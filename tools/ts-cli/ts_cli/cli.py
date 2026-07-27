@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import typer
 
-from ts_cli.commands import aggregate, alias, audit, auth, connections, databricks, dependency, dependency_apply, load, metadata, model, orgs, parameterize, powerbi, profiles, publish, publish_planning, qlik, security, security_planning, share, share_planning, sisense, snowflake, spotql, spotter, tables, tableau, tml, users, variables  # noqa: F401 -- dependency_apply registers `apply-change` on dependency.app, parameterize registers `parameterize`/`unparameterize` on metadata.app, publish_planning registers `export`/`resolve` on publish.app, share_planning registers `export`/`resolve`/`apply` on share.app, security_planning registers `resolve`/`build`/`apply`/`import` on security.column_rules_app, all at import
+from ts_cli.commands import aggregate, alias, audit, auth, connections, databricks, dependency, dependency_apply, groups, load, metadata, model, orgs, parameterize, powerbi, profiles, publish, publish_planning, qlik, security, security_planning, share, share_planning, sisense, snowflake, spotql, spotter, tables, tableau, tenancy, tenancy_export, tml, users, variables  # noqa: F401 -- dependency_apply registers `apply-change` on dependency.app, parameterize registers `parameterize`/`unparameterize` on metadata.app, publish_planning registers `export`/`resolve` on publish.app, share_planning registers `export`/`resolve`/`apply` on share.app, security_planning registers `resolve`/`build`/`apply`/`import` on security.column_rules_app, tenancy_export registers `export` on tenancy.app, all at import
 
 app = typer.Typer(
     name="ts",
@@ -21,6 +21,8 @@ app.add_typer(dependency.app, name="dependency")
 app.add_typer(metadata.app, name="metadata")
 app.add_typer(model.app, name="model")
 app.add_typer(orgs.app, name="orgs")
+app.add_typer(groups.app, name="groups")
+app.add_typer(tenancy.app, name="tenancy")
 app.add_typer(tables.app, name="tables")
 app.add_typer(tml.app, name="tml")
 app.add_typer(profiles.app, name="profiles")

@@ -1,0 +1,196 @@
+# Reference multi-tenancy topology — the cluster state the platform's verification rounds
+# were run against (profile `nebula-damian-alias`).
+#
+# CAPTURED, not hand-written: produced by `ts tenancy export` from a working environment,
+# so it cannot quietly disagree with the cluster it claims to describe. Re-capture with:
+#
+#   ts tenancy export --out tools/fixtures/tenancy-reference.yaml -p <profile>
+#
+# Stand it up somewhere else with:
+#
+#   ts tenancy apply --spec tools/fixtures/tenancy-reference.yaml --dry-run -p <profile>
+#   export TS_TENANCY_PASSWORD=...          # your own terminal; never a flag
+#   ts tenancy apply --spec tools/fixtures/tenancy-reference.yaml \
+#       --password-env TS_TENANCY_PASSWORD -p <profile>
+#   ts tenancy verify --spec tools/fixtures/tenancy-reference.yaml -p <profile>
+#
+# What matters here is the PER-ORG group topology, which is what a hand-built environment
+# gets wrong: `Analyst`/`Consumer` exist only in Primary, `Demo Retail Group` only in the
+# tenant Orgs. guest1 (Analyst) and guest4 (Consumer) are the discriminating pair used to
+# verify column security in Primary; both sit in `Demo Retail Group` in every tenant Org,
+# so they are NOT discriminating there.
+#
+# Built-in groups (`Administrator`, `All`, `System`) are deliberately absent — the platform
+# owns them and `export` filters on the API's own `system_group` flag.
+marker: ts-tenancy-fixture
+marker: ts-tenancy-fixture
+orgs:
+- name: ORG1
+  description: ''
+- name: ORG2
+  description: ''
+- name: ORG3
+  description: ''
+groups:
+  ORG1:
+  - name: Demo Retail Group
+    display_name: Demo Retail Group
+    privileges: []
+  ORG2:
+  - name: Demo Retail Group
+    display_name: Demo Retail Group
+    privileges: []
+  ORG3:
+  - name: Demo Retail Group
+    display_name: Demo Retail Group
+    privileges: []
+  Primary:
+  - name: All Orgs
+    display_name: All Orgs
+    privileges: []
+  - name: Analyst
+    display_name: Analyst Group
+    privileges:
+    - A3ANALYSIS
+  - name: Consumer
+    display_name: Consumer Group
+    privileges: []
+  - name: DataDownloader
+    display_name: Data Downloader Group
+    privileges:
+    - DATADOWNLOADING
+  - name: ShareWithAll
+    display_name: ShareWithAll Group
+    privileges:
+    - SHAREWITHALL
+  - name: UserDataUploader
+    display_name: User Data Uploader Group
+    privileges:
+    - USERDATAUPLOADING
+  - name: rls-group-1
+    display_name: rls-group-1
+    privileges: []
+  - name: rls-group-2
+    display_name: rls-group-2
+    privileges: []
+  - name: rls-group-3
+    display_name: rls-group-3
+    privileges: []
+  - name: rls-group-4
+    display_name: rls-group-4
+    privileges: []
+  - name: rls-group-5
+    display_name: rls-group-5
+    privileges: []
+users:
+- name: guest1
+  display_name: Guest 1
+  email: guest1@thoughtspot.com
+  account_type: LOCAL_USER
+  orgs:
+  - ORG1
+  - ORG2
+  - ORG3
+  - Primary
+  groups:
+    ORG1:
+    - Demo Retail Group
+    ORG2:
+    - Demo Retail Group
+    ORG3:
+    - Demo Retail Group
+    Primary:
+    - Analyst
+    - DataDownloader
+    - ShareWithAll
+    - UserDataUploader
+- name: guest2
+  display_name: Guest 2
+  email: guest2@thoughtspot.com
+  account_type: LOCAL_USER
+  orgs:
+  - Primary
+  groups:
+    Primary:
+    - Analyst
+    - Consumer
+    - DataDownloader
+    - ShareWithAll
+    - UserDataUploader
+- name: guest3
+  display_name: Guest 3
+  email: guest3@thoughtspot.com
+  account_type: LOCAL_USER
+  orgs:
+  - Primary
+  groups:
+    Primary:
+    - Consumer
+    - DataDownloader
+    - ShareWithAll
+    - UserDataUploader
+- name: guest4
+  display_name: Guest 4
+  email: guest4@thoughtspot.com
+  account_type: LOCAL_USER
+  orgs:
+  - ORG1
+  - ORG2
+  - ORG3
+  - Primary
+  groups:
+    ORG1:
+    - Demo Retail Group
+    ORG2:
+    - Demo Retail Group
+    ORG3:
+    - Demo Retail Group
+    Primary:
+    - Consumer
+    - ShareWithAll
+- name: rlsgroup1user
+  display_name: rlsgroup1user
+  email: rlsgroup1user@thoughtspot.com
+  account_type: LOCAL_USER
+  orgs:
+  - Primary
+  groups:
+    Primary:
+    - rls-group-1
+- name: rlsgroup2user
+  display_name: rlsgroup2user
+  email: rlsgroup2user@thoughtspot.com
+  account_type: LOCAL_USER
+  orgs:
+  - Primary
+  groups:
+    Primary:
+    - rls-group-2
+- name: rlsgroup3user
+  display_name: rlsgroup3user
+  email: rlsgroup3user@thoughtspot.com
+  account_type: LOCAL_USER
+  orgs:
+  - Primary
+  groups:
+    Primary:
+    - rls-group-3
+- name: rlsgroup4user
+  display_name: rlsgroup4user
+  email: rlsgroup4user@thoughtspot.com
+  account_type: LOCAL_USER
+  orgs:
+  - Primary
+  groups:
+    Primary:
+    - rls-group-4
+- name: rlsgroup5user
+  display_name: rlsgroup5user
+  email: rlsgroup5user@thoughtspot.com
+  account_type: LOCAL_USER
+  orgs:
+  - Primary
+  groups:
+    Primary:
+    - rls-group-5
+

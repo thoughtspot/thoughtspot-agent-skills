@@ -158,6 +158,7 @@ thoughtspot-agent-skills/
 └── tools/
     ├── ts-cli/     — ThoughtSpot CLI used by CLI skills at runtime
     ├── validate/   — Static validators (runtime coverage, consistency)
+    ├── fixtures/   — Captured cluster topologies for `ts tenancy` (reference multi-tenancy environment)
     └── smoke-tests/ — End-to-end smoke tests requiring live credentials
 ```
 

@@ -3410,3 +3410,66 @@ poll `.../tml/async/status` until `COMPLETED`/`FAILED` (~10–15 minutes for
 large payloads). Above 25 MB is rejected before any API call.
 
 **Output:** JSON to stdout — the import (or async status) response.
+
+---
+
+## `ts tenancy` — provision an Org/user/group topology from a spec
+
+Standing up the multi-tenancy pattern end to end — publish, alias, share, secure — needs a
+cluster with several Orgs, users assigned to them, and **per-Org groups with the right
+members**. That was undocumented tribal knowledge (BL-137), and the part most often got
+wrong is not the tedious part.
+
+**Groups are per-Org, and that is the whole difficulty.** `Analyst` in the Primary Org and
+`Analyst` in a tenant Org are different principals; a `ts share` or column-security
+manifest naming the wrong one fails with `Invalid group identifiers`. `ts tenancy verify`
+and the spec validator refuse an incoherent topology at plan time rather than letting a
+half-built cluster look finished.
+
+```bash
+ts tenancy export  [--org O ...] [--out F] [--marker M] -p prod
+ts tenancy apply   --spec F [--tenant T] [--password-env VAR] [--dry-run] -p prod
+ts tenancy verify  --spec F [--tenant T] -p prod
+ts tenancy teardown --spec F --org O [--org O] [--tenant T] --yes [--dry-run] -p prod
+```
+
+The primitives are available on their own: `ts orgs create`, `ts users create`,
+`ts groups create` / `search` / `add-member` (all per-Org).
+
+### The spec
+
+```yaml
+marker: ts-tenancy-fixture        # stamped into every created object; teardown requires it
+orgs:
+  - name: ORG1
+groups:                            # keyed by Org — this is the load-bearing part
+  Primary: [{name: Analyst, privileges: [AUTHORING, A3ANALYSIS]}]
+  ORG1:    [{name: Demo Retail Group}]
+users:
+  - name: guest1
+    email: guest1@example.com
+    account_type: LOCAL_USER       # or SAML_USER / OIDC_USER / LDAP_USER — no password
+    orgs: [Primary, ORG1]
+    groups:
+      Primary: [Analyst]
+      ORG1:    [Demo Retail Group]
+```
+
+A captured reference topology ships at
+[`tools/fixtures/tenancy-reference.yaml`](../fixtures/tenancy-reference.yaml).
+
+### Behaviours worth knowing
+
+| | |
+|---|---|
+| **`apply` is idempotent** | Anything present is skipped, so a run that failed halfway is simply re-run — the normal case when standing up an environment |
+| **`export` captures, it does not guess** | The shipped topology is read from a working cluster, so it cannot quietly disagree with it. Built-ins are filtered on the API's own `system_group` / `system_user` flags |
+| **`verify` is one-directional** | Objects the cluster has but the spec does not mention are NOT drift. A shared cluster always carries them, and flagging them would make verify permanently red |
+| **`teardown` needs three things** | The spec's marker, every Org named with `--org`, and `--yes`. A user who also belongs to an unnamed Org is refused, because deleting them would strip them from it. Primary is never deleted |
+| **Passwords are never a flag** | `--password-env` names a variable you export yourself; the value is read from the environment and never echoed. Federated accounts never receive one |
+| **`{TENANT}` templating** | One spec, N tenants: `--tenant ACME` substitutes `{TENANT}` / `{TENANT_UPPER}` / `{TENANT_LOWER}`, matching `ts publish resolve --pattern` |
+
+**Production note.** The engine is production-capable — a real tenant's Org, groups and
+users are the same operation — but production onboarding is usually *partial* (the Org is
+created, users arrive via SSO), and selective application (`--only orgs,groups`) plus a
+wrapping skill are tracked in BL-143, not implemented here.

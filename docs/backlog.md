@@ -3619,7 +3619,7 @@ Databricks. Not blocking `ts-publish-orgs`, whose file path covers the same grou
 
 ---
 
-## BL-137 -- End-to-end test-environment fixture for the multi-tenancy platform `Tier 2`
+## BL-137 -- End-to-end test-environment fixture for the multi-tenancy platform `Tier 2` -- **DONE 2026-07-27**
 
 **Filed:** 2026-07-27.
 **Source:** the repo owner's request, raised while verifying `ts security column-rules`
@@ -3627,9 +3627,22 @@ Databricks. Not blocking `ts-publish-orgs`, whose file path covers the same grou
 **Affects:** the multi-tenancy platform programme as a whole -- `ts load`, `ts publish`,
 `ts share`, `ts security column-rules`, and whichever `ts-security-columns` skill and
 migration additions land later. No single ts-cli module owns this.
-**Status:** OPEN.
+**Status:** **DONE 2026-07-27** — shipped as `ts tenancy` (ts-cli v0.111.0), with the
+primitives it needed (`ts orgs create`, `ts users create`, `ts groups create` /
+`search` / `add-member`). Pulled forward ahead of the migration additions at the repo
+owner's request.
 
-**Why it matters.** Today, exercising publication, sharing, aliasing and column security
+The per-Org group topology this item called out as the subtle part is enforced by
+`tenancy_spec.validate_spec`, which refuses a spec where a user joins a group that is not
+declared for that Org — the failure that otherwise surfaces as `Invalid group identifiers`
+mid-apply. The shipped reference topology at `tools/fixtures/tenancy-reference.yaml` is
+**captured** by `ts tenancy export` from a working cluster rather than hand-written, so it
+cannot drift from the environment it describes.
+
+Warehouse tables remain `ts load`'s job, as this item anticipated; `ts tenancy` owns the
+Org/user/group topology only. Production tenant onboarding is BL-143.
+
+**Why it mattered.** Today, exercising publication, sharing, aliasing and column security
 end to end requires a cluster someone has hand-built, and reproducing it is undocumented
 tribal knowledge. Verifying this branch alone needed warehouse tables, several Orgs, users
 assigned to those Orgs, and users assigned to per-Org groups -- and there is no repeatable
@@ -3839,3 +3852,45 @@ belief is created.
 
 **Target:** (1) ships with the skill. (2) is a `ts share` follow-up, unscheduled. Raising
 it with the platform team is the real fix.
+
+---
+
+## BL-143 -- Production tenant onboarding over `ts tenancy` `Tier 2`
+
+**Filed:** 2026-07-27.
+**Source:** the repo owner, while `ts tenancy` was being built for BL-137 — "can this be
+used for production setup as well, i.e. a client can use this to build a tenant in an Org".
+**Status:** OPEN.
+
+**The engine is already production-capable.** Creating a tenant's Org, its per-Org groups
+and its users is the same operation as building a fixture, and `ts tenancy` was
+deliberately designed for both rather than fixture-only: `account_type` is per user so a
+federated tenant gets `SAML_USER`/`OIDC_USER` and is never offered a password; `--tenant`
+substitutes `{TENANT}` through a template so one spec onboards N tenants without a
+copy-pasted file each; and `teardown` requires the marker AND every Org named on the
+command line AND `--yes`, so no single mistake can lose a real tenant.
+
+**What is missing is selectivity.** A fixture means "make all of this exist". Production
+onboarding is usually **partial** — create the Org and its groups, but let users arrive via
+SSO/SCIM; or add a group to an Org that already exists. `apply` already tolerates this
+(it is idempotent, and any spec section may be omitted), but there is no way to say
+"apply the orgs and groups, skip the users" from one shared spec.
+
+**Scope.**
+
+1. `--only orgs,groups,users,members` / `--skip ...` on `apply`, so one spec serves both a
+   full fixture and a partial onboarding.
+2. A `ts-tenant-*` skill wrapping the whole pipeline with confirmation gates:
+   `ts tenancy apply` -> `ts connections create` -> `ts load` -> `ts publish` ->
+   `ts alias` -> `ts share` / `ts security column-rules`. Every one of those already
+   exists; the skill is orchestration and judgement, not new API surface.
+3. Decide whether the marker belongs on production objects. It reads as provenance
+   ("this Org was provisioned from spec X"), which is probably worth keeping, but it also
+   makes `teardown` willing to consider them — that interaction needs a deliberate answer.
+
+**Why not now.** BL-137 wanted a test fixture, and shipping the onboarding skill against
+an unmerged engine would make both harder to review. The engine is the part that would
+have been expensive to retrofit, so it was done first.
+
+**Target:** after the migration additions (parent spec §5 of
+`2026-07-26-ts-security-sharing-design.md`), so the skill covers the finished platform.
