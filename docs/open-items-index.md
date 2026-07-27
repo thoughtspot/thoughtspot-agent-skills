@@ -5,13 +5,13 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**142 total items** across 18 skills — **66 open**, 66 verified, 10 deferred
+**143 total items** across 18 skills — **67 open**, 66 verified, 10 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
 | ts-convert-to-databricks-mv | 9 | **8** | 1 | 0 |
 | ts-dependency-manager | 16 | **8** | 7 | 1 |
-| ts-object-model-aggregates | 19 | **7** | 11 | 1 |
+| ts-object-model-aggregates | 20 | **8** | 11 | 1 |
 | ts-object-model-coach | 7 | **7** | 0 | 0 |
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
 | ts-audit | 15 | **5** | 10 | 0 |
@@ -27,7 +27,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-object-model-agentql-query | 4 | **0** | 4 | 0 |
-### Untagged (66 items)
+### Untagged (67 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -88,6 +88,7 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-object-model-aggregates | #11 | Join-pruning fidelity | OPEN |
 | ts-object-model-aggregates | #17 | RLS propagation (Task 22/23/25/26) | WIRED |
 | ts-object-model-aggregates | #18 | End-to-end build findings (2026-07-15, nebula-aggregate-aware) | OPEN |
+| ts-object-model-aggregates | #19 | Flat-shape `rls_rules` extraction | OPEN |
 | ts-object-model-coach | #4 | Data Model Instructions TML field location | OPEN |
 | ts-object-model-coach | #6 | `search_tokens` dry-run validation via `/searchdata` | OPEN |
 | ts-object-model-coach | #7 | Coaching index refresh latency | OPEN |
