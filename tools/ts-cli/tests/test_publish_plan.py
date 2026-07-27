@@ -646,3 +646,48 @@ def test_parse_value_rows_skips_blank_rows():
 def test_parse_value_rows_rejects_an_incomplete_row():
     with pytest.raises(ValueError, match="org_name"):
         parse_value_rows([{"variable_name": "v", "value": "x"}])
+
+
+# ---------------------------------------------------------------------------
+# Rollback failure classification (live-observed 2026-07-27)
+#
+# A rollback replays recorded steps and MUST be re-runnable. `client.post`
+# raises SystemExit on non-2xx, so before this classification a single benign
+# API refusal aborted the run and left the parameterized fields and created
+# variables behind -- the opposite of a rollback.
+# ---------------------------------------------------------------------------
+
+from ts_cli.publish_apply import (ALREADY_DONE, CONNECTION_IN_USE, FAILED,
+                                  classify_unpublish_failure)
+
+
+def test_an_already_unpublished_object_is_not_a_failure():
+    """Re-running a rollback, or finishing one an operator half-did by hand, must
+    complete the remaining steps rather than abort on the first no-op."""
+    body = ('{"message":{"debug":{"code":13152,"debug":"[\\"Error Message: Node '
+            '4be2cc25-0f29-4f66-a46f-619affd84474 is not published to any orgs\\"]"}}}')
+    assert classify_unpublish_failure(body) == ALREADY_DONE
+
+
+def test_a_shared_connection_grant_is_classified_separately_from_a_real_failure():
+    """Two objects published to one Org over one Connection: rolling back either
+    one tries to retract the Connection the other still needs. The object
+    retraction is legitimate; only the cascade is refused."""
+    body = ('{"message":{"debug":{"debug":"[\\"Operation Unsuccessful. Following '
+            'objects have dependents present: {\\\\"12750490\\\\":'
+            '[\\\\"5e7e34e2-f8c1-4710-aaa8-1670b7a61adc\\\\"]}\\"]"}}}')
+    assert classify_unpublish_failure(body) == CONNECTION_IN_USE
+
+
+def test_anything_else_stays_a_failure():
+    """The classifier must not swallow real problems -- it exists to narrow the
+    abort condition, not to remove it."""
+    assert classify_unpublish_failure('{"error":"Forbidden"}') == FAILED
+    assert classify_unpublish_failure("") == FAILED
+    assert classify_unpublish_failure(None) == FAILED
+
+
+def test_classification_is_case_insensitive():
+    """The message casing is not part of any contract."""
+    assert classify_unpublish_failure("IS NOT PUBLISHED TO ANY ORGS") == ALREADY_DONE
+    assert classify_unpublish_failure("HAVE DEPENDENTS PRESENT") == CONNECTION_IN_USE

@@ -11,9 +11,47 @@ Pure functions, no I/O.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Set
 
 from ts_cli.publish_plan import build_clusters
+
+# --------------------------------------------------------------------------
+# Rollback failure classification
+# --------------------------------------------------------------------------
+# A rollback replays recorded steps, so it MUST be re-runnable: an operator who
+# undoes half a run by hand, or re-runs after a network drop, has to be able to
+# finish it. Two API failures are not really failures, and treating them as such
+# aborted the run before the later unparameterize/delete_variables steps
+# (`client.post` raises SystemExit on non-2xx). Both observed live 2026-07-27.
+
+# "Node <guid> is not published to any orgs" -- the step is already done.
+_ALREADY_UNPUBLISHED_RE = re.compile(r"is not published to any orgs", re.I)
+
+# "Following objects have dependents present: {"<orgid>":["<connection guid>"]}"
+# Raised when `include_dependencies` tries to retract a Connection grant that a
+# DIFFERENT published object in that Org still needs. The object unpublish is
+# fine; only the cascade to the Connection is refused.
+_DEPENDENTS_PRESENT_RE = re.compile(r"have dependents present", re.I)
+
+ALREADY_DONE = "already_done"
+CONNECTION_IN_USE = "connection_in_use"
+FAILED = "failed"
+
+
+def classify_unpublish_failure(body: str) -> str:
+    """Classify an unpublish error body as ``already_done``/``connection_in_use``/``failed``.
+
+    The distinction decides whether the rollback continues. Only ``failed`` is a
+    real problem; the other two are states a re-run or a shared Connection puts
+    us in legitimately, and stopping on them strands the remaining steps.
+    """
+    text = body or ""
+    if _ALREADY_UNPUBLISHED_RE.search(text):
+        return ALREADY_DONE
+    if _DEPENDENTS_PRESENT_RE.search(text):
+        return CONNECTION_IN_USE
+    return FAILED
 
 
 # TML export reports the root's kind in lower case; the publish API wants its own

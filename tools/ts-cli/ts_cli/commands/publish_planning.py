@@ -603,6 +603,50 @@ def apply_plan(
     _publish_all(client, plan)
 
 
+def _rollback_unpublish(client, step) -> Optional[str]:
+    """Run one unpublish step. Return a problem description, or None on success.
+
+    Two non-2xx outcomes are not real failures and must not strand the steps
+    after this one -- `client.post` raises SystemExit, so the previous
+    unconditional call aborted the whole rollback and left the parameterized
+    fields and created variables behind. Both cases seen live 2026-07-27.
+    """
+    from ts_cli.commands.publish import build_unpublish_payload
+    from ts_cli.publish_apply import (ALREADY_DONE, CONNECTION_IN_USE,
+                                      classify_unpublish_failure)
+
+    orgs = ", ".join(step["orgs"])
+
+    def _call(include_dependencies: bool):
+        return client.post(
+            "/api/rest/2.0/security/metadata/unpublish", raise_for_status=False,
+            json=build_unpublish_payload(step["identifiers"], step["type"], step["orgs"],
+                                         include_dependencies=include_dependencies))
+
+    resp = _call(True)
+    if resp.status_code < 300:
+        print(f"unpublished from {orgs}", file=sys.stderr)
+        return None
+
+    kind = classify_unpublish_failure(resp.text)
+    if kind == ALREADY_DONE:
+        print(f"already unpublished from {orgs} -- nothing to retract", file=sys.stderr)
+        return None
+    if kind == CONNECTION_IN_USE:
+        # The object retraction is fine; only the cascade to the Connection is
+        # refused, because another published object in that Org still needs it.
+        # Retracting the object alone IS the correct rollback here -- the
+        # Connection grant is not ours to remove while someone else depends on it.
+        retry = _call(False)
+        if retry.status_code < 300:
+            print(f"unpublished from {orgs} (Connection grant retained -- another "
+                  f"published object in that Org still uses it)", file=sys.stderr)
+            return None
+        return (f"unpublish from {orgs} failed even without dependencies: "
+                f"HTTP {retry.status_code}")
+    return f"unpublish from {orgs} failed: HTTP {resp.status_code} {resp.text[:200]}"
+
+
 @app.command("rollback")
 def rollback(
     input: str = typer.Option(..., "--input", "-i", help="Rollback record from `ts publish apply`"),
@@ -636,16 +680,16 @@ def rollback(
         return
 
     client = ThoughtSpotClient(resolve_profile(profile))
+    failures: List[str] = []
     for step in steps:
         action = step["action"]
         if action == "skip":
             print(f"skipped {step['metadata_identifier']}.{step['field_name']}: "
                   f"{step['reason']}", file=sys.stderr)
         elif action == "unpublish":
-            client.post("/api/rest/2.0/security/metadata/unpublish",
-                        json=build_unpublish_payload(step["identifiers"], step["type"],
-                                                     step["orgs"], include_dependencies=True))
-            print(f"unpublished from {', '.join(step['orgs'])}", file=sys.stderr)
+            problem = _rollback_unpublish(client, step)
+            if problem:
+                failures.append(problem)
         elif action == "unparameterize":
             client.post("/api/rest/2.0/metadata/unparameterize", json={
                 "metadata_type": step.get("metadata_type", "LOGICAL_TABLE"),
@@ -657,6 +701,11 @@ def rollback(
             client.post("/api/rest/2.0/template/variables/delete",
                         json={"identifiers": step["names"]})
             print(f"deleted variable(s) {', '.join(step['names'])}", file=sys.stderr)
+    if failures:
+        print("rollback INCOMPLETE:", file=sys.stderr)
+        for problem in failures:
+            print(f"  - {problem}", file=sys.stderr)
+        raise typer.Exit(1)
     print("rollback complete", file=sys.stderr)
 
 
