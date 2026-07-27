@@ -54,6 +54,14 @@ Evaluated **per (Org, object)**, not per object:
 | **Native** — that Org owns the object | **CSR** preferred; CLS possible | CSR feature flag (`403`/`10023`, disabled-form). And the object must **already be shared** in that Org, or CSR protects something nobody can open |
 | **Published in** — the object lives in another Org | **CLS only** | **Strict Object Mode.** Unreadable by any API. Human gate, §4 |
 
+The second row is **live-verified, not a conservative default** (2026-07-27). CSR is
+closed off there by *two independent* mechanisms: a rule defined in the owning Org does
+not travel with publication, and the tenant Org cannot define one either — `HTTP 500`,
+code **`10038`**, `FORBIDDEN`, with full `ADMINISTRATION` in that Org and a same-session
+control write succeeding on that Org's own native table. Either mechanism alone would
+leave a workaround; together they close it. CLS in the tenant Org on the same published
+object was confirmed working in the same run.
+
 Read the rows carefully: they key on the **audience Org's** relationship, not the object's
 state. A published table viewed from its **owning** Org is a *native* row and CSR works
 there — publication does not disqualify it. The same table viewed from a tenant Org is a
@@ -96,6 +104,7 @@ can be CSR in Primary and CLS in ORG1, and usually should be.
 |---|---|---|
 | Publication state per table | `ts security column-rules resolve` (uses `publish_plan.published_org_ids`) or `ts publish status` | A **failed** read is not "unpublished". It blocks the row, matching the CLI's `CSR_BLOCKED: publication state could not be determined` behaviour |
 | CSR feature flag | First CSR read per Org; `10023` **disabled-form** message | `10023` is **overloaded** — the access-denied form means the caller lacks CSR privileges in that Org, not that the feature is off. The skill must distinguish on message text, as `explain_csr_error` does |
+| Tenant CSR capability | **Not probeable by reading.** Infer it from publication state | Live-verified 2026-07-27: a tenant read of a published table returns `[]` when no rule exists and `10023` once one does. A clean `[]` therefore proves nothing about whether the tenant could *write*. See §9 |
 | Strict Object Mode | **Human only.** No API | §4 |
 | Groups available in the Org | `ts share resolve` group pre-check | A manifest naming a group from another Org fails with `Invalid group identifiers: <name>` |
 | Object access for the audience | `ts share status <guid> --columns --org O` | No access → CSR is refused for that row, §3 |
@@ -315,39 +324,54 @@ stored-procedure shape for it. An `EXPECTED_DIVERGENCES` entry in
 
 ---
 
-## 9. Live verification plan
+## 9. Live verification — RESULTS (2026-07-27)
 
-Cluster: profile `nebula-damian-alias`. Orgs Primary / ORG1 / ORG2 / ORG3.
-`T1/T2/T3_PUBLISH` owned by Primary and unpublished; ORG1 has its own
-`T4/T5/T6_PER_ORG`. Users `guest1-4` and `rlsgroup1-5user` in Primary; `guest1` also in
-ORG1's `Demo Retail Group`. CSR feature flag ON. **Strict Object Mode ON** — confirmed by
-the repo owner, 2026-07-27, which makes the CLS path testable for the first time.
+Cluster: profile `nebula-damian-alias`, Orgs Primary (0) / ORG1 (12750490) / ORG2 / ORG3.
+Strict Object Mode **ON**, CSR flag **ON**. Baseline captured, restored, diff proven on six
+dimensions. Full account:
+[`2026-07-27-ts-security-columns-live-verification.md`](../verification/2026-07-27-ts-security-columns-live-verification.md).
 
-Baseline captured before anything changes, restored afterwards, and the diff proven by a
-final read — the discipline the previous two rounds used.
+**What made this round conclusive** where the second round was not: five controls held
+*before* the test, so publication was the only remaining variable — the ORG1 session was
+confirmed genuinely in ORG1, holding `ADMINISTRATION` **in ORG1**, having just written CSR
+successfully on ORG1's own native table, having read the published table from ORG1, and
+with the owning Org able to write to that same table.
 
-| # | Question | Method | Settles |
-|---|---|---|---|
-| 1 | Can a tenant Org configure **usable** CSR on its **own native** table? | CSR in ORG1 on `T4_PER_ORG` against `Demo Retail Group`, verified as a real non-admin ORG1 user | Parent spec open item #5, native half. The prior attempt failed only on a group-name artefact (`Analyst` does not exist in ORG1), not a product rule |
-| 2 | Can a tenant Org configure usable CSR on a table **published into** it? | Republish `T2_PUBLISH` into ORG1 (parameterize → publish), retry CSR there against an ORG1 group, confirm ORG1 privileges **independently of the call** so a repeat `10023` is diagnosable | Parent spec open item #5, published half — the question §2.1's second row depends on |
-| 3 | Does a group holding **only** column grants reach the table at all? | CLS column grant in ORG1 with no table grant, opened as a real non-admin user | Parent spec open item #1. Untestable before; load-bearing for the entire CLS path |
-| 4 | Does a table-level `NO_ACCESS` clear existing column grants? | Grant columns, then table-level `NO_ACCESS`, then read back | The `ts share` carry-forward, and the reason `ts share` refuses revoke-and-grant in one manifest |
+| # | Question | Result |
+|---|---|---|
+| 1 | Can a tenant Org configure **usable** CSR on its **own native** table? | **YES.** `set --org ORG1` on `T4_PER_ORG` against `Demo Retail Group` applied and read back. The second round's failure here really was only the group-name artefact it was diagnosed as |
+| 2 | Can a tenant Org configure CSR on a table **published into** it? | **NO.** `HTTP 500`, code **`10038`**, `FORBIDDEN`, `User does not have access to read/modify CSR for these tables`. Attributable to publication, per the controls above. Closes parent spec open item #5 |
+| 3 | Does a group holding **only** column grants reach the table? | **PARTIAL.** The CLS grant applied in ORG1 on the published object with no table grant, and read back. Data-plane reachability as a real non-admin user is untested — needs a UI session. Parent spec open item #1 |
+| 4 | Does a table-level `NO_ACCESS` clear existing column grants? | **NO**, at ACL level — the column grant survived unchanged. Closes the `ts share` carry-forward |
 
-Item 2 mutates the cluster non-trivially and is unwound in reverse: unpublish →
-unparameterize → delete the template variable. `ts publish push` fails closed on an
-unparameterized object, so the parameterize step is mandatory, not incidental.
+**§2.1's second row is confirmed, and for a stronger reason than the design assumed.** CSR
+is closed off for a published-in row by *two independent* mechanisms: an owning-Org rule
+does not travel (round 3, data plane), and the tenant cannot define one either (this round,
+API). Either alone would leave a workaround. `CSR_BLOCKED` is right, and `--allow-published`
+is genuinely owning-Org-only scope, never a route to protecting a tenant.
 
-Findings land in
-`docs/superpowers/verification/2026-07-27-ts-security-columns-live-verification.md`.
+**CLS in the tenant Org on the published object works**, so §2.2's "nothing works" cell
+stays a real edge case rather than the normal case.
 
-**If item 2 shows a tenant Org cannot configure CSR on a published object**, §2.1's second
-row is confirmed as a platform constraint rather than a conservative default. **If it
-shows the tenant can**, the row changes: CSR becomes available for published objects
-configured tenant-side, and `ts security column-rules`'s `CSR_BLOCKED` default deserves
-revisiting in a follow-up. Either outcome is a real answer; the design does not depend on
-which.
+### Three defects found
 
----
+1. **BLOCKER — `ts share export --org <tenant>` cannot see tenant-native objects.**
+   `share_planning.py:75-79` resolves the object and lists its columns with the
+   **default-Org** client; only `_fetch_permissions` is org-scoped. Both `metadata/search`
+   probes resolve the same GUID fine with an ORG1-scoped client, so the wrong client is the
+   whole bug. This blocks the skill's Step 4 baseline read for precisely the case the skill
+   exists to serve. Pre-existing in the shipped `ts share` (PR #346).
+   *Secondary:* `_resolve_object`'s typed fallback filters on `metadata_name == identifier`,
+   which a GUID never matches, so GUID resolution rests entirely on the untyped probe.
+2. **Code `10038` has no translation.** `explain_csr_error` covers `10023` (two forms) and
+   `14502` (two forms). `10038` is a third code, reachable by the most predictable tenant
+   mistake there is, and it surfaces raw.
+3. **The `10023` translation is misleading for this case.** It advises "re-run with a
+   profile or Org that holds the needed privilege" when the caller already holds
+   `ADMINISTRATION` in that Org and no Org holds it, because the operation is structurally
+   impossible. It also fires only once a rule exists — a tenant read of a published table
+   with no rules returns a clean `[]`, so `10023` is state-dependent, which is exactly what
+   misled the second round.
 
 ## 10. Out-of-scope corrections this PR still makes
 
@@ -370,8 +394,13 @@ Parent spec §5.1 (`CSR_BLOCKER`) still carries the same claim. It is migration 
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Whether a tenant Org can be given usable CSR — native and published halves | Under test, §9 items 1–2. Parent spec open item #5 |
-| 2 | Whether a group holding only column grants can reach the table | Under test, §9 item 3. Parent spec open item #1 |
-| 3 | Whether a table-level `NO_ACCESS` clears existing column grants | Under test, §9 item 4 |
-| 4 | Whether Strict Object Mode ever becomes API-readable | OPEN. If it does, §4's gate becomes a check and the skill drops a manual step |
-| 5 | The `ts migrate audit` contract in §5.2 | Deferred to a backlog item against the migrate work |
+| 1 | Whether a tenant Org can be given usable CSR — native and published halves | **ANSWERED 2026-07-27.** Native: yes. Published-in: no (`10038 FORBIDDEN`). Closes parent spec open item #5 |
+| 2 | Whether a group holding only column grants can reach the table | **PARTIAL.** ACL proven (§9 item 3); data-plane reachability as a real non-admin user still untested. Parent spec open item #1 stays open on that half |
+| 3 | Whether a table-level `NO_ACCESS` clears existing column grants | **ANSWERED 2026-07-27: no**, at ACL level. Closes the `ts share` carry-forward |
+| 4 | Whether a CLS column grant still *functions* after a table-level `NO_ACCESS` | OPEN, new. §9 item 4 proves the ACL row survives, not that it works |
+| 5 | Whether Strict Object Mode ever becomes API-readable | OPEN. If it does, §4's gate becomes a check and the skill drops a manual step |
+| 6 | The `ts migrate audit` contract in §5.2 | Deferred to a backlog item against the migrate work |
+
+Items 2 and 4 are both data-plane questions needing a UI session as a real non-admin user,
+which is how round 3 settled the Org-scoping question. They are the natural pairing for one
+follow-up session rather than two.
