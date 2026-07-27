@@ -496,10 +496,33 @@ def export_cmd(
 
     written: List[str] = []
     if out and documents:
+        # Namespaced by Org, matching `build --out` (BL-140). The filename the platform
+        # uses is derived from the TABLE alone, so a flat layout collapses two Orgs'
+        # documents for one table into a single file -- and exporting ORG1 then ORG2 into
+        # the same --out would leave ORG1's rules overwritten by ORG2's, silently. That is
+        # the same trap `_document_paths` already refuses on the build side, and the two
+        # halves of one round trip must not disagree about where a document lives.
+        #
+        # `export` runs in ONE Org, so the subdirectory is that Org rather than per
+        # document. Un-scoped (default Org) exports keep the flat layout: there is no Org
+        # name to use, and inventing one would make the path unpredictable.
         directory = Path(out)
+        org_dir = str(org or "")
+        if org_dir in (".", "..") or "/" in org_dir or "\\" in org_dir:
+            raise typer.BadParameter(
+                f"--org '{org}' is not usable as a directory name: `--out` writes each "
+                f"Org's documents into their own subdirectory, and a path separator "
+                f"would write outside --out.")
+        directory = directory / org_dir if org_dir else directory
         directory.mkdir(parents=True, exist_ok=True)
+        seen: set = set()
         for document in documents:
             path = directory / csr_tml_filename(document["table_name"])
+            if path in seen:
+                raise typer.BadParameter(
+                    f"Two documents would both write {path}. Exporting them would keep "
+                    f"only the last one's rules while reporting both as written.")
+            seen.add(path)
             path.write_text(document["yaml"])
             written.append(str(path))
             print(f"wrote {path}", file=sys.stderr)

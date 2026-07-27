@@ -237,8 +237,18 @@ tenant actually uses get granted, unused ones are withheld. See
 
 ### 5.1 `CSR_BLOCKER`
 
-CSR cannot be defined on published objects, so a tenant whose source Tables carry CSR cannot
-have that configuration carried onto the published Model. A third audit status alongside
+**Corrected 2026-07-27 (BL-141).** This section said "CSR cannot be defined on published
+objects". That is false in mechanism, and the truth is more dangerous. The platform
+**accepts** the write (`HTTP 204`) and **enforces it in the Org that defined it**, while
+every tenant Org the object is published to keeps the column fully visible -- no error, no
+warning, either way. Separately, a tenant Org cannot define its own rule on an object
+published into it (`10038 FORBIDDEN`). So CSR is closed off for a tenant by two independent
+mechanisms, neither of which is a refusal the operator would notice.
+
+The practical conclusion below is unchanged -- a tenant whose source Tables carry CSR
+cannot have that configuration carried onto the published Model -- but it holds because the
+rule does not *travel*, not because the platform refuses to write it. Evidence:
+`docs/superpowers/verification/2026-07-27-ts-security-columns-live-verification.md`. A third audit status alongside
 `GAP_BLOCKER` and `SET_BLOCKER`; `apply` refuses by default.
 
 ### 5.2 `--csr map-to-cls`, opt-in only

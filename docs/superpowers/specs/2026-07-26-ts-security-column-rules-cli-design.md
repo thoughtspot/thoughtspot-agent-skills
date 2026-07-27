@@ -273,10 +273,11 @@ guarded the same way -- `set` creates a false belief that data is protected, whi
 guarding it would also block the legitimate remediation of cleaning stale CSR off a
 table that turned out to be published.
 
-The parent spec's comparison table and `docs/multi-tenancy-platform-plan.md` §4.3 both
-still carry the disproven "cannot be defined on published objects" claim, now further
-out of date given the conclusive finding above. Both are out of scope for this branch
-(see the top of this document) and should be corrected separately.
+**Both corrected 2026-07-27 (BL-141).** The parent spec's §5.1 and comparison table, and
+`docs/multi-tenancy-platform-plan.md` §4.3, previously carried the disproven "cannot be
+defined on published objects" claim. Both now state the real mechanism: the platform
+accepts the write and enforces it in the defining Org, and the rule simply does not travel
+with publication.
 
 This is parent spec §5.1's `CSR_BLOCKER` at CLI level. It fails at plan time rather than
 mid-apply, matching the house style that `apply` refuses before touching anything if the
@@ -459,11 +460,10 @@ least: the answer is that the rule simply does not apply there.
 Folded in from that same record: whether a table-level `NO_ACCESS` clears existing column
 grants. **Still open**, carried forward unchanged -- unrelated to CSR's own mechanism.
 
-**Documents beyond this branch's scope that still carry the disproven claim.** The parent
-spec's comparison table (`2026-07-26-ts-security-sharing-design.md`) and
-`docs/multi-tenancy-platform-plan.md` §4.3 both state "CSR cannot be defined on published
-objects" as platform fact. Both are programme documents this branch does not edit; they
-should be corrected separately now that Q6 has disproven the claim.
+**Both of those documents are now corrected (BL-141, 2026-07-27).** The parent spec's
+comparison table and §5.1, and `docs/multi-tenancy-platform-plan.md` §4.3, previously
+stated "CSR cannot be defined on published objects" as platform fact. They now describe
+the real mechanism instead.
 
 Other things settled during verification:
 

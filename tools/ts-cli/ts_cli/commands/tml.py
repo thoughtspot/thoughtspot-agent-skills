@@ -483,6 +483,14 @@ def import_tml(
     )
     data = resp.json()
 
+    # `metadata/tml/import` returns HTTP 200 even when items failed -- the per-item outcome
+    # lives in the body, not the status code -- so `resp.ok` alone reports success on an
+    # import that did nothing (BL-138). Collected BEFORE the GUID back-fill below, which
+    # deliberately skips non-OK items and would otherwise be the only thing that noticed.
+    from ts_cli.tml_common import format_import_failures, tml_import_failures
+
+    import_failures = tml_import_failures(data)
+
     # ThoughtSpot often returns an empty object list despite a successful import.
     # For each OK response with no GUID, search by name and back-fill the GUID.
     from ts_cli.tml_common import extract_imported_guid
@@ -521,7 +529,13 @@ def import_tml(
                             response_block["object"][0].setdefault("header", {})["id_guid"] = r["metadata_id"]
                             break
 
+    # JSON to stdout even on failure -- skills pipe it, and the ts-cli convention is
+    # structured data on stdout with diagnostics on stderr. The exit code is what changes.
     print(json.dumps(data))
+    if import_failures:
+        for line in format_import_failures(import_failures, "Could not import TML"):
+            print(line, file=sys.stderr)
+        raise SystemExit(1)
 
 
 def _parse_tml_docs(tmls: List[str]) -> tuple[list, dict[int, str]]:

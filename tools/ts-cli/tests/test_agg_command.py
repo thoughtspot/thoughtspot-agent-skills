@@ -2,6 +2,12 @@ import json
 import yaml
 from typer.testing import CliRunner
 from ts_cli.cli import app
+
+# BL-139: the module-level `runner` below is the MIXING one this file's other
+# tests rely on. The `isolated_runner` sites were `mix_stderr=False`, i.e.
+# stream-SEPARATED, so they import that one under a distinct name — binding
+# both to `runner` would silently downgrade them to mixing.
+from runners import runner as separated_runner  # noqa: E402
 from ts_cli.commands.aggregate import (_candidate_key, _merge_prior_agg_rows,
                                        _signatures_summary, flag_suspect_base_rows,
                                        routing_ineligible_measures, _grain_summary,
@@ -254,10 +260,7 @@ def test_recommend_missing_dir_files_errors_clearly(tmp_path):
     signatures.jsonl (e.g. `signatures` was never run, or the wrong --dir was
     passed) must fail with a clear diagnostic, not a bare FileNotFoundError
     traceback."""
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "recommend", "--dir", str(tmp_path)])
     assert result.exit_code == 1
     assert "model.tml.yaml" in result.stderr
@@ -341,10 +344,7 @@ def test_signatures_command_offline(monkeypatch, tmp_path):
     # use a non-mixing runner so the diagnostic line doesn't land in stdout
     # and break the JSON parse below (ts-cli convention: JSON stdout, stderr
     # diagnostics only, never mixed).
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "signatures", "--model", "model-guid",
                                           "--out", str(tmp_path)])
     assert result.exit_code == 0, result.output
@@ -413,10 +413,7 @@ def test_profile_requires_a_mode(tmp_path):
     tdir.mkdir()
     (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
         {"table": {"db": "DB", "schema": "S", "db_table": "FACT", "columns": []}}))
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
                                           "--tables-dir", str(tdir)])
     assert result.exit_code == 1
@@ -443,10 +440,7 @@ def test_profile_skips_unsupported_candidate(tmp_path):
         {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
                    "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"}]}}))
     script = tmp_path / "profile.sql"
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
                                           "--tables-dir", str(tdir), "--emit-sql", str(script)])
     assert result.exit_code == 0, result.output
@@ -593,10 +587,7 @@ def test_history_empty_tables_after_strip_errors_clearly(tmp_path, monkeypatch):
 
     monkeypatch.setattr(load_mod, "_connect_python", lambda profile, wh, role: FakeConn())
 
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "history", "--dir", str(tmp_path),
                                           "--snowflake-profile", "My SF Profile",
                                           "--tables", ",  ,"])
@@ -614,10 +605,7 @@ def test_profile_results_missing_key_errors_clearly(tmp_path):
     tdir.mkdir()
     res = tmp_path / "res.json"
     res.write_text(json.dumps({"candidates": {"cand_1": 5}}))  # base_rows missing
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
                                           "--tables-dir", str(tdir), "--results", str(res)])
     assert result.exit_code != 0
@@ -739,10 +727,7 @@ def test_generate_falls_back_to_name_id_with_warning_when_no_agg_model_guid(
     monkeypatch.setattr(client_mod, "ThoughtSpotClient", FakeClient)
     monkeypatch.setattr(client_mod, "resolve_profile", lambda p: "test-profile")
 
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
@@ -989,10 +974,7 @@ def test_generate_requires_warehouse_for_snowflake_dynamic_table(tmp_path):
         {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
                    "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
                                {"name": "CATEGORY", "db_column_name": "CATEGORY"}]}}))
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
@@ -1022,10 +1004,7 @@ def test_generate_reports_unsupported_candidate_instead_of_crashing(tmp_path):
     (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
         {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
                    "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"}]}}))
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
@@ -1056,10 +1035,7 @@ def test_generate_rejects_snowflake_materialized_view_cleanly(tmp_path):
         {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
                    "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
                                {"name": "CATEGORY", "db_column_name": "CATEGORY"}]}}))
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
@@ -1188,10 +1164,7 @@ def test_generate_falls_back_to_sqlgen_when_spotql_status_not_success(tmp_path, 
 
     monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
 
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
@@ -1219,10 +1192,7 @@ def test_generate_falls_back_to_sqlgen_when_spotql_run_raises(tmp_path, monkeypa
 
     monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
 
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
@@ -1289,10 +1259,7 @@ def test_profile_spotql_falls_back_to_sqlgen_on_failure(tmp_path, monkeypatch):
     monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
 
     script = tmp_path / "profile.sql"
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
                                           "--tables-dir", str(tdir), "--emit-sql", str(script),
                                           "--model-guid", "model-guid"])
@@ -1484,10 +1451,7 @@ def test_generate_fails_closed_when_grain_omits_rls_column(tmp_path):
                    "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
                                {"name": "CATEGORY", "db_column_name": "CATEGORY"},
                                {"name": "REGION", "db_column_name": "REGION"}]}}))
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
@@ -1653,10 +1617,7 @@ def test_generate_fails_closed_when_tables_dir_empty(tmp_path):
     tdir = tmp_path / "tables"
     tdir.mkdir()  # deliberately empty — no Table TMLs exported
 
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
@@ -1694,10 +1655,7 @@ def test_generate_fails_closed_when_tables_dir_incomplete(tmp_path):
         {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
                    "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"}]}}))
 
-    try:
-        isolated_runner = CliRunner(mix_stderr=False)
-    except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-        isolated_runner = CliRunner()
+    isolated_runner = separated_runner        # BL-139: shared, see tests/runners.py
     result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",

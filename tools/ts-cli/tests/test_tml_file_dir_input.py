@@ -28,7 +28,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from typer.testing import CliRunner
 
 from ts_cli.cli import app
 from ts_cli.commands.tml import (
@@ -39,10 +38,7 @@ from ts_cli.commands.tml import (
     _stdin_has_piped_content,
 )
 
-try:
-    runner = CliRunner(mix_stderr=False)
-except TypeError:
-    runner = CliRunner()
+from runners import runner  # noqa: E402  (BL-139: one definition, see runners.py)
 
 
 def _all_output(result):

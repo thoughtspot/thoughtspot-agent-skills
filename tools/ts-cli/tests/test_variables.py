@@ -16,7 +16,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from typer.testing import CliRunner
 
 from ts_cli.cli import app
 from ts_cli.commands.variables import (
@@ -24,10 +23,7 @@ from ts_cli.commands.variables import (
     _build_variable_update_payload,
 )
 
-try:
-    runner = CliRunner(mix_stderr=False)
-except TypeError:
-    runner = CliRunner()
+from runners import runner  # noqa: E402  (BL-139: one definition, see runners.py)
 
 
 def _all_output(result):

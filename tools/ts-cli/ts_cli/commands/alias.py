@@ -387,7 +387,7 @@ def export_cmd(
 
     edocs = resp.json() or []
     result = parse_export_response(edocs)
-    print(json.dumps(result))
+    _report_import(result, "Could not import the alias document (async)")
 
 
 # ---------------------------------------------------------------------------
@@ -648,6 +648,29 @@ def _async_import(client: ThoughtSpotClient, tml_yaml: str, policy: str, size: i
     print(json.dumps(result))
 
 
+def _report_import(payload: object, context: str) -> None:
+    """Print the import response, then FAIL if the platform says items did not import.
+
+    `metadata/tml/import` returns HTTP 200 even when every item failed -- the per-item
+    outcome lives in the body, not the status code -- so `resp.ok` alone reports success
+    on an import that did nothing (BL-138; live-observed on CSR import, error 14502
+    exiting 0).
+
+    The JSON still goes to stdout even on failure, because skills pipe it and the ts-cli
+    output convention is structured data on stdout, diagnostics on stderr. The exit code
+    is what changes.
+    """
+    from ts_cli.tml_common import format_import_failures, tml_import_failures
+
+    print(json.dumps(payload))
+    failures = tml_import_failures(payload)
+    if not failures:
+        return
+    for line in format_import_failures(failures, context):
+        print(line, file=sys.stderr)
+    raise SystemExit(1)
+
+
 @app.command("import")
 def import_cmd(
     model: str = typer.Option(..., "--model", help="Model GUID (for validation)"),
@@ -693,4 +716,4 @@ def import_cmd(
             "create_new": False,
         },
     )
-    print(json.dumps(resp.json()))
+    _report_import(resp.json(), "Could not import the alias document")

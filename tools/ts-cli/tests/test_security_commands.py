@@ -5,7 +5,6 @@ import json
 from typing import Any, Dict, Optional
 
 import pytest
-from typer.testing import CliRunner
 
 from ansi import plain
 from ts_cli.cli import app
@@ -15,11 +14,8 @@ from ts_cli.commands.security import _published_orgs
 # print(file=sys.stderr) emits, which the separated runner silently drops. See the
 # Global Constraints section of the plan, and test_cli_alias.py / test_tml_commands.py
 # for the same tradeoff documented elsewhere in this suite.
-try:
-    runner = CliRunner(mix_stderr=False)
-except TypeError:            # Click >= 8.2 removed the parameter
-    runner = CliRunner()
-msg_runner = CliRunner()
+from runners import msg_runner, runner  # noqa: E402  (BL-139: see runners.py)
+
 
 
 class FakeResponse:
@@ -470,3 +466,78 @@ def test_export_says_on_stderr_that_it_found_nothing(patched):
                                      "-p", "x"])
     assert result.exit_code == 0
     assert "no column security rules" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# BL-140: export --out must namespace by Org, like build --out
+# ---------------------------------------------------------------------------
+
+def test_export_out_namespaces_by_org(tmp_path, monkeypatch):
+    """`build --out` writes `<out>/<org>/<TABLE>_CSR...tml`; `export --out` wrote flat.
+
+    The platform's filename comes from the TABLE alone, so exporting ORG1 then ORG2 into
+    one --out silently left ORG1's rules overwritten by ORG2's — the same trap
+    `_document_paths` already refuses on the build side. Two halves of one round trip must
+    not disagree about where a document lives.
+    """
+    from ts_cli.commands import security as security_module
+
+    doc = {"table_name": "T2_PUBLISH", "yaml": "column_security_rules: {}\n"}
+    import ts_cli.csr_plan as csr_plan
+    monkeypatch.setattr(csr_plan, "parse_csr_tml_export", lambda _resp: [doc])
+    monkeypatch.setattr(security_module, "_client_for_org",
+                        lambda *a, **k: _ExportClient())
+    monkeypatch.setattr(security_module, "assert_org_context", lambda *a, **k: None)
+
+    result = runner.invoke(app, ["security", "column-rules", "export", "T2_PUBLISH",
+                                 "--org", "ORG1", "--out", str(tmp_path), "-p", "p"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "ORG1" / "T2_PUBLISH_CSR.column_security_rules.tml").exists()
+
+
+def test_export_out_stays_flat_without_an_org(tmp_path, monkeypatch):
+    """No Org named means no subdirectory to use; inventing one would make the path
+    unpredictable."""
+    from ts_cli.commands import security as security_module
+
+    doc = {"table_name": "T2_PUBLISH", "yaml": "column_security_rules: {}\n"}
+    import ts_cli.csr_plan as csr_plan
+    monkeypatch.setattr(csr_plan, "parse_csr_tml_export", lambda _resp: [doc])
+    monkeypatch.setattr(security_module, "_client_for_org",
+                        lambda *a, **k: _ExportClient())
+
+    result = runner.invoke(app, ["security", "column-rules", "export", "T2_PUBLISH",
+                                 "--out", str(tmp_path), "-p", "p"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "T2_PUBLISH_CSR.column_security_rules.tml").exists()
+
+
+def test_export_out_refuses_an_org_name_that_would_escape_the_directory(tmp_path,
+                                                                       monkeypatch):
+    """`--out` writes into a per-Org subdirectory, so a path separator would write
+    outside it. `_document_paths` refuses the same thing on the build side."""
+    from ts_cli.commands import security as security_module
+
+    doc = {"table_name": "T", "yaml": "x\n"}
+    import ts_cli.csr_plan as csr_plan
+    monkeypatch.setattr(csr_plan, "parse_csr_tml_export", lambda _resp: [doc])
+    monkeypatch.setattr(security_module, "_client_for_org",
+                        lambda *a, **k: _ExportClient())
+    monkeypatch.setattr(security_module, "assert_org_context", lambda *a, **k: None)
+
+    result = runner.invoke(app, ["security", "column-rules", "export", "T",
+                                 "--org", "../escape", "--out", str(tmp_path), "-p", "p"])
+    assert result.exit_code != 0
+
+
+class _ExportClient:
+    """Minimal stand-in: export only needs a 200 whose body the parser is stubbed over."""
+
+    ok = True
+
+    def post(self, _path, json=None, raise_for_status=True):
+        return self
+
+    @staticmethod
+    def json():
+        return []

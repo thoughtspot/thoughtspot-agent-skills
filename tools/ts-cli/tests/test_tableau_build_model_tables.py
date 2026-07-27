@@ -16,15 +16,11 @@ from __future__ import annotations
 import json
 
 import yaml
-from typer.testing import CliRunner
 
 import ts_cli.commands.tableau as tableau_cmd
 from ts_cli.cli import app
 
-try:
-    runner = CliRunner(mix_stderr=False)
-except TypeError:  # Click >= 8.2 removed mix_stderr (stderr is separated by default)
-    runner = CliRunner()
+from runners import runner  # noqa: E402  (BL-139: one definition, see runners.py)
 
 
 def _ds(tables, columns=(), joins=(), col_table_map=None):

@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from typer.testing import CliRunner
 
 from ts_cli.cli import app
 from ts_cli.commands.security_planning import expand_uniform_rules
@@ -18,11 +17,8 @@ from test_security_commands import FakeClient, FakeResponse  # noqa: E402
 
 # See the Global Constraints section: `runner` is stream-separated so result.stdout is
 # parseable JSON; `msg_runner` mixes, which is the only way to see a manual stderr print.
-try:
-    runner = CliRunner(mix_stderr=False)
-except TypeError:            # Click >= 8.2 removed the parameter
-    runner = CliRunner()
-msg_runner = CliRunner()
+from runners import msg_runner, runner  # noqa: E402  (BL-139: see runners.py)
+
 
 FETCH = "/api/rest/2.0/security/column/rules/fetch"
 UPDATE = "/api/rest/2.0/security/column/rules/update"

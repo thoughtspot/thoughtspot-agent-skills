@@ -12,15 +12,11 @@ from __future__ import annotations
 import json
 
 import yaml
-from typer.testing import CliRunner
 
 import ts_cli.commands.tables as tables_mod
 from ts_cli.cli import app
 
-try:
-    runner = CliRunner(mix_stderr=False)
-except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-    runner = CliRunner()
+from runners import runner  # noqa: E402  (BL-139: one definition, see runners.py)
 
 _RLS_SPEC = {
     "name": "SALES_AGG",
