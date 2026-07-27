@@ -8,6 +8,11 @@ MATCHED = "MATCHED"
 GAP = "GAP"
 GAP_BLOCKER = "GAP_BLOCKER"
 BINDING_MISMATCH = "BINDING_MISMATCH"
+# The Model carries a cohort column, so it cannot be published at all and no column-level
+# mapping can rescue it. Distinct from GAP_BLOCKER, which one mapping decision resolves:
+# SET_BLOCKER is a property of the MODEL and is only cleared by retiring or rebuilding the
+# Set. Produced by `ts migrate scan-sets` (Phase 0); `apply` refuses it with no override.
+SET_BLOCKER = "SET_BLOCKER"
 
 # Model readiness verdict
 READY = "READY"

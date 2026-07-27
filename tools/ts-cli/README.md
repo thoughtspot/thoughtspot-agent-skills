@@ -3506,3 +3506,66 @@ the planning decisions in-process.
 users are the same operation — but production onboarding is usually *partial* (the Org is
 created, users arrive via SSO), and selective application (`--only orgs,groups`) plus a
 wrapping skill are tracked in BL-143, not implemented here.
+
+---
+
+## `ts migrate scan-sets` — Phase 0: which tenants are blocked by Sets
+
+**Read-only, and needs no target Org**, so it runs before any clean Org exists.
+
+Before planning a migration wave — or committing to build Phase 2 at all — the programme
+needs one number: **how many tenants actually use Sets.** That answer decides whether Sets
+support gates the whole programme or is a tail of stragglers. This command produces it.
+
+```bash
+ts migrate scan-sets --all-models --source-profile prod
+ts migrate scan-sets --source-org ORG1 --source-org ORG2 --all-models -o ./scan/ -p prod
+ts migrate scan-sets --models-file candidates.csv --source-profile prod
+```
+
+### Why Sets block
+
+Verified live 2026-07-26. Three facts:
+
+1. A Set creates a `LOGICAL_COLUMN` of subtype `COHORT_*` **owned by the Model**.
+2. It **does not appear in the Model's TML at all**.
+3. It **blocks publishing** the Model and every Answer and Liveboard on it, used or not.
+
+Fact 2 is the dangerous one, and it dictates the implementation: because the column is
+invisible in TML, a lift-and-shift would **silently drop** Sets rather than fail. So the
+scan queries `metadata/search` for `COHORT_*` subtypes — a TML inspection reports a clean
+Model that is in fact blocked.
+
+### Output
+
+`sets-scan.json` and `sets-scan.md`, carrying the **denominator** as well as the count:
+"three blocked Orgs" is not a decision, "three of twelve" is.
+
+The per-object detail is the point. "Blocked" alone is a dead end; "blocked by these four
+Answers" is something a tenant can act on — some Set-based content is stale, or rebuilds
+trivially as a filter, and retiring it turns a blocked tenant into a migratable one
+without waiting for the platform.
+
+```json
+{"scanned": {"orgs": 12, "models": 340},
+ "summary": {"orgs_blocked": 3, "models_blocked": 4, "objects_affected": 17},
+ "blocked": [{"org": "Tenant1", "model": "Sales", "model_guid": "...",
+              "cohort_columns": [{"name": "RSET_QTY_BINS", "guid": "..."}],
+              "dependents": [{"type": "ANSWER", "name": "Q4 cohort view", "guid": "..."}]}]}
+```
+
+### What happens to a blocked tenant
+
+`ts migrate apply` **refuses** any Model carrying a cohort column, with **no override
+flag** — silently leaving content behind is precisely the failure mode fact 2 already
+makes likely. A blocked tenant retires the dependent content, rebuilds it, or waits for
+Sets support on published objects (expected roughly 3–6 months from 2026-07).
+
+Set usage is a **risk class in the batching strategy**, not a stop on the programme:
+low-risk tenants migrate now, Sets-using tenants form a later batch.
+
+### Cost
+
+One `LOGICAL_COLUMN` search per Org, sliced per Model — deliberately not one call per
+Model, because being cheap enough to run fleet-wide is the command's whole justification.
+Dependents are walked only for Models that actually carry a cohort column.

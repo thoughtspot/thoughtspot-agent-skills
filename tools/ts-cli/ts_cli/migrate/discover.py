@@ -95,3 +95,28 @@ def used_column_names(client, dependents: List[dict], source_col_names: Set[str]
             if key in lower_to_orig:
                 used.add(lower_to_orig[key])
     return used
+
+
+def all_cohort_column_rows(client) -> List[dict]:
+    """Every `LOGICAL_COLUMN` on the cluster, for the Phase 0 cohort scan.
+
+    ONE call for the whole Org rather than one per Model, because the scan's whole
+    justification is being cheap enough to run fleet-wide before committing to Phase 2.
+    The caller slices the result per Model via `sets_scan.extract_cohort_columns`.
+
+    Cohort columns must be found this way. They do NOT appear in the Model's TML, so a
+    TML inspection reports a clean Model that is in fact blocked -- verified live
+    2026-07-26, and the reason a lift-and-shift would drop Sets silently rather than fail.
+    """
+    return _search(client, {"type": "LOGICAL_COLUMN"})
+
+
+def column_dependents(client, column_guid: str) -> List[dict]:
+    """Objects depending on one cohort column.
+
+    Separate from `list_dependents` (which walks a Model) because the interesting question
+    for a blocked tenant is narrower: not "what uses this Model" but "what would have to
+    be retired or rebuilt if the Set went away".
+    """
+    from ts_cli.commands.metadata import _collect_dependents
+    return _collect_dependents(client, column_guid)
