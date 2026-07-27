@@ -578,20 +578,27 @@ agents/cli/ts-org-migrate/SKILL.md        # orchestration skill (+ references/)
    names are per-Org, so a same-named connection in the clean Org lets scaffolding bind
    without colliding with the published Tables. See
    [the resolution](../verification/2026-07-27-ts-migrate-binding-resolution.md).
-4. **Does RLS on a published Model enforce for users in the Org it is published to?**
-   **The highest-stakes open item in the programme** — if it does not, every tenant sees
-   every other tenant's rows. Untested, and the prior is genuinely mixed: CSR is
-   Org-scoped and does **not** travel with publication (verified 2026-07-27), so
-   "defined in Primary" is not on its own sufficient. RLS is structurally different —
-   it lives in the Table TML as part of the object definition, where CSR is a separate
-   Org-scoped security object — which is why it is expected to carry.
-   For a published single model the rule predicate is `ts_orgid` or `ts_vars`, not
-   `ts_groups`; both are intrinsically Org-aware (`ts_orgid` resolves against the
-   *querying* user's Org), so the per-Org-group principal question that would arise with
-   `ts_groups` does not apply here.
-   **The test must use a real non-admin user in the tenant Org.** An admin session
-   bypasses RLS, and an owning-Org check passes even when the tenant-side behaviour is
-   wrong — that is exactly how the CSR trap was missed until a real tenant user looked.
+4. ~~**Does RLS on a published Model enforce for users in the Org it is published to?**~~
+   **ANSWERED YES, 2026-07-27** — verified with a real non-admin user (`guest4` in ORG1)
+   against a no-RLS control table, so "0 rows" could not be confused with "no access".
+   See [the verification](../verification/2026-07-27-ts-migrate-rls-on-published.md).
+   RLS behaves differently from CSR because it lives **inside** the Table TML as part of
+   the object definition, where a CSR is a separate Org-scoped security object attached
+   to it; publication makes the same GUID visible, so what is carried in the definition
+   comes with it.
+4b. **Can published RLS be made Org-AWARE?** Still open, and now the blocking half.
+   Enforcement carrying is the *safety* question and is settled; each tenant seeing its
+   *own* rows is the *function* question. `ts_orgid` **is not a valid RLS keyword**
+   (`Search did not find "ts_orgid" in your data or metadata`), and the documented
+   Org-aware route — `ts_var(varName)` against an ABAC formula variable with per-Org
+   values — is unavailable on `nebula-damian-alias`: the only variable class present is
+   `TABLE_MAPPING`, which is publishing parameterization, not ABAC. **BL-145.**
+   Remaining routes: a `ts_groups` predicate against a per-Org group whose name matches a
+   tenant-key column value, or enabling ABAC via RLS on the cluster.
+4c. **`apply` must read back any `rls_rules` it writes.** A column-less RLS expression
+   imports with `status_code: OK`, is discarded, **and destroys any valid rule already on
+   the table** — silent in the direction that removes security. **BL-144** (Tier 1).
+   Never trust `OK` on an RLS write.
 5. **Does the alias set survive cutover intact as the fleet grows?** The wave-level merge
    (Phase 2 step 7) is a full-document read-modify-write whose blast radius is every
    already-migrated tenant. The count assertion guards it; worth an end-to-end rehearsal
