@@ -37,18 +37,13 @@ def audit(
     """
     from ts_cli.migrate import discover, run_audit
 
-    # Org scoping uses the client's own `org` keyword, which landed on main (PR #346) with
-    # a live-verified detail this branch's earlier version did not have: `auth/token/full`
-    # SILENTLY IGNORES a non-numeric `org_identifier` and falls back to the caller's default
-    # Org. `_org_auth_fields` resolves that, so a name is safe to pass here.
-    #
-    # Resolving a name to its numeric id and asserting the session afterwards is what
-    # `ts share`'s `_resolve_org_id` / `assert_org_context` do; `apply` (Phase 2) must use
-    # them before any WRITE, because migrating a tenant's content into the wrong Org while
-    # reporting success is this command's worst failure mode. `audit` is read-only, so a
-    # wrong-Org read is recoverable and the assertion is deferred rather than skipped.
-    source_client = ThoughtSpotClient(resolve_profile(source_profile), org=source_org)
-    target_client = ThoughtSpotClient(resolve_profile(target_profile), org=target_org)
+    # Resolved and asserted, NOT passed as a raw name (BL-147). The comment that used to
+    # sit here claimed `_org_auth_fields` made a name safe and that a wrong-Org read was
+    # recoverable anyway. Both were wrong, and the second is the dangerous one: the audit
+    # produces the file a human approves, so reading Primary while believing it read the
+    # tenant hands someone a plausible mapping for the wrong objects.
+    source_client = _org_client(source_profile, source_org)
+    target_client = _org_client(target_profile, target_org)
 
     model_guids = list(model)
     if all_models:
@@ -227,13 +222,20 @@ def scan_sets(
          f"{summary['objects_affected']} Answer(s)/Liveboard(s) affected.")
 
 
-def _assert_write_org(profile: Optional[str], org: Optional[str]):
+def _org_client(profile: Optional[str], org: Optional[str]):
     """An org-scoped client whose session is CONFIRMED to be in that Org.
 
-    `auth/token/full` silently ignores a non-numeric `org_identifier` and falls back to
-    the caller's default Org. `audit` tolerates that because a wrong-Org read is
-    recoverable; `apply` cannot -- migrating a tenant's content into the wrong Org while
-    reporting success is this command's worst failure mode.
+    **Every command in this group must go through here, reads included.**
+    `auth/token/full` SILENTLY ignores a non-numeric `org_identifier` and falls back to
+    the caller's default Org, so passing a name straight to `ThoughtSpotClient` reads the
+    wrong Org while reporting success.
+
+    `audit` used to do exactly that on the grounds that a wrong-Org read is recoverable.
+    It is not, in the way that matters: the error surfaces only when a GUID happens to be
+    missing. When it is not -- two Orgs with same-named Models, which is the normal shape
+    of this migration -- the audit succeeds against the wrong Org and emits a plausible
+    `column-mapping.csv` for objects that are not the tenant's. Someone then approves it.
+    (BL-147.)
     """
     from ts_cli.commands.share import _resolve_org_id, assert_org_context
 
@@ -315,8 +317,8 @@ def apply_migration(
     if sets_scan:
         blocked = blocked_model_guids(_json.loads(Path(sets_scan).read_text()))
 
-    source_client = _assert_write_org(source_profile, source_org)
-    target_client = _assert_write_org(target_profile, target_org)
+    source_client = _org_client(source_profile, source_org)
+    target_client = _org_client(target_profile, target_org)
 
     names = {r.model for r in rows}
     _validate_or_exit(source_client, rows, blocked, sorted(names))
@@ -427,7 +429,7 @@ def rollback_migration(
         _err("Dry run: nothing was deleted.")
         return
 
-    client = _assert_write_org(target_profile, target_org)
+    client = _org_client(target_profile, target_org)
     failures = _delete_in_order(client, ordered)
     if failures:
         _err("rollback INCOMPLETE:")

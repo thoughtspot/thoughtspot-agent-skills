@@ -3975,7 +3975,7 @@ on this cluster, and whether an Org-scoped system variable is planned.
 
 ---
 
-## BL-146 -- `ts publish apply` creates state before its cohort gate, then cannot be re-run `Tier 2`
+## BL-146 -- `ts publish apply` creates state before its cohort gate, then cannot be re-run `Tier 2` -- **DONE 2026-07-28**
 
 **Filed:** 2026-07-27.
 **Source:** staging the end-to-end migration fixture on `nebula-damian-alias`. See
@@ -3997,13 +3997,20 @@ be deleted while still bound.
 **Ask:** run the cohort gate (and any other refusal that is knowable up front) **before**
 creating anything. Failing that, roll back what was created when a later gate refuses.
 
+**FIXED (ts-cli v0.113.1).** `apply` now reads `cohort_columns` off the closure -- which
+`export` already computed, so the check is free -- and refuses beside the existing
+coverage-gap check, before any client is even constructed. Verified live against
+T1_PUBLISH_MODEL: the same command on the same cluster state that previously reported
+`HTTP 409 Duplicate template variable name` now names the actual cohort column, and the
+message states that nothing needs cleaning up so nobody goes looking.
+
 **Also observed:** the refusal was invisible at the surface being watched. `created
 variable` and `parameterized` printed, while the cohort message went elsewhere -- so the
 run read as partial success rather than a refusal.
 
 ---
 
-## BL-147 -- `ts migrate audit` reads the WRONG ORG when given an Org name `Tier 2`
+## BL-147 -- `ts migrate audit` reads the WRONG ORG when given an Org name `Tier 2` -- **DONE 2026-07-28**
 
 **Filed:** 2026-07-27.
 **Source:** as BL-146.
@@ -4022,6 +4029,11 @@ A missing GUID is the lucky case. The dangerous one is an audit that *succeeds* 
 the wrong Org and emits a plausible `column-mapping.csv` for objects that are not the
 tenant's.
 
-**Ask:** resolve the name to a numeric id and assert the session, exactly as `apply` does
-via `_assert_write_org`; or refuse a non-numeric value outright. Correct the comment
-either way.
+**Ask:** resolve the name to a numeric id and assert the session, exactly as `apply` does;
+or refuse a non-numeric value outright. Correct the comment either way.
+
+**FIXED (ts-cli v0.113.1).** `_assert_write_org` is now `_org_client` and **every** command
+in the group goes through it, reads included -- the read/write distinction was the mistake,
+since the audit produces the file a human approves. The false comment is replaced with the
+reason. Verified live: `--source-org ORG1` now returns the correct ORG1 mapping where it
+previously failed outright.

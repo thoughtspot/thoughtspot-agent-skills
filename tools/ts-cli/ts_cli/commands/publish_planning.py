@@ -582,6 +582,27 @@ def apply_plan(
     with open(matrix) as handle:
         matrix_doc = json.load(handle)
 
+    # Cohort gate FIRST, before anything is created (BL-146).
+    #
+    # The publish API refuses a cohort-carrying closure anyway, but it does so at the very
+    # END of the run -- after the variable has been created and the fields parameterized.
+    # Those are left behind, and the RE-RUN then dies at variable creation with
+    # `HTTP 409 Duplicate template variable name`, which points at an entirely different
+    # problem: the operator goes looking for a variable conflict instead of the Set that
+    # actually blocked them. Recovering needs a manual `unparameterize` first, because a
+    # bound variable cannot be deleted.
+    #
+    # `export` already computed this, so the refusal costs nothing and is knowable up
+    # front. Anything else knowable up front belongs here too, beside the coverage check.
+    cohort = closure_doc.get("cohort_columns") or []
+    if cohort:
+        raise typer.BadParameter(
+            f"Cannot publish: cohort column(s) {', '.join(cohort)} are defined on a Model "
+            f"in this closure. Cohort publishing is not supported, and the block is "
+            f"Model-wide -- it stops the Model and every Answer or Liveboard on it, used "
+            f"or not. Delete the Set to publish. Refused before creating any variable or "
+            f"parameterizing any field, so nothing needs cleaning up.")
+
     if not (matrix_doc.get("coverage") or {}).get("complete", True):
         gaps = ", ".join(f"{g['variable']}@{g['org']}"
                          for g in matrix_doc["coverage"].get("missing") or [])

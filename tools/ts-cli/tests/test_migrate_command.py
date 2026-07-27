@@ -1,14 +1,9 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from typer.testing import CliRunner
-
 from ts_cli.cli import app
 
-try:
-    runner = CliRunner(mix_stderr=False)
-except TypeError:  # older click
-    runner = CliRunner()
+from runners import runner  # shared, stream-separated (BL-139)
 
 MODEL_EDOC = json.dumps({
     "guid": "src-1",
@@ -56,3 +51,56 @@ def test_audit_writes_mapping_and_flags_blocker(mock_cls, _rp, _deps, tmp_path):
     assert "Amount,T::AMT,Amount,MATCHED" in mapping
     report = json.loads((tmp_path / "audit-report.json").read_text())
     assert report["overall_ready"] is False
+
+
+# ---------------------------------------------------------------------------
+# BL-147 — audit must RESOLVE an Org name, never pass it through raw
+# ---------------------------------------------------------------------------
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.share.assert_org_context")
+@patch("ts_cli.commands.share._resolve_org_id", return_value=12750490)
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_audit_resolves_an_org_NAME_to_a_numeric_id(mock_cls, mock_resolve, mock_assert, _rp,
+                                                    tmp_path):
+    """`auth/token/full` SILENTLY ignores a non-numeric `org_identifier` and falls back to
+    the caller's default Org. Passing the name straight through therefore reads the WRONG
+    ORG while reporting success -- and the audit produces the file a human approves, so
+    that lands as a plausible column-mapping.csv for objects that are not the tenant's.
+
+    The lucky failure is a missing GUID. The dangerous one is two Orgs with same-named
+    Models, which is the normal shape of this migration.
+    """
+    src, tgt = MagicMock(), MagicMock()
+    src.post.side_effect = [MagicMock(json=lambda: [{"edoc": MODEL_EDOC}]),
+                            MagicMock(json=lambda: [])]
+    tgt.post.side_effect = [MagicMock(json=lambda: []), MagicMock(json=lambda: [])]
+    mock_cls.side_effect = [src, tgt]
+
+    runner.invoke(app, ["migrate", "audit", "--source-profile", "src",
+                        "--target-profile", "tgt", "--source-org", "ORG1",
+                        "--model", "src-1", "--out-dir", str(tmp_path)])
+
+    # The NAME went to the resolver, and the numeric id -- never the name -- to the client.
+    assert mock_resolve.call_args_list[0].args[1] == "ORG1"
+    assert mock_cls.call_args_list[0].kwargs["org"] == "12750490"
+    # And the session was read back before being trusted.
+    assert mock_assert.called
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_audit_without_an_org_builds_a_plain_client(mock_cls, _rp, tmp_path):
+    """Omitting --source-org means "the profile's default Org", which must not be turned
+    into a resolution attempt for the empty string."""
+    src, tgt = MagicMock(), MagicMock()
+    src.post.side_effect = [MagicMock(json=lambda: [{"edoc": MODEL_EDOC}]),
+                            MagicMock(json=lambda: [])]
+    tgt.post.side_effect = [MagicMock(json=lambda: []), MagicMock(json=lambda: [])]
+    mock_cls.side_effect = [src, tgt]
+
+    runner.invoke(app, ["migrate", "audit", "--source-profile", "src",
+                        "--target-profile", "tgt", "--model", "src-1",
+                        "--out-dir", str(tmp_path)])
+
+    assert "org" not in mock_cls.call_args_list[0].kwargs

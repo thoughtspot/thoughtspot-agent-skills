@@ -3,6 +3,8 @@
 **Date:** 2026-07-27
 **Cluster:** `nebula-damian-alias` (test cluster, authorised by the repo owner)
 **Status:** fixture is **live and left in place** for validation. Nothing here is torn down.
+**Updated 2026-07-28:** both defects found while staging are fixed in ts-cli v0.113.1; the
+numeric-Org-id workaround is no longer needed.
 
 A working `ORG1 → ORG2` migration, staged up to the point where the destructive steps
 begin. `audit` and `apply --dry-run` have been run against it successfully; the live
@@ -75,8 +77,8 @@ The plan directory with the **filled** mapping is at
 has been cleaned up.
 
 ```bash
-# 1. Audit  (numeric Org ids -- see the caveat below)
-ts migrate audit --source-org 12750490 --target-org 535312919 \
+# 1. Audit
+ts migrate audit --source-org ORG1 --target-org ORG2 \
   --model 9917a017-443c-4cf7-be81-2958d83997c8 -o ./plan/ \
   --source-profile nebula-damian-alias --target-profile nebula-damian-alias
 
@@ -85,16 +87,16 @@ ts migrate audit --source-org 12750490 --target-org 535312919 \
 #      Order Date -> DATE_1
 
 # 3. Read the plan
-ts migrate apply --source-org 12750490 --target-org 535312919 -d ./plan --dry-run \
+ts migrate apply --source-org ORG1 --target-org ORG2 -d ./plan --dry-run \
   --source-profile nebula-damian-alias --target-profile nebula-damian-alias
 
 # 4. Run it
-ts migrate apply --source-org 12750490 --target-org 535312919 -d ./plan \
+ts migrate apply --source-org ORG1 --target-org ORG2 -d ./plan \
   --source-profile nebula-damian-alias --target-profile nebula-damian-alias
 
 # 5. Undo
-ts migrate rollback --target-org 535312919 -d ./plan --dry-run
-ts migrate rollback --target-org 535312919 -d ./plan
+ts migrate rollback --target-org ORG2 -d ./plan --dry-run
+ts migrate rollback --target-org ORG2 -d ./plan
 ```
 
 ### One gap in the fixture
@@ -110,34 +112,34 @@ the `Segment` column before running step 4.** That column choice matters: `Segme
 renamed during the migration, so the Answer is what proves the rename cascades to
 dependents rather than breaking them.
 
-### Caveat: pass Org ids numerically
+### Org names now work (was a caveat, fixed 2026-07-28)
 
-`--source-org ORG1` **fails** (`Specified identifier doesn't exist`); `--source-org
-12750490` works. `auth/token/full` silently ignores a non-numeric `org_identifier` and
-falls back to the caller's default Org — the known trap — and `audit`'s inline comment
-claiming `_org_auth_fields` resolves a name is **wrong**. Worth fixing: `audit` should
-resolve the name the way `apply` does, or refuse a non-numeric value rather than reading
-the wrong Org.
+`--source-org ORG1` originally failed (`Specified identifier doesn't exist`) and only
+numeric ids worked, because `auth/token/full` silently ignores a non-numeric
+`org_identifier`. **Fixed in ts-cli v0.113.1 (BL-147)** -- `audit` now resolves the name
+and asserts the session like `apply` does, so either form is safe. Verified live: the
+name form returns the correct ORG1 mapping.
 
 Org ids on this cluster: Primary `0`, ORG1 `12750490`, ORG2 `535312919`, ORG3 `443705360`.
 
 ---
 
-## Two `ts publish` defects found while staging this
+## Two defects found while staging this — both now FIXED (v0.113.1)
 
-Neither blocks the fixture; both are real.
-
-**`ts publish apply` is not idempotent, and its gates run in the wrong order.** It creates
-the template variable and parameterizes the field *before* checking the cohort-column gate.
-A Set-blocked publish therefore leaves the variable and the parameterization behind, and
-the re-run fails with `HTTP 409 Duplicate template variable name` — pointing at the wrong
-problem entirely. Recovering takes a manual `unparameterize` (the variable cannot be
-deleted while bound) then a variable delete. **The cohort gate should run first**, before
-anything is created.
+**`ts publish apply` created state before its cohort gate — FIXED (BL-146, v0.113.1).** It
+created the template variable and parameterized the field *before* checking the
+cohort-column gate, so a Set-blocked publish left both behind and the re-run failed with
+`HTTP 409 Duplicate template variable name`, pointing at the wrong problem entirely. The
+gate now runs first, before any client is constructed. Verified live on the same cluster
+state: the command that reported the misleading 409 now names the actual cohort column.
 
 **The failure was also silent at the surface I was watching**: `created variable` and
 `parameterized` were printed, and the cohort refusal went to a different stream, so the
-run looked like it had partially succeeded rather than been refused.
+run looked like it had partially succeeded rather than been refused. The gate now refuses
+before either line can print.
+
+**`ts migrate audit` read the wrong Org when given a name — FIXED (BL-147, v0.113.1).**
+See the section above.
 
 ---
 
