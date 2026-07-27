@@ -94,8 +94,14 @@ string. Recorded in memory `feedback_ts_column_alias_rename_propagates`.
    a `ts tenancy` concern, not a `ts migrate` one.
 3. **Tables dedupe by PHYSICAL binding, not logical name.** A renamed, guid-stripped Table
    still matched an existing one (`Cannot create a new table ... Existing Table GUID: …`).
-   Lift-and-shift needs the tenant's binding to be distinct from anything already modelled
-   in the target.
+   **This is the common case, not an edge case:** tenants need not be segmented by database
+   or schema, and a normal deployment has every tenant referencing the SAME physical table
+   with RLS segmenting the rows. In that topology every tenant's scaffolding shares one
+   binding — with each other and with the clean Org's published Tables — so this blocks
+   lift-and-shift for every tenant and is the likeliest of the three to stop `apply`
+   outright. The strongest option is probably to bind lifted Models to the Table already
+   in the target rather than creating one, which would also simplify step 1; that needs
+   its own verification.
 
 **The mechanism itself showed up working:** `Warning: No table with fqn <dead-guid> found
 for table_id <name>` proves the importer tries the fqn, then falls back to the NAME — which

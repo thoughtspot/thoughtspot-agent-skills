@@ -95,12 +95,34 @@ The importer still matched it to an existing Table, so the identity it dedupes o
 **Consequence:** lift-and-shift can only import a tenant's scaffolding Table if the target
 Org does not already model that same physical table.
 
-**How much this matters depends on the real fleet, and should be checked before `apply` is
-built.** On this test cluster ORG1/ORG2/ORG3 all point at the *same* physical table, so
-they collide by construction — an artefact of the fixture. In a genuine deployment each
-tenant has its own schema, so bindings differ and there is no collision. But the clean Org
-will hold the published Model's Tables, and if a tenant's scaffolding happens to share a
-binding with those, the lift fails. `ts migrate audit` should check for it.
+**This is the common case in production, not a fixture artefact.** My first reading of it
+was wrong and the repo owner corrected it: tenants do **not** have to be segmented by
+database or schema. A perfectly normal deployment has every tenant referencing the **same**
+physical table with **RLS** ensuring each sees only its own rows. In that topology every
+tenant's scaffolding Table shares one physical binding — with each other, and with the
+published Model's Tables in the clean Org.
+
+So this is not an edge case to check for; for an RLS-segmented fleet it blocks
+lift-and-shift for **every** tenant, and it is the most likely of the three findings to
+stop `apply` outright.
+
+That the test cluster reproduces it (ORG1/ORG2/ORG3 all point at one physical table) is
+therefore a *feature* of the fixture, not a flaw in it — it models the harder and more
+common shape.
+
+**What this forces.** Lift-and-shift assumes the scaffolding Table can be created in the
+target Org. Where the binding already exists there, it cannot. Options, none yet chosen:
+
+| Option | Note |
+|---|---|
+| Reuse the existing Table rather than creating one | The scaffolding exists only to carry references and is deleted at step 4, so binding the lifted Models to the target's *existing* Table may be sufficient — and removes the import entirely |
+| Import with `create_new: false` and an explicit guid | Updates the existing Table rather than duplicating it. Risks mutating an object the clean Org depends on |
+| Give the scaffolding a throwaway distinct binding | A view or alias per migration. Extra warehouse objects, but keeps the scaffolding genuinely disposable |
+
+The first looks strongest and would *simplify* the design — but it changes step 1 from
+"lift Tables + Models + content" to "lift Models + content, binding to Tables already
+there", which needs its own verification. `ts migrate audit` must detect the collision
+either way.
 
 ---
 
