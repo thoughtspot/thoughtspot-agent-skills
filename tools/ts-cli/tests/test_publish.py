@@ -374,7 +374,11 @@ def test_apply_refuses_a_cohort_closure_before_creating_any_variable(tmp_path):
     matrix = tmp_path / "matrix.json"
     matrix.write_text(_json.dumps({"coverage": {"complete": True}, "assignments": []}))
 
-    with patch("ts_cli.commands.publish_planning.ThoughtSpotClient") as mock_cls:
+    # `resolve_profile` is patched because CI has no profiles file: unpatched, it exits
+    # before the client is ever constructed, and the assertions below would pass for
+    # entirely the wrong reason.
+    with patch("ts_cli.commands.publish_planning.resolve_profile", return_value={}), \
+            patch("ts_cli.commands.publish_planning.ThoughtSpotClient") as mock_cls:
         result = runner.invoke(app, ["publish", "apply", "-c", str(closure),
                                      "-m", str(matrix), "--publish-to", "ORG1"])
 
@@ -407,7 +411,8 @@ def test_apply_proceeds_when_the_closure_carries_no_cohort_column(tmp_path):
     matrix = tmp_path / "matrix.json"
     matrix.write_text(_json.dumps({"coverage": {"complete": True}, "assignments": []}))
 
-    with patch("ts_cli.commands.publish_planning.ThoughtSpotClient") as mock_cls:
+    with patch("ts_cli.commands.publish_planning.resolve_profile", return_value={}), \
+            patch("ts_cli.commands.publish_planning.ThoughtSpotClient") as mock_cls:
         result = runner.invoke(app, ["publish", "apply", "-c", str(closure),
                                      "-m", str(matrix), "--publish-to", "ORG1"])
 
