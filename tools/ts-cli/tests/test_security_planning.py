@@ -9,9 +9,11 @@ from typer.testing import CliRunner
 from ts_cli.cli import app
 from ts_cli.commands.security_planning import expand_uniform_rules
 
-# Bare module name, not `tests.test_security_commands`: pytest puts the tests directory
-# itself on sys.path, and this matches `from fixtures import ...` in
-# test_worked_examples.py.
+# Bare module name, not `tests.test_security_commands` / `tests.ansi`: pytest puts
+# the tests directory itself on sys.path, and this matches `from fixtures import ...` in
+# test_worked_examples.py. `ansi`, not `conftest`, is the import target for `plain` --
+# see ansi.py's module docstring for why a bare `conftest` import is unsafe here.
+from ansi import plain  # noqa: E402
 from test_security_commands import FakeClient, FakeResponse  # noqa: E402
 
 # See the Global Constraints section: `runner` is stream-separated so result.stdout is
@@ -287,7 +289,7 @@ def test_resolve_file_source_requires_csv(monkeypatch):
     result = msg_runner.invoke(app, ["security", "column-rules", "resolve",
                                      "--source", "file", "-p", "x"])
     assert result.exit_code != 0
-    assert "--csv" in result.output
+    assert "--csv" in plain(result)
 
 
 def test_resolve_db_source_requires_sf_profile(monkeypatch):
@@ -296,7 +298,7 @@ def test_resolve_db_source_requires_sf_profile(monkeypatch):
     result = msg_runner.invoke(app, ["security", "column-rules", "resolve",
                                      "--source", "db", "-p", "x"])
     assert result.exit_code != 0
-    assert "--sf-profile" in result.output
+    assert "--sf-profile" in plain(result)
 
 
 def _plan(**overrides):

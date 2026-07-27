@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 import pytest
 from typer.testing import CliRunner
 
+from ansi import plain
 from ts_cli.cli import app
 from ts_cli.commands.security import _published_orgs
 
@@ -229,7 +230,7 @@ def test_set_refuses_add_and_remove_together(patched):
                                      "--rule", "COST=Finance", "--add", "--remove",
                                      "-p", "x"])
     assert result.exit_code != 0
-    assert "--add" in result.output
+    assert "--add" in plain(result)
 
 
 @pytest.mark.parametrize("flag", ["--add", "--remove"])
@@ -328,7 +329,7 @@ def test_set_allow_published_warns_on_stderr(patched):
                                      "T2_PUBLISH", "--rule", "UNIT_PRICE_AMT=Analyst",
                                      "--allow-published", "-p", "x"])
     assert result.exit_code == 0
-    assert "--allow-published set" in result.output
+    assert "--allow-published set" in plain(result)
 
 
 def test_set_on_an_unpublished_table_is_unaffected(patched):
