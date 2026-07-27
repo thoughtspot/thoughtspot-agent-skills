@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 import typer
+import yaml
 
 app = typer.Typer(help="Power BI (.pbip) -> ThoughtSpot conversion commands.")
 
@@ -153,3 +154,56 @@ def build_liveboard_cmd(
         "tabs": sum(1 for p in result["page_rows"] if p.get("status") == "Migrated"),
         "visuals_migrated": _c(vr, "Migrated"), "approximated": _c(vr, "Approximated"),
         "needs_review": _c(vr, "NEEDS REVIEW"), "liveboard": bool(lb_tml)}))
+
+
+@app.command("build-timeintel")
+def build_timeintel_cmd(
+    specs_file: str = typer.Option(..., "--specs",
+                                   help="JSON list of {base_name, base_expr, [sply_name, yoy_name, yoy_pct_name]}"),
+    date_column: str = typer.Option(..., "--date-column",
+                                    help="Model date column the year-offset compares against"),
+    model_file: str = typer.Option(None, "--model",
+                                   help="Model TML to merge the parameter + measures into (writes back). "
+                                        "Omit to print the fragment for manual merge."),
+    ref_date: str = typer.Option("12/31/2024", "--ref-date",
+                                 help="Reference Date parameter default (MM/DD/YYYY)"),
+) -> None:
+    """Rebuild flagged SAMEPERIODLASTYEAR / YoY measures as Reference-Date `sum_if` measures.
+
+    Power BI time-intelligence has no 1:1 ThoughtSpot formula, so `build-model` flags those
+    measures NEEDS REVIEW. This emits the ONE pattern verified live (worked-examples/powerbi/
+    sply-parameter.md): a `Reference Date` parameter + per base measure a reference-year, SPLY,
+    YoY and YoY% formula. It is measure-based, so the liveboard tiles that reference these
+    render — unlike a hand-authored period-comparison tile. It does NOT invent numbers: run it
+    in Step 3 (before the liveboard), re-import the model, and **verify the per-period numbers
+    against the Power BI source** before handing over.
+
+    \b
+      ts powerbi build-timeintel --specs ti.json --date-column Date --model out/m.model.tml
+    """
+    from ts_cli.powerbi.timeintel import build_time_intelligence, merge_into_model
+    from ts_cli.tml_common import dump_tml_yaml
+
+    specs = json.loads(Path(specs_file).read_text(encoding="utf-8"))
+    if not isinstance(specs, list):
+        typer.echo("--specs must be a JSON list of measure specs", err=True)
+        raise SystemExit(1)
+    built = build_time_intelligence(specs, date_column, ref_date)
+
+    model_updated = False
+    if model_file:
+        doc = yaml.safe_load(Path(model_file).read_text(encoding="utf-8"))
+        merge_into_model(doc.get("model", doc), built)
+        Path(model_file).write_text(dump_tml_yaml(doc), encoding="utf-8")
+        model_updated = True
+
+    typer.echo(json.dumps({
+        "measures_emitted": len(built["formulas"]),
+        "parameter": built["parameter"],
+        "formulas": built["formulas"],
+        "columns": built["columns"],
+        "model_updated": model_updated,
+        "review": built["review"],
+    }))
+    for r in built["review"]:
+        typer.echo(f"review: {r}", err=True)

@@ -90,12 +90,23 @@ Building the liveboard against a model still missing them is exactly what produc
 non-rendering tiles — resolve them here, re-import (Step 2), and only then build the liveboard.
 
 - **`CALCULATE(m, ALL(dims))`** → `group_aggregate` (worked example) — already emitted by Step 1.
-- **SAMEPERIODLASTYEAR / YoY** have no 1:1 DAX→formula path and are flagged NEEDS REVIEW, never
-  faked. Draft each from plain English with `ts spotter answer` — it returns ThoughtSpot's
-  native period-comparison tokens (e.g. `New Hires, Date = 'this year' vs Date = 'last year'`).
-  **Verify the numbers on the cluster before adopting** — never auto-adopt a draft.
-- Add each confirmed measure/column to the model TML and re-import. Do **not** proceed to the
-  liveboard until every measure a tile will reference exists in the model.
+- **SAMEPERIODLASTYEAR / YoY** are flagged NEEDS REVIEW, never faked. Rebuild them
+  deterministically with `ts powerbi build-timeintel` — it emits a `Reference Date` parameter
+  plus `sum_if` reference-year / SPLY / YoY / YoY% measures (the pattern verified live; it is
+  **measure-based**, so the tiles that reference them render — a hand-authored period-comparison
+  tile does not) and merges them into the model TML:
+  ```bash
+  ts powerbi build-timeintel --specs timeintel.json --date-column "<Date column>" \
+    --model out/*.model.tml
+  ```
+  `timeintel.json` is `[{"base_name": "New Hires", "base_expr": "[formula_isNewHire]"}, ...]`,
+  where `base_expr` is the base measure's row-level body (from `mapping.json`); add
+  `sply_name` / `yoy_name` / `yoy_pct_name` to match the source measure names so the author's own
+  `YoY % Change` measures cascade through the id-references. **Verify the per-period numbers
+  against the Power BI source before adopting** — the helper never invents numbers. For a
+  one-off exploratory answer, `ts spotter answer` drafts the native `vs` period comparison.
+- Re-import the model (Step 2). Do **not** proceed to the liveboard until every measure a tile
+  will reference exists in the model.
 
 ### Step 4 — Build, import & VERIFY the liveboard
 ```bash
@@ -122,5 +133,5 @@ user as the deliverable.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1.0 | 2026-07-27 | Render-robustness: require `ts tml verify-render` as a gate after import; resolve the time-intelligence hard tail INTO the model before building the liveboard; add the "tiles come from the tool, never by hand" core rule (a hand-authored tile imports but fails to render with "No data source found") |
+| 1.1.0 | 2026-07-27 | Render-robustness: require `ts tml verify-render` as a gate after import; resolve the time-intelligence hard tail INTO the model before building the liveboard, via the new deterministic `ts powerbi build-timeintel` (Reference-Date SPLY/YoY measures, the live-verified measure-based pattern); add the "tiles come from the tool, never by hand" core rule (a hand-authored tile imports but fails to render with "No data source found") |
 | 1.0.0 | 2026-07-16 | Initial release — `ts powerbi` parse / build-model / build-liveboard |

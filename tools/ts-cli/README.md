@@ -2755,7 +2755,7 @@ with spaces/special chars like `Order Date` 1:1) + batched `INSERT`.
 > limitation), so the new table must be **selected in the ThoughtSpot connection editor (UI)**
 > before `ts tables create` / model build can reference it.
 
-### `ts powerbi parse` / `build-model` / `build-liveboard`
+### `ts powerbi parse` / `build-model` / `build-liveboard` / `build-timeintel`
 
 The Power BI (`.pbip`) to ThoughtSpot converter for the `ts-convert-from-powerbi` skill.
 Mirrors the Tableau converter: `parse` reads the project into structured JSON, `build-model`
@@ -2842,6 +2842,38 @@ Stdout: JSON counts (`report_name`, `answers`, `tabs`, `visuals_migrated`,
 `approximated`, `needs_review`, `liveboard`). A chart type with no faithful ThoughtSpot
 equivalent is emitted as its nearest approximation and flagged `Approximated` or
 `NEEDS REVIEW`, matching the Tableau path's "flag, never downgrade" contract.
+
+#### `ts powerbi build-timeintel`
+
+Rebuild flagged SAMEPERIODLASTYEAR / YoY measures as **Reference-Date `sum_if` measures** — the
+one time-intelligence pattern verified live (`worked-examples/powerbi/sply-parameter.md`). Power
+BI time-intelligence has no 1:1 ThoughtSpot formula, so `build-model` flags those measures NEEDS
+REVIEW; this emits a `Reference Date` parameter plus, per base measure, a reference-year / SPLY /
+YoY / YoY% formula. It is **measure-based**, so the liveboard tiles that reference them render —
+unlike a hand-authored period-comparison tile, whose resolved column structure fails at render
+with "No data source found". Run it in Step 3 (before the liveboard), re-import, then verify the
+numbers against the source. It never invents numbers.
+
+```bash
+ts powerbi build-timeintel --specs timeintel.json --date-column "Date" --model out/my.model.tml
+```
+
+`timeintel.json`:
+```json
+[{"base_name": "New Hires", "base_expr": "[formula_isNewHire]",
+  "sply_name": "New Hires SPLY", "yoy_name": "New Hires YoY", "yoy_pct_name": "New Hires YoY %"}]
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--specs` | yes | JSON list of `{base_name, base_expr, [sply_name, yoy_name, yoy_pct_name]}`. `base_expr` is the base measure's row-level body (from `mapping.json`) |
+| `--date-column` | yes | Model date column the year-offset compares against |
+| `--model` | no | Model TML to merge the parameter + measures into (writes back). Omit to print the fragment for manual merge |
+| `--ref-date` | no | `Reference Date` parameter default, `MM/DD/YYYY` (default `12/31/2024`) |
+
+Stdout: JSON `{measures_emitted, parameter, formulas, columns, model_updated, review}`. `review`
+lists one human-verify note per emitted comparison set (and any spec skipped for a missing
+`base_expr`, never guessed).
 
 ---
 
