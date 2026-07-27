@@ -369,6 +369,27 @@ def _refuse_conflicts(resolved: List[Dict[str, Any]]) -> None:
         raise typer.Exit(1)
 
 
+def _warn_strict_object_mode(resolved: List[Dict[str, Any]]) -> None:
+    """Warn once when the plan carries column-level (CLS) grants.
+
+    Column-level sharing only takes effect when the cluster is in Strict Object Mode.
+    That is a cluster flag, not something either the sharing or metadata APIs expose --
+    it cannot be read through the REST API available to us, so this CLI cannot gate on
+    it. Answers the parent spec's open item #2
+    (`docs/superpowers/specs/2026-07-26-ts-security-sharing-design.md` §6): yes, it is
+    required. If it is off, these grants are still accepted and applied without error;
+    they simply do not take effect. Advisory only -- printed once per run, never
+    blocking and never changing the exit code, because there is nothing here to check
+    or refuse against.
+    """
+    if any(g["column_name"] for g in resolved):
+        print("Warning: this plan includes column-level grants. Column-level sharing "
+              "only takes effect when the cluster is in Strict Object Mode. That "
+              "setting cannot be read through the REST API, so confirm it in the "
+              "cluster's configuration -- if it is off, these grants will be applied "
+              "without error and have no effect.", file=sys.stderr)
+
+
 @app.command("resolve")
 def resolve_cmd(
     org: List[str] = typer.Option([], "--org", help="Target Org name (repeatable)"),
@@ -463,6 +484,7 @@ def resolve_cmd(
     print(f"planned {len(resolved)} grant(s): {summary['object_grants']} object-level, "
           f"{summary['column_grants']} column-level, across "
           f"{len(summary['orgs'])} org(s)", file=sys.stderr)
+    _warn_strict_object_mode(resolved)
     print(json.dumps({"objects": objects, "grants": resolved, "summary": summary}))
 
 

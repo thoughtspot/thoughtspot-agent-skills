@@ -3616,3 +3616,175 @@ platform rather than hoping one dialect parses on both.
 
 **Target:** alongside the first customer engagement that governs a publication manifest in
 Databricks. Not blocking `ts-publish-orgs`, whose file path covers the same ground.
+
+---
+
+## BL-137 -- End-to-end test-environment fixture for the multi-tenancy platform `Tier 2`
+
+**Filed:** 2026-07-27.
+**Source:** the repo owner's request, raised while verifying `ts security column-rules`
+(`feat/ts-security-column-rules`) end to end.
+**Affects:** the multi-tenancy platform programme as a whole -- `ts load`, `ts publish`,
+`ts share`, `ts security column-rules`, and whichever `ts-security-columns` skill and
+migration additions land later. No single ts-cli module owns this.
+**Status:** OPEN.
+
+**Why it matters.** Today, exercising publication, sharing, aliasing and column security
+end to end requires a cluster someone has hand-built, and reproducing it is undocumented
+tribal knowledge. Verifying this branch alone needed warehouse tables, several Orgs, users
+assigned to those Orgs, and users assigned to per-Org groups -- and there is no repeatable
+way to stand that up other than remembering how it was done last time.
+
+**Why it is subtle, not merely tedious.** Groups are per-Org: a group name that exists in
+the Primary Org does not exist in a tenant Org, and a CSR manifest or `ts share` manifest
+naming it fails there (`_check_groups_exist` in `share_planning.py` refuses exactly this).
+Getting the per-Org group topology right -- which groups exist in which Org, and which
+users are members of which per-Org group -- is the part of a hand-built environment most
+likely to be got wrong, not the tedious-but-mechanical parts like warehouse tables.
+
+**Approach.** A reproducible fixture that provisions, in order: warehouse tables (`ts load`
+already does this and is the natural starting point -- see `ts-load-source-data`); the
+Orgs themselves; users created and assigned to those Orgs; and per-Org groups created with
+the right members in each Org. The deliverable is a cluster state a newcomer can stand up
+from scratch and immediately use to run the whole pattern -- publish, alias, share, secure
+-- without hand-authoring any of the topology first.
+
+**Target:** after the platform's development work is complete end to end -- i.e., once the
+`ts-security-columns` skill and the migration additions (parent spec §4/§5 of
+`2026-07-26-ts-security-sharing-design.md`) have landed -- so the fixture covers the
+finished shape of the platform rather than chasing a moving one.
+
+---
+
+## BL-138 -- `ts alias import` and `ts tml import` do not detect embedded per-item TML failures `Tier 2`
+
+**Filed:** 2026-07-27.
+**Source:** `ts security column-rules import`, fixed on `feat/ts-security-column-rules`
+after a live-observed failure: an import that failed with error code 14502 exited 0.
+**Affects:** `ts alias import` (`commands/alias.py`); `ts tml import` (`commands/tml.py`);
+the shared pure helper `tml_import_failures` in `tools/ts-cli/ts_cli/tml_common.py`.
+**Status:** OPEN.
+
+**Why it matters.** `POST /api/rest/2.0/metadata/tml/import` returns HTTP 200 even when
+individual items in the batch failed -- the per-item outcome is buried in the response
+body (`response.status.status_code == "ERROR"`, with an accompanying `error_code`), not
+the HTTP status. A caller that checks only `resp.ok` reports success on an import that did
+nothing. Live-verified on this branch: before the fix, an import that failed with error
+code 14502 exited 0 and reported success.
+
+This branch fixed it for `ts security column-rules import` only: it now calls the shared
+pure helper `tml_import_failures(result)` and exits non-zero, naming each failed item, when
+the platform's own per-item status disagrees with the HTTP status. `ts alias import` and
+`ts tml import` have the identical shape and the identical gap, but were deliberately left
+alone to keep this branch's blast radius small -- both still trust `resp.ok` alone.
+
+**Approach.** Wire both callers to the existing `tml_import_failures` helper the same way
+`security_planning.py`'s `import_cmd` already does: call it on the parsed response and
+route to the same style of per-item failure reporting before exiting non-zero, translating
+via each command's own error-translator where one exists. No new parsing logic is needed --
+the helper already exists and is pure.
+
+**Target:** next time either `ts alias import` or `ts tml import` is touched, since the
+helper already exists and the fix is now mechanical.
+
+---
+
+## BL-139 -- The `CliRunner(mix_stderr=False)` fallback is a Click 8.2 landmine `Tier 3`
+
+**Filed:** 2026-07-27.
+**Source:** noticed while adding tests to `tools/ts-cli/tests/test_share_commands.py` on
+`feat/ts-security-column-rules`, following the convention already used by
+`tests/test_security_planning.py` and others.
+**Affects:** every test module using the `try: CliRunner(mix_stderr=False) except
+TypeError: CliRunner()` pattern; `tools/ts-cli/tests/conftest.py`; the Click pin in
+`pyproject.toml` (currently 8.1.8).
+**Status:** OPEN.
+
+**Why it matters.** Several test modules construct their `runner` with `try:
+CliRunner(mix_stderr=False) except TypeError: CliRunner()`, because Click 8.2 removed the
+`mix_stderr` parameter entirely (it raises `TypeError` at construction, not at call time).
+Click is pinned at 8.1.8 today, so the `try` branch always succeeds. The moment Click is
+upgraded past 8.1.x, every one of those `runner`s silently becomes a *mixing* runner
+instead of a stream-separated one -- no test fails at the moment of upgrade. What breaks
+instead is every `json.loads(result.stdout)` assertion across those modules, each failing
+with a confusing JSON-decode error that gives no hint the real cause is an unrelated Click
+version bump.
+
+**Approach.** `feat/ts-security-column-rules` created `tools/ts-cli/tests/conftest.py`
+for an unrelated reason (see its docstring), which makes it the obvious single home for a
+shared `runner`/`msg_runner` pair: define both there once, and have every test module
+import them instead of repeating the try/except. That turns the eventual fix --
+reconstructing `msg_runner`'s mixing behaviour some other way once `mix_stderr` is gone,
+and pointing every module at the shared fixtures -- from a repo-wide sweep into a
+one-file change plus per-module import edits.
+
+**Target:** whenever Click is upgraded past 8.1.x, or opportunistically before then to
+pre-position the shared fixtures.
+
+---
+
+## BL-140 -- `ts security column-rules export --out` writes a flat layout while `build --out` namespaces by Org `Tier 3`
+
+**Filed:** 2026-07-27.
+**Source:** noticed while implementing `build --out`'s Org-namespaced layout on
+`feat/ts-security-column-rules` (`security_planning.py`'s `_document_paths`).
+**Affects:** `ts security column-rules export` (`commands/security.py`); `ts security
+column-rules build --out` (`commands/security_planning.py`, already fixed).
+**Status:** OPEN.
+
+**Why it matters.** `build --out` was changed on this branch to write
+`<out>/<org>/<TABLE>_CSR.column_security_rules.tml` -- one subdirectory per Org --
+because a plan step is per (Org, table) but the platform's own filename is derived from
+the table alone. A flat layout collapsed a multi-Org plan into one file per table,
+silently keeping only the last Org's rules and losing every other Org's (see
+`_document_paths`'s docstring).
+
+`ts security column-rules export --out` still writes the flat layout,
+`<out>/<TABLE>_CSR...tml`, with no Org subdirectory. Exporting the same table from two
+different Orgs into the same output directory, across two separate `export` invocations,
+silently overwrites the first Org's export with the second's. Same collision class as the
+one `build` already guards against, but lower severity: it needs two deliberate
+invocations against the same `--out` directory rather than a single multi-Org plan
+producing the collision on its own.
+
+**Approach.** Apply the same Org-subdirectory fix to `export --out` that `build --out`
+already has, reusing the same collision-refusal logic rather than re-deriving it.
+
+**Target:** alongside the `ts-security-columns` skill, which is the first thing likely to
+script repeated per-Org exports into a shared directory.
+
+---
+
+## BL-141 -- The parent spec and the platform plan still carry a disproven CSR-on-published claim `Tier 3`
+
+**Filed:** 2026-07-27.
+**Source:** live verification of `ts security column-rules` on `feat/ts-security-column-rules`,
+third round (data-plane, real non-admin users). See
+`docs/superpowers/verification/2026-07-26-ts-security-column-rules-live-verification.md`
+§15 for the evidence.
+**Affects:** `docs/superpowers/specs/2026-07-26-ts-security-sharing-design.md` (§1's
+CSR-vs-CLS comparison table, row "Works on published objects"); `docs/multi-tenancy-platform-plan.md`
+§4.3 ("Publication constrains the column-security mechanism").
+**Status:** OPEN.
+
+**Why it matters.** Both documents state that CSR cannot be defined on published objects.
+Live testing disproved the mechanism, not the conclusion: the platform accepts a CSR
+update against a genuinely published object from the owning Org, returns HTTP 204, and
+enforces it there -- but the rule does not travel with publication, so a tenant Org the
+object is published to keeps seeing the restricted column in full, with no error and no
+warning either way. The two documents' bottom-line advice ("do not rely on CSR here") is
+still right, but the reason they give is wrong: it is not an API refusal, it is a silent
+scoping trap, and an operator reading only the current wording would expect a hard failure
+rather than a working-but-misleading result. `ts security column-rules`
+(`commands/security_planning.py`, §3.3 of `2026-07-26-ts-security-column-rules-cli-design.md`)
+already codifies the corrected understanding; these two programme documents have not
+caught up.
+
+**Approach.** Correct the mechanism in both places, keeping the same "do not do this"
+conclusion: CSR from the owning Org succeeds and is enforced in that Org, but does not
+propagate to any tenant Org the object is published to. Cite the live-verification
+document above as the evidence. Both documents are outside this branch's scope (see the
+top of `2026-07-26-ts-security-column-rules-cli-design.md`), so the correction is deferred
+rather than made here.
+
+**Target:** next edit to either document.

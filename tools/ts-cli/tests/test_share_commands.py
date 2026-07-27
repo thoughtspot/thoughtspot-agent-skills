@@ -5,10 +5,22 @@
 """
 from __future__ import annotations
 
-import pytest
+import json
 
+import pytest
+from typer.testing import CliRunner
+
+from ts_cli.cli import app
 from ts_cli.commands.share import build_share_payload, explain_share_error
 from ts_cli.commands.share_planning import expand_uniform_grants, resolve_guids
+
+# See the Global Constraints section: `runner` is stream-separated so result.stdout is
+# parseable JSON; `msg_runner` mixes, which is the only way to see a manual stderr print.
+try:
+    runner = CliRunner(mix_stderr=False)
+except TypeError:            # Click >= 8.2 removed the parameter
+    runner = CliRunner()
+msg_runner = CliRunner()
 
 
 def _perm(group="Analyst", mode="READ_ONLY"):
@@ -365,3 +377,57 @@ def test_assert_org_context_accepts_a_matching_session(monkeypatch):
             return _Resp()
 
     assert share_module.assert_org_context(_Client(), "ORG1", "p") is None
+
+
+# ---------------------------------------------------------------------------
+# ts share resolve -- the Strict Object Mode warning
+# ---------------------------------------------------------------------------
+#
+# Column-level sharing (CLS) only takes effect when the cluster is in Strict Object
+# Mode, and that flag cannot be read through the REST API (parent spec
+# `2026-07-26-ts-security-sharing-design.md` §6, open item #2). `resolve` warns once,
+# to stderr, whenever the resolved plan carries a column-level grant. `--skip-group-check`
+# keeps these tests offline: no client is ever constructed.
+
+def _write_envelope(tmp_path, objects=_OBJECTS):
+    path = tmp_path / "export.json"
+    path.write_text(json.dumps({"objects": objects, "orgs": ["ORG1"], "current_grants": {}}))
+    return str(path)
+
+
+def _resolve_args(input_path, *extra):
+    return ["share", "resolve", "--input", input_path, "--org", "ORG1",
+            "--source", "uniform", "--group", "Analyst", "--share-mode", "READ_ONLY",
+            "--skip-group-check", *extra]
+
+
+def test_resolve_warns_about_strict_object_mode_for_a_column_grant(tmp_path):
+    result = msg_runner.invoke(app, _resolve_args(_write_envelope(tmp_path),
+                                                   "--column", "PROD_NM"))
+    assert result.exit_code == 0, result.output
+    assert "Strict Object Mode" in result.output
+
+
+def test_resolve_does_not_warn_for_an_object_grants_only_plan(tmp_path):
+    result = msg_runner.invoke(app, _resolve_args(_write_envelope(tmp_path)))
+    assert result.exit_code == 0, result.output
+    assert "Strict Object Mode" not in result.output
+
+
+def test_resolve_warns_once_for_several_column_grants(tmp_path):
+    result = msg_runner.invoke(app, _resolve_args(
+        _write_envelope(tmp_path), "--column", "PROD_NM", "--column", "AMOUNT"))
+    assert result.exit_code == 0, result.output
+    assert result.output.count("Strict Object Mode") == 1
+
+
+def test_resolve_column_grant_warning_does_not_change_the_exit_code_or_leak_to_stdout(
+        tmp_path):
+    # `runner`, not `msg_runner`: stdout must stay pure JSON with the warning kept off
+    # it entirely, and the plan a column grant produces must exit the same as any other.
+    result = runner.invoke(app, _resolve_args(_write_envelope(tmp_path),
+                                              "--column", "PROD_NM"))
+    assert result.exit_code == 0, result.output
+    plan = json.loads(result.stdout)
+    assert plan["summary"]["column_grants"] == 1
+    assert "Strict Object Mode" not in result.stdout

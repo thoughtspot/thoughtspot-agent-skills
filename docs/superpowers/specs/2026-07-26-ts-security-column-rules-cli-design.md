@@ -56,6 +56,28 @@ The parent spec's §2.4 recorded CSR from live probing. Reading the canonical sp
 `updateColumnSecurityRules`) surfaced four things that change the design, and explained one
 of the live gotchas.
 
+**CLS carries an additional precondition that CSR does not, and it is unreadable in the
+same way the publication state in §3.3 briefly was not.** For a column-level grant to
+actually take effect on a Model, the cluster must be in Strict Object Mode. This is a
+cluster-wide flag, and it cannot be read through any REST API available to us -- unlike
+publication state (§3.3), which at least *can* be read (`metadata_header.orgIds`), even
+though getting that reading right took two corrections. Strict Object Mode has no such
+path at all. If it is off, CLS column grants are still accepted and applied without
+error; they simply never take effect, so the failure mode is silent rather than a
+refusal at plan time. This answers the parent spec's §6 open item #2 ("Does strict
+object security have to be enabled for CLS to behave as documented?"), previously OPEN
+on an unverified recording: yes, it is required.
+
+CSR has no equivalent precondition -- once the object is shared (the first of CSR's two
+steps, above), CSR's own filtering applies unconditionally. This is a further asymmetry
+between the two mechanisms, on top of the two already stated above (two steps vs. one;
+the exclusivity rule CLS needs and CSR does not), and it is decision-relevant for the
+same reason those are: it is exactly the kind of precondition the future
+`ts-security-columns` skill (parent spec §4), whose job is choosing between CSR and CLS,
+must confirm before recommending CLS -- since neither this CLI nor that skill can verify
+it, the confirmation has to be a step the operator performs against the cluster's own
+configuration, not an automated check the skill can run.
+
 ### 1.1 `group_access` has three operations, not one
 
 The parent spec assumed CSR was purely declarative. It is not. Each column rule carries a
