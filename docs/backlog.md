@@ -3795,3 +3795,47 @@ top of `2026-07-26-ts-security-column-rules-cli-design.md`), so the correction i
 rather than made here.
 
 **Target:** next edit to either document.
+
+---
+
+## BL-142 -- PLATFORM: an object-level `NO_ACCESS` removes discovery but not the column-grant entitlement `Tier 2`
+
+**Filed:** 2026-07-27.
+**Source:** data-plane verification for `ts-security-columns`, as real non-admin users on
+`nebula-damian-alias`. See
+`docs/superpowers/verification/2026-07-27-ts-security-columns-live-verification.md` §11.
+
+This is a **platform defect to raise with ThoughtSpot**, not a repo bug. Recorded here so
+the skill's guidance has something to point at and so it is not rediscovered.
+
+**What happens.** With a group holding column-level grants (CLS) and no object grant,
+applying an object-level `NO_ACCESS` to that group:
+
+- removes the object from **search** (a Model disappears; a Table stays reachable via the
+  Data page), and
+- leaves the **entitlement fully intact** -- the object still opens by **direct link**,
+  still showing exactly the granted columns.
+
+Verified on both `T2_PUBLISH` (Table) and `T2_PUBLISH_MODEL` (Model) in Primary, with
+Strict Object Mode ON. The Table/Model difference is only which discovery surface each
+uses; the entitlement is identical on both.
+
+**Why it matters.** A partial deny is worse than either a real deny or none at all. It
+looks effective to the administrator who applied it while remaining live for anyone with a
+direct link, a bookmark, or an Answer or Liveboard built on the object. The intuitive
+operator action -- "remove their access to this table" -- does not do what it appears to,
+and nothing warns. Same failure class as CSR-on-published: the write succeeds, and a false
+belief is created.
+
+**What we do in the meantime.**
+
+1. `ts-security-columns` states the rule plainly: to revoke CLS, revoke at **column**
+   level; an object-level deny is not a revoke.
+2. Consider having `ts share status` flag surviving column grants when the object grant is
+   absent, rather than listing them as unremarkable rows -- that combination is now known
+   to be the shape of a failed revoke.
+3. `ts share`'s existing refusal to mix revoke-and-grant in one manifest is retro-justified
+   by this and should stay.
+
+**Target:** (1) ships with the skill. (2) is a `ts share` follow-up, unscheduled. Raising
+it with the platform team is the real fix.

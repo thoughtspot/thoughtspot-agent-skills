@@ -136,6 +136,13 @@ open is not a security outcome, it is a broken one.
 1. TS_SHARE_GRANTS          column grants   ── ts share resolve → apply
 ```
 
+**Revoking CLS is a column-level operation.** Live-verified 2026-07-27: an object-level
+`NO_ACCESS` against a group holding column grants removes the object from *search* but
+leaves the entitlement intact — the object still opens by direct link, still showing the
+granted columns. The intuitive operator action does not do what it looks like it does, so
+the skill must say this plainly and must never present an object-level deny as a way to
+undo a column grant. Platform gap, BL-142.
+
 with the table/column exclusivity rule enforced by `share_plan.find_exclusivity_conflicts`:
 a table grant and a column grant for the same (Org, table, group) are the same mechanism
 at two granularities, so the broader defeats the narrower and the plan is refused rather
@@ -341,8 +348,8 @@ with the owning Org able to write to that same table.
 |---|---|---|
 | 1 | Can a tenant Org configure **usable** CSR on its **own native** table? | **YES.** `set --org ORG1` on `T4_PER_ORG` against `Demo Retail Group` applied and read back. The second round's failure here really was only the group-name artefact it was diagnosed as |
 | 2 | Can a tenant Org configure CSR on a table **published into** it? | **NO.** `HTTP 500`, code **`10038`**, `FORBIDDEN`, `User does not have access to read/modify CSR for these tables`. Attributable to publication, per the controls above. Closes parent spec open item #5 |
-| 3 | Does a group holding **only** column grants reach the table? | **PARTIAL.** The CLS grant applied in ORG1 on the published object with no table grant, and read back. Data-plane reachability as a real non-admin user is untested — needs a UI session. Parent spec open item #1 |
-| 4 | Does a table-level `NO_ACCESS` clear existing column grants? | **NO**, at ACL level — the column grant survived unchanged. Closes the `ts share` carry-forward |
+| 3 | Does a group holding **only** column grants reach the table? | **YES**, both Table and Model, verified as a real non-admin user. With no object grant at all, `guest4` saw exactly the 3 granted columns. Confirms CLS is one step. Closes parent spec open item #1 |
+| 4 | Does a table-level `NO_ACCESS` clear existing column grants? | **NO** — and it does not revoke the entitlement either. The Model drops out of search but still **opens by direct link with the granted columns**. An object-level deny is not a revoke. Platform gap, BL-142 |
 
 **§2.1's second row is confirmed, and for a stronger reason than the design assumed.** CSR
 is closed off for a published-in row by *two independent* mechanisms: an owning-Org rule
@@ -395,12 +402,11 @@ Parent spec §5.1 (`CSR_BLOCKER`) still carries the same claim. It is migration 
 | # | Item | Status |
 |---|---|---|
 | 1 | Whether a tenant Org can be given usable CSR — native and published halves | **ANSWERED 2026-07-27.** Native: yes. Published-in: no (`10038 FORBIDDEN`). Closes parent spec open item #5 |
-| 2 | Whether a group holding only column grants can reach the table | **PARTIAL.** ACL proven (§9 item 3); data-plane reachability as a real non-admin user still untested. Parent spec open item #1 stays open on that half |
+| 2 | Whether a group holding only column grants can reach the table | **ANSWERED 2026-07-27: yes**, Table and Model, as a real non-admin user. Closes parent spec open item #1 |
 | 3 | Whether a table-level `NO_ACCESS` clears existing column grants | **ANSWERED 2026-07-27: no**, at ACL level. Closes the `ts share` carry-forward |
-| 4 | Whether a CLS column grant still *functions* after a table-level `NO_ACCESS` | OPEN, new. §9 item 4 proves the ACL row survives, not that it works |
+| 4 | Whether a CLS column grant still *functions* after a table-level `NO_ACCESS` | **ANSWERED 2026-07-27: yes.** Discovery is removed, the entitlement is not. Platform gap, BL-142 |
 | 5 | Whether Strict Object Mode ever becomes API-readable | OPEN. If it does, §4's gate becomes a check and the skill drops a manual step |
 | 6 | The `ts migrate audit` contract in §5.2 | Deferred to a backlog item against the migrate work |
 
-Items 2 and 4 are both data-plane questions needing a UI session as a real non-admin user,
-which is how round 3 settled the Org-scoping question. They are the natural pairing for one
-follow-up session rather than two.
+Items 2 and 4 were settled together in one data-plane session on 2026-07-27, as real
+non-admin users in Primary. Only item 5 remains, and nothing depends on it.

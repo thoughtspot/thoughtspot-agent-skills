@@ -293,7 +293,88 @@ explicit `column-rules clear` in both Orgs and a `NO_ACCESS` revoke of the colum
 | # | Item | Status |
 |---|---|---|
 | 1 | Can a tenant Org be given usable CSR? | **ANSWERED.** Native object: yes (§2). Published-in object: no, `10038 FORBIDDEN` (§3). Closes parent spec open item #5 |
-| 2 | Does a table-level `NO_ACCESS` clear existing column grants? | **ANSWERED: no**, at ACL level (§7). Closes the `ts share` carry-forward |
-| 3 | Can a group holding only column grants reach the table at all? | **PARTIAL.** The grant applies and reads back with no table grant present (§6). Data-plane reachability as a real non-admin user is untested — needs a UI session. Parent spec open item #1 |
-| 4 | Does a CLS column grant still function after a table-level `NO_ACCESS`? | OPEN, new. §7 proves the ACL row survives, not that it works |
+| 2 | Does a table-level `NO_ACCESS` clear existing column grants? | **ANSWERED: no** at ACL level (§7), and §11 shows it does not clear the *entitlement* either — only discovery |
+| 3 | Can a group holding only column grants reach the table at all? | **ANSWERED: yes**, both Table and Model (§11). Closes parent spec open item #1 |
+| 4 | Does a CLS column grant still function after a table-level `NO_ACCESS`? | **ANSWERED: yes** — the data stays readable by direct link; only search discovery is removed (§11). Platform gap, BL-142 |
 | 5 | Is Strict Object Mode ever API-readable? | OPEN, unchanged |
+
+---
+
+## 11. Fourth round (2026-07-27) — the data plane, as real non-admin users
+
+Items 3 and 4 of §10 needed a UI session as a genuine non-admin. Run by the repo owner
+against Primary, with `guest1` and `guest4`.
+
+### Setup
+
+Two arms on `T2_PUBLISH` (Table) and `T2_PUBLISH_MODEL` (Model), from a clean baseline
+where only `Administrator`/`tsadmin`/`su` held anything:
+
+| Group | User | Object grant | Column grants |
+|---|---|---|---|
+| `Analyst` | `guest1` | `READ_ONLY` | all 25, auto-created by the object grant |
+| `Consumer` | `guest4` | **none** | exactly 3: `PROD_NM`, `PROD_CAT_L1`, `AMOUNT` |
+
+`guest1` and `guest4` share `Demo Retail Group` and `ShareWithAll`, so those cannot
+discriminate; `Analyst` (guest1 only) and `Consumer` (guest4 only) are the discriminating
+pair. Both users are members of all four Orgs and default to `current_org: Primary`.
+
+**A false negative worth recording.** The first `guest4` observation was made in ORG1,
+where neither object exists (`T2_PUBLISH` was unpublished by then), and read as "column
+grants convey no access". It does not: it is an artefact of testing in the wrong Org. Any
+data-plane test on a multi-Org cluster has to state which Org the session was in, because
+"I see nothing" is the expected result almost everywhere.
+
+### Item 3 — a group holding ONLY column grants DOES reach the object
+
+**ANSWERED: yes**, on both surfaces. With no object grant whatsoever, `guest4` opened
+`T2_PUBLISH` and `T2_PUBLISH_MODEL` and saw **exactly the three granted columns**;
+`UNIT_PRICE_AMT` and the other 21 were absent. `guest1` (object grant) saw all 25, which
+is the control proving the objects were reachable and the grants were what differed.
+
+This closes parent spec open item #1 and confirms the design's step-count asymmetry:
+**CLS really is one step** — the column grant is simultaneously the access and the
+restriction — while CSR is two. Strict Object Mode (ON here) is doing its documented job
+on the Model.
+
+### Item 4 — an object-level `NO_ACCESS` removes DISCOVERY, not the entitlement
+
+**ANSWERED, and it is a platform gap rather than a clean yes/no.**
+
+With the three column grants left in place, a table-level `NO_ACCESS` was applied to
+`Consumer` on both objects. The ACL kept all three column rows on both (third instance of
+that behaviour, now on explicitly-granted columns rather than auto-created ones). At the
+data plane:
+
+| Surface | After the deny |
+|---|---|
+| `T2_PUBLISH` (Table) | still visible, still the 3 columns |
+| `T2_PUBLISH_MODEL` (Model) | **gone from search** — but **opens normally by direct link**, still showing the 3 columns |
+
+The Table/Model split is **not** two security models. The entitlement is identical on
+both; only the discovery surface differs, because a Model is reached mainly through search
+and a Table through the Data page. The deny removed the object from search and left the
+column-level entitlement fully intact.
+
+**The operating rule, and it is the security-relevant one:**
+
+> An object-level `NO_ACCESS` is **not a revoke** when column grants exist. It removes the
+> object from discovery while leaving the data readable. To revoke CLS, revoke at COLUMN
+> level.
+
+**Why this is a product gap, not merely a quirk.** A partial deny is worse than either a
+real deny or no deny at all: it looks effective to the administrator who applied it, while
+remaining live for anyone holding a direct link, a bookmark, or an Answer or Liveboard
+built on the object. The intuitive operator action -- "remove their access to this table"
+-- demonstrably does not do what it appears to. This is the same failure class as the
+CSR-on-published trap: the write succeeds, nothing warns, and a false belief is created.
+Filed as BL-142.
+
+It also retro-justifies `ts share`'s refusal to mix revoke-and-grant in one manifest, and
+argues that `ts share status` should call out surviving column grants when the object
+grant is absent, rather than listing them as unremarkable rows.
+
+### Baseline restored
+
+Both objects back to 78 grant rows with only `Administrator`/`tsadmin`/`su`, matching the
+captured baseline.
