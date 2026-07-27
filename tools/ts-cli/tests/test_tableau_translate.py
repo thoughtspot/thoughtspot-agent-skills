@@ -7,6 +7,8 @@ from __future__ import annotations
 import pytest
 
 from ts_cli.tableau_translate import (
+    _lod_to_group_aggregate,
+    _looks_like_string_concat,
     apply_name_clash_renames,
     build_calc_id_map,
     build_csq_column_map,
@@ -42,6 +44,7 @@ from ts_cli.tableau_translate import (
     strip_comments,
     strip_ifnull_zero,
     strip_parameter_prefix,
+    substitute_sql_view_parameters,
     translate_formulas,
     translate_single,
     validate_output,
@@ -365,6 +368,63 @@ class TestBuildParamRenames:
         assert "Metric" not in renames
 
 
+class TestSubstituteSqlViewParameters:
+    def test_known_parameter_default_substituted(self):
+        sql_views = [{"name": "CSQ1", "sql_query": "SELECT * FROM t WHERE region = '<[Parameters].[Region]>'"}]
+        parameters = [{"name": "Region", "default_value": "West"}]
+        issues = substitute_sql_view_parameters(sql_views, parameters)
+
+        assert sql_views[0]["sql_query"] == "SELECT * FROM t WHERE region = 'West'"
+        assert "<[Parameters]" not in sql_views[0]["sql_query"]
+        assert len(issues) == 1
+        assert issues[0]["name"] == "CSQ1"
+        assert any("inlined" in w for w in issues[0]["warnings"])
+
+    def test_unknown_parameter_flagged_needs_review(self):
+        sql_views = [{"name": "CSQ2", "sql_query": "SELECT * FROM t WHERE d >= <[Parameters].[Mystery Param]>"}]
+        issues = substitute_sql_view_parameters(sql_views, parameters=[])
+
+        # Token left in place — nothing safe to substitute.
+        assert "<[Parameters].[Mystery Param]>" in sql_views[0]["sql_query"]
+        assert len(issues) == 1
+        assert any("NEEDS-REVIEW" in w and "Mystery Param" in w for w in issues[0]["warnings"])
+
+    def test_mixed_known_and_unknown_tokens_in_one_query(self):
+        sql_views = [{
+            "name": "CSQ3",
+            "sql_query": (
+                "SELECT * FROM t WHERE region = '<[Parameters].[Region]>' "
+                "AND d >= <[Parameters].[Unknown]>"
+            ),
+        }]
+        parameters = [{"name": "Region", "default_value": "East"}]
+        issues = substitute_sql_view_parameters(sql_views, parameters)
+
+        assert "'East'" in sql_views[0]["sql_query"]
+        assert "<[Parameters].[Unknown]>" in sql_views[0]["sql_query"]
+        assert len(issues) == 1
+        warnings = issues[0]["warnings"]
+        assert any("inlined" in w for w in warnings)
+        assert any("NEEDS-REVIEW" in w for w in warnings)
+
+    def test_no_parameter_token_no_issue(self):
+        sql_views = [{"name": "CSQ4", "sql_query": "SELECT * FROM t"}]
+        issues = substitute_sql_view_parameters(sql_views, parameters=[{"name": "Region", "default_value": "West"}])
+        assert issues == []
+        assert sql_views[0]["sql_query"] == "SELECT * FROM t"
+
+    def test_multiple_sql_views_only_offending_one_reported(self):
+        sql_views = [
+            {"name": "Clean", "sql_query": "SELECT 1"},
+            {"name": "Dirty", "sql_query": "SELECT * FROM t WHERE x = <[Parameters].[N]>"},
+        ]
+        parameters = [{"name": "N", "default_value": "5"}]
+        issues = substitute_sql_view_parameters(sql_views, parameters)
+        assert len(issues) == 1
+        assert issues[0]["name"] == "Dirty"
+        assert sql_views[1]["sql_query"] == "SELECT * FROM t WHERE x = 5"
+
+
 # ---------------------------------------------------------------------------
 # Name clash detection (BL-050 #9)
 # ---------------------------------------------------------------------------
@@ -673,9 +733,152 @@ class TestMapFunctions:
     def test_degrees(self):
         assert map_functions("DEGREES([R])") == "( [R] * 180 / 3.14159265358979 )"
 
+    # -----------------------------------------------------------------------
+    # Inverse trig + COT (BL-072 sub-item) — ThoughtSpot's inverse trig
+    # functions return degrees where Tableau's return radians (by symmetry
+    # with the shipped SIN/COS/TAN radians-to-degrees conversion above), so
+    # the composite converts TS degrees back to radians with * pi/180. COT
+    # has no native ThoughtSpot function; it composites off `tan` the same
+    # way Tableau defines COT(x) = 1/tan(x), with x converted to degrees
+    # for the inner `tan` call.
+    # -----------------------------------------------------------------------
+
+    def test_acos_converts_degrees_to_radians(self):
+        assert map_functions("ACOS([x])") == "( acos ( [x] ) * 3.14159265358979 / 180 )"
+
+    def test_asin_converts_degrees_to_radians(self):
+        assert map_functions("ASIN([x])") == "( asin ( [x] ) * 3.14159265358979 / 180 )"
+
+    def test_atan_converts_degrees_to_radians(self):
+        assert map_functions("ATAN([x])") == "( atan ( [x] ) * 3.14159265358979 / 180 )"
+
+    def test_cot_converts_via_tan_composite(self):
+        assert map_functions("COT([x])") == "( 1 / tan ( [x] * 180 / 3.14159265358979 ) )"
+
+    def test_acos_wrong_arity_left_untranslated(self):
+        expr = "ACOS([a],[b])"
+        assert map_functions(expr) == expr
+
+    def test_asin_wrong_arity_left_untranslated(self):
+        expr = "ASIN([a],[b])"
+        assert map_functions(expr) == expr
+
+    def test_atan_wrong_arity_left_untranslated(self):
+        expr = "ATAN([a],[b])"
+        assert map_functions(expr) == expr
+
+    def test_cot_wrong_arity_left_untranslated(self):
+        expr = "COT([a],[b])"
+        assert map_functions(expr) == expr
+
+    # -----------------------------------------------------------------------
+    # User-identity → RLS system variables (BL-071 subset) — only the
+    # unambiguous, documented mappings. USERNAME() is a bare system variable
+    # reference; ISUSERNAME/ISMEMBEROF are composite equality checks against
+    # it/ts_groups. FULLNAME/ISFULLNAME/USERDOMAIN/USERATTRIBUTE(INCLUDES)
+    # stay unmapped — see TestValidateOutput regression checks below.
+    # -----------------------------------------------------------------------
+
+    def test_username(self):
+        assert map_functions("USERNAME()") == "ts_username"
+
+    def test_username_whitespace_arg_treated_as_zero_arity(self):
+        # USERNAME( ) — whitespace between the parens — must still be
+        # treated as zero-arg, matching the whitespace-tolerant convention
+        # used elsewhere in this file (PI/TODAY/NOW/SIZE). Regression guard:
+        # the arg splitter yields [" "] here, not [], so a naive
+        # `len(a) == 0` check leaves this variant untranslated.
+        assert map_functions("USERNAME( )") == "ts_username"
+
+    def test_isusername(self):
+        assert map_functions("ISUSERNAME([User])") == "( ts_username = [User] )"
+
+    def test_ismemberof(self):
+        assert map_functions('ISMEMBEROF("Sales")') == '( ts_groups = "Sales" )'
+
+    def test_username_wrong_arity_left_untranslated(self):
+        expr = "USERNAME([x])"
+        assert map_functions(expr) == expr
+
+    def test_isusername_wrong_arity_left_untranslated(self):
+        expr = "ISUSERNAME([a],[b])"
+        assert map_functions(expr) == expr
+
+    def test_ismemberof_wrong_arity_left_untranslated(self):
+        expr = "ISMEMBEROF([a],[b])"
+        assert map_functions(expr) == expr
+
     def test_dateparse_flips_args(self):
         assert map_functions("DATEPARSE('yyyy-MM-dd', [DateStr])") == \
             "to_date ( [DateStr] , 'yyyy-MM-dd' )"
+
+    def test_size_table_calc_to_count_over_passthrough(self):
+        # Tier 7 of the Row-Offset Table Calculations decision tree
+        # (tableau-formula-translation.md): SIZE() is unpartitioned and needs
+        # no sort/partition context, so — unlike LOOKUP/INDEX/FIRST/LAST — it
+        # has a context-free translation and is rewritten here rather than
+        # rejected at validate time.
+        assert map_functions("SIZE()") == 'sql_int_aggregate_op ( "COUNT(*) OVER ()" )'
+
+    def test_size_table_calc_case_insensitive_and_whitespace(self):
+        assert map_functions("size ( )") == 'sql_int_aggregate_op ( "COUNT(*) OVER ()" )'
+
+    def test_left_missing_closing_paren_left_untranslated(self):
+        # Unbalanced parens: _extract_function_args can't find the close, so
+        # the arg-handler skips past the call and leaves it as-is.
+        expr = "LEFT([X]"
+        assert map_functions(expr) == expr
+
+    def test_left_wrong_arg_count_left_untranslated(self):
+        # LEFT needs exactly 2 args — the render lambda returns None for any
+        # other count, and the call is left untranslated.
+        expr = "LEFT([Name])"
+        assert map_functions(expr) == expr
+
+    def test_zn_nested_parens_preserved(self):
+        # _convert_zn's paren-depth counter must not stop at the first ')'
+        # when the inner expression itself contains parens.
+        assert map_functions("ZN((1))") == "ifnull ( (1) , 0 )"
+
+    def test_zn_missing_closing_paren_left_untranslated(self):
+        expr = "ZN(1"
+        assert map_functions(expr) == expr
+
+    # -----------------------------------------------------------------------
+    # Fix 2 — REGEXP_*/FINDNTH pass-through mappings (tableau-formula-
+    # translation.md lines ~992-995, used verbatim) + Fix 3 — REPLACE
+    # re-mapped off the invalid bare `replace(...)` native call.
+    # -----------------------------------------------------------------------
+
+    def test_regexp_extract(self):
+        assert map_functions("REGEXP_EXTRACT([x], 'p')") == \
+            'sql_string_op ( "REGEXP_SUBSTR({0}, {1})" , [x] , \'p\' )'
+
+    def test_regexp_match(self):
+        assert map_functions("REGEXP_MATCH([x], 'p')") == \
+            'sql_bool_op ( "REGEXP_LIKE ({0}, {1})" , [x] , \'p\' )'
+
+    def test_regexp_replace(self):
+        assert map_functions("REGEXP_REPLACE([x], 'p', 'r')") == \
+            'sql_string_op ( "REGEXP_REPLACE({0},{1},{2})" , [x] , \'p\' , \'r\' )'
+
+    def test_findnth(self):
+        assert map_functions("FINDNTH([x], 'sub', 2)") == \
+            'sql_int_op ( "REGEXP_INSTR({0},{1},1,{2})" , [x] , \'sub\' , 2 )'
+
+    def test_replace_passthrough(self):
+        # Fix 3: bare `replace(...)` is not a valid ThoughtSpot formula function
+        # (live-confirmed). Must re-map to the sql_string_op pass-through form.
+        assert map_functions("REPLACE([x], 'a', 'b')") == \
+            'sql_string_op ( "REPLACE({0}, {1}, {2})" , [x] , \'a\' , \'b\' )'
+
+    def test_regexp_extract_wrong_arg_count_left_untranslated(self):
+        expr = "REGEXP_EXTRACT([x])"
+        assert map_functions(expr) == expr
+
+    def test_findnth_wrong_arg_count_left_untranslated(self):
+        expr = "FINDNTH([x], 'sub')"
+        assert map_functions(expr) == expr
 
 
 # ---------------------------------------------------------------------------
@@ -740,6 +943,65 @@ class TestMapDateFunctions:
         result = map_date_functions("DATETRUNC('hour', [TS])")
         assert "start_of_hour" not in result and "DATETRUNC" in result
 
+    def test_datetrunc_missing_closing_paren_left_untranslated(self):
+        expr = "DATETRUNC('month', [D]"
+        assert map_date_functions(expr) == expr
+
+    def test_datetrunc_too_few_args_left_untranslated(self):
+        expr = "DATETRUNC('month')"
+        assert map_date_functions(expr) == expr
+
+    def test_datediff_missing_closing_paren_left_untranslated(self):
+        expr = "DATEDIFF('day', [A], [B]"
+        assert map_date_functions(expr) == expr
+
+    def test_datediff_too_few_args_left_untranslated(self):
+        expr = "DATEDIFF('day', [A])"
+        assert map_date_functions(expr) == expr
+
+    def test_datediff_minute(self):
+        result = map_date_functions("DATEDIFF('minute', [A], [B])")
+        assert "diff_time ( [B] , [A] ) / 60" in result
+
+    def test_datediff_week(self):
+        result = map_date_functions("DATEDIFF('week', [A], [B])")
+        assert "diff_days ( [B] , [A] ) / 7" in result
+
+    def test_dateadd_missing_closing_paren_left_untranslated(self):
+        expr = "DATEADD('day', 1, [D]"
+        assert map_date_functions(expr) == expr
+
+    def test_dateadd_too_few_args_left_untranslated(self):
+        expr = "DATEADD('day', 1)"
+        assert map_date_functions(expr) == expr
+
+    def test_datepart_missing_closing_paren_left_untranslated(self):
+        expr = "DATEPART('month', [D]"
+        assert map_date_functions(expr) == expr
+
+    def test_datepart_too_few_args_left_untranslated(self):
+        expr = "DATEPART('month')"
+        assert map_date_functions(expr) == expr
+
+    def test_datename_missing_closing_paren_left_untranslated(self):
+        expr = "DATENAME('month', [D]"
+        assert map_date_functions(expr) == expr
+
+    def test_datename_too_few_args_left_untranslated(self):
+        expr = "DATENAME('year')"
+        assert map_date_functions(expr) == expr
+
+    def test_datename_month(self):
+        result = map_date_functions("DATENAME('month', [D])")
+        assert "month ( [D] )" in result
+
+    def test_datename_unknown_unit_left_untranslated(self):
+        # Only 'month' has a ThoughtSpot equivalent (month(...)) — any other
+        # unit (e.g. 'year') has no DATENAME-style extractor and must be
+        # left untranslated rather than fabricate a function.
+        result = map_date_functions("DATENAME('year', [D])")
+        assert "DATENAME" in result and "year (" not in result
+
 
 # ---------------------------------------------------------------------------
 # INT conversion
@@ -751,6 +1013,10 @@ class TestConvertInt:
         assert "floor" in result
         assert "ceil" in result
         assert ">= 0" in result
+
+    def test_missing_closing_paren_left_untranslated(self):
+        expr = "INT([X]"
+        assert convert_int(expr) == expr
 
 
 # ---------------------------------------------------------------------------
@@ -779,6 +1045,33 @@ class TestConvertStringConcat:
         assert "then concat ( [A] , ' : ' , [B] )" in result
         assert "then concat ( [A] , ' : ' , [B] , ' : ' , [C] )" in result
 
+    def test_measure_role_plain_column_plus_not_concatenated(self):
+        # 'to_string' appears in the expr (so the role=='measure' early-exit
+        # gate doesn't fire), but the matched + pair itself is two bare
+        # column refs with no quote/placeholder — this must NOT be treated
+        # as string concatenation and the chain-builder must bail out.
+        expr = "to_string ( [A] ) [junk] [B] + [C]"
+        result = convert_string_concat(expr, role="measure")
+        assert result == expr
+
+
+class TestLooksLikeStringConcat:
+    """`_looks_like_string_concat` — heuristic classifier (currently unused by
+    the active pipeline, but a real, directly-testable function kept for
+    back-compat; see strings_types.py)."""
+
+    def test_dimension_role_always_true(self):
+        assert _looks_like_string_concat(["[A]", "[B]"], "dimension") is True
+
+    def test_measure_role_with_quoted_literal_true(self):
+        assert _looks_like_string_concat(["'x'", "[B]"], "measure") is True
+
+    def test_measure_role_with_to_string_true(self):
+        assert _looks_like_string_concat(["to_string([A])", "[B]"], "measure") is True
+
+    def test_measure_role_plain_columns_false(self):
+        assert _looks_like_string_concat(["[A]", "[B]"], "measure") is False
+
 
 # ---------------------------------------------------------------------------
 # IN (...) -> in {...}
@@ -800,6 +1093,10 @@ class TestFixInParentheses:
 
     def test_no_in_unchanged(self):
         assert fix_in_parentheses("[A] + [B]") == "[A] + [B]"
+
+    def test_missing_closing_paren_left_unchanged(self):
+        expr = "[Region] IN ('East'"
+        assert fix_in_parentheses(expr) == expr
 
 
 # ---------------------------------------------------------------------------
@@ -871,6 +1168,12 @@ class TestScopeColumns:
         assert "[PROMO::CAMPAIGN_ID]" in result
         assert "[PROMO::CAMPAIGN_NAME]" in result
         assert "'['" in result  # literal preserved, not scoped
+
+    def test_unknown_column_left_unscoped(self):
+        # A bracket ref that isn't in scoped_columns, formula_names, or
+        # parameter_names is left exactly as-is (final fallthrough).
+        result = scope_columns("[UNKNOWN_COL]", {"SALES": "ORDERS"})
+        assert result == "[UNKNOWN_COL]"
 
 
 class TestConvertBooleanAggregate:
@@ -1005,6 +1308,31 @@ class TestConvertLod:
         result = convert_lod("{FIXED : MAX([Date])}")
         assert "group_aggregate ( MAX([Date]) , {} , {} )" in result
 
+    def test_grand_fixed_no_space_before_colon(self):
+        """Fix 1 (LOD keyword whitespace bug): {FIXED: agg} with NO space between
+        the keyword and the colon was silently falling through to emit invalid
+        `{ FIXED }` TML syntax — the keyword regex required `\\s+` (one or more
+        whitespace chars) between FIXED and the colon. Must parse identically to
+        the space-before-colon form above."""
+        result = convert_lod("{FIXED: MAX([Date])}")
+        assert result == "group_aggregate ( MAX([Date]) , {} , {} )"
+        assert "{ FIXED }" not in result
+        assert "FIXED" not in result.replace("group_aggregate", "")
+
+    def test_include_no_space_before_colon(self):
+        result = convert_lod("{INCLUDE: SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , query_groups () , query_filters () )"
+
+    def test_exclude_no_space_before_colon(self):
+        result = convert_lod("{EXCLUDE: SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , query_groups () , query_filters () )"
+
+    def test_fixed_with_dims_no_space_before_colon(self):
+        """A dimensioned FIXED LOD with no space before the colon (space still
+        present between the keyword and the dimension list)."""
+        result = convert_lod("{FIXED [Dim]: SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , { [Dim] } , {} )"
+
     def test_exclude_with_calc_ref_in_dims(self):
         """E1: EXCLUDE LOD with Calculation_* ref in dimension list."""
         result = convert_lod(
@@ -1047,6 +1375,42 @@ class TestConvertLod:
         expr = "SUM([Sales]) / SUM([Cost])"
         assert convert_lod(expr) == expr
 
+    def test_include_no_dims(self):
+        """INCLUDE with no dimension list falls back to bare query_groups()."""
+        result = convert_lod("{INCLUDE : SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , query_groups () , query_filters () )"
+
+    def test_exclude_no_dims(self):
+        """EXCLUDE with no dimension list falls back to bare query_groups()."""
+        result = convert_lod("{EXCLUDE : SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , query_groups () , query_filters () )"
+
+    def test_empty_aggregate_expr_returns_none_and_is_left_unchanged(self):
+        """A colon with nothing after it isn't a valid LOD — left as-is."""
+        expr = "{FIXED [Region] : }"
+        assert convert_lod(expr) == expr
+
+    def test_missing_closing_brace_left_unchanged(self):
+        """No '}' anywhere after the '{' — unbalanced, left untranslated."""
+        expr = "{FIXED [Region] : SUM([Sales])"
+        assert convert_lod(expr) == expr
+
+    def test_brace_char_inside_quoted_string_does_not_fake_a_close(self):
+        """A '}' inside a string literal can fool the crude open-brace scan
+        into thinking it found the closer; the quote-aware matcher then
+        correctly reports no real closing brace, and the malformed
+        expression is left untranslated rather than mistranslated."""
+        expr = "{FIXED 'abc}' : SUM([Sales])"
+        assert convert_lod(expr) == expr
+
+    def test_lod_to_group_aggregate_unknown_keyword_defaults_to_bare_form(self):
+        # _lod_to_group_aggregate is only ever called by convert_lod with a
+        # keyword resolved from _parse_lod_content, which can only produce
+        # "", "FIXED", "INCLUDE", or "EXCLUDE" — so the trailing fallback for
+        # any other keyword is exercised here directly.
+        result = _lod_to_group_aggregate("BOGUS", "[A] , [B]", "SUM([X])")
+        assert result == "group_aggregate ( SUM([X]) , {} , {} )"
+
 
 # ---------------------------------------------------------------------------
 # TOTAL conversion
@@ -1056,6 +1420,10 @@ class TestConvertTotal:
     def test_basic(self):
         result = convert_total("TOTAL(SUM([Sales]))")
         assert "group_aggregate ( SUM([Sales]) , {} , query_filters () )" in result
+
+    def test_missing_closing_paren_left_untranslated(self):
+        expr = "TOTAL(SUM([Sales])"
+        assert convert_total(expr) == expr
 
 
 # ---------------------------------------------------------------------------
@@ -1082,9 +1450,20 @@ class TestValidateOutput:
         errors = validate_output("SPLIT ( [Name] , '-' , 1 )")
         assert any("SPLIT" in e for e in errors)
 
-    def test_username_flagged(self):
+    def test_fullname_still_flagged(self):
+        # USERNAME/ISUSERNAME now translate (BL-071, ts-cli v0.88.0) and were
+        # removed from _UNMAPPED_FUNCTIONS — see test_username_no_longer_
+        # flagged below. FULLNAME has no confirmed ThoughtSpot display-name
+        # variable and stays rejected (scope boundary, BL-071).
+        errors = validate_output("if ( FULLNAME ( ) = 'x' ) then 1 else 0")
+        assert any("FULLNAME" in e for e in errors)
+
+    def test_username_no_longer_flagged(self):
+        # Regression guard: USERNAME/ISUSERNAME were removed from
+        # _UNMAPPED_FUNCTIONS once functions.py started translating them
+        # (BL-071, ts-cli v0.88.0) — validate_output must stop rejecting them.
         errors = validate_output("if ( USERNAME ( ) = 'x' ) then 1 else 0")
-        assert any("USERNAME" in e for e in errors)
+        assert not any("USERNAME" in e for e in errors)
 
     def test_untranslated_datepart_flagged(self):
         errors = validate_output("DATEPART ( 'minute' , [TS] )")
@@ -1098,11 +1477,13 @@ class TestValidateOutput:
         errors = validate_output("DATEADD ( 'fortnight' , 2 , [D] )")
         assert any("DATEADD" in e for e in errors)
 
-    def test_inverse_trig_and_cot_rejected(self):
+    def test_inverse_trig_and_cot_no_longer_rejected(self):
+        # Regression guard: ACOS/ASIN/ATAN/COT were removed from
+        # _UNMAPPED_FUNCTIONS once functions.py started translating them
+        # (BL-072, ts-cli v0.88.0) — validate_output must stop rejecting them.
         for fn in ("ACOS", "ASIN", "ATAN", "COT"):
             errors = validate_output(f"{fn} ( [X] )")
-            assert errors, f"{fn} should be rejected as unmapped"
-            assert any(fn in e for e in errors)
+            assert not any(fn in e for e in errors), f"{fn} should no longer be flagged as unmapped"
 
     def test_spatial_functions_rejected(self):
         # Full 13-function Tableau spatial set (audit 13.8) — none has a
@@ -1124,6 +1505,39 @@ class TestValidateOutput:
             assert errors, f"{fn} should be rejected as unmapped"
             assert any(fn in e for e in errors)
 
+    def test_row_offset_table_calcs_rejected(self):
+        # Live-confirmed (error 14516, "Search did not find '<FUNC> ( ... )'"):
+        # these Tableau row-offset table calcs have no faithful ThoughtSpot
+        # formula equivalent when the sort/partition addressing (Tableau's
+        # worksheet "Compute Using" shelf metadata) isn't resolvable from the
+        # formula text alone — build-model has no such wiring today, so they
+        # must be rejected at translate time instead of emitted verbatim.
+        for fn in ("LOOKUP", "INDEX", "FIRST", "LAST", "PREVIOUS_VALUE"):
+            errors = validate_output(f"{fn} ( [X] )")
+            assert errors, f"{fn} should be rejected — no ThoughtSpot table-calc equivalent"
+            assert any(fn in e for e in errors)
+
+    def test_window_table_calcs_rejected(self):
+        # Same disposition as the row-offset family above — WINDOW_* needs a
+        # sort attribute ThoughtSpot's moving_*() would require but which
+        # isn't available from the formula text.
+        for fn in (
+            "WINDOW_SUM", "WINDOW_AVG", "WINDOW_MAX", "WINDOW_MIN",
+            "WINDOW_STDEV", "WINDOW_VAR", "WINDOW_MEDIAN",
+            "WINDOW_PERCENTILE", "WINDOW_COUNT",
+        ):
+            errors = validate_output(f"{fn} ( [X] , -3 , 0 )")
+            assert errors, f"{fn} should be rejected — sort attribute unresolvable"
+            assert any(fn in e for e in errors)
+
+    def test_size_passthrough_not_rejected(self):
+        # SIZE() is the one row-offset function with a context-free
+        # translation (see TestConvertSizeTableCalc) — map_functions() rewrites
+        # it to this pass-through BEFORE validate_output runs, so the rewritten
+        # form must NOT trip any rejection check.
+        errors = validate_output('sql_int_aggregate_op ( "COUNT(*) OVER ()" )')
+        assert errors == []
+
     def test_untranslated_datetrunc_flagged(self):
         errors = validate_output("DATETRUNC ( 'hour' , [TS] )")
         assert any("DATETRUNC" in e for e in errors)
@@ -1131,6 +1545,27 @@ class TestValidateOutput:
     def test_not_in_flagged(self):
         errors = validate_output("if ( [A] NOT IN ('x') ) then 1 else 0")
         assert any("NOT IN" in e for e in errors)
+
+    def test_regexp_and_findnth_no_longer_flagged(self):
+        # Fix 2: these are now wired to sql_*_op pass-throughs in
+        # map_functions(), so the raw Tableau call should never survive to
+        # validate_output in a real pipeline run — but the fail-loud
+        # unmapped-function check itself must no longer flag them either,
+        # now that they're removed from _UNMAPPED_FUNCTIONS.
+        for fn, args in (
+            ("REGEXP_MATCH", "[x] , 'p'"),
+            ("REGEXP_EXTRACT", "[x] , 'p'"),
+            ("REGEXP_REPLACE", "[x] , 'p' , 'r'"),
+            ("FINDNTH", "[x] , 'sub' , 2"),
+        ):
+            errors = validate_output(f"{fn} ( {args} )")
+            assert not any(fn in e for e in errors), f"{fn} should no longer be flagged as unmapped"
+
+    def test_regexp_extract_nth_still_flagged(self):
+        # REGEXP_EXTRACT_NTH has no documented pass-through template and is
+        # NOT wired — it must remain rejected at translate time.
+        errors = validate_output("REGEXP_EXTRACT_NTH ( [x] , 'p' , 2 )")
+        assert any("REGEXP_EXTRACT_NTH" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
@@ -1222,6 +1657,48 @@ class TestValidatePreImport:
     def test_balanced_nested_if(self):
         issues = validate_pre_import([
             {"name": "Nested", "expr": "if ( [A] > 0 ) then if ( [B] > 0 ) then [C] else [D] else [E]"},
+        ])
+        assert len(issues) == 0
+
+    def test_bare_else_in_aggregate(self):
+        issues = validate_pre_import([
+            {"name": "BareElse", "expr": "sum(if [X] > 0 then [Y] else) + sum(if [A] then [B] else)"},
+        ])
+        assert len(issues) == 1
+        assert "else)" in issues[0]["warnings"][0].lower()
+
+    def test_else_with_value_no_warning(self):
+        issues = validate_pre_import([
+            {"name": "ElseOK", "expr": "sum(if [X] > 0 then [Y] else 0)"},
+        ])
+        assert len(issues) == 0
+
+    # -- Nested-if-in-comparison (BL-060) --
+
+    def test_comparison_directly_followed_by_if_warns(self):
+        issues = validate_pre_import([
+            {"name": "Bad Compare", "expr": "sum([x]) > if [a] then 1 else 0 end"},
+        ])
+        assert len(issues) == 1
+        assert any("wrap the conditional in parentheses" in w for w in issues[0]["warnings"])
+
+    def test_comparison_followed_by_if_various_operators(self):
+        for op in ("<", ">", "<=", ">=", "==", "!="):
+            issues = validate_pre_import([
+                {"name": "Bad", "expr": f"sum([x]) {op} if [a] then 1 else 0 end"},
+            ])
+            assert len(issues) == 1, f"operator {op} did not trigger the warning"
+            assert any("wrap the conditional in parentheses" in w for w in issues[0]["warnings"])
+
+    def test_normal_comparison_no_warning(self):
+        issues = validate_pre_import([
+            {"name": "Normal Compare", "expr": "if sum([x]) > 5 then 1 else 0 end"},
+        ])
+        assert len(issues) == 0
+
+    def test_comparison_followed_by_parenthesized_if_no_warning(self):
+        issues = validate_pre_import([
+            {"name": "Already Wrapped", "expr": "sum([x]) > (if [a] then 1 else 0 end)"},
         ])
         assert len(issues) == 0
 
@@ -1351,6 +1828,72 @@ class TestBuildDependencyDag:
         dag = build_dependency_dag(formulas)
         assert dag["Simple"]["level"] == 0
 
+    def test_reference_to_unknown_calc_id_recorded_as_unresolved(self):
+        # [Calculation_999] isn't any formula's 'name' in the input list, so
+        # it can't be resolved to a caption — it's recorded as an
+        # unresolvable dependency (the literal ref text) rather than dropped.
+        formulas = [
+            {"caption": "Derived", "name": "Calculation_2", "formula": "[Calculation_999] * 2"},
+        ]
+        dag = build_dependency_dag(formulas)
+        assert dag["Derived"]["deps"] == {"[Calculation_999]"}
+        # Unresolvable [Calculation_NNN] deps are excluded from the "all
+        # deps resolved" gate (vacuously true) and from the max-level scan,
+        # so the entry still gets a level — defaulting to 1.
+        assert dag["Derived"]["level"] == 1
+
+    def test_circular_dependency_level_is_negative_one(self):
+        formulas = [
+            {"caption": "A", "name": "Calculation_1", "formula": "[Calculation_2] + 1"},
+            {"caption": "B", "name": "Calculation_2", "formula": "[Calculation_1] + 1"},
+        ]
+        dag = build_dependency_dag(formulas)
+        assert dag["A"]["level"] == -1
+        assert dag["B"]["level"] == -1
+
+
+class TestResolveCrossReferences:
+    def test_fully_unresolvable_ref_left_in_place(self):
+        # by_calc_id has no entry at all for this ref (direct lookup fails,
+        # and the normalized-case fallback lookup also fails) — nothing
+        # gets replaced and the loop bails out on the first pass.
+        expr = "[Calculation_999] + 1"
+        assert resolve_cross_references(expr, {}, {}) == expr
+
+    def test_partial_replacement_when_dependency_itself_unresolved(self):
+        # The referenced entry's raw text still contains an inner
+        # [Calculation_NNN] ref (it wasn't resolved first) — the outer ref
+        # is still substituted in (a "partial" substitution), rather than
+        # left untouched.
+        dag = {"Outer": {"raw": "[Calculation_500] + 1", "resolved_expr": None}}
+        by_calc_id = {"[Calculation_100]": "Outer"}
+        result = resolve_cross_references("[Calculation_100] * 2", dag, by_calc_id)
+        assert result == "([Calculation_500] + 1) * 2"
+
+    def test_caption_resolved_but_missing_from_dag_falls_back_to_display_name(self):
+        # by_calc_id resolves the ref to a caption, but that caption has no
+        # entry in `dag` (e.g. dag was built from a different formula set) —
+        # falls back to substituting the bracketed display name.
+        by_calc_id = {"[Calculation_200]": "NotInDag"}
+        result = resolve_cross_references("[Calculation_200] + 1", {}, by_calc_id)
+        assert result == "[NotInDag] + 1"
+
+
+class TestBuildCalcIdMap:
+    def test_irregular_whitespace_gets_additional_normalized_key(self):
+        # When collapsing whitespace changes the key text, a second
+        # (normalized, lowercased) entry is stored so later lookups tolerant
+        # of whitespace variance still resolve.
+        calc_map = build_calc_id_map(
+            [{"name": "Calculation_1  23", "caption": "Weird"}],
+        )
+        assert calc_map["[Calculation_1  23]"] == "Weird"
+        assert calc_map["[calculation_1 23]"] == "Weird"
+
+    def test_regular_name_gets_single_key_only(self):
+        calc_map = build_calc_id_map([{"name": "Calculation_123", "caption": "Base"}])
+        assert calc_map == {"[Calculation_123]": "Base"}
+
 
 # ---------------------------------------------------------------------------
 # Full translate_single pipeline
@@ -1413,6 +1956,99 @@ class TestTranslateSingle:
             role="measure",
         )
         assert "diff_days ( [End] , [Start] )" in expr
+
+
+# ---------------------------------------------------------------------------
+# Literal masking — string/date literals must survive keyword-cleanup passes
+# (THEN-folding, bare END/CASE/WHEN strip, keyword validation) untouched.
+# ---------------------------------------------------------------------------
+
+class TestTranslateSingleLiteralMasking:
+    def test_double_quoted_end_literal_survives(self):
+        expr, errors, _ = translate_single(
+            'IF [Status] = "END" THEN 1 ELSE 0 END',
+            role="measure",
+        )
+        assert expr == "if ( [Status] = 'END' ) then 1 else 0"
+        assert errors == []
+
+    def test_double_quoted_then_literal_survives(self):
+        expr, errors, _ = translate_single(
+            'IF [x] = "THEN" THEN 1 ELSE 0 END',
+            role="measure",
+        )
+        assert expr == "if ( [x] = 'THEN' ) then 1 else 0"
+        assert errors == []
+
+    def test_double_quoted_when_literal_survives_and_no_false_error(self):
+        expr, errors, _ = translate_single(
+            'IF [x] = "WHEN" THEN 1 ELSE 0 END',
+            role="measure",
+        )
+        assert expr == "if ( [x] = 'WHEN' ) then 1 else 0"
+        assert errors == []
+
+    def test_single_quoted_end_literal_survives(self):
+        expr, errors, _ = translate_single(
+            "IF [x] = 'END' THEN 1 ELSE 0 END",
+            role="measure",
+        )
+        assert expr == "if ( [x] = 'END' ) then 1 else 0"
+        assert errors == []
+
+    def test_double_quoted_literal_normalized_to_single_quotes(self):
+        expr, errors, _ = translate_single(
+            'IF [Status] = "Closed" THEN 1 ELSE 0 END',
+            role="measure",
+        )
+        assert "'Closed'" in expr
+        assert '"Closed"' not in expr
+        assert errors == []
+
+    def test_date_literal_converted_to_to_date(self):
+        expr, errors, _ = translate_single(
+            "IF [Date] > #2024-01-01# THEN 1 ELSE 0 END",
+            role="measure",
+        )
+        assert "to_date ( '2024-01-01' , 'yyyy-MM-dd' )" in expr
+        assert errors == []
+
+    def test_dimension_concat_single_quoted(self):
+        expr, errors, _ = translate_single(
+            "[First] + ' ' + [Last]",
+            role="dimension",
+        )
+        assert expr == "concat ( [First] , ' ' , [Last] )"
+        assert errors == []
+
+    def test_dimension_concat_double_quoted(self):
+        expr, errors, _ = translate_single(
+            '[First] + " " + [Last]',
+            role="dimension",
+        )
+        assert expr == "concat ( [First] , ' ' , [Last] )"
+        assert errors == []
+
+    def test_literal_with_plus_survives_intact(self):
+        expr, errors, _ = translate_single(
+            "[Label] + 'a+b' + [Suffix]",
+            role="dimension",
+        )
+        assert "'a+b'" in expr
+        assert expr == "concat ( [Label] , 'a+b' , [Suffix] )"
+        assert errors == []
+
+    def test_literal_with_brackets_survives_intact_not_scoped(self):
+        expr, errors, _ = translate_single(
+            "[Label] + '[x]' + [Suffix]",
+            role="dimension",
+            scoped_columns={"Label": "T", "Suffix": "T"},
+        )
+        # Real columns get scoped; the literal's own "[x]" must not be
+        # mistaken for a third bare column reference.
+        assert expr == "concat ( [T::Label] , '[x]' , [T::Suffix] )"
+        assert "[T::x]" not in expr
+        assert errors == []
 
 
 # ---------------------------------------------------------------------------
@@ -1499,6 +2135,103 @@ class TestTranslateFormulas:
         ]
         result = translate_formulas(formulas)
         assert 0 in result["stats"]["levels"]
+
+    def test_window_max_omitted_not_emitted_verbatim(self):
+        """Live-confirmed (error 14516): WINDOW_MAX must never reach
+        model.formulas verbatim — it must be skipped with a reason instead."""
+        formulas = [{
+            "caption": "3wk Moving Max",
+            "name": "Calculation_1",
+            "formula": "WINDOW_MAX(SUM([x]), -3, 0)",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 0
+        assert result["stats"]["skipped"] == 1
+        assert not any("WINDOW_MAX" in t["expr"] for t in result["translated"])
+        skipped = result["skipped"][0]
+        assert skipped["name"] == "3wk Moving Max"
+        assert "WINDOW_MAX" in skipped["reason"]
+
+    def test_lookup_omitted_not_emitted_verbatim(self):
+        formulas = [{
+            "caption": "Prior Week Sales",
+            "name": "Calculation_2",
+            "formula": "LOOKUP(SUM([Sales]), -1)",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 0
+        assert result["stats"]["skipped"] == 1
+        assert not any("LOOKUP" in t["expr"] for t in result["translated"])
+        assert "LOOKUP" in result["skipped"][0]["reason"]
+
+    def test_previous_value_omitted_not_emitted_verbatim(self):
+        formulas = [{
+            "caption": "Running Total String",
+            "name": "Calculation_3",
+            "formula": "PREVIOUS_VALUE(0) + 1",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 0
+        assert result["stats"]["skipped"] == 1
+        assert "PREVIOUS_VALUE" in result["skipped"][0]["reason"]
+
+    def test_size_still_translated_to_passthrough(self):
+        """Regression: SIZE() IS translatable (context-free) — must keep working."""
+        formulas = [{
+            "caption": "Partition Size",
+            "name": "Calculation_4",
+            "formula": "SIZE()",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 1
+        assert result["stats"]["skipped"] == 0
+        assert "sql_int_aggregate_op" in result["translated"][0]["expr"]
+        assert "SIZE" not in result["translated"][0]["expr"].upper()
+
+    def test_rank_still_translated_regression(self):
+        """Regression: RANK() has a real native equivalent and must keep
+        translating (not swept up by the new table-calc rejection list)."""
+        formulas = [{
+            "caption": "Sales Rank",
+            "name": "Calculation_5",
+            "formula": "RANK(SUM([Sales]))",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 1
+        assert result["stats"]["skipped"] == 0
+        assert "rank (" in result["translated"][0]["expr"]
+        assert "'desc'" in result["translated"][0]["expr"]
+
+    def test_total_still_translated_regression(self):
+        """Regression: TOTAL(agg) has a real group_aggregate() equivalent and
+        must keep translating."""
+        formulas = [{
+            "caption": "Pct of Total",
+            "name": "Calculation_6",
+            "formula": "SUM([Sales]) / TOTAL(SUM([Sales]))",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 1
+        assert result["stats"]["skipped"] == 0
+        assert "group_aggregate" in result["translated"][0]["expr"]
 
 
 # ---------------------------------------------------------------------------
@@ -1665,6 +2398,10 @@ class TestBatchIntegration:
         )
         assert result["stats"]["name_clashes"] == 1
         assert result["translated"][0]["name"] == "Formula Sales"
+        # Fix #B — the actual rename mapping is surfaced (not just a count) so
+        # a caller can tell "Sales" ended up emitted as "Formula Sales" rather
+        # than reading as a silently dropped formula.
+        assert result["name_clashes"] == {"Sales": "Formula Sales"}
 
     def test_ifnull_and_agg_if_stats(self):
         """Batch stats report ifnull stripping and agg_if conversions."""
@@ -1755,12 +2492,14 @@ class TestValidatePreImportNewChecks:
         assert len(issues) == 1
         assert any("add_quarters" in w for w in issues[0]["warnings"])
 
-    def test_add_years_flagged(self):
+    def test_add_years_passes(self):
+        # add_years() is a valid ThoughtSpot function (see
+        # thoughtspot-formula-patterns.md / tableau-formula-translation.md) —
+        # must not be flagged. Only add_quarters() is unsupported.
         from ts_cli.tableau_translate import validate_pre_import
         formulas = [{"name": "F1", "expr": "add_years ( [T::Date] , 2 )"}]
         issues = validate_pre_import(formulas)
-        assert len(issues) == 1
-        assert any("add_years" in w for w in issues[0]["warnings"])
+        assert len(issues) == 0
 
     def test_add_months_passes(self):
         from ts_cli.tableau_translate import validate_pre_import

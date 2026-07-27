@@ -158,9 +158,20 @@ Example: a Tableau bar of customers by Region, colored by Gender → one
 - **`ADVANCED_PIVOT_TABLE`** does **not** use `custom_chart_config` — it auto-resolves
   rows/columns/values from `chart_columns` + `search_query` (the block is dropped on export).
 - **Combos** (`ADVANCED_LINE_COLUMN`, `ADVANCED_LINE_STACKED_COLUMN`) accept two+ measures
-  and **auto-resolve** which measure is the line vs the column; no `custom_chart_config`
-  required. Fine-grained line/column + secondary-axis control lives in `client_state_v2`
-  `axisProperties` (`axisType: Y`, `isOpposite: true` for the secondary axis).
+  and **auto-resolve** which measure is the line vs the column — emit the type + measures +
+  `axis_configs` (by display name) and it renders as a combo. This is the fresh-import path.
+
+  > **`custom_chart_config` is capture-and-replay only — do NOT hand-author it.** Its
+  > `axes[].column`/`axes[].columns` reference columns by **GUID** (assigned when an answer is
+  > created), so a fresh import with display names errors `Invalid GUID string: <name>`
+  > (live-verified on ps-internal 2026-07-15; `ts tml lint` does NOT catch it — only a real /
+  > VALIDATE_ONLY import does). To pin an exact line-vs-column split + dual axis: import the
+  > auto-resolved combo, set it in the UI, **export** (the exported `custom_chart_config` now
+  > has real GUIDs in `y-axis-column`/`y-axis-line`, `type: MERGED`), and replay that exported
+  > config. `client_state_v2` is not durable for the split (re-derived on render); the
+  > exported GUID-based `custom_chart_config` is. Per-column format lives on
+  > `answer_columns[].format`. Worked example:
+  > `worked-examples/tableau/combo-dual-axis-custom-chart-config.md`.
 - **The shelf vocabulary is permissive, not strictly validated.** An unknown shelf key (e.g.
   `size`) on a cartesian type is *accepted and retained* but ignored at render — so don't rely
   on rejection to validate; only the four cartesian shelves above actually render.

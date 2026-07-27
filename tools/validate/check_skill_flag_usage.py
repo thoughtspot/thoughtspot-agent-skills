@@ -68,9 +68,17 @@ ALWAYS_VALID_FLAGS = {"--help"}
 
 FENCE_RE = re.compile(r'^```')
 # A `ts <group> <command>` invocation at the start of a chain segment.
-TS_INVOCATION_RE = re.compile(r'^ts\s+(\S+)\s+(\S+)(.*)$')
+# Capture every token after `ts` and let the matcher walk the command tree, rather
+# than assuming a fixed `ts <group> <command>` depth. `ts security column-rules get` is
+# three levels deep -- see `_walk_commands`.
+TS_INVOCATION_RE = re.compile(r'^ts\s+(.*)$')
 FLAG_RE = re.compile(r'--[a-zA-Z][\w-]*')
 CHAIN_SPLIT_RE = re.compile(r'&&|\|\||\||;')
+
+# Deepest command nesting to consider when matching a documented invocation
+# against the real tree. `ts security column-rules get` is 3; the bound just
+# stops a long argument list being probed token by token.
+_MAX_DEPTH = 4
 
 
 def build_flag_map(root: Path) -> dict[tuple[str, str], set[str]] | None:
@@ -98,19 +106,37 @@ def build_flag_map(root: Path) -> dict[tuple[str, str], set[str]] | None:
     # the same shape: groups have `.commands` (dict), commands have `.params`, and
     # option params have `param_type_name == "option"` with `.opts`/`.secondary_opts`.
     root_cmd = typer.main.get_command(root_app)
-    flag_map: dict[tuple[str, str], set[str]] = {}
-    for group_name, group_cmd in getattr(root_cmd, "commands", {}).items():
-        subcommands = getattr(group_cmd, "commands", None)
-        if not subcommands:
-            continue
-        for cmd_name, cmd in subcommands.items():
-            flags: set[str] = set()
-            for param in getattr(cmd, "params", []):
-                if getattr(param, "param_type_name", "") == "option":
-                    flags.update(getattr(param, "opts", []))
-                    flags.update(getattr(param, "secondary_opts", []))
-            flag_map[(group_name, cmd_name)] = flags
+    flag_map: dict[tuple[str, ...], set[str]] = {}
+    _walk_commands(root_cmd, (), flag_map)
     return flag_map
+
+
+def _walk_commands(cmd, path: tuple[str, ...],
+                   flag_map: dict[tuple[str, ...], set[str]]) -> None:
+    """Record every LEAF command's flags, keyed by its full path from `ts`.
+
+    Recursive rather than two levels deep, because command groups nest arbitrarily:
+    `ts security column-rules get` is three levels, and a flat (group, command) walk
+    resolved it to the `column-rules` GROUP -- whose only option is `--help` -- so every
+    real flag on every subcommand read as unregistered. That shipped undetected in
+    PR #347 because no SKILL.md referenced those commands until ts-security-columns.
+
+    Groups are not recorded themselves: a bare `ts security column-rules --help` needs no
+    cross-check, and recording it would let a group's `--help` mask a subcommand typo.
+    """
+    subcommands = getattr(cmd, "commands", None)
+    if subcommands:
+        for name, sub in subcommands.items():
+            _walk_commands(sub, path + (name,), flag_map)
+        return
+    if not path:
+        return
+    flags: set[str] = set()
+    for param in getattr(cmd, "params", []):
+        if getattr(param, "param_type_name", "") == "option":
+            flags.update(getattr(param, "opts", []))
+            flags.update(getattr(param, "secondary_opts", []))
+    flag_map[path] = flags
 
 
 def _iter_fenced_blocks(text: str) -> list[list[tuple[int, str]]]:
@@ -166,14 +192,22 @@ def scan_text(
                 m = TS_INVOCATION_RE.match(seg)
                 if not m:
                     continue
-                group, command, tail = m.group(1), m.group(2), m.group(3)
-                key = (group, command)
-                if key not in flag_map:
+                tokens = m.group(1).split()
+                # Longest matching command path wins, so a three-level command is not
+                # mistaken for its two-level parent group.
+                key: tuple[str, ...] | None = None
+                for depth in range(min(len(tokens), _MAX_DEPTH), 0, -1):
+                    candidate = tuple(tokens[:depth])
+                    if candidate in flag_map:
+                        key = candidate
+                        break
+                if key is None:
                     continue  # unknown/typo'd/not-yet-shipped — out of scope here
+                tail = " ".join(tokens[len(key):])
                 valid_flags = flag_map[key] | ALWAYS_VALID_FLAGS
                 for flag in FLAG_RE.findall(tail):
                     if flag not in valid_flags:
-                        findings.append((lineno, group, command, flag))
+                        findings.append((lineno, " ".join(key[:-1]), key[-1], flag))
     return findings
 
 

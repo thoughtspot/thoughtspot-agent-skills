@@ -72,3 +72,32 @@ def search(
             break
         offset += page_size
     print(json.dumps(all_results))
+
+
+@app.command("create")
+def create(
+    name: str = typer.Argument(..., help="Org name (must be unique cluster-wide)"),
+    description: Optional[str] = typer.Option(None, "--description",
+                                              help="Org description. `ts tenancy` writes "
+                                                   "its marker here so teardown can tell "
+                                                   "what it created."),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Create an Org.
+
+    Needs cluster administration (`ORG_ADMINISTRATION` under RBAC), and the Orgs feature
+    must be enabled. Output: the created Org as JSON, including its numeric `id` — which
+    is what org-scoped auth needs, since `auth/token/full` silently ignores an Org NAME.
+
+    Examples:
+
+    \b
+      ts orgs create ORG1 -p prod
+      ts orgs create ORG1 --description "ts-tenancy-fixture tenant" -p prod
+    """
+    client = ThoughtSpotClient(resolve_profile(profile))
+    payload: dict = {"name": name}
+    if description:
+        payload["description"] = description
+    resp = client.post("/api/rest/2.0/orgs/create", json=payload)
+    print(json.dumps(resp.json()))

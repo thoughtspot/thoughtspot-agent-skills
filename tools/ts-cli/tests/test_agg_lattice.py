@@ -131,3 +131,26 @@ def test_generate_candidates_multi_date_groups_and_finest_per_column():
     # compat shim: date_column/bucket derive from date_grains[0]
     assert best[0]["date_column"] == best[0]["date_grains"][0]["column"]
     assert best[0]["bucket"] == best[0]["date_grains"][0]["bucket"]
+
+
+def test_consolidatable_dims_adds_combined_candidate_for_disjoint_singles():
+    # F3: disjoint single-dim signatures never merge via Jaccard (overlap=0),
+    # so the combined "one wide table" grain is only produced when the dims are
+    # passed as consolidatable (the model's physical attribute columns).
+    sigs = [_sig(["State"]), _sig(["Category"]), _sig(["Product"])]
+    plain = generate_candidates(sigs, PLANS)
+    assert not any(len(c["dimensions"]) == 3 for c in plain)   # no combined without the hint
+    cons = generate_candidates(sigs, PLANS,
+                               consolidatable_dims={"State", "Category", "Product"})
+    combined = [c for c in cons if set(c["dimensions"]) == {"State", "Category", "Product"}]
+    assert len(combined) == 1
+    assert set(combined[0]["measure_columns"]) == {"Sales"}   # covers the single-dim sigs
+
+
+def test_consolidatable_dims_excludes_non_consolidatable_dims():
+    # A dim NOT in consolidatable_dims (e.g. a formula/date dim) is left out of
+    # the combined grain — only the safe physical attrs are unioned.
+    sigs = [_sig(["State"]), _sig(["Category"]), _sig(["Employee"])]
+    cons = generate_candidates(sigs, PLANS, consolidatable_dims={"State", "Category"})
+    assert [c for c in cons if set(c["dimensions"]) == {"State", "Category"}]
+    assert not any(len(c["dimensions"]) > 1 and "Employee" in c["dimensions"] for c in cons)

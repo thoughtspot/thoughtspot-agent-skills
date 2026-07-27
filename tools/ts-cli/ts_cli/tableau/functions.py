@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ts_cli.tableau.literals import literal_value
 from ts_cli.tableau.parsing import _extract_function_args
 
 
@@ -44,7 +45,9 @@ def _build_function_map() -> list[tuple[re.Pattern, Any]]:
         (r"\bCONTAINS\s*\(", "contains ( "),
         (r"\bLEN\s*\(", "strlen ( "),
         (r"\bTRIM\s*\(", "trim ( "),
-        (r"\bREPLACE\s*\(", "replace ( "),
+        # REPLACE is handled specially — see _ARG_HANDLERS. `replace(...)` is
+        # NOT a real ThoughtSpot formula function (live-confirmed invalid);
+        # it must go through the sql_string_op pass-through form instead.
 
         # LEFT/RIGHT/MID are handled specially
         (r"\bLEFT\s*\(", "_LEFT_HANDLER"),
@@ -69,6 +72,13 @@ def _build_function_map() -> list[tuple[re.Pattern, Any]]:
         (r"\bEXP\s*\(", "exp ( "),
         (r"\bSQUARE\s*\(", "_SQUARE_HANDLER"),
         (r"\bPI\s*\(\s*\)", "3.14159265358979"),
+
+        # Row-offset table calc — SIZE() is the one member of that family
+        # (see tableau/validate.py's _TABLE_CALC_NO_EQUIVALENT for the rest)
+        # with a context-free translation: unpartitioned row count, no
+        # sort/partition attribute needed. Tier 7 of the Row-Offset Table
+        # Calculations decision tree in tableau-formula-translation.md.
+        (r"\bSIZE\s*\(\s*\)", 'sql_int_aggregate_op ( "COUNT(*) OVER ()" )'),
 
         # Type conversion
         (r"\bFLOAT\s*\(", "to_double ( "),
@@ -157,7 +167,52 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("TAN", lambda a: f"tan ( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
     ("RADIANS", lambda a: f"( {a[0]} * 3.14159265358979 / 180 )" if len(a) == 1 else None),
     ("DEGREES", lambda a: f"( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
+
+    # Inverse trig + COT (BL-072 sub-item). Tableau ACOS/ASIN/ATAN return
+    # radians; ThoughtSpot acos/asin/atan return degrees (by symmetry with
+    # the shipped SIN/COS/TAN radians-to-degrees conversion above) — convert
+    # TS degrees back to radians with * pi/180. COT(x) = 1/tan(x) with x in
+    # radians (Tableau); tan ( ) here needs its argument in degrees, same as
+    # the shipped TAN conversion.
+    ("ACOS", lambda a: f"( acos ( {a[0]} ) * 3.14159265358979 / 180 )" if len(a) == 1 else None),
+    ("ASIN", lambda a: f"( asin ( {a[0]} ) * 3.14159265358979 / 180 )" if len(a) == 1 else None),
+    ("ATAN", lambda a: f"( atan ( {a[0]} ) * 3.14159265358979 / 180 )" if len(a) == 1 else None),
+    ("COT", lambda a: f"( 1 / tan ( {a[0]} * 180 / 3.14159265358979 ) )" if len(a) == 1 else None),
+
     ("DATEPARSE", lambda a: f"to_date ( {a[1]} , {a[0]} )" if len(a) == 2 else None),
+
+    # Pass-through rescues (tableau-formula-translation.md "Functions with no
+    # native ThoughtSpot equivalent — pass-through", lines ~989-995) — no
+    # native ThoughtSpot function exists for regex/nth-occurrence matching, so
+    # these translate to the documented sql_*_op templates verbatim.
+    ("REGEXP_EXTRACT", lambda a: (
+        f'sql_string_op ( "REGEXP_SUBSTR({{0}}, {{1}})" , {a[0]} , {a[1]} )'
+        if len(a) == 2 else None)),
+    ("REGEXP_MATCH", lambda a: (
+        f'sql_bool_op ( "REGEXP_LIKE ({{0}}, {{1}})" , {a[0]} , {a[1]} )'
+        if len(a) == 2 else None)),
+    ("REGEXP_REPLACE", lambda a: (
+        f'sql_string_op ( "REGEXP_REPLACE({{0}},{{1}},{{2}})" , {a[0]} , {a[1]} , {a[2]} )'
+        if len(a) == 3 else None)),
+    ("FINDNTH", lambda a: (
+        f'sql_int_op ( "REGEXP_INSTR({{0}},{{1}},1,{{2}})" , {a[0]} , {a[1]} , {a[2]} )'
+        if len(a) == 3 else None)),
+    # REPLACE: bare `replace(...)` is not a real ThoughtSpot formula function
+    # (live-confirmed invalid) — re-mapped to the sql_string_op pass-through
+    # form. No documented template existed for REPLACE prior to this fix; this
+    # is the form added to tableau-formula-translation.md alongside this change.
+    ("REPLACE", lambda a: (
+        f'sql_string_op ( "REPLACE({{0}}, {{1}}, {{2}})" , {a[0]} , {a[1]} , {a[2]} )'
+        if len(a) == 3 else None)),
+
+    # User-identity → RLS system variables (BL-071 subset). Only the
+    # unambiguous, documented mappings — FULLNAME/ISFULLNAME/USERDOMAIN/
+    # USERATTRIBUTE(INCLUDES) stay in _UNMAPPED_FUNCTIONS (validate.py),
+    # see tableau-formula-translation.md for the disposition of each.
+    ("USERNAME", lambda a: (
+        "ts_username" if len(a) == 0 or (len(a) == 1 and not a[0].strip()) else None)),
+    ("ISUSERNAME", lambda a: f"( ts_username = {a[0]} )" if len(a) == 1 else None),
+    ("ISMEMBEROF", lambda a: f"( ts_groups = {a[0]} )" if len(a) == 1 else None),
 ]
 
 
@@ -229,29 +284,51 @@ _DATEADD_UNIT_MAP = {
 }
 
 
-def map_date_functions(expr: str) -> str:
-    """Convert Tableau date functions to ThoughtSpot equivalents."""
+def _resolve_unit(arg: str, registry: dict | None) -> str:
+    """Resolve a date-function's unit argument to its lowercased text.
+
+    `arg` is normally a quoted literal ('month', 'day', ...). When the
+    pipeline has masked literals into placeholders (see literals.py), `arg`
+    is the placeholder token instead — resolve it via `registry` first. Falls
+    back to the old direct quote-strip when there's no registry (e.g. these
+    functions are still unit-tested by calling them directly with real quotes).
+    """
+    arg = arg.strip()
+    if registry:
+        lit = literal_value(arg, registry)
+        if lit is not None:
+            return lit.lower()
+    return arg.strip("'\"").lower()
+
+
+def map_date_functions(expr: str, registry: dict | None = None) -> str:
+    """Convert Tableau date functions to ThoughtSpot equivalents.
+
+    `registry` is the literal-masking registry from literals.mask_literals
+    (see translate_single) — needed to resolve a masked unit argument
+    ('month', 'day', ...) back to its text for the unit-name lookups below.
+    """
     result = expr
 
     # DATETRUNC('unit', date) → start_of_unit ( date )
-    result = _convert_datetrunc(result)
+    result = _convert_datetrunc(result, registry)
 
     # DATEDIFF('unit', start, end) → diff_unit ( end , start )  [reversed args]
-    result = _convert_datediff(result)
+    result = _convert_datediff(result, registry)
 
     # DATEADD('unit', n, date) → add_unit ( date , n )  [reordered]
-    result = _convert_dateadd(result)
+    result = _convert_dateadd(result, registry)
 
     # DATEPART('unit', date) → unit_func ( date )
-    result = _convert_datepart(result)
+    result = _convert_datepart(result, registry)
 
     # DATENAME('month', date) → month ( date )
-    result = _convert_datename(result)
+    result = _convert_datename(result, registry)
 
     return result
 
 
-def _convert_datetrunc(expr: str) -> str:
+def _convert_datetrunc(expr: str, registry: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATETRUNC\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -267,7 +344,7 @@ def _convert_datetrunc(expr: str) -> str:
             continue
         args, end_pos = extracted
         if len(args) >= 2:
-            unit = args[0].strip().strip("'\"").lower()
+            unit = _resolve_unit(args[0], registry)
             date_expr = args[1].strip()
             ts_func = _DATETRUNC_UNIT_MAP.get(unit)
             if ts_func is None:
@@ -285,7 +362,7 @@ def _convert_datetrunc(expr: str) -> str:
     return result
 
 
-def _convert_datediff(expr: str) -> str:
+def _convert_datediff(expr: str, registry: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATEDIFF\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -301,7 +378,7 @@ def _convert_datediff(expr: str) -> str:
             continue
         args, end_pos = extracted
         if len(args) >= 3:
-            unit = args[0].strip().strip("'\"").lower()
+            unit = _resolve_unit(args[0], registry)
             start_date = args[1].strip()
             end_date = args[2].strip()
             ts_func = _DATEDIFF_UNIT_MAP.get(unit)
@@ -328,7 +405,7 @@ def _convert_datediff(expr: str) -> str:
     return result
 
 
-def _convert_dateadd(expr: str) -> str:
+def _convert_dateadd(expr: str, registry: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATEADD\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -344,7 +421,7 @@ def _convert_dateadd(expr: str) -> str:
             continue
         args, end_pos = extracted
         if len(args) >= 3:
-            unit = args[0].strip().strip("'\"").lower()
+            unit = _resolve_unit(args[0], registry)
             n = args[1].strip()
             date_expr = args[2].strip()
             ts_func = _DATEADD_UNIT_MAP.get(unit)
@@ -364,7 +441,7 @@ def _convert_dateadd(expr: str) -> str:
     return result
 
 
-def _convert_datepart(expr: str) -> str:
+def _convert_datepart(expr: str, registry: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATEPART\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -380,7 +457,7 @@ def _convert_datepart(expr: str) -> str:
             continue
         args, end_pos = extracted
         if len(args) >= 2:
-            unit = args[0].strip().strip("'\"").lower()
+            unit = _resolve_unit(args[0], registry)
             date_expr = args[1].strip()
             ts_func = _DATEPART_UNIT_MAP.get(unit)
             if ts_func is None:
@@ -398,7 +475,7 @@ def _convert_datepart(expr: str) -> str:
     return result
 
 
-def _convert_datename(expr: str) -> str:
+def _convert_datename(expr: str, registry: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATENAME\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -414,7 +491,7 @@ def _convert_datename(expr: str) -> str:
             continue
         args, end_pos = extracted
         if len(args) >= 2:
-            unit = args[0].strip().strip("'\"").lower()
+            unit = _resolve_unit(args[0], registry)
             date_expr = args[1].strip()
             if unit == "month":
                 replacement = f"month ( {date_expr} )"

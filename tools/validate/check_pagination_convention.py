@@ -77,6 +77,10 @@ ALLOWLIST: dict[tuple[str, str], str] = {
         "source-resolution function; the name-lookup branch already raises "
         "SourceAmbiguousError when more than one exact match comes back, so a "
         "caller is never silently handed a truncated page.",
+    ("ts_cli/commands/share.py", "_resolve_object"):
+        "record_size=1 (GUID) and record_size=10 (exact-name) bounded lookups; the "
+        "name branch requires a single exact match and raises on ambiguity, so a "
+        "truncated page can never be silently resolved to the wrong object.",
     ("ts_cli/commands/dependency_apply.py", "_current_modified"):
         "record_size=1 GUID drift-check lookup (BL-083 apply-change) — reads a single "
         "object's metadata_header.modified by GUID; a GUID identifies at most one "

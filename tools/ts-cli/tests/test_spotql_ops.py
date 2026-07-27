@@ -1,5 +1,5 @@
 """Unit tests for ts_cli.spotql_ops — pure aggregate-function classification behind
-`ts spotql classify-columns` (BL-087 codification of two drifted keyword lists).
+`ts agentql classify-columns` (BL-087 codification of two drifted keyword lists).
 
 Pure-function tests — no ThoughtSpot connection required.
 """

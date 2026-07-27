@@ -200,6 +200,49 @@ class TestAddCommand:
         store_cmds = data["keychain_store_commands"]["darwin"]
         assert 'VALUE' in store_cmds
 
+    def test_add_coerces_bool_field_to_boolean(self, profile_dir):
+        """verify_ssl=false must be stored as JSON boolean, not the string "false".
+
+        A string "false" is truthy and `requests` treats it as a CA-bundle path,
+        breaking every request to a self-signed/private cluster.
+        """
+        result = runner.invoke(app, [
+            "add", "--platform", "thoughtspot", "--name", "Private",
+            "--auth-type", "password",
+            "--field", "base_url=https://172.32.6.115:8443",
+            "--field", "username=tsadmin",
+            "--field", "verify_ssl=false",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["profile"]["verify_ssl"] is False
+        saved = json.loads(profile_dir["thoughtspot"].read_text())
+        assert saved[0]["verify_ssl"] is False
+
+    def test_add_coerces_true_field_to_boolean(self, profile_dir):
+        result = runner.invoke(app, [
+            "add", "--platform", "thoughtspot", "--name", "PrivateTrue",
+            "--auth-type", "password",
+            "--field", "base_url=https://ts.example.com",
+            "--field", "username=admin",
+            "--field", "verify_ssl=TRUE",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["profile"]["verify_ssl"] is True
+
+    def test_add_leaves_non_bool_strings_untouched(self, profile_dir):
+        result = runner.invoke(app, [
+            "add", "--platform", "thoughtspot", "--name", "Strs",
+            "--auth-type", "password",
+            "--field", "base_url=https://ts.example.com",
+            "--field", "username=admin",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["profile"]["base_url"] == "https://ts.example.com"
+        assert data["profile"]["username"] == "admin"
+
 
 # ---------------------------------------------------------------------------
 # update
@@ -235,6 +278,21 @@ class TestUpdateCommand:
             "--field", "bad_format",
         ])
         assert result.exit_code != 0
+
+    def test_update_coerces_bool_field_to_boolean(self, profile_dir):
+        profile_dir["thoughtspot"].write_text(json.dumps([
+            {"name": "Private", "base_url": "https://172.32.6.115:8443",
+             "verify_ssl": "false"}
+        ]))
+        result = runner.invoke(app, [
+            "update", "--platform", "thoughtspot", "--name", "Private",
+            "--field", "verify_ssl=false",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["profile"]["verify_ssl"] is False
+        saved = json.loads(profile_dir["thoughtspot"].read_text())
+        assert saved[0]["verify_ssl"] is False
 
 
 # ---------------------------------------------------------------------------

@@ -49,8 +49,10 @@ class TestMapDbxType:
     def test_bool_date_time(self):
         assert map_dbx_type("boolean") == "BOOL"
         assert map_dbx_type("date") == "DATE"
-        assert map_dbx_type("timestamp") == "DATETIME"
-        assert map_dbx_type("timestamp_ntz") == "DATETIME"
+        # DATE_TIME (not DATETIME) is the canonical ThoughtSpot type — a live
+        # VALIDATE_ONLY import confirmed ThoughtSpot rejects "DATETIME".
+        assert map_dbx_type("timestamp") == "DATE_TIME"
+        assert map_dbx_type("timestamp_ntz") == "DATE_TIME"
 
     def test_case_and_whitespace_insensitive(self):
         assert map_dbx_type("  STRING ") == "VARCHAR"
@@ -65,6 +67,25 @@ class TestMapDbxType:
             map_dbx_type("interval")
         assert "interval" in str(exc.value)
         assert "ts-from-databricks-rules.md" in str(exc.value)
+
+
+class TestTsTypeToDbx:
+    def test_canonical(self):
+        from ts_cli.databricks.mv_tml import ts_type_to_dbx
+        assert ts_type_to_dbx("VARCHAR") == "string"
+        assert ts_type_to_dbx("INT64") == "bigint"
+        assert ts_type_to_dbx("DOUBLE") == "double"
+        assert ts_type_to_dbx("BOOL") == "boolean"
+        assert ts_type_to_dbx("DATE") == "date"
+        # DATE_TIME is the canonical ThoughtSpot key — DATETIME is rejected by
+        # the API (live-confirmed), so the reverse map keys on DATE_TIME.
+        assert ts_type_to_dbx("DATE_TIME") == "timestamp"
+
+    def test_unknown_raises(self):
+        import pytest
+        from ts_cli.databricks.mv_tml import ts_type_to_dbx
+        with pytest.raises(ValueError):
+            ts_type_to_dbx("GEO_POINT")
 
 
 class TestBuildTableTml:
@@ -1169,3 +1190,50 @@ model:
         doc, info = self._build()
         assert "filters" not in doc["model"]
         assert info["filter_applied"] is False
+
+
+# ---------------------------------------------------------------------------
+# Role-playing (aliased) dimensions — FROM Databricks
+# ---------------------------------------------------------------------------
+
+from ts_cli.databricks.mv_translate import resolve_parts, reused_physicals
+
+
+class TestRolePlayFromDatabricks:
+    # flattened alias-path -> physical: ACCOUNT reached via two paths (role-play)
+    FLAT = {"source": "CASE", "account": "ACCOUNT",
+            "bill_to": "ACCOUNT", "contact": "CONTACT"}
+
+    def test_reused_physicals(self):
+        assert reused_physicals(self.FLAT) == {"ACCOUNT"}
+
+    def test_resolve_parts_uses_alias_for_reused_physical(self):
+        # reused physical -> node identity is the alias path (distinct per role)
+        assert resolve_parts(self.FLAT, "account.NAME") == ("account", "NAME")
+        assert resolve_parts(self.FLAT, "bill_to.NAME") == ("bill_to", "NAME")
+        # single-use physical -> node identity stays the physical name
+        assert resolve_parts(self.FLAT, "contact.NAME") == ("CONTACT", "NAME")
+
+    def test_build_model_tables_emits_alias_and_alias_with(self):
+        parsed = {"joins": [
+            {"alias": "account", "on": "source.ACCT_ID = account.ID",
+             "cardinality": "many_to_one"},
+            {"alias": "bill_to", "on": "source.BILL_ID = bill_to.ID",
+             "cardinality": "many_to_one"},
+            {"alias": "contact", "on": "source.CONTACT_ID = contact.ID",
+             "cardinality": "many_to_one"},
+        ]}
+        tables = {k: {"name": v} for k, v in self.FLAT.items()}
+        mts = build_model_tables(parsed, tables)
+        by = {(m["name"], m.get("alias")): m for m in mts}
+        # two role-play ACCOUNT instances, each aliased, no bare duplicate
+        assert ("ACCOUNT", "account") in by
+        assert ("ACCOUNT", "bill_to") in by
+        assert "id" not in by[("ACCOUNT", "account")]  # I4: aliased entry has no id
+        # single-use CONTACT stays bare (no alias)
+        assert ("CONTACT", None) in by
+        # fact's joins reference the alias node identity, not the physical name
+        fact = next(m for m in mts if m["name"] == "CASE")
+        withs = {j["with"] for j in fact["joins"]}
+        # reused-physical joins reference the alias; single-use uses the physical name
+        assert {"account", "bill_to", "CONTACT"} <= withs

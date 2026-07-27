@@ -19,7 +19,8 @@ The UDF DDL lives in [references/business-day-udfs.sql](references/business-day-
 
 In the commands below, `{skill_dir}` is the absolute path of the directory containing this SKILL.md (e.g. `~/.claude/skills/ts-recipe-formula-business-days-snowflake` in Claude Code, `~/.snowflake/cortex/skills/...` in Cortex Code CLI). Substitute the real path when running.
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions. Batch **independent** questions
+into a single prompt to cut round-trips.
 
 ---
 
@@ -174,7 +175,7 @@ Would you like help adding one of these formulas to a specific ThoughtSpot Model
 
 If Y:
 1. Check `~/.claude/thoughtspot-profiles.json` — if missing, ask user to run `/ts-profile-thoughtspot` first
-2. Verify: `source ~/.zshenv && ts auth whoami --profile "{ts_profile_name}"`
+2. Verify: `ts auth whoami --profile "{ts_profile_name}"`
 3. Ask: which model, what to name the formula (e.g. `Business Days Open`), which UDF to use, and which date column(s) to pass as arguments
 4. Export TML: `ts tml export {model_guid} --profile {ts_profile_name} --fqn --parse`
 5. Add **both** of the following to the TML — a formula alone is not enough; without the `columns[]` entry the formula is hidden from users:
@@ -224,6 +225,7 @@ If N → done.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.1.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 2.1.0 | 2026-07-12 | Codify UDF DDL as `references/business-day-udfs.sql` deployed via `ts snowflake exec` (ts-cli ≥ 0.48.0); Steps 1/3/4 no longer inline `snowflake.connector` connect blocks or transcribe SQL (BL-079) |
 | 2.0.0 | 2026-05-13 | Renamed from ts-setup-snowflake-udfs-business-days to ts-recipe-formula-business-days-snowflake; new ts-recipe-* family introduced |
 | 1.0.1 | 2026-05-12 | Step 5: explicit formulas[] + columns[] TML pattern; formula alone is hidden without the columns[] entry |

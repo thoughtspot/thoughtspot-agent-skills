@@ -9,6 +9,7 @@ from ts_cli.model_builder import build_model_tml, filter_unresolvable_formulas
 from ts_cli.tableau.build_model import (
     apply_prefix_and_double_agg,
     apply_table_name_map,
+    build_generated_tables_map,
     collect_existing_model_context,
     extract_imported_guid,
     fix_sqlproxy_scoping,
@@ -18,6 +19,7 @@ from ts_cli.tableau.build_model import (
     strip_csq_suffixes,
 )
 from ts_cli.tableau.reconcile import rewrite_formula_refs
+from ts_cli.tml_lint import lint_cross_references
 
 
 def _model_tml(tables=("SALES",), columns=(), formulas=(), parameters=()):
@@ -454,3 +456,94 @@ def test_renamed_ref_dropped_without_map_kept_with_map():
     )
     assert [f["name"] for f in kept1] == ["Total Disc"]
     assert dropped1 == []
+
+
+# --- build_generated_tables_map + lint_cross_references wiring ---------------
+# (BL-cross-ref-check: pre-flight dangling cross-reference check for
+# `ts tableau build-model`'s GENERATE flow — see commands/tableau.py _generate_flow)
+
+def test_build_generated_tables_map_single_table():
+    tables = [{"name": "ORDERS"}]
+    columns = [
+        {"name": "Amount", "db_column_name": "AMOUNT"},
+        {"name": "Order Id", "db_column_name": "ORDER_ID"},
+    ]
+    result = build_generated_tables_map(tables, columns)
+    assert result == {"ORDERS": {"AMOUNT", "ORDER_ID"}}
+
+
+def test_build_generated_tables_map_multi_table_uses_table_key():
+    tables = [{"name": "ORDERS"}, {"name": "CUSTOMERS"}]
+    columns = [
+        {"name": "Amount", "db_column_name": "AMOUNT", "table": "ORDERS"},
+        {"name": "Cust Name", "db_column_name": "NAME", "table": "CUSTOMERS"},
+    ]
+    result = build_generated_tables_map(tables, columns)
+    assert result == {"ORDERS": {"AMOUNT"}, "CUSTOMERS": {"NAME"}}
+
+
+def test_build_generated_tables_map_falls_back_to_name_without_db_column_name():
+    tables = [{"name": "ORDERS"}]
+    columns = [{"name": "Amount"}]
+    result = build_generated_tables_map(tables, columns)
+    assert result == {"ORDERS": {"Amount"}}
+
+
+def test_build_generated_tables_map_includes_sql_view_columns():
+    tables = [{"name": "ORDERS"}]
+    columns = [{"name": "Amount", "db_column_name": "AMOUNT"}]
+    sql_views = [{"name": "MyCustomSQL", "columns": [{"name": "Total"}, {"name": "Region"}]}]
+    result = build_generated_tables_map(tables, columns, sql_views)
+    assert result["ORDERS"] == {"AMOUNT"}
+    assert result["MyCustomSQL"] == {"Total", "Region"}
+
+
+def test_build_generated_tables_map_end_to_end_with_lint_cross_references_clean():
+    # Mirrors _generate_flow: assemble a model_tml via build_model_tml, then
+    # verify the SAME inputs, run through build_generated_tables_map, produce
+    # a clean lint_cross_references result (the happy-path pre-flight check).
+    tables = [{"name": "ORDERS"}, {"name": "CUSTOMERS"}]
+    columns = [
+        {"name": "Amount", "db_column_name": "AMOUNT", "table": "ORDERS"},
+        {"name": "Order Customer Id", "db_column_name": "CUSTOMER_ID", "table": "ORDERS"},
+        {"name": "Customer Id", "db_column_name": "CUSTOMER_ID", "table": "CUSTOMERS"},
+        {"name": "Customer Name", "db_column_name": "NAME", "table": "CUSTOMERS"},
+    ]
+    joins = [{
+        "left_table": "ORDERS", "right_table": "CUSTOMERS",
+        "keys": [{"left": "CUSTOMER_ID", "right": "CUSTOMER_ID"}],
+    }]
+    model_tml = build_model_tml(
+        model_name="Sales",
+        connection_name="my_conn",
+        tables=tables,
+        columns=columns,
+        joins=joins,
+        parameters=[],
+        translated_formulas=[],
+    )
+    generated_tables = build_generated_tables_map(tables, columns)
+    assert lint_cross_references(model_tml, generated_tables) == []
+
+
+def test_build_generated_tables_map_end_to_end_catches_dropped_column():
+    # A formula-free physical column that never made it into `columns` (e.g. a
+    # bug that drops a column during reconciliation) leaves a column_id in the
+    # assembled model TML with no matching entry in the generated-tables map —
+    # exactly the class of bug this pre-flight check exists to catch.
+    tables = [{"name": "ORDERS"}]
+    columns = [{"name": "Amount", "db_column_name": "AMOUNT", "column_id": "ORDERS::AMOUNT"}]
+    model_tml = build_model_tml(
+        model_name="Sales",
+        connection_name="my_conn",
+        tables=tables,
+        columns=columns,
+        joins=[],
+        parameters=[],
+        translated_formulas=[],
+    )
+    # Simulate the bug: the generated-tables map was built from a columns list
+    # that's missing "Amount" (as if it were silently dropped before this point).
+    generated_tables = build_generated_tables_map(tables, [])
+    findings = lint_cross_references(model_tml, generated_tables)
+    assert any("AMOUNT" in f and "ORDERS" in f for f in findings)

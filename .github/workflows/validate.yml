@@ -17,12 +17,12 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history so checkers that diff against HEAD/refs behave correctly.
           fetch-depth: 0
 
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
@@ -31,11 +31,14 @@ jobs:
           pip install pytest pyyaml radon pip-audit
           pip install -e tools/ts-cli
 
+      - name: Install optional extras for audit coverage
+        # Core deps are installed above; extras pull in snowflake-connector-python,
+        # websocket-client, cryptography, etc. that also need CVE coverage.
+        run: pip install -e "tools/ts-cli[snowflake,qlik]"
+
       - name: Dependency vulnerability scan (pip-audit)
-        # Audits the environment just installed above (ts-cli + its runtime deps:
-        # requests, PyYAML, keyring, typer) against the PyPI/OSV advisory database.
-        # Fails the job on any known vulnerability (angle 16.1 — nothing previously
-        # prevented a vulnerable resolution from landing silently).
+        # Audits the full environment (core + optional extras) against the
+        # PyPI/OSV advisory database. Fails on any known vulnerability.
         run: pip-audit
 
       - name: Run validators (full-repo mode)
@@ -77,8 +80,24 @@ jobs:
           # Presence gate: every shared mapping/schema must carry a currency anchor
           # (staleness is soft and never fails — only missing/malformed anchors do).
           python3 tools/validate/check_mapping_currency.py --root . --check
+          python3 tools/validate/generate_open_items_index.py --root . --check
           python3 tools/validate/check_mirror_sync.py
           python3 tools/validate/generate_parity.py --check
+          # Quality gates catalog — soft check in CI. The catalog includes git-log
+          # dates that shift when any validator is touched by a contributor PR, so a
+          # hard gate would force every contributor to regenerate it. Maintainer
+          # regenerates at merge time; pre-commit catches local staleness.
+          python3 tools/validate/generate_quality_gates.py --root . --check || echo "WARN  quality-gates.md is stale (non-blocking in CI)"
+
+      - name: Open-items gate (PR only)
+        # Scoped hard mode: only fails on unresolved items in open-items.md files
+        # that this PR actually changed. Pre-existing items in untouched files are
+        # WARN-only. Analogous to the changelog gate's --base scoping.
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          python3 tools/validate/check_open_items.py --root . \
+            --base "origin/${{ github.base_ref }}"
 
       - name: Changelog gate (PR only)
         # The repo-changelog gate is staged-diff-based in pre-commit (empty in a CI
@@ -121,9 +140,9 @@ jobs:
         # 3.12 is covered by `validate`; this fills in the rest of requires-python.
         python-version: ["3.10", "3.11", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -146,16 +165,16 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
       - name: Install runtime deps + pip-audit
         run: |
           pip install pip-audit
-          pip install -e tools/ts-cli
+          pip install -e "tools/ts-cli[snowflake,qlik]"
 
       - name: Dependency vulnerability scan (pip-audit)
         run: pip-audit

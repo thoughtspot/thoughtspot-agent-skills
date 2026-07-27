@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+import yaml
 
 from ts_cli.tableau.client import TableauClient, _resolve_tableau_profile
 
@@ -129,13 +130,17 @@ def parse_cmd(
     for ds in parsed["datasources"]:
         ds["orphan_calcs"] = detect_orphan_calcs(ds)
     parsed["blend_plan"] = build_blend_plan(parsed["blends"], parsed["datasources"])
+    from ts_cli.tableau.dashboards import extract_dashboards
+    parsed["dashboards"] = extract_dashboards(root)
 
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
     Path(output_file).write_text(json.dumps(parsed, indent=2))
 
+    n_viz = sum(len(d.get("visuals", [])) for d in parsed["dashboards"])
     typer.echo(
         f"Parsed {len(parsed['datasources'])} datasource(s), "
-        f"{len(parsed['blends'])} blend edge-set(s) -> {output_file}",
+        f"{len(parsed['blends'])} blend edge-set(s), "
+        f"{len(parsed['dashboards'])} dashboard(s)/{n_viz} viz -> {output_file}",
         err=True,
     )
 
@@ -381,10 +386,15 @@ def _translate_and_validate(
     resolved_calcs: list[dict],
     scoped_columns: dict,
     parsed: dict,
-) -> tuple[list, list, list]:
+) -> tuple[list, list, list, dict]:
     """Translate a datasource's calculated fields and run pre-import validation.
 
-    Returns (translated, skipped, validation_issues); echoes progress to stderr.
+    Returns (translated, skipped, validation_issues, name_clashes); echoes
+    progress to stderr. ``name_clashes`` (Fix #B) is
+    ``{original_caption: "Formula <original_caption>"}`` for every formula
+    renamed because its caption collided with a physical column's
+    internal/local name — surfaced so the caller can report the rename
+    instead of it reading as a silently dropped formula.
     """
     from ts_cli.tableau_translate import translate_formulas, validate_pre_import
 
@@ -398,6 +408,7 @@ def _translate_and_validate(
 
     translated = translate_result["translated"]
     skipped = translate_result["skipped"]
+    name_clashes = translate_result.get("name_clashes", {})
     typer.echo(
         f"  Translated: {len(translated)}/{len(ds['calculated_fields'])} formulas",
         err=True,
@@ -406,6 +417,8 @@ def _translate_and_validate(
         typer.echo(f"  Skipped: {len(skipped)}", err=True)
         for s in skipped[:5]:
             typer.echo(f"    - {s['name']}: {s['reason'][:80]}", err=True)
+    if name_clashes:
+        typer.echo(f"  Name clashes (column vs. formula) renamed: {name_clashes}", err=True)
 
     # Pre-import validation (catches issues before ThoughtSpot rejects them)
     col_names = {c["name"] for c in ds["columns"]}
@@ -417,7 +430,7 @@ def _translate_and_validate(
             for w in vi["warnings"]:
                 typer.echo(f"    ! {vi['name']}: {w}", err=True)
 
-    return translated, skipped, validation_issues
+    return translated, skipped, validation_issues, name_clashes
 
 
 def _collect_cascade_victims(
@@ -665,6 +678,256 @@ def _write_sql_view_files(sql_views: list, connection_name: str, out_path, slug:
     return paths
 
 
+def _param_display_name_map(param_map: dict) -> dict:
+    """``parsed["param_map"]`` (internal ``"[Parameter 3]"`` -> caption) ->
+    keyed by the RAW ``count='[Parameters].[Parameter 3]'`` reference form a
+    Top-N set's ``count`` attribute actually carries, so
+    ``build_cohort_tml`` can look it up directly."""
+    return {f"[Parameters].{k}": v for k, v in param_map.items()}
+
+
+def _write_cohort_files(
+    sets: list, model_name: str, rename_map: dict, param_map: dict,
+    out_path: Path, slug: str,
+) -> dict:
+    """Build + write one ``*.cohort.tml`` per translatable Set (BL-067 part 2).
+
+    Applies the same formula/column rename_map the model's own formulas went
+    through (a set anchored on a calc whose caption collided and got renamed —
+    e.g. "Formula Region" — must reference the RENAMED display name). Echoes
+    the documented log line for every set (translated or omitted) and returns
+    ``{"cohort_files", "cohorts_emitted", "cohorts_deferred"}`` for the result JSON.
+    """
+    from ts_cli.tableau.sets import build_cohort_tml
+    from ts_cli.tableau_translate import dump_tml_yaml
+
+    param_display_map = _param_display_name_map(param_map)
+    cohort_files: list[str] = []
+    cohorts_emitted: list[dict] = []
+    cohorts_deferred: list[dict] = []
+
+    for spec in sets:
+        remapped = dict(spec)
+        if remapped.get("anchor_name") in rename_map:
+            remapped["anchor_name"] = rename_map[remapped["anchor_name"]]
+
+        cohort_tml, logs = build_cohort_tml(
+            remapped, model_name=model_name, param_display_name_map=param_display_map,
+        )
+        for line in logs:
+            typer.echo(f"  Set: {line}", err=True)
+
+        if cohort_tml is None:
+            cohorts_deferred.append({
+                "name": spec.get("name"), "set_type": spec.get("set_type"),
+                "reason": logs[0] if logs else "omitted",
+            })
+            continue
+
+        cohort_slug = re.sub(r"[^0-9A-Za-z._-]+", "_", spec.get("name", "")).strip("_") or "set"
+        cohort_path = out_path / f"{slug}.{cohort_slug}.cohort.tml"
+        cohort_path.write_text(dump_tml_yaml(cohort_tml))
+        typer.echo(f"  Wrote Cohort: {cohort_path}", err=True)
+        cohort_files.append(str(cohort_path))
+        cohorts_emitted.append({"name": spec.get("name"), "set_type": spec.get("set_type")})
+
+    return {
+        "cohort_files": cohort_files,
+        "cohorts_emitted": cohorts_emitted,
+        "cohorts_deferred": cohorts_deferred,
+    }
+
+
+def _resolve_table_columns(
+    tables: list, columns: list, col_table_map: dict,
+) -> tuple[dict, list]:
+    """Partition physical columns across tables for the multi-table case.
+
+    Ownership is resolved, in priority order, from: an explicit ``table`` key
+    already on the column, then ``col_table_map`` (keyed by db_column_name,
+    then by display name) — the same column->table map
+    ``ts_cli.tableau.twb._build_column_table_map`` builds from datasource
+    metadata-records. A column whose owner can't be resolved this way, or
+    resolves to a table this datasource doesn't have, is left out of every
+    table entirely (never guessed onto an arbitrary one) and reported back so
+    the caller can warn instead of silently mis-scoping it — see the
+    MULTI-table limitation note in ``_write_table_tml_files``.
+    """
+    table_names = {t["name"] for t in tables}
+    by_table: dict = {t["name"]: [] for t in tables}
+    unassigned: list = []
+    for c in columns:
+        owner = (
+            c.get("table")
+            or col_table_map.get(c.get("db_column_name"))
+            or col_table_map.get(c.get("name"))
+        )
+        if owner in table_names:
+            by_table[owner].append(c)
+        else:
+            unassigned.append(c["name"])
+    return by_table, unassigned
+
+
+def _write_table_tml_files(
+    tables: list,
+    columns: list,
+    connection_name: str,
+    database: str,
+    schema: str,
+    out_path,
+    col_table_map: Optional[dict] = None,
+    table_registry: Optional[dict] = None,
+) -> dict:
+    """Write one ``{table_slug}.table.tml`` per physical table via the pure
+    ``ts_cli.tableau.tables.build_table_tml`` (Task A1) — call it, don't
+    reimplement its invariants/type-mapping.
+
+    Single-table datasources (the common case) get every column in
+    ``columns``. Multi-table datasources only get columns whose owning table
+    is resolvable (``_resolve_table_columns``) — on a federated multi-table
+    source, per-column ownership is often absent from the parse
+    (``col_table_map`` doesn't cover every column). That is a known
+    upstream-parse limitation this function does not attempt to fix: an
+    unresolvable column is collected into ``table_columns_unassigned`` and
+    warned about, never dumped onto an arbitrary table (which would silently
+    corrupt that table's schema).
+
+    A ``column_map`` override is always passed to ``build_table_tml`` so the
+    emitted db_column_name is byte-identical to the db_column_name the
+    model's own ``column_id`` was built from (see
+    ``ts_cli/model_builder.py::_build_model_columns``) — a Tableau column's
+    internal/raw name can differ from its display caption, and re-deriving
+    db_column_name from the display name (build_table_tml's un-mapped
+    default) would silently diverge from what the model references, breaking
+    ``ts tml lint --dir``'s cross-reference check.
+
+    ``table_registry`` (Fix #B — BL follow-up, Set Control "Sub-Category" XREF):
+    when a `build-model` run spans MULTIPLE datasources that declare a
+    same-named physical table (a common Tableau pattern — several datasources
+    copied from one connection, each used by a different set of worksheets),
+    each datasource only carries the subset of that table's columns IT
+    references. Without a registry, writing `{slug}.table.tml` per-datasource
+    means the LAST datasource processed silently overwrites the file, dropping
+    any column only an earlier datasource referenced — live-reproduced on
+    ``TableauSetControlUseCases.twbx``, where "Sets"/"Hex Map" (no
+    Sub-Category) processed after "Set Control" (has it) clobbered it, leaving
+    a Model TML column_id with no matching Table TML column (`ts tml lint`
+    XREF). Passing one dict, shared across every datasource in the same
+    `build-model` invocation, accumulates the UNION of columns ever seen for
+    that table name (first-seen definition wins per db_column_name — the
+    normal case is identical column defs across datasources anyway) instead of
+    each datasource's write clobbering the last. ``None`` (the default)
+    preserves the old per-call behavior for any caller that doesn't share a
+    registry across multiple datasources.
+
+    Returns ``{"table_files": [...], "tables_written": N,
+    "table_columns_unassigned": [...]}`` — the last key only for multi-table.
+    """
+    from ts_cli.tableau.tables import build_table_tml
+    from ts_cli.tableau_translate import dump_tml_yaml
+
+    result: dict = {}
+    if len(tables) == 1:
+        by_table = {tables[0]["name"]: list(columns)}
+    else:
+        by_table, unassigned = _resolve_table_columns(tables, columns, col_table_map or {})
+        result["table_columns_unassigned"] = unassigned
+        if unassigned:
+            typer.echo(
+                f"  WARNING: {len(unassigned)} column(s) have no resolvable "
+                f"table ownership on this multi-table datasource — excluded "
+                f"from Table TML (col_table_map upstream-parse limitation).",
+                err=True,
+            )
+
+    paths: list = []
+    for t in tables:
+        t_cols = by_table.get(t["name"], [])
+        if table_registry is not None:
+            merged = table_registry.setdefault(t["name"], {})
+            for c in t_cols:
+                key = c.get("db_column_name") or c.get("name")
+                if key not in merged:
+                    merged[key] = c
+            t_cols = list(merged.values())
+        # Fix #C: forward the parser's own db_table (a dotted db.schema.table
+        # path — see twb.py._extract_tables) so build_table_tml can prefer it
+        # over re-slugging `name`. Matters when the table is a Tableau-
+        # assigned ALIAS for a physical table joined twice (`alias_of`,
+        # e.g. Ads Commercial Dashboard's `d_partner1` aliasing `d_partner`)
+        # — re-deriving from `name` there would slug the alias, a table name
+        # that does not exist in the warehouse.
+        table_dict = {"name": t["name"], "columns": t_cols, "db_table": t.get("db_table")}
+        cmap = {c["name"]: c.get("db_column_name", c["name"]) for c in t_cols}
+        obj, _dropped = build_table_tml(
+            table_dict, connection_name, database, schema,
+            column_map={t["name"]: cmap},
+        )
+        table_slug = re.sub(r"[^a-z0-9]+", "_", t["name"].lower()).strip("_") or "table"
+        t_path = out_path / f"{table_slug}.table.tml"
+        t_path.write_text(dump_tml_yaml(obj))
+        typer.echo(f"  Wrote Table: {t_path}", err=True)
+        paths.append(str(t_path))
+
+    result["table_files"] = paths
+    result["tables_written"] = len(paths)
+    return result
+
+
+def _apply_reconcile_tier(
+    cleaned_cols: list,
+    cleaned_formulas: list[dict],
+    reconcile_table: Optional[str],
+    reconcile_plan_mode: bool,
+    column_name_map: Optional[dict],
+    profile: Optional[str],
+) -> tuple[list, list, Optional[dict], Optional[dict]]:
+    """Tier-2: reconcile emitted columns against a real target table's schema
+    (consultant/stand-in-view case, where the .twb's column names don't match
+    the ThoughtSpot table that will actually back this model).
+
+    Returns ``(cleaned_cols, cleaned_formulas, result_reconcile_dropped, early_result)``.
+    ``early_result`` is non-None only in ``--reconcile-plan`` mode, signalling the
+    caller must return it immediately without building any TML.
+    """
+    if not reconcile_table:
+        return cleaned_cols, cleaned_formulas, None, None
+
+    target_cols = _fetch_target_columns(reconcile_table, profile)
+    if reconcile_plan_mode:
+        print(json.dumps(_reconcile_plan(cleaned_cols, target_cols), indent=2))
+        return cleaned_cols, cleaned_formulas, None, {"reconcile_plan": True}
+
+    from ts_cli.tableau.reconcile import apply_reconciliation
+
+    cleaned_cols, cleaned_formulas, result_reconcile_dropped = apply_reconciliation(
+        cleaned_cols, cleaned_formulas, target_cols, column_name_map or {},
+    )
+    typer.echo(
+        f"  Reconcile: {len(result_reconcile_dropped['columns'])} column(s) dropped, "
+        f"{len(result_reconcile_dropped['formulas'])} formula(s) dropped",
+        err=True,
+    )
+    return cleaned_cols, cleaned_formulas, result_reconcile_dropped, None
+
+
+def _emit_xref_warnings(model_tml: dict, tables: list, columns: list, sql_views: list) -> None:
+    """Pre-flight dangling cross-reference check (BL-cross-ref-check): catches a
+    model_tables/column_id/join reference to a table or column that was never
+    generated — a class of import rejection that otherwise only surfaces after a
+    round trip to the server. Non-fatal — warnings only, printed to stderr (never
+    stdout, which carries this command's JSON result). See build_generated_tables_map
+    for why the table/column map here is an approximation, not read Table TML.
+    """
+    from ts_cli.tableau.build_model import build_generated_tables_map
+    from ts_cli.tml_lint import lint_cross_references
+
+    generated_tables = build_generated_tables_map(tables, columns, sql_views)
+    for finding in lint_cross_references(model_tml, generated_tables):
+        typer.echo(f"  WARNING: {finding}", err=True)
+
+
 def _generate_flow(
     ds: dict,
     name: str,
@@ -680,15 +943,20 @@ def _generate_flow(
     validation_issues: list,
     out_path: Path,
     dry_run: bool,
+    database: str = "",
+    schema: str = "",
     reconcile_table: Optional[str] = None,
     reconcile_plan_mode: bool = False,
     column_name_map: Optional[dict] = None,
     profile: Optional[str] = None,
+    table_registry: Optional[dict] = None,
 ) -> dict:
     """Build phased model TML files from scratch and write them to disk."""
     from ts_cli.model_builder import build_model_tml, split_for_phased_import
     from ts_cli.tableau.build_model import apply_prefix_and_double_agg
-    from ts_cli.tableau.reconcile import clean_columns, drop_junk_formulas, strip_suffix_in_expr
+    from ts_cli.tableau.reconcile import (
+        clean_columns, drop_junk_columns, drop_junk_formulas, strip_suffix_in_expr,
+    )
     from ts_cli.tableau_translate import dump_tml_yaml
 
     # Tier-1: strip Custom-SQL suffixes, drop junk, dedupe, and set the table so
@@ -698,12 +966,17 @@ def _generate_flow(
     # stamping tables[0] on all of them would mis-qualify columns that
     # actually belong to other tables (worse than the pre-existing bare
     # column_id, which _build_model_columns's own single_table guard leaves
-    # alone). Multi-table sources have no Custom-SQL suffixes/junk anyway —
-    # that only comes from single-table sqlproxy sources — so leaving
-    # cleaned_cols untouched here is safe.
+    # alone). Multi-table datasources DO still carry the
+    # __tableau_internal_object_id__ junk pseudo-column (Tableau writes one per
+    # physical table, not just for single-table sqlproxy sources — confirmed
+    # live on Ads Commercial Dashboard: 26 leaked into Model TML before this
+    # fix) — drop_junk_columns() strips those without clean_columns' table
+    # stamp/dedup (both wrong here, see its docstring).
     if len(ds.get("tables", [])) == 1:
         _table_name = ds["tables"][0]["name"]
         cleaned_cols = clean_columns(cleaned_cols, _table_name)
+    else:
+        cleaned_cols = drop_junk_columns(cleaned_cols)
     for f in cleaned_formulas:
         f["expr"] = strip_suffix_in_expr(f["expr"])
 
@@ -711,31 +984,27 @@ def _generate_flow(
     # must run unconditionally, not just under --reconcile-table.
     cleaned_formulas, _junk_dropped = drop_junk_formulas(cleaned_formulas)
 
-    # Tier-2: reconcile emitted columns against a real target table's schema
-    # (consultant/stand-in-view case, where the .twb's column names don't
-    # match the ThoughtSpot table that will actually back this model).
-    result_reconcile_dropped: Optional[dict] = None
-    if reconcile_table:
-        target_cols = _fetch_target_columns(reconcile_table, profile)
-        if reconcile_plan_mode:
-            print(json.dumps(_reconcile_plan(cleaned_cols, target_cols), indent=2))
-            return {"reconcile_plan": True}
-        from ts_cli.tableau.reconcile import apply_reconciliation
-
-        cleaned_cols, cleaned_formulas, result_reconcile_dropped = apply_reconciliation(
-            cleaned_cols, cleaned_formulas, target_cols, column_name_map or {},
-        )
-        typer.echo(
-            f"  Reconcile: {len(result_reconcile_dropped['columns'])} column(s) dropped, "
-            f"{len(result_reconcile_dropped['formulas'])} formula(s) dropped",
-            err=True,
-        )
+    cleaned_cols, cleaned_formulas, result_reconcile_dropped, _early_result = _apply_reconcile_tier(
+        cleaned_cols, cleaned_formulas, reconcile_table, reconcile_plan_mode, column_name_map, profile,
+    )
+    if _early_result is not None:
+        return _early_result
 
     gen_formula_names = {f["name"] for f in cleaned_formulas}
     gen_param_names = {p["name"] for p in parsed["parameters"]}
     apply_prefix_and_double_agg(cleaned_formulas, gen_formula_names, gen_param_names)
 
     sql_views = ds.get("sql_views", [])
+
+    # BL-093: resolve <[Parameters].[Name]> tokens Tableau lets a Custom SQL
+    # body embed — substitute the parsed parameter's default (SQL is then
+    # valid, value is now static) or flag NEEDS-REVIEW when unresolved.
+    # Mutates sql_views' sql_query in place before it's consumed below.
+    from ts_cli.tableau.params import substitute_sql_view_parameters
+    sql_view_param_warnings = substitute_sql_view_parameters(sql_views, parsed["parameters"])
+    for vi in sql_view_param_warnings:
+        for w in vi["warnings"]:
+            typer.echo(f"  ! SQL View {vi['name']}: {w}", err=True)
 
     model_tml = build_model_tml(
         model_name=name,
@@ -749,16 +1018,17 @@ def _generate_flow(
         sql_views=sql_views,
     )
 
+    _emit_xref_warnings(model_tml, ds["tables"], cleaned_cols, sql_views)
+
     levels = {}
     for f in cleaned_formulas:
         fname = f["name"]
         levels[fname] = raw_levels.get(fname, 0)
     phases = split_for_phased_import(model_tml, levels)
 
-    typer.echo(f"  Phases: {len(phases)} (phase 0 = base, then per dependency level)", err=True)
-    for i, phase in enumerate(phases):
-        fc = len(phase["model"].get("formulas", []))
-        typer.echo(f"    Phase {i}: {fc} formulas", err=True)
+    base_model = phases[0]
+    fc_total = len(model_tml["model"].get("formulas", []))
+    typer.echo(f"  Base model: 0 formulas; full model: {fc_total} formulas", err=True)
 
     result = {
         "datasource": ds["name"],
@@ -771,27 +1041,45 @@ def _generate_flow(
         "parameters": len(parsed["parameters"]),
         "name_renames": rename_map,
         "sql_views": len(sql_views),
-        "phases": len(phases),
     }
-    if validation_issues:
-        result["validation_warnings"] = validation_issues
+    all_validation_warnings = list(validation_issues) + sql_view_param_warnings
+    if all_validation_warnings:
+        result["validation_warnings"] = all_validation_warnings
     if _junk_dropped:
         result["junk_formulas_dropped"] = _junk_dropped
     if result_reconcile_dropped is not None:
         result["reconcile_dropped"] = result_reconcile_dropped
 
     if not dry_run:
-        # SQL Views first — they must exist before the model that references them.
-        # (empty list when the datasource has no Custom SQL relations)
         result["sql_view_files"] = _write_sql_view_files(sql_views, connection_name, out_path, slug)
 
-        for i, phase in enumerate(phases):
-            fname = f"{slug}.phase{i}.model.tml"
-            fpath = out_path / fname
-            yaml_str = dump_tml_yaml(phase)
-            fpath.write_text(yaml_str)
-            typer.echo(f"  Wrote: {fpath}", err=True)
-            result[f"phase_{i}_file"] = str(fpath)
+        base_path = out_path / f"{slug}.phase0.model.tml"
+        base_path.write_text(dump_tml_yaml(base_model))
+        typer.echo(f"  Wrote: {base_path}", err=True)
+        result["phase_0_file"] = str(base_path)
+
+        full_path = out_path / f"{slug}.model.tml"
+        full_path.write_text(dump_tml_yaml(model_tml))
+        typer.echo(f"  Wrote: {full_path}", err=True)
+        result["model_file"] = str(full_path)
+
+        # BL-067: emit one *.cohort.tml per translatable native Tableau Set
+        # (Phase 2a/2b/2c) — import order is model -> cohort (a query set's
+        # formula may reference a model parameter), which the phased-import
+        # payload in Step 5.5 already reflects since cohorts land alongside
+        # the full model file, never the phase-0 base.
+        result.update(_write_cohort_files(
+            ds.get("sets", []), name, rename_map, parsed.get("param_map", {}),
+            out_path, slug,
+        ))
+
+        # SPEED GUARDRAIL: reuses ds/cleaned_cols already parsed/assembled
+        # above — no TWB re-parse, no whole-corpus YAML load/dump pass.
+        result.update(_write_table_tml_files(
+            ds["tables"], cleaned_cols, connection_name, database, schema, out_path,
+            col_table_map=ds.get("col_table_map"),
+            table_registry=table_registry,
+        ))
 
     return result
 
@@ -835,10 +1123,20 @@ def _process_datasource(
     out_path: Path,
     reconcile_table: Optional[str],
     reconcile_plan_mode: bool,
+    database: str = "",
+    schema: str = "",
+    table_registry: Optional[dict] = None,
 ) -> Optional[dict]:
     """Run the full per-datasource pipeline (translate, merge-or-generate) for
     one TWB datasource. Returns None to signal --reconcile-plan already
     printed its JSON and the caller should stop without further output.
+
+    ``table_registry`` — see ``_write_table_tml_files`` — is a single dict the
+    caller creates ONCE per `build-model` invocation and passes to every
+    datasource's call here, so Table TML for a physical table name shared by
+    more than one datasource accumulates the union of referenced columns
+    instead of the last datasource's write silently clobbering the rest
+    (Fix #B).
     """
     from ts_cli.model_builder import (
         build_formula_levels,
@@ -889,7 +1187,7 @@ def _process_datasource(
         ds["calculated_fields"], ds["calc_map"],
     )
 
-    translated, skipped, validation_issues = _translate_and_validate(
+    translated, skipped, validation_issues, name_clashes = _translate_and_validate(
         ds, resolved_calcs, scoped_columns, parsed,
     )
 
@@ -897,6 +1195,12 @@ def _process_datasource(
     cleaned_cols, cleaned_formulas, rename_map = resolve_name_collisions(
         ds["columns"], translated, parsed["parameters"],
     )
+    # Fix #B: merge in the column/formula name-clash renames (a distinct
+    # collision class — formula-vs-physical-column, detected earlier inside
+    # translate_formulas — from resolve_name_collisions' own formula-vs-
+    # parameter renames) so every rename this run applied is visible in one
+    # place (`result["name_renames"]`), not just the parameter-collision kind.
+    rename_map = {**name_clashes, **rename_map}
     if rename_map:
         typer.echo(f"  Renamed: {rename_map}", err=True)
 
@@ -932,10 +1236,13 @@ def _process_datasource(
         validation_issues=validation_issues,
         out_path=out_path,
         dry_run=dry_run,
+        database=database,
+        schema=schema,
         reconcile_table=reconcile_table,
         reconcile_plan_mode=reconcile_plan_mode,
         column_name_map=col_name_map,
         profile=profile,
+        table_registry=table_registry,
     )
     if result.get("reconcile_plan"):
         # _generate_flow already printed the plan JSON to stdout — signal
@@ -979,6 +1286,19 @@ def build_model_cmd(
                                               help="Model name (default: derived from TWB)"),
     datasource_name: Optional[str] = typer.Option(None, "--datasource", "-d",
                                                     help="Filter to a single datasource"),
+    database: str = typer.Option(
+        "", "--database", "-D",
+        help="GENERATE mode only. Warehouse database for the emitted Table "
+             "TML(s) `db` field. Empty is fine for offline emission + local "
+             "`ts tml lint`; a later live import would supply the real value. "
+             "(Short flag is -D, not -d — -d is already --datasource.)",
+    ),
+    schema: str = typer.Option(
+        "", "--schema", "-s",
+        help="GENERATE mode only. Warehouse schema for the emitted Table "
+             "TML(s) `schema` field. Empty is fine for offline emission + "
+             "local `ts tml lint`; a later live import would supply the real value.",
+    ),
     existing_guid: Optional[str] = typer.Option(None, "--existing-guid",
                                                   help="GUID of existing model to merge formulas into"),
     profile: Optional[str] = typer.Option(None, "--profile", "-p",
@@ -1019,7 +1339,10 @@ def build_model_cmd(
     Extracts tables, columns, joins, parameters, and calculated fields from
     the TWB XML, translates formulas, resolves name collisions, applies
     formula_ prefix for cross-references, detects double aggregation, and
-    outputs phased model TML files ready for ts tml import.
+    outputs phased model TML files ready for ts tml import. In GENERATE mode
+    (no --existing-guid) also emits one `.table.tml` per physical table
+    referenced by the model, so the output directory is import-ready and
+    `ts tml lint --dir` can check model<->table cross-references.
 
     With --existing-guid: exports the existing model, merges new formulas
     into it (skipping existing), filters unresolvable references, and
@@ -1052,6 +1375,22 @@ def build_model_cmd(
     typer.echo(f"Parsing {twb_path.name}...", err=True)
     parsed = parse_twb(twb_path)
 
+    # BL-131/BL-067: native Tableau Sets (<group> — static/Top-N/condition-based)
+    # ARE now auto-converted by this GENERATE pass — one *.cohort.tml per
+    # translatable set (Phase 2a/2b/2c), see `_write_cohort_files` below. Nudge
+    # that some sets may still be deferred (Set Controls, unclassified shapes) —
+    # each datasource's result JSON carries the exact `cohorts_emitted`/
+    # `cohorts_deferred` breakdown; per-set "Set: ..." log lines above give the
+    # reason for every one.
+    sets_detected = parsed.get("sets_detected", 0)
+    if sets_detected > 0:
+        typer.echo(
+            f"INFO: {sets_detected} Tableau Set(s) detected — emitting *.cohort.tml for "
+            "translatable sets (Phase 2a/2b/2c); see cohorts_emitted/cohorts_deferred "
+            "in the result JSON for any set that couldn't be converted.",
+            err=True,
+        )
+
     # Filter datasources
     datasources = parsed["datasources"]
     if datasource_name:
@@ -1064,6 +1403,16 @@ def build_model_cmd(
                 err=True,
             )
             raise SystemExit(1)
+
+    # Fix #B: shared across every datasource in THIS invocation so a physical
+    # table name declared by more than one datasource (a common Tableau
+    # pattern — several datasources copied from one connection, each used by
+    # a different set of worksheets) accumulates the union of referenced
+    # columns in its Table TML instead of the last datasource processed
+    # silently overwriting an earlier one's columns. See
+    # `_write_table_tml_files`'s docstring for the live-reproduced bug this
+    # closes (TableauSetControlUseCases.twbx "Sub-Category" XREF).
+    table_registry: dict = {}
 
     all_results = []
     for ds in datasources:
@@ -1081,11 +1430,246 @@ def build_model_cmd(
             out_path=out_path,
             reconcile_table=reconcile_table,
             reconcile_plan_mode=reconcile_plan,
+            database=database,
+            schema=schema,
+            table_registry=table_registry,
         )
         if result is None:
             # --reconcile-plan already printed its JSON — stop without
             # printing the all_results wrapper or writing any TML.
             return
+        result["sets_detected"] = sets_detected
         all_results.append(result)
 
     print(json.dumps(all_results, indent=2))
+
+
+def _resolve_lb_spec(data: dict, model_name, model_fqn, report_name) -> dict:
+    """A full build_from_spec spec (has 'model_name'), or a `ts tableau parse` output
+    (has 'dashboards') → assembled into a spec with --model-name + derived measures."""
+    if data.get("model_name"):
+        return data
+    if "dashboards" not in data:
+        raise SystemExit("Input must be a parse output ('dashboards') or a full spec ('model_name').")
+    if not model_name:
+        raise SystemExit("--model-name is required when --input is a parse output.")
+    measures = sorted({f["name"] for d in data["dashboards"]
+                       for v in d.get("visuals", []) for f in v.get("fields", [])
+                       if f.get("measure")})
+    return {"report_name": report_name or model_name, "model_name": model_name,
+            "model_fqn": model_fqn, "measure_names": measures, "dashboards": data["dashboards"]}
+
+
+@app.command("build-liveboard")
+def build_liveboard_cmd(
+    input_file: str = typer.Option(..., "--input", "-i",
+                                   help="A `ts tableau parse` output (has 'dashboards') OR a full spec (has 'model_name')"),
+    output_dir: str = typer.Option(".", "--output-dir", "-o",
+                                   help="Directory for the emitted .liveboard.tml"),
+    model_name: Optional[str] = typer.Option(None, "--model-name",
+                                             help="Model/table name to bind to (required with a parse-output input)"),
+    model_fqn: Optional[str] = typer.Option(None, "--model-fqn",
+                                            help="Model/table GUID to bind to (optional; more robust than name)"),
+    report_name: Optional[str] = typer.Option(None, "--report-name",
+                                              help="Liveboard name (default: the model name)"),
+) -> None:
+    """Emit Answer + tabbed-Liveboard TML from a parsed Tableau dashboard spec.
+
+    Deterministic replacement for the Step 10 prose templates: role-aware axis layout
+    (Columns→x, Color→series/color, Rows→pivot rows, measures→y), a chart-type requirement
+    floor (flag, don't downgrade), and overrides capture-and-replay (formats /
+    client_state_v2 / custom_chart_config / viz_style). Writes `{report}.liveboard.tml`
+    (full answers embedded) to --output-dir and prints a JSON summary
+    {report_name, n_answers, n_tabs, liveboard_file, visual_rows, page_rows} to stdout —
+    visual_rows/page_rows feed the Step 12 migration report.
+
+    Example:
+
+    \\b
+      ts tableau build-liveboard -i dashboard_spec.json -o out/
+    """
+    from ts_cli.tableau import liveboard as lb
+    from ts_cli.tml_common import dump_tml_yaml
+
+    p = Path(input_file)
+    if not p.is_file():
+        typer.echo(f"Spec file not found: {input_file}", err=True)
+        raise SystemExit(1)
+    try:
+        data = json.loads(p.read_text())
+    except ValueError as exc:
+        typer.echo(f"Invalid JSON: {exc}", err=True)
+        raise SystemExit(1)
+
+    spec = _resolve_lb_spec(data, model_name, model_fqn, report_name)
+    result = lb.build_from_spec(spec)
+
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    liveboard_file = None
+    if result["liveboard"]:
+        slug = lb.slugify(spec.get("report_name") or spec["model_name"])
+        liveboard_file = str(out_path / f"{slug}.liveboard.tml")
+        Path(liveboard_file).write_text(dump_tml_yaml(result["liveboard"]))
+
+    n_tabs = len(result["liveboard"]["liveboard"]["layout"]["tabs"]) if result["liveboard"] else 0
+    typer.echo(
+        f"{len(result['answers'])} answer(s), {n_tabs} tab(s) -> {liveboard_file or '(no liveboard)'}",
+        err=True,
+    )
+    print(json.dumps({
+        "report_name": spec.get("report_name") or spec["model_name"],
+        "n_answers": len(result["answers"]),
+        "n_tabs": n_tabs,
+        "liveboard_file": liveboard_file,
+        "visual_rows": result["visual_rows"],
+        "page_rows": result["page_rows"],
+    }, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# ts tableau verify
+# ---------------------------------------------------------------------------
+
+def _load_json(path: Path, label: str) -> dict:
+    from ts_cli.io_helpers import load_json_file
+    try:
+        return load_json_file(path, label)
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise SystemExit(1)
+
+
+def _load_yaml_tml(path: Path, label: str) -> dict:
+    if not path.is_file():
+        typer.echo(f"{label} not found: {path}", err=True)
+        raise SystemExit(1)
+    try:
+        return yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        typer.echo(f"Invalid YAML in {label.lower()} ({path}): {exc}", err=True)
+        raise SystemExit(1)
+
+
+def _print_verify_summary(report: dict) -> None:
+    summary = report["summary"]
+    typer.echo(
+        f"Verify: datasource '{summary.get('datasource', '?')}' -> model "
+        f"'{summary.get('model', '?')}' — {summary.get('errors', 0)} error(s), "
+        f"{summary.get('warnings', 0)} warning(s)",
+        err=True,
+    )
+    for check in report["checks"]:
+        typer.echo(f"  [{check['severity']}] {check['name']}", err=True)
+        for f in check["findings"]:
+            typer.echo(f"    - [{f['severity']}] {f['message']}", err=True)
+
+
+def _discover_dir_model_files(directory: str) -> list[str]:
+    """Resolve `--dir` into a sorted list of full Model TML paths for `verify --dir`.
+
+    Matches every `*.model.tml` file directly in `directory` (non-recursive, reusing
+    `ts tml`'s own --dir scanner for consistency), excluding phased base models
+    (`*.phase0.model.tml`) — those carry no formulas yet (see `build-model`'s
+    phase-0/full split) and aren't what the migration-fidelity check compares.
+    Raises SystemExit with a clear message on a missing/invalid --dir or no matches.
+    """
+    from ts_cli.commands.tml import collect_tml_paths
+
+    matched = collect_tml_paths([], directory, patterns=["*.model.tml"])
+    full_models = [p for p in matched if not p.lower().endswith(".phase0.model.tml")]
+    if not full_models:
+        typer.echo(
+            f"--dir matched no full Model TML (*.model.tml, excluding "
+            f"*.phase0.model.tml) in: {directory}",
+            err=True,
+        )
+        raise SystemExit(1)
+    return full_models
+
+
+def _print_verify_dir_summary(agg: dict) -> None:
+    summary = agg["summary"]
+    typer.echo(
+        f"Verify --dir: {summary['n_models']} model(s) — "
+        f"{summary['errors']} error(s), {summary['warnings']} warning(s) "
+        f"({len(summary['models_with_errors'])} model(s) with errors)",
+        err=True,
+    )
+    for entry in agg["models"]:
+        s = entry["summary"]
+        typer.echo(
+            f"  [{'ERROR' if not entry['ok'] else 'OK'}] {entry['model_file']} — "
+            f"{s.get('errors', 0)} error(s), {s.get('warnings', 0)} warning(s)",
+            err=True,
+        )
+
+
+@app.command("verify")
+def verify_cmd(
+    input_file: str = typer.Option(
+        ..., "--parse", "--input", "-i",
+        help="`ts tableau parse` output JSON (also accepted as --input, matching "
+             "build-liveboard's convention)"),
+    model_file: Optional[str] = typer.Option(
+        None, "--model", "-m",
+        help="Generated Model TML file to verify against. Mutually exclusive with --dir."),
+    dir_: Optional[str] = typer.Option(
+        None, "--dir",
+        help="Directory of `build-model` output — verify every full Model TML "
+             "(*.model.tml, excluding *.phase0.model.tml) in one call. Mutually "
+             "exclusive with --model."),
+) -> None:
+    """Diff a parsed Tableau workbook against its generated Model TML.
+
+    Catches silent drops (a table/join/translatable formula the workbook had
+    but the TML doesn't) and mistranslations (a TML formula that barely
+    resembles its Tableau source) that a coverage count computed from the TWB
+    alone — or a server-side VALIDATE_ONLY import — cannot see. Four checks:
+    structural completeness, formula equivalence (token-level LCS similarity),
+    TML validity (delegates to `ts_cli/tml_lint.py`), and limitation coverage
+    (advisory — see `ts_cli/tableau/verify.py`). Formula-tier classification
+    is delegated to `ts_cli/tableau/classify.py`, so an untranslatable formula
+    correctly absent from the model is never flagged as a drop.
+
+    Model<->table-TML dangling-reference checking is provided separately by
+    `ts tml lint --dir` and is intentionally out of scope here.
+
+    With `--model`: verifies that single Model TML file, printing the full report
+    as JSON to stdout (a human-readable summary to stderr). Exit code is non-zero
+    if any check carries an ERROR finding.
+
+    With `--dir`: verifies every full Model TML in that directory (as `--model`
+    would, one call each) and aggregates the reports into one JSON report + one
+    combined exit code (non-zero if ANY model has an ERROR) — so a multi-datasource
+    workbook's models are checked in a single call instead of one per model.
+    Exactly one of `--model`/`--dir` is required.
+
+    \\b
+      ts tableau verify --parse parsed.json --model out/orders.model.tml
+      ts tableau verify --parse parsed.json --dir out/
+    """
+    if bool(model_file) == bool(dir_):
+        typer.echo("Exactly one of --model or --dir is required.", err=True)
+        raise SystemExit(1)
+
+    from ts_cli.tableau.verify import verify_conversion, verify_conversion_dir
+
+    parsed = _load_json(Path(input_file), "Parse file")
+
+    if model_file:
+        model_tml = _load_yaml_tml(Path(model_file), "Model TML file")
+        report = verify_conversion(parsed, model_tml)
+        _print_verify_summary(report)
+        print(json.dumps(report, indent=2))
+        if not report["ok"]:
+            raise SystemExit(1)
+        return
+
+    model_paths = _discover_dir_model_files(dir_)
+    models = [(p, _load_yaml_tml(Path(p), f"Model TML file ({p})")) for p in model_paths]
+    agg = verify_conversion_dir(parsed, models)
+    _print_verify_dir_summary(agg)
+    print(json.dumps(agg, indent=2))
+    if not agg["ok"]:
+        raise SystemExit(1)

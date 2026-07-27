@@ -2,8 +2,8 @@
 
 Format per [.claude/rules/api-research.md](../../../../.claude/rules/api-research.md).
 
-**Status (updated 2026-07-14):** the core behaviours have been VERIFIED live on the
-aggregate-aware cluster (172.32.87.7): **#0, #1, #2, #6, #7, #8, #10** verified, and the
+**Status (updated 2026-07-27):** the core behaviours have been VERIFIED live on the
+aggregate-aware cluster: **#0, #1, #2, #6, #7, #8, #10** verified, and the
 DDL-from-SpotQL path (#14) proven end-to-end (a generated aggregate matched the detail
 total exactly). **#11, #12, #14, #15** are IMPLEMENTED + unit-tested with a live re-check
 pending; **#13** is DEFERRED (explicit non-v1). The remaining OPEN items — **#3** (model
@@ -13,7 +13,9 @@ edge-case behaviours, each with a runnable live-test script, and are gated behin
 skill's mandatory Step-7 routing verification (every recommendation is provisional until
 that check passes). **#17** (RLS propagation) is WIRED end-to-end, its known import bugs
 are FIXED, and its identical-rule dedup + pass-2 fail-closed hardening (Task 26) are DONE
-— only the live leak-test and the flat-shape confirmation remain OPEN. Per
+— only the live leak-test remains OPEN there; the flat-shape `rls_rules` confirmation it
+used to carry as a sub-item is now **#19**, tracked separately (fail-closed, not a
+blocker). Per
 [.claude/rules/branching.md](../../../../.claude/rules/branching.md), these satisfy the
 "explicitly deferred to a follow-up open item" merge clause.
 
@@ -23,7 +25,7 @@ check pending) | **DEFERRED** (explicit non-v1 decision, tracked as a follow-up)
 
 ---
 
-## #0 — Does routing fire + trigger condition — VERIFIED 2026-07-13 (aggregate-aware cluster 172.32.87.7)
+## #0 — Does routing fire + trigger condition — VERIFIED 2026-07-13 (aggregate-aware cluster)
 
 **RESULT: routing works, and fires ONLY for FORMULA measures — not plain
 measure columns.** A `[Agg Test Sales] [Product Category]` query (where
@@ -106,7 +108,7 @@ scanned physical table is the aggregate, not the detail fact.
    how the skill's **Step 7 routing-verification** must observe routing —
    currently Step 7 inspects SpotQL SQL, which may not surface routing.
 
-## #1 — Date re-aggregation — VERIFIED 2026-07-13 (aggregate-aware cluster 172.32.87.7)
+## #1 — Date re-aggregation — VERIFIED 2026-07-13 (aggregate-aware cluster)
 
 **RESULT: finer-serves-coarser confirmed — `bucket_covers` is correct as written.**
 Against a MONTHLY aggregate (`DM_AGG_CAT_MONTHLY`): a **monthly** query routed to
@@ -319,7 +321,7 @@ a routed query to confirm it resolves.
 
 ---
 
-## #6 — Multi-aggregate precedence — VERIFIED 2026-07-13 (aggregate-aware cluster 172.32.87.7)
+## #6 — Multi-aggregate precedence — VERIFIED 2026-07-13 (aggregate-aware cluster)
 
 **RESULT: first-match by `aggregated_models` definition order — NOT auto-smallest.**
 With two aggregates both able to serve a category query (`DM_AGG_CAT`, 8 rows, and
@@ -457,7 +459,7 @@ the org's week start isn't Monday).
 
 ---
 
-## #10 — Filter-precision-vs-bucket — VERIFIED SAFE 2026-07-14 (aggregate-aware cluster 172.32.87.7)
+## #10 — Filter-precision-vs-bucket — VERIFIED SAFE 2026-07-14 (aggregate-aware cluster)
 
 **RESULT: the engine self-protects — no wrong/empty results.** A MONTHLY-grain
 query filtered at DAY precision (`[Transaction Date] = '01/15/2024'`) against a
@@ -836,7 +838,7 @@ greedy ranking, never `covers()`'s coverage correctness. Noted inline on
 
 ---
 
-## #17 — RLS propagation (Task 22/23/25/26) — WIRED; import bugs FIXED, identical-rule dedup + pass-2 fail-closed DONE, single-rule propagation VERIFIED live; leak-test + flat-shape confirmation OPEN
+## #17 — RLS propagation (Task 22/23/25/26) — WIRED; import bugs FIXED, identical-rule dedup + pass-2 fail-closed DONE, single-rule propagation VERIFIED live; live leak-test OPEN (flat-shape confirmation split out to #19)
 
 **Context:** live review surfaced that the skill previously only GATED on base-table
 row-level security — it refused to import until the user manually replicated the RLS
@@ -858,11 +860,12 @@ five functions, all unit-tested in
    `test_report_matched_columns.py::_TABLE_TML_WITH_RLS`) and a flat rule-list shape
    (no `table_paths` at all). Note: `agents/shared/erd/parser.py::_rls_rule_list`
    normalizes the two *nesting shapes* but does NOT resolve bracket refs to columns —
-   that resolution is this module's own logic. **UNVERIFIED (no in-repo flat-shape
-   TML example):** the flat shape resolves a bracket ref's identifier against the
-   owning table's own name via a seeded `{own_table: (own_table, [])}` fallback entry
-   in the path map — a reasonable inference, flagged for re-check by Task 23 / live
-   testing if a real flat-shape export ever surfaces.
+   that resolution is this module's own logic. **The flat-shape branch is an
+   inference, not a verified behaviour — tracked as its own open item, [#19](#19--flat-shape-rls_rules-extraction--open):**
+   it resolves a bracket ref's identifier against the owning table's own name via a
+   seeded `{own_table: (own_table, [])}` fallback entry in the path map, which is a
+   reasonable reading of the shape but has never been checked against a real
+   flat-shape export.
 2. `rls_filter_columns(rules)` — the `(base table, physical column)` pairs the RLS
    exprs filter on, parsed from each rule's own `path_ids` map (supports cross-table
    RLS refs, not just a rule's owning table). **Fail-closed:** a ref whose path_id is
@@ -1041,7 +1044,7 @@ clarification:**
    table (no RLS) succeeds still reports BOTH guids while exiting non-zero overall; both
    happy paths still exit 0.
 
-**Still OPEN — the only two pieces left:**
+**Still OPEN — the one piece left in this item:**
 1. **Live leak-test.** Task 25 verified single-rule propagation's IMPORT/ATTACH path
    live (the rule now imports and attaches to the aggregate table, per Bugs A/B above)
    — that is a DIFFERENT question from this one. Does an RLS-restricted query against
@@ -1056,7 +1059,110 @@ clarification:**
    restricted user (swap `--profile`) and confirm the returned rows actually respect the
    rule. This item stays OPEN until someone actually runs it against a live
    aggregate-aware cluster with a real RLS rule.
-2. **Flat-shape `rls_rules` confirmation.** `extract_rls`'s flat-list handling (no
-   `table_paths`, resolved via the own-table-name fallback) is still unverified against
-   a real flat-shape TML export — see `rls.py`'s module docstring. Re-check the first
-   time a live table export actually shows this shape.
+
+The flat-shape `rls_rules` confirmation was previously tracked here as a second
+sub-item. It is a distinct, independently-testable gap with its own trigger
+condition, so it now has its own entry — [#19](#19--flat-shape-rls_rules-extraction--open).
+
+## #18 — End-to-end build findings (2026-07-15, nebula-aggregate-aware) — OPEN, plan in references/remediation-plan.md
+
+First full manual build of two aggregates (dimensional + monthly semi-additive) on
+"Dunder Mifflin Sales & Inventory" surfaced 14 findings (F1–F17 in the run's
+PROCESS_FINDINGS.md). Full design + phased plan: [remediation-plan.md](remediation-plan.md).
+Summary of tracked items:
+
+**Correctness bugs (Phase 0):**
+- **F1 — part (a) FIXED.** `build_base_count_sql` counted `model_tables[0]` (a dim, no fact
+  join) → `base_rows=8`. Now `sqlgen.base_table_name` anchors the count on the measure-owning
+  fact (unit-tested). (b) DONE — `flag_suspect_base_rows` warns + sets `base_rows_suspect`
+  when `base_rows` < max(agg_rows), both profile paths. Remaining (c): fix internal SpotQL
+  so profiling stops falling back to the walker (needs live repro).
+- **F6 — INVALIDATED (operator error, not a tool bug).** The reported crash on a
+  `bucket=MONTHLY` candidate was caused by a malformed injected candidate
+  (`date_grains: ['MONTHLY']` — list of strings — instead of the real
+  `[{'column','bucket'}]` shape). Verified offline: correctly-shaped bucketed candidates and
+  the `date_column`/`bucket` compat shim both work in `generate._grain_columns`. Residual
+  (LOW): the tool raises a bare `TypeError`/`AttributeError` on a malformed candidate dict —
+  add input-shape validation with a clear message. NOT a blocker for the monthly use case.
+- **F8 — FIXED.** Component types were hardcoded (`INT64` for COUNT else `DOUBLE`), so
+  `SUM(int)` emitted DOUBLE and `ts tables create` failed the CDW type check. Model TML lacks
+  measure types, but the base Table TMLs carry them — `generate._measure_source_type()` now
+  resolves each component's source column (via `column_id` or the formula's `[TABLE::col]`
+  ref) and preserves its type (SUM/MIN/MAX), COUNT→INT64, DOUBLE fallback. `table_tmls`
+  threaded through `_write_table_artifacts`. Unit-tested.
+- **F2** — `ts aggregate profile` (via `commands/load._connect`) died with a bare
+  "install snowflake-connector-python". **FIXED this PR:** added `[snowflake]` extra +
+  a remedy message covering `pip install 'thoughtspot-cli[snowflake]'` and the uv-tool
+  `uv tool install thoughtspot-cli --with snowflake-connector-python` form.
+
+**Verification (Phase 1):**
+- **F9 — ADDRESSED.** Routing fires ONLY for formula measures (open-item #0); the skill built
+  aggregates over plain measure columns that can never route. `recommend` now emits
+  `routing_ineligible_measures` (`commands/aggregate.routing_ineligible_measures` over
+  `spotql_ops.classify_model_columns`) and SKILL.md Step 5a gates on it, offering the
+  promotion (plain measure → `sum([physical])` formula, backup first). Unit-tested. Optional
+  follow-up: codify the promotion as a `ts` command.
+- **F10/F11/F13 — CORRECTED (earlier claim was wrong).** `ts spotql generate-sql` DOES
+  reflect routing for ALL measure kinds incl. semi-additive; the earlier failures were
+  query-construction errors. Step 7 must pick the wrapper via `ts spotql classify-columns`:
+  raw→`SUM`, aggregate-formula→`AGG` (SUM nests → NESTED_AGGREGATE), semi-additive
+  last_value→`SUM` (AGG → NON_CONVERTIBLE_FUNCTION). Re-verified live: `SUM("Inventory
+  Balance")`→monthly agg, `AGG("Amount")`→dimensional agg. Step 7's hardcoded `SUM("Sales")`
+  example is wrong for aggregate-formula measures and must be replaced.
+- **F14** — RLS leak-test still owed (routed queries so far ran as bypass admin); see #17.
+
+**Capability (Phase 2) — mostly wiring existing engine pieces:**
+- **F3** multi-dimension candidates; **F5** wire `measures.py`/`classify-columns`
+  (semi-additive + ratio) into `lattice` candidate generation (knowledge exists, not wired);
+  **F12** role-playing/conformed date columns (key date aggregates on the column users query,
+  or the shared conformed date); **F4** combine-vs-split analysis; **F15** emit formula-only
+  aggregate models (formulas over physical component cols, no hidden component model columns —
+  also unblocks in-place editing).
+
+**UX (Phase 3) — DONE:** **F16** model name now aggregate-first `<aggregate> (<source>)`;
+**F17** `generate` auto-writes a description (grain/measures/routing/RLS). Both unit-tested.
+
+**Positive (keep):** **F7** RLS fail-closed guard + rule remap worked correctly end to end.
+
+## #19 — Flat-shape `rls_rules` extraction — OPEN
+
+Split out of #17 (2026-07-27) so the gap is tracked in its own right rather than
+buried in that item's implementation notes. Nothing about the gap itself changed.
+
+**The question:** `extract_rls`
+([`ts_cli/aggregate/rls.py`](../../../../tools/ts-cli/ts_cli/aggregate/rls.py))
+handles two `rls_rules` nesting shapes. The dict-nested shape
+(`rls_rules: {tables:[…], table_paths:[…], rules:[…]}`) is the live-verified one
+(#17, Task 25). Some builds instead emit a **flat rule list** directly under
+`rls_rules:` with no `table_paths` indirection. In that shape there is nothing to
+resolve a rule expr's `[<id>::<COL>]` ref against, so the module infers the ref
+identifier is the **owning table's own name**, implemented by seeding the path map
+with a `{own_table: (own_table, [])}` fallback entry before resolving refs.
+
+That inference has never been checked against a real flat-shape export — there is
+no flat-shape TML example in the repo, only synthetic unit-test fixtures built to
+the same assumption, so the tests cannot falsify it.
+
+**Why it is not a blocker.** The fail-closed path covers the bad case: a ref that
+resolves to neither a declared `table_paths` entry nor the owning table name
+surfaces with its raw ref_id as a pseudo-table, lands in `required`/`missing`, and
+makes `propagate_rls` raise. So a wrong inference here fails *closed* (an aggregate
+is refused, or an RLS column is force-added) rather than emitting a wrongly-scoped
+rule. The residual risk is a **mis-mapped** ref that happens to resolve to a real
+but incorrect column, which needs a same-named column on another base table to
+occur — the Task 22 `(table, col)` tuple keying already defends the common form of
+that.
+
+**Test procedure (when a flat-shape export surfaces):**
+1. Export a Table TML from a cluster whose `rls_rules` serialise as a flat list:
+   `ts tml export {table_guid} --profile {name} --fqn`
+2. Confirm the shape: `rls_rules:` is a list, with no `table_paths:` key.
+3. Run `extract_rls` over it and check each rule's `path_ids` maps the expr's
+   bracket refs to `(owning table, physical column)` — not to a pseudo-table.
+4. If the inference is wrong, record the real resolution rule here, fix
+   `_resolve_ref`'s seeding in `rls.py`, and add the export as a test fixture in
+   `tools/ts-cli/tests/test_agg_rls.py` (the missing falsifiable case above).
+
+**Trigger:** the first time a live table export actually shows this shape. Until
+then there is nothing to test against, which is why this is OPEN rather than
+scheduled.

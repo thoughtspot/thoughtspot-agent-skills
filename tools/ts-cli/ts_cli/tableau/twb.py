@@ -17,7 +17,7 @@ import re
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 def load_xml_root(path: str | Path) -> ET.Element:
@@ -171,6 +171,17 @@ def build_param_name_map(root: ET.Element) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# 6b. Native Set detection (BL-131) + 6c. Set -> cohort extraction (BL-067 part 1)
+#
+# Split into ts_cli.tableau.set_extract (module-per-concern, BL-069 pattern) to
+# keep this file's line count in budget. Re-exported here so existing callers/
+# tests importing them from ts_cli.tableau.twb keep working unchanged.
+# ---------------------------------------------------------------------------
+
+from ts_cli.tableau.set_extract import count_native_sets, extract_sets  # noqa: E402,F401
+
+
+# ---------------------------------------------------------------------------
 # TWB XML parser
 # ---------------------------------------------------------------------------
 
@@ -207,8 +218,13 @@ def parse_twb(twb_path: str | Path) -> dict:
 
         columns = _extract_columns(ds, tables)
         joins = _extract_joins(ds)
+        # Modern Tableau stores joins as logical relationships (the "noodle"), not physical
+        # <relation join=...>; pick those up too, or a multi-table model imports with no join
+        # and ThoughtSpot rejects it. See reference-tableau-model-discovery-algorithm.
+        joins += _extract_noodle_joins(ds, sql_views)
         calcs, calc_map = _extract_calculated_fields(ds)
         col_table_map = _build_column_table_map(ds, tables)
+        sets = extract_sets(ds)
 
         datasources.append({
             "name": ds_name,
@@ -219,12 +235,20 @@ def parse_twb(twb_path: str | Path) -> dict:
             "calculated_fields": calcs,
             "calc_map": calc_map,
             "col_table_map": col_table_map,
+            # BL-067: classified native Tableau Sets (see extract_sets) — the
+            # structural extraction half of set->cohort conversion; TML emission
+            # (build_cohort_tml) is a separate build-model-time step.
+            "sets": sets,
         })
 
     return {
         "datasources": datasources,
         "parameters": parameters,
         "param_map": param_map,
+        # BL-131: native Tableau Sets are not auto-converted by build-model's
+        # GENERATE pass (set->cohort is an agent-guided Phase-2a/2b/2c step) —
+        # surfaced here so the caller can nudge instead of silently skipping.
+        "sets_detected": count_native_sets(root),
     }
 
 
@@ -320,6 +344,45 @@ def _strip_brackets(s: str) -> str:
     return s.replace("[", "").replace("]", "")
 
 
+def _is_extract_wrapper(tbl: str) -> bool:
+    """True when a relation's ``table`` path is schema-scoped to ``Extract`` —
+    Tableau's hyper-extract cache mirror of a table's live source, written
+    alongside (and with the same ``<relation type='table'>`` shape as) the real
+    relation. Per the skill's Step 3b ("Use the live-source relation; ignore
+    the ``[Extract]`` relation"), these must never be treated as physical
+    tables in their own right — see BL follow-up #4.
+
+    Only the FIRST bracketed segment (the schema) is checked. The wrapper's own
+    identifier commonly re-embeds the live table's full dotted db path plus a
+    GUID (e.g. ``[Extract].[agg_booked_monthly (db.schema.agg_booked_monthly)_8E5C...]``),
+    so splitting once on the first ``.`` (rather than stripping all brackets and
+    splitting on every ``.``) is what keeps this robust to those embedded dots.
+    """
+    return _strip_brackets(tbl).split(".", 1)[0] == "Extract"
+
+
+def _wrapper_relation_names(ds: ET.Element) -> set[str]:
+    """Relation ``name``s that are hyper-Extract cache wrappers (see
+    ``_is_extract_wrapper``) — the single source of truth for "this relation is
+    not a physical table."
+
+    Shared by ``_extract_tables`` (skips emitting these as Table TML) and
+    ``_metadata_column_records`` (skips the wrapper's own duplicate
+    metadata-records so column ownership always resolves from the live
+    relation, never the wrapper — see the ``col_table_map`` XREF/dropped-column
+    fix: a federated Custom-SQL + hyper-Extract datasource writes its column
+    metadata TWICE, once under the live ``<connection>`` and once — mirrored,
+    GUID-named — under ``<extract>``'s own ``<connection>``, and a naive
+    ``.//metadata-record`` walk over the whole datasource picked up both,
+    with the extract's document-order-later copy silently winning).
+    """
+    return {
+        rel.get("name", "")
+        for rel in ds.findall(".//relation[@type='table']")
+        if rel.get("name") and _is_extract_wrapper(rel.get("table", ""))
+    }
+
+
 def _extract_tables(ds: ET.Element) -> list[dict]:
     """Extract physical table definitions from a datasource.
 
@@ -327,12 +390,21 @@ def _extract_tables(ds: ET.Element) -> list[dict]:
     the same physical table twice, Tableau assigns a distinct ``name`` (e.g.
     ``d_partner1``) while keeping the same ``table`` path. We preserve that alias
     so downstream model TML can reference both table instances independently.
+
+    Hyper-extract cache wrapper relations (``table`` schema-scoped to
+    ``[Extract]`` — see ``_is_extract_wrapper``) are skipped entirely: they
+    duplicate a real table under a mangled name and are never referenced by
+    joins, columns, or formulas (those all key off the live-source table name).
+    Emitting them as Table TML would write spurious duplicate tables that
+    overwrite each other run-to-run when multiple datasources share one.
     """
     tables = []
     seen = set()
     for rel in ds.findall(".//relation[@type='table']"):
-        rel_name = rel.get("name", "")
         tbl = rel.get("table", "")
+        if _is_extract_wrapper(tbl):
+            continue
+        rel_name = rel.get("name", "")
         physical_name = _strip_brackets(tbl).split(".")[-1] if tbl else ""
         name = rel_name or physical_name
         if not name or name in seen:
@@ -429,8 +501,84 @@ def _extract_sql_views(ds: ET.Element) -> list[dict]:
     return views
 
 
+def _metadata_column_records(ds: ET.Element) -> dict[str, dict[str, str]]:
+    """Index ``<metadata-record class='column'>`` entries by ``local-name``.
+
+    Each entry carries the column's real warehouse identity: ``remote_name``
+    (the physical column name — see agents/cli/ts-convert-from-tableau
+    references/step-3-parse-fields.md "remote-name ... use for db_column_name")
+    and ``table`` (owning table, from ``parent-name``). Shared by
+    ``_extract_columns`` and ``_build_column_table_map`` so both derive
+    physical identity from the same source of truth.
+
+    When a column's display caption collides across tables in one datasource,
+    Tableau disambiguates by baking `` (table_name)`` into BOTH the internal
+    ``<column name=...>`` and the caption (e.g. ``LineItemId (agg_booked_monthly)``)
+    — but ``remote-name`` stays the clean physical name (``LineItemId``) in
+    every case, colliding or not, which is exactly why it — not the internal
+    name — belongs in ``db_column_name``.
+
+    A federated Custom-SQL + hyper-Extract datasource writes each column's
+    metadata-record TWICE: once under the live ``<connection>`` (``parent-name``
+    = the real relation, e.g. ``[Custom SQL Query]``) and once more, mirrored,
+    under ``<extract>``'s own ``<connection>`` (``parent-name`` = the Extract
+    wrapper's GUID-mangled relation name, e.g. ``[_9BBB0...]`` — see
+    ``_is_extract_wrapper``). Both sit under this same ``<datasource>``, so a
+    plain ``.//metadata-record`` walk finds both for one ``local-name``; records
+    owned by a wrapper relation are skipped here so the live copy — the one
+    ``_extract_tables`` actually emits as a physical table — always wins,
+    regardless of document order. Without this, ``table`` (and ``remote_name``,
+    which the extract's mirror can itself have internally disambiguated, e.g.
+    ``Sales Person1``) resolve to a relation ``_extract_tables`` excludes,
+    dangling the column's eventual ``column_id`` ("XREF: column_id not found")
+    and dropping it from the emitted Table TML.
+
+    ``table`` is ``parent`` verbatim (bracket-stripped) — NOT ``parent.split(".")``
+    — because ``parent-name`` is always a single relation ``name`` reference (the
+    same identifier ``_extract_tables`` uses), never a dotted schema-qualified
+    path; a file-backed relation's own name can legitimately embed a literal
+    ``.`` (e.g. a CSV extract's Tableau-assigned ``some_file.csv1``), which a
+    ``.split(".")[-1]`` would wrongly truncate to ``csv1`` — a table
+    ``_extract_tables`` never emits, dangling ``column_id`` the same way the
+    wrapper-name bug above did.
+    """
+    wrapper_names = _wrapper_relation_names(ds)
+    idx: dict[str, dict[str, str]] = {}
+    for rec in ds.findall(".//metadata-record[@class='column']"):
+        local_name = (rec.findtext("local-name") or "").strip("[]")
+        if not local_name:
+            continue
+        parent = (rec.findtext("parent-name") or "").strip("[]")
+        if parent in wrapper_names:
+            continue
+        entry = idx.setdefault(local_name, {})
+        remote_name = (rec.findtext("remote-name") or "").strip()
+        if remote_name:
+            entry["remote_name"] = remote_name
+        if parent:
+            entry["table"] = parent
+    return idx
+
+
 def _extract_columns(ds: ET.Element, tables: list[dict]) -> list[dict]:
-    """Extract physical column definitions from a datasource."""
+    """Extract physical column definitions from a datasource.
+
+    ``db_column_name`` comes from the matching metadata-record's ``remote-name``
+    — the real warehouse column — never from the internal Tableau ``<column
+    name=...>`` identifier, which Tableau disambiguates with a `` (table_name)``
+    suffix on any caption collision (see ``_metadata_column_records``). Using
+    that suffixed internal name as db_column_name would bind the Table TML to
+    a column that does not exist in the warehouse ("column not found" at
+    import) and break join cross-references between the colliding tables.
+
+    ``table`` is likewise stamped from the metadata-record's owning table when
+    available, so multi-table ``column_id`` values are ``TABLE::col``-qualified
+    from the source of truth rather than left for (fragile, caption-based)
+    downstream ownership guessing — and so the many-columns-same-clean-name
+    case (the collision above) doesn't collide into duplicate bare
+    ``column_id`` values once the disambiguation suffix is gone.
+    """
+    meta = _metadata_column_records(ds)
     columns = []
     for col in ds.findall("./column"):
         if col.find("calculation") is not None:
@@ -447,12 +595,16 @@ def _extract_columns(ds: ET.Element, tables: list[dict]) -> list[dict]:
         column_type = "MEASURE" if role == "measure" else "ATTRIBUTE"
         ts_type = _tableau_type_to_ts(datatype)
 
-        columns.append({
+        rec = meta.get(name, {})
+        entry: dict[str, Any] = {
             "name": caption,
-            "db_column_name": name,
+            "db_column_name": rec.get("remote_name") or name,
             "column_type": column_type,
             "data_type": ts_type,
-        })
+        }
+        if rec.get("table"):
+            entry["table"] = rec["table"]
+        columns.append(entry)
     return columns
 
 
@@ -485,6 +637,70 @@ def _extract_joins(ds: ET.Element) -> list[dict]:
                 "right_table": right_table,
                 "keys": join_keys,
             })
+    return joins
+
+
+def _detail_id_count(view: dict) -> int:
+    """Count detail-grain id columns (`*_id` / `* id`) in a view's output.
+
+    The MANY side of a join has finer grain — it carries more identifier columns
+    (e.g. driver-events has fleet_account_id AND driver_id; the account-level KI
+    breakdown has only fleet_account_id). Robust where GROUP-BY arity isn't (pivot
+    CTEs group positionally). The join key counts too, but the finer table has strictly
+    more, so the comparison still orders them correctly."""
+    n = 0
+    for c in view.get("columns", []):
+        name = (c.get("sql_output_column") or c.get("name") or "").lower().strip()
+        if re.search(r"(^|[ _])id$", name):
+            n += 1
+    return n
+
+
+def _extract_noodle_joins(ds: ET.Element, sql_views: list[dict]) -> list[dict]:
+    """Extract logical-relationship ("noodle") joins from `<relationships>`.
+
+    Modern Tableau stores joins as logical relationships in
+    `<object-graph>/<relationships>`, NOT as physical `<relation join=...>`. Each
+    `<relationship>/<expression op="=">` holds two column refs of the form
+    `[<col> (<Table Name>)]`; the parenthesised suffix identifies each side's table.
+
+    Tableau defers cardinality to query time, so it is (almost always) absent from the
+    file. We infer the MANY side from CTE grain — the table whose Custom SQL has more
+    terms in its final `GROUP BY` is finer-grained (MANY). This is a heuristic; a
+    post-build double-count check is the proof (see reference-tableau-model-discovery-algorithm).
+    """
+    grain = {v.get("name"): _detail_id_count(v) for v in sql_views}
+    ref_re = re.compile(r"^(.*?)\s*\((.+)\)\s*$")
+
+    def parse_ref(op: str) -> tuple[str, Optional[str]]:
+        s = (op or "").strip().strip("[]")
+        m = ref_re.match(s)
+        return (m.group(1).strip(), m.group(2).strip()) if m else (s, None)
+
+    joins = []
+    for rel in ds.findall(".//relationships/relationship"):
+        eq = rel.find("./expression[@op='=']")
+        if eq is None:
+            continue
+        exprs = eq.findall("./expression")
+        if len(exprs) < 2:
+            continue
+        lcol, ltab = parse_ref(exprs[0].get("op", ""))
+        rcol, rtab = parse_ref(exprs[1].get("op", ""))
+        if not (ltab and rtab):
+            continue
+        # MANY side = finer grain (more detail id columns). Orient left=MANY, right=ONE.
+        la, ra = grain.get(ltab, 0), grain.get(rtab, 0)
+        if ra > la:                       # right is finer → right is MANY → swap
+            ltab, rtab, lcol, rcol = rtab, ltab, rcol, lcol
+        joins.append({
+            "type": "INNER",
+            "left_table": ltab,           # MANY side
+            "right_table": rtab,          # ONE side
+            "keys": [{"left": lcol, "right": rcol}],
+            "cardinality": "MANY_TO_ONE",
+            "_source": "noodle",
+        })
     return joins
 
 
@@ -537,12 +753,9 @@ def _build_column_table_map(ds: ET.Element, tables: list[dict]) -> dict[str, str
     """
     col_map: dict[str, str] = {}
 
-    for col in ds.findall(".//metadata-record[@class='column']"):
-        local_name = (col.findtext("local-name") or "").strip("[]")
-        parent = (col.findtext("parent-name") or "").strip("[]")
-        if local_name and parent:
-            table = parent.split(".")[-1]
-            col_map[local_name] = table
+    for local_name, rec in _metadata_column_records(ds).items():
+        if rec.get("table"):
+            col_map[local_name] = rec["table"]
 
     for col in ds.findall("./column"):
         name = col.get("name", "").strip("[]")

@@ -22,9 +22,9 @@ of this skill over time.
 | `joins[]` (`referencing_join`) | `relationships[]` | Resolved from Table TML `joins_with`; same sub-field names |
 | `ATTRIBUTE` column (non-date) | `dimensions[]` | Expression in `dimensions[].expr` |
 | `ATTRIBUTE` column (date/timestamp) | `time_dimensions[]` | Type from `db_column_properties.data_type`; expression in `time_dimensions[].expr` |
-| `MEASURE` column (`aggregation: SUM/AVG/MIN/MAX`) | `facts[]` | Raw numeric column; `aggregation:` hint is informational and is not carried over — Cortex Analyst aggregates freely |
+| `MEASURE` column (`aggregation: SUM/AVG/MIN/MAX`) | `metrics[]` | `expr: AGG(table.column)` — converter wraps the column in its TS aggregation function (default `SUM` if unset). Routing raw MEASUREs to `facts[]` instead is a **planned future enhancement, not yet implemented** — see BL-031 and "Future Improvements" below. |
 | `MEASURE` column (`aggregation: COUNT_DISTINCT`) | `metrics[]` | `expr: COUNT(DISTINCT table.column)` — preserves specific aggregation intent |
-| `MEASURE` column (`aggregation: NONE`) | `dimensions[]` or `facts[]` | Use `dimensions[]` if column is used as a grouping key; `facts[]` if used as a raw numeric |
+| `MEASURE` column (`aggregation: NONE`) | `metrics[]` | Same current routing as SUM/AVG/MIN/MAX — wrapped in the default `SUM(...)`. `dimensions[]`/`facts[]` routing for grouping-key or raw-numeric use is also planned (BL-031), not current behavior. |
 | Formula column (`formula_id`) | `metrics[]` | Expression in `metrics[].expr`; aggregation is baked into the formula — see ts-snowflake-formula-translation.md |
 | `synonyms[]` | `synonyms[]` | Column/metric-level; table-level synonyms also supported by SV but not populated — see Field Reference section |
 | `column.description` | `description` | Passed through |
@@ -104,13 +104,21 @@ relationships:
 
 ### `facts[]` — raw numeric columns vs. `metrics[]`
 
+**Status: Planned — not yet implemented (BL-031).** The current converter routes
+**every** MEASURE column (SUM/AVG/MIN/MAX/NONE, and COUNT_DISTINCT) to `metrics[]` —
+non-formula measures are wrapped in their TS aggregation function (default `SUM` if
+unset). This is the proven, live-verified path: align on `metrics()` and treat it as
+authoritative for what the converter actually emits today. The `facts[]` design below
+documents the **target** state once BL-031 ships — it is not current output. See
+`ts-convert-to-snowflake-sv/SKILL.md` (Concept Mapping table) for the current behavior.
+
 Snowflake SV supports a `facts[]` array on each table for raw numeric columns with no
 pre-defined aggregation. Cortex Analyst can aggregate these freely at query time.
 `facts[]` has no default aggregation field — the aggregation intent is left entirely
 to the query engine.
 
 This maps to the distinction ThoughtSpot makes between raw MEASURE columns and formula
-MEASURE columns:
+MEASURE columns — **target design, not current converter behavior:**
 
 | ThoughtSpot | → | Snowflake SV | Reason |
 |---|---|---|---|
@@ -131,9 +139,11 @@ metrics:
     expr: "SUM(orders.amount)"                 # formula column
 ```
 
-**Note:** The ThoughtSpot `aggregation:` value for `SUM/AVG/MIN/MAX` MEASURE columns is
-intentionally not propagated to Snowflake SV. It was a default hint for ThoughtSpot's
-search engine; Cortex Analyst determines aggregation from context.
+**Note (target design):** Once `facts[]` routing ships, the ThoughtSpot `aggregation:`
+value for `SUM/AVG/MIN/MAX` MEASURE columns would intentionally not propagate to
+Snowflake SV — it was a default hint for ThoughtSpot's search engine, and Cortex Analyst
+would determine aggregation from context. Today, the converter still bakes that
+aggregation into the `metrics[]` `expr` (see Status note above).
 
 ---
 
@@ -267,9 +277,16 @@ semantics differ enough (ThoughtSpot parameters are UI-driven with list/range co
 Snowflake variables are session-scoped SQL constructs) that a mechanical 1:1 translation
 is not reliable without user review.
 
-Impact: formulas referencing parameters are still **omitted** from the YAML. All
+Impact: formulas referencing parameters are still **omitted** from the DDL/YAML. All
 parameters are listed in the Unmapped Properties Report with a note that Snowflake
 variables are the recommended re-implementation path.
+
+**Future translation target:** Snowflake Semantic Views now support a GA top-level
+`variables:` block (June 2026) — see `variables:` in
+[snowflake-schema.md](../../schemas/snowflake-schema.md) — as a semantic-view-native
+construct for exactly this kind of runtime input (`name`, `data_type`, `default_value`).
+Mapping ThoughtSpot `parameters[]` to this block is tracked in BL-031. Until it ships,
+the omit verdict above stands.
 
 ---
 
@@ -485,7 +502,7 @@ in this table.
 | Area | Potential improvement |
 |---|---|
 | AI context | If Snowflake introduces a dedicated per-field AI instruction property, map `ai_context` directly to it instead of merging into `description`. |
-| `facts[]` vs `metrics[]` — converter update | Current converter emits all MEASUREs to `metrics[]` with SUM wrappers. Update to follow the documented rule: SUM/AVG/MIN/MAX MEASUREs → `facts[]`; COUNT_DISTINCT MEASUREs and formula MEASUREs → `metrics[]`. |
+| `facts[]` vs `metrics[]` — converter update (BL-031) | Current converter emits all MEASUREs to `metrics[]` with SUM wrappers — this is the current, intentional, live-verified behavior (see "`facts[]` — raw numeric columns vs. `metrics[]`" above). Planned future enhancement: route SUM/AVG/MIN/MAX MEASUREs → `facts[]`; keep COUNT_DISTINCT MEASUREs and formula MEASUREs on `metrics[]`. |
 | Table-level synonyms | Populate `tables[].synonyms[]` from the model's table description or TML table name variants; currently left absent. |
 | `primary_key` / `unique_keys` | If ThoughtSpot ever exposes PK declarations in TML (or if they can be inferred from connection metadata), populate these for better Cortex Analyst query planning. |
 | Complex SQL views | Add SQL dialect translation for ThoughtSpot-specific syntax to improve portability of complex `sql_query` strings to Snowflake. |

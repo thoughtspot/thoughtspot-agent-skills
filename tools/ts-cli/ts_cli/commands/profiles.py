@@ -38,6 +38,25 @@ def _strip_credentials(profile: dict) -> dict:
     return {k: v for k, v in profile.items() if k not in _CREDENTIAL_FIELDS}
 
 
+def _coerce_field_value(value: str):
+    """Coerce a --field string value to its natural JSON type.
+
+    ``--field key=value`` always arrives as a string, but some profile fields
+    (e.g. ``verify_ssl``) are consumed as booleans — ``client.py`` assigns
+    ``verify_ssl`` straight to ``requests.Session.verify``, where the string
+    ``"false"`` is truthy and gets treated as a CA-bundle path, breaking every
+    request to a self-signed/private cluster. Convert the literals ``true`` and
+    ``false`` (case-insensitive) to real booleans; leave everything else as a
+    string so URLs, usernames, accounts, etc. are untouched.
+    """
+    lowered = value.strip().lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    return value
+
+
 def _infer_auth_type(profile: dict) -> str | None:
     """Infer auth_type from a profile dict's fields."""
     return (
@@ -235,13 +254,13 @@ def add_cmd(
         typer.echo(f"Unknown platform: {platform!r}. Use: {sorted(PROFILE_PATHS)}", err=True)
         raise typer.Exit(1)
 
-    fields: dict[str, str] = {}
+    fields: dict[str, object] = {}
     for f in (field or []):
         if "=" not in f:
             typer.echo(f"Invalid --field format: {f!r}. Use key=value.", err=True)
             raise typer.Exit(1)
         k, v = f.split("=", 1)
-        fields[k] = v
+        fields[k] = _coerce_field_value(v)
 
     slug = slugify(name)
     service = derive_keychain_service(platform, slug)
@@ -303,7 +322,7 @@ def update_cmd(
             typer.echo(f"Invalid --field format: {f!r}. Use key=value.", err=True)
             raise typer.Exit(1)
         k, v = f.split("=", 1)
-        existing[k] = v
+        existing[k] = _coerce_field_value(v)
 
     ops_add_profile(platform, existing)
     typer.echo(json.dumps({"profile": existing}, indent=2))

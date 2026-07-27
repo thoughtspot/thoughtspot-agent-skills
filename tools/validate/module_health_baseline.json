@@ -1,10 +1,10 @@
 {
   "agents/cli/ts-dependency-manager/references/build_coverage.py::_format_summary": 17,
   "tools/ts-cli/ts_cli/audit/__init__.py::_build_ai_analysis": 20,
-  "tools/ts-cli/ts_cli/audit/checks_ai.py::check_a5": 21,
+  "tools/ts-cli/ts_cli/audit/checks_ai.py::check_a5": 22,
   "tools/ts-cli/ts_cli/audit/checks_human.py::check_h3": 24,
   "tools/ts-cli/ts_cli/audit/checks_perf.py::check_p5": 16,
-  "tools/ts-cli/ts_cli/audit/context.py::build_context": 34,
+  "tools/ts-cli/ts_cli/audit/context.py::build_context": 37,
   "tools/ts-cli/ts_cli/audit/report.py::compact_payload": 20,
   "tools/ts-cli/ts_cli/commands/load.py::_infer_type": 20,
   "tools/ts-cli/ts_cli/commands/load.py::_pick_generator": 29,

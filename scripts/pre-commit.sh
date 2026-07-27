@@ -104,6 +104,7 @@ fi
 # Open-items tracking — warn only (don't block commits on pre-existing UNTESTED items)
 if echo "$STAGED" | grep -q 'open-items\.md'; then
   run_check "open items"         "tools/validate/check_open_items.py --root $REPO_ROOT --warn"
+  run_check "open items index"   "tools/validate/generate_open_items_index.py --root $REPO_ROOT --check"
 fi
 
 # Cross-file consistency — runs when agents/, README.md, or SETUP.md are touched
@@ -229,7 +230,7 @@ fi
 # commit) when a shared mapping OR schema file is edited. Presence is hard-gated in CI
 # (--check) so an anchorless new file fails the PR; staleness stays soft everywhere.
 # (.claude/rules/repo-audit.md, angle 13.)
-if echo "$STAGED" | grep -qE '^agents/shared/(mappings|schemas)/.*\.md$|^agents/cli/ts-object-model-spotql-query/references/limitations\.md$'; then
+if echo "$STAGED" | grep -qE '^agents/shared/(mappings|schemas)/.*\.md$|^agents/cli/ts-object-model-agentql-query/references/limitations\.md$'; then
   "$PYTHON_BIN" tools/validate/check_mapping_currency.py --root "$REPO_ROOT" --staged || true
 fi
 
@@ -250,6 +251,12 @@ run_check "repo changelog"     "tools/validate/suggest_repo_changelog.py --root 
 # Audit freshness — SOFT nudge (never blocks, silent unless due) when an external
 # sweep or a full audit is due by time or by accumulated work (.claude/rules/repo-audit.md).
 "$PYTHON_BIN" tools/validate/check_audit_freshness.py --root "$REPO_ROOT" || true
+
+# Quality gates catalog — re-generated from pre-commit.sh + validate.yml +
+# validator docstrings. Staleness check when any source of truth changes.
+if echo "$STAGED" | grep -qE '(^scripts/pre-commit\.sh$|^\.github/workflows/validate\.yml$|^tools/validate/.*\.py$|^docs/quality-gates\.md$)'; then
+  run_check "quality gates catalog" "tools/validate/generate_quality_gates.py --root $REPO_ROOT --check"
+fi
 
 # Only run unit tests if Python source files are staged.
 #

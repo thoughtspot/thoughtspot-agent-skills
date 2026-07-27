@@ -351,8 +351,15 @@ Delete one or more ThoughtSpot objects by GUID.
 ```bash
 ts metadata delete abc-123
 ts metadata delete abc-123 def-456 --type LIVEBOARD
+ts metadata delete abc-123 stale-guid --ignore-missing
 ts metadata delete abc-123 --profile se-thoughtspot
 ```
+
+A batch delete is atomic — if any one GUID is already gone the whole call
+fails and nothing is deleted. This command tries the batch first (one fast
+call when every GUID is present) and, on failure, falls back to per-GUID
+deletes so present objects are still removed, reporting a per-object outcome
+map. Useful for teardown/cleanup where some GUIDs may already be gone.
 
 **Options:**
 
@@ -360,8 +367,11 @@ ts metadata delete abc-123 --profile se-thoughtspot
 |---|---|---|
 | `--profile`, `-p` | first profile | Profile to use |
 | `--type`, `-t` | `LOGICAL_TABLE` | Object type: `LOGICAL_TABLE`, `LIVEBOARD`, `ANSWER` |
+| `--ignore-missing` | off | Treat already-gone GUIDs (`not_found`) as success instead of exiting non-zero. Genuine errors still exit non-zero. |
 
-**Output:** `{"deleted": ["guid1", "guid2", ...]}` on success.
+**Output:** `{"deleted": [...], "not_found": [...], "errors": {guid: msg}, "outcomes": {guid: "deleted"|"not_found"|"error: ..."}}`.
+Exits non-zero if any GUID could not be deleted, unless the only failures are
+`not_found` and `--ignore-missing` is set.
 
 ---
 
@@ -567,12 +577,14 @@ Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
 | I4 | `model_tables[].id` != `name` — joins silently fail at query time |
 | I5 | a physical column using `aggregation: COUNT_DISTINCT` — silently flips MEASURE → ATTRIBUTE |
 | I8 | a duplicate `column_id` across `columns[]` — hard import rejection ("columns should have unique column_id values") |
+| XREF | a model `model_tables`/`column_id`/join reference to a table or column that no batch TML generates — surfaces only when a table/sql_view TML is linted **alongside** the model (e.g. `--dir`); a lone model file skips it (no ground truth for what tables exist) |
 
 ```bash
-# Lint a single file
+# Lint a single file (model invariants only)
 ts tml lint --file model.tml
 
-# Lint every TML file in a directory
+# Lint every TML file in a directory — also runs the XREF cross-reference
+# check, since tables + model are present together
 ts tml lint --dir ./tml_out
 
 # Tableau-order directory lint, base model only
@@ -750,11 +762,12 @@ source drift.
 ### `ts connections list`
 
 List all available data connections. Results are auto-paginated — all connections
-are returned regardless of how many exist on the instance.
+are returned regardless of how many exist on the instance. **Lists every warehouse type
+by default** (Snowflake, Databricks, BigQuery, …); pass `--type` to filter to one.
 
 ```bash
-ts connections list
-ts connections list --type BIGQUERY
+ts connections list                      # ALL types
+ts connections list --type DATABRICKS    # filter to one type
 ```
 
 **Options:**
@@ -762,7 +775,12 @@ ts connections list --type BIGQUERY
 | Flag | Default | Description |
 |---|---|---|
 | `--profile`, `-p` | first profile | Profile to use |
-| `--type`, `-t` | `SNOWFLAKE` | Data warehouse type filter |
+| `--type`, `-t` | _(none — all types)_ | Optional data warehouse type filter (e.g. `SNOWFLAKE`, `DATABRICKS`) |
+
+> **Org scope:** connections (and metadata) are org-scoped. To operate in a non-default
+> org, set `TS_ORG=<org_id>` (integer org id) — the CLI mints an org-scoped token
+> (`org_id` on `auth/token/full`) with an org-keyed token cache. Without it, calls run in
+> your default org.
 
 **Output:** JSON array of connection objects.
 
@@ -870,18 +888,27 @@ echo '[{"db":"MY_DB","schema":"MY_SCHEMA","table":"MY_TABLE","type":"TABLE","col
 ]
 ```
 
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--auth-type` | Connection authentication type (e.g. `SERVICE_ACCOUNT`, `KEY_PAIR`, `OAUTH`). Auto-detected from the connection when possible; use this flag to override or when auto-detection fails. |
+
 **How it works:**
 
-1. Fetches the current connection state via `fetchConnection` (v1)
+1. Fetches the current connection state via v2 `connection/search`
 2. Merges the new tables in — existing tables and columns are preserved
 3. New columns are appended to existing tables; existing columns are left unchanged
-4. Posts the merged result to `POST /api/rest/2.0/connections/{id}/update`
+4. Includes `authenticationType` in the update payload (auto-detected or via `--auth-type`)
+5. Posts the merged result to `POST /api/rest/2.0/connections/{id}/update`
 
 **Output:** JSON response from the update call.
 
-> **Note:** Inherits the same v1 fetch limitation as `ts connections get` — may
-> fail with a 500 on some instances. Requires `CAN_CREATE_OR_EDIT_CONNECTIONS`
-> privilege.
+> **Note:** The v2 update endpoint defaults to `SERVICE_ACCOUNT` if
+> `authenticationType` is omitted — silently breaking non-SERVICE_ACCOUNT
+> connections (e.g. KEY_PAIR, OAUTH). Pass `--auth-type` explicitly if
+> auto-detection does not work for your connection. Requires
+> `CAN_CREATE_OR_EDIT_CONNECTIONS` privilege.
 
 ---
 
@@ -935,33 +962,35 @@ Tables that failed after all retries are included with `null` as the GUID.
 {"FACT_SALES": "b1e360c4-d571-490f-bae2-e8dc7443c9fa"}
 ```
 
-Auto-retries transient JDBC errors. After each successful import, resolves the GUID via
-metadata search if not already returned in the import response — the search is
-**connection-scoped**: it filters candidates on `metadata_header.dataSourceName ==
-connection_name`, so a same-named table registered on a different connection is never
-returned (live finding, BL-063 PR4, 2026-07-10 — see `_find_guid_by_name` in
-`ts_cli/commands/tables.py`).
+**How it works:**
+1. Tables are imported in batches of up to 50 per API call (`PARTIAL` policy)
+2. Tables that fail with transient JDBC errors are retried individually
+3. GUIDs are resolved from the import response, falling back to a connection-scoped
+   metadata search (`metadata_header.dataSourceName == connection_name`) when absent
+4. Specs with `rls_rules` are handled in two passes: pass 1 creates the table without
+   RLS; pass 2 re-imports with RLS rules + GUID (self-referencing rules can't resolve
+   before the table exists)
 
 ---
 
-### `ts spotql generate-sql` / `ts spotql fetch-data`
+### `ts agentql generate-sql` / `ts agentql fetch-data`
 
-Run SpotQL (Semantic SQL) against a ThoughtSpot Model. The caller supplies the SpotQL
-statement and the Model's GUID — these commands do **not** do natural-language → SpotQL.
+Run AgentQL (Semantic SQL) against a ThoughtSpot Model. The caller supplies the AgentQL
+statement and the Model's GUID — these commands do **not** do natural-language → AgentQL.
 
 - `generate-sql` validates the statement and returns the warehouse SQL it compiles to
   (does not execute).
 - `fetch-data` executes the statement and returns result rows.
 
 ```bash
-ts spotql generate-sql '<SpotQL>' --model <model-guid> --profile <name>
-ts spotql fetch-data   '<SpotQL>' --model <model-guid> --profile <name>
+ts agentql generate-sql '<AgentQL>' --model <model-guid> --profile <name>
+ts agentql fetch-data   '<AgentQL>' --model <model-guid> --profile <name>
 ```
 
 **Example:**
 
 ```bash
-ts spotql fetch-data \
+ts agentql fetch-data \
   'SELECT "Product Category", SUM("Amount") AS total_amount
    FROM "Dunder Mifflin Sales & Inventory" AS "t1" GROUP BY "Product Category"' \
   --model 4da3a07f-fe29-4d20-8758-260eb1315071 --profile champ-staging
@@ -972,25 +1001,25 @@ ts spotql fetch-data \
 - `generate-sql` → `{status, executable_sql, errors}`
 - `fetch-data` → `{status, columns, rows, errors}`
 
-`columns` are `{index, type}` — SpotQL returns per-query column GUIDs (not stable names),
+`columns` are `{index, type}` — AgentQL returns per-query column GUIDs (not stable names),
 so the SELECT ordinal is the usable identifier. A query that is rejected or fails to
 execute returns a non-`SUCCESS` `status` with a populated `errors[]` (and exit code 0) —
 these are structured query errors, not transport failures.
 
-> **SpotQL requires an external cloud data warehouse.** The endpoints only support Models
+> **AgentQL requires an external cloud data warehouse.** The endpoints only support Models
 > backed by an external CDW (Snowflake, Databricks, BigQuery, …). A Model over Falcon /
 > imported / system data (`DEFAULT` datasource) returns
 > `"This API only supports external cloud data warehouses"`.
 
 ---
 
-### `ts spotql classify-columns`
+### `ts agentql classify-columns`
 
 Classify ThoughtSpot columns/formula expressions as attribute vs. measure vs.
-aggregate-formula-measure — the decision that drives `SUM`-vs-`AGG` in SpotQL and the
+aggregate-formula-measure — the decision that drives `SUM`-vs-`AGG` in AgentQL and the
 MEASURE/ATTRIBUTE + aggregation inference when promoting Answer formulas to a Model.
 Codifies BL-087: this was previously two DIFFERENT, drifted keyword lists duplicated
-between `ts-object-model-spotql-query` and `ts-object-answer-promote`; both skills now
+between `ts-object-model-agentql-query` and `ts-object-answer-promote`; both skills now
 call through this one command.
 
 Two mutually-exclusive input modes:
@@ -1001,16 +1030,16 @@ Two mutually-exclusive input modes:
 | Expressions | `--exprs-file <path>` (or stdin) | Classifies a bare JSON array of `{"name", "expr"}` objects not yet attached to a Model column (e.g. Answer formulas being promoted) | No |
 
 ```bash
-ts spotql classify-columns --model <model-guid> --profile <name>
-ts spotql classify-columns --exprs-file formulas_to_add.json
-echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts spotql classify-columns
+ts agentql classify-columns --model <model-guid> --profile <name>
+ts agentql classify-columns --exprs-file formulas_to_add.json
+echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts agentql classify-columns
 ```
 
 **Output (JSON to stdout):**
 
 - `--model` mode → array of `{name, column_type, kind, needs_agg, aggregation, wrapper}`
   — one entry per `model.columns[]` entry. `wrapper` is the directly-actionable output —
-  the SpotQL function to wrap the column reference in (`None` for attributes). `kind` is
+  the AgentQL function to wrap the column reference in (`None` for attributes). `kind` is
   `"attribute"`, `"raw_measure"`, `"aggregate_measure"`, or `"semiadditive_measure"`:
   - `"aggregate_measure"` (equivalently `needs_agg: true`, `wrapper: "AGG"`) — wrap in
     `AGG(...)`; a real aggregate errors `NESTED_AGGREGATE_NOT_SUPPORTED`.
@@ -1031,6 +1060,36 @@ echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts spotql cla
 Diagnostic counts go to stderr. The canonical aggregate-function list lives in
 `ts_cli.spotql_ops.AGGREGATE_FUNCS` — a single source of truth, not duplicated in either
 skill's SKILL.md.
+
+---
+
+### `ts spotter answer`
+
+Ask Spotter (ThoughtSpot AI) a single natural-language question over a Model and return
+its answer — crucially the **search tokens** Spotter chose. Wraps the V2 endpoint
+`POST /api/rest/2.0/ai/answer/create` (`singleAnswer`, Beta / 10.4.0.cl+). This is the
+"Spotter last-mile" the conversion skills use: after a model is built, a measure that
+could not be translated deterministically is phrased in plain English, handed to Spotter,
+and the returned tokens are shown to a human to verify against the source numbers before
+being flagged or adopted.
+
+```bash
+ts spotter answer "total sales by region last quarter" --model <model-guid> --profile <name>
+ts spotter answer "count of distinct customers this year" -m <model-guid>
+```
+
+**Output (JSON to stdout):** `{status, message_type, visualization_type,
+session_identifier, generation_number, tokens, display_tokens, errors}`.
+
+- `tokens` / `display_tokens` — the ThoughtSpot Search expression Spotter produced (the
+  field the last-mile workflow inspects). `display_tokens` is the human-friendly form.
+- `status` is `SUCCESS` when an answer was returned, else an error code with a populated
+  `errors[]`: `FORBIDDEN` (missing `CAN_USE_SPOTTER` privilege or no view access to the
+  Model), `UNAUTHORIZED` (bad/expired token), or `SPOTTER_ERROR` (Spotter could not answer,
+  or is not enabled on the cluster).
+
+Requires `CAN_USE_SPOTTER` and view access to the target Model, and Spotter enabled on the
+cluster. Diagnostics go to stderr; the JSON goes to stdout.
 
 ---
 
@@ -1110,6 +1169,593 @@ ts variables remove <variable> <value> --profile <name> --org <org> [--org ...] 
 ```
 
 Uses the same per-identifier endpoint as `ts variables set` (see above).
+
+---
+
+### `ts variables create`
+
+Create a template variable for parameterizing metadata objects.
+
+```bash
+ts variables create <name> --type <TYPE> --profile <name> [--sensitive] [--data-type <TYPE>]
+# e.g. ts variables create apj_schema --type TABLE_MAPPING --profile prod
+#      ts variables create sf_password --type CONNECTION_PROPERTY --sensitive --profile prod
+#      ts variables create region_var --type FORMULA_VARIABLE --data-type VARCHAR --profile prod
+```
+
+Types: `TABLE_MAPPING` (databaseName / schemaName / tableName), `CONNECTION_PROPERTY`,
+`CONNECTION_PROPERTY_PER_PRINCIPAL` (support-gated), `FORMULA_VARIABLE`.
+
+Names are unique **instance-wide**, not per-org, so a duplicate fails. `--data-type` is
+required for `FORMULA_VARIABLE` and rejected for every other type; its value is passed
+through unvalidated because the published docs give two conflicting lists.
+
+A `TABLE_MAPPING` variable holds exactly **one** value per scope. Assign values per org with
+`ts variables set` before publishing anything that uses it.
+
+---
+
+### `ts variables delete`
+
+Delete one or more template variables.
+
+```bash
+ts variables delete <variable> [<variable> ...] --profile <name>
+```
+
+Uses the batch endpoint `POST /api/rest/2.0/template/variables/delete` (`identifiers[]`);
+the per-identifier `.../{identifier}/delete` path is deprecated. Fails while the variable is
+still bound to an object, so run `ts metadata unparameterize` first.
+
+---
+
+### `ts metadata parameterize`
+
+Bind a template variable to one or more fields of a Table or Connection, replacing the
+static value with a `${variable}` token.
+
+```bash
+ts metadata parameterize <guid|name> --variable <var> --field <field> [--field ...] \
+  [--type LOGICAL_TABLE|CONNECTION|CONNECTION_CONFIG] --profile <name>
+# e.g. ts metadata parameterize T1_PUBLISH --variable apj_schema --field schemaName --profile prod
+```
+
+`field_type` is derived from `--type`, so the type-mismatch error (`code 10002`) is
+unreachable. Logical Table fields are limited to `databaseName`, `schemaName`, `tableName`;
+Connection property names pass through unvalidated.
+
+Passing several `--field` values binds the **same** token to each of them, which is rarely
+intended — the command warns on stderr. Use one variable per distinct value.
+
+---
+
+### `ts metadata unparameterize`
+
+Remove a variable from a field, restoring a static value.
+
+```bash
+ts metadata unparameterize <guid|name> --field <field> --value <static> \
+  [--type LOGICAL_TABLE|CONNECTION|CONNECTION_CONFIG] --profile <name>
+```
+
+One field per call. `--value` is mandatory: the endpoint substitutes a static value rather
+than clearing the field, so the caller must know the original.
+
+---
+
+### `ts publish export`
+
+Discover an object's dependency closure and cluster its parameterizable fields.
+
+```bash
+ts publish export <guid> [<guid> ...] [--with-dependents] --profile <name>
+```
+
+Takes **any anchor type** and as many as you like. Cascade only travels downward, so
+the two directions are asymmetric and the command handles both:
+
+| Anchor | Down (always) | Up (`--with-dependents`) |
+|---|---|---|
+| Liveboard / Answer | the Model and Tables needing variables; publishing cascades back to them | siblings sharing that Model |
+| Model / Table | the Tables directly | every Answer and Liveboard riding on it |
+
+Tables reached by more than one root are de-duplicated, so nothing is parameterized
+twice, and clustering runs once across the union so two roots sharing a schema need
+one variable rather than two.
+
+Walks Model → Tables → Connection and groups each table's `db` / `schema` /
+`db_table` by **distinct value**. Each cluster is one variable to create: a
+variable holds one value per scope, so twenty tables sharing a schema need one
+variable, not twenty. On a real 4-table model this collapses 6 fields into 2
+recommended variables.
+
+Per cluster: `field`, `current_value`, `tables`, `spans_tables`,
+`already_parameterized` (+ `variable`), `parameterizable`, `recommended`,
+`suggested_variable`.
+
+- `recommended` marks `databaseName` and `schemaName`, the conventional per-tenant
+  discriminators. `tableName` is left off because tenant tables normally share a name.
+- `parameterizable` is false for Falcon-backed tables (no connection block) — the
+  "default system tables" the docs exclude. The command also warns on stderr.
+- Suggested names are `{connection}_{db|schema|table}`, with the value folded in
+  when a field carries several values (`apj_sales_schema` vs `apj_shared_ref_schema`),
+  and are collision-checked against variables already on the instance.
+
+Safe to re-run on a partly configured Model: already-parameterized clusters are
+reported rather than re-suggested. That is the add-a-tenant path.
+
+Also reports `cohort_columns`. A cohort column anywhere in the closure blocks
+publishing the Model and everything on it, used or not, so this turns a last-step
+refusal into a warning before any work is done. The check covers intermediate
+Models, not just the roots, because that is where the column is owned.
+
+---
+
+### `ts publish resolve`
+
+Build the per-org value matrix for an exported closure.
+
+```bash
+ts publish export <guid> -p prod | ts publish resolve --org ORG1 --org ORG2 --source uniform -p prod
+ts publish resolve -i export.json --org ORG1 --source pattern --pattern "schemaName={ORG_UPPER}" -p prod
+ts publish resolve -i export.json --org ORG1 --source file --csv values.csv -p prod
+```
+
+Reads a `ts publish export` envelope from `--input` or stdin. Sources:
+
+| Source | Behaviour |
+|---|---|
+| `uniform` (default) | The current value, replicated to every org. The shared-table case: still a real variable, so publish validation stays on and a later divergence is one `ts variables set` rather than a structural change. |
+| `pattern` | A per-field template expanded per org. Placeholders: `{ORG}`, `{ORG_UPPER}`, `{ORG_LOWER}`, `{ORG_ID}`, `{VALUE}`. A field with no pattern keeps its current value. An unknown placeholder is rejected rather than passed through. |
+| `file` | A CSV of `org_name,variable_name,value`. |
+| `existing` | Values already assigned on the instance. The re-publish / add-a-tenant path. |
+
+Selects the recommended fields (`databaseName`, `schemaName`) by default; `--field`
+widens or narrows that. Fields on Falcon-backed tables are never selectable.
+
+**The owner (Primary) org is always included, and always keeps its current value**,
+whatever source is chosen. Parameterizing swaps the static db/schema for tokens, so
+without a value there the FQN collapses and the *source* object breaks — Snowflake
+returns `Object 'T1_PUBLISH' does not exist`. ThoughtSpot's publish validation only
+checks target orgs, so nothing else catches it. Expanding a pattern for the owner org
+is also refused, since publishing must not silently repoint what Primary reads.
+
+Always emits a **coverage check**. Publishing fails closed on a gap and reports the
+variable by GUID and the org by numeric id, so catching it here names both instead:
+
+```
+Coverage gap: variable 'apj_schema' has no value for org 'ORG3'.
+Publishing will be refused until it does.
+```
+
+Output: `{"orgs", "variables", "assignments", "coverage": {"complete", "missing"}}`.
+
+---
+
+### `ts publish apply`
+
+Create the variables, assign their values, parameterize the fields, and optionally publish.
+
+```bash
+ts publish apply -c export.json -m matrix.json --dry-run
+ts publish apply -c export.json -m matrix.json --rollback-out rb.json -p prod
+ts publish apply -c export.json -m matrix.json --publish-to ORG1 --rollback-out rb.json -p prod
+```
+
+Fixed order, because the platform requires it: create before assign, assign before
+publish. Refuses to start if the matrix has coverage gaps, since publishing would be
+refused anyway and a partial apply is worse than none.
+
+Re-running is safe: an existing variable is reused, a field already bound to a token
+is left alone.
+
+**Pass `--rollback-out`.** `unparameterize` substitutes a static value rather than
+clearing the field, so the original values must be recorded somewhere or there is no
+way back. Nothing else records them.
+
+Omit `--publish-to` to wire everything up and stop short of publishing.
+
+---
+
+### `ts publish rollback`
+
+Undo an apply.
+
+```bash
+ts publish rollback -i rb.json --dry-run
+ts publish rollback -i rb.json -p prod
+```
+
+Reverse order: unpublish (with `include_dependencies`, so the Connection grant is
+retracted too), restore each field's static value, then delete the variables that run
+created. A variable that already existed is never deleted, so one shared with another
+Model is safe. A field with no recorded original is skipped and reported.
+
+---
+
+### `ts publish run`
+
+Run a whole publication end to end, unattended. The scheduled counterpart to the
+interactive `export | resolve | apply` pipeline: same engine, no prompts, one exit code.
+
+```bash
+ts publish run --org ORG1 --org ORG2 \
+  --objects-table DB.SCH.TS_PUBLISH_OBJECTS \
+  --values-table  DB.SCH.TS_PUBLISH_VARIABLES \
+  --sf-profile sf --rollback-out rb.json -p prod
+
+ts publish run --org ORG1 --objects-file objects.csv --values-file values.csv \
+  --rollback-out rb.json -p prod --dry-run
+```
+
+Refuses, before touching the instance, if a variable has no value in a target org or
+if a cohort column makes the selection unpublishable. Exits `1` with the reason on
+stderr; `0` on success. Suitable for cron or any Python scheduler.
+
+Manifest tables (`--init-table` on `ts publish resolve` prints the DDL):
+
+```sql
+TS_PUBLISH_OBJECTS   (identifier, type, with_dependents)
+TS_PUBLISH_VARIABLES (org_name, variable_name, value)
+```
+
+Both are readable as CSV instead, with the same columns. Secrets never belong in
+either: a variable marked sensitive is populated out of band by an admin.
+
+---
+
+### `ts publish push`
+
+Publish objects from the Primary Org to target Orgs. No copies are made and GUIDs are
+unchanged; per-org variation comes from the bound variables.
+
+```bash
+ts publish push <guid> [<guid> ...] --org <org> [--org ...] \
+  [--type LOGICAL_TABLE|LIVEBOARD|ANSWER] --profile <name>
+```
+
+`LOGICAL_TABLE` covers both Tables and Models. `--org` accepts an org name or its numeric id.
+Requires ADMINISTRATION with all-Orgs access, run from the Primary Org.
+
+Publishing **fails closed** when a referenced variable has no value in a target org, and when
+the object has no variable bound at all. Both errors are translated into an actionable
+message naming the variable, org and object (the raw API error reports only GUIDs and numeric
+ids). `--skip-validation` exists but is discouraged: it disables every check and lets an
+unparameterized object publish so the target org silently reads the Primary Org's database.
+
+The Connection is granted to target orgs automatically as a dependency; connections cannot be
+published directly.
+
+---
+
+### `ts publish unpush`
+
+Retract published objects from target Orgs.
+
+```bash
+ts publish unpush <guid> [<guid> ...] --org <org> [--org ...] \
+  [--keep-dependencies] [--force] --profile <name>
+```
+
+Dependencies are retracted by default, which is what actually removes the Connection grant
+from the target orgs. `--keep-dependencies` leaves them in place.
+
+---
+
+### `ts publish status`
+
+Report which objects are published to which Orgs.
+
+```bash
+ts publish status [<guid> ...] [--type LOGICAL_TABLE|LIVEBOARD|ANSWER] [--published-only] --profile <name>
+```
+
+Reads `metadata_header.orgIds` from the Primary Org, so no per-org authentication is needed.
+Output: `[{"guid", "name", "subtype", "owner_org", "published_to": [...], "is_published"}]`,
+where `published_to` excludes the owning org.
+
+---
+
+### `ts share` — object and column grants
+
+Grants over `POST /api/rest/2.0/security/metadata/share`. The sharing capability of the
+single-model multi-tenancy pattern: it makes objects visible to end users, and the same
+mechanism carries column-level security. Publishing an object to a tenant Org makes it
+*present* there; sharing is what makes it *visible* to that tenant's users.
+
+Sharing is deliberately **not** part of `ts publish`: it is needed whether or not anything
+was published, and folding it in would put a security operation inside a deployment one.
+
+Three behaviours the implementation rests on, all verified live on 2026-07-26:
+
+| Finding | Consequence |
+|---|---|
+| `message` is **top-level** in the payload, beside `notify_on_share` — not inside `notification`, despite every published example | The nested form fails with `Variable "$message" of required type "String!" was not provided`. Nothing works until this is right |
+| `LOGICAL_COLUMN` **is** accepted by the endpoint, despite being absent from the documented supported-types list | Column-level security is expressible through the same command |
+| Sharing a **table grants every column** in it | Table and column grants are mutually exclusive per (org, table, group) — see the exclusivity rule below |
+| A table-level `NO_ACCESS` does **not** clear existing column grants (live-verified 2026-07-27, ACL level) | The exclusivity rule is about ordering ambiguity, not about `NO_ACCESS` being destructive |
+
+**`export` resolves across every named Org, not just the default one.** `metadata/search`
+is Org-scoped, so an object *native* to a tenant Org is invisible to a default-Org
+client. `export` therefore tries the default Org first (so the common case — a
+Primary-owned object shared into tenants — costs no extra round-trip) and then each
+`--org` in turn, listing the object's columns through whichever Org could see it.
+Without this, `ts share export <guid> --org ORG1` failed outright on anything ORG1 owns,
+which is exactly the case tenant-Org column security is about.
+
+The pipeline mirrors `ts publish` and the `ts alias` source conventions:
+
+```bash
+# 1. Resolve the objects, list their columns, read who can already see them
+ts share export <guid> [<guid> ...] [--org ORG1 --org ORG2] -p prod
+
+# 2. Build the grant manifest, resolve names to GUIDs, refuse an unsafe plan
+ts share export <guid> -p prod | ts share resolve --org ORG1 --org ORG2 \
+  --source uniform --group Analyst --share-mode READ_ONLY -p prod > grants.json
+
+# ...or grant at COLUMN level instead of object level
+ts share export <guid> -p prod | ts share resolve --org ORG1 --source uniform \
+  --group Analyst --share-mode READ_ONLY --column PROD_NM --column AMOUNT -p prod
+
+# ...or take per-Org variation from a CSV or a governed Snowflake table
+ts share resolve -i export.json --source file --csv grants.csv -p prod
+ts share resolve -i export.json --source db --sf-profile sf \
+  --table DB.SCH.TS_SHARE_GRANTS -p prod
+ts share resolve --init-table                    # CREATE TABLE DDL, then exit
+
+# 3. Apply
+ts share apply -i grants.json --dry-run
+ts share apply -i grants.json -p prod
+
+# Read back who can see what
+ts share status <guid> --org ORG1 --org ORG2 --columns -p prod
+```
+
+**The exclusivity rule.** Sharing a table grants access to *every* column in it, so a
+table grant silently defeats any column grants beside it and column security stops
+applying. A manifest containing both for the same (org, table, group) is **refused** — by
+`resolve`, and again by `apply`, because the manifest is a file a human can edit in
+between. The check ignores `share_mode`, `NO_ACCESS` included: whether a table-level
+`NO_ACCESS` clears existing column grants is unverified, so a revoke-then-grant sequence
+cannot be safely ordered inside one manifest and belongs in two applies.
+
+| Table | Grant at |
+|---|---|
+| No secured columns | table level |
+| Has secured columns | column level only, never both |
+
+The `ALL` group is the usual default for a published model and the most dangerous one on a
+secured table. The same rule applies to it: column grants, never a table grant.
+
+**Groups are per-Org.** A group in the Primary Org is a different principal from a
+same-named group in a tenant Org, so each `--org` runs through its own org-scoped token.
+`resolve` checks every group in its own Org and names all the missing pairs at plan time,
+rather than letting the run hit `code 13003` mid-apply. `--skip-group-check` opts out.
+
+**The audience is never inferred.** `--group` and `--share-mode` are required for
+`--source uniform` and have no defaults — sharing decides who sees tenant data.
+
+Grant manifest (`TS_SHARE_GRANTS`), readable as CSV with the same columns:
+
+```sql
+TS_SHARE_GRANTS (org_name, object_identifier, object_type, column_name,
+                 group_name, share_mode)
+-- object_type: LOGICAL_TABLE | LIVEBOARD | ANSWER
+-- column_name: blank = object grant; set = column grant
+-- share_mode:  READ_ONLY | MODIFY | NO_ACCESS
+-- PRIMARY KEY (org_name, object_identifier, column_name, group_name)
+```
+
+Two rows with the same key and the same `share_mode` de-duplicate; the same key with
+*different* modes is refused rather than resolved by a coin-flip.
+
+`apply` batches into the fewest safe calls: one per (Org, metadata type, audience).
+Objects share a call only when their principal and share-mode set is identical, so no
+object is ever exposed to another's audience. Everything is sorted, so the same grants
+always produce the same plan and a `--dry-run` is diffable between runs.
+
+`--notify` is off by default, against the API's own default of `true`: a bulk tenant-wide
+grant should not email every member of every group.
+
+**Org names are resolved to numeric ids before the token is minted.** `auth/token/full`
+honours `org_id` (an int) and **silently ignores** `org_identifier` (a name), falling back
+to the caller's default Org — verified live: `TS_ORG=ORG1` produced a session whose
+`current_org` was `{id: 0, name: Primary}`. Passing a name through would apply a tenant's
+grants in the Primary Org while reporting success, so `ts share` resolves the name itself
+and refuses an unknown one. Before any grant, and before the group-existence check, it also
+reads the session's actual Org back and stops on a mismatch — a silent wrong-Org write is
+the one failure here with no louder symptom.
+
+`status` output is one row per (object, principal):
+`[{"org", "guid", "name", "type", "principal_type", "principal_id", "principal_name",
+"permission", "shared_permission"}]`.
+
+**Read `permission`, not `shared_permission`.** The names suggest the opposite and they
+mislead: verified live, a successful `READ_ONLY` share put `READ_ONLY` in `permission` and
+left `shared_permission` at `NO_ACCESS` — which it was for every principal both before and
+after. The signal that a share landed is a principal **appearing** against an object it was
+absent from, with a non-`NO_ACCESS` `permission`, so diff a before-and-after run rather
+than reading one in isolation (an object's admins and owner always appear). Sharing to a
+group also adds a row per member user, so one group grant shows up as several rows.
+
+---
+
+### `ts security column-rules` -- Column Security Rules (CSR)
+
+Restricts named columns on a Table to named groups, over
+`POST /api/rest/2.0/security/column/rules/update` (read via the sibling `.../fetch`).
+**Beta**, requires **10.12.0.cl or later**, and is **feature-flagged off by default**:
+until ThoughtSpot enables it on a cluster, every call returns 403 with code 10023,
+which the CLI detects and explains rather than surfacing a bare "Forbidden".
+
+CSR is **not** column-level sharing. `ts share` carries that mechanism (CLS), and the
+two must not be modelled the same way -- they are different mechanisms on different
+axes:
+
+- **CSR is two steps over two orthogonal mechanisms.** The object must first be
+  shared (the Model, and optionally the Table) or the user cannot open it at all; CSR
+  then filters columns *within* that access. Access and column visibility are separate
+  decisions, which is why CSR composes cleanly with a table-level share.
+- **CLS is one step.** The grant IS the security: sharing specific columns is the one
+  act that decides both whether the user reaches the object and which columns they
+  see. That is also why CLS refuses to mix a table grant and a column grant for the
+  same (Org, table, group) -- under CLS they are the same mechanism at different
+  granularities, so the broader defeats the narrower. CSR has no equivalent rule,
+  because it is never the mechanism deciding access in the first place.
+
+| | CLS (`ts share`) | CSR (here) |
+|---|---|---|
+| Works on published objects | yes | refused BY DEFAULT at plan time AND by `set` (the platform itself accepts an owning-Org CSR update on a published table and enforces it there -- but the rule does not travel with publication, so every tenant Org keeps the column visible; see below) |
+| Usable by a TENANT Org | yes, on an object published into it (live-verified 2026-07-27) | **no.** The tenant cannot define it either: `HTTP 500`, code `10038`, `FORBIDDEN`, even holding `ADMINISTRATION` in that Org. CSR is for objects an Org OWNS |
+| Declares | every VISIBLE column per group | only the RESTRICTED columns |
+| Liveboard filter on a secured column | locks | stays interactive |
+| Availability | GA | Beta, 10.12+, feature-flagged off by default |
+
+Two routes over one plan, mirroring `ts alias` and `ts share`:
+
+```bash
+# 1. Plan
+ts security column-rules resolve --source uniform --org ORG1 --org ORG2 \
+  --table T2_PUBLISH --rule "COST=Finance" --rule "SALARY=" -p prod > plan.json
+
+# 2a. Route A: apply the plan over the API
+ts security column-rules apply --input plan.json --dry-run -p prod
+ts security column-rules apply --input plan.json -p prod
+
+# 2b. Route B: apply the plan over TML instead
+ts security column-rules build --input plan.json --out ./plan/csr
+ts security column-rules import \
+  --file ./plan/csr/ORG1/T2_PUBLISH_CSR.column_security_rules.tml --org ORG1 -p prod
+```
+
+`build --out` writes one file per (Org, table), into a subdirectory per Org, because a
+plan step is per (Org, table) while the platform's filename is derived from the table
+alone. Without the subdirectory, two Orgs' documents for one table would resolve to the
+same path and the first Org's rules would be lost silently. The filename inside it is
+exactly what the platform exports, so `import` consumes either.
+
+The two routes agree on everything but one thing: `is_unsecured` (pruning a column) has
+no TML equivalent, so a plan carrying `unsecure` entries can only be fully carried out
+by `apply` -- `build` reports the gap on stderr and simply omits those columns from the
+document.
+
+**`update` takes one table per call.** Its documented "all or none" rollback covers a
+single call, not a whole `apply` run: a failure part-way through leaves the tables
+already processed changed, and the command stops rather than continuing, so the plan
+and reality diverge at a known point. Re-running a REPLACE plan is safe -- it converges.
+
+**Only the columns named are touched.** A column already secured and not mentioned in a
+manifest, or in a `set` call, is left exactly as it was. **Live-verified** (2026-07-27,
+cluster `nebula-damian-alias`): securing one column for one group, then a separate column
+for a different group in a second `set` call, left both rules in place side by side -- a
+per-column `REPLACE` is genuinely scoped to that column, not a whole-table replace.
+Verified for REPLACE on a single table; `set` itself is unchanged.
+
+`resolve --prune` is the only way to unsecure columns that are secured today but absent
+from the manifest, and it is opt-in: the alternative default would silently unsecure
+columns whenever a manifest was incomplete, which leaks data, whereas leaving stale
+protection in place is visible and recoverable.
+
+**Published tables are refused by default** -- at plan time as `CSR_BLOCKED` (`resolve`
+/`build`/`apply`), and by `set` directly -- but this is not a platform restriction. It is
+a scoping trap. **Live-verified 2026-07-27, conclusively** (data-plane, real non-admin
+users, both Orgs): with a table genuinely published to a tenant Org, a CSR update issued
+from the OWNING Org returned HTTP 204, took effect, and stayed enforced there -- a
+restricted column stayed hidden in the owning Org. But the SAME table, opened in the
+tenant Org it was published to, showed the restricted column in full: no error, no
+warning, either way. **A CSR rule is scoped to the Org that defined it and does not
+travel with publication.** Setting one on a published table protects the owning Org and
+silently leaves every tenant Org exposed, which is exactly the false belief refusing by
+default exists to prevent. `resolve` marks the affected step in the plan rather than
+failing outright; `build` and `apply` both then refuse any plan containing one, before
+anything is rendered or sent; `set` refuses directly, with no separate plan stage.
+`--allow-published` overrides the refusal (`apply --allow-published`, `set
+--allow-published`) for the case where owning-Org-only scope is genuinely what is
+wanted -- `build` has no equivalent flag. See the live-verification doc (§Q6) for the
+full evidence.
+
+A table whose publication state could not be READ is blocked the same way, with its own
+reason. Only a successful read supports the claim that a table is unpublished, so a failed
+`metadata/search` (a 403 where the CSR flag is off, a 500, no hit) warns on stderr and
+blocks the step rather than passing it as unpublished. `resolve` writes nothing, so a
+false block costs a re-run while a false pass applies CSR to a published object.
+
+Manifest table (`TS_COLUMN_SECURITY_RULES`), readable as CSV with the same columns:
+
+```sql
+TS_COLUMN_SECURITY_RULES (org_name, table_name, column_name, group_name)
+-- group_name: blank = secured, no group can see it
+-- PRIMARY KEY (org_name, table_name, column_name, group_name)
+```
+
+#### The eight commands
+
+`get` reads current CSR, one row per (table, column), for one or more tables and Orgs:
+
+```bash
+ts security column-rules get T1 T2 T3_PUBLISH --org ORG1 --org ORG2 -p prod
+```
+
+`export` pulls each table's `column_security_rules` TML document (needs
+`export_options.export_column_security_rules: true`, itself Beta):
+
+```bash
+ts security column-rules export T2_PUBLISH --out ./plan/csr --org ORG1 -p prod
+```
+
+`resolve` turns a rule manifest into a reviewable plan, from `--source uniform`
+(explicit `--table`/`--org`/`--rule` flags), `file` (`--csv`), or `db`
+(`--sf-profile`/`--table-name`); `--init-table` prints the manifest table's
+`CREATE TABLE` DDL and exits:
+
+```bash
+ts security column-rules resolve --init-table                    # CREATE TABLE DDL, then exit
+ts security column-rules resolve --source uniform --org ORG1 --org ORG2 \
+  --table T2_PUBLISH --rule "COST=Finance" --rule "SALARY=" -p prod
+```
+
+`apply` sends a plan over the API, one `rules/update` call per (Org, table):
+
+```bash
+ts security column-rules apply --input plan.json -p prod
+```
+
+`build` renders a plan into `column_security_rules` TML documents, emit-only (no
+profile, no connection, nothing sent), one file per (Org, table) under `<out>/<org>/`:
+
+```bash
+ts security column-rules build --input plan.json --out ./plan/csr
+# -> ./plan/csr/ORG1/T2_PUBLISH_CSR.column_security_rules.tml
+# -> ./plan/csr/ORG2/T2_PUBLISH_CSR.column_security_rules.tml
+```
+
+`import` uploads a `column_security_rules` TML document (`create_new: false`, so a
+`guid:` at the document root updates in place rather than creating a new one):
+
+```bash
+ts security column-rules import --file T2_CSR.column_security_rules.tml -p prod
+```
+
+`set` is a one-shot imperative that needs no manifest. It is declarative (REPLACE) by
+default, so it is idempotent: running it twice converges, and a `get` before and after
+diffs cleanly. `--add` / `--remove` reach the incremental operations instead. `set`
+refuses a published table by default, the same as the manifest route -- `--allow-published`
+overrides it:
+
+```bash
+ts security column-rules set --table T2 --rule "COST=Finance,Audit" --rule "SALARY=" \
+  --org ORG1 -p prod
+```
+
+`clear` unsecures one column (`--column`) or every column on a table (omit it). Unlike
+`set`, `clear` is **not** blocked on a published table -- deliberately: `set` guards
+against creating a false belief that a column is protected everywhere, while `clear`
+only ever removes protection the operator explicitly asked to remove, including the
+legitimate case of cleaning stale CSR off a table that turned out to be published:
+
+```bash
+ts security column-rules clear --table T2_PUBLISH --column COST -p prod
+```
 
 ---
 
@@ -1440,6 +2086,8 @@ ts tableau build-model "workbook.twbx" \
 | `--datasource`, `-d` | no | Filter to a single datasource |
 | `--dry-run` | no | Report stats only — don't write files |
 | `--table-name-map` | no | GENERATE mode only (no `--existing-guid`). Path to a JSON file mapping TWB physical table name → ThoughtSpot table TML `name`, for when they differ (warehouse-normalized names, sqlproxy/published-datasource scoping). Ignored (with a stderr note) when `--existing-guid` is set. |
+| `--database`, `-D` | no | GENERATE mode only. Warehouse database for the emitted Table TML(s) `db` field. Empty is fine for offline emission + local `ts tml lint`. (Short flag is `-D`, not `-d` — `-d` is already `--datasource`.) |
+| `--schema`, `-s` | no | GENERATE mode only. Warehouse schema for the emitted Table TML(s) `schema` field. Empty is fine for offline emission + local `ts tml lint`. |
 | `--reconcile-table` | no | GUID of an existing ThoughtSpot table to reconcile emitted columns against (consultant/stand-in-view case). Requires `--profile`. |
 | `--reconcile-plan` | no | With `--reconcile-table`: print the reconcile plan (suggested mappings + drops) as JSON and exit without writing TML. |
 | `--column-name-map` | no | JSON file mapping datasource column → target column name (from the confirmed reconcile plan). Applies in GENERATE mode (with `--reconcile-table`, apply mode) and in MERGE mode (`--existing-guid`), where it rewrites re-derived formula refs so renamed columns resolve against the existing model. |
@@ -1457,6 +2105,7 @@ against a real target schema.
 5. Resolve name collisions (formula/param clashes → rename; column/formula clashes → drop column)
 6. Build model TML with `formula_` prefix for cross-references and double-aggregation fix; **emit a `.sql_view.tml` per Custom SQL relation and reference it by name in `model_tables[]`** (physical/SQL-View column dedup applied)
 7. Split into phased import files — **SQL Views first** (they must exist before the model), then phase 0 = base, then per dependency level
+8. **GENERATE mode only** — emit one `.table.tml` per physical table (see "Table TML emission" below)
 
 **Merge mode** (`--existing-guid`): merge translated formulas into an already-imported
 model. This is the Phase 2 flow used by the Tableau migration skill:
@@ -1515,7 +2164,25 @@ endpoints, `columns[].column_id` table prefixes, and any `[TABLE::COL]` refs for
 translation embeds via column scoping. Tables absent from the map pass through
 unchanged. Implemented by `apply_table_name_map()` in `ts_cli/tableau/build_model.py`.
 
-**Output:** One set of phased TML files per datasource:
+**Table TML emission (GENERATE mode only):** alongside the phased model TML,
+`build-model` also writes a `.table.tml` per physical table, so the output directory
+is import-ready and `ts tml lint --dir` can check model↔table cross-references — no
+hand-assembly needed. `--database`/`-D` and `--schema`/`-s` set the emitted table(s)'
+`db`/`schema` fields (empty is fine for offline emission + local lint; a later live
+import supplies the real values).
+
+- **Single-table datasources** (the common case): one `.table.tml` carrying every
+  physical column.
+- **Multi-table datasources**: one `.table.tml` per table, with columns assigned to
+  their owning table. A column whose table ownership can't be resolved from the parse
+  is left off every table and reported in the result JSON's `table_columns_unassigned`
+  (plus a stderr warning) rather than guessed onto an arbitrary table — reconcile these
+  manually before import.
+
+Not emitted in `--dry-run` (stats only, no files written) or `--existing-guid` merge mode.
+
+**Output:** One set of phased TML files per datasource, plus one `.table.tml` per
+physical table (GENERATE mode):
 
 ```
 output/
@@ -1523,10 +2190,14 @@ output/
   my_model.phase_1.model.tml    # Level 0 formulas (no cross-refs)
   my_model.phase_2.model.tml    # + Level 1 formulas (reference level 0)
   ...
+  orders.table.tml              # GENERATE mode: one per physical table
+  customers.table.tml
 ```
 
 Stdout: JSON array with per-datasource stats (tables, columns, translated/skipped
-formulas, rename map, phase count).
+formulas, rename map, phase count) plus, in GENERATE mode, `table_files` (paths
+written), `tables_written` (count), and — for multi-table datasources only —
+`table_columns_unassigned` (columns whose owning table couldn't be resolved).
 
 ---
 
@@ -1617,13 +2288,13 @@ ts aggregate profile --dir /tmp/agg --tables-dir /tmp/agg/tables \
 | `--dialect` | `snowflake` | SQL dialect for generated statements |
 | `--warehouse` | profile's `default_warehouse` | Connected mode: Snowflake warehouse |
 | `--role` | profile's `default_role` | Connected mode: Snowflake role |
-| `--model-guid` | — | Primary Model GUID — enables SpotQL-based profiling SQL per candidate (ThoughtSpot resolves joins correctly on role-playing/ambiguous-path dimensions; the built-in join walker can be wrong there). Omit to always use the built-in walker (pre-Task-18 default; no ThoughtSpot connection needed). |
-| `--profile` / `-p` | `TS_PROFILE` env var | ThoughtSpot profile — used with `--model-guid` to call `ts spotql generate-sql`. Ignored if `--model-guid` is omitted. |
+| `--model-guid` | — | Primary Model GUID — enables AgentQL-based profiling SQL per candidate (ThoughtSpot resolves joins correctly on role-playing/ambiguous-path dimensions; the built-in join walker can be wrong there). Omit to always use the built-in walker (pre-Task-18 default; no ThoughtSpot connection needed). |
+| `--profile` / `-p` | `TS_PROFILE` env var | ThoughtSpot profile — used with `--model-guid` to call `ts agentql generate-sql`. Ignored if `--model-guid` is omitted. |
 | `--no-spotql` | `false` | Even with `--model-guid`, use the built-in join walker directly |
 
 The three modes are mutually exclusive: `--results` ingests, `--emit-sql` writes a
 script (no connection), otherwise `--snowflake-profile` connects and profiles
-directly. Each candidate's profiling SQL prefers SpotQL when `--model-guid` is
+directly. Each candidate's profiling SQL prefers AgentQL when `--model-guid` is
 given (falling back to the built-in join walker on any failure); the base-row
 count is always a plain single-table count either way. Candidates whose SELECT
 can't be built deterministically by either path are skipped (reported, not
@@ -1662,12 +2333,12 @@ ts aggregate history --dir /tmp/agg --snowflake-profile my-sf \
 Emit the DDL and TML for one approved candidate — never imports; the calling skill
 gates each import separately.
 
-**DDL SELECT source (default: SpotQL):** builds a SpotQL statement for the
+**DDL SELECT source (default: AgentQL):** builds an AgentQL statement for the
 candidate's grain and asks ThoughtSpot to compile it against the primary Model
 (`--model-guid`/`--profile`) — this resolves joins against the full semantic
 model, so it's correct on role-playing/ambiguous-path dimensions where the
 built-in join walker (`sqlgen.build_select`) can silently be wrong. Falls back
-to that walker automatically if SpotQL generation is unavailable or errors, or
+to that walker automatically if AgentQL generation is unavailable or errors, or
 always with `--no-spotql`; a fallback prints a stderr note that the result may
 be wrong on such dimensions.
 
@@ -1710,14 +2381,238 @@ ts aggregate generate --dir /tmp/agg --candidate cand_3 \
 | `--agg-name` | derived from root table + grain | Override the aggregate table/model base name |
 | `--out-dir` | `<dir>/<candidate>` | Output directory |
 | `--agg-model-guid` | — | Aggregate Model's GUID, once known (import `agg_model.tml.yaml` first, then pass its returned GUID here). Used as the `aggregated_models` association `id` — the aggregate Model and its backing Table share a name, so a name-based id is ambiguous (`DUPLICATE_OBJECT_FOUND` on a live cluster). Omit on the first, pre-import pass; a stderr warning flags the name-based fallback. |
-| `--no-spotql` | `false` | Skip SpotQL SQL generation and use the built-in join walker directly — see the DDL SELECT source note above |
+| `--no-spotql` | `false` | Skip AgentQL SQL generation and use the built-in join walker directly — see the DDL SELECT source note above |
 
 **Output:** writes `ddl.sql`, `table_spec.json`, `table.tml.yaml`,
 `agg_model.tml.yaml`, and `primary_patched.tml.yaml` (the primary Model TML with the
 new `aggregated_models` entry patched in) to `--out-dir`. Stdout: `{"candidate",
 "aggregate_name", "files"}`.
+### `ts tableau build-liveboard`
+
+Emit Answer + tabbed-Liveboard TML deterministically from a parsed Tableau dashboard
+spec — the codified replacement for the LLM-executed chart/liveboard prose templates
+(SKILL.md Step 10). Role-aware axis layout (Columns→x, Color→series/color, Rows→pivot
+rows, measures→y), a chart-type requirement floor (flags a chart that lacks the measures
+it needs — never silently downgrades it), and overrides capture-and-replay (per-column
+`format`, `client_state_v2`, the authoritative `custom_chart_config` for combos, and
+`viz_style`). The ThoughtSpot-side emission is ported from the verified standalone Power BI
+converter (`_answer_tml`/`_answer_tml_explicit`/`_liveboard_tml`).
+
+```bash
+ts tableau build-liveboard --input dashboard_spec.json --output-dir ./out
+```
+
+**Input** (`--input`): a JSON dashboard spec — see `build_from_spec` in
+`ts_cli/tableau/liveboard.py` for the full shape:
+
+```json
+{
+  "report_name": "Sales Report", "model_name": "Sales Model", "model_fqn": null,
+  "measure_names": ["Total Sales"],
+  "dashboards": [
+    {"name": "Overview", "visuals": [
+      {"title": "Sales by Region", "mark": "bar",
+       "fields": [{"name": "Region", "shelf": "columns", "measure": false},
+                  {"name": "Total Sales", "measure": true},
+                  {"name": "Segment", "role": "Series"}],
+       "tile": {"x": 0, "y": 0, "width": 6, "height": 8}}
+    ]}
+  ]
+}
+```
+
+- Each field carries a Tableau `shelf` (`columns`/`rows`/`color`) — mapped to a
+  canonical role — or an explicit `role` that wins over the shelf. `measure: true`
+  columns always land on y.
+- A visual may carry an `override` (verbatim answer spec) for anything the auto-builder
+  can't express. `tile` is the Step 9c grid placement; omit it for a two-per-row layout.
+- `extra_visuals[]` (top level) adds tiles that have no Tableau source visual.
+
+**Two live-verified emission rules (v0.55.0):**
+- **Bucketed dates** — a `bucket_tokens` entry like `{"Order Date": "[Order Date].monthly"}`
+  puts the token in `search_query` but references the **resolved** output column
+  (`Month(Order Date)`) in chart/axis/table — the raw name won't match the search output and
+  errors `Invalid GUID string` on import. Bare (unbucketed) dates are fine by their raw name.
+- **Combos** — emit `ADVANCED_LINE_COLUMN` + both measures on `axis`; ThoughtSpot auto-resolves
+  line vs column. **Do not hand-author `custom_chart_config`** — its column refs are GUIDs
+  (assigned after an answer exists), so a display-name config fails a fresh import. The command
+  **drops** a display-name `custom_chart_config` and replays only a genuine captured
+  (GUID-based) one. To pin an exact split: import → tune in UI → export → replay the exported
+  config via the visual's `override`.
+
+**Output:** writes `{report}.liveboard.tml` (with every answer embedded) to `--output-dir`.
+Stdout: JSON `{report_name, n_answers, n_tabs, liveboard_file, visual_rows, page_rows}` —
+`visual_rows`/`page_rows` feed the Step 12 migration report.
+
+### `ts tableau verify`
+
+Source↔output migration-fidelity gate: diffs the *parsed* Tableau workbook against the
+*generated* Model TML to catch silent drops (a table/join/translatable formula the
+workbook had but the TML doesn't) and mistranslations (a TML formula that barely
+resembles its Tableau source) — the two failure classes a coverage count computed from
+the TWB alone, or a server-side `VALIDATE_ONLY` import, cannot see (an import gate only
+sees what was emitted; it has no idea what the source contained).
+
+```bash
+ts tableau verify --parse parsed.json --model out/orders.model.tml
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--parse`, `--input`, `-i` | yes | `ts tableau parse` output JSON (`--input` accepted as an alias, matching `build-liveboard`'s convention) |
+| `--model`, `-m` | yes | The generated `*.model.tml` file to verify |
+
+Runs four checks (implemented in `ts_cli/tableau/verify.py::verify_conversion`, pure —
+no Tableau/ThoughtSpot connection):
+
+1. **structural** — datasources→model, physical tables/custom-SQL→`model_tables`, join
+   counts, and a translatable/untranslatable formula split via
+   `ts_cli/tableau/classify.py::classify_formulas` (so this can never disagree with
+   `classify-formulas`/`build-model`). ERROR when a translatable formula, physical
+   table, or custom-SQL relation is missing from the generated TML.
+2. **formula_equivalence** — for each translatable formula, token-normalizes both the
+   raw Tableau expression and its TML translation and scores an LCS-based similarity
+   (MATCH ≥85%, PARTIAL 50–84%, LOW <50%, MISSING). PARTIAL/LOW are candidate
+   mistranslations flagged for manual review.
+3. **validity** — reuses `ts_cli/tml_lint.py::lint_tml` (I1/I2/I4/I5/I8) — no invariant
+   logic is re-implemented here. Model↔table-TML dangling-reference checking (a
+   `columns[].column_id` that no longer resolves on its table TML) is a separate concern,
+   covered by `ts tml lint --dir`.
+4. **limitation_coverage** — reports how many untranslatable formulas were detected.
+   Advisory only (`ts tableau verify` has no `--limitations`/report-list input today).
+
+A formula tiered `UNTRANSLATABLE` by `classify_formulas` (geospatial, circular, orphan,
+parameter-query, or genuinely untranslatable) is *expected* to be absent from
+`model.formulas` and is never counted as a drop.
+
+**Output:** the full report as JSON to stdout (`{"ok", "checks": [{"name", "severity",
+"findings"}], "summary"}`); a human-readable summary to stderr. Exit code is non-zero if
+any check carries an ERROR-severity finding.
 
 ---
+
+## `ts qlik` — Qlik Sense → ThoughtSpot converter
+
+Converts a Qlik Sense app into ThoughtSpot Table + Model TML and a tabbed
+Liveboard. Mirrors the `ts tableau` converter's conventions: structured JSON to
+stdout, diagnostics to stderr, pure conversion logic in `ts_cli.qlik`. Four
+extraction modes, all producing the same IR that `build-model` / `build-liveboard`
+consume:
+
+| `--mode` | `<source>` | Live? | Options |
+|---|---|---|---|
+| `offline` (default) | a `.qvf` file (SQLite layout when present, else best-effort byte-scan) | no | — |
+| `engine-artifacts` | a directory of JSON dumped by the headless-engine extractor | no | — |
+| `qlik-cloud` | *(omit)* | yes | `--tenant <url>` + `--app-id <guid|name>` + `--api-key` (or `QLIK_API_KEY`) |
+| `engine` | *(omit)* | yes | `--engine <ws-url>` + `--app-id <guid>` + optional repeatable `--header k=v` |
+
+Offline extraction degrades gracefully — an opaque `.qvf` yields warnings,
+never a crash. The two **live** modes (`qlik-cloud` REST + QIX, `engine`
+JSON-RPC over websocket) require the optional extra:
+
+```bash
+pip install 'thoughtspot-cli[qlik]'    # adds websocket-client
+```
+
+Invoking a live mode without it fails with that exact remediation message. The
+Qlik Cloud API key is read from `--api-key` or `QLIK_API_KEY` only — it is never
+printed, echoed, or written to a file. For the live modes the positional
+`<source>` is omitted; `qlik-cloud` requires `--tenant` + `--app-id`, `engine`
+requires `--engine` + `--app-id`.
+
+### `ts qlik parse`
+
+Parse a Qlik app into a structured inventory JSON.
+
+```bash
+ts qlik parse App.qvf -o app.inventory.json
+ts qlik parse ./engine-output -o app.inventory.json --mode engine-artifacts
+ts qlik parse -o app.inventory.json --mode qlik-cloud \
+  --tenant https://acme.us.qlikcloud.com --app-id <guid>   # QLIK_API_KEY in env
+ts qlik parse -o app.inventory.json --mode engine \
+  --engine wss://host/app --app-id <guid> --header "Authorization=Bearer <t>"
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--output`, `-o` | — | Output inventory JSON path (required) |
+| `--mode` | `offline` | `offline` \| `engine-artifacts` \| `qlik-cloud` \| `engine` |
+| `--tenant` | — | Qlik Cloud tenant URL (`qlik-cloud` mode) |
+| `--app-id` | — | Qlik app GUID (`qlik-cloud`/`engine`); `qlik-cloud` also accepts an app name |
+| `--api-key` | env `QLIK_API_KEY` | Qlik Cloud API key (`qlik-cloud` mode); never printed |
+| `--engine` | — | Qlik Engine websocket URL, e.g. `wss://host/app` (`engine` mode) |
+| `--header` | — | Extra websocket header `k=v` (`engine` mode); repeatable |
+
+The `--mode` / `--tenant` / `--app-id` / `--api-key` / `--engine` / `--header`
+flags apply identically to `build-model` and `build-liveboard` below.
+
+**Output:** writes `{app_name, extraction_mode, connections, tables, columns,
+measures, dimensions, variables, sheets, charts, counts, warnings}` to the
+output file; prints the `counts` object to stdout, warnings to stderr.
+
+### `ts qlik build-model`
+
+Build import-ready Table TML(s) + Model TML + `mapping.json` from a Qlik app.
+Translates Qlik master-measure expressions to ThoughtSpot formulas
+(`[formula_<name>]` id-refs), honours the TML invariants (`db_column_name` on
+every column, connection `name:` only, `formula_id` linkage, `aggregation:` in
+`columns[]` only). Anything not faithfully translatable is flagged
+`NEEDS REVIEW` in `mapping.json` with the original Qlik expression retained —
+never silently downgraded.
+
+```bash
+ts qlik build-model App.qvf -c "Snowflake_Sales" --db SALES_DB --schema PUBLIC -o ./tml_out
+ts qlik build-model App.qvf -c "Snowflake_Sales" --db DB --schema SCH -o ./tml_out \
+  --model-name "Sales" --types wh_types.json
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--connection`, `-c` | — | ThoughtSpot connection display NAME, never a GUID (required) |
+| `--db` | — | Warehouse database for the table TML(s) (required) |
+| `--schema` | — | Warehouse schema for the table TML(s) (required) |
+| `--output`, `-o` | — | Output directory for TML + `mapping.json` (required) |
+| `--model-name` | Qlik app name | Model name |
+| `--overrides` | — | JSON file whose top-level keys replace parsed IR values (hand-edited IR) |
+| `--types` | — | JSON `{TABLE:{COLUMN:ts_type}}` of real warehouse types to avoid type guessing |
+| `--mode` | `offline` | `offline` \| `engine-artifacts` \| `qlik-cloud` \| `engine` (+ the live-mode flags above) |
+
+**Output:** writes `table.<name>.tml` (one per table), `model.<name>.tml`, and
+`mapping.json` to the output directory; prints a counts summary JSON to stdout.
+
+### `ts qlik build-liveboard`
+
+Build an Answer + tabbed Liveboard from a Qlik app's sheets/charts — one tab per
+Qlik sheet, each chart an embedded Answer whose search query is assembled from
+its dimensions + measures. A Qlik viz type with no ThoughtSpot equivalent
+defaults to a table and is flagged `NEEDS REVIEW`.
+
+```bash
+ts qlik build-liveboard App.qvf -o ./tml_out --model-name "Sales"
+ts qlik build-liveboard App.qvf -o ./tml_out --model-name "Sales" \
+  --model-fqn <model-guid> --report-name "Exec Dashboard"
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--output`, `-o` | — | Output directory for the Liveboard TML + `liveboard_mapping.json` (required) |
+| `--model-name` | — | Name of the ThoughtSpot model the Answers query (required) |
+| `--model-fqn` | — | GUID of the model (added as `fqn` on the Answer table refs) |
+| `--report-name` | model name | Liveboard name |
+| `--overrides` | — | JSON file whose top-level keys replace parsed IR values (hand-edited IR) |
+| `--mode` | `offline` | `offline` \| `engine-artifacts` \| `qlik-cloud` \| `engine` (+ the live-mode flags above) |
+
+**Output:** writes `liveboard.<name>.tml` and `liveboard_mapping.json` to the
+output directory; prints a counts summary JSON to stdout.
+
+---
+
 
 ## Piping and scripting
 
@@ -1803,6 +2698,126 @@ ts load snowflake --source ./csvs/ --profile Production \
 | `--rows` | `100` | Rows to generate (with `--generate-sample`) |
 
 **Output:** JSON with `database`, `schema`, `profile`, and `tables[]` array containing `table_name`, `status`, `rows_loaded`, `columns`, `source_file`.
+
+### `ts load databricks`
+
+Provision table(s) + synthetic data into a Databricks `catalog.schema` (Unity Catalog), so a
+ThoughtSpot Databricks connection can bind a model over them. Auth via a Databricks profile in
+`~/.claude/databricks-profiles.json` (`dbx_profile`, `sql_warehouse_http_path`, `catalog`,
+`schema`); the token lives in `~/.databrickscfg` (`databricks auth login`), never in the
+profile file. Execution goes through the `databricks` CLI's SQL Statement Execution API.
+
+```
+ts load databricks --source ./orders_demo_schema.json --profile sisense-dbx --rows 200
+```
+
+Infers the schema from `--source` (manifest / schema JSON / CSV dir), generates deterministic
+synthetic rows, then `CREATE TABLE` (Delta **column mapping** enabled — preserves column names
+with spaces/special chars like `Order Date` 1:1) + batched `INSERT`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--source`, `-s` | — | Schema/manifest JSON or CSV dir (required) |
+| `--profile`, `-p` | — | Databricks profile name (required) |
+| `--catalog` / `--schema` | from profile | Override target catalog/schema |
+| `--rows`, `-r` | `100` | Synthetic rows per table |
+| `--batch` | `200` | Rows per `INSERT` statement |
+
+> **Connection caveat (live-verified):** for a ThoughtSpot model to bind to the new table, the
+> connection must expose it. A **SERVICE_ACCOUNT** Databricks connection introspects it
+> automatically; an **OAuth/PKCE** connection returns an empty API hierarchy (a ThoughtSpot
+> limitation), so the new table must be **selected in the ThoughtSpot connection editor (UI)**
+> before `ts tables create` / model build can reference it.
+
+### `ts powerbi parse` / `build-model` / `build-liveboard`
+
+The Power BI (`.pbip`) to ThoughtSpot converter for the `ts-convert-from-powerbi` skill.
+Mirrors the Tableau converter: `parse` reads the project into structured JSON, `build-model`
+emits import-ready Table + Model TML (DAX translated to ThoughtSpot formulas), and
+`build-liveboard` emits Answer + tabbed-Liveboard TML from the report pages. The
+ThoughtSpot-side emission reuses the shared `dump_tml_yaml` and `tableau.liveboard.build_from_spec`,
+so both BI converters produce identical TML shapes. Pure conversion logic lives in
+`ts_cli/powerbi/*`; only I/O and typer wiring live in `commands/powerbi.py`.
+
+#### `ts powerbi parse`
+
+Parse a `.pbip` project (TMDL semantic model + PBIR report) into structured JSON:
+tables/columns/measures/relationships and pages/visuals. Anything the parser cannot
+confidently read is listed under `warnings` rather than guessed.
+
+```bash
+ts powerbi parse ./MyReport.pbip --output parsed.json
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `pbip_dir` (arg) | yes | Path to the `.pbip` project folder |
+| `--output`, `-o` | yes | Output parsed JSON path |
+
+Stdout: JSON `counts` object (pipeable). Warnings go to stderr.
+
+#### `ts powerbi build-model`
+
+Build Table + Model TML (and `mapping.json`) from a `.pbip`. Parses the project, translates
+DAX to ThoughtSpot formulas (`[formula_<name>]` id-refs, topo-sorted), emits joins with the
+real relationship cardinality, honours `summarizeBy` for AVG-vs-SUM, and enables Spotter.
+The connection block carries `name:` only (never `fqn:`).
+
+```bash
+ts powerbi build-model ./MyReport.pbip \
+  --connection "MY_CONNECTION" \
+  --db WAREHOUSE_DB --schema WAREHOUSE_SCHEMA \
+  --output ./tml_out \
+  --model-name "My Model"
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `pbip_dir` (arg) | yes | Path to the `.pbip` project folder |
+| `--connection`, `-c` | yes | ThoughtSpot connection display name the tables bind to |
+| `--db` | yes | Warehouse database |
+| `--schema` | yes | Warehouse schema |
+| `--output`, `-o` | yes | Output dir for `.tml` + `mapping.json` |
+| `--model-name` | no | Name for the generated Model (default: derived) |
+| `--join-type` | no | Join type for relationships (default: `LEFT_OUTER`, keeps fact rows) |
+| `--overrides` | no | `overrides.json` (hand-authored `ts_formula` / connection / `table_map` / parameters) |
+| `--lower-db-table` | no | Lowercase `db_table` (Databricks folds unquoted names) |
+
+Stdout: JSON counts (`tables`, `model`, `measures`, `migrated`, `approximated`,
+`needs_review`). A measure whose DAX cannot be translated is flagged `NEEDS REVIEW`
+(never silently downgraded). `mapping.json` records per-object status + notes.
+
+#### `ts powerbi build-liveboard`
+
+Emit Answer + tabbed-Liveboard TML from a `.pbip`'s report pages, reusing the shared
+`build_from_spec` (role-aware axes: Category to x, Series to color, Rows/Columns to pivot,
+measures to y; chart-needs floor; override capture-and-replay). Report pages become tabs in
+PBI `pageOrder`; a Tooltip page is dropped, not a tab.
+
+```bash
+ts powerbi build-liveboard ./MyReport.pbip \
+  --output ./tml_out \
+  --model-name "My Model" \
+  --model-fqn <model-guid>
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `pbip_dir` (arg) | yes | Path to the `.pbip` project folder |
+| `--output`, `-o` | yes | Directory for the emitted `.liveboard.tml` |
+| `--model-name` | yes | Model name the answers bind to (must match `build-model`) |
+| `--model-fqn` | no | Model GUID to bind to (optional; more robust than name) |
+| `--report-name` | no | Liveboard name (default: derived from model) |
+| `--connection`, `-c` | no | Connection name (for the in-memory model build) |
+| `--db` / `--schema` | no | Warehouse db/schema (for the in-memory model build) |
+| `--overrides` | no | `overrides.json` (explicit answers / extra_visuals) |
+
+Stdout: JSON counts (`report_name`, `answers`, `tabs`, `visuals_migrated`,
+`approximated`, `needs_review`, `liveboard`). A chart type with no faithful ThoughtSpot
+equivalent is emitted as its nearest approximation and flagged `Approximated` or
+`NEEDS REVIEW`, matching the Tableau path's "flag, never downgrade" contract.
+
+---
 
 ### `ts snowflake diff`
 
@@ -1937,6 +2952,167 @@ failed).
 top-level `rows` is a convenience for single-query verifies. Diagnostics go to
 stderr.
 
+### `ts snowflake parse-sv`
+
+Parse a Snowflake Semantic View DDL string (from `GET_DDL('SEMANTIC_VIEW', ...)`)
+into structured JSON for the `ts-convert-from-snowflake-sv` skill. Codifies
+Step 4: tables (aliases, PKs, range constraints, subquery sources), relationships
+(equi/range/asof), dimensions, metrics (semi-additive, window, USING), facts,
+custom instructions, verified queries, and extension JSON.
+
+```bash
+ts snowflake parse-sv sv.sql --output parsed.json
+cat sv.sql | ts snowflake parse-sv - --output parsed.json
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `ddl_file` | *(required)* | Path to a DDL file, or `-` for stdin |
+| `--output` / `-o` | *(required)* | Output JSON path |
+
+Exits 1 when `unsupported[]` is non-empty (list on stderr; JSON still written).
+Emits BL-100 prerequisite warnings for `sample_values`/`is_enum` (DDL clause
+shape unverified against live `GET_DDL`).
+
+**Output:** JSON to the `--output` file — `{"view_name", "database", "schema",
+"name", "comment", "tables", "relationships", "dimensions", "metrics", "facts",
+"custom_instructions", "verified_queries", "extension", "warnings",
+"unsupported"}`. Summary line to stderr.
+
+---
+
+### `ts snowflake translate-formulas`
+
+Translate Snowflake SQL formulas from a parsed Semantic View (output of
+`ts snowflake parse-sv`) into ThoughtSpot formula syntax. Codifies
+ts-convert-from-snowflake-sv SKILL.md Step 9: identifier resolution,
+function mapping (DATEDIFF/DATEADD/CASE/CAST/DIV0/COUNT_IF/window functions),
+column classification (ATTRIBUTE/MEASURE, column/formula), semi-additive
+wrapping (last_value/first_value), and USING relationship group_aggregate.
+
+```bash
+ts snowflake translate-formulas --input parsed.json --output translated.json
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--input` / `-i` | *(required)* | Path to parsed SV JSON from `parse-sv` |
+| `--output` / `-o` | *(required)* | Output translated JSON path |
+
+**Output:** JSON to the `--output` file — `{"translated": [...],
+"skipped": [...], "stats": {"total", "translated", "skipped"}}`.
+Each translated entry: `{name, role, output_kind, column_type, table,
+column, ts_expr, aggregation, comment, synonyms, is_private, annotations}`.
+Stats JSON to stdout; skipped entries and diagnostics to stderr.
+
+---
+
+### `ts snowflake introspect`
+
+Query Snowflake INFORMATION_SCHEMA for the source tables referenced by a parsed
+Semantic View and build the artifacts the downstream pipeline needs. Codifies
+ts-convert-from-snowflake-sv Steps 6A–6C: Snowflake type → ThoughtSpot type
+mapping, tables-spec assembly for `ts tables create`, and a tables map for
+`ts snowflake build-model`.
+
+```bash
+ts snowflake introspect --parsed parsed.json --sf-profile PROD \
+  --connection-name "My Snowflake" --output-dir ./output
+cat output/tables-spec.json | ts tables create --profile my-ts
+ts snowflake build-model --tables output/tables.json ...
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--parsed` | *(required)* | Path to parsed SV JSON from `parse-sv` |
+| `--sf-profile` | *(required)* | Snowflake profile name |
+| `--connection-name` | *(required)* | ThoughtSpot connection display name (stamped on every table spec) |
+| `--output-dir` | *(required)* | Directory for `tables-spec.json` and `tables.json` |
+| `--warehouse` | profile default | Warehouse override |
+| `--role` | profile default | Role override |
+
+**Outputs:**
+- `tables-spec.json` — JSON array for `ts tables create` stdin
+- `tables.json` — `{alias: {name}}` map for `ts snowflake build-model --tables`
+  (enrich with GUIDs from `ts tables create` output before calling build-model)
+
+**Output (stdout):** JSON summary — `{tables, total_columns, warnings,
+tables_spec_file, tables_map_file, connection_name}`.
+
+---
+
+### `ts snowflake build-model`
+
+Assemble a ThoughtSpot Model TML from the outputs of `ts snowflake parse-sv` and
+`ts snowflake translate-formulas`, then import it via two-pass import. Codifies
+ts-convert-from-snowflake-sv SKILL.md Steps 10–11: inline Scenario B joins
+(equi/range/ASOF), SV synonym→display name, private column handling, fact table
+detection, and the two-pass import flow (structure-only → GUID capture → full
+model with formulas + `--no-create-new`).
+
+```bash
+ts snowflake build-model \
+  --parsed parsed.json --translated translated.json \
+  --tables tables.json --model-name "Sales Model" \
+  --sv-fqn DB.SCHEMA.SALES_SV --profile my-ts \
+  --output-dir ./output
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--parsed` | *(required)* | Path to parsed SV JSON from `parse-sv` |
+| `--translated` | *(required)* | Path to translated JSON from `translate-formulas` |
+| `--tables` | *(required)* | Path to tables JSON map (`{alias: {name, fqn}}` or `{alias: name}`) |
+| `--model-name` | *(required)* | Display name for the ThoughtSpot model |
+| `--output-dir` | *(required)* | Directory to write the model TML YAML file |
+| `--sv-fqn` | — | Fully-qualified SV name for the model description |
+| `--spotter-enabled` / `--no-spotter-enabled` | enabled | Enable/disable Spotter (AI search) on the model |
+| `--existing-guid` | — | GUID of an existing model to update (skips phase 1 create) |
+| `--profile` | — | ThoughtSpot profile for import |
+| `--dry-run` | `false` | Write TML files only, skip import |
+
+**Output:** JSON summary to stdout — `{model_name, model_guid, formula_count,
+attribute_count, measure_count, phase1, phase2, tml_path, build_info}`.
+Phase 1 is skipped when `--existing-guid` is supplied or when the model has no
+formulas.
+
+---
+
+### `ts snowflake build-sv`
+
+Build a Snowflake Semantic View DDL from exported ThoughtSpot Model + Table TMLs.
+Codifies ts-convert-to-snowflake-sv Steps 5–8: column_id resolution to physical
+column names, classification (dimension/metric/time_dimension), `to_snake`
+aliasing, relationship naming with collision avoidance, metric topological
+ordering, DDL assembly with tables/relationships/dimensions/metrics clauses, and
+Cortex Analyst extension JSON.
+
+```bash
+ts tml export {model_guid} --parse --associated --output-dir ./export
+ts snowflake build-sv --model export/model.json \
+  --tables-dir export/ --sv-name DB.SCHEMA.MY_SV \
+  --output my_sv.sql
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--model` | *(required)* | Path to Model TML JSON (from `ts tml export --parse`) |
+| `--tables-dir` | *(required)* | Directory with Table TML JSON files |
+| `--sv-name` | *(required)* | Fully-qualified SV name (e.g. `DB.SCHEMA.MY_SV`) |
+| `--output` | *(required)* | Output `.sql` file path |
+| `--formulas` | — | Pre-translated formulas JSON (`{formula_id: {expr, kind}}`) |
+
+Formulas without a matching entry in `--formulas` are omitted from the DDL
+and logged as skipped. Join type/cardinality attributes are dropped (logged as
+unmapped). Pipe the output to `ts snowflake lint-ddl` for validation, then
+`ts snowflake exec` to create the view.
+
+**Output (stdout):** JSON summary — `{sv_name, ddl_file, dimensions,
+time_dimensions, metrics, relationship_count, skipped_formulas,
+dropped_join_attrs, unmapped_properties}`.
+
+---
+
 ### `ts databricks parse-mv`
 
 Parse a Databricks Metric View YAML definition (v0.1 or v1.1) into structured
@@ -2057,3 +3233,276 @@ skipped import); `1` — a builder `ValueError` (bad alias, duplicate formula
 title, unsupported join), the zero-column-table guard, non-empty
 `invariant_findings`/`lint_findings`, an unreadable/invalid input file, or an
 import failure.
+
+### `ts databricks build-mv`
+
+Emit Databricks Metric View `.sql` file(s) (`CREATE OR REPLACE VIEW ... WITH
+METRICS`) from an exported ThoughtSpot Model, for the `ts-convert-to-databricks-mv`
+skill. Emit-only — no ThoughtSpot or Databricks profile is used or needed, and
+no DDL is ever executed; it reads local Model/Table TML JSON and writes local
+`.sql` files.
+
+```bash
+ts databricks build-mv \
+  --model model.json --tables tables.json \
+  --catalog analytics --schema sales \
+  --output-dir out/
+```
+
+| Option | Required | Meaning |
+|---|---|---|
+| `--model` / `-m` | yes | Exported Model TML JSON (`{"model": {...}}`, or a bare model dict) |
+| `--tables` | yes | Associated Table TML JSON list (`[{"table": {...}}, ...]`) |
+| `--catalog` | yes | Databricks catalog for the MV's source table and the view itself |
+| `--schema` | yes | Databricks schema for the MV's source table and the view itself |
+| `--output-dir` / `-o` | yes | Directory for the generated `.sql` file(s) |
+| `--source-table` | no | Fact table to build the MV for; omit to emit one MV per fact table `mv_emit.detect_fact_tables` finds (a table carrying ≥1 MEASURE column that is not itself the join target of another table) |
+| `--view-name` | no | Override the generated view name — only honoured when exactly one MV is being emitted (a single `--source-table`, or a model with exactly one detected fact) |
+
+Each fact produces one `{view_name}.sql` file in `--output-dir` (default name
+`{model}_{fact}_mv`, via `mv_build_view.default_view_name`). A fact table this
+model has no MEASURE column for, or that a formula fails to translate for,
+naturally lands in that MV's `skipped[]` rather than aborting the whole run.
+
+**Output:** a summary JSON on stdout (the only stdout output — diagnostics are
+on stderr): `model_name`, `metric_views[]` (`view_name`, `source`, `dimensions`,
+`measures`, `filter_applied`, `file`), `skipped[]`, `warnings[]` — the
+`mv_build_view.build_summary` shape.
+
+Exit codes: `0` — every produced MV has at least one measure; `1` — no fact
+table could be found (no `--source-table` and no MEASURE column anywhere in
+the model), an unreadable/invalid `--model`/`--tables` file, a structural
+`ValueError` while building an MV (e.g. a duplicate emitted column name, or
+the `build_view_ddl` `$$`-collision guard), or any produced MV ends up with
+zero measures.
+
+---
+
+## `ts alias` — column alias management
+
+Composable pipeline for managing column aliases on a ThoughtSpot Model — display
+names/descriptions per (column, locale, org, group) — covering three use cases:
+language localization, tenant-based renaming, and layering locale translation on
+top of tenant-specific names. Each command reads a JSON envelope from stdin and
+writes one to stdout (or TML YAML for `build`), so the four compose with `|`:
+
+```bash
+ts alias export --model <guid> -p prod \
+  | ts alias translate --source ai --locales de-DE,fr-FR \
+  | ts alias build --merge \
+  | ts alias import --model <guid> -p prod
+```
+
+| Command | Description |
+|---|---|
+| `ts alias export --model <guid>` | Export model columns + existing aliases |
+| `ts alias translate --source ai\|file\|db` | Generate aliases from AI, CSV, or a Snowflake table |
+| `ts alias build [--merge] [--format tml\|csv]` | Assemble alias output (TML or CSV) |
+| `ts alias import --model <guid>` | Upload alias TML (sync or async based on size) |
+
+### `ts alias export`
+
+Exports a Model's columns and any existing column aliases via the TML export API
+(`export_options.export_with_column_aliases: true`).
+
+```bash
+ts alias export --model <guid> -p prod
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--model` | *(required)* | Model GUID |
+| `--profile` / `-p` | first profile / `TS_PROFILE` | ThoughtSpot profile |
+
+**Output:** JSON to stdout — `{"model": {"guid", "name", "fqn"}, "columns":
+[{"name", "description", "type"}, ...], "existing_aliases": {"columns": [...]}
+| null}`.
+
+### `ts alias translate`
+
+Generates alias translations from one of three sources and writes a
+translations envelope. `--source ai` translates every column for the given
+`--locales` (language localization only — `--orgs` is rejected). `--source
+file` parses a `--csv` of tenant-specific aliases (optionally filtered by
+`--locales`/`--orgs`/`--groups`). `--source db` queries a Snowflake
+`--table` of the same shape. Either of the last two can layer an AI locale
+translation on top (`--ai-locales`, `--locale-config`, or
+`--locale-config-table`) for the tenant + locale use case. `--init-table`
+emits the standard `TS_COLUMN_ALIASES` / `TS_ALIAS_LOCALES` DDL and exits.
+
+```bash
+ts alias export --model <guid> -p prod | ts alias translate --source ai --locales de-DE,fr-FR
+ts alias export --model <guid> -p prod | ts alias translate --source file --csv aliases.csv
+ts alias export --model <guid> -p prod | ts alias translate --source db --sf-profile sf --table DB.SCHEMA.TS_COLUMN_ALIASES
+ts alias translate --init-table --sf-profile sf
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--source` | *(required unless `--init-table`)* | `ai`, `file`, or `db` |
+| `--locales` | — | Comma-separated locale codes (required for `--source ai`; optional filter for file/db) |
+| `--orgs` | — | Comma-separated org names to filter (file/db only) |
+| `--groups` | — | Comma-separated group names to filter (file/db only) |
+| `--input` | stdin | Input JSON envelope file |
+| `--translator` | `claude` | AI backend: `claude` or `cortex` |
+| `--api-key-env` | `ANTHROPIC_API_KEY` | Env var name for the Anthropic API key |
+| `--sf-profile` | — | Snowflake profile name |
+| `--table` | — | Snowflake table (`--source db`) |
+| `--csv` | — | CSV file path (`--source file`) |
+| `--ai-locales` | — | Comma-separated locales for an AI overlay on file/db |
+| `--locale-config` | — | YAML file for a per-org locale config |
+| `--locale-config-table` | — | Snowflake table for a per-org locale config |
+| `--init-table` | `false` | Emit DDL for the alias + locale tables, then exit |
+| `--profile` / `-p` | first profile / `TS_PROFILE` | ThoughtSpot profile |
+
+A malformed AI response (wrong shape, wrong count, unknown column) is retried
+once with a stricter prompt; a second failure raises.
+
+**Output:** JSON to stdout — `{"model", "translations": [{"column", "locale",
+"alias", "description", "org", "group"}, ...], "existing_aliases"}`.
+
+### `ts alias build`
+
+Assembles `column_alias` TML YAML from a translations envelope. With
+`--merge`, existing aliases (from the export envelope) are preserved and only
+overwritten where the `(column, locale, org, group)` key matches a new
+translation; without it, the new translations fully replace prior aliases.
+
+```bash
+ts alias translate ... | ts alias build
+ts alias translate ... | ts alias build --merge
+ts alias build --input translations.json --merge
+ts alias build --input translations.json --format csv > aliases.csv
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--input` | stdin | Translations JSON envelope file |
+| `--merge` | `false` | Merge with existing aliases instead of replacing them |
+| `--format` | `tml` | Output format: `tml` (column_alias YAML) or `csv` (ThoughtSpot CSV upload format) |
+
+**Output (tml):** `column_alias` TML YAML to stdout. `tml_size_bytes: <n>` and any
+size warning/error go to stderr. Warns above 20 MB; errors (exit 1) above the
+25 MB platform import limit.
+
+**Output (csv):** ThoughtSpot CSV upload format (`Column,locale,alias,description,org_name,group_name`) to stdout. Row count emitted to stderr.
+
+### `ts alias import`
+
+Uploads `column_alias` TML to ThoughtSpot, picking sync vs. async import
+based on payload size.
+
+```bash
+ts alias build ... | ts alias import --model <guid> -p prod
+ts alias import --model <guid> -p prod --file alias.yaml
+ts alias import --model <guid> -p prod --dry-run --file alias.yaml
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--model` | *(required)* | Model GUID |
+| `--profile` / `-p` | first profile / `TS_PROFILE` | ThoughtSpot profile |
+| `--file` | stdin | TML file path |
+| `--dry-run` | `false` | Validate only (`VALIDATE_ONLY` import policy) |
+
+Payloads under 5 MB import synchronously. 5–25 MB import asynchronously and
+poll `.../tml/async/status` until `COMPLETED`/`FAILED` (~10–15 minutes for
+large payloads). Above 25 MB is rejected before any API call.
+
+**Output:** JSON to stdout — the import (or async status) response.
+
+---
+
+## `ts tenancy` — provision an Org/user/group topology from a spec
+
+Standing up the multi-tenancy pattern end to end — publish, alias, share, secure — needs a
+cluster with several Orgs, users assigned to them, and **per-Org groups with the right
+members**. That was undocumented tribal knowledge (BL-137), and the part most often got
+wrong is not the tedious part.
+
+**Groups are per-Org, and that is the whole difficulty.** `Analyst` in the Primary Org and
+`Analyst` in a tenant Org are different principals; a `ts share` or column-security
+manifest naming the wrong one fails with `Invalid group identifiers`. `ts tenancy verify`
+and the spec validator refuse an incoherent topology at plan time rather than letting a
+half-built cluster look finished.
+
+```bash
+ts tenancy export  [--org O ...] [--out F] [--marker M] -p prod
+ts tenancy apply   --spec F [--tenant T] [--password-env VAR] [--dry-run] -p prod
+ts tenancy verify  --spec F [--tenant T] -p prod
+ts tenancy teardown --spec F --org O [--org O] [--tenant T] --yes [--dry-run] -p prod
+```
+
+The primitives are available on their own: `ts orgs create`, `ts users create`,
+`ts groups create` / `search` / `add-member` (all per-Org).
+
+### The spec
+
+```yaml
+marker: ts-tenancy-fixture        # stamped into every created object; teardown requires it
+orgs:
+  - name: ORG1
+groups:                            # keyed by Org — this is the load-bearing part
+  Primary: [{name: Analyst, privileges: [AUTHORING, A3ANALYSIS]}]
+  ORG1:    [{name: Demo Retail Group}]
+users:
+  - name: guest1
+    email: guest1@example.com
+    account_type: LOCAL_USER       # or SAML_USER / OIDC_USER / LDAP_USER — no password
+    orgs: [Primary, ORG1]
+    groups:
+      Primary: [Analyst]
+      ORG1:    [Demo Retail Group]
+```
+
+A captured reference topology ships at
+[`tools/fixtures/tenancy-reference.yaml`](../fixtures/tenancy-reference.yaml).
+
+### Behaviours worth knowing
+
+| | |
+|---|---|
+| **`apply` is idempotent** | Anything present is skipped, so a run that failed halfway is simply re-run — the normal case when standing up an environment |
+| **`export` captures, it does not guess** | The shipped topology is read from a working cluster, so it cannot quietly disagree with it. Built-ins are filtered on the API's own `system_group` / `system_user` flags |
+| **`verify` is one-directional** | Objects the cluster has but the spec does not mention are NOT drift. A shared cluster always carries them, and flagging them would make verify permanently red |
+| **`teardown` needs three things** | The spec's marker, every Org named with `--org`, and `--yes`. A user who also belongs to an unnamed Org is refused, because deleting them would strip them from it. Primary is never deleted |
+| **Passwords are never a flag** | `--password-env` names a variable you export yourself; the value is read from the environment and never echoed. Federated accounts never receive one |
+| **`{TENANT}` templating** | One spec, N tenants: `--tenant ACME` substitutes `{TENANT}` / `{TENANT_UPPER}` / `{TENANT_LOWER}`, matching `ts publish resolve --pattern` |
+
+### Calling it from Python
+
+The planning engine is **pure** — no I/O, no typer, no client — so it can be imported and
+driven directly when you want the decisions without the command layer. That is a
+deliberate design property (`.claude/rules/ts-cli.md`), not an accident, and it is what
+makes the whole decision surface unit-testable without a live instance.
+
+```python
+import yaml
+from ts_cli.tenancy_spec import parse_spec, validate_spec, substitute_tenant
+from ts_cli.tenancy_plan import build_apply_plan, diff_topology, format_plan
+
+doc  = yaml.safe_load(open("tools/fixtures/tenancy-reference.yaml"))
+doc  = substitute_tenant(doc, "ACME")          # optional: resolve {TENANT}
+spec = parse_spec(doc)
+
+problems = validate_spec(spec)                  # ALL problems, not just the first
+if problems:
+    raise SystemExit("\n".join(problems))
+
+# `current` is the live reading; omit it to plan against an empty cluster.
+for line in format_plan(build_apply_plan(spec)):
+    print(line)
+```
+
+`current` has the shape `{"orgs": [...], "groups": {org: [...]}, "users": [...],
+"members": {org: {group: [user]}}}`. `ts tenancy`'s own `_read_cluster` builds it, and
+`diff_topology(spec, current)` is what `verify` reports.
+
+Reading live state still needs the command layer (`ts_cli.commands.tenancy._read_cluster`),
+which owns the auth and the per-Org clients. Prefer the CLI unless you specifically want
+the planning decisions in-process.
+
+**Production note.** The engine is production-capable — a real tenant's Org, groups and
+users are the same operation — but production onboarding is usually *partial* (the Org is
+created, users arrive via SSO), and selective application (`--only orgs,groups`) plus a
+wrapping skill are tracked in BL-143, not implemented here.

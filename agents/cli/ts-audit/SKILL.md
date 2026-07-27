@@ -38,7 +38,8 @@ findings and actionable recommendations, but makes no changes.
 | Coach model for Spotter | `/ts-object-model-coach` |
 | Fix PII indexing / security | Manual via ThoughtSpot UI or TML reimport |
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions. Batch **independent** questions
+into a single prompt to cut round-trips.
 
 ---
 
@@ -403,6 +404,7 @@ If **done**: end the skill.
 | 2.3.2 | 2026-07-02 | Cluster heatmap: findings whose object is not a model (cross-answer/formula/table findings, or empty-guid) are no longer rolled up onto the first model in multi-model audits — this was inflating the first model's row (e.g. GTM Campaigns showing HIGH across angles it had no such findings for). Inherits the ERD fact/dimension classifier refinement |
 | 2.3.1 | 2026-07-02 | ERD embed now shares one parser with the ts-object-model-erd skill (single source of definition); inherits the dimension/fact classifier fix so hidden RLS/parameter helper formulas no longer mislabel a dimension as a fact |
 | 2.3.0 | 2026-07-02 | ERD: AI domain summary, multi-select filter chips, RLS red colour scheme, grouped controls bar, join-tree double-click, layered layout fixes |
+| 2.2.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 2.2.0 | 2026-07-01 | Report UI: accessible heatmap labels, clickable breadcrumbs/KPIs, severity filters on Dashboard, check metadata in Cross-Model groups, show-all-checks toggle, model description + AI analysis panel |
 | 2.1.0 | 2026-07-01 | Add `ts audit report` command: unified HTML report with Dashboard, Scorecard, Cross-Model, Object Map, Cleanup views. Delete superseded `efficiency_report.py`. |
 | 1.0.0 | 2026-06-18 | Initial release — five audit angles: AI Readiness (A), Data Modeling (D), Human Readiness (H), Performance (P), Security (S) |

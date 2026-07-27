@@ -20,6 +20,7 @@ from ts_cli.model_builder import (
     fix_bare_refs,
     fix_double_aggregation,
     merge_formulas_into_model,
+    resolve_all_internal_refs,
     resolve_name_collisions,
     split_for_phased_import,
 )
@@ -334,6 +335,56 @@ class TestFormulaLevels:
         assert levels["B"] == 1
         assert levels["C"] == 1
         assert levels["A"] == 2
+
+    def test_circular_dependency_defaults_to_level_zero(self):
+        """A and B depend on each other — the fixpoint loop never resolves
+        either, so both fall through to the level-0 default rather than
+        looping forever or raising."""
+        calcs = [
+            {"caption": "A", "formula": "[Calculation_2]"},
+            {"caption": "B", "formula": "[Calculation_1]"},
+        ]
+        calc_map = {
+            "Calculation_1": "A", "[Calculation_1]": "A",
+            "Calculation_2": "B", "[Calculation_2]": "B",
+        }
+        levels = build_formula_levels(calcs, calc_map)
+        assert levels["A"] == 0
+        assert levels["B"] == 0
+
+
+# ===================================================================
+# Resolve ALL internal refs (pre-translation)
+# ===================================================================
+
+class TestResolveAllInternalRefs:
+    """resolve_all_internal_refs replaces [Calculation_NNN] and copy-style
+    refs with their captions, ahead of the main translate pipeline."""
+
+    def test_replaces_calculation_ref_with_caption(self):
+        calcs = [{"caption": "Derived", "formula": "[Calculation_1] + 1"}]
+        calc_map = {"Calculation_1": "Base"}
+        resolved = resolve_all_internal_refs(calcs, calc_map)
+        assert resolved[0]["formula"] == "[Base] + 1"
+        assert resolved[0]["caption"] == "Derived"
+
+    def test_copy_style_ref_also_resolved(self):
+        calcs = [{"caption": "Consumer", "formula": "[Source (copy)_999] * 2"}]
+        calc_map = {"Source (copy)_999": "Source"}
+        resolved = resolve_all_internal_refs(calcs, calc_map)
+        assert resolved[0]["formula"] == "[Source] * 2"
+
+    def test_no_matching_ref_leaves_formula_unchanged(self):
+        calcs = [{"caption": "Standalone", "formula": "[COL1] + 1"}]
+        calc_map = {"Calculation_1": "Base"}
+        resolved = resolve_all_internal_refs(calcs, calc_map)
+        assert resolved[0]["formula"] == "[COL1] + 1"
+
+    def test_does_not_mutate_input_list(self):
+        calcs = [{"caption": "Derived", "formula": "[Calculation_1] + 1"}]
+        calc_map = {"Calculation_1": "Base"}
+        resolve_all_internal_refs(calcs, calc_map)
+        assert calcs[0]["formula"] == "[Calculation_1] + 1"
 
 
 # ===================================================================
@@ -1170,10 +1221,11 @@ def test_build_model_tml_references_sql_views():
         translated_formulas=[],
         sql_views=sql_views,
     )["model"]
-    # SQL View appears in model_tables by name, with its columns
+    # SQL View appears in model_tables by name — with NO `columns` key (schema-invalid,
+    # error 13122); its columns live at model.columns via column_id.
     mt = {t["name"]: t for t in model["model_tables"]}
     assert "Orders CSQ" in mt
-    assert {c["name"] for c in mt["Orders CSQ"]["columns"]} == {"Id", "Sales"}
+    assert "columns" not in mt["Orders CSQ"]
     # ...and in model.columns with a SQLViewName::col column_id
     cols = {c["name"]: c for c in model["columns"]}
     assert cols["Sales"]["column_id"] == "Orders CSQ::Sales"
@@ -1181,6 +1233,65 @@ def test_build_model_tml_references_sql_views():
     assert cols["Sales"]["properties"]["aggregation"] == "SUM"
     # ...but NOT in the connection-qualified physical tables: list
     assert all(t["name"] != "Orders CSQ" for t in model["tables"])
+
+
+def test_sql_view_join_emitted_with_cardinality():
+    """A logical (noodle) join between two SQL Views must emit on the MANY side with an
+    explicit cardinality and column names resolved from physical keys — else ThoughtSpot
+    rejects the multi-view model as unjoined."""
+    sql_views = [
+        {"name": "KI", "sql_query": "SELECT ...", "columns": [
+            {"name": "Fleet Account Id", "sql_output_column": "fleet_account_id",
+             "column_type": "ATTRIBUTE", "data_type": "INT64"}]},
+        {"name": "Drivers", "sql_query": "SELECT ...", "columns": [
+            {"name": "fleet_account_id (Drivers)", "sql_output_column": "fleet_account_id",
+             "column_type": "ATTRIBUTE", "data_type": "INT64"},
+            {"name": "Driver Id", "sql_output_column": "driver_id",
+             "column_type": "ATTRIBUTE", "data_type": "INT64"}]},
+    ]
+    joins = [{"type": "INNER", "left_table": "Drivers", "right_table": "KI",
+              "keys": [{"left": "fleet_account_id", "right": "fleet_account_id"}],
+              "cardinality": "MANY_TO_ONE"}]
+    model = build_model_tml(
+        model_name="M", connection_name="C", tables=[], columns=[], joins=joins,
+        parameters=[], translated_formulas=[], sql_views=sql_views,
+    )["model"]
+    mt = {t["name"]: t for t in model["model_tables"]}
+    assert "joins" not in mt["KI"]                       # join lives on the MANY side only
+    j = mt["Drivers"]["joins"][0]
+    assert j["with"] == "KI"
+    assert j["cardinality"] == "MANY_TO_ONE"
+    # physical key resolved to each view's column NAME
+    assert j["on"] == "[Drivers::fleet_account_id (Drivers)] = [KI::Fleet Account Id]"
+
+
+def test_aggregation_avg_vs_sum_heuristic():
+    """Averaged quantities (normalized/rate/score/KI value) → AVERAGE; counts/amounts → SUM.
+    Summing a normalized score is meaningless (golden §2)."""
+    from ts_cli.model_builder import _aggregation_for_name
+    for name in ["SPEEDING_NORMALIZEDBEHAVIOR", "Speeding KI Value", "Normalised Days",
+                 "Completion Rate", "CSAT Score", "Win Ratio", "Price Index",
+                 "safety_score", "SpeedingScore"]:   # snake / camelCase averaged quantities
+        assert _aggregation_for_name(name) == "AVERAGE", name
+    for name in ["Speeding Events", "Total Days Active", "EVENTSCOUNTS", "Sales", "Order Qty",
+                 "Corporate Revenue", "Separate Charges", "Operating Expense"]:  # embed "rate": NOT avg
+        assert _aggregation_for_name(name) == "SUM", name
+
+
+def test_ki_value_measure_gets_average_aggregation():
+    """A KI-value SQL-View measure must emit AVERAGE, not SUM (else it inflates over a join)."""
+    sql_views = [{"name": "KI", "sql_query": "SELECT ...", "columns": [
+        {"name": "Speeding KI Value", "sql_output_column": "speeding_normalizedbehavior",
+         "column_type": "MEASURE", "data_type": "DOUBLE"},
+        {"name": "Speeding Events", "sql_output_column": "speeding_events",
+         "column_type": "MEASURE", "data_type": "INT64"}]}]
+    model = build_model_tml(
+        model_name="M", connection_name="C", tables=[], columns=[], joins=[],
+        parameters=[], translated_formulas=[], sql_views=sql_views,
+    )["model"]
+    cols = {c["name"]: c for c in model["columns"]}
+    assert cols["Speeding KI Value"]["properties"]["aggregation"] == "AVERAGE"
+    assert cols["Speeding Events"]["properties"]["aggregation"] == "SUM"
 
 
 def test_build_model_tml_no_sql_views_unchanged():

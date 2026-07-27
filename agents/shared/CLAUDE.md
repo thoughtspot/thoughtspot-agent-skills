@@ -34,6 +34,13 @@ mappings/looker/
   lookml-to-ts-formula-translation.md — LookML measure/dimension expressions → ThoughtSpot formula mapping
   lookml-tml-rules.md                 — verified TML generation rules for LookML → ThoughtSpot conversion (joins, key dedup, batch import)
 
+mappings/sisense/
+  sisense-formula-translation.md      — Sisense JAQL → ThoughtSpot formula and function mapping (AGG_MAP/FUNCTION_MAP/UNSUPPORTED, mirrors ts_cli/sisense/functions.py)
+mappings/qlik/
+  qlik-thoughtspot-formula-translation.md — Qlik Sense expressions → ThoughtSpot formula and function mapping (199 rows, 17 categories)
+mappings/powerbi/
+  powerbi-formula-translation.md      — Power BI DAX → ThoughtSpot formula and function mapping (aggregations, scalar/date functions, CALCULATE/time-intelligence flagged; mirrors ts_cli/powerbi/functions.py)
+
 schemas/
   thoughtspot-tml.md                  — TML export parsing (PyYAML pitfalls, type detection)
   thoughtspot-table-tml.md            — table TML construction reference
@@ -52,21 +59,33 @@ schemas/
   thoughtspot-connection.md           — connection object structure
   snowflake-schema.md                 — Snowflake Semantic View YAML reference
   databricks-metric-view.md           — Databricks Metric View YAML schema (v0.1/v1.1)
+  qlik-app-ir.md                      — Qlik App IR: the extract↔transform contract for the ts qlik converter
 
 references/
   profile-select-and-authenticate.md  — canonical profile select + verify flow for conversion skills
+  connection-select.md                — canonical N/F/L connection selection + E/C (existing/create) prompt for conversion skills
 
 worked-examples/tableau/
   liveboard-kpi-sparkline.md          — KPI viz with sparkline: client_state_v2 requirement, before/after, verified template (2026-06-11)
   static-set-to-column-set.md         — Tableau static set → ThoughtSpot column set: worksheet binding, EQ-list, {Null}, NE/except, formula-col anchor, live-verified (2026-06-12)
   topn-set-to-query-set.md            — Tableau Top-N/Bottom-N set → ThoughtSpot query set (ADVANCED/COLUMN_BASED): dynamic (rank + parameter-filter formula, model param) vs static (top N keyword) forms, live-verified (2026-06-12)
   data-blend-to-model.md             — two-datasource blend → single ThoughtSpot model with LEFT_OUTER inline join; cross-ds formula translation, join-on-secondary pattern, date-grain caveats (2026-06-14)
+  combo-dual-axis-custom-chart-config.md — Tableau dual-axis combo (line+column) → ADVANCED_LINE_COLUMN with durable custom_chart_config (y-axis-column/y-axis-line MERGED shelves); client_state_v2 decays (2026-07-15)
 
 worked-examples/snowflake/
   ts-to-snowflake.md                  — end-to-end TS → SV conversion (verified against live instance)
   ts-from-snowflake.md                — end-to-end SV → TS conversion — BIRD_SUPERHEROS_SV (verified against live instance)
   ts-from-snowflake-dunder.md         — end-to-end SV → TS conversion — DUNDER_MIFFLIN_SALES_INVENTORY (multi-value synonyms, descriptions, semi-additive, unique count, concat; verified against live instance)
   ts-from-snowflake-identifier-resolution.md — end-to-end SV → TS conversion — COMPANY_WORKFORCE_SV (facts, metric-on-fact inlining, double aggregation via group_count/group_sum, duplicate column_id fix; verified against live instance 2026-06-13)
+
+worked-examples/sisense/
+  numeric-range-filter-to-chip.md     — Sisense dashboard numeric-range filter → ThoughtSpot Liveboard filter chip preset (from/to/NotEqual/equals → GE/GT/LE/LT/BW_INC/BW/EQ)
+  date-bucket-granularity.md          — Sisense date `level` → ThoughtSpot date bucket (hours…years → HOURLY…YEARLY; cyclic parts dropped)
+
+worked-examples/powerbi/
+  sply-parameter.md                   — DAX SAMEPERIODLASTYEAR / time-intelligence measure → ThoughtSpot Spotter period-comparison (flagged NEEDS REVIEW, recovered via Spotter last-mile)
+  calculate-all-to-group-aggregate.md — DAX CALCULATE(..., ALL(...)) → ThoughtSpot group_aggregate (percent-of-total pattern)
+  combo-dual-axis-custom-chart-config.md — Power BI line-and-clustered-column visual → ADVANCED_LINE_COLUMN combo with custom_chart_config
 
 worked-examples/databricks/
   ts-to-databricks.md                 — end-to-end TS → MV conversion — DUNDER_MIFFLIN (multi-fact split, flattened views, LOD dimensions, semi-additive, MEASURE()/ANY_VALUE() cross-refs; verified against live instance 2026-05-25)

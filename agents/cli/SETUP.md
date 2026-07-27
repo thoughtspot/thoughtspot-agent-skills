@@ -91,14 +91,25 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-promote \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-aggregates \
       ~/.snowflake/cortex/skills/ts-object-model-aggregates
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-alias \
+      ~/.snowflake/cortex/skills/ts-object-model-alias
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-publish-orgs \
+      ~/.snowflake/cortex/skills/ts-publish-orgs
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-security-columns \
+      ~/.snowflake/cortex/skills/ts-security-columns
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-setup-tenancy \
+      ~/.snowflake/cortex/skills/ts-setup-tenancy
+
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.snowflake/cortex/skills/ts-object-model-coach
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-erd \
       ~/.snowflake/cortex/skills/ts-object-model-erd
 
-ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-spotql-query \
-      ~/.snowflake/cortex/skills/ts-object-model-spotql-query
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-agentql-query \
+      ~/.snowflake/cortex/skills/ts-object-model-agentql-query
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
       ~/.snowflake/cortex/skills/ts-variable-timezone
@@ -120,6 +131,13 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-databricks-mv \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-looker \
       ~/.snowflake/cortex/skills/ts-convert-from-looker
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-sisense \
+      ~/.snowflake/cortex/skills/ts-convert-from-sisense
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-qlik \
+      ~/.snowflake/cortex/skills/ts-convert-from-qlik
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-powerbi \
+      ~/.snowflake/cortex/skills/ts-convert-from-powerbi
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-tableau \
       ~/.snowflake/cortex/skills/ts-convert-from-tableau
@@ -162,14 +180,25 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-promote \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-aggregates \
       ~/.claude/skills/ts-object-model-aggregates
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-alias \
+      ~/.claude/skills/ts-object-model-alias
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-publish-orgs \
+      ~/.claude/skills/ts-publish-orgs
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-security-columns \
+      ~/.claude/skills/ts-security-columns
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-setup-tenancy \
+      ~/.claude/skills/ts-setup-tenancy
+
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.claude/skills/ts-object-model-coach
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-erd \
       ~/.claude/skills/ts-object-model-erd
 
-ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-spotql-query \
-      ~/.claude/skills/ts-object-model-spotql-query
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-agentql-query \
+      ~/.claude/skills/ts-object-model-agentql-query
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
       ~/.claude/skills/ts-variable-timezone
@@ -191,6 +220,13 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-databricks-mv \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-looker \
       ~/.claude/skills/ts-convert-from-looker
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-sisense \
+      ~/.claude/skills/ts-convert-from-sisense
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-qlik \
+      ~/.claude/skills/ts-convert-from-qlik
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-powerbi \
+      ~/.claude/skills/ts-convert-from-powerbi
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-tableau \
       ~/.claude/skills/ts-convert-from-tableau

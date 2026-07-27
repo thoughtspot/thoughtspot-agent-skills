@@ -16,6 +16,7 @@ class AuditContext:
     ai_instructions: dict = field(default_factory=dict)
     answers: list = field(default_factory=list)
     model_guids: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
 
     def guid_for(self, tml: dict) -> str:
         return tml.get("guid", "")
@@ -37,6 +38,7 @@ def make_context(
     ai_instructions=None,
     answers=None,
     model_guids=None,
+    warnings=None,
 ) -> AuditContext:
     return AuditContext(
         models=models or [],
@@ -46,6 +48,7 @@ def make_context(
         ai_instructions=ai_instructions or {},
         answers=answers or [],
         model_guids=model_guids or [],
+        warnings=warnings or [],
     )
 
 
@@ -65,25 +68,36 @@ def build_context(
     answers = []
 
     _log(f"Exporting TML for {len(model_guids)} model(s)...")
-    resp = client.post("/api/rest/2.0/metadata/tml/export", json={
-        "metadata": [{"identifier": g} for g in model_guids],
-        "export_fqn": True,
-        "export_associated": True,
-        "formattype": "YAML",
-    }, timeout=300)
-    for item in resp.json():
-        edoc = item.get("edoc", "")
-        parsed = parse_edoc(edoc, "YAML")
-        if not parsed:
+    warnings = []
+    model_batch = 50
+    for i in range(0, max(len(model_guids), 1), model_batch):
+        batch = model_guids[i:i + model_batch]
+        if not batch:
+            break
+        resp = client.post("/api/rest/2.0/metadata/tml/export", json={
+            "metadata": [{"identifier": g} for g in batch],
+            "export_fqn": True,
+            "export_associated": True,
+            "formattype": "YAML",
+        }, timeout=300, raise_for_status=False)
+        if not resp.ok:
+            msg = f"Model export batch {i // model_batch + 1} returned {resp.status_code}, skipping {len(batch)} model(s)"
+            _log(f"Warning: {msg}")
+            warnings.append(msg)
             continue
-        tml_type = detect_tml_type(parsed)
-        if tml_type == "model":
-            models.append(parsed)
-        elif tml_type == "table":
-            fqn = (parsed.get("table", {}).get("db") or "") + "." + \
-                  (parsed.get("table", {}).get("schema") or "") + "." + \
-                  (parsed.get("table", {}).get("db_table") or "")
-            tables[fqn] = parsed
+        for item in resp.json():
+            edoc = item.get("edoc", "")
+            parsed = parse_edoc(edoc, "YAML")
+            if not parsed:
+                continue
+            tml_type = detect_tml_type(parsed)
+            if tml_type == "model":
+                models.append(parsed)
+            elif tml_type == "table":
+                fqn = (parsed.get("table", {}).get("db") or "") + "." + \
+                      (parsed.get("table", {}).get("schema") or "") + "." + \
+                      (parsed.get("table", {}).get("db_table") or "")
+                tables[fqn] = parsed
 
     model_guids_from_tml = [m.get("guid") for m in models if m.get("guid")]
     table_guids_from_tml = [t.get("guid") for t in tables.values() if t.get("guid")]
@@ -133,7 +147,9 @@ def build_context(
                 })
                 ai_instructions[guid] = resp.json()
             except Exception:
-                ai_instructions[guid] = {}
+                msg = f"AI instructions fetch failed for model {guid}"
+                _log(f"Warning: {msg}")
+                warnings.append(msg)
 
     if "H" in angles:
         answer_guids = set()
@@ -172,4 +188,5 @@ def build_context(
         ai_instructions=ai_instructions,
         answers=answers,
         model_guids=model_guids,
+        warnings=warnings,
     )

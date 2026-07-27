@@ -100,11 +100,20 @@ class TestTranslateDimension:
         assert out["ts_expr"] == ("group_aggregate ( average ( [TRANSACTIONS::amt] ) , "
                                   "{ [TRANSACTIONS::cat] , [DM_ORDER::REGION] } , query_filters ( ) )")
 
+    def test_lod_median_agg(self):
+        out = translate_dimension(
+            _dim("x", "MEDIAN(amt) OVER (PARTITION BY cat)", "lod_window",
+                 inner_agg="MEDIAN", inner_expr="amt",
+                 partition_by=["cat"]), TABLES)
+        assert out["ts_expr"] == ("group_aggregate ( median ( [TRANSACTIONS::amt] ) , "
+                                  "{ [TRANSACTIONS::cat] } , query_filters ( ) )")
+
     def test_lod_unknown_agg_raises(self):
-        with pytest.raises(UntranslatableError, match="MEDIAN"):
+        with pytest.raises(UntranslatableError, match="PERCENTILE_CONT"):
             translate_dimension(
-                _dim("x", "MEDIAN(amt) OVER (PARTITION BY cat)", "lod_window",
-                     inner_agg="MEDIAN", inner_expr="amt",
+                _dim("x", "PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY amt) OVER (PARTITION BY cat)",
+                     "lod_window",
+                     inner_agg="PERCENTILE_CONT", inner_expr="amt",
                      partition_by=["cat"]), TABLES)
 
 
@@ -145,10 +154,18 @@ class TestTranslateMeasure:
                      physical_ref="x"), TABLES)
         assert out["aggregation"] == "STD_DEVIATION"
 
+    def test_simple_median_uses_formula_path(self):
+        out = translate_measure(
+            _measure("m", "MEDIAN(x)", "simple", agg_function="MEDIAN",
+                     physical_ref="x"), TABLES)
+        assert out["output_kind"] == "formula"
+        assert out["ts_expr"] == "median ( [TRANSACTIONS::x] )"
+
     def test_simple_unknown_agg_falls_back_to_formula_path(self):
-        with pytest.raises(UntranslatableError, match="MEDIAN"):
+        with pytest.raises(UntranslatableError, match="PERCENTILE_CONT"):
             translate_measure(
-                _measure("m", "MEDIAN(x)", "simple", agg_function="MEDIAN",
+                _measure("m", "PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY x)",
+                         "simple", agg_function="PERCENTILE_CONT",
                          physical_ref="x"), TABLES)
 
     def test_simple_distinct_raises(self):
@@ -550,7 +567,8 @@ class TestOrchestrator:
 
     def test_ref_to_skipped_measure_skips_referrer(self):
         measures = [
-            _measure("bad", "MEDIAN(x)", "simple", agg_function="MEDIAN",
+            _measure("bad", "PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY x)",
+                     "simple", agg_function="PERCENTILE_CONT",
                      physical_ref="x"),
             _measure("dep", "MEASURE(bad) * 2", "complex_cross_measure",
                      cross_refs=["bad"]),

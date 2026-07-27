@@ -156,10 +156,13 @@ class TestFunctions:
         assert t("IF(x > 1, 'a', 'b')") == \
             "if ( [TRANSACTIONS::x] > 1 ) then 'a' else 'b'"
 
+    def test_median(self):
+        assert t("MEDIAN(x)") == "median ( [TRANSACTIONS::x] )"
+
     def test_unknown_function_raises_with_doc_pointer(self):
         with pytest.raises(UntranslatableError,
-                           match="MEDIAN.*ts-databricks-formula-translation"):
-            t("MEDIAN(x)")
+                           match="PERCENTILE_CONT.*ts-databricks-formula-translation"):
+            t("PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY x)")
 
     def test_passthrough_lower(self):
         assert t("LOWER(s)") == \

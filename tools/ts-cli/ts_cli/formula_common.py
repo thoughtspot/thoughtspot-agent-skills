@@ -13,6 +13,31 @@ import re
 
 
 # ---------------------------------------------------------------------------
+# Shared translation-failure exception
+# ---------------------------------------------------------------------------
+
+class UntranslatableError(Exception):
+    """A formula/expression construct has no deterministic translation to the
+    other platform's syntax.
+
+    Canonical home (BL-063 PR 14 — Genie vendor wiring): both the reverse
+    (Databricks-SQL -> ThoughtSpot formula, `mv_sql.py`) and forward
+    (ThoughtSpot formula -> Databricks-SQL, `mv_emit_expr.py`) directions
+    raise this SAME exception type for the same concept — "no documented
+    deterministic mapping exists" — so a single `except UntranslatableError`
+    catches either direction's failures. Concatenating both modules into one
+    vendored Genie notebook namespace (`agents/databricks/build_mv_lib.py`)
+    would otherwise define the class twice under one name, which
+    `assert_no_duplicate_top_level_names` rejects. `mv_sql.py` and
+    `mv_emit_expr.py` both re-export this name (`from ts_cli.formula_common
+    import UntranslatableError`) so existing `from
+    ts_cli.databricks.mv_sql import UntranslatableError` / `from
+    ts_cli.databricks.mv_emit_expr import UntranslatableError` call sites are
+    unaffected.
+    """
+
+
+# ---------------------------------------------------------------------------
 # Name collision resolution
 # ---------------------------------------------------------------------------
 
@@ -49,6 +74,97 @@ def resolve_name_collisions(
     dropped = len(columns) - len(cleaned_columns)
 
     return cleaned_columns, formulas, rename_map
+
+
+# ---------------------------------------------------------------------------
+# Duplicate column_id → formula promotion (TML invariant I8/I5)
+# ---------------------------------------------------------------------------
+
+# Column-aggregation enum (columns[].properties.aggregation) → ThoughtSpot
+# formula aggregation function. Covers the enum values BOTH the from-Snowflake
+# (sv_translate._SIMPLE_AGG_MAP — STDDEV/MEDIAN) and from-Databricks
+# (mv_translate._COLUMN_AGG — STD_DEVIATION) builders emit, plus COUNT_DISTINCT
+# for the related I5 rule (a COUNT_DISTINCT column silently flips MEASURE →
+# ATTRIBUTE; `unique count(...)` is the correct form).
+_AGG_TO_FORMULA_FN = {
+    "SUM": "sum",
+    "AVERAGE": "average",
+    "MIN": "min",
+    "MAX": "max",
+    "COUNT": "count",
+    "MEDIAN": "median",
+    "STDDEV": "stddev",
+    "STD_DEVIATION": "stddev",
+    "VARIANCE": "variance",
+    "COUNT_DISTINCT": "unique count",
+}
+
+
+def promote_duplicate_column_ids(
+    physical: list[dict],
+    formula_entries: list[dict],
+) -> tuple[list[dict], list[dict], list[str]]:
+    """Keep every column_id unique (TML invariant I8) by re-expressing duplicate
+    physical columns as formulas.
+
+    When a source references one physical column both as a raw measure and as
+    an aggregate metric (e.g. ``F_TIME_TO_RESOLVE`` + ``AVG(TIMETORESOLVE__C)``),
+    the translate step emits two physical ``columns[]`` candidates with an
+    identical ``TABLE::col`` column_id. ThoughtSpot rejects that on import
+    ("columns should have unique column_id values"). This helper keeps the
+    first occurrence of each column_id as a physical column and promotes every
+    later occurrence to a formula:
+
+    - MEASURE with a mapped aggregation → ``fn ( [TABLE::col] )`` (I5's
+      COUNT_DISTINCT → ``unique count(...)`` is one row of the same map).
+    - Anything else (MEASURE with an unmapped aggregation, or two ATTRIBUTE
+      columns on one physical column) → left in place, so ``ts tml lint`` I8
+      still surfaces it rather than the builder either emitting a wrong formula
+      or silently masking a modelling mistake. Only an aggregate expressible as
+      a formula is promoted; a bare duplicate dimension is a lint finding for
+      the author to resolve.
+
+    Both builders call this AFTER ``resolve_name_collisions`` (so display-name
+    clashes are already settled) and BEFORE the formula-text pipeline (so a
+    promoted expr is prefixed/double-agg-checked like any other formula).
+
+    Each candidate is a builder dict carrying at least ``name`` (display title)
+    and ``entry`` (the translated column dict with ``table`` / ``column`` /
+    ``aggregation`` / ``column_type``), plus the builder's own source-name key
+    used to re-locate it during emission. A promoted candidate keeps that
+    source-name key and gains an ``expr`` key, so the builder's emit walk finds
+    it in ``formula_entries`` instead of ``physical``. Neither input list is
+    mutated; returns ``(kept_physical, formula_entries_with_promotions,
+    promoted_titles)``.
+    """
+    seen: set[str] = set()
+    kept: list[dict] = []
+    out_formulas = list(formula_entries)
+    promoted_titles: list[str] = []
+    for cand in physical:
+        entry = cand["entry"]
+        col_id = f"{entry['table']}::{entry['column']}"
+        fn = None
+        if col_id not in seen:
+            seen.add(col_id)
+            kept.append(cand)
+            continue
+        if entry.get("column_type") == "MEASURE":
+            fn = _AGG_TO_FORMULA_FN.get((entry.get("aggregation") or "SUM").upper())
+        if fn is None:
+            # Not an aggregate we can re-express as a formula (unmapped measure
+            # aggregation, or a bare duplicate dimension) — leave it in place so
+            # `ts tml lint` I8 surfaces it for the author to resolve.
+            kept.append(cand)
+            continue
+        # A formula-measure column's aggregation is ignored by ThoughtSpot (the
+        # expr carries the aggregation); SUM matches the convention used for
+        # every other formula measure.
+        promoted_entry = dict(entry, aggregation="SUM")
+        out_formulas.append(
+            dict(cand, entry=promoted_entry, expr=f"{fn} ( [{col_id}] )"))
+        promoted_titles.append(cand["name"])
+    return kept, out_formulas, promoted_titles
 
 
 # ---------------------------------------------------------------------------

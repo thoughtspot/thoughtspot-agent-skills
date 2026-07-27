@@ -2,9 +2,79 @@ import json
 import yaml
 from typer.testing import CliRunner
 from ts_cli.cli import app
-from ts_cli.commands.aggregate import _candidate_key, _merge_prior_agg_rows, _signatures_summary
+from ts_cli.commands.aggregate import (_candidate_key, _merge_prior_agg_rows,
+                                       _signatures_summary, flag_suspect_base_rows,
+                                       routing_ineligible_measures, _grain_summary,
+                                       _aggregate_description)
 
 runner = CliRunner()
+
+
+def test_grain_summary_dims_and_bucketed_date():
+    cand = {"dimensions": ["Customer State", "Product Category"],
+            "date_grains": [{"column": "Transaction Date", "bucket": "MONTHLY"}],
+            "measure_columns": ["Amount"]}
+    gs = _grain_summary(cand)
+    assert gs == "Customer State x Product Category x Transaction Date (monthly)"
+
+
+def test_grain_summary_grand_total_and_malformed_date_grain():
+    assert _grain_summary({"dimensions": [], "measure_columns": ["Amount"]}) == "grand total"
+    # F6 lesson: a malformed date_grains (list of strings) must not crash
+    assert _grain_summary({"dimensions": ["A"], "date_grains": ["MONTHLY"],
+                           "measure_columns": ["X"]}) == "A"
+
+
+def test_aggregate_description_names_source_grain_measures_and_routing():
+    cand = {"dimensions": ["Product Category"], "date_column": None, "bucket": None,
+            "measure_columns": ["Amount", "Quantity"]}
+    d = _aggregate_description(cand, {"model": {"name": "Dunder Mifflin Sales & Inventory"}})
+    assert "Dunder Mifflin Sales & Inventory" in d
+    assert "Amount, Quantity" in d and "Product Category" in d
+    assert "routing" in d.lower() and "fall back" in d.lower()
+
+
+def test_routing_ineligible_flags_only_plain_measure_columns():
+    # F9: aggregate-aware routing fires only for formula measures. A plain
+    # measure column (Amount) is flagged; a formula measure (Revenue) is not.
+    model = {"model": {"columns": [
+        {"name": "Amount", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        {"name": "Revenue", "formula_id": "f_r",
+         "properties": {"column_type": "MEASURE"}}],
+        "formulas": [{"id": "f_r", "name": "Revenue", "expr": "sum ( [FACT::AMOUNT] )"}]}}
+    cands = [{"id": "c1", "measure_columns": ["Amount", "Revenue"]}]
+    out = routing_ineligible_measures(model, cands)
+    assert [o["measure"] for o in out] == ["Amount"]
+    assert "promote" in out[0]["remedy"]
+
+
+def test_routing_ineligible_empty_when_all_measures_are_formulas():
+    model = {"model": {"columns": [
+        {"name": "Revenue", "formula_id": "f_r",
+         "properties": {"column_type": "MEASURE"}}],
+        "formulas": [{"id": "f_r", "name": "Revenue", "expr": "sum ( [FACT::AMOUNT] )"}]}}
+    assert routing_ineligible_measures(model, [{"id": "c", "measure_columns": ["Revenue"]}]) == []
+
+
+def test_flag_suspect_base_rows_fires_when_base_below_max_agg():
+    # F1(b): base_rows=8 (a dim) but an aggregate has 14 rows — impossible, so flag it.
+    payload = {"base_rows": 8, "candidates": [
+        {"id": "c1", "agg_rows": 14}, {"id": "c2", "agg_rows": 8}]}
+    assert flag_suspect_base_rows(payload) is True
+    assert payload["base_rows_suspect"] is True
+
+
+def test_flag_suspect_base_rows_silent_when_base_is_largest():
+    payload = {"base_rows": 1_208_243, "candidates": [
+        {"id": "c1", "agg_rows": 14}, {"id": "c2", "agg_rows": 8798}]}
+    assert flag_suspect_base_rows(payload) is False
+    assert "base_rows_suspect" not in payload
+
+
+def test_flag_suspect_base_rows_noop_without_profiled_candidates():
+    payload = {"base_rows": 8, "candidates": [{"id": "c1"}]}  # no agg_rows yet
+    assert flag_suspect_base_rows(payload) is False
 
 
 def test_aggregate_group_registered():
@@ -80,8 +150,12 @@ def test_recommend_cost_mode_reports_excluded_unprofiled(tmp_path):
     assert result.exit_code == 0, result.output
     out = json.loads(result.stdout)
     assert out["mode"] == "cost"
-    region_ids = [c["id"] for c in saved["candidates"] if c["dimensions"] == ["Region"]]
-    assert out["excluded_unprofiled"] == region_ids
+    # The profiled Category candidate is NOT excluded; every other (unprofiled)
+    # candidate is surfaced — the single Region grain and the F3-added combined
+    # Category x Region grain (also unprofiled).
+    profiled = {c["id"] for c in saved["candidates"] if c["dimensions"] == ["Category"]}
+    all_ids = {c["id"] for c in saved["candidates"]}
+    assert set(out["excluded_unprofiled"]) == all_ids - profiled
 
 
 def test_candidate_key_distinguishes_single_vs_multi_date_grains():
@@ -680,8 +754,10 @@ def test_generate_falls_back_to_name_id_with_warning_when_no_agg_model_guid(
     out = json.loads(result.stdout)
     outdir = tmp_path / "cand_1"
     patched = yaml.safe_load((outdir / "primary_patched.tml.yaml").read_text())
+    # F16: model name is aggregate-first (<aggregate> (<source>)) so the
+    # distinguishing token survives UI name truncation.
     assert (patched["model"]["aggregated_models"][0]["id"]
-            == f"Sales Model ({out['aggregate_name']})")
+            == f"{out['aggregate_name']} (Sales Model)")
 
 
 def test_generate_idempotent_multi_date_preserves_existing_and_new(tmp_path, monkeypatch):
@@ -995,7 +1071,7 @@ def test_generate_rejects_snowflake_materialized_view_cleanly(tmp_path):
     assert "002212" in result.stderr
 
 
-# --- Task 18: SpotQL-first DDL generation, sqlgen as fallback ---------------
+# --- Task 18: AgentQL-first DDL generation, sqlgen as fallback ---------------
 
 _SPOTQL_MODEL = {"model": {"name": "Sales Model", "model_tables": [{"name": "FACT"}],
                            "columns": [
@@ -1029,7 +1105,7 @@ def _write_spotql_fixture(tmp_path):
 
 def _patch_primary_export(monkeypatch):
     """Fake the primary Model export (`_patch_and_write_primary`'s
-    `_export_tml`), independent of the SpotQL `_run` monkeypatch below —
+    `_export_tml`), independent of the AgentQL `_run` monkeypatch below —
     `generate` always re-exports the primary regardless of which DDL path
     was used."""
     import ts_cli.client as client_mod
@@ -1056,8 +1132,8 @@ def _patch_primary_export(monkeypatch):
 
 
 def test_generate_default_path_uses_spotql_and_wraps_ts_sql(tmp_path, monkeypatch):
-    """Default behaviour (no --no-spotql): `generate` builds SpotQL for the
-    candidate's grain, calls the existing `ts spotql generate-sql` client
+    """Default behaviour (no --no-spotql): `generate` builds AgentQL for the
+    candidate's grain, calls the existing `ts agentql generate-sql` client
     path (monkeypatched here, never a real network call), and wraps the
     returned join-correct `executable_sql` as DDL — never touching
     sqlgen.build_select's hand-rolled join walker."""
@@ -1099,7 +1175,7 @@ def test_generate_default_path_uses_spotql_and_wraps_ts_sql(tmp_path, monkeypatc
 
 
 def test_generate_falls_back_to_sqlgen_when_spotql_status_not_success(tmp_path, monkeypatch):
-    """SpotQL generate-sql returning a non-SUCCESS status (e.g. a rejected
+    """AgentQL generate-sql returning a non-SUCCESS status (e.g. a rejected
     statement) must fall back to sqlgen.build_select, with a stderr note that
     role-playing/ambiguous-path dimensions may be wrong on that fallback."""
     tdir = _write_spotql_fixture(tmp_path)
@@ -1126,13 +1202,13 @@ def test_generate_falls_back_to_sqlgen_when_spotql_status_not_success(tmp_path, 
     assert "role-playing" in result.stderr.lower()
 
     ddl = (tmp_path / "cand_1" / "ddl.sql").read_text()
-    # sqlgen.build_select's physical-column-resolution shape, not the SpotQL wrap.
+    # sqlgen.build_select's physical-column-resolution shape, not the AgentQL wrap.
     assert 'SUM("FACT"."AMOUNT") AS "sales_sum"' in ddl
     assert '"src"' not in ddl
 
 
 def test_generate_falls_back_to_sqlgen_when_spotql_run_raises(tmp_path, monkeypatch):
-    """An exception from the SpotQL client path (e.g. no ThoughtSpot profile
+    """An exception from the AgentQL client path (e.g. no ThoughtSpot profile
     configured, network error) must not crash `generate` — it falls back to
     sqlgen.build_select just like a rejected statement."""
     tdir = _write_spotql_fixture(tmp_path)
@@ -1159,13 +1235,13 @@ def test_generate_falls_back_to_sqlgen_when_spotql_run_raises(tmp_path, monkeypa
 
 
 def test_generate_no_spotql_flag_never_calls_spotql_run(tmp_path, monkeypatch):
-    """--no-spotql skips the SpotQL attempt entirely — the built-in join
+    """--no-spotql skips the AgentQL attempt entirely — the built-in join
     walker is used directly, matching pre-Task-18 behaviour."""
     tdir = _write_spotql_fixture(tmp_path)
     _patch_primary_export(monkeypatch)
 
     def fake_run(path, spotql, model, profile):
-        raise AssertionError("SpotQL must not be attempted with --no-spotql")
+        raise AssertionError("AgentQL must not be attempted with --no-spotql")
 
     monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
 
@@ -1181,7 +1257,7 @@ def test_generate_no_spotql_flag_never_calls_spotql_run(tmp_path, monkeypatch):
 
 
 def test_profile_spotql_path_used_when_model_guid_given(tmp_path, monkeypatch):
-    """`ts aggregate profile --model-guid ... --profile ...` builds SpotQL per
+    """`ts aggregate profile --model-guid ... --profile ...` builds AgentQL per
     candidate and wraps the returned executable_sql as
     `SELECT COUNT(*) FROM (<ts_sql_no_limit>) _agg` for the compression count."""
     tdir = _write_spotql_fixture(tmp_path)
@@ -1228,11 +1304,11 @@ def test_profile_spotql_falls_back_to_sqlgen_on_failure(tmp_path, monkeypatch):
 
 def test_profile_without_model_guid_never_calls_spotql(tmp_path, monkeypatch):
     """Backward compatibility: omitting --model-guid (every pre-Task-18 caller)
-    must never attempt the SpotQL path at all."""
+    must never attempt the AgentQL path at all."""
     tdir = _write_spotql_fixture(tmp_path)
 
     def fake_run(path, spotql, model, profile):
-        raise AssertionError("SpotQL must not be attempted without --model-guid")
+        raise AssertionError("AgentQL must not be attempted without --model-guid")
 
     monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
 
@@ -1645,3 +1721,84 @@ def test_load_tables_dir_matches_yml_and_json(tmp_path):
     (tmp_path / "GEO.json").write_text(json.dumps({"table": {"name": "GEO"}}))
     loaded = _load_tables_dir(str(tmp_path))
     assert set(loaded) == {"FACT", "DIM", "GEO"}
+
+
+def test_semiadditive_measures_surfaced():
+    from ts_cli.commands.aggregate import semiadditive_measures
+    from ts_cli.aggregate.measures import classify_measure
+    plans = {
+        "Inventory Balance": classify_measure(
+            "Inventory Balance",
+            expr="last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , "
+                 "query_groups ( ) , { [DM_DATE_DIM::DATE] } )"),
+        "Amount": classify_measure("Amount", aggregation="SUM"),
+    }
+    out = semiadditive_measures(plans)
+    assert [o["measure"] for o in out] == ["Inventory Balance"]
+    assert "recipe" in out[0]["remedy"]
+
+
+def test_physical_attribute_dims_excludes_measures_formulas_dates():
+    from ts_cli.commands.aggregate import _physical_attribute_dims
+    # Order Date carries NO data_type on the Model column (common for role-playing
+    # dates) — the DATE type must be read from the TABLE TML, else it would be
+    # consolidated as a raw-date dim.
+    model = {"model": {"columns": [
+        {"name": "State", "column_id": "C::STATE",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Employee", "formula_id": "f",           # formula dim -> excluded
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Order Date", "column_id": "O::DT",       # date (per table TML) -> excluded
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Amount", "column_id": "O::AMT",          # measure -> excluded
+         "properties": {"column_type": "MEASURE"}}]}}
+    tables = {
+        "C": {"table": {"columns": [{"name": "STATE", "db_column_name": "STATE",
+              "db_column_properties": {"data_type": "VARCHAR"}}]}},
+        "O": {"table": {"columns": [
+            {"name": "DT", "db_column_name": "DT", "db_column_properties": {"data_type": "DATE"}},
+            {"name": "AMT", "db_column_name": "AMT", "db_column_properties": {"data_type": "DOUBLE"}}]}},
+    }
+    assert _physical_attribute_dims(model, tables) == {"State"}
+
+
+def test_conformed_dates_detects_role_playing_dates():
+    from ts_cli.commands.aggregate_advisories import conformed_dates
+    # Order Date + Balance Date both join to the shared DM_DATE_DIM date
+    # (Transaction Date) — the conformed date.
+    model = {"model": {
+        "columns": [
+            {"name": "Transaction Date", "column_id": "DD::DATE"},
+            {"name": "Order Date", "column_id": "O::ODT"},
+            {"name": "Balance Date", "column_id": "INV::BDT"}],
+        "model_tables": [
+            {"name": "O", "joins": [{"with": "DD", "on": "[O::ODT] = [DD::DATE]"}]},
+            {"name": "INV", "joins": [{"with": "DD", "on": "[INV::BDT] = [DD::DATE]"}]},
+            {"name": "DD"}]}}
+    tables = {
+        "DD": {"table": {"columns": [{"name": "DATE", "db_column_name": "DATE",
+               "db_column_properties": {"data_type": "DATE"}}]}},
+        "O": {"table": {"columns": [{"name": "ODT", "db_column_name": "ODT",
+              "db_column_properties": {"data_type": "DATE"}}]}},
+        "INV": {"table": {"columns": [{"name": "BDT", "db_column_name": "BDT",
+                "db_column_properties": {"data_type": "DATE"}}]}},
+    }
+    out = conformed_dates(model, tables)
+    assert len(out) == 1
+    assert out[0]["conformed"] == "Transaction Date"
+    assert out[0]["role_playing"] == ["Balance Date", "Order Date"]
+
+
+def test_conformed_dates_empty_without_shared_date():
+    from ts_cli.commands.aggregate_advisories import conformed_dates
+    # A single fact date joining to the dim date is not a role-playing set.
+    model = {"model": {
+        "columns": [{"name": "Order Date", "column_id": "O::ODT"},
+                    {"name": "Transaction Date", "column_id": "DD::DATE"}],
+        "model_tables": [{"name": "O", "joins": [{"with": "DD", "on": "[O::ODT] = [DD::DATE]"}]},
+                         {"name": "DD"}]}}
+    tables = {"DD": {"table": {"columns": [{"name": "DATE", "db_column_name": "DATE",
+              "db_column_properties": {"data_type": "DATE"}}]}},
+              "O": {"table": {"columns": [{"name": "ODT", "db_column_name": "ODT",
+              "db_column_properties": {"data_type": "DATE"}}]}}}
+    assert conformed_dates(model, tables) == []

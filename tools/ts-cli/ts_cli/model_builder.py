@@ -51,12 +51,81 @@ from ts_cli.tableau.twb import (  # noqa: F401 — re-exported for back-compat
 # Model TML assembly
 # ---------------------------------------------------------------------------
 
-def _sql_view_model_tables(sql_views: list[dict]) -> list[dict]:
-    """model_tables[] entries for SQL Views — referenced by name, columns listed."""
-    return [
-        {"name": sv["name"], "columns": [{"name": c["name"]} for c in sv.get("columns", [])]}
-        for sv in sql_views
-    ]
+# AVG-vs-SUM heuristic (golden §2/§3): summing a normalized/rate/score is meaningless — a
+# numeric column is NOT automatically a SUM measure. Name tokens that imply an averaged
+# quantity → AVERAGE; everything else → SUM. Heuristic, not proof — a post-build
+# double-count/total check is the real gate.
+#
+# Matched on WHOLE word tokens (name split on separators + camelCase humps), NOT raw
+# substrings: a bare "rate" substring misfires on "Corporate"/"Separate"/"Operate",
+# silently switching a SUM money/count measure to AVERAGE and changing every number.
+_AVG_WORD_TOKENS = frozenset({
+    "rate", "ratio", "percent", "pct", "score", "index", "average", "mean", "avg",
+})
+_AVG_PREFIX_TOKENS = ("normaliz", "normalis")   # normalized / normalised (often concatenated)
+_AVG_PHRASES = ("ki value",)                     # per-KI value columns (the golden's AVG measures)
+
+
+def _name_tokens(name: str) -> list[str]:
+    """Lower-case word tokens: split on non-alphanumerics AND camelCase humps, so
+    `safety_score`, `SpeedingScore` and `Completion Rate` all tokenize to real words."""
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name or "")
+    return [t for t in re.split(r"[^A-Za-z0-9]+", spaced.lower()) if t]
+
+
+def _aggregation_for_name(name: str) -> str:
+    """SUM by default; AVERAGE when the column name implies an averaged quantity."""
+    tokens = _name_tokens(name)
+    joined = " ".join(tokens)
+    if (any(t in _AVG_WORD_TOKENS for t in tokens)
+            or any(t.startswith(_AVG_PREFIX_TOKENS) for t in tokens)
+            or any(p in joined for p in _AVG_PHRASES)):
+        return "AVERAGE"
+    return "SUM"
+
+
+def _resolve_view_key(sv: dict, phys: str) -> str:
+    """Map a physical join key (e.g. `FLEET_ACCOUNT_ID`) to the view's column NAME
+    (which may be a caption like `FLEET ACCOUNT ID` or a collision-suffixed variant)."""
+    p = (phys or "").lower()
+    for c in sv.get("columns", []):
+        if (c.get("sql_output_column") or "").lower() == p or c.get("name", "").lower() == p:
+            return c["name"]
+    return phys
+
+
+def _sql_view_model_tables(sql_views: list[dict], joins: list[dict] | None = None) -> list[dict]:
+    """model_tables[] entries for SQL Views.
+
+    Entries carry only name (+ joins) — NOT a `columns` list; the columns live at
+    model.columns via `column_id: View::col`. Emitting `columns` here fails ThoughtSpot
+    schema validation (error 13122). Joins (from the logical "noodle") are attached to the
+    MANY side with an explicit `cardinality`, or a multi-view model is rejected as unjoined.
+    """
+    joins = joins or []
+    by_name = {sv["name"]: sv for sv in sql_views}
+    out: list[dict] = []
+    for sv in sql_views:
+        mt: dict[str, Any] = {"name": sv["name"]}
+        fk = [j for j in joins
+              if j.get("left_table") == sv["name"] and j.get("right_table") in by_name]
+        if fk:
+            mt["joins"] = []
+            for j in fk:
+                other = j["right_table"]
+                osv = by_name[other]
+                on = " AND ".join(
+                    f"[{sv['name']}::{_resolve_view_key(sv, k['left'])}] = "
+                    f"[{other}::{_resolve_view_key(osv, k['right'])}]"
+                    for k in j["keys"])
+                mt["joins"].append({
+                    "with": other,
+                    "type": j.get("type", "INNER"),
+                    "cardinality": j.get("cardinality", "MANY_TO_ONE"),
+                    "on": on,
+                })
+        out.append(mt)
+    return out
 
 
 def _sql_view_model_columns(sql_views: list[dict]) -> list[dict]:
@@ -71,7 +140,7 @@ def _sql_view_model_columns(sql_views: list[dict]) -> list[dict]:
                 "properties": {"column_type": col_type},
             }
             if col_type == "MEASURE":
-                entry["properties"]["aggregation"] = "SUM"
+                entry["properties"]["aggregation"] = _aggregation_for_name(c["name"])
             cols.append(entry)
     return cols
 
@@ -84,6 +153,58 @@ def _drop_sql_view_shadowed_columns(columns: list[dict], sql_views: list[dict]) 
         return columns
     sv_names = {c["name"] for sv in sql_views for c in sv.get("columns", [])}
     return [c for c in columns if c.get("name") not in sv_names]
+
+
+_SQLVIEW_REF_RE = re.compile(r"\[([^\]:]+)::([^\]]+)\]")
+
+
+def _resolve_sqlview_refs(expr: str, view_cols: dict) -> str:
+    """Resolve a physical column ref to the SQL View's disambiguated column name.
+
+    A translated formula may reference `[Custom SQL Query2::BEHAVIOR]` while the view
+    exposes that column as `BEHAVIOR (Custom SQL Query2)` (Tableau's collision caption
+    when the same physical name appears in >1 query). Left unresolved, the import fails
+    with "Search did not find <column>". Deterministic: only rewrites a ref whose column
+    isn't a real view column but whose `<col> (<View>)` variant is.
+    """
+    def sub(m):
+        view, col = m.group(1), m.group(2)
+        cols = view_cols.get(view)
+        if not cols or col in cols:
+            return m.group(0)
+        cand = f"{col} ({view})"
+        return f"[{view}::{cand}]" if cand in cols else m.group(0)
+    return _SQLVIEW_REF_RE.sub(sub, expr)
+
+
+def _dedup_columns_ci(model_columns: list[dict], model_formulas: list[dict]) -> tuple[list, list]:
+    """Drop case-insensitive duplicate column names (ThoughtSpot is case-insensitive, so
+    `KI 2 value` + `KI 2 Value` → "Multiple columns with the same name").
+
+    Among a collision group, keep the **MEASURE** twin when one exists — a numeric formula
+    authored twice (once raw/ATTRIBUTE, once SUM-wrapped/MEASURE) mis-roles the raw copy as a
+    dimension, which then gets an `else ''` (string) default and fails numeric validation. The
+    MEASURE twin carries the correct `else 0`. Falls back to first-seen otherwise.
+    """
+    from collections import defaultdict
+    groups: dict = defaultdict(list)
+    for c in model_columns:
+        groups[c["name"].lower()].append(c)
+
+    def winner(group: list) -> dict:
+        return next((g for g in group
+                     if g.get("properties", {}).get("column_type") == "MEASURE"), group[0])
+    winners = {k: winner(v) for k, v in groups.items()}
+
+    kept_cols: list = []
+    dropped_fids: set = set()
+    for c in model_columns:
+        if c is winners[c["name"].lower()]:
+            kept_cols.append(c)
+        elif c.get("formula_id"):
+            dropped_fids.add(c["formula_id"])
+    kept_formulas = [f for f in model_formulas if f.get("id") not in dropped_fids]
+    return kept_cols, kept_formulas
 
 
 def build_model_tml(
@@ -121,13 +242,15 @@ def build_model_tml(
     formula_exprs = {f["name"]: f["expr"] for f in translated_formulas}
 
     model_tables = _build_model_tables(tables, columns, joins)
-    model_tables.extend(_sql_view_model_tables(sql_views))
+    model_tables.extend(_sql_view_model_tables(sql_views, joins))
 
+    view_cols = {sv["name"]: {c["name"] for c in sv.get("columns", [])} for sv in sql_views}
     model_formulas = []
     for f in translated_formulas:
         expr = f["expr"]
         expr = add_formula_prefix(expr, formula_names, param_names)
         expr = fix_double_aggregation(expr, formula_exprs)
+        expr = _resolve_sqlview_refs(expr, view_cols)   # BEHAVIOR → BEHAVIOR (Custom SQL Query2)
         model_formulas.append({
             "name": f["name"],
             "id": f"formula_{f['name']}",
@@ -139,6 +262,9 @@ def build_model_tml(
     model_columns = _build_model_columns(
         _drop_sql_view_shadowed_columns(columns, sql_views), tables, translated_formulas)
     model_columns.extend(_sql_view_model_columns(sql_views))
+
+    # ThoughtSpot is case-insensitive on column names; drop case-collision duplicates.
+    model_columns, model_formulas = _dedup_columns_ci(model_columns, model_formulas)
 
     model_params = _build_model_parameters(parameters)
 
@@ -212,33 +338,30 @@ def _build_model_tables(
     for t in tables:
         mt: dict[str, Any] = {"name": t["name"]}
 
-        table_cols = [
-            c for c in columns
-            if c.get("table", t["name"]) == t["name"]
-        ]
-        if table_cols:
-            mt["columns"] = [
-                {"name": c["db_column_name"]}
-                for c in table_cols
-            ]
+        # NOTE: no `columns` key here — model_tables entries carry only name/fqn/joins;
+        # the columns live at model.columns via `column_id: TABLE::col`. Emitting a
+        # `columns` list here fails ThoughtSpot schema validation (error 13122).
 
-        table_joins = [
+        # Emit the join on the MANY side (ThoughtSpot convention: FK entry carries the join).
+        # A join MUST declare `cardinality` or a multi-table model is rejected; when a source
+        # (noodle) cardinality is known we honour it, else default MANY_TO_ONE.
+        fk_joins = [
             j for j in joins
-            if j.get("left_table") == t["name"] or j.get("right_table") == t["name"]
+            if j.get("left_table") == t["name"] and j.get("right_table") in table_names
         ]
-        if table_joins:
+        if fk_joins:
             mt["joins"] = []
-            for j in table_joins:
-                other = j["right_table"] if j["left_table"] == t["name"] else j["left_table"]
-                if other in table_names:
-                    mt["joins"].append({
-                        "with": other,
-                        "type": j["type"],
-                        "on": " AND ".join(
-                            f"[{t['name']}::{k['left']}] = [{other}::{k['right']}]"
-                            for k in j["keys"]
-                        ),
-                    })
+            for j in fk_joins:
+                other = j["right_table"]
+                mt["joins"].append({
+                    "with": other,
+                    "type": j.get("type", "INNER"),
+                    "cardinality": j.get("cardinality", "MANY_TO_ONE"),
+                    "on": " AND ".join(
+                        f"[{t['name']}::{k['left']}] = [{other}::{k['right']}]"
+                        for k in j["keys"]
+                    ),
+                })
 
         model_tables.append(mt)
     return model_tables
@@ -268,7 +391,7 @@ def _build_model_columns(
             },
         }
         if c.get("column_type") == "MEASURE":
-            entry["properties"]["aggregation"] = "SUM"
+            entry["properties"]["aggregation"] = _aggregation_for_name(c["name"])
         model_cols.append(entry)
 
     for f in formulas:
@@ -280,7 +403,7 @@ def _build_model_columns(
             },
         }
         if f.get("column_type") == "MEASURE":
-            entry["properties"]["aggregation"] = "SUM"
+            entry["properties"]["aggregation"] = _aggregation_for_name(f["name"])
         model_cols.append(entry)
 
     return model_cols

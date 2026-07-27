@@ -141,12 +141,37 @@ function internalPrompt(a) {
   ].join('\n')
 }
 
+// Angle 17 — the max /code-review backstop over the delta since the last full audit.
+// Full scope only, delta-scoped, confidence-filtered. Per-PR /code-review is the primary
+// net; this catches what slipped through. See repo-audit.md "Angle 17".
+const CODE_REVIEW_PROMPT = [
+  'You are performing a deep, `max`-effort code review — audit angle 17 (change correctness).',
+  'This is the full-sweep BACKSTOP for behavioural bugs that slipped past per-PR review; it is NOT a code-health pass (that is angle 4).',
+  '',
+  'SCOPE — review only the delta since the last full audit:',
+  '  1. Find the most recent full-audit report: `ls docs/audit/*-full.md | sort | tail -1`.',
+  '  2. Get the commit it was written at: `git log -1 --format=%H -- <that file>`.',
+  '  3. Review the diff `<sha>..HEAD` (`git diff <sha>..HEAD` + `git log <sha>..HEAD`).',
+  '  If no full-audit report exists, review the last 40 commits (`git diff HEAD~40..HEAD`).',
+  '',
+  'METHOD — across the changed code, hunt for:',
+  '  - real correctness bugs (wrong logic, unhandled edge cases, off-by-one, error-swallowing);',
+  '  - violations of the root CLAUDE.md and .claude/rules/*.md (read the ones relevant to the changed files);',
+  '  - regressions visible from git history / prior PR context on the same lines.',
+  'Adversarially verify each candidate before reporting it. Report ONLY findings you are highly confident are real.',
+  'IGNORE (these are false positives for this angle): nitpicks and style; anything a linter/typechecker/CI would catch; pre-existing issues; issues on lines the delta did not modify; general quality/coverage gaps (those are angles 4/6).',
+  '',
+  GROUNDING,
+  'For each finding, prefer suggested_bucket "backlog" (a dated BL-NNN or fix PR) for a one-off bug, or "validator" if a check_*.py could prevent the whole CLASS from recurring.',
+  'Set angle="17 change-correctness". A clean review (empty findings array) is a valid, good result.',
+].join('\n')
+
 // ── run ─────────────────────────────────────────────────────────────────────
 
 phase('Survey')
 const platformCount = PLATFORMS.length
 const internalCount = scope === 'full' ? INTERNAL_ANGLES.length : 0
-log(`repo-audit: scope=${scope} — ${platformCount} platform specialists + performance + dependency${scope === 'full' ? ` + ${internalCount} internal angles` : ''}`)
+log(`repo-audit: scope=${scope} — ${platformCount} platform specialists + performance + dependency${scope === 'full' ? ` + ${internalCount} internal angles + max /code-review over the delta` : ''}`)
 
 const finders = []
 
@@ -162,6 +187,8 @@ if (scope === 'full') {
   for (const a of INTERNAL_ANGLES) {
     finders.push(() => agent(internalPrompt(a), { label: `internal:${a.key}`, phase: 'Survey', schema: FINDINGS_SCHEMA }))
   }
+  // Angle 17 — max /code-review backstop over the delta (full scope only).
+  finders.push(() => agent(CODE_REVIEW_PROMPT, { label: 'code-review:delta', phase: 'Survey', schema: FINDINGS_SCHEMA, effort: 'max' }))
 }
 
 // Barrier: synthesis genuinely needs ALL findings together (dedup + prioritise).

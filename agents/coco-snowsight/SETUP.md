@@ -41,8 +41,6 @@ snow stage copy agents/coco-snowsight/ts-setup-sv/SKILL.md @SKILLS.PUBLIC.SHARED
 snow stage copy agents/coco-snowsight/ts-profile-thoughtspot/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-profile-thoughtspot/ --overwrite
 snow stage copy agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-convert-to-snowflake-sv/ --overwrite
 snow stage copy agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-convert-from-snowflake-sv/ --overwrite
-snow stage copy agents/coco-snowsight/ts-recipe-formula-business-days-snowflake/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-recipe-formula-business-days-snowflake/ --overwrite
-snow stage copy agents/coco-snowsight/ts-recipe-formula-hms-display-snowflake/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-recipe-formula-hms-display-snowflake/ --overwrite
 
 # Shared reference files (only needed when these change)
 snow stage copy agents/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-snowflake/ --overwrite
@@ -73,6 +71,10 @@ snow stage copy agents/shared/mappings/tableau/tableau-formula-translation.md @S
 snow stage copy agents/shared/mappings/tableau/tableau-tml-rules.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/tableau/ --overwrite
 snow stage copy agents/shared/mappings/looker/lookml-to-ts-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/looker/ --overwrite
 snow stage copy agents/shared/mappings/looker/lookml-tml-rules.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/looker/ --overwrite
+snow stage copy agents/shared/mappings/sisense/sisense-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/sisense/ --overwrite
+snow stage copy agents/shared/mappings/qlik/qlik-thoughtspot-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/qlik/ --overwrite
+snow stage copy agents/shared/schemas/qlik-app-ir.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/mappings/powerbi/powerbi-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/powerbi/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake-dunder.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
@@ -82,10 +84,17 @@ snow stage copy agents/shared/worked-examples/tableau/liveboard-kpi-sparkline.md
 snow stage copy agents/shared/worked-examples/tableau/static-set-to-column-set.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/tableau/ --overwrite
 snow stage copy agents/shared/worked-examples/tableau/topn-set-to-query-set.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/tableau/ --overwrite
 snow stage copy agents/shared/worked-examples/tableau/data-blend-to-model.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/tableau/ --overwrite
+snow stage copy agents/shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/tableau/ --overwrite
 snow stage copy agents/shared/worked-examples/databricks/ts-to-databricks.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
 snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
 snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks-sql-view.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
+snow stage copy agents/shared/worked-examples/sisense/numeric-range-filter-to-chip.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/sisense/ --overwrite
+snow stage copy agents/shared/worked-examples/sisense/date-bucket-granularity.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/sisense/ --overwrite
+snow stage copy agents/shared/worked-examples/powerbi/calculate-all-to-group-aggregate.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/powerbi/ --overwrite
+snow stage copy agents/shared/worked-examples/powerbi/combo-dual-axis-custom-chart-config.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/powerbi/ --overwrite
+snow stage copy agents/shared/worked-examples/powerbi/sply-parameter.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/powerbi/ --overwrite
 snow stage copy agents/shared/references/profile-select-and-authenticate.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/references/ --overwrite
+snow stage copy agents/shared/references/connection-select.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/references/ --overwrite
 ```
 
 Or use the sync script (only uploads changed files):

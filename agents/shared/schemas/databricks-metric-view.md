@@ -267,6 +267,13 @@ dimensions:                         # GA canonical key is `fields:`; `dimensions
     display_name: '<label>'         # Optional. Human-readable label.
     comment: '<description>'        # Optional. Column-level description.
     synonyms: ['alias1', 'alias2'] # Optional. Alternative search terms.
+  # Wildcard field expressions (fields: only, not measures:):
+  - expr: source.*                  # All source columns as dimensions. Omit name: — derived from source.
+  - expr: source.* EXCEPT (col1, col2) # All except named columns.
+  - expr: joined_table.*            # All from a joined source (multi-source MVs).
+  # No semantic metadata (display_name, comment, synonyms) on wildcard entries.
+  # To annotate a specific column, EXCEPT it from the wildcard and define it explicitly.
+  # Wildcards expand at CREATE OR REPLACE time; new source columns require re-creating the MV.
 
 measures:
   - name: <identifier>

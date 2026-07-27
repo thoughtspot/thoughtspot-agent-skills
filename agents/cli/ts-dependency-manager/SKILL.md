@@ -33,7 +33,8 @@ exactly what to change, takes TML backups, and provides rollback capability.
 - You want to audit what would be affected before making a structural change
 - You want a dependency report on a column/table/Model **without** committing to a change — Audit mode, or run `ts metadata report` directly for a non-interactive shell version.
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions. Batch **independent** questions
+into a single prompt to cut round-trips.
 
 ---
 
@@ -178,7 +179,7 @@ If exactly one profile exists, show it and ask the user to confirm.
 Authenticate:
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+ts auth whoami --profile "{profile_name}"
 ```
 
 If the command fails, the token may be expired. Refer to
@@ -283,14 +284,14 @@ Search for the object — run both queries and combine results:
 
 ```bash
 # Models and Worksheets
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --subtype WORKSHEET \
   --name "%{search_term}%" \
   --profile "{profile_name}" \
   --all
 
 # Connection tables
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --subtype ONE_TO_ONE_LOGICAL \
   --name "%{search_term}%" \
   --profile "{profile_name}" \
@@ -305,7 +306,7 @@ Save `{source_guid}`, `{source_name}`, `{source_type}` (`MODEL` / `WORKSHEET` / 
 Export the source TML to get the column list:
 
 ```bash
-source ~/.zshenv && ts tml export {source_guid} \
+ts tml export {source_guid} \
   --profile "{profile_name}" \
   --fqn \
   --parse
@@ -316,7 +317,7 @@ import json, subprocess
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts tml export {source_guid} "
+     f"ts tml export {source_guid} "
      f"--profile '{profile_name}' --fqn --parse"],
     capture_output=True, text=True,
 )
@@ -398,7 +399,7 @@ Export both source and target TMLs to identify the column gap:
 def export_columns(guid, profile_name):
     result = subprocess.run(
         ["bash", "-c",
-         f"source ~/.zshenv && ts tml export {guid} "
+         f"ts tml export {guid} "
          f"--profile '{profile_name}' --fqn --parse"],
         capture_output=True, text=True,
     )
@@ -796,7 +797,7 @@ plan = {
 }
 
 result = subprocess.run(
-    ["bash", "-c", f"source ~/.zshenv && ts dependency backup --profile '{profile_name}'"],
+    ["bash", "-c", f"ts dependency backup --profile '{profile_name}'"],
     input=json.dumps(plan), capture_output=True, text=True,
 )
 if result.returncode != 0:
@@ -1128,7 +1129,7 @@ elif choice == "S": flags = " ".join(f"--guid {g}" for g in selected_rollback_gu
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts dependency rollback --backup-dir '{backup_dir}' "
+     f"ts dependency rollback --backup-dir '{backup_dir}' "
      f"{flags} --profile '{profile_name}'"],
     capture_output=True, text=True,
 )
@@ -1186,6 +1187,7 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 1.4.0 | 2026-07-08 | **Step 9 apply is now the codified `ts dependency apply-change` command** (BL-083 PR2). The ~1,060 lines of inline drift/delete/mutate/import/verify/set-delete pseudocode are replaced by a single plan-JSON-driven command; Step 9 now builds the plan and reads back a results JSON. Deterministic decisions (drift, obj_id derivation, the import/verify outcome matrix, post-import verification, 9c ordering, the set-delete consumer guard, and REMOVE_CHART-vs-REMOVE_COLUMN chart-axis-role classification) are extracted to tested `ts_cli/dependency/apply.py`. **Latent-bug fix:** the corrected execution order is deletes → dependents → source → sets (source LAST) — the old section bodies ran source-first, which error 14544 (“Deleted columns have dependents”) would reject whenever a dependent still referenced the column. Live-verified on se-thoughtspot; the test surfaced and fixed a mutation gap — **rollback now restores ROOT-first** (source table before dependents — one-pass, was two, open-item #25); the model-fix now strips **aliased** base columns matched by `column_id`/formula-expr, not just `name` (open-item #24). Chart-role surfacing in `ts metadata report` (open-item #22) and the mandatory live test of the corrected ordering (open-item #23) are follow-ups. Requires ts-cli v0.41.0. |
 | 1.3.0 | 2026-07-08 | **Step 7 backup and Step 11 rollback now call codified CLI commands** (BL-083 PR1). Step 7's inline export loop is replaced by `ts dependency backup` (builds a plan JSON → exports source + fix/delete dependents → writes per-object files + `manifest.json`; collects all exports first and writes nothing on any failure). Step 11's inline `rollback_objects` is replaced by `ts dependency rollback --backup-dir` (restores dependents-before-source; re-imports DELETE-intent objects as new GUIDs). The pure REMOVE/REPOINT TML transforms are now available as `ts dependency mutate` (extracted to `ts_cli/dependency/mutate.py` with full unit tests; fixes two latent bugs — an always-empty formula-name scrub set, and an Answer duplicate-`guid:` YAML break). Requires ts-cli v0.39.0. Step 9's drift/import/verify/delete orchestration stays inline pending the `ts dependency apply-change` follow-up (BL-083 PR2). |
 | 1.2.0 | 2026-07-03 | **Step 4 scope filter now uses `matched_columns[]`.** `ts metadata report`'s dependents now carry a `matched_columns` field (populated by `ts_cli.report.classifier.build_matched_columns_map` from the deep RLS/join/alias/AI-surface/alert probes) — the Step 4 "Filtering by scope" table was filtering on `risk.reason` text, which is always a fixed literal and never names a column, so the filter could never match (2026-07 audit finding). **Step 6b / delete policy line corrected** — both no longer claim `ts metadata delete` "is currently broken" and call raw v2; they now name `ts metadata delete` directly, matching Step 9a (verified 2026-05-11) and removing a stale instruction that could have led an executor to hand-roll a `requests` call. |

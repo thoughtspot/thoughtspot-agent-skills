@@ -7,7 +7,9 @@ description: Set up and manage Databricks connection profiles. Use when configur
 
 Manage Databricks connection profiles stored in `~/.claude/databricks-profiles.json`.
 
-Ask one question at a time. Wait for each answer before moving on.
+Ask one question at a time for **dependent** decisions (credential flows are mostly
+sequential). Batch **independent** questions when possible — e.g. profile name + host
+can be collected together.
 
 ---
 
@@ -706,7 +708,7 @@ Show numbered profile list (if more than one) and ask which to test. If only one
 ### Test Step 1 — Auth Check
 
 ```bash
-source ~/.zshenv && databricks auth describe --profile {dbx_profile} 2>&1
+databricks auth describe --profile {dbx_profile} 2>&1
 ```
 
 Check that the output shows a valid `auth_type` and no authentication errors.
@@ -838,5 +840,6 @@ warehouse_id = profile["sql_warehouse_http_path"].rstrip("/").split("/")[-1]
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-07-22 | Relax prompt-batching: credential flows are mostly sequential, but independent inputs can now be batched (BL-074) |
 | 1.1.0 | 2026-07-13 | Adopt `ts profiles add/update/remove` CLI commands — replaces hand-coded slug derivation, keychain commands, env var naming, and profile JSON I/O |
 | 1.0.0 | 2026-05-20 | Initial release — Service Principal, PAT, and CLI profile auth |

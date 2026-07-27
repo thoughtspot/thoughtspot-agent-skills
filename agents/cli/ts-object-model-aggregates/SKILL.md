@@ -40,7 +40,7 @@ Dependent-walking reuses the same alias-aware v2 `metadata dependents` path
 aggregate-aware cluster (routing fires for formula measures, date re-aggregation, the
 `aggregated_models` TML shape, first-match precedence, dependent types, token casing,
 filter precision — see [references/open-items.md](references/open-items.md) #0/#1/#2/#6/#7/#8/#10),
-and the DDL-from-SpotQL path is proven end-to-end. Row-level security is now auto-
+and the DDL-from-AgentQL path is proven end-to-end. Row-level security is now auto-
 propagated onto every generated aggregate (#17, WIRED) rather than gated manually, but
 its live enforcement is unverified — treat every propagated RLS rule as provisional
 until Step 7's RLS leak-test passes. The remaining OPEN items (#3 model
@@ -52,7 +52,8 @@ as provisional until Step 7's routing verification (and, when RLS was propagated
 leak-test) passes, and read the open items before trusting a candidate the classifier or
 lattice flagged as ambiguous.
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions. Batch **independent** questions
+into a single prompt to cut round-trips.
 
 ---
 
@@ -65,7 +66,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config |
 | [ts-profile-snowflake (Claude Code)](../../claude/ts-profile-snowflake/SKILL.md) | Claude Code: Snowflake profile for connected-mode profiling/history/DDL execution (Cortex Code CLI users use their native `cortex connections` instead) |
 | [../ts-dependency-manager/SKILL.md](../ts-dependency-manager/SKILL.md) | The `ts dependency backup`/`rollback` pattern this skill reuses for the primary Model's TML in Step 6/7 |
-| [../ts-object-model-spotql-query/SKILL.md](../ts-object-model-spotql-query/SKILL.md) | Used in Step 7 to compile a test query to warehouse SQL and confirm which table (primary vs. aggregate) it hits |
+| [../ts-object-model-agentql-query/SKILL.md](../ts-object-model-agentql-query/SKILL.md) | Used in Step 7 to compile a test query to warehouse SQL and confirm which table (primary vs. aggregate) it hits |
 | [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML structure — `model_tables`, `aggregated_models`, GUID/import rules |
 | [../../shared/schemas/thoughtspot-table-tml.md](../../shared/schemas/thoughtspot-table-tml.md) | Table TML structure — column definitions for the registered aggregate table |
 | [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | RLS rule syntax (Table objects) and measure formula patterns |
@@ -129,7 +130,7 @@ Read `~/.claude/thoughtspot-profiles.json`. If missing or empty, tell the user t
 use; if exactly one, confirm it.
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+ts auth whoami --profile "{profile_name}"
 ```
 
 If this fails, the token may be expired — see `/ts-profile-thoughtspot`'s refresh
@@ -144,7 +145,7 @@ This skill targets **Models only** (mirrors
 directly, or search:
 
 ```bash
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --subtype WORKSHEET --name "%{search_term}%" --profile "{profile_name}"
 ```
 
@@ -175,7 +176,7 @@ workdir.mkdir(parents=True, exist_ok=True)
 ## Step 3 — Extract Query Signatures
 
 ```bash
-source ~/.zshenv && ts aggregate signatures \
+ts aggregate signatures \
   --model {model_guid} --profile "{profile_name}" --out "{workdir}"
 ```
 
@@ -212,7 +213,7 @@ for entry in model_tml["model"]["model_tables"]:
     table_name, table_fqn = entry["name"], entry["fqn"]
     result = subprocess.run(
         ["bash", "-c",
-         f"source ~/.zshenv && ts tml export {table_fqn} "
+         f"ts tml export {table_fqn} "
          f"--profile '{profile_name}' --fqn --parse"],
         capture_output=True, text=True,
     )
@@ -252,7 +253,7 @@ for this Model's source and skip straight to Step 5.
 If Y, prompt for the Snowflake profile name (`{sf_profile_name}`) and run:
 
 ```bash
-source ~/.zshenv && ts aggregate history \
+ts aggregate history \
   --dir "{workdir}" --snowflake-profile "{sf_profile_name}" \
   --tables "{comma_separated_db_table_names}" --days 30
 ```
@@ -274,13 +275,37 @@ reflected real usage.
 ### 5a. Pass 1 — coverage-mode recommend
 
 ```bash
-source ~/.zshenv && ts aggregate recommend --dir "{workdir}" \
+ts aggregate recommend --dir "{workdir}" \
   $([ -f "{workdir}/weights.json" ] && echo --weights "{workdir}/weights.json")
 ```
 
 Writes/updates `{workdir}/candidates.json`. Stdout:
-`{"mode", "selected", "curve", "candidates", "excluded_unprofiled"}` — `mode` will be
-`"coverage"` on this first pass (no profiling data yet).
+`{"mode", "selected", "curve", "candidates", "excluded_unprofiled",
+"rls_conflicts", "routing_ineligible_measures"}` — `mode` will be `"coverage"` on this
+first pass (no profiling data yet).
+
+**Routing-eligibility preflight (do this before profiling — a load-bearing gate).**
+Aggregate-aware routing on this product fires ONLY for **formula** measures — a plain
+measure column produces an aggregate that queries never route to
+([open-items.md #0](references/open-items.md)). `recommend` reports every targeted plain
+measure in `routing_ineligible_measures` (`[{measure, reason, remedy}]`, via
+`ts agentql classify-columns`). **If it is non-empty, stop and resolve it before Step 6:**
+tell the user which measures won't route, and offer to **promote** each to a formula
+measure on the primary Model — redefine e.g. `Amount` from a plain `SUM` measure column
+(`column_id: <T>::<col>`) to a formula measure `Amount = sum ( [<T>::<col>] )`, keeping the
+same name/synonyms/description (a semantic no-op that flips routing on). Back up the primary
+(`ts dependency backup`) before importing the promoted TML. Do not build aggregates over a
+measure still listed here — they would be inert. (Verified live 2026-07-15: promoting the
+primary's plain `Amount`/`Quantity` to formulas is what made routing fire.)
+
+**Semi-additive measures.** `recommend` also reports any `last_value`/`first_value`
+period-end snapshot measures (e.g. an inventory/account balance) under
+`semiadditive_measures`. The advisor does NOT auto-generate an aggregate for these — a
+correct snapshot needs a windowed `last_value OVER (…)` DDL out of scope for the generator,
+and flat-summing it would give wrong numbers. If any are listed and the user wants them
+aggregated, hand-build a period-end snapshot aggregate following
+[references/semiadditive-recipe.md](references/semiadditive-recipe.md) (verified live —
+month-end pattern + a mandatory numeric gate before import).
 
 ### 5b. Profile — connected or manual mode
 
@@ -300,7 +325,7 @@ Enter C / M / S:
 **C — connected mode** (reuse `{sf_profile_name}` from Step 4 if set, else ask):
 
 ```bash
-source ~/.zshenv && ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
+ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
   --snowflake-profile "{sf_profile_name}" --top-k 10 \
   --model-guid "{model_guid}" --profile "{profile_name}"
 ```
@@ -308,13 +333,13 @@ source ~/.zshenv && ts aggregate profile --dir "{workdir}" --tables-dir "{workdi
 **M — manual mode:**
 
 ```bash
-source ~/.zshenv && ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
+ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
   --emit-sql "{workdir}/profile.sql" \
   --model-guid "{model_guid}" --profile "{profile_name}"
 ```
 
 `--model-guid`/`--profile` (both already established in Step 3) let each candidate's
-profiling SQL prefer SpotQL — the same ThoughtSpot-generated-SQL path Step 6 uses for
+profiling SQL prefer AgentQL — the same ThoughtSpot-generated-SQL path Step 6 uses for
 DDL — so the row counts reflect the correct join path on role-playing/ambiguous-path
 dimensions, falling back to the built-in walker automatically on any failure.
 
@@ -326,7 +351,7 @@ result goes to `base_rows`), then tell me when it's ready."* When ready, ask for
 results file path and run:
 
 ```bash
-source ~/.zshenv && ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
+ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
   --results "{results_path}"
 ```
 
@@ -339,7 +364,7 @@ Candidates whose SELECT can't be built deterministically are reported as `skippe
 ### 5c. Re-run recommend for the cost-mode curve
 
 ```bash
-source ~/.zshenv && ts aggregate recommend --dir "{workdir}" \
+ts aggregate recommend --dir "{workdir}" \
   $([ -f "{workdir}/weights.json" ] && echo --weights "{workdir}/weights.json")
 ```
 
@@ -472,7 +497,7 @@ Enter E / C:
 **E — use an existing connection:**
 
 ```bash
-source ~/.zshenv && ts connections list --profile "{profile_name}" --type {dialect_upper}
+ts connections list --profile "{profile_name}" --type {dialect_upper}
 ```
 
 Ask how to identify it — name it exactly, filter by a partial string, or list all —
@@ -483,7 +508,7 @@ Save the exact `name` value from the response as `{connection_name}`.
 **C — create a new connection (Snowflake only in v1):**
 
 ```bash
-source ~/.zshenv && ts connections create \
+ts connections create \
   --name "{connection_name}" --account "{account}" --user "{user}" \
   --role "{role}" --warehouse "{warehouse}" --database "{database}" \
   --private-key-path "{key_path}" --profile "{profile_name}"
@@ -555,7 +580,7 @@ in 6a.1 — `dynamic` requires a non-empty `{warehouse}` (Snowflake only); `ctas
 `mview` need none:
 
 ```bash
-source ~/.zshenv && ts aggregate generate \
+ts aggregate generate \
   --dir "{workdir}" --candidate {candidate_id} --model-guid {model_guid} \
   --tables-dir "{workdir}/tables" --db "{db}" --schema "{schema}" \
   --connection-name "{connection_name}" --profile "{profile_name}" \
@@ -574,12 +599,12 @@ Writes five files to `{workdir}/{candidate_id}/`: `ddl.sql`, `table_spec.json`,
 `table.tml.yaml`, `agg_model.tml.yaml`, `primary_patched.tml.yaml`. Stdout:
 `{"candidate", "aggregate_name", "files"}`.
 
-**DDL SELECT source:** by default `ts aggregate generate` builds SpotQL for the
+**DDL SELECT source:** by default `ts aggregate generate` builds AgentQL for the
 candidate's grain and asks ThoughtSpot (via `--model-guid`/`--profile`, already
 passed above) to compile it — this resolves joins against the full semantic
 model, avoiding wrong joins the built-in walker can produce on role-playing /
 ambiguous-path dimensions (e.g. grouping by the wrong role-played date column).
-It falls back to the built-in walker automatically if SpotQL generation is
+It falls back to the built-in walker automatically if AgentQL generation is
 unavailable or errors, printing a stderr note when it does; pass `--no-spotql`
 to force that walker directly. If `ddl.sql`'s SELECT looks wrong for a Model
 with role-playing dimensions, check stderr for a fallback note before assuming
@@ -704,7 +729,7 @@ of pass 1 (the table exists either way), so a non-null GUID in 6d's output is no
 proof RLS is in effect. Export the live object and compare:
 
 ```bash
-source ~/.zshenv && ts tml export {aggregate_table_guid} --profile "{profile_name}" --parse
+ts tml export {aggregate_table_guid} --profile "{profile_name}" --parse
 ```
 
 Check the returned `table.rls_rules` is present and matches `rls` above (same
@@ -762,7 +787,7 @@ gate on an unconfirmed "I'm not sure."
 ### 6f. Import the aggregate Model
 
 ```bash
-source ~/.zshenv && ts tml import --file "{workdir}/{candidate_id}/agg_model.tml.yaml" \
+ts tml import --file "{workdir}/{candidate_id}/agg_model.tml.yaml" \
   --profile "{profile_name}" --policy ALL_OR_NONE --create-new
 ```
 
@@ -788,7 +813,7 @@ does, before 6g imports it. Re-run the exact same `ts aggregate generate` call f
 adding `--agg-model-guid {agg_model_guid}`:
 
 ```bash
-source ~/.zshenv && ts aggregate generate \
+ts aggregate generate \
   --dir "{workdir}" --candidate {candidate_id} --model-guid {model_guid} \
   --tables-dir "{workdir}/tables" --db "{db}" --schema "{schema}" \
   --connection-name "{connection_name}" --profile "{profile_name}" \
@@ -816,7 +841,7 @@ import json, subprocess
 plan = {"operation": "REMOVE", "source": {"guid": model_guid, "type": "MODEL", "name": model_name},
         "fix": [], "delete": [], "out_dir": str(workdir)}
 result = subprocess.run(
-    ["bash", "-c", f"source ~/.zshenv && ts dependency backup --profile '{profile_name}'"],
+    ["bash", "-c", f"ts dependency backup --profile '{profile_name}'"],
     input=json.dumps(plan), capture_output=True, text=True,
 )
 if result.returncode != 0:
@@ -831,7 +856,7 @@ the user the backup location and that it's required for Step 7's rollback path i
 routing verification fails. Then import the patched primary:
 
 ```bash
-source ~/.zshenv && ts tml import --file "{workdir}/{candidate_id}/primary_patched.tml.yaml" \
+ts tml import --file "{workdir}/{candidate_id}/primary_patched.tml.yaml" \
   --profile "{profile_name}" --policy ALL_OR_NONE
 ```
 
@@ -847,25 +872,44 @@ later candidate.
 ## Step 7 — Verify Routing
 
 For each candidate imported in Step 6, spot-check that a query which should route
-does, and one that shouldn't, doesn't. Use
-[ts-object-model-spotql-query](../ts-object-model-spotql-query/SKILL.md), or directly:
+does, and one that shouldn't, doesn't, via
+[ts-object-model-agentql-query](../ts-object-model-agentql-query/SKILL.md) or directly.
+
+**First get the correct AgentQL wrapper per measure — do NOT guess.** `ts agentql
+generate-sql` DOES reflect aggregate-aware routing (including for semi-additive
+measures — this was verified live 2026-07-15), but only when each measure is referenced
+with the right aggregation wrapper, and the wrong one errors instead of routing:
 
 ```bash
-source ~/.zshenv && ts spotql generate-sql \
-  'SELECT "Region", SUM("Sales") AS s FROM "ORDERS" AS "t1" GROUP BY "Region"' \
+ts agentql classify-columns --model {model_guid} --profile "{profile_name}"
+```
+
+Each measure's `kind`/`wrapper` tells you how to reference it in the SELECT:
+- `raw_measure` → `SUM("<m>")` (a plain measure column — but see Step 5a; you should have
+  promoted these to formulas already, else they won't route at all)
+- `aggregate_measure` (formula whose expr already aggregates, e.g. a promoted
+  `Amount = sum(...)`) → **`AGG("<m>")`** — `SUM(...)` errors `NESTED_AGGREGATE_NOT_SUPPORTED`
+- `semiadditive_measure` (outermost op `last_value`/`first_value`, e.g. `Inventory Balance`)
+  → **`SUM("<m>")`** — `AGG(...)` errors `NON_CONVERTIBLE_FUNCTION`
+
+Then build the routing check at the candidate's exact grain (double-quoted identifiers,
+a `FROM "<model>" AS "t1"` alias, dimension columns in `GROUP BY`), e.g. for an
+aggregate-formula measure:
+
+```bash
+ts agentql generate-sql \
+  'SELECT "Product Category", AGG("Amount") FROM "<Model>" AS "t1" GROUP BY "Product Category"' \
   --model {model_guid} --profile "{profile_name}"
 ```
 
-SpotQL requires double-quoted identifiers, a table alias, and quoted column
-references (see the worked example in `tools/ts-cli/README.md`'s `ts spotql` section).
-Build the SELECT to match the candidate's exact grain — swap the illustrative
-`"Region"`/`"Sales"`/`"ORDERS"` above for this candidate's dimension columns, bucketed
-date column, and the measures it covers, keeping every identifier quoted and the
-`FROM "…" AS "t1"` alias in place. Inspect the returned `executable_sql` for the
-**aggregate table's physical name** (`table_spec.json`'s `db_table`). If present,
-routing worked. Then run a **detail-grain** query (one that needs a column outside
-the aggregate's grain) and confirm `executable_sql` references the **primary's**
-table(s) instead — the fallback path.
+Inspect the returned `executable_sql` for the **aggregate table's physical name**
+(`table_spec.json`'s `db_table`). If present, routing worked. Then run a **detail-grain**
+query (one that needs a column outside the aggregate's grain — e.g. a raw/daily date) and
+confirm `executable_sql` references the **primary's** table(s) instead — the fallback path.
+(A deeper cross-check — run the query through the Search Data API and inspect Snowflake
+`QUERY_HISTORY` for the scanned table — is optional; the aggregate table's columns
+(`amount_sum`, the bucketed date) appear only in the aggregate, so their presence in the
+scanned SQL is definitive.)
 
 If the candidate covers a NONADDITIVE measure at all (per
 [measure-decomposition-rules.md](references/measure-decomposition-rules.md)), also
@@ -875,12 +919,14 @@ primary rather than silently returning a wrong number from the aggregate (see
 
 **RLS leak-test — the live gate for propagated security (Task 23).** If 6e showed a
 propagated `rls_rules` block for this candidate, it is provisional until this test
-passes. Re-run the same aggregate-hit query above, but authenticated as a user who is
-actually subject to the base table's RLS rule instead of `{profile_name}`:
+passes. Re-run the same aggregate-hit query above (same wrapper per `classify-columns` —
+`AGG(...)` for an aggregate-formula measure, `SUM(...)` for a semi-additive one), but
+authenticated as a user who is actually subject to the base table's RLS rule instead of
+`{profile_name}`:
 
 ```bash
-source ~/.zshenv && ts spotql generate-sql \
-  'SELECT "Region", SUM("Sales") AS s FROM "ORDERS" AS "t1" GROUP BY "Region"' \
+ts agentql generate-sql \
+  'SELECT "Product Category", AGG("Amount") FROM "<Model>" AS "t1" GROUP BY "Product Category"' \
   --model {model_guid} --profile "{restricted_user_profile}"
 ```
 
@@ -920,7 +966,7 @@ Roll back the aggregated_models association on {model_name}? (Y / N)
 If Y:
 
 ```bash
-source ~/.zshenv && ts dependency rollback --backup-dir "{backup_dir}" \
+ts dependency rollback --backup-dir "{backup_dir}" \
   --only updates --profile "{profile_name}"
 ```
 
@@ -997,4 +1043,7 @@ Remove once you're confident every generated aggregate is correct: rm -rf {workd
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.3 | 2026-07-24 | Update CLI references `ts spotql` → `ts agentql` (the command was renamed; `ts spotql` still works as a deprecated alias). No behaviour change. |
+| 1.0.2 | 2026-07-24 | Rename SpotQL → AgentQL in prose (external product name only; the `ts spotql` CLI and all identifiers are unchanged). No behaviour change. |
+| 1.0.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 1.0.0 | 2026-07-11 | Initial release. Audits a Model's dependent Liveboards/Answers into query signatures (`ts aggregate signatures`), generalizes them into ranked candidate grains with a cost-based marginal-gain curve (`ts aggregate recommend`, optionally reweighted by Snowflake query history via `ts aggregate history`), profiles candidates in connected or manual mode (`ts aggregate profile`), and generates the warehouse DDL + aggregate Table/Model TML + `aggregated_models` association patch per approved candidate (`ts aggregate generate`) — gated at every artifact by a confirmation step, an RLS/CLS parity hard gate, and a post-import routing verification with rollback via `ts dependency backup`/`rollback`. Ships with eleven OPEN items in `references/open-items.md` covering routing semantics, `aggregated_models` TML shape, multi-aggregate precedence, and join-pruning fidelity — all must be VERIFIED against a live 26.6+ instance before this skill is considered merge-ready (tracked as Task 11 on `wip/ts-object-model-aggregates`). |

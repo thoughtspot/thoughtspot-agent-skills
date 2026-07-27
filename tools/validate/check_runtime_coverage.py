@@ -37,8 +37,19 @@ from _dirs import ALL_RUNTIMES
 # ("<skill>", "<runtime>") here.
 EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- CoCo Snowsight divergences (skill exists in claude, not in coco-snowsight) ---
-    ("ts-object-model-spotql-query", "coco-snowsight"):
-        "SpotQL query loop + ts CLI execution not available in Snowsight stored-proc runtime",
+    ("ts-setup-tenancy", "coco-snowsight"):
+        "Provisions Orgs, users and groups on a ThoughtSpot cluster through the ts CLI "
+        "and orchestrates other CLI skills; CoCo runs inside Snowsight with no shell and "
+        "no ts CLI, and there is no stored-procedure equivalent for Org administration.",
+    ("ts-security-columns", "coco-snowsight"):
+        "A decision layer over two ts CLI pipelines with a mandatory interactive "
+        "confirmation gate (Strict Object Mode is unreadable by any API); there is no "
+        "stored-procedure shape for a hard human stop, and CoCo cannot invoke the ts CLI.",
+    ("ts-publish-orgs", "coco-snowsight"):
+        "Orgs Publishing is a ThoughtSpot admin operation driven entirely by the ts CLI; "
+        "no Snowsight stored-procedure equivalent",
+    ("ts-object-model-agentql-query", "coco-snowsight"):
+        "AgentQL query loop + ts CLI execution not available in Snowsight stored-proc runtime",
     ("ts-variable-timezone", "coco-snowsight"):
         "REST v2 template/variables endpoint not available in Snowsight stored-proc runtime",
     ("ts-audit", "coco-snowsight"):
@@ -49,6 +60,8 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
         "Complex search-query / formula manipulation not supported in stored-proc model",
     ("ts-object-model-aggregates", "coco-snowsight"):
         "CoCo: multi-step CLI orchestration + warehouse DDL execution doesn't fit stored-proc model",
+    ("ts-object-model-alias", "coco-snowsight"):
+        "CLI only — depends on ts CLI for all operations",
     ("ts-object-model-coach", "coco-snowsight"):
         "Interactive coaching workflow doesn't fit Snowsight stored-proc execution model",
     ("ts-object-model-erd", "coco-snowsight"):
@@ -79,10 +92,26 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- Looker migration (CLI skill; no CoCo equivalent — LookML parsing needs shell + LLM) ---
     ("ts-convert-from-looker", "coco-snowsight"):
         "LookML parsing and TML generation require shell access and LLM reasoning; not supported in stored-proc runtime",
+
+    # --- Sisense migration (CLI-only; Sisense conversion needs the `ts` CLI, not available in Snowsight) ---
+    ("ts-convert-from-sisense", "coco-snowsight"):
+        "CLI-only: Sisense bundle parsing + `ts sisense`/`ts tml` CLI orchestration not available in Snowsight stored-proc runtime",
+    # --- Qlik migration (CLI skill; no CoCo equivalent — .qvf parsing needs shell + ts CLI) ---
+    ("ts-convert-from-qlik", "coco-snowsight"):
+        "Qlik .qvf/engine-artifacts parsing and the ts qlik CLI require shell access; not supported in Snowsight stored-proc runtime",
+    # --- Power BI migration (CLI skill; no CoCo equivalent — .pbip parsing needs shell + ts CLI) ---
+    ("ts-convert-from-powerbi", "coco-snowsight"):
+        "Power BI .pbip (TMDL + PBIR) parsing and the ts powerbi CLI require shell access; not supported in Snowsight stored-proc runtime",
     ("ts-profile-tableau", "coco-snowsight"):
         "Tableau Server not accessible from Snowsight stored-proc runtime",
     ("ts-load-source-data", "coco-snowsight"):
         "Warehouse loading requires shell access and external tool orchestration; not supported in Snowsight stored-proc runtime",
+
+    # --- Recipe skills (CLI-only; CoCo runtime simplified to conversion pipeline only) ---
+    ("ts-recipe-formula-business-days-snowflake", "coco-snowsight"):
+        "CLI-only: CoCo runtime scoped to conversion pipeline; recipes run via CLI",
+    ("ts-recipe-formula-hms-display-snowflake", "coco-snowsight"):
+        "CLI-only: CoCo runtime scoped to conversion pipeline; recipes run via CLI",
 }
 
 

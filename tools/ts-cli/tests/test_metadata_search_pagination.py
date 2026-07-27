@@ -44,9 +44,9 @@ class TestDefaultIsFullAutoPagination:
 
     @patch("ts_cli.commands.metadata.ThoughtSpotClient")
     @patch("ts_cli.commands.metadata.resolve_profile", return_value="test")
-    def test_full_page_of_50_triggers_a_second_call(self, mock_resolve, mock_client_cls):
+    def test_full_page_triggers_a_second_call(self, mock_resolve, mock_client_cls):
         mock_client = MagicMock()
-        full_page = [{"id": f"t{i}"} for i in range(50)]
+        full_page = [{"id": f"t{i}"} for i in range(500)]
         mock_client.post.side_effect = [
             MagicMock(json=lambda: full_page),
             MagicMock(json=lambda: []),
@@ -62,8 +62,8 @@ class TestDefaultIsFullAutoPagination:
     @patch("ts_cli.commands.metadata.resolve_profile", return_value="test")
     def test_results_from_all_pages_are_concatenated(self, mock_resolve, mock_client_cls):
         mock_client = MagicMock()
-        page1 = [{"id": f"t{i}"} for i in range(50)]
-        page2 = [{"id": "t50"}, {"id": "t51"}]
+        page1 = [{"id": f"t{i}"} for i in range(500)]
+        page2 = [{"id": "t500"}, {"id": "t501"}]
         mock_client.post.side_effect = [
             MagicMock(json=lambda: page1),
             MagicMock(json=lambda: page2),
@@ -74,13 +74,13 @@ class TestDefaultIsFullAutoPagination:
 
         assert result.exit_code == 0, _all_output(result)
         out = json.loads(result.stdout)
-        assert len(out) == 52
+        assert len(out) == 502
 
     @patch("ts_cli.commands.metadata.ThoughtSpotClient")
     @patch("ts_cli.commands.metadata.resolve_profile", return_value="test")
     def test_offset_advances_by_page_size(self, mock_resolve, mock_client_cls):
         mock_client = MagicMock()
-        full_page = [{"id": f"t{i}"} for i in range(50)]
+        full_page = [{"id": f"t{i}"} for i in range(500)]
         mock_client.post.side_effect = [
             MagicMock(json=lambda: full_page),
             MagicMock(json=lambda: []),
@@ -90,7 +90,7 @@ class TestDefaultIsFullAutoPagination:
         runner.invoke(app, ["metadata", "search"])
 
         offsets = [c.kwargs["json"]["record_offset"] for c in mock_client.post.call_args_list]
-        assert offsets == [0, 50]
+        assert offsets == [0, 500]
 
     @patch("ts_cli.commands.metadata.ThoughtSpotClient")
     @patch("ts_cli.commands.metadata.resolve_profile", return_value="test")

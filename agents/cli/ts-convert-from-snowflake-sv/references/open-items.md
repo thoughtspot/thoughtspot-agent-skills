@@ -4,21 +4,29 @@ For a full mapping of what IS supported, see [coverage-matrix.md](coverage-matri
 
 ---
 
-## #2 — Custom instructions mapping — NOT IMPLEMENTED (LOW)
+## #2 — Custom instructions mapping — PARTIALLY IMPLEMENTED (LOW)
 
-Snowflake SVs support `CUSTOM_INSTRUCTIONS` with `AI_QUESTION_CATEGORIZATION` and
-`AI_SQL_GENERATION` properties that guide Cortex Analyst behaviour.
+Snowflake SVs support `ai_sql_generation` / `ai_question_categorization` free-text
+instruction strings (`CUSTOM_INSTRUCTIONS` module) that guide Cortex Analyst behaviour.
 
 ThoughtSpot equivalent: `data_model_instructions` on the Model TML (guides Spotter).
 
-The skill does not parse or map custom instructions. They are not surfaced in the
-conversion report or at the review checkpoint.
+**Done (SKILL v1.16.0 + Step 4x):** the skill now parses `ai_sql_generation` /
+`ai_question_categorization` from the DDL and surfaces the free text as candidate
+Data Model Instructions content in the conversion report and at the review
+checkpoint. See coverage-matrix.md L1.
 
-**Workaround:** run `/ts-object-model-coach` after conversion to create Spotter
-instructions. The coach skill's Step 6.5 generates `data_model_instructions` from
-the model's column structure — independent of SV custom instructions.
+**Still open:** this is a reporting/handoff step, not a structural TML mapping — the
+exact ThoughtSpot TML field for Data Model Instructions is still TBD (see
+`ts-object-model-coach` references/open-items.md #4). Until that field is confirmed,
+the surfaced text is not written into the Model TML directly.
 
-Status: NOT IMPLEMENTED — LOW priority (post-conversion coaching covers the gap)
+**Workaround:** run `/ts-object-model-coach` after conversion to place the surfaced
+text (or generate independent Spotter instructions from the model's column structure
+if the SV had none).
+
+Status: PARTIALLY IMPLEMENTED — parse+surface done; structural TML field placement
+still open, LOW priority (post-conversion coaching covers the gap in the meantime)
 
 ---
 

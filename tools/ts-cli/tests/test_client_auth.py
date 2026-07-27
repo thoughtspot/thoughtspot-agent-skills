@@ -226,3 +226,43 @@ class TestKeyringServiceSlugVariants:
         if mock_kr.called:
             service = mock_kr.call_args[0][0]
             assert service == expected_service
+
+
+# ---------------------------------------------------------------------------
+# Org support (TS_ORG env / profile org_id) — added 2026-07-16
+# ---------------------------------------------------------------------------
+
+class TestOrgSupport:
+    def test_no_org_by_default(self):
+        with patch.dict("os.environ", {}, clear=False):
+            import os
+            os.environ.pop("TS_ORG", None)
+            client = _make_client()
+            assert client._org == ""
+            assert client._org_auth_fields() == {}
+
+    def test_ts_org_env_sets_org_id_int(self):
+        with patch.dict("os.environ", {"TS_ORG": "1417628299"}):
+            client = _make_client()
+            assert client._org == "1417628299"
+            assert client._org_auth_fields() == {"org_id": 1417628299}
+
+    def test_non_numeric_org_falls_back_to_identifier(self):
+        with patch.dict("os.environ", {"TS_ORG": "AnujSeth"}):
+            client = _make_client()
+            assert client._org_auth_fields() == {"org_identifier": "AnujSeth"}
+
+    def test_org_makes_token_cache_key_distinct(self):
+        import os
+        with patch.dict("os.environ", {"TS_ORG": "1417628299"}):
+            org_client = _make_client()
+        os.environ.pop("TS_ORG", None)
+        plain_client = _make_client()
+        assert org_client._token_path() != plain_client._token_path()
+        assert "org1417628299" in str(org_client._token_path())
+
+    def test_profile_org_id_used_when_no_env(self):
+        import os
+        os.environ.pop("TS_ORG", None)
+        client = _make_client(org_id=42)
+        assert client._org_auth_fields() == {"org_id": 42}

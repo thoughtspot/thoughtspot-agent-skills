@@ -13,7 +13,8 @@ Model, they appear in the search bar for everyone who has access to the Model.
 in a saved Answer — a calculated ratio, a conditional flag, a YoY comparison — and now wants it
 available to the whole team via the Model.
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions. Batch **independent** questions
+into a single prompt to cut round-trips.
 
 ---
 
@@ -36,7 +37,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 - ThoughtSpot profile configured — run `/ts-profile-thoughtspot` if not
 - `ts` CLI installed: `pip install -e tools/ts-cli`, version **0.31.0+** (provides
-  `ts spotql classify-columns`, used in Step 10)
+  `ts agentql classify-columns`, used in Step 10)
 - Python package: `pyyaml` (`pip install pyyaml`)
 - ThoughtSpot user must have **MODIFY** or **FULL** access on the target Model
 
@@ -95,7 +96,7 @@ If exactly one profile exists, show it and ask the user to confirm.
 Authenticate:
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+ts auth whoami --profile "{profile_name}"
 ```
 
 If the command fails, the token may be expired. Refer to
@@ -119,7 +120,7 @@ Which saved Answer contains the formula(s) you want to promote?
 **If the user enters a search term:**
 
 ```bash
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --type ANSWER \
   --name "%{search_term}%" \
   --profile "{profile_name}" \
@@ -141,7 +142,7 @@ Enter number, or type a different search term:
 **If the user pastes a GUID:**
 
 ```bash
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --type ANSWER \
   --guid "{guid}" \
   --profile "{profile_name}"
@@ -162,7 +163,7 @@ The data source GUID is extracted from the Answer TML in Step 3 (`answer.tables[
 Export the Answer TML:
 
 ```bash
-source ~/.zshenv && ts tml export {answer_guid} \
+ts tml export {answer_guid} \
   --profile "{profile_name}" \
   --fqn \
   --parse
@@ -176,7 +177,7 @@ import json, subprocess
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts tml export {answer_guid} --profile '{profile_name}' --fqn --parse"],
+     f"ts tml export {answer_guid} --profile '{profile_name}' --fqn --parse"],
     capture_output=True, text=True,
 )
 export_json = json.loads(result.stdout)
@@ -372,7 +373,7 @@ Enter A or S:
 Use `ts metadata get` for a targeted single-object lookup — no pagination, no `--all`:
 
 ```bash
-source ~/.zshenv && ts metadata get {data_source_guid} \
+ts metadata get {data_source_guid} \
   --profile "{profile_name}" 2>/dev/null || echo "NOT_FOUND"
 ```
 
@@ -404,7 +405,7 @@ Search for the target Model by name:
 ```
 
 ```bash
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --subtype WORKSHEET \
   --name "%{search_term}%" \
   --profile "{profile_name}"
@@ -479,7 +480,7 @@ Map: `S` → `--duplicates skip`, `O` → `--duplicates overwrite`.
 ### Build and run the command
 
 ```bash
-source ~/.zshenv && ts model promote-formula \
+ts model promote-formula \
   --answer {answer_guid} \
   --model {model_guid} \
   --profile "{profile_name}" \
@@ -500,7 +501,7 @@ The command returns JSON to stdout:
 import json, subprocess
 
 result = subprocess.run(
-    ["bash", "-c", f"source ~/.zshenv && ts model promote-formula "
+    ["bash", "-c", f"ts model promote-formula "
      f"--answer {answer_guid} --model {model_guid} --profile '{profile_name}' "
      f"--duplicates {dup_policy} " +
      " ".join(f'--formula "{name}"' for name in selected_names)],
@@ -602,7 +603,7 @@ payload = json.dumps([updated_yaml])
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts tml import --profile '{profile_name}' --policy ALL_OR_NONE --no-create-new"],
+     f"ts tml import --profile '{profile_name}' --policy ALL_OR_NONE --no-create-new"],
     input=payload,
     capture_output=True,
     text=True,
@@ -679,8 +680,9 @@ rm -f /tmp/ts_promote_formula_model.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 1.4.0 | 2026-07-13 | Steps 7–10 delegate to `ts model promote-formula` CLI command (BL-066): duplicate detection, reference mapping, column_type inference, and TML merge are now deterministic. Prereq ts-cli v0.51.0. |
-| 1.3.0 | 2026-07-03 | MEASURE/ATTRIBUTE + aggregation inference delegates to `ts spotql classify-columns` (BL-087), replacing the drifted inline keyword list. Prereq ts-cli v0.31.0. |
+| 1.3.0 | 2026-07-03 | MEASURE/ATTRIBUTE + aggregation inference delegates to `ts agentql classify-columns` (BL-087), replacing the drifted inline keyword list. Prereq ts-cli v0.31.0. |
 | 1.2.2 | 2026-07-03 | Soften phantom `/ts-object-model-builder` recommendation in Step 5 and Error Handling to "no skill for this yet — migrate in the ThoughtSpot UI" (audit finding 1.1 — that skill was never shipped). |
 | 1.2.1 | 2026-06-19 | Resolve open items 4 & 5 as deferred scope — embedded-Liveboard Answers and set/cohort promotion are out of current scope (formulas + parameters only), tracked in BL-039; neither is a shipped-unverified path. Correct the Liveboard-TML reference note (no fallback path exists in Step 2). |
 | 1.2.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |

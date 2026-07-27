@@ -123,16 +123,6 @@ at the Step 10 checkpoint or say "file only" at any point before Step 11.
 
 ---
 
-## CLI-first rule — no inline Python for TML operations
-
-**Every** ThoughtSpot API call, TML generation, and model import in this skill **must** go
-through a `ts` CLI command. Do not write inline Python scripts to export/merge/import TML,
-iterate over formula failures, or assemble model JSON. If a CLI command fails or produces
-wrong results, **fix the CLI** (`tools/ts-cli/`) and re-run — do not work around it with
-manual scripting.
-
----
-
 ## Step 0 — Overview
 
 On skill invocation, display this plan before doing any work:
@@ -205,7 +195,7 @@ warehouse_id = warehouse_path.rstrip("/").split("/")[-1] if warehouse_path else 
 Verify connectivity:
 
 ```bash
-source ~/.zshenv && databricks auth describe --profile {dbx_profile}
+databricks auth describe --profile {dbx_profile}
 ```
 
 Store `dbx_profile`, `catalog`, and `warehouse_id` for use in subsequent steps.
@@ -217,7 +207,7 @@ Store `dbx_profile`, `catalog`, and `warehouse_id` for use in subsequent steps.
 All Databricks SQL in this skill uses the Statement Execution API:
 
 ```bash
-source ~/.zshenv && databricks api post /api/2.0/sql/statements \
+databricks api post /api/2.0/sql/statements \
   --profile {dbx_profile} \
   --json '{"warehouse_id": "{warehouse_id}", "statement": "{sql}", "wait_timeout": "50s"}'
 ```
@@ -233,7 +223,7 @@ The response contains:
 
 If `status.state` is `PENDING`, poll the statement ID:
 ```bash
-source ~/.zshenv && databricks api get /api/2.0/sql/statements/{statement_id} --profile {dbx_profile}
+databricks api get /api/2.0/sql/statements/{statement_id} --profile {dbx_profile}
 ```
 
 ---
@@ -305,7 +295,7 @@ Parse the YAML string extracted in Step 4 with the deterministic parser (schema:
 
 ```bash
 printf '%s' "$MV_YAML" > mv.yaml
-source ~/.zshenv && ts databricks parse-mv mv.yaml --output parsed.json
+ts databricks parse-mv mv.yaml --output parsed.json
 ```
 
 The command handles version routing (0.1 / 1.1), `fields:`/`dimensions:` aliasing,
@@ -438,7 +428,7 @@ semantics `parse-mv` implements.
 **2. Translate:**
 
 ```bash
-source ~/.zshenv && ts databricks translate-formulas \
+ts databricks translate-formulas \
   --input parsed.json --tables tables.json --output translated.json
 ```
 
@@ -544,7 +534,7 @@ Enter C / I :
 **Search by name (both scopes start here):**
 
 ```bash
-source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile}
+ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile}
 ```
 
 - **C (within a connection)** → **first identify the connection using the
@@ -567,7 +557,7 @@ same-named tables. Build a map: `physical_table_name -> {metadata_id, metadata_n
 **Export TMLs for found tables to verify columns:**
 
 ```bash
-source ~/.zshenv && ts tml export {guid1} {guid2} ... --profile {profile} --parse
+ts tml export {guid1} {guid2} ... --profile {profile} --parse
 ```
 
 `--parse` returns structured JSON — access columns via `item["tml"]["table"]["columns"]`
@@ -621,37 +611,10 @@ Execute via the SQL execution pattern. The response `data_array` contains rows
 the data type mapping in
 [../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](../../shared/mappings/ts-databricks/ts-from-databricks-rules.md).
 
-**Choose how to identify the connection — don't dump the full list by default.** A long
-connection list is noise when the user already knows the one they want. Ask first:
-
-```
-How would you like to choose the ThoughtSpot connection?
-  N  Name it     — type the exact connection name; I'll use it directly
-  F  Filter      — give a partial string; I'll list only connections that match
-  L  List all    — show every connection and pick by number
-
-Enter N / F / L:
-```
-
-Then fetch the connections once (auto-paginated, returns all of the specified type):
-
-```bash
-source ~/.zshenv && ts connections list --type DATABRICKS --profile {profile}
-```
-
-Resolve the user's choice against that result:
-
-- **N (name it)** — match the typed name against the returned `name` values
-  (case-sensitive). Exactly one match → use it. No match → show the closest names and
-  re-ask. Don't fabricate a name the list doesn't contain — the table TML needs the exact,
-  case-sensitive connection name.
-- **F (filter)** — keep connections whose `name` contains the string (case-insensitive),
-  show them as a short numbered list (name, type, database), and pick from that. One match
-  → auto-select and confirm; none → widen the string or switch to **L**.
-- **L (list all)** — show the full numbered list and pick by number.
-
-If only one connection exists in total, auto-select it and confirm regardless of the choice.
-Use the exact `name` value from the API response in the table TML.
+**Choose the ThoughtSpot connection** using the **N/F/L connection selection** flow in
+[../../shared/references/connection-select.md](../../shared/references/connection-select.md),
+with `--type DATABRICKS` on the `ts connections list` call. No E/C prompt — Databricks
+connection creation is out of this skill's scope (see note below).
 
 > **No suitable connection?** A ThoughtSpot connection only sees catalogs its Databricks
 > credentials are granted. If no existing connection can see the source catalog, table
@@ -665,7 +628,7 @@ Use the exact `name` value from the API response in the table TML.
 Create the ThoughtSpot Table object:
 
 ```bash
-cat tables-spec.json | source ~/.zshenv && ts tables create --profile {profile}
+cat tables-spec.json | ts tables create --profile {profile}
 ```
 
 Where `tables-spec.json` is a JSON array built from the column data. See
@@ -704,13 +667,13 @@ types using [../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](..
 
 Find the ThoughtSpot connection for the table:
 ```bash
-source ~/.zshenv && ts connections list --type DATABRICKS --profile {profile}
+ts connections list --type DATABRICKS --profile {profile}
 ```
 
 Add the missing columns to the connection, then re-import the updated Table TML
 (batch all imports in one call):
 ```bash
-source ~/.zshenv && ts tml import --policy ALL_OR_NONE --profile {profile}
+ts tml import --policy ALL_OR_NONE --profile {profile}
 ```
 
 After import, re-export the updated TMLs to refresh the column map before Step 9.
@@ -724,7 +687,7 @@ Ask the user if they want a different name. Do not add a `TEST_MV_` or other
 prefix — see [../../shared/schemas/ts-model-conversion-invariants.md](../../shared/schemas/ts-model-conversion-invariants.md) (N1).
 
 ```bash
-source ~/.zshenv && ts databricks build-model \
+ts databricks build-model \
   --parsed parsed.json --translated translated.json --tables tables.json \
   --connection "{connection_name}" --model-name "{model_name}" \
   --mv-fqn "{catalog}.{schema}.{view_name}" --output-dir ./tml_out
@@ -892,7 +855,7 @@ silently ignored). On first import omit it; record the returned GUID.
 
 ```bash
 # First import (new model):
-source ~/.zshenv && ts databricks build-model \
+ts databricks build-model \
   --parsed parsed.json --translated translated.json --tables tables.json \
   --connection "{connection_name}" --model-name "{model_name}" \
   --mv-fqn "{catalog}.{schema}.{view_name}" --output-dir ./tml_out \
@@ -906,63 +869,16 @@ With `--profile`, the command imports the model TML via
 `ts tml import --policy PARTIAL` after a clean lint, and reports
 `import_status` and `model_guid` in the summary JSON. **Save the GUID** —
 required for any future update import. On `import_status: "failed"` read
-`import_error` and consult the table below.
+`import_error` and consult the common error table.
 
-**Common import errors:**
-
-| Error | Likely cause | Fix |
-|---|---|---|
-| `column_id not found` | Column name is wrong — MV dimension name used instead of ThoughtSpot Table TML column name | Export Table TML and verify column names |
-| `Compulsory Field ... joins(N)->with is not populated` | Missing `with` field on an inline join | Add `with: {target_id}` to every inline join entry |
-| `{table_name} does not exist in schema` (on `with` field) | `with` value doesn't match any `id` in model_tables | Ensure `with` matches the target's `id` exactly — same case as `name` |
-| `Invalid srcTable or destTable in join expression` | `on` clause references a table name that doesn't match any `id` | Check that both `[table::col]` refs in `on` use `id` values |
-| `Multiple tables have same alias {name}` | Two model_tables entries have the same `name` value | Deduplicate — keep only one entry |
-| `fqn resolution failed` | GUID is stale or from a different ThoughtSpot instance | Re-run Step 8A to get fresh GUIDs |
-| `formula syntax error` | ThoughtSpot formula has invalid syntax | Fix the formula expression |
-| YAML mapping error on formula with `{` | Formula with `{ [col] }` emitted as inline YAML string | The CLI's YAML emitter quotes `{` correctly; this arises only in hand-edited TML |
-| YAML parse error | Non-printable characters in strings | Strip non-printable chars from all string values before serialising |
+**Common import errors:** see
+[`ts-tml-import-gate.md` § 4](../../shared/schemas/ts-tml-import-gate.md#4-common-import-errors).
 
 ---
 
 ### Step 11b: Verify Import
 
-After a successful import response, confirm the model was indexed and has the expected
-shape — not just that the API returned 200.
-
-**1. Search for the model by GUID:**
-
-```bash
-source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%{view_name}%" --profile {profile}
-```
-
-The GUID returned by the import response must appear in the results. If it is absent,
-the import succeeded at the API level but indexing is delayed — wait 5 seconds and
-retry once.
-
-**2. Export the imported model and count columns:**
-
-```bash
-source ~/.zshenv && ts tml export {created_guid} --fqn --profile {profile}
-```
-
-Parse the returned TML and count `model.columns[]` entries. This count must be >= the
-number of translatable fields from the MV (total dimensions + measures, minus any
-entries in translated.json's `skipped[]`).
-
-If the column count is lower than expected: compare the exported TML against the TML
-sent in Step 11 to identify which columns ThoughtSpot silently dropped, and investigate.
-
-**3. Report the model URL:**
-
-```
-Model imported successfully.
-
-  Name:    {view_name}
-  GUID:    {created_guid}
-  URL:     {base_url}/#/model/{created_guid}
-
-Open the URL in a browser to verify the model appears in the ThoughtSpot Data panel.
-```
+Follow [`ts-tml-import-gate.md` § 5](../../shared/schemas/ts-tml-import-gate.md#5-post-import-verification).
 
 ---
 
@@ -1035,6 +951,10 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.10.0 | 2026-07-24 | Duplicate `column_id` → formula promotion (ts-cli v0.92.0, BL-132): an MV that references one physical column both as a raw measure and as an aggregate metric (e.g. `F_TIME_TO_RESOLVE` + `AVG(TIMETORESOLVE__C)`) previously emitted two `columns[]` entries with an identical `TABLE::col`, failing `ts tml lint` I8 on import. `ts databricks build-model` now keeps the first occurrence as a `column_id` entry and re-expresses the rest as `fn ( [TABLE::col] )` aggregation formulas (shared `formula_common.promote_duplicate_column_ids` helper, so from-Snowflake behaves identically). A duplicate that is not a re-expressible aggregate is left in place for `ts tml lint` I8 to surface. |
+| 1.9.0 | 2026-07-23 | Role-playing (aliased) dimension support (ts-cli v0.91.0): an MV that joins one physical table under multiple aliases (role-play) now converts to distinct ThoughtSpot role-play tables — `resolve_parts` gives each reused-physical alias path its own node identity, and `build_model_tables` emits `alias:` + alias-referencing joins instead of collapsing to ambiguous duplicate tables. Single-use tables/renames unchanged. Verified via TS→MV→TS round-trip on SUPPORT_CASE (ACCOUNT×2, SUPPORT_PRODUCT__C×2). |
+| 1.8.5 | 2026-07-23 | Data Type Mapping fix: `timestamp`/`timestamp_ntz` → ThoughtSpot `DATE_TIME` (was invalid `DATETIME` — a live `VALIDATE_ONLY` import confirmed ThoughtSpot rejects `DATETIME`). Fixed in `ts-from-databricks-rules.md` (§Data Type Mapping) and `mv_tml.py`'s `map_dbx_type`/`ts_type_to_dbx` together (BL-X4). |
+| 1.8.4 | 2026-07-22 | Import error table + post-import verification extracted to shared `ts-tml-import-gate.md` §4/§5 (BL-063 phase 1c) |
 | 1.8.3 | 2026-07-15 | JSON path access: ThoughtSpot's formula parser rejects Databricks colon-path syntax (`col:field.subfield`) in `sql_*_op` pass-throughs. Emit `get_json_object({0}, '$.field.subfield')` — bracket notation on `parse_json` FAILS on Databricks (`VARIANT` is not a complex type). Live-verified on Databricks 2026-07-15. |
 | 1.8.2 | 2026-07-11 | Databricks MV schema: `parameters:` GA + tiered runtime requirement (16.4/17.3/18.1/18.2) documented (audit 13.1/13.10). |
 | 1.8.1 | 2026-07-10 | Pre-import lint gate extracted to shared `ts-tml-import-gate.md` (BL-063 PR5) — content unchanged, now linked. |

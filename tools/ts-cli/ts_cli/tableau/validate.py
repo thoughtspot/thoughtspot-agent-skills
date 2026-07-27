@@ -27,11 +27,20 @@ _FORBIDDEN_PATTERNS = [
 # Formulas containing them are skipped with a reason instead of failing at
 # TML import, where the retry loop silently drops them.
 _UNMAPPED_FUNCTIONS = [
-    "SPLIT", "FINDNTH", "PROPER", "ASCII", "CHAR",
-    "REGEXP_MATCH", "REGEXP_EXTRACT", "REGEXP_EXTRACT_NTH", "REGEXP_REPLACE",
+    "SPLIT", "PROPER", "ASCII", "CHAR",
+    # REGEXP_EXTRACT_NTH has no documented pass-through template (unlike its
+    # siblings REGEXP_MATCH/REGEXP_EXTRACT/REGEXP_REPLACE/FINDNTH, wired in
+    # functions.py::_ARG_HANDLERS as of ts-cli v0.81.0 — see
+    # tableau-formula-translation.md lines ~989-996) — still rejected here.
+    "REGEXP_EXTRACT_NTH",
     "MAKEDATE", "MAKETIME", "MAKEDATETIME", "ISDATE",
-    "USERNAME", "FULLNAME", "ISUSERNAME", "ISFULLNAME", "USERDOMAIN",
-    "ACOS", "ASIN", "ATAN", "COT",  # inverse trig + COT — translations tracked in BL-072 (needs live degree/radian check)
+    # USERNAME/ISUSERNAME now translate (BL-071, ts-cli v0.88.0 — see
+    # functions.py) and were removed from this list. FULLNAME/ISFULLNAME/
+    # USERDOMAIN stay rejected — no confirmed ThoughtSpot display-name
+    # variable / unverified value shape, see BL-071.
+    "FULLNAME", "ISFULLNAME", "USERDOMAIN",
+    # ACOS/ASIN/ATAN/COT now translate (BL-072, ts-cli v0.88.0 — see
+    # functions.py) and were removed from this list.
     "DATEPART", "DATENAME", "DATETRUNC", "DATEADD", "DATEDIFF",  # survivors = unknown unit
     # Spatial — full 13-function Tableau set (help.tableau.com Spatial Functions,
     # verified 2026-07-03). No ThoughtSpot spatial data type or constructors exist.
@@ -49,6 +58,29 @@ _UNMAPPED_RE = [
     (re.compile(rf"\b{fn}\s*\(", re.IGNORECASE), fn) for fn in _UNMAPPED_FUNCTIONS
 ]
 
+# Tableau table-calculation / window functions live-confirmed (error 14516,
+# "Search did not find '<FUNC> ( ... )'") to have NO valid ThoughtSpot formula
+# syntax. Per tableau-formula-translation.md ("Row-Offset Table Calculations",
+# "Window / Moving Functions", "Untranslatable Patterns"), each of these
+# either has no ThoughtSpot equivalent at all (PREVIOUS_VALUE — recursive, no
+# SQL form) or needs a sort/partition attribute Tableau encodes as worksheet
+# "Compute Using" addressing metadata — NOT present in the formula text
+# itself. `translate_formulas()` has no wiring today from that worksheet
+# context into this translator, so rather than emit the raw (invalid) Tableau
+# syntax into a Model formula, these are rejected at translate time and the
+# formula is skipped with a table-calc-specific reason (same "skip, don't
+# fabricate" convention as `_UNMAPPED_FUNCTIONS` above).
+#
+# `SIZE()` is deliberately NOT in this list: it is the one row-offset
+# function with a context-free translation (unpartitioned COUNT(*) OVER ()),
+# converted earlier in the pipeline by `map_functions()` — see
+# `ts_cli/tableau/functions.py`.
+_TABLE_CALC_NO_EQUIVALENT = ["LOOKUP", "INDEX", "FIRST", "LAST", "PREVIOUS_VALUE"]
+_TABLE_CALC_RE = [
+    (re.compile(rf"\b{fn}\s*\(", re.IGNORECASE), fn) for fn in _TABLE_CALC_NO_EQUIVALENT
+]
+_WINDOW_TABLECALC_RE = re.compile(r"\b(WINDOW_[A-Z]+)\s*\(", re.IGNORECASE)
+
 
 def validate_output(expr: str) -> list[str]:
     """Check for forbidden patterns in a translated expression.
@@ -62,7 +94,59 @@ def validate_output(expr: str) -> list[str]:
     for pattern, fn in _UNMAPPED_RE:
         if pattern.search(expr):
             errors.append(f"unmapped Tableau function: {fn}")
+    for pattern, fn in _TABLE_CALC_RE:
+        if pattern.search(expr):
+            errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
+    window_fns = {m.group(1).upper() for m in _WINDOW_TABLECALC_RE.finditer(expr)}
+    for fn in sorted(window_fns):
+        errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
     return errors
+
+
+def _check_if_then_else_structure(expr: str, expr_stripped: str) -> list[str]:
+    """if/then/else structural checks (BL-046 #5, BL-060) against a single
+    formula expression. ``expr_stripped`` has ``[col refs]`` and ``'strings'``
+    already removed (by the caller) to avoid false matches inside those.
+
+    Extracted out of ``validate_pre_import`` to keep that function's
+    cyclomatic complexity from creeping past the module-health ratchet as
+    more if/then/else checks are added over time (each is an independent,
+    unrelated check — not a deepening of one code path).
+    """
+    warnings: list[str] = []
+    lower_s = expr_stripped.lower()
+
+    # Use negative lookbehind to exclude *_if functions (sum_if, count_if, etc.)
+    if_count = len(re.findall(r'(?<![a-zA-Z_])\bif\b', lower_s))
+    then_count = len(re.findall(r'(?<![a-zA-Z_])\bthen\b', lower_s))
+    else_count = len(re.findall(r'(?<![a-zA-Z_])\belse\b', lower_s))
+
+    if if_count > 0:
+        if then_count < if_count:
+            warnings.append(f"if without matching then ({if_count} if, {then_count} then)")
+        if else_count < if_count:
+            warnings.append(f"if/then without else ({if_count} if, {else_count} else)")
+    if else_count > if_count:
+        warnings.append(f"Orphaned else clause ({else_count} else, {if_count} if)")
+
+    # Bare else) — missing default value in aggregate context
+    if re.search(r'\belse\s*\)', expr, re.IGNORECASE):
+        warnings.append(
+            "Bare 'else)' — missing default value after else "
+            "(likely needs 'else 0)' or 'else null)')"
+        )
+
+    # Nested-if-in-comparison (BL-060) — a comparison operator binding
+    # directly before 'if' (e.g. "sum(X) < if(Y) then Z else W") is valid
+    # Tableau syntax but fails ThoughtSpot import: the comparison binds
+    # before the if/then/else, so ThoughtSpot needs explicit parens around
+    # the conditional.
+    if re.search(r'[<>=!]=?\s*if\b', expr_stripped, re.IGNORECASE):
+        warnings.append(
+            "Comparison operator directly followed by 'if' — wrap the conditional in parentheses: "
+            "(if ... then ... else ...)")
+
+    return warnings
 
 
 def validate_pre_import(
@@ -110,24 +194,11 @@ def validate_pre_import(
         if b_depth != 0:
             warnings.append(f"Unbalanced brackets (depth={b_depth})")
 
-        # if/then/else structural validation (BL-046 #5)
+        # if/then/else structural validation (BL-046 #5, BL-060)
         # Strip [col refs] and 'strings' to avoid false matches
         expr_stripped = re.sub(r'\[[^\]]*\]', '', expr)
         expr_stripped = re.sub(r"'[^']*'", '', expr_stripped)
-        lower_s = expr_stripped.lower()
-
-        # Use negative lookbehind to exclude *_if functions (sum_if, count_if, etc.)
-        if_count = len(re.findall(r'(?<![a-zA-Z_])\bif\b', lower_s))
-        then_count = len(re.findall(r'(?<![a-zA-Z_])\bthen\b', lower_s))
-        else_count = len(re.findall(r'(?<![a-zA-Z_])\belse\b', lower_s))
-
-        if if_count > 0:
-            if then_count < if_count:
-                warnings.append(f"if without matching then ({if_count} if, {then_count} then)")
-            if else_count < if_count:
-                warnings.append(f"if/then without else ({if_count} if, {else_count} else)")
-        if else_count > if_count:
-            warnings.append(f"Orphaned else clause ({else_count} else, {if_count} if)")
+        warnings.extend(_check_if_then_else_structure(expr, expr_stripped))
 
         # Check for unresolved Custom SQL Query references
         if "Custom SQL Query" in expr:
@@ -154,8 +225,9 @@ def validate_pre_import(
         # Non-existent ThoughtSpot functions
         if re.search(r'\badd_quarters\s*\(', expr, re.IGNORECASE):
             warnings.append("add_quarters() does not exist — use add_months(expr, N*3)")
-        if re.search(r'\badd_years\s*\(', expr, re.IGNORECASE):
-            warnings.append("add_years() does not exist — use add_months(expr, N*12)")
+        # NOTE: add_years / add_weeks ARE valid ThoughtSpot functions (see
+        # thoughtspot-formula-patterns.md and tableau-formula-translation.md) — do
+        # not flag them. Only add_quarters is unsupported.
 
         # Bare date literal not wrapped in to_date()
         bare_date = re.search(r"'(\d{4}-\d{2}-\d{2})'", expr)

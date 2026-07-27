@@ -33,6 +33,8 @@ extend the rule with a new one.
 | 7 | `ts-recipe-*` | `ts-recipe-{ts-artifact-type}-{concept}[-{platform}]` | Build a specific analytical capability in ThoughtSpot. Second token is the primary ThoughtSpot artifact produced (`formula`, `answer`, `liveboard`, `model`). Third+ tokens describe the concept (`business-days`, `hms-display`, `abc-analysis`). Optional platform suffix (`-snowflake`, `-databricks`) present only when the recipe deploys to an external platform; omitted for pure-ThoughtSpot recipes. | `ts-recipe-formula-business-days-snowflake` |
 | 8 | `ts-audit` | `ts-audit` | Read-only health assessment of a ThoughtSpot environment or individual objects. Scans across multiple angles (AI readiness, data modeling, performance, security) and produces a prioritised report with actionable recommendations. Distinct from `ts-dependency-*` which actively modifies the dependency graph. | `ts-audit` |
 | 9 | `ts-load-*` | `ts-load-{specifier}` | Load source data into a warehouse. Specifier describes the data domain or purpose. | `ts-load-source-data` |
+| 10 | `ts-publish-*` | `ts-publish-{target}` | Distribute a master object to a set of destinations **without copying it**, including the variable definition and metadata parameterization that distribution requires. Second token is the destination class. | `ts-publish-orgs` |
+| 11 | `ts-security-*` | `ts-security-{aspect}` | Cross-object, cross-Org security configuration that **chooses between mechanisms** rather than driving one. Second token names the aspect secured (`columns`, `rls`). | `ts-security-columns`, `ts-security-rls` *(planned)* |
 
 ---
 
@@ -126,7 +128,45 @@ and load it into a warehouse (Snowflake, Databricks, etc.) so that ThoughtSpot c
 connect to it. Distinct from `ts-setup-*` (which installs procedures/infrastructure)
 and `ts-convert-*` (which converts between platform schemas).
 
-### 10. None of the above match
+### 10. Does the skill distribute one master object to many destinations without copying it?
+
+→ **`ts-publish-*`**. Pattern: `ts-publish-{target}`.
+
+The destination class is the second token (`orgs` today; a future
+`ts-publish-instances` would slot in the same way). This family owns the whole
+distribution job, not just the final call: defining the template variables,
+parameterizing the Table and Connection fields against them, publishing, and
+verifying what landed where.
+
+Distinct from `ts-object-*` (which operates on one object instance — publishing
+spans a dependency closure plus instance-wide variables, then fans out across a
+set of Orgs), from `ts-dependency-*` (which *rewrites* the graph — publishing
+walks it but changes nothing in it), and from `ts-convert-*` (no format change:
+the same object is made visible elsewhere).
+
+If a skill copies the object rather than sharing it, that is TML deployment, not
+publishing, and it does not belong in this family.
+
+### 11. Does the skill configure security across objects and Orgs, choosing between mechanisms?
+
+→ **`ts-security-*`**. Pattern: `ts-security-{aspect}`.
+
+The aspect is what is being secured (`columns`, and a future `rls`). This family is for
+skills whose job is **selecting a mechanism and explaining the trade-off**, not driving
+one — where two or more platform mechanisms exist for the same goal with materially
+different capabilities, and picking wrong exposes data.
+
+It mirrors the `ts security` CLI group, which was named the same way and for the same
+reason: `ts security column-rules` names the *mechanism* explicitly, leaving
+`ts security rls` as the reserved sibling. The skill layer should mirror that boundary
+rather than blur it.
+
+Distinct from `ts-object-*` (single-object scoped — these skills produce a verdict per
+(Org, object) across a set of both), from `ts-dependency-*` (which *rewrites* the graph —
+these change no object definition at all), from `ts-audit` (read-only), and from
+`ts-publish-*` (which distributes an object — these restrict one).
+
+### 12. None of the above match
 
 → **Extend the rule**. See "Adding a new family" below. The validator
 will fail until either (a) a new family is added or (b) the skill is

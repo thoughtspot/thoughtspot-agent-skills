@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.tableau.literals import PLACEHOLDER_RE
 from ts_cli.tableau.parsing import (
     _extract_function_args,
     _find_last_top_level_else,
@@ -22,9 +23,13 @@ from ts_cli.tableau.parsing import (
 # ---------------------------------------------------------------------------
 
 # agg ( [col] <op> 'literal'|number ) — a bare comparison as the sole arg.
+# The literal alternative also accepts a masked-literal placeholder (see
+# literals.py) — by the time this runs, translate_single has already replaced
+# real string/date literals with opaque placeholder tokens, so a formula like
+# MAX([LEVEL]='brand') arrives here as MAX([LEVEL]=\x01L0\x01).
 _BOOL_AGG = re.compile(
     r"\b(max|min|sum)\s*\(\s*"
-    r"(\[[^\]]+\]\s*(?:<=|>=|<>|!=|=|<|>)\s*(?:'[^']*'|-?\d[\d.]*))"
+    rf"(\[[^\]]+\]\s*(?:<=|>=|<>|!=|=|<|>)\s*(?:'[^']*'|{PLACEHOLDER_RE}|-?\d[\d.]*))"
     r"\s*\)",
     re.IGNORECASE,
 )

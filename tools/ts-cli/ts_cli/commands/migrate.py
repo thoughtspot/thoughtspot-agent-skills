@@ -25,8 +25,8 @@ def _err(msg: str) -> None:
 def audit(
     source_profile: Optional[str] = _source_profile,
     target_profile: Optional[str] = _target_profile,
-    source_org: Optional[int] = typer.Option(None, "--source-org", help="Source Org id (password/secret profiles only)."),
-    target_org: Optional[int] = typer.Option(None, "--target-org", help="Target Org id (password/secret profiles only)."),
+    source_org: Optional[str] = typer.Option(None, "--source-org", help="Source Org (name or numeric id)."),
+    target_org: Optional[str] = typer.Option(None, "--target-org", help="Target Org (name or numeric id)."),
     model: List[str] = typer.Option([], "--model", "-m", help="Source Model GUID(s) to audit."),
     all_models: bool = typer.Option(False, "--all-models", help="Audit every Model in the source Org."),
     out_dir: str = typer.Option(..., "--out-dir", "-o", help="Directory for column-mapping.csv + audit report."),
@@ -37,8 +37,18 @@ def audit(
     """
     from ts_cli.migrate import discover, run_audit
 
-    source_client = ThoughtSpotClient(resolve_profile(source_profile), org_id=source_org)
-    target_client = ThoughtSpotClient(resolve_profile(target_profile), org_id=target_org)
+    # Org scoping uses the client's own `org` keyword, which landed on main (PR #346) with
+    # a live-verified detail this branch's earlier version did not have: `auth/token/full`
+    # SILENTLY IGNORES a non-numeric `org_identifier` and falls back to the caller's default
+    # Org. `_org_auth_fields` resolves that, so a name is safe to pass here.
+    #
+    # Resolving a name to its numeric id and asserting the session afterwards is what
+    # `ts share`'s `_resolve_org_id` / `assert_org_context` do; `apply` (Phase 2) must use
+    # them before any WRITE, because migrating a tenant's content into the wrong Org while
+    # reporting success is this command's worst failure mode. `audit` is read-only, so a
+    # wrong-Org read is recoverable and the assertion is deferred rather than skipped.
+    source_client = ThoughtSpotClient(resolve_profile(source_profile), org=source_org)
+    target_client = ThoughtSpotClient(resolve_profile(target_profile), org=target_org)
 
     model_guids = list(model)
     if all_models:

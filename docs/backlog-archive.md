@@ -1551,3 +1551,274 @@ for csq_name, csq_cols in csq_columns.items():
 | Custom SQL Query3 | CATEGORY_SHARE | 3/3 (100%) | CPG_NAME, LEVEL, PERIOD_TYPE |
 
 ---
+
+## BL-027 — Explicit table→ThoughtSpot binding (user-supplied GUID / db.schema.table) instead of search-and-guess
+
+**Source:** Live Catalog Health Workbook migration session (2026-06-17)
+**Affects:** ts-convert-from-tableau (Step 4 / 4.5 — physical table resolution)
+**Status:** DONE (archived 2026-07-23).
+**Closed by:** 2026-07-23 triage, live-verified against the exact Catalog Health Workbook object this item cites: `.tds` parsing (BL-089 M8, ts-cli v0.38.0) resolves the real `db.schema.table` from the published datasource's own relation `table` attribute (`ts_cli/tableau/twb.py:373`, `_extract_tables`), not a `connection.get('dbname')` guess; `--reconcile-table`/`--reconcile-plan`/`--column-name-map`/`--table-name-map` (`ts_cli/commands/tableau.py`) cover GUID binding, confirm-then-persist, and table-name overrides.
+**Related:** BL-025 (connection-selection N/F/L prompt, PR #88), BL-022 (unjoined-table suggestion)
+
+### Problem
+
+The skill resolves each Tableau table to a warehouse table by parsing the TWB
+relation name (`[DB].[SCHEMA].[TABLE]`, `[sqlproxy]`, etc.) and then matching it
+against the chosen connection — effectively a search-and-guess. When the parsed
+name is wrong, the generated table/SQL-View TML binds to a non-existent object and
+fails at `VALIDATE_ONLY`/import with "table does not exist", with no easy way for
+the user to correct the binding.
+
+This was hit live on the **Catalog Health Workbook**: the two **sqlproxy
+(Published Datasource)** sources resolved from `connection.get('dbname')`, which
+was a mangled concatenation
+(`CATALOG_HEALTH_PRODUCT_COMPLETENESSPRD_DATALAKEHOUSE_..._DATA_CATALOG`). The
+real object is `PRD_DATALAKEHOUSE.DATA_CATALOG.CATALOG_HEALTH_PRODUCT_COMPLETENESS`
+and it existed in Snowflake (as `AGENT_SKILLS.DATA_CATALOG.<table>`), but the
+skill reported it missing because it bound to the garbage name. The same class of
+failure occurs whenever the TWB's `[DB]` differs from the target connection's
+database, or a Published Datasource hides the real schema/table.
+
+### Proposed approach
+
+Add an explicit **table-binding step** so the user can pin each Tableau table to a
+real ThoughtSpot/warehouse object rather than relying on inference:
+
+1. **Show the resolved binding per table** — after Step 4/4.5, print a table:
+   `Tableau ref → resolved db.schema.table (+ connection)` with a confidence flag.
+2. **Allow per-table override**, accepting either:
+   - an existing **ThoughtSpot table GUID** (look it up, confirm its
+     db/schema/db_table, and bind to it), or
+   - an explicit **`db` / `schema` / `db_table`** triple.
+3. **Force confirmation for low-confidence bindings** rather than silently emitting
+   a guess: sqlproxy `dbname` that isn't a clean identifier; `[DB].[SCHEMA].[TABLE]`
+   where `DB` ≠ the selected connection's database; any name not found on the
+   connection during a (optional) live existence check.
+4. **Persist the mapping** (a `table_mapping` override, mirroring the
+   tableau-migration-testing harness's `table_mapping.csv`) so re-runs and audit
+   mode don't re-prompt.
+5. **sqlproxy resolution fix** — for Published Datasources, prefer the real
+   `schema.table` parsed from the datasource caption
+   (`... (DB.SCHEMA.TABLE) (SCHEMA)`) / metadata-records over the opaque `dbname`,
+   and surface it as the default in the binding table.
+
+### Files affected
+
+- `agents/cli/ts-convert-from-tableau/SKILL.md` — new per-table binding/override step (Step 4/4.5); low-confidence confirmation gate
+- `agents/shared/mappings/tableau/tableau-tml-rules.md` — sqlproxy `dbname` resolution rule; explicit-binding + cross-database notes
+- `agents/cli/ts-convert-from-tableau/references/open-items.md` — sqlproxy mis-binding + cross-DB binding items
+
+---
+
+## BL-061 — Tableau: integrate `tml_lint()` into `build-model` command
+
+**Source:** Build-model pipeline design (2026-06-27)
+**Affects:** `tools/ts-cli/ts_cli/commands/tableau.py` (`build_model` command)
+**Status:** DONE (archived 2026-07-23).
+**Closed by:** 2026-07-23 triage: not literally embedded inside `build_model_tml()`, but the same need is met by an equivalent architecture — `build-model` runs an XREF preflight (`_emit_xref_warnings` → `lint_cross_references`, `ts_cli/commands/tableau.py:854-868`), and the skill's Step 6 (SKILL.md v1.34.0) now unconditionally runs `ts tml lint --dir` (full I1/I2/I4/I5/I8/I12 via `ts_cli/tml_lint.py:lint_tml`, invoked from `ts_cli/tableau/verify.py:75`) and `ts tableau verify --dir` immediately after every `build-model` call.
+
+### Problem
+
+`tml_lint()` (in `tml_lint.py`) validates structural TML invariants (I1 duplicate
+`aggregation:` on formulas, I2 missing `formula_id`, I4 `COUNTD` on physical columns,
+I5 `aggregation:` inside `formulas[]`, I8 duplicate `column_id`). It runs via
+`ts tml lint` at the CLI level but is never called from within the `build-model`
+command pipeline. This means structural issues are only caught at ThoughtSpot import
+time, not during the build step.
+
+### Why deferred
+
+`validate_pre_import()` is now wired into `build-model` (as of v0.19.0) and catches
+the most common formula-level issues. The structural invariants `tml_lint()` checks
+are less likely to be violated by the builder (which generates TML programmatically)
+than by hand-edited TML. Adding it is incremental safety, not a gap fix.
+
+### Proposed approach
+
+After `build_model_tml()` generates the model dict, serialize to YAML and run
+`tml_lint()` on the result. Surface warnings to stderr + include in the JSON output.
+Do not block the import — let the retry loop handle actual failures.
+
+**Target:** No date set — add when build-model is next touched.
+
+---
+
+## BL-062 — Tableau: detect misplaced-else-in-aggregate formula pattern
+
+**Source:** Ads Commercial Dashboard migration (2026-06-27) — 1 formula hit this pattern
+**Affects:** `tools/ts-cli/ts_cli/tableau_translate.py` (`validate_pre_import()`)
+**Status:** DONE (archived 2026-07-23).
+**Closed by:** 2026-07-23 triage: `re.search(r'\belse\s*\)', expr, re.IGNORECASE)` live in `validate_pre_import()` at `ts_cli/tableau/validate.py:212` (CHANGELOG "bare-else detection (BL-062)", v0.73.0).
+
+### Problem
+
+A formula like `sum(if X then Y else) + sum(if A then B else)` uses Tableau's
+implicit-else syntax (bare `else` with no value = NULL). ThoughtSpot requires an
+explicit value after `else`: `sum(if X then Y else 0) + ...`. The translator
+sometimes produces the bare `else)` pattern when the source formula has no else
+clause and the translation inserts a synthetic one without a value.
+
+### Why deferred
+
+Detecting bare `else)` reliably (vs. `else <expr>)`) requires context-aware parsing
+to distinguish the aggregate-boundary `)` from a sub-expression `)`. Low frequency
+(1 occurrence across 2 full migrations). The import retry loop catches it and the
+fix is mechanical (`else)` → `else 0)`).
+
+### Proposed approach
+
+Add a regex check to `validate_pre_import()` for `else\s*\)` — warn that the else
+clause may be missing a default value. False positives possible if a legitimate
+expression ends with `)` after `else`, but rare enough to be acceptable as a warning.
+
+**Target:** No date set — revisit if the pattern recurs in future migrations.
+
+---
+
+## BL-068 — Codify Tableau dashboard-to-liveboard conversion
+
+**Source:** codification sweep 2026-06-29 (angle #11b), priority #7.
+**Affects:** `agents/cli/ts-convert-from-tableau/`, `tools/ts-cli/`.
+**Status:** DONE (archived 2026-07-23).
+**Closed by:** 2026-07-23 triage: `ts tableau build-liveboard` (`ts_cli/commands/tableau.py:1365`) + `extract_dashboards()` (`ts_cli/tableau/dashboards.py`) shipped v0.59.0/v0.60.0, live-verified against FedEx VEDR (18 auto-extracted tiles, lint-clean) per CHANGELOG.
+
+### Problem
+
+ts-convert-from-tableau Steps 9a–9c + 10c (dashboard zone parsing + liveboard TML assembly)
+are mechanical: parse Tableau dashboard zones from the TWB XML, map each zone to a ThoughtSpot
+liveboard visualization tile, emit Liveboard TML with layout. The LLM re-derives the
+zone→tile mapping on every invocation.
+
+### Approach
+
+Build `ts tableau build-liveboard` in ts-cli:
+- Input: parsed TWB (from `parse_twb()`) + answer GUIDs (from prior import)
+- Parse dashboard zones, map to liveboard tiles with layout coordinates
+- Emit Liveboard TML ready for import
+- Extends the existing Tableau codification pattern (`parse_twb` → `translate-formulas` →
+  `build-model` → **`build-liveboard`**)
+
+---
+
+## BL-085 — Tableau: wire build-model generate mode + codify TWB parse
+
+**Source:** 2026-07-03 codification review rows 1/15/23.
+**Affects:** ts-convert-from-tableau, `tools/ts-cli/`.
+**Status:** DONE (archived 2026-07-23).
+**Closed by:** 2026-07-23 triage: the backlog's own "Part 2 remains OPEN" status line was stale — `ts tableau parse --help` states verbatim that the parser "composes the existing tables/columns/joins/calcs parser with the blend graph, table-calc addressing, and per-datasource orphan-calc detection extractors" (`ts_cli/commands/tableau.py:100-145`); live-verified parsing `TableauSetControlUseCases.twbx` and `Ads Commercial Dashboard.twb`, both producing `table_calc_addressing`, `blends`, `blend_plan`, and per-datasource `orphan_calcs` keys in the output JSON.
+
+1. **Generate mode (S–M):** Step 5b hand-assembles the Phase-1 base-model TML although
+   `model_builder.py:build_model_tml()` (:113) + `split_for_phased_import()` (:484) already
+   implement exactly this — the skill just never calls the non-`--existing-guid` path.
+   Wire it (+ a `--table-name-map` flag).
+2. **TWB parse (M):** Steps 3b–3g (blend graph, table-calc addressing, orphan calcs) are
+   manual XML reads that produce translate-formulas' own inputs — expose `ts tableau parse
+   {twb} --json` on the existing `parse_twb()` and port 3e/3f/3g.
+3. Dashboard layout grid math → fold into BL-068's scope (already live-verified,
+   open-items #6).
+
+---
+
+## BL-089 — Tableau multi-table build-model: generate-mode support + PR-prep cleanup
+
+**Source:** 2026-07-05 live CPG migration (multi-query datasources needed hand-built multi-table bases).
+**Affects:** `tools/ts-cli/` (`ts tableau build-model`, `commands/tableau.py`, `model_builder.py`).
+**Status:** DONE (archived 2026-07-23).
+**Closed by:** 2026-07-23 triage independently re-confirmed the backlog's own DONE (2026-07-08) status: M8 (`.tds` parsing) live-verified parsing `TableauSetControlUseCases.twbx`; M9 complexity cleanup (`_import_with_retry`, `_merge_flow`, `ts_cli/commands/tableau.py:477,564`, plus `filter_unresolvable_formulas`, `ts_cli/model_builder.py:633`) all now pass `tools/validate/check_module_health.py` with zero violations.
+
+1. **(M8) Parse the published datasource's `.tds`/`.tdsx` — RESOLVED 2026-07-08 (ts-cli
+   v0.38.0).** The physical tables + joins of a multi-query published datasource live in its
+   `.tds`, not the `.twb` (and the field API returns columns only, not joins). `ts tableau
+   parse` and `build-model` now accept a `.tds`/`.tdsx` (root *is* `<datasource>`, handled by
+   `datasource_elements`/`load_xml_root`), so GENERATE mode builds the multi-table model
+   automatically — no hand-assembly. Get the `.tds` via `ts tableau download {id}` or a
+   user-supplied file. (Originally scoped as "emit a multi-table base from a manual table-set
+   spec"; reframed to `.tds` parsing, which is the real source of the join structure.)
+1b. **(M6b) Nested-IF date-window translation — RESOLVED at translation level 2026-07-05
+   (commit 3f04b59).** Root cause was `_convert_if_content` matching `THEN` case-sensitively,
+   so a source-authored nested `IF … then …` (lowercase inner) never got its `if(...)`
+   wrapper. Now case-insensitive. `Start Date`/`End Date` and the `Promo Period`/`ISR`/`IRR`
+   cascade (~10 prod formulas) now translate and validate; `datediff('hour',…)` →
+   `diff_time(b,a)/3600` is correct per the documented arg-order convention
+   (`tableau-formula-translation.md:147` — TS `diff_*` takes `(end, start)`), so no
+   arg-order/sign check is needed. Fully resolved at translation level.
+1c. **Export resilience — RESOLVED 2026-07-08 (ts-cli v0.40.0).** `ThoughtSpotClient.request()`
+   now retries transient gateway faults (502/503/504) and connection/timeout errors with
+   exponential backoff (3 retries: 0.5s/1s/2s), then fails cleanly via the existing
+   `format_http_error` → `SystemExit` path — never a raw `JSONDecodeError` traceback. 500 is
+   deliberately not retried (application error). Central to `request()`, so every `ts` call
+   (incl. `ts tml export` / `build-model --existing-guid`) benefits.
+2. **(M9) Complexity cleanup** — `_import_with_retry` (cc≈19), `_merge_flow` (cc≈18), and
+   `filter_unresolvable_formulas` (cc≈23) exceed the CAP=15 module-health gate; extract helpers.
+3. **(M10) File size** — `commands/tableau.py` is >1000 lines (fails `check_file_size`);
+   split by concern or add an allowlist entry cross-referencing this item.
+4. **(M11)** Open the PR once M9/M10 clear (version 0.35.0 + CHANGELOG already done).
+
+---
+
+## BL-090 — ts-convert-from-tableau: document multi-table / multi-query migration
+
+**Source:** 2026-07-05 live CPG migration.
+**Affects:** `agents/cli/ts-convert-from-tableau/SKILL.md`.
+**Status:** DONE (archived 2026-07-23).
+**Closed by:** 2026-07-23 triage: all five sub-items (M12-M16) confirmed present — SKILL.md §Step 5b "Multi-query datasources" (line 1290) + `references/step-5-tml-generation.md` lines 13-57 name M14 ("Collision-renamed formulas"), M15 ("Absent columns are a data gap"), M16 ("Table exports come back all-ATTRIBUTE — classify"), plus the `.tds`-first detection/routing (M12) and the `--existing-guid`/`--max-retries` parameter-migration guidance (M13); CHANGELOG v1.25.0 self-cites "(BL-090)" for this exact work.
+
+Harden the skill for the next multi-query datasource so the migration path is discoverable
+without re-deriving it live:
+
+1. **(M12)** Detect the multi-query pattern (formulas referencing `(Custom SQL Query N)`
+   columns spanning queries) → recommend a **multi-table model**, not a single-view
+   reconcile; document the hand-build-base → `build-model --existing-guid` pattern (Step 5b / 3.5).
+2. **(M13)** Parameter-migration substep for the `--existing-guid` path + `--max-retries`
+   guidance (Step 7). (build-model now auto-migrates params; the skill should say so.)
+3. **(M14)** Collision-rename note — a formula whose name clashes with a column/parameter is
+   renamed (`Formula Sales`, `Metric Selection`); liveboard tiles must reference the renamed
+   form, and coverage diffs must account for renames or they over-count "missing" (Step 7/10).
+4. **(M15)** Absent-column / data-availability surfacing — flag columns present in no table
+   (e.g. forecast/CI) and their dependent formulas rather than letting them silently filter
+   (Step 5b / report).
+5. **(M16)** Base-model measure-classification reminder — table exports come back all-ATTRIBUTE
+   (Step 5b).
+
+---
+
+## BL-092 — Tableau: drop the extract table when its Custom SQL is emitted as a SQL View
+
+**Source:** 2026-07-06 PR #188 (Custom SQL → SQL View), validated against `markledwich2/Recfluence` seussrecs.twb.
+**Affects:** ts-convert-from-tableau, `build-model` (twb.py / model_builder.py).
+**Status:** DONE (archived 2026-07-23).
+**Closed by:** 2026-07-23 triage, live-reproduced against a real extract-backed Custom SQL datasource (`Demo WB 3 with SQL join.twbx`): `build-model` emits zero Extract-schema Table TML, confirming the filed defect is gone via `_is_extract_wrapper()` (`ts_cli/tableau/twb.py:327-341`, shipped as part of the v0.82.0 "#4" fix). The triage separately flagged an adjacent column-ownership bug (some columns still resolved to the excluded Extract relation's name) as a live but different defect, not the one this item was filed to fix; that bug has since been fixed independently (`col_table_map` no longer resolves to the excluded hyper-Extract wrapper relation, PR #324, merged), so this item archives clean.
+
+An extract-backed Custom SQL datasource carries BOTH a Tableau `Extract` table (fqn like
+`[conn].[Extract.Extract]`, a `.hyper` that cannot bind in the warehouse) AND the source
+`<relation type='text'>`. `build-model` emits both; column dedup keeps `model.columns` unique
+(the SQL View wins), but the orphan `Extract` entry is still emitted in the model's physical
+`tables:`/`model_tables:`. For a live-connection migration the SQL View is the real source, so
+the extract table should be dropped. Not a blocker for live-connection reports (no extract).
+
+---
+
+## BL-125 — Retire vestigial phased-formula emission in `ts tableau build-model`
+
+**Filed:** 2026-07-22.
+**Source:** `docs/proposals/single-pass-formula-cross-ref-import.md` (action item 2).
+**Affects:** `ts_cli/model_builder.py`, `ts_cli/commands/tableau.py`,
+`agents/cli/ts-convert-from-tableau/SKILL.md`
+**Status:** DONE (archived 2026-07-23).
+**Closed by:** 2026-07-23 triage: PR #291 (CHANGELOG "retire vestigial phase1+ file emission (BL-125)"); live-verified a real `build-model` run's output directory contains exactly one phase file (`{slug}.phase0.model.tml`) plus the final `{slug}.model.tml`, no `phase1`...`phaseN` files.
+**Related:** BL-124 (parent audit finding 1.5); PR #247 (I9 refinement, merged).
+
+### Problem
+
+`ts tableau build-model` in GENERATE mode emits `{slug}.phase1.model.tml` …
+`{slug}.phaseN.model.tml` (one per dependency level). Nothing imports them — the
+runtime uses a single merged import with `_import_with_retry`. The skill already
+documents them as unused and filters them out.
+
+### Proposed fix
+
+Stop emitting phase1+ files. Emit base + one ordered formulas artifact. Keep
+`_import_with_retry` and `build_formula_levels` unchanged. Minor version bump.
+Full scope in the proposal doc.
+
+---

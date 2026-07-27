@@ -128,7 +128,7 @@ class ThoughtSpotClient:
     or refresh credentials, which stores them in the OS credential store.
     """
 
-    def __init__(self, profile_name: str, org_id: Optional[int] = None):
+    def __init__(self, profile_name: str, *, org: Optional[str] = None):
         profiles = load_profiles()
         if profile_name not in profiles:
             available = ", ".join(profiles.keys()) or "(none)"
@@ -140,7 +140,16 @@ class ThoughtSpotClient:
         self._profile = profiles[profile_name]
         self._profile_name = profile_name
         self._slug = _slugify(profile_name)
-        self._org_id = org_id
+        # Optional org context, highest precedence first: an explicit `org` argument, then
+        # the TS_ORG env var, then the profile's `org_id`/`org`. It scopes the minted token
+        # to a non-default org, passed to auth/token/full (accepts an org id or name).
+        # Without it, calls run in the user's default org.
+        #
+        # The explicit argument exists because a per-Org operation (`ts share`, where groups
+        # are per-Org) needs several org-scoped clients alive in ONE process. Mutating
+        # TS_ORG between them would leak org context into every client built afterwards.
+        self._org = (org or os.environ.get("TS_ORG") or self._profile.get("org_id")
+                     or self._profile.get("org") or "")
         self._base_url = self._profile["base_url"].rstrip("/")
         self._verify_ssl: bool = self._profile.get("verify_ssl", True)
         self._token: Optional[str] = None
@@ -151,18 +160,26 @@ class ThoughtSpotClient:
     # Token caching
     # ------------------------------------------------------------------
 
-    def _cache_slug(self) -> str:
-        # Fold the org into the slug so a same-cluster different-Org session
-        # never shares a cached token (or its expiry) with another Org.
-        if self._org_id is None:
-            return self._slug
-        return f"{self._slug}-org{self._org_id}"
+    def _org_auth_fields(self) -> Dict[str, Any]:
+        """Org-scoping fields for auth/token/full. Verified: the API takes `org_id` (int) —
+        `org_identifier` is silently ignored. Falls back to a string identifier only for a
+        non-numeric org value."""
+        if not self._org:
+            return {}
+        try:
+            return {"org_id": int(self._org)}
+        except (ValueError, TypeError):
+            return {"org_identifier": str(self._org)}
+
+    def _cache_key(self) -> str:
+        # Org-aware so switching TS_ORG doesn't reuse a token minted for another org.
+        return f"{self._slug}_org{_slugify(str(self._org))}" if self._org else self._slug
 
     def _token_path(self) -> Path:
-        return Path(tempfile.gettempdir()) / f"ts_token_{self._cache_slug()}.txt"
+        return Path(tempfile.gettempdir()) / f"ts_token_{self._cache_key()}.txt"
 
     def _expiry_path(self) -> Path:
-        return Path(tempfile.gettempdir()) / f"ts_token_{self._cache_slug()}_expiry.txt"
+        return Path(tempfile.gettempdir()) / f"ts_token_{self._cache_key()}_expiry.txt"
 
     def _read_cached_token(self) -> Optional[str]:
         token_path = self._token_path()
@@ -245,13 +262,8 @@ class ThoughtSpotClient:
 
         if p.get("password_env"):
             password = self._get_credential(p["password_env"])
-            body = {
-                "username": p["username"],
-                "password": password,
-                "validity_time_in_sec": 3600,
-            }
-            if self._org_id is not None:
-                body["org_id"] = self._org_id
+            body = {"username": p["username"], "password": password, "validity_time_in_sec": 3600,
+                    **self._org_auth_fields()}
             resp = self._session.post(
                 f"{self._base_url}/api/rest/2.0/auth/token/full",
                 json=body,
@@ -270,13 +282,8 @@ class ThoughtSpotClient:
 
         if p.get("secret_key_env"):
             secret_key = self._get_credential(p["secret_key_env"])
-            body = {
-                "username": p["username"],
-                "secret_key": secret_key,
-                "validity_time_in_sec": 3600,
-            }
-            if self._org_id is not None:
-                body["org_id"] = self._org_id
+            body = {"username": p["username"], "secret_key": secret_key, "validity_time_in_sec": 3600,
+                    **self._org_auth_fields()}
             resp = self._session.post(
                 f"{self._base_url}/api/rest/2.0/auth/token/full",
                 json=body,

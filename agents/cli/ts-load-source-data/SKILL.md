@@ -1,6 +1,6 @@
 ---
 name: ts-load-source-data
-description: Load source data (CSV, Tableau download, manifest) into a warehouse. Infers schema, generates synthetic data for schema-only sources, and provisions tables. Snowflake supported; Databricks planned.
+description: Load source data (CSV, Tableau download, manifest) into a warehouse. Infers schema, generates synthetic data for schema-only sources, and provisions tables. Snowflake and Databricks supported.
 ---
 
 # Load Source Data
@@ -81,13 +81,21 @@ If yes, how many rows per table? [100]:
 
 ## Step 2 — Select Target Warehouse
 
-v1 supports Snowflake only. Display:
+Supports **Snowflake** and **Databricks**. Prompt: `Load into Snowflake or Databricks?`
 
-```
-Target warehouse: Snowflake
-```
-
-When Databricks support is added, prompt: `Load into Snowflake or Databricks?`
+- **Snowflake:** `ts load snowflake` (see Step 3, Snowflake profile).
+- **Databricks:** `ts load databricks --source <schema.json> --profile <dbx-profile> [--rows N]`.
+  Requires a Databricks profile in `~/.claude/databricks-profiles.json`
+  (`dbx_profile`, `sql_warehouse_http_path`, `catalog`, `schema`) and the `databricks` CLI
+  authenticated (`databricks auth login` — the token lives in `~/.databrickscfg`, never in a
+  profile file). Infers the schema, generates synthetic rows, and runs `CREATE TABLE`
+  (Delta **column mapping** on, so column names with spaces like `Order Date` are preserved
+  1:1) + `INSERT` via the SQL Statement Execution API. **Caveat (live-verified):** for the
+  ThoughtSpot model to bind, the connection must expose the new table — a SERVICE_ACCOUNT
+  Databricks connection introspects it automatically, but an **OAuth/PKCE** connection returns
+  an empty API hierarchy (a ThoughtSpot limitation), so the newly-created table must be
+  **selected in the ThoughtSpot connection editor (UI)** before `ts tables create` / model
+  build can reference it.
 
 ---
 
@@ -187,4 +195,5 @@ Next steps:
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-07-16 | **Databricks loading** via `ts load databricks` (ts-cli v0.57.0) — infers schema, generates synthetic data, and provisions tables (Delta column-mapping preserves spaced column names 1:1) through the SQL Statement Execution API. Live-verified on ps-internal (created + populated `orders_demo`). Documents the OAuth/PKCE connection caveat: the new table must be selected in the ThoughtSpot connection UI before a model can bind (SERVICE_ACCOUNT connections introspect automatically). Prereq ts-cli v0.57.0 |
 | 1.0.0 | 2026-06-26 | Initial release — Snowflake loading with schema inference and synthetic data generation |

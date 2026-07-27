@@ -1,6 +1,8 @@
 # tools/ts-cli/tests/test_reconcile.py
 from __future__ import annotations
-from ts_cli.tableau.reconcile import clean_column_name, strip_suffix_in_expr, clean_columns
+from ts_cli.tableau.reconcile import (
+    clean_column_name, strip_suffix_in_expr, clean_columns, drop_junk_columns,
+)
 
 
 def test_clean_column_name_strips_suffix():
@@ -119,6 +121,38 @@ def test_drop_junk_formulas():
     kept, dropped = drop_junk_formulas(formulas)
     assert [f["name"] for f in kept] == ["F_clean"]
     assert dropped == ["F_junk"]
+
+
+def test_drop_junk_columns_strips_junk_without_table_stamp():
+    """Multi-table companion to clean_columns (Fix #A): drops the same
+    __tableau_internal_object_id__ junk pseudo-columns clean_columns does, but
+    — unlike clean_columns — never stamps/overwrites a `table` field and never
+    dedupes by db_column_name, since multi-table columns legitimately belong to
+    different tables and two different tables can share a bare column name."""
+    cols = [
+        {
+            "name": "agg_booked_monthly",
+            "db_column_name": "__tableau_internal_object_id__].[agg_booked_monthly (db.s.agg_booked_monthly)_HASH",
+            "column_type": "MEASURE", "data_type": "VARCHAR",
+        },
+        {"name": "Region (d_partner)", "db_column_name": "Region", "column_type": "ATTRIBUTE",
+         "data_type": "VARCHAR", "table": "d_partner"},
+        {"name": "Region (d_partner1)", "db_column_name": "Region", "column_type": "ATTRIBUTE",
+         "data_type": "VARCHAR", "table": "d_partner1"},
+    ]
+    out = drop_junk_columns(cols)
+    assert [c["name"] for c in out] == ["Region (d_partner)", "Region (d_partner1)"]
+    # same-named columns on two different tables both survive — no dedup by db_column_name
+    assert [c["table"] for c in out] == ["d_partner", "d_partner1"]
+
+
+def test_drop_junk_columns_matches_on_name_when_db_column_name_absent():
+    cols = [
+        {"name": "__tableau_internal_object_id__].[x_HASH"},
+        {"name": "Category", "db_column_name": "Category"},
+    ]
+    out = drop_junk_columns(cols)
+    assert [c["name"] for c in out] == ["Category"]
 
 
 from ts_cli.tableau.reconcile import rewrite_expr_refs, rewrite_formula_refs

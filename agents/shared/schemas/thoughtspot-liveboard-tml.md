@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+<!-- currency: thoughtspot — 2026-07 (validated in 2026-07-22 full audit — no changes needed) -->
 
 # ThoughtSpot Liveboard TML — Structure Reference
 

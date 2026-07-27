@@ -19,17 +19,15 @@ a third field via `${}`, does the recursive inline always produce a valid Though
 
 ---
 
-## #2 — `derived_table` SQL View: column list from SELECT — OPEN
+## #2 — `derived_table` SQL View: column list from SELECT — VERIFIED via docs 2026-07-22
 
-**Question:** When generating a SQL View TML from a LookML `derived_table: { sql: "..." }`,
-should the column list in the TML be derived by parsing the SELECT clause, or should we
-rely on ThoughtSpot's schema inference at import time?
+**Answer:** Columns are **required**, not inferred. The shared schema
+`thoughtspot-sql-view-tml.md` states: `sql_view.sql_view_columns: Yes — At least one
+column required` and `sql_output_column: Yes — Must match a column name or alias from
+the SQL query output. Case-sensitive.`
 
-**Concern:** If the SQL references CTEs or complex subqueries, parsing SELECT columns
-at migration time is error-prone. ThoughtSpot may infer columns on import.
-
-**Action:** Test a simple `derived_table` SQL View import against a live ThoughtSpot instance.
-Confirm whether `columns:` in the SQL View TML is required or optional.
+The migration must parse SELECT output columns (or accept a user-provided column list)
+and emit them in the SQL View TML.
 
 ---
 
@@ -62,33 +60,25 @@ add an optional Step 9.5 that creates RLS rules from `sql_always_where:` conditi
 
 ---
 
-## #5 — Liveboard layout grid coordinates — OPEN
+## #5 — Liveboard layout grid coordinates — VERIFIED via docs 2026-07-22
 
-**Question:** LookML dashboards with `layout: newspaper` and `tile_size:` hints — can
-these be mapped to ThoughtSpot's 12-column responsive grid layout?
+**Answer:** `layout` is optional in the liveboard TML schema. ThoughtSpot renders
+liveboards with auto-layout when `layout_config` is absent — tiles are arranged in
+order. The current handling (emit tiles in order, omit `layout_config`) is correct.
 
-**Known:** ThoughtSpot liveboard tiles use `layout_config.default_config` with
-`position: {x, y, height, width}`. LookML newspaper layout tiles have implicit
-ordering but no pixel coordinates.
-
-**Current handling:** Tiles are emitted in order; layout coordinates not set (ThoughtSpot
-uses auto-layout when `layout_config` is absent).
-
-**Action:** Verify whether ThoughtSpot renders liveboards correctly without explicit
-`layout_config`. Document the auto-layout behaviour.
+Explicit grid mapping from LookML `tile_size:` hints is a potential enhancement but
+not required for a correct migration.
 
 ---
 
-## #6 — `value_format_name:` → ThoughtSpot formatting — OPEN
+## #6 — `value_format_name:` → ThoughtSpot formatting — VERIFIED via docs 2026-07-22
 
-**Question:** Is there a way to apply number formatting (`usd`, `percent_0`, `decimal_2`)
-in ThoughtSpot Model TML, or only in Answer/Liveboard TML?
+**Answer:** Formatting is available at the **Model column** level via
+`properties.format_pattern` (e.g., `"#,##0"`, `"#,##0.0%"`) and
+`properties.currency_type.iso_code`. Answer TML does not have `format_pattern`.
 
-**Current handling:** Logged as "format hints to apply manually."
-
-**Action:** Check `thoughtspot-answer-tml.md` and `thoughtspot-liveboard-tml.md` for
-format spec fields on `answer_columns`. If present, apply them in Step 10c when
-building viz column specs.
+Map Looker `value_format_name` to ThoughtSpot `format_pattern` on Model columns:
+`usd` → `"$#,##0.00"`, `percent_0` → `"#,##0%"`, `decimal_2` → `"#,##0.00"`, etc.
 
 ---
 
@@ -128,14 +118,10 @@ table name in the join `on:` clause uses the physical view name (ORDER_FACT), no
 
 ---
 
-## #9 — `looker_waterfall` chart type — OPEN
+## #9 — `looker_waterfall` chart type — VERIFIED via docs 2026-07-22
 
-**Question:** Does ThoughtSpot support a WATERFALL chart type in Liveboard TML?
-
-**Current handling:** Mapped in coverage matrix as supported.
-
-**Action:** Confirm `type: WATERFALL` is valid in `chart.type:` in Liveboard Answer TML.
-If not, fall back to `BAR` and log.
+**Answer:** `WATERFALL` is confirmed valid in `thoughtspot-chart-types.md`
+(dim + measure, running contribution). The coverage matrix mapping is correct.
 
 ---
 

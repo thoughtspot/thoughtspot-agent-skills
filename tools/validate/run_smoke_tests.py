@@ -49,7 +49,7 @@ REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
     "ts-dependency-manager":                    ["--model-guid"],
     "ts-object-model-aggregates":               ["--model-guid"],
     "ts-object-model-coach":                    ["--model-guid"],
-    "ts-object-model-spotql-query":              ["--model-guid", "--spotql"],
+    "ts-object-model-agentql-query":              ["--model-guid", "--agentql"],
     "ts-convert-to-snowflake-sv":               ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
     "ts-convert-from-snowflake-sv":             ["--sf-profile", "--sv-fqn"],
     "ts-convert-to-databricks-mv":              ["--dbx-profile", "--model-guid"],

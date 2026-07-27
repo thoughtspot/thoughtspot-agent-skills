@@ -36,9 +36,9 @@ from pathlib import Path
 # ── CONFIG (repo-specific) ───────────────────────────────────────────────────
 ANCHORED_DIRS = ("agents/shared/mappings", "agents/shared/schemas")
 # Individual files (outside the dirs above) that also carry a currency anchor — e.g. a
-# skill reference encoding external product behaviour that moves (SpotQL limitations).
+# skill reference encoding external product behaviour that moves (AgentQL limitations).
 ANCHORED_FILES = (
-    "agents/cli/ts-object-model-spotql-query/references/limitations.md",
+    "agents/cli/ts-object-model-agentql-query/references/limitations.md",
 )
 STALE_MONTHS = 6
 # ─────────────────────────────────────────────────────────────────────────────

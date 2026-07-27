@@ -154,7 +154,7 @@ def search(
     # Default: auto-paginate and collect the full result set. --all_pages is
     # accepted but unused — this branch now runs whenever --limit is omitted,
     # whether or not the caller also passed --all.
-    page_size = 50
+    page_size = 500
     all_results: List[dict] = []
     current_offset = offset
     while True:
@@ -171,29 +171,135 @@ def search(
     print(json.dumps(filter_by_connection(all_results, connection)))
 
 
+# A batch metadata/delete is atomic: one missing GUID fails the whole call and
+# deletes nothing. ThoughtSpot's stable error code for a missing metadata object
+# is 13003; the documented message is "Metadata object not found ...". We key
+# `not_found` off the specific code (preferred, structured) and fall back to the
+# specific phrase — NOT a bare "not found", which would also match unrelated 400s
+# (e.g. "connection not found") and, with --ignore-missing, silently hide a real
+# failure.
+_DELETE_NOT_FOUND_CODE = "13003"
+_DELETE_NOT_FOUND_PHRASE = "metadata object not found"
+
+
+def _body_signals_not_found(body_text: str) -> bool:
+    """True when a delete 400 body indicates the object was already gone.
+
+    Prefers the structured error code (``13003``) wherever it appears in the
+    JSON — nested under ``error`` or at the top level, under any of the common
+    key spellings — and falls back to the documented message for a non-JSON or
+    unexpected-shape body. Deliberately does not match a bare "not found".
+    """
+    if not body_text:
+        return False
+    try:
+        body = json.loads(body_text)
+    except (ValueError, TypeError):
+        body = None
+    if isinstance(body, dict):
+        containers = [body]
+        err = body.get("error")
+        if isinstance(err, dict):
+            containers.append(err)
+        for c in containers:
+            for key in ("code", "errorCode", "error_code"):
+                if str(c.get(key, "")) == _DELETE_NOT_FOUND_CODE:
+                    return True
+    low = body_text.lower()
+    return _DELETE_NOT_FOUND_CODE in low or _DELETE_NOT_FOUND_PHRASE in low
+
+
+def classify_delete_response(ok: bool, status: int, body_text: str) -> str:
+    """Classify one delete response as ``deleted`` / ``not_found`` / ``error: …``.
+
+    ``not_found`` is reserved for the missing-object 400 (see
+    ``_body_signals_not_found``) — the case that is safe to treat as already-done.
+    Any other non-2xx is a genuine ``error`` so it is never silently swallowed.
+    Pure — no I/O — so the classification is unit-testable in isolation.
+    """
+    if ok:
+        return "deleted"
+    if status == 400 and _body_signals_not_found(body_text):
+        return "not_found"
+    snippet = " ".join((body_text or "").split())[:200]
+    return f"error: HTTP {status}{': ' + snippet if snippet else ''}"
+
+
+def resolve_delete_outcomes(guids: List[str], delete_one) -> dict:
+    """Per-GUID delete producing an ordered ``{guid: outcome}`` map.
+
+    ``delete_one(guid)`` returns ``(ok, status, body_text)`` for a single-GUID
+    delete; the delete API is the source of truth for each object's fate.
+    Requested GUIDs are de-duplicated, order preserved. Pure of the transport —
+    ``delete_one`` is injected — so the fallback map is unit-testable without a
+    live connection.
+    """
+    outcomes: dict = {}
+    for guid in dict.fromkeys(guids):
+        outcomes[guid] = classify_delete_response(*delete_one(guid))
+    return outcomes
+
+
 @app.command("delete")
 def delete_objects(
     guids: List[str] = typer.Argument(..., help="One or more GUIDs to delete"),
     type: str = typer.Option("LOGICAL_TABLE", "--type", "-t",
                              help="Object type: LOGICAL_TABLE, LIVEBOARD, ANSWER"),
+    ignore_missing: bool = typer.Option(
+        False, "--ignore-missing",
+        help="Treat already-gone GUIDs (not_found) as success rather than "
+             "exiting non-zero. Genuine errors still exit non-zero."),
     profile: Optional[str] = _profile_option,
 ) -> None:
-    """Delete one or more ThoughtSpot objects by GUID.
+    """Delete one or more ThoughtSpot objects by GUID, with partial-success handling.
 
-    Output: HTTP 204 on success (no body). Raises on error.
+    A single batch delete is atomic — if any one GUID is already gone the whole
+    call fails and nothing is deleted. This command tries the batch first (one
+    fast call when every GUID is present), and on failure falls back to per-GUID
+    deletes so present objects are still removed. It reports a per-object outcome
+    map to stdout and exits non-zero if any GUID could not be deleted (unless the
+    only failures are not_found and --ignore-missing is set).
+
+    Output (JSON to stdout):
+      {"deleted": [...], "not_found": [...], "errors": {guid: msg},
+       "outcomes": {guid: "deleted"|"not_found"|"error: ..."}}
 
     Examples:
 
     \b
       ts metadata delete abc-123
       ts metadata delete abc-123 def-456 --type LIVEBOARD
+      ts metadata delete abc-123 stale-guid --ignore-missing
     """
     client = ThoughtSpotClient(resolve_profile(profile))
-    client.post(
-        "/api/rest/2.0/metadata/delete",
-        json={"metadata": [{"identifier": g, "type": type} for g in guids]},
-    )
-    print(json.dumps({"deleted": guids}))
+
+    def _delete(subset: List[str]):
+        return client.post(
+            "/api/rest/2.0/metadata/delete",
+            json={"metadata": [{"identifier": g, "type": type} for g in subset]},
+            raise_for_status=False,
+        )
+
+    requested = list(dict.fromkeys(guids))
+    batch = _delete(requested)
+    if batch.ok:
+        outcomes = {g: "deleted" for g in requested}
+    else:
+        # Atomic batch failed (nothing deleted) — isolate each GUID's fate.
+        def delete_one(guid: str):
+            resp = _delete([guid])
+            return resp.ok, resp.status_code, getattr(resp, "text", "") or ""
+
+        outcomes = resolve_delete_outcomes(requested, delete_one)
+
+    deleted = [g for g, s in outcomes.items() if s == "deleted"]
+    not_found = [g for g, s in outcomes.items() if s == "not_found"]
+    errors = {g: s for g, s in outcomes.items() if s.startswith("error")}
+    print(json.dumps({"deleted": deleted, "not_found": not_found,
+                      "errors": errors, "outcomes": outcomes}))
+
+    if errors or (not_found and not ignore_missing):
+        raise typer.Exit(1)
 
 
 @app.command("get")

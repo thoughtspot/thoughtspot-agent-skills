@@ -67,6 +67,17 @@ def _col_map(model_tml: dict) -> dict:
 
 
 def _resolve(model_tml, table_tmls, dialect, display_name):
+    # A measure component's source_column is often already a physical
+    # `TABLE::COL` path (any formula measure — sum([T::c]), a ratio's
+    # numerator/denominator, etc.), not a model column display name. Resolve
+    # that directly when the referenced table is a known model_table; only fall
+    # back to the display-name map otherwise. (Before this, physical-path
+    # source_columns KeyError'd out — every candidate that covered a formula
+    # measure was skipped during profiling.)
+    if "::" in display_name:
+        table, col = display_name.split("::", 1)
+        if table in table_tmls:
+            return f"{_q(dialect, table)}.{_q(dialect, _db_col(table_tmls, table, col))}", table
     try:
         table, col = _col_map(model_tml)[display_name]
     except KeyError:
@@ -315,9 +326,50 @@ def build_profile_sql(select_sql: str) -> str:
     return f"SELECT COUNT(*) AS agg_rows FROM (\n{select_sql}\n) _agg"
 
 
+_MEASURE_REF = re.compile(r"\[([^\]:]+)::")
+
+
+def base_table_name(model_tml: dict) -> str:
+    """The fact table to count for `base_rows` — the physical table owning the
+    model's MEASURE columns.
+
+    The base row count is the compression denominator (detail rows scanned).
+    In a star schema that's the fact table; dimension joins are many-to-one and
+    do not multiply fact rows, so a bare `COUNT(*)` of the fact is the right
+    detail-grain count. The previous implementation used `model_tables[0]`,
+    which is arbitrary ordering — when a dimension happened to be listed first
+    (e.g. an 8-row category table) `base_rows` came back as that dimension's
+    tiny count, making every compression ratio meaningless.
+
+    Resolves the fact from measure columns: a plain measure column's
+    `column_id` (`TABLE::col`) names its table directly; a formula measure's
+    table comes from the `[TABLE::col]` refs in its expr. The table owning the
+    most measures wins (the fact in a single-fact model). Falls back to
+    `model_tables[0]` only when no measure resolves to a known table.
+    """
+    from collections import Counter
+    m = model_tml["model"]
+    valid = {t["name"] for t in m.get("model_tables", []) or []}
+    formulas = {f.get("id"): f.get("expr", "") for f in m.get("formulas", []) or []}
+    counts: Counter = Counter()
+    for c in m.get("columns", []) or []:
+        if (c.get("properties") or {}).get("column_type") != "MEASURE":
+            continue
+        cid = c.get("column_id")
+        if cid and "::" in cid:
+            counts[cid.split("::", 1)[0]] += 1
+        else:
+            for tbl in _MEASURE_REF.findall(formulas.get(c.get("formula_id"), "")):
+                counts[tbl] += 1
+    for tbl, _n in counts.most_common():
+        if tbl in valid:
+            return tbl
+    return m["model_tables"][0]["name"]
+
+
 def build_base_count_sql(model_tml: dict, table_tmls: dict,
                          dialect: str = "snowflake") -> str:
-    root = model_tml["model"]["model_tables"][0]["name"]
+    root = base_table_name(model_tml)
     return (f"SELECT COUNT(*) AS base_rows FROM "
             f"{_table_ref(_table_doc(table_tmls, root), dialect)}")
 

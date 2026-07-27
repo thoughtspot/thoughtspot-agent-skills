@@ -13,7 +13,7 @@ every skill the checker *requires* a smoke test for must resolve. Tested below.
 
 Audit 6.1 added a second drift class in the same family: REQUIRED_EXTRA_ARGS (in
 run_smoke_tests.py) is a hand-maintained table of each smoke test's own required=True
-CLI flags. ts-object-model-spotql-query's smoke test declared --model-guid/--spotql as
+CLI flags. ts-object-model-agentql-query's smoke test declared --model-guid/--agentql as
 required with no matching REQUIRED_EXTRA_ARGS entry — on an unconfigured machine,
 argparse's exit code 2 read as a push-blocking FAIL instead of a graceful SKIP.
 test_required_extra_args_covers_every_smoke_tests_required_flags below parses every

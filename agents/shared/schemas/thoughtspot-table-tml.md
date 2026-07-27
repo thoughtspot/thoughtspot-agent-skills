@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (validated in 2026-07-11 external sweep — no changes needed) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-23: added rls_rules structure; prior: validated in 2026-07-11 external sweep) -->
 
 # ThoughtSpot Table TML — Construction Reference
 
@@ -44,6 +44,17 @@ table:
     # 'on': "([SOURCE_TABLE::FK_COL] = [TARGET_TABLE::PK_COL])"
     type: INNER                # INNER | LEFT_OUTER | RIGHT_OUTER | FULL_OUTER
     cardinality: MANY_TO_ONE   # MANY_TO_ONE | ONE_TO_ONE | ONE_TO_MANY | MANY_TO_MANY
+  # rls_rules: omit entirely when this table has no row-level security rules
+  rls_rules:
+    tables:
+      - name: TABLE_NAME           # self-reference to the owning table
+    table_paths:
+      - id: T_1                    # alias used in rule expressions
+        table: TABLE_NAME
+        column: "[COL_NAME]"
+    rules:
+      - name: RULE_NAME
+        expr: "[T_1::COL_NAME] = ts_groups_int"  # bracket refs use table_paths aliases
   properties:
     spotter_config:
       is_spotter_enabled: false  # optional — controls Spotter (AI search) for this table
@@ -65,6 +76,7 @@ table:
 | `table.connection.name` | Yes | ThoughtSpot connection name (case-sensitive) — NOT a GUID |
 | `table.columns` | Yes | At least one column required |
 | `table.joins_with` | No | Only include on tables that have FK relationships to other tables |
+| `table.rls_rules` | No | Row-level security rules. Contains `tables` (self-reference), `table_paths` (aliases for bracket refs), and `rules` (name + expr). Import all related Table TMLs together when `rls_rules` reference other tables. |
 
 ### `columns[]` fields
 

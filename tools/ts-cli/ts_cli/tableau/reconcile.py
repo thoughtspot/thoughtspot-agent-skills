@@ -41,6 +41,30 @@ def clean_columns(columns: list[dict], table_name: str) -> list[dict]:
     return out
 
 
+def drop_junk_columns(columns: list[dict]) -> list[dict]:
+    """Drop __tableau_internal_object_id__ junk pseudo-columns (Fix #A —
+    multi-table companion to clean_columns).
+
+    clean_columns() does this too, but it ALSO stamps every surviving column
+    onto one ``table_name`` and dedupes by db_column_name within that single
+    table — both wrong on a multi-table datasource, where columns legitimately
+    belong to different tables (stamping them all onto one would mis-qualify
+    every column not actually owned by it) and two different tables can
+    legitimately share a bare column name (deduping globally would silently
+    drop one of them). This is the narrow, table-blind half of that cleanup:
+    it only removes the junk, leaving each column's own ``table``/ownership
+    untouched. Order-preserving; matches on db_column_name (falling back to
+    name) the same way clean_column_name does.
+    """
+    out: list[dict] = []
+    for c in columns:
+        raw = c.get("db_column_name") or c.get("name")
+        if raw and _JUNK in raw:
+            continue
+        out.append(c)
+    return out
+
+
 def _tokens(s: str) -> set[str]:
     return {t for t in s.upper().replace("-", "_").split("_") if t}
 

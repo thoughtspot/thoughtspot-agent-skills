@@ -369,6 +369,39 @@ def derive_blend_joins(component: dict, blend_graph: dict, ds_to_table: dict) ->
     return joins
 
 
+def build_generated_tables_map(
+    tables: list[dict],
+    columns: list[dict],
+    sql_views: list[dict] | None = None,
+) -> dict[str, set[str]]:
+    """Approximate "generated table/sql_view name -> column-name set" for the
+    ``lint_cross_references`` pre-flight check (BL-cross-ref-check).
+
+    GENERATE-mode ``ts tableau build-model`` does not write physical Table TML —
+    those tables are assumed to already exist in ThoughtSpot (created separately via
+    ``ts tables create``), so there is no on-disk Table TML to read authoritative
+    column names from at this point. This mirrors the exact column->table
+    attribution ``_build_model_columns`` uses (``c.get("table") or single_table``)
+    over the SAME ``tables``/``columns`` inputs ``build_model_tml`` consumes, so the
+    map reflects what the just-assembled model TML was actually built from. Any
+    finding this surfaces is therefore a genuine bug in the assembly pipeline
+    (a dropped column, an unresolved blend-join table, ...), not a false alarm from
+    stale external state.
+
+    ``sql_views`` columns ARE exact — the SQL View TML is written by this command
+    (``_write_sql_view_files``) before the model, so its column list is ground truth.
+    """
+    single_table = tables[0]["name"] if len(tables) == 1 else None
+    result: dict[str, set[str]] = {t["name"]: set() for t in tables}
+    for c in columns:
+        table = c.get("table") or single_table or ""
+        if table in result:
+            result[table].add(c.get("db_column_name", c["name"]))
+    for sv in sql_views or []:
+        result[sv["name"]] = {c["name"] for c in sv.get("columns", [])}
+    return result
+
+
 def build_blend_plan(blend_graph: dict, datasources: list[dict]) -> dict:
     """Assemble the full blend plan: components, table map, and joins.
 

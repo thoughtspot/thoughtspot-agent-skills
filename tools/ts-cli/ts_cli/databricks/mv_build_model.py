@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import re
 
-from ts_cli.databricks.mv_translate import normalize_tables
+from ts_cli.databricks.mv_translate import normalize_tables, reused_physicals
 from ts_cli.formula_common import (add_formula_prefix, fix_double_aggregation,
+                                   promote_duplicate_column_ids,
                                    resolve_name_collisions)
 
 
@@ -66,6 +67,13 @@ def build_columns_and_formulas(
     #    parameter renames never fire (MVs have no parameters).
     physical, formula_entries, rename_map = resolve_name_collisions(
         physical, formula_entries, [])
+
+    # 2b. I8/I5: a raw measure + an aggregate metric on the SAME physical column
+    #     (e.g. F_TIME_TO_RESOLVE + AVG(TIMETORESOLVE__C)) both classify as
+    #     physical column candidates with an identical TABLE::col — promote the
+    #     duplicate(s) to aggregation formulas so column_id stays unique.
+    physical, formula_entries, _ = promote_duplicate_column_ids(
+        physical, formula_entries)
 
     # 3. formula-text pipeline via the shared helpers (safety net — translate
     #    already inlined cross-refs, so these are usually no-ops).
@@ -217,9 +225,13 @@ def _join_entries(triples: list, flat: dict, index: dict) -> dict[str, list[dict
     by_parent: dict[str, list[dict]] = {}
     for path, parent_path, node in triples:
         on = _join_on_clause(node, parent_path, path, flat, index)
+        # `with` references the target's node identity (its alias for a role-play,
+        # so two paths to the same physical table don't collide); the `on` clause
+        # keeps physical names on both sides (the ThoughtSpot role-play convention).
+        with_node = path if flat[path] in reused_physicals(flat) else flat[path]
         by_parent.setdefault(parent_path, []).append({
             "name": _join_display(parent_path, path),
-            "with": flat[path],
+            "with": with_node,
             "on": on,
             "type": "INNER",
             "cardinality": _CARDINALITY[node.get("cardinality") or "many_to_one"],
@@ -235,13 +247,28 @@ def build_model_tables(parsed: dict, tables: dict) -> list[dict]:
             raise ValueError(f"join alias '{path}' has no entry in the tables map")
     index = _alias_index(flat)
     has_joins = bool(triples)
+    reused = reused_physicals(flat)
+
+    def _node(path: str) -> str:
+        # A reused physical table (role-play) is identified by its alias path so
+        # its instances stay distinct; otherwise the physical name is the identity.
+        phys = flat[path]
+        return path if phys in reused else phys
 
     def entry(path: str) -> dict:
         info = tables[path]
+        phys = flat[path]
+        node = _node(path)
         e: dict = {}
-        if has_joins:
-            e["id"] = flat[path]
-        e["name"] = flat[path]
+        if node != phys:
+            # Role-play instance: physical name + a disambiguating alias; no `id`
+            # (I4 requires id == name, and joins reference the alias).
+            e["name"] = phys
+            e["alias"] = node
+        else:
+            if has_joins:
+                e["id"] = phys
+            e["name"] = phys
         fqn = info.get("fqn") if isinstance(info, dict) else None
         if fqn:
             e["fqn"] = fqn

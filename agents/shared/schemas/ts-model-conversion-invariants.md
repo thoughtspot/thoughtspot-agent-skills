@@ -5,13 +5,14 @@
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I11, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I12, N1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
 > Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7),
 > `ts-convert-from-databricks-mv` (I1–I7), and `ts-convert-from-tableau` (I9–I10, verified
-> 2026-06-19 against se-thoughtspot). They are proven against live ThoughtSpot imports;
-> violations produce the failure modes listed below.
+> 2026-06-19 against se-thoughtspot; I12, verified 2026-07-23 against se-thoughtspot).
+> They are proven against live ThoughtSpot imports; violations produce the failure modes
+> listed below.
 
 ---
 
@@ -375,6 +376,45 @@ auto-selects join paths through them.
 owner, not the conversion skill. The source platform may mark columns as private or
 hidden (e.g. Snowflake SV `PRIVATE` visibility), but the ThoughtSpot model should not
 mirror that — the owner should decide what to hide after reviewing the imported model.
+
+---
+
+### I12 — `column_id` must always be `TABLE::col`-qualified, never bare
+
+**Rule:** Every physical-column `columns[]` entry's `column_id` must be `TABLE_NAME::col`
+— even on a single-table model. A bare `column_id` (e.g. `REGION`, with no `TABLE::`
+prefix) is rejected at import; it is not merely a style preference.
+
+**Failure mode:** Live-verified (2026-07, se-thoughtspot, `APJ_TAB` connection,
+`--policy VALIDATE_ONLY`): `column_id: REGION` on a single-table model fails with
+`"Unable to create model column(s). These column_id/formula_id values are incorrect:
+REGION"` (error_code 14547). The equivalent `column_id: AMAZON_SALES_DATA::REGION`
+validates clean. `ts tml lint` does not catch a bare `column_id` on its own (see I8,
+which only checks *duplicates*) — see `tml_lint.py`'s dedicated bare-`column_id` check
+for single-table models, which does.
+
+**Applies to:** All source dialects. Most likely to surface wherever a converter's
+table-attribution step is conditioned on `len(tables) == 1` (a common shortcut for
+"this datasource has one physical table") — any column that reaches TML assembly
+without that condition having stamped its owning table produces a bare `column_id`.
+
+**Correct:**
+```yaml
+columns:
+- name: "Region"
+  column_id: AMAZON_SALES_DATA::REGION   # TABLE::col — even for the model's only table
+  properties:
+    column_type: ATTRIBUTE
+```
+
+**Wrong (do NOT do this):**
+```yaml
+columns:
+- name: "Region"
+  column_id: REGION       # WRONG — bare column_id, rejected at import
+  properties:
+    column_type: ATTRIBUTE
+```
 
 ---
 

@@ -29,7 +29,8 @@ content critically rather than blindly adding more.
 - Existing AI assets are critiqued + improved, **never silently overwritten**.
 - The user picks which surfaces to generate via a single up-front menu.
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions. Batch **independent** questions
+into a single prompt to cut round-trips.
 
 ---
 
@@ -102,7 +103,7 @@ Read `~/.claude/thoughtspot-profiles.json`. Prompt for profile if multiple exist
 the single profile if exactly one.
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+ts auth whoami --profile "{profile_name}"
 ```
 
 Save `{base_url}` (strip trailing slash) and `{profile_name}`.
@@ -110,7 +111,7 @@ Save `{base_url}` (strip trailing slash) and `{profile_name}`.
 Pick the Model — accept `--guid` or prompt to search:
 
 ```bash
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --subtype WORKSHEET --name "%{search_term}%" --profile "{profile_name}"
 ```
 
@@ -153,7 +154,7 @@ run_dir.mkdir(parents=True, exist_ok=True)
 Export the Model bundle:
 
 ```bash
-source ~/.zshenv && ts tml export {model_guid} \
+ts tml export {model_guid} \
   --profile "{profile_name}" --fqn --associated --parse > {run_dir}/model_bundle.json
 ```
 
@@ -217,7 +218,7 @@ import json, subprocess
 # Step 1: find the feedback object GUID via dependents
 dep_result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts metadata dependents {model_guid} --raw --profile '{profile_name}'"],
+     f"ts metadata dependents {model_guid} --raw --profile '{profile_name}'"],
     capture_output=True, text=True,
 )
 dep_body = json.loads(dep_result.stdout) if dep_result.stdout.strip() else []
@@ -233,7 +234,7 @@ all_fb_entries = []
 for fb_guid in feedback_guids:
     fb_result = subprocess.run(
         ["bash", "-c",
-         f"source ~/.zshenv && ts tml export {fb_guid} --parse --profile '{profile_name}'"],
+         f"ts tml export {fb_guid} --parse --profile '{profile_name}'"],
         capture_output=True, text=True,
     )
     fb_body = json.loads(fb_result.stdout) if fb_result.stdout.strip() else []
@@ -288,7 +289,7 @@ import json, subprocess
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts metadata dependents {model_guid} --raw --profile '{profile_name}'"],
+     f"ts metadata dependents {model_guid} --raw --profile '{profile_name}'"],
     capture_output=True, text=True,
 )
 body = json.loads(result.stdout)
@@ -1477,7 +1478,7 @@ If N, exit gracefully — leave the run dir in place so the user can re-run or h
 ### 9a. Import patched Model TML (if any of surfaces 1, 2, 6 are non-empty)
 
 ```bash
-source ~/.zshenv && ts tml import --file {run_dir}/after/model.tml \
+ts tml import --file {run_dir}/after/model.tml \
   --profile "{profile_name}" --policy ALL_OR_NONE --no-create-new
 ```
 
@@ -1487,7 +1488,7 @@ source ~/.zshenv && ts tml import --file {run_dir}/after/model.tml \
 ### 9b. Import feedback TML (if any of surfaces 3, 4 are non-empty)
 
 ```bash
-source ~/.zshenv && ts tml import --file {run_dir}/after/feedback.tml \
+ts tml import --file {run_dir}/after/feedback.tml \
   --profile "{profile_name}" --policy ALL_OR_NONE --no-create-new
 ```
 
@@ -1502,7 +1503,7 @@ feedback entries even when they exist (verified [open-items.md #2](references/op
 **For Model TML changes (surfaces 1, 2, 6) — use `--associated`:**
 
 ```bash
-source ~/.zshenv && ts tml export {model_guid} \
+ts tml export {model_guid} \
   --profile "{profile_name}" --fqn --associated --parse
 ```
 
@@ -1520,7 +1521,7 @@ import json, subprocess
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts metadata dependents {model_guid} --profile '{profile_name}'"],
+     f"ts metadata dependents {model_guid} --profile '{profile_name}'"],
     capture_output=True, text=True,
 )
 deps = json.loads(result.stdout)
@@ -1602,6 +1603,7 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.3.3 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 2.3.2 | 2026-07-11 | Migrate Step 9a/9b/rollback imports to `ts tml import --file` (removes a broken `\| source ~/.zshenv &&` pipe that discarded the piped TML) (audit 5.1). |
 | 2.3.1 | 2026-07-03 | Audit fixes: soften phantom `/ts-object-model-builder` recommendations (Step 1 and Error Handling) to "no skill for this yet — planned"; remove stale "CLI does not yet expose `--include-dependent-objects`" framing in Step 3a (it never did — `ts metadata dependents` is the command used). Same phantom-skill fix applied to `references/ai-asset-review-rules.md`. |
 | 2.3.0 | 2026-05-19 | **`column_metadata` + `hierarchies` categories added to `model_instructions`.** Two new structured categories for agent disambiguation: `column_metadata` (cardinality tier, sample values, usage hint, value format per dimension column — requires Snowflake profile) and `hierarchies` (ordered drill-path declarations from coarse to fine grain). Allowed-key list updated (5 → 7 categories). Budget-trim order updated: `output_formatting` → `samples` → `value_format` → `note:/reason:` → `aggregation_defaults`; mandatory tier now includes `hierarchies`. Step 5 adds scope menu option 8; Step 6.5 adds generation algorithms (PII-gated cardinality queries, functional dependency validation for hierarchies, date-dim auto-detection); Step 7 adds `column_metadata.md` review file (Block 9 in review-explainers); Step 8b adds deploy-time validation for new enums/refs. Smoke test updated with structural validation steps for both categories. |

@@ -18,12 +18,14 @@ _profile_option = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE",
 @app.command("list")
 def list_connections(
     profile: Optional[str] = _profile_option,
-    type: str = typer.Option("SNOWFLAKE", "--type", "-t",
-                             help="Data warehouse type filter (e.g. SNOWFLAKE, BIGQUERY)"),
+    type: Optional[str] = typer.Option(None, "--type", "-t",
+                             help="Optional data warehouse type filter (e.g. SNOWFLAKE, "
+                                  "DATABRICKS, BIGQUERY). Omit to list ALL types."),
 ) -> None:
     """List all available data connections (auto-paginated).
 
-    Output: JSON array of all connection objects from
+    Lists connections of **every** warehouse type by default; pass --type to filter to one
+    (e.g. DATABRICKS). Output: JSON array of all connection objects from
     POST /api/rest/2.0/connection/search (all pages, not capped).
     """
     client = ThoughtSpotClient(resolve_profile(profile))
@@ -31,10 +33,10 @@ def list_connections(
     offset = 0
     page_size = 500
     while True:
-        resp = client.post(
-            "/api/rest/2.0/connection/search",
-            json={"data_warehouse_types": [type], "record_size": page_size, "record_offset": offset},
-        )
+        body: Dict[str, Any] = {"record_size": page_size, "record_offset": offset}
+        if type:  # omit the filter entirely to return every warehouse type
+            body["data_warehouse_types"] = [type]
+        resp = client.post("/api/rest/2.0/connection/search", json=body)
         page = resp.json()
         if not isinstance(page, list) or not page:
             break
@@ -86,10 +88,36 @@ def _adapt_v2_databases(v2_dbs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return databases
 
 
+def _extract_auth_type(conn: Dict[str, Any]) -> Optional[str]:
+    """Best-effort extraction of the connection's authentication type from a
+    v2 ``connection/search`` response object.
+
+    The spec doesn't document ``authentication_type`` as an explicit response
+    field, but it may appear at the top level or inside the ``details`` object
+    (when ``include_details: True``).  Returns ``None`` when not found — callers
+    should fall back to a CLI option or warn.
+    """
+    for key in ("authentication_type", "authenticationType"):
+        val = conn.get(key)
+        if val:
+            return val
+    details = conn.get("details") or {}
+    if isinstance(details, dict):
+        for key in ("authenticationType", "authentication_type"):
+            val = details.get(key)
+            if val:
+                return val
+    return None
+
+
 def _fetch_connection_v2(client: ThoughtSpotClient, connection_id: str) -> Dict[str, Any]:
     """Fetch a connection's warehouse-object hierarchy via the v2
     ``POST /api/rest/2.0/connection/search`` endpoint, adapted to the legacy
     ``{"dataWarehouseInfo": {"databases": [...]}}`` shape.
+
+    Also extracts ``authenticationType`` from the response when present — the
+    v2 update endpoint defaults to SERVICE_ACCOUNT if omitted, which silently
+    breaks non-SERVICE_ACCOUNT connections (BL-095).
 
     Replaces the removed v1 ``/tspublic/v1/connection/fetchConnection`` endpoint
     (404 on ThoughtSpot Cloud builds where the legacy tspublic API is dropped).
@@ -117,7 +145,13 @@ def _fetch_connection_v2(client: ThoughtSpotClient, connection_id: str) -> Dict[
     conn = conns[0] if isinstance(conns, list) and conns else (conns or {})
     dwo = conn.get("data_warehouse_objects") or {}
     v2_dbs = dwo.get("databases", []) if isinstance(dwo, dict) else []
-    return {"dataWarehouseInfo": {"databases": _adapt_v2_databases(v2_dbs)}}
+    result: Dict[str, Any] = {
+        "dataWarehouseInfo": {"databases": _adapt_v2_databases(v2_dbs)},
+    }
+    auth_type = _extract_auth_type(conn)
+    if auth_type:
+        result["authenticationType"] = auth_type
+    return result
 
 
 @app.command("get")
@@ -147,6 +181,11 @@ def get_connection(
 def add_tables(
     connection_id: str = typer.Argument(..., help="Connection GUID"),
     profile: Optional[str] = _profile_option,
+    auth_type: Optional[str] = typer.Option(
+        None, "--auth-type",
+        help="Connection authentication type (e.g. SERVICE_ACCOUNT, KEY_PAIR, OAUTH). "
+             "Auto-detected from the connection when possible; use this flag to "
+             "override or when auto-detection fails."),
 ) -> None:
     """Add or update tables in a connection (fetch → merge → update).
 
@@ -170,6 +209,10 @@ def add_tables(
     'ts connections get'), merges the new tables in without delinking any
     existing tables, then POSTs the merged payload to the v2 update endpoint:
       POST /api/rest/2.0/connections/{connection_identifier}/update
+
+    The update payload includes authenticationType inside data_warehouse_config.
+    If omitted, the API defaults to SERVICE_ACCOUNT — silently breaking
+    non-SERVICE_ACCOUNT connections (e.g. KEY_PAIR, OAUTH).
 
     Output: JSON response from the update call.
     """
@@ -200,15 +243,28 @@ def add_tables(
     # 2. Merge new tables into the existing hierarchy
     merged = _merge_tables(fetch_data, new_tables)
 
-    # 3. Update using the v2 endpoint (requires ThoughtSpot Cloud 10.4.0.cl+)
+    # 3. Resolve authentication type: CLI option > fetched value > warn.
+    resolved_auth_type = auth_type or fetch_data.get("authenticationType")
+    if not resolved_auth_type:
+        print(
+            "Warning: could not detect authenticationType for this connection. "
+            "The update will omit it (API defaults to SERVICE_ACCOUNT). "
+            "Pass --auth-type explicitly if this connection uses a different "
+            "authentication method (KEY_PAIR, OAUTH, etc.).",
+            file=sys.stderr,
+        )
+
+    # 4. Update using the v2 endpoint (requires ThoughtSpot Cloud 10.4.0.cl+)
     #    Connection ID goes in the URL path; tables go inside data_warehouse_config.
     #    validate=True triggers ThoughtSpot to verify the table/column changes.
+    #    authenticationType is required for non-SERVICE_ACCOUNT connections (BL-095).
+    dwc: Dict[str, Any] = {"externalDatabases": merged}
+    if resolved_auth_type:
+        dwc["authenticationType"] = resolved_auth_type
     update_resp = client.post(
         f"/api/rest/2.0/connections/{connection_id}/update",
         json={
-            "data_warehouse_config": {
-                "externalDatabases": merged,
-            },
+            "data_warehouse_config": dwc,
             "validate": True,
         },
     )
@@ -319,6 +375,20 @@ def create_connection(
 # Merge logic
 # ---------------------------------------------------------------------------
 
+def _require_entry_keys(entry: Dict[str, Any]) -> tuple:
+    """Extract (db, schema, table) from an add-tables entry. Accepts 'db' or 'database'
+    (the docstring used 'database' while the code read 'db' — a KeyError-crashing mismatch)."""
+    db_name = entry.get("db") or entry.get("database")
+    schema_name = entry.get("schema")
+    table_name = entry.get("table")
+    if not (db_name and schema_name and table_name):
+        raise SystemExit(
+            "Each table entry needs 'db' (or 'database'), 'schema', and 'table'. "
+            f"Got keys: {sorted(entry)}"
+        )
+    return db_name, schema_name, table_name
+
+
 def _merge_tables(
     fetch_response: Dict[str, Any],
     new_tables: List[Dict[str, Any]],
@@ -371,9 +441,7 @@ def _merge_tables(
 
     # Process each new table
     for entry in new_tables:
-        db_name = entry["db"]
-        schema_name = entry["schema"]
-        table_name = entry["table"]
+        db_name, schema_name, table_name = _require_entry_keys(entry)
         table_type = entry.get("type", "TABLE")
         new_columns = entry.get("columns", [])
 
