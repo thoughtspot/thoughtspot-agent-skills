@@ -211,24 +211,40 @@ def _try_search(client: ThoughtSpotClient, metadata: Dict[str, Any],
         return []
 
 
-def _resolve_object(client: ThoughtSpotClient, identifier: str) -> Dict[str, Any]:
-    """Resolve a GUID or name to {guid, name, type, subtype}, failing loudly.
+def _find_object(client: ThoughtSpotClient, identifier: str) -> Optional[Dict[str, Any]]:
+    """Resolve a GUID or name to {guid, name, type, subtype}, or None if not found here.
+
+    "Here" is load-bearing: metadata/search is Org-scoped, so a miss means "not visible
+    to THIS client's Org", not "does not exist". Returning None rather than raising is
+    what lets `_resolve_object_in_orgs` try another Org before giving up. Ambiguity
+    still RAISES, because that is a genuine refusal and must not be swallowed by a
+    caller looping over Orgs.
 
     A GUID resolves untyped and identifies at most one object. A NAME needs its type
-    supplied, so each grantable type is tried in turn, and an exact-name match is
-    REQUIRED -- an ambiguous name is refused rather than resolved to the first hit.
-    That matters more here than in most lookups: silently picking one of two
-    same-named tables would grant a tenant access to the wrong data.
+    supplied, so each grantable type is tried in turn, and an exact match is REQUIRED --
+    an ambiguous name is refused rather than resolved to the first hit. That matters
+    more here than in most lookups: silently picking one of two same-named tables would
+    grant a tenant access to the wrong data.
     """
     by_guid = _try_search(client, {"identifier": identifier}, 1)
     if by_guid:
         return _descriptor(by_guid[0], identifier)
 
     for obj_type in GRANTABLE_TYPES:
-        # A small page, then an exact-name filter: enough to detect ambiguity without
+        # A small page, then an exact-match filter: enough to detect ambiguity without
         # turning a bounded lookup into a listing.
         hits = _try_search(client, {"identifier": identifier, "type": obj_type}, 10)
-        exact = [h for h in hits if h.get("metadata_name") == identifier]
+        # Match on GUID as well as name. The untyped probe above is the normal route for
+        # a GUID, but it is not reliable: it returns 400 (code 10002, "Specify the
+        # metadata_type for identifier ...") whenever the identifier is unknown *in the
+        # current Org*, which `_try_search` correctly swallows. Before this, the typed
+        # fallback compared only `metadata_name == identifier`, which a GUID can never
+        # satisfy -- so a GUID that the untyped probe missed fell through to "Could not
+        # resolve" even when the typed search had just returned it. Live-verified
+        # 2026-07-27.
+        exact = [h for h in hits
+                 if h.get("metadata_name") == identifier
+                 or h.get("metadata_id") == identifier]
         if len(exact) > 1:
             raise typer.BadParameter(
                 f"'{identifier}' matches {len(exact)} {obj_type} objects "
@@ -237,9 +253,51 @@ def _resolve_object(client: ThoughtSpotClient, identifier: str) -> Dict[str, Any
         if exact:
             return _descriptor(exact[0], identifier)
 
+    return None
+
+
+def _resolve_object(client: ThoughtSpotClient, identifier: str) -> Dict[str, Any]:
+    """`_find_object`, failing loudly when the object is not visible to this client."""
+    found = _find_object(client, identifier)
+    if found is None:
+        raise typer.BadParameter(
+            f"Could not resolve '{identifier}'. Expected a GUID, or the exact name of "
+            f"one of: {', '.join(GRANTABLE_TYPES)}.")
+    return found
+
+
+def _resolve_object_in_orgs(profile: Optional[str], orgs: List[str],
+                            identifier: str) -> tuple:
+    """Resolve an identifier in the default Org, then in each named Org.
+
+    Returns `(descriptor, client)` -- the client is returned so the caller lists the
+    object's columns through the SAME Org context that could see it.
+
+    Why this exists. `metadata/search` is Org-scoped, so an object NATIVE to a tenant
+    Org is invisible to the default-Org client. `ts share export <guid> --org ORG1`
+    used to resolve with the default client and scope only the permissions read, so it
+    failed outright on any object ORG1 owns -- exactly the case column-level security
+    in a tenant Org needs. Live-verified 2026-07-27: both the untyped and typed probes
+    resolve such a GUID fine when issued with an ORG1-scoped client, so the only bug
+    was which client was used.
+
+    The default Org is tried FIRST so the common case (a Primary-owned object, shared
+    into tenants) costs no extra round-trip, and so behaviour is unchanged when no
+    `--org` is given. Ambiguity inside any one Org still raises immediately rather than
+    falling through to the next.
+    """
+    attempts: List[Optional[str]] = [None] + list(orgs)
+    for org_name in attempts:
+        client = _client_for_org(profile, org_name)
+        found = _find_object(client, identifier)
+        if found is not None:
+            return found, client
+
+    scope = ("the current Org" if not orgs
+             else f"the current Org or any of: {', '.join(orgs)}")
     raise typer.BadParameter(
-        f"Could not resolve '{identifier}'. Expected a GUID, or the exact name of one of: "
-        f"{', '.join(GRANTABLE_TYPES)}.")
+        f"Could not resolve '{identifier}' in {scope}. Expected a GUID, or the exact "
+        f"name of one of: {', '.join(GRANTABLE_TYPES)}.")
 
 
 def _table_columns(client: ThoughtSpotClient, table_guid: str) -> List[Dict[str, str]]:

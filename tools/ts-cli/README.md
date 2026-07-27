@@ -1473,6 +1473,15 @@ Three behaviours the implementation rests on, all verified live on 2026-07-26:
 | `message` is **top-level** in the payload, beside `notify_on_share` — not inside `notification`, despite every published example | The nested form fails with `Variable "$message" of required type "String!" was not provided`. Nothing works until this is right |
 | `LOGICAL_COLUMN` **is** accepted by the endpoint, despite being absent from the documented supported-types list | Column-level security is expressible through the same command |
 | Sharing a **table grants every column** in it | Table and column grants are mutually exclusive per (org, table, group) — see the exclusivity rule below |
+| A table-level `NO_ACCESS` does **not** clear existing column grants (live-verified 2026-07-27, ACL level) | The exclusivity rule is about ordering ambiguity, not about `NO_ACCESS` being destructive |
+
+**`export` resolves across every named Org, not just the default one.** `metadata/search`
+is Org-scoped, so an object *native* to a tenant Org is invisible to a default-Org
+client. `export` therefore tries the default Org first (so the common case — a
+Primary-owned object shared into tenants — costs no extra round-trip) and then each
+`--org` in turn, listing the object's columns through whichever Org could see it.
+Without this, `ts share export <guid> --org ORG1` failed outright on anything ORG1 owns,
+which is exactly the case tenant-Org column security is about.
 
 The pipeline mirrors `ts publish` and the `ts alias` source conventions:
 
@@ -1597,6 +1606,7 @@ axes:
 | | CLS (`ts share`) | CSR (here) |
 |---|---|---|
 | Works on published objects | yes | refused BY DEFAULT at plan time AND by `set` (the platform itself accepts an owning-Org CSR update on a published table and enforces it there -- but the rule does not travel with publication, so every tenant Org keeps the column visible; see below) |
+| Usable by a TENANT Org | yes, on an object published into it (live-verified 2026-07-27) | **no.** The tenant cannot define it either: `HTTP 500`, code `10038`, `FORBIDDEN`, even holding `ADMINISTRATION` in that Org. CSR is for objects an Org OWNS |
 | Declares | every VISIBLE column per group | only the RESTRICTED columns |
 | Liveboard filter on a secured column | locks | stays interactive |
 | Availability | GA | Beta, 10.12+, feature-flagged off by default |

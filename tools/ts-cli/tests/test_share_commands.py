@@ -431,3 +431,165 @@ def test_resolve_column_grant_warning_does_not_change_the_exit_code_or_leak_to_s
     plan = json.loads(result.stdout)
     assert plan["summary"]["column_grants"] == 1
     assert "Strict Object Mode" not in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Org-scoped resolution -- the blocker found in the 2026-07-27 live round
+# ---------------------------------------------------------------------------
+
+class _Resp:
+    def __init__(self, hits):
+        self._hits = hits
+
+    def json(self):
+        return self._hits
+
+
+def _hit(guid, name, obj_type):
+    return {"metadata_id": guid, "metadata_name": name, "metadata_type": obj_type,
+            "metadata_header": {"id": guid, "name": name}}
+
+
+class _OrgClient:
+    """A client that can see exactly one object, the way an Org-scoped session does.
+
+    The untyped probe raises SystemExit for an identifier it cannot see, mirroring the
+    platform's real 400 (code 10002, "Specify the metadata_type for identifier ..."),
+    which is what `client.py` turns into a SystemExit.
+    """
+
+    def __init__(self, visible_guid=None, visible_name=None,
+                 obj_type="LOGICAL_TABLE", untyped_works=True):
+        self.visible_guid = visible_guid
+        self.visible_name = visible_name
+        self.obj_type = obj_type
+        self.untyped_works = untyped_works
+
+    def post(self, _path, json=None):
+        body = json or {}
+        metadata = (body.get("metadata") or [{}])[0]
+        identifier = metadata.get("identifier")
+        mine = identifier in (self.visible_guid, self.visible_name)
+        if "type" not in metadata:
+            if mine and self.untyped_works:
+                return _Resp([_hit(self.visible_guid, self.visible_name, self.obj_type)])
+            raise SystemExit(1)          # the platform's expected 400
+        if mine and metadata["type"] == self.obj_type:
+            return _Resp([_hit(self.visible_guid, self.visible_name, self.obj_type)])
+        return _Resp([])
+
+
+def test_find_object_returns_none_instead_of_raising_when_not_visible():
+    """`_resolve_object_in_orgs` can only try the next Org if a miss is a return value.
+
+    A miss means "not visible to THIS client's Org", not "does not exist" -- so it must
+    not raise, or the loop over Orgs can never reach the Org that owns the object.
+    """
+    from ts_cli.commands.share import _find_object
+
+    assert _find_object(_OrgClient(visible_guid="other", visible_name="OTHER"),
+                        "T4_PER_ORG") is None
+
+
+def test_find_object_matches_a_guid_through_the_typed_fallback():
+    """The secondary half of the 2026-07-27 blocker.
+
+    The typed fallback used to filter on `metadata_name == identifier` only, which a
+    GUID can never satisfy. So whenever the untyped probe missed -- which it does for
+    any identifier unknown in the current Org -- a GUID that the typed search had just
+    returned still fell through to "Could not resolve".
+    """
+    from ts_cli.commands.share import _find_object
+
+    client = _OrgClient(visible_guid="d3a688f2", visible_name="T4_PER_ORG",
+                        untyped_works=False)
+    found = _find_object(client, "d3a688f2")
+    assert found is not None
+    assert found["guid"] == "d3a688f2"
+    assert found["name"] == "T4_PER_ORG"
+
+
+def test_find_object_still_refuses_an_ambiguous_name(monkeypatch):
+    """Ambiguity must RAISE, not return None -- otherwise a caller looping over Orgs
+    would swallow a genuine refusal and quietly try somewhere else."""
+    import typer
+
+    from ts_cli.commands.share import GRANTABLE_TYPES, _find_object
+
+    class _Ambiguous:
+        @staticmethod
+        def post(_path, json=None):
+            body = json or {}
+            metadata = (body.get("metadata") or [{}])[0]
+            if "type" not in metadata:
+                raise SystemExit(1)
+            if metadata["type"] == GRANTABLE_TYPES[0]:
+                return _Resp([_hit("g1", "DUPE", GRANTABLE_TYPES[0]),
+                              _hit("g2", "DUPE", GRANTABLE_TYPES[0])])
+            return _Resp([])
+
+    with pytest.raises(typer.BadParameter) as excinfo:
+        _find_object(_Ambiguous(), "DUPE")
+    assert "matches 2" in str(excinfo.value)
+
+
+def test_resolve_object_in_orgs_finds_an_object_native_to_a_tenant_org(monkeypatch):
+    """The blocker itself.
+
+    `ts share export <guid> --org ORG1` resolved with the DEFAULT-Org client and scoped
+    only the permissions read, so any object ORG1 owns failed outright -- exactly the
+    case tenant-Org column security is about. Live-verified 2026-07-27 on
+    T4_PER_ORG (orgIds=[12750490]).
+    """
+    from ts_cli.commands import share as share_module
+
+    default_client = _OrgClient(visible_guid="primary-tbl", visible_name="T2_PUBLISH")
+    org1_client = _OrgClient(visible_guid="d3a688f2", visible_name="T4_PER_ORG")
+    handed_out = []
+
+    def _fake_client_for_org(_profile, org=None):
+        handed_out.append(org)
+        return org1_client if org == "ORG1" else default_client
+
+    monkeypatch.setattr(share_module, "_client_for_org", _fake_client_for_org)
+
+    resolved, client = share_module._resolve_object_in_orgs("p", ["ORG1"], "d3a688f2")
+    assert resolved["name"] == "T4_PER_ORG"
+    # The client is returned so columns are listed through the Org that could see it.
+    assert client is org1_client
+    # Default Org tried first, so the common case costs no extra round-trip.
+    assert handed_out == [None, "ORG1"]
+
+
+def test_resolve_object_in_orgs_prefers_the_default_org(monkeypatch):
+    """Unchanged behaviour for a Primary-owned object: resolved in the default Org, and
+    no tenant-Org client is ever constructed."""
+    from ts_cli.commands import share as share_module
+
+    default_client = _OrgClient(visible_guid="primary-tbl", visible_name="T2_PUBLISH")
+    handed_out = []
+
+    def _fake_client_for_org(_profile, org=None):
+        handed_out.append(org)
+        return default_client
+
+    monkeypatch.setattr(share_module, "_client_for_org", _fake_client_for_org)
+
+    resolved, client = share_module._resolve_object_in_orgs("p", ["ORG1"], "primary-tbl")
+    assert resolved["name"] == "T2_PUBLISH"
+    assert client is default_client
+    assert handed_out == [None]
+
+
+def test_resolve_object_in_orgs_names_every_org_it_tried(monkeypatch):
+    from ts_cli.commands import share as share_module
+    import typer
+
+    blind = _OrgClient(visible_guid="nope", visible_name="NOPE")
+    monkeypatch.setattr(share_module, "_client_for_org",
+                        lambda _profile, org=None: blind)
+
+    with pytest.raises(typer.BadParameter) as excinfo:
+        share_module._resolve_object_in_orgs("p", ["ORG1", "ORG2"], "MISSING")
+    message = str(excinfo.value)
+    assert "ORG1" in message and "ORG2" in message

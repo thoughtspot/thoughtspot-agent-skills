@@ -487,6 +487,27 @@ _RULES_REQUIRED_RE = re.compile(
     r"column_security_rules\D{0,40}(is )?required|required\D{0,40}column_security_rules",
     re.IGNORECASE)
 
+# Code 10038 -- the platform refusing to modify CSR on a table in the Org the call ran
+# in. Live-verified 2026-07-27 as the response to the single most predictable tenant
+# mistake there is: trying to define CSR, from a tenant Org, on a table PUBLISHED into
+# that Org. Published objects are read-only in target Orgs, and CSR writes fall under
+# that read-only-ness.
+#
+# Two reasons this needs its own branch rather than leaning on the generic 403 fallback:
+#
+#   - It is a THIRD code, distinct from 10023. Before this it matched nothing and
+#     surfaced raw.
+#   - The canonical spec (`get-rest-api-reference`, `updateColumnSecurityRules`)
+#     documents this outcome as **403**; the live build returns **HTTP 500** with
+#     `Error Code: FORBIDDEN` in the body. So `status_code == 403` never fires for it
+#     and never would have.
+#
+# Matched on the code OR the message text, because the two have been seen together but
+# only the message is self-describing.
+_CODE_10038_RE = re.compile(r"\b10038\b")
+_CSR_TABLE_FORBIDDEN_RE = re.compile(
+    r"does not have access to read/modify CSR", re.IGNORECASE)
+
 
 def explain_csr_error(body_text: str,
                       status_code: Optional[int] = None) -> Optional[str]:
@@ -507,14 +528,41 @@ def explain_csr_error(body_text: str,
             "by ThoughtSpot. This is not an access-control problem and no payload "
             "change will fix it: ask for the flag, then re-run.")
 
+    if _CODE_10038_RE.search(body) or _CSR_TABLE_FORBIDDEN_RE.search(body):
+        return (
+            "The platform refused to read or modify column security rules for this "
+            "table, in the Org this call ran in (code 10038, FORBIDDEN -- note the "
+            "spec documents this as 403 but the build returns 500).\n\n"
+            "The usual cause is not privileges. It is that the table is PUBLISHED "
+            "into this Org from another Org, and published objects are read-only in "
+            "target Orgs -- CSR writes included. Live-verified 2026-07-27: this is "
+            "returned even to a caller holding ADMINISTRATION in the Org, in the same "
+            "session that successfully set CSR on that Org's OWN native table. So "
+            "before auditing privileges, check whether the table is published in.\n\n"
+            "A tenant Org cannot be given CSR on a published object at all: a rule "
+            "set in the owning Org is enforced only there and does not travel with "
+            "publication, and the tenant cannot define its own. Use `ts share` column "
+            "grants (CLS) instead -- those do apply per-Org. CSR remains the right "
+            "mechanism for objects an Org owns.")
+
     if _CODE_10023_RE.search(body) and _ACCESS_DENIED_RE.search(body):
         return (
             "Code 10023, but this is an access failure, not the feature-flag case "
             "that shares its code -- the feature is not disabled. The caller lacks "
             "access to read or modify column security rules in the Org this call ran "
-            "in. Groups and privileges are per-Org, so a token scoped to a tenant Org "
-            "can lack what the Primary Org token has. Re-run with a profile or Org "
-            "that holds the needed privilege.")
+            "in.\n\n"
+            "Check whether the table is PUBLISHED into this Org before auditing "
+            "privileges. Live-verified 2026-07-27: reading CSR on a published table "
+            "from a tenant Org returns a clean `[]` while no rule exists, and this "
+            "10023 once one does -- so the error can appear the moment the owning Org "
+            "sets a rule, with nothing about the tenant's privileges having changed. "
+            "In that case no profile or Org holds the missing privilege, because the "
+            "operation is not permitted tenant-side at all; use `ts share` column "
+            "grants (CLS) instead.\n\n"
+            "Otherwise this is an ordinary per-Org privilege gap -- groups and "
+            "privileges are per-Org, so a token scoped to a tenant Org can lack what "
+            "the Primary Org token has. Re-run with a profile or Org that holds the "
+            "needed privilege.")
 
     if _MISSING_TABLE_RE.search(body):
         named = _MISSING_TABLE_NAMED_RE.search(body)

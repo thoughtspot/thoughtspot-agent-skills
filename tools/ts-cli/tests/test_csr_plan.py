@@ -566,3 +566,66 @@ def test_parse_export_returns_empty_when_no_csr_document_came_back():
 def test_parse_export_tolerates_junk():
     assert parse_csr_tml_export(None) == []
     assert parse_csr_tml_export([{"info": None, "edoc": None}]) == []
+
+
+def test_explain_translates_code_10038_as_a_publication_problem():
+    """Live-verified 2026-07-27, the exact body from trying to define CSR from a tenant
+    Org on a table published INTO it. Before this branch, 10038 matched nothing and the
+    raw error surfaced -- for the most predictable tenant mistake there is.
+    """
+    body = ('{"error":{"message":{"debug":{"code":10038,'
+            '"debug":"[\\"Error Code: FORBIDDEN Incident Id: 12cd\\\\nError Message: '
+            'User does not have access to read/modify CSR for these tables: '
+            '[d2c12c11-6560-4810-96b8-4b902bbb82dc]\\"]"}}}}')
+    message = explain_csr_error(body, 500)
+    assert message is not None
+    assert "published" in message.lower()
+    # It must point at the working alternative, not just diagnose.
+    assert "CLS" in message
+    # And must NOT send the operator chasing privileges: that was the whole defect.
+    assert "read or modify" in message
+    assert "Re-run with a profile or Org that holds" not in message
+
+
+def test_explain_10038_records_the_spec_vs_build_status_divergence():
+    """The canonical spec (`updateColumnSecurityRules`) documents this outcome as 403;
+    the live build returns 500 with `Error Code: FORBIDDEN` in the body. That is why the
+    generic `status_code == 403` fallback never fires for it.
+    """
+    message = explain_csr_error('{"error":{"code":10038}}', 500)
+    assert message is not None
+    assert "403" in message and "500" in message
+
+
+def test_explain_10038_matches_on_the_message_text_alone():
+    """Only the message is self-describing, so it must match without the bare code."""
+    body = "User does not have access to read/modify CSR for these tables: [g1]"
+    message = explain_csr_error(body, 500)
+    assert message is not None
+    assert "published" in message.lower()
+
+
+def test_explain_10038_and_10023_do_not_bleed_into_each_other():
+    forbidden = explain_csr_error('{"error":{"code":10038}}', 500)
+    access = explain_csr_error(
+        '{"error":{"code":10023,"debug":"User does not have access to read"}}', 500)
+    assert forbidden != access
+    assert "10038" in forbidden and "10038" not in access
+    assert "Code 10023" in access and "Code 10023" not in forbidden
+
+
+def test_explain_10023_warns_that_the_error_is_state_dependent():
+    """The second live round read 10023 as a privilege artefact and stalled on it.
+
+    Live-verified 2026-07-27: a tenant read of a published table returns a clean `[]`
+    while no rule exists and this 10023 once one does -- so it can appear the moment the
+    OWNING Org sets a rule, with nothing about the tenant's privileges having changed.
+    The translation has to say so, or it sends the next reader down the same path.
+    """
+    message = explain_csr_error(
+        '{"error":{"code":10023,"debug":"User does not have access to read"}}', 500)
+    assert "published" in message.lower()
+    assert "CLS" in message
+    # The ordinary per-Org privilege gap is still offered, just no longer as the only
+    # reading.
+    assert "per-Org" in message

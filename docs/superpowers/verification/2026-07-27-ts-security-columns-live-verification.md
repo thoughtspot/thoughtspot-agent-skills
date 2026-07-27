@@ -198,9 +198,9 @@ reach.
 
 ---
 
-## 8. Defects found
+## 8. Defects found — all three FIXED on this branch
 
-### 8.1 BLOCKER — `ts share export --org <tenant>` cannot see tenant-native objects
+### 8.1 BLOCKER — `ts share export --org <tenant>` cannot see tenant-native objects — FIXED
 
 `ts_cli/commands/share_planning.py:75-79`:
 
@@ -234,13 +234,13 @@ returns `400 code 10002` ("Specify the metadata_type for identifier ...") when t
 identifier is unknown *in the current Org*, which is why the failure above presents as a
 400 rather than an empty result.
 
-### 8.2 Code `10038` has no error translation
+### 8.2 Code `10038` has no error translation — FIXED
 
 `explain_csr_error` (design §6 of the column-rules CLI spec) covers `10023` in two forms
 and `14502` in two forms. `10038` is a **third code**, reachable by the most predictable
 tenant mistake there is, and it surfaces raw.
 
-### 8.3 The `10023` translation is actively misleading for this case
+### 8.3 The `10023` translation is actively misleading for this case — FIXED
 
 Current wording ends:
 
@@ -251,6 +251,16 @@ For the §5 case that advice is wrong and costly. The caller **holds `ADMINISTRA
 that Org**, and no profile or Org holds the privilege, because the operation is
 structurally impossible on a published object from a tenant Org. The operator is sent to
 audit privileges that are already correct.
+
+**Fixes, ts-cli v0.110.0.** `_find_object` returns `None` instead of raising so a caller
+can try another Org; its typed fallback now matches on `metadata_id` as well as
+`metadata_name`; `_resolve_object_in_orgs` tries the default Org first, then each `--org`,
+returning the client that found the object so columns are listed in the right context;
+ambiguity inside any one Org still raises rather than falling through. `explain_csr_error`
+gains a `10038` branch and the `10023` branch now leads with the publication check.
+Re-verified live: `ts share export d3a688f2-... --org ORG1` now resolves `T4_PER_ORG` with
+all 10 columns and ORG1's grants, and the three pre-existing paths (by name, Primary-owned
+with and without `--org`) are unchanged. 3515 unit tests pass.
 
 ### 8.4 Shape note, not a defect
 

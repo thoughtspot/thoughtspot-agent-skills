@@ -28,7 +28,7 @@ from ts_cli.commands.share import (
     _fetch_permissions,
     _profile_option,
     _read_json_envelope,
-    _resolve_object,
+    _resolve_object_in_orgs,
     _table_columns,
     app,
     assert_org_context,
@@ -73,17 +73,22 @@ def export_cmd(
         --source uniform --group Analyst --share-mode READ_ONLY -p prod
     """
     base = _client_for_org(profile)
+    orgs = list(dict.fromkeys(org))
     objects: List[Dict[str, Any]] = []
     for identifier in dict.fromkeys(guids):
-        resolved = _resolve_object(base, identifier)
-        resolved["columns"] = (_table_columns(base, resolved["guid"])
+        # Resolve across the default Org AND every named Org, listing columns through
+        # whichever client could see the object. An object native to a tenant Org is
+        # invisible to the default-Org client, so resolving only there failed on
+        # exactly the objects a tenant's column security is about. See
+        # `_resolve_object_in_orgs`.
+        resolved, owner_client = _resolve_object_in_orgs(profile, orgs, identifier)
+        resolved["columns"] = (_table_columns(owner_client, resolved["guid"])
                                if resolved["type"] == "LOGICAL_TABLE" else [])
         objects.append(resolved)
         print(f"resolved {identifier} -> {resolved['name']} ({resolved['type']}, "
               f"{len(resolved['columns'])} column(s))", file=sys.stderr)
 
     targets = [{"guid": o["guid"], "type": o["type"]} for o in objects]
-    orgs = list(dict.fromkeys(org))
     current: Dict[str, List[Dict[str, Any]]] = {}
     for org_name in orgs:
         client = _client_for_org(profile, org_name)

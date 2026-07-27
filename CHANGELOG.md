@@ -6,6 +6,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-27
+- fix: `ts share export --org <tenant>` could not see objects native to that Org — it resolved the object and listed its columns with the default-Org client, scoping only the permissions read. Now resolves across the default Org and every `--org`, listing columns through whichever Org could see the object
+- fix: translate CSR error code `10038` — a tenant Org refused CSR on an object published into it (the spec documents this as 403; the build returns 500, so the generic 403 fallback never fired). `10023`'s translation now says to check publication before auditing privileges, because the error is state-dependent
+- chore: bump ts-cli to v0.110.0
 - feat: add `ts security column-rules` (Column Security Rules): the second column-security mechanism alongside `ts share`'s column-level sharing (CLS). Beta, needs 10.12.0.cl or later, and feature-flagged off by default (403/code 10023 until ThoughtSpot enables it). Eight commands: `get`/`export`/`set`/`clear` over the API directly, `resolve` building a plan from a `TS_COLUMN_SECURITY_RULES` manifest, then `apply` (API) or `build` plus `import` (TML) to execute it. CSR declares only the RESTRICTED columns (the inverse of CLS), refuses a published table as `CSR_BLOCKED`, and only unsecures columns absent from a manifest when `--prune` is passed.
 - chore: bump ts-cli to v0.109.0
 
