@@ -12,14 +12,10 @@ from __future__ import annotations
 
 import json
 
-from typer.testing import CliRunner
 
 from ts_cli.cli import app
 
-try:
-    runner = CliRunner(mix_stderr=False)
-except TypeError:  # Click >= 8.2 removed mix_stderr (stderr is separated by default)
-    runner = CliRunner()
+from runners import runner  # noqa: E402  (BL-139: one definition, see runners.py)
 
 TWB = """<?xml version='1.0'?>
 <workbook>

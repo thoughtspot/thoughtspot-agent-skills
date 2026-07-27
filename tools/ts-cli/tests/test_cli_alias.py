@@ -31,7 +31,10 @@ from ts_cli.commands import alias as alias_cmd
 # `print(..., file=sys.stderr)` is never explicitly flushed by Click, so
 # with `mix_stderr=False` (a separate, never-flushed stderr buffer) the
 # error text would be silently lost from the captured result.
-runner = CliRunner()
+# BL-139: this module deliberately wants the MIXING runner (see the comment
+# above), which is exactly what `msg_runner` is. Aliased so every assertion
+# below reads unchanged.
+from runners import msg_runner as runner
 
 
 def _combined_output(result) -> str:

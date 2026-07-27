@@ -3679,14 +3679,15 @@ finished shape of the platform rather than chasing a moving one.
 
 ---
 
-## BL-138 -- `ts alias import` and `ts tml import` do not detect embedded per-item TML failures `Tier 2`
+## BL-138 -- `ts alias import` and `ts tml import` do not detect embedded per-item TML failures `Tier 2` -- **DONE 2026-07-27**
 
 **Filed:** 2026-07-27.
 **Source:** `ts security column-rules import`, fixed on `feat/ts-security-column-rules`
 after a live-observed failure: an import that failed with error code 14502 exited 0.
 **Affects:** `ts alias import` (`commands/alias.py`); `ts tml import` (`commands/tml.py`);
 the shared pure helper `tml_import_failures` in `tools/ts-cli/ts_cli/tml_common.py`.
-**Status:** OPEN.
+**Status:** **DONE 2026-07-27.** `ts alias import` and `ts tml import` now both call the shared `tml_import_failures` helper and exit non-zero, naming each failed item. `ts tml import` collects failures BEFORE its GUID back-fill loop, which deliberately skips non-OK items and would otherwise have been the only thing that noticed. A new shared `format_import_failures` keeps all three callers reporting the same shape, and `test_import_failure_detection.py` asserts all three are wired -- so the next reader does not have to grep three modules.
+
 
 **Why it matters.** `POST /api/rest/2.0/metadata/tml/import` returns HTTP 200 even when
 individual items in the batch failed -- the per-item outcome is buried in the response
@@ -3712,7 +3713,7 @@ helper already exists and the fix is now mechanical.
 
 ---
 
-## BL-139 -- The `CliRunner(mix_stderr=False)` fallback is a Click 8.2 landmine `Tier 3`
+## BL-139 -- The `CliRunner(mix_stderr=False)` fallback is a Click 8.2 landmine `Tier 3` -- **DONE 2026-07-27**
 
 **Filed:** 2026-07-27.
 **Source:** noticed while adding tests to `tools/ts-cli/tests/test_share_commands.py` on
@@ -3721,7 +3722,8 @@ helper already exists and the fix is now mechanical.
 **Affects:** every test module using the `try: CliRunner(mix_stderr=False) except
 TypeError: CliRunner()` pattern; `tools/ts-cli/tests/conftest.py`; the Click pin in
 `pyproject.toml` (currently 8.1.8).
-**Status:** OPEN.
+**Status:** **DONE 2026-07-27.** Both runners now live in `tools/ts-cli/tests/runners.py`; 22 modules import them and no test constructs `CliRunner(mix_stderr=False)` any more. Note the approach below proposed `conftest.py`, which is WRONG for this repo: pre-commit and CI run `tools/ts-cli/tests/` and `tools/validate/tests/` as one pytest invocation and both have a conftest, so a bare `from conftest import ...` binds to whichever is cached first. A uniquely named module has no such collision, exactly as `ansi.py` does.
+
 
 **Why it matters.** Several test modules construct their `runner` with `try:
 CliRunner(mix_stderr=False) except TypeError: CliRunner()`, because Click 8.2 removed the
@@ -3746,14 +3748,15 @@ pre-position the shared fixtures.
 
 ---
 
-## BL-140 -- `ts security column-rules export --out` writes a flat layout while `build --out` namespaces by Org `Tier 3`
+## BL-140 -- `ts security column-rules export --out` writes a flat layout while `build --out` namespaces by Org `Tier 3` -- **DONE 2026-07-27**
 
 **Filed:** 2026-07-27.
 **Source:** noticed while implementing `build --out`'s Org-namespaced layout on
 `feat/ts-security-column-rules` (`security_planning.py`'s `_document_paths`).
 **Affects:** `ts security column-rules export` (`commands/security.py`); `ts security
 column-rules build --out` (`commands/security_planning.py`, already fixed).
-**Status:** OPEN.
+**Status:** **DONE 2026-07-27.** `export --out` now writes `<out>/<org>/<TABLE>_CSR...tml`, matching `build --out`, and refuses an Org name containing a path separator. An un-scoped export (no `--org`) stays flat: there is no Org name to use and inventing one would make the path unpredictable.
+
 
 **Why it matters.** `build --out` was changed on this branch to write
 `<out>/<org>/<TABLE>_CSR.column_security_rules.tml` -- one subdirectory per Org --
@@ -3778,7 +3781,7 @@ script repeated per-Org exports into a shared directory.
 
 ---
 
-## BL-141 -- The parent spec and the platform plan still carry a disproven CSR-on-published claim `Tier 3`
+## BL-141 -- The parent spec and the platform plan still carry a disproven CSR-on-published claim `Tier 3` -- **DONE 2026-07-27**
 
 **Filed:** 2026-07-27.
 **Source:** live verification of `ts security column-rules` on `feat/ts-security-column-rules`,
@@ -3788,7 +3791,8 @@ third round (data-plane, real non-admin users). See
 **Affects:** `docs/superpowers/specs/2026-07-26-ts-security-sharing-design.md` (§1's
 CSR-vs-CLS comparison table, row "Works on published objects"); `docs/multi-tenancy-platform-plan.md`
 §4.3 ("Publication constrains the column-security mechanism").
-**Status:** DONE (2026-07-27) -- fixed on `feat/ts-security-column-rules` (PR #347). §1's
+**Status:** **DONE 2026-07-27.** The parent spec's §5.1 is corrected. `docs/multi-tenancy-platform-plan.md` §4.3 had already been corrected in an earlier PR, so only one document needed the edit; the stale 'both still carry the claim' notes in the CLI design doc are updated too.
+
 comparison table row now reads "Accepted and enforced, but Org-scoped" with a pointer to a
 new §2.7; §2.7 records the corrected behaviour and supersedes the old flat "No"; §6's open
 items #2 and #3 are answered and a new open item #5 records the still-unresolved question of

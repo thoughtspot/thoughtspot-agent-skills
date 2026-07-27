@@ -10,14 +10,10 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from typer.testing import CliRunner
 
 from ts_cli.cli import app
 
-try:
-    runner = CliRunner(mix_stderr=False)
-except TypeError:
-    runner = CliRunner()
+from runners import runner  # noqa: E402  (BL-139: one definition, see runners.py)
 
 
 def _all_output(result):

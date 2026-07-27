@@ -125,3 +125,23 @@ def tml_import_failures(import_result: Any) -> List[Dict[str, Any]]:
             "error_message": status.get("error_message") or "",
         })
     return failures
+
+
+def format_import_failures(failures: List[Dict[str, Any]],
+                           context: str = "import") -> List[str]:
+    """Human-readable lines for `tml_import_failures` output, one per failed item.
+
+    Shared so `ts alias import`, `ts tml import` and `ts security column-rules import`
+    report the same shape. The wording states the contradiction explicitly -- the HTTP
+    call succeeded, the platform's own per-item status says otherwise -- because the
+    surprising part is not the failure but that it arrived inside a 200.
+    """
+    lines = [f"{context}: the HTTP call succeeded, but the platform's own per-item "
+             f"status says {len(failures)} item(s) did not import."]
+    for failure in failures:
+        detail = (failure.get("error_message") or "").strip()
+        if not detail:
+            code = failure.get("error_code")
+            detail = f"error_code {code}" if code else "no error message supplied"
+        lines.append(f"  [{failure.get('request_index')}] {' '.join(detail.split())}")
+    return lines

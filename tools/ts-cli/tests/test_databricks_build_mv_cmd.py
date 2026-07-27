@@ -7,14 +7,10 @@ pure-JSON stdout, and files written to --output-dir.
 """
 import json
 
-from typer.testing import CliRunner
 
 from ts_cli.cli import app
 
-try:
-    runner = CliRunner(mix_stderr=False)
-except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
-    runner = CliRunner()
+from runners import runner  # noqa: E402  (BL-139: one definition, see runners.py)
 
 # --- Fixture models --------------------------------------------------------
 # Physical-column-only models (no formulas) keep these tests focused on the
