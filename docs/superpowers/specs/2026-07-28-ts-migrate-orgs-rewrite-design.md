@@ -132,6 +132,52 @@ Two paths matched a column name exactly but are **user-facing labels, not refere
 `answer.name` also produced 134 *substring* matches (titles like "Sales by Region"), which
 is exactly the class a naive find-and-replace would mangle.
 
+## Views SHIELD the content built on them
+
+Verified 2026-07-28 on `se-thoughtspot`. A View's output column has **two independent
+fields**, and 9 of 265 inspected columns already diverge:
+
+```
+name='LINEAMOUNT'      search_output_column='Total LINEAMOUNT'
+name='Number of URL'   search_output_column='URL'
+name='YM'              search_output_column='Month(YM)'
+```
+
+- `search_output_column` binds to the **search result**, which references the source
+  Model's columns.
+- `name` is the alias **downstream content sees**.
+
+So repointing a View changes what it *reads* without changing what it *exposes*. Rewrite
+the View and **every Answer and Liveboard built on it needs no rewriting at all.**
+
+| Field on the View | Action |
+|---|---|
+| `tables[].fqn` | → published Model guid |
+| `search_query` | bracketed tokens → published names |
+| `view_columns[].search_output_column` | → published name, **preserving any decoration** |
+| `formulas[].expr` | bracketed tokens → published names |
+| `view_columns[].name` | **leave unchanged** — this is what shields downstream content |
+
+The decoration matters: `search_output_column` carries aggregation and bucket wrappers
+(`Total LINEAMOUNT`, `Month(YM)`), so the rewrite substitutes the column name *inside* the
+token rather than replacing the whole value.
+
+### What this means for `audit`
+
+**Dependents must be classified by what they are built on, and the classification changes
+the work:**
+
+| Content sits on | Treatment |
+|---|---|
+| the Model directly | full rewrite (the surface above) |
+| a **View** | **no rewrite** — repoint the View instead |
+| a Table directly | full rewrite, and flag it: a Model-level column rename never reaches it |
+
+A tenant whose content is mostly View-based is dramatically cheaper to migrate than the
+object count suggests, and the audit is what tells you which kind you have. Today it
+reports dependents without distinguishing them, so this is a required addition rather than
+a refinement.
+
 ## The completeness gate
 
 **The scan above is the test.** Run it over a corpus of real Liveboards after a rewrite and
@@ -155,8 +201,9 @@ wrong.
 
 ## Open
 
-- **Views** sitting between content and the Model were not in the scanned corpus. They may
-  carry their own column references and need the same treatment.
+- Whether `view_columns[].name` can be left unchanged **through an actual repoint** is
+  inferred from the two fields being independent (proven) rather than demonstrated
+  end-to-end. Worth one live test before relying on it.
 - **Answers** were scanned only as nested Liveboard visualizations. A standalone Answer is
   the same shape, but confirm.
 - Whether `custom_name` should be rewritten at all. It is a user-supplied override, so it
