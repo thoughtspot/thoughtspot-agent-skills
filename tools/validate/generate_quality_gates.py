@@ -441,10 +441,13 @@ def generate_catalog(repo_root: Path) -> str:
         "The backstop that catches `--no-verify` commits and machines without local tooling |",
         "",
         "The one soft edge: the 1-review requirement carries a bypass allowance for the "
-        "maintainer, so solo merges need green CI but not a second reviewer. Nothing "
-        "bypasses the `validate` check itself. Merge flow: `gh pr checks <n> --watch`, "
-        "then `gh pr merge <n> --squash --delete-branch` (no `--admin` — it has no "
-        "effect under `enforce_admins` and masks the real failure when CI is red).",
+        "maintainer, so the maintainer's own merges need green CI but not a second "
+        "reviewer; all other authors need 1 approving review. Nothing bypasses the "
+        "`validate` check itself. Maintainer merge flow: `gh pr checks <n> --watch`, "
+        "then `gh pr merge <n> --squash --admin --delete-branch` — `--admin` is what "
+        "exercises the review bypass on the CLI (a plain merge is refused), but under "
+        "`enforce_admins` it cannot skip CI or the up-to-date requirement (verified "
+        "2026-07-28, PRs #381/#383).",
         "",
     ])
 
