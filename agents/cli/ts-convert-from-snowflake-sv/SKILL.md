@@ -32,30 +32,21 @@ Two scenarios are supported:
 | [../../shared/worked-examples/snowflake/ts-from-snowflake-dunder.md](../../shared/worked-examples/snowflake/ts-from-snowflake-dunder.md) | End-to-end example: DUNDER_MIFFLIN_SALES_INVENTORY → TS Model. Exercises multi-value synonyms, per-column descriptions, table comments, semi-additive metrics (closing/opening), `unique count` formula, and `concat()` for strings. |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | Cortex Code connection (configured via `cortex connections set`) | Snowflake connection code, SQL execution patterns |
+| [references/concept-mapping.md](references/concept-mapping.md) | SV DDL construct → ThoughtSpot Model mapping table |
+| [references/step-3.5-merge-dedup.md](references/step-3.5-merge-dedup.md) | Step 3.5 merge-mode dedup rules and merge-summary template |
+| [references/step-6-table-registration.md](references/step-6-table-registration.md) | Step 6A table-plan template; Step 6B introspect/connection/create command sequence |
+| [references/step-7-join-discovery.md](references/step-7-join-discovery.md) | Step 7 joinless-SV (GAP-03) join-discovery options |
+| [references/step-c-update-mode.md](references/step-c-update-mode.md) | Mode C diff-review, change-action mapping, and handoff templates (C4–C6) |
+| [references/step-12-report-formats.md](references/step-12-report-formats.md) | Step 10/12/12.5 console + TML report templates |
 | [references/open-items.md](references/open-items.md) | Known gaps and deferred capabilities for this skill |
 
 ---
 
 ## Concept Mapping
 
-| Snowflake Semantic View (real DDL format) | ThoughtSpot Model |
-|---|---|
-| `tables ( DB.SCHEMA.TABLE [primary key (col)] )` | `model_tables[]` — one entry per **physical ThoughtSpot table** |
-| `primary key (col)` on a table | Identifies join target — not written into model TML directly |
-| `tables ( DB.SCHEMA.TABLE ... comment='...' )` | TS **Table** TML `table.description` — applied as a separate Table-TML update |
-| `dimensions ( TABLE.COL as view.NAME [comment='...'] )` | `columns[]` with `column_type: ATTRIBUTE` |
-| Dimension with date/timestamp physical column | `columns[]` with `column_type: ATTRIBUTE` (ThoughtSpot infers date type) |
-| `metrics ( TABLE.COL as SUM(view.NAME) )` | `columns[]` with `column_type: MEASURE` + aggregation |
-| `metrics ( TABLE.COL as complex_sql_expr )` | `formulas[]` with translated ThoughtSpot formula |
-| `metrics ( TABLE.COL non additive by (D.col asc nulls last) as SUM(...) )` | `formulas[]` with `last_value(sum(...), query_groups(), {date})` |
-| `metrics ( TABLE.COL non additive by (D.col desc nulls last) as SUM(...) )` | `formulas[]` with `first_value(sum(...), query_groups(), {date})` |
-| `metrics ( ... OVER (ORDER BY col ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) )` — cumulative/running sum, no `PARTITION BY EXCLUDING` | `formulas[]` with `moving_sum(group_aggregate(agg(...), {[T::PK]}, query_filters()), -1, 0, [T::order_col])` — cannot nest aggregates directly in `moving_sum`; must wrap in `group_aggregate` first. **This is a lossy summary row, not exhaustive:** when the SQL has `PARTITION BY EXCLUDING`, the correct mapping is `cumulative_sum`/`cumulative_average`/etc. instead — see the full PARTITION BY EXCLUDING routing decision table in ts-snowflake-formula-translation.md (Translatable Window Function Patterns) |
-| `COUNT_IF(boolean_col)` in metrics | `count_if([T::BOOL_COL], [T::PK])` or `sum ( if ( [T::BOOL_COL] ) then 1 else 0 )` — note parentheses required around BOOL in `if()`. `sum_if([T::BOOL], [T::MEASURE])` also works (L6). |
-| `relationships ( REL as FROM(FK) references TO(PK) )` | `referencing_join` in model_tables (Scenario A, pre-defined joins) OR `joins[]` inline (Scenario B) |
-| `with synonyms=('Display Name','Alt 1','Alt 2',...)` on a dimension/metric | First → column `name`. Rest → `properties.synonyms` (with `properties.synonym_type: USER_DEFINED`). |
-| `comment='...'` on a dimension/metric | column `description` |
-| Top-level `comment='...'` (after metrics block) | Model TML `model.description` |
-| `with extension (CA='...')` | Not mapped to ThoughtSpot — logged in report |
+Full DDL-construct → ThoughtSpot-Model mapping table — tables, dimensions, metrics,
+non-additive/window-function formulas, relationships, synonyms, comments, and the
+unmapped `extension` clause: [references/concept-mapping.md](references/concept-mapping.md).
 
 **Key structural rules:**
 - `column_id` must use the **column name from the ThoughtSpot Table TML**. Export
@@ -256,49 +247,9 @@ Flag any relationship not present in the existing model (name or endpoint differ
 ### Step C4: Present the diff and collect decisions
 
 Display the summary, then per-section review tables. Wait for the user to edit and
-type `done` before proceeding.
-
-**Summary**
-
-```
-=== Change set for "{model_name}" ===
-
-  ✚ New columns:              {N}   (will be added with generated synonyms + descriptions)
-  ✖ Removed columns:          {M}   (flagged only — see note below)
-  ✏ Modified descriptions:    {P}   (UPDATE / KEEP per column — default: KEEP)
-  ✏ Modified synonyms:        {Q}   (MERGE / UPDATE / KEEP per column — default: MERGE)
-  ~ Modified expressions:     {R}   (YES / SKIP per column — confirm before re-translating)
-  ~ Join changes:             {S}   (flagged for review)
-  = Unchanged columns:        {T}   (no action)
-```
-
-**Modified descriptions** — per-column table, default `KEEP`:
-
-| Column | Current (TS Model) | New (from SV) | Action |
-|---|---|---|---|
-| Amount | Total sales amount in USD | Total revenue in local currency | KEEP |
-
-**Modified synonyms** — per-column table, default `MERGE`:
-
-| Column | Current synonyms | Added by SV | Removed by SV | Action |
-|---|---|---|---|---|
-| Product Category | category, product group | dept | product group | MERGE |
-
-Options:
-- `MERGE` *(default)* — add new SV synonyms, keep existing; never remove coached synonyms
-- `UPDATE` — replace existing synonyms entirely with the SV set
-- `KEEP` — ignore the SV change; leave existing synonyms untouched
-
-**Modified expressions** — show old and new formula side-by-side. Require `YES / SKIP`
-per column — never bulk-apply expression changes.
-
-**Removed columns** — informational list only, no action column:
-
-```
-⚠ The following columns exist in the ThoughtSpot Model but are no longer in the SV.
-  They are NOT removed automatically — removal may break dependent Answers and Liveboards.
-  To remove them safely: run /ts-dependency-manager first, then edit the Model TML manually.
-```
+type `done` before proceeding. Full console templates (summary block, descriptions/
+synonyms/expressions tables, removed-columns warning):
+[references/step-c-update-mode.md](references/step-c-update-mode.md) "Step C4 templates".
 
 Require the user to type `done` after reviewing before proceeding.
 
@@ -306,21 +257,9 @@ Require the user to type `done` after reviewing before proceeding.
 
 ### Step C5: Build the updated Model TML and import
 
-Deep-copy the existing Model TML. Apply only the confirmed changes:
-
-| Change type | Action |
-|---|---|
-| New column | Generate using Step 8 + Step 9 logic — same as create mode |
-| Modified description, `UPDATE` | Write to `column.description` |
-| Modified description, `KEEP` | Leave untouched |
-| Modified synonyms, `MERGE` | Union: add new SV synonyms, keep all existing ones |
-| Modified synonyms, `UPDATE` | Replace `properties.synonyms[]` with SV set |
-| Modified synonyms, `KEEP` | Leave untouched |
-| Modified expression, `YES` | Re-translate using Step 9 logic; update `formulas[].expr` |
-| Modified expression, `SKIP` | Leave untouched |
-| `ai_context` on any column | **Never touch** |
-| Data Model Instructions | **Never touch** |
-| Removed columns | **Never touch** |
+Deep-copy the existing Model TML. Apply only the confirmed changes — full change-type
+→ action mapping table (incl. `ai_context`/Instructions never-touch rules):
+[references/step-c-update-mode.md](references/step-c-update-mode.md) "Step C5 change-action mapping".
 
 Build `tables.json` from the existing model's table GUIDs (same format as Step 8), then
 import with `build-model --existing-guid`:
@@ -341,27 +280,9 @@ error from the summary JSON's `import_error` field.
 
 ### Step C6: Post-import coaching handoff
 
-After a successful import, always surface:
-
-```
-✓ Model "{model_name}" updated.
-
-⚠ Coaching surfaces that may need review:
-
-  Column AI Context
-    {N_new} new columns added — no ai_context yet
-    {M_updated} existing columns had descriptions or synonyms changed
-    → Run /ts-object-model-coach → surface 1 to review and update ai_context
-
-  Data Model Instructions
-    Schema changes (new columns, expression changes, join changes) may affect
-    Spotter's default behaviours — particularly time_defaults and aggregation_defaults.
-    → Run /ts-object-model-coach → surface 5 to review Instructions
-
-  Removed columns flagged above
-    If you intend to remove any of the flagged columns, run /ts-dependency-manager
-    first to assess downstream impact before editing the Model TML manually.
-```
+After a successful import, always surface the coaching-handoff message (`/ts-object-model-coach`
+and `/ts-dependency-manager` pointers). Exact template:
+[references/step-c-update-mode.md](references/step-c-update-mode.md) "Step C6 handoff message".
 
 ---
 
@@ -433,57 +354,12 @@ Parse each DDL in Step 4 before switching Snowflake queries.
 **Skip this step if `merge_mode = False`.**
 
 Combine all parse results from Step 3 into a single merged result that Steps 4–13
-will treat as if it came from one Semantic View.
+will treat as if it came from one Semantic View. Full dedup rule set (tables,
+relationships, metrics, dimensions/facts, fact re-detection, merge-summary template):
+[references/step-3.5-merge-dedup.md](references/step-3.5-merge-dedup.md).
 
-**1. Tables** — union of all `tables[]` entries across all SVs.
-- Deduplicate by **physical identity**: two entries with the same
-  `base_table.database + schema + table` represent the same Snowflake table. Keep one.
-- If their column definitions differ (different dimensions, different data types for
-  the same column name), flag as a **column conflict** — list each conflicting column
-  and ask the user which definition wins before continuing.
-
-**2. Relationships** — union of all `relationships[]`.
-- Deduplicate by (left_table, right_table, left_column, right_column) — exact match
-  on all four fields. Keep one entry.
-- If the same table pair has conflicting relationship definitions (different column
-  pairs), flag as a **relationship conflict** for user resolution.
-
-**3. Metrics** — union of all `metrics[]`.
-- Deduplicate by (name, expr) — exact match on both. Keep one entry.
-- If same name but different expr: flag as a **metric conflict**. User must choose
-  which definition wins or rename one before the merge can proceed. Do not silently
-  prefer either definition.
-
-**4. Dimensions / time_dimensions / metrics / facts (if present)** — union across all
-views, deduplicated by (table_name, column_name). DDL `facts ()` entries (row-level named
-expressions) are also merged and available for identifier resolution in Step 9.
-
-**5. Fact table identification in merged context** — re-run the fact-table detection
-algorithm (tables with no incoming relationships in the merged relationship set = fact
-tables). If a table was a fact in one SV but gains an incoming relationship from
-another SV in the merged graph, present it to the user:
-```
-{TABLE} had no incoming joins in {SV1} but gains one from {SV2} in the merged model.
-Treat as:  F — Fact table   D — Dimension table
-```
-
-**6. Present merge summary and require confirmation before continuing:**
-```
-Merging {M} Semantic Views:
-
-  {SV1}:  {n} tables, {n} relationships, {n} metrics
-  {SV2}:  {n} tables, {n} relationships, {n} metrics
-  ...
-
-Merged result:  {n} tables ({x} deduplicated), {n} relationships, {n} metrics
-Conflicts:      {None / list of conflicts to resolve}
-
-Output model name: {name from Step 2}
-Proceed? YES / NO
-```
-
-If there are unresolved conflicts, require all to be resolved before accepting YES.
-After confirmation, continue with Step 4 using the merged result.
+If there are unresolved conflicts, require all to be resolved before accepting the
+merge summary's `YES`. After confirmation, continue with Step 4 using the merged result.
 
 ---
 
@@ -600,20 +476,9 @@ the semantic view dimensions and metrics to identify any column gaps.
 
 **Confirm the plan before making any changes:**
 
-Show the user a full status table and wait for confirmation:
-
-```
-Table Plan:
-  ✓  {TABLE_1}  — found (GUID: {guid}) — all {n} columns present → use as-is
-  ⚠  {TABLE_2}  — found (GUID: {guid}) — missing {n} columns: {COL_A}, {COL_B} → update
-  ✗  {TABLE_3}  — not found in ThoughtSpot → create new
-
-Actions to be taken:
-  • Update {TABLE_2}: add {n} missing columns
-  • Create {TABLE_3}: {n} columns from Snowflake schema
-
-No changes have been made yet. Proceed? (yes/no):
-```
+Show the user a full status table and wait for confirmation. Exact template:
+[references/step-6-table-registration.md](references/step-6-table-registration.md)
+"Step 6A — Table Plan confirmation template".
 
 Do not proceed until the user confirms. If any table is **not found**, follow Step 6B
 for those tables. If any table has **missing columns**, follow Step 6C before building
@@ -677,73 +542,13 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
 
 ### Step 6B: Create ThoughtSpot Table objects for views (Scenario B) — also the connection picker for the Step 6A connection-scoped search
 
-**Use `ts snowflake introspect` to query Snowflake and build the table spec:**
-
-1. First, choose the ThoughtSpot connection (step 2 below), then run:
-
-   ```bash
-   ts snowflake introspect \
-     --parsed parsed.json --sf-profile {sf_profile} \
-     --connection-name "{connection_name}" --output-dir ./introspect_out
-   ```
-
-   This queries `INFORMATION_SCHEMA.COLUMNS` for all SV source tables in one batch,
-   maps Snowflake types to ThoughtSpot types, and produces:
-   - `introspect_out/tables-spec.json` — input for `ts tables create`
-   - `introspect_out/tables.json` — input for `ts snowflake build-model --tables`
-
-   The summary JSON on stdout includes `{tables, total_columns, warnings}`.
-
-   If `ts snowflake introspect` is not available or the Snowflake profile is not set up,
-   fall back to the manual batch query:
-   ```sql
-   SELECT table_name, column_name, data_type
-   FROM {database}.information_schema.columns
-   WHERE table_schema = '{SCHEMA}'
-   ORDER BY table_name, ordinal_position;
-   ```
-
-2. Choose which ThoughtSpot connection to use — **use an existing one or create a new
-   one**. Use the connection **name** directly in table TML — no GUID lookup is needed
-   or possible from available procedures.
-
-   Follow the **E/C prompt** then **N/F/L connection selection** flow in
-   [../../shared/references/connection-select.md](../../shared/references/connection-select.md),
-   with `{database}` from the semantic view, warehouse type = Snowflake, and
-   auth type = key-pair.
-
-   **C — create a new connection (Snowflake, key-pair auth).** Collect the connection
-   name, Snowflake account identifier, user, role, warehouse, and the path to the
-   **unencrypted PKCS#8 private key** (`.p8`), then run:
-
-   ```bash
-   ts connections create \
-     --name "{connection_name}" \
-     --account "{account}" --user "{user}" --role "{role}" --warehouse "{warehouse}" \
-     --database "{database}" \
-     --private-key-path "{key_path}" \
-     --profile {profile}
-   ```
-
-   The role must have `USAGE` on `{database}` and its schema (and `SELECT` on the
-   tables) — otherwise the tables won't resolve. The matching **public** key must already
-   be registered on the Snowflake user (`DESC USER {user}` shows `RSA_PUBLIC_KEY`).
-
-   **Credential handling (required):** never ask the user to paste a private key,
-   password, or secret into the conversation. The key is passed **by file path only** —
-   `ts connections create` reads it and never echoes it. Key-pair is the only auth this
-   path supports; for password/OAuth, direct the user to create the connection in the
-   ThoughtSpot UI and return on the **E** path. The command prints
-   `{id, name, data_warehouse_type}` — use the returned `name` for the table spec.
-
-3. Create ThoughtSpot Table objects for all tables in one command:
-   ```bash
-   cat introspect_out/tables-spec.json | ts tables create --profile {profile}
-   ```
-   The `tables-spec.json` from `ts snowflake introspect` is ready to use. This command
-   handles JDBC retry and GUID resolution automatically, and outputs `{name: guid}`.
-   The `introspect_out/tables.json` is the tables map for `ts snowflake build-model`
-   in Step 8 — use it directly.
+**Use `ts snowflake introspect` to query Snowflake and build the table spec**, choose
+or create the ThoughtSpot connection, then create the Table objects in one batch. The
+full command sequence — the `introspect` call and its manual-query fallback, the E/C
+connection-selection flow, the `ts connections create` invocation with role/key
+requirements, the required credential-handling guardrail (private key by file path
+only, never pasted into chat), and the batch `ts tables create` call — is in
+[references/step-6-table-registration.md](references/step-6-table-registration.md) "Step 6B — command sequence".
 
 4. Inline joins will be defined directly in the model TML (no `referencing_join`).
 
@@ -772,118 +577,10 @@ How should we discover joins?
   4 — Skip — create model with no joins (single-table queries only)
 ```
 
-**Option 1 — Database constraint discovery:**
-
-Query Snowflake for foreign key relationships between the SV's tables:
-
-```sql
--- For each table in the SV:
-SHOW IMPORTED KEYS IN TABLE {db}.{schema}.{table};
-```
-
-The result contains `pk_table_name`, `pk_column_name`, `fk_table_name`, `fk_column_name`,
-and `key_sequence` (for composite FKs with the same constraint name). Build relationships
-from these — each FK→PK pair becomes a join. Composite FKs (multiple rows with the same
-constraint name) become composite equi-joins.
-
-If FK constraints are found, present them for confirmation:
-
-```
-Found {n} foreign key relationships:
-
-  1. {FK_TABLE}.{FK_COL} → {PK_TABLE}.{PK_COL}  (MANY_TO_ONE)
-  2. {FK_TABLE}.({COL1},{COL2}) → {PK_TABLE}.({COL1},{COL2})  (composite, MANY_TO_ONE)
-
-Accept these joins? [Y / edit / skip]
-```
-
-If no FK constraints are found, offer to fall back to Option 2 (column overlap analysis).
-
-**Option 2 — Column overlap analysis (deeper dive):**
-
-For each pair of tables in the SV:
-
-1. **Scan column name overlap** — find columns with identical names (case-insensitive)
-   across the two tables:
-   ```sql
-   SELECT a.COLUMN_NAME
-   FROM INFORMATION_SCHEMA.COLUMNS a
-   JOIN INFORMATION_SCHEMA.COLUMNS b
-     ON UPPER(a.COLUMN_NAME) = UPPER(b.COLUMN_NAME)
-   WHERE a.TABLE_SCHEMA = '{schema}' AND a.TABLE_NAME = '{table_a}'
-     AND b.TABLE_SCHEMA = '{schema}' AND b.TABLE_NAME = '{table_b}'
-     AND a.TABLE_CATALOG = '{db}' AND b.TABLE_CATALOG = '{db}';
-   ```
-
-2. **Check composite key uniqueness** — for each candidate set of join columns,
-   verify uniqueness on the target table:
-   ```sql
-   SELECT COUNT(*) AS total_rows,
-          COUNT(DISTINCT ({col1}, {col2})) AS distinct_keys
-   FROM {db}.{schema}.{table};
-   ```
-   If `total_rows == distinct_keys`, the column set is a valid unique key.
-
-3. **Validate cardinality** — confirm the join direction:
-   ```sql
-   SELECT MAX(cnt) FROM (
-     SELECT {join_cols}, COUNT(*) AS cnt
-     FROM {db}.{schema}.{from_table}
-     GROUP BY {join_cols}
-   );
-   ```
-   `max(cnt) == 1` → ONE_TO_ONE; `max(cnt) > 1` → MANY_TO_ONE from the source table.
-
-4. **Present suggestions with evidence:**
-   ```
-   Suggested joins (based on column overlap analysis):
-
-     1. EMPLOYEES.(COMPANY_ID, DEPARTMENT) → EMPLOYEE_SUMMARY_VW.(COMPANY_ID, DEPARTMENT)
-        Uniqueness: 15 rows, 15 distinct keys ✓
-        Cardinality: MANY_TO_ONE (max 12 employees per group)
-        Type: LEFT_OUTER
-
-   Accept / Modify / Skip each:
-   ```
-
-**Option 3 — User-specified joins:**
-
-Prompt the user to define each join:
-
-```
-Specify joins between the {n} tables.
-
-For each join, provide:
-  From table: ______
-  From column(s): ______  (comma-separated for composite)
-  To table: ______
-  To column(s): ______
-  Cardinality: MANY_TO_ONE / ONE_TO_ONE / MANY_TO_MANY
-  Type: LEFT_OUTER (default) / INNER / RIGHT_OUTER / FULL_OUTER
-
-Add another join? [Y / done]
-```
-
-**Option 4 — Skip (separate model per table):**
-
-Since ThoughtSpot cannot query across unjoined tables in a single model, create a
-separate model for each table:
-
-```
-⚠ No joins defined. Creating {n} separate models — one per table.
-  Cross-table queries will not be possible.
-
-  Model 1: {TABLE_A} ({m} columns)
-  Model 2: {TABLE_B} ({p} columns)
-
-  You can combine them later by editing Model TML and adding joins.
-
-Proceed? [Y / n]
-```
-
-Each model gets its own `model_tables` entry (single table), its own columns
-(only those from that table), and its own formulas (only those referencing that
-table's columns). Import each model separately.
+Full detail for each option — the auto-discovery SQL, confirmation console templates,
+the column-overlap-analysis queries and evidence display, the manual-join prompt, and
+the separate-model-per-table fallback — is in
+[references/step-7-join-discovery.md](references/step-7-join-discovery.md).
 
 All discovered/specified joins (Options 1–3) are added to the `relationships` map
 and treated identically to SV-declared relationships in Step 8 (inline joins on the
@@ -1025,40 +722,11 @@ Store the answer as a flag for `ts snowflake build-model`:
 ### Step 10: Review checkpoint
 
 Before importing, show the user a summary assembled from `parsed.json`,
-`translated.json`, and `tables.json`:
-
-```
-Model to import: {view_name}
-Tables:
-  ✓ {FACT_TABLE} (GUID: {guid}) — fact table
-  ✓ {DIM_TABLE}  (GUID: {guid}) — referencing_join: {join_name}
-  ...
-
-Columns ({n} total):
-  ATTRIBUTE: {list of display names}
-  MEASURE:   {list of display names}
-  Formulas:  {list of display names}
-
-Formula translations:
-  ✓ {name}: {sql_expr} → {ts_formula}
-  🔄 {name}: DOUBLE AGGREGATION — {outer_agg}(group_{inner_agg}(...))
-  📐 {name}: FACT REFERENCE — inlines fact expression (from {fact_name})
-  ⚠ {name}: OMITTED — {reason}
-
-Filter labels ({n}):
-  {name}: boolean formula (column only / also add as model filter?)
-
-Verified queries ({n}):
-  {name}: "{question}" → will import as NLS Feedback after Model import
-
-Spotter (AI search): enabled / disabled
-
-Proceed with import?
-  yes  — import to ThoughtSpot
-  no   — cancel
-  file — write TML files without importing (for environments where you lack
-          DATAMANAGEMENT access, or to review the TML before committing)
-```
+`translated.json`, and `tables.json` — tables with fact/join annotations, columns by
+type, the formula translation log, filter labels, verified queries, and the Spotter
+setting. Exact console template:
+[references/step-12-report-formats.md](references/step-12-report-formats.md) "Step 10
+— Review checkpoint console template".
 
 Wait for user confirmation before proceeding.
 
@@ -1152,55 +820,11 @@ Follow [`ts-tml-import-gate.md` § 5](../../shared/schemas/ts-tml-import-gate.md
 
 ### Step 12: Produce summary report
 
-After a successful import, output:
-
-```
-## Model Import Complete
-
-**Model:** {view_name}
-**GUID:** {created_guid}
-**ThoughtSpot URL:** {base_url}/#/model/{created_guid}
-
-### Columns Imported ({n})
-| Display Name | Type | Source |
-|---|---|---|
-| {name} | ATTRIBUTE | {TABLE}::{COL} |
-| {name} | MEASURE ({agg}) | {TABLE}::{COL} |
-| {name} | MEASURE (formula) | translated from SQL |
-| ... | ... | ... |
-
-### Formula Translation Log
-| Column | Original SQL | Status | ThoughtSpot Formula |
-|---|---|---|---|
-| {name} | `{sql}` | ✓ Translated | `{ts_formula}` |
-| {name} | `{sql}` | 🔄 Double aggregation | `{ts_formula}` |
-| {name} | `{sql}` | 📐 Fact formula | `{ts_formula}` |
-| {name} | `{sql}` | ⚠ Omitted | {reason} |
-
-### Not Mapped
-- Extension JSON (Cortex Analyst context): not translated to ThoughtSpot
-
-### Facts Mapped ({n})
-| Fact Name | Source Table | Expression | ThoughtSpot Formula |
-|---|---|---|---|
-| {name} | {table} | `{sql_expr}` | `{ts_formula}` |
-
-### Identifier Resolution Summary
-- Physical columns resolved: {n}
-- Fact references resolved: {n}
-- Double aggregation patterns: {n}
-- Unresolvable references: {n} (see OMITTED above)
-
-### Filter Labels ({n})
-| Column | Source Expression | Type |
-|---|---|---|
-| {name} | `{boolean_expr}` | Boolean formula (ATTRIBUTE) |
-
-### Verified Queries ({n})
-| Query Name | Question | Status |
-|---|---|---|
-| {name} | {question} | ✓ Imported as NLS Feedback / ⚠ Manual review needed |
-```
+After a successful import, output the summary report — model header, columns
+imported, formula translation log, not-mapped items, facts mapped, identifier
+resolution summary, filter labels, and verified queries. Exact console template:
+[references/step-12-report-formats.md](references/step-12-report-formats.md) "Step 12
+— Summary report console template".
 
 ---
 
@@ -1217,21 +841,9 @@ SV into NLS Feedback TML and import it against the newly-created Model.
 3. Non-aggregate SELECT columns → dimension tokens: `[Col Display Name]`
 4. `WHERE col = 'val'` → `[Col] = 'val'`
 
-**For each verified query with translatable SQL:**
-
-```yaml
-guid: "{model_guid}"
-nls_feedback:
-  feedback:
-  - id: "{index}"
-    type: REFERENCE_QUESTION
-    access: GLOBAL
-    feedback_phrase: "{question_text}"
-    search_tokens: "{translated_search_tokens}"
-    rating: UPVOTE
-    display_mode: UNDEFINED
-    chart_type: KPI
-```
+**For each verified query with translatable SQL:** build an NLS Feedback TML entry.
+Exact template: [references/step-12-report-formats.md](references/step-12-report-formats.md)
+"Step 12.5 — NLS Feedback TML template".
 
 Import with: `ts tml import --policy ALL_OR_NONE --profile {profile}`
 
@@ -1270,6 +882,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.19.1 | 2026-07-28 | Extract reference-heavy detail into references/ step files (BL-128) — no logic change; SKILL.md context cost ~15.0k → ~11.5k est. tokens. |
 | 1.19.0 | 2026-07-24 | Duplicate `column_id` → formula promotion (ts-cli v0.92.0, BL-132): an SV that references one physical column both as a raw fact and as a simple-aggregate metric (e.g. a raw measure + `AVG(col)` on the same column) previously emitted two `columns[]` entries with an identical `TABLE::col`, failing `ts tml lint` I8 on import. `ts snowflake build-model` now keeps the first occurrence as a `column_id` entry and re-expresses the rest as `fn ( [TABLE::col] )` aggregation formulas (shared `formula_common.promote_duplicate_column_ids` helper, so from-Databricks behaves identically). A duplicate that is not a re-expressible aggregate is left in place for `ts tml lint` I8 to surface. |
 | 1.18.0 | 2026-07-23 | Role-playing (aliased) dimension support (ts-cli v0.89.0): a physical table reused under multiple SV aliases now maps to distinct alias nodes — `model_tables` emit `alias:`, joins carry the alias in `with:` while the `on` clause uses physical names, and column refs use the alias prefix. Bare-column renames emit direct columns, not formulas. Live-verified against se-thoughtspot (SUPPORT_CASE_SV with ACCOUNT/USER/SUPPORT_PRODUCT__C role-plays). |
 | 1.17.1 | 2026-07-22 | Import error table + post-import verification extracted to shared `ts-tml-import-gate.md` §4/§5 (BL-063 phase 1c) |

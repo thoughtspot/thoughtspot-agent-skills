@@ -58,6 +58,17 @@ than configured, so there is no flag to set wrongly.
 rollback, for the whole migration, until you cut over. Same-Org is the weakest: you are
 mutating live content and `plan/backup/` is the only way back.
 
+> **Same-Org has one extra precondition: publish the master into the source Org first.**
+> The Org will then hold **two** Models of the same name — its own and the master — which
+> is correct and expected. It is easy to skip this step, because the Org already contains a
+> same-named Model and there looks to be nothing to publish. `audit` reports `NO_TARGET`
+> until you do. It no longer reports `READY` by comparing the Model with itself (BL-152).
+
+**How the source and the target are told apart:** by **ownership**, not by name. The
+tenant's Model is owned by the tenant Org; the master is owned by Primary. If two
+same-named Models cannot be told apart, both `audit` and `apply` **refuse** rather than
+guess — picking either wrong is silent, so there is no safe default.
+
 **Cross-cluster needs nothing extra** — cluster is a property of the profile. But tags,
 schedules and sharing are per-cluster and need re-establishing, and the per-Org aliases
 live on the *target* cluster's Primary Model.
@@ -166,6 +177,40 @@ across the fleet, and past 5 MB each import goes async at 10–15 minutes.
 Use `/ts-object-model-alias` with `build --merge`, once per wave, serialised.
 **Before merging, confirm the export returned the aliases of every already-cut-over
 tenant.** A partial export silently drops them.
+
+### Alias scoping — three things that will bite you
+
+**Org-wide aliases use `group: TS_WILDCARD_ALL`.** That is what a tenant migration wants:
+every user in the Org sees their own column names.
+
+**An ambiguous alias resolves to the BASE column name.** Verified by live experiment,
+four cases on four columns, checked as a real non-admin user:
+
+| Column | Scopes | Rendered |
+|---|---|---|
+| `STRING_1` | wildcard only | `A_wildcard_only` |
+| `STRING_2` | wildcard + group, **different** aliases | **`STRING_2`** — base name |
+| `STRING_3` | wildcard + group, **identical** aliases | **`STRING_3`** — base name |
+| `STRING_4` | group only | `D_group_only` |
+
+So a group scope does **not** override a wildcard, and identical values do not save you.
+Every entry stays individually valid, the import returns `OK`, and the export looks right —
+the only symptom is tenants seeing generic names.
+
+**Mixed strategies across *different* columns are fine.** Wildcard on some, group scopes on
+others is legitimate; the rule bites only on one column carrying both.
+
+> **Verify in Search Data, an Answer, a Liveboard or Spotter — nowhere else.** Aliases are
+> **not** rendered in the Data Management app (an open development item as of 2026-07-28),
+> and `metadata/answer/data` returns base names too. Checking either shows base names for
+> *everything* and looks like total failure.
+
+**An empty group is rejected** with `Group with name not found in org`. Do not substitute an
+arbitrary real group to get past it — that is precisely how the overlap above gets created.
+
+**`--merge` cannot remove an entry.** Correcting a wrong scope needs a full non-merge
+rebuild, which **silently drops anything absent from your input**. Inventory what exists
+before replacing.
 
 ### Step 8 — Verify, then cut over
 

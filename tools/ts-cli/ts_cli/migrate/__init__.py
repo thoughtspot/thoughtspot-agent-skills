@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from ts_cli.commands.tml import detect_tml_type
 from ts_cli.migrate import classify, discover
@@ -11,7 +11,14 @@ from ts_cli.migrate.mapping import write_mapping
 from ts_cli.migrate.report import build_report, render_markdown
 
 
-def run_audit(source_client, target_client, model_guids: List[str], out_dir: str) -> dict:
+def run_audit(source_client, target_client, model_guids: List[str], out_dir: str,
+              source_owner_org_id: Optional[int] = None) -> dict:
+    """Compare each source Model against its published counterpart in the target Org.
+
+    `source_owner_org_id` is what stops a **same-Org** run pairing a Model with ITSELF.
+    Pass `None` only when the two clients are on different clusters, where an Org id from
+    one cluster means nothing on the other (see `discover.select_target`).
+    """
     comparisons = []
     for mg in model_guids:
         src_doc = discover.export_parsed(source_client, mg)
@@ -37,7 +44,12 @@ def run_audit(source_client, target_client, model_guids: List[str], out_dir: str
             for dep, ref in zip(dependents, refs)]
         effort = classify.build_effort(classified)
 
-        target_guid = discover.find_model_by_name(target_client, model_name)
+        # Never the source object itself: in a same-Org run the tenant's own Model and the
+        # published master share a name, and a bare name lookup returns whichever the
+        # search happens to list first.
+        target_guid = discover.find_target_model(
+            target_client, model_name,
+            exclude_owner_org_id=source_owner_org_id, exclude_guid=mg)
         target_cols = discover.model_columns(target_client, target_guid) if target_guid else []
         comparison = compare_model(model_name, mg, target_guid, src_cols, target_cols,
                                    used, dependents)
