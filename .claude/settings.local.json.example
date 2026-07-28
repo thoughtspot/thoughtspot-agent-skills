@@ -17,11 +17,15 @@
 //
 // ── Model ─────────────────────────────────────────────────────────────────────
 //
-// settings.json pins claude-opus-4-6 — appropriate for this repo (formula
-// translation, domain detection, multi-step TML generation all need deep
-// reasoning). Override only to downgrade for simple authoring sessions:
+// settings.json intentionally carries NO model pin — the session inherits your
+// account's default model, and .claude/rules/model-routing.md says it should stay
+// that way: planning and QA happen interactively, so the session default should be
+// the strong tier. Override here only to downgrade for simple authoring sessions,
+// and always use a tier alias, never a generation-specific model ID (those go
+// stale fast — see the model-routing.md angle-18 note on why a hardcoded ID is a
+// harness-currency risk):
 //
-//   "model": "claude-sonnet-4-6"
+//   "model": "sonnet"
 //
 // ── Common additions ──────────────────────────────────────────────────────────
 //

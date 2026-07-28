@@ -78,6 +78,26 @@ permissions 0600 on POSIX). Skills do not manage this file — the CLI handles e
 refresh. Do not reference or read this path from skill code. If a token needs to be
 invalidated, use `ts auth logout --profile <name>`.
 
+## Permission capture and inline credentials
+
+Claude Code's permission system captures the **full text** of an approved command into
+`permissions.allow` in `.claude/settings.local.json` (gitignored, so it never reaches
+git — but it is still a live, plaintext copy sitting on disk, outside the OS credential
+store this project otherwise relies on). A `curl` command with a bearer token or a
+Snowflake keypair JWT inlined in the argument list gets that token or JWT captured
+verbatim into the allow rule the moment it's approved.
+
+**Rule: never approve or run a command whose argument list contains a literal
+credential value.** Pass the secret through an environment variable instead —
+`curl -H "Authorization: Bearer $TOKEN" ...` — so the text captured into the allow
+rule is the variable name, never the secret. This is the same discipline as "Never
+`print()` or `echo` a credential value" above, extended to the approval prompt itself:
+if you wouldn't `echo` it, don't let it appear in a command that gets approved either.
+
+If a command with an inline credential has already been approved, treat the resulting
+`permissions.allow` entry as a leaked credential: rotate/invalidate it and delete the
+stale entry.
+
 ## Adding a new external service
 
 If a new skill adds credentials for a service other than ThoughtSpot or Snowflake:
