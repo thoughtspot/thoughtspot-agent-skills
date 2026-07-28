@@ -37,7 +37,7 @@ def test_audit_writes_mapping_and_flags_blocker(mock_cls, _rp, _deps, tmp_path):
 
     src = MagicMock()
     src.post.side_effect = src_post
-    # target client: find_model_by_name (search), then model_columns export
+    # target client: find_target_model (search), then model_columns export
     def tgt_post(path, json=None, **kw):
         if "tml/export" in path:
             return MagicMock(json=lambda: [{"edoc": TGT_EDOC}])
