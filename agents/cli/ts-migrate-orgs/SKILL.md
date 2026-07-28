@@ -202,6 +202,11 @@ returned the aliases of every already-cut-over tenant.** A partial export silent
 them, and those tenants' users see `String_1` where they saw `Region` — no error anywhere.
 This is the one catastrophic step in the routine.
 
+**Scope Org-wide with `group: TS_WILDCARD_ALL`.** And never leave a second pathway in place:
+if a user matches both a wildcard entry and a group entry for the same column, they see the
+**base column name**, not either alias — even when both aliases are identical. An empty
+group is rejected, so do not substitute a real group to get past that error.
+
 ## Step 8 — Verify, then cut over
 
 Cutover is deliberately **not** part of `apply`. Verify the target Org in its final state

@@ -167,6 +167,24 @@ Use `/ts-object-model-alias` with `build --merge`, once per wave, serialised.
 **Before merging, confirm the export returned the aliases of every already-cut-over
 tenant.** A partial export silently drops them.
 
+### Alias scoping — three things that will bite you
+
+**Org-wide aliases use `group: TS_WILDCARD_ALL`.** That is what a tenant migration wants:
+every user in the Org sees their own column names.
+
+**An ambiguous alias resolves to the BASE column name.** If a user matches two pathways for
+one column — a `TS_WILDCARD_ALL` entry *and* an entry for a group they belong to — they see
+the underlying name (`STRING_1`), not either alias. **Identical alias values do not save
+you**; two pathways is two pathways. Every entry is individually valid, the import returns
+`OK`, and the export looks right, so the only symptom is tenants seeing generic names.
+
+**An empty group is rejected** with `Group with name not found in org`. Do not substitute an
+arbitrary real group to get past it — that is precisely how the overlap above gets created.
+
+**`--merge` cannot remove an entry.** Correcting a wrong scope needs a full non-merge
+rebuild, which **silently drops anything absent from your input**. Inventory what exists
+before replacing.
+
 ### Step 8 — Verify, then cut over
 
 Verify **as a real non-admin user in the target Org**. An admin bypasses RLS and sees

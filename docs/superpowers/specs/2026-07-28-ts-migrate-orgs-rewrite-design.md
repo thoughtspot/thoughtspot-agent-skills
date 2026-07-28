@@ -237,6 +237,26 @@ object count suggests, and the audit is what tells you which kind you have. Toda
 reports dependents without distinguishing them, so this is a required addition rather than
 a refinement.
 
+## Alias scoping: the per-wave merge needs an OVERLAP check, not just a count
+
+Verified 2026-07-28. Two facts change what the wave-level alias step must do:
+
+- **Org-wide aliases use `group: TS_WILDCARD_ALL`**; an empty group is rejected.
+- **An ambiguous alias resolves to the BASE column name.** A user matching both a
+  `TS_WILDCARD_ALL` entry and a group entry for one column sees `STRING_1`, not either
+  alias — *identical values do not help*.
+
+So the specified fail-closed **count** assertion is necessary but not sufficient. A wave
+that adds a group-scoped alias where a wildcard one already exists passes the count check
+and silently reverts that tenant to generic names, with every entry individually valid and
+the import reporting `OK`.
+
+The step must additionally **refuse overlapping scopes** for any (column, Org) pair.
+
+Compounding it: `--merge` is additive and cannot remove an entry, so fixing a bad scope
+needs a full non-merge rebuild — which drops anything absent from the input. That is the
+same blast radius as the partial-export failure, reached from the other direction.
+
 ## The completeness gate
 
 **The scan above is the test.** Run it over a corpus of real Liveboards after a rewrite and
