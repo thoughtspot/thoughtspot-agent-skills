@@ -4163,3 +4163,37 @@ This is why the rename has to be relied on at all: there is no id-based path.
 The first looks strongest, and it composes with **BL-148**: content has to be rewritten for
 the data-source reference anyway, so `search_query` becomes one more field in the same pass
 rather than a separate mechanism.
+
+---
+
+## BL-150 -- Skill to migrate tables from column-level sharing to column security rules `Tier 2`
+
+**Filed:** 2026-07-28.
+**Source:** user request.
+**Family:** `ts-security-columns` (see `.claude/rules/skill-naming.md` family #11).
+
+ThoughtSpot has two mechanisms for restricting column visibility: **column-level sharing**
+(the legacy approach — share individual columns per group/user) and **column security rules**
+(the newer, policy-based approach — define rules that control which columns are visible to
+which groups). The newer mechanism is more maintainable at scale, but migrating from one to
+the other is manual and error-prone.
+
+### What the skill would do
+
+1. **Audit** — for a given table (or set of tables), read the current column-level sharing
+   configuration and produce a report of which columns are shared with which groups/users.
+2. **Generate rules** — translate the sharing configuration into equivalent column security
+   rules that produce the same effective visibility.
+3. **Apply** — import the generated column security rules (with user confirmation).
+4. **Verify** — compare effective column visibility before and after to confirm equivalence.
+5. **Cleanup** — optionally remove the legacy column-level sharing entries once the rules are
+   verified.
+
+### Approach
+
+- Research the column-sharing and column-security-rules APIs via SpotterCode MCP before
+  writing any code.
+- The `ts-security-columns` family already exists in the naming convention — this skill fits
+  there.
+- The `ts security column-rules` CLI group (if it exists) or new ts-cli commands would handle
+  the API calls; the skill orchestrates the migration workflow.
