@@ -172,11 +172,27 @@ tenant.** A partial export silently drops them.
 **Org-wide aliases use `group: TS_WILDCARD_ALL`.** That is what a tenant migration wants:
 every user in the Org sees their own column names.
 
-**An ambiguous alias resolves to the BASE column name.** If a user matches two pathways for
-one column — a `TS_WILDCARD_ALL` entry *and* an entry for a group they belong to — they see
-the underlying name (`STRING_1`), not either alias. **Identical alias values do not save
-you**; two pathways is two pathways. Every entry is individually valid, the import returns
-`OK`, and the export looks right, so the only symptom is tenants seeing generic names.
+**An ambiguous alias resolves to the BASE column name.** Verified by live experiment,
+four cases on four columns, checked as a real non-admin user:
+
+| Column | Scopes | Rendered |
+|---|---|---|
+| `STRING_1` | wildcard only | `A_wildcard_only` |
+| `STRING_2` | wildcard + group, **different** aliases | **`STRING_2`** — base name |
+| `STRING_3` | wildcard + group, **identical** aliases | **`STRING_3`** — base name |
+| `STRING_4` | group only | `D_group_only` |
+
+So a group scope does **not** override a wildcard, and identical values do not save you.
+Every entry stays individually valid, the import returns `OK`, and the export looks right —
+the only symptom is tenants seeing generic names.
+
+**Mixed strategies across *different* columns are fine.** Wildcard on some, group scopes on
+others is legitimate; the rule bites only on one column carrying both.
+
+> **Verify in Search Data, an Answer, a Liveboard or Spotter — nowhere else.** Aliases are
+> **not** rendered in the Data Management app (an open development item as of 2026-07-28),
+> and `metadata/answer/data` returns base names too. Checking either shows base names for
+> *everything* and looks like total failure.
 
 **An empty group is rejected** with `Group with name not found in org`. Do not substitute an
 arbitrary real group to get past it — that is precisely how the overlap above gets created.

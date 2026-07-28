@@ -202,10 +202,14 @@ returned the aliases of every already-cut-over tenant.** A partial export silent
 them, and those tenants' users see `String_1` where they saw `Region` — no error anywhere.
 This is the one catastrophic step in the routine.
 
-**Scope Org-wide with `group: TS_WILDCARD_ALL`.** And never leave a second pathway in place:
-if a user matches both a wildcard entry and a group entry for the same column, they see the
-**base column name**, not either alias — even when both aliases are identical. An empty
-group is rejected, so do not substitute a real group to get past that error.
+**Scope Org-wide with `group: TS_WILDCARD_ALL`.** And never leave a second pathway on the
+same column: a user matching both a wildcard entry and a group entry sees the **base column
+name**, not either alias — verified live, and true even when both aliases are identical. A
+group scope does *not* override a wildcard. Mixed strategies across *different* columns are
+fine. An empty group is rejected, so do not substitute a real group to get past that error.
+
+**Verify in Search Data, an Answer, a Liveboard or Spotter.** Aliases are not rendered in the
+Data Management app, so checking there shows base names for everything.
 
 ## Step 8 — Verify, then cut over
 
