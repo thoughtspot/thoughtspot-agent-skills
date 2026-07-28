@@ -100,6 +100,29 @@ columns and recording every path where one appears.
 | `visualizations[].answer.answer_columns[].custom_name` | 5 |
 | `visualizations[].answer.chart.axis_configs[].category[]` | 1 |
 
+### Qualified `Source::Column` references — rewrite the column half
+
+Found 2026-07-28 on a **second** pass, and missed by the first because the scan looked for
+whole-string matches. 82 occurrences across 45 real Liveboards, in the SAME fields that
+also hold the bare form:
+
+| Path | Qualified | Bare |
+|---|---|---|
+| `filters[].column[]` | 25 | 39 |
+| `ordered_chips[].name` | 36 | — |
+| `views[].view_filters[].column[]` | 7 | 9 |
+| `parameter_overrides[].value.name` | 14 | — |
+
+`parameter_overrides[].value.name` did not appear in the first scan at all, precisely
+because it only ever holds the qualified form.
+
+Only the **column half** is rewritten. The source half is the Model name, and the
+migration pairs tenant Model to published Model *by name*, so it does not change.
+
+**The coverage gate had the same hole** and reported these documents clean. Both were
+fixed together — a gate that shares the transform's blind spot is worse than no gate,
+because it converts an unknown into a false assurance.
+
 ### Bracketed tokens — rewrite inside the string
 
 | Path | Hits | Example |
