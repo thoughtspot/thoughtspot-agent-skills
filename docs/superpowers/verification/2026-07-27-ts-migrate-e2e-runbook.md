@@ -21,11 +21,24 @@ replaced by export/rewrite/import, and the run now completes.
 | **ORG1** (source) | `T2_PUBLISH` Table on `APJ_ORG1` | ORG1 | `a9f276dd-5055-4b15-895b-18f080e37ccf` |
 | **ORG1** | `T2_PUBLISH_MODEL` | ORG1 | `9917a017-443c-4cf7-be81-2958d83997c8` |
 | **ORG1** | Answer `ORG1 Revenue by Segment` | ORG1 | `3c708712-12ab-45d5-abb6-15a6305b917d` |
+| **ORG1** | `MIGTEST_VIEW` (exposes `Deal Stage`, `Revenue`) | ORG1 | `866a0dc3-dcae-4947-b0f2-0d0d1fdc007b` |
+| **ORG1** | Answer `MIGTEST Answer on View` — **shielded** | ORG1 | `06532195-dbd7-4ea6-ad21-1fbc124e562a` |
+| **ORG1** | `MIGTEST Liveboard` (2 vizzes, chart, QUALIFIED filter) | ORG1 | `083fbd06-a634-4933-b7ab-dea4efff6455` |
+| **ORG1** | `T2_PUBLISH` + `T2_PUBLISH_MODEL` | Primary — **published in** | same GUIDs as ORG2's |
 | **ORG2** (target) | `T2_PUBLISH` Table | Primary — **published** | `d2c12c11-6560-4810-96b8-4b902bbb82dc` |
 | **ORG2** | `T2_PUBLISH_MODEL` | Primary — **published** | `2a743be3-b26e-43b7-9abc-47aa6486dc57` |
+| **ORG2** | the migrated content (own GUIDs) | ORG2 | View `19855619…`, Answers `b349b3d3…` / `8e548ad7…`, Liveboard `8a9ed58d…` |
 
-ORG1's Model shares the published Model's **name** (that is how `audit` pairs them) while
-naming two columns the tenant's way:
+All ORG1 content is shared to group `MIGTEST_VIEWERS` (members `guest1`, `guest4`); ORG2 has
+the same group with `guest1`. Verify as one of those users, never as an admin — an admin sees
+objects regardless of sharing.
+
+The master is published into **both** tenant Orgs. ORG2 is the migration target; **ORG1 is
+the same-Org test's precondition** and can be retracted with
+`ts publish unpush 2a743be3-… --org ORG1 -t LOGICAL_TABLE`.
+
+ORG1's Model shares the published Model's **name**, while naming two columns the tenant's
+way:
 
 | Tenant name | Physical column | Published name |
 |---|---|---|
@@ -33,6 +46,14 @@ naming two columns the tenant's way:
 | `Order Date` | `T2_PUBLISH::DATE_1` | `DATE_1` |
 
 Four other columns already match, which is the normal case.
+
+> **`audit` pairs them by name AND ownership, not by name alone.** This document previously
+> said the shared name "is how `audit` pairs them". That was true and **insufficient**: the
+> master is also published into ORG1 (for the same-Org test), so ORG1 holds *two*
+> `T2_PUBLISH_MODEL` objects and a name-only lookup paired the tenant's Model with **itself**,
+> reporting `READY` with an empty rename map — BL-152, fixed 2026-07-28. The source must be
+> the Model its Org **owns**; the target must be one it does **not**. See
+> [`2026-07-28-ts-migrate-same-org-topology.md`](2026-07-28-ts-migrate-same-org-topology.md).
 
 ORG1's Table sits on `APJ_ORG1` against the **same physical warehouse table** as the
 published one on Primary's `APJ`. No collision, because the Table dedupe key includes the
