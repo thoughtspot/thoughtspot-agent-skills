@@ -346,8 +346,11 @@ def apply_migration(
     state_file = plan_path / "state.json"
     ledger = (_json.loads(state_file.read_text()) if (resume and state_file.exists())
               else new_ledger({"source": source_org, "target": target_org}))
+    # Unscoped session for the segmentation check: an Org-scoped variable read returns
+    # only that Org's value, which makes every target look SHARED.
     ctx = apply_exec.Ctx(source_client, target_client, plan_path, ledger,
-                         allow_unfiltered=allow_unfiltered_target)
+                         allow_unfiltered=allow_unfiltered_target,
+                         unscoped_client=_org_client(target_profile, None))
 
     for step in pending_steps(plan, ledger):
         name = step["step"]

@@ -198,12 +198,12 @@ def _plan(views=None, content=None, same_org=False):
         import_mode("ACME", "ACME" if same_org else "ACME NEW", "p", "p"))
 
 
-def test_the_plan_is_FOUR_steps():
-    """It was eight. Three of the four are the migration; the fourth exists only because
-    shielded content still has to MOVE in a new-Org run, which omitting it made silent
-    data loss."""
+def test_the_plan_step_order_matches_the_engine():
+    """Three steps are the migration itself. The other two exist because a new-Org run
+    also has to MOVE shielded content and RE-ESTABLISH sharing -- omitting either was
+    silent (data loss, then invisible-to-users)."""
     assert [s["step"] for s in _plan()] == list(STEP_ORDER)
-    assert len(STEP_ORDER) == 4
+    assert len(STEP_ORDER) == 5
 
 
 def test_backup_is_first_so_nothing_is_written_before_a_copy_exists():
@@ -442,3 +442,84 @@ def test_the_dry_run_explains_the_empty_same_org_case():
     md = render_plan(_plan_s([{"guid": "s1", "name": "V", "source_refs": ["v1"]}],
                              same_org=True))
     assert "stays where it is" in md
+
+
+# ---------------------------------------------------------------------------
+# The segmentation check must read variables UNSCOPED
+# ---------------------------------------------------------------------------
+
+def test_segmentation_needs_ALL_orgs_values_to_see_segmentation():
+    """Live-verified 2026-07-28: an ORG-SCOPED variable read returns only THAT Org's
+    value. From inside ORG2, `apj_schema` looked like a single value and every target was
+    classified SHARED -- so the check refused a correctly-segmented deployment.
+
+    Same trap as `tenancy._groups_in_org`: an Org-scoped read is a FILTERED view, and
+    treating it as complete inverts the answer. `apply` therefore reads through an
+    unscoped session.
+    """
+    all_orgs = [_var("TABLE_MAPPING", [("Primary", "ALIAS_TESTS"),
+                                       ("ORG2", "AMAZON_SALES_DATA")])]
+    org_scoped = [_var("TABLE_MAPPING", [("ORG2", "AMAZON_SALES_DATA")])]
+    assert target_segmentation(all_orgs, "ORG2") == SEGMENT_PHYSICAL
+    # What the buggy Org-scoped read produced -- the exact inversion:
+    assert target_segmentation(org_scoped, "ORG2") == SEGMENT_SHARED
+
+
+def test_the_ctx_defaults_unscoped_to_the_target_rather_than_crashing():
+    """A caller that forgets to pass one gets UNKNOWN/SHARED and a refusal, never a
+    false pass."""
+    from ts_cli.migrate.apply_exec import Ctx
+    ctx = Ctx("src", "tgt", None, {})
+    assert ctx.unscoped == "tgt"
+
+
+def test_an_explicit_unscoped_client_is_used_when_given():
+    from ts_cli.migrate.apply_exec import Ctx
+    ctx = Ctx("src", "tgt", None, {}, unscoped_client="admin")
+    assert ctx.unscoped == "admin"
+
+
+# ---------------------------------------------------------------------------
+# Sharing — TML carries none, so migrated content is invisible without this
+# ---------------------------------------------------------------------------
+
+from ts_cli.migrate.apply_plan import STEP_SHARE  # noqa: E402
+
+
+def test_a_new_org_run_re_establishes_sharing():
+    """TML has no share/permission/principal/group/acl key at all, so migrated content is
+    authored by the admin and visible to nobody. The migration would complete, every check
+    would pass, and no tenant user could see anything (BL-150)."""
+    step = [s for s in _plan() if s["step"] == STEP_SHARE][0]
+    assert step["objects"], "a new-Org run must re-share its migrated content"
+
+
+def test_a_same_org_run_does_NOT_re_share():
+    """Content was updated in place and kept its existing grants. Re-applying them would
+    be a no-op at best, and could widen access at worst."""
+    plan = build_apply_plan({"source": "A", "target": "A"},
+                            [], [{"guid": "a1", "name": "A"}], {}, {"guid": "t"},
+                            import_mode("A", "A", "p", "p"))
+    assert [s for s in plan if s["step"] == STEP_SHARE][0]["objects"] == []
+
+
+def test_sharing_runs_LAST_because_it_needs_the_target_guids():
+    order = list(STEP_ORDER)
+    assert order.index(STEP_SHARE) > order.index(STEP_REWRITE_CONTENT)
+    assert order.index(STEP_SHARE) > order.index(STEP_MOVE_SHIELDED)
+
+
+def test_sharing_covers_SHIELDED_content_too():
+    """Shielded content is migrated, so it needs grants exactly as much as rewritten
+    content does -- and it is the easier one to forget, since nothing was rewritten."""
+    plan = _plan_s([{"guid": "s1", "name": "OnView", "source_refs": ["v1"]}])
+    guids = {o["guid"] for o in [s for s in plan if s["step"] == STEP_SHARE][0]["objects"]}
+    assert "s1" in guids
+
+
+def test_the_dry_run_says_WHY_sharing_matters():
+    """"re-establish grants" alone reads as housekeeping. It is the difference between a
+    tenant seeing their content and seeing an empty Org."""
+    md = render_plan(_plan())
+    assert "TML carries no sharing" in md
+    assert "users see nothing" in md

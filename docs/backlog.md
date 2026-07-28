@@ -4217,3 +4217,70 @@ the other is manual and error-prone.
   there.
 - The `ts security column-rules` CLI group (if it exists) or new ts-cli commands would handle
   the API calls; the skill orchestrates the migration workflow.
+
+---
+
+## BL-150 -- a new-Org migration DROPS ALL SHARING, so tenant users lose every object `Tier 1`
+
+**Filed:** 2026-07-28.
+**Source:** raised by the repo owner asking whether the fixture was visible only to
+`tsadmin`. It was -- and checking why exposed the general case.
+
+**TML carries no sharing information at all.** An exported Answer contains no `share`,
+`permission`, `principal`, `group` or `acl` key; its top-level keys are only
+`answer_columns`, `chart`, `display_mode`, `name`, `search_query`, `table`, `tables`.
+
+So in a **new-Org** run, `ts migrate apply` creates content authored by the migrating
+admin and **shared with nobody**. The migration completes, every object is present and
+correct, every check passes -- and not one tenant user can see anything.
+
+### Why this is Tier 1
+
+It affects **every tenant** in production, it is **silent** (nothing fails), and it is
+invisible to an admin verifying the migration, because an admin sees objects regardless of
+sharing. The failure surfaces only when a real tenant user logs in and finds an empty
+Org -- which is exactly the point at which the source Org may already have been retired.
+
+A **same-Org** run is unaffected: content is updated in place and keeps its existing
+grants.
+
+### What a fix has to handle
+
+Reading and re-applying is straightforward -- `security/metadata/fetch-permissions` on the
+source, `ts share` on the target. Two things make it more than a copy:
+
+1. **Groups are per-Org principals.** A group named `ACME_VIEWERS` in the source Org is a
+   *different object* from a same-named group in the target, so the target must already
+   have the group (a `ts tenancy` precondition) and the grant must be resolved against the
+   target's principal, not the source's.
+2. **Users may not exist in the target Org yet**, since cutover is deliberately the last
+   step. A per-user grant therefore cannot always be applied at migration time, and may
+   have to be deferred to cutover.
+
+### Built, but NOT verified live -- 2026-07-28
+
+`ts migrate apply` now has a `share_grants` step: it reads the source objects' GROUP
+grants (via `share_plan.permission_rows`, which encodes the `permission` vs
+`shared_permission` gotcha) and re-applies them in the target Org. Group level only,
+because a per-user grant cannot reliably be applied before cutover.
+
+**The step runs and reports success, but the grants do not register.** Verified on
+`nebula-damian-alias`:
+
+| Case | Result |
+|---|---|
+| Share ORG1-owned content to an ORG1 group | **works** -- `MIGTEST_VIEWERS(READ_ONLY)` appears |
+| Share ORG2-owned content to an ORG2 group | `HTTP 204`, grant does **not** appear |
+
+Ruled out: wrong Org (the group reports `orgs: ['ORG2']`), name-vs-GUID resolution (both
+give 204 and neither registers), and an empty group (adding a member changed nothing).
+
+**The one structural difference is that the ORG2 content sits on a PUBLISHED,
+Primary-owned Model.** That is suggestive rather than established, and it rhymes with two
+findings already in this programme -- CSR does not travel with publication, and an
+object-level `NO_ACCESS` is not a revoke (**BL-142**). Whether sharing content built on a
+published object behaves differently is the next thing to establish.
+
+**Until then, treat sharing as a manual post-migration step, and treat an admin-only
+verification as not verified.** "The migration completed" does not yet mean the tenant can
+see anything.

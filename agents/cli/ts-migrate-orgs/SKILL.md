@@ -113,10 +113,30 @@ Three steps:
 | `rewrite_views` | Repoints Views, **preserving what they expose**, so their content needs nothing |
 | `rewrite_content` | Rewrites the chargeable Answers and Liveboards onto the published Model |
 | `move_shielded` | Copies View-shielded content **without rewriting its columns** — new-Org runs only |
+| `share_grants` | Re-establishes **group-level** sharing — new-Org runs only |
 
 Each object's rewrite changes exactly two things: the data-source reference and the column
 names. Progress is recorded in `plan/state.json`, so an interrupted run resumes with
 `--resume`.
+
+**Why `share_grants` exists.** **TML carries no sharing information at all** — no `share`,
+`permission`, `principal`, `group` or `acl` key. So migrated content is authored by whoever
+ran the migration and visible to **nobody else**. The migration completes, every check
+passes, and not one tenant user can see anything.
+
+That failure survives verification, because an admin sees objects regardless of sharing.
+It surfaces only when a real tenant user logs in to an empty Org — possibly after the
+source Org has been retired.
+
+> **Not yet verified live.** The step runs and reports success, but the grants do not
+> register when the target content sits on a published Model (**BL-150**). **Check the
+> grants yourself after any new-Org migration**, and treat an admin-only check as not
+> verified.
+
+Grants are re-applied at **group** level. Groups are **per-Org principals**, so the target
+Org needs a group of each name; a missing one is reported rather than skipped, because a
+dropped grant is invisible until someone complains. Per-user grants are deliberately not
+attempted: the users may not be in the target Org until cutover.
 
 **Why `move_shielded` exists.** A View shields its content from the *column rewrite*, not
 from the migration. In a **new-Org** run that content still has to exist over there, and
@@ -220,6 +240,7 @@ cutover it holds nothing but this migration's output.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.1.0 | 2026-07-28 | Add `share_grants` — TML carries no sharing, so migrated content was invisible to tenant users |
 | 2.0.0 | 2026-07-28 | Rebuild around export/rewrite/import: three steps, no scaffolding, no connection provisioning |
 | 1.1.0 | 2026-07-28 | Replace the dead BL-144 guard with the tenant-isolation check at the repoint |
 | 1.0.0 | 2026-07-27 | Initial release |
