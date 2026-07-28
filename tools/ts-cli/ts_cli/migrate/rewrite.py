@@ -48,6 +48,12 @@ _CS_NAME_FIELDS = (("columnProperties", "columnId"),
 
 _BRACKET_RE = re.compile(r"\[([^\[\]]+)\]")
 
+# A reference qualified by its source: `Retail - Apparel::Product Type`. Found live
+# 2026-07-28 in filters, ordered_chips, view_filters and parameter_overrides -- 82
+# occurrences across 45 real Liveboards, alongside the bare form in the SAME field. Both
+# have to be handled, and a whole-string match catches only the bare one.
+_QUALIFIED_RE = re.compile(r"^(?P<src>[^:]+)::(?P<col>.+)$")
+
 # Fields whose value is a column name wrapped in aggregation or bucket decoration --
 # `Total LINEAMOUNT`, `Month(YM)`. The column name is substituted INSIDE the token.
 _DECORATED_FIELDS = ("search_output_column",)
@@ -68,6 +74,24 @@ def substitute_bracketed(text: str, column_map: Mapping[str, str]) -> str:
         return text
     return _BRACKET_RE.sub(
         lambda m: f"[{column_map.get(m.group(1), m.group(1))}]", text)
+
+
+def substitute_qualified(value: str, column_map: Mapping[str, str]) -> str:
+    """Rewrite the column half of a `Source::Column` reference.
+
+    The source half is left alone: the migration pairs the tenant Model to the published
+    one **by name**, so the qualifier does not change -- only the column does.
+
+    Returns the value unchanged when it is not qualified, or when the column half is not
+    in the map, so this is safe to attempt on any string.
+    """
+    m = _QUALIFIED_RE.match(value or "")
+    if not m:
+        return value
+    col = m.group("col")
+    if col not in column_map:
+        return value
+    return f"{m.group('src')}::{column_map[col]}"
 
 
 def substitute_decorated(value: str, column_map: Mapping[str, str]) -> str:
@@ -130,6 +154,8 @@ def _rewrite_node(node: Any, path: List[str], column_map: Mapping[str, str]) -> 
         return substitute_decorated(node, column_map)
     if "[" in node:
         return substitute_bracketed(node, column_map)
+    if "::" in node:
+        return substitute_qualified(node, column_map)
     return column_map.get(node, node)                 # whole-string reference
 
 
@@ -222,8 +248,10 @@ def residual_references(doc: Any, source_columns: Mapping[str, str]) -> List[Tup
                     len(path) >= 2 and path[-1] == "name"
                     and path[-3:-1] == ["view_columns", "[]"]):
                 return
+            qualified = _QUALIFIED_RE.match(node)
             for col in names:
-                if node == col or f"[{col}]" in node:
+                if (node == col or f"[{col}]" in node
+                        or (qualified and qualified.group("col") == col)):
                     found.append((p, node))
                     return
 

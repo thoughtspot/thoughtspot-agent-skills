@@ -277,3 +277,61 @@ def test_every_label_path_is_documented_as_needing_review_on_platform_change():
     deliberate."""
     assert len(LABEL_PATHS) <= 8
     assert all(p.endswith(("name", "display_name")) for p in LABEL_PATHS)
+
+
+# ---------------------------------------------------------------------------
+# Qualified `Source::Column` references
+# ---------------------------------------------------------------------------
+
+from ts_cli.migrate.rewrite import substitute_qualified  # noqa: E402
+
+
+def test_a_qualified_reference_has_its_COLUMN_half_rewritten():
+    """Found live 2026-07-28: 82 occurrences across 45 real Liveboards, in filters,
+    ordered_chips, view_filters and parameter_overrides. A whole-string match misses all
+    of them, and so did the coverage gate -- a silent hole in both."""
+    assert substitute_qualified("Retail - Apparel::Segment", MAP) == \
+        "Retail - Apparel::STRING_1"
+
+
+def test_the_SOURCE_half_is_left_alone():
+    """The migration pairs tenant Model to published Model BY NAME, so the qualifier does
+    not change. Rewriting it would point the reference at nothing."""
+    out = substitute_qualified("Sales::Segment", MAP)
+    assert out.startswith("Sales::")
+
+
+def test_an_unqualified_value_passes_through_untouched():
+    assert substitute_qualified("Segment", MAP) == "Segment"
+
+
+def test_a_qualified_reference_to_an_UNMAPPED_column_is_untouched():
+    assert substitute_qualified("Sales::Amount", MAP) == "Sales::Amount"
+
+
+def test_a_column_name_CONTAINING_a_colon_still_resolves():
+    """`::` splits on the FIRST colon pair, so a column named `A:B` survives."""
+    m = {"A:B": "STRING_9"}
+    assert substitute_qualified("Sales::A:B", m) == "Sales::STRING_9"
+
+
+def test_BOTH_forms_in_the_same_field_are_handled():
+    """Real Liveboards mix them: 25 qualified and 39 bare in `filters[].column[]`."""
+    doc = {"liveboard": {"filters": [{"column": ["Sales::Segment", "Segment"]}]}}
+    out = rewrite_content(doc, MAP, "tgt")
+    assert out["liveboard"]["filters"][0]["column"] == ["Sales::STRING_1", "STRING_1"]
+
+
+def test_a_qualified_reference_in_parameter_overrides_is_rewritten():
+    """A path the original scan never surfaced, precisely BECAUSE it holds qualified
+    references -- the scan was looking for whole-string matches."""
+    doc = {"liveboard": {"parameter_overrides": [{"value": {"name": "Sales::Segment"}}]}}
+    out = rewrite_content(doc, MAP, "tgt")
+    assert out["liveboard"]["parameter_overrides"][0]["value"]["name"] == "Sales::STRING_1"
+
+
+def test_the_gate_CATCHES_a_missed_qualified_reference():
+    """Without this the gate reports success on a document that still points at the
+    tenant's column -- the exact failure mode the gate exists to prevent."""
+    doc = {"liveboard": {"some_new_field": "Sales::Segment"}}
+    assert residual_references(doc, MAP)
