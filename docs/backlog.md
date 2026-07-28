@@ -4189,9 +4189,12 @@ rather than a separate mechanism.
 
 ---
 
-## BL-150 -- Skill to migrate tables from column-level sharing to column security rules `Tier 2`
+## BL-151 -- Skill to migrate tables from column-level sharing to column security rules `Tier 2`
 
-**Filed:** 2026-07-28.
+**Filed:** 2026-07-28. **Renumbered from BL-150 on 2026-07-28:** two items were filed as
+BL-150 the same day. The other one is cross-referenced from `CHANGELOG.md`, `apply_exec.py`,
+`apply_plan.py`, a test docstring and `ts-migrate-orgs/SKILL.md`, so it kept the number and
+this one moved.
 **Source:** user request.
 **Family:** `ts-security-columns` (see `.claude/rules/skill-naming.md` family #11).
 
@@ -4308,3 +4311,79 @@ in one sentence.
 `share_grants` now grants **bottom-up over the whole stack**: the published Tables, then
 the published Model, then the migrated content. Ordering is load-bearing -- a content grant
 applied before its Model is silently dropped.
+
+---
+
+## BL-152 -- a same-Org migration pairs the tenant's Model with ITSELF and reports READY `Tier 1` -- **FIXED 2026-07-28**
+
+**Filed:** 2026-07-28.
+**Source:** found while running the first same-Org (source Org == target Org) test end to
+end -- the last of the three supported topologies to be exercised.
+
+`ts migrate audit --source-org ORG1 --target-org ORG1` returned:
+
+```
+source_guid  : 9917a017-443c-4cf7-be81-2958d83997c8
+target_guid  : 9917a017-443c-4cf7-be81-2958d83997c8   <- the SAME object
+readiness    : READY
+column_counts: {'MATCHED': 6, 'GAP': 0, 'GAP_BLOCKER': 0, 'BINDING_MISMATCH': 0}
+```
+
+### Cause
+
+`discover.find_model_by_name` returned the **first** name match. In the same-Org topology
+the Org legitimately holds **two** Models of that name -- its own, and the master published
+in from Primary -- and which one came back first was whatever `metadata/search` happened to
+list. It returned the tenant's own Model, so the audit compared the source with itself.
+
+Every downstream number then follows: each column matches itself, the rename map is empty,
+`validate_apply` has nothing to object to, and the verdict is `READY`.
+
+### Why Tier 1
+
+It is a **silent no-op that passes every gate.** `apply` would run green, write a state
+ledger, and move nothing. Verification does not catch it either: the content still works,
+because it is still pointed at the Model it always used. It surfaces only when someone
+retires the "old" Model at teardown -- the point at which every Answer and Liveboard in the
+tenant Org breaks at once, and the backup is the only way back.
+
+Three narrower instances of the same defect were found alongside it, all from the same
+name-only assumption:
+
+| Where | What went wrong |
+|---|---|
+| `audit --all-models` | Swept the published master in as a *source* Model, auditing it against itself alongside the tenant's real Models |
+| `_classify_scope` (`apply`) | The **source** lookup could equally return the master, so `apply` would migrate the master's own dependents and rename its columns |
+| `scan-sets --model <name>` | Could report the master as the tenant's Set blocker, overstating the one number that command exists to produce |
+
+### The fix
+
+**Ownership is the discriminator.** `metadata_header.ownerOrgId` distinguishes the two: the
+published master is owned by Primary, the tenant's copy by the tenant. The same field
+`list_models` already used for the fleet scan, applied to the one place it was missing.
+
+- `discover.name_matches` returns **all** exact name matches with their `ownerOrgId`,
+  because the count is the point.
+- `select_source` requires the Org to **own** the Model; `select_target` requires that it
+  does **not**, and additionally excludes the source object by GUID.
+- Either one **refuses** on genuine ambiguity (`AmbiguousModelName`) rather than picking.
+  Both wrong answers here are silent, so guessing is the one thing not to do.
+- `exclude_owner_org_id` is passed as `None` when the two profiles differ, because Org ids
+  mean nothing across clusters and `Primary` is `0` on both -- excluding by id would refuse
+  a legitimate Primary-to-Primary cross-cluster target.
+- `apply_plan.find_self_repoint` re-asserts the invariant at plan time. The lookup now makes
+  it unreachable; it is kept because the **previous architecture had this guard, the rewrite
+  dropped it, and the case came straight back.**
+- `find_model_by_name`, `scaffolding_objects` and `bespoke_content` are removed --
+  name-only lookup and two dead helpers from the retired lift-and-shift design.
+
+Regression tests were confirmed to fail against the old behaviour with the bug's exact
+signature (`target_guid == '9917a017'`, the source) before being taken as passing.
+
+### What this does not fix
+
+The audit now reports `NO_TARGET` in a same-Org run where the master has not been published
+into the Org yet. That is correct and actionable, but it means **the same-Org topology
+requires the master to be published into the source Org first** -- worth stating in the
+runbook, because the Org already contains a same-named Model and an operator may reasonably
+assume there is nothing to publish.

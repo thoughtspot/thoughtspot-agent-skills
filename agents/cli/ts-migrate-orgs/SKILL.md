@@ -128,11 +128,12 @@ That failure survives verification, because an admin sees objects regardless of 
 It surfaces only when a real tenant user logs in to an empty Org — possibly after the
 source Org has been retired.
 
-> **Not yet verified live.** The step runs and reports success, but on some Orgs the
-> grants do not register for Answers and Liveboards -- `HTTP 204` with no grant applied
-> (**BL-150**, cause not yet established). **Check the grants yourself after any new-Org
-> migration**, and treat an admin-only check as not verified: an admin sees objects
-> regardless of sharing.
+> **Verified live 2026-07-28** (**BL-150**). The earlier note here said grants sometimes
+> did not register — that was **this tool sharing only the content**. Under **Strict Object
+> Mode** a grant on content whose source is ungranted returns `HTTP 204` and is **silently
+> dropped**, so the whole stack has to be granted bottom-up. Still **check the grants
+> yourself after any new-Org migration**, and treat an admin-only check as not verified: an
+> admin sees objects regardless of sharing.
 
 Grants cover the **whole stack**, not just the content: the **published Model needs
 explicit grants too**, because publishing it makes it *present*, not *visible*.
@@ -161,6 +162,12 @@ than configured:
 
 Cross-cluster needs nothing extra. Tags, schedules and sharing are per-cluster though, so
 they need re-establishing over there.
+
+**Same-Org needs the master published into the source Org first.** The Org then holds two
+Models of the same name — its own and the master — which is correct. Easy to skip, because
+a same-named Model is already there; `audit` reports `NO_TARGET` until you do it. Source and
+target are told apart by **ownership** (tenant-owned vs Primary-owned), never by name, and
+if they cannot be told apart both commands refuse rather than guess (BL-152).
 
 ## Step 6 — Two refusals that are the system working
 
@@ -253,6 +260,7 @@ cutover it holds nothing but this migration's output.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.3.0 | 2026-07-28 | Source and target are told apart by **ownership**, not name — a same-Org run had paired a Model with itself and reported READY (BL-152) |
 | 2.2.0 | 2026-07-28 | `share_grants` grants the whole object stack bottom-up — Strict Object Mode drops a grant whose source is ungranted |
 | 2.1.0 | 2026-07-28 | Add `share_grants` — TML carries no sharing, so migrated content was invisible to tenant users |
 | 2.0.0 | 2026-07-28 | Rebuild around export/rewrite/import: three steps, no scaffolding, no connection provisioning |

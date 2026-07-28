@@ -1,6 +1,8 @@
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 from ts_cli.migrate import discover
 from ts_cli.migrate.schema import ColumnInfo
 
@@ -33,20 +35,106 @@ def test_model_columns_parses_name_binding_and_type():
     assert cols[1].name == "Department"
 
 
-def test_find_model_by_name_matches_case_insensitively():
+def _search_returning(*rows):
+    """Mock client whose metadata/search returns these `(guid, name, owner_org_id)` rows."""
     client = MagicMock()
     client.post.return_value = MagicMock(json=lambda: [
-        {"metadata_id": "tgt-1", "metadata_name": "Sales", "metadata_type": "LOGICAL_TABLE"},
-    ])
-    assert discover.find_model_by_name(client, "sales") == "tgt-1"
+        {"metadata_id": g, "metadata_name": n, "metadata_type": "LOGICAL_TABLE",
+         "metadata_header": {"ownerOrgId": o}} for g, n, o in rows])
+    return client
+
+
+def test_name_matches_is_case_insensitive_and_carries_ownership():
+    client = _search_returning(("tgt-1", "Sales", 0))
+    assert discover.name_matches(client, "sales") == [
+        {"guid": "tgt-1", "owner_org_id": 0}]
     posted_filter = client.post.call_args.kwargs["json"]["metadata"][0]
     assert posted_filter["subtypes"] == ["WORKSHEET", "AGGR_WORKSHEET"]
 
 
-def test_find_model_by_name_returns_none_when_absent():
+def test_name_matches_drops_partial_name_hits():
+    # `name_pattern` is a CONTAINS match, so the API returns near-misses too.
+    client = _search_returning(("other", "Sales Archive", 7))
+    assert discover.name_matches(client, "Sales") == []
+
+
+# --- select_source: the tenant's OWN Model -----------------------------------------
+
+def test_select_source_prefers_the_orgs_own_model_over_a_published_master():
+    """The master is VISIBLE in the tenant Org once published, so a name match is not
+    enough -- treating the master as the source would migrate ITS dependents."""
+    candidates = [{"guid": "master", "owner_org_id": 0},
+                  {"guid": "tenant-own", "owner_org_id": 12750490}]
+    assert discover.select_source(candidates, owner_org_id=12750490) == "tenant-own"
+
+
+def test_select_source_returns_none_when_the_org_owns_nothing_by_that_name():
+    assert discover.select_source([{"guid": "master", "owner_org_id": 0}],
+                                 owner_org_id=12750490) is None
+
+
+def test_select_source_refuses_two_models_it_cannot_tell_apart():
+    with pytest.raises(discover.AmbiguousModelName):
+        discover.select_source([{"guid": "a", "owner_org_id": 5},
+                                {"guid": "b", "owner_org_id": 5}], owner_org_id=5)
+
+
+# --- select_target: the published master (BL-152) ----------------------------------
+
+def test_select_target_never_returns_the_source_model_itself():
+    """The same-Org bug: ORG1 holds its own Model and the published master under one name,
+    and a bare lookup returned the source -- pairing it with itself, reporting every column
+    MATCHED and READY, and migrating nothing (BL-152)."""
+    candidates = [{"guid": "tenant-own", "owner_org_id": 12750490},
+                  {"guid": "master", "owner_org_id": 0}]
+    assert discover.select_target(candidates, exclude_owner_org_id=12750490,
+                                 exclude_guid="tenant-own") == "master"
+
+
+def test_select_target_excludes_by_guid_even_without_an_org_id():
+    # Cross-cluster: Org ids are meaningless across clusters, so the GUID is the only
+    # exclusion available and it still has to work on its own.
+    candidates = [{"guid": "tenant-own", "owner_org_id": 12750490},
+                  {"guid": "master", "owner_org_id": 0}]
+    assert discover.select_target(candidates, exclude_guid="tenant-own") == "master"
+
+
+def test_select_target_keeps_a_primary_owned_target_when_no_org_id_is_excluded():
+    """Primary is `0` on every cluster, so a Primary-to-Primary cross-cluster migration
+    must not have its legitimate target excluded by id."""
+    assert discover.select_target([{"guid": "master", "owner_org_id": 0}],
+                                 exclude_owner_org_id=None) == "master"
+
+
+def test_select_target_returns_none_when_only_the_source_matches():
+    assert discover.select_target([{"guid": "tenant-own", "owner_org_id": 12750490}],
+                                  exclude_owner_org_id=12750490,
+                                  exclude_guid="tenant-own") is None
+
+
+def test_select_target_refuses_two_candidate_masters():
+    with pytest.raises(discover.AmbiguousModelName):
+        discover.select_target([{"guid": "a", "owner_org_id": 0},
+                                {"guid": "b", "owner_org_id": 3}],
+                               exclude_owner_org_id=12750490)
+
+
+def test_find_target_model_returns_none_when_absent():
     client = MagicMock()
     client.post.return_value = MagicMock(json=lambda: [])
-    assert discover.find_model_by_name(client, "Nope") is None
+    assert discover.find_target_model(client, "Nope") is None
+
+
+def test_owning_org_id_reads_the_session_back():
+    client = MagicMock()
+    client.get.return_value = MagicMock(json=lambda: {"current_org": {"id": 12750490}})
+    assert discover.owning_org_id(client) == 12750490
+
+
+def test_owning_org_id_is_none_when_the_session_read_fails():
+    client = MagicMock()
+    client.get.side_effect = RuntimeError("401")
+    assert discover.owning_org_id(client) is None
 
 
 def test_used_column_names_finds_referenced_columns_only():

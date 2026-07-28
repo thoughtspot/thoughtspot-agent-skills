@@ -58,6 +58,17 @@ than configured, so there is no flag to set wrongly.
 rollback, for the whole migration, until you cut over. Same-Org is the weakest: you are
 mutating live content and `plan/backup/` is the only way back.
 
+> **Same-Org has one extra precondition: publish the master into the source Org first.**
+> The Org will then hold **two** Models of the same name — its own and the master — which
+> is correct and expected. It is easy to skip this step, because the Org already contains a
+> same-named Model and there looks to be nothing to publish. `audit` reports `NO_TARGET`
+> until you do. It no longer reports `READY` by comparing the Model with itself (BL-152).
+
+**How the source and the target are told apart:** by **ownership**, not by name. The
+tenant's Model is owned by the tenant Org; the master is owned by Primary. If two
+same-named Models cannot be told apart, both `audit` and `apply` **refuse** rather than
+guess — picking either wrong is silent, so there is no safe default.
+
 **Cross-cluster needs nothing extra** — cluster is a property of the profile. But tags,
 schedules and sharing are per-cluster and need re-establishing, and the per-Org aliases
 live on the *target* cluster's Primary Model.

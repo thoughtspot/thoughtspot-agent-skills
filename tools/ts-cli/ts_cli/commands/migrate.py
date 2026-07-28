@@ -47,31 +47,45 @@ def audit(
 
     model_guids = list(model)
     if all_models:
-        model_guids = [m["guid"] for m in discover.list_models(source_client)]
+        # Models this Org OWNS. Once the master has been published in -- which is the
+        # normal state during a same-Org migration -- an unscoped sweep audits the master
+        # against itself alongside the tenant's real Models.
+        model_guids = [m["guid"] for m in discover.list_models(
+            source_client, owner_org_id=discover.owning_org_id(source_client))]
     if not model_guids:
         _err("No models to audit. Pass --model <guid> (repeatable) or --all-models.")
         raise typer.Exit(code=1)
 
-    report = run_audit(source_client, target_client, model_guids, out_dir)
+    try:
+        report = run_audit(source_client, target_client, model_guids, out_dir,
+                           source_owner_org_id=_target_exclusion(
+                               source_client, source_profile, target_profile))
+    except discover.AmbiguousModelName as exc:
+        _refuse(str(exc))
     print(json.dumps(report, indent=2))
     ready = "READY" if report["overall_ready"] else "NEEDS MAPPING"
     _err(f"Audit complete: {len(report['models'])} model(s), overall {ready}. Files in {out_dir}")
 
 
-def _owning_org_id(client) -> Optional[int]:
-    """Numeric id of the Org this client's session is actually in.
+def _refuse(detail: str) -> None:
+    """Turn a refusal into a clean exit rather than a traceback. Never returns."""
+    _err(f"Refused. {detail}")
+    raise typer.Exit(code=1)
 
-    Read back from the session rather than assumed from the `--source-org` argument,
-    because `auth/token/full` silently ignores a non-numeric org identifier and falls back
-    to the caller's default Org. Attributing a scan to the Org that was ASKED for rather
-    than the one it ran in would mislabel every blocked Model in the report.
+
+def _target_exclusion(source_client, source_profile: Optional[str],
+                      target_profile: Optional[str]) -> Optional[int]:
+    """Source Org id to exclude from target lookups, or `None` across clusters.
+
+    Org ids are only meaningful within one cluster -- `Primary` is `0` on both -- so
+    excluding by id across clusters would refuse a legitimate Primary-to-Primary target.
+    Same test as `import_mode` uses for the write mode: profiles equal means one cluster.
     """
-    try:
-        current = (client.get("/api/rest/2.0/auth/session/user").json()
-                   or {}).get("current_org") or {}
-        return current.get("id")
-    except (Exception, SystemExit):
+    from ts_cli.migrate import discover
+
+    if source_profile != target_profile:
         return None
+    return discover.owning_org_id(source_client)
 
 
 def _resolve_scan_models(client, model: List[str], all_models: bool,
@@ -87,7 +101,7 @@ def _resolve_scan_models(client, model: List[str], all_models: bool,
     if all_models:
         # Restrict to Models this Org OWNS. Without it a Primary-owned Model is counted
         # once per tenant Org and reported as each tenant's blocker -- observed live.
-        return discover.list_models(client, owner_org_id=_owning_org_id(client))
+        return discover.list_models(client, owner_org_id=discover.owning_org_id(client))
 
     identifiers = list(model)
     if models_file:
@@ -103,6 +117,7 @@ def _resolve_scan_models(client, model: List[str], all_models: bool,
         identifiers += [str(row[0]).strip() for row in cursor.fetchall()]
 
     resolved: List[dict] = []
+    owner = discover.owning_org_id(client)
     for identifier in [i for i in identifiers if i]:
         # A GUID resolves as-is; a name has to be looked up, and an unknown name is
         # reported rather than skipped -- a silently-dropped Model would understate the
@@ -110,9 +125,14 @@ def _resolve_scan_models(client, model: List[str], all_models: bool,
         if "-" in identifier and len(identifier) >= 32:
             resolved.append({"guid": identifier, "name": identifier})
             continue
-        guid = discover.find_model_by_name(client, identifier)
+        # This Org's OWN Model. A published master visible in the Org is not this tenant's
+        # blocker, and counting it as one overstates the number the scan exists to produce.
+        try:
+            guid = discover.find_source_model(client, identifier, owner)
+        except discover.AmbiguousModelName as exc:
+            _refuse(str(exc))
         if not guid:
-            _err(f"warning: no Model named '{identifier}' — not scanned")
+            _err(f"warning: no Model named '{identifier}' owned by this Org — not scanned")
             continue
         resolved.append({"guid": guid, "name": identifier})
     return resolved
@@ -268,7 +288,12 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
     from ts_cli.migrate import discover
     from ts_cli.migrate.apply_plan import validate_apply
 
-    guids_by_name = {n: discover.find_model_by_name(source_client, n) for n in names}
+    owner = discover.owning_org_id(source_client)
+    try:
+        guids_by_name = {n: discover.find_source_model(source_client, n, owner)
+                         for n in names}
+    except discover.AmbiguousModelName as exc:
+        _refuse(str(exc))
     problems = validate_apply(
         rows, blocked_model_guids=blocked,
         model_guids_by_name={k: v for k, v in guids_by_name.items() if v})
@@ -308,8 +333,9 @@ def apply_migration(
     from pathlib import Path
 
     from ts_cli.migrate import apply_exec, classify, discover
-    from ts_cli.migrate.apply_plan import (build_apply_plan, column_map, import_mode,
-                                           new_ledger, pending_steps, record_completed,
+    from ts_cli.migrate.apply_plan import (build_apply_plan, column_map,
+                                           find_self_repoint, import_mode, new_ledger,
+                                           pending_steps, record_completed,
                                            record_failure, render_plan)
     from ts_cli.migrate.sets_scan import blocked_model_guids
 
@@ -327,11 +353,22 @@ def apply_migration(
     _validate_or_exit(source_client, rows, blocked, names)
 
     mode = import_mode(source_org, target_org, source_profile, target_profile)
-    views, content, shielded, targets = _classify_scope(
-        source_client, target_client, names)
+    try:
+        views, content, shielded, targets = _classify_scope(
+            source_client, target_client, names,
+            exclude_owner_org_id=_target_exclusion(source_client, source_profile,
+                                                   target_profile))
+    except discover.AmbiguousModelName as exc:
+        _refuse(str(exc))
     if not targets:
-        _err("No published Model in the target Org matches the source Model name(s). "
-             "Publish it before migrating content onto it.")
+        _err("No published Model in the target Org matches the source Model name(s), "
+             "other than the source Model itself. Publish the master into the target Org "
+             "before migrating content onto it.")
+        raise typer.Exit(code=1)
+    for name in find_self_repoint(targets):
+        _err(f"Refused. '{name}': the migration target is the source Model itself. "
+             f"Repointing content onto the object it is being moved off is a no-op that "
+             f"reports success and moves nothing.")
         raise typer.Exit(code=1)
 
     plan = build_apply_plan({"source": source_org or "source",
@@ -371,21 +408,29 @@ def apply_migration(
          "users over.")
 
 
-def _classify_scope(source_client, target_client, model_names):
+def _classify_scope(source_client, target_client, model_names, exclude_owner_org_id=None):
     """Split the scope into Views, chargeable content, SHIELDED content, and targets.
 
     Shielded content needs no column rewriting -- the View's exposed names do not change.
     It is returned separately rather than dropped, because in a new-Org run it still has
     to be MOVED, and omitting it is silent data loss.
+
+    Both lookups are OWNERSHIP-AWARE, not name-only: in a same-Org run the tenant's Model
+    and the published master share a name, so a bare lookup can return the master as the
+    source or the source as the target (BL-152).
     """
     from ts_cli.migrate import classify, discover
 
+    owner = discover.owning_org_id(source_client)
     views, content, shielded, targets = [], [], [], []
     for name in model_names:
-        source_guid = discover.find_model_by_name(source_client, name)
-        target_guid = discover.find_model_by_name(target_client, name)
+        source_guid = discover.find_source_model(source_client, name, owner)
+        target_guid = discover.find_target_model(
+            target_client, name,
+            exclude_owner_org_id=exclude_owner_org_id, exclude_guid=source_guid)
         if target_guid:
-            targets.append({"guid": target_guid, "name": name})
+            targets.append({"guid": target_guid, "name": name,
+                            "source_guid": source_guid})
         if not source_guid:
             continue
         deps = discover.dependents_through_views(source_client, source_guid)

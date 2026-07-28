@@ -99,6 +99,22 @@ def find_rename_collisions(rows) -> List[str]:
     return problems
 
 
+def find_self_repoint(targets: Sequence[Mapping[str, Any]]) -> List[str]:
+    """Names whose migration target IS the source Model. Empty list means go.
+
+    A repoint onto the object being migrated off is a **silent no-op**: the rename map is
+    empty, every column matches itself, the plan runs green and nothing moves. It surfaces
+    only when someone deletes the "old" Model and the content breaks (BL-152).
+
+    The target lookup now excludes the source object by GUID, so this should be
+    unreachable. It is kept as a plan-time assertion precisely because the previous
+    architecture had the same guard, dropped it in the rewrite, and the case came straight
+    back -- an invariant worth restating cheaply where it is cheap to check.
+    """
+    return [str(t.get("name") or "?") for t in targets or ()
+            if t.get("source_guid") and t.get("source_guid") == t.get("guid")]
+
+
 def validate_apply(rows: Sequence[ColumnMappingRow],
                    blocked_model_guids: Optional[Set[str]] = None,
                    model_guids_by_name: Optional[Dict[str, str]] = None) -> List[str]:

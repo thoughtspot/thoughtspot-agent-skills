@@ -530,3 +530,24 @@ def test_the_share_step_carries_the_TARGET_so_it_can_find_the_stack():
     the content, so the step needs to know which Model it is granting beneath."""
     step = [s for s in _plan() if s["step"] == STEP_SHARE][0]
     assert step["target"]["guid"] == "tgt"
+
+
+from ts_cli.migrate.apply_plan import find_self_repoint  # noqa: E402
+
+
+def test_a_target_that_IS_the_source_is_refused():
+    """The same-Org no-op (BL-152): ORG1 held its own Model and the published master under
+    one name, the target lookup returned the source, and the run reported READY with an
+    empty rename map. Nothing moved, and nothing failed."""
+    assert find_self_repoint([{"name": "T2_PUBLISH_MODEL", "guid": "9917a017",
+                               "source_guid": "9917a017"}]) == ["T2_PUBLISH_MODEL"]
+
+
+def test_a_genuine_published_target_passes():
+    assert find_self_repoint([{"name": "M", "guid": "master", "source_guid": "own"}]) == []
+
+
+def test_a_target_with_no_known_source_is_not_flagged():
+    """`source_guid` absent means the source lookup found nothing -- a different problem,
+    reported elsewhere. Flagging it here would blame the wrong thing."""
+    assert find_self_repoint([{"name": "M", "guid": "master"}]) == []
