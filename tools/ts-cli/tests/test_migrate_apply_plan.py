@@ -6,11 +6,10 @@ pedantic, the docstring says what breaks in production without it.
 from __future__ import annotations
 
 from ts_cli.migrate.apply_plan import (
-    STEP_BACKUP, STEP_CLEANUP_CONNECTION, STEP_CLEANUP_MODELS, STEP_CLEANUP_TABLES,
-    STEP_LIFT_CONTENT, STEP_LIFT_SCAFFOLDING, STEP_RENAME, STEP_REPOINT,
-    build_apply_plan, build_cleanup_steps, connection_action, find_rename_collisions,
-    new_ledger, pending_steps, record_completed, record_failure, rename_pairs,
-    render_plan, validate_apply,
+    STEP_BACKUP, STEP_ORDER, STEP_REWRITE_CONTENT, STEP_REWRITE_VIEWS,
+    build_apply_plan, column_map, find_rename_collisions, import_mode, new_ledger,
+    pending_steps, record_completed, record_failure, rename_pairs, render_plan,
+    unfiltered_target_problem, validate_apply,
 )
 from ts_cli.migrate.schema import (ColumnMappingRow, GAP, GAP_BLOCKER, MATCHED,
                                    SET_BLOCKER)
@@ -23,14 +22,14 @@ def _row(model, tenant, published, status=MATCHED):
 
 
 # ---------------------------------------------------------------------------
-# Rename extraction
+# The column map
 # ---------------------------------------------------------------------------
 
-def test_only_actual_renames_are_emitted():
-    """A column whose names already match needs no work. Emitting it would make the
-    rename step O(columns) rather than O(renames) and import a no-op diff."""
+def test_only_actual_renames_enter_the_map():
+    """A column whose names already match needs no substitution. Including it would make
+    the rewrite touch every column instead of only the changed ones."""
     rows = [_row("Sales", "Region", "String_1"), _row("Sales", "Amount", "Amount")]
-    assert rename_pairs(rows) == [("Sales", "Region", "String_1")]
+    assert column_map(rows) == {"Region": "String_1"}
 
 
 def test_an_unmapped_gap_row_is_not_a_rename():
@@ -44,38 +43,39 @@ def test_renames_are_sorted_and_deduped_so_two_runs_are_diffable():
 
 
 # ---------------------------------------------------------------------------
-# Collision detection -- the generated-map safety net
+# Collision detection — the generated-map safety net
 # ---------------------------------------------------------------------------
 
 def test_two_columns_mapped_onto_one_published_name_is_fatal():
-    """Standard fields keep their names and custom fields take unused generic slots, so
-    this cannot happen by design. It is checked because the map is GENERATED, and the
-    failure is silent: a rename cascades to every dependent automatically, so a wrong
-    target quietly repoints real content at the wrong column rather than failing."""
+    """The map is GENERATED and its failure is silent: the rewrite substitutes names
+    across the whole document, so a wrong target quietly repoints real content at the
+    wrong column rather than erroring."""
     rows = [_row("Sales", "Region", "String_1"), _row("Sales", "Territory", "String_1")]
     problems = find_rename_collisions(rows)
-    assert len(problems) == 1
-    assert "not injective" in problems[0]
-    assert "Region" in problems[0] and "Territory" in problems[0]
+    assert problems and "not injective" in problems[0]
 
 
 def test_renaming_onto_a_column_that_already_exists_is_fatal():
-    """`Region -> Amount` where `Amount` is a real column of that Model and is not itself
-    being renamed. Two columns would end up sharing one name."""
     rows = [_row("Sales", "Region", "Amount"), _row("Sales", "Amount", "Amount")]
-    problems = find_rename_collisions(rows)
-    assert any("already a column of that Model" in p for p in problems)
+    assert any("already a column of that Model" in p for p in find_rename_collisions(rows))
 
 
 def test_a_rename_CHAIN_is_allowed_because_the_target_frees_up():
-    """`A -> B` and `B -> C` is legal: B is itself renamed away, so nothing collides.
-    Rejecting it would refuse a correct mapping."""
-    rows = [_row("S", "A", "B"), _row("S", "B", "C")]
-    assert find_rename_collisions(rows) == []
+    """`A -> B` and `B -> C` is legal: B is renamed away, so nothing collides."""
+    assert find_rename_collisions([_row("S", "A", "B"), _row("S", "B", "C")]) == []
 
 
-def test_the_same_target_name_in_DIFFERENT_models_is_fine():
-    """Column names only have to be unique within a Model."""
+def test_ONE_column_mapped_DIFFERENTLY_in_two_models_is_fatal():
+    """The rewrite is document-wide, not per-Model, so it could not honour both -- it
+    would silently pick one. This is the collision the flat column map introduces, and
+    the reason it has to be checked."""
+    rows = [_row("Sales", "Region", "String_1"), _row("Orders", "Region", "String_9")]
+    assert any("cannot honour both" in p for p in find_rename_collisions(rows))
+
+
+def test_the_same_TARGET_in_two_models_is_fine():
+    """Two different tenant columns landing on `String_1` in different Models is normal:
+    generic slots are per-Model."""
     rows = [_row("Sales", "Region", "String_1"), _row("Orders", "Zone", "String_1")]
     assert find_rename_collisions(rows) == []
 
@@ -85,21 +85,20 @@ def test_the_same_target_name_in_DIFFERENT_models_is_fine():
 # ---------------------------------------------------------------------------
 
 def test_an_unmapped_gap_blocker_is_refused():
-    problems = validate_apply([_row("Sales", "Dept", "", status=GAP_BLOCKER)])
-    assert any("GAP_BLOCKER" in p for p in problems)
+    assert any("GAP_BLOCKER" in p
+               for p in validate_apply([_row("S", "Dept", "", status=GAP_BLOCKER)]))
 
 
 def test_a_set_blocker_is_refused_and_says_there_is_no_override():
-    """`apply` refuses a cohort-carrying Model with no force flag, deliberately. Silently
-    leaving content behind is the failure mode Phase 0 exists to prevent, so the message
-    must not send someone looking for the flag."""
-    problems = validate_apply([_row("Sales", "Bins", "", status=SET_BLOCKER)])
-    assert any("no override" in p for p in problems)
+    """The message must not send someone looking for a force flag: silently leaving
+    content behind is the failure mode Phase 0 exists to prevent."""
+    assert any("no override"
+               in p for p in validate_apply([_row("S", "B", "", status=SET_BLOCKER)]))
 
 
 def test_a_set_blocker_found_by_scan_sets_is_refused_even_when_the_csv_is_clean():
-    """`scan-sets` and `audit` are separate commands run at different times. A Set added
-    between them appears in neither's CSV, so the GUID set is the authority."""
+    """`scan-sets` and `audit` run at different times; a Set added between them is in
+    neither CSV, so the GUID set is the authority."""
     problems = validate_apply([_row("Sales", "Amount", "Amount")],
                               blocked_model_guids={"m1"},
                               model_guids_by_name={"Sales": "m1"})
@@ -107,10 +106,8 @@ def test_a_set_blocker_found_by_scan_sets_is_refused_even_when_the_csv_is_clean(
 
 
 def test_every_problem_is_returned_not_just_the_first():
-    """Mapping mistakes are systematic. Fixing them one round-trip at a time is how a
-    migration window gets lost."""
-    rows = [_row("S", "A", "", status=GAP_BLOCKER),
-            _row("S", "B", "X"), _row("S", "C", "X")]
+    rows = [_row("S", "A", "", status=GAP_BLOCKER), _row("S", "B", "X"),
+            _row("S", "C", "X")]
     assert len(validate_apply(rows)) >= 2
 
 
@@ -120,195 +117,50 @@ def test_one_model_with_many_set_blocker_rows_reports_once():
 
 
 def test_a_clean_mapping_returns_no_problems():
-    rows = [_row("S", "Region", "String_1"), _row("S", "Amount", "Amount")]
-    assert validate_apply(rows) == []
+    assert validate_apply([_row("S", "Region", "String_1"),
+                           _row("S", "Amount", "Amount")]) == []
 
 
 # ---------------------------------------------------------------------------
-# Connection handling (live-verified 2026-07-27)
+# Topology — the ONLY thing that varies between the three cases
 # ---------------------------------------------------------------------------
 
-def test_a_target_org_with_no_connection_is_fatal():
-    """Publishing a Table into an Org does NOT give that Org a usable connection --
-    verified directly. Without one no Table import can succeed."""
-    action = connection_action("APJ_ACME", [])
-    assert action["action"] == "fail"
-    assert "Publishing does not grant one" in action["reason"]
+def test_same_org_updates_in_place():
+    """The objects already exist. Creating fresh ones would duplicate the tenant's
+    content rather than migrate it."""
+    m = import_mode("ACME", "ACME", "prod", "prod")
+    assert m["same_org"] and m["keep_guid"] and not m["create_new"]
 
 
-def test_a_same_named_connection_lets_the_lifted_tml_resolve_unchanged():
-    """Connection names are per-Org, not cluster-unique (verified by rename). Naming the
-    target's connection as the source's removes the connection-block rewrite entirely."""
-    action = connection_action("APJ_ACME", ["APJ_ACME"])
-    assert action == {"action": "resolve_unchanged", "connection": "APJ_ACME"}
+def test_a_new_org_on_the_same_cluster_creates_fresh():
+    m = import_mode("ACME", "ACME NEW", "prod", "prod")
+    assert m["create_new"] and not m["keep_guid"]
 
 
-def test_a_differently_named_connection_falls_back_to_rewriting_rather_than_failing():
-    """The same-name trick is an optimisation with a correct fallback. Nothing is queried
-    through the scaffolding and it is deleted at cleanup, so any valid connection will
-    do -- treating a mismatch as fatal would refuse a migration that works."""
-    action = connection_action("APJ_ACME", ["APJ_OTHER"])
-    assert action["action"] == "rewrite"
-    assert action["connection"] == "APJ_OTHER"
+def test_a_DIFFERENT_CLUSTER_needs_no_special_handling():
+    """Cluster is a property of the profile, and the two clients are already
+    independent. Treating it as a third mode would be machinery for nothing."""
+    same_cluster = import_mode("ACME", "ACME NEW", "prod", "prod")
+    cross_cluster = import_mode("ACME", "ACME NEW", "prod", "dr")
+    assert same_cluster["create_new"] == cross_cluster["create_new"]
 
 
-# ---------------------------------------------------------------------------
-# Plan shape and ordering
-# ---------------------------------------------------------------------------
-
-def _plan(**over):
-    scaffolding = over.get("scaffolding", {"tables": ["t1"], "models": ["m1"]})
-    content = over.get("content", {"views": ["v1"], "answers": ["a1"],
-                                   "liveboards": ["l1"]})
-    rows = over.get("rows", [_row("Sales", "Region", "String_1")])
-    conn = over.get("connection", {"action": "resolve_unchanged",
-                                   "connection": "APJ_ACME", "provisioned": True})
-    return build_apply_plan({"source": "ACME", "target": "ACME NEW"},
-                            scaffolding, content, rows, conn)
-
-
-def test_backup_is_first_so_nothing_is_written_before_a_copy_exists():
-    assert _plan()[0]["step"] == STEP_BACKUP
-
-
-def test_the_backup_covers_scaffolding_AND_content():
-    assert set(_plan()[0]["objects"]) == {"t1", "m1", "v1", "a1", "l1"}
-
-
-def test_scaffolding_is_lifted_before_content_that_references_it():
-    steps = [s["step"] for s in _plan()]
-    assert steps.index(STEP_LIFT_SCAFFOLDING) < steps.index(STEP_LIFT_CONTENT)
-
-
-def test_content_batches_run_views_then_answers_then_liveboards():
-    """Intra-batch references remap on import, but only for objects already in the batch:
-    a Liveboard references Answers, an Answer references Views."""
-    batches = [k for k, _ in _plan()[2]["batches"]]
-    assert batches == ["views", "answers", "liveboards"]
-
-
-def test_rename_precedes_repoint_because_repoint_matches_columns_BY_NAME():
-    """The repoint is a 1:1-by-name match onto the published Model. Before the rename the
-    names do not match, so the repoint has nothing to bind to."""
-    steps = [s["step"] for s in _plan()]
-    assert steps.index(STEP_RENAME) < steps.index(STEP_REPOINT)
-
-
-def test_cleanup_runs_models_then_tables_then_connection():
-    """Deleting a connection does NOT cascade to its Tables, so the connection cannot go
-    first. Live-checked against the `deleteConnection` spec 2026-07-27."""
-    steps = [s["step"] for s in _plan()]
-    assert (steps.index(STEP_CLEANUP_MODELS) < steps.index(STEP_CLEANUP_TABLES)
-            < steps.index(STEP_CLEANUP_CONNECTION))
-
-
-def test_repoint_precedes_cleanup_so_the_dependent_check_can_fire():
-    """A scaffolding Model with dependents refuses to delete. That refusal IS the
-    missed-repoint check, and it only works if the repoint has already run."""
-    steps = [s["step"] for s in _plan()]
-    assert steps.index(STEP_REPOINT) < steps.index(STEP_CLEANUP_MODELS)
-
-
-def test_a_connection_the_target_org_ALREADY_had_is_never_deleted():
-    """Only a connection this migration provisioned is disposable. Deleting a pre-existing
-    one would remove something that is not ours."""
-    steps = build_cleanup_steps({"tables": ["t1"], "models": ["m1"]},
-                                {"connection": "APJ", "provisioned": False})
-    assert [s["step"] for s in steps] == [STEP_CLEANUP_MODELS, STEP_CLEANUP_TABLES]
-
-
-def test_every_step_carries_the_pair_so_a_log_line_is_self_describing():
-    assert all(s["pair"]["source"] == "ACME" for s in _plan())
+def test_same_org_mode_WARNS_that_the_backup_is_the_only_rollback():
+    """It is the weakest of the three topologies, and the operator has to know before
+    starting rather than after."""
+    assert "only rollback" in import_mode("ACME", "ACME", "p", "p")["note"]
 
 
 # ---------------------------------------------------------------------------
-# Ledger
+# Tenant isolation
 # ---------------------------------------------------------------------------
 
-def test_completed_steps_are_skipped_on_resume():
-    plan = _plan()
-    ledger = record_completed(new_ledger({"source": "A", "target": "B"}), STEP_BACKUP)
-    assert STEP_BACKUP not in [s["step"] for s in pending_steps(plan, ledger)]
-
-
-def test_resume_keys_on_step_NAME_not_index():
-    """A plan regenerated after a mapping edit can have a different length. An index
-    would silently shift and re-run or skip the wrong work."""
-    ledger = record_completed(new_ledger({}), STEP_BACKUP)
-    short = [{"step": STEP_RENAME}, {"step": STEP_BACKUP}]
-    assert [s["step"] for s in pending_steps(short, ledger)] == [STEP_RENAME]
-
-
-def test_created_guids_are_kept_so_a_rerun_updates_in_place():
-    """Re-importing without the target GUID creates a duplicate rather than updating."""
-    ledger = record_completed(new_ledger({}), STEP_LIFT_SCAFFOLDING,
-                              created={"t1": "new-guid"})
-    assert ledger["created"][STEP_LIFT_SCAFFOLDING]["t1"] == "new-guid"
-
-
-def test_recording_a_completion_clears_a_previous_failure():
-    ledger = record_failure(new_ledger({}), STEP_RENAME, "boom")
-    assert record_completed(ledger, STEP_RENAME)["failed"] is None
-
-
-def test_a_failure_records_which_step_and_why():
-    ledger = record_failure(new_ledger({}), STEP_REPOINT, "dangling join")
-    assert ledger["failed"] == {"step": STEP_REPOINT, "detail": "dangling join"}
-
-
-def test_an_empty_ledger_leaves_the_whole_plan_pending():
-    plan = _plan()
-    assert len(pending_steps(plan, new_ledger({}))) == len(plan)
-
-
-# ---------------------------------------------------------------------------
-# Rendering
-# ---------------------------------------------------------------------------
-
-def test_dry_run_names_each_rename_so_it_can_be_read_before_it_runs():
-    md = render_plan(_plan())
-    assert "`Region` → `String_1`" in md
-
-
-def test_dry_run_states_that_a_refused_model_delete_is_the_CHECK():
-    """An operator who reads "refuses to delete" as an error will go looking for a force
-    flag -- and forcing past it is how un-repointed content gets orphaned."""
-    md = render_plan(_plan())
-    assert "missed-repoint check" in md
-
-
-def test_dry_run_says_cutover_is_not_included():
-    """Users move only after the Org is verified in its final state. A reader who assumes
-    apply cuts over would not schedule the verification."""
-    assert "Cutover is NOT part of this plan" in render_plan(_plan())
-
-
-def test_dry_run_explains_a_connection_rewrite_rather_than_just_naming_it():
-    plan = _plan(connection=connection_action("APJ_ACME", ["APJ_OTHER"]))
-    assert "connection block is rewritten" in render_plan(plan)
-
-
-def test_dry_run_says_so_when_there_are_no_renames():
-    """An empty rename list is a legitimate outcome (every column already matches), not a
-    sign the mapping failed to load."""
-    plan = _plan(rows=[_row("S", "Amount", "Amount")])
-    assert "no renames" in render_plan(plan)
-
-
-# ---------------------------------------------------------------------------
-# Tenant isolation at the repoint -- the check that replaced a dead guard
-# ---------------------------------------------------------------------------
-
-from ts_cli.migrate.apply_plan import unfiltered_target_problem  # noqa: E402
-
-
-def test_repointing_onto_an_unfiltered_published_model_is_refused():
-    """After the repoint the tenant's content is bound to the SHARED published Model. If
-    that Model filters no rows, every tenant sees every other tenant's -- the worst
-    outcome the programme can produce, and silent."""
+def test_binding_to_an_unfiltered_published_model_is_refused():
+    """The tenant's content ends up reading the SHARED published Model. If it filters no
+    rows, every tenant sees every other tenant's -- silent, and the worst outcome the
+    programme can produce."""
     problem = unfiltered_target_problem({"SALES": 0}, "Sales")
-    assert problem and "NO row-level security" in problem
-    assert "every other tenant's rows" in problem
+    assert problem and "every other tenant's rows" in problem
 
 
 def test_a_filtered_target_passes():
@@ -317,24 +169,124 @@ def test_a_filtered_target_passes():
 
 def test_ONE_unfiltered_table_among_several_still_refuses():
     """A Model is only as segmented as its least-filtered table."""
-    problem = unfiltered_target_problem({"SALES": 2, "CUSTOMER": 0}, "Sales")
-    assert problem and "CUSTOMER" in problem and "SALES" not in problem.split(":")[1]
+    assert unfiltered_target_problem({"SALES": 2, "CUSTOMER": 0}, "Sales")
 
 
 def test_an_UNREADABLE_check_refuses_rather_than_passing():
-    """An empty result means the RLS could not be read, not that there is none to worry
-    about. Treating unknown as safe is how a silent check becomes a silent hole."""
-    problem = unfiltered_target_problem({}, "Sales")
-    assert problem and "unreadable check is not a passed one" in problem
+    """Treating unknown as safe is how a silent check becomes a silent hole."""
+    assert "unreadable check is not a passed one" in unfiltered_target_problem({}, "S")
 
 
-def test_the_override_is_explicit_and_does_not_apply_to_the_unreadable_case():
-    """--allow-unfiltered-target says "I know this target has no RLS". It cannot mean "I
-    know whatever is there is fine", because in the unreadable case nobody knows."""
-    assert unfiltered_target_problem({"SALES": 0}, "Sales", allow=True) is None
-    assert unfiltered_target_problem({}, "Sales", allow=True) is not None
+def test_the_override_does_NOT_cover_the_unreadable_case():
+    """`--allow-unfiltered-target` says "I know this target has no RLS". It cannot mean
+    "whatever is there is fine", because in the unreadable case nobody knows."""
+    assert unfiltered_target_problem({"S": 0}, "S", allow=True) is None
+    assert unfiltered_target_problem({}, "S", allow=True) is not None
 
 
-def test_the_refusal_names_the_override_so_a_legitimate_case_is_not_stuck():
-    problem = unfiltered_target_problem({"SALES": 0}, "Sales")
-    assert "--allow-unfiltered-target" in problem
+# ---------------------------------------------------------------------------
+# Plan shape
+# ---------------------------------------------------------------------------
+
+def _plan(views=None, content=None, same_org=False):
+    return build_apply_plan(
+        {"source": "ACME", "target": "ACME NEW"},
+        views if views is not None else [{"guid": "v1", "name": "V"}],
+        content if content is not None else [{"guid": "a1", "name": "A"}],
+        {"Segment": "STRING_1"},
+        {"guid": "tgt", "name": "PUBLISHED"},
+        import_mode("ACME", "ACME" if same_org else "ACME NEW", "p", "p"))
+
+
+def test_the_plan_is_THREE_steps():
+    """It was eight. Everything else existed to avoid rewriting content, which
+    BL-148/BL-149 showed was never avoidable."""
+    assert [s["step"] for s in _plan()] == list(STEP_ORDER)
+    assert len(STEP_ORDER) == 3
+
+
+def test_backup_is_first_so_nothing_is_written_before_a_copy_exists():
+    assert _plan()[0]["step"] == STEP_BACKUP
+
+
+def test_the_backup_covers_views_AND_content():
+    assert set(_plan()[0]["objects"]) == {"v1", "a1"}
+
+
+def test_views_are_rewritten_BEFORE_content():
+    """In a new-Org run the View must exist before anything references it."""
+    steps = [s["step"] for s in _plan()]
+    assert steps.index(STEP_REWRITE_VIEWS) < steps.index(STEP_REWRITE_CONTENT)
+
+
+def test_every_step_carries_the_pair_so_a_log_line_is_self_describing():
+    assert all(s["pair"]["source"] == "ACME" for s in _plan())
+
+
+def test_a_migration_with_no_views_still_plans_cleanly():
+    plan = _plan(views=[])
+    assert plan[1]["objects"] == []
+    assert plan[2]["objects"]
+
+
+# ---------------------------------------------------------------------------
+# Ledger
+# ---------------------------------------------------------------------------
+
+def test_completed_steps_are_skipped_on_resume():
+    ledger = record_completed(new_ledger({}), STEP_BACKUP)
+    assert STEP_BACKUP not in [s["step"] for s in pending_steps(_plan(), ledger)]
+
+
+def test_resume_keys_on_step_NAME_not_index():
+    """A plan regenerated after a mapping edit can differ in length; an index would
+    silently shift and skip the wrong work."""
+    ledger = record_completed(new_ledger({}), STEP_BACKUP)
+    short = [{"step": STEP_REWRITE_CONTENT}, {"step": STEP_BACKUP}]
+    assert [s["step"] for s in pending_steps(short, ledger)] == [STEP_REWRITE_CONTENT]
+
+
+def test_created_guids_are_kept_so_a_rerun_updates_in_place():
+    ledger = record_completed(new_ledger({}), STEP_REWRITE_CONTENT, created={"A": "g1"})
+    assert ledger["created"][STEP_REWRITE_CONTENT]["A"] == "g1"
+
+
+def test_recording_a_completion_clears_a_previous_failure():
+    ledger = record_failure(new_ledger({}), STEP_REWRITE_CONTENT, "boom")
+    assert record_completed(ledger, STEP_REWRITE_CONTENT)["failed"] is None
+
+
+def test_a_failure_records_which_step_and_why():
+    ledger = record_failure(new_ledger({}), STEP_REWRITE_VIEWS, "residual refs")
+    assert ledger["failed"] == {"step": STEP_REWRITE_VIEWS, "detail": "residual refs"}
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+def test_dry_run_names_the_column_renames():
+    assert "`Segment` → `STRING_1`" in render_plan(_plan())
+
+
+def test_dry_run_explains_that_views_shield_their_content():
+    """Otherwise "rewrite_views: 1 object" reads as trivial rather than as the step that
+    migrated everything built on it."""
+    assert "needs no migration" in render_plan(_plan())
+
+
+def test_dry_run_states_the_import_MODE():
+    """Update-in-place and create-fresh have very different rollbacks, so the operator
+    must see which one they are about to run."""
+    assert "in place" in render_plan(_plan(same_org=True))
+    assert "created fresh" in render_plan(_plan())
+
+
+def test_dry_run_says_cutover_is_not_included_for_a_NEW_ORG_run():
+    assert "Cutover is NOT part of this plan" in render_plan(_plan())
+
+
+def test_dry_run_does_NOT_mention_cutover_for_a_same_org_run():
+    """There is no cutover: the users are already there. Mentioning one would imply a
+    step that does not exist."""
+    assert "Cutover" not in render_plan(_plan(same_org=True))

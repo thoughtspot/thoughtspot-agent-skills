@@ -47,92 +47,103 @@ Model with **no override** — do not go looking for the flag.
 **Do not batch a Sets-using tenant with clean ones.** Set usage is a risk class in the
 wave plan, not a stop on the programme.
 
-## Step 2 — Provision the target Org and its connection
+## Step 2 — Make sure the published Model exists in the target
 
-The clean Org needs **its own connection, named exactly as the source Org's**.
+Publish the governed Model into the target Org with `/ts-publish-orgs`, and use
+`/ts-setup-tenancy` if the Org itself needs creating.
 
-Connection names are per-Org (verified live), so `ACME NEW` may hold an `APJ_ACME` while
-`ACME` still does — and then every lifted Table's TML resolves **unchanged**. A different
-name still works; `apply` rewrites one field per Table. **No connection at all is fatal**,
-because publishing a Table into an Org does *not* give that Org a usable connection.
-
-Use `/ts-setup-tenancy` or `ts tenancy apply`. Provision the connection yourself — it needs
-warehouse credentials, which must never pass through this conversation.
-
-Then publish the governed Model into the new Org with `/ts-publish-orgs`.
+**No connection provisioning is needed.** Nothing is lifted, so nothing carries a
+`connection` block. That was a precondition of the old architecture and is simply gone.
 
 ## Step 3 — Audit, and read the mapping
 
 ```bash
-ts migrate audit --source-org <TENANT> --target-org <TENANT_NEW> --all-models -o ./plan/ -p <profile>
+ts migrate audit --source-org <TENANT> --target-org <TARGET> --all-models -o ./plan/ -p <profile>
 ```
 
 Produces `plan/column-mapping.csv`, one row per tenant column, and `audit-report.md`.
 
-**This is the step a human must actually read.** Every `GAP_BLOCKER` row has a blank
-`published_column` for you to fill: a column the tenant's content uses that the published
-Model does not have. Ask the tenant what it should map to; do not guess. `MATCHED` rows are
-already resolved and need nothing.
+**Read the effort section first.** It tells you the size of the job, and it is *not* the
+object count:
 
-Check the three target-side findings in the report: no connection in the target (fatal), a
-connection name that differs from the source's (a warning — it triggers the rewrite path),
-and a scaffolding Table colliding on the same connection (fatal, but unreachable in the
-per-tenant-Org topology).
+```
+**47 dependent object(s)**, of which **16 need rewriting**.
+31 are shielded by 3 View(s) and cost nothing.
+```
+
+Content built on a View is free: repointing the View preserves the names its dependents
+see, so everything above it migrates for nothing. A View-heavy tenant is far cheaper than
+its object count suggests, and this is the only place that shows it.
+
+Two warnings in that section matter:
+
+- **Content sitting directly on a Table.** It still needs rewriting, and a Model-level
+  change never reaches it, so anything assuming Model-level coverage misses it.
+- **Unresolved dependents.** Counted as chargeable, because an unresolved dependency is
+  not a safe one to skip.
+
+**Then fill the mapping.** Every `GAP_BLOCKER` row has a blank `published_column`: a
+column the tenant's content uses that the published Model does not have. Ask the tenant;
+do not guess. `MATCHED` rows need nothing.
 
 ## Step 4 — Read the plan before running it
 
 ```bash
-ts migrate apply --source-org <TENANT> --target-org <TENANT_NEW> \
+ts migrate apply --source-org <TENANT> --target-org <TARGET> \
   -d ./plan --sets-scan ./scan/sets-scan.json --dry-run
 ```
 
-Every step is destructive in someone's Org. `--dry-run` prints the ordered plan and writes
-nothing. Read it, then drop `--dry-run`.
+Check the **mode** line. `updated in place` and `created fresh` have very different
+rollbacks, and the plan says which you are about to run.
 
-`apply` refuses the run outright — listing **every** problem, not the first — if a
+`apply` refuses the whole run — listing **every** problem, not the first — if a
 `GAP_BLOCKER` is unmapped, a Model carries a Set, or the rename map is unusable.
 
 ## Step 5 — Apply
 
 ```bash
-ts migrate apply --source-org <TENANT> --target-org <TENANT_NEW> -d ./plan --sets-scan ./scan/sets-scan.json
+ts migrate apply --source-org <TENANT> --target-org <TARGET> -d ./plan --sets-scan ./scan/sets-scan.json
 ```
+
+Three steps:
 
 | Step | What it does |
 |---|---|
 | `backup` | Exports everything in scope before anything is written. All-or-nothing |
-| `lift_scaffolding` | Tenant Tables + Models into the target as **one batch**, so intra-batch references remap |
-| `lift_content` | Views → Answers → Liveboards, in that order |
-| `rename` | Tenant column names → published names, **once per column** |
-| `repoint` | Content moved off the scaffolding onto the published Model |
-| `cleanup_*` | Scaffolding deleted: Models, then Tables, then the connection |
+| `rewrite_views` | Repoints Views, **preserving what they expose**, so their content needs nothing |
+| `rewrite_content` | Rewrites the chargeable Answers and Liveboards onto the published Model |
 
-Progress is recorded in `plan/state.json`, so an interrupted run resumes with `--resume`
-instead of redoing work.
+Each object's rewrite changes exactly two things: the data-source reference and the column
+names. Progress is recorded in `plan/state.json`, so an interrupted run resumes with
+`--resume`.
 
-**The rename is the clever part and worth understanding.** Editing only `columns[].name`
-(keeping `column_id`) is an in-place update, so it cascades to every dependent Answer and
-Liveboard automatically. That is what makes the whole approach O(columns) instead of
-O(objects) — and it is also why a *wrong* mapping is dangerous: it silently repoints real
-content at the wrong column rather than erroring. Which is why step 3 is a human read.
+### The three topologies
 
-## Step 6 — Two outcomes that look like errors and are not
+The same command covers all three; only the write mode differs, and it is derived rather
+than configured:
 
-**A scaffolding Model refuses to delete.** This is the **missed-repoint check working**. By
-cleanup, the repoint has run and nothing should reference the scaffolding; dependents mean
-content was left behind. Find it. Deleting past this orphans that content — and it is
-precisely why cleanup is surgical rather than a wholesale Org drop, which would take the
-un-repointed content silently.
+| | Content | Rollback |
+|---|---|---|
+| Same Org, same cluster | updated in place | **the backup only** — weakest |
+| New Org, same cluster | created fresh | delete the Org |
+| New Org, different cluster | created fresh | delete the Org |
 
-**The repoint refuses: the published Model has no row-level security.** This is the
-tenant-isolation check, and it is the most important refusal in the routine. After the
-repoint your tenant's content is bound to the **shared** published Model — if that Model
-filters no rows, every tenant can see every other tenant's. Add RLS to the published
-table(s) before continuing. `--allow-unfiltered-target` exists only for a target that is
-deliberately single-tenant, or segmented in the warehouse instead.
+Cross-cluster needs nothing extra. Tags, schedules and sharing are per-cluster though, so
+they need re-establishing over there.
 
-An **unreadable** check refuses too. Not knowing whether a shared Model is filtered is not
-the same as knowing it is fine.
+## Step 6 — Two refusals that are the system working
+
+**"rewrite incomplete: N source column reference(s) survive."** The coverage gate caught a
+field the rewrite does not know about. **Do not work around it.** Importing anyway
+produces an object that loads and renders wrong, which is the failure this gate exists to
+prevent. The message names the paths; they need adding to the transform.
+
+**"the published Model has NO row-level security."** The tenant-isolation check. After the
+rewrite your tenant's content reads the **shared** published Model, so if it filters no
+rows every tenant sees every other tenant's. Add RLS before continuing.
+`--allow-unfiltered-target` is only for a target that is deliberately single-tenant, or
+segmented in the warehouse. An **unreadable** check refuses too: not knowing whether a
+shared Model filters is not the same as knowing it does.
 
 ## Step 7 — Aliases, once per WAVE
 
@@ -167,9 +178,13 @@ ts migrate rollback --target-org <TENANT_NEW> -d ./plan --dry-run
 ts migrate rollback --target-org <TENANT_NEW> -d ./plan
 ```
 
-Deletes what the ledger records this run as creating. **The source Org is never touched.**
+Deletes what the ledger records this run as creating. **In a new-Org run the source Org is
+never touched**, so it remains authoritative until you cut over.
 
-Abandoning the attempt entirely? Delete the whole Org (`ts tenancy teardown`) — before
+In a **same-Org** run there is nothing to delete: content was updated in place, and
+`plan/backup/` is the rollback. That is why that topology is the weakest of the three.
+
+Abandoning a new-Org attempt entirely? Delete the Org (`ts tenancy teardown`) — before
 cutover it holds nothing but this migration's output.
 
 ## Reference
@@ -185,5 +200,6 @@ cutover it holds nothing but this migration's output.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.0.0 | 2026-07-28 | Rebuild around export/rewrite/import: three steps, no scaffolding, no connection provisioning |
 | 1.1.0 | 2026-07-28 | Replace the dead BL-144 guard with the tenant-isolation check at the repoint |
 | 1.0.0 | 2026-07-27 | Initial release |

@@ -307,11 +307,10 @@ def apply_migration(
     import json as _json
     from pathlib import Path
 
-    from ts_cli.migrate import apply_exec, discover
-    from ts_cli.migrate.apply_plan import (build_apply_plan, connection_action,
+    from ts_cli.migrate import apply_exec, classify, discover
+    from ts_cli.migrate.apply_plan import (build_apply_plan, column_map, import_mode,
                                            new_ledger, pending_steps, record_completed,
-                                           record_failure, render_plan, validate_apply)
-    from ts_cli.migrate.mapping import read_mapping
+                                           record_failure, render_plan)
     from ts_cli.migrate.sets_scan import blocked_model_guids
 
     plan_path = Path(plan_dir)
@@ -324,17 +323,19 @@ def apply_migration(
     source_client = _org_client(source_profile, source_org)
     target_client = _org_client(target_profile, target_org)
 
-    names = {r.model for r in rows}
-    _validate_or_exit(source_client, rows, blocked, sorted(names))
+    names = sorted({r.model for r in rows})
+    _validate_or_exit(source_client, rows, blocked, names)
 
-    scaffolding = discover.scaffolding_objects(source_client, sorted(names))
-    content = discover.bespoke_content(source_client, scaffolding["models"])
-    conn = connection_action(discover.connection_name_of(source_client, scaffolding["tables"]),
-                             discover.connection_names(target_client))
-    conn["provisioned"] = False   # `ts tenancy` provisions it; apply never deletes what it did not create
+    mode = import_mode(source_org, target_org, source_profile, target_profile)
+    views, content, targets = _classify_scope(source_client, target_client, names)
+    if not targets:
+        _err("No published Model in the target Org matches the source Model name(s). "
+             "Publish it before migrating content onto it.")
+        raise typer.Exit(code=1)
 
-    plan = build_apply_plan({"source": source_org or "source", "target": target_org or "target"},
-                            scaffolding, content, rows, conn)
+    plan = build_apply_plan({"source": source_org or "source",
+                             "target": target_org or "target"},
+                            views, content, column_map(rows), targets[0], mode)
     if dry_run:
         print(render_plan(plan))
         _err("Dry run: nothing was changed.")
@@ -361,7 +362,39 @@ def apply_migration(
         _err(f"  {name}: done")
 
     print(_json.dumps(ledger, indent=2))
-    _err("Migration complete. Verify the target Org, THEN cut users over.")
+    _err("Migration complete. Verify the target Org as a REAL non-admin user, then cut "
+         "users over.")
+
+
+def _classify_scope(source_client, target_client, model_names):
+    """Split the migration scope into Views, chargeable content, and the target Model(s).
+
+    Content already shielded by a View is deliberately EXCLUDED: repointing the View
+    covers it, and rewriting it again would be work that can only introduce error.
+    """
+    from ts_cli.migrate import classify, discover
+
+    views, content, targets = [], [], []
+    for name in model_names:
+        source_guid = discover.find_model_by_name(source_client, name)
+        target_guid = discover.find_model_by_name(target_client, name)
+        if target_guid:
+            targets.append({"guid": target_guid, "name": name})
+        if not source_guid:
+            continue
+        deps = discover.dependents_through_views(source_client, source_guid)
+        docs = discover.export_dependents(source_client, deps)
+        refs = [classify.source_refs(d) for d in docs]
+        kinds = {g: classify.kind_of(st) for g, st in discover.subtypes_by_guid(
+            source_client, {r for rs in refs for r in rs}).items()}
+        for dep, ref in zip(deps, refs):
+            item = classify.classify_dependent(dep.get("guid", ""), dep.get("name", ""),
+                                               dep.get("type", ""), ref, kinds)
+            if kinds.get(item["guid"]) == classify.VIEW_BASED:
+                views.append(item)          # the View itself: repoint it
+            elif item["needs_rewrite"]:
+                content.append(item)        # chargeable
+    return views, content, targets
 
 
 def _delete_in_order(client, ordered) -> List[str]:
