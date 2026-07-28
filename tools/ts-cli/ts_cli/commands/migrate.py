@@ -530,3 +530,125 @@ def rollback_migration(
     ledger["rolled_back"] = True
     state_file.write_text(_json.dumps(ledger, indent=2))
     _err("Rollback complete. The source Org was never touched.")
+
+
+@app.command("aliases")
+def wave_aliases(
+    profile: Optional[str] = typer.Option(None, "--profile", "-p",
+                                          help="Profile holding the MASTER Model's cluster. "
+                                               "Read in its default Org, because per-Org "
+                                               "aliases live on the Primary Org's Model."),
+    model: str = typer.Option(..., "--model", "-m",
+                              help="The published master Model (GUID or exact name)."),
+    target_org: List[str] = typer.Option(
+        [], "--target-org",
+        help="Org migrated in THIS wave, whose aliases are being added (repeatable)."),
+    plan_dir: List[str] = typer.Option(
+        [], "--plan-dir", "-d",
+        help="Plan directory holding that Org's column-mapping.csv (repeatable, paired "
+             "positionally with --target-org)."),
+    expect_org: List[str] = typer.Option(
+        [], "--expect-org",
+        help="Org ALREADY cut over, whose aliases the export must still contain "
+             "(repeatable). Refuses the wave if any is missing."),
+    first_wave: bool = typer.Option(
+        False, "--first-wave",
+        help="Assert that NO Org has been cut over yet, so there is nothing to preserve. "
+             "Required instead of --expect-org on the first wave."),
+) -> None:
+    """Assemble one WAVE's per-Org column aliases -- spec step 7.
+
+    Emits the envelope `ts alias build --merge` consumes, so the whole step is:
+
+    \b
+      ts migrate aliases -m T2_PUBLISH_MODEL --target-org ORG2 -d ./plan \\
+          --expect-org ORG1 -p prod | ts alias build --merge | ts alias import -p prod
+
+    **Once per WAVE, never per tenant, and serialised.** Aliases live on the Primary Org's
+    Model with no delta update until 26.10, so every append re-imports the whole document.
+    Per tenant, tenant *k* pays for all *k* before it -- O(N^2) across a fleet -- and past
+    5 MB each import goes async at 10-15 minutes. Two concurrent writes clobber each other.
+
+    **Why this command rather than hand-writing the translations.** The aliases are the exact
+    inverse of the rename `apply` performed, and that rename is already recorded in the
+    approved `column-mapping.csv`. Deriving them removes a transcription step whose mistakes
+    are silent: a misspelled column aliases nothing, and the tenant sees the physical name
+    with no error anywhere.
+
+    **The refusal that matters.** The import REPLACES the document, so an export that came
+    back partial silently strips every already-cut-over Org it missed -- their users see
+    `STRING_1` where they saw `Region`, with no error, because each entry left in the
+    document is valid. `--expect-org` turns "check the export was complete" from something a
+    human is asked to eyeball into an assertion. It is not optional: pass `--first-wave` to
+    state explicitly that there is nothing to lose, because a check that defaults to off is
+    not a check.
+
+    Verify afterwards in **Search Data, an Answer, a Liveboard or Spotter** -- never the Data
+    Management app, which does not render aliases at all and shows base names for everything.
+    """
+    from pathlib import Path
+
+    from ts_cli.alias import merge_aliases, parse_export_response, translations_to_columns
+    from ts_cli.migrate import aliases as wave
+    from ts_cli.migrate.mapping import read_mapping
+
+    if not target_org:
+        _refuse("pass --target-org (repeatable) for the Org(s) migrated in this wave.")
+    if len(plan_dir) != len(target_org):
+        _refuse(f"{len(target_org)} --target-org but {len(plan_dir)} --plan-dir. Pass one "
+                f"plan directory per Org, in the same order.")
+    if bool(expect_org) == first_wave:
+        _refuse("pass --expect-org for every Org already cut over, or --first-wave to state "
+                "that none has been. Never both, and never neither: this is the check that "
+                "stops a partial export wiping migrated tenants' aliases.")
+
+    # The master Model is read in the profile's DEFAULT Org: per-Org aliases are stored on
+    # the Primary Org's copy, not on the tenant-visible publication.
+    client = _org_client(profile, None)
+    resolved = model
+    if "-" not in model or len(model) < 32:
+        found = discover_alias_model(client, model)
+        if not found:
+            _refuse(f"no Model named '{model}' in this profile's default Org.")
+        resolved = found
+
+    envelope = parse_export_response(client.post(
+        "/api/rest/2.0/metadata/tml/export", json={
+            "metadata": [{"identifier": resolved, "type": "LOGICAL_TABLE"}],
+            "export_associated": True, "export_fqn": True, "edoc_format": "YAML",
+            "export_options": {"export_with_column_aliases": True},
+        }).json() or [])
+
+    existing = (envelope.get("existing_aliases") or {}).get("columns") or []
+
+    translations: List[dict] = []
+    for org, directory in zip(target_org, plan_dir):
+        rows = read_mapping(Path(directory) / "column-mapping.csv")
+        derived = wave.translations_from_mapping(rows, org)
+        if not derived:
+            _err(f"warning: {org} needs no aliases — every mapped column already matches")
+        translations += derived
+
+    merged = merge_aliases(existing, translations_to_columns(translations))
+    problems = wave.wave_problems(existing, merged, expected_orgs=expect_org)
+    if problems:
+        _err("Refused. This wave must not be imported:")
+        for problem in problems:
+            _err(f"  - {problem}")
+        raise typer.Exit(code=1)
+
+    envelope["translations"] = translations
+    print(json.dumps(envelope, indent=2))
+    _err(f"{len(translations)} alias(es) for {', '.join(target_org)}; "
+         f"{len(wave.orgs_present(existing))} Org(s) already present and preserved. "
+         f"Pipe into `ts alias build --merge`.")
+
+
+def discover_alias_model(client, name: str) -> Optional[str]:
+    """The master Model by name, in this client's own Org. See `discover.find_source_model`."""
+    from ts_cli.migrate import discover
+
+    try:
+        return discover.find_source_model(client, name, discover.owning_org_id(client))
+    except discover.AmbiguousModelName as exc:
+        _refuse(str(exc))

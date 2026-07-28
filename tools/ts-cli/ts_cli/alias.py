@@ -139,7 +139,13 @@ def find_scope_overlaps(columns: list[dict]) -> list[str]:
     return problems
 
 
-def _flatten_columns(columns: list[dict]) -> dict[tuple, dict]:
+def flatten_columns(columns: list[dict]) -> dict[tuple, dict]:
+    """`{(column, locale, org, group): {alias, description}}` for the whole document.
+
+    The one traversal of the nested alias shape. Public because the migration's
+    per-wave gate needs the same walk, and a second copy of it would drift from this
+    one exactly where the drift is invisible (see migrate/aliases.py).
+    """
     flat: dict[tuple, dict] = {}
     for col in columns:
         col_name = col["name"]
@@ -163,8 +169,8 @@ def merge_aliases(
     existing_columns: list[dict],
     new_columns: list[dict],
 ) -> list[dict]:
-    existing_flat = _flatten_columns(existing_columns)
-    new_flat = _flatten_columns(new_columns)
+    existing_flat = flatten_columns(existing_columns)
+    new_flat = flatten_columns(new_columns)
     merged_flat = {**existing_flat, **new_flat}
 
     all_translations: list[dict] = []
@@ -203,7 +209,7 @@ def build_alias_csv(columns: list[dict]) -> str:
     output = io.StringIO()
     writer = csv.writer(output, quoting=csv.QUOTE_ALL)
     writer.writerow(["Column", "locale", "alias", "description", "org_name", "group_name"])
-    flat = _flatten_columns(columns)
+    flat = flatten_columns(columns)
     for (col, loc, org, grp), entry in sorted(flat.items()):
         writer.writerow([
             col, loc,

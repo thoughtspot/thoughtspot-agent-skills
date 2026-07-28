@@ -3636,3 +3636,68 @@ ts migrate rollback --target-org "ACME NEW" -d ./plan
 Deletes what the ledger records this run as creating. In a new-Org run the source Org was
 never touched. In a same-Org run there is nothing to delete — `plan/backup/` is the
 rollback.
+
+---
+
+## `ts migrate aliases` — Phase 2 step 7: one WAVE's per-Org column aliases
+
+```bash
+ts migrate aliases -m T2_PUBLISH_MODEL --target-org ORG2 -d ./plan \
+    --expect-org ORG1 -p prod | ts alias build --merge | ts alias import --model <guid> -p prod
+```
+
+Emits the envelope `ts alias build --merge` consumes, so the transform, the size ceilings and
+the async-import path all stay in `ts alias` rather than being restated here.
+
+**Once per WAVE, never per tenant, and serialised.** Per-Org aliases live on the **Primary**
+Org's Model and there is no delta update until 26.10, so every append re-imports the whole
+document. Per tenant, tenant *k* pays for all *k* before it — O(N²) across a fleet — and past
+5 MB each import goes async at 10–15 minutes. Two concurrent full-document writes clobber
+each other.
+
+**The aliases are derived from the approved `column-mapping.csv`, not retyped.** They are the
+exact inverse of the rename `apply` performed: `apply` rewrote the tenant's content
+`Segment` → `STRING_1`, and the alias makes `Segment` what that Org's users see. So
+`column` is the published name and `alias` is the tenant's. Transcribing that by hand is a
+step whose mistakes are silent — a misspelled column aliases nothing and the tenant sees the
+physical name with no error. Scope is always `TS_WILDCARD_ALL`, because a tenant migration
+wants every user in the Org to see the tenant's names.
+
+Rows producing no alias: names that already agree (nothing to restore, and the document is
+size-bound), an unmapped gap (no target), and `SET_BLOCKER` (the Model cannot be published
+at all).
+
+### `--expect-org` is not optional
+
+The import **replaces** the document. An export that came back partial silently strips every
+already-cut-over Org it missed, and those users see `STRING_1` where they saw `Region` — with
+no error, because every entry left in the document is individually valid. This is the one
+catastrophic step in the routine.
+
+`--expect-org` names each Org that must already be present, and the wave is refused if any is
+absent:
+
+```
+Refused. This wave must not be imported:
+  - ORG3: already cut over, but the alias export returned NO entries for it. Merging would
+    drop that Org's aliases on import and its users would see the base column names.
+    Re-export before retrying
+```
+
+Coverage is checked **by Org, not by count**: a count is satisfiable by the wrong Orgs — ten
+aliases for one tenant pass a "ten or more" assertion while nine tenants are being wiped.
+
+Pass `--first-wave` instead when no Org has been cut over yet. One of the two is **required**,
+because a check that defaults to off is not a check.
+
+Also refused: a merge that came out smaller than what it merged into (unreachable with an
+additive merge, asserted because the consequence is fleet-wide alias loss), and any
+**overlapping scope** — `ts alias build` refuses that too, but reporting it here means one
+refusal listing everything rather than a second round-trip through a serialised window.
+
+Re-running the same wave is a **no-op**: the merged document comes out byte-identical.
+
+> **Verify in Search Data, an Answer, a Liveboard or Spotter — nowhere else.** Aliases are
+> not rendered in the Data Management app, and `metadata/answer/data` returns base names too.
+> Checking either shows base names for everything and looks like total failure. And verify as
+> a **real non-admin user in that Org**.

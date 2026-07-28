@@ -174,9 +174,23 @@ Per-Org aliases live on the **Primary** Org's Model with no partial update until
 (est. 26.10), so every append re-imports the whole document. Per-tenant that is O(N²)
 across the fleet, and past 5 MB each import goes async at 10–15 minutes.
 
-Use `/ts-object-model-alias` with `build --merge`, once per wave, serialised.
-**Before merging, confirm the export returned the aliases of every already-cut-over
-tenant.** A partial export silently drops them.
+```bash
+ts migrate aliases -m "{master_model}" --target-org ORG2 -d ./plan \
+    --expect-org ORG1 -p "{profile}" \
+  | ts alias build --merge \
+  | ts alias import --model "{master_model_guid}" -p "{profile}"
+```
+
+Once per wave, serialised. `ts migrate aliases` derives the alias rows from the approved
+`column-mapping.csv` — they are the inverse of the rename `apply` applied — and **refuses the
+wave if the export is missing any Org named in `--expect-org`**. That is the check that used
+to be prose telling you to confirm the export by eye; a partial export silently drops
+already-cut-over tenants. `--first-wave` is the explicit alternative when none exists yet, and
+one of the two is required, because a check that defaults to off is not a check.
+
+Verified live 2026-07-28: with ORG2 already aliased, adding ORG1 preserved ORG2's entries and
+added ORG1's, both `TS_WILDCARD_ALL`; the round-trip export confirmed all four entries; and
+re-running produced a byte-identical document.
 
 ### Alias scoping — three things that will bite you
 
