@@ -1,26 +1,26 @@
 # ThoughtSpot Agent Skills
 
-A collection of skills and tools for semantic model conversion, model authoring,
-and platform governance in ThoughtSpot — packaged for multiple runtimes:
-**Claude Code**, **Cortex Code CLI**, **Snowsight Workspaces**, and **Databricks**
-(Genie Code).
+AI agent skills for working with ThoughtSpot — platform conversion, semantic
+model authoring, multi-tenancy governance, and data querying. Packaged for
+**Claude Code**, **Cortex Code CLI**, **Snowsight**, and **Databricks**.
 
 ---
 
 ## Skills
 
-30 skills across six categories, following the lifecycle from setup to production.
-Each ✓ in the runtime columns links to the SKILL.md for that runtime.
+30 skills across six categories. Each ✓ in the runtime columns links to the
+SKILL.md for that runtime.
 
-```mermaid
-graph LR
-    A["Setup · 8"] --> B["Conversion · 9"]
-    B --> C["Semantic Authoring · 5"]
-    C --> D["Platform & Governance · 5"]
-    D --> E["Query · 1"]
-    E --> F["Recipes · 2"]
-```
+| Category | What it covers | Skills |
+|---|---|:-:|
+| [Setup](#setup) | Credentials, infrastructure, data loading, and tenancy configuration | 8 |
+| [Conversion](#conversion) | Move semantic models between ThoughtSpot and external platforms | 9 |
+| [Semantic Authoring](#semantic-authoring) | Build, optimize, and prepare Models for production | 5 |
+| [Platform & Governance](#platform--governance) | Publish, secure, audit, and maintain across Orgs | 5 |
+| [Query](#query) | Query and explore data through ThoughtSpot's semantic layer | 1 |
+| [Recipes](#recipes) | Pre-built analytical capabilities for ThoughtSpot | 2 |
 
+<a id="setup"></a>
 <details open>
 <summary><strong>Setup</strong> — Credentials, infrastructure, data loading, and tenancy configuration</summary>
 
@@ -39,6 +39,7 @@ graph LR
 
 </details>
 
+<a id="conversion"></a>
 <details>
 <summary><strong>Conversion</strong> — Move semantic models between ThoughtSpot and external platforms</summary>
 
@@ -58,6 +59,7 @@ graph LR
 
 </details>
 
+<a id="semantic-authoring"></a>
 <details>
 <summary><strong>Semantic Authoring</strong> — Build, optimize, and prepare Models for production</summary>
 
@@ -73,6 +75,7 @@ graph LR
 
 </details>
 
+<a id="platform--governance"></a>
 <details>
 <summary><strong>Platform & Governance</strong> — Publish, secure, audit, and maintain across Orgs</summary>
 
@@ -88,6 +91,7 @@ graph LR
 
 </details>
 
+<a id="query"></a>
 <details>
 <summary><strong>Query</strong> — Query and explore data through ThoughtSpot's semantic layer</summary>
 
@@ -99,6 +103,7 @@ graph LR
 
 </details>
 
+<a id="recipes"></a>
 <details>
 <summary><strong>Recipes</strong> — Pre-built analytical capabilities for ThoughtSpot</summary>
 
