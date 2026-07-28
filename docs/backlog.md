@@ -4267,19 +4267,35 @@ because a per-user grant cannot reliably be applied before cutover.
 **The step runs and reports success, but the grants do not register.** Verified on
 `nebula-damian-alias`:
 
-| Case | Result |
-|---|---|
-| Share ORG1-owned content to an ORG1 group | **works** -- `MIGTEST_VIEWERS(READ_ONLY)` appears |
-| Share ORG2-owned content to an ORG2 group | `HTTP 204`, grant does **not** appear |
+| Object | Org | Type | Share |
+|---|---|---|---|
+| `ORG1 Revenue by Segment` (own Model) | ORG1 | ANSWER | **works** |
+| `MIGTEST Answer on View` | ORG1 | ANSWER | **works** |
+| `T4_PER_ORG_MODEL` (ORG2's own Model) | ORG2 | LOGICAL_TABLE | **works** |
+| `CTRL Answer on own model` | ORG2 | ANSWER | **fails** -- 204, no grant |
+| migrated content | ORG2 | ANSWER / LIVEBOARD | **fails** -- 204, no grant |
 
-Ruled out: wrong Org (the group reports `orgs: ['ORG2']`), name-vs-GUID resolution (both
-give 204 and neither registers), and an empty group (adding a member changed nothing).
+### What is ruled OUT
 
-**The one structural difference is that the ORG2 content sits on a PUBLISHED,
-Primary-owned Model.** That is suggestive rather than established, and it rhymes with two
-findings already in this programme -- CSR does not travel with publication, and an
-object-level `NO_ACCESS` is not a revoke (**BL-142**). Whether sharing content built on a
-published object behaves differently is the next thing to establish.
+- **A missing group.** `MIGTEST_VIEWERS` is present in ORG2 with `guest1` as a member, and
+  its own `orgs` field reports `['ORG2']` -- which is the authority, not the fetching
+  client (see `tenancy._groups_in_org`).
+- **Name-vs-GUID resolution.** Both give 204 and neither registers.
+- **An empty group.** Adding a member changed nothing.
+- **Dependency on a PUBLISHED Model.** An earlier note in this entry blamed this. **It is
+  wrong** -- a control Answer built on ORG2's *own* Model fails identically, and an ORG2
+  Model share succeeds. Corrected 2026-07-28.
+
+### What the evidence actually points at
+
+The failing cases are all **`ANSWER`/`LIVEBOARD` in ORG2**, and a **`LOGICAL_TABLE` in the
+same Org with the same group succeeds**. So it is not the group, not the Org alone, and not
+the object's data source -- it tracks with the object *type*, in that Org.
+
+Why the same type shares fine in ORG1 is not explained, and that inconsistency is the next
+thing to chase. Candidates not yet tested: a per-Org configuration difference between ORG1
+and ORG2, an `answer`-specific permission requirement, or the share landing somewhere
+`fetch-permissions` does not report for that type in that Org.
 
 **Until then, treat sharing as a manual post-migration step, and treat an admin-only
 verification as not verified.** "The migration completed" does not yet mean the tenant can
