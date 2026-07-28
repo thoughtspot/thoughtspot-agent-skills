@@ -1,3 +1,5 @@
+<!-- currency: claude-harness — 2026-07 (Claude 5 family: Fable 5 / Opus 5 / Sonnet 5; Haiku 4.5) -->
+
 # Model and Effort Routing
 
 Which model tier and reasoning effort each kind of work gets. The goal: spend the

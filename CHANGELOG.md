@@ -6,6 +6,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-28
+- feat: audit angle 18 — **harness/framework currency**: the external sweep now audits the Claude setup itself (settings pins, agent model/effort tiers, workflow capabilities, rules-file anchors) against the current Claude Code + model lineup; same pattern as angle 13, pointed inward
+- docs: `docs/coding-with-claude-quickstart.md` — the framework's portable layer as a staged adoption guide for other teams
+- feat: pre-commit timing budget — per-check durations printed inline; suite total warned against a 15s budget with slow-check attribution
 - feat: add `check_skill_context_cost.py` validator — gates the estimated-token size of every SKILL.md (warn >12k, fail >25k), since a skill's file is loaded into model context on every invocation and its size is a recurring token tax (BL-128). At introduction: median skill ~4.9k est. tokens, 11 warnings, one allowlisted offender (ts-convert-from-tableau at ~57k)
 - feat(harness): encode model/effort routing (`.claude/rules/model-routing.md`) — mechanical agents (consistency-checker → haiku, repo-publisher → sonnet) and low-effort mechanical audit finders; drop the stale model pin from `.claude/settings.json`
 - docs: enforcement model corrected to CI-hard — branch protection has `enforce_admins`; `--admin` merges bypass the review requirement only, never CI (verified on PRs #381/#383/#384)

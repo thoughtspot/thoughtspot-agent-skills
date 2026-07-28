@@ -126,6 +126,17 @@ const PERF_PROMPT = [
   'Set angle="14 performance".',
 ].join('\n')
 
+// Angle 18 — the framework audits itself: the Claude harness config checked against
+// the current Claude Code + model lineup. Same pattern as angle 13, pointed inward.
+const HARNESS_PROMPT = [
+  'Audit harness / framework currency (angle 18). The quality framework goes stale the same way product mappings do.',
+  'Read the real files first: .claude/settings.json; .claude/agents/*.md (frontmatter); .claude/workflows/*.js; .claude/rules/model-routing.md and any other .claude/rules/*.md with a currency anchor; the harness-related parts of CLAUDE.md.',
+  'Then check them against the CURRENT state of Claude Code and the Claude model lineup. Use WebSearch / WebFetch (load via ToolSearch) against the official Claude Code docs and Anthropic model documentation.',
+  'Report: (a) stale model pins or tier assignments that no longer match the lineup (the canonical example: a pinned claude-opus-4-6 sat in settings.json after the Claude 5 family shipped); (b) new harness capabilities (settings, hooks, agent/workflow options) the repo should adopt; (c) rules files whose anchors are stale or whose claims no longer match how the harness behaves; (d) documented flows that contradict observed behaviour.',
+  GROUNDING,
+  'Set angle="18 harness-currency".',
+].join('\n')
+
 const DEPS_PROMPT = [
   'Audit dependency / supply-chain currency (angle 16). Read tools/ts-cli/pyproject.toml and any requirements files.',
   'Report: unpinned or over-broad version ranges, dependencies with known CVEs, EOL Python versions, anything materially out of date.',
@@ -173,7 +184,7 @@ const CODE_REVIEW_PROMPT = [
 phase('Survey')
 const platformCount = PLATFORMS.length
 const internalCount = scope === 'full' ? INTERNAL_ANGLES.length : 0
-log(`repo-audit: scope=${scope} — ${platformCount} platform specialists + performance + dependency${scope === 'full' ? ` + ${internalCount} internal angles + max /code-review over the delta` : ''}`)
+log(`repo-audit: scope=${scope} — ${platformCount} platform specialists + performance + dependency + harness${scope === 'full' ? ` + ${internalCount} internal angles + max /code-review over the delta` : ''}`)
 
 const finders = []
 
@@ -185,6 +196,8 @@ for (const p of PLATFORMS) {
 finders.push(() => agent(PERF_PROMPT, { label: 'performance', phase: 'Survey', schema: FINDINGS_SCHEMA }))
 // Dependency currency is mechanical (read pyproject, check advisories) — low effort suffices.
 finders.push(() => agent(DEPS_PROMPT, { label: 'dependencies', phase: 'Survey', schema: FINDINGS_SCHEMA, effort: 'low' }))
+// Angle 18 — always part of the external sweep
+finders.push(() => agent(HARNESS_PROMPT, { label: 'harness-currency', phase: 'Survey', schema: FINDINGS_SCHEMA }))
 // Internal angles — full scope only
 if (scope === 'full') {
   for (const a of INTERNAL_ANGLES) {

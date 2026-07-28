@@ -112,6 +112,7 @@ product. This is the **weekly specialist sweep**. Kept tractable by *currency an
 | 13 | **Product currency** | Per-platform: are our mappings, schemas, and "untranslatable" verdicts still accurate against the product's *current* capabilities? Newly-possible translations, deprecated constructs, new artifact types (chart libraries, semantic-view / metric-view features), API & version drift. | Weekly specialist sweep (per platform) + `check_mapping_currency` (per-PR staleness nudge) |
 | 14 | **Performance** | (a) *skill runtime* — redundant API round-trips, un-batched prompts, the obj_id read-back pattern; (b) *generated-artifact efficiency* — do emitted formulas use performant TS constructs (`group_aggregate` vs `sql_*_aggregate_op`, join cardinality) or slow ones; (c) *ts-cli* — pagination, token-cache reuse. | Weekly sweep + MANUAL |
 | 16 | **Dependency / supply-chain currency** | Python deps (`typer`, `requests`, `PyYAML`, `keyring`) — pinned ranges, known CVEs, EOL Python versions. | Weekly sweep (candidate for a future `pip-audit` gate) |
+| 18 | **Harness / framework currency** | The Claude setup itself, checked against the current Claude Code + model lineup: `.claude/settings.json` (stale model pins, unused new settings), `.claude/agents/*.md` frontmatter (model/effort tiers vs `.claude/rules/model-routing.md` and the current model tiers), `.claude/workflows/` (capabilities the runner has gained), and the `.claude/rules/*.md` files' own currency anchors. Same pattern as angle 13, pointed inward — the quality framework goes stale exactly the way product mappings do (a pinned `claude-opus-4-6` sat in settings.json after the Claude 5 family shipped; found manually 2026-07-28). | Weekly sweep |
 
 > **Angle 15 — Conversion fidelity** (does converted output produce *semantically
 > equivalent* results — the same numbers — not just valid-importing TML?) is **PARKED**
@@ -163,7 +164,7 @@ anchor to its mapping/schema files.** That is the entire expansion cost.
 | Scope | When | How |
 |---|---|---|
 | Internal validators (1–10 where automated) | Every PR | pre-commit + CI |
-| **External sweep (13, 14, 16)** | On demand, **when nudged** (~weekly threshold) | `Workflow({name: "repo-audit", args: {scope: "external"}})` |
+| **External sweep (13, 14, 16, 18)** | On demand, **when nudged** (~weekly threshold) | `Workflow({name: "repo-audit", args: {scope: "external"}})` |
 | Full deep audit (all angles) | On demand, **when nudged** (time or activity) + before a release / new runtime | `Workflow({name: "repo-audit", args: {scope: "full"}})` |
 
 **No scheduled cron.** Execution is nudge-driven and on-demand, not automated — see
@@ -236,3 +237,4 @@ that repo's validators. The date/age/activity machinery is unchanged.
 | 2026-06 | Full (inaugural, 12-angle) | PRs #90–#100; BL-026/027/028/029. See `docs/audit/`. |
 | 2026-06-29 | Angle #11 expanded | Added "agentic → deterministic" sub-dimension: classify skill steps as judgment-required vs mechanical, codify mechanical steps as ts-cli commands |
 | 2026-07-24 | Angle 17 added | `max` `/code-review` backstop over the `<last-full-audit-sha>..HEAD` delta, full sweep only; per-PR `/code-review` remains the primary bug net |
+| 2026-07-28 | Angle 18 added | Harness/framework currency — the Claude setup (settings, agent tiers, workflows, rules anchors) checked against the current Claude Code + model lineup; joins the external sweep. Motivated by the stale `claude-opus-4-6` pin found in the 2026-07-28 framework review |
