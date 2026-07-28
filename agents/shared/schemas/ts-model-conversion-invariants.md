@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found) -->
 
 # ThoughtSpot Model Conversion Invariants
 

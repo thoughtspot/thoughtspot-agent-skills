@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: TS→MV window emission tables corrected to live-verified forms (C1/C3/C6/C6a), leading PENDING resolved, strict (start,end) reverse-map added; see BL-032 + docs/audit/2026-07-08-dbx-window-claim-matrix.md; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: corrected the boolean-filter classification tree's "Contains parameters ... → Omit" node — MV `parameters:` IS a GA construct (18.2+); parameters are omitted-and-logged pending auto-translation, not because they are inherently untranslatable (findings 13.1/13.10, deferred to 13.2)) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: TS→MV window emission tables corrected to live-verified forms (C1/C3/C6/C6a), leading PENDING resolved, strict (start,end) reverse-map added; see BL-032 + docs/audit/2026-07-08-dbx-window-claim-matrix.md; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: corrected the boolean-filter classification tree's "Contains parameters ... → Omit" node — MV `parameters:` IS a GA construct (18.2+); parameters are omitted-and-logged pending auto-translation, not because they are inherently untranslatable (findings 13.1/13.10, deferred to 13.2); 2026-07-29 full sweep: added the synonyms clamp rule for the 10-per-column/255-char hard limit (finding 13.9)) -->
 
 # Mapping Rules Reference
 
@@ -109,13 +109,38 @@ v1.1 columns support rich metadata. Map ThoughtSpot properties as follows:
 |---|---|---|
 | Column `name` (display name) | `display_name:` | Wrap in quotes for YAML safety |
 | Column `description` | `comment:` | |
-| `properties.synonyms[]` | `synonyms:` | Read from `properties.synonyms`, NOT column root. YAML list: `['alias1', 'alias2']` |
+| `properties.synonyms[]` | `synonyms:` | Read from `properties.synonyms`, NOT column root. YAML list: `['alias1', 'alias2']`. **Subject to the Synonyms Clamp below (finding 13.9).** |
 | Model-level `description` | Top-level `comment:` | |
 | `ai_context` | **Unmapped** | No equivalent — log in Unmapped Report |
 | `properties.calendar_type` | **Unmapped** | No equivalent |
 
 The `name:` field in MV YAML is a machine-readable identifier (snake_case recommended).
 The `display_name:` is the human-readable label.
+
+### Synonyms Clamp
+
+Databricks MV `synonyms:` has a hard limit on both `fields:`/`dimensions:` and
+`measures:` entries: **max 10 synonyms per column, 255 characters each** (see
+[databricks-metric-view.md](../../schemas/databricks-metric-view.md#synonyms-limit-finding-139)).
+A ThoughtSpot column can carry more than 10 `properties.synonyms[]` entries with no
+such limit, so the converter must clamp before emission:
+
+1. If a column has **10 or fewer** synonyms, emit all of them unchanged (still
+   truncate any individual synonym over 255 chars — see step 3).
+2. If a column has **more than 10** synonyms, emit the **first 10** in source order,
+   or the **best 10 by length fit** (shortest first, to maximize the chance each one
+   is useful for NL search) if the skill's synonym generation step already ranks them —
+   prefer whichever selection the skill's own ordering already implies rather than
+   introducing a second ranking pass.
+3. Truncate any individual synonym longer than 255 characters to 255 characters.
+4. Log every dropped synonym (from step 2) and every truncated synonym (from step 3)
+   in the Unmapped Properties Report — do not silently drop or truncate.
+
+**Enforcement behavior is not live-verified** — whether Databricks rejects a
+`CREATE OR REPLACE VIEW` that exceeds either limit with an error, or silently
+truncates the list/string itself, has not been confirmed against a live warehouse.
+Clamp defensively (as above) regardless of which behavior turns out to be true —
+emitting a value at or under both limits is safe either way.
 
 ---
 
@@ -679,6 +704,6 @@ These ThoughtSpot properties have no Databricks MV equivalent:
 | `properties.calendar_type` | **Unmapped** | No equivalent |
 | `properties.index_type` | **Unmapped** | Databricks handles indexing internally |
 | `properties.index_priority` | **Unmapped** | No equivalent |
-| `properties.currency_type` | `format: { type: currency, currency_code: ... }` | v1.1 supports `format:` on measures |
+| `properties.currency_type` | `format: { type: currency, currency_code: ... }` | v1.1 supports `format:` on measures, and (corrected 2026-07-29, finding 13.10) also on `fields:`/`dimensions:` entries |
 | `properties.geo_config` | **Unmapped** | No geo support in MV |
 | `column_type: UNKNOWN` | **Omit** | Cannot classify — log in report |

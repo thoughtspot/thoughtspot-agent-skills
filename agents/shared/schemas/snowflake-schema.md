@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (derived metrics + named filters + custom_instructions; correction 2026-07: base_table.definition: SQL-query logical-table alternative added to Complete Schema, GA 2026-06-26 — finding 13.4; is_enum dimension property added, GA 2026-06-25 — finding 13.7; BL-064: sample_values blockquote removed from NOT-supported section, verified_queries/unique_keys/relationship type+right_range added to Complete Schema) -->
+<!-- currency: snowflake — 2026-07 (derived metrics + named filters + custom_instructions; correction 2026-07: base_table.definition: SQL-query logical-table alternative added to Complete Schema, GA 2026-06-26 — finding 13.4; is_enum dimension property added, GA 2026-06-25 — finding 13.7; BL-064: sample_values blockquote removed from NOT-supported section, verified_queries/unique_keys/relationship type+right_range added to Complete Schema; 2026-07-29 full sweep: top-level max_staleness: key + materializations DDL/YAML coverage row added, public preview release 10.24 Jul 2026 — finding 13.4; facts[] description corrected — pre-aggregated expressions over related tables and window expressions are allowed, not just raw unaggregated columns — finding 13.6) -->
 
 # Snowflake Semantic View YAML Schema
 
@@ -27,6 +27,14 @@ tags:                              # Optional. GA 2026-05-05. Fully-qualified ta
                                   # live SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML round-trip
                                   # before the converter emits this (BL-031).
   <db>.<schema>.<tag_name>: value  # Repeatable. Not yet confirmed for time_dimensions.
+
+max_staleness: integer             # Optional. PUBLIC PREVIEW (release 10.24, Jul 2026).
+                                  # Minimum age in seconds (>= 120) a materialization must
+                                  # reach before it is eligible for refresh. Required to
+                                  # enable semantic view materializations — see the
+                                  # "Materializations" row in "Advanced constructs — DDL
+                                  # vs YAML coverage" below. DDL:
+                                  # CREATE ... MAX_STALENESS = <seconds>.
 
 tables:                           # Required. At least one entry.
 - name: string                    # Alias used in expr fields and relationships.
@@ -98,7 +106,13 @@ tables:                           # Required. At least one entry.
     labels:                       # Optional.
     - string
 
-  facts:                          # Optional. Per-table raw numeric columns (no aggregation).
+  facts:                          # Optional. Per-table row-level named expressions.
+                                  # Correction 2026-07 (finding 13.6): most facts are raw
+                                  # unaggregated columns, but the current spec is not
+                                  # limited to that — expr may also be a pre-aggregated
+                                  # expression over a related table (evaluated at THIS
+                                  # table's own grain) or a window expression. See
+                                  # ts-snowflake-properties.md "facts[]" section.
   - name: string                  # Unique across all dims/time_dims/metrics/facts.
     synonyms:
     - string
@@ -200,6 +214,7 @@ variables:                        # Optional. GA June 2026. Top-level session/bi
 | root-level derived `METRICS` | `METRICS ( alias.NAME as EXPR, ... )` with `table_alias` omitted from the metric name | ✅ now — root-level `metrics:` | Combines per-table metrics **across multiple logical tables** via `using_relationships`; this is the one exception to Key Structural Rule #1 — see "Derived Metrics" below. Not yet emitted by the to-snowflake-sv converter (BL-031). |
 | named standalone `filters` | *(DDL clause not yet verified)* | ✅ now — per-table `filters:` | Standalone boolean filter (name/synonyms/description/expr) used by Cortex Analyst; AI-optional, not always-applied like a ThoughtSpot model-level filter — see ts-snowflake-properties.md "Model-Level Filters" |
 | `tags` (object tagging) | `WITH TAG (fully.qualified.tag = 'value', ...)` | ✅ now — `tags:` at root/table/dimension/fact/metric levels | GA 2026-05-05. Fully-qualified tag name + value. Verify with a live round-trip before the converter emits it (BL-031). |
+| **Materializations** — enables incremental/full refresh caching of a semantic view | `CREATE ... MAX_STALENESS = <seconds>` at creation time; `ALTER SEMANTIC VIEW ... ADD MATERIALIZATION (REFRESH_MODE = AUTO \| FULL \| INCREMENTAL [, IMMUTABLE WHERE <expr>])` to add/configure one after creation | ⚠ partial — top-level `max_staleness:` only (creation-time eligibility) | **PUBLIC PREVIEW (release 10.24, Jul 9-15 2026).** `max_staleness:` in YAML makes the view materialization-eligible at CREATE time. The `ALTER ... ADD MATERIALIZATION` refresh-mode/immutable-where configuration is DDL-only today — no YAML equivalent documented. GET_DDL token shape for a materialized view is not yet live-verified — see ts-from-snowflake-rules.md "PARSER PREREQUISITE" entry (BL-100). |
 
 ### What is NOT supported in YAML
 

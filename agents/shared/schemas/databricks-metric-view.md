@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: trailing/leading/cumulative/all/semi-additive range behavior live-verified against a Databricks fixture + ThoughtSpot number-match; corrected trailing/leading moving_sum anchor args (C1/C3) and the period-filter offset mechanism from wall-clock to row-relative (C6/C6a); exclusive-default confirmed (C2); materialization: block documented for the first time (C9); quarter/year period-offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: parameters: block GA (18.2+, mutually exclusive with materialization:) documented; runtime requirement corrected to tiered 16.4/17.3/18.1/18.2 (findings 13.1/13.10)) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: trailing/leading/cumulative/all/semi-additive range behavior live-verified against a Databricks fixture + ThoughtSpot number-match; corrected trailing/leading moving_sum anchor args (C1/C3) and the period-filter offset mechanism from wall-clock to row-relative (C6/C6a); exclusive-default confirmed (C2); materialization: block documented for the first time (C9); quarter/year period-offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: parameters: block GA (18.2+, mutually exclusive with materialization:) documented; runtime requirement corrected to tiered 16.4/17.3/18.1/18.2 (findings 13.1/13.10); 2026-07-29 full sweep: materialization: is GA at Runtime 17.3 (not Public Preview) with new cluster_by/partition_by fields, REFRESH MATERIALIZED VIEW added at 18.0 (finding 13.7); wildcard field expressions corrected to Runtime 18.2+-gated and legal in measures: for MV-on-MV import, 18.1 also gates inclusive/exclusive window modifiers and one-to-many joins (finding 13.8); synonyms hard limit (10/column, 255 chars) documented (finding 13.9); format: documented on fields/dimensions, not measures-only (finding 13.10); window: Experimental label recorded (finding 13.11); SHOW CREATE TABLE retrieval path noted (finding 13.12)) -->
 
 # Databricks Metric View Schema
 
@@ -15,16 +15,18 @@ blanket floor:
 | Runtime | Unlocks |
 |---|---|
 | **16.4** | Baseline — Metric Views run at all |
-| **17.3+** | Agent metadata (`display_name` / `comment` / `synonyms` — which this repo's converters emit) |
-| **18.1+** | Join `cardinality:` and window `offset:` |
-| **18.2+** | The `parameters:` block (see "Parameters Block" below) |
+| **17.3+** | Agent metadata (`display_name` / `comment` / `synonyms` — which this repo's converters emit); `materialization:` block (GA — corrected 2026-07-29, finding 13.7; was documented as Public Preview) |
+| **18.0+** | `REFRESH MATERIALIZED VIEW` support for a Metric View's materializations (finding 13.7) |
+| **18.1+** | Join `cardinality:` and window `offset:`; inclusive/exclusive window modifiers (`trailing`/`leading ... inclusive\|exclusive`); one-to-many joins (corrected 2026-07-29, finding 13.8) |
+| **18.2+** | The `parameters:` block (see "Parameters Block" below); wildcard field expressions (corrected 2026-07-29, finding 13.8 — was documented as ungated) |
 
 (A `PARSE_SYNTAX_ERROR` on a GA-era runtime is no longer attributable to the warehouse
 channel — check which tier the failing feature actually needs.) Sources: Databricks
 "Redefining the Semantics Data Layer" (2026-04) and the
 [create/edit](https://docs.databricks.com/aws/en/business-semantics/metric-views/create-edit)
 + [YAML reference](https://docs.databricks.com/aws/en/business-semantics/metric-views/yaml-reference) docs;
-tiered requirement corrected per the 2026-07-11 audit (findings 13.1/13.10).
+tiered requirement corrected per the 2026-07-11 audit (findings 13.1/13.10) and the
+2026-07-29 full sweep (findings 13.7/13.8).
 
 ---
 
@@ -54,6 +56,13 @@ find the row where `col_name = 'View Text'`, and extract the `data_type` column 
 
 Additional metadata rows: `Type` = `METRIC_VIEW`, `Language` = `YAML`,
 `Table Properties` contains `metric_view.raw_yml` with the raw YAML.
+
+**Cleaner alternative (2026-07-29, finding 13.12):** `SHOW CREATE TABLE
+{catalog}.{schema}.{view_name}` has supported Metric Views since **DBSQL 2026.15**
+(released 2026-05-26) and returns the `CREATE VIEW ... WITH METRICS LANGUAGE YAML AS
+$$ ... $$` statement directly — no row-parsing of a `View Text` cell required. The
+`DESCRIBE TABLE EXTENDED` approach above still works and remains the parser's current
+path; `SHOW CREATE TABLE` is a candidate simplification, not yet adopted.
 
 ### Discover (list Metric Views)
 
@@ -266,14 +275,22 @@ dimensions:                         # GA canonical key is `fields:`; `dimensions
     expr: <sql_expression>          # Required. SQL expression or column reference.
     display_name: '<label>'         # Optional. Human-readable label.
     comment: '<description>'        # Optional. Column-level description.
-    synonyms: ['alias1', 'alias2'] # Optional. Alternative search terms.
-  # Wildcard field expressions (fields: only, not measures:):
+    synonyms: ['alias1', 'alias2'] # Optional. Alternative search terms. Hard limit
+                                    # (finding 13.9): max 10 synonyms per column, 255
+                                    # chars each — see "Synonyms Limit" below.
+  # Wildcard field expressions — Runtime 18.2+ (corrected 2026-07-29, finding 13.8;
+  # was documented as ungated). PARSE_SYNTAX_ERROR on a wildcard below 18.2 is a
+  # runtime-gate issue, not a syntax error in the wildcard itself.
   - expr: source.*                  # All source columns as dimensions. Omit name: — derived from source.
   - expr: source.* EXCEPT (col1, col2) # All except named columns.
   - expr: joined_table.*            # All from a joined source (multi-source MVs).
   # No semantic metadata (display_name, comment, synonyms) on wildcard entries.
   # To annotate a specific column, EXCEPT it from the wildcard and define it explicitly.
   # Wildcards expand at CREATE OR REPLACE time; new source columns require re-creating the MV.
+  # Corrected 2026-07-29 (finding 13.8): wildcards are NOT "fields: only" — they are also
+  # legal in `measures:` when the MV's `source:` is itself another metric view (MV-on-MV,
+  # see "Source Forms" above): `measures: [{expr: source.*}]` imports all measures from
+  # the source MV. Still Runtime 18.2+ gated in that position too.
 
 measures:
   - name: <identifier>
@@ -286,6 +303,21 @@ measures:
         range: current
         semiadditive: last           # REQUIRED when window is present.
 ```
+
+### Synonyms Limit (finding 13.9)
+
+`synonyms:` on both `fields:`/`dimensions:` entries and `measures:` entries is capped:
+
+| Limit | Value |
+|---|---|
+| Max synonyms per column | 10 |
+| Max chars per synonym | 255 |
+
+**Enforcement behavior is not yet live-verified** — whether exceeding either limit at
+`CREATE OR REPLACE VIEW` time raises an error or silently truncates the list/string has
+not been confirmed against a live warehouse. See
+[ts-to-databricks-rules.md](../mappings/ts-databricks/ts-to-databricks-rules.md#synonyms-clamp)
+for the to-direction clamp rule this drives.
 
 ### Schema — Multi-Source with Joins (v1.1)
 
@@ -418,11 +450,24 @@ one of:
 
 `on` and `using` are mutually exclusive (XOR) — a join must have one, not both.
 
-### Format Field (verified 2026-05-26)
+### Format Field (verified 2026-05-26; corrected 2026-07-29, finding 13.10)
 
-Measures support a `format:` field for display formatting:
+Measures support a `format:` field for display formatting. **Correction (2026-07-29):**
+`format:` is now also documented on `fields:`/`dimensions:` entries, not measures-only
+as previously stated here — a formatted dimension displays with the same
+currency/percentage rendering as a formatted measure:
 
 ```yaml
+dimensions:
+  - name: list_price
+    expr: LIST_PRICE
+    format:
+      type: currency
+      currency_code: USD
+      decimal_places:
+        type: exact
+        places: 2
+
 measures:
   - name: revenue
     expr: SUM(LINE_TOTAL)
@@ -446,7 +491,22 @@ measures:
 | `currency` | `currency_code`, `decimal_places` | ISO 4217 code (USD, EUR, etc.) |
 | `percentage` | `decimal_places` | Value is multiplied by 100 for display |
 
+**From-parser guidance:** a `format:` on a `fields:`/`dimensions:` entry should be
+tolerated and logged (or mapped to the ThoughtSpot ATTRIBUTE `format_pattern` property
+where a clean translation exists) rather than treated as unexpected/unrecognized —
+see [ts-databricks-properties.md](../mappings/ts-databricks/ts-databricks-properties.md).
+
 ### Window with Offset — Period-over-Period (verified 2026-05-26; requires Runtime 18.1+)
+
+> **Label status (finding 13.11, 2026-07-29): `window:` on measures is officially
+> "Experimental."** Databricks' own pages conflict on this — the feature-availability
+> matrix lists `window:` unflagged alongside GA features, while the YAML reference page
+> labels it Experimental. No inaccuracy has been found in this repo's `window:` mappings
+> against either page, but this is the repo's most heavily live-verified mapping area
+> (the C1-C9/A1-A3 matrices cited throughout this file) presenting syntax Databricks
+> itself has not committed to as stable — the same class of risk the Muze charting
+> library breakage taught this repo to watch for. **Re-check `window:` syntax first**
+> on the next Databricks currency sweep, before any other section of this file.
 
 > **Runtime gate:** The `offset` property requires **Runtime 18.1+** (see the tiered
 > runtime table above — 16.4 is the MV floor, not 17.3). On a runtime below 18.1,
@@ -557,14 +617,16 @@ Cross-measure references can then compute growth rates:
     expr: (MEASURE(monthly_revenue) - MEASURE(prior_month_revenue)) / MEASURE(prior_month_revenue) * 100
 ```
 
-### Materialization Block (Public Preview)
+### Materialization Block (GA — Runtime 17.3+)
 
 `materialization:` is a top-level key — a sibling of `source:`, `fields:`/`dimensions:`,
 `measures:`, `joins:`, and `filter:` — that configures automatic query acceleration via
-materialized views. **Public Preview** status (per the `yaml-reference` docs page;
-`create-edit` does not mention this block at all). Absent by default: omitting
+materialized views. **GA at Databricks Runtime 17.3+ (corrected 2026-07-29, finding
+13.7)** — this block was previously documented here as Public Preview; it has since
+shipped to GA (see the tiered runtime table above). Absent by default: omitting
 `materialization:` does not change query semantics, only whether Databricks maintains
-an acceleration structure behind the Metric View.
+an acceleration structure behind the Metric View. `REFRESH MATERIALIZED VIEW` support
+for a Metric View's materializations was added at **Runtime 18.0** (finding 13.7).
 
 | Field | Required? | Notes |
 |---|---|---|
@@ -575,6 +637,8 @@ an acceleration structure behind the Metric View.
 | `materialized_views[].type` | Required | `aggregated` or `unaggregated` |
 | `materialized_views[].dimensions[]` | Conditional | Field names to materialize (documented alongside `aggregated` type) |
 | `materialized_views[].measures[]` | Conditional | Measure names to materialize (documented alongside `aggregated` type) |
+| `materialized_views[].cluster_by` | Optional | New field (finding 13.7). Either an explicit array of column names, or `auto: true` to let Databricks choose clustering keys automatically |
+| `materialized_views[].partition_by` | Optional | New field (finding 13.7). Array of column names to partition the materialized output by |
 
 ```yaml
 materialization:
@@ -591,6 +655,18 @@ materialization:
       measures:
         - total_revenue
         - order_count
+      cluster_by:
+        - order_date
+      partition_by:
+        - order_status
+    - name: auto_clustered_metrics
+      type: aggregated
+      dimensions:
+        - region
+      measures:
+        - order_count
+      cluster_by:
+        auto: true
 ```
 
 **No ThoughtSpot equivalent** — this is a Databricks-side performance/refresh hint
@@ -601,7 +677,9 @@ with no analog in Model TML. See
 **verified 2026-07-08** — docs research only, see
 `docs/audit/2026-07-08-dbx-window-docs-findings.md`; not live-SQL-tested (the parser
 only needs to recognize the block's shape and pass it through, not execute
-materialization).
+materialization). GA status, `cluster_by`/`partition_by`, and the 18.0 `REFRESH
+MATERIALIZED VIEW` support are docs-research findings from the 2026-07-29 full sweep
+(finding 13.7), likewise not yet live-SQL-tested.
 
 ### Parameters Block (GA — Runtime 18.2+)
 

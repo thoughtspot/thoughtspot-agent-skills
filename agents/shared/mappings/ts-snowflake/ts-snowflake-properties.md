@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (parameters: variables GA; model-level filters downgraded to Partial via named SV filters; correction 2026-07: SQL-query logical tables (base_table.definition:, GA 2026-06-26) — "Partial Migrations — SQL Views" no longer claims complex sql_view sources "cannot be auto-mapped"; adds D (Direct) option, emission deferred to BL-031 — finding 13.4) -->
+<!-- currency: snowflake — 2026-07 (parameters: variables GA; model-level filters downgraded to Partial via named SV filters; correction 2026-07: SQL-query logical tables (base_table.definition:, GA 2026-06-26) — "Partial Migrations — SQL Views" no longer claims complex sql_view sources "cannot be auto-mapped"; adds D (Direct) option, emission deferred to BL-031 — finding 13.4; 2026-07-29 full sweep: facts[] section corrected — pre-aggregated expressions over related tables (at the table's grain) and window expressions are valid, not just raw unaggregated columns; to-direction BL-031 routing guidance unchanged — finding 13.6) -->
 
 # ThoughtSpot → Snowflake Property Coverage
 
@@ -112,10 +112,21 @@ authoritative for what the converter actually emits today. The `facts[]` design 
 documents the **target** state once BL-031 ships — it is not current output. See
 `ts-convert-to-snowflake-sv/SKILL.md` (Concept Mapping table) for the current behavior.
 
-Snowflake SV supports a `facts[]` array on each table for raw numeric columns with no
-pre-defined aggregation. Cortex Analyst can aggregate these freely at query time.
-`facts[]` has no default aggregation field — the aggregation intent is left entirely
-to the query engine.
+Snowflake SV supports a `facts[]` array on each table for row-level named expressions.
+Most facts are raw numeric columns with no pre-defined aggregation, which Cortex Analyst
+can then aggregate freely at query time — `facts[]` has no default aggregation field on
+the fact entry itself.
+
+**Correction (2026-07, finding 13.6):** `facts[]` is not limited to raw unaggregated
+columns. The current YAML spec also allows a fact's `expr` to be a **pre-aggregated
+expression over a related table**, evaluated at *this* table's own grain (e.g. a
+per-order line-item count rolled up from a child table into the parent's `facts[]`), and
+**window expressions**. When the from-SV direction encounters an expression fact whose
+`expr` is already aggregated, do not re-wrap it in another ThoughtSpot aggregation on
+import — treat it the same as the metric-on-metric double-aggregation case (see the
+`group_count`/`group_sum` pattern in
+`../../worked-examples/snowflake/ts-from-snowflake-identifier-resolution.md`), otherwise
+the result double-counts.
 
 This maps to the distinction ThoughtSpot makes between raw MEASURE columns and formula
 MEASURE columns — **target design, not current converter behavior:**
