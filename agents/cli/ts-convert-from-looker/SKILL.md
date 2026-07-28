@@ -32,6 +32,14 @@ inline strategy + label-vs-name decisions, or chart-type + layout preferences.
 | [../../shared/schemas/thoughtspot-connection.md](../../shared/schemas/thoughtspot-connection.md) | Connection handling in TML |
 | [references/coverage-matrix.md](references/coverage-matrix.md) | Mapped and unmapped LookML constructs |
 | [references/open-items.md](references/open-items.md) | Known gaps, validation quirks, deferred items |
+| [references/step-3-parse-fields.md](references/step-3-parse-fields.md) | Step 3 model-file and view-file field-by-field extraction lists |
+| [references/step-4-measure-translation.md](references/step-4-measure-translation.md) | Step 4 dimension/measure classification tables, §4a SQL-pattern table, §4b filtered-measure example |
+| [references/step-5-tml-generation.md](references/step-5-tml-generation.md) | Step 5 derived-table (SQL View) generation detail (§5b) and column/measure naming-conflict rules (§5c–§5f) |
+| [references/step-6-model-joins.md](references/step-6-model-joins.md) | Step 6 join-SQL translation example, join-type/cardinality mapping tables, join-key handling table |
+| [references/step-7-review-templates.md](references/step-7-review-templates.md) | Step 7.5 migration-gaps console display and gaps-file heredoc templates; Step 8 import-error → fix lookup |
+| [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md) | Step 10 dashboard field list, chart-type mapping, search-query/layout detail, full Liveboard TML template, filter mapping, migration-details format |
+| [references/migration-report-format.md](references/migration-report-format.md) | Step 11 migration summary console block and `.md` report structure (Migrate mode) |
+| [references/audit-mode-report.md](references/audit-mode-report.md) | Audit mode console report and `.md` report structure, including CLEAN/CAVEAT/BLOCKED classification rules |
 | [fixtures/skilltest-orders/skilltest_orders.model.lkml](fixtures/skilltest-orders/skilltest_orders.model.lkml) | Verified LookML fixture — input for re-testing the skill |
 
 ---
@@ -143,37 +151,20 @@ If no model file is found, ask the user to confirm the project root.
 
 ### 3a. Parse the model file
 
-From `.model.lkml` extract:
-- `connection:` → ThoughtSpot connection name (must match exactly, by name not GUID — Invariant I6)
-- `include:` → file globs to expand; locate all referenced view files
-- Each `explore { ... }` block:
-  - `explore` name and optional `label:`
-  - `sql_table_name:` override if present on the explore itself
-  - Each `join { ... }` inside the explore:
-    - join name (= the view being joined)
-    - `type:` → join type (`left_outer`, `full_outer`, `inner`, `cross`)
-    - `relationship:` → cardinality (`many_to_one`, `one_to_many`, `many_to_many`, `one_to_one`)
-    - `sql_on:` → join condition (contains `${view.field}` references — resolve at Step 3d)
+From `.model.lkml` extract the `connection:` name (Invariant I6), `include:` globs, and
+each `explore { ... }` block's name/label, `sql_table_name:` override, and `join { ... }`
+entries (type, relationship, `sql_on:`). Full field-by-field list:
+[references/step-3-parse-fields.md](references/step-3-parse-fields.md) "3a. Parse the
+model file — full field list".
 
 ### 3b. Parse each view file
 
-From each `.view.lkml` extract:
-- `view: name` → ThoughtSpot table name
-- `sql_table_name:` → physical table (format: `DATABASE.SCHEMA.TABLE`)
-- `derived_table:` → if present, flag as SQL View (special handling — see Step 5b)
-- Each `dimension { ... }` block:
-  - `type:` → string / number / yesno / date / time / tier / duration / location
-  - `sql:` → physical column reference (usually `${TABLE}.COL`)
-  - `label:` → ThoughtSpot display name (prefer this over field name when present)
-  - `hidden: yes` → note but do NOT skip — hidden fields may be required by measures
-  - `primary_key: yes` → `column_type: ATTRIBUTE`
-  - `value_format_name:` → informational only (no ThoughtSpot equivalent; record in summary)
-- Each `measure { ... }` block:
-  - `type:` → sum / count / count_distinct / average / max / min / number
-  - `sql:` → expression (may contain `${TABLE}.COL`, `${field}`, or `${view.field}`)
-  - `label:` → ThoughtSpot display name
-  - `filters:` → conditional measure (translate to `count_if` / `sum_if` / `average_if`)
-  - `value_format_name:` → informational only
+From each `.view.lkml` extract the view name, `sql_table_name:`, `derived_table:` (flag
+as SQL View — Step 5b), and every `dimension { ... }` / `measure { ... }` block's
+`type:`, `sql:`, `label:`, `hidden:`, `primary_key:`, `filters:`, and
+`value_format_name:`. Full field-by-field list:
+[references/step-3-parse-fields.md](references/step-3-parse-fields.md) "3b. Parse each
+view file — full field list".
 
 ### 3c. Confirm ThoughtSpot connection name
 
@@ -224,74 +215,39 @@ references a dimension. Build a DAG and inline bottom-up.
 
 ## Step 4 — Resolve field references and classify
 
-After Step 3c inline resolution, classify each field:
+After Step 3c inline resolution, classify each field.
 
 ### Dimensions → ThoughtSpot columns
 
-| LookML `type:` | ThoughtSpot `column_type` | Notes |
-|---|---|---|
-| `string` | `ATTRIBUTE` | |
-| `number` (not aggregated) | `ATTRIBUTE` | Used as an ID / key |
-| `yesno` | `ATTRIBUTE` | |
-| `date`, `time` | `ATTRIBUTE` | |
-| `tier` | `ATTRIBUTE` → converted to `if/then/else` formula | See formula translation |
-| `duration` | `ATTRIBUTE` → `diff_days/diff_months/diff_years` formula | |
-| `location` | **Unsupported** — flag + omit | No TS spatial type |
+Map each LookML dimension `type:` to a ThoughtSpot `column_type` — most types become
+`ATTRIBUTE`; `tier` and `duration` convert to a formula; `location` is **unsupported**
+(flag + omit, no TS spatial type). Full mapping table:
+[references/step-4-measure-translation.md](references/step-4-measure-translation.md).
 
 ### Measures → ThoughtSpot formulas
 
-| LookML `type:` | ThoughtSpot formula | column_type | Notes |
-|---|---|---|---|
-| `sum` | `sum ( [T::COL] )` | MEASURE | |
-| `count` | `count ( [T::COL] )` | MEASURE | |
-| `count_distinct` | `unique count ( [T::COL] )` | MEASURE | Invariant I5: NEVER `aggregation: COUNT_DISTINCT` |
-| `average` | `average ( [T::COL] )` | MEASURE | |
-| `max` | `max ( [T::COL] )` | MEASURE | |
-| `min` | `min ( [T::COL] )` | MEASURE | |
-| `number` (derived) | Translate inlined SQL to TS formula | MEASURE | See §4a |
-| `sum_distinct` | `sum ( [T::COL] )` (with user confirmation of grouping intent) | MEASURE | |
-| `running_total` | `cumulative_sum ( sum ( [T::COL] ) , [date_col] )` | MEASURE | |
-| `percent_of_total` | `sum([T::COL]) / group_aggregate(sum([T::COL]), {}, query_filters())` | MEASURE | |
-| `list` | **Unsupported** — omit + log | — | |
+Map each LookML measure `type:` to a ThoughtSpot formula and `column_type` —
+`sum`/`count`/`average`/`max`/`min` map directly, `count_distinct` MUST use
+`unique count()` (never `aggregation: COUNT_DISTINCT` — Invariant I5), a derived
+`number` measure needs SQL translation (§4a), and `list` is **unsupported** (omit + log).
+Full mapping table: [references/step-4-measure-translation.md](references/step-4-measure-translation.md).
 
 ### §4a — Translating `type: number` (derived measure) SQL
 
-After inlining all `${}` references, translate the resulting SQL expression:
-
-| SQL pattern | ThoughtSpot formula |
-|---|---|
-| `1.0 * A / NULLIF(B, 0)` | `safe_divide ( A_formula , B_formula )` — drop the `1.0 *` multiplier |
-| `SUM(col) / SUM(other)` | `safe_divide ( sum ( [T::col] ) , sum ( [T::other] ) )` |
-| `CASE WHEN ... END` | `if ( cond ) then a else b` |
-| `COALESCE(a, 0)` | `ifnull ( a , 0 )` |
-| `NULLIF(a, 0)` (not in denominator) | `if ( a = 0 ) then null else a` |
-| SQL arithmetic | Direct TS arithmetic (`+`, `-`, `*`, `/`) |
-| `SUM(CASE WHEN cond THEN col END)` | `sum_if ( cond , [T::col] )` |
-
-Open the full mapping table before declaring any expression untranslatable:
-`../../shared/mappings/looker/lookml-to-ts-formula-translation.md` — Invariant I7.
+After inlining all `${}` references, translate the resulting SQL expression using the
+SQL-pattern table in
+[references/step-4-measure-translation.md](references/step-4-measure-translation.md)
+"§4a — Translating `type: number`". Open the full mapping table before declaring any
+expression untranslatable: `../../shared/mappings/looker/lookml-to-ts-formula-translation.md`
+— Invariant I7.
 
 ### §4b — Filtered measures (`filters:` on measures)
 
-LookML:
-```ruby
-measure: complete_orders {
-  type: count_distinct
-  sql: ${TABLE}.ORDER_ID ;;
-  filters: [order_status: "Complete"]
-}
-```
-
-ThoughtSpot:
-```
-count_if ( [ORDER_FACT::ORDER_STATUS] = 'Complete' , [ORDER_FACT::ORDER_ID] )
-→ column_type: MEASURE, index_type: DONT_INDEX
-```
-
-For `filters:` with multiple conditions: AND them together:
-```
-sum_if ( [T::STATUS] = 'Complete' and [T::CHANNEL] = 'ONLINE' , [T::REVENUE] )
-```
+A LookML measure's `filters:` block (e.g. `filters: [order_status: "Complete"]`) becomes a
+`count_if`/`sum_if`/`average_if` formula with the filter condition inlined, AND-ing multiple
+conditions together. Worked example:
+[references/step-4-measure-translation.md](references/step-4-measure-translation.md)
+"§4b — Filtered measures".
 
 ### §4c — Multiple aggregations on the same physical column
 
@@ -331,21 +287,12 @@ table:
 
 **db_column_name**: extracted from `${TABLE}.COL` → `COL`. Always include even when it equals `name`.
 
-**LookML type → ThoughtSpot `data_type` mapping:**
-
-| LookML `type:` | `db_column_properties.data_type` |
-|---|---|
-| `string` | `VARCHAR` |
-| `number` (integer, ID, key) | `INT64` |
-| `number` (float/price) | `DOUBLE` |
-| `yesno` | `BOOL` |
-| `date` | `DATE` |
-| `time`, `timestamp` | `DATE_TIME` |
-| `dimension_group: { type: time }` | `DATE_TIME` |
-| `tier` | `VARCHAR` |
-| `duration` | `DOUBLE` |
-
-When LookML type is ambiguous (e.g. a `number` that could be INT or FLOAT), default to `INT64` — ThoughtSpot will report a type mismatch if wrong, giving a clear signal to switch to `DOUBLE`.
+**LookML type → ThoughtSpot `data_type` mapping:** most types map directly (`string`→
+`VARCHAR`, `date`→`DATE`, `yesno`→`BOOL`, etc.); when a LookML `number` is ambiguous
+(could be INT or FLOAT), default to `INT64` — ThoughtSpot will report a type mismatch if
+wrong, giving a clear signal to switch to `DOUBLE`. Full table:
+[references/step-5-tml-generation.md](references/step-5-tml-generation.md) "5a. LookML
+type → ThoughtSpot `data_type` mapping".
 
 ### 5b. Derived tables (derived_table: { sql: ... }) → SQL View TML
 
@@ -354,182 +301,15 @@ When a view block contains `derived_table: { sql: ... }`, generate a **SQL View 
 logical table — it runs raw SQL against the connection and exposes the result columns
 exactly like a physical table. This is the direct equivalent of a Looker PDT.
 
-**What to strip vs. keep:**
-
-| LookML PDT block | Action |
-|---|---|
-| `derived_table: { sql: ... }` | Keep the SQL — translate dialect, see §5b-i |
-| `persist_with:` | Strip — ThoughtSpot has no PDT scheduling |
-| `datagroup_trigger:` | Strip |
-| `sql_trigger:` | Strip |
-| `max_cache_age:` | Strip |
-| `explore_source:` (native DT) | **Cannot convert** — surface to user, omit + log |
-
-#### §5b-i. SQL dialect adaptation
-
-The LookML PDT SQL is written for the Looker connection's warehouse dialect. Adapt it
-for the ThoughtSpot connection's target warehouse before putting it in `sql_query:`.
-
-**BigQuery → Snowflake (most common for qwiklab/training projects):**
-
-| BigQuery pattern | Snowflake equivalent |
-|---|---|
-| `` `project.dataset.table` `` (backtick-quoted) | `DATABASE.SCHEMA.TABLE` |
-| `CAST(x AS STRING)` | `CAST(x AS VARCHAR)` |
-| `CAST(x AS INT64)` | `CAST(x AS NUMBER)` |
-| `CAST(x AS FLOAT64)` | `CAST(x AS FLOAT)` |
-| `DATE_TRUNC(col, MONTH)` | `DATE_TRUNC('MONTH', col)` — argument order flips |
-| `TIMESTAMP_TRUNC(col, HOUR)` | `DATE_TRUNC('HOUR', col)` |
-| `EXTRACT(YEAR FROM col)` | `EXTRACT(YEAR FROM col)` — same |
-| `FORMAT_DATE('%Y-%m', col)` | `TO_CHAR(col, 'YYYY-MM')` |
-| `IFNULL(a, b)` | `IFNULL(a, b)` — same |
-| `DIV(a, b)` | `FLOOR(a / b)` |
-| `SAFE_DIVIDE(a, b)` | `IFF(b = 0, NULL, a / b)` |
-
-`${TABLE}` inside PDT SQL refers to the view's own derived output — it is only valid in
-views that reference themselves, which is unusual. More commonly PDT SQL references
-other views' physical tables via `cloud-training-demos.looker_ecomm.events` etc.
-Resolve `${view.field}` cross-view refs using the dependency graph from Step 3d.
-
-**If the SQL dialect cannot be reliably adapted** (e.g. BigQuery-specific UDFs or
-Geography types with no Snowflake equivalent): surface the untranslatable expression,
-propose the closest Snowflake alternative, and ask the user to confirm before proceeding.
-
-#### §5b-ii. Build sql_view_columns from LookML dimensions
-
-Each `dimension:` / `dimension_group:` in the PDT view maps to a `sql_view_columns[]`
-entry. The `sql_output_column` must match the **column alias in the SQL SELECT list** —
-not the dimension's `sql:` expression.
-
-Rule: scan the SQL SELECT clause for aliases. Match dimension `sql: ${TABLE}.col_alias`
-→ `sql_output_column: col_alias`.
-
-**On a Snowflake-backed ThoughtSpot connection, write both the SQL alias and
-`sql_output_column` in UPPERCASE — do this proactively, don't wait for the import
-error.** Snowflake normalizes unquoted identifiers to uppercase at query time, so a
-`sql_query` with a lowercase `AS session_id` and a `sql_view_columns[].sql_output_column:
-session_id` produces a case-sensitive string mismatch against what Snowflake actually
-returns, and import fails with `"Column name [session_id, ...] is not present in SQL
-query"` even though the SQL is syntactically valid and would run fine standalone. Fix:
-explicit `AS SESSION_ID` in the SQL and `sql_output_column: SESSION_ID`, matching case
-exactly. This applies per-connection dialect — check what the target connection's
-warehouse type is (Step 3c) before assuming case rules; Databricks/Postgres-backed
-connections preserve alias case as written and don't need this.
-
-For `dimension_group: { type: time }` — the PDT SQL typically outputs one timestamp
-column. Create **one** `sql_view_columns:` entry for the base timestamp; ThoughtSpot
-derives date bucketing at query time, so you don't need separate entries for each
-`timeframes:` value.
-
-```yaml
-# LookML:
-#   dimension_group: event1 {
-#     type: time
-#     timeframes: [raw, time]
-#     sql: ${TABLE}.event1_time ;;
-#   }
-# SQL SELECT outputs (Snowflake — explicit uppercase alias):  MIN(...) AS EVENT1_TIME
-
-- name: Event1 Time
-  sql_output_column: EVENT1_TIME
-  data_type: DATE_TIME
-  properties:
-    column_type: ATTRIBUTE
-    index_type: DONT_INDEX
-```
-
-#### §5b-iii. Handle measures in a SQL View
-
-LookML measures on a PDT view (e.g. `type: count_distinct`) should be expressed as
-**model-level formulas in the Model TML** (Step 6) — **not** in the SQL View TML's own
-`formulas:` block, and **not** pre-aggregated in the SQL query itself (that would make
-the SQL View non-additive).
-
-The SQL View TML exposes raw columns only. The model TML references those columns
-using `[SQL_VIEW_NAME::Column Name]` format in its `formulas[]`:
-
-```yaml
-# In Events.model.tml — NOT in EVENT_SESSION_FUNNEL.sql_view.tml
-formulas:
-- id: formula_Session Count
-  name: Session Count
-  expr: unique count ( [EVENT_SESSION_FUNNEL::Session Id] )
-  properties:
-    column_type: MEASURE
-- id: formula_Count Sessions Event1
-  name: Count Sessions Event1
-  expr: count_if ( not is_null ( [EVENT_SESSION_FUNNEL::Event1 Time] ) , [EVENT_SESSION_FUNNEL::Session Id] )
-  properties:
-    column_type: MEASURE
-```
-
-Column references in model `formulas[].expr` use `[SQL_VIEW_NAME::Column Name]` where:
-- `SQL_VIEW_NAME` is the exact `name:` from the `sql_view:` block (case-sensitive)
-- `Column Name` is the `name:` from `sql_view_columns[]` (display name, not `sql_output_column`)
-
-Exception: if a measure is pre-computed as a SELECT alias in the PDT SQL (e.g. a
-`total_revenue` column in the SELECT clause), expose it as a MEASURE column directly
-in `sql_view_columns:` with `aggregation: SUM`.
-
-#### §5b-iv. SQL View TML template
-
-```yaml
-sql_view:
-  name: {View Display Name}                 # Title Case from LookML view name
-  connection:
-    name: {connection_name}                 # same confirmed connection as all Table TMLs
-  sql_query: |
-    {adapted SQL — dialect-corrected, ${TABLE} resolved, PDT directives stripped}
-  sql_view_columns:
-  - name: {Display Name}                    # Title Case from dimension field name or label:
-    sql_output_column: {select_alias}       # must match alias in sql_query SELECT clause
-    data_type: {VARCHAR|INT64|DOUBLE|DATE|DATE_TIME|BOOL}   # optional — inferred if omitted
-    properties:
-      column_type: {ATTRIBUTE|MEASURE}
-      index_type: DONT_INDEX                # apply to timestamp columns and hidden dims
-  formulas:                                 # optional — for measures derived from SQL View columns
-  - id: formula_{Measure Name}
-    name: {Measure Name}
-    expr: "{ThoughtSpot formula using [ViewName::ColumnName] refs}"
-    properties:
-      column_type: MEASURE
-```
-
-File naming: `{VIEW_NAME}.sql_view.tml` (e.g. `EVENT_SESSION_FUNNEL.sql_view.tml`)
-
-#### §5b-v. How the Model TML references a SQL View
-
-In `model_tables[]`, a SQL View is referenced **by name** exactly like a physical Table.
-No special syntax is needed — ThoughtSpot resolves it from the import batch:
-
-```yaml
-model_tables:
-- name: EVENTS                            # physical Table
-  joins:
-  - with: EVENT_SESSION_FUNNEL            # SQL View — referenced by name
-    'on': '[EVENTS::Session Id] = [EVENT_SESSION_FUNNEL::Session Id]'
-    type: LEFT_OUTER
-    cardinality: MANY_TO_ONE
-- name: EVENT_SESSION_FUNNEL              # SQL View listed as a model_table entry too
-```
-
-`column_id:` references in the model use the SQL View name and its `sql_view_columns[]`
-display name: `EVENT_SESSION_FUNNEL::Session Id`.
-
-#### §5b-vi. SQL View self-validation checklist
-
-Before saving a SQL View TML:
-
-- [ ] `sql_query:` SQL is valid for the **target warehouse dialect** (not the original Looker connection dialect)
-- [ ] Every `sql_output_column` matches a column name or alias in the `sql_query:` SELECT clause
-- [ ] All PDT directives stripped (`persist_with:`, `datagroup_trigger:`, `sql_trigger:`, `max_cache_age:`)
-- [ ] `connection.name:` is present — SQL Views require it (unlike Table TMLs where it is also required)
-- [ ] No `db:`, `schema:`, or `db_table:` fields — those belong to Table TML only
-- [ ] No `search_query:` field — that belongs to `view:` (AGGR_WORKSHEET), not `sql_view:`
-- [ ] `column_type:` is nested under `properties:` — not bare at column level
-- [ ] No duplicate `name:` values across `sql_view_columns[]`
-- [ ] If `formulas[]` present: every `id` follows `"formula_"` + name convention
-- [ ] File extension is `.sql_view.tml`
+`persist_with:`, `datagroup_trigger:`, `sql_trigger:`, and `max_cache_age:` are stripped
+(ThoughtSpot has no PDT scheduling); a native `explore_source:` derived table **cannot
+convert** — surface to the user, omit + log. For everything else — SQL dialect adaptation
+(BigQuery → Snowflake and other warehouse pairs), building `sql_view_columns[]` from
+LookML dimensions (including the Snowflake UPPERCASE alias gotcha), where measures go
+(model-level formulas, never in the SQL View's own `formulas:`), the full SQL View TML
+template, how the Model TML references a SQL View, and the self-validation checklist —
+see [references/step-5-tml-generation.md](references/step-5-tml-generation.md) "5b.
+Derived tables".
 
 ### 5c. Column naming
 
@@ -541,49 +321,39 @@ Example: `customer_segment` → "Customer Segment"; `label: "Cust Segment"` → 
 
 ### 5d. Column naming conflicts across joined tables
 
-When multiple joined views expose the same field name, the flat `model.columns[]` list requires unique `name:` values. Apply this resolution order:
-
-1. **Fact table columns** keep the simple name (e.g. `Created At`, `Cost`).
-2. **Joined dim table columns** that conflict are **prefixed** with the table's label or view name: `Users Created At`, `Inventory Cost`.
-3. If two dim tables conflict with each other (not the fact), prefix the less-primary one.
-
-Common conflict patterns in multi-table e-commerce explores:
-
-| Shared field | Fact-side | Joined dim | Joined dim #2 |
-|---|---|---|---|
-| `created_date` / `created_at` | `Created At` | `Users Created At` | `Inventory Created At` |
-| `cost` | — | `Inventory Cost` | `Product Cost` |
-| `name` | — | `Product Name` | `Distribution Center Name` |
-| `id` (PK) | — | `User Id` (hidden) | `Product Id` (hidden) |
-
-**Record every renaming in the migration gaps file** so analysts know the Looker `view.field` → ThoughtSpot model column name mapping. Example:
-```
-users.created_date → "Users Created At" (renamed to avoid conflict with order_items.created_date)
-```
-
-**Resolving the resolution table's own examples can introduce a *new* collision — check the final name set, not just the pairwise rule.** Applying rule 3 literally (e.g. `products.name` → `"Product Name"`) can collide with an unrelated field that already produces that exact string after its own Title-Case conversion (e.g. `inventory_items.product_name` → `"Product Name"` natively, with no conflict resolution needed). Compute the full set of resolved display names across *all* joined tables first, then re-check for new collisions the renaming itself created — don't treat the pairwise table above as terminal. When a second-order collision like this shows up, keep the field that has no conflict at its natural name, and prefix the *other* one with its view name instead (e.g. `inventory_items.product_name` → `"Inventory Product Name"`, freeing up `"Product Name"` for `products.name`).
+When multiple joined views expose the same field name, the flat `model.columns[]` list
+requires unique `name:` values — fact-table columns keep the simple name, conflicting
+joined-dim columns get prefixed with the table's label or view name, and if two dim
+tables conflict with each other the less-primary one is prefixed. **Compute the full set
+of resolved display names across all joined tables before finalizing** — the resolution
+rule can itself introduce a second-order collision (see the worked example). Record every
+renaming in the migration gaps file. Full conflict-pattern table and the second-order
+collision example:
+[references/step-5-tml-generation.md](references/step-5-tml-generation.md) "5d. Column
+naming conflicts across joined tables".
 
 ### 5e. Measure name collisions across joined views
 
-LookML views very commonly each define their own `measure: count { type: count }` — nearly every dimension view in a typical explore has one. Once these become ThoughtSpot model `formulas[]`, they hit the same uniqueness problem as `5d`, but for **formula display names**, not physical column names — `columns[]`/`formulas[].name` must be unique across the *entire* model (self-validation checklist item 8 in `thoughtspot-model-tml.md`), not just within one Table TML (where every view's own `Count` column is fine in isolation).
-
-Apply the same view-name-prefix convention as `5d`, but for every joined view's measure, not just the fact's:
-
-| LookML | Naive ThoughtSpot formula name | Resolved (unique) name |
-|---|---|---|
-| `order_items.order_item_count` (fact) | `Order Item Count` | `Order Item Count` (already distinct — keep) |
-| `users.count` | `Count` | `Users Count` |
-| `products.count` | `Count` | `Products Count` |
-| `inventory_items.count` | `Count` | `Inventory Items Count` |
-| `distribution_centers.count` | `Count` | `Distribution Centers Count` |
-
-This applies independently in **each** model — the same physical table's `count` measure can resolve to the same name (e.g. `Users Count`) in two different models that both join `USERS`, since each Model TML's `formulas[]`/`columns[]` are scoped to that model only.
+LookML views very commonly each define their own `measure: count { type: count }` —
+nearly every dimension view in a typical explore has one. Once these become ThoughtSpot
+model `formulas[]`, they hit the same uniqueness problem as `5d`, but for **formula
+display names**, not physical column names — `columns[]`/`formulas[].name` must be
+unique across the *entire* model, not just within one Table TML. Apply the same
+view-name-prefix convention as `5d` to every joined view's measure, not just the fact's.
+Worked example table: [references/step-5-tml-generation.md](references/step-5-tml-generation.md)
+"5e. Measure name collisions across joined views".
 
 ### 5f. Hidden dimension-table PKs also need unique names — not just when they collide with the fact
 
-Per `6f` below, every joined dimension table's primary key is included in `model.columns[]` as a hidden `ATTRIBUTE` (so join-key columns resolve and RLS/drill can reference them). When a model joins **more than one** dimension table and each one's PK is plainly named `id` in LookML (a very common pattern — `id`, not `customer_id` or `user_id`), every one of them Title-Cases to the same display name `"Id"`. ThoughtSpot rejects duplicate display names across `columns[]` even when both entries have `is_hidden: true` — this collision is not limited to the "FK vs. dim PK" case already covered by `E2` Case B; it happens purely from having 2+ dim tables in the same model, with no fact-side field involved at all.
-
-Give each dim table's hidden PK a table-prefixed name, e.g. for a model joining `USERS`, `INVENTORY_ITEMS`, `PRODUCTS`, and `DISTRIBUTION_CENTERS`: keep the first one plain (`"Id"` for `USERS`) and prefix the rest — `"Inventory Items Id"`, `"Products Id"`, `"Distribution Centers Id"`. As with `5d`/`5e`, record the mapping in the gaps file.
+Per `6f` below, every joined dimension table's primary key is included in
+`model.columns[]` as a hidden `ATTRIBUTE`. When a model joins **more than one** dimension
+table and each one's PK is plainly named `id` in LookML, every one Title-Cases to the
+same display name `"Id"`, and ThoughtSpot rejects the duplicate even with `is_hidden:
+true` — this collision happens purely from having 2+ dim tables in the model, independent
+of the fact-side `E2` Case B collision. Give each dim table's hidden PK a table-prefixed
+name (keep the first plain, prefix the rest) and record the mapping in the gaps file.
+Worked example: [references/step-5-tml-generation.md](references/step-5-tml-generation.md)
+"5f. Hidden dimension-table PKs".
 
 ---
 
@@ -594,129 +364,47 @@ Give each dim table's hidden PK a table-prefixed name, e.g. for a model joining 
 Each `explore {}` block in the model file produces one ThoughtSpot Model TML.
 Model name = explore `label:` if present, else explore name in Title Case.
 
-Template:
-```yaml
-model:
-  name: {Explore Label or Name}
-  model_tables:
-  # Fact table — defines its joins to direct dims
-  - name: {FACT_TABLE_NAME}             # exact ThoughtSpot table object name (case-sensitive)
-    joins:
-    - with: {DIM_TABLE_NAME}            # must match a model_tables[].name exactly
-      'on': '[{FACT_TABLE}::{FK_COL}] = [{DIM_TABLE}::{PK_COL}]'   # 'on' MUST be quoted — YAML reserved word
-      type: LEFT_OUTER                  # from join type: — see §6c; FULL_OUTER invalid, use OUTER
-      cardinality: MANY_TO_ONE          # from relationship: — see §6d
-  # Dim table entry — no joins: array unless it is itself a mid-chain table (see chained join pattern below)
-  - name: {DIM_TABLE_NAME}
-  # Chained join pattern (A→B→C→D): each intermediate table defines its own joins:
-  # - name: {B_TABLE}
-  #   joins:
-  #   - with: {C_TABLE}
-  #     'on': '[{B}::{fk}] = [{C}::{pk}]'
-  #     type: LEFT_OUTER
-  #     cardinality: MANY_TO_ONE
-  # - name: {C_TABLE}
-  #   joins:
-  #   - with: {D_TABLE}
-  #     'on': '[{C}::{fk}] = [{D}::{pk}]'
-  #     type: LEFT_OUTER
-  #     cardinality: MANY_TO_ONE
-  # - name: {D_TABLE}
-
-  formulas:                             # one entry per LookML measure — NO aggregation: here (Invariant I2)
-  - id: formula_{Formula Name}          # id format: "formula_" + display name (spaces preserved)
-    name: {Formula Name}
-    expr: "{ThoughtSpot formula using [TABLE_NAME::Col Name] references}"
-    properties:
-      column_type: MEASURE
-
-  columns:
-  # ── From fact table: all analytical dimensions ──
-  - name: {Fact Dimension Name}
-    column_id: "{FACT_TABLE}::{Col Name}"   # Col Name = Table TML column display name (Step 5c)
-    properties:
-      column_type: ATTRIBUTE
-  # Base numeric column used by a formula: list as ATTRIBUTE + DONT_INDEX (I8 — formula does aggregation)
-  - name: {Base Numeric Name}
-    column_id: "{FACT_TABLE}::{Num Col}"
-    properties:
-      column_type: ATTRIBUTE
-      index_type: DONT_INDEX
-  # FK column on fact side: DO NOT add to columns[] — only in Table TML for join resolution (Step 6f)
-
-  # ── From joined dim table: PK hidden + all useful attributes ──
-  - name: {Dim PK Display Name}         # always list dim PK with is_hidden: true (Step 6f)
-    column_id: "{DIM_TABLE}::{PK_Col}"
-    properties:
-      column_type: ATTRIBUTE
-      is_hidden: true
-  - name: {Dim Attribute Name}          # apply §5d conflict resolution for shared names
-    column_id: "{DIM_TABLE}::{Attr Col}"
-    properties:
-      column_type: ATTRIBUTE
-
-  # ── Formula columns: one per formulas[] entry — Invariant I1 ──
-  - name: {Formula Name}               # must match formulas[].name exactly (case-sensitive)
-    formula_id: formula_{Formula Name} # must match formulas[].id exactly
-    properties:
-      column_type: MEASURE
-      aggregation: SUM                  # convention: SUM for all formula measures (I2)
-      index_type: DONT_INDEX            # Invariant I3
-
-  properties:
-    is_bypass_rls: false
-    join_progressive: true
-```
+The model template covers: `model_tables[]` with the fact table's joins to direct dims
+(and the chained-join pattern for A→B→C→D dependency chains), `formulas[]` (one per
+LookML measure, no `aggregation:` — Invariant I2), and `columns[]` (fact dimensions,
+base numeric columns behind a formula as `DONT_INDEX`, dim PKs hidden, dim attributes,
+and one formula column per `formulas[]` entry per Invariant I1). Full YAML template:
+[references/step-6-model-joins.md](references/step-6-model-joins.md) "6a. Model TML
+template".
 
 ### 6b. Join SQL translation
 
-LookML `sql_on:` → ThoughtSpot `'on':` by replacing `${view.field}` with `[VIEW::col_display_name]`.
-
-The column reference in `'on':` uses the **Table TML column display name** (Title Case from
-field name, or `label:` if present) — NOT the physical `db_column_name`.
-
-```
-# LookML
-sql_on: ${order_fact.customer_key} = ${customer_dim.customer_key} ;;
-
-# ThoughtSpot  (customer_key → Title Case → "Customer Key")
-'on': '[ORDER_FACT::Customer Key] = [CUSTOMER_DIM::Customer Key]'
-```
+LookML `sql_on:` → ThoughtSpot `'on':` by replacing `${view.field}` with
+`[VIEW::col_display_name]`. The column reference uses the **Table TML column display
+name** (Title Case from field name, or `label:` if present) — NOT the physical
+`db_column_name`. Worked example:
+[references/step-6-model-joins.md](references/step-6-model-joins.md) "6b. Join SQL
+translation".
 
 ### 6c. Join type mapping
 
-| LookML `type:` | ThoughtSpot `type:` |
-|---|---|
-| `left_outer` (default) | `LEFT_OUTER` |
-| `full_outer` | `OUTER` |
-| `inner` | `INNER` |
-| `cross` | `CROSS` |
-
-**`FULL_OUTER` is not valid in Model TML inline joins.** ThoughtSpot raises `"Invalid value FULL_OUTER … Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER"`. Use `OUTER` instead.
+Map LookML `type:` to ThoughtSpot `type:` (`left_outer`→`LEFT_OUTER`, `full_outer`→
+`OUTER`, `inner`→`INNER`, `cross`→`CROSS`). **`FULL_OUTER` is not valid** in Model TML
+inline joins — ThoughtSpot raises `"Invalid value FULL_OUTER … Allowed values are INNER,
+LEFT_OUTER, OUTER, RIGHT_OUTER"`; use `OUTER` instead. Full table:
+[references/step-6-model-joins.md](references/step-6-model-joins.md) "6c. Join type
+mapping".
 
 ### 6d. Cardinality mapping
 
-| LookML `relationship:` | ThoughtSpot `cardinality:` |
-|---|---|
-| `many_to_one` (default) | `MANY_TO_ONE` |
-| `one_to_many` | `ONE_TO_MANY` |
-| `many_to_many` | `MANY_TO_MANY` |
-| `one_to_one` | `ONE_TO_ONE` |
+Map LookML `relationship:` to ThoughtSpot `cardinality:` (`many_to_one`→`MANY_TO_ONE`,
+`one_to_many`→`ONE_TO_MANY`, `many_to_many`→`MANY_TO_MANY`, `one_to_one`→`ONE_TO_ONE`).
+Full table: [references/step-6-model-joins.md](references/step-6-model-joins.md) "6d.
+Cardinality mapping".
 
 ### 6f. Join key column handling
 
-The join `'on':` clause references Table TML column names directly. Whether a join key
-column appears in `model.columns[]` depends on which side of the join it is on:
-
-| Column | In Table TML? | In model `columns[]`? | Why |
-|---|---|---|---|
-| **Fact table FK** (e.g. `order_fact.customer_key`) | ✓ Yes | ✗ No | Used only for the join condition — not an analytical column |
-| **Dim table PK** (e.g. `customer_dim.customer_key`) | ✓ Yes | ✓ Yes (`is_hidden: true`) | Canonical key of the dimension; keep hidden so it doesn't clutter search |
-
-The FK column must exist in the fact table's Table TML (the join `'on':` references it), but
-it should **not** be added to the model's `columns[]` list. This avoids a duplicate display
-name conflict when fact and dim both have a field named e.g. `customer_key`, and it keeps
-the model clean — FK columns have no analytical value on their own.
+The join `'on':` clause references Table TML column names directly. A **fact table FK**
+goes in the Table TML only — **not** `model.columns[]` (no analytical value, avoids a
+duplicate-name conflict). A **dim table PK** goes in both, hidden (`is_hidden: true`) in
+`model.columns[]` so join-key columns resolve and RLS/drill can reference them. Full
+table: [references/step-6-model-joins.md](references/step-6-model-joins.md) "6f. Join
+key column handling".
 
 ### 6e. Invariant checklist before saving Model TML
 
@@ -788,58 +476,20 @@ parent — was already deleted manually (e.g. by the user cleaning up before a r
 `rm -rf` on a path that doesn't exist is a no-op, and `mkdir -p` recreates every missing
 parent directory. No existence check needed before this block.
 
-Display this review inline:
+Display this review inline — tiers are **translated** (direct mapping, semantically
+equivalent), **approximate** (translated but with a known behavioural difference, e.g.
+`sum_distinct` → `sum`, `type: running_total` without a deterministic sort), and
+**omitted** (no ThoughtSpot equivalent; field excluded from TML). See
+[references/step-7-review-templates.md](references/step-7-review-templates.md) "Console
+review display template" for the exact console format.
 
-```
-Migration gaps review — {explore_name} explore
-══════════════════════════════════════════════
-
-Formulas ({F} total):
-  ✓  {name}  [translated]:    {lookml_expr}  →  {ts_expr}
-  ~  {name}  [approximate]:   {lookml_expr}  →  {ts_expr}  ⚠ semantics may differ
-  ✗  {name}  [omitted]:       {lookml_expr}  — {reason}
-
-LookML constructs omitted:
-  - {construct}  ({field or explore name}): {reason}  → {recommended action}
-  # if none: "Nothing omitted — full coverage."
-
-Format hints (apply manually in ThoughtSpot after import):
-  - {field_name}: {value_format_name}  → {suggested ThoughtSpot format}
-  # if none: "No format hints."
-
-Approximations to review:
-  - {field_name}: {what may differ from Looker behaviour}
-  # if none: "No approximations."
-```
-
-Tiers:
-- **translated** — direct mapping, semantically equivalent
-- **approximate** — translated but with a known behavioural difference (e.g. `sum_distinct` → `sum`, `type: running_total` without a deterministic sort)
-- **omitted** — no ThoughtSpot equivalent; field excluded from TML
-
-After displaying the review, write the same content to a gaps file in `{reports_dir}`:
-
-```bash
-cat > "{reports_dir}/{explore_name}_migration_gaps.md" << 'EOF'
-# Migration Gaps — {explore_name}
-# Generated by ts-convert-from-looker
-# Source project: {project_path}
-# Date: {date}
-
-## Omitted formulas / constructs
-...
-
-## Approximations
-...
-
-## Format hints
-...
-EOF
-```
-
-The gaps file lives in `{reports_dir}`, not the TML staging directory, and is NOT added
-to the zip — the zip contains only importable TML files. If there are no gaps, still
-write the file with "No gaps — full coverage."
+After displaying the review, write the same content to a gaps file in `{reports_dir}`
+(`{reports_dir}/{explore_name}_migration_gaps.md`) — see
+[references/step-7-review-templates.md](references/step-7-review-templates.md) "Gaps
+file heredoc format" for the exact structure. The gaps file lives in `{reports_dir}`,
+not the TML staging directory, and is NOT added to the zip — the zip contains only
+importable TML files. If there are no gaps, still write the file with "No gaps — full
+coverage."
 
 ---
 
@@ -889,15 +539,9 @@ ts tml import --dir {output_dir} --order tableau --policy PARTIAL --create-new -
 **Alternative — UI import:** Upload `{explore_name}_tml.zip` via ThoughtSpot UI:
 `Data → TML Import → select zip file → Import`
 
-If import fails:
-- `"columns should have unique column_id values"` → Invariant I8 violated — fix duplicate `column_id`
-- `"FORMULA is not a valid aggregation type"` → Invariant I2 violated — remove `aggregation:` from `formulas[]`
-- `"{table_name} does not exist in schema"` → Invariant I4 violated — check join `id` matches `name` exactly
-- `"Connection not found"` → connection display name mismatch — verify `ts connections list --profile {name}`
-- `"DataType INT64 does not match CDW DataType for column ... in connection ..."` → `db_column_properties.data_type` wrong — check actual warehouse column type and correct it (e.g. INT64 → VARCHAR for string-stored IDs)
-- `"Column name [col] is not present in SQL query"` (SQL View) → `sql_output_column` case mismatch — Snowflake normalizes unquoted identifiers to UPPERCASE; ensure every `sql_output_column` value is UPPERCASE and the SQL SELECT uses explicit `AS UPPERCASE_ALIAS` (see thoughtspot-sql-view-tml.md §Snowflake note)
-- `"Search did not find 'is_null ('"` → `is_null()` / `isnull()` not supported on this instance — replace `not is_null ( [col] )` with `[col] != null` (see lookml-to-ts-formula-translation.md §Null checks)
-- `"Invalid value token: daily"` (Liveboard search_query) → `daily` used as a bare standalone token instead of the dotted form — use `[Created At].daily` not a lone `daily` keyword
+If import fails, look up the error message against the invariant it violates and the fix:
+[references/step-7-review-templates.md](references/step-7-review-templates.md) "Step 8 —
+Import error → fix lookup".
 
 ---
 
@@ -920,89 +564,43 @@ Only run if the user selected scope 1 (Models + Liveboards) or scope 3 (Liveboar
 
 ### 10a. Parse LookML dashboard file
 
-LookML dashboards are plain-text YAML (`.dashboard.lookml`). Extract:
-
-**Dashboard-level:**
-- `dashboard: name` → Liveboard name (convert underscores to spaces, title-case)
-- `layout:` → grid style (`newspaper` = 24-column grid; `tile_size` = fixed size)
-- `filters:` block → dashboard filter definitions (see Step 10f)
-
-**Per element (`elements:` — not `tiles:`):**
-- `title:` → viz name (use `title:` if present, else `name:`)
-- `type:` → chart type (see Step 10b for mapping)
-- `explore:` → which explore name (= which model) to bind to
-- `fields: [view.field, view.field, ...]` → all columns for the viz (dimensions and measures in one flat list)
-- `sorts:` → sort order (record in summary; no direct TML equivalent — omit from TML)
-- `limit:` → row limit (record in summary; no direct TML equivalent — omit from TML)
-- `listen:` → map of `{FilterName: view.field}` — which dashboard filters this tile responds to
-- `filters:` → tile-level hard filters `{view.field: "value"}` — embed into `search_query` (see Step 10c)
-- `row:`, `col:`, `width:`, `height:` → grid position in 24-column grid (convert in Step 10d)
-
-**Assign viz IDs sequentially:** `Viz_1`, `Viz_2`, ... in the order elements appear.
+LookML dashboards are plain-text YAML (`.dashboard.lookml`). Extract the dashboard-level
+fields (`dashboard: name`, `layout:`, `filters:`) and, per element (`elements:` — not
+`tiles:`), the viz title/type/explore/fields/sorts/limit/listen/filters/grid-position —
+full field-by-field list:
+[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
+"10a. Parse LookML dashboard file — full field list". **Assign viz IDs sequentially:**
+`Viz_1`, `Viz_2`, ... in the order elements appear.
 
 ### 10b. LookML chart type → ThoughtSpot chart type
 
-| LookML tile type | ThoughtSpot `display_mode` | ThoughtSpot chart `type` |
-|---|---|---|
-| `single_value` | `CHART_MODE` | `KPI` |
-| `looker_column` | `CHART_MODE` | `COLUMN` |
-| `looker_bar` | `CHART_MODE` | `BAR` |
-| `looker_line` | `CHART_MODE` | `LINE` |
-| `looker_pie` | `CHART_MODE` | `PIE` |
-| `looker_scatter` | `CHART_MODE` | `SCATTER` |
-| `looker_area` | `CHART_MODE` | `AREA` |
-| `looker_waterfall` | `CHART_MODE` | `WATERFALL` |
-| `looker_grid` / `table` | `TABLE_MODE` | *(omit `chart:` block — there is no `chart.type: TABLE`)* |
-| `looker_donut_multiples` | `CHART_MODE` | `PIE` | No small-multiples chart in ThoughtSpot. Use PIE; document as migration gap — the per-pivot-value breakdown is lost. |
-| `looker_funnel` | `TABLE_MODE` | *(unsupported → TABLE_MODE placeholder; log in summary)* |
-| `looker_map` / `looker_geo_choropleth` | — | *(unsupported → omit tile entirely; log in summary)* |
+Map each LookML tile `type:` to a ThoughtSpot `display_mode` + chart `type` — most map
+1:1 to `CHART_MODE` (`single_value`→KPI, `looker_column`→COLUMN, `looker_bar`→BAR,
+`looker_line`→LINE, `looker_pie`→PIE, `looker_scatter`→SCATTER, `looker_area`→AREA,
+`looker_waterfall`→WATERFALL); `looker_grid`/`table` → `TABLE_MODE` (omit `chart:`
+entirely); `looker_donut_multiples` has no small-multiples equivalent and becomes PIE
+(document as a migration gap); `looker_funnel` becomes a `TABLE_MODE` placeholder
+(unsupported); `looker_map`/`looker_geo_choropleth` are omitted entirely (unsupported).
+Full table:
+[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
+"10b. LookML chart type → ThoughtSpot chart type".
 
 ### 10c. Resolve field references and build search query
 
-**Resolve `view.field` → ThoughtSpot column display name:**
+**Resolve `view.field` → ThoughtSpot column display name** using the model built in
+Steps 3–6: formula columns (translated measures) use the formula's `name:` **as-is** (no
+"Total" prefix); physical attribute columns use the column's `name:`. **Build
+`search_query`** by joining all resolved column names in square brackets, e.g.
+`'[Region] [Total Net Revenue]'`. **Handle tile-level `filters:`** (hard filters) by
+embedding them as filter conditions appended to the `search_query` — do NOT translate
+these to liveboard-level filters, they are tile-specific — using ThoughtSpot's **dot
+notation** (`[Column].Value`, not SQL syntax). **Build `answer_columns[]`** with one
+entry per resolved column display name, in field order.
 
-Each entry in `fields:` uses `view_name.field_name` format. Map each to the ThoughtSpot
-column display name using the model built in Steps 3–6:
-
-- Formula columns (measures translated to model formulas): use the formula's `name:` from the Model TML **as-is** — no "Total" prefix is added to formula columns.
-  Example: `order_fact.total_net_revenue` → formula name `Total Net Revenue`
-- Physical attribute columns: use the column's `name:` from the Model TML.
-  Example: `customer_dim.region` → column name `Region`
-
-**Build `search_query`:** Join all resolved column names in square brackets:
-```
-search_query: '[Region] [Total Net Revenue]'
-```
-
-**Handle tile-level `filters:` (hard filters):** Embed as filter conditions appended to the
-`search_query`. Do NOT translate these to liveboard-level filters — they are tile-specific.
-
-ThoughtSpot `search_query` uses **dot notation** for value filters — NOT SQL syntax:
-
-| Value type | Syntax | Example |
-|---|---|---|
-| Single-word value | `[Column].Value` | `[Order Status].Complete` |
-| Multi-word value | `[Column].'Value With Spaces'` | `[Customer Segment].'Home Office'` |
-
-Rule: first include the column reference `[Column]`, then one token per filtered value.
-
-```
-# LookML tile-level filter:
-filters:
-  order_fact.order_status: "Complete,Returned"
-
-# Resolve field → column display name, then split comma-separated values into tokens:
-search_query: '[Order Channel] [Order Count] [Total Net Revenue] [Average Order Value] [Order Status] [Order Status].Complete [Order Status].Returned'
-```
-
-**Translating LookML filter values to search tokens:**
-1. Resolve `view.field` → ThoughtSpot column display name (e.g. `order_fact.order_status` → `Order Status`)
-2. Split the LookML filter string on commas: `"Complete,Returned"` → `["Complete", "Returned"]`
-3. For each value: if it contains spaces wrap in single quotes — `[Order Status].Complete`, `[Customer Segment].'Home Office'`
-4. Prepend the bare column reference once: `[Order Status]`
-5. Append all value tokens after the column reference
-
-**Build `answer_columns[]`:** One entry per resolved column display name, in field order.
+Full value-syntax table, the tile-level filter worked example, and the 5-step
+value-token translation procedure:
+[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
+"10c. Resolve field references and build search query — full detail".
 
 ### 10d. Layout coordinate conversion (24-column → 12-column grid)
 
@@ -1019,18 +617,9 @@ height = height                (unchanged)
 
 Using `ceil` for width ensures adjacent tiles stay adjacent when widths are odd (e.g. two tiles of LookML width 11 each → `ceil(11/2) = 6`, total = 12, fills grid cleanly).
 
-Example from `skilltest_orders.dashboard.lookml`:
-```
-LookML (24-col):               ThoughtSpot (12-col):
-  row:0,  col:0,  w:8,  h:4   →   x:0,  y:0,  width:4,  height:4
-  row:0,  col:8,  w:8,  h:4   →   x:4,  y:0,  width:4,  height:4
-  row:0,  col:16, w:8,  h:4   →   x:8,  y:0,  width:4,  height:4
-  row:4,  col:0,  w:12, h:8   →   x:0,  y:4,  width:6,  height:8
-  row:4,  col:12, w:12, h:8   →   x:6,  y:4,  width:6,  height:8
-  row:12, col:0,  w:24, h:8   →   x:0,  y:12, width:12, height:8
-```
-
-Odd-width example: `col:1, width:11 → x:0, width:6`; `col:12, width:11 → x:6, width:6` (two 6-wide tiles fill the 12-col grid perfectly).
+Worked example (from `skilltest_orders.dashboard.lookml`) including the odd-width case:
+[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
+"10d. Layout coordinate conversion — worked example".
 
 ### 10e. Liveboard TML template
 
@@ -1064,133 +653,24 @@ Example:  model "Orders" with GUID "fdea93b4-a80f-..."  →  obj_id: Orders-fdea
   its `axis_configs` against a working tile of a similar chart type before assuming a data
   volume problem.
 
-**Full Liveboard TML:**
-
-```yaml
-liveboard:
-  name: {Dashboard Title}
-  visualizations:
-
-  # ── CHART tile (COLUMN / BAR / LINE / PIE / SCATTER / AREA / WATERFALL) ──
-  - id: Viz_{n}
-    answer:
-      name: {tile title}
-      display_mode: CHART_MODE
-      tables:
-      - id: {Model Name}
-        name: {Model Name}
-        obj_id: "{ModelNameNoSpaces}-{guid8}"   # from Step 9 — NOT fqn
-      search_query: '[{DimColumn}] [{MeasureColumn}]'
-      answer_columns:
-      - name: {DimColumn}
-      - name: {MeasureColumn}
-      chart:
-        type: {COLUMN|BAR|LINE|PIE|SCATTER|AREA|WATERFALL}
-        chart_columns:
-        - column_id: {DimColumn}              # resolved display name
-        - column_id: {MeasureColumn}          # resolved display name
-        axis_configs:
-        - x:
-          - {DimColumn}
-          y:
-          - {MeasureColumn}
-
-  # ── KPI tile (single_value) ──
-  - id: Viz_{n}
-    display_headline_column: {MeasureColumn}  # resolved measure display name
-    answer:
-      name: {tile title}
-      display_mode: CHART_MODE
-      tables:
-      - id: {Model Name}
-        name: {Model Name}
-        obj_id: "{ModelNameNoSpaces}-{guid8}"
-      search_query: '[{MeasureColumn}]'
-      answer_columns:
-      - name: {MeasureColumn}
-      chart:
-        type: KPI
-        chart_columns:
-        - column_id: {MeasureColumn}
-        axis_configs:
-        - y:
-          - {MeasureColumn}
-
-  # ── TABLE tile (table / looker_grid / looker_funnel) ──
-  - id: Viz_{n}
-    answer:
-      name: {tile title}
-      display_mode: TABLE_MODE              # TABLE_MODE — no chart: block
-      tables:
-      - id: {Model Name}
-        name: {Model Name}
-        obj_id: "{ModelNameNoSpaces}-{guid8}"
-      search_query: '[{Col1}] [{Col2}] [{Col3}]'
-      answer_columns:
-      - name: {Col1}
-      - name: {Col2}
-      - name: {Col3}
-
-  filters:
-  # (populated in Step 10f)
-
-  layout:
-    tiles:
-    - visualization_id: Viz_1
-      x: {col/2}
-      y: {row}
-      width: {lookml_width/2}
-      height: {lookml_height}
-    # one entry per viz, in Viz_1…Viz_N order
-```
+**Full Liveboard TML** (CHART tile, KPI tile, and TABLE tile shapes, plus the `layout:`
+block): see
+[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
+"10e. Full Liveboard TML template".
 
 ### 10f. Dashboard filters → Liveboard filters
 
 **Collect all unique filters** from the dashboard-level `filters:` block. Build one
-ThoughtSpot liveboard filter per dashboard filter.
+ThoughtSpot liveboard filter per dashboard filter, mapping LookML `allow_multiple_values`
++ field type to a ThoughtSpot `oper` (multi-value string → `in`, single-value string/
+number → `EQ`, date → a `date_filter:` block instead of `oper`). **`excluded_visualizations`
+rule:** for each liveboard filter, find every viz ID whose `listen:` block does **not**
+include that filter name and add it to `excluded_visualizations`, so the filter only
+applies to tiles that explicitly opted in.
 
-```yaml
-# LookML dashboard filter:
-- name: Region
-  type: field_filter
-  field: customer_dim.region
-  allow_multiple_values: true
-
-# ThoughtSpot liveboard filter:
-- column:
-  - Region                        # resolved ThoughtSpot column display name (from model)
-  is_mandatory: false
-  is_single_value: false          # allow_multiple_values: true  → is_single_value: false
-                                  # allow_multiple_values: false → is_single_value: true
-  oper: in                        # default for multi-value string filters (see operator table)
-  excluded_visualizations:        # viz IDs whose listen: map does NOT include this filter
-  - Viz_{n}
-```
-
-**Operator mapping:**
-
-| LookML `allow_multiple_values` | LookML field type | ThoughtSpot `oper` |
-|---|---|---|
-| `true` | string | `in` |
-| `false` | string | `EQ` |
-| — | date | use `date_filter:` block instead of `oper` |
-| `false` | number | `EQ` |
-
-**`excluded_visualizations` rule:**
-For each liveboard filter, find all viz IDs whose `listen:` block does **not** include that
-filter name. Add those viz IDs to `excluded_visualizations`. This ensures the filter only
-applies to tiles that explicitly opted in via `listen:`.
-
-Example — "Region" filter applies to Viz_1/2/3/5/6 but NOT Viz_4 ("Net Revenue by Region"
-only listens to "Order Channel"):
-```yaml
-- column:
-  - Region
-  is_single_value: false
-  oper: in
-  excluded_visualizations:
-  - Viz_4
-```
+Full YAML example, operator mapping table, and the excluded_visualizations worked
+example: [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
+"10f. Dashboard filters → Liveboard filters — full detail".
 
 ---
 
@@ -1229,27 +709,9 @@ Surface this URL to the user right after import completes, and carry it into
 Write a short overview mapping each Looker dashboard tile to its ThoughtSpot Liveboard
 answer — the file a user opens to see, at a glance, what converted and what didn't.
 Keep this file tile-level, not field/column-level: no data types, no `column_id`s, no
-join details.
-
-One row per Looker tile — four columns: **Dashboard**, **Answer**, **Migration Status**,
-**Reason**. Leave `Reason` blank for a clean 1:1 migration; fill it in only when the row
-is approximated or skipped, and keep it to one short sentence:
-
-```
-| Dashboard | Answer | Migration Status | Reason |
-|---|---|---|---|
-| Business Pulse | Revenue by Channel | ✅ Migrated | |
-| Business Pulse | Orders Over Time | ✅ Migrated | |
-| Business Pulse | Funnel by Stage | ⚠️ Migrated (approximated) | No funnel chart type — rendered as a TABLE placeholder. |
-| Business Pulse | Segment Split | ⚠️ Migrated (approximated) | No small-multiples chart — split into 2 PIE tiles, shared-legend comparison lost. |
-| Business Pulse | Store Locations | ❌ Skipped | No map/geo chart type in ThoughtSpot Liveboard TML. |
-```
-
-`Migration Status` values:
-- **✅ Migrated** — same chart type, same fields, no behavioural difference
-- **⚠️ Migrated (approximated)** — migrated but not 1:1 (chart type substitution,
-  split into multiple tiles, sort/limit dropped, etc.) — always fill `Reason`
-- **❌ Skipped** — no ThoughtSpot equivalent; tile omitted entirely — always fill `Reason`
+join details. One row per Looker tile — four columns: **Dashboard**, **Answer**,
+**Migration Status**, **Reason**. Leave `Reason` blank for a clean 1:1 migration; fill it
+in only when the row is approximated or skipped, and keep it to one short sentence.
 
 **Dashboard-level notes.** If the dashboard has a gap that applies across tiles rather
 than to one answer (e.g. a filter's `listens_to_filters:` cascading behaviour, which has
@@ -1262,32 +724,10 @@ dashboard was converted in this run, add one `Liveboard URL:` line per dashboard
 labelled with the dashboard name.
 
 Write to `{reports_dir}` (defined in Step 7.5 — same folder as the gaps file and the
-migration summary), as a single fixed filename regardless of dashboard name or explore:
-
-```bash
-cat > "{reports_dir}/migration_details.md" << 'EOF'
-# Migration Details
-# Generated by ts-convert-from-looker
-# Source project: {project_path}
-# Date: {date}
-
-| Dashboard | Answer | Migration Status | Reason |
-|---|---|---|---|
-...
-
----
-## Notes
-- {dashboard-level gap, one bullet per gap}
-# omit the "## Notes" section entirely if there are none
-
-Liveboard URL: {liveboard_url}
-# one "Liveboard URL: {name} — {url}" line per dashboard if more than one was converted
-
-For field/formula-level detail and the full migration writeup, see:
-- Migration summary: {reports_dir}/{project_name}_migration_summary.md
-- Migration gaps:    {reports_dir}/{explore_name}_migration_gaps.md
-EOF
-```
+migration summary), as a single fixed filename regardless of dashboard name or explore.
+Full table format, the `Migration Status` value legend, and the heredoc template:
+[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
+"10h. Migration details table format + heredoc".
 
 This file only exists when Step 10 runs (scope 1 or 3). If the project has more than
 one dashboard, add all dashboards' tiles as additional rows in the same table rather
@@ -1298,446 +738,60 @@ migration run.
 
 ## Step 11 — Migration summary report
 
-After all imports complete, emit a structured summary:
-
-```
-=== LookML → ThoughtSpot Migration Summary ===
-
-Source project: {project directory}
-ThoughtSpot profile: {profile name}
-Explore(s) migrated: {list}
-
---- Tables ---
-  Registered:  {count}
-  Skipped:     {count} (PDT / derived — listed below)
-
---- Model(s) ---
-  Imported:    {count}
-  Formulas:    {count total} ({count} translated, {count} approximate, {count} omitted)
-
---- Liveboards ---
-  Imported:    {count}
-  Tiles:       {count total} ({count} chart, {count} KPI, {count} table, {count} placeholder)
-
---- Untranslatable / Omitted ---
-  {List each with: field name, LookML type, reason, recommendation}
-
---- Approximations (review recommended) ---
-  {List each with: field name, original SQL, ThoughtSpot formula, what may differ}
-
---- Output files ---
-  Zip (UI import):   {explore_name}_tml.zip          ← upload via Data → TML Import in ThoughtSpot UI
-  TML files:         {output_dir}/*.table.tml, {output_dir}/*.model.tml   (staging — /tmp, not persisted)
-  Reports folder:    {reports_dir}                    ← one level above the LookML source, persists
-    Gaps file:          {explore_name}_migration_gaps.md
-    Migration summary:  {project_name}_migration_summary.md  (written below)
-    Migration details:  migration_details.md  (only if dashboards were converted — Step 10h; includes the Liveboard URL once)
-
---- Next steps ---
-1. Open ThoughtSpot and search the model to confirm formulas return expected values.
-2. Review any items in the "Approximations" list above.
-3. For omitted geospatial or list fields, plan a manual workaround.
-
-Migration summary written → {reports_dir}/{project_name}_migration_summary.md
-==============================================
-```
+After all imports complete, emit a structured summary covering source project, profile,
+explores migrated, table/model/liveboard counts, untranslatable/omitted items,
+approximations to review, output file locations, and next steps. Full console template:
+[references/migration-report-format.md](references/migration-report-format.md) "Console
+summary block".
 
 ---
 
 ### Migrate Mode — .md Report Output
 
-After printing the console summary above, write a self-contained post-migration
-summary report as `{project_name}_migration_summary.md` in `{reports_dir}`
-(defined in Step 7.5 — one level above the LookML source, not the /tmp TML staging
-dir). Plain markdown — no external library needed.
-
-**Title (H1):** "Looker → ThoughtSpot Migration Summary"
-**Subtitle (italic line under the title):** "Project: {project_name}   |   Migrated: {date}"
-
----
-
-**1. Migration Overview** (H2)
-
-Opening paragraph (plain English):
-> "This report documents what was migrated from Looker to ThoughtSpot, what needs
-> to be verified after import, and what could not be migrated automatically. Use
-> the sections below to complete your go-live checklist."
-
-2-column summary table:
-
-| | |
-|---|---|
-| Project | {project_name} |
-| ThoughtSpot profile | {profile_name} |
-| Explore(s) migrated | {list} |
-| Tables registered | {n} |
-| Tables skipped (PDT/derived) | {n} |
-| Models imported | {n} |
-| Liveboards imported | {n} |
-| Formulas translated | {n} ({n} exact, {n} approximate, {n} omitted) |
-| **Items ready to use** | **{n} — no action needed** |
-| **Items to verify** | **{n} — spot-check recommended** |
-| **Items not migrated** | **{n} — manual decision required** |
-
----
-
-**2. ✅ Migrated Objects** (H2)
-
-Table — one row per imported object:
-
-| Object type | Name | GUID | Notes |
-|---|---|---|---|
-| Table | {table_name} | {guid} | |
-| Model | {model_name} | {guid} | {explore_name} explore |
-| Liveboard | {liveboard_name} | {guid} | {n} tiles |
-
-For skipped tables (PDT / native derived table), add a row with GUID = "— skipped" and the reason.
-
----
-
-**3. ⚠️ Approximations — Verify After Import** (H2)
-
-Explanation paragraph:
-> "The items below were imported but may not behave identically to Looker.
-> Each row tells you what to check and where to find it in ThoughtSpot."
-
-Table — one row per approximation; omit if none:
-
-| # | Field | Original SQL / type | ThoughtSpot formula | What may differ | Where to check |
-|---|---|---|---|---|---|
-| {n} | {view.field} | {original} | {ts_formula} | {caveat} | Worksheet → search on field |
-
-If no approximations: write single line "No approximations recorded. ✅"
-
----
-
-**4. ❌ Fields Not Migrated** (H2)
-
-Explanation paragraph:
-> "The items below were skipped because ThoughtSpot has no equivalent feature.
-> For each one, decide whether to rebuild manually, accept as a known gap, or defer."
-
-Table — one row per omitted field; omit section if none:
-
-| # | Field | LookML type | Reason | Recommended action |
-|---|---|---|---|---|
-| {n} | {view.field} | {type} | {reason} | {action} |
-
-Flag any `sql_always_where:` rows with "⚠️ Go-live blocker" in the Recommended action column.
-
-If no omitted fields: write single line "No fields were omitted. ✅"
-
----
-
-**5. Gaps Checklist** (H2)
-
-Explanation line: "Items from the migration gaps file that require manual follow-up."
-
-Render the full content of `{reports_dir}/{explore_name}_migration_gaps.md` verbatim
-inside a fenced code block.
-
-If the gaps file is empty or does not exist: write "No open gaps recorded. ✅"
-
----
-
-**6. Next Steps** (H2)
-
-Numbered list:
-1. Open ThoughtSpot and search each migrated model to confirm formulas return expected values.
-2. Work through the "Approximations" table above — most checks take 5–10 minutes each.
-3. For each omitted field, assign: Rebuild / Accept gap / Descope.
-4. If row-level security was omitted (sql_always_where), configure ThoughtSpot RLS before go-live.
-5. Share this report with your ThoughtSpot administrator to track completion.
-
----
-
-#### Console output addition
-
-Append this line to the existing console summary block after printing:
-
-```
-Migration summary written → {reports_dir}/{project_name}_migration_summary.md
-```
+After printing the console summary above, write a self-contained post-migration summary
+report as `{project_name}_migration_summary.md` in `{reports_dir}` (defined in Step 7.5 —
+one level above the LookML source, not the /tmp TML staging dir). Plain markdown — no
+external library needed. The report has six sections: Migration Overview, Migrated
+Objects, Approximations to verify, Fields not migrated, a Gaps Checklist (the Step 7.5
+gaps file rendered verbatim), and Next Steps. Full title/subtitle text, every table
+schema, and the exact explanatory paragraphs:
+[references/migration-report-format.md](references/migration-report-format.md)
+"`{project_name}_migration_summary.md` structure (Migrate Mode)". After writing the file,
+append `Migration summary written → {reports_dir}/{project_name}_migration_summary.md` to
+the console output.
 
 ---
 
 ## Audit Mode (A)
 
-Parse the LookML project without any ThoughtSpot auth or TML generation.
-Output a coverage report:
-
-```
-=== LookML Audit Report ===
-
-Explores found: {n}
-Views found:    {n}
-Total fields:   {n}
-
---- Translation coverage ---
-  Directly translatable:   {n} ({pct}%)
-    - sum, count, average, max, min dimensions
-  Formula translation:     {n} ({pct}%)
-    - count_distinct → unique count()
-    - type: number with SQL → inline + translate
-    - filtered measures → count_if / sum_if
-  Approximate / review:    {n} ({pct}%)
-    - complex SQL with no direct TS equivalent
-    - tier dimensions
-    - running_total / percent_of_total
-  Unsupported / omit:      {n} ({pct}%)
-    - type: location
-    - type: list
-    - derived_table PDT sources (requires SQL review)
-
---- Per-explore breakdown ---
-  {explore_name}:
-    Dimensions: {n}  Measures: {n}  Joins: {n}
-    Blockers: {list or "none"}
-
---- Field-level detail ---
-  {view.field | looker_type | zone | notes}
-===========================
-```
+Parse the LookML project without any ThoughtSpot auth or TML generation. Output a
+coverage report covering explores/views/fields found, translation-coverage percentages
+by tier, a per-explore breakdown, and field-level detail. Full console template:
+[references/audit-mode-report.md](references/audit-mode-report.md) "Console coverage
+report template".
 
 ---
 
 ### Audit Mode — .md Report Output
 
-In addition to the console output above, write a self-explanatory migration
-readiness report as `{project_name}_migration_report.md` in the LookML project
-directory. Plain markdown — no external library needed.
-
-**Files parsed for the report** (broader than console output — includes dashboards):
-- All `*.view.lkml` — dimensions, measures, derived tables
-- All `*.model.lkml` — explores, joins, connection
-- All `*.dashboard.lookml` — tiles, chart types, dashboard filters (if present)
-
----
-
-#### Classification rules
-
-Assign every field and every dashboard tile to exactly one zone:
-
-**CLEAN** — no post-import action needed:
-- Dimensions: `string`, `number`, `yesno`, `date`, `time`
-- Measures: `sum`, `count`, `count_distinct`, `average`, `max`, `min`
-- Filtered measures (`filters:` on measures)
-- Derived measures (`type: number`) — only when all `${}` refs resolve and SQL translates cleanly
-- Standard joins (`left_outer`, `inner`, `full_outer` with `sql_on:`)
-- PDT / derived tables (`derived_table: { sql: }`)
-- Dashboard tiles: `single_value`, `looker_column`, `looker_bar`, `looker_line`,
-  `looker_area`, `looker_pie`, `looker_scatter`, `table`, `looker_grid`
-- Dashboard filters with `listen:`
-
-**CAVEAT** — migrates but verify after import:
-- `value_format_name:` on any field
-- `map_layer_name:` on geo dimensions
-- `type: zipcode`
-- `type: tier` dimension
-- `type: running_total`
-- `type: percent_of_total`
-- `type: number` derived measure with complex SQL
-- `looker_donut_multiples` tile (split into N PIE tiles)
-- PDT SQL adapted from one warehouse dialect to another
-- `extends:` view inheritance (flattened at parse time)
-
-**BLOCKED** — will not appear in ThoughtSpot after migration:
-- `type: location`
-- `type: list`
-- `sql_always_where:` ← **go-live blocker — flag prominently**
-- `all_access_grants:` / `required_access_grants:`
-- `derived_table: { explore_source: }` (native derived table)
-- Liquid/Jinja templating (`{{ }}`) in SQL
-- `looker_map` / `looker_geo_choropleth` tile
-- `looker_funnel` tile
-- Dashboard `link:` (cross-dashboard navigation)
-- `sql_always_having:`
-
----
-
-#### .md document structure
-
-Build the document in this order:
-
-**Title (H1):** "Looker → ThoughtSpot Migration Readiness Report"
-**Subtitle (italic line under the title):** "Project: {project_name}   |   Generated: {date}"
-
----
-
-**1. At a Glance** (H2)
-
-Opening paragraph (plain English, no jargon):
-> "This report summarises what can be moved from Looker to ThoughtSpot
-> automatically, what will need a quick check after the move, and what cannot
-> be moved and will need a decision. Use the three sections below to plan
-> your next steps."
-
-2-column summary table:
-
-| | |
-|---|---|
-| Project | {project_name} |
-| Data models | {n} explores → {n} ThoughtSpot models |
-| Physical tables | {n} |
-| Derived tables (SQL views) | {n} |
-| Total fields | {n} ({dimensions} dimensions, {measures} measures) |
-| Dashboard tiles | {n} across {n} dashboards |
-| **Migrates cleanly** | **{n} items ({pct}%) — no action needed** |
-| **Migrates with caveats** | **{n} items ({pct}%) — verify after import** |
-| **Cannot migrate** | **{n} items ({pct}%) — manual decision required** |
-| Estimated manual effort | {effort} |
-
-Effort estimate: CAVEAT items → 5 min each; BLOCKED items → 30 min each. Round to nearest 30 min.
-
----
-
-**2. ✅ Section 1 — Migrates Cleanly** (H2)
-
-Explanation paragraph:
-> "The items in this section will be fully converted and imported into
-> ThoughtSpot automatically. No review or manual steps are needed. Once the
-> migration tool runs, these will be available in ThoughtSpot exactly as
-> they appear in Looker."
-
-Table 1 — Data layer:
-
-| Item | Count | Detail |
-|---|---|---|
-| Physical tables | {n} | {comma-separated table names} |
-| Derived tables (SQL Views) | {n} | {names} or "None" |
-| Joins | {n} | All join types and relationships mapped |
-| Explores → ThoughtSpot models | {n} | {explore_names} |
-
-Table 2 — Fields:
-
-| Field category | Count | Notes |
-|---|---|---|
-| Text / string dimensions | {n} | |
-| Number dimensions (IDs, keys) | {n} | |
-| Date / timestamp dimensions | {n} | |
-| Boolean (yes/no) dimensions | {n} | |
-| SUM measures | {n} | |
-| COUNT measures | {n} | |
-| COUNT DISTINCT measures | {n} | Converted to unique count formula |
-| AVERAGE / MAX / MIN measures | {n} | |
-| Filtered measures | {n} | Converted to count_if / sum_if |
-| Derived (calculated) measures | {n} | SQL translated to ThoughtSpot formula |
-
-Table 3 — Dashboard tiles (only if dashboards found):
-
-| Dashboard | Tile | Chart type | Status |
-|---|---|---|---|
-| {dashboard_name} | {tile_title} | {type} | Ready |
-
-**"What to do next" (bold):**
-> Nothing. Run the migration tool (Migrate mode) and all items in this section
-> will import automatically.
-
----
-
-**3. ⚠️ Section 2 — Migrates But Needs Checking** (H2)
-
-Explanation paragraph:
-> "The items below will be imported into ThoughtSpot, but something about them
-> needs to be verified or adjusted after the import. The data will be there —
-> but the display, formatting, or chart layout may not look exactly right until
-> the check is done. Each row tells you what to look for and where to find it
-> in ThoughtSpot."
-
-Table — one row per caveat type found; omit rows with count = 0:
-
-| # | What | Count | What to check after import | Where in ThoughtSpot |
-|---|---|---|---|---|
-| 1 | Number / currency formatting | {n} fields | Numbers may display without currency symbols or decimal rounding (e.g. 1234.56 instead of $1,235) | Worksheet → column settings → Format |
-| 2 | Geographic columns | {n} fields ({names}) | State / Country columns need their geographic role set for map searches to work | Worksheet → column settings → Geo |
-| 3 | Zip code columns | {n} fields | Zip codes may lose leading zeros (e.g. 01234 displays as 1234) | Run a search on the column and verify; set Geo type to Zip |
-| 4 | Multi-donut chart split to PIE tiles | {n} tiles ({names}) | One Looker multi-donut was split into {n} separate pie charts — verify each shows correct segments and filter | Open each pie tile in the liveboard |
-| 5 | Tier / bucket dimensions | {n} fields ({names}) | Bucket ranges translated to if/then/else — verify the boundaries match the original | Run a search on the field; compare values to Looker |
-| 6 | Running total measures | {n} fields ({names}) | Cumulative sum needs a sort column — verify sort direction is correct | Open an answer using this field and check sort order |
-| 7 | Complex calculated measures | {n} fields ({names}) | SQL inlined and translated — spot-check output values against Looker | Side-by-side comparison of a known total recommended |
-| 8 | Derived table SQL adapted | {n} views ({names}) | SQL rewritten for the ThoughtSpot warehouse — verify row counts match | Run a search on the SQL view; compare counts to source |
-
-If no CAVEAT items found: write single line "No items in this category. ✅"
-
-**"What to do next" (bold):**
-> Import the TML files first — Section 1 items come in automatically. Then go
-> through each row above in the ThoughtSpot UI. Most checks take 5–10 minutes.
-> Estimated time for this section: {effort_section2}.
-
----
-
-**4. ❌ Section 3 — Cannot Be Migrated** (H2)
-
-Explanation paragraph:
-> "The items below will not appear in ThoughtSpot after the migration. The
-> tool skips them because there is no equivalent feature. For each one,
-> decide whether to rebuild it manually, accept it as a known gap, or leave
-> it out of this migration phase."
-
-Table — one row per blocker type found; omit rows with count = 0;
-flag `sql_always_where:` rows with "⚠️ Go-live blocker" in the Recommended action column:
-
-| # | What | Count | Why it cannot migrate | Recommended action |
-|---|---|---|---|---|
-| 1 | Row-level security rules | {n} explores | Looker's always-on row filters have no ThoughtSpot TML equivalent | ⚠️ Go-live blocker — configure Row Level Security in ThoughtSpot Admin before giving users access |
-| 2 | Column-level access grants | {n} fields | Looker permission groups have no TML equivalent | Set column visibility per group manually in ThoughtSpot after import |
-| 3 | Spatial / map dimensions | {n} fields ({names}) | No lat/lon spatial column type in ThoughtSpot | Keep as plain number columns; use geo address config if map display is needed |
-| 4 | Map chart tiles | {n} tiles ({names}) | No map chart type in ThoughtSpot Liveboard TML | Rebuild as a table or bar chart; or use ThoughtSpot's built-in geo search |
-| 5 | Native derived tables | {n} views ({names}) | Defined using a Looker explore, not raw SQL | Rewrite as raw SQL in Looker first, then re-run the audit |
-| 6 | Dynamic SQL (Liquid/Jinja) | {n} fields ({names}) | Template expressions cannot be resolved without Looker | Provide the resolved literal values (e.g. actual schema name) and re-run |
-| 7 | Multi-value list dimensions | {n} fields ({names}) | No multi-value column type in ThoughtSpot | Use a text concatenation formula post-migration if needed |
-| 8 | Funnel chart tiles | {n} tiles ({names}) | No funnel chart type in ThoughtSpot Liveboard TML | Replaced with a table placeholder — rebuild as a funnel in ThoughtSpot UI |
-| 9 | Cross-dashboard navigation | {n} links | ThoughtSpot liveboards have no tile-to-liveboard links in TML | Add navigation links manually after import |
-
-If no BLOCKED items found: write single line "No items in this category. ✅"
-
-**"What to do next" (bold):**
-> For each row above, assign one of:
-> • Rebuild — recreate the feature manually in ThoughtSpot after migration
-> • Accept gap — document and inform end users what will not be available
-> • Descope — exclude from this phase and revisit later
-> If row-level security is listed above, resolve it before go-live — users
-> may otherwise see data they should not have access to.
-
----
-
-**5. Appendix — Full Field Inventory** (H2)
-
-Explanation: "Complete list of all fields in this project and their migration status."
-
-Table:
-
-| View / Table | Field name | Looker type | Zone | Notes |
-|---|---|---|---|---|
-| {view_name} | {field_name} | {type} | ✅ Clean / ⚠️ Caveat / ❌ Blocked | {reason if caveat or blocked} |
-
----
-
-**6. Technical Summary** (H2 — last section in the doc, for developers and technical reviewers)
-
-Explanation line: "Raw output from the migration analysis tool — field-by-field breakdown for technical review."
-
-Render the full console output verbatim inside a fenced code block — this is the same
-`=== LookML Audit Report ===` ... `===========================` block shown under
-**Audit Mode (A)** above, generated once and written to both the terminal and this
-section of the doc. No duplication of logic needed.
-
----
-
-#### Console output (print to terminal after the .md file is written)
-
-Print the same block (`=== LookML Audit Report ===` through `===========================`,
-shown under **Audit Mode (A)** above) to the terminal, then append this trailing footer
-and the file path line:
-
-```
-  ✅  Migrates cleanly:      {n} items ({pct}%)
-  ⚠️   Needs checking:        {n} items ({pct}%)
-  ❌  Cannot migrate:         {n} items ({pct}%)
-  Estimated manual effort:  {effort}
-
-Migration report written → {path}/{project_name}_migration_report.md
-```
+In addition to the console output above, write a self-explanatory migration readiness
+report as `{project_name}_migration_report.md` in the LookML project directory. Plain
+markdown — no external library needed. It parses all `*.view.lkml`, `*.model.lkml`, and
+`*.dashboard.lookml` files (broader than the console output — includes dashboards) and
+assigns every field and dashboard tile to exactly one of three zones: **CLEAN** (no
+post-import action needed — standard dimensions/measures, standard joins, PDT tables,
+most dashboard tile types), **CAVEAT** (migrates but verify after import — format hints,
+tier dimensions, running totals, donut-multiples split, dialect-adapted PDT SQL), or
+**BLOCKED** (will not appear in ThoughtSpot — `type: location`/`list`, `sql_always_where:`
+**go-live blocker**, access grants, Liquid/Jinja templating, map/funnel tiles,
+cross-dashboard links). Full classification-rule lists for all three zones, and the
+6-section `.md` document structure (At a Glance, Migrates Cleanly, Migrates But Needs
+Checking, Cannot Be Migrated, Field Inventory appendix, Technical Summary) with every
+table schema and explanatory paragraph:
+[references/audit-mode-report.md](references/audit-mode-report.md) "`{project_name}_migration_report.md`
+structure". After writing the file, print the same console block plus a trailing
+`✅/⚠️/❌` footer and the file path — exact format in the same reference file, "Console
+output (print to terminal after the .md file is written)".
 
 ---
 
@@ -1829,6 +883,7 @@ to the user and ask them to provide the resolved database/schema string.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.3 | 2026-07-28 | Extract reference-heavy detail into references/ step files (BL-128) — no logic change; SKILL.md context cost ~21k → ~11.8k est. tokens. |
 | 1.0.2 | 2026-07-15 | JSON/VARIANT path access: emit `['key']` bracket notation in `sql_*_op` pass-throughs — ThoughtSpot's formula parser rejects warehouse colon-and-dot path syntax (e.g. Snowflake `PARSE_JSON(...):a.b`) carried in a LookML `sql:`. Verified for Snowflake 2026-07-15. |
 | 1.0.1 | 2026-07-11 | Migrate `ts tml import`/`lint` calls from the stdin JSON-array boilerplate to `--file`/`--dir` (ts-cli ≥ v0.27.0); remove the obsolete "does not accept a file path" note (audit 5.1). |
 | 1.0.0 | 2026-07-09 | Initial release (community contribution, PR #201) — LookML → ThoughtSpot conversion pipeline: parses `.model.lkml`/`.view.lkml` into Table TML and a Model TML per explore, translates LookML measure/dimension expressions to ThoughtSpot formulas, generates SQL View TML for `derived_table` views, validates against the shared model-conversion invariants, and optionally migrates LookML dashboards to Liveboards (chart-type mapping, 24→12-column layout conversion, filter translation). |

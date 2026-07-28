@@ -109,3 +109,83 @@ different native grains (e.g. source has daily `Order Date`, target has monthly
      join on `ORDER_MONTH = MONTH_OF_ORDER_DATE`."
 3. If both columns are the same physical type and grain, use them directly in the join `on`
    clause — no materialization needed.
+
+## Published datasource (sqlproxy) resolution detail (Step 3.5)
+
+**What the TWB DOES contain for sqlproxy datasources** (extract these in Step 3b regardless
+of API access — they are `<column>` elements directly under the `<datasource>` element): all
+**calculated fields** with full Tableau formula text (same as direct-connection datasources);
+**column definitions** with captions, datatypes, and roles; **metadata records**
+(local-name, remote-name, local-type, parent) — often complete enough for column mapping.
+
+**What the TWB does NOT contain** (it lives only in the published datasource's `.tds`): the
+**physical table structure** (table names, joins, db/schema/table paths); the **connection
+details** (database, schema) that link to the warehouse. This means formula extraction and
+translation work without the physical model — the `.tds` adds physical table resolution and
+join definitions, not the formulas.
+
+**Where the physical model actually is — and how to get it.** The join/table structure is
+**not** returned by the field API. `ts tableau datasource --fields` (VizQL `read-metadata`)
+returns **columns/calcs only**, not tables or joins. The full physical model (tables, joins,
+custom SQL) lives in the published datasource's **`.tds`**. Two ways to obtain and parse it:
+download it (needs Tableau access — `ts tableau download {datasource_id}` fetches the
+`.tdsx`; the `.tds` inside carries the model), or be supplied it (the user provides the
+`.tds`/`.tdsx` alongside the `.twb`). Then **`ts tableau parse` accepts a `.tds`/`.tdsx`
+directly** (ts-cli ≥ 0.38.0) — its root *is* the `<datasource>`, and parse extracts its
+tables/joins/columns/calcs just like a workbook datasource. Feed that to `build-model`
+GENERATE mode and it builds the multi-table model automatically — no hand-assembly (see
+Step 5b "Multi-query datasources"). Without the `.tds` (only the `.twb`, no Tableau access),
+fall back to the hand-built multi-table base in Step 5b.
+
+**Flow when the user has Tableau API access (Step 3.5, choice Y):** for each sqlproxy
+datasource, extract `dbname` from the `<connection>` element, then:
+
+Progress label: `"Querying Tableau API (not ThoughtSpot) to resolve published datasource
+columns…"` — make it clear this is a Tableau Server query, not a ThoughtSpot metadata search.
+
+```bash
+# Find the published datasource by name
+ts tableau datasources --profile {PROFILE} --name "{dbname}"
+```
+
+Parse the JSON output to get the datasource `id`, then:
+
+```bash
+# Get field metadata
+ts tableau datasource {id} --profile {PROFILE} --fields
+```
+
+The `fields` array contains: `fieldCaption` (column display name → ThoughtSpot column
+name), `dataType` (`real`/`integer`/`string`/`date`/`datetime`/`boolean` → TS data type),
+`columnClass` (`COLUMN` physical, `CALCULATION` formula, `BIN`, `GROUP`), `formula` (for
+calculated fields — the Tableau formula text for Step 5 translation).
+
+Merge the resolved fields into the parsed datasource structure, replacing opaque sqlproxy
+column references with real names and types. Proceed to Step 4.
+
+**textscan (CSV) / excel-direct sources — offer to download for warehouse provisioning.**
+Essential when the data only exists in Tableau Cloud and hasn't been loaded into a warehouse:
+
+```bash
+# Download the published datasource content
+ts tableau download {datasource_id} --profile {PROFILE} --output-dir {output_dir}
+```
+
+The command downloads the TDSX archive, extracts it, and **validates CSV files** for row
+integrity (column count consistency, corrupt lines). If `is_valid: false`, report the
+corrupt lines and offer to auto-fix (strip them) before proceeding to warehouse load (the
+DunderMifflin live test, 2026-06-26, found a corrupt line — `1tou` — in a Tableau Cloud
+textscan download; this is a known Tableau artifact). If `is_valid: true`, proceed — the CSV
+is clean for loading.
+
+Surface: "The data for datasource '{name}' is a {type} file hosted on Tableau Cloud. It
+needs to be loaded into a warehouse table before ThoughtSpot can connect to it. I've
+downloaded and validated it — {row_count} rows, {status}. Shall I help set up the warehouse
+table? (This will require a Snowflake/Databricks connection.)" If yes, this is the handoff
+point for **BL-010 (`ts-load-source-data`)** when that skill is built. Until then, guide the
+user through manual warehouse provisioning (CREATE TABLE + stage + COPY INTO for Snowflake,
+or INSERT VALUES for Databricks).
+
+**Prerequisites:** Tableau profile configured via `/ts-profile-tableau` (optional — skill
+degrades gracefully); `ts` CLI v0.73.0+ (includes `ts tableau build-model` with
+`--max-retries`, enriched error reporting, GENERATE mode output, and `--table-name-map`).

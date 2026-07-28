@@ -36,46 +36,16 @@ Two scenarios are supported:
 | [../../shared/worked-examples/databricks/ts-to-databricks.md](../../shared/worked-examples/databricks/ts-to-databricks.md) | End-to-end Dunder Mifflin conversion: LOD dimensions, semi-additive, cross-measure ratios, multi-fact split |
 | [../../shared/worked-examples/databricks/ts-from-databricks.md](../../shared/worked-examples/databricks/ts-from-databricks.md) | End-to-end MV → Model conversion: direct + computed dimensions, simple + ratio + window + conditional measures |
 | [../../shared/worked-examples/databricks/ts-from-databricks-sql-view.md](../../shared/worked-examples/databricks/ts-from-databricks-sql-view.md) | Subquery source path: SQL View TML + Model on top |
+| [references/concept-mapping.md](references/concept-mapping.md) | Full Concept Mapping table — Databricks MV YAML construct → ThoughtSpot Model, row by row |
+| [references/console-templates.md](references/console-templates.md) | Console/report templates for Steps 8A (table plan), 10 (review checkpoint), 10-FILE (file-only report), and 12 (summary report + test questions) |
 
 ---
 
 ## Concept Mapping
 
-| Databricks Metric View YAML | ThoughtSpot Model |
-|---|---|
-| `source:` (table FQN, SQL query, or another metric view — 4 forms, see schema) | Table FQN → Single Table TML (`db_table`, `db`, `schema` decomposed from the FQN); SQL query → see `source:` as SELECT subquery row below; another metric view → **fail loud** (MV-on-MV chaining is not supported) |
-| Top-level `comment:` (v1.1) | Model `description` |
-| `dimensions[].expr` (direct column reference) | `columns[]` with `column_type: ATTRIBUTE` |
-| `dimensions[].expr` (computed expression) | `formulas[]` entry with translated expression + `columns[]` with `formula_id` reference |
-| `dimensions[].expr` (window function — LOD) | LOD `formulas[]` entry: `group_aggregate(agg([col]), {[dim]}, query_filters())` — 3 args required. **Live-verified 2026-07-09** (`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, A1/A2): this is filter-aware on TS under both filter kinds, and reproduces a Databricks MV's own global `filter:` — but NOT an ad hoc query-time `WHERE` on an MV with no global filter (DBX-side asymmetry, not fixable by formula), **unless** the emitted formula uses `{}` instead of `query_filters()` paired with a model-level `filters:` block mirroring the MV's `filter:` — that combination reproduces both DBX conditions (A3 follow-up, same matrix, live-verified 2026-07-09) |
-| `dimensions[].display_name` (v1.1) | Column `name` (display name) |
-| `dimensions[].comment` (v1.1) | Column `description` |
-| `dimensions[].synonyms` (v1.1) | `properties.synonyms[]` + `properties.synonym_type: USER_DEFINED` |
-| `measures[].expr` (simple `AGG(col)` — SUM, AVG, MIN, MAX, COUNT) | `columns[]` with `column_type: MEASURE` + extracted `aggregation` |
-| `measures[].expr` (`COUNT(DISTINCT col)`) | `formulas[]` entry: `unique count ( [TABLE::col] )` — NOT `aggregation: COUNT_DISTINCT` on a `column_id` (TS silently overrides to ATTRIBUTE) |
-| `measures[].expr` (complex — ratios, nested aggregates) | `formulas[]` entry with translated expression + `columns[]` with `formula_id` reference |
-| `measures[].expr` with `MEASURE()`/`ANY_VALUE()` | Cross-measure formula — **inline** the referenced expressions (cross-refs fail during TML import). **Live-verified 2026-07-09 across query grain** (`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, B1) — CONFIRMED true ratio-of-sums, cross-platform, at every grain; no grain caveat needed |
-| `measures[].window`, `order:` raw date (semi-additive) | `last_value ( sum ( [m] ) , query_groups ( ) , { [date] } )` / `first_value ( ... )` — snapshot metrics (inventory, balance). **Live-verified 2026-07-09**, `docs/audit/2026-07-08-dbx-window-claim-matrix.md` C7. **Also live-verified 2026-07-09 under a query-time date-range filter** (`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, D1) — CONFIRMED cross-platform, collapses to last/first-in-filtered-range on both platforms |
-| `measures[].window`, `order:` truncated period (period filter), no `offset` | `sum ( [m] )` at the query grain — flow metrics (revenue, qty). **Live-verified 2026-07-09**, matrix C6 |
-| `measures[].window`, `order:` truncated period, `offset: -N <unit>` | `moving_sum ( [m] , N , -N , [date] )` — row-relative `LAG(N)` idiom, **NOT** a wall-clock filter; valid only when the query returns exactly one row per period. **Live-verified 2026-07-09 at month grain, N=1** (matrix C6/C6a); quarter/year grains and N>1 are Deferred (C8) extrapolations of the same idiom. Corrects the pre-2026-07-09 `sum_if(diff_months/quarters/years([date], today())=N, [m])` mapping, which was WRONG for any multi-period query |
-| `measures[].window` with `range: trailing N day` (default/exclusive) | `moving_sum([m], N, -1, [date])` — rolling look-back window, anchor excluded. **Live-verified 2026-07-09**, matrix C1/C2. **Density caveat (E1):** row-positional — matches only when the order column is dense at the window's unit grain (one row per unit, no gaps); see `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md` (E1) |
-| `measures[].window` with `range: trailing N day inclusive` | `moving_sum([m], N-1, 0, [date])` — anchor included. **Live-verified 2026-07-09**, matrix C1. Same E1 density caveat as above |
-| `measures[].window` with `range: leading N day` (default/exclusive) | `moving_sum([m], -1, N, [date])` — rolling look-ahead window, anchor excluded. **Live-verified 2026-07-09**, matrix C3. Same E1 density caveat as above |
-| `measures[].window` with `range: leading N day inclusive` | `moving_sum([m], 0, N-1, [date])` — anchor included. **Live-verified 2026-07-09**, matrix C3. Same E1 density caveat as above |
-| `measures[].window` with `range: cumulative` | `cumulative_sum([m], [date])`. **Live-verified 2026-07-09**, matrix C5 |
-| `measures[].window` with `range: all` | `group_aggregate(sum([m]), {partition dims}, query_filters())`, `column_type: ATTRIBUTE` — unbounded partition window, scoped per query partition. **Live-verified 2026-07-09**, matrix C4. Inherits the same A1/A2 filter asymmetry as the LOD row above (`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`), including its A3 `{}` + model-filter refinement |
-| `measures[].window` with `inclusive`/`exclusive` anchor modifier | Default is `exclusive`, confirmed. Applies only to `trailing`/`leading`. **Live-verified 2026-07-09**, matrix C1/C2/C3 |
-| `measures[].expr` with `FILTER (WHERE cond)` | `agg_if ( cond , [x] )` — native `*_if` conditional aggregate (e.g., `sum_if`, `unique_count_if`) |
-| `COUNT(*)` | Formula: `count ( 1 )` |
-| `fields[]` (GA alias for `dimensions[]`) | Same mapping as `dimensions[]` above — `fields:` is checked first, `dimensions:` is the fallback |
-| Growth % (MoM, QoQ, YoY) | Inline `sum([m])` and `moving_sum([m], N, -N, [date])` expressions for both periods — cross-formula refs not supported during TML import |
-| `joins:` (nested hierarchy) | One Table TML per source; model `joins[]` from parent→child hierarchy |
-| `joins[]."on"` or `joins[].using` (exactly one present) | `on` → join expression as-is; `using: [COL, ...]` → `[A::COL] = [B::COL]` (AND-joined for multiple columns) |
-| `filter:` (any) | Boolean formula column `[MV Filter]` — users apply `[MV Filter] = true`. Always create, never description-only. **Live-verified 2026-07-09** (`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, C1): filter ordering is CONFIRMED cross-platform — a model-level `filters:` block filters rows before a windowed measure computes, matching a Databricks MV's own global `filter:`. Frame semantics on windowed measures still DIVERGE on gapped data — see the density caveat on the trailing/leading rows above (E1) |
-| Subquery in `expr` | **Untranslatable** — log in Unmapped Report |
-| `source:` as SELECT subquery (parenthesized `(SELECT ...)` or bare `SELECT ...`/`WITH ...`) | Prompt user: (D) create Databricks VIEW, (T) create ThoughtSpot SQL View, (M) map to existing, (S) skip |
-| `source:` as another metric view (MV-on-MV) | **Fail loud** — not supported; ask the user to convert the upstream MV first or flatten the chain in Databricks |
-| `version:` | Drives parsing path (v0.1 vs v1.1) — not stored in ThoughtSpot |
+Full Databricks Metric View YAML → ThoughtSpot Model mapping table (33 rows,
+covering `source:`, dimensions, measures, windows, joins, and `filter:`):
+[references/concept-mapping.md](references/concept-mapping.md).
 
 **Key structural rules:**
 - `column_id` must use the **column name from the ThoughtSpot Table TML**. Export
@@ -568,20 +538,9 @@ dimensions and measures to identify any column gaps.
 > The `column_id` in the model TML must use the column names from the ThoughtSpot
 > Table TML — export the TMLs to confirm them.
 
-**Confirm the plan before making any changes:**
-
-```
-Table Plan:
-  ✓  {TABLE_NAME}  — found (GUID: {guid}) — all {n} columns present → use as-is
-  ⚠  {TABLE_NAME}  — found (GUID: {guid}) — missing {n} columns: {COL_A}, {COL_B} → update
-  ✗  {TABLE_NAME}  — not found in ThoughtSpot → create new
-
-Actions to be taken:
-  • Update {TABLE_NAME}: add {n} missing columns
-  • Create {TABLE_NAME}: {n} columns from Databricks schema
-
-No changes have been made yet. Proceed? (yes/no):
-```
+**Confirm the plan before making any changes:** console template —
+[references/console-templates.md](references/console-templates.md)
+"Step 8A — Table plan confirmation console template".
 
 Do not proceed until the user confirms. If any table is **not found**, follow Step 8B
 for those tables. If any table has **missing columns**, follow Step 8C before building
@@ -755,43 +714,9 @@ JSON (and `translated.json`/`parsed.json` for the formula log): tables from `tab
 (`alias`/`name`/`fqn`), column lists from `columns.attributes`/`columns.measures`,
 formula translations from `translated.json`'s `translated[]`/`skipped[]` entries,
 window markers from `window_measures[]` (`name`, `ts_expr`, each annotation's `detail`
-as the assumption line), and Spotter from `spotter_enabled`:
-
-```
-Model to import: {view_name}
-Source: {catalog}.{schema}.{view_name} (Databricks Metric View v{version})
-Filter: {parsed.json "filter" expr if summary filter_applied else "none"}
-
-Tables:
-  ✓ {tables[].name} (fqn: {tables[].fqn}) — alias: {tables[].alias}
-
-Columns ({n} total):
-  ATTRIBUTE: {columns.attributes}
-  MEASURE:   {columns.measures}
-  Formulas:  {formula_count} formula(s)
-
-Formula translations:
-  ✓ {name}: {mv expr from parsed.json} → {ts_expr}     # translated[]
-  ⚠ {name}: OMITTED — {reason}                          # skipped[]
-
-Window measures (review required):
-  ⚠ WINDOW {name}: {ts_expr}
-    Assumption: {annotation.detail}
-
-If any window measures exist, display this warning:
-
-  ⚠ Window measures assume daily grain (one row per day for trailing/rolling).
-    Verify that the source data matches this assumption — if the table has
-    multiple rows per day, moving_sum/moving_average will over-count.
-
-Spotter (AI search): enabled / disabled
-
-Proceed with import?
-  yes  — import to ThoughtSpot
-  no   — cancel
-  file — write TML files without importing (for environments where you lack
-          DATAMANAGEMENT access, or to review the TML before committing)
-```
+as the assumption line), and Spotter from `spotter_enabled`. Console template:
+[references/console-templates.md](references/console-templates.md)
+"Step 10 — Review checkpoint console template".
 
 Wait for user confirmation before proceeding.
 
@@ -808,27 +733,9 @@ said "file only", or has no ThoughtSpot `DATAMANAGEMENT` access.
 `{model_name}.model.tml` (and `{table_name}.table.tml` for every
 `create: true` table). Nothing to generate here.
 
-**2. Report:**
-
-```
-TML files written:
-  {model_name}.model.tml    — ThoughtSpot Model TML
-  {table_name}.table.tml   — ThoughtSpot Table TML (if new tables were needed)
-
-To import to ThoughtSpot when you have access:
-
-  1. Package all .tml files into a zip:
-       zip {model_name}_tml.zip *.tml
-
-  2. In ThoughtSpot: Data → TML Import → upload the zip
-     (table TMLs will import first, then the model)
-
-  3. Or import via CLI:
-       ts tml import --file {model_name}.model.tml --policy ALL_OR_NONE --profile {profile}
-
-  Note: On first import, omit `guid` from the TML (already omitted here). ThoughtSpot
-  will assign a GUID — save it from the import response if you need to update the model later.
-```
+**2. Report:** console template —
+[references/console-templates.md](references/console-templates.md)
+"Step 10-FILE — File-only mode report template".
 
 **3. Proceed to Step 12** (Produce summary report) — include the formula translation log
 and column summary so the user has the full picture before importing.
@@ -884,45 +791,12 @@ Follow [`ts-tml-import-gate.md` § 5](../../shared/schemas/ts-tml-import-gate.md
 
 ### Step 12: Produce summary report
 
-After a successful import (or file output), generate:
-
-```
-## Model Import Complete
-
-**Model:** {view_name}
-**GUID:** {created_guid}
-**ThoughtSpot URL:** {base_url}/#/model/{created_guid}
-**Source:** {catalog}.{schema}.{view_name} (Databricks Metric View v{version})
-**Filter:** {filter_expr or "none"}
-
-### Columns Imported ({n})
-| Display Name | Type | Source |
-|---|---|---|
-| {name} | ATTRIBUTE | {TABLE}::{COL} |
-| {name} | MEASURE ({agg}) | {TABLE}::{COL} |
-| {name} | MEASURE (formula) | translated from SQL |
-| ... | ... | ... |
-
-### Formula Translation Log
-| Column | Original Databricks SQL | Status | ThoughtSpot Formula |
-|---|---|---|---|
-| {name} | `{expr}` | ✓ Translated | `{ts_formula}` |
-| {name} | `{expr}` | ⚠ Omitted | {reason} |
-
-### Not Mapped
-- Global filter: "{filter_expr}" — noted in model description, not enforced as a ThoughtSpot filter
-- MV `version` field — metadata only, not stored in ThoughtSpot
-```
-
-**Test questions:** Suggest 3-5 natural language questions the user can try in Spotter
-to verify the model works. Base them on the dimensions and measures present:
-
-```
-### Suggested test questions for Spotter
-1. "What is the total {measure_1} by {dimension_1}?"
-2. "Show me {measure_2} for each {dimension_2}"
-3. "What are the top 10 {dimension_1} by {measure_1}?"
-```
+After a successful import (or file output), generate the Markdown report
+(Model Import Complete header, Columns Imported, Formula Translation Log, Not
+Mapped) and, separately, 3-5 suggested Spotter test questions based on the
+dimensions and measures present. Both templates:
+[references/console-templates.md](references/console-templates.md)
+"Step 12 — Summary report template" / "Suggested test questions template".
 
 ---
 
@@ -951,6 +825,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.10.1 | 2026-07-28 | Extract reference-heavy detail into references/ step files (BL-128) — no logic change; SKILL.md context cost ~13.7k → ~11.4k est. tokens. |
 | 1.10.0 | 2026-07-24 | Duplicate `column_id` → formula promotion (ts-cli v0.92.0, BL-132): an MV that references one physical column both as a raw measure and as an aggregate metric (e.g. `F_TIME_TO_RESOLVE` + `AVG(TIMETORESOLVE__C)`) previously emitted two `columns[]` entries with an identical `TABLE::col`, failing `ts tml lint` I8 on import. `ts databricks build-model` now keeps the first occurrence as a `column_id` entry and re-expresses the rest as `fn ( [TABLE::col] )` aggregation formulas (shared `formula_common.promote_duplicate_column_ids` helper, so from-Snowflake behaves identically). A duplicate that is not a re-expressible aggregate is left in place for `ts tml lint` I8 to surface. |
 | 1.9.0 | 2026-07-23 | Role-playing (aliased) dimension support (ts-cli v0.91.0): an MV that joins one physical table under multiple aliases (role-play) now converts to distinct ThoughtSpot role-play tables — `resolve_parts` gives each reused-physical alias path its own node identity, and `build_model_tables` emits `alias:` + alias-referencing joins instead of collapsing to ambiguous duplicate tables. Single-use tables/renames unchanged. Verified via TS→MV→TS round-trip on SUPPORT_CASE (ACCOUNT×2, SUPPORT_PRODUCT__C×2). |
 | 1.8.5 | 2026-07-23 | Data Type Mapping fix: `timestamp`/`timestamp_ntz` → ThoughtSpot `DATE_TIME` (was invalid `DATETIME` — a live `VALIDATE_ONLY` import confirmed ThoughtSpot rejects `DATETIME`). Fixed in `ts-from-databricks-rules.md` (§Data Type Mapping) and `mv_tml.py`'s `map_dbx_type`/`ts_type_to_dbx` together (BL-X4). |

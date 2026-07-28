@@ -5,6 +5,25 @@ Coverage Report (Audit Mode)**. Source the numbers from `classification.json` (S
 `ts tableau classify-formulas` output) — do not hand-tally tiers. See the Step A4 spine in
 `SKILL.md` for how to source the numbers before rendering these templates.
 
+## Tier reference (Step A3)
+
+`ts tableau classify-formulas` tiers, mapped to the human-readable categories used in the
+report — kept as reference/documentation, not as executed classification logic:
+
+| Tier | Description | Examples |
+|---|---|---|
+| **Native / Set** | Direct ThoughtSpot mapping exists | IF/THEN, IFNULL, DATEDIFF, LEFT, ABS, ROUND, IIF; **bins** (`class='bin'`) → `floor([x]/size)*size` or BIN_BASED cohort; **manual groups** (`class='categorical-bin'`, incl. fields named "… clusters") → `GROUP_BASED` cohort; `Number of Records`/row counts → `count([column])` (**prompt** for the column; default the primary key); **static sets** (`<group>` with `union`/`member`) → `GROUP_BASED` column-set cohort — incl. ones anchored on a **formula column**, with a **`%null%`** member (via `EQ {Null}`), or an **`except` member-list** (via `NE`) (Phase 2a); **Top-N/Bottom-N sets** (`function='end'`) → query set (`cohort_type: ADVANCED`, `COLUMN_BASED`) via a rank formula + parameter-filter formula (Phase 2b); **condition-based sets** (`function='filter'`) → query set with aggregate condition formula (Phase 2c); **member-list intersect** → `GROUP_BASED` cohort of common members (Phase 2c); **all-except-Top-N** → query set with inverted rank filter (Phase 2c); **computed set operations** (intersect/except of mixed types) → multi-formula query set (Phase 2c) |
+| **LOD** | LOD expression → `group_aggregate()` | `{FIXED dim : SUM(col)}`; **`TOTAL(SUM(x))`** / percent-of-total → `group_aggregate(..., {}, query_filters())` |
+| **Cumulative** | Running calculation → `cumulative_*()` | RUNNING_SUM, RUNNING_AVG |
+| **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK |
+| **Partial / Unmapped (sets)** | Tableau set construct with no current ThoughtSpot equivalent — logged as deferred, never mis-translated | **set controls** (`level-members` only, no fixed members) → no set object, surface as a liveboard filter; **set actions** (`<action>`) → no equivalent |
+| **Row-offset (pass-through)** | `SIZE()` only → answer-level `sql_int_aggregate_op("COUNT(*) OVER()")` | `SIZE()` — only row-offset that still requires SQL pass-through ⚑ flag PT1 |
+| **Untranslatable (row-offset ambiguous)** | Row-offset table calcs with unrecoverable intent — omitted | `INDEX`/`LOOKUP`/`FIRST`/`LAST` unconditionally omitted and flagged as untranslatable — no deterministic ThoughtSpot equivalent across all addressing contexts |
+| **Untranslatable (window ambiguous)** | Window table calcs — omitted | `WINDOW_SUM`, `WINDOW_AVG`, `WINDOW_MAX`, `WINDOW_MIN`, `WINDOW_COUNT`, `WINDOW_STDEV`, `WINDOW_VAR`, `WINDOW_MEDIAN`, `WINDOW_PERCENTILE` unconditionally omitted and flagged as untranslatable — require worksheet addressing context (sort/partition attributes) this pipeline does not resolve |
+| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | `PREVIOUS_VALUE` (true recursion — not the string-aggregation technique); true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`); **geospatial** — full 13-function set (`MAKEPOINT`, `MAKELINE`, `BUFFER`, `OUTLINE`, `DISTANCE`, `AREA`, `LENGTH`, `INTERSECTS`, `SHAPETYPE`, `DIFFERENCE`, `INTERSECTION`, `SYMDIFFERENCE`, `VALIDATE`) — decompose `MAKEPOINT` lat/lon args to individual attribute columns, omit the spatial formula (see `tableau-formula-translation.md` Geospatial Policy); **embedded-RLS user attributes** (`USERATTRIBUTE`, `USERATTRIBUTEINCLUDES`) — rejected at translate time, see BL-071 |
+| **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
+| **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
+
 ## Per-file report
 
 ```

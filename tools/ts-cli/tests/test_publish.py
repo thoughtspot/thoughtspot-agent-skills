@@ -343,3 +343,79 @@ def test_cohort_check_precedes_the_generic_missing_variable_match():
     # variable-coverage branch and produce a misleading message.
     msg = explain_publish_error(_COHORT_BODY, {}, _ORG_INDEX, {})
     assert "not defined for org" not in msg
+
+
+# ---------------------------------------------------------------------------
+# BL-146 — the cohort gate must run BEFORE anything is created
+# ---------------------------------------------------------------------------
+
+def test_apply_refuses_a_cohort_closure_before_creating_any_variable(tmp_path):
+    """The publish API refuses a cohort-carrying closure anyway -- but at the END of the
+    run, after the variable exists and the fields are parameterized. Those are left
+    behind, and the RE-RUN then dies at variable creation with `HTTP 409 Duplicate
+    template variable name`, pointing at an entirely different problem: the operator goes
+    hunting a variable conflict instead of the Set that actually blocked them. Recovery
+    needs a manual `unparameterize` first, because a bound variable cannot be deleted.
+
+    Observed live 2026-07-27 on T1_PUBLISH_MODEL / RSET_QTY_ON_HAND_BINS.
+    """
+    import json as _json
+    from unittest.mock import patch
+
+    from runners import runner
+    from ts_cli.cli import app
+
+    closure = tmp_path / "closure.json"
+    closure.write_text(_json.dumps({
+        "roots": [{"guid": "m1", "name": "Sales", "type": "model"}],
+        "cohort_columns": ["RSET_QTY_BINS"],
+        "tables": [], "variables": [],
+    }))
+    matrix = tmp_path / "matrix.json"
+    matrix.write_text(_json.dumps({"coverage": {"complete": True}, "assignments": []}))
+
+    # `resolve_profile` is patched because CI has no profiles file: unpatched, it exits
+    # before the client is ever constructed, and the assertions below would pass for
+    # entirely the wrong reason.
+    with patch("ts_cli.commands.publish_planning.resolve_profile", return_value={}), \
+            patch("ts_cli.commands.publish_planning.ThoughtSpotClient") as mock_cls:
+        result = runner.invoke(app, ["publish", "apply", "-c", str(closure),
+                                     "-m", str(matrix), "--publish-to", "ORG1"])
+
+    assert result.exit_code != 0
+    combined = result.stdout + getattr(result, "stderr", "")
+    assert "RSET_QTY_BINS" in combined
+    # The operator must be told the Set is the problem, not a variable conflict...
+    assert "cohort" in combined.lower()
+    # ...and told that nothing needs cleaning up, or they will go looking.
+    assert "nothing needs cleaning up" in combined
+    # Nothing was created: no client was even constructed.
+    assert not mock_cls.called
+
+
+def test_apply_proceeds_when_the_closure_carries_no_cohort_column(tmp_path):
+    """The gate must not refuse an ordinary closure -- it narrows the failure, it does not
+    add one. Reaching the client construction is enough; the run itself is not exercised
+    here."""
+    import json as _json
+    from unittest.mock import patch
+
+    from runners import runner
+    from ts_cli.cli import app
+
+    closure = tmp_path / "closure.json"
+    closure.write_text(_json.dumps({
+        "roots": [{"guid": "m1", "name": "Sales", "type": "model"}],
+        "cohort_columns": [], "tables": [], "variables": [],
+    }))
+    matrix = tmp_path / "matrix.json"
+    matrix.write_text(_json.dumps({"coverage": {"complete": True}, "assignments": []}))
+
+    with patch("ts_cli.commands.publish_planning.resolve_profile", return_value={}), \
+            patch("ts_cli.commands.publish_planning.ThoughtSpotClient") as mock_cls:
+        result = runner.invoke(app, ["publish", "apply", "-c", str(closure),
+                                     "-m", str(matrix), "--publish-to", "ORG1"])
+
+    combined = result.stdout + getattr(result, "stderr", "")
+    assert "cohort" not in combined.lower()
+    assert mock_cls.called

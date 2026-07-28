@@ -10,6 +10,90 @@ the full rule/template detail.
 
 ---
 
+## `translate-formulas` output shape (Step 5b)
+
+`ts tableau translate-formulas` writes `formulas_translated.json`:
+
+```json
+{
+  "translated": [
+    {"name": "Revenue Growth %", "expr": "...", "column_type": "MEASURE", "level": 0}
+  ],
+  "skipped": [
+    {"name": "Complex Calc", "reason": "validation: unmapped Tableau function: SPLIT",
+     "level": 1, "original": "...", "attempted_expr": "..."},
+    {"name": "Circular A", "reason": "circular or unresolvable dependency", "level": -1, "original": "..."}
+  ],
+  "stats": {
+    "total": 163, "translated": 107, "skipped": 56,
+    "levels": {"0": 85, "1": 18, "2": 4},
+    "param_conflicts": 2, "param_renames": 1, "name_clashes": 0,
+    "ifnull_stripped": 3, "agg_if_conversions": 5
+  }
+}
+```
+
+Use `translated` entries to populate `formulas[]` and paired `columns[]` in the model TML.
+Review `skipped` entries — some may be recoverable with a `--calc-map` or by manual
+inlining. `stats.levels` shows dependency depth (key = level, `-1` = circular); it maps
+to the audit cross-reference depth table from Step A3/A4.
+
+## `build-model --existing-guid` internal pipeline (Step 7 Phase 2)
+
+When Phase 2 runs `ts tableau build-model --existing-guid`, the command runs the full
+formula pipeline internally: (1) re-parses the TWB to extract calculated fields and
+parameters; (2) **migrates missing parameters onto the model first** (ts-cli ≥ 0.35.0) — a
+formula referencing a parameter the model lacks is unresolvable, so any TWB parameter not
+already on the model is added before formula import (no separate parameter step needed);
+(3) translates all formulas through the transform pipeline; (4) runs `validate_pre_import()`
+— reports warnings for IN-with-parens, non-existent functions (`add_quarters`/`add_years`),
+bare date literals, unbalanced parens/brackets, missing else clauses, and other structural
+issues; (5) applies `formula_` prefix for cross-references (resolves the I9 invariant); (6)
+detects and fixes double aggregation (`sum([formula_X])` where X is already aggregated); (7)
+**filters unresolvable references deterministically** (ts-cli ≥ 0.35.0): `sqlproxy::`,
+`Custom SQL Query`, bare column refs, unconverted concat, qualified `[TABLE::COL]` refs
+whose column is absent from the model, and the transitive cross-formula cascade (drop a
+formula whose referenced formula was dropped) — all caught pre-import, no import
+round-trips; (8) table-qualifies each bare column ref to its real owning table (multi-table
+models), not the anchor; (9) merges new formulas into the existing model (skips formulas
+already present); (10) imports with up to **10** (CLI default, `--max-retries`) retry
+cycles, cascade-dropping a failing formula's dependents in the same cycle — because the
+deterministic classes above are caught pre-import, the retry budget is only for genuine
+server-side rejections.
+
+## Published/sqlproxy datasources bound to an existing table/view — reconcile columns (Step 5b)
+
+When the datasource binds to a pre-existing ThoughtSpot table/view (the consultant/stand-in
+case), emitted columns carry Tableau's `(Custom SQL Query N)` suffixes that may diverge from
+the view's real names. `--reconcile-table` is a deliberate exception to the "one call for
+the whole workbook" rule — it binds one datasource to one existing table GUID, so
+`--datasource` is required:
+
+1. **Plan** (no write; requires `--profile`):
+   ```bash
+   ts tableau build-model {workdir}/{workbook}.twb --connection "{connection_name}" \
+     --datasource "{datasource_name}" --output-dir {output_dir} \
+     --table-name-map {workdir}/table_name_map.json --reconcile-table {table_guid} \
+     --reconcile-plan --profile {profile_name}
+   ```
+2. **Confirm with the user** — present the Plan JSON's `suggested_mappings`
+   (`{from, to, confidence}`) and `unmatched_drop` (no-confident-match columns, to be
+   dropped). Formula impact of a dropped column is only known after Apply (surfaced in
+   `reconcile_dropped.formulas`) — don't present it at this stage. Write confirmed mappings
+   as `{"<from>": "<to>"}` to `{workdir}/column_name_map.json` — **keep it in `{workdir}`,
+   NOT `{output_dir}`** (the output dir's `.json` files get scanned as TML on import).
+3. **Apply** (writes phased TMLs that bind):
+   ```bash
+   ts tableau build-model {workdir}/{workbook}.twb --connection "{connection_name}" \
+     --datasource "{datasource_name}" --output-dir {output_dir} \
+     --table-name-map {workdir}/table_name_map.json --reconcile-table {table_guid} \
+     --column-name-map {workdir}/column_name_map.json --profile {profile_name}
+   ```
+
+Column-id qualification and suffix/junk stripping are automatic (Tier-1) for every run.
+Dropped columns + their formulas appear in the result JSON's `reconcile_dropped` and the
+Step 12 report.
+
 ## Multi-query datasources (one datasource that JOINS several Custom SQL Queries) — hand assembly onto multiple tables
 
 A published/`sqlproxy` datasource often joins several Custom SQL Queries server-side. GENERATE

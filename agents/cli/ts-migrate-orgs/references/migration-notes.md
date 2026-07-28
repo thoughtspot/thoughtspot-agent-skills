@@ -108,8 +108,35 @@ when tenant-side behaviour is wrong — exactly how the CSR trap stayed hidden.
 Row 2 is the control: the same unknown keyword errors loudly *with* a column reference and
 passes silently *without* one. The rule is discarded before keyword validation.
 
-Silent in the direction that removes security. `apply` therefore re-reads and asserts after
-any write to a table that carried RLS — `OK` is never sufficient evidence.
+Silent in the direction that removes security.
+
+**`apply` is not exposed to it. An earlier guard that claimed to mitigate it was dead code
+that could never fire.** Walking every write `apply` makes: the only Table TML it
+writes is the lifted scaffolding, which is disposable, never queried, and deleted at
+cleanup. The rename writes a *Model* document, which carries no `rls_rules` at all — so
+the guard, which looked for `doc["table"]["rls_rules"]`, was checking a key that is never
+present. Recorded rather than quietly deleted, because dead safety code reads as
+protection and the next person would otherwise re-add it.
+
+BL-144 remains a live platform defect for anyone writing Table TML directly. It is simply
+not something this command does.
+
+## Tenant isolation at the repoint
+
+The exposure that IS real, and the check that replaced the dead guard.
+
+After the repoint the tenant's content is bound to the **shared** published Model. If that
+Model's tables carry no RLS, every tenant sees every other tenant's rows — the worst
+outcome the programme can produce, and silent.
+
+Unlike BL-144 this is entirely checkable before the damage is done, so `apply` reads the
+published Model's tables immediately before binding anything to them and refuses if any is
+unfiltered. An **unreadable** result refuses too: not knowing whether a shared Model
+filters is not the same as knowing it does.
+
+`--allow-unfiltered-target` overrides it, for a deliberately single-tenant target or one
+segmented in the warehouse — the same posture `ts security column-rules` takes with
+`--allow-published`.
 
 ## BL-145 — `ts_orgid` is not an RLS keyword
 

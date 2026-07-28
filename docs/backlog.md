@@ -3357,7 +3357,16 @@ section near the top of each missing skill. Verify by an agent run keeping `read
 **Source:** 2026-07-23 benchmark; PR #314 (tableau 4,436 → ~2,900 lines).
 **Affects:** `ts-convert-from-looker` (1,834), `ts-convert-from-snowflake-sv` (1,341),
 `ts-convert-from-databricks-mv` (997) SKILL.md.
-**Status:** OPEN.
+**Status:** DONE 2026-07-28 for the three filed skills — looker #390 (~21.0k → ~11.9k
+est. tokens), databricks-mv #392 (~13.7k → ~11.4k), snowflake-sv #393 (~15.0k → ~11.5k);
+all `check_skill_context_cost` warnings cleared, no logic changes. **Tableau round 2**
+landed the same day: ~57.2k → ~34.4k (−40%, changelog history archived to
+references/changelog-archive.md + step-file appends), but the file remains over the 25k
+hard-fail line and keeps its allowlist entry — the residue is genuine procedural spine
+(~29KB of protected commands/prompts/invariants). A round 3 would have to extract
+prompt-and-command sequences from Steps 4.5/5b/6/7 into step files, trading inline
+flow for size; deferred until the WARN pressure justifies it. The gate introduced
+2026-07-28 (PR #385) now enforces the ceiling this entry was filed for.
 
 SKILL.md size is a per-run token tax (the file is read every run, sometimes in multiple slices). PR #314
 cut tableau ~34% by moving reference-heavy detail (templates, rule tables, report formats) into
@@ -3941,8 +3950,14 @@ a successful application.
 never let a rejected rule delete the rule it was meant to replace.
 
 **Mitigation until fixed** -- any code path writing `rls_rules` must **read back and assert
-the rule survived**, never trusting `status_code: OK`. Applies to `ts migrate apply` when
-it lifts tables carrying RLS.
+the rule survived**, never trusting `status_code: OK`.
+
+**Update 2026-07-28: `ts migrate apply` is NOT exposed to this.** It writes no Table TML at
+all -- the architecture changed to export/rewrite/import and nothing is lifted. A guard was
+added and then removed as dead code: it looked for `doc["table"]["rls_rules"]` while only
+ever running on a Model document, which has no `table` key, so it could never fire.
+Recorded because dead safety code reads as protection. BL-144 remains live for anyone
+writing Table TML directly.
 
 ---
 
@@ -3975,7 +3990,7 @@ on this cluster, and whether an Org-scoped system variable is planned.
 
 ---
 
-## BL-146 -- `ts publish apply` creates state before its cohort gate, then cannot be re-run `Tier 2`
+## BL-146 -- `ts publish apply` creates state before its cohort gate, then cannot be re-run `Tier 2` -- **DONE 2026-07-28**
 
 **Filed:** 2026-07-27.
 **Source:** staging the end-to-end migration fixture on `nebula-damian-alias`. See
@@ -3997,13 +4012,20 @@ be deleted while still bound.
 **Ask:** run the cohort gate (and any other refusal that is knowable up front) **before**
 creating anything. Failing that, roll back what was created when a later gate refuses.
 
+**FIXED (ts-cli v0.113.1).** `apply` now reads `cohort_columns` off the closure -- which
+`export` already computed, so the check is free -- and refuses beside the existing
+coverage-gap check, before any client is even constructed. Verified live against
+T1_PUBLISH_MODEL: the same command on the same cluster state that previously reported
+`HTTP 409 Duplicate template variable name` now names the actual cohort column, and the
+message states that nothing needs cleaning up so nobody goes looking.
+
 **Also observed:** the refusal was invisible at the surface being watched. `created
 variable` and `parameterized` printed, while the cohort message went elsewhere -- so the
 run read as partial success rather than a refusal.
 
 ---
 
-## BL-147 -- `ts migrate audit` reads the WRONG ORG when given an Org name `Tier 2`
+## BL-147 -- `ts migrate audit` reads the WRONG ORG when given an Org name `Tier 2` -- **DONE 2026-07-28**
 
 **Filed:** 2026-07-27.
 **Source:** as BL-146.
@@ -4022,6 +4044,358 @@ A missing GUID is the lucky case. The dangerous one is an audit that *succeeds* 
 the wrong Org and emits a plausible `column-mapping.csv` for objects that are not the
 tenant's.
 
-**Ask:** resolve the name to a numeric id and assert the session, exactly as `apply` does
-via `_assert_write_org`; or refuse a non-numeric value outright. Correct the comment
-either way.
+**Ask:** resolve the name to a numeric id and assert the session, exactly as `apply` does;
+or refuse a non-numeric value outright. Correct the comment either way.
+
+**FIXED (ts-cli v0.113.1).** `_assert_write_org` is now `_org_client` and **every** command
+in the group goes through it, reads included -- the read/write distinction was the mistake,
+since the audit produces the file a human approves. The false comment is replaced with the
+reason. Verified live: `--source-org ORG1` now returns the correct ORG1 mapping where it
+previously failed outright.
+
+---
+
+## BL-148 -- lift-and-shift collides by NAME with the published objects it is migrating onto `Tier 1` -- **RESOLVED BY DESIGN CHANGE 2026-07-28**
+
+> **No longer reachable.** Lift-and-shift was removed: `ts migrate apply` now rewrites
+> content (data-source reference + column names) instead of lifting scaffolding, so nothing
+> is ever imported that could collide. The finding below stands as a fact about the
+> platform and is why the architecture changed -- see
+> `docs/superpowers/specs/2026-07-28-ts-migrate-orgs-rewrite-design.md`. The third
+> candidate option recorded below ("do not lift the scaffolding at all") is what was
+> built.
+
+**Filed:** 2026-07-28.
+**Source:** the first live `ts migrate apply` run against the end-to-end fixture. See
+`docs/superpowers/verification/2026-07-27-ts-migrate-e2e-runbook.md`.
+
+**This blocks Phase 2 end to end.** `ts migrate apply` fails at `lift_scaffolding`:
+
+```
+scaffolding import failed:
+  Error: Found multiple data sources with same name.
+  - T2_PUBLISH
+    * T2_PUBLISH[d2c12c11-...]   <- the PUBLISHED table
+    * T2_PUBLISH[0d111529-...]   <- the scaffolding being lifted
+```
+
+### Why it is structural, not a fixture artefact
+
+The collision is **guaranteed by the design**, not incidental:
+
+1. `ts migrate audit` pairs a tenant Model to its published counterpart **by name**. So by
+   construction they share one.
+2. `apply` then lifts the tenant's Table and Model into the target Org -- which already
+   holds the published objects of those exact names.
+3. Reference resolution is **fqn-then-name** (spike finding 4). The lifted Model's `fqn`
+   points at a source-Org GUID that is dead in the target, so resolution falls back to the
+   name -- and now finds two.
+
+Spike finding 4 already stated "names must be unique within the target Org" as a
+precondition. What was missed is that **the architecture itself violates it**: pairing by
+name and lifting into the same Org cannot both hold.
+
+### What was ruled out
+
+`ALL_OR_NONE` behaves correctly -- the failed batch created nothing, and the target Org was
+left clean. This is a hard failure, not a partial write.
+
+Three variants were probed live; none is a fix on its own:
+
+| Variant | Result |
+|---|---|
+| Keep the document `guid`, same names | `Object with GUID ... already exists. New GUID will be used` -- the source GUID is not usable as an intra-batch key |
+| Strip `guid`, rename scaffolding unique | Table created, but the Model then fails: `No table with fqn ... found for table_id MIG_T2_PUBLISH` |
+| Keep `guid`, rename scaffolding unique | same as above |
+
+Renaming the scaffolding **Table** is not sufficient because the scaffolding **Model** also
+collides with the published Model -- and renaming the Model breaks the *content* lift,
+which is a later batch whose Answers resolve the Model by name.
+
+### Candidate designs, none yet chosen
+
+| Option | Note |
+|---|---|
+| Lift scaffolding **and content in ONE batch**, with scaffolding renamed unique | All references remap intra-batch, so no name fallback is needed. Fewest calls. Needs verification that intra-batch fqn remapping actually works across object types |
+| Rename scaffolding unique, then rewrite each content object's Model reference from the ledger's source→target GUID map | Deterministic, but it is O(objects) reference rewriting -- the exact thing the architecture exists to avoid |
+| Do not lift the scaffolding at all; bind lifted content directly to the **published** Model | Removes the collision entirely and would simplify the design, but the rename step exists precisely because the names do not match yet, so the ordering would have to change |
+
+The third is the most interesting and was already flagged as "the strongest option" in the
+original spike, deferred for its own verification. It is now worth taking seriously.
+
+**Do not attempt a quick fix.** This is reference-resolution behaviour that has already
+produced one wrong assumption (a guard that could never fire, BL-144's mitigation), and
+each candidate needs its own live verification before being built.
+
+---
+
+## BL-149 -- `search_query` propagates ASYNCHRONOUSLY after a column rename `Tier 1` -- **NO LONGER ON THE MIGRATION PATH 2026-07-28**
+
+> **The migration no longer depends on the cascade.** `ts migrate apply` rewrites
+> `search_query` deterministically rather than renaming a Model column and waiting, so the
+> lag cannot bite it. The finding below stands as a live platform fact and still applies to
+> anyone relying on rename propagation -- it is simply not a migration blocker any more.
+> The "rewrite deterministically" option recorded below is what was built.
+
+**Filed:** 2026-07-28.
+**Source:** live on `nebula-damian-alias`, testing the rename cascade the whole migration
+architecture rests on. Raised by the repo owner from field experience, then reproduced.
+
+Renaming a Model column updates a dependent Answer's fields at **different times**:
+
+| Field | Immediately after the rename | Next read |
+|---|---|---|
+| `answer_columns[].name` | new name | new name |
+| `table.table_columns[].column_id` | new name | new name |
+| `search_query` | **OLD name (stale)** | new name |
+
+Reproduced in both directions (rename, then revert). It does converge -- this is a lag,
+not a permanent failure.
+
+### Why Tier 1
+
+The migration's `rename` step is immediately followed by steps that **export** content. An
+export taken in that window produces a TML that is **internally inconsistent**: the column
+lists carry the new name while `search_query` still carries the old one.
+
+That TML then fails on import, or worse mis-binds -- and `search_query` correctness before
+import is already a hard constraint (memory `feedback_ts_tml_import_constraints`). The
+failure mode is a half-correct document that looks plausible in review.
+
+### What this corrects
+
+The 2026-07-15 verification concluded that a rename "auto-propagates to dependent
+Answers/Liveboards", and the design's O(columns)-not-O(objects) claim rests on it. That
+test only inspected a **formula** field, which updates synchronously. It saw the half that
+works.
+
+The claim survives, narrowed: propagation is real, but it is not atomic, and nothing in the
+API response signals when it has completed. `diff: {columns_updated: 1}` is returned before
+`search_query` has caught up.
+
+### Also established: content TML has NO physical anchor
+
+A Liveboard references columns purely by display name -- `search_query` tokens,
+`answer_columns[].name`, and `table_columns[].column_id`, where `column_id` is the **display
+name**, not a `TBL::COL` binding. Only `tables[].fqn` (the data-source GUID) is stable.
+
+This is why the rename has to be relied on at all: there is no id-based path.
+
+### Options
+
+| Option | Note |
+|---|---|
+| Rewrite `search_query` deterministically after the rename, rather than trusting the cascade | Deterministic and testable, and the repo already prefers codified transforms over waiting. Costs a per-object edit, but only to one field |
+| Poll each content object until its export is self-consistent (`search_query` tokens all present in `answer_columns`) | No rewriting, but unbounded wait and a fuzzy stop condition |
+| Re-export content in a later pass, well after the rename | Simplest, but "well after" is not a specification |
+
+The first looks strongest, and it composes with **BL-148**: content has to be rewritten for
+the data-source reference anyway, so `search_query` becomes one more field in the same pass
+rather than a separate mechanism.
+
+---
+
+## BL-151 -- Skill to migrate tables from column-level sharing to column security rules `Tier 2`
+
+**Filed:** 2026-07-28. **Renumbered from BL-150 on 2026-07-28:** two items were filed as
+BL-150 the same day. The other one is cross-referenced from `CHANGELOG.md`, `apply_exec.py`,
+`apply_plan.py`, a test docstring and `ts-migrate-orgs/SKILL.md`, so it kept the number and
+this one moved.
+**Source:** user request.
+**Family:** `ts-security-columns` (see `.claude/rules/skill-naming.md` family #11).
+
+ThoughtSpot has two mechanisms for restricting column visibility: **column-level sharing**
+(the legacy approach — share individual columns per group/user) and **column security rules**
+(the newer, policy-based approach — define rules that control which columns are visible to
+which groups). The newer mechanism is more maintainable at scale, but migrating from one to
+the other is manual and error-prone.
+
+### What the skill would do
+
+1. **Audit** — for a given table (or set of tables), read the current column-level sharing
+   configuration and produce a report of which columns are shared with which groups/users.
+2. **Generate rules** — translate the sharing configuration into equivalent column security
+   rules that produce the same effective visibility.
+3. **Apply** — import the generated column security rules (with user confirmation).
+4. **Verify** — compare effective column visibility before and after to confirm equivalence.
+5. **Cleanup** — optionally remove the legacy column-level sharing entries once the rules are
+   verified.
+
+### Approach
+
+- Research the column-sharing and column-security-rules APIs via SpotterCode MCP before
+  writing any code.
+- The `ts-security-columns` family already exists in the naming convention — this skill fits
+  there.
+- The `ts security column-rules` CLI group (if it exists) or new ts-cli commands would handle
+  the API calls; the skill orchestrates the migration workflow.
+
+---
+
+## BL-150 -- a new-Org migration DROPS ALL SHARING, so tenant users lose every object `Tier 1`
+
+**Filed:** 2026-07-28.
+**Source:** raised by the repo owner asking whether the fixture was visible only to
+`tsadmin`. It was -- and checking why exposed the general case.
+
+**TML carries no sharing information at all.** An exported Answer contains no `share`,
+`permission`, `principal`, `group` or `acl` key; its top-level keys are only
+`answer_columns`, `chart`, `display_mode`, `name`, `search_query`, `table`, `tables`.
+
+So in a **new-Org** run, `ts migrate apply` creates content authored by the migrating
+admin and **shared with nobody**. The migration completes, every object is present and
+correct, every check passes -- and not one tenant user can see anything.
+
+### Why this is Tier 1
+
+It affects **every tenant** in production, it is **silent** (nothing fails), and it is
+invisible to an admin verifying the migration, because an admin sees objects regardless of
+sharing. The failure surfaces only when a real tenant user logs in and finds an empty
+Org -- which is exactly the point at which the source Org may already have been retired.
+
+A **same-Org** run is unaffected: content is updated in place and keeps its existing
+grants.
+
+### What a fix has to handle
+
+Reading and re-applying is straightforward -- `security/metadata/fetch-permissions` on the
+source, `ts share` on the target. Two things make it more than a copy:
+
+1. **Groups are per-Org principals.** A group named `ACME_VIEWERS` in the source Org is a
+   *different object* from a same-named group in the target, so the target must already
+   have the group (a `ts tenancy` precondition) and the grant must be resolved against the
+   target's principal, not the source's.
+2. **Users may not exist in the target Org yet**, since cutover is deliberately the last
+   step. A per-user grant therefore cannot always be applied at migration time, and may
+   have to be deferred to cutover.
+
+### RESOLVED 2026-07-28 -- it was OUR bug: the whole object stack must be granted
+
+`nebula-damian-alias` runs **Strict Object Mode**, so a user needs an explicit grant on the
+entire chain -- Table, then Model, then content. And **publication makes an object *present*,
+not *visible***, so the published Model carries no tenant grants of its own (that half is
+independent of the mode).
+
+> **Strict Object Mode is a per-cluster SETTING and can be toggled.** Confirm it before
+> assuming this explanation applies elsewhere -- on a non-strict cluster the same symptom
+> will have a different cause. The fix below is **safe either way**: with the mode off the
+> extra grants are redundant rather than wrong, so no mode detection is needed.
+
+`share_grants` shared only the content. With the Model ungranted, **the Answer share was
+accepted and not recorded**:
+
+```
+BEFORE  published Model grants: [Administrator, tsadmin]
+        Answer grants         : [Administrator, tsadmin]
+
+share published TABLE  -> 204
+share published MODEL  -> 204   ->  MIGTEST_VIEWERS/READ_ONLY APPEARS
+re-share the ANSWER    -> 204   ->  MIGTEST_VIEWERS/READ_ONLY APPEARS
+```
+
+Granting the Model made the identical Answer share register immediately.
+
+**Why ORG1 appeared to work:** the fixture script happened to share `LOGICAL_TABLE` before
+`ANSWER`, granting the stack bottom-up by accident. Nothing about ORG1 was different.
+
+### Three wrong conclusions, and what they have in common
+
+1. "grants do not register when the content sits on a published Model" -- wrong cause,
+   right neighbourhood.
+2. "it tracks with object TYPE in that Org" -- a real correlation with the wrong
+   explanation: Answers failed because Answers sit on top of a stack, Models did not
+   because theirs was already granted or owned.
+3. "`fetch-permissions` under-reports group grants" -- **wrong.** The read was accurate
+   every time; there was nothing to report.
+
+All three came from treating an API response as the thing to explain, instead of asking
+what the product requires. The repo owner supplied the missing premise (Strict Object Mode)
+in one sentence.
+
+### The fix
+
+`share_grants` now grants **bottom-up over the whole stack**: the published Tables, then
+the published Model, then the migrated content. Ordering is load-bearing -- a content grant
+applied before its Model is silently dropped.
+
+---
+
+## BL-152 -- a same-Org migration pairs the tenant's Model with ITSELF and reports READY `Tier 1` -- **FIXED 2026-07-28**
+
+**Filed:** 2026-07-28.
+**Source:** found while running the first same-Org (source Org == target Org) test end to
+end -- the last of the three supported topologies to be exercised.
+
+`ts migrate audit --source-org ORG1 --target-org ORG1` returned:
+
+```
+source_guid  : 9917a017-443c-4cf7-be81-2958d83997c8
+target_guid  : 9917a017-443c-4cf7-be81-2958d83997c8   <- the SAME object
+readiness    : READY
+column_counts: {'MATCHED': 6, 'GAP': 0, 'GAP_BLOCKER': 0, 'BINDING_MISMATCH': 0}
+```
+
+### Cause
+
+`discover.find_model_by_name` returned the **first** name match. In the same-Org topology
+the Org legitimately holds **two** Models of that name -- its own, and the master published
+in from Primary -- and which one came back first was whatever `metadata/search` happened to
+list. It returned the tenant's own Model, so the audit compared the source with itself.
+
+Every downstream number then follows: each column matches itself, the rename map is empty,
+`validate_apply` has nothing to object to, and the verdict is `READY`.
+
+### Why Tier 1
+
+It is a **silent no-op that passes every gate.** `apply` would run green, write a state
+ledger, and move nothing. Verification does not catch it either: the content still works,
+because it is still pointed at the Model it always used. It surfaces only when someone
+retires the "old" Model at teardown -- the point at which every Answer and Liveboard in the
+tenant Org breaks at once, and the backup is the only way back.
+
+Three narrower instances of the same defect were found alongside it, all from the same
+name-only assumption:
+
+| Where | What went wrong |
+|---|---|
+| `audit --all-models` | Swept the published master in as a *source* Model, auditing it against itself. **Measured on ORG1: 12 Models visible, 5 owned** -- the other seven were the master and **six ThoughtSpot system worksheets** (`TS: BI Server`, `Falcon_Monitor_Data_Load_360`, `Credit Usage Worksheet`, ...), all of which landed in the `column-mapping.csv` a human is asked to approve |
+| `_classify_scope` (`apply`) | The **source** lookup could equally return the master, so `apply` would migrate the master's own dependents and rename its columns |
+| `scan-sets --model <name>` | Could report the master as the tenant's Set blocker, overstating the one number that command exists to produce |
+
+### The fix
+
+**Ownership is the discriminator.** `metadata_header.ownerOrgId` distinguishes the two: the
+published master is owned by Primary, the tenant's copy by the tenant. The same field
+`list_models` already used for the fleet scan, applied to the one place it was missing.
+
+- `discover.name_matches` returns **all** exact name matches with their `ownerOrgId`,
+  because the count is the point.
+- `select_source` requires the Org to **own** the Model; `select_target` requires that it
+  does **not**, and additionally excludes the source object by GUID.
+- Either one **refuses** on genuine ambiguity (`AmbiguousModelName`) rather than picking.
+  Both wrong answers here are silent, so guessing is the one thing not to do.
+- `exclude_owner_org_id` is passed as `None` when the two profiles differ, because Org ids
+  mean nothing across clusters and `Primary` is `0` on both -- excluding by id would refuse
+  a legitimate Primary-to-Primary cross-cluster target.
+- `apply_plan.find_self_repoint` re-asserts the invariant at plan time. The lookup now makes
+  it unreachable; it is kept because the **previous architecture had this guard, the rewrite
+  dropped it, and the case came straight back.**
+- `find_model_by_name`, `scaffolding_objects` and `bespoke_content` are removed --
+  name-only lookup and two dead helpers from the retired lift-and-shift design.
+
+Regression tests were confirmed to fail against the old behaviour with the bug's exact
+signature (`target_guid == '9917a017'`, the source) before being taken as passing.
+
+**Verified live** on `nebula-damian-alias`: the same audit now targets the master
+(`2a743be3`) and returns `NEEDS_MAPPING` with `Segment` a blocker, where it had returned
+`READY` with 6 columns matched. Full record, including the prepared plan and what was
+deliberately not run:
+`docs/superpowers/verification/2026-07-28-ts-migrate-same-org-topology.md`.
+
+### What this does not fix
+
+The audit now reports `NO_TARGET` in a same-Org run where the master has not been published
+into the Org yet. That is correct and actionable, but it means **the same-Org topology
+requires the master to be published into the source Org first** -- worth stating in the
+runbook, because the Org already contains a same-named Model and an operator may reasonably
+assume there is nothing to publish.

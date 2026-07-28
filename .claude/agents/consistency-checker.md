@@ -1,6 +1,7 @@
 ---
 name: consistency-checker
 description: Verify cross-file consistency after edits — checks broken references, stage copy completeness, skills table, symlink instructions, anti-patterns, and version sync. Run after any batch of changes before committing.
+model: haiku
 ---
 
 # Consistency Checker

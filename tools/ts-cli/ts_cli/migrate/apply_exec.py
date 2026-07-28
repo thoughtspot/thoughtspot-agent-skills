@@ -1,12 +1,11 @@
 """Phase 2 executor — the I/O half of `ts migrate apply`.
 
-Pure planning lives in `apply_plan.py`; this module runs the plan. Split so the ordering
-and validation rules -- the parts that encode live findings -- stay unit-testable without
-a cluster.
+Pure planning lives in `apply_plan.py`, the pure transform in `rewrite.py`; this module
+runs them. The split keeps the ordering, validation and rewrite rules -- the parts that
+encode live findings -- testable without a cluster.
 
-Each `run_*` takes `(ctx, step)` and returns `{guid: new_guid}` for the ledger, raising
-`StepFailed` with an actionable message on anything it cannot complete. The caller records
-the outcome and decides whether to continue.
+Each `run_*` takes `(ctx, step)` and returns `{name: guid}` for the ledger, raising
+`StepFailed` with an actionable message on anything it cannot complete.
 """
 from __future__ import annotations
 
@@ -14,10 +13,11 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ts_cli.migrate.apply_plan import (STEP_BACKUP, STEP_CLEANUP_CONNECTION,
-                                       STEP_CLEANUP_MODELS, STEP_CLEANUP_TABLES,
-                                       STEP_LIFT_CONTENT, STEP_LIFT_SCAFFOLDING,
-                                       STEP_RENAME, STEP_REPOINT)
+from ts_cli.migrate.apply_plan import (STEP_BACKUP, STEP_MOVE_SHIELDED,
+                                       STEP_REWRITE_CONTENT, STEP_REWRITE_VIEWS,
+                                       STEP_SHARE, target_segmentation,
+                                       unfiltered_target_problem)
+from ts_cli.migrate.rewrite import residual_references, rewrite_content, rewrite_view
 
 
 class StepFailed(Exception):
@@ -28,12 +28,23 @@ class Ctx:
     """Everything a step needs: both clients, the plan directory, and the live ledger."""
 
     def __init__(self, source_client, target_client, plan_dir: Path,
-                 ledger: Dict[str, Any], dry_run: bool = False):
+                 ledger: Dict[str, Any], dry_run: bool = False,
+                 allow_unfiltered: bool = False, unscoped_client=None):
         self.source = source_client
         self.target = target_client
+        # A session NOT scoped to any Org. Required for the segmentation check: an
+        # Org-scoped variable read returns only THAT Org's value, so from inside the
+        # target every variable looks like it has one value -- and every target looks
+        # SHARED. Same trap as `tenancy._groups_in_org`. Falls back to the target client,
+        # which yields UNKNOWN rather than a false pass.
+        self.unscoped = unscoped_client or target_client
         self.plan_dir = plan_dir
         self.ledger = ledger
         self.dry_run = dry_run
+        # Only ever set by an explicit --allow-unfiltered-target. Defaulting it True would
+        # turn the tenant-isolation check into a no-op for everyone who never reads the
+        # flag list.
+        self.allow_unfiltered = allow_unfiltered
 
     def created(self, step: str) -> Dict[str, str]:
         return (self.ledger.get("created") or {}).get(step, {})
@@ -44,27 +55,22 @@ class Ctx:
 # ---------------------------------------------------------------------------
 
 def export_tml(client, guids: List[str]) -> List[Dict[str, Any]]:
-    """Export a batch as parsed JSON documents. One call, because calls scale with
-    batches rather than objects -- the round-trip budget the design is built on."""
+    """Export a batch as parsed JSON documents. One call: calls scale with batches
+    rather than objects, which is the round-trip budget the design is built on."""
     if not guids:
         return []
     resp = client.post("/api/rest/2.0/metadata/tml/export",
                        json={"metadata": [{"identifier": g} for g in guids],
                              "edoc_format": "JSON", "export_fqn": True})
-    docs = []
-    for item in resp.json():
-        edoc = item.get("edoc")
-        if edoc:
-            docs.append(json.loads(edoc))
-    return docs
+    return [json.loads(i["edoc"]) for i in resp.json() if i.get("edoc")]
 
 
-def import_tml(client, docs: List[Dict[str, Any]], *, create_new: bool = True
+def import_tml(client, docs: List[Dict[str, Any]], *, create_new: bool
                ) -> List[Dict[str, Any]]:
     """Import a batch all-or-none and return the per-item outcomes.
 
-    ALL_OR_NONE because a partial scaffolding import leaves the target Org holding half a
-    reference graph, which the next step would bind content to.
+    ALL_OR_NONE because a partial content import leaves the tenant with some objects
+    migrated and some not, which is harder to reason about than none.
     """
     if not docs:
         return []
@@ -89,7 +95,6 @@ def import_failures(results: List[Dict[str, Any]]) -> List[str]:
 
 
 def imported_guids(results: List[Dict[str, Any]]) -> Dict[str, str]:
-    """`{name: guid}` for successfully imported items, for the ledger."""
     out = {}
     for item in results or []:
         header = ((item.get("response") or {}).get("header") or {})
@@ -98,16 +103,36 @@ def imported_guids(results: List[Dict[str, Any]]) -> Dict[str, str]:
     return out
 
 
+def rls_rule_counts(client, model_guid: str) -> Dict[str, int]:
+    """`{table_name: rule_count}` for the tables under a Model.
+
+    Read through the TARGET Org's session: a published object is Primary-owned but
+    visible in the tenant Org, and reading it as the tenant reads what the tenant is
+    actually bound to (verified 2026-07-28).
+    """
+    docs = export_tml(client, [model_guid])
+    if not docs:
+        return {}
+    body = docs[0].get("model") or docs[0].get("worksheet") or {}
+    fqns = [t.get("fqn") for t in body.get("model_tables") or [] if t.get("fqn")]
+    counts: Dict[str, int] = {}
+    for doc in export_tml(client, fqns):
+        table = doc.get("table") or {}
+        counts[table.get("name") or "?"] = len((table.get("rls_rules") or {})
+                                               .get("rules") or [])
+    return counts
+
+
 # ---------------------------------------------------------------------------
 # Steps
 # ---------------------------------------------------------------------------
 
 def run_backup(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
-    """Export every in-scope source object before anything is written.
+    """Export every in-scope object before anything is written.
 
-    All-or-nothing: nothing is saved if any export fails, mirroring `ts dependency
-    backup`. A partial backup is worse than none -- it reads as a safety net that is not
-    there.
+    All-or-nothing: nothing is saved if any export fails. A partial backup is worse than
+    none -- it reads as a safety net that is not there. In a same-Org run it IS the
+    rollback, so this is the step that makes that topology survivable at all.
     """
     guids = step["objects"]
     docs = export_tml(ctx.source, guids)
@@ -123,272 +148,344 @@ def run_backup(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
     return {}
 
 
-def _rewrite_connection(doc: Dict[str, Any], connection_name: str) -> None:
-    table = doc.get("table")
-    if isinstance(table, dict) and isinstance(table.get("connection"), dict):
-        table["connection"] = {"name": connection_name}
+def publication_variables(client) -> List[Dict[str, Any]]:
+    """Template variables with their per-Org values.
 
+    **Must be called with an UNSCOPED client.** An Org-scoped session returns only that
+    Org's value for each variable (verified live 2026-07-28), so the caller sees one
+    distinct value and concludes the Orgs share data -- when they may be pointed at
+    entirely different schemas. Segmentation is a cross-Org question and cannot be
+    answered from inside one Org.
 
-def run_lift_scaffolding(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
-    """Lift the tenant's Tables and Models into the target Org as one batch.
-
-    Tables and Models go together so their references stay internally consistent -- the
-    importer remaps intra-batch references, which is the whole reason this is
-    lift-and-shift rather than per-object GUID rewriting.
+    Needed because **RLS only matters when publication resolves every Org to the same
+    physical table**. A `TABLE_MAPPING` variable holding a different value per Org points
+    each tenant at its own database or schema, and demanding RLS on top of that would be
+    a false alarm -- worse than no check, because it teaches operators to pass the
+    override reflexively.
     """
-    conn = step["connection"]
-    if conn.get("action") == "fail":
-        raise StepFailed(conn["reason"])
+    resp = client.post("/api/rest/2.0/template/variables/search", raise_for_status=False,
+                       json={"response_content": "METADATA_AND_VALUES", "record_size": -1})
+    if resp.status_code >= 300:
+        return []
+    body = resp.json()
+    return body if isinstance(body, list) else []
 
-    docs = export_tml(ctx.source, step["tables"] + step["models"])
-    if conn["action"] == "rewrite":
-        for doc in docs:
-            _rewrite_connection(doc, conn["connection"])
+
+def _assert_tenants_separated(ctx: Ctx, target: Dict[str, str]) -> None:
+    """Refuse to bind tenant content to a Model that separates no tenants.
+
+    Checks how the Orgs are separated FIRST, and only falls back to requiring RLS when
+    they genuinely share physical data.
+    """
+    guid = target.get("guid")
+    if not guid or ctx.dry_run:
+        return
+    segmentation = target_segmentation(publication_variables(ctx.unscoped),
+                                       target.get("org"))
+    problem = unfiltered_target_problem(rls_rule_counts(ctx.target, guid),
+                                        target.get("name", guid),
+                                        allow=ctx.allow_unfiltered,
+                                        segmentation=segmentation)
+    if problem:
+        raise StepFailed(f"refused: {problem}")
+
+
+def _rewrite_batch(ctx: Ctx, step: Dict[str, Any], transform) -> Dict[str, str]:
+    """Export, rewrite, import -- the whole migration for one class of object."""
+    objects = step["objects"]
+    if not objects:
+        return {}
+    columns = step["columns"]
+    target = step["target"]
+    mode = step["mode"]
+
+    _assert_tenants_separated(ctx, target)
+
+    guids = [o["guid"] for o in objects]
+    docs = export_tml(ctx.source, guids)
+    if len(docs) != len(guids):
+        raise StepFailed(f"exported {len(docs)} of {len(guids)} object(s); refusing to "
+                         f"migrate a partial set")
+
+    rewritten = []
     for doc in docs:
-        doc.pop("guid", None)  # create-new in the target Org
+        out = transform(doc, columns, target["guid"], target.get("name"))
+        # The completeness gate, per object. A partial rewrite imports cleanly and
+        # RENDERS WRONG, so this is checked before writing rather than discovered by a
+        # user later.
+        residual = residual_references(out, columns)
+        if residual:
+            paths = "; ".join(f"{p} = {v[:60]}" for p, v in residual[:4])
+            raise StepFailed(
+                f"rewrite incomplete for '{_doc_name(out)}': {len(residual)} source "
+                f"column reference(s) survive -- {paths}. Importing this would produce an "
+                f"object that loads but renders wrong. This is a gap in the rewrite's "
+                f"field coverage, not a data problem")
+        if mode.get("keep_guid"):
+            out["guid"] = doc.get("guid")
+        else:
+            out.pop("guid", None)
+        rewritten.append(out)
 
     if ctx.dry_run:
         return {}
-    # Imported as ONE batch so intra-batch references remap; the kind is then read back
-    # off each document, because Tables and Models are both LOGICAL_TABLE to the API and
-    # cleanup has to delete Models FIRST.
-    results = import_tml(ctx.target, docs, create_new=True)
+    results = import_tml(ctx.target, rewritten, create_new=mode["create_new"])
     failures = import_failures(results)
     if failures:
-        raise StepFailed("scaffolding import failed:\n  " + "\n  ".join(failures))
-
-    created = imported_guids(results)
-    kinds = ctx.ledger.setdefault("kinds", {"tables": [], "models": []})
-    for doc, item in zip(docs, results):
-        guid = ((item.get("response") or {}).get("header") or {}).get("id_guid")
-        if not guid:
-            continue
-        bucket = "tables" if "table" in doc else "models"
-        if guid not in kinds[bucket]:
-            kinds[bucket].append(guid)
-    return created
+        raise StepFailed("import failed:\n  " + "\n  ".join(failures))
+    return imported_guids(results)
 
 
-def run_lift_content(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
-    """Lift bespoke content in dependency order: Views, then Answers, then Liveboards.
+def _doc_name(doc: Dict[str, Any]) -> str:
+    for key in ("liveboard", "answer", "view", "model", "worksheet", "table"):
+        body = doc.get(key)
+        if isinstance(body, dict) and body.get("name"):
+            return body["name"]
+    return doc.get("guid", "<unnamed>")
 
-    References resolve to the scaffolding just imported. The importer tries the `fqn`
-    (dead in the target) and falls back to the NAME, which is why names must be unique in
-    the target Org.
+
+def run_rewrite_views(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
+    """Repoint Views, PRESERVING what they expose.
+
+    Rewriting `search_output_column` while leaving `view_columns[].name` means the View
+    reads the published Model while exposing the same names -- so every Answer and
+    Liveboard built on it needs no migration at all. Proven end to end 2026-07-28,
+    including that the untouched content still returns data.
+
+    Views go first so that in a new-Org run they exist before anything references them.
     """
-    created: Dict[str, str] = {}
-    for kind, guids in step["batches"]:
-        if not guids:
-            continue
-        docs = export_tml(ctx.source, guids)
-        for doc in docs:
-            doc.pop("guid", None)
-        if ctx.dry_run:
-            continue
-        results = import_tml(ctx.target, docs, create_new=True)
-        failures = import_failures(results)
-        if failures:
-            raise StepFailed(f"{kind} import failed:\n  " + "\n  ".join(failures))
-        created.update(imported_guids(results))
-    return created
+    return _rewrite_batch(ctx, step, rewrite_view)
 
 
-def _rename_columns(doc: Dict[str, Any], renames: Dict[str, str]) -> int:
-    """Rewrite `columns[].name` in place. Returns how many changed.
+def run_rewrite_content(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
+    """Rewrite Answers and Liveboards onto the published Model.
 
-    Only `name` is touched -- `column_id` is the physical binding and anchors the
-    dependents, so an in-place rename cascades to every Answer and Liveboard
-    automatically. Touching `column_id` would make it a drop-and-add instead.
+    Only content NOT already shielded by a View is here: rewriting a shielded object
+    again would be work that can only introduce error.
     """
-    changed = 0
-    for section in ("table", "model", "worksheet"):
-        body = doc.get(section)
-        if not isinstance(body, dict):
-            continue
-        for col in body.get("columns") or []:
-            new = renames.get(col.get("name"))
-            if new:
-                col["name"] = new
-                changed += 1
-    return changed
+    return _rewrite_batch(ctx, step, rewrite_content)
 
 
-def run_rename(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
-    """Rename scaffolding columns to the published names, once per column.
+def _view_guid_remap(ctx: Ctx, objects: List[Dict[str, Any]]) -> Dict[str, str]:
+    """`{source View guid -> target View guid}` for the Views these objects sit on.
 
-    Cascades to every dependent automatically (verified 2026-07-15), so this is
-    O(columns), not O(objects) -- the reason the architecture works at all.
+    Matched by View NAME, which `rewrite_views` recorded in the ledger. The source guid is
+    dead in the target, so the name is the only bridge.
     """
-    renames = step["renames"]
-    if not renames:
-        return {}
-    lifted = ctx.created(STEP_LIFT_SCAFFOLDING)
-    by_model: Dict[str, Dict[str, str]] = {}
-    for model, tenant, target in renames:
-        by_model.setdefault(model, {})[tenant] = target
-
-    for model_name, mapping in sorted(by_model.items()):
-        guid = lifted.get(model_name)
-        if not guid:
-            raise StepFailed(f"rename: no lifted object recorded for Model "
-                             f"'{model_name}' -- re-run the lift step")
-        if ctx.dry_run:
-            continue
-        docs = export_tml(ctx.target, [guid])
-        if not docs:
-            raise StepFailed(f"rename: could not export '{model_name}' ({guid})")
-        doc = docs[0]
-        had_rls = _has_rls(doc)
-        if _rename_columns(doc, mapping) == 0:
-            raise StepFailed(f"rename: none of {sorted(mapping)} matched a column of "
-                             f"'{model_name}' -- the mapping is stale")
-        doc["guid"] = guid
-        results = import_tml(ctx.target, [doc], create_new=False)
-        failures = import_failures(results)
-        if failures:
-            raise StepFailed(f"rename of '{model_name}' failed:\n  "
-                             + "\n  ".join(failures))
-        _assert_rls_survived(ctx, guid, model_name, had_rls)
-    return {}
+    created_views = ctx.created(STEP_REWRITE_VIEWS)
+    refs = sorted({r for o in objects for r in o.get("source_refs") or []})
+    remap: Dict[str, str] = {}
+    for doc in export_tml(ctx.source, refs):
+        new_guid = created_views.get((doc.get("view") or {}).get("name"))
+        if doc.get("guid") and new_guid:
+            remap[doc["guid"]] = new_guid
+    return remap
 
 
-def _has_rls(doc: Dict[str, Any]) -> bool:
-    table = doc.get("table")
-    if not isinstance(table, dict):
-        return False
-    rls = table.get("rls_rules") or {}
-    return bool(rls.get("rules"))
+def run_move_shielded(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
+    """Copy View-shielded content into the target, repointing it at the NEW View.
 
+    Its columns are **not** rewritten -- the View's exposed names did not change, which is
+    the whole point of the shield. But in a new-Org run the content still has to exist
+    over there, and its `tables[].fqn` still points at the SOURCE View's guid, which is
+    dead in the target.
 
-def _assert_rls_survived(ctx: Ctx, guid: str, label: str, had_rls: bool) -> None:
-    """Re-read and confirm an RLS rule that existed before the write still exists.
-
-    **BL-144.** A malformed `rls_rules` block imports with `status_code: OK`, is
-    discarded, AND destroys the rule already on the table. The failure is silent in the
-    direction that REMOVES security, so `OK` is never sufficient evidence on any write to
-    a table that carried RLS.
+    Omitting this step is silent data loss: the tenant's Answer simply would not appear.
+    Observed live 2026-07-28.
     """
-    if not had_rls or ctx.dry_run:
-        return
-    after = export_tml(ctx.target, [guid])
-    if not after or not _has_rls(after[0]):
-        raise StepFailed(
-            f"'{label}' carried an RLS rule before this write and does NOT after it, "
-            f"despite the import reporting success (BL-144). The table is now "
-            f"UNFILTERED. Restore it from {ctx.plan_dir / 'backup'} before continuing")
-
-
-def run_repoint(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
-    """Move bespoke content off the scaffolding Models onto the published Models.
-
-    A 1:1-by-name match, because the rename step already aligned the column names. The
-    TML transform is `ts dependency`'s proven `apply_repoint` rather than a second
-    implementation -- it already handles `search_query` sanitisation and dangling joins,
-    which a fresh one would rediscover the hard way.
-    """
-    from ts_cli.dependency.mutate import apply_repoint
-    from ts_cli.migrate import discover
-
-    lifted = ctx.created(STEP_LIFT_SCAFFOLDING)
-    content = ctx.created(STEP_LIFT_CONTENT)
-    if not content:
+    objects = step["objects"]
+    if not objects or ctx.dry_run:
         return {}
 
-    repointed = 0
-    for name, source_guid in sorted(lifted.items()):
-        target_guid = discover.find_model_by_name(ctx.target, name)
-        if not target_guid or target_guid == source_guid:
+    remap = _view_guid_remap(ctx, objects)
+    guids = [o["guid"] for o in objects]
+    docs = export_tml(ctx.source, guids)
+    if len(docs) != len(guids):
+        raise StepFailed(f"exported {len(docs)} of {len(guids)} shielded object(s); "
+                         f"refusing to move a partial set")
+
+    moved = []
+    for doc in docs:
+        unresolved = [r for r in _table_fqns(doc) if r not in remap]
+        if unresolved:
             raise StepFailed(
-                f"repoint: no published Model named '{name}' in the target Org. The "
-                f"published Model must exist before content can be moved onto it")
-        if ctx.dry_run:
-            continue
-        docs = export_tml(ctx.target, sorted(content.values()))
-        updated = []
-        for doc in docs:
-            guid = doc.get("guid")
-            new_doc = apply_repoint(doc, source_guid=source_guid, target_guid=target_guid,
-                                    target_name=name, column_gap=[])
-            if new_doc != doc:
-                new_doc["guid"] = guid
-                updated.append(new_doc)
-        if updated:
-            results = import_tml(ctx.target, updated, create_new=False)
-            failures = import_failures(results)
-            if failures:
-                raise StepFailed("repoint failed:\n  " + "\n  ".join(failures))
-            repointed += len(updated)
-    return {}
+                f"'{_doc_name(doc)}' sits on a View that was not migrated "
+                f"({', '.join(unresolved)}). Moving it would leave it bound to an object "
+                f"that does not exist in the target")
+        out = _repoint_fqns(doc, remap)
+        out.pop("guid", None)
+        moved.append(out)
+
+    results = import_tml(ctx.target, moved, create_new=True)
+    failures = import_failures(results)
+    if failures:
+        raise StepFailed("shielded-content move failed:\n  " + "\n  ".join(failures))
+    return imported_guids(results)
 
 
-def _delete(client, guids: List[str], obj_type: str) -> Optional[str]:
-    if not guids:
-        return None
-    resp = client.post("/api/rest/2.0/metadata/delete", raise_for_status=False,
-                       json={"metadata": [{"identifier": g, "type": obj_type}
-                                          for g in guids]})
-    if resp.status_code >= 300:
-        return f"HTTP {resp.status_code} {resp.text[:250]}"
-    return None
+def _table_fqns(doc: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+
+    def walk(node, key=None):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, k)
+        elif isinstance(node, list):
+            if key == "tables":
+                out.extend(e["fqn"] for e in node
+                           if isinstance(e, dict) and e.get("fqn"))
+            else:
+                for v in node:
+                    walk(v, key)
+
+    walk(doc)
+    return out
 
 
-def run_cleanup_models(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
-    """Delete the scaffolding Models.
+def _repoint_fqns(doc: Dict[str, Any], remap: Dict[str, str]) -> Dict[str, Any]:
+    """Swap each `tables[].fqn` for its target-Org equivalent, leaving names alone."""
+    def walk(node, key=None):
+        if isinstance(node, dict):
+            return {k: walk(v, k) for k, v in node.items()}
+        if isinstance(node, list):
+            if key == "tables":
+                out = []
+                for e in node:
+                    if isinstance(e, dict) and e.get("fqn") in remap:
+                        e = dict(e)
+                        e["fqn"] = remap[e["fqn"]]
+                    out.append(e)
+                return out
+            return [walk(v, key) for v in node]
+        return node
+    return walk(doc)
 
-    **A refusal here is the check working, not an error to force past.** By this point
-    the repoint has run, so nothing should reference the scaffolding; a Model that still
-    has dependents means a repoint was missed, and those objects would be orphaned. This
-    is the reason cleanup is surgical rather than a wholesale Org delete, which would
-    take the un-repointed content silently.
+
+def source_group_grants(client, objects: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """`{object name: [group names]}` for the GROUP grants on the source objects.
+
+    Group level only, deliberately. A per-user grant cannot reliably be applied before
+    cutover -- the users may not be in the target Org yet -- and group membership is where
+    a tenant's access is actually administered.
+
+    Reads through `share_plan.permission_rows`, which encodes the gotcha that a landed
+    share shows in `permission` and NOT in `shared_permission`.
     """
-    if ctx.dry_run:
+    from ts_cli.share_plan import permission_rows
+
+    out: Dict[str, List[str]] = {}
+    for obj in objects:
+        resp = client.post("/api/rest/2.0/security/metadata/fetch-permissions",
+                           raise_for_status=False,
+                           json={"metadata": [{"identifier": obj["guid"],
+                                               "type": obj.get("type") or "ANSWER"}]})
+        if resp.status_code >= 300:
+            continue
+        groups = sorted({r["principal_name"] for r in permission_rows(resp.json())
+                         if r.get("principal_type") == "USER_GROUP"
+                         and r.get("permission") not in (None, "", "NO_ACCESS")})
+        if groups:
+            out[obj.get("name") or obj["guid"]] = groups
+    return out
+
+
+def target_stack(client, model_guid: str) -> List[Dict[str, str]]:
+    """The published Model and its Tables, bottom-up: Tables first, then the Model.
+
+    Order is load-bearing. Under **Strict Object Mode** a user needs a grant on the whole
+    chain, and a grant applied to something whose source is ungranted is **accepted and
+    silently dropped** -- `HTTP 204`, no row recorded (verified live 2026-07-28 on a cluster
+    with the mode ON; it is a per-cluster setting, and granting the stack is harmless when
+    it is off).
+    """
+    docs = export_tml(client, [model_guid])
+    if not docs:
+        return []
+    body = docs[0].get("model") or docs[0].get("worksheet") or {}
+    tables = [t.get("fqn") for t in body.get("model_tables") or [] if t.get("fqn")]
+    return ([{"guid": g, "type": "LOGICAL_TABLE"} for g in tables]
+            + [{"guid": model_guid, "type": "LOGICAL_TABLE"}])
+
+
+def run_share_grants(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
+    """Grant the tenant's groups access to the WHOLE object stack, bottom-up.
+
+    Two facts make this more than sharing the content:
+
+    1. **Publication makes an object present, not visible.** The published Model carries no
+       tenant grants of its own, so publishing it does not let the tenant's users read it.
+    2. **Strict Object Mode requires the whole chain** -- Table, then Model, then content.
+       A grant on content whose Model is ungranted is accepted and **silently dropped**:
+       `HTTP 204` with no row recorded. Strict Object Mode is a **per-cluster setting**, so
+       this is not universal -- but granting the stack is **safe either way**, since with
+       the mode off the extra grants are merely redundant. Hence no mode detection.
+
+    So this grants published Tables, then the published Model, then the migrated content.
+    Sharing only the content -- which is what this step did originally -- produced a
+    migration that reported success while the tenant saw nothing (BL-150).
+    """
+    objects = step["objects"]
+    if not objects or ctx.dry_run:
         return {}
-    problem = _delete(ctx.target, sorted(_lifted_of_kind(ctx, "models")), "LOGICAL_TABLE")
-    if problem:
+
+    wanted = source_group_grants(ctx.source, objects)
+    if not wanted:
+        print("  share_grants: no group grants on the source objects -- nothing to "
+              "re-establish", file=__import__("sys").stderr)
+        return {}
+    groups = sorted({g for gs in wanted.values() for g in gs})
+
+    target = step.get("target") or {}
+    # Bottom-up, and the ORDER IS THE FIX: published Tables, published Model, migrated
+    # Views, then content. A grant on anything whose source is ungranted is accepted and
+    # SILENTLY DROPPED, so each layer must already be granted before the next is applied.
+    # Missing the Views cost a second round of this bug: the Answer built on a View was
+    # dropped exactly as the Answer on the Model had been.
+    stack = target_stack(ctx.target, target["guid"]) if target.get("guid") else []
+    stack += [{"guid": guid, "type": "LOGICAL_TABLE"}
+              for guid in sorted(ctx.created(STEP_REWRITE_VIEWS).values())]
+    created = {**ctx.created(STEP_REWRITE_CONTENT), **ctx.created(STEP_MOVE_SHIELDED)}
+    content = [{"guid": guid, "type": _type_of(objects, name)}
+               for name, guid in sorted(created.items())]
+
+    failures, applied = [], 0
+    for item in stack + content:
+        for group in groups:
+            resp = ctx.target.post(
+                "/api/rest/2.0/security/metadata/share", raise_for_status=False,
+                json={"metadata_type": item["type"],
+                      "metadata_identifiers": [item["guid"]],
+                      "permissions": [{"principal": {"type": "USER_GROUP",
+                                                     "identifier": group},
+                                       "share_mode": "READ_ONLY"}],
+                      "message": "Re-established by ts migrate apply",
+                      "notify_on_share": False})
+            if resp.status_code >= 300:
+                failures.append(f"{item['guid']} -> {group} (HTTP {resp.status_code})")
+            else:
+                applied += 1
+
+    if failures:
         raise StepFailed(
-            f"scaffolding Model delete refused ({problem}).\nThis is very likely a MISSED "
-            f"REPOINT: content still references the scaffolding. Find it before forcing "
-            f"anything -- deleting past this orphans that content.")
+            f"applied {applied} grant(s), but these failed: {', '.join(failures)}. "
+            f"Groups are PER-ORG principals, so the target Org needs a group of each name "
+            f"(provision it with `ts tenancy`)")
+    print(f"  share_grants: {applied} grant(s) across {len(stack)} stack object(s) and "
+          f"{len(content)} content object(s)", file=__import__("sys").stderr)
     return {}
 
 
-def _lifted_of_kind(ctx: Ctx, kind: str) -> set:
-    """GUIDs the lift recorded. Tables and Models are both LOGICAL_TABLE to the API, so
-    the plan's own lists are the only way to tell them apart."""
-    return set((ctx.ledger.get("kinds") or {}).get(kind, []))
-
-
-def run_cleanup_tables(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
-    if ctx.dry_run:
-        return {}
-    tables = sorted(_lifted_of_kind(ctx, "tables"))
-    problem = _delete(ctx.target, tables, "LOGICAL_TABLE")
-    if problem:
-        raise StepFailed(f"scaffolding Table delete refused ({problem})")
-    return {}
-
-
-def run_cleanup_connection(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
-    """Delete the connection this migration provisioned. Last, because deletion does not
-    cascade to Tables -- they had to go first."""
-    if ctx.dry_run:
-        return {}
-    resp = ctx.target.post(
-        f"/api/rest/2.0/connections/{step['connection']}/delete",
-        raise_for_status=False, json={})
-    if resp.status_code >= 300:
-        raise StepFailed(f"connection delete refused: HTTP {resp.status_code} "
-                         f"{resp.text[:200]}. Its Tables must be gone first")
-    return {}
+def _type_of(objects: List[Dict[str, Any]], name: str) -> str:
+    for obj in objects:
+        if (obj.get("name") or obj["guid"]) == name:
+            return obj.get("type") or "ANSWER"
+    return "ANSWER"
 
 
 RUNNERS = {
     STEP_BACKUP: run_backup,
-    STEP_LIFT_SCAFFOLDING: run_lift_scaffolding,
-    STEP_LIFT_CONTENT: run_lift_content,
-    STEP_RENAME: run_rename,
-    STEP_REPOINT: run_repoint,
-    STEP_CLEANUP_MODELS: run_cleanup_models,
-    STEP_CLEANUP_TABLES: run_cleanup_tables,
-    STEP_CLEANUP_CONNECTION: run_cleanup_connection,
+    STEP_REWRITE_VIEWS: run_rewrite_views,
+    STEP_REWRITE_CONTENT: run_rewrite_content,
+    STEP_MOVE_SHIELDED: run_move_shielded,
+    STEP_SHARE: run_share_grants,
 }

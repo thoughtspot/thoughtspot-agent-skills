@@ -1,11 +1,71 @@
 # Step 10 — Liveboard Generation Detail
 
-Reference detail for **Step 10 — Generate Liveboard TML**: the full KPI viz template, the
-per-encoding `search_query`-building rule set (10b), and the liveboard TML template (10c).
-The step's spine (which command to run, the decision points, and the critical gotchas) stays
-in `SKILL.md` — this file is what the spine links out to for the full rule/template detail.
+Reference detail for **Step 9 — Parse Dashboard Layout** and **Step 10 — Generate Liveboard
+TML**: the zone-extraction field table, the full KPI viz template, the per-encoding
+`search_query`-building rule set (10b), and the liveboard TML template (10c). The steps'
+spine (which command to run, the decision points, and the critical gotchas) stays in
+`SKILL.md` — this file is what the spine links out to for the full rule/template detail.
 
 ---
+
+## Zone extraction field reference (Step 9a)
+
+For each leaf zone found by walking `<dashboard>` → `<zones>` → `<zone>` recursively,
+extract:
+
+| Field | Source |
+|---|---|
+| `zone_id` | `id` attribute |
+| `zone_type` | `type` attribute (`text`, `title`, `viz`, `bitmap`, `web`, `extension`, `metric`) |
+| `worksheet_name` | `name` attribute (for `viz` zones) |
+| `x`, `y`, `w`, `h` | `x`, `y`, `w`, `h` attributes (Tableau uses 0–100,000 coordinate space) |
+| `text_content` | `<formatted-text>` child text (for `text` / `title` zones) |
+| `parent_zone` + `param` | the enclosing `<zone>`'s `id` and its `param` (`vert` = vertical container / stacks children top-to-bottom; `horz` = horizontal container / places children left-to-right). **Keep the nesting** — don't flatten to a coordinate list; the container tree is the layout's real structure (9c). |
+| `floating` | `floating="true"` on the zone — a free-positioned overlay, not part of a container. Handle separately in 9c. |
+
+## Container-tree grid mapping algorithm (Step 9c)
+
+Map the **container tree**, not raw coordinates — a flat y-band scan misgroups zones
+whenever two containers share a y range.
+
+1. **Walk the `<zones>` tree** from 9a. A **`vert`** container stacks its children into
+   successive **rows**; a **`horz`** container lays its children **side-by-side within one
+   row**. Recurse: a `horz` inside a `vert` is one row split into columns; a `vert` inside a
+   `horz` is a column split into stacked rows.
+2. **Columns within a horizontal container** — split 12 columns **proportionally to each
+   child's `w` relative to its siblings' total `w`** (not the whole dashboard). Normalize with
+   **largest-remainder** so `col_span`s sum to **exactly 12** with no slivers: floor each
+   share, then hand the leftover columns to the zones with the largest fractional remainders.
+   Enforce a **minimum `col_span` of 2** (merge or bump anything smaller) so no tile is an
+   unreadable sliver.
+3. **Rows / height** — give each row a `row_span` from the zone's **aspect ratio**, so charts
+   keep roughly their source shape: `row_span ≈ round(col_span × (h/w) × 0.5)`, clamped to a
+   per-type floor — **KPI/number ≥ 3, note/text ≥ 2, chart ≥ 6, table ≥ 8**. Stack rows top to
+   bottom, each starting at the previous row's bottom (`y += prev row_span`).
+4. **Fallback to the band method** only when the tree is unavailable (rare — e.g. a
+   hand-edited TWB with flat zones): group zones within ~2,000 y-units into a band, sort bands
+   top-to-bottom and zones left-to-right within a band, then apply the same proportional
+   column split + aspect-ratio height as above.
+
+**Floating zones** (`floating="true"`) overlap the tiled layout and have no grid equivalent.
+Don't try to reproduce the overlap: place each floating zone as its **own full-or-partial-width
+tile** in reading order (by y then x) after the tiled zones, and **note in the Migration
+Summary** that it was a floating overlay flattened into the flow.
+
+## Mark class → chart type (Step 10a)
+
+| Tableau mark class / zone | ThoughtSpot `chart.type` |
+|---|---|
+| `bar` | `BAR` |
+| `line` | `LINE` |
+| `circle` / `point` | `SCATTER` |
+| `square` | `BAR` |
+| `pie` | `PIE` |
+| `area` | `AREA` |
+| `text` (crosstab) | `TABLE` (display_mode `TABLE_MODE`) |
+| Map (lat/long generated + geo role) | `GEO_BUBBLE` (or `GEO_AREA` for a filled/choropleth map) |
+| "Measure Names / Measure Values" KPI block | `KPI` — **one tile per measure** (see KPI rule in SKILL.md Step 10a) |
+| **dual-axis combo** (two mark classes, e.g. `Bar` + `Line`, on a synchronized/secondary axis) | `ADVANCED_LINE_COLUMN` (Muze) — see the combo rule in SKILL.md Step 10a |
 
 ## KPI viz template (Step 10a)
 

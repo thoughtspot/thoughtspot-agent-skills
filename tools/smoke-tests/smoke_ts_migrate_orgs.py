@@ -18,9 +18,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ts-cli"))
 
 from ts_cli.migrate.apply_plan import (  # noqa: E402
-    STEP_CLEANUP_CONNECTION, STEP_CLEANUP_MODELS, STEP_CLEANUP_TABLES,
-    STEP_LIFT_CONTENT, STEP_LIFT_SCAFFOLDING, STEP_RENAME, STEP_REPOINT, STEP_ORDER,
-    connection_action, find_rename_collisions, validate_apply,
+    STEP_ORDER, STEP_REWRITE_CONTENT, STEP_REWRITE_VIEWS,
+    find_rename_collisions, import_mode, unfiltered_target_problem, validate_apply,
 )
 from ts_cli.migrate.schema import ColumnMappingRow, SET_BLOCKER  # noqa: E402
 
@@ -53,50 +52,82 @@ def test_the_skill_documents_the_engines_actual_step_order():
         assert step in text, f"engine step '{step}' is undocumented in SKILL.md"
 
 
-def test_cleanup_order_is_stated_models_then_tables_then_connection():
-    """Connection deletion does NOT cascade to its Tables, so a skill that implied any
-    other order would have the operator delete the connection while Tables still hang
-    off it."""
+def test_views_are_rewritten_BEFORE_content_in_both_engine_and_skill():
+    """In a new-Org run the View must exist before anything references it -- and the
+    skill's table is what an operator follows."""
     order = list(STEP_ORDER)
-    assert (order.index(STEP_CLEANUP_MODELS) < order.index(STEP_CLEANUP_TABLES)
-            < order.index(STEP_CLEANUP_CONNECTION))
+    assert order.index(STEP_REWRITE_VIEWS) < order.index(STEP_REWRITE_CONTENT)
     text = _skill_text()
-    assert "Models, then Tables, then the connection" in text
+    assert text.index("| `rewrite_views` |") < text.index("| `rewrite_content` |")
 
 
-def test_rename_precedes_repoint_in_both_the_engine_and_the_skill():
-    """The repoint is a 1:1-by-name match; before the rename there is nothing to bind."""
-    order = list(STEP_ORDER)
-    assert order.index(STEP_RENAME) < order.index(STEP_REPOINT)
+def test_the_skill_says_migrated_content_is_INVISIBLE_without_re_sharing():
+    """The failure that survives verification: an admin sees objects regardless of
+    sharing, so the migration looks complete while the tenant sees an empty Org."""
     text = _skill_text()
-    assert text.index("| `rename` |") < text.index("| `repoint` |")
+    assert "TML carries no sharing information" in text
+    assert "visible to **nobody else**" in text
+    assert "per-Org principals" in text
 
 
-def test_scaffolding_is_lifted_before_content():
-    order = list(STEP_ORDER)
-    assert order.index(STEP_LIFT_SCAFFOLDING) < order.index(STEP_LIFT_CONTENT)
+def test_the_skill_documents_the_engines_step_count():
+    """A skill still describing the scaffolding dance would have an operator looking for
+    steps the engine no longer runs."""
+    assert len(STEP_ORDER) == 5
+    text = _skill_text()
+    # The DELETED step names, not the word "scaffolding" -- the changelog legitimately
+    # says "no scaffolding", and a test that cannot tell those apart is noise.
+    for gone in ("lift_scaffolding", "cleanup_models", "cleanup_connection",
+                 "| `rename` |", "| `repoint` |"):
+        assert gone not in text, f"SKILL.md still documents the removed step {gone!r}"
+
+
+def test_the_skill_documents_all_THREE_topologies():
+    """Same Org / new Org / new cluster differ only in write mode, but their ROLLBACKS
+    differ a lot, and the weakest one has to be called out."""
+    text = _skill_text()
+    assert "Same Org, same cluster" in text
+    assert "New Org, different cluster" in text
+    assert "weakest" in text
 
 
 # ---------------------------------------------------------------------------
 # The two outcomes that look like errors
 # ---------------------------------------------------------------------------
 
-def test_the_skill_says_a_refused_model_delete_is_the_CHECK():
-    """The single most damaging misreading available. An operator who treats the refusal
-    as a bug reaches for a bigger hammer and orphans the content it was protecting."""
+def test_the_skill_says_a_COVERAGE_refusal_must_not_be_worked_around():
+    """The most damaging misreading available now. Importing past it produces an object
+    that loads and renders wrong -- exactly what the gate exists to prevent."""
     text = _skill_text()
-    assert "missed-repoint check" in text
-    assert "orphans that content" in text
-    assert "Deleting past this" in text
+    assert "rewrite incomplete" in text
+    assert "Do not work around it" in text
+    assert "renders wrong" in text
 
 
-def test_the_skill_says_a_failed_rls_assertion_means_the_table_is_UNFILTERED_NOW():
-    """BL-144 is silent in the direction that removes security. "Import failed" would be
-    read as "nothing happened", which is the opposite of the truth."""
+def test_the_skill_explains_the_TENANT_ISOLATION_refusal_at_the_repoint():
+    """The most important refusal in the routine, and the one most likely to be forced
+    past: repointing onto a published Model with no RLS lets every tenant see every other
+    tenant's rows. The skill has to say the consequence, not just the rule -- and has to
+    name the override so a legitimate single-tenant target is not stuck."""
     text = _skill_text()
-    assert "BL-144" in text
-    assert "unfiltered" in text.lower()
-    assert "backup" in text.lower()
+    assert "row-level security" in text
+    assert "every other tenant" in text
+    assert "--allow-unfiltered-target" in text
+
+
+def test_the_skill_says_an_UNREADABLE_isolation_check_also_refuses():
+    """Not knowing whether a shared Model filters is not the same as knowing it does.
+    Treating unknown as safe is how a silent check becomes a silent hole."""
+    text = _skill_text()
+    assert "unreadable" in text.lower()
+
+
+def test_the_engine_actually_makes_the_refusal_the_skill_promises():
+    """Skill/engine drift is the hazard: an operator follows the skill."""
+    from ts_cli.migrate.apply_plan import unfiltered_target_problem
+    assert unfiltered_target_problem({"SALES": 0}, "Sales")          # unfiltered -> refuse
+    assert unfiltered_target_problem({}, "Sales")                    # unreadable -> refuse
+    assert unfiltered_target_problem({"SALES": 1}, "Sales") is None  # filtered  -> pass
 
 
 # ---------------------------------------------------------------------------
@@ -136,14 +167,17 @@ def test_a_non_injective_rename_map_is_refused():
     assert find_rename_collisions(rows)
 
 
-def test_a_target_org_with_no_connection_is_fatal_as_the_skill_states():
-    assert connection_action("APJ_ACME", [])["action"] == "fail"
-    assert "No connection at all is fatal" in _skill_text()
+def test_the_skill_says_NO_connection_provisioning_is_needed():
+    """It was a hard precondition of the old architecture. Leaving it in the skill would
+    send an operator to provision something nothing needs."""
+    text = _skill_text()
+    assert "No connection provisioning is needed" in text
 
 
-def test_a_same_named_connection_avoids_rewriting_as_the_skill_claims():
-    assert connection_action("APJ_ACME", ["APJ_ACME"])["action"] == "resolve_unchanged"
-    assert "resolves **unchanged**" in _skill_text()
+def test_the_import_mode_is_DERIVED_not_configured():
+    """Three topologies, one code path. A flag would let an operator pick the wrong one."""
+    assert import_mode("A", "A", "p", "p")["keep_guid"] is True
+    assert import_mode("A", "B", "p", "p")["create_new"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +219,16 @@ def test_the_notes_distinguish_RLS_from_CSR_and_say_why():
     text = NOTES.read_text(encoding="utf-8")
     assert "RLS carries; CSR does not" in text
     assert "separate, Org-scoped security object" in text
+
+
+def test_the_notes_record_that_the_old_BL144_guard_was_DEAD_CODE():
+    """The guard looked for `doc["table"]["rls_rules"]` but only ever ran on a Model
+    document, which has no `table` key -- so it could never fire. Recording that matters
+    more than quietly deleting it: dead safety code reads as protection, and the next
+    person would otherwise re-add it."""
+    text = NOTES.read_text(encoding="utf-8")
+    assert "dead code" in text.lower()
+    assert "could never fire" in text
 
 
 def test_the_notes_mark_ts_vars_as_a_test_env_gap_not_a_platform_limit():

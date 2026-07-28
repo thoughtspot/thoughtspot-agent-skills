@@ -23,6 +23,26 @@ echo ""
 
 FAILED=0
 
+# ── Timing budget ────────────────────────────────────────────────────────────
+# Every check's duration is printed inline and the suite total is checked
+# against BUDGET_S at the end. When the budget is blown, the summary names the
+# slow checks so they can be demoted to CI-only (validate.yml) instead of
+# taxing every commit. perl Time::HiRes because macOS `date` lacks %N.
+BUDGET_S=15
+SLOW_CHECK_S=3
+_now_ms() { perl -MTime::HiRes=time -e 'printf "%d", time()*1000'; }
+SUITE_START_MS=$(_now_ms)
+SLOW_CHECKS=""
+
+_record_duration() {
+  # $1 = label, $2 = start ms; prints "(N.Ns)" and tracks slow checks
+  local dur_ms=$(( $(_now_ms) - $2 ))
+  printf "(%d.%01ds)\n" $((dur_ms / 1000)) $(((dur_ms % 1000) / 100))
+  if [ "$dur_ms" -ge $((SLOW_CHECK_S * 1000)) ]; then
+    SLOW_CHECKS="${SLOW_CHECKS}    $1: $((dur_ms / 1000))s"$'\n'
+  fi
+}
+
 # ── Python interpreter resolution ───────────────────────────────────────────
 # ts-cli's own floor is Python >=3.10 (tools/ts-cli/pyproject.toml), but some
 # machines only expose an EOL system `python3` (e.g. macOS ships 3.9.6). Prefer
@@ -51,11 +71,15 @@ fi
 run_check() {
   local label="$1"
   local cmd="$2"
+  local t0
   printf "  %-30s " "$label"
+  t0=$(_now_ms)
   if output=$("$PYTHON_BIN" $cmd 2>&1); then
-    echo "PASS"
+    printf "PASS "
+    _record_duration "$label" "$t0"
   else
-    echo "FAIL"
+    printf "FAIL "
+    _record_duration "$label" "$t0"
     echo "$output" | sed 's/^/    /'
     FAILED=$((FAILED + 1))
   fi
@@ -119,6 +143,13 @@ fi
 if echo "$STAGED" | grep -q 'SKILL\.md'; then
   "$PYTHON_BIN" tools/validate/suggest_skill_version.py --root $REPO_ROOT
   run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
+fi
+
+# Skill context cost — a SKILL.md is loaded into context on every invocation;
+# gate its estimated-token size (warn >12k, fail >25k — BL-128 extraction is
+# the remedy). Runs when a SKILL.md or the validator itself is touched.
+if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|tools/validate/check_skill_context_cost\.py)'; then
+  run_check "skill context cost" "tools/validate/check_skill_context_cost.py --root $REPO_ROOT --staged"
 fi
 
 # Smoke tests — every Claude skill (not on the allowlist) must have a smoke test,
@@ -281,11 +312,15 @@ export PYTHONPATH="$REPO_ROOT/tools/ts-cli${PYTHONPATH:+:$PYTHONPATH}"
 run_pytest() {
   local label="$1"
   shift
+  local t0
   printf "  %-30s " "$label"
+  t0=$(_now_ms)
   if output=$("$PYTHON_BIN" -m pytest "$@" -q --tb=short 2>&1); then
-    echo "PASS"
+    printf "PASS "
+    _record_duration "$label" "$t0"
   else
-    echo "FAIL"
+    printf "FAIL "
+    _record_duration "$label" "$t0"
     echo "$output" | sed 's/^/    /'
     FAILED=$((FAILED + 1))
   fi
@@ -298,6 +333,19 @@ if echo "$STAGED" | grep -q '\.py$'; then
 fi
 
 echo ""
+
+# ── Timing summary ───────────────────────────────────────────────────────────
+SUITE_MS=$(( $(_now_ms) - SUITE_START_MS ))
+if [ "$SUITE_MS" -gt $((BUDGET_S * 1000)) ]; then
+  echo "  WARN: pre-commit took $((SUITE_MS / 1000))s — over the ${BUDGET_S}s budget."
+  if [ -n "$SLOW_CHECKS" ]; then
+    echo "  Slowest checks (>${SLOW_CHECK_S}s):"
+    printf "%s" "$SLOW_CHECKS"
+  fi
+  echo "  Consider demoting the slowest to CI-only (.github/workflows/validate.yml)"
+  echo "  or tightening their staged-file trigger — see docs/quality-gates.md."
+  echo ""
+fi
 
 if [ "$FAILED" -gt 0 ]; then
   echo "$FAILED check(s) failed. Fix the issues above, then re-stage and commit."

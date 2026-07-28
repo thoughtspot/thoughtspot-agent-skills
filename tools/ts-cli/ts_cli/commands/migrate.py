@@ -37,46 +37,55 @@ def audit(
     """
     from ts_cli.migrate import discover, run_audit
 
-    # Org scoping uses the client's own `org` keyword, which landed on main (PR #346) with
-    # a live-verified detail this branch's earlier version did not have: `auth/token/full`
-    # SILENTLY IGNORES a non-numeric `org_identifier` and falls back to the caller's default
-    # Org. `_org_auth_fields` resolves that, so a name is safe to pass here.
-    #
-    # Resolving a name to its numeric id and asserting the session afterwards is what
-    # `ts share`'s `_resolve_org_id` / `assert_org_context` do; `apply` (Phase 2) must use
-    # them before any WRITE, because migrating a tenant's content into the wrong Org while
-    # reporting success is this command's worst failure mode. `audit` is read-only, so a
-    # wrong-Org read is recoverable and the assertion is deferred rather than skipped.
-    source_client = ThoughtSpotClient(resolve_profile(source_profile), org=source_org)
-    target_client = ThoughtSpotClient(resolve_profile(target_profile), org=target_org)
+    # Resolved and asserted, NOT passed as a raw name (BL-147). The comment that used to
+    # sit here claimed `_org_auth_fields` made a name safe and that a wrong-Org read was
+    # recoverable anyway. Both were wrong, and the second is the dangerous one: the audit
+    # produces the file a human approves, so reading Primary while believing it read the
+    # tenant hands someone a plausible mapping for the wrong objects.
+    source_client = _org_client(source_profile, source_org)
+    target_client = _org_client(target_profile, target_org)
 
     model_guids = list(model)
     if all_models:
-        model_guids = [m["guid"] for m in discover.list_models(source_client)]
+        # Models this Org OWNS. Once the master has been published in -- which is the
+        # normal state during a same-Org migration -- an unscoped sweep audits the master
+        # against itself alongside the tenant's real Models.
+        model_guids = [m["guid"] for m in discover.list_models(
+            source_client, owner_org_id=discover.owning_org_id(source_client))]
     if not model_guids:
         _err("No models to audit. Pass --model <guid> (repeatable) or --all-models.")
         raise typer.Exit(code=1)
 
-    report = run_audit(source_client, target_client, model_guids, out_dir)
+    try:
+        report = run_audit(source_client, target_client, model_guids, out_dir,
+                           source_owner_org_id=_target_exclusion(
+                               source_client, source_profile, target_profile))
+    except discover.AmbiguousModelName as exc:
+        _refuse(str(exc))
     print(json.dumps(report, indent=2))
     ready = "READY" if report["overall_ready"] else "NEEDS MAPPING"
     _err(f"Audit complete: {len(report['models'])} model(s), overall {ready}. Files in {out_dir}")
 
 
-def _owning_org_id(client) -> Optional[int]:
-    """Numeric id of the Org this client's session is actually in.
+def _refuse(detail: str) -> None:
+    """Turn a refusal into a clean exit rather than a traceback. Never returns."""
+    _err(f"Refused. {detail}")
+    raise typer.Exit(code=1)
 
-    Read back from the session rather than assumed from the `--source-org` argument,
-    because `auth/token/full` silently ignores a non-numeric org identifier and falls back
-    to the caller's default Org. Attributing a scan to the Org that was ASKED for rather
-    than the one it ran in would mislabel every blocked Model in the report.
+
+def _target_exclusion(source_client, source_profile: Optional[str],
+                      target_profile: Optional[str]) -> Optional[int]:
+    """Source Org id to exclude from target lookups, or `None` across clusters.
+
+    Org ids are only meaningful within one cluster -- `Primary` is `0` on both -- so
+    excluding by id across clusters would refuse a legitimate Primary-to-Primary target.
+    Same test as `import_mode` uses for the write mode: profiles equal means one cluster.
     """
-    try:
-        current = (client.get("/api/rest/2.0/auth/session/user").json()
-                   or {}).get("current_org") or {}
-        return current.get("id")
-    except (Exception, SystemExit):
+    from ts_cli.migrate import discover
+
+    if source_profile != target_profile:
         return None
+    return discover.owning_org_id(source_client)
 
 
 def _resolve_scan_models(client, model: List[str], all_models: bool,
@@ -92,7 +101,7 @@ def _resolve_scan_models(client, model: List[str], all_models: bool,
     if all_models:
         # Restrict to Models this Org OWNS. Without it a Primary-owned Model is counted
         # once per tenant Org and reported as each tenant's blocker -- observed live.
-        return discover.list_models(client, owner_org_id=_owning_org_id(client))
+        return discover.list_models(client, owner_org_id=discover.owning_org_id(client))
 
     identifiers = list(model)
     if models_file:
@@ -108,6 +117,7 @@ def _resolve_scan_models(client, model: List[str], all_models: bool,
         identifiers += [str(row[0]).strip() for row in cursor.fetchall()]
 
     resolved: List[dict] = []
+    owner = discover.owning_org_id(client)
     for identifier in [i for i in identifiers if i]:
         # A GUID resolves as-is; a name has to be looked up, and an unknown name is
         # reported rather than skipped -- a silently-dropped Model would understate the
@@ -115,9 +125,14 @@ def _resolve_scan_models(client, model: List[str], all_models: bool,
         if "-" in identifier and len(identifier) >= 32:
             resolved.append({"guid": identifier, "name": identifier})
             continue
-        guid = discover.find_model_by_name(client, identifier)
+        # This Org's OWN Model. A published master visible in the Org is not this tenant's
+        # blocker, and counting it as one overstates the number the scan exists to produce.
+        try:
+            guid = discover.find_source_model(client, identifier, owner)
+        except discover.AmbiguousModelName as exc:
+            _refuse(str(exc))
         if not guid:
-            _err(f"warning: no Model named '{identifier}' — not scanned")
+            _err(f"warning: no Model named '{identifier}' owned by this Org — not scanned")
             continue
         resolved.append({"guid": guid, "name": identifier})
     return resolved
@@ -227,13 +242,20 @@ def scan_sets(
          f"{summary['objects_affected']} Answer(s)/Liveboard(s) affected.")
 
 
-def _assert_write_org(profile: Optional[str], org: Optional[str]):
+def _org_client(profile: Optional[str], org: Optional[str]):
     """An org-scoped client whose session is CONFIRMED to be in that Org.
 
-    `auth/token/full` silently ignores a non-numeric `org_identifier` and falls back to
-    the caller's default Org. `audit` tolerates that because a wrong-Org read is
-    recoverable; `apply` cannot -- migrating a tenant's content into the wrong Org while
-    reporting success is this command's worst failure mode.
+    **Every command in this group must go through here, reads included.**
+    `auth/token/full` SILENTLY ignores a non-numeric `org_identifier` and falls back to
+    the caller's default Org, so passing a name straight to `ThoughtSpotClient` reads the
+    wrong Org while reporting success.
+
+    `audit` used to do exactly that on the grounds that a wrong-Org read is recoverable.
+    It is not, in the way that matters: the error surfaces only when a GUID happens to be
+    missing. When it is not -- two Orgs with same-named Models, which is the normal shape
+    of this migration -- the audit succeeds against the wrong Org and emits a plausible
+    `column-mapping.csv` for objects that are not the tenant's. Someone then approves it.
+    (BL-147.)
     """
     from ts_cli.commands.share import _resolve_org_id, assert_org_context
 
@@ -266,7 +288,12 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
     from ts_cli.migrate import discover
     from ts_cli.migrate.apply_plan import validate_apply
 
-    guids_by_name = {n: discover.find_model_by_name(source_client, n) for n in names}
+    owner = discover.owning_org_id(source_client)
+    try:
+        guids_by_name = {n: discover.find_source_model(source_client, n, owner)
+                         for n in names}
+    except discover.AmbiguousModelName as exc:
+        _refuse(str(exc))
     problems = validate_apply(
         rows, blocked_model_guids=blocked,
         model_guids_by_name={k: v for k, v in guids_by_name.items() if v})
@@ -288,6 +315,10 @@ def apply_migration(
     sets_scan: Optional[str] = typer.Option(None, "--sets-scan", help="sets-scan.json from `ts migrate scan-sets`, to refuse Set-blocked Models."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the ordered plan and exit. Nothing is written."),
     resume: bool = typer.Option(False, "--resume", help="Skip steps the state ledger records as done."),
+    allow_unfiltered_target: bool = typer.Option(
+        False, "--allow-unfiltered-target",
+        help="Repoint onto a published Model with NO row-level security. Only for a "
+             "deliberately single-tenant target, or one segmented in the warehouse."),
 ) -> None:
     """Move one tenant's bespoke content onto the governed published Model.
 
@@ -301,11 +332,11 @@ def apply_migration(
     import json as _json
     from pathlib import Path
 
-    from ts_cli.migrate import apply_exec, discover
-    from ts_cli.migrate.apply_plan import (build_apply_plan, connection_action,
-                                           new_ledger, pending_steps, record_completed,
-                                           record_failure, render_plan, validate_apply)
-    from ts_cli.migrate.mapping import read_mapping
+    from ts_cli.migrate import apply_exec, classify, discover
+    from ts_cli.migrate.apply_plan import (build_apply_plan, column_map,
+                                           find_self_repoint, import_mode, new_ledger,
+                                           pending_steps, record_completed,
+                                           record_failure, render_plan)
     from ts_cli.migrate.sets_scan import blocked_model_guids
 
     plan_path = Path(plan_dir)
@@ -315,20 +346,35 @@ def apply_migration(
     if sets_scan:
         blocked = blocked_model_guids(_json.loads(Path(sets_scan).read_text()))
 
-    source_client = _assert_write_org(source_profile, source_org)
-    target_client = _assert_write_org(target_profile, target_org)
+    source_client = _org_client(source_profile, source_org)
+    target_client = _org_client(target_profile, target_org)
 
-    names = {r.model for r in rows}
-    _validate_or_exit(source_client, rows, blocked, sorted(names))
+    names = sorted({r.model for r in rows})
+    _validate_or_exit(source_client, rows, blocked, names)
 
-    scaffolding = discover.scaffolding_objects(source_client, sorted(names))
-    content = discover.bespoke_content(source_client, scaffolding["models"])
-    conn = connection_action(discover.connection_name_of(source_client, scaffolding["tables"]),
-                             discover.connection_names(target_client))
-    conn["provisioned"] = False   # `ts tenancy` provisions it; apply never deletes what it did not create
+    mode = import_mode(source_org, target_org, source_profile, target_profile)
+    try:
+        views, content, shielded, targets = _classify_scope(
+            source_client, target_client, names,
+            exclude_owner_org_id=_target_exclusion(source_client, source_profile,
+                                                   target_profile))
+    except discover.AmbiguousModelName as exc:
+        _refuse(str(exc))
+    if not targets:
+        _err("No published Model in the target Org matches the source Model name(s), "
+             "other than the source Model itself. Publish the master into the target Org "
+             "before migrating content onto it.")
+        raise typer.Exit(code=1)
+    for name in find_self_repoint(targets):
+        _err(f"Refused. '{name}': the migration target is the source Model itself. "
+             f"Repointing content onto the object it is being moved off is a no-op that "
+             f"reports success and moves nothing.")
+        raise typer.Exit(code=1)
 
-    plan = build_apply_plan({"source": source_org or "source", "target": target_org or "target"},
-                            scaffolding, content, rows, conn)
+    plan = build_apply_plan({"source": source_org or "source",
+                             "target": target_org or "target"},
+                            views, content, column_map(rows), targets[0], mode,
+                            shielded=shielded)
     if dry_run:
         print(render_plan(plan))
         _err("Dry run: nothing was changed.")
@@ -337,7 +383,11 @@ def apply_migration(
     state_file = plan_path / "state.json"
     ledger = (_json.loads(state_file.read_text()) if (resume and state_file.exists())
               else new_ledger({"source": source_org, "target": target_org}))
-    ctx = apply_exec.Ctx(source_client, target_client, plan_path, ledger)
+    # Unscoped session for the segmentation check: an Org-scoped variable read returns
+    # only that Org's value, which makes every target look SHARED.
+    ctx = apply_exec.Ctx(source_client, target_client, plan_path, ledger,
+                         allow_unfiltered=allow_unfiltered_target,
+                         unscoped_client=_org_client(target_profile, None))
 
     for step in pending_steps(plan, ledger):
         name = step["step"]
@@ -354,7 +404,50 @@ def apply_migration(
         _err(f"  {name}: done")
 
     print(_json.dumps(ledger, indent=2))
-    _err("Migration complete. Verify the target Org, THEN cut users over.")
+    _err("Migration complete. Verify the target Org as a REAL non-admin user, then cut "
+         "users over.")
+
+
+def _classify_scope(source_client, target_client, model_names, exclude_owner_org_id=None):
+    """Split the scope into Views, chargeable content, SHIELDED content, and targets.
+
+    Shielded content needs no column rewriting -- the View's exposed names do not change.
+    It is returned separately rather than dropped, because in a new-Org run it still has
+    to be MOVED, and omitting it is silent data loss.
+
+    Both lookups are OWNERSHIP-AWARE, not name-only: in a same-Org run the tenant's Model
+    and the published master share a name, so a bare lookup can return the master as the
+    source or the source as the target (BL-152).
+    """
+    from ts_cli.migrate import classify, discover
+
+    owner = discover.owning_org_id(source_client)
+    views, content, shielded, targets = [], [], [], []
+    for name in model_names:
+        source_guid = discover.find_source_model(source_client, name, owner)
+        target_guid = discover.find_target_model(
+            target_client, name,
+            exclude_owner_org_id=exclude_owner_org_id, exclude_guid=source_guid)
+        if target_guid:
+            targets.append({"guid": target_guid, "name": name,
+                            "source_guid": source_guid})
+        if not source_guid:
+            continue
+        deps = discover.dependents_through_views(source_client, source_guid)
+        docs = discover.export_dependents(source_client, deps)
+        refs = [classify.source_refs(d) for d in docs]
+        kinds = {g: classify.kind_of(st) for g, st in discover.subtypes_by_guid(
+            source_client, {r for rs in refs for r in rs}).items()}
+        for dep, ref in zip(deps, refs):
+            item = classify.classify_dependent(dep.get("guid", ""), dep.get("name", ""),
+                                               dep.get("type", ""), ref, kinds)
+            if kinds.get(item["guid"]) == classify.VIEW_BASED:
+                views.append(item)          # the View itself: repoint it
+            elif item["needs_rewrite"]:
+                content.append(item)        # chargeable
+            else:
+                shielded.append(item)       # free to rewrite, but still has to move
+    return views, content, shielded, targets
 
 
 def _delete_in_order(client, ordered) -> List[str]:
@@ -427,7 +520,7 @@ def rollback_migration(
         _err("Dry run: nothing was deleted.")
         return
 
-    client = _assert_write_org(target_profile, target_org)
+    client = _org_client(target_profile, target_org)
     failures = _delete_in_order(client, ordered)
     if failures:
         _err("rollback INCOMPLETE:")

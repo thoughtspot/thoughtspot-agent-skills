@@ -13,11 +13,11 @@ Re-run to refresh. Do not edit manually.
 - **Adding a gate:** add the validator, wire it into `pre-commit.sh` and/or
   `validate.yml`, then re-run this generator.
 
-**39 gates** across pre-commit and CI.
+**40 gates** across pre-commit and CI.
 
 | Runs in | Count |
 |---|---|
-| Pre-commit + CI | 32 |
+| Pre-commit + CI | 33 |
 | Pre-commit only | 6 |
 | CI only | 1 |
 
@@ -46,35 +46,36 @@ Re-run to refresh. Do not edit manually.
 | 19 | `runtime coverage` | check_runtime_coverage.py — validate cross-runtime skill coverage. | Skill files or coverage rule staged (pre-commit, CI) | Runtime coverage — CoCo's divergences are documented in EXPECTED_DIVERGENCES (see .claude/rules/runtime-coverage.md). Runs whenever a skill file is ad | gate | 2026-07-27 |
 | 20 | `secrets` | check_secrets.py — scan staged files for accidental credential exposure. | Every commit (pre-commit, CI) | Always run these — they're fast and catch the most common mistakes | gate | 2026-06-17 |
 | 21 | `no inline tml assembly` | check_skill_cli_usage.py — keep CLI convert skills on `ts tableau build-model`, not hand-rolled inline Python for TML fo... | Convert skill or validator staged (pre-commit, CI) | No inline Python TML assembly — CLI convert skills must use `ts tableau build-model`, not hand-rolled Python heredocs for formula import. Runs when a  | gate | 2026-07-04 |
-| 22 | `flag cross-check` | check_skill_flag_usage.py — fail if a SKILL.md documents a `ts <group> <command> ... --<flag>` invocation whose flag doe... | Skill docs or ts-cli commands staged (pre-commit, CI) | SKILL.md flag cross-check — every `ts <group> <command> --<flag>` a SKILL.md instructs must be a real registered option (audit finding 11.1b). Runs wh | gate | 2026-07-27 |
-| 23 | `skill naming` | check_skill_naming.py — validate skill directory names against the family patterns documented in .claude/rules/skill-nam... | Skill files or naming rule staged (pre-commit, CI) | Skill naming — every skill across all runtimes (Claude / CoCo) must match a documented family pattern (see .claude/rules/skill-naming.md). Runs when a | gate | 2026-07-27 |
-| 24 | `skill versions` | check_skill_versions.py — verify every skill file across all runtimes has a ## Changelog section with at least one valid... | Skill files staged (pre-commit, CI) |  | gate | 2026-07-12 |
-| 25 | `slash-command refs` | check_slash_command_refs.py — fail if a `/ts-<skill>` slash-command mention in skill docs points at a skill directory th... | Agent docs staged (pre-commit, CI) | Slash-command references — every /ts-<skill> mention in agents/ docs must resolve to a real skill directory, or be an explicitly justified planned-ski | gate | 2026-07-12 |
-| 26 | `smoke tests` | check_smoke_tests.py — verify every Claude skill has a smoke test, and vice versa. | Skill or smoke-test files staged (pre-commit, CI) | Smoke tests — every Claude skill (not on the allowlist) must have a smoke test, and non-credential ALLOWLIST exemptions must cite a BL-NNN (audit 6.3) | gate | 2026-07-22 |
-| 27 | `SV YAML structure` | check_sv_yaml.py — validate Snowflake Semantic View YAML structure. | Pattern: `(snowflake-schema|ts-to-snowflake|.yaml$|.yml$)` (pre-commit, CI) | Snowflake SV YAML structural validator — runs when schema or worked-example .md files are staged | gate | 2026-04-19 |
-| 28 | `TML structure` | check_tml.py — validate ThoughtSpot TML structural correctness. | Markdown files staged (pre-commit, CI) | ThoughtSpot TML structural validator — fire on ANY staged .md file. check_tml self-filters: it only validates real Table/Model TML blocks and skips te | gate | 2026-06-13 |
-| 29 | `version sync` | check_version_sync.py — verify __init__.py version matches pyproject.toml. | Every commit (pre-commit, CI) |  | gate | 2026-04-19 |
-| 30 | `YAML blocks` | check_yaml.py — validate all fenced YAML code blocks in .md files parse without error. | Markdown files staged (pre-commit, CI) | Only run YAML check if .md files are staged — checks staged files only, not full repo | gate | 2026-07-12 |
-| 31 | `open items index` | generate_open_items_index.py — scan all open-items.md files and produce a cross-skill index at docs/open-items-index.md. | Open-items files staged (pre-commit, CI) |  | gate | 2026-07-22 |
-| 32 | `parity matrix` | Emit the PARITY.md skill matrix from the filesystem. | Skill files or PARITY.md staged (pre-commit, CI) | Parity matrix — generated from the filesystem, must match committed PARITY.md Runs when any skill file is added/renamed or PARITY.md itself changes | gate | 2026-07-12 |
-| 33 | `quality gates catalog` | generate_quality_gates.py — auto-generate docs/quality-gates.md from the repo's actual quality infrastructure. | Validators or pre-commit infrastructure staged (pre-commit, CI) | Quality gates catalog — re-generated from pre-commit.sh + validate.yml + validator docstrings. Staleness check when any source of truth changes. | gate | 2026-07-22 |
-| 34 | `suggest dependency types` | suggest_dependency_types.py — soft pre-commit nudge for the ts-dependency-manager skill. | Open-items files staged (pre-commit) | ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without also staging references/dependency-types.md. Never blocks. (TTY only) | soft | 2026-06-11 |
-| 35 | `repo changelog` | suggest_repo_changelog.py — interactively propose a CHANGELOG.md entry for significant staged changes. | Every commit (pre-commit, CI) |  | gate | 2026-07-12 |
-| 36 | `suggest skill version` | suggest_skill_version.py — interactively propose a changelog entry for staged SKILL.md changes. | Skill files staged (pre-commit) | Skill versioning — runs when any SKILL.md is touched Step 1: interactively suggest a changelog entry if one is missing (TTY only) Step 2: validate tha | soft | 2026-07-12 |
-| 37 | `unit tests (databricks)` |  | Python files staged (pre-commit) |  | gate |  |
-| 38 | `unit tests (erd)` |  | Python files staged (pre-commit) |  | gate |  |
-| 39 | `unit tests (ts-cli)` |  | Python files staged (pre-commit) |  | gate |  |
+| 22 | `skill context cost` | check_skill_context_cost.py — gate the per-invocation context cost of skills. | Skill files staged (pre-commit, CI) | Skill context cost — a SKILL.md is loaded into context on every invocation; gate its estimated-token size (warn >12k, fail >25k — BL-128 extraction is | gate | 2026-07-28 |
+| 23 | `flag cross-check` | check_skill_flag_usage.py — fail if a SKILL.md documents a `ts <group> <command> ... --<flag>` invocation whose flag doe... | Skill docs or ts-cli commands staged (pre-commit, CI) | SKILL.md flag cross-check — every `ts <group> <command> --<flag>` a SKILL.md instructs must be a real registered option (audit finding 11.1b). Runs wh | gate | 2026-07-27 |
+| 24 | `skill naming` | check_skill_naming.py — validate skill directory names against the family patterns documented in .claude/rules/skill-nam... | Skill files or naming rule staged (pre-commit, CI) | Skill naming — every skill across all runtimes (Claude / CoCo) must match a documented family pattern (see .claude/rules/skill-naming.md). Runs when a | gate | 2026-07-27 |
+| 25 | `skill versions` | check_skill_versions.py — verify every skill file across all runtimes has a ## Changelog section with at least one valid... | Skill files staged (pre-commit, CI) |  | gate | 2026-07-12 |
+| 26 | `slash-command refs` | check_slash_command_refs.py — fail if a `/ts-<skill>` slash-command mention in skill docs points at a skill directory th... | Agent docs staged (pre-commit, CI) | Slash-command references — every /ts-<skill> mention in agents/ docs must resolve to a real skill directory, or be an explicitly justified planned-ski | gate | 2026-07-12 |
+| 27 | `smoke tests` | check_smoke_tests.py — verify every Claude skill has a smoke test, and vice versa. | Skill or smoke-test files staged (pre-commit, CI) | Smoke tests — every Claude skill (not on the allowlist) must have a smoke test, and non-credential ALLOWLIST exemptions must cite a BL-NNN (audit 6.3) | gate | 2026-07-22 |
+| 28 | `SV YAML structure` | check_sv_yaml.py — validate Snowflake Semantic View YAML structure. | Pattern: `(snowflake-schema|ts-to-snowflake|.yaml$|.yml$)` (pre-commit, CI) | Snowflake SV YAML structural validator — runs when schema or worked-example .md files are staged | gate | 2026-04-19 |
+| 29 | `TML structure` | check_tml.py — validate ThoughtSpot TML structural correctness. | Markdown files staged (pre-commit, CI) | ThoughtSpot TML structural validator — fire on ANY staged .md file. check_tml self-filters: it only validates real Table/Model TML blocks and skips te | gate | 2026-06-13 |
+| 30 | `version sync` | check_version_sync.py — verify __init__.py version matches pyproject.toml. | Every commit (pre-commit, CI) |  | gate | 2026-04-19 |
+| 31 | `YAML blocks` | check_yaml.py — validate all fenced YAML code blocks in .md files parse without error. | Markdown files staged (pre-commit, CI) | Only run YAML check if .md files are staged — checks staged files only, not full repo | gate | 2026-07-12 |
+| 32 | `open items index` | generate_open_items_index.py — scan all open-items.md files and produce a cross-skill index at docs/open-items-index.md. | Open-items files staged (pre-commit, CI) |  | gate | 2026-07-22 |
+| 33 | `parity matrix` | Emit the PARITY.md skill matrix from the filesystem. | Skill files or PARITY.md staged (pre-commit, CI) | Parity matrix — generated from the filesystem, must match committed PARITY.md Runs when any skill file is added/renamed or PARITY.md itself changes | gate | 2026-07-12 |
+| 34 | `quality gates catalog` | generate_quality_gates.py — auto-generate docs/quality-gates.md from the repo's actual quality infrastructure. | Validators or pre-commit infrastructure staged (pre-commit, CI) | Quality gates catalog — re-generated from pre-commit.sh + validate.yml + validator docstrings. Staleness check when any source of truth changes. | gate | 2026-07-28 |
+| 35 | `suggest dependency types` | suggest_dependency_types.py — soft pre-commit nudge for the ts-dependency-manager skill. | Open-items files staged (pre-commit) | ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without also staging references/dependency-types.md. Never blocks. (TTY only) | soft | 2026-06-11 |
+| 36 | `repo changelog` | suggest_repo_changelog.py — interactively propose a CHANGELOG.md entry for significant staged changes. | Every commit (pre-commit, CI) |  | gate | 2026-07-12 |
+| 37 | `suggest skill version` | suggest_skill_version.py — interactively propose a changelog entry for staged SKILL.md changes. | Skill files staged (pre-commit) | Skill versioning — runs when any SKILL.md is touched Step 1: interactively suggest a changelog entry if one is missing (TTY only) Step 2: validate tha | soft | 2026-07-12 |
+| 38 | `unit tests (databricks)` |  | Python files staged (pre-commit) |  | gate |  |
+| 39 | `unit tests (erd)` |  | Python files staged (pre-commit) |  | gate |  |
+| 40 | `unit tests (ts-cli)` |  | Python files staged (pre-commit) |  | gate |  |
 
 ## Enforcement model
 
-Gates run in two environments with deliberately different strictness:
+Gates run in two environments; **CI is the hard gate**:
 
 | Environment | Behaviour | Rationale |
 |---|---|---|
-| **Pre-commit (local)** | Hard gate — blocks the commit on failure | The author is present and can fix immediately; fast feedback prevents bad commits from reaching the remote |
-| **CI (`validate.yml`)** | Runs the same checks but **cannot block a merge on its own** — branch protection requires the `validate` status check to pass, yet `--admin` merges bypass it | CI is the safety net, not the primary gate; the tradeoff avoids blocking contributors who lack local tooling |
+| **Pre-commit (local)** | Blocks the commit on failure (bypassable with `--no-verify`) | The author is present and can fix immediately; fast feedback prevents bad commits from reaching the remote |
+| **CI (`validate.yml`)** | **Hard gate** — branch protection requires the `validate` status check, the branch to be up to date with `main` (strict), and applies to admins too (`enforce_admins`); `--admin` merges do NOT bypass it | The backstop that catches `--no-verify` commits and machines without local tooling |
 
-This means enforcement is **inverted from most repos** (which gate hard in CI and soft locally). The accepted tradeoff: a contributor who commits with `--no-verify` can push code that fails CI, but cannot merge to `main` without `--admin` — and `--admin` merges are limited to maintainers who are expected to have run pre-commit locally.
+The one soft edge: the 1-review requirement carries a bypass allowance for the maintainer, so the maintainer's own merges need green CI but not a second reviewer; all other authors need 1 approving review. Nothing bypasses the `validate` check itself. Maintainer merge flow: `gh pr checks <n> --watch`, then `gh pr merge <n> --squash --admin --delete-branch` — `--admin` is what exercises the review bypass on the CLI (a plain merge is refused), but under `enforce_admins` it cannot skip CI or the up-to-date requirement (verified 2026-07-28, PRs #381/#383).
 
 ## Audit review checklist (angle 7)
 

@@ -531,6 +531,7 @@ def build_cmd(
     """
     from ts_cli.alias import (
         translations_to_columns, merge_aliases, build_alias_tml,
+        find_scope_overlaps,
         build_alias_csv, estimate_tml_size,
     )
 
@@ -554,6 +555,18 @@ def build_cmd(
         final_columns = merge_aliases(existing_cols, new_columns)
     else:
         final_columns = new_columns
+
+    # Refuse an ambiguous scope BEFORE emitting anything. A user matching both a
+    # TS_WILDCARD_ALL entry and a group entry for one column sees the BASE column name,
+    # not either alias -- and identical alias values do not help. Nothing downstream
+    # catches it: every entry is valid, the import returns OK, and the export looks right.
+    overlaps = find_scope_overlaps(final_columns)
+    if overlaps:
+        print("Error: overlapping alias scopes -- this would show tenants the BASE column "
+              "name:", file=sys.stderr)
+        for problem in overlaps:
+            print(f"  - {problem}", file=sys.stderr)
+        raise SystemExit(1)
 
     if output_format == "csv":
         csv_out = build_alias_csv(final_columns)
