@@ -132,10 +132,46 @@ Two paths matched a column name exactly but are **user-facing labels, not refere
 `answer.name` also produced 134 *substring* matches (titles like "Sales by Region"), which
 is exactly the class a naive find-and-replace would mangle.
 
-## Views SHIELD the content built on them
+## Views SHIELD the content built on them — PROVEN END TO END
 
-Verified 2026-07-28 on `se-thoughtspot`. A View's output column has **two independent
-fields**, and 9 of 265 inspected columns already diverge:
+Verified 2026-07-28, first on `se-thoughtspot` (the fields are independent) and then
+**functionally** on `nebula-damian-alias` (a real repoint preserves the shield).
+
+### The live repoint test
+
+Built in ORG1: two Models over the same physical column (`Segment` in Model A, `STRING_1`
+in Model B), a View reading Model A's `Segment` but **exposing** it as `MySegment`, and an
+Answer built on the View.
+
+The View was then repointed A → B: `tables[].fqn`, `search_query` and
+`search_output_column` all rewritten. `view_columns[].name` was deliberately left alone.
+
+```
+VIEW after repoint
+  reads from  : T2_ALT_MODEL          <- different Model
+  search_query: [STRING_1] [AMOUNT]   <- different column
+  name='MySegment'   search_output_column='STRING_1'    <- alias SURVIVED
+
+ANSWER on the view (never touched)
+  search_query  : [MySegment] [MyAmount]
+  answer_columns: ['MySegment', 'Total MyAmount']
+```
+
+And it still **returns data**, which is the check that matters — structural survival is not
+functional survival:
+
+```
+VIEW           columns ['MySegment']                    rows Closed Lost / Closed Won / Demo
+ANSWER on view columns ['MySegment', 'Total MyAmount']  rows [Closed Lost, 3949.3], …
+```
+
+The View reads a different Model through a different column name while the untouched Answer
+keeps working. **The shield is real.**
+
+### Why it works
+
+A View's output column has **two independent fields**, and 9 of 265 columns inspected on
+`se-thoughtspot` already diverge in the wild:
 
 ```
 name='LINEAMOUNT'      search_output_column='Total LINEAMOUNT'
@@ -201,9 +237,6 @@ wrong.
 
 ## Open
 
-- Whether `view_columns[].name` can be left unchanged **through an actual repoint** is
-  inferred from the two fields being independent (proven) rather than demonstrated
-  end-to-end. Worth one live test before relying on it.
 - **Answers** were scanned only as nested Liveboard visualizations. A standalone Answer is
   the same shape, but confirm.
 - Whether `custom_name` should be rewritten at all. It is a user-supplied override, so it
