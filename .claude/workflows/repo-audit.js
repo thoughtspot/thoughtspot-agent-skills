@@ -43,12 +43,14 @@ const PLATFORMS = [
 
 // Angles that are MANUAL in the rubric and re-examined only on a full sweep (the rest
 // are continuous validators — no point re-running them here).
+// `effort` tiers the finder's reasoning cost (.claude/rules/model-routing.md): 'low' for
+// mechanical grep/diff-shaped angles; omit for angles that need real judgment.
 const INTERNAL_ANGLES = [
-  { key: 'dead-files', n: 1, prompt: 'Find legacy/dead files: untracked build artifacts, orphaned directories, files referenced nowhere, stale docs. Use git + grep.' },
+  { key: 'dead-files', n: 1, effort: 'low', prompt: 'Find legacy/dead files: untracked build artifacts, orphaned directories, files referenced nowhere, stale docs. Use git + grep.' },
   { key: 'tools-quality', n: 4, prompt: 'Review tools/ (ts-cli, validate, smoke-tests) for code health: dead code, missing error handling, duplicated logic, brittle parsing.' },
   { key: 'ts-cli-gaps', n: 5, prompt: 'Find operations skills need but the ts CLI lacks, and any inline `requests` calls in agents/cli/ SKILL.md files (anti-pattern per .claude/rules/ts-cli.md).' },
   { key: 'testing-value', n: 6, prompt: 'Assess whether tests assert real behaviour vs presence-only; whether smoke tests exercise meaningful paths. Name weak/missing coverage by file.' },
-  { key: 'pr-validation', n: 7, prompt: 'Compare scripts/pre-commit.sh against .github/workflows/validate.yml: any gate that runs in one but not the other, or is bypassable. Read both.' },
+  { key: 'pr-validation', n: 7, effort: 'low', prompt: 'Compare scripts/pre-commit.sh against .github/workflows/validate.yml: any gate that runs in one but not the other, or is bypassable. Read both.' },
   { key: 'codification', n: 11, prompt: 'Find repeated skill logic across agents/cli/*/SKILL.md that should become a ts CLI command, a shared reference, or a validator.' },
 ]
 
@@ -181,11 +183,12 @@ for (const p of PLATFORMS) {
 }
 // Angle 14, 16 — always part of the external sweep
 finders.push(() => agent(PERF_PROMPT, { label: 'performance', phase: 'Survey', schema: FINDINGS_SCHEMA }))
-finders.push(() => agent(DEPS_PROMPT, { label: 'dependencies', phase: 'Survey', schema: FINDINGS_SCHEMA }))
+// Dependency currency is mechanical (read pyproject, check advisories) — low effort suffices.
+finders.push(() => agent(DEPS_PROMPT, { label: 'dependencies', phase: 'Survey', schema: FINDINGS_SCHEMA, effort: 'low' }))
 // Internal angles — full scope only
 if (scope === 'full') {
   for (const a of INTERNAL_ANGLES) {
-    finders.push(() => agent(internalPrompt(a), { label: `internal:${a.key}`, phase: 'Survey', schema: FINDINGS_SCHEMA }))
+    finders.push(() => agent(internalPrompt(a), { label: `internal:${a.key}`, phase: 'Survey', schema: FINDINGS_SCHEMA, ...(a.effort ? { effort: a.effort } : {}) }))
   }
   // Angle 17 — max /code-review backstop over the delta (full scope only).
   finders.push(() => agent(CODE_REVIEW_PROMPT, { label: 'code-review:delta', phase: 'Survey', schema: FINDINGS_SCHEMA, effort: 'max' }))

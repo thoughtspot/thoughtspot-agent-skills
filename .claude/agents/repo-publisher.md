@@ -1,6 +1,7 @@
 ---
 name: repo-publisher
 description: Commit, push to GitHub, and sync changed CoCo/shared files to the Snowflake stage — atomically, in the correct order. Use this instead of running git and stage-sync manually to avoid partial publishes.
+model: sonnet
 ---
 
 # Repo Publisher

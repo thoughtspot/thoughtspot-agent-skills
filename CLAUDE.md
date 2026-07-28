@@ -37,6 +37,7 @@ or patch files there directly.
 | `.mcp.json` (MCP server wiring) or `.claude/rules/api-research.md` | Update the other if precedence/usage rules change; check that `CLAUDE.md` "open-items.md pattern" and `.claude/rules/ts-cli.md` (v1 migration trigger, "When a skill needs an API call") still reference the rule correctly |
 | ts-dependency-manager: changes to Step 4 walking, Step 5 impact-report, or any open-items.md status | Also update agents/cli/ts-dependency-manager/references/dependency-types.md (status table, hierarchy, or sample output as relevant) — these must stay in sync; pre-commit prompts soft when one changes without the other |
 | ts-convert-* skill: new mapped/unmapped construct | Update `references/coverage-matrix.md` in that skill (pre-commit validator `check_coverage_matrix.py` enforces existence) |
+| Add a new agent (`.claude/agents/`) or workflow stage (`.claude/workflows/`) | Assign a model/effort tier per `.claude/rules/model-routing.md` and record it in that rule's table |
 
 If this map is getting outdated, update the table — do not prompt the author to check manually.
 
