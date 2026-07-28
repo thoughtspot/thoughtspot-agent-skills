@@ -4103,3 +4103,63 @@ original spike, deferred for its own verification. It is now worth taking seriou
 **Do not attempt a quick fix.** This is reference-resolution behaviour that has already
 produced one wrong assumption (a guard that could never fire, BL-144's mitigation), and
 each candidate needs its own live verification before being built.
+
+---
+
+## BL-149 -- `search_query` propagates ASYNCHRONOUSLY after a column rename `Tier 1`
+
+**Filed:** 2026-07-28.
+**Source:** live on `nebula-damian-alias`, testing the rename cascade the whole migration
+architecture rests on. Raised by the repo owner from field experience, then reproduced.
+
+Renaming a Model column updates a dependent Answer's fields at **different times**:
+
+| Field | Immediately after the rename | Next read |
+|---|---|---|
+| `answer_columns[].name` | new name | new name |
+| `table.table_columns[].column_id` | new name | new name |
+| `search_query` | **OLD name (stale)** | new name |
+
+Reproduced in both directions (rename, then revert). It does converge -- this is a lag,
+not a permanent failure.
+
+### Why Tier 1
+
+The migration's `rename` step is immediately followed by steps that **export** content. An
+export taken in that window produces a TML that is **internally inconsistent**: the column
+lists carry the new name while `search_query` still carries the old one.
+
+That TML then fails on import, or worse mis-binds -- and `search_query` correctness before
+import is already a hard constraint (memory `feedback_ts_tml_import_constraints`). The
+failure mode is a half-correct document that looks plausible in review.
+
+### What this corrects
+
+The 2026-07-15 verification concluded that a rename "auto-propagates to dependent
+Answers/Liveboards", and the design's O(columns)-not-O(objects) claim rests on it. That
+test only inspected a **formula** field, which updates synchronously. It saw the half that
+works.
+
+The claim survives, narrowed: propagation is real, but it is not atomic, and nothing in the
+API response signals when it has completed. `diff: {columns_updated: 1}` is returned before
+`search_query` has caught up.
+
+### Also established: content TML has NO physical anchor
+
+A Liveboard references columns purely by display name -- `search_query` tokens,
+`answer_columns[].name`, and `table_columns[].column_id`, where `column_id` is the **display
+name**, not a `TBL::COL` binding. Only `tables[].fqn` (the data-source GUID) is stable.
+
+This is why the rename has to be relied on at all: there is no id-based path.
+
+### Options
+
+| Option | Note |
+|---|---|
+| Rewrite `search_query` deterministically after the rename, rather than trusting the cascade | Deterministic and testable, and the repo already prefers codified transforms over waiting. Costs a per-object edit, but only to one field |
+| Poll each content object until its export is self-consistent (`search_query` tokens all present in `answer_columns`) | No rewriting, but unbounded wait and a fuzzy stop condition |
+| Re-export content in a later pass, well after the rename | Simplest, but "well after" is not a specification |
+
+The first looks strongest, and it composes with **BL-148**: content has to be rewritten for
+the data-source reference anyway, so `search_query` becomes one more field in the same pass
+rather than a separate mechanism.
