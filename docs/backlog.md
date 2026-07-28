@@ -4476,3 +4476,89 @@ no stderr diagnostic, and returns 5 rows showing `MIGTEST_VIEWERS` with `READ_ON
 `guest1`/`guest4` inheriting it. The three regression tests were confirmed to **fail against
 the old behaviour** (with `__pycache__` cleared, after a stale `.pyc` briefly made a restored
 file look broken).
+
+---
+
+## BL-154 -- Phase D's four residual verification gaps `Tier 2`
+
+**Filed:** 2026-07-28.
+**Source:** written up at the repo owner's request when pausing the migration work, so the
+gaps are tracked rather than living in a conversation.
+**Status:** OPEN. **The code is built and Phase D is functionally complete** -- these are
+paths that have not been *exercised*, which is a different and lesser thing than unbuilt.
+
+Filed as one item rather than four because they share a cause: each needs cluster or fixture
+state that does not exist yet, and they would be scheduled together in one session with the
+right environment.
+
+| Gap | What is verified today | What it needs | Risk if wrong |
+|---|---|---|---|
+| **Same-Org `apply` (the WRITE)** | `audit` and the full `--dry-run` plan, live (BL-152 record) | The repo owner's go-ahead -- it rewrites ORG1 in place, and ORG1 is the source side of the fixture that has caught six real bugs | An in-place `--no-create-new` import of rewritten content behaving unlike the create-fresh path |
+| **Published Model WITH RLS** | Only the **refusal** path of the tenant-isolation check | An RLS rule on the master -- which runs straight into **BL-144**, where a column-less RLS expression imports `OK` and silently WIPES existing rules | The happy path is the one every real tenant takes, and it is the security-shaped one |
+| **`client_state_v2` rewriting** | The parse-rewrite-reserialise transform, by unit test over a hand-built blob | A chart **customised in the UI** -- a TML-created chart carries no such blob at all, so the path cannot be reached from fixtures the tooling builds | A substring pass over that blob corrupts unrelated chart state; the rewrite parses it precisely to avoid that, and the precision is what is untested |
+| **Cross-cluster topology** | `import_mode` derives it, and the Org-id exclusion is deliberately skipped there (BL-152) | A second cluster with the master published on it | Org ids are meaningless across clusters and `Primary` is `0` on both, so the fallback is GUID exclusion alone |
+
+Also unverified, and much smaller: **that ORG2's pre-existing aliases still RENDER** after a
+later wave's merge. Their presence in the stored document is proven by round-trip export
+(`2026-07-28-ts-migrate-wave-aliases.md` §4); nobody has looked in an ORG2 session. ORG1's
+render **is** confirmed, so the mechanism works -- this is the preservation half's last inch.
+
+### Why this is Tier 2 rather than Tier 1
+
+Nothing here is known-broken. But note what the session that produced Phase D actually shows:
+**every real bug in it was found by running something, and none by reasoning or unit tests** --
+two Tier 1 defects (BL-150, BL-152) that unit tests passed straight through, both silent
+successes. So "built and unit-tested" has a measured track record here, and it is not good.
+These four are where the next one would be.
+
+---
+
+## BL-155 -- the security spec's Phase D additions are still unbuilt `Tier 2`
+
+**Filed:** 2026-07-28.
+**Source:** carried forward from `docs/superpowers/specs/2026-07-26-ts-security-sharing-design.md`
+§5, which lists migration-side work that Phase D did not include.
+**Status:** OPEN, and genuinely unbuilt -- distinct from BL-154, which is untested-but-built.
+
+Three pieces:
+
+1. **A `CSR_BLOCKER` audit status.** A tenant table carrying Column Security Rules cannot be
+   migrated blindly: **CSR is scoped to the Org it was defined in and does NOT travel with
+   publication** (live-verified 2026-07-27 -- the owning Org's update succeeds and is enforced
+   there, while a tenant Org the table is published to keeps the restricted column fully
+   visible). So a migration that moves content onto a published master silently *widens* column
+   access. `audit` should classify and refuse it the way it refuses `SET_BLOCKER`.
+2. **`--csr map-to-cls`.** The mechanism is chosen by AUDIENCE per (Org, object), so migrating
+   onto a published master can require translating CSR to column-level sharing. `ts security
+   column-rules` and `ts share` both exist; what is missing is the migration-time translation.
+3. **CSR TML preservation.** CSR exports as a sibling TML document (`column_security_rules`),
+   exactly like `column_alias`. The rewrite does not carry it, so a migrated table would lose
+   its rules -- the same class of silent loss as BL-150's sharing, reached from a different
+   direction.
+
+**Why it matters:** every failure mode here is a column becoming *more* visible, silently.
+That is the one direction a security change must never drift in by accident.
+
+---
+
+## BL-156 -- two command modules crossed the file-size warn line `Tier 3`
+
+**Filed:** 2026-07-28.
+**Status:** OPEN. Advisory only -- the gate warns at 500 and fails at 1000, and 30 modules
+already warn.
+
+| Module | Lines | Was |
+|---|---|---|
+| `commands/migrate.py` | 654 | 487 before BL-152 |
+| `commands/share.py` | 516 | 484 before BL-153 |
+
+Both crossed while fixing Tier 1/2 bugs, and in both cases the added lines are mostly the
+"why" comments that record what the bug was -- trimming them to get under the line would
+delete the thing worth keeping.
+
+**The established pattern is a module-per-concern split, not shorter comments.**
+`share_planning.py` was already split out of `share.py` under this same gate, and
+`publish_planning.py` out of `publish.py`. `commands/migrate.py` has the same natural seam:
+read-only `audit` / `scan-sets` / `aliases` in one module, destructive `apply` / `rollback` in
+the other. Doing it needs care rather than effort -- the last two renderer patches in this
+family landed in dead code paths because a refactor had moved the live one.
