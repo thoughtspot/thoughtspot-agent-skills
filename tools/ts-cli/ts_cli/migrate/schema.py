@@ -45,3 +45,7 @@ class ModelComparison:
     rows: List[ColumnMappingRow]
     dependents: List[dict] = field(default_factory=list)
     readiness: str = NEEDS_MAPPING
+    # What each dependent SITS ON, and what that costs. Content on a View is free, so the
+    # rewrite count and the object count differ -- often by a lot.
+    effort: dict = field(default_factory=dict)
+    classified_dependents: List[dict] = field(default_factory=list)

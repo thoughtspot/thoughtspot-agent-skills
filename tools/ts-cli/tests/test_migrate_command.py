@@ -25,18 +25,27 @@ ANSWER_EDOC = json.dumps({"guid": "ans-1", "answer": {"name": "A1", "search_quer
 @patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
 @patch("ts_cli.commands.migrate.ThoughtSpotClient")
 def test_audit_writes_mapping_and_flags_blocker(mock_cls, _rp, _deps, tmp_path):
-    # source client export: model, then the dependent answer (for used-column scan)
+    # Dispatch on the ENDPOINT rather than a fixed call order: the audit's call sequence
+    # legitimately changes (it grew a transitive dependent walk), and a positional
+    # side_effect list turns that into a spurious test failure rather than a real one.
+    exports = iter([[{"edoc": MODEL_EDOC}], [{"edoc": ANSWER_EDOC}]])
+
+    def src_post(path, json=None, **kw):
+        if "tml/export" in path:
+            return MagicMock(json=lambda: next(exports, []))
+        return MagicMock(json=lambda: [])      # searches: no further dependents/subtypes
+
     src = MagicMock()
-    src.post.side_effect = [
-        MagicMock(json=lambda: [{"edoc": MODEL_EDOC}]),   # export_parsed(mg) -- reused by model_columns via doc=
-        MagicMock(json=lambda: [{"edoc": ANSWER_EDOC}]),  # used_column_names -> single batched dependent export
-    ]
+    src.post.side_effect = src_post
     # target client: find_model_by_name (search), then model_columns export
+    def tgt_post(path, json=None, **kw):
+        if "tml/export" in path:
+            return MagicMock(json=lambda: [{"edoc": TGT_EDOC}])
+        return MagicMock(json=lambda: [{"metadata_id": "tgt-1", "metadata_name": "Sales",
+                                        "metadata_type": "LOGICAL_TABLE"}])
+
     tgt = MagicMock()
-    tgt.post.side_effect = [
-        MagicMock(json=lambda: [{"metadata_id": "tgt-1", "metadata_name": "Sales", "metadata_type": "LOGICAL_TABLE"}]),
-        MagicMock(json=lambda: [{"edoc": TGT_EDOC}]),
-    ]
+    tgt.post.side_effect = tgt_post
     mock_cls.side_effect = [src, tgt]
 
     result = runner.invoke(app, [
