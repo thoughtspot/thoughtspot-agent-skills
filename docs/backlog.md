@@ -4352,7 +4352,7 @@ name-only assumption:
 
 | Where | What went wrong |
 |---|---|
-| `audit --all-models` | Swept the published master in as a *source* Model, auditing it against itself alongside the tenant's real Models |
+| `audit --all-models` | Swept the published master in as a *source* Model, auditing it against itself. **Measured on ORG1: 12 Models visible, 5 owned** -- the other seven were the master and **six ThoughtSpot system worksheets** (`TS: BI Server`, `Falcon_Monitor_Data_Load_360`, `Credit Usage Worksheet`, ...), all of which landed in the `column-mapping.csv` a human is asked to approve |
 | `_classify_scope` (`apply`) | The **source** lookup could equally return the master, so `apply` would migrate the master's own dependents and rename its columns |
 | `scan-sets --model <name>` | Could report the master as the tenant's Set blocker, overstating the one number that command exists to produce |
 

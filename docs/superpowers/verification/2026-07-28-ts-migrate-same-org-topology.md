@@ -65,6 +65,30 @@ and exactly what the self-pairing hid.
 
 ---
 
+## 2b. The `--all-models` half, measured
+
+`--all-models` had the same name-only assumption from the other direction — it swept up
+everything *visible* rather than everything *owned*. On ORG1:
+
+```
+VISIBLE in ORG1 : 12
+OWNED by ORG1   :  5
+excluded: T2_PUBLISH_MODEL                 2a743be3-...   <- the published master
+excluded: TS: BI Server                    eaab6de7-...
+excluded: TS: Embrace Stats Worksheet v2   11272afa-...
+excluded: Falcon_Monitor_Data_Load_360     180211d5-...
+excluded: Credit Usage Worksheet           7209d203-...
+excluded: Credits Purchased                82da8e20-...
+excluded: Product Usage                    9a527010-...
+```
+
+Worse than the single self-pairing: **six ThoughtSpot system worksheets** were being audited
+as tenant migration candidates, and their columns landed in the `column-mapping.csv` a human
+is asked to approve. `--all-models` now audits the 5 ORG1-owned Models, and the master is not
+among them.
+
+---
+
 ## 3. The plan, with the mapping filled in
 
 `Segment → STRING_1`, `Order Date → DATE_1`, then `apply --dry-run`:
