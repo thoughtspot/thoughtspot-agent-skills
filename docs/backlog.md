@@ -3357,7 +3357,10 @@ section near the top of each missing skill. Verify by an agent run keeping `read
 **Source:** 2026-07-23 benchmark; PR #314 (tableau 4,436 → ~2,900 lines).
 **Affects:** `ts-convert-from-looker` (1,834), `ts-convert-from-snowflake-sv` (1,341),
 `ts-convert-from-databricks-mv` (997) SKILL.md.
-**Status:** OPEN.
+**Status:** IN PROGRESS — looker done 2026-07-28 (~21.0k → ~11.9k est. tokens, 8 new
+references/step-*.md files, no logic change; `check_skill_context_cost` warning cleared).
+Remaining: snowflake-sv, databricks-mv. The gate introduced 2026-07-28 (PR #385) now
+enforces the ceiling this entry was filed for.
 
 SKILL.md size is a per-run token tax (the file is read every run, sometimes in multiple slices). PR #314
 cut tableau ~34% by moving reference-heavy detail (templates, rule tables, report formats) into
