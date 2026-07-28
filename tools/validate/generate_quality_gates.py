@@ -423,25 +423,28 @@ def generate_catalog(repo_root: Path) -> str:
 
     lines.append("")
 
-    # Enforcement model section (audit finding 7.3)
+    # Enforcement model section (audit finding 7.3; CI-hard since 2026-07 — see
+    # branch protection on main: enforce_admins=true, required check `validate`,
+    # strict up-to-date, 1 review with a maintainer bypass allowance)
     lines.extend([
         "## Enforcement model",
         "",
-        "Gates run in two environments with deliberately different strictness:",
+        "Gates run in two environments; **CI is the hard gate**:",
         "",
         "| Environment | Behaviour | Rationale |",
         "|---|---|---|",
-        "| **Pre-commit (local)** | Hard gate — blocks the commit on failure | "
+        "| **Pre-commit (local)** | Blocks the commit on failure (bypassable with `--no-verify`) | "
         "The author is present and can fix immediately; fast feedback prevents bad commits from reaching the remote |",
-        "| **CI (`validate.yml`)** | Runs the same checks but **cannot block a merge on its own** — "
-        "branch protection requires the `validate` status check to pass, yet `--admin` merges bypass it | "
-        "CI is the safety net, not the primary gate; the tradeoff avoids blocking contributors who lack local tooling |",
+        "| **CI (`validate.yml`)** | **Hard gate** — branch protection requires the `validate` status check, "
+        "the branch to be up to date with `main` (strict), and applies to admins too (`enforce_admins`); "
+        "`--admin` merges do NOT bypass it | "
+        "The backstop that catches `--no-verify` commits and machines without local tooling |",
         "",
-        "This means enforcement is **inverted from most repos** (which gate hard in CI "
-        "and soft locally). The accepted tradeoff: a contributor who commits with "
-        "`--no-verify` can push code that fails CI, but cannot merge to `main` without "
-        "`--admin` — and `--admin` merges are limited to maintainers who are expected "
-        "to have run pre-commit locally.",
+        "The one soft edge: the 1-review requirement carries a bypass allowance for the "
+        "maintainer, so solo merges need green CI but not a second reviewer. Nothing "
+        "bypasses the `validate` check itself. Merge flow: `gh pr checks <n> --watch`, "
+        "then `gh pr merge <n> --squash --delete-branch` (no `--admin` — it has no "
+        "effect under `enforce_admins` and masks the real failure when CI is red).",
         "",
     ])
 

@@ -44,8 +44,9 @@ If this map is getting outdated, update the table — do not prompt the author t
 ## Commit + deploy protocol
 
 **Never push directly to `main`.** All changes — including hotfixes and docs-only edits —
-must go through a pull request. `main` has branch protection; direct pushes bypass it and
-skip review.
+must go through a pull request. `main` has branch protection with `enforce_admins`: the
+`validate` CI check and an up-to-date branch are required to merge, admins included —
+`--admin` does not bypass it (see docs/quality-gates.md "Enforcement model").
 
 Workflow for every change:
 1. Work on a feature or wip branch (`feat/<slug>` or `wip/<skill>`)
