@@ -64,6 +64,11 @@ FAMILY_PATTERNS: dict[str, tuple[re.Pattern, str]] = {
         "cross-object, cross-Org security configuration that CHOOSES between "
         "mechanisms: ts-security-{aspect}",
     ),
+    "ts-migrate-*": (
+        re.compile(r"ts-migrate-[a-z][a-z0-9]*"),
+        "move an existing estate onto a new platform pattern, retiring the old "
+        "one: ts-migrate-{destination-class}",
+    ),
     "ts-recipe-*": (
         re.compile(r"ts-recipe-(formula|answer|liveboard|model)-[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*"),
         "analytical recipe: ts-recipe-{ts-artifact-type}-{concept}[-{platform}]",

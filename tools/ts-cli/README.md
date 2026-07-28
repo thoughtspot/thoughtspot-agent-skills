@@ -3564,3 +3564,132 @@ the planning decisions in-process.
 users are the same operation — but production onboarding is usually *partial* (the Org is
 created, users arrive via SSO), and selective application (`--only orgs,groups`) plus a
 wrapping skill are tracked in BL-143, not implemented here.
+
+---
+
+## `ts migrate scan-sets` — Phase 0: which tenants are blocked by Sets
+
+**Read-only, and needs no target Org**, so it runs before any clean Org exists.
+
+Before planning a migration wave — or committing to build Phase 2 at all — the programme
+needs one number: **how many tenants actually use Sets.** That answer decides whether Sets
+support gates the whole programme or is a tail of stragglers. This command produces it.
+
+```bash
+ts migrate scan-sets --all-models --source-profile prod
+ts migrate scan-sets --source-org ORG1 --source-org ORG2 --all-models -o ./scan/ -p prod
+ts migrate scan-sets --models-file candidates.csv --source-profile prod
+```
+
+### Why Sets block
+
+Verified live 2026-07-26. Three facts:
+
+1. A Set creates a `LOGICAL_COLUMN` of subtype `COHORT_*` **owned by the Model**.
+2. It **does not appear in the Model's TML at all**.
+3. It **blocks publishing** the Model and every Answer and Liveboard on it, used or not.
+
+Fact 2 is the dangerous one, and it dictates the implementation: because the column is
+invisible in TML, a lift-and-shift would **silently drop** Sets rather than fail. So the
+scan queries `metadata/search` for `COHORT_*` subtypes — a TML inspection reports a clean
+Model that is in fact blocked.
+
+### Output
+
+`sets-scan.json` and `sets-scan.md`, carrying the **denominator** as well as the count:
+"three blocked Orgs" is not a decision, "three of twelve" is.
+
+The per-object detail is the point. "Blocked" alone is a dead end; "blocked by these four
+Answers" is something a tenant can act on — some Set-based content is stale, or rebuilds
+trivially as a filter, and retiring it turns a blocked tenant into a migratable one
+without waiting for the platform.
+
+```json
+{"scanned": {"orgs": 12, "models": 340},
+ "summary": {"orgs_blocked": 3, "models_blocked": 4, "objects_affected": 17},
+ "blocked": [{"org": "Tenant1", "model": "Sales", "model_guid": "...",
+              "cohort_columns": [{"name": "RSET_QTY_BINS", "guid": "..."}],
+              "dependents": [{"type": "ANSWER", "name": "Q4 cohort view", "guid": "..."}]}]}
+```
+
+### What happens to a blocked tenant
+
+`ts migrate apply` **refuses** any Model carrying a cohort column, with **no override
+flag** — silently leaving content behind is precisely the failure mode fact 2 already
+makes likely. A blocked tenant retires the dependent content, rebuilds it, or waits for
+Sets support on published objects (expected roughly 3–6 months from 2026-07).
+
+Set usage is a **risk class in the batching strategy**, not a stop on the programme:
+low-risk tenants migrate now, Sets-using tenants form a later batch.
+
+### Cost
+
+One `LOGICAL_COLUMN` search per Org, sliced per Model — deliberately not one call per
+Model, because being cheap enough to run fleet-wide is the command's whole justification.
+Dependents are walked only for Models that actually carry a cohort column.
+
+---
+
+## `ts migrate apply` / `rollback` — Phase 2: move one tenant onto the published Model
+
+Runs the **per-tenant** half of the migration. Cutover is deliberately *not* included:
+users move only once the Org has been verified in its final state, and until then the
+rollback is the untouched source Org.
+
+```bash
+# ALWAYS read the plan first — every step is destructive in someone's Org
+ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan --dry-run
+
+ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan \
+  --sets-scan ./scan/sets-scan.json
+ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan --resume
+```
+
+`--plan-dir` holds the approved `column-mapping.csv` from `ts migrate audit`, and
+receives `backup/` and the `state.json` ledger.
+
+### The step order, and why it is what it is
+
+| # | Step | Why here |
+|---|---|---|
+| 1 | `backup` | Nothing is written before a complete copy exists. All-or-nothing: a partial backup reads as a safety net that is not there |
+| 2 | `lift_scaffolding` | Tables + Models as **one batch**, so intra-batch references remap on import |
+| 3 | `lift_content` | Views → Answers → Liveboards; references only remap for objects already in the batch |
+| 4 | `rename` | Once per column, cascading to every dependent automatically — O(columns), not O(objects) |
+| 5 | `repoint` | A 1:1-by-name match, which only works *after* the rename aligned the names |
+| 6 | `cleanup_models` | Before Tables. **A refusal here is the check working** — see below |
+| 7 | `cleanup_tables` | Before the connection |
+| 8 | `cleanup_connection` | Last: connection deletion does **not** cascade to its Tables |
+
+### Two behaviours that look like errors and are not
+
+**A scaffolding Model that refuses to delete is a missed repoint.** By step 6 nothing
+should reference the scaffolding. A Model with dependents means content was left behind,
+and forcing past the refusal orphans it. This is the reason cleanup is surgical rather
+than a wholesale Org delete, which would take the un-repointed content silently.
+
+**An RLS rule is re-read after any write that touches a table carrying one.** A malformed
+`rls_rules` block imports with `status_code: OK`, is discarded, *and destroys the rule
+already on the table* (**BL-144**) — silent in the direction that removes security. `OK`
+is never sufficient evidence here.
+
+### Connection handling
+
+Connection names are **per-Org**, so the target Org can hold a connection named exactly
+as the source's — and then every lifted Table's `connection` block resolves unchanged.
+A different name is not fatal: `apply` rewrites one field per Table. No connection at all
+*is* fatal, because publishing a Table into an Org does not grant that Org a usable
+connection; provision it with `ts tenancy` first.
+
+### Rollback
+
+```bash
+ts migrate rollback --target-org "ACME NEW" -d ./plan --dry-run
+ts migrate rollback --target-org "ACME NEW" -d ./plan
+```
+
+Deletes what the ledger records this run as creating, in the safe order (content →
+Models → Tables). **The source Org is never touched** — `apply` leaves it untouched
+precisely so rollback never has to restore into it. Before cutover the target Org holds
+nothing but this migration's output, so abandoning the whole attempt is better served by
+deleting the Org outright (`ts tenancy teardown`).
