@@ -462,6 +462,11 @@ def run_share_grants(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
         print("  share_grants: no group grants on the source objects -- nothing to "
               "re-establish", file=__import__("sys").stderr)
         return {}
+    # The UNION of the tenant's groups -- correct for the SHARED STACK only (every group
+    # needs the whole Table -> Model -> View chain, or its content grant is silently
+    # dropped). Content gets its own source object's groups, never the union: an Answer
+    # shared only with Finance must not become visible to HR because some other migrated
+    # object was (audit 2026-07-29 finding 17.5).
     groups = sorted({g for gs in wanted.values() for g in gs})
 
     target = step.get("target") or {}
@@ -474,13 +479,32 @@ def run_share_grants(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
     stack += [{"guid": guid, "type": "LOGICAL_TABLE"}
               for guid in sorted(ctx.created(STEP_REWRITE_VIEWS).values())]
     created = {**ctx.created(STEP_REWRITE_CONTENT), **ctx.created(STEP_MOVE_SHIELDED)}
-    content = [{"guid": guid, "type": _type_of(objects, name)}
+    # (item, groups-for-item): the stack takes the union; each content object takes
+    # exactly its own source object's groups, matched by name -- `wanted` and `created`
+    # are both keyed by object name.
+    grants = [(item, groups) for item in stack]
+    grants += [({"guid": guid, "type": _type_of(objects, name)}, wanted.get(name) or ())
                for name, guid in sorted(created.items())]
 
-    failures, applied = [], 0
-    for item in stack + content:
-        for group in groups:
-            resp = ctx.target.post(
+    failures, applied = _apply_grants(ctx.target, grants)
+    if failures:
+        raise StepFailed(
+            f"applied {applied} grant(s), but these failed: {', '.join(failures)}. "
+            f"Groups are PER-ORG principals, so the target Org needs a group of each name "
+            f"(provision it with `ts tenancy`)")
+    print(f"  share_grants: {applied} grant(s) across {len(stack)} stack object(s) and "
+          f"{len(created)} content object(s)", file=__import__("sys").stderr)
+    return {}
+
+
+def _apply_grants(client, grants) -> "tuple[List[str], int]":
+    """Apply `(item, groups)` READ_ONLY grants, collecting failures rather than
+    stopping -- an aborted grant pass strands every layer after it."""
+    failures: List[str] = []
+    applied = 0
+    for item, item_groups in grants:
+        for group in item_groups:
+            resp = client.post(
                 "/api/rest/2.0/security/metadata/share", raise_for_status=False,
                 json={"metadata_type": item["type"],
                       "metadata_identifiers": [item["guid"]],
@@ -493,15 +517,7 @@ def run_share_grants(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
                 failures.append(f"{item['guid']} -> {group} (HTTP {resp.status_code})")
             else:
                 applied += 1
-
-    if failures:
-        raise StepFailed(
-            f"applied {applied} grant(s), but these failed: {', '.join(failures)}. "
-            f"Groups are PER-ORG principals, so the target Org needs a group of each name "
-            f"(provision it with `ts tenancy`)")
-    print(f"  share_grants: {applied} grant(s) across {len(stack)} stack object(s) and "
-          f"{len(content)} content object(s)", file=__import__("sys").stderr)
-    return {}
+    return failures, applied
 
 
 def _type_of(objects: List[Dict[str, Any]], name: str) -> str:

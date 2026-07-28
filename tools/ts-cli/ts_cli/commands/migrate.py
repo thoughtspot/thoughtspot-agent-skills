@@ -294,6 +294,16 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
                          for n in names}
     except discover.AmbiguousModelName as exc:
         _refuse(str(exc))
+    if blocked is None:
+        # No --sets-scan supplied, so apply scans itself. Cohort columns are invisible
+        # in the Model's TML and the audit never queries LOGICAL_COLUMN, so without
+        # this a bare apply proceeds and drops the tenant's Sets silently -- exactly
+        # what the documented "refuses, no override" contract promises cannot happen
+        # (audit 2026-07-29 finding 17.6). One search for the whole Org.
+        from ts_cli.migrate import sets_scan
+        blocked = set(sets_scan.extract_cohort_columns(
+            discover.all_cohort_column_rows(source_client),
+            [g for g in guids_by_name.values() if g]))
     problems = validate_apply(
         rows, blocked_model_guids=blocked,
         model_guids_by_name={k: v for k, v in guids_by_name.items() if v})
@@ -342,7 +352,9 @@ def apply_migration(
     plan_path = Path(plan_dir)
     rows = _load_mapping_or_exit(plan_path)
 
-    blocked = set()
+    # None (not empty) when no scan file was given: _validate_or_exit then runs the
+    # cohort scan itself rather than treating "not scanned" as "not blocked".
+    blocked = None
     if sets_scan:
         blocked = blocked_model_guids(_json.loads(Path(sets_scan).read_text()))
 
