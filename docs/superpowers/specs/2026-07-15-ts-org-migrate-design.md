@@ -6,6 +6,15 @@
 
 ---
 
+> **SUPERSEDED for Phase 2 (2026-07-28).** The lift-and-shift architecture below is
+> replaced by
+> [`2026-07-28-ts-migrate-orgs-rewrite-design.md`](2026-07-28-ts-migrate-orgs-rewrite-design.md):
+> content is **rewritten** (data-source reference + column names) rather than bound to
+> lifted scaffolding. Two live findings removed the foundation — the scaffolding collides
+> by name with the published objects (**BL-148**) and the rename cascade is asynchronous
+> (**BL-149**) — and the underlying reason is that content TML has no physical anchor at
+> all. **Phase 0 (`scan-sets`) and Phase 1 (`audit`) below are unaffected and still stand.**
+
 ## Goal
 
 Provide a deterministic routine to migrate tenant-authored ThoughtSpot content
