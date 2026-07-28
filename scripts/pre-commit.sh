@@ -94,6 +94,11 @@ run_check "secrets"              "tools/validate/check_secrets.py --root $REPO_R
 run_check "reference paths"      "tools/validate/check_references.py --root $REPO_ROOT"
 run_check "anti-patterns"        "tools/validate/check_patterns.py --root $REPO_ROOT --staged"
 run_check "version sync"         "tools/validate/check_version_sync.py --root $REPO_ROOT"
+# Repo hygiene — tracked-but-gitignored files + unexpected top-level tracked files
+# (audit findings 1.1/1.2). Cheap (two `git ls-files` calls over the whole tree, not
+# diff-based), so it runs unconditionally like secrets/references above rather than
+# being gated to a staged-file pattern.
+run_check "repo hygiene"         "tools/validate/check_repo_hygiene.py --root $REPO_ROOT"
 
 # Complexity ratchet on staged Python (soft-skips if radon isn't installed locally;
 # enforced fully in CI). Blocks new/worsening god-functions; legacy is baselined.
@@ -203,6 +208,15 @@ fi
 # Python source under tools/ or agents/ is staged, or the validator itself changes.
 if echo "$STAGED" | grep -qE '(^(tools|agents|scripts)/.*\.py$|tools/validate/check_no_v1_endpoints\.py)'; then
   run_check "no v1 endpoints"     "tools/validate/check_no_v1_endpoints.py --root $REPO_ROOT"
+fi
+
+# Internal imports — every `from ts_cli.X import Y` in tools/ts-cli/ts_cli/ must
+# resolve statically: Y must be defined, re-exported, or a real submodule of X (audit
+# finding 4.2 / 17.1 — a function-local broken import that ImportErrors on first real
+# use, invisible to import-time checks and every existing test). Runs when ts_cli
+# Python source or the validator itself changes.
+if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/.*\.py$|tools/validate/check_internal_imports\.py)'; then
+  run_check "internal imports"   "tools/validate/check_internal_imports.py --root $REPO_ROOT"
 fi
 
 # No inline TML-invariant gate — CLI convert skills must gate imports with `ts tml lint`,

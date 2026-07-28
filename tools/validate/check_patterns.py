@@ -22,6 +22,17 @@ without false positives, so there is no separate declarative registry):
      Re-inlining the connect block re-clones the ~30-line copy that had already
      drifted. Allowlisted: ts-profile-snowflake, whose purpose IS demonstrating the
      connection setup. references/ is carved out automatically (only SKILL.md scanned)
+  8. `from ts_cli...` / `import ts_cli` inside a Claude SKILL.md (2026-07-29 audit
+     findings 4.2/5.1/5.2) — a skill importing ts_cli internals directly (even a
+     PUBLIC name, and certainly a `_private` one) couples the skill to ts_cli's
+     internal module layout with no contract protecting it; a refactor that passes
+     every ts-cli unit test can silently break the skill. Skills call the `ts` CLI.
+     Dated allowlist: ts-object-model-aggregates (finding 5.1 — pending public
+     `ts aggregate preview-names`/`widen-rls` commands). references/ is carved out
+     automatically (only SKILL.md scanned) — this is why the ts-migrate-orgs
+     "Driving it from Python" embedders' appendix in references/running-a-migration.md
+     is unaffected; it deliberately documents the public library API for programmatic
+     embedders, not a skill-execution shortcut
 
 Usage:
     python tools/validate/check_patterns.py
@@ -101,6 +112,24 @@ _STDIN_WRAPPER_WINDOW = 6  # max lines between the payload-builder line and the 
 _SF_CONNECT_RE = re.compile(r'snowflake\.connector\.connect\s*\(')
 # Skill dirs where demonstrating the connection IS the point.
 _SF_CONNECT_ALLOWLIST = {"ts-profile-snowflake"}
+
+# Check 8 (2026-07-29 audit findings 4.2/5.1/5.2): a `ts_cli` internal-library import
+# inside a Claude SKILL.md. Matches both `from ts_cli...import...` and bare
+# `import ts_cli` / `import ts_cli.x.y` — the word-boundary after `ts_cli` means
+# `ts_cli.commands.aggregate` and a bare `ts_cli` both match, but `ts_cli_extra` or a
+# dotted-path MENTION with no `from`/`import` keyword (e.g. the prose
+# "`ts_cli.report.classifier.build_matched_columns_map`. Filter on this field...") does
+# not — this check only fires on an actual import statement.
+_TS_CLI_IMPORT_RE = re.compile(r'\bfrom\s+ts_cli\b|\bimport\s+ts_cli\b')
+
+# Dated allowlist (2026-07-29 audit finding 5.1): ts-object-model-aggregates SKILL.md
+# Step 5d imports `ts_cli.commands.aggregate._aggregate_name` and Step 5e imports
+# `ts_cli.aggregate.rls.add_rls_columns_to_candidate` directly. A separate backlog item
+# (routing table: "New backlog: aggregates CLI gap", 5.1/5.4) adds public
+# `ts aggregate preview-names` / `ts aggregate widen-rls` commands to replace these
+# inline imports — remove this allowlist entry once that ships and the SKILL.md is
+# updated to call them instead of importing ts_cli internals.
+_TS_CLI_IMPORT_ALLOWLIST = {"ts-object-model-aggregates"}
 
 
 def check_stdin_tml_import_wrapper(file_path: Path) -> list[tuple[int, str, int, str]]:
@@ -353,6 +382,29 @@ def main() -> int:
                     f"FAIL  {rel}:{line_num}  cloned-snowflake-connector-in-skill  →  {line.strip()!r}\n"
                     f"      Deploy/execute Snowflake SQL via `ts snowflake exec` (reuses the one\n"
                     f"      connector in ts-cli), not an inlined snowflake.connector.connect() block."
+                )
+                total_hits += 1
+
+    # Check 8: ts_cli internal-library imports in a Claude SKILL.md (audit 4.2/5.1/5.2).
+    # Dated allowlist: ts-object-model-aggregates (finding 5.1, pending a CLI command).
+    # references/ is carved out automatically — only SKILL.md files are scanned.
+    # In --staged mode: only flag newly-added lines.
+    for md_file in skill_md_files:
+        if md_file.parent.name in _TS_CLI_IMPORT_ALLOWLIST:
+            continue
+        added_lines = (
+            get_staged_added_lines(repo_root, md_file) if args.staged else None
+        )
+        for line_num, line in enumerate(md_file.read_text(encoding="utf-8").splitlines(), 1):
+            if _TS_CLI_IMPORT_RE.search(line):
+                if added_lines is not None and line not in added_lines:
+                    continue  # pre-existing violation — skip in staged mode
+                rel = md_file.relative_to(repo_root)
+                print(
+                    f"FAIL  {rel}:{line_num}  ts-cli-internal-import-in-skill  →  {line.strip()!r}\n"
+                    f"      Claude skills call the `ts` CLI, never import ts_cli internals\n"
+                    f"      directly (.claude/rules/ts-cli.md). If the CLI lacks the operation,\n"
+                    f"      add a public `ts` command instead of reaching into ts_cli's modules."
                 )
                 total_hits += 1
 

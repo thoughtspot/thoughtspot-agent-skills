@@ -270,3 +270,111 @@ def test_main_check7_carves_out_references_dir(tmp_path):
     res = _run(tmp_path)
     assert res.returncode == 0, res.stdout + res.stderr
     assert "cloned-snowflake-connector-in-skill" not in res.stdout
+
+
+# --- Check 8: ts_cli internal-library import in a SKILL.md (audit 4.2/5.1/5.2) ----
+
+_TS_CLI_FROM_IMPORT_SNIPPET = (
+    "---\nname: ts-bad-import\n---\n\n"
+    "## Step X\n\n"
+    "```python\n"
+    "from ts_cli.commands.aggregate import _aggregate_name\n"
+    "```\n"
+)
+
+_TS_CLI_BARE_IMPORT_SNIPPET = (
+    "---\nname: ts-bad-import\n---\n\n"
+    "## Step X\n\n"
+    "```python\n"
+    "import ts_cli.aggregate.rls\n"
+    "```\n"
+)
+
+_TS_CLI_PROSE_MENTION_SNIPPET = (
+    "---\nname: ts-good-prose\n---\n\n"
+    "## Step X\n\n"
+    "See `ts_cli.report.classifier.build_matched_columns_map`. Filter on this field, not\n"
+    "the risk reason text. If the command misbehaves, fix `ts_cli/dependency/` and re-run.\n"
+)
+
+_TS_CLI_COMMAND_SNIPPET = (
+    "---\nname: ts-good-cli\n---\n\n"
+    "## Step X\n\n"
+    "```bash\n"
+    "ts aggregate recommend --profile {name} --workdir {workdir}\n"
+    "```\n"
+)
+
+
+def test_main_flags_ts_cli_from_import_in_skill_md(tmp_path):
+    skill_dir = tmp_path / "agents" / "cli" / "ts-bad-import"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_TS_CLI_FROM_IMPORT_SNIPPET)
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "ts-cli-internal-import-in-skill" in res.stdout
+
+
+def test_main_flags_ts_cli_bare_import_in_skill_md(tmp_path):
+    skill_dir = tmp_path / "agents" / "cli" / "ts-bad-import"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_TS_CLI_BARE_IMPORT_SNIPPET)
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "ts-cli-internal-import-in-skill" in res.stdout
+
+
+def test_main_does_not_flag_prose_mention_of_ts_cli_path(tmp_path):
+    # Real lines lifted from ts-dependency-manager SKILL.md — a dotted-path mention
+    # with no leading from/import keyword must not trip the check.
+    skill_dir = tmp_path / "agents" / "cli" / "ts-good-prose"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_TS_CLI_PROSE_MENTION_SNIPPET)
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "ts-cli-internal-import-in-skill" not in res.stdout
+
+
+def test_main_does_not_flag_ts_command_usage(tmp_path):
+    skill_dir = tmp_path / "agents" / "cli" / "ts-good-cli"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_TS_CLI_COMMAND_SNIPPET)
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "ts-cli-internal-import-in-skill" not in res.stdout
+
+
+def test_main_check8_allowlists_ts_object_model_aggregates(tmp_path):
+    # Dated allowlist (audit finding 5.1) — remove once ts aggregate preview-names /
+    # widen-rls ship and the SKILL.md stops importing ts_cli internals directly.
+    skill_dir = tmp_path / "agents" / "cli" / "ts-object-model-aggregates"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_TS_CLI_FROM_IMPORT_SNIPPET)
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "ts-cli-internal-import-in-skill" not in res.stdout
+
+
+def test_main_check8_carves_out_references_dir(tmp_path):
+    # ts-migrate-orgs' references/running-a-migration.md deliberately documents the
+    # public ts_cli library API for programmatic embedders — only SKILL.md is scanned.
+    skill_dir = tmp_path / "agents" / "cli" / "ts-migrate-orgs"
+    refs_dir = skill_dir / "references"
+    refs_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_TS_CLI_COMMAND_SNIPPET)
+    (refs_dir / "running-a-migration.md").write_text(_TS_CLI_FROM_IMPORT_SNIPPET)
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "ts-cli-internal-import-in-skill" not in res.stdout
