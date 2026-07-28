@@ -2,7 +2,12 @@
 
 **Date:** 2026-07-27
 **Cluster:** `nebula-damian-alias` (test cluster, authorised by the repo owner)
-**Status:** fixture is **live and left in place** for validation. Nothing here is torn down.
+**Status:** fixture is **live and left in place**. Nothing here is torn down.
+
+> **The end-to-end run does NOT currently complete.** The first live `apply` fails at
+> `lift_scaffolding` with a name collision between the scaffolding and the published
+> objects — **BL-148**, a structural gap in the design rather than a fixture artefact.
+> `scan-sets`, `audit` and `apply --dry-run` all work; the destructive steps are blocked.
 **Updated 2026-07-28:** both defects found while staging are fixed in ts-cli v0.113.1; the
 numeric-Org-id workaround is no longer needed.
 

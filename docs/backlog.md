@@ -4037,3 +4037,69 @@ in the group goes through it, reads included -- the read/write distinction was t
 since the audit produces the file a human approves. The false comment is replaced with the
 reason. Verified live: `--source-org ORG1` now returns the correct ORG1 mapping where it
 previously failed outright.
+
+---
+
+## BL-148 -- lift-and-shift collides by NAME with the published objects it is migrating onto `Tier 1`
+
+**Filed:** 2026-07-28.
+**Source:** the first live `ts migrate apply` run against the end-to-end fixture. See
+`docs/superpowers/verification/2026-07-27-ts-migrate-e2e-runbook.md`.
+
+**This blocks Phase 2 end to end.** `ts migrate apply` fails at `lift_scaffolding`:
+
+```
+scaffolding import failed:
+  Error: Found multiple data sources with same name.
+  - T2_PUBLISH
+    * T2_PUBLISH[d2c12c11-...]   <- the PUBLISHED table
+    * T2_PUBLISH[0d111529-...]   <- the scaffolding being lifted
+```
+
+### Why it is structural, not a fixture artefact
+
+The collision is **guaranteed by the design**, not incidental:
+
+1. `ts migrate audit` pairs a tenant Model to its published counterpart **by name**. So by
+   construction they share one.
+2. `apply` then lifts the tenant's Table and Model into the target Org -- which already
+   holds the published objects of those exact names.
+3. Reference resolution is **fqn-then-name** (spike finding 4). The lifted Model's `fqn`
+   points at a source-Org GUID that is dead in the target, so resolution falls back to the
+   name -- and now finds two.
+
+Spike finding 4 already stated "names must be unique within the target Org" as a
+precondition. What was missed is that **the architecture itself violates it**: pairing by
+name and lifting into the same Org cannot both hold.
+
+### What was ruled out
+
+`ALL_OR_NONE` behaves correctly -- the failed batch created nothing, and the target Org was
+left clean. This is a hard failure, not a partial write.
+
+Three variants were probed live; none is a fix on its own:
+
+| Variant | Result |
+|---|---|
+| Keep the document `guid`, same names | `Object with GUID ... already exists. New GUID will be used` -- the source GUID is not usable as an intra-batch key |
+| Strip `guid`, rename scaffolding unique | Table created, but the Model then fails: `No table with fqn ... found for table_id MIG_T2_PUBLISH` |
+| Keep `guid`, rename scaffolding unique | same as above |
+
+Renaming the scaffolding **Table** is not sufficient because the scaffolding **Model** also
+collides with the published Model -- and renaming the Model breaks the *content* lift,
+which is a later batch whose Answers resolve the Model by name.
+
+### Candidate designs, none yet chosen
+
+| Option | Note |
+|---|---|
+| Lift scaffolding **and content in ONE batch**, with scaffolding renamed unique | All references remap intra-batch, so no name fallback is needed. Fewest calls. Needs verification that intra-batch fqn remapping actually works across object types |
+| Rename scaffolding unique, then rewrite each content object's Model reference from the ledger's source→target GUID map | Deterministic, but it is O(objects) reference rewriting -- the exact thing the architecture exists to avoid |
+| Do not lift the scaffolding at all; bind lifted content directly to the **published** Model | Removes the collision entirely and would simplify the design, but the rename step exists precisely because the names do not match yet, so the ordering would have to change |
+
+The third is the most interesting and was already flagged as "the strongest option" in the
+original spike, deferred for its own verification. It is now worth taking seriously.
+
+**Do not attempt a quick fix.** This is reference-resolution behaviour that has already
+produced one wrong assumption (a guard that could never fire, BL-144's mitigation), and
+each candidate needs its own live verification before being built.
