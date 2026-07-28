@@ -40,8 +40,12 @@ SKILL_GLOBS = (
 # An allowlisted file skips the hard-fail (it still soft-warns). Remove the
 # entry when the skill is slimmed below HARD_FAIL.
 ALLOWLIST: dict[str, str] = {
-    # ~57k est. tokens at gate introduction — by far the largest skill. The
-    # BL-128 extraction (references/ split) is the tracked remedy.
+    # ~57k est. tokens at gate introduction; the BL-128 round-1 extraction (PR #314)
+    # cut it to ~57.2k, and the round-2 extraction (2026-07-28) cut it further to
+    # ~34.4k est. tokens by archiving changelog history and moving more report
+    # templates/tables/algorithm detail to references/ — still over the 25k
+    # hard-fail line. A round-3 pass on Steps 4.5/5b/6/7's remaining
+    # prompt-and-command-heavy spines is the tracked remedy to clear it.
     "agents/cli/ts-convert-from-tableau/SKILL.md": "BL-128",
 }
 

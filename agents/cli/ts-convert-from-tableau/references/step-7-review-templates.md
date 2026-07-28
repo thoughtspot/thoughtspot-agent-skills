@@ -57,6 +57,15 @@ Proceed?
   file  — write the TMLs to /tmp/ts_tableau_mig/output/{workbook_name}/ without importing
 ```
 
+## Row-offset table calculations review (Step 7)
+
+For each formula classified as Row-offset (native or pass-through), display: the original
+Tableau formula; the resolved sort column and how it was determined (from `<table-calc>`
+`ordering_type`/`ordering_field`, or from worksheet shelf); the ThoughtSpot translation
+(native `rank()` or answer-level `sql_*_aggregate_op`); for pass-throughs, the full SQL
+template with the resolved column names filled in. Ask the user to confirm the sort
+resolution before proceeding — if it looks wrong, they can override it or omit the formula.
+
 ## Phase 1.5 — base model review checkpoint
 
 Shown after Phase 1 (base model, no formulas) succeeds, before Phase 2 (formulas):

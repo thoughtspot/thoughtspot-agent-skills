@@ -6,6 +6,24 @@ and display it inline. Build hyperlinks from `{base_url}` (Step 1) and the GUID 
 import: Model/table → `{base_url}/#/data/tables/{guid}`; Liveboard →
 `{base_url}/#/pinboard/{guid}`; Answer (standalone) → `{base_url}/#/saved-answer/{guid}`.
 
+## Migration Summary tab content (Step 10g)
+
+The liveboard's final "Migration Summary" note tile's `html_parsed_string` has four sections:
+
+```
+1. Items migrated      — each viz/tile and how (chart type, search), formulas, cohorts, params
+2. Decisions made      — non-obvious choices (unpivot via SQL view, bins=cohort vs formula,
+                          count column, growth via `growth of`, theme, top/bottom approximations…)
+3. Partial / placeholder — vizzes that couldn't be fully reproduced but were built as
+                          placeholders (forecast → historical trend; cluster → underlying inputs);
+                          flag each "needs review" + what's missing
+4. Items NOT migrated  — only things with genuinely nothing to show, untranslatable formulas,
+                          the flipboard interaction, orphan worksheets, data-fidelity gaps — reason each
+```
+
+Example of the orphan-worksheet record: the FDI `Groups` cohort exists on the model, but its
+`Groups` worksheet wasn't dashboarded — so nothing referenced it until added deliberately.
+
 ## Report structure
 
 ```markdown
@@ -123,3 +141,26 @@ Review category reference:
 Omit categories with zero formulas. The `ifnull` stripped and `sum_if` rewrite counts come
 from the `translate_formulas` stats (`ifnull_stripped`, `agg_if_conversions`).
 ```
+
+## Step 12.6 — materializing a Spotter last-mile coverage tile
+
+After Step 12.6 adopts a Spotter-suggested formula (verified number match, user approved),
+offer to build a **Step 11.5 coverage tile** directly from Spotter's answer so the number is
+visible in-product, not just in the report:
+
+- `search_query` ← Spotter's returned **`tokens`** (the raw Search expression it produced;
+  `display_tokens` is the human-readable form to show in the confirm prompt).
+- `display_mode` / chart type ← Spotter's **`visualization_type`**:
+  `Table` → `TABLE_MODE` (omit the `chart:` block); `Chart` → `CHART_MODE` with the chart
+  type chosen from the Step 10a intent mapping (a single measure by a date → `KPI` or
+  `LINE`; by a dimension → `BAR`); `Undefined` → default to a `KPI`/`BAR`.
+- `description` ← the original Tableau expression + `via Spotter last-mile` (same
+  convention as Step 11.5), so a reviewer sees source ↔ migrated side by side.
+- **Show the tile spec and ask before adding it** — never auto-append to the liveboard. On
+  approval, add it to the "Formula coverage" tab (or as a standalone answer for a
+  model-only workbook) and re-import in place with `ALL_OR_NONE` (Step 11.5 rules).
+
+This reuses the Step 11.5 machinery — it just seeds the tile from Spotter's answer instead
+of a hand-built search. A tile is only ever added for a measure whose number was verified
+against the source and the user approved; an unverified Spotter suggestion never becomes a
+tile.
