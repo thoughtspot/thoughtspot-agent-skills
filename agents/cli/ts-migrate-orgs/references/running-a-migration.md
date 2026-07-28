@@ -136,6 +136,16 @@ ts migrate apply --source-org <TENANT> --target-org <TARGET> \
 
 Progress is in `plan/state.json`; resume with `--resume`.
 
+**`HTTP 204` from a share call does not mean the grant landed.** Under Strict Object Mode a
+grant on content whose source is ungranted is accepted and **silently dropped**, so grants
+must be applied **bottom-up**: published Tables → published Model → Views → content. The
+**published Model needs explicit grants** — publishing it makes it *present*, not *visible*,
+and that half holds regardless of the mode.
+
+Strict Object Mode is a **per-cluster setting**. Granting the stack is safe either way, so
+nothing detects the mode — but if this symptom appears on a cluster with it **off**, look
+for a different cause.
+
 **Migrated content lands shared with nobody unless `share_grants` runs.** TML has no
 sharing block, so the objects are authored by the migrating admin and invisible to the
 tenant. An admin verifying the migration sees everything, which is why this failure

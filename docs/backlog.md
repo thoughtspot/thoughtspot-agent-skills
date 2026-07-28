@@ -4257,41 +4257,51 @@ source, `ts share` on the target. Two things make it more than a copy:
    step. A per-user grant therefore cannot always be applied at migration time, and may
    have to be deferred to cutover.
 
-### Built and WORKING -- corrected 2026-07-28
+### RESOLVED 2026-07-28 -- it was OUR bug: the whole object stack must be granted
 
-`ts migrate apply` has a `share_grants` step: it reads the source objects' GROUP grants
-(via `share_plan.permission_rows`) and re-applies them in the target Org. Group level only,
-because a per-user grant cannot reliably be applied before cutover -- the users may not be
-in the target Org yet.
+`nebula-damian-alias` runs **Strict Object Mode**, so a user needs an explicit grant on the
+entire chain -- Table, then Model, then content. And **publication makes an object *present*,
+not *visible***, so the published Model carries no tenant grants of its own (that half is
+independent of the mode).
 
-**It works.** Confirmed in the UI by the repo owner: the migrated Answers in ORG2 carry
-`can_view` for the `MIGTEST_VIEWERS` group, exactly as intended.
+> **Strict Object Mode is a per-cluster SETTING and can be toggled.** Confirm it before
+> assuming this explanation applies elsewhere -- on a non-strict cluster the same symptom
+> will have a different cause. The fix below is **safe either way**: with the mode off the
+> extra grants are redundant rather than wrong, so no mode detection is needed.
 
-### The false alarm, and what it cost
+`share_grants` shared only the content. With the Model ungranted, **the Answer share was
+accepted and not recorded**:
 
-Three wrong diagnoses were recorded here before the UI was checked:
+```
+BEFORE  published Model grants: [Administrator, tsadmin]
+        Answer grants         : [Administrator, tsadmin]
 
-1. "grants do not register when the content sits on a published Model" -- disproven by a
-   control on ORG2's own Model;
-2. "it tracks with object TYPE in that Org" -- disproven by the UI;
-3. and underneath both, the premise that the share had failed at all. It had not.
+share published TABLE  -> 204
+share published MODEL  -> 204   ->  MIGTEST_VIEWERS/READ_ONLY APPEARS
+re-share the ANSWER    -> 204   ->  MIGTEST_VIEWERS/READ_ONLY APPEARS
+```
 
-The actual fault was **trusting an API read over the product**. `HTTP 204` was accurate the
-whole time.
+Granting the Model made the identical Answer share register immediately.
 
-### The real finding: `fetch-permissions` UNDER-REPORTS group grants
+**Why ORG1 appeared to work:** the fixture script happened to share `LOGICAL_TABLE` before
+`ANSWER`, granting the stack bottom-up by accident. Nothing about ORG1 was different.
 
-`security/metadata/fetch-permissions` (and therefore `ts share export` / `ts share status`,
-which both read through it) did **not** report the `MIGTEST_VIEWERS` grant on an `ANSWER`
-in ORG2, while the UI shows it. The same read DID report it for an `ANSWER` in ORG1 and for
-a `LOGICAL_TABLE` in ORG2.
+### Three wrong conclusions, and what they have in common
 
-So this is a **reporting** gap, not a sharing one, and it is narrower than it looked -- but
-it matters because it makes API-based verification of sharing unreliable for that
-combination.
+1. "grants do not register when the content sits on a published Model" -- wrong cause,
+   right neighbourhood.
+2. "it tracks with object TYPE in that Org" -- a real correlation with the wrong
+   explanation: Answers failed because Answers sit on top of a stack, Models did not
+   because theirs was already granted or owned.
+3. "`fetch-permissions` under-reports group grants" -- **wrong.** The read was accurate
+   every time; there was nothing to report.
 
-**How to apply:** when confirming sharing state, **the UI is the authority**. Do not
-conclude from a `fetch-permissions` read alone that a grant is absent. `HTTP 204` from
-`security/metadata/share` is better evidence that it landed than the read is that it did
-not.
+All three came from treating an API response as the thing to explain, instead of asking
+what the product requires. The repo owner supplied the missing premise (Strict Object Mode)
+in one sentence.
 
+### The fix
+
+`share_grants` now grants **bottom-up over the whole stack**: the published Tables, then
+the published Model, then the migrated content. Ordering is load-bearing -- a content grant
+applied before its Model is silently dropped.

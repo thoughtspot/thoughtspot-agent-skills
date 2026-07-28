@@ -523,3 +523,10 @@ def test_the_dry_run_says_WHY_sharing_matters():
     md = render_plan(_plan())
     assert "TML carries no sharing" in md
     assert "users see nothing" in md
+
+
+def test_the_share_step_carries_the_TARGET_so_it_can_find_the_stack():
+    """Under Strict Object Mode the published Model and its Tables must be granted before
+    the content, so the step needs to know which Model it is granting beneath."""
+    step = [s for s in _plan() if s["step"] == STEP_SHARE][0]
+    assert step["target"]["guid"] == "tgt"

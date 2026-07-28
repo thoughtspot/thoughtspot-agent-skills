@@ -275,7 +275,7 @@ def build_apply_plan(pair: Dict[str, str], views: List[Dict[str, Any]],
         # be applied before cutover, since the users may not be in the target Org yet.
         {"step": STEP_SHARE, "objects": (list(content) + moving
                                         if not mode.get("same_org") else []),
-         "mode": dict(mode)},
+         "mode": dict(mode), "target": dict(target)},
     ]
     for step in steps:
         step["pair"] = dict(pair)

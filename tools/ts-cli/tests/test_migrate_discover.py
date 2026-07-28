@@ -146,3 +146,28 @@ def test_an_object_reachable_TWICE_is_reported_once():
     client = _walk_client({"m1": ["v1", "a1"], "v1": ["a1"]}, {"v1": "AGGR_WORKSHEET"})
     guids = [d["guid"] for d in dependents_through_views(client, "m1")]
     assert sorted(guids) == ["a1", "v1"]
+
+
+def test_target_stack_returns_TABLES_BEFORE_the_model():
+    """The order IS the fix. A grant on the Model before its Tables is accepted and
+    silently dropped under Strict Object Mode -- HTTP 204, no row (live 2026-07-28)."""
+    from unittest.mock import MagicMock
+    import json as _json
+    from ts_cli.migrate.apply_exec import target_stack
+
+    doc = _json.dumps({"guid": "m1", "model": {
+        "name": "Sales", "model_tables": [{"name": "T", "fqn": "t1"}]}})
+    client = MagicMock()
+    client.post.return_value = MagicMock(json=lambda: [{"edoc": doc}])
+    stack = target_stack(client, "m1")
+    assert [x["guid"] for x in stack] == ["t1", "m1"]
+    assert all(x["type"] == "LOGICAL_TABLE" for x in stack)
+
+
+def test_target_stack_is_empty_when_the_model_cannot_be_exported():
+    """Better to grant nothing than to guess at a stack and half-apply it."""
+    from unittest.mock import MagicMock
+    from ts_cli.migrate.apply_exec import target_stack
+    client = MagicMock()
+    client.post.return_value = MagicMock(json=lambda: [])
+    assert target_stack(client, "m1") == []

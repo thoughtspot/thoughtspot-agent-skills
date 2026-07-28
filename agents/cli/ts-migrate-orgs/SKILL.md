@@ -134,6 +134,9 @@ source Org has been retired.
 > migration**, and treat an admin-only check as not verified: an admin sees objects
 > regardless of sharing.
 
+Grants cover the **whole stack**, not just the content: the **published Model needs
+explicit grants too**, because publishing it makes it *present*, not *visible*.
+
 Grants are re-applied at **group** level. Groups are **per-Org principals**, so the target
 Org needs a group of each name; a missing one is reported rather than skipped, because a
 dropped grant is invisible until someone complains. Per-user grants are deliberately not
@@ -241,6 +244,7 @@ cutover it holds nothing but this migration's output.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.2.0 | 2026-07-28 | `share_grants` grants the whole object stack bottom-up — Strict Object Mode drops a grant whose source is ungranted |
 | 2.1.0 | 2026-07-28 | Add `share_grants` — TML carries no sharing, so migrated content was invisible to tenant users |
 | 2.0.0 | 2026-07-28 | Rebuild around export/rewrite/import: three steps, no scaffolding, no connection provisioning |
 | 1.1.0 | 2026-07-28 | Replace the dead BL-144 guard with the tenant-isolation check at the repoint |

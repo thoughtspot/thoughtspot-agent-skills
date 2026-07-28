@@ -389,18 +389,40 @@ def source_group_grants(client, objects: List[Dict[str, Any]]) -> Dict[str, List
     return out
 
 
+def target_stack(client, model_guid: str) -> List[Dict[str, str]]:
+    """The published Model and its Tables, bottom-up: Tables first, then the Model.
+
+    Order is load-bearing. Under **Strict Object Mode** a user needs a grant on the whole
+    chain, and a grant applied to something whose source is ungranted is **accepted and
+    silently dropped** -- `HTTP 204`, no row recorded (verified live 2026-07-28 on a cluster
+    with the mode ON; it is a per-cluster setting, and granting the stack is harmless when
+    it is off).
+    """
+    docs = export_tml(client, [model_guid])
+    if not docs:
+        return []
+    body = docs[0].get("model") or docs[0].get("worksheet") or {}
+    tables = [t.get("fqn") for t in body.get("model_tables") or [] if t.get("fqn")]
+    return ([{"guid": g, "type": "LOGICAL_TABLE"} for g in tables]
+            + [{"guid": model_guid, "type": "LOGICAL_TABLE"}])
+
+
 def run_share_grants(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
-    """Re-establish GROUP grants on the migrated objects.
+    """Grant the tenant's groups access to the WHOLE object stack, bottom-up.
 
-    **TML carries no sharing information at all** -- no `share`, `permission`, `principal`,
-    `group` or `acl` key. So migrated content is authored by the migrating admin and
-    visible to nobody else: the migration completes, every check passes, and not one
-    tenant user can see anything (BL-150). An admin verifying it sees everything, which is
-    why this failure survives verification.
+    Two facts make this more than sharing the content:
 
-    Groups are **per-Org principals**, so a grant is applied against the TARGET Org's
-    group of that name. A group missing there is reported rather than skipped silently --
-    a dropped grant is invisible until a user complains.
+    1. **Publication makes an object present, not visible.** The published Model carries no
+       tenant grants of its own, so publishing it does not let the tenant's users read it.
+    2. **Strict Object Mode requires the whole chain** -- Table, then Model, then content.
+       A grant on content whose Model is ungranted is accepted and **silently dropped**:
+       `HTTP 204` with no row recorded. Strict Object Mode is a **per-cluster setting**, so
+       this is not universal -- but granting the stack is **safe either way**, since with
+       the mode off the extra grants are merely redundant. Hence no mode detection.
+
+    So this grants published Tables, then the published Model, then the migrated content.
+    Sharing only the content -- which is what this step did originally -- produced a
+    migration that reported success while the tenant saw nothing (BL-150).
     """
     objects = step["objects"]
     if not objects or ctx.dry_run:
@@ -411,34 +433,45 @@ def run_share_grants(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
         print("  share_grants: no group grants on the source objects -- nothing to "
               "re-establish", file=__import__("sys").stderr)
         return {}
+    groups = sorted({g for gs in wanted.values() for g in gs})
 
+    target = step.get("target") or {}
+    # Bottom-up, and the ORDER IS THE FIX: published Tables, published Model, migrated
+    # Views, then content. A grant on anything whose source is ungranted is accepted and
+    # SILENTLY DROPPED, so each layer must already be granted before the next is applied.
+    # Missing the Views cost a second round of this bug: the Answer built on a View was
+    # dropped exactly as the Answer on the Model had been.
+    stack = target_stack(ctx.target, target["guid"]) if target.get("guid") else []
+    stack += [{"guid": guid, "type": "LOGICAL_TABLE"}
+              for guid in sorted(ctx.created(STEP_REWRITE_VIEWS).values())]
     created = {**ctx.created(STEP_REWRITE_CONTENT), **ctx.created(STEP_MOVE_SHIELDED)}
-    missing_groups, applied = [], 0
-    for name, groups in sorted(wanted.items()):
-        target_guid = created.get(name)
-        if not target_guid:
-            continue
+    content = [{"guid": guid, "type": _type_of(objects, name)}
+               for name, guid in sorted(created.items())]
+
+    failures, applied = [], 0
+    for item in stack + content:
         for group in groups:
             resp = ctx.target.post(
                 "/api/rest/2.0/security/metadata/share", raise_for_status=False,
-                json={"metadata_type": _type_of(objects, name),
-                      "metadata_identifiers": [target_guid],
+                json={"metadata_type": item["type"],
+                      "metadata_identifiers": [item["guid"]],
                       "permissions": [{"principal": {"type": "USER_GROUP",
                                                      "identifier": group},
                                        "share_mode": "READ_ONLY"}],
                       "message": "Re-established by ts migrate apply",
                       "notify_on_share": False})
             if resp.status_code >= 300:
-                missing_groups.append(f"{name} -> {group}")
+                failures.append(f"{item['guid']} -> {group} (HTTP {resp.status_code})")
             else:
                 applied += 1
 
-    if missing_groups:
+    if failures:
         raise StepFailed(
-            f"re-established {applied} grant(s), but these could not be applied: "
-            f"{', '.join(missing_groups)}. Groups are PER-ORG principals, so the target "
-            f"Org needs a group of each name (provision it with `ts tenancy`). Until then "
-            f"those objects are invisible to the tenant's users")
+            f"applied {applied} grant(s), but these failed: {', '.join(failures)}. "
+            f"Groups are PER-ORG principals, so the target Org needs a group of each name "
+            f"(provision it with `ts tenancy`)")
+    print(f"  share_grants: {applied} grant(s) across {len(stack)} stack object(s) and "
+          f"{len(content)} content object(s)", file=__import__("sys").stderr)
     return {}
 
 
