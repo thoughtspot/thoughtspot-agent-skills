@@ -3633,9 +3633,11 @@ ts migrate rollback --target-org "ACME NEW" -d ./plan --dry-run
 ts migrate rollback --target-org "ACME NEW" -d ./plan
 ```
 
-Deletes what the ledger records this run as creating. In a new-Org run the source Org was
-never touched. In a same-Org run there is nothing to delete — `plan/backup/` is the
-rollback.
+Deletes what the ledger records this run as creating — content first (with the right
+metadata type per object), then Views. Already-deleted objects are skipped, so a partial
+rollback can be re-run. In a new-Org run the source Org was never touched. A **same-Org
+ledger is refused**: content was updated in place, so the recorded guids are the tenant's
+originals — `plan/backup/` is the rollback for that topology.
 
 ---
 

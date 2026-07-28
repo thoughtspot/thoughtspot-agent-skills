@@ -302,8 +302,13 @@ def build_apply_plan(pair: Dict[str, str], views: List[Dict[str, Any]],
 # Ledger
 # ---------------------------------------------------------------------------
 
-def new_ledger(pair: Dict[str, str]) -> Dict[str, Any]:
-    return {"pair": dict(pair), "completed": [], "created": {}, "failed": None}
+def new_ledger(pair: Dict[str, str],
+               mode: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """`mode` (from `import_mode`) is recorded so `rollback` can tell a same-Org run
+    (objects updated in place -- deleting them destroys the tenant's originals) from a
+    new-Org run (objects created fresh -- deleting them is the rollback)."""
+    return {"pair": dict(pair), "mode": dict(mode) if mode else None,
+            "completed": [], "created": {}, "failed": None}
 
 
 def pending_steps(plan: Sequence[Dict[str, Any]],
@@ -330,6 +335,48 @@ def record_completed(ledger: Dict[str, Any], step: str,
 def record_failure(ledger: Dict[str, Any], step: str, detail: str) -> Dict[str, Any]:
     ledger["failed"] = {"step": step, "detail": detail}
     return ledger
+
+
+def rollback_refusal(ledger: Mapping[str, Any]) -> Optional[str]:
+    """Why this ledger must NOT be rolled back by deletion, or None if it may be.
+
+    A same-Org apply updates the tenant's objects IN PLACE (`keep_guid`), so the guids in
+    `created` are the originals -- deleting them is not an undo, it is data loss. The only
+    rollback for that topology is restoring the TML written to `backup/`.
+
+    Ledgers written before `mode` was recorded are refused on the conservative signal
+    (source Org == target Org): a cross-cluster run with coincidentally equal Org names
+    loses rollback-by-deletion, but the alternative is deleting a tenant's real content.
+    """
+    mode = ledger.get("mode")
+    if mode is not None:
+        if mode.get("same_org"):
+            return ("this ledger records a SAME-ORG run: content was updated in place, "
+                    "not created, so deleting it would destroy the tenant's originals. "
+                    "Restore the TML in backup/ instead")
+        return None
+    pair = ledger.get("pair") or {}
+    if (pair.get("source") or "") == (pair.get("target") or ""):
+        return ("this ledger predates mode recording and its source and target Org are "
+                "the same, which reads as a same-Org run: content was updated in place, "
+                "not created. Restore the TML in backup/ instead")
+    return None
+
+
+def rollback_sets(ledger: Mapping[str, Any]
+                  ) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """`(content, views)` as `{name: guid}` -- everything the apply created, from the
+    ledger the CURRENT executor writes.
+
+    Content (rewritten Answers/Liveboards plus View-shielded copies) deletes before
+    Views, because a View with dependents refuses to delete.
+    """
+    created = ledger.get("created") or {}
+    content: Dict[str, str] = {}
+    for step in (STEP_REWRITE_CONTENT, STEP_MOVE_SHIELDED):
+        content.update(created.get(step) or {})
+    views = dict(created.get(STEP_REWRITE_VIEWS) or {})
+    return content, views
 
 
 # ---------------------------------------------------------------------------

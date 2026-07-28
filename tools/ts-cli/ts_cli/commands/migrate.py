@@ -382,7 +382,7 @@ def apply_migration(
 
     state_file = plan_path / "state.json"
     ledger = (_json.loads(state_file.read_text()) if (resume and state_file.exists())
-              else new_ledger({"source": source_org, "target": target_org}))
+              else new_ledger({"source": source_org, "target": target_org}, mode))
     # Unscoped session for the segmentation check: an Org-scoped variable read returns
     # only that Org's value, which makes every target look SHARED.
     ctx = apply_exec.Ctx(source_client, target_client, plan_path, ledger,
@@ -450,23 +450,68 @@ def _classify_scope(source_client, target_client, model_names, exclude_owner_org
     return views, content, shielded, targets
 
 
+def _types_by_guid(client, guids) -> dict:
+    """`{guid: metadata_type}` for whatever of `guids` still exists, in ONE search.
+
+    Queried WITHOUT a type restriction: rollback deletes Answers, Liveboards and Views,
+    and the delete endpoint requires the right `type` per item. A guid the search does
+    not return is already gone -- which a re-runnable rollback treats as done, not as an
+    error.
+    """
+    if not guids:
+        return {}
+    resp = client.post("/api/rest/2.0/metadata/search", json={
+        "metadata": [{"identifier": g} for g in sorted(guids)],
+        "include_headers": True, "record_size": -1, "record_offset": 0})
+    out = {}
+    for row in resp.json():
+        guid = row.get("metadata_id")
+        if guid:
+            out[guid] = row.get("metadata_type") or "LOGICAL_TABLE"
+    return out
+
+
+def _print_rollback_dry_run(content, views) -> None:
+    """Offline by design: the first thing an operator runs, possibly before credentials
+    for the broken target even exist."""
+    for label, named in (("content", content), ("Views", views)):
+        print(f"{label}: {len(named)}")
+        for name, guid in sorted(named.items()):
+            print(f"  {guid}  {name}")
+    _err("Dry run: nothing was deleted.")
+
+
+def _typed_batches(client, content, views):
+    """`[(label, [(guid, type)])]` in delete order, skipping already-gone objects."""
+    recorded = set(content.values()) | set(views.values())
+    types = _types_by_guid(client, recorded)
+    for guid in sorted(recorded - set(types)):
+        _err(f"  already gone: {guid}")
+    return [
+        ("content", [(g, types[g]) for g in sorted(content.values()) if g in types]),
+        ("Views", [(g, types[g]) for g in sorted(views.values()) if g in types]),
+    ]
+
+
 def _delete_in_order(client, ordered) -> List[str]:
     """Delete each labelled batch in turn, collecting problems rather than stopping.
 
     A rollback that aborts on the first refusal strands everything after it -- the same
-    defect fixed in `ts publish rollback`.
+    defect fixed in `ts publish rollback`. Each batch is `(label, [(guid, type)])`:
+    the delete endpoint requires the correct `type` per item, and one batch can mix
+    Answers and Liveboards.
     """
     failures: List[str] = []
-    for label, guids in ordered:
-        if not guids:
+    for label, items in ordered:
+        if not items:
             continue
         resp = client.post("/api/rest/2.0/metadata/delete", raise_for_status=False,
-                           json={"metadata": [{"identifier": g, "type": "LOGICAL_TABLE"}
-                                              for g in guids]})
+                           json={"metadata": [{"identifier": g, "type": t}
+                                              for g, t in items]})
         if resp.status_code >= 300:
             failures.append(f"{label}: HTTP {resp.status_code} {resp.text[:200]}")
         else:
-            _err(f"  deleted {len(guids)} {label}")
+            _err(f"  deleted {len(items)} {label}")
     return failures
 
 
@@ -482,9 +527,13 @@ def rollback_migration(
     **The source Org is never touched** -- it is the real fallback, and `apply` leaves it
     untouched precisely so this command never has to restore anything into it.
 
-    Deletes in the safe order (content, then Models, then Tables), because a Model with
-    dependents refuses to delete. Objects already gone are not an error: a rollback has to
-    be re-runnable, exactly like `ts publish rollback`.
+    Deletes in the safe order (content, then Views), because a View with dependents
+    refuses to delete. Objects already gone are not an error: a rollback has to be
+    re-runnable, exactly like `ts publish rollback`.
+
+    **Same-Org runs are refused.** They update the tenant's objects in place, so the
+    guids the ledger records ARE the originals -- the only undo there is restoring the
+    TML in `backup/`.
 
     Before cutover the target Org holds nothing but this migration's output, so the
     blunter option is to delete the Org outright (`ts tenancy teardown`). Prefer that when
@@ -493,35 +542,30 @@ def rollback_migration(
     import json as _json
     from pathlib import Path
 
-    from ts_cli.migrate.apply_plan import STEP_LIFT_CONTENT, STEP_LIFT_SCAFFOLDING
+    from ts_cli.migrate.apply_plan import rollback_refusal, rollback_sets
 
     state_file = Path(plan_dir) / "state.json"
     if not state_file.exists():
         _err(f"No state.json in {plan_dir}. Nothing is known to have been created.")
         raise typer.Exit(code=1)
     ledger = _json.loads(state_file.read_text())
-    created = ledger.get("created") or {}
-    kinds = ledger.get("kinds") or {}
 
-    content = sorted((created.get(STEP_LIFT_CONTENT) or {}).values())
-    models = sorted(kinds.get("models") or [])
-    tables = sorted(kinds.get("tables") or [])
-    if not (content or models or tables):
+    refusal = rollback_refusal(ledger)
+    if refusal:
+        _err(f"Refused: {refusal}.")
+        raise typer.Exit(code=1)
+
+    content, views = rollback_sets(ledger)
+    if not (content or views):
         _err("The ledger records nothing created. Nothing to roll back.")
         return
 
-    ordered = [("content", content), ("scaffolding Models", models),
-               ("scaffolding Tables", tables)]
     if dry_run:
-        for label, guids in ordered:
-            print(f"{label}: {len(guids)}")
-            for guid in guids:
-                print(f"  {guid}")
-        _err("Dry run: nothing was deleted.")
+        _print_rollback_dry_run(content, views)
         return
 
     client = _org_client(target_profile, target_org)
-    failures = _delete_in_order(client, ordered)
+    failures = _delete_in_order(client, _typed_batches(client, content, views))
     if failures:
         _err("rollback INCOMPLETE:")
         for problem in failures:
