@@ -224,6 +224,51 @@ def target_segmentation(variables: Sequence[Mapping[str, Any]],
     return SEGMENT_SHARED if saw_physical_variable else SEGMENT_UNKNOWN
 
 
+def bound_variable_names(table_docs: Sequence[Mapping[str, Any]]) -> Set[str]:
+    """Variable names actually bound to these Tables' db/schema/table fields.
+
+    A parameterized field carries a whole-value `${var}` token in the exported TML --
+    the same shape `ts publish export` clusters on, so the parse is shared with
+    `publish_plan` rather than restated. Connection-bound variables
+    (`CONNECTION_PROPERTY`) do not surface in table TML and are NOT discoverable here;
+    a target segmented only at the connection level therefore reads as unparameterized
+    and needs the explicit `--allow-unfiltered-target` decision.
+    """
+    from ts_cli.publish_plan import TML_KEY_TO_FIELD, parse_variable_token
+
+    bound: Set[str] = set()
+    for doc in table_docs or ():
+        table = doc.get("table") or {}
+        for tml_key in TML_KEY_TO_FIELD:
+            name = parse_variable_token(table.get(tml_key))
+            if name:
+                bound.add(name)
+    return bound
+
+
+def segmentation_for_target(table_docs: Sequence[Mapping[str, Any]],
+                            variables: Sequence[Mapping[str, Any]],
+                            target_org: Optional[str]) -> str:
+    """`target_segmentation`, scoped to the variables the TARGET's tables actually bind.
+
+    The unscoped form read every template variable on the cluster, so ANY unrelated
+    publishing programme's `TABLE_MAPPING` variable with two per-Org values yielded
+    SEGMENT_PHYSICAL -- and the no-RLS refusal (the check keeping tenants out of each
+    other's rows) was skipped for a target that resolves every Org to the same physical
+    table (audit 2026-07-29 finding 17.4).
+
+    Readable tables with NO bound variable are SEGMENT_SHARED outright: static
+    db/schema/table values resolve identically in every Org, so RLS is the only
+    separator and must be checked. No table docs at all stays SEGMENT_UNKNOWN --
+    an unreadable check is not a passed one.
+    """
+    bound = bound_variable_names(table_docs)
+    if table_docs and not bound:
+        return SEGMENT_SHARED
+    scoped = [v for v in variables or () if (v.get("name") or "") in bound]
+    return target_segmentation(scoped, target_org)
+
+
 def unfiltered_target_problem(table_rule_counts: Mapping[str, int], model_name: str,
                               allow: bool = False,
                               segmentation: str = SEGMENT_SHARED) -> Optional[str]:

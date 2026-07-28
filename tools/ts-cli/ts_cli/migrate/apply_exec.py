@@ -15,7 +15,8 @@ from typing import Any, Dict, List, Optional
 
 from ts_cli.migrate.apply_plan import (STEP_BACKUP, STEP_MOVE_SHIELDED,
                                        STEP_REWRITE_CONTENT, STEP_REWRITE_VIEWS,
-                                       STEP_SHARE, target_segmentation,
+                                       STEP_SHARE, bound_variable_names,
+                                       segmentation_for_target,
                                        unfiltered_target_problem)
 from ts_cli.migrate.rewrite import residual_references, rewrite_content, rewrite_view
 
@@ -103,24 +104,36 @@ def imported_guids(results: List[Dict[str, Any]]) -> Dict[str, str]:
     return out
 
 
-def rls_rule_counts(client, model_guid: str) -> Dict[str, int]:
-    """`{table_name: rule_count}` for the tables under a Model.
+def model_table_docs(client, model_guid: str) -> List[Dict[str, Any]]:
+    """The exported TML of every Table under a Model, in two batched calls.
 
     Read through the TARGET Org's session: a published object is Primary-owned but
     visible in the tenant Org, and reading it as the tenant reads what the tenant is
-    actually bound to (verified 2026-07-28).
+    actually bound to (verified 2026-07-28). One export feeds BOTH tenant-isolation
+    reads -- the RLS rule counts and the `${var}` publication bindings -- so the two
+    checks cannot diverge on what they looked at.
     """
     docs = export_tml(client, [model_guid])
     if not docs:
-        return {}
+        return []
     body = docs[0].get("model") or docs[0].get("worksheet") or {}
     fqns = [t.get("fqn") for t in body.get("model_tables") or [] if t.get("fqn")]
+    return export_tml(client, fqns)
+
+
+def rls_rule_counts_from_docs(table_docs: List[Dict[str, Any]]) -> Dict[str, int]:
+    """`{table_name: rule_count}` from already-exported Table documents."""
     counts: Dict[str, int] = {}
-    for doc in export_tml(client, fqns):
+    for doc in table_docs:
         table = doc.get("table") or {}
         counts[table.get("name") or "?"] = len((table.get("rls_rules") or {})
                                                .get("rules") or [])
     return counts
+
+
+def rls_rule_counts(client, model_guid: str) -> Dict[str, int]:
+    """`{table_name: rule_count}` for the tables under a Model."""
+    return rls_rule_counts_from_docs(model_table_docs(client, model_guid))
 
 
 # ---------------------------------------------------------------------------
@@ -180,9 +193,16 @@ def _assert_tenants_separated(ctx: Ctx, target: Dict[str, str]) -> None:
     guid = target.get("guid")
     if not guid or ctx.dry_run:
         return
-    segmentation = target_segmentation(publication_variables(ctx.unscoped),
-                                       target.get("org"))
-    problem = unfiltered_target_problem(rls_rule_counts(ctx.target, guid),
+    # One export feeds both halves of the check. The variables read stays UNSCOPED
+    # (values are a cross-Org question) but is then filtered to the variables the
+    # target's tables actually bind -- an unrelated programme's per-Org variable must
+    # not vouch for THIS target's segmentation (audit 2026-07-29 finding 17.4). The
+    # cluster read is skipped entirely when nothing is bound.
+    docs = model_table_docs(ctx.target, guid)
+    variables = (publication_variables(ctx.unscoped)
+                 if bound_variable_names(docs) else [])
+    segmentation = segmentation_for_target(docs, variables, target.get("org"))
+    problem = unfiltered_target_problem(rls_rule_counts_from_docs(docs),
                                         target.get("name", guid),
                                         allow=ctx.allow_unfiltered,
                                         segmentation=segmentation)
@@ -207,9 +227,18 @@ def _rewrite_batch(ctx: Ctx, step: Dict[str, Any], transform) -> Dict[str, str]:
         raise StepFailed(f"exported {len(docs)} of {len(guids)} object(s); refusing to "
                          f"migrate a partial set")
 
+    # Views the content batch's mixed dependents may ALSO read (an Answer on the
+    # migrating Model and a View at once -- classify_dependent charges it as content).
+    # Their View reference must follow the View created by rewrite_views, not stay on
+    # the source View's guid, and must never be rebound to the published Model.
+    view_remap = _view_guid_remap(ctx, objects) if transform is rewrite_content else {}
+
     rewritten = []
     for doc in docs:
-        out = transform(doc, columns, target["guid"], target.get("name"))
+        out = transform(doc, columns, target["guid"], target.get("name"),
+                        target.get("source_guid"))
+        if view_remap:
+            out = _repoint_fqns(out, view_remap)
         # The completeness gate, per object. A partial rewrite imports cleanly and
         # RENDERS WRONG, so this is checked before writing rather than discovered by a
         # user later.

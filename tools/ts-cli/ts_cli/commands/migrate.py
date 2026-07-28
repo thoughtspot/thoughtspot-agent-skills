@@ -350,6 +350,15 @@ def apply_migration(
     target_client = _org_client(target_profile, target_org)
 
     names = sorted({r.model for r in rows})
+    if len(names) > 1:
+        # apply binds every rewritten object to ONE published target, so a multi-Model
+        # mapping (which `audit --all-models` writes by design) would repoint Model B's
+        # content onto Model A's master -- imports cleanly, renders wrong (audit
+        # 2026-07-29 finding 17.2). Refused until per-pair planning exists.
+        _refuse(f"column-mapping.csv covers {len(names)} Models "
+                f"({', '.join(names)}), and `apply` binds all rewritten content to ONE "
+                f"published target -- Model B's content would land on Model A's master. "
+                f"Split the mapping per Model and run one `apply` per Model")
     _validate_or_exit(source_client, rows, blocked, names)
 
     mode = import_mode(source_org, target_org, source_profile, target_profile)

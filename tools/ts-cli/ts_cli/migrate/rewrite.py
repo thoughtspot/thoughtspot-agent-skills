@@ -160,14 +160,31 @@ def _rewrite_node(node: Any, path: List[str], column_map: Mapping[str, str]) -> 
 
 
 def repoint_source(doc: Dict[str, Any], target_guid: str,
-                   target_name: Optional[str] = None) -> Dict[str, Any]:
-    """Point every `tables[]` entry at the target Model.
+                   target_name: Optional[str] = None,
+                   source_guid: Optional[str] = None) -> Dict[str, Any]:
+    """Point the `tables[]` entries that reference the MIGRATING Model at the target.
 
     `fqn` is the only stable reference in a content document, so it is the one field that
     must be right. `id` and `name` are updated alongside it because resolution falls back
     to the name when the fqn is dead -- leaving a stale name means a silent
     bind-to-the-wrong-object if a same-named object exists in the target.
+
+    Only entries that reference the source Model are touched: an entry whose `fqn` is
+    `source_guid`, or -- when the fqn is absent -- whose `name` matches the Model's name
+    (`target_name`: source and target share it, that is how the target was matched). A
+    dependent can read the migrating Model AND another source (classify_dependent takes
+    the worst kind of a mixed dependent), and rebinding the OTHER source too imports
+    cleanly and renders wrong -- audit 2026-07-29 finding 17.3. `source_guid=None`
+    preserves the old rebind-everything behaviour for single-source callers that have
+    no guid to scope by.
     """
+    def references_source(entry: Dict[str, Any]) -> bool:
+        if source_guid is None:
+            return True
+        if entry.get("fqn"):
+            return entry["fqn"] == source_guid
+        return bool(target_name) and entry.get("name") == target_name
+
     def walk(node, path):
         if isinstance(node, dict):
             return {k: walk(v, path + [k]) for k, v in node.items()}
@@ -175,7 +192,7 @@ def repoint_source(doc: Dict[str, Any], target_guid: str,
             if path and path[-1] == "tables":
                 out = []
                 for entry in node:
-                    if isinstance(entry, dict):
+                    if isinstance(entry, dict) and references_source(entry):
                         entry = dict(entry)
                         entry["fqn"] = target_guid
                         if target_name:
@@ -189,15 +206,16 @@ def repoint_source(doc: Dict[str, Any], target_guid: str,
 
 
 def rewrite_content(doc: Dict[str, Any], column_map: Mapping[str, str],
-                    target_guid: str, target_name: Optional[str] = None
-                    ) -> Dict[str, Any]:
+                    target_guid: str, target_name: Optional[str] = None,
+                    source_guid: Optional[str] = None) -> Dict[str, Any]:
     """The migration, for one Answer or Liveboard: repoint, then rewrite columns."""
-    return _rewrite_node(repoint_source(doc, target_guid, target_name), [], column_map)
+    return _rewrite_node(repoint_source(doc, target_guid, target_name, source_guid),
+                         [], column_map)
 
 
 def rewrite_view(doc: Dict[str, Any], column_map: Mapping[str, str],
-                 target_guid: str, target_name: Optional[str] = None
-                 ) -> Dict[str, Any]:
+                 target_guid: str, target_name: Optional[str] = None,
+                 source_guid: Optional[str] = None) -> Dict[str, Any]:
     """Repoint a View, PRESERVING what it exposes downstream.
 
     A View's output column has two independent fields: `search_output_column` binds to the
@@ -208,7 +226,7 @@ def rewrite_view(doc: Dict[str, Any], column_map: Mapping[str, str],
     Proven end to end 2026-07-28: a View repointed to a different Model, through a
     different column name, kept its alias AND kept returning data to an untouched Answer.
     """
-    out = rewrite_content(doc, column_map, target_guid, target_name)
+    out = rewrite_content(doc, column_map, target_guid, target_name, source_guid)
     body = out.get("view")
     original = (doc.get("view") or {}).get("view_columns") or []
     if isinstance(body, dict):
