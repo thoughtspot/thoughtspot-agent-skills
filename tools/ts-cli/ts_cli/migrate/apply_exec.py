@@ -13,8 +13,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ts_cli.migrate.apply_plan import (STEP_BACKUP, STEP_REWRITE_CONTENT,
-                                       STEP_REWRITE_VIEWS, target_segmentation,
+from ts_cli.migrate.apply_plan import (STEP_BACKUP, STEP_MOVE_SHIELDED,
+                                       STEP_REWRITE_CONTENT, STEP_REWRITE_VIEWS,
+                                       target_segmentation,
                                        unfiltered_target_problem)
 from ts_cli.migrate.rewrite import residual_references, rewrite_content, rewrite_view
 
@@ -253,8 +254,104 @@ def run_rewrite_content(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
     return _rewrite_batch(ctx, step, rewrite_content)
 
 
+def _view_guid_remap(ctx: Ctx, objects: List[Dict[str, Any]]) -> Dict[str, str]:
+    """`{source View guid -> target View guid}` for the Views these objects sit on.
+
+    Matched by View NAME, which `rewrite_views` recorded in the ledger. The source guid is
+    dead in the target, so the name is the only bridge.
+    """
+    created_views = ctx.created(STEP_REWRITE_VIEWS)
+    refs = sorted({r for o in objects for r in o.get("source_refs") or []})
+    remap: Dict[str, str] = {}
+    for doc in export_tml(ctx.source, refs):
+        new_guid = created_views.get((doc.get("view") or {}).get("name"))
+        if doc.get("guid") and new_guid:
+            remap[doc["guid"]] = new_guid
+    return remap
+
+
+def run_move_shielded(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
+    """Copy View-shielded content into the target, repointing it at the NEW View.
+
+    Its columns are **not** rewritten -- the View's exposed names did not change, which is
+    the whole point of the shield. But in a new-Org run the content still has to exist
+    over there, and its `tables[].fqn` still points at the SOURCE View's guid, which is
+    dead in the target.
+
+    Omitting this step is silent data loss: the tenant's Answer simply would not appear.
+    Observed live 2026-07-28.
+    """
+    objects = step["objects"]
+    if not objects or ctx.dry_run:
+        return {}
+
+    remap = _view_guid_remap(ctx, objects)
+    guids = [o["guid"] for o in objects]
+    docs = export_tml(ctx.source, guids)
+    if len(docs) != len(guids):
+        raise StepFailed(f"exported {len(docs)} of {len(guids)} shielded object(s); "
+                         f"refusing to move a partial set")
+
+    moved = []
+    for doc in docs:
+        unresolved = [r for r in _table_fqns(doc) if r not in remap]
+        if unresolved:
+            raise StepFailed(
+                f"'{_doc_name(doc)}' sits on a View that was not migrated "
+                f"({', '.join(unresolved)}). Moving it would leave it bound to an object "
+                f"that does not exist in the target")
+        out = _repoint_fqns(doc, remap)
+        out.pop("guid", None)
+        moved.append(out)
+
+    results = import_tml(ctx.target, moved, create_new=True)
+    failures = import_failures(results)
+    if failures:
+        raise StepFailed("shielded-content move failed:\n  " + "\n  ".join(failures))
+    return imported_guids(results)
+
+
+def _table_fqns(doc: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+
+    def walk(node, key=None):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, k)
+        elif isinstance(node, list):
+            if key == "tables":
+                out.extend(e["fqn"] for e in node
+                           if isinstance(e, dict) and e.get("fqn"))
+            else:
+                for v in node:
+                    walk(v, key)
+
+    walk(doc)
+    return out
+
+
+def _repoint_fqns(doc: Dict[str, Any], remap: Dict[str, str]) -> Dict[str, Any]:
+    """Swap each `tables[].fqn` for its target-Org equivalent, leaving names alone."""
+    def walk(node, key=None):
+        if isinstance(node, dict):
+            return {k: walk(v, k) for k, v in node.items()}
+        if isinstance(node, list):
+            if key == "tables":
+                out = []
+                for e in node:
+                    if isinstance(e, dict) and e.get("fqn") in remap:
+                        e = dict(e)
+                        e["fqn"] = remap[e["fqn"]]
+                    out.append(e)
+                return out
+            return [walk(v, key) for v in node]
+        return node
+    return walk(doc)
+
+
 RUNNERS = {
     STEP_BACKUP: run_backup,
     STEP_REWRITE_VIEWS: run_rewrite_views,
     STEP_REWRITE_CONTENT: run_rewrite_content,
+    STEP_MOVE_SHIELDED: run_move_shielded,
 }

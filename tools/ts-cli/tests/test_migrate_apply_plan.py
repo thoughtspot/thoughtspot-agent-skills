@@ -198,11 +198,12 @@ def _plan(views=None, content=None, same_org=False):
         import_mode("ACME", "ACME" if same_org else "ACME NEW", "p", "p"))
 
 
-def test_the_plan_is_THREE_steps():
-    """It was eight. Everything else existed to avoid rewriting content, which
-    BL-148/BL-149 showed was never avoidable."""
+def test_the_plan_is_FOUR_steps():
+    """It was eight. Three of the four are the migration; the fourth exists only because
+    shielded content still has to MOVE in a new-Org run, which omitting it made silent
+    data loss."""
     assert [s["step"] for s in _plan()] == list(STEP_ORDER)
-    assert len(STEP_ORDER) == 3
+    assert len(STEP_ORDER) == 4
 
 
 def test_backup_is_first_so_nothing_is_written_before_a_copy_exists():
@@ -382,3 +383,62 @@ def test_the_refusal_offers_the_SEGMENTATION_route_as_well_as_RLS():
 
 def test_UNKNOWN_segmentation_refuses_regardless_of_rls():
     assert unfiltered_target_problem({"SALES": 5}, "Sales", segmentation=SEGMENT_UNKNOWN)
+
+
+# ---------------------------------------------------------------------------
+# Shielded content still has to MOVE — silent data loss otherwise
+# ---------------------------------------------------------------------------
+
+from ts_cli.migrate.apply_plan import STEP_MOVE_SHIELDED  # noqa: E402
+
+
+def _plan_s(shielded, same_org=False):
+    return build_apply_plan(
+        {"source": "ACME", "target": "ACME NEW"},
+        [{"guid": "v1", "name": "V"}], [{"guid": "a1", "name": "A"}],
+        {"Segment": "STRING_1"}, {"guid": "tgt", "name": "PUBLISHED"},
+        import_mode("ACME", "ACME" if same_org else "ACME NEW", "p", "p"),
+        shielded=shielded)
+
+
+def test_shielded_content_IS_MOVED_in_a_new_org_run():
+    """Observed live 2026-07-28: excluding it entirely meant the tenant's Answer simply
+    did not exist in the target. The shield removes the column REWRITE, not the move."""
+    plan = _plan_s([{"guid": "s1", "name": "OnView", "source_refs": ["v1"]}])
+    step = [s for s in plan if s["step"] == STEP_MOVE_SHIELDED][0]
+    assert [o["guid"] for o in step["objects"]] == ["s1"]
+
+
+def test_shielded_content_is_NOT_moved_in_a_same_org_run():
+    """There is nowhere to move it to: it stays where it is, and the repointed View keeps
+    working underneath it."""
+    plan = _plan_s([{"guid": "s1", "name": "OnView", "source_refs": ["v1"]}],
+                   same_org=True)
+    assert [s for s in plan if s["step"] == STEP_MOVE_SHIELDED][0]["objects"] == []
+
+
+def test_shielded_content_is_BACKED_UP_either_way():
+    """It is in scope for the migration whether or not it moves, so losing it from the
+    backup would remove the only copy in a same-Org rollback."""
+    plan = _plan_s([{"guid": "s1", "name": "OnView", "source_refs": ["v1"]}],
+                   same_org=True)
+    assert "s1" in plan[0]["objects"]
+
+
+def test_the_move_runs_LAST_because_it_needs_the_new_view_guids():
+    order = list(STEP_ORDER)
+    assert order.index(STEP_MOVE_SHIELDED) > order.index(STEP_REWRITE_VIEWS)
+
+
+def test_the_dry_run_says_shielded_columns_are_UNCHANGED():
+    """An operator seeing "1 object copied" alongside the rewrite steps could reasonably
+    assume it was rewritten too."""
+    md = render_plan(_plan_s([{"guid": "s1", "name": "OnView", "source_refs": ["v1"]}]))
+    assert "columns UNCHANGED" in md
+
+
+def test_the_dry_run_explains_the_empty_same_org_case():
+    """"none" alone reads as "nothing was found", which would hide a scope error."""
+    md = render_plan(_plan_s([{"guid": "s1", "name": "V", "source_refs": ["v1"]}],
+                             same_org=True))
+    assert "stays where it is" in md

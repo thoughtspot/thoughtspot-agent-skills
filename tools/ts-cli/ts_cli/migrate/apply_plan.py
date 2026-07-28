@@ -24,8 +24,9 @@ from ts_cli.migrate.schema import ColumnMappingRow, GAP_BLOCKER, SET_BLOCKER
 STEP_BACKUP = "backup"
 STEP_REWRITE_VIEWS = "rewrite_views"
 STEP_REWRITE_CONTENT = "rewrite_content"
+STEP_MOVE_SHIELDED = "move_shielded"
 
-STEP_ORDER = (STEP_BACKUP, STEP_REWRITE_VIEWS, STEP_REWRITE_CONTENT)
+STEP_ORDER = (STEP_BACKUP, STEP_REWRITE_VIEWS, STEP_REWRITE_CONTENT, STEP_MOVE_SHIELDED)
 
 
 # ---------------------------------------------------------------------------
@@ -241,21 +242,31 @@ def unfiltered_target_problem(table_rule_counts: Mapping[str, int], model_name: 
 
 def build_apply_plan(pair: Dict[str, str], views: List[Dict[str, Any]],
                      content: List[Dict[str, Any]], columns: Mapping[str, str],
-                     target: Dict[str, str], mode: Dict[str, Any]
+                     target: Dict[str, str], mode: Dict[str, Any],
+                     shielded: Optional[List[Dict[str, Any]]] = None
                      ) -> List[Dict[str, Any]]:
     """The ordered steps for one (source -> target) pair.
 
-    `views` and `content` are classified dependent rows. Content already shielded by a
-    View is **not** in `content`: rewriting the View covers it, and rewriting it again
-    would be work that can only introduce error.
+    `content` is the chargeable set: objects needing a column rewrite. `shielded` is
+    content sitting on a View, which needs **no column rewriting** because the View's
+    exposed names do not change.
+
+    **Shielded content is still MOVED in a new-Org run**, and omitting it is silent data
+    loss -- the tenant's Answer simply would not exist in the target. Observed live
+    2026-07-28 before this step existed. In a same-Org run there is nothing to move: the
+    content stays where it is and the repointed View keeps working underneath it.
     """
+    shielded = list(shielded or [])
+    moving = shielded if not mode.get("same_org") else []
     steps: List[Dict[str, Any]] = [
         {"step": STEP_BACKUP,
-         "objects": sorted({d["guid"] for d in list(views) + list(content)})},
+         "objects": sorted({d["guid"] for d in list(views) + list(content) + shielded})},
         {"step": STEP_REWRITE_VIEWS, "objects": list(views),
          "columns": dict(columns), "target": dict(target), "mode": dict(mode)},
         {"step": STEP_REWRITE_CONTENT, "objects": list(content),
          "columns": dict(columns), "target": dict(target), "mode": dict(mode)},
+        # Last: it needs the View guids that rewrite_views created.
+        {"step": STEP_MOVE_SHIELDED, "objects": moving, "mode": dict(mode)},
     ]
     for step in steps:
         step["pair"] = dict(pair)
@@ -305,6 +316,12 @@ def _render_rewrite_step(step: Dict[str, Any]) -> List[str]:
     objs = step["objects"]
     mode = step.get("mode") or {}
     verb = "updated in place" if mode.get("same_org") else "created fresh"
+    if step["step"] == STEP_MOVE_SHIELDED:
+        if objs:
+            return [f"   - {len(objs)} object(s) copied, columns UNCHANGED — the View's "
+                    f"exposed names did not change, only its `fqn` is repointed"]
+        return ["   - none (same-Org run: shielded content stays where it is)"
+                if mode.get("same_org") else "   - none"]
     lines = [f"   - {len(objs)} object(s), {verb}"]
     if step["step"] == STEP_REWRITE_VIEWS and objs:
         lines.append("   - a View's exposed column names are PRESERVED, so content "

@@ -61,10 +61,10 @@ def test_views_are_rewritten_BEFORE_content_in_both_engine_and_skill():
     assert text.index("| `rewrite_views` |") < text.index("| `rewrite_content` |")
 
 
-def test_the_skill_states_the_migration_is_THREE_steps():
-    """It was eight. A skill still describing the scaffolding dance would have an
-    operator looking for steps the engine no longer runs."""
-    assert len(STEP_ORDER) == 3
+def test_the_skill_documents_the_engines_step_count():
+    """A skill still describing the scaffolding dance would have an operator looking for
+    steps the engine no longer runs."""
+    assert len(STEP_ORDER) == 4
     text = _skill_text()
     # The DELETED step names, not the word "scaffolding" -- the changelog legitimately
     # says "no scaffolding", and a test that cannot tell those apart is noise.

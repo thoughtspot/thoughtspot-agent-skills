@@ -112,10 +112,17 @@ Three steps:
 | `backup` | Exports everything in scope before anything is written. All-or-nothing |
 | `rewrite_views` | Repoints Views, **preserving what they expose**, so their content needs nothing |
 | `rewrite_content` | Rewrites the chargeable Answers and Liveboards onto the published Model |
+| `move_shielded` | Copies View-shielded content **without rewriting its columns** — new-Org runs only |
 
 Each object's rewrite changes exactly two things: the data-source reference and the column
 names. Progress is recorded in `plan/state.json`, so an interrupted run resumes with
 `--resume`.
+
+**Why `move_shielded` exists.** A View shields its content from the *column rewrite*, not
+from the migration. In a **new-Org** run that content still has to exist over there, and
+its `fqn` still points at the source View, which is dead in the target. Omitting it was
+silent data loss — the tenant's Answer simply did not appear. In a **same-Org** run the
+step is empty: the content stays put and the repointed View keeps working underneath it.
 
 ### The three topologies
 

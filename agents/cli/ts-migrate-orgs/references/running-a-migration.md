@@ -131,8 +131,14 @@ ts migrate apply --source-org <TENANT> --target-org <TARGET> \
 | `backup` | Exports everything in scope. All-or-nothing |
 | `rewrite_views` | Repoints Views **preserving what they expose** |
 | `rewrite_content` | Rewrites chargeable Answers and Liveboards |
+| `move_shielded` | Copies View-shielded content, columns **unchanged** (new-Org runs only) |
 
 Progress is in `plan/state.json`; resume with `--resume`.
+
+**A View shields content from the column rewrite, not from the migration.** In a new-Org
+run that content still has to be copied over and repointed at the newly-created View.
+`move_shielded` runs last because it needs the View guids the previous step created. In a
+same-Org run it is empty: the content stays where it is.
 
 ### Step 7 — Aliases, once per WAVE not per tenant
 

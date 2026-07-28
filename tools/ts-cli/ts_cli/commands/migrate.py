@@ -327,7 +327,8 @@ def apply_migration(
     _validate_or_exit(source_client, rows, blocked, names)
 
     mode = import_mode(source_org, target_org, source_profile, target_profile)
-    views, content, targets = _classify_scope(source_client, target_client, names)
+    views, content, shielded, targets = _classify_scope(
+        source_client, target_client, names)
     if not targets:
         _err("No published Model in the target Org matches the source Model name(s). "
              "Publish it before migrating content onto it.")
@@ -335,7 +336,8 @@ def apply_migration(
 
     plan = build_apply_plan({"source": source_org or "source",
                              "target": target_org or "target"},
-                            views, content, column_map(rows), targets[0], mode)
+                            views, content, column_map(rows), targets[0], mode,
+                            shielded=shielded)
     if dry_run:
         print(render_plan(plan))
         _err("Dry run: nothing was changed.")
@@ -367,14 +369,15 @@ def apply_migration(
 
 
 def _classify_scope(source_client, target_client, model_names):
-    """Split the migration scope into Views, chargeable content, and the target Model(s).
+    """Split the scope into Views, chargeable content, SHIELDED content, and targets.
 
-    Content already shielded by a View is deliberately EXCLUDED: repointing the View
-    covers it, and rewriting it again would be work that can only introduce error.
+    Shielded content needs no column rewriting -- the View's exposed names do not change.
+    It is returned separately rather than dropped, because in a new-Org run it still has
+    to be MOVED, and omitting it is silent data loss.
     """
     from ts_cli.migrate import classify, discover
 
-    views, content, targets = [], [], []
+    views, content, shielded, targets = [], [], [], []
     for name in model_names:
         source_guid = discover.find_model_by_name(source_client, name)
         target_guid = discover.find_model_by_name(target_client, name)
@@ -394,7 +397,9 @@ def _classify_scope(source_client, target_client, model_names):
                 views.append(item)          # the View itself: repoint it
             elif item["needs_rewrite"]:
                 content.append(item)        # chargeable
-    return views, content, targets
+            else:
+                shielded.append(item)       # free to rewrite, but still has to move
+    return views, content, shielded, targets
 
 
 def _delete_in_order(client, ordered) -> List[str]:
