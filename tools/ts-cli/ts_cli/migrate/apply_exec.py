@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from ts_cli.migrate.apply_plan import (STEP_BACKUP, STEP_MOVE_SHIELDED,
                                        STEP_REWRITE_CONTENT, STEP_REWRITE_VIEWS,
-                                       target_segmentation,
+                                       STEP_SHARE, target_segmentation,
                                        unfiltered_target_problem)
 from ts_cli.migrate.rewrite import residual_references, rewrite_content, rewrite_view
 
@@ -361,9 +361,98 @@ def _repoint_fqns(doc: Dict[str, Any], remap: Dict[str, str]) -> Dict[str, Any]:
     return walk(doc)
 
 
+def source_group_grants(client, objects: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """`{object name: [group names]}` for the GROUP grants on the source objects.
+
+    Group level only, deliberately. A per-user grant cannot reliably be applied before
+    cutover -- the users may not be in the target Org yet -- and group membership is where
+    a tenant's access is actually administered.
+
+    Reads through `share_plan.permission_rows`, which encodes the gotcha that a landed
+    share shows in `permission` and NOT in `shared_permission`.
+    """
+    from ts_cli.share_plan import permission_rows
+
+    out: Dict[str, List[str]] = {}
+    for obj in objects:
+        resp = client.post("/api/rest/2.0/security/metadata/fetch-permissions",
+                           raise_for_status=False,
+                           json={"metadata": [{"identifier": obj["guid"],
+                                               "type": obj.get("type") or "ANSWER"}]})
+        if resp.status_code >= 300:
+            continue
+        groups = sorted({r["principal_name"] for r in permission_rows(resp.json())
+                         if r.get("principal_type") == "USER_GROUP"
+                         and r.get("permission") not in (None, "", "NO_ACCESS")})
+        if groups:
+            out[obj.get("name") or obj["guid"]] = groups
+    return out
+
+
+def run_share_grants(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
+    """Re-establish GROUP grants on the migrated objects.
+
+    **TML carries no sharing information at all** -- no `share`, `permission`, `principal`,
+    `group` or `acl` key. So migrated content is authored by the migrating admin and
+    visible to nobody else: the migration completes, every check passes, and not one
+    tenant user can see anything (BL-150). An admin verifying it sees everything, which is
+    why this failure survives verification.
+
+    Groups are **per-Org principals**, so a grant is applied against the TARGET Org's
+    group of that name. A group missing there is reported rather than skipped silently --
+    a dropped grant is invisible until a user complains.
+    """
+    objects = step["objects"]
+    if not objects or ctx.dry_run:
+        return {}
+
+    wanted = source_group_grants(ctx.source, objects)
+    if not wanted:
+        print("  share_grants: no group grants on the source objects -- nothing to "
+              "re-establish", file=__import__("sys").stderr)
+        return {}
+
+    created = {**ctx.created(STEP_REWRITE_CONTENT), **ctx.created(STEP_MOVE_SHIELDED)}
+    missing_groups, applied = [], 0
+    for name, groups in sorted(wanted.items()):
+        target_guid = created.get(name)
+        if not target_guid:
+            continue
+        for group in groups:
+            resp = ctx.target.post(
+                "/api/rest/2.0/security/metadata/share", raise_for_status=False,
+                json={"metadata_type": _type_of(objects, name),
+                      "metadata_identifiers": [target_guid],
+                      "permissions": [{"principal": {"type": "USER_GROUP",
+                                                     "identifier": group},
+                                       "share_mode": "READ_ONLY"}],
+                      "message": "Re-established by ts migrate apply",
+                      "notify_on_share": False})
+            if resp.status_code >= 300:
+                missing_groups.append(f"{name} -> {group}")
+            else:
+                applied += 1
+
+    if missing_groups:
+        raise StepFailed(
+            f"re-established {applied} grant(s), but these could not be applied: "
+            f"{', '.join(missing_groups)}. Groups are PER-ORG principals, so the target "
+            f"Org needs a group of each name (provision it with `ts tenancy`). Until then "
+            f"those objects are invisible to the tenant's users")
+    return {}
+
+
+def _type_of(objects: List[Dict[str, Any]], name: str) -> str:
+    for obj in objects:
+        if (obj.get("name") or obj["guid"]) == name:
+            return obj.get("type") or "ANSWER"
+    return "ANSWER"
+
+
 RUNNERS = {
     STEP_BACKUP: run_backup,
     STEP_REWRITE_VIEWS: run_rewrite_views,
     STEP_REWRITE_CONTENT: run_rewrite_content,
     STEP_MOVE_SHIELDED: run_move_shielded,
+    STEP_SHARE: run_share_grants,
 }

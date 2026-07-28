@@ -25,8 +25,10 @@ STEP_BACKUP = "backup"
 STEP_REWRITE_VIEWS = "rewrite_views"
 STEP_REWRITE_CONTENT = "rewrite_content"
 STEP_MOVE_SHIELDED = "move_shielded"
+STEP_SHARE = "share_grants"
 
-STEP_ORDER = (STEP_BACKUP, STEP_REWRITE_VIEWS, STEP_REWRITE_CONTENT, STEP_MOVE_SHIELDED)
+STEP_ORDER = (STEP_BACKUP, STEP_REWRITE_VIEWS, STEP_REWRITE_CONTENT, STEP_MOVE_SHIELDED,
+              STEP_SHARE)
 
 
 # ---------------------------------------------------------------------------
@@ -265,8 +267,15 @@ def build_apply_plan(pair: Dict[str, str], views: List[Dict[str, Any]],
          "columns": dict(columns), "target": dict(target), "mode": dict(mode)},
         {"step": STEP_REWRITE_CONTENT, "objects": list(content),
          "columns": dict(columns), "target": dict(target), "mode": dict(mode)},
-        # Last: it needs the View guids that rewrite_views created.
+        # Last two: both need the target guids the preceding steps created.
         {"step": STEP_MOVE_SHIELDED, "objects": moving, "mode": dict(mode)},
+        # TML carries no sharing information at all, so migrated content lands visible to
+        # nobody but the migrating admin -- the migration "succeeds" and not one tenant
+        # user can see anything (BL-150). Group level only: a per-user grant cannot always
+        # be applied before cutover, since the users may not be in the target Org yet.
+        {"step": STEP_SHARE, "objects": (list(content) + moving
+                                        if not mode.get("same_org") else []),
+         "mode": dict(mode)},
     ]
     for step in steps:
         step["pair"] = dict(pair)
@@ -311,17 +320,32 @@ def record_failure(ledger: Dict[str, Any], step: str, detail: str) -> Dict[str, 
 # Rendering
 # ---------------------------------------------------------------------------
 
+def _render_share(objs, mode) -> List[str]:
+    if objs:
+        return [f"   - re-establish GROUP grants on {len(objs)} object(s). TML carries no "
+                f"sharing, so without this the tenant's users see nothing"]
+    return ["   - none (same-Org run: existing grants are untouched)"
+            if mode.get("same_org") else "   - none"]
+
+
+def _render_shielded(objs, mode) -> List[str]:
+    if objs:
+        return [f"   - {len(objs)} object(s) copied, columns UNCHANGED — the View's "
+                f"exposed names did not change, only its `fqn` is repointed"]
+    return ["   - none (same-Org run: shielded content stays where it is)"
+            if mode.get("same_org") else "   - none"]
+
+
 def _render_rewrite_step(step: Dict[str, Any]) -> List[str]:
-    """The lines for one rewrite step."""
+    """The lines for one non-backup step."""
     objs = step["objects"]
     mode = step.get("mode") or {}
-    verb = "updated in place" if mode.get("same_org") else "created fresh"
+    if step["step"] == STEP_SHARE:
+        return _render_share(objs, mode)
     if step["step"] == STEP_MOVE_SHIELDED:
-        if objs:
-            return [f"   - {len(objs)} object(s) copied, columns UNCHANGED — the View's "
-                    f"exposed names did not change, only its `fqn` is repointed"]
-        return ["   - none (same-Org run: shielded content stays where it is)"
-                if mode.get("same_org") else "   - none"]
+        return _render_shielded(objs, mode)
+
+    verb = "updated in place" if mode.get("same_org") else "created fresh"
     lines = [f"   - {len(objs)} object(s), {verb}"]
     if step["step"] == STEP_REWRITE_VIEWS and objs:
         lines.append("   - a View's exposed column names are PRESERVED, so content "

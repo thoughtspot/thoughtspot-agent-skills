@@ -61,10 +61,19 @@ def test_views_are_rewritten_BEFORE_content_in_both_engine_and_skill():
     assert text.index("| `rewrite_views` |") < text.index("| `rewrite_content` |")
 
 
+def test_the_skill_says_migrated_content_is_INVISIBLE_without_re_sharing():
+    """The failure that survives verification: an admin sees objects regardless of
+    sharing, so the migration looks complete while the tenant sees an empty Org."""
+    text = _skill_text()
+    assert "TML carries no sharing information" in text
+    assert "visible to **nobody else**" in text
+    assert "per-Org principals" in text
+
+
 def test_the_skill_documents_the_engines_step_count():
     """A skill still describing the scaffolding dance would have an operator looking for
     steps the engine no longer runs."""
-    assert len(STEP_ORDER) == 4
+    assert len(STEP_ORDER) == 5
     text = _skill_text()
     # The DELETED step names, not the word "scaffolding" -- the changelog legitimately
     # says "no scaffolding", and a test that cannot tell those apart is noise.

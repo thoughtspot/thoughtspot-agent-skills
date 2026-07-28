@@ -132,8 +132,15 @@ ts migrate apply --source-org <TENANT> --target-org <TARGET> \
 | `rewrite_views` | Repoints Views **preserving what they expose** |
 | `rewrite_content` | Rewrites chargeable Answers and Liveboards |
 | `move_shielded` | Copies View-shielded content, columns **unchanged** (new-Org runs only) |
+| `share_grants` | Re-establishes **group-level** sharing — new-Org runs only |
 
 Progress is in `plan/state.json`; resume with `--resume`.
+
+**Migrated content lands shared with nobody unless `share_grants` runs.** TML has no
+sharing block, so the objects are authored by the migrating admin and invisible to the
+tenant. An admin verifying the migration sees everything, which is why this failure
+survives verification. Grants are re-applied at **group** level, against the target Org's
+group of that name — so the target needs those groups (provision with `ts tenancy`).
 
 **A View shields content from the column rewrite, not from the migration.** In a new-Org
 run that content still has to be copied over and repointed at the newly-created View.
