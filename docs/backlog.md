@@ -4380,6 +4380,12 @@ published master is owned by Primary, the tenant's copy by the tenant. The same 
 Regression tests were confirmed to fail against the old behaviour with the bug's exact
 signature (`target_guid == '9917a017'`, the source) before being taken as passing.
 
+**Verified live** on `nebula-damian-alias`: the same audit now targets the master
+(`2a743be3`) and returns `NEEDS_MAPPING` with `Segment` a blocker, where it had returned
+`READY` with 6 columns matched. Full record, including the prepared plan and what was
+deliberately not run:
+`docs/superpowers/verification/2026-07-28-ts-migrate-same-org-topology.md`.
+
 ### What this does not fix
 
 The audit now reports `NO_TARGET` in a same-Org run where the master has not been published
