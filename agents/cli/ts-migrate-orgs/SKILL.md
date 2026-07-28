@@ -128,10 +128,11 @@ That failure survives verification, because an admin sees objects regardless of 
 It surfaces only when a real tenant user logs in to an empty Org — possibly after the
 source Org has been retired.
 
-> **Not yet verified live.** The step runs and reports success, but the grants do not
-> register when the target content sits on a published Model (**BL-150**). **Check the
-> grants yourself after any new-Org migration**, and treat an admin-only check as not
-> verified.
+> **Not yet verified live.** The step runs and reports success, but on some Orgs the
+> grants do not register for Answers and Liveboards -- `HTTP 204` with no grant applied
+> (**BL-150**, cause not yet established). **Check the grants yourself after any new-Org
+> migration**, and treat an admin-only check as not verified: an admin sees objects
+> regardless of sharing.
 
 Grants are re-applied at **group** level. Groups are **per-Org principals**, so the target
 Org needs a group of each name; a missing one is reported rather than skipped, because a
