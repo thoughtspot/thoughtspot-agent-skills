@@ -3357,10 +3357,16 @@ section near the top of each missing skill. Verify by an agent run keeping `read
 **Source:** 2026-07-23 benchmark; PR #314 (tableau 4,436 → ~2,900 lines).
 **Affects:** `ts-convert-from-looker` (1,834), `ts-convert-from-snowflake-sv` (1,341),
 `ts-convert-from-databricks-mv` (997) SKILL.md.
-**Status:** IN PROGRESS — looker done 2026-07-28 (~21.0k → ~11.9k est. tokens, 8 new
-references/step-*.md files, no logic change; `check_skill_context_cost` warning cleared).
-Remaining: snowflake-sv, databricks-mv. The gate introduced 2026-07-28 (PR #385) now
-enforces the ceiling this entry was filed for.
+**Status:** DONE 2026-07-28 for the three filed skills — looker #390 (~21.0k → ~11.9k
+est. tokens), databricks-mv #392 (~13.7k → ~11.4k), snowflake-sv #393 (~15.0k → ~11.5k);
+all `check_skill_context_cost` warnings cleared, no logic changes. **Tableau round 2**
+landed the same day: ~57.2k → ~34.4k (−40%, changelog history archived to
+references/changelog-archive.md + step-file appends), but the file remains over the 25k
+hard-fail line and keeps its allowlist entry — the residue is genuine procedural spine
+(~29KB of protected commands/prompts/invariants). A round 3 would have to extract
+prompt-and-command sequences from Steps 4.5/5b/6/7 into step files, trading inline
+flow for size; deferred until the WARN pressure justifies it. The gate introduced
+2026-07-28 (PR #385) now enforces the ceiling this entry was filed for.
 
 SKILL.md size is a per-run token tax (the file is read every run, sometimes in multiple slices). PR #314
 cut tableau ~34% by moving reference-heavy detail (templates, rule tables, report formats) into

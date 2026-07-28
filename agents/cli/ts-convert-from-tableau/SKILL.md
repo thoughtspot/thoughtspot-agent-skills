@@ -632,6 +632,8 @@ API or a supplied `.tds`/`.tdsx`. Full detail (what's in/out of the TWB, how to 
 [references/step-3-parse-fields.md](references/step-3-parse-fields.md) "Published
 datasource (sqlproxy) resolution detail (Step 3.5)".
 
+### Flow
+
 > **ASK before querying the Tableau API.** The user may be a consultant conducting a remote
 > migration without access to the customer's Tableau Server. Do NOT attempt any API call
 > before asking — a failed API call wastes 30–60 seconds and confuses the flow.
@@ -666,8 +668,10 @@ sources, also offer to download and validate the source data (`ts tableau downlo
 {datasource_id} --output-dir {output_dir}`) — see the reference above for the exact
 commands, the `fields` array shape, and the CSV-validation handling.
 
-**Prerequisites:** Tableau profile configured via `/ts-profile-tableau` (optional — skill
-degrades gracefully); `ts` CLI v0.73.0+.
+### Prerequisites
+
+- Tableau profile configured via `/ts-profile-tableau` (optional — skill degrades gracefully)
+- `ts` CLI v0.73.0+
 
 ---
 
