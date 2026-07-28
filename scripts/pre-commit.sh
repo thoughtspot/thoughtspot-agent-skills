@@ -121,6 +121,13 @@ if echo "$STAGED" | grep -q 'SKILL\.md'; then
   run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
 fi
 
+# Skill context cost — a SKILL.md is loaded into context on every invocation;
+# gate its estimated-token size (warn >12k, fail >25k — BL-128 extraction is
+# the remedy). Runs when a SKILL.md or the validator itself is touched.
+if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|tools/validate/check_skill_context_cost\.py)'; then
+  run_check "skill context cost" "tools/validate/check_skill_context_cost.py --root $REPO_ROOT --staged"
+fi
+
 # Smoke tests — every Claude skill (not on the allowlist) must have a smoke test,
 # and non-credential ALLOWLIST exemptions must cite a BL-NNN (audit 6.3).
 # Runs when a SKILL.md, a smoke test, or the validator itself is touched.

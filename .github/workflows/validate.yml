@@ -59,6 +59,7 @@ jobs:
           python3 tools/validate/check_skill_versions.py --root .
           python3 tools/validate/check_smoke_tests.py --root .
           python3 tools/validate/check_skill_naming.py --root .
+          python3 tools/validate/check_skill_context_cost.py --root .
           python3 tools/validate/check_runtime_coverage.py --root .
           python3 tools/validate/check_open_items.py --root . --warn
           # Filesystem-state gates that previously ran ONLY in pre-commit (bypassable
