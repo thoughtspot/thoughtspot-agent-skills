@@ -116,11 +116,15 @@ def build_time_intelligence(
 def merge_into_model(model: dict, built: dict) -> dict:
     """Merge a build_time_intelligence() result into a Model TML dict in place.
 
-    Adds the parameter (unless a same-named one already exists) and appends the formulas +
-    MEASURE columns. Returns the mutated model for chaining."""
+    Idempotent by name: the parameter, formulas and columns are each added only if a
+    same-named entry is not already present — so running `build-timeintel --model` twice
+    on the same file does not produce the duplicate formulas ThoughtSpot rejects on import.
+    Returns the mutated model for chaining."""
     params = model.setdefault("parameters", [])
     if not any(p.get("name") == built["parameter"]["name"] for p in params):
         params.append(built["parameter"])
-    model.setdefault("formulas", []).extend(built["formulas"])
-    model.setdefault("columns", []).extend(built["columns"])
+    existing_formulas = {f.get("name") for f in model.setdefault("formulas", [])}
+    model["formulas"].extend(f for f in built["formulas"] if f["name"] not in existing_formulas)
+    existing_columns = {c.get("name") for c in model.setdefault("columns", [])}
+    model["columns"].extend(c for c in built["columns"] if c["name"] not in existing_columns)
     return model

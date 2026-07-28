@@ -68,3 +68,17 @@ def test_merge_into_model_adds_parameter_once_and_appends():
     # formulas appended (existing + 4 new)
     assert len(merged["formulas"]) == 5
     assert len(merged["columns"]) == 4
+
+
+def test_merge_into_model_is_idempotent():
+    # Running build-timeintel --model twice on the same file must not duplicate formulas
+    # (ThoughtSpot rejects duplicate formula names on import).
+    model = {"name": "M"}
+    built = build_time_intelligence(
+        [{"base_name": "New Hires", "base_expr": "[formula_isNewHire]"}], date_column="Date")
+    merge_into_model(model, built)
+    merge_into_model(model, build_time_intelligence(
+        [{"base_name": "New Hires", "base_expr": "[formula_isNewHire]"}], date_column="Date"))
+    assert len(model["formulas"]) == 4
+    assert len(model["columns"]) == 4
+    assert sum(1 for p in model["parameters"] if p["name"] == "Reference Date") == 1
