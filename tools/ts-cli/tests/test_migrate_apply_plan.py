@@ -290,3 +290,95 @@ def test_dry_run_does_NOT_mention_cutover_for_a_same_org_run():
     """There is no cutover: the users are already there. Mentioning one would imply a
     step that does not exist."""
     assert "Cutover" not in render_plan(_plan(same_org=True))
+
+
+# ---------------------------------------------------------------------------
+# Segmentation — RLS only matters when the Orgs share physical data
+# ---------------------------------------------------------------------------
+
+from ts_cli.migrate.apply_plan import (  # noqa: E402
+    SEGMENT_PER_PRINCIPAL, SEGMENT_PHYSICAL, SEGMENT_SHARED, SEGMENT_UNKNOWN,
+    target_segmentation,
+)
+
+
+def _var(vtype, values):
+    return {"name": "v", "variable_type": vtype,
+            "values": [{"org_identifier": o, "value": v} for o, v in values]}
+
+
+def test_a_table_mapping_with_DIFFERENT_values_per_org_is_physical_segmentation():
+    """Publication points each tenant at its own schema. The tenants are already
+    separated, and demanding RLS on top would be a false alarm."""
+    v = _var("TABLE_MAPPING", [("ACME", "ACME_SCHEMA"), ("GLOBEX", "GLOBEX_SCHEMA")])
+    assert target_segmentation([v], "ACME") == SEGMENT_PHYSICAL
+
+
+def test_a_table_mapping_with_the_SAME_value_everywhere_is_shared():
+    """Live-observed on the fixture: `apj_schema` is ALIAS_TESTS in both Primary and ORG2,
+    so those Orgs really do read the same rows and RLS is the only separator."""
+    v = _var("TABLE_MAPPING", [("Primary", "ALIAS_TESTS"), ("ORG2", "ALIAS_TESTS")])
+    assert target_segmentation([v], "ORG2") == SEGMENT_SHARED
+
+
+def test_a_connection_property_can_also_segment_physically():
+    """Different warehouse connection properties per Org point at different data just as
+    a schema variable does."""
+    v = _var("CONNECTION_PROPERTY", [("ACME", "acme_db"), ("GLOBEX", "globex_db")])
+    assert target_segmentation([v], "ACME") == SEGMENT_PHYSICAL
+
+
+def test_a_USER_PROPERTY_variable_is_per_principal():
+    """Resolved per user, so tenant separation is not an Org-level question at all."""
+    assert target_segmentation([_var("USER_PROPERTY", [])], "ACME") == SEGMENT_PER_PRINCIPAL
+
+
+def test_a_value_scoped_to_a_PRINCIPAL_is_per_principal():
+    v = {"variable_type": "TABLE_MAPPING",
+         "values": [{"org_identifier": "ACME", "value": "x",
+                     "principal_identifier": "user1"}]}
+    assert target_segmentation([v], "ACME") == SEGMENT_PER_PRINCIPAL
+
+
+def test_no_readable_variables_is_UNKNOWN_not_assumed_safe():
+    """Not knowing how a shared Model separates tenants is not the same as knowing it
+    is fine."""
+    assert target_segmentation([], "ACME") == SEGMENT_UNKNOWN
+
+
+def test_a_variable_of_an_IRRELEVANT_type_does_not_imply_sharing():
+    """A FORMULA_VARIABLE says nothing about physical location, so it must not be read as
+    evidence that the Orgs share data."""
+    assert target_segmentation([_var("FORMULA_VARIABLE", [("ACME", "x")])],
+                               "ACME") == SEGMENT_UNKNOWN
+
+
+# --- and what that means for the refusal ---
+
+def test_physically_segmented_orgs_do_NOT_need_RLS():
+    """The correction that matters: firing here would train operators to pass
+    --allow-unfiltered-target reflexively, destroying the check where it counts."""
+    assert unfiltered_target_problem({"SALES": 0}, "Sales",
+                                     segmentation=SEGMENT_PHYSICAL) is None
+
+
+def test_per_principal_segmentation_does_NOT_need_RLS():
+    assert unfiltered_target_problem({"SALES": 0}, "Sales",
+                                     segmentation=SEGMENT_PER_PRINCIPAL) is None
+
+
+def test_SHARED_orgs_with_no_RLS_are_still_refused():
+    problem = unfiltered_target_problem({"SALES": 0}, "Sales",
+                                        segmentation=SEGMENT_SHARED)
+    assert problem and "SAME physical data" in problem
+
+
+def test_the_refusal_offers_the_SEGMENTATION_route_as_well_as_RLS():
+    """Adding RLS is not the only fix, and an operator told only about RLS may add it
+    where pointing the Orgs at different data is the better answer."""
+    problem = unfiltered_target_problem({"SALES": 0}, "Sales", segmentation=SEGMENT_SHARED)
+    assert "different data via the publication variable" in problem
+
+
+def test_UNKNOWN_segmentation_refuses_regardless_of_rls():
+    assert unfiltered_target_problem({"SALES": 5}, "Sales", segmentation=SEGMENT_UNKNOWN)

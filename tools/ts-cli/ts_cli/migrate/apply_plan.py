@@ -153,26 +153,86 @@ def import_mode(source_org: Optional[str], target_org: Optional[str],
 # Tenant isolation
 # ---------------------------------------------------------------------------
 
-def unfiltered_target_problem(table_rule_counts: Mapping[str, int], model_name: str,
-                              allow: bool = False) -> Optional[str]:
-    """Refuse to bind tenant content to a published Model that filters no rows.
+# How a target Org's data is kept separate from other tenants'. RLS is only ONE of these,
+# and demanding it where the platform already segments physically is both wrong and
+# corrosive: it trains operators to pass --allow-unfiltered-target reflexively, which
+# destroys the check for the case where it genuinely matters.
+SEGMENT_PHYSICAL = "physical"            # a variable resolves to a different db/schema/table per Org
+SEGMENT_PER_PRINCIPAL = "per_principal"  # resolved per user/group, so not an Org-level question
+SEGMENT_SHARED = "shared"                # every Org reads the SAME rows -- RLS is the only separator
+SEGMENT_UNKNOWN = "unknown"              # could not be determined
 
-    After the rewrite the tenant's content reads the **shared** published Model. If its
-    tables carry no row-level security, every tenant sees every other tenant's rows --
-    the worst outcome the programme can produce, and silent.
+# Variable classes that segment by resolving differently per PRINCIPAL rather than per Org.
+_PER_PRINCIPAL_TYPES = {"CONNECTION_PROPERTY_PER_PRINCIPAL", "USER_PROPERTY"}
+# Variable classes that can point an Org at different physical data.
+_PHYSICAL_TYPES = {"TABLE_MAPPING", "CONNECTION_PROPERTY"}
+
+
+def target_segmentation(variables: Sequence[Mapping[str, Any]],
+                        target_org: Optional[str]) -> str:
+    """How this target Org's rows are separated from other tenants'.
+
+    **RLS only matters when publication resolves every Org to the SAME physical table.**
+    ThoughtSpot Publishing requires a variable bound to the db/schema/table fields, and
+    that variable may hold a *different* value per Org -- pointing each tenant at its own
+    database or schema. Where it does, the tenants are already physically separated and
+    row-level security is not the mechanism keeping them apart.
+
+    `variables` is the `METADATA_AND_VALUES` response for the variables bound to the
+    published object's fields.
+
+    Returns `SEGMENT_UNKNOWN` when nothing can be read: not knowing how a shared Model is
+    separated is not the same as knowing it is safe.
     """
+    if not variables:
+        return SEGMENT_UNKNOWN
+    saw_physical_variable = False
+    for var in variables:
+        vtype = str(var.get("variable_type") or "").upper()
+        values = var.get("values") or []
+        if vtype in _PER_PRINCIPAL_TYPES:
+            return SEGMENT_PER_PRINCIPAL
+        if any(v.get("principal_identifier") for v in values):
+            return SEGMENT_PER_PRINCIPAL
+        if vtype not in _PHYSICAL_TYPES:
+            continue
+        saw_physical_variable = True
+        distinct = {v.get("value") for v in values if v.get("value") is not None}
+        # More than one distinct value across Orgs means at least two Orgs read different
+        # physical data. That is segmentation, whether or not THIS Org is one of them.
+        if len(distinct) > 1:
+            return SEGMENT_PHYSICAL
+    return SEGMENT_SHARED if saw_physical_variable else SEGMENT_UNKNOWN
+
+
+def unfiltered_target_problem(table_rule_counts: Mapping[str, int], model_name: str,
+                              allow: bool = False,
+                              segmentation: str = SEGMENT_SHARED) -> Optional[str]:
+    """Refuse to bind tenant content to a published Model that separates no tenants.
+
+    RLS is checked **only when the Orgs share physical data**. If publication resolves
+    each Org to its own database, schema or table -- or resolves per principal -- the
+    tenants are already separated and requiring RLS on top would be a false alarm.
+    """
+    if segmentation in (SEGMENT_PHYSICAL, SEGMENT_PER_PRINCIPAL):
+        return None
+    if segmentation == SEGMENT_UNKNOWN:
+        return (f"could not determine how '{model_name}' separates tenants: neither its "
+                f"row-level security nor its publication variables could be read. "
+                f"Refused -- an unreadable check is not a passed one")
     if not table_rule_counts:
-        return (f"could not read the row-level security of '{model_name}'s tables. "
-                f"Binding tenant content to a Model whose filtering is unknown is "
-                f"refused -- an unreadable check is not a passed one")
+        return (f"'{model_name}' resolves every Org to the SAME physical data, and its "
+                f"row-level security could not be read. Refused -- an unreadable check is "
+                f"not a passed one")
     unfiltered = sorted(name for name, count in table_rule_counts.items() if not count)
     if not unfiltered or allow:
         return None
-    return (f"the published Model '{model_name}' has NO row-level security on: "
-            f"{', '.join(unfiltered)}. Binding this tenant's content to it would leave "
-            f"every tenant able to see every other tenant's rows. Add RLS to the "
-            f"published table(s), or pass --allow-unfiltered-target if this target is "
-            f"deliberately single-tenant or segmented elsewhere")
+    return (f"the published Model '{model_name}' resolves every Org to the SAME physical "
+            f"data and has NO row-level security on: {', '.join(unfiltered)}. Binding "
+            f"this tenant's content to it would leave every tenant able to see every "
+            f"other tenant's rows. Add RLS, point the Orgs at different data via the "
+            f"publication variable, or pass --allow-unfiltered-target if this target is "
+            f"deliberately single-tenant")
 
 
 # ---------------------------------------------------------------------------

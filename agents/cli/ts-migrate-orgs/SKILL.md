@@ -138,12 +138,22 @@ field the rewrite does not know about. **Do not work around it.** Importing anyw
 produces an object that loads and renders wrong, which is the failure this gate exists to
 prevent. The message names the paths; they need adding to the transform.
 
-**"the published Model has NO row-level security."** The tenant-isolation check. After the
-rewrite your tenant's content reads the **shared** published Model, so if it filters no
-rows every tenant sees every other tenant's. Add RLS before continuing.
-`--allow-unfiltered-target` is only for a target that is deliberately single-tenant, or
-segmented in the warehouse. An **unreadable** check refuses too: not knowing whether a
-shared Model filters is not the same as knowing it does.
+**"resolves every Org to the SAME physical data and has NO row-level security."** The
+tenant-isolation check.
+
+**It only fires when the Orgs actually share rows.** Publishing binds a variable to the
+db/schema/table fields, and that variable may hold a **different value per Org** — pointing
+each tenant at its own database or schema. Where it does, the tenants are already
+physically separated and the check stays quiet: RLS is not the mechanism keeping them
+apart. Same for a per-principal variable (`USER_PROPERTY`), which resolves per user.
+
+It fires only when every Org resolves to the *same* data, because then RLS is the **only**
+separator and its absence means every tenant sees every other tenant's rows.
+
+Three ways out, and the right one depends on the deployment: add RLS, point the Orgs at
+different data via the publication variable, or `--allow-unfiltered-target` for a
+deliberately single-tenant target. An **unreadable** check refuses too: not knowing how a
+shared Model separates tenants is not the same as knowing it is safe.
 
 ## Step 7 — Aliases, once per WAVE
 

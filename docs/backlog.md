@@ -3941,8 +3941,14 @@ a successful application.
 never let a rejected rule delete the rule it was meant to replace.
 
 **Mitigation until fixed** -- any code path writing `rls_rules` must **read back and assert
-the rule survived**, never trusting `status_code: OK`. Applies to `ts migrate apply` when
-it lifts tables carrying RLS.
+the rule survived**, never trusting `status_code: OK`.
+
+**Update 2026-07-28: `ts migrate apply` is NOT exposed to this.** It writes no Table TML at
+all -- the architecture changed to export/rewrite/import and nothing is lifted. A guard was
+added and then removed as dead code: it looked for `doc["table"]["rls_rules"]` while only
+ever running on a Model document, which has no `table` key, so it could never fire.
+Recorded because dead safety code reads as protection. BL-144 remains live for anyone
+writing Table TML directly.
 
 ---
 
@@ -4040,7 +4046,15 @@ previously failed outright.
 
 ---
 
-## BL-148 -- lift-and-shift collides by NAME with the published objects it is migrating onto `Tier 1`
+## BL-148 -- lift-and-shift collides by NAME with the published objects it is migrating onto `Tier 1` -- **RESOLVED BY DESIGN CHANGE 2026-07-28**
+
+> **No longer reachable.** Lift-and-shift was removed: `ts migrate apply` now rewrites
+> content (data-source reference + column names) instead of lifting scaffolding, so nothing
+> is ever imported that could collide. The finding below stands as a fact about the
+> platform and is why the architecture changed -- see
+> `docs/superpowers/specs/2026-07-28-ts-migrate-orgs-rewrite-design.md`. The third
+> candidate option recorded below ("do not lift the scaffolding at all") is what was
+> built.
 
 **Filed:** 2026-07-28.
 **Source:** the first live `ts migrate apply` run against the end-to-end fixture. See
@@ -4106,7 +4120,13 @@ each candidate needs its own live verification before being built.
 
 ---
 
-## BL-149 -- `search_query` propagates ASYNCHRONOUSLY after a column rename `Tier 1`
+## BL-149 -- `search_query` propagates ASYNCHRONOUSLY after a column rename `Tier 1` -- **NO LONGER ON THE MIGRATION PATH 2026-07-28**
+
+> **The migration no longer depends on the cascade.** `ts migrate apply` rewrites
+> `search_query` deterministically rather than renaming a Model column and waiting, so the
+> lag cannot bite it. The finding below stands as a live platform fact and still applies to
+> anyone relying on rename propagation -- it is simply not a migration blocker any more.
+> The "rewrite deterministically" option recorded below is what was built.
 
 **Filed:** 2026-07-28.
 **Source:** live on `nebula-damian-alias`, testing the rename cascade the whole migration

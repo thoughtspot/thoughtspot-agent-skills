@@ -173,11 +173,25 @@ Caught **before** the object is written. A partial rewrite imports cleanly and *
 wrong*, so it must not be worked around. The message names the surviving paths; they need
 adding to the transform.
 
-**Tenant isolation — "the published Model has NO row-level security".**
-After the rewrite your content reads the **shared** published Model. If it filters no rows,
-every tenant sees every other tenant's. `--allow-unfiltered-target` covers a deliberately
-single-tenant target. An **unreadable** check also refuses: not knowing whether a shared
-Model filters is not the same as knowing it does.
+**Tenant isolation — "resolves every Org to the SAME physical data and has NO row-level
+security".**
+
+RLS is only one way tenants are separated, and the check knows the difference:
+
+| How the Orgs are separated | Detected from | RLS required? |
+|---|---|---|
+| **Physically** — the publication variable holds a different value per Org, so each reads its own db/schema/table | `TABLE_MAPPING` / `CONNECTION_PROPERTY` with >1 distinct value | **no** |
+| **Per principal** — resolved per user or group | `USER_PROPERTY`, or any value scoped to a principal | **no** |
+| **Shared** — every Org resolves to the same data | one distinct value across Orgs | **yes** — RLS is the only separator |
+| **Unknown** — nothing readable | — | refuses; unreadable is not passed |
+
+Demanding RLS where the platform already segments physically would be a false alarm, and
+worse than no check: it teaches operators to pass `--allow-unfiltered-target` reflexively,
+which destroys the check for the case where it genuinely matters.
+
+Three ways out when it does fire: add RLS, point the Orgs at different data via the
+publication variable, or `--allow-unfiltered-target` for a deliberately single-tenant
+target.
 
 ### What the audit reports
 
@@ -264,6 +278,7 @@ damage.
 | Views repointed, `name` preserved | Content on a View then needs nothing at all | Rewriting View dependents too: pointless work, only adds risk |
 | Denylist for label paths, not an allowlist | A new *reference* field is handled automatically | Allowlist: silently misses whatever the platform adds |
 | Coverage gate before writing | A partial rewrite imports cleanly and renders wrong | Checking after: the user finds it |
+| Isolation check is **segmentation-aware** | RLS only separates tenants when they share physical data; publication variables may already segment them | Always requiring RLS: a false alarm that trains operators to pass the override reflexively |
 | `client_state_v2` parsed, not string-replaced | Its column names sit in named fields beside a stable GUID | Substring pass: corrupts unrelated chart state |
 | Write mode derived, not a flag | Three topologies, one code path | A flag an operator can set wrongly |
 | Flat column map across Models | The rewrite is document-wide | Per-Model: does not match how the transform works |

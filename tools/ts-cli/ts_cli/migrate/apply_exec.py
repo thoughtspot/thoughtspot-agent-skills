@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ts_cli.migrate.apply_plan import (STEP_BACKUP, STEP_REWRITE_CONTENT,
-                                       STEP_REWRITE_VIEWS, unfiltered_target_problem)
+                                       STEP_REWRITE_VIEWS, target_segmentation,
+                                       unfiltered_target_problem)
 from ts_cli.migrate.rewrite import residual_references, rewrite_content, rewrite_view
 
 
@@ -140,13 +141,38 @@ def run_backup(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
     return {}
 
 
-def _assert_target_filtered(ctx: Ctx, target: Dict[str, str]) -> None:
+def publication_variables(client) -> List[Dict[str, Any]]:
+    """Template variables with their per-Org values.
+
+    Needed because **RLS only matters when publication resolves every Org to the same
+    physical table**. A `TABLE_MAPPING` variable holding a different value per Org points
+    each tenant at its own database or schema, and demanding RLS on top of that would be
+    a false alarm -- which is worse than no check, because it teaches operators to pass
+    the override reflexively.
+    """
+    resp = client.post("/api/rest/2.0/template/variables/search", raise_for_status=False,
+                       json={"response_content": "METADATA_AND_VALUES", "record_size": -1})
+    if resp.status_code >= 300:
+        return []
+    body = resp.json()
+    return body if isinstance(body, list) else []
+
+
+def _assert_tenants_separated(ctx: Ctx, target: Dict[str, str]) -> None:
+    """Refuse to bind tenant content to a Model that separates no tenants.
+
+    Checks how the Orgs are separated FIRST, and only falls back to requiring RLS when
+    they genuinely share physical data.
+    """
     guid = target.get("guid")
     if not guid or ctx.dry_run:
         return
+    segmentation = target_segmentation(publication_variables(ctx.target),
+                                       target.get("org"))
     problem = unfiltered_target_problem(rls_rule_counts(ctx.target, guid),
                                         target.get("name", guid),
-                                        allow=ctx.allow_unfiltered)
+                                        allow=ctx.allow_unfiltered,
+                                        segmentation=segmentation)
     if problem:
         raise StepFailed(f"refused: {problem}")
 
@@ -160,7 +186,7 @@ def _rewrite_batch(ctx: Ctx, step: Dict[str, Any], transform) -> Dict[str, str]:
     target = step["target"]
     mode = step["mode"]
 
-    _assert_target_filtered(ctx, target)
+    _assert_tenants_separated(ctx, target)
 
     guids = [o["guid"] for o in objects]
     docs = export_tml(ctx.source, guids)
