@@ -4399,3 +4399,80 @@ into the Org yet. That is correct and actionable, but it means **the same-Org to
 requires the master to be published into the source Org first** -- worth stating in the
 runbook, because the Org already contains a same-named Model and an operator may reasonably
 assume there is nothing to publish.
+
+---
+
+## BL-153 -- `ts share status --org X` cannot resolve an object NATIVE to Org X `Tier 2` -- **FIXED 2026-07-28**
+
+**Filed:** 2026-07-28.
+**Source:** found reaching for `ts share status <liveboard-guid> --org ORG1` to read a
+migration's grants back -- the exact use the command exists for.
+
+```
+$ ts share status 083fbd06-... --org ORG1 -p nebula-damian-alias
+ThoughtSpot API 400 ... {"metadata":"Specify the metadata_type for identifier 083fbd06-..."}
+Error: Invalid value: Could not resolve '083fbd06-...'.
+       Expected a GUID, or the exact name of one of: LOGICAL_TABLE, LIVEBOARD, ANSWER.
+```
+
+The GUID was valid, the object existed, and the Org was named on the command line.
+
+### Cause
+
+`status_cmd` resolved its targets with an **Org-less** client and scoped only the
+*permissions read* per Org:
+
+```python
+targets = _status_targets(_client_for_org(profile), list(guids), columns)   # no org
+for org_name in orgs:
+    client = _client_for_org(profile, org_name)                            # org, too late
+```
+
+`metadata/search` is Org-scoped, so an object **native to a tenant Org is invisible to the
+default-Org client** -- it cannot be resolved at all. This is the **same bug already fixed in
+`ts share export` on 2026-07-27**, which is why `_resolve_object_in_orgs` exists. `status` was
+simply missed at the time.
+
+It matters because it breaks the read-back half of the pipeline exactly where a migration
+needs it: confirming that migrated content in a tenant Org carries the grants it should. And
+the error blames the identifier, so it reads as "you typed the GUID wrong" rather than "I
+looked in the wrong Org" -- the same misdirection as BL-147.
+
+**Blast radius beyond migration.** `ts-security-columns/SKILL.md` calls
+`ts share status {guid} --columns --org "{org}"` at two steps, and
+`references/mechanism-decision.md` names it as the check for "does the audience hold object
+access?". Those worked for a Primary-owned published table (visible to the default Org) and
+failed for a **tenant-owned** one -- so the mechanism-decision check was unavailable for
+exactly the objects a tenant defines CLS on.
+
+### Second defect found alongside: the probe cried wolf
+
+`_find_object` probes untyped first, which the platform rejects with a 400 whenever the
+identifier is not in the client's Org -- i.e. **on every tenant-Org lookup**. `_try_search`
+correctly swallows it, but `client.py` had already printed
+`ThoughtSpot API 400 ... Specify the metadata_type` to stderr. So a *successful* report came
+with a red API error in front of it. A probe whose failure IS the answer must not announce a
+fault. `_search` gained a `quiet` flag that passes `raise_for_status=False`; only probes use
+it, and a genuine search failure is still loud and fatal.
+
+### A trap worth recording
+
+Adding a kwarg to the `client.post` call broke five test doubles whose signature was
+`post(self, _path, json=None)`. Because `_try_search` catches **everything**, the resulting
+`TypeError` did not surface as an error -- every lookup silently "found nothing". Reading
+`resp.ok` had the same shape: `AttributeError` on any non-`requests.Response`, swallowed the
+same way. `ok` is now read via `getattr(resp, "ok", True)` and the doubles take `**_kw`.
+
+**The blanket `except (Exception, SystemExit)` in `_try_search` converts programming errors
+into empty result sets.** Its docstring rightly warns against narrowing it to
+`except Exception` (that reintroduces a crash), but the cost is that nothing in this path
+fails loudly. Any future change to what `_search` calls or reads must be exercised against a
+real response object.
+
+### Verified
+
+Live on `nebula-damian-alias`: `ts share status 083fbd06-... --org ORG1` now exits 0, prints
+no stderr diagnostic, and returns 5 rows showing `MIGTEST_VIEWERS` with `READ_ONLY` plus
+`guest1`/`guest4` inheriting it. The three regression tests were confirmed to **fail against
+the old behaviour** (with `__pycache__` cleared, after a stale `.pyc` briefly made a restored
+file look broken).

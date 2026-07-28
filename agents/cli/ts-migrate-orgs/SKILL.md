@@ -138,6 +138,16 @@ source Org has been retired.
 Grants cover the **whole stack**, not just the content: the **published Model needs
 explicit grants too**, because publishing it makes it *present*, not *visible*.
 
+To read the grants back, per object:
+
+```bash
+ts share status {guid} --org "{target_org}" --profile "{profile}"
+```
+
+Look for the group with a non-`NO_ACCESS` **`permission`** — *not* `shared_permission`, whose
+name suggests the opposite but stays `NO_ACCESS` on a successful share. A group grant also
+produces one row per member user, so one grant shows as several rows.
+
 Grants are re-applied at **group** level. Groups are **per-Org principals**, so the target
 Org needs a group of each name; a missing one is reported rather than skipped, because a
 dropped grant is invisible until someone complains. Per-user grants are deliberately not
@@ -260,6 +270,7 @@ cutover it holds nothing but this migration's output.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.4.0 | 2026-07-28 | Give the grant read-back command, now that `ts share status --org` resolves tenant-owned objects (BL-153) |
 | 2.3.0 | 2026-07-28 | Source and target are told apart by **ownership**, not name — a same-Org run had paired a Model with itself and reported READY (BL-152) |
 | 2.2.0 | 2026-07-28 | `share_grants` grants the whole object stack bottom-up — Strict Object Mode drops a grant whose source is ungranted |
 | 2.1.0 | 2026-07-28 | Add `share_grants` — TML carries no sharing, so migrated content was invisible to tenant users |

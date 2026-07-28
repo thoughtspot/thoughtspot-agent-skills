@@ -113,7 +113,7 @@ def test_try_search_swallows_a_system_exit():
 
     class _Client:
         @staticmethod
-        def post(_path, json=None):
+        def post(_path, json=None, **_kw):
             raise SystemExit(1)
 
     assert _try_search(_Client(), {"identifier": "T2_PUBLISH"}, 10) == []
@@ -124,7 +124,7 @@ def test_try_search_swallows_a_plain_exception():
 
     class _Client:
         @staticmethod
-        def post(_path, json=None):
+        def post(_path, json=None, **_kw):
             raise RuntimeError("boom")
 
     assert _try_search(_Client(), {"identifier": "T2_PUBLISH"}, 10) == []
@@ -149,7 +149,7 @@ def test_resolve_object_falls_through_to_a_typed_probe_after_a_system_exit():
 
     class _Client:
         @staticmethod
-        def post(_path, json=None):
+        def post(_path, json=None, **_kw):
             body = json or {}
             metadata = (body.get("metadata") or [{}])[0]
             if "type" not in metadata:
@@ -461,7 +461,7 @@ class _OrgClient:
         self.obj_type = obj_type
         self.untyped_works = untyped_works
 
-    def post(self, _path, json=None):
+    def post(self, _path, json=None, **_kw):
         body = json or {}
         metadata = (body.get("metadata") or [{}])[0]
         identifier = metadata.get("identifier")
@@ -514,7 +514,7 @@ def test_find_object_still_refuses_an_ambiguous_name(monkeypatch):
 
     class _Ambiguous:
         @staticmethod
-        def post(_path, json=None):
+        def post(_path, json=None, **_kw):
             body = json or {}
             metadata = (body.get("metadata") or [{}])[0]
             if "type" not in metadata:
@@ -589,3 +589,96 @@ def test_resolve_object_in_orgs_names_every_org_it_tried(monkeypatch):
         share_module._resolve_object_in_orgs("p", ["ORG1", "ORG2"], "MISSING")
     message = str(excinfo.value)
     assert "ORG1" in message and "ORG2" in message
+
+
+# ---------------------------------------------------------------------------
+# BL-153 — `ts share status --org X` must resolve IN X, and not cry wolf
+# ---------------------------------------------------------------------------
+
+def test_status_targets_resolves_an_object_native_to_a_tenant_org(monkeypatch):
+    """`status` used to resolve with a single Org-LESS client and scope only the
+    permissions read. `metadata/search` is Org-scoped, so a tenant's OWN Answer is
+    invisible to the default-Org client and the command failed with "Could not resolve"
+    against a perfectly valid GUID -- while the Org was named on the command line.
+
+    That is the case reading a migration back needs most. Same bug already fixed in
+    `ts share export` on 2026-07-27; `status` was missed then.
+    """
+    from ts_cli.commands import share as share_module
+
+    default_blind = _OrgClient(visible_guid="other", visible_name="OTHER")
+    tenant = _OrgClient(visible_guid="lb-1", visible_name="MIGTEST Liveboard",
+                        obj_type="LIVEBOARD")
+    handed_out = []
+
+    def _fake_client_for_org(_profile, org=None):
+        handed_out.append(org)
+        return tenant if org == "ORG1" else default_blind
+
+    monkeypatch.setattr(share_module, "_client_for_org", _fake_client_for_org)
+
+    targets = share_module._status_targets("p", ["ORG1"], ["lb-1"], False)
+    assert targets == [{"guid": "lb-1", "type": "LIVEBOARD"}]
+    assert "ORG1" in handed_out, "the tenant Org was never tried"
+
+
+def test_status_targets_lists_columns_through_the_org_that_could_SEE_the_table(monkeypatch):
+    """A column listing issued against the default Org would find nothing for a
+    tenant-owned table, so `--columns` would silently report the object alone."""
+    from ts_cli.commands import share as share_module
+
+    tenant = _OrgClient(visible_guid="tbl-1", visible_name="T_TENANT")
+    monkeypatch.setattr(share_module, "_client_for_org",
+                        lambda _profile, org=None: tenant if org == "ORG1"
+                        else _OrgClient(visible_guid="none", visible_name="NONE"))
+    seen = {}
+
+    def _columns(client, guid):
+        seen["client"] = client
+        return [{"guid": "col-1", "name": "AMOUNT"}]
+
+    monkeypatch.setattr(share_module, "_table_columns", _columns)
+
+    targets = share_module._status_targets("p", ["ORG1"], ["tbl-1"], True)
+    assert {"guid": "col-1", "type": "LOGICAL_COLUMN"} in targets
+    assert seen["client"] is tenant
+
+
+def test_try_search_asks_the_client_NOT_to_report_the_expected_failure():
+    """The untyped probe 400s whenever the identifier is not in the client's Org, which
+    is every tenant-Org lookup. Letting the client print that put a red
+    `ThoughtSpot API 400 ... Specify the metadata_type` line on stderr in front of a
+    perfectly successful report. A probe whose failure IS the answer must not announce a
+    fault."""
+    from ts_cli.commands.share import _try_search
+
+    calls = []
+
+    class _Client:
+        @staticmethod
+        def post(_path, json=None, **kwargs):
+            calls.append(kwargs)
+            class _R:
+                ok = False
+            return _R()
+
+    assert _try_search(_Client(), {"identifier": "whatever"}, 10) == []
+    assert calls[0]["raise_for_status"] is False
+
+
+def test_search_still_raises_loudly_when_it_is_NOT_a_probe():
+    """Only probes are quiet. A real search failure must still be reported and fatal --
+    quieting everything would turn an outage into an empty result set."""
+    from ts_cli.commands.share import _search
+
+    calls = []
+
+    class _Client:
+        @staticmethod
+        def post(_path, json=None, **kwargs):
+            calls.append(kwargs)
+            raise SystemExit(1)
+
+    with pytest.raises(SystemExit):
+        _search(_Client(), {"metadata": [{}]})
+    assert calls[0]["raise_for_status"] is True
