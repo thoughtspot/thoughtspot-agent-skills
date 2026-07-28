@@ -3574,12 +3574,14 @@ Dependents are walked only for Models that actually carry a cohort column.
 
 ## `ts migrate apply` / `rollback` — Phase 2: move one tenant onto the published Model
 
-Runs the **per-tenant** half of the migration. Cutover is deliberately *not* included:
-users move only once the Org has been verified in its final state, and until then the
-rollback is the untouched source Org.
+Rewrites the tenant's content onto the governed published Model. For each object exactly
+two things change: the **data-source reference** and the **column names**.
+
+> **Full operator guide:** `agents/cli/ts-migrate-orgs/references/running-a-migration.md`
+> — the sequence, what a human must decide, every check, and the Python API.
 
 ```bash
-# ALWAYS read the plan first — every step is destructive in someone's Org
+# ALWAYS read the plan first
 ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan --dry-run
 
 ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan \
@@ -3587,52 +3589,42 @@ ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan \
 ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan --resume
 ```
 
-`--plan-dir` holds the approved `column-mapping.csv` from `ts migrate audit`, and
-receives `backup/` and the `state.json` ledger.
+`--plan-dir` holds the approved `column-mapping.csv` from `ts migrate audit`, and receives
+`backup/` and the `state.json` ledger.
 
-### The step order, and why it is what it is
+### Three steps
 
-| # | Step | Why here |
+| Step | What it does |
+|---|---|
+| `backup` | Exports everything in scope before anything is written. All-or-nothing |
+| `rewrite_views` | Repoints Views **preserving what they expose**, so their content needs nothing |
+| `rewrite_content` | Rewrites the chargeable Answers and Liveboards |
+
+Views go first: in a new-Org run the View must exist before anything references it, and
+content it shields is never in the content batch at all.
+
+### Three topologies, one command
+
+The write mode is **derived**, not configured:
+
+| | Content | Rollback |
 |---|---|---|
-| 1 | `backup` | Nothing is written before a complete copy exists. All-or-nothing: a partial backup reads as a safety net that is not there |
-| 2 | `lift_scaffolding` | Tables + Models as **one batch**, so intra-batch references remap on import |
-| 3 | `lift_content` | Views → Answers → Liveboards; references only remap for objects already in the batch |
-| 4 | `rename` | Once per column, cascading to every dependent automatically — O(columns), not O(objects) |
-| 5 | `repoint` | A 1:1-by-name match, which only works *after* the rename aligned the names |
-| 6 | `cleanup_models` | Before Tables. **A refusal here is the check working** — see below |
-| 7 | `cleanup_tables` | Before the connection |
-| 8 | `cleanup_connection` | Last: connection deletion does **not** cascade to its Tables |
+| Same Org, same cluster | updated in place (`guid` kept) | the backup only — weakest |
+| New Org, same cluster | created fresh | delete the Org |
+| New Org, different cluster | created fresh | delete the Org |
 
-### Two behaviours that look like errors and are not
+Cross-cluster needs nothing extra — cluster is a property of the profile.
 
-**A scaffolding Model that refuses to delete is a missed repoint.** By step 6 nothing
-should reference the scaffolding. A Model with dependents means content was left behind,
-and forcing past the refusal orphans it. This is the reason cleanup is surgical rather
-than a wholesale Org delete, which would take the un-repointed content silently.
+### Two refusals that are the system working
 
-**The repoint refuses when the published Model has no row-level security.** After the
-repoint the tenant's content is bound to the **shared** published Model; if that Model
-filters no rows, every tenant sees every other tenant's. `apply` reads the published
-Model's tables immediately before binding anything to them and refuses if any is
-unfiltered — or if the check cannot be read at all, since not knowing whether a shared
-Model filters is not the same as knowing it does.
+**`rewrite incomplete: N source column reference(s) survive`** — the coverage gate, run
+*before* the object is written. A partial rewrite imports cleanly and **renders wrong**, so
+do not work around it: the named paths need adding to the transform.
 
-`--allow-unfiltered-target` overrides it, for a deliberately single-tenant target or one
-segmented in the warehouse. It does **not** override the unreadable case.
-
-*(This replaced an earlier guard that re-read `rls_rules` after a write. That guard was
-dead code: `apply` writes no Table TML whose RLS matters — the only one it writes is
-disposable scaffolding — and the rename writes a Model document, which has no `rls_rules`
-key for the guard to find. BL-144 remains a real platform defect; it is just not one this
-command is exposed to.)*
-
-### Connection handling
-
-Connection names are **per-Org**, so the target Org can hold a connection named exactly
-as the source's — and then every lifted Table's `connection` block resolves unchanged.
-A different name is not fatal: `apply` rewrites one field per Table. No connection at all
-*is* fatal, because publishing a Table into an Org does not grant that Org a usable
-connection; provision it with `ts tenancy` first.
+**`the published Model has NO row-level security`** — after the rewrite the content reads
+the *shared* published Model, so unfiltered means every tenant sees every other tenant's
+rows. `--allow-unfiltered-target` is only for a deliberately single-tenant target. An
+**unreadable** check also refuses.
 
 ### Rollback
 
@@ -3641,8 +3633,6 @@ ts migrate rollback --target-org "ACME NEW" -d ./plan --dry-run
 ts migrate rollback --target-org "ACME NEW" -d ./plan
 ```
 
-Deletes what the ledger records this run as creating, in the safe order (content →
-Models → Tables). **The source Org is never touched** — `apply` leaves it untouched
-precisely so rollback never has to restore into it. Before cutover the target Org holds
-nothing but this migration's output, so abandoning the whole attempt is better served by
-deleting the Org outright (`ts tenancy teardown`).
+Deletes what the ledger records this run as creating. In a new-Org run the source Org was
+never touched. In a same-Org run there is nothing to delete — `plan/backup/` is the
+rollback.

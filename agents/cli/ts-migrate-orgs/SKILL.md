@@ -189,7 +189,10 @@ cutover it holds nothing but this migration's output.
 
 ## Reference
 
-- [Decisions and gotchas](references/migration-notes.md) — the findings behind the step order
+- **[Running a migration](references/running-a-migration.md)** — the complete operator
+  reference: the sequence, what a human must decide, every check the tooling makes, the
+  **Python API**, and every design decision with its rejected alternative
+- [Decisions and gotchas](references/migration-notes.md) — the live findings behind each rule
 - Design spec: `docs/superpowers/specs/2026-07-15-ts-org-migrate-design.md`
 - Verifications: `docs/superpowers/verification/2026-07-27-ts-migrate-binding-resolution.md`,
   `2026-07-27-ts-migrate-rls-on-published.md`

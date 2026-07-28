@@ -50,10 +50,16 @@ per-object reference rewriting:
 1. Lift the tenant's Tables + Models + bespoke content into the clean Org as batches, so
    intra-batch references stay consistent and ThoughtSpot rewires them on import.
 2. Rename the scaffolding columns to the published names, **once per column**. This
-   cascades to every dependent automatically.
 3. Repoint content from the scaffolding onto the governed published Models, now a clean
-   1:1 name match.
 4. Delete the scaffolding.
+
+> **SUPERSEDED 2026-07-28.** The four steps above were replaced by **export, rewrite,
+> import**: content is rewritten (data-source reference + column names) rather than bound
+> to lifted scaffolding. The scaffolding collided by name with the published objects
+> (**BL-148**) and the rename cascade turned out to be asynchronous (**BL-149**) — and
+> underneath both, content TML has no physical anchor, so rewriting was never avoidable.
+> See `docs/superpowers/specs/2026-07-28-ts-migrate-orgs-rewrite-design.md` and, to run
+> one, `agents/cli/ts-migrate-orgs/references/running-a-migration.md`.
 
 That converts O(objects) of fragile rewriting into O(columns) of renaming. Step 2 rests on
 a live-verified behaviour (renaming a Model column's display name with `--no-create-new` is
