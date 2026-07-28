@@ -442,3 +442,38 @@ def test_the_dry_run_explains_the_empty_same_org_case():
     md = render_plan(_plan_s([{"guid": "s1", "name": "V", "source_refs": ["v1"]}],
                              same_org=True))
     assert "stays where it is" in md
+
+
+# ---------------------------------------------------------------------------
+# The segmentation check must read variables UNSCOPED
+# ---------------------------------------------------------------------------
+
+def test_segmentation_needs_ALL_orgs_values_to_see_segmentation():
+    """Live-verified 2026-07-28: an ORG-SCOPED variable read returns only THAT Org's
+    value. From inside ORG2, `apj_schema` looked like a single value and every target was
+    classified SHARED -- so the check refused a correctly-segmented deployment.
+
+    Same trap as `tenancy._groups_in_org`: an Org-scoped read is a FILTERED view, and
+    treating it as complete inverts the answer. `apply` therefore reads through an
+    unscoped session.
+    """
+    all_orgs = [_var("TABLE_MAPPING", [("Primary", "ALIAS_TESTS"),
+                                       ("ORG2", "AMAZON_SALES_DATA")])]
+    org_scoped = [_var("TABLE_MAPPING", [("ORG2", "AMAZON_SALES_DATA")])]
+    assert target_segmentation(all_orgs, "ORG2") == SEGMENT_PHYSICAL
+    # What the buggy Org-scoped read produced -- the exact inversion:
+    assert target_segmentation(org_scoped, "ORG2") == SEGMENT_SHARED
+
+
+def test_the_ctx_defaults_unscoped_to_the_target_rather_than_crashing():
+    """A caller that forgets to pass one gets UNKNOWN/SHARED and a refusal, never a
+    false pass."""
+    from ts_cli.migrate.apply_exec import Ctx
+    ctx = Ctx("src", "tgt", None, {})
+    assert ctx.unscoped == "tgt"
+
+
+def test_an_explicit_unscoped_client_is_used_when_given():
+    from ts_cli.migrate.apply_exec import Ctx
+    ctx = Ctx("src", "tgt", None, {}, unscoped_client="admin")
+    assert ctx.unscoped == "admin"

@@ -29,9 +29,15 @@ class Ctx:
 
     def __init__(self, source_client, target_client, plan_dir: Path,
                  ledger: Dict[str, Any], dry_run: bool = False,
-                 allow_unfiltered: bool = False):
+                 allow_unfiltered: bool = False, unscoped_client=None):
         self.source = source_client
         self.target = target_client
+        # A session NOT scoped to any Org. Required for the segmentation check: an
+        # Org-scoped variable read returns only THAT Org's value, so from inside the
+        # target every variable looks like it has one value -- and every target looks
+        # SHARED. Same trap as `tenancy._groups_in_org`. Falls back to the target client,
+        # which yields UNKNOWN rather than a false pass.
+        self.unscoped = unscoped_client or target_client
         self.plan_dir = plan_dir
         self.ledger = ledger
         self.dry_run = dry_run
@@ -145,11 +151,17 @@ def run_backup(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
 def publication_variables(client) -> List[Dict[str, Any]]:
     """Template variables with their per-Org values.
 
+    **Must be called with an UNSCOPED client.** An Org-scoped session returns only that
+    Org's value for each variable (verified live 2026-07-28), so the caller sees one
+    distinct value and concludes the Orgs share data -- when they may be pointed at
+    entirely different schemas. Segmentation is a cross-Org question and cannot be
+    answered from inside one Org.
+
     Needed because **RLS only matters when publication resolves every Org to the same
     physical table**. A `TABLE_MAPPING` variable holding a different value per Org points
     each tenant at its own database or schema, and demanding RLS on top of that would be
-    a false alarm -- which is worse than no check, because it teaches operators to pass
-    the override reflexively.
+    a false alarm -- worse than no check, because it teaches operators to pass the
+    override reflexively.
     """
     resp = client.post("/api/rest/2.0/template/variables/search", raise_for_status=False,
                        json={"response_content": "METADATA_AND_VALUES", "record_size": -1})
@@ -168,7 +180,7 @@ def _assert_tenants_separated(ctx: Ctx, target: Dict[str, str]) -> None:
     guid = target.get("guid")
     if not guid or ctx.dry_run:
         return
-    segmentation = target_segmentation(publication_variables(ctx.target),
+    segmentation = target_segmentation(publication_variables(ctx.unscoped),
                                        target.get("org"))
     problem = unfiltered_target_problem(rls_rule_counts(ctx.target, guid),
                                         target.get("name", guid),
