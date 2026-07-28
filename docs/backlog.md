@@ -4257,46 +4257,41 @@ source, `ts share` on the target. Two things make it more than a copy:
    step. A per-user grant therefore cannot always be applied at migration time, and may
    have to be deferred to cutover.
 
-### Built, but NOT verified live -- 2026-07-28
+### Built and WORKING -- corrected 2026-07-28
 
-`ts migrate apply` now has a `share_grants` step: it reads the source objects' GROUP
-grants (via `share_plan.permission_rows`, which encodes the `permission` vs
-`shared_permission` gotcha) and re-applies them in the target Org. Group level only,
-because a per-user grant cannot reliably be applied before cutover.
+`ts migrate apply` has a `share_grants` step: it reads the source objects' GROUP grants
+(via `share_plan.permission_rows`) and re-applies them in the target Org. Group level only,
+because a per-user grant cannot reliably be applied before cutover -- the users may not be
+in the target Org yet.
 
-**The step runs and reports success, but the grants do not register.** Verified on
-`nebula-damian-alias`:
+**It works.** Confirmed in the UI by the repo owner: the migrated Answers in ORG2 carry
+`can_view` for the `MIGTEST_VIEWERS` group, exactly as intended.
 
-| Object | Org | Type | Share |
-|---|---|---|---|
-| `ORG1 Revenue by Segment` (own Model) | ORG1 | ANSWER | **works** |
-| `MIGTEST Answer on View` | ORG1 | ANSWER | **works** |
-| `T4_PER_ORG_MODEL` (ORG2's own Model) | ORG2 | LOGICAL_TABLE | **works** |
-| `CTRL Answer on own model` | ORG2 | ANSWER | **fails** -- 204, no grant |
-| migrated content | ORG2 | ANSWER / LIVEBOARD | **fails** -- 204, no grant |
+### The false alarm, and what it cost
 
-### What is ruled OUT
+Three wrong diagnoses were recorded here before the UI was checked:
 
-- **A missing group.** `MIGTEST_VIEWERS` is present in ORG2 with `guest1` as a member, and
-  its own `orgs` field reports `['ORG2']` -- which is the authority, not the fetching
-  client (see `tenancy._groups_in_org`).
-- **Name-vs-GUID resolution.** Both give 204 and neither registers.
-- **An empty group.** Adding a member changed nothing.
-- **Dependency on a PUBLISHED Model.** An earlier note in this entry blamed this. **It is
-  wrong** -- a control Answer built on ORG2's *own* Model fails identically, and an ORG2
-  Model share succeeds. Corrected 2026-07-28.
+1. "grants do not register when the content sits on a published Model" -- disproven by a
+   control on ORG2's own Model;
+2. "it tracks with object TYPE in that Org" -- disproven by the UI;
+3. and underneath both, the premise that the share had failed at all. It had not.
 
-### What the evidence actually points at
+The actual fault was **trusting an API read over the product**. `HTTP 204` was accurate the
+whole time.
 
-The failing cases are all **`ANSWER`/`LIVEBOARD` in ORG2**, and a **`LOGICAL_TABLE` in the
-same Org with the same group succeeds**. So it is not the group, not the Org alone, and not
-the object's data source -- it tracks with the object *type*, in that Org.
+### The real finding: `fetch-permissions` UNDER-REPORTS group grants
 
-Why the same type shares fine in ORG1 is not explained, and that inconsistency is the next
-thing to chase. Candidates not yet tested: a per-Org configuration difference between ORG1
-and ORG2, an `answer`-specific permission requirement, or the share landing somewhere
-`fetch-permissions` does not report for that type in that Org.
+`security/metadata/fetch-permissions` (and therefore `ts share export` / `ts share status`,
+which both read through it) did **not** report the `MIGTEST_VIEWERS` grant on an `ANSWER`
+in ORG2, while the UI shows it. The same read DID report it for an `ANSWER` in ORG1 and for
+a `LOGICAL_TABLE` in ORG2.
 
-**Until then, treat sharing as a manual post-migration step, and treat an admin-only
-verification as not verified.** "The migration completed" does not yet mean the tenant can
-see anything.
+So this is a **reporting** gap, not a sharing one, and it is narrower than it looked -- but
+it matters because it makes API-based verification of sharing unreliable for that
+combination.
+
+**How to apply:** when confirming sharing state, **the UI is the authority**. Do not
+conclude from a `fetch-permissions` read alone that a grant is absent. `HTTP 204` from
+`security/metadata/share` is better evidence that it landed than the read is that it did
+not.
+
