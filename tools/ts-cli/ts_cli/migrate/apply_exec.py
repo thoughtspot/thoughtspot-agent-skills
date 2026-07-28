@@ -17,7 +17,8 @@ from typing import Any, Dict, List, Optional
 from ts_cli.migrate.apply_plan import (STEP_BACKUP, STEP_CLEANUP_CONNECTION,
                                        STEP_CLEANUP_MODELS, STEP_CLEANUP_TABLES,
                                        STEP_LIFT_CONTENT, STEP_LIFT_SCAFFOLDING,
-                                       STEP_RENAME, STEP_REPOINT)
+                                       STEP_RENAME, STEP_REPOINT,
+                                       unfiltered_target_problem)
 
 
 class StepFailed(Exception):
@@ -28,12 +29,17 @@ class Ctx:
     """Everything a step needs: both clients, the plan directory, and the live ledger."""
 
     def __init__(self, source_client, target_client, plan_dir: Path,
-                 ledger: Dict[str, Any], dry_run: bool = False):
+                 ledger: Dict[str, Any], dry_run: bool = False,
+                 allow_unfiltered: bool = False):
         self.source = source_client
         self.target = target_client
         self.plan_dir = plan_dir
         self.ledger = ledger
         self.dry_run = dry_run
+        # Only ever set by an explicit --allow-unfiltered-target. Defaulting it True
+        # would turn the tenant-isolation check into a no-op for everyone who never
+        # reads the flag list.
+        self.allow_unfiltered = allow_unfiltered
 
     def created(self, step: str) -> Dict[str, str]:
         return (self.ledger.get("created") or {}).get(step, {})
@@ -238,7 +244,6 @@ def run_rename(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
         if not docs:
             raise StepFailed(f"rename: could not export '{model_name}' ({guid})")
         doc = docs[0]
-        had_rls = _has_rls(doc)
         if _rename_columns(doc, mapping) == 0:
             raise StepFailed(f"rename: none of {sorted(mapping)} matched a column of "
                              f"'{model_name}' -- the mapping is stale")
@@ -248,34 +253,27 @@ def run_rename(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
         if failures:
             raise StepFailed(f"rename of '{model_name}' failed:\n  "
                              + "\n  ".join(failures))
-        _assert_rls_survived(ctx, guid, model_name, had_rls)
     return {}
 
 
-def _has_rls(doc: Dict[str, Any]) -> bool:
-    table = doc.get("table")
-    if not isinstance(table, dict):
-        return False
-    rls = table.get("rls_rules") or {}
-    return bool(rls.get("rules"))
+def rls_rule_counts(client, model_guid: str) -> Dict[str, int]:
+    """`{table_name: rule_count}` for the tables under a Model.
 
-
-def _assert_rls_survived(ctx: Ctx, guid: str, label: str, had_rls: bool) -> None:
-    """Re-read and confirm an RLS rule that existed before the write still exists.
-
-    **BL-144.** A malformed `rls_rules` block imports with `status_code: OK`, is
-    discarded, AND destroys the rule already on the table. The failure is silent in the
-    direction that REMOVES security, so `OK` is never sufficient evidence on any write to
-    a table that carried RLS.
+    Read from the TARGET Org's session deliberately. A published object is Primary-owned
+    but visible in the tenant Org, and reading it as the tenant reads what the tenant is
+    actually bound to -- verified 2026-07-28 that this resolves.
     """
-    if not had_rls or ctx.dry_run:
-        return
-    after = export_tml(ctx.target, [guid])
-    if not after or not _has_rls(after[0]):
-        raise StepFailed(
-            f"'{label}' carried an RLS rule before this write and does NOT after it, "
-            f"despite the import reporting success (BL-144). The table is now "
-            f"UNFILTERED. Restore it from {ctx.plan_dir / 'backup'} before continuing")
+    docs = export_tml(client, [model_guid])
+    if not docs:
+        return {}
+    body = docs[0].get("model") or docs[0].get("worksheet") or {}
+    fqns = [t.get("fqn") for t in body.get("model_tables") or [] if t.get("fqn")]
+    counts: Dict[str, int] = {}
+    for doc in export_tml(client, fqns):
+        table = doc.get("table") or {}
+        rules = (table.get("rls_rules") or {}).get("rules") or []
+        counts[table.get("name") or "?"] = len(rules)
+    return counts
 
 
 def run_repoint(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
@@ -303,6 +301,12 @@ def run_repoint(ctx: Ctx, step: Dict[str, Any]) -> Dict[str, str]:
                 f"published Model must exist before content can be moved onto it")
         if ctx.dry_run:
             continue
+        # Checked HERE, immediately before content is bound to the shared Model -- the
+        # one moment where an unfiltered target stops being theoretical.
+        problem = unfiltered_target_problem(rls_rule_counts(ctx.target, target_guid),
+                                            name, allow=ctx.allow_unfiltered)
+        if problem:
+            raise StepFailed(f"repoint refused: {problem}")
         docs = export_tml(ctx.target, sorted(content.values()))
         updated = []
         for doc in docs:

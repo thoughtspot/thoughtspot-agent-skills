@@ -124,10 +124,15 @@ content was left behind. Find it. Deleting past this orphans that content — an
 precisely why cleanup is surgical rather than a wholesale Org drop, which would take the
 un-repointed content silently.
 
-**An RLS assertion fails after a rename.** A malformed `rls_rules` block imports with
-`status_code: OK`, is discarded, *and destroys the rule already on the table* (**BL-144**).
-`apply` re-reads and asserts, so this failure means the table is genuinely **unfiltered
-right now**. Restore it from `plan/backup/` before doing anything else.
+**The repoint refuses: the published Model has no row-level security.** This is the
+tenant-isolation check, and it is the most important refusal in the routine. After the
+repoint your tenant's content is bound to the **shared** published Model — if that Model
+filters no rows, every tenant can see every other tenant's. Add RLS to the published
+table(s) before continuing. `--allow-unfiltered-target` exists only for a target that is
+deliberately single-tenant, or segmented in the warehouse instead.
+
+An **unreadable** check refuses too. Not knowing whether a shared Model is filtered is not
+the same as knowing it is fine.
 
 ## Step 7 — Aliases, once per WAVE
 
@@ -180,4 +185,5 @@ cutover it holds nothing but this migration's output.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-07-28 | Replace the dead BL-144 guard with the tenant-isolation check at the repoint |
 | 1.0.0 | 2026-07-27 | Initial release |

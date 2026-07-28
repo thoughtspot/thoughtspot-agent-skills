@@ -165,6 +165,41 @@ def connection_action(source_connection: str,
 # The plan
 # ---------------------------------------------------------------------------
 
+def unfiltered_target_problem(table_rule_counts: Dict[str, int], model_name: str,
+                              allow: bool = False) -> Optional[str]:
+    """Refuse to repoint tenant content onto a published Model that filters no rows.
+
+    **This is the check that matters, and it replaces a guard that could not fire.** The
+    original BL-144 mitigation re-read `rls_rules` after a write -- but `apply` never
+    writes a table whose RLS matters: the only Table TML it writes is disposable
+    scaffolding, deleted at cleanup and never queried. The guard was dead code.
+
+    The real exposure is at the other end. After the repoint, the tenant's content is
+    bound to the SHARED published Model. If that Model's tables carry no row-level
+    security, every tenant sees every other tenant's rows -- the single worst outcome the
+    programme can produce, silent, and unlike BL-144 entirely checkable before the damage
+    is done.
+
+    An override exists because a genuinely single-tenant target, or a warehouse that
+    segments elsewhere, is legitimate -- but it must be a deliberate act, which is the
+    same posture `ts security column-rules` takes with `--allow-published`.
+    """
+    if not table_rule_counts:
+        return (f"could not read the row-level security of '{model_name}'s tables. "
+                f"Repointing tenant content onto a Model whose filtering is unknown is "
+                f"refused -- an unreadable check is not a passed one")
+    unfiltered = sorted(name for name, count in table_rule_counts.items() if not count)
+    if not unfiltered:
+        return None
+    if allow:
+        return None
+    return (f"the published Model '{model_name}' has NO row-level security on: "
+            f"{', '.join(unfiltered)}. Repointing this tenant's content onto it would "
+            f"leave every tenant able to see every other tenant's rows. Add RLS to the "
+            f"published table(s), or pass --allow-unfiltered-target if this target is "
+            f"deliberately single-tenant or segmented elsewhere")
+
+
 def build_apply_plan(pair: Dict[str, str], scaffolding: Dict[str, List[str]],
                      content: Dict[str, List[str]], rows: Sequence[ColumnMappingRow],
                      connection: Dict[str, Any]) -> List[Dict[str, Any]]:

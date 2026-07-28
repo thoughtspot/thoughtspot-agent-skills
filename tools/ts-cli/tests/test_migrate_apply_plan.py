@@ -293,3 +293,48 @@ def test_dry_run_says_so_when_there_are_no_renames():
     sign the mapping failed to load."""
     plan = _plan(rows=[_row("S", "Amount", "Amount")])
     assert "no renames" in render_plan(plan)
+
+
+# ---------------------------------------------------------------------------
+# Tenant isolation at the repoint -- the check that replaced a dead guard
+# ---------------------------------------------------------------------------
+
+from ts_cli.migrate.apply_plan import unfiltered_target_problem  # noqa: E402
+
+
+def test_repointing_onto_an_unfiltered_published_model_is_refused():
+    """After the repoint the tenant's content is bound to the SHARED published Model. If
+    that Model filters no rows, every tenant sees every other tenant's -- the worst
+    outcome the programme can produce, and silent."""
+    problem = unfiltered_target_problem({"SALES": 0}, "Sales")
+    assert problem and "NO row-level security" in problem
+    assert "every other tenant's rows" in problem
+
+
+def test_a_filtered_target_passes():
+    assert unfiltered_target_problem({"SALES": 2}, "Sales") is None
+
+
+def test_ONE_unfiltered_table_among_several_still_refuses():
+    """A Model is only as segmented as its least-filtered table."""
+    problem = unfiltered_target_problem({"SALES": 2, "CUSTOMER": 0}, "Sales")
+    assert problem and "CUSTOMER" in problem and "SALES" not in problem.split(":")[1]
+
+
+def test_an_UNREADABLE_check_refuses_rather_than_passing():
+    """An empty result means the RLS could not be read, not that there is none to worry
+    about. Treating unknown as safe is how a silent check becomes a silent hole."""
+    problem = unfiltered_target_problem({}, "Sales")
+    assert problem and "unreadable check is not a passed one" in problem
+
+
+def test_the_override_is_explicit_and_does_not_apply_to_the_unreadable_case():
+    """--allow-unfiltered-target says "I know this target has no RLS". It cannot mean "I
+    know whatever is there is fine", because in the unreadable case nobody knows."""
+    assert unfiltered_target_problem({"SALES": 0}, "Sales", allow=True) is None
+    assert unfiltered_target_problem({}, "Sales", allow=True) is not None
+
+
+def test_the_refusal_names_the_override_so_a_legitimate_case_is_not_stuck():
+    problem = unfiltered_target_problem({"SALES": 0}, "Sales")
+    assert "--allow-unfiltered-target" in problem

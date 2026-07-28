@@ -290,6 +290,10 @@ def apply_migration(
     sets_scan: Optional[str] = typer.Option(None, "--sets-scan", help="sets-scan.json from `ts migrate scan-sets`, to refuse Set-blocked Models."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the ordered plan and exit. Nothing is written."),
     resume: bool = typer.Option(False, "--resume", help="Skip steps the state ledger records as done."),
+    allow_unfiltered_target: bool = typer.Option(
+        False, "--allow-unfiltered-target",
+        help="Repoint onto a published Model with NO row-level security. Only for a "
+             "deliberately single-tenant target, or one segmented in the warehouse."),
 ) -> None:
     """Move one tenant's bespoke content onto the governed published Model.
 
@@ -339,7 +343,8 @@ def apply_migration(
     state_file = plan_path / "state.json"
     ledger = (_json.loads(state_file.read_text()) if (resume and state_file.exists())
               else new_ledger({"source": source_org, "target": target_org}))
-    ctx = apply_exec.Ctx(source_client, target_client, plan_path, ledger)
+    ctx = apply_exec.Ctx(source_client, target_client, plan_path, ledger,
+                         allow_unfiltered=allow_unfiltered_target)
 
     for step in pending_steps(plan, ledger):
         name = step["step"]

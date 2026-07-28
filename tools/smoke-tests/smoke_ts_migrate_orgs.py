@@ -90,13 +90,30 @@ def test_the_skill_says_a_refused_model_delete_is_the_CHECK():
     assert "Deleting past this" in text
 
 
-def test_the_skill_says_a_failed_rls_assertion_means_the_table_is_UNFILTERED_NOW():
-    """BL-144 is silent in the direction that removes security. "Import failed" would be
-    read as "nothing happened", which is the opposite of the truth."""
+def test_the_skill_explains_the_TENANT_ISOLATION_refusal_at_the_repoint():
+    """The most important refusal in the routine, and the one most likely to be forced
+    past: repointing onto a published Model with no RLS lets every tenant see every other
+    tenant's rows. The skill has to say the consequence, not just the rule -- and has to
+    name the override so a legitimate single-tenant target is not stuck."""
     text = _skill_text()
-    assert "BL-144" in text
-    assert "unfiltered" in text.lower()
-    assert "backup" in text.lower()
+    assert "row-level security" in text
+    assert "every other tenant" in text
+    assert "--allow-unfiltered-target" in text
+
+
+def test_the_skill_says_an_UNREADABLE_isolation_check_also_refuses():
+    """Not knowing whether a shared Model filters is not the same as knowing it does.
+    Treating unknown as safe is how a silent check becomes a silent hole."""
+    text = _skill_text()
+    assert "unreadable" in text.lower()
+
+
+def test_the_engine_actually_makes_the_refusal_the_skill_promises():
+    """Skill/engine drift is the hazard: an operator follows the skill."""
+    from ts_cli.migrate.apply_plan import unfiltered_target_problem
+    assert unfiltered_target_problem({"SALES": 0}, "Sales")          # unfiltered -> refuse
+    assert unfiltered_target_problem({}, "Sales")                    # unreadable -> refuse
+    assert unfiltered_target_problem({"SALES": 1}, "Sales") is None  # filtered  -> pass
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +202,16 @@ def test_the_notes_distinguish_RLS_from_CSR_and_say_why():
     text = NOTES.read_text(encoding="utf-8")
     assert "RLS carries; CSR does not" in text
     assert "separate, Org-scoped security object" in text
+
+
+def test_the_notes_record_that_the_old_BL144_guard_was_DEAD_CODE():
+    """The guard looked for `doc["table"]["rls_rules"]` but only ever ran on a Model
+    document, which has no `table` key -- so it could never fire. Recording that matters
+    more than quietly deleting it: dead safety code reads as protection, and the next
+    person would otherwise re-add it."""
+    text = NOTES.read_text(encoding="utf-8")
+    assert "dead code" in text.lower()
+    assert "could never fire" in text
 
 
 def test_the_notes_mark_ts_vars_as_a_test_env_gap_not_a_platform_limit():

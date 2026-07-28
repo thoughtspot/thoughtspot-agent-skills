@@ -3610,10 +3610,21 @@ should reference the scaffolding. A Model with dependents means content was left
 and forcing past the refusal orphans it. This is the reason cleanup is surgical rather
 than a wholesale Org delete, which would take the un-repointed content silently.
 
-**An RLS rule is re-read after any write that touches a table carrying one.** A malformed
-`rls_rules` block imports with `status_code: OK`, is discarded, *and destroys the rule
-already on the table* (**BL-144**) — silent in the direction that removes security. `OK`
-is never sufficient evidence here.
+**The repoint refuses when the published Model has no row-level security.** After the
+repoint the tenant's content is bound to the **shared** published Model; if that Model
+filters no rows, every tenant sees every other tenant's. `apply` reads the published
+Model's tables immediately before binding anything to them and refuses if any is
+unfiltered — or if the check cannot be read at all, since not knowing whether a shared
+Model filters is not the same as knowing it does.
+
+`--allow-unfiltered-target` overrides it, for a deliberately single-tenant target or one
+segmented in the warehouse. It does **not** override the unreadable case.
+
+*(This replaced an earlier guard that re-read `rls_rules` after a write. That guard was
+dead code: `apply` writes no Table TML whose RLS matters — the only one it writes is
+disposable scaffolding — and the rename writes a Model document, which has no `rls_rules`
+key for the guard to find. BL-144 remains a real platform defect; it is just not one this
+command is exposed to.)*
 
 ### Connection handling
 
