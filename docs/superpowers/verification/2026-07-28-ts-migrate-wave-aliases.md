@@ -111,16 +111,34 @@ Which is the next wave's precondition, established by this one.
 
 ---
 
-## What is NOT verified, and cannot be by API
+## 7. The last inch — CONFIRMED IN THE UI
 
-**That an ORG1 user actually sees `Segment`.** Aliases render *only* in Search Data, Answers,
-Liveboards and Spotter — **not** in the Data Management app (an open ThoughtSpot development
-item) and **not** via `metadata/answer/data`, which returns base names. So there is no
-programmatic oracle: a human must open Search Data as a real non-admin user in ORG1
-(`guest4`, or `guest1`) and look.
+**An ORG1 session shows `Segment` on `T2_PUBLISH_MODEL`.** Confirmed by the repo owner,
+2026-07-28. Aliases render *only* in Search Data, Answers, Liveboards and Spotter — not in the
+Data Management app (an open ThoughtSpot development item) and not via `metadata/answer/data`,
+which returns base names — so there is no programmatic oracle for this and no amount of API
+checking substitutes for someone looking.
 
-Everything up to and including the stored document is verified. The last inch is a human
-looking at a screen, and no amount of API checking substitutes for it.
+That closes step 7 end to end: derive from the approved mapping → gate → merge → import → **a
+user in the migrated Org sees the tenant's own column name on the published master.**
+
+**Why the Org mattered here.** Both Orgs alias `STRING_1` → `Segment` (ORG2's from the earlier
+run, ORG1's from this wave), so "sees Segment" alone was consistent with either session and
+would have proved different things. ORG1 is the one that proves *this wave* worked. The same
+trap as any multi-Org data-plane check: state which Org the session was in, or the observation
+is ambiguous.
+
+**Unlike a sharing check, this one does not depend on being a non-admin.** `TS_WILDCARD_ALL`
+scopes to every user in the Org, admins included, so an admin session in ORG1 matches the same
+alias pathway a tenant user does. (For *sharing*, an admin proves nothing — that caveat stands
+and is separate.)
+
+## Still only verified at the document level
+
+**That ORG2's pre-existing aliases still RENDER after the merge.** The round-trip export
+(§4) proves both entries are present in the stored document, which is strong — but the
+preservation half has not been re-checked with eyes in an ORG2 session. If it is ever worth
+closing, that is the check: sign in to ORG2 and confirm `Segment` is still there.
 
 ## Cluster state
 

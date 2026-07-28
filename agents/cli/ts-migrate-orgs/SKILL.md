@@ -286,6 +286,7 @@ cutover it holds nothing but this migration's output.
 
 | Version | Date | Summary |
 |---|---|---|
+| 3.0.1 | 2026-07-28 | For aliases the Org of the session is what matters, not admin-vs-user — `TS_WILDCARD_ALL` covers admins too |
 | 3.0.0 | 2026-07-28 | Step 7 is a command, not prose: `ts migrate aliases` derives the wave's aliases from the approved mapping and REFUSES a partial export |
 | 2.4.0 | 2026-07-28 | Give the grant read-back command, now that `ts share status --org` resolves tenant-owned objects (BL-153) |
 | 2.3.0 | 2026-07-28 | Source and target are told apart by **ownership**, not name — a same-Org run had paired a Model with itself and reported READY (BL-152) |

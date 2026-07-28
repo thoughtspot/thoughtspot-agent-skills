@@ -3699,5 +3699,8 @@ Re-running the same wave is a **no-op**: the merged document comes out byte-iden
 
 > **Verify in Search Data, an Answer, a Liveboard or Spotter — nowhere else.** Aliases are
 > not rendered in the Data Management app, and `metadata/answer/data` returns base names too.
-> Checking either shows base names for everything and looks like total failure. And verify as
-> a **real non-admin user in that Org**.
+> Checking either shows base names for everything and looks like total failure. **What matters
+> is the Org the session is in**, not whether the user is an admin: `TS_WILDCARD_ALL` scopes to
+> everyone in the Org, admins included, so an admin session in the target Org matches the same
+> pathway a tenant user does. (That is the opposite of a *sharing* check, where an admin proves
+> nothing.) Confirmed live 2026-07-28: an ORG1 session shows `Segment` on the published master.

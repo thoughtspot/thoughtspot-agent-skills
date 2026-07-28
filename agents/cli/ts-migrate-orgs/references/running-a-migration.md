@@ -189,8 +189,9 @@ already-cut-over tenants. `--first-wave` is the explicit alternative when none e
 one of the two is required, because a check that defaults to off is not a check.
 
 Verified live 2026-07-28: with ORG2 already aliased, adding ORG1 preserved ORG2's entries and
-added ORG1's, both `TS_WILDCARD_ALL`; the round-trip export confirmed all four entries; and
-re-running produced a byte-identical document.
+added ORG1's, both `TS_WILDCARD_ALL`; the round-trip export confirmed all four entries;
+re-running produced a byte-identical document; and **an ORG1 session shows `Segment` on the
+published master** — the user-visible outcome, which no API call can confirm.
 
 ### Alias scoping — three things that will bite you
 
@@ -218,6 +219,15 @@ others is legitimate; the rule bites only on one column carrying both.
 > **not** rendered in the Data Management app (an open development item as of 2026-07-28),
 > and `metadata/answer/data` returns base names too. Checking either shows base names for
 > *everything* and looks like total failure.
+>
+> **For aliases, what matters is the Org the session is in — not whether the user is an
+> admin.** `TS_WILDCARD_ALL` scopes to everyone in the Org, admins included, so an admin
+> session in the target Org matches the same pathway a tenant user does. That is the
+> *opposite* of the sharing and RLS checks in Step 8, where an admin proves nothing.
+>
+> And **say which Org you checked.** Every migrated tenant aliases the same physical column
+> to its own name, so "I see `Segment`" is ambiguous across Orgs and can look like a pass
+> while the Org you care about is untouched.
 
 **An empty group is rejected** with `Group with name not found in org`. Do not substitute an
 arbitrary real group to get past it — that is precisely how the overlap above gets created.
