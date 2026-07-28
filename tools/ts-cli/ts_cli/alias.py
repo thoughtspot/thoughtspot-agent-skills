@@ -94,6 +94,51 @@ def translations_to_columns(translations: list[dict]) -> list[dict]:
     return columns
 
 
+# The group name that scopes an alias to EVERY user in the Org.
+WILDCARD_GROUP = "TS_WILDCARD_ALL"
+
+
+def _overlap_problem(col: str, locale: str, org: str, groups: list[str]) -> str | None:
+    """The message for one (column, locale, org), or None if the scopes are unambiguous."""
+    specific = sorted(g for g in groups if g and g != WILDCARD_GROUP)
+    if WILDCARD_GROUP not in groups or not specific:
+        return None
+    return (f"{col} / {locale} / {org}: {WILDCARD_GROUP} overlaps with "
+            f"{', '.join(specific)}. A user in either group matches two pathways, so they "
+            f"would see the BASE column name rather than any alias -- even though the "
+            f"aliases agree. Keep {WILDCARD_GROUP} for Org-wide scope, or use group scopes "
+            f"alone, but never both for one column")
+
+
+def find_scope_overlaps(columns: list[dict]) -> list[str]:
+    """(column, locale, org) triples where a user could match TWO alias pathways.
+
+    **An ambiguous alias resolves to the BASE column name** -- a user who matches both a
+    `TS_WILDCARD_ALL` entry and an entry for a group they belong to sees the underlying
+    column (`STRING_1`), not either alias. **Identical alias values do not help**: two
+    pathways is two pathways.
+
+    Worth refusing rather than warning about, because nothing else catches it. Every entry
+    is individually valid, the import returns `status_code: OK`, and the alias export looks
+    correct. The only symptom is tenants seeing generic column names, which reads as a
+    broken migration rather than an alias-scope collision.
+
+    There is no legitimate wildcard-plus-group combination: since the platform falls back
+    to the base name, that pairing never produces what the author intended.
+    """
+    problems: list[str] = []
+    for col in columns or []:
+        for locale in (col.get("locales") or []):
+            for org in (locale.get("orgs") or []):
+                groups = [g.get("name") for g in (org.get("groups") or [])
+                          if (g.get("entries") or [])]
+                problem = _overlap_problem(col.get("name"), locale.get("name"),
+                                           org.get("name"), groups)
+                if problem:
+                    problems.append(problem)
+    return problems
+
+
 def _flatten_columns(columns: list[dict]) -> dict[tuple, dict]:
     flat: dict[tuple, dict] = {}
     for col in columns:

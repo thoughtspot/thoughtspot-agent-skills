@@ -304,3 +304,90 @@ def test_parse_export_response_no_aliases():
     ]
     result = parse_export_response(edocs)
     assert result["existing_aliases"] is None
+
+
+# ---------------------------------------------------------------------------
+# Overlapping alias scopes — ambiguity falls back to the BASE column name
+# ---------------------------------------------------------------------------
+
+from ts_cli.alias import WILDCARD_GROUP, find_scope_overlaps  # noqa: E402
+
+
+def _cols(org_groups, column="STRING_1", locale="en-US", org="ORG2"):
+    """One column with the given group names, each carrying an alias entry."""
+    return [{"name": column, "locales": [{"name": locale, "orgs": [{
+        "name": org,
+        "groups": [{"name": g, "entries": [{"alias": "Segment"}]} for g in org_groups]}]}]}]
+
+
+def test_wildcard_plus_a_group_is_an_overlap():
+    """Learned live 2026-07-28: a user matching both pathways sees the BASE column name,
+    not either alias. Nothing downstream catches it -- every entry is valid, the import
+    returns OK, and the export looks right."""
+    problems = find_scope_overlaps(_cols([WILDCARD_GROUP, "MIGTEST_VIEWERS"]))
+    assert len(problems) == 1
+    assert "BASE column name" in problems[0]
+    assert "MIGTEST_VIEWERS" in problems[0]
+
+
+def test_IDENTICAL_alias_values_are_still_an_overlap():
+    """The trap I fell into: I assumed matching values made the duplicate harmless. Two
+    pathways is two pathways, whatever they say."""
+    cols = _cols([WILDCARD_GROUP, "G1"])
+    for g in cols[0]["locales"][0]["orgs"][0]["groups"]:
+        g["entries"] = [{"alias": "Segment"}]          # deliberately identical
+    assert find_scope_overlaps(cols)
+
+
+def test_wildcard_ALONE_is_fine():
+    """The correct Org-wide shape."""
+    assert find_scope_overlaps(_cols([WILDCARD_GROUP])) == []
+
+
+def test_group_scopes_ALONE_are_fine():
+    """Several groups without a wildcard cannot double-match a user via the wildcard. A
+    user in two of those groups is a different problem the platform owns, not one this
+    check can see from the document."""
+    assert find_scope_overlaps(_cols(["G1", "G2"])) == []
+
+
+def test_the_overlap_must_be_in_the_SAME_org_to_count():
+    """A wildcard in one Org and a group scope in another are independent audiences."""
+    cols = [{"name": "STRING_1", "locales": [{"name": "en-US", "orgs": [
+        {"name": "ORG2", "groups": [{"name": WILDCARD_GROUP,
+                                     "entries": [{"alias": "A"}]}]},
+        {"name": "ORG3", "groups": [{"name": "G1", "entries": [{"alias": "B"}]}]}]}]}]
+    assert find_scope_overlaps(cols) == []
+
+
+def test_the_overlap_must_be_in_the_SAME_locale_to_count():
+    cols = [{"name": "STRING_1", "locales": [
+        {"name": "en-US", "orgs": [{"name": "ORG2", "groups": [
+            {"name": WILDCARD_GROUP, "entries": [{"alias": "A"}]}]}]},
+        {"name": "fr-FR", "orgs": [{"name": "ORG2", "groups": [
+            {"name": "G1", "entries": [{"alias": "B"}]}]}]}]}]
+    assert find_scope_overlaps(cols) == []
+
+
+def test_a_group_with_NO_entries_is_not_a_pathway():
+    """An empty group carries no alias, so it cannot make a user ambiguous."""
+    cols = _cols([WILDCARD_GROUP, "G1"])
+    cols[0]["locales"][0]["orgs"][0]["groups"][1]["entries"] = []
+    assert find_scope_overlaps(cols) == []
+
+
+def test_every_offending_column_is_reported_not_just_the_first():
+    """Scope mistakes are systematic -- a wave that gets this wrong gets it wrong for
+    every column it touched."""
+    cols = _cols([WILDCARD_GROUP, "G1"]) + _cols([WILDCARD_GROUP, "G1"], column="DATE_1")
+    assert len(find_scope_overlaps(cols)) == 2
+
+
+def test_the_message_says_what_to_DO_not_just_what_is_wrong():
+    problems = find_scope_overlaps(_cols([WILDCARD_GROUP, "G1"]))
+    assert "never both for one column" in problems[0]
+
+
+def test_empty_input_does_not_crash():
+    assert find_scope_overlaps([]) == []
+    assert find_scope_overlaps(None) == []
