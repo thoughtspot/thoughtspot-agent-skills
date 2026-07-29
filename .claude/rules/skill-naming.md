@@ -29,7 +29,7 @@ extend the rule with a new one.
 | 3 | `ts-convert-*` | `ts-convert-{direction}-{format}` | Cross-platform schema conversion. Third token is `to` or `from`; fourth is the target/source format. | `ts-convert-to-snowflake-sv`, `ts-convert-from-snowflake-sv`, `ts-convert-from-tableau` |
 | 4 | `ts-dependency-*` | `ts-dependency-{verb}` | Cross-object dependency-graph operation (walk, rewrite, cleanup). | `ts-dependency-manager` |
 | 5 | `ts-variable-*` | `ts-variable-{specifier}` | Manage a specific platform variable across all its operations (search, set, remove). Second token is the variable's short name. | `ts-variable-timezone` *(planned)* |
-| 6 | `ts-setup-*` | `ts-setup-{specifier}` | Install or upgrade a toolset / stored procedures / shared infrastructure used by other skills. | `ts-setup-sv` |
+| 6 | `ts-setup-*` | `ts-setup-{specifier}` | Install or upgrade a toolset / stored procedures / shared infrastructure — or stand up a reproducible environment — used by other skills. | `ts-setup-sv`, `ts-setup-tenancy` |
 | 7 | `ts-recipe-*` | `ts-recipe-{ts-artifact-type}-{concept}[-{platform}]` | Build a specific analytical capability in ThoughtSpot. Second token is the primary ThoughtSpot artifact produced (`formula`, `answer`, `liveboard`, `model`). Third+ tokens describe the concept (`business-days`, `hms-display`, `abc-analysis`). Optional platform suffix (`-snowflake`, `-databricks`) present only when the recipe deploys to an external platform; omitted for pure-ThoughtSpot recipes. | `ts-recipe-formula-business-days-snowflake` |
 | 8 | `ts-audit` | `ts-audit` | Read-only health assessment of a ThoughtSpot environment or individual objects. Scans across multiple angles (AI readiness, data modeling, performance, security) and produces a prioritised report with actionable recommendations. Distinct from `ts-dependency-*` which actively modifies the dependency graph. | `ts-audit` |
 | 9 | `ts-load-*` | `ts-load-{specifier}` | Load source data into a warehouse. Specifier describes the data domain or purpose. | `ts-load-source-data` |
@@ -86,16 +86,21 @@ variable. If a future skill is a generic variable manager (handles all
 variables, user picks which), use `ts-object-variable-{verb}` instead — but
 that hasn't been written yet.
 
-### 6. Does the skill install or upgrade infrastructure (procs, packages, deployment artefacts)?
+### 6. Does the skill install or upgrade infrastructure (procs, packages, deployment artefacts) — or stand up a reproducible environment other skills run against?
 
 → **`ts-setup-*`**. Pattern: `ts-setup-{specifier}`.
 
-Specifier identifies what's being installed (`sv` = the semantic-view
-toolset, `databricks` = the Databricks toolset, etc.). This is distinct
+Specifier identifies what's being installed or stood up (`sv` = the
+semantic-view toolset, `tenancy` = the multi-tenancy test environment,
+`databricks` = the Databricks toolset, etc.). This is distinct
 from `ts-profile-*` — profile is about credentials, setup is about
-deploying executable code or shared schema files that **other skills use**.
+deploying executable code, shared schema files, or disposable test
+environments that **other skills use** (`ts-setup-tenancy` builds the
+Orgs/groups/tables scaffolding that the publishing, aliasing, column-security
+and migration skills are exercised against).
 If the deployment serves end-users directly (not other skills), prefer
-`ts-recipe-*`.
+`ts-recipe-*` — a recipe's output is a durable analytical artifact the user
+keeps, not disposable scaffolding with a teardown.
 
 ### 7. Does the skill build a specific analytical capability — a formula, answer, or liveboard pattern?
 
