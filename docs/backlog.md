@@ -5131,19 +5131,51 @@ whether the TPC-DS Model TML also belongs in `agents/shared/worked-examples/`.
 **Source:** the `docs/ossie/ts-osi-function-mapping.md` review on the
 `feat/ossie-converter-design` branch -- writing one row per Ossie function forced a
 side-by-side read of every ThoughtSpot formula reference we ship, which is what surfaced
-these. Cross-referenced from that document's *Rows pending live confirmation* section.
+these. Cross-referenced from that document's *Rows live-confirmed — 2026-07-29* section
+(named *Rows pending live confirmation* until this entry was resolved).
 **Affects:** `agents/shared/schemas/thoughtspot-formula-patterns.md`,
 `agents/shared/mappings/tableau/tableau-formula-translation.md`,
 `agents/shared/mappings/ts-databricks/ts-databricks-formula-translation.md`,
 `agents/shared/mappings/qlik/qlik-thoughtspot-formula-translation.md`, and any converter
 whose emitter branches on these functions.
-**Status:** OPEN.
+**Status:** RESOLVED 2026-07-29 (live-verified on se-thoughtspot; docs corrected in
+`fix(shared): BL-170 — live-verified function nativeness corrections`).
 
-Four function-level claims about ThoughtSpot's *own* formula language are stated
-incompatibly across our shared references. In each case one of the files is wrong, so at
-least one converter is emitting either an invalid native call or an unnecessary
+**Result — all four settled, and every "native" claim lost:**
+
+| # | Function(s) | Verdict | Which side was wrong |
+|---|---|---|---|
+| a | `replace` | **NOT native** — `Search did not find "replace ("` | `thoughtspot-formula-patterns.md` + the Databricks/Snowflake/Qlik/Looker mappings. The Tableau mapping was right. |
+| b | `starts_with` / `ends_with` | **NOT native** — both rejected | `thoughtspot-formula-patterns.md` + the Databricks/Snowflake/Qlik mappings. The Tableau mapping was right. |
+| c | `ltrim` / `rtrim` | **NOT native** — and neither is `trim` | The Databricks/Snowflake/Qlik mappings claimed all three. The Qlik file's *conclusion* (no one-sided trim) was right but its premise (`trim` is two-sided) was also wrong. |
+| d | `in` delimiter | **Curly braces required** — `in ( ... )` is rejected with `Expecting one of the valid keywords, such as, "ts_var", "{"` | `thoughtspot-formula-patterns.md` + the Snowflake/Qlik mappings. The Tableau mapping was right. |
+
+**Bonus finding (outside the four questions):** `trim` is **not** a native ThoughtSpot
+function either. It surfaced because `trim` was used as a known-good *control* and failed;
+`concat`, `substr`, `strlen`, `strpos` and `contains` passed as controls, and `upper`
+failed as expected, so the method was sound. Every reference mapping a source `TRIM()` to
+a bare `trim ( )` was corrected in the same pass.
+
+Net effect: `thoughtspot-formula-patterns.md` — the file CLAUDE.md treats as formula ground
+truth — was the defect in all four rows, exactly as this entry predicted. The corrected
+native string-function set is **`concat`, `substr`, `left`, `right`, `strlen`, `strpos`,
+`contains`** and nothing else.
+
+**Follow-on:** the *documentation* is now correct but **five CLI emitters still emit the
+invalid bare calls** — filed as **BL-171**. And the validator that was supposed to gate this
+class, `check_formula_catalog.py`, **silently skips most of its input** (82% of the qlik
+file's rows) — filed as **BL-172** after the PR review found a wrong row the validator had
+passed. See *Validator promotion* below: this class of drift is **not** yet unable to recur.
+
+### What the conflict was (for the record)
+
+Four function-level claims about ThoughtSpot's *own* formula language **were** stated
+incompatibly across our shared references. In each case one of the files was wrong, so at
+least one converter was emitting either an invalid native call or an unnecessary
 pass-through -- and the two failure modes are asymmetric: a wrong "native" claim produces a
-formula that fails at import, while a wrong "no native" claim only costs fidelity.
+formula that fails at import, while a wrong "no native" claim only costs fidelity. As it
+turned out, **every "native" claim was the wrong one**, so the realised failure mode was the
+import-breaking kind on all four rows.
 
 | # | Function(s) | Claim A | Claim B |
 |---|---|---|---|
@@ -5152,42 +5184,198 @@ formula that fails at import, while a wrong "no native" claim only costs fidelit
 | c | `ltrim` / `rtrim` | exist as ThoughtSpot functions (`ts-databricks-formula-translation.md:82-83`, whose left-hand column is the ThoughtSpot side) | "ThoughtSpot `trim()` removes both sides -- no left-only / right-only trim available" (`qlik-thoughtspot-formula-translation.md:180-181`). `thoughtspot-formula-patterns.md` lists `trim` only and names neither, so it corroborates neither side |
 | d | `in` literal-list delimiter | `[col] in ( 'a' , 'b' )` -- round parentheses (`thoughtspot-formula-patterns.md:134`) | `in { a , b , c }` -- curly braces required; the round form raises the parser error "Search did not find 'in ( ...'" (`tableau-formula-translation.md:41`) |
 
-Rows (a), (b) and (d) each have a live-confirmed side (the Tableau mapping, dated and
-attributed to se-thoughtspot), which is the likelier-correct one and makes
-`thoughtspot-formula-patterns.md` -- the file CLAUDE.md treats as the formula ground truth --
-the probable defect in all three. Row (c) has no live evidence on either side. Either way
-the fix is not a guess: these are four one-line formula probes.
+The prediction recorded here at filing time was that rows (a), (b) and (d) each had a
+live-confirmed side (the Tableau mapping, dated and attributed to se-thoughtspot), making
+`thoughtspot-formula-patterns.md` the probable defect in all three, with row (c) having no
+live evidence either way. **That prediction was correct, and row (c) resolved against the
+mappings too** -- `ltrim`/`rtrim` *and* `trim` are all absent.
 
-**Approach:**
+### How it was settled
 
-1. On a live instance, create one Model formula per claim and record accept/reject:
-   `replace ( [col] , 'a' , 'b' )`; `starts_with ( [col] , 'x' )` and
-   `ends_with ( [col] , 'x' )`; `ltrim ( [col] )` and `rtrim ( [col] )`;
-   `[col] in ( 'a' , 'b' )` **and** `[col] in { 'a' , 'b' }`. Import via
-   `ts tml import` so the check is the real parser, not the UI.
-2. Correct whichever reference is wrong, with the date and instance recorded in the row --
-   the same live-verification convention `thoughtspot-formula-patterns.md:182` and
-   `tableau-formula-translation.md:227` already use. Where a function does not exist, state
-   the pass-through or composition explicitly so no converter re-derives it.
-3. Where the two spellings coexist by build, say so rather than picking one: the `in`
-   delimiter is the candidate for that treatment.
-4. Update the affected emitters and the Ossie function-mapping document's *Rows pending
-   live confirmation* table with the result (a `passthrough` -> `direct` flip on
-   `LTRIM`/`RTRIM` also moves that document's counts, which it already records).
+22 probes on **se-thoughtspot** (`https://se-thoughtspot-cloud.thoughtspot.cloud`) on
+2026-07-29 via `ts tml import --policy VALIDATE_ONLY` -- one throwaway Model formula per
+probe, so every result is individually attributable, and nothing is persisted (the probe
+Model re-exported byte-identical afterwards; no objects were created).
 
-**Validator promotion this could unlock:** the disagreement is only detectable by reading
-four files side by side. A `check_formula_catalog.py` extension that cross-checks each
-ThoughtSpot function name appearing in a mapping's ThoughtSpot column against
-`thoughtspot-formula-patterns.md` -- and fails when one file calls a function native and
-another calls it absent -- would make this class of drift impossible to reintroduce. Worth
-filing once the four facts are settled, since the checker needs a correct baseline.
+The method was validated by controls in the same pass, which is what makes the surprising
+`trim` result trustworthy: `concat`, `substr`, `left`, `right`, `strlen`, `strpos` and
+`contains` all **passed**; `upper` (known absent since 2026-06-13) **failed** as expected.
+Every replacement pass-through and composition was also verified to import, so the
+corrections are evidence-backed rather than inferred.
 
-**Target:** next live-instance pass on se-thoughtspot; bundle with any converter formula
-work that touches these functions.
+One correction to the filing-time plan is worth recording: the entry anticipated that a
+`passthrough` -> `direct` flip on `LTRIM`/`RTRIM` might move the Ossie document's counts.
+**The flip went the other way.** `LTRIM`/`RTRIM` stayed `passthrough` (with a stronger
+justification -- there is no `trim` to substitute at all), and `TRIM` and `REPLACE` moved
+`direct` -> `passthrough`, so the split went `114/31/1` -> `112/33/1` and 78% -> 77%. The
+"two spellings may coexist by build" allowance was not needed either: the `in` delimiter is
+unambiguously `{ }`, and the parser error names `"{"` as an expected token explicitly.
+
+### Validator promotion -- partly already in place, and weaker than it looked
+
+The extension proposed at filing time (`check_formula_catalog.py` cross-checking each
+mapping's ThoughtSpot column against the catalog) **already existed** and now has a correct
+baseline. But it should **not** be read as making this class of drift unable to recur, for
+two reasons:
+
+1. **The scanner is broken.** `scan_mapping` skips any table row containing the word
+   "ThoughtSpot" -- 82% of the qlik file's rows. That is why the PR review still found a
+   wrong row (`qlik` CL08: round-paren `in (...)` plus a struck-through `lower()`) *after*
+   the validator reported green. Filed as **BL-172**, which should land before any
+   extension.
+2. **It only covers `agents/shared/mappings/*.md`.** The five converter emitters in
+   `tools/ts-cli/` are ungated and still emit the invalid bare names -- filed as **BL-171**.
+
+So the honest status is: the references are correct and there is a *partial* gate on them;
+the code is still wrong and ungated. BL-172 then BL-171, in that order, is what would
+actually close the loop.
+
+**Outcome:** four conflicts settled, one bonus defect found, six shared references and
+three coverage matrices corrected, seven skills PATCH-bumped, two follow-on entries filed
+(BL-171, BL-172).
 
 ---
 
-## BL-171 — Bound `ts tml verify-render` per-tile probing on large liveboards `Tier 3`
+## BL-171 -- Five ts-cli emitters still emit the six non-existent string functions `Tier 1`
+
+**Filed:** 2026-07-29.
+**Source:** fallout from BL-170's live verification. BL-170 corrected the *reference docs*;
+this entry is the *code*.
+**Affects:** `tools/ts-cli/ts_cli/sv_sql.py`, `tools/ts-cli/ts_cli/databricks/mv_sql.py`,
+`tools/ts-cli/ts_cli/tableau/functions.py`, `tools/ts-cli/ts_cli/qlik/functions.py`,
+`tools/ts-cli/ts_cli/powerbi/functions.py`, plus the vendored
+`agents/databricks/notebooks/databricks_mv_lib.py` (regenerated, not hand-edited).
+**Status:** OPEN.
+
+BL-170 live-proved that `trim`, `ltrim`, `rtrim`, `replace`, `starts_with` and `ends_with`
+are **not** ThoughtSpot formula functions. Five converter emitters still translate a source
+function to those bare names, so every affected formula **fails at TML import** with
+`Search did not find "<fn> ("` (error 14516). This is a correctness bug, not a fidelity
+one — the import is rejected outright.
+
+| Module | Direction | Offending map | Names emitted |
+|---|---|---|---|
+| `sv_sql.py:206-208` | Snowflake SQL → TS | `_RENAME` | `trim`, `ltrim`, `rtrim`, `replace`, `starts_with`, `ends_with` |
+| `databricks/mv_sql.py:251-252` | Databricks SQL → TS | `_RENAME` | `trim`, `ltrim`, `rtrim`, `replace`, `starts_with` |
+| `tableau/functions.py:47` | Tableau → TS | regex rewrite list | `trim` only (the rest of this module is already correct) |
+| `qlik/functions.py:40-43` | Qlik → TS | `FUNCTION_MAP` | `trim`, `ltrim`, `rtrim`, `replace` — **plus `upper`/`lower`** (wrong since 2026-06-13) **and `len`/`mid`** (line 40, identity-mapped `"len": "len"` / `"mid": "mid"`; both live-disproved 2026-07-29 — the real names are `strlen` and `substr`, and neither `len` nor `mid` appears in the catalog at all) |
+| `powerbi/functions.py:39` | DAX → TS | `_DAX_FUNC` | `trim` — **plus `upper`/`lower`**, same pre-existing defect |
+
+`databricks/mv_emit_sql.py:22` (`"trim": "TRIM"`) is the reverse direction and is a
+**harmless dead entry** — no valid TS model can contain `trim`, and the `sql_string_op`
+unwrap already handles the real path. Leave it or delete it; it is not a bug.
+
+**Reference implementation already in the repo:** `tableau/functions.py` `_ARG_HANDLERS`
+(L157-205) already does exactly the right thing for `REPLACE`, `STARTSWITH`, `ENDSWITH`,
+`UPPER` and `LOWER`. The other four modules need the same shape. `sv_sql.py` and
+`mv_sql.py` each already have a `_PASS_THROUGH_HINT` dict (holding `LOWER`/`UPPER`/
+`INITCAP`) which is the natural home; `qlik` and `powerbi` have only `None`-means-flag and
+need a template mechanism added.
+
+**Approach:**
+
+1. Move the six names out of each rename map into that module's pass-through/handler path,
+   emitting `sql_string_op ( "TRIM({0})" , ... )` etc., and the `strpos ( ) = 1` /
+   `substr` compositions for `STARTSWITH`/`ENDSWITH`.
+2. Fold in `upper`/`lower` for qlik and powerbi — same defect class, already disproved — and
+   qlik's `len`/`mid`, which are identity-mapped to names that do not exist (→ `strlen`,
+   `substr`). The qlik map should be audited end-to-end rather than patched name-by-name:
+   four separate defect classes have now been found in it, which suggests it was written
+   against assumed rather than verified ThoughtSpot function names.
+3. Unit tests per module: `tools/ts-cli/tests/` has **no** test asserting any of these six
+   mappings today, which is why the bug survived. `test_sv_sql.py:90-92` asserts the *wrong*
+   expectation (`starts_with ( [A::NAME] , 'A' )`) and must be updated.
+4. Re-run `agents/databricks/build_mv_lib.py` to regenerate the vendored lib
+   (`test_vendor_mv_lib.py` enforces the sync).
+5. Update each affected `references/coverage-matrix.md` to drop the "documentation
+   corrected, CLI still wrong — see BL-171" caveats BL-170 added.
+6. Bump ts-cli version + the affected skills' versions.
+
+**Validator promotion this should unlock:** extend `check_formula_catalog.py` (which today
+scans only `agents/shared/mappings/*.md`) to also parse the emitter rename maps in
+`tools/ts-cli/ts_cli/**` and fail when a map's *value* is a function the catalog marks
+non-existent. That closes the loop BL-170 opened — the catalog is now correct, and the code
+is the only remaining place the claim can drift.
+
+**Target:** next converter-formula pass. Tier 1 because it produces failed imports today on
+five of the six conversion paths.
+
+---
+
+## BL-172 -- `check_formula_catalog.py` silently skips most data rows (header detection is too loose) `Tier 1`
+
+**Filed:** 2026-07-30.
+**Source:** PR review of the BL-170 corrections. The reviewer found a wrong row
+(`qlik` CL08) that the validator should have caught, which led to this root cause.
+**Affects:** `tools/validate/check_formula_catalog.py` (+ `tools/validate/tests/test_formula_catalog.py`).
+**Status:** OPEN.
+
+`scan_mapping` treats **any** table row containing one of `_TS_COLUMN_KEYWORDS`
+(`"thoughtspot"`, `"ts syntax"`, `"ts formula"`) as a **column header**, resets `ts_col`
+from it, and `continue`s -- skipping the row entirely:
+
+```python
+# check_formula_catalog.py:136-141
+if line.strip().startswith("|") and any(
+    kw in line.lower() for kw in _TS_COLUMN_KEYWORDS
+):
+    ts_col = _find_ts_column(line)
+    continue
+```
+
+Mapping files mention "ThoughtSpot" **in their Notes column constantly**, so this silently
+excludes most of the corpus the validator exists to gate:
+
+| File | Table rows | Skipped as "header" |
+|---|--:|--:|
+| `qlik-thoughtspot-formula-translation.md` | 220 | **182 (82%)** |
+| `tableau-formula-translation.md` | 241 | 67 (27%) |
+
+Worse, `_find_ts_column` returns `None` for a data row (no cell *is* a header), which
+**resets `ts_col` to `None`**, so subsequent genuine rows get scanned against cell 0 instead
+of the real ThoughtSpot column -- a second, quieter failure mode.
+
+**Confirmed reproduction** (2026-07-30). The shipped CL08 row is skipped; the *same* row with
+the word "ThoughtSpot" removed from its Notes is flagged correctly:
+
+```
+AS SHIPPED (Notes says 'ThoughtSpot')   -> errors: []            <-- silently skipped
+SAME ROW, 'ThoughtSpot' removed         -> errors: ['ERROR: ... `lower` is not a valid TS function']
+```
+
+`lower` is marked non-existent in the catalog, so this row was always an error -- the
+validator just never looked at it. **This is why the BL-170 pass missed CL08** (round-paren
+`in (...)` *and* a struck-through `lower()`), and it means `check_formula_catalog.py`'s
+green result across the BL-170 corrections was substantially weaker evidence than it
+appeared.
+
+**Approach:**
+
+1. Identify header rows structurally, not by keyword: a header is the row **immediately
+   preceding a separator row** (`|---|---|`). Detect the separator first, then treat the
+   previous line as that table's header.
+2. Never reset `ts_col` from a non-header line.
+3. Regression tests that would have caught this: a data row whose Notes contain
+   "ThoughtSpot" *and* an invalid function must ERROR; and a table whose header is followed
+   by many "ThoughtSpot"-mentioning rows must keep `ts_col` stable throughout.
+4. Re-run over all of `agents/shared/mappings/` afterwards and triage the backlog of rows
+   that were never gated -- expect real findings, including the two open conflicts BL-170
+   flagged but did not settle (`substr` 0- vs 1-indexing in the qlik file; qlik S12's
+   "no substring-position function" claim vs the verified `strpos`).
+
+**Deliberately not fixed in the BL-170 PR** -- that PR is a content correction, and this is a
+tooling change whose blast radius is "every mapping row that was never scanned". Fixing it
+first would have mixed an unbounded triage into a scoped fix.
+
+**Relationship to BL-171:** BL-171 proposes *extending* this validator to cover
+`tools/ts-cli/` emitter maps. **BL-172 should land first** -- extending a scanner that
+skips 82% of its current input would inherit the same blind spot.
+
+**Target:** next validator pass; before BL-171's validator extension.
+
+---
+
+## BL-173 — Bound `ts tml verify-render` per-tile probing on large liveboards `Tier 3`
 
 Raised by djwaldo reviewing #356 (the Power BI render-robustness PR). When a board fails the
 whole-board `metadata/liveboard/data` call, `verify-render` re-probes **each tile sequentially**

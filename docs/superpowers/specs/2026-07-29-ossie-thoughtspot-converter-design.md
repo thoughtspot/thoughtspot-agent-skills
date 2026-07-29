@@ -1,7 +1,7 @@
 # Design: ThoughtSpot ↔ Apache Ossie converter + upstream learnings review
 
 **Date:** 2026-07-29
-**Status:** Approved (design), pending implementation plan
+**Status:** Phases 1–2 complete (PR #411); upstream posting of mapping docs parked pending ThoughtSpot legal approval; Phase 3 plan pending upstream feedback on #285.
 **Owner:** Damian Waldron
 
 ## Background

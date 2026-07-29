@@ -67,19 +67,26 @@ lives in the construct-mapping document (**ID3**).
 |---|--:|--:|--:|--:|
 | Aggregate functions | 18 | 12 | 6 | 0 |
 | Date/time functions | 24 | 17 | 7 | 0 |
-| String functions | 21 | 12 | 9 | 0 |
+| String functions | 21 | 10 | 11 | 0 |
 | Mathematical functions | 25 | 23 | 2 | 0 |
 | Conditional functions | 9 | 9 | 0 | 0 |
 | Window functions | 14 | 9 | 5 | 0 |
 | Type conversion | 2 | 2 | 0 | 0 |
 | Operators and constructs | 33 | 30 | 2 | 1 |
-| **Total** | **146** | **114** | **31** | **1** |
+| **Total** | **146** | **112** | **33** | **1** |
 
-78% of the specification is expressible in ThoughtSpot's native formula language. The
-`passthrough` set concentrates in three places — population statistics and percentiles,
-regular expressions, and case-insensitive string handling — and there is exactly one
-`unmappable` construct, `EXISTS_IN()`, which is unmappable because the specification does
-not define it (see ask **A9**).
+77% of the specification is expressible in ThoughtSpot's native formula language. The
+`passthrough` set concentrates in four places — population statistics and percentiles,
+regular expressions, case-insensitive string handling, and **whitespace/substring editing
+(`TRIM`/`LTRIM`/`RTRIM`/`REPLACE`)** — and there is exactly one `unmappable` construct,
+`EXISTS_IN()`, which is unmappable because the specification does not define it (see ask
+**A9**).
+
+> **Revised 2026-07-29 (BL-170).** `TRIM` and `REPLACE` moved `direct` → `passthrough`
+> after live verification on se-thoughtspot showed that ThoughtSpot has no native `trim`
+> or `replace` function; the split was `114`/`31` before. `STARTSWITH`/`ENDSWITH` stay
+> `direct` — they too have no native function, but their compositions use only native
+> functions, which the `direct` definition admits. See the String functions section.
 
 ---
 
@@ -256,19 +263,19 @@ operators, so they are rowed under Operators and constructs.
 | `LENGTH(str)` | direct | `strlen ( [s] )` | Characters, not bytes, on both sides. |
 | `LOWER(str)` | passthrough | `sql_string_op ( "LOWER({0})" , [s] )` | **Variant: `sql_string_op`.** There is no native `lower` in ThoughtSpot. |
 | `UPPER(str)` | passthrough | `sql_string_op ( "UPPER({0})" , [s] )` | **Variant: `sql_string_op`.** There is no native `upper` in ThoughtSpot. `LOWER`/`UPPER` are the most-used functions in the whole `passthrough` set, and their absence is also what forces `ILIKE` and case-insensitive comparison into pass-throughs. |
-| `TRIM(str)` | direct | `trim ( [s] )` | Both remove leading *and* trailing whitespace. |
-| `LTRIM(str)` | passthrough | `sql_string_op ( "LTRIM({0})" , [s] )` | **Variant: `sql_string_op`.** ThoughtSpot's `trim` is two-sided with no one-sided form, so substituting it would strip trailing whitespace the source preserved. |
+| `TRIM(str)` | passthrough | `sql_string_op ( "TRIM({0})" , [s] )` | **Variant: `sql_string_op`.** There is no native `trim` in ThoughtSpot — live-verified 2026-07-29 on se-thoughtspot (BL-170), rejected with `Search did not find "trim ("`. The whole trim family is a pass-through, not just the one-sided forms. |
+| `LTRIM(str)` | passthrough | `sql_string_op ( "LTRIM({0})" , [s] )` | **Variant: `sql_string_op`.** No native `ltrim` — live-verified 2026-07-29, se-thoughtspot (BL-170). This row was already `passthrough` on the conservative reading that `trim` was two-sided-only; the verification confirms the classification and strengthens the reason — there is no `trim` to substitute at all. |
 | `RTRIM(str)` | passthrough | `sql_string_op ( "RTRIM({0})" , [s] )` | **Variant: `sql_string_op`.** As `LTRIM`. |
 | `LEFT(str, n)` | direct | `left ( [s] , n )` | |
 | `RIGHT(str, n)` | direct | `right ( [s] , n )` | |
 | `SUBSTRING(str, start, length)` | direct | `substr ( [s] , start - 1 , length )` | **Index base differs.** ANSI `SUBSTRING` is 1-based; ThoughtSpot's `substr` is 0-based. The `− 1` is mandatory and is the single most likely off-by-one in the whole mapping. When `start` is an expression rather than a literal, the arithmetic is emitted rather than folded. |
-| `REPLACE(str, from, to)` | direct | `replace ( [s] , [from] , [to] )` | Replaces all occurrences on both sides. Pending live confirmation — see *Rows pending live confirmation*; the fallback is `sql_string_op ( "REPLACE({0},{1},{2})" , [s] , [from] , [to] )`. |
+| `REPLACE(str, from, to)` | passthrough | `sql_string_op ( "REPLACE({0}, {1}, {2})" , [s] , [from] , [to] )` | **Variant: `sql_string_op`.** There is no native `replace` in ThoughtSpot — live-verified 2026-07-29 on se-thoughtspot (BL-170), rejected with `Search did not find "replace ("`. This row was `direct` on documentation; the live pass moved it to the documented fallback. |
 | `SPLIT_PART(str, delimiter, part)` | passthrough | `sql_string_op ( "SPLIT_PART({0}, {1}, {2})" , [s] , [delim] , [n] )` | **Variant: `sql_string_op`.** ThoughtSpot has no tokenising function at all — not `split`, `split_part` or an nth-occurrence search — so there is no composition to fall back on. |
 | `POSITION(substr IN str)` | direct | `strpos ( [s] , [substr] )` | **Operand order is reversed** (haystack first in ThoughtSpot) and the specification's infix `IN` form becomes a comma. 1-based, returning 0 when absent, on both sides. |
 | `CHARINDEX(substr, str)` | direct | `strpos ( [s] , [substr] )` | Specification alias for `POSITION` (`:419`) with the operands already in prefix order; the reversal is the same. |
 | `CONTAINS(str, substr)` | direct | `contains ( [s] , [substr] )` | Returns boolean on both sides. |
-| `STARTSWITH(str, prefix)` | direct | `starts_with ( [s] , [prefix] )` | Pending live confirmation — see *Rows pending live confirmation*; the composition fallback is `strpos ( [s] , [prefix] ) = 1`. |
-| `ENDSWITH(str, suffix)` | direct | `ends_with ( [s] , [suffix] )` | Pending live confirmation; the composition fallback is `substr ( [s] , strlen ( [s] ) - strlen ( [suffix] ) , strlen ( [suffix] ) ) = [suffix]`. |
+| `STARTSWITH(str, prefix)` | direct | `strpos ( [s] , [prefix] ) = 1` | **There is no native `starts_with`** — live-verified 2026-07-29, se-thoughtspot (BL-170). Still `direct` because the composition is exact and uses only native functions (per the classification definition): `strpos` is 1-based, so a true prefix sits at position 1. The composition itself was verified to import. |
+| `ENDSWITH(str, suffix)` | direct | `substr ( [s] , strlen ( [s] ) - strlen ( [suffix] ) , strlen ( [suffix] ) ) = [suffix]` | **There is no native `ends_with`** — live-verified 2026-07-29, se-thoughtspot (BL-170). `direct` by composition, as `STARTSWITH`; verified to import. |
 | `REGEXP_LIKE(str, pattern)` | passthrough | `sql_bool_op ( "REGEXP_LIKE({0}, {1})" , [s] , [pattern] )` | **Variant: `sql_bool_op`** — boolean return, so not `sql_string_op`. ThoughtSpot has no regular-expression support of any kind. |
 | `REGEXP_EXTRACT(str, pattern)` | passthrough | `sql_string_op ( "REGEXP_SUBSTR({0}, {1})" , [s] , [pattern] )` | **Variant: `sql_string_op`.** The function *name* inside the template is dialect-specific — Snowflake spells it `REGEXP_SUBSTR`, others `REGEXP_EXTRACT` — so the converter selects it from the connection's dialect and raises an issue when the dialect is unknown. |
 | `REGEXP_REPLACE(str, pattern, replacement)` | passthrough | `sql_string_op ( "REGEXP_REPLACE({0},{1},{2})" , [s] , [pattern] , [repl] )` | **Variant: `sql_string_op`.** Name is portable; the *pattern dialect* (POSIX vs PCRE, backreference syntax) is not. |
@@ -420,9 +427,9 @@ modifier), `:401` (`||`), `:428-429` (`LIKE`/`ILIKE`), `:500-513` (`CASE`), `:53
 | `a OR b` | direct | `[a] or [b]` | Lower-case, infix. |
 | `NOT expr` | direct | `not ( [x] )` | **Function form with parentheses**, not a prefix operator — `not [x]` does not parse. |
 | `x BETWEEN a AND b` | direct | `[x] between [a] and [b]` | Inclusive on both sides. |
-| `x IN (a, b, c)` | direct | `[x] in { 'a' , 'b' , 'c' }` | Literal lists only on both sides (`:113`) — no subqueries. The list **delimiter** is the one thing to confirm per build: the curly-brace form is what the formula parser accepts in the paths verified most recently, and it forces `>-` block-scalar YAML. See *Rows pending live confirmation*. |
+| `x IN (a, b, c)` | direct | `[x] in { 'a' , 'b' , 'c' }` | Literal lists only on both sides (`:113`) — no subqueries. The curly-brace delimiter is **confirmed**, live-verified 2026-07-29 on se-thoughtspot (BL-170): the round-parenthesis form is rejected with `Expecting one of the valid keywords, such as, "ts_var", "{"`. It forces `>-` block-scalar YAML. |
 | `x NOT IN (a, b, c)` | direct | `not ( [x] in { 'a' , 'b' , 'c' } )` | Emitted as a negated `in` rather than a `not in` keyword — the bare keyword form is not reliably accepted. |
-| `str LIKE pattern` | direct | `starts_with` / `ends_with` / `contains` by pattern shape | `'foo%'` → `starts_with ( [s] , 'foo' )`; `'%foo'` → `ends_with ( [s] , 'foo' )`; `'%foo%'` → `contains ( [s] , 'foo' )`. These three shapes are the overwhelming majority of `LIKE` use. Interior wildcards and any `_` single-character wildcard have no native form and fall back to `sql_bool_op ( "{0} LIKE {1}" , [s] , [pattern] )` (**E3**). |
+| `str LIKE pattern` | direct | prefix / suffix / `contains` composition by pattern shape | `'foo%'` → `strpos ( [s] , 'foo' ) = 1`; `'%foo'` → `substr ( [s] , strlen ( [s] ) - strlen ( 'foo' ) , strlen ( 'foo' ) ) = 'foo'`; `'%foo%'` → `contains ( [s] , 'foo' )`. **Only `contains` is a native function** — `starts_with` and `ends_with` do not exist (live-verified 2026-07-29, se-thoughtspot — BL-170), so the first two shapes are compositions; see the `STARTSWITH`/`ENDSWITH` rows. These three shapes are the overwhelming majority of `LIKE` use. Interior wildcards and any `_` single-character wildcard have no native form and fall back to `sql_bool_op ( "{0} LIKE {1}" , [s] , [pattern] )` (**E3**). |
 | `str ILIKE pattern` | passthrough | `sql_bool_op ( "{0} ILIKE {1}" , [s] , [pattern] )` | **Variant: `sql_bool_op`.** Case-insensitive matching has no native form, and the usual workaround — fold both sides with `lower` — is itself a pass-through, so there is nothing to compose from. |
 | `expr IS NULL` | direct | `isnull ( [x] )` | |
 | `expr IS NOT NULL` | direct | `isnotnull ( [x] )` | Native, so not composed as `not ( isnull ( ) )`. |
@@ -542,28 +549,34 @@ declared untranslatable without checking the composition first.
 
 ---
 
-## Rows pending live confirmation
+## Rows live-confirmed — 2026-07-29
 
-Four `direct` classifications rest on documentation rather than on a recent live import.
-They are marked in their Notes and collected here so a reviewer can see the whole set at
-once, and so the Phase-3 implementation has an explicit verification list. In each case a
-documented fallback exists, so a wrong call costs fidelity, not correctness.
+The four classifications that rested on documentation rather than a live import have been
+**settled empirically**. Verification ran on **se-thoughtspot**
+(`https://se-thoughtspot-cloud.thoughtspot.cloud`) on **2026-07-29** via
+`ts tml import --policy VALIDATE_ONLY`, one throwaway model formula per probe so each
+result is individually attributable. The method was validated with controls in the same
+pass: `concat`, `substr`, `contains`, `strlen` and `strpos` accepted; `upper` rejected.
+Tracked internally as **BL-170**.
 
-| Row | Claim | Fallback if it fails |
-|---|---|---|
-| `REPLACE(str, from, to)` | `replace ( )` is a native function | `sql_string_op ( "REPLACE({0},{1},{2})" , ... )` |
-| `STARTSWITH(str, prefix)` | `starts_with ( )` is native | `strpos ( [s] , [prefix] ) = 1` |
-| `ENDSWITH(str, suffix)` | `ends_with ( )` is native | `substr ( [s] , strlen ( [s] ) - strlen ( [suffix] ) , strlen ( [suffix] ) ) = [suffix]` |
-| `x IN (a, b, c)` | the accepted literal-list delimiter is `{ }` | the `( )` form, per the build's parser |
+| Row | Claim under test | Result | Outcome |
+|---|---|---|---|
+| `REPLACE(str, from, to)` | `replace ( )` is a native function | **REJECTED** — `Search did not find "replace ("` | Row moved `direct` → `passthrough`; the fallback is now the mapping |
+| `STARTSWITH(str, prefix)` | `starts_with ( )` is native | **REJECTED** — `Search did not find "starts_with ("` | Row stays `direct`; ThoughtSpot column replaced with the `strpos ( ) = 1` composition, which was verified to import |
+| `ENDSWITH(str, suffix)` | `ends_with ( )` is native | **REJECTED** — `Search did not find "ends_with ("` | Row stays `direct`; ThoughtSpot column replaced with the `substr`/`strlen` composition, verified to import |
+| `x IN (a, b, c)` | the accepted delimiter is `{ }` | **CONFIRMED** — the `( )` form is rejected with `Expecting one of the valid keywords, such as, "ts_var", "{"` | Row unchanged; the "confirm per build" caveat is removed |
 
-`LTRIM` / `RTRIM` are the mirror case — classified `passthrough` on the conservative
-reading that ThoughtSpot's `trim` is two-sided only. If a one-sided form turns out to
-exist, those two rows move to `direct` and the pass-through count drops to 29.
+`LTRIM` / `RTRIM` were the mirror case, classified `passthrough` on the conservative
+reading that ThoughtSpot's `trim` is two-sided only. **Both stay `passthrough`, and the
+reasoning is now stronger than the guess:** `ltrim`, `rtrim` *and* `trim` were all
+rejected, so there is no trim function of any kind to substitute. The pass-through count
+did **not** drop to 29 — it rose to 33, because `TRIM` itself joined the pass-through set
+along with `REPLACE`.
 
-Each of the four table rows and the `LTRIM`/`RTRIM` pair rests on ThoughtSpot references
-that disagree with one another, so the verification is one live pass rather than five
-separate ones. It is tracked internally as **BL-170**; this section will be updated with
-the result.
+The one finding outside the original four questions: **`trim` is not a native ThoughtSpot
+function.** It surfaced because `trim` was used as a known-good control and failed. Every
+internal reference that mapped a source `TRIM()` to a bare `trim ( )` was corrected in the
+same pass.
 
 ---
 

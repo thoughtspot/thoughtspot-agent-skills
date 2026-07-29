@@ -78,12 +78,13 @@ Resolution:
 | `substr(s, start, len)` | `SUBSTRING(s, start, len)` | |
 | `sql_string_op("LOWER({0})", s)` | `LOWER(s)` | Auto-translated pass-through (ts-cli v0.50.0) |
 | `sql_string_op("UPPER({0})", s)` | `UPPER(s)` | Auto-translated pass-through (ts-cli v0.50.0) |
-| `trim(s)` | `TRIM(s)` | |
-| `ltrim(s)` | `LTRIM(s)` | |
-| `rtrim(s)` | `RTRIM(s)` | |
-| `replace(s, old, new)` | `REPLACE(s, old, new)` | |
+| `sql_string_op("TRIM({0})", s)` | `TRIM(s)` | **No native `trim` in ThoughtSpot** — pass-through (live-verified 2026-07-29, se-thoughtspot — BL-170) |
+| `sql_string_op("LTRIM({0})", s)` | `LTRIM(s)` | **No native `ltrim`** — pass-through (live-verified 2026-07-29, se-thoughtspot — BL-170) |
+| `sql_string_op("RTRIM({0})", s)` | `RTRIM(s)` | **No native `rtrim`** — pass-through (live-verified 2026-07-29, se-thoughtspot — BL-170) |
+| `sql_string_op("REPLACE({0}, {1}, {2})", s, old, new)` | `REPLACE(s, old, new)` | **No native `replace`** — pass-through (live-verified 2026-07-29, se-thoughtspot — BL-170) |
 | `contains(s, sub)` | `CONTAINS(s, sub)` | |
-| `starts_with(s, prefix)` | `STARTSWITH(s, prefix)` | |
+| `strpos(s, prefix) = 1` | `STARTSWITH(s, prefix)` | **No native `starts_with`** — compose from `strpos`, which is 1-based (live-verified 2026-07-29, se-thoughtspot — BL-170) |
+| `substr(s, strlen(s) - strlen(sfx), strlen(sfx)) = sfx` | `ENDSWITH(s, sfx)` | **No native `ends_with`** — compose from `substr`/`strlen` (live-verified 2026-07-29, se-thoughtspot — BL-170) |
 | `left(s, n)` | `LEFT(s, n)` | |
 | `right(s, n)` | `RIGHT(s, n)` | |
 | `lpad(s, n, pad)` | `LPAD(s, n, pad)` | |

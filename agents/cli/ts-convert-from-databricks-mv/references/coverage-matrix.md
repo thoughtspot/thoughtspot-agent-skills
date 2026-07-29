@@ -95,8 +95,10 @@ Use this as the canonical limitations reference.
 
 | # | Databricks SQL | ThoughtSpot Formula | Notes |
 |---|---|---|---|
-| 40 | `CONCAT`, `LENGTH`, `SUBSTRING`, `TRIM`, `LTRIM`, `RTRIM` | `concat`, `strlen`, `substr`, `trim`, `ltrim`, `rtrim` | Direct rename |
-| 41 | `REPLACE`, `CONTAINS`, `STARTSWITH`, `LEFT`, `RIGHT` | `replace`, `contains`, `starts_with`, `left`, `right` | |
+| 40 | `CONCAT`, `LENGTH`, `SUBSTRING` | `concat`, `strlen`, `substr` | Direct rename. `TRIM`/`LTRIM`/`RTRIM` moved to #75 — not native TS functions (BL-170) |
+| 41 | `CONTAINS`, `LEFT`, `RIGHT` | `contains`, `left`, `right` | `REPLACE` moved to #75 and `STARTSWITH` to #76 — not native TS functions (BL-170) |
+| 75 | `TRIM`, `LTRIM`, `RTRIM`, `REPLACE` | `sql_string_op ( "TRIM({0})" / "LTRIM({0})" / "RTRIM({0})" / "REPLACE({0}, {1}, {2})" , ... )` | **None of these is a native ThoughtSpot function** — live-verified 2026-07-29, se-thoughtspot (BL-170). Scalar pass-through. **Documentation corrected; `mv_sql.py`'s `_RENAME` still emits all four bare names — see BL-171.** |
+| 76 | `STARTSWITH`, `ENDSWITH` | `strpos(s, prefix) = 1` / `substr(s, strlen(s) - strlen(sfx), strlen(sfx)) = sfx` | No native `starts_with`/`ends_with` — live-verified 2026-07-29, se-thoughtspot (BL-170); compose from native functions. **`mv_sql.py`'s `_RENAME` still emits the bare `starts_with` — see BL-171. `ENDSWITH` has no `_RENAME` entry at all, so it is currently unmapped rather than mis-emitted.** |
 | 42 | `LPAD`, `RPAD`, `REVERSE`, `REPEAT` | `lpad`, `rpad`, `reverse`, `repeat` | |
 | 43 | `LOWER(s)` / `UPPER(s)` | `sql_string_op("LOWER({0})", [col])` / `sql_string_op("UPPER({0})", [col])` | Auto-translated pass-through (v0.50.0) |
 | 44 | `ABS`, `CEIL`, `FLOOR`, `ROUND`, `MOD`, `POWER`, `SQRT` | `abs`, `ceil`, `floor`, `round`, `mod`, `pow`, `sqrt` | |

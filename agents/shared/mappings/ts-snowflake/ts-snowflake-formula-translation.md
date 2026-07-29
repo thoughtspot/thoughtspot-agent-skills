@@ -160,8 +160,8 @@ Verified 2026-07-10, SE cluster.
 |---|---|
 | `[a] and [b]` → `a AND b` | `a AND b` → `[a] and [b]` |
 | `[a] or [b]` → `a OR b` | `a OR b` → `[a] or [b]` |
-| `[x] in ( 'a' , 'b' )` → `x IN ('a', 'b')` | `x IN ('a', 'b')` → `[x] in ( 'a' , 'b' )` |
-| `[x] not in ( 'a' , 'b' )` → `x NOT IN ('a', 'b')` | `x NOT IN ('a', 'b')` → `[x] not in ( 'a' , 'b' )` |
+| `[x] in { 'a' , 'b' }` → `x IN ('a', 'b')` | `x IN ('a', 'b')` → `[x] in { 'a' , 'b' }` — **curly braces**; requires `>-` YAML |
+| `not ( [x] in { 'a' , 'b' } )` → `x NOT IN ('a', 'b')` | `x NOT IN ('a', 'b')` → `not ( [x] in { 'a' , 'b' } )` — no `not in` keyword; negate the `in` |
 | `[x] between [a] and [b]` → `x BETWEEN a AND b` | `x BETWEEN a AND b` → `[x] between [a] and [b]` |
 | `=`, `!=`, `<>`, `>`, `<`, `>=`, `<=` | Pass through directly in both directions |
 
@@ -203,11 +203,19 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | `strpos ( [x] , 'val' )` → `POSITION('val' IN x)` | `POSITION('val' IN x)` → `strpos ( [x] , 'val' )` |
 | `sql_string_op ( "UPPER({0})" , [x] )` → `UPPER(x)` | `UPPER(x)` → `sql_string_op ( "UPPER({0})" , [x] )` — no native `upper` in TS |
 | `sql_string_op ( "LOWER({0})" , [x] )` → `LOWER(x)` | `LOWER(x)` → `sql_string_op ( "LOWER({0})" , [x] )` — no native `lower` in TS |
-| `trim ( [x] )` → `TRIM(x)` | `TRIM(x)` → `trim ( [x] )` |
-| `replace ( [x] , [old] , [new] )` → `REPLACE(x, old, new)` | `REPLACE(x, old, new)` → `replace ( [x] , [old] , [new] )` |
+| `sql_string_op ( "TRIM({0})" , [x] )` → `TRIM(x)` | `TRIM(x)` → `sql_string_op ( "TRIM({0})" , [x] )` — no native `trim` in TS |
+| `sql_string_op ( "LTRIM({0})" , [x] )` → `LTRIM(x)` | `LTRIM(x)` → `sql_string_op ( "LTRIM({0})" , [x] )` — no native `ltrim` in TS |
+| `sql_string_op ( "RTRIM({0})" , [x] )` → `RTRIM(x)` | `RTRIM(x)` → `sql_string_op ( "RTRIM({0})" , [x] )` — no native `rtrim` in TS |
+| `sql_string_op ( "REPLACE({0}, {1}, {2})" , [x] , [old] , [new] )` → `REPLACE(x, old, new)` | `REPLACE(x, old, new)` → `sql_string_op ( "REPLACE({0}, {1}, {2})" , [x] , [old] , [new] )` — no native `replace` in TS |
 | `contains ( [x] , 'val' )` → `CONTAINS(x, 'val')` | `CONTAINS(x, 'val')` → `contains ( [x] , 'val' )` |
-| `starts_with ( [x] , 'val' )` → `STARTSWITH(x, 'val')` | `STARTSWITH(x, 'val')` → `starts_with ( [x] , 'val' )` |
-| `ends_with ( [x] , 'val' )` → `ENDSWITH(x, 'val')` | `ENDSWITH(x, 'val')` → `ends_with ( [x] , 'val' )` |
+| `strpos ( [x] , 'val' ) = 1` → `STARTSWITH(x, 'val')` | `STARTSWITH(x, 'val')` → `strpos ( [x] , 'val' ) = 1` — no native `starts_with` in TS; `strpos` is 1-based |
+| `substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val'` → `ENDSWITH(x, 'val')` | `ENDSWITH(x, 'val')` → `substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val'` — no native `ends_with` in TS |
+
+> **`trim` / `ltrim` / `rtrim` / `replace` / `starts_with` / `ends_with` are NOT native
+> ThoughtSpot formula functions** — live-verified 2026-07-29 on se-thoughtspot (BL-170),
+> each rejected by the parser with `Search did not find "<fn> ("`, the same signature
+> `upper`/`lower` produce. The pass-throughs and compositions above were verified to import
+> cleanly in the same pass.
 
 ### Type Conversion Functions
 
