@@ -14,8 +14,8 @@ Use this as the canonical limitations reference.
 | 1 | `tables (DB.SCHEMA.TABLE)` block | `model_tables[]` entries | |
 | 2 | `tables (DB.SCHEMA.VIEW)` — view-backed sources | `model_tables[]` entries | TS tables can point to views |
 | 3 | Table aliases (explicit + implicit) | `model_tables[].name` | |
-| 4 | `primary key (col)` on table entries | Join target identification | Not written to TML |
-| 5 | Table-level `comment='...'` | `table.description` | Separate Table TML update |
+| 4 | `primary key (col)` on table entries | Join target identification | Not written to TML (Model TML has no key concept). Consequence on a round trip: the reverse leg can only restore a PK that some relationship implies, so a fact table's own — often composite — PK is lost, and any of its columns the SV references nowhere else disappear with it. Lossless preservation needs a stash — see BL-166. |
+| 5 | Table-level `comment='...'` | `table.description` | Separate Table TML update (Step 6D, which needs Table TMLs fetched from a live instance). **Unreachable on the documented file-only path**, which emits `{model_name}.model.tml` only — table comments are silently dropped there. See BL-176. |
 | 6 | Top-level `comment='...'` (after metrics) | `model.description` | |
 
 ### Joins and Relationships
@@ -34,14 +34,15 @@ Use this as the canonical limitations reference.
 |---|---|---|---|
 | 12 | `dimensions (TABLE.COL as NAME)` | `columns[]` with `column_type: ATTRIBUTE` | |
 | 13 | Computed dimensions (`DATEDIFF`, `CONCAT`, `CASE/WHEN`) | `formulas[]` with `column_type: ATTRIBUTE` | |
-| 14 | `with synonyms=('...',...)` on dimensions/metrics | `column.name` + `properties.synonyms` | First synonym → name; rest → synonyms |
+| 14 | `with synonyms=('...',...)` on dimensions/metrics | `column.name` + `properties.synonyms` | First synonym → name; rest → synonyms. **Correct only for a Semantic View our own to-direction authored** — `build-sv` emits the ThoughtSpot column name as the first synonym, so the pair round-trips. For a Semantic View authored anywhere else, `with synonyms=(...)` means what Snowflake says it means (alternate names for NL matching), and promoting the first one **destroys the logical identifier** any verified query or downstream SQL cites. See BL-179. |
 | 15 | `comment='...'` on dimensions/metrics | column `description` | |
+| 38 | `time_dimensions:` members (YAML form — the DDL has no `time_dimensions` clause; the role survives only inside `with extension (CA='…')`) | `columns[]` with `column_type: ATTRIBUTE` | ThoughtSpot infers the date role from the column's data type, so the temporal role survives **only for date-typed columns**. A `NUMBER` year or a `VARCHAR` month/quarter name is demoted to a plain dimension on the reverse leg. Model TML has no independent temporal-role flag, so lossless preservation needs a stash — see BL-166. |
 
 ### Facts and Metrics
 
 | # | Semantic View Construct | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
-| 16 | `facts (TABLE.NAME as EXPR)` — row-level expressions | `formulas[]` entries (MEASURE or ATTRIBUTE) | |
+| 16 | `facts (TABLE.NAME as EXPR)` — row-level expressions | `formulas[]` entries (**ATTRIBUTE only**) | `sv_translate.py:454-468` hardcodes `ATTRIBUTE` on both branches — there is no `MEASURE` branch, despite the function's own docstring describing the choice. Consequence: every fact returns from the reverse leg inside `dimensions()`, never `facts()`, so quantities/prices/profits are declared to Cortex Analyst as categorical dimensions. See BL-181. |
 | 17 | `labels = (filter)` on facts/dimensions — filter labels | Boolean formula column (`column_type: ATTRIBUTE`) | |
 | 18 | Simple metrics: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` | `columns[]` with `column_type: MEASURE` + `aggregation` | |
 | 19 | `COUNT(DISTINCT col)` | `unique count([T::col])` formula | Never COUNT_DISTINCT aggregation (I5) |
@@ -51,10 +52,11 @@ Use this as the canonical limitations reference.
 | 23 | Window functions: `OVER (PARTITION BY ... ORDER BY ...)` | `group_sum([T::col], [T::dim])` for PARTITION BY; `group_aggregate(agg(...), query_groups()-{dim}, query_filters())` for EXCLUDING | Group functions take columns only, cannot nest in each other. Window functions (`cumulative_*`, `moving_*`) accept `group_aggregate(...)` as input but not raw aggregates. |
 | 24 | `PARTITION BY EXCLUDING` | `group_aggregate(... query_groups()-{dim})` | |
 | 25 | Cumulative: `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` | `moving_sum(group_aggregate(agg(...), {[T::PK]}, query_filters()), -1, 0, [T::order_col])` | Cannot nest aggregates directly in `moving_sum`; must wrap in `group_aggregate` first |
-| 26 | Metric-on-fact resolution (`AVG(table.fact_name)`) | `average([formula_<id>])` | References fact by formula `id` |
-| 27 | Double aggregation / metric-on-metric (`AVG(table.count_metric)`) | `average(group_count([T::col], [DIM::pk]))` | `group_*` shorthands |
-| 28 | Window metrics referencing other metrics | Combined window + double-agg translation | |
+| 26 | Metric-on-fact resolution (`AVG(table.fact_name)`) | `average([formula_<id>])` | References fact by formula `id`. **Broken since 2026-07-22 — the emitted `[formula_X]` matches no declared `formulas[].id`, so the reference dangles and the measure does not resolve; `ts tml lint` and `check_tml.py` both report clean. See BL-178 (three defects; regression against a live-verified worked example).** |
+| 27 | Double aggregation / metric-on-metric (`AVG(table.count_metric)`) | `average(group_count([T::col], [DIM::pk]))` | `group_*` shorthands. **Same dangling-reference blast radius as #26 — see BL-178.** |
+| 28 | Window metrics referencing other metrics | Combined window + double-agg translation | **Same dangling-reference blast radius as #26 — see BL-178.** |
 | 29 | Duplicate `column_id` detection (I8) | Formula with unique `column_id` | Second metric on same column gets formula |
+| 39 | Ratio metrics with a `NULLIF(y, 0)` zero-divisor guard | `safe_divide ( ... )` formula | **Changes semantics silently: `x / NULLIF(y,0)` returns NULL when `y = 0`; `safe_divide` returns 0** (and the reverse leg completes the substitution by emitting Snowflake's `DIV0`). 0 participates in `AVG`/`MIN`/ranking where NULL does not. Emitted with `annotations: []` — no flag. `nullif` is mapped in both directions (`ts-snowflake-formula-translation.md:154`), so a NULL-preserving translation was available throughout. See BL-180. |
 
 ### Verified Queries and Metadata
 
@@ -93,8 +95,17 @@ Use this as the canonical limitations reference.
 | L7 | Formula import on initial model CREATE | Formulas referencing `[TABLE::COL]` fail during initial `ts tml import` (CREATE) but succeed on UPDATE (`--no-create-new`) | Always import model structure first (no formulas), then update with formulas in a second pass |
 | L8 | `is_enum` dimension property (GA 2026-06-25) | No ThoughtSpot enum/categorical-dimension concept | Informational Cortex-Analyst-only aid — parsed but not carried to TML; no action needed |
 | L9 | `with sample values (...)` on a dimension (Snowflake best-practice NL-parsing aid) | No ThoughtSpot sample-values concept | Informational Cortex-Analyst-only aid — parsed but not carried to TML; no action needed |
+| L10 | `\|\|` string concatenation anywhere in a dimension / fact / metric expression | `ts snowflake translate-formulas` rejects the operator and **drops the whole construct** — it lands in `skipped[]` and never reaches the Model TML. `\|\|` is the ANSI standard concatenation operator, and the skip message itself names the fix ("use CONCAT() instead"), whose mapping is already bidirectional (`ts-snowflake-formula-translation.md:197-198`) | Rewrite as `CONCAT(a, ' ', b)` in the Semantic View before converting. The `\|\|` → `concat` rewrite is a mechanical N-ary fold with no judgment involved — fix tracked in BL-180. |
+| L11 | `data_type` on dimensions / time_dimensions / facts (Cortex-Analyst YAML form) | No `CREATE SEMANTIC VIEW` DDL representation, so the skill's `GET_DDL` input never carries it; ThoughtSpot derives the column type from the physical column | None needed on the DDL path. When starting from the YAML form instead, the value is exactly what a Table TML's `db_column_properties.data_type` needs — map it per `ts-from-snowflake-rules.md` rather than discarding it. |
 
 ### Notes on limitations
+
+**L10** is a converter defect rather than a platform limitation: the target mapping exists,
+is bidirectional, and is cited in the very message that declines to apply it. It is recorded
+here so the drop is declared while BL-180 is open, and should move to Mapped when it lands.
+
+**L11** is informational — the property is absent from the skill's actual (DDL) input, and
+is only relevant if a future path consumes the Cortex-Analyst YAML form directly.
 
 **L1–L4, L8, L9** are low severity — ThoughtSpot has no direct equivalent or the
 equivalent is easily achieved via post-conversion coaching (`/ts-object-model-coach`).

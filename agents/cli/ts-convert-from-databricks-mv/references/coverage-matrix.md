@@ -25,6 +25,8 @@ Use this as the canonical limitations reference.
 | 7 | `comment` on dimensions/measures (v1.1) | Column `description` | |
 | 8 | `synonyms` on dimensions/measures (v1.1) | `properties.synonyms` + `synonym_type: USER_DEFINED` | |
 | 9 | `fields:` (GA alias for `dimensions:`) | Same mapping as `dimensions:` | `fields:` checked first, `dimensions:` fallback |
+| 78 | `name:` on dimensions/measures — the MV's queryable identifier | Discarded whenever `display_name` is present; the column carries the display name only | ThoughtSpot columns have a single identity field, so the reverse leg regenerates the identifier from the display name (`sold_year` + `display_name: Year` → `year`). Round-trips cleanly **only** when no `display_name` is set (the title-case ↔ snake-case pair is invertible). Lossless preservation needs a stash — see BL-166. |
+| 79 | `format:` on measures (e.g. `{type: currency, currency_code: USD}`) | `properties.currency_type.iso_code` | **Not written today.** `mv_translate.py` carries `format` into `translated.json` and nothing in `mv_build_model.py`/`mv_tml.py` reads it, although `ts-databricks-properties.md:109`/`:122` document the pair as mapped and the to-direction already emits it from `currency_type`. See BL-174. |
 
 ### Joins and Multi-Source
 
@@ -33,7 +35,8 @@ Use this as the canonical limitations reference.
 | 10 | `joins:` (nested hierarchy) | One Table TML per source; `model.joins[]` from parent→child | |
 | 11 | `joins[].on` (join expression) | `joins[].on` expression as-is | |
 | 12 | `joins[].using: [COL, ...]` | `[A::COL] = [B::COL]` (AND-joined for multiple columns) | |
-| 13 | `joins[].cardinality` / `joins[].rely` | Parsed, precedence applied | Informational — not written to TML |
+| 13 | `joins[].cardinality` / `joins[].rely` | `joins[].cardinality` (`MANY_TO_ONE`) | Parsed, precedence applied. **Written to TML** — `mv_build_model.py:237` stamps `MANY_TO_ONE` on every join, including one whose source declared only the runtime-agnostic `rely: {at_most_one_match: true}` hint. The to-direction then emits an explicit `cardinality:`, which requires Databricks Runtime 18.1+, so a round trip silently raises the MV's runtime floor. See BL-174. |
+| 77 | Join **type** — not an MV field; Databricks fixes star-schema joins as `LEFT OUTER` | `joins[].type` | **Emits `INNER` unconditionally** (`mv_build_model.py:236`) with no source-derived alternative, although `LEFT_OUTER` is a valid Model TML join type. A Metric View keeps fact rows whose FK is NULL or matches no dimension row; an INNER-joined ThoughtSpot Model drops them, so measures read **lower** in ThoughtSpot than in Databricks on the same data. See BL-174. |
 
 ### Dimensions
 
@@ -58,7 +61,7 @@ Use this as the canonical limitations reference.
 
 | # | Metric View Construct | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
-| 23 | Ratio expressions (`SUM(x) / NULLIF(SUM(y), 0)`) | `safe_divide ( sum([x]) , sum([y]) )` formula | NULLIF(x,0) collapsed to safe_divide |
+| 23 | Ratio expressions (`SUM(x) / NULLIF(SUM(y), 0)`) | `safe_divide ( sum([x]) , sum([y]) )` formula | NULLIF(x,0) collapsed to safe_divide. **Changes semantics silently: `x / NULLIF(y,0)` returns NULL when `y = 0`; `safe_divide` returns 0**, and 0 participates in `AVG`/`MIN`/ranking where NULL does not. Emitted with no annotation; `nullif` is available in both directions. See BL-180. |
 | 24 | Nested NULLIF in ratios (e.g. eCPC vs budget) | Nested `safe_divide` calls | |
 | 25 | `COALESCE(x, 0)` | `ifnull ( [x] , 0 )` | 2-arg only; 3+ args raises |
 | 26 | Cross-measure references (`MEASURE(name)` / `ANY_VALUE(dim)`) | **Inlined** — full expression substituted via dependency DAG | Cross-formula refs fail during TML import |
@@ -129,7 +132,7 @@ Use this as the canonical limitations reference.
 | 64 | `x IN (a, b, c)` | `( [x] = a or [x] = b or [x] = c )` | |
 | 65 | `x BETWEEN lo AND hi` | `[x] >= lo and [x] <= hi` | |
 | 66 | `NOT expr` | `not ( expr )` or `[col] = false` for boolean columns | |
-| 67 | `NULLIF(x, 0)` in denominator | Collapsed to `safe_divide` on the enclosing division | |
+| 67 | `NULLIF(x, 0)` in denominator | Collapsed to `safe_divide` on the enclosing division | NULL → 0 on a zero divisor — see the semantics caveat on #23 and BL-180 |
 | 68 | `COALESCE(x, default)` | `ifnull(x, default)` | 2-arg only |
 
 ### Operational Capabilities
@@ -159,6 +162,7 @@ Use this as the canonical limitations reference.
 | L8 | Window measures with non-daily order dimension | Emitted with a sparse-data-risk warning (BL-098) | Valid but may diverge from Databricks on gapped data — TS uses row-positional frames, Databricks uses date-interval frames |
 | L9 | `window:` `offset` with quarter/year grain or N>1 | Deferred extrapolation of the month-grain N=1 live-verified pattern (C8) | Use month grain where possible; for other grains, verify results manually |
 | L10 | `AGG(DISTINCT col) FILTER (WHERE cond)` for non-COUNT aggregates | No ThoughtSpot mapping for `sum_distinct_if` etc. | Pre-aggregate in the source or split into filtered view + distinct aggregate |
+| L11 | Column classification in Table TML on the **file-only** path (Steps 8A/8B, `create: true`) | `build_table_tml` defaults every numeric column to `MEASURE` + `aggregation: SUM`, so surrogate keys — and any numeric column the MV itself declares a **dimension** — arrive as summable measures. The Model TML overrides the classification correctly, so this is not a round-trip loss, but the underlying ThoughtSpot Tables offer e.g. "Sum of Ss Sold Date Sk" | `build_table_tml` already accepts per-column `column_type` / `aggregation` overrides; the SKILL's `tables.json` spec documents only `{name, dbx_type}`, so no documented run passes them. Pass the overrides by hand, or fix the columns in ThoughtSpot after import. See BL-176. |
 
 ### Notes on limitations
 
@@ -175,3 +179,9 @@ ratio formulas) translated fully without hitting any of these limitations.
 
 **L8–L9** are window-measure precision caveats — the translation is emitted but with
 a warning about potential divergence on sparse or non-daily data.
+
+**L11** is a quality gap on one documented path, not a fidelity loss — the Model TML
+classifies these columns correctly, so a round trip survives it. It affects what the user
+receives in the underlying Table objects. The information needed to do better is available
+for free (the MV's own dimension list and every join's `on` clause name exactly which
+numeric columns are keys or dimensions); see BL-176.

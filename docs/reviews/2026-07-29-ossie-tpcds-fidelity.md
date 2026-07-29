@@ -1746,4 +1746,165 @@ All under `.superpowers/sdd/2026-07-29-ossie-tpcds-fidelity/sf/` (gitignored):
 
 ## 4. Findings and routing
 
-_(filled by Task 3)_
+Twenty-one behaviour findings (§2.3 F1–F8, §3.6 F9–F21), eighteen documentation gaps
+(§2.5, §3.8, plus four surfaced in the prose of §2.3/§3.6 and not tabled there), two
+gate-blindness observations (§2.6, §3.9) and three scope-limit items (§2.7, §3.10). Each
+routes to **exactly one** bucket, per the two-bucket rule in `.claude/rules/repo-audit.md`.
+Nothing is left as "we noticed this".
+
+| Bucket | Exit | Behaviour | Doc gaps | Gates | Scope | Total |
+|---|---|:-:|:-:|:-:|:-:|:-:|
+| `BL-NNN` | dated entry in `docs/backlog.md` — **11 new** (BL-174…BL-184) | 16 | 4 | 2 | 0 | **22** |
+| `coverage-matrix` | row added or corrected **in this branch** — 18 rows across 2 matrices | 2 | 14 | 0 | 0 | **16** |
+| `cross-ref` | strengthens an existing entry; deliberately **not** double-filed | 2 | 0 | 0 | 2 | **4** |
+| `upstream-issue` | listed in §4.4, **parked** pending the #285 legal hold — not posted | 0 | 0 | 0 | 0 | **2** |
+| `no-action (justified)` | justification in the Route cell | 1 | 0 | 0 | 1 | **2** |
+| | | **21** | **18** | **2** | **3** | |
+
+`fix-PR` is empty by design: per the plan's routing vocabulary, a small obvious correction is
+filed as a dated BL with a **ready to fix** status rather than fixed in this branch, which is a
+docs-and-routing change. Three entries carry that status — BL-174, BL-178 and BL-180.
+
+### 4.1 Behaviour findings
+
+One row per finding; findings sharing a root cause share a backlog entry, so the 16 BL-routed
+findings resolve into 9 entries rather than 16.
+
+| # | Finding | Bucket | Route |
+|---|---|---|---|
+| F1 | Join type: MV joins are LEFT OUTER, we assert `INNER` unconditionally (`mv_build_model.py:236`) — measures read lower in ThoughtSpot than in Databricks | `BL-174` | **BL-174** item 1, *ready to fix*. Grouped with F3/F5: same module, same leg, same class (a constant where the source or the vendor spec supplies the value). F1 is why the entry is Tier 1 |
+| F2 | Dimension identifier collapses into the display name (`sold_year` → `year`) | `coverage-matrix` | from-DBX **row #78** added — the collapse was undeclared behaviour, not a documented limitation. The ThoughtSpot single-name-field constraint is real, so the *behaviour* is not the defect; lossless preservation needs a stash and that is **BL-166**'s scope, cross-referenced from the row rather than re-filed |
+| F3 | Measure `format:` (currency) dropped on the forward leg only, contradicting `ts-databricks-properties.md:109`/`:122`; the reverse leg already implements it | `BL-174` | **BL-174** item 2, *ready to fix* |
+| F4 | Top-level `comment` polluted with provenance text, missing a separator, and accretive across cycles | `BL-175` | **BL-175**, grouped with F19 — observed independently in both converter pairs, which is what makes it a class rather than a Databricks quirk |
+| F5 | Redundant `cardinality: many_to_one` stamped from a `rely:` hint, silently raising the emitted DDL's Runtime floor 17.3+ → 18.1+ | `BL-174` | **BL-174** item 3, *ready to fix* |
+| F6 | `display_name` synthesized on all 7 constructs that lacked one | `no-action (justified)` | Structural, not a defect: ThoughtSpot has one name field, so the reverse leg must synthesize the identifier/label pair. The values are the correct title-cased forms and no identifier changed. Verdict was recorded as `extra`/benign in §2.3 for completeness; nothing follows |
+| F7 | File-only Table TML marks join keys **and an MV-declared dimension** as summable measures | `BL-176` | **BL-176**, grouped with F16 — the two from-directions have opposite and equally unsatisfactory offline Table TML stories, and the contrast is the finding. Also carries the SKILL.md `tables.json` spec fix (gap G5) |
+| F8 | Default regenerated view name doubles the fact-table token (`tpcds_store_sales_store_sales_mv`) | `BL-177` | **BL-177**, grouped with F18 — same class (a template name where the real name was available), both a few lines, neither worth its own PR |
+| F9 | **Every metric's formula cross-reference is unresolvable in the imported Model TML** (5/5), while every gate reports clean — a three-defect regression against a live-verified worked example | `BL-178` | **BL-178**, *ready to fix*, **Tier 1**. The entry's scope is mandatory and three-part (resolver order + minted id + `sv_parse.py` `alias_name` misparse) plus fixing `test_sv_translate.py:352-361`, which asserts the buggy string, plus live re-verification of the worked example. A fix covering only defects 1–2 looks correct on this fixture and stays wrong on any SV with a computed fact |
+| F10 | The SV logical identifier is replaced by its first synonym (29 of 36 named constructs) | `BL-179` | **BL-179**. Documented behaviour (coverage row 14) that is correct only for a Semantic View our own to-direction authored; the row was amended in this branch (gap G14) to declare the foreign-SV hazard while the entry is open |
+| F11 | `\|\|` rejected and the whole construct dropped, though the `CONCAT` mapping the error message cites is already bidirectional | `BL-180` | **BL-180** item 1, *ready to fix*. Grouped with F12: identical root cause — the translator has the right mapping documented in the reference it cites and does not apply it |
+| F12 | `NULLIF(x,0)` division guard becomes `safe_divide`/`DIV0`: NULL silently becomes 0, with `annotations: []` | `BL-180` | **BL-180** item 2, *ready to fix*. Cross-converter — from-Databricks does the same collapse (coverage rows #23/#67, caveat added in this branch) and both mappings lack the warning the Tableau mapping already carries (gap G13) |
+| F13 | Facts classified `ATTRIBUTE` unconditionally — no `MEASURE` branch exists — so `facts()` returns as `dimensions()` | `BL-181` | **BL-181**. Structurally the same defect as F1 in a different converter; kept separate because the fixes are independent, and cross-referenced from both entries. Also notes that BL-031's `facts[]` emission cannot be exercised end-to-end until this lands |
+| F14 | `time_dimension` role lost for temporal dimensions that are not date-typed (3 of 4) | `coverage-matrix` | from-SF **row #38** added — the role loss was undeclared. Model TML has no independent temporal-role flag, so as with F2 the behaviour is constrained, not defective; preservation is **BL-166**'s scope, cross-referenced from the row |
+| F15 | A surrogate key is re-emitted as a `time_dimension`, because a name-suffix heuristic overrides a known non-date `data_type` | `BL-182` | **BL-182** item 1. Grouped with F20: one module (`sv_build_sv.py`), both a few lines. Compounds with F10 — but has an independent defect (the heuristic overriding an available correct type), so fixing BL-179 alone would mask it rather than fix it |
+| F16 | Table-level `comment` lost for all five tables — coverage row 5's target lives in a file the documented file-only path never writes | `BL-176` | **BL-176**, grouped with F7. Row 5 amended in this branch (gap G10) to say the mapping is unreachable offline |
+| F17 | The fact table's composite primary key is dropped | `cross-ref BL-166` | Coverage row 4 already says PK is "Not written to TML" **by design** (Model TML has no key concept), and the reverse leg can only restore a PK some relationship implies. There is no ThoughtSpot target to write it to, so the only lossless route is the stash — **BL-166**. Row 4's Notes were extended in this branch (gap G15) to state the round-trip consequence; no new entry |
+| F18 | Relationship names regenerated from a `{left}_to_{right}` template rather than reused from the Model TML | `BL-177` | **BL-177** item 2, grouped with F8 |
+| F19 | Model description accretes one provenance sentence **per leg** — twice as fast as the Databricks pair | `BL-175` | **BL-175**, grouped with F4 |
+| F20 | Every formula-backed metric is grouped under a fabricated CA-extension table named `field` — general to any Model with formula-backed measures | `BL-182` | **BL-182** item 2, grouped with F15. The `lint-ddl` half (it passes a DDL whose CA JSON names a non-existent table, inside its own documented remit) is the validator promotion **BL-183** check 2 |
+| F21 | Root-level metrics carry no `using_relationships` — neither side emits it; referee cannot adjudicate | `cross-ref BL-031` | **BL-031**'s construct list was **widened in this branch** to include `using_relationships:` on metrics, with the evidence and the unverified question ("does Snowflake resolve a root metric by inference or reject it?") recorded there for its step-1 live round trip. §3.6 asserted BL-031 already tracked this; it did not, so the claim was made true rather than left standing. The table-scoping half is `matched` on both sides and is a test-harness artifact — nothing to route |
+
+### 4.2 Documentation gaps
+
+Fourteen of the eighteen are **fixed in this branch** — the coverage-matrix bucket is the only one
+the plan designates as in-scope for this task. Both matrices' `## Notes on limitations` prose was
+extended for the new limitation rows, and both skills took a PATCH bump with a changelog entry
+dated to the program date (from-databricks-mv **1.10.3**, from-snowflake-sv **1.19.3**), per
+`.claude/rules/versioning.md` — every row below alters documented skill behaviour.
+
+| # | Gap | Bucket | Route |
+|---|---|---|---|
+| G1 | No coverage row for the MV join **type** at all (§2.5) | `coverage-matrix` | from-DBX **#77** added, stating today's `INNER` emission, the vendor's LEFT OUTER rule, and the numeric consequence |
+| G2 | No coverage row for the MV dimension/measure **`name:`** field; row #6 covers `display_name` only (§2.5) | `coverage-matrix` | from-DBX **#78** added (also F2's route) |
+| G3 | No coverage row for **`format:`** in either section, while `ts-databricks-properties.md` claims it maps (§2.5) | `coverage-matrix` | from-DBX **#79** added |
+| G4 | Row #13 claims cardinality/rely is "Informational — not written to TML" — **stale**, it is written (§2.5) | `coverage-matrix` | from-DBX **#13** corrected, with the runtime-floor consequence |
+| G5 | File-only `tables.json` spec omits the supported per-column `column_type`/`aggregation` keys, in both identical blocks (§2.5) | `BL-176` | Bundled with the behaviour fix so the doc and the code land together — documenting the override without deriving it would leave every documented run still wrong |
+| G6 | No coverage row for `\|\|` or any string operator (§3.8) | `coverage-matrix` | from-SF **L10** added, with a note that it is a converter defect rather than a platform limitation and should move to Mapped when BL-180 lands |
+| G7 | No coverage row for `time_dimensions` (§3.8) | `coverage-matrix` | from-SF **#38** added (also F14's route) |
+| G8 | No coverage row for `data_type` on dimensions/facts — a whole `not-applicable` property class with nothing to cite (§3.8 counts 26 of them, §3.5's tally 28; either way the row was missing) | `coverage-matrix` | from-SF **L11** added, scoped honestly: the property is absent from the skill's actual (DDL) input and matters only if a future path consumes the YAML form |
+| G9 | Row 16 promises facts → "MEASURE **or** ATTRIBUTE" — **stale/aspirational**, no MEASURE branch exists (§3.8) | `coverage-matrix` | from-SF **#16** corrected to ATTRIBUTE-only with the `dimensions()` consequence; flips back when BL-181 lands |
+| G10 | Row 5's "Separate Table TML update" is **unreachable** on the documented file-only path (§3.8) | `coverage-matrix` | from-SF **#5** amended (also F16's declaration) |
+| G11 | `sv_translate.py:125-137` contradicts `ts-from-snowflake-rules.md:585-593` **and its own docstring** (§3.8) | `BL-178` | The rule is right and the code is wrong, so this is a code fix, not a doc fix. Recorded in BL-178 defect 1 |
+| G12 | The live-verified worked example is no longer reproducible (§3.8) | `BL-178` | BL-178 step 4 re-verifies it live against `se-thoughtspot`; **BL-184** is the gate that stops it silently regressing again. Filed against BL-178 because the document cannot be re-earned before the code is fixed |
+| G13 | No warning that `safe_divide` ≠ `x / NULLIF(y,0)`, though the Tableau mapping carries exactly that warning (§3.8) | `BL-180` | Bundled — the shared-mapping edit needs a currency-anchor bump and a stage-sync, which belong with the behaviour change, not in a routing PR |
+| G14 | from-SF row 14 does not distinguish a Semantic View **we** authored from a foreign one *(surfaced in §3.6 F10's prose; not tabled in §3.8)* | `coverage-matrix` | from-SF **#14** amended to declare the hazard while BL-179 is open |
+| G15 | from-SF row 4's "Not written to TML" does not state the round-trip PK consequence *(surfaced in §3.6 F17's prose)* | `coverage-matrix` | from-SF **#4** amended |
+| G16 | from-DBX rows #23/#67 document the `NULLIF` → `safe_divide` collapse **without** the NULL→0 semantics change *(surfaced in §2 by comparison with F12)* | `coverage-matrix` | from-DBX **#23/#67** amended; the equivalent from-SF row **#39** added, since that matrix had no ratio row at all. The only gap in this table routed to three rows |
+| G17 | from-DBX has no row for **column classification on the file-only path** — the behaviour F7 describes is undeclared, distinct from G5's SKILL.md spec omission *(surfaced in §2.3 F7's prose; not tabled in §2.5)* | `coverage-matrix` | from-DBX **L11** added, scoped as a quality gap on one documented path rather than a fidelity loss (the Model TML overrides the classification, so a round trip survives it) |
+| G18 | from-SF rows **26–28** document metric-on-fact, metric-on-metric and window-on-metric resolution as working mappings — all three emit the dangling `[formula_X]` reference F9 describes, so the matrix currently promises three mappings that do not resolve *(surfaced in §3.6 F9; not tabled in §3.8, which recorded the rule-vs-code contradiction as G11 but not its coverage-row consequence)* | `coverage-matrix` | from-SF **#26, #27, #28** amended with the regression date, the fact that both TML gates report clean on it, and a pointer to BL-178. The most important of the eighteen row edits: a reader consulting the matrix today would otherwise be told metric-on-fact resolution works |
+
+### 4.3 Gate blindness → two validator promotions
+
+§2.6 and §3.9 record the same result from both halves of the exercise: **every gate green, every
+finding survives.** That is the two-bucket rule's trigger for promotion, and two of the findings
+are validator-shaped — structural, offline, no judgment.
+
+| # | Observation | Bucket | Route |
+|---|---|---|---|
+| V1 | A dangling `[formula_X]` reference is invisible to `ts tml lint`, `check_tml.py` **and** `build-model`'s own `lint_findings` — 5 of 5 metrics unresolvable, all three clean. The same class also lets `ts snowflake lint-ddl` pass a CA payload naming a non-existent table, inside its documented "undeclared table references" remit | `BL-183` | **BL-183**, Tier 1 — two checks, one PR, plus a new invariant row so BL-168's property tests can pick the property up as a generator target. **Would have caught F9 on 2026-07-22**, the day it was introduced. Deliberately **not** an extension of BL-172's scope: BL-172 fixes a scanner over `agents/shared/mappings/*.md` table rows that gates *function-name claims in documentation*; V1 gates *reference integrity inside emitted TML/DDL* in the CLI's own lint commands. Different input, different tool, no shared code, neither blocks the other — the entry says so explicitly so the two are not merged later by mistake |
+| V2 | The worked examples are declared ground truth (`agents/shared/CLAUDE.md`) and nothing re-runs them. `test_worked_examples.py` re-validates the *documented output* structurally, which cannot detect the emitter drifting away from it | `BL-184` | **BL-184**. Sized for the baseline it will actually find: `ts-from-snowflake-identifier-resolution.md` **also** diverges on 6 of 18 display names and 2 formula ids for an unrelated reason — coverage row 14's first-synonym promotion landed 2026-06-15, *after* the 2026-06-13 verification — so a naive diff will not come back clean even once BL-178 is fixed. Two of those divergences are correct current behaviour against a stale document. The entry requires that choice to be made explicitly (re-verify and update, **or** narrow the assertion and record why) and forbids silently normalising the difference away, which would reproduce the original failure mode one level up |
+
+### 4.4 Parked — upstream-issue items (do **not** post)
+
+Both concern `apache/ossie`'s own converters, both are outside our fidelity denominators (§3.1),
+and both are held pending the legal review tracked on **#285**. Listed here so the follow-up has
+its material ready; **nothing in this branch posts anything externally.**
+
+| # | Item | Evidence | Note |
+|---|---|---|---|
+| U1 | `converters/snowflake/` drops **`custom_extensions` at every object level** with a bare `UserWarning`, never reading the content — inverting that ecosystem's own guidance (`converters/README.md:260`: "Ignore (do not discard) — preserve for round-tripping") — and the drop is **not** enumerated in `converters/snowflake/README.md`'s Limitations, which does acknowledge the `ai_context` drops (`:64-69`) | The five warnings from re-running the shipped converter at `c26b61c` (§3.1), the last of which reads `Dropped from model (no Snowflake counterpart): ai_context, custom_extensions` | Already routed **inward** by the companion review as learnings F20 → carry-to-phase-3 **P15** ("follow the README, not the shipped SF precedent"), so our own converter will not copy it. This entry is only the *outward* half — reporting it to them — and is what is parked |
+| U2 | `converters/snowflake/tests/example_converted_tpcds_semantic_model.yaml` (370 lines) is referenced by **no test** — an illustrative sample in a `tests/` directory | Re-confirmed at `c26b61c`: a repo-wide `grep -rn "example_converted_tpcds" .` returns **zero** matches (§3.1). Its provenance was settled here by reproduction instead — the shipped converter over `examples/tpcds_semantic_model.yaml` reproduces it byte-for-byte modulo the licence header | Already learnings F21 → **P16** ("every checked-in fixture is consumed by an assertion"). Same split as U1: the inward rule is set, the outward report is parked |
+
+### 4.5 Scope limits — routed, not left hanging
+
+| # | Item | Bucket | Route |
+|---|---|---|---|
+| S1 | **BL-171 was not exercised by either half.** Neither fixture contains a string function, so `sv_sql.py:206-208` and `mv_sql.py:251-252` were never reached; the only string operation anywhere was `\|\|`, which is a separate defect (F11) | `cross-ref BL-171` | BL-171 remains **open and untested by this exercise**. No new entry, and no implied evidence either way — recorded so a reader does not mistake this review's green string-function silence for coverage. BL-180 targets the same two modules, so the two should land together |
+| S2 | **Five claims are reasoned from documented semantics, not measured:** F1's dropped-row magnitude, F9's live import behaviour (rejection vs silently-broken measure), F12's numeric magnitude, F15's effect on Cortex Analyst date handling, F21's `using_relationships` resolution | `cross-ref` audit **angle 15** | Each is flagged in place in §2.7/§3.10 **and** carried as a verification step inside its own backlog entry (BL-174, BL-178, BL-180, BL-182, BL-031), so none depends on the angle being unparked. Recorded here because the exercise is itself evidence for unparking: angle 15 (conversion fidelity — "do converted outputs produce the same numbers?") is `PARKED` in `.claude/rules/repo-audit.md` pending 13/14/16 being embedded, and this review produced five concrete questions only it can settle. No rule change made in this branch |
+| S3 | **One harness error was found and corrected mid-review, and it moved the numbers** — the reverse leg was first run without the documented `--formulas` input, which dropped all five metrics and was initially attributed to F9 | `no-action (justified)` | Not a converter defect; the CLI signalled the missing input correctly and legibly. Rescoring against the correctly-invoked run moved the five metrics from `missed` to `mis-inferred` (10/31/6, not 10/26/11) and retired the claim that no measure survives the round trip. Fully recorded in §3.3 and §3.10 with the generalised lesson ("when a converter reports a construct as skipped, check the invocation against the SKILL.md before charging it to a finding"), so the next reader cannot repeat it. No code, doc or backlog change follows |
+
+### 4.6 Completeness
+
+**Behaviour findings.** 21 rows (F1–F21) = 16 `BL-NNN` + 2 `coverage-matrix` + 2 `cross-ref` +
+1 `no-action`. The 16 resolve into **9** entries because five root causes are shared:
+BL-174 ← F1+F3+F5, BL-175 ← F4+F19, BL-176 ← F7+F16, BL-177 ← F8+F18, BL-180 ← F11+F12,
+BL-182 ← F15+F20; BL-178 ← F9, BL-179 ← F10, BL-181 ← F13 stand alone. **No finding without a
+route, and no finding with two.**
+
+**Every non-matched construct in both fidelity tables is carried by at least one row.** Working
+from the verdict columns rather than the finding list, as an independent check:
+
+| Section | Non-matched constructs | Carried by |
+|---|---|---|
+| §2.1 top-level | T3 `comment` (`mis-inferred`) | F4 |
+| §2.1 joins | J1–J3 (`mis-inferred`) + 3 `cardinality` extras | F1, F5 |
+| §2.1 dimensions | D2 `sold_year` (`mis-inferred`) | F2 |
+| §2.1 measures | M1 `total_sales` (`missed`) | F3 |
+| §2.1 extras | 7 × synthesized `display_name` | F6 |
+| §3.4 top-level | S2 `description` (`mis-inferred`) | F19 |
+| §3.4 tables | ST1–ST5 (all `missed`) | F16 (×5 comments), F17 (ST1 PK) |
+| §3.4 dimensions | 15 `mis-inferred` + SD11 `missed` | F10 (15), F11 (SD11); SD1 additionally F15 |
+| §3.4 time dimensions | SX1–SX4 (all `mis-inferred`) | F10 (×4), F14 (SX2–SX4) |
+| §3.4 facts | SF1–SF5 (all `mis-inferred`) | F10 (×5), F13 (×5) |
+| §3.4 relationships | SR1 (`mis-inferred`) | F18 |
+| §3.4 metrics | SM1–SM5 (all `mis-inferred`) | F10 (×5), F12 (SM5), F20 (×5), F21 (×5); F9 on the forward-leg TML |
+| §3.4 extras | 27 self-synonyms, 5 `aggregation`, 5 `index_type` | F10 (the self-synonyms are its mechanical consequence); the 10 stamped properties are recorded benign in §3.4's note, no route needed |
+
+Both counts reconcile: **6 non-matched constructs in §2** (T3, J1, J2, J3, D2, M1) and **37 in
+§3** (S2, ST1–ST5, 16 dimensions, 4 time dimensions, 5 facts, SR1, 5 metrics) — 43 total, every
+one attributed above. Of §3.2's three `not-applicable` classes, two (`unique_keys` → L4,
+table-level `synonyms` → L2) were already correctly declared and so appear in no finding at all —
+the right outcome for a documented limitation — while the third (`data_type`) had no row at all
+and is routed as gap **G8** (from-SF **L11**, added here).
+
+**Documentation gaps.** 18 rows = 14 `coverage-matrix` (fixed here) + 4 `BL-NNN`
+(G5→BL-176, G11→BL-178, G12→BL-178, G13→BL-180).
+
+**The 16 coverage-matrix routes reconcile to 18 row edits, and the difference is worth showing
+rather than asserting.** Two routes collapse onto a shared row — F2 and G2 both resolve to
+from-DBX **#78**, F14 and G7 both to from-SF **#38** — while two routes resolve to three rows
+each (G16 → #23/#67/#39; G18 → #26/#27/#28). So 16 − 2 + 2 + 2 = 18: from-DBX **#13, #23, #67,
+#77, #78, #79, L11** (7) and from-SF **#4, #5, #14, #16, #26, #27, #28, #38, #39, L10, L11** (11).
+`python3 tools/validate/check_coverage_matrix.py --root .` passes on both.
+
+**Gate observations.** 2 rows = 2 `BL-NNN` (both new). **Scope limits.** 3 rows = 2 `cross-ref` +
+1 `no-action`.
+
+**What this branch changed, and what it deliberately did not.** Changed: 15 coverage-matrix rows
+across the two from-direction matrices, both matrices' limitation notes, two skill PATCH bumps
+with changelog entries, BL-031's construct list, and 11 new backlog entries. Deliberately not
+changed: **no converter code** (all behaviour fixes are routed, three of them *ready to fix*),
+**no shared mapping or schema file** (the `safe_divide` hazard warning needs a currency-anchor
+bump and a stage-sync, so it ships with BL-180), **no to-direction coverage matrix** (F5's
+runtime-floor consequence and F8/F18's name synthesis are routed to entries and need no row
+today), and **nothing posted externally** (§4.4).
