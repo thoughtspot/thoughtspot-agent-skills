@@ -126,7 +126,213 @@ Three of databricks's four test layers are **absent outright, not just thinner**
 **CI: the workflow this Task's brief flagged as present does exist** — `.github/workflows/converter-snowflake-ci.yml` is **63 lines**, correcting Task 2's finding that only databricks lacks a CI file (Task 2 §2.6 already used this exact file, `converter-snowflake-ci.yml:20-63`, as the reference shape for what a sibling workflow looks like — that citation is reused here as the primary subject rather than a comparator). Its shape: path-scoped `push`/`pull_request` triggers on `converters/snowflake/**` and the workflow file itself (`:22-32`), a Python matrix `3.11`–`3.14` (`:38-39`), `uv` installed via `curl | sh` (`:50-53`), `uv sync` under `working-directory: converters/snowflake` (`:55-58`), then `uv run pytest` (`:60-63`). **Net effect, contrasted with databricks (Task 2 §2.6): this converter's 107 tests run automatically on every push/PR touching `converters/snowflake/**`**, whereas databricks's 76 tests (75 passed + 1 Hypothesis-skip) run only when a contributor manually invokes `pytest` per its README's `## Development` section — there is no CI gate for databricks at all. Packaging-wise the two converters are near-identical in shape (same `hatchling`/`src`-layout/console-script pattern); the CI-wiring and local-dev-loop-friendliness axes are where they diverge, and each diverges in the *opposite* direction from the other (snowflake has CI but a less frictionless local test run; databricks has a frictionless local test run but no CI).
 
 ## 4. Comparison vs our converter skills
-_(filled by Task 4)_
+
+**Scope.** The four skills compared are `agents/cli/ts-convert-{to,from}-snowflake-sv` and
+`agents/cli/ts-convert-{to,from}-databricks-mv`, plus the `tools/ts-cli/` code they drive and
+the shared references they cite (`agents/shared/mappings/ts-snowflake/*`,
+`agents/shared/mappings/ts-databricks/*`, `agents/shared/schemas/ts-model-conversion-invariants.md`).
+`agents/databricks/skills/` is a separate Genie-Code runtime holding thin-shell skills that
+defer to the same shared mappings (per `.claude/rules/runtime-coverage.md`), not a fifth
+converter — it is out of scope here.
+
+**How to read the comparison — the structural difference.** Ossie's converters are single
+deterministic Python processes: read a YAML file, write a YAML file. Ours are two layers —
+an **agentic** `SKILL.md` that orchestrates (object discovery, table-registration decisions,
+connection selection, review checkpoints, live import/execute, post-import verification) over a
+**deterministic** `ts` CLI core that does all the actual parsing, translation and emission
+(`ts snowflake parse-sv` / `translate-formulas` / `build-model` / `build-sv` / `diff` /
+`lint-ddl`; `ts databricks parse-mv` / `translate-formulas` / `build-model` / `build-mv`).
+Every row below therefore has to name *which layer* it compares: for transformation logic the
+comparable unit is `tools/ts-cli/`, not the SKILL.md; for workflow, confirmation gates and
+live verification, upstream has no counterpart at all.
+
+That split is not incidental — it is the outcome of `.claude/rules/repo-audit.md` angle 11's
+"agentic → deterministic" codification drive, applied deliberately to exactly these four
+skills: `ts-convert-from-snowflake-sv` 1.17.0 ("Rewire onto deterministic CLI commands …
+Removes 8 inline Python code blocks"), `ts-convert-from-databricks-mv` 1.8.0,
+`ts-convert-to-snowflake-sv` 1.4.0, and `ts-convert-to-databricks-mv` 1.2.0 ("deterministic
+tokenizer→AST→Databricks-SQL translator"). What remains agentic in our skills is, by design,
+the part Ossie's file-in/file-out model has no place for.
+
+| Dimension | Ossie DBX converter | Ossie SF converter | Our ts-convert-* skills | Gap/learning |
+|---|---|---|---|---|
+| Expression translation | Dialect **selection**, not translation: `pick_expression` returns the `DATABRICKS` entry, else `ANSI_SQL`, else `None` (`_common.py:221-235`), plus three regex string rewrites around it (fact de/re-qualification, join-alias path). No AST, no `sqlglot`, no cross-dialect rewriting (§2.2) | Narrower selection only: `SNOWFLAKE` else `ANSI_SQL` else warn-and-drop the field (`converter.py:376-414`). Zero expression rewrites of any kind; the only string manipulation targets the dataset `source` identifier (§3.2) | Real bidirectional translation into a **non-SQL** target language: tokenizer→AST→target emitters (`ts_cli/sv_sql.py` + `sv_translate.py`; `ts_cli/databricks/mv_emit_sql.py`, `mv_emit_expr.py`, `mv_emit_window.py`), driven by 1,106-line and sibling mapping references with a Decision Flowchart, and gated by invariant **I7** (a `MANDATORY` "consult the reference before declaring untranslatable" block, e.g. `ts-convert-to-snowflake-sv` Step 8) | Not a like-for-like axis — Ossie never leaves SQL, so it needs no translator; ThoughtSpot's formula language is not SQL, so the Phase-3 converter *must* have one and ours is the only existing implementation. The one idea to adopt: upstream's **`ANSI_SQL` fallback tier**, which our emitters don't currently produce |
+| Lossless roundtrip | `write_stash`/`read_stash` protocol: `_v`-versioned JSON **string** under `vendor_name: "DATABRICKS"`, three fixed key-sets + derived `source_dataset`, stash-if-present-else-derive on the reverse trip, asserted as parsed-dict equality with zero normalization (§2.3) | Does not exist — one direction only. `custom_extensions` is presence-checked and reported as dropped, never read for content (§3.3) | **No stash mechanism at all** — `grep -rn "stash\|custom_extension"` over the four skill dirs plus `agents/shared/mappings/ts-{snowflake,databricks}/` returns zero hits. Round-trip fidelity is verified *manually against live instances* and recorded in changelogs (`ts-convert-to-snowflake-sv` 1.5.0 round-tripped `SUPPORT_CASE_SV`; `ts-convert-from-databricks-mv` 1.9.0 "Verified via TS→MV→TS round-trip on SUPPORT_CASE") — never asserted by a test | **The biggest adoptable idea.** 13 + 10 + 8 + 10 documented limitation rows across the four coverage matrices are documented-then-lost. We already write *and* read a vendor extension blob (`with extension (CA='…')`) — but the from-direction uses it for "Type confirmation; not mapped to TML" only (from-SF coverage matrix row 31), i.e. the plumbing exists and is unused for preservation |
+| Silent-loss prevention | Split posture by direction: export warn-and-drop (`_warn_dropped_model`/`_warn_dropped_field`), import **stash-or-`ConversionError`**. Diagnostics are bare `warnings.warn()` — no accumulating report (§2.4) | One posture for the whole file: warn-and-drop. All 14 `OsiConversionError` sites fire on *malformed input*, never on information loss. Also no accumulating report (§3.4) | Structured, machine-readable issue reports at every stage, JSON on stdout: `unsupported[]` + exit 1 (`parse-sv`, `parse-mv` — "the JSON is still written"; from-DBX Step 5: "Never continue silently past a non-empty `unsupported[]`"); `{total, translated, skipped}` with per-entry `name`/`block`/`reason` and `annotations[]` (`sparse_data_risk`, `pending_verification`, `one_row_per_period`, `lod_filter_asymmetry`) from `translate-formulas`; `skipped_formulas`/`dropped_join_attrs`/`unmapped_properties` from `build-sv`; `skipped: [{role, name, reason}]` + `warnings[]` from `build-mv`; a hard `ts tml lint` I1/I2/I4/I5/I8 exit-1 gate before any import; and a mandatory Step 10 human checkpoint that shows the Unmapped Properties Report before anything is written | **Where we are clearly ahead** — and it is exactly the shape the Go CLI's plugin response envelope wants (`{"files": …, "issues": [...]}`, §1 open-question #2), which *no shipped Ossie converter produces*. Adopt from upstream: the sharper **import-direction raise-don't-drop** line (our to-direction never hard-errors on loss) |
+| Fixture strategy (shared TPC-DS) | Hand-authored fixtureA/fixtureB golden pairs **plus a TPC-DS-derived pair** (`tpcds_ossie.yaml`/`tpcds_metric_view.yaml`), compared through `canon()`, which `json.loads`-es every `custom_extensions[].data` before comparing (§2.5 #1) | No golden-file tests at all; the one TPC-DS-shaped YAML in `tests/` (`example_converted_tpcds_semantic_model.yaml`) is referenced by no test (§3.5) | **Worked-examples-as-oracle**: 4 Snowflake + 3 Databricks end-to-end examples under `agents/shared/worked-examples/`, declared ground truth by `agents/shared/CLAUDE.md` because each was verified against a live instance. Bound to code two ways: `tools/ts-cli/tests/test_worked_examples.py` re-validates the documented outputs against `check_sv_yaml`/`check_tml`, and `test_databricks_to_golden.py` runs the real emitter end-to-end against a fixture transcribed from `ts-to-databricks.md`. **No shared cross-platform corpus** — and no TPC-DS anywhere in the repo | Adopt a **shared vendor-neutral corpus** — Ossie's TPC-DS pair makes cross-converter comparison possible; each of our fixtures is one-of-a-kind (Dunder Mifflin, BIRD_SUPERHEROS, e-commerce transactions), so no two converters are ever exercised on the same input. Carry over *to* upstream: live-instance verification as the bar for "ground truth", and fixtures that test the **emitter**, not only the document |
+| Property-based testing | Hypothesis, 300 examples per property, generation deliberately restricted to the round-trippable subset, **plus a seeded-RNG duplicate driver** (250 seeds/direction) so the same properties still run where `hypothesis` is not installed (§2.5 #3/#4) | None, and no seeded substitute either (§3.5) | **None.** `hypothesis` appears nowhere in the repo (case-insensitive scan of `*.py`/`*.toml`/`*.yml`/`*.txt`/`*.cfg`), and it is not in `tools/ts-cli/pyproject.toml`'s `dev` extra (`pytest`, `PyYAML`, `radon`, `vulture`, `pip-audit`). All 3,808 cases collected from `tools/ts-cli/tests/` are example-based | Clear one-way gap. We already have the invariants **stated as properties** — I1–I12, N1, PT1 in `ts-model-conversion-invariants.md` — but only ever check them on the specific documents a run happens to produce. Copy the **dual-driver** pattern verbatim: `validate.yml`'s 3.10/3.11/3.13/3.14 matrix legs install only `pytest pyyaml`, so a Hypothesis-only test would silently not run there |
+| Packaging/CLI conventions | `apache-ossie-databricks`, hatchling, `src/` layout, `>=3.11`, single runtime dep `PyYAML>=6.0`, console script `ossie-databricks` with `export`/`import` argparse subcommands and `-i`/`-o` paths; `conftest.py` puts `../src` on `sys.path` so a bare `pytest tests/` works. **No CI workflow, no `uv.lock`** (§2.6) | `apache-ossie-snowflake`, same hatchling/`src`/console-script shape but no subcommands and **no `conftest.py`** — bare `pytest tests/` fails with `ModuleNotFoundError`, only `uv sync && uv run pytest` works. **Has** a 63-line CI workflow, 3.11–3.14 matrix (§3.6) | One distribution for everything: `thoughtspot-cli` 0.124.2 (setuptools), one console script `ts` with noun-verb subcommand groups, `requires-python >=3.10,<3.15`, warehouse SDKs behind optional extras (`[snowflake]`, `[qlik]`) so the core install stays at 4 deps. Output conventions are codified as a rule, not convention (`.claude/rules/ts-cli.md`: JSON to stdout, diagnostics to stderr, auth via `--profile`, auto-pagination). CI is one `validate.yml`: validators + full pytest on 3.12, a 3.10/3.11/3.13/3.14 matrix, `pip-audit` on push/PR plus a weekly cron | For Phase 3, follow upstream's convention (own pip dist + thin `-i`/`-o` shell over a library core) — 7 of 9 converters skip the shared `apache-ossie` package and none satisfies `plugin.yaml`, so neither is required. Copy the two-line `conftest.py` shim (SF's absence is a verified papercut). Learning *for* us: DBX's 76 uncovered tests are the cautionary tale — wire CI in the same PR as the first test |
+
+### Expression translation
+
+This is the row where the two designs are least comparable, and saying so precisely matters
+more than scoring it. Ossie's data model carries per-dialect expression variants
+(`expression.dialects[]`), so a converter's job is to *pick* the right one and hand it through:
+`pick_expression` (`_common.py:221-235`) is a preference lookup over dialect labels, and the
+snowflake converter's `_extract_expression` (`converter.py:376-414`) is the same idea with one
+fewer tier. Neither ever parses SQL. Our converters cannot work that way in either direction,
+because ThoughtSpot's formula language is not SQL — `unique count(...)`, `group_aggregate(expr,
+{dims}, query_filters())`, `moving_sum(m, N, -1, [date])` have no dialect-variant relationship
+to `COUNT(DISTINCT …)`, `AGG(…) OVER (PARTITION BY …)` or `range: trailing N day`. So we carry a
+genuine translator on both sides, and the interesting comparison is in the *discipline around*
+it rather than its existence. Two things line up almost exactly: upstream's refusal to guess
+when attribution is ambiguous (a complex expression on a fanned-out dataset is dropped, not
+guessed — `test_fanout_complex_expr_dropped_not_emitted_ambiguously`) is the same policy as our
+`UntranslatableError` → `skipped[]` path, e.g. `rank(...)` in `ts-convert-to-databricks-mv`'s
+coverage matrix L11 ("Fails loud — lands in `skipped[]`, not silently dropped or mis-mapped").
+And upstream's version-gated hard failure on an unsupported input version is the same instinct
+as our MV-on-MV fail-loud check. The one concrete thing to **adopt**: the `ANSI_SQL` fallback
+tier. Our to-direction emitters produce exactly one dialect's SQL; an Ossie-targeting converter
+should emit a `THOUGHTSPOT` dialect entry *and* an `ANSI_SQL` entry wherever the expression is
+portable, and our translators are uniquely well placed to do that because at translate time
+they hold both the ThoughtSpot formula and its source SQL. What the Phase-3 converter must
+**carry over** from us is the I7 gate itself: a `MANDATORY` instruction to consult the mapping
+reference before classifying anything as untranslatable. Upstream has no equivalent because it
+has nothing to consult; a ThoughtSpot converter without it will drop translatable window and
+LOD constructs, which is precisely the failure I7 was written to stop.
+
+### Lossless roundtrip
+
+Upstream's `custom_extensions` stash is the single most valuable idea in this review for our
+own skills, because we have the identical problem and no answer to it. The four coverage
+matrices document 13 (`to-snowflake-sv`), 10 (`to-databricks-mv`), 8 (`from-snowflake-sv`) and
+10 (`from-databricks-mv`) limitation rows, and every one of them resolves to "documented in the
+Unmapped Report, then gone" — `format_pattern`, `geo_config`, `column_groups`,
+`default_date_bucket`, `custom_order`, locale aliases, `ai_context` (partial, folded into a
+comment) on the way out; `ACCESS_MODIFIER: PRIVATE`, table-level synonyms, `is_enum`, sample
+values on the way in. A TS→SV→TS round trip therefore cannot recover any of them, and nothing
+in the repo measures how much is lost. The sharpest detail is that **we already ship the
+plumbing and don't use it for this**: `ts-convert-to-snowflake-sv` emits
+`with extension (CA='{ca_json}')`, and `ts-convert-from-snowflake-sv` parses that same clause —
+but its coverage matrix row 31 records the from-side handling as "Parsed only … Type
+confirmation; not mapped to TML". A `_v`-versioned, `THOUGHTSPOT`-keyed JSON payload written on
+export and read on import is a small change to two CLI commands that would make the pair
+genuinely lossy-by-declaration rather than lossy-by-default. Two upstream details are
+non-negotiable if we do it: per §1 open-question #1 the payload must be a **serialised JSON
+string**, and per §2.5 golden comparisons must `json.loads` both sides before comparing (the
+`canon()` helper) because serialised key order is not stable. Note also *what* the reverse trip
+does with the stash — stash-if-present-**else-derive** (`ossie_to_metric_view.py:415-428`
+derives `rely.at_most_one_match`/`cardinality` when absent) — which is what makes a stashed
+document and a hand-written one both work; a stash-only design would break on any input the
+converter didn't itself produce. Against that, what we do better is worth stating plainly:
+our round-trip claims are verified **against live instances** and dated
+(`ts-convert-to-snowflake-sv` 1.5.0 re-parses a round-tripped `SUPPORT_CASE_SV` to
+"13 tables / 12 relationships / 51 dimensions with all role-plays intact";
+`ts-convert-from-databricks-mv` 1.9.0 verifies a TS→MV→TS round trip on the same object),
+whereas upstream's losslessness is asserted purely offline. Offline structural equality and
+live semantic verification are complements, not substitutes — the Phase-3 converter should have
+both, and neither codebase has both today.
+
+### Silent-loss prevention
+
+Here the direction of the lesson reverses. Upstream's diagnostics are `warnings.warn()` calls
+that Python's default machinery prints to stderr, with no accumulating structure in either
+converter (§2.4, §3.4) — a caller cannot programmatically enumerate what was dropped. Our
+pipeline emits a structured issue report at every stage: `parse-sv`/`parse-mv` write
+`unsupported[]` and exit 1 while still writing the JSON, `translate-formulas` returns
+`{total, translated, skipped}` with `name`/`block`/`reason` per skipped entry plus typed
+`annotations[]` (`sparse_data_risk`, `pending_verification`, `one_row_per_period`,
+`lod_filter_asymmetry`), `build-sv` reports `skipped_formulas`/`dropped_join_attrs`/
+`unmapped_properties`, and `build-mv` returns `skipped: [{role, name, reason}]` alongside
+`warnings[]`. That is then consumed twice — by a hard `ts tml lint` gate (I1/I2/I4/I5/I8, exit 1
+before any import) and by the Step 10 human checkpoint, which is the thing upstream structurally
+cannot have. The strategically important observation for Phase 3 is that **this already matches
+the plugin contract's response envelope**: §1 open-question #2 found `invoke.go` expects
+`{"files": {...}, "issues": [...]}` on stdout, and no shipped converter produces `issues` at all
+because they all use `warnings.warn()`. A ThoughtSpot converter built on our summary-JSON
+convention would be the first converter that can satisfy that envelope without a rewrite —
+worth doing even though the Go `convert`/`plugin install` commands are still stubs, because it
+costs nothing now and forecloses nothing. What we should **adopt** is upstream's harder line on
+the import direction: a condition-less join, a non-equi `on`, a reserved/duplicate join name or
+an unsupported version all `raise ConversionError` rather than degrade, on the explicit grounds
+that the direction's purpose is losslessness. Our from-direction does this in places (MV-on-MV
+fail-loud, the joinless-SV decision prompt, `unsupported[]` + exit 1) but our **to-direction
+never hard-errors over loss** — every unmapped construct is a warn-and-drop into the Unmapped
+Report, and the only exit-1 gates there are structural (`ts snowflake lint-ddl` errors). There
+is a defensible reason (the to-direction ends at a human checkpoint that shows the report), but
+the asymmetry should be a decision on record rather than an accident.
+
+### Fixture strategy (shared TPC-DS)
+
+Upstream's fixture story is thin in absolute terms — two hand-authored pairs and one TPC-DS pair
+for databricks, nothing usable for snowflake — but it has one property ours lacks entirely:
+the TPC-DS fixture is a **shared, vendor-neutral schema** that any converter in the ecosystem
+can be tested against, which is what makes "does converter X handle a multi-join star with
+`rely`/`filter`/`format` together?" a comparable question across converters. Our fixtures are
+richer and better grounded — `agents/shared/worked-examples/` holds 4 Snowflake and 3 Databricks
+end-to-end conversions, and `agents/shared/CLAUDE.md` makes them normative ("If a rule in
+`mappings/` or `schemas/` conflicts with what a worked example produces, investigate before
+changing either") precisely because each was verified against a live instance, which is a
+stronger bar than any offline golden. They are also genuinely wired to the code, in two distinct
+ways worth keeping distinct: `test_worked_examples.py` re-validates the *documented* output
+against `check_sv_yaml`/`check_tml` (it explicitly does not re-run the conversion, since Claude
+is in the execution path), while `test_databricks_to_golden.py` runs the *real emitter*
+end-to-end against a fixture transcribed from `ts-to-databricks.md`. But every one of them is
+bespoke — Dunder Mifflin, BIRD_SUPERHEROS, DUNDER_MIFFLIN_SALES_INVENTORY, COMPANY_WORKFORCE,
+an e-commerce transactions MV — so no two of our converters are ever exercised on the same input
+schema, and there is no TPC-DS anywhere in the repo (the only two files mentioning it are this
+review and its companion spec). The cheap adoption for Phase 3 is direct: take upstream's
+`tpcds_ossie.yaml` verbatim as the from-Ossie input fixture and assert the emitted Model TML
+against `ts tml lint` plus a golden, which simultaneously gives us our first shared-corpus
+fixture and our first cross-ecosystem comparability. The discipline to **carry over** to
+upstream is the live-verification bar and the emitter-level golden: `test_databricks_to_golden.py`
+is instructive here because building it *found emitter bugs and oracle divergences* and its
+docstring records them rather than weakening the assertions — the opposite of the snowflake
+converter's checked-in-but-unreferenced TPC-DS YAML.
+
+### Property-based testing
+
+This is the cleanest one-way gap in the whole comparison: upstream databricks has Hypothesis at
+300 examples per property with a seeded-RNG fallback driver, and we have nothing — `hypothesis`
+appears nowhere in the repo and is absent from `tools/ts-cli/pyproject.toml`'s `dev` extra, so
+all 3,808 collected `tools/ts-cli/tests` cases are example-based. The reason this matters more
+for us than the raw absence suggests is that **we have already written the properties down**:
+`ts-model-conversion-invariants.md` states I1–I12, N1 and PT1 as universally-quantified rules
+over generated Model TML ("For every entry in `formulas[]`, there must be a corresponding entry
+in `columns[]`…"), and `ts tml lint` already implements the checker. What is missing is the
+generator. A Hypothesis strategy producing arbitrary in-subset `parsed.json` documents, asserting
+`lint_tml(build_model(parsed, translated, tables)) == []`, would test the *builder* rather than
+the handful of documents our fixtures happen to contain — a materially stronger claim than any
+example test we have, and one that would have caught the class of bug the duplicate-`column_id`
+work (I8, ts-cli v0.92.0, shipped in `from-snowflake-sv` 1.19.0 / `from-databricks-mv` 1.10.0)
+had to find the hard way. Upstream's second design decision is the one to copy most literally:
+restricting generation to the *round-trippable subset* rather than generating everything and
+excepting failures, which is what keeps a property test from becoming a list of known-bad
+shapes. And the dual-driver arrangement — Hypothesis when installed, a hand-rolled seeded `Rnd`
+implementing the same interface when not — is directly load-bearing for us: `validate.yml`
+installs `pytest pyyaml radon pip-audit` on its 3.12 job and only `pytest pyyaml` on the
+3.10/3.11/3.13/3.14 matrix legs, so a Hypothesis-only test would be silently skipped on every
+leg as configured today, and adding the dependency to the 3.12 job alone would still leave the
+four matrix legs uncovered. That is the exact failure mode upstream's `pytest.importorskip` +
+seeded duplicate was built to avoid. Nothing in this row flows the other way.
+
+### Packaging/CLI conventions
+
+Our packaging is the stronger of the three, and its conventions are enforced rather than
+merely followed: one distribution (`thoughtspot-cli` 0.124.2), one console script (`ts`) with
+noun-verb subcommand groups, warehouse SDKs behind `[snowflake]`/`[qlik]` extras so the core
+install stays at four dependencies, and `.claude/rules/ts-cli.md` codifying the output contract
+(structured JSON to stdout, diagnostics to stderr, auth only via `--profile`, connections by
+display name, transparent pagination) as a rule with pre-commit validators behind parts of it
+(`check_no_inline_requests.py`, `check_pagination_convention.py`, `check_skill_cli_usage.py`,
+`check_skill_flag_usage.py`) — versus upstream,
+where the two converters diverge in *opposite* directions on the same two axes (DBX has a
+frictionless local test loop but no CI; SF has CI but a `conftest.py`-shaped papercut that makes
+bare `pytest tests/` fail). Ours is also the only side with cross-version CI over the whole
+surface. For Phase 3 the right move is nonetheless to follow upstream's convention rather than
+ours: ship `apache-ossie-thoughtspot` as its own pip distribution with a thin `-i`/`-o` argparse
+shell over a library core, since §1 established that 7 of 9 converters skip the shared
+`apache-ossie` package and *none* implements the `plugin.yaml`/stdin-stdout contract, so neither
+dependency nor plugin conformance is expected of a new converter. Keeping the transformation
+logic in a library rather than in the CLI entry point is what preserves the option of adding the
+plugin envelope later — and, per the silent-loss row, our summary-JSON convention already
+produces the `issues[]` half of it. Two small things to copy outright: DBX's two-line
+`conftest.py` `sys.path` shim (its absence in the snowflake converter is a verified failure, not
+a style preference), and its `PyYAML>=6.0` floor over SF's looser `>=5.0`. The cautionary
+lesson runs the other way: the databricks converter's 76 tests — the best test suite in the
+upstream repo — run only when a contributor remembers to invoke them, because no CI workflow
+was ever wired up. Whatever repo or directory the Phase-3 converter lands in, its CI job belongs
+in the same PR as its first test.
 
 ## 5. Findings and routing
 _(filled by Task 5)_
