@@ -630,31 +630,33 @@ references — a format conversion of our own output plus the `data_type` values
 already carries (mapped per `ts-from-snowflake-rules.md:758-766`). It substitutes for no
 conversion logic.
 
+Step 8 (translate each formula ThoughtSpot → Snowflake) is a judgment step, not a CLI command,
+so the five translations were produced per `ts-snowflake-formula-translation.md` and written to
+`11-formulas.json`, which Step 9 then passes via `--formulas`:
+
 ```bash
 ts snowflake build-sv --model 07-model-export.json --tables-dir ./08-tables-export \
-  --sv-name TPCDS.PUBLIC.TPCDS_RETAIL_MODEL_RT --output 09-regenerated-sv.sql
-#   → dimensions: 28, time_dimensions: 2, metrics: 0, relationship_count: 4,
-#     skipped_formulas: 5, dropped_join_attrs: 4
+  --sv-name TPCDS.PUBLIC.TPCDS_RETAIL_MODEL_RT \
+  --output 15-regenerated-sv-asis-with-formulas.sql --formulas 11-formulas.json
+#   → dimensions: 28, time_dimensions: 2, metrics: 5, relationship_count: 4,
+#     skipped_formulas: 0, dropped_join_attrs: 4
 ```
 
-**A second, corrected reverse run was also made, and why.** The forward leg emits five metric
-formulas whose cross-references do not resolve (F9), which alone causes `build-sv` to drop all
-five metrics. Scoring the rest of the reverse leg off that one cascade would have measured the
-same bug five more times and taught nothing about the remaining pipeline. So a corrected
-variant (`10-model-export-corrected.json`) repairs only the three dangling references to the
-`[TABLE::col]` form the documented algorithm prescribes, with Step 8 formula translations
-supplied per `ts-snowflake-formula-translation.md`:
-
-```bash
-ts snowflake build-sv --model 10-model-export-corrected.json --tables-dir ./08-tables-export \
-  --sv-name TPCDS.PUBLIC.TPCDS_RETAIL_MODEL_RT2 --output 12-regenerated-sv-corrected.sql \
-  --formulas 11-formulas.json
-#   → dimensions: 28, time_dimensions: 2, metrics: 5, skipped_formulas: 0
-```
-
-**§3.4's verdicts are scored against the as-is run** (`09-regenerated-sv.sql`) — what a user
-actually gets today. The corrected run is cited only where it isolates a *second, independent*
-defect that the cascade would otherwise have masked (F12, F20, F21).
+**A correction to an earlier run of this section, recorded because it changes numbers.** The
+reverse leg was first invoked **without** `--formulas`, which produced `"metrics": 0` and five
+`SKIPPED formula … not in translated_formulas` lines. That was a **harness error, not a
+converter defect**: `SKILL.md:768-777` documents Step 9 *with* `--formulas`, and `:779-780`
+permits omitting it only "if the model has no formula columns (or all formulas are
+untranslatable)" — this model has five, all translatable. `build-sv` never reads the
+ThoughtSpot-side `expr` at all: `_classify_formula_column` (`sv_build_sv.py:518-529`) consults
+`formulas_by_id[fid]["expr"]` only to populate the *skip record*, and takes the emitted
+expression from `translated[fid]["expr"]`. A second "corrected" run made against a variant with
+F9's dangling references repaired (`10-model-export-corrected.json`,
+`12-regenerated-sv-corrected.sql`) is therefore **byte-identical** to the run above — verified
+by diff, modulo the `--sv-name` argument. The reference repair was a no-op for `build-sv`; only
+`--formulas` mattered. **§3.4 scores the correctly-invoked as-is run**
+(`15-regenerated-sv-asis-with-formulas.sql`); the repaired variant is retained in the workspace
+only as the evidence for that no-op finding, and is cited nowhere as a source of verdicts.
 
 **Interactive checkpoints skipped, and what each would have asked:**
 
@@ -779,15 +781,22 @@ hidden and no row is scored twice.
 | SR1 | `store_sales_to_date` | **`mis-inferred`** | tables and columns round-trip exactly; the **name** is regenerated as `store_sales_to_date_dim` (`.sql:10`) rather than reused — see F18 | — |
 | SR2-4 | `store_sales_to_customer`, `store_sales_to_item`, `store_sales_to_store` | `matched` | names, tables and columns all survive verbatim (`.sql:11-13`). Join `type: LEFT_OUTER` + `cardinality: MANY_TO_ONE` are correctly dropped — the SV format has no join-type field (`snowflake-schema.md:225-226`), so this is `not-applicable`, **not** §2's F1 | — |
 
-**Metrics** (5) — every measure in the model is lost
+**Metrics** (5) — all five reach the regenerated SV, all five renamed; one changes numeric semantics
+
+All five are `mis-inferred`, not `missed`: the round trip preserves them, but every identifier is
+replaced by a synonym (F10), one expression changes its zero-denominator semantics (F12), and all
+five are attributed to a fabricated CA-extension table (F20). Note separately that **the Model TML
+they were built from carries five unresolvable formula references** (F9) — a forward-leg defect
+that does not surface on the reverse leg, because `build-sv` reads the Step 8 translations rather
+than the TML expressions (§3.3).
 
 | # | Construct | Verdict | Evidence | Extras |
 |---|---|---|---|---|
-| SM1 | `total_sales` | **`missed`** | forward leg emits `sum ( [formula_ss_ext_sales_price] )` against a formula id that is never declared; `build-sv` then reports `SKIPPED formula 'total revenue': not in translated_formulas` and the regenerated SV has **no `metrics()` block at all** — see F9. Identifier also → `total revenue` (F10) | `aggregation: SUM`, `index_type: DONT_INDEX` (both benign — see §3.4 note) |
-| SM2 | `total_profit` | **`missed`** | same; `[formula_ss_net_profit]` dangling — F9 | as above |
-| SM3 | `customer_lifetime_value` | **`missed`** | same; `[formula_ss_ext_sales_price]` dangling — F9. `COUNT(DISTINCT …)` → `unique count (…)` was correct (coverage #19/I5) | as above |
-| SM4 | `sales_by_brand` | **`missed`** | same — F9 | as above |
-| SM5 | `store_productivity` | **`missed`** | same — F9. Independently, the corrected run shows `NULLIF(…,0)` → `DIV0` changes NULL to 0 — see F12 | as above |
+| SM1 | `total_sales` | **`mis-inferred`** | `expr` and `description` survive exactly (`SUM(store_sales.ss_ext_sales_price)`, `.sql:48`); identifier → `total revenue` → `total_revenue` (F10). Independently, the forward-leg TML reference `sum ( [formula_ss_ext_sales_price] )` is unresolvable (F9) | `aggregation: SUM`, `index_type: DONT_INDEX` (both benign — see the note below), self-synonym, CA table `field` (F20) |
+| SM2 | `total_profit` | **`mis-inferred`** | `expr`/`description` survive (`.sql:49`); identifier → `net profit` (F10); F9 on the forward leg | as above |
+| SM3 | `customer_lifetime_value` | **`mis-inferred`** | `expr` survives including `COUNT(DISTINCT customer.c_customer_sk)` (`.sql:50`) — the `unique count (…)` translation was correct (coverage #19/I5); identifier → **`CLV`** (F10); F9 on the forward leg | as above |
+| SM4 | `sales_by_brand` | **`mis-inferred`** | `expr`/`description` survive (`.sql:51`); identifier → `brand sales` (F10); F9 on the forward leg | as above |
+| SM5 | `store_productivity` | **`mis-inferred`** | identifier → `sales per employee` (F10) **and** `NULLIF(…, 0)` → `DIV0(…)` changes NULL to 0 (`.sql:52`) — see F12; F9 on the forward leg | as above |
 
 **Note on the two stamped measure properties.** `aggregation: SUM` and
 `index_type: DONT_INDEX` are added to all five formula-backed MEASURE columns
@@ -806,48 +815,58 @@ verdict column reads 0.
 
 | Group | n | `matched` | `mis-inferred` | `missed` | `extra` | `not-applicable` | additive extras |
 |---|---|---|---|---|---|---|---|
-| **Metrics** | 5 | **0** | **0** | **5** | **0** | **0** | 15 |
+| **Metrics** | 5 | **0** | **5** | **0** | **0** | **0** | 15 |
 | **Facts** | 5 | **0** | **5** | **0** | **0** | **0** | 5 |
 | **Dimensions** | 22 | **6** | **15** | **1** | **0** | **0** | 15 |
-| **Time dimensions** | 4 | **0** | **4** | **0** | **0** | **0** | 4 |
+| **Time dimensions** | 4 | **0** | **4** | **0** | **0** | **0** | 2 |
 | **Relationships** | 4 | **3** | **1** | **0** | **0** | **0** | 0 |
 | Tables | 5 | 0 | 0 | 5 | 0 | 0 | 0 |
 | Top-level properties | 2 | 1 | 1 | 0 | 0 | 0 | 0 |
-| **Total** | **47** | **10** | **26** | **11** | **0** | **0** | **39** |
+| **Total** | **47** | **10** | **31** | **6** | **0** | **0** | **37** |
 
-**Property level** (215 source properties): **96 matched · 50 mis-inferred · 31 missed ·
-0 extra · 38 not-applicable**, plus **39 properties we add** that the source lacks (29 ×
-re-added self-synonym on the reverse leg, 5 × `aggregation`, 5 × `index_type`). The 38
-`not-applicable` properties are the ones with no Semantic View representation at all:
-28 × `data_type`, 5 × `unique_keys`, 5 × table `synonyms` — each cited to its coverage row
-in §3.2. (29 source entries carry a `data_type`; the 29th belongs to `customer_full_name`,
-whose whole construct is `missed` under F11, so its properties are counted there instead.) Eight further **role changes** (5 facts → dimensions, 3 time_dimensions →
-dimensions) are scored at construct level only, since the Cortex YAML encodes role by
-*which list an entry sits in* and there is no property to compare.
+**Property level** (215 source properties): **105 matched · 61 mis-inferred · 11 missed ·
+0 extra · 38 not-applicable**, plus **37 properties we add** that the source lacks — 27 ×
+re-added self-synonym on the reverse leg (15 dimensions, 5 facts, 5 metrics, and only 2 of 4
+time dimensions: `d_year` and `d_month_name` each have a single synonym, which is consumed as
+the name, leaving `build-sv` with none to emit), 5 × `aggregation`, 5 × `index_type`. Counted
+from `15-regenerated-sv-asis-with-formulas.sql`, not from the F10 rename count — 29 constructs
+are renamed but only 27 retain a synonym afterwards. The 38 `not-applicable` properties are the
+ones with no Semantic View representation at all: 28 × `data_type`, 5 × `unique_keys`, 5 × table
+`synonyms` — each cited to its coverage row in §3.2. (29 source entries carry a `data_type`; the
+29th belongs to `customer_full_name`, whose whole construct is `missed` under F11, so its
+properties are counted there instead.) Eight further **role changes** (5 facts → dimensions,
+3 time_dimensions → dimensions) are scored at construct level only, since the Cortex YAML encodes
+role by *which list an entry sits in* and there is no property to compare.
 
-**Headline: 21% of constructs survive unchanged (10/47), and 0 of 5 measures survive at all.**
-Property level reads better (96/215 = 45% matched, or 96/177 = 54% excluding
-`not-applicable`) precisely because the properties that *do* survive — `expr`, `description`,
-join columns — are the mechanical ones, while the properties that carry identity and role are
-the ones that break.
+**Headline: 21% of constructs survive unchanged (10/47), and 5 of 5 metrics arrive in the
+imported Model TML with unresolvable formula references while every gate reports clean** (F9).
+The measures do survive the *reverse* leg — `build-sv` reads the Step 8 translations, not the
+broken TML expressions — so the damage is confined to the artifact a user actually imports,
+which is the artifact that matters. Property level reads better (105/215 = 49% matched, or
+105/177 = 59% excluding `not-applicable`) precisely because the properties that *do* survive —
+`expr`, `description`, join columns — are the mechanical ones, while the properties that carry
+identity, role, and cross-references are the ones that break.
 
 **The two figures diverge in the opposite direction from §2.** In §2 the property-level diff
 *flattered* the round trip (92% property vs a join-type defect invisible at property level).
-Here property level flatters it too, but for a different reason: F9 destroys five constructs
-by breaking a *reference*, and a reference has no source property to diff against — the Cortex
-YAML has no "formula id" field. Both sections therefore make the same methodological point
-from opposite directions: **a property-wise diff cannot see a defect in a construct's
-identity, role, or cross-reference**, and those are where both converters actually fail.
+Here the round-trip diff flatters it in a sharper way: F9 breaks a *reference*, and a reference
+has no source property to diff against — the Cortex YAML has no "formula id" field — so F9 is
+invisible at property level **and** invisible in a source-vs-regenerated comparison, surfacing
+only by reading our intermediate TML. Both sections therefore make the same methodological point
+from opposite directions: **a diff of source against regenerated output cannot see a defect in a
+construct's identity, role, or cross-reference**, and those are where both converters actually
+fail.
 
 ### 3.6 Non-matched constructs, both definitions verbatim
 
 Findings continue §2.3's numbering (F1-F8 are Databricks).
 
-#### F9 — Every metric's cross-reference dangles; all five measures are lost *(SM1-SM5, `missed`, wrong side: **ours**)* — HEADLINE
+#### F9 — Every metric's formula cross-reference is unresolvable in the imported Model TML *(forward leg; wrong side: **ours**)* — HEADLINE
 
-The forward leg emits five metric formulas that reference formula ids which are never
-declared, so `build-sv` drops all five and the regenerated Semantic View contains **no
-`metrics()` block at all**. Both TML gates pass clean.
+The forward leg emits five metric formulas that reference formula ids which are never declared,
+so **every measure in the Model TML a user imports is unresolvable** — while `ts tml lint` and
+`check_tml.py` both report clean. This is a defect of the *forward* leg only; §3.3 explains why
+the reverse leg is unaffected.
 
 **Source (`example_converted_tpcds_semantic_model.yaml:334-340`, representative):**
 
@@ -887,23 +906,24 @@ Declared ids are `formula_total revenue`, `formula_net profit`, `formula_CLV`,
 `formula_ss_ext_sales_price`, `formula_ss_net_profit`, `formula_s_number_employees` — **none
 of which exists.** All three referents were emitted as plain `columns[]` entries instead
 (`model.tml:196-219`, e.g. `column_id: "STORE_SALES::ss_ext_sales_price"`, `name: total price`).
-Machine-checked: `5/5` formulas carry at least one dangling reference (`14-tally.txt`,
-`compare.py` "MODEL TML FORMULA INTEGRITY").
+Machine-checked: `5/5` formulas carry at least one dangling reference (`compare.py` →
+`13-comparison.txt`, "MODEL TML FORMULA INTEGRITY").
 
-**Consequence on the reverse leg (`09-regenerated-sv.sql`, stderr):**
+**No consequence on the reverse leg — and that is the point.** An earlier run of this section
+invoked `build-sv` without the documented `--formulas` input and reported `"metrics": 0` with five
+`SKIPPED formula … not in translated_formulas` lines; that was a **harness error, not a symptom of
+F9** (§3.3). `build-sv` never evaluates the ThoughtSpot-side `expr`: it takes each emitted
+expression from `translated[fid]["expr"]` and touches `formulas_by_id[fid]["expr"]` only to fill in
+a skip record (`sv_build_sv.py:518-529`). Repairing the dangling references produces a
+**byte-identical** DDL, verified by diff. So all five metrics round-trip intact and the *only*
+artifact this defect damages is the Model TML — the one the user imports, and the one no gate
+inspects for reference integrity.
 
-```
-  SKIPPED formula 'total revenue': not in translated_formulas
-  SKIPPED formula 'net profit': not in translated_formulas
-  SKIPPED formula 'CLV': not in translated_formulas
-  SKIPPED formula 'brand sales': not in translated_formulas
-  SKIPPED formula 'sales per employee': not in translated_formulas
-```
 
-`"metrics": 0`. The regenerated Semantic View is a five-table model with 28 dimensions and
-**not one measure**.
+**Three independent defects — two in the resolver, one in the parser.** Task 3's fix scope needs
+all three: repairing only the resolver leaves the index it reads still poisoned.
 
-**Two independent defects, both in the resolver.** `tools/ts-cli/ts_cli/sv_translate.py:125-137`:
+`tools/ts-cli/ts_cli/sv_translate.py:125-137`:
 
 ```python
         if len(parts) == 2:
@@ -930,16 +950,66 @@ Machine-checked: `5/5` formulas carry at least one dangling reference (`14-tally
    Physical column is step 1; fact is step 2. The code checks `fact_idx`/`metric_idx` *first*
    and only falls through to `alias_map` afterwards. The function's own docstring
    (`sv_translate.py:103-110`) restates the correct order immediately above the code that
-   inverts it. For a passthrough fact — one whose `expr` *is* a physical column, which is what
-   upstream produces for every OSI field lacking a `dimension` block — step 1 would have
-   emitted `[STORE_SALES::ss_ext_sales_price]` and resolved cleanly.
+   inverts it. **This is the defect that fires on the TPC-DS fixture**: every one of its facts is
+   a passthrough whose `expr` *is* a physical column — which is what upstream emits for every OSI
+   field lacking a `dimension` block — so step 1 would have emitted
+   `[STORE_SALES::ss_ext_sales_price]` and resolved cleanly.
 
-2. **The emitted id is not the id `build-model` mints.** Even where a fact legitimately becomes
-   a formula, the resolver emits `[formula_<sql_token>]` while `build-model` derives the id from
-   the *display* name. The same rules file forecloses this at step 2: "The reference uses the
-   formula's `id` value (e.g. `formula_Tenure Months`), **NOT** the display name." A targeted
-   probe with a computed fact carrying synonyms (`probe/computed_fact.sql`) shows both halves at
-   once — declared `id: formula_Net Line Amount`, referenced `[formula_net_line]`, dangling.
+2. **The emitted id is not the id `build-model` mints.** Even where a fact or metric legitimately
+   becomes a formula, the resolver emits `[formula_<sql_token>]` while `build-model` derives the
+   id from the *display* name (first synonym, else title-case). The same rules file forecloses
+   this at step 2: "The reference uses the formula's `id` value (e.g. `formula_Tenure Months`),
+   **NOT** the display name." Reordering the resolver does not fix this — a correctly-reached
+   step 2 still emits the wrong token.
+
+3. **`sv_parse.py` assigns `alias_name` from the expression, not the declared name, poisoning
+   both indexes.** `_resolve_rhs_alias` (`tools/ts-cli/ts_cli/sv_parse.py:470-492`) returns the
+   *first qualified token of the right-hand side* as `alias_name` whenever the RHS is anything
+   more complex than a bare `alias.NAME`:
+
+   ```python
+       agg_wrap = re.match(
+           r"([A-Za-z_]+)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*$",
+           rhs)
+       if agg_wrap:
+           return agg_wrap.group(2), agg_wrap.group(3), rhs
+
+       alias_m = re.match(
+           r"([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)", rhs)
+       if alias_m:
+           return alias_m.group(1), alias_m.group(2), rhs
+   ```
+
+   `_build_column_index` then keys **both** `fact_idx` and `metric_idx` on
+   `alias_table.alias_name` (`sv_translate.py:72-79`), so a computed fact or metric is indexed
+   under a *physical column of its own table* rather than under its declared name. The probe
+   `probe/computed_fact.sql` declares one computed fact,
+   `STORE_SALES.net_line as STORE_SALES.ss_ext_sales_price - STORE_SALES.ss_net_profit`, and
+   `parse-sv` returns:
+
+   ```json
+   {"source_table": "STORE_SALES", "source_column": "net_line", "alias_table": "STORE_SALES",
+    "alias_name": "ss_ext_sales_price", "expr": "STORE_SALES.ss_ext_sales_price - STORE_SALES.ss_net_profit"}
+   ```
+
+   `alias_name` is `ss_ext_sales_price` — a real physical column — where the declared name
+   `net_line` sits in `source_column`. Two distinct corruptions follow, both visible in
+   `probe/out/Probe.model.tml`:
+
+   - **A spurious reference to a physical column.** The fact's own expression translates to
+     `[formula_ss_ext_sales_price] - [STORE_SALES::ss_net_profit]` — inconsistent within a single
+     expression, because the poisoned `fact_idx` entry captures the first operand while the
+     second resolves normally.
+   - **A metric self-reference.** For `STORE_SALES.total_net as SUM(store_sales.net_line)` the
+     `agg_wrap` branch sets the metric's own `alias_name` to `net_line`, so `metric_idx` is keyed
+     `store_sales.net_line`; resolving the metric's inner reference then hits **its own**
+     `metric_idx` entry and emits `[formula_net_line]`. That is not metric-on-fact resolution —
+     it is the metric pointing at itself under a name `build-model` never mints.
+
+   This defect is **latent on the TPC-DS fixture** (every fact there is a passthrough, so
+   `alias_name` legitimately equals the physical column and only defect 1 fires), which is
+   precisely why it needs stating: a fix that reorders the resolver and aligns the minted ids
+   would look correct on this fixture and still be wrong on any SV containing a computed fact.
 
 **This is a regression against a live-verified baseline, and the regression is load-bearing.**
 `agents/shared/worked-examples/snowflake/ts-from-snowflake-identifier-resolution.md` was
@@ -1020,7 +1090,7 @@ unconfirmed here.
       - transaction date
 ```
 
-**Regenerated (`09-regenerated-sv.sql:44`):**
+**Regenerated (`15-regenerated-sv-asis-with-formulas.sql:44`):**
 
 ```
     STORE_SALES.sale_date as store_sales.ss_sold_date_sk with synonyms=('sale date', 'transaction date') comment='Foreign key to date dimension'
@@ -1039,7 +1109,7 @@ it plainly: "`with synonyms=('...',...)` on dimensions/metrics → `column.name`
 `properties.synonyms` | **First synonym → name**; rest → synonyms"
 (`references/coverage-matrix.md:37`). The heuristic is defensible for Semantic Views our *own*
 to-direction authored — `build-sv` emits the ThoughtSpot column name as the first synonym
-(`09-regenerated-sv.sql` shows exactly that), so the pair round-trips cleanly. It is wrong for
+(`15-regenerated-sv-asis-with-formulas.sql` shows exactly that), so the pair round-trips cleanly. It is wrong for
 a Semantic View authored anywhere else, where `with synonyms=(...)` means what Snowflake says
 it means: alternate names for natural-language matching, not a display name.
 
@@ -1132,7 +1202,7 @@ Independent of F9 — visible on both legs, and isolated by the corrected revers
   - expr: "safe_divide ( sum ( [formula_ss_ext_sales_price] ) , sum ( [formula_s_number_employees] ) )"
 ```
 
-**Ours, regenerated (`12-regenerated-sv-corrected.sql:52`):**
+**Ours, regenerated (`15-regenerated-sv-asis-with-formulas.sql:52`):**
 
 ```
     sales_per_employee as DIV0(SUM(store_sales.ss_ext_sales_price), SUM(store.s_number_employees)) with synonyms=('sales per employee', 'employee productivity', 'revenue per employee') comment='Sales per employee across stores'
@@ -1194,7 +1264,7 @@ employees, which needs live data on both sides (§3.10).
       - quantity
 ```
 
-**Regenerated (`09-regenerated-sv.sql:39`) — now inside the `dimensions()` block:**
+**Regenerated (`15-regenerated-sv-asis-with-formulas.sql:39`) — now inside the `dimensions()` block:**
 
 ```
     STORE_SALES.units_sold as store_sales.ss_quantity with synonyms=('units sold', 'quantity') comment='Quantity of items sold'
@@ -1253,7 +1323,7 @@ the fact/dimension line cleanly, upstream transmits it cleanly, and we erase it.
 
 — all three sit under `time_dimensions:` (`:119`).
 
-**Regenerated (`09-regenerated-sv.sql:20-22`) — inside `dimensions()`, and absent from the
+**Regenerated (`15-regenerated-sv-asis-with-formulas.sql:20-22`) — inside `dimensions()`, and absent from the
 CA JSON's `time_dimensions`:**
 
 ```
@@ -1297,7 +1367,7 @@ real — but the loss is still ours, and it is undeclared: the coverage matrix h
 **Source (`:41-47`):** `ss_sold_date_sk`, a `NUMBER(38,0)` foreign key, declared under
 `dimensions:` — *not* `time_dimensions:`.
 
-**Regenerated (`09-regenerated-sv.sql`, CA extension JSON):**
+**Regenerated (`15-regenerated-sv-asis-with-formulas.sql:55`, CA extension JSON):**
 
 ```json
 {"name":"store_sales", ... ,"time_dimensions":[{"name":"sale_date"}]}
@@ -1341,7 +1411,7 @@ once the name heuristic fires.
   description: Fact table containing all store sales transactions
 ```
 
-**Regenerated (`09-regenerated-sv.sql:2-8`) — the `tables()` block in full, no `comment=` anywhere:**
+**Regenerated (`15-regenerated-sv-asis-with-formulas.sql:2-8`) — the `tables()` block in full, no `comment=` anywhere:**
 
 ```
   tables (
@@ -1384,7 +1454,7 @@ Table-level `synonyms` (4 + 3 + 3 + 3 + 3 = 16 values) are also absent, but that
     - ss_ticket_number
 ```
 
-**Regenerated (`09-regenerated-sv.sql:3`):**
+**Regenerated (`15-regenerated-sv-asis-with-formulas.sql:3`):**
 
 ```
     TPCDS.PUBLIC.STORE_SALES,
@@ -1416,7 +1486,7 @@ means the round trip cannot restore a PK that no join implies.
     right_column: d_date_sk
 ```
 
-**Regenerated (`09-regenerated-sv.sql:10`):**
+**Regenerated (`15-regenerated-sv-asis-with-formulas.sql:10`):**
 
 ```
     store_sales_to_date_dim as STORE_SALES(ss_sold_date_sk) references DATE_DIM(d_date_sk),
@@ -1448,7 +1518,7 @@ description: TPC-DS retail semantic model for sales and customer analytics
   description: TPC-DS retail semantic model for sales and customer analytics Converted from Snowflake Semantic View TPCDS.PUBLIC.TPCDS_RETAIL_MODEL.
 ```
 
-**After the reverse leg (`09-regenerated-sv.sql:47`):**
+**After the reverse leg (`15-regenerated-sv-asis-with-formulas.sql:54`):**
 
 ```
   comment='TPC-DS retail semantic model for sales and customer analytics Converted from Snowflake Semantic View TPCDS.PUBLIC.TPCDS_RETAIL_MODEL. | Migrated from ThoughtSpot: Tpcds Retail Model'
@@ -1470,9 +1540,7 @@ description is not.
 
 #### F20 — Every formula-backed metric is grouped under a fabricated CA-extension table named `field` *(`extra`, wrong side: **ours**)*
 
-Visible in the corrected reverse run (the as-is run has no metrics to group).
-
-**Regenerated (`12-regenerated-sv-corrected.sql:55`, CA extension JSON, final table entry):**
+**Regenerated (`15-regenerated-sv-asis-with-formulas.sql:55`, CA extension JSON, final table entry):**
 
 ```json
 {"name":"field","metrics":[{"name":"total_revenue"},{"name":"net_profit"},{"name":"clv"},{"name":"brand_sales"},{"name":"sales_per_employee"}]}
@@ -1518,7 +1586,7 @@ clauses and not the CA JSON payload.
 
 #### F21 — Root-level metrics carry no `using_relationships` *(SM1-SM5, both sides, referee silent — recorded, not charged to either converter)*
 
-Also from the corrected run. **Regenerated (`12-regenerated-sv-corrected.sql:47-53`, abbreviated):**
+**Regenerated (`15-regenerated-sv-asis-with-formulas.sql:47-53`, abbreviated):**
 
 ```
   metrics (
@@ -1561,7 +1629,7 @@ Two observations, deliberately kept apart:
 
 | Finding | Verdict | Wrong side | Judged against |
 |---|---|---|---|
-| F9 metric cross-references dangle; 5/5 measures lost | `missed` | **ours** | `ts-from-snowflake-rules.md:585-593` (documented order inverted) + live-verified worked example `ts-from-snowflake-identifier-resolution.md:23`,`:233`; referee preserves all 5 metrics |
+| F9 metric cross-references unresolvable in the imported TML (5/5); forward leg only | — (forward-leg defect, no source property to score) | **ours** | `ts-from-snowflake-rules.md:585-593` (documented order inverted); `sv_parse.py:470-492` (alias_name misparse); live-verified worked example `ts-from-snowflake-identifier-resolution.md:23`,`:233` |
 | F10 identifier replaced by first synonym (29/36) | `mis-inferred` | **ours** (documented in coverage row 14, but wrong for foreign SVs) | OSI referee separates `name` (`:547`) from `ai_context.synonyms` (`:554-558`) |
 | F11 `\|\|` rejected, construct dropped | `missed` | **ours** — the cited replacement is already mapped | `ts-snowflake-formula-translation.md:197-198`; OSI declares it `ANSI_SQL` (`:290-292`) |
 | F12 `NULLIF(…,0)` → `safe_divide`/`DIV0`, NULL→0 | `mis-inferred` | **ours** | `thoughtspot-formula-patterns.md:171`; `nullif` available (`ts-snowflake-formula-translation.md:154`) |
@@ -1598,7 +1666,7 @@ Two observations, deliberately kept apart:
 | `ts snowflake build-model` | exit 0, `lint_findings: []`, `name_renames: {}` | **none of F9/F10/F13** — this is where F9, F10, F13 and F19 are introduced |
 | `ts tml lint --dir` | `"clean": true` | **none** — notably blind to F9, a dangling `[formula_X]` reference in 5 of 5 formulas |
 | `tools/validate/check_tml.py` | `PASS` | none |
-| `ts snowflake build-sv` | exit 0; 5 × `SKIPPED formula`, 4 × `DROPPED join attrs` | **F9's symptom** — the 5 skip lines are the only signal a user gets that every measure is gone, and they appear on stderr beside 4 benign `DROPPED join attrs` lines. The `DROPPED join attrs` warnings are correct and expected (SV has no join type) |
+| `ts snowflake build-sv` | exit 0; 5 metrics, `skipped_formulas: 0`, 4 × `DROPPED join attrs` | **none of F10/F12/F18/F20**, which it introduces or carries. The 4 `DROPPED join attrs` warnings are correct and expected (the SV format has no join type). Credit where due: when first invoked **without** the documented `--formulas`, it reported `"metrics": 0` and named all five skipped formulas with the reason `not in translated_formulas` — a correct and legible signal about a missing input, which this section initially misread as an F9 cascade (§3.3) |
 | `ts snowflake lint-ddl` | `clean — no findings` on **both** DDLs | **none** — clean on a Semantic View with zero metrics, and clean on one whose CA JSON references a non-existent table `field` (F20), despite "undeclared table references" being in its documented remit |
 
 Every gate is green and every finding survives. Two are validator-shaped and worth promoting
@@ -1625,6 +1693,15 @@ per the two-bucket rule (`.claude/rules/repo-audit.md`):
 - **The DDL is a re-serialisation, not a `GET_DDL` capture.** §3.2 documents the one construction
   choice that affects a verdict (metric table-scoping, F21). A real `GET_DDL` from a deployed
   view could differ in whitespace, clause order, or CA-JSON content; the *constructs* would not.
+- **One harness error was found and corrected during review, and it moved the numbers.** The
+  reverse leg was first run without the documented `--formulas` input, which dropped all five
+  metrics and was initially attributed to F9. It was not a converter defect (§3.3); the CLI
+  signalled the missing input correctly. Rescoring against the correctly-invoked run moved the
+  five metrics from `missed` to `mis-inferred` (construct totals 10 / 31 / 6, not 10 / 26 / 11)
+  and retired the claim that no measure survives the round trip. F9's forward-leg claims are
+  unaffected and were independently reproduced. The lesson generalises: **when a converter reports
+  a construct as skipped, check the invocation against the SKILL.md before charging it to a
+  finding.**
 - **BL-171 was not exercised, again.** The fixture's only string operation is `||`, which is a
   separate defect (F11). `trim`/`ltrim`/`rtrim`/`replace`/`starts_with`/`ends_with` are untouched
   by either §2 or §3, so BL-171 remains open and untested by this exercise. The `sv_sql.py:206-208`
@@ -1655,10 +1732,13 @@ All under `.superpowers/sdd/2026-07-29-ossie-tpcds-fidelity/sf/` (gitignored):
 | `06-tables.json` | SV alias → ThoughtSpot table map (Step 8) |
 | `tml_out/Tpcds Retail Model.model.tml` | our Model TML — the forward leg's output |
 | `mk_reverse_inputs.py`, `07-model-export.json`, `08-tables-export/` | `build-sv`'s two documented inputs (stand-in for `ts tml export --parse`) |
-| `09-regenerated-sv.sql` | regenerated SV DDL, **as-is** — the artifact §3.4 scores |
-| `10-model-export-corrected.json`, `11-formulas.json`, `12-regenerated-sv-corrected.sql` | corrected variant isolating F12/F20/F21 from F9's cascade |
+| `11-formulas.json` | the five Step 8 ThoughtSpot → Snowflake formula translations, passed via `--formulas` |
+| **`15-regenerated-sv-asis-with-formulas.sql`** | regenerated SV DDL from the **correctly-invoked** reverse leg — **the artifact §3.4 scores** |
+| `09-regenerated-sv.sql` | superseded first reverse run, made without `--formulas`; retained only as the evidence that the omission (not F9) caused `"metrics": 0` |
+| `10-model-export-corrected.json`, `12-regenerated-sv-corrected.sql` | ref-repaired variant, byte-identical to `15-…`; retained only as the evidence that the repair was a no-op for `build-sv` (§3.3) |
+| `16-tally-corrected.txt` | property-level tally rescored against `15-…` (supersedes `14-tally.txt`) |
 | `compare.py`, `13-comparison.txt` | construct inventory, name-fate tally, formula-integrity check |
-| `tally.py`, `14-tally.txt` | property-level fate tally (the 215 denominators and every verdict) |
+| `tally.py` | property-level fate tally generator (the 215 denominators and every verdict); `14-tally.txt` is its superseded first run |
 | `probe/computed_fact.sql`, `probe/out/` | minimal probe isolating F9's second defect half (computed fact + synonyms) |
 | `probe/workforce.sql`, `probe/wout/` | the live-verified worked example's own DDL re-run through today's CLI — F9's regression evidence |
 
