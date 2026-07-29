@@ -200,7 +200,7 @@ else 0
 | ~~`replace`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170). Use `sql_string_op ( "REPLACE({0}, {1}, {2})" , [x] , [old] , [new] )` pass-through. |
 | `contains` | `contains ( [x] , 'val' )` | Returns boolean |
 | ~~`starts_with`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170; also 2026-06-13). Compose from `strpos`: `strpos ( [x] , 'val' ) = 1`. |
-| ~~`ends_with`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170; also 2026-06-13). Compose from `substr`/`strlen`: `substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val'`. |
+| ~~`ends_with`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170). Compose from `substr`/`strlen`: `substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val'`. |
 
 **Whitespace/replacement/prefix note (BL-170, live-verified 2026-07-29 on se-thoughtspot).**
 `trim`, `ltrim`, `rtrim`, `replace`, `starts_with` and `ends_with` are **all absent** from

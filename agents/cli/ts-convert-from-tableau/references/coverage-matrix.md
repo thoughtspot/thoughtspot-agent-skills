@@ -36,7 +36,7 @@ Use this as the canonical limitations reference.
 | 15 | `IIF(test, a, b)` | `if ( test ) then a else b` | |
 | 16 | `IFNULL(a, b)`, `ZN(a)` | `ifnull ( a , b )` | |
 | 17 | `ISNULL(a)` | `isnull ( a )` | |
-| 18 | `CONTAINS`, `FIND` | `contains`, `strpos` | `TRIM` moved to #131 — not a native TS function (BL-170) |
+| 18 | `CONTAINS`, `FIND` | `contains`, `strpos` | `TRIM` moved to #135 — not a native TS function (BL-170) |
 | 19 | `LEFT/MID/RIGHT/LEN` | `substr()` / `strlen()` | CLI-translated (v0.26.0); index adjustment (Tableau is 1-based) |
 | 20 | `UPPER/LOWER` | `sql_string_op("UPPER/LOWER({0})")` | CLI-translated (v0.26.0) |
 | 21 | `STARTSWITH/ENDSWITH` | `strpos(s,sub) = 1` / `substr` idiom | CLI-translated (v0.26.0) |
@@ -45,8 +45,8 @@ Use this as the canonical limitations reference.
 | 128 | `REGEXP_REPLACE(s, pat, r)` | `sql_string_op ( "REGEXP_REPLACE({0},{1},{2})" , s , pat , r )` | No native regex — scalar pass-through (PT1), CLI-translated (v0.81.0). Was rejected at translate time before v0.81.0 (former U4) |
 | 129 | `FINDNTH(s, sub, n)` | `sql_int_op ( "REGEXP_INSTR({0},{1},1,{2})" , s , sub , n )` | No native nth-occurrence — scalar pass-through (PT1), CLI-translated (v0.81.0). Was rejected at translate time before v0.81.0 (former U2) |
 | 130 | `REPLACE(s, old, new)` | `sql_string_op ( "REPLACE({0}, {1}, {2})" , s , old , new )` | Bare `replace(...)` is NOT a valid ThoughtSpot formula function (live-confirmed; re-confirmed 2026-07-29, BL-170) — re-mapped to this scalar pass-through (PT1) in v0.81.0. Previously (incorrectly) documented as native `replace(...)` (former #18) |
-| 131 | `TRIM(s)` | `sql_string_op ( "TRIM({0})" , s )` | Bare `trim(...)` is NOT a valid ThoughtSpot formula function — live-verified 2026-07-29, se-thoughtspot (BL-170). Scalar pass-through (PT1). **Documentation corrected; the CLI still emits `trim ( )` — see BL-171.** Previously (incorrectly) documented as native `trim(...)` (former #18) |
-| 132 | `LTRIM(s)` / `RTRIM(s)` | `sql_string_op ( "LTRIM({0})" / "RTRIM({0})" , s )` | No native `ltrim`/`rtrim` — live-verified 2026-07-29, se-thoughtspot (BL-170). Scalar pass-through (PT1); not currently emitted by the CLI (see BL-171) |
+| 135 | `TRIM(s)` | `sql_string_op ( "TRIM({0})" , s )` | Bare `trim(...)` is NOT a valid ThoughtSpot formula function — live-verified 2026-07-29, se-thoughtspot (BL-170). Scalar pass-through (PT1). **Documentation corrected; the CLI still emits `trim ( )` — see BL-171.** Previously (incorrectly) documented as native `trim(...)` (former #18) |
+| 136 | `LTRIM(s)` / `RTRIM(s)` | `sql_string_op ( "LTRIM({0})" / "RTRIM({0})" , s )` | No native `ltrim`/`rtrim` — live-verified 2026-07-29, se-thoughtspot (BL-170). Scalar pass-through (PT1); not currently emitted by the CLI (see BL-171) |
 | 24 | `DATEDIFF` (all units) | `diff_days`/`diff_months`/`diff_years`/`diff_time` | Args reversed vs Tableau. `day/month/year/hour/minute/week` supported; any other unit (e.g. `quarter`) rejected with reason at translate time (v0.26.0) |
 | 25 | `DATETRUNC` | `start_of_month/quarter/week/year`; `day` → `date()` | `hour`/`minute`/`second` (and any other unit not in the map) rejected with reason at translate time (v0.26.0) |
 | 26 | `DATEADD` | `add_days/add_months/add_years` | Only `day/month/year` supported; other units (e.g. `week`) rejected with reason at translate time (v0.26.0) |
