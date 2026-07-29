@@ -87,9 +87,13 @@ expression.
 - **Attributes go in `GROUP BY`.** Every non-aggregate column in the SELECT must appear in
   `GROUP BY`. Every CTE that contains an aggregate must have its own `GROUP BY` (the main
   SELECT is the only exception — it may aggregate to a single global row without one).
-- Statistical aggregates (`STDDEV_SAMP`/`STDDEV_POP`, `VAR_SAMP`/`VAR_POP`, `MEDIAN`) work
-  in **scalar context only** (no `GROUP BY` in the same query) — see `udf-reference.md` and
-  `patterns.md`. Always write the explicit `_SAMP`/`_POP` suffix.
+- Statistical aggregates: `MEDIAN` works directly — scalar context, and grouped as of
+  jul.26.mt. `STDDEV_SAMP`/`STDDEV_POP` and `VAR_SAMP`/`VAR_POP` **no longer compile
+  against a Model column in either context** on jul.26.mt (`UNSUPPORTED_AGGREGATE` —
+  regression, [SCAL-326935](https://thoughtspot.atlassian.net/browse/SCAL-326935); scalar
+  worked on earlier builds). Use the CTE form: materialise the aggregate in a CTE, then
+  take the statistic over the CTE column in the outer SELECT — that still works
+  (`patterns.md` § Statistics). Always write the explicit `_SAMP`/`_POP` suffix.
 
 ## Aliasing (this one bites)
 
@@ -113,29 +117,30 @@ expression.
   For division still wrap the denominator in `NULLIF(…, 0)` to avoid divide-by-zero.
 - **No `SELECT *`** — enumerate columns. Inside a CTE it is hard-rejected.
 - **No subqueries anywhere** — no `FROM (SELECT …)`, no `WHERE col IN (SELECT …)`, no
-  `WHERE EXISTS (…)`, no scalar subselects. Use named CTEs and JOINs instead.
+  `WHERE EXISTS (…)`, no scalar subselects. Use named CTEs and JOINs instead. **Beware:**
+  on jul.26.mt, `IN (SELECT …)` passes `generate-sql` and only fails at `fetch-data`
+  ([SCAL-326936](https://thoughtspot.atlassian.net/browse/SCAL-326936)) — a compile
+  SUCCESS is not evidence it works. For a membership filter use the rewrite in
+  `patterns.md` § Semi-join via CTE — and dedupe the key CTE with `GROUP BY <key>`,
+  or the join fans out and aggregates silently double-count.
 - **Set operations** — `UNION ALL`, `UNION`, `EXCEPT`, `EXCEPT ALL`, `INTERSECT`,
   `INTERSECT ALL` **work at the top level** of the query ([SCAL-313049](https://thoughtspot.atlassian.net/browse/SCAL-313049),
-  verified 2026-07-07), and **inside a user-defined CTE when no branch contains an
-  aggregate measure** (verified 2026-07-08). Each branch must have the same number of
-  columns with compatible types — but type compatibility is **not checked at compile
-  time**: a mismatch (e.g. VARCHAR vs DOUBLE at the same position) passes `generate-sql`
-  and fails at `fetch-data`. Operator precedence follows the SQL standard (INTERSECT
-  binds tighter than UNION/EXCEPT). Parentheses for explicit grouping are supported.
-  **Caveats (still broken):**
-  - **No `ORDER BY` on the combined result** — silently dropped from generated SQL.
-  - **No `LIMIT` on the combined result** — misplaced into the first branch only.
-  - **No aggregated branches in a set operation inside a CTE** — a branch with
-    `SUM(col) … GROUP BY` fails with `QUERY_GEN_ERROR`
-    (GroupAggregateOptimizationTransformer) no matter how the outer query consumes the
-    CTE. Attribute-only `GROUP BY` branches and raw-column branches are fine.
-  If you need ordered or limited results from a set operation, it cannot be done in AgentQL
-  today. See `limitations.md` for details.
+  verified 2026-07-07) and **inside a user-defined CTE** — including branches with
+  aggregate measures, fixed by jul.26.mt (verified 2026-07-29; on older builds an
+  aggregated branch errors `QUERY_GEN_ERROR`). **`ORDER BY` and `LIMIT` on the combined
+  result also work as of jul.26.mt** (verified 2026-07-29; on older builds ORDER BY was
+  silently dropped and LIMIT misplaced into the first branch — check the generated SQL if
+  the build is older). Each branch must have the same number of columns with compatible
+  types — but type compatibility is **not checked at compile time**: a mismatch (e.g.
+  VARCHAR vs DOUBLE at the same position) passes `generate-sql` and fails at `fetch-data`.
+  Operator precedence follows the SQL standard (INTERSECT binds tighter than UNION/EXCEPT).
+  Parentheses for explicit grouping are supported. See `limitations.md` for details.
 - **No self-join of a CTE** (`[SELF_JOIN]`) and **no non-equi `JOIN … ON`** (only `=`
   allowed; use `CROSS JOIN` + `WHERE` for ranges).
 - **No recursive CTEs** (`WITH RECURSIVE`), **no table functions** (`FLATTEN`, `UNNEST`,
-  `GENERATOR`), **no `LENGTH()`**, **no `GROUP BY 1` ordinals**, **no `col NOT IN (...)`**
-  (rewrite as `!=` chained with `AND`).
+  `GENERATOR`), **no `GROUP BY 1` ordinals**, **no `col NOT IN (...)`**
+  (rewrite as `!=` chained with `AND`). `LENGTH()` works (verified 2026-07-29 — earlier
+  rules wrongly forbade it).
 - **No forbidden date functions**: `DATE_TRUNC`, `NOW()`, `CURRENT_DATE`, `AGE`, `INTERVAL`
   arithmetic. Use the AgentQL UDFs in `udf-reference.md`.
 - **Every CTE must reference a real column** — a CTE selecting only literals errors with
@@ -181,9 +186,10 @@ Only `CAST` a `VARCHAR`/`TEXT` column to numeric/date. Columns already `DOUBLE`,
 
 ## When you can't answer it
 
-If the question needs something AgentQL can't express (ordered/limited set operation results,
-non-`MEDIAN` percentiles, per-group `STDDEV`/`VAR`, subqueries, offset->1 `LAG`/`LEAD`,
-true rolling N-period frames, a column the Model doesn't have, or a non-CDW Model), don't
-force a wrong query. State plainly what's not supported and why. The full, current list
-(with what's been *fixed* — e.g. set operations, `NTILE` and literal arithmetic now work)
-is in `limitations.md`.
+If the question needs something AgentQL can't express (non-`MEDIAN` percentiles, direct
+`STDDEV`/`VAR` on a Model column — the CTE statistics pattern works — subqueries,
+offset->1 `LAG`/`LEAD`, true rolling N-period frames, a column the Model doesn't have, or
+a non-CDW Model), don't force a wrong query. State plainly what's not supported and why.
+The full, current list (with what's been *fixed* — e.g. set operations incl. ORDER
+BY/LIMIT on the combined result, `NTILE` and literal arithmetic now work) is in
+`limitations.md`.

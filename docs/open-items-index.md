@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**143 total items** across 18 skills — **67 open**, 66 verified, 10 deferred
+**144 total items** across 18 skills — **67 open**, 67 verified, 10 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -26,7 +26,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-security-columns | 6 | **1** | 5 | 0 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
-| ts-object-model-agentql-query | 4 | **0** | 4 | 0 |
+| ts-object-model-agentql-query | 5 | **0** | 5 | 0 |
 ### Untagged (67 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.

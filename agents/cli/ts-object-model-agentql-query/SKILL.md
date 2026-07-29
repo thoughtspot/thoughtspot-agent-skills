@@ -191,8 +191,10 @@ question. The essentials (full list in the rules file):
   `AGG` (which errors `NON_CONVERTIBLE_FUNCTION`). Just follow each column's `wrapper` from
   Step 2. Attributes go in `GROUP BY`. See `agentql-rules.md`.
   Alias only computed/aggregate expressions, in Title Case. Never alias a plain model column.
-- **Never** `SELECT *`, `COUNT(*)`, subqueries, set operations, or arithmetic between an
-  aggregate and a numeric literal (it silently returns zeros — see the rules).
+- **Never** `SELECT *`, `COUNT(*)`, or subqueries (`IN (SELECT …)` compiles but fails at
+  execution — use the semi-join rewrite in `patterns.md`). Set operations and
+  aggregate×literal arithmetic **work** on current builds — see the rules and
+  `limitations.md` for the caveats.
 - Dates: use the AgentQL UDFs (`YEAR_NUMBER`, `DIFF_MONTH`, `START_OF_CURRENT_MONTH()`, …),
   never `DATE_TRUNC`/`NOW()`/`CURRENT_DATE`.
 
@@ -262,6 +264,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.2.0 | 2026-07-29 | Full limitation re-probe on jul.26.mt (nebula-damian-alias, 38 probes): set-op ORDER BY/LIMIT on the combined result, aggregated-branch CTE set-ops, `ROUND(x,N)`, `TO_NUMBER`, `CONCAT_WS`, `LENGTH()` and grouped `MEDIAN` all fixed → moved to ✅ in `limitations.md` and rules relaxed. Two new bugs filed and documented: scalar `STDDEV`/`VAR` regression ([SCAL-326935](https://thoughtspot.atlassian.net/browse/SCAL-326935)) and `IN (SELECT …)` compiles-but-fails-at-fetch ([SCAL-326936](https://thoughtspot.atlassian.net/browse/SCAL-326936)). New `patterns.md` § Semi-join via CTE (membership filters; dedupe-the-key fan-out guard). Fix stale Step 3 "no set operations / literal arithmetic zeros" line. |
 | 2.1.0 | 2026-07-24 | Rename the CLI command **`ts spotql` → `ts agentql`** (and all skill/doc references to it). `ts spotql` still works as a deprecated hidden alias, so existing scripts don't break. The server contract is unchanged: the callosum `/data/spotql/*` endpoints and the `spotql_query` request field keep the `spotql` spelling. (ts-cli v0.95.0.) |
 | 2.0.0 | 2026-07-24 | Rename the external product name **SpotQL → AgentQL** across the skill and every reference. Breaking: the skill directory and slash command are renamed `ts-object-model-spotql-query` → `ts-object-model-agentql-query` (re-point the `~/.claude/skills/` and `~/.snowflake/cortex/skills/` symlinks), and `references/spotql-rules.md` → `references/agentql-rules.md`. **No behaviour change:** the `ts spotql` CLI, the callosum endpoints, and the `spotql_query` request field are unchanged stable identifiers, so existing integrations and scripts keep working. |
 | 1.5.0 | 2026-07-22 | Add `references/snowflake-sv-backing.md` — rules R1–R7 for Snowflake Semantic View-backed Models (NULL-key `100072` fix, window-via-CTE, no FROM-subqueries, measure-statistics trap) with Databricks MV comparison; new silent-wrong-answer row in `limitations.md` for secondary aggregates on SV/MV measures. Live-verified 2026-07-21 on `ashok-direct-query` + native Snowflake + Databricks. |
