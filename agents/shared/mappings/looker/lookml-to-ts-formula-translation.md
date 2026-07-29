@@ -107,7 +107,8 @@ safe_divide ( sum ( [ORDER_FACT::NET_REVENUE] ) , unique count ( [ORDER_FACT::OR
 | `CONCAT(a, b)` | `concat ( [T::A] , [T::B] )` |
 | `SUBSTR(col, pos, len)` | `substr ( [T::COL] , pos , len )` |
 | `LENGTH(col)` | `strlen ( [T::COL] )` |
-| `REPLACE(col, old, new)` | `replace ( [T::COL] , 'old' , 'new' )` |
+| `REPLACE(col, old, new)` | `sql_string_op ( "REPLACE({0}, {1}, {2})" , [T::COL] , 'old' , 'new' )` — no native `replace` in ThoughtSpot (live-verified 2026-07-29, se-thoughtspot — BL-170) |
+| `TRIM(col)` | `sql_string_op ( "TRIM({0})" , [T::COL] )` — no native `trim` in ThoughtSpot (live-verified 2026-07-29, se-thoughtspot — BL-170) |
 | `CAST(col AS INTEGER)` | `to_integer ( [T::COL] )` |
 
 ### Date functions

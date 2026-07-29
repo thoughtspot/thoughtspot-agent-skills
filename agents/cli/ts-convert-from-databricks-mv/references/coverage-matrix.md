@@ -95,8 +95,10 @@ Use this as the canonical limitations reference.
 
 | # | Databricks SQL | ThoughtSpot Formula | Notes |
 |---|---|---|---|
-| 40 | `CONCAT`, `LENGTH`, `SUBSTRING`, `TRIM`, `LTRIM`, `RTRIM` | `concat`, `strlen`, `substr`, `trim`, `ltrim`, `rtrim` | Direct rename |
-| 41 | `REPLACE`, `CONTAINS`, `STARTSWITH`, `LEFT`, `RIGHT` | `replace`, `contains`, `starts_with`, `left`, `right` | |
+| 40 | `CONCAT`, `LENGTH`, `SUBSTRING` | `concat`, `strlen`, `substr` | Direct rename. `TRIM`/`LTRIM`/`RTRIM` moved to #43 — not native TS functions (BL-170) |
+| 41 | `CONTAINS`, `LEFT`, `RIGHT` | `contains`, `left`, `right` | `REPLACE`/`STARTSWITH` moved to #43 — not native TS functions (BL-170) |
+| 43 | `TRIM`, `LTRIM`, `RTRIM`, `REPLACE` | `sql_string_op ( "TRIM({0})" / "LTRIM({0})" / "RTRIM({0})" / "REPLACE({0}, {1}, {2})" , ... )` | **None of these is a native ThoughtSpot function** — live-verified 2026-07-29, se-thoughtspot (BL-170). Scalar pass-through. **Documentation corrected; the CLI still emits the bare names — see BL-171.** |
+| 44 | `STARTSWITH`, `ENDSWITH` | `strpos(s, prefix) = 1` / `substr(s, strlen(s) - strlen(sfx), strlen(sfx)) = sfx` | No native `starts_with`/`ends_with` — live-verified 2026-07-29, se-thoughtspot (BL-170); compose from native functions. **CLI still emits the bare names — see BL-171.** |
 | 42 | `LPAD`, `RPAD`, `REVERSE`, `REPEAT` | `lpad`, `rpad`, `reverse`, `repeat` | |
 | 43 | `LOWER(s)` / `UPPER(s)` | `sql_string_op("LOWER({0})", [col])` / `sql_string_op("UPPER({0})", [col])` | Auto-translated pass-through (v0.50.0) |
 | 44 | `ABS`, `CEIL`, `FLOOR`, `ROUND`, `MOD`, `POWER`, `SQRT` | `abs`, `ceil`, `floor`, `round`, `mod`, `pow`, `sqrt` | |

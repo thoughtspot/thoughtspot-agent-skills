@@ -169,10 +169,12 @@ command detects pass-through conflicts automatically and skips them.
 | `MID(s, start, len)` | `substr ( s , start - 1 , len )` | Adjust for 0-based indexing |
 | `LEN(s)` | `strlen ( s )` | |
 | `FIND(s, sub)` | `strpos ( s , sub )` | 1-based, returns 0 when absent — identical contract to Tableau FIND, so `FIND(...) > 0` idioms translate unchanged (live-verified 2026-06-13, se-thoughtspot: strpos('needle_haystack','needle')=1, not-found=0). NOTE: official TS docs describe strpos as 0-based/−1 — live behavior differs; trust this entry. |
-| `REPLACE(s, old, new)` | `sql_string_op ( "REPLACE({0}, {1}, {2})" , s , old , new )` | Bare `replace(...)` is NOT a valid ThoughtSpot formula function (live-confirmed) — scalar pass-through (PT1), CLI-translated (v0.81.0). See "Pass-Through Fallback" below |
+| `REPLACE(s, old, new)` | `sql_string_op ( "REPLACE({0}, {1}, {2})" , s , old , new )` | Bare `replace(...)` is NOT a valid ThoughtSpot formula function (live-confirmed; **re-confirmed 2026-07-29, se-thoughtspot — BL-170**) — scalar pass-through (PT1), CLI-translated (v0.81.0). See "Pass-Through Fallback" below |
 | `UPPER(s)` | `sql_string_op ( "UPPER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
 | `LOWER(s)` | `sql_string_op ( "LOWER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
-| `TRIM(s)` | `trim ( s )` | |
+| `TRIM(s)` | `sql_string_op ( "TRIM({0})" , s )` | Bare `trim(...)` is NOT a valid ThoughtSpot formula function — live-verified 2026-07-29, se-thoughtspot (BL-170): rejected with `Search did not find "trim ("`, the same signature as `upper`/`lower`. Scalar pass-through (PT1). |
+| `LTRIM(s)` | `sql_string_op ( "LTRIM({0})" , s )` | No native `ltrim` (live-verified 2026-07-29, se-thoughtspot — BL-170) — scalar pass-through (PT1) |
+| `RTRIM(s)` | `sql_string_op ( "RTRIM({0})" , s )` | No native `rtrim` (live-verified 2026-07-29, se-thoughtspot — BL-170) — scalar pass-through (PT1) |
 | `SPLIT(s, delim, n)` | Use `substr`/`strpos` combination | No direct equivalent; chain: Tableau `SPLIT` → Snowflake `SPLIT_PART` → ThoughtSpot `substr`/`strpos` |
 | `REGEXP_EXTRACT(s, pat)` | `sql_string_op ( "REGEXP_SUBSTR({0}, {1})" , s , pat )` | No native regex — scalar pass-through (PT1), CLI-translated (v0.81.0) |
 | `REGEXP_MATCH(s, pat)` | `sql_bool_op ( "REGEXP_LIKE ({0}, {1})" , s , pat )` | No native regex; returns boolean — scalar pass-through (PT1), CLI-translated (v0.81.0) |
@@ -224,8 +226,8 @@ command detects pass-through conflicts automatically and skips them.
 | `ACOS(n)` / `ASIN(n)` / `ATAN(n)` | `( acos ( n ) * 3.14159265358979 / 180 )` / `( asin ( n ) * 3.14159265358979 / 180 )` / `( atan ( n ) * 3.14159265358979 / 180 )` | Tableau inverse trig returns radians; ThoughtSpot's returns degrees (by symmetry with the `SIN`/`COS`/`TAN` row above) — convert TS degrees back to radians. CLI-translated (v0.88.0, BL-072) |
 | `COT(n)` | `( 1 / tan ( n * 180 / 3.14159265358979 ) )` | No native `cot()` — composites off `tan`, matching Tableau's own `COT(n) = 1/tan(n)` definition (inner `tan` argument converted to degrees, same as the `TAN` row above). CLI-translated (v0.88.0, BL-072) |
 | `DATEPARSE(format, s)` | `to_date ( s , format )` | **Args flipped.** ThoughtSpot `to_date` accepts both `yyyy-MM-dd`-style and strptime `%Y-%m-%d` tokens (both validate live; `%`-codes are the documented canonical form). For common date patterns pass the Tableau format string through unchanged; for time components use strptime. Date-only (drops time). |
-| `STARTSWITH(s, sub)` | `strpos ( s , sub ) = 1` | No native `starts_with`. strpos is 1-based so a true prefix is position 1 (live-verified 2026-06-13, se-thoughtspot). |
-| `ENDSWITH(s, sub)` | `substr ( s , strlen ( s ) - strlen ( sub ) , strlen ( sub ) ) = sub` | No native `ends_with`; mirrors the `RIGHT(s, n)` idiom above |
+| `STARTSWITH(s, sub)` | `strpos ( s , sub ) = 1` | No native `starts_with`. strpos is 1-based so a true prefix is position 1 (live-verified 2026-06-13, **re-confirmed 2026-07-29 — BL-170**, se-thoughtspot; the composition itself also imports clean). |
+| `ENDSWITH(s, sub)` | `substr ( s , strlen ( s ) - strlen ( sub ) , strlen ( sub ) ) = sub` | No native `ends_with` (**re-confirmed 2026-07-29, se-thoughtspot — BL-170**; the composition itself also imports clean); mirrors the `RIGHT(s, n)` idiom above |
 | `PI()` | `3.14159265358979` | No native `pi()` — use the literal (dialect-free). (alternatively `sql_double_op ( "pi()" )` — documented pass-through) |
 | `RADIANS(n)` | `n * 3.14159265358979 / 180` | No native `radians()` — use the literal composite. (alternatively `sql_double_op ( "radians({0})" , n )` — documented pass-through) |
 | `DEGREES(n)` | `n * 180 / 3.14159265358979` | No native `degrees()` — use the literal composite. (alternatively `sql_double_op ( "degrees({0})" , n )` — documented pass-through) |
@@ -1029,7 +1031,10 @@ sql_<type>_aggregate_op ( "SQL expression with {0}, {1} placeholders" , column_0
 | `REGEXP_MATCH(s, pat)` | `sql_bool_op ( "REGEXP_LIKE ({0}, {1})" , s , pat )` | No native regex; returns boolean. |
 | `REGEXP_REPLACE(s, pat, r)` | `sql_string_op ( "REGEXP_REPLACE({0},{1},{2})" , s , pat , r )` | No native regex. |
 | `FINDNTH(s, sub, n)` | `sql_int_op ( "REGEXP_INSTR({0},{1},1,{2})" , s , sub , n )` | No native nth-occurrence; else omit + log. |
-| `REPLACE(s, sub, r)` | `sql_string_op ( "REPLACE({0}, {1}, {2})" , s , sub , r )` | Bare `replace(...)` is NOT a valid ThoughtSpot formula function (live-confirmed) — must use this pass-through form, not a native call. |
+| `REPLACE(s, sub, r)` | `sql_string_op ( "REPLACE({0}, {1}, {2})" , s , sub , r )` | Bare `replace(...)` is NOT a valid ThoughtSpot formula function (live-confirmed; re-confirmed 2026-07-29 — BL-170) — must use this pass-through form, not a native call. |
+| `TRIM(s)` | `sql_string_op ( "TRIM({0})" , s )` | Bare `trim(...)` is NOT a valid ThoughtSpot formula function — live-verified 2026-07-29, se-thoughtspot (BL-170). Must use this pass-through form, not a native call. |
+| `LTRIM(s)` | `sql_string_op ( "LTRIM({0})" , s )` | No native `ltrim()` (live-verified 2026-07-29 — BL-170). |
+| `RTRIM(s)` | `sql_string_op ( "RTRIM({0})" , s )` | No native `rtrim()` (live-verified 2026-07-29 — BL-170). |
 
 ### Rules
 
@@ -1123,6 +1128,7 @@ model import. A missing formula produces a functional model with reduced coverag
 - `SIZE()` → `sql_int_aggregate_op("COUNT(*) OVER (PARTITION BY ...)")` (answer-level, gated) — see Row-Offset Table Calculations section
 - `REGEXP_EXTRACT`, `REGEXP_MATCH`, `REGEXP_REPLACE`, `FINDNTH` → `sql_*_op()` pass-through (see "Pass-Through Fallback" section); CLI-translated as of ts-cli v0.81.0. `REGEXP_EXTRACT_NTH` remains untranslated (no documented template)
 - `REPLACE(s, old, new)` → `sql_string_op ( "REPLACE({0}, {1}, {2})" , s , old , new )` — re-mapped off the invalid bare `replace(...)` native call (ts-cli v0.81.0; see "Pass-Through Fallback" section)
+- `TRIM(s)` → `sql_string_op ( "TRIM({0})" , s )` — **documented, NOT yet CLI-translated.** `trim` was live-disproved as a native function on 2026-07-29 (BL-170), but `ts_cli/tableau/functions.py` still rewrites `TRIM(` → `trim ( `, which fails at import. Tracked as **BL-171**; until it lands, review any translated formula containing `trim (` by hand.
 
 ---
 

@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — function composition rules, if() parens mandatory) -->
+<!-- currency: thoughtspot — 2026-07 (variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — function composition rules, if() parens mandatory; string-function nativeness re-verified on se-thoughtspot 2026-07-29 per BL-170 — trim/ltrim/rtrim/replace/starts_with/ends_with confirmed ABSENT, `in` confirmed curly-brace-only) -->
 
 # ThoughtSpot Formula Patterns — Reference
 
@@ -131,8 +131,20 @@ count_if ( [TABLE::region] = 'west' , [TABLE::region] )
 | `nullif` | `nullif ( [a] , [b] )` |
 | `not` | `not ( [expr] )` |
 | `and` / `or` | `[a] and [b]` / `[a] or [b]` |
-| `in` | `[col] in ( 'a' , 'b' )` |
+| `in` | `[col] in { 'a' , 'b' }` — **curly braces, not parentheses** (see below) |
 | `between` | `[col] between [a] and [b]` |
+
+**`in` takes a curly-brace literal list.** Live-verified 2026-07-29, se-thoughtspot
+(BL-170). The round-parenthesis form `[col] in ( 'a' , 'b' )` is **rejected**:
+
+```text
+Search did not find "( 'cancelled' , 'active' )" in your data or metadata.
+Expecting one of the valid keywords, such as, "ts_var", "{".
+```
+
+Because the expression contains `{ }`, it **must** use the `>-` folded block scalar in
+YAML — see [YAML Encoding](#yaml-encoding) above. There is no `not in` keyword; negate
+with `not ( [col] in { ... } )`.
 
 **TML import requirement:** The parentheses around the condition in
 `if ( condition ) then ... else ...` are **mandatory** for TML import via
@@ -182,11 +194,20 @@ else 0
 | `strpos` | `strpos ( [x] , 'val' )` | Position of first occurrence — 1-indexed, returns 0 when not found (live-verified 2026-06-13, se-thoughtspot; official docs claim 0-based/−1 — live behavior wins). |
 | ~~`upper`~~ | — | **Does not exist** in ThoughtSpot (verified 2026-06-13). Use `sql_string_op ( "UPPER({0})" , [x] )` pass-through. |
 | ~~`lower`~~ | — | **Does not exist** in ThoughtSpot (verified 2026-06-13). Use `sql_string_op ( "LOWER({0})" , [x] )` pass-through. |
-| `trim` | `trim ( [x] )` | Strip leading/trailing whitespace |
-| `replace` | `replace ( [x] , [old] , [new] )` | Replace all occurrences |
+| ~~`trim`~~ | — | **Does not exist** in ThoughtSpot (live-verified 2026-07-29, se-thoughtspot — BL-170). Use `sql_string_op ( "TRIM({0})" , [x] )` pass-through. |
+| ~~`ltrim`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170). Use `sql_string_op ( "LTRIM({0})" , [x] )` pass-through. |
+| ~~`rtrim`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170). Use `sql_string_op ( "RTRIM({0})" , [x] )` pass-through. |
+| ~~`replace`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170). Use `sql_string_op ( "REPLACE({0}, {1}, {2})" , [x] , [old] , [new] )` pass-through. |
 | `contains` | `contains ( [x] , 'val' )` | Returns boolean |
-| `starts_with` | `starts_with ( [x] , 'val' )` | Returns boolean |
-| `ends_with` | `ends_with ( [x] , 'val' )` | Returns boolean |
+| ~~`starts_with`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170; also 2026-06-13). Compose from `strpos`: `strpos ( [x] , 'val' ) = 1`. |
+| ~~`ends_with`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170; also 2026-06-13). Compose from `substr`/`strlen`: `substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val'`. |
+
+**Whitespace/replacement/prefix note (BL-170, live-verified 2026-07-29 on se-thoughtspot).**
+`trim`, `ltrim`, `rtrim`, `replace`, `starts_with` and `ends_with` are **all absent** from
+the formula parser — each is rejected with `Search did not find "<fn> (" in your data or
+metadata`, the same signature `upper`/`lower` produce. The pass-throughs and compositions
+above were verified to import in the same pass. Only `concat`, `substr`, `left`, `right`,
+`strlen`, `strpos` and `contains` are native string functions.
 
 ### Hyperlink Markup
 

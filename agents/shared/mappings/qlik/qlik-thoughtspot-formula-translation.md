@@ -54,8 +54,8 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | CL03 | `If(IsNull(expr), fallback, expr)` | `ifnull(col, fallback)` | ok | ThoughtSpot has a dedicated ifnull() for null replacement in one call. Qlik requires wrapping IsNull() inside If(). |
 | CL04 | `IsNull(expr)` | `isnull(col)` | ok | Direct equivalent. Both return true/1 when the value is null. |
 | CL05 | `Not IsNull(expr)` | `not isnull(col)` | ok | Direct equivalent. Both check for non-null values using a not prefix. |
-| CL06 | `Match(expr, val1, val2, ...)` | `col in (val1, val2, ...)` | ok | Qlik Match() returns position of match (1-based). ThoughtSpot uses the 'in' operator for membership testing — simpler and more readable. |
-| CL07 | `Not Match(expr, val1, val2)` | `col not in (val1, val2, ...)` | ok | ThoughtSpot uses 'not in' operator directly. Qlik uses Not around Match(). |
+| CL06 | `Match(expr, val1, val2, ...)` | `col in {val1, val2, ...}` | corrected | Qlik Match() returns position of match (1-based). ThoughtSpot uses the 'in' operator for membership testing — with **curly braces**, not parentheses (live-verified 2026-07-29, se-thoughtspot — BL-170); the `{ }` also force `>-` block-scalar YAML. |
+| CL07 | `Not Match(expr, val1, val2)` | `not ( col in {val1, val2, ...} )` | corrected | There is **no `not in` keyword** in ThoughtSpot — negate the `in` instead (live-verified 2026-07-29, se-thoughtspot — BL-170). Qlik uses Not around Match(). |
 | CL08 | `Mixmatch(expr, val1, val2)` | `lower(col) in (lower(val1), ...)` | ok | Qlik Mixmatch is case-insensitive Match. ThoughtSpot uses lower() on both sides to simulate. |
 | CL09 | `WildMatch(expr, pattern)` | `contains(col, substr)` | ok | Qlik supports wildcard patterns with *. ThoughtSpot uses contains() for substring checks — no wildcard syntax in formulas. |
 | CL10 | `Pick(n, val1, val2, ...)` | `if n=1 then val1 else if n=2 then val2 ...` | ok | Qlik Pick() selects the nth value from a list. ThoughtSpot has no Pick() — replicate with chained if/then/else. |
@@ -123,7 +123,7 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | SC03 | `Previous(expr)` | `No direct equivalent` | ok | Qlik script function returning previous row's value during data load. ThoughtSpot has no sequential row reference in formula context. |
 | SC04 | `Exists(field, expr)` | `No direct equivalent` | ok | Qlik script checks if a value exists in a previously loaded field. In ThoughtSpot, use data model joins or worksheet-level filters. |
 | SC05 | `ApplyMap(mapname, expr, default)` | `if col = 'val1' then 'mapped1' else if ...` | ok | Qlik script maps values using a mapping table. ThoughtSpot replicates with if/then/else chains or pre-maps in the data pipeline. |
-| SC06 | `MapSubString(mapname, expr)` | `replace(col, old, new)` | ok | Qlik replaces substrings using a mapping table. ThoughtSpot's replace() substitutes fixed values; for complex mappings use ETL. |
+| SC06 | `MapSubString(mapname, expr)` | `sql_string_op('REPLACE({0}, {1}, {2})', col, old, new)` | corrected | Qlik replaces substrings using a mapping table. ThoughtSpot has **no native `replace()`** (live-verified 2026-07-29, se-thoughtspot — BL-170); the passthrough substitutes fixed values, and for complex mappings use ETL. |
 | SC07 | `FieldValue(field, n)` | `No direct equivalent` | ok | Qlik returns the nth distinct value of a field. ThoughtSpot has no field-enumeration function in formula context. |
 | SC08 | `FieldIndex(field, value)` | `No direct equivalent` | ok | Qlik returns the position of a value in a field's value list. No ThoughtSpot equivalent. |
 
@@ -176,17 +176,17 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | S02 | `Upper(str)` | `sql_string_op('UPPER({0})', col)` | corrected | ThoughtSpot has no native `upper()` in formula context — use the SQL passthrough, same as the Tableau converter's UPPER handling. |
 | S03 | `Lower(str)` | `sql_string_op('LOWER({0})', col)` | corrected | ThoughtSpot has no native `lower()` in formula context — use the SQL passthrough, same as the Tableau converter's LOWER handling. |
 | S04 | `Capitalize(str)` | `No direct equivalent` | ok | Qlik Capitalize() converts to title case. ThoughtSpot has no built-in capitalize — combine upper() on first char and lower() on the rest. |
-| S05 | `Trim(str)` | `trim(col)` | ok | Direct equivalent. Removes leading and trailing whitespace. |
-| S06 | `LTrim(str)` | `No direct equivalent` | ok | Qlik LTrim() removes only leading spaces. ThoughtSpot trim() removes both sides — no left-only trim available. |
-| S07 | `RTrim(str)` | `No direct equivalent` | ok | Qlik RTrim() removes only trailing spaces. ThoughtSpot trim() removes both sides — no right-only trim available. |
+| S05 | `Trim(str)` | `sql_string_op('TRIM({0})', col)` | corrected | ThoughtSpot has **no native `trim()`** in formula context (live-verified 2026-07-29, se-thoughtspot — BL-170) — use the SQL passthrough, same as the `Upper`/`Lower` handling above. |
+| S06 | `LTrim(str)` | `sql_string_op('LTRIM({0})', col)` | corrected | Qlik LTrim() removes only leading spaces. ThoughtSpot has no native `ltrim()` **and no native `trim()` either** (live-verified 2026-07-29, se-thoughtspot — BL-170), so the passthrough is the mapping — it is also exact, unlike the previously-documented two-sided substitute. |
+| S07 | `RTrim(str)` | `sql_string_op('RTRIM({0})', col)` | corrected | Qlik RTrim() removes only trailing spaces. As S06 — no native `rtrim()` or `trim()` (live-verified 2026-07-29, se-thoughtspot — BL-170); the passthrough is exact. |
 | S08 | `Left(str, n)` | `substr(col, 1, n)` | ok | Qlik has dedicated Left(). ThoughtSpot uses substr() starting at position 1 to replicate Left(). |
 | S09 | `Right(str, n)` | `substr(col, len(col)-n+1, n)` | ok | Qlik has dedicated Right(). ThoughtSpot combines substr() and len() to extract trailing characters. |
 | S10 | `Mid(str, start, n)` | `substr(col, start, n)` | ok | Direct equivalent (different name). Qlik Mid() maps exactly to ThoughtSpot substr(). Both are 1-indexed. |
-| S11 | `Replace(str, old, new)` | `replace(col, old, new)` | ok | Direct equivalent. Both replace all occurrences of a substring. |
+| S11 | `Replace(str, old, new)` | `sql_string_op('REPLACE({0}, {1}, {2})', col, old, new)` | corrected | ThoughtSpot has **no native `replace()`** in formula context (live-verified 2026-07-29, se-thoughtspot — BL-170) — use the SQL passthrough. Both replace all occurrences. |
 | S12 | `Index(str, substr, n)` | `No direct equivalent` | verify | Qlik returns position of nth occurrence of a substring. ThoughtSpot has no substring-position function. |
 | S13 | `SubField(str, delim, n)` | `No direct equivalent` | ok | Qlik splits a string on a delimiter and returns the nth token. ThoughtSpot has no token-split function. |
 | S14 | `Concat(expr, delimiter) [aggregating]` | `concat(str1, str2, ...) [row-level]` | ok | DIFFERENT behavior: Qlik Concat() aggregates many row values into one string (like GROUP_CONCAT). ThoughtSpot concat() joins values within the same row — different use case. |
-| S15 | `PurgeChar(str, chars)` | `replace(replace(replace(col,'(',''),')',''),'-','')` | ok | Qlik PurgeChar() removes a set of specified characters in one call. ThoughtSpot requires chained replace() calls — one per character. |
+| S15 | `PurgeChar(str, chars)` | `sql_string_op('REPLACE(REPLACE(REPLACE({0},''('',''''),'')'',''''),''-'','''')', col)` | corrected | Qlik PurgeChar() removes a set of specified characters in one call. ThoughtSpot has **no native `replace()`** (live-verified 2026-07-29, se-thoughtspot — BL-170), so the chaining happens **inside one SQL passthrough**, not as chained ThoughtSpot formula calls. |
 | S16 | `KeepChar(str, chars)` | `No direct equivalent` | ok | Qlik KeepChar() retains only specified characters. ThoughtSpot has no equivalent — handle in ETL. |
 | S17 | `Repeat(str, n)` | `No direct equivalent` | ok | Qlik repeats a string n times. ThoughtSpot has no Repeat() function. |
 | S18 | `Ord(str)` | `No direct equivalent` | ok | Qlik returns the ASCII code of the first character. ThoughtSpot has no Ord()/ASCII() function. |
@@ -194,8 +194,8 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | S20 | `Hash128(expr)` | `No direct equivalent` | ok | Qlik generates a 128-bit hash of a value. ThoughtSpot has no hash function in formula context. |
 | S21 | `Hash256(expr)` | `No direct equivalent` | ok | Qlik generates a 256-bit hash (SHA-256). ThoughtSpot has no hash function in formulas. |
 | S22 | `TextBetween(str, start_delim, end_delim)` | `No direct equivalent` | ok | Qlik extracts text between two delimiter strings. ThoughtSpot requires complex substr logic. |
-| S23 | `N/A — use WildMatch(str, 'prefix*')` | `starts_with(col, prefix)` | ok | ThoughtSpot has dedicated starts_with(). Qlik uses WildMatch with * at end: WildMatch(str, 'prefix*'). |
-| S24 | `N/A — use WildMatch(str, '*.suffix')` | `ends_with(col, suffix)` | ok | ThoughtSpot has dedicated ends_with(). Qlik uses WildMatch with * at start: WildMatch(str, '*.suffix'). |
+| S23 | `N/A — use WildMatch(str, 'prefix*')` | `strpos(col, prefix) = 1` | corrected | ThoughtSpot has **no native `starts_with()`** (live-verified 2026-07-29, se-thoughtspot — BL-170) — compose from `strpos`, which is 1-based, so a true prefix sits at position 1. Qlik uses WildMatch with * at end: WildMatch(str, 'prefix*'). |
+| S24 | `N/A — use WildMatch(str, '*.suffix')` | `substr(col, strlen(col) - strlen(suffix), strlen(suffix)) = suffix` | corrected | ThoughtSpot has **no native `ends_with()`** (live-verified 2026-07-29, se-thoughtspot — BL-170) — compose from `substr`/`strlen`. Qlik uses WildMatch with * at start: WildMatch(str, '*.suffix'). |
 | S25 | `WildMatch(str, '*substr*')` | `contains(col, substr)` | ok | ThoughtSpot has dedicated contains(). Qlik uses WildMatch with * on both sides for substring checking. |
 | S26 | `Evaluate(expr_string)` | `No direct equivalent` | ok | Qlik Evaluate() parses and executes a string as an expression at runtime. ThoughtSpot has no dynamic expression evaluation. |
 | S27 | `Num(expr, format) [display]` | `to_string(col)` | ok | Qlik Num() formats a number as a display string. ThoughtSpot to_string() converts to string — control display formatting in visualization settings. |

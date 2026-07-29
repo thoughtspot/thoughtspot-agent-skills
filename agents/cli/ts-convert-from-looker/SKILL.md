@@ -883,6 +883,7 @@ to the user and ask them to provide the resolved database/schema string.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.4 | 2026-07-29 | **BL-170 — `REPLACE` corrected and `TRIM` added as a pass-through.** Live verification on se-thoughtspot 2026-07-29 proved neither `replace` nor `trim` is a native ThoughtSpot formula function. `lookml-to-ts-formula-translation.md`'s String functions table now maps `REPLACE(col, old, new)` to `sql_string_op ( "REPLACE({0}, {1}, {2})" , ... )` instead of the invalid bare `replace ( )` call, and gained a `TRIM(col)` row using the same pass-through shape — matching how `UPPER`/`LOWER` were already handled in that table. |
 | 1.0.3 | 2026-07-28 | Extract reference-heavy detail into references/ step files (BL-128) — no logic change; SKILL.md context cost ~21k → ~11.8k est. tokens. |
 | 1.0.2 | 2026-07-15 | JSON/VARIANT path access: emit `['key']` bracket notation in `sql_*_op` pass-throughs — ThoughtSpot's formula parser rejects warehouse colon-and-dot path syntax (e.g. Snowflake `PARSE_JSON(...):a.b`) carried in a LookML `sql:`. Verified for Snowflake 2026-07-15. |
 | 1.0.1 | 2026-07-11 | Migrate `ts tml import`/`lint` calls from the stdin JSON-array boilerplate to `--file`/`--dir` (ts-cli ≥ v0.27.0); remove the obsolete "does not accept a file path" note (audit 5.1). |

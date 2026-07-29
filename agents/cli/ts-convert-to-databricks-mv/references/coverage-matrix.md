@@ -79,7 +79,8 @@ for the full bidirectional translation reference.
 | 39 | `if(cond, a, b)` (function form) | `CASE WHEN cond THEN a ELSE b END` | |
 | 40 | `in(x, a, b, c)` | `x IN (a, b, c)` | |
 | 41 | `between(x, lo, hi)` | `x BETWEEN lo AND hi` | |
-| 42 | `concat` / `greatest` / `least` / `upper` / `lower` / `abs` / `round` / `length` / `strlen` / `trim` | `CONCAT` / `GREATEST` / `LEAST` / `UPPER` / `LOWER` / `ABS` / `ROUND` / `LENGTH` / `LENGTH` / `TRIM` | Direct rename, same arg order |
+| 42 | `concat` / `greatest` / `least` / `abs` / `round` / `length` / `strlen` | `CONCAT` / `GREATEST` / `LEAST` / `ABS` / `ROUND` / `LENGTH` / `LENGTH` | Direct rename, same arg order |
+| 42a | `sql_string_op ( "UPPER({0})" / "LOWER({0})" / "TRIM({0})" , x )` | `UPPER` / `LOWER` / `TRIM` | Pass-through unwrap — **this is the only path these three arrive by.** None of `upper`, `lower` or `trim` is a native ThoughtSpot function (`upper`/`lower` verified 2026-06-13; `trim` verified 2026-07-29 on se-thoughtspot, BL-170), so no valid TS model can present them as bare calls. The bare-name entries still in `mv_emit_sql.py`'s `SCALAR_FN_MAP` are unreachable dead code, not a mapping. |
 
 ### Level of Detail (LOD)
 
