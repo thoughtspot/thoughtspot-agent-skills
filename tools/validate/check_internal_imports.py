@@ -73,15 +73,7 @@ SCAN_ROOT = Path("tools/ts-cli/ts_cli")
 # referenced fix merges — this is scaffolding for landing the gate now, not a permanent
 # exemption. Format: (repo-relative path, import lineno, target module, imported name).
 # --------------------------------------------------------------------------------------
-ALLOWLIST: set[tuple[str, int, str, str]] = {
-    # ts_cli/commands/migrate.py:496 imports STEP_LIFT_CONTENT, STEP_LIFT_SCAFFOLDING from
-    # ts_cli.migrate.apply_plan — the apply-rewrite (PR #367) deleted those constants,
-    # which is exactly the breakage audit finding 17.1 documents. A separate PR is
-    # reworking rollback_migration against the new ledger schema.
-    # known break, fix in flight (audit 17.1) — remove when merged. Added 2026-07-29.
-    ("tools/ts-cli/ts_cli/commands/migrate.py", 496, "ts_cli.migrate.apply_plan", "STEP_LIFT_CONTENT"),
-    ("tools/ts-cli/ts_cli/commands/migrate.py", 496, "ts_cli.migrate.apply_plan", "STEP_LIFT_SCAFFOLDING"),
-}
+ALLOWLIST: set[tuple[str, int, str, str]] = set()
 
 
 @dataclass

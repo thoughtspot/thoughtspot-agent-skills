@@ -333,15 +333,17 @@ def test_main_missing_scan_root_is_a_clean_pass(tmp_path):
     assert res.returncode == 0, res.stdout + res.stderr
 
 
-def test_main_allowlist_suppresses_the_known_migrate_break(tmp_path):
-    # Reconstructs the exact real-world shape the dated ALLOWLIST entry targets:
-    # tools/ts-cli/ts_cli/commands/migrate.py importing STEP_LIFT_CONTENT /
-    # STEP_LIFT_SCAFFOLDING from ts_cli.migrate.apply_plan, which no longer defines them.
+def test_the_retired_migrate_allowlist_entry_no_longer_suppresses(tmp_path):
+    # Reconstructs the exact real-world shape the (since-removed) dated ALLOWLIST entry
+    # targeted: tools/ts-cli/ts_cli/commands/migrate.py importing STEP_LIFT_CONTENT /
+    # STEP_LIFT_SCAFFOLDING from ts_cli.migrate.apply_plan at line 496. The rollback
+    # rework (audit 17.1, PR #404) fixed the real import, and the allowlist entry was
+    # removed with it — so this exact shape must now be REPORTED. If someone re-adds
+    # the entry, this fails and demands a fresh dated justification.
     pkg_root = tmp_path / "tools" / "ts-cli" / "ts_cli"
     _write(pkg_root, "__init__.py", "")
     _write(pkg_root, "migrate/__init__.py", "")
     _write(pkg_root, "migrate/apply_plan.py", "STEP_BACKUP = 'backup'\n")
-    # Blank lines pad the import down to line 496, matching the ALLOWLIST's lineno key.
     padding = "\n" * 495
     _write(
         pkg_root, "commands/migrate.py",
@@ -349,5 +351,5 @@ def test_main_allowlist_suppresses_the_known_migrate_break(tmp_path):
     )
 
     res = _run(tmp_path)
-    assert res.returncode == 0, res.stdout + res.stderr
-    assert "allowlisted" in res.stdout
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "STEP_LIFT_CONTENT" in res.stdout
