@@ -53,7 +53,7 @@ FAMILY_PATTERNS: dict[str, tuple[re.Pattern, str]] = {
     ),
     "ts-setup-*": (
         re.compile(r"ts-setup-[a-z][a-z0-9]*"),
-        "toolset / proc installation: ts-setup-{specifier}",
+        "toolset / proc / test-environment installation: ts-setup-{specifier}",
     ),
     "ts-publish-*": (
         re.compile(r"ts-publish-[a-z][a-z0-9]*"),

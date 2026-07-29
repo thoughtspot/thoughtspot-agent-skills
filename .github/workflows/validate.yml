@@ -84,10 +84,16 @@ jobs:
           python3 tools/validate/generate_open_items_index.py --root . --check
           python3 tools/validate/check_mirror_sync.py
           python3 tools/validate/generate_parity.py --check
-          # Quality gates catalog — soft check in CI. The catalog includes git-log
-          # dates that shift when any validator is touched by a contributor PR, so a
-          # hard gate would force every contributor to regenerate it. Maintainer
-          # regenerates at merge time; pre-commit catches local staleness.
+          # Internal-import + repo-hygiene gates (2026-07-29 audit findings 4.2/1.1/1.2).
+          python3 tools/validate/check_internal_imports.py --root .
+          python3 tools/validate/check_repo_hygiene.py --root .
+          # Quality gates catalog — soft baseline check here (the catalog includes
+          # git-log dates that shift when any validator is touched by a contributor
+          # PR, so a hard gate on every PR would force every contributor to
+          # regenerate it). The PR-scoped step below promotes this to a HARD gate
+          # when a PR actually touches the catalog's own sources of truth (audit
+          # finding 7.1) — see that step for why CI was previously weaker than
+          # pre-commit here.
           python3 tools/validate/generate_quality_gates.py --root . --check || echo "WARN  quality-gates.md is stale (non-blocking in CI)"
 
       - name: Open-items gate (PR only)
@@ -96,7 +102,7 @@ jobs:
         # WARN-only. Analogous to the changelog gate's --base scoping.
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          git fetch --no-tags origin "${{ github.base_ref }}"
           python3 tools/validate/check_open_items.py --root . \
             --base "origin/${{ github.base_ref }}"
 
@@ -107,9 +113,37 @@ jobs:
         # carry a CHANGELOG.md change in the same PR.
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          git fetch --no-tags origin "${{ github.base_ref }}"
           python3 tools/validate/suggest_repo_changelog.py --root . --check \
             --base "origin/${{ github.base_ref }}"
+
+      - name: Quality gates catalog gate (PR only, scoped hard-fail)
+        # 2026-07-29 audit finding 7.1: the catalog check above is the only gate where
+        # CI was WEAKER than the pre-commit hook (soft `|| echo WARN` in CI vs. a hard
+        # `run_check` locally) — inverting the design principle that CI is the
+        # server-side superset of pre-commit. Fixed with the same --base PR-scoping
+        # pattern the changelog and open-items gates above already use: fetch the PR's
+        # base ref, diff this PR's changes against it, and hard-fail ONLY when the PR
+        # touched one of the catalog's own sources of truth (pre-commit.sh, this
+        # workflow file, or a tools/validate/*.py validator) — exactly what
+        # pre-commit.sh's own "quality gates catalog" check already triggers on
+        # locally. A routine skill-only PR is untouched by this step; a gate-shape
+        # change can no longer merge with a stale docs/quality-gates.md.
+        if: github.event_name == 'pull_request'
+        run: |
+          # NOTE: these PR-gate fetches must NOT use --depth=1. A shallow fetch into
+          # the full-history checkout writes .git/shallow for the base ref's tip, and
+          # every later `git log` walk stops there — generate_quality_gates.py then
+          # dates untouched validators as "unknown" and the catalog reads stale on
+          # every run (observed on this gate's own first firing, PR #405).
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)
+          if echo "$CHANGED" | grep -qE '^(scripts/pre-commit\.sh|\.github/workflows/validate\.yml|tools/validate/.*\.py)$'; then
+            echo "PR touches a quality-gates source of truth — hard-checking docs/quality-gates.md."
+            python3 tools/validate/generate_quality_gates.py --root . --check
+          else
+            echo "No quality-gates source of truth changed in this PR — skipping hard gate (soft-checked above)."
+          fi
 
       - name: Run unit + validator tests
         # Three separate invocations: agents/cli/ts-object-model-erd/tests and

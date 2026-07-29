@@ -168,9 +168,21 @@ def _read_json_envelope(input_file: Optional[str]) -> Dict[str, Any]:
     return json.loads(sys.stdin.read())
 
 
-def _search(client: ThoughtSpotClient, body: Dict[str, Any]) -> List[dict]:
-    """POST metadata/search and return the result list, whichever envelope came back."""
-    resp = client.post("/api/rest/2.0/metadata/search", json=body)
+def _search(client: ThoughtSpotClient, body: Dict[str, Any],
+            quiet: bool = False) -> List[dict]:
+    """POST metadata/search and return the result list, whichever envelope came back.
+
+    `quiet` suppresses the client's one-line stderr diagnostic. Only for a PROBE whose
+    failure is an expected answer rather than a fault -- see `_try_search`.
+
+    `ok` is read via `getattr` defaulting to True: without it, anything but a real
+    `requests.Response` raised `AttributeError`, which `_try_search` catches -- so the
+    breakage showed up as "found nothing" rather than as an error (BL-153).
+    """
+    resp = client.post("/api/rest/2.0/metadata/search", json=body,
+                       raise_for_status=not quiet)
+    if quiet and not getattr(resp, "ok", True):
+        return []
     data = resp.json()
     return data if isinstance(data, list) else (data.get("metadata") or [])
 
@@ -203,10 +215,15 @@ def _try_search(client: ThoughtSpotClient, metadata: Dict[str, Any],
     `SystemExit` propagated straight out of `_resolve_object` and killed the process
     instead of falling through to the typed-candidate loop. Do not "simplify" this
     back to `except Exception` alone -- that silently reintroduces the crash.
+
+    Passed `quiet=True`: the untyped probe 400s whenever the identifier is not in the
+    client's Org -- every tenant-Org lookup -- and printing that put a red
+    `ThoughtSpot API 400` line in front of a perfectly successful report. A probe whose
+    failure IS the answer must not announce a fault (BL-153).
     """
     try:
         return _search(client, {"metadata": [metadata], "include_headers": True,
-                                "record_size": record_size})
+                                "record_size": record_size}, quiet=True)
     except (Exception, SystemExit):
         return []
 
@@ -422,12 +439,21 @@ def _apply_step(client: ThoughtSpotClient, step: Dict[str, Any],
 # ts share status
 # ---------------------------------------------------------------------------
 
-def _status_targets(client: ThoughtSpotClient, guids: List[str],
+def _status_targets(profile: Optional[str], orgs: List[str], guids: List[str],
                     with_columns: bool) -> List[Dict[str, str]]:
-    """The objects (and optionally their columns) to read permissions for."""
+    """The objects (and optionally their columns) to read permissions for.
+
+    Resolution goes through `_resolve_object_in_orgs`, so it tries the default Org and then
+    each `--org`, and columns are listed through the client that COULD see the object. It
+    used to resolve with one Org-LESS client and scope only the permissions read -- but
+    `metadata/search` is Org-scoped, so an object NATIVE to a tenant Org was invisible and
+    could not be resolved at all. The report failed with "Could not resolve", blaming a
+    perfectly valid GUID while the Org sat on the command line. Same bug already fixed in
+    `ts share export` on 2026-07-27; `status` was missed then (BL-153).
+    """
     targets: List[Dict[str, str]] = []
     for identifier in dict.fromkeys(guids):
-        resolved = _resolve_object(client, identifier)
+        resolved, client = _resolve_object_in_orgs(profile, orgs, identifier)
         targets.append({"guid": resolved["guid"], "type": resolved["type"]})
         if with_columns and resolved["type"] == "LOGICAL_TABLE":
             targets += [{"guid": c["guid"], "type": "LOGICAL_COLUMN"}
@@ -462,6 +488,11 @@ def status_cmd(
     Sharing to a group also adds a row per member user, so one group grant shows up as
     several rows.
 
+    `--org` scopes the RESOLUTION as well as the read, so an object native to a tenant Org
+    resolves. Without that it could not: `metadata/search` is Org-scoped, so a tenant's own
+    Answer is invisible to the default-Org client, and the command failed with "Could not
+    resolve" against a perfectly valid GUID (BL-153).
+
     Output (JSON to stdout):
       [{"org", "guid", "name", "type", "principal_type", "principal_id",
         "principal_name", "permission", "shared_permission"}]
@@ -473,10 +504,11 @@ def status_cmd(
       ts share status <table-guid> --org ORG1 --org ORG2 --columns -p prod
       ts share status T2_PUBLISH --org ORG1 --group Analyst -p prod
     """
-    targets = _status_targets(_client_for_org(profile), list(guids), columns)
+    orgs = list(dict.fromkeys(org))
+    targets = _status_targets(profile, orgs, list(guids), columns)
 
     rows: List[Dict[str, Any]] = []
-    for org_name in list(dict.fromkeys(org)) or [""]:
+    for org_name in orgs or [""]:
         client = _client_for_org(profile, org_name or None)
         for row in _fetch_permissions(client, targets, list(group) or None):
             rows.append({"org": org_name, **row})

@@ -58,6 +58,33 @@ does not. It is **optional**: the `ts` CLI sends neither `connection_type` nor a
 field and both calls succeed against the external-CDW "Dunder Mifflin Sales & Inventory"
 Model. Treat `connection_type` as build/connection-specific — omit for standard CDW.
 
+## #5 — 2026-07-29 full limitation re-probe (jul.26.mt dev) — VERIFIED (live) 2026-07-29
+
+Re-probed every testable `limitations.md` row on nebula-damian-alias (jul.26.mt dev build)
+against the Snowflake-backed "Supplier Model" (`8777533f`) and "T1_PUBLISH_MODEL"
+(`0930baf3`) — 38 `generate-sql` probes plus `fetch-data` execution checks and value
+verification (literal arithmetic ×100/÷100 matched baseline exactly; UNION dedup verified
+against a UNION ALL control, 12 vs 24 rows).
+
+**Fixed on this build** (moved to ✅ in limitations.md): set-op ORDER BY/LIMIT on the
+combined result, aggregated-branch CTE set-ops, `ROUND(x,N)` (now N decimals),
+`TO_NUMBER` (now a real CAST — hard error on bad data), `CONCAT_WS`, `LENGTH()`,
+grouped `MEDIAN`. **Still broken:** QUALIFY + FILTER silently dropped, WHERE-aggregate →
+HAVING lenient parse, set-op type mismatch caught only at fetch, self-join, non-equi join,
+ROLLUP, `SELECT *`/`COUNT(*)`, non-MEDIAN percentiles, INITCAP/REGEXP_*/TO_VARCHAR.
+**New bugs filed:** [SCAL-326935](https://thoughtspot.atlassian.net/browse/SCAL-326935)
+(scalar `STDDEV`/`VAR` regression — CTE workaround still works) and
+[SCAL-326936](https://thoughtspot.atlassian.net/browse/SCAL-326936) (`IN (SELECT …)`
+compiles but fails at fetch — subquery Model name emitted verbatim into warehouse SQL).
+
+**Deferred follow-up:** nebula-spotQL was unreachable that day, so the 2026-07-29 findings
+are single-build. When it (or another older/newer build) is available: re-confirm the
+STDDEV/VAR regression and the set-op fixes, then drop the "jul.26.mt only" hedges from
+`limitations.md` / `agentql-rules.md` / `patterns.md`. Also untestable on this instance
+(only CDW Model has no date or formula columns): the date-function rows (`DAY_OF_YEAR`,
+`TRUNC(date)`, `SUM(CASE WHEN date >= literal)`), `NESTED_AGGREGATE`, and semi-additive
+rows — they keep their earlier verification dates.
+
 ---
 
 ## Keeping `limitations.md` current

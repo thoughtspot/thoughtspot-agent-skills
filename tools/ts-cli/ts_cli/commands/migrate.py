@@ -294,6 +294,16 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
                          for n in names}
     except discover.AmbiguousModelName as exc:
         _refuse(str(exc))
+    if blocked is None:
+        # No --sets-scan supplied, so apply scans itself. Cohort columns are invisible
+        # in the Model's TML and the audit never queries LOGICAL_COLUMN, so without
+        # this a bare apply proceeds and drops the tenant's Sets silently -- exactly
+        # what the documented "refuses, no override" contract promises cannot happen
+        # (audit 2026-07-29 finding 17.6). One search for the whole Org.
+        from ts_cli.migrate import sets_scan
+        blocked = set(sets_scan.extract_cohort_columns(
+            discover.all_cohort_column_rows(source_client),
+            [g for g in guids_by_name.values() if g]))
     problems = validate_apply(
         rows, blocked_model_guids=blocked,
         model_guids_by_name={k: v for k, v in guids_by_name.items() if v})
@@ -342,7 +352,9 @@ def apply_migration(
     plan_path = Path(plan_dir)
     rows = _load_mapping_or_exit(plan_path)
 
-    blocked = set()
+    # None (not empty) when no scan file was given: _validate_or_exit then runs the
+    # cohort scan itself rather than treating "not scanned" as "not blocked".
+    blocked = None
     if sets_scan:
         blocked = blocked_model_guids(_json.loads(Path(sets_scan).read_text()))
 
@@ -350,6 +362,15 @@ def apply_migration(
     target_client = _org_client(target_profile, target_org)
 
     names = sorted({r.model for r in rows})
+    if len(names) > 1:
+        # apply binds every rewritten object to ONE published target, so a multi-Model
+        # mapping (which `audit --all-models` writes by design) would repoint Model B's
+        # content onto Model A's master -- imports cleanly, renders wrong (audit
+        # 2026-07-29 finding 17.2). Refused until per-pair planning exists.
+        _refuse(f"column-mapping.csv covers {len(names)} Models "
+                f"({', '.join(names)}), and `apply` binds all rewritten content to ONE "
+                f"published target -- Model B's content would land on Model A's master. "
+                f"Split the mapping per Model and run one `apply` per Model")
     _validate_or_exit(source_client, rows, blocked, names)
 
     mode = import_mode(source_org, target_org, source_profile, target_profile)
@@ -382,7 +403,7 @@ def apply_migration(
 
     state_file = plan_path / "state.json"
     ledger = (_json.loads(state_file.read_text()) if (resume and state_file.exists())
-              else new_ledger({"source": source_org, "target": target_org}))
+              else new_ledger({"source": source_org, "target": target_org}, mode))
     # Unscoped session for the segmentation check: an Org-scoped variable read returns
     # only that Org's value, which makes every target look SHARED.
     ctx = apply_exec.Ctx(source_client, target_client, plan_path, ledger,
@@ -450,23 +471,81 @@ def _classify_scope(source_client, target_client, model_names, exclude_owner_org
     return views, content, shielded, targets
 
 
+# Everything a rollback can have created, in delete order. Content types first.
+_ROLLBACK_TYPES = ("ANSWER", "LIVEBOARD", "LOGICAL_TABLE")
+
+
+def _types_by_guid(client, guids) -> dict:
+    """`{guid: metadata_type}` for whatever of `guids` still exists, one batched
+    search PER TYPE.
+
+    Typed on purpose: an identifier-only search returns 400 (`Specify the
+    metadata_type for identifier ...`) for any guid that no longer resolves -- which is
+    exactly what every guid looks like on a re-run after a successful delete, so the
+    untyped form made rollback single-shot (verified live 2026-07-29). A TYPED search
+    returns 200 with the misses simply absent, so a guid in no type's result is
+    already gone -- which a re-runnable rollback treats as done, not as an error.
+    """
+    out: dict = {}
+    for mtype in _ROLLBACK_TYPES:
+        remaining = sorted(set(guids) - set(out))
+        if not remaining:
+            break
+        resp = client.post("/api/rest/2.0/metadata/search", raise_for_status=False,
+                           json={"metadata": [{"identifier": g, "type": mtype}
+                                              for g in remaining],
+                                 "include_headers": True, "record_size": -1,
+                                 "record_offset": 0})
+        if resp.status_code >= 300:
+            continue
+        for row in resp.json():
+            guid = row.get("metadata_id")
+            if guid:
+                out[guid] = row.get("metadata_type") or mtype
+    return out
+
+
+def _print_rollback_dry_run(content, views) -> None:
+    """Offline by design: the first thing an operator runs, possibly before credentials
+    for the broken target even exist."""
+    for label, named in (("content", content), ("Views", views)):
+        print(f"{label}: {len(named)}")
+        for name, guid in sorted(named.items()):
+            print(f"  {guid}  {name}")
+    _err("Dry run: nothing was deleted.")
+
+
+def _typed_batches(client, content, views):
+    """`[(label, [(guid, type)])]` in delete order, skipping already-gone objects."""
+    recorded = set(content.values()) | set(views.values())
+    types = _types_by_guid(client, recorded)
+    for guid in sorted(recorded - set(types)):
+        _err(f"  already gone: {guid}")
+    return [
+        ("content", [(g, types[g]) for g in sorted(content.values()) if g in types]),
+        ("Views", [(g, types[g]) for g in sorted(views.values()) if g in types]),
+    ]
+
+
 def _delete_in_order(client, ordered) -> List[str]:
     """Delete each labelled batch in turn, collecting problems rather than stopping.
 
     A rollback that aborts on the first refusal strands everything after it -- the same
-    defect fixed in `ts publish rollback`.
+    defect fixed in `ts publish rollback`. Each batch is `(label, [(guid, type)])`:
+    the delete endpoint requires the correct `type` per item, and one batch can mix
+    Answers and Liveboards.
     """
     failures: List[str] = []
-    for label, guids in ordered:
-        if not guids:
+    for label, items in ordered:
+        if not items:
             continue
         resp = client.post("/api/rest/2.0/metadata/delete", raise_for_status=False,
-                           json={"metadata": [{"identifier": g, "type": "LOGICAL_TABLE"}
-                                              for g in guids]})
+                           json={"metadata": [{"identifier": g, "type": t}
+                                              for g, t in items]})
         if resp.status_code >= 300:
             failures.append(f"{label}: HTTP {resp.status_code} {resp.text[:200]}")
         else:
-            _err(f"  deleted {len(guids)} {label}")
+            _err(f"  deleted {len(items)} {label}")
     return failures
 
 
@@ -482,9 +561,13 @@ def rollback_migration(
     **The source Org is never touched** -- it is the real fallback, and `apply` leaves it
     untouched precisely so this command never has to restore anything into it.
 
-    Deletes in the safe order (content, then Models, then Tables), because a Model with
-    dependents refuses to delete. Objects already gone are not an error: a rollback has to
-    be re-runnable, exactly like `ts publish rollback`.
+    Deletes in the safe order (content, then Views), because a View with dependents
+    refuses to delete. Objects already gone are not an error: a rollback has to be
+    re-runnable, exactly like `ts publish rollback`.
+
+    **Same-Org runs are refused.** They update the tenant's objects in place, so the
+    guids the ledger records ARE the originals -- the only undo there is restoring the
+    TML in `backup/`.
 
     Before cutover the target Org holds nothing but this migration's output, so the
     blunter option is to delete the Org outright (`ts tenancy teardown`). Prefer that when
@@ -493,35 +576,30 @@ def rollback_migration(
     import json as _json
     from pathlib import Path
 
-    from ts_cli.migrate.apply_plan import STEP_LIFT_CONTENT, STEP_LIFT_SCAFFOLDING
+    from ts_cli.migrate.apply_plan import rollback_refusal, rollback_sets
 
     state_file = Path(plan_dir) / "state.json"
     if not state_file.exists():
         _err(f"No state.json in {plan_dir}. Nothing is known to have been created.")
         raise typer.Exit(code=1)
     ledger = _json.loads(state_file.read_text())
-    created = ledger.get("created") or {}
-    kinds = ledger.get("kinds") or {}
 
-    content = sorted((created.get(STEP_LIFT_CONTENT) or {}).values())
-    models = sorted(kinds.get("models") or [])
-    tables = sorted(kinds.get("tables") or [])
-    if not (content or models or tables):
+    refusal = rollback_refusal(ledger)
+    if refusal:
+        _err(f"Refused: {refusal}.")
+        raise typer.Exit(code=1)
+
+    content, views = rollback_sets(ledger)
+    if not (content or views):
         _err("The ledger records nothing created. Nothing to roll back.")
         return
 
-    ordered = [("content", content), ("scaffolding Models", models),
-               ("scaffolding Tables", tables)]
     if dry_run:
-        for label, guids in ordered:
-            print(f"{label}: {len(guids)}")
-            for guid in guids:
-                print(f"  {guid}")
-        _err("Dry run: nothing was deleted.")
+        _print_rollback_dry_run(content, views)
         return
 
     client = _org_client(target_profile, target_org)
-    failures = _delete_in_order(client, ordered)
+    failures = _delete_in_order(client, _typed_batches(client, content, views))
     if failures:
         _err("rollback INCOMPLETE:")
         for problem in failures:
@@ -530,3 +608,125 @@ def rollback_migration(
     ledger["rolled_back"] = True
     state_file.write_text(_json.dumps(ledger, indent=2))
     _err("Rollback complete. The source Org was never touched.")
+
+
+@app.command("aliases")
+def wave_aliases(
+    profile: Optional[str] = typer.Option(None, "--profile", "-p",
+                                          help="Profile holding the MASTER Model's cluster. "
+                                               "Read in its default Org, because per-Org "
+                                               "aliases live on the Primary Org's Model."),
+    model: str = typer.Option(..., "--model", "-m",
+                              help="The published master Model (GUID or exact name)."),
+    target_org: List[str] = typer.Option(
+        [], "--target-org",
+        help="Org migrated in THIS wave, whose aliases are being added (repeatable)."),
+    plan_dir: List[str] = typer.Option(
+        [], "--plan-dir", "-d",
+        help="Plan directory holding that Org's column-mapping.csv (repeatable, paired "
+             "positionally with --target-org)."),
+    expect_org: List[str] = typer.Option(
+        [], "--expect-org",
+        help="Org ALREADY cut over, whose aliases the export must still contain "
+             "(repeatable). Refuses the wave if any is missing."),
+    first_wave: bool = typer.Option(
+        False, "--first-wave",
+        help="Assert that NO Org has been cut over yet, so there is nothing to preserve. "
+             "Required instead of --expect-org on the first wave."),
+) -> None:
+    """Assemble one WAVE's per-Org column aliases -- spec step 7.
+
+    Emits the envelope `ts alias build --merge` consumes, so the whole step is:
+
+    \b
+      ts migrate aliases -m T2_PUBLISH_MODEL --target-org ORG2 -d ./plan \\
+          --expect-org ORG1 -p prod | ts alias build --merge | ts alias import -p prod
+
+    **Once per WAVE, never per tenant, and serialised.** Aliases live on the Primary Org's
+    Model with no delta update until 26.10, so every append re-imports the whole document.
+    Per tenant, tenant *k* pays for all *k* before it -- O(N^2) across a fleet -- and past
+    5 MB each import goes async at 10-15 minutes. Two concurrent writes clobber each other.
+
+    **Why this command rather than hand-writing the translations.** The aliases are the exact
+    inverse of the rename `apply` performed, and that rename is already recorded in the
+    approved `column-mapping.csv`. Deriving them removes a transcription step whose mistakes
+    are silent: a misspelled column aliases nothing, and the tenant sees the physical name
+    with no error anywhere.
+
+    **The refusal that matters.** The import REPLACES the document, so an export that came
+    back partial silently strips every already-cut-over Org it missed -- their users see
+    `STRING_1` where they saw `Region`, with no error, because each entry left in the
+    document is valid. `--expect-org` turns "check the export was complete" from something a
+    human is asked to eyeball into an assertion. It is not optional: pass `--first-wave` to
+    state explicitly that there is nothing to lose, because a check that defaults to off is
+    not a check.
+
+    Verify afterwards in **Search Data, an Answer, a Liveboard or Spotter** -- never the Data
+    Management app, which does not render aliases at all and shows base names for everything.
+    """
+    from pathlib import Path
+
+    from ts_cli.alias import merge_aliases, parse_export_response, translations_to_columns
+    from ts_cli.migrate import aliases as wave
+    from ts_cli.migrate.mapping import read_mapping
+
+    if not target_org:
+        _refuse("pass --target-org (repeatable) for the Org(s) migrated in this wave.")
+    if len(plan_dir) != len(target_org):
+        _refuse(f"{len(target_org)} --target-org but {len(plan_dir)} --plan-dir. Pass one "
+                f"plan directory per Org, in the same order.")
+    if bool(expect_org) == first_wave:
+        _refuse("pass --expect-org for every Org already cut over, or --first-wave to state "
+                "that none has been. Never both, and never neither: this is the check that "
+                "stops a partial export wiping migrated tenants' aliases.")
+
+    # The master Model is read in the profile's DEFAULT Org: per-Org aliases are stored on
+    # the Primary Org's copy, not on the tenant-visible publication.
+    client = _org_client(profile, None)
+    resolved = model
+    if "-" not in model or len(model) < 32:
+        found = discover_alias_model(client, model)
+        if not found:
+            _refuse(f"no Model named '{model}' in this profile's default Org.")
+        resolved = found
+
+    envelope = parse_export_response(client.post(
+        "/api/rest/2.0/metadata/tml/export", json={
+            "metadata": [{"identifier": resolved, "type": "LOGICAL_TABLE"}],
+            "export_associated": True, "export_fqn": True, "edoc_format": "YAML",
+            "export_options": {"export_with_column_aliases": True},
+        }).json() or [])
+
+    existing = (envelope.get("existing_aliases") or {}).get("columns") or []
+
+    translations: List[dict] = []
+    for org, directory in zip(target_org, plan_dir):
+        rows = read_mapping(Path(directory) / "column-mapping.csv")
+        derived = wave.translations_from_mapping(rows, org)
+        if not derived:
+            _err(f"warning: {org} needs no aliases — every mapped column already matches")
+        translations += derived
+
+    merged = merge_aliases(existing, translations_to_columns(translations))
+    problems = wave.wave_problems(existing, merged, expected_orgs=expect_org)
+    if problems:
+        _err("Refused. This wave must not be imported:")
+        for problem in problems:
+            _err(f"  - {problem}")
+        raise typer.Exit(code=1)
+
+    envelope["translations"] = translations
+    print(json.dumps(envelope, indent=2))
+    _err(f"{len(translations)} alias(es) for {', '.join(target_org)}; "
+         f"{len(wave.orgs_present(existing))} Org(s) already present and preserved. "
+         f"Pipe into `ts alias build --merge`.")
+
+
+def discover_alias_model(client, name: str) -> Optional[str]:
+    """The master Model by name, in this client's own Org. See `discover.find_source_model`."""
+    from ts_cli.migrate import discover
+
+    try:
+        return discover.find_source_model(client, name, discover.owning_org_id(client))
+    except discover.AmbiguousModelName as exc:
+        _refuse(str(exc))

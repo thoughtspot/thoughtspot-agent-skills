@@ -11,7 +11,7 @@ semantic auditing, synthesis) and the cheap tiers where the work is mechanical
 
 | Surface | Mechanism | Current assignments |
 |---|---|---|
-| `.claude/agents/*.md` | `model:` frontmatter | `consistency-checker: haiku` (runs validators, greps); `repo-publisher: sonnet` (scripted git/stage ops); `conversion-consistency-auditor:` unset — inherits the session model (semantic judgment) |
+| `.claude/agents/*.md` | `model:` frontmatter (`sonnet`/`opus`/`haiku`/`fable`) — and, per-agent, `effort:` frontmatter (`low`/`medium`/`high`/`xhigh`/`max`, overrides the session-level effort for that agent's own reasoning) plus `isolation`, `maxTurns`, `skills`, and `memory` fields | `consistency-checker: haiku` (runs validators, greps); `repo-publisher: sonnet` (scripted commit → branch → PR → stage-sync flow); `conversion-consistency-auditor:` unset — inherits the session model (semantic judgment). No agent currently sets `effort:` — today's tiering uses `model:` only |
 | `.claude/workflows/*.js` | `effort:` (and rarely `model:`) per `agent()` call | repo-audit: `low` for mechanical finders (dead-files, pr-validation, dependencies); `max` for the angle-17 code-review backstop; default for everything else |
 | `.claude/settings.json` | No `model` pin | The interactive session inherits the user's default. Planning and QA happen interactively, so the session default should be the strong tier |
 
@@ -22,7 +22,7 @@ semantic auditing, synthesis) and the cheap tiers where the work is mechanical
 - **Haiku**: deterministic checklists — run these commands, report pass/fail, grep
   and collate. No synthesis, no judgment calls.
 - **Sonnet**: mechanical multi-step work where mistakes have consequences but the
-  steps are prescribed (repo-publisher's commit → push → stage sequence).
+  steps are prescribed (repo-publisher's commit → branch → PR → stage-sync sequence).
 - **Session default (strong tier)**: anything that weighs evidence — planning,
   code review verification, semantic consistency auditing, audit synthesis.
 - **Effort over model** in workflows: prefer `effort: 'low'` on a strong model for

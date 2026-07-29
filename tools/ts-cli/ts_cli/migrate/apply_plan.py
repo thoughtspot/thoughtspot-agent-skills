@@ -224,6 +224,51 @@ def target_segmentation(variables: Sequence[Mapping[str, Any]],
     return SEGMENT_SHARED if saw_physical_variable else SEGMENT_UNKNOWN
 
 
+def bound_variable_names(table_docs: Sequence[Mapping[str, Any]]) -> Set[str]:
+    """Variable names actually bound to these Tables' db/schema/table fields.
+
+    A parameterized field carries a whole-value `${var}` token in the exported TML --
+    the same shape `ts publish export` clusters on, so the parse is shared with
+    `publish_plan` rather than restated. Connection-bound variables
+    (`CONNECTION_PROPERTY`) do not surface in table TML and are NOT discoverable here;
+    a target segmented only at the connection level therefore reads as unparameterized
+    and needs the explicit `--allow-unfiltered-target` decision.
+    """
+    from ts_cli.publish_plan import TML_KEY_TO_FIELD, parse_variable_token
+
+    bound: Set[str] = set()
+    for doc in table_docs or ():
+        table = doc.get("table") or {}
+        for tml_key in TML_KEY_TO_FIELD:
+            name = parse_variable_token(table.get(tml_key))
+            if name:
+                bound.add(name)
+    return bound
+
+
+def segmentation_for_target(table_docs: Sequence[Mapping[str, Any]],
+                            variables: Sequence[Mapping[str, Any]],
+                            target_org: Optional[str]) -> str:
+    """`target_segmentation`, scoped to the variables the TARGET's tables actually bind.
+
+    The unscoped form read every template variable on the cluster, so ANY unrelated
+    publishing programme's `TABLE_MAPPING` variable with two per-Org values yielded
+    SEGMENT_PHYSICAL -- and the no-RLS refusal (the check keeping tenants out of each
+    other's rows) was skipped for a target that resolves every Org to the same physical
+    table (audit 2026-07-29 finding 17.4).
+
+    Readable tables with NO bound variable are SEGMENT_SHARED outright: static
+    db/schema/table values resolve identically in every Org, so RLS is the only
+    separator and must be checked. No table docs at all stays SEGMENT_UNKNOWN --
+    an unreadable check is not a passed one.
+    """
+    bound = bound_variable_names(table_docs)
+    if table_docs and not bound:
+        return SEGMENT_SHARED
+    scoped = [v for v in variables or () if (v.get("name") or "") in bound]
+    return target_segmentation(scoped, target_org)
+
+
 def unfiltered_target_problem(table_rule_counts: Mapping[str, int], model_name: str,
                               allow: bool = False,
                               segmentation: str = SEGMENT_SHARED) -> Optional[str]:
@@ -302,8 +347,13 @@ def build_apply_plan(pair: Dict[str, str], views: List[Dict[str, Any]],
 # Ledger
 # ---------------------------------------------------------------------------
 
-def new_ledger(pair: Dict[str, str]) -> Dict[str, Any]:
-    return {"pair": dict(pair), "completed": [], "created": {}, "failed": None}
+def new_ledger(pair: Dict[str, str],
+               mode: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """`mode` (from `import_mode`) is recorded so `rollback` can tell a same-Org run
+    (objects updated in place -- deleting them destroys the tenant's originals) from a
+    new-Org run (objects created fresh -- deleting them is the rollback)."""
+    return {"pair": dict(pair), "mode": dict(mode) if mode else None,
+            "completed": [], "created": {}, "failed": None}
 
 
 def pending_steps(plan: Sequence[Dict[str, Any]],
@@ -330,6 +380,48 @@ def record_completed(ledger: Dict[str, Any], step: str,
 def record_failure(ledger: Dict[str, Any], step: str, detail: str) -> Dict[str, Any]:
     ledger["failed"] = {"step": step, "detail": detail}
     return ledger
+
+
+def rollback_refusal(ledger: Mapping[str, Any]) -> Optional[str]:
+    """Why this ledger must NOT be rolled back by deletion, or None if it may be.
+
+    A same-Org apply updates the tenant's objects IN PLACE (`keep_guid`), so the guids in
+    `created` are the originals -- deleting them is not an undo, it is data loss. The only
+    rollback for that topology is restoring the TML written to `backup/`.
+
+    Ledgers written before `mode` was recorded are refused on the conservative signal
+    (source Org == target Org): a cross-cluster run with coincidentally equal Org names
+    loses rollback-by-deletion, but the alternative is deleting a tenant's real content.
+    """
+    mode = ledger.get("mode")
+    if mode is not None:
+        if mode.get("same_org"):
+            return ("this ledger records a SAME-ORG run: content was updated in place, "
+                    "not created, so deleting it would destroy the tenant's originals. "
+                    "Restore the TML in backup/ instead")
+        return None
+    pair = ledger.get("pair") or {}
+    if (pair.get("source") or "") == (pair.get("target") or ""):
+        return ("this ledger predates mode recording and its source and target Org are "
+                "the same, which reads as a same-Org run: content was updated in place, "
+                "not created. Restore the TML in backup/ instead")
+    return None
+
+
+def rollback_sets(ledger: Mapping[str, Any]
+                  ) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """`(content, views)` as `{name: guid}` -- everything the apply created, from the
+    ledger the CURRENT executor writes.
+
+    Content (rewritten Answers/Liveboards plus View-shielded copies) deletes before
+    Views, because a View with dependents refuses to delete.
+    """
+    created = ledger.get("created") or {}
+    content: Dict[str, str] = {}
+    for step in (STEP_REWRITE_CONTENT, STEP_MOVE_SHIELDED):
+        content.update(created.get(step) or {})
+    views = dict(created.get(STEP_REWRITE_VIEWS) or {})
+    return content, views
 
 
 # ---------------------------------------------------------------------------

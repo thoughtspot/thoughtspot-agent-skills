@@ -125,7 +125,7 @@ are roughly ordered by value÷effort.
 | BL-111 | `--connection` filter: converter rewiring (remaining) | — |
 | BL-112 | Rewire smoke_ts_audit.py onto `ts audit run/report` | — |
 | BL-116 | Live destructive dependency-manager smoke | — |
-| BL-153 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
+| BL-171 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
 | ~~BL-132~~ | ~~from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake)~~ | DONE (PR #332) |
 | ~~BL-133~~ | ~~`ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing)~~ | DONE (PR #333, #335) |
 
@@ -525,7 +525,7 @@ does the converter handle them?
 | Range joins (BETWEEN, ASOF) | **None** — MV YAML `joins` are equi-only (`primary_key`/`foreign_key`) | N/A — no equivalent construct |
 | Filter labels (`LABELS=(FILTER)`) | MV `filter:` on dimensions/measures — boolean expressions for conditional availability | **Not mapped** — `ts-from-databricks-rules.md` does not document filter handling |
 | View-backed sources | MV `source.table` accepts views and subqueries (`source.sql_select`) | **Partially mapped** — `sql_select` sources → SQL View TML exists in worked example |
-| Verified queries | **None** — Databricks uses Genie Spaces with separate instruction files, not inline verified queries | N/A — no equivalent construct |
+| Verified queries | **None** — Databricks uses Genie Agents with separate instruction files, not inline verified queries | N/A — no equivalent construct |
 
 ### Proposed approach
 
@@ -2512,6 +2512,22 @@ Step 1 dropped profile discovery entirely (bare `ts auth whoami`, no multi-profi
 menu) and from-databricks-mv inlines ~15 lines of profile-JSON Python duplicated from
 ts-profile-databricks. Cross-reference BL-079/11.3 above.
 
+**Note (2026-07-29 full audit finding 11.3):** the shared reference this note
+anticipated now exists —
+`agents/shared/references/profile-select-and-authenticate.md` (this item's PR1) — but has
+**zero adopters**: 15 `agents/cli/*/SKILL.md` files still inline a divergent "read
+`~/.claude/thoughtspot-profiles.json`" block (`ts-convert-from-looker`, `ts-audit`,
+`ts-dependency-manager`, `ts-object-model-aggregates`, `ts-object-answer-promote`,
+`ts-object-model-agentql-query`, `ts-object-model-alias`, `ts-object-model-coach`,
+both `ts-recipe-formula-*-snowflake` skills, `ts-object-model-erd`,
+`ts-profile-thoughtspot`, `ts-variable-timezone`, `ts-publish-orgs`,
+`ts-security-columns`) — a Claude-only path that quietly assumes the Claude Code
+runtime, though `agents/cli/` also serves Cortex Code CLI. This is the confirmed
+baseline for this item's adoption-pass phase: link each of the 15 to the shared
+reference and swap the inline JSON-parse for `ts profiles list --json`. (BL-122's own
+11.3 note is corrected separately — see that entry — and cross-references this one
+rather than duplicating the adopter list.)
+
 **Target:** 2026-10-31.
 
 ---
@@ -2830,11 +2846,17 @@ Per-converter gap against that bar:
 
 | Converter | Codification | Empirical verification | Notes |
 |---|---|---|---|
-| ts-convert-from-snowflake-sv | **None** (only `ts snowflake diff`/`lint-ddl`) | Partial — 2026-07-10 SE-cluster formula-composition/TML-import batch, but no per-construct claim matrix | Biggest gap; BL-063's original title named Snowflake too. Mirror the Databricks 3-command pipeline (`parse-sv` / `translate-formulas` / `build-model`). CoCo mirror keeps the doc-driven path (no shell) — docs stay authoritative for it. |
-| ts-convert-to-snowflake-sv | None | Inaugural anchor only (2026-06, never swept) | DDL emission is highly mechanical — strong codification candidate. |
-| ts-convert-to-databricks-mv | None | Window emission tables live-verified (PR1) | MV YAML emission is mechanical; reuse `mv_*` module vocabulary in reverse. |
+| ts-convert-from-snowflake-sv | **Shipped** — `ts snowflake parse-sv` / `translate-formulas` / `build-model` (+ `introspect`) | Partial — 2026-07-10 SE-cluster formula-composition/TML-import batch, but no per-construct claim matrix | Skill rewired onto the pipeline. CoCo mirror keeps the doc-driven path (no shell) — docs stay authoritative for it. |
+| ts-convert-to-snowflake-sv | **Shipped** — `ts snowflake introspect` / `build-sv` | Inaugural anchor only (2026-06, never swept) | DDL emission codified; skill rewired. |
+| ts-convert-to-databricks-mv | **Shipped** — `ts databricks build-mv` | Window emission tables live-verified (PR1) | MV YAML emission codified; skill rewired. |
 | ts-convert-from-tableau | **Done** (full `ts tableau` pipeline) | Doc-driven sweeps only — no fixture number-match has ever run | Only the fidelity leg is missing; needs live Tableau Server access (often unavailable — see feedback memory). Scope as opportunistic. |
-| ts-convert-from-looker | **None** | Not yet swept | (audit finding 5.2) 1,845 lines run lkml parsing, field resolution, measure translation, and TML emission agentically — the same mechanical shape codified for Tableau/Databricks. Cheapest parse leg of all converters (mature `lkml` parser on PyPI); build-model can reuse existing machinery. Model on the BL-063 phases (`ts looker parse` / `translate-formulas` / `build-model`). Shipped 6 days after the codification review, so it was absent from the original table. |
+| ts-convert-from-looker | **None** | Not yet swept | (audit finding 5.2) 1,845 lines run lkml parsing, field resolution, measure translation, and TML emission agentically — the same mechanical shape codified for Tableau/Databricks/Snowflake. Cheapest parse leg of all converters (mature `lkml` parser on PyPI); build-model can reuse existing machinery. Model on the BL-063 phases (`ts looker parse` / `translate-formulas` / `build-model`). **The only converter left with zero deterministic pipeline** (2026-07-29 audit finding 11.4) — the natural next codification program. |
+
+**Correction (2026-07-29 full audit finding 11.4):** the table above previously listed
+Snowflake from/to and Databricks-to as "None (only diff/lint-ddl)" — stale. All three
+shipped (`parse-sv`/`translate-formulas`/`build-model`/`introspect`/`build-sv` for
+Snowflake; `build-mv` for Databricks-to) and their skills are rewired onto the pipeline.
+ts-convert-from-looker is now the only converter with zero deterministic codification.
 
 Also in scope: normalize currency-anchor style (the Databricks anchors have outgrown
 "context" into changelog territory; the anchor format is `platform — YYYY-MM (context)` —
@@ -2977,6 +2999,14 @@ for 3.14 to be testable). **Remaining:** (b) the `>=3.11` floor bump after 3.10 
 3.14 is CI-verified; the floor bump to `>=3.11` remains deferred.
 
 **Target:** ✅ cap lifted; revisit the 3.11 floor bump after 2026-10.
+
+**Note (2026-07-29 full audit finding 16.1):** re-confirms the floor bump is already
+tracked here (not a new item) and narrows the plan now that 3.10 EOL (2026-10) is ~2
+months out: bump `requires-python` to `>=3.11` with a **MINOR** ts-cli version bump,
+drop `3.10` from the `pytest-matrix` CI job (BL-107) at the same time, and check
+install-docs / README for any `>=3.10` wording. Batchable with BL-164's
+`snowflake-connector-python` 4.x floor bump — both are Oct-2026-adjacent dependency-floor
+changes — but neither blocks the other.
 
 ---
 
@@ -3255,10 +3285,13 @@ Five ts-cli code-quality items from the audit — all resolved:
 
 Three near-identical prose blocks duplicated across 4+ conversion skills:
 - **11.3** Connection selection prompt (N/F/L + E/C) — extracted to
-  `agents/shared/references/connection-select.md`; from-snowflake-sv and
-  from-databricks-mv updated to link. from-tableau not yet updated (Tableau
-  changes tracked separately). model-aggregates doesn't use this prompt
-  (confirmed — no connection selection in that skill)
+  `agents/shared/references/connection-select.md`; ~~from-snowflake-sv and~~
+  from-databricks-mv updated to link. **Correction (2026-07-29 full audit, its own
+  finding 11.6 — "BL-122 item 11.3 status inaccurate"):** this status line was wrong —
+  only from-databricks-mv actually links `connection-select.md`; from-snowflake-sv
+  still carries its own inline N/F/L prompt and has NOT been updated. from-tableau also
+  not yet updated (Tableau changes tracked separately). model-aggregates doesn't use
+  this prompt (confirmed — no connection selection in that skill).
 - **11.4** Table discovery pattern (C/I scope + metadata search + column verification +
   Table Plan summary) — duplicated with identical logic, already patched skill-by-skill
   once (2026-06-16). See also BL-111 (`--connection` filter on `ts metadata search`)
@@ -3269,6 +3302,13 @@ Three near-identical prose blocks duplicated across 4+ conversion skills:
   because steps described commands in prose without exact flags. PR #319 embedded a canonical
   copy-pasteable invocation per step in `ts-convert-from-tableau` → **0 `--help` probes**, ~25% fewer
   tokens on the Ads run. Apply to every conversion skill — highest-ROI slice of this item.
+
+**Note (2026-07-29 full audit finding 11.3, profile-select-and-authenticate scope):**
+a sibling adoption gap of the same shape — `agents/shared/references/profile-select-and-authenticate.md`
+has zero `agents/cli/*/SKILL.md` adopters (15 skills still inline divergent profile-JSON
+reads) — is tracked under **BL-084** rather than duplicated here, since that reference
+was filed as BL-084's own PR1 and BL-084 already anticipated this exact adoption pass
+(its 2026-07-11 note). See BL-084 for the adopter list and target date.
 
 **Target:** extract shared references when next editing the conversion skills.
 
@@ -3385,7 +3425,8 @@ procedural instructions inline, leave a link; verify all step headings survive +
 
 **Filed:** 2026-07-23.
 **Source:** 2026-07-23 benchmark; PR #319 (`verify --dir` + one-pass build-model guidance).
-**Affects:** all `ts-convert-*` SKILL.md + their `ts <src> verify`/build CLIs.
+**Affects:** all `ts-convert-*` SKILL.md + their `ts <src> verify`/build CLIs;
+**+ `agents/cli/ts-audit/SKILL.md` line ~214** (2026-07-29 audit finding 14.3 — see below).
 **Status:** OPEN (tableau done in #319).
 
 Two generalizable token/latency wins found on Tableau, likely present in the other converters:
@@ -3396,6 +3437,14 @@ Two generalizable token/latency wins found on Tableau, likely present in the oth
 2. **Batch verify.** Added `ts tableau verify --dir` (verify every model in a dir in one call) so verify isn't
    looped per model. Check whether sibling converters' `verify`/validate commands need the same `--dir`.
 3. **Embed exact CLI command+flags per step** (see BL-122) — removed 5–7 `--help` probes/run.
+
+**Extension (2026-07-29 full audit finding 14.3):** the same per-object-loop class exists
+outside the converters — `ts-audit/SKILL.md:214` loops `ts metadata dependents "{model_guid}"`
+once per Model even though the command accepts multiple GUIDs and batches natively (proven
+by `ts audit run`'s own `build_context`, which already calls it batched). Prose-only fix:
+change the step to pass all Model GUIDs to one call. Filed against this item's affected
+list rather than a new BL, since it's the same shape this item already tracks — just found
+outside the `ts-convert-*` family this item was originally scoped to.
 
 **Verify:** an agent run on a multi-object workbook uses ~1 build + 1 lint + 1 verify (not N+N+N), same output.
 **Target:** next converter edit.
@@ -4403,7 +4452,742 @@ assume there is nothing to publish.
 
 ---
 
-## BL-153 — Bound `ts tml verify-render` per-tile probing on large liveboards `Tier 3`
+## BL-153 -- `ts share status --org X` cannot resolve an object NATIVE to Org X `Tier 2` -- **FIXED 2026-07-28**
+
+**Filed:** 2026-07-28.
+**Source:** found reaching for `ts share status <liveboard-guid> --org ORG1` to read a
+migration's grants back -- the exact use the command exists for.
+
+```
+$ ts share status 083fbd06-... --org ORG1 -p nebula-damian-alias
+ThoughtSpot API 400 ... {"metadata":"Specify the metadata_type for identifier 083fbd06-..."}
+Error: Invalid value: Could not resolve '083fbd06-...'.
+       Expected a GUID, or the exact name of one of: LOGICAL_TABLE, LIVEBOARD, ANSWER.
+```
+
+The GUID was valid, the object existed, and the Org was named on the command line.
+
+### Cause
+
+`status_cmd` resolved its targets with an **Org-less** client and scoped only the
+*permissions read* per Org:
+
+```python
+targets = _status_targets(_client_for_org(profile), list(guids), columns)   # no org
+for org_name in orgs:
+    client = _client_for_org(profile, org_name)                            # org, too late
+```
+
+`metadata/search` is Org-scoped, so an object **native to a tenant Org is invisible to the
+default-Org client** -- it cannot be resolved at all. This is the **same bug already fixed in
+`ts share export` on 2026-07-27**, which is why `_resolve_object_in_orgs` exists. `status` was
+simply missed at the time.
+
+It matters because it breaks the read-back half of the pipeline exactly where a migration
+needs it: confirming that migrated content in a tenant Org carries the grants it should. And
+the error blames the identifier, so it reads as "you typed the GUID wrong" rather than "I
+looked in the wrong Org" -- the same misdirection as BL-147.
+
+**Blast radius beyond migration.** `ts-security-columns/SKILL.md` calls
+`ts share status {guid} --columns --org "{org}"` at two steps, and
+`references/mechanism-decision.md` names it as the check for "does the audience hold object
+access?". Those worked for a Primary-owned published table (visible to the default Org) and
+failed for a **tenant-owned** one -- so the mechanism-decision check was unavailable for
+exactly the objects a tenant defines CLS on.
+
+### Second defect found alongside: the probe cried wolf
+
+`_find_object` probes untyped first, which the platform rejects with a 400 whenever the
+identifier is not in the client's Org -- i.e. **on every tenant-Org lookup**. `_try_search`
+correctly swallows it, but `client.py` had already printed
+`ThoughtSpot API 400 ... Specify the metadata_type` to stderr. So a *successful* report came
+with a red API error in front of it. A probe whose failure IS the answer must not announce a
+fault. `_search` gained a `quiet` flag that passes `raise_for_status=False`; only probes use
+it, and a genuine search failure is still loud and fatal.
+
+### A trap worth recording
+
+Adding a kwarg to the `client.post` call broke five test doubles whose signature was
+`post(self, _path, json=None)`. Because `_try_search` catches **everything**, the resulting
+`TypeError` did not surface as an error -- every lookup silently "found nothing". Reading
+`resp.ok` had the same shape: `AttributeError` on any non-`requests.Response`, swallowed the
+same way. `ok` is now read via `getattr(resp, "ok", True)` and the doubles take `**_kw`.
+
+**The blanket `except (Exception, SystemExit)` in `_try_search` converts programming errors
+into empty result sets.** Its docstring rightly warns against narrowing it to
+`except Exception` (that reintroduces a crash), but the cost is that nothing in this path
+fails loudly. Any future change to what `_search` calls or reads must be exercised against a
+real response object.
+
+### Verified
+
+Live on `nebula-damian-alias`: `ts share status 083fbd06-... --org ORG1` now exits 0, prints
+no stderr diagnostic, and returns 5 rows showing `MIGTEST_VIEWERS` with `READ_ONLY` plus
+`guest1`/`guest4` inheriting it. The three regression tests were confirmed to **fail against
+the old behaviour** (with `__pycache__` cleared, after a stale `.pyc` briefly made a restored
+file look broken).
+
+---
+
+## BL-154 -- Phase D's four residual verification gaps `Tier 2`
+
+**Filed:** 2026-07-28.
+**Source:** written up at the repo owner's request when pausing the migration work, so the
+gaps are tracked rather than living in a conversation.
+**Status:** OPEN. **The code is built and Phase D is functionally complete** -- these are
+paths that have not been *exercised*, which is a different and lesser thing than unbuilt.
+
+Filed as one item rather than four because they share a cause: each needs cluster or fixture
+state that does not exist yet, and they would be scheduled together in one session with the
+right environment.
+
+| Gap | What is verified today | What it needs | Risk if wrong |
+|---|---|---|---|
+| **Same-Org `apply` (the WRITE)** | `audit` and the full `--dry-run` plan, live (BL-152 record) | The repo owner's go-ahead -- it rewrites ORG1 in place, and ORG1 is the source side of the fixture that has caught six real bugs | An in-place `--no-create-new` import of rewritten content behaving unlike the create-fresh path |
+| **Published Model WITH RLS** | Only the **refusal** path of the tenant-isolation check | An RLS rule on the master -- which runs straight into **BL-144**, where a column-less RLS expression imports `OK` and silently WIPES existing rules | The happy path is the one every real tenant takes, and it is the security-shaped one |
+| **`client_state_v2` rewriting** | The parse-rewrite-reserialise transform, by unit test over a hand-built blob | A chart **customised in the UI** -- a TML-created chart carries no such blob at all, so the path cannot be reached from fixtures the tooling builds | A substring pass over that blob corrupts unrelated chart state; the rewrite parses it precisely to avoid that, and the precision is what is untested |
+| **Cross-cluster topology** | `import_mode` derives it, and the Org-id exclusion is deliberately skipped there (BL-152) | A second cluster with the master published on it | Org ids are meaningless across clusters and `Primary` is `0` on both, so the fallback is GUID exclusion alone |
+
+Also unverified, and much smaller: **that ORG2's pre-existing aliases still RENDER** after a
+later wave's merge. Their presence in the stored document is proven by round-trip export
+(`2026-07-28-ts-migrate-wave-aliases.md` §4); nobody has looked in an ORG2 session. ORG1's
+render **is** confirmed, so the mechanism works -- this is the preservation half's last inch.
+
+### Why this is Tier 2 rather than Tier 1
+
+Nothing here is known-broken. But note what the session that produced Phase D actually shows:
+**every real bug in it was found by running something, and none by reasoning or unit tests** --
+two Tier 1 defects (BL-150, BL-152) that unit tests passed straight through, both silent
+successes. So "built and unit-tested" has a measured track record here, and it is not good.
+These four are where the next one would be.
+
+---
+
+## BL-155 -- the security spec's Phase D additions are still unbuilt `Tier 2`
+
+**Filed:** 2026-07-28.
+**Source:** carried forward from `docs/superpowers/specs/2026-07-26-ts-security-sharing-design.md`
+§5, which lists migration-side work that Phase D did not include.
+**Status:** OPEN, and genuinely unbuilt -- distinct from BL-154, which is untested-but-built.
+
+Three pieces:
+
+1. **A `CSR_BLOCKER` audit status.** A tenant table carrying Column Security Rules cannot be
+   migrated blindly: **CSR is scoped to the Org it was defined in and does NOT travel with
+   publication** (live-verified 2026-07-27 -- the owning Org's update succeeds and is enforced
+   there, while a tenant Org the table is published to keeps the restricted column fully
+   visible). So a migration that moves content onto a published master silently *widens* column
+   access. `audit` should classify and refuse it the way it refuses `SET_BLOCKER`.
+2. **`--csr map-to-cls`.** The mechanism is chosen by AUDIENCE per (Org, object), so migrating
+   onto a published master can require translating CSR to column-level sharing. `ts security
+   column-rules` and `ts share` both exist; what is missing is the migration-time translation.
+3. **CSR TML preservation.** CSR exports as a sibling TML document (`column_security_rules`),
+   exactly like `column_alias`. The rewrite does not carry it, so a migrated table would lose
+   its rules -- the same class of silent loss as BL-150's sharing, reached from a different
+   direction.
+
+**Why it matters:** every failure mode here is a column becoming *more* visible, silently.
+That is the one direction a security change must never drift in by accident.
+
+---
+
+## BL-156 -- two command modules crossed the file-size warn line `Tier 3`
+
+**Filed:** 2026-07-28.
+**Status:** OPEN. Advisory only -- the gate warns at 500 and fails at 1000, and 30 modules
+already warn.
+
+| Module | Lines | Was |
+|---|---|---|
+| `commands/migrate.py` | 654 | 487 before BL-152 |
+| `commands/share.py` | 516 | 484 before BL-153 |
+
+Both crossed while fixing Tier 1/2 bugs, and in both cases the added lines are mostly the
+"why" comments that record what the bug was -- trimming them to get under the line would
+delete the thing worth keeping.
+
+**The established pattern is a module-per-concern split, not shorter comments.**
+`share_planning.py` was already split out of `share.py` under this same gate, and
+`publish_planning.py` out of `publish.py`. `commands/migrate.py` has the same natural seam:
+read-only `audit` / `scan-sets` / `aliases` in one module, destructive `apply` / `rollback` in
+the other. Doing it needs care rather than effort -- the last two renderer patches in this
+family landed in dead code paths because a refactor had moved the live one.
+
+---
+
+## BL-157 -- Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private imports `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 full audit, findings 5.1 + 5.4.
+**Affects:** `agents/cli/ts-object-model-aggregates/SKILL.md` (Steps 5d/5e/6d),
+`tools/ts-cli/ts_cli/commands/aggregate.py`, `tools/ts-cli/ts_cli/aggregate/rls.py`,
+`tools/validate/check_patterns.py`.
+**Status:** OPEN.
+
+`ts-object-model-aggregates` has the executor import PRIVATE ts-cli internals directly --
+exactly the anti-pattern `.claude/rules/ts-cli.md` exists to prevent, and it landed
+unnoticed because check_patterns.py only ever looked for `requests.*`:
+
+- Step 5d (SKILL.md:388) imports `ts_cli.commands.aggregate._aggregate_name` to compute
+  the deterministic proposed aggregate name for the curve display.
+- Step 5e (SKILL.md:445) imports `ts_cli.aggregate.rls.add_rls_columns_to_candidate` to
+  force-add a missing RLS column to a candidate's grain.
+
+The leading underscore means no contract protects either call -- a ts-cli refactor can
+pass every unit test and still silently break the shipped skill the moment either
+function's signature or module path changes.
+
+**Companion hazard (from finding 11 -- codification):** SKILL.md ~460-467 already warns in
+prose that re-running `ts aggregate recommend` after a force-add silently discards the
+widened grain, because `recommend` regenerates `candidates.json` wholesale from
+`signatures.jsonl` and never reads the existing force-added dimensions back in. Today
+that is a warning to the reader, not a guard in the code.
+
+**Fix, four parts:**
+1. Add `ts aggregate preview-names` -- wraps `_aggregate_name` as a public command so
+   Step 5d calls the CLI instead of importing the private function.
+2. Add `ts aggregate widen-rls --candidate <id>` -- wraps `add_rls_columns_to_candidate`
+   as a public command for Step 5e's force-add path.
+3. Make `recommend` force-add-aware: read back any already-force-added dimensions from
+   the existing `candidates.json` (the same way `_merge_prior_agg_rows` already reads
+   back profiled row counts) so a re-run doesn't discard a widened grain.
+4. Let `ts tables create` accept a single spec object (not only a JSON array) or add
+   `--file`, removing the `python3 -c` array-wrap shim in SKILL.md Step 6d (line ~659).
+
+**Note:** `check_patterns.py` carries a dated allowlist entry for this SKILL.md's two
+`ts_cli` imports (PR #405, extending rule 8 / finding 5.2) -- remove that entry when this
+item ships and the imports are replaced.
+
+**Target:** next `ts-object-model-aggregates` touch -- the audit's own Follow-ups section
+names this as the next scoped unit of work once the migrate-engine/harness/mapping wave closed.
+
+---
+
+## BL-158 -- Extract the cascade-drop retry loop into shared import machinery `Tier 3`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 full audit, finding 11.2.
+**Affects:** `tools/ts-cli/ts_cli/commands/tableau.py` (`_collect_cascade_victims`, line
+~436, and its retry loop around line ~537); `ts-convert-from-qlik`, `ts-convert-from-powerbi`,
+`ts-convert-from-sisense` SKILL.md; the shared import/build-model machinery.
+**Status:** OPEN.
+
+Tableau's build-model import path is the only converter where a rejected-formula cascade
+(a formula referencing another formula that gets dropped for validation reasons) is
+walked deterministically: `_collect_cascade_victims` computes the transitive closure of
+what else breaks when a formula is excluded, then the import retries without those
+victims. `qlik.py`, `powerbi.py`, and `sisense.py` have no equivalent machinery -- their
+SKILL.md files instead instruct the LLM to walk the cascade by hand on import failure.
+An LLM re-deriving the closure from rejection error text will miss a victim that isn't
+directly named in the message (a formula whose only reference to the dropped one is
+transitive) -- exactly what the codified version gets right.
+
+**Approach:** extract the collect-victims + retry loop into shared import machinery
+reusable across converters -- e.g. a `--prune-rejected` flag on the generic
+`ts tml import` / build-model import path, or a shared helper in `io_helpers.py` any
+converter's build-model command can call. Wire qlik/powerbi/sisense's build-model
+commands to it and delete the manual-loop prose from their SKILL.md files.
+
+**Target:** next touch of qlik/powerbi/sisense build-model, or a standalone
+shared-import-machinery pass.
+
+---
+
+## BL-159 -- Canonical migration-report status vocabulary `Tier 3`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 full audit, finding 11.5.
+**Affects:** qlik/sisense/powerbi (`Migrated`/`Approximated`/`NEEDS REVIEW`/`Skipped`),
+looker (`translated`/`approximate`/`omitted`/`Untranslatable`), tableau
+(`Migrated`/`Partial`/`Parked`/`Not migrated`) migration-report generation + each
+skill's `mapping.json`.
+**Status:** OPEN.
+
+Three incompatible status vocabularies exist across the five converters for the same
+underlying concept -- whether a construct migrated cleanly, migrated approximately,
+needs manual review, or was dropped entirely. The vocabulary is the cross-converter
+contract written into each skill's `mapping.json` / migration-report template, so a
+reader (or a future cross-converter tool) has to learn three synonym sets for the same
+four ideas.
+
+**Approach:** extract a canonical status-vocabulary reference to
+`agents/shared/references/` (four canonical states, one line each defining what
+qualifies for it). Adopt the qlik/sisense/powerbi four-state set
+(`Migrated`/`Approximated`/`NEEDS REVIEW`/`Skipped`) as canonical, since it is already
+shared by three of the five converters, and converge looker and tableau onto it the
+next time either skill's migration-report section is touched -- not a standalone
+rename-only PR.
+
+**Target:** next edit of looker's or tableau's migration-report section.
+
+---
+
+## BL-160 -- migrate/ts-cli pagination and per-dependent batching gaps `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 full audit, findings 14.1 + 14.2.
+**Affects:** `tools/ts-cli/ts_cli/migrate/discover.py` (`dependents_through_views`, line
+347), `tools/ts-cli/ts_cli/migrate/__init__.py:30`, `tools/ts-cli/ts_cli/commands/migrate.py:457`,
+`tools/ts-cli/ts_cli/commands/orgs.py:62`, `tools/ts-cli/ts_cli/commands/users.py:67,130`.
+**Status:** OPEN.
+
+Two related performance gaps in the post-2026-07-22 migrate delta:
+
+1. `discover.py:347`'s `dependents_through_views` calls the batched `subtypes_by_guid`
+   helper ONE GUID AT A TIME inside the frontier walk, violating the module's own stated
+   API budget -- and both callers (`migrate/__init__.py`'s `run_audit`,
+   `commands/migrate.py`'s audit command) immediately re-fetch the same subtypes
+   afterward in one batched call anyway, so the per-dependent calls are pure waste. A
+   tenant with 200 dependents costs ~201 `metadata/search` calls per Model instead of
+   ~5 on a fleet-wide scan. **Fix:** batch `subtypes_by_guid` once per frontier LEVEL
+   (collect every `dep_guid` discovered at that depth, one batched call, then decide
+   which are `VIEW_BASED` for the next frontier) instead of once per dependent.
+2. The 2026-07-22 audit's finding 14.1 was recorded as closed by PR #283, but that PR
+   only bumped `metadata/search`'s default page size to 500 -- `orgs.py:62` and
+   `users.py:67` (users) / `:130` (groups) still paginate at `page_size=50`, and
+   `ts-setup-tenancy` / `ts-publish-orgs` both enumerate orgs/users/groups through these
+   paths. Same one-line fix (bump to 500, matching the metadata-search precedent);
+   filing as its own tracked entry since the prior routing record incorrectly reads this
+   as fully closed.
+
+**Target:** next migrate/ts-cli performance pass, or bundled with the BL-157 aggregates
+CLI work if convenient.
+
+---
+
+## BL-161 -- Tools quality cluster: SQL-tokenizer dedup, subprocess import path, validator-helper dedup, dead `--all` flag `Tier 3`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 full audit, findings 4.3, 4.4, 4.6, 1.3.
+**Affects:** `tools/ts-cli/ts_cli/commands/sv_sql.py`, `tools/ts-cli/ts_cli/databricks/mv_sql.py`,
+`tools/ts-cli/ts_cli/io_helpers.py` (`run_tml_import`), `tools/ts-cli/ts_cli/commands/snowflake.py:591`,
+`tools/ts-cli/ts_cli/commands/databricks.py:436`, `tools/validate/check_secrets.py`,
+`check_tml.py`, `check_sv_yaml.py`, `tools/smoke-tests/`, `tools/ts-cli/ts_cli/commands/model.py`
+(`_select_formulas` / `promote-formula --all`).
+**Status:** OPEN.
+
+Four independent cleanups bundled because each is small and touches the same "tools
+quality" surface:
+
+1. `sv_sql.py` and `databricks/mv_sql.py` duplicate ~150 lines of SQL tokenizer/parser
+   machinery (`tokenize()`, `_Cursor`, date-literal constants, shared construct
+   handlers) -- a tokenizer bug fixed in one silently persists in the other. Extract to
+   a shared `sql_common.py`. **Must stay stdlib-only** (no third-party deps) to preserve
+   Genie-vendorability -- `agents/databricks/` concatenates modules for Genie Code,
+   which can't `pip install`.
+2. `io_helpers.py:76`'s `run_tml_import` shells out via
+   `bash -c "source ~/.zshenv && ts tml import ..."` -- hard-requires `~/.zshenv` and
+   `ts` on the subprocess PATH, so it fails outright on fresh Linux installs and on
+   Windows (both declared-supported platforms). An in-process alternative already
+   exists (`commands/tml.py` calling through `ThoughtSpotClient` directly; keyring-backed
+   auth makes the zshenv sourcing unnecessary). Callers: `snowflake.py:591`,
+   `databricks.py:436`. Switch both to the in-process path.
+3. `_extract_yaml_blocks` / `_get_staged_files` are cloned across 3+ validators
+   (`check_secrets.py`, `check_tml.py`, `check_sv_yaml.py`); a ~26-line
+   model-GUID-resolution block is cloned across 2+ smoke tests. Move into a shared
+   `tools/validate/_dirs.py`-style module and `tools/smoke-tests/_common.py`'s
+   `resolve_model()`, respectively.
+4. `ts model promote-formula --all` is a dead no-op: `model.py`'s `_select_formulas`
+   takes an `all_flag` parameter but never reads it, and with neither `--formula` names
+   nor `--all` given, every formula is silently promoted anyway. Either honor the flag
+   (require one of names/`--all`) or remove it and document the promote-all default
+   explicitly.
+
+**Target:** opportunistic, next touch of any of the files above.
+
+---
+
+## BL-162 -- Repoint or retire the `tableau.py` file-size ALLOWLIST justification `Tier 3`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 full audit, finding 4.5.
+**Affects:** `tools/validate/check_file_size.py` (ALLOWLIST entry for `commands/tableau.py`),
+`tools/ts-cli/ts_cli/commands/tableau.py` (1,675 lines).
+**Status:** OPEN.
+
+`check_file_size.py`'s ALLOWLIST entry for `commands/tableau.py` cites BL-089 as its
+justification, but BL-089 is archived Done (`backlog-archive.md` -- "Multi-table
+build-model generate-mode support"), and the file has since grown to 1,675 lines with no
+live backlog item tracking a split. The ALLOWLIST's own rule -- every entry needs a
+backlog cross-reference that is still open -- is silently unsatisfied.
+
+Two paths, either closes it:
+- **(a)** This item becomes the live cross-reference and schedules the per-flow split
+  the same way `share_planning.py` was split out of `share.py` and `publish_planning.py`
+  out of `publish.py` under the same file-size gate (BL-156 documents that pattern for
+  `migrate.py`/`share.py`) -- the natural seam here is parse/classify vs.
+  build-model/build-liveboard vs. the cascade-retry import machinery (BL-158).
+- **(b)** If a split isn't planned, amend the ALLOWLIST comment to an honest permanent
+  exemption instead of a stale backlog pointer.
+
+Optionally extend `check_file_size.py` to assert ALLOWLIST BL references resolve to an
+OPEN backlog item -- would have caught this drift automatically.
+
+**Target:** opportunistic -- next time `tableau.py` is touched for unrelated work, or a
+standalone split PR.
+
+---
+
+## BL-163 -- Validator test coverage + qlik smoke fixture-fail-hard `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 full audit, findings 6.1 + 6.2.
+**Affects:** `tools/validate/` (`check_consistency.py`, `check_runtime_coverage.py`,
+`check_coverage_matrix.py`, `check_skill_naming.py`, `check_no_inline_requests.py`,
+`check_file_size.py`, `check_sv_yaml.py`, `check_version_sync.py`, `check_yaml.py`,
+`generate_parity.py`), `tools/validate/tests/`, `tools/smoke-tests/smoke_ts_convert_from_qlik.py`.
+**Status:** OPEN.
+
+Ten `tools/validate/` gates have zero tests of their own -- including five non-trivial
+ones (`check_consistency.py` at 295 lines, `check_runtime_coverage.py`,
+`check_coverage_matrix.py` including its date-enforcement logic,
+`check_skill_naming.py`'s `FAMILY_PATTERNS` table, `check_no_inline_requests.py`).
+BL-077 (done, PRs #296/#297) added known-bad-fixture self-tests for 18 OTHER
+validators -- this is the same treatment for the stragglers it didn't reach. A
+regression that silently stops one of these ten from flagging still exits 0, exactly
+the failure mode BL-077's own motivating finding (F2, `check_skill_versions`) described.
+
+Separately: `smoke_ts_convert_from_qlik.py` SKIPs (prints "SKIP -- fixture not found"
+and returns 0) when its repo-bundled `.qvf` fixture is missing, applying the
+live-instance-dependency convention (skip when no live instance) to a fixture that
+should always be present in a checkout -- a regression that deletes or corrupts the
+fixture goes unnoticed. The liveboard step also tolerates an empty sheet result
+silently. **Fix:** fail (nonzero) on a missing fixture, and assert the fixture's known
+sheet count rather than accepting whatever comes back.
+
+**Approach:** test the straggler validators highest-line-count first
+(`check_consistency.py`, then `check_runtime_coverage.py` / `check_coverage_matrix.py`),
+following the `test_known_bad_fixtures.py` pattern BL-077 established (git-initialised
+`tmp_path` repos via the existing `_init_git()` helper).
+
+**Target:** opportunistic, highest-line-count validator first.
+
+---
+
+## BL-164 -- `snowflake-connector-python` 4.x compat check and floor bump `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 full audit, finding 16.3.
+**Affects:** `tools/ts-cli/pyproject.toml`.
+**Status:** OPEN.
+
+`snowflake-connector-python>=3.13.1` (the current floor) now resolves to 4.7.1 on a
+fresh install -- a silent major-version crossing nothing in the repo has deliberately
+tested against. Fresh-resolve is defensible day to day given the per-PR CVE gate, but a
+major version bump crossing unnoticed deserves a deliberate compatibility check rather
+than passive trust in "tests still pass": review the 3.x -> 4.x changelog for breaking
+changes relevant to `load.py`'s `_connect_python` (key-pair auth path) and
+ts-profile-snowflake's connection test, run the Snowflake-profile smoke tests against
+4.x explicitly, then set an explicit floor (`>=4,<5`) once verified rather than leaving
+the range open-ended.
+
+**Related but separate:** BL-106 tracks the Python 3.11 floor bump (also
+October-adjacent, since Python 3.10 EOLs 2026-10) -- the two are batchable in the same
+PR if convenient (both are dependency-floor bumps with a similar Oct-2026 trigger) but
+are independent changes; this item does not require BL-106 to land first.
+
+**Target:** no fixed date -- before Python 3.10 EOL (2026-10) is a reasonable anchor,
+since a floor-bump PR is already scheduled for BL-106 around then.
+
+---
+
+## BL-165 -- Small residuals: dependency-types sync check, check_secrets scope, Tableau 2026.2 investigation `Tier 3`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 full audit, findings 7.2, 18.4 (residual), 13.14.
+**Affects:** `scripts/pre-commit.sh` (dependency-types.md sync nudge), root `CLAUDE.md`
+(change-impact map wording), `tools/validate/check_secrets.py`,
+`.claude/rules/security.md`, `agents/shared/mappings/tableau/tableau-tml-rules.md`.
+**Status:** OPEN.
+
+Three independent small items:
+
+1. dependency-types.md sync is a TTY-only soft nudge in `pre-commit.sh` (line ~269) with
+   no CI counterpart, while root `CLAUDE.md`'s change-impact map words the rule as "must
+   stay in sync" -- agent-driven (non-TTY) commits, the dominant mode for this repo, get
+   zero signal either way. Promote the mechanically-checkable component (does
+   dependency-types.md's status table/hierarchy still mention every status
+   ts-dependency-manager's Step 4/5 emit) to a `check_*.py` validator, or soften
+   CLAUDE.md's wording to describe what's actually enforced.
+2. `check_secrets.py` only scans tracked/staged files; the permission-capture
+   inline-credential class documented in `security.md` (Claude Code's
+   `permissions.allow` captures the full command text -- including any inlined bearer
+   token or Snowflake keypair JWT -- into the gitignored `.claude/settings.local.json`)
+   is invisible to it by construction. The two live stale entries found by the
+   2026-07-29 audit were already deleted and the rule is now documented in
+   `security.md` (PR #402); optionally extend `check_secrets.py` to also scan
+   `.claude/settings.local.json` when present, so a longer-lived captured token
+   wouldn't sit unnoticed.
+3. Tableau 2026.2 Composable Data Sources let a workbook relate multiple *published*
+   data sources into one model; `tableau-tml-rules.md`'s one-model-per-datasource rule
+   is silent on composed/PDS-backed datasources and the parser targets federated
+   physical relations only. TWB serialization for this feature is unverified --
+   investigate with a real 2026.2 workbook before changing any mapping or parser logic
+   (park note: DATA-BLOCKED, same shape as BL-091 -- not a known code gap yet).
+
+**Target:** opportunistic -- (1)/(2) are validator/doc touches; (3) needs a 2026.2
+workbook to become actionable.
+
+---
+
+## BL-166 -- `custom_extensions`-style loss stash for the ts-convert-* pairs `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 Apache Ossie converter review
+(`docs/reviews/2026-07-29-ossie-converter-learnings.md`), finding F11.
+**Affects:** `agents/cli/ts-convert-to-snowflake-sv/` (SKILL.md +
+`references/coverage-matrix.md`), `agents/cli/ts-convert-from-snowflake-sv/`,
+`agents/cli/ts-convert-to-databricks-mv/`, `agents/cli/ts-convert-from-databricks-mv/`,
+`tools/ts-cli/ts_cli/` (`build-sv`/`parse-sv`, `build-mv`/`parse-mv`), `tools/ts-cli/tests/`.
+**Status:** OPEN.
+
+41 limitation rows across the four coverage matrices (13 to-SF, 8 from-SF, 10 to-DBX,
+10 from-DBX) resolve to "documented in the Unmapped Properties Report, then gone" --
+`format_pattern`, `geo_config`, `column_groups`, `default_date_bucket`, `custom_order`,
+locale aliases and partial `ai_context` on the way out; `ACCESS_MODIFIER: PRIVATE`,
+table-level synonyms, `is_enum` and sample values on the way in. A TS->SV->TS round trip
+cannot recover any of them and nothing in the repo measures how much is lost. Upstream's
+databricks converter solves the identical problem with a `write_stash`/`read_stash` pair
+over `custom_extensions`, and asserts the result as parsed-dict equality with zero
+normalization.
+
+The sharpest part of the finding: **we already ship the plumbing and don't use it for
+preservation.** `ts-convert-to-snowflake-sv` emits `with extension (CA='{ca_json}')` and
+`ts-convert-from-snowflake-sv` parses that same clause -- but the from-side coverage matrix
+row 31 records the handling as "Parsed only ... Type confirmation; not mapped to TML". A
+versioned, ThoughtSpot-keyed JSON payload written on export and read on import is a small
+change to two CLI commands that would make the pair lossy-by-declaration rather than
+lossy-by-default.
+
+**Approach** -- the five details below are all load-bearing, not polish (each verified in
+the review; section refs are to the report):
+
+1. The payload is a **serialised JSON string**, never a nested object (report section 1 #1:
+   `osi-schema.json` constrains the equivalent field to a string with
+   `additionalProperties: false`; our own DDL clause is a quoted scalar).
+2. Version it with a `_v` marker and **merge into an existing entry** rather than appending
+   a second one.
+3. Restore as **stash-if-present-else-derive** (report section 2.3). A stash-only design
+   breaks on any input the converter did not itself produce -- i.e. every hand-written SV
+   or MV, which is most real inputs.
+4. Golden and round-trip comparisons must `json.loads` both sides before comparing
+   (upstream's `canon()` helper): serialised key order is not stable.
+5. Give the round trip two explicit equality bars -- a *documented-lossy* one that
+   normalizes known drops through a named helper (upstream's `strip_dropped`), and a
+   *lossless* one asserting parsed equality with no normalization at all.
+
+**Scope:** start with the Snowflake pair, where the extension clause already exists on both
+sides. Databricks MV has no equivalent carrier identified yet, so that half needs a
+placement decision first. Then update each coverage-matrix limitation row to state
+*preserved-via-stash* vs *dropped*.
+
+**Validator promotion this unlocks (file once the mechanism exists):** extend
+`check_coverage_matrix.py` so every limitation row must declare preserved-vs-dropped --
+per the two-bucket rule, the promotion is the point, but it cannot precede the mechanism.
+
+**Target:** next converter edit on the Snowflake pipeline, or bundled with BL-100 (bring
+remaining converters to the DBX-from standard, Snowflake pipeline first).
+
+---
+
+## BL-167 -- Record (or change) the to-direction's never-hard-error-on-loss posture `Tier 3`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 Apache Ossie converter review
+(`docs/reviews/2026-07-29-ossie-converter-learnings.md`), finding F14.
+**Affects:** `agents/shared/schemas/ts-model-conversion-invariants.md`, the four
+`references/coverage-matrix.md` files, `agents/cli/ts-convert-to-snowflake-sv/SKILL.md`,
+`agents/cli/ts-convert-to-databricks-mv/SKILL.md`.
+**Status:** OPEN.
+
+Our from-direction hard-errors on constructs it cannot represent (MV-on-MV fail-loud,
+`unsupported[]` + exit 1, the joinless-SV decision prompt), but our **to-direction never
+hard-errors over information loss**: every unmapped construct is a warn-and-drop into the
+Unmapped Properties Report, and the only exit-1 gates there are structural
+(`ts snowflake lint-ddl` errors). Upstream's databricks import direction takes the opposite
+line deliberately -- a condition-less/cross join, a non-equi `on`, a reserved/duplicate join
+name or an unsupported input version all raise `ConversionError`, on the explicit grounds
+that losslessness is that direction's purpose; the single drop-with-warning exception is a
+wildcard column, which has no field identity to preserve.
+
+There is a defensible reason for our asymmetry -- the to-direction ends at a mandatory
+Step 10 human checkpoint that shows the report before anything is written -- but it is
+currently an accident of how the two directions grew rather than a decision on record.
+
+**Approach:** state the posture explicitly as a short subsection in
+`ts-model-conversion-invariants.md` (where the cross-converter rules already live, alongside
+I1-I12/N1/PT1), naming which loss classes are warn-and-drop **by design** and which, if any,
+should become hard errors. Cheaper and sharper after BL-166, because a stash changes the
+answer: a construct that can be preserved should never have been a drop in the first place.
+
+**Target:** opportunistic -- with BL-166, or the next edit to the invariants file.
+
+---
+
+## BL-168 -- Property-based tests for the ts-cli converter builders (dual-driver) `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 Apache Ossie converter review
+(`docs/reviews/2026-07-29-ossie-converter-learnings.md`), finding F15.
+**Affects:** `tools/ts-cli/tests/`, `tools/ts-cli/pyproject.toml` (`dev` extra),
+`.github/workflows/validate.yml`.
+**Status:** OPEN.
+
+All 3,808 cases collected from `tools/ts-cli/tests/` are example-based. There is no
+`hypothesis` dependency or import anywhere in the repo and it is absent from
+`tools/ts-cli/pyproject.toml`'s `dev` extra (`pytest`, `PyYAML`, `radon`, `vulture`,
+`pip-audit`). Upstream's databricks converter runs Hypothesis at 300 examples per property.
+
+The gap matters more than the raw absence suggests because **the properties are already
+written**: `agents/shared/schemas/ts-model-conversion-invariants.md` states I1-I12, N1 and
+PT1 -- 14 rules -- as universally-quantified statements over generated Model TML ("for every
+entry in `formulas[]` there must be a corresponding entry in `columns[]`..."). What is only
+partly built is the checker: `tools/ts-cli/ts_cli/tml_lint.py` implements **6 of the 14** --
+I1, I2, I4, I5, I8 and I12, plus a guid-placement rule. So today six invariants are checked,
+and only against the handful of documents a fixture or a live run happens to produce; the
+other eight are enforced by author discipline alone.
+
+**Approach** -- two components, sequenced, not one:
+
+1. **The generator.** A strategy producing arbitrary in-subset `parsed.json` documents,
+   asserting `lint_tml(build_model(parsed, translated, tables)) == []`. Even confined to the
+   6 invariants lint already covers, this tests the **builder** rather than the documents our
+   fixtures happen to contain -- a materially stronger claim, and the duplicate-`column_id`
+   class (I8, ts-cli v0.92.0, shipped in `from-snowflake-sv` 1.19.0 / `from-databricks-mv`
+   1.10.0) is exactly the kind of bug it would have caught by construction instead of the
+   hard way. This half is worth doing on its own.
+2. **Checkers for the assertable remainder.** I3, I6, I9, I10, I11 and N1 are mechanically
+   assertable over emitted TML but have no `tml_lint.py` check today, so a property test
+   cannot exercise them until one exists -- each is a small addition to the same module, and
+   each also strengthens the existing pre-import `ts tml lint` gate independently of any
+   property test. I7 (a MANDATORY consult gate on the author) and PT1 (a flag-for-review
+   rule) are **not** assertions over output and stay outside both lint and any property test;
+   they are deliberately out of scope here.
+3. Restrict generation to the **round-trippable subset** rather than generating everything
+   and excepting the failures -- upstream's decision, and what stops a property test
+   degenerating into a list of known-bad shapes.
+4. **The dual driver is load-bearing here, not optional polish.** `validate.yml` installs
+   `pytest pyyaml radon pip-audit` on its 3.12 job and only `pytest pyyaml` on the
+   3.10/3.11/3.13/3.14 matrix legs, so a Hypothesis-only test would be silently skipped on
+   every leg as configured today, and adding the dependency to the 3.12 job alone still
+   leaves four legs uncovered. Mirror upstream: `pytest.importorskip("hypothesis")` plus a
+   hand-rolled seeded `Rnd` implementing the same interface, so the same properties run
+   either way.
+
+**Validator promotion this unlocks (file once the first property test exists):** assert that
+any test importing `hypothesis` has a seeded counterpart, or that `hypothesis` is installed
+on every CI leg.
+
+**Target:** next ts-cli converter-builder change. Splittable: the generator over the 6
+already-checked invariants (item 1) plus the seeded driver (item 4) is the smaller first
+increment and delivers value alone; the six new lint checks (item 2) can land incrementally
+after it, or opportunistically whenever `tml_lint.py` is next touched.
+
+---
+
+## BL-169 -- Vendor-neutral TPC-DS fixture corpus (Phase-3-coupled) `Tier 3`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 Apache Ossie converter review
+(`docs/reviews/2026-07-29-ossie-converter-learnings.md`), finding F24.
+**Affects:** upstream `converters/thoughtspot/tests/fixtures/` (Phase 3); in this repo,
+`tools/ts-cli/tests/fixtures/` and `agents/shared/worked-examples/` only if the corpus is
+mirrored inward at Phase 5.
+**Status:** OPEN.
+
+Our fixtures are richer and better grounded than upstream's -- `agents/shared/worked-examples/`
+holds 4 Snowflake and 3 Databricks end-to-end conversions that `agents/shared/CLAUDE.md`
+makes normative because each was verified against a live instance -- and they do recur across
+converters: the Dunder Mifflin Sales & Inventory schema is the shared spine of three worked
+examples (to-snowflake-sv, from-snowflake-sv, to-databricks-mv), with the same model object
+reused again as the target of two Tableau set examples. What is missing is a
+**vendor-neutral, ecosystem-shared** corpus. Dunder Mifflin is ThoughtSpot-shaped and
+repo-local, so however many of our converters it exercises it can never make one of them
+comparable against an upstream converter -- and there is no TPC-DS anywhere in the repo.
+Upstream's `tpcds_ossie.yaml` / `tpcds_metric_view.yaml` pair (and
+`examples/tpcds_semantic_model.yaml`) is the schema the whole ecosystem is compared on.
+
+**Why this is Phase-3-coupled rather than a general repo improvement:** TPC-DS only buys
+comparability once there is something to compare against, i.e. the Phase-3
+`converters/thoughtspot/` package -- whose spec already calls for a `tpcds_*` fixture pair.
+Adopting it here first would add a fixture none of our converters is measured against.
+
+**Approach:** take `tpcds_ossie.yaml` verbatim as the Phase-3 from-Ossie input fixture and
+assert the emitted Model TML against a golden -- our first fixture shared with anything
+outside this repo, and so our first cross-ecosystem comparability. Note that upstream CI is
+offline and cannot depend on our CLI, so the `ts tml lint` pass over the emitted TML belongs
+in local development and at Phase-5 back-port time, not in the upstream workflow (the report
+states the `ts tml lint` assertion without drawing that boundary). Then decide at Phase 5
+whether the TPC-DS Model TML also belongs in `agents/shared/worked-examples/`.
+
+**Target:** with the Phase-3 converter's first test PR -- see
+`docs/superpowers/specs/2026-07-29-ossie-thoughtspot-converter-design.md`, Phase 3.
+
+---
+
+## BL-170 -- Live-verify four internal ground-truth conflicts in the ThoughtSpot formula references `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** the `docs/ossie/ts-osi-function-mapping.md` review on the
+`feat/ossie-converter-design` branch -- writing one row per Ossie function forced a
+side-by-side read of every ThoughtSpot formula reference we ship, which is what surfaced
+these. Cross-referenced from that document's *Rows pending live confirmation* section.
+**Affects:** `agents/shared/schemas/thoughtspot-formula-patterns.md`,
+`agents/shared/mappings/tableau/tableau-formula-translation.md`,
+`agents/shared/mappings/ts-databricks/ts-databricks-formula-translation.md`,
+`agents/shared/mappings/qlik/qlik-thoughtspot-formula-translation.md`, and any converter
+whose emitter branches on these functions.
+**Status:** OPEN.
+
+Four function-level claims about ThoughtSpot's *own* formula language are stated
+incompatibly across our shared references. In each case one of the files is wrong, so at
+least one converter is emitting either an invalid native call or an unnecessary
+pass-through -- and the two failure modes are asymmetric: a wrong "native" claim produces a
+formula that fails at import, while a wrong "no native" claim only costs fidelity.
+
+| # | Function(s) | Claim A | Claim B |
+|---|---|---|---|
+| a | `replace` | native: `replace ( [x] , [old] , [new] )` (`thoughtspot-formula-patterns.md:186`), and the Databricks mapping's ThoughtSpot column agrees (`ts-databricks-formula-translation.md:84`) | "Bare `replace(...)` is **NOT** a valid ThoughtSpot formula function (live-confirmed)" -- re-mapped to `sql_string_op` and CLI-translated in ts-cli v0.81.0 (`tableau-formula-translation.md:117`, `:172`, `:1032`, `:1125`) |
+| b | `starts_with` / `ends_with` | native, returning boolean (`thoughtspot-formula-patterns.md:188-189`); `starts_with` again in `ts-databricks-formula-translation.md:86` | "No native `starts_with`" / "No native `ends_with`", composed from `strpos` / `substr` instead (`tableau-formula-translation.md:227-228`, live-verified 2026-06-13 on se-thoughtspot) |
+| c | `ltrim` / `rtrim` | exist as ThoughtSpot functions (`ts-databricks-formula-translation.md:82-83`, whose left-hand column is the ThoughtSpot side) | "ThoughtSpot `trim()` removes both sides -- no left-only / right-only trim available" (`qlik-thoughtspot-formula-translation.md:180-181`). `thoughtspot-formula-patterns.md` lists `trim` only and names neither, so it corroborates neither side |
+| d | `in` literal-list delimiter | `[col] in ( 'a' , 'b' )` -- round parentheses (`thoughtspot-formula-patterns.md:134`) | `in { a , b , c }` -- curly braces required; the round form raises the parser error "Search did not find 'in ( ...'" (`tableau-formula-translation.md:41`) |
+
+Rows (a), (b) and (d) each have a live-confirmed side (the Tableau mapping, dated and
+attributed to se-thoughtspot), which is the likelier-correct one and makes
+`thoughtspot-formula-patterns.md` -- the file CLAUDE.md treats as the formula ground truth --
+the probable defect in all three. Row (c) has no live evidence on either side. Either way
+the fix is not a guess: these are four one-line formula probes.
+
+**Approach:**
+
+1. On a live instance, create one Model formula per claim and record accept/reject:
+   `replace ( [col] , 'a' , 'b' )`; `starts_with ( [col] , 'x' )` and
+   `ends_with ( [col] , 'x' )`; `ltrim ( [col] )` and `rtrim ( [col] )`;
+   `[col] in ( 'a' , 'b' )` **and** `[col] in { 'a' , 'b' }`. Import via
+   `ts tml import` so the check is the real parser, not the UI.
+2. Correct whichever reference is wrong, with the date and instance recorded in the row --
+   the same live-verification convention `thoughtspot-formula-patterns.md:182` and
+   `tableau-formula-translation.md:227` already use. Where a function does not exist, state
+   the pass-through or composition explicitly so no converter re-derives it.
+3. Where the two spellings coexist by build, say so rather than picking one: the `in`
+   delimiter is the candidate for that treatment.
+4. Update the affected emitters and the Ossie function-mapping document's *Rows pending
+   live confirmation* table with the result (a `passthrough` -> `direct` flip on
+   `LTRIM`/`RTRIM` also moves that document's counts, which it already records).
+
+**Validator promotion this could unlock:** the disagreement is only detectable by reading
+four files side by side. A `check_formula_catalog.py` extension that cross-checks each
+ThoughtSpot function name appearing in a mapping's ThoughtSpot column against
+`thoughtspot-formula-patterns.md` -- and fails when one file calls a function native and
+another calls it absent -- would make this class of drift impossible to reintroduce. Worth
+filing once the four facts are settled, since the checker needs a correct baseline.
+
+**Target:** next live-instance pass on se-thoughtspot; bundle with any converter formula
+work that touches these functions.
+
+---
+
+## BL-171 — Bound `ts tml verify-render` per-tile probing on large liveboards `Tier 3`
 
 Raised by djwaldo reviewing #356 (the Power BI render-robustness PR). When a board fails the
 whole-board `metadata/liveboard/data` call, `verify-render` re-probes **each tile sequentially**

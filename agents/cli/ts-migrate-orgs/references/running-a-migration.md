@@ -174,9 +174,24 @@ Per-Org aliases live on the **Primary** Org's Model with no partial update until
 (est. 26.10), so every append re-imports the whole document. Per-tenant that is O(N²)
 across the fleet, and past 5 MB each import goes async at 10–15 minutes.
 
-Use `/ts-object-model-alias` with `build --merge`, once per wave, serialised.
-**Before merging, confirm the export returned the aliases of every already-cut-over
-tenant.** A partial export silently drops them.
+```bash
+ts migrate aliases -m "{master_model}" --target-org ORG2 -d ./plan \
+    --expect-org ORG1 -p "{profile}" \
+  | ts alias build --merge \
+  | ts alias import --model "{master_model_guid}" -p "{profile}"
+```
+
+Once per wave, serialised. `ts migrate aliases` derives the alias rows from the approved
+`column-mapping.csv` — they are the inverse of the rename `apply` applied — and **refuses the
+wave if the export is missing any Org named in `--expect-org`**. That is the check that used
+to be prose telling you to confirm the export by eye; a partial export silently drops
+already-cut-over tenants. `--first-wave` is the explicit alternative when none exists yet, and
+one of the two is required, because a check that defaults to off is not a check.
+
+Verified live 2026-07-28: with ORG2 already aliased, adding ORG1 preserved ORG2's entries and
+added ORG1's, both `TS_WILDCARD_ALL`; the round-trip export confirmed all four entries;
+re-running produced a byte-identical document; and **an ORG1 session shows `Segment` on the
+published master** — the user-visible outcome, which no API call can confirm.
 
 ### Alias scoping — three things that will bite you
 
@@ -204,6 +219,15 @@ others is legitimate; the rule bites only on one column carrying both.
 > **not** rendered in the Data Management app (an open development item as of 2026-07-28),
 > and `metadata/answer/data` returns base names too. Checking either shows base names for
 > *everything* and looks like total failure.
+>
+> **For aliases, what matters is the Org the session is in — not whether the user is an
+> admin.** `TS_WILDCARD_ALL` scopes to everyone in the Org, admins included, so an admin
+> session in the target Org matches the same pathway a tenant user does. That is the
+> *opposite* of the sharing and RLS checks in Step 8, where an admin proves nothing.
+>
+> And **say which Org you checked.** Every migrated tenant aliases the same physical column
+> to its own name, so "I see `Segment`" is ambiguous across Orgs and can look like a pass
+> while the Org you care about is untouched.
 
 **An empty group is rejected** with `Group with name not found in org`. Do not substitute an
 arbitrary real group to get past it — that is precisely how the overlap above gets created.

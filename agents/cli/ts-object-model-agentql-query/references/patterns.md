@@ -77,9 +77,12 @@ GROUP BY "t1"."Product Category"
 
 ## Statistics / anomaly detection
 
-**When:** standard deviation, median, "outliers". `STDDEV_*`/`VAR_*`/`MEDIAN` only work in
-**scalar context** (no `GROUP BY`). For per-group sums vs the global spread, use the window
-form `STDDEV_SAMP(SUM(col)) OVER ()`:
+**When:** standard deviation, median, "outliers". `MEDIAN` works directly (scalar, and
+grouped as of jul.26.mt). `STDDEV_*`/`VAR_*` do **not** compile directly against a Model
+column on jul.26.mt in *any* context (regression — [SCAL-326935](https://thoughtspot.atlassian.net/browse/SCAL-326935);
+scalar worked on earlier builds): **materialise the aggregate in a CTE first**, then take
+the statistic over the CTE column — plain (`STDDEV_SAMP("Total Sales")` in a scalar outer
+SELECT) for one global number, or the window form to keep per-group rows alongside:
 
 ```sql
 WITH per_cat AS (
@@ -121,6 +124,43 @@ outer op is additive — is a normal aggregate-formula and takes `AGG()`.
 `ROW_NUMBER()` over the raw measure ordered by date desc, filtered to rank 1. If the
 correct behaviour is unclear from the TML, say so rather than silently `SUM`.
 
+## Semi-join via CTE — membership filters without IN (SELECT …)
+
+**When:** any filter that in plain SQL would be `WHERE col IN (SELECT …)` — "quantity by
+category for products that appear in <some set>". Subqueries are unsupported, and on
+jul.26.mt the `IN (SELECT …)` form even passes `generate-sql` before failing at
+`fetch-data` ([SCAL-326936](https://thoughtspot.atlassian.net/browse/SCAL-326936)) — so
+this rewrite is the **only** expressible semi-join.
+
+```sql
+WITH "furniture_products" AS (
+  SELECT "t2"."Product Name"
+  FROM "Model" AS "t2"
+  WHERE "t2"."Product Category" = 'Furniture'
+  GROUP BY "t2"."Product Name"          -- the guard: dedupe the key
+), "qty" AS (
+  SELECT "t1"."Product Category", "t1"."Product Name", SUM("t1"."Quantity") AS "Qty"
+  FROM "Model" AS "t1"
+  GROUP BY "t1"."Product Category", "t1"."Product Name"
+)
+SELECT "q"."Product Category", SUM("q"."Qty") AS "Total Quantity"
+FROM "qty" AS "q"
+JOIN "furniture_products" AS "f" ON "q"."Product Name" = "f"."Product Name"
+GROUP BY "q"."Product Category"
+```
+
+**The `GROUP BY` in the key CTE is load-bearing, not style.** `IN` is a semi-join — each
+outer row is kept or dropped exactly once. A `JOIN` is relational multiplication — an
+outer row matched by *k* key rows appears *k* times, and the outer `SUM` silently
+double-counts. The two are equivalent **only when the key side is unique**, which the
+`GROUP BY <key>` guarantees. Never join to a raw projection; pre-aggregating the measure
+side does not protect you — deduping the key side is the only guard.
+
+For the negation ("members NOT in the set") this rewrite does not apply — use the
+LEFT-OUTER-JOIN + `IS NULL` shape in § Dimension-anchored anti-join below. (Verified live
+2026-07-29, nebula-damian-alias: the `IN (SELECT …)` original fails at fetch; this rewrite
+returns correct rows.)
+
 ## Dimension-anchored anti-join — members with no fact rows
 
 **When:** "which customers have **no** sales?", "products never ordered", "suppliers with
@@ -158,28 +198,29 @@ WHERE "s"."Total Sales" IS NULL
   A formula column spanning other tables drags their joins into the "all members" CTE and
   narrows the list.
 - No set operators needed — `EXCEPT` could express "all minus active", but this form also
-  returns the measure column and avoids the aggregated-branch-in-CTE set-op limitation.
+  returns the measure column.
 
 ## When there's no working form
 
-Still no reliable AgentQL form today: non-`MEDIAN` percentiles, per-group `STDDEV`/`VAR`,
-subqueries (`IN (SELECT …)` / `FROM (SELECT …)`), `QUALIFY` and `FILTER (WHERE …)` (both
-silently dropped), `ROLLUP`/`CUBE`, self-joins, non-equi joins, and ORDER BY / LIMIT on set
-operator results. Don't emit a query that looks right but returns wrong numbers — explain
-the limitation instead.
+Still no reliable AgentQL form today: non-`MEDIAN` percentiles, direct `STDDEV`/`VAR` on a
+Model column (the CTE form above works), subqueries (`IN (SELECT …)` — use § Semi-join via
+CTE — / `FROM (SELECT …)`), `QUALIFY` and `FILTER (WHERE …)` (both silently dropped),
+`ROLLUP`/`CUBE`, self-joins, and non-equi joins. Don't emit a query that looks right but
+returns wrong numbers — explain the limitation instead.
 
 Several constructs that *used* to be unsupported now work — set operations (`UNION ALL`,
-`UNION`, `EXCEPT`, `INTERSECT` at the top level), `NTILE`, explicit `LAG`/`LEAD` offsets,
-`ROWS BETWEEN` window frames (so true rolling N-period averages are now expressible),
-multi-CTE joins, and aggregate×literal arithmetic. See `limitations.md` for the current,
-dated, ticket-linked list.
+`UNION`, `EXCEPT`, `INTERSECT` at the top level and in CTEs, with ORDER BY / LIMIT on the
+combined result as of jul.26.mt), `NTILE`, explicit `LAG`/`LEAD` offsets, `ROWS BETWEEN`
+window frames (so true rolling N-period averages are now expressible), multi-CTE joins,
+aggregate×literal arithmetic, `LENGTH()`, `CONCAT_WS`, and grouped `MEDIAN`. See
+`limitations.md` for the current, dated, ticket-linked list.
 
 ## Set operations
 
 **When:** combining disjoint result sets, subtracting one set from another, or finding the
 intersection of two sets. Since [SCAL-313049](https://thoughtspot.atlassian.net/browse/SCAL-313049),
-set operations work at the **top level** of the query, and inside a CTE when no branch
-carries an aggregate measure.
+set operations work at the **top level** of the query and inside a CTE — including
+aggregated branches, as of jul.26.mt (hard error on older builds).
 
 **Basic UNION ALL** — combine results from different filters:
 
@@ -224,7 +265,6 @@ SELECT "t1"."Country" FROM "Model" AS "t1" WHERE "t1"."Country" = 'canada' GROUP
 - Each branch independently follows all AgentQL rules (alias, aggregation, GROUP BY).
 - Branches can use different aggregate functions (`SUM` in one, `AVG` in another).
 - HAVING, ILIKE, window functions all work inside individual branches.
-- **Cannot** apply ORDER BY or LIMIT to the combined result (silently mishandled).
-- Inside a user-defined CTE, set operations work **only when no branch contains an
-  aggregate measure** — an aggregated branch (`SUM(col) … GROUP BY`) is a hard error.
-  See `limitations.md`.
+- ORDER BY and LIMIT on the combined result work as of jul.26.mt (verified 2026-07-29;
+  on older builds ORDER BY was silently dropped and LIMIT misplaced into the first
+  branch — check the generated SQL if the build is older). See `limitations.md`.

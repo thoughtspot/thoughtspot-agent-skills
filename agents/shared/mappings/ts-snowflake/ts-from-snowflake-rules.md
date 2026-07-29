@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (formula composition + TML import behaviours validated on SE cluster 2026-07-10 — two-pass import requirement, if() parens mandatory, BOOL column support; correction 2026-07: SQL-query logical-table `tables()` form + "→ ThoughtSpot SQL View TML" rule added, GA 2026-06-26 — finding 13.5; ai_sql_generation/ai_question_categorization corrected to free-text instruction strings — finding 13.6; sample_values/is_enum dimension clauses documented — finding 13.7) -->
+<!-- currency: snowflake — 2026-07 (formula composition + TML import behaviours validated on SE cluster 2026-07-10 — two-pass import requirement, if() parens mandatory, BOOL column support; correction 2026-07: SQL-query logical-table `tables()` form + "→ ThoughtSpot SQL View TML" rule added, GA 2026-06-26 — finding 13.5; ai_sql_generation/ai_question_categorization corrected to free-text instruction strings — finding 13.6; sample_values/is_enum dimension clauses documented — finding 13.7; 2026-07-29 full sweep: new PARSER PREREQUISITE for MAX_STALENESS/materialization DDL clause shape, not yet live-verified — finding 13.5) -->
 
 # Reverse Mapping Rules Reference
 
@@ -13,6 +13,14 @@ real format (from Snowflake) is:
 
 ```sql
 create or replace semantic view DB.SCHEMA.VIEW_NAME
+    -- Materialization eligibility (public preview, release 10.24, Jul 2026) —
+    -- PARSER PREREQUISITE: assumed to surface as MAX_STALENESS = <seconds> somewhere in
+    -- the CREATE header (mirroring YAML top-level max_staleness:), not yet confirmed
+    -- against a live GET_DDL round-trip. Whether a materialization added later via
+    -- `ALTER SEMANTIC VIEW ... ADD MATERIALIZATION (REFRESH_MODE = ... [, IMMUTABLE WHERE
+    -- ...])` also surfaces in GET_DDL output (and in what shape) is likewise unverified —
+    -- verify both before freezing the parser grammar (BL-100). → ThoughtSpot: no
+    -- equivalent; handling once verified is parse-and-drop (see note below).
     tables (
         -- Default alias = last segment of the table name
         DB.SCHEMA.TABLE_NAME [primary key (COL)],
@@ -164,6 +172,16 @@ create or replace semantic view BIRD_FINANCIAL_SV
   is a parser prerequisite for BL-100 codification — verify the actual DDL token shape
   against a live semantic view carrying `sample values`/`is_enum` before freezing the
   parser grammar.
+- `MAX_STALENESS = <seconds>` may appear on a materialization-eligible semantic view
+  (public preview, release 10.24, Jul 2026) — mirrors YAML top-level `max_staleness:`
+  (see snowflake-schema.md). → ThoughtSpot: no equivalent — parse and drop once the
+  token shape is confirmed.
+  **Verification status: PARSER PREREQUISITE.** Neither the `MAX_STALENESS` clause shape
+  nor whether a materialization added afterward via `ALTER SEMANTIC VIEW ... ADD
+  MATERIALIZATION (...)` surfaces in `GET_DDL` output at all (and in what shape) has been
+  confirmed against a live round-trip. This must be resolved before BL-100 freezes the
+  parser grammar — an unanticipated clause here is exactly the failure mode a frozen
+  grammar can't recover from.
 
 ---
 

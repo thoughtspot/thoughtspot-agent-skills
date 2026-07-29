@@ -138,6 +138,16 @@ source Org has been retired.
 Grants cover the **whole stack**, not just the content: the **published Model needs
 explicit grants too**, because publishing it makes it *present*, not *visible*.
 
+To read the grants back, per object:
+
+```bash
+ts share status {guid} --org "{target_org}" --profile "{profile}"
+```
+
+Look for the group with a non-`NO_ACCESS` **`permission`** — *not* `shared_permission`, whose
+name suggests the opposite but stays `NO_ACCESS` on a successful share. A group grant also
+produces one row per member user, so one grant shows as several rows.
+
 Grants are re-applied at **group** level. Groups are **per-Org principals**, so the target
 Org needs a group of each name; a missing one is reported rather than skipped, because a
 dropped grant is invisible until someone complains. Per-user grants are deliberately not
@@ -204,16 +214,32 @@ of all *k* before it — O(N²) across the fleet, and past 5 MB each import goes
 
 It must also be serialised: two concurrent full-document writes clobber each other.
 
-Use `/ts-object-model-alias` with `build --merge`. **Before merging, confirm the export
-returned the aliases of every already-cut-over tenant.** A partial export silently drops
-them, and those tenants' users see `String_1` where they saw `Region` — no error anywhere.
-This is the one catastrophic step in the routine.
+```bash
+ts migrate aliases -m "{master_model}" --target-org "{tenant_org}" -d ./plan \
+    --expect-org "{already_cut_over}" -p "{profile}" \
+  | ts alias build --merge \
+  | ts alias import --model "{master_model_guid}" -p "{profile}"
+```
 
-**Scope Org-wide with `group: TS_WILDCARD_ALL`.** And never leave a second pathway on the
-same column: a user matching both a wildcard entry and a group entry sees the **base column
-name**, not either alias — verified live, and true even when both aliases are identical. A
-group scope does *not* override a wildcard. Mixed strategies across *different* columns are
-fine. An empty group is rejected, so do not substitute a real group to get past that error.
+**The aliases come from the approved `column-mapping.csv`, not from you retyping them.** They
+are the exact inverse of the rename `apply` performed, so `column` is the published name and
+`alias` is the tenant's, scoped `TS_WILDCARD_ALL`. Hand-transcribing is a step whose mistakes
+are silent: a misspelled column aliases nothing and the tenant sees the physical name.
+
+**`--expect-org` names every tenant already cut over, and is not optional.** The import
+*replaces* the document, so a partial export silently drops the Orgs it missed and their users
+see `String_1` where they saw `Region` — no error anywhere, because every remaining entry is
+valid. This is the one catastrophic step in the routine, and the command refuses rather than
+asking you to check by eye. Use `--first-wave` when nothing has been cut over yet; one of the
+two is required.
+
+Coverage is checked by **Org, not count** — ten aliases for one tenant would satisfy "ten or
+more" while nine tenants are being wiped. Re-running a wave is a no-op.
+
+Also refused automatically: a second pathway on one column. A user matching both a wildcard
+entry and a group entry sees the **base column name**, not either alias — verified live, true
+even when the aliases are identical. Mixed strategies across *different* columns are fine. An
+empty group is rejected, so never substitute a real group to get past that error.
 
 **Verify in Search Data, an Answer, a Liveboard or Spotter.** Aliases are not rendered in the
 Data Management app, so checking there shows base names for everything.
@@ -260,6 +286,9 @@ cutover it holds nothing but this migration's output.
 
 | Version | Date | Summary |
 |---|---|---|
+| 3.0.1 | 2026-07-28 | For aliases the Org of the session is what matters, not admin-vs-user — `TS_WILDCARD_ALL` covers admins too |
+| 3.0.0 | 2026-07-28 | Step 7 is a command, not prose: `ts migrate aliases` derives the wave's aliases from the approved mapping and REFUSES a partial export |
+| 2.4.0 | 2026-07-28 | Give the grant read-back command, now that `ts share status --org` resolves tenant-owned objects (BL-153) |
 | 2.3.0 | 2026-07-28 | Source and target are told apart by **ownership**, not name — a same-Org run had paired a Model with itself and reported READY (BL-152) |
 | 2.2.0 | 2026-07-28 | `share_grants` grants the whole object stack bottom-up — Strict Object Mode drops a grant whose source is ungranted |
 | 2.1.0 | 2026-07-28 | Add `share_grants` — TML carries no sharing, so migrated content was invisible to tenant users |
