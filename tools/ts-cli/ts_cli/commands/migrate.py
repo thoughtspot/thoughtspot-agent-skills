@@ -471,24 +471,37 @@ def _classify_scope(source_client, target_client, model_names, exclude_owner_org
     return views, content, shielded, targets
 
 
-def _types_by_guid(client, guids) -> dict:
-    """`{guid: metadata_type}` for whatever of `guids` still exists, in ONE search.
+# Everything a rollback can have created, in delete order. Content types first.
+_ROLLBACK_TYPES = ("ANSWER", "LIVEBOARD", "LOGICAL_TABLE")
 
-    Queried WITHOUT a type restriction: rollback deletes Answers, Liveboards and Views,
-    and the delete endpoint requires the right `type` per item. A guid the search does
-    not return is already gone -- which a re-runnable rollback treats as done, not as an
-    error.
+
+def _types_by_guid(client, guids) -> dict:
+    """`{guid: metadata_type}` for whatever of `guids` still exists, one batched
+    search PER TYPE.
+
+    Typed on purpose: an identifier-only search returns 400 (`Specify the
+    metadata_type for identifier ...`) for any guid that no longer resolves -- which is
+    exactly what every guid looks like on a re-run after a successful delete, so the
+    untyped form made rollback single-shot (verified live 2026-07-29). A TYPED search
+    returns 200 with the misses simply absent, so a guid in no type's result is
+    already gone -- which a re-runnable rollback treats as done, not as an error.
     """
-    if not guids:
-        return {}
-    resp = client.post("/api/rest/2.0/metadata/search", json={
-        "metadata": [{"identifier": g} for g in sorted(guids)],
-        "include_headers": True, "record_size": -1, "record_offset": 0})
-    out = {}
-    for row in resp.json():
-        guid = row.get("metadata_id")
-        if guid:
-            out[guid] = row.get("metadata_type") or "LOGICAL_TABLE"
+    out: dict = {}
+    for mtype in _ROLLBACK_TYPES:
+        remaining = sorted(set(guids) - set(out))
+        if not remaining:
+            break
+        resp = client.post("/api/rest/2.0/metadata/search", raise_for_status=False,
+                           json={"metadata": [{"identifier": g, "type": mtype}
+                                              for g in remaining],
+                                 "include_headers": True, "record_size": -1,
+                                 "record_offset": 0})
+        if resp.status_code >= 300:
+            continue
+        for row in resp.json():
+            guid = row.get("metadata_id")
+            if guid:
+                out[guid] = row.get("metadata_type") or mtype
     return out
 
 

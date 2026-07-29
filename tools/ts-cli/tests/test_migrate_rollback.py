@@ -110,6 +110,32 @@ def test_command_refuses_a_same_org_ledger(tmp_path):
     assert "backup/" in result.stderr
 
 
+_ALIVE = {"ans-1": "ANSWER", "ans-2": "ANSWER", "lb-1": "LIVEBOARD",
+          "view-1": "LOGICAL_TABLE"}
+
+
+def _search_post(alive):
+    """A metadata/search double with the API's REAL identifier semantics.
+
+    An identifier WITHOUT a type 400s the whole call when any guid does not resolve
+    (`Specify the metadata_type for identifier ...`) -- which is what every guid looks
+    like on a rollback re-run after a successful delete. A TYPED search returns 200
+    with the misses simply absent. Verified live 2026-07-29; a double that returned []
+    for the untyped form is exactly how the single-shot-rollback bug shipped.
+    """
+    def post(path, json=None, **kw):
+        if "metadata/search" not in path:
+            return MagicMock(json=lambda: [])
+        metas = json["metadata"]
+        if any("type" not in m for m in metas):
+            return MagicMock(status_code=400, json=lambda: {"error": "10002"})
+        rows = [{"metadata_id": m["identifier"], "metadata_type": m["type"]}
+                for m in metas
+                if alive.get(m["identifier"]) == m["type"]]
+        return MagicMock(status_code=200, json=lambda: rows)
+    return post
+
+
 @patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
 @patch("ts_cli.commands.share.assert_org_context")
 @patch("ts_cli.commands.share._resolve_org_id", return_value=1)
@@ -118,21 +144,14 @@ def test_live_rollback_deletes_with_the_right_type_per_object(
         mock_cls, _rid, _assert, _rp, tmp_path):
     """The delete endpoint requires the correct `type` per item. The old command sent
     LOGICAL_TABLE for everything, which cannot delete an Answer or Liveboard."""
-    search_rows = [
-        {"metadata_id": "ans-1", "metadata_type": "ANSWER"},
-        {"metadata_id": "ans-2", "metadata_type": "ANSWER"},
-        {"metadata_id": "lb-1", "metadata_type": "LIVEBOARD"},
-        {"metadata_id": "view-1", "metadata_type": "LOGICAL_TABLE"},
-    ]
     deletes = []
+    search = _search_post(_ALIVE)
 
     def post(path, json=None, **kw):
-        if "metadata/search" in path:
-            return MagicMock(json=lambda: search_rows)
         if "metadata/delete" in path:
             deletes.append(json["metadata"])
             return MagicMock(status_code=204)
-        return MagicMock(json=lambda: [])
+        return search(path, json=json, **kw)
 
     client = MagicMock()
     client.post.side_effect = post
@@ -156,16 +175,16 @@ def test_live_rollback_deletes_with_the_right_type_per_object(
 @patch("ts_cli.commands.migrate.ThoughtSpotClient")
 def test_objects_already_gone_are_skipped_not_errors(
         mock_cls, _rid, _assert, _rp, tmp_path):
-    """Re-runnability: a second rollback after a partial first one must finish the job,
-    and the search simply not returning a guid means it is already deleted."""
+    """Re-runnability: a second rollback after a partial first one must finish the job.
+    Only the View survives; the three content guids no longer resolve, which the API
+    signals by ABSENCE from a typed search (never by returning them type-less)."""
+    search = _search_post({"view-1": "LOGICAL_TABLE"})
+
     def post(path, json=None, **kw):
-        if "metadata/search" in path:
-            return MagicMock(json=lambda: [
-                {"metadata_id": "view-1", "metadata_type": "LOGICAL_TABLE"}])
         if "metadata/delete" in path:
             assert all(m["identifier"] == "view-1" for m in json["metadata"])
             return MagicMock(status_code=204)
-        return MagicMock(json=lambda: [])
+        return search(path, json=json, **kw)
 
     client = MagicMock()
     client.post.side_effect = post
@@ -176,3 +195,29 @@ def test_objects_already_gone_are_skipped_not_errors(
                                  "--target-profile", "tgt"])
     assert result.exit_code == 0, result.stderr
     assert "already gone" in result.stderr
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.share.assert_org_context")
+@patch("ts_cli.commands.share._resolve_org_id", return_value=1)
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_a_full_rerun_after_everything_was_deleted_completes_cleanly(
+        mock_cls, _rid, _assert, _rp, tmp_path):
+    """The exact live failure (2026-07-29): after a successful rollback, a re-run's
+    lookup hit the untyped-identifier 400 and crashed instead of reporting the
+    objects gone. Nothing alive, no deletes, clean exit."""
+    search = _search_post({})
+
+    def post(path, json=None, **kw):
+        assert "metadata/delete" not in path, "nothing exists -- nothing may be deleted"
+        return search(path, json=json, **kw)
+
+    client = MagicMock()
+    client.post.side_effect = post
+    mock_cls.return_value = client
+
+    _write_state(tmp_path, _new_org_ledger())
+    result = runner.invoke(app, ["migrate", "rollback", "-d", str(tmp_path),
+                                 "--target-profile", "tgt"])
+    assert result.exit_code == 0, result.stderr
+    assert result.stderr.count("already gone") == 4
