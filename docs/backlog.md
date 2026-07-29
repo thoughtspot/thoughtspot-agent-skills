@@ -4926,3 +4926,187 @@ Three independent small items:
 
 **Target:** opportunistic -- (1)/(2) are validator/doc touches; (3) needs a 2026.2
 workbook to become actionable.
+
+---
+
+## BL-166 -- `custom_extensions`-style loss stash for the ts-convert-* pairs `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 Apache Ossie converter review
+(`docs/reviews/2026-07-29-ossie-converter-learnings.md`), finding F11.
+**Affects:** `agents/cli/ts-convert-to-snowflake-sv/` (SKILL.md +
+`references/coverage-matrix.md`), `agents/cli/ts-convert-from-snowflake-sv/`,
+`agents/cli/ts-convert-to-databricks-mv/`, `agents/cli/ts-convert-from-databricks-mv/`,
+`tools/ts-cli/ts_cli/` (`build-sv`/`parse-sv`, `build-mv`/`parse-mv`), `tools/ts-cli/tests/`.
+**Status:** OPEN.
+
+41 limitation rows across the four coverage matrices (13 to-SF, 8 from-SF, 10 to-DBX,
+10 from-DBX) resolve to "documented in the Unmapped Properties Report, then gone" --
+`format_pattern`, `geo_config`, `column_groups`, `default_date_bucket`, `custom_order`,
+locale aliases and partial `ai_context` on the way out; `ACCESS_MODIFIER: PRIVATE`,
+table-level synonyms, `is_enum` and sample values on the way in. A TS->SV->TS round trip
+cannot recover any of them and nothing in the repo measures how much is lost. Upstream's
+databricks converter solves the identical problem with a `write_stash`/`read_stash` pair
+over `custom_extensions`, and asserts the result as parsed-dict equality with zero
+normalization.
+
+The sharpest part of the finding: **we already ship the plumbing and don't use it for
+preservation.** `ts-convert-to-snowflake-sv` emits `with extension (CA='{ca_json}')` and
+`ts-convert-from-snowflake-sv` parses that same clause -- but the from-side coverage matrix
+row 31 records the handling as "Parsed only ... Type confirmation; not mapped to TML". A
+versioned, ThoughtSpot-keyed JSON payload written on export and read on import is a small
+change to two CLI commands that would make the pair lossy-by-declaration rather than
+lossy-by-default.
+
+**Approach** -- the five details below are all load-bearing, not polish (each verified in
+the review; section refs are to the report):
+
+1. The payload is a **serialised JSON string**, never a nested object (report section 1 #1:
+   `osi-schema.json` constrains the equivalent field to a string with
+   `additionalProperties: false`; our own DDL clause is a quoted scalar).
+2. Version it with a `_v` marker and **merge into an existing entry** rather than appending
+   a second one.
+3. Restore as **stash-if-present-else-derive** (report section 2.3). A stash-only design
+   breaks on any input the converter did not itself produce -- i.e. every hand-written SV
+   or MV, which is most real inputs.
+4. Golden and round-trip comparisons must `json.loads` both sides before comparing
+   (upstream's `canon()` helper): serialised key order is not stable.
+5. Give the round trip two explicit equality bars -- a *documented-lossy* one that
+   normalizes known drops through a named helper (upstream's `strip_dropped`), and a
+   *lossless* one asserting parsed equality with no normalization at all.
+
+**Scope:** start with the Snowflake pair, where the extension clause already exists on both
+sides. Databricks MV has no equivalent carrier identified yet, so that half needs a
+placement decision first. Then update each coverage-matrix limitation row to state
+*preserved-via-stash* vs *dropped*.
+
+**Validator promotion this unlocks (file once the mechanism exists):** extend
+`check_coverage_matrix.py` so every limitation row must declare preserved-vs-dropped --
+per the two-bucket rule, the promotion is the point, but it cannot precede the mechanism.
+
+**Target:** next converter edit on the Snowflake pipeline, or bundled with BL-100 (bring
+remaining converters to the DBX-from standard, Snowflake pipeline first).
+
+---
+
+## BL-167 -- Record (or change) the to-direction's never-hard-error-on-loss posture `Tier 3`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 Apache Ossie converter review
+(`docs/reviews/2026-07-29-ossie-converter-learnings.md`), finding F14.
+**Affects:** `agents/shared/schemas/ts-model-conversion-invariants.md`, the four
+`references/coverage-matrix.md` files, `agents/cli/ts-convert-to-snowflake-sv/SKILL.md`,
+`agents/cli/ts-convert-to-databricks-mv/SKILL.md`.
+**Status:** OPEN.
+
+Our from-direction hard-errors on constructs it cannot represent (MV-on-MV fail-loud,
+`unsupported[]` + exit 1, the joinless-SV decision prompt), but our **to-direction never
+hard-errors over information loss**: every unmapped construct is a warn-and-drop into the
+Unmapped Properties Report, and the only exit-1 gates there are structural
+(`ts snowflake lint-ddl` errors). Upstream's databricks import direction takes the opposite
+line deliberately -- a condition-less/cross join, a non-equi `on`, a reserved/duplicate join
+name or an unsupported input version all raise `ConversionError`, on the explicit grounds
+that losslessness is that direction's purpose; the single drop-with-warning exception is a
+wildcard column, which has no field identity to preserve.
+
+There is a defensible reason for our asymmetry -- the to-direction ends at a mandatory
+Step 10 human checkpoint that shows the report before anything is written -- but it is
+currently an accident of how the two directions grew rather than a decision on record.
+
+**Approach:** state the posture explicitly as a short subsection in
+`ts-model-conversion-invariants.md` (where the cross-converter rules already live, alongside
+I1-I12/N1/PT1), naming which loss classes are warn-and-drop **by design** and which, if any,
+should become hard errors. Cheaper and sharper after BL-166, because a stash changes the
+answer: a construct that can be preserved should never have been a drop in the first place.
+
+**Target:** opportunistic -- with BL-166, or the next edit to the invariants file.
+
+---
+
+## BL-168 -- Property-based tests for the ts-cli converter builders (dual-driver) `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 Apache Ossie converter review
+(`docs/reviews/2026-07-29-ossie-converter-learnings.md`), finding F15.
+**Affects:** `tools/ts-cli/tests/`, `tools/ts-cli/pyproject.toml` (`dev` extra),
+`.github/workflows/validate.yml`.
+**Status:** OPEN.
+
+All 3,808 cases collected from `tools/ts-cli/tests/` are example-based. There is no
+`hypothesis` dependency or import anywhere in the repo and it is absent from
+`tools/ts-cli/pyproject.toml`'s `dev` extra (`pytest`, `PyYAML`, `radon`, `vulture`,
+`pip-audit`). Upstream's databricks converter runs Hypothesis at 300 examples per property.
+
+The gap matters more than the raw absence suggests because **the properties are already
+written and the checker already exists**: `agents/shared/schemas/ts-model-conversion-invariants.md`
+states I1-I12, N1 and PT1 as universally-quantified rules over generated Model TML ("for
+every entry in `formulas[]` there must be a corresponding entry in `columns[]`..."), and
+`ts tml lint` implements them. Only the generator is missing -- so today those invariants
+are only ever checked against the handful of documents a fixture or a live run happens to
+produce.
+
+**Approach:**
+
+1. A strategy producing arbitrary in-subset `parsed.json` documents, asserting
+   `lint_tml(build_model(parsed, translated, tables)) == []`. That tests the **builder**
+   rather than the documents our fixtures happen to contain -- a materially stronger claim,
+   and the duplicate-`column_id` class (I8, ts-cli v0.92.0, shipped in `from-snowflake-sv`
+   1.19.0 / `from-databricks-mv` 1.10.0) is exactly the kind of bug it would have caught by
+   construction instead of the hard way.
+2. Restrict generation to the **round-trippable subset** rather than generating everything
+   and excepting the failures -- upstream's decision, and what stops a property test
+   degenerating into a list of known-bad shapes.
+3. **The dual driver is load-bearing here, not optional polish.** `validate.yml` installs
+   `pytest pyyaml radon pip-audit` on its 3.12 job and only `pytest pyyaml` on the
+   3.10/3.11/3.13/3.14 matrix legs, so a Hypothesis-only test would be silently skipped on
+   every leg as configured today, and adding the dependency to the 3.12 job alone still
+   leaves four legs uncovered. Mirror upstream: `pytest.importorskip("hypothesis")` plus a
+   hand-rolled seeded `Rnd` implementing the same interface, so the same properties run
+   either way.
+
+**Validator promotion this unlocks (file once the first property test exists):** assert that
+any test importing `hypothesis` has a seeded counterpart, or that `hypothesis` is installed
+on every CI leg.
+
+**Target:** next ts-cli converter-builder change -- the generator is the whole cost; the
+seeded driver is a small addition on top of it.
+
+---
+
+## BL-169 -- Vendor-neutral TPC-DS fixture corpus (Phase-3-coupled) `Tier 3`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 Apache Ossie converter review
+(`docs/reviews/2026-07-29-ossie-converter-learnings.md`), finding F24.
+**Affects:** upstream `converters/thoughtspot/tests/fixtures/` (Phase 3); in this repo,
+`tools/ts-cli/tests/fixtures/` and `agents/shared/worked-examples/` only if the corpus is
+mirrored inward at Phase 5.
+**Status:** OPEN.
+
+Our fixtures are richer and better grounded than upstream's -- `agents/shared/worked-examples/`
+holds 4 Snowflake and 3 Databricks end-to-end conversions that `agents/shared/CLAUDE.md`
+makes normative because each was verified against a live instance -- and they do recur across
+converters: the Dunder Mifflin Sales & Inventory schema is the shared spine of three worked
+examples (to-snowflake-sv, from-snowflake-sv, to-databricks-mv), with the same model object
+reused again as the target of two Tableau set examples. What is missing is a
+**vendor-neutral, ecosystem-shared** corpus. Dunder Mifflin is ThoughtSpot-shaped and
+repo-local, so however many of our converters it exercises it can never make one of them
+comparable against an upstream converter -- and there is no TPC-DS anywhere in the repo.
+Upstream's `tpcds_ossie.yaml` / `tpcds_metric_view.yaml` pair (and
+`examples/tpcds_semantic_model.yaml`) is the schema the whole ecosystem is compared on.
+
+**Why this is Phase-3-coupled rather than a general repo improvement:** TPC-DS only buys
+comparability once there is something to compare against, i.e. the Phase-3
+`converters/thoughtspot/` package -- whose spec already calls for a `tpcds_*` fixture pair.
+Adopting it here first would add a fixture none of our converters is measured against.
+
+**Approach:** take `tpcds_ossie.yaml` verbatim as the Phase-3 from-Ossie input fixture and
+assert the emitted Model TML against a golden -- our first fixture shared with anything
+outside this repo, and so our first cross-ecosystem comparability. Note that upstream CI is
+offline and cannot depend on our CLI, so the `ts tml lint` pass over the emitted TML belongs
+in local development and at Phase-5 back-port time, not in the upstream workflow (the report
+states the `ts tml lint` assertion without drawing that boundary). Then decide at Phase 5
+whether the TPC-DS Model TML also belongs in `agents/shared/worked-examples/`.
+
+**Target:** with the Phase-3 converter's first test PR -- see
+`docs/superpowers/specs/2026-07-29-ossie-thoughtspot-converter-design.md`, Phase 3.
