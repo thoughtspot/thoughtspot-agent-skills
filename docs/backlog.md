@@ -5038,25 +5038,34 @@ All 3,808 cases collected from `tools/ts-cli/tests/` are example-based. There is
 `pip-audit`). Upstream's databricks converter runs Hypothesis at 300 examples per property.
 
 The gap matters more than the raw absence suggests because **the properties are already
-written and the checker already exists**: `agents/shared/schemas/ts-model-conversion-invariants.md`
-states I1-I12, N1 and PT1 as universally-quantified rules over generated Model TML ("for
-every entry in `formulas[]` there must be a corresponding entry in `columns[]`..."), and
-`ts tml lint` implements them. Only the generator is missing -- so today those invariants
-are only ever checked against the handful of documents a fixture or a live run happens to
-produce.
+written**: `agents/shared/schemas/ts-model-conversion-invariants.md` states I1-I12, N1 and
+PT1 -- 14 rules -- as universally-quantified statements over generated Model TML ("for every
+entry in `formulas[]` there must be a corresponding entry in `columns[]`..."). What is only
+partly built is the checker: `tools/ts-cli/ts_cli/tml_lint.py` implements **6 of the 14** --
+I1, I2, I4, I5, I8 and I12, plus a guid-placement rule. So today six invariants are checked,
+and only against the handful of documents a fixture or a live run happens to produce; the
+other eight are enforced by author discipline alone.
 
-**Approach:**
+**Approach** -- two components, sequenced, not one:
 
-1. A strategy producing arbitrary in-subset `parsed.json` documents, asserting
-   `lint_tml(build_model(parsed, translated, tables)) == []`. That tests the **builder**
-   rather than the documents our fixtures happen to contain -- a materially stronger claim,
-   and the duplicate-`column_id` class (I8, ts-cli v0.92.0, shipped in `from-snowflake-sv`
-   1.19.0 / `from-databricks-mv` 1.10.0) is exactly the kind of bug it would have caught by
-   construction instead of the hard way.
-2. Restrict generation to the **round-trippable subset** rather than generating everything
+1. **The generator.** A strategy producing arbitrary in-subset `parsed.json` documents,
+   asserting `lint_tml(build_model(parsed, translated, tables)) == []`. Even confined to the
+   6 invariants lint already covers, this tests the **builder** rather than the documents our
+   fixtures happen to contain -- a materially stronger claim, and the duplicate-`column_id`
+   class (I8, ts-cli v0.92.0, shipped in `from-snowflake-sv` 1.19.0 / `from-databricks-mv`
+   1.10.0) is exactly the kind of bug it would have caught by construction instead of the
+   hard way. This half is worth doing on its own.
+2. **Checkers for the assertable remainder.** I3, I6, I9, I10, I11 and N1 are mechanically
+   assertable over emitted TML but have no `tml_lint.py` check today, so a property test
+   cannot exercise them until one exists -- each is a small addition to the same module, and
+   each also strengthens the existing pre-import `ts tml lint` gate independently of any
+   property test. I7 (a MANDATORY consult gate on the author) and PT1 (a flag-for-review
+   rule) are **not** assertions over output and stay outside both lint and any property test;
+   they are deliberately out of scope here.
+3. Restrict generation to the **round-trippable subset** rather than generating everything
    and excepting the failures -- upstream's decision, and what stops a property test
    degenerating into a list of known-bad shapes.
-3. **The dual driver is load-bearing here, not optional polish.** `validate.yml` installs
+4. **The dual driver is load-bearing here, not optional polish.** `validate.yml` installs
    `pytest pyyaml radon pip-audit` on its 3.12 job and only `pytest pyyaml` on the
    3.10/3.11/3.13/3.14 matrix legs, so a Hypothesis-only test would be silently skipped on
    every leg as configured today, and adding the dependency to the 3.12 job alone still
@@ -5068,8 +5077,10 @@ produce.
 any test importing `hypothesis` has a seeded counterpart, or that `hypothesis` is installed
 on every CI leg.
 
-**Target:** next ts-cli converter-builder change -- the generator is the whole cost; the
-seeded driver is a small addition on top of it.
+**Target:** next ts-cli converter-builder change. Splittable: the generator over the 6
+already-checked invariants (item 1) plus the seeded driver (item 4) is the smaller first
+increment and delivers value alone; the six new lint checks (item 2) can land incrementally
+after it, or opportunistically whenever `tml_lint.py` is next touched.
 
 ---
 
