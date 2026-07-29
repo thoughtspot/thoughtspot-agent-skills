@@ -31,10 +31,16 @@ def test_build_emits_parameter_and_four_measures_per_spec():
     exprs = {f["name"]: f["expr"] for f in out["formulas"]}
     assert exprs["New Hires YoY"] == "[formula_New Hires Ref Yr] - [formula_New Hires SPLY]"
     assert exprs["New Hires YoY %"] == "safe_divide([formula_New Hires YoY], [formula_New Hires SPLY])"
-    # every emitted formula has a MEASURE column with a matching formula_id
+    # every emitted formula carries an id, and every column's formula_id matches one
+    # (CLAUDE.md invariant: formulas[].id must match its columns[].formula_id, else the
+    # column never binds on import and the YoY/YoY% cross-refs dangle)
+    formula_ids = {f["id"] for f in out["formulas"]}
+    for f in out["formulas"]:
+        assert f["id"] == f"formula_{f['name']}"
     for c in out["columns"]:
         assert c["properties"]["column_type"] == "MEASURE"
         assert c["formula_id"] == f"formula_{c['name']}"
+        assert c["formula_id"] in formula_ids
     assert any("VERIFY per-period numbers" in r for r in out["review"])
 
 

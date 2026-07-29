@@ -161,7 +161,9 @@ def build_timeintel_cmd(
     specs_file: str = typer.Option(..., "--specs",
                                    help="JSON list of {base_name, base_expr, [sply_name, yoy_name, yoy_pct_name]}"),
     date_column: str = typer.Option(..., "--date-column",
-                                    help="Model date column the year-offset compares against"),
+                                    help="Model date column the year-offset compares against. Use the "
+                                         "QUALIFIED name (e.g. 'Date::Date') on a multi-table model, where a "
+                                         "bare column name can be ambiguous."),
     model_file: str = typer.Option(None, "--model",
                                    help="Model TML to merge the parameter + measures into (writes back). "
                                         "Omit to print the fragment for manual merge."),

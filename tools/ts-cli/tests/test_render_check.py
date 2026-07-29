@@ -56,6 +56,12 @@ def test_classify_render_200_without_contents_is_failure():
     assert r["rendered"] is False
 
 
+def test_classify_render_200_empty_contents_is_failure():
+    # A 200 with an empty contents array rendered nothing — must not pass the gate.
+    r = classify_render(200, {"metadata_id": "x", "contents": []})
+    assert r == {"rendered": False, "tiles": 0, "error": "no visualization data returned"}
+
+
 def test_classify_render_500_is_failure_with_message():
     r = classify_render(500, BROKEN_500)
     assert r["rendered"] is False

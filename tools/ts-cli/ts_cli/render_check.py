@@ -57,8 +57,12 @@ def classify_render(status_code: int, body: Any) -> dict:
     array renders; anything else is a failure carrying the extracted message."""
     if status_code == 200 and isinstance(body, dict):
         contents = body.get("contents")
-        if isinstance(contents, list):
+        if isinstance(contents, list) and contents:
             return {"rendered": True, "tiles": len(contents), "error": None}
+        if isinstance(contents, list):
+            # 200 with an empty contents array: nothing rendered. Reporting ok:true with
+            # tiles_rendered:0 would be a confusing gate pass, so treat it as a failure.
+            return {"rendered": False, "tiles": 0, "error": "no visualization data returned"}
     return {"rendered": False, "tiles": 0, "error": extract_error(body)}
 
 

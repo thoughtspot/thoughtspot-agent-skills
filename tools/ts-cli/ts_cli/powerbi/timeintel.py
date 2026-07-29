@@ -83,11 +83,15 @@ def build_time_intelligence(
             review.append(f"'{name}' collides with an existing measure name — skipped, resolve by hand")
             return
         seen.add(name)
-        formulas.append({"name": name, "expr": expr})
+        fid = f"formula_{name}"
+        # Formula carries the id; its column references it by formula_id — the pair MUST
+        # match (CLAUDE.md TML invariant), and the YoY/YoY% cross-refs resolve via [id].
+        # Shape mirrors build_model._add_formula exactly.
+        formulas.append({"id": fid, "name": name, "expr": expr})
         columns.append({
             "name": name,
-            "formula_id": f"formula_{name}",
-            "properties": {"column_type": "MEASURE", "aggregation": "NONE"},
+            "formula_id": fid,
+            "properties": {"column_type": "MEASURE"},
         })
 
     for spec in specs:
