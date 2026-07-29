@@ -102,7 +102,7 @@ jobs:
         # WARN-only. Analogous to the changelog gate's --base scoping.
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          git fetch --no-tags origin "${{ github.base_ref }}"
           python3 tools/validate/check_open_items.py --root . \
             --base "origin/${{ github.base_ref }}"
 
@@ -113,7 +113,7 @@ jobs:
         # carry a CHANGELOG.md change in the same PR.
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          git fetch --no-tags origin "${{ github.base_ref }}"
           python3 tools/validate/suggest_repo_changelog.py --root . --check \
             --base "origin/${{ github.base_ref }}"
 
@@ -131,7 +131,12 @@ jobs:
         # change can no longer merge with a stale docs/quality-gates.md.
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          # NOTE: these PR-gate fetches must NOT use --depth=1. A shallow fetch into
+          # the full-history checkout writes .git/shallow for the base ref's tip, and
+          # every later `git log` walk stops there — generate_quality_gates.py then
+          # dates untouched validators as "unknown" and the catalog reads stale on
+          # every run (observed on this gate's own first firing, PR #405).
+          git fetch --no-tags origin "${{ github.base_ref }}"
           CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)
           if echo "$CHANGED" | grep -qE '^(scripts/pre-commit\.sh|\.github/workflows/validate\.yml|tools/validate/.*\.py)$'; then
             echo "PR touches a quality-gates source of truth — hard-checking docs/quality-gates.md."
