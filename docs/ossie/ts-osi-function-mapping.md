@@ -1,7 +1,9 @@
 # Ossie expression language → ThoughtSpot function mapping
 
 **Status:** draft for review on apache/ossie#285 · **Coverage:** 146/146 functions,
-operators and constructs from `core-spec/expression_language.md` (spec version `0.2.0.dev`,
+operators and constructs from `core-spec/expression_language.md` (**Ossie spec version:**
+`0.2.0.dev0`, `core-spec/spec.yaml:20` — matching the construct-mapping document; the
+expression-language draft's own version-history row labels itself `0.2.0.dev`,
 `core-spec/expression_language.md:767`; all Ossie citations are `path:line` against
 apache/ossie @ `c26b61c`) · **Classifications:** `direct` (native ThoughtSpot formula
 equivalent, possibly as a documented composition of native functions) · `passthrough`
@@ -363,7 +365,7 @@ Two consequences run through every row:
 | `LAST_VALUE(expr) OVER (...)` | direct | `last_value ( sum ( [m] ) , query_groups ( ) , { [T::date] } )` | Same conditions and same fallback as `FIRST_VALUE`. |
 | `NTH_VALUE(expr, n) OVER (...)` | passthrough | `sql_number_aggregate_op ( "NTH_VALUE({0}, 2) OVER (ORDER BY {1})" , [m] , [ord] )` | **Variant: `sql_number_aggregate_op`.** ThoughtSpot's semi-additive functions reach only the first and last values of the axis. |
 | `OVER (PARTITION BY ... ORDER BY ...)` clause | direct | structural rewrite — no `OVER` keyword | `PARTITION BY attrs` becomes the `group_aggregate` grouping argument `{ [T::a] , [T::b] }`; `ORDER BY` becomes the window function's trailing attribute arguments. An empty `OVER ()` is grouping `{ }`. **The reverse direction is where this gets lossy** — ThoughtSpot's window functions add the query's own dimensions to the partition dynamically, which the specification has no way to express (ask **A10**). |
-| Frame clause — `ROWS BETWEEN ...` / `RANGE BETWEEN ...` | direct | `moving_*` start/end arguments, or `cumulative_*` | `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` → `cumulative_*`. Bounded `ROWS` frames → `moving_*` with `n PRECEDING` → positive `n`, `CURRENT ROW` → `0`, `n FOLLOWING` → negative `-n`. **`RANGE` frames fall back to a pass-through:** ThoughtSpot's frames are row-positional, not value-ranged — live-verified on gapped dates, `moving_*` counts surviving rows regardless of the calendar distance between them — so a `RANGE` frame over a gapped sort column would silently return different numbers (**E3**). |
+| Frame clause — `ROWS BETWEEN ...` / `RANGE BETWEEN ...` | direct | `moving_*` start/end arguments, or `cumulative_*` | `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` → `cumulative_*`. Bounded `ROWS` frames → `moving_*` with `n PRECEDING` → positive `n`, `CURRENT ROW` → `0`, `n FOLLOWING` → negative `-n`. **`RANGE` frames fall back to `sql_number_aggregate_op`** (the same variant the window-aggregation row below falls back to)**:** ThoughtSpot's frames are row-positional, not value-ranged — live-verified on gapped dates, `moving_*` counts surviving rows regardless of the calendar distance between them — so a `RANGE` frame over a gapped sort column would silently return different numbers (**E3**). |
 | Window aggregation — `AGG(expr) OVER (...)` | direct | `cumulative_*` / `moving_*` / `group_*` by frame shape | The specification allows every aggregate as a window function (`:585`). ThoughtSpot's window family covers `SUM`, `AVG`, `MIN` and `MAX` (as `*_sum`, `*_average`, `*_max`, `*_min`); a windowed `COUNT`, `MEDIAN`, `STDDEV` or `VARIANCE` has a partitioned form via `group_count` / `group_stddev` / `group_variance` but no ordered/framed form, and falls back to `sql_number_aggregate_op`. Subject to **E5**. |
 
 ---
@@ -374,7 +376,7 @@ Source: `core-spec/expression_language.md:608-620` (`CAST`), `:625` (`TRY_CAST`)
 
 | Ossie | Class | ThoughtSpot | Notes |
 |---|---|---|---|
-| `CAST(expression AS target_type)` | direct | per-type — see the target-type table below | 6 of the 8 specified target types are `direct`; `BOOLEAN` and `TIMESTAMP`/`TIME` fall back to a pass-through (**E3**). |
+| `CAST(expression AS target_type)` | direct | per-type — see the target-type table below | 5 of the 8 specified target types are `direct`; the other three — `BOOLEAN`, `TIMESTAMP` and `TIME` — fall back to a pass-through (**E3**). |
 | `TRY_CAST(expression AS target_type)` | direct | the same functions as `CAST` | ThoughtSpot's `to_integer` / `to_double` / `to_string` **already return NULL on failure**, which is exactly `TRY_CAST` semantics — so the two rows share a mapping and it is `CAST`, not `TRY_CAST`, that is the imprecise one. A strict `CAST` that must *error* rather than null is not expressible; the converter records that in the issue log when the source distinguishes them. |
 
 ### `CAST` target types *(not counted — arguments)*
@@ -557,6 +559,11 @@ documented fallback exists, so a wrong call costs fidelity, not correctness.
 `LTRIM` / `RTRIM` are the mirror case — classified `passthrough` on the conservative
 reading that ThoughtSpot's `trim` is two-sided only. If a one-sided form turns out to
 exist, those two rows move to `direct` and the pass-through count drops to 29.
+
+Each of the four table rows and the `LTRIM`/`RTRIM` pair rests on ThoughtSpot references
+that disagree with one another, so the verification is one live pass rather than five
+separate ones. It is tracked internally as **BL-170**; this section will be updated with
+the result.
 
 ---
 

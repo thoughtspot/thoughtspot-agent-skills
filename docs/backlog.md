@@ -5121,3 +5121,65 @@ whether the TPC-DS Model TML also belongs in `agents/shared/worked-examples/`.
 
 **Target:** with the Phase-3 converter's first test PR -- see
 `docs/superpowers/specs/2026-07-29-ossie-thoughtspot-converter-design.md`, Phase 3.
+
+---
+
+## BL-170 -- Live-verify four internal ground-truth conflicts in the ThoughtSpot formula references `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** the `docs/ossie/ts-osi-function-mapping.md` review on the
+`feat/ossie-converter-design` branch -- writing one row per Ossie function forced a
+side-by-side read of every ThoughtSpot formula reference we ship, which is what surfaced
+these. Cross-referenced from that document's *Rows pending live confirmation* section.
+**Affects:** `agents/shared/schemas/thoughtspot-formula-patterns.md`,
+`agents/shared/mappings/tableau/tableau-formula-translation.md`,
+`agents/shared/mappings/ts-databricks/ts-databricks-formula-translation.md`,
+`agents/shared/mappings/qlik/qlik-thoughtspot-formula-translation.md`, and any converter
+whose emitter branches on these functions.
+**Status:** OPEN.
+
+Four function-level claims about ThoughtSpot's *own* formula language are stated
+incompatibly across our shared references. In each case one of the files is wrong, so at
+least one converter is emitting either an invalid native call or an unnecessary
+pass-through -- and the two failure modes are asymmetric: a wrong "native" claim produces a
+formula that fails at import, while a wrong "no native" claim only costs fidelity.
+
+| # | Function(s) | Claim A | Claim B |
+|---|---|---|---|
+| a | `replace` | native: `replace ( [x] , [old] , [new] )` (`thoughtspot-formula-patterns.md:186`), and the Databricks mapping's ThoughtSpot column agrees (`ts-databricks-formula-translation.md:84`) | "Bare `replace(...)` is **NOT** a valid ThoughtSpot formula function (live-confirmed)" -- re-mapped to `sql_string_op` and CLI-translated in ts-cli v0.81.0 (`tableau-formula-translation.md:117`, `:172`, `:1032`, `:1125`) |
+| b | `starts_with` / `ends_with` | native, returning boolean (`thoughtspot-formula-patterns.md:188-189`); `starts_with` again in `ts-databricks-formula-translation.md:86` | "No native `starts_with`" / "No native `ends_with`", composed from `strpos` / `substr` instead (`tableau-formula-translation.md:227-228`, live-verified 2026-06-13 on se-thoughtspot) |
+| c | `ltrim` / `rtrim` | exist as ThoughtSpot functions (`ts-databricks-formula-translation.md:82-83`, whose left-hand column is the ThoughtSpot side) | "ThoughtSpot `trim()` removes both sides -- no left-only / right-only trim available" (`qlik-thoughtspot-formula-translation.md:180-181`). `thoughtspot-formula-patterns.md` lists `trim` only and names neither, so it corroborates neither side |
+| d | `in` literal-list delimiter | `[col] in ( 'a' , 'b' )` -- round parentheses (`thoughtspot-formula-patterns.md:134`) | `in { a , b , c }` -- curly braces required; the round form raises the parser error "Search did not find 'in ( ...'" (`tableau-formula-translation.md:41`) |
+
+Rows (a), (b) and (d) each have a live-confirmed side (the Tableau mapping, dated and
+attributed to se-thoughtspot), which is the likelier-correct one and makes
+`thoughtspot-formula-patterns.md` -- the file CLAUDE.md treats as the formula ground truth --
+the probable defect in all three. Row (c) has no live evidence on either side. Either way
+the fix is not a guess: these are four one-line formula probes.
+
+**Approach:**
+
+1. On a live instance, create one Model formula per claim and record accept/reject:
+   `replace ( [col] , 'a' , 'b' )`; `starts_with ( [col] , 'x' )` and
+   `ends_with ( [col] , 'x' )`; `ltrim ( [col] )` and `rtrim ( [col] )`;
+   `[col] in ( 'a' , 'b' )` **and** `[col] in { 'a' , 'b' }`. Import via
+   `ts tml import` so the check is the real parser, not the UI.
+2. Correct whichever reference is wrong, with the date and instance recorded in the row --
+   the same live-verification convention `thoughtspot-formula-patterns.md:182` and
+   `tableau-formula-translation.md:227` already use. Where a function does not exist, state
+   the pass-through or composition explicitly so no converter re-derives it.
+3. Where the two spellings coexist by build, say so rather than picking one: the `in`
+   delimiter is the candidate for that treatment.
+4. Update the affected emitters and the Ossie function-mapping document's *Rows pending
+   live confirmation* table with the result (a `passthrough` -> `direct` flip on
+   `LTRIM`/`RTRIM` also moves that document's counts, which it already records).
+
+**Validator promotion this could unlock:** the disagreement is only detectable by reading
+four files side by side. A `check_formula_catalog.py` extension that cross-checks each
+ThoughtSpot function name appearing in a mapping's ThoughtSpot column against
+`thoughtspot-formula-patterns.md` -- and fails when one file calls a function native and
+another calls it absent -- would make this class of drift impossible to reintroduce. Worth
+filing once the four facts are settled, since the checker needs a correct baseline.
+
+**Target:** next live-instance pass on se-thoughtspot; bundle with any converter formula
+work that touches these functions.

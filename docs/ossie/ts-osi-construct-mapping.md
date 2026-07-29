@@ -50,14 +50,34 @@ Directions are always written out: **`TML → Ossie`** (converter entry point
 | `lossless` | Both sides have a native field; the value survives unchanged. |
 | `via custom_extensions` | One side has no field for it; the value is carried in the `custom_extensions` entry with `vendor_name: THOUGHTSPOT` and restored on the return trip. |
 | `lossy→issue` | The receiving side cannot represent it at all. The converter emits a structured issue naming the object and the dropped construct. Never a silent drop. |
+| `mixed` | A **container** row whose fidelity is not one value, because the row expands into a level of its own: the per-key verdicts live in that level's table, and the Notes cell names which one to read. Used on `relationships` and `metrics` (Semantic model level) and `fields` (Dataset level) — nowhere else. |
+| `see there` | Fidelity is stated by a **rule** elsewhere in this document rather than by a table row. Used for `expression.dialects[]`, whose verdict is per-function: the rule is *Expression handling*, and the per-function verdicts are in the companion function-mapping document. |
+
+All three base tokens are also written in a **qualified form** — `lossless (structure)`,
+`lossless (equi-join)`, `lossy→issue (formula)`, `via custom_extensions (multi-dataset)` — and
+often as a pair. The parenthetical names the *case* the verdict holds for, and two conventions
+combine them:
+
+- **`/` means the fidelity splits by case.** `lossless (equi-join) / lossy→issue (non-equi)`
+  reads as "lossless for an equi-join, `lossy→issue` for a non-equality one" — exactly one side
+  applies to any given input.
+- **`+` means both apply to the same case.** `lossy→issue + via custom_extensions
+  (multi-dataset)` reads as "for the multi-dataset case, an issue is raised *and* the construct
+  is stashed" — the loss is reported and the value is still preserved.
+
+A qualified `lossless` is therefore never a weaker `lossless`; it is a `lossless` with its
+domain stated, and every row that qualifies one also states what happens outside that domain.
 
 ### The stash is asymmetric — and that matters for what "lossless" can mean
 
 `custom_extensions` is an *Ossie* construct (`core-spec/spec.md:420-430`). TML has no
 vendor-extension field of any kind. So:
 
-- **`TML → Ossie → TML` is the round trip the stash makes lossless.** ThoughtSpot-only
-  concepts are serialised on the way out and restored on the way back.
+- **`TML → Ossie → TML` is the round trip the stash makes lossless** — except for the
+  explicit non-mappings **NM1**–**NM6**, which are deliberately not carried in either
+  direction (instance-local identifiers, RLS rules, presentation and coaching objects,
+  aggregate associations, legacy object types). Every other ThoughtSpot-only concept is
+  serialised on the way out and restored on the way back.
 - **`Ossie → TML → Ossie` is lossy for every Ossie construct TML cannot express**, and no
   stash can fix it — there is nowhere in TML to put it. Each such loss is reported as an
   issue; the rows below mark them `lossy→issue`, and the datatype table names the
@@ -218,9 +238,9 @@ SQL type names**: `BIGINT` returns `DataType BIGINT does not match CDW DataType`
 | `Integer` | `INT64` | `INT64` → `Integer` | ThoughtSpot's integer type is `INT64` — never `BIGINT` or `INTEGER` |
 | `Decimal` | `DOUBLE` | `DOUBLE` → `Decimal` | ThoughtSpot has a single approximate numeric type, so `Decimal` and `Float` **collapse** into it. `TML → Ossie → TML` is exact (`DOUBLE` → `Decimal` → `DOUBLE`); `Ossie → TML → Ossie` cannot distinguish the two, and per **X9** no stash can recover it → **declared loss**, reported as an issue when the input said `Float` |
 | `Float` | `DOUBLE` (`FLOAT` on a BigQuery-backed connection) | `FLOAT` → `Float` | The Table TML reference distinguishes `DOUBLE` for Snowflake-style numerics from `FLOAT` for BigQuery. A `FLOAT` column round-trips exactly; a `DOUBLE` one comes back as `Decimal` (row above) |
-| `Boolean` | `BOOL` (`BOOLEAN` where the connection reports that name) | `BOOL` / `BOOLEAN` → `Boolean` | Lossless. Which spelling the connection uses is recorded in the field stash's `data_type` key so the return trip re-emits the same one |
+| `Boolean` | `BOOLEAN` (`BOOL` on a Snowflake-backed connection) | `BOOL` / `BOOLEAN` → `Boolean` | Lossless. The Table TML reference gives `BOOLEAN` as the general value and `BOOL` as the Snowflake-specific one, so `BOOLEAN` is the default and `BOOL` is selected from the connection. Which spelling the connection uses is recorded in the field stash's `data_type` key so the return trip re-emits the same one |
 | `Date` | `DATE` | `DATE` → `Date` | Lossless |
-| `Time` | `VARCHAR`, or `DATE_TIME` when the underlying column is timestamp-backed | — never emitted | ThoughtSpot's documented type set has no time-of-day type (`TIME` is on the rejected SQL-name list). Per **X9** the original cannot be stashed, so this is a **declared loss** reported at conversion time |
+| `Time` | `VARCHAR`, or `DATE_TIME` when the underlying column is timestamp-backed | — never emitted | ThoughtSpot's documented `data_type` set (Table TML reference, *Data Type Mapping*) has no time-of-day type at all — the closest values are `DATE`, `DATE_TIME` and `VARCHAR`. Per **X9** the original cannot be stashed, so this is a **declared loss** reported at conversion time |
 | `DateTime` | `DATE_TIME` | `DATE_TIME` → `DateTime` | Lossless |
 | `DateTimeTz` | `DATE_TIME` | — (see `DateTime`) | ThoughtSpot has no offset-aware column type — display time zone is an instance/user setting, not a column property. `Ossie → TML → Ossie` collapses to `DateTime` → **declared loss**, reported at conversion time |
 | `Opaque` | `VARCHAR` | — never emitted | Ossie's escape hatch for a type outside the portable vocabulary (`core-spec/spec.md:80`). The marker collapses to `String` on a return trip → **declared loss**, reported at conversion time. Any accompanying vendor refinement in a foreign-vendor extension passes through untouched (**X7**) |
@@ -598,7 +618,9 @@ issue naming the object and the construct — never a silent drop.
 ## Worked shape
 
 One dataset, one attribute, one metric — the minimum that exercises the 1 + N document
-split, the identifier rules, and the metric-as-formula rule (**R4**).
+split, the identifier rules, and the metric-as-formula rule (**R4**) — plus one deliberate
+`lossy→issue`, so the example shows what a declared loss looks like rather than only the
+clean path.
 
 Ossie:
 
@@ -610,7 +632,7 @@ semantic_model:
     datasets:
       - name: orders
         source: SALES.PUBLIC.ORDERS
-        primary_key: [ORDER_ID]
+        primary_key: [ORDER_ID]   # deliberate lossy→issue — see the note below
         fields:
           - name: order_date
             label: Order Date
@@ -639,6 +661,18 @@ semantic_model:
         ai_context:
           synonyms: ["revenue", "total sales"]
 ```
+
+**`primary_key` is the demonstrated loss, and it is why neither TML document below mentions
+`ORDER_ID`.** Per the Dataset-level `primary_key` row, TML has no key declaration anywhere,
+so the only `Ossie → TML` home for a key is the join graph — and this model has a single
+dataset and no relationships, which makes `[ORDER_ID]` the row's *unused key* case: nothing
+consumes it, per **X9** nothing can stash it, so the converter raises an issue naming the
+dataset and the dropped key rather than dropping it silently. (`ORDER_ID` is a physical
+column of `SALES.PUBLIC.ORDERS`, not a declared field — Ossie's `primary_key` names key
+*columns*, `osi-schema.json:188-193` — so its absence from `fields` is correct, not a
+dangling reference.) Add a second dataset and a `MANY_TO_ONE` relationship into `orders`
+and the same key becomes `lossless (join-derived)`: it is then recoverable from the
+relationship's `to_columns` on the way back.
 
 ThoughtSpot, Table document:
 
