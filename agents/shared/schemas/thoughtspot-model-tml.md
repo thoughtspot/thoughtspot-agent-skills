@@ -91,6 +91,7 @@ model:
 | `model.filters` | No | Model-level pre-filters applied before any query |
 | `model.joins_with` | No | Data augmentation joins at the model level (e.g. joining an uploaded CSV to the model) |
 | `model.properties` | No | Model-level settings |
+| `model.lesson_plans` | No | In-product guided-lesson strings attached to the model — a list of `{lesson_id: <int>, lesson_plan_string: <string>}` entries, a sibling of `properties:` rather than a key inside it. Documented in ThoughtSpot's TML reference for Models but **not live-verified here**, so treat the shape as provisional: pass through on round-trips, do not emit when generating a model. |
 
 ### `model_tables[]` fields
 
@@ -167,7 +168,7 @@ joins:
 | `formula_id` | Formula reference | Must match a `formulas[].id` exactly (case-sensitive, spaces included) |
 | `name` | Yes (always) | Display name shown in ThoughtSpot search bar |
 | `properties.column_type` | Yes | `ATTRIBUTE` or `MEASURE` |
-| `properties.aggregation` | No | For MEASURE: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT`. Valid on both `column_id` and `formula_id` entries. **Warning:** `COUNT_DISTINCT` on a `column_id` causes ThoughtSpot to silently override `column_type` to `ATTRIBUTE`. Always use a `formulas[]` entry with `unique count ( [TABLE::col] )` instead. |
+| `properties.aggregation` | No | For MEASURE: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT`. The full documented set also includes `NONE`, `STD_DEVIATION` and `VARIANCE` — accept all nine when round-tripping an exported model, and prefer the six above when generating one. Valid on both `column_id` and `formula_id` entries. **Warning:** `COUNT_DISTINCT` on a `column_id` causes ThoughtSpot to silently override `column_type` to `ATTRIBUTE`. Always use a `formulas[]` entry with `unique count ( [TABLE::col] )` instead. |
 | `properties.index_type` | No | `DONT_INDEX` suppresses text-search indexing. `PREFIX_ONLY` indexes only the string prefix (faster prefix search on long strings). The full documented set also includes `DEFAULT`, `PREFIX_AND_SUBSTRING` and `PREFIX_AND_WORD_SUBSTRING` — accept all five when round-tripping an exported model. Omit for full indexing (default). |
 | `properties.index_priority` | No | Integer — raises or lowers this column's priority in search indexing relative to others. Pass through on round-trips. |
 | `properties.is_attribution_dimension` | No | Boolean — marks the column as an attribution dimension. Pass through on round-trips. |

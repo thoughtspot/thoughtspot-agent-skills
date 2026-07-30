@@ -13,7 +13,7 @@ draws on, this one cites internal paths and internal backlog IDs freely).
 | [ts-osi-function-mapping.md](ts-osi-function-mapping.md) | 33 `passthrough` rows and the 1 `unmappable` one, rules **E1–E12**, asks **A9–A12** |
 | [../reviews/2026-07-29-ossie-converter-learnings.md](../reviews/2026-07-29-ossie-converter-learnings.md) | How other vendors' converters solve the same problems (the `custom_extensions` stash in particular) |
 | [../reviews/2026-07-29-ossie-tpcds-fidelity.md](../reviews/2026-07-29-ossie-tpcds-fidelity.md) | Findings **F1–F21** from round-tripping a community TPC-DS fixture — the measured, not reasoned, evidence |
-| [../backlog.md](../backlog.md) | **BL-166** (no stash), **BL-170** (string functions live-verified), **BL-171** (emitters still wrong) |
+| [../backlog.md](../backlog.md) | **BL-166** (no stash), **BL-170** (string functions live-verified), **BL-171** (emitters still wrong), **BL-186** (the V1–V4 live verifications this document depends on) |
 
 **How to read this.** Three buckets, and the split is the point. Bucket 1 is **ours** — things
 ThoughtSpot cannot express that the standard, or another vendor, can. Bucket 2 is **theirs** —
@@ -23,6 +23,13 @@ listed so nobody mistakes a decision for an oversight.
 
 Priority is *impact on interchange fidelity*, not implementation cost, which we are not in a
 position to judge.
+
+**Routing, recorded deliberately.** Under this repo's two-bucket rule a finding is not "done"
+until it is a permanent check or a dated backlog entry — but the **bucket-1 gaps below are
+intentionally left unrouted**, because they are input to a *product* conversation and not repo
+work; only the ones that already imply repo work carry an ID (G1 → **BL-166**, G4 → **BL-170** /
+**BL-171**). What *is* routed is the set of open ThoughtSpot-side verifications this document
+depends on: **V1–V4** are tracked as **BL-186**.
 
 ---
 
@@ -43,7 +50,7 @@ statement.
 | **G8** | **No time-of-day type, and no offset-aware timestamp type.** The documented `data_type` set has `DATE`, `DATE_TIME` and `VARCHAR` and nothing else temporal. | construct-mapping Datatype map, `Time` and `DateTimeTz` rows (both **declared losses**); function-mapping `TIME '10:30:00'` and `CAST(… AS TIME)` rows, both forced to `sql_date_time_op` | Two of the standard's ten datatypes stop being declared losses. Today a `Time` column becomes a `VARCHAR` (or a `DATE_TIME` with a meaningless date part) and a `DateTimeTz` silently loses its offset — display time zone is an instance/user setting in ThoughtSpot, not a column property | **Medium** |
 | **G9** | **One approximate numeric type.** `DOUBLE` serves for both exact-decimal and floating-point intent; there is no fixed-point type. | construct-mapping Datatype map, `Decimal` / `Float` rows (they **collapse** into one another); function-mapping `CAST` target types, `DECIMAL`/`NUMERIC` row | A `DECIMAL(18,2)` currency column stays exact through a round trip instead of becoming floating-point. Also removes an asymmetry that is confusing to explain: `TML → Ossie → TML` is exact, `Ossie → TML → Ossie` is not | **Medium** |
 | **G10** | **A fiscal or custom calendar cannot be described in TML.** The calendar is a *Connection-scoped* object created via `POST /api/rest/2.0/calendars/create` (10.12.0.cl+) and backed by a warehouse table; TML carries only `properties.calendar`, a bare name reference. The value vocabulary is not even settled internally. | construct-mapping field-level `calendar` row and verification **V1**; function-mapping fiscal-family row and ask **A11(c)**; `agents/shared/schemas/thoughtspot-model-tml.md` (`properties.calendar`, added 2026-07-30) vs `thoughtspot-sql-view-tml.md:136` (`CALENDAR_TYPE_GREGORIAN`) | A fiscal model becomes deployable and portable through TML alone. Today a TML package that references a fiscal calendar is silently wrong on any instance whose connection lacks a calendar of that name — and the expression-level `fiscal` argument on `year ( )` / `quarter_number ( )` has no home either, so the loss is two-part | **Medium** |
-| **G11** | **Four documented silent-failure behaviours on import.** A root-level `synonyms:` is silently dropped; a nested `guid:` is silently ignored and a *duplicate object* is created; `aggregation: COUNT_DISTINCT` on a physical column silently overrides `column_type` to `ATTRIBUTE`; `aggregation` on a formula column is silently ignored at query time. | construct-mapping rules **R2**, **R3**, **R4b**, **R7** — every one of them derived from a real import failure, which is why they are rules and not notes | Imports fail loudly instead of succeeding wrongly. Each of these currently produces a model that imports clean and then behaves incorrectly, which is strictly worse than a rejected import — and each one is a rule every TML-generating tool must independently rediscover | **Medium** |
+| **G11** | **Four documented silent-failure behaviours on import.** A root-level `synonyms:` is silently dropped; a nested `guid:` is silently ignored and a *duplicate object* is created; `aggregation: COUNT_DISTINCT` on a physical column silently overrides `column_type` to `ATTRIBUTE`; `aggregation` on a formula column is silently ignored at query time. | construct-mapping rules **R7** (root-level `synonyms:`), **R2** (nested `guid:`), **R4(b)** (`COUNT_DISTINCT` override) and **R4(c)** (`aggregation` on a formula column) — every one of them derived from a real import failure, which is why they are rules and not notes | Imports fail loudly instead of succeeding wrongly. Each of these currently produces a model that imports clean and then behaves incorrectly, which is strictly worse than a rejected import — and each one is a rule every TML-generating tool must independently rediscover | **Medium** |
 | **G12** | **The function tail:** no `date_trunc`, no `TRUNC`, no `MINUTE`/`SECOND` extractors, no `dense_rank`, no `NTILE`, no percentile functions, no population `stddev`/`variance`, no `atan2`, no `count(*)`. | function-mapping coverage summary — these make up most of the remaining 22 pass-throughs after G4's 11 | Each one removes a `sql_*_op` and its dialect coupling. Individually small; together with G4 they are the entire remaining gap between today's 77% native coverage of the standard's expression language (112 of 146) and near-complete coverage | **Medium** |
 | **G13** | **`FULL_OUTER` is accepted on a Table-level join and rejected on a Model inline join** (the error names only `INNER, LEFT_OUTER, OUTER, RIGHT_OUTER`). | construct-mapping relationship `type` row and rule **R5** | Join semantics stop depending on *where* the join was declared. Today a converter must silently downgrade `FULL_OUTER` to `OUTER` in a model inline join, which changes results | **Low** |
 | **G14** | **A custom-map geo reference is a GUID** (`geo_config.custom_file_guid`), so it is instance-local by construction. | construct-mapping FieldLevel `geo_config` note, rule **X8**, non-mapping **NM1**, verification **V3** | Geo configuration becomes portable. Today a column whose geo role points at a custom map must have that role dropped entirely on export — a GUID cannot be carried into a portable document, so unlike most properties there is not even a lossy path | **Low** |
@@ -89,7 +96,7 @@ loss is always visible to the user.
 | # | Not carried | Why |
 |---|---|---|
 | **NM1** | Object identity — `guid`, `obj_id`, `model_tables[].fqn` | Instance-local. A portable document containing them is not portable, and re-importing a stale value fails with `fqn resolution failed`. Enforced by payload rule **X8** |
-| **NM2** | Row-level security (`rls_rules`), and ABAC group references | Access-control policy, not semantics; the expressions name groups that exist only in the source instance. Relocating security policy into a document other tools will read *and rewrite* is a hazard. The two booleans whose loss would change *results* — `is_bypass_rls` and `is_mandatory_token_filter` — are treated as exceptions and preserved |
+| **NM2** | Row-level security (`rls_rules`) | Access-control policy, not semantics; the rule expressions name groups that exist only in the source instance. Relocating security policy into a document other tools will read *and rewrite* is a hazard. The two booleans whose loss would change *results* — `is_bypass_rls` and `is_mandatory_token_filter` — are treated as exceptions and preserved |
 | **NM3** | Presentation artifacts — Answers, Liveboards, charts | Separate object types with their own identity. The standard models semantics, not visualisations |
 | **NM4** | Spotter coaching objects — reference questions, feedback, business terms | Separate object types that bind search tokens to phrasings. The standard's `ai_context.examples` is the nearest concept and is not interchangeable with them |
 | **NM5** | Aggregate-model associations (`aggregated_models`) | A query-routing performance optimisation whose entries are GUIDs of *other* Models — instance-local by construction (NM1), and not semantics. Called out separately because stripping it silently disables routing with no error |
@@ -115,7 +122,9 @@ any other external-dependency claim in this repo gets.
   covers the same drift pointed inward, at our own tooling.
 - **Verifications V1–V4** in the construct-mapping document are the open ThoughtSpot-side
   questions this document depends on but has not settled — chiefly G10's calendar value
-  vocabulary. Each needs a live export to close, and none should be relied on until it is.
+  vocabulary. Each needs a live export to close, and none should be relied on until it is. They
+  are routed as **BL-186**, whose V1 leg is ~15 minutes on `se-thoughtspot` and gates the only
+  converter behaviour among the four.
 - **Round-trip tests, when the converter exists.** Today every fidelity claim here is either
   reasoned from documented semantics or measured once by hand
   (`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`, which found 21 behaviour issues in one

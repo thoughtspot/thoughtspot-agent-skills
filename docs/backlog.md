@@ -79,6 +79,7 @@ are roughly ordered by value÷effort.
 
 | Item | Summary | Target |
 |---|---|---|
+| BL-186 | Live-verify the four OSSIE-mapping TML property questions (V1-V4) | next se-thoughtspot session |
 | BL-184 | Worked-example reproducibility test (ground truth is never re-run) | after BL-178 |
 | BL-179 | from-Snowflake promotes the first synonym over the logical identifier | with BL-166 |
 | BL-181 | from-Snowflake classifies every fact `ATTRIBUTE` (no MEASURE branch) | after BL-178 |
@@ -6112,3 +6113,59 @@ heading.
 
 **Target:** opportunistic -- next validator sweep, or whenever `docs/backlog.md` is next touched
 for an unrelated reason.
+
+---
+
+## BL-186 -- Live-verify the four OSSIE-mapping TML property questions (V1-V4) `Tier 2`
+
+**Filed:** 2026-07-30.
+**Source:** PR #415 review. The post-ready pass over `docs/ossie/ts-osi-construct-mapping.md`
+swept ThoughtSpot's own product documentation for TML properties our schema references omit. It
+found five, and four of them cannot be settled from documentation alone -- they were recorded as
+verifications **V1**-**V4** in that document's *ThoughtSpot-side open verifications* table. This
+entry is the two-bucket exit for those four, so they are routed rather than sitting as
+"we noticed this".
+**Affects:** `agents/shared/schemas/thoughtspot-model-tml.md`,
+`agents/shared/schemas/thoughtspot-table-tml.md`,
+`agents/shared/schemas/thoughtspot-sql-view-tml.md`,
+`docs/ossie/ts-osi-construct-mapping.md` (the V1-V4 table and the field-level `calendar` row),
+`docs/ossie/ts-osi-compliance-gaps.md` (G10).
+**Status:** OPEN.
+
+**Why these need a live instance.** Our TML references were built from real import failures, so
+they are complete on *what breaks* and incomplete on *what is merely optional*. Absence from them
+is not evidence a property does not exist -- which is exactly how the `calendar` blind spot
+survived. Product documentation establishes that each property below exists; only an export can
+establish the value vocabulary and the round-trip behaviour, and both mapping documents
+deliberately refuse to emit these properties until it does.
+
+| # | What to verify | Method | Why it matters |
+|---|---|---|---|
+| **V1** | `properties.calendar` -- the value vocabulary, and whether it is honoured on a **Table** column | Create a custom calendar on a connection (`POST /api/rest/2.0/calendars/create`, needs 10.12.0.cl+), apply it to a date column, export the Model **and** its Table TML, read back what the `calendar:` value actually is | **The blocking one, and cheapest -- ~15 min.** ThoughtSpot's TML docs give `default \| calendar_name`; our own `thoughtspot-sql-view-tml.md:136` records the literal `CALENDAR_TYPE_GREGORIAN`. Unreconciled, so no converter may emit the property. Also settles whether the Table TML reference needs the row that was deliberately withheld in PR #415 |
+| **V2** | `properties.currency_type` -- the `column` and `is_browser` forms | Set each of the three forms on a measure, export, diff | Documented as three mutually-exclusive forms; our references only ever showed `iso_code`. Confirm both other forms survive a round trip, and whether `column:` takes a display name or a `TABLE::Column` reference |
+| **V3** | `geo_config` naming a custom map (`custom_file_guid` + `geometryType`) | Read-only -- confirm the exported shape | **Already settled as a declared loss** (rule X8 forbids stashing a GUID), so nothing changes for the converter. Verify only so the shape is on record and a future reader does not re-litigate it |
+| **V4** | `properties.is_mandatory_token_filter` | Set it on a column, export, re-import, export again, confirm it is still there | It **fails open**: with the flag, a user whose token carries no filter rule for that column is denied all data; without it, that user sees every value. A round trip that silently drops it *widens* access, so the stash is only as good as the export |
+
+**Steps.**
+
+1. V1 first and on its own -- it is the only one that gates a documented converter behaviour, and
+   it is ~15 minutes on `se-thoughtspot`.
+2. Record each result in the construct-mapping document's V1-V4 table (verified date + finding),
+   not only here, since that table is what a converter author reads.
+3. For any property whose shape is confirmed, add or correct the row in the relevant
+   `agents/shared/schemas/thoughtspot-*-tml.md` and bump that file's currency anchor. `calendar`,
+   `index_priority`, `is_attribution_dimension` and the widened `index_type` / `currency_type` /
+   `aggregation` rows already landed in `thoughtspot-model-tml.md` in PR #415; V1 may add the
+   Table-TML row that was withheld.
+4. `model.lesson_plans` was documented in the same pass from the rendered docs page and flagged
+   provisional. Confirm its shape opportunistically in the same session -- it is not one of the
+   four, and nothing depends on it.
+5. Close the entry only when all four carry a dated verdict, or when a remaining one is explicitly
+   deferred with a reason.
+
+**Not in scope.** The fourteen ThoughtSpot product gaps in `docs/ossie/ts-osi-compliance-gaps.md`
+are deliberately **not** routed to a backlog entry -- they are input to a product conversation,
+not repo work. This entry covers only the four verifications, which *are* ours to close.
+
+**Target:** next `se-thoughtspot` session -- V1 alone is a 15-minute task and can ride along with
+any unrelated live check.
