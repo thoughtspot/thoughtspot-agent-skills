@@ -161,6 +161,22 @@ def test_minute_and_second_are_flagged_not_faked():
         assert "unmapped" in note
 
 
+def test_marker_inside_a_string_literal_is_data_not_a_call():
+    """A DAX string literal containing `trim(` is text, not a call. Rewriting it
+    corrupted the formula into nested quotes and still reported Migrated — a
+    silent wrong answer, which is the one outcome the pass-through mechanism
+    exists to avoid."""
+    expr, status, _ = translate_dax('CONCATENATE(Employee[Name], "trim(x)")')
+    assert status == "Migrated"
+    assert expr == "concat([Employee::Name], 'trim(x)')"
+
+
+def test_trim_of_a_literal_containing_a_marker():
+    expr, status, _ = translate_dax('TRIM("upper(x)")')
+    assert status == "Migrated"
+    assert expr == 'sql_string_op("TRIM({0})", \'upper(x)\')'
+
+
 def test_no_disproved_name_ever_emitted():
     for dax in ("TRIM(Employee[Name])", "UPPER(Employee[Name])",
                 "LOWER(Employee[Name])", "UPPER(TRIM(Employee[Name]))",

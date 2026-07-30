@@ -12,9 +12,12 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 
 | Status | Count |
 |---|---|
-| `ok` | 169 |
-| `corrected` | 29 |
-| `verify` | 1 |
+| `ok` | 164 |
+| `corrected` | 35 |
+| `verify` | 0 |
+
+No row is left at `verify`: BL-171's audit either live-probed the claim on
+se-thoughtspot (2026-07-30) or replaced it with a form that was probed.
 
 ---
 
@@ -134,11 +137,11 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | # | Qlik Sense | ThoughtSpot | Status | Notes |
 |---|---|---|---|---|
 | D01 | `Year(date)` | `year(date_col)` | ok | Direct equivalent. Both extract the 4-digit year from a date column. |
-| D02 | `Month(date)` | `month(date_col)` | ok | Qlik returns month name (e.g. 'Jan'). ThoughtSpot returns numeric month (1-12) by default. |
+| D02 | `Month(date)` | `month_number(date_col)` | corrected | Qlik returns the month name (e.g. 'Jan'); ThoughtSpot's **`month()` also returns the NAME** and `month_number()` is the 1-12 numeric (`thoughtspot-formula-patterns.md` Date Functions). The CLI maps to `month_number`; this row previously claimed `month()` was numeric, contradicting both (BL-171). Use `month(date_col)` if the name is what you want. |
 | D03 | `Day(date)` | `day(date_col)` | ok | Direct equivalent. Both extract the day of month (1-31). |
 | D04 | `Quarter(date)` | `quarter_number(date_col)` | corrected | Both return quarter number (1-4). ThoughtSpot spells it `quarter_number`; a bare `quarter()` does not exist (live-verified 2026-07-30, se-thoughtspot — BL-171). |
 | D05 | `Week(date)` | `week_number_of_year(date_col)` | ok | Both return ISO week number. Naming differs: Qlik uses Week(); ThoughtSpot uses week_number_of_year(). |
-| D06 | `Weekday(date)` | `day_of_week(date_col)` | ok | Qlik returns a number (0=Mon, 6=Sun). ThoughtSpot returns the day name (e.g. 'Monday'). |
+| D06 | `Weekday(date)` | `(day_number_of_week(date_col) - 1)` | corrected | **Not a rename.** Qlik `Weekday()` returns a **number** with 0=Mon; ThoughtSpot `day_of_week()` returns the day NAME (the previous mapping compared a name to a number) and `day_number_of_week()` numbers from **1=Mon**, so the origin is shifted to keep literal comparisons correct — `Weekday(d) = 5` means Saturday, and an unshifted `day_number_of_week(d) = 5` would mean Friday (BL-171). **Caveat:** an app with a non-default `FirstWeekDay` numbers from a different origin; that is Qlik app configuration the converter cannot see, and the shift assumes Qlik's default. Use `day_of_week(date_col)` if the day NAME is what you want. |
 | D07 | `WeekYear(date)` | `year(date_col)` | ok | Qlik returns the year the ISO week belongs to (can differ near year boundaries). ThoughtSpot year() returns calendar year — may differ for week 53. |
 | D08 | `Hour(time)` | `hour_of_day(date_col)` | corrected | Both extract the hour (0-23). ThoughtSpot spells it `hour_of_day`; a bare `hour()` does not exist (live-verified 2026-07-30 — BL-171). |
 | D09 | `Minute(time)` | `sql_int_op('MINUTE({0})', col)` | corrected | ThoughtSpot has **no minute extractor** (live-verified 2026-07-30 — BL-171: `minute (` is rejected). Push it to the warehouse with a `sql_int_op` pass-through, the same treatment `ts_cli/sv_sql.py` and `mv_sql.py` give SQL `MINUTE()`. |
@@ -156,7 +159,7 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | D21 | `AddMonths(date, n)` | `add_months(date_col, n)` | ok | Direct equivalent. Both add or subtract months. Use negative n to go backward. |
 | D22 | `AddYears(date, n)` | `add_years(date_col, n)` | corrected | ThoughtSpot has a native add_years(). No add_months(date,12) workaround needed. |
 | D23 | `Age(date, ref_date)` | `(today() - date_col) / 365` | ok | Qlik Age() returns exact age in years. ThoughtSpot approximates age via date subtraction divided by 365. |
-| D24 | `NetworkDays(start, end)` | `diff_days(date1, date2)` | corrected | Qlik NetworkDays() excludes weekends and optionally holidays. ThoughtSpot date_diff() returns total calendar days only — no business day logic. |
+| D24 | `NetworkDays(start, end)` | `No direct equivalent` | corrected | Qlik `NetworkDays()` excludes weekends (and optionally holidays). ThoughtSpot `diff_days()` returns **total calendar days**, so it is not equivalent and the CLI flags this rather than emitting it — the previous `diff_days` mapping was a silent downgrade (BL-171). For a weekday-only difference see the `ts-recipe-formula-business-days-snowflake` skill. |
 | D25 | `Date(expr, format)` | `to_date(col, format)` | ok | Both convert a value to a date. Format strings differ: Qlik uses 'YYYY-MM-DD'; ThoughtSpot uses strftime '%Y-%m-%d'. |
 | D26 | `Timestamp(expr, format)` | `to_date(col, format)` | ok | Qlik Timestamp() formats a datetime as a string. ThoughtSpot uses to_date() for parsing strings into dates. |
 | D27 | `DayStart(date)` | `date(date_col)` | corrected | Qlik DayStart() returns midnight of the given date. ThoughtSpot's `date()` truncates a timestamp to its date; **`date_trunc()` does not exist** (catalog marks it absent; `date_trunc_month`/`_year`/`_quarter`/`_week` were live-disproved 2026-07-30 — BL-171). |
@@ -181,13 +184,13 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | S05 | `Trim(str)` | `sql_string_op('TRIM({0})', col)` | corrected | ThoughtSpot has **no native `trim()`** in formula context (live-verified 2026-07-29, se-thoughtspot — BL-170) — use the SQL passthrough, same as the `Upper`/`Lower` handling above. |
 | S06 | `LTrim(str)` | `sql_string_op('LTRIM({0})', col)` | corrected | Qlik LTrim() removes only leading spaces. ThoughtSpot has no native `ltrim()` **and no native `trim()` either** (live-verified 2026-07-29, se-thoughtspot — BL-170), so the passthrough is the mapping — it is also exact, unlike the previously-documented two-sided substitute. |
 | S07 | `RTrim(str)` | `sql_string_op('RTRIM({0})', col)` | corrected | Qlik RTrim() removes only trailing spaces. As S06 — no native `rtrim()` or `trim()` (live-verified 2026-07-29, se-thoughtspot — BL-170); the passthrough is exact. |
-| S08 | `Left(str, n)` | `substr(col, 1, n)` | ok | Qlik has dedicated Left(). ThoughtSpot uses substr() starting at position 1 to replicate Left(). |
-| S09 | `Right(str, n)` | `substr(col, strlen(col)-n+1, n)` | corrected | Qlik has dedicated Right(). ThoughtSpot combines substr() and `strlen` — there is no `len()` (live-verified 2026-07-30 — BL-171). |
-| S10 | `Mid(str, start, n)` | `substr(col, start, n)` | ok | Direct equivalent (different name). Qlik Mid() maps exactly to ThoughtSpot substr(). Both are 1-indexed. |
+| S08 | `Left(str, n)` | `left(col, n)` | corrected | ThoughtSpot has a native `left()` (live-verified as a BL-170 control), so no `substr` composition is needed. The equivalent 0-indexed form is `substr(col, 0, n)` — **not** `substr(col, 1, n)`: `substr`'s start is **zero-indexed** (`thoughtspot-formula-patterns.md` String Functions). The CLI emits `left`. |
+| S09 | `Right(str, n)` | `right(col, n)` | corrected | ThoughtSpot has a native `right()` (live-verified as a BL-170 control). The equivalent composition is `substr(col, strlen(col) - n, n)` — 0-indexed, so no `+1`; there is no `len()` either (live-verified 2026-07-30 — BL-171). The CLI emits `right`. |
+| S10 | `Mid(str, start, n)` | `substr(col, start - 1, n)` | corrected | **Not a direct rename.** Qlik `Mid()` is 1-indexed and ThoughtSpot `substr()` is **zero-indexed**, so the start must be decremented — a bare `mid`→`substr` rename imports cleanly and returns strings shifted by one character (BL-171). Same offset the Tableau converter's MID handler applies. |
 | S11 | `Replace(str, old, new)` | `sql_string_op('REPLACE({0}, {1}, {2})', col, old, new)` | corrected | ThoughtSpot has **no native `replace()`** in formula context (live-verified 2026-07-29, se-thoughtspot — BL-170) — use the SQL passthrough. Both replace all occurrences. |
-| S12 | `Index(str, substr, n)` | `No direct equivalent` | verify | Qlik returns position of nth occurrence of a substring. ThoughtSpot has no substring-position function. |
+| S12 | `Index(str, substr, n)` | `strpos(col, substr)` | corrected | ThoughtSpot `strpos` returns the position of the **first** occurrence (1-indexed, 0 when not found), which is exactly Qlik `Index()` with the default `n=1`; the CLI maps it. The **nth-occurrence** form (`n` ≥ 2) has no equivalent and fails loudly on arity rather than translating — the previous "no substring-position function" claim was wrong. |
 | S13 | `SubField(str, delim, n)` | `No direct equivalent` | ok | Qlik splits a string on a delimiter and returns the nth token. ThoughtSpot has no token-split function. |
-| S14 | `Concat(expr, delimiter) [aggregating]` | `concat(str1, str2, ...) [row-level]` | ok | DIFFERENT behavior: Qlik Concat() aggregates many row values into one string (like GROUP_CONCAT). ThoughtSpot concat() joins values within the same row — different use case. |
+| S14 | `Concat(expr, delimiter) [aggregating]` | `No direct equivalent` | corrected | **DIFFERENT behaviour, not a rename.** Qlik `Concat()` aggregates many row values into one string (like `GROUP_CONCAT`); ThoughtSpot `concat()` joins values within the **same row**. ThoughtSpot has no string-aggregation function at all, so this is flagged NEEDS REVIEW rather than name-mapped — the name-map produced a valid-but-wrong formula (BL-171). |
 | S15 | `PurgeChar(str, chars)` | `sql_string_op ( "REPLACE(REPLACE(REPLACE({0}, '(', ''), ')', ''), '-', '')" , col )` | corrected | Qlik PurgeChar() removes a set of specified characters in one call. ThoughtSpot has **no native `replace()`** (live-verified 2026-07-29, se-thoughtspot — BL-170), so the chaining happens **inside one SQL passthrough**, not as chained ThoughtSpot formula calls. Template quoting follows the verified convention — double-quoted outer template, plain `'…'` literals inside (see `thoughtspot-formula-patterns.md` § SQL Pass-Through). |
 | S16 | `KeepChar(str, chars)` | `No direct equivalent` | ok | Qlik KeepChar() retains only specified characters. ThoughtSpot has no equivalent — handle in ETL. |
 | S17 | `Repeat(str, n)` | `No direct equivalent` | ok | Qlik repeats a string n times. ThoughtSpot has no Repeat() function. |
@@ -197,7 +200,7 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | S21 | `Hash256(expr)` | `No direct equivalent` | ok | Qlik generates a 256-bit hash (SHA-256). ThoughtSpot has no hash function in formulas. |
 | S22 | `TextBetween(str, start_delim, end_delim)` | `No direct equivalent` | ok | Qlik extracts text between two delimiter strings. ThoughtSpot requires complex substr logic. |
 | S23 | `N/A — use WildMatch(str, 'prefix*')` | `strpos(col, prefix) = 1` | corrected | ThoughtSpot has **no native `starts_with()`** (live-verified 2026-07-29, se-thoughtspot — BL-170) — compose from `strpos`, which is 1-based, so a true prefix sits at position 1. Qlik uses WildMatch with * at end: WildMatch(str, 'prefix*'). |
-| S24 | `N/A — use WildMatch(str, '*.suffix')` | `substr(col, strlen(col) - strlen(suffix), strlen(suffix)) = suffix` | corrected | ThoughtSpot has **no native `ends_with()`** (live-verified 2026-07-29, se-thoughtspot — BL-170) — compose from `substr`/`strlen`. Qlik uses WildMatch with * at start: WildMatch(str, '*.suffix'). **Indexing caveat:** this composition is the **0-indexed** form from `thoughtspot-formula-patterns.md` (and is the shape the Tableau mapping already ships), but S08/S09/S10 in this same file assert `substr` is **1-indexed**. Those two claims cannot both be true and the conflict is **unresolved** — BL-170's probes verified only that this expression *imports*, not its runtime offset. Verify against data before relying on either form. |
+| S24 | `N/A — use WildMatch(str, '*.suffix')` | `substr(col, strlen(col) - strlen(suffix), strlen(suffix)) = suffix` | corrected | ThoughtSpot has **no native `ends_with()`** (live-verified 2026-07-29, se-thoughtspot — BL-170) — compose from `substr`/`strlen`. **Indexing:** this is the **0-indexed** form, which is the one `thoughtspot-formula-patterns.md` documents and the shape the Tableau mapping ships. The earlier conflict noted here — S08/S09/S10 asserting `substr` was 1-indexed — was resolved **against those rows** in BL-171: the schema reference is authoritative per `CLAUDE.md`, and all four rows now use the same 0-indexed convention. |
 | S25 | `WildMatch(str, '*substr*')` | `contains(col, substr)` | ok | ThoughtSpot has dedicated contains(). Qlik uses WildMatch with * on both sides for substring checking. |
 | S26 | `Evaluate(expr_string)` | `No direct equivalent` | ok | Qlik Evaluate() parses and executes a string as an expression at runtime. ThoughtSpot has no dynamic expression evaluation. |
 | S27 | `Num(expr, format) [display]` | `to_string(col)` | ok | Qlik Num() formats a number as a display string. ThoughtSpot to_string() converts to string — control display formatting in visualization settings. |

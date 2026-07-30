@@ -179,6 +179,14 @@ class TestNonExistentStringFunctions:
             for bad in _NON_EXISTENT:
                 assert bad not in out, f"{src} -> {out} emits {bad!r}"
 
+    def test_two_arg_trim_is_flagged_not_narrowed(self):
+        """Snowflake TRIM(x, chars) has no 1-slot pass-through: emitting
+        TRIM({0}) would silently drop the character set. Flag, don't narrow."""
+        for src in ("TRIM(a.NAME, ' ')", "LTRIM(a.NAME, 'x')",
+                    "RTRIM(a.NAME, 'x')"):
+            with pytest.raises(UntranslatableError, match="expects 1 argument"):
+                translate_sql_expr(src, _resolve)
+
     def test_nested_trim_inside_upper(self):
         assert translate_sql_expr("UPPER(TRIM(a.NAME))", _resolve) == (
             'sql_string_op ( "UPPER({0})" , '

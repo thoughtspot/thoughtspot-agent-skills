@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Optional
 
-from ts_cli.formula_common import wrap_passthrough_calls
+from ts_cli.formula_common import rewrite_marker_calls, wrap_passthrough_calls
 
 # ---------------------------------------------------------------------------
 # Function-name map + translator
@@ -48,6 +48,51 @@ PASSTHROUGH_MAP: dict[str, tuple[str, str, int]] = {
     "replace": ("sql_string_op", "REPLACE({0}, {1}, {2})", 3),
 }
 
+
+def _mid(args: list[str]) -> Optional[str]:
+    """Qlik Mid(str, start, n) -> ThoughtSpot substr, start decremented.
+
+    Qlik `Mid()` is **1-indexed**; ThoughtSpot `substr()` takes a
+    **ZERO-indexed** start (`thoughtspot-formula-patterns.md` String Functions
+    — the authoritative source per CLAUDE.md's precedence, and the offset the
+    Tableau converter's MID handler has always applied). A bare `mid`->`substr`
+    rename therefore imports cleanly and returns strings shifted by one
+    character — the valid-but-wrong class, which is worse than the bare
+    `mid ( )` it replaced: that at least failed loudly with error_code 14516.
+    """
+    if len(args) != 3:
+        return None
+    return f"substr({args[0]}, {args[1]} - 1, {args[2]})"
+
+
+def _weekday(args: list[str]) -> Optional[str]:
+    """Qlik Weekday(date) -> ThoughtSpot day_number_of_week, origin shifted.
+
+    Qlik `Weekday()` returns a **number** with **0 = Monday**; ThoughtSpot
+    `day_of_week()` returns the day NAME (so the old mapping compared a name to
+    a number) and `day_number_of_week()` returns **1 = Monday**. Renaming alone
+    leaves every literal comparison off by one — `Weekday(d) = 5` would mean
+    Friday instead of Saturday — so the origin is shifted here.
+
+    Caveat: a Qlik app with a non-default `FirstWeekDay` numbers the days from a
+    different origin. That is app configuration the converter cannot see; the
+    shift above assumes Qlik's default. Documented on row D06.
+    """
+    if len(args) != 1:
+        return None
+    return f"(day_number_of_week({args[0]}) - 1)"
+
+
+# Functions needing an ARGUMENT-AWARE rewrite rather than a rename: marker
+# name -> handler(args) -> replacement or None (flagged for review). Same
+# marker mechanism as PASSTHROUGH_MAP; the handler emits native ThoughtSpot
+# functions rather than a sql_*_op pass-through.
+#
+# Both entries exist because a bare rename is *valid and wrong* — an index or
+# origin differs between the two platforms, which imports cleanly and returns
+# the wrong answer. That is the failure mode BL-171 was filed against.
+COMPOSITION_MAP: dict[str, Any] = {"mid": _mid, "weekday": _weekday}
+
 # Qlik function name (lowercase) -> ThoughtSpot formula function.
 # None means "no equivalent" -> flagged for manual review. A value that is a
 # PASSTHROUGH_MAP key is an intermediate marker, not an emitted name.
@@ -63,7 +108,7 @@ FUNCTION_MAP: dict[str, Optional[str]] = {
     "min": "min", "max": "max", "median": "median", "stdev": "stddev",
     "variance": "variance",
     # string
-    "left": "left", "right": "right", "mid": "substr", "len": "strlen",
+    "left": "left", "right": "right", "mid": "mid", "len": "strlen",
     "upper": "upper", "lower": "lower", "trim": "trim", "ltrim": "ltrim",
     "rtrim": "rtrim", "index": "strpos",
     # Qlik Concat() aggregates values ACROSS rows (GROUP_CONCAT); ThoughtSpot
@@ -74,7 +119,7 @@ FUNCTION_MAP: dict[str, Optional[str]] = {
     "subfield": None,
     # date
     "year": "year", "month": "month_number", "day": "day",
-    "weekday": "day_of_week", "quarter": "quarter_number", "today": "today",
+    "weekday": "weekday", "quarter": "quarter_number", "today": "today",
     "now": "now", "addmonths": "add_months", "addyears": "add_years",
     "monthstart": "start_of_month", "yearstart": "start_of_year",
     "quarterstart": "start_of_quarter", "weekstart": "start_of_week",
@@ -130,6 +175,10 @@ _FUNC_CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 def _remap_functions(expr: str) -> tuple[str, set[str]]:
     unknown: set[str] = set()
+    # marker name -> the spelling the source expression actually used, so a
+    # flag reads "LTrim" (what the author wrote) rather than a reconstructed
+    # "Ltrim" that appears nowhere in their app.
+    origin: dict[str, str] = {}
 
     def repl(m: re.Match) -> str:
         name = m.group(1)
@@ -139,17 +188,23 @@ def _remap_functions(expr: str) -> tuple[str, set[str]]:
             if ts is None:
                 unknown.add(name)
                 return f"{name}("        # leave as-is, flagged
+            if ts in PASSTHROUGH_MAP or ts in COMPOSITION_MAP:
+                origin[ts] = name
             return f"{ts}("
         unknown.add(name)
         return f"{name}("
 
     out = _FUNC_CALL.sub(repl, expr)
     out = out.replace("<>", "!=").replace("&", "+")
-    # BL-171: rewrite the no-equivalent markers into sql_*_op pass-throughs.
-    # An unresolved marker (wrong arity) is flagged rather than emitted — a
-    # bare trim/replace call is rejected at import with error_code 14516.
+    # BL-171: rewrite the no-equivalent markers into sql_*_op pass-throughs,
+    # then the argument-aware compositions. An unresolved marker (wrong arity,
+    # unbalanced parens) is flagged rather than emitted — a bare trim/replace
+    # call is rejected at import with error_code 14516, and a bare `mid` does
+    # not exist at all.
     out, unresolved = wrap_passthrough_calls(out, PASSTHROUGH_MAP)
-    unknown |= {name.capitalize() for name in unresolved}
+    out, unresolved_comp = rewrite_marker_calls(out, COMPOSITION_MAP)
+    unknown |= {origin.get(name, name)
+                for name in (unresolved | unresolved_comp)}
     return out, unknown
 
 

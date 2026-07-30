@@ -5339,6 +5339,41 @@ Model re-exported byte-identical (9 formulas / 8 columns, no `BLPROBE` anywhere)
 **Follow-ons filed:** none new. The validator promotion below is still the right exit and is
 **not** done -- see *Validator promotion, restated* at the end of this entry.
 
+### PR #425 review round -- four blockers, and the class the fix had recreated
+
+The review found that two of the fixes had **re-introduced the very failure mode the entry
+was filed against** -- a valid-but-wrong formula, which is worse than the loud 14516 it
+replaced:
+
+| # | Finding | Why it mattered |
+|---|---|---|
+| 1 | **`mid` -> `substr` was a bare rename, and the two disagree on the index origin.** Qlik `Mid()` is 1-indexed; `substr` is **zero**-indexed (`thoughtspot-formula-patterns.md` String Functions -- authoritative per CLAUDE.md, and the offset `tableau/functions.py` has always applied). | Before the fix: loud failure (`mid` does not exist). After: imports and returns every string shifted one character. Fixed with an argument-aware composition (`substr(col, start - 1, n)`), the test's locked-in wrong expectation corrected, and the doc's S08/S09/S10 rows -- which all asserted 1-indexed -- reconciled with S24, whose "unresolved conflict" caveat is now **resolved against those rows**. |
+| 2 | **`wrap_passthrough_calls`'s marker SEARCH was not quote-aware** (only its paren walker was). | `Replace(Name, 'upper(x)', 'y')` rewrote the *literal*, producing nested-quote corruption, and reported nothing unresolved -- so it shipped as a successful translation. Same for a DAX `CONCATENATE(E[N], "trim(x)")`. Both are now regression tests, and were re-run against the old algorithm to prove they were genuinely broken. |
+| 3 | `powerbi-formula-translation.md` still shipped `unique_count([t::c])` -- the disproved name -- in the doc an agent reads for hand-translation. The entry had *said* the doc carried the bug; the diff never touched it. | Fixed, plus the rows the code emits but the doc never documented (TRIM/UPPER/LOWER pass-throughs, the date-part targets, the MINUTE/SECOND flag) and a currency-anchor note. |
+| 4 | **qlik `D02 Month()` was missed by the audit entirely.** The mapping row said `month()` "returns numeric month (1-12)"; `month` returns the **NAME** and `month_number` is 1-12 -- and `FUNCTION_MAP` already said `month_number`, so translator and packaged map disagreed. | Fixed in both files, and a **third** self-detection gate added: `FUNCTION_MAP` <-> mapping-row agreement. Neither of the first two gates can see this class -- every name involved exists, they just mean different things. |
+
+`D06 Weekday` is the same class and was fixed with it: Qlik returns a **number** from 0=Mon,
+`day_of_week` returns the day NAME, and `day_number_of_week` starts at 1 -- so the mapping
+now shifts the origin (`(day_number_of_week(col) - 1)`) rather than renaming, which keeps a
+literal comparison correct. Its one irreducible caveat is recorded on the row: a non-default
+Qlik `FirstWeekDay` shifts the origin again, and that is app configuration the converter
+cannot see. Two further rows were reconciled against the code: `S12 Index` (documented as
+having no equivalent, when `strpos` is exact for the default first-occurrence form) and
+`D24 NetworkDays` (mapped to `diff_days`, which counts calendar days -- a silent downgrade,
+now flagged).
+
+**Wave 4 live verification (2026-07-30, same harness, nothing persisted): 13/13 accepted**,
+negative control rejected. It settled the question the `Mid` fix depended on -- an
+**arithmetic expression is accepted in `substr`'s start slot** (`substr(col, 2 - 1, 3)`
+imports), so the offset form needs no constant folding -- and confirmed the shifted
+`(day_number_of_week(col) - 1)` form both bare and compared to a literal, the `sql_int_op`
+MINUTE/SECOND prescription now written into two mapping files, and the 0-indexed `substr`
+compositions the S08/S09 rows document. **98 probes over four waves in total.**
+
+The three qlik gates now stand as: names must exist (existence), markdown must equal the
+packaged JSON (transport), and `FUNCTION_MAP` must name the same function as the row
+(meaning). The third is the one this round proved was missing.
+
 BL-170 live-proved that `trim`, `ltrim`, `rtrim`, `replace`, `starts_with` and `ends_with`
 are **not** ThoughtSpot formula functions. Five converter emitters still translate a source
 function to those bare names, so every affected formula **fails at TML import** with

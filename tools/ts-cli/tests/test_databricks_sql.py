@@ -227,6 +227,13 @@ class TestNonExistentStringFunctions:
             "( substr ( [TRANSACTIONS::s] , strlen ( [TRANSACTIONS::s] ) - "
             "strlen ( 'Z' ) , strlen ( 'Z' ) ) = 'Z' )")
 
+    def test_two_arg_trim_is_flagged_not_narrowed(self):
+        """TRIM(x, chars) has no 1-slot pass-through: emitting TRIM({0}) would
+        silently drop the character set. Flag, don't narrow."""
+        for src in ("TRIM(s, ' ')", "LTRIM(s, 'x')", "RTRIM(s, 'x')"):
+            with pytest.raises(UntranslatableError, match="expects 1 argument"):
+                t(src)
+
     def test_no_bare_non_existent_name_is_ever_emitted(self):
         for src in ("TRIM(s)", "LTRIM(s)", "RTRIM(s)",
                     "REPLACE(s, 'a', 'b')", "STARTSWITH(s, 'A')",

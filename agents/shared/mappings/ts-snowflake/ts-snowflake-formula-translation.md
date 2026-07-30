@@ -208,8 +208,8 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | `sql_string_op ( "RTRIM({0})" , [x] )` → `RTRIM(x)` | `RTRIM(x)` → `sql_string_op ( "RTRIM({0})" , [x] )` — no native `rtrim` in TS |
 | `sql_string_op ( "REPLACE({0}, {1}, {2})" , [x] , [old] , [new] )` → `REPLACE(x, old, new)` | `REPLACE(x, old, new)` → `sql_string_op ( "REPLACE({0}, {1}, {2})" , [x] , [old] , [new] )` — no native `replace` in TS |
 | `contains ( [x] , 'val' )` → `CONTAINS(x, 'val')` | `CONTAINS(x, 'val')` → `contains ( [x] , 'val' )` |
-| `strpos ( [x] , 'val' ) = 1` → `STARTSWITH(x, 'val')` | `STARTSWITH(x, 'val')` → `strpos ( [x] , 'val' ) = 1` — no native `starts_with` in TS; `strpos` is 1-based |
-| `substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val'` → `ENDSWITH(x, 'val')` | `ENDSWITH(x, 'val')` → `substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val'` — no native `ends_with` in TS |
+| `( strpos ( [x] , 'val' ) = 1 )` → `STARTSWITH(x, 'val')` | `STARTSWITH(x, 'val')` → `( strpos ( [x] , 'val' ) = 1 )` — no native `starts_with` in TS; `strpos` is 1-based. **The outer parens are what the CLI emits** and are load-bearing under composition: a bare `a = 1` inside a larger expression (`NOT STARTSWITH(...)`, `... AND ...`) can re-associate |
+| `( substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val' )` → `ENDSWITH(x, 'val')` | `ENDSWITH(x, 'val')` → `( substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val' )` — no native `ends_with` in TS. Outer parens as for `STARTSWITH` above: the CLI emits them and they are load-bearing under composition |
 
 > **`trim` / `ltrim` / `rtrim` / `replace` / `starts_with` / `ends_with` are NOT native
 > ThoughtSpot formula functions** — live-verified 2026-07-29 on se-thoughtspot (BL-170),

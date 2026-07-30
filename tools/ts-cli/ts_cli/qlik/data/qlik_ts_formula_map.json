@@ -724,10 +724,10 @@
     "Category": "Date",
     "Qlik Sense Formula": "Month(date)",
     "Qlik Example": "Month(OrderDate)",
-    "ThoughtSpot Equivalent": "month(date_col)",
-    "ThoughtSpot Example": "month(order_date)",
-    "Comments / Context": "Qlik returns month name (e.g. 'Jan'). ThoughtSpot returns numeric month (1-12) by default.",
-    "status": "ok"
+    "ThoughtSpot Equivalent": "month_number(date_col)",
+    "ThoughtSpot Example": "month_number(order_date)",
+    "Comments / Context": "Qlik returns the month name (e.g. 'Jan'); ThoughtSpot's month() also returns the NAME and month_number() is the 1-12 numeric (thoughtspot-formula-patterns.md Date Functions). The CLI maps to month_number; this row previously claimed month() was numeric, contradicting both (BL-171). Use month(date_col) if the name is what you want.",
+    "status": "corrected"
   },
   {
     "#": "D03",
@@ -764,10 +764,10 @@
     "Category": "Date",
     "Qlik Sense Formula": "Weekday(date)",
     "Qlik Example": "Weekday(OrderDate)",
-    "ThoughtSpot Equivalent": "day_of_week(date_col)",
-    "ThoughtSpot Example": "day_of_week(order_date)",
-    "Comments / Context": "Qlik returns a number (0=Mon, 6=Sun). ThoughtSpot returns the day name (e.g. 'Monday').",
-    "status": "ok"
+    "ThoughtSpot Equivalent": "(day_number_of_week(date_col) - 1)",
+    "ThoughtSpot Example": "(day_number_of_week(order_date) - 1)",
+    "Comments / Context": "Not a rename. Qlik Weekday() returns a number with 0=Mon; ThoughtSpot day_of_week() returns the day NAME (the previous mapping compared a name to a number) and day_number_of_week() numbers from 1=Mon, so the origin is shifted to keep literal comparisons correct — Weekday(d) = 5 means Saturday, and an unshifted day_number_of_week(d) = 5 would mean Friday (BL-171). Caveat: an app with a non-default FirstWeekDay numbers from a different origin; that is Qlik app configuration the converter cannot see, and the shift assumes Qlik's default. Use day_of_week(date_col) if the day NAME is what you want.",
+    "status": "corrected"
   },
   {
     "#": "D07",
@@ -944,9 +944,9 @@
     "Category": "Date",
     "Qlik Sense Formula": "NetworkDays(start, end)",
     "Qlik Example": "NetworkDays(StartDate, EndDate)",
-    "ThoughtSpot Equivalent": "diff_days(date1, date2)",
-    "ThoughtSpot Example": "diff_days(ship_date, order_date)",
-    "Comments / Context": "Qlik NetworkDays() excludes weekends and optionally holidays. ThoughtSpot date_diff() returns total calendar days only — no business day logic.",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent",
+    "Comments / Context": "Qlik NetworkDays() excludes weekends (and optionally holidays). ThoughtSpot diff_days() returns total calendar days, so it is not equivalent and the CLI flags this rather than emitting it — the previous diff_days mapping was a silent downgrade (BL-171). For a weekday-only difference see the ts-recipe-formula-business-days-snowflake skill.",
     "status": "corrected"
   },
   {
@@ -1144,19 +1144,19 @@
     "Category": "String",
     "Qlik Sense Formula": "Left(str, n)",
     "Qlik Example": "Left(SKU, 4)",
-    "ThoughtSpot Equivalent": "substr(col, 1, n)",
-    "ThoughtSpot Example": "substr(sku, 1, 4)",
-    "Comments / Context": "Qlik has dedicated Left(). ThoughtSpot uses substr() starting at position 1 to replicate Left().",
-    "status": "ok"
+    "ThoughtSpot Equivalent": "left(col, n)",
+    "ThoughtSpot Example": "left(customer_name, 3)",
+    "Comments / Context": "ThoughtSpot has a native left() (live-verified as a BL-170 control), so no substr composition is needed. The equivalent 0-indexed form is substr(col, 0, n) — not substr(col, 1, n): substr's start is zero-indexed (thoughtspot-formula-patterns.md String Functions). The CLI emits left.",
+    "status": "corrected"
   },
   {
     "#": "S09",
     "Category": "String",
     "Qlik Sense Formula": "Right(str, n)",
     "Qlik Example": "Right(Code, 3)",
-    "ThoughtSpot Equivalent": "substr(col, strlen(col)-n+1, n)",
-    "ThoughtSpot Example": "substr(customer_name, strlen(customer_name)-3+1, 3)",
-    "Comments / Context": "Qlik has dedicated Right(). ThoughtSpot combines substr() and `strlen` -- there is no `len()` (live-verified 2026-07-30 -- BL-171).",
+    "ThoughtSpot Equivalent": "right(col, n)",
+    "ThoughtSpot Example": "right(customer_name, 3)",
+    "Comments / Context": "ThoughtSpot has a native right() (live-verified as a BL-170 control). The equivalent composition is substr(col, strlen(col) - n, n) — 0-indexed, so no +1; there is no len() either (live-verified 2026-07-30 — BL-171). The CLI emits right.",
     "status": "corrected"
   },
   {
@@ -1164,10 +1164,10 @@
     "Category": "String",
     "Qlik Sense Formula": "Mid(str, start, n)",
     "Qlik Example": "Mid(Name, 2, 5)",
-    "ThoughtSpot Equivalent": "substr(col, start, n)",
-    "ThoughtSpot Example": "substr(name, 2, 5)",
-    "Comments / Context": "Direct equivalent (different name). Qlik Mid() maps exactly to ThoughtSpot substr(). Both are 1-indexed.",
-    "status": "ok"
+    "ThoughtSpot Equivalent": "substr(col, start - 1, n)",
+    "ThoughtSpot Example": "substr(customer_name, 2 - 1, 5)",
+    "Comments / Context": "Not a direct rename. Qlik Mid() is 1-indexed and ThoughtSpot substr() is zero-indexed, so the start must be decremented — a bare mid→substr rename imports cleanly and returns strings shifted by one character (BL-171). Same offset the Tableau converter's MID handler applies.",
+    "status": "corrected"
   },
   {
     "#": "S11",
@@ -1184,10 +1184,10 @@
     "Category": "String",
     "Qlik Sense Formula": "Index(str, substr, n)",
     "Qlik Example": "Index(Email, '@')",
-    "ThoughtSpot Equivalent": "No direct equivalent",
-    "ThoughtSpot Example": "Use contains() to check existence; no position function in ThoughtSpot",
-    "Comments / Context": "Qlik returns position of nth occurrence of a substring. ThoughtSpot has no substring-position function.",
-    "status": "verify"
+    "ThoughtSpot Equivalent": "strpos(col, substr)",
+    "ThoughtSpot Example": "strpos(product_code, 'AB')",
+    "Comments / Context": "ThoughtSpot strpos returns the position of the first occurrence (1-indexed, 0 when not found), which is exactly Qlik Index() with the default n=1; the CLI maps it. The nth-occurrence form (n ≥ 2) has no equivalent and fails loudly on arity rather than translating — the previous \"no substring-position function\" claim was wrong.",
+    "status": "corrected"
   },
   {
     "#": "S13",
@@ -1204,10 +1204,10 @@
     "Category": "String",
     "Qlik Sense Formula": "Concat(expr, delimiter) [aggregating]",
     "Qlik Example": "Concat(ProductName, ', ')",
-    "ThoughtSpot Equivalent": "concat(str1, str2, ...) [row-level]",
-    "ThoughtSpot Example": "concat(first_name, ' ', last_name)",
-    "Comments / Context": "DIFFERENT behavior: Qlik Concat() aggregates many row values into one string (like GROUP_CONCAT). ThoughtSpot concat() joins values within the same row — different use case.",
-    "status": "ok"
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent",
+    "Comments / Context": "DIFFERENT behaviour, not a rename. Qlik Concat() aggregates many row values into one string (like GROUP_CONCAT); ThoughtSpot concat() joins values within the same row. ThoughtSpot has no string-aggregation function at all, so this is flagged NEEDS REVIEW rather than name-mapped — the name-map produced a valid-but-wrong formula (BL-171).",
+    "status": "corrected"
   },
   {
     "#": "S15",
@@ -1306,7 +1306,7 @@
     "Qlik Example": "WildMatch(Email, '*.com')",
     "ThoughtSpot Equivalent": "substr(col, strlen(col) - strlen(suffix), strlen(suffix)) = suffix",
     "ThoughtSpot Example": "substr(file_name, strlen(file_name) - strlen('.csv'), strlen('.csv')) = '.csv'",
-    "Comments / Context": "ThoughtSpot has dedicated ends_with(). Qlik uses WildMatch with * at start: WildMatch(str, '*.suffix').",
+    "Comments / Context": "ThoughtSpot has no native ends_with() (live-verified 2026-07-29, se-thoughtspot — BL-170) — compose from substr/strlen. Indexing: this is the 0-indexed form, which is the one thoughtspot-formula-patterns.md documents and the shape the Tableau mapping ships. The earlier conflict noted here — S08/S09/S10 asserting substr was 1-indexed — was resolved against those rows in BL-171: the schema reference is authoritative per CLAUDE.md, and all four rows now use the same 0-indexed convention.",
     "status": "corrected"
   },
   {

@@ -46,3 +46,113 @@ def test_untranslatable_error_is_single_canonical_class():
         pass
     else:
         raise AssertionError("cross-direction except did not catch")
+
+
+# ---------------------------------------------------------------------------
+# BL-171 — the shared sql_*_op pass-through / composition scanner
+# ---------------------------------------------------------------------------
+
+_T = {"trim": ("sql_string_op", "TRIM({0})", 1),
+      "upper": ("sql_string_op", "UPPER({0})", 1),
+      "replace": ("sql_string_op", "REPLACE({0}, {1}, {2})", 3)}
+
+
+def _wrap(text, quote="'"):
+    from ts_cli.formula_common import wrap_passthrough_calls
+    return wrap_passthrough_calls(text, _T, quote)
+
+
+def test_wrap_single_arg():
+    assert _wrap("trim(Name)") == ("sql_string_op('TRIM({0})', Name)", set())
+
+
+def test_wrap_three_arg():
+    out, unresolved = _wrap("replace(Name, 'a', 'b')")
+    assert out == "sql_string_op('REPLACE({0}, {1}, {2})', Name, 'a', 'b')"
+    assert unresolved == set()
+
+
+def test_wrap_nested_resolves_inside_out():
+    out, unresolved = _wrap("upper(trim(Name))")
+    assert out == ("sql_string_op('UPPER({0})', "
+                   "sql_string_op('TRIM({0})', Name))")
+    assert unresolved == set()
+
+
+def test_wrap_double_quote_style():
+    assert _wrap("trim(Name)", '"')[0] == 'sql_string_op("TRIM({0})", Name)'
+
+
+def test_marker_inside_single_quoted_literal_is_not_a_call():
+    """The marker SEARCH must skip string literals, not just the paren walk.
+    Before the fix this produced nested-quote corruption
+    (`'sql_string_op('UPPER({0})', x)'`) and reported nothing unresolved, so
+    the caller shipped it as a successful translation."""
+    out, unresolved = _wrap("replace(Name, 'upper(x)', 'y')")
+    assert out == "sql_string_op('REPLACE({0}, {1}, {2})', Name, 'upper(x)', 'y')"
+    assert unresolved == set()
+
+
+def test_marker_inside_double_quoted_literal_is_not_a_call():
+    out, unresolved = _wrap('concat(a, "trim(x)")')
+    assert out == 'concat(a, "trim(x)")'
+    assert unresolved == set()
+
+
+def test_emitted_template_is_not_re_read_as_a_call():
+    """The emitted `'TRIM({0})'` template sits inside quotes, so a re-scan of
+    the replacement must not treat it as a `trim` call."""
+    out, _ = _wrap("trim(trim(Name))")
+    assert out.count("sql_string_op") == 2
+    assert "trim(" not in out
+
+
+def test_wrong_arity_is_reported_unresolved_and_left_untouched():
+    out, unresolved = _wrap("replace(Name, 'a')")
+    assert out == "replace(Name, 'a')"
+    assert unresolved == {"replace"}
+
+
+def test_unbalanced_parens_report_unresolved():
+    out, unresolved = _wrap("trim(Name")
+    assert out == "trim(Name"
+    assert unresolved == {"trim"}
+
+
+def test_unbalanced_parens_still_report_later_markers():
+    """The bail-out used to `break` after flagging only the offending marker,
+    leaving any other bare marker in the text unreported — and therefore
+    emitted with review=False."""
+    _out, unresolved = _wrap("trim(Name , upper(x)")
+    assert unresolved == {"trim", "upper"}
+
+
+def test_guard_exhaustion_reports_every_surviving_marker():
+    """More markers than the loop guard allows: whatever is left callable must
+    still be reported, never silently emitted."""
+    out, unresolved = _wrap(" + ".join(f"trim(C{i})" for i in range(300)))
+    assert "trim(" in out           # some survived the guard
+    assert unresolved == {"trim"}
+
+
+def test_composition_handler_receives_split_args():
+    from ts_cli.formula_common import rewrite_marker_calls
+    out, unresolved = rewrite_marker_calls(
+        "mid(Name, 2, 3)",
+        {"mid": lambda a: f"substr({a[0]}, {a[1]} - 1, {a[2]})"
+         if len(a) == 3 else None})
+    assert out == "substr(Name, 2 - 1, 3)"
+    assert unresolved == set()
+
+
+def test_composition_handler_returning_none_is_unresolved():
+    from ts_cli.formula_common import rewrite_marker_calls
+    out, unresolved = rewrite_marker_calls(
+        "mid(Name, 2)", {"mid": lambda a: None})
+    assert out == "mid(Name, 2)"
+    assert unresolved == {"mid"}
+
+
+def test_empty_handler_map_is_a_no_op():
+    from ts_cli.formula_common import rewrite_marker_calls
+    assert rewrite_marker_calls("trim(x)", {}) == ("trim(x)", set())
