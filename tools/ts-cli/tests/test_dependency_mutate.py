@@ -377,6 +377,78 @@ class TestRemoveColumnsFromView:
         assert len(result["view_columns"]) == 1, \
             f"removing {removed!r} wrongly deleted the column labelled {value!r}"
 
+    def test_undecorated_column_named_like_a_decoration_survives(self):
+        """`Total sales` is a real census column whose `name == search_output_column`.
+        Decoration-stripping would read it as `Total ` + `sales` and delete it when a
+        coexisting `sales` column is removed. `_view_column_targeted` only strips
+        decoration when `name != search_output_column` — divergence is the platform's own
+        signal that the label was generated rather than authored.
+        """
+        section = {
+            "view_columns": [
+                {"name": "Total sales", "search_output_column": "Total sales",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "sales", "search_output_column": "sales",
+                 "properties": {"column_type": "MEASURE"}},
+            ],
+        }
+        result = remove_columns_from_view(section, ["sales"])
+        assert [c["name"] for c in result["view_columns"]] == ["Total sales"]
+
+    def test_divergent_entry_still_strips_decoration(self):
+        """The other side of the gate: when the two fields DIVERGE the label is generated,
+        so decoration is stripped — which is what all 9 real decorated entries rely on.
+        """
+        section = {
+            "view_columns": [
+                {"name": "sales rollup", "search_output_column": "Total sales",
+                 "properties": {"column_type": "MEASURE"}},
+            ],
+        }
+        result = remove_columns_from_view(section, ["sales"])
+        assert result["view_columns"] == []
+
+    def test_gate_does_not_break_formula_surfacing(self):
+        """A census formula column has `name == search_output_column` (`prev_year` /
+        `prev_year`), so the gate blocks decoration-stripping on it — but the formula
+        binding is `search_output_column == formulas[].name`, the EXACT branch, which the
+        gate does not touch.
+        """
+        section = {
+            "view_columns": [
+                {"name": "prev_year", "search_output_column": "prev_year",
+                 "properties": {"column_type": "MEASURE", "aggregation": "MOVING_SUM"}},
+            ],
+            "formulas": [{"id": "formula_prev_year", "name": "prev_year",
+                          "expr": "sum ( [sales] )"}],
+        }
+        result = remove_columns_from_view(section, ["sales"])
+        assert result["formulas"] == []
+        assert result["view_columns"] == []
+
+    def test_gate_under_removes_a_self_named_decorated_column_by_design(self):
+        """The gate's measured cost, pinned so it is a documented trade and not a surprise.
+
+        Real corpus case (`Sales with MONTH 2`): a column whose `name` AND
+        `search_output_column` are both `Month(YearMonth)` — renamed by the user to match
+        its own decorated label — surfacing formula `YearMonth`. The gate keeps it, so one
+        dangling reference survives. Accepted deliberately: that fails LOUDLY at import
+        (`tml_lint` I13 / error_code 14516), whereas the `Total sales` over-removal the gate
+        prevents emits valid TML silently. Recovering it is BL-198's scope.
+        """
+        section = {
+            "view_columns": [
+                {"name": "Month(YearMonth)", "search_output_column": "Month(YearMonth)"},
+                {"name": "年月日", "search_output_column": "年月日"},
+            ],
+            "formulas": [{"id": "formula_YearMonth", "name": "YearMonth",
+                          "expr": 'to_date ( to_string ( [年月日] , "%Y-%m" ) , "%Y-%m" )'}],
+        }
+        result = remove_columns_from_view(section, ["年月日"])
+        assert result["formulas"] == [], "the formula itself must still go"
+        assert [c["name"] for c in result["view_columns"]] == ["Month(YearMonth)"], \
+            "known BL-198 residual: gate keeps a self-named decorated formula column"
+
     def test_ordinary_view_loses_only_the_named_column(self):
         """End-to-end statement of the regression: a plain View of four columns, three of
         which contain the word `Date`. Removing `Date` must take exactly one.
@@ -579,6 +651,43 @@ class TestRemoveColumnsFromView:
 # ---------------------------------------------------------------------------
 
 class TestRemoveColumnsFromModelSection:
+    def test_non_ascii_column_names_keep_their_boundary(self):
+        """The Model path shares `_references_column`, so the Unicode-boundary fix reaches
+        it too — the changelog claims this, so it is asserted here and not only on the View
+        path. Under the old ASCII classes a non-ASCII name had no boundary and the match
+        degraded to a substring, taking `前年比区分` when `前年` was removed.
+        """
+        section = {
+            "columns": [
+                {"name": "前年比区分", "column_id": "DIM::前年比区分"},
+                {"name": "Margin", "formula_id": "f1"},
+            ],
+            "formulas": [{"id": "f1", "expr": "[DIM::前年比区分] * 2"}],
+            "model_tables": [{"joins": [{"on": "[A::前年比区分] = [B::前年比区分]"}]}],
+            "filters": [{"column": ["前年比区分"]}],
+        }
+        result = remove_columns_from_model_section(section, ["前年"])
+        assert len(result["columns"]) == 2, "over-removed on a CJK substring"
+        assert len(result["formulas"]) == 1
+        assert len(result["model_tables"][0]["joins"]) == 1
+        assert len(result["filters"]) == 1
+
+    def test_non_ascii_column_removed_when_named_exactly(self):
+        section = {
+            "columns": [
+                {"name": "前年比区分", "column_id": "DIM::前年比区分"},
+                {"name": "Margin", "formula_id": "f1"},
+            ],
+            "formulas": [{"id": "f1", "expr": "[DIM::前年比区分] * 2"}],
+            "model_tables": [{"joins": [{"on": "[A::前年比区分] = [B::x]"}]}],
+            "filters": [{"column": ["前年比区分"]}],
+        }
+        result = remove_columns_from_model_section(section, ["前年比区分"])
+        assert [c["name"] for c in result["columns"]] == []
+        assert result["formulas"] == []
+        assert result["model_tables"][0]["joins"] == []
+        assert result["filters"] == []
+
     def _sample_model(self):
         return {
             "columns": [
