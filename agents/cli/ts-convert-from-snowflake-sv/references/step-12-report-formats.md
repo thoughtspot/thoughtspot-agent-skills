@@ -68,6 +68,19 @@ Proceed with import?
 | {name} | `{sql}` | 📐 Fact formula | `{ts_formula}` |
 | {name} | `{sql}` | ⚠ Omitted | {reason} |
 
+### Review Flags ({n})
+Every entry in `translated[].annotations` from `translated.json` (Step 9), one row per
+annotation. **Never omit this section when any annotation is present** — these are the
+conversions the translator completed but could not verify, and nothing downstream re-raises
+them. Empty is fine; silently dropping them is not.
+
+| Column | Flag | What to check |
+|---|---|---|
+| {name} | 🔄 Double aggregation | The grouping key and relationship direction against the semantic view's intent — the annotation names both |
+| {name} | ⚑ Ambiguous reference | A renamed construct referenced by its declared name: confirm the expression means the semantic view's construct and not a physical column of the same name |
+| {name} | ⚑ Skipped double aggregation | The inner metric aggregates the grouping column itself, so no grouping was applied — confirm what the metric is meant to count |
+| {name} | USING {rel} | The relationship the `group_aggregate` was built from |
+
 ### Not Mapped
 - Extension JSON (Cortex Analyst context): not translated to ThoughtSpot
 

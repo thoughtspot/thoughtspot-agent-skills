@@ -61,7 +61,8 @@ def main() -> int:
         print("\n".join(failures))
         print()
         print("CLI convert skills must gate imports with `ts tml lint` (parser-based,")
-        print("covers I1/I2/I4/I5/I8), not a hand-written grep. See .claude/rules/ts-cli.md")
+        print("covers I1/I2/I4/I5/I8/I12/I13), not a hand-written grep. See")
+        print(".claude/rules/ts-cli.md")
         print("and agents/shared/schemas/ts-model-conversion-invariants.md.")
         return 1
 

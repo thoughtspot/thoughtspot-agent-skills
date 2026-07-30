@@ -316,6 +316,7 @@ def make_resolver(
     """
     alias_map = _build_alias_map(parsed)
     fact_idx, metric_idx = _build_column_index(parsed)
+    dim_idx = _index_constructs(parsed.get("dimensions", []))
     pair_pk_map = _build_table_pair_pk_map(parsed)
 
     def _annotate(note: str) -> None:
@@ -346,6 +347,44 @@ def make_resolver(
                 f"column named '{ref_col}' also exists on {table}, confirm which "
                 f"one the expression means.")
         return f"[{table}::{physical}]"
+
+    def _dimension_ref(dim: dict, ref_col: str) -> str:
+        """Resolve a reference to a declared dimension — three shapes.
+
+        A dimension is the physical-column layer, so this is still step 1, but
+        which column (or formula) it lands on depends on the shape `parse-sv`
+        reported — and `_translate_dimension` makes exactly the same three-way
+        split, so the two must agree:
+
+        1. passthrough (``expr is None``) -> the column ``alias_name`` names;
+        2. bare-column rename (``CASE_ID as ID``) -> the column the EXPRESSION
+           names, not ``alias_name`` (which is the declared name for this shape);
+        3. computed -> a formula, referenced by the minted id.
+
+        Without this, a renamed dimension referenced by its declared name fell
+        through to the assumed-physical branch and emitted a column that does not
+        exist — `DM_CATEGORY.CATEGORY as dm_category.CATEGORY_NAME` referenced as
+        `PARTITION BY dm_category.category` emitted `[DM_CATEGORY::category]`
+        against a real column of `CATEGORY_NAME` (the dunder worked example's own
+        shape). Same silent-until-import class as BL-178, and invisible to
+        `ts tml lint`, which sees no dangling `[formula_*]` — see BL-195.
+        """
+        expr = dim.get("expr")
+        if expr is None:
+            return _physical_ref(dim, ref_col)
+        bare = expr.strip()
+        if _BARE_COLUMN_RE.match(bare):
+            table = alias_map.get(dim["alias_table"].lower(),
+                                  dim["source_table"])
+            if ref_col.lower() != bare.lower():
+                _annotate(
+                    f"⚑ reference '{dim['alias_table']}.{ref_col}' resolves to "
+                    f"the semantic view's '{dim['source_column']}', which "
+                    f"renames physical column {table}::{bare}. If a physical "
+                    f"column named '{ref_col}' also exists on {table}, confirm "
+                    f"which one the expression means.")
+            return f"[{table}::{bare}]"
+        return f"[{construct_formula_id(dim)}]"
 
     def resolve(ident: str) -> str:
         parts = ident.split(".")
@@ -382,6 +421,12 @@ def make_resolver(
                     if grouped is not None:
                         return grouped
                 return f"[{construct_formula_id(metric)}]"
+
+            # Step 1 (continued) — a declared dimension, whose shape decides
+            # which column or formula it resolves to.
+            dim = dim_idx.get(key)
+            if dim is not None:
+                return _dimension_ref(dim, col)
 
             # Step 1 (continued) — no construct declares this name, so it is a
             # physical column on the aliased table.

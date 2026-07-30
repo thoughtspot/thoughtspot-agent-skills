@@ -221,13 +221,63 @@ def _parsed_degenerate_group():
         ],
         "dimensions": [], "facts": [],
         "metrics": [
+            # simple aggregate -> the `col_info` arm of the guard
             {"source_table": "COMPANIES", "source_column": "COMPANY_TALLY",
              "alias_table": "companies", "alias_name": "COMPANY_TALLY",
              "expr": "COUNT(companies.COMPANY_ID)", "block": "metrics",
              "comment": None, "synonyms": None, "sample_values": None,
              "is_enum": False, "is_filter": False, "is_private": False,
              "cortex_search_service": None},
+            # NOT a simple aggregate (trailing arithmetic), so `col_info` is None
+            # and only the full-`group_aggregate`-form arm of the guard can catch
+            # it — the arm N3 flagged as untested.
+            {"source_table": "COMPANIES", "source_column": "TALLY_SCALED",
+             "alias_table": "companies", "alias_name": "TALLY_SCALED",
+             "expr": "COUNT(companies.COMPANY_ID) * 1", "block": "metrics",
+             "comment": None, "synonyms": None, "sample_values": None,
+             "is_enum": False, "is_filter": False, "is_private": False,
+             "cortex_search_service": None},
         ],
+        "custom_instructions": None, "verified_queries": [],
+        "extension": None, "warnings": [], "unsupported": [],
+    }
+
+
+def _parsed_dimension_shapes():
+    """All three dimension shapes on one table, for resolution by declared name.
+
+    PR #424 re-review N1: `_index_constructs` covered facts and metrics only, so a
+    renamed DIMENSION referenced by its declared name fell through to
+    assumed-physical and emitted a column that does not exist. Reproducible from
+    ts-from-snowflake-dunder.md (`DM_CATEGORY.CATEGORY as dm_category.CATEGORY_NAME`
+    referenced as `PARTITION BY dm_category.category`).
+    """
+    def _d(declared, physical, expr, synonyms=None):
+        return {"source_table": "T", "source_column": declared,
+                "alias_table": "t", "alias_name": physical, "expr": expr,
+                "block": "dimensions", "comment": None, "synonyms": synonyms,
+                "sample_values": None, "is_enum": False, "is_filter": False,
+                "is_private": False, "cortex_search_service": None}
+    return {
+        "view_name": "D.P.V", "database": "D", "schema": "P", "name": "V",
+        "comment": None,
+        "tables": [
+            {"fqn": "D.P.T", "name": "T", "alias": "t", "primary_key": ["ID"],
+             "comment": None, "synonyms": None, "sample_values": None,
+             "is_enum": False, "subquery": None, "range_constraints": None},
+        ],
+        "relationships": [],
+        "dimensions": [
+            # 1. renamed passthrough — declared name != physical column
+            _d("CATEGORY", "CATEGORY_NAME", None),
+            # 2. plain passthrough — the two names coincide
+            _d("PLAIN", "PLAIN", None),
+            # 3. bare-column rename — the physical column is the EXPRESSION
+            _d("RENAMED_BARE", "RENAMED_BARE", "ID"),
+            # 4. computed — becomes a formula, referenced by minted id
+            _d("COMPUTED", "COMPUTED", "CONCAT(t.A, ', ', t.B)", ["Full Name"]),
+        ],
+        "facts": [], "metrics": [],
         "custom_instructions": None, "verified_queries": [],
         "extension": None, "warnings": [], "unsupported": [],
     }
@@ -652,7 +702,7 @@ class TestResolver:
             "group_count ( [EMPLOYEES::EMPLOYEE_ID] , [COMPANIES::COMPANY_ID] )")
 
     def test_double_aggregation_emits_the_review_marker(self):
-        """ts-from-snowflake-rules.md:723-726 requires a 🔄 review marker on every
+        """ts-from-snowflake-rules.md "Double Aggregation (Metric-on-Metric)" / "Report line requirement" (:759-762) requires a 🔄 review marker on every
         double-aggregation formula — the grouping key and relationship direction
         have to be verified by hand (PR #424 review F5)."""
         parsed = _parsed_workforce()
@@ -676,6 +726,22 @@ class TestResolver:
         assert "group_count" not in out
         assert out == "[formula_Company Tally]"
         assert any("grouping column" in n for n in notes), notes
+
+    def test_degenerate_grouping_full_form_arm_is_also_guarded(self):
+        """The `group_aggregate` full-form arm of the F6 guard (N3).
+
+        A non-simple inner expression takes the full form, where `col_info` is
+        None and the shorthand arm cannot fire — so the guard has to re-check the
+        translated expression's own references. Untested until now.
+        """
+        parsed = _parsed_degenerate_group()
+        notes: list[str] = []
+        resolver = make_resolver(parsed, "employees", annotations=notes)
+        out = resolver("companies.tally_scaled")
+        assert "group_aggregate" not in out
+        assert out == "[formula_Tally Scaled]"
+        assert any("reads only" in n and "grouping column" in n
+                   for n in notes), notes
 
     def test_renamed_passthrough_resolves_by_declared_name(self):
         """PR #424 review F1 — index the construct under its DECLARED name too.
@@ -710,6 +776,53 @@ class TestResolver:
         resolver("store_sales.revenue")
         assert any("revenue" in n and "ss_ext_sales_price" in n for n in notes), \
             notes
+
+    # --- dimensions: the same three-case resolution (N1) -------------------
+
+    def test_renamed_dimension_resolves_by_declared_name(self):
+        parsed = _parsed_dimension_shapes()
+        notes: list[str] = []
+        resolver = make_resolver(parsed, "t", annotations=notes)
+        assert resolver("t.category") == "[T::CATEGORY_NAME]"
+        assert any("CATEGORY_NAME" in n for n in notes), notes
+
+    def test_renamed_dimension_resolves_by_physical_name_without_flag(self):
+        parsed = _parsed_dimension_shapes()
+        notes: list[str] = []
+        resolver = make_resolver(parsed, "t", annotations=notes)
+        assert resolver("t.CATEGORY_NAME") == "[T::CATEGORY_NAME]"
+        assert notes == []
+
+    def test_plain_passthrough_dimension_is_unchanged(self):
+        parsed = _parsed_dimension_shapes()
+        notes: list[str] = []
+        resolver = make_resolver(parsed, "t", annotations=notes)
+        assert resolver("t.PLAIN") == "[T::PLAIN]"
+        assert notes == []
+
+    def test_bare_column_rename_dimension_resolves_to_the_expression(self):
+        # `T.RENAMED_BARE as ID` is emitted as a column on `ID`, not on
+        # `RENAMED_BARE` — the physical column is the EXPRESSION here, not
+        # `alias_name`, which is the declared name for this shape.
+        parsed = _parsed_dimension_shapes()
+        notes: list[str] = []
+        resolver = make_resolver(parsed, "t", annotations=notes)
+        assert resolver("t.renamed_bare") == "[T::ID]"
+        assert any("ID" in n for n in notes), notes
+
+    def test_computed_dimension_resolves_to_its_formula_id(self):
+        # Previously `[T::computed]` — a column that does not exist, because a
+        # computed dimension is a formula.
+        parsed = _parsed_dimension_shapes()
+        resolver = make_resolver(parsed, "t")
+        assert resolver("t.computed") == "[formula_Full Name]"
+
+    def test_unknown_name_on_a_table_with_dimensions_still_assumes_physical(self):
+        # The assumed-physical fallback must survive — most references are to
+        # columns no dimension block declares.
+        parsed = _parsed_dimension_shapes()
+        resolver = make_resolver(parsed, "t")
+        assert resolver("t.SOME_OTHER_COL") == "[T::SOME_OTHER_COL]"
 
     def test_unrenamed_passthrough_reference_is_not_flagged(self):
         # No ambiguity when the declared name IS the physical column name.

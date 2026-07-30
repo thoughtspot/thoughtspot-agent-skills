@@ -160,6 +160,38 @@ create or replace semantic view TPCDS.PUBLIC.RENAMED
 """
 
 
+# The dunder worked example's renamed dimension plus the window metric that
+# references it by its DECLARED name (ts-from-snowflake-dunder.md:45, 68-70).
+# PR #424 re-review N1: `dm_category.category` resolved to `[DM_CATEGORY::category]`
+# — the real column is `CATEGORY_NAME` — and no gate could see it, because a wrong
+# `TABLE::col` reference is invisible to a single-document lint (BL-195).
+RENAMED_DIMENSION_DDL = """
+create or replace semantic view DM.PUBLIC.DUNDER
+    tables (
+        DM.PUBLIC.DM_CATEGORY primary key (DM_CATEGORY_ID),
+        DM.PUBLIC.DM_ORDER_DETAIL primary key (ID)
+    )
+    relationships (
+        OD_TO_CAT as DM_ORDER_DETAIL(CAT_ID) references DM_CATEGORY(DM_CATEGORY_ID)
+    )
+    dimensions (
+        DM_CATEGORY.CATEGORY as dm_category.CATEGORY_NAME
+            with synonyms=('Product Category'),
+        DM_ORDER_DETAIL.ID as dm_order_detail.ID
+    )
+    metrics (
+        DM_ORDER_DETAIL.CATEGORY_QUANTITY
+            as SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY dm_category.category)
+    )
+    comment='Renamed dimension referenced by declared name';
+"""
+
+DUNDER_TABLES = {
+    "DM_CATEGORY": {"name": "DM_CATEGORY", "fqn": "guid-cat"},
+    "DM_ORDER_DETAIL": {"name": "DM_ORDER_DETAIL", "fqn": "guid-od"},
+}
+
+
 def _build(ddl: str, tables: dict, model_name: str = "Probe") -> dict:
     parsed = parse_sv_ddl(ddl)
     translated = translate_sv_formulas(parsed)
@@ -291,7 +323,7 @@ def _column_ids(doc: dict) -> set[str]:
 def test_double_aggregation_marker_reaches_the_translated_entry():
     """The 🔄 marker is worthless if it stops at the resolver — it has to land on
     the entry `translate-formulas` emits, which is what the skill surfaces
-    (ts-from-snowflake-rules.md:723-726; PR #424 review F5)."""
+    (ts-from-snowflake-rules.md "Double Aggregation (Metric-on-Metric)" / "Report line requirement" (:759-762); PR #424 review F5)."""
     translated = translate_sv_formulas(parse_sv_ddl(WORKFORCE_DDL))
     marked = {t["name"] for t in translated["translated"]
               if any(a.startswith("🔄") for a in t["annotations"])}
@@ -338,6 +370,29 @@ def test_renamed_passthrough_emits_no_unknown_column_ids():
     known = {"ss_item_sk", "ss_ext_sales_price"}
     for cid in _column_ids(doc):
         assert cid.split("::", 1)[1] in known, f"unknown column in {cid}"
+
+
+def test_renamed_dimension_partition_by_uses_the_physical_column():
+    """The dunder worked example's shape, end to end (PR #424 re-review N1).
+
+    `PARTITION BY dm_category.category` must group on `CATEGORY_NAME`, the column
+    the dimension actually aliases — not on the declared name, which is not a
+    column at all.
+    """
+    doc = _build(RENAMED_DIMENSION_DDL, DUNDER_TABLES, "Dunder")
+    exprs = {f["name"]: f["expr"] for f in doc["model"]["formulas"]}
+    assert exprs["Category Quantity"] == (
+        "group_sum ( [DM_ORDER_DETAIL::QUANTITY] , [DM_CATEGORY::CATEGORY_NAME] )")
+    assert "DM_CATEGORY::category" not in exprs["Category Quantity"]
+
+
+def test_renamed_dimension_reference_is_annotated():
+    """The ⚑ ambiguity flag covers dimensions too, not only facts/metrics."""
+    translated = translate_sv_formulas(parse_sv_ddl(RENAMED_DIMENSION_DDL))
+    entry = next(t for t in translated["translated"]
+                 if t["name"] == "CATEGORY_QUANTITY")
+    assert any(a.startswith("⚑") and "CATEGORY_NAME" in a
+               for a in entry["annotations"]), entry
 
 
 def test_computed_fact_reference_is_internally_consistent():
