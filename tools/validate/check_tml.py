@@ -56,14 +56,13 @@ VALID_AGGREGATIONS = {
 # FULL_OUTER is not a ThoughtSpot value anywhere and is rejected with error 14528:
 #   "Invalid value FULL_OUTER of field <ctx>->type.
 #    Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER"
-# Live-verified in BOTH the model and table contexts on se-thoughtspot 2026-07-30 (the
-# other four passed as controls in the same documents). This comment previously claimed
-# Table TML joins_with[].type accepted FULL_OUTER; that was wrong, so the table context
-# was left ungated and would emit TML that fails at import.
+# Live-verified in the model and table contexts on se-thoughtspot 2026-07-30 (the other
+# four passed as controls in the same documents). The SQL View context was NOT probed —
+# its vocabulary comes from ThoughtSpot's published TML docs plus those two siblings, and
+# check_tml has no sql_view validator anyway. This comment previously claimed Table TML
+# joins_with[].type accepted FULL_OUTER; that was wrong, so the table context was left
+# ungated and would emit TML that fails at import.
 VALID_JOIN_TYPES = {"INNER", "LEFT_OUTER", "RIGHT_OUTER", "OUTER"}
-
-# Back-compat alias — the model-specific name this set used to carry.
-VALID_MODEL_JOIN_TYPES = VALID_JOIN_TYPES
 
 
 def _validate_join_type(join_type, context: str) -> list[str]:

@@ -148,13 +148,13 @@ def test_table_joins_with_unknown_type_is_flagged():
     assert any("CROSS" in e for e in errors), errors
 
 
-def test_model_inline_join_full_outer_still_flagged():
-    data = _model(
+def _model_with_join(join_type):
+    return _model(
         model_tables=[
             {"name": "ORDERS", "joins": [{
                 "with": "CUSTOMERS",
                 "on": "[ORDERS::CID] = [CUSTOMERS::CID]",
-                "type": "FULL_OUTER",
+                "type": join_type,
                 "cardinality": "MANY_TO_ONE",
             }]},
             {"name": "CUSTOMERS"},
@@ -165,5 +165,14 @@ def test_model_inline_join_full_outer_still_flagged():
             "properties": {"column_type": "ATTRIBUTE"},
         }],
     )
-    errors = check_tml.validate_model_tml(data)
+
+
+def test_model_inline_join_full_outer_still_flagged():
+    errors = check_tml.validate_model_tml(_model_with_join("FULL_OUTER"))
     assert any("FULL_OUTER" in e for e in errors), errors
+
+
+def test_model_inline_join_outer_passes():
+    # Accept path: OUTER *is* ThoughtSpot's full outer join and must not be flagged.
+    errors = check_tml.validate_model_tml(_model_with_join("OUTER"))
+    assert not any("type" in e for e in errors), errors

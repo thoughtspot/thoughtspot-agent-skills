@@ -121,7 +121,7 @@ Each `joins[]` entry has `with` (always required) plus **one of two forms**:
 |---|---|---|
 | `with` | Yes | Must equal the `name:` of the target `model_tables[]` entry exactly (case-sensitive) |
 | `on` | Yes | Quote with `'on':` — `on` is a YAML reserved word. Format: `[FROM::fk] = [TO::pk]`. Supports range/inequality operators — see Range Joins below. |
-| `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, or `OUTER`. **`OUTER` *is* the full outer join** — it is ThoughtSpot's name for it, not a narrower join type (per ThoughtSpot domain review, 2026-07-30). `FULL_OUTER` is **not** a ThoughtSpot value and is rejected: "Invalid value FULL_OUTER … Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER". So mapping a source `FULL OUTER` to `OUTER` is a **rename, not a downgrade** — no semantics are lost. The same four values are the *only* ones accepted in Table `joins_with[].type` and SQL View `joins[].type` as well; there is no context in which `FULL_OUTER` is valid. |
+| `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, or `OUTER`. **`OUTER` *is* the full outer join** — it is ThoughtSpot's name for it, not a narrower join type (per ThoughtSpot domain review, 2026-07-30). `FULL_OUTER` is **not** a ThoughtSpot value and is rejected: "Invalid value FULL_OUTER … Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER". So mapping a source `FULL OUTER` to `OUTER` is a **rename, not a downgrade** — no semantics are lost. Table `joins_with[].type` accepts exactly the same four and rejects `FULL_OUTER` identically (both live-probed — see the note below); SQL View `joins[].type` is documented with the same four but was **not** probed, so treat it as strongly inferred rather than verified. |
 | `cardinality` | Yes | `MANY_TO_ONE` for most fact-to-dimension joins |
 
 **Join-type vocabulary — re-verified 2026-07-30 on `se-thoughtspot`.** The `FULL_OUTER`
@@ -133,16 +133,21 @@ build, and the probe extended it in two ways:
 | Model inline `model_tables[].joins[].type` | rejected — error 14528 | all accepted |
 | Table `joins_with[].type` | **also rejected** — error 14528, identical allowed list | all accepted |
 
-Verbatim, for the Table context (the newly-corrected half):
+Verbatim response for the Table context (the newly-corrected half) — the whole `status`
+object, so the `error_code` is on the record and not just asserted:
 
-```
-Invalid value <b> FULL_OUTER </b> of field <b> table->joins_with(1st)->type </b>.
-Allowed values are <b> INNER, LEFT_OUTER, OUTER, RIGHT_OUTER </b>.
+```json
+{"status": {"error_message": "Invalid value <b> FULL_OUTER </b> of field <b> table->joins_with(1st)->type </b>. Allowed values are <b> INNER, LEFT_OUTER, OUTER, RIGHT_OUTER </b>. <br/><br/>G7PROBE_JOIN: Skipped relationship import as source_table is not populated, possible because import of source table failed. <br/>", "status_code": "ERROR", "error_code": 14528}}
 ```
 
-So there is **one** join-type vocabulary across all TML contexts, and `OUTER` is the full
-outer join in each. ThoughtSpot's own TML documentation agrees, giving
-`type: [RIGHT_OUTER | LEFT_OUTER | INNER | OUTER]` for Models, Views and Worksheets alike.
+(The trailing "Skipped relationship import" sentence is a cascade of the `type` failure — it
+is absent from all five passing probes on the same document.)
+
+So `OUTER` is the full outer join and `FULL_OUTER` is valid in **neither** probed context.
+ThoughtSpot's own TML documentation extends this to Views, giving
+`type: [RIGHT_OUTER | LEFT_OUTER | INNER | OUTER]` for Models, Views and Worksheets alike —
+note that the **SQL View context was not probed**, so its vocabulary is documented and
+inferred from these two siblings rather than directly verified.
 `FULL_OUTER` was previously documented as valid for Table `joins_with[]` in
 [thoughtspot-table-tml.md](thoughtspot-table-tml.md) and
 [thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md); that was wrong and is corrected.
