@@ -577,6 +577,8 @@ Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
 | I4 | `model_tables[].id` != `name` — joins silently fail at query time |
 | I5 | a physical column using `aggregation: COUNT_DISTINCT` — silently flips MEASURE → ATTRIBUTE |
 | I8 | a duplicate `column_id` across `columns[]` — hard import rejection ("columns should have unique column_id values") |
+| I12 | a bare (unqualified) `column_id` on a single-table model — rejected at import |
+| I13 | a `[formula_*]` reference (in `formulas[].expr`) or a `columns[].formula_id` matching no declared `formulas[].id` — hard import rejection (`error_code 14516`, `Search did not find "formula_X"`). Distinct from I9: I9 says use the id form, I13 says the id must exist |
 | XREF | a model `model_tables`/`column_id`/join reference to a table or column that no batch TML generates — surfaces only when a table/sql_view TML is linted **alongside** the model (e.g. `--dir`); a lone model file skips it (no ground truth for what tables exist) |
 
 ```bash

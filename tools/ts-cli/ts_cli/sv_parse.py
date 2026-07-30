@@ -475,22 +475,30 @@ def _resolve_rhs_alias(
     """Resolve alias_table, alias_name, expr from the right-hand side of `as`.
 
     Returns (alias_table, alias_name, expr) — expr is None for a plain
-    `alias.NAME` form, and the full RHS text for anything more complex."""
+    `alias.NAME` form, and the full RHS text for anything more complex.
+
+    ``alias_table``/``alias_name`` name the construct **as it can be referenced**:
+
+    - A bare ``alias.NAME`` right-hand side is a physical-column alias, so the
+      pair is that column and ``expr`` is None.
+    - Anything computed keeps the **declared** left-hand-side name, because that
+      is the only name another metric can reference the construct by.
+      ``sv_translate._build_column_index`` keys both ``fact_idx`` and
+      ``metric_idx`` on ``alias_table.alias_name``, so deriving the pair from the
+      first qualified token of the expression indexed a computed construct under
+      a *physical column of its own table* — producing a reference to the wrong
+      column, or a metric that resolved its inner reference to itself
+      (BL-178 defect 3; `docs/reviews/2026-07-29-ossie-tpcds-fidelity.md` F9).
+      The declared table is also the correct resolver default for bare
+      identifiers in the expression: ``COUNT(EMPLOYEE_ID)`` on
+      ``EMPLOYEES.HEADCOUNT`` means ``EMPLOYEES.EMPLOYEE_ID``, whatever tables
+      the rest of the expression qualifies.
+    """
     alias_dot = re.match(
         r"([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*$", rhs)
     if alias_dot:
         return alias_dot.group(1), alias_dot.group(2), None
 
-    agg_wrap = re.match(
-        r"([A-Za-z_]+)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*$",
-        rhs)
-    if agg_wrap:
-        return agg_wrap.group(2), agg_wrap.group(3), rhs
-
-    alias_m = re.match(
-        r"([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)", rhs)
-    if alias_m:
-        return alias_m.group(1), alias_m.group(2), rhs
     return default_table.lower(), default_col, rhs
 
 

@@ -162,6 +162,79 @@ def test_i12_does_not_flag_formula_columns():
     assert not any(f.startswith("I12:") for f in lint_tml(data))
 
 
+# ---------------------------------------------------------------------------
+# I13 — dangling [formula_*] cross-references (BL-183, promoted from BL-178)
+# ---------------------------------------------------------------------------
+
+def _model_with_formula_refs(inner_id: str, ref: str) -> dict:
+    """A two-formula model where the outer formula references `ref`."""
+    return {
+        "model": {
+            "name": "SALES",
+            "model_tables": [{"name": "ORDERS"}, {"name": "CUSTOMERS"}],
+            "columns": [
+                {"name": "Tenure Months", "formula_id": inner_id},
+                {"name": "Avg Tenure", "formula_id": "formula_Avg Tenure"},
+            ],
+            "formulas": [
+                {"id": inner_id, "name": "Tenure Months",
+                 "expr": "diff_months ( today ( ) , [ORDERS::HIRE_DATE] )"},
+                {"id": "formula_Avg Tenure", "name": "Avg Tenure",
+                 "expr": f"average ( [{ref}] )"},
+            ],
+        },
+    }
+
+
+def test_i13_resolving_id_reference_passes():
+    # The positive case — the check must not be satisfiable by rejecting every
+    # bracket reference (BL-183 approach step 1).
+    data = _model_with_formula_refs("formula_Tenure Months", "formula_Tenure Months")
+    assert not any(f.startswith("I13:") for f in lint_tml(data))
+
+
+def test_i13_dangling_formula_reference_in_expr_is_flagged():
+    # BL-178's exact symptom: the emitted ref is the SQL token, the minted id is
+    # the display name, so the reference matches nothing.
+    data = _model_with_formula_refs("formula_Tenure Months", "formula_tenure_months")
+    findings = [f for f in lint_tml(data) if f.startswith("I13:")]
+    assert len(findings) == 1
+    assert "formula_tenure_months" in findings[0]
+    # names the referring formula so the finding is actionable
+    assert "formula_Avg Tenure" in findings[0]
+
+
+def test_i13_dangling_column_formula_id_is_flagged():
+    data = _clean_model()
+    data["model"]["columns"].append(
+        {"name": "Orphan", "formula_id": "formula_Missing"})
+    findings = [f for f in lint_tml(data) if f.startswith("I13:")]
+    assert len(findings) == 1
+    assert "formula_Missing" in findings[0]
+
+
+def test_i13_ignores_table_qualified_and_plain_refs():
+    # `[TABLE::COL]` refs and display-name refs are other invariants' business
+    # (XREF / I9) — I13 only gates `formula_*`-prefixed id references.
+    data = _clean_model()
+    data["model"]["formulas"] = [
+        {"id": "f_rev", "name": "Revenue",
+         "expr": "sum ( [ORDERS::AMOUNT] ) + [Some Other Name]"},
+    ]
+    data["model"]["columns"] = [{"name": "Revenue", "formula_id": "f_rev"}]
+    assert not any(f.startswith("I13:") for f in lint_tml(data))
+
+
+def test_i13_flags_every_distinct_dangling_ref_once():
+    data = _clean_model()
+    data["model"]["formulas"] = [
+        {"id": "f_a", "name": "A", "expr": "sum ( [formula_x] ) + [formula_y]"},
+    ]
+    data["model"]["columns"] = [{"name": "A", "formula_id": "f_a"}]
+    findings = [f for f in lint_tml(data) if f.startswith("I13:")]
+    assert len(findings) == 2
+
+
 def test_multiple_violations_accumulate():
     data = _clean_model()
     data["model"]["guid"] = "x"

@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (formula composition + TML import behaviours validated on SE cluster 2026-07-10 — two-pass import requirement, if() parens mandatory, BOOL column support; correction 2026-07: SQL-query logical-table `tables()` form + "→ ThoughtSpot SQL View TML" rule added, GA 2026-06-26 — finding 13.5; ai_sql_generation/ai_question_categorization corrected to free-text instruction strings — finding 13.6; sample_values/is_enum dimension clauses documented — finding 13.7; 2026-07-29 full sweep: new PARSER PREREQUISITE for MAX_STALENESS/materialization DDL clause shape, not yet live-verified — finding 13.5) -->
+<!-- currency: snowflake — 2026-07 (formula composition + TML import behaviours validated on SE cluster 2026-07-10 — two-pass import requirement, if() parens mandatory, BOOL column support; correction 2026-07: SQL-query logical-table `tables()` form + "→ ThoughtSpot SQL View TML" rule added, GA 2026-06-26 — finding 13.5; ai_sql_generation/ai_question_categorization corrected to free-text instruction strings — finding 13.6; sample_values/is_enum dimension clauses documented — finding 13.7; 2026-07-29 full sweep: new PARSER PREREQUISITE for MAX_STALENESS/materialization DDL clause shape, not yet live-verified — finding 13.5; 2026-07-30: Identifier Resolution Algorithm sharpened after BL-178 — passthrough facts take step 1, the step-2 id is derived from the display name by the SAME function build-model mints with, and the facts/metrics maps are keyed on DECLARED names; all three live-verified on se-thoughtspot 2026-07-30) -->
 
 # Reverse Mapping Rules Reference
 
@@ -580,6 +580,13 @@ correct ThoughtSpot construct. This decision tree defines the resolution order.
 | Table columns | Physical columns from the ThoughtSpot Table TML exports |
 | Facts map | `{FACT_NAME: {expr, table_alias, visibility}}` parsed from the `facts()` block |
 | Metrics map | `{METRIC_NAME: {expr, agg, table_alias}}` parsed from the `metrics()` block |
+
+`FACT_NAME` / `METRIC_NAME` are the **declared** names — the left-hand side of the
+`ALIAS.NAME as <expr>` entry — because that is the only name another metric can
+reference the construct by. Keying either map off anything in the expression (its first
+qualified token, say) indexes a computed construct under a physical column of its own
+table, which produces a reference to the wrong column and, for `AGG(alias.name)` forms,
+a metric that resolves its own inner reference to itself (BL-178 defect 3).
 | Relationships | `{REL_NAME: {from_table, from_col, to_table, to_col}}` parsed from `relationships()` |
 
 **Decision tree — resolve `table_alias.name` in this order:**
@@ -588,6 +595,17 @@ correct ThoughtSpot construct. This decision tree defines the resolution order.
 1. Is `name` a physical column on the table identified by `table_alias`?
    YES → emit [TABLE_ID::col_name]  (standard column reference)
    NO  → step 2
+
+   A fact or metric declared under `name` whose right-hand side IS a bare
+   physical-column reference (a PASSTHROUGH — `parse-sv` reports `expr: null`)
+   takes this step too: the SV name merely aliases that column, and `build-model`
+   emits it as a plain `columns[]` entry with a `column_id`, so a formula
+   reference to it could never resolve. This is the shape a Cortex-Analyst
+   semantic model produces for every field without a `dimension` block, so it is
+   the common case, not an edge case.
+       Example: fact `STORE_SALES.ss_ext_sales_price as store_sales.ss_ext_sales_price`
+                metric `SUM(store_sales.ss_ext_sales_price)`
+                → `sum ( [STORE_SALES::ss_ext_sales_price] )`
 
 2. Is `name` a FACT_NAME in the facts map where the fact's table_alias matches?
    YES → emit [formula_<id>]  (formula reference using the fact's `id` field)
@@ -598,11 +616,24 @@ correct ThoughtSpot construct. This decision tree defines the resolution order.
          Example: fact id `formula_Tenure Months`
                   metric `AVG(employees.tenure_months)`
                   → `average ( [formula_Tenure Months] )`
+
+         The id is derived from the fact's DISPLAY NAME (first synonym, else the
+         title-cased declared name — see "Display Name, Synonyms, and Description
+         Resolution" below), because that is what `build-model` mints as
+         `formulas[].id`. Deriving it any other way — from the SQL token, say —
+         produces a reference matching no declared id, which fails at import
+         (`error_code 14516`, "Search did not find ..."; invariant I13, gated by
+         `ts tml lint`). One function must own this derivation and the resolver
+         must call it, not restate it.
    NO  → step 3
 
 3. Is `name` a METRIC_NAME in the metrics map?
    YES → Double aggregation — see "Double Aggregation (Metric-on-Metric)" below.
          The referenced metric becomes an inner formula; the current metric wraps it.
+         When the inner metric's table and the referencing metric's table are NOT
+         connected by a relationship there is no grouping key to aggregate over, so
+         the reference falls back to the inner metric's `[formula_<id>]` (same id
+         derivation as step 2).
    NO  → step 4
 
 4. FAIL — the identifier cannot be resolved. Omit and log: skip the formula

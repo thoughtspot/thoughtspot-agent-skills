@@ -528,3 +528,45 @@ class TestParseColumnEntry:
     def test_metric_with_agg(self):
         c = _parse_column_entry("T.TOTAL as SUM(t.AMOUNT)", "metrics")
         assert c["expr"] == "SUM(t.AMOUNT)"
+
+    # BL-178 defect 3 — `alias_table`/`alias_name` name the construct as it can
+    # be REFERENCED. For a direct `alias.COL` right-hand side that is the physical
+    # column it aliases; for anything computed it is the DECLARED left-hand-side
+    # name, because that is the only name another metric can reference it by.
+    # sv_translate keys both fact_idx and metric_idx on `alias_table.alias_name`,
+    # so taking the first qualified token of the expression indexed a computed
+    # construct under a physical column of its own table.
+
+    def test_computed_fact_alias_is_the_declared_name(self):
+        c = _parse_column_entry(
+            "STORE_SALES.net_line as STORE_SALES.ss_ext_sales_price - "
+            "STORE_SALES.ss_net_profit", "facts")
+        assert c["source_column"] == "net_line"
+        assert c["alias_table"] == "store_sales"
+        assert c["alias_name"] == "net_line"
+
+    def test_agg_wrapped_metric_alias_is_the_declared_name(self):
+        # The `agg_wrap` branch previously returned the aggregated column's alias
+        # AND name, so `metric_idx` was keyed `store_sales.net_line` — the metric
+        # resolved its own inner reference to itself.
+        c = _parse_column_entry(
+            "STORE_SALES.total_net as SUM(store_sales.net_line)", "metrics")
+        assert c["alias_table"] == "store_sales"
+        assert c["alias_name"] == "total_net"
+
+    def test_cross_table_metric_alias_is_its_own_table(self):
+        # A metric declared on COMPANIES that aggregates an EMPLOYEES construct
+        # must index under `companies.…` — and its resolver's default alias for
+        # bare identifiers is COMPANIES, the table it is declared on.
+        c = _parse_column_entry(
+            "COMPANIES.AVG_HEADCOUNT as AVG(employees.headcount)", "metrics")
+        assert c["alias_table"] == "companies"
+        assert c["alias_name"] == "AVG_HEADCOUNT"
+
+    def test_direct_dimension_alias_still_tracks_the_physical_column(self):
+        # Unchanged: a bare `alias.COL` right-hand side is a physical-column
+        # alias and both fields must keep pointing at it.
+        c = _parse_column_entry("T.COL as other.PHYSICAL_COL", "dimensions")
+        assert c["alias_table"] == "other"
+        assert c["alias_name"] == "PHYSICAL_COL"
+        assert c["expr"] is None

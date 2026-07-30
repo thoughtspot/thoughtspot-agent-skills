@@ -5640,7 +5640,42 @@ BL-182 for Snowflake).
 `tools/ts-cli/ts_cli/sv_parse.py` (`:470-492`), `tools/ts-cli/ts_cli/sv_build_model.py` (`:96`),
 `tools/ts-cli/tests/test_sv_translate.py` (`:352-361` -- **asserts the defect**),
 `agents/shared/worked-examples/snowflake/ts-from-snowflake-identifier-resolution.md`.
-**Status:** OPEN -- **ready to fix**, with a mandatory three-part scope (below).
+**Status:** RESOLVED 2026-07-30 (ts-cli v0.126.0, from-snowflake-sv SKILL.md v1.19.4 --
+`fix(ts-cli): BL-178 -- restore from-snowflake-sv formula reference integrity (3 defects + lint gate)`).
+All three defects fixed, the poisoned test corrected, and the worked example re-verified live.
+
+**How each defect was fixed:**
+
+| Defect | Fix |
+|---|---|
+| 1 -- inverted resolution order | `make_resolver` now takes step 1 first: a fact/metric that is a **passthrough** of a physical column (`expr is None`) resolves to `[TABLE::col]`, which is what `build-model` emits for it. This is the defect that fired on TPC-DS -- every fact there is a passthrough -- and all 5 of 5 metrics now resolve to real column references. |
+| 2 -- minted id != emitted ref | `display_title` moved to `sv_translate` and is **re-exported** by `sv_build_model`, so there is exactly ONE naming path; the resolver emits `[{construct_formula_id(c)}]`, which is by construction the id the builder mints. Metric-on-metric additionally gained the documented step-3 `group_*` double aggregation (grouping on the parent-side PK of the connecting relationship), which is what the worked example records and what the resolver never implemented. |
+| 3 -- `alias_name` from the expression | `_resolve_rhs_alias` keeps the RHS-derived `(alias_table, alias_name)` **only** for a bare `alias.NAME` right-hand side; anything computed keeps the DECLARED left-hand-side name, so `fact_idx`/`metric_idx` are keyed on the name references actually use. This also removes the metric self-reference and makes the resolver's default alias for bare identifiers the table the construct is declared on. |
+
+**Live re-verification (se-thoughtspot, 2026-07-30, `--policy VALIDATE_ONLY`, nothing
+persisted -- 0 objects named `Company Workforce%` before and after):**
+
+- Pre-fix TML: `status_code: ERROR`, `error_code 14516`, *"Formula addition failed. Formula:
+  Avg Tenure, Error: Search did not find "formula_tenure_months )" in your data or
+  metadata."* — **this settles the question the review left open: a dangling reference is a
+  HARD IMPORT FAILURE, not a silently-broken measure.**
+- Post-fix TML: `status_code: OK`.
+
+**Validator promotion shipped with the fix:** `ts tml lint` invariant **I13** (and the
+`formulas[].expr` half of `tools/validate/check_tml.py`) now reject a `[formula_*]`
+reference matching no declared id. I13 fires with exactly 4 findings on the pre-fix worked
+example and is clean on the post-fix one. See BL-183 (partially resolved -- its second
+check, CA-JSON table references in `lint-ddl`, is untouched).
+
+**Divergences from the 2026-06-13 baseline that are NOT this regression** (recorded in the
+worked example's re-verification section, per BL-184's caveat): 6 of 18 display names +
+their formula ids (first-synonym promotion, coverage row 14, landed 2026-06-15 -- BL-179);
+`Total Salary` staying a `column_id` entry so the formula count is 8 not 9
+(duplicate-`column_id` promotion keeps the FIRST occupant, ts-cli v0.92.0); and
+`Tenure Months` typed ATTRIBUTE (BL-181). All three are current documented behaviour acting
+on a stale document.
+
+**Original filing follows.**
 
 **The symptom.** Converting a Semantic View whose metrics aggregate a declared fact -- the normal
 shape, and the shape upstream's own converter always emits -- produces a Model TML in which
@@ -5975,7 +6010,25 @@ prefers for BL-178 (F9) and BL-182 item 2 (F20).
 `tools/ts-cli/ts_cli/sv_lint_ddl.py` (`ts snowflake lint-ddl`),
 `agents/shared/schemas/ts-model-conversion-invariants.md` (a new invariant row),
 `docs/quality-gates.md`.
-**Status:** OPEN -- **the preferred exit** for BL-178's class per `.claude/rules/repo-audit.md`.
+**Status:** PARTIALLY RESOLVED 2026-07-30 -- **check 1 shipped** with BL-178's fix
+(ts-cli v0.126.0). **Check 2 (CA-JSON table references in `ts snowflake lint-ddl`) is still
+OPEN** and remains this entry's remaining scope.
+
+Check 1 as shipped: `tml_lint._check_dangling_formula_refs` resolves every `[formula_*]`
+token in each `formulas[].expr` and every `columns[].formula_id` against the document's
+declared id set, naming the referring formula/column in the finding. Registered as invariant
+**I13** in `ts-model-conversion-invariants.md` (with the live failure mode -- `error_code
+14516`, verified on se-thoughtspot 2026-07-30) and documented in `tools/ts-cli/README.md`.
+The `formulas[].expr` half was added to `tools/validate/check_tml.py` in the same pass, since
+that validator already checked the `columns[].formula_id` half and passing the expr half was
+the other reason "every gate reported clean".
+
+Approach step 1 (a positive case, so the check cannot be satisfied by rejecting everything)
+and step 4 (run over existing worked-example TMLs first) were both done: 16 model documents
+across `agents/shared/worked-examples/` and the repo's `*.model.tml` files were scanned and
+**0** produce an I13 finding, so the check was enabled as an error with no triage backlog.
+`docs/quality-gates.md` needed no regeneration -- I13 is a new invariant inside an existing
+gate, not a new gate.
 
 **Why this is validator-shaped and not a backlog fix.** BL-178 is one bug; *dangling
 cross-references in emitted TML* is a recurring class. The check is purely structural over a

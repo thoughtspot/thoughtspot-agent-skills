@@ -6,7 +6,7 @@ ThoughtSpot accepts the TML and then behaves wrong later (silently drops a formu
 flips a measure to an attribute, breaks a join at query time). A couple (I8, I12) ARE
 caught by the server (including under VALIDATE_ONLY) but are cheap, purely-structural
 checks worth failing on locally, without a live call, especially across a batch of
-generated TML. Rules mirror invariants I1/I2/I4/I5/I8/I12 in
+generated TML. Rules mirror invariants I1/I2/I4/I5/I8/I12/I13 in
 `agents/shared/schemas/ts-model-conversion-invariants.md`.
 
 Pure functions over a parsed TML dict so they are trivially unit-testable.
@@ -21,8 +21,8 @@ def lint_tml(data: dict) -> list[str]:
     """Return a list of invariant-violation strings for one parsed TML doc. Empty = clean.
 
     Auto-detects table vs model TML by the top-level key. Checks the model invariants
-    (I1/I2/I4/I5/I8/I12) plus the guid-placement rule — see the module docstring for
-    which of these the server's VALIDATE_ONLY policy does and doesn't also surface.
+    (I1/I2/I4/I5/I8/I12/I13) plus the guid-placement rule — see the module docstring
+    for which of these the server's VALIDATE_ONLY policy does and doesn't also surface.
     """
     if not isinstance(data, dict):
         return ["Top-level TML value must be a mapping"]
@@ -106,8 +106,79 @@ def lint_tml(data: dict) -> list[str]:
             )
 
     findings.extend(_check_bare_column_id_single_table(model_tables, columns))
+    findings.extend(_check_dangling_formula_refs(formulas, columns))
 
     return findings
+
+
+# A bracketed reference of any kind. `formula_`-prefixed ones are id references
+# and must resolve; `TABLE::COL` and plain display-name refs are other checks'
+# business (XREF / I9 respectively).
+_BRACKET_REF_RE = re.compile(r"\[([^\[\]]+)\]")
+
+
+def _expr_formula_ref_misses(
+    formulas: list, declared: set,
+) -> list[tuple[str, str]]:
+    """(context, ref) for each `[formula_*]` in an expr matching no declared id."""
+    out: list[tuple[str, str]] = []
+    for f in formulas:
+        if not isinstance(f, dict):
+            continue
+        expr = f.get("expr")
+        if not isinstance(expr, str):
+            continue
+        context = f"formula '{f.get('id') or f.get('name') or '?'}'"
+        for ref in dict.fromkeys(_BRACKET_REF_RE.findall(expr)):
+            if ref.startswith("formula_") and ref not in declared:
+                out.append((context, ref))
+    return out
+
+
+def _column_formula_id_misses(
+    columns: list, declared: set,
+) -> list[tuple[str, str]]:
+    """(context, ref) for each columns[].formula_id matching no declared id."""
+    out: list[tuple[str, str]] = []
+    for c in columns:
+        if not isinstance(c, dict):
+            continue
+        ref = c.get("formula_id")
+        if isinstance(ref, str) and ref and ref not in declared:
+            out.append((f"column '{c.get('name', '?')}'", ref))
+    return out
+
+
+def _check_dangling_formula_refs(formulas: list, columns: list) -> list[str]:
+    """I13 — every `formula_*` id reference must match a declared `formulas[].id`.
+
+    A bracket reference matching no declared id is not resolved by ThoughtSpot as
+    a cross-reference: it is parsed as search tokens, so the formula either fails
+    to import or imports as a silently-broken measure. Distinct from I9, which
+    says to use the id form at all — this says the id you used must exist.
+
+    Promoted from BL-178 per the two-bucket rule (BL-183): the from-Snowflake
+    converter shipped five weeks of Model TML in which *every* measure referenced
+    an id that was never declared, and `lint_tml`, `check_tml.py` and
+    `build-model`'s own lint_findings all reported clean
+    (`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md` F9 / §3.9). This check
+    would have caught it on the commit that introduced it.
+
+    Purely structural over a single document — no live instance, no judgment.
+    """
+    declared = {
+        f.get("id") for f in formulas
+        if isinstance(f, dict) and f.get("id")
+    }
+    misses = (_expr_formula_ref_misses(formulas, declared)
+              + _column_formula_id_misses(columns, declared))
+    return [
+        f"I13: {context} references '{ref}', which matches no formulas[].id "
+        f"in this document — ThoughtSpot parses an unresolvable bracket "
+        f"reference as search tokens, so the formula fails to import or "
+        f"imports silently broken."
+        for context, ref in dict.fromkeys(misses)
+    ]
 
 
 def _check_bare_column_id_single_table(model_tables: list, columns: list) -> list[str]:

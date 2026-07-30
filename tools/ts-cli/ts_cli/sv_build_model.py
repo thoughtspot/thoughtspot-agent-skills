@@ -15,14 +15,13 @@ from __future__ import annotations
 from ts_cli.formula_common import (add_formula_prefix, fix_double_aggregation,
                                    promote_duplicate_column_ids,
                                    resolve_name_collisions)
-from ts_cli.sv_translate import build_node_id_map
+from ts_cli.sv_translate import build_node_id_map, display_title
 
-
-def display_title(entry: dict) -> str:
-    synonyms = entry.get("synonyms") or []
-    if synonyms:
-        return synonyms[0]
-    return entry["name"].replace("_", " ").title()
+# `display_title` is defined in sv_translate and re-exported here (unchanged
+# import site for callers and tests). It must stay ONE function: the resolver has
+# to predict the id this builder mints, and two independent naming paths are
+# exactly what BL-178 defect 2 was — `formula_<sql_token>` emitted against
+# `id: formula_<display title>`, so every reference dangled.
 
 
 def normalize_tables(tables: dict) -> dict[str, str]:

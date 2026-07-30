@@ -9,7 +9,7 @@ and the extension pattern.
 ts_cli/
   cli.py              — Typer app entry point; registers command groups
   client.py           — ThoughtSpotClient REST wrapper; handles token caching and auth
-  tml_lint.py         — Pre-import TML linter: lint_tml (single-document I1/I2/I4/I5/I8 + guid-placement invariants) (pure functions, no I/O)
+  tml_lint.py         — Pre-import TML linter: lint_tml (single-document I1/I2/I4/I5/I8/I12/I13 + guid-placement invariants). I13 is the dangling-`[formula_*]`-reference gate (BL-183, promoted from BL-178): a bracket id reference matching no `formulas[].id` is parsed as search tokens, so the formula fails to import (error_code 14516, live-verified 2026-07-30) — distinct from I9, which mandates the id form in the first place (pure functions, no I/O)
   tml_common.py       — platform-neutral TML YAML serialization (dump_tml_yaml) + import-response GUID parsing (extract_imported_guid) — relocated from tableau/ (BL-063 PR5); pure functions, Genie-vendorable
   formula_common.py   — platform-neutral formula/name transforms (resolve_name_collisions, add_formula_prefix, expr_is_aggregated, fix_double_aggregation) — relocated from model_builder.py/tableau/naming.py (BL-063 PR5); pure functions, Genie-vendorable
   model_builder.py     — Tableau TML assembly + phased-import orchestration facade (pure functions, no I/O; TWB parsing lives in ts_cli/tableau/twb.py)
@@ -148,7 +148,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.124.2**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.126.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

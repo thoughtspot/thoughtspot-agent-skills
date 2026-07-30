@@ -321,6 +321,28 @@ def validate_model_tml(data: dict) -> list[str]:
                 "aggregation belongs in the corresponding columns[] entry, never in formulas[]"
             )
 
+    # I13 — every `[formula_*]` reference inside a formulas[].expr must match a
+    # declared id. The columns[].formula_id half of this is checked below; the
+    # expr half was the gap that let BL-178 ship — a Model whose five of five
+    # measures referenced ids that never existed passed this validator, `ts tml
+    # lint` and `build-model`'s own lint_findings alike
+    # (docs/reviews/2026-07-29-ossie-tpcds-fidelity.md F9 / BL-183).
+    if formula_ids:
+        for f in formulas:
+            if not isinstance(f, dict):
+                continue
+            expr = f.get("expr")
+            if not isinstance(expr, str):
+                continue
+            for ref in sorted(set(re.findall(r"\[([^\[\]]+)\]", expr))):
+                if ref.startswith("formula_") and ref not in formula_ids:
+                    errors.append(
+                        f"Formula '{f.get('id') or f.get('name', '?')}' "
+                        f"references '[{ref}]', which matches no formulas[].id "
+                        "in this model — an unresolvable bracket reference is "
+                        "parsed as search tokens, not as a cross-reference"
+                    )
+
     formula_ids_referenced: set[str] = set()
     column_ids_seen: set[str] = set()
     col_display_names: list[str] = []

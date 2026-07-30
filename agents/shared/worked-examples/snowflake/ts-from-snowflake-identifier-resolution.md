@@ -20,8 +20,10 @@ cover:
 - **`if()` parenthesization:** CASE/WHEN → `if ( [cond] ) then ... else ...` requires
   parentheses around the condition
 
-Verified end-to-end against `se-thoughtspot` on 2026-06-13. Final model GUID:
-`a8803bc3-f4c7-45f1-8f20-36924e57a2ef`.
+Verified end-to-end against `se-thoughtspot` on 2026-06-13 (model GUID
+`a8803bc3-f4c7-45f1-8f20-36924e57a2ef`) and **re-verified 2026-07-30** — see
+[Re-verification](#re-verification--2026-07-30) for what the re-run changed and why.
+The output below is the 2026-07-30 output.
 
 ---
 
@@ -101,6 +103,7 @@ create or replace semantic view AGENT_SKILLS.IDENTIFIER_RESOLUTION_TEST.COMPANY_
 | Facts | 2: TENURE_MONTHS (DATEDIFF), SALARY_BAND (CASE/WHEN) |
 | Dimensions | 9 (5 from COMPANIES, 4 from EMPLOYEES) |
 | Metrics | 7: 3 simple, 2 metric-on-fact, 2 double aggregation |
+| Facts (passthrough vs computed) | 0 passthrough, 2 computed — so both take resolution step 2, not step 1 |
 
 ---
 
@@ -121,8 +124,8 @@ physical column → fact → metric → FAIL.
 
 | Metric | SV Expression | Resolution | ThoughtSpot Formula |
 |---|---|---|---|
-| AVG_TENURE | `AVG(employees.tenure_months)` | `tenure_months` = fact → formula ref | `average ( [formula_Tenure Months] )` |
-| TOTAL_TENURE | `SUM(employees.tenure_months)` | `tenure_months` = fact → formula ref | `sum ( [formula_Tenure Months] )` |
+| AVG_TENURE | `AVG(employees.tenure_months)` | `tenure_months` = **computed** fact → formula ref | `average ( [formula_Tenure Months] )` |
+| TOTAL_TENURE | `SUM(employees.tenure_months)` | `tenure_months` = **computed** fact → formula ref | `sum ( [formula_Tenure Months] )` |
 
 **Key finding:** `[Tenure Months]` (display name) fails during TML import with
 "Search did not find 'Tenure Months' in your data or metadata." The correct syntax
@@ -146,7 +149,7 @@ The grouping key is `COMPANIES::COMPANY_ID` — the PK on the TO (parent) side o
 
 | Fact | SV Expression | Translation | Column Type |
 |---|---|---|---|
-| Tenure Months | `DATEDIFF(month, HIRE_DATE, CURRENT_DATE())` | `diff_months ( today () , [EMPLOYEES::HIRE_DATE] )` | MEASURE (numeric) |
+| Tenure Months | `DATEDIFF(month, HIRE_DATE, CURRENT_DATE())` | `diff_months ( today ( ) , [EMPLOYEES::HIRE_DATE] )` | ATTRIBUTE (facts are classified ATTRIBUTE unconditionally — BL-181) |
 | Salary Band | `CASE WHEN SALARY >= 90000 THEN 'Senior' WHEN SALARY >= 70000 THEN 'Mid' ELSE 'Junior' END` | `if ( [EMPLOYEES::SALARY] >= 90000 ) then 'Senior' else if ( [EMPLOYEES::SALARY] >= 70000 ) then 'Mid' else 'Junior'` | ATTRIBUTE (string) |
 
 **Note:** `DATEDIFF(month, start, end)` → `diff_months(end, start)` — arguments are reversed.
@@ -167,8 +170,21 @@ ThoughtSpot rejects TML with duplicate `column_id` values:
 > "Field worksheet->columns should have unique column_id values. 12th worksheet->columns
 > has duplicate column_id 'EMPLOYEES::EMPLOYEE_ID'."
 
-**Fix:** convert all three simple metrics to formula columns (`formulas[]` entries) instead
-of `aggregation:`-based `columns[]` entries. This eliminates the duplicate `column_id`.
+**Fix:** every duplicate occupant of a `TABLE::col` becomes a formula column
+(`formulas[]` entry) instead of an `aggregation:`-based `columns[]` entry, which
+eliminates the duplicate `column_id`.
+
+Since ts-cli v0.92.0 (2026-07-24) this is `formula_common.promote_duplicate_column_ids`,
+and it keeps the **first** occupant of each `column_id` as a plain column rather than
+promoting all of them. So on this fixture:
+
+| Column | First occupant (stays a `column_id` entry) | Promoted to a formula |
+|---|---|---|
+| `EMPLOYEES::EMPLOYEE_ID` | `Employee Id` (dimension) | `Employee Count` → `count ( [EMPLOYEES::EMPLOYEE_ID] )` |
+| `EMPLOYEES::SALARY` | `Payroll` (`aggregation: SUM`) | `Avg Salary` → `average ( [EMPLOYEES::SALARY] )` |
+
+That is why the output has 8 formulas, not the 9 the 2026-06-13 baseline recorded — see
+[Re-verification](#re-verification--2026-07-30).
 
 ---
 
@@ -176,224 +192,231 @@ of `aggregation:`-based `columns[]` entries. This eliminates the duplicate `colu
 
 ```yaml
 model:
+  columns:
+  - column_id: "COMPANIES::COMPANY_ID"
+    name: Company Id
+    properties:
+      column_type: ATTRIBUTE
+  - column_id: "COMPANIES::COMPANY_NAME"
+    name: Company
+    properties:
+      column_type: ATTRIBUTE
+      description: The registered company name
+      synonym_type: USER_DEFINED
+      synonyms:
+      - Organisation
+  - column_id: "COMPANIES::FOUNDED_DATE"
+    name: Founded Date
+    properties:
+      column_type: ATTRIBUTE
+      description: Date the company was founded
+  - column_id: "COMPANIES::HEADQUARTERS_CITY"
+    name: City
+    properties:
+      column_type: ATTRIBUTE
+      description: City where the company headquarters is located
+      synonym_type: USER_DEFINED
+      synonyms:
+      - HQ City
+      - Location
+  - column_id: "COMPANIES::INDUSTRY"
+    name: Industry
+    properties:
+      column_type: ATTRIBUTE
+      description: Industry classification of the company
+  - column_id: "EMPLOYEES::EMPLOYEE_ID"
+    name: Employee Id
+    properties:
+      column_type: ATTRIBUTE
+  - column_id: "EMPLOYEES::EMPLOYEE_NAME"
+    name: Name
+    properties:
+      column_type: ATTRIBUTE
+      description: Full name of the employee
+      synonym_type: USER_DEFINED
+      synonyms:
+      - Staff Member
+  - column_id: "EMPLOYEES::HIRE_DATE"
+    name: Hire Date
+    properties:
+      column_type: ATTRIBUTE
+      description: Date the employee was hired
+  - column_id: "EMPLOYEES::DEPARTMENT"
+    name: Team
+    properties:
+      column_type: ATTRIBUTE
+      description: Department the employee belongs to
+      synonym_type: USER_DEFINED
+      synonyms:
+      - Division
+  - formula_id: formula_Tenure Months
+    name: Tenure Months
+    properties:
+      column_type: ATTRIBUTE
+      description: Number of months since the employee was hired
+  - formula_id: formula_Salary Band
+    name: Salary Band
+    properties:
+      column_type: ATTRIBUTE
+      description: Salary classification band based on annual salary
+  - formula_id: formula_Employee Count
+    name: Employee Count
+    properties:
+      aggregation: SUM
+      column_type: MEASURE
+      description: Total number of employees
+      index_type: DONT_INDEX
+      synonym_type: USER_DEFINED
+      synonyms:
+      - Number of Employees
+      - Staff Count
+  - column_id: "EMPLOYEES::SALARY"
+    name: Payroll
+    properties:
+      aggregation: SUM
+      column_type: MEASURE
+      description: Sum of all employee salaries
+      synonym_type: USER_DEFINED
+      synonyms:
+      - Total Compensation
+  - formula_id: formula_Avg Salary
+    name: Avg Salary
+    properties:
+      aggregation: SUM
+      column_type: MEASURE
+      description: Average employee salary
+      index_type: DONT_INDEX
+  - formula_id: formula_Avg Tenure
+    name: Avg Tenure
+    properties:
+      aggregation: SUM
+      column_type: MEASURE
+      description: Average employee tenure in months
+      index_type: DONT_INDEX
+  - formula_id: formula_Total Tenure
+    name: Total Tenure
+    properties:
+      aggregation: SUM
+      column_type: MEASURE
+      description: Total accumulated tenure across all employees in months
+      index_type: DONT_INDEX
+  - formula_id: formula_Avg Headcount Per Company
+    name: Avg Headcount Per Company
+    properties:
+      aggregation: SUM
+      column_type: MEASURE
+      description: Average number of employees per company
+      index_type: DONT_INDEX
+  - formula_id: formula_Max Salary Budget
+    name: Max Salary Budget
+    properties:
+      aggregation: SUM
+      column_type: MEASURE
+      description: Highest total salary budget across all companies
+      index_type: DONT_INDEX
+  description: Company workforce analytics exercising facts, double aggregation, and metric-on-fact resolution Converted from Snowflake Semantic View AGENT_SKILLS.IDENTIFIER_RESOLUTION_TEST.COMPANY_WORKFORCE_SV.
+  formulas:
+  - expr: "diff_months ( today ( ) , [EMPLOYEES::HIRE_DATE] )"
+    id: formula_Tenure Months
+    name: Tenure Months
+    properties:
+      column_type: ATTRIBUTE
+  - expr: "if ( [EMPLOYEES::SALARY] >= 90000 ) then 'Senior' else if ( [EMPLOYEES::SALARY] >= 70000 ) then 'Mid' else 'Junior'"
+    id: formula_Salary Band
+    name: Salary Band
+    properties:
+      column_type: ATTRIBUTE
+  - expr: "count ( [EMPLOYEES::EMPLOYEE_ID] )"
+    id: formula_Employee Count
+    name: Employee Count
+  - expr: "average ( [EMPLOYEES::SALARY] )"
+    id: formula_Avg Salary
+    name: Avg Salary
+  - expr: "average ( [formula_Tenure Months] )"
+    id: formula_Avg Tenure
+    name: Avg Tenure
+  - expr: "sum ( [formula_Tenure Months] )"
+    id: formula_Total Tenure
+    name: Total Tenure
+  - expr: "average ( group_count ( [EMPLOYEES::EMPLOYEE_ID] , [COMPANIES::COMPANY_ID] ) )"
+    id: formula_Avg Headcount Per Company
+    name: Avg Headcount Per Company
+  - expr: "max ( group_sum ( [EMPLOYEES::SALARY] , [COMPANIES::COMPANY_ID] ) )"
+    id: formula_Max Salary Budget
+    name: Max Salary Budget
+  model_tables:
+  - fqn: 5341e282-7259-4727-bb88-c186105a048c
+    id: EMPLOYEES
+    joins:
+    - cardinality: MANY_TO_ONE
+      name: EMPLOYEES_TO_COMPANIES
+      'on': "[EMPLOYEES::COMPANY_ID] = [COMPANIES::COMPANY_ID]"
+      type: LEFT_OUTER
+      with: COMPANIES
+    name: EMPLOYEES
+  - fqn: 829f2a7d-aa1a-4475-ac28-4b3955eea3b7
+    id: COMPANIES
+    name: COMPANIES
   name: Company Workforce
-  description: >-
-    Company workforce analytics exercising facts, double aggregation,
-    and metric-on-fact resolution
   properties:
     is_bypass_rls: false
     join_progressive: true
     spotter_config:
       is_spotter_enabled: true
-  model_tables:
-  - name: COMPANIES
-    fqn: "829f2a7d-aa1a-4475-ac28-4b3955eea3b7"
-    joins:
-    - name: employees_to_companies
-      with: EMPLOYEES
-      on: "[EMPLOYEES::COMPANY_ID] = [COMPANIES::COMPANY_ID]"
-      type: LEFT_OUTER
-      cardinality: ONE_TO_MANY
-  - name: EMPLOYEES
-    fqn: "5341e282-7259-4727-bb88-c186105a048c"
-  formulas:
-  # --- Facts (row-level expressions) ---
-  - id: formula_Tenure Months
-    name: Tenure Months
-    expr: "diff_months ( today () , [EMPLOYEES::HIRE_DATE] )"
-    properties:
-      column_type: MEASURE
-  - id: formula_Salary Band
-    name: Salary Band
-    expr: >-
-      if ( [EMPLOYEES::SALARY] >= 90000 ) then 'Senior'
-      else if ( [EMPLOYEES::SALARY] >= 70000 ) then 'Mid'
-      else 'Junior'
-    properties:
-      column_type: ATTRIBUTE
-  # --- Simple metrics (as formulas to avoid duplicate column_id) ---
-  - id: formula_Headcount
-    name: Headcount
-    expr: "count ( [EMPLOYEES::EMPLOYEE_ID] )"
-    properties:
-      column_type: MEASURE
-  - id: formula_Total Salary
-    name: Total Salary
-    expr: "sum ( [EMPLOYEES::SALARY] )"
-    properties:
-      column_type: MEASURE
-  - id: formula_Avg Salary
-    name: Avg Salary
-    expr: "average ( [EMPLOYEES::SALARY] )"
-    properties:
-      column_type: MEASURE
-  # --- Metric-on-fact (reference fact by formula id, NOT display name) ---
-  - id: formula_Avg Tenure
-    name: Avg Tenure
-    expr: "average ( [formula_Tenure Months] )"
-    properties:
-      column_type: MEASURE
-  - id: formula_Total Tenure
-    name: Total Tenure
-    expr: "sum ( [formula_Tenure Months] )"
-    properties:
-      column_type: MEASURE
-  # --- Double aggregation (metric-on-metric via group_* shorthands) ---
-  - id: formula_Avg Headcount Per Company
-    name: Avg Headcount Per Company
-    expr: "average ( group_count ( [EMPLOYEES::EMPLOYEE_ID] , [COMPANIES::COMPANY_ID] ) )"
-    properties:
-      column_type: MEASURE
-  - id: formula_Max Salary Budget
-    name: Max Salary Budget
-    expr: "max ( group_sum ( [EMPLOYEES::SALARY] , [COMPANIES::COMPANY_ID] ) )"
-    properties:
-      column_type: MEASURE
-  columns:
-  # --- COMPANIES dimensions ---
-  - name: Company Id
-    column_id: COMPANIES::COMPANY_ID
-    properties:
-      column_type: ATTRIBUTE
-  - name: Company Name
-    column_id: COMPANIES::COMPANY_NAME
-    description: The registered company name
-    properties:
-      column_type: ATTRIBUTE
-      synonyms:
-      - Organisation
-      synonym_type: USER_DEFINED
-  - name: Founded Date
-    column_id: COMPANIES::FOUNDED_DATE
-    description: Date the company was founded
-    properties:
-      column_type: ATTRIBUTE
-  - name: Headquarters City
-    column_id: COMPANIES::HEADQUARTERS_CITY
-    description: City where the company headquarters is located
-    properties:
-      column_type: ATTRIBUTE
-      synonyms:
-      - City
-      - HQ City
-      - Location
-      synonym_type: USER_DEFINED
-  - name: Industry
-    column_id: COMPANIES::INDUSTRY
-    description: Industry classification of the company
-    properties:
-      column_type: ATTRIBUTE
-  # --- EMPLOYEES dimensions ---
-  - name: Employee Id
-    column_id: EMPLOYEES::EMPLOYEE_ID
-    properties:
-      column_type: ATTRIBUTE
-  - name: Employee Name
-    column_id: EMPLOYEES::EMPLOYEE_NAME
-    description: Full name of the employee
-    properties:
-      column_type: ATTRIBUTE
-      synonyms:
-      - Name
-      - Staff Member
-      synonym_type: USER_DEFINED
-  - name: Hire Date
-    column_id: EMPLOYEES::HIRE_DATE
-    description: Date the employee was hired
-    properties:
-      column_type: ATTRIBUTE
-  - name: Department
-    column_id: EMPLOYEES::DEPARTMENT
-    description: Department the employee belongs to
-    properties:
-      column_type: ATTRIBUTE
-      synonyms:
-      - Team
-      - Division
-      synonym_type: USER_DEFINED
-  # --- Fact formula columns ---
-  - name: Tenure Months
-    formula_id: formula_Tenure Months
-    description: Number of months since the employee was hired
-    properties:
-      column_type: MEASURE
-      index_type: DONT_INDEX
-  - name: Salary Band
-    formula_id: formula_Salary Band
-    description: Salary classification band based on annual salary
-    properties:
-      column_type: ATTRIBUTE
-  # --- Simple metric formula columns ---
-  - name: Headcount
-    formula_id: formula_Headcount
-    description: Total number of employees
-    properties:
-      column_type: MEASURE
-      index_type: DONT_INDEX
-      synonyms:
-      - Employee Count
-      - Number of Employees
-      - Staff Count
-      synonym_type: USER_DEFINED
-  - name: Total Salary
-    formula_id: formula_Total Salary
-    description: Sum of all employee salaries
-    properties:
-      column_type: MEASURE
-      index_type: DONT_INDEX
-      synonyms:
-      - Payroll
-      - Total Compensation
-      synonym_type: USER_DEFINED
-  - name: Avg Salary
-    formula_id: formula_Avg Salary
-    description: Average employee salary
-    properties:
-      column_type: MEASURE
-      index_type: DONT_INDEX
-  # --- Metric-on-fact formula columns ---
-  - name: Avg Tenure
-    formula_id: formula_Avg Tenure
-    description: Average employee tenure in months
-    properties:
-      column_type: MEASURE
-      index_type: DONT_INDEX
-  - name: Total Tenure
-    formula_id: formula_Total Tenure
-    description: Total accumulated tenure across all employees in months
-    properties:
-      column_type: MEASURE
-      index_type: DONT_INDEX
-  # --- Double aggregation formula columns ---
-  - name: Avg Headcount Per Company
-    formula_id: formula_Avg Headcount Per Company
-    description: Average number of employees per company
-    properties:
-      column_type: MEASURE
-      index_type: DONT_INDEX
-  - name: Max Salary Budget
-    formula_id: formula_Max Salary Budget
-    description: Highest total salary budget across all companies
-    properties:
-      column_type: MEASURE
-      index_type: DONT_INDEX
 ```
 
 ---
 
 ## Verification
 
-Exported model after import confirms all 9 formulas, 18 columns, 1 join, and Spotter
-enabled. Formula expressions round-trip correctly through export.
-
 | Check | Result |
 |---|---|
-| Formulas count | 9 (2 facts + 3 simple + 2 metric-on-fact + 2 double agg) |
+| Formulas count | 8 (2 facts + 2 simple + 2 metric-on-fact + 2 double agg) |
 | Columns count | 18 (9 dimensions + 2 facts + 3 simple metrics + 2 metric-on-fact + 2 double agg) |
-| Joins | COMPANIES → EMPLOYEES (LEFT_OUTER on COMPANY_ID) |
+| Joins | EMPLOYEES → COMPANIES (LEFT_OUTER on COMPANY_ID, MANY_TO_ONE) |
 | Spotter | enabled |
-| Synonyms preserved | Company Name (1), Headquarters City (3), Employee Name (2), Department (2), Headcount (3), Total Salary (2) |
+| Dangling `[formula_*]` references | **0 of 8** (`ts tml lint` clean, I13 included) |
+| Synonyms preserved | Company (1), City (2), Name (1), Team (1), Employee Count (2), Payroll (1) |
 | Descriptions preserved | 13 columns |
+| Live import | `--policy VALIDATE_ONLY` on `se-thoughtspot` 2026-07-30 → `status_code: OK`, nothing persisted |
+
+---
+
+## Re-verification — 2026-07-30
+
+Re-running this example's own DDL through `parse-sv → translate-formulas → build-model`
+found **4 of its 8 formulas dangling** (BL-178; `docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`
+F9). The regression was introduced by the v1.17.0 rewire onto deterministic CLI commands
+(2026-07-22), which postdated the 2026-06-13 verification, and it is now fixed
+(ts-cli v0.126.0). The pre-fix output was **confirmed to be a hard import failure**, not a
+silently-broken measure — the open question the review could not settle:
+
+```
+$ ts tml import --file 'Company Workforce.model.tml' --policy VALIDATE_ONLY --create-new
+error_code 14516  status_code ERROR
+Formula addition failed. Formula: Avg Tenure, Error: Search did not find
+"formula_tenure_months )" in your data or metadata. Expecting one of the valid
+keywords, such as, "(", "-", "abs" etc..
+```
+
+The same command on the post-fix output returns `status_code: OK`. The dangling-reference
+class is now gated by `ts tml lint` invariant **I13** (BL-183), which fires on the pre-fix
+TML with exactly those 4 findings.
+
+**The output above is the 2026-07-30 output, and it differs from the 2026-06-13 baseline
+in four places. Only the first is BL-178's fix; the other three are later documented
+features acting on a stale document, not regressions:**
+
+| Divergence from 2026-06-13 | Cause | Verdict |
+|---|---|---|
+| `average ( [formula_Tenure Months] )` / `sum ( [formula_Tenure Months] )` restored, and the two double-aggregation metrics now emit `group_count` / `group_sum` instead of dangling refs | BL-178 fix | **the regression, repaired** — matches the 2026-06-13 baseline exactly |
+| 6 of 18 display names changed (`Company Name`→`Company`, `Headquarters City`→`City`, `Employee Name`→`Name`, `Department`→`Team`, `Headcount`→`Employee Count`, `Total Salary`→`Payroll`), and the corresponding formula ids with them | first-synonym→display-name promotion, coverage row 14, landed **2026-06-15** — two days after the baseline | current documented behaviour; the baseline names predate it. Whether the promotion is *right* on a foreign SV is **BL-179**, open |
+| `Payroll` is a `column_id` entry with `aggregation: SUM` rather than a `formula_Total Salary` formula, so the formula count is 8 not 9 | duplicate-`column_id` → formula promotion, coverage row 29 / ts-cli v0.92.0 (2026-07-24): the FIRST occupant of a `TABLE::col` keeps the `column_id` and later ones are promoted. `EMPLOYEES::SALARY` is claimed by `Payroll` first, so `Avg Salary` is the one promoted | current documented behaviour |
+| `Tenure Months` is `ATTRIBUTE`, not `MEASURE` | facts are classified `ATTRIBUTE` unconditionally, coverage row 16 | current behaviour; that it is *wrong* is **BL-181**, open |
+
+Nothing was persisted by the re-verification: an object search for `Company Workforce%`
+returned 0 rows before and after, and the guid the `VALIDATE_ONLY` response echoed
+(`3e36b8b0-…`) does not exist on the instance.
 
 ---
 
@@ -414,6 +437,26 @@ using `aggregation:` on a `columns[]` entry creates a duplicate `column_id`. Mov
 metric to a `formulas[]` entry eliminates this. The `COUNT(EMPLOYEE_ID)` metric and the
 `Employee Id` dimension both reference `EMPLOYEES::EMPLOYEE_ID` — the metric must be a
 formula.
+
+### 2b. The reference and the minted id must come from ONE naming function
+
+The `formula_` id is derived from the construct's **display name** (first synonym, else
+the title-cased declared name). Anything that emits a reference to that formula must call
+the *same* function that mints the id, not re-derive the name. When they diverged, the
+resolver emitted `[formula_tenure_months]` against a declared `formula_Tenure Months`, and
+every metric in this model became unimportable — with `ts tml lint` and `check_tml.py` both
+reporting clean (BL-178, 2026-07-22 → 2026-07-30). `sv_translate.display_title` /
+`construct_formula_id` is now that single function, and `sv_build_model` imports it rather
+than restating the rule. Invariant **I13** gates the outcome.
+
+### 2c. A passthrough fact is a column, not a formula
+
+Resolution step 1 (physical column) comes before step 2 (fact). A fact whose right-hand
+side is a bare physical-column reference merely *aliases* that column, so it is emitted as
+a `columns[]` entry and a reference to it must be `[TABLE::col]`. Both facts in this
+example are computed, so both correctly take step 2 — which is exactly why this example
+did not surface the inverted order on its own, and a Cortex-Analyst-shaped SV (every fact
+a passthrough) did.
 
 ### 3. `if()` conditions require parentheses
 

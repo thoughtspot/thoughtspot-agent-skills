@@ -123,6 +123,77 @@ def _parsed_workforce():
     }
 
 
+def _parsed_passthrough_fact():
+    """Parsed SV with a passthrough fact and a computed fact on one table.
+
+    The passthrough fact (`expr is None`) aliases a physical column; the computed
+    fact is a genuine formula. BL-178 defect 1 hinges on the two resolving
+    differently.
+    """
+    return {
+        "view_name": "TPCDS.PUBLIC.PROBE", "database": "TPCDS",
+        "schema": "PUBLIC", "name": "PROBE", "comment": None,
+        "tables": [
+            {"fqn": "TPCDS.PUBLIC.STORE_SALES", "name": "STORE_SALES",
+             "alias": "store_sales", "primary_key": ["SS_ITEM_SK"],
+             "comment": None, "synonyms": None, "sample_values": None,
+             "is_enum": False, "subquery": None, "range_constraints": None},
+        ],
+        "relationships": [],
+        "dimensions": [],
+        "facts": [
+            {"source_table": "STORE_SALES",
+             "source_column": "ss_ext_sales_price",
+             "alias_table": "store_sales",
+             "alias_name": "ss_ext_sales_price",
+             "expr": None, "block": "facts", "comment": None,
+             "synonyms": None, "sample_values": None, "is_enum": False,
+             "is_filter": False, "is_private": False,
+             "cortex_search_service": None},
+            {"source_table": "STORE_SALES", "source_column": "net_line",
+             "alias_table": "store_sales", "alias_name": "net_line",
+             "expr": "store_sales.ss_ext_sales_price - 1",
+             "block": "facts", "comment": None, "synonyms": None,
+             "sample_values": None, "is_enum": False, "is_filter": False,
+             "is_private": False, "cortex_search_service": None},
+        ],
+        "metrics": [],
+        "custom_instructions": None, "verified_queries": [],
+        "extension": None, "warnings": [], "unsupported": [],
+    }
+
+
+def _parsed_cyclic_metrics():
+    """Two related tables whose metrics reference each other (invalid SV, but a
+    hand-written DDL can express it). Guards step 3's nested resolver."""
+    def _m(table, name, expr):
+        return {"source_table": table.upper(), "source_column": name,
+                "alias_table": table, "alias_name": name, "expr": expr,
+                "block": "metrics", "comment": None, "synonyms": None,
+                "sample_values": None, "is_enum": False, "is_filter": False,
+                "is_private": False, "cortex_search_service": None}
+    return {
+        "view_name": "DB.S.CYCLE", "database": "DB", "schema": "S",
+        "name": "CYCLE", "comment": None,
+        "tables": [
+            {"fqn": "DB.S.A", "name": "A", "alias": "a", "primary_key": ["A_ID"],
+             "comment": None, "synonyms": None, "sample_values": None,
+             "is_enum": False, "subquery": None, "range_constraints": None},
+            {"fqn": "DB.S.B", "name": "B", "alias": "b", "primary_key": ["B_ID"],
+             "comment": None, "synonyms": None, "sample_values": None,
+             "is_enum": False, "subquery": None, "range_constraints": None},
+        ],
+        "relationships": [
+            {"name": "B_TO_A", "from_table": "B", "from_column": "A_ID",
+             "to_table": "A", "to_column": "A_ID", "join_type": "equi"},
+        ],
+        "dimensions": [], "facts": [],
+        "metrics": [_m("a", "M_A", "SUM(b.M_B)"), _m("b", "M_B", "SUM(a.M_A)")],
+        "custom_instructions": None, "verified_queries": [],
+        "extension": None, "warnings": [], "unsupported": [],
+    }
+
+
 def _parsed_semi_additive():
     """Parsed SV with semi-additive metrics."""
     return {
@@ -350,15 +421,70 @@ class TestResolver:
             "[COMPANIES::COMPANY_NAME]"
 
     def test_fact_reference(self):
+        # BL-178 defect 2: the reference must be the `id` build-model mints —
+        # `formula_<display title>` — not `formula_<sql token>`. Ground truth:
+        # ts-from-snowflake-identifier-resolution.md:233.
         parsed = _parsed_workforce()
         resolver = make_resolver(parsed, "employees")
         assert resolver("employees.tenure_months") == \
-            "[formula_tenure_months]"
+            "[formula_Tenure Months]"
 
     def test_metric_reference(self):
+        # Same-table metric-on-metric: no relationship to group over, so the
+        # reference is the inner metric's formula id (first synonym wins the
+        # display title, hence "Employee Count" for HEADCOUNT).
         parsed = _parsed_workforce()
         resolver = make_resolver(parsed, "employees")
-        assert resolver("employees.headcount") == "[formula_headcount]"
+        assert resolver("employees.headcount") == "[formula_Employee Count]"
+
+    def test_passthrough_fact_resolves_to_physical_column(self):
+        """BL-178 defect 1 — documented resolution order is physical-column-first.
+
+        A fact whose expression IS a physical column (`expr` is None) aliases
+        that column: step 1 of ts-from-snowflake-rules.md:585-593 applies and the
+        reference must be `[TABLE::col]`. The pre-fix code checked the fact index
+        first and emitted a formula id for a construct build-model emits as a
+        plain `columns[]` entry — every TPC-DS measure dangled as a result.
+        """
+        parsed = _parsed_passthrough_fact()
+        resolver = make_resolver(parsed, "store_sales")
+        assert resolver("store_sales.ss_ext_sales_price") == \
+            "[STORE_SALES::ss_ext_sales_price]"
+
+    def test_computed_fact_still_resolves_to_formula_id(self):
+        # The counterpart to the test above: only a *passthrough* fact takes
+        # step 1. A computed fact is a formula and keeps step 2.
+        parsed = _parsed_passthrough_fact()
+        resolver = make_resolver(parsed, "store_sales")
+        assert resolver("store_sales.net_line") == "[formula_Net Line]"
+
+    def test_cyclic_metric_reference_terminates(self):
+        """A cyclic SV must not recurse forever in step 3's nested resolver.
+
+        Step 3 builds a resolver for the inner metric's own expression, so
+        A-over-B-over-A would recurse without the `_resolving` guard. The guard
+        bounds the nesting and breaks the cycle into a formula-id reference — a
+        wrong answer for invalid input, never a crash, and never a dangling ref.
+        """
+        parsed = _parsed_cyclic_metrics()
+        resolver = make_resolver(parsed, "a")
+        out = resolver("b.M_B")            # terminates
+        assert "[formula_M B]" in out      # the cycle broke into an id ref
+        assert out.count("group_aggregate") == 2  # bounded, not runaway
+        # the whole translate pass completes rather than raising RecursionError
+        assert translate_sv_formulas(parsed)["stats"]["translated"] == 2
+
+    def test_metric_on_metric_across_relationship_double_aggregates(self):
+        """Step 3 — a metric reference across a relationship becomes `group_*`.
+
+        Ground truth: ts-from-snowflake-rules.md "Double Aggregation
+        (Metric-on-Metric)" and ts-from-snowflake-identifier-resolution.md:244.
+        The grouping key is the PK on the parent (TO) side.
+        """
+        parsed = _parsed_workforce()
+        resolver = make_resolver(parsed, "companies")
+        assert resolver("employees.headcount") == (
+            "group_count ( [EMPLOYEES::EMPLOYEE_ID] , [COMPANIES::COMPANY_ID] )")
 
     def test_unknown_alias_raises(self):
         parsed = _parsed_workforce()
@@ -446,8 +572,10 @@ class TestTranslateWorkforce:
                       if t["name"] == "AVG_TENURE")
         assert metric["output_kind"] == "formula"
         assert metric["column_type"] == "MEASURE"
-        assert "[formula_tenure_months]" in metric["ts_expr"]
-        assert "average" in metric["ts_expr"]
+        # BL-178 defect 2: the reference is the id build-model mints, so this
+        # asserts the full expression rather than a substring — a wrong-token
+        # reference passed the old substring check for five weeks.
+        assert metric["ts_expr"] == "average ( [formula_Tenure Months] )"
 
 
 # ---------------------------------------------------------------------------

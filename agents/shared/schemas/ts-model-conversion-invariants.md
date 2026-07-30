@@ -1,16 +1,17 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found; I13 added and live-verified 2026-07-30 on se-thoughtspot — error_code 14516 on a dangling [formula_*] reference, BL-178/BL-183) -->
 
 # ThoughtSpot Model Conversion Invariants
 
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I12, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I13, N1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
 > Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7),
 > `ts-convert-from-databricks-mv` (I1–I7), and `ts-convert-from-tableau` (I9–I10, verified
-> 2026-06-19 against se-thoughtspot; I12, verified 2026-07-23 against se-thoughtspot).
+> 2026-06-19 against se-thoughtspot; I12, verified 2026-07-23 against se-thoughtspot; I13,
+> verified 2026-07-30 against se-thoughtspot).
 > They are proven against live ThoughtSpot imports; violations produce the failure modes
 > listed below.
 
@@ -414,6 +415,66 @@ columns:
   column_id: REGION       # WRONG — bare column_id, rejected at import
   properties:
     column_type: ATTRIBUTE
+```
+
+---
+
+### I13 — Every `[formula_*]` reference must match a declared `formulas[].id`
+
+**Rule:** Every bracket reference of the form `[formula_X]` — in a `formulas[].expr` or
+as a `columns[].formula_id` — must match an `id` declared in the same document's
+`formulas[]`. I9 mandates the id *form*; this invariant says the id you used has to
+exist.
+
+**Failure mode:** Live-verified 2026-07-30 (se-thoughtspot, `--policy VALIDATE_ONLY`):
+a Model whose `formula_Avg Tenure` expression read `average ( [formula_tenure_months] )`
+while the declared id was `formula_Tenure Months` fails with
+
+```
+error_code 14516
+Formula addition failed. Formula: Avg Tenure, Error: Search did not find
+"formula_tenure_months )" in your data or metadata. Expecting one of the valid
+keywords, such as, "(", "-", "abs" etc..
+```
+
+So the outcome is a **hard import rejection**, not a silently-broken measure. The
+platform treats an unresolvable bracket reference as search tokens, which is why the
+error text quotes the token stream rather than the id.
+
+**Applies to:** All source dialects. The class is generic — any converter that mints a
+formula id in one code path and emits references to it from another can diverge. The
+from-Snowflake converter did exactly that between 2026-07-22 and 2026-07-30 (BL-178):
+the resolver emitted `[formula_<sql_token>]` while the builder declared
+`id: formula_<display title>`, so **every** metric reference dangled and every gate —
+`ts tml lint`, `check_tml.py`, and `build-model`'s own `lint_findings` — reported clean.
+The structural fix is to have one function own the naming, and have anything that must
+*predict* a minted id call it (`sv_translate.display_title` /
+`construct_formula_id`).
+
+**Gated by:** `ts tml lint` (`tml_lint._check_dangling_formula_refs`) and
+`tools/validate/check_tml.py`, both purely structural over a single document — no live
+instance and no judgment required.
+
+**Correct:**
+```yaml
+formulas:
+- id: formula_Tenure Months
+  name: Tenure Months
+  expr: "diff_months ( today ( ) , [EMPLOYEES::HIRE_DATE] )"
+- id: formula_Avg Tenure
+  name: Avg Tenure
+  expr: "average ( [formula_Tenure Months] )"   # matches the declared id exactly
+```
+
+**Wrong (do NOT do this):**
+```yaml
+formulas:
+- id: formula_Tenure Months
+  name: Tenure Months
+  expr: "diff_months ( today ( ) , [EMPLOYEES::HIRE_DATE] )"
+- id: formula_Avg Tenure
+  name: Avg Tenure
+  expr: "average ( [formula_tenure_months] )"   # WRONG — no such id; import fails
 ```
 
 ---
