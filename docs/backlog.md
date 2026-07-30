@@ -143,7 +143,6 @@ are roughly ordered by value÷effort.
 | BL-111 | `--connection` filter: converter rewiring (remaining) | — |
 | BL-112 | Rewire smoke_ts_audit.py onto `ts audit run/report` | — |
 | BL-116 | Live destructive dependency-manager smoke | — |
-| BL-171 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
 | ~~BL-132~~ | ~~from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake)~~ | DONE (PR #332) |
 | ~~BL-133~~ | ~~`ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing)~~ | DONE (PR #333, #335) |
 
