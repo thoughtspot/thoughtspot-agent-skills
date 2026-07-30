@@ -87,6 +87,7 @@ jobs:
           # Internal-import + repo-hygiene gates (2026-07-29 audit findings 4.2/1.1/1.2).
           python3 tools/validate/check_internal_imports.py --root .
           python3 tools/validate/check_repo_hygiene.py --root .
+          python3 tools/validate/check_backlog_integrity.py --root .
           # Quality gates catalog — soft baseline check here (the catalog includes
           # git-log dates that shift when any validator is touched by a contributor
           # PR, so a hard gate on every PR would force every contributor to

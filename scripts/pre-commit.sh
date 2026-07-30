@@ -100,6 +100,12 @@ run_check "version sync"         "tools/validate/check_version_sync.py --root $R
 # being gated to a staged-file pattern.
 run_check "repo hygiene"         "tools/validate/check_repo_hygiene.py --root $REPO_ROOT"
 
+# Backlog integrity — duplicate BL ids, dangling BL citations, conflict markers.
+# Runs unconditionally rather than gated to a staged-file pattern: rules 2 and 3
+# are whole-tree queries (`git grep` / `git ls-files`), and the failure it exists
+# to catch arrives via a MERGE, where the staged set is not a reliable signal.
+run_check "backlog integrity"    "tools/validate/check_backlog_integrity.py --root $REPO_ROOT"
+
 # Complexity ratchet on staged Python (soft-skips if radon isn't installed locally;
 # enforced fully in CI). Blocks new/worsening god-functions; legacy is baselined.
 if echo "$STAGED" | grep -q '\.py$'; then
