@@ -10,7 +10,10 @@ Mapped: **Mapped** (deterministic) · **Approximated** (mapped with a caveat).
 
 | Construct | Status | Notes |
 |---|---|---|
-| `SUM/AVERAGE/MIN/MAX/COUNT/DISTINCTCOUNT` | Mapped | direct aggregation (`DISTINCTCOUNT` → `unique_count`) |
+| `SUM/AVERAGE/MIN/MAX/COUNT/DISTINCTCOUNT` | Mapped | direct aggregation (`DISTINCTCOUNT` → `unique count` — with a SPACE; `unique_count` is rejected by the parser, fixed in ts-cli v0.126.1, BL-171) |
+| `TRIM` / `UPPER` / `LOWER` | Mapped | `sql_string_op("TRIM({0})", …)` pass-through — none of the three exists as a ThoughtSpot function (BL-170/BL-171); bare names were emitted until ts-cli v0.126.1. Emitted forms live-verified on se-thoughtspot 2026-07-30 |
+| `YEAR` / `MONTH` / `DAY` / `HOUR` / `QUARTER` | Mapped | `year` / `month_number` / `day` / `hour_of_day` / `quarter_number`. `MONTH` previously emitted `month` (the month **name**, not 1-12) and `HOUR` emitted a non-existent `hour` — both fixed in ts-cli v0.126.1 (BL-171) |
+| `MINUTE` / `SECOND` | Flagged | ThoughtSpot has no minute/second extractor (live-verified 2026-07-30) and the warehouse dialect isn't known at this layer, so these flag NEEDS REVIEW rather than emit a speculative `sql_int_op` template (BL-171) |
 | Arithmetic, operators, `DIVIDE` | Mapped | `DIVIDE` → `safe_divide` |
 | `IF` / nested `IF` | Mapped | → conditional expressions |
 | `CALCULATE(<agg>, FILTER/cond)` | Approximated | → `sum_if`; verify vs Power BI |

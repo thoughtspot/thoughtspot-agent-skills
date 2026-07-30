@@ -289,6 +289,14 @@ def make_resolver(
        a passthrough metric is skipped outright (it carries no aggregation), so in
        neither case does a formula exist to reference. An identifier no
        fact/metric declares is assumed physical and resolves the same way.
+    1b. DIMENSION -> still the physical-column layer, so part of step 1, but it
+       is a **declared** construct and its shape decides the target: see
+       :func:`_dimension_ref` for the three-way split (passthrough -> the column
+       ``alias_name`` names; bare-column rename -> the column the EXPRESSION
+       names; computed -> ``[formula_<id>]``). It is probed after the
+       fact/metric indexes and before the assumed-physical fallback — a renamed
+       dimension that skipped this branch emitted a column that does not exist
+       (the second half of BL-178; cross-index ambiguity is BL-195).
     2. FACT -> ``[formula_<id>]``, the id build-model mints (see
        :func:`construct_formula_id`) — NOT the SQL token, and not the bare
        display name.

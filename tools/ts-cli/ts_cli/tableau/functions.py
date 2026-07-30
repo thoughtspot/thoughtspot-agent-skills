@@ -44,10 +44,11 @@ def _build_function_map() -> list[tuple[re.Pattern, Any]]:
         # String
         (r"\bCONTAINS\s*\(", "contains ( "),
         (r"\bLEN\s*\(", "strlen ( "),
-        (r"\bTRIM\s*\(", "trim ( "),
-        # REPLACE is handled specially — see _ARG_HANDLERS. `replace(...)` is
-        # NOT a real ThoughtSpot formula function (live-confirmed invalid);
-        # it must go through the sql_string_op pass-through form instead.
+        # TRIM/LTRIM/RTRIM and REPLACE are handled specially — see
+        # _ARG_HANDLERS. None of `trim`, `ltrim`, `rtrim` or `replace` is a
+        # real ThoughtSpot formula function (live-verified 2026-07-29 +
+        # 2026-07-30 on se-thoughtspot, error_code 14516 — BL-170/BL-171);
+        # each must go through the sql_string_op pass-through form instead.
 
         # LEFT/RIGHT/MID are handled specially
         (r"\bLEFT\s*\(", "_LEFT_HANDLER"),
@@ -154,6 +155,13 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("MID", lambda a: f"substr ( {a[0]} , {a[1]} - 1 , {a[2]} )" if len(a) == 3 else None),
     ("UPPER", lambda a: f'sql_string_op ( "UPPER({{0}})" , {a[0]} )' if len(a) == 1 else None),
     ("LOWER", lambda a: f'sql_string_op ( "LOWER({{0}})" , {a[0]} )' if len(a) == 1 else None),
+    # BL-171 — `trim`/`ltrim`/`rtrim` do NOT exist in ThoughtSpot (live-verified
+    # 2026-07-29 + 2026-07-30, se-thoughtspot; rejected with error_code 14516,
+    # the same signature UPPER/LOWER produce). Same pass-through treatment;
+    # forms per tableau-formula-translation.md's TRIM/LTRIM/RTRIM rows.
+    ("TRIM", lambda a: f'sql_string_op ( "TRIM({{0}})" , {a[0]} )' if len(a) == 1 else None),
+    ("LTRIM", lambda a: f'sql_string_op ( "LTRIM({{0}})" , {a[0]} )' if len(a) == 1 else None),
+    ("RTRIM", lambda a: f'sql_string_op ( "RTRIM({{0}})" , {a[0]} )' if len(a) == 1 else None),
     ("STARTSWITH", lambda a: f"( strpos ( {a[0]} , {a[1]} ) = 1 )" if len(a) == 2 else None),
     ("ENDSWITH", lambda a: (
         f"( substr ( {a[0]} , strlen ( {a[0]} ) - strlen ( {a[1]} ) , strlen ( {a[1]} ) ) = {a[1]} )"

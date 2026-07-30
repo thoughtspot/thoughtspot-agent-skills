@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.formula_common import wrap_passthrough_calls
+
 # Presence of any of these makes the whole measure NEEDS REVIEW: they manipulate
 # filter context / iterate / do time intelligence and have no 1:1 TS formula.
 _DAX_REVIEW = {
@@ -26,18 +28,40 @@ _DAX_REVIEW = {
 }
 
 # DAX function -> ThoughtSpot function (1:1, deterministic).
+#
+# BL-171: every value here must be a ThoughtSpot function that EXISTS, or a
+# _PASSTHROUGH key (an intermediate marker rewritten before emission). The
+# previous map emitted bare `trim`, `upper`, `lower`, `hour`, `minute`,
+# `second` and `unique_count`, none of which the formula parser accepts — each
+# is rejected with `Search did not find "<fn> ("`, error_code 14516
+# (live-verified 2026-07-30, se-thoughtspot). `month` existed but returns the
+# month NAME; DAX MONTH() is numeric, so the target is `month_number`.
 _DAX_FUNC = {
     "sum": "sum", "average": "average", "min": "min", "max": "max",
-    "count": "count", "counta": "count", "distinctcount": "unique_count",
+    "count": "count", "counta": "count", "distinctcount": "unique count",
     "abs": "abs", "round": "round", "int": "floor",  # DAX INT rounds toward -inf = floor.
     # NB: DAX TRUNC truncates toward zero (TRUNC(-2.5) = -2), which floor gets wrong for
     # negatives; there is no 1:1 ThoughtSpot equivalent, so TRUNC is left unmapped and flagged.
     "ceiling": "ceil", "floor": "floor",
     "sqrt": "sqrt", "exp": "exp", "power": "pow", "mod": "mod", "sign": "sign",
-    "year": "year", "month": "month", "day": "day", "hour": "hour",
-    "minute": "minute", "second": "second", "quarter": "quarter_number",
+    "year": "year", "month": "month_number", "day": "day",
+    "hour": "hour_of_day", "quarter": "quarter_number",
+    # MINUTE / SECOND are deliberately absent: ThoughtSpot has no minute or
+    # second extractor, and the warehouse dialect isn't known at this layer, so
+    # a sql_int_op template would be a guess. They flag as unmapped instead.
     "upper": "upper", "lower": "lower", "len": "strlen", "trim": "trim",
     "isblank": "isnull",
+}
+
+# Functions with NO ThoughtSpot equivalent: marker (lowercase, as produced by
+# _DAX_FUNC) -> (sql_*_op, SQL template, arity). Rewritten by
+# wrap_passthrough_calls after name mapping, so the marker never reaches an
+# emitted formula. Templates are double-quoted, per
+# thoughtspot-formula-patterns.md § SQL Pass-Through.
+_PASSTHROUGH = {
+    "upper": ("sql_string_op", "UPPER({0})", 1),
+    "lower": ("sql_string_op", "LOWER({0})", 1),
+    "trim": ("sql_string_op", "TRIM({0})", 1),
 }
 
 _FUNC_CALL = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)\s*\(")  # incl. dotted names (PERCENTILE.INC)
@@ -349,6 +373,17 @@ def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_
     expr, reason = _map_known_functions(expr)
     if reason:
         return None, "NEEDS REVIEW", reason
+
+    # BL-171: rewrite the no-equivalent markers (trim/upper/lower) into
+    # sql_string_op pass-throughs. An unresolved marker means the call arity
+    # didn't match the template, so flag it rather than emit a bare name the
+    # ThoughtSpot parser rejects.
+    expr, unresolved = wrap_passthrough_calls(expr, _PASSTHROUGH, quote='"')
+    if unresolved:
+        return None, "NEEDS REVIEW", (
+            "unmapped call arity for " + ", ".join(sorted(unresolved))
+            + " (no native ThoughtSpot equivalent; needs a sql_*_op "
+              "pass-through)")
 
     expr = _qualify_home_and_dates(expr, home_table, home_cols, date_cols)
     expr = re.sub(r"\s+", " ", expr).strip()

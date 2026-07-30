@@ -88,8 +88,10 @@ class TestSimpleRenames:
         assert result == "contains ( [A::NAME] , 'test' )"
 
     def test_starts_with(self):
+        # BL-171: `starts_with` is NOT a ThoughtSpot function (live-verified
+        # 2026-07-29 + 2026-07-30, se-thoughtspot) — compose from strpos.
         result = translate_sql_expr("STARTSWITH(a.NAME, 'A')", _resolve)
-        assert result == "starts_with ( [A::NAME] , 'A' )"
+        assert result == "( strpos ( [A::NAME] , 'A' ) = 1 )"
 
     def test_round(self):
         result = translate_sql_expr("ROUND(a.VAL, 2)", _resolve)
@@ -123,6 +125,64 @@ class TestSimpleRenames:
     def test_median(self):
         assert translate_sql_expr("MEDIAN(a.X)", _resolve) == \
             "median ( [A::X] )"
+
+
+# ---------------------------------------------------------------------------
+# BL-171 — string functions that do NOT exist in ThoughtSpot
+#
+# `trim`, `ltrim`, `rtrim`, `replace`, `starts_with` and `ends_with` are all
+# absent from the ThoughtSpot formula parser (live-verified 2026-07-29 and
+# re-verified 2026-07-30 on se-thoughtspot; each is rejected with
+# `Search did not find "<fn> ("`, error_code 14516). The replacement forms
+# below are the rows in ts-snowflake-formula-translation.md (String
+# Functions) and were each verified to import in the same probe pass.
+# ---------------------------------------------------------------------------
+
+_NON_EXISTENT = ("trim (", "ltrim (", "rtrim (", "replace (",
+                 "starts_with (", "ends_with (")
+
+
+class TestNonExistentStringFunctions:
+    def test_trim_pass_through(self):
+        assert translate_sql_expr("TRIM(a.NAME)", _resolve) == \
+            'sql_string_op ( "TRIM({0})" , [A::NAME] )'
+
+    def test_ltrim_pass_through(self):
+        assert translate_sql_expr("LTRIM(a.NAME)", _resolve) == \
+            'sql_string_op ( "LTRIM({0})" , [A::NAME] )'
+
+    def test_rtrim_pass_through(self):
+        assert translate_sql_expr("RTRIM(a.NAME)", _resolve) == \
+            'sql_string_op ( "RTRIM({0})" , [A::NAME] )'
+
+    def test_replace_pass_through(self):
+        assert translate_sql_expr("REPLACE(a.NAME, 'a', 'b')", _resolve) == \
+            'sql_string_op ( "REPLACE({0}, {1}, {2})" , [A::NAME] , ' \
+            "'a' , 'b' )"
+
+    def test_ends_with_composition(self):
+        assert translate_sql_expr("ENDSWITH(a.NAME, 'Z')", _resolve) == (
+            "( substr ( [A::NAME] , strlen ( [A::NAME] ) - strlen ( 'Z' ) "
+            ", strlen ( 'Z' ) ) = 'Z' )")
+
+    def test_no_bare_non_existent_name_is_ever_emitted(self):
+        """The whole point of BL-171: no source function may translate to one
+        of the six bare names, which fail at import (error 14516)."""
+        sources = [
+            "TRIM(a.NAME)", "LTRIM(a.NAME)", "RTRIM(a.NAME)",
+            "REPLACE(a.NAME, 'a', 'b')", "STARTSWITH(a.NAME, 'A')",
+            "ENDSWITH(a.NAME, 'Z')",
+            "UPPER(TRIM(a.NAME))", "CONCAT(TRIM(a.FIRST), a.LAST)",
+        ]
+        for src in sources:
+            out = translate_sql_expr(src, _resolve)
+            for bad in _NON_EXISTENT:
+                assert bad not in out, f"{src} -> {out} emits {bad!r}"
+
+    def test_nested_trim_inside_upper(self):
+        assert translate_sql_expr("UPPER(TRIM(a.NAME))", _resolve) == (
+            'sql_string_op ( "UPPER({0})" , '
+            'sql_string_op ( "TRIM({0})" , [A::NAME] ) )')
 
 
 # ---------------------------------------------------------------------------

@@ -244,30 +244,30 @@
     "Category": "Conditional / Logical",
     "Qlik Sense Formula": "Match(expr, val1, val2, ...)",
     "Qlik Example": "Match(Region, 'West', 'East')",
-    "ThoughtSpot Equivalent": "col in (val1, val2, ...)",
-    "ThoughtSpot Example": "region in ('West', 'East')",
+    "ThoughtSpot Equivalent": "col in {val1, val2, ...}",
+    "ThoughtSpot Example": "region in {'EMEA', 'APAC'}",
     "Comments / Context": "Qlik Match() returns position of match (1-based). ThoughtSpot uses the 'in' operator for membership testing — simpler and more readable.",
-    "status": "ok"
+    "status": "corrected"
   },
   {
     "#": "CL07",
     "Category": "Conditional / Logical",
     "Qlik Sense Formula": "Not Match(expr, val1, val2)",
     "Qlik Example": "Not Match(Region, 'West', 'East')",
-    "ThoughtSpot Equivalent": "col not in (val1, val2, ...)",
-    "ThoughtSpot Example": "region not in ('West', 'East')",
+    "ThoughtSpot Equivalent": "not ( col in {val1, val2, ...} )",
+    "ThoughtSpot Example": "not ( region in {'EMEA'} )",
     "Comments / Context": "ThoughtSpot uses 'not in' operator directly. Qlik uses Not around Match().",
-    "status": "ok"
+    "status": "corrected"
   },
   {
     "#": "CL08",
     "Category": "Conditional / Logical",
     "Qlik Sense Formula": "Mixmatch(expr, val1, val2)",
     "Qlik Example": "Mixmatch(region, 'west', 'WEST')",
-    "ThoughtSpot Equivalent": "lower(col) in (lower(val1), ...)",
-    "ThoughtSpot Example": "lower(region) in ('west')",
+    "ThoughtSpot Equivalent": "sql_bool_op ( \"LOWER({0}) IN (LOWER({1}), LOWER({2}))\" , col , val1 , val2 )",
+    "ThoughtSpot Example": "sql_bool_op ( \"LOWER({0}) IN (LOWER({1}), LOWER({2}))\" , region , 'emea' , 'apac' )",
     "Comments / Context": "Qlik Mixmatch is case-insensitive Match. ThoughtSpot uses lower() on both sides to simulate.",
-    "status": "ok"
+    "status": "corrected"
   },
   {
     "#": "CL09",
@@ -684,10 +684,10 @@
     "Category": "Script / Load (Qlik-specific)",
     "Qlik Sense Formula": "MapSubString(mapname, expr)",
     "Qlik Example": "MapSubString('CodeMap', ProductCode)",
-    "ThoughtSpot Equivalent": "replace(col, old, new)",
-    "ThoughtSpot Example": "replace(product_code, 'OLD', 'NEW')",
+    "ThoughtSpot Equivalent": "sql_string_op('REPLACE({0}, {1}, {2})', col, old, new)",
+    "ThoughtSpot Example": "sql_string_op('REPLACE({0}, {1}, {2})', status, 'A', 'Active')",
     "Comments / Context": "Qlik replaces substrings using a mapping table. ThoughtSpot's replace() substitutes fixed values; for complex mappings use ETL.",
-    "status": "ok"
+    "status": "corrected"
   },
   {
     "#": "SC07",
@@ -744,10 +744,10 @@
     "Category": "Date",
     "Qlik Sense Formula": "Quarter(date)",
     "Qlik Example": "Quarter(OrderDate)",
-    "ThoughtSpot Equivalent": "quarter(date_col)",
-    "ThoughtSpot Example": "quarter(order_date)",
-    "Comments / Context": "Direct equivalent. Both return quarter number (1-4).",
-    "status": "ok"
+    "ThoughtSpot Equivalent": "quarter_number(date_col)",
+    "ThoughtSpot Example": "quarter_number(order_date)",
+    "Comments / Context": "Both return quarter number (1-4). ThoughtSpot spells it `quarter_number`; a bare `quarter()` does not exist (live-verified 2026-07-30 -- BL-171).",
+    "status": "corrected"
   },
   {
     "#": "D05",
@@ -784,30 +784,30 @@
     "Category": "Date",
     "Qlik Sense Formula": "Hour(time)",
     "Qlik Example": "Hour(Timestamp)",
-    "ThoughtSpot Equivalent": "hour(date_col)",
-    "ThoughtSpot Example": "hour(order_timestamp)",
-    "Comments / Context": "Direct equivalent. Both extract the hour (0-23) from a datetime column.",
-    "status": "ok"
+    "ThoughtSpot Equivalent": "hour_of_day(date_col)",
+    "ThoughtSpot Example": "hour_of_day(created_at)",
+    "Comments / Context": "Both extract the hour (0-23). ThoughtSpot spells it `hour_of_day`; a bare `hour()` does not exist (live-verified 2026-07-30 -- BL-171).",
+    "status": "corrected"
   },
   {
     "#": "D09",
     "Category": "Date",
     "Qlik Sense Formula": "Minute(time)",
     "Qlik Example": "Minute(Timestamp)",
-    "ThoughtSpot Equivalent": "minute(date_col)",
-    "ThoughtSpot Example": "minute(order_timestamp)",
-    "Comments / Context": "Direct equivalent. Both extract the minute (0-59).",
-    "status": "ok"
+    "ThoughtSpot Equivalent": "sql_int_op('MINUTE({0})', col)",
+    "ThoughtSpot Example": "sql_int_op('MINUTE({0})', created_at)",
+    "Comments / Context": "Qlik Minute() extracts the minute. ThoughtSpot has NO minute extractor (live-verified 2026-07-30 -- BL-171) -- push it to the warehouse with a sql_int_op pass-through.",
+    "status": "corrected"
   },
   {
     "#": "D10",
     "Category": "Date",
     "Qlik Sense Formula": "Second(time)",
     "Qlik Example": "Second(Timestamp)",
-    "ThoughtSpot Equivalent": "second(date_col)",
-    "ThoughtSpot Example": "second(order_timestamp)",
-    "Comments / Context": "Direct equivalent. Both extract seconds (0-59).",
-    "status": "ok"
+    "ThoughtSpot Equivalent": "sql_int_op('SECOND({0})', col)",
+    "ThoughtSpot Example": "sql_int_op('SECOND({0})', created_at)",
+    "Comments / Context": "Qlik Second() extracts seconds. ThoughtSpot has NO second extractor (live-verified 2026-07-30 -- BL-171) -- sql_int_op pass-through.",
+    "status": "corrected"
   },
   {
     "#": "D11",
@@ -974,10 +974,10 @@
     "Category": "Date",
     "Qlik Sense Formula": "DayStart(date)",
     "Qlik Example": "DayStart(OrderDate)",
-    "ThoughtSpot Equivalent": "date_trunc(date_col, 'day')",
-    "ThoughtSpot Example": "date_trunc(order_date, 'day')",
-    "Comments / Context": "Qlik DayStart() returns midnight of the given date. ThoughtSpot date_trunc to 'day' is the equivalent.",
-    "status": "verify"
+    "ThoughtSpot Equivalent": "date(date_col)",
+    "ThoughtSpot Example": "date(created_at)",
+    "Comments / Context": "Qlik DayStart() returns midnight of the given date. ThoughtSpot's `date()` truncates a timestamp to its date; `date_trunc()` does NOT exist (live-verified 2026-07-30 -- BL-171).",
+    "status": "corrected"
   },
   {
     "#": "D28",
@@ -1074,10 +1074,10 @@
     "Category": "String",
     "Qlik Sense Formula": "Len(str)",
     "Qlik Example": "Len(ProductName)",
-    "ThoughtSpot Equivalent": "len(col)",
-    "ThoughtSpot Example": "len(product_name)",
-    "Comments / Context": "Direct equivalent. Both return the character length of the string.",
-    "status": "ok"
+    "ThoughtSpot Equivalent": "strlen(col)",
+    "ThoughtSpot Example": "strlen(customer_name)",
+    "Comments / Context": "ThoughtSpot's string-length function is `strlen` -- there is no `len()` (live-verified 2026-07-30, se-thoughtspot -- BL-171).",
+    "status": "corrected"
   },
   {
     "#": "S02",
@@ -1114,30 +1114,30 @@
     "Category": "String",
     "Qlik Sense Formula": "Trim(str)",
     "Qlik Example": "Trim(CustomerName)",
-    "ThoughtSpot Equivalent": "trim(col)",
-    "ThoughtSpot Example": "trim(customer_name)",
+    "ThoughtSpot Equivalent": "sql_string_op('TRIM({0})', col)",
+    "ThoughtSpot Example": "sql_string_op('TRIM({0})', customer_name)",
     "Comments / Context": "Direct equivalent. Removes leading and trailing whitespace.",
-    "status": "ok"
+    "status": "corrected"
   },
   {
     "#": "S06",
     "Category": "String",
     "Qlik Sense Formula": "LTrim(str)",
     "Qlik Example": "LTrim(text)",
-    "ThoughtSpot Equivalent": "No direct equivalent",
-    "ThoughtSpot Example": "No left-only trim in ThoughtSpot — use trim() for both sides",
+    "ThoughtSpot Equivalent": "sql_string_op('LTRIM({0})', col)",
+    "ThoughtSpot Example": "sql_string_op('LTRIM({0})', customer_name)",
     "Comments / Context": "Qlik LTrim() removes only leading spaces. ThoughtSpot trim() removes both sides — no left-only trim available.",
-    "status": "ok"
+    "status": "corrected"
   },
   {
     "#": "S07",
     "Category": "String",
     "Qlik Sense Formula": "RTrim(str)",
     "Qlik Example": "RTrim(text)",
-    "ThoughtSpot Equivalent": "No direct equivalent",
-    "ThoughtSpot Example": "No right-only trim in ThoughtSpot — use trim() for both sides",
+    "ThoughtSpot Equivalent": "sql_string_op('RTRIM({0})', col)",
+    "ThoughtSpot Example": "sql_string_op('RTRIM({0})', customer_name)",
     "Comments / Context": "Qlik RTrim() removes only trailing spaces. ThoughtSpot trim() removes both sides — no right-only trim available.",
-    "status": "ok"
+    "status": "corrected"
   },
   {
     "#": "S08",
@@ -1154,10 +1154,10 @@
     "Category": "String",
     "Qlik Sense Formula": "Right(str, n)",
     "Qlik Example": "Right(Code, 3)",
-    "ThoughtSpot Equivalent": "substr(col, len(col)-n+1, n)",
-    "ThoughtSpot Example": "substr(code, len(code)-2, 3)",
-    "Comments / Context": "Qlik has dedicated Right(). ThoughtSpot combines substr() and len() to extract trailing characters.",
-    "status": "ok"
+    "ThoughtSpot Equivalent": "substr(col, strlen(col)-n+1, n)",
+    "ThoughtSpot Example": "substr(customer_name, strlen(customer_name)-3+1, 3)",
+    "Comments / Context": "Qlik has dedicated Right(). ThoughtSpot combines substr() and `strlen` -- there is no `len()` (live-verified 2026-07-30 -- BL-171).",
+    "status": "corrected"
   },
   {
     "#": "S10",
@@ -1174,10 +1174,10 @@
     "Category": "String",
     "Qlik Sense Formula": "Replace(str, old, new)",
     "Qlik Example": "Replace(Name, 'Inc', 'LLC')",
-    "ThoughtSpot Equivalent": "replace(col, old, new)",
-    "ThoughtSpot Example": "replace(name, 'Inc', 'LLC')",
+    "ThoughtSpot Equivalent": "sql_string_op('REPLACE({0}, {1}, {2})', col, old, new)",
+    "ThoughtSpot Example": "sql_string_op('REPLACE({0}, {1}, {2})', product_code, '-', '')",
     "Comments / Context": "Direct equivalent. Both replace all occurrences of a substring.",
-    "status": "ok"
+    "status": "corrected"
   },
   {
     "#": "S12",
@@ -1214,10 +1214,10 @@
     "Category": "String",
     "Qlik Sense Formula": "PurgeChar(str, chars)",
     "Qlik Example": "PurgeChar(Phone, '()-')",
-    "ThoughtSpot Equivalent": "replace(replace(replace(col,'(',''),')',''),'-','')",
-    "ThoughtSpot Example": "replace(replace(replace(phone,'(',''),')',''),'-','')",
+    "ThoughtSpot Equivalent": "sql_string_op ( \"REPLACE(REPLACE(REPLACE({0}, '(', ''), ')', ''), '-', '')\" , col )",
+    "ThoughtSpot Example": "sql_string_op ( \"REPLACE(REPLACE(REPLACE({0}, '(', ''), ')', ''), '-', '')\" , phone )",
     "Comments / Context": "Qlik PurgeChar() removes a set of specified characters in one call. ThoughtSpot requires chained replace() calls — one per character.",
-    "status": "ok"
+    "status": "corrected"
   },
   {
     "#": "S16",
@@ -1294,20 +1294,20 @@
     "Category": "String",
     "Qlik Sense Formula": "N/A — use WildMatch(str, 'prefix*')",
     "Qlik Example": "WildMatch(Email, 'user*')",
-    "ThoughtSpot Equivalent": "starts_with(col, prefix)",
-    "ThoughtSpot Example": "starts_with(email, 'user')",
+    "ThoughtSpot Equivalent": "strpos(col, prefix) = 1",
+    "ThoughtSpot Example": "strpos(product_code, 'AB') = 1",
     "Comments / Context": "ThoughtSpot has dedicated starts_with(). Qlik uses WildMatch with * at end: WildMatch(str, 'prefix*').",
-    "status": "ok"
+    "status": "corrected"
   },
   {
     "#": "S24",
     "Category": "String",
     "Qlik Sense Formula": "N/A — use WildMatch(str, '*.suffix')",
     "Qlik Example": "WildMatch(Email, '*.com')",
-    "ThoughtSpot Equivalent": "ends_with(col, suffix)",
-    "ThoughtSpot Example": "ends_with(email, '.com')",
+    "ThoughtSpot Equivalent": "substr(col, strlen(col) - strlen(suffix), strlen(suffix)) = suffix",
+    "ThoughtSpot Example": "substr(file_name, strlen(file_name) - strlen('.csv'), strlen('.csv')) = '.csv'",
     "Comments / Context": "ThoughtSpot has dedicated ends_with(). Qlik uses WildMatch with * at start: WildMatch(str, '*.suffix').",
-    "status": "ok"
+    "status": "corrected"
   },
   {
     "#": "S25",
@@ -1424,10 +1424,10 @@
     "Category": "Numeric / Math",
     "Qlik Sense Formula": "Exp(x)",
     "Qlik Example": "Exp(1)",
-    "ThoughtSpot Equivalent": "No direct equivalent",
-    "ThoughtSpot Example": "Use pow(2.71828, x) as approximation",
-    "Comments / Context": "Qlik Exp() returns e raised to the power of x. ThoughtSpot has no Exp() — approximate with pow(2.71828, x).",
-    "status": "verify"
+    "ThoughtSpot Equivalent": "exp(col)",
+    "ThoughtSpot Example": "exp(growth_rate)",
+    "Comments / Context": "Qlik Exp() returns e raised to the power of x. ThoughtSpot `exp()` DOES exist (live-verified 2026-07-30, se-thoughtspot -- BL-171); the previous 'no direct equivalent' claim was wrong.",
+    "status": "corrected"
   },
   {
     "#": "N10",

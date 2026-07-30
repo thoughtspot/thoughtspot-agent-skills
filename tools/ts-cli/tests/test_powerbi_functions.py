@@ -14,9 +14,12 @@ def test_simple_sum():
 
 
 def test_distinctcount_maps_to_unique_count():
+    # BL-171: the ThoughtSpot function is `unique count` — with a SPACE.
+    # `unique_count(` is rejected with error_code 14516 (live-verified
+    # 2026-07-30, se-thoughtspot). Only the *_if variants use an underscore.
     expr, status, _ = translate_dax("DISTINCTCOUNT('BU'[BU])")
     assert status == "Migrated"
-    assert expr == "unique_count([BU::BU])"
+    assert expr == "unique count([BU::BU])"
 
 
 def test_divide_to_safe_divide():
@@ -88,3 +91,81 @@ def test_unknown_function_needs_review():
     assert expr is None
     assert status == "NEEDS REVIEW"
     assert "FOOBAR" in note
+
+
+# ---------------------------------------------------------------------------
+# BL-171 — DAX functions whose ThoughtSpot target does not exist
+#
+# `trim`, `upper`, `lower` (live-disproved 2026-06-13 / 2026-07-29, re-verified
+# 2026-07-30 on se-thoughtspot) become sql_string_op pass-throughs; `hour`,
+# `minute`, `second` and `unique_count` were also being emitted as bare names
+# that the formula parser rejects with error_code 14516.
+# ---------------------------------------------------------------------------
+
+_DISPROVED = ("trim(", "upper(", "lower(", "hour(", "minute(", "second(",
+              "unique_count(", "month(")
+
+
+def _assert_clean(expr):
+    for bad in _DISPROVED:
+        assert bad not in expr, f"{expr!r} emits the non-existent {bad!r}"
+
+
+def test_trim_pass_through():
+    expr, status, _ = translate_dax("TRIM(Employee[Name])")
+    assert status == "Migrated"
+    assert expr == 'sql_string_op("TRIM({0})", [Employee::Name])'
+
+
+def test_upper_pass_through():
+    expr, status, _ = translate_dax("UPPER(Employee[Name])")
+    assert status == "Migrated"
+    assert expr == 'sql_string_op("UPPER({0})", [Employee::Name])'
+
+
+def test_lower_pass_through():
+    expr, status, _ = translate_dax("LOWER(Employee[Name])")
+    assert status == "Migrated"
+    assert expr == 'sql_string_op("LOWER({0})", [Employee::Name])'
+
+
+def test_nested_upper_trim():
+    expr, status, _ = translate_dax("UPPER(TRIM(Employee[Name]))")
+    assert status == "Migrated"
+    assert expr == ('sql_string_op("UPPER({0})", '
+                    'sql_string_op("TRIM({0})", [Employee::Name]))')
+
+
+def test_hour_maps_to_hour_of_day():
+    expr, status, _ = translate_dax("HOUR(Employee[Start])")
+    assert status == "Migrated"
+    assert expr == "hour_of_day([Employee::Start])"
+
+
+def test_month_maps_to_month_number():
+    # DAX MONTH() returns 1-12; ThoughtSpot `month()` returns the month NAME —
+    # `month_number()` is the numeric one.
+    expr, status, _ = translate_dax("MONTH(Employee[Start])")
+    assert status == "Migrated"
+    assert expr == "month_number([Employee::Start])"
+
+
+def test_minute_and_second_are_flagged_not_faked():
+    # ThoughtSpot has no minute/second extractor at all (live-verified
+    # 2026-07-30) and the warehouse dialect is unknown here, so flag rather
+    # than emit a speculative pass-through.
+    for dax in ("MINUTE(Employee[Start])", "SECOND(Employee[Start])"):
+        expr, status, note = translate_dax(dax)
+        assert expr is None, dax
+        assert status == "NEEDS REVIEW"
+        assert "unmapped" in note
+
+
+def test_no_disproved_name_ever_emitted():
+    for dax in ("TRIM(Employee[Name])", "UPPER(Employee[Name])",
+                "LOWER(Employee[Name])", "UPPER(TRIM(Employee[Name]))",
+                "DISTINCTCOUNT(Employee[Name])", "HOUR(Employee[Start])",
+                "MONTH(Employee[Start])", "TRIM(Employee[a]) & 'x'"):
+        expr, _status, _note = translate_dax(dax)
+        if expr is not None:
+            _assert_clean(expr)

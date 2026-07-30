@@ -1,8 +1,10 @@
-<!-- currency: qlik — 2026-07 (Qlik Sense SaaS / ThoughtSpot Cloud 26.x) -->
+<!-- currency: qlik — 2026-07 (Qlik Sense SaaS / ThoughtSpot Cloud 26.x; every ThoughtSpot name in this file audited end-to-end and live-probed on se-thoughtspot 2026-07-30 per BL-171 — `len`/`mid`/`ceiling`/`power`/`log`/`quarter`/`hour`/`minute`/`second`/`day_of_month`/`date_trunc_*`/`unique_count` confirmed ABSENT; `exp`/`sign`/`to_bool`/`to_date`/`group_*` confirmed present) -->
 
 # Qlik Sense → ThoughtSpot Formula Translation
 
 The canonical Qlik→ThoughtSpot formula mapping — **199 rows** across 17 categories. This is the human-readable rendering; the machine-readable source that `ts qlik build-model` loads is `tools/ts-cli/ts_cli/qlik/data/qlik_ts_formula_map.json`.
+
+**The two must stay in step.** BL-170 corrected eleven rows here and left the JSON untouched, so the CLI kept serving the pre-correction mapping for a day — `tests/test_qlik_functions.py::TestSharedReferenceSync` now asserts every row's ThoughtSpot column and status match between the two files.
 
 The `ts-convert-from-qlik` skill consults this reference before declaring any Qlik expression untranslatable.
 
@@ -10,9 +12,9 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 
 | Status | Count |
 |---|---|
-| `ok` | 186 |
-| `corrected` | 10 |
-| `verify` | 3 |
+| `ok` | 169 |
+| `corrected` | 29 |
+| `verify` | 1 |
 
 ---
 
@@ -134,13 +136,13 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | D01 | `Year(date)` | `year(date_col)` | ok | Direct equivalent. Both extract the 4-digit year from a date column. |
 | D02 | `Month(date)` | `month(date_col)` | ok | Qlik returns month name (e.g. 'Jan'). ThoughtSpot returns numeric month (1-12) by default. |
 | D03 | `Day(date)` | `day(date_col)` | ok | Direct equivalent. Both extract the day of month (1-31). |
-| D04 | `Quarter(date)` | `quarter(date_col)` | ok | Direct equivalent. Both return quarter number (1-4). |
+| D04 | `Quarter(date)` | `quarter_number(date_col)` | corrected | Both return quarter number (1-4). ThoughtSpot spells it `quarter_number`; a bare `quarter()` does not exist (live-verified 2026-07-30, se-thoughtspot — BL-171). |
 | D05 | `Week(date)` | `week_number_of_year(date_col)` | ok | Both return ISO week number. Naming differs: Qlik uses Week(); ThoughtSpot uses week_number_of_year(). |
 | D06 | `Weekday(date)` | `day_of_week(date_col)` | ok | Qlik returns a number (0=Mon, 6=Sun). ThoughtSpot returns the day name (e.g. 'Monday'). |
 | D07 | `WeekYear(date)` | `year(date_col)` | ok | Qlik returns the year the ISO week belongs to (can differ near year boundaries). ThoughtSpot year() returns calendar year — may differ for week 53. |
-| D08 | `Hour(time)` | `hour(date_col)` | ok | Direct equivalent. Both extract the hour (0-23) from a datetime column. |
-| D09 | `Minute(time)` | `minute(date_col)` | ok | Direct equivalent. Both extract the minute (0-59). |
-| D10 | `Second(time)` | `second(date_col)` | ok | Direct equivalent. Both extract seconds (0-59). |
+| D08 | `Hour(time)` | `hour_of_day(date_col)` | corrected | Both extract the hour (0-23). ThoughtSpot spells it `hour_of_day`; a bare `hour()` does not exist (live-verified 2026-07-30 — BL-171). |
+| D09 | `Minute(time)` | `sql_int_op('MINUTE({0})', col)` | corrected | ThoughtSpot has **no minute extractor** (live-verified 2026-07-30 — BL-171: `minute (` is rejected). Push it to the warehouse with a `sql_int_op` pass-through, the same treatment `ts_cli/sv_sql.py` and `mv_sql.py` give SQL `MINUTE()`. |
+| D10 | `Second(time)` | `sql_int_op('SECOND({0})', col)` | corrected | ThoughtSpot has **no second extractor** (live-verified 2026-07-30 — BL-171). `sql_int_op` pass-through, as D09. |
 | D11 | `Today()` | `today()` | ok | Direct equivalent. Both return today's date with no time component. |
 | D12 | `Now()` | `now()` | ok | Direct equivalent. Both return the current date and time as a timestamp. |
 | D13 | `MonthStart(date)` | `start_of_month(date_col)` | ok | Both return the first day of the month. Different naming but identical behavior. |
@@ -157,7 +159,7 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | D24 | `NetworkDays(start, end)` | `diff_days(date1, date2)` | corrected | Qlik NetworkDays() excludes weekends and optionally holidays. ThoughtSpot date_diff() returns total calendar days only — no business day logic. |
 | D25 | `Date(expr, format)` | `to_date(col, format)` | ok | Both convert a value to a date. Format strings differ: Qlik uses 'YYYY-MM-DD'; ThoughtSpot uses strftime '%Y-%m-%d'. |
 | D26 | `Timestamp(expr, format)` | `to_date(col, format)` | ok | Qlik Timestamp() formats a datetime as a string. ThoughtSpot uses to_date() for parsing strings into dates. |
-| D27 | `DayStart(date)` | `date_trunc(date_col, 'day')` | verify | Qlik DayStart() returns midnight of the given date. ThoughtSpot date_trunc to 'day' is the equivalent. |
+| D27 | `DayStart(date)` | `date(date_col)` | corrected | Qlik DayStart() returns midnight of the given date. ThoughtSpot's `date()` truncates a timestamp to its date; **`date_trunc()` does not exist** (catalog marks it absent; `date_trunc_month`/`_year`/`_quarter`/`_week` were live-disproved 2026-07-30 — BL-171). |
 | D28 | `MakeDate(year, month, day)` | `to_date(concat(to_string(y),'-',to_string(m),'-',to_string(d)), '%Y-%m-%d')` | ok | Qlik has dedicated MakeDate() to construct a date from parts. ThoughtSpot workaround uses concat + to_date. |
 | D29 | `InYear(date, base_date, year_offset)` | `year(date_col) = year(today())` | ok | Qlik InYear() checks if a date falls in a relative year. ThoughtSpot replicates by comparing year() extractions. |
 | D30 | `InMonth(date, base_date, month_offset)` | `year(date_col) = year(today()) and month(date_col) = month(today())` | ok | Qlik InMonth() checks if a date is in the same month as the base. ThoughtSpot matches both year and month components. |
@@ -172,7 +174,7 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 
 | # | Qlik Sense | ThoughtSpot | Status | Notes |
 |---|---|---|---|---|
-| S01 | `Len(str)` | `len(col)` | ok | Direct equivalent. Both return the character length of the string. |
+| S01 | `Len(str)` | `strlen(col)` | corrected | ThoughtSpot's string-length function is `strlen` — there is no `len()` (live-verified 2026-07-30, se-thoughtspot — BL-171; rejected with `Search did not find "len ("`). |
 | S02 | `Upper(str)` | `sql_string_op('UPPER({0})', col)` | corrected | ThoughtSpot has no native `upper()` in formula context — use the SQL passthrough, same as the Tableau converter's UPPER handling. |
 | S03 | `Lower(str)` | `sql_string_op('LOWER({0})', col)` | corrected | ThoughtSpot has no native `lower()` in formula context — use the SQL passthrough, same as the Tableau converter's LOWER handling. |
 | S04 | `Capitalize(str)` | `No direct equivalent` | ok | Qlik Capitalize() converts to title case. ThoughtSpot has no built-in capitalize — combine upper() on first char and lower() on the rest. |
@@ -180,7 +182,7 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | S06 | `LTrim(str)` | `sql_string_op('LTRIM({0})', col)` | corrected | Qlik LTrim() removes only leading spaces. ThoughtSpot has no native `ltrim()` **and no native `trim()` either** (live-verified 2026-07-29, se-thoughtspot — BL-170), so the passthrough is the mapping — it is also exact, unlike the previously-documented two-sided substitute. |
 | S07 | `RTrim(str)` | `sql_string_op('RTRIM({0})', col)` | corrected | Qlik RTrim() removes only trailing spaces. As S06 — no native `rtrim()` or `trim()` (live-verified 2026-07-29, se-thoughtspot — BL-170); the passthrough is exact. |
 | S08 | `Left(str, n)` | `substr(col, 1, n)` | ok | Qlik has dedicated Left(). ThoughtSpot uses substr() starting at position 1 to replicate Left(). |
-| S09 | `Right(str, n)` | `substr(col, len(col)-n+1, n)` | ok | Qlik has dedicated Right(). ThoughtSpot combines substr() and len() to extract trailing characters. |
+| S09 | `Right(str, n)` | `substr(col, strlen(col)-n+1, n)` | corrected | Qlik has dedicated Right(). ThoughtSpot combines substr() and `strlen` — there is no `len()` (live-verified 2026-07-30 — BL-171). |
 | S10 | `Mid(str, start, n)` | `substr(col, start, n)` | ok | Direct equivalent (different name). Qlik Mid() maps exactly to ThoughtSpot substr(). Both are 1-indexed. |
 | S11 | `Replace(str, old, new)` | `sql_string_op('REPLACE({0}, {1}, {2})', col, old, new)` | corrected | ThoughtSpot has **no native `replace()`** in formula context (live-verified 2026-07-29, se-thoughtspot — BL-170) — use the SQL passthrough. Both replace all occurrences. |
 | S12 | `Index(str, substr, n)` | `No direct equivalent` | verify | Qlik returns position of nth occurrence of a substring. ThoughtSpot has no substring-position function. |
@@ -212,7 +214,7 @@ The `ts-convert-from-qlik` skill consults this reference before declaring any Ql
 | N06 | `Sqrt(x)` | `sqrt(col)` | ok | Direct equivalent. Returns the square root. |
 | N07 | `Log(x)` | `ln(col)` | ok | Qlik Log() is natural log (base e). ThoughtSpot names it ln(). ThoughtSpot also has log10() for base-10. |
 | N08 | `Log10(x)` | `log10(col)` | ok | Direct equivalent. Both return the base-10 logarithm. |
-| N09 | `Exp(x)` | `No direct equivalent` | verify | Qlik Exp() returns e raised to the power of x. ThoughtSpot has no Exp() — approximate with pow(2.71828, x). |
+| N09 | `Exp(x)` | `exp(col)` | corrected | Qlik Exp() returns e raised to the power of x. ThoughtSpot **does** have `exp()` (live-verified 2026-07-30, se-thoughtspot — BL-171); the previous "no direct equivalent" claim was wrong, so no `pow(2.71828, x)` workaround is needed. |
 | N10 | `Mod(x, y)` | `mod(col, divisor)` | ok | Direct equivalent. Returns remainder after division — useful for alternating row logic. |
 | N11 | `Div(x, y)` | `floor(col / divisor)` | ok | Qlik Div() returns integer quotient. ThoughtSpot uses floor(x/y) to replicate integer division. |
 | N12 | `Frac(x)` | `col - floor(col)` | ok | Qlik Frac() returns fractional part (3.75 → 0.75). ThoughtSpot workaround: subtract floor() from the value. |

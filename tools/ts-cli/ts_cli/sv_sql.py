@@ -203,9 +203,11 @@ def _keyword_unit(text: str, cur: _Cursor, resolver,
 _RENAME = {
     "CONCAT": "concat", "LENGTH": "strlen", "SUBSTR": "substr",
     "SUBSTRING": "substr",
-    "TRIM": "trim", "LTRIM": "ltrim", "RTRIM": "rtrim", "REPLACE": "replace",
-    "CONTAINS": "contains", "STARTSWITH": "starts_with",
-    "ENDSWITH": "ends_with",
+    # BL-171: TRIM/LTRIM/RTRIM/REPLACE/STARTSWITH/ENDSWITH deliberately do NOT
+    # live here — none of those ThoughtSpot names exists (live-verified
+    # 2026-07-29/30, se-thoughtspot; error_code 14516). They are handled by
+    # _PASS_THROUGH_HINT and _STRING_COMPOSED below.
+    "CONTAINS": "contains",
     "LEFT": "left", "RIGHT": "right", "LPAD": "lpad", "RPAD": "rpad",
     "REVERSE": "reverse", "REPEAT": "repeat",
     "ABS": "abs", "CEIL": "ceil", "CEILING": "ceil",
@@ -228,6 +230,10 @@ _PASS_THROUGH_HINT = {
     "MINUTE": "sql_int_op", "SECOND": "sql_int_op",
     "DATE_FORMAT": "sql_string_op",
     "INITCAP": "sql_string_op",
+    # BL-171 — no native `trim`/`ltrim`/`rtrim` in ThoughtSpot (live-verified
+    # 2026-07-29 + 2026-07-30, se-thoughtspot). Same treatment as UPPER/LOWER.
+    "TRIM": "sql_string_op", "LTRIM": "sql_string_op",
+    "RTRIM": "sql_string_op",
 }
 _DATE_TRUNC = {"day": "date", "week": "start_of_week",
                "month": "start_of_month", "quarter": "start_of_quarter",
@@ -323,6 +329,8 @@ def _call_with_args(name: str, cur: _Cursor, resolver) -> str:
         fn, n = _ARG_SWAP[name]
         _need(args, n, name)
         return _emit(fn, [args[1], args[0]])
+    if name in _STRING_COMPOSED:
+        return _STRING_COMPOSED[name](args)
     if name in _RENAME:
         return _emit(_RENAME[name], args)
     raise UntranslatableError(
@@ -335,6 +343,40 @@ def _need(args: list[str], n: int, name: str) -> None:
     if len(args) != n:
         raise UntranslatableError(
             f"{name} expects {n} arguments, got {len(args)}")
+
+
+# --- BL-171: string functions with no ThoughtSpot equivalent ----------------
+# `replace`, `starts_with` and `ends_with` are absent from the ThoughtSpot
+# formula parser (live-verified 2026-07-29 + 2026-07-30, se-thoughtspot —
+# each rejected with `Search did not find "<fn> ("`, error_code 14516). The
+# forms below are the String Functions rows of
+# ts-snowflake-formula-translation.md, all three verified to import.
+
+def _call_replace(args: list[str]) -> str:
+    _need(args, 3, "REPLACE")
+    return ('sql_string_op ( "REPLACE({0}, {1}, {2})" , '
+            f"{args[0]} , {args[1]} , {args[2]} )")
+
+
+def _call_starts_with(args: list[str]) -> str:
+    """STARTSWITH(s, p) -> ( strpos ( s , p ) = 1 ) — strpos is 1-indexed."""
+    _need(args, 2, "STARTSWITH")
+    return f"( strpos ( {args[0]} , {args[1]} ) = 1 )"
+
+
+def _call_ends_with(args: list[str]) -> str:
+    """ENDSWITH(s, x) -> a substr/strlen tail comparison."""
+    _need(args, 2, "ENDSWITH")
+    s, suffix = args[0], args[1]
+    return (f"( substr ( {s} , strlen ( {s} ) - strlen ( {suffix} ) , "
+            f"strlen ( {suffix} ) ) = {suffix} )")
+
+
+_STRING_COMPOSED = {
+    "REPLACE": _call_replace,
+    "STARTSWITH": _call_starts_with,
+    "ENDSWITH": _call_ends_with,
+}
 
 
 def _call_args(cur: _Cursor, resolver, agg: str | None = None) -> list[str]:

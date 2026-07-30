@@ -197,6 +197,117 @@ def add_formula_prefix(
 
 
 # ---------------------------------------------------------------------------
+# sql_*_op pass-through rewriting (BL-171)
+# ---------------------------------------------------------------------------
+
+def _split_top_level_args(inner: str) -> list[str]:
+    """Split a call's argument text on top-level commas (quote/paren aware)."""
+    args: list[str] = []
+    depth, quote, cur = 0, None, []
+    for ch in inner:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in "'\"":
+            quote = ch
+            cur.append(ch)
+        elif ch in "([{":
+            depth += 1
+            cur.append(ch)
+        elif ch in ")]}":
+            depth -= 1
+            cur.append(ch)
+        elif ch == "," and depth == 0:
+            args.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(ch)
+    if cur:
+        args.append("".join(cur).strip())
+    return [a for a in args if a != ""]
+
+
+def _close_paren(text: str, open_idx: int) -> int:
+    """Index of the ')' matching the '(' at open_idx, or -1 (quote aware)."""
+    depth, quote = 0, None
+    for i in range(open_idx, len(text)):
+        ch = text[i]
+        if quote:
+            if ch == quote:
+                quote = None
+            continue
+        if ch in "'\"":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def wrap_passthrough_calls(
+    text: str,
+    templates: dict[str, tuple[str, str, int]],
+    quote: str = "'",
+) -> tuple[str, set[str]]:
+    """Rewrite `fn(args...)` into a ThoughtSpot `sql_*_op` pass-through.
+
+    BL-171: a converter that renames a source function to a ThoughtSpot name
+    which does not exist produces a formula rejected at import (error_code
+    14516). For the functions with no ThoughtSpot equivalent — `upper`,
+    `lower`, `trim`, `ltrim`, `rtrim`, `replace` (all live-disproved on
+    se-thoughtspot: 2026-06-13 for the first two, 2026-07-29/30 for the rest)
+    — the translation is a `sql_*_op` pass-through instead.
+
+    `templates` maps a LOWERCASE marker name to `(sql_op, sql_template,
+    arity)`, e.g. ``{"trim": ("sql_string_op", "TRIM({0})", 1)}``. Markers are
+    matched case-SENSITIVELY, and templates are conventionally UPPERCASE, so a
+    rewritten call is never re-matched (no unbounded rescan) while nested
+    occurrences still resolve on the following pass.
+
+    Returns ``(rewritten_text, unresolved)``. `unresolved` holds marker names
+    whose call had the wrong argument count or unbalanced parens: those are
+    left untouched so the caller can flag them for review, because emitting a
+    bare `trim ( )` would fail at import (flag, don't downgrade).
+    """
+    if not templates:
+        return text, set()
+    pattern = re.compile(
+        r"(?<![A-Za-z0-9_])(" + "|".join(
+            sorted((re.escape(k) for k in templates), key=len, reverse=True))
+        + r")\s*\(")
+    unresolved: set[str] = set()
+    search_from = 0
+    guard = 0
+    while guard < 200:
+        guard += 1
+        m = pattern.search(text, search_from)
+        if not m:
+            break
+        name = m.group(1)
+        op, template, arity = templates[name]
+        open_idx = m.end() - 1
+        close_idx = _close_paren(text, open_idx)
+        if close_idx < 0:
+            unresolved.add(name)
+            break
+        args = _split_top_level_args(text[open_idx + 1:close_idx])
+        if len(args) != arity:
+            unresolved.add(name)
+            search_from = m.end()
+            continue
+        replacement = (f"{op}({quote}{template}{quote}, "
+                       + ", ".join(args) + ")")
+        text = text[:m.start()] + replacement + text[close_idx + 1:]
+        search_from = m.start()
+    return text, unresolved
+
+
+# ---------------------------------------------------------------------------
 # Double-aggregation detection
 # ---------------------------------------------------------------------------
 

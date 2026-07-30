@@ -1128,7 +1128,7 @@ model import. A missing formula produces a functional model with reduced coverag
 - `SIZE()` → `sql_int_aggregate_op("COUNT(*) OVER (PARTITION BY ...)")` (answer-level, gated) — see Row-Offset Table Calculations section
 - `REGEXP_EXTRACT`, `REGEXP_MATCH`, `REGEXP_REPLACE`, `FINDNTH` → `sql_*_op()` pass-through (see "Pass-Through Fallback" section); CLI-translated as of ts-cli v0.81.0. `REGEXP_EXTRACT_NTH` remains untranslated (no documented template)
 - `REPLACE(s, old, new)` → `sql_string_op ( "REPLACE({0}, {1}, {2})" , s , old , new )` — re-mapped off the invalid bare `replace(...)` native call (ts-cli v0.81.0; see "Pass-Through Fallback" section)
-- `TRIM(s)` → `sql_string_op ( "TRIM({0})" , s )` — **documented, NOT yet CLI-translated.** `trim` was live-disproved as a native function on 2026-07-29 (BL-170), but `ts_cli/tableau/functions.py` still rewrites `TRIM(` → `trim ( `, which fails at import. Tracked as **BL-171**; until it lands, review any translated formula containing `trim (` by hand.
+- `TRIM(s)` / `LTRIM(s)` / `RTRIM(s)` → `sql_string_op ( "TRIM({0})" / "LTRIM({0})" / "RTRIM({0})" , s )` — CLI-translated as of ts-cli v0.126.1 (BL-171). `trim` was live-disproved as a native function on 2026-07-29 (BL-170); until v0.126.1 `ts_cli/tableau/functions.py` still rewrote `TRIM(` → `trim ( `, which failed at import. The three emitted forms were live-verified on se-thoughtspot 2026-07-30.
 
 ---
 

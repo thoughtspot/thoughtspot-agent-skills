@@ -702,6 +702,40 @@ class TestMapFunctions:
     def test_square(self):
         assert map_functions("SQUARE([X])") == "pow ( [X] , 2 )"
 
+    # --- BL-171: TRIM/LTRIM/RTRIM are not ThoughtSpot functions -------------
+    # Live-verified 2026-07-29 and re-verified 2026-07-30 on se-thoughtspot:
+    # `trim (` is rejected with error_code 14516, exactly as `upper`/`lower`
+    # are. tableau-formula-translation.md rows for TRIM/LTRIM/RTRIM give the
+    # sql_string_op pass-through form below.
+    def test_trim_pass_through(self):
+        assert map_functions("TRIM([Name])") == \
+            'sql_string_op ( "TRIM({0})" , [Name] )'
+
+    def test_ltrim_pass_through(self):
+        assert map_functions("LTRIM([Name])") == \
+            'sql_string_op ( "LTRIM({0})" , [Name] )'
+
+    def test_rtrim_pass_through(self):
+        assert map_functions("RTRIM([Name])") == \
+            'sql_string_op ( "RTRIM({0})" , [Name] )'
+
+    def test_self_nested_trim(self):
+        assert map_functions("TRIM(TRIM([a]))") == \
+            'sql_string_op ( "TRIM({0})" , sql_string_op ( "TRIM({0})" , [a] ) )'
+
+    def test_trim_nested_in_upper(self):
+        assert map_functions("UPPER(TRIM([a]))") == \
+            'sql_string_op ( "UPPER({0})" , sql_string_op ( "TRIM({0})" , [a] ) )'
+
+    def test_no_bare_non_existent_string_fn_emitted(self):
+        for src in ("TRIM([a])", "LTRIM([a])", "RTRIM([a])",
+                    "REPLACE([a], 'x', 'y')", "STARTSWITH([a], 'p')",
+                    "ENDSWITH([a], 's')", "TRIM(UPPER([a]))"):
+            out = map_functions(src)
+            for bad in ("trim (", "ltrim (", "rtrim (", "replace (",
+                        "starts_with (", "ends_with ("):
+                assert bad not in out, f"{src} -> {out} emits {bad!r}"
+
     def test_left_nested_in_if(self):
         assert map_functions("IF LEFT([Code], 1) = 'A' THEN 1 END") == \
             "IF substr ( [Code] , 0 , 1 ) = 'A' THEN 1 END"

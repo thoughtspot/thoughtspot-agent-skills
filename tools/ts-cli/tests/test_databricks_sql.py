@@ -189,6 +189,55 @@ class TestFunctions:
             "[TRANSACTIONS::d] >= to_date ( '2024-05-01' , 'yyyy-MM-dd' )"
 
 
+# ---------------------------------------------------------------------------
+# BL-171 — string functions that do NOT exist in ThoughtSpot
+#
+# `trim`, `ltrim`, `rtrim`, `replace`, `starts_with` and `ends_with` are all
+# absent from the ThoughtSpot formula parser (live-verified 2026-07-29 and
+# re-verified 2026-07-30 on se-thoughtspot; rejected with
+# `Search did not find "<fn> ("`, error_code 14516). Replacement forms are the
+# rows in ts-databricks-formula-translation.md + coverage-matrix #75/#76.
+# ---------------------------------------------------------------------------
+
+class TestNonExistentStringFunctions:
+    def test_trim_pass_through(self):
+        assert t("TRIM(s)") == \
+            'sql_string_op ( "TRIM({0})" , [TRANSACTIONS::s] )'
+
+    def test_ltrim_pass_through(self):
+        assert t("LTRIM(s)") == \
+            'sql_string_op ( "LTRIM({0})" , [TRANSACTIONS::s] )'
+
+    def test_rtrim_pass_through(self):
+        assert t("RTRIM(s)") == \
+            'sql_string_op ( "RTRIM({0})" , [TRANSACTIONS::s] )'
+
+    def test_replace_pass_through(self):
+        assert t("REPLACE(s, 'a', 'b')") == (
+            'sql_string_op ( "REPLACE({0}, {1}, {2})" , '
+            "[TRANSACTIONS::s] , 'a' , 'b' )")
+
+    def test_startswith_composition(self):
+        assert t("STARTSWITH(s, 'A')") == \
+            "( strpos ( [TRANSACTIONS::s] , 'A' ) = 1 )"
+
+    def test_endswith_composition(self):
+        # ENDSWITH had no _RENAME entry at all before BL-171 (unmapped).
+        assert t("ENDSWITH(s, 'Z')") == (
+            "( substr ( [TRANSACTIONS::s] , strlen ( [TRANSACTIONS::s] ) - "
+            "strlen ( 'Z' ) , strlen ( 'Z' ) ) = 'Z' )")
+
+    def test_no_bare_non_existent_name_is_ever_emitted(self):
+        for src in ("TRIM(s)", "LTRIM(s)", "RTRIM(s)",
+                    "REPLACE(s, 'a', 'b')", "STARTSWITH(s, 'A')",
+                    "ENDSWITH(s, 'Z')", "UPPER(TRIM(s))",
+                    "CONCAT(TRIM(a), b)"):
+            out = t(src)
+            for bad in ("trim (", "ltrim (", "rtrim (", "replace (",
+                        "starts_with (", "ends_with ("):
+                assert bad not in out, f"{src} -> {out} emits {bad!r}"
+
+
 class TestCaseWhen:
     def test_single_branch_golden(self):
         # ts-from-databricks.md Measure 6

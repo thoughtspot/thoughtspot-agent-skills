@@ -31,7 +31,11 @@ Use this as the canonical limitations reference.
 | 11 | `If(cond, a, b)` | `if ( cond ) then a else b` | |
 | 12 | Arithmetic / comparison operators | Pass-through | |
 | 13 | Set Analysis — set-literal membership (`{1}` total, `=`/`-` include/exclude of literal values) | Filter predicates on the formula | Only literal/static selection sets; see U1 for `$`-context |
-| 14 | 199-row Qlik→ThoughtSpot function map (`ts_cli/qlik/data/`) | Mapped per row; unmapped functions flagged (see below) | Loaded by `ts qlik build-model` |
+| 14 | 199-row Qlik→ThoughtSpot function map (`ts_cli/qlik/data/`) | Mapped per row; unmapped functions flagged (see below) | Loaded by `ts qlik build-model`. Every ThoughtSpot name in the map was audited end-to-end and live-probed on se-thoughtspot 2026-07-30 (BL-171) |
+| 14a | `Upper` / `Lower` / `Trim` / `LTrim` / `RTrim` / `Replace` | `sql_string_op('UPPER({0})', col)` … `sql_string_op('REPLACE({0}, {1}, {2})', col, old, new)` | **No ThoughtSpot equivalent for any of the six** (BL-170/BL-171). `Trim`/`LTrim`/`RTrim`/`Replace` emitted the bare, non-existent names until ts-cli v0.126.1; emitted forms live-verified 2026-07-30 |
+| 14b | `Len` / `Mid` | `strlen(col)` / `substr(col, start, n)` | `len` and `mid` are **not ThoughtSpot functions at all** — they were identity-mapped until ts-cli v0.126.1 (BL-171), so every affected formula failed at import |
+| 14c | `MonthStart` / `QuarterStart` / `YearStart` / `WeekStart` / `Day` | `start_of_month` / `start_of_quarter` / `start_of_year` / `start_of_week` / `day` | Previously emitted fabricated `date_trunc_month`/`_quarter`/`_year`/`_week` and `day_of_month`, none of which exists (BL-171, live-disproved 2026-07-30) |
+| 14d | `Ceil` / `Pow` / `Log` | `ceil` / `pow` / `ln` | Previously emitted `ceiling`/`power`/`log`, all three rejected by the parser (BL-171, live-disproved 2026-07-30) |
 
 ### Sheets, Charts, Liveboard
 
@@ -52,7 +56,8 @@ wrong-but-valid substitute. The original Qlik expression is retained for the rev
 |---|---|---|---|
 | U1 | Set Analysis with current-selection (`$`) context or `$`-expansion | Selection state is not representable in a static ThoughtSpot model | Flag + recreate intent as a Model formula, parameter, or RLS |
 | U2 | Qlik variables (`Variable.definition`) | No 1:1 target; semantics vary (constant vs expression vs macro) | Always flagged; recreate as a Model formula or parameter if needed |
-| U3 | Functions with no ThoughtSpot equivalent (`subfield`, `networkdays`, `rangesum`, `mode`, …) | No native function; not in the translation map | Flagged unmapped; author a manual formula |
+| U3 | Functions with no ThoughtSpot equivalent (`subfield`, `networkdays`, `rangesum`, `mode`, `Minute`, `Second`, …) | No native function; not in the translation map | Flagged unmapped; author a manual formula (for `Minute`/`Second`, a `sql_int_op` pass-through — see D09/D10 in the mapping reference) |
+| U7 | `Concat(expr, delimiter)` — Qlik's **aggregating** string join | Qlik `Concat()` joins values ACROSS rows (like `GROUP_CONCAT`); ThoughtSpot `concat()` joins within one row (mapping row S14). It was name-mapped to `concat` until ts-cli v0.126.1, producing a valid-but-wrong formula — now flagged (BL-171) | Rebuild by hand; there is no ThoughtSpot string-aggregation function |
 | U4 | Table joins / associations | The offline `.qvf` IR carries no reliable join graph, so `model_tables[].joins` is emitted empty | Add joins by hand, or supply them via `--overrides`; engine-artifacts mode records associations as info notes |
 | U5 | Chart types with no ThoughtSpot equivalent | Defaulted to a grid table | Flagged; pick a chart type after import |
 | U6 | Alternate dimensions, calculated dimensions, and complex in-chart expressions | Only the primary dimensions/measures drive the Answer's search query | Flag + rebuild the visualization in ThoughtSpot |
