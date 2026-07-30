@@ -49,7 +49,7 @@ ts_cli/
     history.py            — match Snowflake QUERY_HISTORY GROUP BY shapes to signatures, producing reweighted signature weights behind `ts aggregate history` (pure functions, no I/O)
   dependency/
     __init__.py          — re-exports mutate.py + backup.py public entry points
-    mutate.py             — REMOVE/REPOINT TML dict transforms (apply_remove/apply_repoint dispatchers + remove_columns_from_*/repoint_* helpers) behind `ts dependency mutate` (pure functions, no I/O; BL-083)
+    mutate.py             — REMOVE/REPOINT TML dict transforms (apply_remove/apply_repoint dispatchers + remove_columns_from_*/repoint_* helpers) behind `ts dependency mutate` (pure functions, no I/O; BL-083). A View's `view_columns[]` binds on **`search_output_column`**, never `column_id` — that field is absent from real View TML (0 of 265 columns across all 42 Views on se-thoughtspot, 2026-07-30 census), and a formula-backed column binds to `formulas[].NAME`, not `formulas[].id`. Reading `column_id` made the formula path entirely dead, so a removed formula left its surfacing column behind as a dangling reference (BL-191). Matching is whole-token via the shared `_references_column`, because the value carries the search output's aggregation/bucket decoration (`Total LINEAMOUNT`, `Month(YM)`) — the same treatment `migrate/rewrite.py` gives the field, deliberately one matcher across both readers
     backup.py             — backup filename/delete-order/v2-type-map/restore-policy/rollback-order/manifest helpers behind `ts dependency backup`/`rollback` (pure functions, no I/O; BL-083)
     apply.py              — drift/obj_id/import-outcome-matrix/verify-body/9c-ordering/set-delete-guard/chart-role decision helpers behind `ts dependency apply-change` (pure functions, no I/O; BL-083 PR2)
   tableau/
@@ -148,7 +148,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.127.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.127.1**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

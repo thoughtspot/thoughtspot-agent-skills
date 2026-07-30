@@ -21,7 +21,7 @@ Status legend:
 | # | Dependency type | What it is | Where it lives | Discoverable? | Detection signal | RENAME action | REMOVE action | Status |
 |---|---|---|---|---|---|---|---|---|
 | 1 | **Model / Worksheet** | Logical model built on tables | own TML (`model:` root) | Yes — v2 dependents bucket `LOGICAL_TABLE` (subtype WORKSHEET) | source GUID in `model_tables[].fqn`; column-name in `columns[].column_id` suffix or `formulas[].expr` | rewrite `column_id` (`TBL::OLD` → `TBL::NEW`) and formula expressions | strip from `columns[]`, drop dependent formulas, drop join_with entries that reference it (open-item #4), drop model-level filters (open-item #12) | Implementable |
-| 2 | **View** | Aggregated/joined view over a model | own TML (`view:` root) | Yes — v2 dependents bucket `LOGICAL_TABLE` (subtype AGGR_WORKSHEET) | column-name in `view_columns[].column_id` or `formulas[].expr` or `search_query` | update `column_id` suffix, formula expressions, and `search_query` tokens; also `search_output_column` if it diverges from `name` (open-item #10 layer C) | strip `view_columns[]`, drop formulas, sanitize `search_query`, drop joins | Implementable |
+| 2 | **View** | Aggregated/joined view over a model | own TML (`view:` root) | Yes — v2 dependents bucket `LOGICAL_TABLE` (subtype AGGR_WORKSHEET) | column-name in `view_columns[].search_output_column` (**not** `column_id` — absent from real View TML, see the note below) or `formulas[].expr` or `search_query` | update `search_output_column` **preserving its aggregation/bucket decoration** (`Total X`, `Month(X)`), formula expressions, and `search_query` tokens; leave `name` alone unless the label itself is being renamed | strip `view_columns[]` (matched on `search_output_column`, decoration-aware), drop formulas **and the `view_columns[]` entries that surface them** (matched on `formulas[].name`), sanitize `search_query` — **twice**: once for the removed columns and again for the formulas the removal cascades into, since a View names its formulas in the search string by id — drop joins | Implementable (transitive formula chains: BL-198) |
 | 3 | **Answer** | Saved search result | own TML (`answer:` root) | Yes — v2 dependents bucket `QUESTION_ANSWER_BOOK` | column-name in `answer_columns[].name`, `chart.chart_columns[].column_id`, `chart.axis_configs[].{x,y,color,size,shape}`, `formulas[].expr`, `search_query`, `cohorts[].config.anchor_column_id` | rewrite all of the above | strip column from `answer_columns`, axis bindings (color/size/shape only — x/y require chart removal decision), formulas, search_query, and answer-level cohorts | Implementable |
 | 4 | **Liveboard** | Pinboard composed of viz | own TML (`liveboard:` root) | Yes — v2 dependents bucket `PINBOARD_ANSWER_BOOK` | same as Answer (each viz embeds an `answer:` block); plus liveboard-level `filters[].column[]` | apply Answer-level rewrites to each affected viz; rewrite `filters[].column[]` | per-viz REMOVE_COLUMN / REMOVE_COLOR_BINDING / REMOVE_CHART decisions (skill Step 6); drop liveboard-level filters whose column list goes to zero | Implementable |
 | 5 | **Set / Cohort** | Reusable filter group | own TML (`cohort:` root); read via v2 dependents `COHORT` bucket on the source | Yes — v2 dependents `COHORT` bucket (NOT a valid SearchMetadataType — query the source, then read its consumers via the Set's own GUID with `LOGICAL_COLUMN`) | `config.anchor_column_id` (primary anchor), or column appears in `pass_thru_filter`, `groups[].conditions[].column_name`, or embedded `cohort.answer.search_query` | rewrite `anchor_column_id`, `return_column_id`, `groups[].conditions[].column_name`, `pass_thru_filter.{include,exclude}_column_ids`, embedded answer | DELETE if anchor matches (set is invalidated); FIX (strip references) if column is only in body | Implementable |
@@ -34,6 +34,31 @@ Status legend:
 | 12 | **Column-level ACLs** (sharing) | Who can MODIFY/READ this specific column | ORM records keyed by column GUID; fetched via `POST /api/rest/2.0/security/metadata/fetch-permissions` with `type: LOGICAL_COLUMN` | Yes — v2 endpoint works | not needed — ACLs are GUID-keyed and column GUIDs survive renames | none — ACLs follow the column automatically | none — orphaned ACLs become inert when the column is dropped | GUID-stable — no skill action needed |
 | 13 | **Schedule** (scheduled report delivery) | Cron-driven PDF/XLSX export of a Liveboard | `POST /api/rest/2.0/schedules/search` | Yes — but doesn't reference columns; it references the Liveboard as a whole | Liveboard GUID in `metadata.id` | not applicable — schedules don't reference columns | informational only — schedule still runs after column removal but the rendered output may be missing data | Informational |
 | 14 | **Connection** | Source of base tables | own TML | Yes — but never affected by a column-level operation on a table or model | not applicable | none | none — column changes don't propagate up to the connection | Informational |
+
+### A note on type #2 — a View column is bound by `search_output_column`, not `column_id`
+
+This row said `column_id` until 2026-07-31, and so did the code behind it. **A real View
+has no `column_id`.** The 2026-07-30 TML property census
+([`docs/reviews/2026-07-30-tml-census.md`](../../../../docs/reviews/2026-07-30-tml-census.md))
+covered all 42 `AGGR_WORKSHEET` objects on `se-thoughtspot` and found
+`search_output_column` on **265 of 265** View columns, `column_id` on **zero**, and no
+value containing `::`. The corrected structure reference is
+[`thoughtspot-view-tml.md`](../../../shared/schemas/thoughtspot-view-tml.md).
+
+Two consequences the REMOVE column above now reflects (fixed under **BL-191**, ts-cli
+v0.127.1):
+
+- **`search_output_column` is a search-output LABEL, so it can be decorated.** It is the
+  column's name in the View's own `search_query` output *including* any aggregation or
+  bucket prefix — `Total LINEAMOUNT`, `Month(YM)`, `Average num_rows`. Matching must be
+  whole-token containment, not equality: 9 of the 265 census columns diverge from `name`
+  this way, and in 4 of those the `name` is a different identifier entirely
+  (`name: row_count` / `search_output_column: Average num_rows`), so an exact-`name`
+  matcher silently leaves the column behind.
+- **A formula-backed View column binds to `formulas[].name`, never `formulas[].id`.**
+  Removing a formula must remove that entry too, or the View carries a dangling column
+  reference — which the structure reference's self-validation checklist forbids and
+  ThoughtSpot rejects on import.
 
 ---
 
