@@ -6261,13 +6261,20 @@ repo: a grep for `persona` / `business problem` / `audience` across all `SKILL.m
 and `CLAUDE.md` returned zero hits, and only 5 of 28 CLI skills carried a `When to use` section
 (`ts-audit`, and four others; the nine `ts-convert-*` skills encode direction-and-fit in their
 `description:` frontmatter instead).
-**Affects:** `docs/skill-personas.md`, `README.md` (the routing table), a new
-`tools/validate/generate_skill_personas.py`, `scripts/pre-commit.sh`, and the frontmatter of
-every `agents/*/*/SKILL.md`.
+**Affects:** `docs/skill-personas.md`, a new `tools/validate/generate_skill_personas.py`,
+`scripts/pre-commit.sh`, and the frontmatter of every `agents/*/*/SKILL.md`.
 **Status:** OPEN.
 
-**Why the hand-written version is a stopgap.** Both surfaces added on this branch are
-hand-maintained prose *about* skills, kept in files that are not those skills. `check_consistency.py`
+**Scope narrowed 2026-07-30**, the same day it was filed. The README "Which skill do I need?" routing
+table this entry originally also covered was **removed** on review: at 18 rows it restated the
+skills catalogue immediately below it in a second format, which is duplication a generator would
+only have made cheaper to maintain, not less redundant. The category summary table now carries a
+one-line *problem it solves* per category instead -- six hand-written cells that change only when
+a category is added, so they are deliberately **not** generator scope. This entry is therefore
+about `docs/skill-personas.md` alone.
+
+**Why the hand-written version is a stopgap.** The page is
+hand-maintained prose *about* skills, kept in a file that is not those skills. `check_consistency.py`
 verifies only that each skill *name* appears somewhere in the README skills table -- it says nothing
 about whether the prose next to that name is still true. So the failure mode is the same one
 `generate_parity.py` and `generate_quality_gates.py` were built to remove: a describing document
@@ -6289,10 +6296,9 @@ same content with the source of truth moved to where it cannot drift.
    costs context on every session that loads the skill.
 2. Write `tools/validate/generate_skill_personas.py`, following the
    `generate_parity.py` / `generate_quality_gates.py` pattern including the `--check` mode, to
-   emit both the README routing table (between HTML comment markers) and the per-skill entries in
-   `docs/skill-personas.md`.
+   emit the per-skill entries in `docs/skill-personas.md`.
 3. Wire `--check` into `scripts/pre-commit.sh` and `.github/workflows/validate.yml` gated on
-   `SKILL.md` / `README.md` / `docs/skill-personas.md` changes, so adding a skill without persona
+   `SKILL.md` / `docs/skill-personas.md` changes, so adding a skill without persona
    metadata fails the same way a missing coverage matrix does.
 4. Backfill the two keys across all 30 skills, taking the values from the prose already written
    in `docs/skill-personas.md` on this branch. This is the version-bump-heavy step; do it in one

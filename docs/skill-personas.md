@@ -340,8 +340,7 @@ and each SE solves it from scratch. A recipe is the solved version, deployable i
 
 This page is hand-maintained and is not currently validated against the skills it
 describes, so it can drift. [BL-188](backlog.md) tracks moving `use-when` and `personas`
-into `SKILL.md` frontmatter and generating both this page and the README routing table
-from them, which is the durable fix.
+into `SKILL.md` frontmatter and generating this page from them, which is the durable fix.
 
 Until then: if you add or materially change a skill, update the entry here in the same PR.
 If you spot an entry that no longer matches the skill, correcting it is a genuinely useful
