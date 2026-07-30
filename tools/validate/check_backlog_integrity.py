@@ -220,6 +220,18 @@ def main() -> int:
         dangling = dangling_citations(root)
         markers = conflict_markers(root)
     except GitUnavailable as exc:
+        # Rule 1 may have already found real violations above (problems is
+        # populated before this try block runs) — print them rather than
+        # discarding them, so the operator sees BOTH "problems were found" and
+        # "some rules could not run", not just the git error.
+        if problems:
+            print("\n" + "\n".join(problems))
+            print()
+            print(
+                "The findings above were collected before the check below failed to "
+                "run — some rules found problems, others could not run at all.",
+                file=sys.stderr,
+            )
         print(f"Backlog integrity check could not run: {exc}", file=sys.stderr)
         return 2
 

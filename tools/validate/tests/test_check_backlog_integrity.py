@@ -162,6 +162,29 @@ def test_dangling_citation_detected(tmp_path):
     assert dangling[_UNDEFINED_BL_A] == ["agents/cli/demo/SKILL.md:1"]
 
 
+def test_dangling_citation_two_ids_on_one_line_both_reported(tmp_path):
+    """Docstring claim: dangling_citations() greps whole lines rather than using
+    `git grep -o`, specifically so one line carrying two ids reports both. Pin it
+    here — if the implementation ever collapsed to capturing only the first id per
+    line (e.g. `.search()` instead of `.findall()` over the line body), this test
+    fails while the single-id test above would still pass."""
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
+    _write(
+        tmp_path,
+        "tools/demo/two_ids.md",
+        f"Superseded {_UNDEFINED_BL_A} and also touches {_UNDEFINED_BL_B} here.\n",
+    )
+    _commit_all(tmp_path)
+
+    dangling = cbi.dangling_citations(tmp_path)
+
+    assert _UNDEFINED_BL_A in dangling
+    assert _UNDEFINED_BL_B in dangling
+    assert dangling[_UNDEFINED_BL_A] == ["tools/demo/two_ids.md:1"]
+    assert dangling[_UNDEFINED_BL_B] == ["tools/demo/two_ids.md:1"]
+
+
 def test_resolvable_citation_is_not_flagged(tmp_path):
     _init_repo(tmp_path)
     _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
