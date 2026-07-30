@@ -60,11 +60,9 @@ def _translate_join_on(on_str: str, source_table: str, alias_by_table: dict[str,
 
 # ThoughtSpot cardinalities under which a source row may match MORE than one
 # joined row. The observed inline-join vocabulary is MANY_TO_ONE / ONE_TO_MANY /
-# ONE_TO_ONE (thoughtspot-model-tml.md:125, 233-join census); MANY_TO_MANY was
-# never observed but makes the same "multiple matches allowed" statement, so it
-# takes the same MV form. Everything else — MANY_TO_ONE, ONE_TO_ONE, or an
-# absent value (a Scenario A join whose cardinality lives on the Table TML) —
-# is at-most-one-match, which is also the MV's own default.
+# ONE_TO_ONE (thoughtspot-model-tml.md, "`joins[]` fields" -> the cardinality
+# row; 233-join census); MANY_TO_MANY was never observed but makes the same
+# "multiple matches allowed" statement, so it takes the same MV form.
 _MULTI_MATCH = {"ONE_TO_MANY", "MANY_TO_MANY"}
 
 
@@ -74,14 +72,27 @@ def _cardinality_keys(cardinality: str | None) -> dict:
     `rely: {at_most_one_match: true}` and `cardinality: many_to_one` are
     equivalent, `many_to_one` is the MV schema's own default when neither is
     present, and `rely:` works on every Databricks Runtime while `cardinality:`
-    requires 18.1+ (databricks-metric-view.md:392, :436-437). Emitting BOTH —
-    which this did until BL-174 defect 3 (fidelity report F5) — silently raised
-    a round-tripped MV's Runtime floor from 17.3+ to 18.1+ for no semantic gain.
+    requires 18.1+ (databricks-metric-view.md, "Join Structure" -> the
+    cardinality-hints table at :440 and the default-cardinality note at :445).
+    Emitting BOTH — which this did until BL-174 defect 3 (fidelity report F5) —
+    silently raised a round-tripped MV's Runtime floor from 17.3+ to 18.1+ for
+    no semantic gain.
 
     `one_to_many` is the one value the MV default does not cover, so it IS
     written explicitly (and legitimately gates 18.1+). `rely:` must NOT
     accompany it: at-most-one-match asserts the opposite of what the model
     declares, and until BL-174 that is exactly what a ONE_TO_MANY join emitted.
+
+    An ABSENT cardinality is ASSUMED at-most-one-match rather than known to be
+    (BL-196): the shape that produces it is a Scenario A join, whose cardinality
+    lives on the source Table TML's `joins_with[]` entry — and build_joins reads
+    only that entry's `on:` clause, discarding its cardinality. The assumption
+    matches the MV's own default and is what this emitted before BL-174, and the
+    2026-07-30 census mitigates it: `joins_with[].cardinality` was absent from
+    ALL 165 exported entries across 275 real Tables (thoughtspot-table-tml.md,
+    "`joins_with[]` fields"), so there is usually nothing there to read. A
+    genuinely ONE_TO_MANY Scenario A join would still be emitted as
+    at-most-one-match.
     """
     if (cardinality or "").strip().upper() in _MULTI_MATCH:
         return {"cardinality": "one_to_many"}

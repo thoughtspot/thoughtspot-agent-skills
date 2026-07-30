@@ -5588,7 +5588,7 @@ three.
 
 | # | Defect | Line | Correct behaviour |
 |---|---|---|---|
-| 1 | **`"type": "INNER"` emitted unconditionally** for every join | `mv_build_model.py:236` | `LEFT_OUTER`. The MV schema has no join-type field because Databricks fixes it: "In a star schema, the `source` is the fact table and joins with one or more dimension tables using a `LEFT OUTER JOIN`" ([Joins in metric views](https://docs.databricks.com/aws/en/business-semantics/metric-views/joins)). `LEFT_OUTER` is a valid Model TML join type (`thoughtspot-model-tml.md:123`), so nothing about the target format forces `INNER`. |
+| 1 | **`"type": "INNER"` emitted unconditionally** for every join | `mv_build_model.py:236` | `LEFT_OUTER`. The MV schema has no join-type field because Databricks fixes it: "In a star schema, the `source` is the fact table and joins with one or more dimension tables using a `LEFT OUTER JOIN`" ([Joins in metric views](https://docs.databricks.com/aws/en/business-semantics/metric-views/joins)). `LEFT_OUTER` is a valid Model TML join type (`thoughtspot-model-tml.md`, *`joins[]` fields* -> the `type` row), so nothing about the target format forces `INNER`. |
 | 2 | **Measure `format:` never read** | `mv_build_model.py` / `mv_tml.py` (absence) | Write `properties.currency_type.iso_code`. `mv_translate.py:98` already carries `"format": meta.get("format")` into `translated.json`; the data survives parse and translate and is discarded at assembly. The **reverse** leg already implements the pair (`mv_emit_classify.py:228-231`), and `ts-databricks-properties.md:109`/`:122` document it as mapped. `grep -rn currency_type tools/ts-cli/ts_cli/` returns only the two reverse-direction lines. |
 | 3 | **`cardinality: MANY_TO_ONE` stamped on every join** | `mv_build_model.py:237` | Stamp it only when the source declared `cardinality:` explicitly. `rely: {at_most_one_match: true}` works on all runtimes; `cardinality:` is **18.1+ only** and `many_to_one` is the schema default anyway (`databricks-metric-view.md:20`, `:430-437`). Promoting the `rely:` hint means the to-direction then emits `cardinality:`, silently moving the round-tripped MV's runtime floor from 17.3+ to 18.1+ -- the to-mv skill's own prerequisites table says 18.1+ is "Required only if the model has an explicit `MANY_TO_ONE` join" (`ts-convert-to-databricks-mv/SKILL.md:197`). |
 
@@ -6807,6 +6807,66 @@ someone regenerates, so they may lag reality in between. The rendered document n
 points readers at `git log -1 -- tools/validate/<validator>.py` for an authoritative answer. Dropping
 the column entirely was the alternative; it was not taken because the audit's angle-7 checklist uses
 the column as a starting point, and a labelled snapshot is more useful than nothing.
+
+---
+
+## BL-196 -- `ts databricks build-model` drops an unmappable `format:` silently: there is no warnings channel to report it in `Tier 3`
+
+**Filed:** 2026-07-31.
+**Source:** PR #426 (BL-174) review, concern 6. Raised by the author, agreed by the reviewer
+as "not a one-liner".
+**Affects:** `tools/ts-cli/ts_cli/databricks/mv_build_model.py` (`_currency_type`),
+`tools/ts-cli/ts_cli/commands/databricks.py` (`_echo_translate_diagnostics`, the
+`build-model` stdout summary contract),
+`agents/cli/ts-convert-from-databricks-mv/references/coverage-matrix.md` (row #79, L12),
+`agents/shared/mappings/ts-databricks/ts-databricks-properties.md` (the `format:` row).
+**Status:** OPEN.
+
+BL-174 implemented the mapped half of the Metric View `format:` property: a
+`format: {type: currency, currency_code: X}` on a **measure** now becomes
+`properties.currency_type.iso_code`. The other cases have no ThoughtSpot target and are
+**dropped without a word** — nothing in `build-model`'s stderr diagnostics or its stdout
+summary mentions them:
+
+| Dropped case | Why unmapped |
+|---|---|
+| `type: percentage` | No ThoughtSpot equivalent |
+| `decimal_places: {type: exact, places: N}` | `properties.currency_type` has no decimal-place field |
+| any `format:` on a `fields:`/`dimensions:` entry | `currency_type` is a MEASURE property; an ATTRIBUTE would need `format_pattern`, which is not auto-emitted |
+
+Two reasons this is worth closing rather than leaving as a documented limitation:
+
+1. **Our own mapping doc says it should be reported.** `ts-databricks-properties.md` (the
+   `format:` row) has said a formatted dimension's `format:` "should be tolerated **and
+   logged**" since 2026-07-29. It is tolerated; nothing logs it. BL-174 corrected the two
+   places that mis-stated this as implemented, so the doc and the code now agree that it is
+   a gap — but the gap is real.
+2. **Silence is the failure mode this repo keeps re-learning.** Every other unmappable
+   construct on this path lands in `skipped[]` or a stderr `WARNING` (see the BL-098
+   density warning and the `parse-mv` `unsupported[]` contract); a format drop is the one
+   loss the user can only find by diffing the source MV against the imported Model by eye.
+
+Low tier because the loss is **display formatting only** — no measure value or row count
+changes, unlike BL-174 defect 1.
+
+**Approach:**
+
+1. Have `build_columns_and_formulas` (or `_currency_type`'s caller) collect a
+   `dropped_formats: [{name, role, format, reason}]` list into the `build_info` dict that
+   `build_model_tml_dbx` already returns.
+2. Surface it in `commands/databricks.py`: one stderr `WARNING` per entry via
+   `_echo_translate_diagnostics` (which already takes `build_info`), plus a
+   `dropped_formats` key in the stdout summary JSON so a skill run can report it in its
+   Unmapped Report rather than the user discovering it in the UI.
+3. Decide whether an ATTRIBUTE currency `format:` should instead map to `format_pattern`
+   (`thoughtspot-model-tml.md`, *`columns[]` fields*). If a clean translation exists this
+   stops being a drop at all for the most common of the three cases — settle that question
+   before writing the warning, since it changes what is left to warn about.
+4. Flip L12 and coverage row #79's "silently" wording, and the
+   `ts-databricks-properties.md` `format:` row, when it lands.
+
+**Target:** next converter pass on the Databricks pipeline, or opportunistically whenever
+`build-model`'s diagnostics are touched for another reason.
 
 ---
 

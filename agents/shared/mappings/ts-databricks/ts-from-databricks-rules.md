@@ -626,14 +626,14 @@ segment is the column name; preceding segments trace the join path.
 | MV `format:` | ThoughtSpot property |
 |---|---|
 | `type: currency` + `currency_code: USD`, on a **measure** | `properties.currency_type: { iso_code: USD }` |
-| `type: currency`, on a `fields:`/`dimensions:` entry | **Unmapped** — `currency_type` is a measure property (`thoughtspot-model-tml.md:232`); tolerate and log |
+| `type: currency`, on a `fields:`/`dimensions:` entry | **Unmapped** — `currency_type` is a measure property (`thoughtspot-model-tml.md`, *`columns[]` fields* → the `properties.currency_type` row); tolerated and **dropped** (nothing logs it today — BL-196) |
 | `type: percentage` | **Unmapped** — no ThoughtSpot equivalent |
 | `decimal_places` | **Unmapped** — ThoughtSpot handles formatting at display level |
 
 The field is `iso_code`, **not** `currency_code` (corrected 2026-07-31, BL-174 — the row
 above named the Databricks field on both sides). `properties.currency_type` takes exactly
 one of `iso_code` / `column` / `is_browser`; generated models always use `iso_code`
-(`thoughtspot-model-tml.md:232`). This is the same pair the reverse leg reads, so the
+(`thoughtspot-model-tml.md`, *`columns[]` fields*). This is the same pair the reverse leg reads, so the
 mapping is now implemented in **both** directions.
 
 ### Window with Range/Offset → ThoughtSpot Formulas

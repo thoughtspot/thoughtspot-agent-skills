@@ -23,14 +23,15 @@ def _currency_type(entry: dict) -> dict | None:
     """`format: {type: currency, currency_code: USD}` -> `{iso_code: USD}`.
 
     The MEASURE-only half of the `format:` mapping that
-    ts-databricks-properties.md:109/:122 documents in both directions and that
-    the reverse leg already implements (mv_emit_classify._build_metadata).
+    ts-databricks-properties.md documents in both directions (the
+    properties.currency_type and `format:` rows) and that the reverse leg
+    already implements (mv_emit_classify._build_metadata).
     Returns None for every other case, all of which are declared unmapped in
     ts-convert-from-databricks-mv/references/coverage-matrix.md #79:
     `type: percentage` (no ThoughtSpot equivalent), `decimal_places` (no
     currency_type field), and a `format:` on a fields:/dimensions: entry
-    (properties.currency_type is a measure property —
-    thoughtspot-model-tml.md:232). BL-174 defect 2.
+    (properties.currency_type is a measure property — thoughtspot-model-tml.md,
+    "`columns[]` fields" -> the properties.currency_type row). BL-174 defect 2.
     """
     if entry["column_type"] != "MEASURE":
         return None

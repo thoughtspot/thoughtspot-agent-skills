@@ -78,6 +78,29 @@ class TestJoins:
                           "on": "source.DIM_ID = dim.ID",
                           "cardinality": "one_to_many"}]
 
+    def test_many_to_many_join_emits_cardinality_not_rely(self):
+        # MANY_TO_MANY is never observed in the 233-join census and the MV
+        # vocabulary has no many-to-many value, but it makes the same "a source
+        # row may match multiple rows" statement as ONE_TO_MANY — so it takes the
+        # same form. It must NOT fall through to `rely:`, which would assert
+        # at-most-one-match on a many-to-many join. Like ONE_TO_MANY it therefore
+        # gates Runtime 18.1+ (named in the Prerequisites table alongside it).
+        model = {"name": "M",
+            "model_tables": [
+                {"name": "FACT", "joins": [
+                    {"with": "DIM", "on": "[FACT::DIM_ID] = [DIM::ID]",
+                     "type": "LEFT_OUTER", "cardinality": "MANY_TO_MANY"}]},
+                {"name": "DIM"}],
+            "columns": [], "formulas": []}
+        tables = [
+            {"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact", "columns": []}},
+            {"table": {"name": "DIM", "db": "c", "schema": "s", "db_table": "dim", "columns": []}}]
+        from ts_cli.databricks.mv_emit import build_joins
+        joins, _ = build_joins(model, tables, source_table="FACT")
+        assert joins == [{"name": "dim", "source": "c.s.dim",
+                          "on": "source.DIM_ID = dim.ID",
+                          "cardinality": "one_to_many"}]
+
     def test_one_to_one_join_keeps_the_rely_form(self):
         # ONE_TO_ONE also means "at most one match" (census-observed x3 in real
         # Models — thoughtspot-model-tml.md:125), so it takes the runtime-agnostic

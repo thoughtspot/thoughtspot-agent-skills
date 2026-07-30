@@ -320,8 +320,9 @@ class TestBuildColumnsAndFormulas:
     def test_dimension_currency_format_emits_no_currency_type(self):
         # `format:` is legal on fields:/dimensions: too (databricks-metric-view.md
         # "Format Field", corrected 2026-07-29) but properties.currency_type is a
-        # MEASURE property (thoughtspot-model-tml.md:232) — an ATTRIBUTE's format
-        # has no auto-emitted target yet (coverage-matrix #79).
+        # MEASURE property (thoughtspot-model-tml.md, "`columns[]` fields" ->
+        # properties.currency_type) — an ATTRIBUTE's format has no auto-emitted
+        # target yet (coverage-matrix #79/L12).
         cols, _, _ = build_columns_and_formulas(
             [_t("list_price", "column", "ATTRIBUTE", table="T",
                 column="LIST_PRICE", display_name="List Price",
@@ -330,7 +331,8 @@ class TestBuildColumnsAndFormulas:
 
     def test_currency_format_without_a_code_is_ignored(self):
         # iso_code is the only currency_type form we generate
-        # (thoughtspot-model-tml.md:232) — an empty one is not a valid document.
+        # (thoughtspot-model-tml.md, "`columns[]` fields" ->
+        # properties.currency_type) — an empty one is not a valid document.
         cols, _, _ = build_columns_and_formulas(
             [_t("amount", "column", "MEASURE", table="T", column="AMOUNT",
                 aggregation="SUM", display_name="Amount",
@@ -1154,8 +1156,8 @@ class TestGoldenSqlView:
        `formula_Customer Segment` now carries `properties: {column_type:
        ATTRIBUTE}`, matching the ecommerce doc's `formula_Transaction Month`
        / `formula_MV Filter` (also ATTRIBUTE-kind).
-       agents/shared/schemas/thoughtspot-model-tml.md:193 documents this
-       field as OPTIONAL on formulas[] — both renderings were valid TML;
+       agents/shared/schemas/thoughtspot-model-tml.md ("`formulas[]` fields")
+       documents this field as OPTIONAL — both renderings were valid TML;
        the doc was updated to the canonical (explicit) form for consistency
        across worked examples.
 
