@@ -6,6 +6,13 @@ rather than mocking subprocess — same approach as test_check_repo_hygiene.py.
 NOTE: conflict-marker strings are built by repetition ("<" * 7) and never written as
 literals. A literal in this file would be picked up by Rule 3 scanning the repo's
 own tracked files.
+
+NOTE: the same trap applies to Rule 2. This file lives under tools/, which is inside
+CITATION_SCOPE, so any literal, contiguous "BL" + dash + digits placeholder written
+here for the dangling-citation tests below would itself become a real, unresolved
+citation the moment this file is committed — a false positive baked into the
+validator's own suite. The three placeholder ids used by those tests are therefore
+built by concatenation, never written as a literal contiguous token.
 """
 from __future__ import annotations
 
@@ -131,3 +138,69 @@ def test_heading_id_stops_before_trailing_punctuation(tmp_path):
     _commit_all(tmp_path)
 
     assert cbi.section_headings(cbi._read(tmp_path, "docs/backlog.md")) == ["BL-171"]
+
+
+# Placeholder ids for the dangling-citation tests below. Built by concatenation
+# (never as a literal contiguous "BL" + dash + digits token) — see the module
+# docstring note on why a literal here would be a self-inflicted false positive.
+_UNDEFINED_BL_A = "BL-" + "999"
+_UNDEFINED_BL_B = "BL-" + "888"
+_UNDEFINED_BL_C = "BL-" + "777"
+
+
+def test_dangling_citation_detected(tmp_path):
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
+    _write(tmp_path, "agents/cli/demo/SKILL.md", f"Fixed under {_UNDEFINED_BL_A}.\n")
+    _commit_all(tmp_path)
+
+    dangling = cbi.dangling_citations(tmp_path)
+
+    assert list(dangling) == [_UNDEFINED_BL_A]
+    assert dangling[_UNDEFINED_BL_A] == ["agents/cli/demo/SKILL.md:1"]
+
+
+def test_resolvable_citation_is_not_flagged(tmp_path):
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
+    _write(tmp_path, "tools/ts-cli/ts_cli/demo.py", "# See BL-001 for context.\n")
+    _commit_all(tmp_path)
+
+    assert cbi.dangling_citations(tmp_path) == {}
+
+
+def test_citation_in_docs_is_out_of_scope(tmp_path):
+    """docs/ is a point-in-time record — a spec citing a since-renumbered id is
+    correct as history and must not fail the gate."""
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
+    _write(
+        tmp_path,
+        "docs/superpowers/specs/2026-01-01-old-design.md",
+        f"Filed as {_UNDEFINED_BL_B}.\n",
+    )
+    _commit_all(tmp_path)
+
+    assert cbi.dangling_citations(tmp_path) == {}
+
+
+def test_archive_index_row_counts_as_defined(tmp_path):
+    """An archived item keeps its number and stays a legitimate citation target,
+    even when it no longer owns a `## BL-NNN` section."""
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG + "\n- BL-003 — Archived thing — Done\n")
+    _write(tmp_path, "agents/cli/demo/SKILL.md", "Historical: BL-003.\n")
+    _commit_all(tmp_path)
+
+    assert cbi.dangling_citations(tmp_path) == {}
+
+
+def test_untracked_file_citation_is_ignored(tmp_path):
+    """Rule 2 uses `git grep`, so it sees tracked content only — an uncommitted
+    scratch file must not fail the gate."""
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
+    _commit_all(tmp_path)
+    _write(tmp_path, "agents/scratch.md", f"{_UNDEFINED_BL_C} notes\n")  # deliberately not committed
+
+    assert cbi.dangling_citations(tmp_path) == {}

@@ -49,6 +49,12 @@ from pathlib import Path
 BACKLOG_REL = "docs/backlog.md"
 ARCHIVE_REL = "docs/backlog-archive.md"
 
+# Rule 2 scope — the live, load-bearing surfaces where a stale id misdirects
+# current work. docs/ is deliberately absent: specs and audit reports are
+# point-in-time records, and forcing them to track later renumbering would be
+# wrong. Widening this is a one-line change if it ever proves too narrow.
+CITATION_SCOPE = ("agents", "tools", ".github")
+
 # Two deliberately different patterns, because the two rules need different
 # precision. Do not unify them.
 #
@@ -78,6 +84,15 @@ def _read(root: Path, rel: str) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+def _git_lines(args: list[str], root: Path) -> list[str]:
+    """Run git and return non-blank stdout lines. Non-zero exit yields [] — `git
+    grep` exits 1 on "no matches", which is a clean result, not an error."""
+    result = subprocess.run(
+        ["git", *args], capture_output=True, text=True, cwd=root, check=False,
+    )
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
 def section_headings(text: str) -> list[str]:
     """Every BL id that owns a `## BL-NNN` section heading, in document order."""
     return HEADING_RE.findall(text)
@@ -98,6 +113,36 @@ def cross_file_duplicates(root: Path) -> list[str]:
     live = set(section_headings(_read(root, BACKLOG_REL)))
     archived = set(section_headings(_read(root, ARCHIVE_REL)))
     return sorted(live & archived)
+
+
+def defined_ids(root: Path) -> set[str]:
+    """Every BL id that resolves to something. Deliberately broader than
+    section_headings(): the archive index and the priority-index tables list ids
+    that no longer own a section, and a citation to one of those is still valid."""
+    return set(ANY_BL_RE.findall(_read(root, BACKLOG_REL))) | set(
+        ANY_BL_RE.findall(_read(root, ARCHIVE_REL))
+    )
+
+
+def dangling_citations(root: Path) -> dict[str, list[str]]:
+    """Rule 2 — ids cited inside CITATION_SCOPE that resolve to nothing.
+
+    Greps whole lines rather than using `git grep -o` so one line carrying two ids
+    reports both, and so the path:lineno prefix is available for the message.
+    """
+    defined = defined_ids(root)
+    found: dict[str, set[str]] = {}
+    for line in _git_lines(
+        ["grep", "-nI", "-e", r"BL-[0-9]\+", "--", *CITATION_SCOPE], root
+    ):
+        parts = line.split(":", 2)
+        if len(parts) < 3:
+            continue
+        path, lineno, body = parts
+        for bl_id in ANY_BL_RE.findall(body):
+            if bl_id not in defined:
+                found.setdefault(bl_id, set()).add(f"{path}:{lineno}")
+    return {bl_id: sorted(places) for bl_id, places in sorted(found.items())}
 
 
 def main() -> int:
@@ -121,6 +166,16 @@ def main() -> int:
         problems.append("BL id sectioned in BOTH backlog.md and backlog-archive.md — Rule 1:")
         problems.extend(f"  ✗ {bl_id}" for bl_id in both)
 
+    dangling = dangling_citations(root)
+    if dangling:
+        problems.append("BL id cited but never defined — Rule 2:")
+        for bl_id, places in dangling.items():
+            shown = ", ".join(places[:4])
+            more = f" (+{len(places) - 4} more)" if len(places) > 4 else ""
+            problems.append(f"  ✗ {bl_id} cited at {shown}{more}")
+        problems.append("  Either the id was renumbered and a citation was missed,")
+        problems.append("  or the backlog entry was deleted instead of archived.")
+
     if problems:
         print("\n" + "\n".join(problems))
         print()
@@ -128,7 +183,7 @@ def main() -> int:
         print("(see CLAUDE.md). Take main's side, then renumber the incoming item.")
         return 1
 
-    print("Backlog integrity clean: no duplicate BL ids.")
+    print("Backlog integrity clean: no duplicate BL ids, no dangling citations.")
     return 0
 
 
