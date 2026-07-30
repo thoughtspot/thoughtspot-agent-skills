@@ -225,6 +225,16 @@ def test_i13_ignores_table_qualified_and_plain_refs():
     assert not any(f.startswith("I13:") for f in lint_tml(data))
 
 
+def test_i13_skips_documents_declaring_no_formulas():
+    # Aligned with tools/validate/check_tml.py's `if formula_ids:` guard — the two
+    # must agree or the same TML lints differently in the CLI and in CI. An empty
+    # formulas[] is a formula-free / phase-1 model; I1 owns the orphan direction.
+    data = _clean_model()
+    data["model"]["formulas"] = []
+    data["model"]["columns"] = [{"name": "Orphan", "formula_id": "formula_Gone"}]
+    assert not any(f.startswith("I13:") for f in lint_tml(data))
+
+
 def test_i13_flags_every_distinct_dangling_ref_once():
     data = _clean_model()
     data["model"]["formulas"] = [

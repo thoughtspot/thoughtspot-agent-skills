@@ -5661,6 +5661,39 @@ persisted -- 0 objects named `Company Workforce%` before and after):**
   HARD IMPORT FAILURE, not a silently-broken measure.**
 - Post-fix TML: `status_code: OK`.
 
+**Defect 3 was worse than the fidelity review recorded, and the record should say so.** The
+review called it latent outside computed facts. On the worked example it ALSO made two
+constructs collide on one index key: `AVG_TENURE` was indexed under `employees.tenure_months`
+(colliding with the fact of that name) and `AVG_HEADCOUNT_PER_COMPANY` under
+`employees.headcount`, where it **overwrote `HEADCOUNT`'s own entry** — so
+`employees.headcount` resolved to the *wrong metric*. It never surfaced because defect 2 broke
+the reference regardless. The "latent" characterisation was true of TPC-DS, not of the general
+case.
+
+**A fourth defect of the same family was found in PR #424's review and fixed on the same
+branch (F1).** Keying the indexes on the declared name is necessary but not sufficient: a
+*renamed passthrough* (`STORE_SALES.revenue as store_sales.ss_ext_sales_price`) has a declared
+name AND a physical column, and indexing it under only one of them leaves the other unreachable.
+Referenced by its declared name it missed both indexes, fell through to step 1's
+assumed-physical branch, and emitted `column_id: STORE_SALES::revenue` — a column that does not
+exist, and one **I13 cannot catch** because it is a `TABLE::col` reference, not a `[formula_*]`
+one. Each construct is now indexed under both names, declared name winning on collision. Where
+the two readings can disagree (a renamed passthrough whose declared name may also be a real
+column — undecidable without a column inventory the translator never receives) the reference
+resolves to the semantic view's construct and carries a ⚑ annotation, rather than silently
+aggregating a different column.
+
+**Two smaller correctness items from the same review:** every double aggregation now carries the
+🔄 review marker the rules file has always mandated (it was specified and never emitted), and a
+degenerate grouping — the inner metric aggregating the very column the relationship implies as
+the grouping key, i.e. `group_count([X],[X])` = one row per group — is skipped and flagged
+instead of emitted. A passthrough *metric* (`expr is None`) also no longer crashes
+`translate-formulas` with a raw `AttributeError`; it is a skip with a reason.
+
+**Discovered, not fixed:** same-table metric-on-metric has no resolvable reference at all — see
+**BL-194**. It now fails loudly at `build-model` via I13 rather than emitting a broken Model,
+which is the right direction but not a conversion.
+
 **Validator promotion shipped with the fix:** `ts tml lint` invariant **I13** (and the
 `formulas[].expr` half of `tools/validate/check_tml.py`) now reject a `[formula_*]`
 reference matching no declared id. I13 fires with exactly 4 findings on the pre-fix worked
@@ -6618,6 +6651,76 @@ someone regenerates, so they may lag reality in between. The rendered document n
 points readers at `git log -1 -- tools/validate/<validator>.py` for an authoritative answer. Dropping
 the column entirely was the alternative; it was not taken because the audit's angle-7 checklist uses
 the column as a starting point, and a labelled snapshot is more useful than nothing.
+
+---
+
+## BL-194 -- Same-table metric-on-metric has no resolvable reference, so a common ratio shape hard-fails `Tier 2`
+
+**Filed:** 2026-07-30.
+**Source:** PR #424 review (F2) -- found while fixing BL-178, by asking what the
+metric-on-metric fallback actually resolves to rather than only testing the cross-table path
+the worked example exercises.
+**Affects:** `tools/ts-cli/ts_cli/sv_translate.py` (`make_resolver` step 3,
+`_resolve_double_aggregation`), `agents/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md`
+(Identifier Resolution step 3), `agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md`
+row 27.
+**Status:** OPEN. Documented as a limitation in the rules file and coverage row 27 by PR #424 --
+the behaviour is honest and loud, not silent, but the shape is common enough to deserve a fix.
+
+**The shape.** A metric that references another metric **on the same table**:
+
+```sql
+metrics (
+    ORDERS.total_rev   as SUM(AMOUNT),
+    ORDERS.order_count as COUNT(ID),
+    ORDERS.aov         as orders.total_rev / orders.order_count
+)
+```
+
+**What happens.** Step 3's double aggregation needs a relationship between the inner metric's
+table and the referencing metric's table, to get a grouping key from the parent side. Same
+table means no relationship, so there is no grouping key and the resolver falls back to the
+inner metric's `[formula_<id>]`. That reference resolves **only if the inner metric became a
+`formulas[]` entry** -- and a simple aggregate (`SUM(col)`, `COUNT(col)`) becomes a
+`columns[]` entry with an `aggregation:` instead, which has no formula id. So the reference
+dangles, `ts tml lint` I13 fires, and `ts snowflake build-model` **exits 1**.
+
+Reproduced on the shape above: `formula_Avg Order Value = [formula_Total Rev] / [formula_Order
+Count]`, both referents emitted as `columns[]` entries.
+
+**This is the honest outcome, and it is why it is Tier 2 rather than Tier 1.** Before BL-178
+the same input produced a Model that imported broken with every gate green; now it fails at
+build time with a named finding. A user is blocked rather than misled, which is the right
+direction -- but blocked is not converted.
+
+**Approach -- inline the inner aggregation.** The translator already holds everything needed:
+the inner metric's parsed `expr` and a resolver for its table. Where the inner metric is a
+simple aggregate on a physical column, substitute its **translated aggregation** rather than a
+reference to it:
+
+```
+orders.total_rev / orders.order_count
+  -> sum ( [ORDERS::AMOUNT] ) / count ( [ORDERS::ID] )
+```
+
+This is the same "inline rather than reference" resolution the Databricks direction already
+uses for cross-measure references (`mv_translate.py`, cross-measure inlining via dependency
+DAG), so the pattern is established in the repo rather than novel. Notes:
+
+1. Scope it to the **same-table, no-grouping-key** case. Cross-table references must keep
+   their `group_*` double aggregation -- inlining there would silently drop the grouping and
+   change the numbers, which is the failure mode BL-178 was about.
+2. Reuse the cycle guard already threaded through `make_resolver` (`_resolving`); inlining
+   deepens the same recursion.
+3. Where the inner metric is NOT a simple aggregate, inlining its whole translated expression
+   is still correct but can duplicate large expressions -- measure the emitted size before
+   deciding whether to inline or to keep failing loudly for that sub-case.
+4. Add the shape to `test_sv_formula_ref_contract.py` (the ratio DDL above is ready to lift
+   from this entry) and remove the limitation paragraph from the rules file and coverage row 27
+   in the same PR.
+
+**Target:** next from-Snowflake wave. Cheap, well-bounded, and it converts an input that
+currently cannot be converted at all.
 
 ---
 

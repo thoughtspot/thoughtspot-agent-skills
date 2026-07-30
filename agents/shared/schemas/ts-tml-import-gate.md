@@ -19,6 +19,8 @@ accepts the TML and then behaves wrong, or rejects it on import):
 - **I4** — every `model_tables[]` `id:` (when present) equals its `name:`. *(Mismatch makes joins silently fail.)*
 - **I5** — no physical-column `aggregation: COUNT_DISTINCT`; use a `unique count ( [TABLE::col] )` formula. *(Silently flips MEASURE → ATTRIBUTE.)*
 - **I8** — no duplicate `column_id` across `columns[]`. *(Hard import rejection: "columns should have unique column_id values".)*
+- **I12** — every `column_id` is `TABLE::col`-qualified, never bare — even on a single-table model. *(Hard import rejection: "These column_id/formula_id values are incorrect", error_code 14547.)*
+- **I13** — every `[formula_*]` reference (in a `formulas[].expr`) and every `columns[].formula_id` matches a declared `formulas[].id`. *(Hard import rejection: `error_code 14516`, "Search did not find \"formula_X\"" — an unresolvable bracket reference is parsed as search tokens. Distinct from I9, which mandates the id form in the first place.)*
 
 `ts tml lint` reads raw TML file paths via `--file`/`--dir` (the same input `ts tml
 import` takes) and exits non-zero on any finding, so it gates the import (replace

@@ -114,6 +114,13 @@ def lint_tml(data: dict) -> list[str]:
 # A bracketed reference of any kind. `formula_`-prefixed ones are id references
 # and must resolve; `TABLE::COL` and plain display-name refs are other checks'
 # business (XREF / I9 respectively).
+#
+# Deliberately NOT string-literal aware: a `[formula_x]` sequence inside a quoted
+# literal (e.g. `'see [formula_x]'`) would be scanned as a reference. Accepted
+# risk — the payload would have to be a formula whose *text* names a formula id,
+# and the failure mode is a visible finding a human dismisses, not a silent pass.
+# Tokenizing the ThoughtSpot formula grammar here would couple the linter to
+# sv_sql.py's tokenizer for no gain in the cases that occur.
 _BRACKET_REF_RE = re.compile(r"\[([^\[\]]+)\]")
 
 
@@ -165,11 +172,19 @@ def _check_dangling_formula_refs(formulas: list, columns: list) -> list[str]:
     would have caught it on the commit that introduced it.
 
     Purely structural over a single document — no live instance, no judgment.
+
+    A document that declares NO formula ids is skipped entirely, matching
+    `tools/validate/check_tml.py`'s `if formula_ids:` guard (the two must agree, or
+    the same TML lints differently in the CLI and in CI). An empty `formulas[]` is
+    a formula-free or phase-1 model, not a document full of broken references; the
+    orphan-column direction is I1's job.
     """
     declared = {
         f.get("id") for f in formulas
         if isinstance(f, dict) and f.get("id")
     }
+    if not declared:
+        return []
     misses = (_expr_formula_ref_misses(formulas, declared)
               + _column_formula_id_misses(columns, declared))
     return [

@@ -327,6 +327,11 @@ def validate_model_tml(data: dict) -> list[str]:
     # measures referenced ids that never existed passed this validator, `ts tml
     # lint` and `build-model`'s own lint_findings alike
     # (docs/reviews/2026-07-29-ossie-tpcds-fidelity.md F9 / BL-183).
+    #
+    # The `if formula_ids:` guard is shared with tml_lint's I13 by agreement, not
+    # accident: a document declaring no formula ids is formula-free or phase-1, and
+    # the two checks must skip the same documents or the same TML lints differently
+    # here and in `ts tml lint`. Not string-literal aware, same accepted risk.
     if formula_ids:
         for f in formulas:
             if not isinstance(f, dict):
