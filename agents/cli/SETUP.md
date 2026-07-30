@@ -3,6 +3,11 @@
 These skills work in both **Claude Code** and **Cortex Code CLI**. Both runtimes
 have full shell access and use the `ts` CLI for ThoughtSpot API calls.
 
+> **Not sure which skill you need?** The README has a
+> [routing table by job-to-be-done](../../README.md#which-skill-do-i-need), and
+> [skill personas](../../docs/skill-personas.md) covers why each skill exists, who tends
+> to need it, and when to reach for it.
+
 ---
 
 ## Prerequisites
