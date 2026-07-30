@@ -80,6 +80,7 @@ are roughly ordered by value÷effort.
 
 | Item | Summary | Target |
 |---|---|---|
+| BL-192 | `docs/quality-gates.md` stales from main's commits, not yours — hard-fails the PR gate on a race | next validator-tooling pass |
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | BL-189 | `ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard | next ts-cli change |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
@@ -125,6 +126,7 @@ are roughly ordered by value÷effort.
 
 | Item | Summary | Target |
 |---|---|---|
+| BL-193 | Worktree `git commit` runs the MAIN checkout's pre-commit script — local gates are the wrong branch's | opportunistic |
 | BL-177 | Reverse legs synthesise names that were already available | opportunistic |
 | BL-190 | Re-run the TML census: `--fqn --include-obj-id` (evidence NM1/X8) + a second cluster (T3) | next census session |
 | BL-173 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
@@ -6493,3 +6495,104 @@ crash.
 
 **Target:** next `tools/ts-cli/` dependency-engine change. Needs a version bump in both
 `__init__.py` and `pyproject.toml` per `.claude/rules/ts-cli.md`.
+
+---
+
+## BL-192 -- `docs/quality-gates.md` goes stale from main's commits, not yours, and hard-fails the PR gate `Tier 2`
+
+**Filed:** 2026-07-30.
+**Source:** PR #421 (`check_backlog_integrity`). Its first CI run failed the "Quality gates catalog
+gate (PR only, scoped hard-fail)" step while the *identical* `--check` passed locally minutes
+earlier, on the same commit.
+**Affects:** `tools/validate/generate_quality_gates.py`, `.github/workflows/validate.yml`
+("Quality gates catalog gate"), `scripts/pre-commit.sh` (the staged-trigger branch that runs the
+same check).
+**Status:** OPEN.
+
+The catalog embeds a **git-log-derived date per validator row**. That makes it a function of repo
+*history*, not of repo *contents* — so it goes stale when **someone else's** commit touches any
+validator, with no change on your branch at all.
+
+**Confirmed reproduction (PR #421).** Local `--check` passed. CI failed with
+`FAIL docs/quality-gates.md is stale`. Regenerating against the merged history produced exactly a
+one-row diff, and not for anything the PR touched:
+
+```
+< | 32 | `TML structure` | check_tml.py — ... | gate | 2026-06-13 |
+> | 32 | `TML structure` | check_tml.py — ... | gate | 2026-07-30 |
+```
+
+`check_tml.py` was touched on `main` between the branch forking and CI running. The PR never went
+near it.
+
+**Why this is worse than a one-off annoyance.** The gate is a *hard* fail on any PR touching
+`scripts/pre-commit.sh`, `.github/workflows/validate.yml` or `tools/validate/*.py` (audit finding
+7.1 promoted it deliberately, to stop gate-shape changes merging with a stale catalog — the intent
+is right). But the staleness trigger is far wider than the intent: **regenerating before you push is
+not sufficient.** It must be regenerated against the *merged* history, and it re-stales the moment
+main touches a validator. On this repo's cadence that is a live race, and every lap costs a full CI
+cycle. Two validator PRs open at once can each invalidate the other.
+
+**Approach when picked up.** The fix is to stop making the gate depend on data the author cannot
+control. Options, roughly in order of preference:
+
+1. **Drop the date column from the gated comparison.** Keep dates in the rendered file for humans,
+   but have `--check` compare only the structural content (gate name, trigger, description, kind).
+   A gate-shape change still fails a stale catalog — the actual intent of finding 7.1 — while
+   another branch's unrelated commit does not.
+2. **Derive the date from the file's own content hash or a checked-in manifest** rather than
+   `git log`, so it changes when the validator changes rather than when history moves.
+3. **Regenerate-and-commit in CI** on the PR branch instead of failing. Least preferred: it puts a
+   bot commit on every validator PR and muddies authorship.
+
+Whichever is chosen, add a test that pins the property: a catalog generated at commit A must still
+pass `--check` at commit B when B differs only by an unrelated validator's mtime/history.
+
+**Target:** next validator-tooling pass. Cheap relative to how often it fires.
+
+---
+
+## BL-193 -- A worktree's `git commit` runs the MAIN checkout's pre-commit script, so local gates are the wrong branch's `Tier 3`
+
+**Filed:** 2026-07-30.
+**Source:** PR #421 verification. The branch added a new pre-commit check and needed to prove it
+fired; the hook-driven run never listed it.
+**Affects:** `.git/hooks/pre-commit` (repo-local, untracked), `.claude/rules/branching.md`,
+`docs/coding-with-claude-quickstart.md` if it documents the hook.
+**Status:** OPEN -- documentation/tooling, no product impact.
+
+`.git/hooks/pre-commit` is a **relative symlink**, `../../scripts/pre-commit.sh`, and it lives in the
+**common** git dir. Git shares hooks across all worktrees, so that symlink resolves into the **main
+checkout's working tree**, on whatever branch *that* checkout currently has out. A real `git commit`
+from any worktree therefore executes a **different branch's** hook script.
+
+**Confirmed 2026-07-30.** While shipping PR #421 from a worktree, the main checkout was on
+`feat/ossie-consolidation`, whose `scripts/pre-commit.sh` contained **zero** matches for the check
+#421 was adding. Commits from the feature worktree silently skipped the very gate the branch
+existed to add. A commit with a deliberately planted violation was observed to succeed, then reset.
+
+**Both directions hurt.** A branch that *adds* a check gets no local benefit from it. A branch that
+*fixes* a broken hook is still gated by the broken one. And a worktree can commit code violating a
+gate that main's script does enforce differently, discovering it only in CI.
+
+**Not urgent, and why.** CI is a strict superset of pre-commit by design (see
+`docs/quality-gates.md` "Enforcement model"), so nothing reaches main ungated. The cost is a slower
+feedback loop and, more insidiously, **false confidence**: "the hook passed" is not evidence about
+your branch's gates.
+
+**Approach when picked up.** Mostly documentation, since the shared-hooks behaviour is git's, not
+ours:
+
+1. Record the behaviour in `.claude/rules/branching.md` next to the worktree guidance, with the
+   verification recipe: run `bash scripts/pre-commit.sh` **from the worktree** rather than trusting
+   the hook.
+2. Note two traps in that recipe, both hit live: the script produces **no output and exits 0 when
+   nothing is staged** (so an empty result proves nothing — stage a real content change, not a
+   `touch`), and local `python3` may be below the repo floor, so tests need
+   `uv run --python 3.11 --with pytest`.
+3. Optionally make the hook self-locating — resolve `scripts/pre-commit.sh` relative to
+   `git rev-parse --show-toplevel` at run time instead of via a symlink baked to one worktree. This
+   would make the hook follow the committing worktree. Verify it does not break the main checkout
+   before adopting.
+
+**Target:** opportunistic — next time `.claude/rules/branching.md` or the hook is touched.
