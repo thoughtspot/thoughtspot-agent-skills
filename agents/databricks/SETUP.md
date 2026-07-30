@@ -3,6 +3,11 @@
 Deploy the ThoughtSpot skills and client to a Databricks workspace using
 Databricks Asset Bundles.
 
+> **Not sure which skill you need?** [Skill personas](../../docs/skill-personas.md)
+> covers why each skill exists, who tends to need it, and when to reach for it. Note that
+> this runtime carries only the two Databricks Metric View conversion skills; the rest are
+> CLI-only.
+
 ---
 
 ## Prerequisites

@@ -7,6 +7,11 @@ ThoughtSpot API (since the Workspace runtime has no shell access).
 > **Prefer the CLI?** See `agents/cli/SETUP.md` for the simpler Cortex Code
 > CLI setup — no stored procedures, stages, or external access integrations needed.
 
+> **Not sure which skill you need?** [Skill personas](../../docs/skill-personas.md)
+> covers why each skill exists, who tends to need it, and when to reach for it. Note that
+> Snowsight carries only the Snowflake conversion pipeline plus its auth and setup skills;
+> the rest are CLI-only.
+
 ---
 
 ## Prerequisites

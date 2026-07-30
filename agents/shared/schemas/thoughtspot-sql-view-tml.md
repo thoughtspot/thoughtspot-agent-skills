@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (validated in 2026-07-22 full audit — no changes needed) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-30: corrected joins[].type — FULL_OUTER removed and OUTER added, from ThoughtSpot's published TML docs plus live probes in the two sibling contexts; the SQL View context itself was NOT probed; prior: validated in 2026-07-22 full audit) -->
 
 # ThoughtSpot SQL View TML — Structure Reference
 
@@ -96,7 +96,7 @@ sql_view:
       name: "TARGET_TABLE"
       fqn: "<table_guid>"             # optional — GUID of the destination object
     'on': "[SQL View Display Name::col1] = [TARGET_TABLE::pk_col]"
-    type: LEFT_OUTER                   # INNER | LEFT_OUTER | RIGHT_OUTER | FULL_OUTER
+    type: LEFT_OUTER                   # INNER | LEFT_OUTER | RIGHT_OUTER | OUTER (OUTER = full outer; FULL_OUTER is invalid)
     is_one_to_one: false               # optional — boolean
 ```
 
@@ -157,7 +157,7 @@ sql_view:
 | `destination.name` | Yes | Exact name of the target ThoughtSpot object (table, view, or SQL view) |
 | `destination.fqn` | No | GUID of the destination object — optional but recommended for disambiguation |
 | `on` | Yes | Join condition — uses `[ObjectName::col]` references. Quote as `'on':` in YAML (reserved word). |
-| `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, `FULL_OUTER` |
+| `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, `OUTER`. `OUTER` **is** the full outer join (per ThoughtSpot domain review, 2026-07-30); `FULL_OUTER` is not a ThoughtSpot value. This reference previously listed `FULL_OUTER` and omitted `OUTER` — corrected 2026-07-30. **Evidence class, stated precisely: the SQL View context was *not* probed.** The correction rests on (a) ThoughtSpot's published TML documentation, which gives `type: [RIGHT_OUTER | LEFT_OUTER | INNER | OUTER]` for Views (and identically for Models and Worksheets), and (b) live probes in the two *sibling* contexts — Model inline joins and Table `joins_with[]` — where `FULL_OUTER` was rejected and the four values above accepted, on `se-thoughtspot` 2026-07-30 (see [thoughtspot-model-tml.md](thoughtspot-model-tml.md) *`joins[]` fields*). A direct SQL View probe would upgrade this from strongly-inferred to verified. |
 | `is_one_to_one` | No | Boolean — `true` for 1:1 joins, `false` or absent for many-to-one/many-to-many |
 
 ---

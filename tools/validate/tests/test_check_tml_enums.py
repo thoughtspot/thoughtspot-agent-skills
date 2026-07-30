@@ -106,3 +106,73 @@ def test_valid_data_type_varchar_passes():
     }}
     errors = check_tml.validate_table_tml(data)
     assert not any("data_type" in e for e in errors), errors
+
+
+# ── VALID_JOIN_TYPES: the same four values in every TML context ──────────────
+# Live-verified 2026-07-30 on se-thoughtspot: FULL_OUTER is rejected with error
+# 14528 in BOTH model_tables[].joins[].type and table.joins_with[].type, and
+# OUTER *is* the full outer join. The table context was previously ungated
+# because the reference wrongly documented FULL_OUTER as valid there.
+
+def _table_with_join(join_type):
+    return {"table": {
+        "name": "ORDERS", "db": "DB", "schema": "S", "db_table": "ORDERS",
+        "connection": {"name": "conn"},
+        "columns": [{
+            "name": "c", "db_column_name": "c",
+            "properties": {"column_type": "ATTRIBUTE"},
+            "db_column_properties": {"data_type": "VARCHAR"},
+        }],
+        "joins_with": [{
+            "name": "ORDERS_to_CUSTOMERS",
+            "destination": {"name": "CUSTOMERS"},
+            "on": "[ORDERS::CID] = [CUSTOMERS::CID]",
+            "type": join_type,
+            "cardinality": "MANY_TO_ONE",
+        }],
+    }}
+
+
+def test_table_joins_with_full_outer_is_flagged():
+    errors = check_tml.validate_table_tml(_table_with_join("FULL_OUTER"))
+    assert any("FULL_OUTER" in e and "ORDERS_to_CUSTOMERS" in e for e in errors), errors
+
+
+def test_table_joins_with_outer_passes():
+    errors = check_tml.validate_table_tml(_table_with_join("OUTER"))
+    assert not any("type" in e for e in errors), errors
+
+
+def test_table_joins_with_unknown_type_is_flagged():
+    errors = check_tml.validate_table_tml(_table_with_join("CROSS"))
+    assert any("CROSS" in e for e in errors), errors
+
+
+def _model_with_join(join_type):
+    return _model(
+        model_tables=[
+            {"name": "ORDERS", "joins": [{
+                "with": "CUSTOMERS",
+                "on": "[ORDERS::CID] = [CUSTOMERS::CID]",
+                "type": join_type,
+                "cardinality": "MANY_TO_ONE",
+            }]},
+            {"name": "CUSTOMERS"},
+        ],
+        formulas=[],
+        columns=[{
+            "name": "CID", "column_id": "ORDERS::CID",
+            "properties": {"column_type": "ATTRIBUTE"},
+        }],
+    )
+
+
+def test_model_inline_join_full_outer_still_flagged():
+    errors = check_tml.validate_model_tml(_model_with_join("FULL_OUTER"))
+    assert any("FULL_OUTER" in e for e in errors), errors
+
+
+def test_model_inline_join_outer_passes():
+    # Accept path: OUTER *is* ThoughtSpot's full outer join and must not be flagged.
+    errors = check_tml.validate_model_tml(_model_with_join("OUTER"))
+    assert not any("type" in e for e in errors), errors

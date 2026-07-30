@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-23: added rls_rules structure; prior: validated in 2026-07-11 external sweep) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-30: corrected joins_with[].type — FULL_OUTER is invalid and OUTER was missing, live-verified on se-thoughtspot; 2026-07-23: added rls_rules structure; prior: validated in 2026-07-11 external sweep) -->
 
 # ThoughtSpot Table TML — Construction Reference
 
@@ -42,7 +42,7 @@ table:
     'on': "[SOURCE_TABLE::FK_COL] = [TARGET_TABLE::PK_COL]"
     # on expressions may optionally be wrapped in parens — both styles are valid:
     # 'on': "([SOURCE_TABLE::FK_COL] = [TARGET_TABLE::PK_COL])"
-    type: INNER                # INNER | LEFT_OUTER | RIGHT_OUTER | FULL_OUTER
+    type: INNER                # INNER | LEFT_OUTER | RIGHT_OUTER | OUTER (OUTER = full outer; FULL_OUTER is invalid)
     cardinality: MANY_TO_ONE   # MANY_TO_ONE | ONE_TO_ONE | ONE_TO_MANY | MANY_TO_MANY
   # rls_rules: omit entirely when this table has no row-level security rules
   rls_rules:
@@ -101,7 +101,7 @@ table:
 | `name` | Yes | Join identifier — used as `referencing_join` in model TML (Scenario A) |
 | `destination.name` | Yes | Exact `name` of the target ThoughtSpot table object |
 | `on` | Yes | Join condition — uses `[TABLE::col]` references. Multiple conditions joined with `AND` are supported. Supports range/inequality operators (`>=`, `<`, `>`, `<=`) for range joins, ASOF joins, and SCD lookups — see Range Joins in [thoughtspot-model-tml.md](thoughtspot-model-tml.md). |
-| `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, `FULL_OUTER` |
+| `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, `OUTER` — and nothing else. **`OUTER` *is* the full outer join** (per ThoughtSpot domain review, 2026-07-30); `FULL_OUTER` is **not** a ThoughtSpot value and is rejected here exactly as it is in Model TML: `Invalid value FULL_OUTER of field table->joins_with(1st)->type. Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER` (error 14528, live-verified 2026-07-30 on `se-thoughtspot`; the other four passed as controls in the same document). This reference previously listed `FULL_OUTER` and omitted `OUTER` — that was wrong. See [thoughtspot-model-tml.md](thoughtspot-model-tml.md) *`joins[]` fields* for the full probe record. |
 | `cardinality` | Yes | `MANY_TO_ONE`, `ONE_TO_ONE`, `ONE_TO_MANY`, `MANY_TO_MANY` |
 | `is_one_to_one` | No | Boolean — seen on data augmentation joins and SQL view joins |
 

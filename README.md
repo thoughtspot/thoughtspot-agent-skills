@@ -9,16 +9,17 @@ model authoring, multi-tenancy governance, and data querying. Packaged for
 ## Skills
 
 30 skills across six categories. Each ✓ in the runtime columns links to the
-SKILL.md for that runtime.
+SKILL.md for that runtime. For why an individual skill exists, who tends to need it,
+and when to reach for it, see [skill personas](docs/skill-personas.md).
 
-| Category | What it covers | Skills |
+| Category | Problem it solves | Skills |
 |---|---|:-:|
-| [Setup](#setup) | Credentials, infrastructure, data loading, and tenancy configuration | 8 |
-| [Conversion](#conversion) | Move semantic models between ThoughtSpot and external platforms | 9 |
-| [Semantic Authoring](#semantic-authoring) | Build, optimize, and prepare Models for production | 5 |
-| [Platform & Governance](#platform--governance) | Publish, secure, audit, and maintain across Orgs | 5 |
-| [Query](#query) | Query and explore data through ThoughtSpot's semantic layer | 1 |
-| [Recipes](#recipes) | Pre-built analytical capabilities for ThoughtSpot | 2 |
+| [Setup](#setup) | Nothing else runs until credentials and data exist | 8 |
+| [Conversion](#conversion) | The semantics already exist elsewhere, and rebuilding them by hand is what stalls a migration | 9 |
+| [Semantic Authoring](#semantic-authoring) | A Model that imports cleanly can still answer badly or run slowly | 5 |
+| [Platform & Governance](#platform--governance) | Many audiences, one definition, without a copy per tenant | 5 |
+| [Query](#query) | Getting data out programmatically, and seeing the SQL behind a disputed number | 1 |
+| [Recipes](#recipes) | The same analytical need recurs account after account | 2 |
 
 <a id="setup"></a>
 <details open>

@@ -63,6 +63,12 @@ are roughly ordered by value÷effort.
 
 | Item | Summary | Target |
 |---|---|---|
+| BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
+| BL-183 | Validator: dangling `[formula_X]` refs in `ts tml lint` + CA-JSON table refs | with BL-178 |
+| BL-174 | from-Databricks forward leg: `INNER` join type, dropped `format:`, stamped `cardinality:` | next DBX pass |
+| BL-180 | from-Snowflake translator ignores `\|\|`→`concat` and NULL-preserving division | next formula pass |
+| BL-172 | `check_formula_catalog.py` skips most data rows | next validator pass |
+| BL-171 | Five ts-cli emitters still emit the six non-existent string functions | next formula pass |
 | BL-100 | Bring remaining converters to DBX-from standard (Snowflake pipeline first) | post-audit |
 | ~~BL-064~~ | ~~External audit product-currency fixes (medium-severity residuals)~~ | DONE |
 | ~~BL-118~~ | ~~Codify AgentQL SV/MV backing behaviour~~ | DONE (PR #301) |
@@ -73,6 +79,16 @@ are roughly ordered by value÷effort.
 
 | Item | Summary | Target |
 |---|---|---|
+| BL-186 | Live-verify the four OSSIE-mapping TML property questions (V1-V4) | next se-thoughtspot session |
+| ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
+| BL-184 | Worked-example reproducibility test (ground truth is never re-run) | after BL-178 |
+| BL-179 | from-Snowflake promotes the first synonym over the logical identifier | with BL-166 |
+| BL-181 | from-Snowflake classifies every fact `ATTRIBUTE` (no MEASURE branch) | after BL-178 |
+| BL-182 | from-Snowflake reverse leg: date-suffix override + fabricated CA table `field` | next SF pass |
+| BL-176 | File-only path Table TML gaps in both from-directions | next converter pass |
+| BL-175 | Provenance text written into the round-tripping description field | with BL-166 |
+| BL-166 | `custom_extensions`-style loss stash for the ts-convert-* pairs | next SF converter edit |
+| BL-168 | Property-based tests for the ts-cli converter builders (dual-driver) | next builder change |
 | BL-123 | Product currency gaps (2026-07-22 audit) | weekly sweep |
 | BL-122 | Cross-skill prompt/discovery extraction | next converter edit |
 | BL-127 | Roll out context-budget rule to all conversion skills | next converter edit |
@@ -107,6 +123,12 @@ are roughly ordered by value÷effort.
 
 | Item | Summary | Target |
 |---|---|---|
+| BL-177 | Reverse legs synthesise names that were already available | opportunistic |
+| BL-173 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
+| BL-185 | Validator: `docs/backlog.md` priority-index consistency (number/tier/no-duplicate) | opportunistic |
+| BL-188 | Generate the persona/routing docs from `SKILL.md` frontmatter | opportunistic |
+| BL-167 | Record (or change) the to-direction's never-hard-error-on-loss posture | opportunistic |
+| BL-169 | Vendor-neutral TPC-DS fixture corpus (Phase-3-coupled) | Phase-3 test PR |
 | BL-034 | tools/ & ts-cli quality polish | 2026-10-31 |
 | BL-128 | Skill-size audit: extract detail from heavy converter skills | opportunistic |
 | BL-036 | Databricks-native connection creation | 2026-10-31 |
@@ -125,7 +147,6 @@ are roughly ordered by value÷effort.
 | BL-111 | `--connection` filter: converter rewiring (remaining) | — |
 | BL-112 | Rewire smoke_ts_audit.py onto `ts audit run/report` | — |
 | BL-116 | Live destructive dependency-manager smoke | — |
-| BL-171 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
 | ~~BL-132~~ | ~~from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake)~~ | DONE (PR #332) |
 | ~~BL-133~~ | ~~`ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing)~~ | DONE (PR #333, #335) |
 
@@ -1132,9 +1153,22 @@ requiring `CAN_USE_SPOTTER` + `SPOTTER_COACHING_PRIVILEGE`.
 The published semantic-view YAML spec now accepts constructs the converter still treats as
 DDL-only or unsupported: per-table `facts:`, dimension `sample_values:` (Snowflake-recommended
 for Cortex Analyst accuracy), `labels: [filter]`, `unique:`, `cortex_search_service:`,
-`access_modifier:`, and `base_table.definition:` (SQL-query logical tables, GA 2026-06-26 —
+`access_modifier:`, `using_relationships:` on metrics (scope widened 2026-07-29 — see below),
+and `base_table.definition:` (SQL-query logical tables, GA 2026-06-26 —
 audit 13.4). The schema doc has been corrected (2026-06-17); the **converter emit
 behaviour has deliberately not changed** pending verification.
+
+**`using_relationships` (added 2026-07-29, TPC-DS fidelity review F21).** Every metric
+`build-sv` emits lands at the root of `metrics()` with an unqualified name — which in Semantic
+View terms is the **derived-metric** form, reserved for expressions spanning multiple logical
+tables and required to declare its relationship path (`snowflake-schema.md:275-276`, Key
+Structural Rule #1 at `:233-239`). On the TPC-DS fixture two of the five metrics genuinely do
+span two tables and reach Snowflake with no declared path. Whether Snowflake resolves such a
+metric by inference or rejects it is **unverified** — settle it in step 1's live round trip
+alongside the other constructs, then either emit `using_relationships` or table-scope the
+metric. See `docs/reviews/2026-07-29-ossie-tpcds-fidelity.md` §3.6 F21; the referee could not
+adjudicate it because OSI metrics are model-level by spec, so neither converter had the
+information to scope them.
 
 ### Approach
 
@@ -5391,3 +5425,892 @@ early-bail after N failing tiles (the board is already known broken; naming the 
 enough to act), keeping the full per-tile list only under the cap. Pure change in
 `ts_cli/render_check.py` + the loop in `commands/tml.py verify_render_cmd`; add a test asserting
 the cap. Target: opportunistic — next time a real liveboard with 20+ tiles goes through the gate.
+
+---
+
+## BL-174 -- from-Databricks forward leg: three source-fidelity defects in `mv_build_model.py` `Tier 1`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`), findings F1, F3, F5.
+**Affects:** `tools/ts-cli/ts_cli/databricks/mv_build_model.py`,
+`tools/ts-cli/tests/` (no test asserts any of the three today),
+`agents/cli/ts-convert-from-databricks-mv/references/coverage-matrix.md` (rows #13, #77, #79 —
+added/corrected in the fidelity PR, to be flipped when this lands).
+**Status:** OPEN -- **ready to fix**. All three are localised, source-derived-value-vs-constant
+defects in one module; one PR, one ts-cli bump.
+
+Round-tripping apache/ossie's TPC-DS Metric View fixture (MV -> Model TML -> MV, fully offline)
+scored 9 of 15 constructs `matched`. Three of the six deviations are forward-leg assembly
+defects in the same module, and every gate -- `parse-mv`, `translate-formulas`, `build-model`'s
+own `invariant_findings`/`lint_findings`, `ts tml lint`, `check_tml.py` -- reported clean on all
+three.
+
+| # | Defect | Line | Correct behaviour |
+|---|---|---|---|
+| 1 | **`"type": "INNER"` emitted unconditionally** for every join | `mv_build_model.py:236` | `LEFT_OUTER`. The MV schema has no join-type field because Databricks fixes it: "In a star schema, the `source` is the fact table and joins with one or more dimension tables using a `LEFT OUTER JOIN`" ([Joins in metric views](https://docs.databricks.com/aws/en/business-semantics/metric-views/joins)). `LEFT_OUTER` is a valid Model TML join type (`thoughtspot-model-tml.md:123`), so nothing about the target format forces `INNER`. |
+| 2 | **Measure `format:` never read** | `mv_build_model.py` / `mv_tml.py` (absence) | Write `properties.currency_type.iso_code`. `mv_translate.py:98` already carries `"format": meta.get("format")` into `translated.json`; the data survives parse and translate and is discarded at assembly. The **reverse** leg already implements the pair (`mv_emit_classify.py:228-231`), and `ts-databricks-properties.md:109`/`:122` document it as mapped. `grep -rn currency_type tools/ts-cli/ts_cli/` returns only the two reverse-direction lines. |
+| 3 | **`cardinality: MANY_TO_ONE` stamped on every join** | `mv_build_model.py:237` | Stamp it only when the source declared `cardinality:` explicitly. `rely: {at_most_one_match: true}` works on all runtimes; `cardinality:` is **18.1+ only** and `many_to_one` is the schema default anyway (`databricks-metric-view.md:20`, `:430-437`). Promoting the `rely:` hint means the to-direction then emits `cardinality:`, silently moving the round-tripped MV's runtime floor from 17.3+ to 18.1+ -- the to-mv skill's own prerequisites table says 18.1+ is "Required only if the model has an explicit `MANY_TO_ONE` join" (`ts-convert-to-databricks-mv/SKILL.md:197`). |
+
+**Why Tier 1 is defect 1 alone.** It **changes numbers, silently**. Every fact row whose FK is
+NULL or matches no dimension row is retained by the Metric View and dropped by the ThoughtSpot
+Model, so measures read **lower** in ThoughtSpot than in Databricks on the same data. TPC-DS's
+`store_sales` surrogate-key columns carry no NOT NULL constraint, so the divergence is reachable
+on the fixture's own schema. The magnitude was **not measured** (no live workspace or instance --
+see the report's §2.7); the direction of the error is not in doubt.
+
+**Why the round-trip diff cannot see defect 1.** The Metric View schema has no `type:` field, so
+the source-vs-regenerated diff is silent on it -- it is visible only by reading our intermediate
+TML against the vendor spec. A property-level diff alone scored the round trip 35/38 = 92% and
+missed the one finding that changes numbers. That asymmetry is why this needs a unit test, not a
+round-trip assertion.
+
+**Approach:**
+
+1. Fix the three lines. Defect 3 needs the parsed node to distinguish "declared `cardinality:`"
+   from "inferred from `rely:`" -- `parse-mv` already preserves both, so this is a read of the
+   parsed dict, not a parser change.
+2. Unit tests per defect against `_build_joins` / the assembly function directly (no live
+   connection): a join with only `rely:` emits `LEFT_OUTER` and **no** `cardinality`; a join with
+   explicit `cardinality:` emits it; a measure with `format: {type: currency, currency_code: USD}`
+   emits `properties.currency_type.iso_code: USD`.
+3. Flip coverage-matrix rows #13, #77 and #79 to plain Mapped rows and drop the BL-174 caveats.
+4. Re-run the TPC-DS round trip from the fidelity report's workspace recipe (§1.4) and confirm the
+   regenerated MV has no `cardinality:` keys and carries the `format:` block back.
+5. Bump ts-cli + the from-databricks-mv skill (MINOR -- #2 is a new mapped property).
+
+**Target:** next converter pass on the Databricks pipeline; Tier 1 because defect 1 produces
+wrong numbers today with no warning anywhere in the pipeline.
+
+---
+
+## BL-175 -- Provenance text written into the field that round-trips as the source's own description `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`), findings F4 (Databricks) and F19 (Snowflake) --
+independently observed in both converter pairs, which is what makes it a class rather than a quirk.
+**Affects:** `tools/ts-cli/ts_cli/databricks/mv_build_model.py`,
+`tools/ts-cli/ts_cli/sv_build_model.py`, `tools/ts-cli/ts_cli/sv_build_sv.py`,
+`tools/ts-cli/ts_cli/databricks/mv_emit_classify.py` -- plus a sweep of the other five
+converters, which were not exercised by this review.
+**Status:** OPEN.
+
+Both from-directions append provenance sentences to `model.description`, and both reverse legs
+copy the whole string back into the source's own comment field. Two distinct defects, both
+present in both converters:
+
+1. **Missing separator.** The source description and the appended sentence are concatenated with
+   a single space and no terminating punctuation on the first, producing a run-on that is
+   **user-visible in the ThoughtSpot model description** regardless of any round trip:
+   `"...customer dimensions Converted from Databricks Metric View tpcds.public.tpcds_store_sales."`
+   and `"...sales and customer analytics Converted from Snowflake Semantic View
+   TPCDS.PUBLIC.TPCDS_RETAIL_MODEL."`
+2. **Unbounded accretion.** Because the reverse leg round-trips the polluted string, each
+   conversion cycle appends again. The Snowflake pair appends on **both** legs, so a single round
+   trip already accumulates two provenance strings
+   (`comment='... Converted from Snowflake Semantic View ... | Migrated from ThoughtSpot: Tpcds
+   Retail Model'`) and accretes twice as fast as the Databricks pair.
+
+The provenance itself is legitimate and useful -- the defect is the destination.
+
+**Approach:**
+
+1. Decide the destination once, cross-converter. Options: a dedicated non-round-tripping field;
+   the model's AI-context/instructions block; or the stash BL-166 will introduce (cleanest -- a
+   `_v`-versioned `converted_from` key is exactly the shape BL-166 defines, and a stash-aware
+   reverse leg would strip it from the comment automatically).
+2. Until then, at minimum: separator + terminating punctuation, and make the reverse leg strip a
+   recognised provenance suffix before writing `comment:`/`description:` -- an idempotence
+   property, not a cosmetic fix.
+3. Add a round-trip test that converts twice and asserts the description is byte-identical after
+   the second cycle (the property the current code violates).
+4. Sweep tableau / qlik / powerbi / sisense / looker for the same pattern -- this review only
+   exercised the Snowflake and Databricks pairs, so their status is unknown, not clean.
+
+**Target:** with BL-166 (shared destination decision) or the next converter pass, whichever comes
+first. Tier 2 rather than 3 because the run-on is user-visible on every single conversion, not
+only on a round trip.
+
+---
+
+## BL-176 -- File-only path Table TML gaps in both from-direction converters `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`), findings F7 (Databricks) and F16 (Snowflake).
+**Affects:** `tools/ts-cli/ts_cli/databricks/mv_tml.py`,
+`agents/cli/ts-convert-from-databricks-mv/SKILL.md` (the file-only `tables.json` spec, twice --
+`:552-556` and the identical block at `:607-611`),
+`tools/ts-cli/ts_cli/sv_build_model.py`, `agents/cli/ts-convert-from-snowflake-sv/SKILL.md`
+(Step 10-FILE, Step 6D), both `references/coverage-matrix.md` files.
+**Status:** OPEN.
+
+The two from-direction converters have opposite and equally unsatisfactory offline Table TML
+stories, and the contrast is the finding:
+
+**Databricks emits Table TMLs, but classifies them badly.** `build_table_tml`
+(`mv_tml.py:68-72`) defaults every numeric column to `MEASURE` with `aggregation: SUM`. On the
+TPC-DS fixture the four surrogate keys **and `ss_ticket_number`** -- which the MV *explicitly
+declares a dimension* -- arrive as summable measures, so the user's Tables offer "Sum of Ss Sold
+Date Sk" and a summable ticket number. The Model TML overrides the classification correctly, so
+this is a quality defect, not a fidelity loss. `build_table_tml` **already accepts** per-column
+`column_type` and `aggregation` overrides -- but the SKILL's file-only `tables.json` spec
+documents only `{name, dbx_type}`, so no documented run ever passes them. The information needed
+is free: the MV's own dimension list and every join's `on` clause name exactly which numeric
+columns are keys or declared dimensions.
+
+**Snowflake emits no Table TML at all**, so a documented mapping row is unreachable. Coverage
+row 5 maps table-level `comment=` to `table.description` via "Separate Table TML update"
+(Step 6D) -- but Step 6D needs Table TMLs fetched from a live instance, and Step 10-FILE writes
+`{model_name}.model.tml` only (`SKILL.md:752-753`). `parse-sv` captures all five table comments
+correctly (`"comment": "Fact table containing all store sales transactions"` in the parsed JSON);
+they are then silently dropped. Five of five table descriptions lost on the documented offline
+path.
+
+**Approach:**
+
+1. **Databricks:** derive `column_type`/`aggregation` from the MV itself inside `build-model` --
+   any column named in `dimensions:`/`fields:` or in a join `on` clause is an `ATTRIBUTE` with no
+   aggregation; everything else keeps today's default. Then document the two extra `tables.json`
+   keys in **both** copies of the SKILL.md spec block so a hand-built map can override.
+2. **Snowflake:** emit Table TML on the file-only path too, carrying at least the SV's table-level
+   `comment=` and the physical columns the SV references. The SV DDL does not enumerate every
+   physical column, so these are necessarily partial Table TMLs -- decide explicitly whether that
+   is acceptable (import-then-refresh) or whether the comment should instead be surfaced as a
+   post-import manual step the skill names. Either way the current silent drop is not the answer.
+3. Update coverage rows: from-DBX **L11** and from-SF row **#5** were added/amended in the
+   fidelity PR to declare today's behaviour; flip both when this lands.
+4. Tests: assert the emitted Table TML classifies a join key and an MV-declared dimension as
+   `ATTRIBUTE`; assert the SF file-only path emits one Table TML per referenced table with the
+   parsed `comment` on it.
+
+**Target:** next converter pass; bundle with BL-100 (bring remaining converters to the DBX-from
+standard) if that lands first -- this is exactly the kind of asymmetry BL-100 exists to close.
+
+---
+
+## BL-177 -- Reverse legs synthesise names that were already available `Tier 3`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`), findings F8 (Databricks) and F18 (Snowflake).
+**Affects:** `tools/ts-cli/ts_cli/databricks/mv_emit.py` (`default_view_name`),
+`tools/ts-cli/ts_cli/sv_build_sv.py` (relationship naming),
+`agents/cli/ts-convert-to-databricks-mv/SKILL.md` (Step 5 prompts).
+**Status:** OPEN.
+
+Two independent instances of the same small defect class: the reverse leg generates a name from a
+template when the real name was sitting in the input.
+
+1. **Doubled fact-table token in the default MV name.** `default_view_name(model_name, fact)`
+   concatenates the model name with the fact table, so a model named after its fact produces
+   `tpcds_store_sales_store_sales_mv`. `--view-name` overrides it and **no skill step prompts for
+   it**, so the default is what most runs get. Fix: skip the fact token when the snake-cased model
+   name already ends with it, and add the prompt.
+2. **Relationship names regenerated rather than reused.** The forward leg preserves the SV
+   relationship name correctly onto the join (`name: store_sales_to_date` in the Model TML) and
+   `build-sv` discards it in favour of a `{left}_to_{right}` template, emitting
+   `store_sales_to_date_dim`. The other three names on the TPC-DS fixture survive only
+   coincidentally, by already matching the template. Relationship names are **referenceable** in
+   Snowflake -- `using_relationships` on a metric names them (`snowflake-schema.md:146-147`) -- so a
+   rename breaks any metric or verified query that cites one. Fix: reuse `joins[].name` when
+   present; fall back to the template only when it is absent.
+
+Low impact on this fixture (nothing referenced either name) and both fixes are a few lines with
+an obvious test, which is why they are grouped rather than filed separately: neither justifies its
+own PR, and both are pure name fidelity that costs nothing to preserve.
+
+**Target:** opportunistic -- fold into the next PR touching either emitter (BL-174 for Databricks,
+BL-182 for Snowflake).
+
+---
+
+## BL-178 -- from-Snowflake identifier resolution: a three-defect regression that makes every metric's formula reference dangle `Tier 1`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`), finding F9 -- the report's headline.
+**Affects:** `tools/ts-cli/ts_cli/sv_translate.py` (`:103-137`, `:72-79`),
+`tools/ts-cli/ts_cli/sv_parse.py` (`:470-492`), `tools/ts-cli/ts_cli/sv_build_model.py` (`:96`),
+`tools/ts-cli/tests/test_sv_translate.py` (`:352-361` -- **asserts the defect**),
+`agents/shared/worked-examples/snowflake/ts-from-snowflake-identifier-resolution.md`.
+**Status:** OPEN -- **ready to fix**, with a mandatory three-part scope (below).
+
+**The symptom.** Converting a Semantic View whose metrics aggregate a declared fact -- the normal
+shape, and the shape upstream's own converter always emits -- produces a Model TML in which
+**every measure is unresolvable**. On the TPC-DS fixture all 5 of 5 metric formulas reference
+formula ids that are never declared:
+
+```yaml
+  formulas:
+  - expr: "sum ( [formula_ss_ext_sales_price] )"   # <- no such id
+    id: formula_total revenue
+    name: total revenue
+  - expr: "sum ( [formula_ss_ext_sales_price] ) / unique count ( [CUSTOMER::c_customer_sk] )"
+    id: formula_CLV
+    name: CLV
+```
+
+Declared ids are `formula_total revenue`, `formula_net profit`, `formula_CLV`,
+`formula_brand sales`, `formula_sales per employee`; referenced ids are
+`formula_ss_ext_sales_price`, `formula_ss_net_profit`, `formula_s_number_employees` -- none of
+which exists. All three referents were emitted as plain `columns[]` entries instead. Per
+CLAUDE.md's formula invariant, a bracket reference matching no `formulas[].id` is parsed as search
+tokens rather than resolving, so the expected outcome is import failure or a silently broken
+measure -- **which of the two is unverified** (no instance was available; verify on the fix).
+
+`ts tml lint` and `check_tml.py` both report **clean** on this TML. So does `build-model`'s own
+`lint_findings`. The defect is confined to the forward leg: `build-sv` reads the Step 8
+translations, not the TML expressions (`sv_build_sv.py:518-529`), so repairing the references
+produces a byte-identical DDL -- verified by diff. The **only** damaged artifact is the one the
+user imports.
+
+**This is a regression against a live-verified baseline.**
+`agents/shared/worked-examples/snowflake/ts-from-snowflake-identifier-resolution.md` was "Verified
+end-to-end against `se-thoughtspot` on 2026-06-13" (`:23`, with the resulting model GUID recorded)
+and documents `expr: "average ( [formula_Tenure Months] )"` at `:233`. Re-running that worked
+example's own DDL through today's pipeline emits `average ( [formula_tenure_months] )` and
+**4 of its 8 formulas dangle**. Per `agents/shared/CLAUDE.md` ("Worked examples are ground
+truth"), the worked example wins. Likely window: the Step 4/9/8 rewire onto deterministic
+commands -- from-snowflake-sv SKILL.md v1.17.0, 2026-07-22 -- which postdates the verification.
+
+### Fix scope -- all three defects, or the fix is cosmetic
+
+Repairing only the resolver leaves the index it reads still poisoned. A fix that addresses defects
+1 and 2 would look correct on the TPC-DS fixture and still be wrong on any SV containing a
+computed fact.
+
+**Defect 1 -- the documented resolution order is inverted** (`sv_translate.py:125-137`).
+`ts-from-snowflake-rules.md:585-593` is explicit: step 1 is "is `name` a physical column on the
+table identified by `table_alias`?", step 2 is the facts map. The code checks
+`fact_idx`/`metric_idx` **first** and falls through to `alias_map` afterwards -- and the
+function's own docstring (`:103-110`) restates the correct order immediately above the code that
+inverts it. **This is the defect that fires on TPC-DS**: every fact there is a passthrough whose
+`expr` *is* a physical column, so step 1 would have emitted `[STORE_SALES::ss_ext_sales_price]`
+and resolved cleanly.
+
+**Defect 2 -- the emitted id is not the id `build-model` mints.** Even where a fact or metric
+legitimately becomes a formula, the resolver emits `[formula_<sql_token>]` while `build-model`
+derives the id from the *display* name (first synonym, else title-case -- `sv_build_model.py:96`).
+The rules file forecloses this at step 2: "The reference uses the formula's `id` value (e.g.
+`formula_Tenure Months`), **NOT** the display name." Reordering the resolver does not fix this --
+a correctly-reached step 2 still emits the wrong token.
+
+**Defect 3 -- `sv_parse.py` assigns `alias_name` from the expression, not the declared name**
+(`_resolve_rhs_alias`, `:470-492`), which poisons **both** indexes. It returns the first qualified
+token of the right-hand side as `alias_name` whenever the RHS is more complex than a bare
+`alias.NAME`; `_build_column_index` then keys both `fact_idx` and `metric_idx` on
+`alias_table.alias_name` (`sv_translate.py:72-79`), so a computed fact or metric is indexed under
+**a physical column of its own table** rather than under its declared name. Reproduced with a
+minimal probe -- `STORE_SALES.net_line as STORE_SALES.ss_ext_sales_price -
+STORE_SALES.ss_net_profit` parses to `alias_name: ss_ext_sales_price` with the declared name
+`net_line` in `source_column`. Two corruptions follow: a spurious reference to a physical column
+(`[formula_ss_ext_sales_price] - [STORE_SALES::ss_net_profit]` -- inconsistent *within one
+expression*), and, for `SUM(store_sales.net_line)`, a **metric self-reference** where resolving the
+metric's inner reference hits its own `metric_idx` entry. Latent on TPC-DS; not latent in general.
+
+**Approach:**
+
+1. Fix all three. Defect 3 first -- the index feeds the resolver.
+2. **Fix the test that asserts the bug.** `test_sv_translate.py:352-361`
+   (`test_fact_reference`) asserts `resolver("employees.tenure_months") ==
+   "[formula_tenure_months]"` -- the wrong expectation, which is why this survived.
+3. **Add the missing contract test.** The resolver and `build-model` are each tested in isolation
+   and the contract *between* them -- every `[formula_X]` a metric emits matches an id
+   `build-model` will declare -- is asserted nowhere. Assert it end-to-end over a parsed SV, not
+   per-unit. (The structural half of this is also a validator promotion: BL-183.)
+4. **Re-verify the worked example live.** Re-run
+   `ts-from-snowflake-identifier-resolution.md`'s DDL through the fixed pipeline against
+   `se-thoughtspot` and confirm both the documented `formulas[]` block and a successful import;
+   the worked example is ground truth and must be re-earned, not assumed. Note the worked example
+   **also** diverges on 6 of 18 display names and 2 formula ids for an unrelated reason (coverage
+   row 14's first-synonym promotion landed 2026-06-15, after the 2026-06-13 verification), so
+   expect to reconcile that in the same pass -- see BL-184, which depends on this baseline being
+   trustworthy.
+5. Bump ts-cli + the from-snowflake-sv skill (PATCH -- restores documented behaviour).
+
+**Target:** immediate -- this is the highest-severity finding of the review. Every from-Snowflake
+conversion done since 2026-07-22 on an SV with declared facts has produced a Model whose measures
+do not resolve, with every gate green.
+
+---
+
+## BL-179 -- from-Snowflake promotes the first synonym over the logical identifier `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`), finding F10.
+**Affects:** `tools/ts-cli/ts_cli/sv_build_model.py`,
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 14 (amended in the
+fidelity PR), `agents/cli/ts-convert-from-snowflake-sv/SKILL.md`.
+**Status:** OPEN.
+
+`with synonyms=('...',...)` is read as "first synonym is the display name; the rest are
+synonyms" (coverage row 14). **29 of the 36 named dimension/time_dimension/fact/metric constructs
+on the TPC-DS fixture are renamed this way** -- every construct that carries a synonyms list. The
+7 survivors survive only because they have no synonyms, so the title-case <-> snake-case pair is
+invertible.
+
+**The heuristic is defensible for a Semantic View our own to-direction authored** -- `build-sv`
+emits the ThoughtSpot column name as the first synonym, so the pair round-trips cleanly. It is
+wrong for a Semantic View authored anywhere else, where `with synonyms=(...)` means what Snowflake
+says it means: alternate names for natural-language matching. The referee is unambiguous and
+separates the two fields explicitly: OSI keeps `name: total_sales` and
+`ai_context.synonyms: ["total revenue", ...]` in different places, and upstream's converter carried
+both through correctly.
+
+Worst on metrics, where the substitutions are not even display-name-shaped: `total_sales` ->
+`total revenue`, `customer_lifetime_value` -> **`CLV`**, `store_productivity` ->
+`sales per employee`, `sales_by_brand` -> `brand sales`. Any Cortex Analyst verified query, saved
+question or downstream SQL referencing the real name breaks.
+
+**It also compounds** -- the rename is what triggers the date-heuristic misfire in BL-182 item 1:
+`ss_sold_date_sk` matches no `_DATE_SUFFIXES` entry, but `sale date` does.
+
+**Approach:**
+
+1. Default to the SV logical name as `column.name` and put **all** synonyms in
+   `properties.synonyms`. That is the behaviour the source format's own semantics imply.
+2. Detect our own output and keep today's behaviour for it: `build-sv` emits the ThoughtSpot
+   column name as the first synonym *and* writes a `with extension (CA=...)` clause, so a
+   provenance marker in that clause is the natural signal -- which is exactly the stash BL-166
+   introduces. Until BL-166 lands, a `--promote-first-synonym/--no-promote-first-synonym` flag
+   defaulting to *off* (identifier wins) is the honest interim.
+3. Amend coverage row 14 again when this lands (it was corrected in the fidelity PR only to
+   declare the current hazard).
+4. Tests: a foreign-shaped SV keeps its identifiers and gains all synonyms; a `build-sv`-produced
+   SV still round-trips its ThoughtSpot names.
+
+**Target:** with BL-166 (the provenance signal makes the detection clean) or the next
+from-Snowflake pass. Do **not** land before BL-178 -- renaming behaviour interacts with the id the
+resolver mints.
+
+---
+
+## BL-180 -- from-Snowflake formula translation ignores two mappings it already documents `Tier 1`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`), findings F11 and F12.
+**Affects:** `tools/ts-cli/ts_cli/sv_sql.py`,
+`agents/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md` (a missing hazard
+warning), `agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` (L10, #39 --
+added in the fidelity PR), plus `tools/ts-cli/ts_cli/databricks/mv_sql.py` for the second item.
+**Status:** OPEN -- **ready to fix**; both are mechanical rewrites with no judgment involved.
+
+Two independent findings, one root cause: the translator has the correct mapping documented in
+the reference it cites and does not apply it.
+
+**1. `||` is rejected and the whole construct dropped, though `CONCAT` is mapped.**
+`ts snowflake translate-formulas` on the TPC-DS fixture:
+
+```
+Skipped:
+  - customer_full_name (dimensions): operator '||' — use CONCAT() instead (ts-snowflake-formula-translation.md)
+```
+
+The suggested replacement is already a documented bidirectional mapping, and the second row of it
+is a character-for-character match for the shape needed
+(`ts-snowflake-formula-translation.md:197-198`: `CONCAT(a, ' ', b)` ->
+`concat ( [a] , ' ' , [b] )`). So the translator declines a translation whose rule it names in its
+own error message. `||` is **the ANSI SQL standard** concatenation operator -- the OSI source
+declares this very expression under `dialect: ANSI_SQL` -- and upstream's converter passes
+expressions through untouched, so every `||` in any OSI model reaches us intact. This will drop
+constructs from a large share of real Semantic Views. Fix: a mechanical N-ary fold of `a || b || c`
+to `concat ( a , b , c )` in the tokenizer.
+
+**2. `x / NULLIF(y, 0)` becomes `safe_divide`, silently turning NULL into 0.**
+
+| | |
+|---|---|
+| Source | `SUM(store_sales.ss_ext_sales_price) / NULLIF(SUM(store.s_number_employees), 0)` |
+| Ours (forward) | `safe_divide ( sum ( [...] ) , sum ( [...] ) )` |
+| Ours (regenerated) | `DIV0(SUM(store_sales.ss_ext_sales_price), SUM(store.s_number_employees))` |
+
+`X / NULLIF(Y, 0)` yields **NULL** when `Y = 0`; `safe_divide` yields **0** --
+`thoughtspot-formula-patterns.md:171` states it outright -- and the round trip completes the
+substitution by emitting Snowflake's `DIV0`. A store with zero employees reports **0 sales per
+employee** where the source reports "no value", and the two are not interchangeable downstream:
+0 participates in `AVG`, `MIN` and ranking; NULL does not. Emitted with `"annotations": []` -- no
+flag, no note, nothing in the `build-model` summary. A NULL-preserving translation was available
+throughout: `nullif` is mapped in both directions at `ts-snowflake-formula-translation.md:154`.
+
+**Cross-converter.** from-Databricks does the same collapse and documents it without the caveat
+(coverage rows #23/#67 -- caveat added in the fidelity PR). The **Tableau** mapping already carries
+exactly this warning (`tableau-formula-translation.md:319`: "Returns **0**, not NULL, on zero
+divisor ... flag if downstream logic distinguishes 0 from NULL"); the ts-snowflake and
+ts-databricks mappings carry no such warning. **Magnitude not measured** -- it depends on how many
+rows have a zero divisor, which needs live data on both sides.
+
+**Approach:**
+
+1. `||` -> `concat` N-ary fold in `sv_sql.py`; drop the skip branch. Tests for 2-arg, 3-arg and
+   literal-interleaved forms.
+2. Emit the NULL-preserving form `sum ( [...] ) / nullif ( sum ( [...] ) , 0 )` by default in both
+   `sv_sql.py` and `mv_sql.py`, keeping `safe_divide` behind an explicit opt-in for callers who
+   want 0. If the default must stay `safe_divide` for compatibility, then at minimum emit a typed
+   `annotations[]` entry so the substitution is visible in the summary JSON -- silence is the part
+   that is indefensible.
+3. Add the zero-divisor warning to `ts-snowflake-formula-translation.md` and
+   `ts-databricks-formula-translation.md`, matching the Tableau mapping's wording. Bump the
+   currency anchors and stage-sync the shared files.
+4. Flip coverage rows: from-SF **L10** -> Mapped, from-SF **#39** and from-DBX **#23/#67** to
+   whatever the new default is.
+
+**Target:** next converter-formula pass, alongside BL-171 (same modules, same class of
+"the emitter disagrees with the reference"). Tier 1: item 1 drops constructs and item 2 changes
+numbers, both on common shapes.
+
+---
+
+## BL-181 -- from-Snowflake classifies every fact `ATTRIBUTE`, so `facts()` returns as `dimensions()` `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`), finding F13.
+**Affects:** `tools/ts-cli/ts_cli/sv_translate.py` (`_translate_fact`, `:454-468`),
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 16 (corrected in the
+fidelity PR), `tools/ts-cli/tests/`.
+**Status:** OPEN.
+
+`_translate_fact` hardcodes `ATTRIBUTE` on both branches -- there is no `MEASURE` branch anywhere
+in the function -- while its own docstring describes the choice ("always formulas, classified as
+ATTRIBUTE (non-aggregated) or MEASURE") and coverage row 16 promised "`formulas[]` entries
+(**MEASURE or ATTRIBUTE**)". The documented decision is never actually made.
+
+Consequence on the TPC-DS fixture: all 5 facts leave `facts()` and return inside `dimensions()`;
+the regenerated Semantic View has **no `facts()` block at all**. Quantities, prices, profit and
+employee counts are declared to Cortex Analyst as categorical dimensions.
+
+**The referee draws the line cleanly and we erase it.** OSI marks a field as a fact *by omitting
+the `dimension:` block* -- upstream's own `_classify_field` documents the rule as "A field with no
+`dimension` block is a `fact` regardless of `datatype`" -- and all 22 true dimensions on the
+fixture carry `dimension: {is_time: false}` and are correctly `ATTRIBUTE` on our side. So the
+distinction survives the source format and upstream's converter, and is lost in ours.
+
+This is **structurally the same defect as BL-174 item 1** (a hardcoded constant where the source
+implies a choice) in a different converter -- worth reading the two together, though the fixes are
+independent.
+
+**Approach:**
+
+1. Classify from the SV: a fact whose `expr` is a bare physical column or a row-level arithmetic
+   expression over numeric columns is a `MEASURE` candidate; one that is categorical or produces a
+   string/date is `ATTRIBUTE`. The parsed entry already carries enough to decide
+   (`expr`, `source_column`, and the physical column's type where available).
+2. If the classification cannot be made reliably offline, make it an explicit prompt in the
+   SKILL's review step rather than a silent constant -- but do not leave the docstring describing
+   a branch the code lacks.
+3. Tests over `_translate_fact` directly, one per branch.
+4. Flip coverage row 16 back to "MEASURE or ATTRIBUTE" only once the branch exists.
+
+**Blocks a round-trip check in BL-031.** BL-031 wants the to-direction to emit `facts[]` natively;
+until this lands, a TS <-> SV round trip has no MEASURE-classified facts for it to emit, so that
+half of BL-031 cannot be exercised end-to-end.
+
+**Target:** next from-Snowflake pass, after BL-178.
+
+---
+
+## BL-182 -- from-Snowflake reverse leg: date-suffix heuristic overrides a known type, and metrics are grouped under a fabricated table `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`), findings F15 and F20.
+**Affects:** `tools/ts-cli/ts_cli/sv_build_sv.py` (`_is_date_column` `:94-105`,
+`_classify_formula_column` `:531-538`, `_build_ca_tables` `:610-613`, `to_snake` `:24-32`),
+`tools/ts-cli/ts_cli/sv_lint_ddl.py`, `tools/ts-cli/tests/`.
+**Status:** OPEN. Both defects are in one module and both are a few lines.
+
+**1. A surrogate key is re-emitted as a `time_dimension`.** `ss_sold_date_sk` -- a
+`NUMBER(38,0)` foreign key the source declares under `dimensions:`, not `time_dimensions:` --
+comes back in the Cortex-Analyst extension JSON as the fact table's time dimension:
+`{"name":"store_sales", ... ,"time_dimensions":[{"name":"sale_date"}]}`. That invites date
+filtering and date truncation of a join key. Mechanism: `_is_date_column` tests the declared type
+(correctly fails, `INT64`) then falls back to a name-suffix list containing the bare string
+`"date"`. **The two defects compound**: the original identifier `ss_sold_date_sk` ends in `_sk` and
+matches no suffix -- it only trips the heuristic because BL-179's rename made it `sale date`.
+Neither defect alone produces this. The source `data_type` was available and correct throughout
+and is not consulted once the name test fires. Fix: never let the name heuristic promote a column
+whose declared type is a known **non**-date type; the name test is a fallback for unknown types
+only.
+
+**2. Every formula-backed metric is grouped under a fabricated table named `field`.**
+`_classify_formula_column` builds the metric entry with no `"table"` key; `_build_ca_tables` groups
+by `to_snake(m.get("table", ""))`; and `to_snake` returns the placeholder `"field"` for an empty
+string. The `if tname:` guard immediately above was clearly meant to skip untabled entries --
+`"field"` is truthy, so it never fires. Result: the Cortex Analyst context JSON attributes all five
+metrics to a table that does not exist in the view. **This is general** -- any Model with
+formula-backed measures produces it, not just this fixture. Fix: carry the owning table onto the
+entry (the alias is already resolved when the entry is built), and make `to_snake`'s empty-string
+fallback distinguishable from a real alias so the guard works.
+
+**A gate misses defect 2 within its own documented remit.** `ts snowflake lint-ddl` reports
+`clean — no findings` on a DDL whose CA JSON references a non-existent table, although
+"undeclared table references" is in its `--help` remit -- it checks the DDL clauses and not the CA
+JSON payload. Extending it to the CA payload is the validator half, filed as BL-183.
+
+**Approach:** fix both; unit-test `_is_date_column` with a `NUMBER` column named `sale_date`
+(must be False) and a `DATE` column named `x` (must be True); assert the emitted CA JSON's table
+names are a subset of the `tables()` block -- which is also BL-183's check, so write it once and
+share.
+
+**Target:** next from-Snowflake pass; fold BL-177 item 2 in (same module, same PR).
+
+---
+
+## BL-183 -- Validator promotion: dangling `[formula_X]` references and CA-JSON table references `Tier 1`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`) §3.9 -- the promotion the two-bucket rule
+prefers for BL-178 (F9) and BL-182 item 2 (F20).
+**Affects:** `tools/ts-cli/ts_cli/tml_lint.py` (`ts tml lint`),
+`tools/ts-cli/ts_cli/sv_lint_ddl.py` (`ts snowflake lint-ddl`),
+`agents/shared/schemas/ts-model-conversion-invariants.md` (a new invariant row),
+`docs/quality-gates.md`.
+**Status:** OPEN -- **the preferred exit** for BL-178's class per `.claude/rules/repo-audit.md`.
+
+**Why this is validator-shaped and not a backlog fix.** BL-178 is one bug; *dangling
+cross-references in emitted TML* is a recurring class. The check is purely structural over a
+single TML document -- every bracket reference matching `formula_*` must match a `formulas[].id`
+in the same document -- needing no live instance and no judgment. It belongs in `ts tml lint`'s
+invariant set beside I5/I8, and **it would have caught BL-178 at the moment it was introduced on
+2026-07-22** rather than five weeks later via a fidelity review. Today `ts tml lint`,
+`check_tml.py` and `build-model`'s own `lint_findings` all report clean on a Model whose five of
+five measures are unresolvable.
+
+Two checks, same PR:
+
+1. **`ts tml lint` — dangling formula reference.** For each `formulas[].expr` and each
+   `columns[].formula_id`, resolve every `[formula_*]` bracket token against the document's
+   declared `formulas[].id` set; report each miss with the referring formula's id. Note this is
+   *distinct* from CLAUDE.md's existing display-name-vs-id invariant (I9): I9 says use the id
+   form; this says the id you used must exist.
+2. **`ts snowflake lint-ddl` — CA-JSON table references.** Assert every table name inside
+   `with extension (CA='…')` appears in the DDL's `tables()` block. This is already in the
+   command's documented remit ("undeclared table references") and it currently passes a DDL whose
+   CA payload names a table called `field`.
+
+**Not the same tool as BL-172, deliberately.** BL-172 fixes `check_formula_catalog.py`, a scanner
+over `agents/shared/mappings/*.md` table rows that gates *function-name* claims in documentation.
+This entry gates *reference integrity inside emitted TML/DDL*, in the CLI's own lint commands.
+Different input, different tool, no shared code -- so this is its own entry rather than an
+extension of BL-172's scope, and neither blocks the other.
+
+**Approach:**
+
+1. Add the two checks with unit tests, including a positive case (an id-form reference that
+   resolves) so the check cannot be satisfied by rejecting everything.
+2. Add the invariant to `ts-model-conversion-invariants.md` so the property is written down where
+   BL-168's property tests can pick it up as a generator target.
+3. Regenerate the quality-gates catalog (`generate_quality_gates --check` runs in CI).
+4. Run over the repo's existing worked-example TMLs before enabling as an error -- expect real
+   findings, and triage rather than weaken the check.
+
+**Target:** with or immediately after BL-178. Tier 1: the promotion is the point, and it stops the
+class recurring.
+
+---
+
+## BL-184 -- Worked-example reproducibility: nothing re-runs the ground truth `Tier 2`
+
+**Filed:** 2026-07-29.
+**Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`) §3.9, second validator promotion.
+**Affects:** `tools/ts-cli/tests/test_worked_examples.py`,
+`tools/smoke-tests/`, `agents/shared/worked-examples/snowflake/`,
+`agents/shared/worked-examples/databricks/`, `agents/shared/CLAUDE.md`.
+**Status:** OPEN.
+
+`agents/shared/CLAUDE.md` makes the worked examples **ground truth** -- each was verified
+end-to-end against a live instance and dated. Nothing re-runs them. `test_worked_examples.py`
+re-validates the *documented output* against `check_sv_yaml`/`check_tml`, which asserts the
+document is well-formed, not that today's converter still produces it; only
+`test_databricks_to_golden.py` runs a real emitter against a fixture. That gap is exactly why a
+live-verified output could silently stop being reproducible: BL-178 broke
+`ts-from-snowflake-identifier-resolution.md` on 2026-07-22 and it went unnoticed until this
+review re-ran the example by hand and found 4 of 8 formulas dangling.
+
+**The test that would have caught it:** re-run each Snowflake worked example's DDL through
+`parse-sv -> translate-formulas -> build-model` and diff the emitted `formulas[]` block against
+the block the worked example documents. Same shape for the Databricks examples via
+`parse-mv -> translate-formulas -> build-model`.
+
+**Size it for the baseline it will actually find -- this is the load-bearing caveat.** A naive
+diff against the documented output will **not** come back clean once BL-178 is fixed.
+`ts-from-snowflake-identifier-resolution.md` also diverges on **6 of 18 display names and 2
+formula ids** for an entirely unrelated reason: coverage row 14's first-synonym-to-name promotion
+landed 2026-06-15, *after* the 2026-06-13 verification, so the documented names predate current
+documented behaviour. Two of those divergences are therefore *correct current behaviour* against a
+*stale document*, not regressions. Decide up front which it is for each divergence:
+
+- re-verify the worked example live and update the documented output (preferred -- it restores the
+  document to ground truth, and BL-178's step 4 has to go live on this example anyway, so bundle
+  them); **or**
+- scope the assertion narrowly (formula ids and `expr` reference-resolution only, not display
+  names) and record in the worked example *why* the names are excluded.
+
+Do **not** land a test that silently normalises the difference away -- that reproduces the
+original failure mode one level up.
+
+**Approach:**
+
+1. Land after BL-178, whose step 4 produces the re-verified baseline.
+2. One parametrised test per worked example, driven off a small manifest so a new worked example
+   is covered by adding a row (the same binding discipline as `check_formula_catalog.py`).
+3. Where a divergence is accepted, name it in the manifest with a reason -- an auditable declared
+   difference, not a silent normalisation (the same "documented-lossy vs lossless" two-bar pattern
+   BL-166 item 5 adopts).
+4. If a worked example needs a live instance to re-verify, the offline test asserts the frozen
+   documented output and a `tools/smoke-tests/` entry covers the live leg -- do not skip the
+   offline half because the live half is unavailable.
+
+**Target:** immediately after BL-178. Tier 2 rather than 1 only because it depends on that fix
+landing first; the gate itself is the higher-value half of the pair.
+
+---
+
+## BL-185 -- Validator promotion: `docs/backlog.md` priority-index consistency `Tier 3`
+
+**Filed:** 2026-07-30.
+**Source:** this branch's final review fix-wave
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`) -- while correcting that report's own
+citations, found the same "index row typo'd its own number" pattern PR #356 introduced in this
+file (BL-173's summary indexed as BL-171), hand-fixed on this branch 2026-07-30.
+**Affects:** a new `tools/validate/check_backlog_index.py`, `scripts/pre-commit.sh`,
+`docs/backlog.md` (the `## Priority index` tier tables and the `## BL-NNN` headings they index).
+**Status:** OPEN.
+
+**Why this is validator-shaped and not a one-off fix.** #356 added a Tier 3 priority-index row
+for its own new entry but labelled it `BL-171` instead of `BL-173`:
+
+```
+| BL-171 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
+```
+
+That summary belongs to BL-173 (`## BL-173 -- Bound ts tml verify-render ... Tier 3`); the real
+BL-171 is "Five ts-cli emitters still emit the six non-existent string functions" (`Tier 1`). The
+mislabeled row sat in the index for a full audit cycle before a manual read caught it. A
+grep-for-number collision check (`git grep "BL-173"`) cannot find this class of defect -- it finds
+only the heading, because the row whose number *is* the defect never mentions the right number at
+all. The check that does catch it is structural: cross-validate every index row against its own
+heading.
+
+**Approach:**
+
+1. Parse every `## BL-NNN -- Title \`Tier N\`` heading into `{number: tier}`.
+2. Parse every `| BL-NNN | summary | target |` row under each `### Tier N` section into
+   `{number: section_tier}`, skipping `~~BL-NNN~~` (done/struck-through) rows.
+3. Assert: (a) every index row's number has a matching heading -- catches a row referencing a
+   BL number that doesn't exist; (b) the row's section tier equals its own heading's `Tier N`
+   marker -- this is what would have caught #356's typo, since the BL-171 heading says `Tier 1`
+   while the mislabeled row sat in the `### Tier 3` section; (c) no BL number is indexed twice
+   across all tier sections combined.
+4. Wire into `scripts/pre-commit.sh` gated on `docs/backlog.md` changes, alongside the existing
+   `check_open_items.py` step.
+5. Unit test against a small fixture backlog with a deliberately mismatched row, mirroring the
+   #356 case, so the regression cannot silently return.
+
+**Target:** opportunistic -- next validator sweep, or whenever `docs/backlog.md` is next touched
+for an unrelated reason.
+
+---
+
+## BL-186 -- Live-verify the four OSSIE-mapping TML property questions (V1-V4) `Tier 2`
+
+**Filed:** 2026-07-30.
+**Source:** PR #415 review. The post-ready pass over `docs/ossie/ts-osi-construct-mapping.md`
+swept ThoughtSpot's own product documentation for TML properties our schema references omit. It
+found five, and four of them cannot be settled from documentation alone -- they were recorded as
+verifications **V1**-**V4** in that document's *ThoughtSpot-side open verifications* table. This
+entry is the two-bucket exit for those four, so they are routed rather than sitting as
+"we noticed this".
+**Affects:** `agents/shared/schemas/thoughtspot-model-tml.md`,
+`agents/shared/schemas/thoughtspot-table-tml.md`,
+`agents/shared/schemas/thoughtspot-sql-view-tml.md`,
+`docs/ossie/ts-osi-construct-mapping.md` (the V1-V4 table and the field-level `calendar` row),
+`docs/ossie/ts-osi-compliance-gaps.md` (G10).
+**Status:** OPEN.
+
+**Why these need a live instance.** Our TML references were built from real import failures, so
+they are complete on *what breaks* and incomplete on *what is merely optional*. Absence from them
+is not evidence a property does not exist -- which is exactly how the `calendar` blind spot
+survived. Product documentation establishes that each property below exists; only an export can
+establish the value vocabulary and the round-trip behaviour, and both mapping documents
+deliberately refuse to emit these properties until it does.
+
+| # | What to verify | Method | Why it matters |
+|---|---|---|---|
+| **V1** | `properties.calendar` -- the value vocabulary, and whether it is honoured on a **Table** column | Create a custom calendar on a connection (`POST /api/rest/2.0/calendars/create`, needs 10.12.0.cl+), apply it to a date column, export the Model **and** its Table TML, read back what the `calendar:` value actually is | **The blocking one, and cheapest -- ~15 min.** ThoughtSpot's TML docs give `default \| calendar_name`; our own `thoughtspot-sql-view-tml.md:136` records the literal `CALENDAR_TYPE_GREGORIAN`. Unreconciled, so no converter may emit the property. Also settles whether the Table TML reference needs the row that was deliberately withheld in PR #415 |
+| **V2** | `properties.currency_type` -- the `column` and `is_browser` forms | Set each of the three forms on a measure, export, diff | Documented as three mutually-exclusive forms; our references only ever showed `iso_code`. Confirm both other forms survive a round trip, and whether `column:` takes a display name or a `TABLE::Column` reference |
+| **V3** | `geo_config` naming a custom map (`custom_file_guid` + `geometryType`) | Read-only -- confirm the exported shape | **Already settled as a declared loss** (rule X8 forbids stashing a GUID), so nothing changes for the converter. Verify only so the shape is on record and a future reader does not re-litigate it |
+| **V4** | `properties.is_mandatory_token_filter` | Set it on a column, export, re-import, export again, confirm it is still there | It **fails open**: with the flag, a user whose token carries no filter rule for that column is denied all data; without it, that user sees every value. A round trip that silently drops it *widens* access, so the stash is only as good as the export |
+
+**Steps.**
+
+1. V1 first and on its own -- it is the only one that gates a documented converter behaviour, and
+   it is ~15 minutes on `se-thoughtspot`.
+2. Record each result in the construct-mapping document's V1-V4 table (verified date + finding),
+   not only here, since that table is what a converter author reads.
+3. For any property whose shape is confirmed, add or correct the row in the relevant
+   `agents/shared/schemas/thoughtspot-*-tml.md` and bump that file's currency anchor. `calendar`,
+   `index_priority`, `is_attribution_dimension` and the widened `index_type` / `currency_type` /
+   `aggregation` rows already landed in `thoughtspot-model-tml.md` in PR #415; V1 may add the
+   Table-TML row that was withheld.
+4. `model.lesson_plans` was documented in the same pass from the rendered docs page and flagged
+   provisional. Confirm its shape opportunistically in the same session -- it is not one of the
+   four, and nothing depends on it.
+5. Close the entry only when all four carry a dated verdict, or when a remaining one is explicitly
+   deferred with a reason.
+
+**Refined 2026-07-30** by the G7/G13 verification run (see BL-187). That run exported a 40-model
+random sample from `se-thoughtspot` for an unrelated question and picked up drive-by evidence on
+three of the four. **None of the four is closed** — the evidence narrows V1 and rules nothing out:
+
+| # | Change | Detail |
+|---|---|---|
+| **V1** | **Narrowed.** Still open, and still the blocking one | `properties.calendar` was present on 36 Model columns across 12 models, and the value was the bare token `calendar` in *every* case — never `default`, never `CALENDAR_TYPE_GREGORIAN`. That favours the `calendar_name` reading over the SQL-View reference's enum spelling, but does not settle whether `calendar` is a user-named object or an export sentinel, and no value was seen on a **Table** column. The `calendars/create` leg is still required |
+| **V2** | Unchanged | All 29 observed `currency_type` blocks used `iso_code`; neither `column` nor `is_browser` occurs in the wild, so the round-trip question is untested |
+| **V3** | Unchanged | Read-only by design; nothing observed either way |
+| **V4** | Unchanged | `is_mandatory_token_filter` appeared on zero columns — the fail-open round-trip risk is still unverified |
+| step 4 | **Done** | `model.lesson_plans` shape **confirmed** on 4 real Models: a `properties:` sibling holding `{lesson_id: <int>, lesson_plan_string: <string>}`. The provisional marker has been dropped from `thoughtspot-model-tml.md` |
+
+**Not in scope.** The thirteen ThoughtSpot product gaps in `docs/ossie/ts-osi-compliance-gaps.md`
+are deliberately **not** routed to a backlog entry -- they are input to a product conversation,
+not repo work. This entry covers only the four verifications, which *are* ours to close.
+
+**Target:** next `se-thoughtspot` session -- V1 alone is a 15-minute task and can ride along with
+any unrelated live check.
+
+---
+
+## BL-187 -- Live-verify the two contested OSSIE product-gap claims (G7, G13) `Tier 2`
+
+**Filed:** 2026-07-30.
+**Source:** a ThoughtSpot domain expert challenged two rows of
+`docs/ossie/ts-osi-compliance-gaps.md` on reading it. Both challenges were correct.
+**Affects:** `docs/ossie/ts-osi-compliance-gaps.md` (G7, G13),
+`docs/ossie/ts-osi-construct-mapping.md` (Field + Metric `description`/`datatype` rows, the
+relationship `type` row, rule **R5**, the RelationshipLevel and MetricLevel stash schemas),
+`agents/shared/schemas/thoughtspot-model-tml.md`,
+`agents/shared/schemas/thoughtspot-table-tml.md`,
+`agents/shared/schemas/thoughtspot-sql-view-tml.md`,
+`agents/shared/mappings/ts-snowflake/ts-to-snowflake-rules.md`,
+`agents/cli/ts-convert-from-snowflake-sv/references/step-7-join-discovery.md`,
+`tools/validate/check_tml.py`.
+**Status:** RESOLVED 2026-07-30 (live-verified on `se-thoughtspot`; both claims corrected in
+`docs(ossie): G7/G13 live verification`).
+
+**Result — both challenges upheld; one gap halved, one withdrawn entirely.**
+
+| Claim | As written | Verdict |
+|---|---|---|
+| **G7** | Formula-backed columns carry *neither* a description *nor* a declared datatype | **Half wrong.** `description` is a first-class Model `columns[]` field and works on formula-backed entries — 14 of 78 formula columns in a 40-model random sample carry one, and it is in ThoughtSpot's published Model TML syntax. The *datatype* half stands: no `data_type` key exists on `columns[]` or `formulas[]`, and 0 of 78 carried one. Gap narrowed from four `lossy→issue` verdicts to two, priority Medium → Low |
+| **G13** | `FULL_OUTER` accepted on a Table join, rejected on a Model inline join, so a converter must downgrade and "change results" | **Withdrawn — not a product gap.** `FULL_OUTER` is rejected on the **Table** join too, with the byte-identical error 14528 and the same allowed list, so the two contexts never diverged. And `OUTER` **is** ThoughtSpot's full outer join, so `FULL_OUTER → OUTER` is a rename that changes nothing. The defect was **ours** |
+
+### How it was settled
+
+The BL-170 harness pattern: `ts tml import --policy VALIDATE_ONLY` against the **Payroll Test
+Model** (`acf62370-...`) and its `PAYROLL_LOCATIONS` table, one variable per probe, verbatim
+responses recorded. Nothing was persisted — the model re-exported byte-identical, the table
+gained no `joins_with`, and `ts metadata search --name "%G7PROBE%"` returned `[]`.
+
+**The decisive evidence for G7 was not the probes.** A negative control settled that: an
+invented nonsense key on a `columns[]` entry (`g7probe_nonsense_key: x`) **also validated
+clean**, proving a Model import silently ignores unknown keys there. So every acceptance
+result on this surface is worthless, and `description`/`data_type` acceptance proved nothing.
+What proved it instead was a **40-model random export sample** plus ThoughtSpot's own published
+TML syntax — the product writes `description` on formula columns and has no `data_type` field
+for them at all. Recording this because it generalises: *on a Model `columns[]` entry,
+VALIDATE_ONLY acceptance is not evidence of support.* Rejection remains decisive.
+
+For G13 the probes **were** decisive, because join `type` is enum-validated: `FULL_OUTER` and
+`FULL` were both rejected (error 14528) in each of the two contexts, while `INNER`,
+`LEFT_OUTER`, `RIGHT_OUTER` and `OUTER` all passed as controls in the same documents. No
+`FULL_OUTER` was found persisted on any of 19 real tables scanned, and ThoughtSpot's TML
+documentation gives `[RIGHT_OUTER | LEFT_OUTER | INNER | OUTER]` for Models, Views and
+Worksheets alike.
+
+### Validator promotion (the preferred two-bucket exit)
+
+`check_tml.py` gated `FULL_OUTER` on model inline joins only, and carried a comment asserting
+that Table TML *did* accept it — so the table context was deliberately exempt and would pass
+TML that fails at import. The join-type check is now shared (`_validate_join_type`) and applied
+to `table.joins_with[].type` as well, with four unit tests in
+`tools/validate/tests/test_check_tml_enums.py`. This class of drift can no longer recur in
+either of the two validated contexts. **One residual gap:** `check_tml.py` has no `sql_view`
+validator at all (`validate_tml` dispatches on `table` and `model` only), so SQL View
+`joins[].type` is corrected in the reference but ungated. Small and low-risk — SQL View TML is
+rarely hand-authored here — but worth folding into the next `check_tml.py` change rather than
+left unmentioned.
+
+**Follow-on:** none required. G7's remaining datatype half is a live product gap and stays in
+the gaps document unrouted, per that document's stated policy on bucket-1 rows.
+
+---
+
+## BL-188 -- Generate the persona/routing docs from `SKILL.md` frontmatter `Tier 3`
+
+**Filed:** 2026-07-30.
+**Source:** the field-enablement AMA prep (session scheduled 2026-08-06). Writing
+`docs/skill-personas.md` and the README "Which skill do I need?" table surfaced that the
+"why does this exist / who is it for / when do I reach for it" layer existed **nowhere** in the
+repo: a grep for `persona` / `business problem` / `audience` across all `SKILL.md` files, `docs/`
+and `CLAUDE.md` returned zero hits, and only 5 of 28 CLI skills carried a `When to use` section
+(`ts-audit`, and four others; the nine `ts-convert-*` skills encode direction-and-fit in their
+`description:` frontmatter instead).
+**Affects:** `docs/skill-personas.md`, a new `tools/validate/generate_skill_personas.py`,
+`scripts/pre-commit.sh`, and the frontmatter of every `agents/*/*/SKILL.md`.
+**Status:** OPEN.
+
+**Scope narrowed 2026-07-30**, the same day it was filed. The README "Which skill do I need?" routing
+table this entry originally also covered was **removed** on review: at 18 rows it restated the
+skills catalogue immediately below it in a second format, which is duplication a generator would
+only have made cheaper to maintain, not less redundant. The category summary table now carries a
+one-line *problem it solves* per category instead -- six hand-written cells that change only when
+a category is added, so they are deliberately **not** generator scope. This entry is therefore
+about `docs/skill-personas.md` alone.
+
+**Why the hand-written version is a stopgap.** The page is
+hand-maintained prose *about* skills, kept in a file that is not those skills. `check_consistency.py`
+verifies only that each skill *name* appears somewhere in the README skills table -- it says nothing
+about whether the prose next to that name is still true. So the failure mode is the same one
+`generate_parity.py` and `generate_quality_gates.py` were built to remove: a describing document
+drifts from the thing it describes, silently, and the drift is only found by a human reading both.
+A skill can be renamed, re-scoped, or have its coverage limits change with nothing failing.
+
+The reason it was written by hand anyway: the alternative at the time was a ~32-file PR (23 CLI
+`SKILL.md` bodies plus 5 mirrors, each requiring a version bump and changelog row per
+`.claude/rules/versioning.md`, plus mirror `synced-from` marker updates) for a docs-only change,
+and it needed to exist before the 2026-08-06 enablement session. The generated version is the
+same content with the source of truth moved to where it cannot drift.
+
+**Approach:**
+
+1. Add two optional frontmatter keys to `SKILL.md`: `personas:` (a list of role slugs) and
+   `use-when:` (a short list of jobs-to-be-done). Keep them **out** of `description:` --
+   that field drives skill triggering and is already budgeted by
+   `check_skill_context_cost.py`; adding business framing to it dilutes match accuracy and
+   costs context on every session that loads the skill.
+2. Write `tools/validate/generate_skill_personas.py`, following the
+   `generate_parity.py` / `generate_quality_gates.py` pattern including the `--check` mode, to
+   emit the per-skill entries in `docs/skill-personas.md`.
+3. Wire `--check` into `scripts/pre-commit.sh` and `.github/workflows/validate.yml` gated on
+   `SKILL.md` / `docs/skill-personas.md` changes, so adding a skill without persona
+   metadata fails the same way a missing coverage matrix does.
+4. Backfill the two keys across all 30 skills, taking the values from the prose already written
+   in `docs/skill-personas.md` on this branch. This is the version-bump-heavy step; do it in one
+   PR so the churn is a single reviewable pass rather than spread across unrelated changes.
+5. Once generated, delete the "Keeping this page honest" caveat at the foot of
+   `docs/skill-personas.md`, which exists only to flag the hand-maintained state.
+
+**Decide when picking this up:** whether the per-skill "Why this exists" prose should also render
+*into* each `SKILL.md` (co-located, discoverable when browsing one skill folder on GitHub) or stay
+only in the aggregate page. Rendering into `SKILL.md` is the friendlier read for a contributor who
+opens a single skill, but it puts human-audience prose into the file every agent session loads.
+Step 1's keys make either choice cheap, so the question does not need answering before step 1.
+
+**Target:** opportunistic -- next validator sweep, or whenever a new skill is added and the
+persona entry has to be written by hand anyway.

@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (validated in 2026-07-11 external sweep — no changes needed) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-30: live-verified on se-thoughtspot — columns[].description confirmed on formula-backed entries, no data_type on formulas[]/columns[], and the single join-type vocabulary INNER/LEFT_OUTER/RIGHT_OUTER/OUTER confirmed in both Model and Table contexts; earlier 2026-07-30: added columns[] properties.calendar / index_priority / is_attribution_dimension, widened index_type + currency_type from a product-docs sweep; prior: validated in 2026-07-11 external sweep) -->
 
 # ThoughtSpot Model TML — Construction Reference
 
@@ -91,6 +91,7 @@ model:
 | `model.filters` | No | Model-level pre-filters applied before any query |
 | `model.joins_with` | No | Data augmentation joins at the model level (e.g. joining an uploaded CSV to the model) |
 | `model.properties` | No | Model-level settings |
+| `model.lesson_plans` | No | In-product guided-lesson strings attached to the model — a list of `{lesson_id: <int>, lesson_plan_string: <string>}` entries, a sibling of `properties:` rather than a key inside it. **Shape confirmed 2026-07-30** against 4 real Models on `se-thoughtspot` (e.g. `{lesson_id: 0, lesson_plan_string: "What were [Sales] by [Store Region] in [Date].'last year' ?"}`). Pass through on round-trips; do not emit when generating a model. |
 
 ### `model_tables[]` fields
 
@@ -120,8 +121,36 @@ Each `joins[]` entry has `with` (always required) plus **one of two forms**:
 |---|---|---|
 | `with` | Yes | Must equal the `name:` of the target `model_tables[]` entry exactly (case-sensitive) |
 | `on` | Yes | Quote with `'on':` — `on` is a YAML reserved word. Format: `[FROM::fk] = [TO::pk]`. Supports range/inequality operators — see Range Joins below. |
-| `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, or `OUTER`. `FULL_OUTER` is **not valid** in model TML inline joins — ThoughtSpot raises "Invalid value FULL_OUTER … Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER". Use `OUTER` for full outer joins. |
+| `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, or `OUTER`. **`OUTER` *is* the full outer join** — it is ThoughtSpot's name for it, not a narrower join type (per ThoughtSpot domain review, 2026-07-30). `FULL_OUTER` is **not** a ThoughtSpot value and is rejected: "Invalid value FULL_OUTER … Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER". So mapping a source `FULL OUTER` to `OUTER` is a **rename, not a downgrade** — no semantics are lost. Table `joins_with[].type` accepts exactly the same four and rejects `FULL_OUTER` identically (both live-probed — see the note below); SQL View `joins[].type` is documented with the same four but was **not** probed, so treat it as strongly inferred rather than verified. |
 | `cardinality` | Yes | `MANY_TO_ONE` for most fact-to-dimension joins |
+
+**Join-type vocabulary — re-verified 2026-07-30 on `se-thoughtspot`.** The `FULL_OUTER`
+rejection recorded here from an earlier real import failure is **still current** on this
+build, and the probe extended it in two ways:
+
+| Context probed | `FULL_OUTER` | `OUTER` / `INNER` / `LEFT_OUTER` / `RIGHT_OUTER` |
+|---|---|---|
+| Model inline `model_tables[].joins[].type` | rejected — error 14528 | all accepted |
+| Table `joins_with[].type` | **also rejected** — error 14528, identical allowed list | all accepted |
+
+Verbatim response for the Table context (the newly-corrected half) — the whole `status`
+object, so the `error_code` is on the record and not just asserted:
+
+```json
+{"status": {"error_message": "Invalid value <b> FULL_OUTER </b> of field <b> table->joins_with(1st)->type </b>. Allowed values are <b> INNER, LEFT_OUTER, OUTER, RIGHT_OUTER </b>. <br/><br/>G7PROBE_JOIN: Skipped relationship import as source_table is not populated, possible because import of source table failed. <br/>", "status_code": "ERROR", "error_code": 14528}}
+```
+
+(The trailing "Skipped relationship import" sentence is a cascade of the `type` failure — it
+is absent from all five passing probes on the same document.)
+
+So `OUTER` is the full outer join and `FULL_OUTER` is valid in **neither** probed context.
+ThoughtSpot's own TML documentation extends this to Views, giving
+`type: [RIGHT_OUTER | LEFT_OUTER | INNER | OUTER]` for Models, Views and Worksheets alike —
+note that the **SQL View context was not probed**, so its vocabulary is documented and
+inferred from these two siblings rather than directly verified.
+`FULL_OUTER` was previously documented as valid for Table `joins_with[]` in
+[thoughtspot-table-tml.md](thoughtspot-table-tml.md) and
+[thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md); that was wrong and is corrected.
 
 #### Range / Inequality Joins
 
@@ -166,19 +195,23 @@ joins:
 | `column_id` | Physical column | Format: `TABLE_NAME::col_name` — TABLE_NAME is the `name:` (or `alias:`) from model_tables |
 | `formula_id` | Formula reference | Must match a `formulas[].id` exactly (case-sensitive, spaces included) |
 | `name` | Yes (always) | Display name shown in ThoughtSpot search bar |
+| `description` | No | Free-text column description, a **sibling of `name`** (not under `properties:`). Valid on **both** `column_id` and `formula_id` entries — a formula-backed column's description lives here, because the `formulas[]` entry has no `description` field of its own. Live-verified 2026-07-30 on `se-thoughtspot`: 14 of 78 formula-backed columns across a 40-model sample carry one, and ThoughtSpot's own Model TML syntax lists `description: <optional_column_description>` as a `columns[]` key. Pass through on round-trips. |
 | `properties.column_type` | Yes | `ATTRIBUTE` or `MEASURE` |
-| `properties.aggregation` | No | For MEASURE: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT`. Valid on both `column_id` and `formula_id` entries. **Warning:** `COUNT_DISTINCT` on a `column_id` causes ThoughtSpot to silently override `column_type` to `ATTRIBUTE`. Always use a `formulas[]` entry with `unique count ( [TABLE::col] )` instead. |
-| `properties.index_type` | No | `DONT_INDEX` suppresses text-search indexing. `PREFIX_ONLY` indexes only the string prefix (faster prefix search on long strings). Omit for full indexing (default). |
+| `properties.aggregation` | No | For MEASURE: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT`. The full documented set also includes `NONE`, `STD_DEVIATION` and `VARIANCE` — accept all nine when round-tripping an exported model, and prefer the six above when generating one. Valid on both `column_id` and `formula_id` entries. **Warning:** `COUNT_DISTINCT` on a `column_id` causes ThoughtSpot to silently override `column_type` to `ATTRIBUTE`. Always use a `formulas[]` entry with `unique count ( [TABLE::col] )` instead. |
+| `properties.index_type` | No | `DONT_INDEX` suppresses text-search indexing. `PREFIX_ONLY` indexes only the string prefix (faster prefix search on long strings). The full documented set also includes `DEFAULT`, `PREFIX_AND_SUBSTRING` and `PREFIX_AND_WORD_SUBSTRING` — accept all five when round-tripping an exported model. Omit for full indexing (default). |
+| `properties.index_priority` | No | Integer — raises or lowers this column's priority in search indexing relative to others. Pass through on round-trips. |
+| `properties.is_attribution_dimension` | No | Boolean — marks the column as an attribution dimension. Pass through on round-trips. |
 | `properties.is_hidden` | No | `true` hides the column from the search bar. **Do not set during conversion or model creation** — hidden columns cause locked visualizations and unexpected query behaviour. Leave visibility decisions to the model owner after import. |
 | `properties.is_additive` | No | `true` marks a column as additive — used on semi-additive models to explicitly allow summation across time. |
 | `properties.format_pattern` | No | Number display format string. Common values: `"#,##0"` (integer), `"#,##0.0%"` (percentage), `"###0"` (plain). |
-| `properties.currency_type.iso_code` | No | ISO currency code (e.g. `USD`, `EUR`) — adds currency symbol and formatting to a measure. |
+| `properties.currency_type` | No | Adds currency symbol and formatting to a measure. Exactly **one** of three mutually-exclusive forms: `iso_code: USD` (a fixed ISO code — the common case), `column: <column_name>` (the code is read per row from another column), or `is_browser: true` (format in the viewer's browser locale). Only `iso_code` is used when generating new models; accept all three when round-tripping. |
 | `properties.geo_config` | No | Geographic role for the column. See Geo Config below. |
 | `properties.spotiq_preference` | No | `"EXCLUDE"` removes the column from SpotIQ auto-analysis (use on lat/long, internal IDs). |
 | `properties.search_iq_preferred` | No | `true` flags this column as preferred in Search IQ / natural language queries. |
 | `properties.ai_context` | No | Free-text description used by Spotter (AI search) to understand the column's business meaning. Appears on most columns in AI-enriched models. Pass through on round-trips; safe to omit when constructing new models. |
 | `properties.custom_order` | No | Array of attribute values in custom display order. Used to control sort order in visualizations (e.g. `[USA, UK, France]`). ATTRIBUTE columns only. |
 | `properties.default_date_bucket` | No | Default time granularity for date columns. Values: `DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `YEARLY`, `AUTO`. Omit for ThoughtSpot default. |
+| `properties.calendar` | No | **Date columns only** — the custom / fiscal calendar the column is bucketed by, so quarters and years follow a fiscal or 4-4-5 retail calendar instead of the Gregorian one. **Reference only:** the calendar itself is a *Connection-scoped* object created outside TML (`POST /api/rest/2.0/calendars/create`, 10.12.0.cl or later, backed by a warehouse calendar table), so this value is meaningless on a target instance whose connection has no calendar of that name. **Do not emit when generating a model** — pass through on round-trips only. The value vocabulary is not settled: ThoughtSpot's TML documentation gives `default` or a calendar name, while [thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md) records the literal `CALENDAR_TYPE_GREGORIAN` on SQL View columns. Verify against a live export before relying on either spelling. |
 | `properties.synonyms` | No | Array of alternative names for search. **Must live under `properties:`** — top-level `synonyms:` at the column root is silently dropped on import. |
 | `properties.synonym_type` | No | `USER_DEFINED` for user-supplied synonyms; `AUTO_GENERATED` for ThoughtSpot-inferred. Set to `USER_DEFINED` whenever you populate `properties.synonyms`. |
 | `data_panel_column_groups` | No | Assigns the column to one or more data panel folders. Map of `{folder_name: ''}` — values are always empty string. A column can appear in multiple folders. Folder names must match entries in `column_groups[].column_group_info[].name`. Pass through on round-trips. |
@@ -192,6 +225,14 @@ joins:
 | `expr` | Yes | ThoughtSpot formula expression. Use `>-` block scalar if expression contains `{ }` curly braces. |
 | `properties.column_type` | No | `ATTRIBUTE` or `MEASURE`. Optional in the `formulas[]` entry itself. |
 | `was_auto_generated` | No | `true` when ThoughtSpot auto-generated this formula (e.g. AI-derived). `false` or absent = user-created. Pass through on round-trips; never set to `true` when constructing new formulas. |
+
+**A `formulas[]` entry has no `description` and no declared data type** (verified 2026-07-30 on
+`se-thoughtspot` against a 40-model sample and ThoughtSpot's published Model TML syntax). Put a
+formula's description on the surfacing `columns[]` entry instead — that is its home. There is no
+`data_type` key on either the `formulas[]` or the `columns[]` entry: ThoughtSpot derives a
+formula's type from its expression, and it cannot be declared. Note that acceptance is not
+evidence here — a Model import silently ignores unknown keys on a `columns[]` entry, so an
+invented `data_type:` validates clean and does nothing.
 
 **Never add `aggregation:` to a `formulas[]` entry** — formulas are self-contained through
 their `expr`. Adding `aggregation:` causes `FORMULA is not a valid aggregation type`.

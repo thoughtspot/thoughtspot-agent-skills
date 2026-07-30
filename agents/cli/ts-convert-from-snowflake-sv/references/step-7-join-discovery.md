@@ -92,7 +92,7 @@ For each join, provide:
   To table: ______
   To column(s): ______
   Cardinality: MANY_TO_ONE / ONE_TO_ONE / MANY_TO_MANY
-  Type: LEFT_OUTER (default) / INNER / RIGHT_OUTER / FULL_OUTER
+  Type: LEFT_OUTER (default) / INNER / RIGHT_OUTER / OUTER   (OUTER = full outer; FULL_OUTER is invalid TML)
 
 Add another join? [Y / done]
 ```
