@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — function composition rules, if() parens mandatory; string-function nativeness re-verified on se-thoughtspot 2026-07-29 per BL-170 — trim/ltrim/rtrim/replace/starts_with/ends_with confirmed ABSENT, `in` confirmed curly-brace-only) -->
+<!-- currency: thoughtspot — 2026-07 (variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — function composition rules, if() parens mandatory; string-function nativeness re-verified on se-thoughtspot 2026-07-29 per BL-170 — trim/ltrim/rtrim/replace/starts_with/ends_with confirmed ABSENT, `in` confirmed curly-brace-only; window/semi-additive signatures verified on se-thoughtspot 2026-07-30 — no PARTITION BY slot on moving_*/cumulative_*, rank/rank_percentile arity fixed at 2, first_value/last_value partition + axis explicit, lag/dense_rank/row_number/nth_value/moving_count/moving_stddev/cumulative_count confirmed ABSENT) -->
 
 # ThoughtSpot Formula Patterns — Reference
 
@@ -173,7 +173,7 @@ else 0
 | `floor` | `floor ( [x] )` |
 | `ceil` | `ceil ( [x] )` |
 | `abs` | `abs ( [x] )` |
-| `pow` | `pow ( [x] , [n] )` | Verified 2026-06-13. **Not** `power` — that name is rejected. |
+| `pow` | `pow ( [x] , [n] )` — **not `power`**, which the parser rejects (verified 2026-06-13) |
 | `mod` | `mod ( [x] , [n] )` |
 | `sqrt` | `sqrt ( [x] )` |
 | `ln` | `ln ( [x] )` |
@@ -294,6 +294,45 @@ a string. No reformatting needed; just provide a matching format pattern.
 ---
 
 ## Window Functions
+
+> **The window shape is completed from the search context — a window formula cannot declare its
+> own PARTITION BY.** *Per ThoughtSpot domain review, 2026-07-30, live-confirmed the same day on
+> `se-thoughtspot` by rejection.* `moving_*` and `cumulative_*` take a measure, frame offsets and
+> **order** columns only; there is no partition argument and one cannot be added:
+>
+> ```
+> # REJECTED — Search did not find "{"
+> moving_sum ( [T::AMOUNT] , 1 , -1 , [T::ORDER_DATE] , { [T::REGION] } )
+> cumulative_sum ( [T::AMOUNT] , [T::ORDER_DATE] , { [T::REGION] } )
+>
+> # REJECTED — Search did not find "query_groups ( ) )"
+> moving_sum ( [T::AMOUNT] , 1 , -1 , [T::ORDER_DATE] , query_groups ( ) )
+> ```
+>
+> The partition is whatever dimensions the user's search or Answer carries, minus the order
+> columns. `rank` / `rank_percentile` are stricter still — arity is fixed at exactly two, so they
+> are always global (see Rank Functions below). **The one exception is the semi-additive pair**
+> `first_value` / `last_value`, whose partition *is* an explicit argument — see Semi-Additive
+> Functions.
+>
+> Consequence for any conversion: a source window expression with an explicit `PARTITION BY`
+> (SQL `OVER`, Tableau `WINDOW_*`, DAX, LookML) has **no** native ThoughtSpot target. Use a
+> `sql_*_aggregate_op` pass-through carrying the whole `OVER` clause, wrapped in
+> `group_aggregate ( ... , query_groups ( ) + { [partition_col] } , query_filters ( ) )` so the
+> partition column reaches the GROUP BY — see *`group_aggregate` wrapping for pass-through window
+> functions* below.
+>
+> The order columns are optional too: `cumulative_sum ( [T::AMOUNT] )` — a single argument, no
+> order attribute — was **accepted** (2026-07-30), which leaves *both* halves of the window to the
+> query context. `moving_*` is stricter: its frame offsets are positional and required
+> (`moving_sum ( [m] , [ord] )` → `Function moving_sum expects 2nd argument to be Numeric`).
+>
+> **Functions that do NOT exist** (all rejected 2026-07-30 with
+> `Search did not find "<name> ("`): `lag`, `dense_rank`, `row_number`, `nth_value`,
+> `moving_count`, `moving_stddev`, `cumulative_count`. The ordered-window family is
+> `sum` / `average` / `max` / `min` only; a windowed `COUNT` / `STDDEV` / `VARIANCE` has a
+> *partitioned* form (`group_count`, `group_stddev`, `group_variance`) and no ordered or framed
+> form of any kind.
 
 ### Cumulative Functions
 
@@ -441,6 +480,28 @@ rank ( sum ( [FACT::QUANTITY] ) , 'desc' )
 rank_percentile ( sum ( [FACT::REVENUE] ) , 'asc' )
 ```
 
+**Signature live-verified 2026-07-30, se-thoughtspot** (`VALIDATE_ONLY`). Both forms above
+import clean. Four hard constraints, each proven by rejection:
+
+| Attempt | Verbatim rejection |
+|---|---|
+| `rank ( sum ( [m] ) )` — direction omitted | `Function rank expects 2 arguments, found 1.` |
+| `rank ( [m] , 'desc' )` — bare column | `Function rank expects 1st argument to be aggregated.` |
+| `rank ( sum ( [m] ) , 'desc' , [attr] )` — and the `{ [attr] }` and `query_groups ( )` spellings | `Function rank expects only 2 arguments.` |
+| `rank ( group_aggregate ( sum ( [m] ) , { [a] } , query_filters ( ) ) , 'desc' )` | `Search did not find "group_aggregate ( sum ("` |
+
+`rank_percentile` behaves identically (`Function rank_percentile expects only 2 arguments.`).
+So a **partitioned rank has no native form at all** — not via an extra argument, and not by
+wrapping the measure in a `group_aggregate`. Use the `sql_int_aggregate_op` pass-through with
+`group_aggregate` wrapping (see below).
+
+**Caveat — the direction string is not validated at import.** `rank ( sum ( [m] ) , 'descending' )`
+was **accepted**. Acceptance proves the call shape, never the ordering; only `'asc'` and `'desc'`
+are documented, so emit only those.
+
+For dense ranking and row numbering, note that `dense_rank ( )` and `row_number ( )` **do not
+exist** — both rejected 2026-07-30. Use a pass-through.
+
 ---
 
 ## Level of Detail (LOD) Functions
@@ -523,6 +584,30 @@ balance, account balance, headcount at period end).
 
 - The `grouping` argument uses the same `query_groups()` / `{}` syntax as `group_aggregate`
 - The `{ date_col }` argument (curly braces) specifies the time axis — **requires `>-` YAML encoding**
+
+**This family is the exception to the no-explicit-PARTITION-BY rule above** — its partition and
+its axis are *both* explicit formula arguments. Live-verified 2026-07-30, se-thoughtspot
+(`VALIDATE_ONLY`); every grouping form below imports clean:
+
+| Grouping argument | Accepted? | Meaning |
+|---|:-:|---|
+| `query_groups ( )` | ✓ | Partition by the query grain (the common snapshot case) |
+| `{ [T::attr] }` | ✓ | **Fixed single-column partition** — declared in the formula |
+| `{ [T::a] , [T::b] }` | ✓ | **Fixed multi-column partition** |
+| `{ }` | ✓ | Grand total — no partition |
+| `query_groups ( ) - { [T::attr] }` | ✓ | Query grain minus one dimension |
+
+Two enforced constraints:
+
+- **The axis argument must be a List** — the braces are mandatory:
+  `last_value ( sum ( [m] ) , query_groups ( ) , [T::DATE] )` is rejected with
+  `Function last_value expects 3rd argument to be List.`
+- All four spellings (`last_value`, `first_value`, `last_value_in_period`,
+  `first_value_in_period`) share this identical three-argument shape, and a two-column axis
+  (`{ [d1] , [d2] }`) is also accepted.
+
+**Caveat — the axis column's type is not validated at import.** A `VARCHAR` axis was accepted.
+Acceptance proves the call shape, not that the axis is temporal; supply a DATE / DATE_TIME column.
 
 ```yaml
 expr: >-
@@ -681,6 +766,14 @@ every search that uses the formula.
 GROUP BY matching concerns. Use `sql_*_aggregate_op` window functions (with
 `group_aggregate` wrapping) when native functions can't express the required
 semantics (e.g., `DENSE_RANK`, partitioned rank, `ROW_NUMBER`).
+
+**"Cover the use case" has one specific meaning for `moving_*` / `cumulative_*`:** the source's
+partition must be the dimensions the user's search will actually carry. If the source declares an
+explicit `PARTITION BY`, the native form does **not** cover it — there is no partition slot (see
+the note at the head of *Window Functions*) — so a `sql_*_aggregate_op` carrying the whole `OVER`
+clause is the faithful translation, and the native `moving_sum` is a **documented downgrade** the
+user should be asked to accept rather than a silent substitution. `first_value` / `last_value` are
+the exception: their partition is explicit, so they cover an explicit `PARTITION BY` exactly.
 
 ---
 

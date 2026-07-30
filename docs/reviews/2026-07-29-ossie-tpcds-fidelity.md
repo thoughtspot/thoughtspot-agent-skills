@@ -800,12 +800,25 @@ than the TML expressions (§3.3).
 
 **Note on the two stamped measure properties.** `aggregation: SUM` and
 `index_type: DONT_INDEX` are added to all five formula-backed MEASURE columns
-(`sv_build_model.py:41-44`). Both are benign and neither is a double-aggregation bug:
-`agents/shared/schemas/thoughtspot-model-tml.md:200-203` states that "`aggregation:` on formula
-`columns[]` entries is **ignored at query time** — ThoughtSpot evaluates the formula `expr`
-directly", and the same passage prescribes `SUM` as the convention for all MEASURE formula
-columns — so stamping it on the `CLV` ratio neither re-aggregates the ratio nor departs from our
-own guidance. Both are recorded in the extras column for completeness only.
+(`sv_build_model.py:41-44`). Both are benign here and neither is a double-aggregation bug —
+but the reason is narrower than an earlier revision of this note claimed. Per ThoughtSpot
+domain review, 2026-07-30, `aggregation:` on a formula `columns[]` entry is a query-time
+**no-op only when the `expr` already contains an aggregate**; on a *scalar* `expr` it applies,
+and the formula is rolled up by it (see `agents/shared/schemas/thoughtspot-model-tml.md`,
+"`aggregation:` on a formula `columns[]` entry"). All five exprs here are aggregate exprs
+(`sum ( … )`, and the two ratios are quotients *of* aggregates — `sum ( … ) / unique count ( … )`
+and `safe_divide ( sum ( … ) , sum ( … ) )`), so in every one of these five cases the stamped
+`SUM` is inert: it neither re-aggregates the `CLV` ratio nor departs from our own guidance. The
+verdict is unchanged; only the generality of the justification is. Had the converter emitted a
+scalar `expr` for any of them, the stamped `SUM` would **not** have been benign. Both properties
+are recorded in the extras column for completeness only.
+
+**Evidence class for that correction.** The scalar-vs-aggregate rule is a **query-time** semantic:
+`VALIDATE_ONLY` import probing cannot test it in either direction, because both `expr` shapes
+import clean carrying any `aggregation:` value. It rests on domain review, not on a probe. What
+*this* section verifies independently is the narrower factual premise — that all five emitted
+`expr`s are aggregate exprs — which is readable straight off the TML above and is why the `benign`
+verdicts stand regardless of how the rule is eventually confirmed.
 
 ### 3.5 Summary counts
 

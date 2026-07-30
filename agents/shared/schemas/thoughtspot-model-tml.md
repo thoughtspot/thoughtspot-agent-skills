@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-30: live-verified on se-thoughtspot — columns[].description confirmed on formula-backed entries, no data_type on formulas[]/columns[], and the single join-type vocabulary INNER/LEFT_OUTER/RIGHT_OUTER/OUTER confirmed in both Model and Table contexts; earlier 2026-07-30: added columns[] properties.calendar / index_priority / is_attribution_dimension, widened index_type + currency_type from a product-docs sweep; prior: validated in 2026-07-11 external sweep) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-30: live-verified on se-thoughtspot — columns[].description confirmed on formula-backed entries, no data_type on formulas[]/columns[], and the single join-type vocabulary INNER/LEFT_OUTER/RIGHT_OUTER/OUTER confirmed in both Model and Table contexts; earlier 2026-07-30: added columns[] properties.calendar / index_priority / is_attribution_dimension, widened index_type + currency_type from a product-docs sweep; also 2026-07-30, from a 500-document TML property census on se-thoughtspot covering 143 Models: added action_object_associations[] and columns[].properties.value_casing, extended geo_config with the country boolean and custom-map roles, rewrote the calendar value vocabulary, recorded index_priority as a non-integral number, loosened the joins[] either/or framing for 12 observed hybrids, and raised the lesson_plans evidence to 8 Models; prior: validated in 2026-07-11 external sweep) -->
 
 # ThoughtSpot Model TML — Construction Reference
 
@@ -91,7 +91,7 @@ model:
 | `model.filters` | No | Model-level pre-filters applied before any query |
 | `model.joins_with` | No | Data augmentation joins at the model level (e.g. joining an uploaded CSV to the model) |
 | `model.properties` | No | Model-level settings |
-| `model.lesson_plans` | No | In-product guided-lesson strings attached to the model — a list of `{lesson_id: <int>, lesson_plan_string: <string>}` entries, a sibling of `properties:` rather than a key inside it. **Shape confirmed 2026-07-30** against 4 real Models on `se-thoughtspot` (e.g. `{lesson_id: 0, lesson_plan_string: "What were [Sales] by [Store Region] in [Date].'last year' ?"}`). Pass through on round-trips; do not emit when generating a model. |
+| `model.lesson_plans` | No | In-product guided-lesson strings attached to the model — a list of `{lesson_id: <int>, lesson_plan_string: <string>}` entries, a sibling of `properties:` rather than a key inside it. **Shape confirmed 2026-07-30** against 8 real Models on `se-thoughtspot` (a 143-Model census; `lesson_id` is 0-based) (e.g. `{lesson_id: 0, lesson_plan_string: "What were [Sales] by [Store Region] in [Date].'last year' ?"}`). Pass through on round-trips; do not emit when generating a model. |
 
 ### `model_tables[]` fields
 
@@ -102,7 +102,7 @@ model:
 | `fqn` | Yes on first import | GUID of the ThoughtSpot table object. For repoint operations, prefer `obj_id` over `fqn` when supported (avoids VERSION_CONFLICT 14009). Use one or the other on each entry, not both. |
 | `obj_id` | No | ThoughtSpot-assigned content ID (format: `{NAME}-{first_8_chars_of_guid}`, e.g. `DM_ORDER-924f10e2`). Only present when exported with `export_options.include_obj_id_ref: true`. Preferred over `fqn` for repoint operations — avoids VERSION_CONFLICT (error 14009) on some builds. When importing with `obj_id`, omit `fqn` on the same entry (and vice versa). |
 | `id` | No | When present, must equal `name` exactly (same case). ThoughtSpot uses `name` as the join reference target when `id` is absent. Omitting `id` is simpler. |
-| `joins` | No | Joins FROM this table — lives on the source (FK) table entry only. Each entry is either a **referencing join** (Scenario A: `with` + `referencing_join`) or an **inline join** (Scenario B: `with` + `on` + `type` + `cardinality`). See Join Scenarios below. |
+| `joins` | No | Joins FROM this table — lives on the source (FK) table entry only. Each entry is usually either a **referencing join** (Scenario A: `with` + `referencing_join`) or an **inline join** (Scenario B: `with` + `on` + `type` + `cardinality`) — but the two are **not strictly exclusive**: real joins carry `referencing_join` *plus* an inline attribute. See Join Scenarios below, and *Hybrid joins* under `joins[]` fields. |
 
 ### `joins[]` fields (on `model_tables` FK entry)
 
@@ -122,7 +122,32 @@ Each `joins[]` entry has `with` (always required) plus **one of two forms**:
 | `with` | Yes | Must equal the `name:` of the target `model_tables[]` entry exactly (case-sensitive) |
 | `on` | Yes | Quote with `'on':` — `on` is a YAML reserved word. Format: `[FROM::fk] = [TO::pk]`. Supports range/inequality operators — see Range Joins below. |
 | `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, or `OUTER`. **`OUTER` *is* the full outer join** — it is ThoughtSpot's name for it, not a narrower join type (per ThoughtSpot domain review, 2026-07-30). `FULL_OUTER` is **not** a ThoughtSpot value and is rejected: "Invalid value FULL_OUTER … Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER". So mapping a source `FULL OUTER` to `OUTER` is a **rename, not a downgrade** — no semantics are lost. Table `joins_with[].type` accepts exactly the same four and rejects `FULL_OUTER` identically (both live-probed — see the note below); SQL View `joins[].type` is documented with the same four but was **not** probed, so treat it as strongly inferred rather than verified. |
-| `cardinality` | Yes | `MANY_TO_ONE` for most fact-to-dimension joins |
+| `cardinality` | Yes | `MANY_TO_ONE` for most fact-to-dimension joins. Census-observed vocabulary across 233 real inline joins: `MANY_TO_ONE` ×223, `ONE_TO_MANY` ×11, `ONE_TO_ONE` ×3 — **`MANY_TO_MANY` never**. |
+
+**Hybrid joins — the two scenarios are not strictly exclusive (2026-07-30 census).** Across 493
+real `joins[]` entries in 143 Models:
+
+| Key set | Count | |
+|---|--:|---|
+| `with` + `referencing_join` | 248 | pure Scenario A |
+| `with` + `on` + `type` + `cardinality` | 233 | pure Scenario B |
+| `with` + `referencing_join` + `type` | **8** | **hybrid** |
+| `with` + `referencing_join` + `cardinality` | **4** | **hybrid** |
+
+So 12 of 493 joins carry a `referencing_join` **and** an inline attribute — e.g.
+`{with: Dim_Promotion, referencing_join: "Promotion_Key - Promotion_Key", type: LEFT_OUTER}`
+(`Retail Sales` and two copies of it) and
+`{with: CUST_PROFILING_ALL, referencing_join: "…", cardinality: MANY_TO_ONE}`
+(`Demo Bank Deposits`, ×4).
+
+**Consequence for a parser:** branching strictly on "has `referencing_join` ⇒ ignore
+`type`/`cardinality`" silently drops a join attribute on those 12. Read the inline attributes
+whenever they are present, regardless of `referencing_join`. When **generating**, still pick one
+form — emitting both is not necessary and the precedence between them is unverified.
+
+**Non-equality joins: zero observed.** No inline join in the 143-Model census contains `>=`, `<=`,
+`>` or `<` in its `on` expression. The range / ASOF support documented below is correct per
+ThoughtSpot's docs but is **entirely unexercised on that cluster** — no live evidence either way.
 
 **Join-type vocabulary — re-verified 2026-07-30 on `se-thoughtspot`.** The `FULL_OUTER`
 rejection recorded here from an earlier real import failure is **still current** on this
@@ -195,11 +220,11 @@ joins:
 | `column_id` | Physical column | Format: `TABLE_NAME::col_name` — TABLE_NAME is the `name:` (or `alias:`) from model_tables |
 | `formula_id` | Formula reference | Must match a `formulas[].id` exactly (case-sensitive, spaces included) |
 | `name` | Yes (always) | Display name shown in ThoughtSpot search bar |
-| `description` | No | Free-text column description, a **sibling of `name`** (not under `properties:`). Valid on **both** `column_id` and `formula_id` entries — a formula-backed column's description lives here, because the `formulas[]` entry has no `description` field of its own. Live-verified 2026-07-30 on `se-thoughtspot`: 14 of 78 formula-backed columns across a 40-model sample carry one, and ThoughtSpot's own Model TML syntax lists `description: <optional_column_description>` as a `columns[]` key. Pass through on round-trips. |
+| `description` | No | Free-text column description, a **sibling of `name`** (not under `properties:`). Valid on **both** `column_id` and `formula_id` entries — a formula-backed column's description lives here, because the `formulas[]` entry has no `description` field of its own. Live-verified 2026-07-30 on `se-thoughtspot`, and corroborated the same day at 7× the sample by a 143-Model property census: **63 of 549** formula-backed columns carry one, and **1,960 of 4,436** physical columns do (72 of 143 Models have at least one) — it is the second-most-common optional `columns[]` key on the cluster. ThoughtSpot's own Model TML syntax lists `description: <optional_column_description>` as a `columns[]` key. Pass through on round-trips. |
 | `properties.column_type` | Yes | `ATTRIBUTE` or `MEASURE` |
 | `properties.aggregation` | No | For MEASURE: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT`. The full documented set also includes `NONE`, `STD_DEVIATION` and `VARIANCE` — accept all nine when round-tripping an exported model, and prefer the six above when generating one. Valid on both `column_id` and `formula_id` entries. **Warning:** `COUNT_DISTINCT` on a `column_id` causes ThoughtSpot to silently override `column_type` to `ATTRIBUTE`. Always use a `formulas[]` entry with `unique count ( [TABLE::col] )` instead. |
 | `properties.index_type` | No | `DONT_INDEX` suppresses text-search indexing. `PREFIX_ONLY` indexes only the string prefix (faster prefix search on long strings). The full documented set also includes `DEFAULT`, `PREFIX_AND_SUBSTRING` and `PREFIX_AND_WORD_SUBSTRING` — accept all five when round-tripping an exported model. Omit for full indexing (default). |
-| `properties.index_priority` | No | Integer — raises or lowers this column's priority in search indexing relative to others. Pass through on round-trips. |
+| `properties.index_priority` | No | A **number** — raises or lowers this column's priority in search indexing relative to others. **Emitted non-integrally (2026-07-30 census):** every one of the 20 observed sightings is `10.0`, `9.0`, `8.0`, `7.0` or `2.0`, confirmed verbatim in the raw `edoc` string (`"index_priority":10.0`) and not an artefact of JSON parsing. A strict *integer* validator therefore rejects real ThoughtSpot output — parse it as a number and accept a `.0` fraction. Pass through on round-trips. |
 | `properties.is_attribution_dimension` | No | Boolean — marks the column as an attribution dimension. Pass through on round-trips. |
 | `properties.is_hidden` | No | `true` hides the column from the search bar. **Do not set during conversion or model creation** — hidden columns cause locked visualizations and unexpected query behaviour. Leave visibility decisions to the model owner after import. |
 | `properties.is_additive` | No | `true` marks a column as additive — used on semi-additive models to explicitly allow summation across time. |
@@ -211,10 +236,34 @@ joins:
 | `properties.ai_context` | No | Free-text description used by Spotter (AI search) to understand the column's business meaning. Appears on most columns in AI-enriched models. Pass through on round-trips; safe to omit when constructing new models. |
 | `properties.custom_order` | No | Array of attribute values in custom display order. Used to control sort order in visualizations (e.g. `[USA, UK, France]`). ATTRIBUTE columns only. |
 | `properties.default_date_bucket` | No | Default time granularity for date columns. Values: `DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `YEARLY`, `AUTO`. Omit for ThoughtSpot default. |
-| `properties.calendar` | No | **Date columns only** — the custom / fiscal calendar the column is bucketed by, so quarters and years follow a fiscal or 4-4-5 retail calendar instead of the Gregorian one. **Reference only:** the calendar itself is a *Connection-scoped* object created outside TML (`POST /api/rest/2.0/calendars/create`, 10.12.0.cl or later, backed by a warehouse calendar table), so this value is meaningless on a target instance whose connection has no calendar of that name. **Do not emit when generating a model** — pass through on round-trips only. The value vocabulary is not settled: ThoughtSpot's TML documentation gives `default` or a calendar name, while [thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md) records the literal `CALENDAR_TYPE_GREGORIAN` on SQL View columns. Verify against a live export before relying on either spelling. |
+| `properties.calendar` | No | **Date columns only** — the custom / fiscal calendar the column is bucketed by, so quarters and years follow a fiscal or 4-4-5 retail calendar instead of the Gregorian one. **Reference only:** the calendar itself is a *Connection-scoped* object created outside TML (`POST /api/rest/2.0/calendars/create`, 10.12.0.cl or later, backed by a warehouse calendar table), so this value is meaningless on a target instance whose connection has no calendar of that name. **Do not emit when generating a model** — pass through on round-trips only. **Value vocabulary — settled 2026-07-30** by a 500-document census, superseding the "not settled" note this row previously carried: the value is a **calendar name**, and the literal `calendar` is the default spelling. See the sub-table below. |
+| `properties.value_casing` | No | Documented as a Table-column refinement, but **present on Model columns too — 545 sightings across 18 of 143 Models** (2026-07-30 census), including 156 on *formula-backed* columns. Same vocabulary as the Table reference (`UPPER` / `LOWER` / `MIXED` / `UNKNOWN`); every observed Model value is `UNKNOWN`. Pass through on round-trips; do not emit when generating a model. |
 | `properties.synonyms` | No | Array of alternative names for search. **Must live under `properties:`** — top-level `synonyms:` at the column root is silently dropped on import. |
 | `properties.synonym_type` | No | `USER_DEFINED` for user-supplied synonyms; `AUTO_GENERATED` for ThoughtSpot-inferred. Set to `USER_DEFINED` whenever you populate `properties.synonyms`. |
 | `data_panel_column_groups` | No | Assigns the column to one or more data panel folders. Map of `{folder_name: ''}` — values are always empty string. A column can appear in multiple folders. Folder names must match entries in `column_groups[].column_group_info[].name`. Pass through on round-trips. |
+
+#### `properties.calendar` — observed values (census, 2026-07-30)
+
+500 documents across all four TML types, 143 of them Models:
+
+| Value | Occurrences | Where | Reading |
+|---|--:|---|---|
+| `calendar` (the literal string) | 70 | 34 unrelated Models — `TST_*`, `PUB_*`, `VER_*`, `Retail Sales - RLS`, `Transaction History`, `Inventory Planning`, `Care Provider`, `Mobile Network Analysis`, … — almost always on a column named `Full Date` or `Month Start Date` | **The default spelling.** Neither our references nor ThoughtSpot's docs previously recorded it |
+| `SeanTSCROOTS` | 1 Model + 1 **Table** | `454 Cal Test (Sean)` col `Transaction Date`; `FACT_RETAPP_SALES` col `RECORDDATE` | A real custom-calendar **object name** |
+| `Dupont_Fiscal_Cal` | 1 | `Test Custom Calendars` col `Eff Start Date` | A real custom-calendar object name |
+| `CALENDAR_TYPE_GREGORIAN` | **0** | — | **Not emitted by this build, on any document type.** [thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md) records this literal; it is now marked unverified there — including on the SQL Views where that file claims it (0 of 40) |
+| `default` | **0** | — | Not emitted either, despite appearing in ThoughtSpot's published `[ default \| calendar_name ]` |
+
+Three consequences:
+
+1. **Emit and read a calendar *name*.** ThoughtSpot's published `calendar_name` form is right; the
+   `CALENDAR_TYPE_GREGORIAN` enum spelling is wrong or at least not current.
+2. **`calendar:` is honoured on a Table column**, not only a Model column — see
+   [thoughtspot-table-tml.md](thoughtspot-table-tml.md). It also appears on **formula-backed**
+   Model columns (5 sightings), which neither reference previously contemplated.
+3. **Still open:** whether the literal `calendar` is a genuine default sentinel or a customer
+   calendar that happens to be named "calendar". The 34-Model spread across unrelated tenants
+   strongly favours *sentinel*, but confirming it needs a `GET /api/rest/2.0/calendars/…` read.
 
 ### `formulas[]` fields
 
@@ -238,10 +287,33 @@ invented `data_type:` validates clean and does nothing.
 their `expr`. Adding `aggregation:` causes `FORMULA is not a valid aggregation type`.
 Add `aggregation:` to the corresponding `columns[]` entry instead.
 
-**`aggregation:` on formula `columns[]` entries is ignored at query time.** ThoughtSpot
-evaluates the formula `expr` directly — the column-level `aggregation` does not re-aggregate
-the result. Use `SUM` as the convention for all MEASURE formula columns; do not attempt to
-infer a "correct" aggregation from the expression shape (e.g. ratio vs. sum).
+**`aggregation:` on a formula `columns[]` entry — whether it applies depends on whether the
+`expr` is scalar or already aggregated.** *Per ThoughtSpot domain review, 2026-07-30* — the
+earlier blanket claim ("ignored at query time", stated universally) was wrong:
+
+| `expr` shape | Example | Does `columns[].properties.aggregation` apply? |
+|---|---|---|
+| **Scalar** (row-level, no aggregate function) | `[FACT::AMOUNT] - [FACT::COST]` | **Yes.** The formula behaves like a fact column: it is evaluated per row and then rolled up by the column's declared `aggregation`. This is the same model as a physical fact column with a default aggregation (Snowflake's FACT + default aggregation is the direct analogy). |
+| **Aggregate** (the `expr` already contains an aggregate) | `sum ( [FACT::AMOUNT] - [FACT::COST] )` | **No — it is a no-op.** ThoughtSpot evaluates the aggregate in the `expr`; the column-level `aggregation` does not re-aggregate the result. |
+
+Two consequences for generators:
+
+- A **scalar** MEASURE formula needs its `aggregation:` chosen deliberately — it is load-bearing.
+  `SUM` is the right default for an additive quantity, but a scalar ratio or rate must not carry
+  `SUM`, because the sum of per-row ratios is not the ratio of the sums.
+- An **aggregate** MEASURE formula may carry `aggregation: SUM` as a harmless convention; it has
+  no query-time effect either way. Do not attempt to infer a "correct" aggregation from the
+  expression shape in this case — there is nothing to get right.
+
+Both patterns are legitimate and idiomatic. The scalar form is the more reusable of the two: the
+formula stays at row grain, so it can be re-aggregated differently in different searches, and it
+composes into other formulas.
+
+> **Evidence class.** This is a **query-time semantic**, so `VALIDATE_ONLY` import probing cannot
+> test it — both shapes import clean with any `aggregation:` value (the aggregate form was
+> confirmed to validate on `se-thoughtspot`, 2026-07-30). The scalar-versus-aggregate distinction
+> above rests on ThoughtSpot domain review, not on an import probe, and closing it empirically
+> would need a query-result comparison against live data.
 
 **Formula cross-references: reference by id, not display name.** The two reference styles
 behave differently on import, and only one fails:
@@ -279,18 +351,72 @@ properties:
 # Named region (state, zip, county, city, country)
 properties:
   geo_config:
-    region_name:
+    region_name:             # a DICT, not a list — census-confirmed on Models AND Views
       country: "UNITED STATES"
       region_name: "state"   # state | zip code | county | city | country
+
+# Country role — a BARE BOOLEAN, and distinct from region_name.country (a string)
+properties:
+  geo_config:
+    country: true
+
+# Custom-map role — points at an uploaded custom map file
+properties:
+  geo_config:
+    custom_file_guid: "f3faaa74-147f-4376-ac42-eff0c3779f6f"
+    geometryType: POLYGON    # POLYGON | MULTI_POLYGON
 ```
+
+**Five geo roles exist, not three (2026-07-30 census).** Observed distribution across 143 Models:
+
+| Role shape | Occ | Docs | Note |
+|---|--:|--:|---|
+| `region_name: {country, region_name}` | 88 | 39 | The common case. A **dict** — [thoughtspot-view-tml.md](thoughtspot-view-tml.md) and [thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md) previously documented a list; both corrected the same day |
+| `latitude: true` | 17 | 17 | |
+| `longitude: true` | 17 | 17 | |
+| `custom_file_guid` + `geometryType` | 7 | 3 | **Custom maps exist in production.** `geometryType` ∈ {`POLYGON`, `MULTI_POLYGON`} |
+| `country: true` | 5 | 5 | **A fifth role this reference did not document.** A bare boolean — do not confuse it with `region_name.country`, which is a *string* naming the country a region belongs to |
+
+**`custom_file_guid` is instance-local.** It names an uploaded custom-map file by GUID, so a
+portable document must not carry it — the geo role has to be dropped rather than translated. Pass
+through only on a same-instance round trip. `geo_config` also appears on **formula-backed** columns
+(2 sightings), which this reference did not previously contemplate.
 
 ### `properties` fields
 
 | Field | Default | Notes |
 |---|---|---|
-| `is_bypass_rls` | false | Set true to bypass row-level security |
-| `join_progressive` | true | ThoughtSpot execution hint — always set true |
-| `spotter_config.is_spotter_enabled` | true | Enables Spotter (AI search) for this model |
+| `is_bypass_rls` | false | Set true to bypass row-level security. **Always emitted on export** — 143 of 143 census Models carry it, every one `false` |
+| `join_progressive` | true | ThoughtSpot execution hint — always set true. Always emitted (143/143; `true` ×142, `false` ×1) |
+| `spotter_config.is_spotter_enabled` | true | Enables Spotter (AI search) for this model. Always emitted (143/143; `true` ×128, `false` ×15) |
+
+### `action_object_associations[]`
+
+A model-level construct, **undocumented until 2026-07-30** and found by the census (1 of 143
+Models — `MT Retail Sales`). It binds a **custom action** to the Model, so the action appears in
+the relevant menu when a user is working with data from it.
+
+```yaml
+model:
+  name: MODEL_NAME
+  action_object_associations:
+  - action_name: "Generate Forecast"   # display name of an existing custom action
+    context: CONTEXT_MENU              # only value observed
+    enabled: true
+```
+
+| Field | Type | Observed values |
+|---|---|---|
+| `action_name` | string | `Generate Forecast` — names a custom action object that exists outside TML |
+| `context` | string | `CONTEXT_MENU` (the only value seen; the product also exposes primary/menu placements, so treat the vocabulary as open) |
+| `enabled` | bool | `true` |
+
+**Treat it as a presentation binding, not semantics.** The action itself is a separate object that
+this document only references by display name, so the association is meaningless on an instance
+without an action of that name — the same reasoning as `properties.calendar`. **Do not emit when
+generating a model**; pass through on round-trips only, and note that a round trip to an instance
+lacking the action is a silent no-op rather than an error. It is a sibling of `properties:`, not a
+key inside it.
 
 ### `parameters[]` fields
 
