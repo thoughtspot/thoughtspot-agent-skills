@@ -231,3 +231,83 @@ def test_cli_exits_2_when_git_is_unavailable(tmp_path):
     combined = result.stdout + result.stderr
     assert "could not run" in combined
     assert "not a git repository" in combined
+
+
+# Built by repetition, never as literals — a literal here would be found by Rule 3
+# when it scans this repo's own tracked files.
+_OURS = "<" * 7
+_THEIRS = ">" * 7
+_SPLIT = "=" * 7
+
+
+def test_conflict_markers_detected(tmp_path):
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
+    _write(
+        tmp_path,
+        "notes.md",
+        f"intro\n{_OURS} HEAD\nmine\n{_SPLIT}\ntheirs\n{_THEIRS} origin/main\noutro\n",
+    )
+    _commit_all(tmp_path)
+
+    hits = cbi.conflict_markers(tmp_path)
+
+    assert hits == ["notes.md:2", "notes.md:4", "notes.md:6"]
+
+
+def test_setext_underline_alone_is_not_a_conflict(tmp_path):
+    """A bare 7-equals line is a legal Markdown setext h1 underline. It counts only
+    when the same file also carries an ours/theirs marker."""
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
+    _write(tmp_path, "readme.md", f"Title\n{_SPLIT}\n\nBody text.\n")
+    _commit_all(tmp_path)
+
+    assert cbi.conflict_markers(tmp_path) == []
+
+
+def test_conflict_marker_fails_cli(tmp_path):
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
+    _write(tmp_path, "notes.md", f"{_OURS} HEAD\nmine\n")
+    _commit_all(tmp_path)
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 1
+    assert "notes.md:1" in result.stdout
+
+
+def test_binary_file_does_not_crash_the_scan(tmp_path):
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
+    (tmp_path / "blob.bin").write_bytes(bytes(range(256)))
+    _commit_all(tmp_path)
+
+    assert cbi.conflict_markers(tmp_path) == []
+
+
+def test_cli_exits_2_when_conflict_markers_rule_hits_git_unavailable(tmp_path, monkeypatch):
+    """Regression guard for the widened guard itself. dangling_citations() is called
+    first in main() and, against a plain non-repo directory, always raises before
+    conflict_markers() is ever reached — so the plain non-repo scenario in
+    test_cli_exits_2_when_git_is_unavailable above passes identically whether the
+    try/except wraps both rules or only dangling_citations(). It cannot tell the two
+    implementations apart.
+
+    This test forces the discriminating case directly: dangling_citations() succeeds
+    (real, valid repo) and conflict_markers() is the one that raises GitUnavailable.
+    If the guard is scoped tightly around dangling_citations() only, this call escapes
+    as an uncaught traceback instead of returning 2.
+    """
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
+    _commit_all(tmp_path)
+
+    def _boom(root):
+        raise cbi.GitUnavailable("simulated failure for the widened-guard test")
+
+    monkeypatch.setattr(cbi, "conflict_markers", _boom)
+    monkeypatch.setattr(sys, "argv", ["check_backlog_integrity.py", "--root", str(tmp_path)])
+
+    assert cbi.main() == 2

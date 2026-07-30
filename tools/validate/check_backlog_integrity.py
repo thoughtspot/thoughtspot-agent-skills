@@ -56,6 +56,12 @@ ARCHIVE_REL = "docs/backlog-archive.md"
 # wrong. Widening this is a one-line change if it ever proves too narrow.
 CITATION_SCOPE = ("agents", "tools", ".github")
 
+# Built by repetition so the literal marker strings never appear in this file.
+# A literal here would make this validator flag its own source, and its own tests.
+MARK_OURS = "<" * 7
+MARK_THEIRS = ">" * 7
+MARK_SPLIT = "=" * 7
+
 # Two deliberately different patterns, because the two rules need different
 # precision. Do not unify them.
 #
@@ -162,6 +168,31 @@ def dangling_citations(root: Path) -> dict[str, list[str]]:
     return {bl_id: sorted(places) for bl_id, places in sorted(found.items())}
 
 
+def conflict_markers(root: Path) -> list[str]:
+    """Rule 3 — tracked text files carrying git conflict markers.
+
+    The split marker is only counted when the file also has an ours/theirs marker:
+    a bare 7-equals line is a legal Markdown setext h1 underline and appears in
+    real documents.
+    """
+    hits: list[str] = []
+    for rel in _git_lines(["ls-files"], root):
+        try:
+            lines = (root / rel).read_text(encoding="utf-8").splitlines()
+        except (UnicodeDecodeError, OSError):
+            continue  # binary, symlink, or gone — not a conflict-marker surface
+        sides = [
+            i + 1
+            for i, line in enumerate(lines)
+            if line.startswith(MARK_OURS) or line.startswith(MARK_THEIRS)
+        ]
+        if not sides:
+            continue
+        splits = [i + 1 for i, line in enumerate(lines) if line.rstrip() == MARK_SPLIT]
+        hits.extend(f"{rel}:{n}" for n in sorted(sides + splits))
+    return hits
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="Repository root (default: cwd)")
@@ -183,8 +214,11 @@ def main() -> int:
         problems.append("BL id sectioned in BOTH backlog.md and backlog-archive.md — Rule 1:")
         problems.extend(f"  ✗ {bl_id}" for bl_id in both)
 
+    # Both remaining rules shell out to git, so one guard covers both. Exit 2 means
+    # "could not run", which must never read as clean — see the Exit codes block.
     try:
         dangling = dangling_citations(root)
+        markers = conflict_markers(root)
     except GitUnavailable as exc:
         print(f"Backlog integrity check could not run: {exc}", file=sys.stderr)
         return 2
@@ -198,6 +232,12 @@ def main() -> int:
         problems.append("  Either the id was renumbered and a citation was missed,")
         problems.append("  or the backlog entry was deleted instead of archived.")
 
+    if markers:
+        problems.append("Git conflict marker(s) in tracked file(s) — Rule 3:")
+        problems.extend(f"  ✗ {hit}" for hit in markers[:20])
+        if len(markers) > 20:
+            problems.append(f"  ... and {len(markers) - 20} more")
+
     if problems:
         print("\n" + "\n".join(problems))
         print()
@@ -205,7 +245,10 @@ def main() -> int:
         print("(see CLAUDE.md). Take main's side, then renumber the incoming item.")
         return 1
 
-    print("Backlog integrity clean: no duplicate BL ids, no dangling citations.")
+    print(
+        "Backlog integrity clean: no duplicate BL ids, no dangling citations, "
+        "no conflict markers."
+    )
     return 0
 
 
