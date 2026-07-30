@@ -13,6 +13,14 @@ Re-run to refresh. Do not edit manually.
 - **Adding a gate:** add the validator, wire it into `pre-commit.sh` and/or
   `validate.yml`, then re-run this generator.
 
+> **`Last modified` is a snapshot, not a gated value** (BL-192). It comes from
+> `git log` per validator, which made the whole document a function of repo
+> *history* rather than repo *contents* — so `--check` used to fail on branches
+> that changed nothing relevant, because somebody else had touched a validator.
+> `--check` now compares structure and ignores this column, which means the dates
+> refresh whenever anyone regenerates and may lag reality in between. For an
+> authoritative answer, run `git log -1 -- tools/validate/<validator>.py`.
+
 **43 gates** across pre-commit and CI.
 
 | Runs in | Count |

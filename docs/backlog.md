@@ -80,7 +80,7 @@ are roughly ordered by value÷effort.
 
 | Item | Summary | Target |
 |---|---|---|
-| BL-192 | `docs/quality-gates.md` stales from main's commits, not yours — hard-fails the PR gate on a race | next validator-tooling pass |
+| ~~BL-192~~ | ~~`docs/quality-gates.md` stales from main's commits, not yours — hard-fails the PR gate on a race~~ | DONE (2026-07-30) |
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | BL-189 | `ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard | next ts-cli change |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
@@ -6507,7 +6507,7 @@ earlier, on the same commit.
 **Affects:** `tools/validate/generate_quality_gates.py`, `.github/workflows/validate.yml`
 ("Quality gates catalog gate"), `scripts/pre-commit.sh` (the staged-trigger branch that runs the
 same check).
-**Status:** OPEN.
+**Status:** RESOLVED 2026-07-30 — approach 1 taken (gate on structure, leave dates as decoration).
 
 The catalog embeds a **git-log-derived date per validator row**. That makes it a function of repo
 *history*, not of repo *contents* — so it goes stale when **someone else's** commit touches any
@@ -6548,7 +6548,23 @@ control. Options, roughly in order of preference:
 Whichever is chosen, add a test that pins the property: a catalog generated at commit A must still
 pass `--check` at commit B when B differs only by an unrelated validator's mtime/history.
 
-**Target:** next validator-tooling pass. Cheap relative to how often it fires.
+**Outcome (2026-07-30).** Approach 1, as preferred above. `--check` now compares the catalog's
+*structure* via a new `strip_volatile()` helper that blanks the `Last modified` cell of every gate
+row before comparing; plain generation still renders the dates. A gate row is identified by its
+second-to-last cell being a known mode (`gate`/`nudge`/`report`), so the document's **prose** tables
+— the enforcement model and the audit checklist — pass through unnormalised and stay fully gated.
+
+Verified by four end-to-end proofs against the real catalog: flipping one gate row's date now
+**passes** (the exact #421 failure), while downgrading a gate to a nudge, deleting a gate row, and
+editing the prose enforcement-model table each still **fail**. Seven unit tests pin the property,
+including that the fixtures genuinely differ, so a test that passes either way cannot masquerade as
+coverage.
+
+Residual, accepted deliberately: because the dates are no longer gated they refresh only when
+someone regenerates, so they may lag reality in between. The rendered document now says so and
+points readers at `git log -1 -- tools/validate/<validator>.py` for an authoritative answer. Dropping
+the column entirely was the alternative; it was not taken because the audit's angle-7 checklist uses
+the column as a starting point, and a labelled snapshot is more useful than nothing.
 
 ---
 

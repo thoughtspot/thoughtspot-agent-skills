@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from generate_quality_gates import (
+    strip_volatile,
     _collect_comment,
     _extract_docstring,
     _find_trigger,
@@ -232,3 +233,74 @@ class TestParsePrecommit:
         assert len(entries) == 1
         assert entries[0]["label"] == "unit tests (ts-cli)"
         assert entries[0]["mode"] == "gate"
+
+
+# ---------------------------------------------------------------------------
+# strip_volatile — BL-192
+# ---------------------------------------------------------------------------
+
+class TestStripVolatile:
+    """The catalog embeds a git-log date per validator, so its rendered form is a
+    function of repo HISTORY, not repo CONTENTS. A byte-exact --check therefore
+    failed on branches that changed nothing relevant (confirmed on PR #421: local
+    --check passed, CI failed, and the entire diff was one date flipping for
+    check_tml.py, which that PR never touched).
+
+    These tests pin the property BL-192 asked for: a catalog generated at commit A
+    must still pass --check at commit B when B differs only by an unrelated
+    validator's history.
+    """
+
+    HEADER = "| # | Gate | Description | When it runs | Why it exists | Mode | Last modified |"
+    SEP = "|---|---|---|---|---|---|---|"
+
+    def _row(self, n, label, mode="gate", date="2026-06-13"):
+        return f"| {n} | `{label}` | desc | always (pre-commit) | why | {mode} | {date} |"
+
+    def test_date_difference_alone_is_not_stale(self):
+        """The exact PR #421 failure: one row's date moved, nothing else."""
+        a = "\n".join([self.HEADER, self.SEP, self._row(1, "TML structure", date="2026-06-13")])
+        b = "\n".join([self.HEADER, self.SEP, self._row(1, "TML structure", date="2026-07-30")])
+
+        assert a != b, "fixtures must actually differ, or this test proves nothing"
+        assert strip_volatile(a) == strip_volatile(b)
+
+    def test_structural_difference_is_still_stale(self):
+        """The gate must keep doing its real job — finding 7.1's actual intent."""
+        a = "\n".join([self.HEADER, self.SEP, self._row(1, "TML structure")])
+        b = "\n".join([self.HEADER, self.SEP, self._row(1, "backlog integrity")])
+
+        assert strip_volatile(a) != strip_volatile(b)
+
+    def test_added_gate_row_is_still_stale(self):
+        a = "\n".join([self.HEADER, self.SEP, self._row(1, "secrets")])
+        b = "\n".join([self.HEADER, self.SEP, self._row(1, "secrets"), self._row(2, "new gate")])
+
+        assert strip_volatile(a) != strip_volatile(b)
+
+    def test_mode_change_is_still_stale(self):
+        """A gate downgraded to a nudge is exactly what must not slip through."""
+        a = "\n".join([self.HEADER, self.SEP, self._row(1, "open items", mode="gate")])
+        b = "\n".join([self.HEADER, self.SEP, self._row(1, "open items", mode="nudge")])
+
+        assert strip_volatile(a) != strip_volatile(b)
+
+    def test_prose_tables_pass_through_untouched(self):
+        """The document also holds non-gate tables (enforcement model, audit
+        checklist). If those were normalised too, a real edit to them would stop
+        being gated."""
+        prose = "| **CI (`validate.yml`)** | **Hard gate** — branch protection requires it |"
+
+        assert strip_volatile(prose) == prose
+
+    def test_non_table_lines_pass_through_untouched(self):
+        text = "# Quality Gates Catalog\n\nAuto-generated. Do not edit manually.\n"
+
+        assert strip_volatile(text) == text
+
+    def test_nudge_and_report_rows_are_normalised_too(self):
+        for mode in ("nudge", "report"):
+            a = "\n".join([self.HEADER, self.SEP, self._row(1, "x", mode=mode, date="2026-01-01")])
+            b = "\n".join([self.HEADER, self.SEP, self._row(1, "x", mode=mode, date="2026-09-09")])
+
+            assert strip_volatile(a) == strip_volatile(b), f"mode={mode} not normalised"

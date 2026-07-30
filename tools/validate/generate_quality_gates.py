@@ -259,7 +259,12 @@ def _extract_docstring(path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 def _last_modified(path: Path, repo_root: Path) -> str:
-    """Get the date a file was last modified (git log)."""
+    """Get the date a file was last modified (git log).
+
+    NOTE: this makes the rendered catalog a function of repo HISTORY, not repo
+    CONTENTS. That is why `--check` must not compare these values — see
+    `strip_volatile` and BL-192.
+    """
     rel = str(path.relative_to(repo_root))
     try:
         result = subprocess.run(
@@ -366,6 +371,14 @@ def generate_catalog(repo_root: Path) -> str:
         "  checking something that no longer happens?",
         "- **Adding a gate:** add the validator, wire it into `pre-commit.sh` and/or",
         "  `validate.yml`, then re-run this generator.",
+        "",
+        "> **`Last modified` is a snapshot, not a gated value** (BL-192). It comes from",
+        "> `git log` per validator, which made the whole document a function of repo",
+        "> *history* rather than repo *contents* — so `--check` used to fail on branches",
+        "> that changed nothing relevant, because somebody else had touched a validator.",
+        "> `--check` now compares structure and ignores this column, which means the dates",
+        "> refresh whenever anyone regenerates and may lag reality in between. For an",
+        "> authoritative answer, run `git log -1 -- tools/validate/<validator>.py`.",
         "",
         f"**{len(all_validators)} gates** across pre-commit and CI.",
         "",
@@ -537,6 +550,41 @@ def _humanise_trigger(pattern: str) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
+def strip_volatile(content: str) -> str:
+    """Blank the `Last modified` cell of every gate-table row.
+
+    BL-192. The catalog embeds a git-log date per validator, so its rendered form
+    depends on repo history rather than repo contents. A byte-exact `--check`
+    therefore failed on branches that changed nothing relevant: someone else's
+    commit touching any validator was enough. Confirmed on PR #421 — local
+    `--check` passed, CI failed, and the whole diff was one date flipping for
+    `check_tml.py`, a file that PR never touched.
+
+    So `--check` compares structure and ignores dates. A gate-shape change still
+    fails a stale catalog, which is what audit finding 7.1 actually wanted; an
+    unrelated branch's history no longer does.
+
+    A gate row is a table row whose second-to-last cell is a known mode value.
+    That shape test matters: the document also contains prose tables (the
+    enforcement model, the audit checklist) which must pass through untouched, or
+    a real edit to them would stop being gated.
+    """
+    modes = {"gate", "nudge", "report"}
+    out = []
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("|") and stripped.endswith("|"):
+            cells = stripped.split("|")
+            # cells[0] and cells[-1] are the empty strings either side of the
+            # leading/trailing pipes; the mode is the second-to-last real cell.
+            if len(cells) >= 4 and cells[-3].strip() in modes:
+                cells[-2] = " "
+                out.append("|".join(cells))
+                continue
+        out.append(line)
+    return "\n".join(out)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Generate quality gates catalog."
@@ -556,11 +604,14 @@ def main() -> int:
                   "Run: python3 tools/validate/generate_quality_gates.py")
             return 1
         existing = out_path.read_text(encoding="utf-8")
-        if existing != new_content:
+        # Structural comparison only — the `Last modified` column is git-log
+        # derived and drifts with anyone's commits (BL-192). See strip_volatile.
+        if strip_volatile(existing) != strip_volatile(new_content):
             print("FAIL  docs/quality-gates.md is stale. "
                   "Run: python3 tools/validate/generate_quality_gates.py")
             return 1
-        print("PASS  docs/quality-gates.md is up to date")
+        print("PASS  docs/quality-gates.md is up to date "
+              "(structure; `Last modified` dates are not gated)")
         return 0
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
