@@ -33,6 +33,7 @@ to satisfy Rule 1 leaves the misattachment in place. The mitigation is procedura
 Exit codes:
   0 — all rules pass
   1 — at least one violation
+  2 — the check could not run (git unavailable or refused); NOT a pass
 
 Run manually:
     python3 tools/validate/check_backlog_integrity.py --root .
@@ -84,12 +85,28 @@ def _read(root: Path, rel: str) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+class GitUnavailable(RuntimeError):
+    """git could not be run, or refused the request. Distinct from "found nothing"."""
+
+
 def _git_lines(args: list[str], root: Path) -> list[str]:
-    """Run git and return non-blank stdout lines. Non-zero exit yields [] — `git
-    grep` exits 1 on "no matches", which is a clean result, not an error."""
+    """Run git and return non-blank stdout lines.
+
+    Exit-code handling is load-bearing. `git grep` exits **1** on "no matches",
+    which is a clean empty result. Anything **above 1** is a real failure (128 =
+    not a git repository or bad pathspec, 127 = git not on PATH). Treating those
+    as "no matches" makes the gate pass VACUOUSLY — a validator that goes green
+    because it could not run is exactly the silent-green failure this whole file
+    exists to prevent, so it raises instead.
+    """
     result = subprocess.run(
         ["git", *args], capture_output=True, text=True, cwd=root, check=False,
     )
+    if result.returncode > 1:
+        raise GitUnavailable(
+            f"`git {' '.join(args)}` failed with exit {result.returncode}: "
+            f"{result.stderr.strip() or '(no stderr)'}"
+        )
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
@@ -166,7 +183,12 @@ def main() -> int:
         problems.append("BL id sectioned in BOTH backlog.md and backlog-archive.md — Rule 1:")
         problems.extend(f"  ✗ {bl_id}" for bl_id in both)
 
-    dangling = dangling_citations(root)
+    try:
+        dangling = dangling_citations(root)
+    except GitUnavailable as exc:
+        print(f"Backlog integrity check could not run: {exc}", file=sys.stderr)
+        return 2
+
     if dangling:
         problems.append("BL id cited but never defined — Rule 2:")
         for bl_id, places in dangling.items():

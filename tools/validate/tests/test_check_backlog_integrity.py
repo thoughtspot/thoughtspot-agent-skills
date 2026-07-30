@@ -20,6 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import check_backlog_integrity as cbi
 
 VALIDATE = Path(__file__).resolve().parents[1]
@@ -204,3 +206,28 @@ def test_untracked_file_citation_is_ignored(tmp_path):
     _write(tmp_path, "agents/scratch.md", f"{_UNDEFINED_BL_C} notes\n")  # deliberately not committed
 
     assert cbi.dangling_citations(tmp_path) == {}
+
+
+def test_git_lines_raises_on_non_repo_directory(tmp_path):
+    """`git grep` exits 128 ("not a git repository") outside any repo — the exit-1
+    "no matches" shortcut must not swallow that. Deliberately skips _init_repo: a
+    fail-open here means the gate reports clean because it could not run at all,
+    which is worse than reporting nothing."""
+    with pytest.raises(cbi.GitUnavailable):
+        cbi._git_lines(["grep", "-nI", "-e", "BL-[0-9]+", "--", "agents"], tmp_path)
+
+
+def test_cli_exits_2_when_git_is_unavailable(tmp_path):
+    """The CLI must fail loudly (exit 2), not silently report clean (exit 0), when
+    run against a directory git refuses to operate on. This is the regression guard
+    for the fail-open bug: against the old _git_lines (non-zero exit -> []), this
+    same setup returns exit 0 with "Backlog integrity clean" — a validator reporting
+    success because it could not run at all."""
+    result = _run(tmp_path)  # tmp_path is not a git repo — no _init_repo call
+
+    assert result.returncode == 2
+    assert result.returncode != 0
+    assert result.returncode != 1
+    combined = result.stdout + result.stderr
+    assert "could not run" in combined
+    assert "not a git repository" in combined
