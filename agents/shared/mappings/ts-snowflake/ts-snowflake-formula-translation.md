@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (fiscal-calendar functions: custom_instructions mitigation documented; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — cumulative reverse-translation decision table, COUNT_IF mapping) -->
+<!-- currency: snowflake — 2026-07 (fiscal-calendar functions: custom_instructions mitigation documented; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — cumulative reverse-translation decision table, COUNT_IF mapping; 2026-07-30: fixed-partition cumulative row marked an approximation — moving_*/cumulative_* have no PARTITION BY slot, live-confirmed by rejection on se-thoughtspot) -->
 
 # Formula Translation Reference — Snowflake
 
@@ -483,9 +483,32 @@ SUM(tbl.metric) OVER (
 |---|---|---|
 | `PARTITION BY EXCLUDING dim ORDER BY dim ROWS UNBOUNDED PRECEDING` | `cumulative_sum ( [T::col] , [T::dim] )` | EXCLUDING matches TS's dynamic partition behaviour |
 | `ORDER BY dim ROWS UNBOUNDED PRECEDING` (no PARTITION BY) | `moving_sum ( group_aggregate(sum([T::col]), {[T::PK]}, query_filters()) , -1 , 0 , [T::dim] )` | No EXCLUDING = need explicit grain via group_aggregate |
-| `PARTITION BY dim1 ORDER BY dim2 ROWS UNBOUNDED PRECEDING` (fixed partition) | `moving_sum ( group_aggregate(sum([T::col]), {[T::dim1]}, query_filters()) , -1 , 0 , [T::dim2] )` | Fixed partition mapped to group_aggregate grain |
+| `PARTITION BY dim1 ORDER BY dim2 ROWS UNBOUNDED PRECEDING` (fixed partition) | `moving_sum ( group_aggregate(sum([T::col]), {[T::dim1]}, query_filters()) , -1 , 0 , [T::dim2] )` | Fixed partition **approximated** via group_aggregate grain — see the caveat below |
 
 Verified 2026-07-10 on SE cluster: `moving_sum(group_aggregate(sum([PAYROLL_COMPANIES::FAILED_PAYROLLS]), {[PAYROLL_COMPANIES::PAYROLL_COMPANY_ID]}, query_filters()), -1, 0, [PAYROLL_COMPANIES::PAYROLL_COMPANY_CREATED_AT])` — compiles and imports via TML.
+
+**Caveat on the fixed-partition row — it is an approximation, not an equivalence
+(2026-07-30).** `group_aggregate` fixes the grain of the **measure** being windowed; it does not
+give `moving_sum` a `PARTITION BY`. `moving_sum` has **no partition argument at all** — confirmed
+by rejection on `se-thoughtspot`, 2026-07-30: a `{ [attr] }` or `query_groups ( )` argument after
+the order columns is rejected at the parser, in both `moving_*` and `cumulative_*`. So the window
+`moving_sum` actually evaluates over is still completed from the query's own dimensions, and the
+translation reproduces the source's numbers only when the search carries `dim1`.
+
+Two practical rules follow:
+
+- **Flag the fixed-partition case for review** rather than emitting it silently. The formula
+  compiles (verified above), which is exactly what makes the divergence dangerous — nothing
+  errors.
+- Where fidelity matters more than nativeness, a `sql_*_aggregate_op` carrying the whole `OVER`
+  clause, wrapped in `group_aggregate ( … , query_groups ( ) + { [dim1] } , query_filters ( ) )`,
+  is the faithful alternative: the wrapper forces `dim1` into the GROUP BY so the declared
+  partition holds regardless of the search.
+
+The first two rows of the table are unaffected — `PARTITION BY EXCLUDING` genuinely matches
+ThoughtSpot's dynamic partition, and the no-PARTITION-BY row is already flagged as needing
+explicit grain. Full evidence and the reclassification it drove:
+[thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md) *Window Functions*.
 
 ### Moving Functions
 

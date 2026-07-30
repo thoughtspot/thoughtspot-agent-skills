@@ -5,11 +5,13 @@ to apache/ossie#285 is **held pending legal review**, and nothing has been poste
 · **Ossie spec version:** `0.2.0.dev0`
 (`core-spec/spec.yaml:20`, `core-spec/spec.md:24`; all Ossie citations below are
 `path:line` against apache/ossie @ `c26b61c`) · **TS ground truth:**
-`agents/shared/schemas/thoughtspot-model-tml.md` and
-`agents/shared/schemas/thoughtspot-table-tml.md` — internal paths in the ThoughtSpot
-skills repo, cited below by section name as the *Model TML reference* and the
-*Table TML reference*. They are the authoritative record of ThoughtSpot's TML shape
-(derived from real import failures) and override any other description of it.
+`agents/shared/schemas/thoughtspot-model-tml.md`,
+`agents/shared/schemas/thoughtspot-table-tml.md` and
+`agents/shared/schemas/thoughtspot-view-tml.md` — internal paths in the ThoughtSpot
+skills repo, cited below by section name as the *Model TML reference*, the
+*Table TML reference* and the *View TML reference*. They are the authoritative record of
+ThoughtSpot's TML shape (derived from real import failures, and since 2026-07-30 also from a
+500-document census of real exported TML) and override any other description of it.
 
 This document proposes the construct-level mapping for a bidirectional ThoughtSpot
 converter. The companion expression/function mapping — one row per
@@ -233,7 +235,7 @@ Ossie schema: `core-spec/spec.md:231-240`; required keys `name` and `expression`
 | `label` | `columns[].name` verbatim | Read as the human display label, matching `converters/databricks/README.md:89`. See ask [**A5**](#open-questions-and-upstream-asks) | lossless |
 | `expression` — a single bare identifier | Table `columns[].db_column_name`, surfaced by a Model `columns[]` entry with `column_id: TABLE::Name` and `column_type: ATTRIBUTE` | The identifier is the *physical* column; the display name comes from `label`/`name`. `db_column_name` is emitted unconditionally — see [**R1**](#reverse-direction-rules-ossie--tml) | lossless |
 | `expression` — computed | Model `formulas[]` entry (`id: formula_<Name>`, `name`, `expr`) plus a `columns[]` entry referencing it by `formula_id` with `column_type: ATTRIBUTE` | ThoughtSpot formulas are model-scope, so a computed field must be **attributed** to a dataset: attribute it to the dataset all its column references resolve to. When they span two or more datasets there is no correct dataset, and the converter does not guess — it raises an issue and preserves the formula in the model-scope stash (`unattributed_formulas`). This mirrors upstream's refuse-to-guess rule for expressions on fanned-out datasets | lossless (single dataset) / lossy→issue + via custom_extensions (multi-dataset) |
-| `expression.dialects[]` | one ThoughtSpot formula string | Each expression's verdict is decided function-by-function in the companion [function-mapping document](ts-osi-function-mapping.md#coverage-summary): of the 146 constructs the specification declares, **112 are `direct`** — a native ThoughtSpot equivalent, so that part of the expression is lossless; **33 are `passthrough`** — carried as warehouse SQL inside a `sql_*_op` wrapper, which preserves the result but couples it to one dialect; and **1 is `unmappable`** (`EXISTS_IN()`, unspecified upstream — ask [**A9**](ts-osi-function-mapping.md#open-questions-and-upstream-asks)), which raises an issue. An expression's verdict is therefore the weakest verdict among the constructs it uses. See [Expression handling](#expression-handling-summary--detail-in-the-companion-function-mapping-document) for how a formula is assembled and rewritten | per-function — see [Expression handling](#expression-handling-summary--detail-in-the-companion-function-mapping-document) |
+| `expression.dialects[]` | one ThoughtSpot formula string | Each expression's verdict is decided function-by-function in the companion [function-mapping document](ts-osi-function-mapping.md#coverage-summary): of the 146 constructs the specification declares, **108 are `direct`** — a native ThoughtSpot equivalent, so that part of the expression is lossless; **37 are `passthrough`** — carried as warehouse SQL inside a `sql_*_op` wrapper, which preserves the result but couples it to one dialect; and **1 is `unmappable`** (`EXISTS_IN()`, unspecified upstream — ask [**A9**](ts-osi-function-mapping.md#open-questions-and-upstream-asks)), which raises an issue. An expression's verdict is therefore the weakest verdict among the constructs it uses. See [Expression handling](#expression-handling-summary--detail-in-the-companion-function-mapping-document) for how a formula is assembled and rewritten | per-function — see [Expression handling](#expression-handling-summary--detail-in-the-companion-function-mapping-document) |
 | `dimension.is_time` (`is_time` is the `dimension` object's only key — `osi-schema.json:127-137`) | a `DATE` / `DATE_TIME` column, plus `properties.default_date_bucket` for its default grain | `TML → Ossie`: ThoughtSpot has no temporal-role flag, so the role is derived from the column type and `is_time` is emitted **only** when it differs from the type-derived default (`core-spec/spec.md:337`) — which, given a type-derived role, is never; the field is simply omitted and the default applies. `Ossie → TML`: a time role on a **non-temporal** type — a year as `Integer`, a quarter name as `String` (`core-spec/spec.md:341-348`) — has no TML flag to write and, per [**X9**](#protocol), nothing to stash → issue. **The issue is actionable, not just a report:** ThoughtSpot has no temporal-role flag, but it *can* hold a real `DATE` derived from the integer, so the issue carries a ready-to-paste formula for the common integer-year case rather than leaving the user to invent one — `to_date ( concat ( to_string ( [TABLE::Year] ) , '-01-01' ) , 'yyyy-MM-dd' )`, which anchors the year to 1 January (syntax live-verified 2026-07-30 on `se-thoughtspot`; a `trim ( )` negative control in the same pass was rejected, so formula bodies really are parsed by this check). Emit only the documented `yyyy-MM-dd` pattern style: the format string itself is **not** validated at import — a bogus `'%Y'` also passed — so acceptance proves the call shape, not the pattern. **The converter still does not synthesise by default**, because inventing a column is exactly what [**X9**](#protocol) forbids; whether to offer opt-in synthesis behind a flag (`--synthesize-time-columns`, emitting the formula as a real derived column and setting the temporal role) is a **Phase-3 converter decision**, to be settled with upstream feedback on whether a synthesised field should be marked as converter-generated. `properties.default_date_bucket` is a ThoughtSpot-only grain default, stashed in `column_properties` | lossless (temporal types) / lossy→issue (role on a non-temporal type) |
 | — (no calendar concept in Ossie) | `properties.calendar` on a date column — the **custom / fiscal calendar** the column is bucketed by | ThoughtSpot lets a date column be reported against a non-Gregorian calendar (fiscal-year offset, 4-4-5 / 4-5-4 / 5-4-4 retail periods). **Only a reference travels, never a definition:** the calendar itself is a *Connection-scoped object* created outside TML via `POST /api/rest/2.0/calendars/create` (10.12.0.cl or later) and backed by a warehouse calendar table, so the Ossie document can record which calendar a column uses but cannot describe it. `TML → Ossie` stashes the value as `column_properties.calendar` and raises an issue naming the calendar, because a target instance without that calendar on that connection cannot honour the reference. `Ossie → TML` writes it back only from the stash — it is never invented. **The exact value vocabulary needs live verification ([V1](#thoughtspot-side-open-verifications-not-upstream-asks)):** ThoughtSpot's public TML documentation gives `calendar: [ default \| calendar_name ]` for Model columns, while our own SQL View reference records the literal `CALENDAR_TYPE_GREGORIAN`, and the two have not been reconciled — a converter must not emit this property until they are | lossy→issue (definition) + via custom_extensions (reference, pending [V1](#thoughtspot-side-open-verifications-not-upstream-asks)) |
 | `description` | Model `columns[].description` for a Model-surfaced field; Table `columns[].description` for a Table-only one | **Live-verified 2026-07-30 on `se-thoughtspot`.** `description` is a first-class field on the Model `columns[]` entry and applies to a formula-backed entry exactly as it does to a `column_id` one — ThoughtSpot's own Model TML syntax lists `description: <optional_column_description>` as a `columns[]` key, and 14 of the 78 formula-backed columns in a 40-model random sample carry one (e.g. `What-If Sales` → "project sales figures based upon the input parameter percentage"). It is the `columns[]` entry, not the `formulas[]` entry, that owns column-level metadata; `formulas[]` holds only `id`/`name`/`expr`. So a computed field's description round-trips with no stash and no issue | lossless |
@@ -254,7 +256,7 @@ scope of a ThoughtSpot Model formula, so this level maps cleanly in both directi
 |---|---|---|---|
 | `name` | `formulas[].name`, matched by the surfacing `columns[].name`, with `formulas[].id` = `formula_<Name>` and `columns[].formula_id` matching that id exactly | A `formulas[]` entry with no `columns[]` entry referencing it is **not surfaced** in the model at all (Model TML reference, *Formula Visibility*). Metrics have no `label` field, so when [ID1](#identifiers--the-second-non-obvious-thing) normalisation changes the name the exact ThoughtSpot display name is stashed | lossless / via custom_extensions (exact name) |
 | `expression` | `formulas[].expr` | Always emitted as a formula, never as a physical column plus an aggregation — three grounded reasons in [**R4**](#reverse-direction-rules-ossie--tml) | lossless (translatable) / lossy→issue (untranslatable) |
-| (the aggregation function, which lives *inside* `expression` — Ossie has no separate `aggregation` field) | `columns[].properties.aggregation` on the surfacing column | `TML → Ossie`: a `columns[]` entry with `column_id` + `aggregation: SUM` becomes the metric `SUM(dataset.field)`. The enum maps `SUM`/`COUNT`/`AVERAGE`/`MIN`/`MAX`/`COUNT_DISTINCT` ↔ `SUM`/`COUNT`/`AVG`/`MIN`/`MAX`/`COUNT(DISTINCT …)`, against Ossie's required core aggregations (`core-spec/expression_language.md:153-163`). TML also accepts `STD_DEVIATION`, `VARIANCE` and `NONE`, which map to Ossie's `STDDEV`, `VARIANCE` and "no aggregate" respectively. **`aggregation:` belongs in `columns[]` entries only — never in a `formulas[]` entry** (the Model TML reference records `FORMULA is not a valid aggregation type` as the resulting import error), and `aggregation` on a formula column is *ignored at query time*, so the aggregation must be inside `expr` | lossless |
+| (the aggregation function, which lives *inside* `expression` — Ossie has no separate `aggregation` field) | `columns[].properties.aggregation` on the surfacing column | `TML → Ossie`: a `columns[]` entry with `column_id` + `aggregation: SUM` becomes the metric `SUM(dataset.field)`. The enum maps `SUM`/`COUNT`/`AVERAGE`/`MIN`/`MAX`/`COUNT_DISTINCT` ↔ `SUM`/`COUNT`/`AVG`/`MIN`/`MAX`/`COUNT(DISTINCT …)`, against Ossie's required core aggregations (`core-spec/expression_language.md:153-163`). TML also accepts `STD_DEVIATION`, `VARIANCE` and `NONE`, which map to Ossie's `STDDEV`, `VARIANCE` and "no aggregate" respectively. **`aggregation:` belongs in `columns[]` entries only — never in a `formulas[]` entry** (the Model TML reference records `FORMULA is not a valid aggregation type` as the resulting import error). Whether it *applies* on a formula column depends on the `expr`, and both directions need to know which: **a scalar `expr`** (`[FACT::AMOUNT] - [FACT::COST]`) is evaluated per row and then rolled up by the column's `aggregation`, exactly like a physical fact column with a default aggregation — so the column-level `aggregation` is load-bearing; **an aggregate `expr`** (`sum ( … )`) already carries its own aggregation and the column-level value is a no-op (*per ThoughtSpot domain review, 2026-07-30* — an earlier revision of this document stated the no-op case universally, which was wrong). `TML → Ossie` therefore composes the two: a scalar formula column carrying `aggregation: AVERAGE` becomes the metric expression `AVG(<translated scalar expr>)`, not the bare scalar. `Ossie → TML` may emit either shape — see [**R4**](#reverse-direction-rules-ossie--tml) | lossless |
 | `description` | `columns[].description` on the surfacing column | **Live-verified 2026-07-30 on `se-thoughtspot`.** The `formulas[]` entry has no `description` key, but the `columns[]` entry that surfaces it does, and it is populated on real UI-authored metrics (14 of 78 formula-backed columns in a 40-model random sample). Since a metric is only surfaced *through* a `columns[]` entry (see the `name` row), that entry is always available as the description's home — so no stash and no issue | lossless |
 | `datatype` | metrics have no declared type in Model TML | **Live-verified 2026-07-30 on `se-thoughtspot`:** no `data_type` key exists on either the `columns[]` or the `formulas[]` entry in ThoughtSpot's documented Model TML syntax, and none of the 78 sampled formula-backed columns carried one — ThoughtSpot derives a metric's type from its expression. `TML → Ossie` therefore emits `datatype` only when the metric is a bare aggregate over a typed physical column (`COUNT` and `COUNT(DISTINCT …)` → `Integer`; otherwise the column's mapped type); otherwise omitted. `Ossie → TML` has nowhere to write it ([**X9**](#protocol)) → issue | lossless (bare aggregate) / lossy→issue (otherwise) |
 | `ai_context.synonyms` | `properties.synonyms` + `synonym_type` on the surfacing column | | lossless |
@@ -405,7 +407,12 @@ Mirrors the Databricks converter's stash
         },
         "lesson_plans": {
           "type": "array",
-          "description": "Verbatim model.lesson_plans[] entries (lesson_id, lesson_plan_string) — the in-product guided-lesson strings attached to a Model. No Ossie equivalent; presentation/coaching content, but TML-resident and therefore stashable (unlike the separate coaching objects of NM4).",
+          "description": "Verbatim model.lesson_plans[] entries (lesson_id, lesson_plan_string) — the in-product guided-lesson strings attached to a Model. No Ossie equivalent; presentation/coaching content, but TML-resident and therefore stashable (unlike the separate coaching objects of NM4). Shape live-confirmed on 8 real Models (2026-07-30 census); lesson_id is 0-based.",
+          "items": { "type": "object" }
+        },
+        "action_object_associations": {
+          "type": "array",
+          "description": "Verbatim model.action_object_associations[] entries ({action_name, context, enabled}) — custom actions bound to the Model, e.g. {\"action_name\": \"Generate Forecast\", \"context\": \"CONTEXT_MENU\", \"enabled\": true}. Found by the 2026-07-30 census (1 of 143 Models) and previously undocumented anywhere in this repo. Classified as a presentation binding, so NM3's reasoning applies to the ACTION — the custom action itself is a separate object type and is not converted — but the ASSOCIATION is TML-resident, so it is stashable on the same basis as lesson_plans rather than dropped. It names the action by display name only, so it is a no-op on an instance lacking an action of that name; Ossie -> TML must therefore not invent one, and an inbound association whose action cannot be resolved raises an issue rather than being written.",
           "items": { "type": "object" }
         },
         "model_joins_with": {
@@ -425,7 +432,7 @@ Mirrors the Databricks converter's stash
               "on_expression": { "type": "string" },
               "type": { "type": "string" },
               "cardinality": { "type": "string" },
-              "join_shape": { "enum": ["referencing", "inline"] },
+              "join_shape": { "enum": ["referencing", "inline", "referencing_with_inline_attrs"] },
               "referencing_join": { "type": "string" }
             }
           }
@@ -493,8 +500,8 @@ Mirrors the Databricks converter's stash
         "type": { "enum": ["INNER", "LEFT_OUTER", "RIGHT_OUTER", "OUTER"], "description": "ThoughtSpot's complete join-type vocabulary, identical in the Model inline join and the Table joins_with[] entry. OUTER is the full outer join; FULL_OUTER is not a ThoughtSpot value and is rejected in both contexts (error 14528, live-verified 2026-07-30)." },
         "cardinality": { "enum": ["MANY_TO_ONE", "ONE_TO_ONE", "ONE_TO_MANY", "MANY_TO_MANY"] },
         "join_shape": {
-          "enum": ["referencing", "inline"],
-          "description": "referencing = a named Table joins_with[] entry the Model points at; inline = defined in model_tables[].joins[]"
+          "enum": ["referencing", "inline", "referencing_with_inline_attrs"],
+          "description": "referencing = a named Table joins_with[] entry the Model points at; inline = defined in model_tables[].joins[]; referencing_with_inline_attrs = BOTH, which is real — 12 of 493 joins in a 143-Model census (2026-07-30) carry a referencing_join PLUS a `type` or a `cardinality`. The enum was closed at the first two values, which would have collapsed those hybrids to `referencing` and silently dropped the inline attribute. `type`/`cardinality` are independent keys here, so they survive whichever shape is recorded — the third value exists so `Ossie -> TML` can reproduce the source document rather than normalising it."
         },
         "referencing_join": { "type": "string", "description": "The Table joins_with[] name, when join_shape is referencing" },
         "on_expression": {
@@ -520,17 +527,17 @@ Mirrors the Databricks converter's stash
               "enum": ["DONT_INDEX", "DEFAULT", "PREFIX_ONLY", "PREFIX_AND_SUBSTRING", "PREFIX_AND_WORD_SUBSTRING"],
               "description": "Full documented set — a payload restricted to DONT_INDEX/PREFIX_ONLY would reject a model using the substring variants."
             },
-            "index_priority": { "type": "integer", "description": "Search-indexing priority" },
-            "value_casing": { "enum": ["UPPER", "LOWER", "MIXED", "UNKNOWN"] },
+            "index_priority": { "type": "number", "description": "Search-indexing priority. A NUMBER, not an integer: ThoughtSpot emits it non-integrally (`\"index_priority\":10.0`, confirmed in the raw edoc across all 20 sightings in a 2026-07-30 census), so an integer-typed field rejects real ThoughtSpot output." },
+            "value_casing": { "enum": ["UPPER", "LOWER", "MIXED", "UNKNOWN"], "description": "Documented as a Table-column refinement on VARCHAR, but observed on 545 MODEL columns across 18 of 143 Models (2026-07-30 census), 156 of them formula-backed — so it is stashed at the field level for Model columns too, not only for Table ones." },
             "default_date_bucket": { "enum": ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY", "AUTO"] },
             "calendar": {
               "type": "string",
-              "description": "The custom / fiscal calendar the date column is bucketed by — a reference only; the calendar object itself lives on the Connection, outside TML. Value vocabulary pending live verification V1, so a converter records it but does not emit it."
+              "description": "The custom / fiscal calendar the date column is bucketed by — a reference only; the calendar object itself lives on the Connection, outside TML. Value vocabulary SETTLED 2026-07-30 (V1): it is a calendar NAME, with the literal `calendar` as the default spelling; CALENDAR_TYPE_GREGORIAN was observed zero times in 500 documents. Honoured on Table and formula-backed columns as well as Model ones. A converter records it and still does not emit it, because the named calendar does not exist on a target instance."
             },
             "custom_order": { "type": "array", "items": { "type": "string" } },
             "geo_config": {
               "type": "object",
-              "description": "latitude / longitude / country / region_name role for map rendering. A geo_config that names a **custom map** carries `custom_file_guid` + `geometryType` — a GUID, so by rule X8 (and NM1) it must NOT be stashed: that column's geo role is dropped with an issue naming the custom map instead."
+              "description": "Map-rendering role. FIVE shapes exist, confirmed by a 2026-07-30 census of 143 Models: `region_name` as a DICT {country, region_name} (88 sightings), `latitude: true` (17), `longitude: true` (17), `custom_file_guid` + `geometryType` (7), and `country: true` (5) — the last being a BARE BOOLEAN, distinct from `region_name.country`, which is a string. A geo_config that names a **custom map** carries `custom_file_guid` + `geometryType` — a GUID, so by rule X8 (and NM1) it must NOT be stashed: that column's geo role is dropped with an issue naming the custom map instead. Custom maps are confirmed present in production (3 Models), so this path is exercised, not hypothetical."
             },
             "spotiq_preference": { "type": "string" },
             "search_iq_preferred": { "type": "boolean" },
@@ -576,8 +583,8 @@ Mirrors the Databricks converter's stash
       "properties": {
         "tml_name": { "type": "string", "description": "Exact display name when normalisation changed it (metrics have no `label`)" },
         "shape": {
-          "enum": ["formula", "column_aggregation"],
-          "description": "Which TML shape the source used, so TML -> Ossie -> TML reproduces it. New TML is always emitted as `formula` — see R4."
+          "enum": ["formula", "scalar_formula_plus_aggregation", "column_aggregation"],
+          "description": "Which TML shape the source used, so TML -> Ossie -> TML reproduces it. New TML is always emitted as `formula` today — see R4. `scalar_formula_plus_aggregation` is a formulas[] entry whose expr is scalar, aggregated by the surfacing columns[] entry's `aggregation`: it round-trips as AGG(scalar_expr) and is the Phase-3 emission option R4-P3 pattern B; recording it distinctly is what lets that round trip reproduce the source shape rather than collapsing it to `formula`."
         },
         "column_id": { "type": "string", "description": "TABLE::Column, when shape is column_aggregation" },
         "column_properties": {
@@ -636,14 +643,35 @@ failure recorded in the two TML references, so none is stylistic.
   display-name form — a display-name reference fails on first import (ThoughtSpot parses
   it as search tokens), while id references resolve order-independently in a single pass.
 - **R4** A metric is always emitted as a formula, never as a physical `column_id` plus an
-  `aggregation`. Three reasons, each independently sufficient: (a) the same physical
+  `aggregation`. Two reasons, each independently sufficient: (a) the same physical
   column is usually also a field, and two `columns[]` entries sharing a `column_id` is a
   `duplicate column_id` import error; (b) `aggregation: COUNT_DISTINCT` on a physical
   column makes ThoughtSpot **silently override** `column_type` to `ATTRIBUTE` — the
-  documented fix is a `unique count ( [T::c] )` formula; (c) `aggregation` on a formula
-  column is ignored at query time, so the aggregation has to be inside `expr` regardless.
+  documented fix is a `unique count ( [T::c] )` formula.
+  **(c) — corrected, and no longer a reason.** An earlier revision of this rule gave a third
+  reason: "`aggregation` on a formula column is ignored at query time, so the aggregation has to
+  be inside `expr` regardless." *Per ThoughtSpot domain review, 2026-07-30* that is only true of
+  an **aggregate** `expr`. On a **scalar** `expr` the column-level `aggregation` **does** apply —
+  the formula is evaluated per row and rolled up by the declared aggregation, the same way a
+  physical fact column with a default aggregation behaves. So R4 rests on (a) and (b) alone; (c)
+  is retained here as a corrected note because the wrong version of it is quoted downstream (see
+  **G11** in the [compliance-gaps document](ts-osi-compliance-gaps.md)).
   The source shape is recorded in the stash (`shape`) so a round trip reproduces the
   original document.
+- **R4-P3** *(Phase-3 design option, recorded not decided.)* Because a scalar `expr` plus a
+  column-level `aggregation` is a real ThoughtSpot idiom rather than a no-op, an Ossie metric
+  of the form `AGG(<scalar expression>)` has **two** faithful TML emissions, and the choice is a
+  Phase-3 converter design decision:
+
+  | Pattern | Emission | Trade-off |
+  |---|---|---|
+  | **A — aggregate-in-expr** (today's rule) | one `formulas[]` entry, `expr: "sum ( [FACT::AMOUNT] - [FACT::COST] )"`; the surfacing `columns[]` entry's `aggregation` is a conventional no-op | One object per metric, and the metric's grain is fixed by the `expr`. Simplest, and what R4 emits today. |
+  | **B — scalar formula + column aggregation** | one `formulas[]` entry, `expr: "[FACT::AMOUNT] - [FACT::COST]"`, and the surfacing `columns[]` entry carries `properties.aggregation: SUM` | More idiomatic ThoughtSpot, and **reusable at row grain**: the same formula can be re-aggregated differently in different searches and composed into other formulas, which pattern A forecloses. Costs a round-trip subtlety — the aggregation now lives in a *property*, so a `TML → Ossie` reader must compose it back (see the Metric-level `aggregation` row) or the metric silently loses its aggregate. |
+
+  Pattern B is only available when the aggregation is a single outer aggregate over an otherwise
+  scalar expression — `SUM(a - b)` qualifies, `SUM(a) / SUM(b)` does not (there is no scalar
+  expression to hoist). A converter choosing B must also not emit a `SUM` on a scalar *ratio*
+  expression, because the sum of per-row ratios is not the ratio of the sums.
 - **R5** Inline joins live inside the source (FK) `model_tables[]` entry, never at model
   top level (`destination is missing`). Quote the condition key as `'on':` — `on` is a
   YAML 1.1 reserved word. `type` and `cardinality` are both required; `with:` must equal
@@ -677,11 +705,15 @@ failure recorded in the two TML references, so none is stylistic.
 Deliberately not carried. In every case a value present on the source side raises an
 issue naming the object and the construct — never a silent drop.
 
-1. **NM1 — Object identity: `guid`, `obj_id`, and `model_tables[].fqn`.** These identify
-   an object *inside one ThoughtSpot instance*. Carrying them into an interchange
-   document would make it non-portable and re-importing a stale value fails with
-   `fqn resolution failed`. Never emitted, never consumed, and absent from the payload
-   schema by rule [**X8**](#protocol).
+1. **NM1 — Object identity: `guid`, `obj_id`, `model_tables[].fqn`, `table.dataset_id`, and
+   `geo_config.custom_file_guid`.** These identify an object *inside one ThoughtSpot instance*.
+   Carrying them into an interchange document would make it non-portable and re-importing a stale
+   value fails with `fqn resolution failed`. Never emitted, never consumed, and absent from the
+   payload schema by rule [**X8**](#protocol). Two additions from the 2026-07-30 census:
+   **`table.dataset_id`** — a 12-hex-character root-level Table key (`28ede9b627ab`) on
+   uploaded/derived tables, 4 of 275 observed, undocumented by ThoughtSpot and identity-shaped, so
+   it joins this list rather than the stash; and **`geo_config.custom_file_guid`**, which was
+   already excluded by X8 in the `geo_config` note and is named here so the list is complete.
 2. **NM2 — Row-level security (Table `rls_rules`).** These are access-control policy, not
    semantics: the rule expressions reference group identifiers that only exist in the
    source instance (e.g. `ts_groups_int`). Relocating a security policy into a portable
@@ -715,6 +747,34 @@ issue naming the object and the construct — never a silent drop.
    A converter rejects all of these documents with a clear issue rather than
    half-mapping them into a Model.
 
+   Two refinements from a 500-document TML census on a current Cloud build (2026-07-30):
+
+   - **`worksheet:` is no longer obtainable by export.** All 2,397 `WORKSHEET`-subtype objects on
+     the surveyed cluster were checked: **2,394 carry `worksheetVersion: V2`** and every sampled
+     one exported with root key `model:` — V2 *is* a Model. The only three without a
+     `worksheetVersion` are ThoughtSpot's own system worksheets and all three return `FORBIDDEN`
+     on export. The rule stays as a defensive check, but its likelihood of firing on a current
+     build is near zero.
+   - **A `view:` document is rejected, and the reason deserves the same explicitness
+     `worksheet:` gets.** It is not that `view_columns[]` is hard to map — it is that
+     **`view.search_query` carries the View's actual semantics.** Observed on **42 of 42** real
+     Views, it is where the aggregation and the filtering live; `view_columns[]` only names and
+     decorates the output columns of that search, and its column reference is a search-output
+     *label* (`search_output_column`, e.g. `Total Revenue`, `Month(YM)`) rather than a
+     `table_path::column` reference. A reader who mapped `view_columns[]` alone would produce a
+     dataset with the right column names and none of the semantics. See the *View TML reference*.
+
+     One consequence of the exclusion is worth recording rather than leaving implicit: a View
+     column's `aggregation` vocabulary is **wider than the Model/Table one** — `MOVING_SUM`,
+     `RANK` and `SQL_INT_AGGREGATE_OP` were all observed on real View columns, none of which is in
+     the nine-value set the Metric level maps. The census verified the boundary in both
+     directions: across all 500 documents, `model:` columns used only
+     `{SUM, AVERAGE, COUNT, COUNT_DISTINCT, MIN}`, `table:` only
+     `{SUM, AVERAGE, COUNT, COUNT_DISTINCT}` and `sql_view:` only `{SUM, AVERAGE}` — **no window
+     value appears on any document type a converter accepts.** So the payload schema's
+     nine-value `aggregation` enum is **correct as scoped and is deliberately not widened**; the
+     wider vocabulary belongs to `view:`, which NM6 excludes.
+
 ## Open questions and upstream asks
 
 Each ask carries the **upstream venue** it should be raised in — mapped against apache/ossie's existing discussion index on 2026-07-30, so an ask lands on a live thread rather than as a duplicate ticket.
@@ -741,10 +801,10 @@ mention*, which is the class of gap the `calendar` row above belongs to.
 
 | # | Item | What is known | What needs verifying |
 |---|---|---|---|
-| **V1** | `properties.calendar` — custom / fiscal calendar on a date column | The property exists on Model columns and on SQL View columns. Custom calendars are Connection-scoped objects created via `POST /api/rest/2.0/calendars/create` (10.12.0.cl+) with types `MONTH_OFFSET`, `FOUR_FOUR_FIVE`, `FOUR_FIVE_FOUR`, `FIVE_FOUR_FOUR`, a `month_offset`, a `start_day_of_week` and year/quarter label prefixes — none of which is in TML | **The value vocabulary.** ThoughtSpot's public TML docs give `[ default \| calendar_name ]`; our SQL View reference records the literal `CALENDAR_TYPE_GREGORIAN`. Whether both are accepted, whether one is an export-only spelling, and whether `calendar:` is honoured on a **Table** column (as opposed to Model / SQL View, where it is documented) are all open. Export a model that uses a real custom calendar and read what comes back |
-| **V2** | `properties.currency_type` — the `column` and `is_browser` forms | Three mutually-exclusive forms are documented: `iso_code`, `column` (per-row code from another column), `is_browser` (viewer locale). Our TML references only ever showed `iso_code` | That the two other forms survive an import/export round trip, and whether `column` takes a display name or a `TABLE::Column` reference |
-| **V3** | `geo_config` naming a **custom map** (`custom_file_guid` + `geometryType`) | Documented as an alternative to the lat/long/country/region roles | Nothing to verify for the converter — rule **X8** already forbids stashing a GUID, so this is settled as a declared loss. Listed here only so a future reader does not mistake the omission for an oversight |
-| **V4** | `properties.is_mandatory_token_filter` — ABAC mandatory filters | Documented: a user with no matching filter rule in their token is denied all data for that column | That it survives a TML round trip at all. It **fails open** if dropped, which is the worst direction for a security flag, so it is stashed rather than ignored — but the stash is only as good as the export |
+| **V1** | `properties.calendar` — custom / fiscal calendar on a date column | **SUBSTANTIALLY SETTLED 2026-07-30** by a 500-document census. The value is a calendar **name**: two real named calendars observed (`SeanTSCROOTS`, `Dupont_Fiscal_Cal`), with the literal `calendar` as the default spelling (70 sightings across 34 unrelated Models). `CALENDAR_TYPE_GREGORIAN` and `default` were observed **zero** times on any of the four document types. `calendar:` **is** honoured on a **Table** column (`FACT_RETAPP_SALES.RECORDDATE`) and on **formula-backed** Model columns (5 sightings). Custom calendars remain Connection-scoped objects created via `POST /api/rest/2.0/calendars/create` (10.12.0.cl+), none of whose configuration is in TML | **What remains: one question, narrowed.** Is the literal `calendar` a genuine default *sentinel*, or a customer calendar coincidentally named "calendar"? The 34-Model spread across unrelated tenants strongly favours sentinel. Closing it needs a `GET /api/rest/2.0/calendars/…` read on the surveyed cluster — census follow-up **T4**, not another export. **The converter behaviour this gated is now decided:** read and stash a calendar *name*; never emit; treat `CALENDAR_TYPE_GREGORIAN` as withdrawn |
+| **V2** | `properties.currency_type` — the `column` and `is_browser` forms | **PARTIALLY SETTLED 2026-07-30.** The `column` form is confirmed live — one sighting, on a **Table** column, carrying a **bare column name** (`{"column": "TARGET_CURRENCY"}`), *not* a `TABLE::Column` reference. That answers half the open question. `is_browser` was observed **zero** times anywhere in 500 documents. All 81 Model sightings and all 5 View sightings used `iso_code` | Two things still open: whether either non-`iso_code` form survives an import/export **round trip** (the census is export-only, so it shows the form exists, not that it survives being written back), and whether `is_browser` is emitted at all on any build |
+| **V3** | `geo_config` naming a **custom map** (`custom_file_guid` + `geometryType`) | **CONFIRMED PRESENT IN PRODUCTION 2026-07-30** — 3 Models / 7 columns in the census, with `geometryType` ∈ {`POLYGON`, `MULTI_POLYGON`}. Previously documented but unevidenced | Nothing to verify for the converter — rule **X8** already forbids stashing a GUID, so this stays settled as a declared loss. The census's contribution is that the declared-loss path is **exercised in the wild**, not hypothetical: real models will hit it. The census also found a **fifth** geo role this document did not name, `country: true` (a bare boolean, 5 sightings) — added to the `geo_config` payload description |
+| **V4** | `properties.is_mandatory_token_filter` — ABAC mandatory filters | Documented: a user with no matching filter rule in their token is denied all data for that column. **Still unevidenced:** observed **zero** times in the 500-document census, so a second, much larger sample has now failed to find it | **STILL FULLY OPEN**, and the census cannot speak to it — a property that never appears cannot be shown to round-trip. That it survives a TML round trip at all remains untested, and it **fails open** if dropped, which is the worst direction for a security flag. It is stashed rather than ignored, but the stash is only as good as the export. Closing this needs a *constructed* object that sets the flag, not a wider survey |
 
 **Drive-by evidence from the 2026-07-30 G7/G13 probe run** (a 40-model random export sample on
 `se-thoughtspot`, gathered incidentally — none of it closes a verification, and all four stay open):
@@ -753,9 +813,8 @@ mention*, which is the class of gap the `calendar` row above belongs to.
   12 models, and in *every* case the value was the bare lowercase token `calendar` — never
   `default`, and never `CALENDAR_TYPE_GREGORIAN`. That is consistent with the
   `calendar_name` reading and inconsistent with the SQL-View reference's enum-like spelling, but
-  it does **not** settle the vocabulary: whether `calendar` here is a user-named calendar object
-  or an export-time sentinel is still unknown, and no `calendar:` value was observed on a **Table**
-  column. [V1](#thoughtspot-side-open-verifications-not-upstream-asks) still needs the `calendars/create` leg described above.
+  it did **not** settle the vocabulary, and no `calendar:` value was observed on a **Table**
+  column. *(Both of the gaps in this bullet were closed by the census below.)*
 - **V2 gained no evidence.** All 29 observed `currency_type` blocks used `iso_code` only; the
   `column` and `is_browser` forms did not appear in the wild, so the round-trip question is untouched.
 - **V4 gained no evidence.** `is_mandatory_token_filter` appeared on zero columns in the sample.
@@ -764,6 +823,40 @@ mention*, which is the class of gap the `calendar` row above belongs to.
   `{lesson_id: <int>, lesson_plan_string: <string>}` — e.g.
   `{"lesson_id": 0, "lesson_plan_string": "What were [Sales] by [Store Region] in [Date].'last year' ?"}`.
   The reference's provisional marker can be dropped.
+
+**Superseding evidence — the 2026-07-30 TML property census.** A read-only census of **500**
+logical-table TML documents on `se-thoughtspot` (143 Models, 275 Tables, 42 Views, 40 SQL Views,
+sampled from a 15,204-object population; nothing created, modified or deleted) went further than
+the 40-model sample above and **advanced V1, V2 and V3 past the positions recorded in those
+bullets**. The V-item rows in the table above now carry the census position; the bullets are kept
+because they record what was known when, and because the census contradicts one of them directly.
+The four headline corrections:
+
+1. **V1 — the census observes both of the things the 40-model sample reports as absent.** Two real
+   *named* calendars on Model columns (`SeanTSCROOTS`, `Dupont_Fiscal_Cal`) **and** a `calendar:`
+   on a **Table** column (`FACT_RETAPP_SALES.RECORDDATE: SeanTSCROOTS`). The `calendar_name`
+   reading is therefore confirmed directly rather than inferred, and the Table-column half of V1 is
+   answered **yes**. `CALENDAR_TYPE_GREGORIAN`: zero sightings in 500 documents, including zero on
+   the SQL Views where our own reference claimed it.
+2. **V2 — the `column` form exists**, on a Table column, as a bare column name.
+3. **V3 — custom maps are in production**, 3 Models / 7 columns.
+4. **V4 — a second and far larger sample still finds nothing.** Zero of 500 documents.
+
+Two further census findings changed this document outside the V-items: the join-shape enum was
+closed at two values but 12 of 493 real joins are **hybrids** (see `RelationshipLevel.join_shape`),
+and `action_object_associations[]` was a wholly undocumented model-level construct (now a stash
+key). The census also confirmed several existing claims empirically rather than by inference:
+`db_column_name` on 2,719 of 2,719 Table columns (**R1**), `name` as the only key in all 313
+connection blocks, `list_choice[]` objects in 79 of 79 parameters with `CHAR` ×24 / `VARCHAR` ×0
+(**I10**), `column_id` in the `TABLE::col` form universally, and `formula_` + name as the
+`formula_id` convention universally.
+
+**What the census could not see, by construction.** It exported without `--fqn`, `--associated` or
+`--include-obj-id`, so the `fqn` / `obj_id` / `destination.fqn` paths are absent from it *by
+method*, not by absence in the product. **NM1** and **X8** — the identity rules — are therefore the
+least-evidenced part of this document, and a re-run with those flags is the way to close that. Nor
+can an export-only census speak to any *round-trip* question (V2's and V4's remaining halves), or
+to any query-time semantic.
 
 Absence from our TML references is not evidence a property does not exist: those references were
 built from real import failures, so they are complete on *what breaks* and incomplete on *what is

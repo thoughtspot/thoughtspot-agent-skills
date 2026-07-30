@@ -79,7 +79,8 @@ are roughly ordered by value÷effort.
 
 | Item | Summary | Target |
 |---|---|---|
-| BL-186 | Live-verify the four OSSIE-mapping TML property questions (V1-V4) | next se-thoughtspot session |
+| BL-186 | Live-verify the OSSIE-mapping TML property questions — **V1 substantially settled, V2 half-settled, V3 confirmed; V2-residual + V4 remain** | next se-thoughtspot session |
+| BL-189 | `ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard | next ts-cli change |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
 | BL-184 | Worked-example reproducibility test (ground truth is never re-run) | after BL-178 |
 | BL-179 | from-Snowflake promotes the first synonym over the logical identifier | with BL-166 |
@@ -124,6 +125,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-177 | Reverse legs synthesise names that were already available | opportunistic |
+| BL-190 | Re-run the TML property census with `--fqn --include-obj-id` (evidence NM1/X8) | next census session |
 | BL-173 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
 | BL-185 | Validator: `docs/backlog.md` priority-index consistency (number/tier/no-duplicate) | opportunistic |
 | BL-188 | Generate the persona/routing docs from `SKILL.md` frontmatter | opportunistic |
@@ -6177,7 +6179,28 @@ three of the four. **None of the four is closed** — the evidence narrows V1 an
 | **V4** | Unchanged | `is_mandatory_token_filter` appeared on zero columns — the fail-open round-trip risk is still unverified |
 | step 4 | **Done** | `model.lesson_plans` shape **confirmed** on 4 real Models: a `properties:` sibling holding `{lesson_id: <int>, lesson_plan_string: <string>}`. The provisional marker has been dropped from `thoughtspot-model-tml.md` |
 
-**Not in scope.** The thirteen ThoughtSpot product gaps in `docs/ossie/ts-osi-compliance-gaps.md`
+**Refined again 2026-07-30** by the TML property census (500 logical-table documents on
+`se-thoughtspot`: 143 Models, 275 Tables, 42 Views, 40 SQL Views, from a 15,204-object population;
+read-only, nothing created or modified). This is a **much** larger sample than the 40-model one
+above and it moves three of the four. **Two of the four are now effectively closed, one is half
+closed, and one is untouched:**
+
+| # | Status after the census | Detail |
+|---|---|---|
+| **V1** | **SUBSTANTIALLY SETTLED** — and it settles the converter behaviour that was blocking | The value is a calendar **name**: two real *named* calendars observed on Model columns (`SeanTSCROOTS` on `454 Cal Test (Sean)`, `Dupont_Fiscal_Cal` on `Test Custom Calendars`), which the 40-model run reports as *not* seen. The literal `calendar` is the **default spelling** (70 sightings / 34 unrelated Models). `CALENDAR_TYPE_GREGORIAN`: **0** in 500 documents, on any type, including 0 on the SQL Views where our own reference claimed it — now marked withdrawn/unverified there. And **`calendar:` IS honoured on a Table column** (`FACT_RETAPP_SALES.RECORDDATE: SeanTSCROOTS`), which the 40-model run explicitly reports as not observed — so the Table-TML row withheld in PR #415 has now been added. It also appears on **formula-backed** Model columns (5 sightings), which no reference contemplated. **Residual: one narrow question** — is the literal `calendar` a genuine default *sentinel*, or a customer calendar coincidentally named "calendar"? The 34-Model spread across unrelated tenants strongly favours sentinel. Closing it needs a `GET /api/rest/2.0/calendars/…` read, **not another export** — so the `calendars/create` leg this entry originally specified is no longer the cheapest path |
+| **V2** | **HALF SETTLED** | The `column` form is **confirmed live** — one sighting, on a **Table** column, carrying a **bare column name** (`{"column": "TARGET_CURRENCY"}`), *not* a `TABLE::Column` reference. That answers one of this row's two original questions outright. `is_browser`: **0** sightings in 500 documents. **Residual:** whether either non-`iso_code` form survives an import/export **round trip** — an export-only census cannot show that — and whether `is_browser` is emitted at all |
+| **V3** | **CONFIRMED PRESENT** — closeable | Custom-map `geo_config` (`custom_file_guid` + `geometryType`) confirmed in **3 production Models / 7 columns**, `geometryType` ∈ {`POLYGON`, `MULTI_POLYGON`}. The declared-loss-under-X8 verdict is unchanged; what changes is that the path is **exercised in the wild**, so real models will hit it. This row was always read-only-by-design, and it now has its shape on record — it can be marked closed |
+| **V4** | **UNTOUCHED, and now negatively evidenced twice** | `is_mandatory_token_filter`: **0** of 500 documents. A second and far larger survey has failed to find it, which means a survey is the wrong instrument — a property that never appears cannot be shown to round-trip. Closing V4 requires **constructing** an object that sets the flag and round-tripping it, exactly as this entry's original step describes. Unchanged and still the highest-stakes of the four, because it fails open |
+
+**What remains of this entry, restated.** V1's sentinel-versus-name question (one API read), V2's
+round-trip leg plus `is_browser` (needs a constructed object), and V4 in full (needs a constructed
+object). V3 is done. The census cost nothing extra to gather these — it was run for a different
+purpose — which is worth noting for how the residuals should be closed: **the remaining three all
+need object construction or an API read, not more surveying.** A follow-up census with
+`--fqn --include-obj-id` is filed separately as **BL-190** for the identity rules (NM1 / X8), which
+this census could not see by construction.
+
+**Not in scope.** The ThoughtSpot product gaps in `docs/ossie/ts-osi-compliance-gaps.md`
 are deliberately **not** routed to a backlog entry -- they are input to a product conversation,
 not repo work. This entry covers only the four verifications, which *are* ours to close.
 
@@ -6314,3 +6337,91 @@ Step 1's keys make either choice cheap, so the question does not need answering 
 
 **Target:** opportunistic -- next validator sweep, or whenever a new skill is added and the
 persona entry has to be written by hand anyway.
+## BL-189 -- `ts tml export --parse` crashes on a null `edoc` (one inaccessible GUID kills the batch) `Tier 2`
+
+**Filed:** 2026-07-30.
+**Source:** found incidentally while running the 2026-07-30 TML property census (500 documents on
+`se-thoughtspot`). The census had to abandon `--parse` entirely and parse the `edoc` strings
+itself, which is the workaround, not the fix.
+**Affects:** `tools/ts-cli/ts_cli/commands/tml.py` (`:258`, `:391`),
+`tools/ts-cli/tests/` (needs a null-edoc fixture).
+**Status:** OPEN -- **ready to fix.** Diagnosed, located, and reproduced; deliberately not fixed in
+the consolidation PR that filed it, which was documentation-only.
+
+**The bug.** `ts tml export --parse` raises
+`TypeError: argument of type 'NoneType' is not iterable` whenever **any** object in the batch
+returns a null `edoc` -- and a null `edoc` is exactly what an object returns when the export is
+refused. `FORBIDDEN` (no access) and `OBJECT_INVALID_STATE` (broken object) both produce one.
+
+```
+tools/ts-cli/ts_cli/commands/tml.py:391  -> detect_tml_type(parsed_tml)
+tools/ts-cli/ts_cli/commands/tml.py:258  -> for key in _TML_TYPE_KEYS: if key in parsed:
+TypeError: argument of type 'NoneType' is not iterable
+```
+
+**Why it matters more than it looks.** Batching is the documented, recommended way to export
+(`thoughtspot-table-tml.md`, *Importing multiple tables*; the census batched 12 GUIDs per call). On
+any real instance a batch will eventually include an object the caller cannot read -- the census hit
+6 in 506, three of them `FORBIDDEN` on ThoughtSpot's own `TS:` system objects, which are present on
+every cluster. So **one unreadable GUID aborts an otherwise-successful batch of twelve**, with a
+`TypeError` rather than a message naming the object. The failure mode is a stack trace, not a
+diagnosis, which is what made it cost census time.
+
+**The fix (two parts -- both are needed).**
+
+1. `detect_tml_type()` needs a `parsed is None` guard and should return `None` rather than raise.
+2. The `--parse` loop needs to **skip and report** any document whose `edoc` is null, so the rest
+   of the batch still parses and the caller learns which GUIDs were dropped and why -- the response
+   already carries the `status`/`error_message` for each, so the reason is available and should be
+   surfaced rather than discarded.
+
+**Testing.** A unit test with a null-`edoc` fixture, per `.claude/rules/ts-cli.md` (tests must not
+need a live instance): a two-element response where one element has `edoc: null` should yield one
+parsed document plus one reported skip, and must not raise. Add a direct
+`detect_tml_type(None)` case too.
+
+**Target:** next `tools/ts-cli/` change. Small, self-contained, and needs a version bump in both
+`__init__.py` and `pyproject.toml` per the ts-cli rules.
+
+---
+
+## BL-190 -- Re-run the TML property census with `--fqn --associated --include-obj-id` (evidence the identity rules) `Tier 3`
+
+**Filed:** 2026-07-30.
+**Source:** census follow-up **T2**. The 2026-07-30 census exported with plain
+`ts tml export <guid...> --format JSON` -- **no** `--fqn`, `--associated` or `--include-obj-id` --
+so `fqn`, `obj_id` and `destination.fqn` are absent from its 207 observed key-paths **by
+construction, not by absence in the product**. Every conclusion about those three keys is
+therefore out of scope for that run, and the report says so explicitly.
+**Affects:** `docs/ossie/ts-osi-construct-mapping.md` (**NM1**, rule **X8**, the
+`model_tables[].fqn` / `obj_id` rows), `agents/shared/schemas/thoughtspot-model-tml.md` and
+`thoughtspot-table-tml.md` (the `fqn` / `obj_id` rows and the `joins_with[].destination.fqn`
+shape).
+**Status:** OPEN.
+
+**Why it is worth a second run.** **NM1** and **X8** -- "never carry object identity into a
+portable document" -- are the *least-evidenced* rules in the construct mapping, and they are also
+the rules whose violation makes output silently non-portable rather than loudly broken. The first
+census confirmed a dozen claims empirically (`db_column_name` 2,719/2,719, `name` as the only
+connection-block key in 313/313, `list_choice[]` objects 79/79) and corrected four; the identity
+rules got nothing, because the flags that emit them were not set.
+
+**What a re-run should establish.**
+
+- Which documents carry `obj_id` at the root and on `model_tables[]` entries, and whether the
+  observed format really is `{NAME}-{first_8_of_guid}` universally (the Model reference states it
+  as a format, sourced from a handful of examples).
+- Whether `fqn` and `obj_id` ever co-occur on one `model_tables[]` entry -- the references say to
+  use one or the other, which a survey can support or contradict.
+- The `joins_with[].destination.fqn` shape, and whether a Table join ever carries a `destination`
+  without one.
+- Whether `--associated` pulls in any document type the first census never saw.
+
+**Method.** Reuse the census scripts verbatim (they persist in the run's scratchpad artifacts:
+`build_sample.py`, `export_sample.py`, `census.py`, `ground_truth.py`, `classify.py`); the only
+change is the export flags. Note that `--parse` is unusable until **BL-189** is fixed, so the
+re-run must parse `edoc` itself as the first one did -- or fix BL-189 first, which is the better
+order.
+
+**Target:** opportunistic, next `se-thoughtspot` census session. Read-only throughout, so it is
+safe to run at any time.

@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-30: corrected joins[].type — FULL_OUTER removed and OUTER added, from ThoughtSpot's published TML docs plus live probes in the two sibling contexts; the SQL View context itself was NOT probed; prior: validated in 2026-07-22 full audit) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-30: corrected joins[].type — FULL_OUTER removed and OUTER added, from ThoughtSpot's published TML docs plus live probes in the two sibling contexts; the SQL View context itself was NOT probed. Also 2026-07-30: geo_config.region_name corrected to a dict; `calendar: CALENDAR_TYPE_GREGORIAN` withdrawn as unverified; 12 never-observed properties marked unverified — all from a 500-document TML property census on se-thoughtspot covering all 40 SQL Views on the cluster; prior: validated in 2026-07-22 full audit) -->
 
 # ThoughtSpot SQL View TML — Structure Reference
 
@@ -27,7 +27,7 @@ ts metadata search --subtype SQL_VIEW --name '%view_name%' --profile {profile}
 |---|---|---|
 | TML root key | `sql_view:` | `view:` |
 | Data source | `sql_query:` (raw SQL) | `search_query:` (ThoughtSpot search syntax) |
-| Column definition | `sql_view_columns:` with `sql_output_column:` | `view_columns:` with `column_id:` |
+| Column definition | `sql_view_columns:` with `sql_output_column:` | `view_columns:` with `search_output_column:` (**not** `column_id:` — corrected 2026-07-30, see [thoughtspot-view-tml.md](thoughtspot-view-tml.md)) |
 | Connection | Required — `connection.name:` | Not needed — references Tables |
 | Formula syntax | Standard ThoughtSpot formulas | `if/then/else` keywords, row-level only |
 | Aggregation | In the SQL query or formulas | In `search_query` keywords |
@@ -62,8 +62,8 @@ sql_view:
       - "alt_name"
       is_hidden: false                 # optional — hides column from search bar
       geo_config:                      # optional — geographic role
-        region_name:
-        - country: "United States"
+        region_name:                   # a DICT, not a list — corrected 2026-07-30
+          country: "UNITED STATES"
           region_name: "state"
   - name: "Amount"
     sql_output_column: "col2"
@@ -82,7 +82,7 @@ sql_view:
     properties:
       column_type: ATTRIBUTE
       index_type: DONT_INDEX
-      calendar: CALENDAR_TYPE_GREGORIAN  # optional — date columns
+      calendar: calendar               # optional — a calendar NAME; `calendar` is the default spelling
       is_attribution_dimension: false    # optional
   formulas:                            # optional — calculated columns on top of the SQL output
   - id: "formula_Metric Name"
@@ -127,18 +127,41 @@ sql_view:
 | `sql_output_column` | Yes | Must match a column name or alias from the SQL query output. Case-sensitive. |
 | `data_type` | No | ThoughtSpot data type (`VARCHAR`, `INT64`, `DOUBLE`, `DATE`, `DATE_TIME`, `BOOL`). Inferred from the query if omitted. |
 | `properties.column_type` | Yes | `ATTRIBUTE` or `MEASURE` |
-| `properties.aggregation` | No | For MEASURE columns: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT` |
+| `properties.aggregation` | No | For MEASURE columns: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT`. Census-observed on SQL Views: `SUM` ×133, `AVERAGE` ×4 — nothing else |
 | `properties.index_type` | No | `DONT_INDEX` suppresses text search indexing. Omit for default (indexed). |
 | `properties.index_priority` | No | Integer — controls search indexing priority |
 | `properties.synonyms` | No | Array of alternative names for search. Must be under `properties:`. |
 | `properties.is_attribution_dimension` | No | Boolean — marks column as an attribution dimension |
 | `properties.is_additive` | No | Boolean — marks column as additive |
-| `properties.calendar` | No | Calendar type for date columns (e.g. `CALENDAR_TYPE_GREGORIAN`) |
+| `properties.calendar` | No | Date columns only — the **name** of a Connection-scoped custom calendar, with the literal `calendar` as the default spelling. **`CALENDAR_TYPE_GREGORIAN` is withdrawn as unverified (2026-07-30):** a 500-document census on se-thoughtspot found that literal **zero** times on any document type, and found `calendar:` on **zero** of 40 SQL View columns — so this row is doubly unverified for `sql_view:`. See [thoughtspot-model-tml.md](thoughtspot-model-tml.md) for the observed vocabulary |
 | `properties.format_pattern` | No | Number/date display format string |
 | `properties.currency_type.iso_code` | No | ISO currency code (e.g. `USD`, `EUR`) |
 | `properties.is_hidden` | No | `true` hides the column from the search bar |
-| `properties.geo_config` | No | Geographic role — same structure as Table/Model TML |
+| `properties.geo_config` | No | Geographic role — same structure as Table/Model TML, i.e. `region_name` is a **dict** `{country, region_name}`. This file previously showed it as a list; corrected 2026-07-30. Never observed on a SQL View column |
 | `properties.spotiq_preference` | No | `"EXCLUDE"` removes column from SpotIQ auto-analysis |
+
+#### Which of the above are actually emitted — census, 2026-07-30
+
+A 500-document property census on `se-thoughtspot` covered **all 40** SQL Views on the cluster.
+Every one is minimal:
+
+| Level | Keys ever observed |
+|---|---|
+| `sql_view` root | `name`, `connection.name`, `sql_query`, `sql_view_columns` (+ `description` ×4) |
+| `sql_view_columns[]` | `name`, `sql_output_column`, `properties` (+ `description` ×18) |
+| `sql_view_columns[].properties` | `column_type` ×385, `index_type` ×288, `aggregation` ×137 — **and nothing else** |
+
+So **12 of the 15 properties documented above were never emitted**: `synonyms`,
+`index_priority`, `is_hidden`, `is_additive`, `is_attribution_dimension`, `calendar`,
+`format_pattern`, `currency_type`, `geo_config`, `spotiq_preference` — plus `data_type` at the
+column level and the whole of `formulas[]` and `joins_with[]` (0 of 40 SQL Views has either).
+Treat those rows as **unverified for this document type**: they were transcribed from the Model
+reference rather than observed, and this file is the weakest-evidenced of the four TML references.
+They may well be accepted on import — nothing here says they are rejected — but nothing
+establishes that they are honoured either.
+
+`data_type`'s absence is the one that is *expected*: ThoughtSpot infers it from the query, exactly
+as this file's own row says it may.
 
 ### `formulas[]` fields
 

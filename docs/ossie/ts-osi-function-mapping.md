@@ -21,7 +21,7 @@ against live instances and override any other description of it.
 This is the companion to the [construct-mapping document](ts-osi-construct-mapping.md), which stops at the boundary where
 an expression string begins. That document owns identifier rewriting, dialect selection,
 the `custom_extensions` payload and the structural asks [**A1**–**A8**](ts-osi-construct-mapping.md#open-questions-and-upstream-asks); this one owns
-everything inside `expression`. Rules introduced here are numbered [**E1**](#how-to-read-the-tables)–[**E12**](#runtime-display-and-calendar-concepts) and new
+everything inside `expression`. Rules introduced here are numbered [**E1**](#how-to-read-the-tables)–[**E13**](#window-functions) and new
 upstream asks [**A9**–**A12**](#open-questions-and-upstream-asks), continuing that document's sequence.
 
 ---
@@ -72,17 +72,27 @@ lives in the construct-mapping document ([**ID3**](ts-osi-construct-mapping.md#i
 | String functions | 21 | 10 | 11 | 0 |
 | Mathematical functions | 25 | 23 | 2 | 0 |
 | Conditional functions | 9 | 9 | 0 | 0 |
-| Window functions | 14 | 9 | 5 | 0 |
+| Window functions | 14 | 5 | 9 | 0 |
 | Type conversion | 2 | 2 | 0 | 0 |
 | Operators and constructs | 33 | 30 | 2 | 1 |
-| **Total** | **146** | **112** | **33** | **1** |
+| **Total** | **146** | **108** | **37** | **1** |
 
-77% of the specification is expressible in ThoughtSpot's native formula language. The
-`passthrough` set concentrates in four places — population statistics and percentiles,
-regular expressions, case-insensitive string handling, and **whitespace/substring editing
-(`TRIM`/`LTRIM`/`RTRIM`/`REPLACE`)** — and there is exactly one `unmappable` construct,
-`EXISTS_IN()`, which is unmappable because the specification does not define it (see ask
-[**A9**](#open-questions-and-upstream-asks)).
+74% of the specification is expressible in ThoughtSpot's native formula language. The
+`passthrough` set concentrates in five places — **windowing with a declared partition**,
+population statistics and percentiles, regular expressions, case-insensitive string handling,
+and **whitespace/substring editing (`TRIM`/`LTRIM`/`RTRIM`/`REPLACE`)** — and there is exactly
+one `unmappable` construct, `EXISTS_IN()`, which is unmappable because the specification does
+not define it (see ask [**A9**](#open-questions-and-upstream-asks)).
+
+> **Revised 2026-07-30 (window rework).** Four Window rows moved `direct` → `passthrough` —
+> `LAG`, `LEAD`, the `OVER` clause and window aggregation — after a ThoughtSpot domain review
+> established, and live probing on se-thoughtspot confirmed, that a ThoughtSpot window formula
+> **cannot declare its own `PARTITION BY`**: the partition is completed from the search context
+> ([**E13**](#window-functions)). The Window split was `9`/`5` before and the total was
+> `112`/`33` (77%). `FIRST_VALUE` / `LAST_VALUE` stay `direct` — they are the one family that
+> takes an explicit partition *and* an explicit order axis — and `RANK` / `PERCENT_RANK` /
+> the frame clause stay `direct` with their boundaries now proven by rejection rather than
+> asserted. See [Window rows live-confirmed — 2026-07-30](#window-rows-live-confirmed--2026-07-30).
 
 > **Revised 2026-07-29 (BL-170).** `TRIM` and `REPLACE` moved `direct` → `passthrough`
 > after live verification on se-thoughtspot showed that ThoughtSpot has no native `trim`
@@ -348,34 +358,65 @@ Window functions are where the two models diverge most, so the three structural 
 end of this table carry as much weight as the named functions above them. ThoughtSpot has no
 `OVER` clause: window behaviour is expressed by *which function* is used, with the partition
 and order derived from the function's trailing arguments and from the query's own grouping.
-Two consequences run through every row:
+
+**This section was reworked on 2026-07-30 and four rows moved `direct` → `passthrough`** —
+`LAG`, `LEAD`, the `OVER` clause and window aggregation. The reason is **E13**, below: a
+ThoughtSpot window formula cannot state its own `PARTITION BY`, so an Ossie window expression
+that declares one has no faithful native target. See [Window rows live-confirmed —
+2026-07-30](#window-rows-live-confirmed--2026-07-30) for the probe evidence.
+
+Three consequences run through every row:
 
 - **E5 — a raw aggregate cannot be nested inside a ThoughtSpot window function.** The
   argument must be a column reference or a `group_aggregate ( ... )`. `moving_sum ( sum ( [x] ) , ... )`
   is rejected; `moving_sum ( group_aggregate ( sum ( [x] ) , { [T::pk] } , query_filters ( ) ) , ... )`
   is the valid form. A converter that translates `SUM(x) OVER (...)` naively produces a
-  formula that fails at import.
+  formula that fails at import. **Live-confirmed 2026-07-30** in both directions: the raw-aggregate
+  form is rejected (`Search did not find "sum ("`), the `group_aggregate` form validates, for
+  `moving_*` and `cumulative_*` alike.
 - **E6 — ThoughtSpot's `ORDER BY` column must be a physical column reference.** A formula
   column in the sort position fails to resolve. When the specification's `ORDER BY`
   expression is computed, the converter raises an issue rather than emitting a formula that
   will not compile.
+- **E13 — a ThoughtSpot window formula cannot declare its own `PARTITION BY`; the window shape
+  is completed from the search context.** *Per ThoughtSpot domain review, 2026-07-30.* A
+  `moving_*` / `cumulative_*` formula names only its measure, its frame offsets and its **order**
+  columns; the partition is whatever dimensions the user's search or Answer happens to carry, with
+  the order columns excluded. There is no argument slot for a partition and none can be added —
+  live-confirmed by rejection on `se-thoughtspot`, 2026-07-30 (a fifth `{ [attr] }` or
+  `query_groups ( )` argument to `moving_sum`, and a third to `cumulative_sum`, are both rejected
+  at the parser). `rank` / `rank_percentile` are the stricter case: their arity is fixed at exactly
+  two and enforced (`Function rank expects only 2 arguments`), so they are always global.
+
+  The consequence is that **an Ossie `OVER (PARTITION BY …)` is not faithfully expressible**, and
+  — the sharper half — an Ossie `OVER (ORDER BY …)` with *no* `PARTITION BY` is not either, because
+  ThoughtSpot's partition is never empty: it is populated dynamically from the query. So for the
+  `moving_*` / `cumulative_*` family there is **no** `OVER` shape whose numbers a native
+  ThoughtSpot formula reproduces independently of the search, which is why those rows are
+  `passthrough` rather than `direct` with a caveat. Wrapping the pass-through per [**E8**](#passthrough-caveat-applies-to-every-passthrough-row)
+  is what makes the declared partition actually hold.
+
+  **The exception is the semi-additive pair.** `first_value` and `last_value` take a genuine,
+  explicit partition argument and a genuine, explicit order axis — both live-confirmed accepted,
+  including a multi-column fixed partition — so they, alone in this section, do let the formula
+  define the window. They stay `direct`.
 
 | Ossie | Class | ThoughtSpot | Notes |
 |---|---|---|---|
 | `ROW_NUMBER() OVER (...)` | passthrough | `sql_int_aggregate_op ( "ROW_NUMBER() OVER (PARTITION BY {0} ORDER BY {1})" , [dim] , [ord] )` | **Variant: `sql_int_aggregate_op`.** ThoughtSpot's `rank` is competition rank, not a row number, so it is not a substitute. Wrap the result in `group_aggregate ( ... , query_groups ( ) + { [dim] } , query_filters ( ) )` so the partition column is guaranteed into the GROUP BY. |
-| `RANK() OVER (...)` | direct | `rank ( sum ( [m] ) , 'desc' )` | Exact for the global, `ORDER BY`-only form the specification's own tool-mapping table shows (`:740`). ThoughtSpot's `rank` is always global and takes its order from the aggregate, so **an explicit `PARTITION BY` is not expressible** and falls back to `sql_int_aggregate_op ( "RANK() OVER (PARTITION BY {0} ORDER BY SUM({1}) DESC)" , ... )` ([**E3**](#how-to-read-the-tables)). |
-| `DENSE_RANK() OVER (...)` | passthrough | `sql_int_aggregate_op ( "dense_rank() over (order by sum({0}) desc)" , [m] )` | **Variant: `sql_int_aggregate_op`.** ThoughtSpot's `rank` skips ranks after a tie; dense ranking has no native form. |
+| `RANK() OVER (...)` | direct | `rank ( sum ( [m] ) , 'desc' )` | **`direct` for one shape only, and the boundary is now proven rather than asserted.** Exact for the global, `ORDER BY`-only form over an aggregate that the specification's own tool-mapping table shows (`:740`). The signature was live-confirmed on `se-thoughtspot`, 2026-07-30: `rank ( sum ( [m] ) , 'desc' )` and `'asc'` both validate, and the arity is **enforced at exactly two** — a third argument in any shape (bare attribute, `{ [attr] }`, or `query_groups ( )`) is rejected with `Function rank expects only 2 arguments`, so **an explicit `PARTITION BY` is provably not expressible**. Two further live-proven restrictions: the first argument **must** be aggregated (`rank ( [m] , 'desc' )` → `Function rank expects 1st argument to be aggregated`), so an Ossie `ORDER BY <non-aggregated column>` has no native target either; and it may **not** be a `group_aggregate ( ... )`, so the partition cannot be smuggled in through the measure. Every non-covered shape falls back to `sql_int_aggregate_op ( "RANK() OVER (PARTITION BY {0} ORDER BY SUM({1}) DESC)" , ... )` ([**E3**](#how-to-read-the-tables)), wrapped per [**E8**](#passthrough-caveat-applies-to-every-passthrough-row). **Query-context caveat:** `rank` carries no dynamic partition ([**E13**](#window-functions)) but it *is* evaluated over the query's result rows, so the covered shape is faithful to `RANK() OVER (ORDER BY …)` only when the search returns the grain the expression assumed. One more caveat: the direction string is **not** validated at import — `'descending'` was accepted — so acceptance proves the call shape, never the ordering. |
+| `DENSE_RANK() OVER (...)` | passthrough | `sql_int_aggregate_op ( "dense_rank() over (order by sum({0}) desc)" , [m] )` | **Variant: `sql_int_aggregate_op`.** ThoughtSpot's `rank` skips ranks after a tie; dense ranking has no native form — live-confirmed 2026-07-30, `dense_rank ( … )` rejected with `Search did not find "dense_rank ( sum ("`. This settles the doubt raised by the internal Tableau mapping, which uses a SQL pass-through for `DENSE_RANK`: the two references agree, and for the right reason. |
 | `NTILE(n) OVER (...)` | passthrough | `sql_int_aggregate_op ( "NTILE(4) OVER (ORDER BY SUM({0}))" , [m] )` | **Variant: `sql_int_aggregate_op`.** `n` is a literal, baked into the template. |
-| `PERCENT_RANK() OVER (...)` | direct | `1 - rank_percentile ( sum ( [m] ) , 'asc' ) / 100` | ThoughtSpot's `rank_percentile` is documented as `(1.0 - PERCENT_RANK() OVER (ORDER BY ...)) * 100`, so the inverse is exact. **Two adjustments are both required:** the scale (ThoughtSpot 0–100, specification 0–1) and the inversion. Dropping either produces a plausible-looking column that is wrong everywhere. |
+| `PERCENT_RANK() OVER (...)` | direct | `1 - rank_percentile ( sum ( [m] ) , 'asc' ) / 100` | ThoughtSpot's `rank_percentile` is documented as `(1.0 - PERCENT_RANK() OVER (ORDER BY ...)) * 100`, so the inverse is exact. **Two adjustments are both required:** the scale (ThoughtSpot 0–100, specification 0–1) and the inversion. Dropping either produces a plausible-looking column that is wrong everywhere. Same shape restriction as `RANK`, and it is the same live-proven boundary — `rank_percentile` is also fixed at exactly two arguments (`Function rank_percentile expects only 2 arguments`, `se-thoughtspot` 2026-07-30), so it too is global-only and an explicit `PARTITION BY` falls back to `sql_number_aggregate_op ( "PERCENT_RANK() OVER (PARTITION BY {0} ORDER BY SUM({1}))" , ... )` ([**E3**](#how-to-read-the-tables), [**E13**](#window-functions)). |
 | `CUME_DIST() OVER (...)` | passthrough | `sql_number_aggregate_op ( "CUME_DIST() OVER (ORDER BY SUM({0}))" , [m] )` | **Variant: `sql_number_aggregate_op`.** `rank_percentile` is *not* a substitute: `PERCENT_RANK` divides by *n − 1* and starts at 0, `CUME_DIST` divides by *n* and ends at 1. They agree on no row of a tie-free window except the last. |
-| `LAG(expr, offset, default) OVER (...)` | direct | `moving_sum ( [m] , n , -n , [ord] )` | The verified single-row-back idiom: a frame of `n PRECEDING` to `n PRECEDING`. **The `default` argument has no equivalent** — ThoughtSpot yields null outside the frame — so a `LAG` with a non-null `default` raises an issue. Subject to [**E5**](#window-functions) and [**E6**](#window-functions). |
-| `LEAD(expr, offset, default) OVER (...)` | direct | `moving_sum ( [m] , -n , n , [ord] )` | Mirror of `LAG` — ThoughtSpot's start/end arguments use opposite sign conventions, so a forward offset is a negative start. Same `default` limitation. |
-| `FIRST_VALUE(expr) OVER (...)` | direct | `first_value ( sum ( [m] ) , query_groups ( ) , { [T::date] } )` | Exact when the `ORDER BY` is a date column and the partition is the query grain — the semi-additive snapshot case this specification's users write it for. ThoughtSpot's `first_value` is a semi-additive function over a date axis, **not** a general window function, so any other `OVER` shape falls back to `sql_number_aggregate_op ( "FIRST_VALUE({0}) OVER (...)" , ... )` ([**E3**](#how-to-read-the-tables)). The `{ }` argument forces `>-` block-scalar YAML. |
-| `LAST_VALUE(expr) OVER (...)` | direct | `last_value ( sum ( [m] ) , query_groups ( ) , { [T::date] } )` | Same conditions and same fallback as `FIRST_VALUE`. |
-| `NTH_VALUE(expr, n) OVER (...)` | passthrough | `sql_number_aggregate_op ( "NTH_VALUE({0}, 2) OVER (ORDER BY {1})" , [m] , [ord] )` | **Variant: `sql_number_aggregate_op`.** ThoughtSpot's semi-additive functions reach only the first and last values of the axis. |
-| `OVER (PARTITION BY ... ORDER BY ...)` clause | direct | structural rewrite — no `OVER` keyword | `PARTITION BY attrs` becomes the `group_aggregate` grouping argument `{ [T::a] , [T::b] }`; `ORDER BY` becomes the window function's trailing attribute arguments. An empty `OVER ()` is grouping `{ }`. **The reverse direction is where this gets lossy** — ThoughtSpot's window functions add the query's own dimensions to the partition dynamically, which the specification has no way to express (ask [**A10**](#open-questions-and-upstream-asks)). |
-| Frame clause — `ROWS BETWEEN ...` / `RANGE BETWEEN ...` | direct | `moving_*` start/end arguments, or `cumulative_*` | `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` → `cumulative_*`. Bounded `ROWS` frames → `moving_*` with `n PRECEDING` → positive `n`, `CURRENT ROW` → `0`, `n FOLLOWING` → negative `-n`. **`RANGE` frames fall back to `sql_number_aggregate_op`** (the same variant the window-aggregation row below falls back to)**:** ThoughtSpot's frames are row-positional, not value-ranged — live-verified on gapped dates, `moving_*` counts surviving rows regardless of the calendar distance between them — so a `RANGE` frame over a gapped sort column would silently return different numbers ([**E3**](#how-to-read-the-tables)). |
-| Window aggregation — `AGG(expr) OVER (...)` | direct | `cumulative_*` / `moving_*` / `group_*` by frame shape | The specification allows every aggregate as a window function (`:585`). ThoughtSpot's window family covers `SUM`, `AVG`, `MIN` and `MAX` (as `*_sum`, `*_average`, `*_max`, `*_min`); a windowed `COUNT`, `MEDIAN`, `STDDEV` or `VARIANCE` has a partitioned form via `group_count` / `group_stddev` / `group_variance` but no ordered/framed form, and falls back to `sql_number_aggregate_op`. Subject to [**E5**](#window-functions). |
+| `LAG(expr, offset, default) OVER (...)` | passthrough | `sql_number_aggregate_op ( "LAG({0}, 1) OVER (PARTITION BY {1} ORDER BY {2})" , [m] , [dim] , [ord] )` | **Variant: `sql_number_aggregate_op`; wrap per [E8](#passthrough-caveat-applies-to-every-passthrough-row).** **Reclassified `direct` → `passthrough` 2026-07-30** ([**E13**](#window-functions)). The native idiom `moving_sum ( [m] , n , -n , [ord] )` is real and validates (live-confirmed `se-thoughtspot`, 2026-07-30) — a frame of `n PRECEDING` to `n PRECEDING` — but it is **not equivalent to any `OVER` shape**, because `moving_sum` has no partition slot and ThoughtSpot completes the partition from the query's dimensions instead. So an Ossie `LAG` with a `PARTITION BY` cannot be expressed, and one *without* a `PARTITION BY` still cannot, because ThoughtSpot's partition is not empty. The converter emits the pass-through by default and offers the native `moving_sum` idiom as a **documented downgrade** the user must accept: it is correct exactly when the search's dimensions are the intended partition. **The `default` argument has no equivalent in the native idiom** — ThoughtSpot yields null outside the frame — so it is a second reason the native form is a downgrade (the pass-through carries `default` fine). Subject to [**E5**](#window-functions) and [**E6**](#window-functions). |
+| `LEAD(expr, offset, default) OVER (...)` | passthrough | `sql_number_aggregate_op ( "LEAD({0}, 1) OVER (PARTITION BY {1} ORDER BY {2})" , [m] , [dim] , [ord] )` | **Variant: `sql_number_aggregate_op`.** Mirror of `LAG`, reclassified for the same reason and on the same date. The native downgrade is `moving_sum ( [m] , -n , n , [ord] )` — ThoughtSpot's start/end arguments use opposite sign conventions, so a forward offset is a negative start (both live-confirmed 2026-07-30). Same `default` limitation. |
+| `FIRST_VALUE(expr) OVER (...)` | direct | `first_value ( sum ( [m] ) , query_groups ( ) , { [T::date] } )` | **The section's exception, and the only window row whose `direct` verdict survived the 2026-07-30 rework** — because `first_value` takes a genuine explicit partition argument and a genuine explicit order axis, so the formula *does* define its own window ([**E13**](#window-functions)). Live-confirmed on `se-thoughtspot`, 2026-07-30: `query_groups ( )`, a fixed single-column `{ [attr] }`, a **multi-column** `{ [a] , [b] }`, the grand-total `{ }` and the dynamic `query_groups ( ) - { [attr] }` all validate in the partition slot, so a static Ossie `PARTITION BY` list maps straight onto it. The axis slot is typed and enforced — a bare column reference is rejected with `Function last_value expects 3rd argument to be List`, so the `{ }` braces are mandatory (and force `>-` block-scalar YAML). Two boundaries remain: ThoughtSpot's `first_value` is a **semi-additive** function over a date axis rather than a general window function, so an `OVER` shape with a row frame other than the whole partition falls back to `sql_number_aggregate_op ( "FIRST_VALUE({0}) OVER (...)" , ... )` ([**E3**](#how-to-read-the-tables)); and the axis column's *type* is not validated at import (a `VARCHAR` axis was accepted), so acceptance proves the call shape, not that the axis is temporal. |
+| `LAST_VALUE(expr) OVER (...)` | direct | `last_value ( sum ( [m] ) , query_groups ( ) , { [T::date] } )` | Same conditions, same live evidence and same fallback as `FIRST_VALUE`. `last_value_in_period` and `first_value_in_period` also validate in the identical three-argument shape and are the period-completeness variants — see the reverse-direction table. |
+| `NTH_VALUE(expr, n) OVER (...)` | passthrough | `sql_number_aggregate_op ( "NTH_VALUE({0}, 2) OVER (ORDER BY {1})" , [m] , [ord] )` | **Variant: `sql_number_aggregate_op`.** ThoughtSpot's semi-additive functions reach only the first and last values of the axis — live-confirmed 2026-07-30, `nth_value ( … )` rejected with `Search did not find "nth_value ( sum ("`. |
+| `OVER (PARTITION BY ... ORDER BY ...)` clause | passthrough | `sql_*_aggregate_op` carrying the clause verbatim, wrapped per [**E8**](#passthrough-caveat-applies-to-every-passthrough-row) | **Reclassified `direct` → `passthrough` 2026-07-30.** The previous verdict claimed a clean structural rewrite — "`PARTITION BY attrs` becomes the `group_aggregate` grouping argument; `ORDER BY` becomes the window function's trailing attribute arguments". **That holds for `PARTITION BY` alone and breaks the moment an `ORDER BY` is present**, which is most window use. There are two disjoint targets and only one of them accepts a partition: an `OVER` clause with a `PARTITION BY` and **no** `ORDER BY`/frame is `group_aggregate ( agg ( [m] ) , { [T::a] , [T::b] } , query_filters ( ) )` and is genuinely lossless (`{ }` for an empty `OVER ()`, `query_groups ( )` for the query grain — both live-confirmed 2026-07-30); an `OVER` clause **with** an `ORDER BY` must target `moving_*` / `cumulative_*`, which have **no partition slot at all** — live-confirmed by rejection: a `{ [attr] }` or `query_groups ( )` argument after the order columns is rejected at the parser in both families. So a partitioned, ordered window has no native home and the whole clause goes into the template ([**E13**](#window-functions)). The **reverse** direction is lossy for the mirror-image reason — ThoughtSpot's ordered window functions add the query's own dimensions to the partition dynamically, which the specification cannot express (ask [**A10**](#open-questions-and-upstream-asks)). |
+| Frame clause — `ROWS BETWEEN ...` / `RANGE BETWEEN ...` | direct | `moving_*` start/end arguments, or `cumulative_*` | **`direct` for the frame boundaries only** — deliberately scoped, so the partition loss is counted once, on the `OVER` row above, and not twice. `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` → `cumulative_*`. Bounded `ROWS` frames → `moving_*` with `n PRECEDING` → positive `n`, `CURRENT ROW` → `0`, `n FOLLOWING` → negative `-n`. All four boundary shapes were live-confirmed on `se-thoughtspot`, 2026-07-30 (`moving_sum ( [m] , 2 , 0 , [ord] )`, `( … , 1 , -1 , … )`, `( … , -1 , 1 , … )`, `cumulative_sum ( [m] , [ord] )`), and the positional signature is enforced — `moving_sum ( [m] , [ord] )` is rejected with `Function moving_sum expects 2nd argument to be Numeric`. **`RANGE` frames fall back to `sql_number_aggregate_op`** (the same variant the window-aggregation row below falls back to)**:** ThoughtSpot's frames are row-positional, not value-ranged — live-verified on gapped dates, `moving_*` counts surviving rows regardless of the calendar distance between them — so a `RANGE` frame over a gapped sort column would silently return different numbers ([**E3**](#how-to-read-the-tables)). A frame reaches ThoughtSpot **natively** only when the accompanying `OVER` clause declares no `PARTITION BY`; otherwise it is emitted verbatim inside the pass-through template the `OVER` row selects. |
+| Window aggregation — `AGG(expr) OVER (...)` | passthrough | `sql_number_aggregate_op ( "SUM({0}) OVER (PARTITION BY {1} ORDER BY {2} ROWS BETWEEN …)" , … )` | **Variant: `sql_number_aggregate_op`** (or the typed sibling for a non-numeric aggregate)**; wrap per [E8](#passthrough-caveat-applies-to-every-passthrough-row).** **Reclassified `direct` → `passthrough` 2026-07-30**, inheriting the `OVER` row's problem: the specification allows every aggregate as a window function (`:585`), but every *ordered* ThoughtSpot target (`cumulative_*`, `moving_*`) completes its partition from the query ([**E13**](#window-functions)). The unordered case remains lossless and is the `group_aggregate` path on the `OVER` row. The native family is also narrower than the specification's: `cumulative_*` / `moving_*` cover `SUM`, `AVG`, `MIN` and `MAX` only — live-confirmed 2026-07-30 that `moving_count`, `moving_stddev` and `cumulative_count` **do not exist** (`Search did not find "moving_count ("` and siblings) — so a windowed `COUNT`, `MEDIAN`, `STDDEV` or `VARIANCE` has a *partitioned* form via `group_count` / `group_stddev` / `group_variance` and no ordered or framed form of any kind. Subject to [**E5**](#window-functions). |
 
 ---
 
@@ -507,16 +548,21 @@ declared untranslatable without checking the composition first.
 
 ### Window, LOD and semi-additive functions
 
+Every row here was re-examined on 2026-07-30 against live probes on `se-thoughtspot`. The
+signatures below are the **confirmed** ones, and three rows changed disposition: the two
+ordered-window families moved from "via Ossie composition" to a **partial** composition that
+loses the partition, for the reason in [**E13**](#window-functions).
+
 | ThoughtSpot | Ossie expression | Disposition |
 |---|---|---|
-| `rank ( agg ( [m] ) , 'desc' )` | `RANK() OVER (ORDER BY AGG(m) DESC)` | via Ossie composition |
-| `rank_percentile ( agg ( [m] ) , 'asc' )` | `(1.0 - PERCENT_RANK() OVER (ORDER BY AGG(m) ASC)) * 100` | via Ossie composition — the scale and inversion both reverse. |
-| `moving_sum` / `_average` / `_max` / `_min` `( [m] , s , e , [attr] )` | `AGG(m) OVER (ORDER BY attr ROWS BETWEEN s PRECEDING AND e FOLLOWING)` | via Ossie composition — sign conventions convert per the frame-clause row above. ANSI `ROWS` frames are row-positional, which matches ThoughtSpot's live-verified behaviour exactly, so this direction is clean. |
-| `cumulative_sum` / `_average` / `_max` / `_min` `( [m] , [attr] )` | `AGG(m) OVER (ORDER BY attr ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` | via Ossie composition **for the frame** — but see the dynamic-partition row below. |
-| `group_aggregate ( agg ( [m] ) , { [a] , [b] } , query_filters ( ) )` and the `group_*` shorthands | `AGG(m) OVER (PARTITION BY a, b)` | via Ossie composition — fixed-grain grouping is an ordinary `PARTITION BY`. `{ }` is `OVER ()`; `query_groups()` needs no window at all and becomes a plain `AGG(m)`. |
-| `group_aggregate ( ... , query_groups ( ) - { [a] } , ... )`, and the dynamic partition every `cumulative_*` / `moving_*` carries implicitly | — | **`custom_extensions` + issue.** "All the query's dimensions except *a*" has no expression in the specification. Snowflake's `PARTITION BY EXCLUDING` exists precisely for this, and without an equivalent the same model returns different numbers depending on which dimensions a user adds. This is the largest single fidelity gap in this direction — see ask [**A10**](#open-questions-and-upstream-asks). |
+| `rank ( agg ( [m] ) , 'desc' )` | `RANK() OVER (ORDER BY AGG(m) DESC)` | via Ossie composition — **signature live-confirmed 2026-07-30**, which was the open question on this row: the composition exists exactly as written, `'asc'`/`'desc'` both validate, and the first argument must be aggregated. The arity is fixed at two, so there is never a partition to lose in this direction — a ThoughtSpot `rank` *is* an unpartitioned `RANK()`. Caveat for a consumer: ThoughtSpot evaluates it over the query's result rows, so the Ossie expression describes the ranking rule, not the row set. |
+| `rank_percentile ( agg ( [m] ) , 'asc' )` | `(1.0 - PERCENT_RANK() OVER (ORDER BY AGG(m) ASC)) * 100` | via Ossie composition — the scale and inversion both reverse. Signature live-confirmed 2026-07-30, same two-argument arity as `rank`. |
+| `moving_sum` / `_average` / `_max` / `_min` `( [m] , s , e , [attr] )` | `AGG(m) OVER (ORDER BY attr ROWS BETWEEN s PRECEDING AND e FOLLOWING)` — **frame and order only; the partition is lost** | **Partial composition + issue.** The frame and order translate exactly — sign conventions per the frame-clause row above, and ANSI `ROWS` frames are row-positional, which matches ThoughtSpot's live-verified behaviour. But the emitted `OVER` clause has **no `PARTITION BY`, and that is not what the ThoughtSpot formula means**: ThoughtSpot partitions by the query's dimensions minus the order columns. An unpartitioned ANSI window is therefore a *different* computation, so the converter emits the frame composition **and** raises an issue naming the missing partition, with the verbatim formula in a `THOUGHTSPOT` dialect entry per [**E11**](#runtime-display-and-calendar-concepts). Only `_sum` / `_average` / `_max` / `_min` exist — `moving_count` and `moving_stddev` were live-confirmed absent 2026-07-30. See ask [**A10**](#open-questions-and-upstream-asks). |
+| `cumulative_sum` / `_average` / `_max` / `_min` `( [m] , [attr] )` | `AGG(m) OVER (ORDER BY attr ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` — **frame and order only; the partition is lost** | **Partial composition + issue**, identically to `moving_*` and for the same reason. `cumulative_count` was live-confirmed absent 2026-07-30. |
+| `group_aggregate ( agg ( [m] ) , { [a] , [b] } , query_filters ( ) )` and the `group_*` shorthands | `AGG(m) OVER (PARTITION BY a, b)` | via Ossie composition — fixed-grain grouping is an ordinary `PARTITION BY`, and this is the **one** ThoughtSpot windowing form that is clean in this direction, precisely because its partition is declared in the formula rather than completed from the query. `{ }` is `OVER ()`; `query_groups()` needs no window at all and becomes a plain `AGG(m)`. |
+| `group_aggregate ( ... , query_groups ( ) - { [a] } , ... )` and `query_groups ( ) + { [a] }`, plus the dynamic partition every `cumulative_*` / `moving_*` carries implicitly | — | **`custom_extensions` + issue.** "All the query's dimensions except *a*" has no expression in the specification (both the `-` and `+` forms were live-confirmed valid ThoughtSpot on 2026-07-30, so this is a real construct being lost, not a hypothetical). Snowflake's `PARTITION BY EXCLUDING` exists precisely for this, and without an equivalent the same model returns different numbers depending on which dimensions a user adds. This is the largest single fidelity gap in this direction — see ask [**A10**](#open-questions-and-upstream-asks). |
 | `group_aggregate` with a non-`query_filters()` filter argument — `{ }`, `{ [c] = 'v' }`, `query_filters ( ) - { [c] }` | — | **`custom_extensions` + issue.** Filter scoping inside an expression, which the specification excludes from expressions and redirects to a filter property it does not define (`:130`) — the construct-mapping document's ask [**A3**](ts-osi-construct-mapping.md#open-questions-and-upstream-asks). |
-| `last_value` / `first_value` / `last_value_in_period` / `first_value_in_period` | `LAST_VALUE(m) OVER (PARTITION BY ... ORDER BY d ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)` gets the snapshot; the re-aggregation at query grain does not | **`custom_extensions` + issue.** The window expression is only half of it: semi-additivity is a declaration about *how the measure may be rolled up*, not an expression. Snowflake carries it as `non_additive_dimensions` and Databricks has its own form; the specification has neither. See ask [**A12**](#open-questions-and-upstream-asks). |
+| `last_value` / `first_value` / `last_value_in_period` / `first_value_in_period` | `LAST_VALUE(m) OVER (PARTITION BY ... ORDER BY d ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)` gets the snapshot; the re-aggregation at query grain does not | **`custom_extensions` + issue.** The window expression is only half of it: semi-additivity is a declaration about *how the measure may be rolled up*, not an expression. Snowflake carries it as `non_additive_dimensions` and Databricks has its own form; the specification has neither. See ask [**A12**](#open-questions-and-upstream-asks). Unlike the `moving_*` / `cumulative_*` rows, the `PARTITION BY` here is **not** lost: this family's partition argument is explicit in the formula (`query_groups ( )`, `{ [a] , [b] }` or `{ }`, all live-confirmed 2026-07-30), so the window clause round-trips faithfully and the loss is only the roll-up declaration. All four spellings share the identical three-argument shape, live-confirmed the same day. |
 | `sql_string_op` / `sql_int_op` / `sql_double_op` / `sql_bool_op` / `sql_date_op` / `sql_date_time_op` and the four `*_aggregate_op` variants | a `dialects[]` entry for the connection's dialect, with `{0}`, `{1}` … substituted for the resolved column references | via Ossie composition — **the dialect mechanism is the right home for these** (`:648-659`). A pass-through *is* dialect-specific raw SQL, which is what a non-Ossie dialect entry is for. Two caveats: no `ANSI_SQL` entry is emitted alongside, because the template's portability is exactly what is unknown; and the connection's dialect is not always derivable from TML, in which case the converter raises an issue rather than guessing a dialect label. |
 
 ### Runtime, display and calendar concepts
@@ -548,6 +594,69 @@ declared untranslatable without checking the composition first.
   tell from the issue alone whether the loss is a specification gap (raise it upstream), a
   ThoughtSpot limitation (accept it), or a missing piece of model metadata (supply it and
   re-run).
+
+---
+
+## Window rows live-confirmed — 2026-07-30
+
+Every window and semi-additive signature in this document was probed on **se-thoughtspot**
+(`https://se-thoughtspot-cloud.thoughtspot.cloud`) on **2026-07-30** with
+`ts tml import --policy VALIDATE_ONLY`, one throwaway model formula per probe so each result is
+individually attributable. **52 probes — 31 accepted, 21 rejected.** Nothing was persisted (verified
+after the run: zero objects matching the probe prefix, and the substrate model's export
+byte-identical to its pre-probe state).
+
+**Why this evidence is decisive, when the earlier `data_type` probes were not.** Unknown *keys*
+on a Model `columns[]` entry are silently ignored, so acceptance there proves nothing. A formula
+**`expr` body is parsed**, so both acceptance and rejection carry information — and the negative
+controls in this run prove the surface discriminates: `rank_over`, `dense_rank`, `row_number`,
+`lag`, `nth_value`, `moving_count`, `moving_stddev` and `cumulative_count` were each rejected with
+`Search did not find "…"`, and the arity/type errors below are a second, stricter class of
+rejection.
+
+**What was confirmed as valid** (the documented shapes hold):
+
+| Shape | Result |
+|---|---|
+| `rank ( sum ( [m] ) , 'desc' )` · `'asc'` | accepted — the composition row is **confirmed** |
+| `rank_percentile ( sum ( [m] ) , 'asc' )` | accepted |
+| `moving_sum ( [m] , 2 , 0 , [ord] )` · `( … , 1 , -1 , … )` · `( … , -1 , 1 , … )` · `moving_average` · `moving_max` | accepted — trailing, LAG-idiom, LEAD-idiom and the family |
+| `cumulative_sum ( [m] , [ord] )` · `cumulative_average` | accepted |
+| `moving_sum` / `cumulative_sum` with a `group_aggregate ( … )` first argument | accepted — [**E5**](#window-functions)'s valid form, both families |
+| `moving_sum ( [m] , 1 , -1 , [ord1] , [ord2] )` · `cumulative_sum ( [m] , [ord1] , [ord2] )` | accepted — trailing arguments are **order** columns and take more than one |
+| `last_value` / `first_value` / `last_value_in_period` / `first_value_in_period` `( sum ( [m] ) , query_groups ( ) , { [date] } )` | all accepted |
+| `last_value ( sum ( [m] ) , { [attr] } , { [date] } )` · `{ [a] , [b] }` · `{ }` · `query_groups ( ) - { [attr] }` | all accepted — **an explicit, multi-column partition is expressible here** |
+| `group_aggregate ( sum ( [m] ) , query_groups ( ) - { [a] } , query_filters ( ) )` · `+ { [a] }` | both accepted — the constructs ask [**A10**](#open-questions-and-upstream-asks) is about are real |
+
+**What was rejected — the evidence that carries the reclassification** (verbatim):
+
+| Probe | Verbatim rejection | What it proves |
+|---|---|---|
+| `rank ( sum ( [m] ) , 'desc' , [attr] )` | `Function rank expects only 2 arguments.` | No partition slot on `rank` |
+| `rank ( sum ( [m] ) , 'desc' , { [attr] } )` | `Function rank expects only 2 arguments.` | …nor as a list |
+| `rank ( sum ( [m] ) , 'desc' , query_groups ( ) )` | `Function rank expects only 2 arguments.` | …nor as the query grain |
+| `rank_percentile ( sum ( [m] ) , 'asc' , [attr] )` | `Function rank_percentile expects only 2 arguments.` | Same for the percentile form |
+| `rank ( sum ( [m] ) )` | `Function rank expects 2 arguments, found 1.` | The direction argument is mandatory |
+| `rank ( [m] , 'desc' )` | `Function rank expects 1st argument to be aggregated.` | An `ORDER BY` over a non-aggregated column has no native target |
+| `rank ( group_aggregate ( sum ( [m] ) , { [a] } , query_filters ( ) ) , 'desc' )` | `Search did not find "group_aggregate ( sum ("` | The partition cannot be smuggled in through the measure |
+| `moving_sum ( [m] , 1 , -1 , [ord] , { [attr] } )` | `Search did not find "{"` | **No partition slot on `moving_*`** |
+| `moving_sum ( [m] , 1 , -1 , [ord] , query_groups ( ) )` | `Search did not find "query_groups ( ) )"` | …in any spelling |
+| `cumulative_sum ( [m] , [ord] , { [attr] } )` | `Search did not find "{"` | **No partition slot on `cumulative_*`** |
+| `moving_sum ( sum ( [m] ) , 1 , -1 , [ord] )` | `Search did not find "sum ("` | [**E5**](#window-functions) confirmed |
+| `moving_sum ( [m] , [ord] )` | `Function moving_sum expects 2nd argument to be Numeric.` | The positional frame signature is enforced |
+| `last_value ( sum ( [m] ) , query_groups ( ) , [date] )` | `Function last_value expects 3rd argument to be List.` | The `{ }` braces on the axis are mandatory |
+| `dense_rank ( … )` · `row_number ( … )` · `nth_value ( … )` | `Search did not find "dense_rank ( sum ("` etc. | Those three `passthrough` rows are correct |
+| `lag ( [m] , 1 , [ord] )` | `Search did not find "lag ("` | There is no native `LAG`; `moving_sum` is the only idiom |
+| `moving_count ( … )` · `moving_stddev ( … )` · `cumulative_count ( … )` | `Search did not find "moving_count ("` etc. | The ordered-window family is `sum`/`average`/`max`/`min` only |
+
+**Two acceptances that prove less than they look** — recorded so nobody over-reads them, and the
+same trap as the format-pattern acceptance in the 2026-07-29 pass:
+
+- `rank ( sum ( [m] ) , 'descending' )` was **accepted.** The direction string is not validated at
+  import, so acceptance proves the call shape, never the ordering.
+- `last_value ( sum ( [m] ) , query_groups ( ) , { [a VARCHAR column] } )` was **accepted.** The
+  axis column's type is not validated at import, so acceptance does not establish that the axis is
+  temporal.
 
 ---
 
@@ -591,7 +700,7 @@ As in that document, each ask carries the **upstream venue** it should be raised
 | # | Ask | Why | Upstream venue |
 |---|---|---|---|
 | **A9** | Define `EXISTS_IN()`, or remove the reference to it. | It is named at `core-spec/expression_language.md:131` as the sanctioned alternative to a subquery, but has no signature, no semantics and no entry in any function table — it is the one construct in the specification that cannot be mapped, and only because it cannot be read. Relatedly: `:219` says "SUM / COUNT aggregation functions support `DISTINCT`" while the syntax table gives `COUNT(DISTINCT expr)` its own row (`:160`) and `SUM(DISTINCT …)` appears only in an example (`:224`). Is `DISTINCT` a modifier available on every aggregate, or only on those two? The answer changes how many rows a converter must generate. | new issue (spec defect: `EXISTS_IN` referenced but never defined) |
-| **A10** | A way to express a *dynamic* window partition — the equivalent of Snowflake's `PARTITION BY EXCLUDING`. | ThoughtSpot's `cumulative_*`, `moving_*` and `group_aggregate ( … , query_groups ( ) - { attr } , … )` all add the query's own dimensions to the partition at query time. A static `PARTITION BY` list cannot express it, so today the construct is stashed and invisible to every other consumer — meaning the same model returns different numbers in two tools as soon as a user adds a dimension. Snowflake solved this with an explicit `EXCLUDING` clause; is a core spelling in scope for 0.2.x? | new discussion; related #39 |
+| **A10** | A way to express a *dynamic* window partition — the equivalent of Snowflake's `PARTITION BY EXCLUDING`. | **This ask now has evidence in both directions, and it is the reason four Window rows are `passthrough` rather than `direct`.** *Ossie → ThoughtSpot:* an Ossie window expression's declared `PARTITION BY` has nowhere to go. ThoughtSpot's ordered window functions have **no partition argument at all** — live-confirmed by rejection on `se-thoughtspot`, 2026-07-30: a partition argument added to `moving_sum` or `cumulative_sum` is rejected at the parser, and `rank` / `rank_percentile` enforce an arity of exactly two (`Function rank expects only 2 arguments`). *ThoughtSpot → Ossie:* the mirror image — `cumulative_*`, `moving_*` and `group_aggregate ( … , query_groups ( ) ± { attr } , … )` all complete the partition from the query's own dimensions at query time (both the `-` and `+` forms live-confirmed valid the same day), and a static `PARTITION BY` list cannot express that, so the construct is stashed and invisible to every other consumer. The failure mode is symmetric and silent: the same model returns different numbers in two tools as soon as a user adds a dimension, and neither side errors. The **one** exception in either direction is the semi-additive pair `first_value` / `last_value`, whose partition *is* an explicit formula argument (also live-confirmed, including a multi-column fixed partition) — which is exactly the shape the rest of the family is missing, and a useful existence proof that the concept fits ThoughtSpot's formula grammar. Snowflake solved the dynamic half with an explicit `EXCLUDING` clause; is a core spelling in scope for 0.2.x? | new discussion; related #39 |
 | **A11** | Fix the date-part vocabulary's edges: (a) the `DAYOFWEEK` base, (b) the asymmetry between the function list and the part list, (c) a fiscal-calendar declaration. | (a) `:284-285` lists `DAYOFWEEK` as a valid part but never says whether 1 is Monday or Sunday, and the engines in the specification's own support table disagree — so a portable expression using it is not actually portable. (b) `DAYOFYEAR` has a first-class function (`:263`) while `DAYOFWEEK` and `WEEK` exist only as parts; ThoughtSpot has functions for all three, so the gap shows up immediately as an inconsistency in the mapping. (c) Fiscal calendars are a model-level fact with no expression-level fix; ThoughtSpot has a `fiscal` argument on most date functions and there is nowhere to put it. | discussion #44 (Universal calendar support); related #47 |
 | **A12** | A declaration for non-additive / semi-additive measures, and a home for the `Decomposability` classification. | These are the two pieces of aggregation *metadata* the expression language surfaces but cannot carry. `:236-241` already classifies every aggregate as distributive / algebraic / holistic / sketch-based for multi-stage aggregation, but the classification lives only in this prose table — a consumer cannot read it off a model. And a snapshot measure (inventory balance, headcount) needs a "do not sum across time" declaration: ThoughtSpot has `last_value`/`first_value`, Snowflake has `non_additive_dimensions`, Databricks has its own. All three are stashed today, and the failure mode is the worst kind — a silently summed balance sheet, with no error anywhere. | discussion #19 (Structured aggregation_method); related #39 |
 
