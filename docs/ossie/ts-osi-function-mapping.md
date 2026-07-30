@@ -1,6 +1,8 @@
 # Ossie expression language → ThoughtSpot function mapping
 
-**Status:** draft for review on apache/ossie#285 · **Coverage:** 146/146 functions,
+**Status:** post-ready (last touched 2026-07-30) — internally reviewed and complete; publication
+to apache/ossie#285 is **held pending legal review**, and nothing has been posted
+· **Coverage:** 146/146 functions,
 operators and constructs from `core-spec/expression_language.md` (**Ossie spec version:**
 `0.2.0.dev0`, `core-spec/spec.yaml:20` — matching the construct-mapping document; the
 expression-language draft's own version-history row labels itself `0.2.0.dev`,
@@ -524,7 +526,7 @@ declared untranslatable without checking the composition first.
 | Runtime parameter reference — `[Parameter Name]` | — | **`custom_extensions` + issue.** Resolved per-query from user input; the definitions are stashed at model level. The construct-mapping document owns this rule; it is repeated here because the *expression* is the thing that stops being portable. |
 | `ts_username`, `ts_groups`, `ts_groups_int`, `ts_org`, `ts_email_domain`, `ts_var ( ... )` | — | **`custom_extensions` + issue.** Signed-in-user identity resolved at query time. An interchange document that carried them would be describing an access-control decision, not semantics — the same reasoning as the construct-mapping document's **NM2**. |
 | `concat ( "{caption}" , "text" , "{/caption}" , [url] )` | — | **`custom_extensions` + issue.** Hyperlink display markup, not computation. `concat` itself maps; the markup tokens inside the string literals do not, and a consumer that rendered them literally would show the tags to users. |
-| Fiscal-calendar variants — `year ( [d] , fiscal )`, `quarter_number ( [d] , fiscal )`, `diff_months ( [e] , [s] , fiscal )` and the rest of the `fiscal` family | — | **`custom_extensions` + issue.** The specification has no fiscal-calendar concept, and the fiscal year's start month is a *model-level* fact that no per-expression rewrite can recover. Emitting the calendar-year function instead would be silently wrong for every organisation whose year does not start in January. See ask **A11**. |
+| Fiscal-calendar variants — `year ( [d] , fiscal )`, `quarter_number ( [d] , fiscal )`, `diff_months ( [e] , [s] , fiscal )` and the rest of the `fiscal` family | — | **`custom_extensions` + issue.** The specification has no fiscal-calendar concept, and the fiscal year's start month is a *model-level* fact that no per-expression rewrite can recover. Emitting the calendar-year function instead would be silently wrong for every organisation whose year does not start in January. See ask **A11**. The *model-level* half does have a TML home — `properties.calendar` on the date column, naming a Connection-scoped custom calendar — so the loss is two-part: the `fiscal` argument inside the expression, and the calendar definition that argument resolves against. The construct-mapping document's field-level `calendar` row and open verification **V1** own that half. |
 | `month ( [d] )`, `year_name ( [d] )`, `day_of_week ( [d] )` (name-returning) | `TO_CHAR(d, 'MONTH')`, `TO_CHAR(d, 'YYYY')`, `TO_CHAR(d, 'DAY')` | via Ossie composition — but `TO_CHAR` is EXPERIMENTAL (`:356`) and the name tokens are locale-dependent by the specification's own admission (`:385-387`), so an issue records the locale exposure. |
 | `month_number_of_quarter ( [d] )` | `MOD(MONTH(d) - 1, 3) + 1` | via Ossie composition |
 | `day_number_of_quarter ( [d] )` | `DATEDIFF(day, DATE_TRUNC('quarter', d), d) + 1` | via Ossie composition |

@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (validated in 2026-07-11 external sweep — no changes needed) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-30: added columns[] properties.calendar / index_priority / is_attribution_dimension, widened index_type + currency_type from a product-docs sweep; prior: validated in 2026-07-11 external sweep) -->
 
 # ThoughtSpot Model TML — Construction Reference
 
@@ -168,17 +168,20 @@ joins:
 | `name` | Yes (always) | Display name shown in ThoughtSpot search bar |
 | `properties.column_type` | Yes | `ATTRIBUTE` or `MEASURE` |
 | `properties.aggregation` | No | For MEASURE: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT`. Valid on both `column_id` and `formula_id` entries. **Warning:** `COUNT_DISTINCT` on a `column_id` causes ThoughtSpot to silently override `column_type` to `ATTRIBUTE`. Always use a `formulas[]` entry with `unique count ( [TABLE::col] )` instead. |
-| `properties.index_type` | No | `DONT_INDEX` suppresses text-search indexing. `PREFIX_ONLY` indexes only the string prefix (faster prefix search on long strings). Omit for full indexing (default). |
+| `properties.index_type` | No | `DONT_INDEX` suppresses text-search indexing. `PREFIX_ONLY` indexes only the string prefix (faster prefix search on long strings). The full documented set also includes `DEFAULT`, `PREFIX_AND_SUBSTRING` and `PREFIX_AND_WORD_SUBSTRING` — accept all five when round-tripping an exported model. Omit for full indexing (default). |
+| `properties.index_priority` | No | Integer — raises or lowers this column's priority in search indexing relative to others. Pass through on round-trips. |
+| `properties.is_attribution_dimension` | No | Boolean — marks the column as an attribution dimension. Pass through on round-trips. |
 | `properties.is_hidden` | No | `true` hides the column from the search bar. **Do not set during conversion or model creation** — hidden columns cause locked visualizations and unexpected query behaviour. Leave visibility decisions to the model owner after import. |
 | `properties.is_additive` | No | `true` marks a column as additive — used on semi-additive models to explicitly allow summation across time. |
 | `properties.format_pattern` | No | Number display format string. Common values: `"#,##0"` (integer), `"#,##0.0%"` (percentage), `"###0"` (plain). |
-| `properties.currency_type.iso_code` | No | ISO currency code (e.g. `USD`, `EUR`) — adds currency symbol and formatting to a measure. |
+| `properties.currency_type` | No | Adds currency symbol and formatting to a measure. Exactly **one** of three mutually-exclusive forms: `iso_code: USD` (a fixed ISO code — the common case), `column: <column_name>` (the code is read per row from another column), or `is_browser: true` (format in the viewer's browser locale). Only `iso_code` is used when generating new models; accept all three when round-tripping. |
 | `properties.geo_config` | No | Geographic role for the column. See Geo Config below. |
 | `properties.spotiq_preference` | No | `"EXCLUDE"` removes the column from SpotIQ auto-analysis (use on lat/long, internal IDs). |
 | `properties.search_iq_preferred` | No | `true` flags this column as preferred in Search IQ / natural language queries. |
 | `properties.ai_context` | No | Free-text description used by Spotter (AI search) to understand the column's business meaning. Appears on most columns in AI-enriched models. Pass through on round-trips; safe to omit when constructing new models. |
 | `properties.custom_order` | No | Array of attribute values in custom display order. Used to control sort order in visualizations (e.g. `[USA, UK, France]`). ATTRIBUTE columns only. |
 | `properties.default_date_bucket` | No | Default time granularity for date columns. Values: `DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `YEARLY`, `AUTO`. Omit for ThoughtSpot default. |
+| `properties.calendar` | No | **Date columns only** — the custom / fiscal calendar the column is bucketed by, so quarters and years follow a fiscal or 4-4-5 retail calendar instead of the Gregorian one. **Reference only:** the calendar itself is a *Connection-scoped* object created outside TML (`POST /api/rest/2.0/calendars/create`, 10.12.0.cl or later, backed by a warehouse calendar table), so this value is meaningless on a target instance whose connection has no calendar of that name. **Do not emit when generating a model** — pass through on round-trips only. The value vocabulary is not settled: ThoughtSpot's TML documentation gives `default` or a calendar name, while [thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md) records the literal `CALENDAR_TYPE_GREGORIAN` on SQL View columns. Verify against a live export before relying on either spelling. |
 | `properties.synonyms` | No | Array of alternative names for search. **Must live under `properties:`** — top-level `synonyms:` at the column root is silently dropped on import. |
 | `properties.synonym_type` | No | `USER_DEFINED` for user-supplied synonyms; `AUTO_GENERATED` for ThoughtSpot-inferred. Set to `USER_DEFINED` whenever you populate `properties.synonyms`. |
 | `data_panel_column_groups` | No | Assigns the column to one or more data panel folders. Map of `{folder_name: ''}` — values are always empty string. A column can appear in multiple folders. Folder names must match entries in `column_groups[].column_group_info[].name`. Pass through on round-trips. |
