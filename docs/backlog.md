@@ -123,6 +123,7 @@ are roughly ordered by value÷effort.
 |---|---|---|
 | BL-177 | Reverse legs synthesise names that were already available | opportunistic |
 | BL-173 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
+| BL-185 | Validator: `docs/backlog.md` priority-index consistency (number/tier/no-duplicate) | opportunistic |
 | BL-167 | Record (or change) the to-direction's never-hard-error-on-loss posture | opportunistic |
 | BL-169 | Vendor-neutral TPC-DS fixture corpus (Phase-3-coupled) | Phase-3 test PR |
 | BL-034 | tools/ & ts-cli quality polish | 2026-10-31 |
@@ -5546,7 +5547,7 @@ The two from-direction converters have opposite and equally unsatisfactory offli
 stories, and the contrast is the finding:
 
 **Databricks emits Table TMLs, but classifies them badly.** `build_table_tml`
-(`mv_tml.py:69-73`) defaults every numeric column to `MEASURE` with `aggregation: SUM`. On the
+(`mv_tml.py:68-72`) defaults every numeric column to `MEASURE` with `aggregation: SUM`. On the
 TPC-DS fixture the four surrogate keys **and `ss_ticket_number`** -- which the MV *explicitly
 declares a dimension* -- arrive as summable measures, so the user's Tables offer "Sum of Ss Sold
 Date Sk" and a summable ticket number. The Model TML overrides the classification correctly, so
@@ -5559,7 +5560,7 @@ columns are keys or declared dimensions.
 **Snowflake emits no Table TML at all**, so a documented mapping row is unreachable. Coverage
 row 5 maps table-level `comment=` to `table.description` via "Separate Table TML update"
 (Step 6D) -- but Step 6D needs Table TMLs fetched from a live instance, and Step 10-FILE writes
-`{model_name}.model.tml` only (`SKILL.md:753-754`). `parse-sv` captures all five table comments
+`{model_name}.model.tml` only (`SKILL.md:752-753`). `parse-sv` captures all five table comments
 correctly (`"comment": "Fact table containing all store sales transactions"` in the parsed JSON);
 they are then silently dropped. Five of five table descriptions lost on the documented offline
 path.
@@ -5593,7 +5594,7 @@ standard) if that lands first -- this is exactly the kind of asymmetry BL-100 ex
 (`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`), findings F8 (Databricks) and F18 (Snowflake).
 **Affects:** `tools/ts-cli/ts_cli/databricks/mv_emit.py` (`default_view_name`),
 `tools/ts-cli/ts_cli/sv_build_sv.py` (relationship naming),
-`agents/cli/ts-convert-to-databricks-mv/SKILL.md` (Step 5.2 prompts).
+`agents/cli/ts-convert-to-databricks-mv/SKILL.md` (Step 5 prompts).
 **Status:** OPEN.
 
 Two independent instances of the same small defect class: the reverse leg generates a name from a
@@ -6065,3 +6066,49 @@ original failure mode one level up.
 
 **Target:** immediately after BL-178. Tier 2 rather than 1 only because it depends on that fix
 landing first; the gate itself is the higher-value half of the pair.
+
+---
+
+## BL-185 -- Validator promotion: `docs/backlog.md` priority-index consistency `Tier 3`
+
+**Filed:** 2026-07-30.
+**Source:** this branch's final review fix-wave
+(`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`) -- while correcting that report's own
+citations, found the same "index row typo'd its own number" pattern PR #356 introduced in this
+file (BL-173's summary indexed as BL-171), hand-fixed on this branch 2026-07-30.
+**Affects:** a new `tools/validate/check_backlog_index.py`, `scripts/pre-commit.sh`,
+`docs/backlog.md` (the `## Priority index` tier tables and the `## BL-NNN` headings they index).
+**Status:** OPEN.
+
+**Why this is validator-shaped and not a one-off fix.** #356 added a Tier 3 priority-index row
+for its own new entry but labelled it `BL-171` instead of `BL-173`:
+
+```
+| BL-171 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
+```
+
+That summary belongs to BL-173 (`## BL-173 -- Bound ts tml verify-render ... Tier 3`); the real
+BL-171 is "Five ts-cli emitters still emit the six non-existent string functions" (`Tier 1`). The
+mislabeled row sat in the index for a full audit cycle before a manual read caught it. A
+grep-for-number collision check (`git grep "BL-173"`) cannot find this class of defect -- it finds
+only the heading, because the row whose number *is* the defect never mentions the right number at
+all. The check that does catch it is structural: cross-validate every index row against its own
+heading.
+
+**Approach:**
+
+1. Parse every `## BL-NNN -- Title \`Tier N\`` heading into `{number: tier}`.
+2. Parse every `| BL-NNN | summary | target |` row under each `### Tier N` section into
+   `{number: section_tier}`, skipping `~~BL-NNN~~` (done/struck-through) rows.
+3. Assert: (a) every index row's number has a matching heading -- catches a row referencing a
+   BL number that doesn't exist; (b) the row's section tier equals its own heading's `Tier N`
+   marker -- this is what would have caught #356's typo, since the BL-171 heading says `Tier 1`
+   while the mislabeled row sat in the `### Tier 3` section; (c) no BL number is indexed twice
+   across all tier sections combined.
+4. Wire into `scripts/pre-commit.sh` gated on `docs/backlog.md` changes, alongside the existing
+   `check_open_items.py` step.
+5. Unit test against a small fixture backlog with a deliberately mismatched row, mirroring the
+   #356 case, so the regression cannot silently return.
+
+**Target:** opportunistic -- next validator sweep, or whenever `docs/backlog.md` is next touched
+for an unrelated reason.

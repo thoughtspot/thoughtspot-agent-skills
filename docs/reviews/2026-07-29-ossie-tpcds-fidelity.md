@@ -21,7 +21,7 @@
 
 ### 1.1 Why this fixture
 
-`tpcds_metric_view.yaml` is the strongest available baseline because **upstream's own round-trip on it is lossless**. `converters/databricks/tests/test_roundtrip.py:57-63` (`test_tpcds_mv_round_trips`) asserts MV → OSI → MV is structurally byte-faithful for this exact file, and `converters/databricks/tests/test_ossie_to_metric_view.py:33-38` (`test_tpcds_export_matches_expected`) asserts the OSI → MV direction reproduces it exactly. Any loss measured below is therefore **ours**, not inherited from the fixture pair.
+`tpcds_metric_view.yaml` is the strongest available baseline because **upstream's own round-trip on it is lossless**. `converters/databricks/tests/test_roundtrip.py:56-62` (`test_tpcds_mv_round_trips`) asserts MV → OSI → MV is structurally byte-faithful for this exact file, and `converters/databricks/tests/test_ossie_to_metric_view.py:33-39` (`test_tpcds_export_matches_expected`) asserts the OSI → MV direction reproduces it exactly. Any loss measured below is therefore **ours**, not inherited from the fixture pair.
 
 ### 1.2 Source inventory — the fidelity denominators
 
@@ -102,7 +102,7 @@ ts databricks build-model --parsed ./01-parsed.json --translated ./03-translated
 #   → exit 0; "invariant_findings": [], "lint_findings": [], "skipped": []
 ```
 
-**Reverse (Model TML → MV)** — `agents/cli/ts-convert-to-databricks-mv/SKILL.md`, offline. Step 3's `ts tml export --parse` is unavailable without an instance, so the two JSON inputs `build-mv` documents (Step 5.1) were produced by loading the TML files we just generated — a format conversion of our own output, not a substitute for any conversion logic:
+**Reverse (Model TML → MV)** — `agents/cli/ts-convert-to-databricks-mv/SKILL.md`, offline. Step 3's `ts tml export --parse` is unavailable without an instance, so the two JSON inputs `build-mv` documents (Step 5) were produced by loading the TML files we just generated — a format conversion of our own output, not a substitute for any conversion logic:
 
 ```bash
 ts databricks build-mv --model ./05-model-export.json --tables ./06-tables-export.json \
@@ -130,7 +130,7 @@ ts databricks build-mv --model ./05-model-export.json --tables ./06-tables-expor
 | to-mv | 1 / 1.5 | ThoughtSpot + Databricks profile selection | skipped |
 | to-mv | 1.5 | warehouse selection **and the Runtime-floor confirmation** (`Y / N / ?`) — materially relevant here, see finding F5: the emitted DDL requires Runtime **18.1+**, not 17.3+ | skipped |
 | to-mv | 2 | find/select the model (`G / S / B`) | TML already on disk |
-| to-mv | 5.2 | confirm `--catalog` / `--schema` (also sets the `source:` FQN) | `tpcds` / `public` |
+| to-mv | 5 | confirm `--catalog` / `--schema` (also sets the `source:` FQN) | `tpcds` / `public` |
 | to-mv | 10 | `YES / NO / EDIT / FILE` on the generated DDL | **FILE** |
 | to-mv | 12 | — | DDL execution skipped (no workspace) |
 
@@ -402,7 +402,7 @@ Five dimensions (D1, D3, D4, D5, D6) and both measures had no `display_name` in 
 
 #### F7 — File-only Table TML classifies join keys and a declared dimension as summable measures *(quality, wrong side: **ours + a doc gap**; not a round-trip loss)*
 
-`build_table_tml` defaults every numeric column to `MEASURE` with `aggregation: SUM` (`tools/ts-cli/ts_cli/databricks/mv_tml.py:69-73`). The generated Table TMLs therefore mark all four surrogate keys and `ss_ticket_number` as summable measures — including `ss_ticket_number`, which the MV **explicitly declares a dimension** (`tpcds_metric_view.yaml:39-40`):
+`build_table_tml` defaults every numeric column to `MEASURE` with `aggregation: SUM` (`tools/ts-cli/ts_cli/databricks/mv_tml.py:68-72`). The generated Table TMLs therefore mark all four surrogate keys and `ss_ticket_number` as summable measures — including `ss_ticket_number`, which the MV **explicitly declares a dimension** (`tpcds_metric_view.yaml:39-40`):
 
 ```yaml
   - db_column_name: ss_ticket_number
@@ -416,7 +416,7 @@ Five dimensions (D1, D3, D4, D5, D6) and both measures had no `display_name` in 
 
 The Model TML overrides it correctly (`column_type: ATTRIBUTE`, `model.tml:3-6`), so the round trip survives and the regenerated MV has `ticket_number` back as a dimension — this is not a fidelity loss. It is a quality defect in what a user actually receives: the underlying ThoughtSpot Tables offer "Sum of Ss Sold Date Sk" and a summable ticket number.
 
-Notably, `build_table_tml` **does** accept per-column `column_type` and `aggregation` overrides (`mv_tml.py:69-73`) — but the SKILL's file-only instructions specify only `{"name", "dbx_type"}` (`agents/cli/ts-convert-from-databricks-mv/SKILL.md:552-556` and the identical block at `:607-611`), so no documented run ever passes them. The information needed to do better is available for free: the MV's own dimension list and every join's `on` clause identify exactly which numeric columns are keys or dimensions.
+Notably, `build_table_tml` **does** accept per-column `column_type` and `aggregation` overrides (`mv_tml.py:68-72`) — but the SKILL's file-only instructions specify only `{"name", "dbx_type"}` (`agents/cli/ts-convert-from-databricks-mv/SKILL.md:552-556` and the identical block at `:607-611`), so no documented run ever passes them. The information needed to do better is available for free: the MV's own dimension list and every join's `on` clause identify exactly which numeric columns are keys or dimensions.
 
 #### F8 — Default regenerated view name doubles the fact-table token *(cosmetic, wrong side: **ours**)*
 
@@ -432,7 +432,7 @@ Notably, `build_table_tml` **does** accept per-column `column_type` and `aggrega
 | F4 `comment` polluted + accretive | `mis-inferred` | **ours** | source fixture `:20` |
 | F5 redundant `cardinality:` | `extra` | **ours** | `databricks-metric-view.md:20`, `:430-437`; to-mv `SKILL.md:197` |
 | F6 synthesized `display_name` | `extra` | **ambiguous / benign** | structural to ThoughtSpot's single name field |
-| F7 keys as MEASURE/SUM in Table TML | quality (not a fidelity loss) | **ours + doc gap** | MV's own dimension declaration `:39-40`; `mv_tml.py:69-73` |
+| F7 keys as MEASURE/SUM in Table TML | quality (not a fidelity loss) | **ours + doc gap** | MV's own dimension declaration `:39-40`; `mv_tml.py:68-72` |
 | F8 doubled default view name | cosmetic | **ours** | — |
 
 ### 2.5 Documentation gaps found alongside the behaviour
@@ -513,7 +513,7 @@ UserWarning: Dropped from model (no Snowflake counterpart): ai_context, custom_e
 
 **Upstream's own fidelity, therefore, is not lossless** — unlike §2's Databricks fixture pair,
 whose round trip upstream asserts is byte-faithful (§1.1). Against the OSI referee, upstream drops:
-model-level `ai_context.instructions` (a 200-word Spotter-style instruction block,
+model-level `ai_context.instructions` (a ~34-word Spotter-style instruction block,
 `examples/tpcds_semantic_model.yaml:29`), all four relationship `ai_context.synonyms` sets
 (`:510-513`, `:520-523`, `:530-533`, `:540-543`), both `custom_extensions` vendor payloads
 (`:613-631`), and `datatype: Decimal` on all five metrics (`:553`, `:566`, `:579`, `:593`, `:606`).
@@ -1164,7 +1164,7 @@ rewrite is a mechanical N-ary fold with no judgment involved.
 
 **Referee: `||` is not a Snowflake dialect quirk that could excuse skipping it.** The OSI
 source declares the expression under `dialect: ANSI_SQL`
-(`examples/tpcds_semantic_model.yaml:290-292`):
+(`examples/tpcds_semantic_model.yaml:289-292`):
 
 ```yaml
             expression:
@@ -1431,7 +1431,7 @@ reaches our pipeline and is discarded downstream.
 table-level `comment=` → `table.description` with the note "**Separate Table TML update**"
 (`references/coverage-matrix.md:18`), applied by Step 6D. But Step 10-FILE emits the Model TML
 only — "The command writes `{model_name}.model.tml` to the output directory"
-(`SKILL.md:753-754`) — and Step 6D depends on Table TMLs fetched from a live instance. So on
+(`SKILL.md:752-753`) — and Step 6D depends on Table TMLs fetched from a live instance. So on
 the documented offline path the mapping row is unreachable and five table descriptions are
 silently dropped. Contrast §1.4, where the from-databricks file-only path emits four Table
 TMLs alongside the model.
@@ -1631,12 +1631,12 @@ Two observations, deliberately kept apart:
 |---|---|---|---|
 | F9 metric cross-references unresolvable in the imported TML (5/5); forward leg only | — (forward-leg defect, no source property to score) | **ours** | `ts-from-snowflake-rules.md:585-593` (documented order inverted); `sv_parse.py:470-492` (alias_name misparse); live-verified worked example `ts-from-snowflake-identifier-resolution.md:23`,`:233` |
 | F10 identifier replaced by first synonym (29/36) | `mis-inferred` | **ours** (documented in coverage row 14, but wrong for foreign SVs) | OSI referee separates `name` (`:547`) from `ai_context.synonyms` (`:554-558`) |
-| F11 `\|\|` rejected, construct dropped | `missed` | **ours** — the cited replacement is already mapped | `ts-snowflake-formula-translation.md:197-198`; OSI declares it `ANSI_SQL` (`:290-292`) |
+| F11 `\|\|` rejected, construct dropped | `missed` | **ours** — the cited replacement is already mapped | `ts-snowflake-formula-translation.md:197-198`; OSI declares it `ANSI_SQL` (`:289-292`) |
 | F12 `NULLIF(…,0)` → `safe_divide`/`DIV0`, NULL→0 | `mis-inferred` | **ours** | `thoughtspot-formula-patterns.md:171`; `nullif` available (`ts-snowflake-formula-translation.md:154`) |
 | F13 facts → ATTRIBUTE → `dimensions()` | `mis-inferred` | **ours** — contradicts coverage row 16's "MEASURE or ATTRIBUTE" | OSI marks all 5 as facts by omitting `dimension:` (`:103-149`, `:491-501`) |
 | F14 `time_dimension` role lost (3/4) | `mis-inferred` | **ours**, ThoughtSpot has no non-date temporal flag | OSI `is_time: true` explicit and commented as deliberate (`:195`, `:201-210`, `:224`) |
 | F15 surrogate key → `time_dimension` | `mis-inferred` | **ours** — compounds with F10 | source `data_type: NUMBER(38,0)` (`:47`); `sv_build_sv.py:94-105` |
-| F16 table `comment` lost (5/5) | `missed` | **ours** — coverage row 5 claims it maps; unreachable offline | source `:34`,`:109`,`:155`,`:205`,`:262`; `SKILL.md:747-748` |
+| F16 table `comment` lost (5/5) | `missed` | **ours** — coverage row 5 claims it maps; unreachable offline | source `:34`,`:109`,`:155`,`:205`,`:262`; `SKILL.md:752-753` |
 | F17 fact table's composite PK dropped | `missed` | **ours** | source `:26-29`; `snowflake-schema.md:244-245` |
 | F18 relationship name regenerated | `mis-inferred` | **ours** — name was preserved in the TML and then discarded | source `:309`; `model.tml:297` |
 | F19 description provenance + accretion (×2) | `mis-inferred` | **ours** — same class as §2's F4 | source `:19` |
@@ -1650,7 +1650,7 @@ Two observations, deliberately kept apart:
 |---|---|---|
 | No coverage row for `\|\|` (or any string operator) | `references/coverage-matrix.md` — Mapped and Unmapped sections | Missing — the F11 drop is neither implemented nor declared, while `ts-snowflake-formula-translation.md:197-198` maps the equivalent |
 | No coverage row for `time_dimensions` | same file, Dimensions section (`:31-38`) | Missing — F14's role loss is undeclared |
-| No coverage row for `data_type` on dimensions/facts | same file | Missing — 26 source properties are `not-applicable` with nothing to cite |
+| No coverage row for `data_type` on dimensions/facts | same file | Missing — 28 source properties are `not-applicable` with nothing to cite |
 | Row 16 says facts → "MEASURE **or** ATTRIBUTE" | `coverage-matrix.md:44` | **Stale/aspirational** — `sv_translate.py:454-468` has no MEASURE branch (F13) |
 | Row 5 says table `comment=` → `table.description` via "Separate Table TML update" | `coverage-matrix.md:18` | **Unreachable on the documented file-only path** — Step 10-FILE emits no Table TML (F16) |
 | Identifier Resolution Algorithm step 1 vs step 2 | `ts-from-snowflake-rules.md:585-593` vs `sv_translate.py:125-137` | **Code contradicts the rule** and its own docstring (F9) |
@@ -1747,7 +1747,7 @@ All under `.superpowers/sdd/2026-07-29-ossie-tpcds-fidelity/sf/` (gitignored):
 ## 4. Findings and routing
 
 Twenty-one behaviour findings (§2.3 F1–F8, §3.6 F9–F21), eighteen documentation gaps
-(§2.5, §3.8, plus four surfaced in the prose of §2.3/§3.6 and not tabled there), two
+(§2.5, §3.8, plus five surfaced in the prose of §2.3/§3.6 and not tabled there), two
 gate-blindness observations (§2.6, §3.9) and three scope-limit items (§2.7, §3.10). Each
 routes to **exactly one** bucket, per the two-bucket rule in `.claude/rules/repo-audit.md`.
 Nothing is left as "we noticed this".
@@ -1757,9 +1757,14 @@ Nothing is left as "we noticed this".
 | `BL-NNN` | dated entry in `docs/backlog.md` — **11 new** (BL-174…BL-184) | 16 | 4 | 2 | 0 | **22** |
 | `coverage-matrix` | row added or corrected **in this branch** — 18 rows across 2 matrices | 2 | 14 | 0 | 0 | **16** |
 | `cross-ref` | strengthens an existing entry; deliberately **not** double-filed | 2 | 0 | 0 | 2 | **4** |
-| `upstream-issue` | listed in §4.4, **parked** pending the #285 legal hold — not posted | 0 | 0 | 0 | 0 | **2** |
+| `upstream-issue` | listed in §4.4, **parked** pending the #285 legal hold — not posted | 0 | 0 | 0 | 0 | **2**¹ |
 | `no-action (justified)` | justification in the Route cell | 1 | 0 | 0 | 1 | **2** |
 | | | **21** | **18** | **2** | **3** | |
+
+¹ U1 and U2 sit outside the four finding classes (Behaviour / Doc gaps / Gates / Scope) — they
+are §3.1's out-of-denominator upstream items, not a fifth class of finding. That is why the four
+class columns sum to 44 while the Total column sums to 46: the upstream-issue row's Total is real,
+it just has no home in the four-column breakdown.
 
 `fix-PR` is empty by design: per the plan's routing vocabulary, a small obvious correction is
 filed as a dated BL with a **ready to fix** status rather than fixed in this branch, which is a
@@ -1811,7 +1816,7 @@ dated to the program date (from-databricks-mv **1.10.3**, from-snowflake-sv **1.
 | G5 | File-only `tables.json` spec omits the supported per-column `column_type`/`aggregation` keys, in both identical blocks (§2.5) | `BL-176` | Bundled with the behaviour fix so the doc and the code land together — documenting the override without deriving it would leave every documented run still wrong |
 | G6 | No coverage row for `\|\|` or any string operator (§3.8) | `coverage-matrix` | from-SF **L10** added, with a note that it is a converter defect rather than a platform limitation and should move to Mapped when BL-180 lands |
 | G7 | No coverage row for `time_dimensions` (§3.8) | `coverage-matrix` | from-SF **#38** added (also F14's route) |
-| G8 | No coverage row for `data_type` on dimensions/facts — a whole `not-applicable` property class with nothing to cite (§3.8 counts 26 of them, §3.5's tally 28; either way the row was missing) | `coverage-matrix` | from-SF **L11** added, scoped honestly: the property is absent from the skill's actual (DDL) input and matters only if a future path consumes the YAML form |
+| G8 | No coverage row for `data_type` on dimensions/facts — a whole `not-applicable` property class with nothing to cite (28 of them, per §3.5) | `coverage-matrix` | from-SF **L11** added, scoped honestly: the property is absent from the skill's actual (DDL) input and matters only if a future path consumes the YAML form |
 | G9 | Row 16 promises facts → "MEASURE **or** ATTRIBUTE" — **stale/aspirational**, no MEASURE branch exists (§3.8) | `coverage-matrix` | from-SF **#16** corrected to ATTRIBUTE-only with the `dimensions()` consequence; flips back when BL-181 lands |
 | G10 | Row 5's "Separate Table TML update" is **unreachable** on the documented file-only path (§3.8) | `coverage-matrix` | from-SF **#5** amended (also F16's declaration) |
 | G11 | `sv_translate.py:125-137` contradicts `ts-from-snowflake-rules.md:585-593` **and its own docstring** (§3.8) | `BL-178` | The rule is right and the code is wrong, so this is a code fix, not a doc fix. Recorded in BL-178 defect 1 |
@@ -1833,6 +1838,15 @@ are validator-shaped — structural, offline, no judgment.
 |---|---|---|---|
 | V1 | A dangling `[formula_X]` reference is invisible to `ts tml lint`, `check_tml.py` **and** `build-model`'s own `lint_findings` — 5 of 5 metrics unresolvable, all three clean. The same class also lets `ts snowflake lint-ddl` pass a CA payload naming a non-existent table, inside its documented "undeclared table references" remit | `BL-183` | **BL-183**, Tier 1 — two checks, one PR, plus a new invariant row so BL-168's property tests can pick the property up as a generator target. **Would have caught F9 on 2026-07-22**, the day it was introduced. Deliberately **not** an extension of BL-172's scope: BL-172 fixes a scanner over `agents/shared/mappings/*.md` table rows that gates *function-name claims in documentation*; V1 gates *reference integrity inside emitted TML/DDL* in the CLI's own lint commands. Different input, different tool, no shared code, neither blocks the other — the entry says so explicitly so the two are not merged later by mistake |
 | V2 | The worked examples are declared ground truth (`agents/shared/CLAUDE.md`) and nothing re-runs them. `test_worked_examples.py` re-validates the *documented output* structurally, which cannot detect the emitter drifting away from it | `BL-184` | **BL-184**. Sized for the baseline it will actually find: `ts-from-snowflake-identifier-resolution.md` **also** diverges on 6 of 18 display names and 2 formula ids for an unrelated reason — coverage row 14's first-synonym promotion landed 2026-06-15, *after* the 2026-06-13 verification — so a naive diff will not come back clean even once BL-178 is fixed. Two of those divergences are correct current behaviour against a stale document. The entry requires that choice to be made explicitly (re-verify and update, **or** narrow the assertion and record why) and forbids silently normalising the difference away, which would reproduce the original failure mode one level up |
+
+**A third, process-level validator promotion surfaced during this branch's own final fix-wave
+(2026-07-30), not counted in the two above because it is not a TPC-DS fidelity finding: BL-185.**
+Fixing this report's own citations turned up the same "index row typo'd its own number" pattern
+that PR #356 introduced in `docs/backlog.md` (BL-173's summary indexed as BL-171, hand-fixed on
+this branch) — a defect a grep-for-number collision check cannot catch, since the row's number
+*is* the defect. Routed as its own entry rather than folded into V1/V2 because the input (a
+Markdown index table) and the tool (a `docs/backlog.md` structure check) share nothing with
+`ts tml lint`/`lint-ddl`.
 
 ### 4.4 Parked — upstream-issue items (do **not** post)
 
@@ -1856,7 +1870,7 @@ its material ready; **nothing in this branch posts anything externally.**
 ### 4.6 Completeness
 
 **Behaviour findings.** 21 rows (F1–F21) = 16 `BL-NNN` + 2 `coverage-matrix` + 2 `cross-ref` +
-1 `no-action`. The 16 resolve into **9** entries because five root causes are shared:
+1 `no-action`. The 16 resolve into **9** entries because six root causes are shared:
 BL-174 ← F1+F3+F5, BL-175 ← F4+F19, BL-176 ← F7+F16, BL-177 ← F8+F18, BL-180 ← F11+F12,
 BL-182 ← F15+F20; BL-178 ← F9, BL-179 ← F10, BL-181 ← F13 stand alone. **No finding without a
 route, and no finding with two.**
@@ -1900,7 +1914,7 @@ each (G16 → #23/#67/#39; G18 → #26/#27/#28). So 16 − 2 + 2 + 2 = 18: from-
 **Gate observations.** 2 rows = 2 `BL-NNN` (both new). **Scope limits.** 3 rows = 2 `cross-ref` +
 1 `no-action`.
 
-**What this branch changed, and what it deliberately did not.** Changed: 15 coverage-matrix rows
+**What this branch changed, and what it deliberately did not.** Changed: 18 coverage-matrix rows
 across the two from-direction matrices, both matrices' limitation notes, two skill PATCH bumps
 with changelog entries, BL-031's construct list, and 11 new backlog entries. Deliberately not
 changed: **no converter code** (all behaviour fixes are routed, three of them *ready to fix*),
