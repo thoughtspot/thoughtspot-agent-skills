@@ -813,6 +813,13 @@ verdict is unchanged; only the generality of the justification is. Had the conve
 scalar `expr` for any of them, the stamped `SUM` would **not** have been benign. Both properties
 are recorded in the extras column for completeness only.
 
+**Evidence class for that correction.** The scalar-vs-aggregate rule is a **query-time** semantic:
+`VALIDATE_ONLY` import probing cannot test it in either direction, because both `expr` shapes
+import clean carrying any `aggregation:` value. It rests on domain review, not on a probe. What
+*this* section verifies independently is the narrower factual premise — that all five emitted
+`expr`s are aggregate exprs — which is readable straight off the TML above and is why the `benign`
+verdicts stand regardless of how the rule is eventually confirmed.
+
 ### 3.5 Summary counts
 
 **Construct level** (47 constructs). Convention as stated in §3.4 — worst deviation wins the

@@ -239,6 +239,8 @@ joins:
 | `properties.calendar` | No | **Date columns only** — the custom / fiscal calendar the column is bucketed by, so quarters and years follow a fiscal or 4-4-5 retail calendar instead of the Gregorian one. **Reference only:** the calendar itself is a *Connection-scoped* object created outside TML (`POST /api/rest/2.0/calendars/create`, 10.12.0.cl or later, backed by a warehouse calendar table), so this value is meaningless on a target instance whose connection has no calendar of that name. **Do not emit when generating a model** — pass through on round-trips only. **Value vocabulary — settled 2026-07-30** by a 500-document census, superseding the "not settled" note this row previously carried: the value is a **calendar name**, and the literal `calendar` is the default spelling. See the sub-table below. |
 | `properties.value_casing` | No | Documented as a Table-column refinement, but **present on Model columns too — 545 sightings across 18 of 143 Models** (2026-07-30 census), including 156 on *formula-backed* columns. Same vocabulary as the Table reference (`UPPER` / `LOWER` / `MIXED` / `UNKNOWN`); every observed Model value is `UNKNOWN`. Pass through on round-trips; do not emit when generating a model. |
 | `properties.synonyms` | No | Array of alternative names for search. **Must live under `properties:`** — top-level `synonyms:` at the column root is silently dropped on import. |
+| `properties.synonym_type` | No | `USER_DEFINED` for user-supplied synonyms; `AUTO_GENERATED` for ThoughtSpot-inferred. Set to `USER_DEFINED` whenever you populate `properties.synonyms`. |
+| `data_panel_column_groups` | No | Assigns the column to one or more data panel folders. Map of `{folder_name: ''}` — values are always empty string. A column can appear in multiple folders. Folder names must match entries in `column_groups[].column_group_info[].name`. Pass through on round-trips. |
 
 #### `properties.calendar` — observed values (census, 2026-07-30)
 
@@ -262,8 +264,6 @@ Three consequences:
 3. **Still open:** whether the literal `calendar` is a genuine default sentinel or a customer
    calendar that happens to be named "calendar". The 34-Model spread across unrelated tenants
    strongly favours *sentinel*, but confirming it needs a `GET /api/rest/2.0/calendars/…` read.
-| `properties.synonym_type` | No | `USER_DEFINED` for user-supplied synonyms; `AUTO_GENERATED` for ThoughtSpot-inferred. Set to `USER_DEFINED` whenever you populate `properties.synonyms`. |
-| `data_panel_column_groups` | No | Assigns the column to one or more data panel folders. Map of `{folder_name: ''}` — values are always empty string. A column can appear in multiple folders. Folder names must match entries in `column_groups[].column_group_info[].name`. Pass through on round-trips. |
 
 ### `formulas[]` fields
 

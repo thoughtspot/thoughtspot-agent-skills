@@ -173,7 +173,7 @@ else 0
 | `floor` | `floor ( [x] )` |
 | `ceil` | `ceil ( [x] )` |
 | `abs` | `abs ( [x] )` |
-| `pow` | `pow ( [x] , [n] )` | Verified 2026-06-13. **Not** `power` — that name is rejected. |
+| `pow` | `pow ( [x] , [n] )` — **not `power`**, which the parser rejects (verified 2026-06-13) |
 | `mod` | `mod ( [x] , [n] )` |
 | `sqrt` | `sqrt ( [x] )` |
 | `ln` | `ln ( [x] )` |

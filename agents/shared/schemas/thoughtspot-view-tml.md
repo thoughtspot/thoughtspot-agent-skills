@@ -18,8 +18,8 @@
 >
 > `search_output_column` is **not** a table-path reference. It is the column's label *in the
 > View's own `search_query` output*, including the aggregation or bucket prefix ThoughtSpot's
-> search result uses. In 256 of 265 columns it equals `name`; where it differs, the difference is
-> exactly that prefix — `name: YM` / `search_output_column: Month(YM)`,
+> search result uses. In **256 of 265** columns it equals `name`; where it differs, the difference is
+> exactly that prefix (figures and the full key-path inventory: [the census report](../../../docs/reviews/2026-07-30-tml-census.md)) — `name: YM` / `search_output_column: Month(YM)`,
 > `name: LINEAMOUNT` / `search_output_column: Total LINEAMOUNT`,
 > `name: row_count` / `search_output_column: Average num_rows`. A **formula** column is referenced
 > the same way, by the `formulas[].name` (not the `formulas[].id`): `name: prev_year` /
@@ -32,7 +32,8 @@
 > *this* build, but it is one cluster. `column_id` may be a legacy or version-gated spelling that
 > this cluster no longer emits. Treat `search_output_column` as the field to generate and to read;
 > if a second cluster produces `column_id`, tolerate it on input rather than assuming the census
-> was wrong. Re-running the census against a second cluster is tracked as census follow-up **T3**.
+> was wrong. Re-running the census against a second cluster is tracked as **BL-190** (census follow-up
+> **T3**, folded into that entry's scope).
 >
 > Note that `thoughtspot-sql-view-tml.md` lists "using `search_output_column`" as a *common import
 > error* — that is correct for `sql_view:` (whose field is `sql_output_column`) and does **not**
@@ -244,8 +245,9 @@ reject real ThoughtSpot output.
 
 **`search_output_column` format:**
 - For regular columns: the search-output label, e.g. `Revenue`, `Total Revenue`, `Month(YM)`.
-  Equal to `name` in 256 of 265 observed columns; where it differs, the difference is the
-  aggregation or bucket prefix. **Never contains `::`** (0 of 265)
+  Equal to `name` in **256 of 265** observed columns; where it differs, the difference is the
+  aggregation or bucket prefix. **Never contains `::`** (0 of 265). Corpus and per-column figures:
+  [the census report](../../../docs/reviews/2026-07-30-tml-census.md)
 - For formula columns: the `formulas[].name` value (e.g. `Revenue per Customer`) — **not** the
   `formulas[].id`
 

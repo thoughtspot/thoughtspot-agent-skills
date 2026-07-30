@@ -64,6 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
+| BL-191 | `dependency/mutate.py` reads Views through `column_id` (0/265 in the wild) — silent dangling refs | next dependency change |
 | BL-183 | Validator: dangling `[formula_X]` refs in `ts tml lint` + CA-JSON table refs | with BL-178 |
 | BL-174 | from-Databricks forward leg: `INNER` join type, dropped `format:`, stamped `cardinality:` | next DBX pass |
 | BL-180 | from-Snowflake translator ignores `\|\|`→`concat` and NULL-preserving division | next formula pass |
@@ -79,7 +80,7 @@ are roughly ordered by value÷effort.
 
 | Item | Summary | Target |
 |---|---|---|
-| BL-186 | Live-verify the OSSIE-mapping TML property questions — **V1 substantially settled, V2 half-settled, V3 confirmed; V2-residual + V4 remain** | next se-thoughtspot session |
+| BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | BL-189 | `ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard | next ts-cli change |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
 | BL-184 | Worked-example reproducibility test (ground truth is never re-run) | after BL-178 |
@@ -125,7 +126,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-177 | Reverse legs synthesise names that were already available | opportunistic |
-| BL-190 | Re-run the TML property census with `--fqn --include-obj-id` (evidence NM1/X8) | next census session |
+| BL-190 | Re-run the TML census: `--fqn --include-obj-id` (evidence NM1/X8) + a second cluster (T3) | next census session |
 | BL-173 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
 | BL-185 | Validator: `docs/backlog.md` priority-index consistency (number/tier/no-duplicate) | opportunistic |
 | BL-188 | Generate the persona/routing docs from `SKILL.md` frontmatter | opportunistic |
@@ -6337,6 +6338,9 @@ Step 1's keys make either choice cheap, so the question does not need answering 
 
 **Target:** opportunistic -- next validator sweep, or whenever a new skill is added and the
 persona entry has to be written by hand anyway.
+
+---
+
 ## BL-189 -- `ts tml export --parse` crashes on a null `edoc` (one inaccessible GUID kills the batch) `Tier 2`
 
 **Filed:** 2026-07-30.
@@ -6385,7 +6389,7 @@ parsed document plus one reported skip, and must not raise. Add a direct
 
 ---
 
-## BL-190 -- Re-run the TML property census with `--fqn --associated --include-obj-id` (evidence the identity rules) `Tier 3`
+## BL-190 -- Re-run the TML property census with `--fqn --associated --include-obj-id`, and against a second cluster (census T3) `Tier 3`
 
 **Filed:** 2026-07-30.
 **Source:** census follow-up **T2**. The 2026-07-30 census exported with plain
@@ -6425,3 +6429,67 @@ order.
 
 **Target:** opportunistic, next `se-thoughtspot` census session. Read-only throughout, so it is
 safe to run at any time.
+
+---
+
+## BL-191 -- `dependency/mutate.py` reads Views through `column_id`, a field real View TML does not have `Tier 1`
+
+**Filed:** 2026-07-30.
+**Source:** PR #420 review. That PR corrected `agents/shared/schemas/thoughtspot-view-tml.md` after a
+500-document TML property census found `view_columns[].column_id` in **0** of 265 real View columns
+(and `search_output_column` in **265** of 265). The PR's own report then claimed "no code depends on
+the old field", which the reviewer disproved: `dependency/mutate.py` depends on it in four places.
+**Affects:** `tools/ts-cli/ts_cli/dependency/mutate.py` (`_strip_view_columns` ~:226-235,
+`_strip_view_formulas` ~:238-251), `tools/ts-cli/tests/test_dependency_mutate.py` (~:287, ~:648).
+**Status:** OPEN -- **ready to fix.** Diagnosed and located; deliberately not fixed in #420, which
+was documentation-only.
+
+**The defect, in four parts.**
+
+1. **`_strip_view_columns`' prefix branch never fires.** It filters on
+   `any(col in c.get("column_id", "") for col in cols_to_remove)`. Real View columns have no
+   `column_id`, so `.get(…, "")` returns `""` and the branch is always false. Only the
+   `c.get("name") not in cols_to_remove` fallback does any work -- which is why the function
+   *appears* to behave: an exact display-name match still removes the column. It silently fails
+   whenever the name is decorated (see 3).
+2. **`_strip_view_formulas` is entirely dead in its second half, and that half is the dangerous
+   one.** It removes matching `formulas[]` entries, then tries to remove their surfacing columns
+   with `c.get("column_id") not in formula_ids_to_remove`. A real formula-backed View column is
+   bound by `search_output_column == formulas[].name` -- **not** `column_id == formulas[].id`
+   (census: `name: prev_year` / `search_output_column: prev_year` for
+   `formulas[].id == "formula_prev_year"`). So the formula is deleted and its `view_columns[]` entry
+   is left behind: **a dangling column reference**, which is exactly what the checklist item #420
+   added to `thoughtspot-view-tml.md` forbids. This is a correctness bug, not dead code.
+3. **The docstrings assert the disproved shape.** `_strip_view_columns` says "real view column_ids
+   are prefixed, e.g. `Orders_1::Revenue`". **0 of 265** real `search_output_column` values contain
+   `::`. Where the value differs from `name` at all (9 of 265) the difference is an aggregation or
+   bucket **decoration** -- `Total LINEAMOUNT`, `Month(YM)`, `Average num_rows` -- so a substring
+   match against a bare column name is the wrong matcher in a second way: it needs to match
+   *inside* the decoration.
+4. **The two View readers in this codebase disagree.** `migrate/rewrite.py` already models the
+   field correctly -- `_DECORATED_FIELDS = ("search_output_column",)` (`:59`) with the comment
+   "the column name is substituted INSIDE the token", and `rewrite_view` (`:216-235`) documents the
+   two-independent-fields model (`search_output_column` binds to the search result, `name` is the
+   alias dependents see). It was proven end to end on 2026-07-28. So the correct model is **already
+   in the repo**; `mutate.py` simply predates it and was never reconciled.
+
+**Tests are part of the defect, not the safety net.** `test_removes_formula_and_its_view_column`
+(~:287) and `test_view_doc` (~:648) both build fixtures shaped
+`{"name": …, "column_id": …}` -- a shape the census shows **does not occur**. They pass, and they
+pass *because* the fixture matches the wrong model. Any fix must re-fixture them from real exported
+shapes first, or the fix will look like a regression.
+
+**The fix.** Match on `search_output_column` (falling back to `name`), with decoration-aware
+containment rather than a bare substring test -- reusing `rewrite.py`'s `_DECORATED_FIELDS`
+treatment rather than inventing a second matcher. Bind formula-backed columns by
+`formulas[].name`, not `formulas[].id`. Correct both docstrings. Then re-fixture the two tests from
+census-observed shapes and add a case for the decorated form (`search_output_column: "Total X"`
+with `name: "X"`), which nothing currently covers.
+
+**Why Tier 1.** Unlike BL-189 (which fails loudly with a `TypeError`), this one **fails silently
+and leaves a broken object**: a `ts-dependency-manager` run over a View emits TML that imports and
+then carries a dangling column reference. Silent + destructive + already shipped puts it above the
+crash.
+
+**Target:** next `tools/ts-cli/` dependency-engine change. Needs a version bump in both
+`__init__.py` and `pyproject.toml` per `.claude/rules/ts-cli.md`.
