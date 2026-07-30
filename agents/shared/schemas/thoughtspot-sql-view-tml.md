@@ -57,7 +57,7 @@ sql_view:
     properties:
       column_type: ATTRIBUTE
       index_type: DEFAULT              # DEFAULT | DONT_INDEX
-      index_priority: 1               # optional — integer for search indexing priority
+      index_priority: 1               # optional — a NUMBER; TS exports it as 10.0, not 10
       synonyms:                        # optional — alternative names for search
       - "alt_name"
       is_hidden: false                 # optional — hides column from search bar
@@ -129,7 +129,7 @@ sql_view:
 | `properties.column_type` | Yes | `ATTRIBUTE` or `MEASURE` |
 | `properties.aggregation` | No | For MEASURE columns: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT`. Census-observed on SQL Views: `SUM` ×133, `AVERAGE` ×4 — nothing else |
 | `properties.index_type` | No | `DONT_INDEX` suppresses text search indexing. Omit for default (indexed). |
-| `properties.index_priority` | No | Integer — controls search indexing priority |
+| `properties.index_priority` | No | A **number**, not an integer — ThoughtSpot emits it non-integrally (`10.0`); see [thoughtspot-model-tml.md](thoughtspot-model-tml.md). Controls search indexing priority. Never observed on a SQL View column |
 | `properties.synonyms` | No | Array of alternative names for search. Must be under `properties:`. |
 | `properties.is_attribution_dimension` | No | Boolean — marks column as an attribution dimension |
 | `properties.is_additive` | No | Boolean — marks column as additive |

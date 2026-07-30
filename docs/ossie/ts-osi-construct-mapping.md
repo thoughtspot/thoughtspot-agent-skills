@@ -595,7 +595,7 @@ Mirrors the Databricks converter's stash
               "description": "Full documented TML set. The first six are the enum the Metric-level table maps to Ossie's required core aggregations; STD_DEVIATION and VARIANCE map to Ossie's STDDEV / VARIANCE, and NONE means the column is surfaced unaggregated."
             },
             "index_type": { "enum": ["DONT_INDEX", "DEFAULT", "PREFIX_ONLY", "PREFIX_AND_SUBSTRING", "PREFIX_AND_WORD_SUBSTRING"] },
-            "index_priority": { "type": "integer" },
+            "index_priority": { "type": "number", "description": "A number, not an integer — same reason as the FieldLevel entry: ThoughtSpot emits it non-integrally (10.0)." },
             "format_pattern": { "type": "string" },
             "currency_type": {
               "type": "object",
