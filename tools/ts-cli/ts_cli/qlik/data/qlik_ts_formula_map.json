@@ -1185,8 +1185,8 @@
     "Qlik Sense Formula": "Index(str, substr, n)",
     "Qlik Example": "Index(Email, '@')",
     "ThoughtSpot Equivalent": "strpos(col, substr)",
-    "ThoughtSpot Example": "strpos(product_code, 'AB')",
-    "Comments / Context": "ThoughtSpot strpos returns the position of the first occurrence (1-indexed, 0 when not found), which is exactly Qlik Index() with the default n=1; the CLI maps it. The nth-occurrence form (n ≥ 2) has no equivalent and fails loudly on arity rather than translating — the previous \"no substring-position function\" claim was wrong.",
+    "ThoughtSpot Example": "strpos(email, '@')",
+    "Comments / Context": "ThoughtSpot strpos returns the position of the first occurrence (1-indexed, 0 when not found), which is exactly Qlik Index() with its default n=1, so the CLI maps the 2-argument form. A third argument (nth occurrence, including a negative n counting from the end) has no ThoughtSpot equivalent and is flagged NEEDS REVIEW at translate time — a bare rename instead passed it through as strpos(col, sub, 2), a real function with the wrong arity, so the conversion reported success and the *import* failed later — live-confirmed 2026-07-30 on se-thoughtspot: Function strpos expects only 2 arguments. (error_code 14516), BL-171. The earlier \"no substring-position function\" claim was also wrong.",
     "status": "corrected"
   },
   {

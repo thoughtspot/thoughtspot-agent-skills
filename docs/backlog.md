@@ -5374,6 +5374,19 @@ The three qlik gates now stand as: names must exist (existence), markdown must e
 packaged JSON (transport), and `FUNCTION_MAP` must name the same function as the row
 (meaning). The third is the one this round proved was missing.
 
+**Re-review -- one breakage the round's own doc edit introduced.** The corrected `S12 Index`
+row claimed the nth-occurrence form "fails loudly on arity", but `index` was still a bare
+`FUNCTION_MAP` rename, so `Index(Email, '@', 2)` translated to a 3-argument
+`strpos(Email, '@', 2)` with `review=False` -- a *real* function with the wrong arity, which
+reads as a successful conversion and fails only at import. Exactly the unflagged
+valid-but-wrong class this round removed elsewhere, and there were no `Index` tests at all.
+`index` is now a `COMPOSITION_MAP` entry with a strict 2-argument check (2 args ->
+`strpos(col, sub)`; 3+ -> flagged NEEDS REVIEW naming the nth-occurrence gap), tested on both
+arms, with the doc row, the packaged JSON and coverage row `14f` matching. **Live-confirmed
+2026-07-30** that the wrong-arity form is an import-time failure, so the claim now quotes the
+platform verbatim: `Function strpos expects only 2 arguments.` (error_code 14516), with a
+2-argument control accepted in the same pass. **100 probes over five waves in total.**
+
 BL-170 live-proved that `trim`, `ltrim`, `rtrim`, `replace`, `starts_with` and `ends_with`
 are **not** ThoughtSpot formula functions. Five converter emitters still translate a source
 function to those bare names, so every affected formula **fails at TML import** with

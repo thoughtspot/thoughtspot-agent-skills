@@ -65,6 +65,23 @@ def _mid(args: list[str]) -> Optional[str]:
     return f"substr({args[0]}, {args[1]} - 1, {args[2]})"
 
 
+def _index(args: list[str]) -> Optional[str]:
+    """Qlik Index(str, substr[, n]) -> ThoughtSpot strpos — 2 arguments only.
+
+    `strpos(x, sub)` returns the position of the **first** occurrence, which is
+    exactly Qlik `Index()` with its default `n=1`. The **nth-occurrence** form
+    (`n` >= 2) has no ThoughtSpot equivalent at all, and a bare rename passed
+    the third argument straight through as `strpos(x, sub, 2)` — a real function
+    with the wrong arity, so the translation reported success and the *import*
+    failed later — live-confirmed on se-thoughtspot 2026-07-30: `Function strpos
+    expects only 2 arguments.` (error_code 14516). Returning None here flags it
+    at translate time instead, which is where a reviewer can act on it.
+    """
+    if len(args) != 2:
+        return None
+    return f"strpos({args[0]}, {args[1]})"
+
+
 def _weekday(args: list[str]) -> Optional[str]:
     """Qlik Weekday(date) -> ThoughtSpot day_number_of_week, origin shifted.
 
@@ -91,7 +108,13 @@ def _weekday(args: list[str]) -> Optional[str]:
 # Both entries exist because a bare rename is *valid and wrong* — an index or
 # origin differs between the two platforms, which imports cleanly and returns
 # the wrong answer. That is the failure mode BL-171 was filed against.
-COMPOSITION_MAP: dict[str, Any] = {"mid": _mid, "weekday": _weekday}
+# `index` is here for a third reason: an arity the ThoughtSpot target cannot
+# express. A bare rename let the extra argument through into a real function
+# with the wrong arity, which reads as a successful translation and fails at
+# import — unflagged, so nobody sees it until then.
+COMPOSITION_MAP: dict[str, Any] = {
+    "mid": _mid, "weekday": _weekday, "index": _index,
+}
 
 # Qlik function name (lowercase) -> ThoughtSpot formula function.
 # None means "no equivalent" -> flagged for manual review. A value that is a
@@ -110,7 +133,7 @@ FUNCTION_MAP: dict[str, Optional[str]] = {
     # string
     "left": "left", "right": "right", "mid": "mid", "len": "strlen",
     "upper": "upper", "lower": "lower", "trim": "trim", "ltrim": "ltrim",
-    "rtrim": "rtrim", "index": "strpos",
+    "rtrim": "rtrim", "index": "index",
     # Qlik Concat() aggregates values ACROSS rows (GROUP_CONCAT); ThoughtSpot
     # concat() joins within one row (S14) — mapping the name produced a
     # valid-but-wrong formula, so it is flagged instead (flag, don't downgrade).

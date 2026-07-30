@@ -109,6 +109,7 @@ def _assert_clean(out: str) -> None:
 _COMPOSITION_SAMPLE_ARGS = {
     "mid": ("Field", "2", "3"),
     "weekday": ("OrderDate",),
+    "index": ("Email", "'@'"),
 }
 
 
@@ -382,6 +383,24 @@ class TestIdentityMappedNames:
     def test_mid_nested_in_trim_keeps_the_offset(self):
         assert tr("Trim(Mid(Name, 4, 2))") == \
             "sql_string_op('TRIM({0})', substr(Name, 4 - 1, 2))"
+
+    def test_index_two_arg_becomes_strpos(self):
+        """Qlik Index(str, sub) with the default n=1 is exactly strpos."""
+        out, review, _reason = translate("Index(Email, '@')")
+        assert out == "strpos(Email, '@')"
+        assert review is False
+
+    def test_index_nth_occurrence_is_flagged_not_passed_through(self):
+        """Qlik Index(str, sub, n) has no ThoughtSpot equivalent. A bare rename
+        passed the third argument through as `strpos(Email, '@', 2)` — a real
+        function with the wrong arity — so the translation reported success and the
+        *import* failed later (live-confirmed 2026-07-30: `Function strpos
+        expects only 2 arguments.`). It must be flagged at translate time."""
+        out, review, reason = translate("Index(Email, '@', 2)")
+        assert review is True
+        assert "Index" in reason
+        assert out == "index(Email, '@', 2)"      # untouched, not downgraded
+        assert "strpos" not in out
 
 
 # ---------------------------------------------------------------------------
