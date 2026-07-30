@@ -52,18 +52,23 @@ ARCHIVE_REL = "docs/backlog-archive.md"
 # Two deliberately different patterns, because the two rules need different
 # precision. Do not unify them.
 #
-# HEADING_RE must capture the FULL id including any suffix. The archive really
-# does hold BL-003, BL-003b, BL-003c and BL-003-UMBRELLA as four separate items;
-# a `BL-\d+` capture prefix-matches all four to "BL-003" and manufactures a
-# duplicate that isn't there.
+# HEADING_RE must capture the FULL id including any suffix, but stop before
+# trailing punctuation so it doesn't fold "## BL-171:" into an id distinct from
+# "BL-171" (which would let a genuine duplicate escape Rule 1 entirely). The
+# archive really does hold BL-003, BL-003b, BL-003c and BL-003-UMBRELLA as four
+# separate items — a bare `BL-\d+` capture prefix-matches all four to "BL-003"
+# and manufactures a duplicate that isn't there — so the id chars must include
+# letters and hyphens, not just digits. `[A-Za-z0-9-]+` gets both properties:
+# it stays whole through a suffix, and it stops at the first space, colon,
+# period, or em dash that follows the id in a real heading.
 #
 # ANY_BL_RE stays loose (numeric only) because it drives Rule 2 over PROSE, where
-# `BL-\d+[A-Za-z0-9-]*` over-captures: `tools/ts-cli/ts_cli/dependency/mutate.py`
+# `BL-[A-Za-z0-9-]+` over-captures: `tools/ts-cli/ts_cli/dependency/mutate.py`
 # says "the pre-BL-083-PR2 behaviour", meaning BL-083's second PR, not an id. The
 # loose pattern resolves that to BL-083, which is defined, and passes. Since
 # defined_ids() applies this same loose pattern to the backlog text, both sides of
 # the Rule 2 comparison agree.
-HEADING_RE = re.compile(r"^## (BL-\S+)", re.M)
+HEADING_RE = re.compile(r"^## (BL-[A-Za-z0-9-]+)", re.M)
 ANY_BL_RE = re.compile(r"BL-\d+")
 
 

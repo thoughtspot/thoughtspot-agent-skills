@@ -96,3 +96,38 @@ def test_id_sectioned_in_both_live_and_archive_is_flagged(tmp_path):
     _commit_all(tmp_path)
 
     assert cbi.cross_file_duplicates(tmp_path) == ["BL-002"]
+
+
+def test_suffixed_ids_stay_distinct(tmp_path):
+    """BL-003, BL-003b, BL-003c and BL-003-UMBRELLA are four separate archived items.
+    A `BL-\\d+` pattern prefix-matches all four to "BL-003" and manufactures a
+    duplicate. This test fails against that regex and is the regression guard for it.
+    """
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", CLEAN_BACKLOG)
+    _write(
+        tmp_path,
+        "docs/backlog-archive.md",
+        "# Archive\n\n"
+        "## BL-003 -- Umbrella parent\n\nDone.\n\n"
+        "## BL-003b -- Second part\n\nDone.\n\n"
+        "## BL-003c -- Third part\n\nDone.\n\n"
+        "## BL-003-UMBRELLA -- The umbrella\n\nDone.\n",
+    )
+    _commit_all(tmp_path)
+
+    assert cbi.section_headings(
+        cbi._read(tmp_path, "docs/backlog-archive.md")
+    ) == ["BL-003", "BL-003b", "BL-003c", "BL-003-UMBRELLA"]
+    assert cbi.duplicate_headings(tmp_path) == []
+
+
+def test_heading_id_stops_before_trailing_punctuation(tmp_path):
+    """A heading written as "## BL-171: Something" must resolve to the id "BL-171",
+    not "BL-171:" — otherwise a genuine duplicate written with adjacent punctuation
+    would evade Rule 1 entirely (the id would never collide with a plain "BL-171")."""
+    _init_repo(tmp_path)
+    _write(tmp_path, "docs/backlog.md", "# Backlog\n\n## BL-171: Something\n\nDone.\n")
+    _commit_all(tmp_path)
+
+    assert cbi.section_headings(cbi._read(tmp_path, "docs/backlog.md")) == ["BL-171"]
