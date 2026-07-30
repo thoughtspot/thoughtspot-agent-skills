@@ -20,6 +20,37 @@ SKILL.md for that runtime.
 | [Query](#query) | Query and explore data through ThoughtSpot's semantic layer | 1 |
 | [Recipes](#recipes) | Pre-built analytical capabilities for ThoughtSpot | 2 |
 
+### Which skill do I need?
+
+Start from the job, not the skill name. Roles are a hint, not a restriction.
+For why each skill exists and when to reach for it, see
+**[skill personas](docs/skill-personas.md)**.
+
+| I need to... | Who usually asks | Start with |
+|---|---|---|
+| Get a customer off Tableau, Power BI, Qlik or Sisense without rebuilding by hand | SE, PS | [`ts-convert-from-tableau`](agents/cli/ts-convert-from-tableau/SKILL.md), [`ts-convert-from-powerbi`](agents/cli/ts-convert-from-powerbi/SKILL.md), [`ts-convert-from-qlik`](agents/cli/ts-convert-from-qlik/SKILL.md), [`ts-convert-from-sisense`](agents/cli/ts-convert-from-sisense/SKILL.md) |
+| Migrate a customer off Looker's semantic layer | SE, PS | [`ts-convert-from-looker`](agents/cli/ts-convert-from-looker/SKILL.md) |
+| Work with a customer standardised on Snowflake or Databricks semantics | SE, PM | [`ts-convert-from-snowflake-sv`](agents/cli/ts-convert-from-snowflake-sv/SKILL.md), [`ts-convert-from-databricks-mv`](agents/cli/ts-convert-from-databricks-mv/SKILL.md) |
+| Answer "does ThoughtSpot lock our semantics in?" | SE, PM | [`ts-convert-to-snowflake-sv`](agents/cli/ts-convert-to-snowflake-sv/SKILL.md), [`ts-convert-to-databricks-mv`](agents/cli/ts-convert-to-databricks-mv/SKILL.md) |
+| Work out why Spotter answers a question badly | CSM, CSA, SE | [`ts-object-model-coach`](agents/cli/ts-object-model-coach/SKILL.md) |
+| Inherit an unfamiliar environment and find what is broken | CSA, PS, SRE | [`ts-audit`](agents/cli/ts-audit/SKILL.md) |
+| See a model's structure, or share it with someone who has no login | SE, CSA, PS | [`ts-object-model-erd`](agents/cli/ts-object-model-erd/SKILL.md) |
+| Fix slow Liveboards | SRE, CSA, SE | [`ts-object-model-aggregates`](agents/cli/ts-object-model-aggregates/SKILL.md) |
+| Serve many tenants from one governed Model | PS, SRE | [`ts-publish-orgs`](agents/cli/ts-publish-orgs/SKILL.md), [`ts-object-model-alias`](agents/cli/ts-object-model-alias/SKILL.md) |
+| Consolidate tenants that each grew their own copies | PS, SRE | [`ts-migrate-orgs`](agents/cli/ts-migrate-orgs/SKILL.md) |
+| Hide sensitive columns from a group, tenant or audience | PS, SRE, SE | [`ts-security-columns`](agents/cli/ts-security-columns/SKILL.md) |
+| Remove or repoint a column without breaking Liveboards | CSA, PS | [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) |
+| Share one person's formula with everyone | CSA, CSM | [`ts-object-answer-promote`](agents/cli/ts-object-answer-promote/SKILL.md) |
+| Pull rows from a Model, or see the SQL behind a disputed number | SE, PM | [`ts-object-model-agentql-query`](agents/cli/ts-object-model-agentql-query/SKILL.md) |
+| Build a POC when there is no usable data yet | SE, PS | [`ts-load-source-data`](agents/cli/ts-load-source-data/SKILL.md) |
+| Stand up a multi-Org environment to test against, or reproduce a bug | PS, SRE, PM | [`ts-setup-tenancy`](agents/cli/ts-setup-tenancy/SKILL.md) |
+| Handle weekday-only date maths, or durations that should read as `HH:MM:SS` | SE, CSA | [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md), [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) |
+| Fix users in different timezones seeing different days | CSA, SRE | [`ts-variable-timezone`](agents/cli/ts-variable-timezone/SKILL.md) |
+
+Setting up for the first time? Start with
+[`ts-profile-thoughtspot`](agents/cli/ts-profile-thoughtspot/SKILL.md), then the
+profile skill for whichever warehouse or BI source you are working with.
+
 <a id="setup"></a>
 <details open>
 <summary><strong>Setup</strong> — Credentials, infrastructure, data loading, and tenancy configuration</summary>

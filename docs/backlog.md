@@ -125,6 +125,7 @@ are roughly ordered by value÷effort.
 | BL-177 | Reverse legs synthesise names that were already available | opportunistic |
 | BL-173 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
 | BL-185 | Validator: `docs/backlog.md` priority-index consistency (number/tier/no-duplicate) | opportunistic |
+| BL-188 | Generate the persona/routing docs from `SKILL.md` frontmatter | opportunistic |
 | BL-167 | Record (or change) the to-direction's never-hard-error-on-loss posture | opportunistic |
 | BL-169 | Vendor-neutral TPC-DS fixture corpus (Phase-3-coupled) | Phase-3 test PR |
 | BL-034 | tools/ & ts-cli quality polish | 2026-10-31 |
@@ -6169,3 +6170,63 @@ not repo work. This entry covers only the four verifications, which *are* ours t
 
 **Target:** next `se-thoughtspot` session -- V1 alone is a 15-minute task and can ride along with
 any unrelated live check.
+
+---
+
+## BL-188 -- Generate the persona/routing docs from `SKILL.md` frontmatter `Tier 3`
+
+**Filed:** 2026-07-30.
+**Source:** the field-enablement AMA prep (session scheduled 2026-08-06). Writing
+`docs/skill-personas.md` and the README "Which skill do I need?" table surfaced that the
+"why does this exist / who is it for / when do I reach for it" layer existed **nowhere** in the
+repo: a grep for `persona` / `business problem` / `audience` across all `SKILL.md` files, `docs/`
+and `CLAUDE.md` returned zero hits, and only 5 of 28 CLI skills carried a `When to use` section
+(`ts-audit`, and four others; the nine `ts-convert-*` skills encode direction-and-fit in their
+`description:` frontmatter instead).
+**Affects:** `docs/skill-personas.md`, `README.md` (the routing table), a new
+`tools/validate/generate_skill_personas.py`, `scripts/pre-commit.sh`, and the frontmatter of
+every `agents/*/*/SKILL.md`.
+**Status:** OPEN.
+
+**Why the hand-written version is a stopgap.** Both surfaces added on this branch are
+hand-maintained prose *about* skills, kept in files that are not those skills. `check_consistency.py`
+verifies only that each skill *name* appears somewhere in the README skills table -- it says nothing
+about whether the prose next to that name is still true. So the failure mode is the same one
+`generate_parity.py` and `generate_quality_gates.py` were built to remove: a describing document
+drifts from the thing it describes, silently, and the drift is only found by a human reading both.
+A skill can be renamed, re-scoped, or have its coverage limits change with nothing failing.
+
+The reason it was written by hand anyway: the alternative at the time was a ~32-file PR (23 CLI
+`SKILL.md` bodies plus 5 mirrors, each requiring a version bump and changelog row per
+`.claude/rules/versioning.md`, plus mirror `synced-from` marker updates) for a docs-only change,
+and it needed to exist before the 2026-08-06 enablement session. The generated version is the
+same content with the source of truth moved to where it cannot drift.
+
+**Approach:**
+
+1. Add two optional frontmatter keys to `SKILL.md`: `personas:` (a list of role slugs) and
+   `use-when:` (a short list of jobs-to-be-done). Keep them **out** of `description:` --
+   that field drives skill triggering and is already budgeted by
+   `check_skill_context_cost.py`; adding business framing to it dilutes match accuracy and
+   costs context on every session that loads the skill.
+2. Write `tools/validate/generate_skill_personas.py`, following the
+   `generate_parity.py` / `generate_quality_gates.py` pattern including the `--check` mode, to
+   emit both the README routing table (between HTML comment markers) and the per-skill entries in
+   `docs/skill-personas.md`.
+3. Wire `--check` into `scripts/pre-commit.sh` and `.github/workflows/validate.yml` gated on
+   `SKILL.md` / `README.md` / `docs/skill-personas.md` changes, so adding a skill without persona
+   metadata fails the same way a missing coverage matrix does.
+4. Backfill the two keys across all 30 skills, taking the values from the prose already written
+   in `docs/skill-personas.md` on this branch. This is the version-bump-heavy step; do it in one
+   PR so the churn is a single reviewable pass rather than spread across unrelated changes.
+5. Once generated, delete the "Keeping this page honest" caveat at the foot of
+   `docs/skill-personas.md`, which exists only to flag the hand-maintained state.
+
+**Decide when picking this up:** whether the per-skill "Why this exists" prose should also render
+*into* each `SKILL.md` (co-located, discoverable when browsing one skill folder on GitHub) or stay
+only in the aggregate page. Rendering into `SKILL.md` is the friendlier read for a contributor who
+opens a single skill, but it puts human-audience prose into the file every agent session loads.
+Step 1's keys make either choice cheap, so the question does not need answering before step 1.
+
+**Target:** opportunistic -- next validator sweep, or whenever a new skill is added and the
+persona entry has to be written by hand anyway.
