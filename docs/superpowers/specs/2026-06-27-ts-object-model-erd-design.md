@@ -95,7 +95,7 @@ The single interface both sides depend on. `render.py` consumes exactly this; `p
     "from":   str, "to": str, "name": str,
     "card":   "MANY_TO_ONE" | "ONE_TO_MANY" | "ONE_TO_ONE" | "MANY_TO_MANY",
     "origin": "table" | "model",       // where the join is defined (governance signal)
-    "type":   "INNER" | "LEFT_OUTER" | "RIGHT_OUTER" | "FULL_OUTER"
+    "type":   "INNER" | "LEFT_OUTER" | "RIGHT_OUTER" | "OUTER"   // corrected 2026-07-30: FULL_OUTER is not a ThoughtSpot value in any TML context; OUTER *is* the full outer join
   }],
   "formulas": { "<name>": "<expr>" },
   "findings": [{                        // OPTIONAL — empty unless populated by ts-audit

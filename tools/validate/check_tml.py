@@ -50,12 +50,39 @@ VALID_AGGREGATIONS = {
     "COUNT_DISTINCT", "NONE", "STD_DEVIATION", "VARIANCE",
 }
 
-# Valid join type values for model TML inline joins (model_tables[].joins[].type).
-# Note: FULL_OUTER is NOT valid here — ThoughtSpot raises:
-#   "Invalid value FULL_OUTER of field worksheet->model_tables->joins->type.
+# Valid join type values — the SAME four in every TML context: model TML inline joins
+# (model_tables[].joins[].type), Table TML joins_with[].type, and SQL View joins[].type.
+# OUTER *is* ThoughtSpot's full outer join (ThoughtSpot domain review, 2026-07-30).
+# FULL_OUTER is not a ThoughtSpot value anywhere and is rejected with error 14528:
+#   "Invalid value FULL_OUTER of field <ctx>->type.
 #    Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER"
-# Table TML joins_with[].type does allow FULL_OUTER; this set only applies to model TML.
-VALID_MODEL_JOIN_TYPES = {"INNER", "LEFT_OUTER", "RIGHT_OUTER", "OUTER"}
+# Live-verified in the model and table contexts on se-thoughtspot 2026-07-30 (the other
+# four passed as controls in the same documents). The SQL View context was NOT probed —
+# its vocabulary comes from ThoughtSpot's published TML docs plus those two siblings, and
+# check_tml has no sql_view validator anyway. This comment previously claimed Table TML
+# joins_with[].type accepted FULL_OUTER; that was wrong, so the table context was left
+# ungated and would emit TML that fails at import.
+VALID_JOIN_TYPES = {"INNER", "LEFT_OUTER", "RIGHT_OUTER", "OUTER"}
+
+
+def _validate_join_type(join_type, context: str) -> list[str]:
+    """Validate one join `type` value. `context` is a human-readable path for the message."""
+    if not join_type or not isinstance(join_type, str):
+        return []
+    if join_type.upper() == "FULL_OUTER":
+        return [
+            f"{context} type='FULL_OUTER' — ThoughtSpot uses 'OUTER' for full outer "
+            "joins in every TML context (Model, Table and SQL View). FULL_OUTER is "
+            "rejected with error 14528: 'Invalid value FULL_OUTER ... Allowed values "
+            "are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER'. OUTER is the full outer "
+            "join, so this is a rename and loses nothing."
+        ]
+    if join_type.upper() not in VALID_JOIN_TYPES:
+        return [
+            f"{context} has invalid type='{join_type}' — must be one of "
+            f"{sorted(VALID_JOIN_TYPES)}"
+        ]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +217,17 @@ def validate_table_tml(data: dict) -> list[str]:
             "with no joins. An empty list may cause import errors on some versions."
         )
 
+    # joins_with[].type — the same four values as model TML; FULL_OUTER is rejected
+    # here too (live-verified 2026-07-30; this context was previously ungated because
+    # the reference wrongly documented FULL_OUTER as valid).
+    for j, join in enumerate(joins_with or []):
+        if not isinstance(join, dict):
+            continue
+        j_name = join.get("name") or j
+        errors.extend(_validate_join_type(
+            join.get("type"), f"table.joins_with['{j_name}']"
+        ))
+
     return errors
 
 
@@ -256,25 +294,13 @@ def validate_model_tml(data: dict) -> list[str]:
                 "(\"{table} does not exist in schema\"). Omit 'id' or set it identical to 'name'."
             )
 
-        # Validate inline joins[].type — FULL_OUTER is invalid in model TML
+        # Validate inline joins[].type — FULL_OUTER is invalid in every context
         for j, join in enumerate(entry.get("joins") or []):
             if not isinstance(join, dict):
                 continue
-            join_type = join.get("type")
-            if join_type and isinstance(join_type, str):
-                if join_type.upper() == "FULL_OUTER":
-                    errors.append(
-                        f"model_tables['{t_name}'].joins[{j}] type='FULL_OUTER' — "
-                        "ThoughtSpot model TML uses 'OUTER' for full outer joins. "
-                        "FULL_OUTER is rejected: 'Invalid value FULL_OUTER of field "
-                        "worksheet->model_tables->joins->type'."
-                    )
-                elif join_type.upper() not in VALID_MODEL_JOIN_TYPES:
-                    errors.append(
-                        f"model_tables['{t_name}'].joins[{j}] has invalid "
-                        f"type='{join_type}' — must be one of "
-                        f"{sorted(VALID_MODEL_JOIN_TYPES)}"
-                    )
+            errors.extend(_validate_join_type(
+                join.get("type"), f"model_tables['{t_name}'].joins[{j}]"
+            ))
 
     columns = inner.get("columns") or []
     formulas = inner.get("formulas") or []

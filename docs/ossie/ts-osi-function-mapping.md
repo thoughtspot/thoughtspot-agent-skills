@@ -18,11 +18,11 @@ in the ThoughtSpot skills repo, cited below by section name as the *formula refe
 the *Snowflake formula mapping*. They record ThoughtSpot's formula language as verified
 against live instances and override any other description of it.
 
-This is the companion to the construct-mapping document, which stops at the boundary where
+This is the companion to the [construct-mapping document](ts-osi-construct-mapping.md), which stops at the boundary where
 an expression string begins. That document owns identifier rewriting, dialect selection,
-the `custom_extensions` payload and the structural asks **A1**–**A8**; this one owns
-everything inside `expression`. Rules introduced here are numbered **E1**–**E12** and new
-upstream asks **A9**–**A12**, continuing that document's sequence.
+the `custom_extensions` payload and the structural asks [**A1**–**A8**](ts-osi-construct-mapping.md#open-questions-and-upstream-asks); this one owns
+everything inside `expression`. Rules introduced here are numbered [**E1**](#how-to-read-the-tables)–[**E12**](#runtime-display-and-calendar-concepts) and new
+upstream asks [**A9**–**A12**](#open-questions-and-upstream-asks), continuing that document's sequence.
 
 ---
 
@@ -31,7 +31,7 @@ upstream asks **A9**–**A12**, continuing that document's sequence.
 Every row's ThoughtSpot cell is written in ThoughtSpot formula syntax: column references
 are `[TABLE::Column]`, and the spaces around parentheses and commas are the canonical form
 (`concat ( [a] , [b] )`). Reference rewriting is not shown per row — it is uniform and
-lives in the construct-mapping document (**ID3**).
+lives in the construct-mapping document ([**ID3**](ts-osi-construct-mapping.md#identifiers--the-second-non-obvious-thing)).
 
 - **E1 — one row per construct.** Every named function, operator and syntactic construct
   the specification declares supported appears in exactly one row. Two categories are
@@ -82,7 +82,7 @@ lives in the construct-mapping document (**ID3**).
 regular expressions, case-insensitive string handling, and **whitespace/substring editing
 (`TRIM`/`LTRIM`/`RTRIM`/`REPLACE`)** — and there is exactly one `unmappable` construct,
 `EXISTS_IN()`, which is unmappable because the specification does not define it (see ask
-**A9**).
+[**A9**](#open-questions-and-upstream-asks)).
 
 > **Revised 2026-07-29 (BL-170).** `TRIM` and `REPLACE` moved `direct` → `passthrough`
 > after live verification on se-thoughtspot showed that ThoughtSpot has no native `trim`
@@ -102,7 +102,7 @@ Source tables: `core-spec/expression_language.md:157-163` (core), `:169-174` (st
 | `SUM(expr)` | direct | `sum ( [x] )` | |
 | `COUNT(expr)` | direct | `count ( [x] )` | Counts non-null values on both sides. |
 | `COUNT(*)` | direct | `count ( [T::key] )` | ThoughtSpot has no `count(*)`; the row count is `count()` over a column known to be non-null. The converter uses the dataset's `primary_key` when the model declares one, and raises an issue rather than guessing a column when it does not. |
-| `COUNT(DISTINCT expr)` | direct | `unique count ( [x] )` | **A space, not an underscore.** `count_distinct(...)` is rejected by the formula parser. See ask **A9** on `DISTINCT` as a general modifier. |
+| `COUNT(DISTINCT expr)` | direct | `unique count ( [x] )` | **A space, not an underscore.** `count_distinct(...)` is rejected by the formula parser. See ask [**A9**](#open-questions-and-upstream-asks) on `DISTINCT` as a general modifier. |
 | `AVG(expr)` | direct | `average ( [x] )` | |
 | `MIN(expr)` | direct | `min ( [x] )` | ThoughtSpot `min` is **aggregate-only** — it never compares two columns row-wise. Scalar two-argument minima are `LEAST`, a separate row. |
 | `MAX(expr)` | direct | `max ( [x] )` | Aggregate-only, as `MIN`. |
@@ -129,7 +129,7 @@ better than pass-through in this direction: ThoughtSpot has a native `*_if` fami
 **Decomposability** (`:236-241`) has no ThoughtSpot analogue to map. ThoughtSpot decides
 re-aggregation from the formula shape and the query grain rather than from a declared
 category, so the classification is informative here — but it is exactly the information a
-multi-stage aggregation would need, and it is worth preserving. See ask **A12**.
+multi-stage aggregation would need, and it is worth preserving. See ask [**A12**](#open-questions-and-upstream-asks).
 
 ---
 
@@ -153,9 +153,9 @@ Source tables: `core-spec/expression_language.md:251-253` (current), `:259-266`
 | `HOUR(timestamp_expr)` | direct | `hour_of_day ( [t] )` | The function is `hour_of_day`, not `hour`. |
 | `MINUTE(timestamp_expr)` | passthrough | `sql_int_op ( "MINUTE({0})" , [t] )` | **Variant: `sql_int_op`.** No native minute-of-hour extractor; `add_minutes` and `diff_minutes` exist but neither extracts. |
 | `SECOND(timestamp_expr)` | passthrough | `sql_int_op ( "SECOND({0})" , [t] )` | **Variant: `sql_int_op`.** As `MINUTE`. |
-| `EXTRACT(part FROM date_expr)` | direct | per-part — see the date-part table below | Rewritten to the part's own ThoughtSpot function; there is no generic extractor. 8 of the 11 specified parts are `direct`; `MINUTE`, `SECOND` and `MILLISECOND` fall back to `sql_int_op` (**E3**). |
+| `EXTRACT(part FROM date_expr)` | direct | per-part — see the date-part table below | Rewritten to the part's own ThoughtSpot function; there is no generic extractor. 8 of the 11 specified parts are `direct`; `MINUTE`, `SECOND` and `MILLISECOND` fall back to `sql_int_op` ([**E3**](#how-to-read-the-tables)). |
 | `DATE_PART('part', date_expr)` | direct | per-part — see the date-part table below | Identical treatment to `EXTRACT`; the two spellings collapse onto one rewrite (`:276-279`). |
-| `DATE_TRUNC(part, date_expr)` | direct | per-precision — see the truncation table below | **ThoughtSpot has no `date_trunc`.** The `start_of_*` family covers 7 of the 8 specified precisions; `'second'` falls back to `sql_date_time_op` (**E3**). |
+| `DATE_TRUNC(part, date_expr)` | direct | per-precision — see the truncation table below | **ThoughtSpot has no `date_trunc`.** The `start_of_*` family covers 7 of the 8 specified precisions; `'second'` falls back to `sql_date_time_op` ([**E3**](#how-to-read-the-tables)). |
 | `DATEADD(part, amount, date_expr)` | direct | per-part `add_*` — see the arithmetic table below | **Argument order differs:** ThoughtSpot is `add_days ( [d] , n )`, the specification is `DATEADD(day, n, d)`. Every specified part is reachable, two by arithmetic on a coarser unit. |
 | `DATEDIFF(part, start_date, end_date)` | direct | per-part `diff_*` — see the arithmetic table below | **Argument order is reversed:** ThoughtSpot is `diff_days ( [end] , [start] )` — end first. Getting this wrong silently negates every duration in the model. |
 | `DATE '2024-01-15'` (typed literal) | direct | `to_date ( '2024-01-15' , 'yyyy-MM-dd' )` | A bare `'2024-01-15'` in a ThoughtSpot formula is parsed as *arithmetic* (`2024 − 1 − 15`), so the literal must always be wrapped. `to_date` takes exactly two arguments, so the converter supplies the ISO format model. |
@@ -178,7 +178,7 @@ Specified vocabulary: `core-spec/expression_language.md:284-286`.
 | `MONTH` | `month_number ( [d] )` | direct |
 | `WEEK` | `week_number_of_year ( [d] )` | direct |
 | `DAY` | `day ( [d] )` | direct |
-| `DAYOFWEEK` | `day_number_of_week ( [d] )` | direct — ThoughtSpot numbers 1 = Monday … 7 = Sunday. The specification does not fix a base, and engines disagree (Snowflake and BigQuery start at Sunday), so the converter records the base in the issue log rather than assuming parity. See ask **A11**. |
+| `DAYOFWEEK` | `day_number_of_week ( [d] )` | direct — ThoughtSpot numbers 1 = Monday … 7 = Sunday. The specification does not fix a base, and engines disagree (Snowflake and BigQuery start at Sunday), so the converter records the base in the issue log rather than assuming parity. See ask [**A11**](#open-questions-and-upstream-asks). |
 | `DAYOFYEAR` | `day_number_of_year ( [d] )` | direct |
 | `HOUR` | `hour_of_day ( [d] )` | direct |
 | `MINUTE` | `sql_int_op ( "MINUTE({0})" , [d] )` | passthrough |
@@ -187,7 +187,7 @@ Specified vocabulary: `core-spec/expression_language.md:284-286`.
 
 Note the asymmetry in the specification's own function tables: `DAYOFYEAR` has a
 first-class function (`:263`) but `DAYOFWEEK` and `WEEK` exist only as `EXTRACT`/`DATE_PART`
-parts (`:284-285`). ThoughtSpot has functions for all three. See ask **A11**.
+parts (`:284-285`). ThoughtSpot has functions for all three. See ask [**A11**](#open-questions-and-upstream-asks).
 
 ### `DATE_TRUNC` precisions *(not counted — arguments)*
 
@@ -363,19 +363,19 @@ Two consequences run through every row:
 | Ossie | Class | ThoughtSpot | Notes |
 |---|---|---|---|
 | `ROW_NUMBER() OVER (...)` | passthrough | `sql_int_aggregate_op ( "ROW_NUMBER() OVER (PARTITION BY {0} ORDER BY {1})" , [dim] , [ord] )` | **Variant: `sql_int_aggregate_op`.** ThoughtSpot's `rank` is competition rank, not a row number, so it is not a substitute. Wrap the result in `group_aggregate ( ... , query_groups ( ) + { [dim] } , query_filters ( ) )` so the partition column is guaranteed into the GROUP BY. |
-| `RANK() OVER (...)` | direct | `rank ( sum ( [m] ) , 'desc' )` | Exact for the global, `ORDER BY`-only form the specification's own tool-mapping table shows (`:740`). ThoughtSpot's `rank` is always global and takes its order from the aggregate, so **an explicit `PARTITION BY` is not expressible** and falls back to `sql_int_aggregate_op ( "RANK() OVER (PARTITION BY {0} ORDER BY SUM({1}) DESC)" , ... )` (**E3**). |
+| `RANK() OVER (...)` | direct | `rank ( sum ( [m] ) , 'desc' )` | Exact for the global, `ORDER BY`-only form the specification's own tool-mapping table shows (`:740`). ThoughtSpot's `rank` is always global and takes its order from the aggregate, so **an explicit `PARTITION BY` is not expressible** and falls back to `sql_int_aggregate_op ( "RANK() OVER (PARTITION BY {0} ORDER BY SUM({1}) DESC)" , ... )` ([**E3**](#how-to-read-the-tables)). |
 | `DENSE_RANK() OVER (...)` | passthrough | `sql_int_aggregate_op ( "dense_rank() over (order by sum({0}) desc)" , [m] )` | **Variant: `sql_int_aggregate_op`.** ThoughtSpot's `rank` skips ranks after a tie; dense ranking has no native form. |
 | `NTILE(n) OVER (...)` | passthrough | `sql_int_aggregate_op ( "NTILE(4) OVER (ORDER BY SUM({0}))" , [m] )` | **Variant: `sql_int_aggregate_op`.** `n` is a literal, baked into the template. |
 | `PERCENT_RANK() OVER (...)` | direct | `1 - rank_percentile ( sum ( [m] ) , 'asc' ) / 100` | ThoughtSpot's `rank_percentile` is documented as `(1.0 - PERCENT_RANK() OVER (ORDER BY ...)) * 100`, so the inverse is exact. **Two adjustments are both required:** the scale (ThoughtSpot 0–100, specification 0–1) and the inversion. Dropping either produces a plausible-looking column that is wrong everywhere. |
 | `CUME_DIST() OVER (...)` | passthrough | `sql_number_aggregate_op ( "CUME_DIST() OVER (ORDER BY SUM({0}))" , [m] )` | **Variant: `sql_number_aggregate_op`.** `rank_percentile` is *not* a substitute: `PERCENT_RANK` divides by *n − 1* and starts at 0, `CUME_DIST` divides by *n* and ends at 1. They agree on no row of a tie-free window except the last. |
-| `LAG(expr, offset, default) OVER (...)` | direct | `moving_sum ( [m] , n , -n , [ord] )` | The verified single-row-back idiom: a frame of `n PRECEDING` to `n PRECEDING`. **The `default` argument has no equivalent** — ThoughtSpot yields null outside the frame — so a `LAG` with a non-null `default` raises an issue. Subject to **E5** and **E6**. |
+| `LAG(expr, offset, default) OVER (...)` | direct | `moving_sum ( [m] , n , -n , [ord] )` | The verified single-row-back idiom: a frame of `n PRECEDING` to `n PRECEDING`. **The `default` argument has no equivalent** — ThoughtSpot yields null outside the frame — so a `LAG` with a non-null `default` raises an issue. Subject to [**E5**](#window-functions) and [**E6**](#window-functions). |
 | `LEAD(expr, offset, default) OVER (...)` | direct | `moving_sum ( [m] , -n , n , [ord] )` | Mirror of `LAG` — ThoughtSpot's start/end arguments use opposite sign conventions, so a forward offset is a negative start. Same `default` limitation. |
-| `FIRST_VALUE(expr) OVER (...)` | direct | `first_value ( sum ( [m] ) , query_groups ( ) , { [T::date] } )` | Exact when the `ORDER BY` is a date column and the partition is the query grain — the semi-additive snapshot case this specification's users write it for. ThoughtSpot's `first_value` is a semi-additive function over a date axis, **not** a general window function, so any other `OVER` shape falls back to `sql_number_aggregate_op ( "FIRST_VALUE({0}) OVER (...)" , ... )` (**E3**). The `{ }` argument forces `>-` block-scalar YAML. |
+| `FIRST_VALUE(expr) OVER (...)` | direct | `first_value ( sum ( [m] ) , query_groups ( ) , { [T::date] } )` | Exact when the `ORDER BY` is a date column and the partition is the query grain — the semi-additive snapshot case this specification's users write it for. ThoughtSpot's `first_value` is a semi-additive function over a date axis, **not** a general window function, so any other `OVER` shape falls back to `sql_number_aggregate_op ( "FIRST_VALUE({0}) OVER (...)" , ... )` ([**E3**](#how-to-read-the-tables)). The `{ }` argument forces `>-` block-scalar YAML. |
 | `LAST_VALUE(expr) OVER (...)` | direct | `last_value ( sum ( [m] ) , query_groups ( ) , { [T::date] } )` | Same conditions and same fallback as `FIRST_VALUE`. |
 | `NTH_VALUE(expr, n) OVER (...)` | passthrough | `sql_number_aggregate_op ( "NTH_VALUE({0}, 2) OVER (ORDER BY {1})" , [m] , [ord] )` | **Variant: `sql_number_aggregate_op`.** ThoughtSpot's semi-additive functions reach only the first and last values of the axis. |
-| `OVER (PARTITION BY ... ORDER BY ...)` clause | direct | structural rewrite — no `OVER` keyword | `PARTITION BY attrs` becomes the `group_aggregate` grouping argument `{ [T::a] , [T::b] }`; `ORDER BY` becomes the window function's trailing attribute arguments. An empty `OVER ()` is grouping `{ }`. **The reverse direction is where this gets lossy** — ThoughtSpot's window functions add the query's own dimensions to the partition dynamically, which the specification has no way to express (ask **A10**). |
-| Frame clause — `ROWS BETWEEN ...` / `RANGE BETWEEN ...` | direct | `moving_*` start/end arguments, or `cumulative_*` | `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` → `cumulative_*`. Bounded `ROWS` frames → `moving_*` with `n PRECEDING` → positive `n`, `CURRENT ROW` → `0`, `n FOLLOWING` → negative `-n`. **`RANGE` frames fall back to `sql_number_aggregate_op`** (the same variant the window-aggregation row below falls back to)**:** ThoughtSpot's frames are row-positional, not value-ranged — live-verified on gapped dates, `moving_*` counts surviving rows regardless of the calendar distance between them — so a `RANGE` frame over a gapped sort column would silently return different numbers (**E3**). |
-| Window aggregation — `AGG(expr) OVER (...)` | direct | `cumulative_*` / `moving_*` / `group_*` by frame shape | The specification allows every aggregate as a window function (`:585`). ThoughtSpot's window family covers `SUM`, `AVG`, `MIN` and `MAX` (as `*_sum`, `*_average`, `*_max`, `*_min`); a windowed `COUNT`, `MEDIAN`, `STDDEV` or `VARIANCE` has a partitioned form via `group_count` / `group_stddev` / `group_variance` but no ordered/framed form, and falls back to `sql_number_aggregate_op`. Subject to **E5**. |
+| `OVER (PARTITION BY ... ORDER BY ...)` clause | direct | structural rewrite — no `OVER` keyword | `PARTITION BY attrs` becomes the `group_aggregate` grouping argument `{ [T::a] , [T::b] }`; `ORDER BY` becomes the window function's trailing attribute arguments. An empty `OVER ()` is grouping `{ }`. **The reverse direction is where this gets lossy** — ThoughtSpot's window functions add the query's own dimensions to the partition dynamically, which the specification has no way to express (ask [**A10**](#open-questions-and-upstream-asks)). |
+| Frame clause — `ROWS BETWEEN ...` / `RANGE BETWEEN ...` | direct | `moving_*` start/end arguments, or `cumulative_*` | `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` → `cumulative_*`. Bounded `ROWS` frames → `moving_*` with `n PRECEDING` → positive `n`, `CURRENT ROW` → `0`, `n FOLLOWING` → negative `-n`. **`RANGE` frames fall back to `sql_number_aggregate_op`** (the same variant the window-aggregation row below falls back to)**:** ThoughtSpot's frames are row-positional, not value-ranged — live-verified on gapped dates, `moving_*` counts surviving rows regardless of the calendar distance between them — so a `RANGE` frame over a gapped sort column would silently return different numbers ([**E3**](#how-to-read-the-tables)). |
+| Window aggregation — `AGG(expr) OVER (...)` | direct | `cumulative_*` / `moving_*` / `group_*` by frame shape | The specification allows every aggregate as a window function (`:585`). ThoughtSpot's window family covers `SUM`, `AVG`, `MIN` and `MAX` (as `*_sum`, `*_average`, `*_max`, `*_min`); a windowed `COUNT`, `MEDIAN`, `STDDEV` or `VARIANCE` has a partitioned form via `group_count` / `group_stddev` / `group_variance` but no ordered/framed form, and falls back to `sql_number_aggregate_op`. Subject to [**E5**](#window-functions). |
 
 ---
 
@@ -385,7 +385,7 @@ Source: `core-spec/expression_language.md:608-620` (`CAST`), `:625` (`TRY_CAST`)
 
 | Ossie | Class | ThoughtSpot | Notes |
 |---|---|---|---|
-| `CAST(expression AS target_type)` | direct | per-type — see the target-type table below | 5 of the 8 specified target types are `direct`; the other three — `BOOLEAN`, `TIMESTAMP` and `TIME` — fall back to a pass-through (**E3**). |
+| `CAST(expression AS target_type)` | direct | per-type — see the target-type table below | 5 of the 8 specified target types are `direct`; the other three — `BOOLEAN`, `TIMESTAMP` and `TIME` — fall back to a pass-through ([**E3**](#how-to-read-the-tables)). |
 | `TRY_CAST(expression AS target_type)` | direct | the same functions as `CAST` | ThoughtSpot's `to_integer` / `to_double` / `to_string` **already return NULL on failure**, which is exactly `TRY_CAST` semantics — so the two rows share a mapping and it is `CAST`, not `TRY_CAST`, that is the imprecise one. A strict `CAST` that must *error* rather than null is not expressible; the converter records that in the issue log when the source distinguishes them. |
 
 ### `CAST` target types *(not counted — arguments)*
@@ -431,7 +431,7 @@ modifier), `:401` (`||`), `:428-429` (`LIKE`/`ILIKE`), `:500-513` (`CASE`), `:53
 | `x BETWEEN a AND b` | direct | `[x] between [a] and [b]` | Inclusive on both sides. |
 | `x IN (a, b, c)` | direct | `[x] in { 'a' , 'b' , 'c' }` | Literal lists only on both sides (`:113`) — no subqueries. The curly-brace delimiter is **confirmed**, live-verified 2026-07-29 on se-thoughtspot (BL-170): the round-parenthesis form is rejected with `Expecting one of the valid keywords, such as, "ts_var", "{"`. It forces `>-` block-scalar YAML. |
 | `x NOT IN (a, b, c)` | direct | `not ( [x] in { 'a' , 'b' , 'c' } )` | Emitted as a negated `in` rather than a `not in` keyword — the bare keyword form is not reliably accepted. |
-| `str LIKE pattern` | direct | prefix / suffix / `contains` composition by pattern shape | `'foo%'` → `strpos ( [s] , 'foo' ) = 1`; `'%foo'` → `substr ( [s] , strlen ( [s] ) - strlen ( 'foo' ) , strlen ( 'foo' ) ) = 'foo'`; `'%foo%'` → `contains ( [s] , 'foo' )`. **Only `contains` is a native function** — `starts_with` and `ends_with` do not exist (live-verified 2026-07-29, se-thoughtspot — BL-170), so the first two shapes are compositions; see the `STARTSWITH`/`ENDSWITH` rows. These three shapes are the overwhelming majority of `LIKE` use. Interior wildcards and any `_` single-character wildcard have no native form and fall back to `sql_bool_op ( "{0} LIKE {1}" , [s] , [pattern] )` (**E3**). |
+| `str LIKE pattern` | direct | prefix / suffix / `contains` composition by pattern shape | `'foo%'` → `strpos ( [s] , 'foo' ) = 1`; `'%foo'` → `substr ( [s] , strlen ( [s] ) - strlen ( 'foo' ) , strlen ( 'foo' ) ) = 'foo'`; `'%foo%'` → `contains ( [s] , 'foo' )`. **Only `contains` is a native function** — `starts_with` and `ends_with` do not exist (live-verified 2026-07-29, se-thoughtspot — BL-170), so the first two shapes are compositions; see the `STARTSWITH`/`ENDSWITH` rows. These three shapes are the overwhelming majority of `LIKE` use. Interior wildcards and any `_` single-character wildcard have no native form and fall back to `sql_bool_op ( "{0} LIKE {1}" , [s] , [pattern] )` ([**E3**](#how-to-read-the-tables)). |
 | `str ILIKE pattern` | passthrough | `sql_bool_op ( "{0} ILIKE {1}" , [s] , [pattern] )` | **Variant: `sql_bool_op`.** Case-insensitive matching has no native form, and the usual workaround — fold both sides with `lower` — is itself a pass-through, so there is nothing to compose from. |
 | `expr IS NULL` | direct | `isnull ( [x] )` | |
 | `expr IS NOT NULL` | direct | `isnotnull ( [x] )` | Native, so not composed as `not ( isnull ( ) )`. |
@@ -443,8 +443,8 @@ modifier), `:401` (`||`), `:428-429` (`LIKE`/`ILIKE`), `:500-513` (`CASE`), `:53
 | Parentheses — expression grouping | direct | `( ... )` | Precedence is the standard SQL ordering on the Ossie side (`:139-147`). The converter emits explicit parentheses around every rewritten sub-expression rather than relying on the two languages agreeing about precedence — cheap, and it removes a whole class of silent arithmetic errors. |
 | `TRUE` / `FALSE` (boolean literals) | direct | `true` / `false` | A bare BOOL *column* reference used as a condition still needs its parentheses: `if ( [T::flag] ) then ...` parses, `if [T::flag] then ...` does not. |
 | `DISTINCT` aggregate modifier | passthrough | `sql_number_aggregate_op ( "SUM(DISTINCT {0})" , [x] )` | **Variant: `sql_number_aggregate_op`.** The specification allows `DISTINCT` on `SUM` as well as `COUNT` (`:219-225`). ThoughtSpot has exactly one distinct-aware aggregate — `unique count` — which is `COUNT(DISTINCT)` and has its own row. Every other `DISTINCT` aggregate is a pass-through. |
-| Column / metric reference — `field`, `dataset.field` | direct | `[TABLE::Column]`, or `[Formula Name]` for a metric | Always rewritten from resolved metadata, never passed through textually. The rewrite, the case-sensitivity rules and the display-name-versus-identifier problem are the construct-mapping document's **ID1**–**ID4**. |
-| `EXISTS_IN()` | **unmappable** | — issue; construct preserved in `custom_extensions` | Named at `:131` as the sanctioned way to filter on a subquery, but **defined nowhere in the specification** — no signature, no argument order, no semantics, and absent from every function table. Even given a signature, ThoughtSpot's nearest capability is a `sql_bool_op` subquery template that requires a fully-qualified warehouse table name, which is not derivable from an Ossie expression. See ask **A9**. |
+| Column / metric reference — `field`, `dataset.field` | direct | `[TABLE::Column]`, or `[Formula Name]` for a metric | Always rewritten from resolved metadata, never passed through textually. The rewrite, the case-sensitivity rules and the display-name-versus-identifier problem are the construct-mapping document's [**ID1**](ts-osi-construct-mapping.md#identifiers--the-second-non-obvious-thing)–[**ID4**](ts-osi-construct-mapping.md#identifiers--the-second-non-obvious-thing). |
+| `EXISTS_IN()` | **unmappable** | — issue; construct preserved in `custom_extensions` | Named at `:131` as the sanctioned way to filter on a subquery, but **defined nowhere in the specification** — no signature, no argument order, no semantics, and absent from every function table. Even given a signature, ThoughtSpot's nearest capability is a `sql_bool_op` subquery template that requires a fully-qualified warehouse table name, which is not derivable from an Ossie expression. See ask [**A9**](#open-questions-and-upstream-asks). |
 
 ---
 
@@ -514,9 +514,9 @@ declared untranslatable without checking the composition first.
 | `moving_sum` / `_average` / `_max` / `_min` `( [m] , s , e , [attr] )` | `AGG(m) OVER (ORDER BY attr ROWS BETWEEN s PRECEDING AND e FOLLOWING)` | via Ossie composition — sign conventions convert per the frame-clause row above. ANSI `ROWS` frames are row-positional, which matches ThoughtSpot's live-verified behaviour exactly, so this direction is clean. |
 | `cumulative_sum` / `_average` / `_max` / `_min` `( [m] , [attr] )` | `AGG(m) OVER (ORDER BY attr ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` | via Ossie composition **for the frame** — but see the dynamic-partition row below. |
 | `group_aggregate ( agg ( [m] ) , { [a] , [b] } , query_filters ( ) )` and the `group_*` shorthands | `AGG(m) OVER (PARTITION BY a, b)` | via Ossie composition — fixed-grain grouping is an ordinary `PARTITION BY`. `{ }` is `OVER ()`; `query_groups()` needs no window at all and becomes a plain `AGG(m)`. |
-| `group_aggregate ( ... , query_groups ( ) - { [a] } , ... )`, and the dynamic partition every `cumulative_*` / `moving_*` carries implicitly | — | **`custom_extensions` + issue.** "All the query's dimensions except *a*" has no expression in the specification. Snowflake's `PARTITION BY EXCLUDING` exists precisely for this, and without an equivalent the same model returns different numbers depending on which dimensions a user adds. This is the largest single fidelity gap in this direction — see ask **A10**. |
-| `group_aggregate` with a non-`query_filters()` filter argument — `{ }`, `{ [c] = 'v' }`, `query_filters ( ) - { [c] }` | — | **`custom_extensions` + issue.** Filter scoping inside an expression, which the specification excludes from expressions and redirects to a filter property it does not define (`:130`) — the construct-mapping document's ask **A3**. |
-| `last_value` / `first_value` / `last_value_in_period` / `first_value_in_period` | `LAST_VALUE(m) OVER (PARTITION BY ... ORDER BY d ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)` gets the snapshot; the re-aggregation at query grain does not | **`custom_extensions` + issue.** The window expression is only half of it: semi-additivity is a declaration about *how the measure may be rolled up*, not an expression. Snowflake carries it as `non_additive_dimensions` and Databricks has its own form; the specification has neither. See ask **A12**. |
+| `group_aggregate ( ... , query_groups ( ) - { [a] } , ... )`, and the dynamic partition every `cumulative_*` / `moving_*` carries implicitly | — | **`custom_extensions` + issue.** "All the query's dimensions except *a*" has no expression in the specification. Snowflake's `PARTITION BY EXCLUDING` exists precisely for this, and without an equivalent the same model returns different numbers depending on which dimensions a user adds. This is the largest single fidelity gap in this direction — see ask [**A10**](#open-questions-and-upstream-asks). |
+| `group_aggregate` with a non-`query_filters()` filter argument — `{ }`, `{ [c] = 'v' }`, `query_filters ( ) - { [c] }` | — | **`custom_extensions` + issue.** Filter scoping inside an expression, which the specification excludes from expressions and redirects to a filter property it does not define (`:130`) — the construct-mapping document's ask [**A3**](ts-osi-construct-mapping.md#open-questions-and-upstream-asks). |
+| `last_value` / `first_value` / `last_value_in_period` / `first_value_in_period` | `LAST_VALUE(m) OVER (PARTITION BY ... ORDER BY d ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)` gets the snapshot; the re-aggregation at query grain does not | **`custom_extensions` + issue.** The window expression is only half of it: semi-additivity is a declaration about *how the measure may be rolled up*, not an expression. Snowflake carries it as `non_additive_dimensions` and Databricks has its own form; the specification has neither. See ask [**A12**](#open-questions-and-upstream-asks). |
 | `sql_string_op` / `sql_int_op` / `sql_double_op` / `sql_bool_op` / `sql_date_op` / `sql_date_time_op` and the four `*_aggregate_op` variants | a `dialects[]` entry for the connection's dialect, with `{0}`, `{1}` … substituted for the resolved column references | via Ossie composition — **the dialect mechanism is the right home for these** (`:648-659`). A pass-through *is* dialect-specific raw SQL, which is what a non-Ossie dialect entry is for. Two caveats: no `ANSI_SQL` entry is emitted alongside, because the template's portability is exactly what is unknown; and the connection's dialect is not always derivable from TML, in which case the converter raises an issue rather than guessing a dialect label. |
 
 ### Runtime, display and calendar concepts
@@ -524,14 +524,14 @@ declared untranslatable without checking the composition first.
 | ThoughtSpot | Ossie expression | Disposition |
 |---|---|---|
 | Runtime parameter reference — `[Parameter Name]` | — | **`custom_extensions` + issue.** Resolved per-query from user input; the definitions are stashed at model level. The construct-mapping document owns this rule; it is repeated here because the *expression* is the thing that stops being portable. |
-| `ts_username`, `ts_groups`, `ts_groups_int`, `ts_org`, `ts_email_domain`, `ts_var ( ... )` | — | **`custom_extensions` + issue.** Signed-in-user identity resolved at query time. An interchange document that carried them would be describing an access-control decision, not semantics — the same reasoning as the construct-mapping document's **NM2**. |
+| `ts_username`, `ts_groups`, `ts_groups_int`, `ts_org`, `ts_email_domain`, `ts_var ( ... )` | — | **`custom_extensions` + issue.** Signed-in-user identity resolved at query time. An interchange document that carried them would be describing an access-control decision, not semantics — the same reasoning as the construct-mapping document's [**NM2**](ts-osi-construct-mapping.md#explicit-non-mappings). |
 | `concat ( "{caption}" , "text" , "{/caption}" , [url] )` | — | **`custom_extensions` + issue.** Hyperlink display markup, not computation. `concat` itself maps; the markup tokens inside the string literals do not, and a consumer that rendered them literally would show the tags to users. |
-| Fiscal-calendar variants — `year ( [d] , fiscal )`, `quarter_number ( [d] , fiscal )`, `diff_months ( [e] , [s] , fiscal )` and the rest of the `fiscal` family | — | **`custom_extensions` + issue.** The specification has no fiscal-calendar concept, and the fiscal year's start month is a *model-level* fact that no per-expression rewrite can recover. Emitting the calendar-year function instead would be silently wrong for every organisation whose year does not start in January. See ask **A11**. The *model-level* half does have a TML home — `properties.calendar` on the date column, naming a Connection-scoped custom calendar — so the loss is two-part: the `fiscal` argument inside the expression, and the calendar definition that argument resolves against. The construct-mapping document's field-level `calendar` row and open verification **V1** own that half. |
+| Fiscal-calendar variants — `year ( [d] , fiscal )`, `quarter_number ( [d] , fiscal )`, `diff_months ( [e] , [s] , fiscal )` and the rest of the `fiscal` family | — | **`custom_extensions` + issue.** The specification has no fiscal-calendar concept, and the fiscal year's start month is a *model-level* fact that no per-expression rewrite can recover. Emitting the calendar-year function instead would be silently wrong for every organisation whose year does not start in January. See ask [**A11**](#open-questions-and-upstream-asks). The *model-level* half does have a TML home — `properties.calendar` on the date column, naming a Connection-scoped custom calendar — so the loss is two-part: the `fiscal` argument inside the expression, and the calendar definition that argument resolves against. The construct-mapping document's field-level `calendar` row and open verification [**V1**](ts-osi-construct-mapping.md#thoughtspot-side-open-verifications-not-upstream-asks) own that half. |
 | `month ( [d] )`, `year_name ( [d] )`, `day_of_week ( [d] )` (name-returning) | `TO_CHAR(d, 'MONTH')`, `TO_CHAR(d, 'YYYY')`, `TO_CHAR(d, 'DAY')` | via Ossie composition — but `TO_CHAR` is EXPERIMENTAL (`:356`) and the name tokens are locale-dependent by the specification's own admission (`:385-387`), so an issue records the locale exposure. |
 | `month_number_of_quarter ( [d] )` | `MOD(MONTH(d) - 1, 3) + 1` | via Ossie composition |
 | `day_number_of_quarter ( [d] )` | `DATEDIFF(day, DATE_TRUNC('quarter', d), d) + 1` | via Ossie composition |
 | `week_number_of_month` / `week_number_of_quarter` | `DATEDIFF(week, DATE_TRUNC('month'/'quarter', d), d) + 1` | via Ossie composition — correct only if both sides agree on the week start day, which the specification fixes as Monday (`:300`) while ThoughtSpot's is an instance setting. Issue raised when they cannot be shown to agree. |
-| `is_weekend ( [d] )` | `DATE_PART('dayofweek', d) IN (...)` | via Ossie composition — the member list depends on the `DAYOFWEEK` base, which the specification does not fix (see ask **A11**), so the converter emits the list for the connection's engine and records the base in the issue. |
+| `is_weekend ( [d] )` | `DATE_PART('dayofweek', d) IN (...)` | via Ossie composition — the member list depends on the `DAYOFWEEK` base, which the specification does not fix (see ask [**A11**](#open-questions-and-upstream-asks)), so the converter emits the list for the connection's engine and records the base in the issue. |
 | `start_of_hour` / `start_of_min` / `date` / `time` | `DATE_TRUNC('hour', d)` / `DATE_TRUNC('minute', d)` / `DATE_TRUNC('day', d)` / `CAST(d AS TIME)` | via Ossie composition |
 | `greatest` / `least` | `GREATEST` / `LEAST` | via Ossie composition — **never `MAX`/`MIN`**, which would turn a row-wise attribute into an aggregate measure. |
 
@@ -539,7 +539,7 @@ declared untranslatable without checking the composition first.
   above whose disposition is `custom_extensions + issue`, the expression is not simply
   discarded: the verbatim ThoughtSpot formula goes into a `THOUGHTSPOT` dialect entry so the
   round trip is lossless, and no `ANSI_SQL` sibling is emitted because there is none. This
-  depends entirely on the construct-mapping document's blocking ask **A1** — until
+  depends entirely on the construct-mapping document's blocking ask [**A1**](ts-osi-construct-mapping.md#open-questions-and-upstream-asks) — until
   `THOUGHTSPOT` is in the `Dialect` enum and in `SKIP_SQL_VALIDATION`, such a document fails
   schema validation, so **every row in this table is blocked on A1**, not just the
   parameter row.
@@ -584,7 +584,7 @@ same pass.
 
 ## Open questions and upstream asks
 
-Continuing the construct-mapping document's sequence, which ends at **A8**.
+Continuing the construct-mapping document's sequence, which ends at [**A8**](ts-osi-construct-mapping.md#open-questions-and-upstream-asks).
 
 As in that document, each ask carries the **upstream venue** it should be raised in — mapped against apache/ossie's existing discussion index on 2026-07-30, so an ask lands on a live thread rather than as a duplicate ticket.
 
@@ -641,7 +641,7 @@ metrics:
 ```
 
 ThoughtSpot (Model `formulas[]`; each needs a `columns[]` entry referencing it by
-`formula_id`, per the construct-mapping document's **R3**):
+`formula_id`, per the construct-mapping document's [**R3**](ts-osi-construct-mapping.md#reverse-direction-rules-ossie--tml)):
 
 ```yaml
 formulas:
