@@ -206,8 +206,10 @@ def main() -> int:
         problems.append("Duplicate BL section heading(s) — Rule 1:")
         problems.extend(f"  ✗ {where} has {n} sections" for where, n in dups)
         problems.append("  Two branches likely each claimed the next free number.")
-        problems.append("  Keep the number for whichever item is already cited")
-        problems.append("  elsewhere in the repo; renumber the other one.")
+        problems.append("  Citation count decides: keep the number for whichever item")
+        problems.append("  is already cited elsewhere in the repo; renumber the other.")
+        problems.append("  If neither (or both) are cited, keep main's and renumber")
+        problems.append("  the incoming one.")
 
     both = cross_file_duplicates(root)
     if both:
@@ -253,8 +255,12 @@ def main() -> int:
     if problems:
         print("\n" + "\n".join(problems))
         print()
-        print("For docs/backlog.md, never resolve a conflict by accepting both sides")
-        print("(see CLAUDE.md). Take main's side, then renumber the incoming item.")
+        # Generic on purpose — this prints for a Rule 2 or Rule 3 hit too, where a
+        # specific renumbering directive wouldn't apply. The citation-count decision
+        # procedure itself lives in the Rule 1 block above (where it's relevant) and
+        # in CLAUDE.md (in full); this is a pointer, not a restatement.
+        print("For docs/backlog.md, never resolve a conflict by accepting both sides —")
+        print("see CLAUDE.md ('Resolving conflicts...') for the full decision procedure.")
         return 1
 
     print(
