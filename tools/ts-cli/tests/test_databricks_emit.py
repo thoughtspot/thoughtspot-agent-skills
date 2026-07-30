@@ -44,11 +44,59 @@ class TestJoins:
             {"table": {"name": "DIM", "db": "c", "schema": "s", "db_table": "dim", "columns": []}}]
         from ts_cli.databricks.mv_emit import build_joins
         joins, dot = build_joins(model, tables, source_table="FACT")
+        # BL-174 defect 3 (fidelity report F5) — `rely: {at_most_one_match: true}`
+        # and `cardinality: many_to_one` are equivalent, `many_to_one` is the MV
+        # schema's own default (databricks-metric-view.md:436-437) and `rely:`
+        # works on ALL runtimes while `cardinality:` is 18.1+ only. Emitting both
+        # silently raised the MV's Databricks Runtime floor from 17.3+ to 18.1+,
+        # so the redundant key is no longer written.
         assert joins == [{"name": "dim", "source": "c.s.dim",
                           "on": "source.DIM_ID = dim.ID",
-                          "rely": {"at_most_one_match": True},
-                          "cardinality": "many_to_one"}]
+                          "rely": {"at_most_one_match": True}}]
         assert dot == {"FACT": "source", "DIM": "dim"}
+
+    def test_one_to_many_join_emits_cardinality_and_no_rely(self):
+        # A ONE_TO_MANY model join previously emitted `rely: {at_most_one_match:
+        # true}` and NO `cardinality:`, i.e. the MV asserted the OPPOSITE
+        # cardinality to the model's — an at-most-one-match constraint on a join
+        # the model declares as one-to-many. `one_to_many` is not the schema
+        # default, so it is the one case that must be written explicitly
+        # (and legitimately gates Runtime 18.1+).
+        model = {"name": "M",
+            "model_tables": [
+                {"name": "FACT", "joins": [
+                    {"with": "DIM", "on": "[FACT::DIM_ID] = [DIM::ID]",
+                     "type": "LEFT_OUTER", "cardinality": "ONE_TO_MANY"}]},
+                {"name": "DIM"}],
+            "columns": [], "formulas": []}
+        tables = [
+            {"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact", "columns": []}},
+            {"table": {"name": "DIM", "db": "c", "schema": "s", "db_table": "dim", "columns": []}}]
+        from ts_cli.databricks.mv_emit import build_joins
+        joins, _ = build_joins(model, tables, source_table="FACT")
+        assert joins == [{"name": "dim", "source": "c.s.dim",
+                          "on": "source.DIM_ID = dim.ID",
+                          "cardinality": "one_to_many"}]
+
+    def test_one_to_one_join_keeps_the_rely_form(self):
+        # ONE_TO_ONE also means "at most one match" (census-observed x3 in real
+        # Models — thoughtspot-model-tml.md:125), so it takes the runtime-agnostic
+        # `rely:` form, not a `cardinality:` key the MV vocabulary lacks.
+        model = {"name": "M",
+            "model_tables": [
+                {"name": "FACT", "joins": [
+                    {"with": "DIM", "on": "[FACT::DIM_ID] = [DIM::ID]",
+                     "type": "LEFT_OUTER", "cardinality": "ONE_TO_ONE"}]},
+                {"name": "DIM"}],
+            "columns": [], "formulas": []}
+        tables = [
+            {"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact", "columns": []}},
+            {"table": {"name": "DIM", "db": "c", "schema": "s", "db_table": "dim", "columns": []}}]
+        from ts_cli.databricks.mv_emit import build_joins
+        joins, _ = build_joins(model, tables, source_table="FACT")
+        assert joins == [{"name": "dim", "source": "c.s.dim",
+                          "on": "source.DIM_ID = dim.ID",
+                          "rely": {"at_most_one_match": True}}]
 
     def test_two_level_nested_join(self):
         model = {"name": "M",
@@ -74,7 +122,6 @@ class TestJoins:
             {"name": "dim", "source": "c.s.dim",
              "on": "source.DIM_ID = dim.ID",
              "rely": {"at_most_one_match": True},
-             "cardinality": "many_to_one",
              "joins": [
                  {"name": "subdim", "source": "c.s.subdim",
                   "on": "dim.SUBDIM_ID = subdim.ID",
@@ -117,8 +164,7 @@ class TestJoins:
         joins, dot = build_joins(model, tables, source_table="FACT")
         assert joins == [{"name": "dim", "source": "c.s.dim",
                           "on": "source.DIM_ID = dim.ID",
-                          "rely": {"at_most_one_match": True},
-                          "cardinality": "many_to_one"}]
+                          "rely": {"at_most_one_match": True}}]
         assert dot == {"FACT": "source", "DIM": "dim"}
 
 
@@ -976,8 +1022,10 @@ class TestBuildMetricView:
             "joins": [{
                 "name": "dim", "source": "cat.sch.dim_tbl",
                 "on": "source.DIM_ID = dim.ID",
+                # BL-174 defect 3: `rely:` only — the equivalent `cardinality:
+                # many_to_one` is the MV default and is 18.1+-gated, so emitting
+                # it as well raised the runtime floor for nothing.
                 "rely": {"at_most_one_match": True},
-                "cardinality": "many_to_one",
             }],
             "dimensions": [
                 {"name": "region", "expr": "dim.REGION", "display_name": "Region"},

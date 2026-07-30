@@ -23,8 +23,9 @@ for the full bidirectional translation reference.
 | 3 | Join `on:` (inline equality or comparison, `AND`-joined conjuncts) | Dot-path condition in the nested join's `on:` | `_translate_join_on` routes through the general `emit_sql` expression emitter, so `=`/`!=`/`<`/`<=`/`>`/`>=` conjuncts joined with `AND` all translate — not just equality |
 | 4 | Join `using:` (column list) | Dot-path equality generated from the shared column names | |
 | 5 | `referencing_join` | Resolved via the source table's `joins_with[]` `on:` clause | Falls back to `joins[]` defensively; raises if not found |
-| 6 | Join `cardinality: MANY_TO_ONE` | `cardinality: many_to_one` on the MV join node | `ONE_TO_MANY` and unset both fall through with no `cardinality:` key |
+| 6 | Join `cardinality:` | `MANY_TO_ONE` / `ONE_TO_ONE` / unset → `rely: { at_most_one_match: true }`; `ONE_TO_MANY` / `MANY_TO_MANY` → `cardinality: one_to_many` | Never both keys on one join (BL-174). `rely:` works on every Runtime while `cardinality:` is 18.1+ only, and `many_to_one` is the MV's own default — so emitting `cardinality: many_to_one` beside `rely:` (the behaviour until v1.4.0) raised the DDL's Runtime floor for nothing. `ONE_TO_MANY` conversely must **not** carry `rely:`, which asserts the opposite of what the model declares |
 | 7 | Multi-fact models | One independent MV per detected fact table | `detect_fact_tables` — join-root tables carrying ≥1 MEASURE column |
+| 66 | Join `type:` (`INNER` / `LEFT_OUTER` / `RIGHT_OUTER` / `OUTER`) | Dropped — no MV join-type field | Databricks fixes star-schema joins as `LEFT OUTER` ([Joins in metric views](https://docs.databricks.com/aws/en/business-semantics/metric-views/joins)), so a `LEFT_OUTER` model join is lossless; an `INNER`/`RIGHT_OUTER`/`OUTER` one is **not** reproducible and its row-retention semantics change in the MV |
 
 ### Columns and Column Metadata
 

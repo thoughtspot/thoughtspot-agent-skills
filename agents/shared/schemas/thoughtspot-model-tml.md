@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-30: live-verified on se-thoughtspot — columns[].description confirmed on formula-backed entries, no data_type on formulas[]/columns[], and the single join-type vocabulary INNER/LEFT_OUTER/RIGHT_OUTER/OUTER confirmed in both Model and Table contexts; earlier 2026-07-30: added columns[] properties.calendar / index_priority / is_attribution_dimension, widened index_type + currency_type from a product-docs sweep; also 2026-07-30, from a 500-document TML property census on se-thoughtspot covering 143 Models: added action_object_associations[] and columns[].properties.value_casing, extended geo_config with the country boolean and custom-map roles, rewrote the calendar value vocabulary, recorded index_priority as a non-integral number, loosened the joins[] either/or framing for 12 observed hybrids, and raised the lesson_plans evidence to 8 Models; prior: validated in 2026-07-11 external sweep) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-30: live-verified on se-thoughtspot — columns[].description confirmed on formula-backed entries, no data_type on formulas[]/columns[], and the single join-type vocabulary INNER/LEFT_OUTER/RIGHT_OUTER/OUTER confirmed in both Model and Table contexts; earlier 2026-07-30: added columns[] properties.calendar / index_priority / is_attribution_dimension, widened index_type + currency_type from a product-docs sweep; also 2026-07-30, from a 500-document TML property census on se-thoughtspot covering 143 Models: added action_object_associations[] and columns[].properties.value_casing, extended geo_config with the country boolean and custom-map roles, rewrote the calendar value vocabulary, recorded index_priority as a non-integral number, loosened the joins[] either/or framing for 12 observed hybrids, and raised the lesson_plans evidence to 8 Models; prior: validated in 2026-07-11 external sweep; 2026-07-31: live-verified (VALIDATE_ONLY on se-thoughtspot) that an inline model join REQUIRES type and cardinality together -- "both  type and cardinality should be defined" -- and re-confirmed LEFT_OUTER accepted on a real Model's inline joins (BL-174)) -->
 
 # ThoughtSpot Model TML — Construction Reference
 
@@ -122,7 +122,21 @@ Each `joins[]` entry has `with` (always required) plus **one of two forms**:
 | `with` | Yes | Must equal the `name:` of the target `model_tables[]` entry exactly (case-sensitive) |
 | `on` | Yes | Quote with `'on':` — `on` is a YAML reserved word. Format: `[FROM::fk] = [TO::pk]`. Supports range/inequality operators — see Range Joins below. |
 | `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, or `OUTER`. **`OUTER` *is* the full outer join** — it is ThoughtSpot's name for it, not a narrower join type (per ThoughtSpot domain review, 2026-07-30). `FULL_OUTER` is **not** a ThoughtSpot value and is rejected: "Invalid value FULL_OUTER … Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER". So mapping a source `FULL OUTER` to `OUTER` is a **rename, not a downgrade** — no semantics are lost. Table `joins_with[].type` accepts exactly the same four and rejects `FULL_OUTER` identically (both live-probed — see the note below); SQL View `joins[].type` is documented with the same four but was **not** probed, so treat it as strongly inferred rather than verified. |
-| `cardinality` | Yes | `MANY_TO_ONE` for most fact-to-dimension joins. Census-observed vocabulary across 233 real inline joins: `MANY_TO_ONE` ×223, `ONE_TO_MANY` ×11, `ONE_TO_ONE` ×3 — **`MANY_TO_MANY` never**. |
+| `cardinality` | Yes | `MANY_TO_ONE` for most fact-to-dimension joins. Census-observed vocabulary across 233 real inline joins: `MANY_TO_ONE` ×223, `ONE_TO_MANY` ×11, `ONE_TO_ONE` ×3 — **`MANY_TO_MANY` never**. "Required" is **live-verified, not inferred** — see the note below. |
+
+**`type` and `cardinality` are required *together* on an inline join — live-verified
+2026-07-31 on `se-thoughtspot`.** Dropping `cardinality` from four inline joins of a real
+Model and re-submitting with `import_policy: VALIDATE_ONLY` fails, one finding per join:
+
+```
+model->model_tables(3rd)->joins(2nd) both  type and cardinality should be defined.
+```
+
+(`status_code: ERROR`; the same document validates `OK` with the field present, and `OK`
+again with every `type` flipped from `INNER` to `LEFT_OUTER`.) So a generator can never
+"omit `cardinality` and let the platform default" — there is no default to fall back to,
+and a converter whose source format has no cardinality concept must still choose one
+(BL-174 defect 3, where the redundancy had to be resolved on the *emitting* side instead).
 
 **Hybrid joins — the two scenarios are not strictly exclusive (2026-07-30 census).** Across 493
 real `joins[]` entries in 143 Models:

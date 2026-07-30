@@ -49,8 +49,9 @@ Classic DBR clusters ship both packages — no install needed there.
 **Runtime requirement.** Metric Views are GA — no Preview channel needed. The
 `display_name`/`comment`/`synonyms` metadata this pipeline always emits needs Databricks
 Runtime **17.3+** on the warehouse/cluster that will run the generated DDL; a model with an
-explicit `MANY_TO_ONE` join or a period-over-period window measure (prior month/quarter/year)
-needs **18.1+** instead (join `cardinality:` / window `offset:`). See the tiered table in
+explicit `ONE_TO_MANY` join or a period-over-period window measure (prior month/quarter/year)
+needs **18.1+** instead (join `cardinality:` / window `offset:`). A `MANY_TO_ONE` join stays
+at 17.3+ — it emits the runtime-agnostic `rely: { at_most_one_match: true }` (BL-174). See the tiered table in
 [../shared/schemas/databricks-metric-view.md](../shared/schemas/databricks-metric-view.md).
 
 ---

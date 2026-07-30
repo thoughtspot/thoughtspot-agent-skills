@@ -58,6 +58,36 @@ def _translate_join_on(on_str: str, source_table: str, alias_by_table: dict[str,
     return emit_sql(ast, resolver)
 
 
+# ThoughtSpot cardinalities under which a source row may match MORE than one
+# joined row. The observed inline-join vocabulary is MANY_TO_ONE / ONE_TO_MANY /
+# ONE_TO_ONE (thoughtspot-model-tml.md:125, 233-join census); MANY_TO_MANY was
+# never observed but makes the same "multiple matches allowed" statement, so it
+# takes the same MV form. Everything else — MANY_TO_ONE, ONE_TO_ONE, or an
+# absent value (a Scenario A join whose cardinality lives on the Table TML) —
+# is at-most-one-match, which is also the MV's own default.
+_MULTI_MATCH = {"ONE_TO_MANY", "MANY_TO_MANY"}
+
+
+def _cardinality_keys(cardinality: str | None) -> dict:
+    """The MV join node's cardinality declaration for a model join's cardinality.
+
+    `rely: {at_most_one_match: true}` and `cardinality: many_to_one` are
+    equivalent, `many_to_one` is the MV schema's own default when neither is
+    present, and `rely:` works on every Databricks Runtime while `cardinality:`
+    requires 18.1+ (databricks-metric-view.md:392, :436-437). Emitting BOTH —
+    which this did until BL-174 defect 3 (fidelity report F5) — silently raised
+    a round-tripped MV's Runtime floor from 17.3+ to 18.1+ for no semantic gain.
+
+    `one_to_many` is the one value the MV default does not cover, so it IS
+    written explicitly (and legitimately gates 18.1+). `rely:` must NOT
+    accompany it: at-most-one-match asserts the opposite of what the model
+    declares, and until BL-174 that is exactly what a ONE_TO_MANY join emitted.
+    """
+    if (cardinality or "").strip().upper() in _MULTI_MATCH:
+        return {"cardinality": "one_to_many"}
+    return {"rely": {"at_most_one_match": True}}
+
+
 def _resolve_referencing_join(join: dict, source: str, target: str, tbl_by_name: dict) -> str:
     """Resolve a `referencing_join` name against the SOURCE (FK) table's join defs.
 
@@ -175,10 +205,8 @@ def build_joins(model: dict, tables: list[dict], source_table: str) -> tuple[lis
                 "name": alias,
                 "source": f"{target_table.get('db')}.{target_table.get('schema')}.{target_table.get('db_table')}",
                 "on": on_sql,
-                "rely": {"at_most_one_match": True},
             }
-            if join.get("cardinality") == "MANY_TO_ONE":
-                join_node["cardinality"] = "many_to_one"
+            join_node.update(_cardinality_keys(join.get("cardinality")))
 
             node_by_table[target] = join_node
             if current == source_table:

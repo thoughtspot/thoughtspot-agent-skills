@@ -277,6 +277,66 @@ class TestBuildColumnsAndFormulas:
         by_name = {f["name"]: f for f in formulas}
         assert by_name["Wrapped"]["expr"] == "[formula_Base]"
 
+    def test_measure_currency_format_becomes_currency_type(self):
+        # BL-174 defect 2 (fidelity report F3) — the MV's
+        # `format: {type: currency, currency_code: USD}` survived parse and
+        # translate (mv_translate carries it into translated[]) and was then
+        # discarded at assembly. It must land on
+        # properties.currency_type.iso_code — the field the REVERSE leg already
+        # reads (mv_emit_classify._build_metadata) and that
+        # ts-databricks-properties.md:109/:122 documents as mapped both ways.
+        cols, _, _ = build_columns_and_formulas(
+            [_t("total_sales", "column", "MEASURE", table="STORE_SALES",
+                column="ss_ext_sales_price", aggregation="SUM",
+                display_name="Total Sales", comment="Total sales revenue",
+                fmt={"type": "currency", "currency_code": "USD"})], None)
+        assert cols[0]["properties"] == {
+            "column_type": "MEASURE", "aggregation": "SUM",
+            "description": "Total sales revenue",
+            "currency_type": {"iso_code": "USD"}}
+
+    def test_formula_measure_currency_format_becomes_currency_type(self):
+        # Same for an aggregate metric emitted as a formula — the `format:` block
+        # is per-measure in the MV regardless of how we realise it in TML.
+        # `decimal_places` has no currency_type equivalent and is dropped.
+        cols, _, _ = build_columns_and_formulas(
+            [_t("margin", "formula", "MEASURE", ts_expr="sum ( [T::m] )",
+                aggregation="SUM", display_name="Margin",
+                fmt={"type": "currency", "currency_code": "EUR",
+                     "decimal_places": {"type": "exact", "places": 2}})], None)
+        assert cols[0]["properties"]["currency_type"] == {"iso_code": "EUR"}
+
+    def test_percentage_format_emits_no_currency_type(self):
+        # `format: {type: percentage}` is a legal MV format with no ThoughtSpot
+        # equivalent (ts-databricks-properties.md:122) — it must not be
+        # mis-mapped onto currency_type.
+        cols, _, _ = build_columns_and_formulas(
+            [_t("growth_pct", "formula", "MEASURE", ts_expr="sum ( [T::g] )",
+                aggregation="SUM", display_name="Growth Pct",
+                fmt={"type": "percentage",
+                     "decimal_places": {"type": "exact", "places": 1}})], None)
+        assert "currency_type" not in cols[0]["properties"]
+
+    def test_dimension_currency_format_emits_no_currency_type(self):
+        # `format:` is legal on fields:/dimensions: too (databricks-metric-view.md
+        # "Format Field", corrected 2026-07-29) but properties.currency_type is a
+        # MEASURE property (thoughtspot-model-tml.md:232) — an ATTRIBUTE's format
+        # has no auto-emitted target yet (coverage-matrix #79).
+        cols, _, _ = build_columns_and_formulas(
+            [_t("list_price", "column", "ATTRIBUTE", table="T",
+                column="LIST_PRICE", display_name="List Price",
+                fmt={"type": "currency", "currency_code": "USD"})], None)
+        assert "currency_type" not in cols[0]["properties"]
+
+    def test_currency_format_without_a_code_is_ignored(self):
+        # iso_code is the only currency_type form we generate
+        # (thoughtspot-model-tml.md:232) — an empty one is not a valid document.
+        cols, _, _ = build_columns_and_formulas(
+            [_t("amount", "column", "MEASURE", table="T", column="AMOUNT",
+                aggregation="SUM", display_name="Amount",
+                fmt={"type": "currency"})], None)
+        assert "currency_type" not in cols[0]["properties"]
+
     def test_duplicate_dimension_display_titles_fail_loud(self):
         # BL-099 #2 — two physical dimensions with the same display_name must
         # not silently emit duplicate columns[] names. `ts tml lint` I8 (unique
@@ -330,11 +390,40 @@ class TestBuildModelTables:
         assert out[0]["joins"] == [{
             "name": "fact_to_orders", "with": "DM_ORDER",
             "on": "[FACT_SALES::ORDER_ID] = [DM_ORDER::ORDER_ID]",
-            "type": "INNER", "cardinality": "MANY_TO_ONE"}]
+            "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"}]
         assert out[1]["joins"][0]["name"] == "orders_to_customers"
         assert out[1]["joins"][0]["on"] == (
             "[DM_ORDER::CUSTOMER_ID] = [DM_CUSTOMER::CUSTOMER_ID]")
         assert "joins" not in out[2]
+
+    def test_join_type_is_left_outer_on_every_join(self):
+        # BL-174 defect 1 (fidelity report F1) — a Metric View has no join-type
+        # field because Databricks fixes it: "In a star schema, the `source` is
+        # the fact table and joins with one or more dimension tables using a
+        # LEFT OUTER JOIN" (docs.databricks.com/aws/en/business-semantics/
+        # metric-views/joins, re-confirmed 2026-07-31). INNER dropped every fact
+        # row whose FK was NULL or matched no dimension row, so measures read
+        # LOWER in ThoughtSpot than in Databricks on the same data. Nested joins
+        # are LEFT OUTER from their own parent, so the rule is unconditional.
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact"}, "joins": NESTED}
+        out = build_model_tables(parsed, TABLES3)
+        types = [j["type"] for t in out for j in t.get("joins") or []]
+        assert types == ["LEFT_OUTER", "LEFT_OUTER"]
+
+    def test_cardinality_emitted_even_when_source_declared_only_rely(self):
+        # BL-174 defect 3 asked for `cardinality` to be OMITTED when the MV
+        # declared only the runtime-agnostic `rely: {at_most_one_match: true}`.
+        # The platform REFUSES such a document — live-probed on se-thoughtspot
+        # 2026-07-31 with import_policy VALIDATE_ONLY: "model->model_tables(3rd)
+        # ->joins(2nd) both  type and cardinality should be defined."
+        # So the field stays (thoughtspot-model-tml.md:125 "Required: Yes" is
+        # correct) and the round-trip redundancy is fixed on the REVERSE leg
+        # instead — see test_databricks_emit.py TestJoins.
+        joins = [_join("orders", "c.s.dm_order", on="source.ID = orders.ID")]
+        joins[0]["cardinality_source"] = "rely"
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact"}, "joins": joins}
+        out = build_model_tables(parsed, {"source": "FACT", "orders": "DM_ORDER"})
+        assert out[0]["joins"][0]["cardinality"] == "MANY_TO_ONE"
 
     def test_using_join_and_one_to_many(self):
         joins = [_join("orders", "c.s.dm_order", using=["ORDER_ID", "REGION_ID"],

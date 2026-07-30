@@ -19,6 +19,32 @@ def display_title(entry: dict) -> str:
     return entry.get("display_name") or entry["name"].replace("_", " ").title()
 
 
+def _currency_type(entry: dict) -> dict | None:
+    """`format: {type: currency, currency_code: USD}` -> `{iso_code: USD}`.
+
+    The MEASURE-only half of the `format:` mapping that
+    ts-databricks-properties.md:109/:122 documents in both directions and that
+    the reverse leg already implements (mv_emit_classify._build_metadata).
+    Returns None for every other case, all of which are declared unmapped in
+    ts-convert-from-databricks-mv/references/coverage-matrix.md #79:
+    `type: percentage` (no ThoughtSpot equivalent), `decimal_places` (no
+    currency_type field), and a `format:` on a fields:/dimensions: entry
+    (properties.currency_type is a measure property —
+    thoughtspot-model-tml.md:232). BL-174 defect 2.
+    """
+    if entry["column_type"] != "MEASURE":
+        return None
+    fmt = entry.get("format")
+    if not isinstance(fmt, dict):
+        return None
+    if str(fmt.get("type") or "").strip().lower() != "currency":
+        return None
+    iso = fmt.get("currency_code")
+    if not iso:
+        return None
+    return {"iso_code": str(iso)}
+
+
 def _column_props(entry: dict, *, is_formula: bool) -> dict:
     props: dict = {"column_type": entry["column_type"]}
     if entry["column_type"] == "MEASURE":
@@ -30,6 +56,9 @@ def _column_props(entry: dict, *, is_formula: bool) -> dict:
     if entry.get("synonyms"):
         props["synonyms"] = list(entry["synonyms"])
         props["synonym_type"] = "USER_DEFINED"
+    currency = _currency_type(entry)
+    if currency:
+        props["currency_type"] = currency
     return props
 
 
@@ -233,7 +262,23 @@ def _join_entries(triples: list, flat: dict, index: dict) -> dict[str, list[dict
             "name": _join_display(parent_path, path),
             "with": with_node,
             "on": on,
-            "type": "INNER",
+            # A Metric View has no join-type field because Databricks fixes it:
+            # "In a star schema, the `source` is the fact table and joins with
+            # one or more dimension tables using a LEFT OUTER JOIN"
+            # (docs.databricks.com/aws/en/business-semantics/metric-views/joins,
+            # re-confirmed 2026-07-31). This was INNER until BL-174, which
+            # DROPPED every fact row with a NULL or unmatched FK — measures read
+            # lower in ThoughtSpot than in Databricks, silently. Nested joins are
+            # LEFT OUTER from their own parent, so the rule is unconditional.
+            "type": "LEFT_OUTER",
+            # Always written, even when the MV declared only the runtime-agnostic
+            # `rely: {at_most_one_match: true}` hint: ThoughtSpot REFUSES an
+            # inline join that omits it — "both  type and cardinality should be
+            # defined" (live-probed on se-thoughtspot 2026-07-31, import_policy
+            # VALIDATE_ONLY; thoughtspot-model-tml.md:125). The round-trip
+            # redundancy BL-174 defect 3 reported is fixed on the reverse leg
+            # instead — mv_emit_joins.py only re-emits `cardinality:` for the
+            # one_to_many case the MV default does not already cover.
             "cardinality": _CARDINALITY[node.get("cardinality") or "many_to_one"],
         })
     return by_parent

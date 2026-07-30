@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: MV→TS window translations live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading anchor args corrected (C1/C3), leading/all/cumulative/semi-additive confirmed (C3/C4/C5/C7), period-filter offset corrected from wall-clock sum_if to row-relative moving_sum LAG idiom (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: MV→TS window translations live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading anchor args corrected (C1/C3), leading/all/cumulative/semi-additive confirmed (C3/C4/C5/C7), period-filter offset corrected from wall-clock sum_if to row-relative moving_sum LAG idiom (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-31 BL-174: MV join type re-confirmed LEFT OUTER against the vendor joins doc and the MV->TS join type corrected from INNER to LEFT_OUTER; cardinality documented as mandatory on the TS side (live-probed VALIDATE_ONLY: "both  type and cardinality should be defined"); the currency format row's TS field corrected from currency_code to currency_type.iso_code and now implemented) -->
 
 # Reverse Mapping Rules Reference
 
@@ -518,7 +518,7 @@ model_tables:
       - name: fact_to_orders
         with: DM_ORDER
         on: "[FACT_TABLE::ORDER_ID] = [DM_ORDER::ORDER_ID]"
-        type: INNER
+        type: LEFT_OUTER
         cardinality: MANY_TO_ONE
   - id: DM_ORDER
     name: DM_ORDER
@@ -526,11 +526,22 @@ model_tables:
       - name: orders_to_customers
         with: DM_CUSTOMER
         on: "[DM_ORDER::CUSTOMER_ID] = [DM_CUSTOMER::CUSTOMER_ID]"
-        type: INNER
+        type: LEFT_OUTER
         cardinality: MANY_TO_ONE
   - id: DM_CUSTOMER
     name: DM_CUSTOMER
 ```
+
+**Join type — always `LEFT_OUTER`** (corrected 2026-07-31, BL-174). A Metric View has
+no join-type field because Databricks fixes it: *"In a star schema, the `source` is the
+fact table and joins with one or more dimension tables using a `LEFT OUTER JOIN`"*
+([Joins in metric views](https://docs.databricks.com/aws/en/business-semantics/metric-views/joins),
+re-confirmed 2026-07-31). Emitting `INNER` — which this converter did until BL-174 —
+**changes numbers silently**: every fact row whose FK is NULL or matches no dimension row
+is kept by the Metric View and dropped by the ThoughtSpot Model, so measures read *lower*
+in ThoughtSpot than in Databricks on the same data. Nested joins are LEFT OUTER from their
+own parent, so the rule is unconditional. There is nothing in the MV to map from and
+nothing in Model TML that forces `INNER`.
 
 **Cardinality mapping** — two MV syntaxes, same ThoughtSpot output:
 
@@ -542,6 +553,14 @@ model_tables:
 | Neither `rely:` nor `cardinality:` present | `MANY_TO_ONE` (spec default) |
 
 When both `rely:` and `cardinality:` are present, `cardinality:` takes precedence.
+
+`cardinality:` is written on **every** generated inline join, including the last row's
+"neither declared" case: ThoughtSpot rejects an inline join that omits it —
+*"both  type and cardinality should be defined"* (live-probed on `se-thoughtspot`
+2026-07-31 with `import_policy: VALIDATE_ONLY`; `thoughtspot-model-tml.md:125`). The
+reverse leg does **not** turn that back into an MV `cardinality:` key — see
+[ts-to-databricks-rules.md](ts-to-databricks-rules.md) — so a round trip no longer
+raises the MV's Databricks Runtime floor from 17.3+ to 18.1+ (BL-174).
 
 ### `using:` Joins — Shared-Column Shorthand (verified 2026-07)
 
@@ -570,7 +589,7 @@ model_tables:
       - name: fact_to_orders
         with: DM_ORDER
         on: "[FACT_TABLE::ORDER_ID] = [DM_ORDER::ORDER_ID]"
-        type: INNER
+        type: LEFT_OUTER
         cardinality: MANY_TO_ONE
 ```
 
@@ -606,9 +625,16 @@ segment is the column name; preceding segments trace the join path.
 
 | MV `format:` | ThoughtSpot property |
 |---|---|
-| `type: currency` + `currency_code: USD` | `properties.currency_type: { currency_code: USD }` |
-| `type: percentage` | **Unmapped** — note in model description |
+| `type: currency` + `currency_code: USD`, on a **measure** | `properties.currency_type: { iso_code: USD }` |
+| `type: currency`, on a `fields:`/`dimensions:` entry | **Unmapped** — `currency_type` is a measure property (`thoughtspot-model-tml.md:232`); tolerate and log |
+| `type: percentage` | **Unmapped** — no ThoughtSpot equivalent |
 | `decimal_places` | **Unmapped** — ThoughtSpot handles formatting at display level |
+
+The field is `iso_code`, **not** `currency_code` (corrected 2026-07-31, BL-174 — the row
+above named the Databricks field on both sides). `properties.currency_type` takes exactly
+one of `iso_code` / `column` / `is_browser`; generated models always use `iso_code`
+(`thoughtspot-model-tml.md:232`). This is the same pair the reverse leg reads, so the
+mapping is now implemented in **both** directions.
 
 ### Window with Range/Offset → ThoughtSpot Formulas
 

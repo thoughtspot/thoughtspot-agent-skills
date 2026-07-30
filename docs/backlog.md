@@ -5563,8 +5563,22 @@ the cap. Target: opportunistic — next time a real liveboard with 20+ tiles goe
 `tools/ts-cli/tests/` (no test asserts any of the three today),
 `agents/cli/ts-convert-from-databricks-mv/references/coverage-matrix.md` (rows #13, #77, #79 —
 added/corrected in the fidelity PR, to be flipped when this lands).
-**Status:** OPEN -- **ready to fix**. All three are localised, source-derived-value-vs-constant
-defects in one module; one PR, one ts-cli bump.
+**Status:** RESOLVED 2026-07-31 (ts-cli v0.127.0; from-databricks-mv v1.12.0 +
+to-databricks-mv v1.4.0). Per-item outcome:
+
+| # | Outcome |
+|---|---|
+| 1 | **Fixed as filed.** `mv_build_model.py` emits `type: LEFT_OUTER` on every join, nested ones included. The vendor claim was re-checked against the live [Joins in metric views](https://docs.databricks.com/aws/en/business-semantics/metric-views/joins) doc before coding — still "using a `LEFT OUTER JOIN`", and still **no `type:` field** to map from, so the value is unconditional rather than source-derived. `LEFT_OUTER` re-confirmed accepted live on a real Model's inline joins, and the fixed emitter's own output validated end-to-end (`VALIDATE_ONLY`, zero persistence). |
+| 2 | **Fixed as filed.** A measure's `format: {type: currency, currency_code: X}` now writes `properties.currency_type.iso_code`. `type: percentage`, `decimal_places` and a `format:` on a `fields:`/`dimensions:` entry are out of scope and now **declared** as from-direction limitation **L12** instead of silently dropped. The from-direction rules file's own row was also wrong — it named `currency_code` on the ThoughtSpot side where the schema says `iso_code`. |
+| 3 | **Prescription refused by the platform; equivalent fix landed on the other leg.** "Omit `cardinality` when the source declared only `rely:`" is not a legal Model TML document: an inline join that omits it fails with *"both  type and cardinality should be defined"* (live-probed 2026-07-31 on `se-thoughtspot`, `import_policy: VALIDATE_ONLY`, four findings for four joins; the same document validates `OK` with the field present). `thoughtspot-model-tml.md:125`'s "Required: Yes" was right and is now evidenced there. The **harm** the item was filed for — a round trip moving the MV's Runtime floor from 17.3+ to 18.1+ — is fixed where it is realised: `mv_emit_joins.py` now emits `rely:` **or** `cardinality:`, never both, so a `MANY_TO_ONE` join round-trips to the runtime-agnostic `rely:` form alone. **Bonus defect found in those same lines:** `ONE_TO_MANY` emitted `rely: {at_most_one_match: true}` and no `cardinality:` — the MV asserted the *opposite* cardinality to the Model's. Now `cardinality: one_to_many` with no `rely:`. |
+
+Coverage-matrix rows #13/#77/#79 flipped as planned (plus new L12 on the from side, and
+row #6 rewritten + new row #66 on the to side). The to-direction skill's Runtime
+prerequisites table is corrected in three places: 18.1+ is gated by an explicit
+**`ONE_TO_MANY`** join, not `MANY_TO_ONE`. Step 4 of the original approach (re-running the
+TPC-DS round trip) was **not** performed — no Databricks workspace was in play; the
+verification done instead was a live `VALIDATE_ONLY` probe of the fixed emitter's own
+output plus 12 unit tests (3 of them on the reverse leg).
 
 Round-tripping apache/ossie's TPC-DS Metric View fixture (MV -> Model TML -> MV, fully offline)
 scored 9 of 15 constructs `matched`. Three of the six deviations are forward-leg assembly
