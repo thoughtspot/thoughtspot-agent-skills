@@ -50,11 +50,20 @@ v0.127.1):
 
 - **`search_output_column` is a search-output LABEL, so it can be decorated.** It is the
   column's name in the View's own `search_query` output *including* any aggregation or
-  bucket prefix — `Total LINEAMOUNT`, `Month(YM)`, `Average num_rows`. Matching must be
-  whole-token containment, not equality: 9 of the 265 census columns diverge from `name`
-  this way, and in 4 of those the `name` is a different identifier entirely
-  (`name: row_count` / `search_output_column: Average num_rows`), so an exact-`name`
-  matcher silently leaves the column behind.
+  bucket prefix — `Total LINEAMOUNT`, `Month(YM)`, `Average num_rows`. 9 of the 265 census
+  columns diverge from `name` this way, and in 4 of those the `name` is a different
+  identifier entirely (`name: row_count` / `search_output_column: Average num_rows`), so
+  matching `name` alone silently leaves the column behind.
+
+  **Match it by whole-value equality against a known decoration vocabulary — never by
+  searching inside it.** The value is a human label *with spaces*, so any containment rule
+  — even one anchored to the end of the string — matches a trailing word-subsequence of an
+  *unrelated* column: removing `Date` takes `Ship Date` (an ordinary undecorated column)
+  and `Month(Order Date)`; removing `sales` takes the real census value
+  `Growth of Total sales`. Over-removal emits **valid TML**, so no import gate, linter or
+  review catches it — it is silent, which is worse than the under-removal this note exists
+  to fix. Strip one decoration level only: `Growth of Total sales` resolves to
+  `Total sales`, not to `sales`.
 - **A formula-backed View column binds to `formulas[].name`, never `formulas[].id`.**
   Removing a formula must remove that entry too, or the View carries a dangling column
   reference — which the structure reference's self-validation checklist forbids and

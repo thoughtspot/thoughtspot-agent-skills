@@ -41,16 +41,19 @@ behaviour (a removed formula's display name must also be scrubbed from
 tie-break rule (test file is the executable/tested contract; SKILL.md prose can drift).
 
 Corrected-after-shipping bug (BL-191, ts-cli v0.127.1): the View helpers bound
-`view_columns[]` on `column_id`, a field real View TML does not have. The 2026-07-30 TML
-property census (`docs/reviews/2026-07-30-tml-census.md`) covered all 42 `AGGR_WORKSHEET`
-objects on se-thoughtspot and found `search_output_column` on 265 of 265 View columns and
-`column_id` on ZERO. `_strip_view_columns`' prefix branch was therefore always
-`col in ""` — dead — and `_strip_view_formulas`' surfacing-column removal
-(`column_id == formulas[].id`) bound 0 of 46 real formulas, so removing a formula left
-its `view_columns[]` entry behind as a DANGLING REFERENCE. Both now bind on
-`search_output_column` / `formulas[].name` via the shared `_references_column`, matching
-what `ts_cli/migrate/rewrite.py` already did — the two View readers disagreeing was
-itself half the defect. `column_id` is still tolerated on input; see `_view_column_ref`.
+`view_columns[]` on `column_id`, a field real View TML does not have — the 2026-07-30
+property census (`docs/reviews/2026-07-30-tml-census.md`, all 42 `AGGR_WORKSHEET` objects
+on se-thoughtspot) found `search_output_column` on 265 of 265 View columns and `column_id`
+on ZERO. So `_strip_view_columns`' prefix branch was always `col in ""` — dead — and
+`_strip_view_formulas`' surfacing-column removal (`column_id == formulas[].id`) bound 0 of
+46 real formulas, leaving a removed formula's `view_columns[]` entry behind as a DANGLING
+REFERENCE. Both now bind on `search_output_column` / `formulas[].name`, as
+`ts_cli/migrate/rewrite.py` already did — the two View readers disagreeing was itself half
+the defect. Matchers are split the way rewrite.py splits its substituters:
+`_references_column` (whole-token) for bracketed reference fields, `_decorated_ref_matches`
+(whole-value equality against an ENUMERATED decoration vocabulary, never a search) for
+`search_output_column`, which is a human label with spaces where containment over-removes
+unrelated columns. `column_id` is tolerated on input; see `_view_column_ref`.
 
 RENAME-mode helpers (`rename_in_search_query`, `rename_column_in_answer`,
 `rename_column_in_view`, `rename_column_in_set`, `remove_model_joins` used only by the
@@ -67,6 +70,16 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
+from .view_refs import (  # noqa: F401  (re-exported — see the View helpers section)
+    _AGG_PREFIXES,
+    _BUCKET_RE,
+    _DATE_BUCKETS,
+    _decorated_ref_matches,
+    _undecorated_forms,
+    _view_column_ref,
+    _view_column_targeted,
+)
+
 TmlSection = Dict[str, Any]
 TmlDoc = Dict[str, Any]
 
@@ -82,23 +95,22 @@ def sanitize_search_query(query_str: Optional[str], cols_to_remove: Iterable[str
     references a column that no longer exists (open-items.md #3) — this sanitizer
     is mandatory before removing a column from a dependent Answer or View.
 
-    A token's optional **bucket modifier** is consumed with it: a real query says
-    `[formula_PMPM month].monthly` / `[date].daily`, and stripping only the bracketed
-    half left a bare `.monthly` stranded at the front of the query (observed on
-    `OptumRx View`'s live export while fixing BL-191). The modifier is meaningless
-    without the column it qualifies, so removing both is the only coherent outcome —
-    and it cannot introduce a reference, only drop leftovers.
+    A token's trailing **bucket modifiers** go with it: a real query says
+    `[formula_PMPM month].monthly` / `[date].daily`, and stripping only the bracketed half
+    stranded a bare `.monthly` at the front of the query (seen on `OptumRx View`'s live
+    export while fixing BL-191). A modifier is meaningless without its column, and dropping
+    it can only remove leftovers, never introduce a reference. `(?:\\.\\w+)*` repeats so a
+    chained `.monthly.growth` goes whole; the modifier must follow the `]` immediately, so
+    a separate `[monthly]` column token is left alone.
 
     Known limitation (BL-197): only the BARE `[col]` form is matched, not the qualified
-    `[table_path::col]` form that real Views also use. Removing the base column leaves a
-    qualified token in place.
+    `[table_path::col]` form real Views also use.
     """
     if not query_str:
         return query_str
     for col in cols_to_remove:
         query_str = re.sub(
-            r"\s*\[" + re.escape(col) + r"\](\.[A-Za-z_][A-Za-z0-9_]*)?\s*",
-            " ", query_str)
+            r"\s*\[" + re.escape(col) + r"\](?:\.\w+)*\s*", " ", query_str)
     return query_str.strip()
 
 
@@ -112,30 +124,28 @@ def sanitize_search_query(query_str: Optional[str], cols_to_remove: Iterable[str
 def _references_column(text: Optional[str], cols_to_remove: Iterable[str]) -> bool:
     """True if `text` references any of `cols_to_remove` as a whole token.
 
-    Uses a word-boundary match (no alphanumeric/underscore on either side) so a
-    reference to the base column name inside a qualified `TABLE::COLUMN` id, a
-    `[TABLE::COLUMN]` formula token, or an aggregation/bucket decoration
-    (`Total LINEAMOUNT`, `Month(YM)`) is caught, WITHOUT false-matching a longer name
-    that merely contains it (e.g. removing `CATEGORY_NAME` must not match
-    `SUB_CATEGORY_NAME` or `DM_CATEGORY::CATEGORY_NAME_FULL`).
+    The matcher for **bracketed reference** fields — `formulas[].expr`, join `on`, Model
+    `column_id` — mirroring `migrate/rewrite.py`'s `substitute_bracketed`. A word-boundary
+    match, so the base name inside `[TABLE::COLUMN]` is caught without false-matching a
+    longer name containing it (`CATEGORY_NAME` must not match `DM_CATEGORY::CATEGORY_NAME_FULL`).
+    That is what lets the model helper strip an aliased base column — `name: "Product
+    Category"` / `column_id: "DM_CATEGORY::CATEGORY_NAME"` — which matching `name` alone
+    missed (open-items #24).
 
-    This is why the model helper below can strip a base-table column from a dependent
-    Model even when the Model exposes it under a friendly alias — the column entry has
-    `name: "Product Category"` but `column_id: "DM_CATEGORY::CATEGORY_NAME"`, and the
-    Model's measure formulas reference `[DM_CATEGORY::CATEGORY_NAME]` in their expr.
-    Matching on `name` alone (the pre-BL-083-PR2 behaviour) missed both — found live
-    on se-thoughtspot, open-items #24.
+    NOT for a View's `search_output_column`: that is a human label with spaces, where
+    containment of any kind over-matches, so it gets `_decorated_ref_matches` instead.
+    rewrite.py makes the same split; BL-191 defect 4 was that mutate.py made none.
 
-    It is the same treatment `ts_cli/migrate/rewrite.py` gives a View's decorated
-    fields (`_DECORATED_FIELDS = ("search_output_column",)` +
-    `substitute_decorated`, whose matcher is the same whole-token pattern): "the
-    column name is substituted INSIDE the token". Reusing one matcher across both
-    readers is deliberate — BL-191 defect 4 was that they disagreed.
+    Boundaries are Unicode-aware `\\w` (as rewrite.py:110), not `[A-Za-z0-9_]` — under the
+    ASCII class a non-ASCII name had no boundary at all and the match degraded to a
+    substring, so removing `前年` would have taken the census's real `前年比区分`. CJK
+    letters ARE `\\w`. Pre-existing on the Model path too; fixed here because BL-191 made
+    the View path share this function.
     """
     if not text:
         return False
     return any(
-        re.search(r"(?<![A-Za-z0-9_])" + re.escape(col) + r"(?![A-Za-z0-9_])", text)
+        re.search(r"(?<!\w)" + re.escape(col) + r"(?!\w)", text)
         for col in cols_to_remove
     )
 
@@ -286,88 +296,10 @@ def _strip_view_search_query(v: TmlSection, cols_to_remove: List[str]) -> None:
         v["search_query"] = sanitize_search_query(v["search_query"], cols_to_remove)
 
 
-def _view_column_ref(c: TmlSection) -> str:
-    """The reference field of a `view_columns[]` entry.
-
-    `search_output_column` is the field real View TML carries: the 2026-07-30 property
-    census (`docs/reviews/2026-07-30-tml-census.md`) covered all 42 `AGGR_WORKSHEET`
-    objects on se-thoughtspot and found it on 265 of 265 View columns, while `column_id`
-    appeared ZERO times and no value contained `::`.
-
-    `column_id` is still read as a FALLBACK. That is deliberate defensive
-    compatibility, not indecision: the census is one cluster, so `column_id` may be a
-    legacy or version-gated spelling some other build still emits, and
-    `agents/shared/schemas/thoughtspot-view-tml.md` states the policy — prefer
-    `search_output_column`, tolerate the old spelling on input. (Re-running the census
-    against a second cluster is BL-190.)
-    """
-    return c.get("search_output_column") or c.get("column_id") or ""
-
-
-def _decorated_ref_matches(value: Optional[str], cols_to_remove: Iterable[str]) -> bool:
-    """True when `value` is one of `cols_to_remove`, or is that column DECORATED.
-
-    This is the matcher for `search_output_column` specifically, and it is deliberately
-    NOT `_references_column`: that one is for *bracketed reference* fields (`expr`,
-    join `on`, Model `column_id`), where the column is delimited by `[`/`]`/`::` and
-    plain whole-token containment is right. `search_output_column` is a **human label
-    with spaces**, so plain containment over-matches — `Order` is a whole token inside
-    `Month(Order Date)`, and removing the column `Order` would then silently delete the
-    unrelated `Order Date` column from the View. That is the same silent-destructive
-    class BL-191 itself is about, so it is guarded here rather than inherited.
-    (`migrate/rewrite.py` makes the same split, between `substitute_bracketed` and
-    `substitute_decorated`; and it can afford to be looser because a *rename* that
-    over-matches is visible and recoverable, where a *removal* that over-matches is
-    neither.)
-
-    The decoration rule comes from the evidence, not from guesswork. In all 9 of the 265
-    census columns where `search_output_column` diverges from `name`, the column name is
-    either the WHOLE value, its TRAILING segment, or parenthesised — never a leading or
-    interior fragment:
-
-        Total LINEAMOUNT · Average num_rows · Total Line Unit Cost   (trailing)
-        Total Input Column - Budgets · Growth of Total sales         (trailing)
-        Month(YM) · Month(PMPM month) · Day(time)                    (parenthesised)
-        URL                                                          (whole value)
-
-    So a match must end at end-of-string or immediately before `)`. That accepts all 9
-    real forms, rejects `Order` inside `Month(Order Date)`, and — via the leading
-    boundary — still rejects `num_rows` inside `Average num_rows_pct`. It also handles
-    the tolerated legacy `column_id` shape (`Orders_1::Revenue`), where the column is
-    the trailing segment after `::`, while still rejecting
-    `DM_CATEGORY::CATEGORY_NAME_FULL` for `CATEGORY_NAME`.
-
-    Residual, stated rather than hidden: a decoration with a trailing SUFFIX
-    (`Total Revenue (USD)`) would not match. No such form occurs in the corpus, and
-    under-removing there is caught by the import gate, where over-removing is silent.
-    """
-    if not value:
-        return False
-    if value in cols_to_remove:
-        return True
-    return any(
-        re.search(r"(?<![A-Za-z0-9_])" + re.escape(col) + r"(?=\)|$)", value)
-        for col in cols_to_remove
-    )
-
-
-def _view_column_targeted(c: TmlSection, cols_to_remove: Iterable[str]) -> bool:
-    """True when a `view_columns[]` entry refers to one of `cols_to_remove`.
-
-    Matched on `_view_column_ref` allowing for decoration (`_decorated_ref_matches`),
-    OR on an exact `name` match. Decoration tolerance is required because
-    `search_output_column` is the column's label in the View's `search_query` OUTPUT,
-    so it can wrap the column name in an aggregation or bucket prefix —
-    `Total LINEAMOUNT`, `Month(YM)`, `Average num_rows`.
-
-    The pre-BL-191 matcher was `any(col in c.get("column_id", "") ...)`, which on a real
-    View is always `col in ""` — dead. Only the `name` fallback did any work, so an
-    aliased column (`name: row_count` / `search_output_column: Average num_rows`) was
-    silently left behind.
-    """
-    return (_decorated_ref_matches(_view_column_ref(c), cols_to_remove)
-            or c.get("name") in cols_to_remove)
-
+# View column-reference binding (`_view_column_ref` / `_decorated_ref_matches` /
+# `_view_column_targeted`, plus the `_AGG_PREFIXES` / `_DATE_BUCKETS` decoration
+# vocabulary) lives in `view_refs.py` — split out under the file-size gate and
+# re-exported above, so callers and tests import it from here unchanged.
 
 def _strip_view_columns(v: TmlSection, cols_to_remove: List[str]) -> None:
     """Remove `view_columns[]` entries that reference a removed column — see
@@ -383,28 +315,24 @@ def _strip_view_formulas(v: TmlSection, cols_to_remove: List[str]) -> None:
     """Remove formulas[] whose expr references a removed column, AND the
     `view_columns[]` entries that surface them. Mutates `v` in place.
 
-    A formula-backed View column is bound by `search_output_column == formulas[].NAME`
-    — not by `column_id == formulas[].id`, which is what this function used to check
-    and which matched nothing on a real View (`column_id`: 0 of 265 census columns).
-    The formula was therefore deleted while its `view_columns[]` entry survived: a
-    dangling column reference, which `agents/shared/schemas/thoughtspot-view-tml.md`'s
-    self-validation checklist forbids and ThoughtSpot rejects on import. That silent
-    broken-object outcome is why BL-191 was Tier 1.
+    A formula-backed View column is bound by `search_output_column == formulas[].NAME` —
+    not `column_id == formulas[].id`, which is what this used to check and which matched
+    nothing on a real View (`column_id`: 0 of 265 census columns). The formula was deleted
+    while its `view_columns[]` entry survived: a dangling reference, which
+    `agents/shared/schemas/thoughtspot-view-tml.md`'s checklist forbids and ThoughtSpot
+    rejects on import. That silent broken object is why BL-191 was Tier 1.
 
-    A removed formula's display name is passed back through `_view_column_targeted`, so
-    the surfacing column is matched the same decoration-tolerant way a physical column
-    is (`Total Margin` surfaces formula `Margin`). The legacy `column_id == formulas[].id`
-    binding is still honoured on input, for the same reason `_view_column_ref` still
-    reads `column_id`.
+    The removed formula's display name goes back through `_view_column_targeted`, so its
+    surfacing column is matched as decoration-tolerantly as a physical one
+    (`Total Margin` surfaces formula `Margin`). The legacy id binding is still honoured on
+    input, for the same reason `_view_column_ref` still reads `column_id`.
 
-    `search_query` is re-sanitized here, against the removed formulas' **ids and names**.
-    `_strip_view_search_query` runs before this function and only knows `cols_to_remove`,
-    so it cannot see a formula that removal *cascades* into — and a View references its
-    formulas from the search string by id: `OptumRx View`'s real query begins
-    `[formula_PMPM month] [formula_PMPM month].monthly …`, so dropping that formula while
+    `search_query` is re-sanitized here against the removed formulas' **ids and names**:
+    `_strip_view_search_query` ran earlier knowing only `cols_to_remove`, so it cannot see
+    a formula the removal *cascades* into — and a View names its formulas in the search
+    string by id (`OptumRx View`'s real query begins `[formula_PMPM month].monthly`), so
     leaving the query intact ships the same dangling reference by another route
-    (open-items #3 — ThoughtSpot rejects the import). Found by review of the BL-191 fix
-    and confirmed against that live export.
+    (open-items #3). Found by review of the BL-191 fix, on that live export.
     """
     def targeted(f: TmlSection) -> bool:
         return _references_column(f.get("expr", ""), cols_to_remove)
@@ -418,6 +346,12 @@ def _strip_view_formulas(v: TmlSection, cols_to_remove: List[str]) -> None:
     formula_ids = {f.get("id") for f in removed if f.get("id")}
     formula_names = {f.get("name") for f in removed if f.get("name")}
     v["formulas"] = [f for f in v.get("formulas", []) if not targeted(f)]
+    # Residual: a `view_columns[]` entry carries no `formula_id`, so a formula and a
+    # PHYSICAL column that share a display name are indistinguishable here and the
+    # physical entry would be taken with the formula. Not reachable from a well-formed
+    # View (ThoughtSpot does not allow two output columns with the same label), and not
+    # separable without a field the document does not have. In scope for BL-198, which
+    # already has to rebuild this closure for transitive chains.
     v["view_columns"] = [
         c for c in v.get("view_columns", [])
         if not _view_column_targeted(c, formula_names)
@@ -443,19 +377,18 @@ def _strip_view_joins(v: TmlSection, cols_to_remove: List[str]) -> None:
 def remove_columns_from_view(view_dict: TmlSection, cols_to_remove: List[str]) -> TmlSection:
     """Remove column references from a View TML section (the `view:` body).
 
-    Mutates `view_dict` in place and returns it. Handles: search_query,
-    view_columns[] (matched on `search_output_column` by whole-token containment, so an
-    aggregation/bucket decoration such as `Total Revenue` or `Month(YM)` is caught — OR
-    exact match on `name`; `column_id` is tolerated as a fallback but is not a field of
-    real View TML), formulas[] that reference a removed column (and their view_columns[]
-    entries, matched on `search_output_column == formulas[].name`), and joins[] whose
-    `on` expression references a removed column.
+    Mutates `view_dict` in place and returns it. Handles: search_query; view_columns[]
+    (matched on `search_output_column` by whole-value equality against the enumerated
+    decoration vocabulary, so `Total Revenue` / `Month(YM)` are caught while an unrelated
+    column merely ending in the same word is not — OR exact `name`; `column_id` tolerated
+    as a fallback but not a field of real View TML); formulas[] referencing a removed
+    column, plus their view_columns[] entries (`search_output_column == formulas[].name`);
+    and joins[] whose `on` references a removed column.
 
-    The binding was corrected under BL-191 — it read `column_id`, which the 2026-07-30
-    TML property census found in 0 of 265 real View columns, so the formula path was
-    entirely dead and left dangling references. See `_view_column_ref`,
-    `_view_column_targeted` and `_strip_view_formulas` for the evidence and the
-    tolerate-old-on-input policy.
+    The binding was corrected under BL-191 — it read `column_id`, absent from 265 of 265
+    real View columns, so the formula path was dead and left dangling references. Evidence
+    and the tolerate-old-on-input policy: `_view_column_ref`, `_decorated_ref_matches`,
+    `_strip_view_formulas`.
     """
     v = view_dict
 

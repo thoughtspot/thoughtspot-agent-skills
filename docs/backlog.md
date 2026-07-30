@@ -64,7 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
-| BL-191 | `dependency/mutate.py` reads Views through `column_id` (0/265 in the wild) — silent dangling refs | next dependency change |
+| ~~BL-191~~ | ~~`dependency/mutate.py` reads Views through `column_id` (0/265 in the wild) — silent dangling refs~~ | DONE (2026-07-31) |
 | BL-183 | Validator: dangling `[formula_X]` refs in `ts tml lint` + CA-JSON table refs | with BL-178 |
 | BL-174 | from-Databricks forward leg: `INNER` join type, dropped `format:`, stamped `cardinality:` | next DBX pass |
 | BL-180 | from-Snowflake translator ignores `\|\|`→`concat` and NULL-preserving division | next formula pass |
@@ -6689,10 +6689,11 @@ the old field", which the reviewer disproved: `dependency/mutate.py` depends on 
 (`fix/bl-191-view-paths`, PR #427). Per defect:
 
 1. **Prefix branch never fired** -- `_strip_view_columns` now matches
-   `_view_column_ref(c)` (`search_output_column`, falling back to `column_id`) by
-   whole-token containment via the shared `_references_column`, so an aggregation or
-   bucket decoration is caught: **re-verified live that 4 of the 9 decorated columns in
-   the corpus** (`row_count`/`Average num_rows`, `date`/`Day(time)`,
+   `_view_column_ref(c)` (`search_output_column`, falling back to `column_id`) via
+   `_decorated_ref_matches`: **whole-value equality against an enumerated decoration
+   vocabulary** (`_AGG_PREFIXES` / `_DATE_BUCKETS`), never a search inside the value. So an
+   aggregation or bucket decoration is caught: **re-verified live that 4 of the 9 decorated
+   columns in the corpus** (`row_count`/`Average num_rows`, `date`/`Day(time)`,
    `Number of URL`/`URL`, `Growth of sales`/`Growth of Total sales`) name a column the
    old exact-`name` fallback could not see.
 2. **`_strip_view_formulas`' second half was dead** -- a removed formula's **display
@@ -6707,25 +6708,51 @@ the old field", which the reviewer disproved: `dependency/mutate.py` depends on 
    and are corrected too.
 4. **The two View readers disagreed** -- `_references_column` was moved into a shared
    matcher section used by BOTH the View and Model paths. `expr`/join-`on` matching moved
-   to it as well, so the View path is whole-token throughout (removing `Cost` no longer
-   drags out a formula on `[Cost_Center]`). The split now mirrors `migrate/rewrite.py`'s
-   own: `_references_column` for **bracketed reference** fields (its
-   `substitute_bracketed`), `_decorated_ref_matches` for the **decorated label** field
-   `search_output_column` (its `substitute_decorated`).
+   to it as well, so those fields are whole-token throughout (removing `Cost` no longer
+   drags out a formula on `[Cost_Center]`), and its boundary classes became Unicode-aware
+   `\w` -- with the old ASCII class a non-ASCII name had no boundary at all and the match
+   degraded to a substring, so removing `前年` would have taken the census's real
+   `前年比区分`. That is **a pre-existing bug on the Model path too**, fixed here because
+   the View path now shares the function. The split now mirrors `migrate/rewrite.py`'s own:
+   `_references_column` for **bracketed reference** fields (its `substitute_bracketed`),
+   `_decorated_ref_matches` for the **decorated label** field `search_output_column` (its
+   `substitute_decorated`).
 
 **Found by review of this fix, and fixed in the same PR** (both confirmed against live
 exports before changing anything):
 
 5. **The first cut re-created the silent-destructive class in the opposite direction.**
-   Binding `search_output_column` with plain whole-token containment over-matches, because
-   the value is a human label *with spaces*: `Order` is a whole token inside
-   `Month(Order Date)`, so removing the column `Order` silently deleted the unrelated
-   `Order Date` column. `_decorated_ref_matches` now requires the match to end at
-   end-of-string or immediately before `)` -- which is what **all 9** divergent census
-   values look like (trailing or parenthesised, never leading or interior). This is a
-   deliberate divergence from `substitute_decorated`, which can afford to be looser
-   because an over-matched *rename* is visible and recoverable where an over-matched
-   *removal* is neither.
+   Binding `search_output_column` by *containment* over-removes, because the value is a
+   human label *with spaces* -- and an end-anchored containment rule is not enough, because
+   it still matches a trailing word-**subsequence** of an unrelated column: removing `Date`
+   took `Ship Date` (an ordinary UNDECORATED column, which `main` protected by exact-name
+   match) and `Month(Order Date)`; `Cost` took `Total Line Unit Cost`; `sales` took the real
+   census value `Growth of Total sales`. A View of `{Date, Ship Date, Order Date, Revenue}`
+   lost **three of four** columns on remove-`Date`. Over-removal emits **valid TML**, so no
+   import gate or linter catches it -- silent, exactly the failure mode BL-191 was filed
+   for. Corpus-measured on real data, the first cut over-removed in **2** places
+   (`Growth of Total sales` for `sales`; `Total Line Unit Cost` for `Unit Cost`).
+
+   Redesigned to **whole-value equality against an enumerated vocabulary**: `value == col`,
+   or `value == f"{prefix} {col}"` for a recognised aggregation/growth prefix, or
+   `value == f"{bucket}({col})"` for a recognised date bucket. No search, ever. The
+   vocabulary is derived from the corpus (`SUM`->`Total`, `AVERAGE`->`Average`,
+   `COUNT`->`Number of`, plus `Growth of` and the `Month(`/`Day(` buckets) and extended with
+   the display forms of the aggregations `thoughtspot-view-tml.md` documents. Composite
+   prefixes are deliberately excluded -- "Growth of Total" would strip two levels and make
+   `sales` match `Growth of Total sales` again -- so stripping is **one level only**.
+
+   The structural reason this shape is required, and not just preferred:
+   `substitute_decorated` is a *substitution* and can lean on a longest-match-first
+   tiebreak (`rewrite.py:108-112`), so when both `Order` and `Order Date` are mapped the
+   longer wins. A boolean *deletion* predicate is asked about one column at a time, in
+   isolation, with no view of the others -- it has no tiebreak available, so enumerated
+   equality is the only safe shape. The blast radius differs too: an over-matched rename is
+   visible and reversible, an over-matched delete is neither.
+
+   Residual, stated: a decoration outside the vocabulary (an unseen bucket, or a trailing
+   suffix like `Total Revenue (USD)`) will not match, so the column is left in place -- the
+   safe direction, since a dangling reference is rejected loudly at import.
 6. **`search_query` still named the cascaded-away formula.** `_strip_view_search_query`
    runs before the formula cascade is known, so it cannot see a formula that column
    removal *cascades* into -- and a View references its formulas from the search string by
@@ -6770,10 +6797,24 @@ plus the census's 42, all read-only, replaying every strip in memory:
 | `column_id` present | **0 / 265** |
 | `search_output_column` containing `::` | **0** |
 | decorated (`name` != `search_output_column`) | 9, of which **4** are the alias class the old `name` fallback could not see |
-| formula surfacing bound -- FIXED vs OLD | **37** view_columns vs **0** (of 46 formulas) |
+| formula surfacing bound -- FIXED vs OLD | **34** view_columns vs **0** (of 46 formulas) |
 | dangling `view_columns[]` refs after a strip -- OLD vs FIXED | **101** vs **0** |
 | dangling `search_query` formula ids -- OLD vs FIXED | **94** vs **0** |
 | end-to-end strip fires | **42 / 42** Views |
+
+**Both failure directions were measured**, because 0 dangling references says nothing about
+over-removal -- an over-removal emits valid TML, so nothing downstream catches it. 305
+single-column removals replayed across the 42 Views, diffed against an oracle built by
+CONSTRUCTING each column's legal labels (so it cannot inherit the matcher's own bug):
+
+| Implementation | over-removals | under-removals |
+|---|--:|--:|
+| pre-BL-191 (`main`) | 0 | **21** |
+| first BL-191 cut (end-anchored containment) | **2** | 0 |
+| final (this PR) | **0** | **0** |
+
+Full-pipeline replay (`remove_columns_from_view` end to end, cascade-aware oracle):
+**0 over, 0 under**.
 
 **The defect, in four parts** (as diagnosed; retained for the record).
 

@@ -16,6 +16,8 @@ inputs are never mutated, even though the low-level helpers they call mutate in 
 """
 from __future__ import annotations
 
+import pytest
+
 from ts_cli.dependency.mutate import (
     apply_remove,
     apply_repoint,
@@ -53,6 +55,28 @@ class TestSanitizeSearchQuery:
         result = sanitize_search_query("  [Revenue]  by  [Region]  ", ["Revenue"])
         assert "[Revenue]" not in result
         assert "[Region]" in result
+
+    def test_consumes_the_tokens_bucket_modifier(self):
+        """A real View query says `[date].daily` / `[formula_PMPM month].monthly`.
+        Stripping only the bracketed half strands a bare `.monthly` (observed on
+        `OptumRx View`'s live export) — the modifier is meaningless without its column.
+        """
+        assert sanitize_search_query("[date].monthly [Brand]", ["date"]) == "[Brand]"
+        assert sanitize_search_query("[date].daily by [Region]", ["date"]) == "by [Region]"
+
+    def test_consumes_chained_bucket_modifiers(self):
+        assert sanitize_search_query("[date].monthly.growth [Brand]", ["date"]) == "[Brand]"
+
+    def test_leaves_a_separate_column_token_named_like_a_modifier(self):
+        """The modifier must follow the `]` immediately. A standalone `[monthly]` is a
+        column reference in its own right and must survive.
+        """
+        result = sanitize_search_query("[date].monthly [monthly]", ["date"])
+        assert result == "[monthly]"
+
+    def test_does_not_consume_a_modifier_after_an_unrelated_token(self):
+        result = sanitize_search_query("[Revenue] [date].monthly", ["Revenue"])
+        assert result == "[date].monthly"
 
     def test_empty_query(self):
         assert sanitize_search_query("", ["Revenue"]) == ""
@@ -321,37 +345,53 @@ class TestRemoveColumnsFromView:
         result = remove_columns_from_view(section, ["num_rows"])
         assert [c["name"] for c in result["view_columns"]] == ["Region"]
 
-    def test_keeps_column_whose_decoration_only_partially_matches(self):
-        """Leading-boundary guard: removing `num_rows` must not take
-        `Average num_rows_pct` with it.
-        """
-        section = {
-            "view_columns": [
-                {"name": "pct", "search_output_column": "Average num_rows_pct",
-                 "properties": {"column_type": "MEASURE"}},
-            ],
-        }
-        result = remove_columns_from_view(section, ["num_rows"])
-        assert len(result["view_columns"]) == 1
+    # -- Over-removal floors. `search_output_column` is a human label WITH SPACES, so
+    # every containment rule — including one anchored to the end of the string — matches
+    # a trailing word-SUBSEQUENCE of an unrelated column. The matcher is whole-value
+    # equality against enumerated decorations precisely to refuse these. Over-removal
+    # emits VALID TML, so no import gate or linter catches it.
 
-    def test_keeps_column_where_removed_name_is_an_interior_word(self):
-        """Trailing-boundary guard — the over-removal case a plain whole-token matcher
-        gets WRONG. `search_output_column` is a human label with spaces, so `Order` is a
-        whole token inside `Month(Order Date)`; removing the column `Order` must NOT
-        delete the unrelated `Order Date` column. A decoration always has the column at
-        the end or parenthesised (all 9 divergent census values do), never as a leading
-        or interior fragment.
+    @pytest.mark.parametrize("value, removed", [
+        # The headline case: `Ship Date` is an ORDINARY UNDECORATED column. `Ship` is not
+        # an aggregation prefix, so `Ship Date` is not a decorated form of `Date`.
+        ("Ship Date", "Date"),
+        # Decorated, but the decoration wraps a DIFFERENT column.
+        ("Month(Order Date)", "Date"),
+        ("Total Line Unit Cost", "Cost"),
+        ("Total Unit Cost", "Cost"),
+        # A real census value: the column inside `Growth of ` is `Total sales`, not `sales`.
+        ("Growth of Total sales", "sales"),
+        # Trailing-extension floor.
+        ("Average num_rows_pct", "num_rows"),
+        # Leading-extension floor: the prefix must be a RECOGNISED token, and the rest
+        # must equal the column exactly — `rows` is not `num_rows`.
+        ("Average num_rows", "rows"),
+        # An unrecognised parenthesised head is not a bucket, so nothing is unwrapped.
+        ("Truncate(Order Date)", "Order Date"),
+        # Legacy `column_id` shape must still refuse a longer sibling.
+        ("DM_CATEGORY::CATEGORY_NAME_FULL", "CATEGORY_NAME"),
+    ])
+    def test_does_not_over_remove(self, value, removed):
+        section = {"view_columns": [{"name": "kept", "search_output_column": value}]}
+        result = remove_columns_from_view(section, [removed])
+        assert len(result["view_columns"]) == 1, \
+            f"removing {removed!r} wrongly deleted the column labelled {value!r}"
+
+    def test_ordinary_view_loses_only_the_named_column(self):
+        """End-to-end statement of the regression: a plain View of four columns, three of
+        which contain the word `Date`. Removing `Date` must take exactly one.
         """
         section = {
             "view_columns": [
-                {"name": "Order Date", "search_output_column": "Month(Order Date)",
-                 "properties": {"column_type": "ATTRIBUTE"}},
-                {"name": "Order", "search_output_column": "Order",
-                 "properties": {"column_type": "ATTRIBUTE"}},
+                {"name": "Date", "search_output_column": "Date"},
+                {"name": "Ship Date", "search_output_column": "Ship Date"},
+                {"name": "Order Date", "search_output_column": "Month(Order Date)"},
+                {"name": "Revenue", "search_output_column": "Total Revenue"},
             ],
         }
-        result = remove_columns_from_view(section, ["Order"])
-        assert [c["name"] for c in result["view_columns"]] == ["Order Date"]
+        result = remove_columns_from_view(section, ["Date"])
+        assert [c["name"] for c in result["view_columns"]] == [
+            "Ship Date", "Order Date", "Revenue"]
 
     def test_accepts_every_decoration_form_observed_in_the_census(self):
         """All 9 real `name` != `search_output_column` pairs from the 2026-07-30 census,
@@ -484,6 +524,36 @@ class TestRemoveColumnsFromView:
         result = remove_columns_from_view(section, ["Cost"])
         assert result["formulas"] == []
         assert result["view_columns"] == []
+
+    def test_non_ascii_column_names_keep_their_boundary(self):
+        """The boundary classes are Unicode-aware `\\w`, not `[A-Za-z0-9_]`. With the
+        ASCII class a non-ASCII name had no effective boundary and the match degraded to
+        a plain substring, so removing `前年` would have taken the census's real
+        `前年比区分` formula with it. CJK letters ARE `\\w`, so the boundary holds.
+        """
+        section = {
+            "view_columns": [
+                {"name": "前年比区分", "search_output_column": "前年比区分"},
+            ],
+            "formulas": [{"id": "formula_前年比区分", "name": "前年比区分",
+                          "expr": "if ( [前年比区分] > 0 ) then 1 else 0"}],
+            "joins": [{"name": "j", "on": "[前年比区分] = [other::前年比区分]"}],
+        }
+        result = remove_columns_from_view(section, ["前年"])
+        assert len(result["view_columns"]) == 1, "over-removed on a CJK substring"
+        assert len(result["formulas"]) == 1
+        assert len(result["joins"]) == 1
+
+    def test_non_ascii_column_name_still_removed_when_named_exactly(self):
+        section = {
+            "view_columns": [{"name": "前年比区分", "search_output_column": "Total 前年比区分"}],
+            "formulas": [{"id": "f", "name": "n", "expr": "sum ( [前年比区分] )"}],
+            "joins": [{"name": "j", "on": "[a::前年比区分] = [b::x]"}],
+        }
+        result = remove_columns_from_view(section, ["前年比区分"])
+        assert result["view_columns"] == []
+        assert result["formulas"] == []
+        assert result["joins"] == []
 
     def test_formula_expr_match_is_whole_token(self):
         """`expr` matching uses the module's whole-token matcher, so removing `Cost`
