@@ -63,7 +63,10 @@ Not ThoughtSpot's to fix. Listed so an engineering reader can tell the two apart
 and so a gap on this list is not filed twice.
 
 **Nothing on this list has been posted.** Publication of both mapping documents to
-apache/ossie#285 is held pending legal review.
+apache/ossie#285 is held pending legal review. Each ask's **upstream venue** — the live
+discussion thread, converter PR, or new issue it should be raised in — was mapped against
+apache/ossie's existing discussion index on 2026-07-30 and is recorded in the `Upstream venue`
+column of the two mapping documents' own asks tables, not duplicated here.
 
 | # | Ask (one line) | Status |
 |---|---|---|
