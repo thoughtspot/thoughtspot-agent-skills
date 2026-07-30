@@ -80,6 +80,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-186 | Live-verify the four OSSIE-mapping TML property questions (V1-V4) | next se-thoughtspot session |
+| ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
 | BL-184 | Worked-example reproducibility test (ground truth is never re-run) | after BL-178 |
 | BL-179 | from-Snowflake promotes the first synonym over the logical identifier | with BL-166 |
 | BL-181 | from-Snowflake classifies every fact `ATTRIBUTE` (no MEASURE branch) | after BL-178 |
@@ -6163,9 +6164,86 @@ deliberately refuse to emit these properties until it does.
 5. Close the entry only when all four carry a dated verdict, or when a remaining one is explicitly
    deferred with a reason.
 
-**Not in scope.** The fourteen ThoughtSpot product gaps in `docs/ossie/ts-osi-compliance-gaps.md`
+**Refined 2026-07-30** by the G7/G13 verification run (see BL-187). That run exported a 40-model
+random sample from `se-thoughtspot` for an unrelated question and picked up drive-by evidence on
+three of the four. **None of the four is closed** — the evidence narrows V1 and rules nothing out:
+
+| # | Change | Detail |
+|---|---|---|
+| **V1** | **Narrowed.** Still open, and still the blocking one | `properties.calendar` was present on 36 Model columns across 12 models, and the value was the bare token `calendar` in *every* case — never `default`, never `CALENDAR_TYPE_GREGORIAN`. That favours the `calendar_name` reading over the SQL-View reference's enum spelling, but does not settle whether `calendar` is a user-named object or an export sentinel, and no value was seen on a **Table** column. The `calendars/create` leg is still required |
+| **V2** | Unchanged | All 29 observed `currency_type` blocks used `iso_code`; neither `column` nor `is_browser` occurs in the wild, so the round-trip question is untested |
+| **V3** | Unchanged | Read-only by design; nothing observed either way |
+| **V4** | Unchanged | `is_mandatory_token_filter` appeared on zero columns — the fail-open round-trip risk is still unverified |
+| step 4 | **Done** | `model.lesson_plans` shape **confirmed** on 4 real Models: a `properties:` sibling holding `{lesson_id: <int>, lesson_plan_string: <string>}`. The provisional marker has been dropped from `thoughtspot-model-tml.md` |
+
+**Not in scope.** The thirteen ThoughtSpot product gaps in `docs/ossie/ts-osi-compliance-gaps.md`
 are deliberately **not** routed to a backlog entry -- they are input to a product conversation,
 not repo work. This entry covers only the four verifications, which *are* ours to close.
 
 **Target:** next `se-thoughtspot` session -- V1 alone is a 15-minute task and can ride along with
 any unrelated live check.
+
+---
+
+## BL-187 -- Live-verify the two contested OSSIE product-gap claims (G7, G13) `Tier 2`
+
+**Filed:** 2026-07-30.
+**Source:** a ThoughtSpot domain expert challenged two rows of
+`docs/ossie/ts-osi-compliance-gaps.md` on reading it. Both challenges were correct.
+**Affects:** `docs/ossie/ts-osi-compliance-gaps.md` (G7, G13),
+`docs/ossie/ts-osi-construct-mapping.md` (Field + Metric `description`/`datatype` rows, the
+relationship `type` row, rule **R5**, the RelationshipLevel and MetricLevel stash schemas),
+`agents/shared/schemas/thoughtspot-model-tml.md`,
+`agents/shared/schemas/thoughtspot-table-tml.md`,
+`agents/shared/schemas/thoughtspot-sql-view-tml.md`,
+`agents/shared/mappings/ts-snowflake/ts-to-snowflake-rules.md`,
+`agents/cli/ts-convert-from-snowflake-sv/references/step-7-join-discovery.md`,
+`tools/validate/check_tml.py`.
+**Status:** RESOLVED 2026-07-30 (live-verified on `se-thoughtspot`; both claims corrected in
+`docs(ossie): G7/G13 live verification`).
+
+**Result — both challenges upheld; one gap halved, one withdrawn entirely.**
+
+| Claim | As written | Verdict |
+|---|---|---|
+| **G7** | Formula-backed columns carry *neither* a description *nor* a declared datatype | **Half wrong.** `description` is a first-class Model `columns[]` field and works on formula-backed entries — 14 of 78 formula columns in a 40-model random sample carry one, and it is in ThoughtSpot's published Model TML syntax. The *datatype* half stands: no `data_type` key exists on `columns[]` or `formulas[]`, and 0 of 78 carried one. Gap narrowed from four `lossy→issue` verdicts to two, priority Medium → Low |
+| **G13** | `FULL_OUTER` accepted on a Table join, rejected on a Model inline join, so a converter must downgrade and "change results" | **Withdrawn — not a product gap.** `FULL_OUTER` is rejected on the **Table** join too, with the byte-identical error 14528 and the same allowed list, so the two contexts never diverged. And `OUTER` **is** ThoughtSpot's full outer join, so `FULL_OUTER → OUTER` is a rename that changes nothing. The defect was **ours** |
+
+### How it was settled
+
+The BL-170 harness pattern: `ts tml import --policy VALIDATE_ONLY` against the **Payroll Test
+Model** (`acf62370-...`) and its `PAYROLL_LOCATIONS` table, one variable per probe, verbatim
+responses recorded. Nothing was persisted — the model re-exported byte-identical, the table
+gained no `joins_with`, and `ts metadata search --name "%G7PROBE%"` returned `[]`.
+
+**The decisive evidence for G7 was not the probes.** A negative control settled that: an
+invented nonsense key on a `columns[]` entry (`g7probe_nonsense_key: x`) **also validated
+clean**, proving a Model import silently ignores unknown keys there. So every acceptance
+result on this surface is worthless, and `description`/`data_type` acceptance proved nothing.
+What proved it instead was a **40-model random export sample** plus ThoughtSpot's own published
+TML syntax — the product writes `description` on formula columns and has no `data_type` field
+for them at all. Recording this because it generalises: *on a Model `columns[]` entry,
+VALIDATE_ONLY acceptance is not evidence of support.* Rejection remains decisive.
+
+For G13 the probes **were** decisive, because join `type` is enum-validated: `FULL_OUTER` and
+`FULL` were both rejected (error 14528) in each of the two contexts, while `INNER`,
+`LEFT_OUTER`, `RIGHT_OUTER` and `OUTER` all passed as controls in the same documents. No
+`FULL_OUTER` was found persisted on any of 19 real tables scanned, and ThoughtSpot's TML
+documentation gives `[RIGHT_OUTER | LEFT_OUTER | INNER | OUTER]` for Models, Views and
+Worksheets alike.
+
+### Validator promotion (the preferred two-bucket exit)
+
+`check_tml.py` gated `FULL_OUTER` on model inline joins only, and carried a comment asserting
+that Table TML *did* accept it — so the table context was deliberately exempt and would pass
+TML that fails at import. The join-type check is now shared (`_validate_join_type`) and applied
+to `table.joins_with[].type` as well, with four unit tests in
+`tools/validate/tests/test_check_tml_enums.py`. This class of drift can no longer recur in
+either of the two validated contexts. **One residual gap:** `check_tml.py` has no `sql_view`
+validator at all (`validate_tml` dispatches on `table` and `model` only), so SQL View
+`joins[].type` is corrected in the reference but ungated. Small and low-risk — SQL View TML is
+rarely hand-authored here — but worth folding into the next `check_tml.py` change rather than
+left unmentioned.
+
+**Follow-on:** none required. G7's remaining datatype half is a live product gap and stays in
+the gaps document unrouted, per that document's stated policy on bucket-1 rows.

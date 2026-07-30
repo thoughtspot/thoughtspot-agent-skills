@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (validated in 2026-07-11 external sweep — no changes needed) -->
+<!-- currency: snowflake — 2026-07 (2026-07-30: join-type row corrected — the ThoughtSpot side never emits FULL_OUTER; OUTER is its full outer join, live-verified on se-thoughtspot; prior: validated in 2026-07-11 external sweep) -->
 
 # Mapping Rules Reference
 
@@ -251,7 +251,7 @@ and will cause a parse error.
 |---|---|---|
 | `LEFT_OUTER` | relationship (type dropped) | "Join semantics dropped: {join_name} was LEFT_OUTER" |
 | `RIGHT_OUTER` | relationship (type dropped) | "Join semantics dropped: {join_name} was RIGHT_OUTER" |
-| `FULL_OUTER` | relationship (type dropped) | "Join semantics dropped: {join_name} was FULL_OUTER" |
+| `OUTER` (ThoughtSpot's full outer join) | relationship (type dropped) | "Join semantics dropped: {join_name} was OUTER (full outer)" |
 | `INNER` | relationship (type dropped) | "Join semantics dropped: {join_name} was INNER" |
 
 SV relationships are FK→PK path declarations with no join-type semantics. Every
