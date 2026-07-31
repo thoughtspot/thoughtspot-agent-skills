@@ -64,6 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
+| ~~BL-199~~ | ~~`dependency.py`'s `_export_one` — same null-`edoc` crash BL-189 fixed, one call away~~ | DONE (2026-07-31) |
 | ~~BL-191~~ | ~~`dependency/mutate.py` reads Views through `column_id` (0/265 in the wild) — silent dangling refs~~ | DONE (2026-07-31) |
 | BL-183 | Validator: dangling `[formula_X]` refs in `ts tml lint` + CA-JSON table refs | with BL-178 |
 | BL-174 | from-Databricks forward leg: `INNER` join type, dropped `format:`, stamped `cardinality:` | next DBX pass |
@@ -6597,21 +6598,30 @@ itself, which is the workaround, not the fix.
 (`fix/bl-189-parse-null-edoc`, PR #428). Both parts of the prescribed fix landed as specified:
 `detect_tml_type()` now guards `parsed is None` and returns `None` (kept distinct from
 `'unknown'`, which still means "a document with no recognised type key"); the `--parse`
-loop in `export_tml` now treats a falsy `edoc` (empty string OR explicit `null` -- the
-live crash traces to the empty-string case, since `yaml.safe_load("")` is `None` and
-that reached `detect_tml_type` unguarded, but an explicit `null` value hit a *different*
-unhandled `TypeError` inside `parse_edoc`'s non-printable-strip step, so both are now
-excluded before parsing is attempted at all) as skip-and-report rather than parse input:
-a stderr warning names the object and the reason read from `info.status` (the
-`info.status.status_code`/`error_message` shape `publish_planning.py:61` already reads
-for the same endpoint), the item is omitted from the JSON array on stdout, and the rest
-of the batch still parses. Exit code is 1 if anything was skipped, 0 otherwise, matching
-`tml import`'s existing "JSON to stdout regardless, exit code carries the signal"
-convention in the same file. Verified with mocked unit tests only (empty-string and
-explicit-`null` edoc, mixed with a good item, and an all-bad batch) -- live verification
-was judged unnecessary per `.claude/rules/ts-cli.md` (pure function + CLI-command logic,
-no live-instance-dependent behaviour), and the failure shape is already recorded verbatim
-in the 2026-07-30 census.
+loop in `export_tml` now treats a falsy `edoc` as skip-and-report rather than parse input.
+**Live-verified against `se-thoughtspot`, the real crash traces to the `edoc` key being
+absent from the response entirely** for a FORBIDDEN item, not a literal `"edoc": ""` --
+the empty string only ever appeared because the *old* code's `item.get("edoc", "")`
+substituted that default before parsing; `yaml.safe_load("")` then returns `None`, which
+reached `detect_tml_type` unguarded. An explicit JSON `null` (not observed live, but a
+value the API could plausibly send) hits a *different* unhandled exception one step
+earlier, inside `parse_edoc`'s non-printable-strip -- the fix's `if not edoc:` guard,
+checked before any parsing is attempted, covers both regardless of which one the API
+actually sends. A stderr warning names the object and the reason read from `info.status`
+(the `info.status.status_code`/`error_message` shape `publish_planning.py:61` already
+reads for the same endpoint), the item is omitted from the JSON array on stdout, and the
+rest of the batch still parses. Exit code is 1 if anything was skipped, 0 otherwise,
+matching `tml import`'s existing "JSON to stdout regardless, exit code carries the
+signal" convention in the same file. Unit-tested first (empty-string and explicit-`null`
+edoc, mixed with a good item, and an all-bad batch), then live-verified read-only on
+`se-thoughtspot`: exporting the real FORBIDDEN system object `TS: Service Resources`
+(`6246c548-985b-4dcf-9b62-196314a404b3`) alone, and mixed with a real accessible
+worksheet -- no crash, correct stderr warning, good item present in stdout JSON, forbidden
+item skipped, exit code 1, and the response shape confirmed exactly as assumed above.
+
+**Sibling crash found in review, fixed in the same PR (BL-199).** `dependency.py`'s
+`_export_one` (backing `ts dependency backup`, used by every `ts dependency` mutation)
+had the identical unguarded pattern one call away -- see BL-199 below.
 
 **The bug.** `ts tml export --parse` raises
 `TypeError: argument of type 'NoneType' is not iterable` whenever **any** object in the batch
@@ -7382,3 +7392,53 @@ re-run it and assert 0.
 
 **Target:** next `tools/ts-cli/` dependency-engine change; pairs naturally with BL-197.
 Needs a version bump in both `__init__.py` and `pyproject.toml`.
+
+---
+
+## BL-199 -- `dependency.py`'s `_export_one` has the same unguarded null-`edoc` crash BL-189 fixed, one call away `Tier 1` -- **RESOLVED 2026-07-31**
+
+**Filed:** 2026-07-31.
+**Source:** review of the BL-189 fix (PR #428). BL-189 fixed `tml export --parse`'s
+`export_tml`; the reviewer found the identical unguarded pattern in
+`_export_one`, which backs `ts dependency backup` -- and therefore every `ts dependency`
+mutation, since `backup_cmd` calls it before any REMOVE/REPOINT is applied.
+**Affects:** `tools/ts-cli/ts_cli/commands/dependency.py` `_export_one` (~:222-238),
+`tools/ts-cli/tests/test_dependency_command.py` (needed a null-edoc fixture).
+**Status:** **RESOLVED 2026-07-31** -- fixed in ts-cli **v0.127.2**, same PR as BL-189
+(`fix/bl-189-parse-null-edoc`, PR #428).
+
+**The bug.** A FORBIDDEN or OBJECT_INVALID_STATE object returns HTTP 200 (`resp.ok` is
+`True` -- the existing check at the top of `_export_one` only catches a request-level
+failure) with no `edoc` in the per-item body, exactly the shape BL-189 found. The old code
+read `edoc = item.get("edoc", "")`, so a missing key silently became `""`;
+`parse_edoc("", "YAML")` -> `yaml.safe_load("")` -> `None`, and `parsed.get("guid", guid)`
+two lines later crashed with an unhandled `AttributeError: 'NoneType' object has no
+attribute 'get'` -- one property object anywhere in a `source`/`fix`/`delete` set is
+enough to abort a `ts dependency backup` call with a bare traceback instead of a diagnosis.
+**Arguably more likely to fire than the BL-189 case**: a dependency-manager mutation
+routinely targets objects flagged for removal or repointing, which correlates with exactly
+the broken/inaccessible states that produce this response shape.
+
+**The fix -- same guard, different failure mode, deliberately.** `_export_one`'s docstring
+already states the function's contract: *"Raises SystemExit on export or parse failure --
+safe to call before any backup file has been written, per `backup_cmd`'s all-or-nothing
+contract."* Unlike `tml export --parse`'s batch (where skip-and-continue is correct because
+the caller just wants whatever TML is fetchable), a partial backup here would be unsafe --
+`ts dependency mutate`/`apply-change` need every affected object backed up before a
+destructive change is applied, so a silently-skipped object would leave no rollback path
+for it. The fix therefore checks `if not edoc:` before parsing (covering a missing key, an
+explicit `null`, and an empty string identically) and raises the same
+`SystemExit("Backup FAILED for ... No changes have been applied and no backup files were
+written.")` this function already raises for the sibling export- and parse-failure cases --
+just naming the object, the intent, and the reason from `info.status` instead of crashing
+with an `AttributeError` that names neither.
+
+**Testing.** `tools/ts-cli/tests/test_dependency_command.py::TestBackupCommand`
+`test_null_edoc_item_fails_loud_not_with_attributeerror` -- a mocked backup plan where the
+`fix` object's export response is HTTP 200 with a FORBIDDEN `info.status` and no `edoc`;
+asserts the exception is not an `AttributeError`, exit code is non-zero, nothing is written
+under `out_dir` (same all-or-nothing assertion the existing
+`test_aborts_and_writes_nothing_on_export_failure` makes for the HTTP-level case), and the
+message names the object and the reason. Written first and confirmed failing against the
+pre-fix code (`AttributeError("'NoneType' object has no attribute 'get'")`) before the fix
+landed.

@@ -220,8 +220,28 @@ def _export_one(client: ThoughtSpotClient, obj: dict) -> List[dict]:
     data = resp.json()
     items = []
     for item in data:
-        edoc = item.get("edoc", "")
-        info = item.get("info", {})
+        edoc = item.get("edoc")
+        info = item.get("info") or {}
+        if not edoc:
+            # A FORBIDDEN or OBJECT_INVALID_STATE object returns HTTP 200 (resp.ok
+            # above only catches a request-level failure) with no edoc in the
+            # per-item body -- the same shape BL-189 found in `tml export --parse`.
+            # Feeding that straight to parsed.get(...) below crashed with an
+            # unhandled AttributeError (BL-199). Unlike --parse's skip-and-continue,
+            # this function's contract is all-or-nothing (see docstring), so it
+            # still fails loud here -- just with a clear, actionable message
+            # instead of a bare traceback.
+            status = info.get("status") or {}
+            reason = (
+                status.get("error_message")
+                or status.get("status_code")
+                or "no edoc returned (object inaccessible or invalid)"
+            )
+            raise SystemExit(
+                f"Backup FAILED for '{obj.get('name', guid)}' ({guid}) — "
+                f"intent={obj.get('intent')}: {reason}. No changes have been "
+                "applied and no backup files were written."
+            )
         try:
             parsed = parse_edoc(edoc, "YAML")
         except Exception as exc:

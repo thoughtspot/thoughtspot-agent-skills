@@ -216,6 +216,58 @@ class TestBackupCommand:
         result = runner.invoke(app, ["dependency", "backup"], input=json.dumps(plan))
         assert result.exit_code != 0
 
+    def test_null_edoc_item_fails_loud_not_with_attributeerror(self, tmp_path):
+        # BL-199 — a FORBIDDEN/OBJECT_INVALID_STATE object returns HTTP 200 (resp.ok
+        # is True) with no `edoc` in the per-item body — the same shape BL-189 found
+        # in `tml export --parse`. `_export_one` fed that straight into
+        # `parsed.get("guid", guid)`, an unhandled AttributeError on `None`. Per this
+        # function's own docstring ("safe to call before any backup file has been
+        # written, per backup_cmd's all-or-nothing contract"), the correct fix keeps
+        # failing loud with a clear message -- unlike `tml export --parse`'s
+        # skip-and-continue, a partial backup here would be unsafe to mutate against.
+        plan = {
+            "operation": "REMOVE",
+            "source": {"guid": "src-1", "type": "MODEL", "name": "Orders Model"},
+            "fix": [{"guid": "dep-1", "type": "ANSWER", "name": "Revenue Answer"}],
+            "out_dir": str(tmp_path),
+        }
+        mock_client = MagicMock()
+        mock_client.base_url = "https://example.thoughtspot.cloud"
+
+        def fake_post(path, json=None, **kwargs):
+            guid = json["metadata"][0]["identifier"]
+            if guid == "dep-1":
+                resp = MagicMock()
+                resp.ok = True  # HTTP 200 -- the failure is per-item, in the body
+                resp.json.return_value = [{
+                    "info": {
+                        "name": "Revenue Answer",
+                        "id": "dep-1",
+                        "status": {
+                            "status_code": "ERROR",
+                            "error_message": "Cannot download TML due to lack of "
+                                             "access to objects.",
+                        },
+                    },
+                }]
+                return resp
+            return _fake_export_response(guid, "model", "Test_src-1")
+
+        mock_client.post.side_effect = fake_post
+
+        with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=mock_client), \
+             patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+            result = runner.invoke(app, ["dependency", "backup", "--profile", "test"],
+                                   input=json.dumps(plan))
+
+        assert not isinstance(result.exception, AttributeError), repr(result.exception)
+        assert result.exit_code != 0
+        # All-or-nothing: nothing written, same as the HTTP-level failure case above.
+        assert os.listdir(tmp_path) == []
+        output = _all_output(result)
+        assert "dep-1" in output
+        assert "Cannot download TML due to lack of access to objects" in output
+
 
 # ---------------------------------------------------------------------------
 # ts dependency rollback
