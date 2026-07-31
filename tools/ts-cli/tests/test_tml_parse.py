@@ -157,6 +157,16 @@ class TestDetectTmlType:
     def test_only_guid_returns_unknown(self):
         assert detect_tml_type({"guid": "abc"}) == "unknown"
 
+    def test_none_returns_none_not_raise(self):
+        """BL-189: a null/empty edoc parses to None (yaml.safe_load("") == None).
+
+        detect_tml_type(None) must return None rather than raising
+        `TypeError: argument of type 'NoneType' is not iterable` from the
+        `key in parsed` membership check — the exact crash the census hit on
+        a FORBIDDEN/OBJECT_INVALID_STATE object.
+        """
+        assert detect_tml_type(None) is None
+
 
 # ---------------------------------------------------------------------------
 # parse_edoc — YAML

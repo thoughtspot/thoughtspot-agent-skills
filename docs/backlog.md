@@ -82,7 +82,7 @@ are roughly ordered by value÷effort.
 |---|---|---|
 | ~~BL-192~~ | ~~`docs/quality-gates.md` stales from main's commits, not yours — hard-fails the PR gate on a race~~ | DONE (2026-07-30) |
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
-| BL-189 | `ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard | next ts-cli change |
+| ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
 | BL-184 | Worked-example reproducibility test (ground truth is never re-run) | after BL-178 |
 | BL-179 | from-Snowflake promotes the first synonym over the logical identifier | with BL-166 |
@@ -6585,7 +6585,7 @@ persona entry has to be written by hand anyway.
 
 ---
 
-## BL-189 -- `ts tml export --parse` crashes on a null `edoc` (one inaccessible GUID kills the batch) `Tier 2`
+## BL-189 -- `ts tml export --parse` crashes on a null `edoc` (one inaccessible GUID kills the batch) `Tier 2` -- **RESOLVED 2026-07-31**
 
 **Filed:** 2026-07-30.
 **Source:** found incidentally while running the 2026-07-30 TML property census (500 documents on
@@ -6593,8 +6593,25 @@ persona entry has to be written by hand anyway.
 itself, which is the workaround, not the fix.
 **Affects:** `tools/ts-cli/ts_cli/commands/tml.py` (`:258`, `:391`),
 `tools/ts-cli/tests/` (needs a null-edoc fixture).
-**Status:** OPEN -- **ready to fix.** Diagnosed, located, and reproduced; deliberately not fixed in
-the consolidation PR that filed it, which was documentation-only.
+**Status:** **RESOLVED 2026-07-31** -- fixed in ts-cli **v0.127.2**
+(`fix/bl-189-parse-null-edoc`). Both parts of the prescribed fix landed as specified:
+`detect_tml_type()` now guards `parsed is None` and returns `None` (kept distinct from
+`'unknown'`, which still means "a document with no recognised type key"); the `--parse`
+loop in `export_tml` now treats a falsy `edoc` (empty string OR explicit `null` -- the
+live crash traces to the empty-string case, since `yaml.safe_load("")` is `None` and
+that reached `detect_tml_type` unguarded, but an explicit `null` value hit a *different*
+unhandled `TypeError` inside `parse_edoc`'s non-printable-strip step, so both are now
+excluded before parsing is attempted at all) as skip-and-report rather than parse input:
+a stderr warning names the object and the reason read from `info.status` (the
+`info.status.status_code`/`error_message` shape `publish_planning.py:61` already reads
+for the same endpoint), the item is omitted from the JSON array on stdout, and the rest
+of the batch still parses. Exit code is 1 if anything was skipped, 0 otherwise, matching
+`tml import`'s existing "JSON to stdout regardless, exit code carries the signal"
+convention in the same file. Verified with mocked unit tests only (empty-string and
+explicit-`null` edoc, mixed with a good item, and an all-bad batch) -- live verification
+was judged unnecessary per `.claude/rules/ts-cli.md` (pure function + CLI-command logic,
+no live-instance-dependent behaviour), and the failure shape is already recorded verbatim
+in the 2026-07-30 census.
 
 **The bug.** `ts tml export --parse` raises
 `TypeError: argument of type 'NoneType' is not iterable` whenever **any** object in the batch
@@ -6667,9 +6684,10 @@ rules got nothing, because the flags that emit them were not set.
 
 **Method.** Reuse the census scripts verbatim (they persist in the run's scratchpad artifacts:
 `build_sample.py`, `export_sample.py`, `census.py`, `ground_truth.py`, `classify.py`); the only
-change is the export flags. Note that `--parse` is unusable until **BL-189** is fixed, so the
-re-run must parse `edoc` itself as the first one did -- or fix BL-189 first, which is the better
-order.
+change is the export flags. **BL-189 is now fixed** (ts-cli v0.127.2), so the re-run can use
+`--parse` directly instead of hand-parsing `edoc` as the first census did -- a FORBIDDEN/
+OBJECT_INVALID_STATE object in the batch is skipped with a stderr warning rather than aborting
+the run.
 
 **Target:** opportunistic, next `se-thoughtspot` census session. Read-only throughout, so it is
 safe to run at any time.

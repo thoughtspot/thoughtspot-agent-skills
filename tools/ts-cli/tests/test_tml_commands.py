@@ -21,7 +21,9 @@ import pytest
 from ts_cli.cli import app
 
 
-from runners import runner  # noqa: E402  (BL-139: one definition, see runners.py)
+# `runner` for stdout-JSON assertions; `msg_runner` for anything a manual
+# print(file=sys.stderr) emits, which the separated runner silently drops.
+from runners import msg_runner, runner  # noqa: E402  (BL-139: one definition, see runners.py)
 
 
 def _all_output(result):
@@ -169,6 +171,159 @@ class TestExportTypeFeedbackGuard:
         for variant in ("feedback", "Feedback", "FEEDBACK"):
             result = runner.invoke(app, ["tml", "export", "some-guid", "--type", variant])
             assert result.exit_code != 0, f"Expected non-zero exit for --type {variant}"
+
+
+# ---------------------------------------------------------------------------
+# ts tml export --parse: null-edoc guard (BL-189)
+#
+# Why: a FORBIDDEN or OBJECT_INVALID_STATE object in the export response comes back
+# with an empty/absent `edoc` -- exactly what an object returns when the export is
+# refused (census, 2026-07-30, docs/reviews/2026-07-30-tml-census.md). `yaml.safe_load("")`
+# returns None, and the old code fed that straight into `detect_tml_type`, which raised
+# an unhandled `TypeError: argument of type 'NoneType' is not iterable` from `key in
+# parsed` -- aborting the WHOLE batch over one inaccessible GUID. The fix skips (and
+# reports on stderr) any item whose edoc is falsy, so the rest of the batch still parses.
+# ---------------------------------------------------------------------------
+
+def _forbidden_export_item(guid="ts-service-resources-guid", name="TS: Service Resources"):
+    """Mirrors the real FORBIDDEN response shape recorded in the 2026-07-30 census:
+    edoc is empty and info.status carries the reason -- same info.status.status_code
+    shape already relied on in ts_cli/commands/publish_planning.py:61.
+    """
+    return {
+        "edoc": "",
+        "info": {
+            "id": guid,
+            "name": name,
+            "type": "worksheet",
+            "status": {
+                "status_code": "ERROR",
+                "error_message": "Cannot download TML due to lack of access to objects",
+            },
+        },
+    }
+
+
+def _good_export_item(guid="abc-123", name="Good Model"):
+    return {
+        "edoc": f"guid: {guid}\nmodel:\n  name: {name}\n",
+        "info": {"id": guid, "name": name, "type": "model"},
+    }
+
+
+class TestExportParseNullEdocGuard:
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_forbidden_item_does_not_crash_the_batch(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [
+            _good_export_item(), _forbidden_export_item(),
+        ]
+        mock_client_cls.return_value = mock_client
+        result = runner.invoke(
+            app, ["tml", "export", "abc-123", "ts-service-resources-guid", "--parse"]
+        )
+        # A clean `raise SystemExit(1)` (the expected skip-and-report signal) is not a
+        # crash -- only an unhandled TypeError/AttributeError etc. is the regression.
+        assert not isinstance(result.exception, (TypeError, AttributeError)), repr(result.exception)
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_good_item_still_parsed_and_present_in_output(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [
+            _good_export_item(), _forbidden_export_item(),
+        ]
+        mock_client_cls.return_value = mock_client
+        result = runner.invoke(
+            app, ["tml", "export", "abc-123", "ts-service-resources-guid", "--parse"]
+        )
+        data = json.loads(result.stdout)
+        assert len(data) == 1
+        assert data[0]["type"] == "model"
+        assert data[0]["guid"] == "abc-123"
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_forbidden_item_omitted_from_stdout(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [
+            _good_export_item(), _forbidden_export_item(),
+        ]
+        mock_client_cls.return_value = mock_client
+        result = runner.invoke(
+            app, ["tml", "export", "abc-123", "ts-service-resources-guid", "--parse"]
+        )
+        data = json.loads(result.stdout)
+        guids = [d["guid"] for d in data]
+        assert "ts-service-resources-guid" not in guids
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_stderr_warning_names_guid_and_reason(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [
+            _good_export_item(), _forbidden_export_item(),
+        ]
+        mock_client_cls.return_value = mock_client
+        result = msg_runner.invoke(
+            app, ["tml", "export", "abc-123", "ts-service-resources-guid", "--parse"]
+        )
+        assert "ts-service-resources-guid" in result.output
+        assert "TS: Service Resources" in result.output
+        assert "Cannot download TML due to lack of access to objects" in result.output
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_exit_code_nonzero_when_an_item_is_skipped(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [
+            _good_export_item(), _forbidden_export_item(),
+        ]
+        mock_client_cls.return_value = mock_client
+        result = runner.invoke(
+            app, ["tml", "export", "abc-123", "ts-service-resources-guid", "--parse"]
+        )
+        assert result.exit_code == 1
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_exit_code_zero_when_nothing_skipped(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [_good_export_item()]
+        mock_client_cls.return_value = mock_client
+        result = runner.invoke(app, ["tml", "export", "abc-123", "--parse"])
+        assert result.exit_code == 0
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_all_items_forbidden_yields_empty_array_not_a_crash(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [_forbidden_export_item()]
+        mock_client_cls.return_value = mock_client
+        result = runner.invoke(
+            app, ["tml", "export", "ts-service-resources-guid", "--parse"]
+        )
+        assert not isinstance(result.exception, (TypeError, AttributeError)), repr(result.exception)
+        assert json.loads(result.stdout) == []
+        assert result.exit_code == 1
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_none_edoc_value_also_skipped_not_crashed(self, mock_resolve, mock_client_cls):
+        """The API may send an explicit JSON null rather than an empty string --
+        both must be treated as 'no content', not just the empty-string case."""
+        item = _forbidden_export_item()
+        item["edoc"] = None
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [_good_export_item(), item]
+        mock_client_cls.return_value = mock_client
+        result = runner.invoke(
+            app, ["tml", "export", "abc-123", "ts-service-resources-guid", "--parse"]
+        )
+        assert not isinstance(result.exception, (TypeError, AttributeError)), repr(result.exception)
+        data = json.loads(result.stdout)
+        assert len(data) == 1
 
 
 # ---------------------------------------------------------------------------

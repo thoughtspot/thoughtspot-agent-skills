@@ -243,15 +243,24 @@ def load_input_tmls(
         raise SystemExit("stdin must be a JSON string or array of TML strings.")
 
 
-def detect_tml_type(parsed: dict) -> str:
+def detect_tml_type(parsed: Optional[dict]) -> Optional[str]:
     """Return the TML object type from the top-level key (excluding 'guid'/'obj_id').
 
     ThoughtSpot TML has exactly one top-level key that names the object type
     (e.g. 'model', 'table', 'answer'). The optional 'guid' and 'obj_id' keys
     at document root are excluded from the search.
 
-    Returns 'unknown' if no recognised type key is found.
+    Returns 'unknown' if `parsed` is a dict with no recognised type key.
+
+    Returns `None` (distinct from 'unknown') when `parsed is None` -- which is what
+    `parse_edoc` returns for a null/empty edoc (`yaml.safe_load("")` is `None`), the
+    shape a FORBIDDEN or OBJECT_INVALID_STATE export item comes back with (BL-189).
+    Without this guard, `key in parsed` below raises
+    `TypeError: argument of type 'NoneType' is not iterable` -- an unhandled crash
+    that aborted a whole export batch over one inaccessible object.
     """
+    if parsed is None:
+        return None
     _skip = {"guid", "obj_id"}
     # Prefer known type keys first for determinism
     for key in _TML_TYPE_KEYS:
@@ -318,6 +327,13 @@ def export_tml(
     object. Non-printable characters are stripped automatically. This
     eliminates the boilerplate parse loop that every skill otherwise needs.
 
+    With --parse, an item with no edoc content (a FORBIDDEN or OBJECT_INVALID_STATE
+    object -- no view access, or a broken object) is skipped rather than aborting
+    the batch: a warning naming the object and the reason (if the response carries
+    one) is printed to stderr, and the item is omitted from the JSON array on
+    stdout. Exit code is 1 if any item was skipped, 0 otherwise -- stdout always
+    carries the successfully parsed items regardless of exit code.
+
     Note: --type FEEDBACK is not supported. Feedback (nls_feedback) TML must
     be exported via the feedback object's own GUID, not the parent model's
     GUID. To locate feedback GUIDs: use `ts metadata dependents <model-guid>`
@@ -377,24 +393,61 @@ def export_tml(
         return
 
     result = []
+    skipped = 0
     for item in data:
-        edoc = item.get("edoc", "")
-        info = item.get("info", {})
-        obj_name = info.get("name", "unknown")
-        try:
-            parsed_tml = parse_edoc(edoc, format)
-        except Exception as exc:
-            raise SystemExit(
-                f"--parse: failed to parse edoc for '{obj_name}': {exc}"
-            ) from exc
-        result.append({
-            "type": detect_tml_type(parsed_tml),
-            "guid": parsed_tml.get("guid", ""),
-            "tml": parsed_tml,
-            "info": info,
-        })
+        parsed_item = _parse_export_item(item, format)
+        if parsed_item is None:
+            skipped += 1
+            continue
+        result.append(parsed_item)
 
+    # JSON to stdout regardless -- skills pipe it, and the ts-cli convention is
+    # structured data on stdout with diagnostics on stderr (see `tml import`'s
+    # import_failures handling above). The exit code is what changes.
     print(json.dumps(result))
+    if skipped:
+        raise SystemExit(1)
+
+
+def _parse_export_item(item: dict, format: str) -> Optional[dict]:
+    """Parse one `tml export --parse` response item into `{type, guid, tml, info}`.
+
+    Returns `None` (after printing a stderr warning) when the item's `edoc` is
+    falsy -- an empty string or an explicit `null` -- rather than attempting to
+    parse it. That is exactly what a FORBIDDEN (no view access) or
+    OBJECT_INVALID_STATE (broken object) export item returns, and feeding it to
+    `parse_edoc`/`detect_tml_type` unguarded used to crash the whole batch with an
+    unhandled `TypeError` over one inaccessible GUID (BL-189). The reason is read
+    from `info.status` when the response carries one -- the same
+    `info.status.status_code` shape `publish_planning.py` already reads for this
+    endpoint -- so the caller learns which GUID was dropped and why, on stderr,
+    without the drop showing up in the JSON on stdout.
+    """
+    edoc = item.get("edoc")
+    info = item.get("info") or {}
+    obj_name = info.get("name", "unknown")
+    if not edoc:
+        guid = info.get("id") or "unknown"
+        status = info.get("status") or {}
+        reason = (
+            status.get("error_message")
+            or status.get("status_code")
+            or "no edoc returned (object inaccessible or invalid)"
+        )
+        print(f"Warning: skipping '{obj_name}' ({guid}): {reason}", file=sys.stderr)
+        return None
+    try:
+        parsed_tml = parse_edoc(edoc, format)
+    except Exception as exc:
+        raise SystemExit(
+            f"--parse: failed to parse edoc for '{obj_name}': {exc}"
+        ) from exc
+    return {
+        "type": detect_tml_type(parsed_tml),
+        "guid": parsed_tml.get("guid", ""),
+        "tml": parsed_tml,
+        "info": info,
+    }
 
 
 @app.command("import")

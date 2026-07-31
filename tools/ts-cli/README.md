@@ -498,6 +498,12 @@ on the CLI output.
 **Note:** Using `--associated` on a model exports the model plus all referenced tables.
 For example, `--fqn --associated` on a model with 3 tables returns 4 objects total.
 
+**Note:** With `--parse`, an item with no `edoc` content — a FORBIDDEN (no view access) or
+OBJECT_INVALID_STATE (broken object) export — is skipped rather than aborting the batch. A
+warning naming the object and the reason (read from `info.status`, when present) is printed
+to stderr; the item is omitted from the JSON array on stdout. Exit code is `1` if any item
+was skipped, `0` otherwise — stdout always carries the successfully parsed items regardless.
+
 ---
 
 ### `ts tml import`
