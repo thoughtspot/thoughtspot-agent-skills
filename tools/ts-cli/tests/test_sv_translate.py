@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from ts_cli.sv_translate import (
+    fact_column_type,
     _find_over_split,
     _is_simple_agg,
     _parse_window_spec,
@@ -628,7 +629,11 @@ class TestResolver:
         """
         parsed = _parsed_workforce()
         resolver = make_resolver(parsed, "employees")
-        assert resolver("employees.headcount") == "[formula_Employee Count]"
+        # BL-179: the declared name wins by default; the synonym
+        # ('Employee Count') is an alternate NL name, not the identifier.
+        assert resolver("employees.headcount") == "[formula_Headcount]"
+        promoted = make_resolver(parsed, "employees", promote_synonym=True)
+        assert promoted("employees.headcount") == "[formula_Employee Count]"
 
     def test_same_table_ratio_of_simple_aggs_fails_the_lint_gate(self):
         """The BL-194 shape, pinned so the limitation is visible in the suite.
@@ -815,7 +820,9 @@ class TestResolver:
         # computed dimension is a formula.
         parsed = _parsed_dimension_shapes()
         resolver = make_resolver(parsed, "t")
-        assert resolver("t.computed") == "[formula_Full Name]"
+        assert resolver("t.computed") == "[formula_Computed]"
+        promoted = make_resolver(parsed, "t", promote_synonym=True)
+        assert promoted("t.computed") == "[formula_Full Name]"
 
     def test_unknown_name_on_a_table_with_dimensions_still_assumes_physical(self):
         # The assumed-physical fallback must survive — most references are to
@@ -991,3 +998,84 @@ class TestUsing:
         assert "group_sum" in m["ts_expr"] or "group_aggregate" in m["ts_expr"]
         assert "B::PK" in m["ts_expr"]
         assert "query_filters" in m["ts_expr"]
+
+
+class TestFactColumnType:
+    """BL-181 — `_translate_fact` hardcoded ATTRIBUTE on both branches, so
+    quantities, prices and profit were declared categorical. The SV's own
+    `facts()` block is the signal: it holds row-level numeric values."""
+
+    def _fact(self, expr):
+        return {"source_table": "T", "source_column": "F", "alias_table": "t",
+                "alias_name": "f", "expr": expr, "comment": None,
+                "synonyms": [], "is_private": False}
+
+    @pytest.mark.parametrize("expr", [
+        None,                                   # passthrough physical column
+        "t.amount",
+        "t.qty * t.price",
+        "t.revenue - t.cost",
+        "t.a / t.b",
+        "ABS(t.delta)",
+        "ROUND(t.rate, 2)",
+        "CASE WHEN t.flag THEN 1 ELSE 0 END",   # numeric CASE
+    ])
+    def test_numeric_facts_are_measures(self, expr):
+        assert fact_column_type(self._fact(expr)) == "MEASURE"
+
+    @pytest.mark.parametrize("expr", [
+        "CONCAT(t.first, t.last)",
+        "t.first || t.last",
+        "TO_CHAR(t.d, 'YYYY')",
+        "UPPER(t.code)",
+        "SUBSTR(t.code, 1, 3)",
+        "DATE_TRUNC(month, t.d)",
+        "t.amount > 0",
+        "t.status = 'X'",
+        "CASE WHEN t.n > 1 THEN 'many' ELSE 'one' END",
+    ])
+    def test_non_numeric_facts_are_attributes(self, expr):
+        assert fact_column_type(self._fact(expr)) == "ATTRIBUTE"
+
+    def test_passthrough_fact_translates_as_a_measure_column(self):
+        parsed = {"tables": [{"alias": "T", "name": "T", "primary_key": ["ID"]}],
+                  "relationships": [], "dimensions": [], "metrics": [],
+                  "facts": [self._fact(None)]}
+        out = translate_sv_formulas(parsed)["translated"][0]
+        assert out["output_kind"] == "column"
+        assert out["column_type"] == "MEASURE"
+
+    def test_string_fact_translates_as_an_attribute_formula(self):
+        f = self._fact("CONCAT(t.a, t.b)")
+        parsed = {"tables": [{"alias": "T", "name": "T", "primary_key": ["ID"]}],
+                  "relationships": [], "dimensions": [], "metrics": [], "facts": [f]}
+        out = translate_sv_formulas(parsed)["translated"][0]
+        assert out["column_type"] == "ATTRIBUTE"
+
+
+class TestTranslateRecordsNamingDecision:
+    """The promotion decision is made once and recorded, so build-model reads
+    it rather than being told a second time — two independent naming paths is
+    the BL-178 defect-2 shape."""
+
+    PARSED = {"tables": [{"alias": "T", "name": "T", "primary_key": ["ID"]}],
+              "relationships": [], "facts": [], "metrics": [],
+              "dimensions": [{"source_table": "T", "source_column": "STATUS",
+                              "alias_table": "t", "alias_name": "status",
+                              "expr": None, "comment": None,
+                              "synonyms": ["State", "Condition"],
+                              "is_private": False}]}
+
+    def test_default_is_no_promotion(self):
+        r = translate_sv_formulas(self.PARSED)
+        assert r["options"]["promote_first_synonym"] is False
+        assert r["translated"][0]["name"] == "STATUS"
+
+    def test_opt_in_is_recorded(self):
+        r = translate_sv_formulas(self.PARSED, promote_synonym=True)
+        assert r["options"]["promote_first_synonym"] is True
+
+    def test_synonyms_are_preserved_either_way(self):
+        for flag in (False, True):
+            r = translate_sv_formulas(self.PARSED, promote_synonym=flag)
+            assert r["translated"][0]["synonyms"] == ["State", "Condition"]

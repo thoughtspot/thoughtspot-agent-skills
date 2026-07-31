@@ -270,10 +270,13 @@ def test_passthrough_fact_metric_uses_physical_column():
     """
     doc = _build(TPCDS_DDL, TPCDS_TABLES, "Tpcds Retail Model")
     exprs = {f["name"]: f["expr"] for f in doc["model"]["formulas"]}
-    # `total revenue` shares its physical column with the `total price` fact
-    # column, so I8 promotion re-expresses it as an aggregation formula.
-    assert "[STORE_SALES::ss_ext_sales_price]" in exprs["total revenue"]
-    assert "formula_ss_ext_sales_price" not in exprs["total revenue"]
+    # `Total Sales` shares its physical column with the `ss_ext_sales_price`
+    # fact column, so I8 promotion re-expresses it as an aggregation formula.
+    # Keyed by the DECLARED name (`total_sales`) — BL-179: this fixture is a
+    # foreign SV, where `with synonyms=('total revenue', ...)` names alternate
+    # NL phrasings and must not displace the logical identifier.
+    assert "[STORE_SALES::ss_ext_sales_price]" in exprs["Total Sales"]
+    assert "formula_ss_ext_sales_price" not in exprs["Total Sales"]
 
 
 # ---------------------------------------------------------------------------

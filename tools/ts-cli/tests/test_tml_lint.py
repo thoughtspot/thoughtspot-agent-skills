@@ -252,3 +252,88 @@ def test_multiple_violations_accumulate():
     data["model"]["model_tables"][0]["id"] = "orders"
     findings = lint_tml(data)
     assert len(findings) >= 3
+
+
+class TestI14DuplicateJoinPairs:
+    """I14 — an ordered table pair joined twice leaves the join path ambiguous
+    and ThoughtSpot will not load the Model. A Semantic View source declares
+    exactly this shape whenever a dimension is role-played without aliases
+    (BL-202)."""
+
+    @staticmethod
+    def _model(model_tables):
+        return {"model": {"name": "M", "model_tables": model_tables,
+                          "columns": [], "formulas": []}}
+
+    @staticmethod
+    def _join(name, with_, on="[A::X] = [B::Y]"):
+        return {"name": name, "with": with_, "on": on,
+                "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"}
+
+    def test_duplicate_pair_is_flagged(self):
+        f = lint_tml(self._model([
+            {"name": "FACT_SALES", "joins": [
+                self._join("TO_TIME_TXN", "DIM_TIME"),
+                self._join("TO_TIME_SHIP", "DIM_TIME")]},
+            {"name": "DIM_TIME"}]))
+        assert len(f) == 1
+        assert f[0].startswith("I14:")
+        assert "'FACT_SALES' joins 'DIM_TIME' 2 times" in f[0]
+        assert "TO_TIME_TXN" in f[0] and "TO_TIME_SHIP" in f[0]
+
+    def test_aliased_roles_are_clean(self):
+        f = lint_tml(self._model([
+            {"name": "FACT_SALES", "joins": [
+                self._join("TO_TIME_TXN", "DIM_TIME"),
+                self._join("TO_TIME_SHIP", "DIM_TIME_SHIP_DATE")]},
+            {"name": "DIM_TIME"},
+            {"name": "DIM_TIME", "alias": "DIM_TIME_SHIP_DATE"}]))
+        assert f == []
+
+    def test_alias_is_the_node_identity_on_the_from_side(self):
+        """Two aliases of one physical table each joining the same target is
+        fine — the pairs differ because the FROM nodes differ."""
+        f = lint_tml(self._model([
+            {"name": "DIM_Q", "alias": "DIM_Q_A", "joins": [
+                self._join("A_TO_T", "DIM_TIME")]},
+            {"name": "DIM_Q", "alias": "DIM_Q_B", "joins": [
+                self._join("B_TO_T", "DIM_TIME")]},
+            {"name": "DIM_TIME"}]))
+        assert f == []
+
+    def test_from_side_alias_named_in_the_finding(self):
+        f = lint_tml(self._model([
+            {"name": "DIM_Q", "alias": "DIM_Q_A", "joins": [
+                self._join("A_TO_T1", "DIM_TIME"),
+                self._join("A_TO_T2", "DIM_TIME")]},
+            {"name": "DIM_TIME"}]))
+        assert len(f) == 1
+        assert "'DIM_Q_A' joins 'DIM_TIME'" in f[0]
+
+    def test_distinct_targets_are_clean(self):
+        f = lint_tml(self._model([
+            {"name": "FACT_SALES", "joins": [
+                self._join("TO_TIME", "DIM_TIME"),
+                self._join("TO_CUST", "DIM_CUSTOMERS")]},
+            {"name": "DIM_TIME"}, {"name": "DIM_CUSTOMERS"}]))
+        assert f == []
+
+    def test_five_way_roleplay_reports_the_count(self):
+        f = lint_tml(self._model([
+            {"name": "DIM_CUSTOMERS", "joins": [
+                self._join(f"TO_EMP_{i}", "DIM_EMPLOYEES") for i in range(5)]},
+            {"name": "DIM_EMPLOYEES"}]))
+        assert len(f) == 1
+        assert "5 times" in f[0]
+
+    def test_unnamed_join_is_labelled(self):
+        f = lint_tml(self._model([
+            {"name": "A", "joins": [{"with": "B"}, {"with": "B"}]},
+            {"name": "B"}]))
+        assert len(f) == 1
+        assert "(unnamed)" in f[0]
+
+    def test_malformed_entries_do_not_crash(self):
+        assert lint_tml(self._model(["not-a-dict"])) == []
+        assert lint_tml(self._model([{"name": "A", "joins": ["x", None]}])) == []
+        assert lint_tml(self._model([{"name": "A", "joins": [{"on": "x"}]}])) == []

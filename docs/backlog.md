@@ -64,6 +64,10 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
+| ~~BL-200~~ | ~~SV entry splitter not quote aware -- a comma in `comment=` shatters the entry~~ | DONE (2026-07-31) |
+| ~~BL-201~~ | ~~live `sample_values` unmatched, read as part of the expression~~ | DONE (2026-07-31) |
+| ~~BL-202~~ | ~~a table pair joined twice makes the Model unloadable; nothing caught it (I14)~~ | DONE (2026-07-31) |
+| BL-203 | ERD parser discards a join's real name -- same-pair joins unreachable, false degraded-fidelity warning | next ERD pass |
 | ~~BL-199~~ | ~~`dependency.py`'s `_export_one` — same null-`edoc` crash BL-189 fixed, one call away~~ | DONE (2026-07-31) |
 | ~~BL-191~~ | ~~`dependency/mutate.py` reads Views through `column_id` (0/265 in the wild) — silent dangling refs~~ | DONE (2026-07-31) |
 | BL-183 | Validator: dangling `[formula_X]` refs in `ts tml lint` + CA-JSON table refs | with BL-178 |
@@ -5968,6 +5972,15 @@ do not resolve, with every gate green.
 
 ## BL-179 -- from-Snowflake promotes the first synonym over the logical identifier `Tier 2`
 
+**Status:** **RESOLVED 2026-07-31** -- fixed in ts-cli **v0.128.0**. Promotion is now
+opt-in (`translate-formulas --promote-first-synonym`, default off) and the decision is
+recorded in `translated.json` `options.promote_first_synonym` so `build-model` reads it
+rather than deciding a second time. `_column_props` no longer drops `synonyms[0]` unless
+it was actually promoted, so no synonym is lost. Promotion is not needed to round-trip a
+display name: `build-sv` derives the construct name as `to_snake(display_name)`, so
+title-casing recovers it -- opt in only when the name does not survive that transform
+(`"YTD Sales"` -> `ytd_sales` -> `"Ytd Sales"`).
+
 **Filed:** 2026-07-29.
 **Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
 (`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`), finding F10.
@@ -6095,6 +6108,18 @@ numbers, both on common shapes.
 ---
 
 ## BL-181 -- from-Snowflake classifies every fact `ATTRIBUTE`, so `facts()` returns as `dimensions()` `Tier 2`
+
+**Status:** **RESOLVED 2026-07-31** -- fixed in ts-cli **v0.128.0** via the approach this
+entry prescribes. New `sv_translate.fact_column_type()` classifies from the SV: the
+`facts()` block *is* the signal (it declares row-level numeric values, `dimensions()`
+declares categorical ones), so a fact is MEASURE by default and ATTRIBUTE only when the
+expression is evidently non-numeric -- headed by a string/date/boolean function, a `||`
+concatenation, a bare comparison, or a `CASE` returning string literals. Deliberately
+does **not** infer intent from column names: a source that declares an employee number in
+`facts()` gets a summable measure, because that is what it declared. Per approach item 2,
+`build-model`'s summary now reports `fact_types: {measure, attribute}` so the skill's
+review step can catch a mis-declared one. On the 1,100-line customer fixture all 182
+facts classify MEASURE (previously 0).
 
 **Filed:** 2026-07-29.
 **Source:** 2026-07-29 TPC-DS conversion-fidelity cross-validation
@@ -6999,6 +7024,108 @@ someone regenerates, so they may lag reality in between. The rendered document n
 points readers at `git log -1 -- tools/validate/<validator>.py` for an authoritative answer. Dropping
 the column entirely was the alternative; it was not taken because the audit's angle-7 checklist uses
 the column as a starting point, and a labelled snapshot is more useful than nothing.
+
+---
+
+## BL-200 -- SV DDL entry splitter is not quote aware, so a comma in `comment=` shatters the entry `Tier 1`
+
+**Filed:** 2026-07-31.
+**Source:** converting a real 1,100-line customer Semantic View (Stuller sales).
+**Affects:** `tools/ts-cli/ts_cli/snowflake_ops.py` (`_split_top_level`) -- and therefore
+`sv_parse.py` (parse-sv) plus the to-direction (`build-sv`, `lint-ddl`) which share it.
+**Status:** **RESOLVED 2026-07-31** -- fixed in ts-cli **v0.128.0**.
+
+`_split_top_level` tracked paren depth but not quotes, so a comma inside `comment='...'`
+was read as an entry separator. Semantic View DDL carries free text in `comment=` on
+nearly every construct and that text routinely contains commas, so this fires on most
+real SVs. On the fixture: **15 tables parsed as 32** and **169 fragments** landed in
+`unsupported[]` -- `"but technically"` arriving as a dimension. Silent: exit code 0, and
+the debris is in `unsupported[]` where a skill run can skim past it.
+
+`databricks/mv_expr._split_top_level` was already quote aware and had a test for exactly
+this (`test_split_top_level_quote_aware`); the Snowflake side never got it. Now quote
+aware, honouring the SQL `''` escape.
+
+---
+
+## BL-201 -- `sample_values` in live GET_DDL is unmatched, so the clause is read as part of the expression `Tier 1`
+
+**Filed:** 2026-07-31.
+**Source:** converting a real 1,100-line customer Semantic View (Stuller sales).
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py` (`_SAMPLE_VALUES_RE`).
+**Status:** **RESOLVED 2026-07-31** -- fixed in ts-cli **v0.128.0**.
+
+`_SAMPLE_VALUES_RE` matched only `with sample values (` -- the authored/documented form.
+**Live `GET_DDL` emits `sample_values (`**, which went unmatched, so the clause stayed in
+the entry text and was mis-read as part of the expression: a passthrough rename became
+`t.status sample_values ('a','b')`, and `translate-formulas` then rejected it as an
+unknown `SAMPLE_VALUES` function. On the fixture that skipped **all 46 `is_enum`
+dimensions** (964/1010 translated) while `is_enum` itself parsed correctly, so the entry
+looked half-right.
+
+This is the shape the standing **BL-100** warning ("DDL clause shape unverified against
+live GET_DDL") was pointing at -- it fired 47 times on the fixture and was the only
+signal. Both spellings now accepted.
+
+---
+
+## BL-202 -- a table pair joined twice makes the Model unloadable, and nothing catches it `Tier 1`
+
+**Filed:** 2026-07-31.
+**Source:** converting a real 1,100-line customer Semantic View (Stuller sales);
+unloadable-Model behaviour confirmed by the skill operator.
+**Affects:** `tools/ts-cli/ts_cli/tml_lint.py` (new I14),
+`agents/shared/schemas/ts-model-conversion-invariants.md` (I14),
+`agents/cli/ts-convert-from-snowflake-sv/SKILL.md` (new Step 7.5).
+**Status:** **PARTIALLY RESOLVED 2026-07-31** -- the gate and the procedure landed in
+ts-cli **v0.128.0**; automatic alias synthesis is deliberately **not** done, see below.
+
+A Snowflake SV scopes construct names *per table*, so declaring eight relationships from
+one fact to one `DIM_TIME` is legal and idiomatic there. ThoughtSpot has one flat join
+graph, so the same declaration leaves the join path ambiguous and **the Model will not
+load**. `build-model` emitted **21 such joins across 7 pairs** on the fixture and every
+gate reported clean -- `lint_findings: []`, I1-I13 all passing. Role-played dimensions are
+common in sales schemas (order vs ship vs booked date; five customer-team employee roles),
+so this is close to a default outcome, not an edge case.
+
+New **I14** rejects any duplicate `(from_node, joins[].with)` pair, naming the pair, the
+count and the offending join names. `build-model` runs `ts tml lint` internally, so it now
+refuses rather than emitting an unloadable Model.
+
+**Why alias synthesis is not automatic.** The mechanical half (mint an alias node per
+role, repoint the join) is trivial, but the alias's **column set is a judgment call** and
+the naive answer is actively harmful: copying all 56 `DIM_TIME` columns into 14 aliases
+adds **784** near-duplicate columns to a 1,015-column model and degrades NL search more
+than the ambiguity it fixed. The right trim (~12 grouping columns per alias, period flags
+and offsets left on the base node only) depends on how the model will be used. I14 plus
+the SKILL's Step 7.5 procedure puts the decision where the context is. **Follow-up:
+BL-203** for a `ts snowflake plan-roleplay` helper that emits the alias plan and leaves
+the trim to the operator.
+
+---
+
+## BL-203 -- ERD parser discards a join's real name, so same-pair joins are unreachable in the inspector `Tier 2`
+
+**Filed:** 2026-07-31.
+**Source:** skill operator noticed `FACT_OPEN_ORDERS`'s `BOOKED_DATE_ID` and
+`ORDER_DATE_ID` joins missing from a rendered ERD.
+**Affects:** `agents/shared/erd/parser.py` (`_build_joins`, ~:153;
+`_log_degraded_fidelity`).
+**Status:** OPEN.
+
+For an **inline** join, `_build_joins` synthesizes the name as `f"{frm}_{to}"` and
+discards the model TML's actual `name:`. Two consequences. (a) The viewer keys edges by
+name (`showEdge(name)`), so where a pair is joined more than once only the **first** is
+reachable in the inspector -- on the fixture that hid **18 of 23** date joins, which is
+how the defect was found. (b) `_log_degraded_fidelity` looks the synthesized name up in
+the Table-TML join index, where it can never match, so it emits a **false**
+"Fidelity degraded: N joins had no Table TML definition" for every inline-join model --
+cardinality and type are in fact present, read straight off the inline join.
+
+Prefer `j.get("name")` when present, falling back to the synthesized form. Note the fix
+becomes less load-bearing once I14 (BL-202) forces same-pair joins to be aliased, since
+distinct `with:` targets already yield distinct synthesized names -- but (b) is wrong
+regardless, and a hand-authored Model can still carry the shape.
 
 ---
 

@@ -35,7 +35,9 @@ def normalize_tables(tables: dict) -> dict[str, str]:
     return out
 
 
-def _column_props(entry: dict, *, is_formula: bool) -> dict:
+def _column_props(
+    entry: dict, *, is_formula: bool, promote_synonym: bool = False,
+) -> dict:
     props: dict = {"column_type": entry["column_type"]}
     if entry["column_type"] == "MEASURE":
         props["aggregation"] = entry.get("aggregation") or "SUM"
@@ -45,8 +47,10 @@ def _column_props(entry: dict, *, is_formula: bool) -> dict:
         props["index_type"] = "DONT_INDEX"
     if entry.get("comment"):
         props["description"] = entry["comment"]
+    # The first synonym is dropped only when it was promoted to the column
+    # name; otherwise every synonym belongs here (BL-179).
     syns = entry.get("synonyms") or []
-    remaining = syns[1:] if syns else []
+    remaining = syns[1:] if (promote_synonym and syns) else list(syns)
     if remaining:
         props["synonyms"] = list(remaining)
         props["synonym_type"] = "USER_DEFINED"
@@ -54,12 +58,13 @@ def _column_props(entry: dict, *, is_formula: bool) -> dict:
 
 
 def build_columns_and_formulas(
-    translated: list[dict],
+    translated: list[dict], *, promote_synonym: bool = False,
 ) -> tuple[list[dict], list[dict], dict[str, str]]:
     physical = []
     formula_entries = []
     for entry in translated:
-        titled = dict(entry, title=display_title(entry))
+        titled = dict(entry, title=display_title(
+            entry, promote_synonym=promote_synonym))
         if entry["output_kind"] == "column":
             physical.append({"name": titled["title"], "entry": titled,
                              "sv_name": entry["name"]})
@@ -99,11 +104,15 @@ def build_columns_and_formulas(
             formulas.append(formula)
             columns.append({"name": candidate["name"],
                             "formula_id": formula["id"],
-                            "properties": _column_props(entry, is_formula=True)})
+                            "properties": _column_props(
+                                entry, is_formula=True,
+                                promote_synonym=promote_synonym)})
         else:
             columns.append({"name": candidate["name"],
                             "column_id": f"{entry['table']}::{entry['column']}",
-                            "properties": _column_props(entry, is_formula=False)})
+                            "properties": _column_props(
+                                entry, is_formula=False,
+                                promote_synonym=promote_synonym)})
 
     for entry in translated:
         sv_name = entry["name"]
@@ -270,14 +279,29 @@ def strip_formulas(doc: dict) -> dict:
     return stripped
 
 
+def _fact_type_counts(translated: list[dict]) -> dict[str, int]:
+    counts = {"measure": 0, "attribute": 0}
+    for e in translated:
+        if e.get("role") != "fact":
+            continue
+        key = "measure" if e["column_type"] == "MEASURE" else "attribute"
+        counts[key] += 1
+    return counts
+
+
 def build_model_tml_sv(
     *, model_name: str, parsed: dict, translated_doc: dict,
     tables: dict, sv_fqn: str | None = None,
     spotter_enabled: bool | None = None,
     existing_guid: str | None = None,
 ) -> tuple[dict, dict]:
+    # The naming decision is made once, by translate-formulas, and recorded in
+    # its output. Re-deciding here would give the resolver and the builder two
+    # independent naming paths — exactly the BL-178 defect-2 shape.
+    promote_synonym = bool(
+        (translated_doc.get("options") or {}).get("promote_first_synonym"))
     columns, formulas, rename_map = build_columns_and_formulas(
-        translated_doc["translated"])
+        translated_doc["translated"], promote_synonym=promote_synonym)
     _check_no_duplicate_display_names(columns)
 
     model: dict = {
@@ -299,6 +323,11 @@ def build_model_tml_sv(
         "measures": [c["name"] for c in columns
                      if c["properties"]["column_type"] == "MEASURE"],
         "formula_count": len(formulas),
+        # Facts are MEASURE unless the expression is evidently non-numeric
+        # (BL-181). The source decides; report the split so the skill's review
+        # step can catch a fact the SV author mis-declared (an employee number
+        # in facts() becomes a summable measure, faithfully but uselessly).
+        "fact_types": _fact_type_counts(translated_doc["translated"]),
     }
     doc = {"model": model}
     if existing_guid:

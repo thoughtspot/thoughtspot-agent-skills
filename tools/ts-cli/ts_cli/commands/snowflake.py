@@ -414,6 +414,13 @@ def translate_formulas_cmd(
         ..., "--input", "-i", help="Parsed SV JSON from parse-sv"),
     output_file: str = typer.Option(
         ..., "--output", "-o", help="Output translated JSON path"),
+    promote_first_synonym: bool = typer.Option(
+        False, "--promote-first-synonym/--no-promote-first-synonym",
+        help="Use a construct's first synonym as its ThoughtSpot column name "
+             "instead of its declared name. Only correct for a Semantic View "
+             "this converter authored (round trip); on a foreign SV synonyms "
+             "are alternate NL names and promoting one destroys the logical "
+             "identifier (BL-179)."),
 ) -> None:
     """Translate Snowflake SQL formulas from parsed SV to ThoughtSpot syntax.
 
@@ -430,7 +437,8 @@ def translate_formulas_cmd(
         raise SystemExit(1)
     parsed = json.loads(path.read_text())
 
-    result = translate_sv_formulas(parsed)
+    result = translate_sv_formulas(
+        parsed, promote_synonym=promote_first_synonym)
 
     out = Path(output_file)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -608,6 +616,7 @@ def _build_model_summary(
         "columns": {"attributes": build_info["attributes"],
                      "measures": build_info["measures"]},
         "formula_count": build_info["formula_count"],
+        "fact_types": build_info["fact_types"],
         "skipped": skipped,
         "name_renames": build_info["rename_map"],
         "spotter_enabled": spotter_enabled,

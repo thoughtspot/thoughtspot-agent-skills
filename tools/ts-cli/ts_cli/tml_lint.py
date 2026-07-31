@@ -6,7 +6,7 @@ ThoughtSpot accepts the TML and then behaves wrong later (silently drops a formu
 flips a measure to an attribute, breaks a join at query time). A couple (I8, I12) ARE
 caught by the server (including under VALIDATE_ONLY) but are cheap, purely-structural
 checks worth failing on locally, without a live call, especially across a batch of
-generated TML. Rules mirror invariants I1/I2/I4/I5/I8/I12/I13 in
+generated TML. Rules mirror invariants I1/I2/I4/I5/I8/I12/I13/I14 in
 `agents/shared/schemas/ts-model-conversion-invariants.md`.
 
 Pure functions over a parsed TML dict so they are trivially unit-testable.
@@ -21,7 +21,7 @@ def lint_tml(data: dict) -> list[str]:
     """Return a list of invariant-violation strings for one parsed TML doc. Empty = clean.
 
     Auto-detects table vs model TML by the top-level key. Checks the model invariants
-    (I1/I2/I4/I5/I8/I12/I13) plus the guid-placement rule — see the module docstring
+    (I1/I2/I4/I5/I8/I12/I13/I14) plus the guid-placement rule — see the module docstring
     for which of these the server's VALIDATE_ONLY policy does and doesn't also surface.
     """
     if not isinstance(data, dict):
@@ -107,7 +107,57 @@ def lint_tml(data: dict) -> list[str]:
 
     findings.extend(_check_bare_column_id_single_table(model_tables, columns))
     findings.extend(_check_dangling_formula_refs(formulas, columns))
+    findings.extend(_check_duplicate_join_pairs(model_tables))
 
+    return findings
+
+
+def _node_id(entry: dict) -> str:
+    """A model_tables entry's node identity.
+
+    `alias` wins when present — that is the whole point of an alias, and it is
+    what `joins[].with` and `column_id` prefixes reference. Otherwise `id`
+    (which I4 already pins to `name`), else `name`.
+    """
+    return entry.get("alias") or entry.get("id") or entry.get("name") or "?"
+
+
+def _check_duplicate_join_pairs(model_tables: list) -> list[str]:
+    """I14 — no ordered table pair may be joined more than once.
+
+    Two joins between the same pair leave the join path ambiguous, and
+    ThoughtSpot will not load the Model. A role-played dimension (the same
+    physical table reached by several keys — order date vs ship date, or five
+    employee roles off one customer row) must be modelled as one aliased
+    `model_tables` entry per role, so each pair is joined exactly once.
+
+    This is the invariant a Semantic View source violates by construction: an
+    SV scopes names per table and happily declares eight relationships from
+    one fact to one date dimension, which is legal there and fatal here
+    (BL-202).
+    """
+    findings: list[str] = []
+    for t in model_tables:
+        if not isinstance(t, dict):
+            continue
+        frm = _node_id(t)
+        seen: dict[str, list[str]] = {}
+        for j in t.get("joins") or []:
+            if not isinstance(j, dict):
+                continue
+            with_ = j.get("with")
+            if not with_:
+                continue
+            seen.setdefault(with_, []).append(j.get("name") or "(unnamed)")
+        for with_, names in seen.items():
+            if len(names) > 1:
+                findings.append(
+                    f"I14: '{frm}' joins '{with_}' {len(names)} times "
+                    f"({', '.join(names)}) — the join path is ambiguous and "
+                    f"ThoughtSpot will not load the Model. Give each role its "
+                    f"own aliased model_tables entry (name: the physical table, "
+                    f"alias: a unique per-role id) and point one join at each."
+                )
     return findings
 
 

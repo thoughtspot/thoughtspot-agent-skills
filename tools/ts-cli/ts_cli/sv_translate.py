@@ -10,6 +10,13 @@ ts-snowflake-formula-translation.md and ts-from-snowflake-rules.md.
 from __future__ import annotations
 
 import re
+
+from ts_cli.sv_naming import (  # noqa: F401  (re-exported for callers/tests)
+    build_node_id_map,
+    construct_formula_id,
+    display_title,
+    fact_column_type,
+)
 from typing import Any, Callable
 
 from ts_cli.formula_common import UntranslatableError
@@ -17,30 +24,6 @@ from ts_cli.sv_sql import translate_sql_expr
 
 
 # --- identifier resolution --------------------------------------------------
-
-def build_node_id_map(parsed: dict) -> dict[str, str]:
-    """Map each SV table alias -> its ThoughtSpot model node id (role-play aware).
-
-    A physical table referenced by more than one SV table is *reused* — a
-    role-playing pattern (e.g. one ``USER`` table played as ``CASE_OWNER``,
-    ``INCIDENT_OWNER`` and ``INCIDENT_RESOLVED_BY``). Each reused instance whose
-    alias differs from the physical name becomes its own node, identified by the
-    alias, so column references and joins stay unambiguous. A single-use table
-    (or the one instance whose alias equals the physical name) uses the physical
-    table name as its node id — no alias needed.
-
-    Returns ``{sv_alias: node_id}``. Keyed by the alias exactly as parsed."""
-    tables = parsed.get("tables", [])
-    phys_count: dict[str, int] = {}
-    for t in tables:
-        phys_count[t["name"]] = phys_count.get(t["name"], 0) + 1
-    node_of: dict[str, str] = {}
-    for t in tables:
-        alias, phys = t["alias"], t["name"]
-        reused = phys_count[phys] > 1
-        node_of[alias] = alias if (reused and alias != phys) else phys
-    return node_of
-
 
 def _build_alias_map(parsed: dict) -> dict[str, str]:
     """Map lowercase table alias -> ThoughtSpot node id (role-play aware).
@@ -106,34 +89,6 @@ def _build_column_index(
             _index_constructs(parsed.get("metrics", [])))
 
 
-def display_title(entry: dict) -> str:
-    """The ThoughtSpot display name for an SV construct — first synonym, else
-    title-cased name.
-
-    THE one naming path. ``sv_build_model`` mints every formula id as
-    ``formula_<display_title>`` and re-exports this function rather than
-    restating the rule, because two independent naming paths are exactly what
-    BL-178 defect 2 was: the resolver emitted ``[formula_<sql_token>]`` while the
-    builder declared ``id: formula_<display title>``, so every metric-on-fact
-    reference dangled. Anything that needs to *predict* a minted id must call
-    this."""
-    synonyms = entry.get("synonyms") or []
-    if synonyms:
-        return synonyms[0]
-    return entry["name"].replace("_", " ").title()
-
-
-def construct_formula_id(construct: dict) -> str:
-    """The `formulas[].id` build-model will mint for a parsed SV construct.
-
-    ``construct`` is a parse-sv dimension/fact/metric dict (declared name in
-    ``source_column``); the translated entry that reaches build-model carries the
-    same name under ``name``."""
-    return "formula_" + display_title(
-        {"name": construct["source_column"],
-         "synonyms": construct.get("synonyms")})
-
-
 def _build_table_pair_pk_map(
     parsed: dict,
 ) -> dict[tuple[str, str], tuple[str, str, str]]:
@@ -181,6 +136,7 @@ def _resolve_double_aggregation(
     pair_pk_map: dict[tuple[str, str], tuple[str, str, str]],
     resolving: frozenset,
     annotate: Callable[[str], None],
+    *, promote_synonym: bool = False,
 ) -> str | None:
     """Resolve a metric-on-metric reference to a `group_*` expression.
 
@@ -220,7 +176,7 @@ def _resolve_double_aggregation(
     inner_notes: list[str] = []
     inner_resolver = make_resolver(
         parsed, inner_metric["alias_table"], annotations=inner_notes,
-        _resolving=resolving)
+        promote_synonym=promote_synonym, _resolving=resolving)
     def _flush() -> None:
         for note in inner_notes:
             annotate(note)
@@ -275,6 +231,7 @@ def make_resolver(
     default_alias: str,
     *,
     annotations: list[str] | None = None,
+    promote_synonym: bool = False,
     _resolving: frozenset = frozenset(),
 ) -> Callable[[str], str]:
     """Build a resolver: SQL identifier -> [TABLE::col], [formula_id] or group_*.
@@ -392,7 +349,7 @@ def make_resolver(
                     f"column named '{ref_col}' also exists on {table}, confirm "
                     f"which one the expression means.")
             return f"[{table}::{bare}]"
-        return f"[{construct_formula_id(dim)}]"
+        return f"[{construct_formula_id(dim, promote_synonym=promote_synonym)}]"
 
     def resolve(ident: str) -> str:
         parts = ident.split(".")
@@ -418,17 +375,18 @@ def make_resolver(
 
             # Step 2 — a computed fact is a formula; reference it by minted id.
             if fact is not None:
-                return f"[{construct_formula_id(fact)}]"
+                return f"[{construct_formula_id(fact, promote_synonym=promote_synonym)}]"
 
             # Step 3 — metric-on-metric.
             if metric is not None:
                 if key not in _resolving:
                     grouped = _resolve_double_aggregation(
                         metric, default_alias, parsed, alias_map, pair_pk_map,
-                        _resolving | {key}, _annotate)
+                        _resolving | {key}, _annotate,
+                        promote_synonym=promote_synonym)
                     if grouped is not None:
                         return grouped
-                return f"[{construct_formula_id(metric)}]"
+                return f"[{construct_formula_id(metric, promote_synonym=promote_synonym)}]"
 
             # Step 1 (continued) — a declared dimension, whose shape decides
             # which column or formula it resolves to.
@@ -734,6 +692,7 @@ _BARE_COLUMN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 
 def _translate_dimension(
     dim: dict, parsed: dict, alias_map: dict[str, str],
+    *, promote_synonym: bool = False,
 ) -> dict[str, Any]:
     """Translate one dimension entry.
 
@@ -755,29 +714,36 @@ def _translate_dimension(
             table=table, column=expr.strip())
     annotations: list[str] = []
     resolver = make_resolver(
-        parsed, dim["alias_table"], annotations=annotations)
+        parsed, dim["alias_table"], annotations=annotations,
+        promote_synonym=promote_synonym)
     ts_expr = translate_sql_expr(dim["expr"], resolver)
     return _entry(
         dim["source_column"], "dimension", "formula", "ATTRIBUTE", dim,
         ts_expr=ts_expr, annotations=annotations)
 
 
+# Functions whose result is a string, date or boolean — a fact built from one of
+# these is not summable, whatever block it was declared in.
 def _translate_fact(
     fact: dict, parsed: dict, alias_map: dict[str, str],
+    *, promote_synonym: bool = False,
 ) -> dict[str, Any]:
-    """Translate one fact entry. Facts are intermediate computed columns —
-    always formulas, classified as ATTRIBUTE (non-aggregated) or MEASURE."""
+    """Translate one fact entry. Facts are row-level values from the SV's
+    ``facts()`` block, classified MEASURE or ATTRIBUTE by
+    :func:`fact_column_type` (BL-181)."""
+    col_type = fact_column_type(fact)
     if fact["expr"] is None:
         table = alias_map.get(fact["alias_table"].lower(), fact["source_table"])
         return _entry(
-            fact["source_column"], "fact", "column", "ATTRIBUTE", fact,
+            fact["source_column"], "fact", "column", col_type, fact,
             table=table, column=fact["alias_name"])
     annotations: list[str] = []
     resolver = make_resolver(
-        parsed, fact["alias_table"], annotations=annotations)
+        parsed, fact["alias_table"], annotations=annotations,
+        promote_synonym=promote_synonym)
     ts_expr = translate_sql_expr(fact["expr"], resolver)
     return _entry(
-        fact["source_column"], "fact", "formula", "ATTRIBUTE", fact,
+        fact["source_column"], "fact", "formula", col_type, fact,
         ts_expr=ts_expr, annotations=annotations)
 
 
@@ -836,6 +802,7 @@ def _translate_metric(
     parsed: dict,
     alias_map: dict[str, str],
     rel_pk_map: dict[str, tuple[str, str]],
+    *, promote_synonym: bool = False,
 ) -> dict[str, Any]:
     """Translate one metric entry.
 
@@ -855,7 +822,8 @@ def _translate_metric(
             f"'{metric['alias_table']}.{metric['alias_name']}') — declare it in "
             f"dimensions() or facts(), or give the metric an aggregation")
     resolver = make_resolver(
-        parsed, metric["alias_table"], annotations=annotations)
+        parsed, metric["alias_table"], annotations=annotations,
+        promote_synonym=promote_synonym)
     semi = metric.get("semi_additive")
     using = metric.get("using_relationship")
 
@@ -892,10 +860,14 @@ def _translate_metric(
 
 # --- orchestrator ------------------------------------------------------------
 
-def translate_sv_formulas(parsed: dict) -> dict[str, Any]:
+def translate_sv_formulas(
+    parsed: dict, *, promote_synonym: bool = False,
+) -> dict[str, Any]:
     """Translate all formulas from a parsed Semantic View into ThoughtSpot syntax.
 
-    Returns {translated: [...], skipped: [...], stats: {...}}.
+    Returns {translated, skipped, stats, options}. ``options`` records the
+    naming decision so ``build-model`` reads it rather than being told a second
+    time — two independent naming paths is precisely what BL-178 defect 2 was.
     """
     alias_map = _build_alias_map(parsed)
     rel_pk_map = _build_relationship_pk_map(parsed)
@@ -905,7 +877,8 @@ def translate_sv_formulas(parsed: dict) -> dict[str, Any]:
 
     for dim in parsed.get("dimensions", []):
         try:
-            translated.append(_translate_dimension(dim, parsed, alias_map))
+            translated.append(_translate_dimension(
+                dim, parsed, alias_map, promote_synonym=promote_synonym))
         except UntranslatableError as e:
             skipped.append({
                 "name": dim["source_column"],
@@ -915,7 +888,8 @@ def translate_sv_formulas(parsed: dict) -> dict[str, Any]:
 
     for fact in parsed.get("facts", []):
         try:
-            translated.append(_translate_fact(fact, parsed, alias_map))
+            translated.append(_translate_fact(
+                fact, parsed, alias_map, promote_synonym=promote_synonym))
         except UntranslatableError as e:
             skipped.append({
                 "name": fact["source_column"],
@@ -925,8 +899,9 @@ def translate_sv_formulas(parsed: dict) -> dict[str, Any]:
 
     for metric in parsed.get("metrics", []):
         try:
-            translated.append(
-                _translate_metric(metric, parsed, alias_map, rel_pk_map))
+            translated.append(_translate_metric(
+                metric, parsed, alias_map, rel_pk_map,
+                promote_synonym=promote_synonym))
         except UntranslatableError as e:
             skipped.append({
                 "name": metric["source_column"],
@@ -941,6 +916,7 @@ def translate_sv_formulas(parsed: dict) -> dict[str, Any]:
     return {
         "translated": translated,
         "skipped": skipped,
+        "options": {"promote_first_synonym": promote_synonym},
         "stats": {
             "total": total,
             "translated": len(translated),

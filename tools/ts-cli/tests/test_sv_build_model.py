@@ -140,9 +140,18 @@ class TestDisplayTitle:
     def test_title_case(self):
         assert display_title({"name": "ORDER_DATE"}) == "Order Date"
 
-    def test_synonym_wins(self):
+    def test_declared_name_wins_by_default(self):
+        """BL-179 — on a foreign SV `with synonyms=(...)` means alternate NL
+        names; promoting the first over the declared name destroys the logical
+        identifier. Default is the declared name."""
         assert display_title(
             {"name": "ORDER_DATE", "synonyms": ["Date of Order", "Alt"]}
+        ) == "Order Date"
+
+    def test_synonym_wins_when_promotion_opted_in(self):
+        assert display_title(
+            {"name": "ORDER_DATE", "synonyms": ["Date of Order", "Alt"]},
+            promote_synonym=True,
         ) == "Date of Order"
 
     def test_empty_synonyms_fallback(self):
@@ -199,17 +208,31 @@ class TestColumnProps:
         props = _column_props(entry, is_formula=False)
         assert props["description"] == "desc"
 
-    def test_synonyms_skip_first(self):
+    def test_all_synonyms_kept_by_default(self):
+        """BL-179 — with no promotion, every synonym belongs in
+        properties.synonyms; dropping the first would lose it entirely."""
         entry = {"column_type": "ATTRIBUTE", "comment": None,
                  "synonyms": ["Display", "Alt1", "Alt2"]}
         props = _column_props(entry, is_formula=False)
-        assert props["synonyms"] == ["Alt1", "Alt2"]
+        assert props["synonyms"] == ["Display", "Alt1", "Alt2"]
         assert props["synonym_type"] == "USER_DEFINED"
 
-    def test_single_synonym_no_remaining(self):
+    def test_promoted_first_synonym_is_not_repeated(self):
+        entry = {"column_type": "ATTRIBUTE", "comment": None,
+                 "synonyms": ["Display", "Alt1", "Alt2"]}
+        props = _column_props(entry, is_formula=False, promote_synonym=True)
+        assert props["synonyms"] == ["Alt1", "Alt2"]
+
+    def test_single_synonym_kept_by_default(self):
         entry = {"column_type": "ATTRIBUTE", "comment": None,
                  "synonyms": ["Display"]}
         props = _column_props(entry, is_formula=False)
+        assert props["synonyms"] == ["Display"]
+
+    def test_single_synonym_dropped_when_promoted(self):
+        entry = {"column_type": "ATTRIBUTE", "comment": None,
+                 "synonyms": ["Display"]}
+        props = _column_props(entry, is_formula=False, promote_synonym=True)
         assert "synonyms" not in props
 
 
@@ -407,21 +430,27 @@ class TestBuildColumnsAndFormulas:
         assert len(form) == 2  # 1 dim formula + 1 metric formula
         assert len(formulas) == 2
 
-    def test_synonym_as_display_name(self):
-        translated = _translated_basic()
-        columns, _, _ = build_columns_and_formulas(translated)
-        name_col = next(c for c in columns
-                        if "column_id" in c
-                        and c["column_id"] == "CUSTOMERS::CUSTOMER_NAME")
-        assert name_col["name"] == "Client Name"
+    def _name_col(self, **kw):
+        columns, _, _ = build_columns_and_formulas(_translated_basic(), **kw)
+        return next(c for c in columns
+                    if "column_id" in c
+                    and c["column_id"] == "CUSTOMERS::CUSTOMER_NAME")
 
-    def test_remaining_synonyms_in_props(self):
-        translated = _translated_basic()
-        columns, _, _ = build_columns_and_formulas(translated)
-        name_col = next(c for c in columns
-                        if "column_id" in c
-                        and c["column_id"] == "CUSTOMERS::CUSTOMER_NAME")
-        assert name_col["properties"]["synonyms"] == ["Account"]
+    def test_declared_name_is_the_display_name(self):
+        """BL-179 — default keeps the declared name, so the SV's logical
+        identifier survives the conversion."""
+        assert self._name_col()["name"] == "Customer Name"
+
+    def test_synonym_becomes_display_name_when_opted_in(self):
+        assert self._name_col(promote_synonym=True)["name"] == "Client Name"
+
+    def test_all_synonyms_in_props_by_default(self):
+        assert self._name_col()["properties"]["synonyms"] == [
+            "Client Name", "Account"]
+
+    def test_remaining_synonyms_in_props_when_promoted(self):
+        assert self._name_col(
+            promote_synonym=True)["properties"]["synonyms"] == ["Account"]
 
     def test_measure_column(self):
         translated = _translated_basic()
@@ -429,7 +458,7 @@ class TestBuildColumnsAndFormulas:
         amount_col = next(c for c in columns
                           if "column_id" in c
                           and c["column_id"] == "ORDERS::AMOUNT")
-        assert amount_col["name"] == "Revenue"
+        assert amount_col["name"] == "Total Amount"
         assert amount_col["properties"]["aggregation"] == "SUM"
 
     def test_measure_formula(self):

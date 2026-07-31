@@ -525,6 +525,69 @@ provides an equivalent SQL function, translate it via a ThoughtSpot pass-through
 
 ---
 
+### I14 — No ordered table pair may be joined more than once
+
+**Rule:** Within one Model, a given `(from_node, joins[].with)` pair may appear at most
+once. A dimension reached by several different keys — a date dimension joined on order
+date *and* ship date, or one employee table joined through five customer-team roles — is
+**role-played**, and each role needs its own aliased `model_tables` entry.
+
+**Failure mode:** two joins between the same pair leave the join path ambiguous and the
+Model will not load. Nothing upstream catches it: `build-model` assembled 21 such joins
+across 7 pairs on a real customer Semantic View, and I1–I13 all reported clean.
+
+**Why converters hit this by construction:** a Snowflake Semantic View scopes construct
+names *per table*, so declaring eight relationships from one fact to one `DIM_TIME` is
+legal and idiomatic there. ThoughtSpot has one flat join graph, so the same declaration
+is fatal. A source SV that models role-play *without* aliases therefore cannot be
+converted 1:1 — the aliases must be synthesized.
+
+**Correct shape** — one entry per role, `name` the physical table, `alias` the per-role
+node id. Joins carry the alias in `with:`; the `on` clause uses **physical** names on
+both sides; `column_id` prefixes use the **alias**:
+
+```yaml
+model_tables:
+- name: FACT_SALES
+  fqn: "{fact_guid}"
+  joins:
+  - name: FACT_SALES_TO_DIM_TIME_TRANSACTION
+    with: DIM_TIME                       # base node — the default date context
+    'on': "[FACT_SALES::TRANSACTION_DATE_ID] = [DIM_TIME::DATE_ID]"
+    type: LEFT_OUTER
+    cardinality: MANY_TO_ONE
+  - name: FACT_SALES_TO_DIM_TIME_SHIP
+    with: DIM_TIME_SHIP_DATE             # alias node
+    'on': "[FACT_SALES::SHIP_DATE_ID] = [DIM_TIME::DATE_ID]"
+    type: LEFT_OUTER
+    cardinality: MANY_TO_ONE
+- name: DIM_TIME
+  fqn: "{dim_guid}"
+- name: DIM_TIME                          # same physical table, second role
+  alias: DIM_TIME_SHIP_DATE
+  fqn: "{dim_guid}"
+columns:
+- name: "Fiscal Year"                     # base node: unqualified = default context
+  column_id: DIM_TIME::YEAR
+- name: "Fiscal Year (Ship Date)"         # alias node: suffix for uniqueness
+  column_id: DIM_TIME_SHIP_DATE::YEAR
+```
+
+**Keep one role on the base node.** Aliasing *every* role leaves the base table with no
+joins — a disconnected node in the model. Give the primary/default role the base entry
+(and its full column set); alias the rest.
+
+**Trim the alias column sets.** An alias does not need the whole dimension. A 56-column
+date dimension aliased 14 times adds 784 near-duplicate columns and degrades NL search
+more than the ambiguity it fixed; ~12 grouping columns per alias (calendar date, fiscal
+year/quarter/month/week names and orders, month/week ids) covers what users pivot on.
+Keep period flags and offsets (`is_ytd`, `same_date_id_last_year`) on the base node only.
+Set the join key to `index_type: DONT_INDEX` on every alias.
+
+**Applies to:** all convert-from skills (Tableau, Snowflake SV, Databricks MV).
+
+---
+
 ## Intentional differences (do NOT harmonize)
 
 ### EXC1 — Cumulative/moving: model formula vs answer-level
