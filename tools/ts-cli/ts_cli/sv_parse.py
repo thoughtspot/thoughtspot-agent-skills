@@ -64,8 +64,12 @@ _SYNONYMS_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Live GET_DDL emits `sample_values ('a', 'b')`; the documented/authored form
+# is `with sample values (...)`. Accept both, plus the mixed spellings — the
+# underscore form was previously unmatched, so the clause stayed in the entry
+# and was mis-read as part of the expression (BL-197).
 _SAMPLE_VALUES_RE = re.compile(
-    r"\bwith\s+sample\s+values\s*\(",
+    r"\b(?:with\s+)?sample[_\s]values\s*\(",
     re.IGNORECASE,
 )
 

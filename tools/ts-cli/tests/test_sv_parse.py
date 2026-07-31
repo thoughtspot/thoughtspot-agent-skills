@@ -570,3 +570,113 @@ class TestParseColumnEntry:
         assert c["alias_table"] == "other"
         assert c["alias_name"] == "PHYSICAL_COL"
         assert c["expr"] is None
+
+
+class TestQuotedCommasInComments:
+    """BL-196 — the entry splitter must not break on commas inside comment=''.
+
+    Semantic View DDL carries free text in `comment='...'` on nearly every
+    construct, and that text routinely contains commas. A paren-only splitter
+    shatters such entries into fragments and silently inflates the construct
+    count, with the debris landing in `unsupported[]`.
+    """
+
+    COMMA_DDL = textwrap.dedent("""\
+        create or replace semantic view DB.S.COMMA_SV
+            tables (
+                DB.S.DIM_CUST primary key (ID) with synonyms=('a','b')
+                    comment='Identity, segmentation, geography, and territory attributes.',
+                DB.S.FACT_SALES primary key (LINE_ID)
+                    comment='Sales facts, at invoice-line grain.'
+            )
+            relationships (
+                FACT_TO_CUST as FACT_SALES(CUST_ID) references DIM_CUST(ID)
+            )
+            facts (
+                FACT_SALES.AMOUNT as fact_sales.amount
+                    comment='Revenue, net of returns, in USD.'
+            )
+            dimensions (
+                DIM_CUST.SEGMENT as dim_cust.segment
+                    comment='Retail, Etail, Designer, or Other.',
+                DIM_CUST.NOTE as dim_cust.note
+                    comment='It''s a quoted, escaped apostrophe, plus commas.'
+            )
+            comment='Top level, with a comma.';""")
+
+    def test_table_count_not_inflated(self):
+        r = parse_sv_ddl(self.COMMA_DDL)
+        assert len(r["tables"]) == 2
+        assert [t["alias"] for t in r["tables"]] == ["DIM_CUST", "FACT_SALES"]
+
+    def test_comments_survive_intact(self):
+        r = parse_sv_ddl(self.COMMA_DDL)
+        by = {t["alias"]: t for t in r["tables"]}
+        assert by["DIM_CUST"]["comment"] == (
+            "Identity, segmentation, geography, and territory attributes.")
+        assert by["DIM_CUST"]["synonyms"] == ["a", "b"]
+
+    def test_no_fragment_debris(self):
+        r = parse_sv_ddl(self.COMMA_DDL)
+        assert r["unsupported"] == []
+        assert len(r["dimensions"]) == 2
+        assert len(r["facts"]) == 1
+
+    def test_escaped_apostrophe_inside_comment(self):
+        r = parse_sv_ddl(self.COMMA_DDL)
+        note = next(d for d in r["dimensions"] if d["source_column"] == "NOTE")
+        assert note["comment"] == (
+            "It's a quoted, escaped apostrophe, plus commas.")
+
+    def test_splitter_is_quote_aware(self):
+        from ts_cli.snowflake_ops import _split_top_level
+        assert _split_top_level("a, 'x, y', b") == ["a", "'x, y'", "b"]
+        assert _split_top_level("T.A as t.a comment='p, q', T.B as t.b") == [
+            "T.A as t.a comment='p, q'", "T.B as t.b"]
+        # a doubled quote is an escaped literal, so the string stays open
+        assert _split_top_level("x comment='it''s, fine', y") == [
+            "x comment='it''s, fine'", "y"]
+        # paren nesting still respected
+        assert _split_top_level("f(a, b), c") == ["f(a, b)", "c"]
+
+
+class TestSampleValuesLiveDdlForm:
+    """BL-197 — live GET_DDL emits `sample_values (...)`, not the authored
+    `with sample values (...)`. Only the latter was matched, so the clause
+    stayed in the entry text and was mis-read as part of the expression."""
+
+    def _ddl(self, clause):
+        return textwrap.dedent(f"""\
+            create or replace semantic view DB.S.T_SV
+                tables (DB.S.T primary key (ID))
+                dimensions (T.STATUS as t.status {clause});""")
+
+    @pytest.mark.parametrize("clause", [
+        "sample_values ('Active', 'Inactive') is_enum",
+        "with sample values ('Active','Inactive') is_enum",
+        "with sample_values ('Active','Inactive') is_enum",
+        "SAMPLE_VALUES ('Active','Inactive') IS_ENUM",
+    ])
+    def test_all_spellings_extract(self, clause):
+        d = parse_sv_ddl(self._ddl(clause))["dimensions"][0]
+        assert d["sample_values"] == ["Active", "Inactive"]
+        assert d["is_enum"] is True
+
+    def test_expr_is_not_polluted(self):
+        """A passthrough rename must stay a passthrough (expr None), not
+        become `t.status sample_values (...)` — which the translator then
+        rejects as an unknown SAMPLE_VALUES function."""
+        d = parse_sv_ddl(
+            self._ddl("sample_values ('Active', 'Inactive') is_enum")
+        )["dimensions"][0]
+        assert d["expr"] is None
+
+    def test_computed_expr_keeps_expression_only(self):
+        ddl = textwrap.dedent("""\
+            create or replace semantic view DB.S.T_SV
+                tables (DB.S.T primary key (ID))
+                dimensions (T.UP as UPPER(t.status)
+                    sample_values ('A', 'B') is_enum);""")
+        d = parse_sv_ddl(ddl)["dimensions"][0]
+        assert d["sample_values"] == ["A", "B"]
+        assert "sample" not in (d["expr"] or "").lower()

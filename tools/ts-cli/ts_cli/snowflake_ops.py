@@ -219,12 +219,33 @@ def _extract_clause(text: str, keyword: str) -> str | None:
 
 
 def _split_top_level(text: str) -> list[str]:
-    """Split clause body text on commas that are not nested inside parens."""
+    """Split clause body text on commas that are not nested inside parens.
+
+    Quote aware: a comma inside a single-quoted string is data, not a
+    separator. Semantic View DDL puts free text in ``comment='...'`` on
+    almost every construct, and such text routinely contains commas — a
+    paren-only splitter shatters those entries into fragments, silently
+    inflating the construct count (BL-196). SQL escapes a quote by doubling
+    it (``''``), which stays inside the string.
+    """
     parts: list[str] = []
     depth = 0
+    in_quote = False
     current: list[str] = []
-    for ch in text:
-        if ch == "(":
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "'":
+            # a doubled quote is an escaped literal quote, not a delimiter
+            if in_quote and i + 1 < n and text[i + 1] == "'":
+                current.append("''")
+                i += 2
+                continue
+            in_quote = not in_quote
+            current.append(ch)
+        elif in_quote:
+            current.append(ch)
+        elif ch == "(":
             depth += 1
             current.append(ch)
         elif ch == ")":
@@ -235,6 +256,7 @@ def _split_top_level(text: str) -> list[str]:
             current = []
         else:
             current.append(ch)
+        i += 1
     tail = "".join(current).strip()
     if tail:
         parts.append(tail)
