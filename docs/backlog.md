@@ -67,7 +67,8 @@ are roughly ordered by value÷effort.
 | ~~BL-200~~ | ~~SV entry splitter not quote aware -- a comma in `comment=` shatters the entry~~ | DONE (2026-07-31) |
 | ~~BL-201~~ | ~~live `sample_values` unmatched, read as part of the expression~~ | DONE (2026-07-31) |
 | ~~BL-202~~ | ~~a table pair joined twice makes the Model unloadable; nothing caught it (I14)~~ | DONE (2026-07-31) |
-| BL-203 | ERD parser discards a join's real name -- same-pair joins unreachable, false degraded-fidelity warning | next ERD pass |
+| ~~BL-203~~ | ~~ERD parser discards a join's real name -- same-pair joins unreachable, false degraded-fidelity warning~~ | DONE (2026-07-31) |
+| BL-204 | no plan-only helper for role-play alias synthesis -- Step 7.5 is done by hand | next converter pass |
 | ~~BL-199~~ | ~~`dependency.py`'s `_export_one` — same null-`edoc` crash BL-189 fixed, one call away~~ | DONE (2026-07-31) |
 | ~~BL-191~~ | ~~`dependency/mutate.py` reads Views through `column_id` (0/265 in the wild) — silent dangling refs~~ | DONE (2026-07-31) |
 | BL-183 | Validator: dangling `[formula_X]` refs in `ts tml lint` + CA-JSON table refs | with BL-178 |
@@ -7099,7 +7100,7 @@ adds **784** near-duplicate columns to a 1,015-column model and degrades NL sear
 than the ambiguity it fixed. The right trim (~12 grouping columns per alias, period flags
 and offsets left on the base node only) depends on how the model will be used. I14 plus
 the SKILL's Step 7.5 procedure puts the decision where the context is. **Follow-up:
-BL-203** for a `ts snowflake plan-roleplay` helper that emits the alias plan and leaves
+BL-204** for a `ts snowflake plan-roleplay` helper that emits the alias plan and leaves
 the trim to the operator.
 
 ---
@@ -7111,7 +7112,12 @@ the trim to the operator.
 `ORDER_DATE_ID` joins missing from a rendered ERD.
 **Affects:** `agents/shared/erd/parser.py` (`_build_joins`, ~:153;
 `_log_degraded_fidelity`).
-**Status:** OPEN.
+**Status:** **RESOLVED 2026-07-31** -- fixed in the same PR that filed it (#429),
+ts-object-model-erd **v1.7.2**. `_build_joins` now prefers `j.get("name")`, falling back
+to the synthesized `{frm}_{to}`. `_log_degraded_fidelity` was rewritten to fire only for
+joins that genuinely still lack cardinality/type after stitching (i.e. `referencing_join`
+ones) -- the no-Table-TMLs-at-all branch had the same over-breadth and would have kept
+firing on an all-inline model.
 
 For an **inline** join, `_build_joins` synthesizes the name as `f"{frm}_{to}"` and
 discards the model TML's actual `name:`. Two consequences. (a) The viewer keys edges by
@@ -7126,6 +7132,37 @@ Prefer `j.get("name")` when present, falling back to the synthesized form. Note 
 becomes less load-bearing once I14 (BL-202) forces same-pair joins to be aliased, since
 distinct `with:` targets already yield distinct synthesized names -- but (b) is wrong
 regardless, and a hand-authored Model can still carry the shape.
+
+---
+
+## BL-204 -- no plan-only helper for role-play alias synthesis, so Step 7.5 is done by hand `Tier 3`
+
+**Filed:** 2026-07-31.
+**Source:** BL-202 follow-up -- the I14 gate tells you the pairs, the SKILL tells you the
+procedure, but the operator still edits `parsed.json` by hand.
+**Affects:** `tools/ts-cli/ts_cli/commands/snowflake.py` (new subcommand),
+`agents/cli/ts-convert-from-snowflake-sv/references/step-7.5-roleplay-aliases.md`.
+**Status:** OPEN.
+
+I14 (BL-202) correctly refuses a Model whose table pair is joined twice, and Step 7.5
+documents the fix, but every step of it is manual: synthesize an alias `tables[]` entry
+per non-primary role, repoint the relationship, duplicate a trimmed column set, add the
+`tables.json` entry. Doing it by hand on a 23-join model is where mistakes happen -- the
+first attempt on the customer fixture crashed because the column lookup used the raw
+`source_column` when a display-name collision pass had already appended a `__Label`
+suffix (the exact trap Step 7.5 now warns about, because it was hit).
+
+**Why it is not just "automate Step 7.5":** the column trim is a judgment call and the
+naive full copy is harmful (784 near-duplicate columns on the fixture), which is why
+BL-202 stopped at the gate. So the helper should be **plan-only**: emit the alias plan
+(nodes, repoints, and the candidate column set per alias) as JSON for the operator to
+edit, then apply it. That keeps the decision with the human and the bookkeeping with the
+tool.
+
+Sketch: `ts snowflake plan-roleplay --parsed parsed.json [--apply plan.json]`. Reads the
+duplicate pairs, proposes a primary role per physical table (the one the SV's own
+`ai_sql_generation` treats as default, else the first declared), and proposes a trimmed
+column set. `--apply` writes the mutated `parsed.json` + `tables.json`.
 
 ---
 
