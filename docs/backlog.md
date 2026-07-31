@@ -6594,7 +6594,7 @@ itself, which is the workaround, not the fix.
 **Affects:** `tools/ts-cli/ts_cli/commands/tml.py` (`:258`, `:391`),
 `tools/ts-cli/tests/` (needs a null-edoc fixture).
 **Status:** **RESOLVED 2026-07-31** -- fixed in ts-cli **v0.127.2**
-(`fix/bl-189-parse-null-edoc`). Both parts of the prescribed fix landed as specified:
+(`fix/bl-189-parse-null-edoc`, PR #428). Both parts of the prescribed fix landed as specified:
 `detect_tml_type()` now guards `parsed is None` and returns `None` (kept distinct from
 `'unknown'`, which still means "a document with no recognised type key"); the `--parse`
 loop in `export_tml` now treats a falsy `edoc` (empty string OR explicit `null` -- the
