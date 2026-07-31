@@ -150,7 +150,15 @@ def _build_joins(model_tables, node_ids):
                        "card": "UNKNOWN", "origin": "model",
                        "type": "UNKNOWN", "on": ""}
             elif inline_on:
-                rec = {"from": frm, "to": to, "name": f"{frm}_{to}",
+                # Prefer the join's declared name. Synthesizing `{frm}_{to}`
+                # unconditionally (a) collided whenever a pair was joined more
+                # than once, and the viewer keys edges by name — so only the
+                # first was reachable in the inspector (18 of 23 date joins
+                # hidden on a real model), and (b) can never match the
+                # Table-TML join index, making the "fidelity degraded" warning
+                # a false positive on every inline-join model (BL-203).
+                rec = {"from": frm, "to": to,
+                       "name": j.get("name") or f"{frm}_{to}",
                        "card": j.get("cardinality", "UNKNOWN"),
                        "origin": "model", "type": j.get("type", "UNKNOWN"),
                        "on": inline_on}
@@ -244,18 +252,31 @@ def _log_dropped_joins(dropped, log):
 
 
 def _log_degraded_fidelity(joins, table_joins, log):
+    """Warn only about joins whose fidelity is *actually* degraded.
+
+    A join has degraded fidelity when it still lacks cardinality/type after
+    stitching. An **inline** join carries both on the join itself, so a
+    Table-TML miss costs it nothing; only a `referencing_join` depends on the
+    Table TML to supply them. Warning on inline joins made this fire for every
+    inline-join model — naming joins whose cardinality was in fact known, and
+    (before the name fix) naming synthesized ids that could never match the
+    index by construction (BL-203).
+    """
     if not log:
         return
-    referenced = {j["name"] for j in joins}
-    if referenced and not table_joins:
-        log("Fidelity degraded: no Table TMLs provided — join cardinality/type/"
-            "origin and RLS omitted for all %d join(s)." % len(referenced))
+    unresolved = [j for j in joins
+                  if j["name"] and j["name"] not in table_joins
+                  and (j.get("card") == "UNKNOWN"
+                       or j.get("type") == "UNKNOWN")]
+    if not unresolved:
         return
-    missing = sorted(n for n in referenced if n and n not in table_joins)
-    if missing:
-        log("Fidelity degraded: %d join(s) had no Table TML definition "
-            "(treated as model-local, cardinality unknown): %s"
-            % (len(missing), ", ".join(missing)))
+    if not table_joins:
+        log("Fidelity degraded: no Table TMLs provided — join cardinality/type/"
+            "origin and RLS omitted for all %d join(s)." % len(unresolved))
+        return
+    log("Fidelity degraded: %d join(s) had no Table TML definition "
+        "(treated as model-local, cardinality unknown): %s"
+        % (len(unresolved), ", ".join(sorted(j["name"] for j in unresolved))))
 
 
 def parse_model(model_tml, table_tmls, log=None):

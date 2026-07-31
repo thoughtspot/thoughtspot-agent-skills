@@ -132,9 +132,18 @@ def _check_no_duplicate_display_names(columns: list[dict]) -> None:
             dupes.add(c["name"])
         seen.add(c["name"])
     if dupes:
+        # "Fix the SV" is not actionable when you do not own the SV, and a wide
+        # multi-fact SV collides by construction: Snowflake scopes construct
+        # names per table, ThoughtSpot has one flat column namespace.
         raise ValueError(
-            f"duplicate display title(s): {sorted(dupes)} — set distinct "
-            f"display_name values in the SV")
+            f"duplicate display title(s): {len(dupes)} name(s) claimed by more "
+            f"than one construct: {sorted(dupes)[:10]}"
+            f"{' …' if len(dupes) > 10 else ''} — a Semantic View scopes names "
+            f"per table, a ThoughtSpot Model has one flat column namespace, so "
+            f"a wide multi-fact SV collides by construction. Disambiguate in "
+            f"the parsed doc before building (suffix the non-primary instances, "
+            f"keep the primary fact's bare) — see the ts-convert-from-snowflake-sv "
+            f"skill, Step 8.5.")
 
 
 def _detect_fact_tables(relationships: list[dict]) -> set[str]:

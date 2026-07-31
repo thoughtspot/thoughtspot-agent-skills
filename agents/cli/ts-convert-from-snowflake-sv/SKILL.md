@@ -36,6 +36,8 @@ Two scenarios are supported:
 | [references/step-3.5-merge-dedup.md](references/step-3.5-merge-dedup.md) | Step 3.5 merge-mode dedup rules and merge-summary template |
 | [references/step-6-table-registration.md](references/step-6-table-registration.md) | Step 6A table-plan template; Step 6B introspect/connection/create command sequence |
 | [references/step-7-join-discovery.md](references/step-7-join-discovery.md) | Step 7 joinless-SV (GAP-03) join-discovery options |
+| [references/step-7.5-roleplay-aliases.md](references/step-7.5-roleplay-aliases.md) | Step 7.5 role-played dimension aliases — I14, the alias shape, column trim |
+| [references/step-8.5-display-name-collisions.md](references/step-8.5-display-name-collisions.md) | Step 8.5 flat-namespace collisions — characterise, choose, disambiguate |
 | [references/step-c-update-mode.md](references/step-c-update-mode.md) | Mode C diff-review, change-action mapping, and handoff templates (C4–C6) |
 | [references/step-12-report-formats.md](references/step-12-report-formats.md) | Step 10/12/12.5 console + TML report templates |
 | [references/open-items.md](references/open-items.md) | Known gaps and deferred capabilities for this skill |
@@ -97,7 +99,9 @@ Steps:
   6.   Discover / create ThoughtSpot Table objects ........ auto (may ask for clarification)
   6D.  Apply SV table descriptions to TS Table TMLs ....... auto (when SV has table comments)
   7.   Find join names (Scenario A) ...................... auto
+  7.5. Role-played dimension aliases (if any) ............ you choose
   8.   Assemble tables map ............................... auto
+  8.5. Display-name collisions (if any) .................. you choose
   9.   Translate SQL expressions → ThoughtSpot formulas ... auto (ts snowflake translate-formulas)
   9.5. Confirm Spotter enablement (default: enabled) ...... you choose
  10.   Review checkpoint — inspect TML before import ...... you confirm
@@ -107,7 +111,7 @@ Steps:
 
 File-only mode: at Step 10, choose FILE to write TML files for manual import.
 
-Confirmation required: Steps 1.5, 5, 9.5, 10 (Modes A/B); Steps 1.5, C4 (Mode C)
+Confirmation required: Steps 1.5, 5, 7.5 + 8.5 (if applicable), 9.5, 10 (Modes A/B); Steps 1.5, C4 (Mode C)
 Auto-executed: all others
 
 Ready to start? [Y / N]
@@ -608,6 +612,33 @@ If no matching join is found:
 
 ---
 
+### Step 7.5: Role-played dimension aliases (I14)
+
+A Semantic View may join one table to the same target several times (a date
+dimension on order/ship/booked date; an employee dimension on several account-team
+roles). That is legal in an SV, which scopes names per table, and **fatal in
+ThoughtSpot**, which has one flat join graph: the join path is ambiguous and the
+Model will not load. `ts tml lint` invariant I14 rejects it, so `build-model`
+refuses rather than emitting an unloadable Model.
+
+Detect it from `parsed.json` before building:
+
+```python
+from collections import Counter
+pairs = Counter((r["from_table"], r["to_table"]) for r in parsed["relationships"])
+roleplay = {k: v for k, v in pairs.items() if v > 1}
+```
+
+If `roleplay` is non-empty, follow
+[references/step-7.5-roleplay-aliases.md](references/step-7.5-roleplay-aliases.md) —
+it covers picking the primary role, synthesizing the alias entries, the column
+trim (**ask the user**; the naive full-copy adds hundreds of near-duplicate
+columns and degrades NL search), and the `tables.json` entries the aliases need.
+
+Otherwise skip to Step 8.
+
+---
+
 ### Step 8: Assemble the tables map
 
 Build `tables.json` — a JSON object mapping each SV table alias to its ThoughtSpot
@@ -665,6 +696,33 @@ and `tables.json` and deterministically assembles the model TML. It handles:
 - `COUNT(DISTINCT)` → `unique count(...)` formula (I5)
 - Name collision resolution, `formula_` prefix for cross-references
 - YAML block scalar encoding for `{ }` formulas
+
+---
+
+### Step 8.5: Display-name collisions
+
+A Semantic View scopes construct names per table; a ThoughtSpot Model has one flat
+column namespace. On a wide multi-fact SV the two collide by construction and
+`build-model` refuses with `duplicate display title(s): ...`. Detect it before
+building:
+
+```python
+import re
+from collections import defaultdict
+def title(n): return " ".join(w.capitalize() for w in re.split(r"[_\s]+", n))
+groups = defaultdict(list)
+for block in ("dimensions", "facts", "metrics"):
+    for e in parsed[block]:
+        groups[title(e["source_column"])].append(e)
+dups = {k: v for k, v in groups.items() if len(v) > 1}
+```
+
+If `dups` is non-empty, follow
+[references/step-8.5-display-name-collisions.md](references/step-8.5-display-name-collisions.md) —
+characterise the collisions, **ask the user** which resolution they want (it changes
+the model's whole search surface), then apply it to the parsed doc.
+
+Otherwise skip to Step 9.
 
 ---
 
@@ -894,6 +952,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.20.0 | 2026-07-31 | **Two new steps and three parser/translator fixes, from converting a real 1,100-line customer Semantic View (ts-cli v0.128.0).** New **Step 7.5 — role-played dimension aliases**: an SV scopes names per table and freely joins one fact to one date dimension eight times; ThoughtSpot has one flat join graph, so that is ambiguous and **the Model will not load**. New lint invariant **I14** (BL-202) rejects any duplicate `(from_node, joins[].with)` pair, so `build-model` now refuses rather than emitting an unloadable Model — it previously emitted 21 such joins across 7 pairs with `lint_findings: []` and I1–I13 all clean. The reference covers picking the primary role (one must keep the base node or it becomes a disconnected table), synthesizing the alias entries, the `tables.json` entries they need, and the **column trim** — which is a user decision, because the naive full copy adds 784 near-duplicate columns to a 1,015-column model and degrades NL search more than the ambiguity it fixed. New **Step 8.5 — display-name collisions**: an SV's per-table name scoping collides with ThoughtSpot's flat column namespace by construction on a wide multi-fact SV (129 colliding titles over 322 of 1,010 columns on the fixture); the reference characterises them, offers three resolutions, and applies the qualify-and-de-index pattern. `build-model`'s error message no longer says "set distinct display_name values in the SV", which is not actionable when you do not own the SV. Parser fixes: **BL-200** the entry splitter is now quote aware, so a comma inside `comment='...'` no longer shatters the entry (15 tables had parsed as 32, with 169 fragments in `unsupported[]`); **BL-201** live `GET_DDL`'s `sample_values (...)` spelling is now matched, so the clause is no longer read as part of the expression (had skipped all 46 `is_enum` dimensions). Translator fixes: **BL-179** first-synonym promotion is now opt-in (`--promote-first-synonym`, default off) and the decision is recorded in `translated.json` for `build-model` to read — on a foreign SV it had renamed 9 constructs, destroying the logical identifier; **BL-181** facts now classify MEASURE or ATTRIBUTE from the expression instead of hardcoding ATTRIBUTE, so quantities and profit aggregate (182 of 182 facts on the fixture were previously categorical). |
 | 1.19.5 | 2026-07-30 | **BL-171 — `sv_sql.py` stops emitting six non-existent string functions (ts-cli v0.126.1).** BL-170 corrected the *documentation* on 2026-07-29 and left the code: `sv_sql.py`'s `_RENAME` still translated Snowflake `TRIM`/`LTRIM`/`RTRIM`/`REPLACE`/`STARTSWITH`/`ENDSWITH` to the bare ThoughtSpot names `trim`/`ltrim`/`rtrim`/`replace`/`starts_with`/`ends_with`, **none of which exists**, so every affected metric or computed dimension failed at import with `error_code 14516`. `TRIM`/`LTRIM`/`RTRIM` now go through `_PASS_THROUGH_HINT` (the same path as `UPPER`/`LOWER`), and `REPLACE`/`STARTSWITH`/`ENDSWITH` through new composed handlers, matching `ts-snowflake-formula-translation.md`'s String Functions rows character for character. `test_sv_sql.py`'s `test_starts_with` had asserted the *wrong* expectation (`starts_with ( … )`) — corrected, and 7 new tests cover the family plus a sweep asserting no bare name is ever emitted. Coverage matrix rows 20a/20b added. **The emitted forms were live-verified on se-thoughtspot 2026-07-30** (`--policy VALIDATE_ONLY`, nothing persisted). |
 | 1.19.4 | 2026-07-30 | **BL-178 — formula reference integrity restored (three defects; ts-cli v0.126.0).** Every metric-on-fact and metric-on-metric reference in the emitted Model TML matched no declared `formulas[].id` between 2026-07-22 (v1.17.0's rewire) and today, so **every measure was unimportable** while `ts tml lint`, `check_tml.py` and `build-model`'s own `lint_findings` all reported clean. Live-confirmed on se-thoughtspot 2026-07-30 as a **hard import failure** (`error_code 14516`, *Search did not find "formula_tenure_months )"*), settling the question the fidelity review left open. Three fixes: (1) the documented resolution order is restored — a **passthrough** fact (right-hand side is a bare physical column, the shape a Cortex-Analyst model emits for every field) resolves to `[TABLE::col]`, which is what `build-model` emits for it, so all 5 of 5 TPC-DS metrics now resolve; (2) `display_title` is now a single function shared by the resolver and the builder, so an emitted `[formula_X]` is by construction the id the builder mints — and metric-on-metric gained the documented `group_*` double aggregation (grouping on the parent-side PK of the connecting relationship) it never implemented; (3) `parse-sv` keys the facts/metrics maps on **declared** names rather than the first qualified token of the expression, which had been indexing a computed fact under a physical column of its own table and letting a metric resolve its inner reference to itself. **New gate:** `ts tml lint` invariant **I13** rejects any `[formula_*]` reference or `columns[].formula_id` matching no declared id (BL-183), so this class cannot recur silently. The `ts-from-snowflake-identifier-resolution.md` worked example was re-verified live and its recorded output updated; three of its four divergences from the 2026-06-13 baseline are later documented features (BL-179 first-synonym promotion, duplicate-`column_id` promotion, BL-181 fact typing), not regressions. **PR review additions:** a *renamed* passthrough (`STORE_SALES.revenue as store_sales.ss_ext_sales_price`) is now indexed under its declared name as well as its physical column — referenced by the declared name it previously emitted `column_id: STORE_SALES::revenue`, a column that does not exist and that I13 cannot see because it is a `TABLE::col` reference; every double aggregation now carries the 🔄 review marker the rules file has always mandated; a degenerate grouping (`group_count([X],[X])`, one row per group) is skipped and flagged instead of emitted; and a passthrough *metric* is a reasoned skip rather than a raw `AttributeError`. **Known limitation, newly documented:** same-table metric-on-metric (e.g. a ratio of two simple-aggregate metrics) has no resolvable reference and now fails at `build-model` via I13 rather than emitting a broken Model — coverage row 27 and **BL-194**. **Re-review addition — renamed DIMENSIONS had the same defect:** `DM_CATEGORY.CATEGORY as dm_category.CATEGORY_NAME` referenced as `PARTITION BY dm_category.category` emitted `[DM_CATEGORY::category]` where the real column is `CATEGORY_NAME`, a second worked-example regression (`ts-from-snowflake-dunder.md:207` documents the correct form). Dimensions now resolve through the same index with a three-way split — passthrough, bare-column rename, computed — and the emitted output matches that worked example character for character. Step 9 and Step 12 now **surface `translated[].annotations`** (🔄 double-aggregation markers and ⚑ ambiguity warnings) in a Review Flags section: these are conversions the translator completed but cannot verify, and nothing downstream re-raises them. A wrong `TABLE::col` reference remains invisible to `build-model`'s lint — see **BL-195**. |
 | 1.19.3 | 2026-07-29 | **TPC-DS conversion-fidelity cross-validation — eleven coverage-matrix corrections (docs only; the behaviour fixes are BL-178 through BL-182).** Converting upstream's TPC-DS Cortex-Analyst model through this converter and back (`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md` §3) found that only 10 of 47 constructs survive unchanged. Rows **#26/#27/#28** caveated — metric-on-fact, metric-on-metric and window-on-metric resolution all emit a `[formula_X]` reference matching no declared `formulas[].id`, so **every measure in the emitted Model TML is unresolvable** while `ts tml lint` and `check_tml.py` both report clean; a regression against a live-verified worked example, likely introduced by v1.17.0's rewire on 2026-07-22 (BL-178, three defects). Row **#14** corrected — promoting the first synonym to `column.name` is right only for a Semantic View our own to-direction authored; on a foreign SV `with synonyms=(...)` means alternate NL names and the promotion **destroys the logical identifier** (29 of 36 named constructs renamed on this fixture — BL-179). Row **#16** corrected — facts are `ATTRIBUTE`-**only** (`sv_translate.py:454-468` has no `MEASURE` branch), so every fact returns inside `dimensions()` rather than `facts()`, not "MEASURE or ATTRIBUTE" (BL-181). Row **#5** — the table-level `comment=` mapping runs in Step 6D and is **unreachable on the file-only path**, which emits no Table TML (BL-176). Row **#4** — a round trip can only restore a PK some relationship implies, so a fact table's composite PK is lost (BL-166). New row **#38** — `time_dimensions:` map to `ATTRIBUTE` and the temporal role survives only for date-typed columns (BL-166). New row **#39** — a `NULLIF(y,0)` ratio guard becomes `safe_divide`/`DIV0`, silently turning NULL into 0 with `annotations: []` (BL-180). New limitation **L10** — `||` concatenation is rejected and the whole construct dropped, though the `CONCAT` mapping it names as the fix is already bidirectional (BL-180). New limitation **L11** — `data_type` has no DDL representation. No behaviour change in this release. |
