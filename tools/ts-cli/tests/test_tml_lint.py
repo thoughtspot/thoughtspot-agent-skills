@@ -337,3 +337,27 @@ class TestI14DuplicateJoinPairs:
         assert lint_tml(self._model(["not-a-dict"])) == []
         assert lint_tml(self._model([{"name": "A", "joins": ["x", None]}])) == []
         assert lint_tml(self._model([{"name": "A", "joins": [{"on": "x"}]}])) == []
+
+
+# --- chart tile with no axis encoding imports but renders blank (blank-chart gate) ---
+
+def test_lint_flags_chart_tile_without_axis_encoding():
+    doc = {"liveboard": {"visualizations": [
+        {"answer": {"name": "Blank Combo", "chart": {"type": "LINE_COLUMN"}}},
+    ]}}
+    findings = lint_tml(doc)
+    assert any("Blank Combo" in f and "renders blank" in f for f in findings)
+
+
+def test_lint_clean_when_chart_tiles_carry_axis_configs():
+    doc = {"liveboard": {"visualizations": [
+        {"answer": {"name": "ok line", "chart": {"type": "LINE", "axis_configs": [{"x": ["m"], "y": ["v"]}]}}},
+        {"answer": {"name": "pivot", "chart": {"type": "PIVOT_TABLE"}}},
+    ]}}
+    assert lint_tml(doc) == []
+
+
+def test_lint_standalone_answer_blank_chart_flagged():
+    doc = {"answer": {"name": "Bad Hires by Age (Bar)", "chart": {"type": "BAR"}}}
+    findings = lint_tml(doc)
+    assert any("Bad Hires by Age (Bar)" in f for f in findings)

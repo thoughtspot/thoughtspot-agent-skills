@@ -730,24 +730,19 @@ def lint_tml_cmd(
     raise SystemExit(1 if any_findings else 0)
 
 
-def _liveboard_viz_names(client: ThoughtSpotClient, identifier: str) -> List[str]:
-    """Answer names of a Liveboard's visualizations, for per-tile render probing.
+def _liveboard_doc(client: ThoughtSpotClient, identifier: str) -> dict:
+    """Export a Liveboard's TML and return the parsed doc dict (``{}`` on any failure).
 
-    Best-effort: exports the board TML and reads ``visualizations[].answer.name``. Returns
-    [] on any parse failure — the caller still reports the board-level failure, just
-    without per-tile attribution."""
+    Used both to name tiles for per-tile render probing and to run the static
+    axis-encoding check. Best-effort — a parse failure just means no per-tile attribution
+    and no axis findings, never a crash."""
     resp = client.post("/api/rest/2.0/metadata/tml/export",
                         json={"metadata": [{"identifier": identifier}]}, raise_for_status=False)
     try:
-        lb = yaml.safe_load(resp.json()[0]["edoc"]).get("liveboard", {})
+        doc = yaml.safe_load(resp.json()[0]["edoc"])
     except (ValueError, AttributeError, KeyError, TypeError, IndexError):
-        return []
-    names = []
-    for v in lb.get("visualizations", []):
-        nm = (v.get("answer", {}) or {}).get("name")
-        if nm:
-            names.append(nm)
-    return names
+        return {}
+    return doc if isinstance(doc, dict) else {}
 
 
 @app.command("verify-render")
@@ -759,19 +754,20 @@ def verify_render_cmd(
 ) -> None:
     """Verify an imported Liveboard actually RENDERS — not merely that it imported.
 
-    A hand-authored or subtly mis-bound answer can import cleanly yet fail at query time
-    with "No data source found for the query" (the tile shows blank/broken in the UI, and
-    `ts tml import` still reports success). This calls `metadata/liveboard/data` for the
-    board; on failure it re-probes each tile so the offending visualization is named, not
-    just a board-level 500.
+    Two ways a board that imports cleanly still fails a user:
+    - A hand-authored or mis-bound answer fails at query time ("No data source found"); this
+      calls `metadata/liveboard/data` and, on failure, re-probes each tile to name it.
+    - A chart tile with no axis encoding *loads data* (the board returns 200) but draws
+      BLANK — the data check alone would pass it, so those tiles are flagged separately.
 
-    Output: JSON `{"ok", "board", "tiles_rendered", "error", "failing_tiles":[{visual,error}]}`.
-    Exit 0 if the board renders, 1 otherwise — so a skill's import step can gate on it.
+    Output: JSON `{"ok", "board", "tiles_rendered", "error", "failing_tiles":[{visual,error}],
+    "blank_chart_tiles":[{visual,chart_type}]}`. Exit 0 only if the board returns data AND has
+    no blank chart tiles — so a skill's import step can gate on it.
 
     \b
       ts tml verify-render <liveboard-guid> --profile myprofile
     """
-    from ts_cli.render_check import classify_render, render_summary
+    from ts_cli.render_check import classify_render, render_summary, chart_tiles_missing_axis
     client = ThoughtSpotClient(resolve_profile(profile), org=org)
 
     def _data(body: dict) -> tuple:
@@ -782,6 +778,13 @@ def verify_render_cmd(
         except ValueError:
             return r.status_code, {"error": r.text[:300]}
 
+    # Export the board TML once: names tiles for per-tile probing AND feeds the axis check.
+    doc = _liveboard_doc(client, liveboard)
+    lb = doc.get("liveboard") or doc.get("pinboard") or {}
+    viz_names = [nm for v in lb.get("visualizations", [])
+                 if (nm := (v.get("answer", {}) or {}).get("name"))]
+    blank_tiles = chart_tiles_missing_axis(doc)
+
     status, body = _data({"metadata_identifier": liveboard})
     board = classify_render(status, body)
 
@@ -789,12 +792,12 @@ def verify_render_cmd(
     if not board["rendered"]:
         # Re-probe each tile so we can name the culprit, not just report a board-level 500.
         per_viz = []
-        for name in _liveboard_viz_names(client, liveboard):
+        for name in viz_names:
             st, bd = _data({"metadata_identifier": liveboard, "visualization_identifiers": [name]})
             entry = classify_render(st, bd)
             entry["visual"] = name
             per_viz.append(entry)
 
-    summary = render_summary(liveboard, board, per_viz)
+    summary = render_summary(liveboard, board, per_viz, blank_tiles)
     print(json.dumps(summary))
     raise SystemExit(0 if summary["ok"] else 1)

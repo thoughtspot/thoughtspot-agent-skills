@@ -16,6 +16,71 @@ from __future__ import annotations
 import re
 from typing import Any
 
+# Chart types whose rendering needs an explicit encoding — an x/y (+ series) axis map
+# (legacy cartesian, `chart.axis_configs`) or the ADVANCED_* shelf model
+# (`chart.custom_chart_config`). A tile of one of these types with NEITHER imports cleanly
+# but draws BLANK (the hand-authored-off-skill failure mode: a chart type is set, but nothing
+# tells the engine which column is the axis vs the series). Tables (GRID_TABLE / PIVOT_TABLE),
+# KPI, PIE, GEO_*, TREEMAP, FUNNEL, HEATMAP, SANKEY etc. don't use an x/y axis and are exempt.
+_CHART_NEEDS_AXIS = frozenset({
+    "LINE", "COLUMN", "BAR", "AREA",
+    "STACKED_COLUMN", "STACKED_BAR", "STACKED_AREA",
+    "LINE_COLUMN", "LINE_STACKED_COLUMN",
+    "SCATTER", "BUBBLE", "WATERFALL", "PARETO", "WHISKER_SCATTER", "CANDLESTICK",
+    "ADVANCED_LINE", "ADVANCED_COLUMN", "ADVANCED_BAR", "ADVANCED_AREA",
+    "ADVANCED_STACKED_COLUMN", "ADVANCED_STACKED_BAR", "ADVANCED_STACKED_AREA",
+    "ADVANCED_LINE_COLUMN", "ADVANCED_LINE_STACKED_COLUMN",
+})
+
+
+def _tile_answers(doc: dict):
+    """Yield ``(tile_label, answer_dict)`` for a parsed answer OR liveboard/pinboard TML doc.
+
+    A standalone answer has ``doc['answer']``; a liveboard has
+    ``doc['liveboard']['visualizations'][].answer``. Anything else yields nothing."""
+    if not isinstance(doc, dict):
+        return
+    a = doc.get("answer")
+    if isinstance(a, dict):
+        yield a.get("name") or "(answer)", a
+    lb = doc.get("liveboard") or doc.get("pinboard")
+    if isinstance(lb, dict):
+        for v in lb.get("visualizations") or []:
+            va = (v or {}).get("answer") if isinstance(v, dict) else None
+            if isinstance(va, dict):
+                yield va.get("name") or "(visualization)", va
+
+
+def chart_tiles_missing_axis(doc: dict) -> list:
+    """Chart tiles that will import but render blank for lack of an axis encoding.
+
+    Returns ``[{"visual": name, "chart_type": TYPE}, ...]`` for every answer/visualization
+    whose ``chart.type`` is in ``_CHART_NEEDS_AXIS`` but which carries neither
+    ``chart.axis_configs`` nor ``chart.custom_chart_config``. Empty for model/table TML,
+    tables, KPIs, and correctly-encoded charts. Pure — used by both `ts tml lint` (pre-import)
+    and `ts tml verify-render` (post-import, re-exported through render_check)."""
+    out = []
+    for name, a in _tile_answers(doc):
+        chart = a.get("chart") if isinstance(a.get("chart"), dict) else {}
+        ctype = str(chart.get("type") or "").upper()
+        if ctype in _CHART_NEEDS_AXIS and not (chart.get("axis_configs") or chart.get("custom_chart_config")):
+            out.append({"visual": name, "chart_type": ctype})
+    return out
+
+
+def _check_chart_tile_encoding(data: dict) -> list[str]:
+    """Chart tiles (answer/liveboard TML) that import cleanly but render BLANK for lack of
+    an axis encoding — neither chart.axis_configs nor a custom_chart_config. This is the
+    hand-authored-off-skill failure (a real CSM board shipped this way); the converter's
+    build-liveboard always emits the encoding, so its absence flags a hand-drawn tile.
+    A no-op for model/table docs, which have no tiles."""
+    return [
+        f"visualization '{tile['visual']}' is a {tile['chart_type']} chart but has no "
+        "chart.axis_configs (or custom_chart_config) — it imports but renders blank. "
+        "Generate the tile with the converter's build-liveboard, not by hand."
+        for tile in chart_tiles_missing_axis(data)
+    ]
+
 
 def lint_tml(data: dict) -> list[str]:
     """Return a list of invariant-violation strings for one parsed TML doc. Empty = clean.
@@ -37,6 +102,8 @@ def lint_tml(data: dict) -> list[str]:
                 f"guid is nested inside '{key}:' — it must be a top-level key "
                 f"(sibling of '{key}:'), or omitted on first import."
             )
+
+    findings.extend(_check_chart_tile_encoding(data))
 
     model = data.get("model")
     if not isinstance(model, dict):

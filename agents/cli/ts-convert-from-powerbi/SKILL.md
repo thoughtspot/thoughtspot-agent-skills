@@ -46,12 +46,14 @@ Ask one question at a time for **dependent** decisions (where the next depends o
 
 Every Answer/Liveboard tile is produced by `ts powerbi build-liveboard`. **Never hand-author
 answer or liveboard TML, and never hand-edit a tile's `search_query`, `answer_columns`, or
-chart block.** A hand-authored tile that references a raw column (e.g. `[Month]` instead of the
-`Month(Date)` bucket) or omits its axis config imports cleanly but fails at render with
-*"No data source found for the query"* — the board looks done and shows blank tiles. If a tile
-needs a measure that is not in the model yet, the fix is to add that measure to the **model**
-(Step 3) and re-run `build-liveboard` — not to draw the tile by hand. Step 4 gates on
-`ts tml verify-render`, so a board that does not actually render can never be handed over.
+chart block.** A hand-authored tile fails in one of two silent ways: a raw column reference
+(e.g. `[Month]` instead of the `Month(Date)` bucket) fails at render with *"No data source
+found for the query"*; and a chart tile with **no axis config** *loads data* (the board returns
+200) but draws a **blank chart**. Either way the board looks done and shows empty tiles. If a
+tile needs a measure that is not in the model yet, the fix is to add that measure to the
+**model** (Step 3) and re-run `build-liveboard` — not to draw the tile by hand. Linting the
+liveboard TML (Step 4, before import) catches the missing-axis case, and `ts tml verify-render`
+(Step 4, after import) catches both, so a board that does not truly render is never handed over.
 
 ## Workflow
 
@@ -111,13 +113,16 @@ non-rendering tiles — resolve them here, re-import (Step 2), and only then bui
 ### Step 4 — Build, import & VERIFY the liveboard
 ```bash
 ts powerbi build-liveboard <path-to-.pbip> --model-name "<Model name>" --output out/
+ts tml lint out/*.liveboard.tml                          # pre-import: flags any blank chart tile
 ts tml import out/*.liveboard.tml --profile <name>
 ts tml verify-render <liveboard-guid> --profile <name>   # REQUIRED gate; exit 1 = broken board
 ```
 `build-liveboard` emits renderable tiles: report pages become tabs (PBI `pageOrder`; a Tooltip
 page is dropped), role-aware axes (Category → x, Series/Legend → color, matrix Rows/Columns →
 pivot, measures → y), a month column becomes a monthly date bucket (`Month(Date)`), and every
-chart carries its axis config. **`ts tml verify-render` is a required gate, not optional.** If
+chart carries its axis config. **`ts tml verify-render` is a required gate, not optional.** It
+also fails on a chart tile with no axis config (`blank_chart_tiles`) — a board can return data
+yet draw blank. If
 it reports `ok:false` it names the failing tile(s); the cause is almost always a tile
 referencing a measure not in the model (return to Step 3) or a hand-edited tile. Fix the model
 or re-run `build-liveboard` — never hand-edit the tile TML to silence the error.
@@ -133,6 +138,7 @@ user as the deliverable.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.2 | 2026-08-03 | Render-robustness follow-up: lint the liveboard TML **before** import (Step 4) and let `ts tml verify-render` fail on the blank-chart case. A chart tile emitted with a type but no `chart.axis_configs` (or `custom_chart_config`) imports cleanly and **returns data (HTTP 200) yet draws blank** — the exact hole a hand-authored board fell through (a real board came back with 3 of 4 tiles blank). `ts tml lint` now flags such a tile pre-import and `verify-render` reports it under a new `blank_chart_tiles` field and exits non-zero, so a board that loads data but does not truly render can no longer pass the gate. Core rule reworded to name both failure modes (raw column → "No data source found"; no axis config → 200-but-blank). ts-cli v0.129.0. |
 | 1.1.1 | 2026-07-30 | **BL-171 — `_DAX_FUNC` stops emitting seven non-existent or wrong-meaning ThoughtSpot names (ts-cli v0.126.1).** `TRIM`/`UPPER`/`LOWER` mapped to bare `trim`/`upper`/`lower`, `HOUR`/`MINUTE`/`SECOND` to bare `hour`/`minute`/`second`, and `DISTINCTCOUNT` to `unique_count` — **none of those seven names exists in the ThoughtSpot formula parser** (live-disproved on se-thoughtspot: `upper`/`lower` 2026-06-13, the rest 2026-07-30), so every affected measure failed at import with `error_code 14516`. Now: `TRIM`/`UPPER`/`LOWER` → `sql_string_op("TRIM({0})", …)` pass-throughs (via the shared `wrap_passthrough_calls`), `HOUR` → `hour_of_day`, `DISTINCTCOUNT` → `unique count` (with a space), and `MINUTE`/`SECOND` are **flagged NEEDS REVIEW** rather than faked — ThoughtSpot has no minute/second extractor and the warehouse dialect isn't known at this layer. Separately, `MONTH` mapped to `month`, which exists but returns the month **name**; DAX `MONTH()` is numeric, so the target is `month_number` — a wrong *number*, not a failed import. Coverage matrix updated; 9 new tests; existing `test_distinctcount_maps_to_unique_count` had asserted the wrong expectation and is corrected. **All emitted forms live-verified on se-thoughtspot 2026-07-30** (`VALIDATE_ONLY`, nothing persisted). |
 | 1.1.0 | 2026-07-27 | Render-robustness: require `ts tml verify-render` as a gate after import; resolve the time-intelligence hard tail INTO the model before building the liveboard, via the new deterministic `ts powerbi build-timeintel` (Reference-Date SPLY/YoY measures, the live-verified measure-based pattern); add the "tiles come from the tool, never by hand" core rule (a hand-authored tile imports but fails to render with "No data source found") |
 | 1.0.0 | 2026-07-16 | Initial release — `ts powerbi` parse / build-model / build-liveboard |

@@ -16,6 +16,12 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
+# The blank-chart detector lives in tml_lint (it is fundamentally a pre-import lint over
+# the TML dict, and tml_lint must stay self-contained for the Databricks-Genie vendored
+# closure, which strips cross-module ts_cli imports). Re-exported here so the post-import
+# render path (`ts tml verify-render`) and its tests can import it from render_check.
+from ts_cli.tml_lint import chart_tiles_missing_axis  # noqa: F401  (re-export)
+
 
 def extract_error(body: Any) -> Optional[str]:
     """Pull the human-readable message out of a ThoughtSpot v2 error body.
@@ -66,17 +72,24 @@ def classify_render(status_code: int, body: Any) -> dict:
     return {"rendered": False, "tiles": 0, "error": extract_error(body)}
 
 
-def render_summary(board_guid: str, board: dict, per_viz: Optional[list] = None) -> dict:
+def render_summary(board_guid: str, board: dict, per_viz: Optional[list] = None,
+                   blank_tiles: Optional[list] = None) -> dict:
     """Assemble the command's stdout JSON contract.
 
     ``per_viz`` is a list of ``{"visual": name, ...classify_render()}`` probed only when
     the whole-board fetch failed, so the caller can name the offending tile(s) rather
-    than report a bare board-level 500."""
+    than report a bare board-level 500.
+
+    ``blank_tiles`` is ``chart_tiles_missing_axis()`` output: chart tiles that load data
+    but carry no axis encoding, so they draw blank. They fail the gate too — a board can
+    return data (200) yet be visually empty, which the data check alone would pass."""
     failing = [v for v in (per_viz or []) if not v.get("rendered")]
+    blanks = blank_tiles or []
     return {
-        "ok": bool(board.get("rendered")),
+        "ok": bool(board.get("rendered")) and not blanks,
         "board": board_guid,
         "tiles_rendered": board.get("tiles", 0),
         "error": board.get("error"),
         "failing_tiles": [{"visual": v.get("visual"), "error": v.get("error")} for v in failing],
+        "blank_chart_tiles": [{"visual": t.get("visual"), "chart_type": t.get("chart_type")} for t in blanks],
     }

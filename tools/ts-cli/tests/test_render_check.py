@@ -3,7 +3,12 @@
 The error body shape below is the real one observed live: an imported-but-broken
 liveboard returns 500 with the message nested at error.message.debug.debug.
 """
-from ts_cli.render_check import classify_render, extract_error, render_summary
+from ts_cli.render_check import (
+    chart_tiles_missing_axis,
+    classify_render,
+    extract_error,
+    render_summary,
+)
 
 # The real 500 body from a hand-authored board that imports but fails to render.
 BROKEN_500 = {
@@ -91,3 +96,66 @@ def test_render_summary_failing_board_names_tiles():
     assert s["failing_tiles"] == [
         {"visual": "Bad tile", "error": "No data source found for the query."}
     ]
+
+
+# --- chart_tiles_missing_axis: the blank-chart detector (Gunjan failure mode) ---
+
+def test_missing_axis_flags_linechart_without_axis():
+    doc = {"answer": {"name": "NH by Month", "chart": {"type": "LINE"}}}
+    assert chart_tiles_missing_axis(doc) == [{"visual": "NH by Month", "chart_type": "LINE"}]
+
+
+def test_missing_axis_ok_with_axis_configs():
+    doc = {"answer": {"name": "x", "chart": {"type": "LINE", "axis_configs": [{"x": ["Month"], "y": ["NH"]}]}}}
+    assert chart_tiles_missing_axis(doc) == []
+
+
+def test_missing_axis_empty_axis_configs_still_flags():
+    # an empty axis_configs list is no encoding at all
+    doc = {"answer": {"name": "x", "chart": {"type": "COLUMN", "axis_configs": []}}}
+    assert chart_tiles_missing_axis(doc) == [{"visual": "x", "chart_type": "COLUMN"}]
+
+
+def test_missing_axis_advanced_type_uses_custom_chart_config():
+    doc = {"answer": {"name": "x", "chart": {"type": "ADVANCED_LINE_COLUMN",
+                                             "custom_chart_config": {"configuration": "..."}}}}
+    assert chart_tiles_missing_axis(doc) == []
+
+
+def test_missing_axis_exempts_tables_kpi_pie_geo():
+    for ct in ("GRID_TABLE", "PIVOT_TABLE", "KPI", "PIE", "GEO_BUBBLE", "FUNNEL", "TREEMAP"):
+        doc = {"answer": {"name": ct, "chart": {"type": ct}}}
+        assert chart_tiles_missing_axis(doc) == [], ct
+
+
+def test_missing_axis_liveboard_flags_only_the_blank_chart_tiles():
+    doc = {"liveboard": {"visualizations": [
+        {"answer": {"name": "good line", "chart": {"type": "LINE", "axis_configs": [{"x": ["m"]}]}}},
+        {"answer": {"name": "blank combo", "chart": {"type": "LINE_COLUMN"}}},
+        {"answer": {"name": "pivot", "chart": {"type": "PIVOT_TABLE"}}},
+        {"answer": {"name": "blank bar", "chart": {"type": "BAR"}}},
+    ]}}
+    assert chart_tiles_missing_axis(doc) == [
+        {"visual": "blank combo", "chart_type": "LINE_COLUMN"},
+        {"visual": "blank bar", "chart_type": "BAR"},
+    ]
+
+
+def test_missing_axis_empty_for_model_and_table_tml():
+    assert chart_tiles_missing_axis({"model": {"columns": []}}) == []
+    assert chart_tiles_missing_axis({"table": {}}) == []
+    assert chart_tiles_missing_axis({}) == []
+
+
+def test_render_summary_blank_tiles_fail_gate_even_on_data_200():
+    board = classify_render(200, {"contents": [{"visualization_id": "v"}]})  # data DOES load
+    s = render_summary("g", board, None, [{"visual": "blank", "chart_type": "LINE"}])
+    assert s["ok"] is False  # 200 but blank charts -> not ok
+    assert s["blank_chart_tiles"] == [{"visual": "blank", "chart_type": "LINE"}]
+
+
+def test_render_summary_ok_when_data_loads_and_no_blanks():
+    board = classify_render(200, {"contents": [{"visualization_id": "v"}]})
+    s = render_summary("g", board, None, [])
+    assert s["ok"] is True
+    assert s["blank_chart_tiles"] == []

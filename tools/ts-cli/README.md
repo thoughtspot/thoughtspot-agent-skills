@@ -619,6 +619,12 @@ ts tml lint --file model.tml && ts tml import --file model.tml --policy ALL_OR_N
 
 **Input:** the SAME input as `ts tml import` — either `--file`/`--dir` (raw TML text per file) or, when neither is given, stdin as a JSON string or array of TML strings.
 
+For **answer / liveboard** TML, lint also flags a **chart tile with no axis encoding** — a
+LINE/COLUMN/BAR/combo whose `chart.type` is set but which carries neither `chart.axis_configs`
+nor a `custom_chart_config`. Such a tile imports cleanly yet renders blank (the
+hand-authored-off-skill failure); the converter's `build-liveboard` always emits the encoding,
+so its absence flags a hand-drawn tile before it ever reaches ThoughtSpot.
+
 **Output:** JSON `{"clean": bool, "results": [{index, type, name, findings: [...]}]}`.
 **Exit code** is `1` if any document has findings, else `0` — so it composes with `&&`.
 
@@ -633,6 +639,11 @@ blank/broken in the UI while `ts tml import` reported success. This calls
 `metadata/liveboard/data` for the board; on failure it re-probes each tile so the
 offending visualization is named, not just a board-level 500.
 
+It also catches a **second** blank-board failure the data check alone misses: a chart tile
+with **no axis encoding** (a LINE/COLUMN/BAR/combo with neither `chart.axis_configs` nor a
+`custom_chart_config`) *loads data* — the board returns 200 — but draws blank. Those tiles
+are reported in `blank_chart_tiles` and fail the gate too.
+
 ```bash
 ts tml verify-render <liveboard-guid> --profile myprofile
 ts tml verify-render <liveboard-guid> --profile myprofile --org 1417628299
@@ -644,9 +655,11 @@ ts tml verify-render <liveboard-guid> --profile myprofile --org 1417628299
 | `--profile`, `-p` | first profile | Profile to use |
 | `--org` | profile/env org | Org id or name the Liveboard lives in |
 
-**Output:** JSON `{"ok", "board", "tiles_rendered", "error", "failing_tiles": [{visual, error}]}`.
-**Exit code** is `0` if the board renders, `1` otherwise — so a conversion skill can gate its
-import step on it (`ts tml import ... && ts tml verify-render <guid>`).
+**Output:** JSON `{"ok", "board", "tiles_rendered", "error", "failing_tiles": [{visual, error}],
+"blank_chart_tiles": [{visual, chart_type}]}`.
+**Exit code** is `0` only if the board returns data **and** has no blank chart tiles, `1`
+otherwise — so a conversion skill can gate its import step on it
+(`ts tml import ... && ts tml verify-render <guid>`).
 
 ---
 
