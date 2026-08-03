@@ -87,6 +87,105 @@ rows — they keep their earlier verification dates.
 
 ---
 
+## #6 — Reference corrections from BI-client probing — OPEN 2026-08-04
+
+Driving Tableau Desktop at AgentQL through a Postgres-wire bridge
+(`spotql-testing`, `src/spotql_test/bridge/`) exercised the reference material far
+harder than hand-written queries do, because a BI tool emits SQL nobody chose.
+That surfaced **three claims in this skill's own references that do not hold** on
+build 26.7.0.cl-72 against a Snowflake-backed Model, plus **five limitations not
+yet recorded**.
+
+Every item below was verified with `generate-sql` / `fetch-data` against
+`T1_PUBLISH_MODEL` on `nebula-damian-alias` (physical
+`AGENT_SKILLS.ALIAS_TESTS.T1_PUBLISH`), per this file's own rule that the probe,
+not the ticket or the doc, is the source of truth.
+
+### A. Three corrections — the doc is wrong
+
+| Where | Says | Actually | Evidence |
+|---|---|---|---|
+| `udf-reference.md` § Extraction UDFs | `DAY_NUMBER(date_col)` returns INT **(1–366)**, i.e. day of year | Returns **day of month** | For 2024-03-15, `DAY_NUMBER` = 15 and `DAY_IN_MONTH_NUMBER` = 15. Day of year is 75. So `DAY_NUMBER` duplicates `DAY_IN_MONTH_NUMBER` and **there is no day-of-year UDF** |
+| `agentql-rules.md` § Forbidden (recap) | "arithmetic between an aggregate and a numeric literal (returns zeros)" | **Works correctly** | Against a known Furniture total of 6878: `*100` → 687800, `/2` → 3439, `+1` → 6879, `-1` → 6877; also literal-first, DOUBLE, `COUNT`, `AVG`, and grouped forms. All correct |
+| `agentql-rules.md` § Forbidden (recap) | `LENGTH()` forbidden | **Works** | 15 grouped rows returned. `limitations.md` L-14 already records it mapping to `char_length` server-side |
+
+**Why these matter more than a typo.** The aggregate-times-literal claim is the
+dangerous one: a deny-list entry was written against it and then removed once
+probed. Had it shipped it would have blocked every percentage and unit-scaling
+calculation a BI tool produces. The `DAY_NUMBER` error is the other kind — it
+would have been used to translate `EXTRACT(DOY ...)`, returning a plausible wrong
+number rather than an error.
+
+### B. Five limitations to add to `limitations.md`
+
+All found through BI-client SQL, all with SCAL tickets under
+[SCAL-316371](https://thoughtspot.atlassian.net/browse/SCAL-316371):
+
+| Construct | Behaviour | Ticket |
+|---|---|---|
+| `LTRIM(x, chars)` / `RTRIM(x, chars)` | Validates, then renders ANSI `trim(leading ' ' from ...)`, which Snowflake rejects. Single-argument form is correct | [SCAL-326943](https://thoughtspot.atlassian.net/browse/SCAL-326943) |
+| `DATE_TRUNC(unit, col)` | Validates, then leaks the parser alias, drops the unit (`trunc(x, null)`), and **silently drops the `GROUP BY`**, wrapping the date in `min()` | [SCAL-326944](https://thoughtspot.atlassian.net/browse/SCAL-326944) |
+| `CAST(<literal> AS <type>)` | Rejected as a fabricated column `Constant_<value>`. Casting a *column* is fine | [SCAL-326946](https://thoughtspot.atlassian.net/browse/SCAL-326946) |
+| `EXTRACT(DOW ...)` | Rejected at parse, `DatePart expected`. `DAY_IN_WEEK_NUMBER(x) % 7` is the exact equivalent (Monday=1..Sunday=7, so mod 7 gives Sunday=0..Saturday=6) | [SCAL-327864](https://thoughtspot.atlassian.net/browse/SCAL-327864) |
+| `EXTRACT(DOY ...)` | Validates, renders `extract(day_of_year from ...)`; Snowflake wants `dayofyear`. No workaround, because `DAY_NUMBER` is day-of-month (see A) | [SCAL-327864](https://thoughtspot.atlassian.net/browse/SCAL-327864) |
+
+Diagnostics worth noting alongside them
+([SCAL-326945](https://thoughtspot.atlassian.net/browse/SCAL-326945)): a derived
+table in a `JOIN` reports `Table 't' not found`, where `'t'` is a hardcoded
+placeholder that appears whatever the real alias is; and `GROUP BY 1` reports
+`Missing formula alias: <guid>`, naming neither the construct nor anything the
+caller wrote.
+
+### C. Two behaviours to document, not tickets
+
+- **`LIMIT 100000` is appended to every generated statement**, including
+  statements with no `LIMIT` of their own. On a large Model a bulk extract would
+  be silently capped. Worth a line in `limitations.md` and confirming whether it
+  is configurable.
+- **`IN (SELECT ...)` validates and emits the subquery untranslated**, referencing
+  the Model name as though it were a physical table. It only fails because no such
+  object exists; if one did, it would execute against the wrong thing. A ticket
+  reportedly already exists.
+
+### D. Suggested addition to `patterns.md`: the CTE semi-join
+
+Subqueries are unsupported, but a **CTE joined to the Model** is, and it is the
+only expressible semi-join. It works, including `ORDER BY ... LIMIT n` inside the
+CTE, which is what a Top-N rewrite needs.
+
+The guard is not optional and is stricter than it looks:
+
+> **The CTE's grouped (or `DISTINCT`) column set must be a subset of the columns
+> in the join's `ON` equality.**
+
+A derived table filters; a `JOIN` multiplies. Measured on `T1_PUBLISH_MODEL`,
+true `SUM(QTY_ON_HAND)` = 18,695:
+
+| Shape | Result |
+|---|---|
+| Key CTE not deduped | **472,314** |
+| Key CTE `GROUP BY <join key>` | 18,695 |
+| Key CTE `GROUP BY (cat, name)`, joined on `cat` only | **472,314** |
+
+The last row is the point: a `GROUP BY` is present and the answer is still 25×
+too high. Pre-aggregating the fact side does not help — re-aggregating a
+fanned-out result just adds up the duplicates.
+
+### Proposed work
+
+1. Apply the three corrections in A. Mechanical; the evidence is above.
+2. Add the five rows in B to `limitations.md` with their SCAL refs, and bump the
+   currency anchor.
+3. Add C as two notes.
+4. Add D to `patterns.md` with the guard stated as a rule.
+5. Consider whether `udf-reference.md` should be **generated from a live probe
+   suite** rather than hand-maintained. Three wrong entries in one file is a
+   pattern rather than bad luck, and `use-cases.md` #6 already describes the
+   executable form of exactly that check.
+
+Not done here because it changes a shipped skill's guidance, which deserves a
+review rather than being folded into a bridge branch.
+
 ## Keeping `limitations.md` current
 
 `limitations.md` carries a currency anchor (`<!-- currency: spotql — YYYY-MM (...) -->`).
