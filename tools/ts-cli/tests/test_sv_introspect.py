@@ -6,6 +6,7 @@ import pytest
 from ts_cli.sv_introspect import (
     build_info_schema_query,
     build_tables_map,
+    tables_map_from_parsed,
     build_tables_spec,
     detect_column_gaps,
     extract_table_locations,
@@ -290,6 +291,49 @@ class TestBuildTablesMap:
             "O": {"name": "ORDERS"},
             "C": {"name": "CUSTOMERS"},
         }
+
+
+# ---------------------------------------------------------------------------
+# tables_map_from_parsed (BL-205 — the diagram/preview path)
+# ---------------------------------------------------------------------------
+
+class TestTablesMapFromParsed:
+    def test_derives_alias_to_physical_name(self):
+        parsed = {"tables": [
+            {"alias": "SUPPORT_CASE", "name": "CASE"},
+            {"alias": "ACCOUNT", "name": "ACCOUNT"},
+        ]}
+        assert tables_map_from_parsed(parsed) == {
+            "SUPPORT_CASE": {"name": "CASE"},
+            "ACCOUNT": {"name": "ACCOUNT"},
+        }
+
+    def test_role_play_aliases_stay_distinct_on_one_physical_table(self):
+        """The whole point on a role-played SV: three USER instances must remain
+        three keys, or the joins collapse onto one node in the diagram."""
+        parsed = {"tables": [
+            {"alias": "CASE_OWNER", "name": "USER"},
+            {"alias": "INCIDENT_OWNER", "name": "USER"},
+            {"alias": "INCIDENT_RESOLVED_BY", "name": "USER"},
+        ]}
+        m = tables_map_from_parsed(parsed)
+        assert len(m) == 3
+        assert {e["name"] for e in m.values()} == {"USER"}
+
+    def test_carries_no_fqn(self):
+        """Nothing was looked up, so no entry may claim a warehouse GUID."""
+        m = tables_map_from_parsed({"tables": [{"alias": "A", "name": "T"}]})
+        assert "fqn" not in m["A"]
+
+    def test_no_tables_key(self):
+        assert tables_map_from_parsed({}) == {}
+
+    def test_agrees_with_the_introspection_path_on_shape(self):
+        """Both routes feed build-model, so their output shape cannot diverge."""
+        parsed = {"tables": [{"alias": "O", "name": "ORDERS"}]}
+        introspected = build_tables_map(
+            [{"database": "DB", "schema": "S", "table_name": "ORDERS", "alias": "O"}])
+        assert tables_map_from_parsed(parsed) == introspected
 
 
 # ---------------------------------------------------------------------------

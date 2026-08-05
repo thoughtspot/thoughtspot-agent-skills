@@ -221,6 +221,24 @@ def build_tables_map(locations: list[dict]) -> dict[str, dict]:
     }
 
 
+def tables_map_from_parsed(parsed: dict) -> dict[str, dict]:
+    """Derive the `--tables` map straight from parse-sv output, no warehouse round-trip.
+
+    `build_tables_map` needs an introspection result because a real conversion has
+    to confirm the tables exist and later carry their GUIDs. A **diagram** needs
+    neither: the parse already holds every table's SV alias and physical name,
+    which is the whole of the map's shape. Routed through `build_tables_map` rather
+    than rebuilding the dict so the two paths cannot drift on shape.
+
+    Carries no `fqn` — there is nothing to look one up against — so the result is
+    for emitting Model TML to read, never to import (BL-205).
+    """
+    return build_tables_map([
+        {"alias": t["alias"], "table_name": t["name"]}
+        for t in parsed.get("tables") or []
+    ])
+
+
 # ---------------------------------------------------------------------------
 # Column gap detection
 # ---------------------------------------------------------------------------

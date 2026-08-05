@@ -41,6 +41,8 @@ into a single prompt to cut round-trips.
 
 - Python 3.9+ with `pyyaml` (`pip install pyyaml`)
 - For live export: a ThoughtSpot profile (`/ts-profile-thoughtspot`) + the `ts` CLI
+- For a source semantic definition (Step 1.5): the `ts` CLI only — no ThoughtSpot
+  profile and no warehouse connection are needed
 
 ---
 
@@ -55,6 +57,7 @@ Read-only — never modifies the source model.
 ### Steps
 
   1.  Choose source ....................................... ask
+  1.5 (Source definition) Convert offline, then render ... ask/auto
   2.  (Live) Authenticate + select models ................ ask/auto
   3.  Read or export TML .................................. auto
   4.  Synthesize AI-analysis corpus ...................... auto
@@ -78,10 +81,70 @@ Confirm the user wants to proceed before starting Step 1.
 
 ## Step 1 — Choose source
 
-Ask: **(A) Local TML files or folder**, or **(B) Live ThoughtSpot instance**?
+Ask: **(A) Local TML files or folder**, **(B) Live ThoughtSpot instance**, or
+**(C) A source semantic definition** (a Snowflake Semantic View or a Databricks Metric View)?
 
 - **A — Files:** ask for the path(s) to the TML files or directory. Skip to Step 3.
 - **B — Live:** proceed to Step 2.
+- **C — Source definition:** proceed to Step 1.5.
+
+---
+
+## Step 1.5 — (Source definition only) Convert, then render
+
+The ERD renders ThoughtSpot TML, so convert first. This runs **fully offline** — no
+ThoughtSpot instance, no warehouse, no profile — because `--tables auto` derives the
+alias→table map from the parse output instead of introspecting a warehouse.
+
+Ask for the path to the source file, then run the pair of commands for its format
+and continue to Step 5 with the emitted `.model.tml`.
+
+**Snowflake Semantic View** (a `CREATE SEMANTIC VIEW` DDL file — get one with
+`GET_DDL('SEMANTIC_VIEW', '<fqn>')` if the user only has the view name):
+
+```bash
+ts snowflake parse-sv "{ddl_file}" -o parsed.json
+ts snowflake translate-formulas -i parsed.json -o translated.json
+ts snowflake build-model -p parsed.json -t translated.json \
+    --tables auto -n "{model_name}" -o tml_out --sv-fqn "{source_fqn}"
+```
+
+**Databricks Metric View** (the Metric View YAML):
+
+```bash
+ts databricks parse-mv "{mv_yaml}" -o parsed.json
+ts databricks translate-formulas -i parsed.json -o translated.json --tables auto
+ts databricks build-model -p parsed.json -t translated.json \
+    --tables auto -n "{model_name}" -o tml_out --mv-fqn "{source_fqn}"
+```
+
+Note the asymmetry: Databricks needs `--tables auto` on **both** commands because its
+expressions are dot-paths that resolve through the map, while Snowflake needs it only at
+`build-model`.
+
+**Report what the conversion says.** Both commands print a JSON summary and send
+diagnostics to stderr. A `SKIPPED` line means a measure or dimension did not survive
+translation and will be **absent from the diagram** — surface those to the user rather
+than letting the ERD imply the source had nothing there. On the Databricks side a
+`WARNING: '<path>' has no table FQN` means a `sql_query` source was labelled with its
+alias, because a real conversion would build a SQL View there.
+
+**Say what the diagram is.** An ERD built this way shows **the ThoughtSpot Model the
+source would convert to**, not the source's native shape. For a Semantic View that is
+close to 1:1; state it anyway when sharing the file. `--sv-fqn` / `--mv-fqn` writes the
+source FQN into the model description, so the provenance travels with the diagram.
+
+**Do not import this model.** `--tables auto` looks nothing up, so the map carries no
+warehouse GUIDs; both commands refuse `--profile` for that reason. Converting **for
+real** is a different job with different steps (table registration, connection choice,
+review gates) — route the user to `/ts-convert-from-snowflake-sv` or
+`/ts-convert-from-databricks-mv`.
+
+Other sources (Tableau, Power BI, Qlik, Sisense, Looker) are **not** wired into this
+step. Their conversion invents the table layer from extracts and makes reconcile and
+name-mapping decisions, so a diagram-only run would stub out exactly the choices that
+determine what the picture looks like. To diagram one of those, run its converter
+properly first and render the resulting TML through option **(A)**.
 
 ---
 
@@ -236,6 +299,7 @@ HTML file; no ThoughtSpot login required to view.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.8.0 | 2026-08-05 | **BL-205 — render an ERD from a source semantic definition.** New Step 1 option **(C)**, covering a Snowflake Semantic View and a Databricks Metric View, with a Step 1.5 that converts offline and hands the emitted Model TML to the existing render. The conversion always worked without a ThoughtSpot instance; what blocked it was that both `build-model`s demand warehouse-registration inputs a diagram never uses, so producing one meant hand-deriving a tables map. `--tables auto` (ts-cli 0.129.0) closes that, and on Databricks `--connection` is no longer required alongside it. Scoped to those two formats deliberately: they are declarative semantic-layer objects, while the BI-workbook converters invent the table layer and would stub the decisions that shape the diagram — those still render via option (A) after a real conversion. The step also requires reporting `SKIPPED` translations (absent from the diagram, so silence would misrepresent the source) and stating that the ERD shows the ThoughtSpot Model the source converts to. |
 | 1.7.3 | 2026-08-05 | **Column descriptions never reached the ERD.** `_column_entry` read `desc` from a column's **top-level** `description` only — the field its own docstring notes is "usually null" — while falling back to `properties` for `synonyms` and `ai_context`. Model TML puts a column comment under `properties.description`, so every description a conversion skill emits was dropped and the column inspector rendered blank: a Snowflake Semantic View converted with `/ts-convert-from-snowflake-sv` carries a `comment=` on each dimension, metric and fact, and all 60 of them were lost on a 13-table support-case model. `description` now takes the same `properties` fallback as its two neighbours, with the top-level field still winning when an export carries both. |
 | 1.7.2 | 2026-07-31 | **BL-203 — an inline join's real name was discarded, hiding same-pair joins and faking a fidelity warning.** `_build_joins` synthesized every inline join's name as `{from}_{to}`, throwing away the model TML's `name:`. Two consequences, both found when a skill operator noticed `FACT_OPEN_ORDERS`'s `BOOKED_DATE_ID` and `ORDER_DATE_ID` joins missing from a rendered ERD. (a) The viewer keys edges by name (`showEdge(name)`), so where a table pair is joined more than once only the **first** was reachable in the inspector — on a real 44-join model that hid **18 of 23** date joins, and the overlapping edges drew as one line. (b) `_log_degraded_fidelity` looked the synthesized name up in the Table-TML join index, where it can never match, so **every inline-join model** got a false "Fidelity degraded: N join(s) had no Table TML definition" naming joins whose cardinality and type were in fact known — read straight off the inline join. Now prefers the declared name, and the warning fires only for joins that genuinely still lack cardinality/type (i.e. `referencing_join` ones), including in the no-Table-TMLs-at-all branch. |
 | 1.7.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |

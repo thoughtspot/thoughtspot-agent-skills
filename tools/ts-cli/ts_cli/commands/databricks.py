@@ -15,6 +15,8 @@ from typing import Optional
 
 import typer
 
+from ts_cli.tml_common import AUTO_TABLES
+
 app = typer.Typer(help="Databricks Metric View conversion commands (offline file transforms).")
 
 
@@ -78,7 +80,8 @@ def translate_formulas_cmd(
     tables_file: str = typer.Option(
         ..., "--tables", "-t",
         help="JSON object mapping MV alias paths to ThoughtSpot table "
-             "names ('source' key required)"),
+             "names ('source' key required), or the literal 'auto' to derive it "
+             "from --input (diagram/preview only)"),
 ) -> None:
     """Translate parsed Metric View expressions to ThoughtSpot formulas.
 
@@ -94,7 +97,18 @@ def translate_formulas_cmd(
     from ts_cli.databricks.mv_translate import translate_metric_view
 
     parsed = _load_json(input_file, "parsed input")
-    tables = _load_json(tables_file, "tables map")
+    if tables_file == AUTO_TABLES:
+        # The Databricks pipeline needs the map a step earlier than the Snowflake
+        # one (expressions are dot-paths that resolve through it), so the sentinel
+        # has to be accepted here too or the diagram path stalls before build-model.
+        from ts_cli.databricks.mv_build_model import tables_map_from_parsed
+        tables, auto_notes = tables_map_from_parsed(parsed)
+        for note in auto_notes:
+            typer.echo(f"WARNING: {note}", err=True)
+        typer.echo(f"--tables auto: derived {len(tables)} table(s) from --input.",
+                   err=True)
+    else:
+        tables = _load_json(tables_file, "tables map")
     try:
         result = translate_metric_view(parsed, tables)
     except ValueError as exc:
@@ -125,10 +139,13 @@ def build_model_cmd(
     translated_path: str = typer.Option(
         ..., "--translated", "-t", help="translate-formulas output JSON"),
     tables_path: str = typer.Option(
-        ..., "--tables", help="tables.json (v2 objects or plain strings)"),
-    connection: str = typer.Option(
-        ..., "--connection", "-c",
-        help="ThoughtSpot connection display name (table TML only)"),
+        ..., "--tables",
+        help="tables.json (v2 objects or plain strings), or the literal 'auto' to "
+             "derive it from --parsed (diagram/preview only, no import)"),
+    connection: Optional[str] = typer.Option(
+        None, "--connection", "-c",
+        help="ThoughtSpot connection display name (table TML only; not needed "
+             "with --tables auto, which writes no table TML)"),
     model_name: str = typer.Option(
         ..., "--model-name", "-n", help="Model TML name"),
     output_dir: str = typer.Option(
@@ -161,7 +178,27 @@ def build_model_cmd(
 
     parsed = _load_json(parsed_path, "parsed")
     translated_doc = _load_json(translated_path, "translated")
-    tables = _load_json(tables_path, "tables")
+
+    if tables_path == AUTO_TABLES:
+        if profile:
+            typer.echo(
+                "--tables auto derives names from the parse output and looks nothing "
+                "up, so it carries no warehouse GUIDs and must not be imported. "
+                "Supply a real tables map to use --profile.", err=True)
+            raise SystemExit(1)
+        from ts_cli.databricks.mv_build_model import tables_map_from_parsed
+        tables, auto_notes = tables_map_from_parsed(parsed)
+        for note in auto_notes:
+            typer.echo(f"WARNING: {note}", err=True)
+        typer.echo(
+            f"--tables auto: derived {len(tables)} table(s) from --parsed. Model TML "
+            f"only, nothing verified against a warehouse — for an ERD or a preview, "
+            f"not for import.", err=True)
+    else:
+        if not connection:
+            typer.echo("--connection is required unless --tables auto", err=True)
+            raise SystemExit(1)
+        tables = _load_json(tables_path, "tables")
 
     try:
         model_doc, build_info = build_model_tml_dbx(

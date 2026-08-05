@@ -19,6 +19,7 @@ from ts_cli.databricks.mv_build_model import (
     build_model_tml_dbx,
     display_title,
     flatten_join_aliases,
+    tables_map_from_parsed,
 )
 from ts_cli.databricks.mv_parse import parse_metric_view
 from ts_cli.databricks.mv_tml import (
@@ -377,6 +378,55 @@ class TestFlattenJoinAliases:
             ("orders", "source"), ("orders.customers", "orders")]
 
 
+class TestTablesMapFromParsed:
+    """BL-205 — the diagram/preview map, derived without a warehouse round-trip."""
+
+    def test_keys_are_source_plus_every_join_dot_path(self):
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact_sales",
+                             "parts": ["c", "s", "fact_sales"]},
+                  "joins": NESTED}
+        m, notes = tables_map_from_parsed(parsed)
+        assert m == {"source": "fact_sales", "orders": "dm_order",
+                     "orders.customers": "dm_customer"}
+        assert notes == []
+
+    def test_keys_match_what_build_model_tables_looks_up(self):
+        """The derived map must satisfy build_model_tables, which raises on any
+        join path it cannot find — that is the contract, so assert it directly."""
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact_sales",
+                             "parts": ["c", "s", "fact_sales"]},
+                  "joins": NESTED}
+        m, _ = tables_map_from_parsed(parsed)
+        entries = build_model_tables(parsed, m)
+        assert [e["name"] for e in entries] == ["fact_sales", "dm_order", "dm_customer"]
+
+    def test_two_part_fqn_without_parts_falls_back_to_the_raw_tail(self):
+        parsed = {"source": {"kind": "table_fqn", "raw": "s.`odd name`",
+                             "parts": None}, "joins": []}
+        m, notes = tables_map_from_parsed(parsed)
+        assert m == {"source": "odd name"}
+        assert notes == []
+
+    def test_sql_query_source_degrades_to_the_alias_and_says_so(self):
+        """A SELECT source has no table to name. A real conversion builds a SQL
+        View there; a diagram takes the alias and the note carries the caveat."""
+        parsed = {"source": {"kind": "sql_query", "raw": "(SELECT 1)"},
+                  "joins": [_join("orders", "c.s.dm_order")]}
+        m, notes = tables_map_from_parsed(parsed)
+        assert m["source"] == "source"
+        assert m["orders"] == "dm_order"
+        assert len(notes) == 1
+        assert "SQL View" in notes[0]
+
+    def test_values_are_plain_strings_so_no_table_tml_is_built(self):
+        """Plain strings carry no `create: true`, which is what makes the
+        connection argument unnecessary on this path."""
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.t",
+                             "parts": ["c", "s", "t"]}, "joins": []}
+        m, _ = tables_map_from_parsed(parsed)
+        assert all(isinstance(v, str) for v in m.values())
+
+
 class TestBuildModelTables:
     def test_single_table_no_id_no_joins(self):
         parsed = {"source": {"kind": "table_fqn", "raw": "a.e.t"}, "joins": []}
@@ -625,6 +675,46 @@ class TestBuildModelCommand:
                 "--model-name", "M",
                 "--output-dir", str(tmp_path / "out"), *extra]
         return runner.invoke(app, args)
+
+    def _run_auto(self, tmp_path, *extra):
+        """--tables auto, and deliberately no --connection (BL-205)."""
+        runner = CliRunner()
+        return runner.invoke(app, [
+            "databricks", "build-model",
+            "--parsed", str(tmp_path / "parsed.json"),
+            "--translated", str(tmp_path / "translated.json"),
+            "--tables", "auto",
+            "--model-name", "M",
+            "--output-dir", str(tmp_path / "out"), *extra])
+
+    def test_tables_auto_needs_no_connection(self, tmp_path):
+        result = self._run_auto(_write_build_inputs(tmp_path))
+        assert result.exit_code == 0, result.output
+        # This CliRunner mixes stderr into stdout, and the auto path emits its
+        # "derived N table(s)" notice there (diagnostics on stderr, per the
+        # ts-cli output conventions), so read the summary off the last line.
+        summary = json.loads(result.output.strip().splitlines()[-1])
+        assert summary["connection"] is None
+        assert summary["table_files"] == []
+        assert (tmp_path / "out" / "M.model.tml").exists()
+
+    def test_tables_auto_refuses_to_import(self, tmp_path):
+        """The derived map has no GUIDs, so importing it must be impossible."""
+        result = self._run_auto(_write_build_inputs(tmp_path), "--profile", "p")
+        assert result.exit_code == 1
+        assert "must not be imported" in result.output
+
+    def test_connection_still_required_without_tables_auto(self, tmp_path):
+        _write_build_inputs(tmp_path)
+        result = CliRunner().invoke(app, [
+            "databricks", "build-model",
+            "--parsed", str(tmp_path / "parsed.json"),
+            "--translated", str(tmp_path / "translated.json"),
+            "--tables", str(tmp_path / "tables.json"),
+            "--model-name", "M",
+            "--output-dir", str(tmp_path / "out")])
+        assert result.exit_code == 1
+        assert "--connection is required" in result.output
 
     def test_writes_model_tml_and_summary(self, tmp_path):
         result = self._run(_write_build_inputs(tmp_path))

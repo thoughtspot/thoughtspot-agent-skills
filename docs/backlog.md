@@ -87,7 +87,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | ~~BL-192~~ | ~~`docs/quality-gates.md` stales from main's commits, not yours — hard-fails the PR gate on a race~~ | DONE (2026-07-30) |
-| BL-205 | ERD from a source semantic definition (SF SV / DBX MV) is possible but entirely manual | next converter pass |
+| ~~BL-205~~ | ~~ERD from a source semantic definition (SF SV / DBX MV) is possible but entirely manual~~ | DONE (2026-08-05) |
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
@@ -7136,7 +7136,7 @@ regardless, and a hand-authored Model can still carry the shape.
 
 ---
 
-## BL-205 -- an ERD from a source semantic definition is possible but entirely manual: `build-model` demands warehouse-registration inputs a diagram never uses `Tier 2`
+## BL-205 -- an ERD from a source semantic definition is possible but entirely manual: `build-model` demands warehouse-registration inputs a diagram never uses `Tier 2` -- DONE (2026-08-05)
 
 **Filed:** 2026-08-05.
 **Source:** rendering an ERD for a customer Snowflake SV (`DEV_GOLD.SALESFORCE.SUPPORT_CASE_SV`,
@@ -7145,7 +7145,30 @@ whole pipeline was assembled by hand in-session.
 **Affects:** `agents/cli/ts-object-model-erd/SKILL.md` (Step 1),
 `tools/ts-cli/ts_cli/commands/snowflake.py` + `commands/databricks.py` (`build-model` args),
 `tools/ts-cli/ts_cli/sv_introspect.py` (`build_tables_map` reuse).
-**Status:** OPEN.
+**Status:** DONE (2026-08-05) -- ts-cli v0.129.0, ts-object-model-erd v1.8.0.
+
+**What shipped.** `--tables auto` on `ts snowflake build-model`, and on **both**
+`ts databricks translate-formulas` and `build-model` (the Databricks pipeline resolves
+dot-path expressions through the map, so it is needed a step earlier than assumed when
+this was filed -- found only by running it). `ts databricks build-model --connection` is
+now required only when *not* using the sentinel. `/ts-object-model-erd` gains Step 1
+option **(C)** and a Step 1.5 that converts offline and renders.
+
+Two things make the derivation trustworthy rather than merely convenient: the Snowflake
+path routes through `build_tables_map`, so the introspected and derived maps cannot drift
+on shape, and it emits **byte-identical** Model TML to a hand-written map on the 13-table
+`SUPPORT_CASE_SV` fixture; the Databricks path is keyed by the same `flatten_join_aliases`
+walk that `build_model_tables` looks up, so the two cannot disagree about what a join path
+is, and a test asserts the derived map satisfies `build_model_tables` directly.
+
+The map carries no warehouse GUIDs, so both commands **refuse `--profile`**, and only the
+exact string `auto` opts in -- a mistyped path stays an error rather than silently becoming
+a derived map. A `sql_query` Databricks source has no table to name, so it degrades to its
+alias with a stderr WARNING saying a real conversion would build a SQL View there.
+
+Verified end to end on both formats: `SUPPORT_CASE_SV` (13 tables / 12 joins / 5 role-play
+aliases) and the `MV_DM_SALES` Metric View fixture (7 tables / 6 joins, including nested
+dot-paths). Full suite 4074 passed.
 
 `ts-object-model-erd` Step 1 offers exactly two sources: local TML files, or a live
 ThoughtSpot instance. There is no way to point it at a semantic definition the estate has a
