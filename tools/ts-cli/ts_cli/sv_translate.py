@@ -811,8 +811,10 @@ def _derived_resolver(
     own entity, so a reference must point at whatever that metric is EMITTED as,
     not at a double aggregation:
 
-    * a simple ``AGG(col)`` metric becomes a plain ``columns[]`` entry, so the
-      reference is its display name — ``[Amount]``;
+    * a simple ``AGG(col)`` metric becomes a plain ``columns[]`` entry with an
+      aggregation, so there is no formula id to point at AND a display-name
+      reference is rejected by ThoughtSpot's formula parser — its own aggregate
+      is inlined instead: ``sum ( [DM_ORDER_DETAIL::LINE_TOTAL] )``;
     * anything else becomes a formula, so the reference is the minted id —
       ``[formula_Avg Order Value]``.
 
@@ -831,10 +833,15 @@ def _derived_resolver(
         m = metric_idx.get(ident.lower())
         if m is not None:
             if _is_simple_agg(m.get("expr")) is not None:
-                return "[" + display_title(
-                    {"name": m["source_column"],
-                     "synonyms": m.get("synonyms")},
-                    promote_synonym=promote_synonym) + "]"
+                # A simple AGG(col) metric is emitted as a plain columns[] entry
+                # carrying an aggregation, NOT a formula — so there is no id to
+                # reference, and a ThoughtSpot formula cannot reference another
+                # column by DISPLAY NAME either (`[Amount]` is rejected:
+                # "Search did not find ... Expecting one of the valid keywords").
+                # Inline the metric's own aggregate over the physical column,
+                # which is the form every working formula in a converted Model
+                # uses: `sum ( [DM_ORDER_DETAIL::LINE_TOTAL] )`.
+                return translate_sql_expr(m["expr"], generic)
             return "[" + construct_formula_id(
                 m, promote_synonym=promote_synonym) + "]"
         return generic(ident)

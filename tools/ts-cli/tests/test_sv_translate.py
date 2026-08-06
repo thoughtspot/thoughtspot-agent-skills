@@ -1120,27 +1120,32 @@ class TestDerivedMetricTranslation:
         e = _t("ATTAINMENT")
         assert e["output_kind"] == "formula" and e["column_type"] == "MEASURE"
 
-    def test_simple_agg_reference_uses_the_column_display_name(self):
-        # AMOUNT is SUM(col) -> a plain column, so [Amount], NOT [formula_Amount]
-        assert _t("ATTAINMENT")["ts_expr"] == "[Amount] / [Target Revenue]"
+    def test_simple_agg_reference_inlines_the_physical_aggregate(self):
+        # AMOUNT is SUM(col) -> a plain columns[] entry, so there is no formula
+        # id to point at, and ThoughtSpot REJECTS a display-name reference
+        # ("Search did not find ..."). Its own aggregate is inlined instead.
+        assert _t("ATTAINMENT")["ts_expr"] == (
+            "sum ( [F::LINE_TOTAL] ) / sum ( [T::TARGET_AMOUNT] )")
 
     def test_computed_metric_reference_uses_the_formula_id(self):
         # AVG_ORDER_VALUE is a real formula, so the minted id is correct here
         assert _t("RATIO_TO_FORMULA")["ts_expr"] == (
-            "[formula_Avg Order Value] / [Target Revenue]")
+            "[formula_Avg Order Value] / sum ( [T::TARGET_AMOUNT] )")
 
     def test_no_reference_dangles(self):
+        """Every bracketed reference is either a physical TABLE::col or a
+        declared formula id. A bare display name would import-fail."""
         import re
         out = translate_sv_formulas(parse_sv_ddl(_D_DDL))
         formulas = {f"formula_{e['name'].replace('_', ' ').title()}"
                     for e in out["translated"] if e["output_kind"] == "formula"}
-        columns = {e["name"].replace("_", " ").title()
-                   for e in out["translated"] if e["output_kind"] == "column"}
         for e in out["translated"]:
             for ref in re.findall(r"\[([^\]]+)\]", e["ts_expr"] or ""):
                 if "::" in ref:
                     continue
-                assert ref in (formulas | columns), f"{ref} dangles in {e['name']}"
+                assert ref in formulas, (
+                    f"{ref!r} in {e['name']} is neither TABLE::col nor a "
+                    f"declared formula id — ThoughtSpot will reject it")
 
     def test_qualified_metrics_still_translate(self):
         assert _t("AVG_ORDER_VALUE")["output_kind"] == "formula"
