@@ -5,6 +5,22 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-08-06
+
+### Added
+
+- **`ts-recipe-model-period-over-period-snowflake`** — new recipe skill that adds prior-period
+  comparison (same week / same month last year) to a ThoughtSpot Model using role-played date
+  aliases over offset date keys. Analyses the target model first (date dimension present? offset
+  keys present? does the fact reach the calendar directly or through a hub?), branches on whether
+  the user can run warehouse DDL, and closes with two verification gates — grand-total
+  reconciliation and an orphan check — that between them catch every silent-wrong failure found
+  while developing it. Ships `references/alternative-approaches.md` (the measured comparison of
+  alias join vs `sum_if` vs window `LAG` vs a denormalised column, including the four-way I/O
+  parity benchmark on a 100M-row clustered fact), `references/date-dimension-ddl.sql`, and
+  `references/prototype-with-sql-view.md` (the no-DDL path, explicitly prototype-only, with the
+  generated SQL showing why). All behaviours live-verified on Snowflake and ThoughtSpot.
+
 ## 2026-08-05
 - feat: **BL-205 — render an ERD straight from a Snowflake Semantic View or a Databricks Metric View.** `/ts-object-model-erd` offered only local TML or a live ThoughtSpot instance, so diagramming a source semantic definition meant assembling `parse` → `translate-formulas` → `build-model` → `build_erd` by hand. The conversion half always ran offline; what blocked it was that both `build-model`s demand warehouse-registration inputs a diagram never uses. New `--tables auto` derives the alias→table map from the parse output instead of introspecting a warehouse — on the Snowflake side it produces **byte-identical** Model TML to a hand-written map, and on the Databricks side it is keyed by the same `flatten_join_aliases` walk `build_model_tables` looks up, so the two cannot disagree about what a join path is. Derived values are plain strings, so no entry carries `create: true`, no table TML is written, and `ts databricks build-model --connection` is no longer required alongside it (`translate-formulas` accepts the sentinel too, since Databricks resolves dot-path expressions through the map a step earlier). The derived map carries no GUIDs, so both commands **refuse `--profile`**; only the exact string `auto` opts in, so a mistyped path stays an error. Scoped to those two formats deliberately: they are declarative semantic-layer objects, while the BI-workbook converters (Tableau, Power BI, Qlik, Sisense) invent the table layer from extracts and would stub the very decisions that shape the diagram
 - fix: **ERD column descriptions were dropped.** The shared ERD parser read a column's `desc` from the top-level `description` field its own docstring calls "usually null", with no fallback to `properties.description` where Model TML actually stores it — unlike `synonyms` and `ai_context`, which did fall back. Every description a conversion skill emits rendered blank; a converted Semantic View lost all 60 of its per-column comments

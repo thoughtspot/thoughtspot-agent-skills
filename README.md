@@ -114,6 +114,7 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 |---|---|:-:|:-:|:-:|
 | [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax | [✓](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | — | — |
 | [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings | [✓](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | — | — |
+| [`ts-recipe-model-period-over-period-snowflake`](agents/cli/ts-recipe-model-period-over-period-snowflake/SKILL.md) | Period-over-period: add prior-period comparison (same week / same month last year) to a Model via role-played date aliases over offset date keys | [✓](agents/cli/ts-recipe-model-period-over-period-snowflake/SKILL.md) | — | — |
 
 </details>
 

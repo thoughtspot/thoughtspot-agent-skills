@@ -23,6 +23,7 @@ effects and require live credentials.
 | `smoke_ts_load_source_data.py` | ts-load-source-data | Offline |
 | `smoke_ts_recipe_formula_business_days_snowflake.py` | ts-recipe-formula-business-days-snowflake | Yes (SF) |
 | `smoke_ts_recipe_formula_hms_display_snowflake.py` | ts-recipe-formula-hms-display-snowflake | Yes (SF) |
+| `smoke_ts_recipe_model_period_over_period_snowflake.py` | ts-recipe-model-period-over-period-snowflake | Yes (SF) |
 | `smoke_ts_variable_timezone.py` | ts-variable-timezone | Yes (TS) |
 
 ## Prerequisites

@@ -125,6 +125,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-business-days-snow
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-hms-display-snowflake \
       ~/.snowflake/cortex/skills/ts-recipe-formula-hms-display-snowflake
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-model-period-over-period-snowflake \
+      ~/.snowflake/cortex/skills/ts-recipe-model-period-over-period-snowflake
+
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-databricks \
       ~/.snowflake/cortex/skills/ts-profile-databricks
 

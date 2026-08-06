@@ -65,6 +65,10 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
         "CoCo: multi-step CLI orchestration + warehouse DDL execution doesn't fit stored-proc model",
     ("ts-object-model-alias", "coco-snowsight"):
         "CLI only — depends on ts CLI for all operations",
+    ("ts-recipe-model-period-over-period-snowflake", "coco-snowsight"):
+        "Rebuilds a ThoughtSpot Model's join graph (role-played alias nodes) via TML "
+        "import and verifies it with ts spotql; both are ts CLI paths with no Snowsight "
+        "stored-procedure equivalent.",
     ("ts-object-model-coach", "coco-snowsight"):
         "Interactive coaching workflow doesn't fit Snowsight stored-proc execution model",
     ("ts-object-model-erd", "coco-snowsight"):
