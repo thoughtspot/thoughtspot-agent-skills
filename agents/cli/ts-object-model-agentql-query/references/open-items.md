@@ -197,10 +197,15 @@ This also gives `EXTRACT(DOY …)` a workaround, which B said it did not have.
 
 **B — added to `limitations.md`**, plus two found while applying this:
 
-- `CAST(<expression> AS <type>)` fails with `UNSUPPORTED_EXPRESSION` in any
-  statement involving a CTE — inside a body *or* in a query joining one — while
-  the identical cast is fine with no CTE present. Casting a bare column is fine;
-  it is casting over an **expression** that breaks.
+- `CAST(<function call> AS <type>)` fails with `UNSUPPORTED_EXPRESSION` in any
+  query block that **joins a CTE**. Narrowed by probe on 2026-08-07: the trigger
+  is the join, not the CTE — the identical expression compiles inside a CTE that
+  joins nothing. The affected set is inconsistent: `LOWER`, `EXTRACT`, `TRUNC`
+  and `TO_NUMBER` fail, while `ABS`, `ROUND`, `MONTH_NUMBER`, arithmetic and bare
+  columns are fine — including `ABS` and `TO_NUMBER` applied to the *same* column,
+  which rules out both operand type and target type as the explanation. Worth a
+  SCAL ticket under [SCAL-316371](https://thoughtspot.atlassian.net/browse/SCAL-316371);
+  not filed yet (no Jira access in the session that found it).
 - An aggregate over a column the CTE does not otherwise reference fails with
   `COLUMN_NOT_FOUND` against `wrapper_<model>_<hash>`, because ThoughtSpot
   materialises a CTE as a wrapper exposing only the columns that CTE mentions.
