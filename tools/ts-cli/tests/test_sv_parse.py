@@ -746,3 +746,61 @@ class TestDerivedMetricParsing:
 def _metric(ddl: str, name: str) -> dict:
     return next(m for m in parse_sv_ddl(ddl)["metrics"]
                 if m["source_column"] == name)
+
+
+# ---------------------------------------------------------------------------
+# BL-214 — several unique keys on one logical table
+#
+# A date dimension carrying more than one offset column needs a unique key per
+# offset, because Snowflake requires every referenced key to be a primary or
+# unique key of the entity. Only the first `unique (...)` was consumed; the rest
+# stayed in the entry text and were swallowed into the table NAME, breaking
+# every downstream lookup keyed on it.
+# ---------------------------------------------------------------------------
+
+_MULTI_UNIQUE_DDL = """
+create or replace semantic view SV_T
+  tables (
+    DD primary key (DATE_VALUE) unique (D7) unique (D28) unique (D364),
+    F
+  )
+  relationships ( f2d as F (DAY) references DD (D7) )
+  dimensions ( DD.DV as DD.DATE_VALUE )
+  metrics ( F.AMT as SUM(F.LINE_TOTAL) );
+"""
+
+
+class TestMultipleUniqueKeys:
+
+    def test_table_name_is_not_polluted(self):
+        dd = _table(_MULTI_UNIQUE_DDL, "DD")
+        assert dd["name"] == "DD" and dd["alias"] == "DD"
+
+    def test_all_unique_keys_captured(self):
+        assert _table(_MULTI_UNIQUE_DDL, "DD")["unique_cols"] == ["D7", "D28", "D364"]
+
+    def test_primary_key_still_parsed(self):
+        assert _table(_MULTI_UNIQUE_DDL, "DD")["primary_key"] == ["DATE_VALUE"]
+
+    def test_single_unique_key_unchanged(self):
+        ddl = _MULTI_UNIQUE_DDL.replace("unique (D7) unique (D28) unique (D364)",
+                                        "unique (D7)")
+        assert _table(ddl, "DD")["unique_cols"] == ["D7"]
+
+    def test_no_unique_key_unchanged(self):
+        ddl = _MULTI_UNIQUE_DDL.replace(" unique (D7) unique (D28) unique (D364)", "")
+        assert _table(ddl, "DD").get("unique_cols") is None
+
+    def test_composite_unique_key_still_works(self):
+        ddl = _MULTI_UNIQUE_DDL.replace("unique (D7) unique (D28) unique (D364)",
+                                        "unique (A, B)")
+        assert _table(ddl, "DD")["unique_cols"] == ["A", "B"]
+
+    def test_relationship_to_a_later_unique_key_resolves(self):
+        ddl = _MULTI_UNIQUE_DDL.replace("references DD (D7)", "references DD (D364)")
+        r = parse_sv_ddl(ddl)["relationships"][0]
+        assert r["to_table"] == "DD" and r["to_cols"] == ["D364"]
+
+
+def _table(ddl: str, name: str) -> dict:
+    return next(t for t in parse_sv_ddl(ddl)["tables"] if t["alias"] == name)

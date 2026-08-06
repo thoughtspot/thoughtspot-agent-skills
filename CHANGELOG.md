@@ -9,6 +9,17 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ### Fixed
 
+- **BL-214 — `parse-sv` consumed only the first `unique (...)` clause per logical table**
+  (ts-cli v0.132.0). A table may declare several unique keys, and must when it carries more
+  than one offset column a role-played alias joins on. The remaining clauses were swallowed
+  into the table *name* (`DM_DATE_DIM unique (DATE_28_DAYS_AGO) …`), breaking every
+  downstream lookup keyed on it and hiding the other offsets. Found building the
+  three-period comparison the period-over-period recipe recommends.
+
+## 2026-08-06
+
+### Fixed
+
 - **`ts-convert-from-snowflake-sv` — five conversion gaps found taking a live Semantic View
   end to end into a ThoughtSpot Model** (ts-cli v0.130.0, skill v1.21.0).
   - **BL-213** — unqualified derived metrics (`NAME as m1 / m2`) are now parsed, translated

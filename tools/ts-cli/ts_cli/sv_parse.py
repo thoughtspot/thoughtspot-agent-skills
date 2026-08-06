@@ -273,6 +273,28 @@ def _extract_sample_values(entry: str) -> tuple[list[str], str]:
 # Table parsing
 # ---------------------------------------------------------------------------
 
+def _extract_unique_keys(entry: str) -> tuple[list[str], str]:
+    """Strip every `unique (...)` clause from a table entry, returning the keys
+    and the remaining text.
+
+    A logical table may declare SEVERAL unique keys, and it must when it carries
+    more than one offset column that a role-played alias joins on
+    (`unique (DATE_7_DAYS_AGO) unique (DATE_28_DAYS_AGO) unique (...)`) --
+    Snowflake requires every referenced key to be a primary or unique key of the
+    entity. Only the FIRST clause used to be consumed, so the rest stayed in the
+    entry text and were swallowed into the table NAME, e.g.
+    `DM_DATE_DIM unique (DATE_28_DAYS_AGO) unique (DATE_364_DAYS_AGO)`, breaking
+    every downstream lookup keyed on that name (BL-214).
+    """
+    cols: list[str] = []
+    while True:
+        m = _UNIQUE_RE.search(entry)
+        if not m:
+            return cols, entry
+        cols.extend(c.strip() for c in m.group(1).split(","))
+        entry = entry[:m.start()].rstrip() + entry[m.end():]
+
+
 def _parse_table_entry(raw: str) -> dict[str, Any]:
     """Parse a single entry from the tables() clause."""
     entry = raw.strip()
@@ -302,11 +324,7 @@ def _parse_table_entry(raw: str) -> dict[str, Any]:
         }
         entry = entry[:m_range.start()].rstrip() + entry[m_range.end():]
 
-    unique_cols: list[str] = []
-    m_unique = _UNIQUE_RE.search(entry)
-    if m_unique:
-        unique_cols = [c.strip() for c in m_unique.group(1).split(",")]
-        entry = entry[:m_unique.start()].rstrip() + entry[m_unique.end():]
+    unique_cols, entry = _extract_unique_keys(entry)
 
     if range_constraint:
         result["range_constraint"] = range_constraint

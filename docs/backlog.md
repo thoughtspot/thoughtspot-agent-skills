@@ -90,6 +90,7 @@ are roughly ordered by value÷effort.
 | ~~BL-205~~ | ~~ERD from a source semantic definition (SF SV / DBX MV) is possible but entirely manual~~ | DONE (2026-08-05) |
 | ~~BL-212~~ | ~~from-Snowflake translator rejects a quoted DATEDIFF/DATEADD unit and any double-quoted identifier~~ | DONE (2026-08-06) |
 | ~~BL-213~~ | ~~from-Snowflake drops unqualified derived metrics — the only way an SV expresses a cross-fact ratio~~ | DONE (2026-08-06) |
+| ~~BL-214~~ | ~~parse-sv consumes only the first `unique (...)` per table; the rest corrupt the table name~~ | DONE (2026-08-06) |
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
@@ -7744,3 +7745,28 @@ from the Model with no error at import.
 Verified end to end through `build-model`: `Attainment` emits as a MEASURE formula
 `[Amount] / [Target Revenue]` with `lint_findings: []`, and a test asserts no reference in
 any emitted expression dangles. 14 tests across parse and translate.
+
+
+## BL-214 -- parse-sv consumes only the first `unique (...)` per logical table `Tier 1` -- DONE (2026-08-06)
+
+A Semantic View table may declare several unique keys, and it **must** when it carries more
+than one offset column that a role-played alias joins on -- Snowflake requires every
+referenced key to be a primary or unique key of the entity, so a date dimension serving
+week / four-week / year comparisons needs
+`unique (DATE_7_DAYS_AGO) unique (DATE_28_DAYS_AGO) unique (DATE_364_DAYS_AGO)`.
+
+`_UNIQUE_RE.search()` matched once. The remaining clauses stayed in the entry text and were
+swallowed into the table NAME:
+
+    name = 'DM_DATE_DIM unique (DATE_28_DAYS_AGO) unique (DATE_364_DAYS_AGO)'
+
+which breaks every downstream lookup keyed on the table name -- `tables.json` construction
+raises `KeyError`, and had it not, the emitted Model would reference a table that does not
+exist. Only `unique_cols: ['DATE_7_DAYS_AGO']` survived, so the other two offsets were
+invisible.
+
+Found building the three-period comparison the `ts-recipe-model-period-over-period-snowflake`
+recipe recommends, so the recipe's own worked shape triggered it. **Fix:** loop
+`_UNIQUE_RE` until exhausted, accumulating every key. 7 tests, including that a single key
+and a composite `unique (A, B)` are unchanged and that a relationship pointing at a *later*
+unique key resolves.
