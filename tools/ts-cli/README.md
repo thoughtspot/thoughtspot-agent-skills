@@ -3128,7 +3128,7 @@ ts snowflake build-model \
 |---|---|---|
 | `--parsed` | *(required)* | Path to parsed SV JSON from `parse-sv` |
 | `--translated` | *(required)* | Path to translated JSON from `translate-formulas` |
-| `--tables` | *(required)* | Path to tables JSON map (`{alias: {name, fqn}}` or `{alias: name}`) |
+| `--tables` | *(required)* | Path to tables JSON map (`{alias: {name, fqn}}` or `{alias: name}`), or the literal `auto` — see below |
 | `--model-name` | *(required)* | Display name for the ThoughtSpot model |
 | `--output-dir` | *(required)* | Directory to write the model TML YAML file |
 | `--sv-fqn` | — | Fully-qualified SV name for the model description |
@@ -3141,6 +3141,14 @@ ts snowflake build-model \
 attribute_count, measure_count, phase1, phase2, tml_path, build_info}`.
 Phase 1 is skipped when `--existing-guid` is supplied or when the model has no
 formulas.
+
+**`--tables auto`** (BL-205) derives the map from `--parsed` instead of reading a file,
+using the alias and physical name the parse already carries. It exists so a Semantic View
+can be turned into a Model TML — and from there an ERD, via `/ts-object-model-erd` Step
+1.5 — with no warehouse round-trip and no ThoughtSpot profile. The derived map carries no
+GUIDs, so `--profile` is **refused** with it; supply a real map to import. Only the exact
+string `auto` opts in, so a mistyped path stays an error rather than silently becoming a
+derived map.
 
 ---
 
@@ -3231,7 +3239,7 @@ ts databricks translate-formulas \
 |---|---|---|
 | `--input` / `-i` | yes | `parsed.json` produced by `ts databricks parse-mv` |
 | `--output` / `-o` | yes | Output path for the translated formulas JSON |
-| `--tables` / `-t` | yes | JSON object mapping MV alias paths to ThoughtSpot table names — a `"source"` key is required (the MV's base table alias); nested join aliases (e.g. `"orders.customers"`) map to their joined ThoughtSpot table |
+| `--tables` / `-t` | yes | JSON object mapping MV alias paths to ThoughtSpot table names — a `"source"` key is required (the MV's base table alias); nested join aliases (e.g. `"orders.customers"`) map to their joined ThoughtSpot table. Or the literal `auto` to derive the whole map from `--input` (BL-205) |
 
 **Output:** `{"translated": [...], "skipped": [...], "filter": {...}|null,
 "dependency_dag": {...}, "window_measures": [...], "stats": {"total":
@@ -3268,8 +3276,8 @@ ts databricks build-model \
 |---|---|---|
 | `--parsed` / `-p` | yes | `parsed.json` from `ts databricks parse-mv` |
 | `--translated` / `-t` | yes | `translated.json` from `ts databricks translate-formulas` |
-| `--tables` | yes | Same `tables.json` used for `translate-formulas` — values may be plain strings or v2 objects (`{"name", "fqn", "create", "db", "schema", "db_table", "columns"}`) |
-| `--connection` / `-c` | yes | ThoughtSpot connection display name (used only for `create: true` table TML) |
+| `--tables` | yes | Same `tables.json` used for `translate-formulas` — values may be plain strings or v2 objects (`{"name", "fqn", "create", "db", "schema", "db_table", "columns"}`), or the literal `auto` — see below |
+| `--connection` / `-c` | unless `--tables auto` | ThoughtSpot connection display name (used only for `create: true` table TML) |
 | `--model-name` / `-n` | yes | Model TML `name:` |
 | `--output-dir` / `-o` | yes | Directory for the generated `.model.tml` / `.table.tml` files |
 | `--mv-fqn` | no | Source MV FQN, appended to the model description |
@@ -3282,6 +3290,17 @@ A `create: true` table whose columns[] end up empty after Databricks-type
 omissions (e.g. every column is `binary`/`array`/`map`/`struct`) is a hard
 error naming the table and the omitted columns — this is caught before any
 file is written.
+
+**`--tables auto`** (BL-205) derives the map from the parse output — `"source"` plus every
+join dot-path — instead of reading a file, so a Metric View becomes a Model TML (and from
+there an ERD, via `/ts-object-model-erd` Step 1.5) with no warehouse round-trip and no
+ThoughtSpot profile. Pass it to **both** `translate-formulas` and `build-model`: the
+Databricks pipeline resolves dot-path expressions through the map, so it is needed a step
+earlier than the Snowflake equivalent. Derived values are plain strings, so no entry
+carries `create: true`, no table TML is written and `--connection` becomes unnecessary. A
+`sql_query` source has no table to name and degrades to its alias with a stderr WARNING
+(a real conversion builds a SQL View there). The map carries no GUIDs, so `--profile` is
+**refused** with it.
 
 **Output:** a summary JSON on stdout (the only stdout output — diagnostics are
 on stderr): `model_name`, `model_file`, `table_files`, `connection`, `tables[]`,

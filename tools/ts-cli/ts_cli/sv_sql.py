@@ -23,7 +23,13 @@ from ts_cli.formula_common import UntranslatableError
 _TOKEN_RE = re.compile(
     r"(?P<string>'(?:[^']|'')*')"
     r"|(?P<number>\d+(?:\.\d+)?)"
-    r"|(?P<ident>[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)*)"
+    # A segment is a bare identifier OR a double-quoted one. Snowflake requires
+    # the quoted form for reserved words and for names needing exact case
+    # (`dm_date_dim."DATE"`); without this alternative the tokenizer stopped at
+    # the dot and raised "unrecognized character '.'", silently costing the
+    # construct (BL-212).
+    r"|(?P<ident>(?:[A-Za-z_][\w$]*|\"[^\"]+\")"
+    r"(?:\.(?:[A-Za-z_][\w$]*|\"[^\"]+\"))*)"
     r"|(?P<op><=|>=|!=|<>|\|\||[+\-*/%(),<>=])"
     r"|(?P<ws>\s+)")
 
@@ -148,7 +154,39 @@ def _op_unit(text: str, cur: _Cursor, resolver, units: list[str]) -> None:
         units.append(text)
 
 
+def _unquote_ident(text: str) -> str:
+    """Strip Snowflake double-quoting from each dotted segment.
+
+    ``dm_date_dim."DATE"`` -> ``dm_date_dim.DATE``. The quotes carry no meaning
+    once the token is parsed — they exist in the DDL only so a reserved word or
+    an exact-case name is legal SQL — and downstream resolution is
+    case-insensitive.
+    """
+    if '"' not in text:
+        return text
+    return ".".join(seg[1:-1] if seg.startswith('"') and seg.endswith('"')
+                    else seg
+                    for seg in _split_dotted(text))
+
+
+def _split_dotted(text: str) -> list[str]:
+    """Split a dotted identifier on the dots that separate segments, ignoring
+    any dot inside a double-quoted segment."""
+    segs, buf, in_q = [], [], False
+    for ch in text:
+        if ch == '"':
+            in_q = not in_q
+            buf.append(ch)
+        elif ch == "." and not in_q:
+            segs.append("".join(buf)); buf = []
+        else:
+            buf.append(ch)
+    segs.append("".join(buf))
+    return segs
+
+
 def _ident_unit(text: str, cur: _Cursor, resolver, units: list[str]) -> None:
+    text = _unquote_ident(text)
     upper = text.upper()
     nk, nt = cur.peek()
     if upper in _BARE_NOW_FNS:
@@ -484,6 +522,28 @@ def _call_date_trunc(args: list[str]) -> str:
         f"(day|week|month|quarter|year|hour|minute|second)")
 
 
+def _unit_arg(cur: _Cursor, fn_name: str) -> str:
+    """Read the leading date-part argument of DATEDIFF / DATEADD.
+
+    Snowflake accepts the unit either bare (``DATEDIFF(day, a, b)``) or as a
+    string literal (``DATEDIFF('day', a, b)``) and both are idiomatic in a
+    hand-written Semantic View. Only the bare form was accepted, so the quoted
+    form raised "expects a unit identifier as first argument" and the whole
+    metric was dropped into ``skipped[]`` (BL-212).
+    """
+    kind, text = cur.peek()
+    if kind == "string":
+        unit = text[1:-1].strip().upper()
+    elif kind == "ident":
+        unit = text.upper()
+    else:
+        raise UntranslatableError(
+            f"{fn_name} expects a unit identifier or quoted unit as first "
+            f"argument")
+    cur.advance()
+    return unit
+
+
 def _call_datediff(cur: _Cursor, resolver) -> str:
     """DATEDIFF(unit, start, end) -> diff_days/diff_months(end, start).
 
@@ -491,12 +551,7 @@ def _call_datediff(cur: _Cursor, resolver) -> str:
     ThoughtSpot diff_* functions take (later, earlier) — same order as
     Snowflake's (start, end) becomes (end, start) — args reversed.
     """
-    kind, text = cur.peek()
-    if kind != "ident":
-        raise UntranslatableError(
-            "DATEDIFF expects a unit identifier as first argument")
-    unit = text.upper()
-    cur.advance()
+    unit = _unit_arg(cur, "DATEDIFF")
     cur.expect_op(",")
     args = _call_args(cur, resolver)
     _need(args, 2, "DATEDIFF(unit, ...)")
@@ -511,12 +566,7 @@ def _call_datediff(cur: _Cursor, resolver) -> str:
 
 def _call_dateadd(cur: _Cursor, resolver) -> str:
     """DATEADD(unit, amount, date) -> add_days/add_months(date, amount)."""
-    kind, text = cur.peek()
-    if kind != "ident":
-        raise UntranslatableError(
-            "DATEADD expects a unit identifier as first argument")
-    unit = text.upper()
-    cur.advance()
+    unit = _unit_arg(cur, "DATEADD")
     cur.expect_op(",")
     args = _call_args(cur, resolver)
     _need(args, 2, "DATEADD(unit, ...)")

@@ -55,6 +55,10 @@ unmapped `extension` clause: [references/concept-mapping.md](references/concept-
   Table TMLs to confirm — do not assume they match the semantic view left-hand side.
 - Simple metrics (`AGG(view.col)` — one column, one aggregate) → `MEASURE` column.
   Complex expressions → `formulas[]` entry.
+- **Unqualified derived metrics** (`NAME as m1 / m2`, no table prefix on the left) →
+  `formulas[]` MEASURE. This is the only SV construct that can combine metrics from two
+  *unrelated* facts, so cross-fact ratios — attainment, period-over-period growth — arrive
+  this way.
 - In Scenario A, `referencing_join` points to a join pre-defined at the ThoughtSpot
   Table object level (found by exporting the FROM table's TML).
 - In Scenario B / hybrid, inline `joins[]` on the FROM table entry (requires `with` field).
@@ -79,6 +83,9 @@ at the Step 10 checkpoint or say "file only" at any point before Step 11.
 - Role with `USAGE` on the database and schema containing the semantic view
 - Connection configured — run `/ts-profile-snowflake` if you haven't already
 - For Scenario B: role with `CREATE TABLE` or connection modification rights
+- `ts snowflake introspect` needs the Snowflake connector in the `ts` environment. If it
+  reports `snowflake-connector-python is required`, install it into the tool env:
+  `uv tool install thoughtspot-cli --with snowflake-connector-python`
 
 ---
 
@@ -106,6 +113,7 @@ Steps:
   9.5. Confirm Spotter enablement (default: enabled) ...... you choose
  10.   Review checkpoint — inspect TML before import ...... you confirm
  11.   Import the model into ThoughtSpot .................. auto (ts snowflake build-model)
+ 11c.  Reconcile the Model against the SV ................. auto
  12.   Verify import and produce summary report ........... auto
  12.5. Import verified queries as NLS Feedback ............ auto (when SV has verified queries)
 
@@ -554,6 +562,18 @@ requirements, the required credential-handling guardrail (private key by file pa
 only, never pasted into chat), and the batch `ts tables create` call — is in
 [references/step-6-table-registration.md](references/step-6-table-registration.md) "Step 6B — command sequence".
 
+> **Table objects are created with `ts tables create`. Do NOT use
+> `ts connections add-tables`.** That command rewrites the *connection's* registered-object
+> list, which is a different operation and is not what this step needs — a connection that
+> can already reach the database needs no change. Run against a shared connection it can
+> fail with a 500 (`NullPointerException` in `validateConfigSourceConnectionId`) and, if it
+> succeeded, would risk the connection's `authenticationType`.
+>
+> The tell: `introspect` writes `tables-spec.json` shaped to pipe into `ts tables create`
+> **unmodified**. If a command rejects those keys (it wants `table` where the spec has
+> `db_table`), that is the signal you have the wrong command — do not transform the keys to
+> force it through.
+
 4. Inline joins will be defined directly in the model TML (no `referencing_join`).
 
 ---
@@ -881,6 +901,42 @@ Follow [`ts-tml-import-gate.md` § 5](../../shared/schemas/ts-tml-import-gate.md
 
 ---
 
+### Step 11c: Reconcile the Model against the Semantic View
+
+**A successful import is not a correct conversion.** Step 11b confirms the object exists
+and re-exports; it does not confirm a single number. Query the Model and compare it to the
+SV — this is the only check that catches a join wired to the wrong key, a role-played alias
+that resolved to the wrong node, or rows lost to an unmatched join.
+
+**Check 1 — grand totals, every additive measure.** For each simple `SUM` metric, compare
+the Model's grand total to the SV's:
+
+```bash
+# ThoughtSpot
+ts spotql fetch-data 'SELECT SUM("{measure}") FROM "{model_name}" AS "t1"' \
+  -m {model_guid} --profile {profile}
+```
+```sql
+-- Snowflake, same measure
+SELECT * FROM SEMANTIC_VIEW({sv_fqn} METRICS {table}.{metric});
+```
+
+They must be **identical**. A difference is a wiring fault, not a rounding one.
+
+**Check 2 — one grouped query per fact.** Grand totals can agree while a join is wrong, so
+group by a dimension each fact reaches and compare a few rows. Pick a dimension in the
+middle of the data, not the first or last period.
+
+**Check 3 — aliased facts must reconcile to their base.** If the SV role-plays a table
+(the same physical table under several aliases), each alias's additive measure sums to the
+**same grand total** as the base measure — it is the same rows read through a different
+key. A mismatch means rows fell out of the aliased join.
+
+Report each comparison in Step 12 with both numbers. If any fails, do not describe the
+conversion as verified — say which check failed and what the two numbers were.
+
+---
+
 ### Step 12: Produce summary report
 
 After a successful import, output the summary report — model header, columns
@@ -952,6 +1008,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.21.0 | 2026-08-06 | **Two translator gaps closed, derived metrics supported, and two workflow fixes — all from converting a live SV end to end into a ThoughtSpot Model (ts-cli v0.130.0).** **BL-213:** an unqualified derived metric (`NAME as m1 / m2`, no table prefix) is valid SV grammar and the **only** way to express a ratio spanning two *unrelated* facts — a qualified metric may reference only metrics on directly related entities (`010211`) — so attainment and period-over-period growth arrive exclusively this way. All four on the fixture had landed in `unsupported[]` as "could not parse metric entry" and were silently absent from the Model. Now parsed, translated to a MEASURE formula, and emitted by `build-model`. The resolver needed its own path: the generic metric branch emits `[formula_<id>]`, which **dangles** against a simple-`AGG(col)` metric (emitted as a plain column) — the BL-178 shape I13 rejects, previously unreachable because Snowflake refuses the qualified equivalent. **BL-212:** the translator rejected `DATEDIFF('day', …)` (Snowflake accepts the unit bare *or* quoted) and any double-quoted identifier (`dm_date_dim."DATE"` raised "unrecognized character '.'"), each silently costing a construct — 3 of 44 on the fixture, now 44/44. **New Step 11c — reconcile the Model against the SV:** a successful import is not a correct conversion; Step 11b confirms the object exists but not one number. Three checks (grand totals per additive measure, one grouped query per fact, and aliased facts reconciling to their base) — the only thing that catches a join wired to the wrong key or a role-played alias resolved to the wrong node. **Step 6B** now warns off `ts connections add-tables` (it rewrites the connection's registered-object list, is not what the step needs, and 500s on a shared connection) and names the tell: `tables-spec.json` is shaped to pipe into `ts tables create` unmodified. **Prerequisites** note the `snowflake-connector-python` extra `introspect` requires. |
 | 1.20.0 | 2026-07-31 | **Two new steps and three parser/translator fixes, from converting a real 1,100-line customer Semantic View (ts-cli v0.128.0).** New **Step 7.5 — role-played dimension aliases**: an SV scopes names per table and freely joins one fact to one date dimension eight times; ThoughtSpot has one flat join graph, so that is ambiguous and **the Model will not load**. New lint invariant **I14** (BL-202) rejects any duplicate `(from_node, joins[].with)` pair, so `build-model` now refuses rather than emitting an unloadable Model — it previously emitted 21 such joins across 7 pairs with `lint_findings: []` and I1–I13 all clean. The reference covers picking the primary role (one must keep the base node or it becomes a disconnected table), synthesizing the alias entries, the `tables.json` entries they need, and the **column trim** — which is a user decision, because the naive full copy adds 784 near-duplicate columns to a 1,015-column model and degrades NL search more than the ambiguity it fixed. New **Step 8.5 — display-name collisions**: an SV's per-table name scoping collides with ThoughtSpot's flat column namespace by construction on a wide multi-fact SV (129 colliding titles over 322 of 1,010 columns on the fixture); the reference characterises them, offers three resolutions, and applies the qualify-and-de-index pattern. `build-model`'s error message no longer says "set distinct display_name values in the SV", which is not actionable when you do not own the SV. Parser fixes: **BL-200** the entry splitter is now quote aware, so a comma inside `comment='...'` no longer shatters the entry (15 tables had parsed as 32, with 169 fragments in `unsupported[]`); **BL-201** live `GET_DDL`'s `sample_values (...)` spelling is now matched, so the clause is no longer read as part of the expression (had skipped all 46 `is_enum` dimensions). Translator fixes: **BL-179** first-synonym promotion is now opt-in (`--promote-first-synonym`, default off) and the decision is recorded in `translated.json` for `build-model` to read — on a foreign SV it had renamed 9 constructs, destroying the logical identifier; **BL-181** facts now classify MEASURE or ATTRIBUTE from the expression instead of hardcoding ATTRIBUTE, so quantities and profit aggregate (182 of 182 facts on the fixture were previously categorical). |
 | 1.19.5 | 2026-07-30 | **BL-171 — `sv_sql.py` stops emitting six non-existent string functions (ts-cli v0.126.1).** BL-170 corrected the *documentation* on 2026-07-29 and left the code: `sv_sql.py`'s `_RENAME` still translated Snowflake `TRIM`/`LTRIM`/`RTRIM`/`REPLACE`/`STARTSWITH`/`ENDSWITH` to the bare ThoughtSpot names `trim`/`ltrim`/`rtrim`/`replace`/`starts_with`/`ends_with`, **none of which exists**, so every affected metric or computed dimension failed at import with `error_code 14516`. `TRIM`/`LTRIM`/`RTRIM` now go through `_PASS_THROUGH_HINT` (the same path as `UPPER`/`LOWER`), and `REPLACE`/`STARTSWITH`/`ENDSWITH` through new composed handlers, matching `ts-snowflake-formula-translation.md`'s String Functions rows character for character. `test_sv_sql.py`'s `test_starts_with` had asserted the *wrong* expectation (`starts_with ( … )`) — corrected, and 7 new tests cover the family plus a sweep asserting no bare name is ever emitted. Coverage matrix rows 20a/20b added. **The emitted forms were live-verified on se-thoughtspot 2026-07-30** (`--policy VALIDATE_ONLY`, nothing persisted). |
 | 1.19.4 | 2026-07-30 | **BL-178 — formula reference integrity restored (three defects; ts-cli v0.126.0).** Every metric-on-fact and metric-on-metric reference in the emitted Model TML matched no declared `formulas[].id` between 2026-07-22 (v1.17.0's rewire) and today, so **every measure was unimportable** while `ts tml lint`, `check_tml.py` and `build-model`'s own `lint_findings` all reported clean. Live-confirmed on se-thoughtspot 2026-07-30 as a **hard import failure** (`error_code 14516`, *Search did not find "formula_tenure_months )"*), settling the question the fidelity review left open. Three fixes: (1) the documented resolution order is restored — a **passthrough** fact (right-hand side is a bare physical column, the shape a Cortex-Analyst model emits for every field) resolves to `[TABLE::col]`, which is what `build-model` emits for it, so all 5 of 5 TPC-DS metrics now resolve; (2) `display_title` is now a single function shared by the resolver and the builder, so an emitted `[formula_X]` is by construction the id the builder mints — and metric-on-metric gained the documented `group_*` double aggregation (grouping on the parent-side PK of the connecting relationship) it never implemented; (3) `parse-sv` keys the facts/metrics maps on **declared** names rather than the first qualified token of the expression, which had been indexing a computed fact under a physical column of its own table and letting a metric resolve its inner reference to itself. **New gate:** `ts tml lint` invariant **I13** rejects any `[formula_*]` reference or `columns[].formula_id` matching no declared id (BL-183), so this class cannot recur silently. The `ts-from-snowflake-identifier-resolution.md` worked example was re-verified live and its recorded output updated; three of its four divergences from the 2026-06-13 baseline are later documented features (BL-179 first-synonym promotion, duplicate-`column_id` promotion, BL-181 fact typing), not regressions. **PR review additions:** a *renamed* passthrough (`STORE_SALES.revenue as store_sales.ss_ext_sales_price`) is now indexed under its declared name as well as its physical column — referenced by the declared name it previously emitted `column_id: STORE_SALES::revenue`, a column that does not exist and that I13 cannot see because it is a `TABLE::col` reference; every double aggregation now carries the 🔄 review marker the rules file has always mandated; a degenerate grouping (`group_count([X],[X])`, one row per group) is skipped and flagged instead of emitted; and a passthrough *metric* is a reasoned skip rather than a raw `AttributeError`. **Known limitation, newly documented:** same-table metric-on-metric (e.g. a ratio of two simple-aggregate metrics) has no resolvable reference and now fails at `build-model` via I13 rather than emitting a broken Model — coverage row 27 and **BL-194**. **Re-review addition — renamed DIMENSIONS had the same defect:** `DM_CATEGORY.CATEGORY as dm_category.CATEGORY_NAME` referenced as `PARTITION BY dm_category.category` emitted `[DM_CATEGORY::category]` where the real column is `CATEGORY_NAME`, a second worked-example regression (`ts-from-snowflake-dunder.md:207` documents the correct form). Dimensions now resolve through the same index with a three-way split — passthrough, bare-column rename, computed — and the emitted output matches that worked example character for character. Step 9 and Step 12 now **surface `translated[].annotations`** (🔄 double-aggregation markers and ⚑ ambiguity warnings) in a Review Flags section: these are conversions the translator completed but cannot verify, and nothing downstream re-raises them. A wrong `TABLE::col` reference remains invisible to `build-model`'s lint — see **BL-195**. |

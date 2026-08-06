@@ -47,7 +47,11 @@ def _column_entry(col, props, is_formula, src):
     """Build the renderer-facing column dict, including AI-authored metadata.
 
     Top-level `description`/`synonyms` are usually null; the real content lives
-    under `properties` (ai_context, synonyms), so fall back to those.
+    under `properties` (description, ai_context, synonyms), so fall back to those.
+    `description` needs the same fallback as `synonyms` — the Model TML schema
+    writes a column comment to `properties.description`, and reading only the
+    top-level field dropped every description a conversion skill emitted (a
+    Snowflake SV's per-column comments landed in the ERD blank).
     """
     return {
         "name": col.get("name", ""),
@@ -58,7 +62,7 @@ def _column_entry(col, props, is_formula, src):
         "key": False,
         "hidden": bool(props.get("is_hidden", False)),
         "flag": None,
-        "desc": col.get("description") or "",
+        "desc": col.get("description") or props.get("description") or "",
         "ai_context": props.get("ai_context") or "",
         "synonyms": props.get("synonyms") or col.get("synonyms") or [],
     }

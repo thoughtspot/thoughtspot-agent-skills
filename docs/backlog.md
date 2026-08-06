@@ -87,6 +87,9 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | ~~BL-192~~ | ~~`docs/quality-gates.md` stales from main's commits, not yours — hard-fails the PR gate on a race~~ | DONE (2026-07-30) |
+| ~~BL-205~~ | ~~ERD from a source semantic definition (SF SV / DBX MV) is possible but entirely manual~~ | DONE (2026-08-05) |
+| ~~BL-212~~ | ~~from-Snowflake translator rejects a quoted DATEDIFF/DATEADD unit and any double-quoted identifier~~ | DONE (2026-08-06) |
+| ~~BL-213~~ | ~~from-Snowflake drops unqualified derived metrics — the only way an SV expresses a cross-fact ratio~~ | DONE (2026-08-06) |
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
@@ -7135,6 +7138,89 @@ regardless, and a hand-authored Model can still carry the shape.
 
 ---
 
+## BL-205 -- an ERD from a source semantic definition is possible but entirely manual: `build-model` demands warehouse-registration inputs a diagram never uses `Tier 2` -- DONE (2026-08-05)
+
+**Filed:** 2026-08-05.
+**Source:** rendering an ERD for a customer Snowflake SV (`DEV_GOLD.SALESFORCE.SUPPORT_CASE_SV`,
+13 tables / 12 joins / 5 role-play aliases). The skill has no source-definition path, so the
+whole pipeline was assembled by hand in-session.
+**Affects:** `agents/cli/ts-object-model-erd/SKILL.md` (Step 1),
+`tools/ts-cli/ts_cli/commands/snowflake.py` + `commands/databricks.py` (`build-model` args),
+`tools/ts-cli/ts_cli/sv_introspect.py` (`build_tables_map` reuse).
+**Status:** DONE (2026-08-05) -- ts-cli v0.129.0, ts-object-model-erd v1.8.0.
+
+**What shipped.** `--tables auto` on `ts snowflake build-model`, and on **both**
+`ts databricks translate-formulas` and `build-model` (the Databricks pipeline resolves
+dot-path expressions through the map, so it is needed a step earlier than assumed when
+this was filed -- found only by running it). `ts databricks build-model --connection` is
+now required only when *not* using the sentinel. `/ts-object-model-erd` gains Step 1
+option **(C)** and a Step 1.5 that converts offline and renders.
+
+Two things make the derivation trustworthy rather than merely convenient: the Snowflake
+path routes through `build_tables_map`, so the introspected and derived maps cannot drift
+on shape, and it emits **byte-identical** Model TML to a hand-written map on the 13-table
+`SUPPORT_CASE_SV` fixture; the Databricks path is keyed by the same `flatten_join_aliases`
+walk that `build_model_tables` looks up, so the two cannot disagree about what a join path
+is, and a test asserts the derived map satisfies `build_model_tables` directly.
+
+The map carries no warehouse GUIDs, so both commands **refuse `--profile`**, and only the
+exact string `auto` opts in -- a mistyped path stays an error rather than silently becoming
+a derived map. A `sql_query` Databricks source has no table to name, so it degrades to its
+alias with a stderr WARNING saying a real conversion would build a SQL View there.
+
+Verified end to end on both formats: `SUPPORT_CASE_SV` (13 tables / 12 joins / 5 role-play
+aliases) and the `MV_DM_SALES` Metric View fixture (7 tables / 6 joins, including nested
+dot-paths). Full suite 4074 passed.
+
+`ts-object-model-erd` Step 1 offers exactly two sources: local TML files, or a live
+ThoughtSpot instance. There is no way to point it at a semantic definition the estate has a
+converter for, even though the conversion half already works fully offline -- `--profile` is
+needed only for the import that follows, never for the emit.
+
+**Scope is Snowflake SV and Databricks MV, deliberately.** Both are declarative
+semantic-layer objects and share one command shape (`parse` -> `translate-formulas` ->
+`build-model`). The BI-workbook converters (Tableau, Power BI, Qlik, Sisense) are out of
+scope on purpose: their conversion has to invent the table layer from extracts and make
+reconcile and name-mapping calls, so a diagram-only run stubs out exactly the decisions that
+determine what the picture looks like. SF and DBX are the subset where the ERD is a faithful
+read of the source, not merely the cheaper half.
+
+**Two concrete blockers, both small:**
+
+1. **`--tables` is required by both `build-model`s** and normally comes from warehouse
+   introspection. But `sv_introspect.build_tables_map` only builds `{alias: {name}}`, and the
+   `parse` output already carries both fields per table -- so an `auto` derivation needs no
+   connection and no new logic, just the existing map shape. Deriving it by hand was three
+   lines in-session, which is the tell.
+2. **`ts databricks build-model --connection` is required but annotated "(table TML only)"**,
+   so it only stamps a block the ERD ignores. `ts snowflake build-model` asks for no
+   connection at all, so the two commands are already inconsistent about a value that is
+   inert on this path.
+
+**Evidence the table-registration machinery is pure overhead here:** the Snowflake path emits
+**no** Table TMLs and still produced a complete diagram. Cardinality and join type came off
+the inline joins, and columns routed to their nodes by `column_id` prefix. Nothing the
+connection/db/schema arguments configure reaches the rendered output.
+
+**Proposal.** `--tables auto` on both `build-model`s; make the Databricks `--connection`
+optional when not importing; add Step 1 option **(C) a source semantic definition** to the ERD
+skill dispatching on those two formats. The diagram should also state that it shows the
+ThoughtSpot shape the source *converts to*, not the source's native shape -- the provenance is
+already half-carried, since `--sv-fqn` writes the source FQN into the model description.
+
+**Why not a dedicated `ts erd from-source` command.** It types better and tests better, but it
+would have to re-drive each converter's orchestration, and this repo already has precedent for
+that going wrong: PR #180 exists because `ts-convert-from-tableau`'s audit and migrate paths
+diverged that way. At two formats it is over-engineering. Revisit if the format count ever
+reaches four or five, at which point the per-format recipe in SKILL.md becomes the liability
+instead.
+
+**Looker is a known non-starter for this.** It has no CLI at all -- `agents/cli/ts-convert-from-looker`
+generates Table and Model TML in-conversation at Steps 5 and 6 -- so it cannot join a
+deterministic dispatch without a LookML parser landing first.
+
+---
+
 ## BL-204 -- no plan-only helper for role-play alias synthesis, so Step 7.5 is done by hand `Tier 3`
 
 **Filed:** 2026-07-31.
@@ -7606,3 +7692,55 @@ under `out_dir` (same all-or-nothing assertion the existing
 message names the object and the reason. Written first and confirmed failing against the
 pre-fix code (`AttributeError("'NoneType' object has no attribute 'get'")`) before the fix
 landed.
+
+
+## BL-212 -- from-Snowflake translator rejects a quoted date-part unit and any double-quoted identifier `Tier 2` -- DONE (2026-08-06)
+
+Two tokenizer/parser gaps, both hit on the first real Semantic View that used them, each
+silently costing a construct: the metric or dimension landed in `skipped[]` and simply did
+not exist in the emitted Model.
+
+1. **Quoted date-part unit.** Snowflake accepts `DATEDIFF(day, a, b)` and
+   `DATEDIFF('day', a, b)` equally, and the quoted form is idiomatic in hand-written DDL.
+   `_call_datediff` / `_call_dateadd` required `kind == "ident"` and raised
+   *"DATEDIFF expects a unit identifier as first argument"* on the quoted form. Cost two
+   metrics (`DAYS_TO_SHIP`, `DAYS_LATE`) on the fixture.
+2. **Double-quoted identifiers.** `_TOKEN_RE`'s `ident` alternative had no quoted-segment
+   branch, so `dm_date_dim."DATE"` stopped at the dot and raised
+   *"unrecognized character '.' at position 11"*. Quoting is mandatory for a reserved word
+   or an exact-case name, so this is not an exotic shape. Cost one dimension.
+
+**Fix.** A shared `_unit_arg()` accepts the unit bare or quoted; the ident pattern gained a
+`"[^"]+"` alternative per dotted segment, and `_unquote_ident()` strips the quotes before
+resolution (downstream matching is case-insensitive, so the quotes carry no meaning once
+tokenized). 3 of 44 constructs on the fixture went from skipped to translated (41/44 ->
+44/44). 14 tests, including that quoted and bare forms produce identical output and that an
+unmapped unit is still refused.
+
+## BL-213 -- from-Snowflake drops unqualified derived metrics, the only way an SV expresses a cross-fact ratio `Tier 1` -- DONE (2026-08-06)
+
+`NAME as <expr>` with no table prefix on the left is valid Semantic View grammar, and it is
+the **only** way to express a ratio spanning two unrelated facts: a metric qualified on a
+table may reference only metrics on *directly related* entities (Snowflake `010211`). So
+attainment (`revenue / target`) and period-over-period growth arrive exclusively in this
+shape. `_parse_column_entry` matched only `TABLE.COL as ...`, so all four such metrics on
+the fixture landed in `unsupported[]` as *"could not parse metric entry"* and were absent
+from the Model with no error at import.
+
+**Fix, three layers.**
+- `sv_parse`: a metrics-block-only fallback for the unqualified shape, emitting
+  `source_table`/`alias_table` `None` plus `is_derived: True`.
+- `sv_translate`: `_index_constructs` skips table-less constructs (they cannot be
+  referenced as `TABLE.NAME`, and indexing one crashed on the `None` alias);
+  `_translate_metric` handles the derived case first, via a dedicated `_derived_resolver`.
+- The resolver matters. The generic step-3 metric branch always emits `[formula_<id>]`,
+  which **dangles** against a simple-`AGG(col)` metric because that is emitted as a plain
+  `columns[]` entry — the BL-178 shape `ts tml lint` I13 rejects. That path was previously
+  unreachable for unrelated entities (Snowflake refuses the qualified form), so a derived
+  metric is the first construct to reach it. `_derived_resolver` maps a simple-agg
+  reference to its column display name `[Amount]` and anything else to
+  `[formula_<id>]`.
+
+Verified end to end through `build-model`: `Attainment` emits as a MEASURE formula
+`[Amount] / [Target Revenue]` with `lint_findings: []`, and a test asserts no reference in
+any emitted expression dangles. 14 tests across parse and translate.

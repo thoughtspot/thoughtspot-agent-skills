@@ -510,3 +510,79 @@ class TestComplex:
     def test_string_with_escaped_quotes(self):
         result = translate_sql_expr("a.X = 'it''s'", _resolve)
         assert "'it''s'" in result
+
+
+# ---------------------------------------------------------------------------
+# BL-212 — quoted date-part units and double-quoted identifiers
+#
+# Both shapes are idiomatic in a hand-written Semantic View and both were
+# rejected, dropping the whole construct into skipped[]. Found converting a
+# real SV: DATEDIFF('day', ...) cost two metrics and dm_date_dim."DATE" cost a
+# dimension, 3 of 44 constructs, with no error visible in the Model.
+# ---------------------------------------------------------------------------
+
+class TestQuotedUnitArgument:
+    """Snowflake accepts the DATEDIFF/DATEADD date part bare OR quoted."""
+
+    def test_datediff_quoted_unit(self):
+        assert translate_sql_expr(
+            "DATEDIFF('day', o.ORDER_DATE, o.SHIPPED_DATE)", _resolve
+        ) == "diff_days ( [O::SHIPPED_DATE] , [O::ORDER_DATE] )"
+
+    def test_datediff_bare_unit_unchanged(self):
+        assert translate_sql_expr(
+            "DATEDIFF(day, o.ORDER_DATE, o.SHIPPED_DATE)", _resolve
+        ) == "diff_days ( [O::SHIPPED_DATE] , [O::ORDER_DATE] )"
+
+    def test_datediff_quoted_and_bare_agree(self):
+        quoted = translate_sql_expr("DATEDIFF('month', a.S, a.E)", _resolve)
+        bare = translate_sql_expr("DATEDIFF(month, a.S, a.E)", _resolve)
+        assert quoted == bare
+
+    def test_datediff_quoted_unit_mixed_case(self):
+        assert translate_sql_expr(
+            "DATEDIFF('DAY', o.S, o.E)", _resolve
+        ) == "diff_days ( [O::E] , [O::S] )"
+
+    def test_dateadd_quoted_unit(self):
+        assert translate_sql_expr(
+            "DATEADD('day', -364, d.DATE_VALUE)", _resolve
+        ) == "add_days ( [D::DATE_VALUE] , - 364 )"
+
+    def test_unmapped_quoted_unit_still_refused(self):
+        with pytest.raises(UntranslatableError, match="not mapped"):
+            translate_sql_expr("DATEDIFF('microsecond', a.S, a.E)", _resolve)
+
+    def test_non_unit_first_arg_still_refused(self):
+        with pytest.raises(UntranslatableError, match="unit identifier"):
+            translate_sql_expr("DATEDIFF(42, a.S, a.E)", _resolve)
+
+
+class TestDoubleQuotedIdentifiers:
+    """A reserved word or an exact-case column must be double-quoted in the
+    DDL; the quotes carry no meaning once tokenized."""
+
+    def test_quoted_reserved_word_column(self):
+        assert translate_sql_expr('d."DATE"', _resolve) == "[D::DATE]"
+
+    def test_quoted_column_inside_function(self):
+        assert translate_sql_expr(
+            'DATE_TRUNC(\'month\', d."DATE")', _resolve
+        ) == "start_of_month ( [D::DATE] )"
+
+    def test_quoted_table_segment(self):
+        assert translate_sql_expr('"MY_TABLE".col', _resolve) == "[MY_TABLE::col]"
+
+    def test_both_segments_quoted(self):
+        assert translate_sql_expr('"T"."C"', _resolve) == "[T::C]"
+
+    def test_unquoted_is_unchanged(self):
+        assert translate_sql_expr("d.DATE_VALUE", _resolve) == "[D::DATE_VALUE]"
+
+    def test_quoted_and_unquoted_resolve_alike(self):
+        assert (translate_sql_expr('d."COL"', _resolve)
+                == translate_sql_expr("d.COL", _resolve))
+
+    def test_tokenizer_keeps_quoted_segment_whole(self):
+        kinds = [k for k, _ in tokenize('d."DATE"') if k != "ws"]
+        assert kinds == ["ident"]

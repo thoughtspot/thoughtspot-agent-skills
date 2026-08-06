@@ -23,6 +23,7 @@ from ts_cli.snowflake_ops import (
     parse_var_assignment,
     substitute_sql_vars,
 )
+from ts_cli.tml_common import AUTO_TABLES
 
 app = typer.Typer(help="Snowflake Semantic View conversion helper commands.")
 
@@ -463,7 +464,9 @@ def build_model_cmd(
     translated_path: str = typer.Option(
         ..., "--translated", "-t", help="translate-formulas output JSON"),
     tables_path: str = typer.Option(
-        ..., "--tables", help="JSON object mapping SV alias -> TS table name/info"),
+        ..., "--tables",
+        help="JSON object mapping SV alias -> TS table name/info, or the literal "
+             "'auto' to derive it from --parsed (diagram/preview only, no import)"),
     model_name: str = typer.Option(
         ..., "--model-name", "-n", help="Model TML name"),
     output_dir: str = typer.Option(
@@ -498,7 +501,22 @@ def build_model_cmd(
 
     parsed = _read_json_file(parsed_path, "--parsed")
     translated_doc = _read_json_file(translated_path, "--translated")
-    tables = _read_json_file(tables_path, "--tables")
+
+    if tables_path == AUTO_TABLES:
+        if profile:
+            typer.echo(
+                "--tables auto derives names from the parse output and looks nothing "
+                "up, so it carries no warehouse GUIDs and must not be imported. "
+                "Supply a real tables map to use --profile.", err=True)
+            raise SystemExit(1)
+        from ts_cli.sv_introspect import tables_map_from_parsed
+        tables = tables_map_from_parsed(parsed)
+        typer.echo(
+            f"--tables auto: derived {len(tables)} table(s) from --parsed. Model TML "
+            f"only, nothing verified against a warehouse — for an ERD or a preview, "
+            f"not for import.", err=True)
+    else:
+        tables = _read_json_file(tables_path, "--tables")
 
     try:
         model_doc, build_info = build_model_tml_sv(

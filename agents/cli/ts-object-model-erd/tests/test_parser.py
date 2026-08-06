@@ -55,6 +55,38 @@ def test_hidden_non_measure_formula_does_not_make_dim_a_fact():
     assert ff["role"] == "FORMULA"  # display role preserved (ƒ badge)
 
 
+def test_column_description_read_from_properties():
+    """A column comment lives under `properties.description` in Model TML — the
+    same place `synonyms` and `ai_context` live. Reading only the top-level
+    `description` (usually absent) blanked every description a conversion skill
+    emitted, e.g. a Snowflake SV's per-column comments."""
+    model = _mini_model()
+    model["model"]["columns"].append(
+        {"name": "Region Name", "column_id": "CUSTOMER::REGION",
+         "properties": {"column_type": "ATTRIBUTE",
+                        "description": "Sales region of the customer"}}
+    )
+    m = parser.parse_model(model, {})
+    customer = next(t for t in m["tables"] if t["id"] == "CUSTOMER")
+    region = next(c for c in customer["cols"] if c["name"] == "Region Name")
+    assert region["desc"] == "Sales region of the customer"
+
+
+def test_top_level_column_description_wins_over_properties():
+    """When an export carries both, the top-level field stays authoritative."""
+    model = _mini_model()
+    model["model"]["columns"].append(
+        {"name": "Region Name", "column_id": "CUSTOMER::REGION",
+         "description": "top-level",
+         "properties": {"column_type": "ATTRIBUTE",
+                        "description": "properties-level"}}
+    )
+    m = parser.parse_model(model, {})
+    customer = next(t for t in m["tables"] if t["id"] == "CUSTOMER")
+    region = next(c for c in customer["cols"] if c["name"] == "Region Name")
+    assert region["desc"] == "top-level"
+
+
 def test_dimension_with_outgoing_join_is_not_a_fact():
     """A pure dimension that merely joins out to another table (e.g. USER -> EVENT)
     must not be classified a fact. Regression for GTM Campaigns TS_USER."""
