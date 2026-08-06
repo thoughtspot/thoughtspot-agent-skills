@@ -45,6 +45,12 @@ Jira epic, not re-probed.
 | `moving_sum(group_aggregate(...), …)` at grand-total or grouped by a non-order column | `INVALID_WINDOWING_FUNCTION_ARGUMENTS` — distinct from the semi-additive class; wrapper is still `AGG()` (`SUM()` → NESTED). Needs its order column present; may be a broader `moving_sum`/AgentQL gap (untriaged) | ✓ live 2026-07-13 |
 | `ROLLUP` / `CUBE` / `GROUPING SETS` | rejected | [SCAL-319339](https://thoughtspot.atlassian.net/browse/SCAL-319339) |
 | Many scalar functions: `INITCAP`, `REGEXP_SUBSTR`, `REGEXP_REPLACE`, `TO_VARCHAR`, bitwise (`BIT_*`), constant-only (`EXP`/`ACOS`/`LOG(b,x)`/`CHR`/`SPACE`/`CURRENT_DATE`/`TO_DATE`), `DAY_OF_YEAR`, `TRUNC(date,part)`, `OVERLAY`/array fns (`CONCAT_WS` now works — see ✅) | rejected / `NO_BASE_TABLES` (`INITCAP`/`REGEXP_SUBSTR`/`TO_VARCHAR`/`CURRENT_DATE` re-verified 2026-07-29; date-arg fns not re-probed — no date column on the CDW test model) | [SCAL-319333–319343](https://thoughtspot.atlassian.net/browse/SCAL-316371) |
+| `LTRIM(x, chars)` / `RTRIM(x, chars)` (two-argument form) | compiles, then renders ANSI `trim(leading ' ' from …)`, which Snowflake rejects. The **single-argument** form is correct | ✓ live 2026-08-04 · [SCAL-326943](https://thoughtspot.atlassian.net/browse/SCAL-326943) |
+| `CAST(<literal> AS <type>)` | rejected as a fabricated column `Constant_<value>`. Casting a **column** is fine | ✓ live 2026-08-04 · [SCAL-326946](https://thoughtspot.atlassian.net/browse/SCAL-326946) |
+| `CAST(<expression> AS <type>)` **in a statement involving a CTE** | `UNSUPPORTED_EXPRESSION` — *"Failed to traverse CAST source expression"*. Fails both when the cast is inside a CTE body and when it is in a query joining one; the identical cast is accepted with no CTE present. A cast over a bare column is fine — it is casting over an **expression** that breaks. Workaround: drop the cast where the inner expression is already the target type (`CAST(TRUNC(EXTRACT(…)) AS INTEGER)` → `TRUNC(EXTRACT(…))`), verified to return identical values | ✓ live 2026-08-06 |
+| `EXTRACT(DOW …)` | rejected at parse, `DatePart expected`. Exact equivalent: `DAY_IN_WEEK_NUMBER(x) % 7` (Mon=1..Sun=7, so mod 7 gives Sun=0..Sat=6) | ✓ live 2026-08-04 · [SCAL-327864](https://thoughtspot.atlassian.net/browse/SCAL-327864) |
+| `EXTRACT(DOY …)` | compiles, then renders `extract(day_of_year from …)`; Snowflake wants `dayofyear`. **Workaround: `DAY_IN_YEAR_NUMBER(x)`**, which returns the true day of year | ✓ live 2026-08-06 · [SCAL-327864](https://thoughtspot.atlassian.net/browse/SCAL-327864) |
+| Aggregate over a column the CTE does not otherwise reference (e.g. `HAVING COUNT(other_col) > 0`) | `COLUMN_NOT_FOUND` against `wrapper_<model>_<hash>`. ThoughtSpot materialises a CTE as a wrapper exposing only the columns that CTE mentions, so any other Model column is out of scope inside it. Workaround: use a column the CTE already references | ✓ live 2026-08-06 |
 | Variant / semi-structured / JSON (`ARRAY_CONTAINS`, `ARRAY_SIZE`, lateral flatten) | unsupported | [SCAL-316392–316396](https://thoughtspot.atlassian.net/browse/SCAL-316371), [SCAL-318984](https://thoughtspot.atlassian.net/browse/SCAL-318984) |
 **Workarounds:** `STDDEV`/`VAR`/percentile → aggregate in a CTE, take the stat in the
 outer SELECT (`patterns.md` § Statistics); `MEDIAN` works directly. Membership filters
@@ -60,7 +66,19 @@ AgentQL UDFs (`udf-reference.md`), not `TRUNC`/`TO_DATE`/`CURRENT_DATE`.
 | `QUALIFY …` | clause silently dropped from generated SQL (no `ROW_NUMBER` emitted at all) → you get **all** rows, not the filtered set | ✓ live 2026-07-29 · [SCAL-319330](https://thoughtspot.atlassian.net/browse/SCAL-319330) |
 | `FILTER (WHERE …)` on an aggregate | silently dropped → aggregate ignores the filter (returns the unfiltered total) | ✓ live 2026-07-29 · [SCAL-319332](https://thoughtspot.atlassian.net/browse/SCAL-319332) |
 | `SUM(CASE WHEN <raw-date '>=' literal> …)` | aggregate returns type-UNKNOWN, all zeros — use integer date-parts inside CASE (not re-probed 2026-07-29 — no date column on the CDW test model) | [SCAL-319329](https://thoughtspot.atlassian.net/browse/SCAL-319329) |
+| `DATE_TRUNC(unit, col)` | compiles, then leaks the parser alias, **drops the unit** (`trunc(x, null)`) and **silently drops the `GROUP BY`**, wrapping the date in `min()`. Three failures in one, none of them visible. Use the date-part UDFs in `udf-reference.md` | ✓ live 2026-08-04 · [SCAL-326944](https://thoughtspot.atlassian.net/browse/SCAL-326944) |
 | `AVG`/`MIN`/`MAX` on a measure over an **SV or MV backing** | outer aggregate silently dropped — returns the measure's native aggregation (e.g. `AVG` of a `SUM` measure returns the `SUM`). Regular Models hard-error (`NESTED_AGGREGATE_NOT_SUPPORTED`). `MEDIAN`/`STDDEV` fail as nested aggregates on all backings. **Fix:** the CTE statistics pattern — materialise at a grain, apply the statistic in the outer SELECT (`patterns.md` § Statistics). | ✓ live 2026-07-21 · [snowflake-sv-backing.md](snowflake-sv-backing.md) |
+
+> **`LIMIT 100000` is appended to every generated statement**, including statements that
+> carry no `LIMIT` of their own (✓ live 2026-08-04). On a large Model a bulk extract is
+> silently capped at 100,000 rows with nothing in the response to say so. Whether it is
+> configurable is unconfirmed.
+
+> **Diagnostics that name the wrong thing** ([SCAL-326945](https://thoughtspot.atlassian.net/browse/SCAL-326945)):
+> a derived table in a `JOIN` reports `Table 't' not found`, where `'t'` is a hardcoded
+> placeholder that appears whatever the real alias is; and `GROUP BY 1` reports
+> `Missing formula alias: <guid>`, naming neither the construct nor anything the caller
+> wrote. Both cost real time to trace back to their cause.
 
 ## 🔧 In flight — open bugs (behaviour may change; treat results with care)
 

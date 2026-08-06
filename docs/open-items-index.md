@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**145 total items** across 18 skills — **68 open**, 67 verified, 10 deferred
+**145 total items** across 18 skills — **67 open**, 68 verified, 10 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -23,11 +23,11 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-sisense | 5 | **2** | 2 | 1 |
 | ts-convert-from-tableau | 17 | **2** | 12 | 3 |
 | ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
-| ts-object-model-agentql-query | 6 | **1** | 5 | 0 |
 | ts-security-columns | 6 | **1** | 5 | 0 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
-### Untagged (68 items)
+| ts-object-model-agentql-query | 6 | **0** | 6 | 0 |
+### Untagged (67 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -81,7 +81,6 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-object-answer-promote | #3 | Bare display-name column references in Model formulas | OPEN |
 | ts-object-answer-promote | #4 | Answers embedded in Liveboards (not standalone objects) | OPEN |
 | ts-object-answer-promote | #5 | Sets (cohorts) in Answer TML | OPEN |
-| ts-object-model-agentql-query | #6 | Reference corrections from BI-client probing | OPEN |
 | ts-object-model-aggregates | #3 | Aggregate Model visibility | OPEN |
 | ts-object-model-aggregates | #4 | Non-additive measure routing | OPEN |
 | ts-object-model-aggregates | #5 | Cross-connection aggregates | OPEN |

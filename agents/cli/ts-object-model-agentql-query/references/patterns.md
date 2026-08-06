@@ -156,6 +156,52 @@ double-counts. The two are equivalent **only when the key side is unique**, whic
 `GROUP BY <key>` guarantees. Never join to a raw projection; pre-aggregating the measure
 side does not protect you — deduping the key side is the only guard.
 
+### The guard is stricter than "has a `GROUP BY`"
+
+> **The CTE's grouped (or `DISTINCT`) column set must be a *subset* of the columns in the
+> join's `ON` equality** — or the CTE must return exactly one row.
+
+Measured on `T1_PUBLISH_MODEL` (nebula-damian-alias, 2026-08-04), where the true
+`SUM(QTY_ON_HAND)` is **18,695**:
+
+| Key CTE | Result |
+|---|---|
+| Not deduped | **472,314** |
+| `GROUP BY <join key>` | 18,695 ✓ |
+| `GROUP BY (category, name)`, joined on `category` only | **472,314** |
+
+The last row is the point: a `GROUP BY` is present, and the answer is still 25× too high.
+Grouping on a *finer* grain than you join on leaves duplicates at the join grain. Checking
+for the presence of a `GROUP BY` is not the check.
+
+### A single-row CTE is exempt
+
+A CTE that aggregates without grouping returns exactly one row, so it cannot multiply
+anything — it is safe joined on any condition, and on none at all:
+
+```sql
+WITH "total" AS (
+  SELECT SUM("t1"."Quantity") AS "grand_total" FROM "Model" AS "t1"
+), "by_cat" AS (
+  SELECT "t1"."Product Category" AS "cat", SUM("t1"."Quantity") AS "qty"
+  FROM "Model" AS "t1" GROUP BY "t1"."Product Category"
+)
+SELECT "b"."cat", "b"."qty", "t"."grand_total"
+FROM "by_cat" AS "b" CROSS JOIN "total" AS "t"
+```
+
+This is how a percent-of-total is expressed without a window function, and it is what a BI
+tool's grand-total calculation compiles to. Verified live 2026-08-06: the grand total
+repeats on every row, and the per-category values still sum to it.
+
+Two further shapes verified the same day, which together make the pattern composable:
+
+- **A CTE may select from an earlier CTE**, so a filter and the query that uses it can be
+  separate CTEs rather than one nested expression. Declaration order matters — the
+  referenced CTE must come first.
+- **`CROSS JOIN` between two CTEs works**, which is what makes the single-row form above
+  expressible at all.
+
 For the negation ("members NOT in the set") this rewrite does not apply — use the
 LEFT-OUTER-JOIN + `IS NULL` shape in § Dimension-anchored anti-join below. (Verified live
 2026-07-29, nebula-damian-alias: the `IN (SELECT …)` original fails at fetch; this rewrite

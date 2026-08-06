@@ -17,8 +17,9 @@ Take a date column, return an integer. Safe anywhere — `SELECT`, `WHERE`, `GRO
 | `QUARTER_NUMBER(date_col)` | INT (1–4) | 2 |
 | `MONTH_NUMBER(date_col)` | INT (1–12) | 5 |
 | `WEEK_IN_YEAR_NUMBER(date_col)` | INT (1–53) | 21 |
-| `DAY_NUMBER(date_col)` | INT (1–366) | 140 |
-| `DAY_IN_MONTH_NUMBER(date_col)` | INT (1–31) | 20 |
+| `DAY_NUMBER(date_col)` | INT (1–31) — **day of month**, not day of year | 20 |
+| `DAY_IN_MONTH_NUMBER(date_col)` | INT (1–31) — synonym of `DAY_NUMBER` | 20 |
+| `DAY_IN_YEAR_NUMBER(date_col)` | INT (1–366) — day of year | 140 |
 | `DAY_IN_WEEK_NUMBER(date_col)` | INT (1–7, Mon=1) | 3 |
 | `DAY_NAME(date_col)` | VARCHAR | "wednesday" |
 

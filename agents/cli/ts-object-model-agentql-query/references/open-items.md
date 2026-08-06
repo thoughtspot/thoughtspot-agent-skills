@@ -87,7 +87,7 @@ rows — they keep their earlier verification dates.
 
 ---
 
-## #6 — Reference corrections from BI-client probing — OPEN 2026-08-04
+## #6 — Reference corrections from BI-client probing — RESOLVED 2026-08-07
 
 Driving Tableau Desktop at AgentQL through a Postgres-wire bridge
 (`spotql-testing`, `src/spotql_test/bridge/`) exercised the reference material far
@@ -171,20 +171,60 @@ The last row is the point: a `GROUP BY` is present and the answer is still 25×
 too high. Pre-aggregating the fact side does not help — re-aggregating a
 fanned-out result just adds up the duplicates.
 
-### Proposed work
+### What was applied — 2026-08-07
 
-1. Apply the three corrections in A. Mechanical; the evidence is above.
-2. Add the five rows in B to `limitations.md` with their SCAL refs, and bump the
-   currency anchor.
-3. Add C as two notes.
-4. Add D to `patterns.md` with the guard stated as a rule.
-5. Consider whether `udf-reference.md` should be **generated from a live probe
-   suite** rather than hand-maintained. Three wrong entries in one file is a
-   pattern rather than bad luck, and `use-cases.md` #6 already describes the
-   executable form of exactly that check.
+Everything was re-probed before being written, and that caught an error in this
+item itself.
 
-Not done here because it changes a shipped skill's guidance, which deserves a
-review rather than being folded into a bridge branch.
+**A — one of the three, not three.** `LENGTH()` and the aggregate-times-literal
+claim had already been corrected on `main` (2026-07-29) by the time this was
+actioned. Only `DAY_NUMBER` remained.
+
+**A also had its own mistake.** This item asserted that "there is no day-of-year
+UDF". There is: **`DAY_IN_YEAR_NUMBER`**, undocumented and working. Verified on
+five rows, each matching the true day of year exactly, alongside `DAY_NUMBER`
+matching the true day of month:
+
+| Date | `DAY_IN_YEAR_NUMBER` | true DOY | `DAY_NUMBER` | true DOM |
+|---|---|---|---|---|
+| 2023-04-11 | 101 | 101 | 11 | 11 |
+| 2023-05-30 | 150 | 150 | 30 | 30 |
+| 2023-06-22 | 173 | 173 | 22 | 22 |
+
+So `udf-reference.md` was wrong twice about the same thing: it gave `DAY_NUMBER`
+a range it does not have, *and* omitted the UDF that does have it. Both fixed.
+This also gives `EXTRACT(DOY …)` a workaround, which B said it did not have.
+
+**B — added to `limitations.md`**, plus two found while applying this:
+
+- `CAST(<expression> AS <type>)` fails with `UNSUPPORTED_EXPRESSION` in any
+  statement involving a CTE — inside a body *or* in a query joining one — while
+  the identical cast is fine with no CTE present. Casting a bare column is fine;
+  it is casting over an **expression** that breaks.
+- An aggregate over a column the CTE does not otherwise reference fails with
+  `COLUMN_NOT_FOUND` against `wrapper_<model>_<hash>`, because ThoughtSpot
+  materialises a CTE as a wrapper exposing only the columns that CTE mentions.
+
+**C** — the `LIMIT 100000` cap and the misleading diagnostics are now notes in
+`limitations.md`. The `IN (SELECT …)` behaviour was already recorded there.
+
+**D — `patterns.md` § Semi-join via CTE already existed**, so the guard was
+sharpened rather than duplicated: grouped set must be a *subset* of the `ON`
+equality columns, with the measured 472,314-vs-18,695 table showing that a
+`GROUP BY` on a finer grain than the join key still fans out. Added the
+single-row exemption (a scalar aggregate cannot multiply anything, so `CROSS
+JOIN` to it is safe), which is how percent-of-total is expressed without a window
+function, plus the two shapes that make it composable: a CTE may select from an
+earlier CTE, and `CROSS JOIN` between two CTEs works.
+
+### Still open
+
+**Generate `udf-reference.md` from a live probe suite** rather than maintaining it
+by hand. The case is now stronger than when this item was written: the same file
+has been wrong about `DAY_NUMBER`'s range, about `LENGTH()`, and about
+`DAY_IN_YEAR_NUMBER` existing at all. Three of those were caught only because a BI
+tool emitted SQL nobody would have chosen to write. `use-cases.md` #6 already
+describes the executable form of the check.
 
 ## Keeping `limitations.md` current
 
