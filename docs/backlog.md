@@ -88,6 +88,8 @@ are roughly ordered by value÷effort.
 |---|---|---|
 | ~~BL-192~~ | ~~`docs/quality-gates.md` stales from main's commits, not yours — hard-fails the PR gate on a race~~ | DONE (2026-07-30) |
 | ~~BL-205~~ | ~~ERD from a source semantic definition (SF SV / DBX MV) is possible but entirely manual~~ | DONE (2026-08-05) |
+| ~~BL-212~~ | ~~from-Snowflake translator rejects a quoted DATEDIFF/DATEADD unit and any double-quoted identifier~~ | DONE (2026-08-06) |
+| ~~BL-213~~ | ~~from-Snowflake drops unqualified derived metrics — the only way an SV expresses a cross-fact ratio~~ | DONE (2026-08-06) |
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
@@ -7690,3 +7692,55 @@ under `out_dir` (same all-or-nothing assertion the existing
 message names the object and the reason. Written first and confirmed failing against the
 pre-fix code (`AttributeError("'NoneType' object has no attribute 'get'")`) before the fix
 landed.
+
+
+## BL-212 -- from-Snowflake translator rejects a quoted date-part unit and any double-quoted identifier `Tier 2` -- DONE (2026-08-06)
+
+Two tokenizer/parser gaps, both hit on the first real Semantic View that used them, each
+silently costing a construct: the metric or dimension landed in `skipped[]` and simply did
+not exist in the emitted Model.
+
+1. **Quoted date-part unit.** Snowflake accepts `DATEDIFF(day, a, b)` and
+   `DATEDIFF('day', a, b)` equally, and the quoted form is idiomatic in hand-written DDL.
+   `_call_datediff` / `_call_dateadd` required `kind == "ident"` and raised
+   *"DATEDIFF expects a unit identifier as first argument"* on the quoted form. Cost two
+   metrics (`DAYS_TO_SHIP`, `DAYS_LATE`) on the fixture.
+2. **Double-quoted identifiers.** `_TOKEN_RE`'s `ident` alternative had no quoted-segment
+   branch, so `dm_date_dim."DATE"` stopped at the dot and raised
+   *"unrecognized character '.' at position 11"*. Quoting is mandatory for a reserved word
+   or an exact-case name, so this is not an exotic shape. Cost one dimension.
+
+**Fix.** A shared `_unit_arg()` accepts the unit bare or quoted; the ident pattern gained a
+`"[^"]+"` alternative per dotted segment, and `_unquote_ident()` strips the quotes before
+resolution (downstream matching is case-insensitive, so the quotes carry no meaning once
+tokenized). 3 of 44 constructs on the fixture went from skipped to translated (41/44 ->
+44/44). 14 tests, including that quoted and bare forms produce identical output and that an
+unmapped unit is still refused.
+
+## BL-213 -- from-Snowflake drops unqualified derived metrics, the only way an SV expresses a cross-fact ratio `Tier 1` -- DONE (2026-08-06)
+
+`NAME as <expr>` with no table prefix on the left is valid Semantic View grammar, and it is
+the **only** way to express a ratio spanning two unrelated facts: a metric qualified on a
+table may reference only metrics on *directly related* entities (Snowflake `010211`). So
+attainment (`revenue / target`) and period-over-period growth arrive exclusively in this
+shape. `_parse_column_entry` matched only `TABLE.COL as ...`, so all four such metrics on
+the fixture landed in `unsupported[]` as *"could not parse metric entry"* and were absent
+from the Model with no error at import.
+
+**Fix, three layers.**
+- `sv_parse`: a metrics-block-only fallback for the unqualified shape, emitting
+  `source_table`/`alias_table` `None` plus `is_derived: True`.
+- `sv_translate`: `_index_constructs` skips table-less constructs (they cannot be
+  referenced as `TABLE.NAME`, and indexing one crashed on the `None` alias);
+  `_translate_metric` handles the derived case first, via a dedicated `_derived_resolver`.
+- The resolver matters. The generic step-3 metric branch always emits `[formula_<id>]`,
+  which **dangles** against a simple-`AGG(col)` metric because that is emitted as a plain
+  `columns[]` entry — the BL-178 shape `ts tml lint` I13 rejects. That path was previously
+  unreachable for unrelated entities (Snowflake refuses the qualified form), so a derived
+  metric is the first construct to reach it. `_derived_resolver` maps a simple-agg
+  reference to its column display name `[Amount]` and anything else to
+  `[formula_<id>]`.
+
+Verified end to end through `build-model`: `Attainment` emits as a MEASURE formula
+`[Amount] / [Target Revenue]` with `lint_findings: []`, and a test asserts no reference in
+any emitted expression dangles. 14 tests across parse and translate.

@@ -5,6 +5,27 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-08-06
+
+### Fixed
+
+- **`ts-convert-from-snowflake-sv` — five conversion gaps found taking a live Semantic View
+  end to end into a ThoughtSpot Model** (ts-cli v0.130.0, skill v1.21.0).
+  - **BL-213** — unqualified derived metrics (`NAME as m1 / m2`) are now parsed, translated
+    and emitted. They are the only SV construct that can span two *unrelated* facts, so
+    cross-fact ratios (attainment, period-over-period growth) arrive exclusively in this
+    shape; all four on the fixture were silently dropped into `unsupported[]`. Includes a
+    dedicated resolver, because the generic metric branch emits `[formula_<id>]` which
+    dangles against a simple-agg metric emitted as a plain column.
+  - **BL-212** — the translator now accepts a quoted date-part unit (`DATEDIFF('day', …)`)
+    and double-quoted identifiers (`dim."DATE"`). Both are idiomatic Snowflake and each
+    silently cost a construct; 3 of 44 on the fixture, now 44/44.
+  - **New Step 11c** — reconcile the Model against the SV after import. A successful import
+    is not a correct conversion: Step 11b confirms the object exists but checks no numbers.
+  - **Step 6B** now warns off `ts connections add-tables` (wrong operation for the step,
+    500s on a shared connection) and names the tell that you have the wrong command.
+  - **Prerequisites** note the `snowflake-connector-python` extra `introspect` needs.
+
 ## 2026-08-05
 - feat: **BL-205 — render an ERD straight from a Snowflake Semantic View or a Databricks Metric View.** `/ts-object-model-erd` offered only local TML or a live ThoughtSpot instance, so diagramming a source semantic definition meant assembling `parse` → `translate-formulas` → `build-model` → `build_erd` by hand. The conversion half always ran offline; what blocked it was that both `build-model`s demand warehouse-registration inputs a diagram never uses. New `--tables auto` derives the alias→table map from the parse output instead of introspecting a warehouse — on the Snowflake side it produces **byte-identical** Model TML to a hand-written map, and on the Databricks side it is keyed by the same `flatten_join_aliases` walk `build_model_tables` looks up, so the two cannot disagree about what a join path is. Derived values are plain strings, so no entry carries `create: true`, no table TML is written, and `ts databricks build-model --connection` is no longer required alongside it (`translate-formulas` accepts the sentinel too, since Databricks resolves dot-path expressions through the map a step earlier). The derived map carries no GUIDs, so both commands **refuse `--profile`**; only the exact string `auto` opts in, so a mistyped path stays an error. Scoped to those two formats deliberately: they are declarative semantic-layer objects, while the BI-workbook converters (Tableau, Power BI, Qlik, Sisense) invent the table layer from extracts and would stub the very decisions that shape the diagram
 - fix: **ERD column descriptions were dropped.** The shared ERD parser read a column's `desc` from the top-level `description` field its own docstring calls "usually null", with no fallback to `properties.description` where Model TML actually stores it — unlike `synonyms` and `ai_context`, which did fall back. Every description a conversion skill emits rendered blank; a converted Semantic View lost all 60 of its per-column comments

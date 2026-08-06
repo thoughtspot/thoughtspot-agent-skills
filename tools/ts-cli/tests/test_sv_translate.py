@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from ts_cli.sv_parse import parse_sv_ddl
 from ts_cli.sv_translate import (
     fact_column_type,
     _find_over_split,
@@ -1079,3 +1080,68 @@ class TestTranslateRecordsNamingDecision:
         for flag in (False, True):
             r = translate_sv_formulas(self.PARSED, promote_synonym=flag)
             assert r["translated"][0]["synonyms"] == ["State", "Condition"]
+
+
+# ---------------------------------------------------------------------------
+# BL-213 — translating an unqualified derived metric
+#
+# A derived metric combines metrics that have already aggregated on their own
+# entity, so each reference must point at what that metric is EMITTED as. The
+# generic resolver always emits [formula_<id>], which DANGLES against a
+# simple-agg metric (emitted as a plain column) — the BL-178 shape I13 rejects.
+# ---------------------------------------------------------------------------
+
+_D_DDL = """
+create or replace semantic view SV_T
+  tables ( F, T )
+  relationships ( )
+  dimensions ( F.PID as F.PRODUCT_ID )
+  metrics (
+    F.AMOUNT as SUM(F.LINE_TOTAL),
+    F.AVG_ORDER_VALUE as DIV0(SUM(F.LINE_TOTAL), COUNT(DISTINCT F.OID)),
+    T.TARGET_REVENUE as SUM(T.TARGET_AMOUNT),
+    ATTAINMENT as F.AMOUNT / T.TARGET_REVENUE,
+    RATIO_TO_FORMULA as F.AVG_ORDER_VALUE / T.TARGET_REVENUE
+  );
+"""
+
+
+def _t(name: str) -> dict:
+    out = translate_sv_formulas(parse_sv_ddl(_D_DDL))
+    return next(e for e in out["translated"] if e["name"] == name)
+
+
+class TestDerivedMetricTranslation:
+
+    def test_nothing_skipped(self):
+        assert translate_sv_formulas(parse_sv_ddl(_D_DDL))["skipped"] == []
+
+    def test_emitted_as_a_measure_formula(self):
+        e = _t("ATTAINMENT")
+        assert e["output_kind"] == "formula" and e["column_type"] == "MEASURE"
+
+    def test_simple_agg_reference_uses_the_column_display_name(self):
+        # AMOUNT is SUM(col) -> a plain column, so [Amount], NOT [formula_Amount]
+        assert _t("ATTAINMENT")["ts_expr"] == "[Amount] / [Target Revenue]"
+
+    def test_computed_metric_reference_uses_the_formula_id(self):
+        # AVG_ORDER_VALUE is a real formula, so the minted id is correct here
+        assert _t("RATIO_TO_FORMULA")["ts_expr"] == (
+            "[formula_Avg Order Value] / [Target Revenue]")
+
+    def test_no_reference_dangles(self):
+        import re
+        out = translate_sv_formulas(parse_sv_ddl(_D_DDL))
+        formulas = {f"formula_{e['name'].replace('_', ' ').title()}"
+                    for e in out["translated"] if e["output_kind"] == "formula"}
+        columns = {e["name"].replace("_", " ").title()
+                   for e in out["translated"] if e["output_kind"] == "column"}
+        for e in out["translated"]:
+            for ref in re.findall(r"\[([^\]]+)\]", e["ts_expr"] or ""):
+                if "::" in ref:
+                    continue
+                assert ref in (formulas | columns), f"{ref} dangles in {e['name']}"
+
+    def test_qualified_metrics_still_translate(self):
+        assert _t("AVG_ORDER_VALUE")["output_kind"] == "formula"
+        assert _t("AMOUNT")["output_kind"] == "column"

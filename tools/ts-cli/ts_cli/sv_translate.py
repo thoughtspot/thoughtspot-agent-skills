@@ -15,6 +15,7 @@ from ts_cli.sv_naming import (  # noqa: F401  (re-exported for callers/tests)
     build_node_id_map,
     construct_formula_id,
     display_title,
+    display_title,
     fact_column_type,
 )
 from typing import Any, Callable
@@ -68,11 +69,15 @@ def _index_constructs(constructs: list[dict]) -> dict[str, dict]:
     own identifier must never be shadowed by another construct's physical-column
     alias.
     """
+    # An unqualified derived metric owns no entity, so it has no alias_table and
+    # cannot be referenced as TABLE.NAME. It belongs in no table-scoped index
+    # (BL-213); indexing it would also crash on the None alias.
+    scoped = [c for c in constructs if c.get("alias_table")]
     idx: dict[str, dict] = {}
-    for c in constructs:
+    for c in scoped:
         alias = c["alias_table"].lower()
         idx[f"{alias}.{c['alias_name'].lower()}"] = c
-    for c in constructs:
+    for c in scoped:
         alias = c["alias_table"].lower()
         idx[f"{alias}.{c['source_column'].lower()}"] = c
     return idx
@@ -797,6 +802,46 @@ def _apply_using(
             f"{{[{ts_table}::{to_col}]}} , query_filters ( ) )")
 
 
+def _derived_resolver(
+    parsed: dict, annotations: list[str], *, promote_synonym: bool = False,
+):
+    """Resolver for an unqualified derived metric's expression.
+
+    A derived metric combines metrics that have each already aggregated on their
+    own entity, so a reference must point at whatever that metric is EMITTED as,
+    not at a double aggregation:
+
+    * a simple ``AGG(col)`` metric becomes a plain ``columns[]`` entry, so the
+      reference is its display name — ``[Amount]``;
+    * anything else becomes a formula, so the reference is the minted id —
+      ``[formula_Avg Order Value]``.
+
+    The generic resolver always emits ``[formula_<id>]`` for a metric (step 3),
+    which dangles against a simple-agg metric because no such formula exists —
+    the BL-178 failure shape that ``ts tml lint`` I13 now rejects. That path was
+    previously unreachable for unrelated entities because Snowflake refuses a
+    qualified metric that references one (010211); a derived metric is the first
+    construct that can reach it, so it needs its own mapping (BL-213).
+    """
+    _, metric_idx = _build_column_index(parsed)
+    generic = make_resolver(
+        parsed, "", annotations=annotations, promote_synonym=promote_synonym)
+
+    def resolve(ident: str) -> str:
+        m = metric_idx.get(ident.lower())
+        if m is not None:
+            if _is_simple_agg(m.get("expr")) is not None:
+                return "[" + display_title(
+                    {"name": m["source_column"],
+                     "synonyms": m.get("synonyms")},
+                    promote_synonym=promote_synonym) + "]"
+            return "[" + construct_formula_id(
+                m, promote_synonym=promote_synonym) + "]"
+        return generic(ident)
+
+    return resolve
+
+
 def _translate_metric(
     metric: dict,
     parsed: dict,
@@ -815,6 +860,24 @@ def _translate_metric(
     """
     annotations: list[str] = []
     expr = metric["expr"]
+
+    if metric.get("is_derived"):
+        # An unqualified derived metric owns no entity: it is purely a function
+        # of other metrics, each of which aggregates on its own table. That is
+        # what lets it span two UNRELATED facts, and it maps directly onto a
+        # ThoughtSpot formula over the referenced measures. Every reference in
+        # one is table-qualified, so the resolver's default alias is never
+        # consulted (BL-213).
+        if expr is None:
+            raise UntranslatableError(
+                f"derived metric '{metric['source_column']}' has no expression")
+        resolver = _derived_resolver(
+            parsed, annotations, promote_synonym=promote_synonym)
+        ts_expr = translate_sql_expr(expr, resolver)
+        return _entry(
+            metric["source_column"], "metric", "formula", "MEASURE",
+            metric, ts_expr=ts_expr, annotations=annotations)
+
     if expr is None:
         raise UntranslatableError(
             f"metric '{metric['source_column']}' has no aggregate expression "

@@ -141,6 +141,17 @@ _DIM_METRIC_ENTRY_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Unqualified DERIVED metric: `NAME as <expr>` with no table prefix on the
+# left. Valid Semantic View grammar and the ONLY way to express a ratio that
+# spans two unrelated facts -- a metric qualified on a table may reference only
+# metrics on directly related entities (Snowflake 010211). Previously every such
+# metric fell through both patterns below and landed in unsupported[] as
+# "could not parse metric entry" (BL-213).
+_DERIVED_METRIC_ENTRY_RE = re.compile(
+    r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s+as\s+(.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
 # Table.COL pattern for the left-hand side (before `as` or modifiers)
 _TABLE_DOT_COL_RE = re.compile(
     r"([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)",
@@ -507,7 +518,8 @@ def _resolve_rhs_alias(
 
 
 def _build_result(
-    source_table: str, source_column: str, alias_table: str, alias_name: str,
+    source_table: str | None, source_column: str,
+    alias_table: str | None, alias_name: str,
     expr: str | None, block_type: str, mods: dict[str, Any],
     semi_additive: dict[str, str] | None,
     using_relationship: str | None,
@@ -555,6 +567,18 @@ def _parse_column_entry(raw: str, block_type: str) -> dict[str, Any] | None:
 
     m_entry = _DIM_METRIC_ENTRY_RE.match(cleaned)
     if not m_entry:
+        # An unqualified derived metric has no owning entity, so there is no
+        # TABLE.COL to match. Metrics block only -- a dimension or fact must
+        # name its table.
+        if block_type == "metrics":
+            m_derived = _DERIVED_METRIC_ENTRY_RE.match(cleaned)
+            if m_derived and "." not in m_derived.group(1):
+                result = _build_result(
+                    None, m_derived.group(1), None, m_derived.group(1),
+                    m_derived.group(2).strip(), block_type, mods,
+                    semi_additive, using_relationship)
+                result["is_derived"] = True
+                return result
         m_lhs = _TABLE_DOT_COL_RE.match(cleaned)
         if m_lhs:
             rest = cleaned[m_lhs.end():].strip()
