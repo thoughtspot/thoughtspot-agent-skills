@@ -19,7 +19,7 @@ ts_cli/
   sv_sql.py            — Snowflake SQL expression → ThoughtSpot formula text (translate_sql_expr); tokenizer + recursive descent + Snowflake function map (ts-snowflake-formula-translation.md as data) behind `ts snowflake translate-formulas` (BL-100; pure functions, no I/O)
   sv_translate.py      — Parsed SV → translated ThoughtSpot formulas (translate_sv_formulas); identifier resolution, column classification, window/LOD/semi-additive/USING handling behind `ts snowflake translate-formulas` (BL-100; pure functions, no I/O)
   sv_build_model.py    — Snowflake SV → ThoughtSpot Model TML assembly (build_model_tml_sv); inline Scenario B joins (equi/range/ASOF), SV synonym→display name, private columns, fact table detection, strip_formulas for two-pass import; imports formula_common shared transforms (BL-100 PR3; pure functions, no I/O)
-  sv_introspect.py     — INFORMATION_SCHEMA → tables-spec + tables map (map_snowflake_type, build_tables_spec, build_tables_map, detect_column_gaps); Snowflake type → ThoughtSpot type mapping, cross-schema query building, column gap detection against existing TS tables (BL-100 PR4; pure functions, no I/O)
+  sv_introspect.py     — INFORMATION_SCHEMA → tables-spec + tables map (map_snowflake_type, build_tables_spec, build_tables_map, tables_map_from_parsed, detect_column_gaps); `tables_map_from_parsed` is the no-warehouse path behind `--tables auto` (BL-205) and routes through `build_tables_map` so the introspected and derived maps cannot drift on shape; Snowflake type → ThoughtSpot type mapping, cross-schema query building, column gap detection against existing TS tables (BL-100 PR4; pure functions, no I/O)
   sv_build_sv.py       — ThoughtSpot Model TML → Snowflake Semantic View DDL (build_sv_ddl); column_id resolution, column classification (dimension/metric/time_dimension), to_snake aliasing, relationship naming with collision avoidance, metric topological ordering, CA extension JSON, synonym/comment handling (BL-100 PR5; pure functions, no I/O)
   spotql_ops.py        — Aggregate-function classification (AGGREGATE_FUNCS/is_aggregate_expr/classify_expr/outermost_func/classify_model_columns; incl. semi-additive last_value/first_value → SUM wrapper) behind `ts agentql classify-columns` (pure functions, no I/O)
   publish_plan.py      -- Orgs Publishing planning engine: field-variance clustering (build_clusters/extract_table_fields/suggest_variable_name) + the value matrix (build_value_matrix/expand_pattern/coverage_report) behind `ts publish export`/`resolve`/`apply`/`rollback` (incl. build_apply_plan/rollback_steps, which record each field's ORIGINAL static value because unparameterize substitutes rather than clears). Clusters by DISTINCT VALUE because a variable holds one value per scope, so N tables sharing a schema need one variable, not N. Also holds `published_org_ids(header)` -- THE one statement of what `metadata_header.orgIds` means (owning Org PLUS every Org published to, so `ownerOrgId` is excluded and the result reads as "additionally visible in"), shared by `ts publish status` and `ts security column-rules` rather than restated in each; restating it is how the two readings diverged, with CSR treating every table on an Orgs-enabled cluster as published (pure functions, no I/O)
@@ -77,6 +77,7 @@ ts_cli/
     client.py             — TableauClient (HTTP) + profile resolution; the package's one I/O module
   databricks/
     __init__.py         — package marker (stdlib + PyYAML only — Genie-vendorable, no HTTP/auth deps)
+    mv_build_model.py   — (see also) `tables_map_from_parsed` derives the `--tables` map from parse-mv output behind `--tables auto` (BL-205), keyed by the same `flatten_join_aliases` walk `build_model_tables` looks up, so the two cannot disagree about what a join path is; values are plain strings, so nothing carries `create: true`, no table TML is written and `--connection` is unnecessary; a `sql_query` source degrades to its alias with a note (pure functions, no I/O)
     mv_parse.py         — Metric View YAML -> structured dict behind `ts databricks parse-mv`: source classification, joins walk, top-level assembly; re-exports the mv_expr/mv_window API (pure functions, no I/O; BL-063 PR2)
     mv_expr.py          — dimension/measure SQL expression classification (pure functions, no I/O)
     mv_window.py        — window-spec parsing: 5 range values, offset, BL-098 density flag (pure functions, no I/O)
@@ -149,7 +150,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.128.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.131.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

@@ -181,6 +181,47 @@ def flatten_join_aliases(parsed_joins: list) -> list[tuple[str, str, dict]]:
     return out
 
 
+def _physical_from_source(src, path: str, notes: list[str]) -> str:
+    """Physical table name for one parsed `source:`, or the alias when there isn't one."""
+    if isinstance(src, dict) and src.get("kind") == "table_fqn":
+        parts = src.get("parts")
+        if parts:
+            return parts[-1]
+        raw = (src.get("raw") or "").strip()
+        if raw:
+            return raw.split(".")[-1].strip("`")
+    kind = src.get("kind", "unknown") if isinstance(src, dict) else "unknown"
+    notes.append(
+        f"'{path}' has no table FQN to take a name from (source kind {kind!r}); "
+        f"using the alias. A real conversion turns this source into a SQL View.")
+    return path.split(".")[-1]
+
+
+def tables_map_from_parsed(parsed: dict) -> tuple[dict[str, str], list[str]]:
+    """Derive the `--tables` map straight from parse-mv output, no warehouse round-trip.
+
+    Returns ``(map, notes)``. Keys are exactly what `build_model_tables` looks up:
+    ``"source"`` plus every join's dot-path, produced by the same
+    `flatten_join_aliases` walk so the two cannot disagree about what a path is.
+    Values are plain name strings, which `normalize_tables` already accepts.
+
+    A `sql_query` source has no physical table to name, so it degrades to the
+    alias and says so in ``notes`` — enough for a diagram, and the note is the
+    honest signal that a real conversion would build a SQL View there instead.
+
+    Plain strings also mean no entry carries ``create: true``, so no Table TML is
+    built and no ThoughtSpot connection is needed: the map is for emitting Model
+    TML to read, never to import (BL-205).
+    """
+    notes: list[str] = []
+    out: dict[str, str] = {
+        "source": _physical_from_source(parsed.get("source"), "source", notes),
+    }
+    for path, _parent, node in flatten_join_aliases(parsed.get("joins") or []):
+        out[path] = _physical_from_source(node.get("source"), path, notes)
+    return out, notes
+
+
 def _alias_index(flat: dict) -> dict:
     """Map last-path-segment -> [full paths] for single-token alias resolution."""
     index: dict = {}

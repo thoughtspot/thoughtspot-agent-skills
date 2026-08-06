@@ -9,6 +9,15 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
+#: Sentinel accepted by `--tables` on every `build-model` that takes a tables map
+#: (`ts snowflake`, `ts databricks`): derive the map from the parse output instead
+#: of reading a file. Defined once so the two command surfaces cannot drift on the
+#: spelling, and so a reader can grep one name to find every diagram-only path
+#: (BL-205). A sentinel rather than "omit --tables", because omission is what
+#: forgetting the map during a real conversion looks like, and that must stay an
+#: error rather than silently producing a GUID-less model.
+AUTO_TABLES = "auto"
+
 
 def dump_tml_yaml(data: dict) -> str:
     """Serialize a TML dict to YAML with proper quoting for formula expressions.

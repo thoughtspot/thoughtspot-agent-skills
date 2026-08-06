@@ -680,3 +680,69 @@ class TestSampleValuesLiveDdlForm:
         d = parse_sv_ddl(ddl)["dimensions"][0]
         assert d["sample_values"] == ["A", "B"]
         assert "sample" not in (d["expr"] or "").lower()
+
+
+# ---------------------------------------------------------------------------
+# BL-213 — unqualified derived metrics
+#
+# `NAME as <expr>` with no table prefix is valid SV grammar and the ONLY way to
+# express a ratio spanning two unrelated facts: a metric qualified on a table
+# may reference only metrics on directly related entities (Snowflake 010211).
+# Every such metric previously landed in unsupported[].
+# ---------------------------------------------------------------------------
+
+_DERIVED_DDL = """
+create or replace semantic view SV_T
+  tables ( F, T )
+  relationships ( )
+  dimensions ( F.PID as F.PRODUCT_ID )
+  metrics (
+    F.AMOUNT as SUM(F.LINE_TOTAL),
+    T.TARGET_REVENUE as SUM(T.TARGET_AMOUNT),
+    ATTAINMENT as F.AMOUNT / T.TARGET_REVENUE
+      with synonyms=('Attainment','vs target') comment='Revenue over target.'
+  );
+"""
+
+
+class TestDerivedMetricParsing:
+
+    def test_no_longer_unsupported(self):
+        assert parse_sv_ddl(_DERIVED_DDL).get("unsupported") == []
+
+    def test_derived_metric_is_parsed(self):
+        names = [m["source_column"] for m in parse_sv_ddl(_DERIVED_DDL)["metrics"]]
+        assert "ATTAINMENT" in names
+
+    def test_flagged_is_derived(self):
+        m = _metric(_DERIVED_DDL, "ATTAINMENT")
+        assert m["is_derived"] is True
+
+    def test_derived_metric_has_no_owning_table(self):
+        m = _metric(_DERIVED_DDL, "ATTAINMENT")
+        assert m["source_table"] is None and m["alias_table"] is None
+
+    def test_expression_captured(self):
+        assert _metric(_DERIVED_DDL, "ATTAINMENT")["expr"] == "F.AMOUNT / T.TARGET_REVENUE"
+
+    def test_modifiers_still_parsed(self):
+        m = _metric(_DERIVED_DDL, "ATTAINMENT")
+        assert m["synonyms"] == ["Attainment", "vs target"]
+        assert m["comment"] == "Revenue over target."
+
+    def test_qualified_metrics_unaffected(self):
+        m = _metric(_DERIVED_DDL, "AMOUNT")
+        assert m["source_table"] == "F" and not m.get("is_derived")
+
+    def test_unqualified_dimension_is_not_treated_as_derived(self):
+        # only the metrics block may omit the table qualifier
+        ddl = _DERIVED_DDL.replace(
+            "dimensions ( F.PID as F.PRODUCT_ID )",
+            "dimensions ( BARE as F.PRODUCT_ID )")
+        assert not any(d.get("is_derived")
+                       for d in parse_sv_ddl(ddl).get("dimensions", []))
+
+
+def _metric(ddl: str, name: str) -> dict:
+    return next(m for m in parse_sv_ddl(ddl)["metrics"]
+                if m["source_column"] == name)

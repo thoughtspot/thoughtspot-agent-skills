@@ -678,3 +678,76 @@ class TestParseTableName:
         entry = _parse_table_entry("ALIAS as (SELECT 1 AS x)")
         assert entry["name"] == "ALIAS"
         assert entry["is_subquery"] is True
+
+
+# ---------------------------------------------------------------------------
+# `ts snowflake build-model --tables auto` (BL-205 — the diagram/preview path)
+# ---------------------------------------------------------------------------
+
+class TestBuildModelCommandTablesAuto:
+    def _write(self, tmp_path):
+        import json
+        (tmp_path / "parsed.json").write_text(json.dumps(_parsed_basic()))
+        (tmp_path / "translated.json").write_text(
+            json.dumps({"translated": _translated_basic(), "skipped": []}))
+        return tmp_path
+
+    def _invoke(self, tmp_path, *extra):
+        from typer.testing import CliRunner
+        from ts_cli.cli import app
+        return CliRunner().invoke(app, [
+            "snowflake", "build-model",
+            "--parsed", str(tmp_path / "parsed.json"),
+            "--translated", str(tmp_path / "translated.json"),
+            "--tables", "auto",
+            "--model-name", "M",
+            "--output-dir", str(tmp_path / "out"), *extra])
+
+    def test_auto_builds_without_a_tables_file(self, tmp_path):
+        result = self._invoke(self._write(tmp_path))
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "out" / "M.model.tml").exists()
+
+    def test_auto_matches_a_hand_written_map_that_carries_no_guids(self, tmp_path):
+        """The derived map must produce the same model as naming the tables by
+        hand — that equivalence is the whole claim of the auto path."""
+        import json
+        import yaml
+        self._write(tmp_path)
+        assert self._invoke(tmp_path).exit_code == 0
+        auto_doc = yaml.safe_load((tmp_path / "out" / "M.model.tml").read_text())
+
+        (tmp_path / "tables.json").write_text(json.dumps(
+            {"ORDERS": {"name": "ORDERS"}, "CUSTOMERS": {"name": "CUSTOMERS"}}))
+        from typer.testing import CliRunner
+        from ts_cli.cli import app
+        assert CliRunner().invoke(app, [
+            "snowflake", "build-model",
+            "--parsed", str(tmp_path / "parsed.json"),
+            "--translated", str(tmp_path / "translated.json"),
+            "--tables", str(tmp_path / "tables.json"),
+            "--model-name", "M",
+            "--output-dir", str(tmp_path / "hand")]).exit_code == 0
+        hand_doc = yaml.safe_load((tmp_path / "hand" / "M.model.tml").read_text())
+        assert auto_doc == hand_doc
+
+    def test_auto_refuses_to_import(self, tmp_path):
+        """The derived map has no GUIDs, so importing it must be impossible."""
+        result = self._invoke(self._write(tmp_path), "--profile", "p")
+        assert result.exit_code == 1
+        assert "must not be imported" in result.output
+
+    def test_a_missing_tables_file_is_still_an_error(self, tmp_path):
+        """Only the literal 'auto' opts in; a typo'd path must not silently
+        become a derived map."""
+        from typer.testing import CliRunner
+        from ts_cli.cli import app
+        self._write(tmp_path)
+        result = CliRunner().invoke(app, [
+            "snowflake", "build-model",
+            "--parsed", str(tmp_path / "parsed.json"),
+            "--translated", str(tmp_path / "translated.json"),
+            "--tables", str(tmp_path / "nope.json"),
+            "--model-name", "M",
+            "--output-dir", str(tmp_path / "out")])
+        assert result.exit_code == 1
