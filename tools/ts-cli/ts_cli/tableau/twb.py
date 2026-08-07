@@ -608,6 +608,41 @@ def _extract_columns(ds: ET.Element, tables: list[dict]) -> list[dict]:
     return columns
 
 
+def _join_key_column(op: str) -> str:
+    """Extract the bare column name from a join-clause expression's ``op``.
+
+    Tableau writes the operand either bare (``[Col]``) or table-qualified
+    (``[Table].[Col]``) depending on how the join was authored — a Custom SQL
+    Query join side (``ON [Custom SQL Query].[Sales Person] = ...``) uses the
+    qualified form. Callers (``_sql_view_model_tables`` / the model_tables
+    join assembly in ``model_builder.py``) prepend their own ``table::``
+    qualifier from ``left_table``/``right_table``, so only the bare column
+    name belongs in ``keys[].left``/``right`` — a qualified string surviving
+    a naive ``.strip("[]")`` (which only strips the outer brackets) leaves
+    the internal ``].[`` fragment in the name and corrupts the emitted join
+    ``on:`` clause.
+    """
+    stripped = op.strip("[]")
+    if "].[" in stripped:
+        return stripped.rsplit("].[", 1)[-1]
+    return stripped
+
+
+def _leaf_expressions(clause: ET.Element) -> list[ET.Element]:
+    """Find leaf ``<expression>`` nodes (no ``<expression>`` children) under a join clause.
+
+    A plain ``clause.findall(".//expression")`` also matches Tableau's
+    wrapping ``<expression op='='>`` node when the equality is written nested
+    (``<expression op='='><expression op='[A]'/><expression op='[B]'/></expression>``)
+    rather than the two operands being direct ``<clause>`` children. That
+    wrapper node shifts list indices — ``exprs[0]`` becomes the wrapper
+    (``op="="``, never a bracket reference) — so the real operands are never
+    checked and the join is silently dropped. Filtering to nodes with no
+    ``<expression>`` children is correct for both the flat and nested shape.
+    """
+    return [e for e in clause.findall(".//expression") if e.find("./expression") is None]
+
+
 def _extract_joins(ds: ET.Element) -> list[dict]:
     """Extract join definitions from a datasource."""
     joins = []
@@ -616,17 +651,20 @@ def _extract_joins(ds: ET.Element) -> list[dict]:
         clauses = rel.findall(".//clause")
         join_keys = []
         for clause in clauses:
-            exprs = clause.findall(".//expression")
+            exprs = _leaf_expressions(clause)
             if len(exprs) >= 2:
                 left = exprs[0].get("op", "")
                 right = exprs[1].get("op", "")
                 if left.startswith("[") and right.startswith("["):
                     join_keys.append({
-                        "left": left.strip("[]"),
-                        "right": right.strip("[]"),
+                        "left": _join_key_column(left),
+                        "right": _join_key_column(right),
                     })
         if join_keys:
-            children = rel.findall("./relation[@type='table']")
+            # A join side can be a Custom SQL relation (type='text'), not just
+            # a physical table (type='table') — e.g. a Custom SQL Query joined
+            # to a dimension table. Both are valid, named join sides.
+            children = [c for c in rel.findall("./relation") if c.get("type") in ("table", "text")]
             left_table = right_table = ""
             if len(children) >= 2:
                 left_table = children[0].get("name", "") or _strip_brackets(children[0].get("table", "")).split(".")[-1]

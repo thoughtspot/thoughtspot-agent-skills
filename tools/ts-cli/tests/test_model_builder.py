@@ -873,6 +873,62 @@ class TestExtractJoinsUsesRelationName:
         assert joins[0]["left_table"] == "d_partner1"
         assert joins[0]["right_table"] == "orders"
 
+    def test_join_with_nested_equality_and_custom_sql_side_not_dropped(self):
+        # BL-205 — a Custom SQL Query joined to a dimension table (a common,
+        # ordinary Tableau pattern, not exotic) writes the clause's equality
+        # nested inside a wrapping <expression op='='>, and the Custom SQL
+        # side is type='text', not type='table'. Reproduces
+        # "Multi level WB v0.twb" live-verified 2026-08-06: ts tableau parse
+        # reported 0 joins before this fix, though the workbook has exactly
+        # one, and a formula spanning both sides
+        # (Commission Earned = SUM([Amount (Custom SQL Query)] *
+        # [Commission Rate (dim_sales_team_clean_updated.csv1)])) got a
+        # validation warning ("Unresolved Custom SQL Query alias") because
+        # the model had no join path between the two relations it referenced.
+        ds = self._make_ds('''
+            <relation join="left" type="join">
+                <clause type="join">
+                    <expression op="=">
+                        <expression op="[Custom SQL Query].[Sales Person]" />
+                        <expression op="[dim_sales_team_clean_updated.csv1].[Sales Person]" />
+                    </expression>
+                </clause>
+                <relation name="Custom SQL Query" type="text">SELECT "Sales Person" FROM "Chocolate Sales 2"</relation>
+                <relation name="dim_sales_team_clean_updated.csv1" type="table" table="[dim_sales_team_clean_updated#csv]" />
+            </relation>
+        ''')
+        joins = _extract_joins(ds)
+        assert len(joins) == 1
+        assert joins[0]["left_table"] == "Custom SQL Query"
+        assert joins[0]["right_table"] == "dim_sales_team_clean_updated.csv1"
+        # Bare column names — the caller (model_builder.py) prepends its own
+        # `table::` qualifier; a table-qualified key here would corrupt the
+        # emitted join `on:` clause.
+        assert joins[0]["keys"] == [{"left": "Sales Person", "right": "Sales Person"}]
+
+    def test_join_with_nested_equality_both_sides_table_not_dropped(self):
+        # Isolates the index-shift defect from the type='text' side: even a
+        # plain table-to-table join is silently dropped if Tableau happens to
+        # write the equality nested, independent of whether a Custom SQL
+        # relation is involved at all.
+        ds = self._make_ds('''
+            <relation join="inner" type="join">
+                <relation type="table" name="d_partner1" table="[db].[s].[d_partner]" />
+                <relation type="table" name="orders" table="[db].[s].[orders]" />
+                <clause type="join">
+                    <expression op="=">
+                        <expression op="[PartnerId]" />
+                        <expression op="[OrderPartnerId]" />
+                    </expression>
+                </clause>
+            </relation>
+        ''')
+        joins = _extract_joins(ds)
+        assert len(joins) == 1
+        assert joins[0]["left_table"] == "d_partner1"
+        assert joins[0]["right_table"] == "orders"
+        assert joins[0]["keys"] == [{"left": "PartnerId", "right": "OrderPartnerId"}]
+
 
 # ---------------------------------------------------------------------------
 # build_model_cmd — parameter and output contract tests
