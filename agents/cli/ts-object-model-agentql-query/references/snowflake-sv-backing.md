@@ -83,9 +83,14 @@ over. Snowflake additionally offers the **`SEMANTIC_VIEW` clause**
 (`SEMANTIC_VIEW( … DIMENSIONS … METRICS … )`) — value-identical, immune to the
 `100072` bug natively, supports inline window functions, and is the only method
 that can use semantic-view **variables** — but ThoughtSpot cannot emit it yet,
-and it is Snowflake-only (no Databricks analogue). So treat it as a Snowflake
-capability upgrade (mainly for variables), not a required fix. See the
-escalation doc.
+and it is Snowflake-only (no Databricks analogue).
+
+> ⚠️ **Do not adopt the `SEMANTIC_VIEW` clause.** Snowflake advised on 2026-08-08
+> that it is a **deprecated** solution. It is described here only to explain why
+> the `100072` bug occurs (column nullability) and as a point of comparison. The
+> `CASE`-wrap (R2) is the recommended remediation, and it is portable to Databricks.
+> What replaces the clause for dimension-anchored aggregation is an open question
+> with Snowflake, tracked in SCAL-331033.
 
 ## Databricks note (live-tested 2026-07-21, not yet via ThoughtSpot)
 
