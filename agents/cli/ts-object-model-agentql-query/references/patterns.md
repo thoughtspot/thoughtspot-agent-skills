@@ -214,10 +214,22 @@ no purchase transactions". The Model's dimension↔fact join is typically INNER,
 with no fact rows vanish from every ordinary query — this pattern surfaces them **without
 changing the Model's join definition**.
 
+**Prerequisite — the Model must set `join_progressive: true`.** Check it before writing
+anything: `ts tml export {model_guid} --parse` → `model.properties.join_progressive`. If it
+is absent or false, ThoughtSpot joins **every table in the Model into every query**, even
+one selecting a single dimension column, so step 1 below does not hold, both CTEs return
+the same fact-filtered member list, and the anti-join returns **zero rows** — silently, with
+no error and a plausible-looking result. Models built in the ThoughtSpot UI carry the
+property; **hand-authored model TML does not get it for free**, which is the common way to
+hit this. (Verified 2026-08-10, nebula-damian-alias: the same query on the same star
+compiled to `FROM FACT_ORDER_LINE LEFT OUTER JOIN DIM_PRODUCT …` without the property and
+to `FROM DIM_PRODUCT` with it — 73 members vs the true 79.)
+
 **Why it works (both verified live, nebula-spotQL 2026-07-10):**
 1. **An attribute-only CTE compiles to a scan of the dimension table alone** — AgentQL only
    pulls the fact table (and the Model's inner join) into the generated SQL when a measure
    demands it. So a CTE selecting just the member attribute returns the *full* member list.
+   This is exactly what `join_progressive` governs; see the prerequisite above.
 2. **Outer joins between CTEs compile and execute verbatim** — `LEFT OUTER JOIN`,
    `RIGHT OUTER JOIN` and `FULL OUTER JOIN` all work (equi-`ON` only, as with all CTE joins).
 
