@@ -7862,3 +7862,45 @@ are in circulation, and consider `ts calendar generate --fy-start <MM/DD> --week
 
 Raised 2026-08-18 from a client calendar review. Sample files reproducing every defect above
 are at `~/Dev/dropfiles/` (`EPL_Calendar.csv`, `JulyOffset.csv`) and make good test fixtures.
+
+---
+
+## BL-216 -- no way to run or assert a **token search**; enablement content teaches a modality nothing can verify `Tier 2`
+
+The CLI can ask a Model a question two ways — `ts agentql fetch-data` (Semantic SQL) and
+`ts spotter answer` (natural language) — and **neither is token search**, the product's
+signature interaction and the one every enablement audience actually uses. Nothing wraps
+`POST /api/rest/2.0/searchdata`, so a token query string cannot be executed, diffed, or
+regression-tested from anywhere in this repo.
+
+**Why it matters beyond convenience.** Found while building Course 1 of the ThoughtSpot
+modelling enablement material (`~/Dev/ts/enablement`), whose whole premise is that every
+number the courseware quotes is asserted against a live cluster so a ThoughtSpot release
+that changes modelling behaviour fails the build instead of embarrassing an instructor.
+That guarantee breaks at the modality boundary: the modules **teach token search** while
+the invariant suite **asserts AgentQL**. Those are different query shapes over the same
+Model, and Course 1 module 3 exists precisely to show that *query shape decides the
+answer* — freight on an order header returns `3,053,874.63` ungrouped and `9,136,425.60`
+grouped by product. Assuming two shapes agree is least safe exactly where the course
+makes its point.
+
+**Approach.** One command, shaped like `ts agentql fetch-data` so existing callers need no
+new idiom:
+
+```
+ts search '<token query>' --model <guid> --profile <p>
+```
+
+wrapping `POST /api/rest/2.0/searchdata` with `query_string` and
+`logical_table_identifier`. JSON to stdout, progress and warnings to stderr, rows
+row-major. That is enough for a test suite to assert token-search figures directly, and it
+closes the last gap between what ThoughtSpot users do and what this repo can verify.
+
+**Worth doing well rather than quickly:** a `--compare-agentql` mode that runs the same
+question both ways and diffs the result sets would turn this into a modality-parity
+harness, which is the more valuable artefact — every converter skill in this repo currently
+validates its output through AgentQL alone.
+
+Raised 2026-08-10 from the enablement build. Deferred there deliberately: the course
+material was the priority, and modules 1-3 ship with the assumption stated rather than
+blocking on this.
