@@ -91,6 +91,7 @@ are roughly ordered by value÷effort.
 | ~~BL-212~~ | ~~from-Snowflake translator rejects a quoted DATEDIFF/DATEADD unit and any double-quoted identifier~~ | DONE (2026-08-06) |
 | ~~BL-213~~ | ~~from-Snowflake drops unqualified derived metrics — the only way an SV expresses a cross-fact ratio~~ | DONE (2026-08-06) |
 | ~~BL-214~~ | ~~parse-sv consumes only the first `unique (...)` per table; the rest corrupt the table name~~ | DONE (2026-08-06) |
+| BL-215 | No validator for a custom calendar CSV; the reference file everyone copies is itself wrong in 99% of rows | next client calendar review |
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
@@ -7770,3 +7771,94 @@ recipe recommends, so the recipe's own worked shape triggered it. **Fix:** loop
 `_UNIQUE_RE` until exhausted, accumulating every key. 7 tests, including that a single key
 and a composite `unique (A, B)` are unchanged and that a relationship pointing at a *later*
 unique key resolves.
+
+---
+
+## BL-215 -- nothing validates a custom calendar CSV, and the reference file people copy is itself wrong in 99% of rows `Tier 2`
+
+ThoughtSpot custom calendars are Connection-scoped objects backed by a warehouse calendar
+table, loaded from a 30-column CSV
+([docs](https://docs.thoughtspot.com/cloud/26.8.0.cl/connections-cust-cal-create)). This
+repo already knows the *reference* side well: `properties.calendar` is documented in the
+Model, Table and SQL View schemas, and V1 under BL-186 settled its value vocabulary. The
+*definition* side is absent. Nothing here can read a calendar CSV and say whether it is
+correct, and a bad one fails silently rather than loudly: ThoughtSpot accepts the file, and
+every fiscal period, YoY comparison and week-over-week trend built on it is quietly off.
+
+**Why this earns a skill rather than a note.** Found 2026-08-18 analysing a client's
+April-offset calendar (`EPL_Calendar.csv`, 7,306 rows, fiscal year starting 1 April)
+against a known-good July-offset reference. Both files came from the same generator. The
+client file carried two defects, and the reference carried the worst one:
+
+- **`week_number_of_quarter` is not week-within-quarter in either file.** It is a rolling
+  mod-13 counter, exactly `((absolute_week_number - 1) mod 13) + 1`, with zero exceptions
+  across both files. A quarter is 13 weeks plus drift, so the reset walks away from the
+  quarter boundary: wrong on 6,002 of 7,306 rows (82%) in the client file, and on 7,220 of
+  7,305 (99%) in the July reference. By the last fiscal year the counter resets four weeks
+  *into* the quarter. `week_number_of_month` and `week_number_of_year` are exactly right in
+  both files, which is what makes this easy to miss: two of the three week columns are
+  perfect.
+- **A trailing stub row invents a phantom fiscal year.** The client file runs one day past
+  its final year end, so 04/01/2040 gets a one-day month, a one-day quarter and a one-day
+  FY2041 whose `end_of_*_epoch` values are the following day instead of the real period
+  ends. Anything landing on that date, and any YoY against FY2041, returns nonsense.
+- **Label formatting drift.** `quarterly` is `Q1FY2021` in the client file against
+  `Q1 FY2012` in the reference. Cosmetic on a chart, but the docs make these strings the
+  literal match target for calendar row-level security, and relabelling after load
+  reshuffles every pinned visualisation.
+- **Fiscal-year naming convention is unstated and reversible.** The client file names by
+  the ending year (Apr 2020 to Mar 2021 is FY2021); the reference names by the starting
+  year (Jul 2012 to Jun 2013 is FY2012). Both conventions are legitimate, neither file
+  declares which it uses, and the only way to catch a wrong one is to read a boundary row.
+
+None of that is exotic, all of it is mechanically checkable, and all of it fell out of a
+throwaway script in one session. The failure mode is the expensive part: a client loads the
+calendar, builds a year of reporting on it, and the error surfaces as "the numbers moved"
+long after anyone remembers there was a CSV.
+
+**Approach.** A `ts calendar` command group plus a thin skill over it, shaped like
+`ts audit`:
+
+```
+ts calendar describe <file.csv>                      # infer and print the configuration
+ts calendar validate <file.csv> [--reference <csv>]  # assert every invariant, non-zero exit on failure
+```
+
+`describe` reports what the file actually encodes, so a client can confirm intent before
+load: fiscal year start, quarter starts, week start day, weekend days, FY naming convention
+(start year or end year), `monthly` and `quarterly` label formats, coverage span, and
+whether periods follow Gregorian months or a 4-4-5 / 4-5-4 / 5-4-4 retail pattern.
+
+`validate` asserts, per row and per period:
+
+1. **Mechanics.** 30 lowercase headers, UTF-8, `MM/DD/YYYY`, ascending order, no gaps, no
+   duplicate dates.
+2. **Calendar truth.** `day_of_week`, `day_number_of_week`, `is_weekend` and `month` agree
+   with the real date under the inferred week-start convention.
+3. **Period sequencing.** `day_number_of_month` / `_quarter` / `_year` run 1..n inside every
+   period; `week_number_of_month` / `_quarter` / `_year` equal the rank of that week within
+   its parent (this is the check that catches the mod-13 bug); `month_number_of_quarter`,
+   `month_number_of_year` and `quarter_number_of_year` are mutually consistent; the
+   `quarter` label matches `quarter_number_of_year`.
+4. **Absolute numbering.** `absolute_week/month/quarter/year_number` are sequential from 1
+   with no gaps, and each maps 1:1 to its epoch pair.
+5. **Epoch contiguity.** `end_of_X_epoch` equals the next period's `start_of_X_epoch` (the
+   docs specify an exclusive upper bound: "greater than or equal to the start value and less
+   than the end value"), and every date falls inside `[start, end)` at all four levels.
+6. **Period-length sanity.** Months 28 to 31, quarters 90 to 92, years 365 or 366 for a
+   Gregorian-month calendar, with the 4-4-5 family checked against its own pattern instead.
+   A one-day or otherwise degenerate period is an error, not a warning.
+7. **Boundary stubs.** Report the partial first and last week, and hard-fail a trailing
+   period whose end epoch is clipped by the end of the file (defect 2 above).
+
+`--reference` diffs the inferred configuration against a known-good file, so "same
+generator, different offset" drift is caught directly.
+
+**Do not skip the generator question.** Both files here came from one generator that emits a
+wrong `week_number_of_quarter` every time, so a validator pointed only at client files
+leaves the source intact. Once `validate` exists, run it across whatever reference calendars
+are in circulation, and consider `ts calendar generate --fy-start <MM/DD> --week-start <day>
+--from <year> --to <year>` so there is a correct source rather than a file everyone copies.
+
+Raised 2026-08-18 from a client calendar review. Sample files reproducing every defect above
+are at `~/Dev/dropfiles/` (`EPL_Calendar.csv`, `JulyOffset.csv`) and make good test fixtures.
