@@ -92,6 +92,7 @@ are roughly ordered by value÷effort.
 | ~~BL-213~~ | ~~from-Snowflake drops unqualified derived metrics — the only way an SV expresses a cross-fact ratio~~ | DONE (2026-08-06) |
 | ~~BL-214~~ | ~~parse-sv consumes only the first `unique (...)` per table; the rest corrupt the table name~~ | DONE (2026-08-06) |
 | BL-215 | No validator for a custom calendar CSV; the reference file everyone copies is itself wrong in 99% of rows | next client calendar review |
+| BL-217 | Converter helper adoption uneven (pass-throughs, name collisions, I3); nothing detects a converter that skips one | before the next converter |
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
@@ -7904,3 +7905,71 @@ validates its output through AgentQL alone.
 Raised 2026-08-10 from the enablement build. Deferred there deliberately: the course
 material was the priority, and modules 1-3 ship with the assumption stated rather than
 blocking on this.
+
+---
+
+## BL-217 -- converter helper adoption is uneven and nothing detects a converter that skips one `Tier 2`
+
+The TML-correctness fixes that every converter needs — pass-through rewriting for the
+ThoughtSpot functions that do not exist, formula/column name-collision resolution,
+double-aggregation collapse, `index_type: DONT_INDEX` on computed measures — live in
+`ts_cli/formula_common.py`, whose docstring says plainly: *"Never fork these into a
+platform module; import them."* Adoption is nonetheless partial, inconsistent in
+mechanism, and entirely unenforced.
+
+| Helper / invariant | SV | Tableau | Databricks MV | Sisense | Qlik | PowerBI |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|
+| `resolve_name_collisions` | Y | Y | Y | Y | — | — |
+| `fix_double_aggregation` | Y | Y | Y | Y | — | — |
+| `promote_duplicate_column_ids` | Y | — | Y | — | — | — |
+| I3 `index_type: DONT_INDEX` | Y | — | Y | — | — | — |
+| `validate_tml_invariants` | — | — | Y (command) | — | — | — |
+| BL-171 string pass-throughs | n/a | Y (own impl) | n/a | n/a | Y (shared) | Y (shared) |
+
+**Why it matters.** The last row is the instructive one. The six functions BL-170/BL-171
+live-disproved (`upper`, `lower`, `trim`, `ltrim`, `rtrim`, `replace`) are handled
+correctly everywhere today — but by **three different mechanisms**: Tableau hand-rolls
+lambdas in `tableau/functions.py:156-164`, Qlik and PowerBI import
+`formula_common.wrap_passthrough_calls` with a `PASSTHROUGH_MAP`, and Looker documents it
+in the mapping file with no CLI module at all. Three correct implementations of one fix is
+three places to keep right and no single thing a new converter can be pointed at.
+
+That cost came due in PR #440 (`ts-convert-from-domo`), which copies the Qlik converter's
+structure closely — same module layout, same `translate(expr) -> tuple[str, bool, str]`
+signature — but omits its `PASSTHROUGH_MAP`, and so emits `upper([Region])` and
+`trim([Name])` reported as `Migrated`. Formulas rejected at import (error_code 14516),
+presented to the user as a clean conversion. The same PR reintroduces the
+`resolve_name_collisions` gap: two datasets sharing a Beast Mode name collide on
+`formula_<name>` and **both** formulas are dropped, leaving a dangling `formula_id`.
+
+Neither was caught by 33 validators, 4,637 tests, or a live import check. Nothing in the
+repo asserts that a converter adopts the shared correctness set, so every new converter
+re-litigates fixes that were already paid for — and regressions land looking green.
+
+**Approach.** Two parts, in order:
+
+1. **A validator — `tools/validate/check_converter_parity.py`.** Enumerate the converter
+   packages under `ts_cli/` and assert each imports the helpers its shape requires
+   (emits formula columns -> `resolve_name_collisions` + `fix_double_aggregation`; maps
+   source string functions -> the shared pass-through path; emits Model TML ->
+   `validate_tml_invariants` and I3). An `EXPECTED_DIVERGENCES` map with a one-line
+   justification per exemption, matching `check_runtime_coverage.py`'s convention — Sisense
+   translates no string functions, so it needs no pass-through and should say so rather
+   than silently pass. This is the two-bucket rule's automated-check bucket: it is the
+   thing that would have caught #440 before review.
+2. **Consolidate onto the shared helper.** Move Tableau's hand-rolled lambdas onto
+   `wrap_passthrough_calls` + `PASSTHROUGH_MAP` so one mechanism serves every converter,
+   then close the `resolve_name_collisions` / `fix_double_aggregation` gaps in Qlik and
+   PowerBI and the I3 gap in Tableau, Qlik, PowerBI and Sisense.
+
+Ordering matters: land the validator first with the current state encoded as divergences,
+then retire divergences one at a time. That way the gate exists before the cleanup rather
+than after, and each fix is a small reviewable PR.
+
+**Not urgent, but do it before the next converter.** There are seven now
+(Tableau, Snowflake SV, Databricks MV, Looker, Qlik, PowerBI, Sisense) plus Domo in
+review; the marginal cost of a new one skipping a helper is a silently-wrong migration
+handed to a customer, and the failure mode is always the same — the report says
+`Migrated`.
+
+Raised 2026-08-26 from the PR #440 review.
