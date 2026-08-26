@@ -7,6 +7,15 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-08-26
 
+### Changed
+
+- feat: update ts-convert-to-snowflake-sv to v1.6.0 (CoCo mirror v1.3.0) — an *additive*
+  hardcoded filter is now translatable. `group_aggregate(..., query_filters() + {attr='v'})`
+  maps to `SUM(CASE WHEN ... THEN ... END)`; live-verified on Snowflake 10.30.101 that a
+  semantic-view metric expression **can** carry a filter, which the shared mapping had denied
+  while its own `sum_if` row asserted the opposite (finding 13.9). Filters that *suppress*
+  query filters remain untranslatable, now for the correct reason.
+
 ### Fixed
 
 - **`ts-profile-databricks` wrote OAuth secrets and PATs to `~/.databrickscfg` in
