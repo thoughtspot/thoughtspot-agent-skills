@@ -841,19 +841,9 @@ def _derived_resolver(
                 # Inline the metric's own aggregate over the physical column,
                 # which is the form every working formula in a converted Model
                 # uses: `sum ( [DM_ORDER_DETAIL::LINE_TOTAL] )`.
-                #
-                # Resolve that inner expression against the INNER METRIC'S OWN
-                # table, not `generic` (default alias ""). An unqualified column
-                # is the canonical Semantic View style — `F.AMOUNT as
-                # SUM(LINE_TOTAL)` — and under `generic` a bare identifier hits
-                # `alias_map.get("")` -> None and raises "no table for bare
-                # identifier". That propagated out of _translate_metric and filed
-                # the whole derived metric into skipped[], silently, so BL-213
-                # dropped every derived metric whose inner metric was written the
-                # documented way. Every test used qualified inner expressions, so
-                # the feature read as working (audit 17.1).
-                inner = make_resolver(
-                    parsed, m.get("alias_table") or "",
+                # Against the INNER metric's own table: under `generic`
+                # (alias "") a bare column silently skips the metric (17.1).
+                inner = make_resolver(parsed, m.get("alias_table") or "",
                     annotations=annotations, promote_synonym=promote_synonym)
                 return translate_sql_expr(m["expr"], inner)
             return "[" + construct_formula_id(
