@@ -14,6 +14,36 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
+# SQL CAST target type -> ThoughtSpot conversion function
+# ---------------------------------------------------------------------------
+
+#: Every value is a platform-neutral ThoughtSpot formula function, so this map is
+#: shared by every source dialect that parses SQL `CAST(expr AS type)`.
+#:
+#: It lived only in `sv_sql.py`, and the Databricks clone
+#: (`databricks/mv_sql_constructs._construct_cast`) discarded the target type
+#: outright — `tk, _ttext = cur.advance()  # dropped (implicit in TS)`. That is a
+#: silent wrong-numbers bug, not a cosmetic divergence: `CAST(4.7 AS INT)` must
+#: truncate to 4 and `CAST(ts AS DATE)` must drop the time component, and an
+#: emitted formula that does neither returns different figures from the source
+#: with no advisory (2026-08-26 audit, finding 4.1).
+#:
+#: BL-161 item 1 predicted this shape — "a tokenizer bug fixed in one silently
+#: persists in the other" — so the map lives here now rather than in either
+#: platform module. See this file's header: never fork these; import them.
+CAST_MAP = {
+    "INTEGER": "to_integer", "INT": "to_integer", "BIGINT": "to_integer",
+    "SMALLINT": "to_integer", "TINYINT": "to_integer",
+    "NUMBER": "to_double", "FLOAT": "to_double", "DOUBLE": "to_double",
+    "DECIMAL": "to_double", "NUMERIC": "to_double", "REAL": "to_double",
+    "VARCHAR": "to_string", "TEXT": "to_string", "STRING": "to_string",
+    "CHAR": "to_string",
+    "DATE": "to_date", "TIMESTAMP": "to_date",
+    "BOOLEAN": "to_bool",
+}
+
+
+# ---------------------------------------------------------------------------
 # Shared translation-failure exception
 # ---------------------------------------------------------------------------
 

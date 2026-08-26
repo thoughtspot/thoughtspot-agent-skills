@@ -15,6 +15,8 @@ it — this module has no top-level dependency on mv_sql.
 """
 from __future__ import annotations
 
+from ts_cli.formula_common import CAST_MAP
+
 
 # Keywords that can never continue a NOT operand: boolean connectors plus
 # the CASE-structure keywords (a NOT inside a CASE condition ends at THEN).
@@ -141,9 +143,15 @@ def _construct_cast(cur, resolver) -> str:
     kind, text = cur.advance()
     if text != "AS":
         raise UntranslatableError("CAST without AS")
-    tk, _ttext = cur.advance()  # the target type ident — dropped (implicit in TS)
+    tk, ttext = cur.advance()
     if tk != "ident":
         raise UntranslatableError("CAST with a non-identifier target type")
+    # The target type used to be discarded here as "implicit in TS". It is not:
+    # CAST(4.7 AS INT) must truncate and CAST(ts AS DATE) must drop the time, so
+    # dropping it emitted a formula returning different numbers than the source,
+    # silently (audit 4.1). The Snowflake engine already mapped it; the map now
+    # lives in formula_common and both emit through it.
+    type_name = ttext.upper()
     nk, nt = cur.peek()
     if nk == "op" and nt == "(":  # DECIMAL(10,2)-style precision — skip it
         cur.advance()
@@ -155,9 +163,15 @@ def _construct_cast(cur, resolver) -> str:
             elif k2 == "op" and t2 == ")":
                 depth -= 1
     cur.expect_op(")")
-    if len(inner_units) == 1:
-        return inner_units[0]
-    return f"( {' '.join(inner_units)} )"
+    inner = inner_units[0] if len(inner_units) == 1 else f"( {' '.join(inner_units)} )"
+    fn = CAST_MAP.get(type_name)
+    if fn is None:
+        # Fail loudly rather than emitting a cast-free expression: an unmapped type
+        # is exactly the case where silently dropping it changes the numbers.
+        raise UntranslatableError(
+            f"CAST target type '{type_name}' not mapped — extend CAST_MAP in "
+            "ts_cli/formula_common.py")
+    return f"{fn} ( {inner} )"
 
 
 def _construct_is(cur, units: list[str]) -> None:
