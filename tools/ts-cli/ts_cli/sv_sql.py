@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from typing import Callable
 
-from ts_cli.formula_common import CAST_MAP, UntranslatableError
+from ts_cli.formula_common import CAST_MAP_FULL, UntranslatableError
 
 
 _TOKEN_RE = re.compile(
@@ -284,7 +284,7 @@ _DATEADD_UNIT = {"DAY": "add_days", "WEEK": "add_days",
                  "MONTH": "add_months", "YEAR": "add_months"}
 # Canonical map now lives in formula_common so both engines share one copy
 # (audit 4.1). Alias kept so existing references need no change.
-_CAST_MAP = CAST_MAP
+_CAST_MAP = CAST_MAP_FULL
 _NULLIF0 = "\x00NULLIF0\x00"
 
 

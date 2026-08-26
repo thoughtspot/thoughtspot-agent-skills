@@ -16,31 +16,55 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # SQL CAST target type -> ThoughtSpot conversion function
 # ---------------------------------------------------------------------------
-
-#: Every value is a platform-neutral ThoughtSpot formula function, so this map is
-#: shared by every source dialect that parses SQL `CAST(expr AS type)`.
-#:
-#: It lived only in `sv_sql.py`, and the Databricks clone
-#: (`databricks/mv_sql_constructs._construct_cast`) discarded the target type
-#: outright — `tk, _ttext = cur.advance()  # dropped (implicit in TS)`. That is a
-#: silent wrong-numbers bug, not a cosmetic divergence: `CAST(4.7 AS INT)` must
-#: truncate to 4 and `CAST(ts AS DATE)` must drop the time component, and an
-#: emitted formula that does neither returns different figures from the source
-#: with no advisory (2026-08-26 audit, finding 4.1).
-#:
-#: BL-161 item 1 predicted this shape — "a tokenizer bug fixed in one silently
-#: persists in the other" — so the map lives here now rather than in either
-#: platform module. See this file's header: never fork these; import them.
-CAST_MAP = {
+#
+# Shared so a fix in one engine cannot silently miss the other — the divergence
+# BL-161 item 1 predicted and audit 4.1 found had already happened: the Databricks
+# clone discarded the target type outright while Snowflake mapped it.
+#
+# The two engines legitimately differ on WIDENING casts, and that is deliberate:
+#
+#   * Snowflake emits the conversion (CAST(x AS DOUBLE) -> to_double([x])), which
+#     ts-snowflake-formula-translation.md documents and `to_double` is a valid
+#     ThoughtSpot formula function (thoughtspot-formula-patterns.md).
+#   * Databricks unwraps it, which ts-from-databricks.md documents. Justified by
+#     live test on se-thoughtspot 2026-08-26:
+#         SELECT SUM("UNITS_SOLD") / COUNT("ORDER_ID")  ->  type DOUBLE, 5128.71
+#     Both operands are INT64, so ThoughtSpot promotes integer division itself and
+#     a CAST(... AS DOUBLE) around a numerator is genuinely redundant.
+#
+# What is NOT optional is a NARROWING cast. Dropping one changes the answer, and
+# that was the real 4.1 bug on the Databricks side:
+#     CAST(4.7 AS INT)  must truncate to 4
+#     CAST(ts AS DATE)  must drop the time component
+#
+#: Casts whose target type changes the VALUE. Every engine MUST emit these;
+#: dropping one is a silent wrong-numbers bug.
+CAST_MAP_LOAD_BEARING = {
     "INTEGER": "to_integer", "INT": "to_integer", "BIGINT": "to_integer",
     "SMALLINT": "to_integer", "TINYINT": "to_integer",
+    "DATE": "to_date", "TIMESTAMP": "to_date",
+    "BOOLEAN": "to_bool",
+}
+
+#: Widening / no-op casts. Enumerated rather than defaulted so a genuinely
+#: UNKNOWN target type still fails loudly instead of silently unwrapping.
+CAST_TYPES_WIDENING = frozenset({
+    "NUMBER", "FLOAT", "DOUBLE", "DECIMAL", "NUMERIC", "REAL",
+    "VARCHAR", "TEXT", "STRING", "CHAR",
+})
+
+#: Load-bearing + widening, for engines that emit a conversion for every
+#: recognised target (Snowflake). Keeps sv_sql's behaviour unchanged.
+CAST_MAP_FULL = {
+    **CAST_MAP_LOAD_BEARING,
     "NUMBER": "to_double", "FLOAT": "to_double", "DOUBLE": "to_double",
     "DECIMAL": "to_double", "NUMERIC": "to_double", "REAL": "to_double",
     "VARCHAR": "to_string", "TEXT": "to_string", "STRING": "to_string",
     "CHAR": "to_string",
-    "DATE": "to_date", "TIMESTAMP": "to_date",
-    "BOOLEAN": "to_bool",
 }
+
+#: Back-compat alias.
+CAST_MAP = CAST_MAP_FULL
 
 
 # ---------------------------------------------------------------------------

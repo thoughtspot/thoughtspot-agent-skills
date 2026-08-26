@@ -15,7 +15,7 @@ it — this module has no top-level dependency on mv_sql.
 """
 from __future__ import annotations
 
-from ts_cli.formula_common import CAST_MAP
+from ts_cli.formula_common import CAST_MAP_LOAD_BEARING, CAST_TYPES_WIDENING
 
 
 # Keywords that can never continue a NOT operand: boolean connectors plus
@@ -164,14 +164,17 @@ def _construct_cast(cur, resolver) -> str:
                 depth -= 1
     cur.expect_op(")")
     inner = inner_units[0] if len(inner_units) == 1 else f"( {' '.join(inner_units)} )"
-    fn = CAST_MAP.get(type_name)
-    if fn is None:
-        # Fail loudly rather than emitting a cast-free expression: an unmapped type
-        # is exactly the case where silently dropping it changes the numbers.
-        raise UntranslatableError(
-            f"CAST target type '{type_name}' not mapped — extend CAST_MAP in "
-            "ts_cli/formula_common.py")
-    return f"{fn} ( {inner} )"
+    fn = CAST_MAP_LOAD_BEARING.get(type_name)
+    if fn is not None:
+        # Narrowing cast: the target changes the value, so it must be emitted.
+        return f"{fn} ( {inner} )"
+    if type_name in CAST_TYPES_WIDENING:
+        # Widening/no-op: ThoughtSpot's arithmetic already promotes (live-verified),
+        # and emitting a conversion here yields an unresolvable function.
+        return inner
+    raise UntranslatableError(
+        f"CAST target type '{type_name}' not recognised — add it to "
+        "CAST_MAP_LOAD_BEARING or CAST_TYPES_WIDENING in ts_cli/formula_common.py")
 
 
 def _construct_is(cur, units: list[str]) -> None:
