@@ -107,10 +107,10 @@ def check_open_items_file(path: Path) -> list[tuple[str, str]]:
 def _changed_files(base: str, repo_root: Path) -> set[str]:
     """Return repo-relative paths changed between ``base`` and HEAD."""
     result = subprocess.run(
-        ["git", "diff", f"{base}...HEAD", "--name-only"],
+        ["git", "diff", f"{base}...HEAD", "--name-only", "-z"],
         capture_output=True, text=True, cwd=repo_root,
     )
-    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    return {line.strip() for line in result.stdout.split("\0") if line.strip()}
 
 
 def main() -> int:

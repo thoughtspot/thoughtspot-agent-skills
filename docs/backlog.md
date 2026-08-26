@@ -93,6 +93,7 @@ are roughly ordered by value÷effort.
 | ~~BL-214~~ | ~~parse-sv consumes only the first `unique (...)` per table; the rest corrupt the table name~~ | DONE (2026-08-06) |
 | BL-215 | No validator for a custom calendar CSV; the reference file everyone copies is itself wrong in 99% of rows | next client calendar review |
 | BL-217 | Converter helper adoption uneven (pass-throughs, name collisions, I3); nothing detects a converter that skips one | before the next converter |
+| BL-218 | 3 `--name-status` git call sites still parse quoted paths — same fail-open as BL-217's sibling, needs a status-pairing parser | with the next validator pass |
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
@@ -7973,3 +7974,39 @@ handed to a customer, and the failure mode is always the same — the report say
 `Migrated`.
 
 Raised 2026-08-26 from the PR #440 review.
+
+---
+
+## BL-218 -- the three `--name-status` call sites still carry the octal-quoting fail-open `Tier 2`
+
+The 2026-08-26 audit (finding 4.2) found every git file-enumeration helper blind to
+octal-quoted paths: git quotes any non-ASCII path, callers split on newlines, the path
+is dropped, and the gate reports PASS on a file it never read. Reproduced against
+`check_secrets` — a staged credential in `café.md` passed both the pre-commit gate and
+the CI `--all` backstop with exit 0.
+
+That is fixed for every **file-list** call site: `tools/validate/_git.py` now NUL-splits
+and raises instead of returning an empty list, a `check_patterns` rule bans new raw
+`["git", "ls-files"|"diff"]` calls, and 16 sites across 12 files were migrated.
+
+**What is left.** Three sites use `--name-status`, which emits a status letter and a path
+*per record* rather than a bare path list, so `git_paths()` does not fit them:
+
+- `tools/validate/suggest_repo_changelog.py` — `git diff --cached --name-status`
+- `tools/validate/suggest_repo_changelog.py` — `git diff {base}...HEAD --name-status`
+- `tools/validate/check_audit_freshness.py` — `git log ... --name-status`
+
+They carry the same latent bug: a renamed or added file with a non-ASCII name is dropped
+from the changelog suggestion and the audit-activity count. Lower consequence than the
+secrets gate — these two *suggest* and *nudge* rather than gate — which is why they were
+allowlisted rather than rushed.
+
+**Approach.** Add a `git_status_paths()` to `_git.py` returning `(status, path)` pairs
+from `-z` output. With `--name-status -z` git emits `STATUS\0path\0` per record, and for
+renames `R100\0old\0new\0` — three fields, not two. That asymmetry is the reason this
+is its own item and not a one-line change: a naive pairwise split desynchronises on the
+first rename and silently mislabels every subsequent record. Once it exists, remove the
+three entries from `_GIT_ENUM_ALLOWLIST` in `check_patterns.py` so the guard covers the
+whole directory with no exceptions.
+
+Raised 2026-08-26 from the full-sweep fix for finding 4.2.

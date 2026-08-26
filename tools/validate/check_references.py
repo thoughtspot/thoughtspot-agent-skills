@@ -52,6 +52,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _git import git_paths, tracked_relpaths
+
 from _dirs import runtime_globs
 
 LINK_PATTERN = re.compile(r'\[([^\]]+)\]\(([^)]+)\)')
@@ -154,10 +156,9 @@ def resolve_path(link_target: str, skill_file: Path, repo_root: Path) -> Path | 
 
 def _git_tracked(repo_root: Path) -> set[str]:
     """Repo-relative paths currently tracked by git."""
-    result = subprocess.run(
-        ["git", "ls-files"], capture_output=True, text=True, cwd=repo_root,
-    )
-    return set(result.stdout.splitlines())
+    # NUL-split via _git: `.splitlines()` dropped octal-quoted paths, so a
+    # non-ASCII filename read as untracked (audit 4.2).
+    return set(tracked_relpaths(repo_root))
 
 
 def check_skill_file(

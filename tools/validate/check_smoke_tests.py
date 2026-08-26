@@ -39,6 +39,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _git import _GitOut, git_paths, tracked_relpaths
+
 from _dirs import CLI_RUNTIMES, CLI_RUNTIME_PATHS
 
 # Trailing-slash prefixes for str.startswith on repo-relative paths.
@@ -148,18 +150,11 @@ def check_allowlist_bl_references(source_text: str) -> tuple[list[str], list[str
 
 def _get_tracked_paths(repo_root: Path) -> set[str]:
     """Return set of repo-relative paths currently tracked by git."""
-    result = subprocess.run(
-        ["git", "ls-files"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
-    return set(result.stdout.splitlines())
+    return set(tracked_relpaths(repo_root))
 
 
 def _get_staged_names(repo_root: Path) -> list[str]:
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
+    result = _GitOut("\n".join(git_paths(["diff", "--cached", "--name-only", "--diff-filter=ACM"], repo_root)))
     return result.stdout.splitlines()
 
 

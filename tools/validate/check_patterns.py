@@ -169,10 +169,10 @@ def get_staged_files(repo_root: Path, suffix: str, skip_dirs: set | None = None)
     """Return staged files with the given suffix, excluding skip_dirs."""
     import subprocess
     result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM", "-z"],
         capture_output=True, text=True, cwd=repo_root
     )
-    paths = [repo_root / f for f in result.stdout.splitlines()
+    paths = [repo_root / f for f in result.stdout.split("\0")
              if f.endswith(suffix) and (repo_root / f).exists()]
     if skip_dirs:
         paths = [p for p in paths if not any(part in p.parts for part in skip_dirs)]
@@ -200,6 +200,12 @@ def get_staged_added_lines(repo_root: Path, file_path: Path) -> set[str]:
 # A CONCRETE converter name (platform token present). The family patterns
 # `ts-convert-*` / `ts-convert-from-*` / `ts-convert-to-*` are the correct forms and
 # do not match: `*` is not in the character class.
+# A RAW git invocation for a file list: the literal "git" as argv[0] followed by
+# ls-files or diff. Deliberately requires the "git" element, so a correct
+# `git_paths(["diff", "--cached", "--name-only"], root)` call — which has no "git"
+# element because _git supplies it — does not match.
+_RAW_GIT_ENUM_RE = re.compile(r'"git",\s*"(?:ls-files|diff)"')
+
 _CONCRETE_CONVERTER_RE = re.compile(r"ts-convert-(?:from|to)-[a-z0-9][a-z0-9-]*")
 
 
@@ -242,8 +248,8 @@ def main() -> int:
         # Only check SKILL.md files that are tracked by git (skip gitignored pending skills)
         import subprocess as _sp
         _tracked = set(
-            _sp.run(["git", "ls-files", *CLI_RUNTIME_PATHS, "agents/shared"],
-                    capture_output=True, text=True, cwd=repo_root).stdout.splitlines()
+            _sp.run(["git", "ls-files", "-z", *CLI_RUNTIME_PATHS, "agents/shared"],
+                    capture_output=True, text=True, cwd=repo_root).stdout.split("\0")
         )
         skill_md_files: list[Path] = []
         for runtime in CLI_RUNTIMES:
@@ -413,6 +419,46 @@ def main() -> int:
                     f"      add a public `ts` command instead of reaching into ts_cli's modules."
                 )
                 total_hits += 1
+
+    # ---------------------------------------------------------------------
+    # Raw git file-enumeration is banned outside _git.py.
+    #
+    # `git ls-files` / `git diff --cached --name-only` without `-z` returns
+    # octal-QUOTED paths for anything non-ASCII, and callers that split on
+    # newlines then drop them silently. That let a staged credential in a
+    # non-ASCII filename pass check_secrets in BOTH pre-commit and the CI --all
+    # backstop, exit 0 (audit 4.2, reproduced). Use tools/validate/_git.py, which
+    # NUL-splits and raises instead of returning an empty list on git failure.
+    #
+    # ALLOWLIST holds the three `--name-status` call sites: those pair a status
+    # letter with a path per record, so they need their own parse rather than
+    # git_paths(). They carry the same latent bug — tracked as BL-218.
+    # ---------------------------------------------------------------------
+    _GIT_ENUM_ALLOWLIST = {
+        "tools/validate/_git.py",                    # the shared implementation
+        "tools/validate/suggest_repo_changelog.py",  # --name-status pairs (BL-218)
+        "tools/validate/check_audit_freshness.py",   # git log --name-status (BL-218)
+    }
+    for py in sorted((repo_root / "tools" / "validate").glob("*.py")):
+        rel = str(py.relative_to(repo_root))
+        if rel in _GIT_ENUM_ALLOWLIST:
+            continue
+        for line_num, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
+            if not _RAW_GIT_ENUM_RE.search(line):
+                continue
+            if '"-z"' in line or "'-z'" in line:
+                continue  # explicitly NUL-terminated — the caller must split on \0
+            if '"--"' in line:
+                continue  # `git diff ... -- <path>`: reads hunks for a known file,
+                          # not a file LIST, so no path ever reaches a caller's split
+            print(
+                f"FAIL  {rel}:{line_num}  raw-git-file-enumeration  \u2192  {line.strip()!r}\n"
+                f"      Unquoted paths only come back with -z. Without it, any non-ASCII\n"
+                f"      filename is octal-quoted, dropped by the caller, and the gate\n"
+                f"      reports PASS on a file it never read (audit 4.2).\n"
+                f"      Use tools/validate/_git.py (git_paths / staged_files / tracked_files)."
+            )
+            total_hits += 1
 
     # ---------------------------------------------------------------------
     # conversion-consistency-auditor must DISCOVER converters, never list them.

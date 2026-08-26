@@ -31,6 +31,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _git import GitEnumerationError, staged_files, tracked_files
+
 
 # ---------------------------------------------------------------------------
 # Credential filename patterns (mirrors .gitignore)
@@ -149,27 +151,18 @@ def _line_has_template(line: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def _get_staged_files(repo_root: Path) -> list[Path]:
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
-    return [
-        repo_root / f
-        for f in result.stdout.splitlines()
-        if (repo_root / f).exists()
-    ]
+    """Staged files, via the shared NUL-splitting enumerator.
+
+    Was a local `--name-only` + `.splitlines()` copy, which dropped octal-quoted
+    paths so a staged secret in a non-ASCII filename passed this gate with exit 0
+    (audit 4.2). See `_git` for both fail-open modes.
+    """
+    return staged_files(repo_root)
 
 
 def _get_all_tracked_files(repo_root: Path) -> list[Path]:
-    result = subprocess.run(
-        ["git", "ls-files"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
-    return [
-        repo_root / f
-        for f in result.stdout.splitlines()
-        if (repo_root / f).exists()
-    ]
+    """All tracked files. Same fix as above — this is the CI `--all` backstop."""
+    return tracked_files(repo_root)
 
 
 # ---------------------------------------------------------------------------
@@ -279,12 +272,19 @@ def main() -> int:
 
     repo_root = Path(args.root).resolve()
 
-    if args.all:
-        files = _get_all_tracked_files(repo_root)
-        mode = "all tracked files"
-    else:
-        files = _get_staged_files(repo_root)
-        mode = "staged files"
+    # A git failure must fail the gate, never read as "nothing to scan" (audit 4.2).
+    # This is the security gate: silence here is indistinguishable from a clean repo.
+    try:
+        if args.all:
+            files = _get_all_tracked_files(repo_root)
+            mode = "all tracked files"
+        else:
+            files = _get_staged_files(repo_root)
+            mode = "staged files"
+    except GitEnumerationError as exc:
+        print(f"FAIL  could not enumerate files to scan: {exc}")
+        print("      Refusing to report PASS on an unscanned tree.")
+        return 1
 
     if not files:
         print(f"No {mode} to scan.")

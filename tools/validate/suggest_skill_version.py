@@ -25,6 +25,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from _git import git_paths
+
 from _dirs import ALL_RUNTIME_PATHS
 
 # Trailing-slash prefixes for str.startswith on repo-relative paths.
@@ -225,10 +227,10 @@ def main() -> int:
 
     # Find staged SKILL.md files
     result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"],
+        ["git", "diff", "--cached", "--name-only", "-z"],
         capture_output=True, text=True, cwd=repo_root,
     )
-    staged = result.stdout.splitlines()
+    staged = [f for f in result.stdout.split("\0") if f]
     staged_skills = [
         repo_root / p for p in staged
         if p.endswith("/SKILL.md") and p.startswith(_RUNTIME_PREFIXES)

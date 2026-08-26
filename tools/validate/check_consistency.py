@@ -21,23 +21,19 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _git import _GitOut, git_paths
+
 from _dirs import ALL_RUNTIMES, CLI_RUNTIMES
 
 
 def _get_staged_names(repo_root: Path) -> list[str]:
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
-    return result.stdout.splitlines()
+    # NUL-split via _git — see audit 4.2 (quoted paths were dropped silently).
+    return git_paths(["diff", "--cached", "--name-only", "--diff-filter=ACM"], repo_root)
 
 
 def _get_tracked_paths(repo_root: Path) -> set[str]:
     """Return set of repo-relative paths currently tracked by git (not gitignored)."""
-    result = subprocess.run(
-        ["git", "ls-files"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
+    result = _GitOut("\n".join(git_paths(["ls-files"], repo_root)))
     return set(result.stdout.splitlines())
 
 

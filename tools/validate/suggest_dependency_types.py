@@ -32,6 +32,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _git import git_paths
+
 
 SKILL_DIR_REL = "agents/cli/ts-dependency-manager"
 TRIGGER_PATHS = (
@@ -42,11 +44,8 @@ TARGET_PATH = f"{SKILL_DIR_REL}/references/dependency-types.md"
 
 
 def get_staged_files(repo_root: Path) -> list[str]:
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
-    return result.stdout.splitlines()
+    # NUL-split via _git — see audit 4.2 (quoted paths were dropped silently).
+    return git_paths(["diff", "--cached", "--name-only", "--diff-filter=ACM"], repo_root)
 
 
 def main() -> int:

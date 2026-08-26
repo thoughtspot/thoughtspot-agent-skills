@@ -41,6 +41,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _git import git_paths, tracked_relpaths
+
 from _dirs import ALL_RUNTIMES
 
 # Runtimes whose skill directories are valid resolution targets.
@@ -69,11 +71,7 @@ ALLOWLIST: dict[str, str] = {
 
 
 def _get_tracked_paths(repo_root: Path) -> set[str]:
-    result = subprocess.run(
-        ["git", "ls-files", "agents"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
-    return set(result.stdout.splitlines())
+    return set(tracked_relpaths(repo_root, ["agents"]))
 
 
 def _known_skill_names(repo_root: Path, tracked: set[str]) -> set[str]:
@@ -120,8 +118,8 @@ def main() -> int:
     root = Path(args.root).resolve()
 
     all_tracked = set(
-        subprocess.run(["git", "ls-files"], capture_output=True, text=True, cwd=root)
-        .stdout.splitlines()
+        subprocess.run(["git", "ls-files", "-z"], capture_output=True, text=True, cwd=root)
+        .stdout.split("\0")
     )
     known_skills = _known_skill_names(root, all_tracked)
 

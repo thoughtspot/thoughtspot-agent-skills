@@ -29,6 +29,8 @@ import re
 import sys
 from pathlib import Path
 
+from _git import _GitOut, git_paths
+
 try:
     import yaml
 except ImportError:
@@ -331,10 +333,7 @@ def _extract_yaml_blocks(file_path: Path) -> list[tuple[int, str]]:
 
 def _get_staged_files(repo_root: Path, suffix: str) -> list[Path]:
     import subprocess
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
+    result = _GitOut("\n".join(git_paths(["diff", "--cached", "--name-only", "--diff-filter=ACM"], repo_root)))
     return [
         repo_root / f
         for f in result.stdout.splitlines()

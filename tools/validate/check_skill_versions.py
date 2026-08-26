@@ -26,6 +26,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _git import _GitOut, git_paths
+
 from _dirs import ALL_RUNTIMES, ALL_RUNTIME_PATHS
 
 # Trailing-slash prefixes for str.startswith on repo-relative paths.
@@ -49,10 +51,7 @@ def _git_show(repo_root: Path, ref: str) -> str | None:
 
 def _staged_skill_files(repo_root: Path) -> list[str]:
     """Repo-relative paths of staged SKILL.md skill files (added/modified)."""
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
+    result = _GitOut("\n".join(git_paths(["diff", "--cached", "--name-only", "--diff-filter=ACM"], repo_root)))
     out = []
     for f in result.stdout.splitlines():
         if f.endswith("/SKILL.md") and f.startswith(_RUNTIME_PREFIXES):
@@ -118,10 +117,10 @@ def check_skill(skill_file: Path) -> list[str]:
 def get_tracked_files(repo_root: Path, path: str) -> set[str]:
     """Return git-tracked file paths under the given path (relative to repo root)."""
     result = subprocess.run(
-        ["git", "ls-files", path],
+        ["git", "ls-files", "-z", path],
         capture_output=True, text=True, cwd=repo_root,
     )
-    return set(result.stdout.splitlines())
+    return {f for f in result.stdout.split("\0") if f}
 
 
 def collect_skill_files(repo_root: Path) -> list[Path]:

@@ -37,6 +37,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _git import git_paths, tracked_relpaths
+
 # Finding 1.1: the only files legitimately tracked at the repo root (verified
 # 2026-07-29, after this same audit round's PR removes err.txt). Anything else
 # tracked directly at root needs either removal or a deliberate, reviewed addition
@@ -62,14 +64,13 @@ def _git(args: list[str], repo_root: Path) -> str:
 def tracked_but_ignored(repo_root: Path) -> list[str]:
     """Finding 1.2 — files git tracks that an exclude source (.gitignore, etc.) also
     declares ignored. Empty list = clean."""
-    out = _git(["ls-files", "-ci", "--exclude-standard"], repo_root)
-    return sorted(line.strip() for line in out.splitlines() if line.strip())
+    return sorted(git_paths(["ls-files", "-ci", "--exclude-standard"], repo_root))
 
 
 def unexpected_top_level_files(repo_root: Path) -> list[str]:
     """Finding 1.1 — a bare filename (no "/") tracked at the repo root that isn't on
     ALLOWED_TOP_LEVEL_FILES. Empty list = clean."""
-    out = _git(["ls-files"], repo_root)
+    out = "\n".join(git_paths(["ls-files"], repo_root))
     unexpected = []
     for line in out.splitlines():
         line = line.strip()

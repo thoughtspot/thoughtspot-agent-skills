@@ -33,6 +33,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from _git import git_paths
+
 # ── CONFIG (repo-specific) ───────────────────────────────────────────────────
 ANCHORED_DIRS = ("agents/shared/mappings", "agents/shared/schemas")
 # Individual files (outside the dirs above) that also carry a currency anchor — e.g. a
@@ -88,13 +90,9 @@ def _is_anchored_path(rel: str) -> bool:
 
 
 def _staged_anchored_files(repo_root: Path) -> list[Path]:
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
     return [
         repo_root / f
-        for f in result.stdout.splitlines()
+        for f in git_paths(["diff", "--cached", "--name-only", "--diff-filter=ACM"], repo_root)
         if _is_anchored_path(f) and (repo_root / f).exists()
     ]
 
