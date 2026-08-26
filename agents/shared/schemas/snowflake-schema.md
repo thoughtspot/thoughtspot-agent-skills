@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (derived metrics + named filters + custom_instructions; correction 2026-07: base_table.definition: SQL-query logical-table alternative added to Complete Schema, GA 2026-06-26 — finding 13.4; is_enum dimension property added, GA 2026-06-25 — finding 13.7; BL-064: sample_values blockquote removed from NOT-supported section, verified_queries/unique_keys/relationship type+right_range added to Complete Schema; 2026-07-29 full sweep: top-level max_staleness: key + materializations DDL/YAML coverage row added, public preview release 10.24 Jul 2026 — finding 13.4; facts[] description corrected — pre-aggregated expressions over related tables and window expressions are allowed, not just raw unaggregated columns — finding 13.6) -->
+<!-- currency: snowflake — 2026-07 (derived metrics + named filters + custom_instructions; correction 2026-07: base_table.definition: SQL-query logical-table alternative added to Complete Schema, GA 2026-06-26 — finding 13.4; is_enum dimension property added, GA 2026-06-25 — finding 13.7; BL-064: sample_values blockquote removed from NOT-supported section, verified_queries/unique_keys/relationship type+right_range added to Complete Schema; 2026-07-29 full sweep: top-level max_staleness: key + materializations DDL/YAML coverage row added, public preview release 10.24 Jul 2026 — finding 13.4; facts[] description corrected — pre-aggregated expressions over related tables and window expressions are allowed, not just raw unaggregated columns — finding 13.6; 2026-08-26: derived-metric section corrected — using_relationships and non_additive_dimensions are table-level keys only, plus the two expr restrictions (no aggregations of metrics, no window functions) — finding 13.6) -->
 
 # Snowflake Semantic View YAML Schema
 
@@ -211,7 +211,7 @@ variables:                        # Optional. GA June 2026. Top-level session/bi
 | `AI_QUESTION_CATEGORIZATION` | `AI_QUESTION_CATEGORIZATION = '<free-text instructions>'` | ✅ now — `module_custom_instructions.question_categorization` | Free-text instruction string, scoped to question categorization only |
 | `ai_verified_queries` | `ai_verified_queries ( 'query' verified_by = '...' )` | ✅ now — `verified_queries[]` | Top-level array; verified queries (→ NLS Feedback TML on the TS side) |
 | `using <relationship>` | on metrics | ✅ — `using_relationships` | Relationship path for cross-table metrics |
-| root-level derived `METRICS` | `METRICS ( alias.NAME as EXPR, ... )` with `table_alias` omitted from the metric name | ✅ now — root-level `metrics:` | Combines per-table metrics **across multiple logical tables** via `using_relationships`; this is the one exception to Key Structural Rule #1 — see "Derived Metrics" below. Not yet emitted by the to-snowflake-sv converter (BL-031). |
+| root-level derived `METRICS` | `METRICS ( alias.NAME as EXPR, ... )` with `table_alias` omitted from the metric name | ✅ now — root-level `metrics:` | Combines per-table metrics across logical tables. **`using_relationships` is NOT valid here** — it is a table-level metric key only (corrected 2026-08-26, audit 13.6). The one exception to Key Structural Rule #1 — see "Derived Metrics" below. Not yet emitted by the to-snowflake-sv converter (BL-031). |
 | named standalone `filters` | *(DDL clause not yet verified)* | ✅ now — per-table `filters:` | Standalone boolean filter (name/synonyms/description/expr) used by Cortex Analyst; AI-optional, not always-applied like a ThoughtSpot model-level filter — see ts-snowflake-properties.md "Model-Level Filters" |
 | `tags` (object tagging) | `WITH TAG (fully.qualified.tag = 'value', ...)` | ✅ now — `tags:` at root/table/dimension/fact/metric levels | GA 2026-05-05. Fully-qualified tag name + value. Verify with a live round-trip before the converter emits it (BL-031). |
 | **Materializations** — enables incremental/full refresh caching of a semantic view | `CREATE ... MAX_STALENESS = <seconds>` at creation time; `ALTER SEMANTIC VIEW ... ADD MATERIALIZATION (REFRESH_MODE = AUTO \| FULL \| INCREMENTAL [, IMMUTABLE WHERE <expr>])` to add/configure one after creation | ⚠ partial — top-level `max_staleness:` only (creation-time eligibility) | **PUBLIC PREVIEW (release 10.24, Jul 9-15 2026).** `max_staleness:` in YAML makes the view materialization-eligible at CREATE time. The `ALTER ... ADD MATERIALIZATION` refresh-mode/immutable-where configuration is DDL-only today — no YAML equivalent documented. GET_DDL token shape for a materialized view is not yet live-verified — see ts-from-snowflake-rules.md "PARSER PREREQUISITE" entry (BL-100). |
@@ -262,8 +262,36 @@ The following fields are **not** part of the YAML schema. Including them causes 
 
 A semantic view may declare a **root-level** `metrics:` block — the one legitimate
 exception to Key Structural Rule #1. Root-level metrics combine per-table metrics
-**across multiple logical tables** via `using_relationships`; the DDL equivalent is
-a `METRICS` entry with the `table_alias` omitted from the metric name.
+across logical tables; the DDL equivalent is a `METRICS` entry with the
+`table_alias` omitted from the metric name.
+
+### Allowed keys — and the two that are not
+
+A root-level (derived) metric accepts **only**: `name`, `synonyms`, `description`,
+`access_modifier`, `expr`, `tags`.
+
+> **`using_relationships` and `non_additive_dimensions` are table-level metric keys
+> only — they are NOT valid on a root-level metric.** This reference previously
+> documented the opposite and its example emitted
+> `using_relationships: [fact_sales_to_fact_cost]` on a derived metric (corrected
+> 2026-08-26, audit finding 13.6).
+>
+> The reason is structural, not arbitrary: the Snowflake SQL guide states that
+> *"each relationship that you specify must start from the logical table containing
+> the metric"*. A derived metric is by definition not tied to a table, so there is
+> no start-from table for a relationship path to begin at. The relationships a
+> derived metric traverses are resolved from the metrics it references, not declared
+> on it.
+
+### Two `expr` restrictions
+
+A derived-metric `expr` may **not**:
+
+- use **aggregations of metrics** — `SUM(fact_sales.revenue)` where `revenue` is
+  itself a metric is rejected; reference the metric directly
+- use **window functions**
+
+Neither restriction was recorded here before.
 
 ```yaml
 metrics:                              # Root level — cross-table derived metrics only.
@@ -272,15 +300,20 @@ metrics:                              # Root level — cross-table derived metri
   - "Gross Margin %"
   description: "Gross margin as a percentage of revenue, spanning two fact tables."
   expr: (fact_sales.revenue - fact_cost.total_cost) / NULLIF(fact_sales.revenue, 0)
-  using_relationships:
-  - fact_sales_to_fact_cost
+  # No using_relationships: — see above. The relationship path is inferred from the
+  # referenced metrics' own tables.
 ```
 
 Use root-level `metrics:` only when the expression genuinely spans more than one
 table's metrics. A metric scoped to a single table's own columns still belongs in
-that table's `metrics:` list — the normal case under Rule #1. This is newly-possible
-for the to-snowflake-sv direction (e.g. cross-fact ratio formulas could emit as a
-clean derived metric); the converter does not yet emit these (**BL-031**).
+that table's `metrics:` list — the normal case under Rule #1. This is
+newly-possible for the to-snowflake-sv direction (e.g. cross-fact ratio formulas
+could emit as a clean derived metric); the converter does not yet emit these
+(**BL-031**).
+
+**BL-031 reads this section as its spec**, which is why the correction matters more
+than a docs typo: emitting `using_relationships` on a derived metric would produce
+invalid YAML on every one the converter generates.
 
 ---
 
