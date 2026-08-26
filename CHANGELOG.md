@@ -7,6 +7,17 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-08-26
 
+### Fixed
+
+- **BL-218 — the `--name-status` call sites dropped non-ASCII paths.** git octal-quotes
+  such paths, and both callers split on newlines/tabs, so a renamed or added file with a
+  non-ASCII name vanished from the changelog suggestion and the audit-activity count.
+  `_git.parse_name_status_z` handles the variable record width (`A\0path\0` vs
+  `R100\0old\0new\0` — a naive pairwise split desynchronises on the first rename and
+  mislabels every record after it), and `git_status_paths` adds the fail-loud contract.
+  `_GIT_ENUM_ALLOWLIST` is now a single entry. Verified end-to-end: pre-fix the gate
+  exited 0 having seen nothing.
+
 ### Added
 
 - **`check_converter_parity.py` — BL-217 part 1.** Asserts that no converter maps a

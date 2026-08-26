@@ -3,6 +3,7 @@ from datetime import date
 from pathlib import Path
 
 import check_audit_freshness as af
+from _git import parse_name_status_z
 
 
 def test_report_dates_parses_and_sorts(tmp_path):
@@ -90,29 +91,44 @@ def test_effective_external_date_none_when_neither_run():
 # is a NUL-prefixed header line followed by its name-status rows.
 
 def _commit(sha: str, *rows: str) -> str:
-    return "\x00" + sha + "\n" + "\n".join(rows)
+    """Build one commit's worth of real `git log --name-status -z` bytes.
+
+    Each row is "STATUS\tpath" for readability; it is converted to the NUL form git
+    actually emits. Git glues the `--pretty` header to the FIRST status letter with a
+    newline (`"<sha>\nA"`), which is how `_parse_activity` recovers commit boundaries.
+    """
+    out = "\x00" + sha + "\n"
+    for row in rows:
+        status, _, path = row.partition("\t")
+        out += status + "\x00" + path + "\x00"
+    return out
+
+
+def _parse(log: str):
+    """Route fake bytes through the real parser, so these tests cover it too."""
+    return af._parse_activity(parse_name_status_z(log))
 
 
 def test_ts_cli_bumps_are_not_counted_as_activity():
     # ts-cli version bumps are deliberately NOT an activity trigger (not audit surface,
     # redundant with commit count). A bump-only commit contributes to `commits` but
     # never yields a new-skill/shared reason.
-    log = "\n".join([
+    log = "".join([
         _commit("a" * 40, "M\ttools/ts-cli/pyproject.toml", "M\ttools/ts-cli/ts_cli/__init__.py"),
         _commit("b" * 40, "M\ttools/ts-cli/pyproject.toml", "M\ttools/ts-cli/ts_cli/__init__.py"),
     ])
-    counts = af._parse_activity(log)
+    counts = _parse(log)
     assert "ts_cli_bumps" not in counts
     assert counts["commits"] == 2
     assert af._activity_reasons(counts) == []
 
 
 def test_new_skill_and_runtime_and_shared_counted():
-    log = "\n".join([
+    log = "".join([
         _commit("a" * 40, "A\tagents/cli/ts-new/SKILL.md"),
         _commit("b" * 40, "A\tagents/shared/schemas/foo.md", "A\tagents/shared/mappings/bar.md"),
     ])
-    counts = af._parse_activity(log)
+    counts = _parse(log)
     assert counts["new_skills"] == 1
     assert counts["new_runtimes"] == 1   # "cli"
     assert counts["new_shared"] == 2
@@ -121,10 +137,10 @@ def test_new_skill_and_runtime_and_shared_counted():
 
 def test_modified_skill_is_not_a_new_skill():
     log = _commit("a" * 40, "M\tagents/cli/ts-existing/SKILL.md")
-    assert af._parse_activity(log)["new_skills"] == 0
+    assert _parse(log)["new_skills"] == 0
 
 
 def test_empty_log_is_all_zeros():
-    counts = af._parse_activity("")
+    counts = _parse("")
     assert counts == {"new_skills": 0, "new_runtimes": 0, "new_shared": 0,
                       "commits": 0}

@@ -37,6 +37,8 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
+from _git import GitEnumerationError, git_status_paths
+
 # ── CONFIG (repo-specific — the only part to change when porting) ─────────────
 AUDIT_DIR = "docs/audit"
 EXTERNAL_MAX_AGE_DAYS = 7
@@ -100,23 +102,26 @@ def _git(args: list[str], root: Path) -> str:
     return r.stdout if r.returncode == 0 else ""
 
 
-def _parse_activity(log_text: str) -> dict[str, int]:
-    """Count substantive changes from `git log --name-status --pretty=format:%x00%H`.
+def _parse_activity(records: list[tuple[str, str, str]]) -> dict[str, int]:
+    """Count substantive changes from parsed `git log --name-status -z` records.
 
-    Commit boundaries are the NUL-prefixed header lines (used to count commits). Pure —
-    no I/O — so the counting logic is unit-tested git-free. ts-cli version bumps are
-    deliberately not counted (see the ACTIVITY comment — not audit surface).
+    Takes `(prefix, status, path)` triples from `_git.parse_name_status_z`. The
+    `prefix` carries the commit sha for the first record of each commit (git glues
+    the `--pretty` header to the following status letter), so counting distinct
+    non-empty prefixes counts commits. Still pure — no I/O — so the counting logic
+    stays unit-tested git-free. ts-cli version bumps are deliberately not counted
+    (see the ACTIVITY comment — not audit surface).
+
+    Was line/tab-based until BL-218. Two defects came with that: git octal-quoted
+    any non-ASCII path so it was dropped from the counts entirely, and a rename's
+    three tab fields made `parts[-1]` right by luck rather than by rule.
     """
-    new_skills = new_shared = commits = 0
+    new_skills = new_shared = 0
     runtimes: set[str] = set()
-    for line in log_text.splitlines():
-        if line.startswith("\x00"):
-            commits += 1
-            continue
-        parts = line.split("\t")
-        if len(parts) < 2:
-            continue
-        status, path = parts[0].strip(), parts[-1].strip()
+    shas: set[str] = set()
+    for prefix, status, path in records:
+        if prefix:
+            shas.add(prefix)
         if status == "A" and path.endswith("/SKILL.md"):
             new_skills += 1
             seg = path.split("/")
@@ -128,7 +133,7 @@ def _parse_activity(log_text: str) -> dict[str, int]:
         "new_skills": new_skills,
         "new_runtimes": len(runtimes),
         "new_shared": new_shared,
-        "commits": commits,
+        "commits": len(shas),
     }
 
 
@@ -159,8 +164,13 @@ def _activity_since(since_ref: str | None, root: Path) -> dict[str, int]:
     `since_ref` is a commit SHA (see _latest_full_audit_commit), not a date.
     """
     rng = f"{since_ref}..HEAD" if since_ref else "HEAD"
-    log_text = _git(["log", rng, "--name-status", "--pretty=format:%x00%H"], root)
-    return _parse_activity(log_text)
+    try:
+        records = git_status_paths(["log", rng, "--pretty=format:%x00%H"], root)
+    except GitEnumerationError:
+        # A nudge must never become a hard failure; an unreadable log means "no
+        # activity signal", which suppresses the nudge rather than fabricating one.
+        return _parse_activity([])
+    return _parse_activity(records)
 
 
 def _activity_reasons(counts: dict[str, int]) -> list[str]:

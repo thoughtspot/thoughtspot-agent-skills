@@ -111,3 +111,71 @@ class _GitOut:
 
     def __init__(self, stdout: str) -> None:
         self.stdout = stdout
+
+
+def parse_name_status_z(text: str) -> List[tuple[str, str, str]]:
+    """Parse ``--name-status -z`` output into ``(prefix, status, path)`` triples.
+
+    ``--name-status`` is the one git enumeration :func:`git_paths` cannot serve,
+    because a record is a status *and* a path rather than a bare path — and the
+    record width is not constant:
+
+    * ordinary change -- ``A\\0path\\0``            (2 fields)
+    * rename or copy  -- ``R100\\0old\\0new\\0``     (3 fields)
+
+    That asymmetry is the whole reason this is a separate function. A naive
+    pairwise split desynchronises on the first rename and then silently mislabels
+    every subsequent record — reading the *next* record's status letter as a path
+    and its path as a status. Verified against real git output, not inferred.
+
+    ``path`` is the **new** path for a rename or copy, which is what every caller
+    wants ("what does the tree look like now"); the old path is dropped.
+
+    ``prefix`` exists for ``git log --name-status -z --pretty=format:...``, where
+    git emits the commit header glued to the following status letter by a newline
+    (``"<sha>\\nA"``). Callers that need commit boundaries count non-empty
+    prefixes; for ``git diff`` the prefix is always ``""``.
+    """
+    records: List[tuple[str, str, str]] = []
+    fields = text.split("\0")
+    i = 0
+    while i < len(fields):
+        raw = fields[i]
+        if not raw:
+            i += 1                      # separator run between commits
+            continue
+        prefix, _, status = raw.rpartition("\n")
+        # R/C are the only statuses that carry a second path.
+        width = 2 if status[:1] in ("R", "C") else 1
+        if i + width >= len(fields):
+            break                       # truncated trailing record
+        path = fields[i + width]
+        if not path:
+            # A status with no path (truncated output). Emitting it would hand the
+            # caller an empty path that silently matches no rule.
+            break
+        records.append((prefix, status, path))
+        i += width + 1
+    return records
+
+
+def git_status_paths(args: Sequence[str], repo_root: Path) -> List[tuple[str, str, str]]:
+    """Run ``git <args> --name-status -z`` and return parsed records.
+
+    Same fail-loud contract as :func:`git_paths`: a git failure raises rather than
+    returning an empty list that reads as "nothing changed".
+    """
+    try:
+        result = subprocess.run(
+            ["git", *args, "--name-status", "-z"],
+            capture_output=True, text=True, cwd=repo_root, check=True,
+        )
+    except FileNotFoundError as exc:
+        raise GitEnumerationError(f"git not found: {exc}") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = " ".join((exc.stderr or "").split())[:200]
+        raise GitEnumerationError(
+            f"git {' '.join(args)} --name-status failed in {repo_root} "
+            f"(exit {exc.returncode}): {detail}"
+        ) from exc
+    return parse_name_status_z(result.stdout)

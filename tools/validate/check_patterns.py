@@ -434,10 +434,11 @@ def main() -> int:
     # letter with a path per record, so they need their own parse rather than
     # git_paths(). They carry the same latent bug — tracked as BL-218.
     # ---------------------------------------------------------------------
+    # BL-218 closed 2026-08-26: the two --name-status call sites now go through
+    # _git.git_status_paths, so the guard covers tools/validate/ with exactly one
+    # exception — the shared implementation itself.
     _GIT_ENUM_ALLOWLIST = {
         "tools/validate/_git.py",                    # the shared implementation
-        "tools/validate/suggest_repo_changelog.py",  # --name-status pairs (BL-218)
-        "tools/validate/check_audit_freshness.py",   # git log --name-status (BL-218)
     }
     for py in sorted((repo_root / "tools" / "validate").glob("*.py")):
         rel = str(py.relative_to(repo_root))

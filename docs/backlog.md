@@ -8004,6 +8004,21 @@ Raised 2026-08-26 from the PR #440 review.
 
 ## BL-218 -- the three `--name-status` call sites still carry the octal-quoting fail-open `Tier 2`
 
+> **CLOSED 2026-08-26.** `_git.parse_name_status_z` + `git_status_paths` added; both
+> files migrated; `_GIT_ENUM_ALLOWLIST` is down to one entry (the shared implementation
+> itself), so the guard now covers `tools/validate/` with no functional exceptions.
+>
+> Proven end-to-end rather than by inspection. Staging a new skill under
+> `agents/cli/ts-café-test/`: the pre-fix tool exited **0 having detected nothing**
+> (git had handed it `"agents/cli/ts-caf\303\251-test/SKILL.md"`, quotes included);
+> the post-fix tool reports `feat: add ts-café-test skill`.
+>
+> Two notes for the reader. The item says "three sites"; it is **two files** — the two
+> `suggest_repo_changelog` sites share one enumerator. And writing the parser's tests
+> found an edge the item did not anticipate: a truncated `"A\0"` record yielded an
+> **empty path**, which matches no rule and so would have been dropped silently — the
+> same fail-open shape one layer down. Guarded, with a test.
+
 The 2026-08-26 audit (finding 4.2) found every git file-enumeration helper blind to
 octal-quoted paths: git quotes any non-ASCII path, callers split on newlines, the path
 is dropped, and the gate reports PASS on a file it never read. Reproduced against

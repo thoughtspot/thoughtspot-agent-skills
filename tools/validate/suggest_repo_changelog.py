@@ -28,6 +28,7 @@ from datetime import date
 from pathlib import Path
 
 from _dirs import ALL_RUNTIME_PATHS
+from _git import git_status_paths
 
 # Trailing-slash prefixes for str.startswith on repo-relative paths.
 _RUNTIME_PREFIXES = tuple(f"{p}/" for p in ALL_RUNTIME_PATHS)
@@ -38,17 +39,15 @@ TODAY = str(date.today())
 
 # ── git helpers ───────────────────────────────────────────────────────────────
 
-def get_staged_files(repo_root: Path, base: str | None = None) -> list[str]:
+def get_staged_files(repo_root: Path, base: str | None = None) -> list[tuple[str, str]]:
     """Changed files. Default: staged (`git diff --cached`). With `base`, the commits a
     PR introduces (`git diff <base>...HEAD`) — so the gate can enforce server-side in CI,
     where nothing is staged."""
-    cmd = (
-        ["git", "diff", f"{base}...HEAD", "--name-status"]
-        if base
-        else ["git", "diff", "--cached", "--name-status"]
-    )
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_root)
-    return result.stdout.splitlines()
+    args = ["diff", f"{base}...HEAD"] if base else ["diff", "--cached"]
+    # (status, path) pairs, NUL-split so a non-ASCII path is neither octal-quoted
+    # nor dropped, and a rename's THREE fields do not desynchronise the split
+    # (BL-218). The path is the post-rename one.
+    return [(status, path) for _prefix, status, path in git_status_paths(args, repo_root)]
 
 
 def restage_file(path: Path, repo_root: Path) -> None:
@@ -85,7 +84,8 @@ def _skill_changelog_version(text: str) -> tuple[int, int, int] | None:
 
 
 def detect_significant_changes(
-    staged_lines: list[str], repo_root: Path, new_ref: str = ":", old_ref: str = "HEAD:"
+    staged_lines: list[tuple[str, str]], repo_root: Path,
+    new_ref: str = ":", old_ref: str = "HEAD:"
 ) -> list[tuple[str, str]]:
     """
     Return a list of (type, description) tuples for significant staged changes.
@@ -95,11 +95,7 @@ def detect_significant_changes(
     staged mode uses ':'/'HEAD:'; base (CI) mode uses 'HEAD:'/'<base>:'.
     """
     changes = []
-    for line in staged_lines:
-        parts = line.split("\t", 1)
-        if len(parts) != 2:
-            continue
-        status, path = parts[0].strip(), parts[1].strip()
+    for status, path in staged_lines:
 
         # New SKILL.md added
         if status == "A" and path.endswith("/SKILL.md") and path.startswith(_RUNTIME_PREFIXES):
@@ -137,12 +133,9 @@ def detect_significant_changes(
 
 # ── changelog helpers ─────────────────────────────────────────────────────────
 
-def changelog_already_staged(staged_lines: list[str]) -> bool:
+def changelog_already_staged(staged_lines: list[tuple[str, str]]) -> bool:
     """Return True if CHANGELOG.md is already in the staged changes."""
-    return any(
-        line.split("\t", 1)[-1].strip() == CHANGELOG
-        for line in staged_lines
-    )
+    return any(path == CHANGELOG for _status, path in staged_lines)
 
 
 def insert_today_section(changelog_path: Path, entries: list[str]) -> None:
