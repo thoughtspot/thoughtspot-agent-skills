@@ -11,7 +11,7 @@ semantic auditing, synthesis) and the cheap tiers where the work is mechanical
 
 | Surface | Mechanism | Current assignments |
 |---|---|---|
-| `.claude/agents/*.md` | `model:` frontmatter (`sonnet`/`opus`/`haiku`/`fable`) — and, per-agent, `effort:` frontmatter (`low`/`medium`/`high`/`xhigh`/`max`, overrides the session-level effort for that agent's own reasoning) plus `isolation`, `maxTurns`, `skills`, and `memory` fields | `consistency-checker: haiku` (runs validators, greps); `repo-publisher: sonnet` (scripted commit → branch → PR → stage-sync flow); `conversion-consistency-auditor:` unset — inherits the session model (semantic judgment). No agent currently sets `effort:` — today's tiering uses `model:` only |
+| `.claude/agents/*.md` | `model:` frontmatter (`sonnet`/`opus`/`haiku`/`fable`) — and, per-agent, `effort:` frontmatter (`low`/`medium`/`high`/`xhigh`/`max`, overrides the session-level effort for that agent's own reasoning) plus `isolation`, `maxTurns`, `skills`, and `memory` fields | `consistency-checker:` session model at `effort: low` (runs validators, greps — mechanical, but see "effort over model" below); `repo-publisher: sonnet` (scripted commit → branch → PR → stage-sync flow); `conversion-consistency-auditor:` unset — inherits the session model (semantic judgment) |
 | `.claude/workflows/*.js` | `effort:` (and rarely `model:`) per `agent()` call | repo-audit: `low` for mechanical finders (dead-files, pr-validation, dependencies); `max` for the angle-17 code-review backstop; default for everything else |
 | `.claude/settings.json` | No `model` pin | The interactive session inherits the user's default. Planning and QA happen interactively, so the session default should be the strong tier |
 
@@ -25,9 +25,18 @@ semantic auditing, synthesis) and the cheap tiers where the work is mechanical
   steps are prescribed (repo-publisher's commit → branch → PR → stage-sync sequence).
 - **Session default (strong tier)**: anything that weighs evidence — planning,
   code review verification, semantic consistency auditing, audit synthesis.
-- **Effort over model** in workflows: prefer `effort: 'low'` on a strong model for
-  mechanical stages rather than downgrading the model — same savings profile,
-  less capability risk. Reserve `effort: 'max'` for adversarial verification.
+- **Effort over model**, in workflows *and* in agent frontmatter: prefer `effort: low`
+  on a strong model for mechanical stages rather than downgrading the model — same
+  savings profile, less capability risk. Reserve `effort: 'max'` for adversarial
+  verification.
+- **Corollary — a `model:` pin needs a reason the effort dial cannot serve.** The dial
+  is the default lever; a pin is the exception. `repo-publisher: sonnet` keeps its pin
+  because its risk is a *partial publish* from a long prescribed sequence, not shallow
+  reasoning — capability headroom buys nothing there. `consistency-checker` had no such
+  reason, so it moved to `effort: low` on the session model (audit finding 18.3,
+  2026-07-29). This also settles a standing conflict: the user's subagent-driven-
+  development policy rejects Haiku for delegated work outright, which a `haiku` pin
+  contradicted and an effort dial does not.
 
 ## When adding a new agent or workflow stage
 

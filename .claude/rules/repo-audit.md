@@ -112,7 +112,30 @@ product. This is the **weekly specialist sweep**. Kept tractable by *currency an
 | 13 | **Product currency** | Per-platform: are our mappings, schemas, and "untranslatable" verdicts still accurate against the product's *current* capabilities? Newly-possible translations, deprecated constructs, new artifact types (chart libraries, semantic-view / metric-view features), API & version drift. | Weekly specialist sweep (per platform) + `check_mapping_currency` (per-PR staleness nudge) |
 | 14 | **Performance** | (a) *skill runtime* — redundant API round-trips, un-batched prompts, the obj_id read-back pattern; (b) *generated-artifact efficiency* — do emitted formulas use performant TS constructs (`group_aggregate` vs `sql_*_aggregate_op`, join cardinality) or slow ones; (c) *ts-cli* — pagination, token-cache reuse. | Weekly sweep + MANUAL |
 | 16 | **Dependency / supply-chain currency** | Python deps (`typer`, `requests`, `PyYAML`, `keyring`) — pinned ranges, known CVEs, EOL Python versions. | Weekly sweep + `pip-audit` gate (per-PR CI step over core + `[snowflake,qlik]` extras, plus weekly cron — see `.github/workflows/validate.yml`) |
-| 18 | **Harness / framework currency** | The Claude setup itself, checked against the current Claude Code + model lineup: `.claude/settings.json` (stale model pins, unused new settings), `.claude/agents/*.md` frontmatter (model/effort tiers vs `.claude/rules/model-routing.md` and the current model tiers), `.claude/workflows/` (capabilities the runner has gained), and the `.claude/rules/*.md` files' own currency anchors. Same pattern as angle 13, pointed inward — the quality framework goes stale exactly the way product mappings do (a pinned `claude-opus-4-6` sat in settings.json after the Claude 5 family shipped; found manually 2026-07-28). | Weekly sweep |
+| 18 | **Harness / framework currency** | The Claude setup itself, checked against the current Claude Code + model lineup: `.claude/settings.json` (stale model pins, unused new settings), `.claude/agents/*.md` frontmatter (model/effort tiers vs `.claude/rules/model-routing.md` and the current model tiers), `.claude/workflows/` (capabilities the runner has gained), and the `.claude/rules/*.md` files' own currency anchors. Same pattern as angle 13, pointed inward — the quality framework goes stale exactly the way product mappings do (a pinned `claude-opus-4-6` sat in settings.json after the Claude 5 family shipped; found manually 2026-07-28). **Repo-scoped only — see the boundary note below.** | Weekly sweep |
+
+#### Angle 18's boundary with the machine-level review
+
+Angle 18 and the `claude-practice:setup-review` skill both read
+`.claude/agents/*.md` model/effort frontmatter, so the overlap needs an owner or
+each will assume the other covered it:
+
+| Surface | Owner |
+|---|---|
+| **This repo's** routing vs [model-routing.md](model-routing.md); `.claude/workflows/` capabilities; `.claude/rules/*.md` currency anchors | **Angle 18** (this rubric, `check_audit_freshness.py` nudge) |
+| `~/.claude/` — user settings, machine-wide agents, installed-vs-used plugins/skills/MCP, the auto-memory folders and their `MEMORY.md` indexes; Claude Code features shipped since last review; routing *across* repos | **`setup-review`** (own `~/.claude/audit/` reports, own backlog, own 30-day SessionStart nudge) |
+
+The split is "does the answer live in this repo?" Angle 18 checks whether this
+repo's harness is internally coherent and current; `setup-review` checks the
+machine the harness runs on and compares repos to each other. A finding on
+`~/.claude/` state routes to `setup-review`'s backlog, not to `docs/backlog.md` —
+otherwise a machine-level fix gets tracked where no machine-level review will read
+it. Neither is a substitute for the other: `setup-review` cannot know this repo's
+rules, and angle 18 cannot see the machine.
+
+Worth knowing: the two nudges are independent, so a quiet angle-18 sweep says
+nothing about machine drift. `setup-review` had never run on this machine as of
+2026-08-26 despite being installed and armed.
 
 > **Angle 15 — Conversion fidelity** (does converted output produce *semantically
 > equivalent* results — the same numbers — not just valid-importing TML?) is **PARKED**
@@ -239,3 +262,4 @@ that repo's validators. The date/age/activity machinery is unchanged.
 | 2026-07-24 | Angle 17 added | `max` `/code-review` backstop over the `<last-full-audit-sha>..HEAD` delta, full sweep only; per-PR `/code-review` remains the primary bug net |
 | 2026-07-28 | Angle 18 added | Harness/framework currency — the Claude setup (settings, agent tiers, workflows, rules anchors) checked against the current Claude Code + model lineup; joins the external sweep. Motivated by the stale `claude-opus-4-6` pin found in the 2026-07-28 framework review |
 | 2026-07-29 | Full (all angles incl. 17/18) | 63 raw → 58 findings (5 high / 23 med / 30 low). Headline: 4 high-severity correctness bugs in the rebuilt `ts migrate` engine (angle 17's first catch) + stale repo-publisher push-to-main flow. 6 validator promotions proposed. See `docs/audit/2026-07-29-full.md` |
+| 2026-08-26 | Angle 18 boundary + 18.3 closed | `consistency-checker` moved from `model: haiku` to session model at `effort: low` (the rule's own "effort over model" principle, and the SDD policy's no-Haiku rule); added the corollary that a `model:` pin needs a reason the effort dial cannot serve. Documented the angle-18 / `claude-practice:setup-review` ownership split after finding both read agent frontmatter |
