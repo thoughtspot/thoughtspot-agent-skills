@@ -1,3 +1,4 @@
+<!-- currency: snowflake — 2026-07 (backfilled from last edit — not re-verified) -->
 # Worked Example — Company Workforce SV → ThoughtSpot Model (Identifier Resolution)
 
 End-to-end conversion of `AGENT_SKILLS.IDENTIFIER_RESOLUTION_TEST.COMPANY_WORKFORCE_SV`

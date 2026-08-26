@@ -1,3 +1,4 @@
+<!-- currency: tableau — 2026-06 (backfilled from last edit — not re-verified) -->
 # Worked Example — Tableau KPI Worksheet → ThoughtSpot KPI Viz with Sparkline
 
 End-to-end conversion of a Tableau "KPI's" worksheet (Measure Names / Measure Values

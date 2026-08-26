@@ -1,3 +1,4 @@
+<!-- currency: snowflake — 2026-06 (backfilled from last edit — not re-verified) -->
 # Worked Example — Snowflake Semantic View → ThoughtSpot Model
 
 End-to-end conversion of `BIRD.SUPERHERO_SV.BIRD_SUPERHEROS_SV` to a ThoughtSpot

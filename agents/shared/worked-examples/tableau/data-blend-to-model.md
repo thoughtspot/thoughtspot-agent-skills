@@ -1,3 +1,4 @@
+<!-- currency: tableau — 2026-06 (backfilled from last edit — not re-verified) -->
 # Data Blend → Single Model (Worked Example)
 
 Demonstrates converting a Tableau workbook with two blended datasources into a single

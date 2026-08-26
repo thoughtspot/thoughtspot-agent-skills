@@ -1,3 +1,4 @@
+<!-- currency: snowflake — 2026-06 (backfilled; teaches Worksheet TML as the BASIC path — audit 13.2, needs inverting) -->
 # Worked Example — ThoughtSpot Worksheet → Snowflake Semantic View
 
 End-to-end conversion of the `Retail Sales` Worksheet to a Snowflake Semantic View

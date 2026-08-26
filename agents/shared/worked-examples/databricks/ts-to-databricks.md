@@ -1,3 +1,4 @@
+<!-- currency: databricks — 2026-07 (backfilled from last edit — not re-verified) -->
 # Worked Example — ThoughtSpot Model → Databricks Metric Views
 
 End-to-end conversion of the `Dunder Mifflin Sales & Inventory` Model to two

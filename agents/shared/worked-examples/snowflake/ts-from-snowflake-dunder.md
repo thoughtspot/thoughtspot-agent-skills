@@ -1,3 +1,4 @@
+<!-- currency: snowflake — 2026-06 (backfilled from last edit — not re-verified) -->
 # Worked Example — Dunder Mifflin Sales & Inventory SV → ThoughtSpot Model
 
 End-to-end conversion of `DUNDERMIFFLIN.PUBLIC.DUNDER_MIFFLIN_SALES_INVENTORY` to a

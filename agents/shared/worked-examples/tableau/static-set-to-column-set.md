@@ -1,3 +1,4 @@
+<!-- currency: tableau — 2026-06 (backfilled from last edit — not re-verified) -->
 # Worked Example — Tableau Static Set → ThoughtSpot Column Set
 
 Live-verified 2026-06-12 against `se-thoughtspot` (model `TEST_SV_DMSI_AI_CONTEXT`): the

@@ -1,3 +1,4 @@
+<!-- currency: databricks — 2026-07 (backfilled from last edit — not re-verified) -->
 # Worked Example — Databricks Metric View (SELECT Subquery Source) → ThoughtSpot SQL View + Model
 
 End-to-end conversion of a Databricks Metric View whose `source:` is a SELECT

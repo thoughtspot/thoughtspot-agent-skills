@@ -1,3 +1,4 @@
+<!-- currency: databricks — 2026-07 (backfilled from last edit — not re-verified) -->
 # Worked Example — Databricks Metric View → ThoughtSpot Model
 
 End-to-end conversion of `analytics.ecommerce.ecommerce_transactions_mv` to a

@@ -36,18 +36,38 @@ from pathlib import Path
 from _git import git_paths
 
 # ── CONFIG (repo-specific) ───────────────────────────────────────────────────
-ANCHORED_DIRS = ("agents/shared/mappings", "agents/shared/schemas")
+# `worked-examples` was added 2026-08-26 (audit 13.3). Worked examples encode
+# product-shaped assumptions exactly as mappings and schemas do — input TML shapes,
+# DDL forms, chart config — but sat outside this net, so nothing nudged them and no
+# sweep was pointed at them. 11 of 17 carried no anchor, which is why the canonical
+# to-Snowflake example still taught Worksheet TML as the BASIC path three majors
+# after Worksheet import was blocked at 10.13.0.cl (audit 13.2).
+ANCHORED_DIRS = (
+    "agents/shared/mappings",
+    "agents/shared/schemas",
+    "agents/shared/worked-examples",
+)
 # Individual files (outside the dirs above) that also carry a currency anchor — e.g. a
-# skill reference encoding external product behaviour that moves (AgentQL limitations).
+# skill reference encoding external product behaviour that moves (AgentQL limitations),
+# or a rule whose content is pinned to a moving external lineup (model-routing's tier
+# table goes stale the same way a product mapping does — audit 18.7).
 ANCHORED_FILES = (
     "agents/cli/ts-object-model-agentql-query/references/limitations.md",
+    ".claude/rules/model-routing.md",
 )
 STALE_MONTHS = 6
 # ─────────────────────────────────────────────────────────────────────────────
 
 # <!-- currency: snowflake — 2026-06 (Cortex Analyst GA) -->   (en/em dash or hyphen)
+# The platform group deliberately allows `-`: it previously excluded it to
+# disambiguate from a plain-hyphen separator, which silently broke every
+# hyphenated platform name. `.claude/rules/model-routing.md` carried a valid
+# `claude-harness — 2026-07` anchor that this regex could not parse, so the file
+# reported "no currency anchor" while being anchored (found 2026-08-26). The
+# separator is disambiguated by what FOLLOWS it instead — a 4-digit year — which
+# a platform name never is.
 ANCHOR_RE = re.compile(
-    r"<!--\s*currency:\s*(?P<platform>[^—–\-]+?)\s*[—–-]\s*(?P<year>\d{4})-(?P<month>\d{2})\b",
+    r"<!--\s*currency:\s*(?P<platform>.+?)\s*[—–-]\s*(?P<year>\d{4})-(?P<month>\d{2})\b",
     re.IGNORECASE,
 )
 
