@@ -96,10 +96,18 @@ exclude→NOT_IN, numeric range→GE/GT/LE/LT/BW_INC/BW/EQ — see the worked ex
 Each Answer is emitted via the shared emitter's `build_answer` using the Sisense-resolved
 chart type directly, so the widget-type mapping wins and the Approximated / NEEDS REVIEW
 signal survives into the report (a widget that can't be mapped is flagged, never silently
-downgraded). Import the emitted TML:
+downgraded). Lint, then import the emitted TML:
 ```bash
+ts tml lint --dir out/                                    # now includes the liveboard
 ts tml import --dir out/ --order tableau --policy ALL_OR_NONE --profile <name>
+ts tml verify-render <liveboard-guid> --profile <name>    # post-import gate; exit 1 = broken board
 ```
+
+> **Why lint again here.** Step 2's lint runs before the liveboard is emitted, so it
+> cannot see the tile — the same ordering gap found in the Qlik skill (audit finding
+> 17.3). This converter routes through the shared `build_answer`, which already sets
+> `axis_configs`, so nothing is expected to fire; the gate is here so a future change to
+> the shared emitter cannot ship blank boards unnoticed.
 
 ### Step 4 — Migration report
 `mapping.json` accounts for every table, measure, and widget with a status (Migrated /

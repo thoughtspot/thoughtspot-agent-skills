@@ -22,6 +22,10 @@ from typing import Any
 # but draws BLANK (the hand-authored-off-skill failure mode: a chart type is set, but nothing
 # tells the engine which column is the axis vs the series). Tables (GRID_TABLE / PIVOT_TABLE),
 # KPI, PIE, GEO_*, TREEMAP, FUNNEL, HEATMAP, SANKEY etc. don't use an x/y axis and are exempt.
+# Public alias: emitters import this so the "which charts need an axis" fact has ONE
+# definition. A converter copying the list is the drift class BL-217 exists to stop --
+# and 17.3 is what a missing copy looks like (Qlik emitted four of these types with no
+# axis encoding at all, so its boards imported and rendered blank).
 _CHART_NEEDS_AXIS = frozenset({
     "LINE", "COLUMN", "BAR", "AREA",
     "STACKED_COLUMN", "STACKED_BAR", "STACKED_AREA",
@@ -31,6 +35,7 @@ _CHART_NEEDS_AXIS = frozenset({
     "ADVANCED_STACKED_COLUMN", "ADVANCED_STACKED_BAR", "ADVANCED_STACKED_AREA",
     "ADVANCED_LINE_COLUMN", "ADVANCED_LINE_STACKED_COLUMN",
 })
+CHART_NEEDS_AXIS = _CHART_NEEDS_AXIS
 
 
 def _tile_answers(doc: dict):

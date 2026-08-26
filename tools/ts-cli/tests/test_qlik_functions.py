@@ -304,32 +304,32 @@ class TestSharedReferenceSync:
 
 class TestStringPassThroughs:
     def test_trim(self):
-        assert tr("Trim(Name)") == "sql_string_op('TRIM({0})', Name)"
+        assert tr("Trim(Name)") == "sql_string_op(\"TRIM({0})\", Name)"
 
     def test_ltrim(self):
-        assert tr("LTrim(Name)") == "sql_string_op('LTRIM({0})', Name)"
+        assert tr("LTrim(Name)") == "sql_string_op(\"LTRIM({0})\", Name)"
 
     def test_rtrim(self):
-        assert tr("RTrim(Name)") == "sql_string_op('RTRIM({0})', Name)"
+        assert tr("RTrim(Name)") == "sql_string_op(\"RTRIM({0})\", Name)"
 
     def test_replace(self):
         assert tr("Replace(Name, 'a', 'b')") == \
-            "sql_string_op('REPLACE({0}, {1}, {2})', Name, 'a', 'b')"
+            "sql_string_op(\"REPLACE({0}, {1}, {2})\", Name, 'a', 'b')"
 
     def test_upper_still_passes_through(self):
-        assert tr("Upper(Name)") == "sql_string_op('UPPER({0})', Name)"
+        assert tr("Upper(Name)") == "sql_string_op(\"UPPER({0})\", Name)"
 
     def test_lower_still_passes_through(self):
-        assert tr("Lower(Name)") == "sql_string_op('LOWER({0})', Name)"
+        assert tr("Lower(Name)") == "sql_string_op(\"LOWER({0})\", Name)"
 
     def test_nested_trim_inside_upper(self):
         assert tr("Upper(Trim(Name))") == \
-            "sql_string_op('UPPER({0})', sql_string_op('TRIM({0})', Name))"
+            "sql_string_op(\"UPPER({0})\", sql_string_op(\"TRIM({0})\", Name))"
 
     def test_trim_inside_if(self):
         out = tr("If(Trim(Name) = 'x', 1, 0)")
         assert out == \
-            "if (sql_string_op('TRIM({0})', Name) = 'x') then 1 else 0"
+            "if (sql_string_op(\"TRIM({0})\", Name) = 'x') then 1 else 0"
 
     def test_replace_with_wrong_arity_is_flagged_for_review(self):
         """A 2-arg Replace has no 3-slot template to fill, so the call is left
@@ -349,7 +349,7 @@ class TestStringPassThroughs:
         while reporting review=False — a silent wrong answer."""
         out, review, _reason = translate("Replace(Name, 'upper(x)', 'y')")
         assert out == \
-            "sql_string_op('REPLACE({0}, {1}, {2})', Name, 'upper(x)', 'y')"
+            "sql_string_op(\"REPLACE({0}, {1}, {2})\", Name, 'upper(x)', 'y')"
         assert review is False
 
     def test_marker_inside_a_literal_alone_is_left_alone(self):
@@ -382,7 +382,7 @@ class TestIdentityMappedNames:
 
     def test_mid_nested_in_trim_keeps_the_offset(self):
         assert tr("Trim(Mid(Name, 4, 2))") == \
-            "sql_string_op('TRIM({0})', substr(Name, 4 - 1, 2))"
+            "sql_string_op(\"TRIM({0})\", substr(Name, 4 - 1, 2))"
 
     def test_index_two_arg_becomes_strpos(self):
         """Qlik Index(str, sub) with the default n=1 is exactly strpos."""

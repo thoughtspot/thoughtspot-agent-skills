@@ -156,3 +156,45 @@ def test_composition_handler_returning_none_is_unresolved():
 def test_empty_handler_map_is_a_no_op():
     from ts_cli.formula_common import rewrite_marker_calls
     assert rewrite_marker_calls("trim(x)", {}) == ("trim(x)", set())
+
+
+class TestPassThroughQuotingIsUniform:
+    """Finding 17.2 — every emitter must use the same outer-template quoting.
+
+    BL-171 routed the six non-existent string functions through `sql_string_op` in five
+    emitters. Four passed `quote='"'`, matching every example in
+    thoughtspot-formula-patterns.md; **Qlik omitted the argument** and silently took
+    formula_common's single-quote default, so one converter emitted a form no schema
+    example uses and nothing compared them. This is the comparison.
+    """
+
+    @staticmethod
+    def _emitted():
+        """`{converter: emitted_passthrough}` for the same logical input."""
+        from ts_cli.qlik.functions import translate as qlik_translate
+        out = {"qlik": qlik_translate("Upper(Name)")[0]}
+        from ts_cli.formula_common import wrap_passthrough_calls
+        from ts_cli.powerbi import functions as pbi
+        expr, _ = wrap_passthrough_calls("upper(Name)", pbi._PASSTHROUGH, quote='"')
+        out["powerbi"] = expr
+        return out
+
+    def test_no_emitter_uses_a_single_quoted_outer_template(self):
+        for name, emitted in self._emitted().items():
+            assert "sql_string_op('" not in emitted, (
+                f"{name} emits a single-quoted outer template; the authoritative schema "
+                f"(thoughtspot-formula-patterns.md § SQL Pass-Through) double-quotes it, "
+                f"and only the double-quoted form has a verification record"
+            )
+
+    def test_all_emitters_agree(self):
+        quoting = {n: ('"' if 'sql_string_op("' in e else "'") for n, e in self._emitted().items()}
+        assert len(set(quoting.values())) == 1, f"emitters disagree: {quoting}"
+
+    def test_sv_and_mv_pass_through_double_quote_too(self):
+        """D09/D10 cited these as precedent for SINGLE quotes; they use double."""
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1] / "ts_cli"
+        for rel in ("sv_sql.py", "databricks/mv_sql.py"):
+            text = (root / rel).read_text(encoding="utf-8")
+            assert 'sql_string_op ( \\"' in text or 'sql_string_op ( "' in text, rel

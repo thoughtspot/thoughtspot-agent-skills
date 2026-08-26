@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 from .ir import Chart, QlikApp
 from ts_cli.tml_common import derive_viz_obj_id
+from ts_cli.tml_lint import CHART_NEEDS_AXIS
 
 # Qlik viz object type -> ThoughtSpot chart type.
 _CHART_MAP = {
@@ -107,6 +108,35 @@ def build_liveboard_artifacts(
     }
 
 
+def _chart_config(chart_type: str, chart: Chart) -> dict[str, Any]:
+    """`chart:` block, with axis encoding for the types that require it.
+
+    A chart type in CHART_NEEDS_AXIS carrying neither `axis_configs` nor
+    `custom_chart_config` imports cleanly and renders BLANK (`ts tml lint`
+    chart_tiles_missing_axis, #431). This builder emitted `{"type": chart_type}` alone
+    while _CHART_MAP produces COLUMN/BAR/LINE/LINE_COLUMN -- four such types -- so every
+    Qlik board with one shipped empty (audit finding 17.3). Tableau / PowerBI / Sisense
+    all satisfy the invariant via tableau.liveboard.build_answer; only this hand-rolled
+    path did not.
+
+    Encoding is structural: dimensions on x, measures on y, matching build_answer's own
+    fallback. It makes the tile render rather than claiming semantic fidelity -- Qlik set
+    analysis and alternate dimensions are already flagged for review by this converter,
+    and the skill now lints the liveboard before import.
+
+    Extracted from `_viz` to keep that function under the complexity cap.
+    """
+    cfg: dict[str, Any] = {"type": chart_type}
+    if chart_type in CHART_NEEDS_AXIS and chart.measures:
+        cols = list(chart.dimensions) + list(chart.measures)
+        cfg["chart_columns"] = [{"column_id": c} for c in cols]
+        axis: dict[str, Any] = {"y": list(chart.measures)}
+        if chart.dimensions:
+            axis["x"] = list(chart.dimensions)
+        cfg["axis_configs"] = [axis]
+    return cfg
+
+
 def _viz(
     vid: str,
     chart: Chart,
@@ -138,11 +168,13 @@ def _viz(
         # and leaves the viz with no data source (audit 14.2).
         table_ref["obj_id"] = derive_viz_obj_id(model_name, model_fqn)
 
+    chart_cfg = _chart_config(chart_type, chart)
+
     answer: dict[str, Any] = {
         "name": chart.title or chart.id,
         "tables": [table_ref],
         "search_query": search_query or "[]",
-        "chart": {"type": chart_type},
+        "chart": chart_cfg,
         "display_mode": "TABLE_MODE" if chart_type == "GRID_TABLE" else "CHART_MODE",
     }
     viz = {"id": vid, "answer": answer}

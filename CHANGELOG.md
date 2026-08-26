@@ -9,6 +9,18 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ### Fixed
 
+- **Qlik liveboards shipped blank, and its pass-through quoting diverged (17.3, 17.2).**
+  `qlik/answers._viz` emitted `{"type": chart_type}` alone while its `_CHART_MAP` produces
+  four types in `_CHART_NEEDS_AXIS`, so every board with one imported cleanly and rendered
+  empty; it was also the only converter with no pre-import liveboard lint (Step 2 lints
+  before the liveboard exists — Sisense had the same ordering gap). Separately, Qlik was
+  the only one of the five BL-171 emitters not passing `quote='"'`, so it alone emitted a
+  single-quoted `sql_string_op` template. Emitters now share the linter's own
+  `CHART_NEEDS_AXIS` set rather than a copy, and a cross-emitter test compares the
+  quoting. `chore: bump ts-cli to v0.132.4`
+
+### Fixed
+
 - **A failed existence probe made `ts migrate rollback` report success having deleted
   nothing (finding 17.4).** `_types_by_guid` discarded a non-2xx and `continue`d, so all
   three typed probes failing left `out` empty → every guid announced "already gone" → two

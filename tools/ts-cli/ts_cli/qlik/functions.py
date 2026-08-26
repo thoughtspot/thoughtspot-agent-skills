@@ -224,7 +224,13 @@ def _remap_functions(expr: str) -> tuple[str, set[str]]:
     # unbalanced parens) is flagged rather than emitted — a bare trim/replace
     # call is rejected at import with error_code 14516, and a bare `mid` does
     # not exist at all.
-    out, unresolved = wrap_passthrough_calls(out, PASSTHROUGH_MAP)
+    # quote='"' explicitly: formula_common defaults to a SINGLE quote, and this call
+    # was the only one of the five BL-171 emitters to take the default -- so Qlik alone
+    # emitted sql_string_op('UPPER({0})', …) while its siblings (and every example in
+    # thoughtspot-formula-patterns.md) use the double-quoted outer template. Only the
+    # single-quoted form is unverified against the parser, and BL-171 existed to stop
+    # emitting forms ThoughtSpot rejects (audit finding 17.2).
+    out, unresolved = wrap_passthrough_calls(out, PASSTHROUGH_MAP, quote='"')
     out, unresolved_comp = rewrite_marker_calls(out, COMPOSITION_MAP)
     unknown |= {origin.get(name, name)
                 for name in (unresolved | unresolved_comp)}

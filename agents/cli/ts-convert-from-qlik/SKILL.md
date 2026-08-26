@@ -96,8 +96,17 @@ what lands is guaranteed to work, and the report records what was pruned.
 ```bash
 ts qlik build-liveboard <app.qvf> --model-name "<Model name>" --output out/ \
   [--model-fqn <model-guid>] [--report-name "<Liveboard name>"]
+ts tml lint out/*.liveboard.tml                          # pre-import: flags any blank chart tile
 ts tml import out/*.liveboard.tml --profile <name>
+ts tml verify-render <liveboard-guid> --profile <name>    # post-import gate; exit 1 = broken board
 ```
+
+> **Why the lint line is here and not in Step 2.** Step 2 lints `out/*.tml` *before the
+> liveboard exists*, so it never sees the tile. The `chart_tiles_missing_axis` rule
+> (a chart type that needs an axis carrying neither `axis_configs` nor
+> `custom_chart_config` imports cleanly and renders **blank**) therefore had no gate on
+> this path at all — and this was the one converter whose builder violated it, so its
+> boards shipped empty (audit finding 17.3; emitter fixed in the same change).
 Each Qlik sheet becomes a Liveboard tab; each chart becomes an embedded Answer whose search
 query is built from the chart's dimensions and measures. Chart types with no ThoughtSpot
 equivalent default to a table and are flagged.
