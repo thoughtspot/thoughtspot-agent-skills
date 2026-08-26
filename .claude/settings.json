@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
       "Bash(git:*)",
@@ -10,13 +11,15 @@
     ]
   },
   "hooks": {
-    "Stop": [
+    "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "osascript -e 'display notification \"Claude finished\" with title \"Claude Code\"' 2>/dev/null || true",
-            "async": true
+            "command": "python3 tools/validate/check_audit_freshness.py --root . 2>/dev/null || true; b=$(git branch --show-current 2>/dev/null); [ \"$b\" = main ] && echo \"branch: main — branching.md: create a branch before editing\" || echo \"branch: ${b:-(detached)}\"",
+            "async": false,
+            "timeout": 20,
+            "statusMessage": "Checking branch + audit freshness…"
           }
         ]
       }

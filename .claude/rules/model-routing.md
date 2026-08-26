@@ -1,4 +1,4 @@
-<!-- currency: claude-harness — 2026-07 (Claude 5 family: Fable 5 / Opus 5 / Sonnet 5; Haiku 4.5) -->
+<!-- currency: claude-harness — 2026-08 (Claude 5 family: Fable 5 / Opus 5 / Sonnet 5; Haiku 4.5); 2026-08-26: anchor was stale at 2026-07 after the 96a9c59 rewrite (finding 18.7) -- this file is already in check_mapping_currency's ANCHORED_FILES (added earlier the same day, PR #447), so staleness is nudged rather than remembered -- only the anchor VALUE was stale; frontmatter inventory completed and `tools:` declared on the two read-only agents (finding 18.6) -->
 
 # Model and Effort Routing
 
@@ -11,9 +11,28 @@ semantic auditing, synthesis) and the cheap tiers where the work is mechanical
 
 | Surface | Mechanism | Current assignments |
 |---|---|---|
-| `.claude/agents/*.md` | `model:` frontmatter (`sonnet`/`opus`/`haiku`/`fable`) — and, per-agent, `effort:` frontmatter (`low`/`medium`/`high`/`xhigh`/`max`, overrides the session-level effort for that agent's own reasoning) plus `isolation`, `maxTurns`, `skills`, and `memory` fields | `consistency-checker:` session model at `effort: low` (runs validators, greps — mechanical, but see "effort over model" below); `repo-publisher: sonnet` (scripted commit → branch → PR → stage-sync flow); `conversion-consistency-auditor:` unset — inherits the session model (semantic judgment) |
+| `.claude/agents/*.md` | `model:` frontmatter (`sonnet`/`opus`/`haiku`/`fable`, or `inherit`) and `effort:` (`low`/`medium`/`high`/`xhigh`/`max`) — plus **`tools:` / `disallowedTools:`**, `permissionMode`, `isolation`, `maxTurns`, `skills`, `memory`, `mcpServers`, `hooks` (subagent-scoped), `background`, `color`, `initialPrompt` (inventory completed 2026-08-26, finding 18.6 — the previous list omitted the two that matter most) | `consistency-checker:` session model at `effort: low` (runs validators, greps — mechanical, but see "effort over model" below); `repo-publisher: sonnet` (scripted commit → branch → PR → stage-sync flow); `conversion-consistency-auditor:` unset — inherits the session model (semantic judgment) |
 | `.claude/workflows/*.js` | `effort:` (and rarely `model:`) per `agent()` call | repo-audit: `low` for mechanical finders (dead-files, pr-validation, dependencies); `max` for the angle-17 code-review backstop; default for everything else |
 | `.claude/settings.json` | No `model` pin | The interactive session inherits the user's default. Planning and QA happen interactively, so the session default should be the strong tier |
+
+## Tool grants — a contract is not an enforcement
+
+`tools:` was absent from this file's inventory until 2026-08-26 (finding 18.6), and the
+consequence was concrete: `conversion-consistency-auditor`'s description ended
+**"Read-only."** and `consistency-checker` is a pure reporter, yet neither declared a
+grant — so nothing but the prompt stopped either from editing the repo it was auditing.
+An agent that *reports* on correctness is exactly the one whose write access should be
+denied rather than requested.
+
+Both now declare `tools: Bash, Read, Grep, Glob`. State the limit honestly: **Bash can
+mutate**, and both agents genuinely need it (one runs validators, the other greps and
+globs), so removing Edit/Write/NotebookEdit narrows the surface without closing it. The
+guarantee is partial by design. Closing it fully would mean re-expressing every `ls`/
+`grep` step as Glob/Grep tool calls and dropping Bash — worth doing for the auditor if
+its instructions are ever rewritten, but not worth a rewrite on its own.
+
+**When adding a read-only agent, declare `tools:`.** A description that says "read-only"
+without a grant is a comment, not a control.
 
 ## Rules of thumb
 

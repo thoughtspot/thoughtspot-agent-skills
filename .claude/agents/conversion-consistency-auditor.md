@@ -1,6 +1,12 @@
 ---
 name: conversion-consistency-auditor
 description: Audit EVERY ThoughtSpot conversion skill (each `agents/cli/ts-convert-*`, discovered at run time — never a fixed list) for SEMANTIC consistency, and for implementation-strategy drift against its sibling converters, per agents/shared/schemas/ts-model-conversion-invariants.md. Run when editing any conversion skill or its shared mappings/schemas, and before merging conversion-skill changes. Reports per-invariant PASS/FAIL with file:line. Read-only.
+# Read-only by contract AND by grant (audit 18.6): Edit/Write/NotebookEdit are
+# not granted, so the "read-only" claim in the description is enforced rather
+# than merely asserted. Bash is still required -- this agent runs validators /
+# greps -- and Bash can mutate, so the guarantee is partial, not absolute. That
+# is a deliberate trade, not an oversight; see model-routing.md.
+tools: Bash, Read, Grep, Glob
 ---
 
 # Conversion Consistency Auditor

@@ -2,6 +2,12 @@
 name: consistency-checker
 description: Verify cross-file consistency after edits — checks broken references, stage copy completeness, skills table, symlink instructions, anti-patterns, and version sync. Run after any batch of changes before committing.
 effort: low
+# Read-only by contract AND by grant (audit 18.6): Edit/Write/NotebookEdit are
+# not granted, so the "read-only" claim in the description is enforced rather
+# than merely asserted. Bash is still required -- this agent runs validators /
+# greps -- and Bash can mutate, so the guarantee is partial, not absolute. That
+# is a deliberate trade, not an oversight; see model-routing.md.
+tools: Bash, Read, Grep, Glob
 ---
 
 # Consistency Checker

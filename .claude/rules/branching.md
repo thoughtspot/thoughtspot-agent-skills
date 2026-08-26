@@ -1,8 +1,18 @@
 # Branching Protocol
 
-## Session-start check — do this before any file edits
+## Session-start check — now automated
 
-At the start of every session, run:
+A `SessionStart` hook in `.claude/settings.json` prints the current branch every session
+and, on `main`, says so explicitly. Added 2026-08-26 (audit finding 18.8): this protocol
+was prose the human had to remember, and the only thing that ran
+`check_audit_freshness.py` was `pre-commit.sh` — i.e. *after* the edits the branch check
+exists to gate. The hook makes both deterministic rather than advisory.
+
+Note for anyone editing that hook: a **newly added** `settings.json` key is inert until
+`/hooks` is opened or the session restarts, so a fresh clone gets it on the next session,
+not the current one.
+
+You can still run it by hand:
 
 ```bash
 git branch && git status

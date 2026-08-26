@@ -139,7 +139,7 @@ product. This is the **weekly specialist sweep**. Kept tractable by *currency an
 | 13 | **Product currency** | Per-platform: are our mappings, schemas, and "untranslatable" verdicts still accurate against the product's *current* capabilities? Newly-possible translations, deprecated constructs, new artifact types (chart libraries, semantic-view / metric-view features), API & version drift. | Weekly specialist sweep (per platform) + `check_mapping_currency` (per-PR staleness nudge) |
 | 14 | **Performance** | (a) *skill runtime* — redundant API round-trips, un-batched prompts, the obj_id read-back pattern; (b) *generated-artifact efficiency* — do emitted formulas use performant TS constructs (`group_aggregate` vs `sql_*_aggregate_op`, join cardinality) or slow ones; (c) *ts-cli* — pagination, token-cache reuse. | Weekly sweep + MANUAL |
 | 16 | **Dependency / supply-chain currency** | Python deps (`typer`, `requests`, `PyYAML`, `keyring`) — pinned ranges, known CVEs, EOL Python versions. | Weekly sweep + `pip-audit` gate (per-PR CI step over core + `[snowflake,qlik]` extras, plus weekly cron — see `.github/workflows/validate.yml`) |
-| 18 | **Harness / framework currency** | The Claude setup itself, checked against the current Claude Code + model lineup: `.claude/settings.json` (stale model pins, unused new settings), `.claude/agents/*.md` frontmatter (model/effort tiers vs `.claude/rules/model-routing.md` and the current model tiers), `.claude/workflows/` (capabilities the runner has gained), and the `.claude/rules/*.md` files' own currency anchors. Same pattern as angle 13, pointed inward — the quality framework goes stale exactly the way product mappings do (a pinned `claude-opus-4-6` sat in settings.json after the Claude 5 family shipped; found manually 2026-07-28). **Repo-scoped only — see the boundary note below.** | Weekly sweep |
+| 18 | **Harness / framework currency** | The Claude setup itself, checked against the current Claude Code + model lineup: `.claude/settings.json` (stale model pins, unused new settings), `.claude/agents/*.md` frontmatter (model/effort tiers vs `.claude/rules/model-routing.md` and the current model tiers), `.claude/workflows/` (capabilities the runner has gained), and the currency anchors on those `.claude/rules/*.md` files that carry one (today just `model-routing.md`, which `check_mapping_currency` nudges via `ANCHORED_FILES` — the rest are internal rules with no external state to go stale). Same pattern as angle 13, pointed inward — the quality framework goes stale exactly the way product mappings do (a pinned `claude-opus-4-6` sat in settings.json after the Claude 5 family shipped; found manually 2026-07-28). **Repo-scoped only — see the boundary note below.** | Weekly sweep |
 
 #### Angle 18's boundary with the machine-level review
 
@@ -228,7 +228,10 @@ once it is routine.
 ### Freshness triggers (nudge, never auto-run)
 
 `check_audit_freshness.py` surfaces *both* cadences when they come due, and is silent
-otherwise — safe to run on every commit and at session start. It nudges; it never runs
+otherwise — safe to run on every commit and at session start. **It now actually runs at
+both**: `pre-commit.sh` and a `SessionStart` hook in `.claude/settings.json` (added
+2026-08-26, finding 18.8 — until then "safe to run at session start" described a
+capability nothing exercised, and the only caller ran *after* the commit). It nudges; it never runs
 an audit. (A full audit spawns many agents and produces human-routed findings — it must
 be a deliberate `Workflow` call, not unattended automation.)
 
