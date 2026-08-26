@@ -91,7 +91,13 @@ def _find_guid_by_name(
             json={
                 "metadata": [{"type": "LOGICAL_TABLE", "subtypes": ["ONE_TO_ONE_LOGICAL"],
                                "name_pattern": name}],
-                "record_size": 10,
+                # -1, not a page: `name_pattern` is a SUBSTRING match, so for a name that
+                # is a substring of many others ("Sales") the first 10 rows need not
+                # contain the exact match -- the post-filter below then finds nothing,
+                # this returns None, and the caller CREATES A DUPLICATE TABLE instead of
+                # updating (audit finding 14.5). -1 is the codebase's own convention
+                # (metadata.py:358, connections.py:139, share.py:356).
+                "record_size": -1,
                 "record_offset": 0,
                 "include_headers": True,
             },
@@ -104,8 +110,13 @@ def _find_guid_by_name(
                 header = r.get("metadata_header") or r
                 if header.get("dataSourceName") == connection_name:
                     return r.get("metadata_id")
-    except Exception:
-        pass
+    except Exception as exc:
+        # Control flow is unchanged (None => "not found"), but a silent swallow here
+        # means the caller creates a duplicate table with no hint why, so say something.
+        # Same fail-open shape as the record_size bug above (audit finding 14.5).
+        typer.echo(f"warning: table lookup for {name!r} failed ({exc.__class__.__name__}: "
+                   f"{exc}); treating as not-found, which may create a duplicate",
+                   err=True)
     return None
 
 

@@ -567,7 +567,9 @@ def import_tml(
                     "/api/rest/2.0/metadata/search",
                     json={
                         "metadata": [{"type": "LOGICAL_TABLE", "name_pattern": obj_name}],
-                        "record_size": 10,
+                        # -1: a substring `name_pattern` page can omit the exact match,
+                        # losing the imported object's GUID (audit finding 14.5).
+                        "record_size": -1,
                         "record_offset": 0,
                         "include_headers": True,
                     },

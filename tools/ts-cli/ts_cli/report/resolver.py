@@ -124,7 +124,9 @@ def resolve_source(input_str: str, client: ThoughtSpotClient) -> SourceDescripto
     # 1-, 2-, 3-part name lookup (exact-name match).
     hits = _search(client, {
         "metadata": [{"type": "LOGICAL_TABLE", "name_pattern": input_str}],
-        "record_size": 10,
+        # -1: a substring `name_pattern` page can omit the exact match, raising
+        # SourceUnresolvedError for an object that exists (audit finding 14.5).
+        "record_size": -1,
         "include_headers": True,
     })
     hits = [h for h in hits if (h.get("metadata_name") or "") == input_str]

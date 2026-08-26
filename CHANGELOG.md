@@ -9,6 +9,19 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ### Fixed
 
+- **A paged substring search could omit the exact match (14.5).** Three call sites issued
+  a `name_pattern` search — a **substring** match — with `record_size: 10` and then
+  post-filtered for an exact name, so for a name that is a substring of many others
+  ("Sales") the exact row need not be in the page. Three silent modes:
+  `tables.py` returned `None` and the caller **created a duplicate table** instead of
+  updating; `tml.py` lost the imported object's GUID; `report/resolver.py` raised
+  `SourceUnresolvedError` for an object that exists. Now `record_size: -1`, the
+  codebase's own convention. The bare `except Exception: pass` beside the first one now
+  emits a diagnostic rather than silently reading as not-found.
+  `chore: bump ts-cli to v0.132.5`
+
+### Fixed
+
 - **Qlik liveboards shipped blank, and its pass-through quoting diverged (17.3, 17.2).**
   `qlik/answers._viz` emitted `{"type": chart_type}` alone while its `_CHART_MAP` produces
   four types in `_CHART_NEEDS_AXIS`, so every board with one imported cleanly and rendered
