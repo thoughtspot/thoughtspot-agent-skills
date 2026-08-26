@@ -1111,6 +1111,64 @@ def _t(name: str) -> dict:
     return next(e for e in out["translated"] if e["name"] == name)
 
 
+# ---------------------------------------------------------------------------
+# Audit 17.1 — every test above uses FULLY-QUALIFIED inner expressions
+# (`SUM(F.LINE_TOTAL)`), so the unqualified form — which is the canonical
+# Semantic View style and what the repo's own worked example uses — was
+# untested, and BL-213 silently filed every such derived metric into skipped[].
+# ---------------------------------------------------------------------------
+
+_D_DDL_UNQUALIFIED = """
+create or replace semantic view SV_U
+  tables ( F, T )
+  relationships ( )
+  metrics (
+    F.AMOUNT as SUM(LINE_TOTAL),
+    T.TARGET_REVENUE as SUM(TARGET_AMOUNT),
+    ATTAINMENT as F.AMOUNT / T.TARGET_REVENUE
+  );
+"""
+
+_D_DDL_QUALIFIED = """
+create or replace semantic view SV_Q
+  tables ( F, T )
+  relationships ( )
+  metrics (
+    F.AMOUNT as SUM(F.LINE_TOTAL),
+    T.TARGET_REVENUE as SUM(T.TARGET_AMOUNT),
+    ATTAINMENT as F.AMOUNT / T.TARGET_REVENUE
+  );
+"""
+
+
+class TestDerivedMetricUnqualifiedInner:
+    """A derived metric must survive an inner metric written the documented way."""
+
+    def test_unqualified_inner_is_not_skipped(self):
+        out = translate_sv_formulas(parse_sv_ddl(_D_DDL_UNQUALIFIED))
+        assert [s["name"] for s in out["skipped"]] == [], (
+            "derived metric skipped for an unqualified inner column: "
+            f"{out['skipped']}"
+        )
+        assert "ATTAINMENT" in [e["name"] for e in out["translated"]]
+
+    def test_unqualified_inner_resolves_to_the_inner_metrics_own_table(self):
+        """The bare column must qualify to the INNER metric's table, not the
+        derived metric's (which has none — it owns no entity)."""
+        out = translate_sv_formulas(parse_sv_ddl(_D_DDL_UNQUALIFIED))
+        expr = next(e for e in out["translated"] if e["name"] == "ATTAINMENT")["ts_expr"]
+        assert "[F::LINE_TOTAL]" in expr, expr
+        assert "[T::TARGET_AMOUNT]" in expr, expr
+
+    def test_qualified_and_unqualified_agree(self):
+        """Both spellings describe the same semantic view, so they must emit the
+        same formula — this is the assertion that would have caught 17.1."""
+        unq = translate_sv_formulas(parse_sv_ddl(_D_DDL_UNQUALIFIED))
+        qual = translate_sv_formulas(parse_sv_ddl(_D_DDL_QUALIFIED))
+        pick = lambda o: next(e for e in o["translated"] if e["name"] == "ATTAINMENT")["ts_expr"]
+        assert pick(unq) == pick(qual)
+
+
 class TestDerivedMetricTranslation:
 
     def test_nothing_skipped(self):
