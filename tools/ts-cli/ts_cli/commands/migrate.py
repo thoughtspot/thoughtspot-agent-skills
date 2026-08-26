@@ -475,9 +475,9 @@ def _classify_scope(source_client, target_client, model_names, exclude_owner_org
 _ROLLBACK_TYPES = ("ANSWER", "LIVEBOARD", "LOGICAL_TABLE")
 
 
-def _types_by_guid(client, guids) -> dict:
-    """`{guid: metadata_type}` for whatever of `guids` still exists, one batched
-    search PER TYPE.
+def _types_by_guid(client, guids) -> tuple[dict, List[str]]:
+    """`({guid: metadata_type}, probe_errors)` for whatever of `guids` still exists,
+    one batched search PER TYPE.
 
     Typed on purpose: an identifier-only search returns 400 (`Specify the
     metadata_type for identifier ...`) for any guid that no longer resolves -- which is
@@ -485,8 +485,23 @@ def _types_by_guid(client, guids) -> dict:
     untyped form made rollback single-shot (verified live 2026-07-29). A TYPED search
     returns 200 with the misses simply absent, so a guid in no type's result is
     already gone -- which a re-runnable rollback treats as done, not as an error.
+
+    **That premise justifies treating an ABSENT ROW as gone. It does not justify
+    treating a FAILED REQUEST as gone** -- and until 2026-08-26 (audit finding 17.4)
+    this swallowed the difference: a non-2xx `continue`d with the error discarded. If
+    all three typed probes failed (5xx, 429, an org-context or auth problem), `out`
+    came back empty, `_typed_batches` reported "already gone" for every guid and
+    returned two empty batches, `_delete_in_order` skipped empty batches so
+    `failures == []`, and the caller wrote `rolled_back: True` and printed "Rollback
+    complete. The source Org was never touched." Nothing had been deleted, on the
+    destructive-recovery path, with the ledger asserting otherwise.
+
+    Before #409 the default `raise_for_status` made a request-level failure abort
+    loudly. Probe errors are therefore returned for the caller to surface, per this
+    module's own discipline: a gate must never go green because it could not run.
     """
     out: dict = {}
+    errors: List[str] = []
     for mtype in _ROLLBACK_TYPES:
         remaining = sorted(set(guids) - set(out))
         if not remaining:
@@ -497,12 +512,22 @@ def _types_by_guid(client, guids) -> dict:
                                  "include_headers": True, "record_size": -1,
                                  "record_offset": 0})
         if resp.status_code >= 300:
+            errors.append(
+                f"{mtype} existence probe failed (HTTP {resp.status_code}) over "
+                f"{len(remaining)} guid(s) -- cannot tell whether these objects still "
+                f"exist, so they are NOT reported as already-deleted"
+            )
             continue
-        for row in resp.json():
+        try:
+            rows = resp.json()
+        except ValueError:
+            errors.append(f"{mtype} existence probe returned unparseable JSON")
+            continue
+        for row in rows:
             guid = row.get("metadata_id")
             if guid:
                 out[guid] = row.get("metadata_type") or mtype
-    return out
+    return out, errors
 
 
 def _print_rollback_dry_run(content, views) -> None:
@@ -516,15 +541,23 @@ def _print_rollback_dry_run(content, views) -> None:
 
 
 def _typed_batches(client, content, views):
-    """`[(label, [(guid, type)])]` in delete order, skipping already-gone objects."""
+    """`([(label, [(guid, type)])], probe_errors)` in delete order, skipping
+    already-gone objects.
+
+    `probe_errors` is non-empty when an existence probe could not be trusted; the
+    caller must treat that as a rollback failure rather than as "nothing to delete"
+    (finding 17.4). A guid is only announced "already gone" when a probe actually
+    succeeded and omitted it.
+    """
     recorded = set(content.values()) | set(views.values())
-    types = _types_by_guid(client, recorded)
-    for guid in sorted(recorded - set(types)):
-        _err(f"  already gone: {guid}")
+    types, probe_errors = _types_by_guid(client, recorded)
+    if not probe_errors:
+        for guid in sorted(recorded - set(types)):
+            _err(f"  already gone: {guid}")
     return [
         ("content", [(g, types[g]) for g in sorted(content.values()) if g in types]),
         ("Views", [(g, types[g]) for g in sorted(views.values()) if g in types]),
-    ]
+    ], probe_errors
 
 
 def _delete_in_order(client, ordered) -> List[str]:
@@ -599,7 +632,8 @@ def rollback_migration(
         return
 
     client = _org_client(target_profile, target_org)
-    failures = _delete_in_order(client, _typed_batches(client, content, views))
+    ordered, probe_errors = _typed_batches(client, content, views)
+    failures = probe_errors + _delete_in_order(client, ordered)
     if failures:
         _err("rollback INCOMPLETE:")
         for problem in failures:

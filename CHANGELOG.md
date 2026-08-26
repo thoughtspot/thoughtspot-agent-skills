@@ -9,6 +9,17 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ### Fixed
 
+- **A failed existence probe made `ts migrate rollback` report success having deleted
+  nothing (finding 17.4).** `_types_by_guid` discarded a non-2xx and `continue`d, so all
+  three typed probes failing left `out` empty → every guid announced "already gone" → two
+  empty batches → `failures == []` → the ledger recorded `rolled_back: True` and printed
+  *"Rollback complete. The source Org was never touched."* Probe errors now propagate to
+  the caller as rollback failures. The documented premise justifies treating an **absent
+  row** as gone; it never justified treating a **failed request** as gone.
+  `chore: bump ts-cli to v0.132.3`
+
+### Fixed
+
 - **Audit mediums batch 1 — three gates hardened, two docs corrected.**
   `check_version_sync`'s TOML fallback was table-blind and is the only path under a bare
   `python3` on 3.9 (4.4 — reproduced in both the false-fail and false-pass directions);

@@ -203,3 +203,90 @@ def test_same_org_audit_reports_NO_TARGET_when_the_master_is_not_published_in(
     assert report["models"][0]["target_guid"] is None
     assert report["models"][0]["readiness"] == "NO_TARGET"
     assert report["overall_ready"] is False
+
+
+class TestRollbackProbeFailures:
+    """Finding 17.4 — a failed existence probe must not read as "already deleted".
+
+    The premise `_types_by_guid` documents ("a TYPED search returns 200 with the misses
+    simply absent, so a guid in no result is already gone") is correct for an ABSENT
+    ROW and wrong for a FAILED REQUEST. Before this fix a non-2xx `continue`d with the
+    error discarded, so all three probes failing produced: empty `out` -> every guid
+    announced "already gone" -> two empty batches -> `failures == []` ->
+    `rolled_back: True` and "Rollback complete. The source Org was never touched."
+    Nothing deleted, on the destructive-recovery path, ledger asserting otherwise.
+    """
+
+    class _Resp:
+        def __init__(self, status, payload=None):
+            self.status_code = status
+            self._payload = payload if payload is not None else []
+
+        def json(self):
+            return self._payload
+
+    class _Client:
+        """Returns a scripted status per POST, in call order."""
+        def __init__(self, *statuses):
+            self._statuses = list(statuses)
+            self.calls = []
+
+        def post(self, path, **kw):
+            self.calls.append(path)
+            status, payload = self._statuses.pop(0)
+            return TestRollbackProbeFailures._Resp(status, payload)
+
+    def test_all_probes_failing_surfaces_errors_not_silence(self):
+        from ts_cli.commands import migrate
+        client = self._Client((500, None), (500, None), (500, None))
+        types, errors = migrate._types_by_guid(client, {"g1", "g2"})
+        assert types == {}
+        # One error per attempted type — not a silent empty dict.
+        assert len(errors) == 3
+        assert all("probe failed" in e for e in errors)
+        assert all("HTTP 500" in e for e in errors)
+
+    def test_probe_errors_reach_the_caller_as_rollback_failures(self):
+        from ts_cli.commands import migrate
+        client = self._Client((429, None), (429, None), (429, None))
+        ordered, probe_errors = migrate._typed_batches(
+            client, {"answer-a": "g1"}, {"view-v": "g2"})
+        assert probe_errors, "probe errors must propagate to the rollback caller"
+        # Batches are empty, which is exactly why the errors must not be dropped:
+        # _delete_in_order skips empty batches and would return no failures.
+        assert all(items == [] for _label, items in ordered)
+
+    def test_a_guid_is_not_announced_gone_when_the_probe_failed(self, capsys):
+        from ts_cli.commands import migrate
+        client = self._Client((503, None), (503, None), (503, None))
+        migrate._typed_batches(client, {"answer-a": "g1"}, {})
+        assert "already gone" not in capsys.readouterr().err
+
+    def test_successful_probe_still_reports_a_genuinely_absent_guid(self, capsys):
+        """The re-runnable-rollback behaviour must survive the fix."""
+        from ts_cli.commands import migrate
+        client = self._Client(
+            (200, [{"metadata_id": "g1", "metadata_type": "ANSWER"}]),
+            (200, []), (200, []))
+        ordered, probe_errors = migrate._typed_batches(
+            client, {"answer-a": "g1"}, {"view-v": "gone"})
+        assert probe_errors == []
+        assert "already gone: gone" in capsys.readouterr().err
+        assert ("content", [("g1", "ANSWER")]) in ordered
+
+    def test_unparseable_json_is_an_error_not_an_empty_result(self):
+        from ts_cli.commands import migrate
+
+        class BadJson:
+            status_code = 200
+
+            def json(self):
+                raise ValueError("not json")
+
+        class C:
+            def post(self, path, **kw):
+                return BadJson()
+
+        types, errors = migrate._types_by_guid(C(), {"g1"})
+        assert types == {}
+        assert errors and "unparseable" in errors[0]
