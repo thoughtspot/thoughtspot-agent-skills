@@ -47,11 +47,38 @@ for new codification opportunities.
 | 6 | Testing-framework value | Tests assert behaviour, not just presence; smoke tests are real | `check_smoke_tests` (presence) + MANUAL (value) |
 | 7 | PR-validation effectiveness | CI is not a strict subset of pre-commit; gates actually fire; gate effectiveness review (see `docs/quality-gates.md` audit checklist) | `generate_quality_gates --check` (catalog freshness) + MANUAL (effectiveness review) |
 | 8 | Cross-runtime skill drift | CLI / CoCo / Databricks mirrors in sync; parity matrix current | `check_mirror_sync`, `check_runtime_coverage`, `generate_parity --check`, `check_skill_naming` |
-| 9 | Conversion consistency | The conversion skills agree with each other against the invariants | `conversion-consistency-auditor` agent, `check_coverage_matrix`, `check_formula_catalog` |
+| 9 | Conversion consistency **+ implementation drift** | Two halves. (a) *Semantic*: every converter agrees with the invariants. (b) *Implementation*: converters agree on **how** they are built — shared helpers in `formula_common` imported rather than re-implemented or skipped, one spelling per emitted construct, nothing hand-instructed in prose that a sibling codified. Scope is **discovered, never listed** — a new `ts-convert-*` is audited from its first commit. | `conversion-consistency-auditor` agent (**now invoked by the sweep** — see the note below), `check_coverage_matrix`, `check_formula_catalog`, `check_converter_parity` *(planned, BL-217)* |
 | 10 | Security | No secrets, no v1 endpoints, credential-handling rules honoured | `check_secrets`, `check_no_v1_endpoints` |
 | 11 | Codification | (a) Repeated skill logic that should become `ts` CLI / shared reference / validator; (b) *agentic → deterministic*: skill steps that are mechanical transformations (parsing, type mapping, TML emission, formula rewriting) currently executed by the LLM but codifiable as deterministic Python — yielding faster, cheaper, more reproducible results. The Tableau `translate-formulas` pipeline (ts-cli v0.17.0) is the reference pattern. | `jscpd` (code-duplication report, sweep) + MANUAL |
 | 17 | Change correctness (delta bug-hunt) | Correctness bugs and `.claude/rules`/CLAUDE.md violations in the code that landed **since the last full audit** — the backstop for what slipped past per-PR review. Distinct from angle 4 (which is code *health*: complexity, dead code, duplication) — this hunts for *behavioural bugs*. | **full sweep only:** a `max`-level `/code-review` agent over the `<last-full-audit-sha>..HEAD` diff (see below) + **per-PR `/code-review` (recommended, primary net)** |
 | 12 | Synthesis / advise | Prioritise findings, route each to a bucket | MANUAL (the sweep's final step) |
+
+#### Angle 9's judgment half ran nowhere until 2026-08-26
+
+Worth recording, because it is the failure mode an enforcement column invites. Angle 9's
+enforcement listed an *agent* alongside two validators. The validators run per-PR; the
+agent ran neither per-PR nor in the sweep — the workflow never invoked it. So the half of
+angle 9 that needs judgment (semantic invariants, and implementation drift, which no
+validator covers at all) was enforced by nothing while the rubric read as covered.
+
+Two compounding staleness bugs made it worse: the agent scoped itself to a hardcoded
+"five conversion skills" when nine existed, and to invariants "I1–I7, N1" when the doc
+had grown to I1–I14 + PT1. Invoked as written, it would have audited 5 of 9 converters
+against 8 of 15 invariants.
+
+The fix has three parts, all landed together: the sweep now invokes the agent; the agent
+discovers converters and invariants at run time instead of listing them; and angle 9's
+remit explicitly covers implementation drift. **The lesson generalises — when an angle's
+enforcement names an agent rather than a validator, check that something actually
+invokes it.** Angle 12 (synthesis) is the only other angle in that shape, and it runs by
+construction.
+
+**How a new converter gets picked up.** Nothing is edited. The agent globs
+`agents/cli/ts-convert-*`, classifies by the `from`/`to` direction token the naming rule
+guarantees, and enumerates invariants from the schema file's headings. Same principle as
+`tools/validate/_dirs.py`, which exists because ~18 validators each hardcoded the runtime
+dir list (BL-110) — a missed edit there reported PASS, exactly as a missed edit here
+reported "consistent".
 
 #### Code-health tooling (the sweep runs these; not per-PR gates)
 
@@ -263,3 +290,4 @@ that repo's validators. The date/age/activity machinery is unchanged.
 | 2026-07-28 | Angle 18 added | Harness/framework currency — the Claude setup (settings, agent tiers, workflows, rules anchors) checked against the current Claude Code + model lineup; joins the external sweep. Motivated by the stale `claude-opus-4-6` pin found in the 2026-07-28 framework review |
 | 2026-07-29 | Full (all angles incl. 17/18) | 63 raw → 58 findings (5 high / 23 med / 30 low). Headline: 4 high-severity correctness bugs in the rebuilt `ts migrate` engine (angle 17's first catch) + stale repo-publisher push-to-main flow. 6 validator promotions proposed. See `docs/audit/2026-07-29-full.md` |
 | 2026-08-26 | Angle 18 boundary + 18.3 closed | `consistency-checker` moved from `model: haiku` to session model at `effort: low` (the rule's own "effort over model" principle, and the SDD policy's no-Haiku rule); added the corollary that a `model:` pin needs a reason the effort dial cannot serve. Documented the angle-18 / `claude-practice:setup-review` ownership split after finding both read agent frontmatter |
+| 2026-08-26 | Angle 9 made real + self-scaling | The `conversion-consistency-auditor` was invoked by nothing (not per-PR, not the sweep) and hardcoded 5 of 9 converters / 8 of 15 invariants. Wired into the sweep, scope now discovered at run time, remit broadened to implementation drift, and PT2 added for the no-native-function class that shipped as `Migrated` in PR #440 |

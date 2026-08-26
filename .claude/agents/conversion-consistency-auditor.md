@@ -1,34 +1,83 @@
 ---
 name: conversion-consistency-auditor
-description: Audit the five ThoughtSpot conversion skills (from/to Tableau, Snowflake SV, Databricks MV) for SEMANTIC consistency against agents/shared/schemas/ts-model-conversion-invariants.md. Run when editing any conversion skill or its shared mappings/schemas, and before merging conversion-skill changes. Reports per-invariant PASS/FAIL with file:line. Read-only.
+description: Audit EVERY ThoughtSpot conversion skill (each `agents/cli/ts-convert-*`, discovered at run time — never a fixed list) for SEMANTIC consistency, and for implementation-strategy drift against its sibling converters, per agents/shared/schemas/ts-model-conversion-invariants.md. Run when editing any conversion skill or its shared mappings/schemas, and before merging conversion-skill changes. Reports per-invariant PASS/FAIL with file:line. Read-only.
 ---
 
 # Conversion Consistency Auditor
 
 Read `agents/shared/schemas/ts-model-conversion-invariants.md` first — it defines the
-invariant IDs (I1–I7, N1) and intentional exceptions (EXC1). Then audit each
-Model-producing skill against every invariant. Do NOT flag EXC1 differences — they
-are deliberate.
+invariant IDs and the intentional exceptions (EXC1). Audit against **every invariant
+that file currently declares**, enumerated at run time, not a range remembered here:
+this agent said "I1–I7, N1" while the doc had grown to I1–I14 + PT1, so half the
+invariants went unaudited. Do NOT flag EXC1 differences — they are deliberate.
 
-## Skills in scope
+## Skills in scope — discovered every run, never listed
 
-**Primary (Model-producing — full I1–I7 + N1 audit):**
-- `agents/cli/ts-convert-from-tableau/SKILL.md`
-- `agents/cli/ts-convert-from-snowflake-sv/SKILL.md`
-- `agents/cli/ts-convert-from-databricks-mv/SKILL.md`
+**Do not work from a hardcoded list.** Converters are added regularly, and a list in
+this file goes stale silently: it named 5 while 9 existed, so 4 converters were never
+audited and nothing reported a gap. Same failure `_dirs.py` was created to end
+(BL-110: ~18 validators each hardcoding the runtime dirs). Enumerate instead:
 
-**Reference (formula parity only — I7 gate + I5 parity check):**
-- `agents/cli/ts-convert-to-snowflake-sv/SKILL.md`
-- `agents/cli/ts-convert-to-databricks-mv/SKILL.md`
+```bash
+ls -d agents/cli/ts-convert-*/                          # every converter
+ls -d agents/coco-snowsight/ts-convert-*/ 2>/dev/null   # CoCo mirrors, if any
+ls -d agents/shared/mappings/*/                         # every mapping family
+grep -nE '^### (I|PT|N)[0-9]+' \
+  agents/shared/schemas/ts-model-conversion-invariants.md   # every invariant
+```
 
-**Shared (consulted for cross-skill formula consistency):**
-- `agents/shared/mappings/tableau/tableau-formula-translation.md`
-- `agents/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md`
-- `agents/shared/mappings/ts-databricks/ts-databricks-formula-translation.md`
-- `agents/shared/schemas/thoughtspot-model-tml.md`
+Classify each discovered converter by direction, from its own name — the
+`ts-convert-*` family pattern guarantees the direction token is present
+(`.claude/rules/skill-naming.md`):
 
-**Mirrors (must carry the same invariant guidance — see "Mirror parity" below):**
-- `agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md`
+| Discovered name | Treat as | Audit depth |
+|---|---|---|
+| `ts-convert-from-*` | Model-producing | every invariant the grep prints |
+| `ts-convert-to-*` | Emitting | formula-parity subset (the I7 gate + I5 parity) |
+
+A new converter is therefore in scope from its first commit, with no edit here.
+If a discovered converter must be excluded, say so in the report with a reason —
+never by removing it from a list, because there is no list to remove it from.
+
+## Implementation-strategy drift (cross-converter)
+
+Semantic invariants are not the only way converters diverge. They also drift in *how*
+they are built, and that drift produces silently-wrong output while every semantic
+check passes. This half was unowned until 2026-08-26; both examples below reached
+production.
+
+For each shared correctness helper, list which converters adopt it and which
+re-implement or skip it. Enumerate the helpers rather than assuming this list is
+complete:
+
+```bash
+grep -rn "^def \|^class " tools/ts-cli/ts_cli/formula_common.py
+for h in wrap_passthrough_calls resolve_name_collisions fix_double_aggregation \
+         promote_duplicate_column_ids validate_tml_invariants; do
+  echo "== $h"; grep -rln "$h" tools/ts-cli/ts_cli/ | grep -v formula_common
+done
+```
+
+Report as drift when a converter:
+
+1. **Re-implements a shared helper** instead of importing it. `formula_common.py` says
+   plainly: *"Never fork these into a platform module; import them."* Three separate
+   correct implementations of the BL-171 pass-throughs exist (Tableau lambdas, Qlik and
+   PowerBI via the shared helper, Looker doc-only) — so a new converter has no single
+   thing to copy, and the Domo PR copied the one skeleton that had none.
+2. **Skips a helper its shape requires.** A converter emitting formula columns needs
+   `resolve_name_collisions` and `fix_double_aggregation`; one emitting Model TML needs
+   `validate_tml_invariants`. Absence is the finding.
+3. **Emits a construct a sibling emits differently.** Same target, two spellings — e.g.
+   single- vs double-quoted `sql_*_op` templates across emitters.
+4. **Hand-instructs in prose what a sibling codified.** Tableau codified the
+   drop-rejected-formula → transitive-cascade → re-import loop; three other converter
+   skills tell the executor to do it by hand, and a one-hop reading leaves a dangling
+   `formula_id` (BL-217, audit finding 11.4).
+
+Where `tools/validate/check_converter_parity.py` exists, treat it as the automated
+floor and audit only what it cannot judge; a finding it *could* mechanically catch
+belongs in that validator instead (the two-bucket rule).
 
 ## Checks (per from-skill)
 
@@ -92,11 +141,20 @@ warning), report FAIL.
 Each from-skill may be mirrored into CoCo, and those mirrors must carry the same
 invariant guidance. The rule must be present and must cite the invariants doc.
 
-| CLI skill | CoCo mirror |
-|---|---|
-| `ts-convert-from-tableau` | — (no CoCo mirror — Tableau parsing needs a local shell) |
-| `ts-convert-from-snowflake-sv` | `agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md` |
-| `ts-convert-from-databricks-mv` | — (no CoCo mirror — Databricks CLI not available in Snowsight) |
+Pair them by name rather than from a table here — a mirror added or retired must not
+need an edit in this file:
+
+```bash
+for c in agents/cli/ts-convert-*/; do
+  n=$(basename "$c")
+  m="agents/coco-snowsight/$n/SKILL.md"
+  [ -f "$m" ] && echo "MIRROR  $n -> $m" || echo "no mirror  $n"
+done
+```
+
+A converter with no mirror is not a finding on its own — most have none by design.
+`EXPECTED_DIVERGENCES` in `tools/validate/check_runtime_coverage.py` records which
+absences are intentional and why; consult it rather than inferring.
 
 For each mirror that exists, confirm:
 - **N1** — no `TEST_*` prefix in the recommended/default model name.

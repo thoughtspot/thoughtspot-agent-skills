@@ -525,6 +525,46 @@ provides an equivalent SQL function, translate it via a ThoughtSpot pass-through
 
 ---
 
+### PT2 — Six string functions have no native ThoughtSpot form; renaming to the same name is rejected at import
+
+**Rule:** `UPPER`, `LOWER`, `TRIM`, `LTRIM`, `RTRIM` and `REPLACE` do **not** exist as
+ThoughtSpot formula functions. A converter must emit a `sql_string_op` pass-through, never
+a same-named rename. Live-disproved on se-thoughtspot: `upper`/`lower` 2026-06-13,
+the other four 2026-07-29/30 (BL-170 / BL-171). The authoritative list — including any
+function later added or removed — is the strikethrough rows in
+`agents/shared/schemas/thoughtspot-formula-patterns.md`; read it rather than trusting this
+paragraph's enumeration.
+
+**Failure mode:** the formula is **rejected at import with `error_code 14516`** — but the
+conversion report says `Migrated`, because a name-for-name rename looks like a successful
+translation to every check that only asks "is this a plausible function?".
+
+**Applies to:** every converter that translates source string functions.
+
+**Correct pattern:**
+```
+UPPER(`Region`)   ->  sql_string_op ( "UPPER({0})" , [Region] )
+TRIM(`Name`)      ->  sql_string_op ( "TRIM({0})" , [Name] )
+```
+
+**Wrong (do NOT do this):**
+```
+UPPER(`Region`)   ->  upper([Region])     # WRONG — `upper` does not exist; rejected at import
+TRIM(`Name`)      ->  trim([Name])        # WRONG — same
+```
+
+Use `formula_common.wrap_passthrough_calls` with a `PASSTHROUGH_MAP`, rather than a new
+per-platform implementation — see the cross-converter drift section of the
+`conversion-consistency-auditor` agent, and BL-217.
+
+**Why this is an invariant and not just a mapping row.** `check_formula_catalog` already
+guards the function names, but only in markdown **table rows** — a mapping doc that writes
+its function map as prose bullets bypasses it silently. That is exactly how a converter
+shipped all six of these as `Migrated` (PR #440). The invariant exists so the audit catches
+the class even when the validator's parser cannot see it.
+
+---
+
 ### I14 — No ordered table pair may be joined more than once
 
 **Rule:** Within one Model, a given `(from_node, joins[].with)` pair may appear at most

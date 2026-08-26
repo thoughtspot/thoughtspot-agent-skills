@@ -197,6 +197,12 @@ def get_staged_added_lines(repo_root: Path, file_path: Path) -> set[str]:
     return added
 
 
+# A CONCRETE converter name (platform token present). The family patterns
+# `ts-convert-*` / `ts-convert-from-*` / `ts-convert-to-*` are the correct forms and
+# do not match: `*` is not in the character class.
+_CONCRETE_CONVERTER_RE = re.compile(r"ts-convert-(?:from|to)-[a-z0-9][a-z0-9-]*")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Detect known anti-patterns.")
     parser.add_argument("--root", default=".", help="Repo root directory (default: current dir)")
@@ -405,6 +411,35 @@ def main() -> int:
                     f"      Claude skills call the `ts` CLI, never import ts_cli internals\n"
                     f"      directly (.claude/rules/ts-cli.md). If the CLI lacks the operation,\n"
                     f"      add a public `ts` command instead of reaching into ts_cli's modules."
+                )
+                total_hits += 1
+
+    # ---------------------------------------------------------------------
+    # conversion-consistency-auditor must DISCOVER converters, never list them.
+    #
+    # The agent named a hardcoded "five conversion skills" while nine existed, so
+    # four were never audited and nothing reported a gap (2026-08-26 audit, angle 9).
+    # Same failure `_dirs.py` was created to end (BL-110). A concrete converter name
+    # in PROSE means someone re-introduced a list; inside a fenced block it is
+    # illustrative sample output and fine.
+    # ---------------------------------------------------------------------
+    auditor = repo_root / ".claude/agents/conversion-consistency-auditor.md"
+    if auditor.exists():
+        in_fence = False
+        for line_num, line in enumerate(auditor.read_text(encoding="utf-8").splitlines(), 1):
+            if line.startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            for m in _CONCRETE_CONVERTER_RE.finditer(line):
+                print(
+                    f"FAIL  .claude/agents/conversion-consistency-auditor.md:{line_num}  "
+                    f"hardcoded-converter-in-auditor  \u2192  {m.group(0)!r}\n"
+                    f"      Angle 9's scope is discovered at run time, never listed: name a\n"
+                    f"      converter in prose and the next one added is silently unaudited.\n"
+                    f"      Use the `ts-convert-*` glob (see the agent's \"Skills in scope\"\n"
+                    f"      section). Illustrative sample output inside a ``` block is fine."
                 )
                 total_hits += 1
 

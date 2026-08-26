@@ -192,6 +192,23 @@ const finders = []
 for (const p of PLATFORMS) {
   finders.push(() => agent(platformPrompt(p), { label: `currency:${p.key}`, phase: 'Survey', schema: FINDINGS_SCHEMA }))
 }
+const CONVERSION_PROMPT = `Audit conversion consistency across EVERY converter (angle 9).
+
+Follow your agent instructions: discover the converter set and the invariant set at run
+time — do not work from any list in this prompt, which would go stale the same way the
+agent's own list did.
+
+Report findings in two classes:
+1. SEMANTIC — a converter that violates, contradicts or fails to state an invariant
+   declared in agents/shared/schemas/ts-model-conversion-invariants.md.
+2. IMPLEMENTATION DRIFT — a converter that re-implements a shared correctness helper
+   instead of importing it, skips one its shape requires, emits a construct a sibling
+   emits differently, or hand-instructs in prose what a sibling codified.
+
+For each finding give file:line, the invariant id (or helper name) and the concrete
+wrong output it produces. A finding a validator could mechanically catch should be
+reported as a validator candidate, not as prose.`
+
 // Angle 14, 16 — always part of the external sweep
 finders.push(() => agent(PERF_PROMPT, { label: 'performance', phase: 'Survey', schema: FINDINGS_SCHEMA }))
 // Dependency currency is mechanical (read pyproject, check advisories) — low effort suffices.
@@ -203,6 +220,13 @@ if (scope === 'full') {
   for (const a of INTERNAL_ANGLES) {
     finders.push(() => agent(internalPrompt(a), { label: `internal:${a.key}`, phase: 'Survey', schema: FINDINGS_SCHEMA, ...(a.effort ? { effort: a.effort } : {}) }))
   }
+  // Angle 9 — conversion consistency. Runs the dedicated auditor agent rather than a
+  // generic finder: its judgment half (semantic invariants + cross-converter
+  // implementation drift) is not covered by any validator, so before 2026-08-26 it ran
+  // NOWHERE — not per-PR, not in the sweep — and the rubric's enforcement column for
+  // this angle was fiction. The agent discovers its own scope, so a new converter is
+  // audited from its first commit with no edit here.
+  finders.push(() => agent(CONVERSION_PROMPT, { label: 'conversion-consistency', phase: 'Survey', schema: FINDINGS_SCHEMA, agentType: 'conversion-consistency-auditor' }))
   // Angle 17 — max /code-review backstop over the delta (full scope only).
   finders.push(() => agent(CODE_REVIEW_PROMPT, { label: 'code-review:delta', phase: 'Survey', schema: FINDINGS_SCHEMA, effort: 'max' }))
 }
