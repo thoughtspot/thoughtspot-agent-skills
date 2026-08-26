@@ -119,6 +119,20 @@ jobs:
           python3 tools/validate/suggest_repo_changelog.py --root . --check \
             --base "origin/${{ github.base_ref }}"
 
+      - name: Dependency-types co-change gate (PR only)
+        # CLAUDE.md's change-impact map requires ts-dependency-manager's SKILL.md /
+        # open-items.md and references/dependency-types.md to move together. Until
+        # 2026-08-26 that rule existed ONLY as an interactive pre-commit prompt, run
+        # bare with no exit-code capture and no CI counterpart -- bypassable by
+        # ignoring the prompt, by --no-verify, or by committing without a TTY
+        # (audit finding 7.2). This is the missing server-side half; the local prompt
+        # stays soft so ordinary commits are never blocked.
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          python3 tools/validate/suggest_dependency_types.py --root . --check \
+            --base "origin/${{ github.base_ref }}"
+
       - name: Quality gates catalog gate (PR only, scoped hard-fail)
         # 2026-07-29 audit finding 7.1: the catalog check above is the only gate where
         # CI was WEAKER than the pre-commit hook (soft `|| echo WARN` in CI vs. a hard

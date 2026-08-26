@@ -9,6 +9,18 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ### Fixed
 
+- **Audit mediums batch 1 — three gates hardened, two docs corrected.**
+  `check_version_sync`'s TOML fallback was table-blind and is the only path under a bare
+  `python3` on 3.9 (4.4 — reproduced in both the false-fail and false-pass directions);
+  `suggest_dependency_types` gained a `--check`/`--base` mode and a CI step, so a rule
+  that was interactive-only now has a server-side half (7.2); a `check_patterns` rule
+  bans instructional `ts spotql`, the deprecated alias, in SKILL.md prose (17.5); the
+  smoke-tests README's blanket "require live credentials" was wrong for 9 of 21 suites
+  and omitted five files, now rewritten by tier and gated (6.7); dead import removed
+  (4.5).
+
+### Fixed
+
 - **BL-218 — the `--name-status` call sites dropped non-ASCII paths.** git octal-quotes
   such paths, and both callers split on newlines/tabs, so a renamed or added file with a
   non-ASCII name vanished from the changelog suggestion and the audit-activity count.

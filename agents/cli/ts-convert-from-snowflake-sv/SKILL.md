@@ -913,7 +913,7 @@ the Model's grand total to the SV's:
 
 ```bash
 # ThoughtSpot
-ts spotql fetch-data 'SELECT SUM("{measure}") FROM "{model_name}" AS "t1"' \
+ts agentql fetch-data 'SELECT SUM("{measure}") FROM "{model_name}" AS "t1"' \
   -m {model_guid} --profile {profile}
 ```
 ```sql

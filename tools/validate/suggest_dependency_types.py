@@ -32,7 +32,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from _git import git_paths
+from _git import git_paths, git_status_paths
 
 
 SKILL_DIR_REL = "agents/cli/ts-dependency-manager"
@@ -43,8 +43,14 @@ TRIGGER_PATHS = (
 TARGET_PATH = f"{SKILL_DIR_REL}/references/dependency-types.md"
 
 
-def get_staged_files(repo_root: Path) -> list[str]:
-    # NUL-split via _git — see audit 4.2 (quoted paths were dropped silently).
+def get_staged_files(repo_root: Path, base: str | None = None) -> list[str]:
+    """Changed paths. Default: staged. With `base`, the paths a PR introduces.
+
+    NUL-split via _git — see audit 4.2 (quoted paths were dropped silently).
+    """
+    if base:
+        # Server-side: nothing is staged in CI, so compare the PR against its base.
+        return [path for _p, _s, path in git_status_paths(["diff", f"{base}...HEAD"], repo_root)]
     return git_paths(["diff", "--cached", "--name-only", "--diff-filter=ACM"], repo_root)
 
 
@@ -53,14 +59,44 @@ def main() -> int:
         description="Soft prompt to update dependency-types.md when its companion files change.",
     )
     parser.add_argument("--root", default=".", help="Repo root directory (default: current dir)")
+    parser.add_argument("--check", action="store_true",
+                        help="Gate mode: exit 1 if a trigger file changed without the "
+                             "companion. Works in non-TTY (CI).")
+    parser.add_argument("--base", default=None,
+                        help="With --check: compare against this ref instead of the "
+                             "index, for CI where nothing is staged.")
     args = parser.parse_args()
 
-    # Non-interactive environments (CI, GUI git clients) — skip silently.
-    # The change impact map in CLAUDE.md is the human reviewer's checklist.
+    repo_root = Path(args.root).resolve()
+
+    # Gate mode: the server-side half. Until 2026-08-26 this rule existed only as an
+    # interactive prompt with no exit-code capture and no CI counterpart, so it was
+    # bypassable three ways — ignore the prompt, --no-verify, or commit without a TTY
+    # (audit finding 7.2). Every other co-change rule in the repo has a hard half.
+    if args.check:
+        changed = get_staged_files(repo_root, base=args.base)
+        triggered = [p for p in changed if p in TRIGGER_PATHS]
+        if not triggered or TARGET_PATH in changed:
+            return 0
+        if not (repo_root / TARGET_PATH).exists():
+            return 0        # pre-1.0 wip: the companion does not exist yet
+        print("  ts-dependency-manager: companion doc not updated.")
+        for p in triggered:
+            print(f"    changed: {p}")
+        print(f"    missing: {TARGET_PATH}")
+        print()
+        print("  CLAUDE.md's change-impact map requires these to move together: that file")
+        print("  holds the status table, hierarchy and sample output for every dependency")
+        print("  type. If this change genuinely needs no doc update, say so in the PR and")
+        print("  include a trivial touch, or relax the rule in CLAUDE.md deliberately.")
+        return 1
+
+    # Non-interactive environments (GUI git clients) — skip the PROMPT silently.
+    # The change impact map in CLAUDE.md is the human reviewer's checklist, and
+    # --check above is the enforcing half.
     if not sys.stdin.isatty():
         return 0
 
-    repo_root = Path(args.root).resolve()
     staged = get_staged_files(repo_root)
 
     triggered_by = [p for p in staged if p in TRIGGER_PATHS]

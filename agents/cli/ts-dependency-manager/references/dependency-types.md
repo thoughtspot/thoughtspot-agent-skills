@@ -280,3 +280,4 @@ edit needed for the coverage messaging itself. If the renderer's bucketing logic
 to change (e.g. introducing a new bucket), update `STATUS_TO_BUCKET` in
 [build_coverage.py](build_coverage.py) and the unit test in [tests/](#) (when the test
 file is added; currently smoke-tested via `--list`).
+

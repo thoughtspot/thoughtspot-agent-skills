@@ -39,9 +39,39 @@ def read_pyproject_version(pyproject_file: Path) -> str | None:
             return data.get("project", {}).get("version")
         except Exception:
             pass
-    # Fallback: regex parse
-    m = re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE)
-    return m.group(1) if m else None
+    # Fallback: section-anchored scan, used whenever neither tomllib (3.11+) nor
+    # tomli is importable — which is the ONLY path under a bare `python3` on a 3.9
+    # interpreter, and both pre-commit.sh and CI invoke this as bare `python3`.
+    #
+    # A plain `^version\s*=` MULTILINE search is table-blind: it returns the first
+    # column-0 `version =` anywhere in the file. That is correct today only because
+    # `[build-system]` happens to use `requires =`. Reproduced both directions
+    # (2026-08-26 audit, finding 4.4): a `[tool.poetry] version` above `[project]`
+    # yields a mismatch that does not exist, and a `[project]` with no version at
+    # all silently adopts some other table's — a false PASS on a version gate.
+    return _version_in_project_table(content)
+
+
+def _version_in_project_table(content: str) -> str | None:
+    """`version` from the `[project]` table only, ignoring every other table.
+
+    Deliberately not a general TOML parser — it needs one key from one table. Stops
+    at the next `[section]` header so a key in a later table can never leak in.
+    """
+    in_project = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            # `[project]` exactly — not `[project.optional-dependencies]`, which is a
+            # different table and must not satisfy the lookup.
+            in_project = stripped == "[project]"
+            continue
+        if not in_project:
+            continue
+        m = re.match(r'version\s*=\s*["\']([^"\']+)["\']', stripped)
+        if m:
+            return m.group(1)
+    return None
 
 
 def main() -> int:

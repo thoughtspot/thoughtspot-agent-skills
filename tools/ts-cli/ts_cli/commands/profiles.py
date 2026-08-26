@@ -19,7 +19,6 @@ from ts_cli.profile_ops import (
     load_platform_profiles,
     remove_profile as ops_remove_profile,
     slugify,
-    upsert_zshenv,
     windows_env_commands,
     zshenv_export_line,
 )

@@ -308,6 +308,32 @@ def _find_orphan_smoke_tests(repo_root: Path, tracked: set[str]) -> list[str]:
     return orphans
 
 
+def _find_undocumented_smoke_tests(repo_root: Path, tracked: set[str]) -> list[str]:
+    """Every tracked smoke suite must appear in tools/smoke-tests/README.md.
+
+    Five tracked files were missing from that table (2026-08-26 audit, finding 6.7),
+    which made them invisible to anyone auditing coverage from the docs — and nothing
+    checked it: `check_consistency` covers the README/SETUP *skill* tables, not this
+    one. A file-not-in-table check is cheap and closes the drift for good.
+    """
+    readme = repo_root / "tools" / "smoke-tests" / "README.md"
+    if not readme.is_file():
+        return []
+    text = readme.read_text(encoding="utf-8")
+    missing = []
+    for rel in sorted(tracked):
+        if not rel.startswith("tools/smoke-tests/smoke_") or not rel.endswith(".py"):
+            continue
+        name = Path(rel).name
+        if name not in text:
+            missing.append(
+                f"FAIL  {name}  →  tracked but absent from tools/smoke-tests/README.md.  "
+                f"Add a row (with its tier: Pure / CLI-only / Live) so coverage is "
+                f"visible from the docs."
+            )
+    return missing
+
+
 def check(repo_root: Path, staged_only: bool = False) -> tuple[list[str], list[str]]:
     """Return (failures, info_messages)."""
     failures: list[str] = []
@@ -350,6 +376,7 @@ def check(repo_root: Path, staged_only: bool = False) -> tuple[list[str], list[s
 
     failures.extend(_find_orphan_smoke_tests(repo_root, tracked))
     failures.extend(_find_double_claimed_skills(repo_root, tracked))
+    failures.extend(_find_undocumented_smoke_tests(repo_root, tracked))
 
     return failures, info
 

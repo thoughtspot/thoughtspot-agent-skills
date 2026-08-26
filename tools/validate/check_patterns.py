@@ -490,6 +490,39 @@ def main() -> int:
                 )
                 total_hits += 1
 
+    # ---------------------------------------------------------------------
+    # `ts spotql` is a deprecated hidden alias for `ts agentql`.
+    #
+    # The v2.1.0 rename's own changelog scoped itself to "all skill/doc references",
+    # but #434 re-seeded `ts spotql fetch-data` into an instructional step, and it
+    # sat there as the last instructional use in any SKILL.md (2026-08-26 audit,
+    # finding 17.5). It still works, so nothing broke and nothing complained -- the
+    # exact profile of drift a grep gate is for.
+    #
+    # Changelog rows are history and must keep the old spelling. A line that is
+    # explicitly ABOUT the deprecation is also legitimate, so a line naming the
+    # alias relationship is allowed through.
+    # ---------------------------------------------------------------------
+    for skill_md in sorted(repo_root.glob("agents/*/*/SKILL.md")):
+        rel = str(skill_md.relative_to(repo_root))
+        in_changelog = False
+        for line_num, line in enumerate(skill_md.read_text(encoding="utf-8").splitlines(), 1):
+            if line.startswith("## "):
+                in_changelog = line.strip().lower() == "## changelog"
+            if in_changelog or "ts spotql" not in line:
+                continue
+            # A sentence documenting the alias itself, not instructing its use.
+            if "deprecated" in line.lower() or "alias" in line.lower():
+                continue
+            print(
+                f"FAIL  {rel}:{line_num}  deprecated-ts-spotql  \u2192  {line.strip()[:90]!r}\n"
+                f"      `ts spotql` is a deprecated hidden alias for `ts agentql`. Operators\n"
+                f"      copy-paste steps, so an instructional use re-seeds the old spelling.\n"
+                f"      Use `ts agentql`. Changelog rows and lines describing the alias are\n"
+                f"      exempt; this is neither."
+            )
+            total_hits += 1
+
     print()
     if total_hits:
         print(f"{total_hits} anti-pattern(s) found.")
