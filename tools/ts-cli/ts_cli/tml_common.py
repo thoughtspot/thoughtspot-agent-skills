@@ -154,3 +154,23 @@ def format_import_failures(failures: List[Dict[str, Any]],
             detail = f"error_code {code}" if code else "no error message supplied"
         lines.append(f"  [{failure.get('request_index')}] {' '.join(detail.split())}")
     return lines
+
+def derive_viz_obj_id(model_name: str, model_fqn: str) -> str:
+    """Viz-level `answer.tables[].obj_id` for binding a viz to its Model.
+
+    Format per agents/shared/schemas/thoughtspot-liveboard-tml.md: the model's
+    display name with spaces removed, `-`, then the FIRST segment of its GUID —
+    e.g. ("Amazon Sales data", "fdea93b4-a80f-...") -> "AmazonSalesdata-fdea93b4".
+
+    Why this exists: every liveboard emitter used to bind with a bare viz-level
+    `fqn`, which that schema is explicit about — "a viz-level `fqn` is dropped on
+    import, leaving the viz with no data source, which renders as an error". The
+    binding silently fell back to `name`, and recovery was a
+    build -> import -> export -> re-import cycle (2026-08-26 audit, finding 14.2).
+
+    No new CLI flag was needed to fix it: `obj_id` is derivable from the
+    `--model-fqn` GUID the commands already accept.
+    """
+    slug = "".join(model_name.split())
+    guid8 = (model_fqn or "").split("-")[0]
+    return f"{slug}-{guid8}" if guid8 else slug

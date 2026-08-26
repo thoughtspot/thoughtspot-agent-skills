@@ -68,6 +68,34 @@ def chart_tiles_missing_axis(doc: dict) -> list:
     return out
 
 
+def _check_viz_table_binding(data: dict) -> list[str]:
+    """Viz tiles bound by a bare `fqn` instead of `obj_id`.
+
+    agents/shared/schemas/thoughtspot-liveboard-tml.md is explicit: inside a viz,
+    `answer.tables[]` must bind via `obj_id`, because "a viz-level `fqn` is dropped
+    on import, leaving the viz with no data source, which renders as an error".
+
+    Every converter emitter used to do the opposite, and the skills mandated a
+    binding their own required CLI could not emit (audit 14.2). Recovery was a
+    build -> import -> export -> re-import cycle. Flagged pre-import so the cycle
+    is never needed: the fix is `obj_id`, derivable from the same GUID via
+    tml_common.derive_viz_obj_id.
+    """
+    out = []
+    for name, a in _tile_answers(data):
+        for t in (a.get("tables") or []):
+            if not isinstance(t, dict):
+                continue
+            if "fqn" in t and "obj_id" not in t:
+                out.append(
+                    f"visualization '{name}' binds its data source with a bare viz-level "
+                    "`fqn` and no `obj_id` — the fqn is DROPPED on import, leaving the viz "
+                    "with no data source (it renders as an error). Use `obj_id` "
+                    "(ModelNameNoSpaces-{guid8}); see thoughtspot-liveboard-tml.md."
+                )
+    return out
+
+
 def _check_chart_tile_encoding(data: dict) -> list[str]:
     """Chart tiles (answer/liveboard TML) that import cleanly but render BLANK for lack of
     an axis encoding — neither chart.axis_configs nor a custom_chart_config. This is the
@@ -104,6 +132,7 @@ def lint_tml(data: dict) -> list[str]:
             )
 
     findings.extend(_check_chart_tile_encoding(data))
+    findings.extend(_check_viz_table_binding(data))
 
     model = data.get("model")
     if not isinstance(model, dict):

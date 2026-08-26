@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
+from ts_cli.tml_common import derive_viz_obj_id
+
 # Tableau mark class → ThoughtSpot chart type. Unknown marks default to GRID_TABLE.
 _MARK_TO_CHART = {
     "bar": "BAR", "line": "LINE", "area": "AREA",
@@ -235,9 +237,13 @@ def build_answer(name: str, obj_key: str, model_name: str, model_fqn: Optional[s
     if ax:
         chart["axis_configs"] = [ax]
 
+    # Bind via obj_id, never a bare viz-level fqn: the shared schema is explicit
+    # that a viz-level fqn is DROPPED on import, leaving the viz with no data
+    # source (audit 14.2). obj_id is derived from the same GUID.
     tables_ref = {"name": model_name}
     if model_fqn:
-        tables_ref = {"id": model_name, "name": model_name, "fqn": model_fqn}
+        tables_ref = {"id": model_name, "name": model_name,
+                      "obj_id": derive_viz_obj_id(model_name, model_fqn)}
     return {
         "obj_id": f"{slugify(obj_key)}-tab",
         "answer": {
@@ -288,9 +294,13 @@ def build_answer_explicit(name: str, obj_key: str, model_name: str,
     for k in ("custom_visual_props", "viz_style"):
         if ov.get(k) is not None:
             chart[k] = ov[k]
+    # Bind via obj_id, never a bare viz-level fqn: the shared schema is explicit
+    # that a viz-level fqn is DROPPED on import, leaving the viz with no data
+    # source (audit 14.2). obj_id is derived from the same GUID.
     tables_ref = {"name": model_name}
     if model_fqn:
-        tables_ref = {"id": model_name, "name": model_name, "fqn": model_fqn}
+        tables_ref = {"id": model_name, "name": model_name,
+                      "obj_id": derive_viz_obj_id(model_name, model_fqn)}
     return {
         "obj_id": f"{slugify(obj_key)}-tab",
         "answer": {
