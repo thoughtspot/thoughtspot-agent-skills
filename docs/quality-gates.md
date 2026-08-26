@@ -25,8 +25,8 @@ Re-run to refresh. Do not edit manually.
 
 | Runs in | Count |
 |---|---|
-| Pre-commit + CI | 37 |
-| Pre-commit only | 6 |
+| Pre-commit + CI | 38 |
+| Pre-commit only | 5 |
 | CI only | 1 |
 
 ## Gates
@@ -66,12 +66,12 @@ Re-run to refresh. Do not edit manually.
 | 31 | `smoke tests` | check_smoke_tests.py — verify every Claude skill has a smoke test, and vice versa. | Skill or smoke-test files staged (pre-commit, CI) | Smoke tests — every Claude skill (not on the allowlist) must have a smoke test, and non-credential ALLOWLIST exemptions must cite a BL-NNN (audit 6.3) | gate | 2026-08-26 |
 | 32 | `SV YAML structure` | check_sv_yaml.py — validate Snowflake Semantic View YAML structure. | Pattern: `(snowflake-schema|ts-to-snowflake|.yaml$|.yml$)` (pre-commit, CI) | Snowflake SV YAML structural validator — runs when schema or worked-example .md files are staged | gate | 2026-08-26 |
 | 33 | `TML structure` | check_tml.py — validate ThoughtSpot TML structural correctness. | Markdown files staged (pre-commit, CI) | ThoughtSpot TML structural validator — fire on ANY staged .md file. check_tml self-filters: it only validates real Table/Model TML blocks and skips te | gate | 2026-08-26 |
-| 34 | `version sync` | check_version_sync.py — verify __init__.py version matches pyproject.toml. | Every commit (pre-commit, CI) |  | gate | 2026-04-19 |
+| 34 | `version sync` | check_version_sync.py — verify __init__.py version matches pyproject.toml. | Every commit (pre-commit, CI) |  | gate | 2026-08-26 |
 | 35 | `YAML blocks` | check_yaml.py — validate all fenced YAML code blocks in .md files parse without error. | Markdown files staged (pre-commit, CI) | Only run YAML check if .md files are staged — checks staged files only, not full repo | gate | 2026-08-26 |
 | 36 | `open items index` | generate_open_items_index.py — scan all open-items.md files and produce a cross-skill index at docs/open-items-index.md. | Open-items files staged (pre-commit, CI) |  | gate | 2026-07-22 |
 | 37 | `parity matrix` | Emit the PARITY.md skill matrix from the filesystem. | Skill files or PARITY.md staged (pre-commit, CI) | Parity matrix — generated from the filesystem, must match committed PARITY.md Runs when any skill file is added/renamed or PARITY.md itself changes | gate | 2026-07-12 |
 | 38 | `quality gates catalog` | generate_quality_gates.py — auto-generate docs/quality-gates.md from the repo's actual quality infrastructure. | Validators or pre-commit infrastructure staged (pre-commit, CI) | Quality gates catalog — re-generated from pre-commit.sh + validate.yml + validator docstrings. Staleness check when any source of truth changes. | gate | 2026-07-30 |
-| 39 | `suggest dependency types` | suggest_dependency_types.py — soft pre-commit nudge for the ts-dependency-manager skill. | Open-items files staged (pre-commit) | ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without also staging references/dependency-types.md. Never blocks. (TTY only) | soft | 2026-08-26 |
+| 39 | `suggest dependency types` | suggest_dependency_types.py — soft pre-commit nudge for the ts-dependency-manager skill. | Open-items files staged (pre-commit, CI) | ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without also staging references/dependency-types.md. Never blocks. (TTY only) | soft | 2026-08-26 |
 | 40 | `repo changelog` | suggest_repo_changelog.py — interactively propose a CHANGELOG.md entry for significant staged changes. | Every commit (pre-commit, CI) |  | gate | 2026-08-26 |
 | 41 | `suggest skill version` | suggest_skill_version.py — interactively propose a changelog entry for staged SKILL.md changes. | Skill files staged (pre-commit) | Skill versioning — runs when any SKILL.md is touched Step 1: interactively suggest a changelog entry if one is missing (TTY only) Step 2: validate tha | soft | 2026-08-26 |
 | 42 | `unit tests (databricks)` |  | Python files staged (pre-commit) |  | gate |  |
