@@ -160,6 +160,22 @@ jobs:
           pytest agents/cli/ts-object-model-erd/tests/ -q
           pytest agents/databricks/tests/ -q
 
+      - name: Run credential-free smoke suites
+        # These five assert real behaviour of publish_plan / csr_plan / apply_plan /
+        # alias and need NO credentials, but ran in no CI job at all: the pytest steps
+        # never touch tools/smoke-tests, the smoke_*.py prefix isn't collected by
+        # pytest by default anyway, and pre-push derives its list purely from touched
+        # agents/(cli|claude)/<skill>/ paths. So a PR editing only ts_cli/publish_plan.py
+        # — the exact engine they guard — ran none of them, anywhere (audit 6.x).
+        # Invoked directly, not via pytest: they are scripts with their own runners.
+        run: |
+          for s in smoke_ts_publish_orgs smoke_ts_security_columns \
+                   smoke_ts_setup_tenancy smoke_ts_migrate_orgs \
+                   smoke_ts_object_model_alias; do
+            echo "--- $s"
+            python3 "tools/smoke-tests/$s.py"
+          done
+
   # Cross-version pytest matrix. The `validate` job above runs the full suite on 3.12; this
   # job re-runs ONLY the unit/validator tests on the rest of the declared support range
   # (pyproject `requires-python = ">=3.10,<3.15"`). Validators/linters stay single-version in

@@ -215,6 +215,13 @@ def step_live_roundtrip(dbx_cli_profile: str, warehouse_id: str, catalog: str) -
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
+    # run_smoke_tests.py appends --ts-profile to EVERY smoke invocation, so this
+    # must be accepted even though the emit path is entirely local (fixture ->
+    # build-mv -> assert). Without it, argparse exits 2 and the runner reports a
+    # FAIL indistinguishable from a real regression (audit 6.2).
+    parser.add_argument("--ts-profile", default="",
+                        help="Accepted for runner compatibility; unused — this "
+                             "smoke test needs no ThoughtSpot credentials.")
     parser.add_argument("--live", action="store_true",
                         help="Also attempt the live Databricks round-trip (skips "
                              "gracefully if credentials/warehouse aren't available)")

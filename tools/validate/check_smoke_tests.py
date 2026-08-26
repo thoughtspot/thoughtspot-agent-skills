@@ -72,8 +72,35 @@ ALLOWLIST = {
 NAME_ALIASES = {
     "ts-convert-to-snowflake-sv":    "tools/smoke-tests/smoke_ts_to_snowflake.py",
     "ts-convert-from-snowflake-sv":  "tools/smoke-tests/smoke_ts_from_snowflake.py",
-    "ts-convert-to-databricks-mv":   "tools/smoke-tests/smoke_ts_to_databricks.py",
+    # Points at the hyphenated file deliberately: it invokes the shipped
+    # `ts databricks build-mv`, whereas smoke_ts_to_databricks.py re-implements
+    # its own MV YAML builder and asserted against a string it had just built
+    # (audit 6.1/6.2 — the emitter had zero smoke coverage while the harness
+    # reported PASS).
+    "ts-convert-to-databricks-mv":   "tools/smoke-tests/smoke_ts-convert-to-databricks-mv.py",
     "ts-convert-from-databricks-mv": "tools/smoke-tests/smoke_ts_from_databricks.py",
+}
+
+
+# Smoke files that legitimately accompany a skill's PRIMARY (aliased) smoke test
+# rather than replacing it, mapped to the skill they support plus a justification.
+# Excluded from the orphan and double-claim checks.
+#
+# Why this exists: `ts-convert-to-databricks-mv` genuinely needs two, because they
+# cover disjoint paths. The aliased file is offline (local fixture -> build-mv ->
+# assert shape) so pre-push can run it with no credentials; the companion is a live
+# end-to-end (ThoughtSpot auth -> export real model TML -> build-mv -> execute in
+# Databricks -> verify -> cleanup) and needs both platforms. Collapsing them would
+# lose one path or make the credential-free gate uncredentialable.
+#
+# Keep this list SHORT. A companion must cover a path the aliased file cannot, not
+# merely add assertions — two files covering the same path is the audit-6.1 bug.
+COMPANION_SMOKE_TESTS = {
+    "tools/smoke-tests/smoke_ts_to_databricks.py": (
+        "ts-convert-to-databricks-mv",
+        "live end-to-end (TS export -> build-mv -> execute in Databricks); the "
+        "aliased file covers the same emitter offline against a fixture",
+    ),
 }
 
 
@@ -180,6 +207,62 @@ def _candidate_smoke_paths(skill_name: str) -> list[str]:
     return [f"tools/smoke-tests/smoke_{base}.py"]
 
 
+def _find_double_claimed_skills(repo_root: Path, tracked: set[str]) -> list[str]:
+    """Fail when TWO tracked smoke files resolve to one skill.
+
+    The failure this exists for (audit 6.1/6.2): `ts-convert-to-databricks-mv` had
+    both `smoke_ts-convert-to-databricks-mv.py` (calls the shipped
+    `ts databricks build-mv`) and `smoke_ts_to_databricks.py` (re-implements its own
+    MV YAML builder, then asserted `"WITH METRICS LANGUAGE YAML" in ddl` against the
+    string it had just built — an assertion that cannot fail). NAME_ALIASES routed the
+    harness to the weaker one, so the real emitter had ZERO coverage while the gate
+    reported PASS, and the stronger file was unreachable.
+
+    Neither existing rule caught it. The per-skill loop is satisfied by any one file,
+    and `_find_orphan_smoke_tests` only flags a file resolving to NO tracked skill —
+    both of these resolve to a real skill, so both passed.
+
+    Resolution is the author's call, not this validator's: delete the weaker file, or
+    fold its coverage into the aliased one. Two files is always a bug, because only one
+    can ever run.
+    """
+    smoke_dir = repo_root / "tools" / "smoke-tests"
+    if not smoke_dir.is_dir():
+        return []
+
+    known_skills: set[str] = set()
+    for runtime in CLI_RUNTIMES:
+        runtime_dir = repo_root / "agents" / runtime
+        if runtime_dir.is_dir():
+            known_skills |= {d.name for d in runtime_dir.iterdir() if d.is_dir()}
+
+    # skill -> [smoke files claiming it]
+    claims: dict[str, list[str]] = {}
+    for f in sorted(smoke_dir.glob("smoke_*.py")):
+        rel = str(f.relative_to(repo_root))
+        if rel not in tracked or rel in COMPANION_SMOKE_TESTS:
+            continue
+        stem = f.stem[len("smoke_"):]
+        # A file claims a skill either by being its NAME_ALIASES target, or by the
+        # smoke_<skill>.py convention (underscores standing in for hyphens).
+        for skill in known_skills:
+            if NAME_ALIASES.get(skill) == rel or stem in (skill, skill.replace("-", "_")):
+                claims.setdefault(skill, []).append(rel)
+
+    out = []
+    for skill, files in sorted(claims.items()):
+        if len(files) > 1:
+            aliased = NAME_ALIASES.get(skill)
+            detail = f" (NAME_ALIASES runs {aliased}; the other never executes)" if aliased else ""
+            out.append(
+                f"{skill}: {len(files)} smoke files claim this skill{detail}\n"
+                + "".join(f"      - {f}\n" for f in files)
+                + "      Only one can run. Delete the redundant file or merge its\n"
+                  "      coverage into the aliased one (audit 6.1/6.2)."
+            )
+    return out
+
+
 def _find_orphan_smoke_tests(repo_root: Path, tracked: set[str]) -> list[str]:
     """Return failure messages for tracked smoke_*.py files that resolve to no skill.
 
@@ -192,7 +275,7 @@ def _find_orphan_smoke_tests(repo_root: Path, tracked: set[str]) -> list[str]:
     if not smoke_dir.is_dir():
         return []
 
-    alias_targets = set(NAME_ALIASES.values())
+    alias_targets = set(NAME_ALIASES.values()) | set(COMPANION_SMOKE_TESTS)
 
     known_skills: set[str] = set()
     for runtime in CLI_RUNTIMES:
@@ -266,6 +349,7 @@ def check(repo_root: Path, staged_only: bool = False) -> tuple[list[str], list[s
                 )
 
     failures.extend(_find_orphan_smoke_tests(repo_root, tracked))
+    failures.extend(_find_double_claimed_skills(repo_root, tracked))
 
     return failures, info
 

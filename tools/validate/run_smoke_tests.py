@@ -172,7 +172,12 @@ def run(skills: list[str]) -> int:
 
         quoted_args = " ".join(shlex.quote(a) for a in extra_args)
         cmd = ["bash", "-c",
-               f"source ~/.zshenv && python3 {smoke_path} "
+               # `source ~/.zshenv &&` hard-failed when the file is absent: the
+               # smoke script never ran and the runner reported FAIL, making the
+               # pre-push gate unusable for an environment reason (audit 6.x).
+               # ~/.zshenv is a convention, not a guarantee — .claude/rules/security.md
+               # also names PowerShell $PROFILE and ~/.bashrc.
+               f"[ -f ~/.zshenv ] && . ~/.zshenv; python3 {smoke_path} "
                f"--ts-profile {shlex.quote(skill_profile)} {quoted_args}"]
 
         print(f"{label:<{col}} ", end="", flush=True)

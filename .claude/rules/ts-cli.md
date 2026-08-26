@@ -126,12 +126,38 @@ builds (returns 404) and has been **migrated to the v2 endpoint**
   `_adapt_v2_databases` in `tools/ts-cli/ts_cli/commands/connections.py`
 - `connections_get` in `agents/databricks/notebooks/ts_client.py`
 
-**Caveat:** v2 `connection/search` only returns the warehouse database/table/column
-hierarchy for connections that authenticate with a stored `SERVICE_ACCOUNT`. OAuth/PKCE
-connections return connection metadata with an empty hierarchy (a real ThoughtSpot
-limitation, not a CLI bug). To find tables already registered as ThoughtSpot objects,
-use `ts metadata search --name "%table%"` and filter on `metadata_header.dataSourceName`
+**Caveat — live-verified 2026-08-26 on se-thoughtspot.** v2 `connection/search`
+returns connection metadata with an **empty** warehouse database/table/column hierarchy.
+This is a real ThoughtSpot limitation, not a CLI bug, and there is no request-shape
+workaround. To find tables already registered as ThoughtSpot objects, use
+`ts metadata search --name "%table%"` and filter on `metadata_header.dataSourceName`
 for a connection-scoped result — **do not** rely on connection introspection.
+
+The 2026-08-26 audit (finding 13.1) hypothesised from the `searchConnection` spec that
+the empty hierarchy was *our own fault* — the spec documents an `authentication_type`
+parameter defaulting to `SERVICE_ACCOUNT`, which we omit, so a key-pair connection would
+be introspected with credentials it does not have. Probed directly; the hypothesis is
+**wrong**:
+
+| Connection auth | `authentication_type` sent | Result |
+|---|---|---|
+| KEY_PAIR (`APJ_TAB`) | omitted | 200 in 2s — **0 objects** |
+| KEY_PAIR (`APJ_TAB`) | `"KEY_PAIR"` | 200 in 16s — **0 objects** |
+| SERVICE_ACCOUNT (`churn connection`) | omitted | 200 in 5s — **0 objects** |
+| SERVICE_ACCOUNT (`churn connection`) | `"SERVICE_ACCOUNT"` | 200 in 2s — **0 objects** |
+
+Two things make this conclusive rather than a null result. The **2s → 16s** jump shows
+the parameter is not ignored — it reaches live warehouse introspection and that work
+simply yields nothing. And the **SERVICE_ACCOUNT control is equally empty**, so the
+limitation is not about auth type at all: introspection returns nothing on this cluster
+regardless. (Relevant to how much this matters: all four sampled APJ Snowflake
+connections use key-pair, so the non-SERVICE_ACCOUNT case is the norm here, not a corner.)
+
+**Spec divergence found while probing.** `authentication_type` is a **scalar string**,
+not the "List of authentication types" the REST spec describes. An array is rejected:
+`Enum "ConnectionSearchAuthenticationType" cannot represent non-string value:
+["KEY_PAIR"]. Did you mean the enum value "KEY_PAIR"?` Pass `"KEY_PAIR"`, never
+`["KEY_PAIR"]`, if a future caller needs it.
 
 If a new v1 endpoint is ever introduced, migrate it to the v2 equivalent before use:
 confirm the v2 spec via `get-rest-api-reference`, update the command/docstring/README,
