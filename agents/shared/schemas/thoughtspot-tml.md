@@ -63,6 +63,24 @@ set in ThoughtSpot. Do **not** prompt the user for the schema value unless:
 
 ## Export Options (v2 API)
 
+### Top-level request flags (verified via `get-rest-api-reference(apiName: "exportMetadataTML")`, 2026-08-26)
+
+These sit beside `metadata`, **not** inside `export_options`, and were undocumented here
+until 2026-08-26 (finding 13.5):
+
+| Flag | Default | Notes |
+|---|---|---|
+| `export_schema_version` | `DEFAULT` | `DEFAULT` \| `V1` \| `V2`. **This is the `worksheet:` vs `model:` fork** — the branch this repo keys off throughout. No caller sets it, so every export takes `DEFAULT`; the fork is undocumented rather than mis-set, but anything relying on the shape should know the switch exists |
+| `export_associated` | false | Also export the object's dependencies |
+| `export_fqn` | false | Add FQNs of referenced objects (what `ts tml export --fqn` sets) |
+| `edoc_format` | `JSON` | `JSON` \| `YAML` |
+| `export_dependent` | false | Export tables when exporting a connection |
+| `export_connection_as_dependent` | false | Only active when `export_associated: true` |
+| `all_orgs_override` | false | Export from an all-Orgs context |
+
+The `export_options` object below is a **separate, nested** field — do not merge the two
+tables.
+
 The v2 export endpoint accepts an `export_options` object with additional flags:
 
 | Option | Default | Since | Notes |

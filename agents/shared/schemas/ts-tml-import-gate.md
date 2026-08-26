@@ -61,6 +61,23 @@ ts tml import --dir <dir> --policy PARTIAL        # a batch
 | `PARTIAL_OBJECT` | Like `PARTIAL`, but also allows **sub-component** failures within an object. A Liveboard imports even if one visualization fails; a Table imports even if a join/relationship fails. Warnings appear in the API response. REST API v2 only (10.5.0.cl+). |
 | `VALIDATE_ONLY` | Validates the objects but does not import them. Useful for dry-run checks — but does **not** catch the hard invariants in §1–§2 above. |
 
+### Other request flags (verified via `get-rest-api-reference(apiName: "importMetadataTML")`, 2026-08-26)
+
+`import_policy` is not the only flag on the import request. `ts tml import` currently
+sends only `import_policy` + `create_new`; the rest default to `false`.
+
+| Flag | Default | Since | Notes |
+|---|---|---|---|
+| `create_new` | false | — | Create with new GUIDs instead of updating in place |
+| `enable_large_metadata_validation` | false | 10.5.0.cl | **The one that matters here.** This repo generates very large Model TML and has already hit a 25MB upload cap, so a large payload that fails validation is a live scenario, not a theoretical one |
+| `skip_diff_check` | false | 10.6.0.cl | Skip the TML diff check before processing |
+| `all_orgs_override` | false | — | Import from an all-Orgs context |
+| `enable_personalized_view_upsert` | false | 26.8.0.cl | Update/insert personalized views on a Liveboard. **Newer than every currency anchor in this repo** — treat as unverified against the clusters we target |
+
+None is exposed by `ts tml import` today. Exposing `enable_large_metadata_validation`
+is the one with a concrete motivation; the others should wait for a skill that needs
+them, per `.claude/rules/ts-cli.md` ("Do NOT add a CLI command speculatively").
+
 ## 4. Common import errors
 
 On `import_status: "failed"`, read `import_error` and consult this table:
