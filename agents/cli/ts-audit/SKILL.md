@@ -231,6 +231,22 @@ ts metadata search --type ANSWER --all --profile "{profile_name}"
 **If connection scope was set in Step 2c**, filter each result set to only include
 objects whose `metadata_header.dataSourceName` matches a selected connection.
 
+> **Why this step does NOT use `ts metadata search --connection`** (finding 11.1,
+> 2026-08-26 — an earlier attempt at this change did, and was wrong). Two reasons, both
+> verified against `filter_by_connection` (`commands/metadata.py:35`):
+>
+> 1. **The flag drops models and answers.** It keeps only rows with a matching
+>   `metadata_header.dataSourceName`, and worksheets/models/answers do not carry that
+>   field — so a connection-scoped audit would enumerate **zero** of them, while the
+>   inventory summary below still prints `Models: N (scoped to: …)`. Step 2c is right to
+>   scope models via `table.connection.name` instead.
+> 2. **The flag takes one connection.** It is `Optional[str]` and not repeatable, whereas
+>   Step 2c explicitly offers *"Choose specific connections"* (plural).
+>
+> Where a search really is table-only and single-connection — as in the `ts-convert-*`
+> skills — prefer the flag: it **casefolds** both sides, which a hand comparison does not.
+> Here, do the filtering yourself and **compare case-insensitively**.
+
 **Display inventory summary and confirm:**
 
 ```
@@ -399,6 +415,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.4.2 | 2026-08-26 | Record why Step 3-4 connection scoping does **not** use `ts metadata search --connection`: the flag keeps only rows with a matching `dataSourceName`, which worksheets/models/answers do not carry, so it would enumerate zero of them — and it takes a single connection where Step 2c offers several. Keep the hand filter, but compare case-insensitively (finding 11.1). |
 | 2.4.1 | 2026-07-03 | Fix stale Phase 2 cross-reference — "OI-6 through OI-9" corrected to "#9 through #12", matching the actual numbering in `references/open-items.md` (audit finding 5.4). |
 | 2.4.0 | 2026-07-03 | Fix 3 audit bugs: (1) scorecard missing 77% of findings — child-object findings (columns, joins, formulas) now match by GUID, not lookup index; (2) false orphan models from pagination — `record_size: -1` in dependent payload; (3) false orphan models from associated export — dependent fetch now covers all model GUIDs from TML, not just input list. Batch size reduced 25→15 for reliability. |
 | 2.3.2 | 2026-07-02 | Cluster heatmap: findings whose object is not a model (cross-answer/formula/table findings, or empty-guid) are no longer rolled up onto the first model in multi-model audits — this was inflating the first model's row (e.g. GTM Campaigns showing HIGH across angles it had no such findings for). Inherits the ERD fact/dimension classifier refinement |

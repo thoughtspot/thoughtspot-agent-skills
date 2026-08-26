@@ -7,21 +7,6 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-08-26
 
-### Fixed
-
-- **Seven documentation corrections, several self-contradictory (13.2, 13.7, 13.8, 13.16,
-  13.17, 14.3, 18.5).** `first_value(..., query_groups(), {date})` was marked
-  untranslatable on a false reason that contradicted both a sibling file and the row two
-  lines below it — it maps to `NON ADDITIVE BY … desc`. The Sisense mapping reversed the
-  COUNT_DISTINCT axis in four places while the code it declares authoritative had it right,
-  labelling two **exact** translations as lossy. `non_additive_dimensions` was absent from
-  the Snowflake schema while the semi-additive path emitted it. The Databricks `format:`
-  table documented 2 of 6 types. The `window:` Experimental caution is withdrawn
-  (re-fetched: no such label). Worksheet TML is recorded as a read-only legacy shape no
-  instance can produce. And `model-routing.md`'s own rules-of-thumb now lead with the
-  **effort dial and work shape** rather than model names, which is what the rule's own
-  corollary already required.
-
 ### Added
 
 - **Five validator promotions (4.3, 18.4, 13.19, 18.2, 14.6).** Two size allowlists
@@ -35,79 +20,6 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
   `settings.local.json.example` is now valid JSON (its `//` prose moved to a sibling
   `.md`), gated by a "every `.claude/*.json` parses" check — the documented `cp` was
   breaking contributors' settings.
-
-### Fixed
-
-- **The Tableau function census was list-driven, not page-driven (13.22, 13.25, 13.26,
-  13.27, 13.28).** Four families passed through untranslated against the mapping file's
-  own fail-loud contract: 2 of Tableau's **15** spatial functions (`PARSE_WKT`,
-  `NO_CUTOUTS` — missing from **two** code sites, not the one the finding named), all ten
-  `MODEL_*`/`SCRIPT_*` analytics-extension functions, `HEXBINX`/`HEXBINY`, and any unknown
-  `RANK_*` member. `RANK_PERCENTILE` turned out to be a **missed native equivalent**
-  (`rank_percentile`, live-verified), and `ATAN2`/`DIV` now translate. The new families are
-  matched by **regex** rather than added to a list, mirroring `_WINDOW_TABLECALC_RE` — a
-  named list is what went stale in the first place. `chore: bump ts-cli to v0.133.0`
-
-### Fixed
-
-- **A paged substring search could omit the exact match (14.5).** Three call sites issued
-  a `name_pattern` search — a **substring** match — with `record_size: 10` and then
-  post-filtered for an exact name, so for a name that is a substring of many others
-  ("Sales") the exact row need not be in the page. Three silent modes:
-  `tables.py` returned `None` and the caller **created a duplicate table** instead of
-  updating; `tml.py` lost the imported object's GUID; `report/resolver.py` raised
-  `SourceUnresolvedError` for an object that exists. Now `record_size: -1`, the
-  codebase's own convention. The bare `except Exception: pass` beside the first one now
-  emits a diagnostic rather than silently reading as not-found.
-  `chore: bump ts-cli to v0.132.5`
-
-### Fixed
-
-- **Qlik liveboards shipped blank, and its pass-through quoting diverged (17.3, 17.2).**
-  `qlik/answers._viz` emitted `{"type": chart_type}` alone while its `_CHART_MAP` produces
-  four types in `_CHART_NEEDS_AXIS`, so every board with one imported cleanly and rendered
-  empty; it was also the only converter with no pre-import liveboard lint (Step 2 lints
-  before the liveboard exists — Sisense had the same ordering gap). Separately, Qlik was
-  the only one of the five BL-171 emitters not passing `quote='"'`, so it alone emitted a
-  single-quoted `sql_string_op` template. Emitters now share the linter's own
-  `CHART_NEEDS_AXIS` set rather than a copy, and a cross-emitter test compares the
-  quoting. `chore: bump ts-cli to v0.132.4`
-
-### Fixed
-
-- **A failed existence probe made `ts migrate rollback` report success having deleted
-  nothing (finding 17.4).** `_types_by_guid` discarded a non-2xx and `continue`d, so all
-  three typed probes failing left `out` empty → every guid announced "already gone" → two
-  empty batches → `failures == []` → the ledger recorded `rolled_back: True` and printed
-  *"Rollback complete. The source Org was never touched."* Probe errors now propagate to
-  the caller as rollback failures. The documented premise justifies treating an **absent
-  row** as gone; it never justified treating a **failed request** as gone.
-  `chore: bump ts-cli to v0.132.3`
-
-### Fixed
-
-- **Audit mediums batch 1 — three gates hardened, two docs corrected.**
-  `check_version_sync`'s TOML fallback was table-blind and is the only path under a bare
-  `python3` on 3.9 (4.4 — reproduced in both the false-fail and false-pass directions);
-  `suggest_dependency_types` gained a `--check`/`--base` mode and a CI step, so a rule
-  that was interactive-only now has a server-side half (7.2); a `check_patterns` rule
-  bans instructional `ts spotql`, the deprecated alias, in SKILL.md prose (17.5); the
-  smoke-tests README's blanket "require live credentials" was wrong for 9 of 21 suites
-  and omitted five files, now rewritten by tier and gated (6.7); dead import removed
-  (4.5).
-
-### Fixed
-
-- **BL-218 — the `--name-status` call sites dropped non-ASCII paths.** git octal-quotes
-  such paths, and both callers split on newlines/tabs, so a renamed or added file with a
-  non-ASCII name vanished from the changelog suggestion and the audit-activity count.
-  `_git.parse_name_status_z` handles the variable record width (`A\0path\0` vs
-  `R100\0old\0new\0` — a naive pairwise split desynchronises on the first rename and
-  mislabels every record after it), and `git_status_paths` adds the fail-loud contract.
-  `_GIT_ENUM_ALLOWLIST` is now a single entry. Verified end-to-end: pre-fix the gate
-  exited 0 having seen nothing.
-
-### Added
 
 - **`check_converter_parity.py` — BL-217 part 1.** Asserts that no converter maps a
   source function onto one of the six names that do not exist in ThoughtSpot
@@ -129,6 +41,91 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
   query filters remain untranslatable, now for the correct reason.
 
 ### Fixed
+
+- **Bucket A tail: three skill wirings and two runner tails (11.1, 5.2, 5.3, 6.4, 6.5).**
+  Four skills hand-filtered `dataSourceName` when `ts metadata search --connection` ships —
+  and their prose said **equals** where the CLI **casefolds**, so an executor following it
+  literally dropped rows the CLI keeps. `ts-object-model-coach` called an `execute()`
+  defined nowhere, inviting exactly the inlined connector a validator already bans in a
+  SKILL.md. `ts-object-answer-promote` gained a real permission pre-flight: the "endpoint
+  not yet verified" verdict predated `ts share`, and `ts share status` posts to a
+  *different* endpoint than the one that 500'd. `run_smoke_tests` gained a `timeout=` (a
+  hung live request previously blocked the runner indefinitely), and the interpreter warning
+  now names the interpreters it actually checks. Also aligns
+  `.claude/rules/model-routing.md` with the portable policy in `~/.claude/CLAUDE.md`, which
+  it had over-simplified.
+
+- **Seven documentation corrections, several self-contradictory (13.2, 13.7, 13.8, 13.16,
+  13.17, 14.3, 18.5).** `first_value(..., query_groups(), {date})` was marked
+  untranslatable on a false reason that contradicted both a sibling file and the row two
+  lines below it — it maps to `NON ADDITIVE BY … desc`. The Sisense mapping reversed the
+  COUNT_DISTINCT axis in four places while the code it declares authoritative had it right,
+  labelling two **exact** translations as lossy. `non_additive_dimensions` was absent from
+  the Snowflake schema while the semi-additive path emitted it. The Databricks `format:`
+  table documented 2 of 6 types. The `window:` Experimental caution is withdrawn
+  (re-fetched: no such label). Worksheet TML is recorded as a read-only legacy shape no
+  instance can produce. And `model-routing.md`'s own rules-of-thumb now lead with the
+  **effort dial and work shape** rather than model names, which is what the rule's own
+  corollary already required.
+
+- **The Tableau function census was list-driven, not page-driven (13.22, 13.25, 13.26,
+  13.27, 13.28).** Four families passed through untranslated against the mapping file's
+  own fail-loud contract: 2 of Tableau's **15** spatial functions (`PARSE_WKT`,
+  `NO_CUTOUTS` — missing from **two** code sites, not the one the finding named), all ten
+  `MODEL_*`/`SCRIPT_*` analytics-extension functions, `HEXBINX`/`HEXBINY`, and any unknown
+  `RANK_*` member. `RANK_PERCENTILE` turned out to be a **missed native equivalent**
+  (`rank_percentile`, live-verified), and `ATAN2`/`DIV` now translate. The new families are
+  matched by **regex** rather than added to a list, mirroring `_WINDOW_TABLECALC_RE` — a
+  named list is what went stale in the first place. `chore: bump ts-cli to v0.133.0`
+
+- **A paged substring search could omit the exact match (14.5).** Three call sites issued
+  a `name_pattern` search — a **substring** match — with `record_size: 10` and then
+  post-filtered for an exact name, so for a name that is a substring of many others
+  ("Sales") the exact row need not be in the page. Three silent modes:
+  `tables.py` returned `None` and the caller **created a duplicate table** instead of
+  updating; `tml.py` lost the imported object's GUID; `report/resolver.py` raised
+  `SourceUnresolvedError` for an object that exists. Now `record_size: -1`, the
+  codebase's own convention. The bare `except Exception: pass` beside the first one now
+  emits a diagnostic rather than silently reading as not-found.
+  `chore: bump ts-cli to v0.132.5`
+
+- **Qlik liveboards shipped blank, and its pass-through quoting diverged (17.3, 17.2).**
+  `qlik/answers._viz` emitted `{"type": chart_type}` alone while its `_CHART_MAP` produces
+  four types in `_CHART_NEEDS_AXIS`, so every board with one imported cleanly and rendered
+  empty; it was also the only converter with no pre-import liveboard lint (Step 2 lints
+  before the liveboard exists — Sisense had the same ordering gap). Separately, Qlik was
+  the only one of the five BL-171 emitters not passing `quote='"'`, so it alone emitted a
+  single-quoted `sql_string_op` template. Emitters now share the linter's own
+  `CHART_NEEDS_AXIS` set rather than a copy, and a cross-emitter test compares the
+  quoting. `chore: bump ts-cli to v0.132.4`
+
+- **A failed existence probe made `ts migrate rollback` report success having deleted
+  nothing (finding 17.4).** `_types_by_guid` discarded a non-2xx and `continue`d, so all
+  three typed probes failing left `out` empty → every guid announced "already gone" → two
+  empty batches → `failures == []` → the ledger recorded `rolled_back: True` and printed
+  *"Rollback complete. The source Org was never touched."* Probe errors now propagate to
+  the caller as rollback failures. The documented premise justifies treating an **absent
+  row** as gone; it never justified treating a **failed request** as gone.
+  `chore: bump ts-cli to v0.132.3`
+
+- **Audit mediums batch 1 — three gates hardened, two docs corrected.**
+  `check_version_sync`'s TOML fallback was table-blind and is the only path under a bare
+  `python3` on 3.9 (4.4 — reproduced in both the false-fail and false-pass directions);
+  `suggest_dependency_types` gained a `--check`/`--base` mode and a CI step, so a rule
+  that was interactive-only now has a server-side half (7.2); a `check_patterns` rule
+  bans instructional `ts spotql`, the deprecated alias, in SKILL.md prose (17.5); the
+  smoke-tests README's blanket "require live credentials" was wrong for 9 of 21 suites
+  and omitted five files, now rewritten by tier and gated (6.7); dead import removed
+  (4.5).
+
+- **BL-218 — the `--name-status` call sites dropped non-ASCII paths.** git octal-quotes
+  such paths, and both callers split on newlines/tabs, so a renamed or added file with a
+  non-ASCII name vanished from the changelog suggestion and the audit-activity count.
+  `_git.parse_name_status_z` handles the variable record width (`A\0path\0` vs
+  `R100\0old\0new\0` — a naive pairwise split desynchronises on the first rename and
+  mislabels every record after it), and `git_status_paths` adds the fail-loud contract.
+  `_GIT_ENUM_ALLOWLIST` is now a single entry. Verified end-to-end: pre-fix the gate
+  exited 0 having seen nothing.
 
 - **`ts-profile-databricks` wrote OAuth secrets and PATs to `~/.databrickscfg` in
   plaintext** — on the stated grounds that the Databricks CLI "does not support shell

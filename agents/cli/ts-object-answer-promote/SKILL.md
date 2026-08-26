@@ -451,8 +451,27 @@ Continue anyway? (Y / N):
 
 If N, stop. If Y, proceed — a 403 at import time will surface a clear error message.
 
-A full permission pre-flight check requires a separate API endpoint not yet verified
-on all instance versions — see open-items.md #2.
+### Permission pre-flight — buildable today (finding 5.3, 2026-08-26)
+
+This step used to say a pre-flight "requires a separate API endpoint not yet verified".
+**That verdict predates `ts share`.** Open-item #2 recorded a 500 from
+`POST /api/rest/2.0/security/metadata/fetch`; `ts share status` posts to a **different**
+endpoint — `security/metadata/fetch-permissions` (`commands/share.py:360`) — whose response
+semantics were verified live 2026-07-26. So the check needs **no new CLI work**:
+
+```bash
+ts auth whoami --profile "{profile}"                          # who am I
+ts share status "{model_guid}" --columns --profile "{profile}" # who can see the Model + its columns
+```
+
+Read the **`permission`** field, not `shared_permission` — the names suggest the opposite,
+and the live verification is explicit about it. An object's owner and admins always appear,
+so judge by whether *your* principal has a non-`NO_ACCESS` `permission` on the Model rather
+than by the list being non-empty.
+
+If the pre-flight shows no write access, stop here rather than relying on a 403 at import
+time: the fallback below (owner-name comparison plus a "Continue anyway?" prompt) accepts a
+403 as the first real signal, which wastes the export and leaves the operator guessing.
 
 ---
 
@@ -680,6 +699,7 @@ rm -f /tmp/ts_promote_formula_model.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.0 | 2026-08-26 | Permission pre-flight via `ts auth whoami` + `ts share status --columns`. The "endpoint not yet verified" verdict predated `ts share`: open-item #2's 500 was on `security/metadata/fetch`, while `ts share status` posts to `security/metadata/fetch-permissions`, live-verified 2026-07-26. No new CLI work (finding 5.3); open-item #2 closed as superseded. |
 | 1.4.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 1.4.0 | 2026-07-13 | Steps 7–10 delegate to `ts model promote-formula` CLI command (BL-066): duplicate detection, reference mapping, column_type inference, and TML merge are now deterministic. Prereq ts-cli v0.51.0. |
 | 1.3.0 | 2026-07-03 | MEASURE/ATTRIBUTE + aggregation inference delegates to `ts agentql classify-columns` (BL-087), replacing the drifted inline keyword list. Prereq ts-cli v0.31.0. |

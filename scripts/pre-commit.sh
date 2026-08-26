@@ -67,7 +67,7 @@ unset _candidate
 if [ -z "$PYTHON_BIN" ]; then
   PYTHON_BIN="python3"
   echo "Warning: no python3.10+ interpreter with pytest installed found on PATH"
-  echo "  (checked python3.12, python3.11, python3.10). Falling back to '$PYTHON_BIN'"
+  echo "  (checked python3.14, python3.13, python3.12, python3.11, python3.10). Falling back to '$PYTHON_BIN'"
   echo "  ($($PYTHON_BIN --version 2>&1)) — ts-cli requires Python >=3.10."
   echo ""
 fi

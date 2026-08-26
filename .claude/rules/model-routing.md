@@ -43,6 +43,20 @@ without a grant is a comment, not a control.
   mechanical multi-step work" — which contradicted the corollary below and, worse, goes
   stale on every lineup change. A rule that names a model has to be re-audited each time
   the family moves; a rule that names a *work shape* does not.
+- **But "effort over model" is not a complete policy**, and this file said so too
+  absolutely on its first rewrite. Corrected 2026-08-26 against the portable policy in
+  `~/.claude/CLAUDE.md`, which is the governing statement — this project rule is *more
+  specific and therefore wins*, so an over-simplification here silently overrides the
+  correct general rule. Two cases are genuinely **model**-shaped and cannot be expressed
+  as effort:
+  - the **cheapest tier rejects the effort parameter outright**, so choosing it is a model
+    decision with no effort equivalent; and
+  - **frontier reasoning or long-horizon agentic work** is what the top model is for, at a
+    real price premium.
+
+  Where the requirement is model-shaped, name it — and **write the reason beside it**, so a
+  later reader can tell a considered choice from a copied one. That is what
+  `repo-publisher`'s pin does, and why it survives.
 - **Mechanical work** — deterministic checklists, running commands and reporting
   pass/fail, grep-and-collate. No synthesis, no judgment calls. → **inherit the model,
   drop `effort` to `low`.**
@@ -53,10 +67,13 @@ without a grant is a comment, not a control.
   semantic consistency auditing, audit synthesis, and **every review gate**. → **inherit
   the model at `effort: high`→`max`.** Never downgrade a gate; an independent reviewer
   that reasons less than the author is worse than no reviewer.
-- **Effort over model**, in workflows *and* in agent frontmatter: prefer `effort: low`
-  on a strong model for mechanical stages rather than downgrading the model — same
-  savings profile, less capability risk. Reserve `effort: 'max'` for adversarial
-  verification.
+- **Effort over model** — *read with the qualification three bullets above, which this
+  bullet used to omit.* In workflows and in agent frontmatter, prefer `effort: low` on a
+  strong model for mechanical stages rather than downgrading the model — same savings
+  profile, less capability risk. Reserve `effort: 'max'` for adversarial verification.
+  Note the dial is not available on every path: the `Agent` tool takes `model` but no
+  `effort`, so there the model *is* the only lever (see `~/.claude/CLAUDE.md`). Say which
+  dial you actually had when justifying a choice.
 - **Corollary — a `model:` pin needs a reason the effort dial cannot serve.** The dial
   is the default lever; a pin is the exception. `repo-publisher: sonnet` keeps its pin
   because its risk is a *partial publish* from a long prescribed sequence, not shallow

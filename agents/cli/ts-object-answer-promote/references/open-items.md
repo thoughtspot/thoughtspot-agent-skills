@@ -9,17 +9,25 @@ procedure, and findings recorded against `champ-staging` (champagne-master-aws.t
 
 **Skill steps affected:** Step 6 (access check)
 
-**Status:** PARTIALLY VERIFIED — tested against champ-staging
+**Status:** RESOLVED 2026-08-26 (superseded — see Current recommendation)
 
 **Finding:** The `ts metadata search` response does not include an explicit permissions
 field. `POST /api/rest/2.0/security/metadata/fetch` returned HTTP 500 on champ-staging.
 
-**Current recommendation:** Proceed without pre-flight permission check. Rely on import
-response for access errors. If `metadata_header.author` matches current user, skip warning.
+**Current recommendation (updated 2026-08-26, finding 5.3):** **Do the pre-flight.**
+`ts auth whoami` + `ts share status <guid> --columns` gives it with no new CLI work. The
+"proceed without a pre-flight" advice below was correct only while the endpoint question was
+open, and it is not the same endpoint: this item's 500 was on
+`POST /api/rest/2.0/security/metadata/fetch`, whereas `ts share status` posts to
+`security/metadata/fetch-permissions` (`commands/share.py:360`), with response semantics
+verified live 2026-07-26. Read the `permission` field, not `shared_permission`.
+
+Superseded, not re-probed — whether `security/metadata/fetch` still 500s is no longer
+load-bearing for this skill. Reopen only if something needs that specific endpoint.
 
 **Still to test:**
 - [ ] READ_ONLY shared Model import behaviour
-- [ ] `security/metadata/fetch` on newer instance versions
+- [x] `security/metadata/fetch` on newer instance versions — **CLOSED 2026-08-26 (finding 5.3): superseded, not re-probed.** The pre-flight this item blocked is now built on `ts share status`, which posts to `security/metadata/fetch-permissions` (`commands/share.py:360`) — a *different* endpoint, with response semantics verified live 2026-07-26. Whether `security/metadata/fetch` still 500s is no longer load-bearing for this skill; reopen only if something needs that specific endpoint.
 
 ---
 

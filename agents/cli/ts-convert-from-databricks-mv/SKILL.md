@@ -514,14 +514,20 @@ ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profil
 - **C (within a connection)** → **first identify the connection using the
   N (name it) / F (filter by substring) / L (list all) prompt in Step 8B — present that
   prompt and let the user choose; do NOT run `ts connections list` and dump every
-  connection by default.** Then keep only results whose `metadata_header.dataSourceName`
-  equals the chosen connection name (each result carries its connection there, e.g.
-  `"APJ_DBX"`). Fastest, and unambiguous when the same table name exists on several
-  connections.
+  connection by default.**
+  Then **pass `--connection "{connection_name}"` to `ts metadata search`** rather than
+  hand-filtering: the CLI scopes it in `filter_by_connection`
+  (`commands/metadata.py:35`), which **casefolds** both sides. This step previously said
+  to keep results whose `dataSourceName` **equals** the connection name — an executor
+  following that literally drops rows the CLI keeps (`APJ_DBX` vs `apj_dbx`).
+  Corrected 2026-08-26, finding 11.1. Fastest, and unambiguous when the same table name
+  exists on several connections.
 - **I (entire instance)** → run the name search above with no connection filter.
 
-Filter the JSON to match the MV source table by table name (`metadata_name`) and, for
-the connection scope, `metadata_header.dataSourceName`; use
+Filter the JSON to match the MV source table by table name (`metadata_name`).
+**Connection scoping is already done** by the `--connection` flag above — do NOT re-filter on
+`metadata_header.dataSourceName` here: the flag casefolds and a hand comparison does not, so
+re-applying it drops every row the flag kept (finding 11.1, 2026-08-26). Use
 `metadata_header.database_stripes` / `metadata_header.schema_stripes` to disambiguate
 same-named tables. Build a map: `physical_table_name -> {metadata_id, metadata_name}`.
 
@@ -829,6 +835,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.12.2 | 2026-08-26 | Use `ts metadata search --connection` instead of hand-filtering `dataSourceName`; the old instruction said **equals** where the CLI casefolds (finding 11.1). |
 | 1.12.1 | 2026-08-26 | Carry BL-074's prompt-batching rule — ask one question at a time for **dependent** decisions, batch **independent** ones. The rule reached 13 skills but omitted the four conversion skills, which are the most interactive in the repo by ask-count (finding 14.6). A `check_patterns` rule now enforces it above a question-count threshold. |
 | 1.12.0 | 2026-07-31 | **BL-174 — generated Model joins get LEFT OUTER semantics, and a measure's `format:` currency now reaches the TML (ts-cli v0.127.0).** (1) `joins[].type` was **`INNER` on every join**, unconditionally. A Metric View has no join-type field because Databricks fixes it — *"In a star schema, the `source` is the fact table and joins with one or more dimension tables using a `LEFT OUTER JOIN`"* ([Joins in metric views](https://docs.databricks.com/aws/en/business-semantics/metric-views/joins), re-confirmed 2026-07-31) — so every fact row with a NULL or unmatched FK was kept by the MV and **dropped** by the Model, making measures read *lower* in ThoughtSpot than in Databricks with nothing in the pipeline warning. Now `LEFT_OUTER`, nested joins included (live-validated on `se-thoughtspot`, `VALIDATE_ONLY`). **This changes the numbers a converted Model returns** — re-convert any Model whose fact FKs are nullable. (2) `format: {type: currency, currency_code: USD}` on a **measure** now writes `properties.currency_type.iso_code`; the data reached `translated.json` and was discarded at assembly, though the reverse leg already implemented the pair. `type: percentage`, `decimal_places` and a `format:` on a `fields:`/`dimensions:` entry stay unmapped — declared as new limitation **L12**. (3) `joins[].cardinality` **keeps** being written: omitting it is refused by the platform ("both  type and cardinality should be defined", live-probed 2026-07-31), so BL-174's third item was resolved on the to-direction instead (see its v1.4.0). Coverage-matrix rows #13/#77/#79 corrected; `ts-from-databricks-rules.md`'s currency row also corrected — the ThoughtSpot field is `iso_code`, not `currency_code`. 13 new tests. |
 | 1.11.0 | 2026-07-30 | **BL-171 — `mv_sql.py` stops emitting five non-existent string functions, and `ENDSWITH` is newly mapped (ts-cli v0.126.1).** `_RENAME` translated Databricks `TRIM`/`LTRIM`/`RTRIM`/`REPLACE`/`STARTSWITH` to bare ThoughtSpot names that **do not exist** (live-disproved 2026-07-29, BL-170; re-verified 2026-07-30), so every affected measure or dimension failed at import with `error_code 14516`. `TRIM`/`LTRIM`/`RTRIM` now use `_PASS_THROUGH_HINT` (as `UPPER`/`LOWER` already did) and `REPLACE`/`STARTSWITH` composed handlers; **`ENDSWITH` gains a mapping it never had** (it was unmapped, hence the MINOR bump) as the documented `substr`/`strlen` tail comparison. Coverage-matrix rows #75/#76 lose their "CLI still wrong" caveats. 7 new tests. **All emitted forms live-verified on se-thoughtspot 2026-07-30** (`VALIDATE_ONLY`, nothing persisted). |

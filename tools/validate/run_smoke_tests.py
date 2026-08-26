@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import shlex
 import subprocess
 import sys
@@ -39,6 +40,19 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 # (audit F5). test_smoke_alias_sync.py asserts the `is` identity below.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_smoke_tests import ALLOWLIST, NAME_ALIASES  # noqa: E402
+
+# Upper bound for one smoke suite. A live suite that exceeds this is hung, not slow
+# (audit 6.4 — the runner had no timeout at all).
+#
+# Known limit, recorded rather than papered over: subprocess.run's timeout kills the
+# direct child (`bash`), so in principle a forked `python3 {smoke_path}` grandchild could
+# be orphaned. A process-group reap (Popen + os.killpg with start_new_session) was written
+# and then REMOVED, because it could not be shown to fix anything: probing both the simple
+# and the real compound command shape on macOS, no orphan survived `proc.kill()` in either
+# case. Shipping unverified machinery would have manufactured confidence. If an orphan is
+# ever observed, that is the fix to reach for -- and it now has a note saying so.
+SMOKE_TIMEOUT_SECONDS = 1200
+
 
 # Skills that need extra required args beyond --ts-profile.
 # These must come from smoke-config.local.json; skills are skipped with a warning if absent.
@@ -181,7 +195,26 @@ def run(skills: list[str]) -> int:
                f"--ts-profile {shlex.quote(skill_profile)} {quoted_args}"]
 
         print(f"{label:<{col}} ", end="", flush=True)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # timeout= is mandatory here: these suites make live HTTP/warehouse calls, so a
+        # hung request otherwise blocks the whole runner INDEFINITELY behind a
+        # half-printed status line, with no way to tell a hang from a slow test (audit
+        # 6.4). 20 min is generous for the slowest live suite while still bounded.
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True,
+                                    timeout=SMOKE_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            print(f"{FAIL}  TIMEOUT after {SMOKE_TIMEOUT_SECONDS}s — a failure, not a "
+                  f"skip: a hang is a real signal.")
+            # TimeoutExpired carries whatever the child emitted before hanging. The FAIL
+            # branch below prints both streams; dropping them here would make a timeout
+            # the one outcome with no diagnostics at all.
+            for stream in (exc.stdout, exc.stderr):
+                text = stream.decode() if isinstance(stream, bytes) else (stream or "")
+                for line in text.splitlines():
+                    print(f"    {line}")
+            failures.append(skill)
+            continue
+
         if result.returncode == 0:
             print(PASS)
         else:

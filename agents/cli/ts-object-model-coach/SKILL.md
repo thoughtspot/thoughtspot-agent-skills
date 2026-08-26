@@ -1000,6 +1000,37 @@ Confirm exclusion from sample values? (Y to confirm / N to include all):
 
 If confirmed, those columns get `cardinality` only — no `samples`.
 
+> **Running the SQL in this step — use `ts snowflake exec`.**
+> Added 2026-08-26 (finding 5.2). The code below calls `execute(sql)`, which is **defined
+> nowhere** in this skill or its references, so an executor had to improvise a connection
+> each run — and the likeliest improvisation is exactly the inlined-connector block that
+> `check_patterns` rule 7 (`cloned-snowflake-connector-in-skill`) forbids in a SKILL.md
+> (BL-079). A validator can keep that text out of the file; it cannot stop an LLM writing
+> it at runtime. Naming the real command is what does.
+>
+> The flag is **`--sf-profile`** (not `--profile`) and it is **required**; the profile name
+> this skill collects is `{sf_profile_name}` (Step 2). So `execute(sql)` below means:
+>
+> ```python
+> import json, subprocess
+>
+> def execute(sql: str) -> list[dict]:
+>     """One round-trip to Snowflake via the CLI — never a hand-rolled connector.
+>
+>     `ts` must be on PATH (it is under `uv tool install -e tools/ts-cli`). Output is
+>     JSON on stdout with a top-level `rows` holding the last result set; diagnostics
+>     go to stderr.
+>     """
+>     out = subprocess.run(
+>         ["ts", "snowflake", "exec", "--sf-profile", sf_profile_name, "--query", sql],
+>         capture_output=True, text=True, check=True).stdout
+>     return json.loads(out).get("rows", [])
+> ```
+>
+> **Batch where you can.** The per-column `SELECT DISTINCT … LIMIT 5` loop is N
+> round-trips; the cardinality query above already shows the batched form (one statement,
+> one call). Prefer that shape on a wide model.
+
 ```python
 # Step 2: Query Snowflake for cardinality (all ATTRIBUTE columns)
 # Build a single query with APPROX_COUNT_DISTINCT per column
@@ -1603,6 +1634,8 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.4.0 | 2026-08-26 | Name `ts snowflake exec` at the SQL sites and define the previously-undefined `execute()` against it — the flag is `--sf-profile` (required) and the profile is `{sf_profile_name}`. Without this an executor improvised a connection each run, and the likeliest improvisation is the inlined connector a validator already bans in a SKILL.md (finding 5.2). Also flags the per-column sample loop as N round-trips where a batched form already exists. |
+| 2.3.4 | 2026-08-26 | Name `ts snowflake exec` at the SQL sites and define the previously-undefined `execute()` against it — an executor had to improvise a connection each run, and the likeliest improvisation is the inlined connector a validator already bans in a SKILL.md (finding 5.2). Also flags the per-column loop as N round-trips where a batched form exists. |
 | 2.3.3 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 2.3.2 | 2026-07-11 | Migrate Step 9a/9b/rollback imports to `ts tml import --file` (removes a broken `\| source ~/.zshenv &&` pipe that discarded the piped TML) (audit 5.1). |
 | 2.3.1 | 2026-07-03 | Audit fixes: soften phantom `/ts-object-model-builder` recommendations (Step 1 and Error Handling) to "no skill for this yet — planned"; remove stale "CLI does not yet expose `--include-dependent-objects`" framing in Step 3a (it never did — `ts metadata dependents` is the command used). Same phantom-skill fix applied to `references/ai-asset-review-rules.md`. |

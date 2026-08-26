@@ -462,14 +462,20 @@ ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profil
 - **C (within a connection)** → **first identify the connection using the
   N (name it) / F (filter by substring) / L (list all) prompt in Step 6B — present that
   prompt and let the user choose; do NOT run `ts connections list` and dump every
-  connection by default.** Then keep only results whose `metadata_header.dataSourceName`
-  equals the chosen connection name (each result carries its connection there, e.g.
-  `"APJ_SNOW"`). Fastest, and unambiguous when the same table name exists on several
-  connections.
+  connection by default.**
+  Then **pass `--connection "{connection_name}"` to `ts metadata search`** rather than
+  hand-filtering: the CLI scopes it in `filter_by_connection`
+  (`commands/metadata.py:35`), which **casefolds** both sides. This step previously said
+  to keep results whose `dataSourceName` **equals** the connection name — an executor
+  following that literally drops rows the CLI keeps (`APJ_SNOW` vs `apj_snow`).
+  Corrected 2026-08-26, finding 11.1. Fastest, and unambiguous when the same table name
+  exists on several connections.
 - **I (entire instance)** → run the name search above with no connection filter.
 
-Filter the JSON to match each semantic view base table by table name (`metadata_name`)
-and, for the connection scope, `metadata_header.dataSourceName`; use
+Filter the JSON to match each semantic view base table by table name (`metadata_name`).
+**Connection scoping is already done** by the `--connection` flag above — do NOT re-filter on
+`metadata_header.dataSourceName` here: the flag casefolds and a hand comparison does not, so
+re-applying it drops every row the flag kept (finding 11.1, 2026-08-26). Use
 `metadata_header.database_stripes` / `metadata_header.schema_stripes` to disambiguate
 same-named tables. Build a map: `physical_table_name → {metadata_id, metadata_name}`.
 
@@ -1012,6 +1018,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.21.2 | 2026-08-26 | Use `ts metadata search --connection` instead of hand-filtering `dataSourceName`; the old instruction said **equals** where the CLI casefolds (finding 11.1). |
 | 1.21.1 | 2026-08-26 | Carry BL-074's prompt-batching rule — ask one question at a time for **dependent** decisions, batch **independent** ones. The rule reached 13 skills but omitted the four conversion skills, which are the most interactive in the repo by ask-count (finding 14.6). A `check_patterns` rule now enforces it above a question-count threshold. |
 | 1.21.0 | 2026-08-06 | **Two translator gaps closed, derived metrics supported, and two workflow fixes — all from converting a live SV end to end into a ThoughtSpot Model (ts-cli v0.130.0).** **BL-213:** an unqualified derived metric (`NAME as m1 / m2`, no table prefix) is valid SV grammar and the **only** way to express a ratio spanning two *unrelated* facts — a qualified metric may reference only metrics on directly related entities (`010211`) — so attainment and period-over-period growth arrive exclusively this way. All four on the fixture had landed in `unsupported[]` as "could not parse metric entry" and were silently absent from the Model. Now parsed, translated to a MEASURE formula, and emitted by `build-model`. The resolver needed its own path: the generic metric branch emits `[formula_<id>]`, which **dangles** against a simple-`AGG(col)` metric (emitted as a plain column) — the BL-178 shape I13 rejects, previously unreachable because Snowflake refuses the qualified equivalent. **BL-212:** the translator rejected `DATEDIFF('day', …)` (Snowflake accepts the unit bare *or* quoted) and any double-quoted identifier (`dm_date_dim."DATE"` raised "unrecognized character '.'"), each silently costing a construct — 3 of 44 on the fixture, now 44/44. **New Step 11c — reconcile the Model against the SV:** a successful import is not a correct conversion; Step 11b confirms the object exists but not one number. Three checks (grand totals per additive measure, one grouped query per fact, and aliased facts reconciling to their base) — the only thing that catches a join wired to the wrong key or a role-played alias resolved to the wrong node. **Step 6B** now warns off `ts connections add-tables` (it rewrites the connection's registered-object list, is not what the step needs, and 500s on a shared connection) and names the tell: `tables-spec.json` is shaped to pipe into `ts tables create` unmodified. **Prerequisites** note the `snowflake-connector-python` extra `introspect` requires. |
 | 1.20.0 | 2026-07-31 | **Two new steps and three parser/translator fixes, from converting a real 1,100-line customer Semantic View (ts-cli v0.128.0).** New **Step 7.5 — role-played dimension aliases**: an SV scopes names per table and freely joins one fact to one date dimension eight times; ThoughtSpot has one flat join graph, so that is ambiguous and **the Model will not load**. New lint invariant **I14** (BL-202) rejects any duplicate `(from_node, joins[].with)` pair, so `build-model` now refuses rather than emitting an unloadable Model — it previously emitted 21 such joins across 7 pairs with `lint_findings: []` and I1–I13 all clean. The reference covers picking the primary role (one must keep the base node or it becomes a disconnected table), synthesizing the alias entries, the `tables.json` entries they need, and the **column trim** — which is a user decision, because the naive full copy adds 784 near-duplicate columns to a 1,015-column model and degrades NL search more than the ambiguity it fixed. New **Step 8.5 — display-name collisions**: an SV's per-table name scoping collides with ThoughtSpot's flat column namespace by construction on a wide multi-fact SV (129 colliding titles over 322 of 1,010 columns on the fixture); the reference characterises them, offers three resolutions, and applies the qualify-and-de-index pattern. `build-model`'s error message no longer says "set distinct display_name values in the SV", which is not actionable when you do not own the SV. Parser fixes: **BL-200** the entry splitter is now quote aware, so a comma inside `comment='...'` no longer shatters the entry (15 tables had parsed as 32, with 169 fragments in `unsupported[]`); **BL-201** live `GET_DDL`'s `sample_values (...)` spelling is now matched, so the clause is no longer read as part of the expression (had skipped all 46 `is_enum` dimensions). Translator fixes: **BL-179** first-synonym promotion is now opt-in (`--promote-first-synonym`, default off) and the decision is recorded in `translated.json` for `build-model` to read — on a foreign SV it had renamed 9 constructs, destroying the logical identifier; **BL-181** facts now classify MEASURE or ATTRIBUTE from the expression instead of hardcoding ATTRIBUTE, so quantities and profit aggregate (182 of 182 facts on the fixture were previously categorical). |
