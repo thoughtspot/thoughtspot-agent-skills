@@ -207,6 +207,14 @@ if echo "$STAGED" | grep -qE '(agents/cli/ts-convert-|tools/validate/check_cover
   run_check "coverage matrix"     "tools/validate/check_coverage_matrix.py --root $REPO_ROOT"
 fi
 
+# Converter parity (BL-217) — a converter must not emit a ThoughtSpot function that
+# does not exist, and must adopt the shared formula helpers. Runs when any converter
+# package, any converter skill, or the validator itself is touched. Scope is
+# discovered from agents/cli/ts-convert-*, so a NEW converter is covered with no edit.
+if echo "$STAGED" | grep -qE '(agents/cli/ts-convert-|tools/ts-cli/ts_cli/|tools/validate/check_converter_parity\.py)'; then
+  run_check "converter parity"    "tools/validate/check_converter_parity.py --root $REPO_ROOT"
+fi
+
 # Formula catalog cross-check — mapping files must only reference valid TS functions
 # from thoughtspot-formula-patterns.md. Runs when any mapping or the catalog is touched.
 if echo "$STAGED" | grep -qE 'agents/shared/(mappings/|schemas/thoughtspot-formula-patterns\.md)'; then

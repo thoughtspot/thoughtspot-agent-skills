@@ -7,6 +7,18 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-08-26
 
+### Added
+
+- **`check_converter_parity.py` — BL-217 part 1.** Asserts that no converter maps a
+  source function onto one of the six names that do not exist in ThoughtSpot
+  (`upper`/`lower`/`trim`/`ltrim`/`rtrim`/`replace`, live-disproved per BL-170/BL-171)
+  without routing it to a `sql_*_op` pass-through, and that any converter emitting
+  formulas uses `resolve_name_collisions` + `fix_double_aggregation`. Verified against
+  PR #440's pre-review commit, which it flags on both counts. Converter scope is
+  discovered from `agents/cli/ts-convert-*`, so a new converter is covered with no
+  edit; one whose code cannot be located fails loudly. Wired into pre-commit and CI;
+  8 unit tests.
+
 ### Changed
 
 - feat: update ts-convert-to-snowflake-sv to v1.6.0 (CoCo mirror v1.3.0) — an *additive*

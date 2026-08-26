@@ -7911,6 +7911,31 @@ blocking on this.
 
 ## BL-217 -- converter helper adoption is uneven and nothing detects a converter that skips one `Tier 2`
 
+> **Part 1 LANDED 2026-08-26** — `tools/validate/check_converter_parity.py`, wired into
+> pre-commit and CI, 8 unit tests. Scope is discovered from `agents/cli/ts-convert-*`,
+> so a new converter is covered with no edit; a converter whose code cannot be located
+> fails loudly rather than being silently skipped. **Part 2 (consolidation) is still
+> open** — 7 divergences are encoded in the validator, each a target.
+>
+> Three corrections to the analysis below, found while building it:
+>
+> 1. **The obvious rule does not work.** The first cut asserted "emits `sql_*_op` ->
+>    must import `wrap_passthrough_calls`" and **passed on #440's pre-review tree**.
+>    The bug is that the converter emitted *no* pass-through at all, so an
+>    absence-triggered rule can never fire. The shipped check is phrased as a
+>    forbidden **output** — mapping a source function onto one of the six
+>    live-disproved names without routing it — which fires on the shape that shipped.
+> 2. **Four mechanisms, not three.** Databricks has its own `_PASS_THROUGH_HINT` map
+>    in `databricks/mv_sql.py`, a fourth implementation the table below missed.
+> 3. **Qlik and PowerBI map `upper -> upper` and that is correct** — the name is a key
+>    in their pass-through map and gets rewritten. Any check here must not flag it,
+>    which is why "mapped AND not routed" is the condition.
+>
+> Also worth relaying: run against #440's **current** head, the validator still flags a
+> missing `fix_double_aggregation`. The author has since fixed the pass-throughs and
+> `resolve_name_collisions`, so that one gap is either a real remaining hole or a
+> justified divergence — the author's call, but it is now visible.
+
 The TML-correctness fixes that every converter needs — pass-through rewriting for the
 ThoughtSpot functions that do not exist, formula/column name-collision resolution,
 double-aggregation collapse, `index_type: DONT_INDEX` on computed measures — live in
