@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: trailing/leading/cumulative/all/semi-additive range behavior live-verified against a Databricks fixture + ThoughtSpot number-match; corrected trailing/leading moving_sum anchor args (C1/C3) and the period-filter offset mechanism from wall-clock to row-relative (C6/C6a); exclusive-default confirmed (C2); materialization: block documented for the first time (C9); quarter/year period-offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: parameters: block GA (18.2+, mutually exclusive with materialization:) documented; runtime requirement corrected to tiered 16.4/17.3/18.1/18.2 (findings 13.1/13.10); 2026-07-29 full sweep: materialization: is GA at Runtime 17.3 (not Public Preview) with new cluster_by/partition_by fields, REFRESH MATERIALIZED VIEW added at 18.0 (finding 13.7); wildcard field expressions corrected to Runtime 18.2+-gated and legal in measures: for MV-on-MV import, 18.1 also gates inclusive/exclusive window modifiers and one-to-many joins (finding 13.8); synonyms hard limit (10/column, 255 chars) documented (finding 13.9); format: documented on fields/dimensions, not measures-only (finding 13.10); window: Experimental label recorded (finding 13.11); SHOW CREATE TABLE retrieval path noted (finding 13.12); 2026-07-31 BL-174: recorded that an MV join has no type: field because Databricks fixes star-schema joins as LEFT OUTER (vendor joins doc re-checked), with the row-retention consequence for converters spelled out) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: trailing/leading/cumulative/all/semi-additive range behavior live-verified against a Databricks fixture + ThoughtSpot number-match; corrected trailing/leading moving_sum anchor args (C1/C3) and the period-filter offset mechanism from wall-clock to row-relative (C6/C6a); exclusive-default confirmed (C2); materialization: block documented for the first time (C9); quarter/year period-offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: parameters: block GA (18.2+, mutually exclusive with materialization:) documented; runtime requirement corrected to tiered 16.4/17.3/18.1/18.2 (findings 13.1/13.10); 2026-07-29 full sweep: materialization: is GA at Runtime 17.3 (not Public Preview) with new cluster_by/partition_by fields, REFRESH MATERIALIZED VIEW added at 18.0 (finding 13.7); wildcard field expressions corrected to Runtime 18.2+-gated and legal in measures: for MV-on-MV import, 18.1 also gates inclusive/exclusive window modifiers and one-to-many joins (finding 13.8); synonyms hard limit (10/column, 255 chars) documented (finding 13.9); format: documented on fields/dimensions, not measures-only (finding 13.10); window: Experimental label recorded (finding 13.11); SHOW CREATE TABLE retrieval path noted (finding 13.12); 2026-07-31 BL-174: recorded that an MV join has no type: field because Databricks fixes star-schema joins as LEFT OUTER (vendor joins doc re-checked), with the row-retention consequence for converters spelled out); 2026-08-26 finding 13.12 live-verified on DBSQL 2026.35: date-hierarchy levels must truncate the window's order FIELD, not the underlying column -- divergence requires a non-passthrough date field, and this repo's emitters are structurally safe via the direct-[TABLE::COL] guard (see "Date-Hierarchy Levels") -->
 
 # Databricks Metric View Schema
 
@@ -565,6 +565,38 @@ calendar month. An out-of-range `offset` (e.g. the earliest row has no "prior" r
 evaluates to `NULL`, not `0`. See
 [ts-databricks-formula-translation.md](../mappings/ts-databricks/ts-databricks-formula-translation.md)
 for the corrected ThoughtSpot translation.
+
+### Date-Hierarchy Levels — truncate the order *field*, not the column
+
+**Live-verified 2026-08-26** (DBSQL 2026.35, PREVIEW channel; fixture
+`agent_skills.audit_probe`). The `advanced-techniques` page (updated 2026-08-18)
+warns that a date-hierarchy level must be defined on the window's **order field**,
+not on the underlying source column — "Defining a hierarchy level on the underlying
+source column, such as `DATE_TRUNC('MONTH', o_orderdate)`, breaks its link to the
+order field … Grouping a window measure by such a field returns incorrect results."
+
+The live results **narrow that warning materially**, so read it with this scoping:
+
+| Order field's `expr` | `DATE_TRUNC` applied to | Result |
+|---|---|---|
+| a bare column (`o_orderdate`) | the column | **Identical numbers** — the two spellings are the same expression, so no divergence is possible |
+| a bare column | the field name | Identical (verified: offset `-1 month`, `cumulative`, `trailing 2 month`) |
+| a **transformed** expression (`o_orderdate + INTERVAL 15 DAYS`) | the column | **WRONG** — mislabelled buckets, a missing period row, wrong per-period totals |
+| a transformed expression | the field name | Correct |
+
+So the failure needs a date field that is *not* a bare column passthrough. Both
+spellings create a valid MV and both queries succeed — **no import check or
+validator can catch this**; only the numbers differ.
+
+**This repo's emitters are in the safe class, structurally.** `synthesize_period_dim`
+resolves the level from a physical dot-path, and both it and `_raw_date_dim` reject a
+non-`col` order node (`UntranslatableError`), so the order field is always a bare
+column and the two spellings coincide. That guard is therefore load-bearing for
+numeric correctness, not just tidiness: relaxing it to accept transformed date fields
+would move emitted MVs into the wrong-numbers row above. Guard added to
+`synthesize_period_dim` 2026-08-26 — it previously raised `KeyError`, which escaped
+`emit_window_measure` (whose caller catches only `UntranslatableError`) and aborted
+the whole model conversion.
 
 | `range` value | Meaning |
 |---|---|

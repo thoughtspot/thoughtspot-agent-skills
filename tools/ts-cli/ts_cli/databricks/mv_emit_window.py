@@ -153,6 +153,17 @@ def synthesize_period_dim(date_col_node: dict, grain: str,
     """
     from ts_cli.databricks.mv_emit import to_snake
 
+    # Same guard as `_raw_date_dim`, for the same reason. Databricks requires a
+    # date-hierarchy level to be defined on the window's *order field*, not on a
+    # transformed expression over the underlying column -- and every caller here
+    # resolves the level from a physical dot-path, so a non-`col` node would
+    # silently produce a level that no longer corresponds to the order field.
+    # Without this the KeyError below escapes `emit_window_measure`, whose caller
+    # in mv_emit.py catches only UntranslatableError, aborting the whole model
+    # conversion instead of skipping the one formula.
+    if date_col_node.get("node") != "col":
+        raise UntranslatableError(
+            "window order column must be a direct [TABLE::COL] reference")
     dot_path = col_resolver(date_col_node)
     name = to_snake(f"{grain}_{date_col_node['column']}")
     display = f"{grain.title()} ({date_col_node['column'].replace('_', ' ').title()})"

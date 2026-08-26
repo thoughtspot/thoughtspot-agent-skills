@@ -1392,3 +1392,54 @@ class TestRolePlayEmit:
         # both role-play dims survive, each on its own alias path
         assert "account.NAME" in exprs
         assert "BILL_TO.NAME" in exprs
+
+
+class TestPeriodDimOrderFieldGuard:
+    """A period-offset window's date argument must be a direct [TABLE::COL] ref.
+
+    Databricks requires a date-hierarchy level to be defined on the window's
+    *order field*, not on a transformed expression over the underlying column;
+    live-verified 2026-08-26 (see databricks-metric-view.md "Date-Hierarchy
+    Levels"). `_raw_date_dim` already enforced this; `synthesize_period_dim`
+    did not, and the resulting KeyError escaped `emit_window_measure` -- whose
+    only caller catches UntranslatableError alone, so one such formula aborted
+    the entire model conversion.
+    """
+
+    @staticmethod
+    def _resolver(node):
+        return f"orders.{node['column']}"
+
+    def _emit(self, formula):
+        from ts_cli.databricks.mv_emit_window import emit_window_measure
+        model = {"formulas": [{"id": "f1", "name": "W", "expr": formula}]}
+        col = {"name": "w", "formula_id": "f1", "aggregation": "SUM"}
+        return emit_window_measure(col, self._resolver, lambda r: r, model, [])
+
+    def test_plain_column_date_arg_still_emits(self):
+        measure, dims = self._emit(
+            "sum_if(diff_months([Orders::O Orderdate], today()) = -1, [Orders::Amount])")
+        assert measure["window"][0]["offset"] == "-1 month"
+        # The level's inner expression is the bare dot-path -- i.e. exactly the
+        # expression the order field resolves to. That identity is what keeps
+        # the emitted MV in the numerically-safe class.
+        assert dims[0]["expr"] == "DATE_TRUNC('MONTH', orders.O Orderdate)"
+
+    def test_transformed_date_arg_is_reported_not_crashed(self):
+        from ts_cli.databricks.mv_emit_expr import UntranslatableError
+        with pytest.raises(UntranslatableError):
+            self._emit("sum_if(diff_months(add_days([Orders::O Orderdate], 15), "
+                       "today()) = -1, [Orders::Amount])")
+
+    def test_period_and_raw_date_paths_agree_on_a_transformed_node(self):
+        """Implementation-drift guard: the two sibling resolvers handled the same
+        malformed input differently -- one reported, one crashed."""
+        from ts_cli.databricks.mv_emit_expr import UntranslatableError
+        from ts_cli.databricks.mv_emit_window import _period_dim, _raw_date_dim
+        xform = {"node": "call", "fn": "add_days",
+                 "args": [{"node": "col", "table": "orders", "column": "o_orderdate"},
+                          {"node": "lit", "value": 15}]}
+        for fn in (lambda: _raw_date_dim(xform, self._resolver, []),
+                   lambda: _period_dim(xform, "month", self._resolver, [])):
+            with pytest.raises(UntranslatableError):
+                fn()
