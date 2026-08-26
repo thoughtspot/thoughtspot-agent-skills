@@ -111,12 +111,21 @@ def test_marker_not_matched_as_substring(tmp_path):
 # ── --base scoped-hard-mode tests ─────────────────────────────────────────────
 
 def test_changed_files_parsing(tmp_path, monkeypatch):
-    """_changed_files parses git diff --name-only output into a set."""
+    """_changed_files parses `git diff --name-only -z` output into a set.
+
+    The call passes -z, so git NUL-separates and never octal-quotes; the fake
+    mirrors that. It previously modelled newline-separated output, which is the
+    shape that silently dropped non-ASCII paths (audit 4.2).
+    """
     import subprocess
 
     def fake_run(cmd, **kwargs):
+        assert "-z" in cmd, "must request NUL-separated output"
         result = subprocess.CompletedProcess(cmd, 0)
-        result.stdout = "agents/cli/skill-a/references/open-items.md\nagents/cli/skill-b/SKILL.md\n"
+        result.stdout = (
+            "agents/cli/skill-a/references/open-items.md\0"
+            "agents/cli/skill-b/SKILL.md\0"
+        )
         result.stderr = ""
         return result
 
@@ -126,3 +135,23 @@ def test_changed_files_parsing(tmp_path, monkeypatch):
         "agents/cli/skill-a/references/open-items.md",
         "agents/cli/skill-b/SKILL.md",
     }
+
+
+def test_changed_files_keeps_non_ascii_paths(tmp_path, monkeypatch):
+    """The regression 4.2 is about: a non-ASCII path must survive parsing.
+
+    Without -z git returns `"agents/cli/caf\\303\\251/SKILL.md"` — quotes
+    included — which no caller un-escapes, so the file was dropped silently.
+    """
+    import subprocess
+
+    def fake_run(cmd, **kwargs):
+        result = subprocess.CompletedProcess(cmd, 0)
+        result.stdout = "agents/cli/café/SKILL.md\0agents/cli/plain/SKILL.md\0"
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    got = check_open_items._changed_files("origin/main", tmp_path)
+    assert "agents/cli/café/SKILL.md" in got, got
+    assert len(got) == 2
