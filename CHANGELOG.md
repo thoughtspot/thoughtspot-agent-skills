@@ -9,6 +9,15 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ### Fixed
 
+- **`ts-profile-databricks` wrote OAuth secrets and PATs to `~/.databrickscfg` in
+  plaintext** — on the stated grounds that the Databricks CLI "does not support shell
+  expansion or keychain lookups." The CLI does read `DATABRICKS_CLIENT_ID` /
+  `DATABRICKS_CLIENT_SECRET` / `DATABRICKS_TOKEN` from the environment (live-verified
+  on CLI v1.13.0 against a real Service Principal), which is a keychain-backed path
+  that keeps the credential off disk entirely. Steps A-SP4 and A-PAT4 now verify auth
+  via env vars; a named CLI profile is opt-in and written by the user, not by the
+  skill. `ts-profile-databricks` 1.1.1 → 2.0.0
+
 - **A period-offset window formula with a transformed date argument aborted the
   entire model conversion** — `synthesize_period_dim` lacked the direct-`[TABLE::COL]`
   guard its sibling `_raw_date_dim` has, so `sum_if(diff_months(add_days([Date], 15),

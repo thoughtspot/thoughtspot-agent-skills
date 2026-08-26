@@ -278,45 +278,55 @@ Tell the user to run `source ~/.zshenv` and wait for confirmation.
 **Windows:** Show the `windows_env_commands` from the output for the user to run in
 PowerShell. Wait for confirmation.
 
-#### A-SP4 — Write Databricks CLI Config
+#### A-SP4 — Verify CLI Auth (no secret on disk)
 
-Read the client secret from the env var (must be loaded after `source ~/.zshenv`):
+The Databricks CLI reads Service Principal credentials straight from the
+environment, so **nothing needs to be written to `~/.databrickscfg`** and the
+secret never leaves the keychain. `~/.zshenv` (step A-SP3) already exports
+`{secret_env}` from the keychain, so confirm auth works:
 
-```python
-import os
-secret = os.environ.get("{secret_env}", "")
-if not secret:
-    print("ERROR: {secret_env} is empty — run 'source ~/.zshenv' first.")
+```bash
+DATABRICKS_HOST="{host}" \
+DATABRICKS_CLIENT_ID="{client_id}" \
+DATABRICKS_CLIENT_SECRET="${secret_env}" \
+  databricks current-user me -o json
 ```
 
-Where `{secret_env}` is the `env_var` from the `ts profiles add` output.
+A JSON body naming the Service Principal means auth is working. **Live-verified
+2026-08-26** against a real SP on Databricks CLI v1.13.0.
 
-Write or update the `[{dbx_profile}]` section in `~/.databrickscfg`:
+If it reports an empty secret, the user has not run `source ~/.zshenv` yet.
 
-```ini
-[{dbx_profile}]
-host          = {host}
-client_id     = {client_id}
-client_secret = <value from env var>
-auth_type     = oauth-m2m
+> **Why no `~/.databrickscfg` section.** This skill previously wrote
+> `client_secret` there in plaintext, on the stated grounds that the CLI "does
+> not support shell expansion or keychain lookups." The second half is true and
+> the conclusion does not follow — the CLI supports `DATABRICKS_HOST` /
+> `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET`, which is a keychain-backed
+> path that keeps the credential off disk entirely. Writing it was a direct
+> violation of [security.md](../../../.claude/rules/security.md) ("Credentials
+> are never stored in files"), and `chmod 600` mitigates but does not fix that —
+> a long-lived OAuth secret in a readable file is still a second copy outside the
+> credential store, surviving backups and `rsync`.
+
+**Only if the user specifically needs a named CLI profile** (e.g. to pass
+`--profile {dbx_profile}` or set `DATABRICKS_CONFIG_PROFILE` for
+`agents/databricks/deploy.sh`), tell them how to add it themselves and name the
+trade-off — do **not** write the secret to the file on their behalf:
+
+```
+Adding a named profile means storing the OAuth secret in ~/.databrickscfg in
+plaintext. The env-var path above needs no such copy. If you still want the
+named profile, add this yourself and keep the file at chmod 600:
+
+  [{dbx_profile}]
+  host      = {host}
+  client_id = {client_id}
+  client_secret = <your secret>
+  auth_type = oauth-m2m
 ```
 
-Where `{dbx_profile}` is `ts-{slug}` from the `ts profiles add` output.
-
-Read `~/.databrickscfg` first. If a section named `[{dbx_profile}]` already exists, replace it. Otherwise append. Preserve all other sections.
-
-After writing, set file permissions:
-
-```python
-import os
-os.chmod(os.path.expanduser("~/.databrickscfg"), 0o600)
-```
-
-**Note:** `~/.databrickscfg` must contain `client_secret` in plaintext because the
-Databricks CLI reads it from this file — it does not support shell expansion or
-keychain lookups. The file is permission-restricted to 0600 (owner-only). The
-keychain entry is the authoritative copy; the config file is a derived artifact
-that this skill keeps in sync.
+Note that `deploy.sh` only passes `--profile` when `DATABRICKS_CONFIG_PROFILE` is
+set; with it unset, the CLI picks up the env vars above and no profile is needed.
 
 #### A-SP5 — Collect Workspace Defaults
 
@@ -409,22 +419,21 @@ Stop if verification fails.
 
 Same as A-SP3 — upsert the `zshenv_line` from the output.
 
-#### A-PAT4 — Write Databricks CLI Config
+#### A-PAT4 — Verify CLI Auth (no token on disk)
 
-Read the token from the env var, then write or update `~/.databrickscfg`:
+Same principle as A-SP4 — the CLI reads a PAT from the environment, so the token
+stays in the keychain and nothing is written to `~/.databrickscfg`:
 
-```ini
-[{dbx_profile}]
-host  = {host}
-token = <value from env var>
+```bash
+DATABRICKS_HOST="{host}" DATABRICKS_TOKEN="${secret_env}" \
+  databricks current-user me -o json
 ```
 
-Where `{dbx_profile}` is `ts-{slug}` from the `ts profiles add` output.
+An empty token means the user has not run `source ~/.zshenv` yet.
 
-Same read/replace/append logic as A-SP4. Set file permissions to 0600.
-
-**Note:** Same plaintext trade-off as Service Principal — `~/.databrickscfg` must
-contain the token value. The keychain entry is the authoritative copy.
+If the user specifically needs a named CLI profile, apply the same rule as A-SP4:
+tell them what it costs (the token in plaintext at `chmod 600`) and let them add it
+themselves — do not write the credential to the file for them.
 
 #### A-PAT5 — Collect Workspace Defaults
 
@@ -550,7 +559,8 @@ New workspace URL: [{current_host}]
 ts profiles update --platform databricks --name "{profile_name}" --field host={new_host}
 ```
 
-Also update `host` in `~/.databrickscfg` under the `[{dbx_profile}]` section if the
+If — and only if — the user opted into a named CLI profile (see A-SP4), also update
+`host` in `~/.databrickscfg` under the `[{dbx_profile}]` section if the
 profile uses SP or PAT auth.
 
 Confirm: `URL updated.`
@@ -600,7 +610,10 @@ After confirmation, verify (re-use the platform-specific verification block from
 
 **macOS / Linux:** Tell the user to run `source ~/.zshenv`.
 
-After sourcing, also update `client_secret` in `~/.databrickscfg` under `[{dbx_profile}]`.
+After sourcing, the env-var path picks the new secret up with no further step. Only
+if the user opted into a named CLI profile (A-SP4) does `client_secret` in
+`~/.databrickscfg` under `[{dbx_profile}]` also need updating — the keychain entry is
+always the authoritative copy.
 
 **PAT:** Same pattern but with account name `"token"`, and updating the `token` field
 in `~/.databrickscfg`.
@@ -622,7 +635,7 @@ Run the full credential setup section of [Add](#a--add) for the chosen method.
 Clean up the old auth:
 - Delete old Keychain entry
 - Remove old export line from `~/.zshenv` (macOS/Linux)
-- Remove or replace old `~/.databrickscfg` section
+- Remove or replace an old `~/.databrickscfg` section, if the user had opted into one
 - Profile JSON is already updated by `ts profiles add`
 
 ### U4–U6 — Simple Field Updates (Catalog, Schema, Warehouse)
@@ -685,7 +698,7 @@ Parse the JSON output for `keychain_service` and `env_var_to_remove`.
 
 3. **If SP or PAT auth — remove export line from shell profile** (macOS/Linux only) — read `~/.zshenv`, filter out any line that exports `{env_var_to_remove}`, write back.
 
-4. **If SP or PAT auth — remove `~/.databrickscfg` section** — read the file, remove the `[{dbx_profile}]` section, write back. Preserve all other sections.
+4. **If the user had opted into a named CLI profile — remove the `~/.databrickscfg` section** — read the file, remove the `[{dbx_profile}]` section, write back. Preserve all other sections. Skip when absent (the default: A-SP4/A-PAT4 write no section).
 
 5. Tell the user:
 ```
@@ -840,6 +853,7 @@ warehouse_id = profile["sql_warehouse_http_path"].rstrip("/").split("/")[-1]
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.0.0 | 2026-08-26 | Stop writing credentials to `~/.databrickscfg` — the CLI reads `DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET`/`DATABRICKS_TOKEN` from the environment, so the secret stays in the keychain (live-verified). A named CLI profile is now opt-in and user-written |
 | 1.1.1 | 2026-07-22 | Relax prompt-batching: credential flows are mostly sequential, but independent inputs can now be batched (BL-074) |
 | 1.1.0 | 2026-07-13 | Adopt `ts profiles add/update/remove` CLI commands — replaces hand-coded slug derivation, keychain commands, env var naming, and profile JSON I/O |
 | 1.0.0 | 2026-05-20 | Initial release — Service Principal, PAT, and CLI profile auth |
