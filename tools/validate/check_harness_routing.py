@@ -74,13 +74,20 @@ def parse_frontmatter(path: Path) -> dict[str, str]:
 
 
 def routing_assignments(rule_text: str) -> str:
-    """The routing table's assignment prose, lowercased for substring checks.
+    """The routing TABLE's rows only, lowercased for substring checks.
 
-    The table is human-authored markdown, so this looks for agent names inside it
-    rather than parsing cells — the check is "is this agent accounted for", not
-    "does the table have a particular shape".
+    Deliberately NOT the whole file. Matching the whole document made the check
+    disarmable by ordinary prose: the 18.5 rewrite (same day) introduced a bare
+    `effort: high` into the rules-of-thumb text, and assertion 4 ("the declared tier
+    matches the table") silently stopped firing for `effort: high` — A/B verified. A
+    gate that any nearby sentence can satisfy is not a gate.
+
+    Restricting to table rows keeps the check honest: an agent's tier must be recorded
+    in the assignments TABLE, which is what CLAUDE.md actually requires. Prose may
+    discuss `effort: high` freely without vouching for any agent.
     """
-    return rule_text.lower()
+    rows = [ln for ln in rule_text.splitlines() if ln.lstrip().startswith("|")]
+    return "\n".join(rows).lower()
 
 
 def check(root: Path) -> list[str]:

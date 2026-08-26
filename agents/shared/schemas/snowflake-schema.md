@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (derived metrics + named filters + custom_instructions; correction 2026-07: base_table.definition: SQL-query logical-table alternative added to Complete Schema, GA 2026-06-26 — finding 13.4; is_enum dimension property added, GA 2026-06-25 — finding 13.7; BL-064: sample_values blockquote removed from NOT-supported section, verified_queries/unique_keys/relationship type+right_range added to Complete Schema; 2026-07-29 full sweep: top-level max_staleness: key + materializations DDL/YAML coverage row added, public preview release 10.24 Jul 2026 — finding 13.4; facts[] description corrected — pre-aggregated expressions over related tables and window expressions are allowed, not just raw unaggregated columns — finding 13.6; 2026-08-26: derived-metric section corrected — using_relationships and non_additive_dimensions are table-level keys only, plus the two expr restrictions (no aggregations of metrics, no window functions) — finding 13.6); 2026-08-26 finding 13.10: using_relationships marked Preview (available to all accounts) -- shipped Preview 2026-03-13, no GA announcement found through Aug 2026 -->
+<!-- currency: snowflake — 2026-07 (derived metrics + named filters + custom_instructions; correction 2026-07: base_table.definition: SQL-query logical-table alternative added to Complete Schema, GA 2026-06-26 — finding 13.4; is_enum dimension property added, GA 2026-06-25 — finding 13.7; BL-064: sample_values blockquote removed from NOT-supported section, verified_queries/unique_keys/relationship type+right_range added to Complete Schema; 2026-07-29 full sweep: top-level max_staleness: key + materializations DDL/YAML coverage row added, public preview release 10.24 Jul 2026 — finding 13.4; facts[] description corrected — pre-aggregated expressions over related tables and window expressions are allowed, not just raw unaggregated columns — finding 13.6; 2026-08-26: derived-metric section corrected — using_relationships and non_additive_dimensions are table-level keys only, plus the two expr restrictions (no aggregations of metrics, no window functions) — finding 13.6); 2026-08-26 finding 13.10: using_relationships marked Preview (available to all accounts) -- shipped Preview 2026-03-13, no GA announcement found through Aug 2026; 2026-08-26 finding 13.7: non_additive_dimensions documented (4 sub-fields + listed-order significance) -- it was absent while the semi-additive path depended on it -->
 
 # Snowflake Semantic View YAML Schema
 
@@ -145,6 +145,36 @@ tables:                           # Required. At least one entry.
     - string
     using_relationships:          # Optional. Relationship path for cross-table metrics.
     - string
+    non_additive_dimensions:      # Optional. Semi-additive metric — the dimension(s) the
+                                  # metric must NOT be summed across (e.g. a balance
+                                  # snapshot over time). Added to THIS BLOCK 2026-08-26
+                                  # (finding 13.7). Scope note: the key was already named
+                                  # at the derived-metrics blockquote below (added the
+                                  # same day by finding 13.6) — the audit's "absent from
+                                  # this file entirely" was stale by the time it was
+                                  # actioned. What was genuinely missing is the Complete
+                                  # Schema entry with its sub-fields, which is what this
+                                  # file is read as for Step-11 validation: without it a
+                                  # validation pass flags every correctly-emitted
+                                  # semi-additive metric as carrying an unknown key.
+    - table: string               # Required. Logical table holding the dimension.
+      dimension: string           # Required. The non-additive dimension.
+      sort_direction: string      # Optional. "ascending" (closing/most-recent snapshot)
+                                  # | "descending" (opening/earliest). Maps to the DDL's
+                                  # NON ADDITIVE BY (dim asc|desc).
+      null_order: string          # Optional. "first" | "last" -> the DDL's
+                                  # `nulls first|last`. NOT merely for completeness: the
+                                  # formula mapping makes it an INSTRUCTION --
+                                  # ts-snowflake-formula-translation.md:1020, "Include
+                                  # `null_order: last` to match ThoughtSpot last_value
+                                  # behaviour" -- and it appears in 9 places across 4
+                                  # files. (The audit said it "appears nowhere in the
+                                  # repo"; that was wrong, and an earlier draft of this
+                                  # comment repeated it.)
+                                  #
+                                  # LISTED-DIMENSION ORDER IS SIGNIFICANT (key-level note,
+                                  # not specific to null_order): entries are applied in
+                                  # sequence, so reordering them changes the metric.
     tags:                          # Optional. GA 2026-05-05. Same fully-qualified
                                   # tag name → value form as the root-level `tags:`.
       <db>.<schema>.<tag_name>: value

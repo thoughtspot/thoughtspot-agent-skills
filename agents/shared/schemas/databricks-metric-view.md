@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: trailing/leading/cumulative/all/semi-additive range behavior live-verified against a Databricks fixture + ThoughtSpot number-match; corrected trailing/leading moving_sum anchor args (C1/C3) and the period-filter offset mechanism from wall-clock to row-relative (C6/C6a); exclusive-default confirmed (C2); materialization: block documented for the first time (C9); quarter/year period-offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: parameters: block GA (18.2+, mutually exclusive with materialization:) documented; runtime requirement corrected to tiered 16.4/17.3/18.1/18.2 (findings 13.1/13.10); 2026-07-29 full sweep: materialization: is GA at Runtime 17.3 (not Public Preview) with new cluster_by/partition_by fields, REFRESH MATERIALIZED VIEW added at 18.0 (finding 13.7); wildcard field expressions corrected to Runtime 18.2+-gated and legal in measures: for MV-on-MV import, 18.1 also gates inclusive/exclusive window modifiers and one-to-many joins (finding 13.8); synonyms hard limit (10/column, 255 chars) documented (finding 13.9); format: documented on fields/dimensions, not measures-only (finding 13.10); window: Experimental label recorded (finding 13.11); SHOW CREATE TABLE retrieval path noted (finding 13.12); 2026-07-31 BL-174: recorded that an MV join has no type: field because Databricks fixes star-schema joins as LEFT OUTER (vendor joins doc re-checked), with the row-retention consequence for converters spelled out); 2026-08-26 finding 13.12 live-verified on DBSQL 2026.35: date-hierarchy levels must truncate the window's order FIELD, not the underlying column -- divergence requires a non-passthrough date field, and this repo's emitters are structurally safe via the direct-[TABLE::COL] guard (see "Date-Hierarchy Levels"); 2026-08-26 finding 13.13: the "rely: works on every Runtime" claim WITHDRAWN -- the vendor feature-availability matrix lists join optimization with rely.at_most_one_match under 18.1 while the YAML reference gates only one-to-many joins; both readings recorded, unverifiable on our workspace (both channels run DBSQL 2026.35), 18.1+ is now the documented floor; 2026-08-26 mediums batch 2: runtime tier table completed from the vendor availability matrix (Snowflake-schema joins / TEMPORARY MVs / JDBC-ODBC at 17.3, BI compatibility mode at 18.0 -- finding 13.20), and v1.1's #-comment stripping documented with the note that yaml.safe_dump means our emitters were never exposed to it (finding 13.21) -->
+<!-- currency: databricks — 2026-08 (PR1 window deep-analysis 2026-07-09: trailing/leading/cumulative/all/semi-additive range behavior live-verified against a Databricks fixture + ThoughtSpot number-match; corrected trailing/leading moving_sum anchor args (C1/C3) and the period-filter offset mechanism from wall-clock to row-relative (C6/C6a); exclusive-default confirmed (C2); materialization: block documented for the first time (C9); quarter/year period-offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: parameters: block GA (18.2+, mutually exclusive with materialization:) documented; runtime requirement corrected to tiered 16.4/17.3/18.1/18.2 (findings 13.1/13.10); 2026-07-29 full sweep: materialization: is GA at Runtime 17.3 (not Public Preview) with new cluster_by/partition_by fields, REFRESH MATERIALIZED VIEW added at 18.0 (finding 13.7); wildcard field expressions corrected to Runtime 18.2+-gated and legal in measures: for MV-on-MV import, 18.1 also gates inclusive/exclusive window modifiers and one-to-many joins (finding 13.8); synonyms hard limit (10/column, 255 chars) documented (finding 13.9); format: documented on fields/dimensions, not measures-only (finding 13.10); window: Experimental label recorded (finding 13.11); SHOW CREATE TABLE retrieval path noted (finding 13.12); 2026-07-31 BL-174: recorded that an MV join has no type: field because Databricks fixes star-schema joins as LEFT OUTER (vendor joins doc re-checked), with the row-retention consequence for converters spelled out); 2026-08-26 finding 13.12 live-verified on DBSQL 2026.35: date-hierarchy levels must truncate the window's order FIELD, not the underlying column -- divergence requires a non-passthrough date field, and this repo's emitters are structurally safe via the direct-[TABLE::COL] guard (see "Date-Hierarchy Levels"); 2026-08-26 finding 13.13: the "rely: works on every Runtime" claim WITHDRAWN -- the vendor feature-availability matrix lists join optimization with rely.at_most_one_match under 18.1 while the YAML reference gates only one-to-many joins; both readings recorded, unverifiable on our workspace (both channels run DBSQL 2026.35), 18.1+ is now the documented floor; 2026-08-26 mediums batch 2: runtime tier table completed from the vendor availability matrix (Snowflake-schema joins / TEMPORARY MVs / JDBC-ODBC at 17.3, BI compatibility mode at 18.0 -- finding 13.20), and v1.1's #-comment stripping documented with the note that yaml.safe_dump means our emitters were never exposed to it (finding 13.21); 2026-08-26 finding 13.17: the `window:` Experimental caution is WITHDRAWN -- re-fetched the YAML reference and no Experimental/Preview/Beta label appears on it, so finding 13.11's standing "re-check window first" instruction is discharged. NB the finding's claim that the vendor now publishes the frame table is NOT true of the YAML reference, so this repo's live-verified frame semantics remain the authority; 2026-08-26 finding 13.16: format: type table completed from 2 of 6 types to all six (number/currency/percentage/byte/date/date_time) plus the optional keys -- transcribed from the audit report, NOT re-fetched from the vendor -->
 
 # Databricks Metric View Schema
 
@@ -531,8 +531,21 @@ measures:
 
 | Format type | Fields | Notes |
 |---|---|---|
-| `currency` | `currency_code`, `decimal_places` | ISO 4217 code (USD, EUR, etc.) |
-| `percentage` | `decimal_places` | Value is multiplied by 100 for display |
+| `number` | `decimal_places`, `hide_group_separator`, `abbreviation` | Plain numeric |
+| `currency` | `currency_code`, `decimal_places`, `hide_group_separator`, `abbreviation` | ISO 4217 code (USD, EUR, etc.) |
+| `percentage` | `decimal_places`, `hide_group_separator` | Value is multiplied by 100 for display |
+| `byte` | `decimal_places`, `abbreviation` | Byte-scaled numeric |
+| `date` | `date_format`, `leading_zeros` | Temporal |
+| `date_time` | `date_format`, `time_format`, `leading_zeros` | Temporal |
+
+`decimal_places` takes `{type: max\|exact\|all, places: N}`. The `{type: exact, places: N}`
+and `currency_code` shapes are both confirmed correct as previously documented.
+
+> **Completed 2026-08-26 (finding 13.16).** This table documented **2 of 6** types and none
+> of the optional keys. That matters beyond completeness: this file's own from-parser
+> guidance tells the parser to map `format:` → the ThoughtSpot ATTRIBUTE `format_pattern`,
+> which cannot be written correctly with two-thirds of the vocabulary missing — a
+> `type: date` MV round-tripped with its formatting silently dropped.
 
 **From-parser guidance:** a `format:` on a `fields:`/`dimensions:` entry should be
 tolerated and logged (or mapped to the ThoughtSpot ATTRIBUTE `format_pattern` property
@@ -541,15 +554,25 @@ see [ts-databricks-properties.md](../mappings/ts-databricks/ts-databricks-proper
 
 ### Window with Offset — Period-over-Period (verified 2026-05-26; requires Runtime 18.1+)
 
-> **Label status (finding 13.11, 2026-07-29): `window:` on measures is officially
-> "Experimental."** Databricks' own pages conflict on this — the feature-availability
-> matrix lists `window:` unflagged alongside GA features, while the YAML reference page
-> labels it Experimental. No inaccuracy has been found in this repo's `window:` mappings
-> against either page, but this is the repo's most heavily live-verified mapping area
-> (the C1-C9/A1-A3 matrices cited throughout this file) presenting syntax Databricks
-> itself has not committed to as stable — the same class of risk the Muze charting
-> library breakage taught this repo to watch for. **Re-check `window:` syntax first**
-> on the next Databricks currency sweep, before any other section of this file.
+> **Label status — RESOLVED 2026-08-26 (finding 13.17 closes finding 13.11).** Finding
+> 13.11 recorded a conflict (the availability matrix listed `window:` unflagged while the
+> YAML reference labelled it Experimental) and instructed "re-check `window:` syntax first
+> on the next sweep". This is that re-check: **no Experimental / Preview / Beta label
+> appears on `window:` anywhere on the YAML reference** (re-fetched 2026-08-26 — the page
+> presents it as a standard GA feature). The conflict is gone because the Experimental side
+> of it is gone, so the caution is withdrawn and the standing "re-check this first"
+> instruction is discharged.
+>
+> One correction to 13.17's own text, recorded so a later reader does not inherit it: the
+> finding also claimed the vendor "now publishes the exact frame table the repo derived by
+> live testing". **Not on the YAML reference** — it lists the supported `range` values in a
+> bullet, with no comparative frame-boundary table. Only that page was re-fetched here, so
+> this says nothing about the advanced-techniques page the finding also cites; treat the
+> claim as unconfirmed rather than disproved. So this file's frame semantics
+> (`trailing N` = `[t-N, t)`, `leading N` = `(t, t+N]`, `current` = `[t,t]`,
+> `cumulative` = `(-inf, t]`) continue to rest on **this repo's own live verification**
+> (the C1-C9/A1-A3 matrices), which is the stronger evidence anyway — vendor corroboration
+> would have been a bonus, not the basis.
 
 > **Runtime gate:** The `offset` property requires **Runtime 18.1+** (see the tiered
 > runtime table above — 16.4 is the MV floor, not 17.3). On a runtime below 18.1,

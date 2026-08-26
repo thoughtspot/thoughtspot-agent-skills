@@ -7,6 +7,21 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-08-26
 
+### Fixed
+
+- **Seven documentation corrections, several self-contradictory (13.2, 13.7, 13.8, 13.16,
+  13.17, 14.3, 18.5).** `first_value(..., query_groups(), {date})` was marked
+  untranslatable on a false reason that contradicted both a sibling file and the row two
+  lines below it — it maps to `NON ADDITIVE BY … desc`. The Sisense mapping reversed the
+  COUNT_DISTINCT axis in four places while the code it declares authoritative had it right,
+  labelling two **exact** translations as lossy. `non_additive_dimensions` was absent from
+  the Snowflake schema while the semi-additive path emitted it. The Databricks `format:`
+  table documented 2 of 6 types. The `window:` Experimental caution is withdrawn
+  (re-fetched: no such label). Worksheet TML is recorded as a read-only legacy shape no
+  instance can produce. And `model-routing.md`'s own rules-of-thumb now lead with the
+  **effort dial and work shape** rather than model names, which is what the rule's own
+  corollary already required.
+
 ### Added
 
 - **Five validator promotions (4.3, 18.4, 13.19, 18.2, 14.6).** Two size allowlists

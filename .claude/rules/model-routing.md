@@ -38,12 +38,21 @@ without a grant is a comment, not a control.
 
 - **Default to inheriting.** Only set a tier when you are confident the task shape
   justifies it — a wrong cheap-tier assignment costs more in rework than it saves.
-- **Haiku**: deterministic checklists — run these commands, report pass/fail, grep
-  and collate. No synthesis, no judgment calls.
-- **Sonnet**: mechanical multi-step work where mistakes have consequences but the
-  steps are prescribed (repo-publisher's commit → branch → PR → stage-sync sequence).
-- **Session default (strong tier)**: anything that weighs evidence — planning,
-  code review verification, semantic consistency auditing, audit synthesis.
+- **Describe the WORK, not the model.** Rewritten 2026-08-26 (finding 18.5). These
+  bullets used to lead with model names — "Haiku: deterministic checklists", "Sonnet:
+  mechanical multi-step work" — which contradicted the corollary below and, worse, goes
+  stale on every lineup change. A rule that names a model has to be re-audited each time
+  the family moves; a rule that names a *work shape* does not.
+- **Mechanical work** — deterministic checklists, running commands and reporting
+  pass/fail, grep-and-collate. No synthesis, no judgment calls. → **inherit the model,
+  drop `effort` to `low`.**
+- **Prescribed multi-step work** where mistakes have consequences but the steps are
+  fixed (repo-publisher's commit → branch → PR → stage-sync sequence). → inherit, or pin
+  *only* under the corollary below.
+- **Judgment work** — anything that weighs evidence: planning, code-review verification,
+  semantic consistency auditing, audit synthesis, and **every review gate**. → **inherit
+  the model at `effort: high`→`max`.** Never downgrade a gate; an independent reviewer
+  that reasons less than the author is worse than no reviewer.
 - **Effort over model**, in workflows *and* in agent frontmatter: prefer `effort: low`
   on a strong model for mechanical stages rather than downgrading the model — same
   savings profile, less capability risk. Reserve `effort: 'max'` for adversarial
@@ -59,7 +68,9 @@ without a grant is a comment, not a control.
 
 ## When adding a new agent or workflow stage
 
-Classify it: *mechanical* (prescribed steps, verifiable output) → haiku/sonnet or
-`effort: 'low'`; *judgment* (weighs evidence, synthesises, verifies) → inherit.
+Classify it by **work shape**, then reach for the **effort dial** — not a model name
+(finding 18.5): *mechanical* (prescribed steps, verifiable output) → inherit the model at
+`effort: low`; *judgment* (weighs evidence, synthesises, verifies) → inherit at
+`effort: high`→`max`. Pin a model only under the corollary above.
 Record the assignment in the table above so the audit (harness-currency angle)
 can review it against the current model lineup.

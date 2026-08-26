@@ -1,4 +1,4 @@
-<!-- currency: sisense — 2026-07 (Sisense L2024.x JAQL) -->
+<!-- currency: sisense — 2026-07 (Sisense L2024.x JAQL); 2026-08-26 finding 14.3: COUNT_DISTINCT axis corrected -- Sisense count==distinct and countduplicates==exact total, so BOTH are exact; the doc had reversed it in four places while functions.py (declared authoritative here) had it right -->
 # Sisense JAQL → ThoughtSpot formula translation
 
 The translation map behind `ts sisense build-model`. The authoritative source is
@@ -16,8 +16,8 @@ A simple measure's JAQL `agg` becomes a TML column `aggregation:` keyword.
 |---|---|---|---|
 | `sum` | `SUM` | Migrated | |
 | `avg` | `AVERAGE` | Migrated | |
-| `count` | `COUNT` | Migrated | |
-| `countduplicates` | `COUNT` | Approximated | DupCount approximated as COUNT |
+| `count` | `COUNT_DISTINCT` | Migrated | Sisense `count` is a **distinct** count (`functions.py:29`) — see the note on the row below. |
+| `countduplicates` / `dupcount` | `COUNT` | **Migrated** | **Exact, not approximated** (corrected 2026-08-26, finding 14.3). Sisense `count` returns *unique* values while `dupCount` returns the *total* including duplicates, so they map **opposite to the intuitive reading** — `count` → `COUNT_DISTINCT`, `countduplicates` → `COUNT`. Both are exact. This doc declares `sisense/functions.py` authoritative; the code had it right and these rows had it backwards. |
 | `min` | `MIN` | Migrated | |
 | `max` | `MAX` | Migrated | |
 | `stdev` | `STD_DEVIATION` | Migrated | sample standard deviation |
@@ -30,7 +30,9 @@ Used inside a JAQL `formula`. Function names are rewritten in the resolved expre
 
 | Sisense function | ThoughtSpot | Notes |
 |---|---|---|
-| `sum` / `avg`(`average`) / `count` / `min` / `max` | `sum` / `average` / `count` / `min` / `max` | aggregation |
+| `sum` / `avg`(`average`) / `min` / `max` | `sum` / `average` / `min` / `max` | aggregation |
+| `count` | `unique count` | Sisense `count` is **distinct** (`functions.py:45`) — NOT `count` |
+| `countduplicates` / `dupcount` | `count` | Sisense `dupCount` is the **exact total** including duplicates (`functions.py:46-47`); ThoughtSpot `count` is also a total, so the translation is exact. Documented here from 2026-08-26: finding 14.3 removed it from the Approximated table (correctly — it is not approximated) and it briefly appeared in neither table. |
 | `abs` | `abs` | |
 | `round` | `round` | 1-arg direct; 2-arg is Approximated (see below) |
 | `ceiling` | `ceil` | |
@@ -67,7 +69,7 @@ A JAQL formula references fields through `[key]` placeholders resolved against a
 |---|---|---|
 | `case(...)` | nested `if(...)` | mapped mechanically; verify the branch semantics |
 | `round(x, n)` (2-arg) | `round(x, n)` | TS's 2nd arg is a rounding **increment** (e.g. `round(x, 0.01)` for 2 decimals), not Sisense's decimal-place **count** |
-| `countduplicates` (as a formula wrapper) | `count(...)` | duplicate-count semantics not preserved |
+| ~~`countduplicates` (as a formula wrapper)~~ | — | **Removed 2026-08-26 (finding 14.3): this is not approximated.** `countduplicates` → `count(...)` preserves duplicate-count semantics exactly, because Sisense `dupCount` *is* a total count and ThoughtSpot `count` *is* a total count. Listing it here labelled two exact translations as lossy in the conversion report. |
 
 ## Flagged — NEEDS REVIEW (`UNSUPPORTED`, never faked)
 

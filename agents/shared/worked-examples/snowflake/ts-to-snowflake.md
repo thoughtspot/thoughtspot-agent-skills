@@ -1,5 +1,20 @@
-<!-- currency: snowflake — 2026-06 (backfilled; teaches Worksheet TML as the BASIC path — audit 13.2, needs inverting) -->
+<!-- currency: snowflake — 2026-08 (backfilled; Worksheet TML demoted to a legacy read-only reference and Example 2 (Model) named the basic case — audit 13.2 CLOSED 2026-08-26; examples deliberately NOT renumbered because audit reports and open-items cite them by number) -->
 # Worked Example — ThoughtSpot Worksheet → Snowflake Semantic View
+
+> **⚠ Read the ordering note first (finding 13.2, 2026-08-26).** This Example 1 takes a
+> `worksheet:` / `worksheet_columns:` TML as its **input**, and **no instance can produce
+> that shape any more**: Worksheet creation was removed at 10.12.0.cl and Worksheet TML
+> *import* was blocked from 10.13.0.cl, against a current release of 26.8.0.cl. This
+> repo's own 500-document TML census found **143 Models and zero Worksheets**.
+>
+> **So treat "Worked Example 2 — ThoughtSpot Model → Snowflake Semantic View", further
+> down this file, as the basic case, and this one as a legacy reference** for reading an
+> old export. Read-side tolerance in `ts-cli` is deliberately kept — an archived TML file
+> still parses — but nothing new arrives in this shape.
+>
+> The examples are not renumbered here on purpose: several audit reports and open-items
+> cite them by number, and silently swapping the numbering would break those citations
+> while looking like a tidy-up.
 
 End-to-end conversion of the `Retail Sales` Worksheet to a Snowflake Semantic View
 named `retail_sales`. Covers column classification, formula translation, name

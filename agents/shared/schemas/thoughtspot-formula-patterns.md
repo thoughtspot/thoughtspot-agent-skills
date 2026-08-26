@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — function composition rules, if() parens mandatory; string-function nativeness re-verified on se-thoughtspot 2026-07-29 per BL-170 — trim/ltrim/rtrim/replace/starts_with/ends_with confirmed ABSENT, `in` confirmed curly-brace-only; window/semi-additive signatures verified on se-thoughtspot 2026-07-30 — no PARTITION BY slot on moving_*/cumulative_*, rank/rank_percentile arity fixed at 2, first_value/last_value partition + axis explicit, lag/dense_rank/row_number/nth_value/moving_count/moving_stddev/cumulative_count confirmed ABSENT) -->
+<!-- currency: thoughtspot — 2026-07 (variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — function composition rules, if() parens mandatory; string-function nativeness re-verified on se-thoughtspot 2026-07-29 per BL-170 — trim/ltrim/rtrim/replace/starts_with/ends_with confirmed ABSENT, `in` confirmed curly-brace-only; window/semi-additive signatures verified on se-thoughtspot 2026-07-30 — no PARTITION BY slot on moving_*/cumulative_*, rank/rank_percentile arity fixed at 2, first_value/last_value partition + axis explicit, lag/dense_rank/row_number/nth_value/moving_count/moving_stddev/cumulative_count confirmed ABSENT); 2026-08-26 finding 13.8: first_value(..., query_groups(), {date}) reclassified TRANSLATABLE via NON ADDITIVE BY desc / sort_direction: descending -- the old "last-value only" reason contradicted a sibling file and the row two lines below it -->
 
 # ThoughtSpot Formula Patterns — Reference
 
@@ -619,10 +619,11 @@ expr: >-
 | Function | Behavior | Translatable? |
 |---|---|---|
 | `last_value(..., query_groups(), {date})` | Last snapshot value, query-grain partition | Yes — via `non_additive_dimensions` in Snowflake SV |
-| `first_value(..., query_groups(), {date})` | First snapshot value | No — `NON ADDITIVE BY` only supports last-value semantics |
+| `first_value(..., query_groups(), {date})` | First snapshot value | **Yes** — `NON ADDITIVE BY (dim **desc** nulls last)`, i.e. `sort_direction: descending` (corrected 2026-08-26, finding 13.8). `NON ADDITIVE BY` takes `{ASC\|DESC}`; DESC selects the earliest value. The previous "only supports last-value semantics" reason was false, contradicted the row two lines below (`first_value_in_period` → "treat same as `first_value`", which was marked No), and contradicted `ts-snowflake-formula-translation.md:1036`, which had already mapped this correctly. |
 | `last_value_in_period(...)` | Last value only if the period's last date is complete | Yes — treat same as `last_value(...)` |
 | `first_value_in_period(...)` | First value only if the period's first date is complete | Yes — treat same as `first_value(...)` |
 | `agg(last_value(...))` e.g. `max(last_value(...))` | Re-aggregation of a snapshot metric | No |
+| `agg(first_value(...))` e.g. `max(first_value(...))` | Re-aggregation of a snapshot metric | No — same as the row above. Added 2026-08-26 with finding 13.8: promoting `first_value` to translatable without this row would leave a reader seeing Yes with no re-aggregation caveat, where the sibling mapping carries both. |
 
 ---
 

@@ -94,6 +94,27 @@ The v2 export endpoint accepts an `export_options` object with additional flags:
 
 ---
 
+## Worksheet TML is a read-only legacy shape
+
+**Added 2026-08-26 (finding 13.2).** `worksheet:` / `worksheet_columns:` documents are
+**historical input only**:
+
+| Milestone | Release |
+|---|---|
+| Worksheet *creation* removed | 10.12.0.cl |
+| Worksheet TML *import* blocked | 10.13.0.cl |
+| Current release at time of writing | 26.8.0.cl |
+
+A 500-document TML census on this repo's test cluster found **143 Models and zero
+Worksheets**. So a converter should expect `model:` and treat `worksheet:` as an archived
+file it can still *parse* — read-side tolerance in `ts-cli` is deliberate — but never as a
+shape it can round-trip or a target it can create.
+
+Related: `export_schema_version` (`DEFAULT`/`V1`/`V2`) in the export-flags table above is
+the switch between the two shapes; no caller sets it, so every export takes `DEFAULT`.
+
+---
+
 ## Debugging Parsed TML Structure
 
 When inspecting any parsed TML object, emit all keys before filtering:
