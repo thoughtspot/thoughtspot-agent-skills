@@ -34,12 +34,26 @@ def test_huge_skill_fails(tmp_path, capsys):
     assert "FAIL" in out
 
 
-def test_allowlisted_huge_skill_passes(tmp_path, monkeypatch, capsys):
-    rel = _make_skill(tmp_path, "cli", "ts-convert-from-tableau", cc.HARD_FAIL + 1_000)
-    monkeypatch.setitem(cc.ALLOWLIST, rel, "BL-128")
+def test_ratcheted_huge_skill_passes_at_or_below_its_recorded_size(tmp_path, monkeypatch, capsys):
+    """A ratchet entry exempts the HARD_FAIL, but only up to the recorded size."""
+    size = cc.HARD_FAIL + 1_000
+    rel = _make_skill(tmp_path, "cli", "ts-convert-from-tableau", size)
+    tokens = cc._est_tokens(str(tmp_path / rel))
+    monkeypatch.setitem(cc.RATCHET, rel, (tokens, "BL-128"))
     assert cc.main(["--root", str(tmp_path)]) == 0
     out = capsys.readouterr().out
     assert "WARN" in out  # still soft-warns
+
+
+def test_ratcheted_skill_that_grew_fails(tmp_path, monkeypatch, capsys):
+    """The point of the change (audit 4.3): an allowlist recorded a backlog id, so an
+    exempt file could grow without bound while the gate said PASS."""
+    rel = _make_skill(tmp_path, "cli", "ts-convert-from-tableau", cc.HARD_FAIL + 1_000)
+    tokens = cc._est_tokens(str(tmp_path / rel))
+    monkeypatch.setitem(cc.RATCHET, rel, (tokens - 500, "BL-128"))
+    assert cc.main(["--root", str(tmp_path)]) == 1
+    out = capsys.readouterr().out
+    assert "GREW" in out and "BL-128" in out
 
 
 def test_scans_all_runtimes(tmp_path, capsys):
