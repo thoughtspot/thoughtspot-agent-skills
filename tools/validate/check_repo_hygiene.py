@@ -81,6 +81,37 @@ def unexpected_top_level_files(repo_root: Path) -> list[str]:
     return sorted(unexpected)
 
 
+# Directory names that hold RUNTIME OUTPUT, never source. `ts migrate audit -o ./plan/`
+# is the documented example. Nothing tracked should ever live under one of these.
+RUNTIME_OUTPUT_DIRS = {
+    "plan",       # ts migrate audit / plan output
+    "out",        # converter output (ts tableau build-model, qlik, powerbi, sisense)
+}
+
+
+def tracked_runtime_output(repo_root: Path) -> list[str]:
+    """Finding 1.1 (2026-08-26) — a tracked file under a runtime-output directory.
+
+    Three files (`audit-report.md`, `audit-report.json`, `column-mapping.csv`) were
+    committed in f48a179 while staging the migrate runbook and sat in
+    `tools/ts-cli/plan/` ever since, carrying real instance GUIDs and an org column
+    layout from that run. No test or validator referenced the path.
+
+    Both pre-existing queries here were structurally blind to it:
+    `tracked_but_ignored` needs a matching exclude rule, and `.gitignore` had no
+    `plan/` entry; `unexpected_top_level_files` is root-only by design, so the same
+    class one directory deeper was unguarded. This is the query that closes it — the
+    `.gitignore` entry alone would not, because git keeps tracking a file already in
+    the index regardless of a later ignore rule.
+    """
+    hits = []
+    for rel in git_paths(["ls-files"], repo_root):
+        parts = rel.split("/")
+        if any(seg in RUNTIME_OUTPUT_DIRS for seg in parts[:-1]):
+            hits.append(rel)
+    return sorted(hits)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="Repository root (default: cwd)")
@@ -95,6 +126,18 @@ def main() -> int:
             f"{len(ignored_tracked)} tracked-but-gitignored file(s) found (audit finding 1.2):"
         )
         sections.extend(f"  ✗ {f}" for f in ignored_tracked)
+
+    runtime_output = tracked_runtime_output(root)
+    if runtime_output:
+        sections.append(
+            f"{len(runtime_output)} tracked file(s) under a runtime-output directory "
+            f"(audit finding 1.1) — these are command output, not source:"
+        )
+        sections.extend(f"  ✗ {f}" for f in runtime_output)
+        sections.append(
+            "  Delete them and keep the directory gitignored. A .gitignore entry alone "
+            "does NOT help: git keeps tracking a file already in the index."
+        )
 
     stray = unexpected_top_level_files(root)
     if stray:
@@ -113,7 +156,7 @@ def main() -> int:
         print("reviewed addition.")
         return 1
 
-    print("Repo hygiene clean: no tracked-but-ignored files, no unexpected top-level files.")
+    print("Repo hygiene clean: no tracked-but-ignored files, no tracked runtime output, no unexpected top-level files.")
     return 0
 
 

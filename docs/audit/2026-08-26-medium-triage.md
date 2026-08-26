@@ -15,7 +15,7 @@ Ordered by consequence, not by id.
 
 | # | Why it's in A | Shape |
 |---|---|---|
-| **1.1** | **Do first.** Three runtime-output files are *still tracked* under `tools/ts-cli/plan/`, carrying real instance identifiers (source/target GUIDs, an org column layout) from a staging run. Verified tracked today. | delete + `.gitignore` + a third `check_repo_hygiene` query so the next staging run can't re-commit it |
+| **1.1** | ✅ **CLOSED (PR #465).** **Do first.** Three runtime-output files are *still tracked* under `tools/ts-cli/plan/`, carrying real instance identifiers (source/target GUIDs, an org column layout) from a staging run. Verified tracked today. | delete + `.gitignore` + a third `check_repo_hygiene` query so the next staging run can't re-commit it |
 | **17.4** | **Silent false success on the destructive-recovery path.** All three typed probes failing leaves `out` empty, every guid reads "already gone", `failures == []`, and the ledger records *"Rollback complete. The source Org was never touched."* Nothing was deleted. | distinguish an absent row from a failed request; 5xx/429 must surface as rollback failure |
 | **17.3** | Qlik `_viz` emits no axis encoding for four chart types in `_CHART_NEEDS_AXIS`, so its boards **ship blank**; it is also the one converter with no pre-import lint. Sisense has the same step-order gap. | fix `_viz`; add the lint gate at the right step in both skills |
 | **17.2** | Qlik omits `quote='"'`, emitting `sql_string_op('UPPER({0})', …)` where every sibling emits double quotes per the schema. Only the single-quoted form is unverified against the parser — and BL-171 existed to stop emitting forms ThoughtSpot rejects. | one-arg fix + correct the mapping rows + cross-emitter comparison as the guard |
