@@ -99,11 +99,15 @@ class TestModelReference:
         ref = res["liveboard"]["tml"]["liveboard"]["visualizations"][0]["answer"]["tables"][0]
         assert ref == {"name": "My Model"}
 
-    def test_model_fqn_added_when_provided(self):
+    def test_model_binding_uses_obj_id_not_fqn(self):
+        """Audit 14.2 — a bare viz-level `fqn` is dropped on import (see
+        thoughtspot-liveboard-tml.md), so the binding must be `obj_id`, derived
+        from the same GUID the caller already passes as model_fqn."""
         app = make_app(sheets=[Sheet(id="s", title="A", charts=[Chart(id="c", viz_type="kpi")])])
         res = build(app, model_name="My Model", model_fqn="guid-123")
         ref = res["liveboard"]["tml"]["liveboard"]["visualizations"][0]["answer"]["tables"][0]
-        assert ref["fqn"] == "guid-123"
+        assert ref["obj_id"] == "MyModel-guid"
+        assert "fqn" not in ref, "a bare viz-level fqn is dropped on import"
         assert ref["name"] == "My Model"
 
     def test_report_name_defaults_to_model_name(self):

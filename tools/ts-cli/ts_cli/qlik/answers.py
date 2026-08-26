@@ -18,6 +18,7 @@ import re
 from typing import Any, Optional
 
 from .ir import Chart, QlikApp
+from ts_cli.tml_common import derive_viz_obj_id
 
 # Qlik viz object type -> ThoughtSpot chart type.
 _CHART_MAP = {

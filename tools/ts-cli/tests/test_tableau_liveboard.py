@@ -83,10 +83,15 @@ def test_build_answer_search_query_and_bucket_token():
     assert a["answer"]["search_query"] == "[Order Date].MONTHLY [Total Sales]"
 
 
-def test_build_answer_fqn_tables_ref():
+def test_build_answer_binds_via_obj_id_not_fqn():
+    """Audit 14.2. This asserted a bare viz-level `fqn`, which
+    thoughtspot-liveboard-tml.md says is DROPPED on import, leaving the viz with no
+    data source. The GUID still arrives via model_fqn; obj_id is derived from it."""
     a = lb.build_answer("X", "v5", "M", "fqn-123", cols=["Total Sales"], chart_type="KPI",
                         measure_names={"Total Sales"})
-    assert a["answer"]["tables"][0] == {"id": "M", "name": "M", "fqn": "fqn-123"}
+    ref = a["answer"]["tables"][0]
+    assert ref == {"id": "M", "name": "M", "obj_id": "M-fqn"}
+    assert "fqn" not in ref, "a bare viz-level fqn is dropped on import"
 
 
 # ── build_answer_explicit: overrides capture-and-replay ─────────────────────
