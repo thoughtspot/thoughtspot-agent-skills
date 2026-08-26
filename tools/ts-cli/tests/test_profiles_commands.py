@@ -138,6 +138,32 @@ class TestAddCommand:
         assert data["profile"]["dbx_profile"] == "ts-dev"
         assert data["keychain_account"] == "token"
 
+    def test_add_databricks_oauth_m2m_keys_secret_under_client_id(self, profile_dir):
+        """The SP flow is the skill's recommended path, so its keychain commands
+        must be emitted -- they were None until the oauth-m2m branch was added."""
+        result = runner.invoke(app, [
+            "add",
+            "--platform", "databricks",
+            "--name", "Production",
+            "--auth-type", "oauth-m2m",
+            "--field", "host=https://dbx.cloud.databricks.com",
+            "--field", "client_id=2b427791-782e-4d1b-bc62-59eb845e81c4",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["env_var"] == "DATABRICKS_SP_SECRET_PRODUCTION"
+        assert data["keychain_account"] == "2b427791-782e-4d1b-bc62-59eb845e81c4"
+        assert data["keychain_service"] == "databricks-production"
+        # The four downstream artifacts the skill's A-SP2/A-SP3 steps read.
+        assert data["keychain_store_commands"] is not None
+        assert data["keychain_verify_commands"] is not None
+        assert data["zshenv_line"] is not None
+        assert data["windows_env_commands"] is not None
+        assert "2b427791-782e-4d1b-bc62-59eb845e81c4" in \
+            data["keychain_store_commands"]["darwin"]
+        # The credential itself must never be echoed by the CLI.
+        assert "VALUE" in data["keychain_store_commands"]["darwin"]
+
     def test_add_tableau_pat(self, profile_dir):
         result = runner.invoke(app, [
             "add",

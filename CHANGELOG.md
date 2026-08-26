@@ -5,6 +5,24 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-08-26
+
+### Fixed
+
+- **`ts profiles add` emitted no keychain commands for a Databricks Service
+  Principal** — `_keychain_account` had branches for `databricks`+`pat` and
+  `tableau`+`pat` but none for `databricks`+`oauth-m2m`, so it fell through to
+  `fields.get("username")` and returned `""`. Because all four downstream
+  artifacts are gated on a truthy account, `keychain_store_commands`,
+  `keychain_verify_commands`, `zshenv_line` and `windows_env_commands` all came
+  back `null`. That made step A-SP2 of `ts-profile-databricks` — the skill's own
+  *recommended* auth path — impossible to complete as written. The OAuth secret
+  is now keyed under the SP's `client_id`, matching the
+  `client_id`/`client_secret` pair the Databricks CLI reads from
+  `~/.databrickscfg`. `chore: bump ts-cli to v0.132.1`
+
+---
+
 ## 2026-08-06
 
 ### Fixed

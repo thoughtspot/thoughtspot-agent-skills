@@ -75,6 +75,11 @@ def _keychain_account(platform: str, auth_type: str, fields: dict) -> str | None
         return None
     if platform == "databricks" and auth_type == "pat":
         return "token"
+    if platform == "databricks" and auth_type == "oauth-m2m":
+        # The OAuth secret belongs to the Service Principal, so the client_id is
+        # the account it is keyed under -- matching the client_id/client_secret
+        # pair the Databricks CLI reads from ~/.databrickscfg.
+        return fields.get("client_id", "")
     if platform == "tableau" and auth_type == "pat":
         return fields.get("pat_name", "")
     return fields.get("username", "")
