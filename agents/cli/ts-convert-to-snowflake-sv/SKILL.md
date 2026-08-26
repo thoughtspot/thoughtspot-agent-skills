@@ -9,6 +9,10 @@ Convert a ThoughtSpot Worksheet or Model into a Snowflake Semantic View. Searche
 ThoughtSpot for available models, exports the TML definition, maps it to the Snowflake
 Semantic View DDL format, and creates it via `CREATE OR REPLACE SEMANTIC VIEW`.
 
+Ask one question at a time for **dependent** decisions (each answer narrows the next —
+target database, then schema, then table). Batch **independent** questions when possible
+— e.g. connection name + target database + schema can be collected together (BL-074).
+
 ---
 
 ## References
@@ -1292,6 +1296,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.6.1 | 2026-08-26 | Carry BL-074's prompt-batching rule — ask one question at a time for **dependent** decisions, batch **independent** ones. The rule reached 13 skills but omitted the four conversion skills, which are the most interactive in the repo by ask-count (finding 14.6). A `check_patterns` rule now enforces it above a question-count threshold. |
 | 1.6.0 | 2026-08-26 | **Finding 13.9 — an additive hardcoded filter is translatable.** `group_aggregate(..., query_filters() + {attr='v'})` now maps to `SUM(CASE WHEN ... THEN ... END)`; live-verified on Snowflake 10.30.101 that a semantic-view metric expression CAN carry a filter, which the shared mapping had denied while its own `sum_if` row asserted the opposite. Filters that *suppress* query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable, now for the correct reason. |
 | 1.5.1 | 2026-07-29 | **BL-170 — the shared Snowflake formula mapping's ThoughtSpot side was corrected.** Live verification on se-thoughtspot 2026-07-29 proved `trim`, `ltrim`, `rtrim`, `replace`, `starts_with` and `ends_with` are not native ThoughtSpot functions, and that `in` requires curly braces. `ts-snowflake-formula-translation.md` is bidirectional, so this direction's left-hand (ThoughtSpot-source) column changed too: a TS model can never present `trim ( )`/`replace ( )`/`starts_with ( )` as input — the real input is the corresponding `sql_string_op` pass-through or composition, which this direction already unwraps correctly. Read as a narrowing of the accepted input set, not a new emission rule. |
 | 1.5.0 | 2026-07-23 | Role-playing (aliased) dimension support in `ts snowflake build-sv` (ts-cli v0.90.0): a Model with a reused physical table (role-play) now emits `<alias> as <FQN>` in `tables()`, references the SV logical name (not the FQN) in `relationships()`, and owns role-play dimensions by their alias (no longer collapsed/dropped). Also fixes two pre-existing bugs that made emitted DDL un-creatable: invalid `[primary key]` square brackets, and fully-qualified names in relationships. Live-verified: round-tripped SUPPORT_CASE_SV creates in Snowflake and re-parses to 13 tables / 12 relationships / 51 dimensions with all role-plays intact. |

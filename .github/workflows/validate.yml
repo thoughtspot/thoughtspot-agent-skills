@@ -68,6 +68,7 @@ jobs:
           python3 tools/validate/check_coverage_matrix.py --root .
           python3 tools/validate/check_formula_catalog.py --root .
           python3 tools/validate/check_converter_parity.py --root .
+          python3 tools/validate/check_harness_routing.py --root .
           python3 tools/validate/check_no_v1_endpoints.py --root .
           python3 tools/validate/check_no_inline_tml_gate.py --root .
           python3 tools/validate/check_skill_cli_usage.py --root .

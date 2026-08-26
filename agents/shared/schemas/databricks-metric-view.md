@@ -939,6 +939,17 @@ dimensions:
     display_name: Order Date
     comment: Date the order was placed.
     synonyms: ['order placed', 'purchase date']
+  - name: order_month
+    # The window measures below order by this. It was MISSING from this block until
+    # 2026-08-26 (finding 13.19): `order:` must name a field defined in the view, so
+    # the highest-trust artifact in this file could not be created as printed.
+    #
+    # Note it truncates `order_date` -- the order FIELD, by name -- not the underlying
+    # `orders.DM_ORDER_ORDER_DATE` column. That is the rule recorded under
+    # "Date-Hierarchy Levels" above, and this example is where a reader checks it.
+    expr: DATE_TRUNC('MONTH', order_date)
+    display_name: Order Month
+    synonyms: ['month', 'order month']
   - name: product_category
     expr: products.category.CATEGORY_NAME       # dot-path through nested join
     display_name: Product Category

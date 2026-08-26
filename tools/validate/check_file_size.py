@@ -23,14 +23,24 @@ SOFT_WARN = 500
 HARD_FAIL = 1000
 SCAN_ROOT = "tools/ts-cli/ts_cli"
 
-# One-time entries for pre-existing offenders: path -> justification.
-# An allowlisted file skips the hard-fail (it still soft-warns). Every entry
-# needs a backlog cross-reference; remove the entry when the file is split.
-ALLOWLIST: dict[str, str] = {
+# RATCHET, not an allowlist: path -> (recorded line count, backlog reference).
+#
+# This was `path -> backlog_id`, which meant an exempt file could grow WITHOUT
+# BOUND while the gate reported PASS -- the BL-069 monolith failure mode recurring
+# inside the exemption meant to contain it. Verified via git history (2026-08-26
+# audit, finding 4.3): `commands/tableau.py` was allowlisted at **1063** lines
+# (a1b3b65, 2026-07-05) and had reached **1675** (+58%) with the gate green
+# throughout, because nothing recorded what "allowlisted" was allowing.
+#
+# Now it records the measurement. Growth past the recorded value fails; shrinking
+# is free and the number should be lowered as the file is split. Same shape as
+# `check_module_health`'s baseline JSON, which is the pattern this repo already
+# trusts for complexity.
+RATCHET: dict[str, tuple[int, str]] = {
     # ts tableau command module grew past 1000 lines with the multi-table
-    # build-model fixes (v0.35–0.36). Split into per-flow submodules tracked
-    # in BL-089 (M10); allowlisted until then.
-    "tools/ts-cli/ts_cli/commands/tableau.py": "BL-089",
+    # build-model fixes (v0.35-0.36). Split into per-flow submodules tracked
+    # in BL-089 (M10); ratcheted until then. Lower this number as it shrinks.
+    "tools/ts-cli/ts_cli/commands/tableau.py": (1675, "BL-089"),
 }
 
 
@@ -67,14 +77,29 @@ def main(argv=None) -> int:
             print("PASS  file size: no staged ts_cli modules")
             return 0
 
-    fails, warns = [], []
+    fails, warns, ratchet_fails = [], [], []
     for rel in sorted(files):
         with open(os.path.join(root, rel), encoding="utf-8") as fh:
             n = sum(1 for _ in fh)
-        if n > HARD_FAIL and rel not in ALLOWLIST:
+        if rel in RATCHET:
+            recorded, ref = RATCHET[rel]
+            if n > recorded:
+                ratchet_fails.append((rel, n, recorded, ref))
+            elif n > SOFT_WARN:
+                warns.append((rel, n))
+        elif n > HARD_FAIL:
             fails.append((rel, n))
         elif n > SOFT_WARN:
             warns.append((rel, n))
+
+    if ratchet_fails:
+        print("FAIL  file size — a ratcheted module GREW:")
+        for rel, n, recorded, ref in ratchet_fails:
+            print("  %s: %d lines, recorded %d (+%d)  [%s]" % (rel, n, recorded, n - recorded, ref))
+        print("\nA ratchet entry is a debt ceiling, not a licence to grow. Either bring the"
+              "\nfile back under its recorded size, or -- if the growth is genuinely"
+              "\nwarranted -- raise the number in RATCHET and say why in the PR.")
+        return 1
 
     for rel, n in warns:
         print("WARN  file size: %s is %d lines (>%d) — consider a module-per-concern "
@@ -85,8 +110,8 @@ def main(argv=None) -> int:
             print("  %5d  %s" % (n, rel))
         print("\nSplit the module (see tools/ts-cli/CLAUDE.md architecture and the"
               "\nBL-069 refactor for the pattern), or — for a pre-existing offender —"
-              "\nadd a one-time ALLOWLIST entry in tools/validate/check_file_size.py"
-              "\nwith a backlog cross-reference.")
+              "\nadd a RATCHET entry in tools/validate/check_file_size.py"
+              "\nrecording its CURRENT size plus a backlog cross-reference.")
         return 1
     print("PASS  file size: %d module(s) checked, %d warning(s)" % (len(files), len(warns)))
     return 0

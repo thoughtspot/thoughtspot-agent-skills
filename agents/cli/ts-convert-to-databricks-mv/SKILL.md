@@ -9,6 +9,10 @@ Convert a ThoughtSpot Worksheet or Model into a Databricks Metric View. Searches
 ThoughtSpot for available models, exports the TML definition, maps it to Databricks
 Metric View YAML format, and creates it via `CREATE OR REPLACE VIEW ... WITH METRICS`.
 
+Ask one question at a time for **dependent** decisions (each answer narrows the next —
+target database, then schema, then table). Batch **independent** questions when possible
+— e.g. connection name + target database + schema can be collected together (BL-074).
+
 ---
 
 ## References
@@ -960,6 +964,7 @@ If no (or no more models remain): the session is complete. No token cleanup need
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.2 | 2026-08-26 | Carry BL-074's prompt-batching rule — ask one question at a time for **dependent** decisions, batch **independent** ones. The rule reached 13 skills but omitted the four conversion skills, which are the most interactive in the repo by ask-count (finding 14.6). A `check_patterns` rule now enforces it above a question-count threshold. |
 | 1.4.1 | 2026-08-26 | Withdraw the claim that a `MANY_TO_ONE` join keeps an emitted MV at 17.3+ — the vendor availability matrix lists `rely.at_most_one_match` under 18.1 (finding 13.13). Emission unchanged |
 | 1.4.0 | 2026-07-31 | **BL-174 — join cardinality is declared once, in the form that does not raise the Runtime floor (ts-cli v0.127.0).** A `MANY_TO_ONE` model join emitted **both** `rely: { at_most_one_match: true }` **and** `cardinality: many_to_one`. The two are equivalent, `many_to_one` is the MV schema's own default, and `rely:` works on every Databricks Runtime while `cardinality:` is **18.1+ only** — so the redundant key silently moved the generated DDL's Runtime requirement from 17.3+ to 18.1+ for no semantic gain (fidelity report F5, `docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`). Now `MANY_TO_ONE`/`ONE_TO_ONE`/unset emit `rely:` alone. **Also fixed in the same lines:** a `ONE_TO_MANY` join emitted `rely: { at_most_one_match: true }` and no `cardinality:`, i.e. the MV asserted the **opposite** cardinality to the Model's — it now emits `cardinality: one_to_many` and no `rely:`. The Prerequisites Runtime table is corrected accordingly: 18.1+ is needed for an explicit **`ONE_TO_MANY`** join (not `MANY_TO_ONE`) or a period-over-period measure. Coverage-matrix row #6 rewritten, new row #66 records that `joins[].type` is dropped and why a non-`LEFT_OUTER` model join is not reproducible in an MV. 4 new tests. |
 | 1.3.1 | 2026-07-29 | **BL-170 — documented that `upper`/`lower`/`trim` are unreachable inputs on the ThoughtSpot side.** Live verification on se-thoughtspot 2026-07-29 proved `trim` is not a native ThoughtSpot function (`upper`/`lower` were already known absent since 2026-06-13), so no valid TS model can contain any of the three and the `_RENAME` entries for them are dead code. `references/coverage-matrix.md` #42 was split, with the three unreachable names moved to a new #42a explaining that the real path is the `sql_string_op` unwrap — which already emits `UPPER`/`LOWER`/`TRIM` correctly. No behaviour change in this direction. |

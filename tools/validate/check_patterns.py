@@ -523,6 +523,100 @@ def main() -> int:
             )
             total_hits += 1
 
+    # ---------------------------------------------------------------------
+    # A metric-view `window[].order` must name a field the same YAML block defines.
+    #
+    # The flagship "Verified v1.1 Example" set `order: order_month` on two measures
+    # and never defined it, so the artifact readers copy -- and the section a reader
+    # consults to check the date-hierarchy rule -- could not be created as printed
+    # (2026-08-26 audit, finding 13.19). Docs-only, but this is the highest-trust
+    # example in the file, which is exactly why it needs a machine check rather than
+    # careful reading.
+    # ---------------------------------------------------------------------
+    _ORDER_RE = re.compile(r"\border\s*:\s*([A-Za-z_][A-Za-z0-9_]*)")
+    _NAME_RE = re.compile(r"^\s*-\s*name\s*:\s*([A-Za-z_][A-Za-z0-9_]*)")
+    _SECTION_RE = re.compile(r"^([a-z_]+)\s*:\s*$")
+
+    def _dimension_names(block: str) -> set[str] | None:
+        """Names defined under `dimensions:`/`fields:`, or None if the block has
+        neither -- i.e. it is a measures-only fragment illustrating window syntax,
+        where an `order:` legitimately refers to a field defined elsewhere. Checking
+        those would be a false positive: verified against the real docs, where a naive
+        version flagged 6 such fragments alongside the 1 genuine defect.
+        """
+        section, names, saw = None, set(), False
+        for line in block.splitlines():
+            m = _SECTION_RE.match(line)
+            if m:
+                section = m.group(1)
+                if section in ("dimensions", "fields"):
+                    saw = True
+                continue
+            if section in ("dimensions", "fields"):
+                nm = _NAME_RE.match(line)
+                if nm:
+                    names.add(nm.group(1))
+        return names if saw else None
+
+    for doc in sorted((repo_root / "agents" / "shared").rglob("*.md")):
+        rel = str(doc.relative_to(repo_root))
+        text = doc.read_text(encoding="utf-8")
+        # Walk fenced yaml blocks; each is a self-contained document.
+        for block in re.findall(r"```ya?ml\n(.*?)```", text, re.S):
+            if "window" not in block:
+                continue
+            defined = _dimension_names(block)
+            if defined is None:
+                continue          # measures-only fragment -- nothing to resolve against
+            for ordered in set(_ORDER_RE.findall(block)):
+                if ordered in defined:
+                    continue
+                print(
+                    f"FAIL  {rel}  mv-window-order-unresolved  \u2192  {ordered!r}\n"
+                    f"      A metric-view `window[].order` must name a field/dimension the\n"
+                    f"      same YAML block defines, or the view cannot be created. Define\n"
+                    f"      {ordered!r} in that block's dimensions (per the date-hierarchy rule,\n"
+                    f"      truncate the order FIELD, not the underlying column)."
+                )
+                total_hits += 1
+
+    # ---------------------------------------------------------------------
+    # BL-074's prompt-batching rule must reach every interactive skill.
+    #
+    # The rule ("ask one question at a time for DEPENDENT decisions; batch
+    # INDEPENDENT ones") was propagated to 13 skills, but its Affects list omitted the
+    # four Snowflake/Databricks conversion skills -- which are the MOST interactive in
+    # the repo by ask-count. So the skills that would benefit most were the ones
+    # missed, while every less-interactive peer got it (2026-08-26 audit, finding
+    # 14.6). Hand-propagation is the failure; a threshold check is the fix.
+    #
+    # Threshold 2: with the four now carrying it, every skill lacking the preamble has
+    # at most ONE question-shaped line (ts-migrate-orgs, which the finding confirms
+    # needs nothing). Measured, not guessed.
+    # ---------------------------------------------------------------------
+    _QUESTION_RE = re.compile(
+        r"^\s*(Which|What|Do you|Would you|Enter|Choice|Select)\b", re.M | re.I)
+    _PREAMBLE = "ask one question at a time"
+    _ASK_THRESHOLD = 2
+    for skill_md in sorted(repo_root.glob("agents/cli/*/SKILL.md")):
+        rel = str(skill_md.relative_to(repo_root))
+        text = skill_md.read_text(encoding="utf-8")
+        if _PREAMBLE in text.lower():
+            continue
+        n_questions = len(_QUESTION_RE.findall(text))
+        if n_questions < _ASK_THRESHOLD:
+            continue
+        print(
+            f"FAIL  {rel}  missing-prompt-batching-preamble  \u2192  "
+            f"{n_questions} question-shaped line(s)\n"
+            f"      An interactive skill must carry BL-074's prompt-batching rule: ask\n"
+            f"      one question at a time for DEPENDENT decisions, batch INDEPENDENT\n"
+            f"      ones. It was hand-propagated to 13 skills and missed the four most\n"
+            f"      interactive ones (finding 14.6) -- hence this check. Copy the\n"
+            f"      wording from any ts-convert-* skill."
+        )
+        total_hits += 1
+
     print()
     if total_hits:
         print(f"{total_hits} anti-pattern(s) found.")

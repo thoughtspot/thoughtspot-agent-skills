@@ -8,37 +8,3 @@
     ]
   }
 }
-
-// ── How to use this file ──────────────────────────────────────────────────────
-//
-// 1. Copy this file: cp .claude/settings.local.json.example .claude/settings.local.json
-// 2. Add your personal bash allowlists and WebFetch domains
-// 3. NEVER commit settings.local.json — it is gitignored
-//
-// ── Model ─────────────────────────────────────────────────────────────────────
-//
-// settings.json intentionally carries NO model pin — the session inherits your
-// account's default model, and .claude/rules/model-routing.md says it should stay
-// that way: planning and QA happen interactively, so the session default should be
-// the strong tier. Override here only to downgrade for simple authoring sessions,
-// and always use a tier alias, never a generation-specific model ID (those go
-// stale fast — see the model-routing.md angle-18 note on why a hardcoded ID is a
-// harness-currency risk):
-//
-//   "model": "sonnet"
-//
-// ── Common additions ──────────────────────────────────────────────────────────
-//
-// ThoughtSpot instance domains (add yours to allow WebFetch calls):
-//   "WebFetch(domain:yourorg.thoughtspot.cloud)"
-//
-// Snowflake CLI and connector tools:
-//   "Bash(snow:*)"
-//
-// ── Hook events ───────────────────────────────────────────────────────────────
-//
-// Add personal hooks here (not in shared settings.json):
-//
-//   "hooks": {
-//     "Notification": [{ "hooks": [{ "type": "command", "command": "..." }] }]
-//   }

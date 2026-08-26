@@ -112,6 +112,36 @@ def tracked_runtime_output(repo_root: Path) -> list[str]:
     return sorted(hits)
 
 
+def unparseable_claude_json(repo_root: Path) -> list[str]:
+    """Finding 18.2 — every `.json` / `.json.example` under `.claude/` must parse.
+
+    `settings.local.json.example` was a JSON object followed by ~30 lines of `//`
+    prose, so `json.load` failed with `Extra data: line 12`. Its own step 1 is
+    `cp … .claude/settings.local.json`, and settings files are strict JSON — so a
+    contributor following the documented flow got a Settings Error on next launch and
+    lost their local settings file until they hand-stripped the comments.
+
+    A `.json.example` is checked as strictly as a `.json` precisely because it is
+    consumed by `cp`: being an example is what makes it dangerous, not what excuses it.
+    """
+    import json
+
+    claude_dir = repo_root / ".claude"
+    if not claude_dir.is_dir():
+        return []
+    bad = []
+    for path in sorted(claude_dir.rglob("*.json")) + sorted(claude_dir.rglob("*.json.example")):
+        rel = path.relative_to(repo_root)
+        # settings.local.json is gitignored and personal; not ours to police.
+        if path.name == "settings.local.json":
+            continue
+        try:
+            json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            bad.append(f"{rel}: {exc}")
+    return bad
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="Repository root (default: cwd)")
@@ -126,6 +156,15 @@ def main() -> int:
             f"{len(ignored_tracked)} tracked-but-gitignored file(s) found (audit finding 1.2):"
         )
         sections.extend(f"  ✗ {f}" for f in ignored_tracked)
+
+    bad_json = unparseable_claude_json(root)
+    if bad_json:
+        sections.append(
+            f"{len(bad_json)} unparseable JSON file(s) under .claude/ "
+            f"(audit finding 18.2) — settings files are STRICT JSON, and a "
+            f".json.example is copied straight into one:"
+        )
+        sections.extend(f"  ✗ {b}" for b in bad_json)
 
     runtime_output = tracked_runtime_output(root)
     if runtime_output:
@@ -156,7 +195,7 @@ def main() -> int:
         print("reviewed addition.")
         return 1
 
-    print("Repo hygiene clean: no tracked-but-ignored files, no tracked runtime output, no unexpected top-level files.")
+    print("Repo hygiene clean: no tracked-but-ignored files, no tracked runtime output, no unexpected top-level files, all .claude/ JSON parses.")
     return 0
 
 

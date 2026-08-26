@@ -36,17 +36,24 @@ SKILL_GLOBS = (
     "agents/coco-snowsight/*/SKILL.md",
 )
 
-# One-time entries for pre-existing offenders: path -> backlog justification.
-# An allowlisted file skips the hard-fail (it still soft-warns). Remove the
-# entry when the skill is slimmed below HARD_FAIL.
-ALLOWLIST: dict[str, str] = {
+# RATCHET, not an allowlist: path -> (recorded est. tokens, backlog reference).
+#
+# This was `path -> backlog_id`, so an exempt skill could grow without bound while
+# the gate reported PASS -- and it had: the comment below recorded "~34.4k" while
+# the file measured **34,804** est. tokens, so it had already drifted past its own
+# note with nothing to catch it (2026-08-26 audit, finding 4.3; identical shape to
+# the check_file_size allowlist fixed in the same change).
+#
+# Now it records the measurement. Growth past the recorded value fails; shrinking is
+# free and the number should be lowered as the skill is slimmed.
+RATCHET: dict[str, tuple[int, str]] = {
     # ~57k est. tokens at gate introduction; the BL-128 round-1 extraction (PR #314)
     # cut it to ~57.2k, and the round-2 extraction (2026-07-28) cut it further to
     # ~34.4k est. tokens by archiving changelog history and moving more report
     # templates/tables/algorithm detail to references/ — still over the 25k
     # hard-fail line. A round-3 pass on Steps 4.5/5b/6/7's remaining
     # prompt-and-command-heavy spines is the tracked remedy to clear it.
-    "agents/cli/ts-convert-from-tableau/SKILL.md": "BL-128",
+    "agents/cli/ts-convert-from-tableau/SKILL.md": (34_804, "BL-128"),
 }
 
 
@@ -82,13 +89,29 @@ def main(argv=None) -> int:
             print("PASS  skill context cost: no staged SKILL.md files")
             return 0
 
-    fails, warns = [], []
+    fails, warns, ratchet_fails = [], [], []
     for rel in sorted(files):
         tokens = _est_tokens(os.path.join(root, rel))
-        if tokens > HARD_FAIL and rel not in ALLOWLIST:
+        if rel in RATCHET:
+            recorded, ref = RATCHET[rel]
+            if tokens > recorded:
+                ratchet_fails.append((rel, tokens, recorded, ref))
+            elif tokens > SOFT_WARN:
+                warns.append((rel, tokens))
+        elif tokens > HARD_FAIL:
             fails.append((rel, tokens))
         elif tokens > SOFT_WARN:
             warns.append((rel, tokens))
+
+    if ratchet_fails:
+        print("FAIL  skill context cost — a ratcheted skill GREW:")
+        for rel, tokens, recorded, ref in ratchet_fails:
+            print("  %s: ~%s est. tokens, recorded ~%s (+%s)  [%s]"
+                  % (rel, f"{tokens:,}", f"{recorded:,}", f"{tokens - recorded:,}", ref))
+        print("\nA ratchet entry is a debt ceiling, not a licence to grow. Bring the skill"
+              "\nback under its recorded size (BL-128 extraction pattern), or -- if the"
+              "\ngrowth is genuinely warranted -- raise the number in RATCHET and say why.")
+        return 1
 
     for rel, tokens in warns:
         print("WARN  skill context cost: %s is ~%s est. tokens (>%s) — every "
@@ -103,8 +126,8 @@ def main(argv=None) -> int:
               "\nApply the BL-128 extraction: move templates, rule tables, and report"
               "\nformats into references/*.md and keep the procedural spine inline"
               "\n(see PR #314 for the pattern), or — for a pre-existing offender —"
-              "\nadd a one-time ALLOWLIST entry in tools/validate/check_skill_context_cost.py"
-              "\nwith a backlog cross-reference.")
+              "\nadd a RATCHET entry in tools/validate/check_skill_context_cost.py"
+              "\nrecording its CURRENT est. tokens plus a backlog cross-reference.")
         return 1
     print("PASS  skill context cost: %d skill(s) checked, %d warning(s)"
           % (len(files), len(warns)))

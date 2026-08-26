@@ -7,6 +7,20 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-08-26
 
+### Added
+
+- **Five validator promotions (4.3, 18.4, 13.19, 18.2, 14.6).** Two size allowlists
+  became **ratchets** — they stored a backlog id rather than a measurement, so an exempt
+  file could grow without bound while the gate said PASS (`commands/tableau.py` went
+  1063 → **1675** lines green throughout). New `check_harness_routing.py` reads
+  `.claude/agents/*.md` frontmatter against `model-routing.md`, closing a gap where
+  **nothing** read harness config and a stale `model: haiku` pin survived until a manual
+  sweep. Three new `check_patterns` rules: an unresolvable metric-view `window[].order`,
+  and a missing BL-074 prompt-batching preamble above a question-count threshold. And
+  `settings.local.json.example` is now valid JSON (its `//` prose moved to a sibling
+  `.md`), gated by a "every `.claude/*.json` parses" check — the documented `cp` was
+  breaking contributors' settings.
+
 ### Fixed
 
 - **The Tableau function census was list-driven, not page-driven (13.22, 13.25, 13.26,
