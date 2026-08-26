@@ -33,6 +33,10 @@ import argparse
 import json
 import re
 import sys
+import os
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -50,42 +54,6 @@ from _common import (
     databricks_sql, dbx_sql_rows,
 )
 
-
-def _build_mv_yaml(model_tml: dict) -> str:
-    """Build a minimal MV YAML from a parsed ThoughtSpot model TML."""
-    model = model_tml.get("model", {})
-    model_tables = model.get("model_tables", [])
-    if not model_tables:
-        raise RuntimeError("Model has no model_tables")
-
-    dims = []
-    measures = []
-
-    for mt in model_tables:
-        for col in mt.get("columns", []):
-            col_type = col.get("properties", {}).get("column_type", "ATTRIBUTE")
-            name = col.get("name", "unknown")
-            col_id = col.get("column_id", "")
-            phys_col = col_id.split("::")[-1] if "::" in col_id else col_id
-
-            if col_type == "MEASURE":
-                agg = col.get("properties", {}).get("aggregation", "SUM")
-                agg_map = {
-                    "SUM": "SUM", "COUNT": "COUNT",
-                    "COUNT_DISTINCT": "COUNT(DISTINCT",
-                    "AVERAGE": "AVG", "AVG": "AVG",
-                    "MIN": "MIN", "MAX": "MAX",
-                }
-                agg_fn = agg_map.get(agg, "SUM")
-                if agg == "COUNT_DISTINCT":
-                    measures.append({"name": name, "expr": f"COUNT(DISTINCT {phys_col})"})
-                else:
-                    measures.append({"name": name, "expr": f"{agg_fn}({phys_col})"})
-            else:
-                dims.append({"name": name, "expr": phys_col})
-
-    mv = {"version": 0.1, "dimensions": dims, "measures": measures}
-    return yaml.dump(mv, default_flow_style=False, sort_keys=False)
 
 
 def main() -> int:
@@ -164,27 +132,51 @@ def main() -> int:
         r.info(f"Columns: {col_counts['total']} total "
                f"({col_counts['attributes']} ATTRIBUTE, {col_counts['measures']} MEASURE)")
 
-    # Step 5: Build MV YAML
-    ok, mv_yaml = r.step("Build MV YAML from TML", _build_mv_yaml, tml)
-    if ok:
-        parsed = yaml.safe_load(mv_yaml)
-        r.info(f"Generated: {len(parsed.get('dimensions', []))} dimensions, "
-               f"{len(parsed.get('measures', []))} measures")
-
-    # Step 6: Generate DDL
+    # Steps 5+6: emit via the SHIPPED converter.
+    #
+    # These two steps used to call a local `_build_mv_yaml()` re-implementation and
+    # then assert `"WITH METRICS LANGUAGE YAML" in ddl` against a string built two
+    # lines earlier — an assertion that cannot fail (audit 6.1). So the emitter this
+    # smoke test exists to guard (mv_emit*.py, mv_build_view.py: LOD routing, window
+    # measures, cross-references, aggregation wrapping) had zero coverage while the
+    # harness reported PASS. Routing through `ts databricks build-mv` is also what
+    # `.claude/rules/ts-cli.md` requires: "Do not rewrite a `ts ... build-model` call
+    # as an inline Python script."
     def build_ddl():
         if not args.target_fqn:
             raise SkipStep("No --target-fqn specified; DDL generation skipped")
-        ddl = (
-            f"CREATE OR REPLACE VIEW {args.target_fqn}\n"
-            f"WITH METRICS LANGUAGE YAML AS $$\n"
-            f"{mv_yaml}$$"
-        )
-        assert "WITH METRICS LANGUAGE YAML" in ddl
-        assert "version:" in ddl
+        catalog, schema, view = args.target_fqn.split(".", 2)
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            (td_path / "model.json").write_text(json.dumps(tml))
+            (td_path / "tables.json").write_text(json.dumps({"tables": []}))
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(_TS_CLI_SRC)
+            res = subprocess.run(
+                [sys.executable, "-m", "ts_cli.cli", "databricks", "build-mv",
+                 "--model", str(td_path / "model.json"),
+                 "--tables", str(td_path / "tables.json"),
+                 "--catalog", catalog, "--schema", schema,
+                 "--view-name", view, "--output-dir", str(td_path)],
+                capture_output=True, text=True, env=env,
+            )
+            if res.returncode != 0:
+                raise RuntimeError(
+                    f"ts databricks build-mv failed (exit {res.returncode}):\n{res.stderr}")
+            emitted = sorted(td_path.glob("*.sql"))
+            if not emitted:
+                raise RuntimeError(f"build-mv produced no .sql in {td_path}")
+            ddl = emitted[0].read_text()
+        # Assert against what the EMITTER produced, not against our own f-string.
+        if "WITH METRICS LANGUAGE YAML" not in ddl:
+            raise RuntimeError("emitted DDL missing WITH METRICS LANGUAGE YAML")
+        if "version:" not in ddl:
+            raise RuntimeError("emitted DDL carries no MV YAML body (no `version:`)")
         return ddl
 
-    ok, ddl = r.step("Generate DDL", build_ddl)
+    ok, ddl = r.step("Emit DDL via `ts databricks build-mv`", build_ddl)
+    if ok and ddl:
+        r.info(f"Emitted DDL: {len(ddl.splitlines())} lines")
 
     # Step 7: Execute (optional)
     if args.execute and ddl:

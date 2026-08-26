@@ -52,7 +52,11 @@ _record_duration() {
 # a false FAIL. Fall back to plain `python3` with a warning rather than
 # hard-failing the commit over interpreter selection itself.
 PYTHON_BIN=""
-for _candidate in python3.12 python3.11 python3.10; do
+# Newest first. Must stay in step with requires-python in tools/ts-cli/pyproject.toml
+  # (>=3.10,<3.15) and the CI pytest-matrix. Omitting 3.13/3.14 sent contributors on
+  # those interpreters to bare `python3` — the 3.9 system Python with no pytest — so
+  # every unit-test check reported a false FAIL (audit 6.x).
+  for _candidate in python3.14 python3.13 python3.12 python3.11 python3.10; do
   if command -v "$_candidate" >/dev/null 2>&1 && "$_candidate" -c "import pytest" >/dev/null 2>&1; then
     PYTHON_BIN="$_candidate"
     break
