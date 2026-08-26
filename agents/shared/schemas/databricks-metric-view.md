@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: trailing/leading/cumulative/all/semi-additive range behavior live-verified against a Databricks fixture + ThoughtSpot number-match; corrected trailing/leading moving_sum anchor args (C1/C3) and the period-filter offset mechanism from wall-clock to row-relative (C6/C6a); exclusive-default confirmed (C2); materialization: block documented for the first time (C9); quarter/year period-offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: parameters: block GA (18.2+, mutually exclusive with materialization:) documented; runtime requirement corrected to tiered 16.4/17.3/18.1/18.2 (findings 13.1/13.10); 2026-07-29 full sweep: materialization: is GA at Runtime 17.3 (not Public Preview) with new cluster_by/partition_by fields, REFRESH MATERIALIZED VIEW added at 18.0 (finding 13.7); wildcard field expressions corrected to Runtime 18.2+-gated and legal in measures: for MV-on-MV import, 18.1 also gates inclusive/exclusive window modifiers and one-to-many joins (finding 13.8); synonyms hard limit (10/column, 255 chars) documented (finding 13.9); format: documented on fields/dimensions, not measures-only (finding 13.10); window: Experimental label recorded (finding 13.11); SHOW CREATE TABLE retrieval path noted (finding 13.12); 2026-07-31 BL-174: recorded that an MV join has no type: field because Databricks fixes star-schema joins as LEFT OUTER (vendor joins doc re-checked), with the row-retention consequence for converters spelled out); 2026-08-26 finding 13.12 live-verified on DBSQL 2026.35: date-hierarchy levels must truncate the window's order FIELD, not the underlying column -- divergence requires a non-passthrough date field, and this repo's emitters are structurally safe via the direct-[TABLE::COL] guard (see "Date-Hierarchy Levels") -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: trailing/leading/cumulative/all/semi-additive range behavior live-verified against a Databricks fixture + ThoughtSpot number-match; corrected trailing/leading moving_sum anchor args (C1/C3) and the period-filter offset mechanism from wall-clock to row-relative (C6/C6a); exclusive-default confirmed (C2); materialization: block documented for the first time (C9); quarter/year period-offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: parameters: block GA (18.2+, mutually exclusive with materialization:) documented; runtime requirement corrected to tiered 16.4/17.3/18.1/18.2 (findings 13.1/13.10); 2026-07-29 full sweep: materialization: is GA at Runtime 17.3 (not Public Preview) with new cluster_by/partition_by fields, REFRESH MATERIALIZED VIEW added at 18.0 (finding 13.7); wildcard field expressions corrected to Runtime 18.2+-gated and legal in measures: for MV-on-MV import, 18.1 also gates inclusive/exclusive window modifiers and one-to-many joins (finding 13.8); synonyms hard limit (10/column, 255 chars) documented (finding 13.9); format: documented on fields/dimensions, not measures-only (finding 13.10); window: Experimental label recorded (finding 13.11); SHOW CREATE TABLE retrieval path noted (finding 13.12); 2026-07-31 BL-174: recorded that an MV join has no type: field because Databricks fixes star-schema joins as LEFT OUTER (vendor joins doc re-checked), with the row-retention consequence for converters spelled out); 2026-08-26 finding 13.12 live-verified on DBSQL 2026.35: date-hierarchy levels must truncate the window's order FIELD, not the underlying column -- divergence requires a non-passthrough date field, and this repo's emitters are structurally safe via the direct-[TABLE::COL] guard (see "Date-Hierarchy Levels"); 2026-08-26 finding 13.13: the "rely: works on every Runtime" claim WITHDRAWN -- the vendor feature-availability matrix lists join optimization with rely.at_most_one_match under 18.1 while the YAML reference gates only one-to-many joins; both readings recorded, unverifiable on our workspace (both channels run DBSQL 2026.35), 18.1+ is now the documented floor -->
 
 # Databricks Metric View Schema
 
@@ -17,7 +17,7 @@ blanket floor:
 | **16.4** | Baseline — Metric Views run at all |
 | **17.3+** | Agent metadata (`display_name` / `comment` / `synonyms` — which this repo's converters emit); `materialization:` block (GA — corrected 2026-07-29, finding 13.7; was documented as Public Preview) |
 | **18.0+** | `REFRESH MATERIALIZED VIEW` support for a Metric View's materializations (finding 13.7) |
-| **18.1+** | Join `cardinality:` and window `offset:`; inclusive/exclusive window modifiers (`trailing`/`leading ... inclusive\|exclusive`); one-to-many joins (corrected 2026-07-29, finding 13.8) |
+| **18.1+** | Join `cardinality:` and window `offset:`; inclusive/exclusive window modifiers (`trailing`/`leading ... inclusive\|exclusive`); one-to-many joins (corrected 2026-07-29, finding 13.8); **join optimization with `rely.at_most_one_match`** (added 2026-08-26, finding 13.13 — see "The `rely` Runtime Floor") |
 | **18.2+** | The `parameters:` block (see "Parameters Block" below); wildcard field expressions (corrected 2026-07-29, finding 13.8 — was documented as ungated) |
 
 (A `PARSE_SYNTAX_ERROR` on a GA-era runtime is no longer attributable to the warehouse
@@ -436,11 +436,43 @@ row. Two equivalent syntaxes exist:
 
 | Syntax | Runtime | Example |
 |---|---|---|
-| `rely: { at_most_one_match: true }` | All (pre-18.1 and later) | Original syntax |
+| `rely: { at_most_one_match: true }` | **18.1+ per the availability matrix** — see the note below; not version-gated in the YAML reference | Original syntax |
 | `cardinality: many_to_one` | 18.1+ only | GA-era alternative; also supports `one_to_many` |
 
 When both `rely:` and `cardinality:` are present on the same join, `cardinality:`
 takes precedence. Parsers must check `cardinality:` first, falling back to `rely:`.
+
+#### The `rely` Runtime Floor — two vendor pages disagree (finding 13.13, 2026-08-26)
+
+This file previously said `rely: { at_most_one_match: true }` works on **all** runtimes.
+That claim is not supported, and the two vendor pages do not agree with each other:
+
+| Vendor page | What it says about `rely` |
+|---|---|
+| **Feature availability** matrix | Lists *"Join optimization with `rely.at_most_one_match`"* (YAML 1.1) under the **18.1** row |
+| **YAML reference** | Documents `rely.at_most_one_match` with **no version gate**, and states a version requirement only for one-to-many joins — *"One-to-many joins require Databricks Runtime 18.1 or above and YAML specification version 1.1"* |
+
+The reconciliation that fits both: the **YAML key parses** on any MV-capable runtime (the
+reference is the syntax authority and gates only `one_to_many`), while the **optimization
+the hint enables** arrives at 18.1. Note the matrix's wording is "join optimization *with*
+`rely.at_most_one_match`" — an optimizer capability, not necessarily a parser gate.
+
+**This is unverified below 18.1 and cannot be verified on our test workspace** — both SQL
+warehouse channels there run DBSQL 2026.35, far past 18.1, so neither reading can be
+falsified locally (`rely` is confirmed to parse and return correct results on 2026.35).
+Until someone tests a genuine ≤18.0 runtime, **treat 18.1+ as the documented floor** for
+any MV carrying `rely:` — the conservative reading — and do not restate the "all runtimes"
+claim.
+
+**What this does to BL-174.** BL-174 chose to emit `rely:` *alone* rather than alongside
+`cardinality: many_to_one`, reasoning that `rely:` "works on every Databricks Runtime" so
+emitting both needlessly raised the floor to 18.1+. That rationale is void. The *decision*
+still stands, because emitting `rely:` alone is never **worse** than emitting both — under
+the benign reading it keeps the lower floor, under the conservative reading both are 18.1+
+and the redundant key was still pointless. What changes is the claim converters may make:
+a `MANY_TO_ONE` join does **not** demonstrably keep an MV at 17.3+. If a genuine 17.3 floor
+is ever required, the emitter must omit **both** keys and rely on the schema's `many_to_one`
+default.
 
 **Default cardinality (verified 2026-07):** when a join specifies **neither**
 `rely:` nor `cardinality:`, the spec's default is `many_to_one`.

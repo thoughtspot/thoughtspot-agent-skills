@@ -51,8 +51,11 @@ Classic DBR clusters ship both packages — no install needed there.
 Runtime **17.3+** on the warehouse/cluster that will run the generated DDL; a model with an
 explicit `ONE_TO_MANY` or `MANY_TO_MANY` join (both emit `cardinality: one_to_many`) or a
 period-over-period window measure (prior month/quarter/year) needs **18.1+** instead (join
-`cardinality:` / window `offset:`). A `MANY_TO_ONE` or `ONE_TO_ONE` join stays at 17.3+ — it
-emits the runtime-agnostic `rely: { at_most_one_match: true }` (BL-174). See the tiered table in
+`cardinality:` / window `offset:`). A `MANY_TO_ONE` or `ONE_TO_ONE` join emits
+`rely: { at_most_one_match: true }` (BL-174) — but **does not demonstrably stay at 17.3+**
+(corrected 2026-08-26, finding 13.13: the vendor availability matrix lists
+`rely.at_most_one_match` under 18.1, while the YAML reference gates only one-to-many joins;
+assume 18.1+ for a join-carrying MV). See the tiered table in
 [../shared/schemas/databricks-metric-view.md](../shared/schemas/databricks-metric-view.md).
 
 ---
@@ -181,6 +184,7 @@ review step as the deliverable.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.1 | 2026-08-26 | Withdraw the claim that a `MANY_TO_ONE` join keeps an emitted MV at 17.3+ — the vendor availability matrix lists `rely.at_most_one_match` under 18.1 (finding 13.13). Emission unchanged |
 | 1.2.0 | 2026-07-31 | **BL-174 — join cardinality is declared once, in the form that does not raise the Runtime floor.** Mirrors the CLI skill's v1.4.0: a `MANY_TO_ONE`/`ONE_TO_ONE` join now emits `rely: { at_most_one_match: true }` alone (the redundant, 18.1+-gated `cardinality: many_to_one` is gone), and `ONE_TO_MANY`/`MANY_TO_MANY` emit `cardinality: one_to_many` with **no** `rely:` — previously a `ONE_TO_MANY` join emitted `rely: { at_most_one_match: true }`, asserting the opposite cardinality to the Model's. This skill carries no logic of its own: the fix lands in `ts_cli/databricks/mv_emit_joins.py` and reaches this runtime when `agents/databricks/deploy.sh` regenerates the vendored `databricks_mv_lib` notebook (`build_mv_lib.py`), so **re-deploy to pick it up**. The Runtime-requirement paragraph is corrected accordingly: 18.1+ is gated by an explicit `ONE_TO_MANY`/`MANY_TO_MANY` join, not `MANY_TO_ONE`. |
 | 1.1.0 | 2026-07-18 | Rewire Genie skill to call the vendored `build_metric_view`/`build_view_ddl` (deterministic emit) instead of agentic mapping. |
 | 1.0.0 | 2026-06-15 | Initial release — Genie Code runtime |
