@@ -992,6 +992,7 @@ rm -f /tmp/ts_tml_*.json
 > | `sum(group_aggregate(sum(m), {attr}, query_filters()))` | Plain `SUM(m)` — outer sum + query_filters() simplifies |
 > | `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | Plain `SUM(m)` |
 > | `safe_divide(sum(m), [NamedMetric])` where NamedMetric is same measure at coarser grain | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` — contribution ratio pattern |
+| `group_aggregate(sum(m), {attr}, query_filters() + {region='east'})` | `SUM(CASE WHEN t.REGION = 'east' THEN t.M END)` — an *additive* hardcoded filter is translatable (corrected 2026-08-26, finding 13.9, live-verified). Only filters that **suppress** query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable |
 >
 > Consult the reference. Never reason from first principles about ThoughtSpot functions.
 
@@ -1474,6 +1475,7 @@ Apply Steps 11b–12b (checkpoint + verify) from the standard workflow unchanged
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-08-26 | **Finding 13.9 — an additive hardcoded filter is translatable.** `group_aggregate(..., query_filters() + {attr='v'})` now maps to `SUM(CASE WHEN ... THEN ... END)`; live-verified on Snowflake 10.30.101 that a semantic-view metric expression CAN carry a filter, which the shared mapping had denied while its own `sum_if` row asserted the opposite. Filters that *suppress* query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable, now for the correct reason. |
 | 1.2.2 | 2026-07-03 | Snowflake currency corrections: soften the "metrics are never top-level" rule to note the root-level derived-metrics exception (Key Structural Rule #1 in snowflake-schema.md). |
 | 1.2.1 | 2026-06-13 | Add LOD/window metric alias rule (error 010256) to Step 11 checklist; sync to CLI v1.2.2. |
 | 1.2.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5) and Mode C workflow (update existing Snowflake Semantic View from changed Model) using GET_DDL + CREATE OR REPLACE. |

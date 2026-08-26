@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (fiscal-calendar functions: custom_instructions mitigation documented; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — cumulative reverse-translation decision table, COUNT_IF mapping; 2026-07-30: fixed-partition cumulative row marked an approximation — moving_*/cumulative_* have no PARTITION BY slot, live-confirmed by rejection on se-thoughtspot) -->
+<!-- currency: snowflake — 2026-07 (fiscal-calendar functions: custom_instructions mitigation documented; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — cumulative reverse-translation decision table, COUNT_IF mapping; 2026-07-30: fixed-partition cumulative row marked an approximation — moving_*/cumulative_* have no PARTITION BY slot, live-confirmed by rejection on se-thoughtspot); 2026-08-26 finding 13.9 live-verified on Snowflake 10.30.101: a metric expr CAN carry a filter (SUM(CASE WHEN ...)) -- the old blanket "metrics cannot contain filter clauses" reason was false and self-contradicted by the sum_if row; query_filters() + {attr='v'} reclassified Translatable, while {} / {attr='v'} / {attr} stay untranslatable for the real reason (a metric cannot suppress an enclosing query filter); entity-level filters: is not a substitute (AI-optional) -->
 
 # Formula Translation Reference — Snowflake
 
@@ -680,14 +680,46 @@ The third argument to `group_aggregate` controls how filters are applied:
 | ThoughtSpot filter | Behavior | Status |
 |---|---|---|
 | `query_filters()` | Accepts all filters from the query | Translatable — no filter needed in semantic view (Cortex applies query filters) |
-| `{}` | No filters — ignores all query filters | **Untranslatable** — semantic view metrics cannot suppress query filters |
-| `{region='east'}` | Hardcoded always-applied filter | **Untranslatable** — semantic view metrics cannot contain filter clauses |
-| `query_filters() + {region='east'}` | All query filters + always apply region='east' | **Untranslatable** — no hardcoded filter support |
+| `{}` | No filters — ignores all query filters | **Untranslatable** — a metric expression cannot *suppress* the query's own filters |
+| `{region='east'}` | Hardcoded always-applied filter | **Untranslatable** — but see the note below: the blocker is filter *suppression*, not the hardcoded filter itself |
+| `query_filters() + {region='east'}` | All query filters + always apply region='east' | **Translatable** — `SUM(CASE WHEN <cond> THEN <x> END)`; live-verified 2026-08-26 |
 | `query_filters() - {region, country}` | All query filters minus filters on region/country | **Untranslatable** — cannot selectively ignore filters |
 | `{region}` | Only accept filters for region, ignore others | **Untranslatable** — cannot selectively accept filters |
 
-Only `query_filters()` (pass-through all filters) is translatable. All other filter
-patterns require filter logic that semantic view metrics do not support.
+#### Metric expressions CAN carry a filter (corrected 2026-08-26, finding 13.9)
+
+This section previously said *"semantic view metrics cannot contain filter clauses"* and
+that only `query_filters()` was translatable. **That was false, and contradicted by line
+123 of this same file**, which maps `sum_if([cond],[x])` → `SUM(CASE WHEN cond THEN x END)`
+— a conditional aggregate *is* an always-applied filter inside a metric expression.
+
+**Live-verified 2026-08-26** on Snowflake 10.30.101 (`AGENT_SKILLS.PUBLIC`, fixture
+`F139_SALES` / `SV139_FILTER_PROBE`, created via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`):
+
+```yaml
+metrics:
+  - name: total_amount
+    expr: SUM(fact_sales.AMOUNT)
+  - name: east_amount
+    expr: SUM(CASE WHEN fact_sales.REGION = 'EAST' THEN fact_sales.AMOUNT END)
+```
+
+Both the `CASE WHEN` and `IFF(cond, x, NULL)` forms validate, create, and query correctly:
+`total_amount` = 1400, `east_amount` = 250 (EAST rows only).
+
+**The filter composes with the query; it does not override it.** Grouped by `region`,
+`east_amount` is 250 on the EAST row and `NULL` on NORTH and WEST. That is precisely
+`query_filters() + {region='east'}` semantics — which is why only that row flips to
+Translatable. `{region='east'}` on its own means *ignore the query's filters and apply
+only this one*, and no metric expression can suppress an enclosing filter — the same
+limitation that keeps `{}` untranslatable. So the two rows share one real blocker
+(suppression), and it is not the one previously stated.
+
+**Entity-level `filters:` is not a substitute.** A semantic view's `filters:` block is
+**AI-optional** — Cortex Analyst decides whether to apply it — whereas a ThoughtSpot
+hardcoded filter is always applied. See
+[snowflake-schema.md](../../schemas/snowflake-schema.md) `filters:` and
+[ts-snowflake-properties.md](ts-snowflake-properties.md) "Model-Level Filters".
 
 ### Translatable LOD Patterns
 
@@ -928,7 +960,7 @@ Resolution Algorithm in `ts-from-snowflake-rules.md`.
 | Pattern | Reason |
 |---|---|
 | `max/min/avg/count(group_aggregate(...))` | Max/count of category totals ≠ max/count of rows — simplification does not hold (unlike `sum`) |
-| `group_aggregate(...)` with explicit filter | Semantic view metrics cannot contain filter clauses |
+| `group_aggregate(...)` with a filter that *suppresses* query filters (`{}`, `{attr='v'}`, `{attr}`, `query_filters() - {...}`) | A metric expression cannot suppress an enclosing query filter. **A filter that only *adds* to the query's filters — `query_filters() + {attr='v'}` — IS translatable** via `SUM(CASE WHEN ... THEN ... END)` (corrected 2026-08-26, finding 13.9, live-verified) |
 | `group_aggregate(...)` with `query_groups() + {attr}` | No conditional include in semantic views |
 | `group_aggregate(...)` with `query_groups(attr1, attr2)` | No optional include in semantic views |
 
