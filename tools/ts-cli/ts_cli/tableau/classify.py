@@ -25,9 +25,13 @@ UNTRANSLATABLE_TIERS = {
     "circular", "orphan", "parameter_query",
 }
 
+# All 15 spatial functions (help.tableau.com Spatial Functions, re-verified
+# 2026-08-26). NO_CUTOUTS and PARSE_WKT were missing here AND in validate.py's
+# _UNMAPPED_FUNCTIONS -- two sites, one stale census (audit finding 13.22).
 _GEO_RE = re.compile(
     r"\b(MAKEPOINT|MAKELINE|BUFFER|OUTLINE|DISTANCE|AREA|LENGTH|INTERSECTS|"
-    r"SHAPETYPE|DIFFERENCE|INTERSECTION|SYMDIFFERENCE|VALIDATE)\s*\(", re.I)
+    r"SHAPETYPE|DIFFERENCE|INTERSECTION|SYMDIFFERENCE|VALIDATE|"
+    r"NO_CUTOUTS|PARSE_WKT)\s*\(", re.I)
 _LOD_RE = re.compile(r"\{\s*(FIXED|INCLUDE|EXCLUDE)\b", re.I)
 _RUNNING_RE = re.compile(r"\bRUNNING_(SUM|AVG|MAX|MIN|COUNT)\s*\(", re.I)
 _WINDOW_RE = re.compile(r"\bWINDOW_(SUM|AVG|MAX|MIN|COUNT|STDEV|VAR|MEDIAN|PERCENTILE)\s*\(", re.I)

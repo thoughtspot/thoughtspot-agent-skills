@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-07 (v0.88.0 inverse trig + COT mapped, USERNAME/ISUSERNAME/ISMEMBEROF -> RLS variables) -->
+<!-- currency: tableau — 2026-07 (v0.88.0 inverse trig + COT mapped, USERNAME/ISUSERNAME/ISMEMBEROF -> RLS variables); 2026-08-26 function census re-verified page-driven rather than list-driven: spatial corrected 13->15 (PARSE_WKT, NO_CUTOUTS -- finding 13.22, two stale code sites), MODEL_*/SCRIPT_* analytics extensions and HEXBIN* added as untranslatable (13.25/13.27), RANK_PERCENTILE mapped to its NATIVE equivalent (13.26), ATAN2 and DIV now translate (13.27), ISO date-part family documented with the week_number_of_year near-miss warning (13.28) -->
 
 # Tableau → ThoughtSpot Formula Translation
 
@@ -840,6 +840,9 @@ function with `PARTITION BY` in the SQL string instead.
 |---|---|---|
 | `RANK(SUM([col]))` | `rank ( sum ( [table::col] ) , 'desc' )` | **Direction arg is required** — `rank(measure)` with one arg fails validation (*"Function rank expects 2 arguments, found 1"*). Pass `'desc'` explicitly for Tableau's default. |
 | `RANK(SUM([col]), 'asc')` | `rank ( sum ( [table::col] ) , 'asc' )` | |
+| `ATAN2(y, x)` | `sql_double_op ( "ATAN2({0}, {1})" , [y] , [x] )` | **Added 2026-08-26 (finding 13.27)** — appeared in no mapped, unmapped or pass-through table, so it passed through untranslated. Same pass-through treatment as `PI`/`RADIANS`/`DEGREES`; argument order is (y, x) in both Tableau and SQL, so no swap. That the trig block handled the radian/degree mismatch but stopped short of `ATAN2` is the tell that the census was function-list-driven. |
+| `DIV(a, b)` | `floor ( safe_divide ( [a] , [b] ) )` | **Added 2026-08-26 (finding 13.27)** — Tableau `DIV` is integer division. `floor` is native; the divisor guard is mandatory here (a raw `/` pushed to the warehouse errors the whole query on a zero divisor, where Tableau returns NULL), so it goes through `safe_divide` — which returns **0, not NULL** on a zero divisor. Flag if downstream logic distinguishes the two. |
+| `RANK_PERCENTILE(SUM([col]))` | `rank_percentile ( sum ( [table::col] ) , 'desc' )` | **Native, not a gap** (added 2026-08-26, finding 13.26 — it was absent from this section while the other four rank variants were covered). `rank_percentile` is documented native and live-verified in `thoughtspot-formula-patterns.md:474`, with the **same fixed two-arg arity as `rank`** (verified se-thoughtspot 2026-07-30), so the direction argument is required. Tableau's default is descending. |
 | `RANK_UNIQUE(SUM([col]), 'desc')` | `rank ( sum ( [table::col] ) , 'desc' )` | ThoughtSpot `rank` uses **competition ranking** (ties share a rank, next rank is skipped: 1,1,3 — verified 2026-06-13, generates `RANK() OVER (ORDER BY ...)`). No RANK_UNIQUE equivalent — document the tie-handling difference. |
 
 **Partitioned rank** — ThoughtSpot's native `rank()` has no partition support. For
@@ -1097,6 +1100,27 @@ model import. A missing formula produces a functional model with reduced coverag
 | `LENGTH(geom, unit)` | Geospatial line length — no ThoughtSpot equivalent. Distinct from the string function `LEN(s)` (see Function Mapping table), which IS translatable → `strlen(s)`. Omit + log. |
 | `SHAPETYPE(geom)` | Geospatial geometry-type introspection (returns Point/LineString/Polygon/etc.) — no ThoughtSpot equivalent. Omit + log. |
 | `OUTLINE(geom)` | Geospatial polygon → linestring constructor — no ThoughtSpot equivalent. Omit + log. |
+| `PARSE_WKT(string)` | Geospatial constructor from Well-Known Text — no ThoughtSpot equivalent. Omit + log. **Added 2026-08-26 (finding 13.22)**: absent from this table and from both code sites, so it was emitted verbatim and failed import opaquely. The likeliest of the two additions to appear in a real workbook. |
+| `NO_CUTOUTS(spatial)` | Geospatial geometry cleanup (removes interior rings) — no ThoughtSpot equivalent. Omit + log. Added 2026-08-26 (finding 13.22). |
+| `HEXBINX(x, y)` / `HEXBINY(x, y)` | Hexagonal spatial binning — no ThoughtSpot equivalent, and not decomposable the way `MAKEPOINT` is. Omit + log. Added 2026-08-26 (finding 13.27). |
+| `MODEL_PERCENTILE(...)` / `MODEL_QUANTILE(...)` / `MODEL_EXTENSION_REAL\|STR\|INT\|BOOL(...)` | Tableau **analytics extensions** — the calculation runs in an external R/Python service, so there is nothing to translate. Omit + log. **Added 2026-08-26 (finding 13.25)**: these ten appeared in *no* mapping table and in neither `_UNMAPPED_FUNCTIONS` nor `_TABLE_CALC_NO_EQUIVALENT`, so they violated this file's own fail-loud contract while the migration-report format already *anticipated* the case (`MODEL_QUANTILE(…)` → "⊘ Not migrated") that the classifier could not detect. |
+| `SCRIPT_REAL(...)` / `SCRIPT_STR(...)` / `SCRIPT_INT(...)` / `SCRIPT_BOOL(...)` | Same analytics-extension mechanism as `MODEL_*`. Omit + log. Added 2026-08-26 (finding 13.25). |
+| `ISOYEAR(date)` / `ISOQUARTER(date)` / `ISOWEEK(date)` / `ISOWEEKDAY(date)` | **ISO-8601 week-based** date parts. ThoughtSpot's `week_number_of_year` is **not** ISO-8601 — it uses a different year-boundary rule, so substituting it is a *valid-but-wrong* translation, the worst class. Omit + log, or use a `sql_int_op ( "..." , [date] )` pass-through where the warehouse has a genuine ISO function. **Never** substitute the near-miss native. Added 2026-08-26 (finding 13.28). |
+
+> **On the ISO *units*** (`iso-week`, `iso-quarter`, … as the first argument to
+> `DATEPART`/`DATENAME`/`DATETRUNC`/`DATEADD`/`DATEDIFF`): these are already handled
+> correctly **by construction** — they appear in none of the four unit maps, so the call
+> is left in place and `validate_output` rejects the formula via the
+> `DATEPART`/`DATETRUNC`/… entries in `_UNMAPPED_FUNCTIONS` ("survivors = unknown unit").
+> Recorded here because the previous silence made it impossible to tell whether the case
+> had been considered or missed (finding 13.28).
+
+> **A generic catch, not just a list.** `MODEL_*`, `SCRIPT_*` and unknown `RANK_*`
+> members are now matched by **family regexes** in `tableau/validate.py`
+> (`_MODEL_EXT_RE`, `_RANK_UNKNOWN_RE`), mirroring the existing `_WINDOW_TABLECALC_RE`.
+> A named list goes stale the moment the vendor adds a member — which is precisely how
+> the spatial census drifted (13.22). Prefer a family regex whenever the family has a
+> stable prefix.
 | `DIFFERENCE(geom1, geom2)` | Geospatial set difference — no ThoughtSpot equivalent. Omit + log. |
 | `INTERSECTION(geom1, geom2)` | Geospatial set intersection — no ThoughtSpot equivalent. Omit + log. |
 | `SYMDIFFERENCE(geom1, geom2)` | Geospatial symmetric difference — no ThoughtSpot equivalent. Omit + log. |
@@ -1157,16 +1181,28 @@ sql_string_aggregate_op ( "LISTAGG({0}, ', ') WITHIN GROUP (ORDER BY {0})" , [Ca
 
 ## Geospatial Policy
 
-Tableau's spatial function set is **13 functions** (help.tableau.com Spatial Functions,
-verified 2026-07-03): `MAKEPOINT`, `MAKELINE`, `BUFFER`, `OUTLINE` (construct spatial
-objects); `DISTANCE`, `AREA`, `LENGTH`, `INTERSECTS`, `SHAPETYPE` (derive information from
-spatial objects); `DIFFERENCE`, `INTERSECTION`, `SYMDIFFERENCE`, `VALIDATE` (set operations
-on spatial objects). ThoughtSpot has no spatial data type, constructors, or set operations —
-all 13 are untranslatable.
+Tableau's spatial function set is **15 functions** (help.tableau.com Spatial Functions,
+re-verified 2026-08-26): `MAKEPOINT`, `MAKELINE`, `BUFFER`, `OUTLINE`, `PARSE_WKT`
+(construct spatial objects); `DISTANCE`, `AREA`, `LENGTH`, `INTERSECTS`, `SHAPETYPE`
+(derive information from spatial objects); `DIFFERENCE`, `INTERSECTION`, `SYMDIFFERENCE`,
+`VALIDATE`, `NO_CUTOUTS` (set operations / geometry cleanup). ThoughtSpot has no spatial
+data type, constructors, or set operations — all 15 are untranslatable.
+
+> **Corrected 2026-08-26 (finding 13.22): this said 13, and the census was
+> function-list-driven rather than page-driven.** `PARSE_WKT` and `NO_CUTOUTS` were
+> therefore absent from **two** code sites — `_UNMAPPED_FUNCTIONS` in
+> `tableau/validate.py` and `_GEO_RE` in `tableau/classify.py` (the finding named only
+> the first). A calc using either matched no pattern, was never mapped, and was emitted
+> verbatim into model TML: a silent pass-through that fails import opaquely instead of
+> being skipped with a reason — exactly the failure the policy below exists to prevent,
+> for 2 of 15 functions. `PARSE_WKT` is the likelier of the two in real workbooks.
+> (`DISTANCE` additionally requires a live connection in Tableau; noted for completeness,
+> it changes nothing here.) `UNION` appears only in a `VALIDATE` example on that page and
+> is **not** added on that evidence.
 
 **Policy — detect, decompose, log (never silent):**
 
-1. **Detect** all 13 function calls in calculated fields (use the same `FUNCTION\s*\(`
+1. **Detect** all 15 function calls in calculated fields (use the same `FUNCTION\s*\(`
    pattern as other untranslatable functions — see the classifier patterns below).
 2. **Decompose `MAKEPOINT(lat, lon)`:** if the two arguments resolve to physical columns (latitude
    and longitude), ensure those columns are migrated as individual `ATTRIBUTE` columns on the model.

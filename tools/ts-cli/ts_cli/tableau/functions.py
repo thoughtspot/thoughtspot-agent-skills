@@ -175,6 +175,22 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("TAN", lambda a: f"tan ( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
     ("RADIANS", lambda a: f"( {a[0]} * 3.14159265358979 / 180 )" if len(a) == 1 else None),
     ("DEGREES", lambda a: f"( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
+    # ATAN2 has no native ThoughtSpot function; pass it to the warehouse, the same
+    # treatment PI/RADIANS/DEGREES get above. Argument order is Tableau's (y, x)
+    # and SQL ATAN2 takes (y, x) too, so no swap. Audit finding 13.27 -- it was in
+    # no mapped, unmapped or pass-through table, so it passed through untranslated
+    # against this file's own fail-loud policy. That the trig block handled the
+    # radian/degree mismatch but stopped short of ATAN2 is the tell that the census
+    # was function-list-driven rather than page-driven.
+    ("ATAN2", lambda a: (f'sql_double_op ( "ATAN2({{0}}, {{1}})" , {a[0]} , {a[1]} )'
+                         if len(a) == 2 else None)),
+    # Tableau DIV(a, b) is INTEGER division. floor() is native; the divisor guard is
+    # mandatory in this repo (raw `/` pushed to the warehouse errors the whole query
+    # on a zero divisor, where Tableau returns NULL) -- so it goes through
+    # safe_divide, which returns 0 rather than NULL on a zero divisor. Flag if
+    # downstream logic distinguishes the two (finding 13.27).
+    ("DIV", lambda a: (f"floor ( safe_divide ( {a[0]} , {a[1]} ) )"
+                       if len(a) == 2 else None)),
 
     # Inverse trig + COT (BL-072 sub-item). Tableau ACOS/ASIN/ATAN return
     # radians; ThoughtSpot acos/asin/atan return degrees (by symmetry with

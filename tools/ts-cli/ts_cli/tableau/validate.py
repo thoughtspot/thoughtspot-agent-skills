@@ -42,12 +42,21 @@ _UNMAPPED_FUNCTIONS = [
     # ACOS/ASIN/ATAN/COT now translate (BL-072, ts-cli v0.88.0 — see
     # functions.py) and were removed from this list.
     "DATEPART", "DATENAME", "DATETRUNC", "DATEADD", "DATEDIFF",  # survivors = unknown unit
-    # Spatial — full 13-function Tableau set (help.tableau.com Spatial Functions,
-    # verified 2026-07-03). No ThoughtSpot spatial data type or constructors exist.
+    # Spatial — full 15-function Tableau set (help.tableau.com Spatial Functions,
+    # re-verified 2026-08-26; the census said 13 and was function-list-driven rather
+    # than page-driven, so NO_CUTOUTS and PARSE_WKT matched no _UNMAPPED_RE and were
+    # emitted verbatim into model TML -- a silent pass-through that fails import
+    # opaquely instead of being skipped with a reason. PARSE_WKT is the likelier of
+    # the two in real workbooks. Audit finding 13.22; classify.py's _GEO_RE was the
+    # second stale copy.) No ThoughtSpot spatial data type or constructors exist.
     # See "Geospatial Policy" in tableau-formula-translation.md.
     "MAKEPOINT", "MAKELINE", "DISTANCE", "BUFFER", "AREA",
     "INTERSECTS", "LENGTH", "SHAPETYPE", "OUTLINE",
     "DIFFERENCE", "INTERSECTION", "SYMDIFFERENCE", "VALIDATE",
+    "NO_CUTOUTS", "PARSE_WKT",
+    # Spatial hex-binning — same verdict, different page. HEXBINX/HEXBINY have no
+    # ThoughtSpot equivalent (audit finding 13.27).
+    "HEXBINX", "HEXBINY",
     # Embedded-RLS user-attribute family — sibling of USERNAME/FULLNAME/etc above.
     # ABAC ts_var() referencing a formula variable is a plausible native translation
     # (same JWT user-attribute mechanism as the ISMEMBEROF→ts_groups reclassification
@@ -80,6 +89,24 @@ _TABLE_CALC_RE = [
     (re.compile(rf"\b{fn}\s*\(", re.IGNORECASE), fn) for fn in _TABLE_CALC_NO_EQUIVALENT
 ]
 _WINDOW_TABLECALC_RE = re.compile(r"\b(WINDOW_[A-Z]+)\s*\(", re.IGNORECASE)
+# Generic family catches. A named list goes stale the moment the vendor adds a
+# member -- which is precisely how the spatial census drifted (13.22) and how the
+# ten predictive/analytics-extension functions came to appear in NO mapping table and
+# in neither unmapped list (audit finding 13.25). The WINDOW_* catch above already
+# proved the pattern; these are its siblings, so a new MODEL_*/SCRIPT_*/RANK_* member
+# is rejected at translate time rather than passed through untranslated.
+#
+# MODEL_PERCENTILE / MODEL_QUANTILE / MODEL_EXTENSION_* -> Tableau analytics
+# extensions (external R/Python). SCRIPT_REAL/STR/INT/BOOL -> the same mechanism.
+# Neither has any ThoughtSpot equivalent.
+_MODEL_EXT_RE = re.compile(r"\b(MODEL_[A-Z_]+|SCRIPT_[A-Z]+)\s*\(", re.IGNORECASE)
+# RANK_* variants OTHER than the four with a documented disposition
+# (RANK/RANK_UNIQUE -> native rank(); RANK_DENSE/RANK_MODIFIED -> documented
+# pass-through; RANK_PERCENTILE -> native rank_percentile()). Anything else is a
+# member the census has not seen (audit finding 13.26).
+_RANK_UNKNOWN_RE = re.compile(
+    r"\b(RANK_(?!UNIQUE\b|MODIFIED\b|DENSE\b|PERCENTILE\b)[A-Z_]+)\s*\(",
+    re.IGNORECASE)
 
 
 def validate_output(expr: str) -> list[str]:
@@ -100,6 +127,18 @@ def validate_output(expr: str) -> list[str]:
     window_fns = {m.group(1).upper() for m in _WINDOW_TABLECALC_RE.finditer(expr)}
     for fn in sorted(window_fns):
         errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
+    # Analytics-extension families (MODEL_*/SCRIPT_*) — external R/Python, no
+    # ThoughtSpot equivalent of any kind (finding 13.25).
+    for fn in sorted({m.group(1).upper() for m in _MODEL_EXT_RE.finditer(expr)}):
+        errors.append(
+            f"Tableau analytics-extension function has no ThoughtSpot equivalent: {fn} "
+            f"(external R/Python via an analytics extension)")
+    # A RANK_* member with no documented disposition (finding 13.26).
+    for fn in sorted({m.group(1).upper() for m in _RANK_UNKNOWN_RE.finditer(expr)}):
+        errors.append(
+            f"Tableau rank variant has no documented ThoughtSpot mapping: {fn} "
+            f"(RANK/RANK_UNIQUE/RANK_DENSE/RANK_MODIFIED/RANK_PERCENTILE are mapped; "
+            f"this one is not)")
     return errors
 
 

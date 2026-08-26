@@ -9,6 +9,18 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ### Fixed
 
+- **The Tableau function census was list-driven, not page-driven (13.22, 13.25, 13.26,
+  13.27, 13.28).** Four families passed through untranslated against the mapping file's
+  own fail-loud contract: 2 of Tableau's **15** spatial functions (`PARSE_WKT`,
+  `NO_CUTOUTS` — missing from **two** code sites, not the one the finding named), all ten
+  `MODEL_*`/`SCRIPT_*` analytics-extension functions, `HEXBINX`/`HEXBINY`, and any unknown
+  `RANK_*` member. `RANK_PERCENTILE` turned out to be a **missed native equivalent**
+  (`rank_percentile`, live-verified), and `ATAN2`/`DIV` now translate. The new families are
+  matched by **regex** rather than added to a list, mirroring `_WINDOW_TABLECALC_RE` — a
+  named list is what went stale in the first place. `chore: bump ts-cli to v0.133.0`
+
+### Fixed
+
 - **A paged substring search could omit the exact match (14.5).** Three call sites issued
   a `name_pattern` search — a **substring** match — with `record_size: 10` and then
   post-filtered for an exact name, so for a name that is a substring of many others
