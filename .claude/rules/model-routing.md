@@ -49,10 +49,26 @@ without a grant is a comment, not a control.
   specific and therefore wins*, so an over-simplification here silently overrides the
   correct general rule. Two cases are genuinely **model**-shaped and cannot be expressed
   as effort:
-  - the **cheapest tier rejects the effort parameter outright**, so choosing it is a model
+  - the **cheapest tier does not support the effort parameter at all** - it forfeits the
+    dial rather than rejecting a call, which is easy to miss - so choosing it is a model
     decision with no effort equivalent; and
   - **frontier reasoning or long-horizon agentic work** is what the top model is for, at a
     real price premium.
+
+  **Why the old wording mattered.** This bullet read "the cheapest tier *rejects* the
+  effort parameter outright" until 2026-08-27. "Rejects" tells a reader they would find
+  out; they would not. The client gates on a `supportsEffort` property and drops the
+  parameter, and the runtime describes the result in its own words as the active level
+  "after any **silent downgrade** for the selected model" - the same trap class as an
+  `effortLevel` settings key that quietly discards `max`. Ask for a level the model cannot
+  do and you get less, with no error. Verified against the installed binary, not inferred
+  from the schema.
+
+  Recording it because the paragraph above predicted this exact failure: it says an
+  over-simplification *here* silently overrides the correct general rule, since this file
+  is more specific and therefore wins. It then contained one for a day, while
+  `~/.claude/CLAUDE.md` - which it names as the governing statement - already carried the
+  accurate version. A file that can describe its own failure mode can still live it.
 
   Where the requirement is model-shaped, name it — and **write the reason beside it**, so a
   later reader can tell a considered choice from a copied one. That is what
