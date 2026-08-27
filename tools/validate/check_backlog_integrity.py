@@ -8,7 +8,7 @@ fixed insertion point, so two branches always write to the same lines. In PR #35
 two branches each independently claimed BL-171 (second occurrence; BL-150 was the
 first, 2026-07-28). Stripping the conflict markers — the natural "accept both"
 resolution — produced a file with two `## BL-171` sections that passed all 23
-pre-commit checks and all 5 CI jobs. Nothing validated BL-number uniqueness.
+pre-commit checks and every CI job. Nothing validated BL-number uniqueness.
 
 Rule 1 — no duplicate `## BL-NNN` heading, and no id carrying a section in both
 backlog.md and backlog-archive.md. This matters more than a normal docs nit

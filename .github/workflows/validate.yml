@@ -179,6 +179,13 @@ jobs:
           pytest agents/cli/ts-object-model-erd/tests/ -q
           pytest agents/databricks/tests/ -q
 
+      - name: Check the CI gate covers every job
+        # The aggregate `validate` job is only a gate if every non-schedule job is in its
+        # `needs:`. Nothing else in the repo reads job names, so without this a new job
+        # silently reproduces audit finding 7.1.
+        run: |
+          python3 tools/validate/check_ci_gate_coverage.py --root .
+
       - name: Run credential-free smoke suites
         # These five assert real behaviour of publish_plan / csr_plan / apply_plan /
         # alias and need NO credentials, but ran in no CI job at all: the pytest steps
@@ -236,11 +243,18 @@ jobs:
   # requirement covers it, with no branch-protection change and no version numbers baked
   # into a settings page that would silently reopen the hole on the next support-range bump.
   #
-  # `contains(needs.*.result, ...)` rather than `needs.suite.result != 'success'` because a
-  # hyphenated job name cannot be read with dot syntax (`needs.pytest-matrix` is a parse
-  # error) — the wildcard form sidesteps that AND covers any job added to `needs:` later.
-  # `always()` is required or a failed dependency skips this job, and a skipped required
-  # check never turns the merge button red.
+  # `contains(needs.*.result, ...)` rather than naming each job: it covers any job added to
+  # `needs:` later, which is the whole failure mode being fixed. (It is NOT because a
+  # hyphenated name needs escaping — `needs.pytest-matrix.result` is perfectly valid; dot
+  # dereference allows `-`, as line 218's `matrix.python-version` demonstrates. An earlier
+  # version of this comment claimed otherwise. The trade-off is real though: the wildcard
+  # form over `needs` is undocumented, while the dot form is documented.)
+  #
+  # `always()` is required, or a FAILED dependency skips this job — and a skipped required
+  # check does not turn the merge button red, which would reproduce the very bug this job
+  # fixes, one level up. **Do not "correct" this to `!cancelled()`**: GitHub's docs prefer
+  # `!cancelled()` generically, but here a cancelled run would skip the job and a skipped
+  # required check counts as satisfied. `always()` is deliberate.
   validate:
     if: always() && github.event_name != 'schedule'
     needs: [suite, pytest-matrix]
@@ -260,7 +274,7 @@ jobs:
 
   # Weekly scheduled CVE sweep — pip-audit ONLY (no validators/tests). Keeps the existing
   # CVE gate time-driven as well as event-driven without re-running the whole suite on cron
-  # (audit finding 16.3). The push/PR pip-audit step inside `validate` is unchanged.
+  # (audit finding 16.3). The push/PR pip-audit step inside `suite` is unchanged.
   scheduled-audit:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest

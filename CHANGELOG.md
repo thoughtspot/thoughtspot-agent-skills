@@ -17,8 +17,13 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
   unless both succeeded. No branch-protection change was needed, which is the point:
   adding the four legs to the required-checks list would bake interpreter versions into a
   settings page, where the next `requires-python` bump would silently reopen the hole.
-  **Adding a job to `validate.yml` no longer gates it — add it to `validate`'s `needs:`
-  too**, a rule now stated in `docs/quality-gates.md`.
+  **Adding a job to `validate.yml` does not gate it — it must also go in `validate`'s
+  `needs:`.** (Not "no longer": adding a *job* never gated anything; before this change
+  the required context was the job that ran the work, so adding a *step* did.) That new
+  invariant is enforced by `check_ci_gate_coverage.py`, not left as prose — it also pins
+  `always()` (a failed dependency would otherwise SKIP the gate, and a skipped required
+  check counts as satisfied) and rejects `continue-on-error` on a gated job, the one
+  documented way to make a failure report as success.
 
 ## 2026-08-26
 

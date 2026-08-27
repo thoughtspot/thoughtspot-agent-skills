@@ -110,6 +110,14 @@ run_check "repo hygiene"         "tools/validate/check_repo_hygiene.py --root $R
 # to catch arrives via a MERGE, where the staged set is not a reliable signal.
 run_check "backlog integrity"    "tools/validate/check_backlog_integrity.py --root $REPO_ROOT"
 
+# The aggregate CI gate must cover every pull-request job. Gated on the workflow being
+# staged: the invariant can only be broken by editing that file, and it is the file the
+# author is least likely to re-read (audit finding 7.1 — the gate that reported failures
+# it could not act on).
+if echo "$STAGED" | grep -q '^\.github/workflows/validate\.yml$'; then
+  run_check "CI gate coverage"   "tools/validate/check_ci_gate_coverage.py --root $REPO_ROOT"
+fi
+
 # Complexity ratchet on staged Python (soft-skips if radon isn't installed locally;
 # enforced fully in CI). Blocks new/worsening god-functions; legacy is baselined.
 if echo "$STAGED" | grep -q '\.py$'; then

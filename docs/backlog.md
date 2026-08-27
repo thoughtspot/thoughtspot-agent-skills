@@ -3127,8 +3127,8 @@ changes — but neither blocks the other.
 **Source:** 2026-07-11 full audit finding 16.4.
 **Affects:** `.github/workflows/validate.yml` (pytest step).
 **Status:** DONE (2026-07-11) — added a dedicated `pytest-matrix` job running the unit/validator
-tests on `["3.10", "3.11", "3.13", "3.14"]` (3.12 already covered by `validate`). Validators/linters
-stay single-version in `validate`, per the item's scope.
+tests on `["3.10", "3.11", "3.13", "3.14"]` (3.12 already covered by `suite`). Validators/linters
+stay single-version in `suite`, per the item's scope.
 
 CI tested a single Python version (3.12) while `pyproject.toml` claimed support for a wider range.
 The new matrix job fills in the rest of `requires-python` without duplicating the validator suite.
