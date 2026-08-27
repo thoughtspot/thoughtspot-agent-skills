@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-08-28
+- chore: drop model-routing's hand-maintained assignments table -- `model:` pins now carry a `# reason:` comment in agent frontmatter, `check_harness_routing.py` rewritten to enforce that instead of table sync; remove the unused `consistency-checker` agent (its checks restate per-commit validators, and its name collided with a different agent in another repo); derive the active-wip-branch list instead of hand-maintaining it (BL-224/BL-225 filed)
+
 ## 2026-08-27
 
 ### Added

@@ -1,36 +1,31 @@
-"""check_harness_routing.py — every subagent's tier must match model-routing.md.
+"""check_harness_routing.py — delegated agents keep to the routing requirements.
 
-`CLAUDE.md` makes it an obligation that a new agent or workflow stage is tiered per
-`.claude/rules/model-routing.md` **and recorded in that rule's table**. Nothing
-enforced it: a grep for `.claude/agents`, `model-routing` or `.claude/workflows`
-across `tools/validate/`, `scripts/` and `.github/workflows/` returned **zero
-files**, so neither pre-commit nor CI read harness config at all (2026-08-26 audit,
-finding 18.4).
-
-That is precisely how the previous angle-18 finding survived: `consistency-checker`
-carried a `model: haiku` pin that contradicted the rule's own "effort over model"
-corollary *and* the user's no-Haiku-for-delegated-work policy, and it sat in the tree
-until a manual sweep noticed. An obligation with no check is a preference.
+History. This validator originally enforced sync between agent frontmatter and a
+hand-maintained "Current assignments" table in `.claude/rules/model-routing.md`
+(assertions: agent-named-in-table, declared-tier-matches-table). Those were dropped
+on 2026-08-27: the table was a second hand-maintained copy of facts the frontmatter
+already carries, plus a gate whose main job was keeping the copies equal — double
+bookkeeping, and a merge-conflict funnel when concurrent sessions each edit an
+agent. The reviewable justification now lives beside the pin itself.
 
 What this asserts, per agent under `.claude/agents/`:
 
-1. **It is named in the routing table.** An agent absent from
-   "Current assignments" is untiered — the specific thing CLAUDE.md forbids.
-2. **A `model:` pin is justified.** The rule states a pin "needs a reason the effort
-   dial cannot serve", so a pinned agent must have its reason recorded in the table.
-3. **No Haiku pin.** The rule records that the subagent-driven-development policy
-   "rejects Haiku for delegated work outright". This is the exact regression that
-   went unnoticed before.
-4. **The declared tier matches the table.** A `model:`/`effort:` value that disagrees
-   with what the table says about that agent is drift in one direction or the other.
+1. **No Haiku pin.** `model-routing.md` records that the subagent-driven-development
+   policy rejects Haiku for delegated work, and that the cheapest tier forfeits the
+   effort dial rather than erroring — so the saving cannot be recovered as effort.
+   This exact regression shipped once and sat unnoticed until a manual sweep
+   (2026-08-26 audit, finding 18.3/18.4).
+2. **A `model:` pin carries its reason.** The rule: a pin "needs a reason the effort
+   dial cannot serve". Mechanically: a frontmatter `model:` value other than
+   `inherit` requires a `# reason:` comment line inside the same frontmatter block,
+   so the justification is reviewable where the pin is and travels with it.
 
-Read-only agents additionally need a `tools:` grant, but that is a separate concern
-(finding 18.6) and lives in the rule's prose rather than a parseable table, so it is
-deliberately not asserted here.
+The rule file itself must exist — the requirements these checks enforce are stated
+there, and a validator pointing at a deleted rule is enforcing prose nobody can read.
 
 Exit codes:
-  0 — every agent is tiered and agrees with the table
-  1 — an agent is untiered, disagrees, or carries an unjustified/forbidden pin
+  0 — every agent conforms
+  1 — a forbidden or unjustified pin, or the rule file is missing
 
 Run manually:
     python3 tools/validate/check_harness_routing.py --root .
@@ -49,45 +44,36 @@ ROUTING_RULE = ".claude/rules/model-routing.md"
 FORBIDDEN_MODEL_PINS = {"haiku"}
 
 _FM_KEY_RE = re.compile(r"^(?P<key>[a-zA-Z_]+)\s*:\s*(?P<value>.*?)\s*$")
+_REASON_RE = re.compile(r"^\s*#\s*reason\s*:", re.IGNORECASE)
 
 
-def parse_frontmatter(path: Path) -> dict[str, str]:
-    """Frontmatter key/values from a `---`-delimited agent file.
+def frontmatter_lines(path: Path) -> list[str]:
+    """Raw lines of the `---`-delimited frontmatter block (exclusive of fences).
 
     Deliberately not a YAML parse: these files carry `#` comment lines inside the
-    frontmatter (see the `tools:` grants added for 18.6) and only flat scalars
-    matter here.
+    frontmatter (the `tools:` grants from 18.6, and now `# reason:` beside pins),
+    and both the keys and the comments matter here.
     """
     lines = path.read_text(encoding="utf-8").splitlines()
     if not lines or lines[0].strip() != "---":
-        return {}
-    out: dict[str, str] = {}
+        return []
+    block: list[str] = []
     for line in lines[1:]:
         if line.strip() == "---":
             break
+        block.append(line)
+    return block
+
+
+def parse_frontmatter(block: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for line in block:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         m = _FM_KEY_RE.match(line)
         if m:
             out[m.group("key")] = m.group("value")
     return out
-
-
-def routing_assignments(rule_text: str) -> str:
-    """The routing TABLE's rows only, lowercased for substring checks.
-
-    Deliberately NOT the whole file. Matching the whole document made the check
-    disarmable by ordinary prose: the 18.5 rewrite (same day) introduced a bare
-    `effort: high` into the rules-of-thumb text, and assertion 4 ("the declared tier
-    matches the table") silently stopped firing for `effort: high` — A/B verified. A
-    gate that any nearby sentence can satisfy is not a gate.
-
-    Restricting to table rows keeps the check honest: an agent's tier must be recorded
-    in the assignments TABLE, which is what CLAUDE.md actually requires. Prose may
-    discuss `effort: high` freely without vouching for any agent.
-    """
-    rows = [ln for ln in rule_text.splitlines() if ln.lstrip().startswith("|")]
-    return "\n".join(rows).lower()
 
 
 def check(root: Path) -> list[str]:
@@ -98,24 +84,14 @@ def check(root: Path) -> list[str]:
     if not agents_dir.is_dir():
         return failures                      # no agents to check
     if not rule_path.is_file():
-        return [f"{ROUTING_RULE} is missing — CLAUDE.md requires tiers be recorded there."]
-
-    rule_text = rule_path.read_text(encoding="utf-8")
-    assignments = routing_assignments(rule_text)
+        return [f"{ROUTING_RULE} is missing — it states the requirements this check enforces."]
 
     for agent_file in sorted(agents_dir.glob("*.md")):
         name = agent_file.stem
-        fm = parse_frontmatter(agent_file)
+        block = frontmatter_lines(agent_file)
+        fm = parse_frontmatter(block)
         model = (fm.get("model") or "").strip().strip("\"'").lower()
-        effort = (fm.get("effort") or "").strip().strip("\"'").lower()
-
-        if name.lower() not in assignments:
-            failures.append(
-                f"{name}: not named in {ROUTING_RULE}'s assignments. CLAUDE.md requires a "
-                f"new agent be tiered per that rule AND recorded in its table — an agent "
-                f"absent from it is untiered."
-            )
-            continue
+        has_reason = any(_REASON_RE.match(ln) for ln in block)
 
         if model in FORBIDDEN_MODEL_PINS:
             failures.append(
@@ -126,21 +102,12 @@ def check(root: Path) -> list[str]:
                 f"`effort: low` on the session model instead."
             )
 
-        if model and model != "inherit":
-            # The rule: "a `model:` pin needs a reason the effort dial cannot serve."
-            # Require the pin to be visible in the table so the reason is reviewable.
-            if f"{name.lower()}: {model}" not in assignments and f"`{name.lower()}: {model}`" not in assignments:
-                failures.append(
-                    f"{name}: pinned to `model: {model}`, but {ROUTING_RULE} does not record "
-                    f"that pin. The rule requires a pin to have \"a reason the effort dial "
-                    f"cannot serve\" — record the pin and its reason, or drop it for "
-                    f"`effort:`."
-                )
-
-        if effort and f"effort: {effort}" not in assignments:
+        if model and model != "inherit" and not has_reason:
             failures.append(
-                f"{name}: declares `effort: {effort}`, which {ROUTING_RULE} does not record. "
-                f"Update the rule's assignments so the table and the frontmatter agree."
+                f"{name}: pinned to `model: {model}` with no `# reason:` comment in the "
+                f"frontmatter. {ROUTING_RULE} requires a pin to have \"a reason the "
+                f"effort dial cannot serve\", written beside the pin — add the comment, "
+                f"or drop the pin for `effort:`."
             )
 
     return failures
@@ -157,19 +124,21 @@ def main() -> int:
 
     if args.verbose:
         for agent_file in sorted((root / AGENTS_DIR).glob("*.md")):
-            fm = parse_frontmatter(agent_file)
+            block = frontmatter_lines(agent_file)
+            fm = parse_frontmatter(block)
             print(f"  {agent_file.stem}: model={fm.get('model', '(inherit)')} "
                   f"effort={fm.get('effort', '(session)')} "
-                  f"tools={'yes' if fm.get('tools') else 'no'}")
+                  f"tools={'yes' if fm.get('tools') else 'no'} "
+                  f"reason={'yes' if any(_REASON_RE.match(ln) for ln in block) else 'no'}")
 
     if failures:
-        print("FAIL  harness routing — agent tiers disagree with model-routing.md:")
+        print("FAIL  harness routing — agent pins violate model-routing.md's requirements:")
         for f in failures:
             print(f"  - {f}")
         return 1
 
     n = len(list((root / AGENTS_DIR).glob("*.md")))
-    print(f"PASS  harness routing: {n} agent(s) tiered and recorded in model-routing.md.")
+    print(f"PASS  harness routing: {n} agent(s) conform (no Haiku pins; every pin carries its reason).")
     return 0
 
 

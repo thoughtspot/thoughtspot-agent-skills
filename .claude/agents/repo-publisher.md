@@ -2,6 +2,10 @@
 name: repo-publisher
 description: Commit, push a feature branch, open a PR, and — after that PR merges — sync changed CoCo/shared files to the Snowflake stage, in the correct order. Use this instead of running git and stage-sync manually to avoid partial publishes.
 model: sonnet
+# reason: the risk in this long prescribed commit -> PR -> stage-sync sequence is a
+# PARTIAL PUBLISH, not shallow reasoning -- capability headroom buys nothing here,
+# so this is a requirement the effort dial cannot serve (model-routing.md corollary;
+# audit finding 18.3 moved the only other pinned agent OFF its pin for lacking one).
 ---
 
 # Repo Publisher

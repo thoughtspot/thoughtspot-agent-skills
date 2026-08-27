@@ -56,8 +56,12 @@ git branch -d wip/<branch>
 git push origin --delete wip/<branch>
 ```
 
-## Active wip branches (update this list when branches are created or merged)
+## Active wip branches
 
-| Branch | Contents | Status |
-|---|---|---|
-| _none_ | — | No active wip branches |
+Derive the list — do not maintain it by hand. (A hand-kept table stood here until
+2026-08-27: mutable status inside a rules file, which concurrent sessions had to
+race to update and which was stale whenever they lost.)
+
+```bash
+git fetch --prune && git branch -r | grep 'origin/wip/' || echo "no active wip branches"
+```

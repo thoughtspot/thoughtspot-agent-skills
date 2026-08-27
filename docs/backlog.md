@@ -8445,3 +8445,31 @@ exactly the drift these items exist to catch; fix it in whichever step lands fir
 Raised 2026-08-26 from the full audit (findings 13.14 and 13.15); filed 2026-08-27 on
 discovering the triage had routed them nowhere, and rewritten the same day after review found
 the item had proposed reversing a live-verified decision without naming the evidence for it.
+
+## BL-224 -- the audit-freshness nudge is stateless, so N concurrent sessions are each told to run the same sweep `Tier 2`
+
+Filed 2026-08-28 from the 2026-08-27 process meta-review (machine-level,
+`~/.claude/audit/2026-08-27-process-meta-review.md`).
+
+Once `check_audit_freshness.py`'s 7-day or 40-commit threshold trips, every concurrent
+session gets the identical "sweep due" nudge at SessionStart. There is no in-progress
+marker, and the clock resets only when a report file lands in `docs/audit/` -- so two
+sessions obeying the nudge launch two ~14-agent sweeps and race to save
+`docs/audit/<same-date>-<scope>.md`. This is a concrete mechanism for concurrent
+sessions duplicating and fighting over process work.
+
+**Fix shape:** before launching a sweep, check for (a) a sweep branch on origin, or
+(b) a gitignored `.audit-in-progress` marker written by the launching session (with a
+staleness cutoff so a crashed sweep does not block forever). Deliberately not built
+during the meta-review fix wave, which was subtractive by design -- this adds
+machinery and should be its own considered PR.
+
+## BL-225 -- repo-audit.md carries full post-mortems inline; move narrative to docs/audit/, keep the tables `Tier 3`
+
+Filed 2026-08-28 from the 2026-08-27 process meta-review. The rubric's angle
+taxonomy and two-bucket rule are load-bearing; the inline incident write-ups
+(the angle-9 "ran nowhere" history, the angle-17 rationale block, the code-health
+tooling narratives) tax every reader of the rules file and duplicate content that
+belongs with the dated audit reports. Move the histories to `docs/audit/` (or the
+History table's linked reports), keep the tables and requirements. No information
+is lost; it moves to where history lives.
