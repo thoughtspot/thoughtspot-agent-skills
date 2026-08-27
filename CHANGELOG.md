@@ -7,6 +7,22 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-08-27
 
+### Added
+
+- **The repo audit can run unattended (finding 18.1).** `.claude/workflows/repo-audit.js`
+  tells every external-angle finder to research against live vendor docs via WebSearch,
+  WebFetch and the SpotterCode MCP — none of which was in `permissions.allow`, so a 7- or
+  14-agent sweep stopped on one interactive prompt per agent. The rubric's premise is a
+  sweep you start and read later; that was broken by config, not by the workflow.
+  Widened in the **committed** `.claude/settings.json`, since the workflow is shared repo
+  state and every contributor hit the same wall: `WebSearch`, six **domain-scoped**
+  `WebFetch` rules, and the two **read-only** SpotterCode tools.
+  `mcp__SpotterCode__execute-thoughtspot-code` is deliberately excluded — it runs code
+  against a live instance and no finder needs it.
+  New `check_audit_workflow_permissions.py` keeps the two files in step: adding a platform
+  to the workflow's `PLATFORMS` table now fails the gate until its docs domain is
+  approved, rather than blocking that one finder halfway through a sweep.
+
 ### Changed
 
 - **`validate` is now an aggregate CI gate, so the Python matrix can actually block a

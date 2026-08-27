@@ -7,7 +7,16 @@
       "Bash(pip:*)",
       "Bash(pytest:*)",
       "Bash(ts:*)",
-      "Bash(source ~/.zshenv:*)"
+      "Bash(source ~/.zshenv:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.snowflake.com)",
+      "WebFetch(domain:docs.databricks.com)",
+      "WebFetch(domain:help.tableau.com)",
+      "WebFetch(domain:docs.claude.com)",
+      "WebFetch(domain:code.claude.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "mcp__SpotterCode__get-rest-api-reference",
+      "mcp__SpotterCode__get-developer-docs-reference"
     ]
   },
   "hooks": {
@@ -16,10 +25,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 tools/validate/check_audit_freshness.py --root . 2>/dev/null || true; b=$(git branch --show-current 2>/dev/null); [ \"$b\" = main ] && echo \"branch: main — branching.md: create a branch before editing\" || echo \"branch: ${b:-(detached)}\"",
+            "command": "python3 tools/validate/check_audit_freshness.py --root . 2>/dev/null || true; b=$(git branch --show-current 2>/dev/null); [ \"$b\" = main ] && echo \"branch: main \u2014 branching.md: create a branch before editing\" || echo \"branch: ${b:-(detached)}\"",
             "async": false,
             "timeout": 20,
-            "statusMessage": "Checking branch + audit freshness…"
+            "statusMessage": "Checking branch + audit freshness\u2026"
           }
         ]
       }

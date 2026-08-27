@@ -110,6 +110,13 @@ run_check "repo hygiene"         "tools/validate/check_repo_hygiene.py --root $R
 # to catch arrives via a MERGE, where the staged set is not a reliable signal.
 run_check "backlog integrity"    "tools/validate/check_backlog_integrity.py --root $REPO_ROOT"
 
+# The audit workflow can only run unattended if every tool it tells a finder to use is
+# pre-approved (finding 18.1 — a 14-agent sweep stopped on one prompt per agent). Gated on
+# either file, since the invariant couples the workflow to the allow-list.
+if echo "$STAGED" | grep -qE '^\.claude/(workflows/repo-audit\.js|settings\.json)$'; then
+  run_check "audit workflow perms" "tools/validate/check_audit_workflow_permissions.py --root $REPO_ROOT"
+fi
+
 # The aggregate CI gate must cover every pull-request job. Gated on the workflow being
 # staged: the invariant can only be broken by editing that file, and it is the file the
 # author is least likely to re-read (audit finding 7.1 — the gate that reported failures

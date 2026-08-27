@@ -186,6 +186,10 @@ jobs:
         run: |
           python3 tools/validate/check_ci_gate_coverage.py --root .
 
+      - name: Check the audit workflow's tools are pre-approved
+        run: |
+          python3 tools/validate/check_audit_workflow_permissions.py --root .
+
       - name: Run credential-free smoke suites
         # These five assert real behaviour of publish_plan / csr_plan / apply_plan /
         # alias and need NO credentials, but ran in no CI job at all: the pytest steps
