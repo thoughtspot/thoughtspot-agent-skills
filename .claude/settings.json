@@ -15,8 +15,12 @@
       "WebFetch(domain:docs.claude.com)",
       "WebFetch(domain:code.claude.com)",
       "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:platform.claude.com)",
       "mcp__SpotterCode__get-rest-api-reference",
       "mcp__SpotterCode__get-developer-docs-reference"
+    ],
+    "deny": [
+      "mcp__SpotterCode__execute-thoughtspot-code"
     ]
   },
   "hooks": {

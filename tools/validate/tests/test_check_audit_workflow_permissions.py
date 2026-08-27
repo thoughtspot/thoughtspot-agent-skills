@@ -41,10 +41,12 @@ WORKFLOW = """
     ].join('\\n')
 """
 
+# platform.claude.com is the host that SERVES the model docs; docs.claude.com and
+# docs.anthropic.com only redirect to it cross-host (finding 18.3), so they are entry
+# points rather than evidence and rule 5 does not assert them.
 HARNESS_ALLOW = [
-    "WebFetch(domain:docs.claude.com)",
     "WebFetch(domain:code.claude.com)",
-    "WebFetch(domain:docs.anthropic.com)",
+    "WebFetch(domain:platform.claude.com)",
 ]
 
 BASE_ALLOW = [
@@ -56,13 +58,16 @@ BASE_ALLOW = [
 ]
 
 
-def _repo(tmp_path, workflow=WORKFLOW, allow=None):
+def _repo(tmp_path, workflow=WORKFLOW, allow=None, deny=None, ask=None):
     (tmp_path / ".claude" / "workflows").mkdir(parents=True)
     (tmp_path / ".claude" / "workflows" / "repo-audit.js").write_text(
         textwrap.dedent(workflow), encoding="utf-8")
+    perms = {"allow": BASE_ALLOW if allow is None else allow}
+    perms["deny"] = ["mcp__SpotterCode__execute-thoughtspot-code"] if deny is None else deny
+    if ask is not None:
+        perms["ask"] = ask
     (tmp_path / ".claude" / "settings.json").write_text(
-        json.dumps({"permissions": {"allow": BASE_ALLOW if allow is None else allow}}),
-        encoding="utf-8")
+        json.dumps({"permissions": perms}), encoding="utf-8")
     return tmp_path
 
 
@@ -81,7 +86,7 @@ def test_missing_mcp_tool_is_caught(tmp_path):
     r = _run(_repo(tmp_path, allow=allow))
     assert r.returncode == 1
     assert "get-rest-api-reference" in r.stderr
-    assert "stop on a prompt" in r.stderr
+    assert "permissions.allow" in r.stderr
 
 
 def test_missing_websearch_is_caught(tmp_path):
@@ -119,10 +124,21 @@ def test_mcp_only_platform_needs_no_domain(tmp_path):
     assert "thoughtspot" not in r.stderr
 
 
-def test_code_execution_tool_is_rejected(tmp_path):
+def test_code_execution_tool_in_allow_is_rejected(tmp_path):
     r = _run(_repo(tmp_path, allow=BASE_ALLOW + ["mcp__SpotterCode__execute-thoughtspot-code"]))
     assert r.returncode == 1
-    assert "executes code" in r.stderr
+    assert "permissions.allow" in r.stderr
+
+
+def test_missing_deny_entry_is_caught(tmp_path):
+    """Rule 4 is presence-of-deny, not absence-from-allow.
+
+    As an absence check it was satisfiable by another settings scope allowing the tool;
+    `deny` beats `allow` from every scope, so that is where the guarantee lives.
+    """
+    r = _run(_repo(tmp_path, deny=[]))
+    assert r.returncode == 1
+    assert "permissions.**deny**" in r.stderr
 
 
 def test_execute_tool_named_in_workflow_is_not_demanded(tmp_path):
@@ -161,16 +177,16 @@ def test_harness_docs_domain_missing_is_caught(tmp_path):
     allow = [a for a in BASE_ALLOW if a not in HARNESS_ALLOW]
     r = _run(_repo(tmp_path, allow=allow))
     assert r.returncode == 1
-    assert "outside the PLATFORMS table" in r.stderr
-    assert "docs.anthropic.com" in r.stderr
+    assert "platform.claude.com" in r.stderr
+    assert "code.claude.com" in r.stderr
 
 
 def test_partial_harness_domains_is_caught(tmp_path):
-    allow = [a for a in BASE_ALLOW if "code.claude.com" not in a]
+    """The finding-18.3 case: the serving host missing while an entry point is present."""
+    allow = [a for a in BASE_ALLOW if "platform.claude.com" not in a]
     r = _run(_repo(tmp_path, allow=allow))
     assert r.returncode == 1
-    assert "code.claude.com" in r.stderr
-    assert "docs.claude.com" not in r.stderr.split("not allowed:")[-1]
+    assert "platform.claude.com" in r.stderr
 
 
 def test_angles_key_does_not_manufacture_a_platform(tmp_path):
@@ -186,3 +202,82 @@ def test_missing_platforms_block_fails_rather_than_passing(tmp_path):
     r = _run(_repo(tmp_path, workflow=wf))
     assert r.returncode == 1
     assert "could not parse" in r.stderr or "Could not locate" in r.stderr
+
+
+# --- rule 6: deny / ask are as blocking as a missing allow ------------------------
+
+def test_required_tool_in_deny_is_caught(tmp_path):
+    """Listed in BOTH allow and deny previously reported clean."""
+    r = _run(_repo(tmp_path, deny=["mcp__SpotterCode__execute-thoughtspot-code", "WebSearch"]))
+    assert r.returncode == 1
+    assert "beats allow" in r.stderr
+
+
+def test_required_domain_in_ask_is_caught(tmp_path):
+    r = _run(_repo(tmp_path, ask=["WebFetch(domain:docs.snowflake.com)"]))
+    assert r.returncode == 1
+    assert "still prompts" in r.stderr
+
+
+# --- rule 3: quote styles and unreadable entries ----------------------------------
+
+def test_double_quoted_research_on_a_shipped_platform_is_still_checked(tmp_path):
+    """The false pass the review found: one quote change hid a real missing domain."""
+    wf = WORKFLOW.replace(
+        "research: 'Use WebSearch / WebFetch against current Snowflake docs.',",
+        'research: "Use WebSearch / WebFetch against current Snowflake docs.",')
+    allow = [a for a in BASE_ALLOW if "snowflake" not in a]
+    r = _run(_repo(tmp_path, workflow=wf, allow=allow))
+    assert r.returncode == 1
+    assert "docs.snowflake.com" in r.stderr
+
+
+def test_template_literal_research_is_read(tmp_path):
+    wf = WORKFLOW.replace(
+        "research: 'Use WebSearch / WebFetch against current Snowflake docs.',",
+        "research: `Use WebSearch / WebFetch against current Snowflake docs.`,")
+    allow = [a for a in BASE_ALLOW if "snowflake" not in a]
+    r = _run(_repo(tmp_path, workflow=wf, allow=allow))
+    assert r.returncode == 1
+    assert "docs.snowflake.com" in r.stderr
+
+
+def test_unreadable_entry_fails_rather_than_thinning_the_set(tmp_path):
+    wf = WORKFLOW.replace("        key: 'snowflake', label: 'Snowflake',\n", "        label: 'Snowflake',\n")
+    r = _run(_repo(tmp_path, workflow=wf))
+    assert r.returncode == 1
+    assert "no readable" in r.stderr
+
+
+# --- rule 5: hosts, not a constant ------------------------------------------------
+
+def test_new_url_host_outside_platforms_is_caught(tmp_path):
+    wf = WORKFLOW + "    const X = ['Use WebFetch against https://docs.getdbt.com/reference'].join('x')\n"
+    r = _run(_repo(tmp_path, workflow=wf))
+    assert r.returncode == 1
+    assert "docs.getdbt.com" in r.stderr
+
+
+def test_reworded_harness_prompt_fails_loudly(tmp_path):
+    """A constant cannot notice a reword, so the phrase itself is asserted."""
+    wf = WORKFLOW.replace("Anthropic model documentation", "the model lineup page")
+    r = _run(_repo(tmp_path, workflow=wf))
+    assert r.returncode == 1
+    assert "TEXT_HOST_HINTS" in r.stderr
+
+
+def test_js_property_access_is_not_read_as_a_host(tmp_path):
+    """`p.key` / `args.scope` / `pyproject.toml` are not hosts (11 false failures once)."""
+    wf = WORKFLOW + "    const f = PLATFORMS.map(p => p.key + args.scope + 'pyproject.toml')\n"
+    r = _run(_repo(tmp_path, workflow=wf))
+    assert r.returncode == 0, r.stderr
+
+
+# --- legitimate broadening --------------------------------------------------------
+
+def test_bare_webfetch_satisfies_every_domain(tmp_path):
+    """A maintainer who drops domain-scoping must not get a red gate listing the rules
+    they deliberately superseded."""
+    allow = [a for a in BASE_ALLOW if not a.startswith("WebFetch(")] + ["WebFetch"]
+    r = _run(_repo(tmp_path, allow=allow))
+    assert r.returncode == 0, r.stderr

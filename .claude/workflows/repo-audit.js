@@ -162,7 +162,7 @@ const CODE_REVIEW_PROMPT = [
   'This is the full-sweep BACKSTOP for behavioural bugs that slipped past per-PR review; it is NOT a code-health pass (that is angle 4).',
   '',
   'SCOPE — review only the delta since the last full audit:',
-  '  1. Find the most recent full-audit report: `ls docs/audit/*-full.md | sort | tail -1`.',
+  '  1. Find the most recent full-audit report: `ls docs/audit/*-full.md | tail -1`.',
   '  2. Get the commit it was written at: `git log -1 --format=%H -- <that file>`.',
   '  3. Review the diff `<sha>..HEAD` (`git diff <sha>..HEAD` + `git log <sha>..HEAD`).',
   '  If no full-audit report exists, review the last 40 commits (`git diff HEAD~40..HEAD`).',

@@ -139,7 +139,7 @@ product. This is the **weekly specialist sweep**. Kept tractable by *currency an
 | 13 | **Product currency** | Per-platform: are our mappings, schemas, and "untranslatable" verdicts still accurate against the product's *current* capabilities? Newly-possible translations, deprecated constructs, new artifact types (chart libraries, semantic-view / metric-view features), API & version drift. | Weekly specialist sweep (per platform) + `check_mapping_currency` (per-PR staleness nudge) |
 | 14 | **Performance** | (a) *skill runtime* — redundant API round-trips, un-batched prompts, the obj_id read-back pattern; (b) *generated-artifact efficiency* — do emitted formulas use performant TS constructs (`group_aggregate` vs `sql_*_aggregate_op`, join cardinality) or slow ones; (c) *ts-cli* — pagination, token-cache reuse. | Weekly sweep + MANUAL |
 | 16 | **Dependency / supply-chain currency** | Python deps (`typer`, `requests`, `PyYAML`, `keyring`) — pinned ranges, known CVEs, EOL Python versions. | Weekly sweep + `pip-audit` gate (per-PR CI step over core + `[snowflake,qlik]` extras, plus weekly cron — see `.github/workflows/validate.yml`) |
-| 18 | **Harness / framework currency** | The Claude setup itself, checked against the current Claude Code + model lineup: `.claude/settings.json` (stale model pins, unused new settings), `.claude/agents/*.md` frontmatter (model/effort tiers vs `.claude/rules/model-routing.md` and the current model tiers), `.claude/workflows/` (capabilities the runner has gained), and the currency anchors on those `.claude/rules/*.md` files that carry one (today just `model-routing.md`, which `check_mapping_currency` nudges via `ANCHORED_FILES` — the rest are internal rules with no external state to go stale). Same pattern as angle 13, pointed inward — the quality framework goes stale exactly the way product mappings do (a pinned `claude-opus-4-6` sat in settings.json after the Claude 5 family shipped; found manually 2026-07-28). **Repo-scoped only — see the boundary note below.** | Weekly sweep |
+| 18 | **Harness / framework currency** | The Claude setup itself, checked against the current Claude Code + model lineup: `.claude/settings.json` (stale model pins, unused new settings), `.claude/agents/*.md` frontmatter (model/effort tiers vs `.claude/rules/model-routing.md` and the current model tiers), `.claude/workflows/` (capabilities the runner has gained), and the currency anchors on those `.claude/rules/*.md` files that carry one (today just `model-routing.md`, which `check_mapping_currency` nudges via `ANCHORED_FILES` — the rest are internal rules with no external state to go stale). Same pattern as angle 13, pointed inward — the quality framework goes stale exactly the way product mappings do (a pinned `claude-opus-4-6` sat in settings.json after the Claude 5 family shipped; found manually 2026-07-28). **Repo-scoped only — see the boundary note below.** | Weekly sweep + `check_audit_workflow_permissions.py` (asserts the sweep's own research tools stay pre-approved — finding 18.1) |
 
 #### Angle 18's boundary with the machine-level review
 
@@ -197,8 +197,20 @@ can't gate a PR — but it keeps anchors from rotting.
 
 ## Platforms in scope (expand here)
 
-One specialist lens per platform. **Adding a platform = add a row here + a currency
-anchor to its mapping/schema files.** That is the entire expansion cost.
+One specialist lens per platform. **Adding a platform costs four edits** (updated
+2026-08-27, when finding 18.1's fix added the last two — the sentence here previously
+claimed a row plus an anchor was "the entire expansion cost", and stopped being true the
+moment the sweep's tool permissions became a gate):
+
+1. a row in the table below;
+2. a currency anchor in its mapping/schema files;
+3. a `PLATFORMS` entry in `.claude/workflows/repo-audit.js`;
+4. its docs host in `PLATFORM_DOMAINS` (`tools/validate/check_audit_workflow_permissions.py`)
+   **and** a matching `WebFetch(domain:…)` rule in `.claude/settings.json`.
+
+Step 4 is gated: omit it and `check_audit_workflow_permissions.py` fails the commit. That
+is deliberate — without it the new finder alone blocks mid-sweep while every other angle
+completes, and the report still arrives looking complete.
 
 | Platform | Specialist source of truth | Mapping/schema home |
 |---|---|---|

@@ -10,7 +10,9 @@
 ── How to use this file ──────────────────────────────────────────────────────
 
 1. Copy this file: cp .claude/settings.local.json.example .claude/settings.local.json
-2. Add your personal bash allowlists and WebFetch domains
+2. Add your personal bash allowlists and WebFetch domains — the vendor
+   docs hosts the audit sweep needs are already in the **committed**
+   `.claude/settings.json` (finding 18.1), so put only instance-specific hosts here
 3. NEVER commit settings.local.json — it is gitignored
 
 ── Model ─────────────────────────────────────────────────────────────────────

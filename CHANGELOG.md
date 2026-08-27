@@ -10,15 +10,25 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ### Added
 
 - **The repo audit can run unattended (finding 18.1).** `.claude/workflows/repo-audit.js`
-  tells every external-angle finder to research against live vendor docs via WebSearch,
-  WebFetch and the SpotterCode MCP — none of which was in `permissions.allow`, so a 7- or
-  14-agent sweep stopped on one interactive prompt per agent. The rubric's premise is a
-  sweep you start and read later; that was broken by config, not by the workflow.
+  tells its external-angle finders to research against live vendor docs via WebSearch,
+  WebFetch and the SpotterCode MCP — none of which was in `permissions.allow`, so those
+  finders blocked on their first research call. The rubric's premise is a sweep you start
+  and read later; that was broken by config, not by the workflow. (The external scope runs
+  **7** finders and the full scope **15**; the audit's own "14" was short by one, and
+  "one prompt per agent" was wrong in both directions — eight full-sweep finders touch no
+  web or MCP tool at all, while each external finder can prompt once per tool and host.)
   Widened in the **committed** `.claude/settings.json`, since the workflow is shared repo
-  state and every contributor hit the same wall: `WebSearch`, six **domain-scoped**
-  `WebFetch` rules, and the two **read-only** SpotterCode tools.
-  `mcp__SpotterCode__execute-thoughtspot-code` is deliberately excluded — it runs code
-  against a live instance and no finder needs it.
+  state: `WebSearch`, seven **domain-scoped** `WebFetch` rules, and the two **read-only**
+  SpotterCode tools. `mcp__SpotterCode__execute-thoughtspot-code` goes in
+  `permissions.**deny**` rather than merely being left out of `allow` — deny beats allow
+  from every scope, so the guarantee survives a local settings file.
+
+  **This also closes finding 18.3, which the first cut of this work ignored.**
+  `docs.claude.com` and `docs.anthropic.com` are pure cross-host redirectors to
+  `platform.claude.com`, and WebFetch hands a cross-host redirect back to the caller — so
+  allowing only the redirectors granted angle 18 nothing, on exactly the page (the model
+  lineup) that angle exists to read. 18.3 said so verbatim and was paired to 18.1 in the
+  report. `platform.claude.com` is now allowed and is what the gate asserts.
   New `check_audit_workflow_permissions.py` keeps the two files in step: adding a platform
   to the workflow's `PLATFORMS` table now fails the gate until its docs domain is
   approved, rather than blocking that one finder halfway through a sweep.

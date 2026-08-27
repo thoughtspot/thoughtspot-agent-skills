@@ -4,7 +4,7 @@
       "Bash(git:*)",
       "Bash(python3:*)",
       "Bash(ts:*)",
-      "WebFetch(domain:docs.anthropic.com)"
+      "WebFetch(domain:yourorg.thoughtspot.cloud)"
     ]
   }
 }
