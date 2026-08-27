@@ -31,6 +31,19 @@ Four rules:
      against a live instance; no audit finder needs it, and a code-execution tool
      should not slip into a committed, team-wide allow-list without a reviewer
      seeing it. If it is ever genuinely needed, delete this rule deliberately.
+  5. If anything OUTSIDE the `PLATFORMS` table researches via WebFetch, the harness
+     docs hosts are allowed. Rule 3 alone was **vacuous here** — angle 18's
+     `HARNESS_PROMPT` fetches "the official Claude Code docs and Anthropic model
+     documentation" and is not a platform, so the three domains it needs sat in the
+     allow-list with nothing asserting they stay. Found by review, 2026-08-27; it is
+     the same silent-coverage-gap shape this whole checker exists to prevent, one
+     level in.
+
+Rule 3's regex is scoped to the `const PLATFORMS = [ ... ]` block, not the whole file.
+Unscoped it pairs any `key: '...'` with the next `research: '...'` across the file, and
+the `ANGLES` list below PLATFORMS also uses `key:` — harmless today because no later
+object has a `research:` key, but a reorder or a new key would either manufacture a
+platform (false failure) or pair a real one with the wrong text (false pass).
 
 Exit codes:
   0 — all rules pass
@@ -63,10 +76,15 @@ PLATFORM_DOMAINS = {
 # Read-only by design; see rule 4.
 FORBIDDEN_TOOLS = ("mcp__SpotterCode__execute-thoughtspot-code",)
 
+# Angle 18 checks the harness against the live Claude Code / Anthropic docs (rule 5).
+# Both claude.com hosts are needed: the docs moved and both spellings are in use.
+HARNESS_DOMAINS = ("docs.claude.com", "code.claude.com", "docs.anthropic.com")
+
 MCP_RE = re.compile(r"mcp__[A-Za-z0-9_]+__[A-Za-z0-9_-]+")
 # Non-greedy pair capture: each PLATFORMS entry is `key: '<k>', label: ...` then
 # `research: '<text>'`. DOTALL because the two sit on separate lines.
 PLATFORM_RE = re.compile(r"key:\s*'([a-z0-9-]+)'.*?research:\s*'(.*?)'", re.S)
+PLATFORMS_BLOCK_RE = re.compile(r"const PLATFORMS\s*=\s*\[(.*?)^\]", re.S | re.M)
 WEBFETCH_DOMAIN_RE = re.compile(r"^WebFetch\(domain:([^)]+)\)$")
 
 
@@ -103,8 +121,20 @@ def check(root: Path) -> list[str]:
             f"`{SETTINGS_REL}`."
         )
 
-    # Rule 3 — a docs domain per WebFetch-researching platform.
-    for key, research in PLATFORM_RE.findall(workflow):
+    # Rule 3 — a docs domain per WebFetch-researching platform. Scoped to the PLATFORMS
+    # array; see the module docstring for why the unscoped form is unsafe.
+    block_match = PLATFORMS_BLOCK_RE.search(workflow)
+    if block_match is None:
+        failures.append(
+            f"Could not locate the `const PLATFORMS = [ ... ]` block in {WORKFLOW_REL}. "
+            f"Rule 3 cannot run, and a checker that passes because it could not parse is "
+            f"worse than no checker — fix the pattern or the file."
+        )
+        platforms_block = ""
+    else:
+        platforms_block = block_match.group(1)
+
+    for key, research in PLATFORM_RE.findall(platforms_block):
         if "WebFetch" not in research:
             continue
         domain = PLATFORM_DOMAINS.get(key)
@@ -119,6 +149,19 @@ def check(root: Path) -> list[str]:
             failures.append(
                 f"Platform `{key}` researches via WebFetch against `{domain}`, which is "
                 f"not allowed. Add `WebFetch(domain:{domain})` to {SETTINGS_REL}."
+            )
+
+    # Rule 5 — WebFetch used outside PLATFORMS (angle 18's harness prompt) needs the
+    # harness docs hosts. Rule 3 iterates platforms only, so this path was uncovered.
+    outside = workflow.replace(platforms_block, "") if platforms_block else workflow
+    if "WebFetch" in outside:
+        missing = [d for d in HARNESS_DOMAINS if d not in allowed_domains]
+        if missing:
+            failures.append(
+                f"`{WORKFLOW_REL}` fetches docs outside the PLATFORMS table (angle 18 reads "
+                f"the harness against the live Claude Code / Anthropic docs), but these hosts "
+                f"are not allowed: {', '.join(missing)}. Add "
+                f"{', '.join(f'`WebFetch(domain:{d})`' for d in missing)} to {SETTINGS_REL}."
             )
 
     # Rule 4 — the code-execution tool stays out.

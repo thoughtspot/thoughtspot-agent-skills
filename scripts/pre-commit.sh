@@ -113,7 +113,7 @@ run_check "backlog integrity"    "tools/validate/check_backlog_integrity.py --ro
 # The audit workflow can only run unattended if every tool it tells a finder to use is
 # pre-approved (finding 18.1 — a 14-agent sweep stopped on one prompt per agent). Gated on
 # either file, since the invariant couples the workflow to the allow-list.
-if echo "$STAGED" | grep -qE '^\.claude/(workflows/repo-audit\.js|settings\.json)$'; then
+if echo "$STAGED" | grep -qE '^(\.claude/(workflows/repo-audit\.js|settings\.json)|tools/validate/check_audit_workflow_permissions\.py)$'; then
   run_check "audit workflow perms" "tools/validate/check_audit_workflow_permissions.py --root $REPO_ROOT"
 fi
 
@@ -121,7 +121,9 @@ fi
 # staged: the invariant can only be broken by editing that file, and it is the file the
 # author is least likely to re-read (audit finding 7.1 — the gate that reported failures
 # it could not act on).
-if echo "$STAGED" | grep -q '^\.github/workflows/validate\.yml$'; then
+# The checker's own path is in the trigger too: editing a gate must re-run it, or a broken
+# gate lands green locally and only CI (which runs both unconditionally) catches it.
+if echo "$STAGED" | grep -qE '^(\.github/workflows/validate\.yml|tools/validate/check_ci_gate_coverage\.py)$'; then
   run_check "CI gate coverage"   "tools/validate/check_ci_gate_coverage.py --root $REPO_ROOT"
 fi
 
