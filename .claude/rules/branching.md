@@ -59,7 +59,7 @@ git push origin --delete wip/<branch>
 ## Active wip branches
 
 Derive the list — do not maintain it by hand. (A hand-kept table stood here until
-2026-08-27: mutable status inside a rules file, which concurrent sessions had to
+2026-08-28: mutable status inside a rules file, which concurrent sessions had to
 race to update and which was stale whenever they lost.)
 
 ```bash

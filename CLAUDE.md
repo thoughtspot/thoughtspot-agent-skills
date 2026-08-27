@@ -37,7 +37,7 @@ or patch files there directly.
 | `.mcp.json` (MCP server wiring) or `.claude/rules/api-research.md` | Update the other if precedence/usage rules change; check that `CLAUDE.md` "open-items.md pattern" and `.claude/rules/ts-cli.md` (v1 migration trigger, "When a skill needs an API call") still reference the rule correctly |
 | ts-dependency-manager: changes to Step 4 walking, Step 5 impact-report, or any open-items.md status | Also update agents/cli/ts-dependency-manager/references/dependency-types.md (status table, hierarchy, or sample output as relevant) — these must stay in sync; pre-commit prompts soft when one changes without the other |
 | ts-convert-* skill: new mapped/unmapped construct | Update `references/coverage-matrix.md` in that skill (pre-commit validator `check_coverage_matrix.py` enforces existence) |
-| Add a new agent (`.claude/agents/`) or workflow stage (`.claude/workflows/`) | Tier it per `.claude/rules/model-routing.md`: classify by work shape, reach for the effort dial; a `model:` pin needs a `# reason:` comment beside it in the frontmatter (enforced by `check_harness_routing.py` — there is no assignments table to update, dropped 2026-08-27) |
+| Add a new agent (`.claude/agents/`) or workflow stage (`.claude/workflows/`) | Tier it per `.claude/rules/model-routing.md`: classify by work shape, reach for the effort dial; a `model:` pin needs a `# reason:` comment beside it in the frontmatter (enforced by `check_harness_routing.py` — there is no assignments table to update, dropped 2026-08-28) |
 | Add a new `ts-convert-*` skill | **Nothing to register for angle 9** — the `conversion-consistency-auditor` globs `agents/cli/ts-convert-*` and classifies by the `from`/`to` direction token, so a new converter is audited from its first commit. Do NOT add it to a list in that agent; there is deliberately no list. Import the shared helpers in `ts_cli/formula_common.py` rather than re-implementing them (BL-217) — re-implementation is itself an angle-9 finding |
 
 If this map is getting outdated, update the table — do not prompt the author to check manually.
@@ -76,7 +76,7 @@ These branches are pushed to remote for backup but never merged to main until ve
 **Starting a new wip skill:**
 1. `git checkout -b wip/<skill-name>` from current main
 2. Remove the skill's `.gitignore` entry on that branch only
-3. Update README.md, SETUP.md, and coco-snowsight/SETUP.md to include the skill (consistency checker enforces this)
+3. Update README.md, SETUP.md, and coco-snowsight/SETUP.md to include the skill (`check_consistency.py` enforces this)
 4. `git push -u origin wip/<skill-name>`
 
 **Session-start protocol:** see `.claude/rules/branching.md` — check your branch before making any edits.

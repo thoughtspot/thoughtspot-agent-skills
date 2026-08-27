@@ -224,9 +224,11 @@ if echo "$STAGED" | grep -qE '(agents/cli/ts-convert-|tools/validate/check_cover
   run_check "coverage matrix"     "tools/validate/check_coverage_matrix.py --root $REPO_ROOT"
 fi
 
-# Harness routing (18.4) — a subagent's tier must match model-routing.md. Runs when
-# any agent definition, the routing rule, or the validator itself is touched. Nothing
-# read harness config at all before this; that is how a stale `model: haiku` pin sat in
+# Harness routing (18.4) — no Haiku pin on a delegated agent, and any `model:` pin
+# carries a `# reason:` comment in its frontmatter (the table-sync assertions were
+# dropped 2026-08-28 with the assignments table itself). Runs when any agent
+# definition, the routing rule, or the validator itself is touched. Nothing read
+# harness config at all before this; that is how a stale `model: haiku` pin sat in
 # the tree contradicting the rule until a manual sweep found it.
 if echo "$STAGED" | grep -qE '(\.claude/agents/|\.claude/rules/model-routing\.md|tools/validate/check_harness_routing\.py)'; then
   run_check "harness routing"      "tools/validate/check_harness_routing.py --root $REPO_ROOT"

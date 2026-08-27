@@ -8454,7 +8454,8 @@ Filed 2026-08-28 from the 2026-08-27 process meta-review (machine-level,
 Once `check_audit_freshness.py`'s 7-day or 40-commit threshold trips, every concurrent
 session gets the identical "sweep due" nudge at SessionStart. There is no in-progress
 marker, and the clock resets only when a report file lands in `docs/audit/` -- so two
-sessions obeying the nudge launch two ~14-agent sweeps and race to save
+sessions obeying the nudge launch two multi-agent sweeps (7 finders external, 15 full,
+plus synthesis -- see `.claude/workflows/repo-audit.js`) and race to save
 `docs/audit/<same-date>-<scope>.md`. This is a concrete mechanism for concurrent
 sessions duplicating and fighting over process work.
 

@@ -1,4 +1,4 @@
-<!-- currency: claude-harness — 2026-08 (Claude 5 family: Fable 5 / Opus 5 / Sonnet 5; Haiku 4.5; 2026-08-27: assignments table dropped in favour of frontmatter-with-reason — see docs/backlog.md and the check_harness_routing.py docstring for the history) -->
+<!-- currency: claude-harness — 2026-08 (Claude 5 family: Fable 5 / Opus 5 / Sonnet 5; Haiku 4.5; 2026-08-28: assignments table dropped in favour of frontmatter-with-reason — see docs/backlog.md and the check_harness_routing.py docstring for the history) -->
 
 # Model and Effort Routing
 
@@ -21,7 +21,7 @@ corrected 2026-08-27). Requirements below; machinery in the dated inventory.
   `.claude/agents/*.md` frontmatter are the single source of truth. The former
   "Current assignments" table here was a second hand-maintained copy of the
   frontmatter plus a validator rule to keep the copies equal — double bookkeeping,
-  and a merge-conflict funnel for concurrent sessions. Dropped 2026-08-27.
+  and a merge-conflict funnel for concurrent sessions. Dropped 2026-08-28.
 - **Classify by work shape, then reach for the effort dial — not a model name**
   (finding 18.5: rules that name models go stale on every lineup change; rules that
   name work shapes do not). *Mechanical* (prescribed steps, verifiable output:
@@ -30,14 +30,14 @@ corrected 2026-08-27). Requirements below; machinery in the dated inventory.
   inherit at `effort: high`→`max`. Never downgrade a gate; an independent reviewer
   that reasons less than the author is worse than no reviewer.
 - **A `model:` pin needs a reason the effort dial cannot serve, written beside it**
-  as a `# reason:` comment inside the frontmatter block (enforced by
-  `tools/validate/check_harness_routing.py`). `repo-publisher`'s pin is the worked
-  example: its risk is a *partial publish* from a long prescribed sequence, not
-  shallow reasoning — capability headroom buys nothing there.
+  as a `# reason:` comment inside the frontmatter block — its own line or inline on
+  the pin (enforced by `tools/validate/check_harness_routing.py`). `repo-publisher`'s
+  pin is the worked example: its risk is a *partial publish* from a long prescribed
+  sequence, not shallow reasoning — capability headroom buys nothing there.
 - **No Haiku pin for delegated work** (enforced by the same validator). The
-  subagent-driven-development policy rejects it outright, and the cheapest tier
-  forfeits the effort dial rather than erroring, so the saving cannot be recovered
-  as effort afterwards.
+  subagent-driven-development policy rejects it outright; the governing policy in
+  `~/.claude/CLAUDE.md` and the dated inventory record why the cheap tier cannot be
+  reached through the effort dial instead.
 - **A read-only agent declares `tools:`.** A description that says "read-only"
   without a grant is a comment, not a control (finding 18.6: two pure reporters
   declared no grant, so nothing but the prompt stopped them editing the repo they

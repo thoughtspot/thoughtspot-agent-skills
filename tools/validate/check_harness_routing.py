@@ -11,14 +11,23 @@ agent. The reviewable justification now lives beside the pin itself.
 What this asserts, per agent under `.claude/agents/`:
 
 1. **No Haiku pin.** `model-routing.md` records that the subagent-driven-development
-   policy rejects Haiku for delegated work, and that the cheapest tier forfeits the
-   effort dial rather than erroring — so the saving cannot be recovered as effort.
-   This exact regression shipped once and sat unnoticed until a manual sweep
-   (2026-08-26 audit, finding 18.3/18.4).
+   policy rejects Haiku for delegated work (the governing policy in
+   `~/.claude/CLAUDE.md` records why). This exact regression shipped once and sat
+   unnoticed until a manual sweep (2026-08-26 audit, finding 18.3/18.4). Inline
+   frontmatter comments are stripped before the comparison, so `model: haiku  # x`
+   cannot slip past (a fixture-verified evasion in this validator's first rewrite,
+   caught by refute review 2026-08-28).
 2. **A `model:` pin carries its reason.** The rule: a pin "needs a reason the effort
    dial cannot serve". Mechanically: a frontmatter `model:` value other than
-   `inherit` requires a `# reason:` comment line inside the same frontmatter block,
-   so the justification is reviewable where the pin is and travels with it.
+   `inherit` requires a `# reason:` comment inside the same frontmatter block — its
+   own line or inline on the pin — so the justification is reviewable where the pin
+   is and travels with it. Deliberate looseness, admitted: the comment may sit
+   anywhere in the frontmatter and is not checked for being ABOUT the pin; at the
+   current agent count that is a review job, not a parse job.
+
+Deliberately NOT asserted: `effort:` values. The harness schema-validates agent
+frontmatter itself, and with the assignments table gone there is no second copy for
+an effort value to disagree with.
 
 The rule file itself must exist — the requirements these checks enforce are stated
 there, and a validator pointing at a deleted rule is enforcing prose nobody can read.
@@ -44,7 +53,7 @@ ROUTING_RULE = ".claude/rules/model-routing.md"
 FORBIDDEN_MODEL_PINS = {"haiku"}
 
 _FM_KEY_RE = re.compile(r"^(?P<key>[a-zA-Z_]+)\s*:\s*(?P<value>.*?)\s*$")
-_REASON_RE = re.compile(r"^\s*#\s*reason\s*:", re.IGNORECASE)
+_REASON_RE = re.compile(r"#\s*reason\s*:", re.IGNORECASE)  # own line or inline
 
 
 def frontmatter_lines(path: Path) -> list[str]:
@@ -72,7 +81,9 @@ def parse_frontmatter(block: list[str]) -> dict[str, str]:
             continue
         m = _FM_KEY_RE.match(line)
         if m:
-            out[m.group("key")] = m.group("value")
+            # YAML treats ` #` as a comment; strip it or `model: haiku  # x`
+            # evades the forbidden-pin comparison (refute review, 2026-08-28).
+            out[m.group("key")] = m.group("value").split(" #", 1)[0].strip()
     return out
 
 
@@ -91,15 +102,14 @@ def check(root: Path) -> list[str]:
         block = frontmatter_lines(agent_file)
         fm = parse_frontmatter(block)
         model = (fm.get("model") or "").strip().strip("\"'").lower()
-        has_reason = any(_REASON_RE.match(ln) for ln in block)
+        has_reason = any(_REASON_RE.search(ln) for ln in block)
 
         if model in FORBIDDEN_MODEL_PINS:
             failures.append(
                 f"{name}: `model: {model}` is forbidden for a delegated agent. "
                 f"{ROUTING_RULE} records that the subagent-driven-development policy "
-                f"rejects Haiku for delegated work, and that Haiku forfeits the effort "
-                f"dial rather than being an alternative route to the same saving. Use "
-                f"`effort: low` on the session model instead."
+                f"rejects Haiku for delegated work (~/.claude/CLAUDE.md records why). "
+                f"Use `effort: low` on the session model instead."
             )
 
         if model and model != "inherit" and not has_reason:
@@ -129,7 +139,7 @@ def main() -> int:
             print(f"  {agent_file.stem}: model={fm.get('model', '(inherit)')} "
                   f"effort={fm.get('effort', '(session)')} "
                   f"tools={'yes' if fm.get('tools') else 'no'} "
-                  f"reason={'yes' if any(_REASON_RE.match(ln) for ln in block) else 'no'}")
+                  f"reason={'yes' if any(_REASON_RE.search(ln) for ln in block) else 'no'}")
 
     if failures:
         print("FAIL  harness routing — agent pins violate model-routing.md's requirements:")
