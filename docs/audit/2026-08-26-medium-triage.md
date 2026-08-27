@@ -56,7 +56,7 @@ Ordered by consequence, not by id.
 | # | Blocker |
 |---|---|
 | **13.24** | Needs a live 2026.x workbook built on a Tableau Semantics semantic model. The cheap interim (detect-and-warn on an unrecognised published-datasource class, so a run doesn't silently yield an empty join set) **is** doable and moves to bucket A if wanted. |
-| **7.1** | Repo-admin change: branch protection requires only `validate`, so a red `pytest-matrix` on 3.10/3.14 **cannot block a merge**. Confirmed today: required contexts are `["validate"]`. Either add the four matrix legs or fold the matrix into `validate`. Needs someone with settings access. |
+| **7.1** | ✅ **CLOSED 2026-08-27 — and it needed no settings access after all.** `validate` is now an *aggregate* job (`needs: [suite, pytest-matrix]`) that fails unless both succeeded, so the existing single required context covers the matrix. Aggregating beat adding the four legs to the required-checks list: it keeps interpreter versions out of a settings page where the next support-range bump would silently reopen the hole. The original blocker read: repo-admin change: branch protection requires only `validate`, so a red `pytest-matrix` on 3.10/3.14 **cannot block a merge**. Confirmed today: required contexts are `["validate"]`. Either add the four matrix legs or fold the matrix into `validate`. Needs someone with settings access. |
 | **18.1** | The audit workflow's own premise is broken — every finder is told to use WebSearch/WebFetch/SpotterCode, none of which is in `permissions.allow`, so a 7- or 14-agent sweep blocks on interactive prompts. The fix is a **shared** allow-list widening (web domains + MCP tools), which is a policy call rather than a mechanical edit. |
 
 ## Recommended order

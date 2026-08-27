@@ -437,7 +437,8 @@ def generate_catalog(repo_root: Path) -> str:
     lines.append("")
 
     # Enforcement model section (audit finding 7.3; CI-hard since 2026-07 — see
-    # branch protection on main: enforce_admins=true, required check `validate`,
+    # branch protection on main: enforce_admins=true, required check `validate`
+    # (an aggregate job gating `suite` + `pytest-matrix` — see the note emitted below),
     # strict up-to-date, 1 review with a maintainer bypass allowance)
     lines.extend([
         "## Enforcement model",
@@ -452,6 +453,17 @@ def generate_catalog(repo_root: Path) -> str:
         "the branch to be up to date with `main` (strict), and applies to admins too (`enforce_admins`); "
         "`--admin` merges do NOT bypass it | "
         "The backstop that catches `--no-verify` commits and machines without local tooling |",
+        "",
+        "**`validate` is an aggregate gate, not a job that runs anything.** It declares "
+        "`needs: [suite, pytest-matrix]` and fails unless both succeeded. `suite` is the "
+        "full validator/linter/test run on 3.12; `pytest-matrix` re-runs the unit and "
+        "validator tests on 3.10/3.11/3.13/3.14. Before this indirection the required "
+        "context *was* the single-interpreter job, so a red matrix leg reported a failure "
+        "that could not block a merge (audit finding 7.1). Aggregating rather than adding "
+        "the four legs to the required-checks list keeps interpreter versions out of the "
+        "branch-protection settings, where a support-range bump would silently reopen the "
+        "hole. **Adding a job to this workflow does not gate it — add it to `validate`\u2019s "
+        "`needs:` as well.**",
         "",
         "The one soft edge: the 1-review requirement carries a bypass allowance for the "
         "maintainer, so the maintainer's own merges need green CI but not a second "

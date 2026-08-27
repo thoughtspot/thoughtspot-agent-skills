@@ -5,6 +5,21 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-08-27
+
+### Changed
+
+- **`validate` is now an aggregate CI gate, so the Python matrix can actually block a
+  merge (audit finding 7.1).** Branch protection requires exactly one status check on
+  `main`, and that context used to be the single-interpreter job — so `pytest-matrix`
+  (3.10/3.11/3.13/3.14) reported failures that could not stop anything. The heavy job is
+  renamed `suite`; a new `validate` job declares `needs: [suite, pytest-matrix]` and fails
+  unless both succeeded. No branch-protection change was needed, which is the point:
+  adding the four legs to the required-checks list would bake interpreter versions into a
+  settings page, where the next `requires-python` bump would silently reopen the hole.
+  **Adding a job to `validate.yml` no longer gates it — add it to `validate`'s `needs:`
+  too**, a rule now stated in `docs/quality-gates.md`.
+
 ## 2026-08-26
 
 ### Added
