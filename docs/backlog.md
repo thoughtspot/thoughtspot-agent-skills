@@ -94,6 +94,10 @@ are roughly ordered by value÷effort.
 | BL-215 | No validator for a custom calendar CSV; the reference file everyone copies is itself wrong in 99% of rows | next client calendar review |
 | BL-217 | Converter helper adoption uneven (pass-throughs, name collisions, I3); nothing detects a converter that skips one | before the next converter |
 | BL-218 | 3 `--name-status` git call sites still parse quoted paths — same fail-open as BL-217's sibling, needs a status-pairing parser | with the next validator pass |
+| BL-219 | Tableau relationships on any operator but `=` are dropped entirely; the "no range joins" premise is false | next Tableau pass |
+| BL-220 | Gate the hardcoded `thoughtspot-profiles.json` path out of SKILL.md — the enforcement half of BL-084's adoption pass | after BL-084's adoption pass |
+| BL-221 | Qlik/PowerBI/Sisense hand-walk a transitive formula cascade that `commands/tableau.py` already codifies | with BL-217 part 2 |
+| BL-222 | `check_patterns` Check 8 scans SKILL.md only — a `references/` file imports six internal modules unchecked | next validator pass |
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
@@ -140,6 +144,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-193 | Worktree `git commit` runs the MAIN checkout's pre-commit script — local gates are the wrong branch's | opportunistic |
+| BL-223 | Seven `ts snowflake` subcommands never invoked by a test; `exec` is uncovered in CI entirely | next `commands/snowflake.py` change |
 | BL-177 | Reverse legs synthesise names that were already available | opportunistic |
 | BL-190 | Re-run the TML census: `--fqn --include-obj-id` (evidence NM1/X8) + a second cluster (T3) | next census session |
 | BL-173 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
@@ -1380,6 +1385,20 @@ or delete them as part of this item.
 2. Replace the tautological to-databricks assertion with a real parse/round-trip check.
 3. Wire or remove the orphaned report smoke test; refresh the smoke README table; fix the stale header.
 
+**Note (2026-08-26 full audit finding 11.5) — `ts tml export-corpus` is now the last
+straggler of its sweep.** Every other item from the 2026-06-29 codification sweep has
+shipped; this one has not, and `commands/tml.py` still exposes only
+export / import / lint / verify-render. Meanwhile the consuming skill has grown into the
+argument for it: `ts-object-model-coach/SKILL.md:470-553` is ~85 lines of inline Python the
+executor must reproduce faithfully **every run** — model enumeration with two header-field
+exclusions, a `~/.cache/…/tml-corpus` cache keyed on `{guid}-{modified}` with glob-unlink
+eviction, a second `forbidden.json` cache with a 24h TTL in epoch-ms, a
+`ThreadPoolExecutor(max_workers=4)` fan-out, per-future stderr classification by substring
+match on "FORBIDDEN" / "UNAUTHORIZED", and progress printing every 25 completions. Every one
+of those has a wrong-but-plausible variant and none of them is a judgment call. Promote it
+out of "implement when the consuming skills are next touched": being the only survivor of
+its sweep is itself the case for doing it on its own.
+
 **Target:** 2026-10-31.
 
 ---
@@ -2600,6 +2619,23 @@ step the Critical TML invariants exist to protect). Candidates: `ts model mine-l
 `ts model validate-synonyms`, `ts model patch-model` (or `ts tml patch-model`),
 `ts model cross-consistency-scan`.
 
+**Note (2026-08-26 full audit finding 5.4) — two of the skill's largest deterministic
+blocks are missing from the list above.** The skill carries 521 lines of inline Python
+across 19 blocks (~5x any other CLI skill), and the enumeration above omits its two
+biggest:
+
+- **Step 6.5 column-metadata probe (~78 lines)** — a compiled PII regex, an
+  `APPROX_COUNT_DISTINCT` assembler, a four-tier cardinality classifier with hard
+  thresholds, filter/group_by usage inference with a cardinality fallback, and a
+  `VALUE_FORMAT_PATTERNS` regex table. Candidate: `ts model probe-columns`.
+- **Hierarchy detection (~60 lines)** — prefix-grouping display names, then ordering by
+  cardinality to derive drill paths. Candidate: `ts model detect-hierarchies`.
+
+Every step in both is a fixed rule rather than a judgment call, and both are the same shape
+as work this item already accepts. Recorded here so the next sweep does not rediscover them
+as new findings. (The corpus-scan half of this item's list is tracked separately under
+BL-034 — see the 2026-08-26 note there.)
+
 **Target:** 2026-11-30.
 
 ---
@@ -2983,6 +3019,17 @@ wrong. Decide TS Parameter ↔ MV parameter translation both directions and live
 on an 18.2 SQL warehouse. Doc corrections already shipped in the 2026-07-11 mapping
 batch (PR #213); this is the parser/emitter half. Companion to finding 13.1.
 
+**Note (2026-08-26 full audit finding 13.18) — the parameter surface is wider than the
+`parameters:` block.** A window measure's `range` or `offset` can now itself be an integer
+parameter, so a caller passes the window size in at query time (feature matrix, Runtime
+**18.2** row — the same runtime this item already needs a warehouse on). The repo does not
+model this at all: the Parameters section documents parameters only as bare-word refs inside
+a measure or dimension `expr`. It matters in both directions, and most in the from-direction
+this item owns: a ThoughtSpot Parameter driving a rolling-window length ("last N days") is a
+very common Model shape that currently lands in the Unmapped Report, and this is its native
+equivalent. Fold it into this item's live-verification pass rather than filing separately —
+it needs the same 18.2 warehouse.
+
 **Target:** no fixed date — next Databricks-from touch, paired with the 13.1 companion work.
 
 ---
@@ -3361,6 +3408,20 @@ has zero `agents/cli/*/SKILL.md` adopters (15 skills still inline divergent prof
 reads) — is tracked under **BL-084** rather than duplicated here, since that reference
 was filed as BL-084's own PR1 and BL-084 already anticipated this exact adoption pass
 (its 2026-07-11 note). See BL-084 for the adopter list and target date.
+
+**Note (2026-08-26 full audit finding 11.3) — item 11.4's tables reference is still
+unwritten, and the picture is worse than "duplicated".** The ~40-line "do these tables
+already exist? + search scope" procedure is triplicated near-verbatim — down to the example
+connection name — across from-tableau, from-databricks-mv and from-snowflake-sv, and
+Tableau's own text admits the copy. The copies have already **diverged where it matters**:
+Tableau offers **E/G/N/?** with a GUID fast path and a multi-workbook dedup warning; the
+other two offer **Y/N/?** with neither, so Tableau's enrichment never propagated. More
+consequential, the scope prompt is **absent from the other four converters** — from-looker
+searches by name only, and qlik / powerbi / sisense never call `ts metadata search` at all —
+so a second migration against the same warehouse tables **silently creates duplicates**,
+which is precisely the failure Tableau's dedup note exists to prevent. Write the reference
+(Tableau's is the version to lift, being the enriched one) and adopt it in all seven
+converters; the four with no prompt at all are the priority half.
 
 **Target:** extract shared references when next editing the conversion skills.
 
@@ -8050,3 +8111,177 @@ three entries from `_GIT_ENUM_ALLOWLIST` in `check_patterns.py` so the guard cov
 whole directory with no exceptions.
 
 Raised 2026-08-26 from the full-sweep fix for finding 4.2.
+
+---
+
+## BL-219 -- a Tableau relationship on any operator but `=` is dropped entirely, and the false premise that made that look correct `Tier 2`
+
+`tableau-tml-rules.md:272` says "Tableau does not support range joins natively". Both
+halves of Tableau's join surface contradict it: physical joins support non-equi operators
+(`<`, `<>`), and logical relationships let you "specify how fields should be compared by
+using operators". ThoughtSpot *does* support inequality joins, and the same rules file
+documents the range-join `on:` form — so the correct translation already exists on both
+sides. Only the premise blocks it.
+
+The premise propagated into the parser. `_extract_noodle_joins` (`tableau/twb.py:682`)
+does `rel.find("./expression[@op='=']")` and `continue`s when that returns None, so a
+relationship built on any other operator is **dropped entirely** — not partially
+translated, not logged, dropped. That produces exactly the "multi-table model imports
+with no join" outcome the function's own comment warns about. `_extract_joins`
+(`:611-640`) never captures the clause operator at all, so a non-equi *physical* join
+cannot round-trip either even once the drop is fixed. No test exercises the operator in
+either function.
+
+**Why it matters.** This is silent under-conversion on the structural half of the model.
+Nothing is rejected at import, so no `⊘ Not migrated` row appears in the migration report
+— the report cannot show a gap it never detected — and the user is handed a Model whose
+joins are simply absent. The fail-loud contract the Tableau mapping file states for
+*functions* has no equivalent for *joins*.
+
+**Approach.** Three parts, and the first two are much cheaper than the third:
+
+1. Correct the claim at `tableau-tml-rules.md:272` and re-date it.
+2. **Make the drop loud.** Capture the operator in both extractors and, when it is not
+   `=`, route it through the converter's existing unmapped/warnings channel instead of
+   `continue`. On its own this converts a silent wrong answer into a reported gap, and it
+   is worth landing independently of (3).
+3. Map Tableau's relationship operator set (`=`, `<>`, `<`, `<=`, `>`, `>=`) onto the
+   ThoughtSpot `on:` expression the rules file already documents for range joins, with a
+   test per operator. This is the part that needs a design rather than a patch, and it is
+   why this is an item and not a one-line fix.
+
+**Park note.** The Tableau converter was parked 2026-07-23. Steps 1–2 are small enough to
+fold into any Tableau touch; step 3 waits for the next real Tableau pass.
+
+Raised 2026-08-26 from the full audit (finding 13.23).
+
+---
+
+## BL-220 -- nothing stops a SKILL.md hardcoding `~/.claude/thoughtspot-profiles.json`, which is the wrong path for half the runtime `agents/cli/` serves `Tier 2`
+
+`ts profiles list --json` ships with credentials stripped, and
+`agents/shared/references/profile-select-and-authenticate.md` documents the canonical flow
+against it. Adoption split along a line nobody drew on purpose: five converter skills call
+the CLI; fifteen other `agents/cli/*/SKILL.md` files open
+`~/.claude/thoughtspot-profiles.json` by hand, and the shared reference has **zero**
+adopters anywhere under `agents/cli/`.
+
+**Why it matters.** Two costs, and the second is what makes this more than duplication.
+The hand-rolled blocks have already drifted — a numbered menu in one, "ask which to use"
+in another, a single line in a third, and one that skips the missing-file branch entirely
+— so the same decision behaves differently depending on which skill the user happened to
+start. And `agents/cli/` serves **Cortex Code CLI** as well as Claude Code, where
+`~/.claude/` is not the profile home: the hardcoded path is a Claude-only assumption
+sitting in a deliberately shared runtime.
+
+**Relationship to BL-084 — read before starting.** The 15-skill adoption pass is BL-084's
+and its adopter list lives there; this item does **not** duplicate that list, because
+BL-084 and BL-122 already had to correct each other once over exactly this finding's
+ancestor. What is new here is the **enforcement half**. The finding has been open since
+2026-07-29 with no gate behind it, which is precisely how it stayed unmoved.
+
+**Approach**, in this order:
+
+1. Run BL-084's adoption pass, so the baseline can go green.
+2. Then add the check: ban the literal `thoughtspot-profiles.json` in any
+   `agents/cli/*/SKILL.md` outside `ts-profile-*`, which legitimately owns the file. A
+   `check_patterns` rule is the natural home.
+
+The ordering is the whole point. Landing the gate first would mean shipping it with 15
+exemptions — the state the gate exists to end. Same sequence BL-217 used, for the same
+reason.
+
+Raised 2026-08-26 from the full audit (finding 11.2); first filed 2026-07-29 and unmoved
+since.
+
+---
+
+## BL-221 -- three converters ask an LLM to walk a transitive cascade that is codified next door `Tier 2`
+
+`commands/tableau.py` codifies the drop-rejected-formula path: `_collect_cascade_victims`
+finds every column that depends on a rejected formula and `_import_with_retry` re-imports,
+bounded by `max_retries`. Qlik, PowerBI and Sisense have none of it — grepping
+`prune|rejected|max_retries|retry` in `commands/qlik.py`, `powerbi.py` and `sisense.py`
+returns zero hits in all three — and yet all three SKILL.md files instruct the executor to
+run the identical loop by hand: drop the rejected formula *and any column that depends on
+it*, then re-import.
+
+**Why it matters.** "Any column that depends on it" is a **transitive closure**. The
+codified version walks it (`tableau/model_builder.py:726`, commented "Transitive
+cascade"); an LLM eyeballing a formula list reliably gets the one-hop case and misses the
+second hop, leaving a dangling `formula_id` — the same failure BL-217 describes for the
+name-collision case, reached from the other direction. Worse, this is a step the skill
+prescribes on the **error** path: it runs exactly when the migration is already going
+wrong, and is the least likely moment for anyone to check the closure by hand.
+
+Secondary signal for the same root cause: five independent cascade implementations now
+exist under `ts_cli`, none shared.
+
+**Approach.** Extract one cascade+retry helper — closure walk plus bounded re-import —
+adopt it in the three converter commands, then replace the hand-instruction in the three
+SKILL.md files with the command. Sequence it with **BL-217 part 2**: same converters, same
+"a shared helper exists and adoption is uneven" shape, and `check_converter_parity.py` is
+where the resulting invariant belongs so a fourth converter cannot skip it.
+
+Raised 2026-08-26 from the full audit (finding 11.4). First filed 2026-07-29, re-verified
+fully open, and the converter count has grown since.
+
+---
+
+## BL-222 -- `check_patterns` Check 8 scans SKILL.md only, so a `references/` file may import anything it likes `Tier 2`
+
+Check 8 bans `from ts_cli …` in a SKILL.md, and its own comment states the limit:
+"references/ is carved out automatically — only SKILL.md files are scanned."
+`agents/cli/ts-migrate-orgs/references/running-a-migration.md:304-336` walks straight
+through that carve-out with **six internal imports across five modules** (`ts_cli.client`,
+`ts_cli.migrate`, `migrate.apply_plan` — seven names — `migrate.mapping`,
+`migrate.rewrite`) plus `apply_exec.Ctx` / `RUNNERS` attribute access.
+
+**Why it matters.** A `references/` file is loaded and followed exactly like SKILL.md
+prose, so the gate's *scope*, not its rule, is what lets this pass. All twelve names bind
+today — which is the point rather than the reassurance: `migrate.apply_plan` is the exact
+module whose deleted `STEP_LIFT_*` constants produced finding **17.1** of this same audit.
+`check_internal_imports.py`, written in response to 17.1, walks only
+`tools/ts-cli/ts_cli/` — so nothing in the repo checks internal names cited in skill
+documentation, in either file type.
+
+**Approach.** Extend Check 8's file set to `references/**.md`. The migrate-orgs block then
+needs the treatment SKILL.md blocks get: a `ts` command that covers it, or an explicit
+allowlist entry carrying a removal condition.
+
+**Companion, same root — do it in the same pass.** Check 8's allowlist entry for
+`ts-object-model-aggregates` is still live and its removal condition is **unmet**: it was
+written against `ts aggregate preview-names` / `widen-rls` shipping, neither has, and the
+SKILL.md still imports a private `_aggregate_name`. An allowlist entry whose exit
+condition never arrives is a permanent exemption wearing a temporary label, and it should
+either be honoured or re-justified.
+
+Raised 2026-08-26 from the full audit (finding 11.6).
+
+---
+
+## BL-223 -- seven `ts snowflake` subcommands are never invoked by a test, and `exec` is uncovered in CI entirely `Tier 3`
+
+`commands/snowflake.py` (856 lines) registers eight subcommands. Tests invoke exactly one:
+`build-model`, three times. `diff`, `lint-ddl`, `exec`, `parse-sv`, `translate-formulas`,
+`introspect` and `build-sv` are never invoked through the app.
+
+**Why it matters.** The pure cores are well covered, so what is missing is specifically the
+**adapter layer** — flag parsing, file I/O, exit paths, and the stdout-JSON /
+stderr-diagnostics convention `.claude/rules/ts-cli.md` requires of every command.
+`_resolve_exec_sql`, `_resolve_exec_vars`, `_exec_python`, `_exec_cli`, `_read_json_file`
+and `_build_model_summary` return **zero** grep hits in `tools/ts-cli/tests/` or
+`tools/smoke-tests/`. `_resolve_exec_sql` alone owns three-way input resolution
+(`--file` / `--query` / stdin) plus three distinct `SystemExit` messages, none of which any
+test has ever taken.
+
+`ts snowflake exec` is the sharp end: both `ts-recipe-formula-*-snowflake` skills invoke it
+at runtime, and its only coverage is two Snowflake-credentialed live smoke tests that never
+run in CI. **On CI the command is entirely uncovered.**
+
+**Approach.** CLI-invocation tests for the adapter layer through the typer runner, starting
+with `_resolve_exec_sql`'s three error paths — cheapest to write and the most user-facing.
+No live warehouse needed, and none permitted: `.claude/rules/ts-cli.md` already requires
+ts-cli tests to run without a connection, so mock at the connector boundary.
+
+Raised 2026-08-26 from the full audit (finding 6.6).

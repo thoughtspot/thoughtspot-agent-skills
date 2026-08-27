@@ -35,15 +35,15 @@ Ordered by consequence, not by id.
 
 | # | Why not now | Proposed |
 |---|---|---|
-| **13.23** | Behavioural parser change plus tests: `_extract_noodle_joins` drops any non-`=` relationship entirely, `_extract_joins` never captures the operator, and **no test exercises it**. Needs an operator-mapping design, not a patch. | new BL |
-| **11.2** | 15 skills open `~/.claude/thoughtspot-profiles.json` by hand, and `agents/cli/` also serves Cortex Code CLI where that path is wrong. Green-baseline validator + 15 edits. | new BL |
-| **11.3** | The missing shared reference must be *written*, then adopted in 7 converters; four have no scope prompt at all, so a second migration **silently creates duplicates**. | extend BL-122 |
-| **11.4** | Five independent cascade implementations; extracting one shared helper touches three converter commands. Transitive closure is the part an LLM gets wrong. | extend BL-161 or new BL |
-| **11.5** | Build `ts tml export-corpus --cache-dir` — the last straggler from the 2026-06-29 sweep (everything else shipped). | BL-034 |
-| **11.6** | Extend `check_patterns` Check 8 to `references/**.md` (six internal imports live through the carve-out today), and re-examine a live allowlist entry whose removal condition is unmet. | new BL |
-| **5.4** | Two large deterministic blocks (~138 lines) belong in BL-086's substrate list: `ts model probe-columns`, `ts model detect-hierarchies`. | fold into BL-086 |
-| **6.6** | Adapter-layer tests for seven never-invoked `ts snowflake` subcommands; `exec` is entirely uncovered in CI. | new BL |
-| **13.18** | Parameterised `range`/`offset` (18.2) is the native equivalent of "last N days" — fold into the deferred parameter-emission work. | fold into BL-031/13.2 work |
+| **13.23** | ✅ **FILED (BL-219).** Behavioural parser change plus tests: `_extract_noodle_joins` drops any non-`=` relationship entirely, `_extract_joins` never captures the operator, and **no test exercises it**. Needs an operator-mapping design, not a patch. | new BL |
+| **11.2** | ✅ **FILED (BL-220).** 15 skills open `~/.claude/thoughtspot-profiles.json` by hand, and `agents/cli/` also serves Cortex Code CLI where that path is wrong. Green-baseline validator + 15 edits. | new BL |
+| **11.3** | ✅ **FILED (BL-122 note).** The missing shared reference must be *written*, then adopted in 7 converters; four have no scope prompt at all, so a second migration **silently creates duplicates**. | extend BL-122 |
+| **11.4** | ✅ **FILED (BL-221).** Five independent cascade implementations; extracting one shared helper touches three converter commands. Transitive closure is the part an LLM gets wrong. | ~~extend BL-161 or new BL~~ -> BL-221 |
+| **11.5** | ✅ **FILED (BL-034 note).** Build `ts tml export-corpus --cache-dir` — the last straggler from the 2026-06-29 sweep (everything else shipped). | BL-034 |
+| **11.6** | ✅ **FILED (BL-222).** Extend `check_patterns` Check 8 to `references/**.md` (six internal imports live through the carve-out today), and re-examine a live allowlist entry whose removal condition is unmet. | new BL |
+| **5.4** | ✅ **FILED (BL-086 note).** Two large deterministic blocks (~138 lines) belong in BL-086's substrate list: `ts model probe-columns`, `ts model detect-hierarchies`. | fold into BL-086 |
+| **6.6** | ✅ **FILED (BL-223).** Adapter-layer tests for seven never-invoked `ts snowflake` subcommands; `exec` is entirely uncovered in CI. | new BL |
+| **13.18** | ✅ **FILED (BL-102 note).** Parameterised `range`/`offset` (18.2) is the native equivalent of "last N days" — fold into the deferred parameter-emission work. | ~~fold into BL-031/13.2 work~~ -> BL-102, which already owns the 18.2 live-verify |
 
 ## Bucket C — blocked on something I don't have
 
@@ -60,4 +60,6 @@ Ordered by consequence, not by id.
 3. **The Tableau census cluster** (13.22/13.25/13.26) — one file, one module, three findings.
 4. **The validator promotions** (4.3, 18.4, 13.19, 18.2's gate, 14.6's) — each stops a class recurring.
 5. **The doc corrections** — cheapest, and several are self-contradictions that mislead a reader today.
-6. **File bucket B as dated BL items** before starting any of it, so nothing depends on this document surviving.
+6. ✅ **DONE.** **File bucket B as dated BL items** before starting any of it, so nothing
+   depends on this document surviving — BL-219..BL-223 filed, plus notes folded into
+   BL-034 / BL-086 / BL-102 / BL-122 (2026-08-27).
