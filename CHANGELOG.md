@@ -6,6 +6,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-08-28
+- fix: `ts profiles add/update` refuse a profile name whose slug is empty or already
+  taken — the slug names the credential, so two names sharing one meant two
+  profiles sharing one token. chore: bump ts-cli to v0.135.0
 - fix: `ts profiles add/update` refuse a literal credential via `--field` and no longer
   echo one; `_strip_credentials` was inverted (it stripped env-var *names*, kept secret
   *values*). chore: bump ts-cli to v0.134.0

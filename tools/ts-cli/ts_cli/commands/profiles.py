@@ -10,6 +10,7 @@ import typer
 from ts_cli.client import PROFILES_PATH, load_profiles
 from ts_cli.profile_ops import (
     PROFILE_PATHS,
+    SlugCollisionError,
     add_profile as ops_add_profile,
     derive_env_var,
     derive_keychain_service,
@@ -369,7 +370,11 @@ def add_cmd(
             method = "darwin" if system == "darwin" else "linux"
             zshenv = zshenv_export_line(env_var, service, account, method)
 
-    ops_add_profile(platform, profile)
+    try:
+        ops_add_profile(platform, profile)
+    except SlugCollisionError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
 
     output = {
         "profile": _strip_secret_values(profile),
@@ -416,7 +421,11 @@ def update_cmd(
     _reject_secret_fields(updates)
     existing.update(updates)
 
-    ops_add_profile(platform, existing)
+    try:
+        ops_add_profile(platform, existing)
+    except SlugCollisionError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
     typer.echo(json.dumps({"profile": _strip_secret_values(existing)}, indent=2))
 
 
