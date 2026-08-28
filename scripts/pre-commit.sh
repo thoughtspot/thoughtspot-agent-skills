@@ -248,6 +248,18 @@ if echo "$STAGED" | grep -qE 'agents/shared/(mappings/|schemas/thoughtspot-formu
   run_check "formula catalog"     "tools/validate/check_formula_catalog.py --root $REPO_ROOT"
 fi
 
+# Mapping/code sync — the mapping doc and its Python translator are two hand-kept
+# copies of one ruleset, and until this gate nothing compared them: check_formula_catalog
+# reads only *.md, check_mirror_sync compares only version markers. sv_sql.py emitted the
+# six BL-171 functions for three CLI versions AFTER the doc rows were corrected.
+#
+# Triggered by the UNION of both sides' patterns, because either side can drift alone:
+# the translator Python, the mapping docs, the catalog itself, a converter skill (scope
+# is discovered from agents/cli/ts-convert-*), or this validator.
+if echo "$STAGED" | grep -qE '(tools/ts-cli/ts_cli/|agents/shared/(mappings/|schemas/thoughtspot-formula-patterns\.md)|agents/cli/ts-convert-|tools/validate/check_mapping_code_sync\.py)'; then
+  run_check "mapping/code sync"   "tools/validate/check_mapping_code_sync.py --root $REPO_ROOT"
+fi
+
 # No v1 endpoints — the repo is v1-free (.claude/rules/ts-cli.md). Guard against a
 # new /tspublic/v1/ call slipping into the CLI or Databricks client. Runs when any
 # Python source under tools/ or agents/ is staged, or the validator itself changes.

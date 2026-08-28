@@ -8474,3 +8474,30 @@ tooling narratives) tax every reader of the rules file and duplicate content tha
 belongs with the dated audit reports. Move the histories to `docs/audit/` (or the
 History table's linked reports), keep the tables and requirements. No information
 is lost; it moves to where history lives.
+
+## BL-226 -- sv_sql.py translates 12 Snowflake constructs no mapping doc records, so CoCo cannot translate them `Tier 2`
+
+Filed 2026-08-28, surfaced by the new `check_mapping_code_sync.py` gate on its
+first run. The doc/code drift is not symmetric and this is the code-ahead side:
+
+`SUBSTRING`, `LPAD`, `RPAD`, `REPEAT`, `CEILING`, `DAYOFWEEK`, `DAYOFYEAR`,
+`WEEKOFYEAR`, `NVL`, `ZEROIFNULL`, `MONTHS_BETWEEN`, `LOCATE` are all translated by
+`ts_cli/sv_sql.py` (lines 243-307) and appear in **no** file under
+`agents/shared/mappings/ts-snowflake/`.
+
+Why it matters beyond tidiness: the **CoCo Snowsight runtime has no `ts` CLI and
+translates by reading those tables directly** (`agents/coco-snowsight/
+ts-convert-from-snowflake-sv/SKILL.md` marks it MANDATORY under I7). So the CLI
+handles these twelve and CoCo cannot — the two runtimes silently disagree on
+coverage, and a reviewer reading only the doc understates what the CLI does.
+
+`ZEROIFNULL` needs one extra step: it maps to `zeroifnull`, which appears in
+`thoughtspot-formula-patterns.md` **neither as valid nor as struck-through**, so it
+is unverified rather than disproved. The Databricks doc spells the same concept
+`zero_if_null` (`ts-databricks-formula-translation.md:111`), so at most one of the
+two spellings can be right. Probe it live before writing a row either way.
+
+Exit: add the twelve rows to `ts-snowflake-formula-translation.md` (bidirectional,
+matching the existing row shape), and a catalog row for the verified `zeroifnull`
+spelling. The gate keeps the count from growing meanwhile — it is a warning, not a
+block, so it cannot regress silently but will not fail a commit.
