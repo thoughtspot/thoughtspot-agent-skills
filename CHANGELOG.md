@@ -7,6 +7,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-08-28
 - docs: document 8 previously-unmapped Snowflake constructs in ts-snowflake-formula-translation.md; name the 4 whose TS target is absent from the catalog rather than asserting a row (BL-226)
+- fix: `ts profiles add/update` refuse a literal credential via `--field` and no longer
+  echo one; `_strip_credentials` was inverted (it stripped env-var *names*, kept secret
+  *values*). chore: bump ts-cli to v0.134.0
 - feat: add check_mapping_code_sync.py — gate that a translator never emits a
   disproved ThoughtSpot function, and warns when it translates a construct no
   mapping doc records (BL-217 angle 9; first run filed BL-226)
