@@ -53,6 +53,14 @@ result = subprocess.run(["security", "find-generic-password", "-s", svc, "-a", u
 print(result.stdout)  # never do this
 ```
 
+**Never pass a secret through `ts profiles --field`.** As of ts-cli 0.134.0 the CLI
+*refuses* it, and `list`/`add`/`update` strip both credential pointers and literal
+secret values from their output. Before that, `--field token=…` wrote the secret to
+`~/.claude/<platform>-profiles.json` at mode 0644, echoed it on stdout, and — in
+Claude Code — captured it into the conversation transcript: three copies from one
+mistake, while `_strip_credentials` removed only the *name* of the env var. The
+profile holds the pointer (`token_env`); the value lives in the OS credential store.
+
 **Use `ts auth` for ThoughtSpot API calls.** The CLI handles token caching and Keychain
 access — skill code never needs to read, store, or pass credentials directly. If you find
 yourself constructing an `Authorization: Bearer` header in skill code, stop and use the CLI.

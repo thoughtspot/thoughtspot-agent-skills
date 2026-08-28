@@ -26,15 +26,93 @@ from ts_cli.tableau.client import load_tableau_profiles, TABLEAU_PROFILES_PATH
 
 app = typer.Typer(help="Profile management commands.")
 
+# Fields that POINT AT a credential — the name of an env var, the path to a key
+# file. Stripped from `list` output for tidiness; none of them is itself a secret.
 _CREDENTIAL_FIELDS = {
     "token_env", "password_env", "secret_key_env", "secret_env",
     "pat_secret_env", "private_key_path", "private_key_passphrase_env",
 }
 
+# Fields whose VALUE is the secret itself.
+#
+# The distinction above was inverted for as long as this module existed:
+# `_strip_credentials` removed `token_env` — the *name* of an environment
+# variable, which is not sensitive — and kept `token`, the live credential. So
+# `ts profiles list --json` echoed any literal secret a profile carried, while the
+# SKILL.md files claimed credentials were stripped. Reproduced on every platform,
+# not just one.
+#
+# Names are EXACT, deliberately. A substring rule refuses real fields: `pat_name`
+# is a Tableau PAT's *name* (not its secret), and `key` appears in `primary_key`,
+# `key_pair`, `sort_key`, `keychain_service`. The suffix rule below covers names
+# nobody has thought of yet, and is guarded against the pointer suffixes so
+# `pat_secret_env` and `private_key_path` stay allowed.
+_SECRET_VALUE_FIELDS = frozenset({
+    "token", "password", "secret", "secret_key", "pat_secret",
+    "private_key", "private_key_passphrase", "api_key", "apikey",
+    "developer_token", "client_secret", "access_token", "refresh_token",
+})
+
+_SECRET_SUFFIXES = ("_token", "_password", "_secret", "_passphrase")
+_POINTER_SUFFIXES = ("_env", "_path", "_file", "_name")
+
+
+def is_secret_value_field(key: str) -> bool:
+    """True when `key`'s VALUE would be a live credential rather than a pointer."""
+    k = str(key).strip().lower()
+    if k.endswith(_POINTER_SUFFIXES):
+        return False
+    return k in _SECRET_VALUE_FIELDS or k.endswith(_SECRET_SUFFIXES)
+
 
 def _strip_credentials(profile: dict) -> dict:
-    """Return a copy of the profile with credential-related fields removed."""
-    return {k: v for k, v in profile.items() if k not in _CREDENTIAL_FIELDS}
+    """Copy of `profile` without credential pointers OR literal secret values.
+
+    Belt-and-braces: `--field token=…` is refused at parse time now, so a literal
+    should never reach disk — but profiles written before that refusal existed
+    still carry one, and this is what stops `list` echoing it.
+    """
+    return {k: v for k, v in profile.items()
+            if k not in _CREDENTIAL_FIELDS and not is_secret_value_field(k)}
+
+
+def _strip_secret_values(profile: dict) -> dict:
+    """Copy of `profile` without literal secret values, but KEEPING the pointers.
+
+    Used by `add`/`update`, whose whole job is to tell the operator which env var to
+    populate — `token_env` is the actionable half of that output and is not itself
+    sensitive. Stripping it too broke `test_add_thoughtspot_token`, correctly: the
+    first cut of this fix reused `_strip_credentials` and removed the one field the
+    caller needs. `list` still strips both, which is its pre-existing contract.
+    """
+    return {k: v for k, v in profile.items() if not is_secret_value_field(k)}
+
+
+def _reject_secret_fields(fields: dict) -> None:
+    """Refuse `--field <secret>=…` before it can be persisted or echoed.
+
+    Stripping output alone is not enough: the value still lands in
+    `~/.claude/<platform>-profiles.json` at mode 0644, and `ts profiles add`
+    echoed the whole profile to stdout — which in Claude Code means the
+    conversation transcript. `.claude/rules/security.md` forbids both outright.
+    Nothing reads these keys either: token resolution is env-var-then-keyring, so
+    the on-disk copy bought nothing it could lose.
+    """
+    offenders = sorted(k for k in fields if is_secret_value_field(k))
+    if not offenders:
+        return
+    names = ", ".join(repr(k) for k in offenders)
+    typer.echo(
+        f"Refusing --field for credential value(s): {names}.\n"
+        f"A secret passed this way is written to the profile JSON (mode 0644), "
+        f"echoed back on stdout, and — in Claude Code — captured into the "
+        f"conversation transcript. Store it in the OS credential store or an "
+        f"environment variable instead, and let the profile hold only the "
+        f"pointer (e.g. 'token_env'). Run the relevant /ts-profile-* skill for "
+        f"the exact commands.",
+        err=True,
+    )
+    raise typer.Exit(1)
 
 
 def _coerce_field_value(value: str):
@@ -207,12 +285,16 @@ def list_profiles(
     ),
     json_output: bool = typer.Option(
         False, "--json",
-        help="Output profiles as JSON (credentials stripped).",
+        help="Output profiles as JSON (credential pointers and literal secrets stripped).",
     ),
 ) -> None:
     """List configured profiles.
 
-    By default lists ThoughtSpot profiles. Credentials are never shown.
+    By default lists ThoughtSpot profiles.
+
+    Neither a credential pointer (`token_env`) nor a literal secret value (`token`)
+    is shown. The literal case is belt-and-braces: `--field token=…` is refused at
+    parse time, so a secret should never reach the file in the first place.
     """
     platform = _resolve_platform(snowflake, tableau, databricks)
 
@@ -266,6 +348,8 @@ def add_cmd(
         k, v = f.split("=", 1)
         fields[k] = _coerce_field_value(v)
 
+    _reject_secret_fields(fields)
+
     slug = slugify(name)
     service = derive_keychain_service(platform, slug)
     account = _keychain_account(platform, auth_type, fields)
@@ -288,7 +372,7 @@ def add_cmd(
     ops_add_profile(platform, profile)
 
     output = {
-        "profile": profile,
+        "profile": _strip_secret_values(profile),
         "slug": slug,
         "env_var": env_var,
         "keychain_service": service,
@@ -321,15 +405,19 @@ def update_cmd(
         typer.echo(f"Profile {name!r} not found for platform {platform!r}.", err=True)
         raise typer.Exit(1)
 
+    updates: dict[str, object] = {}
     for f in (field or []):
         if "=" not in f:
             typer.echo(f"Invalid --field format: {f!r}. Use key=value.", err=True)
             raise typer.Exit(1)
         k, v = f.split("=", 1)
-        existing[k] = _coerce_field_value(v)
+        updates[k] = _coerce_field_value(v)
+
+    _reject_secret_fields(updates)
+    existing.update(updates)
 
     ops_add_profile(platform, existing)
-    typer.echo(json.dumps({"profile": existing}, indent=2))
+    typer.echo(json.dumps({"profile": _strip_secret_values(existing)}, indent=2))
 
 
 # ---------------------------------------------------------------------------
