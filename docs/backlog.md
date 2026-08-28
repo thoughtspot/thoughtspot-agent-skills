@@ -8491,13 +8491,27 @@ ts-convert-from-snowflake-sv/SKILL.md` marks it MANDATORY under I7). So the CLI
 handles these twelve and CoCo cannot — the two runtimes silently disagree on
 coverage, and a reviewer reading only the doc understates what the CLI does.
 
-`ZEROIFNULL` needs one extra step: it maps to `zeroifnull`, which appears in
-`thoughtspot-formula-patterns.md` **neither as valid nor as struck-through**, so it
-is unverified rather than disproved. The Databricks doc spells the same concept
-`zero_if_null` (`ts-databricks-formula-translation.md:111`), so at most one of the
-two spellings can be right. Probe it live before writing a row either way.
+**Update 2026-08-28 — eight closed, four remain, and the residue is worse than
+this item first stated.** Checking each emitted TS name against the catalog rather
+than assuming, **four** of the twelve are absent from
+`thoughtspot-formula-patterns.md` — neither valid nor struck-through — not one:
 
-Exit: add the twelve rows to `ts-snowflake-formula-translation.md` (bidirectional,
-matching the existing row shape), and a catalog row for the verified `zeroifnull`
-spelling. The gate keeps the count from growing meanwhile — it is a warning, not a
-block, so it cannot regress silently but will not fail a commit.
+| Snowflake | TS emitted | Status |
+|---|---|---|
+| `SUBSTRING` `CEILING` `DAYOFWEEK` `DAYOFYEAR` `WEEKOFYEAR` `NVL` `MONTHS_BETWEEN` `LOCATE` | `substr` `ceil` `day_number_of_week` `day_number_of_year` `week_number_of_year` `ifnull` `diff_months` `strpos` | catalog-valid — **rows added, closed** |
+| `LPAD` `RPAD` `REPEAT` `ZEROIFNULL` | `lpad` `rpad` `repeat` `zeroifnull` | **NOT IN CATALOG — still open** |
+
+The eight are documented, including the two whose argument order is **reversed**
+(`MONTHS_BETWEEN`→`diff_months`, `LOCATE`→`strpos`; `sv_sql` emits
+`[args[1], args[0]]`, verified behaviourally, since a doc that gets arg order wrong
+produces wrong numbers rather than a failed import).
+
+The four are **named in the mapping doc but deliberately given no row**, because a
+row asserts a mapping holds and these are unverified. `ZEROIFNULL` needs particular
+care: the Databricks reference spells the same concept `zero_if_null`
+(`ts-databricks-formula-translation.md:111`), so at most one spelling can be right.
+
+Remaining exit: probe the four on a live instance, then either add a catalog row
+plus a table row, or route them through a `sql_string_op` pass-through as the six
+BL-170 names are. `check_mapping_code_sync` reports 0 soft findings now, so a
+regression here becomes visible again rather than hiding in a count of 12.

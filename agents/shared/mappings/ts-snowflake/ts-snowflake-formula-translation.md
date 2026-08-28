@@ -151,6 +151,7 @@ Verified 2026-07-10, SE cluster.
 | `isnull ( [x] )` → `x IS NULL` | `x IS NULL` → `isnull ( [x] )` |
 | `isnotnull ( [x] )` → `x IS NOT NULL` | `x IS NOT NULL` → `isnotnull ( [x] )` |
 | `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `COALESCE(x, default)` → `ifnull ( [x] , [default] )` |
+| `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `NVL(x, default)` → `ifnull ( [x] , [default] )` — Snowflake's two-argument `NVL` is `COALESCE` with a fixed arity |
 | `nullif ( [a] , [b] )` → `NULLIF(a, b)` | `NULLIF(a, b)` → `nullif ( [a] , [b] )` |
 | `not ( [x] )` → `NOT x` | `NOT x` → `not ( [x] )` |
 
@@ -173,6 +174,7 @@ Verified 2026-07-10, SE cluster.
 | `round ( [x] , [n] )` → `ROUND(x, n)` | `ROUND(x, n)` → `round ( [x] , [n] )` |
 | `floor ( [x] )` → `FLOOR(x)` | `FLOOR(x)` → `floor ( [x] )` |
 | `ceil ( [x] )` → `CEIL(x)` | `CEIL(x)` → `ceil ( [x] )` |
+| `ceil ( [x] )` → `CEIL(x)` | `CEILING(x)` → `ceil ( [x] )` — Snowflake `CEILING` is a synonym of `CEIL`; both map to `ceil` |
 | `abs ( [x] )` → `ABS(x)` | `ABS(x)` → `abs ( [x] )` |
 | `pow ( [x] , [n] )` → `POWER(x, n)` | `POWER(x, n)` → `pow ( [x] , [n] )` |
 | `mod ( [x] , [n] )` → `MOD(x, n)` | `MOD(x, n)` → `mod ( [x] , [n] )` |
@@ -197,10 +199,12 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | `concat ( [a] , [b] )` → `CONCAT(a, b)` | `CONCAT(a, b)` → `concat ( [a] , [b] )` |
 | `concat ( [a] , ' ' , [b] )` → `CONCAT(a, ' ', b)` *(supports N args)* | `CONCAT(a, ' ', b)` → `concat ( [a] , ' ' , [b] )` |
 | `substr ( [x] , [start] , [len] )` → `SUBSTR(x, start, len)` | `SUBSTR(x, start, len)` → `substr ( [x] , [start] , [len] )` |
+| `substr ( [x] , [start] , [len] )` → `SUBSTR(x, start, len)` | `SUBSTRING(x, start, len)` → `substr ( [x] , [start] , [len] )` — Snowflake `SUBSTRING` is a synonym of `SUBSTR` |
 | `strlen ( [x] )` → `LENGTH(x)` | `LENGTH(x)` → `strlen ( [x] )` |
 | `left ( [x] , [n] )` → `LEFT(x, n)` | `LEFT(x, n)` → `left ( [x] , [n] )` |
 | `right ( [x] , [n] )` → `RIGHT(x, n)` | `RIGHT(x, n)` → `right ( [x] , [n] )` |
 | `strpos ( [x] , 'val' )` → `POSITION('val' IN x)` | `POSITION('val' IN x)` → `strpos ( [x] , 'val' )` |
+| `strpos ( [x] , 'val' )` → `POSITION('val' IN x)` | `LOCATE('val', x)` → `strpos ( [x] , 'val' )` — **argument order is REVERSED**: Snowflake takes (needle, haystack), `strpos` takes (haystack, needle). Verified against `sv_sql._ARG_SWAP` |
 | `sql_string_op ( "UPPER({0})" , [x] )` → `UPPER(x)` | `UPPER(x)` → `sql_string_op ( "UPPER({0})" , [x] )` — no native `upper` in TS |
 | `sql_string_op ( "LOWER({0})" , [x] )` → `LOWER(x)` | `LOWER(x)` → `sql_string_op ( "LOWER({0})" , [x] )` — no native `lower` in TS |
 | `sql_string_op ( "TRIM({0})" , [x] )` → `TRIM(x)` | `TRIM(x)` → `sql_string_op ( "TRIM({0})" , [x] )` — no native `trim` in TS |
@@ -210,6 +214,20 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | `contains ( [x] , 'val' )` → `CONTAINS(x, 'val')` | `CONTAINS(x, 'val')` → `contains ( [x] , 'val' )` |
 | `( strpos ( [x] , 'val' ) = 1 )` → `STARTSWITH(x, 'val')` | `STARTSWITH(x, 'val')` → `( strpos ( [x] , 'val' ) = 1 )` — no native `starts_with` in TS; `strpos` is 1-based. **The outer parens are what the CLI emits** and are load-bearing under composition: a bare `a = 1` inside a larger expression (`NOT STARTSWITH(...)`, `... AND ...`) can re-associate |
 | `( substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val' )` → `ENDSWITH(x, 'val')` | `ENDSWITH(x, 'val')` → `( substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val' )` — no native `ends_with` in TS. Outer parens as for `STARTSWITH` above: the CLI emits them and they are load-bearing under composition |
+
+> **Four translations the CLI performs are UNVERIFIED — do not rely on them yet**
+> (BL-226, 2026-08-28). `sv_sql.py` translates `LPAD`→`lpad`, `RPAD`→`rpad`,
+> `REPEAT`→`repeat` and `ZEROIFNULL`→`zeroifnull`, and none of those four TS names
+> appears in
+> [../../schemas/thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md)
+> — neither as valid nor as struck-through. That is *unverified*, which is a weaker
+> claim than wrong: they may work. They are named here rather than given rows,
+> because a row asserts a mapping holds. `ZEROIFNULL` needs particular care — the
+> Databricks reference spells the same concept `zero_if_null`
+> ([../ts-databricks/ts-databricks-formula-translation.md](../ts-databricks/ts-databricks-formula-translation.md)),
+> so at most one of the two spellings can be right. Probe each on a live instance,
+> then add a catalog row and a table row here — or route it through a `sql_string_op`
+> pass-through as the six BL-170 names below are.
 
 > **`trim` / `ltrim` / `rtrim` / `replace` / `starts_with` / `ends_with` are NOT native
 > ThoughtSpot formula functions** — live-verified 2026-07-29 on se-thoughtspot (BL-170),
@@ -240,6 +258,10 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | `month ( [date] )` → `MONTH(date)` | `MONTH(date)` → `month ( [date] )` |
 | `day ( [date] )` → `DAY(date)` | `DAY(date)` → `day ( [date] )` |
 | `hour_of_day ( [date] )` → `HOUR(date)` | `HOUR(date)` → `hour_of_day ( [date] )` |
+| `day_number_of_week ( [date] )` → `DAYOFWEEK(date)` | `DAYOFWEEK(date)` → `day_number_of_week ( [date] )` |
+| `day_number_of_year ( [date] )` → `DAYOFYEAR(date)` | `DAYOFYEAR(date)` → `day_number_of_year ( [date] )` |
+| `week_number_of_year ( [date] )` → `WEEKOFYEAR(date)` | `WEEKOFYEAR(date)` → `week_number_of_year ( [date] )` |
+| `diff_months ( [later] , [earlier] )` → `MONTHS_BETWEEN(earlier, later)` | `MONTHS_BETWEEN(a, b)` → `diff_months ( [b] , [a] )` — **argument order is REVERSED**. Snowflake returns `a - b`; `diff_months` takes (later, earlier). Verified against `sv_sql._ARG_SWAP`, which emits `[args[1], args[0]]` |
 | `date ( [datetime] )` → `DATE(datetime)` | `DATE(datetime)` → `date ( [datetime] )` |
 | `start_of_month ( [date] )` → `DATE_TRUNC('MONTH', date)` | `DATE_TRUNC('MONTH', date)` → `start_of_month ( [date] )` |
 | `diff_days ( [end] , [start] )` → `DATEDIFF('day', start, end)` | `DATEDIFF('day', start, end)` → `diff_days ( [end] , [start] )` |
