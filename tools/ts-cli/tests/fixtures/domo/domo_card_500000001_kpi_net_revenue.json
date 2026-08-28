@@ -1,0 +1,40 @@
+{
+  "urn": "500000001",
+  "title": "Net Revenue",
+  "chartType": "kpi",
+  "chartVersion": "2.0",
+  "dataSetId": "00000006-0000-4000-8000-000000000006",
+  "description": "Total net revenue after discounts, current period",
+  "goal": 5000000,
+  "calculatedFields": [
+    {
+      "id": "1001",
+      "name": "Net Revenue",
+      "formula": "SUM(`Revenue`) - SUM(`Discount`)",
+      "saveToDataSet": false
+    }
+  ],
+  "summaryNumber": {
+    "columns": [
+      { "column": "Net Revenue", "aggregation": "SUM", "alias": "Net Revenue" }
+    ],
+    "filters": [
+      { "column": "Transaction Date", "operand": "LAST_90_DAYS", "values": [] }
+    ],
+    "groupBy": [],
+    "orderBy": [],
+    "limit": 1,
+    "offset": 0
+  },
+  "conditionalFormats": [
+    {
+      "condition": { "column": "Net Revenue", "operand": "GREATER_THAN", "values": ["5000000"] },
+      "format": { "color": "#2ECC71", "textColor": "#FFFFFF", "textStyle": "BOLD", "applyToRow": false }
+    }
+  ],
+  "quickFilters": [
+    { "column": "Region", "name": "Region Filter", "operator": "IN", "type": "MULTISELECT", "values": [] }
+  ],
+  "preferredFullWidth": 3,
+  "preferredFullHeight": 2
+}

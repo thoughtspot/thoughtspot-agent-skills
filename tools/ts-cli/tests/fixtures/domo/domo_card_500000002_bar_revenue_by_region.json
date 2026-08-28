@@ -1,0 +1,40 @@
+{
+  "urn": "500000002",
+  "title": "Revenue by Region",
+  "chartType": "bar",
+  "chartVersion": "2.0",
+  "dataSetId": "00000006-0000-4000-8000-000000000006",
+  "description": "Total revenue broken down by sales region, sorted descending",
+  "calculatedFields": [
+    {
+      "id": "1001",
+      "name": "Net Revenue",
+      "formula": "SUM(`Revenue`) - SUM(`Discount`)",
+      "saveToDataSet": false
+    }
+  ],
+  "chartBody": {
+    "columns": [
+      { "column": "Region", "alias": "Region" },
+      { "column": "Net Revenue", "aggregation": "SUM", "alias": "Total Revenue" }
+    ],
+    "groupBy": [
+      { "column": "Region", "alias": "Region" }
+    ],
+    "orderBy": [
+      { "column": "Total Revenue", "order": "DESCENDING" }
+    ],
+    "filters": [
+      { "column": "Transaction Date", "operand": "LAST_90_DAYS", "values": [] }
+    ],
+    "limit": 10,
+    "offset": 0,
+    "distinct": false,
+    "fiscal": false
+  },
+  "quickFilters": [
+    { "column": "Product Category", "name": "Category Filter", "operator": "IN", "type": "MULTISELECT", "values": [] }
+  ],
+  "preferredFullWidth": 6,
+  "preferredFullHeight": 4
+}

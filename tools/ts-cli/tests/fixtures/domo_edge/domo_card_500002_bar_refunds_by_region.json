@@ -1,0 +1,24 @@
+{
+  "urn": "500002",
+  "title": "Refunds by Region",
+  "chartType": "bar",
+  "chartVersion": "2.0",
+  "dataSetId": "bbbb2222-0000-4000-8000-000000000002",
+  "description": "Edge-case fixture: card lives on the SECOND dataset, whose Region/Revenue columns are display-renamed in the Model. Emitting the raw Domo names would bind this card to Orders.",
+  "calculatedFields": [],
+  "chartBody": {
+    "columns": [
+      { "column": "Region", "alias": "Region" },
+      { "column": "Revenue", "aggregation": "SUM", "alias": "Refunded" }
+    ],
+    "groupBy": [
+      { "column": "Region", "alias": "Region" }
+    ],
+    "orderBy": [],
+    "filters": [],
+    "limit": 25
+  },
+  "quickFilters": [],
+  "preferredFullWidth": 6,
+  "preferredFullHeight": 4
+}

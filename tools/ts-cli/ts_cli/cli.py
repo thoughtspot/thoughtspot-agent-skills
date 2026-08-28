@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import typer
 
-from ts_cli.commands import aggregate, alias, audit, auth, connections, databricks, dependency, dependency_apply, groups, load, metadata, migrate, model, orgs, parameterize, powerbi, profiles, publish, publish_planning, qlik, security, security_planning, share, share_planning, sisense, snowflake, spotql, spotter, tables, tableau, tenancy, tenancy_export, tml, users, variables  # noqa: F401 -- dependency_apply registers `apply-change` on dependency.app, parameterize registers `parameterize`/`unparameterize` on metadata.app, publish_planning registers `export`/`resolve` on publish.app, share_planning registers `export`/`resolve`/`apply` on share.app, security_planning registers `resolve`/`build`/`apply`/`import` on security.column_rules_app, tenancy_export registers `export` on tenancy.app, migrate registers the `migrate` group, all at import
+from ts_cli.commands import aggregate, alias, audit, auth, connections, databricks, dependency, dependency_apply, domo, groups, load, metadata, migrate, model, orgs, parameterize, powerbi, profiles, publish, publish_planning, qlik, security, security_planning, share, share_planning, sisense, snowflake, spotql, spotter, tables, tableau, tenancy, tenancy_export, tml, users, variables  # noqa: F401 -- dependency_apply registers `apply-change` on dependency.app, parameterize registers `parameterize`/`unparameterize` on metadata.app, publish_planning registers `export`/`resolve` on publish.app, share_planning registers `export`/`resolve`/`apply` on share.app, security_planning registers `resolve`/`build`/`apply`/`import` on security.column_rules_app, tenancy_export registers `export` on tenancy.app, migrate registers the `migrate` group, all at import
 
 app = typer.Typer(
     name="ts",
+    # Never render frame locals in a traceback: several commands hold credentials in
+    # scope, and `typer>=0.12,<1` permits versions that default this to True (0.12.5
+    # does). Explicit here rather than relying on the installed version's default.
+    pretty_exceptions_show_locals=False,
     help="ThoughtSpot REST API CLI.\n\nWraps common ThoughtSpot API operations used by Claude skills.",
     no_args_is_help=True,
 )
@@ -38,6 +42,7 @@ app.add_typer(tableau.app, name="tableau")
 app.add_typer(sisense.app, name="sisense")
 app.add_typer(qlik.app, name="qlik")
 app.add_typer(powerbi.app, name="powerbi")
+app.add_typer(domo.app, name="domo")
 app.add_typer(load.app, name="load")
 app.add_typer(snowflake.app, name="snowflake")
 app.add_typer(migrate.app, name="migrate")

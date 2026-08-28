@@ -215,7 +215,93 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
   `client_id`/`client_secret` pair the Databricks CLI reads from
   `~/.databrickscfg`. `chore: bump ts-cli to v0.132.1`
 
----
+### Added
+
+- **`ts-convert-from-domo` — Domo → ThoughtSpot converter** (new skill, v1.0.0). Converts a
+  captured **offline** Domo bundle (dataset schemas, Beast Modes, cards, page) into Table +
+  Model TML, Answers and a single-page Liveboard via a new `ts domo` command group
+  (`parse` / `build-model` / `build-liveboard` / `report` / `signin`). Beast Mode → ThoughtSpot
+  formula translation with the structural cases (multi-branch `CASE`, window/LOD) flagged
+  rather than silently downgraded; model joins taken from a Magic ETL export (`--etl`) when
+  supplied, else inferred by shared column name and always flagged `NEEDS REVIEW`; a rich
+  `migration_report.md` (executive summary, per-object accounting, chasm-trap warning,
+  verification checklist, modernization scorecard) derived entirely from the build mappings.
+  Ships `agents/shared/schemas/domo-app-ir.md` and
+  `agents/shared/mappings/domo/beastmode-thoughtspot-formula-translation.md`.
+
+  Offline-only by design: a Domo card's *analyzer query* — the measure/dimension/aggregation
+  it plots — is not exposed by any Domo API a token can reach, so live conversion cannot be
+  faithful. `ts_cli/domo/client.py` reaches datasets, pages, card metadata and Beast Modes and
+  is exercised by `ts domo signin`, but is deliberately not wired into `parse_app`. See the
+  skill's `references/open-items.md` (#3, #4).
+
+  A card's sort, filters (incl. relative dates), quick filters, conditional formatting and
+  number formats are parsed but **not** emitted, so an Answer lands unsorted and unfiltered.
+  That gap is reported rather than hidden: each affected card is downgraded to `Approximated`
+  with the dropped constructs named, and leads the migration report's Manual review section
+  (`open-items.md` #11).
+
+  Post-review correctness fixes (PR #440 review): `UPPER`/`LOWER`/`TRIM`/`LTRIM`/`RTRIM`/
+  `REPLACE` now translate to `sql_string_op` pass-throughs via the shared
+  `formula_common.wrap_passthrough_calls` instead of ThoughtSpot names that do not exist
+  (BL-170/BL-171, rejected at import with error_code 14516), and `SUBSTRING` maps to
+  `substr`; the Beast Mode function map is now expressed as tables so
+  `check_formula_catalog.py` actually guards it. Duplicate Beast Mode names across
+  datasets no longer collapse into a dangling `formula_id`. Join inference emits one join
+  per dataset pair on an id-like key, refuses incidental keys, and places the join on the
+  many side by row count rather than filename order. `--etl` joins are reconciled against
+  the bundle's datasets, with unmatched ones reported rather than counted-then-dropped.
+  Simple-form `CASE expr WHEN` is flagged like the searched form. Non-SUM card
+  aggregations are reported. `--mode domo-cloud` is refused rather than recorded as false
+  provenance. Empty parses no longer render as "Automation 100% — clean conversion"
+  (`open-items.md` #12–#15).
+
+  Second review round: column and Beast Mode renames now cross the stage boundary. A new
+  `ts_cli/domo/naming.py` owns the collision rule as a pure function of the parsed IR, so
+  `build-model` and `build-liveboard` — separate CLI invocations that each re-parse the
+  bundle — resolve names identically without a file handshake. This closes two
+  wrong-numbers bugs: a Beast Mode on the second dataset read the first dataset's column
+  of the same name, and an Answer on the second dataset grouped by the first dataset's
+  column. A reference that resolves to nothing the Model exposes is flagged, not shipped.
+  Flagged formulas are wrapped in `/* TODO review: … */` so one untranslatable measure no
+  longer makes the whole model TML unimportable. Cards on Domo pages 2..n are reported
+  `Skipped` instead of vanishing. Magic ETL `relationshipType` is honoured (read before
+  orientation, so a declared `OTM` is not inverted); a Domo many-to-many is flattened to
+  MANY_TO_ONE *and* warned about on the join's own row, since ThoughtSpot cannot express it. `Approximated` now
+  reaches the risk score, verification checklist and scorecard, not just Manual review.
+  Plus: the structural-construct check no longer misfires on columns named "Case …";
+  id-like join-key detection no longer matches `Paid`/`Void`/`Valid`; `DATEDIFF` arity is
+  checked (`open-items.md` #16–#21). Self-review pass: the Beast Mode naming rule is no
+  longer derived in two places (the divergence that caused #16), `BeastMode.status` is
+  honoured instead of ignored, and card column aliases are documented as unmapped
+  (`open-items.md` #22).
+
+  Fourth review round — the binding class closed at the namespace rather than at the call
+  sites. `naming.Index` now owns tables, columns, formulas **and** the generated
+  `formula_*` id space in one reserved set (a Domo column named `formula_Net` previously
+  aliased a Beast Mode's id and shipped the wrong column, lint-clean), compares names
+  NFC-normalised, and owns emitted filenames. `resolve_name_collisions` is used as an
+  assertion rather than a mutation, so it can no longer drop a column. Determinism is
+  explicit: datasets order by id rather than filename glob, `build-model` writes the
+  resolved index and `build-liveboard` loads it, a bundle digest is refused on mismatch,
+  and parser notes are printed. Host validation closes the shorthand-IP and IDNA-separator
+  classes and states its own limitation. `_risk_level` accounts for dropped joins and
+  findings; aggregation switches moved onto the affected measure's row
+  (`open-items.md` #23–#28).
+
+- **`ts-profile-domo` — Domo credential setup** (new skill, v1.0.0). Adds `domo` as a real
+  platform to `ts profiles add/list/update/remove/sync-env`: `developer-token` auth, the
+  `DOMO_DEVELOPER_TOKEN_{SLUG}` env var, and the `domo-{slug}` keychain service. `ts domo
+  signin` verifies a profile by making one authenticated call and reporting which endpoint
+  families the token reaches, without ever printing the token.
+
+### Changed
+
+- chore: bump ts-cli to v0.134.0 — new `ts domo` command group and `domo` platform support in
+  `ts profiles`. (0.133.0 was taken by #469 on main while this branch was in review.)
+- Refactored `ts_cli/domo/{report,build_model,magic_etl,answers}.py` into per-section /
+  per-concern helpers so every function lands under the cyclomatic-complexity cap; output is
+  byte-identical (verified against captured fixture output).
 
 ## 2026-08-06
 

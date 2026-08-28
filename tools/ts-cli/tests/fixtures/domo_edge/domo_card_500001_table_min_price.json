@@ -1,0 +1,24 @@
+{
+  "urn": "500001",
+  "title": "Lowest Unit Price by Region",
+  "chartType": "table",
+  "chartVersion": "2.0",
+  "dataSetId": "aaaa1111-0000-4000-8000-000000000001",
+  "description": "Edge-case fixture: per-column aggregation is MIN, not SUM",
+  "calculatedFields": [],
+  "chartBody": {
+    "columns": [
+      { "column": "Region", "alias": "Region" },
+      { "column": "Unit Price", "aggregation": "MIN", "alias": "Lowest Price" }
+    ],
+    "groupBy": [
+      { "column": "Region", "alias": "Region" }
+    ],
+    "orderBy": [],
+    "filters": [],
+    "limit": 50
+  },
+  "quickFilters": [],
+  "preferredFullWidth": 6,
+  "preferredFullHeight": 4
+}

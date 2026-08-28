@@ -137,6 +137,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-databricks-mv \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-looker \
       ~/.snowflake/cortex/skills/ts-convert-from-looker
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-domo \
+      ~/.snowflake/cortex/skills/ts-convert-from-domo
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-sisense \
       ~/.snowflake/cortex/skills/ts-convert-from-sisense
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-qlik \
@@ -149,6 +151,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-tableau \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-tableau \
       ~/.snowflake/cortex/skills/ts-profile-tableau
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-domo \
+      ~/.snowflake/cortex/skills/ts-profile-domo
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-load-source-data \
       ~/.snowflake/cortex/skills/ts-load-source-data
@@ -228,6 +232,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-databricks-mv \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-looker \
       ~/.claude/skills/ts-convert-from-looker
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-domo \
+      ~/.claude/skills/ts-convert-from-domo
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-sisense \
       ~/.claude/skills/ts-convert-from-sisense
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-qlik \
@@ -240,6 +246,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-tableau \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-tableau \
       ~/.claude/skills/ts-profile-tableau
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-domo \
+      ~/.claude/skills/ts-profile-domo
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-load-source-data \
       ~/.claude/skills/ts-load-source-data

@@ -1,0 +1,932 @@
+{
+    "contentType": "domo/dataflow-entities",
+    "data": {
+        "nodes": [
+            {
+                "id": "LoadFromVault-00000008-0000-4000-8000-000000000008",
+                "type": "Tile",
+                "x": 96,
+                "y": 192
+            },
+            {
+                "id": "LoadFromVault-00000001-0000-4000-8000-000000000001",
+                "type": "Tile",
+                "x": 192,
+                "y": 320
+            },
+            {
+                "id": "MergeJoin-00000016-0000-4000-8000-000000000016",
+                "type": "Tile",
+                "x": 320,
+                "y": 192
+            },
+            {
+                "id": "LoadFromVault-00000024-0000-4000-8000-000000000024",
+                "type": "Tile",
+                "x": 416,
+                "y": 320
+            },
+            {
+                "id": "MergeJoin-00000003-0000-4000-8000-000000000003",
+                "type": "Tile",
+                "x": 512,
+                "y": 192
+            },
+            {
+                "id": "LoadFromVault-00000026-0000-4000-8000-000000000026",
+                "type": "Tile",
+                "x": 608,
+                "y": 320
+            },
+            {
+                "id": "MergeJoin-00000020-0000-4000-8000-000000000020",
+                "type": "Tile",
+                "x": 704,
+                "y": 192
+            },
+            {
+                "id": "LoadFromVault-00000022-0000-4000-8000-000000000022",
+                "type": "Tile",
+                "x": 768,
+                "y": 320
+            },
+            {
+                "id": "MergeJoin-00000015-0000-4000-8000-000000000015",
+                "type": "Tile",
+                "x": 896,
+                "y": 192
+            },
+            {
+                "id": "LoadFromVault-00000028-0000-4000-8000-000000000028",
+                "type": "Tile",
+                "x": 960,
+                "y": 320
+            },
+            {
+                "id": "MergeJoin-00000005-0000-4000-8000-000000000005",
+                "type": "Tile",
+                "x": 1088,
+                "y": 192
+            },
+            {
+                "id": "LoadFromVault-00000017-0000-4000-8000-000000000017",
+                "type": "Tile",
+                "x": 1120,
+                "y": 352
+            },
+            {
+                "id": "MergeJoin-00000007-0000-4000-8000-000000000007",
+                "type": "Tile",
+                "x": 1344,
+                "y": 192
+            },
+            {
+                "id": "Metadata-00000023-0000-4000-8000-000000000023",
+                "type": "Tile",
+                "x": 1280,
+                "y": 352
+            },
+            {
+                "id": "LoadFromVault-00000004-0000-4000-8000-000000000004",
+                "type": "Tile",
+                "x": 1472,
+                "y": 352
+            },
+            {
+                "id": "MergeJoin-00000012-0000-4000-8000-000000000012",
+                "type": "Tile",
+                "x": 1568,
+                "y": 192
+            },
+            {
+                "id": "PublishToVault-00000010-0000-4000-8000-000000000010",
+                "type": "Tile",
+                "x": 1664,
+                "y": 320
+            }
+        ],
+        "actions": [
+            {
+                "name": "Olist Orders Dataset",
+                "id": "LoadFromVault-00000008-0000-4000-8000-000000000008",
+                "dependsOn": {},
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "LoadFromVault",
+                "dataSourceId": "00000013-0000-4000-8000-000000000013",
+                "executeFlowWhenUpdated": false,
+                "onlyLoadNewVersions": false,
+                "recentVersionCutoffMs": 0,
+                "columnSettings": {},
+                "visiblePartitionColumn": "",
+                "versionWindow": null,
+                "previewRowLimit": 10000,
+                "propagateAi": false,
+                "filterGroupIds": [],
+                "sourceType": "AUTO",
+                "filterPolicy": "LEGACY",
+                "gui": {
+                    "id": "LoadFromVault-00000008-0000-4000-8000-000000000008",
+                    "type": "Tile",
+                    "x": 96,
+                    "y": 192,
+                    "color": 10827556,
+                    "colorSource": null
+                }
+            },
+            {
+                "name": "Olist Customer Dataset",
+                "id": "LoadFromVault-00000001-0000-4000-8000-000000000001",
+                "dependsOn": {},
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "LoadFromVault",
+                "dataSourceId": "00000011-0000-4000-8000-000000000011",
+                "executeFlowWhenUpdated": false,
+                "onlyLoadNewVersions": false,
+                "recentVersionCutoffMs": 0,
+                "columnSettings": {},
+                "visiblePartitionColumn": "",
+                "versionWindow": null,
+                "previewRowLimit": 10000,
+                "propagateAi": false,
+                "filterGroupIds": [],
+                "sourceType": "AUTO",
+                "filterPolicy": "LEGACY",
+                "gui": {
+                    "id": "LoadFromVault-00000001-0000-4000-8000-000000000001",
+                    "type": "Tile",
+                    "x": 192,
+                    "y": 320,
+                    "color": 13586860,
+                    "colorSource": null
+                }
+            },
+            {
+                "name": "Join Data",
+                "id": "MergeJoin-00000016-0000-4000-8000-000000000016",
+                "dependsOn": {
+                    "0": {
+                        "actionId": "LoadFromVault-00000008-0000-4000-8000-000000000008",
+                        "outputId": null
+                    },
+                    "1": {
+                        "actionId": "LoadFromVault-00000001-0000-4000-8000-000000000001",
+                        "outputId": null
+                    }
+                },
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "MergeJoin",
+                "joinType": "LEFT OUTER",
+                "step1": "LoadFromVault-00000008-0000-4000-8000-000000000008",
+                "step2": "LoadFromVault-00000001-0000-4000-8000-000000000001",
+                "keys1": [
+                    "customer_id"
+                ],
+                "keys2": [
+                    "customer_id"
+                ],
+                "on": null,
+                "schemaModification1": [],
+                "schemaModification2": [
+                    {
+                        "name": "customer_id",
+                        "rename": "customer_id_1",
+                        "remove": false
+                    },
+                    {
+                        "name": "_BATCH_ID_",
+                        "rename": "Olist Customer Dataset._BATCH_ID_",
+                        "remove": false
+                    },
+                    {
+                        "name": "_BATCH_LAST_RUN_",
+                        "rename": "Olist Customer Dataset._BATCH_LAST_RUN_",
+                        "remove": false
+                    }
+                ],
+                "relationshipType": "MTM",
+                "gui": {
+                    "id": "MergeJoin-00000016-0000-4000-8000-000000000016",
+                    "type": "Tile",
+                    "x": 320,
+                    "y": 192,
+                    "color": null,
+                    "colorSource": null
+                },
+                "previewRowLimit": null
+            },
+            {
+                "name": "Olist Order Items Dataset",
+                "id": "LoadFromVault-00000024-0000-4000-8000-000000000024",
+                "dependsOn": {},
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "LoadFromVault",
+                "dataSourceId": "00000025-0000-4000-8000-000000000025",
+                "executeFlowWhenUpdated": false,
+                "onlyLoadNewVersions": false,
+                "recentVersionCutoffMs": 0,
+                "columnSettings": {},
+                "visiblePartitionColumn": "",
+                "versionWindow": null,
+                "previewRowLimit": 10000,
+                "propagateAi": false,
+                "filterGroupIds": [],
+                "sourceType": "AUTO",
+                "filterPolicy": "LEGACY",
+                "gui": {
+                    "id": "LoadFromVault-00000024-0000-4000-8000-000000000024",
+                    "type": "Tile",
+                    "x": 416,
+                    "y": 320,
+                    "color": 14964258,
+                    "colorSource": null
+                }
+            },
+            {
+                "name": "Join Data 1",
+                "id": "MergeJoin-00000003-0000-4000-8000-000000000003",
+                "dependsOn": {
+                    "0": {
+                        "actionId": "MergeJoin-00000016-0000-4000-8000-000000000016",
+                        "outputId": null
+                    },
+                    "1": {
+                        "actionId": "LoadFromVault-00000024-0000-4000-8000-000000000024",
+                        "outputId": null
+                    }
+                },
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "MergeJoin",
+                "joinType": "LEFT OUTER",
+                "step1": "MergeJoin-00000016-0000-4000-8000-000000000016",
+                "step2": "LoadFromVault-00000024-0000-4000-8000-000000000024",
+                "keys1": [
+                    "order_id"
+                ],
+                "keys2": [
+                    "order_id"
+                ],
+                "on": null,
+                "schemaModification1": [],
+                "schemaModification2": [
+                    {
+                        "name": "order_id",
+                        "rename": "order_id_2",
+                        "remove": false
+                    },
+                    {
+                        "name": "_BATCH_ID_",
+                        "rename": "Olist Order Items Dataset._BATCH_ID_",
+                        "remove": false
+                    },
+                    {
+                        "name": "_BATCH_LAST_RUN_",
+                        "rename": "Olist Order Items Dataset._BATCH_LAST_RUN_",
+                        "remove": false
+                    }
+                ],
+                "relationshipType": "MTM",
+                "gui": {
+                    "id": "MergeJoin-00000003-0000-4000-8000-000000000003",
+                    "type": "Tile",
+                    "x": 512,
+                    "y": 192,
+                    "color": null,
+                    "colorSource": null
+                },
+                "previewRowLimit": null
+            },
+            {
+                "name": "Olist Order Payments Dataset",
+                "id": "LoadFromVault-00000026-0000-4000-8000-000000000026",
+                "dependsOn": {},
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "LoadFromVault",
+                "dataSourceId": "00000018-0000-4000-8000-000000000018",
+                "executeFlowWhenUpdated": false,
+                "onlyLoadNewVersions": false,
+                "recentVersionCutoffMs": 0,
+                "columnSettings": {},
+                "visiblePartitionColumn": "",
+                "versionWindow": null,
+                "previewRowLimit": 10000,
+                "propagateAi": false,
+                "filterGroupIds": [],
+                "sourceType": "AUTO",
+                "filterPolicy": "LEGACY",
+                "gui": {
+                    "id": "LoadFromVault-00000026-0000-4000-8000-000000000026",
+                    "type": "Tile",
+                    "x": 608,
+                    "y": 320,
+                    "color": 2259058,
+                    "colorSource": null
+                }
+            },
+            {
+                "name": "Join Data 2",
+                "id": "MergeJoin-00000020-0000-4000-8000-000000000020",
+                "dependsOn": {
+                    "0": {
+                        "actionId": "MergeJoin-00000003-0000-4000-8000-000000000003",
+                        "outputId": null
+                    },
+                    "1": {
+                        "actionId": "LoadFromVault-00000026-0000-4000-8000-000000000026",
+                        "outputId": null
+                    }
+                },
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "MergeJoin",
+                "joinType": "LEFT OUTER",
+                "step1": "MergeJoin-00000003-0000-4000-8000-000000000003",
+                "step2": "LoadFromVault-00000026-0000-4000-8000-000000000026",
+                "keys1": [
+                    "order_id"
+                ],
+                "keys2": [
+                    "order_id"
+                ],
+                "on": null,
+                "schemaModification1": [],
+                "schemaModification2": [
+                    {
+                        "name": "order_id",
+                        "rename": "oder_id_2",
+                        "remove": false
+                    },
+                    {
+                        "name": "_BATCH_ID_",
+                        "rename": "Olist Order Payments Dataset._BATCH_ID_",
+                        "remove": false
+                    },
+                    {
+                        "name": "_BATCH_LAST_RUN_",
+                        "rename": "Olist Order Payments Dataset._BATCH_LAST_RUN_",
+                        "remove": false
+                    }
+                ],
+                "relationshipType": "MTM",
+                "gui": {
+                    "id": "MergeJoin-00000020-0000-4000-8000-000000000020",
+                    "type": "Tile",
+                    "x": 704,
+                    "y": 192,
+                    "color": null,
+                    "colorSource": null
+                },
+                "previewRowLimit": null
+            },
+            {
+                "name": "Olist Order Reviews Dataset",
+                "id": "LoadFromVault-00000022-0000-4000-8000-000000000022",
+                "dependsOn": {},
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "LoadFromVault",
+                "dataSourceId": "00000009-0000-4000-8000-000000000009",
+                "executeFlowWhenUpdated": false,
+                "onlyLoadNewVersions": false,
+                "recentVersionCutoffMs": 0,
+                "columnSettings": {},
+                "visiblePartitionColumn": "",
+                "versionWindow": null,
+                "previewRowLimit": 10000,
+                "propagateAi": false,
+                "filterGroupIds": [],
+                "sourceType": "AUTO",
+                "filterPolicy": "LEGACY",
+                "gui": {
+                    "id": "LoadFromVault-00000022-0000-4000-8000-000000000022",
+                    "type": "Tile",
+                    "x": 768,
+                    "y": 320,
+                    "color": 10955410,
+                    "colorSource": null
+                }
+            },
+            {
+                "name": "Join Data 3",
+                "id": "MergeJoin-00000015-0000-4000-8000-000000000015",
+                "dependsOn": {
+                    "0": {
+                        "actionId": "MergeJoin-00000020-0000-4000-8000-000000000020",
+                        "outputId": null
+                    },
+                    "1": {
+                        "actionId": "LoadFromVault-00000022-0000-4000-8000-000000000022",
+                        "outputId": null
+                    }
+                },
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "MergeJoin",
+                "joinType": "LEFT OUTER",
+                "step1": "MergeJoin-00000020-0000-4000-8000-000000000020",
+                "step2": "LoadFromVault-00000022-0000-4000-8000-000000000022",
+                "keys1": [
+                    "order_id"
+                ],
+                "keys2": [
+                    "order_id"
+                ],
+                "on": null,
+                "schemaModification1": [],
+                "schemaModification2": [
+                    {
+                        "name": "order_id",
+                        "rename": "oder_id_3",
+                        "remove": false
+                    },
+                    {
+                        "name": "_BATCH_ID_",
+                        "rename": "Olist Order Reviews Dataset._BATCH_ID_",
+                        "remove": false
+                    },
+                    {
+                        "name": "_BATCH_LAST_RUN_",
+                        "rename": "Olist Order Reviews Dataset._BATCH_LAST_RUN_",
+                        "remove": false
+                    }
+                ],
+                "relationshipType": "MTM",
+                "gui": {
+                    "id": "MergeJoin-00000015-0000-4000-8000-000000000015",
+                    "type": "Tile",
+                    "x": 896,
+                    "y": 192,
+                    "color": null,
+                    "colorSource": null
+                },
+                "previewRowLimit": null
+            },
+            {
+                "name": "Olist Products Dataset",
+                "id": "LoadFromVault-00000028-0000-4000-8000-000000000028",
+                "dependsOn": {},
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "LoadFromVault",
+                "dataSourceId": "00000027-0000-4000-8000-000000000027",
+                "executeFlowWhenUpdated": false,
+                "onlyLoadNewVersions": false,
+                "recentVersionCutoffMs": 0,
+                "columnSettings": {},
+                "visiblePartitionColumn": "",
+                "versionWindow": null,
+                "previewRowLimit": 10000,
+                "propagateAi": false,
+                "filterGroupIds": [],
+                "sourceType": "AUTO",
+                "filterPolicy": "LEGACY",
+                "gui": {
+                    "id": "LoadFromVault-00000028-0000-4000-8000-000000000028",
+                    "type": "Tile",
+                    "x": 960,
+                    "y": 320,
+                    "color": 3355443,
+                    "colorSource": null
+                }
+            },
+            {
+                "name": "Join Data 4",
+                "id": "MergeJoin-00000005-0000-4000-8000-000000000005",
+                "dependsOn": {
+                    "0": {
+                        "actionId": "MergeJoin-00000015-0000-4000-8000-000000000015",
+                        "outputId": null
+                    },
+                    "1": {
+                        "actionId": "LoadFromVault-00000028-0000-4000-8000-000000000028",
+                        "outputId": null
+                    }
+                },
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "MergeJoin",
+                "joinType": "LEFT OUTER",
+                "step1": "MergeJoin-00000015-0000-4000-8000-000000000015",
+                "step2": "LoadFromVault-00000028-0000-4000-8000-000000000028",
+                "keys1": [
+                    "product_id"
+                ],
+                "keys2": [
+                    "product_id"
+                ],
+                "on": null,
+                "schemaModification1": [],
+                "schemaModification2": [
+                    {
+                        "name": "_BATCH_ID_",
+                        "rename": "Olist Products Dataset._BATCH_ID_",
+                        "remove": false
+                    },
+                    {
+                        "name": "_BATCH_LAST_RUN_",
+                        "rename": "Olist Products Dataset._BATCH_LAST_RUN_",
+                        "remove": false
+                    },
+                    {
+                        "name": "product_id",
+                        "rename": "Olist Products Dataset.product_id",
+                        "remove": false
+                    }
+                ],
+                "relationshipType": "MTM",
+                "gui": {
+                    "id": "MergeJoin-00000005-0000-4000-8000-000000000005",
+                    "type": "Tile",
+                    "x": 1088,
+                    "y": 192,
+                    "color": null,
+                    "colorSource": null
+                },
+                "previewRowLimit": null
+            },
+            {
+                "name": "Product Category Name Translation",
+                "id": "LoadFromVault-00000017-0000-4000-8000-000000000017",
+                "dependsOn": {},
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "LoadFromVault",
+                "dataSourceId": "00000021-0000-4000-8000-000000000021",
+                "executeFlowWhenUpdated": false,
+                "onlyLoadNewVersions": false,
+                "recentVersionCutoffMs": 0,
+                "columnSettings": {},
+                "visiblePartitionColumn": "",
+                "versionWindow": null,
+                "previewRowLimit": 10000,
+                "propagateAi": false,
+                "filterGroupIds": [],
+                "sourceType": "AUTO",
+                "filterPolicy": "LEGACY",
+                "gui": {
+                    "id": "LoadFromVault-00000017-0000-4000-8000-000000000017",
+                    "type": "Tile",
+                    "x": 1120,
+                    "y": 352,
+                    "color": 5147834,
+                    "colorSource": null
+                }
+            },
+            {
+                "name": "Join Data 5",
+                "id": "MergeJoin-00000007-0000-4000-8000-000000000007",
+                "dependsOn": {
+                    "0": {
+                        "actionId": "MergeJoin-00000005-0000-4000-8000-000000000005",
+                        "outputId": null
+                    },
+                    "1": {
+                        "actionId": "Metadata-00000023-0000-4000-8000-000000000023",
+                        "outputId": null
+                    }
+                },
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "MergeJoin",
+                "joinType": "LEFT OUTER",
+                "step1": "MergeJoin-00000005-0000-4000-8000-000000000005",
+                "step2": "Metadata-00000023-0000-4000-8000-000000000023",
+                "keys1": [
+                    "product_category_name"
+                ],
+                "keys2": [
+                    "product_category_name"
+                ],
+                "on": null,
+                "schemaModification1": [],
+                "schemaModification2": [
+                    {
+                        "name": "_BATCH_ID_",
+                        "rename": "Alter Columns._BATCH_ID_",
+                        "remove": false
+                    },
+                    {
+                        "name": "_BATCH_LAST_RUN_",
+                        "rename": "Alter Columns._BATCH_LAST_RUN_",
+                        "remove": false
+                    },
+                    {
+                        "name": "product_category_name",
+                        "rename": "Alter Columns.product_category_name",
+                        "remove": false
+                    }
+                ],
+                "relationshipType": "MTM",
+                "gui": {
+                    "id": "MergeJoin-00000007-0000-4000-8000-000000000007",
+                    "type": "Tile",
+                    "x": 1344,
+                    "y": 192,
+                    "color": null,
+                    "colorSource": null
+                },
+                "previewRowLimit": null
+            },
+            {
+                "name": "Alter Columns",
+                "id": "Metadata-00000023-0000-4000-8000-000000000023",
+                "dependsOn": {
+                    "0": {
+                        "actionId": "LoadFromVault-00000017-0000-4000-8000-000000000017",
+                        "outputId": null
+                    }
+                },
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "Metadata",
+                "fields": [
+                    {
+                        "name": "string_field_0",
+                        "rename": "product_category_name",
+                        "type": null,
+                        "dateFormat": null,
+                        "settings": {},
+                        "remove": false
+                    },
+                    {
+                        "name": "string_field_1",
+                        "rename": "product_category_name_english",
+                        "type": null,
+                        "dateFormat": null,
+                        "settings": {},
+                        "remove": false
+                    }
+                ],
+                "gui": {
+                    "id": "Metadata-00000023-0000-4000-8000-000000000023",
+                    "type": "Tile",
+                    "x": 1280,
+                    "y": 352,
+                    "color": null,
+                    "colorSource": null
+                },
+                "previewRowLimit": null
+            },
+            {
+                "name": "Olist Sellers Dataset",
+                "id": "LoadFromVault-00000004-0000-4000-8000-000000000004",
+                "dependsOn": {},
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "LoadFromVault",
+                "dataSourceId": "00000002-0000-4000-8000-000000000002",
+                "executeFlowWhenUpdated": false,
+                "onlyLoadNewVersions": false,
+                "recentVersionCutoffMs": 0,
+                "columnSettings": {},
+                "visiblePartitionColumn": "",
+                "versionWindow": null,
+                "previewRowLimit": 10000,
+                "propagateAi": false,
+                "filterGroupIds": [],
+                "sourceType": "AUTO",
+                "filterPolicy": "LEGACY",
+                "gui": {
+                    "id": "LoadFromVault-00000004-0000-4000-8000-000000000004",
+                    "type": "Tile",
+                    "x": 1472,
+                    "y": 352,
+                    "color": 5611320,
+                    "colorSource": null
+                }
+            },
+            {
+                "name": "Join Data 6",
+                "id": "MergeJoin-00000012-0000-4000-8000-000000000012",
+                "dependsOn": {
+                    "0": {
+                        "actionId": "MergeJoin-00000007-0000-4000-8000-000000000007",
+                        "outputId": null
+                    },
+                    "1": {
+                        "actionId": "LoadFromVault-00000004-0000-4000-8000-000000000004",
+                        "outputId": null
+                    }
+                },
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "MergeJoin",
+                "joinType": "LEFT OUTER",
+                "step1": "MergeJoin-00000007-0000-4000-8000-000000000007",
+                "step2": "LoadFromVault-00000004-0000-4000-8000-000000000004",
+                "keys1": [
+                    "seller_id"
+                ],
+                "keys2": [
+                    "seller_id"
+                ],
+                "on": null,
+                "schemaModification1": [],
+                "schemaModification2": [
+                    {
+                        "name": "_BATCH_ID_",
+                        "rename": "Olist Sellers Dataset._BATCH_ID_",
+                        "remove": false
+                    },
+                    {
+                        "name": "_BATCH_LAST_RUN_",
+                        "rename": "Olist Sellers Dataset._BATCH_LAST_RUN_",
+                        "remove": false
+                    },
+                    {
+                        "name": "seller_id",
+                        "rename": "Olist Sellers Dataset.seller_id",
+                        "remove": false
+                    }
+                ],
+                "relationshipType": "MTM",
+                "gui": {
+                    "id": "MergeJoin-00000012-0000-4000-8000-000000000012",
+                    "type": "Tile",
+                    "x": 1568,
+                    "y": 192,
+                    "color": null,
+                    "colorSource": null
+                },
+                "previewRowLimit": null
+            },
+            {
+                "name": "Olist Master Dataset",
+                "id": "PublishToVault-00000010-0000-4000-8000-000000000010",
+                "dependsOn": {
+                    "0": {
+                        "actionId": "MergeJoin-00000012-0000-4000-8000-000000000012",
+                        "outputId": null
+                    }
+                },
+                "disabled": false,
+                "removeByDefault": false,
+                "notes": [],
+                "settings": {
+                    "preferredDatabaseEntityType": "TEMP_VIEW"
+                },
+                "type": "PublishToVault",
+                "dataSource": {
+                    "guid": "00000019-0000-4000-8000-000000000019",
+                    "type": "DataFlow",
+                    "name": "Olist Master Dataset",
+                    "cloudId": "domo"
+                },
+                "versionChainType": "REPLACE",
+                "partitionIdColumns": [],
+                "upsertColumns": [],
+                "retainPartitionExpression": "",
+                "gui": {
+                    "id": "PublishToVault-00000010-0000-4000-8000-000000000010",
+                    "type": "Tile",
+                    "x": 1664,
+                    "y": 320,
+                    "color": null,
+                    "colorSource": null
+                },
+                "previewRowLimit": null
+            }
+        ],
+        "actionColors": {
+            "LoadFromVault-00000008-0000-4000-8000-000000000008": {
+                "color": 10827556,
+                "colorSource": null
+            },
+            "LoadFromVault-00000001-0000-4000-8000-000000000001": {
+                "color": 13586860,
+                "colorSource": null
+            },
+            "MergeJoin-00000016-0000-4000-8000-000000000016": {
+                "color": null,
+                "colorSource": null
+            },
+            "LoadFromVault-00000024-0000-4000-8000-000000000024": {
+                "color": 14964258,
+                "colorSource": null
+            },
+            "MergeJoin-00000003-0000-4000-8000-000000000003": {
+                "color": null,
+                "colorSource": null
+            },
+            "LoadFromVault-00000026-0000-4000-8000-000000000026": {
+                "color": 2259058,
+                "colorSource": null
+            },
+            "MergeJoin-00000020-0000-4000-8000-000000000020": {
+                "color": null,
+                "colorSource": null
+            },
+            "LoadFromVault-00000022-0000-4000-8000-000000000022": {
+                "color": 10955410,
+                "colorSource": null
+            },
+            "MergeJoin-00000015-0000-4000-8000-000000000015": {
+                "color": null,
+                "colorSource": null
+            },
+            "LoadFromVault-00000028-0000-4000-8000-000000000028": {
+                "color": 3355443,
+                "colorSource": null
+            },
+            "MergeJoin-00000005-0000-4000-8000-000000000005": {
+                "color": null,
+                "colorSource": null
+            },
+            "LoadFromVault-00000017-0000-4000-8000-000000000017": {
+                "color": 5147834,
+                "colorSource": null
+            },
+            "MergeJoin-00000007-0000-4000-8000-000000000007": {
+                "color": null,
+                "colorSource": null
+            },
+            "Metadata-00000023-0000-4000-8000-000000000023": {
+                "color": null,
+                "colorSource": null
+            },
+            "LoadFromVault-00000004-0000-4000-8000-000000000004": {
+                "color": 5611320,
+                "colorSource": null
+            },
+            "MergeJoin-00000012-0000-4000-8000-000000000012": {
+                "color": null,
+                "colorSource": null
+            },
+            "PublishToVault-00000010-0000-4000-8000-000000000010": {
+                "color": null,
+                "colorSource": null
+            }
+        },
+        "sections": [],
+        "comments": []
+    }
+}

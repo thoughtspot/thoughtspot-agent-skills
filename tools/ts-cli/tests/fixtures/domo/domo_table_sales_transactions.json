@@ -1,0 +1,25 @@
+{
+  "id": "00000006-0000-4000-8000-000000000006",
+  "name": "Sample Sales Transactions",
+  "description": "Synthetic dataset modeled on Domo's Dataset Schema API for migration-testing purposes",
+  "rows": 12500,
+  "owner": {
+    "id": 900000003,
+    "type": "USER",
+    "displayName": "Fixture User 1"
+  },
+  "schema": {
+    "columns": [
+      { "type": "STRING", "name": "Transaction ID" },
+      { "type": "DATETIME", "name": "Transaction Date" },
+      { "type": "STRING", "name": "Customer ID" },
+      { "type": "STRING", "name": "Product Category" },
+      { "type": "STRING", "name": "Region" },
+      { "type": "DOUBLE", "name": "Unit Price" },
+      { "type": "LONG", "name": "Quantity" },
+      { "type": "DOUBLE", "name": "Revenue" },
+      { "type": "DOUBLE", "name": "Discount" },
+      { "type": "STRING", "name": "Sales Rep" }
+    ]
+  }
+}

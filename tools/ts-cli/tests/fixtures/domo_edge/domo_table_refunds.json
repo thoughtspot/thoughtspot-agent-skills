@@ -1,0 +1,15 @@
+{
+  "id": "bbbb2222-0000-4000-8000-000000000002",
+  "name": "Refunds",
+  "description": "Edge-case fixture: small dimension-sized table; shares Order ID (real key) and Region/Date (incidental) with Orders",
+  "rows": 1200,
+  "schema": {
+    "columns": [
+      { "type": "STRING", "name": "Order ID" },
+      { "type": "STRING", "name": "Region" },
+      { "type": "DATETIME", "name": "Date" },
+      { "type": "DOUBLE", "name": "Revenue" },
+      { "type": "STRING", "name": "Reason" }
+    ]
+  }
+}

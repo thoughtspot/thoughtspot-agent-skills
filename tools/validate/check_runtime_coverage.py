@@ -99,6 +99,11 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- Sisense migration (CLI-only; Sisense conversion needs the `ts` CLI, not available in Snowsight) ---
     ("ts-convert-from-sisense", "coco-snowsight"):
         "CLI-only: Sisense bundle parsing + `ts sisense`/`ts tml` CLI orchestration not available in Snowsight stored-proc runtime",
+    # --- Domo migration (CLI skill; no CoCo equivalent — bundle parsing needs shell + ts CLI) ---
+    ("ts-convert-from-domo", "coco-snowsight"):
+        "CLI-only: offline Domo bundle parsing + `ts domo`/`ts tml` CLI orchestration not available in Snowsight stored-proc runtime",
+    ("ts-profile-domo", "coco-snowsight"):
+        "CLI-only: stores a Domo developer token in the OS keychain via `ts profiles`; Snowsight stored-proc runtime has no keychain or shell",
     # --- Qlik migration (CLI skill; no CoCo equivalent — .qvf parsing needs shell + ts CLI) ---
     ("ts-convert-from-qlik", "coco-snowsight"):
         "Qlik .qvf/engine-artifacts parsing and the ts qlik CLI require shell access; not supported in Snowsight stored-proc runtime",

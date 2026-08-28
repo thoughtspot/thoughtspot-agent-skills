@@ -101,6 +101,7 @@ _ENV_VAR_TEMPLATES: dict[tuple[str, str], str] = {
     ("databricks", "pat"): "DATABRICKS_TOKEN_{SLUG}",
     ("tableau", "password"): "TABLEAU_PASSWORD_{SLUG}",
     ("tableau", "pat"): "TABLEAU_PAT_SECRET_{SLUG}",
+    ("domo", "developer-token"): "DOMO_DEVELOPER_TOKEN_{SLUG}",
 }
 
 # Public — for reference by skills/docs that need to enumerate known
@@ -249,6 +250,7 @@ PROFILE_PATHS: dict[str, Path] = {
     "snowflake": Path.home() / ".claude" / "snowflake-profiles.json",
     "databricks": Path.home() / ".claude" / "databricks-profiles.json",
     "tableau": Path.home() / ".claude" / "tableau-profiles.json",
+    "domo": Path.home() / ".claude" / "domo-profiles.json",
 }
 
 

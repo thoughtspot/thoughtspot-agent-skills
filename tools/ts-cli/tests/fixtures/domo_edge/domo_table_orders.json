@@ -1,0 +1,17 @@
+{
+  "id": "aaaa1111-0000-4000-8000-000000000001",
+  "name": "Orders",
+  "description": "Edge-case fixture: fact table (large row count) sharing an id key plus incidental columns with Refunds",
+  "rows": 480000,
+  "schema": {
+    "columns": [
+      { "type": "STRING", "name": "Order ID" },
+      { "type": "STRING", "name": "Region" },
+      { "type": "DATETIME", "name": "Date" },
+      { "type": "STRING", "name": "Product Name" },
+      { "type": "DOUBLE", "name": "Revenue" },
+      { "type": "DOUBLE", "name": "Discount" },
+      { "type": "DOUBLE", "name": "Unit Price" }
+    ]
+  }
+}

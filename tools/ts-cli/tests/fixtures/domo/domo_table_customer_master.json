@@ -1,0 +1,21 @@
+{
+  "id": "00000014-0000-4000-8000-000000000014",
+  "name": "Customer Master",
+  "description": "Synthetic reference dataset for testing dataset-to-dataset joins during Domo -> ThoughtSpot migration",
+  "rows": 3400,
+  "owner": {
+    "id": 900000001,
+    "type": "USER",
+    "displayName": "Fixture User 2"
+  },
+  "schema": {
+    "columns": [
+      { "type": "STRING", "name": "Customer ID" },
+      { "type": "STRING", "name": "Customer Name" },
+      { "type": "STRING", "name": "Segment" },
+      { "type": "STRING", "name": "Country" },
+      { "type": "STRING", "name": "Account Owner" },
+      { "type": "DATETIME", "name": "Onboarded Date" }
+    ]
+  }
+}

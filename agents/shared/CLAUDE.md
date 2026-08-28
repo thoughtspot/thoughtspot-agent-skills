@@ -36,6 +36,8 @@ mappings/looker/
 
 mappings/sisense/
   sisense-formula-translation.md      — Sisense JAQL → ThoughtSpot formula and function mapping (AGG_MAP/FUNCTION_MAP/UNSUPPORTED, mirrors ts_cli/sisense/functions.py)
+mappings/domo/
+  beastmode-thoughtspot-formula-translation.md — Domo Beast Mode → ThoughtSpot formula and function mapping (aggregations, math/string/date, structural NEEDS-REVIEW cases; mirrors ts_cli/domo/functions.py)
 mappings/qlik/
   qlik-thoughtspot-formula-translation.md — Qlik Sense expressions → ThoughtSpot formula and function mapping (199 rows, 17 categories)
 mappings/powerbi/
@@ -59,6 +61,7 @@ schemas/
   thoughtspot-connection.md           — connection object structure
   snowflake-schema.md                 — Snowflake Semantic View YAML reference
   databricks-metric-view.md           — Databricks Metric View YAML schema (v0.1/v1.1)
+  domo-app-ir.md                      — Domo App IR: the parse↔build contract for the ts domo converter
   qlik-app-ir.md                      — Qlik App IR: the extract↔transform contract for the ts qlik converter
 
 references/

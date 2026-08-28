@@ -1,0 +1,77 @@
+{
+  "totalHits": 9,
+  "results": [
+    {
+      "id": 2001,
+      "name": "Net Revenue",
+      "global": true,
+      "status": "VALID",
+      "formula": "SUM(`Revenue`) - SUM(`Discount`)",
+      "dataSourceId": "aaaa1111-0000-4000-8000-000000000001"
+    },
+    {
+      "id": 2002,
+      "name": "Net Revenue",
+      "global": true,
+      "status": "VALID",
+      "formula": "SUM(`Revenue`)",
+      "dataSourceId": "bbbb2222-0000-4000-8000-000000000002"
+    },
+    {
+      "id": 2003,
+      "name": "Region Upper",
+      "global": true,
+      "status": "VALID",
+      "formula": "UPPER(`Region`)",
+      "dataSourceId": "aaaa1111-0000-4000-8000-000000000001"
+    },
+    {
+      "id": 2004,
+      "name": "Clean Product",
+      "global": true,
+      "status": "VALID",
+      "formula": "TRIM(REPLACE(`Product Name`, '-', ' '))",
+      "dataSourceId": "aaaa1111-0000-4000-8000-000000000001"
+    },
+    {
+      "id": 2005,
+      "name": "Refund Flag Simple Case",
+      "global": true,
+      "status": "VALID",
+      "formula": "CASE `Reason` WHEN 'damaged' THEN 1 ELSE 0 END",
+      "dataSourceId": "bbbb2222-0000-4000-8000-000000000002"
+    },
+    {
+      "id": 2006,
+      "name": "Twice Net Revenue",
+      "global": true,
+      "status": "VALID",
+      "formula": "`Net Revenue` * 2",
+      "dataSourceId": "bbbb2222-0000-4000-8000-000000000002"
+    },
+    {
+      "id": 2007,
+      "name": "Region",
+      "global": true,
+      "status": "VALID",
+      "formula": "UPPER(`Region`)",
+      "dataSourceId": "bbbb2222-0000-4000-8000-000000000002"
+    },
+    {
+      "id": 2008,
+      "name": "Revenue",
+      "global": true,
+      "status": "VALID",
+      "formula": "SUM(`Revenue`) * 0.5",
+      "dataSourceId": "aaaa1111-0000-4000-8000-000000000001"
+    },
+    {
+      "id": 2009,
+      "name": "Broken Measure",
+      "global": true,
+      "status": "INVALID",
+      "formula": "SUM(`Revenue`)",
+      "dataSourceId": "aaaa1111-0000-4000-8000-000000000001"
+    }
+  ]
+}

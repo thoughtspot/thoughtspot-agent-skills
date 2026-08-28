@@ -2538,6 +2538,137 @@ any check carries an ERROR-severity finding.
 
 ---
 
+## `ts domo` — Domo → ThoughtSpot converter
+
+Converts a captured **offline** Domo bundle into ThoughtSpot Table + Model TML,
+Answers and a single-page Liveboard. Mirrors the `ts tableau` / `ts qlik` conventions:
+structured JSON to stdout, diagnostics to stderr, pure conversion logic in
+`ts_cli.domo` (the command module does all I/O).
+
+`<bundle-dir>` is a directory of Domo JSON — one file per dataset, the beast-mode
+list, each card, and the page. The layout is documented by
+`tools/ts-cli/tests/fixtures/domo/`. Unreadable or unrecognised files produce a
+warning in `notes`, never a crash.
+
+**There is no live mode.** A Domo card's *analyzer query* — the measure, dimension
+and aggregation it plots — is not exposed by any Domo API a developer token can
+reach, so a live conversion could not be faithful. `ts_cli/domo/client.py` does
+reach datasets, pages, card metadata and Beast Modes (used by `ts domo signin`
+and useful for *capturing* a bundle), but it is deliberately not wired into the
+parser. `--mode` is accepted and recorded in the IR for provenance; `offline` is
+the only behaviour.
+
+### `ts domo signin`
+
+Verify a Domo profile's developer token (see `/ts-profile-domo`) by making one
+authenticated call. Never prints the token.
+
+```bash
+ts domo signin
+ts domo signin --profile acme-domo
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--profile`, `-p` | the only configured profile | Domo profile name |
+
+**Output:** `{instance, reachable: {datasets, pages}, ok}`. A reachable family
+reports its object count; a failure reports `FAILED: <error>` for that family
+only. Exits 1 when nothing is reachable.
+
+### `ts domo parse`
+
+Parse a bundle directory into a structured inventory JSON.
+
+```bash
+ts domo parse ./domo-bundle --output /tmp/domo_inv.json
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--output`, `-o` | — | Output inventory JSON path (required) |
+| `--mode` | `offline` | Recorded in the IR for provenance; `offline` is the only behaviour |
+
+**Output:** writes the inventory (datasets, columns, Beast Modes, cards, page,
+`notes`) to the output file; prints the `counts` object to stdout. Read `notes` —
+the parser flags what it could not confidently read rather than guessing.
+
+### `ts domo build-model`
+
+Build Table TML(s) + Model TML + `mapping.json`.
+
+```bash
+ts domo build-model ./domo-bundle --connection "Snowflake Prod" \
+  --database ANALYTICS --schema PUBLIC --model-name "Sales Overview" \
+  --output-dir out/
+ts domo build-model ./domo-bundle --connection "Snowflake Prod" \
+  --database ANALYTICS --schema PUBLIC --etl magic_etl_export.json --output-dir out/
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--connection`, `-c` | — | ThoughtSpot connection name (required) |
+| `--database` | — | Warehouse database (required) |
+| `--schema` | — | Warehouse schema (required) |
+| `--model-name`, `-m` | `<app name> Model` | Model display name |
+| `--output-dir`, `-o` | `out` | Directory for the emitted TML + `mapping.json` |
+| `--mode` | `offline` | See `parse` |
+| `--etl` | — | Domo Magic ETL export JSON — takes model joins from the dataflow's `MergeJoin` graph instead of shared-column inference |
+
+**Joins:** with `--etl`, joins come from the real join graph (keys + type) — the
+accurate source. Without it they are inferred by shared column name. Either way
+every join is flagged `NEEDS REVIEW`, because the join side and cardinality are
+inferred without full column lineage.
+
+### `ts domo build-liveboard`
+
+Build Answer + tabbed Liveboard TML + `liveboard_mapping.json`.
+
+```bash
+ts domo build-liveboard ./domo-bundle --model-name "Sales Overview" --output-dir out/
+ts domo build-liveboard ./domo-bundle --model-name "Sales Overview" \
+  --model-fqn <model-guid> --report-name "Sales Overview LB" --output-dir out/
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--model-name`, `-m` | — | ThoughtSpot Model name to bind to (required) |
+| `--model-fqn` | — | Model GUID; binds the Answers to a specific Model |
+| `--report-name` | the Domo page name | Liveboard display name |
+| `--output-dir`, `-o` | `out` | Output directory |
+| `--mode` | `offline` | See `parse` |
+
+### `ts domo report`
+
+Render the build mappings into a Markdown migration report.
+
+```bash
+ts domo report --output-dir out/            # -> out/migration_report.md
+ts domo report --output-dir out/ --output /tmp/report.md
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--output-dir`, `-o` | `out` | Directory holding `mapping.json` (+ `liveboard_mapping.json`) |
+| `--output` | `<output-dir>/migration_report.md` | Report path |
+
+**Output:** an executive summary (complexity, automation %, effort, risk),
+inventory, modernization notes, a per-object-type summary, the data model
+(tables, joins, Beast Modes with both formulas), cards → answers, a manual-review
+section that leads with every `NEEDS REVIEW` item (including a **chasm-trap**
+warning when two facts share a join key), a verification checklist, and a
+modernization scorecard. Every number is derived from the mappings.
+
 ## `ts qlik` — Qlik Sense → ThoughtSpot converter
 
 Converts a Qlik Sense app into ThoughtSpot Table + Model TML and a tabbed

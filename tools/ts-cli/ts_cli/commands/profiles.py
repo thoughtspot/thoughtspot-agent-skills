@@ -158,6 +158,8 @@ def _keychain_account(platform: str, auth_type: str, fields: dict) -> str | None
         # the account it is keyed under -- matching the client_id/client_secret
         # pair the Databricks CLI reads from ~/.databrickscfg.
         return fields.get("client_id", "")
+    if platform == "domo" and auth_type == "developer-token":
+        return "developer-token"
     if platform == "tableau" and auth_type == "pat":
         return fields.get("pat_name", "")
     return fields.get("username", "")
@@ -189,6 +191,11 @@ def _apply_auth_fields(profile: dict, platform: str, auth_type: str, slug: str) 
         elif auth_type == "pat":
             profile["pat_secret_env"] = derive_env_var(platform, auth_type, slug)
 
+    elif platform == "domo":
+        profile["auth"] = auth_type
+        if auth_type == "developer-token":
+            profile["token_env"] = derive_env_var(platform, auth_type, slug)
+
     return profile
 
 
@@ -201,6 +208,7 @@ _PLATFORM_SKILLS = {
     "snowflake": "ts-profile-snowflake",
     "databricks": "ts-profile-databricks",
     "tableau": "ts-profile-tableau",
+    "domo": "ts-profile-domo",
 }
 
 
@@ -230,6 +238,13 @@ def _list_databricks(profiles: list) -> None:
         typer.echo(f"  {p['name']:30s}  {auth_type:12s}  {host}")
 
 
+def _list_domo(profiles: list) -> None:
+    for p in profiles:
+        auth = p.get("auth", "unknown")
+        instance = p.get("instance", "")
+        typer.echo(f"  {p['name']:30s}  {auth:16s}  {instance}")
+
+
 def _list_snowflake(profiles: list) -> None:
     for p in profiles:
         method = p.get("method", "unknown")
@@ -256,13 +271,16 @@ def _list_thoughtspot() -> None:
         typer.echo(f"  {name:20s}  {auth:12s}  {p.get('base_url', '')}")
 
 
-def _resolve_platform(snowflake: bool, tableau: bool, databricks: bool) -> str:
+def _resolve_platform(snowflake: bool, tableau: bool, databricks: bool,
+                      domo: bool = False) -> str:
     if databricks:
         return "databricks"
     if snowflake:
         return "snowflake"
     if tableau:
         return "tableau"
+    if domo:
+        return "domo"
     return "thoughtspot"
 
 
@@ -284,6 +302,10 @@ def list_profiles(
         False, "--databricks",
         help="List Databricks profiles instead of ThoughtSpot profiles.",
     ),
+    domo: bool = typer.Option(
+        False, "--domo",
+        help="List Domo profiles instead of ThoughtSpot profiles.",
+    ),
     json_output: bool = typer.Option(
         False, "--json",
         help="Output profiles as JSON (credential pointers and literal secrets stripped).",
@@ -297,7 +319,7 @@ def list_profiles(
     is shown. The literal case is belt-and-braces: `--field token=…` is refused at
     parse time, so a secret should never reach the file in the first place.
     """
-    platform = _resolve_platform(snowflake, tableau, databricks)
+    platform = _resolve_platform(snowflake, tableau, databricks, domo)
 
     if json_output:
         profiles = load_platform_profiles(platform)
@@ -317,6 +339,10 @@ def list_profiles(
         sf_profiles = load_platform_profiles("snowflake")
         _list_or_exit("snowflake", sf_profiles)
         _list_snowflake(sf_profiles)
+    elif platform == "domo":
+        domo_profiles = load_platform_profiles("domo")
+        _list_or_exit("domo", domo_profiles)
+        _list_domo(domo_profiles)
     else:
         _list_thoughtspot()
 
@@ -327,9 +353,9 @@ def list_profiles(
 
 @app.command("add")
 def add_cmd(
-    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau."),
+    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau, domo."),
     name: str = typer.Option(..., help="Profile display name."),
-    auth_type: str = typer.Option(..., "--auth-type", help="Auth method (token, password, key_pair, pat, oauth-m2m, databricks-cli, cli)."),
+    auth_type: str = typer.Option(..., "--auth-type", help="Auth method (token, password, key_pair, pat, oauth-m2m, databricks-cli, cli, developer-token)."),
     field: Optional[list[str]] = typer.Option(None, "--field", help="Profile field as key=value. Repeatable."),
 ) -> None:
     """Add or replace a profile. Derives slug, env var, keychain commands.
@@ -396,7 +422,7 @@ def add_cmd(
 
 @app.command("update")
 def update_cmd(
-    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau."),
+    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau, domo."),
     name: str = typer.Option(..., help="Profile name to update."),
     field: Optional[list[str]] = typer.Option(None, "--field", help="Field to update as key=value. Repeatable."),
 ) -> None:
@@ -435,7 +461,7 @@ def update_cmd(
 
 @app.command("remove")
 def remove_cmd(
-    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau."),
+    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau, domo."),
     name: str = typer.Option(..., help="Profile name to remove."),
 ) -> None:
     """Remove a profile and report cleanup info."""

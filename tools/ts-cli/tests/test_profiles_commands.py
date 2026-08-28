@@ -20,6 +20,7 @@ def profile_dir(tmp_path, monkeypatch):
         "snowflake": tmp_path / "snowflake-profiles.json",
         "databricks": tmp_path / "databricks-profiles.json",
         "tableau": tmp_path / "tableau-profiles.json",
+        "domo": tmp_path / "domo-profiles.json",
     }
     monkeypatch.setattr(profile_ops, "PROFILE_PATHS", paths)
     return paths
@@ -400,3 +401,60 @@ class TestSyncEnvCommand:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert len(data["lines"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# domo platform (ts-profile-domo)
+# ---------------------------------------------------------------------------
+
+
+class TestDomoPlatform:
+    def test_list_json_domo_strips_token_env(self, profile_dir):
+        profile_dir["domo"].write_text(json.dumps([
+            {"name": "Acme", "instance": "https://acme.domo.com",
+             "auth": "developer-token", "token_env": "DOMO_DEVELOPER_TOKEN_ACME"}
+        ]))
+        result = runner.invoke(app, ["list", "--json", "--domo"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data[0]["instance"] == "https://acme.domo.com"
+        assert "token_env" not in data[0]
+
+    def test_list_table_domo(self, profile_dir):
+        profile_dir["domo"].write_text(json.dumps([
+            {"name": "Acme", "instance": "https://acme.domo.com", "auth": "developer-token"}
+        ]))
+        result = runner.invoke(app, ["list", "--domo"])
+        assert result.exit_code == 0
+        assert "Acme" in result.output
+        assert "https://acme.domo.com" in result.output
+
+    def test_list_domo_empty_points_at_skill(self, profile_dir):
+        result = runner.invoke(app, ["list", "--domo"])
+        assert result.exit_code == 1
+        assert "ts-profile-domo" in result.output
+
+    def test_add_domo_derives_env_var_and_keychain(self, profile_dir):
+        result = runner.invoke(app, [
+            "add", "--platform", "domo", "--name", "Acme Domo",
+            "--auth-type", "developer-token",
+            "--field", "instance=https://acme.domo.com",
+        ])
+        assert result.exit_code == 0, result.output
+        out = json.loads(result.output)
+        assert out["env_var"] == "DOMO_DEVELOPER_TOKEN_ACME_DOMO"
+        assert out["keychain_service"] == "domo-acme-domo"
+        assert out["keychain_account"] == "developer-token"
+        # The token itself never passes through the CLI.
+        assert out["profile"]["token_env"] == "DOMO_DEVELOPER_TOKEN_ACME_DOMO"
+        assert out["profile"]["auth"] == "developer-token"
+        saved = json.loads(profile_dir["domo"].read_text())
+        assert saved[0]["name"] == "Acme Domo"
+
+    def test_remove_domo(self, profile_dir):
+        profile_dir["domo"].write_text(json.dumps([
+            {"name": "Acme", "instance": "https://acme.domo.com"}
+        ]))
+        result = runner.invoke(app, ["remove", "--platform", "domo", "--name", "Acme"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(profile_dir["domo"].read_text()) == []

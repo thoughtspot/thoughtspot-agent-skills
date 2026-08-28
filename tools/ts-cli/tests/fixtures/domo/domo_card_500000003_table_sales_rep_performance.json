@@ -1,0 +1,64 @@
+{
+  "urn": "500000003",
+  "title": "Sales Rep Performance",
+  "chartType": "table",
+  "chartVersion": "2.0",
+  "dataSetId": "00000006-0000-4000-8000-000000000006",
+  "description": "Detail table of revenue, average order value, and discount rate by sales rep",
+  "calculatedFields": [
+    {
+      "id": "1001",
+      "name": "Net Revenue",
+      "formula": "SUM(`Revenue`) - SUM(`Discount`)",
+      "saveToDataSet": false
+    },
+    {
+      "id": "1002",
+      "name": "Avg Order Value",
+      "formula": "SUM(`Revenue`) / COUNT(DISTINCT `Transaction ID`)",
+      "saveToDataSet": false
+    },
+    {
+      "id": "1003",
+      "name": "Discount Rate %",
+      "formula": "(SUM(`Discount`) / SUM(`Revenue`)) * 100",
+      "saveToDataSet": false
+    }
+  ],
+  "chartBody": {
+    "columns": [
+      { "column": "Sales Rep", "alias": "Sales Rep" },
+      {
+        "column": "Net Revenue",
+        "aggregation": "SUM",
+        "alias": "Net Revenue",
+        "format": { "type": "CURRENCY", "currency": "USD", "commas": true, "precision": 0 }
+      },
+      {
+        "column": "Avg Order Value",
+        "aggregation": "AVG",
+        "alias": "Avg Order Value",
+        "format": { "type": "CURRENCY", "currency": "USD", "commas": true, "precision": 2 }
+      },
+      {
+        "column": "Discount Rate %",
+        "aggregation": "AVG",
+        "alias": "Discount Rate %",
+        "format": { "type": "NUMBER", "percent": true, "precision": 1 }
+      }
+    ],
+    "groupBy": [
+      { "column": "Sales Rep", "alias": "Sales Rep" }
+    ],
+    "orderBy": [
+      { "column": "Net Revenue", "order": "DESCENDING" }
+    ],
+    "filters": [
+      { "column": "Transaction Date", "operand": "LAST_90_DAYS", "values": [] }
+    ],
+    "limit": 50,
+    "offset": 0
+  },
+  "preferredFullWidth": 6,
+  "preferredFullHeight": 5
+}
