@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Iterable
 
 # ---------------------------------------------------------------------------
 # Slug derivation
@@ -30,6 +31,61 @@ def slugify(name: str) -> str:
 def slug_to_upper(slug: str) -> str:
     """Convert a slug to UPPER_SNAKE for env var name segments."""
     return slug.upper().replace("-", "_")
+
+
+class SlugCollisionError(ValueError):
+    """Two profile names would share one slug, so one credential serves both.
+
+    The slug is the *only* thing that names a profile's credential: it becomes the
+    keychain service (`derive_keychain_service`) and the env var
+    (`derive_env_var`). `slugify` is lossy — it lowercases, replaces every
+    non-`[a-z0-9]` run with a hyphen, and strips — so many distinct profile names
+    collapse onto one slug:
+
+        'Acme Prod'  'Acme/Prod'  'ACME  PROD'  'Acme-Prod'  'Acme_Prod'
+        'Acme.Prod'  'acme prod'  '  Acme Prod  '        ->  'acme-prod'
+
+    Accents are dropped rather than folded, so `café` -> `caf` collides with a
+    profile literally named `Caf`, and `Ünïcödé` -> `n-c-d`. Any name with no ASCII
+    alphanumeric at all -> `''`, giving the shared service `thoughtspot-` and the
+    shared env var `THOUGHTSPOT_TOKEN_` — so *every* such profile reads one
+    credential.
+
+    `add_profile` dedupes by NAME, so the two profiles coexist happily in the JSON
+    while sharing a credential. Two tenants named `Acme Prod` and `Acme/Prod` means
+    tenant B's token is sent to tenant A's host, with nothing in any output
+    revealing it.
+
+    **The fix is a refusal at write time, not a new slug rule.** Changing `slugify`
+    would silently orphan every keychain entry and env var already in use on every
+    machine — a far worse failure than the one being fixed, and unfixable from
+    inside the CLI. Refusing the *second* colliding name is non-breaking: existing
+    profiles keep resolving exactly as before.
+    """
+
+
+def slug_conflicts(name: str, existing_names: Iterable[str]) -> list[str]:
+    """Existing profile names that derive the same slug as `name`.
+
+    Excludes `name` itself (an exact-name match is a REPLACE, which is what
+    `ts profiles update` does on every call and must not be refused). Pure — no I/O
+    — so the rule is testable without touching a profile file.
+    """
+    slug = slugify(name)
+    return sorted(
+        other for other in existing_names
+        if other != name and slugify(other) == slug
+    )
+
+
+def has_usable_slug(name: str) -> bool:
+    """False when `name` has no ASCII alphanumeric, so its slug is the empty string.
+
+    An empty slug is not a collision between two names — it is a collision between
+    a name and *every other* unusable name, present and future, so it is refused on
+    its own rather than only when a second one appears.
+    """
+    return bool(slugify(name))
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +286,42 @@ def save_platform_profiles(platform: str, profiles: list[dict]) -> None:
 
 
 def add_profile(platform: str, profile: dict) -> dict:
-    """Add or replace a profile (matched by name). Returns the saved profile."""
+    """Add or replace a profile (matched by name). Returns the saved profile.
+
+    Raises `SlugCollisionError` rather than writing a profile whose slug is empty or
+    already taken by a different name — see that class for why the refusal lives
+    here and not in `slugify`. This is the ONE write path (both `ts profiles add`
+    and `ts profiles update` route through it), so the check cannot be bypassed by a
+    caller that forgets it.
+    """
+    name = profile["name"]
     profiles = load_platform_profiles(platform)
-    profiles = [p for p in profiles if p.get("name") != profile["name"]]
+
+    if not has_usable_slug(name):
+        raise SlugCollisionError(
+            f"Profile name {name!r} contains no ASCII letter or digit, so its slug is "
+            f"empty. The slug names the credential — an empty one gives the keychain "
+            f"service {derive_keychain_service(platform, '')!r}, which EVERY such "
+            f"profile would share. Include at least one ASCII letter or digit — and make "
+            f"THAT part distinct from every other profile, since the non-ASCII "
+            f"characters are dropped rather than transliterated: 'ドモ 本番' and "
+            f"'ドモ ステージ' both reduce to the same slug once prefixed identically."
+        )
+
+    clashes = slug_conflicts(name, [p.get("name", "") for p in profiles])
+    if clashes:
+        slug = slugify(name)
+        raise SlugCollisionError(
+            f"Profile name {name!r} derives the slug {slug!r}, already used by "
+            f"{', '.join(repr(c) for c in clashes)}. The slug — not the name — is what "
+            f"names the credential, so both profiles would read the keychain service "
+            f"{derive_keychain_service(platform, slug)!r}: this profile would be sent "
+            f"the other one's token, with nothing in any output revealing it. Rename "
+            f"one so the slugs differ (the difference must survive lowercasing and "
+            f"collapsing every non-alphanumeric run — 'Acme Prod 2', not 'Acme_Prod')."
+        )
+
+    profiles = [p for p in profiles if p.get("name") != name]
     profiles.append(profile)
     save_platform_profiles(platform, profiles)
     return profile
