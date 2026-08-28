@@ -110,6 +110,137 @@ def test_both_directions_collapse_to_one_platform(tmp_path):
     assert "1 converter platform(s)" in result.stdout
 
 
+def _shared_emitter(tmp_path, body):
+    """Write a fake ts_cli/model_builder.py so delegation can be exercised."""
+    pkg = tmp_path / "tools" / "ts-cli" / "ts_cli"
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "model_builder.py").write_text(body)
+    return tmp_path
+
+
+# --- B1: the shared-emitter route (the hole that failed domo on a helper it runs) ---
+
+_DELEGATING = ("from ts_cli.model_builder import build_model_tml\n"
+               "formulas = []\n"
+               "def assemble():\n    return build_model_tml()\n")
+
+
+def test_delegation_credits_the_helper_the_emitter_applies(tmp_path):
+    """Requirement B must see through `build_model_tml`.
+
+    This is the exact shape that failed #440 in CI for `fix_double_aggregation` —
+    a helper the shared emitter demonstrably applies on the converter's behalf.
+    """
+    root = _repo(tmp_path, "fake", _DELEGATING)
+    _shared_emitter(root, "def build_model_tml():\n"
+                          "    expr = fix_double_aggregation(expr, {})\n"
+                          "    expr = resolve_name_collisions(expr, {})\n")
+    result = _run(root)
+    assert result.returncode == 0, result.stdout
+
+
+def test_delegation_credits_only_helpers_the_emitter_actually_calls(tmp_path):
+    """An unused import in the emitter must NOT be credited to its callers.
+
+    `model_builder` really does import `resolve_name_collisions` without calling it,
+    so "delegation satisfies both helpers" would assert a guarantee that does not
+    exist. A call is the evidence; an import is not.
+    """
+    root = _repo(tmp_path, "fake", _DELEGATING)
+    _shared_emitter(root, "from ts_cli.formula_common import resolve_name_collisions\n"
+                          "def build_model_tml():\n"
+                          "    return fix_double_aggregation(expr, {})\n")
+    result = _run(root)
+    assert result.returncode == 1
+    assert "resolve_name_collisions" in result.stdout
+    # ...and the one it does call must not be re-reported.
+    assert "must use formula_common.fix_double_aggregation" not in result.stdout
+
+
+def test_a_local_build_model_tml_is_not_delegation(tmp_path):
+    """The powerbi / sisense shape: same symbol NAME, defined locally.
+
+    A name-presence test would exempt two converters that do not delegate at all,
+    which is why the signal is the import of the shared symbol.
+    """
+    src = ("formulas = []\n"
+           "def build_model_tml():\n    return {}\n"
+           "model_tml = build_model_tml()\n")
+    result = _run(_repo(tmp_path, "fake", src))
+    assert result.returncode == 1
+    assert "does not delegate" in result.stdout
+
+
+# --- B2: prose must not satisfy a requirement ---
+
+def test_a_comment_does_not_satisfy_a_helper_requirement(tmp_path):
+    """The live false PASS: a comment saying the helper is NOT used, passing the check.
+
+    Read as evidence of presence, a statement of absence is worse than silence.
+    """
+    src = ("formulas = []\n"
+           "# We deliberately do not call resolve_name_collisions here, because it\n"
+           "# drops the colliding column. See naming.py.\n"
+           "# fix_double_aggregation is likewise handled elsewhere.\n")
+    result = _run(_repo(tmp_path, "fake", src))
+    assert result.returncode == 1
+    assert "resolve_name_collisions" in result.stdout
+    assert "fix_double_aggregation" in result.stdout
+
+
+def test_a_docstring_does_not_satisfy_a_helper_requirement(tmp_path):
+    """Same hole via a docstring / string literal rather than a `#` comment."""
+    src = ('"""This module intentionally avoids resolve_name_collisions and\n'
+           'fix_double_aggregation; see the design note."""\n'
+           "formulas = []\n")
+    result = _run(_repo(tmp_path, "fake", src))
+    assert result.returncode == 1
+
+
+def test_requirement_a_still_reads_string_literals(tmp_path):
+    """Stripping strings for requirement B must not blind requirement A.
+
+    A's mappings live INSIDE string literals, so it reads the raw text. Without this
+    the B2 fix would have silently disabled the validator's primary rule.
+    """
+    src = _HELPERS + 'FUNCTION_MAP = {"UPPER": "upper"}\n'
+    result = _run(_repo(tmp_path, "fake", src))
+    assert result.returncode == 1
+    assert "not a" in result.stdout.lower() and "upper" in result.stdout
+
+
+# --- the divergence table must not carry entries nothing consults ---
+
+def test_an_unreachable_divergence_key_is_reported(monkeypatch):
+    """Three such entries shipped with this validator and were counted as outstanding.
+
+    An exemption nothing consults reads as a decision and gets cited as precedent,
+    so a dead key must fail rather than sit in the table.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ccp", VALIDATOR)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    dead = ("tableau", "wrap_passthrough_calls")
+    monkeypatch.setitem(mod.EXPECTED_DIVERGENCES, dead, "commentary, not a key")
+
+    # Assert on the KEY, not on the message prose: the guidance text names every
+    # consultable helper, so a substring test matches the advice rather than the
+    # finding. (The first cut of this test did exactly that and passed vacuously.)
+    def reported(keys):
+        problems = mod._unreachable_divergences()
+        return {k for k in keys if any(repr(k) in p for p in problems)}
+
+    assert reported([dead]) == {dead}
+
+    # A well-formed key of each consultable shape must NOT be reported.
+    good = [("qlik", "emits:upper"), ("qlik", "fix_double_aggregation")]
+    for key in good:
+        monkeypatch.setitem(mod.EXPECTED_DIVERGENCES, key, "ok")
+    assert reported(good) == set()
+
+
 def test_real_repo_passes(tmp_path):
     """The live tree must be clean, so a genuine regression is the only red."""
     repo_root = Path(__file__).resolve().parents[3]
