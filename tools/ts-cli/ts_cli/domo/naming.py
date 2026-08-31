@@ -77,11 +77,38 @@ def _strip_reserved_prefix(name: str, kind: str) -> tuple[str, str]:
     one. That asymmetry is the recurring shape of this converter's binding bugs, so the
     rule has exactly one home.
     """
-    if not name.startswith(FORMULA_ID_PREFIX):
+    reasons: list[str] = []
+    out = name
+
+    # `::` is ThoughtSpot's TABLE-QUALIFICATION syntax, so a source name containing it
+    # emits `[Net::Rev]`, which resolves to table `Net` column `Rev` — a real, unrelated
+    # column — and `formula_common.add_formula_prefix` skips any ref containing `::` as
+    # already qualified, so the id prefix is never applied (PR #440, round 6). Replaced
+    # rather than rejected: the name is otherwise legitimate Domo input.
+    if "::" in out:
+        out = out.replace("::", " ")
+        reasons.append("'::' is ThoughtSpot's table-qualification syntax and cannot "
+                       "appear in a display name")
+
+    # CASEFOLDED, and to a FIXPOINT. A case-sensitive `startswith` let `FORMULA_Net`
+    # through while every namespace comparison downstream casefolds and
+    # `formula_common._WRAPPED_REF` is compiled IGNORECASE — so the column kept the
+    # prefix and a reference to it bound to the generated id of a Beast Mode named
+    # `Net`. And a single strip left `formula_formula_X` still carrying the prefix.
+    # Both were live silent-wrong-number paths (round 6).
+    stripped = False
+    while out.casefold().startswith(FORMULA_ID_PREFIX):
+        out = out[len(FORMULA_ID_PREFIX):].strip()
+        stripped = True
+    if stripped:
+        out = out or kind
+        reasons.append(f"'{FORMULA_ID_PREFIX}' is reserved for generated formula ids")
+
+    if out == name:
         return name, ""
-    stem = name[len(FORMULA_ID_PREFIX):].strip() or kind
-    return (f"{stem} ({kind})",
-            f"'{FORMULA_ID_PREFIX}' is reserved for generated formula ids")
+    if stripped:
+        out = f"{out} ({kind})"
+    return out, "; ".join(reasons)
 
 
 def _norm(s: str) -> str:
@@ -299,9 +326,16 @@ def build_index(app: DomoApp) -> Index:
 
     # --- tables -----------------------------------------------------------
     for ds in datasets:
-        name = ns.reserve(ds.name, "dataset")
+        # The table pass strips too. It did not, so a dataset named `formula_Net` shipped
+        # carrying the reserved prefix — benign today only because tables are not
+        # `[X]`-referenced in formulas, but it is the same one-rule-two-passes asymmetry
+        # that produced every wrong binding in this class (round 6).
+        candidate, table_reason = _strip_reserved_prefix(ds.name, "table")
+        name = ns.reserve(candidate, "dataset")
         if name != ds.name:
-            index.table_renames.append({"dataset_id": ds.id, "from": ds.name, "to": name})
+            index.table_renames.append({
+                "dataset_id": ds.id, "from": ds.name, "to": name,
+                "reason": table_reason or "the name is already taken in the Model"})
         index.table_by_dataset[ds.id] = name
         # Filenames get their own namespace: `Sales-Data` and `Sales Data` both slug to
         # `Sales_Data`, which silently discarded one whole Table TML.
@@ -345,8 +379,26 @@ def build_index(app: DomoApp) -> Index:
         # `_strip_reserved_prefix` and both passes call it.
         candidate, prefix_reason = _strip_reserved_prefix(bm.name, "measure")
         name = ns.reserve(candidate, table)
-        # Reserve the generated id too, so no later name can alias it.
-        ns.reserve(f"{FORMULA_ID_PREFIX}{name}")
+        # The generated id is reserved AND THE RESULT IS HONOURED. This call previously
+        # discarded its return value, so the namespace correctly detected that
+        # `formula_<name>` was already taken and nothing acted on it — the code computed
+        # the right answer and threw it away (round 6). If the id collides, the FORMULA's
+        # display name moves, because the id is derived from it and cannot be set
+        # independently.
+        #
+        # HONESTLY LABELLED: this branch is currently UNREACHABLE. Once
+        # `_strip_reserved_prefix` casefolds and runs to a fixpoint, no Model object can
+        # be displayed as `formula_*`, so the derived id cannot collide — reverting this
+        # branch alone leaves the whole suite green, which I verified rather than
+        # assumed. It is kept as defence for the case where the strip is weakened, not
+        # because a test exercises it. The two tests that DO bite cover the strip
+        # itself (casefolding, and the `::` replacement).
+        reserved_id = ns.reserve(f"{FORMULA_ID_PREFIX}{name}")
+        if reserved_id != f"{FORMULA_ID_PREFIX}{name}":
+            name = ns.reserve(reserved_id[len(FORMULA_ID_PREFIX):].strip() or name, table)
+            ns.reserve(f"{FORMULA_ID_PREFIX}{name}")
+            prefix_reason = prefix_reason or (
+                "its generated id would have aliased another Model object")
         if name != bm.name:
             index.formula_renames.append({
                 "dataset": table, "from": bm.name, "to": name,

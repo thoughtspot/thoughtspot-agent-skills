@@ -28,6 +28,14 @@
       {
         "type": "DOUBLE",
         "name": "formula_Net Revenue"
+      },
+      {
+        "type": "DOUBLE",
+        "name": "FORMULA_Refund Amount"
+      },
+      {
+        "type": "STRING",
+        "name": "Ref::Code"
       }
     ]
   }

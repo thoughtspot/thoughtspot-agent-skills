@@ -52,6 +52,13 @@ _SECRET_VALUE_FIELDS = frozenset({
     "token", "password", "secret", "secret_key", "pat_secret",
     "private_key", "private_key_passphrase", "api_key", "apikey",
     "developer_token", "client_secret", "access_token", "refresh_token",
+    # Added after an adversarial pass found these walking straight through: the bare
+    # nouns were missing because the suffix rule below only fires on `_passphrase`,
+    # `_secret` etc., and `bearer`/`pw`/`credential` were not considered at all.
+    # This is still a DENYLIST — `ts-profile-*/SKILL.md` now says so rather than
+    # implying value-level protection it cannot give.
+    "passphrase", "credential", "credentials", "bearer", "pw", "pass",
+    "auth_token", "session_token", "sas_token", "private_token",
 })
 
 _SECRET_SUFFIXES = ("_token", "_password", "_secret", "_passphrase")

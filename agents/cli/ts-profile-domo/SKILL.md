@@ -114,11 +114,18 @@ macOS), and removing the `~/.zshenv` export line.
   (`instance`) only; the token belongs in the OS keychain via Step 3, with only the env-var
   *name* in the profile.
 
-  As of **ts-cli 0.134.0** the CLI enforces this rather than relying on the reader:
-  `ts profiles add/update` **refuse** a `--field` whose key names a credential value
-  (`token`, `password`, `secret`, `pat_secret`, `api_key`, …), all-or-nothing across the
-  whole `--field` set, and `list`/`add`/`update` strip both credential *pointers* and any
-  literal secret an older profile still carries. See `.claude/rules/security.md`.
+  As of **ts-cli 0.134.0** the CLI refuses a `--field` whose key is a **known**
+  credential name (`token`, `password`, `secret`, `pat_secret`, `api_key`,
+  `developer_token`, … and anything ending `_token`/`_password`/`_secret`/`_passphrase`),
+  all-or-nothing across the whole `--field` set. `list`/`add`/`update` strip those same
+  names from their output. See `.claude/rules/security.md`.
+
+  **This is a key-name denylist, not a guarantee about values.** An unlisted key —
+  `bearer`, `credential`, `passphrase`, `pw`, `notes`, `t0ken` — still writes cleartext to
+  `~/.claude/domo-profiles.json` at mode `0644` and is echoed back by
+  `ts profiles list --domo --json`. So the rule remains "never put a secret in
+  `--field`", and the refusal is a safety net for the common spellings rather than a
+  reason to stop caring which key you use.
 
   This paragraph previously described the *opposite* — that a `--field token=…` would
   persist in cleartext and be echoed back by `ts profiles list --domo --json`, and that the

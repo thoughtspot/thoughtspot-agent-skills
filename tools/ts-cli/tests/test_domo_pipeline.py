@@ -122,19 +122,36 @@ class TestOutputIsSelfConsistent:
         The Model-level invariant that forecloses it: no string may name both a column
         and a formula id, so no reference can be ambiguous in the first place.
         """
-        m = model_of = _run(tmp_path, bundle_id)[2]["model"]
-        display_names = {c["name"] for c in model_of["columns"]}
+        model_of = _run(tmp_path, bundle_id)[2]["model"]
+        cols = {c["name"] for c in model_of["columns"]}
+        tables = {t["name"] for t in model_of["model_tables"]}
         formula_ids = {f["id"] for f in model_of["formulas"]}
-        clash = display_names & formula_ids
-        assert not clash, (
-            f"these strings name BOTH a column and a formula id, so any reference to "
-            f"them is ambiguous: {sorted(clash)}")
+        exposed = cols | tables
 
-        # And nothing the Model exposes may carry the generated-id prefix, which is
-        # what makes the ambiguity possible.
-        assert not [n for n in display_names if n.startswith("formula_")], (
-            "a column display name carries the reserved 'formula_' prefix")
-        del m
+        # CASEFOLDED. The first version of this assertion compared case-sensitively
+        # while every namespace comparison downstream casefolds and
+        # `formula_common._WRAPPED_REF` is IGNORECASE — so a column `FORMULA_Net`
+        # alongside a formula id `formula_Net` passed, and a reference to the column
+        # bound to the formula (round 6). A check that does not match the namespace it
+        # defends is not a check.
+        folded_exposed = {n.casefold() for n in exposed}
+        folded_ids = {i.casefold() for i in formula_ids}
+        clash = folded_exposed & folded_ids
+        assert not clash, (
+            f"these strings name BOTH a Model object and a formula id (compared "
+            f"case-insensitively, as ThoughtSpot does), so any reference is "
+            f"ambiguous: {sorted(clash)}")
+
+        # Nothing exposed may carry the generated-id prefix in ANY case, and nothing
+        # may contain `::` — that is table-qualification syntax, so `[Net::Rev]` reads
+        # as table `Net` column `Rev` and `add_formula_prefix` skips it as already
+        # qualified.
+        assert not [n for n in exposed if n.casefold().startswith("formula_")], (
+            f"a Model object carries the reserved 'formula_' prefix: "
+            f"{sorted(n for n in exposed if n.casefold().startswith('formula_'))}")
+        assert not [n for n in exposed if "::" in n], (
+            f"a Model object name contains '::': "
+            f"{sorted(n for n in exposed if '::' in n)}")
 
     def test_mapping_rows_describe_what_was_emitted(self, tmp_path, bundle_id):
         """The mapping is what the report reads, so it must match the TML exactly."""

@@ -1,5 +1,5 @@
 {
-  "totalHits": 11,
+  "totalHits": 14,
   "results": [
     {
       "id": 2001,
@@ -87,6 +87,30 @@
       "global": true,
       "status": "VALID",
       "formula": "SUM(`formula_Net Revenue`) - `formula_Prefixed`",
+      "dataSourceId": "bbbb2222-0000-4000-8000-000000000002"
+    },
+    {
+      "id": 2103,
+      "name": "Refund Amount",
+      "global": true,
+      "status": "VALID",
+      "formula": "SUM(`Revenue`)",
+      "dataSourceId": "bbbb2222-0000-4000-8000-000000000002"
+    },
+    {
+      "id": 2104,
+      "name": "Uses Cased",
+      "global": true,
+      "status": "VALID",
+      "formula": "SUM(`FORMULA_Refund Amount`) * 2",
+      "dataSourceId": "bbbb2222-0000-4000-8000-000000000002"
+    },
+    {
+      "id": 2105,
+      "name": "Ref::Total",
+      "global": true,
+      "status": "VALID",
+      "formula": "SUM(`Revenue`)",
       "dataSourceId": "bbbb2222-0000-4000-8000-000000000002"
     }
   ]
