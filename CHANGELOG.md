@@ -5,6 +5,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-09-01
+- docs: file BL-227 (complexity gate fails open without radon; pre-commit hook not
+  installed) and BL-228 (Domo bypass-detection gate catches 3 of 8), both from the
+  PR #440 review rounds
+
 ## 2026-08-28
 - fix: `ts profiles add/update` refuse a profile name whose slug is empty or already
   taken — the slug names the credential, so two names sharing one meant two

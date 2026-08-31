@@ -8517,6 +8517,98 @@ plus a table row, or route them through a `sql_string_op` pass-through as the si
 BL-170 names are. `check_mapping_code_sync` reports 0 soft findings now, so a
 regression here becomes visible again rather than hiding in a count of 12.
 
+## BL-227 -- the complexity gate fails OPEN when radon is missing, and the pre-commit hook is not installed at all `Tier 2`
+
+Filed 2026-09-01, found while reviewing PR #440. A cyclomatic-complexity regression
+(`build_index` 15 -> 18 against `CAP=15`) reached a pushed branch, and three
+independent layers each failed open rather than catching it:
+
+1. **`check_module_health.py` returns 0 when `radon` is absent** -- it prints
+   `SKIP  module health: radon not installed (...); enforced in CI.` and exits
+   successfully. Any reviewer or agent running `for f in tools/validate/check_*.py`
+   with an interpreter lacking radon gets a clean sweep and a false "all validators
+   pass". That is exactly what happened.
+2. **The pre-commit hook is not installed.** `.git/hooks/` holds only `.sample`
+   files and `core.hooksPath` is unset, so nothing in `scripts/pre-commit.sh` runs
+   on commit in a fresh clone. There is no step in SETUP.md or CLAUDE.md that
+   installs it, and no check that it is installed.
+3. **Even installed, it would still skip.** `pre-commit.sh` resolves to a Python
+   with neither `radon` nor `pytest`, so the same SKIP fires there -- and
+   `tools/validate/tests/test_check_module_health.py:13` opens with
+   `importorskip("radon")`, so the tests for the gate delete themselves on the same
+   machine where the gate is inert.
+4. **The interpreter itself is below the repo's floor, which is why (1) and (3) are
+   the default rather than an accident.** `python3` on this machine is **3.9.6**,
+   while `tools/ts-cli/pyproject.toml` declares `requires-python = ">=3.10,<3.15"`.
+   So `pip install -e tools/ts-cli` does not merely lack the dev deps -- it *refuses*
+   (`Package 'thoughtspot-cli' requires a different Python: 3.9.6 not in
+   '<3.15,>=3.10'`). Any contributor following the docs with bare `python3` gets the
+   fail-open path by default, not by neglect. Nothing checks the interpreter version.
+
+Only CI actually enforces it, which means the feedback arrives after a push rather
+than before a commit.
+
+**Why this is Tier 2 rather than cosmetic.** The repo's whole quality model is
+"per-PR validators, so the issue cannot recur." A validator that exits 0 when its
+dependency is missing is indistinguishable from a passing validator, so the model
+silently degrades to "CI only" for every check with an optional dependency.
+
+**The "any other `check_*.py` with the same shape?" audit, run 2026-09-01: 2 of 37.**
+`check_module_health.py` (needs `radon`) and **`check_skill_flag_usage.py`** (needs
+`typer` + an importable `ts_cli`: `SKIP  flag cross-check: typer/ts_cli not
+importable`). Both print SKIP and exit 0. The second is the more interesting of the
+two, because it is the gate that cross-checks documented skill flags against the
+CLI's real command tree -- exactly the drift a reviewer cannot eyeball -- and it is
+inert on any machine where the CLI is not installed, which per (4) is the default.
+`check_orphan_references.py` also prints SKIP lines but they are **per-file
+allowlist** decisions, not a whole-gate bail; it is not an instance. Re-run on a
+3.13 venv with `radon`, `typer` and `ts_cli` present: 37 validators, 0 SKIP-to-zero,
+0 failures -- so the inventory is 2, and the remaining 35 are genuinely enforced
+locally.
+
+Exit: (a) invert the default for **both** instances -- a missing dependency exits
+non-zero, and an explicit `--allow-skip` (which CI need not pass) is what makes it
+lenient, so the fail-open path has to be asked for; (b) add a repo-level check that
+the pre-commit hook is installed *and* that its interpreter satisfies
+`requires-python` and imports the dev deps -- the version check is the cheap half and
+catches (4) outright; (c) drop the `importorskip` so the gate's own tests cannot
+vanish silently.
+
+**Target:** next validator pass. Note that (a) is a one-line change per gate and
+closes the class, while (b) is the durable fix; do not let (b)'s size defer (a).
+
+## BL-228 -- the Domo bypass-detection gate catches 3 of 8 realistic TLS/validation bypasses, and 2 are unreachable by any source test `Tier 3`
+
+Filed 2026-09-01 from PR #440's fifth and sixth reviews. `test_no_bypass_flag_exists`
+originally grepped six substrings and caught 1 of 8 landed bypasses. It was replaced
+with properties asserted against live objects (the opener's SSL context, the installed
+redirect handler, the constructor signature, the CLI surface), which catches **3 of 8**.
+
+Still undetected, each landed and measured:
+
+- an `HTTPSHandler` **subclass** that swaps in an unverified context inside
+  `https_open` -- defeats a construction-time context check and handed a developer
+  token to a self-signed MITM server with the full suite green
+- a `_NoRedirect` **subclass** restoring the permissive `redirect_request`
+- a **class attribute** opt-out (`DomoClient.trust_all_hosts`), invisible to a check
+  that inspects `__init__`'s signature
+- an **unlisted** env kill-switch (the check probes a hardcoded list of nine names)
+- `--insecure` in a **different** command module (the check reads one file)
+
+And two that need no code change at all, so no source-level test can reach them:
+`SSL_CERT_FILE` and `SSL_CERT_DIR`.
+
+**No live vulnerability** -- at PR #440's head TLS verification, redirect refusal and
+host validation are all genuinely on, verified against live servers. This item is
+about the gate not detecting a regression in them.
+
+**Recorded rather than fixed because the instrument looks wrong.** Two attempts at a
+cleverer test each caught more and still missed most; "did someone deliberately weaken
+TLS" is a code-review and CI-configuration question, not something a unit test over the
+module under test can answer. Candidate exits: a dependency/config scan in CI, a
+runtime assertion at client construction that fails closed, or an accepted-gap note in
+`.claude/rules/security.md` saying plainly that this class is review-gated rather than
+test-gated. Deciding which is the work.
 ## BL-229 -- `docs/quality-gates.md` can rot on `main` indefinitely, because the freshness gate is scoped to the PRs least likely to fire it `Tier 3`
 
 **Filed:** 2026-09-01.
