@@ -15,7 +15,7 @@ product actually emits in the wild.
 | Exported successfully | **500** |
 | Export failures | 6 (all instance-side, see below) |
 | Distinct key-paths observed | **207** across four document types |
-| Ground truth compared against | 4 schema refs (read from the **working tree**, ~12:57 local) + `docs/ossie/ts-osi-construct-mapping.md` (read from **`main`** via `git show`, to avoid racing the branch edit) |
+| Ground truth compared against | 4 schema refs (read from the **working tree**, ~12:57 local) + `docs/ossie/ts-ossie-construct-mapping.md` (read from **`main`** via `git show`, to avoid racing the branch edit) |
 
 > ### ⚠️ Concurrency note — read this before acting on §5
 >
@@ -427,7 +427,7 @@ declared closed at those nine values — a real View would fail payload validati
 ### 3.2 SCHEMA-DOCUMENTED-BUT-UNMAPPED
 
 Paths present in a schema ref but not named as a mapped/stashed construct in
-`docs/ossie/ts-osi-construct-mapping.md` (main). Most are structural container keys the
+`docs/ossie/ts-ossie-construct-mapping.md` (main). Most are structural container keys the
 mapping addresses implicitly; two are substantive.
 
 | Path | Occ | Docs | Verdict |
@@ -753,7 +753,7 @@ Ordered by blast radius. All are `agents/shared/schemas/` edits.
 
 ### 5.2 Construct-mapping rows to add or correct
 
-`docs/ossie/ts-osi-construct-mapping.md` — coordinate with whoever owns the branch.
+`docs/ossie/ts-ossie-construct-mapping.md` — coordinate with whoever owns the branch.
 
 | # | Change | Severity |
 |---|---|:-:|
@@ -789,7 +789,7 @@ Ordered by blast radius. All are `agents/shared/schemas/` edits.
 
 Between the ground-truth snapshot (~12:57) and this write-up, the other agent landed
 working-tree edits to `thoughtspot-model-tml.md`, `thoughtspot-table-tml.md`,
-`thoughtspot-sql-view-tml.md` and `docs/ossie/ts-osi-construct-mapping.md`. Overlap:
+`thoughtspot-sql-view-tml.md` and `docs/ossie/ts-ossie-construct-mapping.md`. Overlap:
 
 | Census finding | Concurrent-branch status | Census's marginal contribution |
 |---|---|---|
