@@ -816,12 +816,24 @@ issue naming the object and the construct — never a silent drop.
    source instance (e.g. `ts_groups_int`). Relocating a security policy into a portable
    document that other tools will read and rewrite is a hazard, not a convenience.
    `TML → Ossie` raises an issue naming each table that had rules, so the loss is
-   visible. **Two security *booleans* are carved out and stashed**, because unlike a rule
-   expression they name no group and their loss would change results:
-   model-scope `is_bypass_rls`, and column-scope `properties.is_mandatory_token_filter`
-   (ABAC). The second is the sharper case — it **fails open**: with the flag set, a user
-   whose token carries no filter rule for that column is denied all data; drop the flag and
-   that same user sees every value instead of none. A silent drop would therefore *widen*
+   visible — and **that issue is now the loudest one this converter raises.** Per ThoughtSpot
+   domain review, 2026-09-01, `rls_rules` on tables is the mechanism customers are actively
+   migrating *onto*, replacing the ABAC mandatory-token-filter path below. It is no longer one
+   security mechanism among several; it is the primary one. The non-mapping stands — the rule
+   expressions still name instance-local groups, and relocating policy into a document other
+   tools rewrite is still a hazard — but the *consequence* of a reader not noticing has grown,
+   so this is an error-severity issue that names every affected table, never a quiet declared
+   loss buried in a coverage matrix.
+
+   **Two security *booleans* are carved out and stashed**, because unlike a rule expression
+   they name no group and their loss would change results: model-scope `is_bypass_rls`, and
+   column-scope `properties.is_mandatory_token_filter` (ABAC). **They fail in opposite
+   directions, which is the part worth remembering.** Dropping `is_bypass_rls: true` causes RLS
+   to be *applied* where it was previously bypassed — fewer rows, a broken model, but no
+   exposure: it fails **closed**. `is_mandatory_token_filter` is the sharper case — it **fails
+   open**: with the flag set, a user whose token carries no filter rule for that column is
+   denied all data; drop the flag and that same user sees every value instead of none. A silent
+   drop would therefore *widen*
    access, so it is preserved and an issue is raised when it cannot be.
 3. **NM3 — Presentation artifacts: Answers, Liveboards, charts.** Separate TML object
    types with their own identity. Ossie models semantics, not visualisations.
@@ -901,7 +913,7 @@ mention*, which is the class of gap the `calendar` row above belongs to.
 | **V1** | `properties.calendar` — custom / fiscal calendar on a date column | **SUBSTANTIALLY SETTLED 2026-07-30** by a 500-document census. The value is a calendar **name**: two real named calendars observed (`SeanTSCROOTS`, `Dupont_Fiscal_Cal`), with the literal `calendar` as the default spelling (70 sightings across 34 unrelated Models). `CALENDAR_TYPE_GREGORIAN` and `default` were observed **zero** times on any of the four document types. `calendar:` **is** honoured on a **Table** column (`FACT_RETAPP_SALES.RECORDDATE`) and on **formula-backed** Model columns (5 sightings). Custom calendars remain Connection-scoped objects created via `POST /api/rest/2.0/calendars/create` (10.12.0.cl+), none of whose configuration is in TML | **What remains: one question, narrowed.** Is the literal `calendar` a genuine default *sentinel*, or a customer calendar coincidentally named "calendar"? The 34-Model spread across unrelated tenants strongly favours sentinel. Closing it needs a `GET /api/rest/2.0/calendars/…` read on the surveyed cluster, not another export — the remaining leg of **BL-186**, whose body describes it. **The converter behaviour this gated is now decided:** read and stash a calendar *name*; never emit; treat `CALENDAR_TYPE_GREGORIAN` as withdrawn |
 | **V2** | `properties.currency_type` — the `column` and `is_browser` forms | **PARTIALLY SETTLED 2026-07-30.** The `column` form is confirmed live — one sighting, on a **Table** column, carrying a **bare column name** (`{"column": "TARGET_CURRENCY"}`), *not* a `TABLE::Column` reference. That answers half the open question. `is_browser` was observed **zero** times anywhere in 500 documents. All 81 Model sightings and all 5 View sightings used `iso_code` | Two things still open: whether either non-`iso_code` form survives an import/export **round trip** (the census is export-only, so it shows the form exists, not that it survives being written back), and whether `is_browser` is emitted at all on any build |
 | **V3** | `geo_config` naming a **custom map** (`custom_file_guid` + `geometryType`) | **CONFIRMED PRESENT IN PRODUCTION 2026-07-30** — 3 Models / 7 columns in the census, with `geometryType` ∈ {`POLYGON`, `MULTI_POLYGON`}. Previously documented but unevidenced | Nothing to verify for the converter — rule **X8** already forbids stashing a GUID, so this stays settled as a declared loss. The census's contribution is that the declared-loss path is **exercised in the wild**, not hypothetical: real models will hit it. The census also found a **fifth** geo role this document did not name, `country: true` (a bare boolean, 5 sightings) — added to the `geo_config` payload description |
-| **V4** | `properties.is_mandatory_token_filter` — ABAC mandatory filters | Documented: a user with no matching filter rule in their token is denied all data for that column. **Still unevidenced:** observed **zero** times in the 500-document census, so a second, much larger sample has now failed to find it | **STILL FULLY OPEN**, and the census cannot speak to it — a property that never appears cannot be shown to round-trip. That it survives a TML round trip at all remains untested, and it **fails open** if dropped, which is the worst direction for a security flag. It is stashed rather than ignored, but the stash is only as good as the export. Closing this needs a *constructed* object that sets the flag, not a wider survey |
+| **V4** | `properties.is_mandatory_token_filter` — ABAC mandatory filters | **CLOSED 2026-09-01 — will not be verified, and should not be.** Per ThoughtSpot domain review: the mechanism is **legacy and being deprecated**, and customers are actively migrating off it for security reasons onto standard `rls_rules` on tables. Constructing an object to measure the round-trip fidelity of a mechanism on its way out is not a good use of a live instance. **This also re-reads the census's zero.** `is_mandatory_token_filter` appeared **0** times in 500 documents, and this table previously called that a limitation of the instrument — *"a property that never appears cannot be shown to round-trip"*. It was not a measurement failure; it was the finding. Near-zero usage was the product telling us the feature was being retired, and we explained it away. (This repo's own rule says so directly: *"when an audit inventory yields a zero, a never, or a large drift, that is a finding and needs an exit"*.) **Converter behaviour is unchanged:** keep stashing the flag so a model that still carries it round-trips faithfully — deprecated is not the same as inert, and a silent drop still fails open for the shrinking population that has it — but never synthesise one, and do not treat it as a target for `Ossie → TML`. | **CLOSED** |
 
 **Drive-by evidence from the 2026-07-30 G7/G13 probe run** (a 40-model random export sample on
 `se-thoughtspot`, gathered incidentally — none of it closes a verification, and all four stay open):
