@@ -173,6 +173,7 @@ are roughly ordered by value÷effort.
 | BL-116 | Live destructive dependency-manager smoke | — |
 | ~~BL-132~~ | ~~from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake)~~ | DONE (PR #332) |
 | ~~BL-133~~ | ~~`ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing)~~ | DONE (PR #333, #335) |
+| BL-229 | `docs/quality-gates.md` can rot on `main` indefinitely — the freshness gate is scoped to PRs that touch a gate source of truth | next validator pass |
 
 ### Tier 4 — Deferred
 
@@ -8515,3 +8516,59 @@ Remaining exit: probe the four on a live instance, then either add a catalog row
 plus a table row, or route them through a `sql_string_op` pass-through as the six
 BL-170 names are. `check_mapping_code_sync` reports 0 soft findings now, so a
 regression here becomes visible again rather than hiding in a count of 12.
+
+## BL-229 -- `docs/quality-gates.md` can rot on `main` indefinitely, because the freshness gate is scoped to the PRs least likely to fire it `Tier 3`
+
+**Filed:** 2026-09-01.
+**Source:** PR #485 CI. That PR edited four lines of `check_mapping_currency.py` (registering
+`docs/ossie/` in `ANCHORED_DIRS`) and CI hard-failed:
+
+```
+PR touches a quality-gates source of truth — hard-checking docs/quality-gates.md.
+FAIL  docs/quality-gates.md is stale. Run: python3 tools/validate/generate_quality_gates.py
+```
+
+**Affects:** `.github/workflows/validate.yml` (the "Quality gates catalog gate" step),
+`tools/validate/generate_quality_gates.py`, `docs/quality-gates.md`.
+**Status:** OPEN.
+
+**The hole.** The gate is deliberately scoped — it only hard-checks the catalog when the PR
+diff touches `scripts/pre-commit.sh`, `.github/workflows/validate.yml`, or
+`tools/validate/*.py`. That scoping is reasonable per-PR: it is the only way a catalog
+*regeneration* requirement does not tax every docs PR. But it means the catalog's freshness is
+only ever asserted by PRs that happen to touch a validator, and **nothing asserts it on `main`
+between such PRs**.
+
+The evidence that this is real rather than theoretical is in the regeneration PR #485 had to
+do. Three rows changed, and only one belonged to that PR:
+
+| Row | Before | After | Whose drift |
+|---|---|---|---|
+| `converter parity` | 2026-08-26 | 2026-08-28 | pre-existing on `main` |
+| `mapping/code sync` | **`unknown`** | 2026-08-28 | pre-existing on `main` |
+| `mapping currency` | 2026-08-26 | 2026-09-01 | PR #485's own |
+
+So `main` was carrying a stale catalog for days, and it surfaced only because an unrelated
+four-line validator edit tripped the scope. Had PR #485 not touched a validator, it would still
+be stale now.
+
+`mapping/code sync` reading `unknown` is the second finding: that is the shallow-fetch artefact
+the workflow's own inline comment warns about (`.git/shallow` truncating the `git log` walk, as
+first observed on this gate's own first firing in PR #405). The full-history fetch resolved it,
+which means the `unknown` had been sitting in the committed catalog since that gate landed —
+a value that reads as a fact about the validator when it is a fact about how CI cloned the repo.
+
+**The two-bucket exit — a permanent check, not a backlog reminder.** Run
+`python3 tools/validate/generate_quality_gates.py --root . --check` **unscoped** in the weekly
+cron already defined in `.github/workflows/validate.yml` (the same job that runs `pip-audit`).
+Cron has no PR diff to scope against, so the objection that motivated the scoping does not
+apply there, and a weekly assertion bounds staleness at seven days instead of unbounded. Keep
+the scoped hard-fail on PRs exactly as it is — it is doing its job; it is simply not a
+freshness guarantee, and the catalog's own header should not imply that it is.
+
+**Worth checking in the same pass:** whether any other generated artefact is gated the same
+scoped way and therefore has the same hole. `generate_parity.py --check` and
+`generate_open_items_index.py --check` are the obvious candidates — both are generators with a
+`--check` mode, and if either is only wired to a scoped trigger it shares this defect.
+
+**Target:** next validator pass.
