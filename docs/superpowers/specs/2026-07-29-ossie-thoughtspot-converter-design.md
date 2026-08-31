@@ -196,6 +196,12 @@ dated `BL-NNN` in `docs/backlog.md`; trivial fixes as immediate small PRs).
 
 ### Phase 3 — Build the converter (fork of apache/ossie)
 
+> **Superseded 2026-09-01 by [2026-09-01-ossie-converter-foundations-plan.md](2026-09-01-ossie-converter-foundations-plan.md).**
+> The sketch below predates the TPC-DS fidelity run, the TML census, the window-function
+> rework, discussion #325's converter quality bar, and the corrections in PRs #485/#488/#489.
+> It is kept for the record; build from the plan, which splits this phase into four and
+> carries the rule inventory (`ID1`-`ID4`, `X1`-`X9`, `KD1`-`KD3`, `E1`-`E13`) the sketch omits.
+
 Mirror the databricks package shape:
 
 ```
