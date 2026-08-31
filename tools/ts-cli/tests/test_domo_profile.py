@@ -193,36 +193,269 @@ class TestInstanceValidation:
         from ts_cli.domo.client import normalise_instance
         assert normalise_instance(instance) == expected
 
-    def test_no_bypass_flag_exists(self):
-        """A security control with an override is not a control.
+    # --- one test per mechanism, because six of them were asserted by NOTHING ----
+    #
+    # Round 5 deleted each mechanism in turn and the whole file stayed green for six
+    # of nine. Every round-3 host bypass could therefore regress silently. Each test
+    # below was confirmed to go RED when its mechanism is neutered.
 
-        Grepping for literals caught 1 of 8 realistic bypasses (and one of the five it
-        looked for was a `requests` idiom this module doesn't use), so this asserts
-        POSITIVE properties of the code instead: no TLS context is constructed, no
-        env var can relax validation, and every request goes through the one opener.
+    @pytest.mark.parametrize("sep,name", [
+        ("\u3002", "U+3002 IDEOGRAPHIC FULL STOP"),
+        ("\uff0e", "U+FF0E FULLWIDTH FULL STOP"),
+        ("\uff61", "U+FF61 HALFWIDTH IDEOGRAPHIC FULL STOP"),
+        ("\u2024", "U+2024 ONE DOT LEADER"),
+        ("\ufe52", "U+FE52 SMALL FULL STOP"),
+    ])
+    def test_unicode_label_separators_are_refused(self, sep, name):
+        """`acme.domo.com<sep>evil.example` connects to evil.example, displays as Domo.
+
+        Two mechanisms produce a separator — the codec's own `dots` regex and
+        nameprep's NFKC mapping — and the first fix for this held only one set.
+        """
+        from ts_cli.domo.client import DomoError, normalise_instance
+        with pytest.raises(DomoError):
+            normalise_instance(f"https://acme.domo.com{sep}evil.example")
+
+    @pytest.mark.parametrize("shorthand", [
+        "2130706433", "127.1", "0177.1", "0x7f.1", "0x7f000001", "017700000001",
+        "127.0.1", "0",
+    ])
+    def test_ipv4_shorthand_is_canonicalised_before_classification(self, shorthand):
+        """Loopback to the resolver, but not canonical literals.
+
+        `getaddrinfo` is stubbed to FAIL, deliberately. Without that the shorthand is
+        also caught by the resolution guard, so deleting the `inet_aton`
+        canonicalisation left this test green — it was asserting the outcome, which two
+        mechanisms can produce, rather than the mechanism. The two are not redundant:
+        canonicalisation works offline, resolution does not. Verified to go red when
+        the `inet_aton` path is removed.
+        """
+        import socket
+        from unittest import mock
+
+        from ts_cli.domo.client import DomoError, normalise_instance
+
+        def no_dns(*a, **k):
+            raise socket.gaierror("offline")
+
+        with mock.patch.object(socket, "getaddrinfo", no_dns):
+            with pytest.raises(DomoError):
+                normalise_instance(f"https://{shorthand}")
+
+    @pytest.mark.parametrize("host", [
+        "localhost", "LOCALHOST", "localhost.", "localhost.localdomain",
+        "ip6-localhost", "box.localhost", "svc.local", "api.internal",
+        "metadata.google.internal",
+    ])
+    def test_local_hostname_forms_are_refused_by_name(self, host):
+        """Refused without resolving, so an offline machine cannot be tricked either."""
+        from ts_cli.domo.client import DomoError, normalise_instance
+        with pytest.raises(DomoError):
+            normalise_instance(f"https://{host}")
+
+    def test_a_public_name_resolving_to_an_internal_address_is_refused(self):
+        """The resolution guard — the headline of round 4, tested by nothing.
+
+        `getaddrinfo` is stubbed rather than relying on the ambient resolver: the real
+        one made these tests network-dependent, and in isolated CI the
+        `except OSError: return` path meant this classifier never ran at all.
+        """
+        import socket
+        from unittest import mock
+
+        from ts_cli.domo import client as c
+
+        def fake(host, *a, **k):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "",
+                     ("93.184.216.34", 443)),
+                    (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))]
+
+        with mock.patch.object(socket, "getaddrinfo", fake):
+            with pytest.raises(c.DomoError):
+                c.normalise_instance("https://looks-public.example")
+
+    def test_every_resolved_address_is_classified_not_just_the_first(self):
+        """A hostile resolver can put a public address first."""
+        import socket
+        from unittest import mock
+
+        from ts_cli.domo import client as c
+
+        for internal in ("169.254.169.254", "10.0.0.5", "100.64.0.1"):
+            def fake(host, *a, _ip=internal, **k):
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443)),
+                        (socket.AF_INET, socket.SOCK_STREAM, 6, "", (_ip, 443))]
+            with mock.patch.object(socket, "getaddrinfo", fake):
+                with pytest.raises(c.DomoError):
+                    c.normalise_instance("https://looks-public.example")
+
+    def test_an_unresolvable_host_is_not_fatal(self):
+        """The CLI must work offline; resolution is a best-effort guard, not a gate."""
+        import socket
+        from unittest import mock
+
+        from ts_cli.domo import client as c
+
+        def boom(*a, **k):
+            raise socket.gaierror("no DNS")
+
+        with mock.patch.object(socket, "getaddrinfo", boom):
+            assert c.normalise_instance("https://acme.domo.com") == \
+                "https://acme.domo.com"
+
+    def test_non_ascii_host_is_idna_encoded_before_validation(self):
+        """What is validated must be what urllib sends.
+
+        `①②⑦.0.0.1` NFKC/IDNA-expands to `127.0.0.1`, so classifying the raw string
+        would check a host nothing ever connects to. (Getting the circled digit wrong
+        by one gives `128.0.0.1`, which is public and correctly ACCEPTED — the first
+        draft of this test did exactly that and read as a gap in the code.)
+        """
+        from ts_cli.domo.client import DomoError, normalise_instance
+        with pytest.raises(DomoError):
+            normalise_instance("https://\u2460\u2461\u2466.0.0.1")
+
+    @pytest.mark.parametrize("instance", [
+        "https://acme.domo.com#frag",
+        "https://acme.domo.com?q=1",
+        "https://acme.domo.com/some/path",
+    ])
+    def test_fragment_path_and_query_are_refused(self, instance):
+        """An EMPTY fragment or query is deliberately allowed — nothing to smuggle."""
+        from ts_cli.domo.client import DomoError, normalise_instance
+        with pytest.raises(DomoError):
+            normalise_instance(instance)
+
+    @pytest.mark.parametrize("host", [
+        "100.64.0.1", "100.127.255.254",
+    ])
+    def test_cgnat_is_refused_independently_of_interpreter_version(self, host):
+        """CPython 3.13 dropped 100.64/10 from `_private_networks`.
+
+        The old flag union delegated "internal" to the interpreter, so the same source
+        accepted this on 3.13+ and refused it on <=3.12 — both inside
+        `requires-python = ">=3.10,<3.15"`. 100.64/10 is the EKS/Fargate and GKE
+        pod CIDR. `not is_global` is version-stable.
+        """
+        import ipaddress
+
+        from ts_cli.domo.client import DomoError, normalise_instance
+        assert ipaddress.ip_address(host).is_global is False
+        with pytest.raises(DomoError):
+            normalise_instance(f"https://{host}")
+
+    def test_tls_verification_is_actually_on(self):
+        """Inspect the LIVE SSL context, not the source text.
+
+        The previous version grepped six substrings for a TLS control surface and
+        called that a positive property. It is a denylist, and a three-line split
+        walks through it while the whole file stays green (PR #440 review, round 5):
+
+            _m = _il.import_module("s" + "sl")
+            _U = _m.__dict__["_create" + "_unverified" + "_context"]()
+            self._opener = urllib.request.build_opener(_NoRedirect,
+                            urllib.request.HTTPSHandler(context=_U))
+
+        That handed a token to a self-signed MITM server with all 33 tests passing.
+        A property cannot be evaded by spelling, so this asks the constructed opener
+        what its context actually does.
+        """
+        import ssl
+        import urllib.request
+
+        from ts_cli.domo.client import DomoClient
+
+        c = DomoClient("acme.domo.com", "tok")
+        https = [h for h in c._opener.handlers
+                 if isinstance(h, urllib.request.HTTPSHandler)]
+        assert https, "no HTTPSHandler on the opener"
+        contexts = [getattr(h, "_context", None) for h in https]
+        for ctx in contexts:
+            if ctx is None:
+                continue  # handler defers to ssl.create_default_context()
+            assert ctx.verify_mode == ssl.CERT_REQUIRED, (
+                f"TLS verification is off: verify_mode={ctx.verify_mode!r}")
+            assert ctx.check_hostname is True, "hostname checking is off"
+
+    def test_redirects_are_refused_by_the_installed_opener(self):
+        """The no-redirect handler is present and is the one that runs.
+
+        Asserted on the opener rather than by grepping for `build_opener`, because
+        replacing the opener with a plain `build_opener()` was one of the bypasses the
+        old text-based check missed.
+        """
+        import urllib.request
+
+        from ts_cli.domo.client import DomoClient, _NoRedirect
+
+        c = DomoClient("acme.domo.com", "tok")
+        assert any(isinstance(h, _NoRedirect) for h in c._opener.handlers), \
+            "the redirect-refusing handler is not installed"
+        assert not any(
+            type(h) is urllib.request.HTTPRedirectHandler
+            for h in c._opener.handlers), "the default redirect handler is installed"
+
+    def test_no_environment_variable_can_relax_validation(self):
+        """Behavioural, not a grep: set every plausible kill-switch and re-probe.
+
+        The old check scanned source lines for `os.environ`/`getenv`, which
+        `from os import environ` defeats — and that missed a working
+        `DOMO_ALLOW_INTERNAL=1` switch over the whole host classifier.
+        """
+        import os
+        from unittest import mock
+
+        from ts_cli.domo.client import DomoError, normalise_instance
+
+        names = [
+            "DOMO_ALLOW_INTERNAL", "DOMO_ALLOW_HTTP", "DOMO_INSECURE",
+            "DOMO_SKIP_VERIFY", "DOMO_ALLOW_PRIVATE", "DOMO_DISABLE_VALIDATION",
+            "PYTHONHTTPSVERIFY", "SSLKEYLOGFILE", "DOMO_NO_VERIFY",
+        ]
+        for name in names:
+            with mock.patch.dict(os.environ, {name: "1"}, clear=False):
+                for host in ("127.0.0.1", "169.254.169.254", "100.64.0.1"):
+                    with pytest.raises(DomoError):
+                        normalise_instance(f"https://{host}")
+                with pytest.raises(DomoError):
+                    normalise_instance("http://acme.domo.com")
+
+    def test_validation_cannot_be_opted_out_of(self):
+        """No constructor argument or attribute skips `normalise_instance`.
+
+        `DomoClient(validate=False)` is the literal "security control with an
+        override" the old docstring named, and nothing caught it.
         """
         import inspect
 
+        from ts_cli.domo.client import DomoClient, DomoError
+
+        params = inspect.signature(DomoClient.__init__).parameters
+        for name in params:
+            assert not any(tok in name.lower() for tok in
+                           ("validate", "verify", "insecure", "skip", "unsafe")), \
+                f"DomoClient.__init__ exposes an opt-out parameter: {name}"
+        with pytest.raises(DomoError):
+            DomoClient("127.0.0.1", "tok")
+
+    def test_the_cli_layer_adds_no_insecure_flag(self):
+        """The old check read only client.py, so `--insecure` on the command was free."""
+        import inspect
+
+        from ts_cli.commands import domo as domo_cmd
+        src = inspect.getsource(domo_cmd)
+        for banned in ("insecure", "no-verify", "skip-verify", "allow-http",
+                       "allow_internal"):
+            assert banned not in src.lower(), f"CLI exposes a bypass: {banned}"
+
+    def test_exactly_one_request_path(self):
+        import inspect
+
         from ts_cli.domo import client
+
         src = inspect.getsource(client)
-
-        # No way to build or weaken an SSL context.
-        for banned in ("ssl.", "_create_unverified", "SSLContext", "CERT_NONE",
-                       "check_hostname", "verify=False", "verify = False"):
-            assert banned not in src, f"TLS control surface present: {banned}"
-
-        # Validation must not be reachable from the environment.
-        env_reads = [ln for ln in src.splitlines()
-                     if "os.environ" in ln or "getenv" in ln]
-        for ln in env_reads:
-            assert "token_env" in ln or "env_var" in ln, (
-                f"environment read outside credential resolution: {ln.strip()}")
-
-        # Exactly one request path, and it uses the redirect-refusing opener.
         assert src.count("urlopen(") == 0, "a bare urlopen bypasses the opener"
         assert src.count("self._opener.open(") == 1, "more than one request path"
-
-        # The scheme allowlist is a constant, not a parameter.
         assert '_ALLOWED_SCHEMES = ("https",)' in src
 
     def test_control_bytes_are_stripped_from_server_text(self):

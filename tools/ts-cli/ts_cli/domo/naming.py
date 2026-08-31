@@ -63,6 +63,27 @@ _REF = re.compile(r"\[([^\[\]]+)\]")
 FORMULA_ID_PREFIX = "formula_"
 
 
+def _strip_reserved_prefix(name: str, kind: str) -> tuple[str, str]:
+    """`(candidate, reason)` for a source name that intrudes on the id namespace.
+
+    `model_builder` mints formula ids as `formula_<display name>`, so ANY Model object
+    displayed as `formula_X` aliases the id of an object named `X`. The prefix is
+    STRIPPED, never suffixed — a rename to `formula_Net (column)` leaves the alias in
+    place, which was the first attempt at this in round 4.
+
+    Both the column pass and the formula pass call this. Round 4 had the rule inline in
+    the column pass only, and the formula pass therefore left a Beast Mode named
+    `formula_Net` displayed with the prefix intact — one rule, two passes, applied in
+    one. That asymmetry is the recurring shape of this converter's binding bugs, so the
+    rule has exactly one home.
+    """
+    if not name.startswith(FORMULA_ID_PREFIX):
+        return name, ""
+    stem = name[len(FORMULA_ID_PREFIX):].strip() or kind
+    return (f"{stem} ({kind})",
+            f"'{FORMULA_ID_PREFIX}' is reserved for generated formula ids")
+
+
 def _norm(s: str) -> str:
     """Normalised key for collision comparison.
 
@@ -149,16 +170,36 @@ class Index:
     def rewrite(self, expr: str, dataset_id: Optional[str]) -> tuple[str, list[str]]:
         """Rewrite `[raw]` refs in `expr` to Model names for one dataset.
 
-        A `[formula_X]` ref is an already-resolved generated id and passes through —
-        which is only safe because `build_index` reserves that prefix, so `formula_X`
-        cannot also be a column.
+        EVERY ref is resolved, including one spelled `formula_X`. There used to be a
+        pass-through for that prefix, justified as "an already-resolved generated id,
+        safe because `build_index` reserves the prefix". Both halves were wrong, and
+        the combination was the fifth wrong-binding path on this converter (PR #440
+        review, round 5):
+
+        * **Nothing reaching here is a generated id.** `rewrite` has one call site,
+          `build_model._translate_one`, and it runs on the *output of
+          `functions.translate`* — which converts Domo backticks to brackets and
+          emits SOURCE names only. Generated ids are minted later, by
+          `model_builder.add_formula_prefix` during assembly. So every `[formula_X]`
+          arriving here is a Domo name that merely starts with those characters.
+        * **The reservation is on the wrong side of the rename.** `build_index`
+          reserves the prefix in the *Model display-name* namespace — a source column
+          `formula_Net` is renamed to `Net (column)`. The pass-through fired on the
+          *raw source* name, pre-rename. So it checked a source-side name against an
+          output-side guarantee, which is this bug class's signature: two
+          representations, the check applied to the wrong one.
+
+        The observable failure: a Domo column `formula_Net` holding money, alongside
+        a Beast Mode `Net`, made `SUM(`formula_Net`) * 0.9` emit
+        `[formula_Net] * 0.9` — binding to the *formula* `Net` rather than the money
+        column, reported `Migrated`, and `ts tml lint` clean. Wrong numbers, silently.
+        The variant where the ref instead dangles was caught by lint, so the bug was
+        loud when harmless and silent when harmful.
         """
         unresolved: list[str] = []
 
         def _sub(m: re.Match) -> str:
             raw = m.group(1)
-            if raw.startswith(FORMULA_ID_PREFIX):
-                return m.group(0)
             resolved = self.resolve(dataset_id, raw)
             if resolved is None:
                 unresolved.append(raw)
@@ -280,16 +321,7 @@ def build_index(app: DomoApp) -> Index:
                     "reason": "duplicate raw column name on this dataset — only the "
                               "first occurrence is mapped"})
                 continue
-            candidate = c.name
-            reason = ""
-            if candidate.startswith(FORMULA_ID_PREFIX):
-                # Reserved: `formula_X` would alias the generated id of a Beast Mode
-                # named X, and every reference to either would bind to whichever the
-                # Model resolved first. The prefix is STRIPPED, not suffixed — keeping
-                # it would leave the alias in place.
-                stem = c.name[len(FORMULA_ID_PREFIX):].strip() or "column"
-                candidate = f"{stem} (column)"
-                reason = f"'{FORMULA_ID_PREFIX}' is reserved for generated formula ids"
+            candidate, reason = _strip_reserved_prefix(c.name, "column")
             display = ns.reserve(candidate, table)
             if display != c.name:
                 index.renames.append({
@@ -303,14 +335,24 @@ def build_index(app: DomoApp) -> Index:
     for bm in deduped_beast_modes(app):
         table = index.table_by_dataset.get(bm.data_source_id) or ""
         clashes_with_column = ns.taken(bm.name)
-        name = ns.reserve(bm.name, table)
+        # The prefix is stripped from Beast Mode names too, not just columns. Round 4
+        # applied this to the column pass only, which left a Beast Mode *named*
+        # `formula_Net` displayed as `formula_Net` while its generated id became
+        # `formula_formula_Net` — and `formula_common.add_formula_prefix` skips any ref
+        # already starting with the prefix, so a sibling's `[formula_Net]` was never
+        # prefixed and dangled. Two passes, one rule, applied in one of them: the same
+        # shape as every other bug in this class, which is why the rule now lives in
+        # `_strip_reserved_prefix` and both passes call it.
+        candidate, prefix_reason = _strip_reserved_prefix(bm.name, "measure")
+        name = ns.reserve(candidate, table)
         # Reserve the generated id too, so no later name can alias it.
         ns.reserve(f"{FORMULA_ID_PREFIX}{name}")
         if name != bm.name:
             index.formula_renames.append({
                 "dataset": table, "from": bm.name, "to": name,
-                "reason": ("collides with a column or table name" if clashes_with_column
-                           else "the same Beast Mode name exists on another dataset")})
+                "reason": (prefix_reason or
+                           ("collides with a column or table name" if clashes_with_column
+                            else "the same Beast Mode name exists on another dataset"))})
         index.formulas_by_dataset[(bm.data_source_id or "", bm.name)] = name
         index.formula_names.add(name)
 

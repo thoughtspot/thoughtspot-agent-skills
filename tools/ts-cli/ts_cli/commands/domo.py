@@ -59,7 +59,7 @@ def signin_cmd(
     profile: Optional[str] = typer.Option(None, "--profile", "-p",
         help="Domo profile name (see /ts-profile-domo). Omit if only one is configured."),
 ) -> None:
-    """Verify a Domo profile's developer token by making one authenticated call.
+    """Verify a Domo profile's developer token by making two authenticated calls.
 
     Never prints the token. Reports what the token can actually reach, which is the
     thing worth knowing: the internal endpoints are undocumented and scope-dependent.

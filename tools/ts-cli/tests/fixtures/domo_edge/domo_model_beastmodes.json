@@ -1,5 +1,5 @@
 {
-  "totalHits": 9,
+  "totalHits": 11,
   "results": [
     {
       "id": 2001,
@@ -72,6 +72,22 @@
       "status": "INVALID",
       "formula": "SUM(`Revenue`)",
       "dataSourceId": "aaaa1111-0000-4000-8000-000000000001"
+    },
+    {
+      "id": 2101,
+      "name": "formula_Prefixed",
+      "global": true,
+      "status": "VALID",
+      "formula": "SUM(`Revenue`)",
+      "dataSourceId": "bbbb2222-0000-4000-8000-000000000002"
+    },
+    {
+      "id": 2102,
+      "name": "Uses Prefixed",
+      "global": true,
+      "status": "VALID",
+      "formula": "SUM(`formula_Net Revenue`) - `formula_Prefixed`",
+      "dataSourceId": "bbbb2222-0000-4000-8000-000000000002"
     }
   ]
 }

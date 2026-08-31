@@ -74,8 +74,8 @@ so the token resolves from the env var without a keychain prompt on every call.
 ts domo signin --profile "{PROFILE_NAME}"
 ```
 
-Makes one authenticated call and reports which endpoint families the token actually reaches
-(`datasets`, `pages`) — never printing the token. A `FAILED:` entry for both means the token or
+Makes two authenticated calls — one per endpoint family — and reports which the token
+actually reaches (`datasets`, `pages`) — never printing the token. A `FAILED:` entry for both means the token or
 instance URL is wrong; a partial result means the token is valid but scoped narrowly, which is
 worth telling the user before they rely on it.
 
@@ -110,16 +110,22 @@ macOS), and removing the `~/.zshenv` export line.
 - Never enter the developer token in this conversation — always via the keychain command in the
   user's own terminal.
 - The token is resolved lazily at call time and held in memory only.
-- **Never pass a secret through `--field`.** `ts profiles add --field` writes whatever it is
-  given straight into `~/.claude/domo-profiles.json`, which is created mode `0644`. It is for
-  non-secret metadata (`instance`) only.
+- **Never pass a secret through `--field`.** `--field` is for non-secret metadata
+  (`instance`) only; the token belongs in the OS keychain via Step 3, with only the env-var
+  *name* in the profile.
 
-  `ts profiles list` strips *credential-location* fields (`token_env`, `secret_env`, …) — those
-  name an env var, not a value. It does **not** strip a literal secret stored under some other
-  key, because it cannot know one is there. So a `--field token=…` would persist in cleartext
-  and be echoed back by `ts profiles list --domo --json`. This is a limitation of the shared
-  `ts profiles` substrate, not something this skill can guard; the correct flow is Step 3, which
-  puts the token in the OS keychain and leaves only the env-var *name* in the profile.
+  As of **ts-cli 0.134.0** the CLI enforces this rather than relying on the reader:
+  `ts profiles add/update` **refuse** a `--field` whose key names a credential value
+  (`token`, `password`, `secret`, `pat_secret`, `api_key`, …), all-or-nothing across the
+  whole `--field` set, and `list`/`add`/`update` strip both credential *pointers* and any
+  literal secret an older profile still carries. See `.claude/rules/security.md`.
+
+  This paragraph previously described the *opposite* — that a `--field token=…` would
+  persist in cleartext and be echoed back by `ts profiles list --domo --json`, and that the
+  substrate could not guard it. That was true when written and was fixed in #480/#483. It is
+  recorded here because a guardrail described as **absent when it exists** misleads in the
+  same way as one described as present when it does not: it tells the reader not to rely on a
+  protection they have.
 - The client requires `https://` and refuses redirects — a redirect target would otherwise be
   handed the token, because urllib replays custom headers onto the new host. Server response
   bodies are never printed (only the status code and a control-character-stripped reason),

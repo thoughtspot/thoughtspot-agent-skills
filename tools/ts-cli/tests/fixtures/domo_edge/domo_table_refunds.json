@@ -5,11 +5,30 @@
   "rows": 1200,
   "schema": {
     "columns": [
-      { "type": "STRING", "name": "Order ID" },
-      { "type": "STRING", "name": "Region" },
-      { "type": "DATETIME", "name": "Date" },
-      { "type": "DOUBLE", "name": "Revenue" },
-      { "type": "STRING", "name": "Reason" }
+      {
+        "type": "STRING",
+        "name": "Order ID"
+      },
+      {
+        "type": "STRING",
+        "name": "Region"
+      },
+      {
+        "type": "DATETIME",
+        "name": "Date"
+      },
+      {
+        "type": "DOUBLE",
+        "name": "Revenue"
+      },
+      {
+        "type": "STRING",
+        "name": "Reason"
+      },
+      {
+        "type": "DOUBLE",
+        "name": "formula_Net Revenue"
+      }
     ]
   }
 }

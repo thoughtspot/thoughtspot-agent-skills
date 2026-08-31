@@ -16,7 +16,7 @@ of the family so downstream tooling and the audit mode can read all converters u
 {
   "source": { "mode": "offline|domo-cloud", "app_name": "Sales Overview" },
   "datasets": [
-    { "domo_id": "61c4e63d-…", "name": "Sample Sales Transactions",
+    { "domo_id": "00000006-…", "name": "Sample Sales Transactions",
       "ts_table": "Sample Sales Transactions", "columns": 10, "status": "Migrated" }
   ],
   "joins": [

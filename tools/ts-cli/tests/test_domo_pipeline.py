@@ -106,6 +106,36 @@ class TestOutputIsSelfConsistent:
             for ref in re.findall(r"\[(formula_[^\]]+)\]", f["expr"]):
                 assert ref in ids, f"{f['id']} references missing {ref}"
 
+    def test_no_reference_is_ambiguous_between_a_column_and_a_formula_id(
+        self, tmp_path, bundle_id
+    ):
+        """EXISTENCE is not IDENTITY, and asserting the first hid five bugs.
+
+        `test_every_formula_id_referenced_exists` above checks a `[formula_X]` ref
+        resolves to *something*. That is satisfiable by the wrong object: a Domo column
+        named `formula_Net` and a Beast Mode named `Net` both produced the string
+        `formula_Net` — one as a column, one as a generated id — so a reference authored
+        against the money column bound to `sum([Qty])` instead, imported cleanly, and
+        reported `Migrated` (PR #440 review, round 5; the fifth path in this class, and
+        the fifth time a test asserting existence read as a test asserting correctness).
+
+        The Model-level invariant that forecloses it: no string may name both a column
+        and a formula id, so no reference can be ambiguous in the first place.
+        """
+        m = model_of = _run(tmp_path, bundle_id)[2]["model"]
+        display_names = {c["name"] for c in model_of["columns"]}
+        formula_ids = {f["id"] for f in model_of["formulas"]}
+        clash = display_names & formula_ids
+        assert not clash, (
+            f"these strings name BOTH a column and a formula id, so any reference to "
+            f"them is ambiguous: {sorted(clash)}")
+
+        # And nothing the Model exposes may carry the generated-id prefix, which is
+        # what makes the ambiguity possible.
+        assert not [n for n in display_names if n.startswith("formula_")], (
+            "a column display name carries the reserved 'formula_' prefix")
+        del m
+
     def test_mapping_rows_describe_what_was_emitted(self, tmp_path, bundle_id):
         """The mapping is what the report reads, so it must match the TML exactly."""
         m, lb, model, liveboard, _rpt = _run(tmp_path, bundle_id)

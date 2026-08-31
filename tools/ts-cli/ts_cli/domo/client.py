@@ -54,10 +54,13 @@ can raise before it is used, so it cannot be rendered into a traceback.
 from __future__ import annotations
 
 import ipaddress
+import http.client
 import json
 import os
 import re
 import socket
+import unicodedata
+import encodings.idna as _idna_module
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -67,9 +70,26 @@ from typing import Any, Callable, Optional
 # downgraded, because the credential travels in a header on every request.
 _ALLOWED_SCHEMES = ("https",)
 
-# Unicode characters Python's IDNA codec treats as label separators. A host carrying
-# one connects somewhere other than what the UI renders.
-_IDNA_SEPARATORS = ("\u3002", "\uff0e", "\uff61")
+# Unicode characters that become label separators in the ASCII host, so a host
+# carrying one connects somewhere other than what every UI string renders.
+#
+# DERIVED from both mechanisms, not listed. Two are in play and each alone is
+# incomplete — the hand-written list held one set, and replacing it with the other
+# lost members the first had (PR #440 review, round 5, and then the first attempt at
+# this fix):
+#
+#   1. `encodings.idna.dots` — the codec's own separator regex:  . 。 ． ｡
+#   2. nameprep's NFKC mapping, applied per label AFTER splitting, which turns any
+#      codepoint whose NFKC form is "." into a real separator:   ․ ﹒ ．
+#
+# The union is what actually reaches the wire, so the union is what is refused. Both
+# sets are computed at import, so a future Unicode or CPython revision cannot quietly
+# add a fifth spelling.
+_IDNA_SEPARATORS = tuple(sorted(
+    {c for c in map(chr, range(0x110000))
+     if c != "." and unicodedata.normalize("NFKC", c) == "."}
+    | {c for c in _idna_module.dots.pattern if c not in ".[]"}
+))
 
 # Hostname forms that mean "this machine" without being IP literals.
 _LOCAL_NAMES = {"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback"}
@@ -109,9 +129,30 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
             "developer token would be replayed onto that host. Check the instance URL.")
 
 
+# Response cap. Large enough for any real Domo payload this client reads (the biggest
+# is a dataset list at `limit=200`), small enough that a hostile host cannot exhaust
+# memory before the timeout fires.
+_MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+
+
 def _is_internal(ip) -> bool:
-    return bool(ip.is_loopback or ip.is_link_local or ip.is_private or ip.is_reserved
-                or ip.is_multicast or ip.is_unspecified)
+    """True for any address that is not publicly routable.
+
+    `not is_global` is the primary test, deliberately, because the flag union this
+    replaced delegated the definition of "internal" to the interpreter version.
+    CPython 3.13 removed `100.64.0.0/10` (CGNAT) from `IPv4Address._private_networks`,
+    so `is_private` is False there and True on <=3.12 — meaning the SAME source
+    accepted a CGNAT host on 3.13+ and refused it on 3.12, both inside this package's
+    `requires-python = ">=3.10,<3.15"` (PR #440 review, round 5). 100.64/10 is the
+    pod/node CIDR on EKS/Fargate and GKE, i.e. exactly where a migration CLI runs.
+
+    The explicit flags are kept as an OR rather than dropped: `is_global` is False for
+    everything they cover, but stating them documents the intent and survives any
+    future change to how `is_global` treats reserved or multicast space.
+    """
+    return bool(not ip.is_global or ip.is_loopback or ip.is_link_local
+                or ip.is_private or ip.is_reserved or ip.is_multicast
+                or ip.is_unspecified)
 
 
 def _as_ip(host: str):
@@ -281,10 +322,19 @@ class DomoClient:
             self._url(path), data=data, headers=self._headers(), method=method)
         try:
             with self._opener.open(req, timeout=self.timeout) as resp:
+                # BOUNDED. An unbounded read against a chunked flood reached 7.3 GB
+                # RSS in 2.7 s (round 5) — `timeout` bounds idle time, not
+                # throughput, and the whole host-validation apparatus exists for
+                # "a host the operator was tricked into naming".
+                body = resp.read(_MAX_RESPONSE_BYTES + 1)
+                if len(body) > _MAX_RESPONSE_BYTES:
+                    raise DomoError(
+                        f"{method} {path} -> response exceeded "
+                        f"{_MAX_RESPONSE_BYTES} bytes and was not read")
                 # errors="replace": a non-UTF-8 body raised an uncaught
                 # UnicodeDecodeError that replaced the reachability report with a
                 # traceback.
-                raw = resp.read().decode("utf-8", errors="replace")
+                raw = body.decode("utf-8", errors="replace")
                 return json.loads(raw) if raw else None
         except urllib.error.HTTPError as e:
             # Status + reason only. The response BODY is attacker-controlled and
@@ -300,6 +350,15 @@ class DomoClient:
             raise DomoError(f"{method} {path} -> response was not decodable") from None
         except json.JSONDecodeError:
             raise DomoError(f"{method} {path} -> response was not JSON") from None
+        except http.client.HTTPException as e:
+            # `IncompleteRead`, `BadStatusLine` and `InvalidURL` are NOT OSError
+            # subclasses, so urllib never wraps them as URLError and they escaped as
+            # tracebacks — a truncated body or a non-HTTP answer crashed
+            # `ts domo signin` (round 5). Type name only; the message can carry
+            # server bytes.
+            raise DomoError(
+                f"{method} {path} -> malformed HTTP response "
+                f"({type(e).__name__})") from None
 
     def _get(self, path: str) -> Any:
         return self._request(path, "GET")
