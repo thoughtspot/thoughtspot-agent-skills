@@ -1,10 +1,11 @@
+<!-- currency: ossie — 2026-08 (apache/ossie @ b5da5d6; core-spec unchanged since 0.2.0.dev0) -->
 # ThoughtSpot TML ↔ Ossie construct mapping
 
 **Status:** post-ready (last touched 2026-07-30) — internally reviewed and complete; publication
 to apache/ossie#285 is **held pending legal review**, and nothing has been posted
 · **Ossie spec version:** `0.2.0.dev0`
 (`core-spec/spec.yaml:20`, `core-spec/spec.md:24`; all Ossie citations below are
-`path:line` against apache/ossie @ `c26b61c`) · **TS ground truth:**
+`path:line` against apache/ossie @ `b5da5d6`) · **TS ground truth:**
 `agents/shared/schemas/thoughtspot-model-tml.md`,
 `agents/shared/schemas/thoughtspot-table-tml.md` and
 `agents/shared/schemas/thoughtspot-view-tml.md` — internal paths in the ThoughtSpot
@@ -85,8 +86,8 @@ vendor-extension field of any kind. So:
   issue; the rows below mark them `lossy→issue`, and the datatype table names the
   collapses explicitly.
 
-`data` is a JSON **string**, not a nested object: `osi-schema.json:73-76` types it
-`"string"` and `osi-schema.json:66-80` sets `additionalProperties: false` on the
+`data` is a JSON **string**, not a nested object: `ossie-schema.json:73-76` types it
+`"string"` and `ossie-schema.json:66-80` sets `additionalProperties: false` on the
 extension object, so a nested payload is a schema-validation failure rather than a style
 choice (`core-spec/spec.md:426-430` says the same). Two rules follow: the payload schema
 below describes the *content of that string*, and any round-trip comparison must
@@ -128,7 +129,7 @@ Rules the converter follows in both directions:
 ## Semantic model level
 
 Ossie schema: `core-spec/spec.md:88-96`; required keys `name` and `datasets`
-(`osi-schema.json:348`).
+(`ossie-schema.json:348`).
 
 | Ossie | ThoughtSpot | Direction notes | Fidelity |
 |---|---|---|---|
@@ -155,15 +156,15 @@ in two tools. That is upstream ask [**A3**](#open-questions-and-upstream-asks).
 ## Dataset level
 
 Ossie schema: `core-spec/spec.md:124-133`; required keys `name` and `source`
-(`osi-schema.json:225`).
+(`ossie-schema.json:225`).
 
 | Ossie | ThoughtSpot | Direction notes | Fidelity |
 |---|---|---|---|
 | `name` | Table `table.name`, which must equal the `model_tables[]` `name` exactly (case-sensitive) | **One dataset per participating entry, not per physical table.** When one physical table participates twice (self-join, or one dimension in two roles) each `model_tables[]` entry carries a distinct `alias` and `column_id` prefixes use the alias (Model TML reference, *`model_tables[]` fields*). Each alias is its own Ossie dataset with the same `source`; `alias` and the underlying table name are stashed so the return trip rebuilds aliases instead of duplicate Table objects | lossless / via custom_extensions (alias) |
 | `source` | `db` + `schema` + `db_table`, joined as `DB.SCHEMA.TABLE`; or, for a `sql_view:`, the `sql_query` string | Ossie explicitly allows `source` to be a query (`core-spec/spec.md:127`), so a `source` that is not a three-part identifier becomes a `sql_view:` document. The parts are stashed individually when any part contains a `.` and the dotted form would be ambiguous | lossless |
 | (`source`'s warehouse binding) | Table `connection.name` | ThoughtSpot reaches the warehouse through a **named Connection object**; the Table TML reference requires `connection.name` (a display name, never a GUID, and `fqn:` inside a connection block must never appear). Ossie has no connection concept → stashed as `connection_name`. `Ossie → TML` cannot emit a valid Table document without one, so a hand-authored Ossie document with no stash requires the connection name as a converter argument; absent both, `lossy→issue` | via custom_extensions |
-| `primary_key` | no key declaration exists in Table TML | `TML → Ossie`: derived — the ordered `to_columns` of relationships that target this dataset with a to-one cardinality are its key evidence; omitted when not derivable. `Ossie → TML`: a key that no relationship uses has nowhere to go. Upstream precedent binds the same pair to a join hint (`rely.at_most_one_match`, `converters/databricks/README.md:85`); TML has no equivalent hint. See ask [**A7**](#open-questions-and-upstream-asks) | lossless (join-derived) / lossy→issue (unused keys) |
-| `unique_keys` | no key declaration exists in Table TML | Never emitted `TML → Ossie` — nothing in TML distinguishes a unique key from a join target. Dropped with an issue on the way in | lossy→issue |
+| `primary_key` | no key declaration exists in Table TML | `TML → Ossie`: derived, but only from **qualifying** relationships — see [**Key derivation and `to_columns` coverage**](#key-derivation-and-to_columns-coverage). A relationship qualifies only when it targets this dataset with a to-one cardinality **and** its condition is wholly expressed by its equality pairs. Emitted only when the qualifying relationships agree on a single column set; where they disagree the candidates go to `unique_keys` and no `primary_key` is emitted, because choosing one is a guess. Omitted entirely when nothing qualifies. `Ossie → TML`: a key that no relationship uses has nowhere to go. Upstream precedent binds the same pair to a join hint (`rely.at_most_one_match`, `converters/databricks/README.md:85`); TML has no equivalent hint. See ask [**A7**](#open-questions-and-upstream-asks) | lossless (join-derived) / lossy→issue (unused keys) |
+| `unique_keys` | no key declaration exists in Table TML | `TML → Ossie`: **every distinct qualifying `to_columns` set** is emitted as a `unique_keys` entry. A to-one join whose condition is wholly its equality pairs *is* an assertion that those columns are unique in the target, so restating it is faithful rather than inventive — and it keeps every sibling relationship covered under upstream's key-coverage check (below). A *declared* unique key the join graph does not witness is indistinguishable from any other column set in TML, so it cannot be recovered and is dropped with an issue on the way in | lossless (join-witnessed) / lossy→issue (unwitnessed keys) |
 | `description` | Table `table.description` | Documented in the Table TML reference, *`columns[]` fields* (the `table.description` row) | lossless |
 | `ai_context` | — | No table-scope synonym or instruction field in Table TML | lossy→issue |
 | `fields` | Table `columns[]`, surfaced by the Model `columns[]` entries whose `column_id` prefix is this dataset, plus ATTRIBUTE `formulas[]` attributed to it | See [Field and metric level](#field-and-metric-level). Table columns the Model does not surface are not part of the semantic model, so they are not emitted as fields; they are stashed as `unsurfaced_columns` so the Table document can be regenerated exactly | mixed |
@@ -172,7 +173,7 @@ Ossie schema: `core-spec/spec.md:124-133`; required keys `name` and `source`
 ## Relationship level
 
 Ossie schema: `core-spec/spec.md:183-191`; required keys `name`, `from`, `to`,
-`from_columns`, `to_columns` (`osi-schema.json:270`). Ossie models a relationship as a
+`from_columns`, `to_columns` (`ossie-schema.json:270`). Ossie models a relationship as a
 foreign-key **equality** between two ordered column lists, oriented many (`from`) → one
 (`to`). It has no join-type field and no cardinality field.
 
@@ -204,13 +205,13 @@ and the dividing line is set by the schema, not by taste:
 | Case | `TML → Ossie` behaviour | Fidelity |
 |---|---|---|
 | **At least one equality pair** (the common shape — an FK equality narrowed by an effective-date window, a timezone bridge, or a constant discriminator) | Emit the `Relationship`, with `from_columns`/`to_columns` carrying **only** the equality pairs. The residual predicates go into the relationship's own `custom_extensions` entry as `residual_predicates[]`, alongside the verbatim `on_expression`. An issue of severity `warning` records that the emitted relationship is **weaker than the source join** — a consumer that reads only `from_columns`/`to_columns` will join more rows than ThoughtSpot does | via custom_extensions |
-| **No equality pair at all** (a pure range or pure constant join) | No relationship is emitted, because `from_columns` and `to_columns` are both `required` (`osi-schema.json:270`) **and** carry `minItems: 1` (`osi-schema.json:249`, `:257`) — a bare relationship with empty column arrays is a hard schema-validation failure, not a permitted degenerate form. The condition is stashed at model scope under `unrepresentable_joins[]` and an issue is raised. This is the **only** case that keeps the old model-scope-stash fallback | lossy→issue |
+| **No equality pair at all** (a pure range or pure constant join) | No relationship is emitted, because `from_columns` and `to_columns` are both `required` (`ossie-schema.json:270`) **and** carry `minItems: 1` (`ossie-schema.json:249`, `:257`) — a bare relationship with empty column arrays is a hard schema-validation failure, not a permitted degenerate form. The condition is stashed at model scope under `unrepresentable_joins[]` and an issue is raised. This is the **only** case that keeps the old model-scope-stash fallback | lossy→issue |
 
 Two things make this safe to do:
 
 - **`custom_extensions` is permitted on a `Relationship`.** It is a documented optional field
   of the construct — `core-spec/spec.md:191` ("`custom_extensions` | array | No |
-  Vendor-specific attributes") and `osi-schema.json:263-268` — so the extension attaches to
+  Vendor-specific attributes") and `ossie-schema.json:263-268` — so the extension attaches to
   the relationship itself, not to some parent object standing in for it.
 - **The emitted relationship is still valid, just under-specified.** The equality pairs are
   a true subset of the source condition, so `from`/`to`/`from_columns`/`to_columns` all
@@ -222,12 +223,61 @@ Two things make this safe to do:
 which is correct, because that is all the document says. The lost narrowing is a property of
 the Ossie document, not of the converter, and that is exactly what [**A6**](#open-questions-and-upstream-asks) asks upstream to fix.
 
+### Key derivation and `to_columns` coverage
+
+`to_columns` is not merely "the columns on the `to` side". The specification defines it as
+the **primary or unique key columns** of the `to` dataset (`core-spec/spec.md:189`,
+`ossie-schema.json:258`), and since 2026-08-28 `validation/validate.py` enforces a weak form
+of that: `validate_references` emits
+
+```
+[Reference] Warning: Relationship '<name>' in model '<m>': to_columns [...] does not cover
+the primary key or a unique key of dataset '<to>'
+```
+
+Three mechanics matter to a converter (all verified against `validate.py` at
+`b5da5d6`, and against the motivating issue, apache/ossie#301):
+
+- It tests **coverage**, not equality — a `to_columns` that is a superset of a declared key passes.
+- It is a **warning**. `main()` partitions the returned list on the substring `"Warning:"` and
+  still exits 0 with `Validation PASSED`. Do not gate on the exit code; see [**A8**](#open-questions-and-upstream-asks).
+- A dataset that declares **no keys at all** is skipped entirely. Emitting nothing is therefore
+  always warning-free — and always the least informative option.
+
+**Why this bites us specifically.** TML has no key declaration (gap **G3**), so every key in
+our output is manufactured by the derivation rule above. Every upstream fixture passes the new
+check — they either join on genuinely declared keys or declare none — so a converter that
+invents keys is the first thing that will trip it.
+
+**KD1 — a relationship qualifies as key evidence only if its condition is wholly its equality
+pairs.** A residual-predicate join (an FK equality narrowed by an effective-date window) is
+to-one *because of the narrowing*; its equality columns alone are not unique. Deriving a key
+from one is a false assertion, and it does not stay contained: `converters/databricks`
+(`ossie_to_metric_view.py:420`) reads exactly this pair and emits
+`rely: {at_most_one_match: true}` on a join that fans out. A fabricated key becomes another
+vendor's wrong numbers. `MANY_TO_MANY` is excluded for the same reason, and `ONE_TO_MANY` only
+qualifies after its orientation is inverted.
+
+**KD2 — a relationship excluded by KD1 will warn, and that warning is correct.** Where a
+dataset has a qualifying key *and* a non-qualifying relationship targeting it, the check fires
+on the latter. Do not suppress it by widening the key: raise a converter issue naming the
+relationship and the residual predicate that disqualified it. A true warning is a better
+outcome than a false key.
+
+**KD3 — orientation is checked downstream, so do not rely on ours surviving.**
+`ossie_to_metric_view.py:446-478` silently swaps `from`/`to` and their column arrays when the
+*from* side covers a key and the *to* side does not. The swap carries our
+`custom_extensions[THOUGHTSPOT]` payload onto the reversed relationship, where a verbatim
+`on_expression` written in `[FROM::col]` / `[TO::col]` terms now contradicts the orientation.
+Emit the payload's column references resolved to dataset-qualified names, never to the
+positional `FROM` / `TO` aliases.
+
 ## Field and metric level
 
 ### Fields
 
 Ossie schema: `core-spec/spec.md:231-240`; required keys `name` and `expression`
-(`osi-schema.json:173`).
+(`ossie-schema.json:173`).
 
 | Ossie | ThoughtSpot | Direction notes | Fidelity |
 |---|---|---|---|
@@ -235,8 +285,8 @@ Ossie schema: `core-spec/spec.md:231-240`; required keys `name` and `expression`
 | `label` | `columns[].name` verbatim | Read as the human display label, matching `converters/databricks/README.md:89`. See ask [**A5**](#open-questions-and-upstream-asks) | lossless |
 | `expression` — a single bare identifier | Table `columns[].db_column_name`, surfaced by a Model `columns[]` entry with `column_id: TABLE::Name` and `column_type: ATTRIBUTE` | The identifier is the *physical* column; the display name comes from `label`/`name`. `db_column_name` is emitted unconditionally — see [**R1**](#reverse-direction-rules-ossie--tml) | lossless |
 | `expression` — computed | Model `formulas[]` entry (`id: formula_<Name>`, `name`, `expr`) plus a `columns[]` entry referencing it by `formula_id` with `column_type: ATTRIBUTE` | ThoughtSpot formulas are model-scope, so a computed field must be **attributed** to a dataset: attribute it to the dataset all its column references resolve to. When they span two or more datasets there is no correct dataset, and the converter does not guess — it raises an issue and preserves the formula in the model-scope stash (`unattributed_formulas`). This mirrors upstream's refuse-to-guess rule for expressions on fanned-out datasets | lossless (single dataset) / lossy→issue + via custom_extensions (multi-dataset) |
-| `expression.dialects[]` | one ThoughtSpot formula string | Each expression's verdict is decided function-by-function in the companion [function-mapping document](ts-osi-function-mapping.md#coverage-summary): of the 146 constructs the specification declares, **108 are `direct`** — a native ThoughtSpot equivalent, so that part of the expression is lossless; **37 are `passthrough`** — carried as warehouse SQL inside a `sql_*_op` wrapper, which preserves the result but couples it to one dialect; and **1 is `unmappable`** (`EXISTS_IN()`, unspecified upstream — ask [**A9**](ts-osi-function-mapping.md#open-questions-and-upstream-asks)), which raises an issue. An expression's verdict is therefore the weakest verdict among the constructs it uses. See [Expression handling](#expression-handling-summary--detail-in-the-companion-function-mapping-document) for how a formula is assembled and rewritten | per-function — see [Expression handling](#expression-handling-summary--detail-in-the-companion-function-mapping-document) |
-| `dimension.is_time` (`is_time` is the `dimension` object's only key — `osi-schema.json:127-137`) | a `DATE` / `DATE_TIME` column, plus `properties.default_date_bucket` for its default grain | `TML → Ossie`: ThoughtSpot has no temporal-role flag, so the role is derived from the column type and `is_time` is emitted **only** when it differs from the type-derived default (`core-spec/spec.md:337`) — which, given a type-derived role, is never; the field is simply omitted and the default applies. `Ossie → TML`: a time role on a **non-temporal** type — a year as `Integer`, a quarter name as `String` (`core-spec/spec.md:341-348`) — has no TML flag to write and, per [**X9**](#protocol), nothing to stash → issue. **The issue is actionable, not just a report:** ThoughtSpot has no temporal-role flag, but it *can* hold a real `DATE` derived from the integer, so the issue carries a ready-to-paste formula for the common integer-year case rather than leaving the user to invent one — `to_date ( concat ( to_string ( [TABLE::Year] ) , '-01-01' ) , 'yyyy-MM-dd' )`, which anchors the year to 1 January (syntax live-verified 2026-07-30 on `se-thoughtspot`; a `trim ( )` negative control in the same pass was rejected, so formula bodies really are parsed by this check). Emit only the documented `yyyy-MM-dd` pattern style: the format string itself is **not** validated at import — a bogus `'%Y'` also passed — so acceptance proves the call shape, not the pattern. **The converter still does not synthesise by default**, because inventing a column is exactly what [**X9**](#protocol) forbids; whether to offer opt-in synthesis behind a flag (`--synthesize-time-columns`, emitting the formula as a real derived column and setting the temporal role) is a **Phase-3 converter decision**, to be settled with upstream feedback on whether a synthesised field should be marked as converter-generated. `properties.default_date_bucket` is a ThoughtSpot-only grain default, stashed in `column_properties` | lossless (temporal types) / lossy→issue (role on a non-temporal type) |
+| `expression.dialects[]` | one ThoughtSpot formula string | Each expression's verdict is decided function-by-function in the companion [function-mapping document](ts-ossie-function-mapping.md#coverage-summary): of the 146 constructs the specification declares, **108 are `direct`** — a native ThoughtSpot equivalent, so that part of the expression is lossless; **37 are `passthrough`** — carried as warehouse SQL inside a `sql_*_op` wrapper, which preserves the result but couples it to one dialect; and **1 is `unmappable`** (`EXISTS_IN()`, unspecified upstream — ask [**A9**](ts-ossie-function-mapping.md#open-questions-and-upstream-asks)), which raises an issue. An expression's verdict is therefore the weakest verdict among the constructs it uses. See [Expression handling](#expression-handling-summary--detail-in-the-companion-function-mapping-document) for how a formula is assembled and rewritten | per-function — see [Expression handling](#expression-handling-summary--detail-in-the-companion-function-mapping-document) |
+| `dimension.is_time` (`is_time` is the `dimension` object's only key — `ossie-schema.json:127-137`) | a `DATE` / `DATE_TIME` column, plus `properties.default_date_bucket` for its default grain | `TML → Ossie`: ThoughtSpot has no temporal-role flag, so the role is derived from the column type and `is_time` is emitted **only** when it differs from the type-derived default (`core-spec/spec.md:337`) — which, given a type-derived role, is never; the field is simply omitted and the default applies. `Ossie → TML`: a time role on a **non-temporal** type — a year as `Integer`, a quarter name as `String` (`core-spec/spec.md:341-348`) — has no TML flag to write and, per [**X9**](#protocol), nothing to stash → issue. **The issue is actionable, not just a report:** ThoughtSpot has no temporal-role flag, but it *can* hold a real `DATE` derived from the integer, so the issue carries a ready-to-paste formula for the common integer-year case rather than leaving the user to invent one — `to_date ( concat ( to_string ( [TABLE::Year] ) , '-01-01' ) , 'yyyy-MM-dd' )`, which anchors the year to 1 January (syntax live-verified 2026-07-30 on `se-thoughtspot`; a `trim ( )` negative control in the same pass was rejected, so formula bodies really are parsed by this check). Emit only the documented `yyyy-MM-dd` pattern style: the format string itself is **not** validated at import — a bogus `'%Y'` also passed — so acceptance proves the call shape, not the pattern. **The converter still does not synthesise by default**, because inventing a column is exactly what [**X9**](#protocol) forbids; whether to offer opt-in synthesis behind a flag (`--synthesize-time-columns`, emitting the formula as a real derived column and setting the temporal role) is a **Phase-3 converter decision**, to be settled with upstream feedback on whether a synthesised field should be marked as converter-generated. `properties.default_date_bucket` is a ThoughtSpot-only grain default, stashed in `column_properties` | lossless (temporal types) / lossy→issue (role on a non-temporal type) |
 | — (no calendar concept in Ossie) | `properties.calendar` on a date column — the **custom / fiscal calendar** the column is bucketed by | ThoughtSpot lets a date column be reported against a non-Gregorian calendar (fiscal-year offset, 4-4-5 / 4-5-4 / 5-4-4 retail periods). **Only a reference travels, never a definition:** the calendar itself is a *Connection-scoped object* created outside TML via `POST /api/rest/2.0/calendars/create` (10.12.0.cl or later) and backed by a warehouse calendar table, so the Ossie document can record which calendar a column uses but cannot describe it. `TML → Ossie` stashes the value as `column_properties.calendar` and raises an issue naming the calendar, because a target instance without that calendar on that connection cannot honour the reference. `Ossie → TML` writes it back only from the stash — it is never invented. **The exact value vocabulary needs live verification ([V1](#thoughtspot-side-open-verifications-not-upstream-asks)):** ThoughtSpot's public TML documentation gives `calendar: [ default \| calendar_name ]` for Model columns, while our own SQL View reference records the literal `CALENDAR_TYPE_GREGORIAN`, and the two have not been reconciled — a converter must not emit this property until they are | lossy→issue (definition) + via custom_extensions (reference, pending [V1](#thoughtspot-side-open-verifications-not-upstream-asks)) |
 | `description` | Model `columns[].description` for a Model-surfaced field; Table `columns[].description` for a Table-only one | **Live-verified 2026-07-30 on `se-thoughtspot`.** `description` is a first-class field on the Model `columns[]` entry and applies to a formula-backed entry exactly as it does to a `column_id` one — ThoughtSpot's own Model TML syntax lists `description: <optional_column_description>` as a `columns[]` key, and **63 of 549** formula-backed columns and **1,960 of 4,436** physical columns across a 143-Model census (72 of 143 Models) carry one — the second-most-common optional `columns[]` key on the cluster (the earlier 40-model sample measured 14 of 78; same conclusion, a seventh of the evidence) (e.g. `What-If Sales` → "project sales figures based upon the input parameter percentage"). It is the `columns[]` entry, not the `formulas[]` entry, that owns column-level metadata; `formulas[]` holds only `id`/`name`/`expr`. So a computed field's description round-trips with no stash and no issue | lossless |
 | `datatype` | Table `db_column_properties.data_type` | See [Datatype map](#datatype-map). **Live-verified 2026-07-30 on `se-thoughtspot`:** a formula-backed field has no *declared* type anywhere in Model TML — neither the `columns[]` entry nor the `formulas[]` entry has a `data_type` key in ThoughtSpot's documented syntax, and none of the 78 formula-backed columns in a 40-model sample carried one. ThoughtSpot derives a formula's type from its expression instead. So it is omitted `TML → Ossie` (`datatype` is optional) and raises an issue `Ossie → TML`. Note the physical case is also indirect: the type lives on the **Table** document, not the Model, so a Model-only reader cannot see it either | lossless (physical) / lossy→issue (formula) |
@@ -248,7 +298,7 @@ Ossie schema: `core-spec/spec.md:231-240`; required keys `name` and `expression`
 ### Metrics
 
 Ossie schema: `core-spec/spec.md:365-372`; required keys `name` and `expression`
-(`osi-schema.json:301`). Ossie metrics are **model-scope and may span datasets**
+(`ossie-schema.json:301`). Ossie metrics are **model-scope and may span datasets**
 (`core-spec/spec.md:361`, and the cross-dataset example at `:403-416`) — exactly the
 scope of a ThoughtSpot Model formula, so this level maps cleanly in both directions.
 
@@ -267,7 +317,7 @@ scope of a ThoughtSpot Model formula, so this level maps cleanly in both directi
 
 ## Datatype map
 
-Ossie datatypes: `core-spec/spec.md:69-80` and `osi-schema.json:111-126` — a closed
+Ossie datatypes: `core-spec/spec.md:69-80` and `ossie-schema.json:111-126` — a closed
 10-value enum, optional on both Field and Metric. ThoughtSpot values are from the
 Table TML reference, *Data Type Mapping*, which also records that ThoughtSpot **rejects
 SQL type names**: `BIGINT` returns `DataType BIGINT does not match CDW DataType`.
@@ -305,13 +355,13 @@ inferred rather than omitted.
    The converter holds both representations at translation time, and the second tier is
    what makes the document useful to a non-ThoughtSpot consumer.
 4. **Blocker — upstream ask A1.** `THOUGHTSPOT` is not in the `Dialect` enum
-   (`osi-schema.json:24-27`, a closed 7-value enum; `core-spec/spec.md:52-60`), so a
+   (`ossie-schema.json:24-27`, a closed 7-value enum; `core-spec/spec.md:52-60`), so a
    `THOUGHTSPOT` dialect entry **fails schema validation today**. It also needs adding to
    `SKIP_SQL_VALIDATION` (`validation/validate.py:75`, currently
    `{MDX, TABLEAU, MAQL}`): a ThoughtSpot formula is not SQL — a documented formula shape
    is `last_value ( sum ( [T::c] ) , query_groups ( ) , { [D::date] } )`, and no sqlglot
    dialect parses `{ }` grouping — and an unlisted dialect falls through
-   `DIALECT_MAP.get(dialect) → None` (`validation/validate.py:64-72`, `:160`) into a
+   `DIALECT_MAP.get(dialect) → None` (`validation/validate.py:64-72`, `:178`) into a
    default-dialect parse and a hard validation error.
 5. **Constructs Ossie excludes from expressions** (`core-spec/expression_language.md:124-135`)
    are compatible with ThoughtSpot's formula language, with one gap: `WHERE` is redirected
@@ -333,20 +383,35 @@ Mirrors the Databricks converter's stash
 
 - **X1** One entry per object, `vendor_name: THOUGHTSPOT`. Merge into an existing entry;
   never append a second.
-- **X2** `data` is a JSON string (`osi-schema.json:73-76`). Compare parsed, never raw.
+- **X2** `data` is a JSON string (`ossie-schema.json:73-76`). Compare parsed, never raw.
 - **X3** `_v` is an integer shape version, bumped when the payload shape changes. An
   unrecognised `_v` raises an issue rather than being partially read.
 - **X4** Malformed JSON raises a converter error naming the object — never a bare
   `JSONDecodeError`.
-- **X5** Restoration is **stash-if-present-else-derive**. A hand-authored Ossie document
-  has no stash and must still convert; every stashed key therefore needs a derivation or
-  a documented default.
+- **X5** Restoration is **stash-if-present-and-still-current-else-derive**. A hand-authored
+  Ossie document has no stash and must still convert, so every stashed key needs a derivation
+  or a documented default. But a stash can also be *stale*: a user who edits the Ossie
+  document — retargets a relationship, rewrites a metric expression — leaves the stash
+  describing the document as it was, and a plain stash-if-present rule then silently discards
+  the edit. So each stashed value that shadows a derivable one is written alongside the Ossie
+  value it was derived from, and is reused **only when the two still agree**; otherwise the
+  stash is dropped for that key and the value re-derived. `converters/nvidia` is the worked
+  precedent — `_expression_matches` (`native_converter.py:1836-1844`) normalises the live
+  expression against the recorded copy before reusing preserved native SQL, and
+  `_reconcile_native_relationships` (`:2007-2064`) does the same for joins. This applies in
+  particular to the two places this document currently says to prefer the stash: a
+  relationship's verbatim `on_expression` and a formula's `expr`.
 - **X6** Write nothing when the payload would be empty, so a converted document stays
   clean where ThoughtSpot added nothing.
 - **X7** Entries for other vendors pass through untouched in both directions.
 - **X8 (identity)** The payload carries **no** `guid`, `obj_id`, or `fqn` under any key.
-  These are instance-local (see [**NM1**](#explicit-non-mappings)); a portable document must not contain them, and
-  re-importing a stale one fails with `fqn resolution failed`.
+  These are instance-local (see [**NM1**](#explicit-non-mappings)), and re-importing a stale one
+  fails outright with `fqn resolution failed`. **Stated as a ThoughtSpot-specific consequence, not
+  a universal:** upstream precedent runs the other way — `converters/nvidia` deliberately preserves
+  live GSF ids and asserts their survival in its round-trip tests (`README.md:119-124`,
+  `tests/test_converter.py:238`). That is defensible where an id is stable across the vendor's own
+  deployments. A ThoughtSpot `guid` is not: it is minted per instance at import, so carrying one
+  makes the document *less* portable rather than more.
 - **X9 (the stash can only carry what TML contains)** Because `custom_extensions` lives in
   the *Ossie* document, the stash is written by `tml_to_ossie` and read by
   `ossie_to_tml` — so **every key below is derivable from a TML document**. There is
@@ -422,7 +487,7 @@ Mirrors the Databricks converter's stash
         },
         "unrepresentable_joins": {
           "type": "array",
-          "description": "Joins with no equality pair at all (pure range or pure constant conditions), which cannot become a Relationship because from_columns/to_columns are required with minItems 1 (osi-schema.json:249, :257, :270). Preserved verbatim; an issue is raised alongside. A join with at least one equality pair does NOT appear here — it is emitted as a Relationship with its residual predicates in the relationship's own extension.",
+          "description": "Joins with no equality pair at all (pure range or pure constant conditions), which cannot become a Relationship because from_columns/to_columns are required with minItems 1 (ossie-schema.json:249, :257, :270). Preserved verbatim; an issue is raised alongside. A join with at least one equality pair does NOT appear here — it is emitted as a Relationship with its residual predicates in the relationship's own extension.",
           "items": {
             "type": "object",
             "required": ["from", "to", "on_expression"],
@@ -655,7 +720,7 @@ failure recorded in the two TML references, so none is stylistic.
   the formula is evaluated per row and rolled up by the declared aggregation, the same way a
   physical fact column with a default aggregation behaves. So R4 rests on (a) and (b) alone; (c)
   is retained here as a corrected note because the wrong version of it is quoted downstream (see
-  **G11** in the [compliance-gaps document](ts-osi-compliance-gaps.md)).
+  **G11** in the [compliance-gaps document](ts-ossie-compliance-gaps.md)).
   **Evidence class:** a *query-time* semantic, which `VALIDATE_ONLY` cannot probe — both shapes
   import clean with any `aggregation:` value, so neither the old claim nor the correction is
   probe-provable. This rests on domain review; a query-result comparison against live data is what
@@ -785,13 +850,13 @@ Each ask carries the **upstream venue** it should be raised in — mapped agains
 
 | # | Ask | Why | Upstream venue |
 |---|---|---|---|
-| **A1** | Add `THOUGHTSPOT` to the `Dialect` enum (`osi-schema.json:24-27`, `core-spec/spec.md:52-60`) **and** to `SKIP_SQL_VALIDATION` (`validation/validate.py:75`). | **Blocking.** The enum is closed, so a `THOUGHTSPOT` dialect entry fails schema validation today; and a ThoughtSpot formula is not SQL, so an unlisted dialect falls through to a default-dialect sqlglot parse and a hard error. Same treatment as `MDX`, `TABLEAU` and `MAQL` already receive. | converter PR (or a short issue referencing #285) |
-| **A2** | Add a `THOUGHTSPOT` row to the well-known vendor examples table (`core-spec/spec.md:439-448`). | Trivial, and it is the table a reader consults to know the extension key is legitimate. | converter PR |
+| **A1** | Add `THOUGHTSPOT` to the `Dialect` enum (`ossie-schema.json:24-27`, `core-spec/spec.md:52-60`) **and** to `SKIP_SQL_VALIDATION` (`validation/validate.py:75`). | **High, not blocking — re-graded 2026-08-31.** The enum is closed, so a `THOUGHTSPOT` dialect entry fails schema validation today; and a ThoughtSpot formula is not SQL, so an unlisted dialect falls through to a default-dialect sqlglot parse and a hard error. Same treatment as `MDX`, `TABLEAU` and `MAQL` already receive — and a fourth member matters beyond us: the `#342` filters discussion turns on the fact that a parse-based join-path resolution cannot work for any dialect in that set. **What this does *not* block is shipping.** `converters/nvidia` emits under `ANSI_SQL` with the real dialect preserved in its extension (`native_converter.py:1908-1919`), which is a working precedent for a converter that lands before its dialect does. Earlier drafts of this row said A1 "blocks the entire reverse direction"; that was overstated — it blocks a *faithful* `THOUGHTSPOT` dialect entry, not the converter. | **Its own dev@ thread + PR** — this is a spec change, so it needs the 7-day discussion and a `[VOTE]` with three binding +1s, not a converter PR. Copy PR #250 (`DAX` dialect); PR #143 (`BIGQUERY`) took 41 days |
+| **A2** | Add a `THOUGHTSPOT` row to the well-known vendor examples table — **all three of them**. | Trivial, cosmetic, and currently mis-targeted: there is no single table. `core-spec/spec.md:439-448` (8 entries), `ossie-schema.json:31` (`$defs.Vendor.examples`, 7 — already missing `HONEYDEW`) and `converters/README.md:70-78` (7, now with `NVIDIA_GSF`) have diverged from each other. `Vendor` is `examples`-only — *"Any string value is accepted"* — so none of this gates emission. | The converter PR updates `converters/README.md`, which is where the NVIDIA precedent (PR #299) landed. PR #328 is already trying to reconcile all three; attach there rather than opening a fourth front |
 | **A3** | A core `filters` construct (or a documented convention). | The expression-language proposal already assumes one twice: it scopes itself to "expressions at the logical layer. This means metrics, fields, filters, etc" (`core-spec/expression_language.md:41`) and redirects `WHERE` to "the filter property" (`:130`) — but the core schema defines no such property. ThoughtSpot has `filters[]` and `constraints`; the Databricks Metric View has `filter`. All are stashed today, and a stashed filter is invisible to other consumers — so the same model returns different numbers in two tools. This is the highest-value semantic gap we found. | discussion #5 (Semantic Filters) |
 | **A4** | Join `type` and cardinality on `Relationship`. | Every vendor is stashing them: Databricks derives cardinality from `from`/`to` orientation (`converters/databricks/README.md:84`), and ThoughtSpot has four cardinality values and five join types that orientation alone cannot encode. Is a core field in scope for 0.2.x? | discussion #50 (Make Relationship Cardinality Explicit); related #11, #24 |
 | **A5** | Confirm `label` semantics. | We read `field.label` as the human display label, matching the Databricks converter's `label` → `display_name` mapping (`converters/databricks/README.md:89`). `core-spec/spec.md:236` describes it as "Label for categorization", which reads differently. ThoughtSpot needs a display-label home because its display names are not valid SQL identifiers. | discussion #37 (Display name); related #31 |
-| **A6** | First-class support for non-equality relationships. | `from_columns`/`to_columns` can only express FK equality. ThoughtSpot supports range and ASOF joins (timezone bridges, SCD-2 windows, point-in-time lookups) that are structural, not incidental. **Interim answer received, and this document now follows it:** per guidance from an Ossie committer on the community Slack, 2026-07-30, range and constant joins should be carried as "an extension inside the relationships section … for now until we update the spec to support those" — so a join with at least one equality pair is emitted as a `Relationship` with its residual predicates in the relationship's own `custom_extensions` (`core-spec/spec.md:191`). **The ask stays open** for two reasons: an extension is invisible to every consumer that does not read the `THOUGHTSPOT` vendor key, so the emitted relationship still over-joins for everyone else; and a **pure** range or constant join still cannot be expressed at all, because `from_columns`/`to_columns` are required with `minItems: 1` (`osi-schema.json:249`, `:257`, `:270`). `core-spec/expression_language.md:41` anticipates "arbitrary join expressions" — is that the intended permanent home? | discussion #4 (Complex Relationship Definitions) |
-| **A7** | Is deriving `primary_key` from a relationship's `to_columns` acceptable? | TML has no key declaration, so the only key evidence available is the join graph. The alternative is to omit `primary_key` unless a caller supplies it. Upstream's Databricks converter recovers `unique_keys` from a join hint (`converters/databricks/README.md:85`), which suggests derivation is accepted practice. | converter PR review |
+| **A6** | First-class support for non-equality relationships. | `from_columns`/`to_columns` can only express FK equality. ThoughtSpot supports range and ASOF joins (timezone bridges, SCD-2 windows, point-in-time lookups) that are structural, not incidental. **Interim answer received, and this document now follows it:** per guidance from an Ossie committer on the community Slack, 2026-07-30, range and constant joins should be carried as "an extension inside the relationships section … for now until we update the spec to support those" — so a join with at least one equality pair is emitted as a `Relationship` with its residual predicates in the relationship's own `custom_extensions` (`core-spec/spec.md:191`). **The ask stays open** for two reasons: an extension is invisible to every consumer that does not read the `THOUGHTSPOT` vendor key, so the emitted relationship still over-joins for everyone else; and a **pure** range or constant join still cannot be expressed at all, because `from_columns`/`to_columns` are required with `minItems: 1` (`ossie-schema.json:249`, `:257`, `:270`). `core-spec/expression_language.md:41` anticipates "arbitrary join expressions" — is that the intended permanent home? | discussion #4 (Complex Relationship Definitions) |
+| **A7** | Is deriving `primary_key` from a relationship's `to_columns` acceptable practice? | **Partly answered upstream, 2026-08-28.** PR #330 (from issue #301, which reports another converter emitting non-key `to_columns`) added a coverage check to `validate_references` and, in doing so, took a position: derivation is tolerated, coverage rather than equality is the test, and *"declared keys may be an incomplete recovery of the dataset's real keys"*. That settles the acceptability question and leaves a narrower one — **which** relationships may serve as key evidence. Our answer is [**KD1**](#key-derivation-and-to_columns-coverage); discussion #119 (`primary_key` as immutable grain vs `unique_keys` as business-logical) argues a stricter line that would rule out join-derived primary keys altogether, and is worth answering before we assert one. | discussion #119, referencing issue #301 |
 | **A8** | Should `converters/README.md` tell an import converter to run `validation/validate.py` on its own emitted Ossie document? | Step 1 covers validating a *source* model; step 9 covers the *vendor* output against *vendor* tooling. Nothing tells a converter to validate the Ossie document it produces, even though `validate.py`'s four checks are exactly the invariants that output must satisfy. | discussion #35 (OSI-level validations?) |
 
 ### ThoughtSpot-side open verifications (not upstream asks)
@@ -922,7 +987,7 @@ dataset and no relationships, which makes `[ORDER_ID]` the row's *unused key* ca
 consumes it, per [**X9**](#protocol) nothing can stash it, so the converter raises an issue naming the
 dataset and the dropped key rather than dropping it silently. (`ORDER_ID` is a physical
 column of `SALES.PUBLIC.ORDERS`, not a declared field — Ossie's `primary_key` names key
-*columns*, `osi-schema.json:188-193` — so its absence from `fields` is correct, not a
+*columns*, `ossie-schema.json:188-193` — so its absence from `fields` is correct, not a
 dangling reference.) Add a second dataset and a `MANY_TO_ONE` relationship into `orders`
 and the same key becomes `lossless (join-derived)`: it is then recoverable from the
 relationship's `to_columns` on the way back.

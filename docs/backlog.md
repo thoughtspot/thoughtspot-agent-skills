@@ -5115,7 +5115,7 @@ lossy-by-default.
 the review; section refs are to the report):
 
 1. The payload is a **serialised JSON string**, never a nested object (report section 1 #1:
-   `osi-schema.json` constrains the equivalent field to a string with
+   `ossie-schema.json` constrains the equivalent field to a string with
    `additionalProperties: false`; our own DDL clause is a quoted scalar).
 2. Version it with a `_v` marker and **merge into an existing entry** rather than appending
    a second one.
@@ -5280,7 +5280,7 @@ whether the TPC-DS Model TML also belongs in `agents/shared/worked-examples/`.
 ## BL-170 -- Live-verify four internal ground-truth conflicts in the ThoughtSpot formula references `Tier 2`
 
 **Filed:** 2026-07-29.
-**Source:** the `docs/ossie/ts-osi-function-mapping.md` review on the
+**Source:** the `docs/ossie/ts-ossie-function-mapping.md` review on the
 `feat/ossie-converter-design` branch -- writing one row per Ossie function forced a
 side-by-side read of every ThoughtSpot formula reference we ship, which is what surfaced
 these. Cross-referenced from that document's *Rows live-confirmed — 2026-07-29* section
@@ -6502,7 +6502,7 @@ for an unrelated reason.
 ## BL-186 -- Live-verify the four OSSIE-mapping TML property questions (V1-V4) `Tier 2`
 
 **Filed:** 2026-07-30.
-**Source:** PR #415 review. The post-ready pass over `docs/ossie/ts-osi-construct-mapping.md`
+**Source:** PR #415 review. The post-ready pass over `docs/ossie/ts-ossie-construct-mapping.md`
 swept ThoughtSpot's own product documentation for TML properties our schema references omit. It
 found five, and four of them cannot be settled from documentation alone -- they were recorded as
 verifications **V1**-**V4** in that document's *ThoughtSpot-side open verifications* table. This
@@ -6511,8 +6511,8 @@ entry is the two-bucket exit for those four, so they are routed rather than sitt
 **Affects:** `agents/shared/schemas/thoughtspot-model-tml.md`,
 `agents/shared/schemas/thoughtspot-table-tml.md`,
 `agents/shared/schemas/thoughtspot-sql-view-tml.md`,
-`docs/ossie/ts-osi-construct-mapping.md` (the V1-V4 table and the field-level `calendar` row),
-`docs/ossie/ts-osi-compliance-gaps.md` (G10).
+`docs/ossie/ts-ossie-construct-mapping.md` (the V1-V4 table and the field-level `calendar` row),
+`docs/ossie/ts-ossie-compliance-gaps.md` (G10).
 **Status:** OPEN.
 
 **Why these need a live instance.** Our TML references were built from real import failures, so
@@ -6579,7 +6579,7 @@ need object construction or an API read, not more surveying.** A follow-up censu
 `--fqn --include-obj-id` is filed separately as **BL-190** for the identity rules (NM1 / X8), which
 this census could not see by construction.
 
-**Not in scope.** The ThoughtSpot product gaps in `docs/ossie/ts-osi-compliance-gaps.md`
+**Not in scope.** The ThoughtSpot product gaps in `docs/ossie/ts-ossie-compliance-gaps.md`
 are deliberately **not** routed to a backlog entry -- they are input to a product conversation,
 not repo work. This entry covers only the four verifications, which *are* ours to close.
 
@@ -6592,9 +6592,9 @@ any unrelated live check.
 
 **Filed:** 2026-07-30.
 **Source:** a ThoughtSpot domain expert challenged two rows of
-`docs/ossie/ts-osi-compliance-gaps.md` on reading it. Both challenges were correct.
-**Affects:** `docs/ossie/ts-osi-compliance-gaps.md` (G7, G13),
-`docs/ossie/ts-osi-construct-mapping.md` (Field + Metric `description`/`datatype` rows, the
+`docs/ossie/ts-ossie-compliance-gaps.md` on reading it. Both challenges were correct.
+**Affects:** `docs/ossie/ts-ossie-compliance-gaps.md` (G7, G13),
+`docs/ossie/ts-ossie-construct-mapping.md` (Field + Metric `description`/`datatype` rows, the
 relationship `type` row, rule **R5**, the RelationshipLevel and MetricLevel stash schemas),
 `agents/shared/schemas/thoughtspot-model-tml.md`,
 `agents/shared/schemas/thoughtspot-table-tml.md`,
@@ -6801,7 +6801,7 @@ parsed document plus one reported skip, and must not raise. Add a direct
 so `fqn`, `obj_id` and `destination.fqn` are absent from its 207 observed key-paths **by
 construction, not by absence in the product**. Every conclusion about those three keys is
 therefore out of scope for that run, and the report says so explicitly.
-**Affects:** `docs/ossie/ts-osi-construct-mapping.md` (**NM1**, rule **X8**, the
+**Affects:** `docs/ossie/ts-ossie-construct-mapping.md` (**NM1**, rule **X8**, the
 `model_tables[].fqn` / `obj_id` rows), `agents/shared/schemas/thoughtspot-model-tml.md` and
 `thoughtspot-table-tml.md` (the `fqn` / `obj_id` rows and the `joins_with[].destination.fqn`
 shape).

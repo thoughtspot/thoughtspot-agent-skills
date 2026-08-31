@@ -53,7 +53,7 @@ than left as an implicit claim.
 
 ### 2.3 Knock-on corrections (not in the brief, required by consistency)
 
-- **`ts-osi-compliance-gaps.md` G11** — "**Four** documented silent-failure behaviours" → **three**,
+- **`ts-ossie-compliance-gaps.md` G11** — "**Four** documented silent-failure behaviours" → **three**,
   with the withdrawn item explained. A legitimate idiom had been filed as a product defect.
 - **`docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`** — its "both are benign" note cited the
   universal claim. **The verdict survives but the reasoning did not:** I checked all five emitted
@@ -479,7 +479,7 @@ code-span pipes) over all nine touched files. Two genuine mismatches, both **pre
 
 | Site | Defect | Disposition |
 |---|---|---|
-| `ts-osi-compliance-gaps.md` — the withdrawn **G13** row | 4 cells in a 5-cell table, so every cell after *Evidence* rendered one column left | **Fixed** — I was already restructuring that table to add G15, so leaving a shifted row in it was not defensible |
+| `ts-ossie-compliance-gaps.md` — the withdrawn **G13** row | 4 cells in a 5-cell table, so every cell after *Evidence* rendered one column left | **Fixed** — I was already restructuring that table to add G15, so leaving a shifted row in it was not defensible |
 | `thoughtspot-formula-patterns.md` — the `pow` row in the math-functions table | 3 cells in a 2-column table; GitHub drops the third, so the "**Not** `power` — that name is rejected" note **did not render at all** | **Fixed on the review round.** I first left it, reasoning that widen-vs-fold was a content decision. On reflection that was the wrong call: the invisible text is a *verified parser gotcha*, the file was already being edited in this pass, and the table's own `safe_divide` row establishes the house style (an em-dash note inside cell 2). Folded to match it, so the warning now renders. One line, no table restructuring |
 
 ---

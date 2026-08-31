@@ -1,3 +1,4 @@
+<!-- currency: ossie — 2026-08 (apache/ossie @ b5da5d6; core-spec unchanged since 0.2.0.dev0) -->
 # Ossie expression language → ThoughtSpot function mapping
 
 **Status:** post-ready (last touched 2026-07-30) — internally reviewed and complete; publication
@@ -7,7 +8,7 @@ operators and constructs from `core-spec/expression_language.md` (**Ossie spec v
 `0.2.0.dev0`, `core-spec/spec.yaml:20` — matching the construct-mapping document; the
 expression-language draft's own version-history row labels itself `0.2.0.dev`,
 `core-spec/expression_language.md:767`; all Ossie citations are `path:line` against
-apache/ossie @ `c26b61c`) · **Classifications:** `direct` (native ThoughtSpot formula
+apache/ossie @ `b5da5d6`) · **Classifications:** `direct` (native ThoughtSpot formula
 equivalent, possibly as a documented composition of native functions) · `passthrough`
 (requires a ThoughtSpot `sql_*_op` pass-through — warehouse-dialect-specific, bypasses
 ThoughtSpot's query planning) · `unmappable` (converter raises an issue; construct
@@ -18,9 +19,9 @@ in the ThoughtSpot skills repo, cited below by section name as the *formula refe
 the *Snowflake formula mapping*. They record ThoughtSpot's formula language as verified
 against live instances and override any other description of it.
 
-This is the companion to the [construct-mapping document](ts-osi-construct-mapping.md), which stops at the boundary where
+This is the companion to the [construct-mapping document](ts-ossie-construct-mapping.md), which stops at the boundary where
 an expression string begins. That document owns identifier rewriting, dialect selection,
-the `custom_extensions` payload and the structural asks [**A1**–**A8**](ts-osi-construct-mapping.md#open-questions-and-upstream-asks); this one owns
+the `custom_extensions` payload and the structural asks [**A1**–**A8**](ts-ossie-construct-mapping.md#open-questions-and-upstream-asks); this one owns
 everything inside `expression`. Rules introduced here are numbered [**E1**](#how-to-read-the-tables)–[**E13**](#window-functions) and new
 upstream asks [**A9**–**A12**](#open-questions-and-upstream-asks), continuing that document's sequence.
 
@@ -31,7 +32,7 @@ upstream asks [**A9**–**A12**](#open-questions-and-upstream-asks), continuing 
 Every row's ThoughtSpot cell is written in ThoughtSpot formula syntax: column references
 are `[TABLE::Column]`, and the spaces around parentheses and commas are the canonical form
 (`concat ( [a] , [b] )`). Reference rewriting is not shown per row — it is uniform and
-lives in the construct-mapping document ([**ID3**](ts-osi-construct-mapping.md#identifiers--the-second-non-obvious-thing)).
+lives in the construct-mapping document ([**ID3**](ts-ossie-construct-mapping.md#identifiers--the-second-non-obvious-thing)).
 
 - **E1 — one row per construct.** Every named function, operator and syntactic construct
   the specification declares supported appears in exactly one row. Two categories are
@@ -484,7 +485,7 @@ modifier), `:401` (`||`), `:428-429` (`LIKE`/`ILIKE`), `:500-513` (`CASE`), `:53
 | Parentheses — expression grouping | direct | `( ... )` | Precedence is the standard SQL ordering on the Ossie side (`:139-147`). The converter emits explicit parentheses around every rewritten sub-expression rather than relying on the two languages agreeing about precedence — cheap, and it removes a whole class of silent arithmetic errors. |
 | `TRUE` / `FALSE` (boolean literals) | direct | `true` / `false` | A bare BOOL *column* reference used as a condition still needs its parentheses: `if ( [T::flag] ) then ...` parses, `if [T::flag] then ...` does not. |
 | `DISTINCT` aggregate modifier | passthrough | `sql_number_aggregate_op ( "SUM(DISTINCT {0})" , [x] )` | **Variant: `sql_number_aggregate_op`.** The specification allows `DISTINCT` on `SUM` as well as `COUNT` (`:219-225`). ThoughtSpot has exactly one distinct-aware aggregate — `unique count` — which is `COUNT(DISTINCT)` and has its own row. Every other `DISTINCT` aggregate is a pass-through. |
-| Column / metric reference — `field`, `dataset.field` | direct | `[TABLE::Column]`, or `[Formula Name]` for a metric | Always rewritten from resolved metadata, never passed through textually. The rewrite, the case-sensitivity rules and the display-name-versus-identifier problem are the construct-mapping document's [**ID1**](ts-osi-construct-mapping.md#identifiers--the-second-non-obvious-thing)–[**ID4**](ts-osi-construct-mapping.md#identifiers--the-second-non-obvious-thing). |
+| Column / metric reference — `field`, `dataset.field` | direct | `[TABLE::Column]`, or `[Formula Name]` for a metric | Always rewritten from resolved metadata, never passed through textually. The rewrite, the case-sensitivity rules and the display-name-versus-identifier problem are the construct-mapping document's [**ID1**](ts-ossie-construct-mapping.md#identifiers--the-second-non-obvious-thing)–[**ID4**](ts-ossie-construct-mapping.md#identifiers--the-second-non-obvious-thing). |
 | `EXISTS_IN()` | **unmappable** | — issue; construct preserved in `custom_extensions` | Named at `:131` as the sanctioned way to filter on a subquery, but **defined nowhere in the specification** — no signature, no argument order, no semantics, and absent from every function table. Even given a signature, ThoughtSpot's nearest capability is a `sql_bool_op` subquery template that requires a fully-qualified warehouse table name, which is not derivable from an Ossie expression. See ask [**A9**](#open-questions-and-upstream-asks). |
 
 ---
@@ -561,7 +562,7 @@ loses the partition, for the reason in [**E13**](#window-functions).
 | `cumulative_sum` / `_average` / `_max` / `_min` `( [m] , [attr] )` | `AGG(m) OVER (ORDER BY attr ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` — **frame and order only; the partition is lost** | **Partial composition + issue**, identically to `moving_*` and for the same reason. `cumulative_count` was live-confirmed absent 2026-07-30. |
 | `group_aggregate ( agg ( [m] ) , { [a] , [b] } , query_filters ( ) )` and the `group_*` shorthands | `AGG(m) OVER (PARTITION BY a, b)` | via Ossie composition — fixed-grain grouping is an ordinary `PARTITION BY`, and this is the **one** ThoughtSpot windowing form that is clean in this direction, precisely because its partition is declared in the formula rather than completed from the query. `{ }` is `OVER ()`; `query_groups()` needs no window at all and becomes a plain `AGG(m)`. |
 | `group_aggregate ( ... , query_groups ( ) - { [a] } , ... )` and `query_groups ( ) + { [a] }`, plus the dynamic partition every `cumulative_*` / `moving_*` carries implicitly | — | **`custom_extensions` + issue.** "All the query's dimensions except *a*" has no expression in the specification (both the `-` and `+` forms were live-confirmed valid ThoughtSpot on 2026-07-30, so this is a real construct being lost, not a hypothetical). Snowflake's `PARTITION BY EXCLUDING` exists precisely for this, and without an equivalent the same model returns different numbers depending on which dimensions a user adds. This is the largest single fidelity gap in this direction — see ask [**A10**](#open-questions-and-upstream-asks). |
-| `group_aggregate` with a non-`query_filters()` filter argument — `{ }`, `{ [c] = 'v' }`, `query_filters ( ) - { [c] }` | — | **`custom_extensions` + issue.** Filter scoping inside an expression, which the specification excludes from expressions and redirects to a filter property it does not define (`:130`) — the construct-mapping document's ask [**A3**](ts-osi-construct-mapping.md#open-questions-and-upstream-asks). |
+| `group_aggregate` with a non-`query_filters()` filter argument — `{ }`, `{ [c] = 'v' }`, `query_filters ( ) - { [c] }` | — | **`custom_extensions` + issue.** Filter scoping inside an expression, which the specification excludes from expressions and redirects to a filter property it does not define (`:130`) — the construct-mapping document's ask [**A3**](ts-ossie-construct-mapping.md#open-questions-and-upstream-asks). |
 | `last_value` / `first_value` / `last_value_in_period` / `first_value_in_period` | `LAST_VALUE(m) OVER (PARTITION BY ... ORDER BY d ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)` gets the snapshot; the re-aggregation at query grain does not | **`custom_extensions` + issue.** The window expression is only half of it: semi-additivity is a declaration about *how the measure may be rolled up*, not an expression. Snowflake carries it as `non_additive_dimensions` and Databricks has its own form; the specification has neither. See ask [**A12**](#open-questions-and-upstream-asks). Unlike the `moving_*` / `cumulative_*` rows, the `PARTITION BY` here is **not** lost: this family's partition argument is explicit in the formula (`query_groups ( )`, `{ [a] , [b] }` or `{ }`, all live-confirmed 2026-07-30), so the window clause round-trips faithfully and the loss is only the roll-up declaration. All four spellings share the identical three-argument shape, live-confirmed the same day. |
 | `sql_string_op` / `sql_int_op` / `sql_double_op` / `sql_bool_op` / `sql_date_op` / `sql_date_time_op` and the four `*_aggregate_op` variants | a `dialects[]` entry for the connection's dialect, with `{0}`, `{1}` … substituted for the resolved column references | via Ossie composition — **the dialect mechanism is the right home for these** (`:648-659`). A pass-through *is* dialect-specific raw SQL, which is what a non-Ossie dialect entry is for. Two caveats: no `ANSI_SQL` entry is emitted alongside, because the template's portability is exactly what is unknown; and the connection's dialect is not always derivable from TML, in which case the converter raises an issue rather than guessing a dialect label. |
 
@@ -570,9 +571,9 @@ loses the partition, for the reason in [**E13**](#window-functions).
 | ThoughtSpot | Ossie expression | Disposition |
 |---|---|---|
 | Runtime parameter reference — `[Parameter Name]` | — | **`custom_extensions` + issue.** Resolved per-query from user input; the definitions are stashed at model level. The construct-mapping document owns this rule; it is repeated here because the *expression* is the thing that stops being portable. |
-| `ts_username`, `ts_groups`, `ts_groups_int`, `ts_org`, `ts_email_domain`, `ts_var ( ... )` | — | **`custom_extensions` + issue.** Signed-in-user identity resolved at query time. An interchange document that carried them would be describing an access-control decision, not semantics — the same reasoning as the construct-mapping document's [**NM2**](ts-osi-construct-mapping.md#explicit-non-mappings). |
+| `ts_username`, `ts_groups`, `ts_groups_int`, `ts_org`, `ts_email_domain`, `ts_var ( ... )` | — | **`custom_extensions` + issue.** Signed-in-user identity resolved at query time. An interchange document that carried them would be describing an access-control decision, not semantics — the same reasoning as the construct-mapping document's [**NM2**](ts-ossie-construct-mapping.md#explicit-non-mappings). |
 | `concat ( "{caption}" , "text" , "{/caption}" , [url] )` | — | **`custom_extensions` + issue.** Hyperlink display markup, not computation. `concat` itself maps; the markup tokens inside the string literals do not, and a consumer that rendered them literally would show the tags to users. |
-| Fiscal-calendar variants — `year ( [d] , fiscal )`, `quarter_number ( [d] , fiscal )`, `diff_months ( [e] , [s] , fiscal )` and the rest of the `fiscal` family | — | **`custom_extensions` + issue.** The specification has no fiscal-calendar concept, and the fiscal year's start month is a *model-level* fact that no per-expression rewrite can recover. Emitting the calendar-year function instead would be silently wrong for every organisation whose year does not start in January. See ask [**A11**](#open-questions-and-upstream-asks). The *model-level* half does have a TML home — `properties.calendar` on the date column, naming a Connection-scoped custom calendar — so the loss is two-part: the `fiscal` argument inside the expression, and the calendar definition that argument resolves against. The construct-mapping document's field-level `calendar` row and open verification [**V1**](ts-osi-construct-mapping.md#thoughtspot-side-open-verifications-not-upstream-asks) own that half. |
+| Fiscal-calendar variants — `year ( [d] , fiscal )`, `quarter_number ( [d] , fiscal )`, `diff_months ( [e] , [s] , fiscal )` and the rest of the `fiscal` family | — | **`custom_extensions` + issue.** The specification has no fiscal-calendar concept, and the fiscal year's start month is a *model-level* fact that no per-expression rewrite can recover. Emitting the calendar-year function instead would be silently wrong for every organisation whose year does not start in January. See ask [**A11**](#open-questions-and-upstream-asks). The *model-level* half does have a TML home — `properties.calendar` on the date column, naming a Connection-scoped custom calendar — so the loss is two-part: the `fiscal` argument inside the expression, and the calendar definition that argument resolves against. The construct-mapping document's field-level `calendar` row and open verification [**V1**](ts-ossie-construct-mapping.md#thoughtspot-side-open-verifications-not-upstream-asks) own that half. |
 | `month ( [d] )`, `year_name ( [d] )`, `day_of_week ( [d] )` (name-returning) | `TO_CHAR(d, 'MONTH')`, `TO_CHAR(d, 'YYYY')`, `TO_CHAR(d, 'DAY')` | via Ossie composition — but `TO_CHAR` is EXPERIMENTAL (`:356`) and the name tokens are locale-dependent by the specification's own admission (`:385-387`), so an issue records the locale exposure. |
 | `month_number_of_quarter ( [d] )` | `MOD(MONTH(d) - 1, 3) + 1` | via Ossie composition |
 | `day_number_of_quarter ( [d] )` | `DATEDIFF(day, DATE_TRUNC('quarter', d), d) + 1` | via Ossie composition |
@@ -585,7 +586,7 @@ loses the partition, for the reason in [**E13**](#window-functions).
   above whose disposition is `custom_extensions + issue`, the expression is not simply
   discarded: the verbatim ThoughtSpot formula goes into a `THOUGHTSPOT` dialect entry so the
   round trip is lossless, and no `ANSI_SQL` sibling is emitted because there is none. This
-  depends entirely on the construct-mapping document's blocking ask [**A1**](ts-osi-construct-mapping.md#open-questions-and-upstream-asks) — until
+  depends entirely on the construct-mapping document's blocking ask [**A1**](ts-ossie-construct-mapping.md#open-questions-and-upstream-asks) — until
   `THOUGHTSPOT` is in the `Dialect` enum and in `SKIP_SQL_VALIDATION`, such a document fails
   schema validation, so **every row in this table is blocked on A1**, not just the
   parameter row.
@@ -693,7 +694,7 @@ same pass.
 
 ## Open questions and upstream asks
 
-Continuing the construct-mapping document's sequence, which ends at [**A8**](ts-osi-construct-mapping.md#open-questions-and-upstream-asks).
+Continuing the construct-mapping document's sequence, which ends at [**A8**](ts-ossie-construct-mapping.md#open-questions-and-upstream-asks).
 
 As in that document, each ask carries the **upstream venue** it should be raised in — mapped against apache/ossie's existing discussion index on 2026-07-30, so an ask lands on a live thread rather than as a duplicate ticket.
 
@@ -750,7 +751,7 @@ metrics:
 ```
 
 ThoughtSpot (Model `formulas[]`; each needs a `columns[]` entry referencing it by
-`formula_id`, per the construct-mapping document's [**R3**](ts-osi-construct-mapping.md#reverse-direction-rules-ossie--tml)):
+`formula_id`, per the construct-mapping document's [**R3**](ts-ossie-construct-mapping.md#reverse-direction-rules-ossie--tml)):
 
 ```yaml
 formulas:

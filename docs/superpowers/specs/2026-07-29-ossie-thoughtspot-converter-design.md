@@ -23,14 +23,20 @@ Upstream repo facts (verified 2026-07-29):
   `metric_view_to_ossie.py` / `ossie_to_metric_view.py`, `cli.py`, fixtureA/B +
   TPC-DS fixture pairs, roundtrip tests, property-based roundtrip tests.
 - **Snowflake converter is one-directional today** (Ossie → Snowflake YAML only).
-- Shared assets: `core-spec/spec.md` + `osi-schema.json` +
+- Shared assets: `core-spec/spec.md` + `ossie-schema.json` +
   `core-spec/expression_language.md`, `python/src/ossie/models.py`,
   `validation/validate.py`, `examples/tpcds_semantic_model.yaml`.
 - `custom_extensions[].vendor_name` is a **free-form string** — using
   `THOUGHTSPOT` requires **no spec change**; we only add a row to the
   "well-known examples" table in `spec.md`.
-- Contribution process is ASF: dev mailing list is the decision channel; an
-  ICLA must be on file before a first non-trivial contribution merges.
+- Contribution process is ASF: the dev mailing list is the decision channel.
+  **No CLA is required to contribute** (`CONTRIBUTING.md`, corrected upstream in
+  PR #339, 2026-08-29): an ICLA is needed only once a contributor is *elected as a
+  committer*, before their Apache account is created, and a CCLA is likewise not
+  required for contributions. The same commit dropped the `Signed-off-by`
+  convention, asking only that commits be attributed to the correct author. An
+  earlier version of this spec stated the pre-#339 text, which required an ICLA
+  before a first non-trivial contribution could merge.
 
 ## Scope
 
@@ -83,11 +89,10 @@ Three deliverables:
 1. **Subscribe + intro:** empty email to `dev-subscribe@ossie.apache.org`,
    reply to the confirmation, then send an intro to `dev@ossie.apache.org`
    announcing the planned converter (draft below).
-2. **ICLA:** fill and sign https://www.apache.org/licenses/icla.pdf, email to
-   `secretary@apache.org`. Does not block opening the PR — only merging.
-   **Internal question:** confirm with the ThoughtSpot OSI relationship owner
-   whether a CCLA is filed/needed and whether internal OSS-contribution
-   approval applies.
+2. **No CLA step.** Removed 2026-08-31 — neither an ICLA nor a CCLA is required to
+   open or merge a contribution (see Background). An ICLA becomes relevant only on
+   election as a committer. ThoughtSpot's own internal OSS-contribution approval is a
+   separate matter and was **granted 2026-08-31**.
 3. **Raise intent:** GitHub issue on `apache/ossie` (draft below) + two-line
    dev-list message linking it. Better filed once Phase 2 drafts exist so
    there's substance to react to; the only hard rule is announce before the PR
@@ -143,7 +148,7 @@ Three deliverables:
 
 Read upstream: `converters/databricks/` (full pattern incl.
 `test_roundtrip_properties.py`), `converters/snowflake/` (one-directional —
-itself a data point), `core-spec/spec.md`, `osi-schema.json`,
+itself a data point), `core-spec/spec.md`, `ossie-schema.json`,
 `expression_language.md`, `python/src/ossie/models.py`,
 `validation/validate.py`, and the `converter_issues.py` pattern in dbt/wisdom
 (structured "what was lost" reporting; orionbelt's
@@ -165,7 +170,7 @@ dated `BL-NNN` in `docs/backlog.md`; trivial fixes as immediate small PRs).
 
 **Open questions to resolve in this phase:**
 
-- Does `osi-schema.json` constrain `custom_extensions` shape beyond
+- Does `ossie-schema.json` constrain `custom_extensions` shape beyond
   `vendor_name` + `data` (JSON-string) — and is `data`-as-JSON-string awkward
   for our nested TS metadata?
 - Does the Go CLI plugin contract (`cli/internal/plugin/`) impose requirements
@@ -218,7 +223,7 @@ Build rules:
   pairing; formula cross-refs by id; `aggregation:` only in `columns[]`;
   CHAR + object-form `list_choice` for list parameters).
 - Ossie output validated with `validation/validate.py` against
-  `osi-schema.json`.
+  `ossie-schema.json`.
 - TPC-DS fixture pair gives cross-vendor comparability — the same model every
   other converter round-trips.
 - TML fixtures verified once against a live ThoughtSpot instance
@@ -229,7 +234,11 @@ Build rules:
 
 One PR from the fork: converter package + CI workflow + the two doc touches.
 Follow the upstream PR template; respond to review on GitHub and the dev list.
-ICLA must be on file before merge.
+No CLA gates the merge. A converter PR passes by lazy consensus — one binding **+1**
+from a committer and no unresolved **-1**. Note this does *not* cover **A1**: adding
+`THOUGHTSPOT` to the `Dialect` enum is a *specification* change, which needs a dev@
+announcement, a minimum 7-day discussion window and a `[VOTE]` carrying three binding
+**+1**s. File it as its own PR, early — PR #143 (`BIGQUERY`, 3 files) took 41 days.
 
 ### Phase 5 — Back-port into this repo
 

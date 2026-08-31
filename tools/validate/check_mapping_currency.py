@@ -46,6 +46,10 @@ ANCHORED_DIRS = (
     "agents/shared/mappings",
     "agents/shared/schemas",
     "agents/shared/worked-examples",
+    # The Ossie mapping documents pin a specific apache/ossie commit and cite it by
+    # path:line throughout. Upstream renamed osi-schema.json and corrected its ICLA
+    # policy while these sat unwatched for four weeks and nothing nudged (2026-08-31).
+    "docs/ossie",
 )
 # Individual files (outside the dirs above) that also carry a currency anchor — e.g. a
 # skill reference encoding external product behaviour that moves (AgentQL limitations),
