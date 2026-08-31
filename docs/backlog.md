@@ -6572,9 +6572,38 @@ closed, and one is untouched:**
 | **V3** | **CONFIRMED PRESENT** — closeable | Custom-map `geo_config` (`custom_file_guid` + `geometryType`) confirmed in **3 production Models / 7 columns**, `geometryType` ∈ {`POLYGON`, `MULTI_POLYGON`}. The declared-loss-under-X8 verdict is unchanged; what changes is that the path is **exercised in the wild**, so real models will hit it. This row was always read-only-by-design, and it now has its shape on record — it can be marked closed |
 | **V4** | **UNTOUCHED, and now negatively evidenced twice** | `is_mandatory_token_filter`: **0** of 500 documents. A second and far larger survey has failed to find it, which means a survey is the wrong instrument — a property that never appears cannot be shown to round-trip. Closing V4 requires **constructing** an object that sets the flag and round-tripping it, exactly as this entry's original step describes. Unchanged and still the highest-stakes of the four, because it fails open |
 
-**What remains of this entry, restated.** V1's sentinel-versus-name question (one API read), V2's
-round-trip leg plus `is_browser` (needs a constructed object), and V4 in full (needs a constructed
-object). V3 is done. The census cost nothing extra to gather these — it was run for a different
+**What remains of this entry, restated (revised 2026-09-01).** V1's sentinel-versus-name question
+(one API read) and V2's round-trip leg plus `is_browser` (needs a constructed object). **V3 is
+done, and V4 is now closed — see below.**
+
+**V4 CLOSED 2026-09-01 — will not be verified.** Per ThoughtSpot domain review,
+`is_mandatory_token_filter` is **legacy and being deprecated**: customers are actively migrating
+off it for security reasons, onto standard `rls_rules` on tables. Constructing an object to
+measure the round-trip fidelity of a mechanism on its way out is not a good use of a live
+instance, and designing converter behaviour around it would be worse.
+
+Two things follow, and the second matters more than the closure.
+
+1. **Converter behaviour is unchanged.** Keep stashing the flag so a model that still carries it
+   round-trips faithfully — deprecated is not inert, and a silent drop still fails open for the
+   shrinking population that has it — but never synthesise one.
+2. **The census's zero was a finding, and this entry misread it.** The text above concluded that
+   0-of-500 meant *"a survey is the wrong instrument — a property that never appears cannot be
+   shown to round-trip."* It was not a measurement failure. Near-zero usage was the product
+   telling us the feature was being retired, and it was explained away as a sampling limit.
+   `.claude/rules/repo-audit.md` already states the rule this broke: *"when an audit inventory
+   yields a zero, a never, or a large drift, that is a finding and needs an exit."* The other
+   never-observed paths in the census should be re-read the same way — as possible deprecation
+   signals rather than as gaps in the sample. Recorded in
+   `docs/reviews/2026-07-30-tml-census.md`.
+
+**Knock-on, routed here rather than filed separately.** Because table `rls_rules` is now the
+*primary* security mechanism rather than one of several, non-mapping **NM2**'s consequence has
+grown even though its decision has not. The construct-mapping and compliance-gaps documents now
+require the `rls_rules` loss to surface as an **error-severity issue naming every affected
+table**, not a quiet declared loss. Also recorded there: `is_bypass_rls` and
+`is_mandatory_token_filter` fail in *opposite* directions — the former closed, the latter open —
+which the earlier text treated as one category. The census cost nothing extra to gather these — it was run for a different
 purpose — which is worth noting for how the residuals should be closed: **the remaining three all
 need object construction or an API read, not more surveying.** A follow-up census with
 `--fqn --include-obj-id` is filed separately as **BL-190** for the identity rules (NM1 / X8), which

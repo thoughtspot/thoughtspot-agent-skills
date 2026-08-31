@@ -717,6 +717,8 @@ construct mapping stashes it because it *fails open*, which remains the right ca
 ("that it survives a TML round trip at all") is **not** settled by this census — no
 sampled object uses it.
 
+> **Re-read 2026-09-01.** The zero above was recorded as a limit of the instrument — a property that never appears cannot be shown to round-trip. That was the wrong reading. Per ThoughtSpot domain review, `is_mandatory_token_filter` is **legacy and being deprecated**, with customers actively migrating off it onto standard table `rls_rules`. Near-zero usage across 500 documents was the product telling us so. The methodological lesson is the one this repo already has a rule for — a zero in an inventory is a finding needing an exit, not a null result — and it applies to the other never-observed paths in this census, which should be re-read as possible deprecation signals rather than as sampling gaps. Routed: BL-186's V4 is closed on this basis.
+
 And: **2 of 275 Tables have no `connection` block at all** — `MetricsMonitoring`
 (`db: thoughtspot_internal_stats`) and `sav_dim_unit` (`db: falcon_default_schema`), both
 Falcon/in-memory tables. The Table ref marks `table.connection.name` **Required: Yes**.
