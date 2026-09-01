@@ -49,6 +49,25 @@ Copied verbatim from the spec and the upstream contribution rules. Every task's 
 - **Dialect label and vendor key are separate constants** (P6), never one shared string, even though both currently read `THOUGHTSPOT`.
 - **`custom_extensions[].data` is a serialised JSON string, never a nested object** (P1, X2). `ossie-schema.json:73-76` types it `"string"` and `:66-80` sets `additionalProperties: false`.
 - **Never emit a `THOUGHTSPOT` dialect entry until apache/ossie#351 merges.** The enum is closed; it fails schema validation today. Until then emit `ANSI_SQL` with the real dialect in the stash, as `converters/nvidia` does. Plan B owns this switch; Plan A only defines the constant.
+- **Write every line fresh. Port nothing from `tools/ts-cli/` or any ThoughtSpot product.**
+  Per Jean-Baptiste Onofré (Ossie mentor, IPMC) on `dev@ossie.apache.org`, 2026-08-31:
+  *"the license has to be AL v2 and if the code is coming from another product, SGA and
+  license change is required."* A Software Grant Agreement is a legal process, not a
+  paperwork step, and it would convert an ordinary contribution into one needing corporate
+  sign-off.
+
+  **This bites hardest in Plan B**, where the temptation is concrete rather than
+  hypothetical: `tools/ts-cli/ts_cli/formula_common.py` (478 lines) and `sv_translate.py`
+  (999 lines) in the ThoughtSpot skills repo already implement working ThoughtSpot formula
+  translation, and reaching for them is the obvious efficiency. They are ThoughtSpot-owned
+  work in a ThoughtSpot-org repository, so porting them upstream is exactly the case JB
+  describes.
+
+  What may be used: the **mapping documents**, which are prose specifications of behaviour
+  rather than code, and the **behaviour** they describe. What may not: source, structure
+  copied closely enough to be a derivative, test fixtures taken from that repo, or the
+  packaged JSON maps. A reviewer should be able to diff any module here against its
+  `ts_cli` counterpart and see two independent implementations of one documented ruleset.
 - **Python floor 3.10** — `converters/databricks` uses `str | None` syntax, and the repo's own tooling assumes 3.10+.
 
 ---
