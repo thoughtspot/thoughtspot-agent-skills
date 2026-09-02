@@ -50,6 +50,11 @@ ANCHORED_DIRS = (
     # path:line throughout. Upstream renamed osi-schema.json and corrected its ICLA
     # policy while these sat unwatched for four weeks and nothing nudged (2026-08-31).
     "docs/ossie",
+    # The cross-platform gap analysis makes claims about three products at once
+    # (Ossie, Snowflake Semantic Views, Databricks Metric Views), so it goes stale
+    # three ways and faster than any single mapping file. Added 2026-09-02 with
+    # docs/gaps/ts-semantic-modelling-gaps.md, the first file in the directory.
+    "docs/gaps",
 )
 # Individual files (outside the dirs above) that also carry a currency anchor — e.g. a
 # skill reference encoding external product behaviour that moves (AgentQL limitations),

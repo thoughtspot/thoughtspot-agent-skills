@@ -24,6 +24,14 @@ draws on, this one cites internal paths and internal backlog IDs freely).
 > the schema references cite are defined in a file a fresh clone actually has. (They were written
 > to an untracked scratch directory first and moved here on review.)
 
+> **See also — and note the corrections.**
+> [`docs/gaps/ts-semantic-modelling-gaps.md`](../gaps/ts-semantic-modelling-gaps.md) (2026-09-02)
+> places these findings alongside Snowflake Semantic Views and Databricks Metric Views, adds an
+> upstream-engagement read, and **records nine claims in this document that did not survive
+> re-verification** — chiefly the `custom_extensions` adoption statistic in G1, "stricter than any
+> peer" in G2, A1's retracted "Blocking" grade, G12's prose function list, and the V1–V4 paragraph
+> below. Read its *Corrections* register before quoting this document externally.
+
 **How to read this.** Three buckets, and the split is the point. Bucket 1 is **ours** — things
 ThoughtSpot cannot express that the standard, or another vendor, can. Bucket 2 is **theirs** —
 gaps in the Ossie specification we are raising upstream, listed so nobody mistakes an upstream gap

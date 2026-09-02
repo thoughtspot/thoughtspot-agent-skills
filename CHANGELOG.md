@@ -5,6 +5,12 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-09-02
+- docs: add `docs/gaps/ts-semantic-modelling-gaps.md` — cross-platform ThoughtSpot semantic-modelling
+  gap analysis vs Ossie / Snowflake Semantic Views / Databricks Metric Views, with a differentiator
+  list, an upstream-engagement read, and a register of 18 existing claims that failed re-verification
+- feat: `check_mapping_currency.py` now anchors `docs/gaps` so the analysis nudges when stale
+
 ## 2026-09-01
 - docs: file BL-227 (complexity gate fails open without radon; pre-commit hook not
   installed) and BL-228 (Domo bypass-detection gate catches 3 of 8), both from the
