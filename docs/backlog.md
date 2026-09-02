@@ -174,6 +174,8 @@ are roughly ordered by value÷effort.
 | ~~BL-132~~ | ~~from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake)~~ | DONE (PR #332) |
 | ~~BL-133~~ | ~~`ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing)~~ | DONE (PR #333, #335) |
 | BL-229 | `docs/quality-gates.md` can rot on `main` indefinitely — the freshness gate is scoped to PRs that touch a gate source of truth | next validator pass |
+| BL-230 | Ossie converter `normalise()` is ASCII-only — non-Latin column names are silently mangled or rejected; no transliteration policy | before Plan C wires identifiers into a pipeline |
+| BL-231 | `check_backlog_integrity.py` passes on a structurally destroyed backlog — proven, not theorised | next validator pass |
 
 ### Tier 4 — Deferred
 
@@ -8691,5 +8693,114 @@ freshness guarantee, and the catalog's own header should not imply that it is.
 scoped way and therefore has the same hole. `generate_parity.py --check` and
 `generate_open_items_index.py --check` are the obvious candidates — both are generators with a
 `--check` mode, and if either is only wired to a scoped trigger it shares this defect.
+
+**Target:** next validator pass.
+
+## BL-230 -- the Ossie converter's identifier derivation is ASCII-only, and silently mangles non-Latin names `Tier 2`
+
+**Filed:** 2026-09-02.
+**Source:** the Task 6 and Task 8 reviews during Plan A execution (the `apache/ossie` converter
+foundations). Two independent reviewers reached it from different directions.
+**Affects:** `converters/thoughtspot/src/ossie_thoughtspot/identifiers.py` in the `apache/ossie`
+fork; rule **ID1** in `docs/ossie/ts-ossie-construct-mapping.md`; Plans B/C/D.
+**Status:** OPEN.
+
+**What it does.** `normalise()` lowercases, then replaces every run of `[^0-9a-z]` with an
+underscore. Anything outside ASCII alphanumerics is therefore *dropped*, not transliterated.
+Measured against the committed code:
+
+| input | output |
+|---|---|
+| `Cafe` (with acute e) | `caf` |
+| `Urun` (with diaeresis U) | `r_n` |
+| `Istanbul` (dotted capital I) | `i_stanbul` |
+| CJK-only name | raises `ValueError` |
+
+**Why it is worse than a rough edge.** The failure modes are *inconsistent*, which is the part
+that bites. Accented-Latin names fail **silently**, producing plausible-but-wrong identifiers
+that are also collision-prone. Whole-non-Latin names fail **loudly**. So a customer with a
+mixed-script model gets some columns quietly corrupted and others rejected outright, with no
+single signal that the converter cannot handle their naming.
+
+The dotted-capital case is a worked example of how non-obvious this is: Python lowercases it to
+`i` **plus a combining dot above** (U+0307), and that combining character, being
+non-alphanumeric, becomes a separator. The spurious underscore comes from the combining mark,
+not from the letter.
+
+**Why it was not fixed in place.** Choosing a transliteration policy is a *product* decision,
+not an implementation one: what should a Japanese column name become in an interchange document
+other vendors will read? Inventing an answer inside a foundations task would have been worse
+than stating the boundary. Plan A therefore documented it (module docstring plus a
+`## Known limitations` section in the converter README) and pinned the current behaviour with
+tests explicitly labelled as limitations, so it cannot silently drift.
+
+**Why this entry exists at all.** The original ruling was to "carry an open item into Plan C".
+The only place that was recorded was the SDD ledger, which is gitignored and which the skill
+deletes when the run finishes -- and Plan C does not exist yet. The note would have evaporated
+with the workspace: precisely the "we noticed this, we'll remember" failure the two-bucket rule
+exists to prevent. This entry is the durable half.
+
+**The exit.** Before Plan C wires `identifiers.py` into a real pipeline, decide and implement one
+of:
+
+1. **Transliterate** -- e.g. `unicodedata` NFKD plus an ASCII fold, or a dependency if one can be
+   justified upstream. Note the converter is PyYAML-only by policy and a new runtime dependency
+   needs PMC/IPMC approval.
+2. **Reject loudly and consistently** -- raise on any input that would lose characters, so the
+   silent-corruption half disappears and the user gets one clear signal.
+3. **Preserve the original in the label** and accept a lossy identifier, which only works if the
+   display name survives elsewhere in the document.
+
+Option 2 is cheapest and removes the inconsistency; option 1 is the only one that keeps such
+models convertible. This needs a product view, which is why it is a backlog item rather than a
+code change.
+
+**Target:** before Plan C.
+
+## BL-231 -- `check_backlog_integrity.py` passes on a structurally destroyed backlog `Tier 2`
+
+**Filed:** 2026-09-02.
+**Source:** discovered by accident while filing BL-230. A scripting error joined the file with a
+literal backslash-n instead of a newline, collapsing `docs/backlog.md` from **8,695 lines to
+61** -- the entire priority index and every prior entry fused into one line carrying visible
+`\n` sequences. `check_backlog_integrity.py --root .` reported **"Backlog integrity clean: no
+duplicate BL ids, no dangling citations, no conflict markers."**
+**Affects:** `tools/validate/check_backlog_integrity.py`.
+**Status:** OPEN.
+
+**Why it passed.** The validator's three checks are all content-pattern checks -- it regexes for
+duplicate `BL-NNN` ids, for citations with no matching entry, and for conflict markers. Every one
+of those still succeeds on a single-line file, because the ids and citations are all still
+*present*, just no longer on separate lines. Nothing in the validator asserts anything about the
+document's **shape**.
+
+This is the same failure class the repo has hit before: a check that reports PASS because it was
+never looking at the thing that broke. The audit rubric's own note on angle 9 says it directly --
+"a missed edit there reported PASS, exactly as a missed edit here reported 'consistent'".
+
+**Why it matters more than the accident that found it.** The corruption was caught only because
+the author happened to re-read the file afterwards. In the ordinary flow -- edit, run the
+validator, see green, commit -- it would have merged, and the backlog is cited roughly a thousand
+times across the repo. A validator that returns clean on a destroyed file is worse than no
+validator, because it converts "I should check this" into "the gate says it is fine".
+
+**The exit -- cheap structural assertions.** Add to the validator:
+
+1. **A line-count floor**, or better, a floor relative to the committed version: the file should
+   never shrink by more than a small margin in one commit. A drop from 8,695 to 61 fails
+   instantly.
+2. **No literal `\n` two-character sequences** in the file -- there is no legitimate reason for
+   one in this document, and it is the specific signature of this class of scripting error.
+3. **A structural sanity check**: the priority-index table and the `## BL-NNN` detail sections
+   must each appear on their own lines, i.e. assert a plausible ratio of lines to entries. If
+   there are ~230 entries and 61 lines, something is very wrong.
+
+Check 2 alone would have caught this instance. Checks 1 and 3 generalise to other ways the file
+could be flattened or truncated.
+
+**Worth checking in the same pass:** whether the repo's other content-pattern validators share
+the blind spot -- any check that greps for patterns without asserting document shape will pass
+on a flattened file. `check_open_items.py` and `check_coverage_matrix.py` are the obvious
+candidates, since both parse structured Markdown.
 
 **Target:** next validator pass.
