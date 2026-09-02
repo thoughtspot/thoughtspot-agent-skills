@@ -1233,7 +1233,7 @@ def expression_entries(expr, resolve, log, *, object_ref):
         target = resolve(*bare)
         if target is None:
             log.add(code="TS-EXPR-UNRESOLVED", severity=Severity.WARNING,
-                    message=f"reference {formula.format_column_ref(*bare)} resolves to no "
+                    message=f"reference {identifiers.format_column_ref(*bare)} resolves to no "
                             f"dataset field; no portable expression is emitted",
                     object_ref=object_ref)
             return entries
@@ -1546,41 +1546,7 @@ must work); other vendors' extensions survive; the full set reloads through
 
 ---
 
-### Task 10: `cli.py` — the console entry point
-
-**Files:** create `src/ossie_thoughtspot/cli.py`, `tests/test_cli.py`; modify `pyproject.toml`.
-
-Mirror the shape of the other converters' CLIs. `argparse` only — no new dependency.
-
-```
-ossie-thoughtspot to-ossie   <tml-file>... -o <out.yaml>  [--issues <issues.json>]
-ossie-thoughtspot to-tml     <ossie.yaml>  -o <out-dir>   [--issues <issues.json>]
-```
-
-**Contract:**
-
-- Structured output to the named file; **issues as JSON**, to `--issues` when given and to
-  stderr otherwise. Never interleave issues with document output.
-- **Exit code 1 when the issue log `has_errors()`**, 0 otherwise. Warnings and info do not
-  fail the run — a conversion with declared losses is a successful conversion that reported
-  them, and treating it as a failure would push users toward `|| true`.
-- `to-tml` writes one file per document into the output directory, named by
-  `dump_document_set` (tables first).
-- **Add the `[project.scripts]` entry in the same task.** Plan A deliberately left it out
-  because `cli:main` did not exist and a declared-but-broken entry point is worse than none.
-  It exists now, so declare it here — and the test below is what proves the two agree.
-
-**Tests:** `to-ossie` on the fixture set writes a loadable Ossie document; `to-tml` writes
-the expected filenames; issues land in `--issues` as JSON and not in the document; exit 1 on
-an error-severity issue and 0 on warnings only; `--help` works for both subcommands; and the
-console-script entry point resolves — import `ossie_thoughtspot.cli` and assert `main` is
-callable, so a typo in `pyproject.toml` fails a test rather than a user's install.
-
-- [ ] Steps 1–6. Commit: `feat(thoughtspot): CLI entry point for both directions`
-
----
-
-### Task 11: the TPC-DS fixture pair
+### Task 10: the TPC-DS fixture pair
 
 **Files:** create `tests/fixtures/tpcds/*.table.tml`, `tests/fixtures/tpcds/*.model.tml`,
 `tests/fixtures/tpcds/expected.ossie.yaml`; and `tests/fixtures/minimal/` likewise.
@@ -1612,6 +1578,40 @@ whose failure mode is silent corruption rather than an error.
 fixture set equals `expected.ossie.yaml`.
 
 - [ ] Steps 1–6. Commit: `test(thoughtspot): TPC-DS and minimal fixture pairs`
+
+---
+
+### Task 11: `cli.py` — the console entry point
+
+**Files:** create `src/ossie_thoughtspot/cli.py`, `tests/test_cli.py`; modify `pyproject.toml`.
+
+Mirror the shape of the other converters' CLIs. `argparse` only — no new dependency.
+
+```
+ossie-thoughtspot to-ossie   <tml-file>... -o <out.yaml>  [--issues <issues.json>]
+ossie-thoughtspot to-tml     <ossie.yaml>  -o <out-dir>   [--issues <issues.json>]
+```
+
+**Contract:**
+
+- Structured output to the named file; **issues as JSON**, to `--issues` when given and to
+  stderr otherwise. Never interleave issues with document output.
+- **Exit code 1 when the issue log `has_errors()`**, 0 otherwise. Warnings and info do not
+  fail the run — a conversion with declared losses is a successful conversion that reported
+  them, and treating it as a failure would push users toward `|| true`.
+- `to-tml` writes one file per document into the output directory, named by
+  `dump_document_set` (tables first).
+- **Add the `[project.scripts]` entry in the same task.** Plan A deliberately left it out
+  because `cli:main` did not exist and a declared-but-broken entry point is worse than none.
+  It exists now, so declare it here — and the test below is what proves the two agree.
+
+**Tests:** `to-ossie` on the fixture set writes a loadable Ossie document; `to-tml` writes
+the expected filenames; issues land in `--issues` as JSON and not in the document; exit 1 on
+an error-severity issue and 0 on warnings only; `--help` works for both subcommands; and the
+console-script entry point resolves — import `ossie_thoughtspot.cli` and assert `main` is
+callable, so a typo in `pyproject.toml` fails a test rather than a user's install.
+
+- [ ] Steps 1–6. Commit: `feat(thoughtspot): CLI entry point for both directions`
 
 ---
 
@@ -1680,8 +1680,9 @@ Keep `max_examples` modest (the default is fine) and set a deadline generous eno
   certain, and no SQL dialect is re-rendered into another. State it as the deliberate choice
   it is, with the specification's pass-through default as the reason. A reviewer who
   discovers this by reading the code will read it as a gap.
-- **`pyproject.toml`** — the `[project.scripts]` entry from Task 10, the `hypothesis` test
-  extra, and a regenerated `uv.lock`.
+- **`pyproject.toml`** — regenerate `uv.lock` only. The `[project.scripts]` entry and the
+  `hypothesis` test extra were already added by the tasks that needed them; this task
+  **verifies** they are present and correct rather than adding them again.
 - **CI** — extend the existing workflow to run the new suites on the supported Python
   matrix. Keep it offline.
 - **`converters/README.md`** — add the THOUGHTSPOT vendor row.
