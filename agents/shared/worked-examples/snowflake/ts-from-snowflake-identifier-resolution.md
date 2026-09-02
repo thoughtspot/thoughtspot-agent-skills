@@ -200,72 +200,72 @@ model:
       column_type: ATTRIBUTE
   - column_id: "COMPANIES::COMPANY_NAME"
     name: Company
+    description: The registered company name
     properties:
       column_type: ATTRIBUTE
-      description: The registered company name
       synonym_type: USER_DEFINED
       synonyms:
       - Organisation
   - column_id: "COMPANIES::FOUNDED_DATE"
     name: Founded Date
+    description: Date the company was founded
     properties:
       column_type: ATTRIBUTE
-      description: Date the company was founded
   - column_id: "COMPANIES::HEADQUARTERS_CITY"
     name: City
+    description: City where the company headquarters is located
     properties:
       column_type: ATTRIBUTE
-      description: City where the company headquarters is located
       synonym_type: USER_DEFINED
       synonyms:
       - HQ City
       - Location
   - column_id: "COMPANIES::INDUSTRY"
     name: Industry
+    description: Industry classification of the company
     properties:
       column_type: ATTRIBUTE
-      description: Industry classification of the company
   - column_id: "EMPLOYEES::EMPLOYEE_ID"
     name: Employee Id
     properties:
       column_type: ATTRIBUTE
   - column_id: "EMPLOYEES::EMPLOYEE_NAME"
     name: Name
+    description: Full name of the employee
     properties:
       column_type: ATTRIBUTE
-      description: Full name of the employee
       synonym_type: USER_DEFINED
       synonyms:
       - Staff Member
   - column_id: "EMPLOYEES::HIRE_DATE"
     name: Hire Date
+    description: Date the employee was hired
     properties:
       column_type: ATTRIBUTE
-      description: Date the employee was hired
   - column_id: "EMPLOYEES::DEPARTMENT"
     name: Team
+    description: Department the employee belongs to
     properties:
       column_type: ATTRIBUTE
-      description: Department the employee belongs to
       synonym_type: USER_DEFINED
       synonyms:
       - Division
   - formula_id: formula_Tenure Months
     name: Tenure Months
+    description: Number of months since the employee was hired
     properties:
       column_type: ATTRIBUTE
-      description: Number of months since the employee was hired
   - formula_id: formula_Salary Band
     name: Salary Band
+    description: Salary classification band based on annual salary
     properties:
       column_type: ATTRIBUTE
-      description: Salary classification band based on annual salary
   - formula_id: formula_Employee Count
     name: Employee Count
+    description: Total number of employees
     properties:
       aggregation: SUM
       column_type: MEASURE
-      description: Total number of employees
       index_type: DONT_INDEX
       synonym_type: USER_DEFINED
       synonyms:
@@ -273,47 +273,47 @@ model:
       - Staff Count
   - column_id: "EMPLOYEES::SALARY"
     name: Payroll
+    description: Sum of all employee salaries
     properties:
       aggregation: SUM
       column_type: MEASURE
-      description: Sum of all employee salaries
       synonym_type: USER_DEFINED
       synonyms:
       - Total Compensation
   - formula_id: formula_Avg Salary
     name: Avg Salary
+    description: Average employee salary
     properties:
       aggregation: SUM
       column_type: MEASURE
-      description: Average employee salary
       index_type: DONT_INDEX
   - formula_id: formula_Avg Tenure
     name: Avg Tenure
+    description: Average employee tenure in months
     properties:
       aggregation: SUM
       column_type: MEASURE
-      description: Average employee tenure in months
       index_type: DONT_INDEX
   - formula_id: formula_Total Tenure
     name: Total Tenure
+    description: Total accumulated tenure across all employees in months
     properties:
       aggregation: SUM
       column_type: MEASURE
-      description: Total accumulated tenure across all employees in months
       index_type: DONT_INDEX
   - formula_id: formula_Avg Headcount Per Company
     name: Avg Headcount Per Company
+    description: Average number of employees per company
     properties:
       aggregation: SUM
       column_type: MEASURE
-      description: Average number of employees per company
       index_type: DONT_INDEX
   - formula_id: formula_Max Salary Budget
     name: Max Salary Budget
+    description: Highest total salary budget across all companies
     properties:
       aggregation: SUM
       column_type: MEASURE
-      description: Highest total salary budget across all companies
       index_type: DONT_INDEX
   description: Company workforce analytics exercising facts, double aggregation, and metric-on-fact resolution Converted from Snowflake Semantic View AGENT_SKILLS.IDENTIFIER_RESOLUTION_TEST.COMPANY_WORKFORCE_SV.
   formulas:

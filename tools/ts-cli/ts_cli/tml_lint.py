@@ -6,7 +6,9 @@ ThoughtSpot accepts the TML and then behaves wrong later (silently drops a formu
 flips a measure to an attribute, breaks a join at query time). A couple (I8, I12) ARE
 caught by the server (including under VALIDATE_ONLY) but are cheap, purely-structural
 checks worth failing on locally, without a live call, especially across a batch of
-generated TML. Rules mirror invariants I1/I2/I4/I5/I8/I12/I13/I14 in
+generated TML. I15 is the misplaced-column-root-key check (BL-232): a `description` under
+`properties:` imports with status OK and is then silently discarded. Rules mirror
+invariants I1/I2/I4/I5/I8/I12/I13/I14/I15 in
 `agents/shared/schemas/ts-model-conversion-invariants.md`.
 
 Pure functions over a parsed TML dict so they are trivially unit-testable.
@@ -119,7 +121,7 @@ def lint_tml(data: dict) -> list[str]:
     """Return a list of invariant-violation strings for one parsed TML doc. Empty = clean.
 
     Auto-detects table vs model TML by the top-level key. Checks the model invariants
-    (I1/I2/I4/I5/I8/I12/I13/I14) plus the guid-placement rule — see the module docstring
+    (I1/I2/I4/I5/I8/I12/I13/I14/I15) plus the guid-placement rule — see the module docstring
     for which of these the server's VALIDATE_ONLY policy does and doesn't also surface.
     """
     if not isinstance(data, dict):
@@ -209,7 +211,58 @@ def lint_tml(data: dict) -> list[str]:
     findings.extend(_check_bare_column_id_single_table(model_tables, columns))
     findings.extend(_check_dangling_formula_refs(formulas, columns))
     findings.extend(_check_duplicate_join_pairs(model_tables))
+    findings.extend(_check_misplaced_column_root_keys(columns))
 
+    return findings
+
+
+# I15 — keys that belong at a columns[] entry's ROOT, as siblings of `name`
+# (thoughtspot-model-tml.md, the columns[] field table). A Model import silently
+# ignores unknown keys INSIDE `properties`, so one of these placed there validates
+# clean, imports with status_code OK, and is then simply gone.
+#
+# Deliberately a denylist of misplaced-root keys, NOT an allow-list of valid
+# `properties` keys: the linter gates imports, and an allow-list would fail a
+# legitimate round-tripped Model carrying any property not yet catalogued here.
+# This form has no false positives and still closes the class.
+# `data_panel_column_groups` is root-level, settled by census rather than by the
+# doc-vs-code split it first looked like: docs/reviews/2026-07-30-tml-census.md:150
+# records `model.columns[].data_panel_column_groups` 9 times across 3 of 143 real
+# Models, at the column ROOT, with zero `properties.`-level sightings. (Two sites
+# still call it a properties key — sv_build_sv.py's _UNMAPPED_PROP_KEYS and a CoCo
+# SKILL.md — tracked as BL-237, the same doc-vs-code split that produced BL-232's
+# fifth site.)
+_COLUMN_ROOT_ONLY_KEYS = (
+    "description", "name", "column_id", "formula_id", "data_panel_column_groups",
+)
+
+
+def _check_misplaced_column_root_keys(columns: list) -> list[str]:
+    """I15 — a column-root key placed inside `properties`, where import drops it.
+
+    BL-232: `description` was emitted under `properties` by five sites across two
+    converters and the CoCo mapping doc. Every gate in the repo passed — `ts tml lint`
+    included — while every column description was silently discarded at import. Three
+    of the five sites were found only on a second pass, which is why this is a lint
+    rule and not just five fixes.
+    """
+    findings: list[str] = []
+    for c in columns:
+        if not isinstance(c, dict):
+            continue
+        props = c.get("properties")
+        if not isinstance(props, dict):
+            continue
+        label = c.get("name") or c.get("column_id") or c.get("formula_id") or "?"
+        for key in _COLUMN_ROOT_ONLY_KEYS:
+            if key in props:
+                findings.append(
+                    f"I15: column '{label}' has '{key}:' inside properties: — it belongs "
+                    f"at the columns[] entry root, as a sibling of 'name'. A Model import "
+                    f"SILENTLY IGNORES unknown keys under properties:, so this imports "
+                    f"with status OK and the value is lost (contrast 'synonyms', which "
+                    f"must stay under properties:)."
+                )
     return findings
 
 

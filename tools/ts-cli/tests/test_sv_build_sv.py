@@ -411,6 +411,33 @@ class TestBuildSvDdl:
         assert "comment=" in ddl
         assert "CA=" in ddl
 
+    def test_column_root_description_reaches_comment(self):
+        """BL-232 site 4 — a column's `description` is a SIBLING of `name`.
+
+        `sv_build_sv.py` read `properties.description`, which real ThoughtSpot never
+        emits, so no genuine Model's descriptions ever reached an SV `comment=`. It
+        went unnoticed because `sv_build_model.py` wrote to that same wrong place, so
+        the two cancelled on a round-trip through our own tools. No fixture carried a
+        description at all, so nothing failed when one side was fixed.
+        """
+        model = _model_tml()
+        for col in model["model"]["columns"]:
+            if col["name"] == "Customer Name":
+                col["description"] = "The customer display name."
+        ddl, _ = build_sv_ddl(
+            model_tml=model, table_tmls=_table_tmls(), sv_name="DB.S.SV")
+        assert "The customer display name." in ddl
+
+    def test_properties_description_still_read_as_fallback(self):
+        """Locally generated TML predating the fix keeps working."""
+        model = _model_tml()
+        for col in model["model"]["columns"]:
+            if col["name"] == "Customer Name":
+                col["properties"]["description"] = "Legacy placement."
+        ddl, _ = build_sv_ddl(
+            model_tml=model, table_tmls=_table_tmls(), sv_name="DB.S.SV")
+        assert "Legacy placement." in ddl
+
     def test_counts(self):
         _, info = build_sv_ddl(
             model_tml=_model_tml(), table_tmls=_table_tmls(),

@@ -5,7 +5,7 @@
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I13, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I15, N1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
 > Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7),
@@ -479,6 +479,138 @@ formulas:
 
 ---
 
+### I14 — No ordered table pair may be joined more than once
+
+**Rule:** Within one Model, a given `(from_node, joins[].with)` pair may appear at most
+once. A dimension reached by several different keys — a date dimension joined on order
+date *and* ship date, or one employee table joined through five customer-team roles — is
+**role-played**, and each role needs its own aliased `model_tables` entry.
+
+**Failure mode:** two joins between the same pair leave the join path ambiguous and the
+Model will not load. Nothing upstream catches it: `build-model` assembled 21 such joins
+across 7 pairs on a real customer Semantic View, and I1–I13 all reported clean.
+
+**Why converters hit this by construction:** a Snowflake Semantic View scopes construct
+names *per table*, so declaring eight relationships from one fact to one `DIM_TIME` is
+legal and idiomatic there. ThoughtSpot has one flat join graph, so the same declaration
+is fatal. A source SV that models role-play *without* aliases therefore cannot be
+converted 1:1 — the aliases must be synthesized.
+
+**Correct shape** — one entry per role, `name` the physical table, `alias` the per-role
+node id. Joins carry the alias in `with:`; the `on` clause uses **physical** names on
+both sides; `column_id` prefixes use the **alias**:
+
+```yaml
+model_tables:
+- name: FACT_SALES
+  fqn: "{fact_guid}"
+  joins:
+  - name: FACT_SALES_TO_DIM_TIME_TRANSACTION
+    with: DIM_TIME                       # base node — the default date context
+    'on': "[FACT_SALES::TRANSACTION_DATE_ID] = [DIM_TIME::DATE_ID]"
+    type: LEFT_OUTER
+    cardinality: MANY_TO_ONE
+  - name: FACT_SALES_TO_DIM_TIME_SHIP
+    with: DIM_TIME_SHIP_DATE             # alias node
+    'on': "[FACT_SALES::SHIP_DATE_ID] = [DIM_TIME::DATE_ID]"
+    type: LEFT_OUTER
+    cardinality: MANY_TO_ONE
+- name: DIM_TIME
+  fqn: "{dim_guid}"
+- name: DIM_TIME                          # same physical table, second role
+  alias: DIM_TIME_SHIP_DATE
+  fqn: "{dim_guid}"
+columns:
+- name: "Fiscal Year"                     # base node: unqualified = default context
+  column_id: DIM_TIME::YEAR
+- name: "Fiscal Year (Ship Date)"         # alias node: suffix for uniqueness
+  column_id: DIM_TIME_SHIP_DATE::YEAR
+```
+
+**Keep one role on the base node.** Aliasing *every* role leaves the base table with no
+joins — a disconnected node in the model. Give the primary/default role the base entry
+(and its full column set); alias the rest.
+
+**Trim the alias column sets.** An alias does not need the whole dimension. A 56-column
+date dimension aliased 14 times adds 784 near-duplicate columns and degrades NL search
+more than the ambiguity it fixed; ~12 grouping columns per alias (calendar date, fiscal
+year/quarter/month/week names and orders, month/week ids) covers what users pivot on.
+Keep period flags and offsets (`is_ytd`, `same_date_id_last_year`) on the base node only.
+Set the join key to `index_type: DONT_INDEX` on every alias.
+
+**Applies to:** all convert-from skills (Tableau, Snowflake SV, Databricks MV).
+
+---
+
+### I15 — A column-root key must never appear inside `columns[].properties`
+
+**Rule:** Within a `columns[]` entry, `description`, `name`, `column_id` and `formula_id`
+are **siblings of `name`** at the entry root. Only the catalogued `properties.*` keys
+belong under `properties:` — `column_type`, `aggregation`, `synonyms`/`synonym_type`,
+`index_type`, `currency_type`, `ai_context` and the rest of that table in
+`thoughtspot-model-tml.md`.
+
+**Failure mode:** a Model import **silently ignores unknown keys inside `properties:`**.
+A misplaced key therefore validates clean, imports with `status_code OK`, and the value is
+simply gone. Nothing in the response distinguishes it from a successful import.
+
+**Why converters hit this by construction:** `synonyms` genuinely does belong under
+`properties:`, and it is populated two lines away from `description` in the same
+`_column_props()`-shaped helper every converter has. Putting both in the same dict reads
+as consistent and is wrong for exactly one of them.
+
+**Evidence (BL-232, 2026-09-02).** `description` was emitted under `properties` by
+**five** sites — `mv_build_model.py`, `sv_build_model.py` (writers), `mv_emit_classify.py`,
+`sv_build_sv.py` (readers) and `ts-from-snowflake-rules.md` (the doc CoCo executes, since
+it has no `ts` CLI). Converting a real Metric View sent 19 of 19 descriptions and stored
+0; relocating them and re-importing the same GUID restored all 19. Synonyms survived both
+runs, which is what isolated the cause.
+
+Two properties of this bug are why it became an invariant rather than five fixes:
+
+- **Every gate was green** — `ts tml lint`, `build-model`'s own `invariant_findings`,
+  `VALIDATE_ONLY`, and the whole pre-commit suite, on a tree losing data.
+  `check_converter_parity` asserts helper adoption, `check_coverage_matrix` asserts row
+  existence rather than row *truth*, and `check_mapping_code_sync` gates emitted function
+  names — none of those three can see TML nesting. But the sharper point is that a
+  **placement gate already existed and was single-key**: `check_tml.py` flags
+  `column_type` at the column root (lines 162 and 366, for Table and Model TML
+  respectively) and has no handling of `description` at all. The lesson is not "no
+  validator could see this" — it is that the validator which *could* have was written
+  for one key and never generalised.
+- **The writer and reader bugs cancelled.** A TS→MV→TS round-trip through this repo's own
+  tools wrote to the wrong place and read from the same wrong place, so it round-tripped
+  perfectly while both halves were wrong against real ThoughtSpot. Fixing one side alone
+  turns the other into an active regression — which is what happened to `sv_build_sv.py`
+  mid-fix, caught only by an adversarial review of the fix itself.
+
+**Searching for it:** grep by indentation does not work — the five sites sat at two
+different indents, and a six-space pattern missed the four-space one. Parse the YAML and
+compare each `columns[]` entry's keys against the field table **in both directions**:
+inspecting `columns[].properties` alone is blind to the mirror error (a properties-only
+key hoisted to the root), and blind to misplacement in Table TML.
+
+**Enforced by:** `ts tml lint` (`_check_misplaced_column_root_keys`), over the root-only
+set `description` / `name` / `column_id` / `formula_id` / `data_panel_column_groups`.
+Deliberately a denylist of misplaced root keys, **not** an allow-list of valid
+`properties` keys: the linter gates imports, so an allow-list would fail a legitimate
+round-tripped Model carrying any property not yet catalogued.
+
+**Enforcement gaps, stated rather than implied.** The rule as written is symmetric — the
+schema references say a top-level `synonyms:` is silently dropped too — but the check is
+**one-directional** and does not flag a properties-only key hoisted to the root. It also
+runs on **Model TML only**: `lint_tml` returns early for a `table:` document, so a
+misplaced `description` in Table TML is unenforced even though
+`thoughtspot-table-tml.md` puts it at the column root as well. Both are tracked as
+BL-238; neither is a reason to weaken the rule.
+
+**Applies to:** the rule applies to every convert-from skill (Tableau, Snowflake SV,
+Databricks MV, Power BI, Qlik, Sisense) and both convert-to legs. *Enforcement* today
+covers Model TML in one direction only, per the gaps above.
+
+---
+
+
 ## Naming
 
 ### N1 — Model name: bare source name, no prefix
@@ -562,69 +694,6 @@ guards the function names, but only in markdown **table rows** — a mapping doc
 its function map as prose bullets bypasses it silently. That is exactly how a converter
 shipped all six of these as `Migrated` (PR #440). The invariant exists so the audit catches
 the class even when the validator's parser cannot see it.
-
----
-
-### I14 — No ordered table pair may be joined more than once
-
-**Rule:** Within one Model, a given `(from_node, joins[].with)` pair may appear at most
-once. A dimension reached by several different keys — a date dimension joined on order
-date *and* ship date, or one employee table joined through five customer-team roles — is
-**role-played**, and each role needs its own aliased `model_tables` entry.
-
-**Failure mode:** two joins between the same pair leave the join path ambiguous and the
-Model will not load. Nothing upstream catches it: `build-model` assembled 21 such joins
-across 7 pairs on a real customer Semantic View, and I1–I13 all reported clean.
-
-**Why converters hit this by construction:** a Snowflake Semantic View scopes construct
-names *per table*, so declaring eight relationships from one fact to one `DIM_TIME` is
-legal and idiomatic there. ThoughtSpot has one flat join graph, so the same declaration
-is fatal. A source SV that models role-play *without* aliases therefore cannot be
-converted 1:1 — the aliases must be synthesized.
-
-**Correct shape** — one entry per role, `name` the physical table, `alias` the per-role
-node id. Joins carry the alias in `with:`; the `on` clause uses **physical** names on
-both sides; `column_id` prefixes use the **alias**:
-
-```yaml
-model_tables:
-- name: FACT_SALES
-  fqn: "{fact_guid}"
-  joins:
-  - name: FACT_SALES_TO_DIM_TIME_TRANSACTION
-    with: DIM_TIME                       # base node — the default date context
-    'on': "[FACT_SALES::TRANSACTION_DATE_ID] = [DIM_TIME::DATE_ID]"
-    type: LEFT_OUTER
-    cardinality: MANY_TO_ONE
-  - name: FACT_SALES_TO_DIM_TIME_SHIP
-    with: DIM_TIME_SHIP_DATE             # alias node
-    'on': "[FACT_SALES::SHIP_DATE_ID] = [DIM_TIME::DATE_ID]"
-    type: LEFT_OUTER
-    cardinality: MANY_TO_ONE
-- name: DIM_TIME
-  fqn: "{dim_guid}"
-- name: DIM_TIME                          # same physical table, second role
-  alias: DIM_TIME_SHIP_DATE
-  fqn: "{dim_guid}"
-columns:
-- name: "Fiscal Year"                     # base node: unqualified = default context
-  column_id: DIM_TIME::YEAR
-- name: "Fiscal Year (Ship Date)"         # alias node: suffix for uniqueness
-  column_id: DIM_TIME_SHIP_DATE::YEAR
-```
-
-**Keep one role on the base node.** Aliasing *every* role leaves the base table with no
-joins — a disconnected node in the model. Give the primary/default role the base entry
-(and its full column set); alias the rest.
-
-**Trim the alias column sets.** An alias does not need the whole dimension. A 56-column
-date dimension aliased 14 times adds 784 near-duplicate columns and degrades NL search
-more than the ambiguity it fixed; ~12 grouping columns per alias (calendar date, fiscal
-year/quarter/month/week names and orders, month/week ids) covers what users pivot on.
-Keep period flags and offsets (`is_ytd`, `same_date_id_last_year`) on the base node only.
-Set the join key to `index_type: DONT_INDEX` on every alias.
-
-**Applies to:** all convert-from skills (Tableau, Snowflake SV, Databricks MV).
 
 ---
 

@@ -46,14 +46,27 @@ def _currency_type(entry: dict) -> dict | None:
     return {"iso_code": str(iso)}
 
 
+def _column_entry(base: dict, entry: dict, props: dict) -> dict:
+    """Assemble one `columns[]` entry.
+
+    `description` is a SIBLING of `name`, never a `properties` key. A Model
+    import silently ignores unknown keys inside `properties`, so a description
+    written there validates clean, imports with status OK, and is then lost —
+    see thoughtspot-model-tml.md, the `columns[]` field table.
+    """
+    col = dict(base)
+    if entry.get("comment"):
+        col["description"] = entry["comment"]
+    col["properties"] = props
+    return col
+
+
 def _column_props(entry: dict, *, is_formula: bool) -> dict:
     props: dict = {"column_type": entry["column_type"]}
     if entry["column_type"] == "MEASURE":
         props["aggregation"] = entry.get("aggregation") or "SUM"
         if is_formula:
             props["index_type"] = "DONT_INDEX"
-    if entry.get("comment"):
-        props["description"] = entry["comment"]
     if entry.get("synonyms"):
         props["synonyms"] = list(entry["synonyms"])
         props["synonym_type"] = "USER_DEFINED"
@@ -132,12 +145,14 @@ def build_columns_and_formulas(
             if entry["column_type"] == "ATTRIBUTE":
                 formula["properties"] = {"column_type": "ATTRIBUTE"}
             formulas.append(formula)
-            columns.append({"name": candidate["name"], "formula_id": formula["id"],
-                            "properties": _column_props(entry, is_formula=True)})
+            columns.append(_column_entry(
+                {"name": candidate["name"], "formula_id": formula["id"]},
+                entry, _column_props(entry, is_formula=True)))
         else:
-            columns.append({"name": candidate["name"],
-                            "column_id": f"{entry['table']}::{entry['column']}",
-                            "properties": _column_props(entry, is_formula=False)})
+            columns.append(_column_entry(
+                {"name": candidate["name"],
+                 "column_id": f"{entry['table']}::{entry['column']}"},
+                entry, _column_props(entry, is_formula=False)))
 
     for entry in translated:
         mv_name = entry["name"]

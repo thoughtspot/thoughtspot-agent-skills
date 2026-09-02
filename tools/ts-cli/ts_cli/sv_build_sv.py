@@ -534,7 +534,9 @@ def _classify_formula_column(
         "expr": tf["expr"],
         "classification": classification,
         "synonyms": props.get("synonyms", []),
-        "comment": props.get("description"),
+        # `description` lives at the COLUMN ROOT, where ThoughtSpot emits it — the
+        # `properties` read is a fallback for locally generated TML predating that fix.
+        "comment": col.get("description") or props.get("description"),
     }
     if classification == "metric":
         metrics_list.append(entry)
@@ -566,7 +568,9 @@ def _classify_physical_column(
     classification = classify_column(col, formulas_by_id, data_type)
 
     synonyms = props.get("synonyms", [])
-    comment = props.get("description")
+    # `description` lives at the COLUMN ROOT, where ThoughtSpot emits it — the
+    # `properties` read is a fallback for locally generated TML predating that fix.
+    comment = col.get("description") or props.get("description")
     _collect_unmapped_props(col_name, props, unmapped_props)
 
     if classification == "metric":

@@ -35,7 +35,7 @@ for the full bidirectional translation reference.
 | 9 | `ATTRIBUTE` column, physical (date/timestamp) | `dimensions[]` — same as non-date | No separate `time_dimensions` in the MV schema |
 | 10 | `MEASURE` column with `properties.aggregation` | `measures[]` — `expr: AGG(dot-path)` | Default aggregation `SUM` when unset |
 | 11 | `MEASURE` column, `aggregation: COUNT_DISTINCT` | `measures[]` — `expr: COUNT(DISTINCT dot-path)` | |
-| 12 | `properties.description` | `comment:` | |
+| 12 | `column.description` | `comment:` | Column ROOT, not `properties.description` — a Model import silently ignores unknown keys under `properties:` (I15/BL-232). The sibling to-Snowflake matrix row 14 says the same. |
 | 13 | `properties.synonyms[]` | `synonyms:` list | |
 | 14 | `properties.currency_type.iso_code` | `format: {type: currency, currency_code: ...}` | |
 | 15 | `ai_context` | **NOT MAPPED** | See Unmapped L2 |

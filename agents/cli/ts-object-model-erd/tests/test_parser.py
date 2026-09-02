@@ -55,11 +55,28 @@ def test_hidden_non_measure_formula_does_not_make_dim_a_fact():
     assert ff["role"] == "FORMULA"  # display role preserved (ƒ badge)
 
 
-def test_column_description_read_from_properties():
-    """A column comment lives under `properties.description` in Model TML — the
-    same place `synonyms` and `ai_context` live. Reading only the top-level
-    `description` (usually absent) blanked every description a conversion skill
-    emitted, e.g. a Snowflake SV's per-column comments."""
+def test_column_description_root_is_canonical():
+    """A column `description` is a SIBLING of `name` at the column root — that is
+    where ThoughtSpot emits it (thoughtspot-model-tml.md, columns[] field table).
+    Unlike `synonyms` and `ai_context`, it does NOT belong under `properties`."""
+    model = _mini_model()
+    model["model"]["columns"].append(
+        {"name": "Region Name", "column_id": "CUSTOMER::REGION",
+         "description": "Sales region of the customer",
+         "properties": {"column_type": "ATTRIBUTE"}}
+    )
+    m = parser.parse_model(model, {})
+    customer = next(t for t in m["tables"] if t["id"] == "CUSTOMER")
+    region = next(c for c in customer["cols"] if c["name"] == "Region Name")
+    assert region["desc"] == "Sales region of the customer"
+
+
+def test_column_description_properties_fallback_is_a_legacy_shim():
+    """The `properties.description` fallback exists ONLY for TML generated before
+    BL-232, when our own converters wrote comments there by mistake. A Model
+    import silently ignores unknown keys under `properties:`, so those never
+    reached ThoughtSpot — the ERD saw them only because it parses the generated
+    file directly. Keep the fallback; do not read it as the schema."""
     model = _mini_model()
     model["model"]["columns"].append(
         {"name": "Region Name", "column_id": "CUSTOMER::REGION",
