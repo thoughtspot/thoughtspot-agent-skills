@@ -625,6 +625,57 @@ Keep period flags and offsets (`is_ytd`, `same_date_id_last_year`) on the base n
 Set the join key to `index_type: DONT_INDEX` on every alias.
 
 **Applies to:** all convert-from skills (Tableau, Snowflake SV, Databricks MV).
+### I15 — A column-root key must never appear inside `columns[].properties`
+
+**Rule:** Within a `columns[]` entry, `description`, `name`, `column_id` and `formula_id`
+are **siblings of `name`** at the entry root. Only the catalogued `properties.*` keys
+belong under `properties:` — `column_type`, `aggregation`, `synonyms`/`synonym_type`,
+`index_type`, `currency_type`, `ai_context` and the rest of that table in
+`thoughtspot-model-tml.md`.
+
+**Failure mode:** a Model import **silently ignores unknown keys inside `properties:`**.
+A misplaced key therefore validates clean, imports with `status_code OK`, and the value is
+simply gone. Nothing in the response distinguishes it from a successful import.
+
+**Why converters hit this by construction:** `synonyms` genuinely does belong under
+`properties:`, and it is populated two lines away from `description` in the same
+`_column_props()`-shaped helper every converter has. Putting both in the same dict reads
+as consistent and is wrong for exactly one of them.
+
+**Evidence (BL-232, 2026-09-02).** `description` was emitted under `properties` by
+**five** sites — `mv_build_model.py`, `sv_build_model.py` (writers), `mv_emit_classify.py`,
+`sv_build_sv.py` (readers) and `ts-from-snowflake-rules.md` (the doc CoCo executes, since
+it has no `ts` CLI). Converting a real Metric View sent 19 of 19 descriptions and stored
+0; relocating them and re-importing the same GUID restored all 19. Synonyms survived both
+runs, which is what isolated the cause.
+
+Two properties of this bug are why it became an invariant rather than five fixes:
+
+- **Every gate was green.** `ts tml lint`, `build-model`'s own `invariant_findings`,
+  `VALIDATE_ONLY`, and all twelve repo validators passed on the broken tree.
+  `check_converter_parity` asserts helper adoption, `check_coverage_matrix` asserts row
+  existence rather than row truth, `check_mapping_code_sync` gates emitted function
+  names — none can see TML nesting.
+- **The writer and reader bugs cancelled.** A TS→MV→TS round-trip through this repo's own
+  tools wrote to the wrong place and read from the same wrong place, so it round-tripped
+  perfectly while both halves were wrong against real ThoughtSpot. Fixing one side alone
+  turns the other into an active regression — which is what happened to `sv_build_sv.py`
+  mid-fix, caught only by an adversarial review of the fix itself.
+
+**Searching for it:** grep by indentation does not work — the five sites sat at two
+different indents, and a six-space pattern missed the four-space one. Parse the YAML and
+inspect `columns[].properties` structurally.
+
+**Enforced by:** `ts tml lint` (`_check_misplaced_column_root_keys`). Deliberately a
+denylist of misplaced root keys, **not** an allow-list of valid `properties` keys: the
+linter gates imports, so an allow-list would fail a legitimate round-tripped Model
+carrying any property not yet catalogued.
+
+**Applies to:** all convert-from skills (Tableau, Snowflake SV, Databricks MV, Power BI,
+Qlik, Sisense) and both convert-to legs.
+
+---
+
 
 ---
 

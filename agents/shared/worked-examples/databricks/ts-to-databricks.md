@@ -54,60 +54,60 @@ model:
   columns:
   - name: Order Id
     column_id: DM_ORDER::ORDER_ID
+    description: "Identifier for one order header. Each order can have multiple lines."
     properties:
       column_type: ATTRIBUTE
-      description: "Identifier for one order header. Each order can have multiple lines."
   - name: Order Date
     column_id: DM_ORDER::ORDER_DATE
+    description: "Date the order was placed."
     properties:
       column_type: ATTRIBUTE
-      description: "Date the order was placed."
       synonyms:
       - order placed
       - purchase date
   - name: Product Name
     column_id: DM_PRODUCT::PRODUCT_NAME
+    description: "Display name of the product."
     properties:
       column_type: ATTRIBUTE
-      description: "Display name of the product."
       synonyms:
       - product
       - item
   - name: Product Category
     column_id: DM_CATEGORY::CATEGORY_NAME
+    description: "Category name the product belongs to."
     properties:
       column_type: ATTRIBUTE
-      description: "Category name the product belongs to."
       synonyms:
       - category
       - product line
   - name: Customer Name
     column_id: DM_CUSTOMER::COMPANY_NAME
+    description: "The customer display name."
     properties:
       column_type: ATTRIBUTE
-      description: "The customer display name."
       synonyms:
       - customer
       - client
       - buyer
   - name: Customer State
     column_id: DM_CUSTOMER::STATE
+    description: "The customer state of residence."
     properties:
       column_type: ATTRIBUTE
-      description: "The customer state of residence."
   - name: Customer Zipcode
     column_id: DM_CUSTOMER::ZIPCODE
+    description: "Postal code on the customer billing address."
     properties:
       column_type: ATTRIBUTE
-      description: "Postal code on the customer billing address."
       synonyms:
       - zip code
       - postal code
   - name: Discount
     column_id: DM_ORDER_DETAIL::DISCOUNT
+    description: "Per-line discount recorded on the order detail."
     properties:
       column_type: ATTRIBUTE
-      description: "Per-line discount recorded on the order detail."
       synonyms:
       - promo
       - discount amount
@@ -121,22 +121,22 @@ model:
       - salesperson
   - name: Transaction Date
     column_id: DM_DATE_DIM::DATE_VALUE
+    description: "Date dimension key."
     properties:
       column_type: ATTRIBUTE
-      description: "Date dimension key."
       synonyms:
       - date
   - name: Balance Date
     column_id: DM_INVENTORY::BALANCE_DATE
+    description: "Date the inventory balance was snapshotted."
     properties:
       column_type: ATTRIBUTE
-      description: "Date the inventory balance was snapshotted."
   - name: Revenue
     column_id: DM_ORDER_DETAIL::LINE_TOTAL
+    description: "Dollar value of an order-line item."
     properties:
       column_type: MEASURE
       aggregation: SUM
-      description: "Dollar value of an order-line item."
       synonyms:
       - sales
       - total sales
@@ -144,19 +144,19 @@ model:
       ai_context: Total line-item revenue for financial analysis.
   - name: Quantity
     column_id: DM_ORDER_DETAIL::QUANTITY
+    description: "Number of units sold on one order line."
     properties:
       column_type: MEASURE
       aggregation: SUM
-      description: "Number of units sold on one order line."
       synonyms:
       - units
       - units sold
   - name: Unit Price
     column_id: DM_ORDER_DETAIL::UNIT_PRICE
+    description: "Unit price recorded on the order-line item."
     properties:
       column_type: MEASURE
       aggregation: AVERAGE
-      description: "Unit price recorded on the order-line item."
       synonyms:
       - price
       - list price
@@ -170,16 +170,16 @@ model:
       - rep count
   - name: Category Quantity
     formula_id: formula_Category Quantity
+    description: "Total units sold for a product category."
     properties:
       column_type: MEASURE
       aggregation: SUM
-      description: "Total units sold for a product category."
   - name: Category Contribution Ratio
     formula_id: formula_Category Contribution Ratio
+    description: "Product share of category total units."
     properties:
       column_type: MEASURE
       aggregation: SUM
-      description: "Product share of category total units."
   - name: Monthly Revenue
     formula_id: formula_Monthly Revenue
     properties:
@@ -192,10 +192,10 @@ model:
       aggregation: SUM
   - name: Inventory Balance
     formula_id: formula_Inventory Balance
+    description: "Semi-additive inventory snapshot."
     properties:
       column_type: MEASURE
       aggregation: SUM
-      description: "Semi-additive inventory snapshot."
       synonyms:
       - stock
       - stock on hand

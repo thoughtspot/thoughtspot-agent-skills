@@ -5,6 +5,24 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-09-02
+- fix: column `description` was emitted under `columns[].properties`, where a Model import
+  silently ignores it — every column description was discarded on import by both the
+  Databricks and Snowflake converters, and the TS→Databricks leg read the same wrong
+  location so a round-trip through our own tools hid it (BL-232)
+- feat: `ts tml lint` gains I15 — a column-root key (`description`, `name`, `column_id`,
+  `formula_id`) inside `columns[].properties` is now a finding. A Model import silently
+  ignores unknown keys there, so BL-232's five sites passed every gate in the repo while
+  discarding every column description; I15 fires 19 times on the exact TML that imported
+  clean. A denylist of root-only keys, not an allow-list of valid properties keys, so a
+  round-tripped Model carrying an uncatalogued property is not failed
+- chore: bump ts-cli to v0.136.0
+- docs: correct `ts profiles sync-env` — it reports the `~/.zshenv` lines and writes
+  nothing; the summary said "Regenerate", which read as a promise to update the file
+- docs: file BL-233 (`ts profiles add` stamps `dbx_profile` for a CLI profile v2.0.0 of the
+  skill no longer creates) and BL-234 (`thoughtspot-model-tml.md` lists `NONE` as a valid
+  `properties.aggregation`; the platform rejects it with error_code 14528)
+
 ## 2026-09-01
 - docs: file BL-227 (complexity gate fails open without radon; pre-commit hook not
   installed) and BL-228 (Domo bypass-detection gate catches 3 of 8), both from the

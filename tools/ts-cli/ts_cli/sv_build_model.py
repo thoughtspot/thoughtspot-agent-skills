@@ -35,6 +35,21 @@ def normalize_tables(tables: dict) -> dict[str, str]:
     return out
 
 
+def _column_entry(base: dict, entry: dict, props: dict) -> dict:
+    """Assemble one `columns[]` entry.
+
+    `description` is a SIBLING of `name`, never a `properties` key. A Model
+    import silently ignores unknown keys inside `properties`, so a description
+    written there validates clean, imports with status OK, and is then lost —
+    see thoughtspot-model-tml.md, the `columns[]` field table.
+    """
+    col = dict(base)
+    if entry.get("comment"):
+        col["description"] = entry["comment"]
+    col["properties"] = props
+    return col
+
+
 def _column_props(
     entry: dict, *, is_formula: bool, promote_synonym: bool = False,
 ) -> dict:
@@ -45,8 +60,6 @@ def _column_props(
             props["index_type"] = "DONT_INDEX"
     if entry.get("is_private"):
         props["index_type"] = "DONT_INDEX"
-    if entry.get("comment"):
-        props["description"] = entry["comment"]
     # The first synonym is dropped only when it was promoted to the column
     # name; otherwise every synonym belongs here (BL-179).
     syns = entry.get("synonyms") or []
@@ -102,17 +115,18 @@ def build_columns_and_formulas(
             if entry["column_type"] == "ATTRIBUTE":
                 formula["properties"] = {"column_type": "ATTRIBUTE"}
             formulas.append(formula)
-            columns.append({"name": candidate["name"],
-                            "formula_id": formula["id"],
-                            "properties": _column_props(
-                                entry, is_formula=True,
-                                promote_synonym=promote_synonym)})
+            columns.append(_column_entry(
+                {"name": candidate["name"], "formula_id": formula["id"]},
+                entry,
+                _column_props(entry, is_formula=True,
+                              promote_synonym=promote_synonym)))
         else:
-            columns.append({"name": candidate["name"],
-                            "column_id": f"{entry['table']}::{entry['column']}",
-                            "properties": _column_props(
-                                entry, is_formula=False,
-                                promote_synonym=promote_synonym)})
+            columns.append(_column_entry(
+                {"name": candidate["name"],
+                 "column_id": f"{entry['table']}::{entry['column']}"},
+                entry,
+                _column_props(entry, is_formula=False,
+                              promote_synonym=promote_synonym)))
 
     for entry in translated:
         sv_name = entry["name"]

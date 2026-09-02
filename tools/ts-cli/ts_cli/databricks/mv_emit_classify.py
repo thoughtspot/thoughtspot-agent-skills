@@ -213,13 +213,18 @@ def _physical_measure_expr(dot_path: str, aggregation: str | None) -> str:
 
 
 def _build_metadata(col: dict) -> dict:
-    """Map properties.description/synonyms/currency_type to comment/synonyms/format,
+    """Map a column's description/synonyms/currency_type to comment/synonyms/format,
     per ts-to-databricks-rules.md "v1.1 Column Metadata Mapping" /
     "Unmapped ThoughtSpot Properties". Keys are only included when present.
+
+    `description` is read from the COLUMN ROOT, where ThoughtSpot emits it — not
+    from `properties` (thoughtspot-model-tml.md, `columns[]` field table). The
+    `properties` read is kept only as a fallback for locally generated TML that
+    predates that fix; real exported Model TML never puts it there.
     """
     props = col.get("properties") or {}
     meta: dict = {}
-    comment = props.get("description")
+    comment = col.get("description") or props.get("description")
     if comment:
         meta["comment"] = comment
     synonyms = props.get("synonyms")

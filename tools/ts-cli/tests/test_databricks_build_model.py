@@ -212,11 +212,14 @@ class TestBuildColumnsAndFormulas:
                 display_name="Total Revenue", comment="Net revenue.")], None)
         assert formulas == [{"id": "formula_Total Revenue", "name": "Total Revenue",
                              "expr": "sum ( [T::a] )"}]
+        # `description` is a SIBLING of `name`, never a properties key — a Model
+        # import silently ignores unknown properties keys, so a description under
+        # properties imports with status OK and is then lost.
         assert cols == [{"name": "Total Revenue",
                          "formula_id": "formula_Total Revenue",
+                         "description": "Net revenue.",
                          "properties": {"column_type": "MEASURE", "aggregation": "SUM",
-                                        "index_type": "DONT_INDEX",
-                                        "description": "Net revenue."}}]
+                                        "index_type": "DONT_INDEX"}}]
 
     def test_attribute_formula_gets_column_type_in_formulas(self):
         _, formulas, _ = build_columns_and_formulas(
@@ -293,8 +296,8 @@ class TestBuildColumnsAndFormulas:
                 fmt={"type": "currency", "currency_code": "USD"})], None)
         assert cols[0]["properties"] == {
             "column_type": "MEASURE", "aggregation": "SUM",
-            "description": "Total sales revenue",
             "currency_type": {"iso_code": "USD"}}
+        assert cols[0]["description"] == "Total sales revenue"
 
     def test_formula_measure_currency_format_becomes_currency_type(self):
         # Same for an aggregate metric emitted as a formula — the `format:` block
@@ -1107,53 +1110,53 @@ model:
       column_type: ATTRIBUTE
   - name: "Total Revenue"
     formula_id: formula_Total Revenue
+    description: "Net revenue after discount."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Net revenue after discount."
       synonyms:
       - "revenue"
       - "sales"
       synonym_type: USER_DEFINED
   - name: "Unique Customers"
     formula_id: formula_Unique Customers
+    description: "Distinct customer count."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Distinct customer count."
   - name: "Avg Order Value"
     formula_id: formula_Avg Order Value
+    description: "Average revenue per transaction."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Average revenue per transaction."
       synonyms:
       - "AOV"
       synonym_type: USER_DEFINED
   - name: "High Value Revenue"
     formula_id: formula_High Value Revenue
+    description: "Revenue from items priced above 100."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Revenue from items priced above 100."
   - name: "7-Day Rolling Revenue"
     formula_id: "formula_7-Day Rolling Revenue"
+    description: "Trailing 7-day rolling sum of gross revenue."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Trailing 7-day rolling sum of gross revenue."
   - name: "Return Rate"
     formula_id: formula_Return Rate
+    description: "Fraction of transactions that were returned."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Fraction of transactions that were returned."
   - name: "MV Filter"
     formula_id: "formula_MV Filter"
     properties:

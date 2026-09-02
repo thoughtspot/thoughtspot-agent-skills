@@ -577,53 +577,53 @@ model:
       column_type: ATTRIBUTE
   - name: "Total Revenue"
     formula_id: formula_Total Revenue
+    description: "Net revenue after discount."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Net revenue after discount."
       synonyms:
       - "revenue"
       - "sales"
       synonym_type: USER_DEFINED
   - name: "Unique Customers"
     formula_id: formula_Unique Customers
+    description: "Distinct customer count."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Distinct customer count."
   - name: "Avg Order Value"
     formula_id: formula_Avg Order Value
+    description: "Average revenue per transaction."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Average revenue per transaction."
       synonyms:
       - "AOV"
       synonym_type: USER_DEFINED
   - name: "High Value Revenue"
     formula_id: formula_High Value Revenue
+    description: "Revenue from items priced above 100."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Revenue from items priced above 100."
   - name: "7-Day Rolling Revenue"
     formula_id: "formula_7-Day Rolling Revenue"
+    description: "Trailing 7-day rolling sum of gross revenue."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Trailing 7-day rolling sum of gross revenue."
   - name: "Return Rate"
     formula_id: formula_Return Rate
+    description: "Fraction of transactions that were returned."
     properties:
       column_type: MEASURE
       aggregation: SUM
       index_type: DONT_INDEX
-      description: "Fraction of transactions that were returned."
   - name: "MV Filter"
     formula_id: "formula_MV Filter"
     properties:

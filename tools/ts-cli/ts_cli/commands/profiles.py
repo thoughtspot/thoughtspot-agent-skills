@@ -473,10 +473,17 @@ def remove_cmd(
 @app.command("sync-env")
 def sync_env_cmd(
     platform: Optional[str] = typer.Option(
-        None, help="Sync only this platform. Omit to sync all."
+        None, help="Report only this platform. Omit to report all."
     ),
 ) -> None:
-    """Regenerate ~/.zshenv export lines from all profiles."""
+    """Report the ~/.zshenv export lines every profile needs. Writes nothing.
+
+    This command only prints the lines; applying them to ~/.zshenv is the
+    caller's job (the profile skills read the file, upsert each line and write
+    it back). The previous summary said "Regenerate", which read as a promise to
+    write the file and led callers to believe their environment was configured
+    when nothing had changed.
+    """
     system = plat.system().lower()
     if system not in ("darwin", "linux"):
         typer.echo(json.dumps({

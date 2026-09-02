@@ -21,6 +21,7 @@ accepts the TML and then behaves wrong, or rejects it on import):
 - **I8** — no duplicate `column_id` across `columns[]`. *(Hard import rejection: "columns should have unique column_id values".)*
 - **I12** — every `column_id` is `TABLE::col`-qualified, never bare — even on a single-table model. *(Hard import rejection: "These column_id/formula_id values are incorrect", error_code 14547.)*
 - **I13** — every `[formula_*]` reference (in a `formulas[].expr`) and every `columns[].formula_id` matches a declared `formulas[].id`. *(Hard import rejection: `error_code 14516`, "Search did not find \"formula_X\"" — an unresolvable bracket reference is parsed as search tokens. Distinct from I9, which mandates the id form in the first place.)*
+- **I15** — no column-root key (`description`, `name`, `column_id`, `formula_id`) inside a `columns[]` entry's `properties:`. *(A Model import silently ignores unknown keys under `properties:` — the TML validates clean, imports with `status_code OK`, and the value is gone. BL-232: five sites emitted `description` there and every gate in the repo passed; 19 of 19 descriptions were discarded on a live import. Contrast `synonyms`, which must stay under `properties:`.)*
 
 `ts tml lint` reads raw TML file paths via `--file`/`--dir` (the same input `ts tml
 import` takes) and exits non-zero on any finding, so it gates the import (replace

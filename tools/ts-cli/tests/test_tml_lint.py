@@ -361,3 +361,77 @@ def test_lint_standalone_answer_blank_chart_flagged():
     doc = {"answer": {"name": "Bad Hires by Age (Bar)", "chart": {"type": "BAR"}}}
     findings = lint_tml(doc)
     assert any("Bad Hires by Age (Bar)" in f for f in findings)
+
+
+class TestI15MisplacedColumnRootKeys:
+    """I15 — a column-root key placed inside `properties:`, where a Model import
+    silently ignores it.
+
+    BL-232: `description` was emitted under `properties` by five sites across two
+    converters plus the CoCo mapping doc. EVERY gate in the repo passed — this
+    linter included, `build-model`'s own invariant checks, `VALIDATE_ONLY`, and the
+    live import returning `status_code OK` — while every column description was
+    discarded. Three of the five sites were found only on a second, structural
+    pass, which is why this is a lint rule rather than five point fixes."""
+
+    @staticmethod
+    def _model(columns):
+        return {"model": {"name": "M", "model_tables": [{"name": "T"}],
+                          "columns": columns, "formulas": []}}
+
+    def test_description_under_properties_is_flagged(self):
+        f = lint_tml(self._model([
+            {"name": "Order Id", "column_id": "T::ORDER_ID",
+             "properties": {"column_type": "ATTRIBUTE",
+                            "description": "Identifier for one order."}}]))
+        assert len(f) == 1
+        assert f[0].startswith("I15:")
+        assert "'Order Id'" in f[0] and "'description:'" in f[0]
+
+    def test_description_at_root_is_clean(self):
+        f = lint_tml(self._model([
+            {"name": "Order Id", "column_id": "T::ORDER_ID",
+             "description": "Identifier for one order.",
+             "properties": {"column_type": "ATTRIBUTE"}}]))
+        assert f == []
+
+    def test_synonyms_under_properties_stay_clean(self):
+        """The contrast case — `synonyms` MUST live under properties, so the rule
+        must not sweep it up."""
+        f = lint_tml(self._model([
+            {"name": "Order Date", "column_id": "T::ORDER_DATE",
+             "description": "Date the order was placed.",
+             "properties": {"column_type": "ATTRIBUTE",
+                            "synonyms": ["order placed"],
+                            "synonym_type": "USER_DEFINED"}}]))
+        assert f == []
+
+    def test_uncatalogued_property_is_not_flagged(self):
+        """Deliberately a denylist, not an allow-list: the linter gates imports, so
+        a property we have not catalogued must NOT fail a legitimate round-tripped
+        Model."""
+        f = lint_tml(self._model([
+            {"name": "C", "column_id": "T::C",
+             "properties": {"column_type": "ATTRIBUTE",
+                            "some_future_property": "whatever"}}]))
+        assert f == []
+
+    def test_flags_formula_backed_columns_too(self):
+        f = lint_tml(self._model([
+            {"name": "Employee", "formula_id": "formula_Employee",
+             "properties": {"column_type": "ATTRIBUTE",
+                            "description": "Employee name as Last, First."}}]))
+        assert any(x.startswith("I15:") for x in f)
+
+    def test_other_root_only_keys_flagged(self):
+        f = lint_tml(self._model([
+            {"name": "C", "column_id": "T::C",
+             "properties": {"column_type": "ATTRIBUTE",
+                            "name": "C", "column_id": "T::C"}}]))
+        assert sum(1 for x in f if x.startswith("I15:")) == 2
+
+    def test_label_falls_back_when_name_absent(self):
+        f = lint_tml(self._model([
+            {"column_id": "T::C",
+             "properties": {"column_type": "ATTRIBUTE", "description": "d"}}]))
+        assert "'T::C'" in f[0]

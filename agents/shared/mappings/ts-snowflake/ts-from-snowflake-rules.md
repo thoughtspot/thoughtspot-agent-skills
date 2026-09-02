@@ -957,10 +957,15 @@ formulas:
 columns:
 - name: Is Senior
   formula_id: formula_Is Senior
+  description: "Boolean filter: true when salary at or above senior threshold"
   properties:
     column_type: ATTRIBUTE
-    description: "Boolean filter: true when salary at or above senior threshold"
 ```
+
+> `description` is a **sibling of `name`**, never a `properties` key — a Model import
+> silently ignores unknown keys inside `properties`, so a description placed there
+> imports with status OK and is then lost. Contrast `synonyms`, which **must** live
+> under `properties`. See `thoughtspot-model-tml.md`, the `columns[]` field table.
 
 At the Step 10 review checkpoint, offer the user the option to also add as a model filter:
 

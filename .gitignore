@@ -78,3 +78,6 @@ docs/superpowers/plans/
 # real instance GUIDs from a staging run (audit finding 1.1). Ignore the directory
 # name wherever it appears, not just at the root.
 plan/
+
+# Transient review/agent worktrees (see BL-232 review, 2026-09-02)
+wt-*/

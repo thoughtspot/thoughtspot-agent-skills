@@ -14,6 +14,7 @@ from ts_cli.sv_build_model import (
     strip_formulas,
     _build_join_on,
     _check_no_duplicate_display_names,
+    _column_entry,
     _column_props,
     _detect_fact_tables,
 )
@@ -202,11 +203,20 @@ class TestColumnProps:
         props = _column_props(entry, is_formula=False)
         assert props["index_type"] == "DONT_INDEX"
 
-    def test_description(self):
+    def test_description_is_not_a_properties_key(self):
+        """`description` belongs at the column root, not under `properties`.
+
+        A Model import silently ignores unknown keys inside `properties`, so a
+        description written there validates clean, imports with status OK and is
+        then lost. `_column_props` must not emit it; `_column_entry` places it.
+        """
         entry = {"column_type": "ATTRIBUTE", "comment": "desc",
                  "synonyms": []}
         props = _column_props(entry, is_formula=False)
-        assert props["description"] == "desc"
+        assert "description" not in props
+        col = _column_entry({"name": "C", "column_id": "T::c"}, entry, props)
+        assert col["description"] == "desc"
+        assert "description" not in col["properties"]
 
     def test_all_synonyms_kept_by_default(self):
         """BL-179 — with no promotion, every synonym belongs in
@@ -596,6 +606,33 @@ class TestBuildModelTmlSv:
         assert info["formula_count"] == 2
         assert len(info["attributes"]) == 4  # 3 dims + 1 fact
         assert len(info["measures"]) == 2
+
+    def test_description_at_column_root_in_assembled_document(self):
+        """BL-232 — document-level assertion, the one the SV side lacked.
+
+        The DBX converter had a golden document fixture that (wrongly) pinned
+        `properties.description`, which is how the bug survived for months. The SV
+        side had no document-level assertion at all, so it had even less standing
+        between it and a silent recurrence. This asserts the shape of the assembled
+        document, not just `_column_props`'s return value.
+        """
+        parsed = _parsed_basic()
+        translated_doc = {
+            "translated": _translated_basic(),
+            "skipped": [], "stats": {},
+        }
+        doc, _ = build_model_tml_sv(
+            model_name="Sales Model", parsed=parsed,
+            translated_doc=translated_doc, tables=_tables_basic(),
+            sv_fqn="DB.SCHEMA.SALES_SV")
+
+        by_name = {c["name"]: c for c in doc["model"]["columns"]}
+        # _translated_basic() gives CUSTOMER_NAME "Full name" and TOTAL_AMOUNT "Revenue"
+        assert by_name["Customer Name"]["description"] == "Full name"
+        assert by_name["Total Amount"]["description"] == "Revenue"
+        # and nowhere is it under properties, on ANY column
+        for col in doc["model"]["columns"]:
+            assert "description" not in (col.get("properties") or {}), col["name"]
 
     def test_with_existing_guid(self):
         parsed = _parsed_basic()

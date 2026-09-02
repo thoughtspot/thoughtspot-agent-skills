@@ -104,7 +104,10 @@ ts profiles remove --platform snowflake --name "Partner AP"
 
 ### `ts profiles sync-env`
 
-Regenerate ~/.zshenv export lines from all configured profiles.
+Report the `~/.zshenv` export line every configured profile needs. **Writes nothing** —
+applying the lines to `~/.zshenv` is the caller's job (the profile skills read the file,
+upsert each line and write it back). The summary previously read "Regenerate", which
+invited callers to believe the file had been updated when it had not.
 
 ```bash
 ts profiles sync-env
@@ -2521,7 +2524,7 @@ no Tableau/ThoughtSpot connection):
    raw Tableau expression and its TML translation and scores an LCS-based similarity
    (MATCH ≥85%, PARTIAL 50–84%, LOW <50%, MISSING). PARTIAL/LOW are candidate
    mistranslations flagged for manual review.
-3. **validity** — reuses `ts_cli/tml_lint.py::lint_tml` (I1/I2/I4/I5/I8/I12/I13) — no invariant
+3. **validity** — reuses `ts_cli/tml_lint.py::lint_tml` (I1/I2/I4/I5/I8/I12/I13/I15) — no invariant
    logic is re-implemented here. Model↔table-TML dangling-reference checking (a
    `columns[].column_id` that no longer resolves on its table TML) is a separate concern,
    covered by `ts tml lint --dir`.
