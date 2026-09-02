@@ -74,6 +74,7 @@ jobs:
           python3 tools/validate/check_mapping_code_sync.py --root .
           python3 tools/validate/check_harness_routing.py --root .
           python3 tools/validate/check_no_v1_endpoints.py --root .
+          python3 tools/validate/check_lint_invariant_list.py --root .
           python3 tools/validate/check_no_inline_tml_gate.py --root .
           python3 tools/validate/check_skill_cli_usage.py --root .
           # 2026-07-03 audit-harvest validators (see .claude/rules/repo-audit.md).

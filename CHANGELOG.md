@@ -6,6 +6,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-09-02
+- feat: `check_lint_invariant_list.py` — the `ts tml lint` rule set is now declared
+  ONCE (a `CANONICAL-RULE-SET` marker in `tml_lint.py`, gated against the findings the
+  code actually emits) and restated nowhere. It had been hand-copied into ~11 places and
+  drifted twice: I14 for weeks, then I15 across eight sites. Eight redundant copies
+  removed; short cross-references, dated changelog rows and historical records stay
 - fix: a Semantic View relationship names its join keys in the SV namespace, so a renamed
   key emitted a join against a column that does not exist — two of eight joins on a real SV,
   including order-line→order-header and order→date. Every gate was green: the XREF check only
