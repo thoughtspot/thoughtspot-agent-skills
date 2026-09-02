@@ -20,7 +20,7 @@ from ts_cli.sv_naming import (  # noqa: F401  (re-exported for callers/tests)
 )
 from typing import Any, Callable
 
-from ts_cli.formula_common import UntranslatableError
+from ts_cli.formula_common import UntranslatableError, bare_column_name
 from ts_cli.sv_sql import translate_sql_expr
 
 
@@ -342,8 +342,8 @@ def make_resolver(
         expr = dim.get("expr")
         if expr is None:
             return _physical_ref(dim, ref_col)
-        bare = expr.strip()
-        if _BARE_COLUMN_RE.match(bare):
+        bare = bare_column_name(expr, dim.get("alias_table"))
+        if bare:
             table = alias_map.get(dim["alias_table"].lower(),
                                   dim["source_table"])
             if ref_col.lower() != bare.lower():
@@ -692,8 +692,6 @@ def _entry(
 
 # --- per-block translators ---------------------------------------------------
 
-_BARE_COLUMN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
-
 
 def _translate_dimension(
     dim: dict, parsed: dict, alias_map: dict[str, str],
@@ -713,10 +711,11 @@ def _translate_dimension(
         return _entry(
             dim["source_column"], "dimension", "column", "ATTRIBUTE", dim,
             table=table, column=dim["alias_name"])
-    if _BARE_COLUMN_RE.match(expr.strip()):
+    bare = bare_column_name(expr, dim.get("alias_table"))
+    if bare:
         return _entry(
             dim["source_column"], "dimension", "column", "ATTRIBUTE", dim,
-            table=table, column=expr.strip())
+            table=table, column=bare)
     annotations: list[str] = []
     resolver = make_resolver(
         parsed, dim["alias_table"], annotations=annotations,

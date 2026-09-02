@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from ts_cli.sv_parse import parse_sv_ddl
+from ts_cli.formula_common import bare_column_name
 from ts_cli.sv_translate import (
     fact_column_type,
     _find_over_split,
@@ -1208,3 +1209,66 @@ class TestDerivedMetricTranslation:
     def test_qualified_metrics_still_translate(self):
         assert _t("AVG_ORDER_VALUE")["output_kind"] == "formula"
         assert _t("AMOUNT")["output_kind"] == "column"
+
+
+class TestBareColumnName:
+    """A rename must classify as a COLUMN, including qualified/quoted forms.
+
+    `DM_DATE_DIM.DATE_VALUE as dm_date_dim."DATE"` was classified as *computed*
+    and emitted as a formula, because the old pattern only matched an
+    unqualified, unquoted identifier. On a date dimension whose only other
+    references are join keys, that left the table with ZERO column_id entries and
+    ThoughtSpot refused the import outright: "One or more tables have been added
+    to the model without selecting any of their columns ... DM_DATE_DIM"
+    (live, TEST_SV_DUNDER_MIFFLIN_SALES_INVENTORY, 2026-09-02).
+    """
+
+    def test_plain_identifier(self):
+        assert bare_column_name("ORDER_ID") == "ORDER_ID"
+        assert bare_column_name("  ORDER_ID  ") == "ORDER_ID"
+
+    def test_quoted_identifier(self):
+        assert bare_column_name('"DATE"') == "DATE"
+
+    def test_qualified_and_quoted(self):
+        assert bare_column_name('dm_date_dim."DATE"', "dm_date_dim") == "DATE"
+        assert bare_column_name("dm_order.ORDER_DATE", "dm_order") == "ORDER_DATE"
+        assert bare_column_name('"dm_order"."ORDER_DATE"', "dm_order") == "ORDER_DATE"
+
+    def test_qualifier_must_match_the_construct_table(self):
+        """A reference to a DIFFERENT table is not a rename of this one's column,
+        so it must fall through to the formula path rather than silently emit a
+        column on the wrong table."""
+        assert bare_column_name("other_table.SOME_COL", "dm_order") is None
+
+    def test_qualifier_ignored_when_no_alias_table_given(self):
+        assert bare_column_name("anything.COL") == "COL"
+
+    def test_real_expressions_are_not_bare_columns(self):
+        for expr in ("CONCAT(a, b)", "A + B", "SUM(x)", "CASE WHEN x THEN 1 END",
+                     "a.b.c", "", None, "COUNT(DISTINCT x)"):
+            assert bare_column_name(expr) is None, expr
+
+    def test_dimension_with_qualified_quoted_rename_emits_a_column(self):
+        """End to end: the shape that broke the import must yield output_kind
+        'column' with the physical column, not a formula."""
+        parsed = {
+            "tables": [{"fqn": "D.S.DM_DATE_DIM", "name": "DM_DATE_DIM",
+                        "alias": "DM_DATE_DIM", "primary_key": ["DATE_VALUE"]}],
+            "relationships": [],
+            "dimensions": [{
+                "source_table": "DM_DATE_DIM", "source_column": "DATE_VALUE",
+                "alias_table": "dm_date_dim", "alias_name": "DATE_VALUE",
+                "expr": 'dm_date_dim."DATE"', "block": "dimensions",
+                "comment": None, "synonyms": [], "sample_values": [],
+                "is_enum": False, "is_filter": False, "is_private": False,
+                "cortex_search_service": None,
+            }],
+            "metrics": [], "facts": [],
+        }
+        out = translate_sv_formulas(parsed)
+        e = out["translated"][0]
+        assert e["output_kind"] == "column", e
+        assert e["table"] == "DM_DATE_DIM"
+        assert e["column"] == "DATE"          # the physical column, unquoted
+        assert e["ts_expr"] is None

@@ -476,3 +476,46 @@ def fix_double_aggregation(
         return m.group(0)
 
     return _WRAPPED_REF.sub(_replace, expr)
+
+
+# A single column reference, optionally qualified and/or double-quoted:
+#   COL   "COL"   tbl.COL   tbl."COL"   "tbl"."COL"
+_QUALIFIED_BARE_COLUMN_RE = re.compile(
+    r'^(?:(?P<tbl>"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)\s*\.\s*)?'
+    r'(?P<col>"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)$')
+
+
+def bare_column_name(expr: str | None, alias_table: str | None = None) -> str | None:
+    """Return the column an expression names, if it names exactly one column.
+
+    A rename is a COLUMN in ThoughtSpot, not a formula — and, as
+    `_translate_dimension` documents, "a table needs at least one real column
+    selected or it imports with a cross-join warning". The previous pattern
+    only recognised the UNQUALIFIED, UNQUOTED form, so a rename written
+    `DM_DATE_DIM.DATE_VALUE as dm_date_dim."DATE"` was classified as computed and
+    emitted as a formula. On a date dimension whose only other references are join
+    keys that left the table with **zero** `column_id` entries, and ThoughtSpot
+    refuses the import outright:
+
+        "One or more tables have been added to the model without selecting any of
+         their columns ... DM_DATE_DIM"
+
+    (live, converting TEST_SV_DUNDER_MIFFLIN_SALES_INVENTORY, 2026-09-02.) BL-212
+    taught the expression *translator* to read quoted identifiers; this is the
+    *classifier* catching up.
+
+    When the expression is qualified, the qualifier must match `alias_table`
+    (case-insensitively) — a reference to a different table is not a simple rename
+    of this one's column, so it correctly falls through to the formula path.
+    Returns the column name with quotes stripped, or None.
+    """
+    if not expr:
+        return None
+    m = _QUALIFIED_BARE_COLUMN_RE.match(expr.strip())
+    if not m:
+        return None
+    tbl = m.group("tbl")
+    if tbl is not None and alias_table is not None:
+        if tbl.strip('"').lower() != alias_table.strip('"').lower():
+            return None
+    return m.group("col").strip('"')
