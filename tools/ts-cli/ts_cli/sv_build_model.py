@@ -12,7 +12,9 @@ Key SV-specific differences from the Databricks builder:
 """
 from __future__ import annotations
 
-from ts_cli.formula_common import (add_formula_prefix, fix_double_aggregation,
+
+from ts_cli.formula_common import (add_formula_prefix, bare_column_name,
+                                   fix_double_aggregation,
                                    promote_duplicate_column_ids,
                                    resolve_name_collisions)
 from ts_cli.sv_translate import build_node_id_map, display_title
@@ -168,7 +170,71 @@ def _detect_fact_tables(relationships: list[dict]) -> set[str]:
     return all_tables - to_tables
 
 
-def _build_join_on(rel: dict, flat: dict[str, str]) -> str:
+def build_join_column_index(parsed: dict) -> dict[tuple[str, str], str]:
+    """Map an SV construct name used as a join key to its PHYSICAL column.
+
+    A `relationships(...)` clause names its keys in the **SV namespace**, which is
+    not the physical column whenever the construct renames one:
+
+        DM_ORDER.DM_ORDER_ORDER_DATE as dm_order.ORDER_DATE
+        DM_ORDER_DETAIL.DM_ORDER_DETAIL_ORDER_ID as dm_order_detail.RRDER_ID
+        ...
+        DM_ORDER_DETAIL_TO_DM_ORDER as DM_ORDER_DETAIL(DM_ORDER_DETAIL_ORDER_ID) ...
+
+    Emitting the declared name produces `[DM_ORDER_DETAIL::DM_ORDER_DETAIL_ORDER_ID]`
+    against a table whose column is `RRDER_ID` — a join on a column that does not
+    exist. It is the same silent-until-query class as BL-178/BL-195, and invisible
+    to `ts tml lint`: I15 and the formula checks see nothing wrong, and the XREF
+    cross-reference check only runs when Table TMLs are linted *alongside* the
+    model, which never happens when tables were created by `ts tables create`
+    rather than from TML on disk.
+
+    Keys are `(table_lower, construct_name_lower)`; the value is the physical
+    column, preserving its declared case. Only the two shapes that ARE a physical
+    column are indexed, mirroring `sv_translate._dimension_ref`'s split so the two
+    cannot disagree:
+
+      1. passthrough (``expr is None``) -> the column ``alias_name`` names;
+      2. bare-column rename (``expr`` is a lone identifier) -> the column the
+         EXPRESSION names.
+
+    A computed construct (shape 3) is deliberately NOT indexed: it is a formula,
+    cannot be a join key, and passing it through unresolved is the correct way to
+    surface an SV that tries — the reference then fails loudly against the real
+    column inventory instead of resolving to something plausible and wrong.
+    """
+    idx: dict[tuple[str, str], str] = {}
+    for block in ("dimensions", "facts"):
+        for c in parsed.get(block) or []:
+            src_table = c.get("source_table")
+            src_col = c.get("source_column")
+            if not src_table or not src_col:
+                continue
+            expr = c.get("expr")
+            if expr is None:
+                physical = c.get("alias_name")
+            else:
+                # Shared with sv_translate so the join index and the column
+                # classifier cannot disagree about what "names one column" means
+                # — a private copy here was narrower and missed a qualified or
+                # quoted rename (the BL-217 duplication class).
+                physical = bare_column_name(expr, c.get("alias_table"))
+            if not physical:
+                continue
+            idx[(src_table.lower(), src_col.lower())] = physical
+    return idx
+
+
+def _resolve_join_col(table_alias: str, col: str,
+                      col_idx: dict[tuple[str, str], str] | None) -> str:
+    """Resolve one join key from the SV namespace to its physical column."""
+    if not col_idx:
+        return col
+    return col_idx.get((table_alias.lower(), col.lower()), col)
+
+
+def _build_join_on(rel: dict, flat: dict[str, str],
+                   col_idx: dict[tuple[str, str], str] | None = None) -> str:
     """Build the `on` expression for one relationship.
 
     The join `on` clause describes the *physical* key equality, so both table
@@ -176,31 +242,44 @@ def _build_join_on(rel: dict, flat: dict[str, str]) -> str:
     role-playing endpoint — e.g. ``[DM_ORDER::REQUIRED_DATE] = [DM_DATE_DIM::DATE]``.
     Role-play disambiguation is carried by the join's ``with:`` (the alias), not by
     the `on` clause. (Column references, by contrast, use the alias prefix — see
-    build_node_id_map.)"""
-    from_ts = flat[rel["from_table"]]
-    to_ts = flat[rel["to_table"]]
+    build_node_id_map.)
+
+    Physical applies to the COLUMN tokens too, which is what `col_idx`
+    (``build_join_column_index``) supplies — the relationship names its keys in the
+    SV namespace, and those differ from the physical column whenever the construct
+    renames one."""
+    from_alias, to_alias = rel["from_table"], rel["to_table"]
+    from_ts = flat[from_alias]
+    to_ts = flat[to_alias]
     style = rel.get("join_style", "equi")
 
+    def fcol(c: str) -> str:
+        return _resolve_join_col(from_alias, c, col_idx)
+
+    def tcol(c: str) -> str:
+        return _resolve_join_col(to_alias, c, col_idx)
+
     if style == "range":
-        fc = rel["from_cols"][0]
-        start, end = rel["to_cols"][0], rel["to_cols"][1]
+        fc = fcol(rel["from_cols"][0])
+        start, end = tcol(rel["to_cols"][0]), tcol(rel["to_cols"][1])
         return (f"[{from_ts}::{fc}] >= [{to_ts}::{start}] and "
                 f"[{from_ts}::{fc}] < [{to_ts}::{end}]")
 
     if style == "asof":
         parts = []
         for fc, tc in zip(rel["from_cols"], rel["to_cols"]):
-            parts.append(f"[{from_ts}::{fc}] = [{to_ts}::{tc}]")
+            parts.append(f"[{from_ts}::{fcol(fc)}] = [{to_ts}::{tcol(tc)}]")
         parts[-1] = parts[-1].replace("] =", "] >=", 1)
         return " and ".join(parts)
 
     return " and ".join(
-        f"[{from_ts}::{fc}] = [{to_ts}::{tc}]"
+        f"[{from_ts}::{fcol(fc)}] = [{to_ts}::{tcol(tc)}]"
         for fc, tc in zip(rel["from_cols"], rel["to_cols"]))
 
 
 def _collect_joins(
     relationships: list[dict], node_of: dict[str, str], flat: dict[str, str],
+    col_idx: dict[tuple[str, str], str] | None = None,
 ) -> dict[str, list[dict]]:
     joins_by_from: dict[str, list[dict]] = {}
     for rel in relationships:
@@ -217,7 +296,7 @@ def _collect_joins(
         join_entry = {
             "name": rel["name"],
             "with": node_of[to_alias],          # alias for a role-play, else the name
-            "on": _build_join_on(rel, flat),     # physical names on both sides
+            "on": _build_join_on(rel, flat, col_idx),  # physical table AND column names
             "type": "LEFT_OUTER",
             "cardinality": "MANY_TO_ONE",
         }
@@ -232,7 +311,8 @@ def build_model_tables(
     node_of = build_node_id_map(parsed)
     relationships = parsed.get("relationships") or []
     has_joins = bool(relationships)
-    joins_by_from = _collect_joins(relationships, node_of, flat)
+    joins_by_from = _collect_joins(
+        relationships, node_of, flat, build_join_column_index(parsed))
 
     fact_aliases = _detect_fact_tables(relationships) if relationships else set()
 

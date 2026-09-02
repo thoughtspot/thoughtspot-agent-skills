@@ -13,6 +13,7 @@ from ts_cli.sv_build_model import (
     normalize_tables,
     strip_formulas,
     _build_join_on,
+    build_join_column_index,
     _check_no_duplicate_display_names,
     _column_entry,
     _column_props,
@@ -788,3 +789,111 @@ class TestBuildModelCommandTablesAuto:
             "--model-name", "M",
             "--output-dir", str(tmp_path / "out")])
         assert result.exit_code == 1
+
+
+class TestJoinKeyRenameResolution:
+    """A relationship names its keys in the SV namespace, not the physical column.
+
+    Found converting TEST_SV_DUNDER_MIFFLIN_SALES_INVENTORY live (2026-09-02).
+    Two of eight joins referenced a column that does not exist:
+
+        DM_ORDER_DETAIL.DM_ORDER_DETAIL_ORDER_ID as dm_order_detail.RRDER_ID
+        DM_ORDER_DETAIL_TO_DM_ORDER as DM_ORDER_DETAIL(DM_ORDER_DETAIL_ORDER_ID) ...
+
+    -> emitted `[DM_ORDER_DETAIL::DM_ORDER_DETAIL_ORDER_ID]` against a table whose
+    column is `RRDER_ID`. Same silent-until-query class as BL-178/BL-195, and
+    invisible to every gate: `build-model` reported `lint_findings: []`, and the
+    XREF cross-reference check only runs when Table TMLs are linted alongside the
+    model — which never happens when tables came from `ts tables create`. The
+    columns[] resolver already handled the rename, so only the join builder was
+    wrong: 0 broken `column_id`, 2 broken join refs.
+    """
+
+    @staticmethod
+    def _parsed():
+        return {
+            "dimensions": [
+                # shape 1 — passthrough rename: physical is alias_name
+                {"source_table": "DM_ORDER_DETAIL",
+                 "source_column": "DM_ORDER_DETAIL_ORDER_ID",
+                 "alias_table": "dm_order_detail", "alias_name": "RRDER_ID",
+                 "expr": None},
+                {"source_table": "DM_ORDER", "source_column": "DM_ORDER_ORDER_DATE",
+                 "alias_table": "dm_order", "alias_name": "ORDER_DATE",
+                 "expr": None},
+                # not renamed — must map to itself
+                {"source_table": "DM_ORDER", "source_column": "ORDER_ID",
+                 "alias_table": "dm_order", "alias_name": "ORDER_ID",
+                 "expr": None},
+                # shape 3 — computed: NOT indexable, cannot be a join key
+                {"source_table": "DM_EMPLOYEE", "source_column": "EMPLOYEE",
+                 "alias_table": "dm_employee", "alias_name": "EMPLOYEE",
+                 "expr": "CONCAT(dm_employee.LAST_NAME, ', ', dm_employee.FIRST_NAME)"},
+            ],
+            "facts": [
+                # shape 2 — bare-column rename: physical is what the EXPRESSION names
+                {"source_table": "DM_INVENTORY", "source_column": "BAL_DATE",
+                 "alias_table": "dm_inventory", "alias_name": "BAL_DATE",
+                 "expr": "DM_INVENTORY_BALANCE_DATE"},
+            ],
+        }
+
+    def test_index_covers_the_three_shapes(self):
+        idx = build_join_column_index(self._parsed())
+        assert idx[("dm_order_detail", "dm_order_detail_order_id")] == "RRDER_ID"
+        assert idx[("dm_order", "dm_order_order_date")] == "ORDER_DATE"
+        assert idx[("dm_order", "order_id")] == "ORDER_ID"
+        # shape 2 resolves to the expression's column, not alias_name
+        assert idx[("dm_inventory", "bal_date")] == "DM_INVENTORY_BALANCE_DATE"
+        # shape 3 is deliberately absent — a formula cannot be a join key
+        assert ("dm_employee", "employee") not in idx
+
+    def test_renamed_join_key_resolves_to_physical(self):
+        idx = build_join_column_index(self._parsed())
+        rel = {"from_table": "DM_ORDER_DETAIL", "from_cols": ["DM_ORDER_DETAIL_ORDER_ID"],
+               "to_table": "DM_ORDER", "to_cols": ["ORDER_ID"], "join_style": "equi"}
+        flat = {"DM_ORDER_DETAIL": "DM_ORDER_DETAIL", "DM_ORDER": "DM_ORDER"}
+        assert _build_join_on(rel, flat, idx) == (
+            "[DM_ORDER_DETAIL::RRDER_ID] = [DM_ORDER::ORDER_ID]")
+
+    def test_unresolved_key_passes_through_unchanged(self):
+        """No mapping -> emit as given, so it fails loudly against the real column
+        inventory rather than resolving to something plausible and wrong."""
+        rel = {"from_table": "A", "from_cols": ["X"], "to_table": "B",
+               "to_cols": ["Y"], "join_style": "equi"}
+        flat = {"A": "A", "B": "B"}
+        assert _build_join_on(rel, flat, {}) == "[A::X] = [B::Y]"
+        assert _build_join_on(rel, flat, None) == "[A::X] = [B::Y]"
+
+    def test_range_and_asof_styles_resolve_too(self):
+        idx = {("a", "fk"): "FK_PHYS", ("b", "s"): "S_PHYS", ("b", "e"): "E_PHYS"}
+        flat = {"A": "A", "B": "B"}
+        rng = {"from_table": "A", "from_cols": ["FK"], "to_table": "B",
+               "to_cols": ["S", "E"], "join_style": "range"}
+        assert _build_join_on(rng, flat, idx) == (
+            "[A::FK_PHYS] >= [B::S_PHYS] and [A::FK_PHYS] < [B::E_PHYS]")
+        asof = {"from_table": "A", "from_cols": ["FK", "FK"], "to_table": "B",
+                "to_cols": ["S", "E"], "join_style": "asof"}
+        assert _build_join_on(asof, flat, idx) == (
+            "[A::FK_PHYS] = [B::S_PHYS] and [A::FK_PHYS] >= [B::E_PHYS]")
+
+    def test_end_to_end_via_build_model_tables(self):
+        """The regression as it actually presented: through build_model_tables."""
+        parsed = self._parsed()
+        parsed["tables"] = [
+            {"fqn": "D.S.DM_ORDER_DETAIL", "name": "DM_ORDER_DETAIL",
+             "alias": "DM_ORDER_DETAIL", "primary_key": []},
+            {"fqn": "D.S.DM_ORDER", "name": "DM_ORDER", "alias": "DM_ORDER",
+             "primary_key": ["ORDER_ID"]},
+        ]
+        parsed["relationships"] = [
+            {"name": "DM_ORDER_DETAIL_TO_DM_ORDER", "from_table": "DM_ORDER_DETAIL",
+             "from_cols": ["DM_ORDER_DETAIL_ORDER_ID"], "to_table": "DM_ORDER",
+             "to_cols": ["ORDER_ID"], "join_style": "equi"},
+        ]
+        tables = {"DM_ORDER_DETAIL": {"name": "DM_ORDER_DETAIL", "fqn": "g1"},
+                  "DM_ORDER": {"name": "DM_ORDER", "fqn": "g2"}}
+        mts = build_model_tables(parsed, tables)
+        ons = [j["on"] for t in mts for j in (t.get("joins") or [])]
+        assert ons == ["[DM_ORDER_DETAIL::RRDER_ID] = [DM_ORDER::ORDER_ID]"]
+        assert not any("DM_ORDER_DETAIL_ORDER_ID" in o for o in ons)

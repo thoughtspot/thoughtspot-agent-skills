@@ -6,6 +6,16 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-09-02
+- fix: a Semantic View relationship names its join keys in the SV namespace, so a renamed
+  key emitted a join against a column that does not exist — two of eight joins on a real SV,
+  including order-line→order-header and order→date. Every gate was green: the XREF check only
+  runs when Table TMLs are linted alongside the model, and tables created by `ts tables create`
+  leave none on disk
+- fix: a rename written with a qualified or quoted identifier (`as dm_date_dim."DATE"`)
+  was classified as computed and emitted as a formula, leaving its table with zero
+  `column_id` entries — ThoughtSpot then refused the import outright. The new
+  `bare_column_name` helper lives in `formula_common.py` and is shared by both classifier
+  sites and the join index. chore: bump ts-cli to v0.137.0
 - fix: column `description` was emitted under `columns[].properties`, where a Model import
   silently ignores it — every column description was discarded on import by both the
   Databricks and Snowflake converters, and the TS→Databricks leg read the same wrong
