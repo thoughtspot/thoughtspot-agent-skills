@@ -176,6 +176,7 @@ are roughly ordered by value÷effort.
 | BL-229 | `docs/quality-gates.md` can rot on `main` indefinitely — the freshness gate is scoped to PRs that touch a gate source of truth | next validator pass |
 | BL-230 | Ossie converter `normalise()` is ASCII-only — non-Latin column names are silently mangled or rejected; no transliteration policy | before Plan C wires identifiers into a pipeline |
 | BL-231 | `check_backlog_integrity.py` passes on a structurally destroyed backlog — proven, not theorised | next validator pass |
+| BL-235 | passthrough arity is verified against itself, never against the mapping doc — green sweep, no guard | next validator pass |
 
 ### Tier 4 — Deferred
 
@@ -8756,6 +8757,42 @@ models convertible. This needs a product view, which is why it is a backlog item
 code change.
 
 **Target:** before Plan C.
+
+## BL-235 -- passthrough arity is verified against itself, never against the mapping document `Tier 2`
+
+**Filed:** 2026-09-02.
+**Source:** the Ossie converter build (Plan B, `feat/thoughtspot-converter` in `~/Dev/ts/ossie`).
+A final review asked for an exhaustive regression test proving that a future catalog edit could
+not desync a passthrough template's `{n}` placeholders from its intended arity. The test was
+added -- `test_every_passthrough_catalog_row_renders_with_its_own_natural_arity`, sweeping all 37
+passthrough rows -- and it is green. **It cannot detect that desync.**
+**Affects:** `converters/thoughtspot/src/ossie_thoughtspot/expressions/` (upstream, unpushed);
+the same class applies to `tools/validate/check_mapping_code_sync.py` here.
+**Status:** OPEN.
+
+**Why the test cannot fire.** `emit_passthrough` never formats its template -- a passthrough
+emits the template as literal SQL. Its argument-count guard therefore derives the expected arity
+from `_placeholder_count(template)`, and the sweep derives the arguments it supplies from the
+same call on the same string. Both sides move together. Proven by injection: changing
+`STDDEV_POP({0})` to `STDDEV_POP({5})` -- placeholder count unchanged at 1, index now out of
+range -- leaves the suite green at 289.
+
+The test is still worth keeping. It catches the class that actually shipped a crash during the
+build (unescaped braces in the `IN` / `NOT IN` templates, which raised on correct usage), and it
+exercises the `PARTITION BY` path. It is simply not the guard it was requested as, and the
+distinction matters because a green exhaustive-looking sweep is exactly the evidence that would
+let "arity is now guarded" stand unchallenged.
+
+**Where the real gap is.** Arity is asserted in two hand-maintained places: the catalog's
+templates, and the arity column of the mapping documents. No self-consistent test can compare
+them -- closing this needs a comparator that parses the document, exactly as
+`check_mapping_code_sync.py` already does for the translator-vs-catalog direction.
+
+**Related, and probably the same fix.** 14 of the 37 passthrough rows are **exemplars**: they
+bake a caller-supplied value in as a literal while declaring a satisfiable arity --
+`PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY {0})` claims arity 1 and silently discards the
+requested percentile. A document-vs-code arity comparator would surface both problems in one
+pass, which is the argument for doing them together rather than patching the exemplars alone.
 
 ## BL-231 -- `check_backlog_integrity.py` passes on a structurally destroyed backlog `Tier 2`
 
