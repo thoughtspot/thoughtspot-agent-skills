@@ -869,7 +869,7 @@ the `build-model` summary JSON.
 `ts snowflake build-model` runs `ts tml lint` internally before any import — the
 command exits 1 on lint findings. See
 [`../../shared/schemas/ts-tml-import-gate.md`](../../shared/schemas/ts-tml-import-gate.md)
-for the invariant list (I1/I2/I4/I5/I8/I12/I13) and import-policy rules. No separate lint
+for the invariant list and import-policy rules. No separate lint
 step is needed.
 
 ---

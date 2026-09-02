@@ -8,8 +8,14 @@ caught by the server (including under VALIDATE_ONLY) but are cheap, purely-struc
 checks worth failing on locally, without a live call, especially across a batch of
 generated TML. I15 is the misplaced-column-root-key check (BL-232): a `description` under
 `properties:` imports with status OK and is then silently discarded. Rules mirror
-invariants I1/I2/I4/I5/I8/I12/I13/I14/I15 in
-`agents/shared/schemas/ts-model-conversion-invariants.md`.
+the invariants in `agents/shared/schemas/ts-model-conversion-invariants.md`.
+
+CANONICAL-RULE-SET: I1/I2/I4/I5/I8/I12/I13/I14/I15
+    The one authoritative enumeration of what this module checks, gated by
+    tools/validate/check_lint_invariant_list.py against the findings the code
+    actually emits. Do not restate this set anywhere else — name the concept
+    ("the model invariants") and link to the doc above. Subset statements in
+    prose ("most of these (I1/I2/I4/I5) are …") are fine and are not this.
 
 Pure functions over a parsed TML dict so they are trivially unit-testable.
 """
@@ -121,7 +127,7 @@ def lint_tml(data: dict) -> list[str]:
     """Return a list of invariant-violation strings for one parsed TML doc. Empty = clean.
 
     Auto-detects table vs model TML by the top-level key. Checks the model invariants
-    (I1/I2/I4/I5/I8/I12/I13/I14/I15) plus the guid-placement rule — see the module docstring
+    (the module docstring's CANONICAL-RULE-SET) plus the guid-placement rule — see it
     for which of these the server's VALIDATE_ONLY policy does and doesn't also surface.
     """
     if not isinstance(data, dict):

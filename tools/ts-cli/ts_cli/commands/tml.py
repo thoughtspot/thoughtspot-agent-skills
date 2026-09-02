@@ -688,7 +688,7 @@ def lint_tml_cmd(
         help="Glob(s) to filter --dir files, e.g. --pattern '*.liveboard.tml'",
     ),
 ) -> None:
-    """Lint TML for the model invariants VALIDATE_ONLY does not catch (I1/I2/I4/I5/I8/I12/I13/I14/I15 + guid).
+    """Lint TML for the model invariants VALIDATE_ONLY does not catch, plus guid placement.
 
     Reads the SAME input as `ts tml import` — either --file/--dir (raw TML file paths,
     with --order/--model-phase/--pattern applying only to this mode) or, when neither is

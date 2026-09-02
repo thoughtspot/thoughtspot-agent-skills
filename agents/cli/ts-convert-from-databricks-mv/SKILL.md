@@ -756,7 +756,7 @@ and column summary so the user has the full picture before importing.
 
 Before any `ts tml import`, run the mandatory lint gate — see
 [`../../shared/schemas/ts-tml-import-gate.md`](../../shared/schemas/ts-tml-import-gate.md)
-for the invariant list (I1/I2/I4/I5/I8/I12/I13), the stdin command, and the
+for the invariant list, the stdin command, and the
 update-vs-create `guid` and import-policy rules. Do not import until
 `ts tml lint` reports `"clean": true`.
 

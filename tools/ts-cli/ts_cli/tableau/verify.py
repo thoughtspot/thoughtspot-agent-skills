@@ -49,7 +49,7 @@ a wholesale port. In particular:
     ``translate_formulas()`` today — tracked separately, out of scope here.
 
   - TML validity is delegated entirely to :mod:`ts_cli.tml_lint`
-    (``lint_tml`` for the I1/I2/I4/I5/I8/I12/I13 invariants). This module never
+    (``lint_tml`` for the model invariants). This module never
     re-implements TML invariant logic.
 
     Model↔table-TML dangling-reference checking is provided separately by

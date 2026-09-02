@@ -279,6 +279,10 @@ fi
 # No inline TML-invariant gate — CLI convert skills must gate imports with `ts tml lint`,
 # not a hand-rolled grep gate (.claude/rules/ts-cli.md; audit angle 11). Runs when a
 # convert skill or the validator changes.
+if echo "$STAGED" | grep -qE '\.(md|py)$'; then
+  run_check "lint invariant list" "tools/validate/check_lint_invariant_list.py --root $REPO_ROOT"
+fi
+
 if echo "$STAGED" | grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validate/check_no_inline_tml_gate\.py)'; then
   run_check "no inline tml gate" "tools/validate/check_no_inline_tml_gate.py --root $REPO_ROOT"
 fi
