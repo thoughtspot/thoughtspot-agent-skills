@@ -48,7 +48,15 @@ Copied verbatim from the spec and the upstream contribution rules. Every task's 
 - **Ossie spec version:** `0.2.0.dev0`, pinned as `apache/ossie @ b5da5d6`. Accept by `major.minor` series rather than exact string — upstream's first release is proposed as **0.3.0**, not 0.2.0, so an exact-string pin will break on release.
 - **Dialect label and vendor key are separate constants** (P6), never one shared string, even though both currently read `THOUGHTSPOT`.
 - **`custom_extensions[].data` is a serialised JSON string, never a nested object** (P1, X2). `ossie-schema.json:73-76` types it `"string"` and `:66-80` sets `additionalProperties: false`.
-- **Never emit a `THOUGHTSPOT` dialect entry until apache/ossie#351 merges.** The enum is closed; it fails schema validation today. Until then emit `ANSI_SQL` with the real dialect in the stash, as `converters/nvidia` does. Plan B owns this switch; Plan A only defines the constant.
+- **`THOUGHTSPOT` is a registered Ossie dialect** as of apache/ossie#351, merged
+  **2026-09-01** and approved by the project's ASF mentor. It is in the `Dialect` enum in
+  `core-spec/ossie-schema.json`, in `SKIP_SQL_VALIDATION` in `validation/validate.py`, and in
+  `OssieDialect` in `python/src/ossie/models.py`. Emit it. Per learnings **P8**, also emit an
+  `ANSI_SQL` entry alongside wherever the expression is portable, so consumers that do not
+  implement our dialect still get something executable — that is what `PORTABLE_DIALECT` is
+  for. *(This constraint previously read "never emit a `THOUGHTSPOT` dialect entry until
+  apache/ossie#351 merges", which was correct when written and is now inverted. Plans B–D
+  inherit the new form.)*
 - **Write every line fresh. Port nothing from `tools/ts-cli/` or any ThoughtSpot product.**
   Per Jean-Baptiste Onofré (Ossie mentor, IPMC) on `dev@ossie.apache.org`, 2026-08-31:
   *"the license has to be AL v2 and if the code is coming from another product, SGA and
@@ -1391,6 +1399,6 @@ git commit -m "docs(thoughtspot): README with direction statement and coverage m
 | **BL-186 V1** — is the literal `calendar` a default sentinel or a real calendar name? One `GET /api/rest/2.0/calendars/…` read | Gates calendar emission in Plan C. Not needed for Plan A or B |
 | **BL-186 V2** — does a non-`iso_code` `currency_type` survive a round trip? | Gates two `currency_type` forms in Plan D |
 | **G8** — the documented temporal `data_type` set cites our own mapping table as though it were the product enum | Affects the datatype map in Plan C |
-| **apache/ossie#351** — the `THOUGHTSPOT` dialect | Flip `DIALECT_IS_REGISTERED` when it merges. Plan B branches on it |
+| ~~**apache/ossie#351** — the `THOUGHTSPOT` dialect~~ | **CLOSED 2026-09-01 — merged upstream.** `DIALECT_IS_REGISTERED` is now `True` and `FALLBACK_DIALECT` was renamed `PORTABLE_DIALECT`, since `ANSI_SQL`'s role changed from *instead of* to *alongside* (P8). Plan B no longer branches on it |
 | **apache/ossie#287** — extended metadata | Would move five stash keys to first-class fields. Plan C and D branch on it |
 | **Where the converter lives** — main repo or a per-vendor repo, asked on `dev@` 2026-08-31 | Changes the path in every task, nothing else |
