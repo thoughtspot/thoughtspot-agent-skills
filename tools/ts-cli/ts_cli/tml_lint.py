@@ -225,7 +225,16 @@ def lint_tml(data: dict) -> list[str]:
 # `properties` keys: the linter gates imports, and an allow-list would fail a
 # legitimate round-tripped Model carrying any property not yet catalogued here.
 # This form has no false positives and still closes the class.
-_COLUMN_ROOT_ONLY_KEYS = ("description", "name", "column_id", "formula_id")
+# `data_panel_column_groups` is root-level, settled by census rather than by the
+# doc-vs-code split it first looked like: docs/reviews/2026-07-30-tml-census.md:150
+# records `model.columns[].data_panel_column_groups` 9 times across 3 of 143 real
+# Models, at the column ROOT, with zero `properties.`-level sightings. (Two sites
+# still call it a properties key — sv_build_sv.py's _UNMAPPED_PROP_KEYS and a CoCo
+# SKILL.md — tracked as BL-237, the same doc-vs-code split that produced BL-232's
+# fifth site.)
+_COLUMN_ROOT_ONLY_KEYS = (
+    "description", "name", "column_id", "formula_id", "data_panel_column_groups",
+)
 
 
 def _check_misplaced_column_root_keys(columns: list) -> list[str]:

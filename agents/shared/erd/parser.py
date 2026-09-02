@@ -46,12 +46,18 @@ def _index_table_joins(table_tmls):
 def _column_entry(col, props, is_formula, src):
     """Build the renderer-facing column dict, including AI-authored metadata.
 
-    Top-level `description`/`synonyms` are usually null; the real content lives
-    under `properties` (description, ai_context, synonyms), so fall back to those.
-    `description` needs the same fallback as `synonyms` — the Model TML schema
-    writes a column comment to `properties.description`, and reading only the
-    top-level field dropped every description a conversion skill emitted (a
-    Snowflake SV's per-column comments landed in the ERD blank).
+    `synonyms` and `ai_context` genuinely live under `properties`. `description`
+    does NOT: it is a **sibling of `name`** at the column root, which is where
+    ThoughtSpot emits it (thoughtspot-model-tml.md, the columns[] field table).
+
+    The `properties.description` fallback is kept only for TML generated before
+    BL-232, and the reason it was ever needed is the inverse of what this
+    docstring used to claim: the Model TML schema did not put comments there —
+    OUR OWN converters wrote them there by mistake, and a Model import silently
+    ignores unknown keys under `properties:`, so those descriptions never reached
+    ThoughtSpot at all. The ERD read them because it parses the generated file
+    directly rather than a round trip. Read root first; treat the fallback as a
+    compatibility shim, not the schema.
     """
     return {
         "name": col.get("name", ""),

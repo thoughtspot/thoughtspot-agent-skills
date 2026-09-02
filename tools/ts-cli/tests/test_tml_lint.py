@@ -430,6 +430,25 @@ class TestI15MisplacedColumnRootKeys:
                             "name": "C", "column_id": "T::C"}}]))
         assert sum(1 for x in f if x.startswith("I15:")) == 2
 
+    def test_data_panel_column_groups_is_root_only(self):
+        """Settled by census, not by the doc-vs-code split it first looked like:
+        docs/reviews/2026-07-30-tml-census.md:150 records
+        model.columns[].data_panel_column_groups 9 times across 3 of 143 real
+        Models at the column ROOT, with zero properties-level sightings."""
+        f = lint_tml(self._model([
+            {"name": "C", "column_id": "T::C",
+             "properties": {"column_type": "ATTRIBUTE",
+                            "data_panel_column_groups": {"KPIs": ""}}}]))
+        assert len(f) == 1 and f[0].startswith("I15:")
+        assert "data_panel_column_groups" in f[0]
+
+    def test_root_level_data_panel_column_groups_is_clean(self):
+        f = lint_tml(self._model([
+            {"name": "C", "column_id": "T::C",
+             "data_panel_column_groups": {"KPIs": ""},
+             "properties": {"column_type": "ATTRIBUTE"}}]))
+        assert f == []
+
     def test_label_falls_back_when_name_absent(self):
         f = lint_tml(self._model([
             {"column_id": "T::C",

@@ -142,6 +142,7 @@ are roughly ordered by value÷effort.
 | BL-028 | Audit mode: assess visualization layer | — |
 | BL-094 | Joins between SQL Views (multi-query Custom SQL) | — |
 | BL-233 | `ts profiles add` stamps `dbx_profile` for a CLI profile the skill no longer creates | next Databricks pass |
+| BL-238 | I15 is one-directional and Model-only; `check_tml.py` leaves worked-example descriptions ungated | next validator pass |
 
 ### Tier 3 — Opportunistic
 
@@ -202,6 +203,8 @@ are roughly ordered by value÷effort.
 | BL-119 | Smoke test for ts-convert-from-sisense | first Sisense bundle |
 | ~~BL-134~~ | ~~Smoke test for ts-object-model-alias~~ | DONE (feat/ts-object-model-alias) |
 | BL-236 | `lint_tml` crashes on a non-string `joins[].with` instead of reporting it | next validator pass |
+| BL-237 | two sites still classify `data_panel_column_groups` as a `properties` key | next Snowflake pass |
+| BL-239 | `ts-from-databricks-rules.md` TML templates put nested keys at the column root | next Databricks pass |
 
 ---
 
@@ -9027,3 +9030,99 @@ and join when it is not, so a malformed `with:` is reported like any other invar
 Pre-existing — untouched by the BL-232 fix, which only added a call after it.
 
 **Target:** next validator pass, alongside any other `lint_tml` hardening.
+
+---
+
+## BL-237 — two sites still classify `data_panel_column_groups` as a `properties` key `Tier 3`
+
+**Filed:** 2026-09-02.
+**Source:** refute-briefed review of PR #499 (BL-232's fix), which correctly refused the
+exclusion made when I15 was written.
+**Affects:** `tools/ts-cli/ts_cli/sv_build_sv.py:728` (`_UNMAPPED_PROP_KEYS`),
+`agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md:962`.
+
+`docs/reviews/2026-07-30-tml-census.md:150` settles the placement: 9 sightings of
+`model.columns[].data_panel_column_groups` across 3 of 143 real Models, at the **column
+root**, with **zero** `properties.`-level sightings anywhere in the census. `ts tml lint`
+I15 now treats it as root-only on that basis.
+
+Two sites still say otherwise. `_UNMAPPED_PROP_KEYS` lists it among properties keys and is
+read via `_collect_unmapped_props(col_name, props, ...)`, so `build-sv`'s Unmapped
+Properties Report has **never** reported it against real exported TML — it looks for the
+key in a dict it never appears in. The CoCo SKILL.md carries the same claim.
+
+**Why this is worth its own item.** It is the identical doc-vs-code split that produced
+BL-232's fifth site (a mapping doc CoCo executes disagreeing with the schema), caught this
+time before it shipped a data loss rather than after. Left unfixed it will be cited as
+precedent for the wrong placement.
+
+**Approach:** read `data_panel_column_groups` from the column root in
+`_collect_unmapped_props` (it needs the column dict, not just `props`), drop it from
+`_UNMAPPED_PROP_KEYS`, and correct the CoCo SKILL.md line. Add a test asserting the
+Unmapped Properties Report actually reports it from a root-level sighting.
+
+**Target:** next Snowflake pass.
+
+---
+
+## BL-238 — I15 is one-directional and Model-only `Tier 2`
+
+**Filed:** 2026-09-02.
+**Source:** refute-briefed review of PR #499.
+**Affects:** `tools/ts-cli/ts_cli/tml_lint.py` (`_check_misplaced_column_root_keys`,
+`lint_tml`), `tools/validate/check_tml.py`.
+
+I15 closes half of the class it names. Three gaps, all confirmed by running the linter:
+
+1. **No mirror direction.** Both schema references state a top-level `synonyms:` is
+   *silently dropped on import*, and `thoughtspot-model-tml.md` states unknown keys at the
+   `columns[]` **root** are silently ignored too — so the class is symmetric. `synonyms`,
+   `synonym_type`, `ai_context` and `aggregation` hoisted to the column root currently
+   produce **no finding**. This is the natural over-application of I15's own lesson, out of
+   the very dict `description` just left.
+2. **Table TML is unenforced.** `lint_tml` returns early for a `table:` document, so I15
+   never runs on one, although `thoughtspot-table-tml.md` puts `description` at the column
+   root and carries the same synonyms warning.
+3. **`check_tml.py` is not covered.** It gates column key placement for `column_type` only
+   (lines 162 / 366, Table and Model). `ts tml lint` runs on `.tml` at conversion time;
+   `check_tml.py` runs on every staged `.md`. So **nothing in pre-commit or CI protects the
+   38 relocated worked-example descriptions from regressing** — a doc could reintroduce the
+   BL-232 shape and no gate would fire.
+
+**Approach:** generalise both checks from a hardcoded key to the `columns[]` field table's
+root/properties split, applied in both directions and to both TML types. Item 3 is the one
+with a live regression risk and should lead.
+
+**Target:** next validator pass.
+
+---
+
+## BL-239 — `ts-from-databricks-rules.md`'s TML templates put nested keys at the column root `Tier 3`
+
+**Filed:** 2026-09-02.
+**Source:** refute-briefed review of PR #499, which found it while checking whether the
+BL-232 sweep was complete.
+**Affects:** `agents/shared/mappings/ts-databricks/ts-from-databricks-rules.md:971-1008`.
+
+The Table TML template puts **`data_type` and `column_type` at the column root**, where the
+schema reference requires `db_column_properties.data_type` and `properties.column_type` —
+and every ts-cli table builder emits them nested (`tableau/tables.py:103,110`,
+`sisense/tables.py:121,128`). Its Model TML template nests `columns:`/`formulas:` **inside
+a `model_tables[]` item** rather than at `model:` level.
+
+**Same class as BL-232's fifth site, opposite direction.** This is a mapping doc under
+`agents/shared/**`, which CoCo executes as its implementation, and the error is at the
+column *root* rather than under `properties` — so BL-232's prescribed structural search
+(inspect `columns[].properties`) is blind to it by construction. I15's search paragraph has
+been amended to say compare keys in both directions.
+
+**Why it is ungated.** `check_tml._is_template_block` skips any block containing a
+`{placeholder}`, so `check_tml.py --root .` validates 16 blocks repo-wide out of ~156
+candidates. A template is exactly where a wrong shape does the most damage, because it is
+copied.
+
+**Worth noting the contrast:** `ts-from-snowflake-rules.md:847-854` *delegates* to the
+schema references instead of copying them, which is why it cannot drift this way. That is
+the fix pattern.
+
+**Target:** next Databricks pass; the `_is_template_block` gap belongs with BL-238.
