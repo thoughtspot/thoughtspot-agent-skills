@@ -88,6 +88,7 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 | [`ts-security-columns`](agents/cli/ts-security-columns/SKILL.md) | Restrict which columns a group can see on a Table or Model — chooses between the two mechanisms (column security rules and column-level sharing) **per Org**, explains the trade-off, and drives `ts share` / `ts security column-rules` | [✓](agents/cli/ts-security-columns/SKILL.md) | — | — |
 | [`ts-audit`](agents/cli/ts-audit/SKILL.md) | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings | [✓](agents/cli/ts-audit/SKILL.md) | — | — |
 | [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards | [✓](agents/cli/ts-dependency-manager/SKILL.md) | — | — |
+| [`ts-dependency-cleanup`](agents/cli/ts-dependency-cleanup/SKILL.md) | Inspect and cascade-delete dependency graphs via the v1 `/dependency` API — list what references a logical/physical column, table or relationship, then delete an object with its dependents | [✓](agents/cli/ts-dependency-cleanup/SKILL.md) | — | — |
 | [`ts-variable-timezone`](agents/cli/ts-variable-timezone/SKILL.md) | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 | [✓](agents/cli/ts-variable-timezone/SKILL.md) | — | — |
 
 </details>

@@ -36,6 +36,7 @@ imports `run_ts` yet needs no credentials; it just needs the CLI installed).
 | `smoke_ts_to_databricks.py` | ts-convert-to-databricks-mv | Live (TS + DBX) |
 | `smoke_ts_from_databricks.py` | ts-convert-from-databricks-mv | Live (TS + DBX) |
 | `smoke_ts_dependency_manager.py` | ts-dependency-manager | Live (TS) |
+| `smoke_ts_dependency_cleanup.py` | ts-dependency-cleanup | Live (TS) |
 | `smoke_ts_audit.py` | ts-audit | Live (TS) |
 | `smoke_ts_object_model_coach.py` | ts-object-model-coach | Live (TS) |
 | `smoke_ts_object_model_aggregates.py` | ts-object-model-aggregates | Live (TS + SF) |

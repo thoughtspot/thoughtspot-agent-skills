@@ -1,4 +1,4 @@
-# Open Items — ts-dependency-manager-v2
+# Open Items — ts-dependency-cleanup
 
 Items #1, #2 and #4 were probed live against `https://172.32.51.133:8443` on 2026-09-01
 and are VERIFIED below. The rest remain UNVERIFIED — they need an authenticated call,
@@ -39,7 +39,7 @@ SKILL.md uses `$TS_BASE_URL/callosum/v1/tspublic/v1`. Some deployments serve v1 
 `$TS_BASE_URL/tspublic/v1` with no callosum segment. Probe both with #1's call; record
 which returns something other than 404 and correct the `TS_V1` assignment in SKILL.md.
 
-## #3 — Form-encoded or JSON body? — UNVERIFIED
+## #3 — Form-encoded or JSON body? — RESOLVED 2026-09-01 (see the #3 entry below)
 
 SKILL.md sends `application/x-www-form-urlencoded` with `id` as a JSON-array *string*.
 That matches the legacy v1 convention and matches the `["guid-1","guid-2"]` shape given
@@ -55,7 +55,7 @@ A `401` on a path that exists (#1 returned non-404) points here. Note the intera
 with the no-auth-step design: if v1 needs a session cookie, this skill needs a login
 step after all, and that decision should come back to the user.
 
-## #5 — Response shapes for all nine endpoints — UNVERIFIED
+## #5 — Response shapes for all nine endpoints — RESOLVED 2026-09-01 (see the #5 entry below)
 
 SKILL.md renders a per-GUID list of `{type, name, guid}` and instructs the executor to
 fall back to raw JSON when the shape does not match. Capture one real response per
