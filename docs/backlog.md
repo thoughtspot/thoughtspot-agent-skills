@@ -82,6 +82,11 @@ are roughly ordered by value÷effort.
 | ~~BL-118~~ | ~~Codify AgentQL SV/MV backing behaviour~~ | DONE (PR #301) |
 | ~~BL-063~~ | ~~Extract CLI formula translation~~ | DONE |
 | ~~BL-029~~ | ~~Coverage matrix for ts-convert-to-databricks-mv~~ | DONE |
+| BL-240 | ASOF join returns wrong numbers on BOTH legs ($2,100 true → 3,800 in / 5,100 out); matrix row 9 reads as "mapped" | next SF converter pass |
+| BL-241 | `non additive by` dropped on the return leg — a $5,300 semi-additive balance comes back $25,400 | next SF converter pass, with BL-253 |
+| BL-242 | fixed `PARTITION BY` silently dropped from every cumulative/moving window — YTD becomes a lifetime total | next formula pass, with BL-180 |
+| BL-243 | `with tag` folded into the metric expr — destroys all 5 metrics, `build-model` still exits 0 | next SF converter pass |
+| BL-244 | SV `variables` translate 8/8 / 0 skipped (false success), then fail at import and re-deploy | next SF converter pass, with BL-031 |
 
 ### Tier 2 — Schedule soon
 
@@ -106,7 +111,7 @@ are roughly ordered by value÷effort.
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
 | BL-184 | Worked-example reproducibility test (ground truth is never re-run) | after BL-178 |
 | BL-179 | from-Snowflake promotes the first synonym over the logical identifier | with BL-166 |
-| BL-181 | from-Snowflake classifies every fact `ATTRIBUTE` (no MEASURE branch) | after BL-178 |
+| ~~BL-181~~ | ~~from-Snowflake classifies every fact `ATTRIBUTE` (no MEASURE branch)~~ | DONE (2026-07-31, ts-cli v0.128.0) — re-confirmed live 3× on 2026-09-08; coverage-matrix row 16 corrected then |
 | BL-182 | from-Snowflake reverse leg: date-suffix override + fabricated CA table `field` | next SF pass |
 | BL-176 | File-only path Table TML gaps in both from-directions | next converter pass |
 | BL-175 | Provenance text written into the round-tripping description field | with BL-166 |
@@ -143,6 +148,15 @@ are roughly ordered by value÷effort.
 | BL-094 | Joins between SQL Views (multi-query Custom SQL) | — |
 | BL-233 | `ts profiles add` stamps `dbx_profile` for a CLI profile the skill no longer creates | next Databricks pass |
 | BL-238 | I15 is one-directional and Model-only; `check_tml.py` leaves worked-example descriptions ungated | next validator pass |
+| BL-245 | `build-sv` drops every Model formula without `--formulas`, and no command produces that file | next SF converter pass |
+| BL-246 | `build-sv` emits unqualified formula-derived aliases — 9 of 12 outbound legs undeployable as emitted | next SF converter pass, with BL-247 |
+| BL-247 | **Validator:** `lint-ddl` passes DDL that Snowflake rejects and `parse-sv` calls unsupported — offline self-consistency gate | next validator pass |
+| BL-248 | `parse-sv` drops the unnamed relationship form → joinless Model, rejected by ThoughtSpot | next SF converter pass |
+| BL-249 | compound range join loses its equality column; both lists stay length 2 so nothing can detect it | next SF converter pass, with BL-240 |
+| BL-250 | `using (relationship)` on a metric dropped silently (`expr: null`), absent from the matrix entirely | next SF converter pass |
+| BL-251 | `classify-columns` reports `SUM` for every raw measure regardless of declared aggregation — 7 of 7 | next `ts agentql` change |
+| BL-252 | `introspect` emits no `fqn`, so `build-model` collides on any generic table name (52 `DIM_PRODUCT` live) | next SF converter pass |
+| BL-253 | table alias dropped for the physical name — breaks every query citing the alias; masks BL-241 | next SF converter pass, before BL-241 |
 
 ### Tier 3 — Opportunistic
 
@@ -181,6 +195,13 @@ are roughly ordered by value÷effort.
 | BL-231 | `check_backlog_integrity.py` passes on a structurally destroyed backlog — proven, not theorised | next validator pass |
 | BL-234 | `thoughtspot-model-tml.md` lists `NONE` as a valid aggregation; platform rejects it (14528) | next TS currency sweep |
 | BL-235 | passthrough arity self-verifies; residual is now cross-repo only, since the shipped converter generates its docs from the catalog | opportunistic |
+| BL-254 | `parse-sv` never parses `ai_sql_generation` — the regex requires an `=` the syntax does not have | next SF converter pass |
+| BL-255 | `_extract_clause` scans raw DDL, so comment text swallows a real clause (4th instance of one cause) | next SF converter pass, with BL-254 |
+| BL-256 | per-column descriptions lost on the return leg; Model-level description survives | next SF converter pass |
+| BL-257 | `build-sv` has no `facts()` emitter — a fact block cannot survive a round trip | with BL-031 |
+| BL-258 | two `parse-sv` defects on the hand-written-DDL path (implicit `references T`; comment-preceded metric) | with BL-248 and BL-255 |
+| BL-259 | `sv_build_model.py:43` stamps `aggregation: SUM` on an already-aggregated formula — **question unresolved** | next SF converter pass |
+| BL-260 | `PARTITION BY EXCLUDING` maps to nothing on a qualified reference; `LAG`/`LEAD` unrecorded | next formula pass, with BL-242 |
 
 ### Tier 4 — Deferred
 
@@ -205,6 +226,7 @@ are roughly ordered by value÷effort.
 | BL-236 | `lint_tml` crashes on a non-string `joins[].with` instead of reporting it | next validator pass |
 | BL-237 | two sites still classify `data_panel_column_groups` as a `properties` key | next Snowflake pass |
 | BL-239 | `ts-from-databricks-rules.md` TML templates put nested keys at the column root | next Databricks pass |
+| BL-261 | `build-sv --help` cites `ts tml export --output-dir`, which does not exist | next `commands/snowflake.py` change |
 
 ---
 
@@ -4922,7 +4944,7 @@ CLI work if convenient.
 
 **Filed:** 2026-07-29.
 **Source:** 2026-07-29 full audit, findings 4.3, 4.4, 4.6, 1.3.
-**Affects:** `tools/ts-cli/ts_cli/commands/sv_sql.py`, `tools/ts-cli/ts_cli/databricks/mv_sql.py`,
+**Affects:** `tools/ts-cli/ts_cli/sv_sql.py`, `tools/ts-cli/ts_cli/databricks/mv_sql.py`,
 `tools/ts-cli/ts_cli/io_helpers.py` (`run_tml_import`), `tools/ts-cli/ts_cli/commands/snowflake.py:591`,
 `tools/ts-cli/ts_cli/commands/databricks.py:436`, `tools/validate/check_secrets.py`,
 `check_tml.py`, `check_sv_yaml.py`, `tools/smoke-tests/`, `tools/ts-cli/ts_cli/commands/model.py`
@@ -9238,3 +9260,1181 @@ schema references instead of copying them, which is why it cannot drift this way
 the fix pattern.
 
 **Target:** next Databricks pass; the `_is_template_block` gap belongs with BL-238.
+---
+
+## BL-240 — ASOF join returns materially wrong numbers on BOTH legs, and coverage-matrix row 9 reads as "mapped" `Tier 1`
+
+**Filed:** 2026-09-08.
+**Source:** the 16-pattern Semantic View round-trip fidelity study —
+`docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md` (synthesis, and the
+`asof_join` per-pattern section). Raw captures at `.svrt/work/asof_join/`
+(**`.svrt/` is gitignored** — the evidence is local to the run worktree, not committed).
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py`, `tools/ts-cli/ts_cli/sv_build_model.py`
+(`_build_join_on`), `tools/ts-cli/ts_cli/snowflake_ops.py` (`build-sv` relationship
+emitter), `agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 9.
+**Status:** OPEN.
+
+**This is one of three findings in this study where the converter produces output that
+imports cleanly, lints cleanly, and returns the wrong number.** See also BL-241 and
+BL-242. Nothing errors on any of the three.
+
+The `asof_join` pattern exists to demonstrate point-in-time correctness: charge a customer's
+revenue to the address they held *at the time of the order*, not to every address they have
+ever held. The regenerated view answers the pattern's own Q1 and gets it wrong:
+**$5,100 against a true $2,100.** One customer's entire $1,500 is charged to each of her
+three historical postcodes — verbatim the mistake the construct exists to prevent.
+
+**The two legs are wrong differently, which is what the study's three-stage attribution
+buys.** Neither is a crash; both are scored answers:
+
+| Leg | Mechanism | Result |
+|---|---|---|
+| Inbound (SV → Model) | emits coverage-matrix row 9's `>=` on the ASOF column, which matches **every prior row** where ASOF matches only the latest | 3,800 |
+| Outbound (Model → SV) | drops the second column of each side entirely, collapsing the relationship to a **single-column equi join** | 5,100 |
+| Truth (original SV) | — | **2,100** |
+
+`A_vs_C` is 0/3 on both legs. Stage A is sound — the pattern's one oracled query passes —
+so the divergence is the converter's, not the harness's.
+
+**Row 9 is accurate as a description of the TML and misleading as a statement of coverage.**
+It says `references TABLE(COL1, ASOF COL2)` → `=` on COL1, `>=` on the ASOF column, with no
+caveat, and the from-direction does emit exactly that. A reader planning a migration takes
+that row as "ASOF is handled". The matrix row is corrected in the same pass as this filing;
+the code fix is this item.
+
+**Approach.** `>=` cannot express ASOF semantics in a ThoughtSpot join at all — the join
+needs the *latest* matching row, which is a `last_value`/window problem, not a comparison
+operator. Two honest exits: emit the join plus a generated `last_value(...)` guard column and
+annotate it for review, or decline the construct loudly (`UntranslatableError`) so it lands in
+`skipped[]` rather than silently answering. **Declining is preferable to the current
+behaviour** — a construct that returns a wrong number with a clean lint is worse than one that
+refuses. The outbound column-dropping half is a separate, simpler bug in the relationship
+emitter and should be fixed regardless.
+
+**Target:** next Snowflake converter pass — ahead of BL-100, because this class returns wrong
+figures rather than failing.
+
+## BL-241 — `non additive by` is dropped on the return leg: a semi-additive balance of $5,300 comes back as $25,400 `Tier 1`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(synthesis, and the `semi_additive_metric` per-pattern section). Raw captures at
+`.svrt/work/semi_additive_metric/` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/snowflake_ops.py` (`build-sv` metric emitter),
+`agents/cli/ts-convert-to-snowflake-sv/references/coverage-matrix.md` row 19,
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` rows 21/22.
+**Status:** OPEN.
+
+**Second of the three wrong-numbers findings** (BL-240, BL-242).
+
+The inbound leg is correct and is now live-confirmed for the first time: `non additive by
+(BALANCE_DATE asc nulls last) as SUM(...)` translates to
+`last_value ( sum ( [ACCOUNT_BALANCES::BALANCE_USD] ) , query_groups ( ) ,
+{[ACCOUNT_BALANCES::BALANCE_DATE]} )` — character-for-character what coverage-matrix row 21
+predicts.
+
+**The return leg has no `non additive by` emitter at all.** The modifier is not emitted,
+not flagged, and not logged: the metric comes back as a plain additive `SUM`. Probed directly
+on one account:
+
+| view | Account A002 balance |
+|---|---|
+| original Semantic View | **$5,300** |
+| regenerated Semantic View | **$25,400** |
+
+$25,400 is the sum across all five monthly snapshots — the exact wrong answer a semi-additive
+measure exists to prevent. A balance is not additive over time; the whole pattern is that
+constraint, and it is silently discarded.
+
+**The severity was masked, and nearly reported as something milder.** This pattern also loses
+its table alias (BL-253), which made all five of its queries fail loudly with `invalid
+identifier`. Fixing the alias alone would convert **5 loud errors into 5 silent wrong
+numbers** — strictly worse. Both must be fixed together, and the alias fix must not ship
+first.
+
+Two further leg-independent losses ride along on this pattern: `build-sv` has no `facts()`
+emitter at all (BL-257), and the returned fact metric shadows the physical column of the same
+name, which is a second Snowflake rejection (BL-246).
+
+**Approach.** `last_value(agg(...), query_groups(), {[date]})` is a recognisable shape and the
+inbound mapping already round-trips it in one direction — the outbound emitter should pattern-match
+it back to `non additive by (<date> asc nulls last) as <agg>(...)`, and `first_value(...)` to
+`desc nulls last`. Where the shape is not recognised, the metric must be flagged in the
+Unmapped Report rather than emitted as a bare additive aggregate. **An unflagged
+additive fallback is the defect** — not the missing emitter.
+
+**Target:** next Snowflake converter pass, with BL-253 and never before it.
+
+## BL-242 — a fixed `PARTITION BY` is silently dropped from every cumulative/moving window: year-to-date becomes a lifetime total `Tier 1`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(synthesis, and the `window_metrics` per-pattern section). Raw captures at
+`.svrt/work/window_metrics/` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_translate.py` (`_translate_window`),
+`agents/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md` (window decision
+table), `agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 25.
+**Status:** OPEN.
+
+**Third of the three wrong-numbers findings** (BL-240, BL-241), and the cheapest to fix.
+
+```
+SUM(total_revenue) OVER (PARTITION BY daily_sales.year ORDER BY daily_sales.date
+                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+  ->  cumulative_sum ( [DAILY_SALES::total_revenue] , [DAILY_SALES::sale_date] )
+```
+
+The `PARTITION BY daily_sales.year` is gone. A year-to-date running total becomes a
+**lifetime** running total. No annotation, no warning, no skip entry.
+
+**The cause is a bound-but-never-read local**, confirmed by reading
+`sv_translate.py::_translate_window`: `partition` is bound from
+`window_spec["partition_by"]` at the top of the function and is read **only** on the
+non-framed `group_*` fall-through at the end. The `cumulative` branch and the `moving`
+branch each return early using `order[0]` alone and never reference `partition`.
+
+**This contradicts three of the repo's own authorities at once**, which is what makes it a
+documentation-and-code-sync failure rather than a plain bug:
+
+1. The mapping doc's decision table routes exactly this shape to
+   `moving_sum(group_aggregate(…, {[T::dim1]}, query_filters()), -1, 0, [T::dim2])`.
+2. That same doc states the rule explicitly — *"flag the fixed-partition case for review
+   rather than emitting it silently. The formula compiles … which is exactly what makes the
+   divergence dangerous — nothing errors."* The doc predicted this failure and the code does
+   not implement the prediction.
+3. Coverage-matrix row 25 documents the `moving_sum` form as the mapping.
+
+**Approach.** Read `partition` on the framed branches: emit the documented
+`moving_sum(group_aggregate(..., {partition}, query_filters()), -1, 0, order_col)` form when
+a fixed partition is present, and carry the review annotation the mapping doc already
+mandates. `check_mapping_code_sync.py` gates the formula catalog's dangerous direction today
+but does not read the window decision table — see the validator note on BL-247 for the
+generalisation (a parsed field that is bound and never read is the recurring class here; this
+study found four instances of it).
+
+**Target:** next formula pass, with BL-180.
+
+## BL-243 — `with tag` is folded into the metric expression, destroying every metric it annotates, and `build-model` exits 0 `Tier 1`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(the `tags` per-pattern section). Raw captures at `.svrt/work/tags/` (**`.svrt/` is
+gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py`,
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` (needs an unmapped row).
+**Status:** OPEN.
+
+`parse-sv` has no tag field and does **not** drop the clause — it folds the whole
+`with tag (...)` text into the metric's `expr`, reporting `unsupported: []` and
+`warnings: []`. The resulting `expr` is not valid SQL, so `translate-formulas` skips
+**all five** of the pattern's metrics (four on an unresolvable multi-part identifier, one on
+*"no table for bare identifier 'WITH'"*). `build-model` then exits **0** and imports a Model
+whose `measures` list is empty.
+
+So a Snowflake governance annotation with no ThoughtSpot equivalent **takes the business
+logic with it**, silently, under a success exit code. `A_vs_C` is 0/1. This is the
+worst-shaped failure in the study: total loss, reported as success.
+
+**Approach.** Two independent fixes, and the first matters more than the second:
+
+1. **Strip `with tag (...)` in the parser** before the expression is captured, and record it
+   as an unmapped construct. A clause the parser does not model must be *removed* from the
+   expression, never left in it — leaving it in is what turns "unmapped" into "destroys".
+2. **`build-model` must not exit 0 with an empty `measures` list** when the source declared
+   metrics. That is a gate, not a translation fix, and it generalises past tags — see BL-247.
+
+`with tag` appears in neither the Mapped nor the Unmapped section of the coverage matrix; an
+unmapped row is added in the same pass as this filing, flagged as destructive rather than
+benign.
+
+**Target:** next Snowflake converter pass.
+
+## BL-244 — Semantic View `variables` translate 8/8 with 0 skipped — a false success — then fail at Model import and at re-deploy `Tier 1`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(the `variables` per-pattern section). Raw captures at `.svrt/work/variables/`
+(**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py`, `tools/ts-cli/ts_cli/sv_translate.py`
+(bare-identifier resolution), `agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md`
+(needs an unmapped row).
+**Status:** OPEN.
+
+Snowflake session/bind `variables` are invisible to `parse-sv` — no `variables` key in
+`parsed.json`, `unsupported: []`. `translate-formulas` then reports **8/8 translated,
+0 skipped**, because every bare variable identifier is silently resolved against the default
+table alias: `premium_threshold` becomes `[PRODUCT_SALES::premium_threshold]`, a column that
+does not exist.
+
+**The skip list is the study's primary inbound-loss signal, and here it reports nothing
+wrong.** That is the finding. The failure surfaces two steps later — at Model import
+(*"Formula addition failed. Formula: Price Tier, Error: Search did not find …"*) and again on
+the return leg (*"Value was provided for variable 'PRICE_WEIGHT' but no such variable is
+defined"*). `build-model` is PARTIAL: phase 1 imports, phase 2 fails.
+
+**The translator can already detect this class and declines to on the bare form.** On the
+`window_metrics` pattern the same resolver raised *"unknown table alias 'EXCLUDING
+daily_sales'"* for a qualified reference. A bare identifier gets a free pass that a qualified
+one does not — so the fix is a narrowing of an existing check, not new machinery.
+
+**Approach.** Resolving a bare identifier onto the default table must require that the
+column *exists* in the introspected table spec; otherwise raise `UntranslatableError` so the
+construct lands in `skipped[]`. Separately, parse and surface `variables` as an unmapped
+construct (Snowflake session variables are GA and are already the recommended target for the
+to-direction's parameter gap under BL-031 — the two meet here).
+
+**Target:** next Snowflake converter pass, with BL-031's `variables:` work.
+
+## BL-245 — `build-sv` silently drops every Model formula unless `--formulas` is supplied, and no command in the documented flow produces that file `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(method section, and every per-pattern outbound leg). Confirmed on the pilot and again across
+all 12 patterns that produced an outbound leg. Raw captures at `.svrt/work/*/build_sv_rt.log`
+(**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/commands/snowflake.py` (`build-sv`),
+`agents/cli/ts-convert-to-snowflake-sv/SKILL.md`,
+`agents/cli/ts-convert-to-snowflake-sv/references/coverage-matrix.md`.
+**Status:** OPEN.
+
+`ts snowflake build-sv` takes an optional `--formulas <file>`. Without it, **every formula
+column on the Model is dropped from the emitted DDL** — no warning, no Unmapped Report entry,
+clean exit. And **nothing in the documented flow produces that file.** Both `formulas.json`
+files used in this study were hand-authored; one carries its own note saying so.
+
+This is not a corner case, it is the default path. Measured cost:
+
+| Pattern | Formulas lost without `--formulas` |
+|---|---|
+| `derived_metrics` | the one metric that survived the inbound leg |
+| `semi_additive_metric` | 2 of 3 metrics — including the entire construct under test |
+
+Both still emit DDL that **deploys clean**, so a user following the documented steps gets a
+Semantic View that looks successful and has lost its derived measures.
+
+**Why this distorted the study, and why the study is worth citing here.** Two of the three
+pilot patterns were given a hand-authored `formulas.json` and the third was not, so the three
+were not on equal footing and the hand-authored file was flattering the results. The study was
+re-run with **both** outbound legs — `RT` (the documented flow a user actually gets) and `RTF`
+(the converter's ceiling, with a hand-authored formulas file) — reported separately. That
+split exists only because of this gap.
+
+**Approach.** Either (a) `build-sv` derives the formula set from the Model TML it is already
+reading, making `--formulas` an override rather than a prerequisite — the obvious fix, since
+the formulas are *in* the input; or (b) ship a producer command and make the omission loud. In
+either case **the silent drop must go**: a dropped formula belongs in the Unmapped Report at
+minimum. Option (a) is preferred and is the smaller change.
+
+**Target:** next Snowflake converter pass — this gates the honest measurement of every
+outbound-leg finding.
+
+## BL-246 — `build-sv` emits unqualified formula-derived aliases; 9 of the 12 outbound legs in the study were undeployable as emitted `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(synthesis). Independently hit by all four run groups and the pilot. Raw captures at
+`.svrt/work/*/rt.sql`, `rtf.sql`, `*_exec.err` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/snowflake_ops.py` (`build-sv` dimension + metric emitters),
+`agents/cli/ts-convert-to-snowflake-sv/references/coverage-matrix.md` rows 13/18/20/21.
+**Status:** OPEN.
+
+Snowflake's `dimensions()` and `metrics()` clauses require `entity.name as expr`. `build-sv`
+writes a formula column that has no single owning entity as a **bare** name —
+`price_tier as CASE …`, `year as YEAR(sale_date)`, `ytd_revenue as SUM(…) OVER (…)`,
+`revenue as AMOUNT`. Snowflake rejects the whole DDL:
+
+```
+syntax error line 8 at position 15 unexpected 'as'.
+010271 (42601)  Unsupported expression in the definition of derived metric REVENUE.
+```
+
+**This is systematic, not incidental.** Of the 12 patterns that produced an outbound
+assisted (`RTF`) leg, **9 did not deploy as emitted** — 3 from each of two run groups, 2 from
+a third, and the pilot's. The assisted leg is unreachable without hand repair on essentially
+every pattern that has one, which is why the study's `RTF` numbers must be read as "what
+`build-sv` emitted", never as "what survived a round trip".
+
+**The defect is narrower than "unqualified names are wrong", and the narrowing is the fix.**
+An unqualified name is legal — and correct — for a genuine *derived* metric composed from
+other metric aliases; the pilot's `multi_fact_table` emitted the same unqualified form and
+deployed clean. The bug is that `build-sv` emits unqualified **unconditionally** for formula
+columns, with no test of whether the expression resolves to a single owning table.
+
+A window metric fails a **second** way on the same defect: bisected across five probe views,
+the sole difference between failing and deploying was qualifying the *metric* name —
+unqualified, `SUM(total_revenue) OVER (…)` cannot resolve its base metric
+(*"invalid identifier 'TOTAL_REVENUE'"*).
+
+A related second-order rejection on the same leg: a returned fact metric that **shadows the
+physical column of the same name** breaks the metric that consumes it
+(`010220`, confirmed by rename alone).
+
+**Approach.** Qualify with the owning table alias whenever the expression's column references
+all resolve to one table; leave unqualified only for a true cross-metric derived expression.
+Add a fixture test per shape. **`lint-ddl` passed every one of these files — see BL-247, which
+is the gate half of this finding and the stronger exit.**
+
+**Target:** next Snowflake converter pass, with BL-247.
+
+## BL-247 — VALIDATOR: `lint-ddl` passes generated DDL that Snowflake rejects and that `parse-sv` puts in `unsupported[]` — the repo's own parser refuses its own emitter's output `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(synthesis). Raw captures at `.svrt/work/*/lint_rt.log`, `lint_rtf.log`, `parse_rt.log`,
+`parse_rtf.log` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/snowflake_ops.py` (`lint-ddl`, `parse-sv`), a new
+`tools/validate/check_sv_emitter_selfconsistency.py`, `docs/quality-gates.md`.
+**Status:** OPEN.
+
+`ts snowflake lint-ddl` returned `[]` on **8 of 8** generated DDL files in one run group, **4
+of which Snowflake rejects outright** — three outbound legs on an unqualified identifier
+(`unexpected 'as'`) and one on a dangling join key (`invalid identifier`). Across the whole
+study it passed every one of the 9 undeployable legs in BL-246.
+
+The gate's own docstrings claim exactly the checks it failed to fire:
+`snowflake_ops.py:415-416` describes "alias identifier validity (item 13), duplicate alias
+(item 4), and undeclared table references". It fired **zero** times where it should have
+fired four.
+
+**And `ts snowflake parse-sv`, run on the same files, puts the offending entries in
+`unsupported[]`** ("could not parse dimension entry"). So the repo already contains a
+component that knows these files are malformed. Two of its own tools disagree about its own
+emitter's output.
+
+**This is the study's strongest validator candidate, and the reason is that it needs no live
+warehouse.** It is a pure self-consistency property over three components the repo already
+ships:
+
+> **`check_sv_emitter_selfconsistency.py`** — for each Semantic View DDL fixture the repo can
+> generate from a committed Model TML fixture, assert that (a) `parse-sv` returns
+> `unsupported: []` and `warnings: []`, and (b) `lint-ddl` and `parse-sv` **agree**: if
+> `parse-sv` flags an entry, `lint-ddl` must report a finding for it, and vice versa.
+
+Cheap because it is offline, deterministic, and reuses existing entry points — no Snowflake
+credentials, no network, no fixture data. It cannot catch "Snowflake rejects this" directly,
+but it catches the *disagreement*, and in this study the disagreement was present on every
+rejected file. A permanent check here makes the whole BL-246 class unable to recur silently.
+
+**Approach.** Land the self-consistency validator sketched above rather than chasing the
+individual rejected files: it is offline, deterministic, needs no warehouse credentials, and
+asserting *agreement between two components the repo already ships* is strictly cheaper than
+teaching `lint-ddl` Snowflake's grammar. Take it before BL-246 — the gate stops the class,
+whereas fixing today's instances leaves the class open. Wire it into `scripts/pre-commit.sh`
+and `.github/workflows/validate.yml` in the same PR, per the two-bucket rule.
+
+**Two smaller gates worth landing in the same pass**, both from the same study and both
+offline:
+
+- **`build-model` must not exit 0 having imported a Model with an empty `measures` list when
+  the source declared metrics** (the BL-243 shape). A success exit code on total loss is the
+  single most dangerous outcome shape the study found.
+- **A bound-but-never-read parsed field.** `_translate_window`'s `partition` (BL-242) is one
+  of **four** half-wired values this study found; a static check that every key a `_parse_*`
+  function emits is referenced by its consuming translator would have caught it. Narrow, but
+  the class recurred four times in one study.
+
+**Target:** next validator pass — take this before BL-246, since the gate stops the class and
+the fix only closes today's instances.
+
+## BL-248 — `parse-sv` drops the unnamed relationship form, producing a joinless Model that ThoughtSpot rejects `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(the `entity_facts` and `asof_join` per-pattern sections). Raw captures at
+`.svrt/work/*/parsed.json` and the `*.UNNAMED_REL.*` artefacts (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py` (`_RELATIONSHIP_RE`, line 100),
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 7.
+**Status:** OPEN.
+
+Snowflake accepts a relationship with no name — `ORDERS(CUSTOMER_ID) references CUSTOMERS` —
+and `GET_DDL` preserves it verbatim. `_RELATIONSHIP_RE` requires a leading
+`<name> as ` prefix, so the entry is dropped: `unsupported: []`, exit 0, and a **joinless
+Model** that ThoughtSpot then refuses with *"Schema validation failed"*.
+
+**2 of 5 patterns in one run group use the unnamed form** — it is the natural way to write a
+single relationship, not an exotic spelling. Coverage-matrix row 7 spells relationships only
+as `REL as FROM(FK) references TO(PK)`; there is no row, mapped or unmapped, for the unnamed
+form.
+
+Adding a name is the entire fix, and it was verified as such: with a name added by hand, both
+patterns import first time with a clean lint and an empty skip list.
+
+**Approach.** Make the relationship name optional in the regex and synthesise one
+(`<from>_to_<to>`) when absent. Note the sibling defect in the same regex: it also requires an
+explicit parenthesised PK list, so the equally-valid `references <table>` without a column
+list is dropped too — filed as BL-258.
+
+**Target:** next Snowflake converter pass.
+
+## BL-249 — the compound range join silently loses its equality column, and both column lists stay the same length so nothing downstream can detect it `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(the `range_join` and `multi_path_metrics` per-pattern sections). Raw captures at
+`.svrt/work/range_join/NOTES.md` and `parsed.json` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py`, `tools/ts-cli/ts_cli/sv_build_model.py`
+(`_build_join_on` range branch),
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 8.
+**Status:** OPEN.
+
+```
+ORDERS_TO_SEGMENT as ORDERS(CUSTOMER_ID,ORDER_DATE)
+  references CUSTOMER_SEGMENTS(CUSTOMER_ID,between VALID_FROM and VALID_TO exclusive)
+```
+parses to:
+```json
+"from_cols":["CUSTOMER_ID","ORDER_DATE"], "to_cols":["VALID_FROM","VALID_TO"]
+```
+
+`CUSTOMER_ID` is gone from `to_cols`. **Both lists are still length 2**, so nothing
+downstream can detect the misalignment — the pairing silently becomes
+`CUSTOMER_ID→VALID_FROM`, `ORDER_DATE→VALID_TO`. `unsupported: []`, `warnings: []`, exit 0.
+ThoughtSpot then refuses the import:
+
+```
+Error while translating 1st join of ORDERS . Invalid join expression
+[ORDERS::CUSTOMER_ID] >= [CUSTOMER_SEGMENTS::VALID_FROM] and [ORDERS::CUSTOMER_ID] …
+```
+
+The loud failure here is luck, not design: the equal lengths mean a shape where the wrong
+pairing happened to type-check would have produced a wrong number instead of an error.
+
+**Two patterns, so it is the compound form and not one fixture.** `multi_path_metrics`
+(`references WEATHER(CITY_CODE, between …)`) loses `CITY_CODE` the same way. Both patterns
+were BLOCKED at build-model, so neither contributed a round-trip verdict — the defect is
+upstream of measurement.
+
+**This is also implementation drift between two constructs the matrix presents as equally
+mapped** (repo-audit angle 9's shape). `_build_join_on`'s **asof** branch zips all
+`(from, to)` pairs and promotes only the last to `>=`, so it *does* handle a leading equality
+column. The **range** branch takes `from_cols[0]`, `to_cols[0]`, `to_cols[1]` and ignores
+`from_cols[1]` entirely. Two sibling constructs, two different strategies, one of them wrong.
+
+Coverage-matrix row 8 describes only the *bare* range form. The compound form — equality
+column plus range, which is the form a range join normally needs and the form both
+range-carrying fixtures use — is recorded nowhere.
+
+**Approach.** Parse the equality columns and the range endpoints into separate fields rather
+than one flat `to_cols`, then build the range branch the way the asof branch already does.
+Add a length/role assertion so a misalignment cannot pass silently even if the parse regresses.
+
+**Target:** next Snowflake converter pass, with BL-240 (same emitter, sibling construct).
+
+## BL-250 — `using (relationship)` on a metric is dropped silently and appears nowhere in the coverage matrix `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(the `accumulating_snapshot` per-pattern section). Raw captures at
+`.svrt/work/accumulating_snapshot/parsed.json`, `skipped.json` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py`,
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md`.
+**Status:** OPEN.
+
+`APPLICATIONS.APPLICATION_COUNT using (APP_TO_APPLICATION_DATE) as COUNT(...)` — the
+`using (<relationship>)` modifier that pins a metric to a named join path — is parsed to
+`expr: null` with `unsupported: []` and exit 0. All six of the pattern's metrics then land in
+`skipped.json`, and the pattern is BLOCKED at build-model (lint I14).
+
+**It is not merely unmapped: it is dropped silently**, which is the distinction the coverage
+matrix exists to record. The construct appears in **neither** the Mapped nor the Unmapped
+section — a reader has no way to learn it is unsupported. It is the defining construct of the
+accumulating-snapshot pattern (a fact table with several role-played date paths, where each
+metric must declare which path it counts along).
+
+An unmapped row is added to the matrix in the same pass as this filing. This item is the
+parser fix.
+
+**Approach.** Recognise `using (<rel>)` in the metric grammar and either (a) map it — a named
+relationship corresponds to a specific ThoughtSpot join path, so the metric can be emitted
+against the role-played table alias that path resolves to — or (b) raise
+`UntranslatableError` so it lands in `skipped[]` **with a reason**. Today it produces
+`expr: null`, which is the worst of both: skipped without explanation.
+
+**Target:** next Snowflake converter pass.
+
+## BL-251 — `ts agentql classify-columns` reports `SUM` for every raw measure regardless of the column's declared aggregation — 7 of 7 non-SUM cases `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(method section, stage-B limits). Raw captures at `.svrt/work/*/classify.json` (the first
+pass — **9** patterns) and `.svrt/work/_remediation/classify/*.json` (the re-run — **11**
+patterns, the authoritative set); the counts below are the union, remediation-preferred
+(**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/spotql_ops.py` (the `wrapper` literal on the `raw_measure`
+branch, line ~202) surfaced by `tools/ts-cli/ts_cli/commands/spotql.py` (`classify-columns`;
+the module is named `spotql.py` and registered as the `ts agentql` group in `cli.py:32`).
+**Status:** OPEN.
+
+**Three denominators, stated separately, because conflating them is how this item first read
+as inconsistent.** Recounted from the artefacts on 2026-09-08: **33** MEASURE columns, across
+**11** Models carrying classify output (**10** of which contribute at least one MEASURE);
+of those 33, **7** declare a non-SUM aggregation, and those 7 fall in **5** patterns.
+`classify-columns` reports `wrapper: SUM` for **all 7 — 7 of 7, every observed case** —
+`Order Count` (COUNT) ×3, `Customer Count` (COUNT), `Total Sales` (COUNT), `Avg Rating`
+(AVERAGE), `Avg Daily Balance` (AVERAGE). "33 columns" and "five patterns" are answers to
+different questions and were never in conflict.
+
+It reports every `raw_measure` as `SUM` irrespective of what the column declares. This is
+systematic, not incidental — and it is **only** the `wrapper` field: the same record's
+`aggregation` field reads the declared value correctly (`props.get("aggregation") or "SUM"`),
+so the right answer is present in the very dict whose `wrapper` contradicts it.
+
+**It is a false-PASS risk as well as a false-FAIL one**, which is why it is Tier 2 rather
+than Tier 3: `SUM` over an AVERAGE column coincides with the right answer on any single-row
+group, so a consumer can validate against it and see agreement. Measured on one pattern:
+
+| | month 1 | month 2 | month 3 |
+|---|---:|---:|---:|
+| true (`AVG`) | 900 | 1170 | 5080 |
+| as reported (`SUM`) | 4500 | 5850 | **25400** |
+
+The declared aggregation was available throughout — a third independent source in the study's
+own harness (`_strip_agg`) agreed with the declared value in both broken cases.
+
+**Impact on the study, stated plainly:** every stage-B (`A_vs_B` / `B_vs_C`) verdict on those
+five patterns was contaminated and was re-run. Twelve verdicts moved, all
+`NUMERIC_DIFF → EXACT`; one pattern went 0/4 → 4/4. **`A_vs_C` — the headline — never passes
+through AgentQL and did not move: all 95 cells reproduced identically.**
+
+**Approach.** Read the column's declared `aggregation` from the Model TML rather than
+defaulting; where it is genuinely undeterminable, return an explicit "unknown" so a caller
+declines rather than guessing. A wrapper that guesses is worse than one that abstains.
+
+**Target:** next `ts agentql` change.
+
+## BL-252 — `introspect` emits no `fqn`, so `build-model` collides on any generic table name `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(method section — this blocked 15 of the 16 patterns until worked around). Raw captures at
+`.svrt/work/*/introspect/` for the missing-`fqn` defect itself; **the "52 instances / another
+~20" collision counts are recorded at `.svrt/RUN-BRIEF.md` (line 36), not in the introspect
+artefacts** — those show only the absent field (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/commands/snowflake.py` (`introspect`),
+`tools/ts-cli/ts_cli/sv_build_model.py` (line 254), `agents/cli/ts-convert-from-snowflake-sv/SKILL.md`.
+**Status:** OPEN.
+
+`ts snowflake introspect` writes a tables spec that carries **no `fqn` field**, and
+`ts-convert-from-snowflake-sv/SKILL.md` tells the user to pass it to `build-model` as-is.
+On any cluster with more than one table of a given name, `build-model` fails:
+
+```
+import_status: "failed"
+import_error: "Found multiple data sources with same name. - DIM_DATE"
+```
+
+`build-model` **already reads `fqn`** from the tables map — `sv_build_model.py:254` does
+`e["fqn"] = fqn` when `info.get("fqn")` is present — so the disambiguator is a documented
+input that the upstream command simply does not populate. The workaround in this study was to
+enrich the local tables map with GUIDs by hand, for nearly every pattern.
+
+**Scale, so this is not a shared-cluster curiosity:** one measured table name had **52**
+instances on the cluster, another **~20**. Semantic-view corpora and real warehouses both use
+maximally generic dimension names (`DIM_DATE`, `DIM_PRODUCT`, `ORDERS`, `CUSTOMERS`), so this
+recurs by default rather than by accident. GUID/FQN enrichment is load-bearing, not a nicety.
+
+**Approach.** Have `introspect` emit `fqn` (it already queries `INFORMATION_SCHEMA` and knows
+the database and schema for every table it returns) and drop the manual enrichment step from
+the SKILL.md. Note the adjacent inconsistency: `sv_build_model.py` reads `fqn`, not `guid`,
+from the tables map — a caller enriching with GUIDs is working against a field the code does
+not read at that site.
+
+**Target:** next Snowflake converter pass — this is the cheapest high-leverage fix in the set.
+
+## BL-253 — a Semantic View table alias is dropped in favour of the physical name, breaking every query written against the alias `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(the `semi_additive_metric` and `time_intelligence` per-pattern sections). Raw captures at
+`.svrt/work/semi_additive_metric/parsed.json` vs `parsed_rt.json` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/snowflake_ops.py` (`build-sv` tables emitter),
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 3.
+**Status:** OPEN.
+
+An explicit table alias does not survive the round trip where it is not needed to
+disambiguate:
+
+```
+original:     tables [ (BALANCES, ACCOUNT_BALANCES) ]     metrics on alias `balances`
+regenerated:  tables [ (ACCOUNT_BALANCES, ACCOUNT_BALANCES) ]
+```
+
+Every query written against `balances.total_balance` breaks on the regenerated view. Measured
+again on a second pattern: role-played aliases `SALES` / `SALES_LM` / `SALES_LY` **survived**
+(they disambiguate three references to one physical table), while the single-use
+`CALENDAR as DIM_CALENDAR` did **not** — so every query addressing `calendar.year` fails.
+
+**The rule is "the alias survives only where it disambiguates"**, which is exactly backwards
+from what a consumer needs: an alias is a *published contract* with every query, dashboard and
+verified query that cites it, whether or not the converter needs it internally.
+
+This pattern's five queries all failed with `invalid identifier` because of this — and that
+**masked BL-241**, a silent wrong-number defect underneath. The two must be fixed together and
+this one must not ship first, or 5 loud errors become 5 silent wrong numbers.
+
+Coverage-matrix row 3 claims table aliases map to `model_tables[].name` with no caveat; it is
+corrected in the same pass as this filing.
+
+**Approach.** Preserve the source alias on the `tables()` entry unconditionally
+(`<alias> as <physical>`), and only fall back to the physical name when no alias was declared.
+The information is present in the parsed input; nothing needs to be inferred.
+
+**Target:** next Snowflake converter pass, with BL-241 and never before it.
+
+## BL-254 — `parse-sv` never parses `ai_sql_generation`: the regex requires an `=` that Snowflake's syntax does not have `Tier 3`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(the `ai_metadata` per-pattern section). Raw captures at `.svrt/work/ai_metadata/parsed.json`
+(**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py` (`_AI_SQL_GEN_RE`, line 118),
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` L1.
+**Status:** OPEN.
+
+`_AI_SQL_GEN_RE = r"\bai_sql_generation\s*=\s*'"` requires an `=`. Snowflake's syntax has
+none — `GET_DDL` round-trips the clause verbatim without one. **The clause therefore never
+parses, on any input.** Silently: no warning, no `unsupported[]` entry.
+
+Measured across the wider corpus: **15 of 25 patterns carry the clause, 16 occurrences,
+and zero of them use `=`.** Of the 16 patterns in this study, 5 carry it. So the match rate
+is not low, it is nil.
+
+Coverage-matrix L1 says the free text is parsed and surfaced as candidate Data Model
+Instructions content. **The parse half of that has never run.** L1 is corrected in the same
+pass as this filing; this item is the one-line regex fix.
+
+Worth checking `_AI_QUESTION_CAT_RE` in the same commit — it is built the same way and may
+share the defect.
+
+**Approach.** Make the `=` optional in both regexes. Add a fixture from real `GET_DDL` output
+rather than hand-written DDL — the study's recurring lesson is that hand-written fixtures
+agree with the parser's assumptions and live output does not.
+
+**Target:** next Snowflake converter pass.
+
+## BL-255 — `_extract_clause` scans raw DDL against its own docstring's contract, so comment text swallows a real clause `Tier 3`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(the `ai_metadata` and `entity_facts` per-pattern sections). Raw captures at
+`.svrt/work/ai_metadata/parsed.json`, `.svrt/work/entity_facts/parsed.json`
+(**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py` (`_extract_clause`, and `parse()`'s call sites).
+**Status:** OPEN.
+
+`parse()` calls `_extract_clause(ddl, "ai_verified_queries")` on the **raw** DDL, while
+`_extract_clause`'s own docstring states it "assumes string literals have already been
+blanked". They disagree, and the docstring is right.
+
+Consequence, measured twice:
+
+- `ai_metadata`: a `comment=` string containing the text `AI_VERIFIED_QUERIES (` was matched
+  as the clause opener, so the real clause was swallowed — `verified_queries: []` and an empty
+  comment. Silent.
+- `entity_facts`: a comment reading `aggregated facts (lifetime_value)` produced a **phantom**
+  `PARSE_INCOMPLETE` on the `facts` section — a reported parse failure on a clause that parses
+  fine.
+
+The second shape is worth noting for anyone reading the study's numbers: the phantom inflated
+a reported structural loss. It is a measurement artefact of a real code defect, not a
+measurement bug.
+
+**This is the fourth instance of one root cause in this file.** The study's own comparison
+harness hit the identical shape three times independently (a `;` inside a `--` comment
+splitting statements; `CLAUSE.finditer` and a `split_csv` depth counter both running over
+kept string literals). The generalisable lesson recorded there applies here: **when two fixes
+in a file share a cause, enumerate every instance of that shape before moving on.**
+
+**Approach.** Blank string literals and comments once, at the top of `parse()`, and pass the
+blanked text to every clause scan — the module already has a `_blank` helper for this. Then
+audit every remaining `finditer` / regex call in `sv_parse.py` for a raw-text argument. Note
+`_blank` had never handled `/* */` block comments either.
+
+**Target:** next Snowflake converter pass, with BL-254 (same file).
+
+## BL-256 — per-column descriptions are lost on the return leg, while the Model-level description survives `Tier 3`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(synthesis). Confirmed on both `--parse` and raw `edoc` export forms. Raw captures at
+`.svrt/work/*/tml/` and `parsed_rt.json` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/snowflake_ops.py` (`build-sv` dimension/metric emitters),
+`agents/cli/ts-convert-to-snowflake-sv/references/coverage-matrix.md` row 14,
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 15.
+**Status:** OPEN.
+
+Inbound, `comment='...'` on a dimension or metric maps correctly to the column `description`
+— from-matrix row 15 is right. **It does not come back.** Every per-column description is
+absent from the regenerated Semantic View; only the Model-level description survives as the
+top-level `comment=`.
+
+To-matrix row 14 claims `column.description` → `comment='...'` on the entry. That is the
+refuted row, and it is corrected in the same pass as this filing.
+
+The loss matters more for a Semantic View than a typical metadata field: Cortex Analyst reads
+per-column comments as its primary natural-language grounding, so a round trip strips exactly
+the context the target platform consumes.
+
+**Approach.** Emit `comment='<description>'` on each `dimensions()` / `metrics()` entry from
+the column's TML `properties.description`. The value is already read on the inbound leg
+(`sv_build_model.py` sets `props["description"] = entry["comment"]`), so both halves of the
+mapping exist and only the outbound write is missing.
+
+**Target:** next Snowflake converter pass.
+
+## BL-257 — `build-sv` has no `facts()` emitter, so a Semantic View's fact block cannot survive a round trip `Tier 3`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(the `semi_additive_metric` per-pattern section). Raw captures at
+`.svrt/work/semi_additive_metric/rt.sql`, `structural_rt.json` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/snowflake_ops.py` (`build-sv`),
+`agents/cli/ts-convert-to-snowflake-sv/references/coverage-matrix.md` (L13 needs correcting).
+**Status:** OPEN.
+
+`build-sv` emits `tables()`, `relationships()`, `dimensions()` and `metrics()`. There is no
+`facts()` emitter, so an original view's `facts ( BALANCES.BALANCE_USD … )` block cannot
+return under any input — this is leg-independent and no `--formulas` file changes it.
+
+To-matrix L13 already records that every MEASURE is routed to `metrics[]` and calls `facts[]`
+"a planned future enhancement" tracked under BL-031. **The study upgrades that from a
+planned enhancement to a measured round-trip loss**, which is a different claim: L13 reads as
+"the output is correct, just not using facts", and for a round trip it is not correct — the
+row-level fact declaration is gone.
+
+It also interacts with the now-corrected from-matrix row 16 (see BL-181, closed): facts now
+come back as `MEASURE` on the inbound leg, so the pair of legs together turns a
+`facts()` entry into a `metrics()` entry with no record that it was ever a fact.
+
+**Approach.** Emit `facts()` for MEASURE columns whose expression is a bare row-level
+expression with no aggregation, keeping `metrics()` for aggregated ones. Fold into BL-031's
+`facts[]` work and correct L13's framing at the same time.
+
+**Target:** with BL-031.
+
+## BL-258 — two `parse-sv` defects on the hand-written-DDL path: implicit `references <table>` and a comment-preceded metric `Tier 3`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(method section: why the pipeline parses `GET_DDL` output rather than the source file).
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py`.
+**Status:** OPEN.
+
+Two low-severity parser defects, both verified directly and both scoped to **hand-written**
+DDL — which is a supported path, since `parse-sv` accepts a file or stdin:
+
+1. **`references <table>` without an explicit PK column list is dropped.** `_RELATIONSHIP_RE`
+   requires a parenthesised list on the right-hand side. Sibling of BL-248 (same regex, other
+   missing element) and should be fixed in the same commit.
+2. **A metric entry preceded by a `--` comment inside `metrics()` is dropped.**
+
+Both disappear when the input is `GET_DDL` output rather than the source file: `GET_DDL`
+normalises implicit `references T` to `references T(PK)` and strips comments. Verified both
+directions on one pattern — the raw corpus file yielded `relationships: 0` and
+`unsupported: 5`, while `GET_DDL` output of the same deployed view yielded
+`relationships: 3`, `metrics: 7`, `unsupported: 0`.
+
+**Recorded because the mitigation is a convention, not a guarantee.** The
+`ts-convert-from-snowflake-sv` flow mandates `GET_DDL`, which is why these never affected the
+study's numbers. But `parse-sv` is a public entry point that accepts a file, and a user
+pointing it at a checked-in `.sql` file gets a silently incomplete parse.
+
+**Approach.** Fix (1) with BL-248. For (2), blank comments before scanning `metrics()` — the
+same fix as BL-255, which is the general case.
+
+**Target:** next Snowflake converter pass, with BL-248 and BL-255.
+
+## BL-259 — `sv_build_model.py` stamps `aggregation: SUM` on an already-aggregated formula — **live-settled: inert, no double aggregation** `Tier 4`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(the `semi_additive_metric` per-pattern section). Raw captures at
+`.svrt/work/semi_additive_metric/` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_build_model.py` (`_column_props`, line 43).
+**Status:** RESOLVED (2026-09-08) — **the question was settled live, on the study's own
+deployed Models, before teardown destroyed the evidence.** There is no double aggregation.
+The property is inert; what remains is cosmetic.
+
+`_column_props` sets `props["aggregation"] = entry.get("aggregation") or "SUM"` for any
+MEASURE, **including when `is_formula` is true**. So a formula whose expression already
+aggregates is imported carrying an outer `aggregation: SUM`.
+
+**The answer, measured rather than reasoned about.** The sharpest available discriminator was
+an `average(...)` formula column stamped `aggregation: SUM`: `AVG` and `SUM` diverge loudly,
+where a `sum(...)` formula would have concealed an outer op entirely. Queried on the deployed
+Model and compared against the warehouse:
+
+| Figure | Value |
+|---|---:|
+| ThoughtSpot, `AGG("Avg Order Value")`, grand total | **875.0** |
+| Warehouse `AVG(<amount>)` — the correct answer | **875** |
+| Warehouse `SUM(<amount>)` — if the stamp were applied to rows | 5,250 |
+| Warehouse sum of per-group `AVG`s — if it double-aggregated across groups | 1,512.5 |
+
+ThoughtSpot returned the true average — neither double-aggregated figure — and the per-group
+breakdown matched the warehouse group for group. `generate-sql` confirms the mechanism directly
+rather than inferring it from the number: the emitted warehouse SQL is a bare `avg(<amount>)`
+with **no outer `SUM` anywhere**.
+
+Reproduced on a second, structurally different shape: a `sum(a) + sum(b) + sum(c)` derived
+metric, also stamped `SUM`, whose generated SQL likewise carries no outer aggregate. So the
+platform derives a formula column's aggregation from its **expression** and ignores the
+`aggregation` property on formula columns. The classifier already agrees, independently —
+it reports `kind: aggregate_measure, aggregation: null, wrapper: AGG` for exactly these
+columns, i.e. it never reads the stamp either.
+
+**One shape could not be settled, and nothing is claimed for it.** The
+`last_value(sum(...), query_groups(), {...})` semi-additive formula — the shape that raised
+this item — cannot be queried at all: `generate-sql` returns `NON_CONVERTIBLE_FUNCTION`
+("Non standard sql function QueryGroups"), so no number exists to compare. Its stamp is
+unreachable for the same reason the formula is. Both shapes that *are* reachable behave
+identically, so the finding is not shape-specific as far as it can be tested — but that
+one case rests on inference, not measurement, and is recorded here as such.
+
+**Approach.** No correctness fix is required, which is why this closes at Tier 4 rather than
+becoming the Tier 1 it would have been: omit `aggregation` when `is_formula` and the translated
+expression already contains an aggregate, so the emitted TML stops asserting something the
+platform discards. Worth doing because the stamp **misleads a reader** — it is precisely what
+made this a suspected wrong-numbers defect, and it cost a live investigation to disprove — not
+because it moves a number.
+
+**Target:** opportunistic — fold into the next `sv_build_model.py` edit. Nothing blocks on it.
+
+## BL-260 — `PARTITION BY EXCLUDING` maps to nothing when the dimension reference is qualified: the modifier is mis-parsed as part of a table alias `Tier 3`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(the `window_metrics` per-pattern section). Raw captures at
+`.svrt/work/window_metrics/translate.log`, `skipped.json` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_translate.py` (`_parse_window_spec`),
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 24.
+**Status:** OPEN.
+
+Coverage-matrix row 24 maps `PARTITION BY EXCLUDING` to
+`group_aggregate(… query_groups()-{dim})`. On a **qualified** dimension reference the
+translator instead absorbs the `EXCLUDING` keyword into the table alias and skips the
+construct:
+
+```
+unknown table alias 'EXCLUDING daily_sales' in reference 'EXCLUDING daily_sales.date'
+```
+
+So for the qualified spelling — which is what `GET_DDL` emits — the construct maps to
+nothing. It is at least a **loud** skip, unlike BL-242 on the same code path, which is why
+this is Tier 3 and that is Tier 1.
+
+Contributes to row 28's now-measured result: of three window-metrics-referencing-metrics on a
+live fixture, **0 of 3 survive** — two skipped at translate (this defect, plus `LAG` being
+unmapped) and one rejected at Model import. Row 28 previously said "not exercised on a live
+fixture"; it is corrected in the same pass as this filing.
+
+**Also unmapped and unrecorded: `LAG` / `LEAD`.** Coverage-matrix rows 23–25 stop at
+`OVER` / `PARTITION BY` / cumulative, and `LAG` is skipped with *"function 'LAG' is not in
+ts-snowflake-formula-translation.md"* — a correct, loud refusal, but one no matrix row
+predicts. An unmapped row is added in the same pass; no code change is claimed for it here.
+
+**Approach.** Strip the `EXCLUDING` keyword in `_parse_window_spec` before the remainder is
+resolved as a column reference, and add a fixture with the qualified spelling.
+
+**Target:** next formula pass, with BL-242 (same function).
+
+## BL-261 — `ts snowflake build-sv --help` cites `ts tml export --output-dir`, which does not exist `Tier 4`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(method section). Hit at the start of the run and again on re-verification; a helper script had
+to be written to work around it.
+**Affects:** `tools/ts-cli/ts_cli/commands/snowflake.py` (`build-sv` help epilog),
+`agents/cli/ts-convert-to-snowflake-sv/SKILL.md`.
+**Status:** OPEN.
+
+```
+$ ts tml export <guid> --profile <p> --fqn --associated --parse --output-dir ./tml
+Error: No such option: --output-dir
+```
+
+`build-sv`'s **own worked example** in its `--help` output tells the user to run a command
+that fails. And the shapes do not line up either: `build-sv` needs `--model` pointing at a
+document rooted at `model:` plus `--tables-dir` holding `*.json` files each rooted at
+`table:`, while `ts tml export --parse` emits a single array of `{type, guid, tml, info}`
+objects. So even with a working output flag, a user following the example has to split the
+export by hand.
+
+**Approach.** Either add `--output-dir` to `ts tml export` with the per-object split
+`build-sv` needs — the more useful fix, since the split is mechanical and every converter
+needs it — or correct the epilog to the commands that actually work. Do not leave a `--help`
+example that cannot be copy-pasted.
+
+**A cheap permanent check exists for this class**, and it generalises past this one flag:
+assert that every `ts ...` command line appearing in a `--help` epilog or in a SKILL.md code
+block parses against the live Click command tree (flags exist on the named command). Offline,
+fast, and it would have caught this before the flag reached a worked example. Worth folding
+into the BL-247 validator pass.
+
+**Target:** next `commands/snowflake.py` change.
+
+## BL-262 — a computed fact used as a join key breaks the forward leg outright: the fact is a formula, the join predicate is a physical column id `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(finding **N8**, §5.3; per-pattern §4.5 `fact_as_relationship_key` and §4.11 `time_intelligence`).
+Raw captures at `.svrt/work/fact_as_relationship_key/` and `.svrt/work/time_intelligence/`
+(**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_build_model.py` (join emission vs. formula-column emission),
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 16.
+**Status:** OPEN.
+
+When a Semantic View declares a **fact whose right-hand side is an expression** and then uses
+that fact as a relationship key, `build-model` emits the two halves of the construct into
+**incompatible namespaces**: the fact becomes a model-level formula column, while the join
+predicate is written against a **physical** table column of the same name. ThoughtSpot rejects
+the import.
+
+`fact_as_relationship_key` — lint clean, exit 1:
+
+> `Error while translating 1st join of SALES . Could not find column: SALES::FISCAL_QTR_KEY.`
+
+`time_intelligence` — `lint_findings: []`, and worse, because **no Model reached the cluster at
+all**:
+
+```
+"import_status": "failed", "model_guid": null,
+"import_error": "Error while translating 1st join of SALES_LY . Could not find column:
+FACT_SALES::SALE_MONTH_SHIFTED_LY. …"
+```
+
+**Two patterns, independently, on different constructs** (a `CONCAT`-built quarter key and a
+month-shift), which is what makes this a class rather than an instance. The expression
+translation itself is *correct* in both cases — `concat ( to_string ( year ( [SALES::sale_date] ) ) , '-Q' , … )`
+is exactly right. Only the join predicate disagrees with it.
+
+**Why Tier 2 and not Tier 1.** It fails **loudly** — a non-zero exit and an explicit import
+error, never a wrong number. But it is a total loss for the pattern, and `time_intelligence`
+produced no Model, so it contributed no round-trip data at all: its five queries are
+unmeasurable and both structural rollups carry a † marker. Its skip list was **0 of 15** —
+every formula translated, and the Model still could not import, so the skip list (the pipeline's
+primary loss signal) reported nothing wrong.
+
+**This is one of the five from-direction blockers** §7 of the report makes a precondition for
+unparking audit angle 15 — with BL-267, row 8's compound range join, BL-250 (`USING`-scoped
+metrics) and BL-248 (unnamed relationships). Until it lands, the to-direction stays measurable
+only as far as the from-direction reaches.
+
+**Approach.** Resolve the join predicate through the **same** name/id map `build-model` uses to
+mint formula ids, rather than assuming a physical column: when a relationship key names a fact
+that translated to a formula, emit `[formula_<id>]` in the `on:` expression. If ThoughtSpot
+cannot join on a formula column at all, then the construct is genuinely unmappable and must be
+**declined loudly at lint time** with the rewrite instruction (materialise the expression as a
+warehouse column, or a view, and key the relationship off that) — a refusal at `lint-ddl` is
+strictly better than an import error the operator has to decode. Decide which of the two it is
+first; that is one probe against a live Model.
+
+**Target:** next from-direction converter pass — take with BL-267, since both are angle-15
+preconditions.
+
+## BL-263 — join `type` and `cardinality` are dropped on every outbound leg, and nothing in the comparison surface can see it `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(finding **N10**, §5.3; first surfaced in §4.3 `asof_join`). Counted from the `build_sv` logs
+under `.svrt/work/*/` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_build_sv.py` (relationship emission),
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 40 (added by this
+branch).
+**Status:** OPEN.
+
+`build-sv` discards a ThoughtSpot join's `type` and `cardinality` when emitting
+`relationships (...)`, logging one line per relationship and continuing:
+
+> `DROPPED join attrs on <rel>: type=LEFT_OUTER, cardinality=MANY_TO_ONE`
+
+**22 relationships across 9 patterns — every relationship that reached `build-sv`**, 19 of them
+on a leg that actually deployed. Not a corner case: it is universal.
+
+**The reason it went unnoticed for a whole study is the important half.** Relationships are
+matched between the original and regenerated views on **endpoint tuples only**, so a
+regenerated view whose joins have silently reverted to default semantics compares as
+*identical*. No rollup row, no structural verdict and no `A_vs_C` cell can register the change.
+A round trip therefore reports a clean relationship set while having changed what the joins
+mean — and inner-vs-outer is not cosmetic: it changes row counts, hence every aggregate over
+the joined shape.
+
+Same class as the OSSIE review's F1 (`docs/reviews/2026-07-29-ossie-converter-learnings.md`):
+a join-semantics change with a numeric consequence and no declaring row anywhere.
+
+**Approach.** Two parts, and the second matters more than the first. (1) `CREATE SEMANTIC VIEW`
+has no join-type or cardinality syntax, so the attributes cannot round-trip in the DDL —
+therefore **stop dropping them silently**: emit them into the relationship's `comment` (or the
+stash of BL-166, which exists for exactly this class of un-representable metadata) so a return
+trip can restore them, and surface a per-relationship warning in the command's own output
+rather than only in a log line. (2) Make the loss **visible to any comparator**: relationship
+matching must compare join semantics, not just endpoints, or the next fidelity study will score
+this as survival again. Part 2 is the durable fix and belongs with the harness specified in §7
+of the report.
+
+**Target:** next to-direction (`build-sv`) change; part 2 with the fidelity-harness work.
+
+## BL-264 — `build-model` copies DDL identifier case verbatim, so a valid lower-cased Semantic View cannot import `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(finding **N11**, §5.3; per-pattern §4.9 `shared_degenerate_dimension`). Raw captures at
+`.svrt/work/shared_degenerate_dimension/` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_build_model.py` (`column_id` and join-token emission),
+`agents/cli/ts-convert-from-snowflake-sv/SKILL.md` (states the rule),
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row L16 (added by this
+branch).
+**Status:** OPEN.
+
+A Semantic View may legally write its physical references in lower case —
+`REGIONS.REGION as region`, `SUM(amount)` — and Snowflake accepts it. `build-model` copies the
+DDL's right-hand side **verbatim** into every `column_id` and join token, and ThoughtSpot's
+join translation is **case-sensitive**:
+
+> `Could not find column: REGION_DIM::region.`
+
+**The rule is already written down and no command implements it.**
+`ts-convert-from-snowflake-sv/SKILL.md` states the case-reconciliation requirement; nothing in
+the pipeline performs it. Coverage-matrix rows 12/18 imply a clean physical-column mapping,
+which holds only for an upper-cased DDL — i.e. only for `GET_DDL` output from a view that was
+itself authored in upper case.
+
+**Why this is a gate hole and not just a bug.** Documented-but-unimplemented is the same shape
+as BL-266: a SKILL.md rule that no code enforces reads as covered to anyone auditing the
+skill's prose. A validator asserting "every rule the SKILL.md states is either implemented by a
+named command or marked as an operator step" would catch the class.
+
+**Approach.** Reconcile identifier case in `build-model` against the authoritative source
+rather than the DDL text: the Table TML's `db_column_name` (or a warehouse `INFORMATION_SCHEMA`
+lookup when building from a file with no live instance). Match case-insensitively, emit the
+warehouse's actual casing, and **fail loudly with the offending identifier** when no
+case-insensitive match exists — a silent pass-through is what produces the undecodable import
+error. Prefer this over uppercasing blindly: a genuinely lower-cased warehouse column exists and
+must not be broken by the fix.
+
+**Target:** next from-direction converter pass.
+
+## BL-265 — ThoughtSpot demotes a `COUNT` metric over a `VARCHAR` key to an `ATTRIBUTE`, and the converter neither predicts nor reports it `Tier 3`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(finding **N12**, §5.3; per-pattern §4.3 `asof_join`). Raw captures at
+`.svrt/work/asof_join/` — `tml/`, `classify.json` and the name map
+(**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/sv_naming.py` (`fact_column_type()` and the metric analogue),
+`tools/ts-cli/ts_cli/sv_build_model.py`.
+**Status:** OPEN.
+
+`asof_join`'s `Orders.order_count AS COUNT(o_ordid)` was built as a `MEASURE`, imported, and
+**re-exported by ThoughtSpot as an `ATTRIBUTE`** — because `o_ordid` is `VARCHAR(10)`. The
+platform types the column from the counted column's data type, not from the aggregation.
+
+Three consequences, none of them announced:
+
+- the column is **unclassified in the name map** (`unclassified: ['Order Count']`), so any
+  query naming it is stage-B `UNAVAILABLE` — it drops out of the measurable surface entirely;
+- on the outbound leg it re-emerges inside `dimensions()` as a raw column, so the metric
+  **changes kind** across a round trip while the endpoint-level comparison sees a column that
+  is still present;
+- `COUNT` over a key column is an entirely ordinary modelling choice, so this is not an exotic
+  input.
+
+Related but distinct from row 16: that row is about **facts** being typed by data type
+(`fact_column_type()`, live-confirmed and now correct in the matrix). This is the same rule
+applied to a **metric**, where the converter does not anticipate it at all.
+
+**Approach.** Predict the demotion rather than discover it: where a metric's aggregation is
+`COUNT`/`COUNT_DISTINCT` over a non-numeric column, either emit it in the form ThoughtSpot will
+keep as a `MEASURE` (a formula counting the key, so the column's own type does not decide), or
+**annotate it** so the operator knows the kind will change on import. Silent kind-change is the
+part worth fixing; the platform behaviour itself is not ours to change. Confirm the exact
+trigger first — whether it is `VARCHAR` specifically or any non-numeric type — which is one
+probe on a live Model.
+
+**Target:** next from-direction converter pass; fold the type rule in beside
+`fact_column_type()` so facts and metrics share one decision.
+
+## BL-266 — Step 8.5's documented remedy is incompatible with the documented command, so its own predicted artifact ships `Tier 3`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(finding **N14**, §5.3; per-pattern §4.9 `shared_degenerate_dimension`). Raw captures at
+`.svrt/work/shared_degenerate_dimension/` (**`.svrt/` is gitignored**).
+**Affects:** `agents/cli/ts-convert-from-snowflake-sv/references/step-8.5-display-name-collisions.md`,
+`agents/cli/ts-convert-from-snowflake-sv/SKILL.md`,
+`tools/ts-cli/ts_cli/commands/snowflake.py` (`build-model`).
+**Status:** OPEN.
+
+Two source columns that are distinct in the Semantic View can collide on display name in the
+Model — `store_orders.order_month` and `web_orders.order_month`. `build-model` correctly exits 1
+and points the operator at the skill's **Step 8.5**. Step 8.5 then prescribes a remedy that
+**cannot be carried out**: it tells the operator to post-process the Model TML after
+`build-model`, and `build-model --profile` **builds and imports in one call**, offering no point
+at which to intervene.
+
+So the operator applies Step 8.5's option A instead, which produces the title
+**`Order Month  Web` — with a double space** — *exactly as Step 8.5's own step 4 predicts it
+will*. The artifact then propagates into the formula id and back out of the return leg as
+`order_month_web`. **The documentation predicts the defect, prescribes a fix for it, and the
+command makes the fix unreachable.**
+
+Same class as BL-264: a rule that exists only in prose, where the tool's actual shape
+contradicts it. Cheap to get wrong, because a reader auditing the SKILL.md sees a documented
+remedy and marks the case handled.
+
+**Approach.** Either give `build-model` a seam — a `--no-import` / `--emit-only` mode (or accept
+a collision-rename map up front, e.g. `--rename <col>=<title>`) so the documented
+post-processing has somewhere to happen — or, better, **stop producing the artifact**: mint the
+disambiguated title deterministically (single-space join of the source table's role and the
+column title) so no hand edit is needed and Step 8.5 becomes a description of what the tool does
+rather than a manual procedure. Then correct Step 8.5's step 4, which currently documents the
+double space as expected output. Prefer the second: a mechanical, judgment-free rename is
+exactly the "agentic → deterministic" codification angle 11 asks for.
+
+**Target:** next from-direction converter pass; the Step 8.5 doc correction can land immediately
+and independently.
+
+## BL-267 — lint I14 refuses the role-play aliasing `build-model` performs unprompted two patterns over `Tier 2`
+
+**Filed:** 2026-09-08.
+**Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
+(finding **N15**, §5.3; per-pattern §4.1 `accumulating_snapshot`, §4.6 `multi_path_metrics`,
+against §4.8 `role_playing_dimensions`). Raw captures at `.svrt/work/accumulating_snapshot/` and
+`.svrt/work/multi_path_metrics/` (**`.svrt/` is gitignored**).
+**Affects:** `tools/ts-cli/ts_cli/` lint rule I14 (`ts tml lint`),
+`tools/ts-cli/ts_cli/sv_build_model.py` (role-play alias generation),
+`agents/cli/ts-convert-from-snowflake-sv/references/step-7.5-roleplay-aliases.md`.
+**Status:** OPEN.
+
+Lint **I14** blocks the import with a message that spells out the complete fix:
+
+> `LINT: I14: 'AS_LOAN_APPLICATIONS' joins 'AS_DIM_DATE' 4 times (APP_TO_APPLICATION_DATE, APP_TO_REVIEW_DATE, APP_TO_DECISION_DATE, APP_TO_FUNDING_DATE) — the join path is ambiguous and ThoughtSpot will not load the Model. Give each role its own aliased model_tables entry (name: the physical table, alias: a unique per-role id) and point one join at each.`
+
+**`build-model` already performs precisely that aliasing, unprompted, for
+`role_playing_dimensions`** (§4.8 — role playing survives, and it is the study's best structural
+result). Two roles it handles automatically; four it refuses. The gate is *correct* — the
+un-aliased shape genuinely will not load — but it declines work the tool demonstrably can do,
+and the refusal is what costs the patterns, not the platform.
+
+**Two patterns lost to a capability that exists:** `accumulating_snapshot` (4 date roles) and
+`multi_path_metrics` (2 roles). Both produced no Model and therefore contributed **no outbound
+data at all**. Both are otherwise sound — `accumulating_snapshot` oracled 4 of 5 queries EXACT
+at stage A, `multi_path_metrics` PASSed both oracled queries — so the baseline is good and the
+loss is entirely in the tooling.
+
+**This is the first of the five from-direction blockers** §7 of the report makes a precondition
+for unparking audit angle 15, alongside BL-262. It is also the cheapest of the five: the code
+path already exists.
+
+**Approach.** Apply the role-play aliasing automatically whenever I14 would fire — the same
+generator `role_playing_dimensions` already goes through — and let I14 fire only when aliasing
+cannot resolve the ambiguity (which needs its own probe: establish whether the 2-role path
+generalises to N roles before assuming it does). Derive each alias from the **relationship
+name**, which the ambiguous case always has, rather than from the column, so the roles are
+self-describing. Keep I14 as the backstop; demote it from blocker to warning only once the
+aliasing runs. Note that `accumulating_snapshot` would additionally need BL-250 (`USING`-scoped
+metrics) before it carries any of its funnel — 6 of its 9 metrics were already dropped upstream
+— so fixing I14 alone makes the Model load but does not make the pattern whole.
+
+**Target:** next from-direction converter pass — take with BL-262; both are angle-15
+preconditions and this one is the cheaper.

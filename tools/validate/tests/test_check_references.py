@@ -189,3 +189,144 @@ def test_docs_backlog_archive_is_excluded(tmp_path):
     res = _run_checker(repo)
     assert res.returncode == 0, res.stdout + res.stderr
     assert "backlog-archive" not in res.stdout
+
+
+# ── backtick-quoted repo paths (the hole that let 22 dead citations pass) ─────
+#
+# check_references validated only markdown-link syntax [text](path). This repo
+# cites code and doc paths in backticks, so a branch could carry 22 dead
+# `docs/reviews/...` citations with every gate green (2026-09-08).
+
+
+def test_tracked_top_level_dirs_ignores_untracked_roots():
+    """An untracked scratch dir must not become a recognised path root."""
+    tracked = {"agents/cli/x/SKILL.md", "docs/backlog.md", "README.md"}
+    assert check_references.tracked_top_level_dirs(tracked) == {"agents", "docs"}
+
+
+def test_backtick_candidate_recognised():
+    got = check_references.backtick_candidates(
+        "see `docs/backlog.md` for detail", {"docs"}
+    )
+    assert got == ["docs/backlog.md"]
+
+
+def test_backtick_candidate_needs_tracked_top_dir():
+    """`ts_cli/commands/x.py` is written relative to tools/ts-cli — never guess."""
+    assert check_references.backtick_candidates(
+        "in `ts_cli/commands/spotql.py`", {"docs", "tools"}
+    ) == []
+
+
+def test_backtick_candidate_strips_line_locators():
+    for token, want in [
+        ("`tools/a.py:67`", "tools/a.py"),
+        ("`tools/a.py:67,130`", "tools/a.py"),
+        ("`docs/a.md:45,68-70`", "docs/a.md"),
+        ("`tools/a.py::my_func`", "tools/a.py"),
+        ("`tools/t.py::TestClass`", "tools/t.py"),
+    ]:
+        assert check_references.backtick_candidates(token, {"tools", "docs"}) == [want], token
+
+
+def test_backtick_candidate_skips_non_paths():
+    top = {"docs", "tools", "agents"}
+    for token in [
+        "`grep -o docs/x.md`",          # whitespace — not one token
+        "`docs/*/schema.sql`",          # glob
+        "`docs/{name}.md`",             # placeholder
+        "`https://example.com/a.md`",   # url
+        "`tools/validate`",             # no extension
+        "`docs/subdir/`",               # trailing slash
+        "`backlog.md`",                 # no directory
+    ]:
+        assert check_references.backtick_candidates(token, top) == [], token
+
+
+def test_dangling_backtick_path_fails(tmp_path):
+    """The regression test for the hole itself."""
+    repo = _make_repo(tmp_path)
+    (repo / "agents" / "cli" / "ts-x" / "SKILL.md").write_text("stub\n")
+    (repo / "docs" / "backlog.md").write_text(
+        "Source: `docs/reviews/2026-09-08-does-not-exist.md`\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "init")
+    res = _run_checker(repo)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "2026-09-08-does-not-exist.md" in res.stdout
+    assert "backtick-cited repo path does not exist" in res.stdout
+
+
+def test_resolving_backtick_path_passes(tmp_path):
+    repo = _make_repo(tmp_path)
+    (repo / "agents" / "cli" / "ts-x" / "SKILL.md").write_text("stub\n")
+    (repo / "docs" / "backlog.md").write_text("Source: `docs/real.md`\n")
+    (repo / "docs" / "real.md").write_text("hi\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "init")
+    res = _run_checker(repo)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_gitignored_backtick_path_is_skipped(tmp_path):
+    """A path .gitignore excludes is never expected to resolve."""
+    repo = _make_repo(tmp_path)
+    (repo / ".gitignore").write_text("docs/scratch/\n")
+    (repo / "agents" / "cli" / "ts-x" / "SKILL.md").write_text("stub\n")
+    (repo / "docs" / "backlog.md").write_text(
+        "Captures at `docs/scratch/run.json` (gitignored).\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "init")
+    res = _run_checker(repo)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_untracked_backtick_path_fails(tmp_path):
+    """Exists locally but never committed — a dead reference for cloners."""
+    repo = _make_repo(tmp_path)
+    (repo / "agents" / "cli" / "ts-x" / "SKILL.md").write_text("stub\n")
+    (repo / "docs" / "backlog.md").write_text("Source: `docs/local-only.md`\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "init")
+    (repo / "docs" / "local-only.md").write_text("not committed\n")
+    res = _run_checker(repo)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "untracked" in res.stdout
+
+
+def test_backtick_path_in_fenced_block_is_skipped(tmp_path):
+    repo = _make_repo(tmp_path)
+    (repo / "agents" / "cli" / "ts-x" / "SKILL.md").write_text("stub\n")
+    (repo / "docs" / "backlog.md").write_text(
+        "Example:\n\n```\ncat `docs/nope.md`\n```\n\nend\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "init")
+    res = _run_checker(repo)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_known_missing_backtick_paths_are_exempt(tmp_path, monkeypatch):
+    repo = _make_repo(tmp_path)
+    (repo / "agents" / "cli" / "ts-x" / "SKILL.md").write_text("stub\n")
+    (repo / "docs" / "backlog.md").write_text("Source: `docs/exempted.md`\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "init")
+    monkeypatch.setitem(
+        check_references.KNOWN_MISSING_BACKTICK_PATHS,
+        "docs/exempted.md", "test: external repo",
+    )
+    broken = check_references.check_skill_file(
+        repo / "docs" / "backlog.md", repo, check_references._git_tracked(repo)
+    )
+    assert broken == []  # markdown-link check unaffected
+    assert "docs/exempted.md" in check_references.KNOWN_MISSING_BACKTICK_PATHS
+
+
+def test_every_exemption_has_a_reason():
+    """An exemption without a stated reason is just a silenced failure."""
+    for path, reason in check_references.KNOWN_MISSING_BACKTICK_PATHS.items():
+        assert reason and reason.strip(), f"{path} has no reason"
+        assert len(reason.strip()) > 10, f"{path}: reason too thin to review: {reason!r}"

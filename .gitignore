@@ -81,3 +81,6 @@ plan/
 
 # Transient review/agent worktrees (see BL-232 review, 2026-09-02)
 wt-*/
+
+# Round-trip fidelity study workspace (evidence + throwaway harness)
+.svrt/

@@ -164,10 +164,45 @@ Worth knowing: the two nudges are independent, so a quiet angle-18 sweep says
 nothing about machine drift. `setup-review` had never run on this machine as of
 2026-08-26 despite being installed and armed.
 
-> **Angle 15 — Conversion fidelity** (does converted output produce *semantically
-> equivalent* results — the same numbers — not just valid-importing TML?) is **PARKED**
-> as of 2026-06-17. It is the highest-value external angle but needs live data on both
-> sides to test properly. Revisit once 13/14/16 are embedded.
+### Angle 15 — Conversion fidelity (UNPARKED, qualified, 2026-09-08)
+
+Does converted output produce *semantically equivalent* results — the same numbers — not just
+valid-importing TML? Parked 2026-06-17 for want of "live data on both sides to test properly".
+
+**That blocker is now closed.** The 2026-09-08 Snowflake Semantic View round-trip study
+(`docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`) built exactly that: 16 upstream
+pattern fixtures with their own schema, seed data and expected values, round-tripped
+Snowflake → ThoughtSpot → Snowflake and compared at three stages so a discrepancy is
+attributable to one hop. It found three constructs that import cleanly, lint cleanly and return
+the wrong number — an ASOF join answering 5,100 against a true 2,100; a semi-additive balance
+answering 25,400 against 5,300; a fixed `PARTITION BY` turning YTD into a lifetime total. None of
+those is visible to any validator in this repo, which is the case for the angle existing.
+
+| | |
+|---|---|
+| **Cadence** | **Full sweep only** — never the weekly external one. It needs a live warehouse, a live cluster and ~100 disposable objects; that cost only earns out at the deliberate on-demand cadence. |
+| **Fixture** | The upstream pattern corpus, staged one schema per pattern (they collide on shared table names — see the study's own amended spec). |
+| **Method** | Three-stage numeric comparison plus construct-level structural survival. The study's harness was throwaway by design; a rerunnable one is BL-247's neighbourhood, not a prerequisite. |
+
+**Why "qualified".** Three gaps keep this from being an unconditional angle, and closing any of
+them raises its value:
+
+1. **Oracle coverage.** 8 of 16 patterns ship no expected values, so their stage A cannot
+   self-verify — and an oracle is the only thing that proves a pattern read its own data rather
+   than a neighbour's.
+2. **Four of sixteen corpus DDLs do not compile** on current Snowflake and needed minimal repair
+   before the round trip could start. A corpus defect is not a converter finding and must never be
+   scored as one.
+3. **The to-direction is gated behind the from-direction.** Five patterns produced no Model at
+   all, so their return leg was never measured. Fixing the from-direction blockers is what makes
+   the angle measure both halves.
+
+**The finding that shapes how to read its results.** Only 1 of the 3 wrong-number findings
+appeared in the scored verdicts; the other two were masked by louder upstream failures and were
+found by direct probing. Repairing one dropped table alias converts five loud errors into five
+silent wrong answers with no converter change. **So a fidelity score here is a floor, not a total,
+and loud-failure counts falling is not the same as fidelity improving.** Any future run must
+report silent-wrong separately from loud-failure, or it will mistake progress for regress.
 
 Why these are external, not just "more angles": #13 already bit us twice — the **Muze
 charting library** (we'd have emitted legacy charts forever) and the **v1 endpoint
@@ -227,7 +262,7 @@ completes, and the report still arrives looking complete.
 |---|---|---|
 | Internal validators (1–10 where automated) | Every PR | pre-commit + CI |
 | **External sweep (13, 14, 16, 18)** | On demand, **when nudged** (~weekly threshold) | `Workflow({name: "repo-audit", args: {scope: "external"}})` |
-| Full deep audit (all angles) | On demand, **when nudged** (time or activity) + before a release / new runtime | `Workflow({name: "repo-audit", args: {scope: "full"}})` |
+| Full deep audit (all angles, **incl. 15**) | On demand, **when nudged** (time or activity) + before a release / new runtime | `Workflow({name: "repo-audit", args: {scope: "full"}})` |
 
 **No scheduled cron.** Execution is nudge-driven and on-demand, not automated — see
 the rationale under Freshness triggers.
@@ -305,4 +340,5 @@ that repo's validators. The date/age/activity machinery is unchanged.
 | 2026-07-28 | Angle 18 added | Harness/framework currency — the Claude setup (settings, agent tiers, workflows, rules anchors) checked against the current Claude Code + model lineup; joins the external sweep. Motivated by the stale `claude-opus-4-6` pin found in the 2026-07-28 framework review |
 | 2026-07-29 | Full (all angles incl. 17/18) | 63 raw → 58 findings (5 high / 23 med / 30 low). Headline: 4 high-severity correctness bugs in the rebuilt `ts migrate` engine (angle 17's first catch) + stale repo-publisher push-to-main flow. 6 validator promotions proposed. See `docs/audit/2026-07-29-full.md` |
 | 2026-08-26 | Angle 18 boundary + 18.3 closed | `consistency-checker` moved from `model: haiku` to session model at `effort: low` (the rule's own "effort over model" principle, and the SDD policy's no-Haiku rule); added the corollary that a `model:` pin needs a reason the effort dial cannot serve. Documented the angle-18 / `claude-practice:setup-review` ownership split after finding both read agent frontmatter |
+| 2026-09-08 | **Angle 15 unparked (qualified)** | The 2026-06-17 blocker ("needs live data on both sides") is closed by the Snowflake SV pattern round-trip study — 16 fixtures with their own seed data and expected values, three-stage attributable comparison. Three constructs found that import clean, lint clean and return the wrong number. **Full sweep only.** Qualified on three gaps: 8/16 patterns ship no oracle, 4/16 corpus DDLs do not compile, and 5 patterns produced no Model so their return leg is unmeasured. Key reading rule recorded: only 1 of 3 wrong-number findings was visible to the scored verdicts, so a fidelity score is a FLOOR — repairing one dropped alias turns five loud errors into five silent wrong answers. See `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md` |
 | 2026-08-26 | Angle 9 made real + self-scaling | The `conversion-consistency-auditor` was invoked by nothing (not per-PR, not the sweep) and hardcoded 5 of 9 converters / 8 of 15 invariants. Wired into the sweep, scope now discovered at run time, remit broadened to implementation drift, and PT2 added for the no-native-function class that shipped as `Migrated` in PR #440 |
