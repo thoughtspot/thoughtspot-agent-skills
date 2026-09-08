@@ -1,5 +1,5 @@
 ---
-name: ts-dependency-manager-v2
+name: ts-dependency-cleanup
 description: Inspect and delete ThoughtSpot dependency graphs via the v1 /dependency API family — list dependents by type, list objects referencing a logical/physical column, table, relationship or pinboard, delete objects with their dependents, and purge. Authenticates with a v1 session-login cookie. Operations run in any order; purge requires a prior applied delete.
 ---
 
@@ -124,7 +124,7 @@ of the session (see Cleanup).
 On invocation, display this before doing any work:
 
 ---
-**ts-dependency-manager-v2** — inspect and delete ThoughtSpot dependency graphs via the `/dependency` API family.
+**ts-dependency-cleanup** — inspect and delete ThoughtSpot dependency graphs via the `/dependency` API family.
 
 ### Operations
 
@@ -587,6 +587,4 @@ in-memory only and dies with the session.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.2.0 | 2026-09-03 | **Operations 8 and 9 are live — they were never absent.** Both sit on `/callosum/v1/dependency/`, not the `/callosum/v1/tspublic/v1/` prefix operations 1–7 use; three earlier probe passes tested only the tspublic prefix and recorded 404 = absent. Operation 8 needs two parameters the original spec omitted: `type` (`LOGICAL_TABLE`/`LOGICAL_COLUMN`) and `operation_type=DELETE_OBJECT_CASCADE`; `apply_changes` defaults to false, verified by omission. Verified 200 response carries `dependents` plus a ready-made `csv` impact export. Business-rule refusals (`400 METADATA_ERROR`) documented as normal and column-specific, with an instruction not to reshape around them. `purge` route confirmed live via `OPTIONS` 204; a bare `GET` hit deletion logic and was stopped by system-object protection, which is evidence its scope is instance-wide — the scope gate is now mandatory. Cross-references to ts-dependency-manager removed; the skills are independent. |
-| 1.1.0 | 2026-09-03 | **Operations 8 and 9 implemented** (were a hardcoded refusal). Operation 8: availability pre-flight, mandatory blast-radius lookup, mandatory `apply_changes=false` preview, typed `DELETE`, partial-delete detection, post-delete re-verification, session ledger. Operation 9: `OPTIONS`-only pre-flight, an explicit unverified-scope gate that must be agreed before the call, the ledger sequencing guard, typed `PURGE`. Both still return 404 on 172.32.51.133 — re-probed 2026-09-03 across the v1 tree, `/api/rest/2.0/` and `/tspublic/v2/` — so the skill detects and reports rather than assuming. Verb and encoding for both are inferred from operation 1, not verified. |
-| 1.0.0 | 2026-09-01 | Initial release. Authenticates via v1 session login (`session/login` → cookie jar), reading `base_url` / `username` / `password_env` from `~/.claude/thoughtspot-profiles.json` per the repo credential convention. Nine `/dependency` operations behind one menu, all probed live against 172.32.51.133 on 2026-09-01. **Six work:** `listdependents` (POST, form-encoded, mandatory `type`) and the GET per-type endpoints for logical column/table/relationship and physical column/table. **Three do not:** `pinboard` returns a server-side 500 NPE, and `delete-with-dependents` and `purge` are absent (404 on every verb and spelling tried). Verified: prefix `/callosum/v1/tspublic/v1`, cookie auth via `session/login`, and the response shape — keyed by source GUID, bucketed by dependent type, each entry a 46-field metadata header, with `{\"guid\":{}}` meaning zero dependents and `{}` meaning a type mismatch. See `references/open-items.md`. |
+| 1.0.0 | 2026-09-08 | Initial release. Nine `/dependency` operations behind one menu, authenticated via v1 session login (`session/login` -> cookie jar), reading `base_url` / `username` / `password_env` from `~/.claude/thoughtspot-profiles.json`. **Ops 1-6** (`listdependents` POST + the five GET per-type lookups) and **op 8** (`delete-with-dependents`, cascade) are live-verified; **op 7** (`pinboard`) returns a server-side 500 NPE; **op 9** (`purge`) has a live route but unverified scope, gated behind an explicit agreement. Ops 8/9 sit on the `/callosum/v1/dependency/` prefix, not the `/callosum/v1/tspublic/v1/` prefix ops 1-7 use. Output contract requires full 36-character GUIDs and in-chat object tables -- a truncated GUID copies with its ellipsis, and a scratchpad CSV is not a delivery channel. Op 8's `apply_changes=false` preview is the authoritative blast radius: the ops 1-6 lookups under-report cascade scope (4 reported vs 12 deleted, live 2026-09-07 -- open item #19). |
