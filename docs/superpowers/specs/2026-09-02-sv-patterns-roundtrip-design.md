@@ -89,6 +89,22 @@ structurally and numerically. The output is a review document and routed finding
   plausible successor once this pass shows what a comparator must actually catch —
   it is deliberately not this piece of work.)
 - **No fixture corpus vendored into the repo.**
+
+### A note on identifiers, since this repo is public
+
+An earlier draft of this spec carried a rule against naming the Snowflake account, role,
+warehouse, connection or schema. That rule was stricter than this repo's established practice and
+is **withdrawn as over-strict**, measured rather than assumed: `se-thoughtspot` appears in 104
+tracked files, `AGENT_SKILLS` in 24, `APJ_TAB` in 14, `ap-southeast-2` in 6, `SE_ROLE` in 5,
+`SE_DEMO_WH` in 2, `THOUGHTSPOT_PARTNER` in 1. Redacting a method document that must be
+reproducible would cost real clarity and add no protection.
+
+The security model that does bind (`.claude/rules/security.md`) is about **credentials**: tokens,
+passwords and keys live in the OS credential store and never in a file, a command's argument list,
+or the conversation. That line is held here.
+
+The published **report** is a different genre and stays narrower — `docs/reviews/` precedent names
+only the cluster nickname, and a review has no reason to widen exposure it does not need.
 - **No conversion-code fixes.** Findings are recorded and routed; fixing them is
   separate work on separate branches.
 
@@ -114,11 +130,30 @@ is not. Do not read that 404 as an auth failure.
 A single schema, **`AGENT_SKILLS.SV_PATTERNS`**, holding all 16 patterns' tables and
 semantic views.
 
-The justification is measured, not assumed: across all 25 upstream patterns there is
-exactly one table-name collision (`customers`, in `entity_facts` and
-`system_explain_semantic_query`), and the second of those is out of scope — so **within
-the 16 there are zero collisions**. Per-pattern schemas would multiply ThoughtSpot table
-registration by 16 for no isolation benefit.
+**AMENDED 2026-09-08 — the original justification here was wrong, and the error caused real
+data loss.** This section claimed "within the 16 there are zero collisions", measured with a
+lowercase-only regex applied only to `schema.sql`. Re-measured case-insensitively across every
+`.sql` file, the 16 study patterns claim 32 distinct table names of which **two collide**:
+
+| Table | Claimed by |
+|---|---|
+| `DIM_DATE` | `accumulating_snapshot`, `derived_metrics`, `role_playing_dimensions` |
+| `ORDERS` | `asof_join`, `entity_facts`, `range_join`, `role_playing_dimensions` |
+
+Because every pattern deploys with `CREATE OR REPLACE TABLE`, a later pattern silently
+overwrites an earlier one's data with an incompatible shape, and the earlier pattern's stage A
+then returns wrong rows with no error. This happened live: `DIM_DATE` was clobbered mid-run and
+`derived_metrics`' stage A had to be re-isolated.
+
+**Corrected layout: one schema per pattern, `AGENT_SKILLS.SV_PATTERNS_<pattern>`, table names
+unchanged.** Renaming tables instead is not viable — it would break every `dim_date.x` reference
+in the SV DDL and force hand-editing of `build-sv` output, contaminating the very thing being
+measured. The extra ThoughtSpot table registration is the cost of isolation and is worth paying.
+
+**Method consequence for the report:** a pattern whose oracle check passes is proven
+uncontaminated at stage A. A pattern with no oracle cannot self-verify, so any pattern that (a)
+shares a colliding table name and (b) ships no oracle must be re-run under isolation before its
+numbers are published.
 
 The snippets hardcode `SNIPPETS.PUBLIC` and open with `CREATE DATABASE IF NOT EXISTS
 SNIPPETS`. Rewrite those references to the target before executing; do not create a
@@ -206,9 +241,16 @@ Per query: `EXACT` / `NUMERIC_DIFF` / `SHAPE_DIFF` (row count or grouping differ
 `UNAVAILABLE` (metric did not survive to that stage) / `ERROR`.
 
 Numeric comparison normalises on column name and row ordering. Decimals compare equal
-within a **relative tolerance of 1e-9** — tight enough that a real semantic divergence
+within a **relative tolerance of 1e-12** — tight enough that a real semantic divergence
 (BL-180's NULL → 0, a double-counted fan trap) cannot hide inside it, loose enough to
-absorb float representation drift between two engines. A comparison that needs a looser
+absorb representation drift between two engines.
+
+*Amended 2026-09-02, from 1e-9.* The original value was an estimate and an adversarial
+review falsified it: at relative 1e-9 the threshold reaches one cent at $10M and one
+dollar at $1B, so `123456789.01` vs `123456789.02` compared EXACT. For a study whose
+headline numbers are revenue totals, that is exactly the divergence class worth catching.
+Comparing Decimals natively rather than coercing to float landed in the same change, so
+the tighter bound costs no legitimate precision. A comparison that needs a looser
 tolerance to pass is a finding, not a tuning problem: record the actual delta rather
 than widening the tolerance. `UNAVAILABLE` is a distinct verdict from
 `ERROR` on purpose: a metric that vanished structurally and a metric that blew up at
