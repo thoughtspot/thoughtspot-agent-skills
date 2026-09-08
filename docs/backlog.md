@@ -177,10 +177,10 @@ are roughly ordered by value÷effort.
 | ~~BL-132~~ | ~~from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake)~~ | DONE (PR #332) |
 | ~~BL-133~~ | ~~`ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing)~~ | DONE (PR #333, #335) |
 | BL-229 | `docs/quality-gates.md` can rot on `main` indefinitely — the freshness gate is scoped to PRs that touch a gate source of truth | next validator pass |
-| BL-230 | Ossie converter `normalise()` is ASCII-only — non-Latin column names are silently mangled or rejected; no transliteration policy | before Plan C wires identifiers into a pipeline |
+| BL-230 | Ossie converter loses **every field and metric** whose name is in a non-Latin script — reported, but the document is unusable | before any non-Latin customer uses the converter |
 | BL-231 | `check_backlog_integrity.py` passes on a structurally destroyed backlog — proven, not theorised | next validator pass |
 | BL-234 | `thoughtspot-model-tml.md` lists `NONE` as a valid aggregation; platform rejects it (14528) | next TS currency sweep |
-| BL-235 | passthrough arity is verified against itself, never against the mapping doc — green sweep, no guard | next validator pass |
+| BL-235 | passthrough arity self-verifies; residual is now cross-repo only, since the shipped converter generates its docs from the catalog | opportunistic |
 
 ### Tier 4 — Deferred
 
@@ -8704,7 +8704,53 @@ scoped way and therefore has the same hole. `generate_parity.py --check` and
 
 **Target:** next validator pass.
 
-## BL-230 -- the Ossie converter's identifier derivation is ASCII-only, and silently mangles non-Latin names `Tier 2`
+## BL-230 -- the Ossie converter cannot name a non-Latin-script identifier, and loses every field that has one `Tier 1`
+
+**UPDATED 2026-09-08, and the severity is worse than filed while the scope is narrower.**
+Re-measured against the shipped converter (`apache/ossie` PR #364), not the code this item was
+filed against.
+
+**Fixed since filing.** Accented-Latin names no longer mangle. `normalise()` now folds via NFKD
+before dropping non-ASCII, so `Café` -> `cafe`, `Ürün` -> `urun`, `İstanbul` -> `istanbul`,
+`naïve café` -> `naive_cafe`. The silent-mangling half of this item is closed, and with it the
+"inconsistent failure modes" complaint: accented Latin now succeeds correctly.
+
+**What remains, and it is not mangling.** A name in a non-Latin *script* — Greek, CJK, and any
+script with no ASCII form under NFKD — still cannot produce an identifier. At document level a
+non-Latin *model* name degrades gracefully (falls back to `model`, logs
+`TS-MODEL-NAME-UNNORMALISABLE`, original recoverable from the vendor payload). **A non-Latin
+field or metric name does not.** Measured on a fully Japanese model:
+
+| | |
+|---|---|
+| model | `model` (fallback, reported) |
+| dataset | `顧客` (kept — dataset names are not normalised) |
+| fields | **`[]`** |
+| metrics | **`[]`** |
+
+So a Japanese, Chinese, Korean, Greek or Cyrillic customer gets a document with datasets and
+**no fields and no metrics at all**. It is reported rather than silent — `TS-COLUMN-REF-MALFORMED`
+fires — but the output is unusable. That is total content loss for a whole customer segment,
+which is why this is now Tier 1 rather than Tier 2.
+
+**Two sub-items.**
+
+1. **The issue code is misleading.** The reference is fine — `split_column_ref('[顧客::名前]')`
+   returns `('顧客','名前')` correctly. It is `normalise('名前')` that raises, and the failure is
+   caught by the malformed-reference handler. A reader is told their column reference is
+   malformed when their *name* is unrepresentable. Cheap to separate, and worth doing before
+   someone debugs the wrong thing.
+2. **The fix is a transliteration or escaping policy**, unchanged from the original filing —
+   still a product decision, not a code change. The graceful-degradation pattern already used
+   for the model name (fallback + issue + recoverable original) is the obvious interim shape to
+   extend to fields and metrics, and would turn total loss into named-but-placeholder fields.
+
+**Original filing follows, retained because its analysis of the ASCII-drop mechanism is still
+accurate for the non-Latin case.**
+
+---
+
+### Original entry, 2026-09-02
 
 **Filed:** 2026-09-02.
 **Source:** the Task 6 and Task 8 reviews during Plan A execution (the `apache/ossie` converter
@@ -8765,7 +8811,33 @@ code change.
 
 **Target:** before Plan C.
 
-## BL-235 -- passthrough arity is verified against itself, never against the mapping document `Tier 2`
+## BL-235 -- passthrough arity is verified against itself, never against the mapping document `Tier 3`
+
+**UPDATED 2026-09-08 — the converter shipped, and that changed the shape of this problem.**
+
+The defect is unchanged: `emit_passthrough` never formats its template, so its argument-count
+guard and the sweep that exercises it both derive from the same `_placeholder_count` call on the
+same string, and no template-only edit can trip it.
+
+What changed is where the *other* copy of the arity fact lives. This item was filed on the
+premise of a divergence between the catalog's templates and a hand-maintained mapping document.
+That document is no longer part of the converter: the shipped package generates its reference
+documentation *from* the catalog, with a byte-exact drift test. So within `apache/ossie` the
+arity fact now has exactly one home and cannot diverge from itself.
+
+The residual is real but smaller and now cross-repository: this repo's own
+`agents/shared/mappings/` copies are a separate hand-maintained ruleset, governed by
+`check_mapping_code_sync.py`, describing the `ts-cli` translators rather than the Ossie
+converter. Those two are different codebases that happen to encode overlapping rules.
+
+**Downgraded to Tier 3.** A doc-vs-code comparator is also cheaper than when this was filed —
+the catalog is now a published, machine-readable structure with a generator already reading it.
+
+**Original filing follows.**
+
+---
+
+### Original entry, 2026-09-02
 
 **Filed:** 2026-09-02.
 **Source:** the Ossie converter build (Plan B, `feat/thoughtspot-converter` in `~/Dev/ts/ossie`).
