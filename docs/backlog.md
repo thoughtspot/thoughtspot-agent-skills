@@ -177,7 +177,7 @@ are roughly ordered by value÷effort.
 | ~~BL-132~~ | ~~from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake)~~ | DONE (PR #332) |
 | ~~BL-133~~ | ~~`ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing)~~ | DONE (PR #333, #335) |
 | BL-229 | `docs/quality-gates.md` can rot on `main` indefinitely — the freshness gate is scoped to PRs that touch a gate source of truth | next validator pass |
-| BL-230 | Ossie converter loses **every field and metric** whose name is in a non-Latin script — reported, but the document is unusable | before any non-Latin customer uses the converter |
+| BL-230 | no transliteration policy for non-Latin identifiers — content loss FIXED, a warehouse-derived name plus an issue is the current default | product decision, no deadline |
 | BL-231 | `check_backlog_integrity.py` passes on a structurally destroyed backlog — proven, not theorised | next validator pass |
 | BL-234 | `thoughtspot-model-tml.md` lists `NONE` as a valid aggregation; platform rejects it (14528) | next TS currency sweep |
 | BL-235 | passthrough arity self-verifies; residual is now cross-repo only, since the shipped converter generates its docs from the catalog | opportunistic |
@@ -8704,7 +8704,47 @@ scoped way and therefore has the same hole. `generate_parity.py --check` and
 
 **Target:** next validator pass.
 
-## BL-230 -- the Ossie converter cannot name a non-Latin-script identifier, and loses every field that has one `Tier 1`
+## BL-230 -- the Ossie converter has no transliteration policy for non-Latin identifiers `Tier 3`
+
+**UPDATED 2026-09-08 (second update, same day) — FIXED, and this item is now much smaller
+than either previous version of it.** The content loss described below was closed in
+`apache/ossie` PR #364; what is left is the original open product question.
+
+**What was fixed.** A field or metric whose name is in a non-Latin script no longer disappears.
+Measured on a mixed Japanese/Greek model:
+
+| | |
+|---|---|
+| fields | `c_name` (label `名前`), `c_omega` (label `Ωμέγα`) |
+| metrics | `c_amt` (original `売上` in the vendor payload) |
+| issues | `TS-FIELD-NAME-UNNORMALISABLE`, `TS-METRIC-NAME-UNNORMALISABLE`, `TS-MODEL-NAME-UNNORMALISABLE` |
+
+Three parts to the fix. The identifier now falls back to the **physical warehouse column name**
+rather than a placeholder, so a user gets `c_name` and not `field_1` — warehouse identifiers are
+almost always ASCII and unique per table. The exact original is recoverable: for a field from
+`label` (which turned out never to have been populated before, because the exception fired
+mid-construction of the field dict, before `label` was assigned), and for a metric from the
+existing stash key. And each failure now reports under its own code instead of the previous
+`TS-COLUMN-REF-MALFORMED`, which misattributed a name problem to a reference that parsed fine.
+
+**The dataset-name inconsistency was investigated and is not one.** Dataset names are
+deliberately never normalised: a dataset's `name` is the verbatim `model_tables[]` reference that
+every `column_id` and join must match exactly, and there is no separate label to recover it from,
+so folding it would corrupt cross-references rather than merely relabel.
+
+**What remains, and it is the original question.** There is still no transliteration policy — a
+non-Latin name yields a warehouse-derived identifier plus an issue, not a romanised one. That is
+a product decision, not a code change, and the current behaviour is a defensible default:
+nothing is lost, everything is reported, and the original is recoverable. Tier 3.
+
+**Known residual, recorded rather than fixed:** the reverse direction's staleness witness will
+flag a CJK metric-name round trip as stale, the same pre-existing gap the model-name case has.
+
+**Both earlier versions of this entry follow.**
+
+---
+
+### Second version, 2026-09-08 (superseded by the fix above)
 
 **UPDATED 2026-09-08, and the severity is worse than filed while the scope is narrower.**
 Re-measured against the shipped converter (`apache/ossie` PR #364), not the code this item was
