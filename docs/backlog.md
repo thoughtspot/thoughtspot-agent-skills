@@ -10963,6 +10963,58 @@ correctly named and keyed.
 `<connection>` duplicates this join under a second, cached copy inside an object-graph
 cache block (`<object id='_9BBB...'><properties>`) -- see BL-276.
 
+**Update 2026-09-10 -- operator fidelity.** `_extract_joins` never read a join clause's
+actual comparison operator, so a non-`=` clause (`<>`, `>=`, ...) was silently emitted as
+an equi-join `on:` clause. `=`, `>=`, `>`, `<`, `<=`, `!=` are the supported set --
+range/ASOF joins are documented for ThoughtSpot's `on:` syntax (thoughtspot-model-tml.md
+"Range / Inequality Joins"); Tableau's `<>` translates to ThoughtSpot's `!=`. Fix: the
+wrapper's `op` is read and mapped through `_JOIN_OPERATORS` (flat-shape clauses have no
+wrapper and default to `=`); any operator outside that map is skipped with a warning rather
+than emitted. `_extract_joins` now returns `(joins, warnings)`, threaded through `parse_twb`
+and `commands/tableau.py`'s validation-warnings aggregate into a "Join warnings" section in
+the migration report.
+
+**Testing.** `TestExtractJoinsUsesRelationName` covers `>=` and `<>` propagating correctly,
+an ASOF-shaped composite (`A=B AND C>=D`) preserving both operators, and a genuinely
+unsupported operator (`LIKE`) still skipped and warned about, standalone and inside a
+composite key. Full suite: 4062/4062 passed.
+
+**Update 2026-09-10 -- composite-key truncation.** `_extract_joins` only ever paired the
+first two leaves found (`exprs[0]`/`exprs[1]`) into one key. For a composite-key join
+(`A=B AND C=D`, or three conditions as a flat AND or nested AND-of-AND), every condition
+after the first was silently discarded -- one key emitted where two or three were authored,
+with clean TML and a clean lint. A join on a partial key doesn't fail import -- it fans out,
+and every measure built on it silently double-counts.
+
+Fix: `_leaf_expressions()`/`_clause_operator()` replaced by `_collect_comparisons()`, which
+recurses into an `<expression op="AND">` node's children at any depth, returning one
+`(left, right, op)` triple per real comparison. `_extract_joins` now emits one key per
+comparison whose operator is in `_JOIN_OPERATORS`; if any comparison in a composite group
+uses an unsupported operator, the whole key is dropped rather than just the offending pair
+-- a partial composite key carries the same fan-out risk as the original defect.
+
+**Testing.** Cases covering a 2-condition flat AND, a 3-condition AND-of-AND, an ASOF-shaped
+composite (`A=B AND C>=D`, both operators preserved), and a composite mixing an equi
+condition with a genuinely unsupported operator (drops entirely). Full suite: 4062/4062
+passed.
+
+**Update 2026-09-10 -- function-wrapped operands.** `UPPER([OrderId]) = [OrderId]` (a
+case-insensitive join) was silently mishandled: the original code's leaf scan found
+`UPPER`'s inner `[OrderId]` and the right-side `[OrderId]` as the only childless nodes, so
+the comparison silently unwrapped to bare `[OrderId] = [OrderId]` -- the function vanishes
+with no error. After the composite-key fix above, the terminal match required both sides of
+a comparison to be true leaves, so the whole clause silently returned nothing instead --
+still no trace.
+
+Fix: `_collect_comparisons`'s terminal match no longer requires both children to be
+leaves -- any two-child, non-`AND` node is handed through as one comparison. The
+bracket-prefix check in `_extract_joins` (which previously failed with no warning at all)
+now warns naming the unsupported operand and both tables, and drops the whole key when the
+comparison is part of a composite one.
+
+**Testing.** Two new cases: a standalone function-wrapped operand, and one inside a
+composite key. Full suite: 4067/4067 passed.
+
 ---
 
 ## BL-276 -- `_extract_joins` has no filter for object-graph-cached join duplicates `Tier 2`
@@ -10997,3 +11049,15 @@ single example. If it holds, the fix is a new filter analogous to
 `<object id='...'><properties><relation join=...>` mirror of the same join; assert
 `_extract_joins` returns exactly one entry. Live-verify against `Multi level WB v0.twb`
 (1 join, not 2) after the fix.
+
+**Update 2026-09-10.** Confirmed live on `Multi level WB v0.twb`: `_extract_joins` still
+returns the same join twice -- the ancestor chain of the second copy is
+`relation -> properties -> object[id=_9BBB...] -> objects -> object-graph -> datasource`,
+distinct from the live copy's `relation -> connection -> datasource`, confirming the
+"nested inside `<object-graph>/<objects>`" signal this entry asked to verify. Concrete
+consequence: the duplicate reaches `model_tables[].joins[]` as two identical entries,
+`ts tableau build-model` doesn't run `lint_tml` itself so it emits silently, and the
+skill's Step 6 `ts tml lint` hard-fails on I14 (BL-202's duplicate-`(from_node,
+joins[].with)` guard) -- whose remedy (rename/alias a role-played dimension) misdiagnoses a
+cached mirror as a real duplicate relationship. Deferred to a follow-up change rather than
+fixed here; still OPEN, fix design unchanged.

@@ -40,7 +40,11 @@ RATCHET: dict[str, tuple[int, str]] = {
     # ts tableau command module grew past 1000 lines with the multi-table
     # build-model fixes (v0.35-0.36). Split into per-flow submodules tracked
     # in BL-089 (M10); ratcheted until then. Lower this number as it shrinks.
-    "tools/ts-cli/ts_cli/commands/tableau.py": (1675, "BL-089"),
+    # 1675 -> 1677: two lines forwarding `_extract_joins`' join_warnings into
+    # all_validation_warnings, so an unsupported join operator or a
+    # function-wrapped operand reaches the migration report instead of being
+    # computed and then dropped silently.
+    "tools/ts-cli/ts_cli/commands/tableau.py": (1677, "BL-089"),
 }
 
 
