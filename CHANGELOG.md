@@ -5,6 +5,12 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-09-10
+- fix: **`_extract_joins` now respects a join clause's comparison operator instead of assuming `=`.** Supported operators are `=`, `>=`, `>`, `<`, `<=`, `!=` — Tableau's `<>` translates to ThoughtSpot's `!=`. Any other operator is skipped with a warning instead of being silently emitted as an equi-join.
+- fix: **Composite-key joins (`A=B AND C=D`) were being truncated to their first condition.** `_extract_joins` now uses a recursive comparison collector (`_collect_comparisons`) that preserves every condition at any AND-nesting depth, including mixed equi/range shapes like an ASOF join (`A=B AND C>=D`). If any condition in a composite key uses an unsupported operator, the whole key is skipped rather than just the offending condition — a partial key causes row fan-out and double-counted measures, so it isn't a safer partial result. These warnings, plus the operator warning above, thread through `parse_twb` into the build pipeline and surface in a new "Join warnings" section of the migration report.
+- fix: **A function-wrapped join operand (e.g. `UPPER([Col])`) is now recognized and skipped with a warning** instead of being silently unwrapped to a bare column reference.
+- known issue: **`_extract_joins` can report the same join twice** when Tableau caches a relation inside its object-graph cache (`<object-graph>/<objects>/<object>/<properties>`). Tracked as BL-269; fix planned for a follow-up change.
+
 ## 2026-09-02
 - feat: `check_lint_invariant_list.py` — the `ts tml lint` rule set is now declared
   ONCE (a `CANONICAL-RULE-SET` marker in `tml_lint.py`, gated against the findings the
