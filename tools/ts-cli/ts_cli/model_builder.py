@@ -116,7 +116,7 @@ def _sql_view_model_tables(sql_views: list[dict], joins: list[dict] | None = Non
                 other = j["right_table"]
                 osv = by_name[other]
                 on = " AND ".join(
-                    f"[{sv['name']}::{_resolve_view_key(sv, k['left'])}] = "
+                    f"[{sv['name']}::{_resolve_view_key(sv, k['left'])}] {k.get('op', '=')} "
                     f"[{other}::{_resolve_view_key(osv, k['right'])}]"
                     for k in j["keys"])
                 mt["joins"].append({
@@ -359,7 +359,7 @@ def _build_model_tables(
                     "type": j.get("type", "INNER"),
                     "cardinality": j.get("cardinality", "MANY_TO_ONE"),
                     "on": " AND ".join(
-                        f"[{t['name']}::{k['left']}] = [{other}::{k['right']}]"
+                        f"[{t['name']}::{k['left']}] {k.get('op', '=')} [{other}::{k['right']}]"
                         for k in j["keys"]
                     ),
                 })

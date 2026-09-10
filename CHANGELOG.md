@@ -60,6 +60,13 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
   customer SV that lost a 1,923-character instruction block and its entire description
 - chore: bump ts-cli to v0.138.0
 
+## 2026-09-10
+- fix: **`_extract_joins` now respects a join clause's comparison operator instead of assuming `=`.** Supported operators are `=`, `>=`, `>`, `<`, `<=`, `!=` — Tableau's `<>` translates to ThoughtSpot's `!=`. Any other operator is skipped with a warning instead of being silently emitted as an equi-join.
+- fix: **Composite-key joins (`A=B AND C=D`) were being truncated to their first condition.** `_extract_joins` now uses a recursive comparison collector (`_collect_comparisons`) that preserves every condition at any AND-nesting depth, including mixed equi/range shapes like an ASOF join (`A=B AND C>=D`). If any condition in a composite key uses an unsupported operator, the whole key is skipped rather than just the offending condition — a partial key causes row fan-out and double-counted measures, so it isn't a safer partial result. These warnings, plus the operator warning above, thread through `parse_twb` into the build pipeline and surface in a new "Join warnings" section of the migration report.
+- fix: **A function-wrapped join operand (e.g. `UPPER([Col])`) is now recognized and skipped with a warning** instead of being silently unwrapped to a bare column reference.
+- known issue: **`_extract_joins` can report the same join twice** when Tableau caches a relation inside its object-graph cache (`<object-graph>/<objects>/<object>/<properties>`). Tracked as BL-269; fix planned for a follow-up change.
+- chore: bump ts-cli to v0.141.0
+
 ## 2026-09-02
 - feat: `check_lint_invariant_list.py` — the `ts tml lint` rule set is now declared
   ONCE (a `CANONICAL-RULE-SET` marker in `tml_lint.py`, gated against the findings the
@@ -312,7 +319,6 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-08-07
 - fix: **BL-275 (SCAL-330635) — `_extract_joins` silently dropped a join whose equality clause was nested, or whose join side was a Custom SQL relation.** Found on `Multi level WB v0.twb` during a `ts-convert-from-tableau` accuracy-testing pass — the first concrete COLLECTION-datasource workbook encountered since `references/open-items.md` #3 was filed a month earlier for lack of one. `clause.findall(".//expression")` is recursive, so a Tableau-authored `<expression op='='><expression op='[A]'/><expression op='[B]'/></expression>` clause returned 3 nodes instead of 2 — `exprs[0]` became the wrapper (`op="="`, never a bracket reference), so the join was dropped with no error. Separately, the table-side lookup only recognized `type='table'`, so a Custom SQL Query join side (`type='text'`) never resolved even with the first defect fixed. A third defect surfaced while implementing the fix: this workbook's clause expressions are table-qualified (`[Table].[Col]`), but the caller expects a bare column name — the existing `.strip("[]")` only strips outer brackets, which would have emitted a corrupted key into the generated join `on:` clause. `_leaf_expressions()` now finds leaf `<expression>` nodes regardless of nesting depth; the table-side lookup accepts `type='text'`; `_join_key_column()` strips a table-qualified operand to its bare column name. Two new regression tests in `test_model_builder.py::TestExtractJoinsUsesRelationName`; live-verified via `ts tableau parse` (0 joins → 1, correctly named and keyed). `references/open-items.md` #3 updated to PARTIALLY RESOLVED. **BL-276** tracks a related, separate defect this fix exposed: the same workbook's live connection duplicates the join under an object-graph-cached mirror, which `_extract_joins` has no filter for
-- chore: bump ts-cli to v0.138.0 — BL-275
 
 ## 2026-08-06
 

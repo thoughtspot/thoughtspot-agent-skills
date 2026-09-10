@@ -1043,6 +1043,8 @@ def _generate_flow(
         "sql_views": len(sql_views),
     }
     all_validation_warnings = list(validation_issues) + sql_view_param_warnings
+    if ds.get("join_warnings"):
+        all_validation_warnings.append({"name": ds["name"], "warnings": ds["join_warnings"]})
     if all_validation_warnings:
         result["validation_warnings"] = all_validation_warnings
     if _junk_dropped:
