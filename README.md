@@ -208,6 +208,15 @@ thoughtspot-agent-skills/
 
 ## Contributing
 
+**Before your first commit, install the pre-commit hook.** It runs the same gates CI
+does, so a stale registry or a failing validator surfaces in seconds locally instead of
+minutes later in CI. It is not installed by a clone — git has no way to do that — so
+this step is manual and easy to miss:
+
+```bash
+ln -s ../../scripts/pre-commit.sh .git/hooks/pre-commit
+```
+
 | Resource | What it covers |
 |---|---|
 | [Quality gates catalog](docs/quality-gates.md) | All 37 validators — what each checks, when it runs, why it exists |

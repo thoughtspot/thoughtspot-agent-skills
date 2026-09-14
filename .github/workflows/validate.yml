@@ -47,54 +47,60 @@ jobs:
       - name: Run validators (full-repo mode)
         run: |
           set -e
+          # Every validator below appends `|| rc=1` rather than aborting: a single
+          # `set -e` chain reports only its FIRST failure, so a PR with three stale
+          # registries needed three round trips to discover all three (PR #505). The
+          # `|| rc=1` form is also why `set -e` stays — it exempts these lines only,
+          # so any future non-validator command still aborts as before.
+          rc=0
           # Smoke tests are intentionally excluded — they need live ThoughtSpot /
           # Snowflake credentials and run via scripts/pre-push.sh, not in CI.
-          python3 tools/validate/check_secrets.py --root . --all
-          python3 tools/validate/check_references.py --root .
-          python3 tools/validate/check_patterns.py --root .
-          python3 tools/validate/check_version_sync.py --root .
-          python3 tools/validate/check_module_health.py --root .
-          python3 tools/validate/check_file_size.py --root .
-          python3 tools/validate/check_yaml.py --root .
-          python3 tools/validate/check_sv_yaml.py --root .
-          python3 tools/validate/check_tml.py --root .
-          python3 tools/validate/check_consistency.py --root .
-          python3 tools/validate/check_skill_versions.py --root .
-          python3 tools/validate/check_smoke_tests.py --root .
-          python3 tools/validate/check_skill_naming.py --root .
-          python3 tools/validate/check_skill_context_cost.py --root .
-          python3 tools/validate/check_runtime_coverage.py --root .
-          python3 tools/validate/check_open_items.py --root . --warn
+          python3 tools/validate/check_secrets.py --root . --all || rc=1
+          python3 tools/validate/check_references.py --root . || rc=1
+          python3 tools/validate/check_patterns.py --root . || rc=1
+          python3 tools/validate/check_version_sync.py --root . || rc=1
+          python3 tools/validate/check_module_health.py --root . || rc=1
+          python3 tools/validate/check_file_size.py --root . || rc=1
+          python3 tools/validate/check_yaml.py --root . || rc=1
+          python3 tools/validate/check_sv_yaml.py --root . || rc=1
+          python3 tools/validate/check_tml.py --root . || rc=1
+          python3 tools/validate/check_consistency.py --root . || rc=1
+          python3 tools/validate/check_skill_versions.py --root . || rc=1
+          python3 tools/validate/check_smoke_tests.py --root . || rc=1
+          python3 tools/validate/check_skill_naming.py --root . || rc=1
+          python3 tools/validate/check_skill_context_cost.py --root . || rc=1
+          python3 tools/validate/check_runtime_coverage.py --root . || rc=1
+          python3 tools/validate/check_open_items.py --root . --warn || rc=1
           # Filesystem-state gates that previously ran ONLY in pre-commit (bypassable
           # via --no-verify with no server-side catch). They derive purely from repo
           # contents, so they work in a clean CI checkout.
-          python3 tools/validate/check_coverage_matrix.py --root .
-          python3 tools/validate/check_formula_catalog.py --root .
-          python3 tools/validate/check_converter_parity.py --root .
-          python3 tools/validate/check_mapping_code_sync.py --root .
-          python3 tools/validate/check_harness_routing.py --root .
-          python3 tools/validate/check_no_v1_endpoints.py --root .
-          python3 tools/validate/check_lint_invariant_list.py --root .
-          python3 tools/validate/check_no_inline_tml_gate.py --root .
-          python3 tools/validate/check_skill_cli_usage.py --root .
+          python3 tools/validate/check_coverage_matrix.py --root . || rc=1
+          python3 tools/validate/check_formula_catalog.py --root . || rc=1
+          python3 tools/validate/check_converter_parity.py --root . || rc=1
+          python3 tools/validate/check_mapping_code_sync.py --root . || rc=1
+          python3 tools/validate/check_harness_routing.py --root . || rc=1
+          python3 tools/validate/check_no_v1_endpoints.py --root . || rc=1
+          python3 tools/validate/check_lint_invariant_list.py --root . || rc=1
+          python3 tools/validate/check_no_inline_tml_gate.py --root . || rc=1
+          python3 tools/validate/check_skill_cli_usage.py --root . || rc=1
           # 2026-07-03 audit-harvest validators (see .claude/rules/repo-audit.md).
-          python3 tools/validate/check_no_inline_requests.py --root .
-          python3 tools/validate/check_pagination_convention.py --root .
-          python3 tools/validate/check_slash_command_refs.py --root .
-          python3 tools/validate/check_orphan_references.py --root .
+          python3 tools/validate/check_no_inline_requests.py --root . || rc=1
+          python3 tools/validate/check_pagination_convention.py --root . || rc=1
+          python3 tools/validate/check_slash_command_refs.py --root . || rc=1
+          python3 tools/validate/check_orphan_references.py --root . || rc=1
           # Needs ts_cli's own typer command tree (installed above) to cross-check
           # SKILL.md `--flag` references against the real, registered CLI options.
-          python3 tools/validate/check_skill_flag_usage.py --root .
+          python3 tools/validate/check_skill_flag_usage.py --root . || rc=1
           # Presence gate: every shared mapping/schema must carry a currency anchor
           # (staleness is soft and never fails — only missing/malformed anchors do).
-          python3 tools/validate/check_mapping_currency.py --root . --check
-          python3 tools/validate/generate_open_items_index.py --root . --check
-          python3 tools/validate/check_mirror_sync.py
-          python3 tools/validate/generate_parity.py --check
+          python3 tools/validate/check_mapping_currency.py --root . --check || rc=1
+          python3 tools/validate/generate_open_items_index.py --root . --check || rc=1
+          python3 tools/validate/check_mirror_sync.py || rc=1
+          python3 tools/validate/generate_parity.py --check || rc=1
           # Internal-import + repo-hygiene gates (2026-07-29 audit findings 4.2/1.1/1.2).
-          python3 tools/validate/check_internal_imports.py --root .
-          python3 tools/validate/check_repo_hygiene.py --root .
-          python3 tools/validate/check_backlog_integrity.py --root .
+          python3 tools/validate/check_internal_imports.py --root . || rc=1
+          python3 tools/validate/check_repo_hygiene.py --root . || rc=1
+          python3 tools/validate/check_backlog_integrity.py --root . || rc=1
           # Quality gates catalog — soft baseline check here (the catalog includes
           # git-log dates that shift when any validator is touched by a contributor
           # PR, so a hard gate on every PR would force every contributor to
@@ -103,12 +109,13 @@ jobs:
           # finding 7.1) — see that step for why CI was previously weaker than
           # pre-commit here.
           python3 tools/validate/generate_quality_gates.py --root . --check || echo "WARN  quality-gates.md is stale (non-blocking in CI)"
+          exit $rc
 
       - name: Open-items gate (PR only)
         # Scoped hard mode: only fails on unresolved items in open-items.md files
         # that this PR actually changed. Pre-existing items in untouched files are
         # WARN-only. Analogous to the changelog gate's --base scoping.
-        if: github.event_name == 'pull_request'
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: |
           git fetch --no-tags origin "${{ github.base_ref }}"
           python3 tools/validate/check_open_items.py --root . \
@@ -119,7 +126,7 @@ jobs:
         # checkout). --base diffs the PR's commits against the target branch so it
         # enforces server-side too: a new skill / ts-cli bump / new shared file must
         # carry a CHANGELOG.md change in the same PR.
-        if: github.event_name == 'pull_request'
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: |
           git fetch --no-tags origin "${{ github.base_ref }}"
           python3 tools/validate/suggest_repo_changelog.py --root . --check \
@@ -133,7 +140,7 @@ jobs:
         # ignoring the prompt, by --no-verify, or by committing without a TTY
         # (audit finding 7.2). This is the missing server-side half; the local prompt
         # stays soft so ordinary commits are never blocked.
-        if: github.event_name == 'pull_request'
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: |
           git fetch --no-tags origin "${{ github.base_ref }}"
           python3 tools/validate/suggest_dependency_types.py --root . --check \
@@ -151,7 +158,7 @@ jobs:
         # pre-commit.sh's own "quality gates catalog" check already triggers on
         # locally. A routine skill-only PR is untouched by this step; a gate-shape
         # change can no longer merge with a stale docs/quality-gates.md.
-        if: github.event_name == 'pull_request'
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: |
           # NOTE: these PR-gate fetches must NOT use --depth=1. A shallow fetch into
           # the full-history checkout writes .git/shallow for the base ref's tip, and
@@ -176,6 +183,7 @@ jobs:
         # (ImportPathMismatchError / "Plugin already registered under a different
         # name"). tools/validate/tests has no __init__.py, so it can safely share
         # an invocation with tools/ts-cli/tests.
+        if: ${{ !cancelled() }}
         run: |
           pytest tools/ts-cli/tests/ tools/validate/tests/ -q
           pytest agents/cli/ts-object-model-erd/tests/ -q
@@ -185,10 +193,12 @@ jobs:
         # The aggregate `validate` job is only a gate if every non-schedule job is in its
         # `needs:`. Nothing else in the repo reads job names, so without this a new job
         # silently reproduces audit finding 7.1.
+        if: ${{ !cancelled() }}
         run: |
           python3 tools/validate/check_ci_gate_coverage.py --root .
 
       - name: Check the audit workflow's tools are pre-approved
+        if: ${{ !cancelled() }}
         run: |
           python3 tools/validate/check_audit_workflow_permissions.py --root .
 
@@ -200,6 +210,7 @@ jobs:
         # agents/(cli|claude)/<skill>/ paths. So a PR editing only ts_cli/publish_plan.py
         # — the exact engine they guard — ran none of them, anywhere (audit 6.x).
         # Invoked directly, not via pytest: they are scripts with their own runners.
+        if: ${{ !cancelled() }}
         run: |
           for s in smoke_ts_publish_orgs smoke_ts_security_columns \
                    smoke_ts_setup_tenancy smoke_ts_migrate_orgs \
