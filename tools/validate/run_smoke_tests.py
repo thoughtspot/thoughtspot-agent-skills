@@ -61,6 +61,7 @@ SMOKE_TIMEOUT_SECONDS = 1200
 REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
     "ts-audit":                                   ["--model-guid"],
     "ts-dependency-manager":                    ["--model-guid"],
+    "ts-dependency-cleanup":                    ["--column-guid"],
     "ts-object-model-aggregates":               ["--model-guid"],
     "ts-object-model-coach":                    ["--model-guid"],
     "ts-object-model-agentql-query":              ["--model-guid", "--agentql"],

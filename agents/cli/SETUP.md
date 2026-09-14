@@ -88,6 +88,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-audit \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-dependency-manager \
       ~/.snowflake/cortex/skills/ts-dependency-manager
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-dependency-cleanup \
+      ~/.snowflake/cortex/skills/ts-dependency-cleanup
+
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-promote \
       ~/.snowflake/cortex/skills/ts-object-answer-promote
 
@@ -178,6 +181,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-audit \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-dependency-manager \
       ~/.claude/skills/ts-dependency-manager
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-dependency-cleanup \
+      ~/.claude/skills/ts-dependency-cleanup
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-promote \
       ~/.claude/skills/ts-object-answer-promote

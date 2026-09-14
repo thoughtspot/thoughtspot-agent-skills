@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**145 total items** across 18 skills — **67 open**, 68 verified, 10 deferred
+**164 total items** across 19 skills — **72 open**, 82 verified, 10 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -16,6 +16,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
 | ts-audit | 15 | **5** | 10 | 0 |
 | ts-convert-from-qlik | 6 | **5** | 0 | 1 |
+| ts-dependency-cleanup | 19 | **5** | 14 | 0 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
 | ts-load-source-data | 3 | **3** | 0 | 0 |
@@ -27,7 +28,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-object-model-agentql-query | 6 | **0** | 6 | 0 |
-### Untagged (67 items)
+### Untagged (72 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -66,6 +67,11 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-to-databricks-mv | #6 | `source.`-prefix in a single-source MV's `filter:`/exprs needs live verification | OPEN |
 | ts-convert-to-databricks-mv | #7 | 2-argument `{0}`-template SQL pass-through form is not implemented | OPEN |
 | ts-convert-to-databricks-mv | #8 | Live numeric fidelity of the codified emit path | OPEN |
+| ts-dependency-cleanup | #6 | Migrate the calls into a `ts dependency` CLI group | OPEN |
+| ts-dependency-cleanup | #7 | The purge guard is session-scoped | OPEN |
+| ts-dependency-cleanup | #8 | Purge scope: evidence now points to instance-wide | OPEN |
+| ts-dependency-cleanup | #14 | Dependent data on this cluster is sparse | OPEN |
+| ts-dependency-cleanup | #16 | CLOSED. Encoding is form-encoded, and two parameters were undocumented. | OPEN |
 | ts-dependency-manager | #9 | Column security rule TML retrieval | OPEN |
 | ts-dependency-manager | #11 | Reusable Set (cohort) delete command | OPEN |
 | ts-dependency-manager | #13 | Chart `client_state_v2` stale column references | OPEN |

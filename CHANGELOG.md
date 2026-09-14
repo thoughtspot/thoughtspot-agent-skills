@@ -5,6 +5,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-09-08
+- feat: add ts-dependency-cleanup skill (inspect + cascade-delete dependency graphs via the v1 `/dependency` API)
+
+---
+
 ## 2026-09-02
 - feat: `check_lint_invariant_list.py` — the `ts tml lint` rule set is now declared
   ONCE (a `CANONICAL-RULE-SET` marker in `tml_lint.py`, gated against the findings the
