@@ -141,13 +141,13 @@ python3 references/build_coverage.py --summary
 Sample output (regenerates from `references/dependency-types.md`):
 
 ```
-Coverage:  auto-detected (8): Model / Worksheet, View, Answer, Liveboard, Set / Cohort, Monitor alert, RLS rule, Inline alias
-           partial (3): Spotter feedback, Column security rule (CSR), Column alias TML
+Coverage:  auto-detected (9): Model / Worksheet, View, Answer, Liveboard, Set / Cohort, Monitor alert, RLS rule, Column security rule (CSR), Inline alias
+           partial (2): Spotter feedback, Column alias TML
            informational (2): Schedule, Connection | no skill action (1): Column-level ACLs
            Full breakdown in references/dependency-types.md
 ```
 
-If a status changes (e.g. open-item #9 CSR retrieval verified), update
+If a status changes (e.g. open-item #9 CSR retrieval, resolved 2026-08-27), update
 `references/dependency-types.md` only — this block re-renders. Do **not** hardcode
 the list anywhere in SKILL.md.
 

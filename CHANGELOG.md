@@ -5,6 +5,29 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-09-09
+- fix: `ts dbt-export build` renamed every table on the round trip. A staging model `stg_appointments` with no alias materialises as `STG_APPOINTMENTS`, so syncing the project back imported a **second** ThoughtSpot Table beside the original `APPOINTMENTS` — the Model silently repointed at the copy while the original kept every dependent it had. Staging models now carry `config.alias: <TABLE>`, and both readers (`schema.yml` and the compiled manifest) resolve through the alias. An adopted Case B name is never aliased, since those models already materialise somewhere real
+- fix: `ts_join_name` was emitted as a derived `<left>_to_<right>` rather than the join's own ThoughtSpot name, renaming every join on each round trip. The derived form is still generated for platforms with identifier rules (Snowflake SV) and kept beside it as `join_data["name"]`
+- feat: `ts dbt-export build --target-schema` refuses at build time when dbt's target is a Table's own schema — where an aliased model would overwrite its own source. Omitted, the command says on stderr which schemas dbt must avoid
+- test: offline smoke tests for both dbt skills (`smoke_ts_convert_to_dbt.py`, `smoke_ts_convert_from_dbt.py`) over a new bundled fixture. The to-dbt one asserts that re-diffing a freshly built project is a no-op — build and diff are separate paths over one generator, so any drift between writer and reader shows up there and nowhere else
+- feat: `ts_cli/dbt/cloud_api.py` — one dbt Cloud Admin API layer for `list-models`, `inspect`, `build-model` and `trigger-job`, replacing three near-identical copies. Artifacts are cached per `(profile, run id, artifact)` at mode 0600, turning a round trip's 3–5 `manifest.json` downloads into 1. Keyed on the run id, not a TTL: a finished run's artifacts are immutable, so a hit cannot be stale and a new job invalidates by construction
+- fix: the dbt Cloud keychain lookup used the raw profile *name* where a slug was required, so any profile whose name was not already slug-shaped ("My Project") silently found no credential. Now slugified, and the profile's own recorded `token_env`/`keychain_service` win over re-derived names
+- feat: `--file` on `ts dbt create`/`update`/`generate-tml`/`generate-sync-tml` accepts the dbt Core `target/` directory (or the project root, or either artifact) and zips `manifest.json` + `catalog.json` into the upload archive. Making that archive by hand was previously a documented **user** prerequisite of the whole ZIP_FILE path. A ready-made `.zip` still passes through verbatim; a missing `catalog.json` is refused naming `dbt docs generate`, because ThoughtSpot types Table columns from it and a manifest-only archive imports *successfully* with no column types
+- feat: `ts dbt inspect --model-path` — reports a directory's models, `ts_join_*` tests, `ts_rls_rules` models and MetricFlow metrics, and recommends Path N or Path Y with the reasons that decided it. Replaces a 31-line block `ts-convert-from-dbt` Step 8-pre asked the LLM to hand-write, whose manifest download was only a comment
+- fix: `ts dbt list-models` emitted each model's file name where dbt materialises its `alias` — the only name ThoughtSpot matches — 400ing `generate-tml` for any project that sets aliases (open-items #15). Now emits `alias or name`; `--no-alias` restores the old behaviour
+- feat: `ts dbt list-models --manifest` / `ts dbt inspect --manifest` read a local `manifest.json`, `target/` dir or project ZIP — the ZIP_FILE path, with no profile, token or network
+- feat: `ts tml export --split-dir` writes each exported object to its own file in the layout `ts dbt-export` and `ts snowflake build-sv` read, so a 40-table export no longer passes through the caller's context purely to be re-emitted as files. Same-named Tables get distinct filenames rather than one overwriting the other
+- feat: `ts dbt-export sync --dry-run` returns before any write (including under `--update-metadata`) and prints exactly what `diff` prints — one renderer over one change-set, so a reviewed plan and an applied plan cannot differ. `--format md` renders either as markdown, leading with the removals that need a human decision
+- feat: `ts dbt-export build-model --model-guid --import` — replaces the hand-edit that inserted `"guid":` at the document root between emitting and importing. Skipping it silently created a second Model instead of updating the first
+- chore: bump ts-cli to v0.138.0
+- refactor: split `dbt_build_export.py` (1738 lines) and `commands/dbt_export.py` (1056) into a new `ts_cli/dbt/` package — both were over the 1000-line `check_file_size` fail cap, which blocked the pre-commit hook on any dbt change. Code moved byte-identically; `dbt_build_export.py` re-exports every public name so no import site changed
+- fix: `ts columns impact` could return "no dependents" for a common column name — `_find_col_guid` fetched one 50-record page then filtered by owner in memory, so the real match could sit past the page. Now paginates
+- feat: `tools/measure_skill_run.py` — read-only transcript parser splitting a skill run into time-waiting-on-the-user vs model+tools, for the agentic-to-deterministic work
+- feat: `ts dbt-export` covers all 13 documented ThoughtSpot dbt column tags — adds `ts_hidden`, `ts_calendar_type`, `ts_currency_type` and `ts_geo_config` (the last two as nested `type:` blocks), on physical and formula columns alike
+- fix: `ts_index_priority`, `ts_attr_dim`, `ts_additive` and `ts_spotiq_pref` were write-only — emitted to dbt but dropped by both readers on the way back; all read paths now share one inverse mapping
+- fix: `value_casing`, `custom_order`, `default_date_bucket` and `search_iq_preferred` were dropped with no trace; now reported in `unmapped_properties`
+- fix: `ts dbt-export sync --update-metadata` no longer deletes hand-authored `ts_*` tags it cannot generate; preserved tags are reported in `preserved_meta` and on stderr
+- feat: `ts dbt-export build-model` honours `ts_display_name` and `ts_column_exclude` (previously ignored — a dbt-side edit was lost on the offline return leg) and gains `--rls-out` so model-level `ts_rls_rules` is written out instead of dropped
 ## 2026-09-02
 - feat: `check_lint_invariant_list.py` — the `ts tml lint` rule set is now declared
   ONCE (a `CANONICAL-RULE-SET` marker in `tml_lint.py`, gated against the findings the
@@ -254,6 +277,14 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
   `~/.databrickscfg`. `chore: bump ts-cli to v0.132.1`
 
 ---
+- **`ts dbt` command group** (ts-cli v0.138.0) — wraps ThoughtSpot's native dbt
+  integration (`POST /api/rest/2.0/dbt/*`, 9.9.0.cl+): `create`/`update`/`list`/`delete`
+  for dbt connection objects (DBT_CLOUD or ZIP_FILE import type), plus
+  `generate-tml`/`generate-sync-tml` for first-import and resync TML generation.
+  Foundation for the upcoming `ts-convert-from-dbt` skill. Required adding
+  multipart/form-data support to `ThoughtSpotClient` (`client.py`), since every
+  dbt endpoint takes `multipart/form-data` and the client previously hardcoded
+  `Content-Type: application/json` on every request.
 
 ## 2026-08-06
 

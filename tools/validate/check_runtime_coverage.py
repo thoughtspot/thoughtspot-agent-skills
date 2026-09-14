@@ -105,6 +105,14 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- Power BI migration (CLI skill; no CoCo equivalent — .pbip parsing needs shell + ts CLI) ---
     ("ts-convert-from-powerbi", "coco-snowsight"):
         "Power BI .pbip (TMDL + PBIR) parsing and the ts powerbi CLI require shell access; not supported in Snowsight stored-proc runtime",
+    ("ts-convert-from-dbt", "coco-snowsight"):
+        "CLI-only: drives ThoughtSpot's native dbt integration via the `ts dbt` CLI "
+        "(dbt Cloud API token / manifest+catalog ZIP upload); no shell or ts CLI access "
+        "in the Snowsight stored-proc runtime.",
+    ("ts-convert-to-dbt", "coco-snowsight"):
+        "CLI-only: `ts dbt-export build` is an offline file transform run via the `ts` "
+        "CLI (reads/writes local TML and dbt project files); no shell or ts CLI access "
+        "in the Snowsight stored-proc runtime.",
     ("ts-profile-tableau", "coco-snowsight"):
         "Tableau Server not accessible from Snowsight stored-proc runtime",
     ("ts-load-source-data", "coco-snowsight"):

@@ -1,0 +1,40 @@
+{
+  "nodes": {
+    "model.barbershop.stg_appointments": {
+      "columns": {
+        "BARBER_ID": {
+          "type": "NUMBER",
+          "index": 1
+        },
+        "APPOINTMENT_DATE": {
+          "type": "DATE",
+          "index": 2
+        },
+        "SERVICE_AMOUNT": {
+          "type": "FLOAT",
+          "index": 3
+        }
+      }
+    },
+    "model.barbershop.stg_barbers": {
+      "columns": {
+        "BARBER_ID": {
+          "type": "NUMBER",
+          "index": 1
+        },
+        "BARBER_NAME": {
+          "type": "TEXT",
+          "index": 2
+        },
+        "SHOP_LATITUDE": {
+          "type": "FLOAT",
+          "index": 3
+        },
+        "CHAIR_COUNT": {
+          "type": "NUMBER",
+          "index": 4
+        }
+      }
+    }
+  }
+}

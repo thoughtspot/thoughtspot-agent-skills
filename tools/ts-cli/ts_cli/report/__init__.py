@@ -14,7 +14,10 @@ from .schema import (
 )
 from .resolver import resolve_source, SourceUnresolvedError, SourceAmbiguousError
 from .walker import walk_dependents_recursive, row_to_entry
-from .classifier import aggregate_classification, AggregateInputs, build_matched_columns_map
+from .classifier import (
+    aggregate_classification, AggregateInputs, build_matched_columns_map,
+    classify_dependent, DependentSignals,
+)
 
 
 def _now_iso() -> str:
@@ -180,10 +183,326 @@ def build_coverage(
     ))
     coverage.append(CoverageEntry(type="Column-level sharing (ACLs)", checked=False, found=0,
                                    informational=True, reason="not implemented in v1"))
-    coverage.append(CoverageEntry(type="CSR (column_security_rules)", checked=False, found=0,
-                                   reason="deferred — cluster feature gate (open-item #9)"))
 
     return coverage, warnings
+
+
+def build_extended_coverage(*, deep_active: bool, probes: dict) -> Tuple[List[CoverageEntry], List[str]]:
+    """Coverage rows + warnings for the impact_probes.py probe family.
+
+    `probes` maps a coverage-row type name to a dict with keys `hits` (list),
+    `ok` (bool, default True), `error` (str, optional), and `informational`
+    (bool, default False). Pure function — no I/O.
+
+    Kept separate from build_coverage() (rather than growing that function's
+    signature further) so the original probe family's tests are untouched.
+    """
+    coverage: List[CoverageEntry] = []
+    warnings: List[str] = []
+    for type_name, result in probes.items():
+        hits = result.get("hits", [])
+        ok = result.get("ok", True)
+        error = result.get("error")
+        checked = deep_active and ok
+        reason = None
+        if not checked:
+            reason = "deep probes only populate for column sources in v1" if not deep_active else \
+                "probe failed — see warnings"
+        coverage.append(CoverageEntry(
+            type=type_name, checked=checked, found=len(hits),
+            informational=result.get("informational", False), reason=reason,
+        ))
+        # skip_warning: this row shares its ok/error flag with a probe family
+        # that already emits its own warning elsewhere (e.g. "Model-level
+        # filters" and "Formula references" ride the same primary-TML-export
+        # probe as the RLS/Joins/AI-surface rows in build_coverage) — without
+        # this, one underlying failure would be reported twice.
+        if deep_active and not ok and not result.get("skip_warning", False):
+            detail = f": {error}" if error else ""
+            warnings.append(
+                f"{type_name} probe failed{detail}. This coverage row is UNVERIFIED "
+                f"(checked=False) — found=0 does NOT mean nothing was found, it means "
+                f"the probe could not run."
+            )
+    return coverage, warnings
+
+
+class _ProbeState:
+    """Mutable accumulator for every probe family's hits + success flags.
+
+    Threaded through the build_report phase functions below rather than
+    passed/returned as a growing tuple. Internal to this module — not part of
+    the public Report schema.
+    """
+    def __init__(self):
+        self.rls_hits: list = []
+        self.csr_hits: list = []
+        self.alias_hits: list = []
+        self.alert_hits: list = []
+        self.join_hits: list = []
+        self.ai_hits: list = []
+        self.formula_hits: list = []
+        self.model_filter_hits: list = []
+        self.variable_hits: list = []
+        self.memory_hits: list = []
+        self.sql_view_hits: list = []
+        self.action_hits: list = []
+        self.schedule_hits: list = []
+        # Cascade hops discovered mid-report (formula columns, SQL views) —
+        # merged into `dependents` once all cascade sources have run.
+        self.extra_dependent_rows: list = []
+        # (doc_guid, parsed_model_dict) for every MODEL-type doc seen in the
+        # primary export — consumed by the per-model impact_probes phase.
+        self.model_docs: list = []
+
+        # Per-probe success — a failed probe must not read as "verified: no
+        # usage found" (2026-07 audit finding this module's docstrings cite).
+        self.primary_probe_ok = True
+        self.primary_probe_error: Optional[str] = None
+        self.monitor_probe_ok = True
+        self.monitor_probe_error: Optional[str] = None
+        self.csr_probe_ok = True
+        self.csr_probe_error: Optional[str] = None
+        self.variables_probe_ok = True
+        self.variables_probe_error: Optional[str] = None
+        self.memory_probe_ok = True
+        self.memory_probe_error: Optional[str] = None
+        self.sql_view_probe_ok = True
+        self.sql_view_probe_error: Optional[str] = None
+        self.actions_probe_ok = True
+        self.actions_probe_error: Optional[str] = None
+        self.schedules_probe_ok = True
+        self.schedules_probe_error: Optional[str] = None
+
+
+def _run_primary_probes(state, client, source, target_cols, physical_column) -> None:
+    """Primary TML export: RLS, alias, join, AI-surface, formula, model-filter.
+
+    One export call covers all six — export_associated=True pulls in every
+    associated Table/Model/column-alias doc alongside the source itself.
+    """
+    from . import tml_probes
+    import yaml
+
+    try:
+        resp = client.post("/api/rest/2.0/metadata/tml/export", json={
+            "metadata": [{"identifier": source.guid, "type": source.type}],
+            "export_associated": True,
+            "export_fqn": True,
+            "edoc_format": "YAML",
+            "export_options": {"export_with_column_aliases": True},
+        })
+        for doc in (resp.json() or []):
+            edoc_str = doc.get("edoc") or ""
+            if not edoc_str:
+                continue
+            parsed = yaml.safe_load(edoc_str) or {}
+            info = doc.get("info") or {}
+            info_type = (info.get("type") or "").upper()
+            filename = (info.get("filename") or "").lower()
+            doc_guid = info.get("id")
+            if "COLUMN_ALIAS" in info_type or "alias" in filename:
+                state.alias_hits.extend(_tag_hits(
+                    tml_probes.find_alias_column_uses(parsed, target_cols), doc_guid))
+            if info_type in ("TABLE", "LOGICAL_TABLE"):
+                state.rls_hits.extend(_tag_hits(
+                    tml_probes.find_rls_column_uses(parsed, target_cols), doc_guid))
+            if info_type in ("MODEL", "LOGICAL_MODEL", "WORKSHEET"):
+                state.join_hits.extend(_tag_hits(
+                    tml_probes.find_join_column_uses(parsed, target_cols), doc_guid))
+                state.ai_hits.extend(_tag_hits(
+                    tml_probes.find_ai_surface_uses(parsed, target_cols), doc_guid))
+                if physical_column:
+                    state.formula_hits.extend(_tag_hits(
+                        tml_probes.find_formula_column_uses(parsed, physical_column), doc_guid))
+                    state.model_filter_hits.extend(_tag_hits(
+                        tml_probes.find_model_filter_column_uses(parsed, target_cols), doc_guid))
+                    state.model_docs.append((doc_guid, parsed))
+    except Exception as exc:
+        state.primary_probe_ok = False
+        state.primary_probe_error = str(exc)
+
+
+def _run_monitor_alert_probe(state, client, dependents, target_cols) -> None:
+    """Monitor alerts: batch-export TML for all Liveboard dependents."""
+    from . import tml_probes
+    import yaml
+
+    lb_guids = [dep.guid for dep in dependents if dep.type == "LIVEBOARD"]
+    if not lb_guids:
+        return
+    try:
+        a_resp = client.post("/api/rest/2.0/metadata/tml/export", json={
+            "metadata": [{"identifier": g, "type": "LIVEBOARD"} for g in lb_guids],
+            "export_associated": True,
+            "edoc_format": "YAML",
+        })
+        for doc in (a_resp.json() or []):
+            parsed = yaml.safe_load((doc.get("edoc") or "")) or {}
+            if "monitor_alert" in parsed:
+                doc_guid = (doc.get("info") or {}).get("id")
+                state.alert_hits.extend(_tag_hits(
+                    tml_probes.find_alert_column_uses(parsed, target_cols), doc_guid))
+    except Exception as exc:
+        state.monitor_probe_ok = False
+        state.monitor_probe_error = str(exc)
+
+
+def _run_per_model_probes(state, client, target_cols, physical_column) -> None:
+    """Formula/template variables + business terms/AI memory + formula cascade.
+
+    One model at a time, in the same order model_docs was populated — deferred
+    to its own phase (after the monitor-alerts export) so call ordering stays
+    predictable regardless of how many associated models a source has.
+    """
+    from . import tml_probes, impact_probes
+
+    for doc_guid, parsed_model in state.model_docs:
+        if not doc_guid:
+            continue
+        try:
+            state.variable_hits.extend(
+                impact_probes.fetch_formula_variables(client, doc_guid, target_cols))
+        except Exception as exc:
+            state.variables_probe_ok = False
+            state.variables_probe_error = str(exc)
+        try:
+            state.memory_hits.extend(
+                impact_probes.fetch_business_terms_and_ai_memory(client, doc_guid, target_cols))
+        except Exception as exc:
+            state.memory_probe_ok = False
+            state.memory_probe_error = str(exc)
+        # Cascade (column_impact.py Pass 3): a formula referencing the dropped
+        # physical column is itself a column other Answers/Liveboards may
+        # query directly — walk its own dependents too.
+        for f in tml_probes.find_formula_column_uses(parsed_model, physical_column):
+            try:
+                fguid = impact_probes.find_column_guid_by_name(client, f["name"], doc_guid)
+                if fguid:
+                    state.extra_dependent_rows.extend(
+                        impact_probes.walk_one_hop(client, fguid, "LOGICAL_COLUMN", 2))
+            except Exception:
+                pass  # best-effort cascade; failures don't own a coverage row
+
+
+def _run_csr_probe(state, client, source, deep_active, physical_column) -> None:
+    """Column security rules — needs the owning table's GUID, only available
+    when the source resolved with a parent (e.g. a DB.SCH.TBL.COL input)."""
+    if not (deep_active and source.parent):
+        return
+    from . import impact_probes
+    try:
+        state.csr_hits = impact_probes.fetch_column_security_rules(
+            client, source.parent["guid"], physical_column)
+    except Exception as exc:
+        state.csr_probe_ok = False
+        state.csr_probe_error = str(exc)
+
+
+def _run_sql_view_probe(state, client, deep_active, physical_column) -> None:
+    """SQL views — org-wide text scan (most expensive probe here, see
+    impact_probes.fetch_sql_view_hits docstring) + their downstream dependents."""
+    if not deep_active:
+        return
+    from . import impact_probes
+    try:
+        state.sql_view_hits = impact_probes.fetch_sql_view_hits(client, physical_column)
+        for v in state.sql_view_hits:
+            if not v.get("guid"):
+                continue
+            try:
+                state.extra_dependent_rows.extend(
+                    impact_probes.walk_one_hop(client, v["guid"], "LOGICAL_TABLE", 1))
+            except Exception:
+                pass  # downstream-of-SQL-view walk is best-effort
+    except Exception as exc:
+        state.sql_view_probe_ok = False
+        state.sql_view_probe_error = str(exc)
+
+
+def _merge_cascade_rows(dependents: list, state, with_deep: bool, physical_column) -> None:
+    """Merge formula-column + SQL-view downstream dependents into `dependents`,
+    deduped by GUID, before anything counts or classifies dependents."""
+    seen_guids = {d.guid for d in dependents}
+    for row in state.extra_dependent_rows:
+        if row.get("guid") in seen_guids:
+            continue
+        seen_guids.add(row["guid"])
+        entry = row_to_entry(row)
+        entry.matched_columns = [physical_column] if with_deep and physical_column else []
+        dependents.append(entry)
+
+
+def _run_custom_actions_and_schedules(state, client, dependents) -> None:
+    """Custom actions + scheduled reports — computed from the final dependents list."""
+    from . import impact_probes
+    try:
+        state.action_hits = impact_probes.fetch_custom_actions_for_guids(
+            client, [d.guid for d in dependents])
+    except Exception as exc:
+        state.actions_probe_ok = False
+        state.actions_probe_error = str(exc)
+    try:
+        state.schedule_hits = impact_probes.fetch_scheduled_reports(
+            client, [d.guid for d in dependents if d.type == "LIVEBOARD"])
+    except Exception as exc:
+        state.schedules_probe_ok = False
+        state.schedules_probe_error = str(exc)
+
+
+def _extended_probe_map(state) -> dict:
+    """Assemble the `probes` dict build_extended_coverage() expects from a _ProbeState."""
+    return {
+        "Column security rules (CSR)": {
+            "hits": state.csr_hits, "ok": state.csr_probe_ok, "error": state.csr_probe_error},
+        "Model-level filters": {
+            "hits": state.model_filter_hits, "ok": state.primary_probe_ok,
+            "error": state.primary_probe_error, "skip_warning": True},
+        "Formula references": {
+            "hits": state.formula_hits, "ok": state.primary_probe_ok,
+            "error": state.primary_probe_error, "skip_warning": True},
+        "Formula / template variables": {
+            "hits": state.variable_hits, "ok": state.variables_probe_ok,
+            "error": state.variables_probe_error},
+        "Business terms / AI memory": {
+            "hits": state.memory_hits, "ok": state.memory_probe_ok,
+            "error": state.memory_probe_error},
+        "SQL views": {
+            "hits": state.sql_view_hits, "ok": state.sql_view_probe_ok,
+            "error": state.sql_view_probe_error},
+        "Custom actions": {
+            "hits": state.action_hits, "ok": state.actions_probe_ok,
+            "error": state.actions_probe_error},
+        "Scheduled reports": {
+            "hits": state.schedule_hits, "ok": state.schedules_probe_ok,
+            "error": state.schedules_probe_error, "informational": True},
+    }
+
+
+def _classify_all_dependents(dependents: list, state) -> None:
+    """Real per-dependent risk classification.
+
+    Previously dead code: every dependent got a hardcoded LOW placeholder from
+    walker.row_to_entry, and classify_dependent (despite being fully
+    implemented) was never called — see
+    agents/cli/ts-convert-from-dbt/references/open-items.md #8. Signals still
+    without any backing probe (chart axis use, dormancy, informational-only)
+    stay unset; that's a smaller, separately-scoped remaining gap, not
+    silently claimed fixed here.
+    """
+    join_guids = {h["object_guid"] for h in state.join_hits if h.get("object_guid")}
+    model_filter_guids = {h["object_guid"] for h in state.model_filter_hits if h.get("object_guid")}
+    alert_guids = {h["object_guid"] for h in state.alert_hits if h.get("object_guid")}
+    ai_guids = {h["object_guid"] for h in state.ai_hits if h.get("object_guid")}
+    for dep in dependents:
+        sig = DependentSignals(
+            referenced_in_joins=dep.guid in join_guids,
+            referenced_in_model_filter=dep.guid in model_filter_guids,
+            referenced_in_alerts=dep.guid in alert_guids,
+            referenced_in_feedback=(dep.type == "FEEDBACK"),
+            referenced_in_ai_surface=dep.guid in ai_guids,
+        )
+        dep.risk = classify_dependent(dep, sig)
 
 
 def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_depth: int = 3) -> dict:
@@ -191,6 +510,13 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
 
     Returns the to_dict() result of a Report. Raises SourceUnresolvedError /
     SourceAmbiguousError if the source ref can't be uniquely resolved.
+
+    The deep-probe phases (RLS/alias/join/AI-surface/formula/model-filter,
+    monitor alerts, formula/template variables, business terms/AI memory,
+    column security rules, SQL views, custom actions, scheduled reports) were
+    ported from a live-tested prototype (api_work/column_impact.py) that found
+    this module covered only ~4 of 13 real impact-analysis passes — see
+    agents/cli/ts-convert-from-dbt/references/open-items.md #8.
     """
     client = ThoughtSpotClient(resolve_profile(profile))
     source = resolve_source(source_ref, client)
@@ -198,113 +524,60 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
     raw_rows = walk_dependents_recursive(source, client, max_depth=max_depth)
     dependents = [row_to_entry(r) for r in raw_rows]
 
-    # TML probes (RLS, alerts, aliases, joins, AI surface).
-    rls_hits: list = []
-    csr_hits: list = []
-    alias_hits: list = []
-    alert_hits: list = []
-    join_hits: list = []
-    ai_hits: list = []
-
-    # Per-probe success — a failed probe must not read as "verified: no usage found".
-    primary_probe_ok = True
-    primary_probe_error: Optional[str] = None
-    monitor_probe_ok = True
-    monitor_probe_error: Optional[str] = None
-
     # Deep probes filter by column name; for table/model sources there is no
-    # single target column, so all probe functions return zero hits.  Track
+    # single target column, so all probe functions return zero hits. Track
     # whether deep probes were truly active so coverage rows can be honest.
     deep_active = with_deep and source.type == "LOGICAL_COLUMN"
+    target_cols = {source.name} if source.type == "LOGICAL_COLUMN" else set()
+    physical_column = source.name if target_cols else None
 
+    state = _ProbeState()
     if with_deep:
-        from . import tml_probes
-        import yaml
+        _run_primary_probes(state, client, source, target_cols, physical_column)
+        _run_monitor_alert_probe(state, client, dependents, target_cols)
+        _run_per_model_probes(state, client, target_cols, physical_column)
+        _run_csr_probe(state, client, source, deep_active, physical_column)
+        _run_sql_view_probe(state, client, deep_active, physical_column)
 
-        # Determine target columns for probe filtering.
-        target_cols = {source.name} if source.type == "LOGICAL_COLUMN" else set()
+    _merge_cascade_rows(dependents, state, with_deep, physical_column)
 
-        # Export source TML with the column-alias beta flag (10.13.0+).
-        # The response contains model, table, and column_alias docs in one call.
-        # RLS, joins, and AI-surface uses are parsed from those same docs.
-        try:
-            resp = client.post("/api/rest/2.0/metadata/tml/export", json={
-                "metadata": [{"identifier": source.guid, "type": source.type}],
-                "export_associated": True,
-                "export_fqn": True,
-                "edoc_format": "YAML",
-                "export_options": {"export_with_column_aliases": True},
-            })
-            for doc in (resp.json() or []):
-                edoc_str = doc.get("edoc") or ""
-                if not edoc_str:
-                    continue
-                parsed = yaml.safe_load(edoc_str) or {}
-                info = doc.get("info") or {}
-                info_type = (info.get("type") or "").upper()
-                filename = (info.get("filename") or "").lower()
-                doc_guid = info.get("id")
-                if "COLUMN_ALIAS" in info_type or "alias" in filename:
-                    alias_hits.extend(_tag_hits(
-                        tml_probes.find_alias_column_uses(parsed, target_cols), doc_guid))
-                if info_type in ("TABLE", "LOGICAL_TABLE"):
-                    rls_hits.extend(_tag_hits(
-                        tml_probes.find_rls_column_uses(parsed, target_cols), doc_guid))
-                if info_type in ("MODEL", "LOGICAL_MODEL", "WORKSHEET"):
-                    join_hits.extend(_tag_hits(
-                        tml_probes.find_join_column_uses(parsed, target_cols), doc_guid))
-                    ai_hits.extend(_tag_hits(
-                        tml_probes.find_ai_surface_uses(parsed, target_cols), doc_guid))
-        except Exception as exc:
-            primary_probe_ok = False
-            primary_probe_error = str(exc)
-
-        # Monitor alerts: batch-export TML for all Liveboard dependents.
-        lb_guids = [dep.guid for dep in dependents if dep.type == "LIVEBOARD"]
-        if lb_guids:
-            try:
-                a_resp = client.post("/api/rest/2.0/metadata/tml/export", json={
-                    "metadata": [{"identifier": g, "type": "LIVEBOARD"} for g in lb_guids],
-                    "export_associated": True,
-                    "edoc_format": "YAML",
-                })
-                for doc in (a_resp.json() or []):
-                    parsed = yaml.safe_load((doc.get("edoc") or "")) or {}
-                    if "monitor_alert" in parsed:
-                        doc_guid = (doc.get("info") or {}).get("id")
-                        alert_hits.extend(_tag_hits(
-                            tml_probes.find_alert_column_uses(parsed, target_cols), doc_guid))
-            except Exception as exc:
-                monitor_probe_ok = False
-                monitor_probe_error = str(exc)
+    if deep_active:
+        _run_custom_actions_and_schedules(state, client, dependents)
 
     coverage, probe_warnings = build_coverage(
         dependents,
-        rls_hits=rls_hits,
-        alert_hits=alert_hits,
-        alias_hits=alias_hits,
-        join_hits=join_hits,
-        ai_hits=ai_hits,
+        rls_hits=state.rls_hits,
+        alert_hits=state.alert_hits,
+        alias_hits=state.alias_hits,
+        join_hits=state.join_hits,
+        ai_hits=state.ai_hits,
         deep_active=deep_active,
-        primary_probe_ok=primary_probe_ok,
-        monitor_probe_ok=monitor_probe_ok,
-        primary_probe_error=primary_probe_error,
-        monitor_probe_error=monitor_probe_error,
+        primary_probe_ok=state.primary_probe_ok,
+        monitor_probe_ok=state.monitor_probe_ok,
+        primary_probe_error=state.primary_probe_error,
+        monitor_probe_error=state.monitor_probe_error,
     )
+    extended_coverage, extended_warnings = build_extended_coverage(
+        deep_active=deep_active, probes=_extended_probe_map(state))
+    coverage.extend(extended_coverage)
+    probe_warnings.extend(extended_warnings)
 
     # Attribute deep-probe hits back to the specific dependent that referenced the
     # column (see build_matched_columns_map docstring) — fixes the scope-filter bug
     # where ts-dependency-manager's Step 4 tried to match on risk.reason text.
     matched_columns_map = build_matched_columns_map(
-        rls_hits, alert_hits, join_hits, ai_hits, alias_hits,
+        state.rls_hits, state.alert_hits, state.join_hits, state.ai_hits, state.alias_hits,
     )
     for dep in dependents:
-        dep.matched_columns = matched_columns_map.get(dep.guid, [])
+        if dep.guid in matched_columns_map:
+            dep.matched_columns = matched_columns_map[dep.guid]
+
+    _classify_all_dependents(dependents, state)
 
     agg = aggregate_classification(AggregateInputs(
         per_dependent_tags=[d.risk for d in dependents],
-        rls_hits=rls_hits,
-        csr_hits=csr_hits,
+        rls_hits=state.rls_hits,
+        csr_hits=state.csr_hits,
     ))
     classification = Classification(
         per_dependent=dependents,

@@ -75,6 +75,11 @@ def test_matched_columns_attributed_to_the_right_dependents(MockClient):
     #   by the Monitor-alert hit), ans-1 (Answer, referenced by nothing).
     # Call 3: primary TML probe export — table doc (RLS) + model doc (join, AI-surface).
     # Call 4: Monitor-alerts export for the one Liveboard dependent.
+    # Call 5: formula/template variables for model ws-1 (empty — no formulas hit)
+    # Call 6-7: business terms (FEEDBACK TML export) + AI memory export for ws-1
+    # Call 8: SQL-views org-wide search (empty)
+    # Call 9: custom actions search (empty)
+    # Call 10: scheduled reports search, scoped to lb-1 (empty)
     client.post.side_effect = [
         _resp([{
             "metadata_id": "col-1", "metadata_name": "ZIPCODE",
@@ -112,6 +117,12 @@ def test_matched_columns_attributed_to_the_right_dependents(MockClient):
             {"info": {"type": "liveboard", "id": "lb-1", "name": "Regional Dashboard"},
              "edoc": _MONITOR_ALERT_TML},
         ]),
+        _resp([]),
+        _resp([]),
+        _resp({}),
+        _resp([]),
+        _resp([]),
+        _resp([]),
     ]
 
     out = build_report("baa451a6-02a0-42d1-8347-8cd4af13b505", profile="test",

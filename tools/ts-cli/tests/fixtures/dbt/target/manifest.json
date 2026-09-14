@@ -1,0 +1,143 @@
+{
+  "nodes": {
+    "model.barbershop.stg_appointments": {
+      "resource_type": "model",
+      "name": "stg_appointments",
+      "alias": "appointments",
+      "original_file_path": "models/staging/barbershop/stg_appointments.sql",
+      "database": "DL_TEST",
+      "schema": "DBT_DLEE_PROD",
+      "columns": {
+        "BARBER_ID": {
+          "config": {
+            "meta": {
+              "ts_column_type": "attribute"
+            }
+          }
+        },
+        "APPOINTMENT_DATE": {
+          "config": {
+            "meta": {
+              "ts_column_type": "attribute",
+              "ts_calendar_type": "fiscal_apr"
+            }
+          },
+          "description": "When the appointment starts."
+        },
+        "SERVICE_AMOUNT": {
+          "config": {
+            "meta": {
+              "ts_column_type": "measure",
+              "ts_aggregation": "sum",
+              "ts_currency_type": {
+                "type": "from_isocode",
+                "isocode": "USD"
+              }
+            }
+          }
+        }
+      },
+      "config": {
+        "meta": {
+          "ts_rls_rules": [
+            {
+              "name": "own_appointments_only",
+              "expr": "[BARBER_ID] = ts_username",
+              "table_paths": [
+                {
+                  "id": "appointments",
+                  "table": "APPOINTMENTS",
+                  "columns": [
+                    "BARBER_ID"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "model.barbershop.stg_barbers": {
+      "resource_type": "model",
+      "name": "stg_barbers",
+      "alias": "barbers",
+      "original_file_path": "models/staging/barbershop/stg_barbers.sql",
+      "database": "DL_TEST",
+      "schema": "DBT_DLEE_PROD",
+      "columns": {
+        "BARBER_ID": {
+          "config": {
+            "meta": {
+              "ts_column_type": "attribute"
+            }
+          }
+        },
+        "BARBER_NAME": {
+          "config": {
+            "meta": {
+              "ts_column_type": "attribute",
+              "ts_synonym": "Stylist"
+            }
+          }
+        },
+        "SHOP_LATITUDE": {
+          "config": {
+            "meta": {
+              "ts_column_type": "attribute",
+              "ts_geo_config": {
+                "type": "latitude"
+              }
+            }
+          }
+        },
+        "CHAIR_COUNT": {}
+      }
+    },
+    "model.barbershop.stg_old": {
+      "resource_type": "model",
+      "name": "stg_old",
+      "alias": "old",
+      "original_file_path": "models/staging/barbershop_archive/stg_old.sql",
+      "database": "DL_TEST",
+      "schema": "DBT_DLEE_PROD",
+      "columns": {}
+    },
+    "test.barbershop.rel_appt_barber": {
+      "resource_type": "test",
+      "original_file_path": "models/staging/barbershop/schema.yml",
+      "test_metadata": {
+        "name": "relationships",
+        "kwargs": {
+          "model": "{{ get_where_subquery(ref('stg_appointments')) }}",
+          "to": "ref('stg_barbers')",
+          "column_name": "BARBER_ID",
+          "field": "BARBER_ID"
+        }
+      },
+      "config": {
+        "meta": {
+          "ts_join_name": "appointment_to_barber",
+          "ts_join_type": "left_outer",
+          "ts_join_cardinality": "many_to_one"
+        }
+      }
+    },
+    "test.barbershop.rel_plain": {
+      "resource_type": "test",
+      "original_file_path": "models/staging/barbershop/schema.yml",
+      "test_metadata": {
+        "name": "relationships",
+        "kwargs": {
+          "model": "{{ get_where_subquery(ref('stg_appointments')) }}",
+          "to": "ref('stg_barbers')",
+          "column_name": "BARBER_ID"
+        }
+      },
+      "config": {
+        "meta": {
+          "severity": "warn"
+        }
+      }
+    }
+  }
+}

@@ -85,13 +85,23 @@ def extract_imported_guid(import_result: list) -> str | None:
     return response.get("header", {}).get("id_guid") or None
 
 
+#: Per-item ``status_code`` values under which the object WAS created/updated.
+IMPORTED_STATUS_CODES = frozenset({"OK", "WARNING"})
+
+
 def tml_import_failures(import_result: Any) -> List[Dict[str, Any]]:
     """Per-item failures out of a `metadata/tml/import` response.
 
     `import` returns HTTP 200 even when every item failed: the per-item outcome lives
-    at ``response.status.status_code`` -- ``"OK"`` on success, anything else a failure
-    -- the same field `ts tml import`'s GUID-backfill loop already reads (see
-    `commands/tml.py`). A caller that only checks the HTTP status code can print this
+    at ``response.status.status_code`` -- ``"OK"`` on success, ``"WARNING"`` when the
+    object WAS imported but the platform has something to say about it, anything else
+    a failure -- the same field `ts tml import`'s GUID-backfill loop already reads (see
+    `commands/tml.py`). ``"WARNING"`` is NOT a failure: live-verified 2026-09-09 on
+    Embed-1-Prod -- a Model import answered ``WARNING`` ("columns with misconfigured
+    suggestion settings", the routine notice for columns without an explicit
+    index type) and the re-exported Model carried the change. Treating it as a
+    failure made `ts tml import` exit 1 and print "did not import" for an import
+    that had succeeded. Warnings are surfaced separately by `tml_import_warnings`. A caller that only checks the HTTP status code can print this
     body and exit 0 having imported nothing (live-observed on CSR import into an Org
     missing the referenced table, 2026-07-27).
 
@@ -103,7 +113,7 @@ def tml_import_failures(import_result: Any) -> List[Dict[str, Any]]:
     A missing ``status`` block (or a missing ``status_code`` within it) is NOT treated
     as a failure -- there is no positive evidence of one, and defaulting to "failed"
     would flag responses that never carried status information in the first place.
-    Only an explicit, non-``"OK"`` ``status_code`` is reported.
+    Only an explicit ``status_code`` other than ``"OK"``/``"WARNING"`` is reported.
 
     Tolerates a non-list, empty, or junk response by returning ``[]`` rather than
     raising: a read-back must not fail louder than the write it is checking.
@@ -125,7 +135,7 @@ def tml_import_failures(import_result: Any) -> List[Dict[str, Any]]:
         if not isinstance(status, dict):
             continue
         status_code = status.get("status_code")
-        if status_code is None or status_code == "OK":
+        if status_code is None or status_code in IMPORTED_STATUS_CODES:
             continue
         failures.append({
             "request_index": item.get("request_index", idx),
@@ -134,6 +144,52 @@ def tml_import_failures(import_result: Any) -> List[Dict[str, Any]]:
             "error_message": status.get("error_message") or "",
         })
     return failures
+
+
+def tml_import_warnings(import_result: Any) -> List[Dict[str, Any]]:
+    """Per-item ``WARNING`` entries out of a `metadata/tml/import` response.
+
+    The object imported (see `tml_import_failures`), but the platform attached a
+    notice -- most often "columns with misconfigured suggestion settings" on a Model
+    whose columns carry no explicit index type. Callers print these to stderr and
+    still exit 0. Same entry shape and tolerance rules as `tml_import_failures`;
+    the notice text is under ``error_message`` because that is the key the platform
+    uses for it. Pure -- no I/O.
+    """
+    warnings: List[Dict[str, Any]] = []
+    items = import_result if isinstance(import_result, list) else []
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        response = item.get("response")
+        if not isinstance(response, dict):
+            continue
+        status = response.get("status")
+        if not isinstance(status, dict) or status.get("status_code") != "WARNING":
+            continue
+        warnings.append({
+            "request_index": item.get("request_index", idx),
+            "status_code": "WARNING",
+            "error_code": status.get("error_code"),
+            "error_message": status.get("error_message") or "",
+        })
+    return warnings
+
+
+def format_import_warnings(warnings: List[Dict[str, Any]],
+                           context: str = "import") -> List[str]:
+    """Human-readable lines for `tml_import_warnings` output -- one header line that
+    says the items DID import, then one line per warning. Mirrors
+    `format_import_failures` so the two read alike on stderr."""
+    lines = [f"{context}: {len(warnings)} item(s) imported with status WARNING "
+             f"(the object was created/updated; review the notice below)."]
+    for warning in warnings:
+        detail = (warning.get("error_message") or "").strip()
+        if not detail:
+            code = warning.get("error_code")
+            detail = f"error_code {code}" if code else "no message supplied"
+        lines.append(f"  [{warning.get('request_index')}] {' '.join(detail.split())}")
+    return lines
 
 
 def format_import_failures(failures: List[Dict[str, Any]],

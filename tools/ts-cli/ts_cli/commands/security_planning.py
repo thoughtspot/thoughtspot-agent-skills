@@ -717,9 +717,16 @@ def import_cmd(
     # very likely present in `ts alias import` and `ts tml import` -- both only check
     # `resp.ok` too. This PR fixes it for CSR only, to keep the blast radius small;
     # wiring the other two callers to the same helper is a follow-up, not done here.
-    from ts_cli.tml_common import tml_import_failures
+    from ts_cli.tml_common import (
+        format_import_warnings, tml_import_failures, tml_import_warnings,
+    )
 
     result = resp.json()
+    warnings = tml_import_warnings(result)
+    if warnings:  # imported, with a platform notice -- surface it, keep going
+        for line in format_import_warnings(
+                warnings, f"Imported {body['table']['name']}'s column security rules"):
+            print(line, file=sys.stderr)
     failures = tml_import_failures(result)
     if failures:
         _report_import_failures(failures, body["table"]["name"])

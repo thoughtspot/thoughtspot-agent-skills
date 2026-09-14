@@ -31,6 +31,8 @@ imports `run_ts` yet needs no credentials; it just needs the CLI installed).
 | `smoke_ts-convert-to-databricks-mv.py` | ts-convert-to-databricks-mv (codified emitter) | Pure (`--live` opts in) |
 | `smoke_ts_convert_from_qlik.py` | ts-convert-from-qlik | CLI-only |
 | `smoke_ts_load_source_data.py` | ts-load-source-data | CLI-only |
+| `smoke_ts_convert_to_dbt.py` | ts-convert-to-dbt | CLI-only |
+| `smoke_ts_convert_from_dbt.py` | ts-convert-from-dbt | CLI-only (the server-side / dbt Cloud half needs a live instance — see that skill's open-items.md) |
 | `smoke_ts_to_snowflake.py` | ts-convert-to-snowflake-sv | Live (TS + SF) |
 | `smoke_ts_from_snowflake.py` | ts-convert-from-snowflake-sv | Live (TS + SF) |
 | `smoke_ts_to_databricks.py` | ts-convert-to-databricks-mv | Live (TS + DBX) |

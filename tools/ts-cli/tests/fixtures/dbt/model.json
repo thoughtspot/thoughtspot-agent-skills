@@ -1,0 +1,92 @@
+{
+  "model": {
+    "name": "BARBERSHOP_OPERATIONS",
+    "description": "Appointments and the barbers who serve them.",
+    "model_tables": [
+      {
+        "id": "APPOINTMENTS",
+        "name": "APPOINTMENTS",
+        "joins": [
+          {
+            "name": "appointment_to_barber",
+            "with": "BARBERS",
+            "on": "[APPOINTMENTS::Barber Id] = [BARBERS::Barber Id]",
+            "type": "LEFT_OUTER",
+            "cardinality": "MANY_TO_ONE"
+          }
+        ]
+      },
+      {
+        "id": "BARBERS",
+        "name": "BARBERS"
+      }
+    ],
+    "columns": [
+      {
+        "name": "Barber Id",
+        "column_id": "APPOINTMENTS::Barber Id",
+        "properties": {
+          "column_type": "ATTRIBUTE"
+        }
+      },
+      {
+        "name": "Appointment Date",
+        "column_id": "APPOINTMENTS::Appointment Date",
+        "description": "When the appointment starts.",
+        "properties": {
+          "column_type": "ATTRIBUTE",
+          "calendar": "fiscal_apr"
+        }
+      },
+      {
+        "name": "Service Amount",
+        "column_id": "APPOINTMENTS::Service Amount",
+        "properties": {
+          "column_type": "MEASURE",
+          "aggregation": "SUM",
+          "currency_type": {
+            "iso_code": "USD"
+          },
+          "index_priority": 5.0
+        }
+      },
+      {
+        "name": "Barber Name",
+        "column_id": "BARBERS::Barber Name",
+        "properties": {
+          "column_type": "ATTRIBUTE",
+          "synonyms": [
+            "Stylist"
+          ],
+          "is_hidden": false
+        }
+      },
+      {
+        "name": "Shop Latitude",
+        "column_id": "BARBERS::Shop Latitude",
+        "properties": {
+          "column_type": "ATTRIBUTE",
+          "geo_config": {
+            "latitude": true
+          }
+        }
+      },
+      {
+        "name": "Revenue Per Barber",
+        "column_id": "REVENUE_PER_BARBER",
+        "formula_id": "formula_Revenue_Per_Barber",
+        "properties": {
+          "column_type": "MEASURE",
+          "aggregation": "SUM"
+        }
+      }
+    ],
+    "formulas": [
+      {
+        "id": "formula_Revenue_Per_Barber",
+        "name": "Revenue Per Barber",
+        "expr": "sum([APPOINTMENTS::Service Amount])"
+      }
+    ]
+  }
+}

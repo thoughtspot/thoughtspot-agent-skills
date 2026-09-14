@@ -154,6 +154,10 @@ class TestBuildReportPropagatesProbeFailures:
         # Call 1: resolve_source (GUID -> metadata/search, a LOGICAL_COLUMN hit)
         # Call 2: walk_dependents_recursive (no dependents)
         # Call 3: the primary TML probe export -> raises
+        # Call 4: SQL-views org-wide search (no dependents means no model docs,
+        #   so this and custom-actions are the only later deep_active probes
+        #   that still fire; both succeed here so they don't add extra warnings)
+        # Call 5: custom actions search
         client.post.side_effect = [
             _resp([{
                 "metadata_id": "g-1", "metadata_name": "Col",
@@ -162,6 +166,8 @@ class TestBuildReportPropagatesProbeFailures:
             }]),
             _resp([{"metadata_id": "g-1", "dependent_objects": {"dependents": {}}}]),
             RuntimeError("boom"),
+            _resp([]),
+            _resp([]),
         ]
 
         out = build_report(uuid, profile="test", with_deep=True)
@@ -182,8 +188,13 @@ class TestBuildReportPropagatesProbeFailures:
         # Call 1: resolve_source (LOGICAL_COLUMN hit)
         # Call 2: walk_dependents_recursive -> one Liveboard dependent (depth 1,
         #   max_depth=1 so the walk stops before re-querying it)
-        # Call 3: the primary TML probe export -> succeeds
+        # Call 3: the primary TML probe export -> succeeds (model doc has no
+        #   "id" in info, so the per-model variables/business-terms/cascade
+        #   phase skips it — no extra calls from that phase)
         # Call 4: the Monitor-alerts Liveboard export -> raises
+        # Call 5: SQL-views org-wide search (empty)
+        # Call 6: custom actions search (empty)
+        # Call 7: scheduled reports search, scoped to lb-1 (empty)
         client.post.side_effect = [
             _resp([{
                 "metadata_id": "g-1", "metadata_name": "Col",
@@ -200,6 +211,9 @@ class TestBuildReportPropagatesProbeFailures:
             }]),
             _resp([{"info": {"type": "model"}, "edoc": "column_alias:\n  columns: []\n"}]),
             RuntimeError("monitor export exploded"),
+            _resp([]),
+            _resp([]),
+            _resp([]),
         ]
 
         out = build_report(uuid, profile="test", with_deep=True, max_depth=1)

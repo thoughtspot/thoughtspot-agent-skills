@@ -49,14 +49,19 @@ to the column before removal; remove affected joins and report them.
 
 ---
 
-## #9 — Column security rule TML retrieval — OPEN
+## #9 — Column security rule TML retrieval — RESOLVED 2026-08-27
 
 TML structure is documented and detection/update logic is mechanical. The **retrieval
-mechanism** is the open question: on champ-staging, the v2 `--associated` export does
-not return CSR files. They appear only via the ThoughtSpot UI's Download TML zip or
-the `vcs/git/branches/commit` workflow.
-
-**Action:** Confirm retrieval mechanism. Re-test on Cloud 26.4.0+.
+mechanism** was the open question: on champ-staging, the v2 `--associated` export does
+not return CSR files — confirmed correct, they don't. The fix isn't via `--associated`
+at all: `POST /api/rest/2.0/security/column/rules/fetch` (beta, 10.12.0.cl+) retrieves
+them directly, scoped by table GUID. Wired in `ts_cli/report/impact_probes.py::fetch_column_security_rules`,
+exposed via `ts metadata report`'s "Column security rules (CSR)" coverage row, and
+feeding the aggregate STOP condition (`ts_cli/report/classifier.py::aggregate_classification`,
+which already checked `csr_hits` — that half of STOP was dead code until this fix
+actually populated it). See dependency-types.md row #9 and
+`agents/cli/ts-convert-from-dbt/references/open-items.md` #8 for the fuller fix history
+(found while porting a live-tested column-impact prototype into `ts_cli/report/`).
 
 ---
 

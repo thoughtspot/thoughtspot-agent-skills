@@ -134,6 +134,12 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-databricks-mv \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-databricks-mv \
       ~/.snowflake/cortex/skills/ts-convert-from-databricks-mv
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-dbt \
+      ~/.snowflake/cortex/skills/ts-convert-to-dbt
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-dbt \
+      ~/.snowflake/cortex/skills/ts-convert-from-dbt
+
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-looker \
       ~/.snowflake/cortex/skills/ts-convert-from-looker
 
@@ -224,6 +230,12 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-databricks-mv \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-databricks-mv \
       ~/.claude/skills/ts-convert-from-databricks-mv
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-dbt \
+      ~/.claude/skills/ts-convert-to-dbt
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-dbt \
+      ~/.claude/skills/ts-convert-from-dbt
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-looker \
       ~/.claude/skills/ts-convert-from-looker

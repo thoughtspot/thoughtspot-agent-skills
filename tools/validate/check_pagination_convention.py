@@ -61,6 +61,10 @@ UNLIMITED_SENTINEL = -1
 # Add an entry here only for a literal record_size that is a bounded, exact-match
 # lookup — never a "return search results to the caller" path (those must paginate).
 ALLOWLIST: dict[tuple[str, str], str] = {
+    ("ts_cli/commands/columns.py", "_fetch_dependents"):
+        "record_size=1 GUID lookup — a GUID identifies at most one object. "
+        "(The dependent_objects_record_size=200 cap on the same call is a "
+        "separate axis this validator does not check — see BL-215 note.)",
     ("ts_cli/commands/metadata.py", "get_object"):
         "record_size=1 GUID lookup — a GUID identifies at most one object, "
         "so there is nothing to paginate over.",
@@ -85,6 +89,10 @@ ALLOWLIST: dict[tuple[str, str], str] = {
         "record_size=1 GUID drift-check lookup (BL-083 apply-change) — reads a single "
         "object's metadata_header.modified by GUID; a GUID identifies at most one "
         "object and the result is never returned as a listing.",
+    ("ts_cli/report/impact_probes.py", "find_column_guid_by_name"):
+        "record_size=50 exact-name lookup, immediately filtered to the single entry "
+        "whose metadata_header.owner matches owner_guid — returns one GUID or None, "
+        "never a listing, same bounded-lookup shape as resolver.py:resolve_source.",
 }
 
 

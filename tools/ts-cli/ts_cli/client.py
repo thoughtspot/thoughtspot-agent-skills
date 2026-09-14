@@ -325,12 +325,19 @@ class ThoughtSpotClient:
     # HTTP helpers
     # ------------------------------------------------------------------
 
-    def _auth_headers(self) -> Dict[str, str]:
-        return {
+    def _auth_headers(self, *, multipart: bool = False) -> Dict[str, str]:
+        headers = {
             "Authorization": f"Bearer {self.get_token()}",
-            "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        if not multipart:
+            # A multipart/form-data request (files= in kwargs) must leave
+            # Content-Type unset — requests/urllib3 compute the boundary and
+            # set the header themselves when preparing the body. Forcing
+            # application/json here would ship a boundary-less multipart
+            # body under a JSON content type, which the server cannot parse.
+            headers["Content-Type"] = "application/json"
+        return headers
 
     def request(
         self,
@@ -345,11 +352,12 @@ class ThoughtSpotClient:
         url = f"{self._base_url}{path}"
         allow_401_retry = path != _AUTH_TOKEN_PATH
 
+        is_multipart = "files" in kwargs
         retried_401 = False
         transient_attempts = 0
         while True:
             headers = dict(extra_headers)
-            headers.update(self._auth_headers())
+            headers.update(self._auth_headers(multipart=is_multipart))
             try:
                 resp = self._session.request(method, url, headers=headers, timeout=timeout, **kwargs)
             except (requests.exceptions.ConnectionError,

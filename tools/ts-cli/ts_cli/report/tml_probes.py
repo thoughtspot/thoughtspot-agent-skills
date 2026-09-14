@@ -117,6 +117,67 @@ def find_join_column_uses(model_tml: dict, target_columns: Iterable[str]) -> Lis
     return hits
 
 
+def find_formula_column_uses(model_tml: dict, physical_column: str) -> List[dict]:
+    """Return model formulas[] entries whose expr references physical_column.
+
+    Unlike the other probes here, this matches the *physical* (db) column name,
+    not a display name — a formula expr is written against the underlying
+    column identifier, so a dropped physical column breaks the formula even
+    though the formula's own display name never changes.
+    """
+    hits = []
+    for f in (model_tml.get("model") or {}).get("formulas", []) or []:
+        expr = f.get("expr", "") or ""
+        if physical_column and physical_column.lower() in expr.lower():
+            hits.append({"formula_id": f.get("id"), "name": f.get("name"), "expr": expr})
+    return hits
+
+
+def find_model_filter_column_uses(model_tml: dict, target_columns: Iterable[str]) -> List[dict]:
+    """Return model-level filters[] entries referencing a target column.
+
+    Distinct from find_join_column_uses (joins_with[].on) — a Model's own
+    top-level filters[] block applies a filter across the whole model.
+    """
+    targets = set(target_columns)
+    hits = []
+    for filt in (model_tml.get("model") or {}).get("filters", []) or []:
+        col = filt.get("column")
+        if col in targets:
+            hits.append({"column": col, "oper": filt.get("oper"), "values": filt.get("values")})
+    return hits
+
+
+def find_sql_view_column_uses(sql_view_doc: dict, physical_column: str) -> Optional[dict]:
+    """Return a hit dict if this SQL view's query or output columns reference
+    physical_column, else None.
+
+    The dependents API does not track column references inside a SQL view's
+    raw query text — callers must enumerate SQL_VIEW objects and scan this way.
+    """
+    sv = sql_view_doc.get("sql_view") or {}
+    if not sv:
+        return None
+    sql_query = sv.get("sql_query", "") or ""
+    output_cols = [
+        c.get("sql_output_column") or c.get("name", "")
+        for c in (sv.get("sql_view_columns") or [])
+    ]
+    col_lower = (physical_column or "").lower()
+    in_sql = bool(col_lower) and col_lower in sql_query.lower()
+    in_cols = bool(col_lower) and any(col_lower in c.lower() for c in output_cols)
+    if not (in_sql or in_cols):
+        return None
+    return {
+        "guid": sql_view_doc.get("guid", ""),
+        "name": sv.get("name", ""),
+        "sql_query": sql_query,
+        "output_columns": output_cols,
+        "in_sql": in_sql,
+        "in_output_columns": in_cols,
+    }
+
+
 def find_ai_surface_uses(model_tml: dict, target_columns: Iterable[str]) -> List[dict]:
     """Return hits where a target column appears in a Spotter-AI surface area:
     Data Model Instructions, synonyms, or business-term column references.

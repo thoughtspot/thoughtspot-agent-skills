@@ -2,6 +2,7 @@
 |---|---|---|---|---|
 | ts-audit | Y | — | — | — |
 | ts-convert-from-databricks-mv | Y | — | — | Y |
+| ts-convert-from-dbt | Y | — | — | — |
 | ts-convert-from-looker | Y | — | — | — |
 | ts-convert-from-powerbi | Y | — | — | — |
 | ts-convert-from-qlik | Y | — | — | — |
@@ -9,6 +10,7 @@
 | ts-convert-from-snowflake-sv | Y | — | Y | — |
 | ts-convert-from-tableau | Y | — | — | — |
 | ts-convert-to-databricks-mv | Y | — | — | Y |
+| ts-convert-to-dbt | Y | — | — | — |
 | ts-convert-to-snowflake-sv | Y | — | Y | — |
 | ts-dependency-manager | Y | — | — | — |
 | ts-load-source-data | Y | — | — | — |

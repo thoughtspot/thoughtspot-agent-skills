@@ -5,18 +5,20 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**145 total items** across 18 skills — **67 open**, 68 verified, 10 deferred
+**181 total items** across 20 skills — **74 open**, 96 verified, 11 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
 | ts-convert-to-databricks-mv | 9 | **8** | 1 | 0 |
-| ts-dependency-manager | 16 | **8** | 7 | 1 |
 | ts-object-model-aggregates | 20 | **8** | 11 | 1 |
+| ts-dependency-manager | 16 | **7** | 8 | 1 |
 | ts-object-model-coach | 7 | **7** | 0 | 0 |
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
 | ts-audit | 15 | **5** | 10 | 0 |
 | ts-convert-from-qlik | 6 | **5** | 0 | 1 |
+| ts-convert-from-dbt | 18 | **4** | 14 | 0 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
+| ts-convert-to-dbt | 18 | **4** | 13 | 1 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
 | ts-load-source-data | 3 | **3** | 0 | 0 |
 | ts-publish-orgs | 8 | **3** | 4 | 1 |
@@ -27,7 +29,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-object-model-agentql-query | 6 | **0** | 6 | 0 |
-### Untagged (67 items)
+### Untagged (74 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -38,6 +40,10 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-audit | #11 | User Action enum | UNVERIFIED |
 | ts-audit | #12 | Query Text column parsability | UNVERIFIED |
 | ts-audit | #13 | Liveboard viz fingerprinting | UNVERIFIED |
+| ts-convert-from-dbt | #3 | dbt construct coverage beyond "models" | OPEN |
+| ts-convert-from-dbt | #5 | Certified-warehouse enforcement point | OPEN |
+| ts-convert-from-dbt | #7 | `generate-sync-tml` has no diff/dry-run | OPEN |
+| ts-convert-from-dbt | #12 | `generate-sync-tml` 500s on resync after structural edits | OPEN |
 | ts-convert-from-looker | #1 | `type: number` cross-measure SQL inlining edge cases | OPEN |
 | ts-convert-from-looker | #3 | Multiple explores that share views: one model or separate models | OPEN |
 | ts-convert-from-looker | #4 | `sql_always_where:` → ThoughtSpot RLS | OPEN |
@@ -66,7 +72,10 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-to-databricks-mv | #6 | `source.`-prefix in a single-source MV's `filter:`/exprs needs live verification | OPEN |
 | ts-convert-to-databricks-mv | #7 | 2-argument `{0}`-template SQL pass-through form is not implemented | OPEN |
 | ts-convert-to-databricks-mv | #8 | Live numeric fidelity of the codified emit path | OPEN |
-| ts-dependency-manager | #9 | Column security rule TML retrieval | OPEN |
+| ts-convert-to-dbt | #2 | Legacy MetricFlow spec (semantic_models.yml) | OPEN |
+| ts-convert-to-dbt | #6 | Entity naming collision across unrelated Models | OPEN |
+| ts-convert-to-dbt | #13 | Column Security Rules (CSR) not in Table TML | OPEN |
+| ts-convert-to-dbt | #16 | `ts_column_exclude` is read but never written | OPEN |
 | ts-dependency-manager | #11 | Reusable Set (cohort) delete command | OPEN |
 | ts-dependency-manager | #13 | Chart `client_state_v2` stale column references | OPEN |
 | ts-dependency-manager | #14 | Cohort `pass_thru_filter` lost on round-trip | OPEN |

@@ -1,0 +1,31 @@
+{
+  "table": {
+    "name": "BARBERS",
+    "db": "DL_TEST",
+    "schema": "DBT_DLEE_PROD",
+    "db_table": "BARBERS",
+    "columns": [
+      {
+        "name": "Barber Id",
+        "db_column_name": "BARBER_ID",
+        "db_column_properties": {
+          "data_type": "INT64"
+        }
+      },
+      {
+        "name": "Barber Name",
+        "db_column_name": "BARBER_NAME",
+        "db_column_properties": {
+          "data_type": "VARCHAR"
+        }
+      },
+      {
+        "name": "Shop Latitude",
+        "db_column_name": "SHOP_LATITUDE",
+        "db_column_properties": {
+          "data_type": "DOUBLE"
+        }
+      }
+    ]
+  }
+}

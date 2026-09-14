@@ -45,6 +45,7 @@ ts profiles list
 ts profiles list --snowflake
 ts profiles list --tableau
 ts profiles list --databricks
+ts profiles list --dbt-cloud
 ts profiles list --json
 ts profiles list --snowflake --json
 ```
@@ -74,6 +75,24 @@ ts profiles add \
 ```
 
 **Output:** JSON with `profile`, `slug`, `env_var`, `keychain_store_commands`, `zshenv_line`.
+
+**Platforms:** `thoughtspot`, `snowflake`, `databricks`, `tableau`, `dbt-cloud`.
+`dbt-cloud` profiles (`--auth-type token`) persist `dbt_url`/`account_id`/
+`project_id`/`dbt_env_id`/`project_name` as plain fields — unlike the other
+platforms, these aren't consumed by a `ts` command's own auth resolution;
+`ts-convert-from-dbt` reads them directly so its Discovery API calls (Step 5,
+Step 10.3) don't need these coordinates re-entered every session (ThoughtSpot's
+own `dbt/search` response never echoes them back after connection creation):
+
+```bash
+ts profiles add \
+  --platform dbt-cloud \
+  --name "Sales" \
+  --auth-type token \
+  --field dbt_url=https://cloud.getdbt.com \
+  --field account_id=12345 \
+  --field project_id=67890
+```
 
 ---
 
@@ -436,6 +455,10 @@ ts tml export abc-123 --type FEEDBACK --parse
 
 # Export with obj_id references (for repoint operations)
 ts tml export abc-123 --include-obj-id --include-obj-id-ref --no-guid --parse
+
+# Split the export into per-object files (the shape ts dbt-export /
+# ts snowflake build-sv read with --model and --tables-dir)
+ts tml export abc-123 --associated --split-dir ./export
 ```
 
 **Options:**
@@ -451,6 +474,17 @@ ts tml export abc-123 --include-obj-id --include-obj-id-ref --no-guid --parse
 | `--include-obj-id` | false | Include `obj_id` on the exported object itself. |
 | `--include-obj-id-ref` | false | Include `obj_id` on referenced objects (e.g. `model_tables` entries). |
 | `--include-guid` / `--no-guid` | true | Include `guid` at document root. Use `--no-guid` to omit. |
+| `--split-dir` | (none) | Write each parsed item to its own JSON file in this directory instead of returning one array. Implies `--parse`. |
+
+**`--split-dir`** writes `model.json`, `table_<NAME>.json` per Table, and
+`<type>_<guid>.json` for anything else — the layout `ts dbt-export
+build`/`diff`/`sync` and `ts snowflake build-sv` read via `--model` and
+`--tables-dir`. stdout becomes a small manifest (`{split_dir, written[]}`), so
+a 40-table export no longer passes through a caller's context purely to be
+re-emitted as files. Two Tables sharing a name (an Org can hold a raw source
+table beside the dbt view) get distinct filenames rather than one silently
+overwriting the other. An inaccessible item is skipped and the exit code is 1,
+exactly as with `--parse`.
 
 **Output (default):** JSON array from `POST /api/rest/2.0/metadata/tml/export`. Each element
 contains `info` (metadata) and `edoc` (the raw TML string).
@@ -565,6 +599,20 @@ Combining `--file`/`--dir` with piped stdin content is rejected as an ambiguous 
 
 **Output:** JSON from `POST /api/rest/2.0/metadata/tml/import` containing
 per-object status and GUIDs of created/updated objects.
+
+**Exit status follows the per-item `status_code`, not the HTTP code** (the endpoint
+answers 200 even when an item failed):
+
+| Per-item `status_code` | Meaning | Exit |
+|---|---|---|
+| `OK` | created/updated | 0 |
+| `WARNING` | created/updated, with a platform notice — printed on stderr as `Imported TML: N item(s) imported with status WARNING …` | 0 |
+| anything else | not imported — printed on stderr as `Could not import TML: …` | 1 |
+
+The routine `WARNING` is "columns with misconfigured suggestion settings" on a Model
+whose columns carry no explicit index type; the object has landed (live-verified
+2026-09-09 by re-export). Before that fix the CLI reported such an import as
+"did not import" and exited 1.
 
 ---
 
@@ -3180,7 +3228,7 @@ ordering, DDL assembly with tables/relationships/dimensions/metrics clauses, and
 Cortex Analyst extension JSON.
 
 ```bash
-ts tml export {model_guid} --parse --associated --output-dir ./export
+ts tml export {model_guid} --associated --split-dir ./export
 ts snowflake build-sv --model export/model.json \
   --tables-dir export/ --sv-name DB.SCHEMA.MY_SV \
   --output my_sv.sql
@@ -3378,6 +3426,718 @@ the model), an unreadable/invalid `--model`/`--tables` file, a structural
 `ValueError` while building an MV (e.g. a duplicate emitted column name, or
 the `build_view_ddl` `$$`-collision guard), or any produced MV ends up with
 zero measures.
+
+---
+
+## `ts columns` — column-level impact analysis
+
+### `ts columns impact`
+
+Run a 13-pass dependency analysis to find every ThoughtSpot object that would break
+if a physical column were deleted from the database.
+
+**Passes:**
+1. Model column direct dependents (Answers, Liveboards, dependent Worksheets/Views)
+2. Model TML formula scan — formulas whose expression references the physical column
+3. Dependents of broken formula columns
+4. Table-level column dependents
+5. Column security rules (beta endpoint, 10.12.0.cl+)
+6. RLS rules and table paths in the table TML that reference the column
+7. Formula variables scoped to the model (26.4.0.cl+)
+8. NLS feedback entries and AI memory rules that reference the column or its formulas
+9. SQL views whose `sql_query` or output columns reference the column
+10. Custom actions scoped to affected objects
+11. Cohort columns anchored to the model column
+12. Scheduled reports on affected Liveboards
+13. Monitor alerts on affected Liveboards / Answers
+
+Diagnostic output goes to **stderr**. A JSON impact summary is written to **stdout**.
+
+```bash
+ts columns impact \
+  --column "Franchise Id" \
+  --physical-col "franchiseID" \
+  --model 252de95b-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
+  --table  6eb11eb8-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
+  --profile my-ts-profile
+
+# Capture the JSON summary while watching stderr progress
+ts columns impact \
+  --column "Revenue" --physical-col "REVENUE" \
+  --model <model-guid> --table <table-guid> \
+  --profile prod > impact.json
+```
+
+| Flag | Description |
+|---|---|
+| `--column` | Column display name in the Model |
+| `--physical-col` | Physical DB column name (`db_column_name`) |
+| `--model` | Model GUID |
+| `--table` | ThoughtSpot Table GUID |
+| `--profile` / `-p` | ThoughtSpot profile name |
+
+---
+
+## `ts dbt` — dbt connection management and TML generation
+
+Wraps ThoughtSpot's native dbt integration (`POST /api/rest/2.0/dbt/*`,
+9.9.0.cl+) for the `ts-convert-from-dbt` skill: create/update a dbt
+connection object, list/delete connections, and generate TML from dbt models
+(first import or resync). All requests are `multipart/form-data` — every
+scalar field is sent as a `(None, value)` tuple in `files=` so `requests`
+always multipart-encodes the body, even when no file is attached.
+
+Two import types, mirroring dbt Cloud vs dbt Core:
+
+| `--import-type` | Use when | Required fields |
+|---|---|---|
+| `DBT_CLOUD` (default) | Source is a dbt Cloud project | `--dbt-url`, `--account-id`, `--project-id`, `--access-token-env` |
+| `ZIP_FILE` | Source is a local dbt Core project | `--file` (a ZIP of the `manifest.json` + `catalog.json` artifacts) |
+
+**Credential handling:** The dbt Cloud API token is never passed as a literal
+flag value (it would be captured verbatim into `permissions.allow`; see
+`.claude/rules/security.md`). Two ways to supply it:
+
+- **`--dbt-cloud-profile <name>`** (preferred): reads the token from the OS
+  credential store (macOS Keychain / Windows Credential Manager / Linux Secret
+  Service) using the `keychain_service` and `keychain_account` stored when the
+  profile was created. Falls back to the profile's `token_env` env var if the
+  credential store is unavailable. Use this when the profile was created with
+  `ts profiles add --platform dbt-cloud`.
+- **`--access-token-env <VAR>`**: reads the token from the named env var
+  (`os.environ[VAR]`). The env var must be exported in the shell before running
+  the command.
+
+### `ts dbt create`
+
+```bash
+# With a dbt-cloud profile (reads token from Keychain — no env var needed)
+ts dbt create \
+  --connection-name "Snowflake Prod" --database-name ANALYTICS \
+  --import-type DBT_CLOUD --dbt-cloud-profile my-test-proj
+```
+
+```bash
+# With an explicit env var (legacy / when no profile is set up)
+export MY_DBT_TOKEN=...  # set in your own shell, never echoed
+ts dbt create \
+  --connection-name "Snowflake Prod" --database-name ANALYTICS \
+  --import-type DBT_CLOUD --dbt-url https://cloud.getdbt.com \
+  --account-id 12345 --project-id 67890 --access-token-env MY_DBT_TOKEN
+```
+
+```bash
+# dbt Core: point --file at the target/ dir that `dbt docs generate` wrote.
+# manifest.json + catalog.json are zipped for you.
+ts dbt create \
+  --connection-name "Snowflake Prod" --database-name ANALYTICS \
+  --import-type ZIP_FILE --file ./my_dbt_project/target
+
+# a ready-made archive still works verbatim
+ts dbt create \
+  --connection-name "Snowflake Prod" --database-name ANALYTICS \
+  --import-type ZIP_FILE --file dbt_artifacts.zip
+```
+
+| Option | Required | Meaning |
+|---|---|---|
+| `--connection-name` | yes | Display name of the EXISTING ThoughtSpot warehouse connection the dbt project builds into (e.g. `se snowflake`) — not a label for the dbt connection object. The response's `connection_id` is that connection's GUID. `ts connections list` shows the candidates. |
+| `--database-name` | yes | Database on that connection that the dbt models are materialised in |
+| `--import-type` | no (default `DBT_CLOUD`) | `DBT_CLOUD` or `ZIP_FILE` |
+| `--dbt-url` / `--account-id` / `--project-id` / `--dbt-env-id` / `--project-name` | `DBT_CLOUD` only | dbt Cloud project coordinates |
+| `--dbt-cloud-profile` | `DBT_CLOUD` only (preferred) | Profile name — reads token from OS credential store |
+| `--access-token-env` | `DBT_CLOUD` only (alternative) | Env var holding the dbt Cloud API token |
+| `--file` | `ZIP_FILE` only | The dbt Core artifacts (see **`--file` accepts a directory** below) |
+
+**Output:** the raw JSON response from `POST /api/rest/2.0/dbt/dbt-connection`.
+
+#### `--file` accepts a directory (v0.133.0)
+
+Every `--file` flag in this group — `create`, `update`, `generate-tml`,
+`generate-sync-tml` — takes any of:
+
+| Passed | Behaviour |
+|---|---|
+| `./project/target` | `manifest.json` + `catalog.json` are zipped into an upload-ready archive |
+| `./project` | same, found via `./target/` |
+| `./project/target/manifest.json` | same, the sibling `catalog.json` is picked up |
+| `artifacts.zip` | used verbatim — the escape hatch for any other layout |
+
+Zipping the two files was previously a documented **user** prerequisite. It is a
+mechanical step over paths dbt already fixes, so the CLI does it.
+
+**A missing `catalog.json` is refused**, naming `dbt docs generate` (which
+writes both) rather than uploading the manifest alone: ThoughtSpot types the
+generated Table columns from the catalog, so a manifest-only archive imports
+*successfully*, with no column types. `dbt compile` writes only the manifest,
+which is the usual reason it is absent. To upload without one anyway, zip it
+yourself and pass the `.zip`.
+
+Archive entries are flat at the root (`manifest.json`, `catalog.json`).
+The generated archive goes to the OS temp dir under a name keyed on the source
+directory, so the three uploads of one session rewrite one file rather than
+leaving three copies of a manifest that can run to hundreds of MB.
+
+### `ts dbt update`
+
+Same fields as `create`, plus `--connection-id` (the
+`dbt_connection_identifier` to update). Accepts `--dbt-cloud-profile` or
+`--access-token-env` to supply the token. Only the fields passed are sent —
+omitted fields are left unchanged server-side.
+
+### `ts dbt list`
+
+`POST /api/rest/2.0/dbt/search` — lists dbt connection objects for the
+current user/org. Output: JSON array of
+`{dbt_connection_identifier, project_name, connection_id, connection_name,
+cdw_database, import_type, author_name}`.
+
+### `ts dbt delete`
+
+```bash
+ts dbt delete --connection-id <dbt_connection_identifier>
+```
+
+`POST /api/rest/2.0/dbt/{dbt_connection_identifier}/delete`.
+
+### `ts dbt generate-tml`
+
+First-import TML generation — generates and imports Table/Worksheet TML for
+the dbt models and tables named in `--model-tables`.
+
+```bash
+ts dbt generate-tml --connection-id <dbt_connection_identifier> \
+  --model-tables '[{"model_name": "orders", "model_path": "models/orders.sql", "tables": ["orders"]}]'
+
+# ZIP_FILE connections re-upload the manifest+catalog on every call:
+ts dbt generate-tml --connection-id <id> --file dbt_artifacts.zip \
+  --model-tables '[...]'
+
+# Select specific worksheets instead of all/none:
+ts dbt generate-tml --connection-id <id> --model-tables '[...]' \
+  --import-worksheets SELECTED --worksheets '["orders_worksheet"]'
+```
+
+| Option | Required | Meaning |
+|---|---|---|
+| `--connection-id` | yes | `dbt_connection_identifier` to generate TML for |
+| `--model-tables` | yes | JSON array of `{model_name, model_path, tables[]}` — the dbt models (and their tables) to import |
+| `--import-worksheets` | no (default `ALL`) | `ALL`, `NONE`, or `SELECTED` |
+| `--worksheets` | `SELECTED` only | JSON array of worksheet names |
+| `--file` | `ZIP_FILE` connections only | Manifest+catalog ZIP |
+| `--include-semantic-report` / `--no-include-semantic-report` | no | Per-model import/skip breakdown — Snowflake and Databricks connections only |
+
+### `ts dbt generate-sync-tml`
+
+Resync TML generation — resynchronizes the existing Table/Model/Worksheet
+TML for the connection against the current state of the dbt project. Same
+options as `generate-tml`.
+
+---
+
+### `ts dbt list-models` — `--model-tables` JSON for a dbt project's directories
+
+Groups every model node in a compiled manifest by parent directory and prints
+the array `ts dbt generate-tml --model-tables` expects.
+
+```bash
+# dbt Cloud: the latest SUCCESSFUL run's manifest, token from the keychain
+ts dbt list-models --dbt-cloud-profile barbershop
+
+# ZIP_FILE / offline: a local manifest, a target/ dir, or a project ZIP.
+# No profile, no token, no network.
+ts dbt list-models --manifest ./target/manifest.json
+ts dbt list-models --manifest ./my_project.zip
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--dbt-cloud-profile` | — | Profile supplying account/project/environment ids and the token |
+| `--manifest` | — | Read a LOCAL `manifest.json`, `target/` dir, or project ZIP instead of downloading |
+| `--alias` / `--no-alias` | `--alias` | Emit each model's `alias` rather than its file name |
+| `--access-token-env` | — | Env var holding the token (alternative to a profile) |
+| `--account-id` / `--project-id` / `--dbt-env-id` / `--dbt-url` | from profile | Overrides |
+| `--no-cache` | false | Re-download even if this run's manifest is already cached |
+
+**Use the alias.** A model that sets `alias:` (or a project-level `+alias` /
+`generate_alias_name` macro) is materialised under that alias, and that is the
+only name ThoughtSpot matches. Emitting the file name instead fails the whole
+`generate-tml` call with a 400 naming tables that "do not exist".
+`--no-alias` exists only for a project whose manifest aliases are wrong.
+
+**Artifact caching.** A run's artifacts are immutable once it finishes, so
+downloads are cached per `(profile, run id, artifact)` in the OS temp dir at
+mode 0600 and shared with `ts dbt inspect` and `ts dbt build-model`. A new dbt
+job has a new run id and therefore a new key — there is no TTL to tune and no
+way to serve a stale artifact. `--no-cache` forces a re-download.
+
+---
+
+### `ts dbt inspect` — what is in a model directory, and Path N or Path Y
+
+Read-only. Reads one directory of a compiled manifest and reports what it
+holds, plus a recommendation on whether ThoughtSpot's own `generate-tml` can
+handle it (Path N) or the Model must be assembled client-side by
+`ts dbt build-model` (Path Y). Calls no ThoughtSpot API and needs no
+ThoughtSpot profile.
+
+```bash
+ts dbt inspect --dbt-cloud-profile barbershop \
+  --model-path models/staging/barbershop
+
+# offline, from a local manifest
+ts dbt inspect --manifest ./target/manifest.json \
+  --model-path models/staging/barbershop
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--model-path` | *(required)* | Directory in the manifest, e.g. `models/staging/barbershop` |
+| `--dbt-cloud-profile` | — | Profile supplying coordinates and the token |
+| `--manifest` | — | Read a LOCAL manifest / `target/` dir / project ZIP instead |
+| `--access-token-env` | — | Env var holding the token |
+| `--no-cache` | false | Re-download even if this run's manifest is cached |
+
+**Output (stdout):** `{models[], ts_join_tests[], rls_models[],
+metricflow_metrics[], recommended_path, reasons[]}`. `recommended_path` is
+`"Y"` whenever the directory holds something only the client-side assembly
+preserves:
+
+| Signal | Why Path N loses it |
+|---|---|
+| `ts_join_*` relationship tests | `generate-tml` emits one Model per FK-source (fact) table, each with its direct targets and shared dimensions duplicated — `path_n_model_count` predicts how many |
+| model-level `ts_rls_rules` | ThoughtSpot's server-side sync does not read the tag — RLS is dropped silently |
+| MetricFlow metrics | only `build-model` translates them into Model formulas |
+
+`reasons[]` names each signal that decided the verdict, so the recommendation
+is auditable rather than a bare letter.
+
+These are read from the **compiled** manifest, not from `schema.yml` — a
+`schema.yml` edit needs a dbt job run (`ts dbt trigger-job`) before it appears.
+
+---
+
+### `ts dbt build-model` — build and import a unified Model TML from dbt Cloud artifacts
+
+Downloads `manifest.json` + `catalog.json` from the latest successful dbt Cloud run,
+reads `ts_join_*` relationship tests to assemble a unified ThoughtSpot Model TML, translates
+MetricFlow metrics (dbt Semantic Layer) into Model formulas, and imports it via the
+ThoughtSpot API.
+
+Use after `ts dbt generate-tml --import-worksheets NONE` has created the Table objects.
+This is Path Y in `ts-convert-from-dbt`: needed when `ts dbt generate-tml` splits a
+multi-fact directory into multiple Models (one per FK-disconnected fact-table component).
+
+Requires a DBT_CLOUD connection — reads token from the OS keychain via
+`--dbt-cloud-profile` (same profile used by `ts dbt list-models`).
+
+```bash
+# Step 1: import Tables only
+ts dbt generate-tml \
+  --connection-id <dbt_connection_identifier> \
+  --model-tables '[{"model_name":"barbershop","model_path":"models/staging/barbershop","tables":["STG_APPOINTMENTS","STG_BARBERS","STG_BS_CUSTOMERS","STG_PRODUCTS","STG_PRODUCT_SALES","STG_SERVICES","STG_TRANSACTIONS"]}]' \
+  --import-worksheets NONE \
+  --profile Embed-1-Prod
+
+# Step 2: build and import unified Model from job artifacts
+ts dbt build-model \
+  --dbt-cloud-profile my-test-proj \
+  --model-path models/staging/barbershop \
+  --model-name BARBERSHOP_OPERATIONS \
+  --profile Embed-1-Prod
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--dbt-cloud-profile` | yes | dbt Cloud profile name — reads account-id, project-id, dbt-env-id, dbt-url, and token from keychain |
+| `--model-path` | yes | Directory path in the manifest (e.g. `models/staging/barbershop`) |
+| `--model-name` | yes | Name for the ThoughtSpot Model (e.g. `BARBERSHOP_OPERATIONS`) |
+| `--pretty-names` | no | Title-case Model column display names and replace `_` with spaces (`APPOINTMENT_DATETIME` → `Appointment Datetime`; `ID`, `URL`, `SKU`, `ZIP` … stay upper-case). `column_id` keeps the physical `TABLE::COLUMN`; formula names are untouched |
+| `--model-guid` | no | Update this existing Model in place — writes `guid:` at the TML root and imports with `create_new: false` — instead of creating a new Model |
+| `--metrics` / `--no-metrics` | no (default on) | Translate the manifest's MetricFlow `semantic_models`/`metrics` (dbt v2 nested spec, dbt Core 1.12+ / Fusion) into Model formulas. `--no-metrics` builds from `ts_*` column meta only |
+| `--profile` / `-p` | no | ThoughtSpot profile name |
+
+**MetricFlow metrics → formulas.** ThoughtSpot cannot query the dbt Semantic Layer, so
+MetricFlow's compiled SQL never runs — what carries over is the *definition*. `build-model`
+(module `ts_cli/dbt_metricflow.py`) reads every metric whose semantic model is backed by a dbt
+model in `--model-path` and emits one Model formula per metric:
+
+| MetricFlow | ThoughtSpot formula |
+|---|---|
+| `type: simple`, `agg` sum / average / min / max / count on a bare column | `sum ( [TABLE::COL] )` etc. |
+| `type: simple`, `agg: count_distinct` | `unique count ( [TABLE::COL] )` |
+| `type: ratio` | `safe_divide ( [formula_num] , [formula_den] )` — formula-id refs, single-pass import |
+| `type: derived`, `expr` over `input_metrics` aliases | aliases replaced by `[formula_id]` refs (`revenue - discounts` → `[formula_Total_Service_Revenue] - [formula_Total_Discounts_Given]`) |
+| cumulative, conversion, any `filter`, `offset_window`/`offset_to_grain`, SQL-expression `expr`, `median`/`percentile`/`sum_boolean` | **reported on stderr as NOT translated** — never dropped silently |
+
+The formula's display name is the metric `label` (falling back to `name`); `description` and
+any `config.meta.ts_synonym` / `ts_format_pattern` / `ts_index_type` / `ts_ai_context` on the
+metric carry onto the formula column. **Precedence:** a metric whose label matches an existing
+`ts_formula` column (case-insensitive) supersedes it — the `ts_formula` entry is dropped and
+the metric-derived formula takes its place, so a project can migrate from `ts_formula` strings
+to real metrics one metric at a time. Derived metrics over ratios resolve in a second pass.
+**Joins from entities.** `relationships` tests + `ts_join_*` stay authoritative (the only
+place join type / name live). Only for a table pair *no* such test covers does `build-model`
+derive a join from MetricFlow entities — a `foreign` entity on one semantic model matching a
+`primary`/`unique` entity on another becomes `LEFT_OUTER` / `MANY_TO_ONE` (the one join shape
+MetricFlow itself can express), named `<src>_to_<tgt>`, reported on stderr. Entities whose
+`expr` is a SQL expression, or whose primary is ambiguous, are skipped. The time spine model
+MetricFlow requires is never imported (it sits outside `--model-path`).
+
+**Untagged columns.** A column with no `ts_*` meta at all is still included in the Model: its
+type is inferred from `catalog.json` (numeric warehouse types → `MEASURE` / `SUM`, everything
+else → `ATTRIBUTE`), except that a MetricFlow entity or dimension column, or a column whose
+name ends in `_ID` / `_KEY` / `_CODE` / `_NUMBER` / `_NUM` / `_NO`, is always an `ATTRIBUTE`
+(an ID key is numeric but not a measure). The inferred columns are listed on stderr;
+a `ts_column_type` tag always wins. If an inferred column's display name collides with a
+metric-derived formula (the docs' own `TRANSACTION_TOTAL` column vs `transaction_total` metric),
+the column is renamed with the table prefix (`Fact Barbershop Transactions Transaction Total`)
+and reported — declare the column with a `ts_display_name` to pick the name yourself. Declared
+columns still fail fast on collisions. Fully-tagged projects (every column carries `ts_*` meta)
+are unaffected.
+
+**Excluding columns.** `ts_column_exclude: yes` on a column's `config.meta` leaves it out of
+the Model's `columns[]` altogether (the Table still has it — Tables are generated server-side).
+Works for physical and `ts_formula` columns; excluded columns are listed on stderr. Unlike
+ThoughtSpot's `ts_hidden` (column stays in the Model, hidden in the UI) an excluded column
+cannot be searched or charted from the Model at all. `ts dbt-export diff/sync` treat such
+columns as intentionally absent — never "removed", never auto-deleted.
+
+**Display names.** By default a Model column's display name is the warehouse column name
+verbatim. Two ways to change that: a `ts_display_name` column meta tag in schema.yml (always
+wins, per column — `ts_display_name: "Appt. Date/Time"`), or `--pretty-names` for everything
+else. Re-running with `--model-guid <existing>` swaps the names on the Model already in use
+without changing its GUID.
+
+**Same-named Tables / `fqn` pinning.** Before importing, `build-model` resolves every
+`model_tables[]` name to a GUID (`metadata/search`, type `LOGICAL_TABLE`) and writes it as
+`fqn`. A name-only reference imports fine in a clean Org but fails with error 14502
+*"Found multiple data sources with same name"* as soon as the Org holds a second Table with
+that name — typical when the raw warehouse tables were registered in ThoughtSpot before the
+dbt views. When several Tables share a name, the candidates' TML is exported and the one whose
+`db` / `schema` / `db_table` match the manifest's `database` / `schema` / `alias` for that model
+is picked (reported on stderr); if none or several match, the command exits listing the
+candidate GUIDs and their locations so you can delete or rename the stale ones. The same GUID
+is used for the `ts_rls_rules` Table export, which otherwise 409s (`DUPLICATE_OBJECT_FOUND`)
+on a name identifier.
+
+**Column properties read from the manifest** (from model node `columns[].config.meta` or `columns[].meta`):
+`ts_column_type` → `column_type`, `ts_aggregation` → `aggregation`, `ts_synonym` → `synonyms`,
+`ts_format_pattern` → `format_pattern`, `ts_index_type` → `index_type`, `ts_ai_context` → `ai_context`.
+
+**Note:** `description` and `ts_ai_context` are populated from the compiled manifest. If absent in
+the imported Model, trigger a new dbt Cloud job run to compile the latest schema.yml changes, then
+re-run `ts dbt build-model`.
+
+A `WARNING` status about "misconfigured suggestion settings" in the response is expected for columns
+without explicit `ts_index_type` — the Model imports correctly.
+
+### `ts dbt trigger-job`
+
+Trigger a dbt Cloud job run and wait for it to complete. Use before `ts dbt generate-tml` or
+`ts dbt build-model` to ensure the latest `schema.yml` changes (`description`, `ts_ai_context`,
+and other `meta:` fields) are compiled into the manifest and catalog artifacts.
+
+**List available jobs** (no `--job-id` — prints JSON with `id`, `name`, `description`, `last_successful_run` and exits):
+
+```bash
+ts dbt trigger-job --dbt-cloud-profile {profile_name}
+```
+
+**Trigger a specific job and wait for completion:**
+
+```bash
+ts dbt trigger-job --dbt-cloud-profile {profile_name} --job-id {job_id}
+```
+
+Returns JSON with `run_id`, `job_id`, `status`, and `finished_at` on success. Exits non-zero
+if the run ends in `Error` or `Cancelled` — and first prints, on stderr, the name of the first
+failed run step plus the last 40 non-empty lines of its log (ANSI codes and `Sending event:`
+tracking noise stripped), so a parse-time failure such as MetricFlow's `Invalid name …` /
+`Semantic Manifest validation failed` is readable without opening dbt Cloud.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--dbt-cloud-profile` | required | Profile name (reads account-id, project-id, dbt-url, token from keychain) |
+| `--job-id` | — | Job ID to trigger; omit to list available jobs |
+| `--wait` / `--no-wait` | `--wait` | Wait for the run to finish before returning |
+| `--poll-interval` | `15` | Seconds between status polls |
+| `--cause` | `triggered by ts-cli` | Human-readable cause string attached to the run |
+
+---
+
+## `ts dbt-export` — ThoughtSpot Model → dbt project scaffold
+
+The REVERSE direction from `ts dbt` above: generates dbt project files from an
+exported ThoughtSpot Model, for `ts-convert-to-dbt`. Emit-only offline file
+transform (the `ts snowflake build-sv` precedent) — no ThoughtSpot or dbt
+connection is used or needed. `build` scaffolds a brand-new project (Case A);
+`diff`/`sync` update an existing dbt project in place (Case B, see below).
+
+### `ts dbt-export build`
+
+Emits, per ThoughtSpot `model_table`: one staging dbt model
+(`select * from {{ source(...) }}`) per distinct physical table, a thin
+passthrough model for each role-play alias of that table, plus TWO
+complementary YAML artifacts:
+
+- **`models/schema.yml`** (primary) — plain dbt `columns:`/`data_tests:` with
+  ThoughtSpot's own `ts_*` metadata tags under `meta:` (`ts_column_type`,
+  `ts_aggregation`, `ts_synonym`, `ts_format_pattern`, and others on columns;
+  `ts_join_cardinality`/`ts_join_type`/`ts_join_name` on a `relationships:`
+  test). This is what a `dbt run`/`dbt compile` + `dbt docs generate` step
+  compiles into `manifest.json`/`catalog.json` — the actual artifact
+  ThoughtSpot's `ZIP_FILE` import reads (`file_content` on `dbtGenerateTml`).
+  Uses current dbt config syntax (`config: {meta: ...}`, `data_tests:` +
+  `arguments: {to, field}`) rather than the older bare `meta:`/`tests:`
+  shape — live-verified against `dbt-fusion parse` and a compiled
+  `manifest.json` inspection (2026-08-27), and against **dbt-core 1.12.4**
+  (2026-09-10): a generated project parses clean and its manifest carries the
+  `alias`, every `ts_*` column tag and every `ts_join_*` test.
+- **`models/semantic_models.yml`** (secondary) — the legacy top-level
+  `semantic_models:`/`metrics:` MetricFlow spec (entities from the Model's
+  joins, dimensions, measures), for ThoughtSpot's separate MetricFlow-import
+  feature (documented only through "dbt 1.7 and earlier"). **Opt in with
+  `--semantic-models`.** Off by default: with a time dimension present,
+  dbt-core fails to parse the project unless a `metricflow_time_spine` model
+  exists and none is generated, and no ThoughtSpot importer is known to read
+  the file.
+
+Formula (calculated) columns are not translated in either artifact — dbt's
+metric taxonomy (simple/ratio/cumulative/derived) needs its own translation
+reference, not yet written. Every formula column is reported in
+`skipped_formulas`. Full details and open questions:
+`agents/cli/ts-convert-to-dbt/references/open-items.md`.
+
+This command generates a dbt **project** only — it does not run `dbt build`,
+zip anything, or call the dbt Cloud API. Getting the result back into
+ThoughtSpot is a separate, connection-type-specific hand-off (see
+open-items.md #7): `ZIP_FILE` connections need a local `dbt run`/`dbt
+compile` + `dbt docs generate` + zip step before `ts dbt create --import-type
+ZIP_FILE`; `DBT_CLOUD` connections need the generated files committed into
+the dbt-Cloud-connected repo and a dbt Cloud job run, with no local artifact
+file at all.
+
+`ts tml export` has no `--output-dir` — it always prints its `--parse` array
+to stdout (per the output convention above). Split that array into the
+per-file shape this command reads before calling it:
+
+```bash
+ts tml export {model_guid} --parse --associated > export.json
+python3 -c "
+import json, pathlib
+items = json.load(open('export.json'))
+out = pathlib.Path('export'); out.mkdir(exist_ok=True)
+for it in items:
+    name = 'model.json' if it['type'] == 'model' else f\"table_{it['tml']['table']['name']}.json\"
+    (out / name).write_text(json.dumps(it['tml']))
+"
+ts dbt-export build --model export/model.json --tables-dir export/ \
+  --project-name sales --source-name warehouse --output-dir ./sales_dbt
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--model` | *(required)* | Path to Model TML JSON (from `ts tml export --parse`) |
+| `--tables-dir` | *(required)* | Directory with Table TML JSON files |
+| `--project-name` | *(required)* | dbt project name (`dbt_project.yml` `name:`) |
+| `--source-name` | *(required)* | dbt source name for the generated `sources.yml` |
+| `--output-dir` | *(required)* | Directory for the generated dbt project files |
+
+A Model spanning more than one (database, schema) pair gets one `sources:`
+entry per pair (`<source-name>_1`, `<source-name>_2`, ...) — dbt puts
+`database:`/`schema:` at the source level, not per table.
+
+**Output (stdout):** JSON summary — `{project_name, output_dir,
+files_written, tables, dimensions, time_dimensions, metrics,
+skipped_formulas, skipped_composite_joins, unmapped_properties}`.
+Diagnostics (skipped formulas/joins, unmapped properties) on stderr.
+
+### `ts dbt-export diff` / `ts dbt-export sync` — Case B (update an existing project)
+
+Mirrors `ts snowflake diff`'s "Mode C" pattern rather than a general YAML
+merge tool: regenerate the project in memory from the current Model +
+Table TML, then compare it against what's already on disk at
+`--project-dir`. Diffing is scoped to the PRIMARY artifact only
+(`models/schema.yml` — `ts_*` meta tags + `relationships` tests);
+`models/semantic_models.yml` is not diffed (see
+`agents/cli/ts-convert-to-dbt/references/open-items.md` #4).
+
+- **`diff`** — read-only. NEVER writes anything, anywhere. Prints a
+  change-set to stdout: `new_tables`/`removed_tables` (dbt models the Model
+  would/wouldn't produce vs. what's on disk, detected from `.sql` file
+  presence — a table can have zero classified columns/joins and so have no
+  `schema.yml` entry at all), `changed_tables` (per-column `ts_*` meta tag /
+  `description` / relationships-test differences, for models that exist on
+  both sides — keys `new_columns`, `removed_columns`, `modified_meta`,
+  `modified_description`, `new_relationship`, `removed_relationship`,
+  `modified_relationship`), and `new_source_tables`/`removed_source_tables`
+  (the same comparison for `models/staging/sources.yml`'s table entries).
+  `modified_description` lists exactly what `sync --update-metadata` would
+  write: a non-empty description that differs from the one on disk. A
+  description cleared in ThoughtSpot is neither reported nor applied — the
+  dbt text is kept.
+- **Existing names are adopted, not overwritten.** Case A names staging
+  models `stg_<table>` by dbt convention, but an existing project may have
+  renamed them. `diff`/`sync` therefore pair each Model table with the on-disk
+  model that selects from its warehouse table — `{{ source('<src>', 'APPOINTMENTS') }}`
+  → `appointments.sql` — and reuse that model's name for the regenerated
+  `.sql`, `schema.yml` block and `ref()` targets. The pairing is reported as
+  `adopted_names` (`{"APPOINTMENTS": "appointments", ...}`) in the change-set.
+  A table selected by two different models is ambiguous and falls back to the
+  default name; role-play aliases (`dim_<alias>`) are never renamed.
+  When the ThoughtSpot Tables were themselves created **from** dbt
+  (`ts-convert-from-dbt`), they point at the models' *output* relations
+  (`DL_TEST.DBT_DLEE_PROD.BARBERS`), not at any source — those are matched to
+  the model of the same name as the Table's `db_table` (`barbers`), listed
+  under `dbt_output_tables`, and excluded from the `sources.yml` comparison
+  (the project's same-named source entry is the model's input, not the Table).
+  `removed_tables` is scoped to the directories the adopted models live in
+  (`scoped_to`) so unrelated marts/sources in a shared project aren't reported.
+- **`sync`** — writes ONLY what's purely additive: new tables' `.sql`
+  files, their `models/schema.yml` model blocks (appended — creates
+  schema.yml if missing), and their `models/staging/sources.yml` table
+  entries (merged into the matching database/schema source block, or a new
+  source block if none matches). Anything touching a table that already
+  exists (`changed_tables`, `removed_tables`, `removed_source_tables`) is
+  **never** auto-applied — it's printed in the same change-set shape for
+  manual review, exactly like `diff`'s output.
+- **`sync --update-metadata`** — additionally applies `changed_tables` to models
+  that already exist: the `ts_*` keys this generator OWNS in column and model
+  `config.meta`, column `description` (when the fresh one is non-empty),
+  new columns appended, relationship tests added/replaced, and `removed_columns`
+  deleted only when the entry is entirely `ts_*`-originated (a description,
+  non-`ts_*` meta key or custom test keeps it for manual review). Run
+  `ts columns impact` before committing any auto-deleted column.
+  `removed_tables`/`removed_source_tables` are still never applied.
+
+**Tag coverage.** `build` emits, and both `build-model` paths read
+back, **all 13 column tags ThoughtSpot documents**
+(docs.thoughtspot.com/cloud/26.9.0.cl/dbt-integration-metadata-tags):
+`ts_column_type`, `ts_aggregation`, `ts_synonym`, `ts_format_pattern`,
+`ts_index_type`, `ts_index_priority`, `ts_attr_dim`, `ts_additive`,
+`ts_spotiq_pref`, `ts_hidden`, `ts_calendar_type`, `ts_currency_type`,
+`ts_geo_config` — plus the three join tags and the ts-cli extensions
+`ts_ai_context`, `ts_display_name`, `ts_formula` and model-level
+`ts_rls_rules`. `ts_currency_type` and `ts_geo_config` are **nested blocks**
+with a `type:` discriminator, not flat values. `tml_properties_from_ts_meta`
+is the single inverse used by every read path, and
+`TestFullPropertyRoundTrip` asserts TS → schema.yml → TS equality
+property-for-property, including all four geo roles and all three currency
+forms.
+
+Properties with no `ts_*` tag at all (`value_casing`, `custom_order`,
+`default_date_bucket`, `search_iq_preferred`) and the instance-local
+custom-map geo role are **reported** in `unmapped_properties`, never dropped
+in silence.
+
+**The `ts_*` ownership boundary.** `--update-metadata` clears and
+rewrites only the tags `build` can itself emit — declared as
+`GENERATED_COLUMN_META_KEYS` / `GENERATED_MODEL_META_KEYS` in
+`dbt_build_export.py`. Every other key is preserved: non-`ts_*` keys another
+tool owns, `ts_column_exclude` (hand-authored by definition), and any tag a
+ThoughtSpot release newer than this build adds. Those are reported in
+`preserved_meta` and on stderr rather than silently kept, and `diff` excludes
+them from `modified_meta` so it reports exactly what `sync` applies. An earlier
+revision of this work cleared the whole `ts_*` namespace, deleting hand-authored
+tags with no diagnostic. `TestGeneratedMetaKeyBoundary` fails if the declared
+set and the emitters drift apart in either direction.
+
+```bash
+ts dbt-export diff --model export/model.json --tables-dir export/ \
+  --project-name sales --source-name warehouse --project-dir ./sales_dbt
+ts dbt-export sync --model export/model.json --tables-dir export/ \
+  --project-name sales --source-name warehouse --project-dir ./sales_dbt
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--model` | *(required)* | Path to Model TML JSON (from `ts tml export --parse`) |
+| `--tables-dir` | *(required)* | Directory with Table TML JSON files |
+| `--project-name` | *(required)* | dbt project name (must match the existing project) |
+| `--source-name` | *(required)* | dbt source name (must match the existing `sources.yml`) |
+| `--project-dir` | *(required)* | Path to the EXISTING dbt project to compare against |
+| `--update-metadata` | off | `sync` only — also update `ts_*` meta, descriptions and relationship tests on existing models (see above) |
+| `--dry-run` | off | `sync` only — compute and print the change-set, then return **before any write** |
+| `--format` | `json` | `json` (the scripting contract) or `md` (the same change-set as markdown) |
+
+**`--dry-run` and `--format md` (v0.133.0).** `sync --dry-run` returns before
+the first write — including under `--update-metadata`, the flag that rewrites
+existing files — and prints exactly what `diff` prints. Both go through one
+renderer over one change-set (`build_case_b_report`), so the plan you review
+is the plan that gets applied; they cannot describe it differently.
+
+`--format md` renders the same data as markdown, leading with the two
+`removed_*` lists because those are the only lines that need a human decision
+— everything else is either applied or reported for information.
+
+**CAVEAT:** `sync`'s `schema.yml`/`sources.yml` writes are a full YAML
+parse-then-dump round-trip (the same mechanism `build` already uses to
+generate these files from scratch) — appending reformats the WHOLE file and
+does not preserve comments. Only run `sync` against a version-controlled
+project and review `git diff` before committing.
+
+**Output (stdout):** the change-set JSON — `{new_tables, removed_tables,
+changed_tables, new_source_tables, removed_source_tables}` (`sync` adds a
+`written` field listing what it wrote, and a `preserved_meta` field —
+`{"<model>.<column>": [unmanaged ts_* keys]}` — whenever `--update-metadata`
+left a hand-authored tag alone). Diagnostic counts on stderr.
+
+---
+
+### `ts dbt-export build-model` — assemble a ThoughtSpot Model TML from schema.yml
+
+Reads `ts_*` column meta tags and `ts_join_*` relationship-test metadata from a
+dbt `schema.yml` and assembles a single unified ThoughtSpot Model TML. Useful when
+`ts dbt generate-tml` splits a multi-fact ThoughtSpot model into separate models
+(one per connected component of the dbt FK graph — see
+`ts-convert-to-dbt/references/open-items.md` #11).
+
+Emit-only offline transform: no ThoughtSpot profile or dbt connection is needed.
+Pipe the output to `ts tml import --profile {name}` to import the assembled model.
+
+```bash
+ts dbt-export build-model \
+  --schema-yml models/staging/barbershop/schema.yml \
+  --model-name BARBERSHOP_OPERATIONS \
+  | ts tml import --profile Embed-1-Prod
+```
+
+Or write to a file for review first:
+
+```bash
+ts dbt-export build-model \
+  --schema-yml models/staging/barbershop/schema.yml \
+  --model-name BARBERSHOP_OPERATIONS \
+  --output ~/barbershop_model.json
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--schema-yml` | *(required)* | Path to `schema.yml` with `ts_*` meta tags and `ts_join_*` relationship tests |
+| `--model-name` | *(required)* | Name for the ThoughtSpot Model (`name:` in TML) |
+| `--output` / `-o` | stdout | Write TML JSON to this file instead of stdout |
+| `--rls-out` | — | Directory for per-Table `rls_rules` JSON (RLS lives on the Table TML, so this Model-only command writes it for manual merge) |
+| `--model-guid` | — | Update this existing Model in place: sets `guid` at the document root and, with `--import`, imports with `create_new=false` |
+| `--import` | off | Import the assembled TML rather than only emitting it. Requires `--profile` |
+| `--profile` / `-p` | `TS_PROFILE` | ThoughtSpot profile — only used by `--import` |
+
+**`--model-guid` / `--import` (v0.133.0).** Before these, updating an existing
+Model meant emitting the TML, hand-inserting `"guid": "..."` at the document
+root, then piping to `ts tml import` — a manual edit between two commands
+where getting it wrong, or skipping it, does not fail. It silently creates a
+**second Model** beside the one you meant to update. `--model-guid` places the
+guid at the root (the one placement ThoughtSpot accepts — see
+`thoughtspot-model-tml.md`) for both the emitted file and the import, and
+`--import` keeps the guid-bearing document and `create_new=false` in one call.
+Importing without `--model-guid` warns on stderr that it is creating a new
+Model.
+
+**Output (stdout):** ThoughtSpot Model TML as JSON — `{"model": {...}}` with
+`model_tables[]` (join graph from `ts_join_*` tests) and `columns[]` (column
+properties from `ts_*` meta tags), plus `guid` at the root when `--model-guid`
+is given. With `--import`, stdout is the import result instead —
+`{status, guid, model_name, created_new, error}`.
 
 ---
 
