@@ -217,7 +217,7 @@ def parse_twb(twb_path: str | Path) -> dict:
         seen_ds.add(ds_name)
 
         columns = _extract_columns(ds, tables)
-        joins = _extract_joins(ds)
+        joins, join_warnings = _extract_joins(ds)
         # Modern Tableau stores joins as logical relationships (the "noodle"), not physical
         # <relation join=...>; pick those up too, or a multi-table model imports with no join
         # and ThoughtSpot rejects it. See reference-tableau-model-discovery-algorithm.
@@ -232,6 +232,10 @@ def parse_twb(twb_path: str | Path) -> dict:
             "sql_views": sql_views,
             "columns": columns,
             "joins": joins,
+            # Non-fatal: comparison operators _extract_joins couldn't translate
+            # (see _JOIN_OPERATORS) — surfaced to the caller instead of silently
+            # dropped, so build-model can fold them into its warnings/report.
+            "join_warnings": join_warnings,
             "calculated_fields": calcs,
             "calc_map": calc_map,
             "col_table_map": col_table_map,
@@ -608,36 +612,126 @@ def _extract_columns(ds: ET.Element, tables: list[dict]) -> list[dict]:
     return columns
 
 
-def _extract_joins(ds: ET.Element) -> list[dict]:
-    """Extract join definitions from a datasource."""
+def _join_key_column(op: str) -> str:
+    """Extract the bare column name from a join-clause expression's ``op``.
+
+    Tableau writes the operand either bare (``[Col]``) or table-qualified
+    (``[Table].[Col]``) depending on how the join was authored — a Custom SQL
+    Query join side (``ON [Custom SQL Query].[Sales Person] = ...``) uses the
+    qualified form. Callers (``_sql_view_model_tables`` / the model_tables
+    join assembly in ``model_builder.py``) prepend their own ``table::``
+    qualifier from ``left_table``/``right_table``, so only the bare column
+    name belongs in ``keys[].left``/``right`` — a qualified string surviving
+    a naive ``.strip("[]")`` (which only strips the outer brackets) leaves
+    the internal ``].[`` fragment in the name and corrupts the emitted join
+    ``on:`` clause.
+    """
+    stripped = op.strip("[]")
+    if "].[" in stripped:
+        return stripped.rsplit("].[", 1)[-1]
+    return stripped
+
+
+# Comparison operators a join clause's wrapper node may carry, mapped to the
+# symbol ThoughtSpot's `on:` clause expects. `=`/`>=`/`>`/`<`/`<=` are
+# documented for Model/Table `joins[].on` (range/ASOF joins — see
+# thoughtspot-model-tml.md "Range / Inequality Joins"). `!=` is documented for
+# `filters[].oper`/`rls_rules[].expr`, not specifically confirmed for a join
+# `on:` clause — included anyway; flag for live verification before relying
+# on it. Tableau writes not-equal as `<>`; ThoughtSpot's symbol is `!=`, so
+# that one entry translates rather than passing through unchanged. Any
+# operator outside this map is left alone rather than guessed at — skipped
+# and warned about.
+_JOIN_OPERATORS = {"=": "=", ">=": ">=", ">": ">", "<": "<", "<=": "<=", "!=": "!=", "<>": "!="}
+
+
+def _collect_comparisons(node: ET.Element) -> list[tuple[ET.Element, ET.Element, str]]:
+    """Recursively collect (left, right, op) comparison triples from a join clause.
+      handle composite-key joins
+    """
+    children = [c for c in node if c.tag == "expression"]
+    op = node.get("op", "") if node.tag == "expression" else ""
+    if op.upper() == "AND" and children:
+        out: list[tuple[ET.Element, ET.Element, str]] = []
+        for child in children:
+            out.extend(_collect_comparisons(child))
+        return out
+    if len(children) == 2:
+        # Hand the pair through even when one side isn't a plain leaf (e.g. a
+        # function call like UPPER([Col])) — the caller's bracket-prefix check
+        # is what recognizes and warns about that shape (SCAL-330635 review
+        # comment 3); a stricter "both must be leaves" match here caused it to
+        # vanish before ever reaching that check, with no warning at all.
+        return [(children[0], children[1], op or "=")]
+    if len(children) == 1:
+        return _collect_comparisons(children[0])
+    return []
+
+
+def _extract_joins(ds: ET.Element) -> tuple[list[dict], list[str]]:
+    """Extract join definitions from a datasource.
+
+    Returns (joins, warnings). A composite key (`A=B AND C=D`) is preserved in
+    full via `_collect_comparisons` — never truncated to its first condition.
+    If ANY comparison in a clause's group uses an operator outside
+    `_JOIN_OPERATORS`, the entire clause is skipped and a warning is emitted —
+    a partial composite key is exactly as dangerous as a missing one.
+    """
     joins = []
+    warnings: list[str] = []
     for rel in ds.findall(".//relation[@join]"):
         join_type = rel.get("join", "inner").upper()
         clauses = rel.findall(".//clause")
+        # A join side can be a Custom SQL relation (type='text'), not just a
+        # physical table (type='table') — e.g. a Custom SQL Query joined to a
+        # dimension table. Both are valid, named join sides. Resolved up front
+        # (not just when join_keys is non-empty) so a skip warning can name them.
+        children = [c for c in rel.findall("./relation") if c.get("type") in ("table", "text")]
+        left_table = right_table = ""
+        if len(children) >= 2:
+            left_table = children[0].get("name", "") or _strip_brackets(children[0].get("table", "")).split(".")[-1]
+            right_table = children[1].get("name", "") or _strip_brackets(children[1].get("table", "")).split(".")[-1]
         join_keys = []
         for clause in clauses:
-            exprs = clause.findall(".//expression")
-            if len(exprs) >= 2:
-                left = exprs[0].get("op", "")
-                right = exprs[1].get("op", "")
-                if left.startswith("[") and right.startswith("["):
-                    join_keys.append({
-                        "left": left.strip("[]"),
-                        "right": right.strip("[]"),
-                    })
+            comparisons = _collect_comparisons(clause)
+            clause_keys = []
+            for left_expr, right_expr, raw_op in comparisons:
+                left = left_expr.get("op", "")
+                right = right_expr.get("op", "")
+                if not (left.startswith("[") and right.startswith("[")):
+                    bad = left if not left.startswith("[") else right
+                    composite_note = " (composite key)" if len(comparisons) > 1 else ""
+                    warnings.append(
+                        f"join clause between {left_table!r} and {right_table!r} has an "
+                        f"unsupported operand {bad!r} — not a plain column reference "
+                        f"(function call or unrecognized expression){composite_note}, skipped"
+                    )
+                    clause_keys = None
+                    break
+                if raw_op not in _JOIN_OPERATORS:
+                    composite_note = " (composite key)" if len(comparisons) > 1 else ""
+                    warnings.append(
+                        f"join clause between {left_table!r} and {right_table!r} uses "
+                        f"unsupported comparison operator {raw_op!r}{composite_note} — "
+                        f"skipped"
+                    )
+                    clause_keys = None
+                    break
+                clause_keys.append({
+                    "left": _join_key_column(left),
+                    "right": _join_key_column(right),
+                    "op": _JOIN_OPERATORS[raw_op],
+                })
+            if clause_keys:
+                join_keys.extend(clause_keys)
         if join_keys:
-            children = rel.findall("./relation[@type='table']")
-            left_table = right_table = ""
-            if len(children) >= 2:
-                left_table = children[0].get("name", "") or _strip_brackets(children[0].get("table", "")).split(".")[-1]
-                right_table = children[1].get("name", "") or _strip_brackets(children[1].get("table", "")).split(".")[-1]
             joins.append({
                 "type": join_type,
                 "left_table": left_table,
                 "right_table": right_table,
                 "keys": join_keys,
             })
-    return joins
+    return joins, warnings
 
 
 def _detail_id_count(view: dict) -> int:
