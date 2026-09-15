@@ -1,0 +1,367 @@
+# ts-object-calendar-builder — Custom Calendar Builder (Design)
+
+**Status:** design approved, implementation not started
+**Skill:** `agents/cli/ts-object-calendar-builder/`
+**CLI surface:** `ts calendar`
+**Date:** 2026-09-15
+
+---
+
+## Problem
+
+ThoughtSpot custom calendars (`/api/rest/2.0/calendars/*`, 10.12.0.cl / 26.3.0.sw or
+later) can be created two ways: `FROM_INPUT_PARAMS`, where ThoughtSpot generates the
+calendar itself, or `FROM_EXISTING_TABLE`, where a warehouse table matching a required
+schema is registered as-is.
+
+The native `FROM_INPUT_PARAMS` path is insufficient for real retail and fiscal
+calendars. Verified live against `semantic-sql`
+(`nebula-ts-semview.thoughtspotdev.cloud`) on 2026-09-15:
+
+1. **It never inserts a leap week.** Every generated fiscal year is exactly 364 days.
+   A 4-4-5 / 4-5-4 / 5-4-4 year is 52 weeks, so the calendar drifts against the
+   Gregorian year at ~1.25 days/year and cannot re-anchor. Generating 4-5-4 /
+   February / Monday across 2015–2026 and diffing against the known-good `LULULEMON`
+   calendar in `CUSTOM_CALENDAR.PUBLIC`:
+
+   | Label | API start | Days | LULULEMON start | |
+   |---|---|---|---|---|
+   | FY2015 | 2015-02-02 | 364 | 2015-02-02 | match |
+   | FY2016 | 2016-02-01 | 364 | 2016-02-01 | match |
+   | FY2017 | 2017-01-30 | 364 | 2017-01-30 | match |
+   | FY2018 | 2018-01-29 | 364 | 2018-01-29 | match |
+   | FY2019 | 2019-01-28 | 364 | 2019-02-04 | **diverges** |
+   | FY2022 | 2022-01-24 | 364 | 2022-01-31 | drift 7d |
+   | FY2025 | 2025-01-20 | 364 | 2025-02-03 | drift 14d |
+
+   The divergence at FY2019 is exactly the 53rd week LULULEMON inserted in 2018.
+
+   **Testing trap, recorded deliberately:** FY2015–FY2018 match exactly. Any test
+   range shorter than ~4 years makes the native API look correct. This is why the
+   oracle test below spans 11 years, and why this paragraph exists.
+
+2. **`monthly` carries the fiscal year, not the calendar year.** For a December
+   offset starting 2024-12-01, ThoughtSpot emits `monthly = "January 2024"` for rows
+   dated 2025-01-01..2025-01-31, and `"November 2024"` for rows dated
+   2025-11-01..2025-11-30. Any month falling in the fiscal year's second calendar
+   year is mislabelled.
+
+What the native API *does* do correctly, and which this design must preserve rather
+than reimplement badly:
+
+- It snaps `start_date` forward to the next `start_day_of_week`. Requested
+  `01/01/2027` (Friday) with `Monday` returned `01/04/2027`; requested `02/01/2028`
+  (Tuesday) returned `2028-02-07`, the first Monday of February.
+- It numbers the fiscal year by the calendar year it **starts** in (verified for both
+  July and December offsets).
+- It emits the 30-column extended schema with `MM/DD/YYYY` dates and `"true"`/`"false"`
+  for `is_weekend`.
+
+So the native API is exactly equivalent to one of the three anchor rules below
+(`fixed52`), and is a legitimate fast path for that rule only.
+
+---
+
+## Scope
+
+Generate a custom calendar table, load it to Snowflake, and register it with
+ThoughtSpot — with the native API used as a fast path when, and only when, the
+requested calendar is natively expressible.
+
+Primary output is a **warehouse-neutral CSV**. Snowflake is the supported load and
+registration path. Databricks is out of scope for v1.
+
+---
+
+## Architecture
+
+Pure core, thin wrappers. Three entry points over one implementation:
+
+- **Python:** `from ts_cli.custom_calendar import ...` — importable and scriptable
+  directly, no CLI required.
+- **CLI:** `ts calendar <cmd>` — a thin Typer wrapper.
+- **Skill:** `agents/cli/ts-object-calendar-builder/SKILL.md` orchestrates the CLI.
+
+The pure core is what makes the oracle tests runnable with no live cluster.
+
+### Package layout — `tools/ts-cli/ts_cli/custom_calendar/`
+
+Named `custom_calendar`, **not** `calendar` — `calendar` shadows the stdlib module.
+
+| Module | Responsibility |
+|---|---|
+| `spec.py` | `CalendarSpec`, `LabelSpec`, `CalendarSet` dataclasses + validation |
+| `anchors.py` | The three anchor rules, each `(year) -> date` |
+| `grid.py` | Spec → year/quarter/period/week skeleton. Derives 52 vs 53 weeks, distributes the pattern, places the leap week |
+| `labels.py` | Skeleton → display labels (month/day names, year basis, prefixes, formats) |
+| `rows.py` | Skeleton + labels → the 10- or 30-column rows |
+| `emit.py` | Rows → CSV, Snowflake DDL, or a union view/table for the RLS case |
+
+Split this way because `check_file_size.py` warns past 500 lines and fails past 1000,
+and because the anchor/grid arithmetic is where the bugs live — it must be testable
+without the row expansion.
+
+### CLI subcommands — `tools/ts-cli/ts_cli/commands/calendars.py`, registered as `ts calendar`
+
+| Command | Network | Purpose |
+|---|---|---|
+| `preview` | no | Print the year/period boundary table — which years are 53 weeks and which period is long — so the shape is confirmed before generating thousands of rows |
+| `generate` | no | Write the CSV; `--ddl` also emits Snowflake DDL; `--set` emits an RLS union |
+| `validate` | no | Check a CSV or live table against the column contract and the internal invariants below |
+| `register` | yes | `createCalendar` via `FROM_EXISTING_TABLE`; `--native` uses `FROM_INPUT_PARAMS` |
+| `search` | yes | `POST /calendars/search` to verify what actually landed |
+
+Loading reuses the existing `ts load snowflake`. No new loader.
+
+`--native` **must refuse** any spec whose anchor rule is not `fixed52`, rather than
+silently emitting a drifting calendar. This is the single most important safety rail
+in the design.
+
+---
+
+## Anchor rules
+
+A fiscal year runs `anchor(y) .. anchor(y+1) - 1`. Because every anchor falls on the
+same weekday, that span is always a whole number of weeks, so **52-vs-53 is derived,
+never configured**. Only the leap week's *placement* is an option.
+
+| Rule | Definition | Implemented by |
+|---|---|---|
+| `nearest` | Chosen weekday nearest the 1st of the start month. NRF/retail standard | Us — reproduces LULULEMON |
+| `first` | First chosen weekday on or after the 1st of the start month | Us |
+| `fixed52` | Anchor once, then +364 days forever | Us, and **identical to the native API** |
+
+`nearest` verified by hand against all twelve LULULEMON year boundaries including both
+371-day years (2018, 2024). `fixed52` verified against the live API output above.
+
+### Leap-week placement
+
+`--leap-week-period`, default `last`:
+
+| Value | Effect |
+|---|---|
+| `last` (default) | Final period of the fiscal year absorbs the extra week. 4-5-4 → Q4 becomes 4-5-5; 4-4-5 → Q4 becomes 4-4-6 |
+| `1`–`12` | That period ordinal absorbs it (`1`–`13` under 13-period labelling) |
+
+`last` is not a guess: in both LULULEMON 53-week years (2018, 2024) the extra week
+lands on JAN, the final period, turning Q4 from 4-5-4 into 4-5-5. No other period
+moves.
+
+The named period gains a week, its quarter goes to 14 weeks, `week_number_of_year`
+runs 1..53, and every dependent column (`week_number_of_quarter`, the
+`absolute_*_number`s, the `*_epoch` boundaries) shifts accordingly. An ordinal outside
+the period count is rejected.
+
+---
+
+## Label layer
+
+The date grid and the labels are independent. Almost all client-specific variation
+lives in the labels.
+
+```
+month_names         list[str]   # 12 or 13 — default English full names
+day_names           list[str]   # 7, absolute Sunday..Saturday
+year_prefix                     # e.g. "FY"
+quarter_prefix                  # e.g. "Q"
+year_basis          fiscal | gregorian     (default fiscal)
+monthly_basis       fiscal | gregorian     (default fiscal)
+quarterly_basis     fiscal | gregorian     (default fiscal)
+fiscal_year_number  start | end            (default start — verified)
+monthly_format      "{month} {year}"
+quarterly_format    "{quarter} {year}"
+```
+
+**`month_names` collapses three features into one mechanism.** Localization,
+abbreviations (`FEB`), and 13-period labelling (`Period 1..13`) are all "supply a list
+of names". There is no separate label-style option.
+
+**The three `*_basis` knobs are independent because real client requirements make them
+independent.** The motivating case sets `year` and `monthly` to gregorian while
+deliberately leaving `quarterly` fiscal — a single uniform switch cannot express that.
+With `gregorian`, the `year` column varies *within* a fiscal year; that is intended.
+
+`day_number_of_week` is relative to `start_day_of_week` while `day_of_week` is the
+absolute day name (verified: `start_day_of_week: Monday` gives Thursday
+`day_number_of_week = 4`, `day_of_week = "Thursday"`). Ordering lives in the numeric
+columns, so labels are opaque strings.
+
+### Relabelling calendars that already exist
+
+`references/relabel-calendar.sql`, parameterised and run via
+`ts snowflake exec -f … --var`, the same pattern
+`ts-recipe-formula-business-days-snowflake` uses. This supports
+"API-generate → relabel → register" without regenerating, which is worth having
+because the native `fixed52` output is correct as far as it goes.
+
+Not a CLI command in v1. Cheap to promote later if it earns it.
+
+---
+
+## Row-level security — union calendars
+
+Verified from `CUSTOM_CALENDAR.PUBLIC.rlscalendar`:
+
+```sql
+create or replace view "rlscalendar"( …30 standard columns…, TS_CALENDAR_GROUP ) as (
+   select *, 'tsCalendar1' as ts_calendar_group from custom_calendar.public."saturdaycalendar"
+   union all
+   select *, 'tsCalendar2' as ts_calendar_group from custom_calendar.public."mondaycalendar"
+);
+```
+
+RLS is **composition over N independent calendars**: generate each variant as its own
+table, `UNION ALL` with a literal discriminator appended as column 31, register the
+union. `damianmultitest` is the materialised-table flavour of the same idea (3
+variants, 52,230 rows, discriminator column `TSGROUP`).
+
+```
+CalendarSet:
+  variants:              list[(discriminator_value, CalendarSpec)]
+  discriminator_column:  str = "TS_CALENDAR_GROUP"
+  materialisation:       view | table
+```
+
+The discriminator column name is caller-chosen — the corpus uses both
+`TS_CALENDAR_GROUP` and `TSGROUP`.
+
+Two facts from the corpus that contradict the obvious assumptions:
+
+- **Variants need not share a date range.** `testcal2` covers 1980-02-01..2023-01-31
+  while its siblings cover 1980-07-01..2030-06-30. The union is ragged; `validate`
+  checks coverage per variant, never against one global range.
+- **Within a variant each date appears exactly once** (rows = distinct dates for all
+  three variants). The uniqueness invariant is on `(date, discriminator)`.
+
+### Boundary
+
+This skill produces the correctly-shaped union and emits what an RLS rule needs. It
+does **not** create the RLS rule — that means fetching, editing and reimporting the
+ThoughtSpot table's TML, and `.claude/rules/skill-naming.md` already reserves
+`ts-security-rls` for that work.
+
+---
+
+## Column contract
+
+Two shapes, first 10 columns identical in name and order. Written from the live API's
+own CSV output, corroborated across 42 corpus tables — not inferred.
+
+| Shape | Columns |
+|---|---|
+| Minimum (10) | `date, day_of_week, month, quarter, year, day_number_of_week, week_number_of_month, week_number_of_quarter, week_number_of_year, is_weekend` |
+| Extended (30) | the above + `monthly`, `quarterly`, `day_number_of_{month,quarter,year}`, `month_number_of_{quarter,year}`, `quarter_number_of_year`, and `absolute_*_number` / `start_of_*_epoch` / `end_of_*_epoch` for week/month/quarter/year |
+
+`--columns 10|30`, default **30** — the corpus majority, and what period-over-period
+comparisons need.
+
+`end_of_*_epoch` is exclusive (start of the next period): the API emits
+`start_of_week_epoch = 07/01/2027`, `end_of_week_epoch = 07/05/2027` for a Monday-start
+week. Documented in `references/calendar-table-contract.md`.
+
+---
+
+## Validation invariants
+
+`ts calendar validate` checks:
+
+1. Column names, order and types match the 10- or 30-column contract
+2. Periods tile — no gaps, no overlaps, no missing dates in range
+3. Week numbering monotonic; `week_number_of_year` ∈ 1..53
+4. Period lengths are whole weeks and match the declared pattern
+5. Exactly one period per year is long in a 53-week year, at the declared ordinal
+6. `(date, discriminator)` unique — plain `date` unique when not a set
+7. Per-variant range coverage for a `CalendarSet`
+8. **Warn** (not fail) when `year_basis` and `quarterly_basis` disagree: filtering
+   `year = 2025` then returns dates spanning two fiscal years and `quarterly` will
+   disagree with `year` on boundary rows. A legitimate choice, but it must be visible.
+
+---
+
+## Testing
+
+Two independent ground truths — a stronger position than most converters in this repo.
+
+| Oracle | Asserts |
+|---|---|
+| **LULULEMON** (`CUSTOM_CALENDAR.PUBLIC`) | `nearest` / 4-5-4 / February / Monday reproduces all 12 year boundaries *and* the full period grid for 2018 and 2024, pinning leap-week placement — not just year length |
+| **Live API CSV** | `fixed52` output matches the native API row-for-row |
+
+The LULULEMON fixture is extracted to a checked-in file so the test stays Pure tier
+(no credentials, runs in CI). The API oracle is a Live-tier check.
+
+- Unit tests: `tools/ts-cli/tests/test_custom_calendar.py` — anchors, tiling, 52/53
+  derivation, pattern distribution, leap-week placement, label bases.
+- Smoke test: `tools/smoke-tests/smoke_ts_object_calendar_builder.py`, **Pure** tier,
+  plus its row in `tools/smoke-tests/README.md`.
+
+Test range must span ≥ 4 years wherever native-vs-generated behaviour is compared —
+see the testing trap under Problem.
+
+---
+
+## Skill flow
+
+Step 0 plan block with confirmation gate → authenticate → gather spec (batched
+independent questions) → `preview` + **confirm gate** → `generate` → `validate` →
+load to Snowflake *or* hand over the CSV → `register` (native fast path only when the
+rule is `fixed52`) → `search` to verify → Error Handling table → Changelog at 1.0.0.
+
+### Reference files
+
+| File | Purpose |
+|---|---|
+| `references/calendar-table-contract.md` | The 10/30 column contract, value formats, epoch exclusivity |
+| `references/anchor-rules.md` | The three rules with worked year tables and the nearest-vs-first divergence |
+| `references/relabel-calendar.sql` | Parameterised relabel CTAS for existing calendars |
+| `references/open-items.md` | See below |
+
+---
+
+## Open items (verify live before/during implementation)
+
+1. **Non-English labels.** No table among the 42 in `CUSTOM_CALENDAR.PUBLIC` uses a
+   non-English label — `rlscalendarjapan` is English despite its name. Evidence is
+   strong but indirect: three mutually-incompatible styles ship in production
+   (`April`, `FEB`, `Period 1`), and no month-name parser would accept `Period 1`.
+   Needs a live round-trip registering a calendar with non-Latin month and day names.
+   Design is safe either way — ordering lives in the numeric columns.
+2. **`generate-csv` is unavailable on `se-thoughtspot`.** Every request shape returns
+   504 or times out, including the documented happy path (`MONTH_OFFSET` July,
+   month-boundary start). The control failing is what makes this a cluster/endpoint
+   problem, not a request-shape problem. All native-API findings in this design come
+   from `semantic-sql`. Re-verify on a second cluster before relying on `--native`.
+3. **`fiscal_year_number` default.** Verified `start` on `semantic-sql` for July and
+   December offsets. May be version- or config-dependent; re-check on another build
+   before documenting it as invariant.
+4. **`FROM_EXISTING_TABLE` schema validation.** The API errors if the referenced table
+   does not match the required DDL, but the error shape is undocumented. Capture it so
+   `validate` can pre-empt it with a better message.
+
+---
+
+## Out of scope (v1)
+
+- Databricks loading — `ts load databricks` exists, but doubles the DDL and
+  type-mapping surface for no demonstrated demand.
+- Calendar `update` / `delete` lifecycle — `search` is included only to verify
+  registration.
+- Creating RLS rules — see the boundary note above; belongs to `ts-security-rls`.
+- 13-period as a separate structure — it is 4-4-5 with `Period N` labels, covered by
+  `month_names`.
+- `relabel` as a CLI command — ships as a parameterised `.sql` recipe.
+
+---
+
+## Repo wiring checklist
+
+- `agents/cli/ts-object-calendar-builder/SKILL.md` — family `ts-object-*`, no naming
+  rule change needed
+- README skills-table row
+- Both `ln -s` blocks in `agents/cli/SETUP.md` (Cortex + Claude Code)
+- `EXPECTED_DIVERGENCES` entry in `tools/validate/check_runtime_coverage.py`
+- Same-day `CHANGELOG.md` entry (hard-gated)
+- Regenerate `agents/PARITY.md`
+- `ts_cli` version bump in both `__init__.py` and `pyproject.toml`
+- `tools/ts-cli/README.md` command docs
+- Smoke test + `tools/smoke-tests/README.md` row
