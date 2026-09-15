@@ -134,6 +134,28 @@ never configured**. Only the leap week's *placement* is an option.
 `nearest` verified by hand against all twelve LULULEMON year boundaries including both
 371-day years (2018, 2024). `fixed52` verified against the live API output above.
 
+### Period patterns
+
+`pattern` selects both the period count and the weeks each period holds. Quarter
+layout is derived from the period count, not configured.
+
+| Pattern | Periods | Weeks per period in a quarter | Quarter layout | Corpus reference |
+|---|---|---|---|---|
+| `4-4-5` | 12 | 4, 4, 5 | 3/3/3/3 | `PERIOD_CALENDAR` (labelled `Period N`) |
+| `4-5-4` | 12 | 4, 5, 4 | 3/3/3/3 | `LULULEMON` |
+| `5-4-4` | 12 | 5, 4, 4 | 3/3/3/3 | — |
+| `13x4` | 13 | 4 throughout | **3/3/3/4** | `FISCAL_CALENDAR_13_PERIOD` |
+
+All four are 52 weeks in a normal year. The `13x4` quarter layout is 3/3/3/4 —
+verified from `FISCAL_CALENDAR_13_PERIOD` FY2020, where Q1–Q3 hold three periods and
+Q4 holds four (`Period 10`–`Period 13`).
+
+`13x4` is a genuine structure, not a relabelling. An earlier draft of this spec put
+13-period out of scope on the grounds that it was "4-4-5 with `Period N` labels";
+that is true of `PERIOD_CALENDAR` (12 periods) but false of
+`FISCAL_CALENDAR_13_PERIOD` (13 periods × 28 days, 364-day years, and a 371-day
+FY2023). Both tables exist in the corpus and they are different things.
+
 ### Leap-week placement
 
 `--leap-week-period`, default `last`:
@@ -390,8 +412,10 @@ rule is `fixed52`) → `search` to verify → Error Handling table → Changelog
 - Calendar `update` / `delete` lifecycle — `search` is included only to verify
   registration.
 - Creating RLS rules — see the boundary note above; belongs to `ts-security-rls`.
-- 13-period as a separate structure — it is 4-4-5 with `Period N` labels, covered by
-  `month_names`.
+- ~~13-period as a separate structure~~ — **corrected and brought into scope.** See
+  "Period patterns": `FISCAL_CALENDAR_13_PERIOD` is a real 13×28 grid, not a
+  relabelled 4-4-5. Shipping it as `pattern: 13x4` costs less than the false
+  justification did.
 - `relabel` as a CLI command — ships as a parameterised `.sql` recipe.
 
 ---
