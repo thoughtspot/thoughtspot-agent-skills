@@ -186,6 +186,29 @@ absolute day name (verified: `start_day_of_week: Monday` gives Thursday
 `day_number_of_week = 4`, `day_of_week = "Thursday"`). Ordering lives in the numeric
 columns, so labels are opaque strings.
 
+### Label scope: set-level by default
+
+`LabelSpec` attaches to the **`CalendarSet`**, shared by every variant. A per-variant
+override exists but requires an explicit opt-in.
+
+This is a structural decision, not a stylistic one. ThoughtSpot indexes a column's
+values across all rows of the registered object, but RLS resolves a given user to a
+single variant. If one variant labels a month `AUGUST` and another `AUG`, the UI
+offers **both** as search suggestions while only one can ever return rows for any
+given user — the other silently yields nothing. The same applies to `day_of_week`,
+to `quarter` prefixes, and to `year` prefix drift (`FY2024` vs `2024`).
+
+Variants legitimately differ in *grid* — start day, pattern, anchor rule, range; that
+is the entire point of an RLS calendar. There is no corresponding reason for them to
+differ in *vocabulary*. Defaulting the label spec to set level makes the common case
+correct by construction rather than merely checkable.
+
+Detection is still required because unions can be assembled from pre-existing tables
+that never went through this generator — `rlscalendar` unions `saturdaycalendar` and
+`mondaycalendar`, both built independently. Those two happen to agree (identical
+month, day and quarter vocabularies, checked 2026-09-15), but nothing enforced it.
+See validation invariant 9.
+
 ### Relabelling calendars that already exist
 
 `references/relabel-calendar.sql`, parameterised and run via
@@ -217,10 +240,14 @@ variants, 52,230 rows, discriminator column `TSGROUP`).
 
 ```
 CalendarSet:
+  labels:                LabelSpec          # set-level — shared by all variants
   variants:              list[(discriminator_value, CalendarSpec)]
   discriminator_column:  str = "TS_CALENDAR_GROUP"
   materialisation:       view | table
 ```
+
+`labels` sits on the set, not the variant — see "Label scope" above. Variants differ
+in grid; they share a vocabulary.
 
 The discriminator column name is caller-chosen — the corpus uses both
 `TS_CALENDAR_GROUP` and `TSGROUP`.
@@ -275,6 +302,22 @@ week. Documented in `references/calendar-table-contract.md`.
 8. **Warn** (not fail) when `year_basis` and `quarterly_basis` disagree: filtering
    `year = 2025` then returns dates spanning two fiscal years and `quarterly` will
    disagree with `year` on boundary rows. A legitimate choice, but it must be visible.
+9. **Cross-variant label consistency** for a `CalendarSet` — see "Label scope" above
+   for why. Two tiers, because the columns differ in kind:
+
+   | Columns | Rule | Severity |
+   |---|---|---|
+   | `day_of_week`, `month`, `quarter` | Closed vocabularies — distinct value sets must be **identical** across every variant | **Fail**, `--allow-label-drift` downgrades to warn |
+   | `year`, `monthly`, `quarterly` | Derived and open-ended; values legitimately differ by range. Compare the *format signature* — prefix presence, separator, component order | Warn |
+
+   The failure message names the mismatching values explicitly (`month: AUGUST` vs
+   `AUG`), not just the column.
+
+   **Known legitimate conflict:** a set mixing a 12-month variant with a 13-period
+   variant cannot have identical `month` vocabularies. This fails by design — it is a
+   real modelling smell that produces exactly the broken-suggestion behaviour above —
+   and `--allow-label-drift` is the deliberate escape hatch rather than a special case
+   in the rule.
 
 ---
 
