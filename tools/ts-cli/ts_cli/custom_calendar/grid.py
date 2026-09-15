@@ -48,6 +48,11 @@ def _quarter_of_period(n_periods: int) -> List[Tuple[int, int]]:
 def _period_weeks(spec: CalendarSpec, total_weeks: int) -> List[int]:
     weeks = list(PATTERNS[spec.pattern])
     extra = total_weeks - sum(weeks)
+    if extra not in (0, 1):
+        raise ValueError(
+            f"Fiscal year has {total_weeks} weeks; expected 52 or 53 for pattern "
+            f"'{spec.pattern}'"
+        )
     if extra:
         weeks[leap_index(spec)] += extra
     return weeks
@@ -80,7 +85,11 @@ def build_years(spec: CalendarSpec) -> Tuple[FiscalYear, ...]:
             periods.append(Period(index=i + 1, quarter=q, index_in_quarter=iq,
                                   start=cursor, end_exclusive=nxt, weeks=w))
             cursor = nxt
-        assert cursor == end_exclusive, "periods must tile the fiscal year exactly"
+        if cursor != end_exclusive:
+            raise RuntimeError(
+                f"Internal invariant violated: fiscal year {number}'s periods tile to "
+                f"{cursor}, but the year's end_exclusive is {end_exclusive}"
+            )
 
         years.append(FiscalYear(number=number, start=start, end_exclusive=end_exclusive,
                                 weeks=total_weeks, periods=tuple(periods)))

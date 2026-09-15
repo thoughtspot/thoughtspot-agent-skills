@@ -139,7 +139,7 @@ def test_resolve_anchor_dispatches_on_rule():
     assert resolve_anchor(CalendarSpec(anchor_rule="fixed52", **common), 2019) == date(2019, 1, 28)
 
 
-from ts_cli.custom_calendar.grid import build_years, Period, FiscalYear
+from ts_cli.custom_calendar.grid import build_years, Period, FiscalYear, _period_weeks
 
 
 def _lulu_spec(first=2015, last=2026, **kw):
@@ -219,3 +219,13 @@ def test_years_tile_with_no_gaps():
     years = build_years(_lulu_spec())
     for a, b in zip(years, years[1:]):
         assert a.end_exclusive == b.start
+
+
+def test_period_weeks_rejects_out_of_range_surplus_instead_of_an_oversized_period():
+    with pytest.raises(ValueError, match="54"):
+        _period_weeks(_lulu_spec(), 54)
+
+
+def test_period_weeks_rejects_negative_surplus_instead_of_a_negative_period():
+    with pytest.raises(ValueError, match="47"):
+        _period_weeks(_lulu_spec(), 47)
