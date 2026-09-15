@@ -346,3 +346,68 @@ def test_render_day_of_week_agrees_with_sunday_index_across_a_week():
         d = p.start + timedelta(days=offset)
         out = render(LabelSpec(), fy, p, d)
         assert out["day_of_week"] == DAYS_EN[sunday_index(d)]
+
+
+from ts_cli.custom_calendar.rows import build_rows, COLUMNS_10, COLUMNS_30, columns_for
+
+
+def test_first_ten_columns_are_the_contract_in_order():
+    assert COLUMNS_10 == (
+        "date", "day_of_week", "month", "quarter", "year",
+        "day_number_of_week", "week_number_of_month", "week_number_of_quarter",
+        "week_number_of_year", "is_weekend",
+    )
+    assert COLUMNS_30[:10] == COLUMNS_10
+    assert len(COLUMNS_30) == 30
+
+
+def test_row_count_matches_the_grid():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    assert len(rows) == 364
+    rows18 = build_rows(_lulu_spec(2018, 2018), LabelSpec())
+    assert len(rows18) == 371
+
+
+def test_day_number_of_week_is_relative_to_start_day():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    first = rows[0]
+    assert first["date"] == date(2017, 1, 30)      # a Monday
+    assert first["day_number_of_week"] == 1
+    assert first["day_of_week"] == "Monday"
+    # Thursday, three days later, with a Monday start
+    assert rows[3]["day_number_of_week"] == 4
+    assert rows[3]["day_of_week"] == "Thursday"
+
+
+def test_is_weekend_is_saturday_sunday_regardless_of_start_day():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    for r in rows[:7]:
+        assert r["is_weekend"] == (r["date"].weekday() >= 5)
+
+
+def test_end_epochs_are_exclusive():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    first = rows[0]
+    assert first["start_of_week_epoch"] == date(2017, 1, 30)
+    assert first["end_of_week_epoch"] == date(2017, 2, 6)     # start of next week
+    assert first["start_of_year_epoch"] == date(2017, 1, 30)
+    assert first["end_of_year_epoch"] == date(2018, 1, 29)    # start of next year
+
+
+def test_week_number_of_year_reaches_53_in_a_leap_year():
+    rows = build_rows(_lulu_spec(2018, 2018), LabelSpec())
+    assert max(r["week_number_of_year"] for r in rows) == 53
+    rows17 = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    assert max(r["week_number_of_year"] for r in rows17) == 52
+
+
+def test_ten_column_mode_emits_only_the_contract_columns():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec(), columns=10)
+    assert tuple(rows[0].keys()) == COLUMNS_10
+
+
+def test_absolute_numbers_increase_across_years():
+    rows = build_rows(_lulu_spec(2017, 2018), LabelSpec())
+    assert rows[0]["absolute_year_number"] == 1
+    assert rows[-1]["absolute_year_number"] == 2
+    assert rows[-1]["absolute_month_number"] == 24
