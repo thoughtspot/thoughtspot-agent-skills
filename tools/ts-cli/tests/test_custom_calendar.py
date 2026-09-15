@@ -548,7 +548,9 @@ def test_allow_label_drift_downgrades_to_warning():
                                "AUG", "SEP", "OCT", "NOV", "DEC", "JAN")),
     )
     findings = validate_set_labels({"a": base, "b": abbrev}, allow_label_drift=True)
-    assert all(f.severity == "warning" for f in findings if f.code == "label-drift")
+    drift = [f for f in findings if f.code == "label-drift"]
+    assert drift, "expected label-drift findings to exist before checking severity"
+    assert all(f.severity == "warning" for f in drift)
 
 
 def test_identical_variants_produce_no_label_findings():
