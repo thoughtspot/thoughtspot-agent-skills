@@ -488,3 +488,84 @@ def test_union_sql_rejects_variant_count_mismatch():
     cset = CalendarSet(labels=LabelSpec(), variants=(("a", _lulu_spec()),))
     with pytest.raises(ValueError, match="source_tables"):
         union_sql(cset, database="D", schema="S", target="t", source_tables=("x", "y"))
+
+
+from ts_cli.custom_calendar.validate import Finding, validate_rows, validate_set_labels
+
+
+def test_clean_calendar_has_no_findings():
+    rows = build_rows(_lulu_spec(2017, 2018), LabelSpec())
+    assert validate_rows(rows, columns=COLUMNS_30) == []
+
+
+def test_missing_date_is_detected():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    del rows[10]
+    codes = [f.code for f in validate_rows(rows, columns=COLUMNS_30)]
+    assert "date-gap" in codes
+
+
+def test_duplicate_date_is_detected():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    rows.append(dict(rows[0]))
+    codes = [f.code for f in validate_rows(rows, columns=COLUMNS_30)]
+    assert "duplicate-date" in codes
+
+
+def test_wrong_column_set_is_detected():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    rows[0].pop("is_weekend")
+    codes = [f.code for f in validate_rows(rows, columns=COLUMNS_30)]
+    assert "column-contract" in codes
+
+
+def test_week_number_above_53_is_detected():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    rows[0]["week_number_of_year"] = 54
+    codes = [f.code for f in validate_rows(rows, columns=COLUMNS_30)]
+    assert "week-number-range" in codes
+
+
+def test_cross_variant_label_drift_fails_on_closed_vocabularies():
+    base = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    abbrev = build_rows(
+        _lulu_spec(2017, 2017),
+        LabelSpec(month_names=("FEB", "MAR", "APR", "MAY", "JUN", "JUL",
+                               "AUG", "SEP", "OCT", "NOV", "DEC", "JAN")),
+    )
+    findings = validate_set_labels({"a": base, "b": abbrev})
+    drift = [f for f in findings if f.code == "label-drift"]
+    assert drift and drift[0].severity == "error"
+    assert "month" in drift[0].message
+    assert "February" in drift[0].message or "FEB" in drift[0].message
+
+
+def test_allow_label_drift_downgrades_to_warning():
+    base = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    abbrev = build_rows(
+        _lulu_spec(2017, 2017),
+        LabelSpec(month_names=("FEB", "MAR", "APR", "MAY", "JUN", "JUL",
+                               "AUG", "SEP", "OCT", "NOV", "DEC", "JAN")),
+    )
+    findings = validate_set_labels({"a": base, "b": abbrev}, allow_label_drift=True)
+    assert all(f.severity == "warning" for f in findings if f.code == "label-drift")
+
+
+def test_identical_variants_produce_no_label_findings():
+    a = build_rows(_lulu_spec(2017, 2017), LabelSpec())
+    b = build_rows(
+        CalendarSpec(start_month=FEB, start_day_of_week=6, pattern="4-5-4",
+                     anchor_rule="nearest", first_year=2017, last_year=2017),
+        LabelSpec(),
+    )
+    # Different start day (a genuine grid difference) but the same vocabulary.
+    assert [f for f in validate_set_labels({"a": a, "b": b})
+            if f.code == "label-drift"] == []
+
+
+def test_year_prefix_drift_is_a_warning_not_an_error():
+    a = build_rows(_lulu_spec(2017, 2017), LabelSpec(year_prefix="FY"))
+    b = build_rows(_lulu_spec(2017, 2017), LabelSpec(year_prefix=""))
+    findings = [f for f in validate_set_labels({"a": a, "b": b})
+                if f.code == "label-format-drift"]
+    assert findings and all(f.severity == "warning" for f in findings)
