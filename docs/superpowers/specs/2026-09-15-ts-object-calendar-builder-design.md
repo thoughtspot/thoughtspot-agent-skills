@@ -185,6 +185,31 @@ that is true of `PERIOD_CALENDAR` (12 periods) but false of
 `FISCAL_CALENDAR_13_PERIOD` (13 periods × 28 days, 364-day years, and a 371-day
 FY2023). Both tables exist in the corpus and they are different things.
 
+#### 13x4 carries a consumption risk that the other patterns do not
+
+Query generation is fine — the numeric columns carry all the ordering. The risk is in
+the **filter widget**, and there are two distinct mechanisms:
+
+1. **Lexical sort scrambles period order.** Confirmed against
+   `FISCAL_CALENDAR_13_PERIOD` on 2026-09-15: sorting its `month` values as strings
+   gives `Period 1, Period 10, Period 11, Period 12, Period 13, Period 2, …` —
+   numeric order is not preserved. Any consumer that sorts the label rather than
+   `month_number_of_year` lists periods wrongly.
+2. **The date-filter contract assumes month semantics.** `MONTH_YEAR` requires
+   `month_name`, documented as "Name of the month in uppercase", and `MONTH_ONLY`,
+   `QUARTER_ONLY` and `PERIOD_ONLY` are documented as unsupported filter types.
+   Whether `"PERIOD 1"` is accepted where a month name is expected is unverified.
+   Quarters are unaffected — a 13-period year still has four.
+
+**Mitigation, applied by default for `13x4`:** zero-pad the generated labels
+(`Period 01` … `Period 13`) so lexical and numeric order coincide. This costs nothing,
+needs no product change, and removes mechanism 1 entirely. It does not address
+mechanism 2, which is open item 5.
+
+Because mechanism 2 is unresolved, `13x4` ships **documented as query-safe but
+filter-unverified**. The skill must say so when a user selects it rather than
+presenting it as equivalent to the 12-period patterns.
+
 ### Leap-week placement
 
 `--leap-week-period`, default `last`:
@@ -431,6 +456,23 @@ rule is `fixed52`) → `search` to verify → Error Handling table → Changelog
 4. **`FROM_EXISTING_TABLE` schema validation.** The API errors if the referenced table
    does not match the required DDL, but the error shape is undocumented. Capture it so
    `validate` can pre-empt it with a better message.
+5. **Filter-widget behaviour for `13x4` period labels.** Two mechanisms, one confirmed
+   and mitigated, one open — see "13x4 carries a consumption risk" above.
+   - *Confirmed:* lexical sort of `Period 1..13` does not preserve numeric order.
+     Mitigated by zero-padding the default labels. No further action needed unless a
+     user supplies custom unpadded labels, which `validate` should warn about.
+   - *Open:* whether the filter widget and the `MONTH_YEAR` date-filter type accept a
+     non-month string as `month_name`, and whether the widget orders by
+     `month_number_of_year` or by the label. The REST spec documents `month_name` as
+     "Name of the month in uppercase" and lists `PERIOD_ONLY` as unsupported, so the
+     assumption is real but its enforcement is untested.
+   - *What would resolve it:* register a `13x4` calendar on a live cluster, build a
+     Liveboard filter on the calendar's month column, and check (a) the order periods
+     are listed in, (b) whether selecting `Period 13` filters correctly, (c) whether a
+     `MONTH_YEAR` filter via the REST API accepts a period label. Status: UNVERIFIED.
+   - *If it fails:* `13x4` remains useful for query generation and aggregation; the
+     workaround is to filter on `month_number_of_year` or on a date range rather than
+     the period label. Document that rather than withdrawing the pattern.
 
 ---
 
