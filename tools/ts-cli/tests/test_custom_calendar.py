@@ -229,3 +229,105 @@ def test_period_weeks_rejects_out_of_range_surplus_instead_of_an_oversized_perio
 def test_period_weeks_rejects_negative_surplus_instead_of_a_negative_period():
     with pytest.raises(ValueError, match="47"):
         _period_weeks(_lulu_spec(), 47)
+
+
+from ts_cli.custom_calendar.labels import render, fiscal_year_label
+
+
+def _dec_year():
+    """A December-start fiscal year — the case where fiscal and calendar years differ."""
+    spec = CalendarSpec(start_month=12, start_day_of_week=MONDAY, pattern="4-4-5",
+                        anchor_rule="first", first_year=2024, last_year=2025)
+    return build_years(spec)[0]
+
+
+# The Dec-2024 fiscal year runs 2024-12-02 .. 2025-11-30 (52 weeks). Its second
+# period spans 2024-12-30 .. 2025-01-26, so the period START is still in 2024 —
+# use an explicit mid-January date to exercise the fiscal-vs-gregorian split.
+JAN_2025 = date(2025, 1, 15)
+
+
+def test_fiscal_basis_reproduces_the_thoughtspot_defect():
+    # ThoughtSpot emits monthly="January 2024" for dates in January 2025.
+    fy = _dec_year()
+    jan = fy.periods[1]
+    assert jan.start <= JAN_2025 < jan.end_exclusive
+    out = render(LabelSpec(), fy, jan, JAN_2025)
+    assert out["year"] == "2024"
+    assert out["monthly"].endswith("2024")     # ... for a date in 2025
+
+
+def test_gregorian_basis_fixes_monthly_and_year():
+    fy = _dec_year()
+    jan = fy.periods[1]
+    labels = LabelSpec(year_basis="gregorian", monthly_basis="gregorian")
+    out = render(labels, fy, jan, JAN_2025)
+    assert out["year"] == "2025"
+    assert out["monthly"].endswith("2025")
+
+
+def test_bases_are_independent_quarterly_can_stay_fiscal():
+    # The motivating client case: year+monthly gregorian, quarterly left fiscal.
+    fy = _dec_year()
+    jan = fy.periods[1]
+    labels = LabelSpec(year_basis="gregorian", monthly_basis="gregorian",
+                       quarterly_basis="fiscal", year_prefix="FY", quarter_prefix="Q")
+    out = render(labels, fy, jan, JAN_2025)
+    assert out["year"] == "FY2025"
+    assert out["quarterly"].endswith("FY2024")
+
+
+def test_prefixes_apply_to_year_and_quarter():
+    fy = _lulu_year_2017()
+    p = fy.periods[0]
+    out = render(LabelSpec(year_prefix="FY", quarter_prefix="Q"), fy, p, p.start)
+    assert out["year"] == "FY2017"
+    assert out["quarter"] == "Q1"
+    assert out["quarterly"] == "Q1 FY2017"
+
+
+def _lulu_year_2017():
+    return {y.number: y for y in build_years(_lulu_spec())}[2017]
+
+
+def test_month_names_drive_localization_abbreviation_and_period_labels():
+    fy = _lulu_year_2017()
+    p = fy.periods[0]
+    abbrev = LabelSpec(month_names=("FEB", "MAR", "APR", "MAY", "JUN", "JUL",
+                                    "AUG", "SEP", "OCT", "NOV", "DEC", "JAN"))
+    assert render(abbrev, fy, p, p.start)["month"] == "FEB"
+
+    periods = LabelSpec(month_names=tuple(f"Period {i}" for i in range(1, 13)))
+    assert render(periods, fy, p, p.start)["month"] == "Period 1"
+
+    jp = LabelSpec(month_names=tuple(f"{i}月" for i in range(1, 13)),
+                   day_names=("日", "月", "火", "水", "木", "金", "土"))
+    out = render(jp, fy, p, p.start)
+    assert out["month"] == "1月"
+    assert out["day_of_week"] == "月"     # 2017-01-30 is a Monday
+
+
+def test_fiscal_year_number_end_convention():
+    fy = _dec_year()
+    assert fiscal_year_label(LabelSpec(), fy) == "2024"
+    assert fiscal_year_label(LabelSpec(fiscal_year_number="end"), fy) == "2025"
+
+
+def test_default_month_names_for_twelve_period_patterns():
+    from ts_cli.custom_calendar.labels import default_month_names
+    for pattern in ("4-4-5", "4-5-4", "5-4-4"):
+        assert default_month_names(pattern)[0] == "January"
+        assert len(default_month_names(pattern)) == 12
+
+
+def test_default_month_names_for_13x4_are_zero_padded():
+    # Unpadded "Period 1".."Period 13" sort lexically as
+    # Period 1, Period 10, Period 11, Period 12, Period 13, Period 2, ...
+    # which scrambles any consumer that sorts the label instead of
+    # month_number_of_year. Confirmed against FISCAL_CALENDAR_13_PERIOD.
+    from ts_cli.custom_calendar.labels import default_month_names
+    names = default_month_names("13x4")
+    assert len(names) == 13
+    assert names[0] == "Period 01"
+    assert names[12] == "Period 13"
+    assert list(names) == sorted(names)      # lexical order == numeric order
