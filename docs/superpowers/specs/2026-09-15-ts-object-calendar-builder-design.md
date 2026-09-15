@@ -106,6 +106,7 @@ without the row expansion.
 | Command | Network | Purpose |
 |---|---|---|
 | `preview` | no | Print the year/period boundary table — which years are 53 weeks and which period is long — so the shape is confirmed before generating thousands of rows |
+| `compare` | no | Show what a given option choice actually changes, before committing to it — see below |
 | `generate` | no | Write the CSV; `--ddl` also emits Snowflake DDL; `--set` emits an RLS union |
 | `validate` | no | Check a CSV or live table against the column contract and the internal invariants below |
 | `register` | yes | `createCalendar` via `FROM_EXISTING_TABLE`; `--native` uses `FROM_INPUT_PARAMS` |
@@ -116,6 +117,34 @@ Loading reuses the existing `ts load snowflake`. No new loader.
 `--native` **must refuse** any spec whose anchor rule is not `fixed52`, rather than
 silently emitting a drifting calendar. This is the single most important safety rail
 in the design.
+
+### `compare` — showing the implications of a choice
+
+Several options in this design are consequential and hard to reason about in the
+abstract: fiscal vs gregorian year basis, and the three anchor rules. A user choosing
+between them should see what changes *before* generating a calendar, not discover it
+afterwards in a Liveboard.
+
+`ts calendar compare --vary <dimension>` renders the same specification under every
+value of one dimension and reports **only where they disagree**:
+
+| `--vary` | Compares | Reports |
+|---|---|---|
+| `year-basis`, `monthly-basis`, `quarterly-basis`, `fiscal-year-number` | fiscal vs gregorian (or start vs end) | Count of differing rows, and sample rows with both labels side by side |
+| `anchor` | `nearest` vs `first` vs `fixed52` | Per-year start dates under each rule, plus `first_divergence` — the first year where any two disagree |
+
+Two properties make this worth a command rather than "run `preview` twice":
+
+- **A null result is informative.** A January-start calendar has *no* rows where
+  fiscal and gregorian year differ. Reporting "0 of 364 rows differ" tells the user the
+  choice is irrelevant for their calendar, which running two previews and eyeballing
+  them does not.
+- **`--vary anchor` surfaces the testing trap directly.** `first_divergence` is
+  exactly the year where a short test range stops telling the truth (2019 for the
+  motivating retail case). Making it a reported number is cheaper than hoping someone
+  reads the warning.
+
+`compare` is pure and network-free, like `preview`.
 
 ---
 
