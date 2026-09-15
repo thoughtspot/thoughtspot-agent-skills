@@ -144,6 +144,10 @@ def parse_cmd(
         err=True,
     )
 
+    # Non-fatal degradations; stderr keeps the --output JSON clean.
+    for w in parsed["table_calc_addressing"].get("warnings", []):
+        typer.echo(f"WARNING: {w}", err=True)
+
 
 @app.command("translate-formulas")
 def translate_formulas_cmd(

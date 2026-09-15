@@ -298,7 +298,20 @@ def extract_blends(root: ET.Element) -> dict:
     return graph
 
 
-def _read_table_calc(tc: ET.Element) -> dict:
+def _read_table_calc(
+    tc: ET.Element, warnings: list | None = None, context: str = ""
+) -> dict:
+    """Read one ``<table-calc>`` element into an addressing entry.
+
+    Tableau writes a non-numeric token into ``<address><value>`` for non-offset
+    addressing modes (``false``, ``"All Pages"``), so a non-numeric value
+    degrades to ``address_offset: None`` — what the element-absent case already
+    produces — with a warning. Raising here abandoned the entire workbook parse
+    (SCAL-338450).
+
+    ``try``/``except`` not ``.isdigit()``: the latter is False for negative
+    offsets, which are legitimate.
+    """
     entry = {
         "ordering_type": tc.get("ordering-type", "Rows"),
         "ordering_field": tc.get("ordering-field"),
@@ -308,7 +321,16 @@ def _read_table_calc(tc: ET.Element) -> dict:
     }
     addr = tc.find("address/value")
     if addr is not None and addr.text:
-        entry["address_offset"] = int(addr.text)
+        try:
+            entry["address_offset"] = int(addr.text)
+        except ValueError:
+            if warnings is not None:
+                where = f"{context}: " if context else ""
+                warnings.append(
+                    f"{where}non-numeric table-calc address value "
+                    f"{addr.text!r} — addressing offset skipped "
+                    f"(address_offset=None)"
+                )
     return entry
 
 
@@ -316,7 +338,11 @@ def extract_table_calc_addressing(root: ET.Element) -> dict:
     """Extract column-level and worksheet-override table-calc addressing.
 
     ws_overrides take precedence over column_level for a given worksheet.
+    ``warnings`` holds one message per skipped non-numeric address value
+    (see ``_read_table_calc``); always present, empty when nothing was skipped.
     """
+    warnings: list = []
+
     column_level: dict = {}
     for column in root.findall(".//datasource//column"):
         calc = column.find("calculation[@class='tableau']")
@@ -325,7 +351,10 @@ def extract_table_calc_addressing(root: ET.Element) -> dict:
         tc = calc.find("table-calc")
         if tc is None:
             continue
-        column_level[column.get("name")] = _read_table_calc(tc)
+        col_name = column.get("name")
+        column_level[col_name] = _read_table_calc(
+            tc, warnings, f"column {col_name!r}"
+        )
 
     ws_overrides: dict = {}
     for ws in root.findall(".//worksheet"):
@@ -335,9 +364,16 @@ def extract_table_calc_addressing(root: ET.Element) -> dict:
             tc = ci.find("table-calc")
             if tc is None:
                 continue
-            ws_overrides[ws_name][ci.get("column")] = _read_table_calc(tc)
+            ci_col = ci.get("column")
+            ws_overrides[ws_name][ci_col] = _read_table_calc(
+                tc, warnings, f"worksheet {ws_name!r}, column {ci_col!r}"
+            )
 
-    return {"column_level": column_level, "ws_overrides": ws_overrides}
+    return {
+        "column_level": column_level,
+        "ws_overrides": ws_overrides,
+        "warnings": warnings,
+    }
 
 
 def _strip_brackets(s: str) -> str:

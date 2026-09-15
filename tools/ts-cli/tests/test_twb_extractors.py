@@ -77,7 +77,77 @@ def test_extract_table_calc_addressing_column_and_ws():
 def test_extract_table_calc_addressing_none():
     root = ET.fromstring("<workbook><worksheet name='S'/></workbook>")
     addr = extract_table_calc_addressing(root)
-    assert addr == {"column_level": {}, "ws_overrides": {"S": {}}}
+    assert addr == {"column_level": {}, "ws_overrides": {"S": {}}, "warnings": []}
+
+
+# Both values are taken from real workbooks this crashed on (SCAL-338450):
+# 'false' (Channel Performance Dashboards_v2025.1), '"All Pages"' (Partner Clickstream).
+NON_NUMERIC_ADDRESS_XML = """
+<workbook>
+  <datasource name='federated.a'>
+    <column name='[Calculation_1]'>
+      <calculation class='tableau' formula='SUM([X])'>
+        <table-calc ordering-type='Rows' type='PctDiff'>
+          <address><value>{value}</value></address>
+        </table-calc>
+      </calculation>
+    </column>
+  </datasource>
+  <worksheet name='Sheet 1'/>
+</workbook>
+"""
+
+
+def test_non_numeric_address_skips_and_warns_instead_of_crashing():
+    for bad in ("false", '"All Pages"'):
+        root = ET.fromstring(NON_NUMERIC_ADDRESS_XML.format(value=bad))
+        addr = extract_table_calc_addressing(root)  # must not raise
+
+        entry = addr["column_level"]["[Calculation_1]"]
+        assert entry["address_offset"] is None
+        # Only the offset degrades.
+        assert entry["quick_calc_type"] == "PctDiff"
+        assert entry["ordering_type"] == "Rows"
+
+        assert len(addr["warnings"]) == 1
+        warning = addr["warnings"][0]
+        assert "[Calculation_1]" in warning
+        assert bad in warning
+
+
+def test_negative_address_offset_still_parses():
+    """``.isdigit()`` instead of try/except would turn these into None."""
+    root = ET.fromstring(NON_NUMERIC_ADDRESS_XML.format(value="-2"))
+    addr = extract_table_calc_addressing(root)
+    assert addr["column_level"]["[Calculation_1]"]["address_offset"] == -2
+    assert addr["warnings"] == []
+
+
+# The worksheet <column-instance> path, not the column path, is the one that
+# fired on both real workbooks — every live warning named a worksheet.
+WS_NON_NUMERIC_ADDRESS_XML = """
+<workbook>
+  <worksheet name='Daily Performance'>
+    <column-instance column='[cost]'>
+      <table-calc ordering-type='Rows' type='PctDiff'>
+        <address><value>false</value></address>
+      </table-calc>
+    </column-instance>
+  </worksheet>
+</workbook>
+"""
+
+
+def test_worksheet_override_non_numeric_address_warns_with_worksheet_context():
+    root = ET.fromstring(WS_NON_NUMERIC_ADDRESS_XML)
+    addr = extract_table_calc_addressing(root)
+
+    assert addr["ws_overrides"]["Daily Performance"]["[cost]"]["address_offset"] is None
+    assert len(addr["warnings"]) == 1
+    warning = addr["warnings"][0]
+    assert "Daily Performance" in warning   # which sheet
+    assert "[cost]" in warning              # which column
+    assert "false" in warning
 
 
 def test_detect_orphan_calcs_direct_and_transitive():
