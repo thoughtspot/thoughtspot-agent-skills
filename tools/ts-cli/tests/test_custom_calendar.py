@@ -460,8 +460,17 @@ def test_union_sql_matches_the_rlscalendar_shape():
                     target="rlscal", source_tables=("saturdaycalendar", "mondaycalendar"))
     assert "CREATE OR REPLACE VIEW" in sql
     assert "UNION ALL" in sql
-    assert "'tsCalendar1' AS TS_CALENDAR_GROUP" in sql
-    assert '"saturdaycalendar"' in sql
+    # Assert whole-line pairing, not scattered substrings — a mispaired
+    # (variant, source_table) zip must fail this test.
+    assert ('\'tsCalendar1\' AS TS_CALENDAR_GROUP FROM '
+            '"CUSTOM_CALENDAR"."PUBLIC"."saturdaycalendar"') in sql
+    assert ('\'tsCalendar2\' AS TS_CALENDAR_GROUP FROM '
+            '"CUSTOM_CALENDAR"."PUBLIC"."mondaycalendar"') in sql
+    # Reject the crossed pairings explicitly.
+    assert ('\'tsCalendar1\' AS TS_CALENDAR_GROUP FROM '
+            '"CUSTOM_CALENDAR"."PUBLIC"."mondaycalendar"') not in sql
+    assert ('\'tsCalendar2\' AS TS_CALENDAR_GROUP FROM '
+            '"CUSTOM_CALENDAR"."PUBLIC"."saturdaycalendar"') not in sql
 
 
 def test_union_sql_can_materialise_as_a_table():
