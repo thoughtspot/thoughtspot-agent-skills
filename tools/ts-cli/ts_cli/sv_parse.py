@@ -115,13 +115,32 @@ _ASOF_REF_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Snowflake spells these clauses WITHOUT an `=` — `ai_sql_generation '...'`. It
+# rejects the `=` form outright ("syntax error ... unexpected '='"), and GET_DDL
+# emits the bare form, so a pattern that requires `=` can never match a real
+# Semantic View. The `=` stays accepted so hand-written fixtures still parse.
+#
+# The separator is `=` OR at least one space — NEVER optional-and-empty. These
+# patterns are searched against the RAW DDL (BL-255), so `\s*=?\s*'` would let
+# the CLOSING quote of any literal ending in the clause name satisfy the `'`,
+# and `_extract_string_literal` would then read the NEXT literal: a comment
+# reading "Instructions live in ai_sql_generation" fabricated
+# `custom_instructions` out of nothing, silently. Caught in review before merge.
 _AI_SQL_GEN_RE = re.compile(
-    r"\bai_sql_generation\s*=\s*'",
+    r"\bai_sql_generation(?:\s*=\s*|\s+)'",
     re.IGNORECASE,
 )
 
 _AI_QUESTION_CAT_RE = re.compile(
-    r"\bai_question_categorization\s*=\s*'",
+    r"\bai_question_categorization(?:\s*=\s*|\s+)'",
+    re.IGNORECASE,
+)
+
+# `ai_verified_queries (...)` is a POST-comment clause, not one of the blocks the
+# top-level comment follows: Snowflake requires `comment=` before it and rejects
+# the reverse order. It therefore bounds the comment search rather than extending it.
+_AI_VERIFIED_QUERIES_RE = re.compile(
+    r"\bai_verified_queries\s*\(",
     re.IGNORECASE,
 )
 
@@ -684,9 +703,8 @@ def _extract_top_level_comment(ddl: str) -> str | None:
 
     Searches the region between the last known block keyword's closing paren
     and the first post-block keyword (`with extension`, `ai_sql_generation`,
-    etc.), or end-of-DDL if neither exists."""
-    block_kws = ("tables", "relationships", "facts", "dimensions", "metrics",
-                 "ai_verified_queries")
+    `ai_verified_queries`, etc.), or end-of-DDL if neither exists."""
+    block_kws = ("tables", "relationships", "facts", "dimensions", "metrics")
     last_block_end = 0
     for kw in block_kws:
         pattern = re.compile(r"\b" + kw + r"\s*\(", re.IGNORECASE)
@@ -712,13 +730,23 @@ def _extract_top_level_comment(ddl: str) -> str | None:
 
     tail = ddl[last_block_end:]
 
-    boundary_patterns = [_EXTENSION_RE, _AI_SQL_GEN_RE, _AI_QUESTION_CAT_RE]
+    boundary_patterns = [_EXTENSION_RE, _AI_SQL_GEN_RE, _AI_QUESTION_CAT_RE,
+                         _AI_VERIFIED_QUERIES_RE]
     earliest_boundary = len(tail)
     for bp in boundary_patterns:
         bm = bp.search(tail)
         if bm:
             earliest_boundary = min(earliest_boundary, bm.start())
 
+    # Deliberately no fallback scan of the rest of the tail when this finds
+    # nothing. It would rescue a `comment=` placed after `ai_verified_queries`,
+    # but Snowflake REJECTS that order — live-verified 2026-09-14 on
+    # thoughtspot_partner.ap-southeast-2: moving the clause after the block
+    # fails with `syntax error line 270 at position 4 unexpected 'comment'`,
+    # and moving `ai_sql_generation` after it fails the same way. So the shape
+    # cannot reach us from GET_DDL, while the fallback WOULD let a `comment='`
+    # occurring inside a verified query's QUESTION/SQL text be read as the
+    # model description — trading an impossible input for a plausible one.
     search_region = tail[:earliest_boundary]
     m = _COMMENT_RE.search(search_region)
     if not m:

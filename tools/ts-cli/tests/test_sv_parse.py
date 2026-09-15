@@ -97,10 +97,51 @@ DUNDER_DDL = textwrap.dedent("""\
                 comment='Running total within each category'
         )
         comment='Dunder Mifflin Sales'
-        ai_sql_generation = 'Use CLOSING_STOCK for current levels.'
-        ai_question_categorization = 'Group under Sales.'
+        ai_sql_generation 'Use CLOSING_STOCK for current levels.'
+        ai_question_categorization 'Group under Sales.'
         with extension (CA='{"tables":[]}');
 """)
+
+
+# VERBATIM GET_DDL CAPTURE — do not tidy, and do not hand-write a replacement.
+#
+# Trimmed (fewer tables/dimensions/queries) from the live output of
+#   SELECT GET_DDL('SEMANTIC_VIEW', 'AGENT_SKILLS.COMPLAINTS.SV_COMPLAINTS_NO_BRIDGE')
+# on thoughtspot_partner.ap-southeast-2, 2026-09-14. BL-254 asks for a fixture from
+# real GET_DDL rather than hand-written DDL, because hand-written fixtures agree with
+# the parser's assumptions and live output does not — which is how BL-254 itself
+# survived 82 releases.
+#
+# Details here that a hand-written fixture gets wrong, and which are the point:
+#   - `ai_sql_generation '...'` carries NO `=` (Snowflake rejects the `=` form)
+#   - clause order is comment -> ai_sql_generation -> ai_verified_queries, and
+#     Snowflake rejects every other order
+#   - `ONBOARDING_QUESTION` precedes `SQL` inside a verified query
+#   - `AS ( ` has a trailing space; indentation is tabs
+VERIFIED_QUERIES_DDL = (
+    "create or replace semantic view SV_COMPLAINTS_NO_BRIDGE\n"
+    "\ttables (\n"
+    "\t\tAGENT_SKILLS.COMPLAINTS.VW_COMPLAINTS\n"
+    "\t)\n"
+    "\tdimensions (\n"
+    "\t\tVW_COMPLAINTS.ACCOUNT_ID as ACCOUNT_ID\n"
+    "\t)\n"
+    "\tmetrics (\n"
+    "\t\tVW_COMPLAINTS.COMPLAINTS_COUNT as COUNT(DISTINCT COMPLAINT_NUMBER)\n"
+    "\t)\n"
+    "\tcomment='Complaints analytics model for tracking complaint rates, "
+    "procedure counts, and complaint counts across business units.'\n"
+    "\tai_sql_generation 'Exclude Unknown, Unspecified, N-A, None and Test "
+    "placeholder values by default.'\n"
+    "\tai_verified_queries (\n"
+    "\t\tCOMPLAINTS_BY_PRODUCT_FAMILY AS ( \n"
+    "QUESTION 'What are the top product families by complaint count?' \n"
+    "ONBOARDING_QUESTION false\n"
+    "SQL 'SELECT p.PRODUCT_FAMILY, COUNT(DISTINCT c.COMPLAINT_NUMBER) AS "
+    "COMPLAINTS_COUNT FROM __VW_PMS_GROUPING AS p JOIN __VW_COMPLAINTS AS c "
+    "ON p.BASE_PART_NUMBER = c.BASE_PART GROUP BY p.PRODUCT_FAMILY')\n"
+    "\t);\n"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +437,18 @@ class TestComment:
         result = parse_sv_ddl(ddl)
         assert result["comment"] == "It's a test view"
 
+    def test_survives_a_trailing_ai_verified_queries_block(self):
+        """`ai_verified_queries` bounds the comment search; it does not extend it.
+
+        It was in the block list, so the search window opened AFTER the block's
+        closing paren — past the comment, which Snowflake requires to come first.
+        Every Semantic View carrying verified queries lost its description, with
+        no warning: the model imported with only the converter's own boilerplate.
+        """
+        result = parse_sv_ddl(VERIFIED_QUERIES_DDL)
+        assert result["comment"].startswith(
+            "Complaints analytics model for tracking complaint rates")
+
 
 # ---------------------------------------------------------------------------
 # Custom instructions
@@ -411,6 +464,60 @@ class TestCustomInstructions:
     def test_absent(self):
         result = parse_sv_ddl(WORKFORCE_DDL)
         assert result["custom_instructions"] is None
+
+    def test_snowflake_bare_form_without_equals(self):
+        """Snowflake's only accepted spelling — `ai_sql_generation '...'`, no `=`.
+
+        The patterns required `=`, which Snowflake rejects as a syntax error and
+        GET_DDL never emits, so no real Semantic View could ever match: the whole
+        instruction block was dropped silently on every conversion.
+        """
+        result = parse_sv_ddl(VERIFIED_QUERIES_DDL)
+        ci = result["custom_instructions"]
+        assert ci["ai_sql_generation"] == (
+            "Exclude Unknown, Unspecified, N-A, None and Test "
+            "placeholder values by default.")
+
+    def test_clause_name_inside_a_comment_is_not_a_clause(self):
+        """A `comment=` whose text merely ENDS with the clause name is not a clause.
+
+        The separator must be `=` or whitespace, never optional-and-empty: these
+        patterns scan the RAW DDL (BL-255), so an empty separator lets the CLOSING
+        quote of any literal ending in the clause name satisfy the `'`, and the
+        extractor then reads the NEXT literal. The first attempt at BL-254 shipped
+        exactly that and fabricated `custom_instructions` from comment prose --
+        the same silent-wrong-answer class BL-254 is about. Caught in review.
+        """
+        ddl = """create or replace semantic view DB.S.V
+            tables (DB.S.T primary key (ID))
+            dimensions (T.NAME as NAME)
+            comment='Instructions live in ai_sql_generation'
+            ;"""
+        result = parse_sv_ddl(ddl)
+        assert result["comment"] == "Instructions live in ai_sql_generation"
+        assert result["custom_instructions"] is None
+
+    def test_real_clause_wins_over_a_decoy_earlier_in_a_comment(self):
+        """A decoy in comment text must not shadow the real clause that follows."""
+        ddl = """create or replace semantic view DB.S.V
+            tables (DB.S.T primary key (ID))
+            dimensions (T.NAME as NAME)
+            comment='See ai_sql_generation'
+            ai_sql_generation 'REAL INSTRUCTION TEXT.';"""
+        ci = parse_sv_ddl(ddl)["custom_instructions"]
+        assert ci["ai_sql_generation"] == "REAL INSTRUCTION TEXT."
+
+    def test_legacy_equals_form_still_parses(self):
+        """`=` stays optional so existing hand-written fixtures keep working."""
+        ddl = """create or replace semantic view DB.S.V
+            tables (DB.S.T primary key (ID))
+            dimensions (T.NAME as t.NAME)
+            comment='V'
+            ai_sql_generation = 'Legacy spelling.'
+            ai_question_categorization = 'Legacy too.';"""
+        ci = parse_sv_ddl(ddl)["custom_instructions"]
+        assert ci["ai_sql_generation"] == "Legacy spelling."
+        assert ci["ai_question_categorization"] == "Legacy too."
 
 
 # ---------------------------------------------------------------------------

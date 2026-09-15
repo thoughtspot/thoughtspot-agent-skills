@@ -5,6 +5,20 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-09-15
+- fix: `parse-sv` dropped two whole fields of every real Semantic View, silently and for
+  82 ts-cli releases (introduced in v0.63.0, 2026-07-21; found at v0.137.0). `ai_sql_generation` / `ai_question_categorization` matched only an `=` form
+  that Snowflake **rejects** (`syntax error ... unexpected '='`) and `GET_DDL` never emits,
+  so custom instructions were unreachable on any input (BL-254); and `ai_verified_queries`
+  sat in the block list `_extract_top_level_comment` scans past, so any view carrying
+  verified queries lost its model description to the converter's own boilerplate (BL-268).
+  Both exit 0 with `unsupported: []`, `warnings: []` and `lint_findings: []`. The unit
+  fixture asserted the `=` spelling, so the suite confirmed the first bug rather than
+  catching it — and no fixture paired a comment with a verified-queries block, so the
+  clause-order assumption behind the second was never contradicted. Found converting a live
+  customer SV that lost a 1,923-character instruction block and its entire description
+- chore: bump ts-cli to v0.138.0
+
 ## 2026-09-02
 - feat: `check_lint_invariant_list.py` — the `ts tml lint` rule set is now declared
   ONCE (a `CANONICAL-RULE-SET` marker in `tml_lint.py`, gated against the findings the

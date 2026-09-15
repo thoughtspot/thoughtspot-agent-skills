@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (formula composition + TML import behaviours validated on SE cluster 2026-07-10 — two-pass import requirement, if() parens mandatory, BOOL column support; correction 2026-07: SQL-query logical-table `tables()` form + "→ ThoughtSpot SQL View TML" rule added, GA 2026-06-26 — finding 13.5; ai_sql_generation/ai_question_categorization corrected to free-text instruction strings — finding 13.6; sample_values/is_enum dimension clauses documented — finding 13.7; 2026-07-29 full sweep: new PARSER PREREQUISITE for MAX_STALENESS/materialization DDL clause shape, not yet live-verified — finding 13.5; 2026-07-30: Identifier Resolution Algorithm sharpened after BL-178 — passthrough facts take step 1, the step-2 id is derived from the display name by the SAME function build-model mints with, and the facts/metrics maps are keyed on DECLARED names; all three live-verified on se-thoughtspot 2026-07-30) -->
+<!-- currency: snowflake — 2026-07 (formula composition + TML import behaviours validated on SE cluster 2026-07-10 — two-pass import requirement, if() parens mandatory, BOOL column support; correction 2026-07: SQL-query logical-table `tables()` form + "→ ThoughtSpot SQL View TML" rule added, GA 2026-06-26 — finding 13.5; ai_sql_generation/ai_question_categorization corrected to free-text instruction strings — finding 13.6; sample_values/is_enum dimension clauses documented — finding 13.7; 2026-07-29 full sweep: new PARSER PREREQUISITE for MAX_STALENESS/materialization DDL clause shape, not yet live-verified — finding 13.5; 2026-07-30: Identifier Resolution Algorithm sharpened after BL-178 — passthrough facts take step 1, the step-2 id is derived from the display name by the SAME function build-model mints with, and the facts/metrics maps are keyed on DECLARED names; all three live-verified on se-thoughtspot 2026-07-30; 2026-09-14: the `ai_sql_generation` / `ai_question_categorization` DDL spelling corrected to drop the `=` — Snowflake REJECTS the `=` form (`syntax error ... unexpected '='`) and GET_DDL emits the bare form; the clause ORDER is also load-bearing and now documented: comment -> ai_sql_generation -> ai_verified_queries, every other order rejected. Both live-verified on thoughtspot_partner.ap-southeast-2 — BL-254 / BL-268) -->
 
 # Reverse Mapping Rules Reference
 
@@ -98,8 +98,12 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
     -- Corrected 2026-07 (finding 13.6): free-text instruction strings, NOT ON/OFF
     -- toggles (Jan 12 2026 "custom instructions" release) — see snowflake-schema.md
     -- module_custom_instructions.sql_generation / .question_categorization
-    ai_sql_generation = '<free-text instructions>'
-    ai_question_categorization = '<free-text instructions>'
+    -- NO `=`. Snowflake REJECTS `ai_sql_generation = '...'` outright
+    -- (syntax error ... unexpected '='); GET_DDL emits the bare form.
+    -- Live-verified 2026-09-14. This spelling was wrong here and in the
+    -- parser for 82 ts-cli releases — see BL-254.
+    ai_sql_generation '<free-text instructions>'
+    ai_question_categorization '<free-text instructions>'
     ai_verified_queries (
         QUERY_NAME AS (
             QUESTION 'natural language question'
@@ -154,7 +158,8 @@ create or replace semantic view BIRD_FINANCIAL_SV
 - Each metric entry format: `TABLE_ALIAS.VIEW_COLUMN as AGG(view_alias.METRIC_NAME)`
   - The `AGG(...)` expression defines the aggregation
 - `comment='...'` is optional metadata — use as a ThoughtSpot column description
-- `ai_sql_generation = '<text>'` / `ai_question_categorization = '<text>'` are free-text
+- `ai_sql_generation '<text>'` / `ai_question_categorization '<text>'` (**no `=`** — Snowflake
+  rejects the `=` form; live-verified 2026-09-14, BL-254) are free-text
   instruction strings (not ON/OFF toggles) that parse as
   `module_custom_instructions.sql_generation` / `.question_categorization` in Snowflake's
   own YAML (see snowflake-schema.md). → ThoughtSpot: treat the text as candidate content

@@ -11,10 +11,20 @@ instruction strings (`CUSTOM_INSTRUCTIONS` module) that guide Cortex Analyst beh
 
 ThoughtSpot equivalent: `data_model_instructions` on the Model TML (guides Spotter).
 
-**Done (SKILL v1.16.0 + Step 4x):** the skill now parses `ai_sql_generation` /
-`ai_question_categorization` from the DDL and surfaces the free text as candidate
-Data Model Instructions content in the conversion report and at the review
-checkpoint. See coverage-matrix.md L1.
+**Done (SKILL v1.16.0 + Step 4x), but non-functional until ts-cli v0.138.0:** the skill
+parses `ai_sql_generation` / `ai_question_categorization` from the DDL and surfaces the
+free text as candidate Data Model Instructions content in the conversion report and at
+the review checkpoint. See coverage-matrix.md L1.
+
+The parse was **dead on arrival and stayed that way for 82 ts-cli releases** (introduced v0.63.0 on 2026-07-21; fixed v0.138.0). Both
+patterns required an `=` (`ai_sql_generation = '...'`), a spelling Snowflake **rejects**
+outright — `syntax error ... unexpected '='` — and which `GET_DDL` therefore never emits.
+No real Semantic View could match, so `custom_instructions` came back `None` every time
+and the whole instruction block was dropped with no warning: `parse-sv` exited 0 with
+`unsupported: 0, warnings: 0`. The unit fixture asserted the `=` form, so the test suite
+confirmed the bug rather than catching it — the behaviour was never checked against
+Snowflake, only against an assumption about its syntax. Caught 2026-09-14 converting a
+live customer SV whose 1,923-character instruction block vanished silently.
 
 **Still open:** this is a reporting/handoff step, not a structural TML mapping — the
 exact ThoughtSpot TML field for Data Model Instructions is still TBD (see

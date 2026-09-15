@@ -195,8 +195,9 @@ are roughly ordered by value÷effort.
 | BL-231 | `check_backlog_integrity.py` passes on a structurally destroyed backlog — proven, not theorised | next validator pass |
 | BL-234 | `thoughtspot-model-tml.md` lists `NONE` as a valid aggregation; platform rejects it (14528) | next TS currency sweep |
 | BL-235 | passthrough arity self-verifies; residual is now cross-repo only, since the shipped converter generates its docs from the catalog | opportunistic |
-| BL-254 | `parse-sv` never parses `ai_sql_generation` — the regex requires an `=` the syntax does not have | next SF converter pass |
-| BL-255 | `_extract_clause` scans raw DDL, so comment text swallows a real clause (4th instance of one cause) | next SF converter pass, with BL-254 |
+| ~~BL-254~~ | ~~`parse-sv` never parses `ai_sql_generation` — the regex requires an `=` the syntax does not have~~ | DONE (2026-09-15) |
+| ~~BL-268~~ | ~~top-level `comment` dropped on every SV carrying verified queries — `ai_verified_queries` sat in the comment-search block list~~ | DONE (2026-09-15) |
+| BL-255 | `_extract_clause` scans raw DDL, so comment text swallows a real clause (4th instance of one cause) — partially mitigated by BL-268; the `_extract_clause` half is untouched | next SF converter pass |
 | BL-256 | per-column descriptions lost on the return leg; Model-level description survives | next SF converter pass |
 | BL-257 | `build-sv` has no `facts()` emitter — a fact block cannot survive a round trip | with BL-031 |
 | BL-258 | two `parse-sv` defects on the hand-written-DDL path (implicit `references T`; comment-preceded metric) | with BL-248 and BL-255 |
@@ -9887,9 +9888,14 @@ The information is present in the parsed input; nothing needs to be inferred.
 **Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
 (the `ai_metadata` per-pattern section). Raw captures at `.svrt/work/ai_metadata/parsed.json`
 (**`.svrt/` is gitignored**).
-**Affects:** `tools/ts-cli/ts_cli/sv_parse.py` (`_AI_SQL_GEN_RE`, line 118),
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py` (`_AI_SQL_GEN_RE`, line 122 after the fix),
 `agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` L1.
-**Status:** OPEN.
+**Status:** DONE (2026-09-15, ts-cli v0.138.0) — `=` made optional in **both** regexes;
+`_AI_QUESTION_CAT_RE` did carry the same defect, as this item predicted. Confirmed against
+Snowflake first: the `=` form is not merely absent from `GET_DDL`, it is **rejected**
+(`syntax error ... unexpected '='`), so the pattern was unmatchable by construction rather
+than merely unlucky. Re-found independently on 2026-09-14 converting a live customer SV,
+which lost its entire 1,923-character instruction block silently.
 
 `_AI_SQL_GEN_RE = r"\bai_sql_generation\s*=\s*'"` requires an `=`. Snowflake's syntax has
 none — `GET_DDL` round-trips the clause verbatim without one. **The clause therefore never
@@ -9911,6 +9917,57 @@ rather than hand-written DDL — the study's recurring lesson is that hand-writt
 agree with the parser's assumptions and live output does not.
 
 **Target:** next Snowflake converter pass.
+
+## BL-268 — the top-level `comment` is dropped on every Semantic View carrying verified queries `Tier 3`
+
+**Filed:** 2026-09-15. **Status:** DONE (2026-09-15, ts-cli v0.138.0) — filed and fixed together.
+**Source:** converting a live customer Semantic View (`SV_COMPLAINTS_NO_BRIDGE`, a two-fact
+complaints/procedures model with 7 verified queries) into a ThoughtSpot Model.
+**Affects:** `tools/ts-cli/ts_cli/sv_parse.py` (`_extract_top_level_comment`),
+`agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 6.
+
+`_extract_top_level_comment` listed `ai_verified_queries` in `block_kws` — the clauses the
+top-level `comment=` is assumed to come *after*. It does not. **Snowflake requires the
+comment to come before it**, and rejects the reverse order outright; the accepted order is
+`comment` → `ai_sql_generation` → `ai_verified_queries`, with the verified-queries block
+strictly last. So on any view that has one, the search window opened past the comment and
+the function returned `None`.
+
+Silent in the way that matters: `parse-sv` exits 0 with `unsupported: []` and `warnings: []`,
+`build-model` reports `lint_findings: []`, and the Model imports fine — carrying only the
+converter's own `"Converted from Snowflake Semantic View ..."` boilerplate as its entire
+description. The business description a Cortex Analyst model leads with is simply gone, and
+nothing downstream re-raises it.
+
+**Distinct from BL-255 / study finding N2, which is still open.** N2 records that
+`_extract_top_level_comment` "uses the same raw scan and lands past the real `comment=`" —
+that is the *raw-scan* mechanism, where a `comment=` string whose own text contains a clause
+name followed by `(` is matched as the clause opener. This is a second, independent
+mechanism that needs no such text: the fixture added with this fix comments
+`'Order analytics across channels'` — no clause name, no parenthesis — and still lost it.
+Either one alone is fatal, so fixing N2 would not have closed this.
+
+**It does, however, partially mitigate N2 — recorded here so BL-255 is not read as untouched.**
+N2's named `_extract_top_level_comment` symptom for the `ai_verified_queries` keyword is gone:
+the study's own `ai_metadata` reproduction (a `comment=` whose text contains
+`AI_VERIFIED_QUERIES (pre-approved SQL for common questions)`) now returns its comment where it
+previously returned `None`, so study row 30's recorded outcome no longer holds. What is NOT fixed,
+and keeps BL-255 open: `_extract_clause` still scans raw DDL — it still returns
+`'pre-approved SQL for common questions'` as the verified-queries clause — and a comment containing
+any OTHER clause name plus `(` (`facts (`, `tables (`) still defeats `_extract_top_level_comment`.
+
+**Fix.** Move `ai_verified_queries` out of `block_kws` and into `boundary_patterns`, where
+the other post-comment clauses (`with extension`, `ai_sql_generation`,
+`ai_question_categorization`) already sit — it bounds the comment search rather than
+extending it. Regression test `TestComment::test_survives_a_trailing_ai_verified_queries_block`
+pins Snowflake's real clause order; it fails against the previous parser.
+
+**The generalisable lesson**, and the reason this sat undetected: the clause *order* is
+load-bearing and was never encoded anywhere. No fixture carried `comment` and
+`ai_verified_queries` together, so the ordering assumption baked into `block_kws` was never
+contradicted. It is the same shape as BL-254 in the same file — an assumption about
+Snowflake's syntax that the test suite confirmed instead of checking.
+
 
 ## BL-255 — `_extract_clause` scans raw DDL against its own docstring's contract, so comment text swallows a real clause `Tier 3`
 
