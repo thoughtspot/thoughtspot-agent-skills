@@ -55,3 +55,85 @@ def test_calendar_set_holds_labels_at_set_level():
     s = CalendarSet(labels=LabelSpec(), variants=(("tsCal1", _spec()),))
     assert s.discriminator_column == "TS_CALENDAR_GROUP"
     assert s.materialisation == "view"
+
+
+from datetime import date
+from ts_cli.custom_calendar.anchors import (
+    sunday_index, anchor_nearest, anchor_first, anchor_fixed52, resolve_anchor,
+)
+
+MONDAY = 1
+FEB = 2
+
+# Verified against CUSTOM_CALENDAR.PUBLIC.LULULEMON on 2026-09-15.
+LULULEMON_STARTS = {
+    2015: date(2015, 2, 2), 2016: date(2016, 2, 1), 2017: date(2017, 1, 30),
+    2018: date(2018, 1, 29), 2019: date(2019, 2, 4), 2020: date(2020, 2, 3),
+    2021: date(2021, 2, 1), 2022: date(2022, 1, 31), 2023: date(2023, 1, 30),
+    2024: date(2024, 1, 29), 2025: date(2025, 2, 3), 2026: date(2026, 2, 2),
+}
+
+
+def test_sunday_index_conversion():
+    assert sunday_index(date(2026, 9, 13)) == 0   # Sunday
+    assert sunday_index(date(2026, 9, 14)) == 1   # Monday
+    assert sunday_index(date(2026, 9, 19)) == 6   # Saturday
+
+
+@pytest.mark.parametrize("year,expected", sorted(LULULEMON_STARTS.items()))
+def test_anchor_nearest_reproduces_lululemon(year, expected):
+    assert anchor_nearest(year, FEB, MONDAY) == expected
+
+
+def test_nearest_yields_52_or_53_week_years_only():
+    for year in range(2015, 2026):
+        span = (anchor_nearest(year + 1, FEB, MONDAY)
+                - anchor_nearest(year, FEB, MONDAY)).days
+        assert span % 7 == 0
+        assert span in (364, 371)
+
+
+def test_lululemon_leap_years_are_2018_and_2024():
+    leap = [y for y in range(2015, 2026)
+            if (anchor_nearest(y + 1, FEB, MONDAY)
+                - anchor_nearest(y, FEB, MONDAY)).days == 371]
+    assert leap == [2018, 2024]
+
+
+def test_anchor_first_differs_from_nearest_from_2017():
+    # Both rules agree while drift is under half a week, then part company.
+    assert anchor_first(2015, FEB, MONDAY) == date(2015, 2, 2)
+    assert anchor_first(2016, FEB, MONDAY) == date(2016, 2, 1)
+    assert anchor_first(2017, FEB, MONDAY) == date(2017, 2, 6)   # nearest gives Jan 30
+    assert anchor_nearest(2017, FEB, MONDAY) == date(2017, 1, 30)
+
+
+def test_anchor_first_also_tiles_in_whole_weeks():
+    for year in range(2015, 2030):
+        span = (anchor_first(year + 1, FEB, MONDAY)
+                - anchor_first(year, FEB, MONDAY)).days
+        assert span % 7 == 0
+
+
+def test_fixed52_is_always_364_days():
+    prev = None
+    for year in range(2015, 2026):
+        got = anchor_fixed52(year, FEB, MONDAY, first_year=2015)
+        if prev is not None:
+            assert (got - prev).days == 364
+        prev = got
+
+
+def test_fixed52_drifts_away_from_lululemon():
+    # This is the defect that justifies the whole skill.
+    assert anchor_fixed52(2018, FEB, MONDAY, first_year=2015) == LULULEMON_STARTS[2018]
+    assert anchor_fixed52(2019, FEB, MONDAY, first_year=2015) == date(2019, 1, 28)
+    assert LULULEMON_STARTS[2019] == date(2019, 2, 4)
+
+
+def test_resolve_anchor_dispatches_on_rule():
+    common = dict(start_month=FEB, start_day_of_week=MONDAY,
+                  pattern="4-5-4", first_year=2015, last_year=2026)
+    assert resolve_anchor(CalendarSpec(anchor_rule="nearest", **common), 2017) == date(2017, 1, 30)
+    assert resolve_anchor(CalendarSpec(anchor_rule="first", **common), 2017) == date(2017, 2, 6)
+    assert resolve_anchor(CalendarSpec(anchor_rule="fixed52", **common), 2019) == date(2019, 1, 28)
