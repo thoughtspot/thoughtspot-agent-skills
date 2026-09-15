@@ -137,3 +137,85 @@ def test_resolve_anchor_dispatches_on_rule():
     assert resolve_anchor(CalendarSpec(anchor_rule="nearest", **common), 2017) == date(2017, 1, 30)
     assert resolve_anchor(CalendarSpec(anchor_rule="first", **common), 2017) == date(2017, 2, 6)
     assert resolve_anchor(CalendarSpec(anchor_rule="fixed52", **common), 2019) == date(2019, 1, 28)
+
+
+from ts_cli.custom_calendar.grid import build_years, Period, FiscalYear
+
+
+def _lulu_spec(first=2015, last=2026, **kw):
+    base = dict(start_month=FEB, start_day_of_week=MONDAY, pattern="4-5-4",
+                anchor_rule="nearest", first_year=first, last_year=last)
+    base.update(kw)
+    return CalendarSpec(**base)
+
+
+def test_normal_year_is_52_weeks_in_454_shape():
+    fy = {y.number: y for y in build_years(_lulu_spec())}[2017]
+    assert fy.weeks == 52
+    assert [p.weeks for p in fy.periods] == [4, 5, 4] * 4
+    assert [p.quarter for p in fy.periods] == [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4]
+
+
+def test_leap_week_lands_on_final_period_matching_lululemon_2018():
+    fy = {y.number: y for y in build_years(_lulu_spec())}[2018]
+    assert fy.weeks == 53
+    # LULULEMON 2018: Q4 is 4-5-5, every other quarter unchanged.
+    assert [p.weeks for p in fy.periods] == [4, 5, 4, 4, 5, 4, 4, 5, 4, 4, 5, 5]
+    assert fy.start == date(2018, 1, 29)
+    assert fy.end_exclusive == date(2019, 2, 4)
+
+
+def test_lululemon_2018_period_boundaries_exact():
+    # Read from CUSTOM_CALENDAR.PUBLIC.LULULEMON on 2026-09-15.
+    expected = [
+        (date(2018, 1, 29), date(2018, 2, 26)), (date(2018, 2, 26), date(2018, 4, 2)),
+        (date(2018, 4, 2), date(2018, 4, 30)),  (date(2018, 4, 30), date(2018, 5, 28)),
+        (date(2018, 5, 28), date(2018, 7, 2)),  (date(2018, 7, 2), date(2018, 7, 30)),
+        (date(2018, 7, 30), date(2018, 8, 27)), (date(2018, 8, 27), date(2018, 10, 1)),
+        (date(2018, 10, 1), date(2018, 10, 29)), (date(2018, 10, 29), date(2018, 11, 26)),
+        (date(2018, 11, 26), date(2018, 12, 31)), (date(2018, 12, 31), date(2019, 2, 4)),
+    ]
+    fy = {y.number: y for y in build_years(_lulu_spec())}[2018]
+    assert [(p.start, p.end_exclusive) for p in fy.periods] == expected
+
+
+def test_leap_week_placement_is_configurable():
+    fy = {y.number: y for y in build_years(_lulu_spec(leap_week_period=1))}[2018]
+    assert [p.weeks for p in fy.periods] == [5, 5, 4, 4, 5, 4, 4, 5, 4, 4, 5, 4]
+
+
+def _13x4_spec(first, last):
+    return CalendarSpec(start_month=1, start_day_of_week=MONDAY, pattern="13x4",
+                        anchor_rule="nearest", first_year=first, last_year=last)
+
+
+def test_13x4_grid_is_thirteen_four_week_periods_in_3_3_3_4_quarters():
+    # FY2021 (Jan/Monday/nearest) is a 52-week year: 2021-01-04 .. 2022-01-03.
+    # Do NOT use FY2020 here — it spans 371 days, so one period holds 5 weeks.
+    fy = build_years(_13x4_spec(2021, 2021))[0]
+    assert fy.weeks == 52
+    assert len(fy.periods) == 13
+    assert [p.weeks for p in fy.periods] == [4] * 13
+    assert [p.quarter for p in fy.periods] == [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4]
+
+
+def test_13x4_leap_year_puts_the_extra_week_on_the_last_period():
+    # FY2020 is 371 days (2019-12-30 .. 2021-01-04) — a 53-week 13-period year.
+    fy = build_years(_13x4_spec(2020, 2020))[0]
+    assert fy.weeks == 53
+    assert [p.weeks for p in fy.periods] == [4] * 12 + [5]
+    assert fy.periods[-1].quarter == 4
+
+
+def test_periods_tile_the_year_with_no_gaps():
+    for fy in build_years(_lulu_spec()):
+        assert fy.periods[0].start == fy.start
+        assert fy.periods[-1].end_exclusive == fy.end_exclusive
+        for a, b in zip(fy.periods, fy.periods[1:]):
+            assert a.end_exclusive == b.start
+
+
+def test_years_tile_with_no_gaps():
+    years = build_years(_lulu_spec())
+    for a, b in zip(years, years[1:]):
+        assert a.end_exclusive == b.start
