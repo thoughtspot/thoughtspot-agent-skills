@@ -100,5 +100,6 @@ connection object). One file per object type, per platform.
 New platforms get a new subdirectory (e.g., mappings/ts-databricks/), not new files
 in the Snowflake mapping directory.
 
-When you add to either: update agents/coco-snowsight/SETUP.md stage copy list and run
-`./scripts/stage-sync.sh` — shared/ files must be deployed to the stage to reach CoCo.
+When you add to either: update the agents/coco-snowsight/SETUP.md stage copy list so it stays
+accurate. The stage sync itself is dormant — see "CoCo stage sync is dormant" in the root
+CLAUDE.md.

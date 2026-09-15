@@ -26,7 +26,7 @@ or patch files there directly.
 | Changed area | Also update |
 |---|---|
 | Any SKILL.md (new command or step) | README.md skills table; agents/cli/SETUP.md if install/symlink step changed; bump version in SKILL.md ## Changelog |
-| agents/shared/* | snow stage copy for that file (see agents/coco-snowsight/SETUP.md); worked example if output changes |
+| agents/shared/* | worked example if output changes. **No stage sync required** — see "CoCo stage sync is dormant" below |
 | tools/ts-cli command interface | tools/ts-cli/README.md; any SKILL.md that uses that command; CHANGELOG.md entry if version bumped |
 | agents/claude/ skill logic | Corresponding agents/cli/ and agents/coco-snowsight/ skill if logic applies |
 | agents/cli/ skill logic | Corresponding agents/claude/ skill and agents/coco-snowsight/ skill if logic applies |
@@ -55,10 +55,24 @@ Workflow for every change:
 1. Work on a feature or wip branch (`feat/<slug>` or `wip/<skill>`)
 2. `git push -u origin <branch>` and open a PR against `main`
 3. After the PR merges:
-   - For any changed `agents/coco-snowsight/` or `agents/shared/` file: `./scripts/stage-sync.sh`
    - For `tools/ts-cli/` changes: `pip install -e tools/ts-cli` in the affected environment
 
 Claude Code changes (via symlinks) take effect immediately — no step needed for `agents/claude/` only.
+
+## CoCo stage sync is dormant
+
+`agents/coco-snowsight/` skills remain in the repo and are still validated (naming, runtime
+coverage, mirror sync). **What has stopped is the deployment step.** The Snowflake stage is no
+longer kept in step with `main`, so a change to `agents/shared/` or `agents/coco-snowsight/`
+does **not** require `./scripts/stage-sync.sh` after merge, and the stage being behind is the
+expected state rather than a pending task.
+
+`scripts/stage-sync.sh` and `agents/coco-snowsight/SETUP.md` are unchanged and still work. To
+resume, run the sync and seed `.snowflake-deploy-sha` first — without it the script
+full-uploads every staged file rather than the changed ones.
+
+Revisit if the CoCo runtime is either picked back up or retired outright; it is currently
+neither.
 
 ## Branching conventions
 
