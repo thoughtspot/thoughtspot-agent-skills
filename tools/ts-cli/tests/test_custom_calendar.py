@@ -331,3 +331,18 @@ def test_default_month_names_for_13x4_are_zero_padded():
     assert names[0] == "Period 01"
     assert names[12] == "Period 13"
     assert list(names) == sorted(names)      # lexical order == numeric order
+
+
+def test_render_day_of_week_agrees_with_sunday_index_across_a_week():
+    # render() must not carry its own Monday->Sunday conversion — sunday_index()
+    # in anchors.py is the only one. Pin agreement across a full week so the two
+    # can't silently drift apart.
+    from datetime import timedelta
+    from ts_cli.custom_calendar.spec import DAYS_EN
+
+    fy = _lulu_year_2017()
+    p = fy.periods[0]
+    for offset in range(7):
+        d = p.start + timedelta(days=offset)
+        out = render(LabelSpec(), fy, p, d)
+        assert out["day_of_week"] == DAYS_EN[sunday_index(d)]

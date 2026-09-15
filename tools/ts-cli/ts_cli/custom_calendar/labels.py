@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Dict, Tuple
 
+from ts_cli.custom_calendar.anchors import sunday_index
 from ts_cli.custom_calendar.grid import FiscalYear, Period
 from ts_cli.custom_calendar.spec import MONTHS_EN, PATTERNS, LabelSpec
 
@@ -57,7 +58,7 @@ def render(labels: LabelSpec, fy: FiscalYear, period: Period, d: date) -> Dict[s
     quarterly_year = f"{labels.year_prefix}{_year_value(labels, fy, d, labels.quarterly_basis)}"
 
     return {
-        "day_of_week": labels.day_names[(d.weekday() + 1) % 7],
+        "day_of_week": labels.day_names[sunday_index(d)],
         "month": month,
         "quarter": quarter,
         "year": year,
