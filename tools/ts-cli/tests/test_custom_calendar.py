@@ -411,3 +411,71 @@ def test_absolute_numbers_increase_across_years():
     assert rows[0]["absolute_year_number"] == 1
     assert rows[-1]["absolute_year_number"] == 2
     assert rows[-1]["absolute_month_number"] == 24
+
+
+import io
+from ts_cli.custom_calendar.emit import write_csv, snowflake_ddl, union_sql
+
+
+def test_csv_header_matches_columns_and_dates_are_iso():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec(), columns=10)
+    buf = io.StringIO()
+    write_csv(rows, COLUMNS_10, buf)
+    lines = buf.getvalue().splitlines()
+    assert lines[0] == ",".join(COLUMNS_10)
+    assert lines[1].startswith("2017-01-30,Monday,")
+
+
+def test_csv_appends_discriminator_column_when_given():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec(), columns=10)
+    buf = io.StringIO()
+    write_csv(rows, COLUMNS_10, buf, discriminator=("TS_CALENDAR_GROUP", "tsCal1"))
+    lines = buf.getvalue().splitlines()
+    assert lines[0].endswith(",TS_CALENDAR_GROUP")
+    assert lines[1].endswith(",tsCal1")
+
+
+def test_snowflake_ddl_quotes_lowercase_identifiers():
+    ddl = snowflake_ddl("MY_CAL", COLUMNS_10, database="CUSTOM_CALENDAR", schema="PUBLIC")
+    assert 'CREATE OR REPLACE TABLE "CUSTOM_CALENDAR"."PUBLIC"."MY_CAL"' in ddl
+    assert '"date" DATE' in ddl
+    assert '"is_weekend" BOOLEAN' in ddl
+    assert '"day_number_of_week" NUMBER' in ddl
+    assert '"month" VARCHAR' in ddl
+
+
+def test_snowflake_ddl_adds_discriminator_last():
+    ddl = snowflake_ddl("MY_CAL", COLUMNS_10, database="D", schema="S",
+                        discriminator="TS_CALENDAR_GROUP")
+    body = ddl[ddl.index("("):]
+    assert body.rstrip().rstrip(");").strip().endswith("TS_CALENDAR_GROUP VARCHAR")
+
+
+def test_union_sql_matches_the_rlscalendar_shape():
+    cset = CalendarSet(
+        labels=LabelSpec(),
+        variants=(("tsCalendar1", _lulu_spec()), ("tsCalendar2", _lulu_spec())),
+    )
+    sql = union_sql(cset, database="CUSTOM_CALENDAR", schema="PUBLIC",
+                    target="rlscal", source_tables=("saturdaycalendar", "mondaycalendar"))
+    assert "CREATE OR REPLACE VIEW" in sql
+    assert "UNION ALL" in sql
+    assert "'tsCalendar1' AS TS_CALENDAR_GROUP" in sql
+    assert '"saturdaycalendar"' in sql
+
+
+def test_union_sql_can_materialise_as_a_table():
+    cset = CalendarSet(
+        labels=LabelSpec(),
+        variants=(("a", _lulu_spec()), ("b", _lulu_spec())),
+        materialisation="table",
+    )
+    sql = union_sql(cset, database="D", schema="S", target="t",
+                    source_tables=("x", "y"))
+    assert "CREATE OR REPLACE TABLE" in sql
+
+
+def test_union_sql_rejects_variant_count_mismatch():
+    cset = CalendarSet(labels=LabelSpec(), variants=(("a", _lulu_spec()),))
+    with pytest.raises(ValueError, match="source_tables"):
+        union_sql(cset, database="D", schema="S", target="t", source_tables=("x", "y"))
