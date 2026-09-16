@@ -1,0 +1,191 @@
+"""ts calendar — build, validate and register ThoughtSpot custom calendars."""
+from __future__ import annotations
+
+import json
+import sys
+from typing import Dict, List, Optional, Tuple
+
+import typer
+
+from ts_cli.custom_calendar.emit import write_csv
+from ts_cli.custom_calendar.grid import build_years
+from ts_cli.custom_calendar.labels import default_month_names
+from ts_cli.custom_calendar.rows import build_rows, columns_for
+from ts_cli.custom_calendar.spec import (
+    MONTHS_EN, CalendarSpec, LabelSpec, leap_index, parse_day_of_week,
+    periods_per_year, validate_labels, validate_spec,
+)
+
+app = typer.Typer(help="Custom calendar generation and registration.")
+
+_profile_option = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE",
+                               help="Profile name (default: first profile or TS_PROFILE env var)")
+
+
+def _parse_month(name: str) -> int:
+    try:
+        return MONTHS_EN.index(name.strip().capitalize()) + 1
+    except ValueError:
+        raise typer.BadParameter(
+            f"Unknown month '{name}'. Expected one of: {', '.join(MONTHS_EN)}"
+        ) from None
+
+
+def build_spec_from_options(
+    start_month: str, start_day: str, pattern: str, anchor: str,
+    first_year: int, last_year: int, leap_week_period: str,
+    year_prefix: str, quarter_prefix: str,
+    year_basis: str, monthly_basis: str, quarterly_basis: str,
+    fiscal_year_number: str, month_names: Optional[str], day_names: Optional[str],
+) -> Tuple[CalendarSpec, LabelSpec]:
+    """Turn CLI options into validated spec objects. Pure."""
+    try:
+        leap: object = "last" if leap_week_period == "last" else int(leap_week_period)
+        spec = CalendarSpec(
+            start_month=_parse_month(start_month),
+            start_day_of_week=parse_day_of_week(start_day),
+            pattern=pattern, anchor_rule=anchor,
+            first_year=first_year, last_year=last_year, leap_week_period=leap,
+        )
+        # Validate the spec BEFORE deriving default month names from its pattern —
+        # default_month_names() does a raw PATTERNS[pattern] lookup that raises
+        # KeyError (not ValueError) for an unknown pattern, which would otherwise
+        # escape as an unhandled exception instead of a clean CLI error.
+        validate_spec(spec)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from None
+
+    kwargs: Dict[str, object] = dict(
+        year_prefix=year_prefix, quarter_prefix=quarter_prefix,
+        year_basis=year_basis, monthly_basis=monthly_basis,
+        quarterly_basis=quarterly_basis, fiscal_year_number=fiscal_year_number,
+    )
+    if month_names:
+        kwargs["month_names"] = tuple(m.strip() for m in month_names.split(","))
+    else:
+        # LabelSpec defaults to 12 English month names, which fails validation for
+        # a 13-period pattern. Pick the pattern-appropriate default instead.
+        kwargs["month_names"] = default_month_names(spec.pattern)
+    if day_names:
+        kwargs["day_names"] = tuple(d.strip() for d in day_names.split(","))
+    labels = LabelSpec(**kwargs)
+
+    try:
+        validate_labels(labels, periods_per_year(spec))
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from None
+    return spec, labels
+
+
+def preview_payload(spec: CalendarSpec, labels: LabelSpec) -> Dict[str, object]:
+    """Year/period shape only — no rows."""
+    li = leap_index(spec)
+    years = []
+    for fy in build_years(spec):
+        years.append({
+            "year": fy.number,
+            "start": fy.start.isoformat(),
+            "end": (fy.end_exclusive).isoformat(),
+            "weeks": fy.weeks,
+            "period_weeks": [p.weeks for p in fy.periods],
+            "long_period": li + 1 if fy.weeks > 52 else None,
+        })
+    return {"pattern": spec.pattern, "anchor_rule": spec.anchor_rule,
+            "periods_per_year": periods_per_year(spec), "years": years}
+
+
+# Shared option objects so `preview` and `generate` cannot drift apart.
+_O = dict(
+    start_month=typer.Option(..., "--start-month", help="Fiscal year start month, e.g. February"),
+    start_day=typer.Option(..., "--start-day", help="Start day of week, e.g. Monday"),
+    pattern=typer.Option("4-5-4", "--pattern", help="4-4-5 | 4-5-4 | 5-4-4 | 13x4"),
+    anchor=typer.Option("nearest", "--anchor", help="nearest | first | fixed52"),
+    first_year=typer.Option(..., "--first-year", help="First fiscal year"),
+    last_year=typer.Option(..., "--last-year", help="Last fiscal year (inclusive)"),
+    leap=typer.Option("last", "--leap-week-period",
+                      help="Period absorbing a 53rd week: 'last' or an ordinal"),
+    year_prefix=typer.Option("", "--year-prefix", help="e.g. FY"),
+    quarter_prefix=typer.Option("", "--quarter-prefix", help="e.g. Q"),
+    year_basis=typer.Option("fiscal", "--year-basis", help="fiscal | gregorian"),
+    monthly_basis=typer.Option("fiscal", "--monthly-basis", help="fiscal | gregorian"),
+    quarterly_basis=typer.Option("fiscal", "--quarterly-basis", help="fiscal | gregorian"),
+    fy_number=typer.Option("start", "--fiscal-year-number", help="start | end"),
+    month_names=typer.Option(None, "--month-names", help="Comma-separated period labels"),
+    day_names=typer.Option(None, "--day-names", help="Comma-separated day labels, Sunday first"),
+)
+
+
+@app.command("preview")
+def preview_cmd(
+    start_month: str = _O["start_month"], start_day: str = _O["start_day"],
+    pattern: str = _O["pattern"], anchor: str = _O["anchor"],
+    first_year: int = _O["first_year"], last_year: int = _O["last_year"],
+    leap_week_period: str = _O["leap"],
+    year_prefix: str = _O["year_prefix"], quarter_prefix: str = _O["quarter_prefix"],
+    year_basis: str = _O["year_basis"], monthly_basis: str = _O["monthly_basis"],
+    quarterly_basis: str = _O["quarterly_basis"], fiscal_year_number: str = _O["fy_number"],
+    month_names: Optional[str] = _O["month_names"], day_names: Optional[str] = _O["day_names"],
+) -> None:
+    """Print the year and period shape without generating rows.
+
+    Use this as the confirmation gate before `generate` — it shows which years
+    are 53 weeks and which period absorbs the extra week.
+
+    Output: JSON to stdout.
+
+    Examples:
+
+    \b
+      ts calendar preview --start-month February --start-day Monday \\
+        --pattern 4-5-4 --anchor nearest --first-year 2015 --last-year 2026
+    """
+    spec, labels = build_spec_from_options(
+        start_month, start_day, pattern, anchor, first_year, last_year,
+        leap_week_period, year_prefix, quarter_prefix, year_basis,
+        monthly_basis, quarterly_basis, fiscal_year_number, month_names, day_names)
+    print(json.dumps(preview_payload(spec, labels), indent=2))
+
+
+@app.command("generate")
+def generate_cmd(
+    start_month: str = _O["start_month"], start_day: str = _O["start_day"],
+    pattern: str = _O["pattern"], anchor: str = _O["anchor"],
+    first_year: int = _O["first_year"], last_year: int = _O["last_year"],
+    leap_week_period: str = _O["leap"],
+    year_prefix: str = _O["year_prefix"], quarter_prefix: str = _O["quarter_prefix"],
+    year_basis: str = _O["year_basis"], monthly_basis: str = _O["monthly_basis"],
+    quarterly_basis: str = _O["quarterly_basis"], fiscal_year_number: str = _O["fy_number"],
+    month_names: Optional[str] = _O["month_names"], day_names: Optional[str] = _O["day_names"],
+    columns: int = typer.Option(30, "--columns", help="10 or 30"),
+    out: str = typer.Option(..., "--out", help="CSV output path"),
+    discriminator_column: Optional[str] = typer.Option(
+        None, "--discriminator-column", help="RLS discriminator column name"),
+    discriminator_value: Optional[str] = typer.Option(
+        None, "--discriminator-value", help="RLS discriminator literal for this variant"),
+) -> None:
+    """Generate a calendar as CSV.
+
+    Output: the CSV at --out; a JSON summary to stdout. Diagnostics to stderr.
+
+    Examples:
+
+    \b
+      ts calendar generate --start-month February --start-day Monday \\
+        --pattern 4-5-4 --anchor nearest --first-year 2015 --last-year 2026 \\
+        --out retail.csv
+    """
+    spec, labels = build_spec_from_options(
+        start_month, start_day, pattern, anchor, first_year, last_year,
+        leap_week_period, year_prefix, quarter_prefix, year_basis,
+        monthly_basis, quarterly_basis, fiscal_year_number, month_names, day_names)
+    if bool(discriminator_column) != bool(discriminator_value):
+        raise typer.BadParameter(
+            "--discriminator-column and --discriminator-value must be given together")
+
+    cols = columns_for(columns)
+    rows = build_rows(spec, labels, columns=columns)
+    disc = (discriminator_column, discriminator_value) if discriminator_column else None
+    with open(out, "w", encoding="utf-8", newline="") as fh:
+        write_csv(rows, cols, fh, discriminator=disc)
+    print(f"Wrote {len(rows)} rows to {out}", file=sys.stderr)
+    print(json.dumps({"rows": len(rows), "columns": len(cols), "path": out}))
