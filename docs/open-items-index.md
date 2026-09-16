@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**145 total items** across 18 skills — **67 open**, 68 verified, 10 deferred
+**151 total items** across 19 skills — **70 open**, 71 verified, 10 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -19,6 +19,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
 | ts-load-source-data | 3 | **3** | 0 | 0 |
+| ts-object-calendar-builder | 6 | **3** | 3 | 0 |
 | ts-publish-orgs | 8 | **3** | 4 | 1 |
 | ts-convert-from-sisense | 5 | **2** | 2 | 1 |
 | ts-convert-from-tableau | 17 | **2** | 12 | 3 |
@@ -27,7 +28,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-object-model-agentql-query | 6 | **0** | 6 | 0 |
-### Untagged (67 items)
+### Untagged (70 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -81,6 +82,9 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-object-answer-promote | #3 | Bare display-name column references in Model formulas | OPEN |
 | ts-object-answer-promote | #4 | Answers embedded in Liveboards (not standalone objects) | OPEN |
 | ts-object-answer-promote | #5 | Sets (cohorts) in Answer TML | OPEN |
+| ts-object-calendar-builder | #2 | `generate-csv` unavailable on `se-thoughtspot` | OPEN |
+| ts-object-calendar-builder | #3 | `fiscal_year_number` default | OPEN |
+| ts-object-calendar-builder | #6 | Filter-widget behaviour for `13x4` period labels | OPEN |
 | ts-object-model-aggregates | #3 | Aggregate Model visibility | OPEN |
 | ts-object-model-aggregates | #4 | Non-additive measure routing | OPEN |
 | ts-object-model-aggregates | #5 | Cross-connection aggregates | OPEN |
