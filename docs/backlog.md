@@ -10568,11 +10568,22 @@ and should not be cited as if it does.
 `datasource_elements(root)`, then `.//column` within each — the shape `parse_twb` already
 uses. Add a `.tds`-rooted fixture to `test_twb_extractors.py`; there is currently none for
 this extractor, which is why a docstring that names the trap sat next to code that falls into
-it. One other confirmed instance of the same XPath shape: `set_extract.py:49` scans
-`root.findall(".//datasource//group")`, so Tableau groups are lost on a `.tds` the same way —
-fix both in one pass. `extract_blends` (`twb.py:268`) uses the same XPath but is **not**
-affected: it early-returns on a missing `<datasource-relationships>` element, which a
-standalone datasource never has.
+it.
+
+**Three sites share the self-exclusion, not one.** Confirmed by execution:
+
+- `set_extract.py:49` (`count_native_sets`) scans `.//datasource//group` — a `.tds` root
+  returns **0 native Sets** where the equivalent `.twb` returns 1.
+- `extract_blends` (`twb.py:268`) builds `fed_to_caption` from `root.findall(".//datasource")`,
+  which is empty on a datasource-rooted tree, so nothing resolves and the graph comes back
+  `{}`. Its early return on a missing `<datasource-relationships>` masks this for the ordinary
+  `.tds`, but a datasource-rooted tree that *does* carry relationships gets past the guard and
+  still returns `{}`. Treat the early return as a coincidence, not as protection.
+- `extract_table_calc_addressing` (`twb.py:321`), this item's subject.
+
+**On the PR #511 branch the `.tds` path emits no warning either** — the new `warnings` list is
+populated inside the column loop, and the loop never runs, so the degradation this item
+describes is invisible on exactly the surface added to make degradations visible.
 
 **Target:** next Tableau converter pass.
 
@@ -10605,6 +10616,18 @@ surfaces then contradict each other, and SKILL.md Step 3f reads both.
 
 Neither warning's context string carries enough to disambiguate: case 1 has no datasource,
 case 2 has no instance name.
+
+**Worse than order-independent loss: document order decides which value survives, and the
+warning is byte-identical either way.** Confirmed by running case 1 in both orders —
+
+| Document order | `address_offset` | Warning emitted |
+|---|---|---|
+| `false` first, `-1` second | `-1` (good value survives) | `column '[Calculation_1]': ... 'false' ... skipped` |
+| `-1` first, `false` second | `None` (good value destroyed) | *byte-identical to the row above* |
+
+So the same warning text describes both "your offset is intact" and "your offset is gone",
+and which one a workbook gets is decided by the order Tableau happened to serialize its
+datasources in. A reader cannot tell the two apart from the output, and no test pins either.
 
 **Degenerate case, same function.** A `<worksheet>` with no `name` attribute keys
 `ws_overrides` under Python `None` — serialized as the JSON key `"null"`, which Step 3f's
