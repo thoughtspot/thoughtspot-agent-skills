@@ -189,3 +189,58 @@ def generate_cmd(
         write_csv(rows, cols, fh, discriminator=disc)
     print(f"Wrote {len(rows)} rows to {out}", file=sys.stderr)
     print(json.dumps({"rows": len(rows), "columns": len(cols), "path": out}))
+
+
+from ts_cli.custom_calendar.compare import (
+    LABEL_DIMENSIONS, compare_anchors, compare_labels,
+)
+
+
+@app.command("compare")
+def compare_cmd(
+    vary: str = typer.Option(..., "--vary",
+                             help="anchor | " + " | ".join(LABEL_DIMENSIONS)),
+    start_month: str = _O["start_month"], start_day: str = _O["start_day"],
+    pattern: str = _O["pattern"], anchor: str = _O["anchor"],
+    first_year: int = _O["first_year"], last_year: int = _O["last_year"],
+    leap_week_period: str = _O["leap"],
+    year_prefix: str = _O["year_prefix"], quarter_prefix: str = _O["quarter_prefix"],
+    month_names: Optional[str] = _O["month_names"], day_names: Optional[str] = _O["day_names"],
+    max_samples: int = typer.Option(10, "--max-samples",
+                                    help="Cap on sample differing rows"),
+) -> None:
+    """Show what one option choice actually changes, before generating a calendar.
+
+    Reports only disagreements. "0 of 364 rows differ" is a useful answer — it
+    means the choice is irrelevant for this calendar.
+
+    --vary anchor also reports first_divergence: the first year where the anchor
+    rules stop agreeing. Any test range shorter than that will make the native
+    ThoughtSpot API look correct when it is not.
+
+    Output: JSON to stdout.
+
+    Examples:
+
+    \b
+      ts calendar compare --vary year-basis --start-month December \\
+        --start-day Monday --pattern 4-4-5 --anchor first \\
+        --first-year 2024 --last-year 2024
+
+      ts calendar compare --vary anchor --start-month February \\
+        --start-day Monday --pattern 4-5-4 --anchor nearest \\
+        --first-year 2015 --last-year 2026
+    """
+    spec, labels = build_spec_from_options(
+        start_month, start_day, pattern, anchor, first_year, last_year,
+        leap_week_period, year_prefix, quarter_prefix, "fiscal", "fiscal",
+        "fiscal", "start", month_names, day_names)
+
+    if vary == "anchor":
+        print(json.dumps(compare_anchors(spec), indent=2))
+        return
+    try:
+        print(json.dumps(compare_labels(spec, labels, vary, max_samples=max_samples),
+                         indent=2))
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from None

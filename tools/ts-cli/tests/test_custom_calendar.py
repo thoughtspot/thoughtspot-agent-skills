@@ -571,3 +571,92 @@ def test_year_prefix_drift_is_a_warning_not_an_error():
     findings = [f for f in validate_set_labels({"a": a, "b": b})
                 if f.code == "label-format-drift"]
     assert findings and all(f.severity == "warning" for f in findings)
+
+
+from ts_cli.custom_calendar.compare import (
+    LABEL_DIMENSIONS, compare_labels, compare_anchors,
+)
+
+
+def _dec_spec():
+    return CalendarSpec(start_month=12, start_day_of_week=MONDAY, pattern="4-4-5",
+                        anchor_rule="first", first_year=2024, last_year=2024)
+
+
+def _jan_spec():
+    # FY2023 is the genuine zero case: 2023-01-02 .. 2023-12-31, 52 weeks, entirely
+    # inside one Gregorian year. Most January-start week-aligned years DO spill —
+    # FY2024 runs to 2025-01-05 (53 weeks) and yields 5 differing rows.
+    return CalendarSpec(start_month=1, start_day_of_week=MONDAY, pattern="4-4-5",
+                        anchor_rule="first", first_year=2023, last_year=2023)
+
+
+def _jan_spilling_spec():
+    # FY2024: 2024-01-01 .. 2025-01-05, 53 weeks — spills 5 days into 2025.
+    return CalendarSpec(start_month=1, start_day_of_week=MONDAY, pattern="4-4-5",
+                        anchor_rule="first", first_year=2024, last_year=2024)
+
+
+def test_label_dimensions_cover_every_comparable_option():
+    assert LABEL_DIMENSIONS["year-basis"] == ("fiscal", "gregorian")
+    assert LABEL_DIMENSIONS["monthly-basis"] == ("fiscal", "gregorian")
+    assert LABEL_DIMENSIONS["quarterly-basis"] == ("fiscal", "gregorian")
+    assert LABEL_DIMENSIONS["fiscal-year-number"] == ("start", "end")
+
+
+def test_december_calendar_has_differing_rows_for_year_basis():
+    out = compare_labels(_dec_spec(), LabelSpec(), "year-basis")
+    assert out["values"] == ["fiscal", "gregorian"]
+    assert out["total_rows"] == 364
+    assert out["differing_rows"] > 0
+    sample = out["samples"][0]
+    assert sample["fiscal"]["year"] != sample["gregorian"]["year"]
+
+
+def test_a_fiscal_year_inside_one_gregorian_year_reports_zero_differing_rows():
+    # A null result is the informative case: the choice is irrelevant for THIS
+    # calendar. It is not a property of January starts in general — see the
+    # spilling test below.
+    out = compare_labels(_jan_spec(), LabelSpec(), "year-basis")
+    assert out["total_rows"] == 364
+    assert out["differing_rows"] == 0
+    assert out["samples"] == []
+
+
+def test_a_spilling_january_year_does_report_differing_rows():
+    # The counterpart, and the reason `compare` earns its place: a week-aligned
+    # January calendar usually DOES spill into the next Gregorian year, which a
+    # user would not guess. FY2024 spills 5 days.
+    out = compare_labels(_jan_spilling_spec(), LabelSpec(), "year-basis")
+    assert out["differing_rows"] == 5
+    assert out["samples"][0]["fiscal"]["year"] == "2024"
+    assert out["samples"][0]["gregorian"]["year"] == "2025"
+
+
+def test_compare_labels_rejects_unknown_dimension():
+    with pytest.raises(ValueError, match="dimension"):
+        compare_labels(_dec_spec(), LabelSpec(), "colour")
+
+
+def test_compare_labels_caps_the_sample():
+    out = compare_labels(_dec_spec(), LabelSpec(), "year-basis", max_samples=3)
+    assert len(out["samples"]) <= 3
+
+
+def test_compare_anchors_reports_first_divergence():
+    spec = _lulu_spec(2015, 2026)
+    out = compare_anchors(spec)
+    assert out["values"] == ["nearest", "first", "fixed52"]
+    by_year = {y["year"]: y for y in out["years"]}
+    assert by_year[2015]["nearest"] == "2015-02-02"
+    assert by_year[2017]["nearest"] == "2017-01-30"
+    assert by_year[2017]["first"] == "2017-02-06"
+    # nearest and fixed52 agree until the 2018 leap week pushes them apart.
+    assert by_year[2019]["nearest"] == "2019-02-04"
+    assert by_year[2019]["fixed52"] == "2019-01-28"
+    assert out["first_divergence"] == 2017
+
+
+def test_compare_anchors_flags_the_short_range_trap():
+    out = compare_anchors(_lulu_spec(2015, 2026))
+    assert out["nearest_vs_fixed52_first_divergence"] == 2019

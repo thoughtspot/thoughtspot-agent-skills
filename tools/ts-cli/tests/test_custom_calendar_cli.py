@@ -63,3 +63,36 @@ def test_generate_rejects_bad_pattern(tmp_path):
     ])
     assert res.exit_code != 0
     assert "pattern" in res.output.lower()
+
+
+def test_compare_cli_varies_year_basis():
+    res = runner.invoke(app, [
+        "compare", "--vary", "year-basis",
+        "--start-month", "December", "--start-day", "Monday",
+        "--pattern", "4-4-5", "--anchor", "first",
+        "--first-year", "2024", "--last-year", "2024",
+    ])
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.stdout)
+    assert payload["differing_rows"] > 0
+
+
+def test_compare_cli_varies_anchor():
+    res = runner.invoke(app, [
+        "compare", "--vary", "anchor",
+        "--start-month", "February", "--start-day", "Monday",
+        "--pattern", "4-5-4", "--anchor", "nearest",
+        "--first-year", "2015", "--last-year", "2026",
+    ])
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout)["first_divergence"] == 2017
+
+
+def test_compare_cli_rejects_unknown_dimension():
+    res = runner.invoke(app, [
+        "compare", "--vary", "colour",
+        "--start-month", "February", "--start-day", "Monday",
+        "--pattern", "4-5-4", "--anchor", "nearest",
+        "--first-year", "2017", "--last-year", "2017",
+    ])
+    assert res.exit_code != 0
