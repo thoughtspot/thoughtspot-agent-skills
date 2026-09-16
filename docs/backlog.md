@@ -157,6 +157,8 @@ are roughly ordered by value÷effort.
 | BL-251 | `classify-columns` reports `SUM` for every raw measure regardless of declared aggregation — 7 of 7 | next `ts agentql` change |
 | BL-252 | `introspect` emits no `fqn`, so `build-model` collides on any generic table name (52 `DIM_PRODUCT` live) | next SF converter pass |
 | BL-253 | table alias dropped for the physical name — breaks every query citing the alias; masks BL-241 | next SF converter pass, before BL-241 |
+| BL-270 | table-calc addressing is empty for every `.tds`/`.tdsx` input — `.//datasource//column` cannot match a datasource-rooted tree | next Tableau converter pass |
+| BL-274 | two PRs can ship the same ts-cli version with zero merge conflicts and every gate green — demonstrated on #511 vs #512 | next validator pass |
 
 ### Tier 3 — Opportunistic
 
@@ -203,6 +205,9 @@ are roughly ordered by value÷effort.
 | BL-258 | two `parse-sv` defects on the hand-written-DDL path (implicit `references T`; comment-preceded metric) | with BL-248 and BL-255 |
 | BL-259 | `sv_build_model.py:43` stamps `aggregation: SUM` on an already-aggregated formula — **question unresolved** | next SF converter pass |
 | BL-260 | `PARTITION BY EXCLUDING` maps to nothing on a qualified reference; `LAG`/`LEAD` unrecorded | next formula pass, with BL-242 |
+| BL-269 | `build_blend_plan` disagrees with its own previous run on identical input — weakens the corpus-diff regression instrument | next Tableau converter pass |
+| BL-271 | table-calc warnings name entries that are not in the output they describe (last-wins keys vs per-occurrence warnings) | next Tableau converter pass |
+| BL-272 | five mutually inconsistent handlings of "non-numeric token in TWB XML"; degradation channel exists in one extractor of six | next Tableau converter pass |
 
 ### Tier 4 — Deferred
 
@@ -228,6 +233,7 @@ are roughly ordered by value÷effort.
 | BL-237 | two sites still classify `data_panel_column_groups` as a `properties` key | next Snowflake pass |
 | BL-239 | `ts-from-databricks-rules.md` TML templates put nested keys at the column root | next Databricks pass |
 | BL-261 | `build-sv --help` cites `ts tml export --output-dir`, which does not exist | next `commands/snowflake.py` change |
+| BL-273 | `tools/ts-cli/CLAUDE.md:153` asserts `Current version: 0.135.0`; package is at 0.139.0 and nothing gates the line | next ts-cli version bump |
 
 ---
 
@@ -10496,3 +10502,219 @@ metrics) before it carries any of its funnel — 6 of its 9 metrics were already
 
 **Target:** next from-direction converter pass — take with BL-262; both are angle-15
 preconditions and this one is the cheaper.
+
+
+## BL-269 — `build_blend_plan` disagrees with its own previous run on identical input `Tier 3`
+
+**Filed:** 2026-09-16.
+**Source:** review of PR #511 (SCAL-338450). The PR body records this defect and states it is
+"left to its own item" — no such item existed. Filed here so the promised exit is real.
+**Affects:** `tools/ts-cli/ts_cli/tableau/twb.py` (`build_blend_plan`).
+
+The 33-workbook regression diff run for PR #511 produced one apparent difference that the PR's
+change cannot explain: **Hourly Sales Flash**. The old code disagrees with *its own* previous
+run on the same input — same members, different order — so the diff is not old-vs-new at all.
+Non-determinism in `build_blend_plan`, almost certainly set or dict iteration feeding an
+ordered output structure.
+
+**Why it matters more than cosmetics.** It is load-bearing for exactly the technique PR #511
+used to earn its confidence: "run old and new over the corpus and diff the outputs" is the
+repo's strongest regression instrument for the Tableau converter, and every future use of it
+has to hand-wave one file. A reviewer cannot tell a real regression in that file from the
+noise, which means the instrument is silently weaker than it reads. It also makes any
+`parse` output diff-based review — by a human or an agent — unreliable for blended workbooks.
+
+**Approach.** Find the unordered container (candidates: a `set` of blend members, or dict
+iteration over datasource captions) and sort at the boundary where the plan is built, not at
+the point of comparison — a sort in the test would hide it rather than fix it. Then re-run the
+corpus diff old-vs-old to confirm the file is stable before trusting it old-vs-new. A cheap
+gate: parse one blended workbook twice in the same test and assert the two outputs are equal.
+
+**Target:** next Tableau converter pass — take before the next corpus-diff regression run,
+since that run's evidentiary value depends on it.
+
+
+## BL-270 — table-calc addressing is empty for every `.tds`/`.tdsx` input, silently `Tier 2`
+
+**Filed:** 2026-09-16.
+**Source:** review of PR #511 (SCAL-338450); the defect predates that PR.
+**Affects:** `tools/ts-cli/ts_cli/tableau/twb.py` (`extract_table_calc_addressing`, line 321 on
+`main`), `agents/cli/ts-convert-from-tableau/SKILL.md` Step 3f.
+
+`extract_table_calc_addressing` scans `root.findall(".//datasource//column")`. That XPath
+never matches when the root **is** the `<datasource>` element, which is precisely the
+`.tds`/`.tdsx` shape. Confirmed by executing the extractor against a `.tds`-shaped root: it
+returns `{"column_level": {}, "ws_overrides": {}}` regardless of content.
+
+**The repo already knows this trap and already solved it.** `datasource_elements()`
+(`twb.py:42`) exists for exactly this and its docstring names the failure verbatim — "a
+standalone `.tds`/`.tdsx` root **is** the `<datasource>` itself (`.//datasource` would not
+match it)". `parse_twb` (`twb.py:188`) uses the helper correctly. This one extractor does not.
+`parse_cmd`'s argument help advertises `.tds/.tdsx published-datasource file` and
+`load_xml_root` handles it, so the input is supported, reached, and silently degraded.
+
+**Silent in the way that matters:** `parse` exits 0, writes the output file, and emits an
+empty `table_calc_addressing` that is indistinguishable from a datasource that genuinely has
+no table calcs. Step 3f then reasons about LOOKUP/INDEX/RUNNING_SUM addressing from an empty
+map and produces a confidently wrong answer rather than a missing one.
+
+**Second-order consequence, recorded because it bounds an evidence claim.** PR #511 fixed a
+crash in `_read_table_calc` and verified it across a 33-workbook corpus. That corpus is
+workbooks. On the `.tds` path no column is ever visited, so the crash class could not have
+been *observed* there either — the corpus evidence does not extend to published datasources,
+and should not be cited as if it does.
+
+**Approach.** Replace the `.//datasource//column` scan with iteration over
+`datasource_elements(root)`, then `.//column` within each — the shape `parse_twb` already
+uses. Add a `.tds`-rooted fixture to `test_twb_extractors.py`; there is currently none for
+this extractor, which is why a docstring that names the trap sat next to code that falls into
+it. One other confirmed instance of the same XPath shape: `set_extract.py:49` scans
+`root.findall(".//datasource//group")`, so Tableau groups are lost on a `.tds` the same way —
+fix both in one pass. `extract_blends` (`twb.py:268`) uses the same XPath but is **not**
+affected: it early-returns on a missing `<datasource-relationships>` element, which a
+standalone datasource never has.
+
+**Target:** next Tableau converter pass.
+
+
+## BL-271 — table-calc warnings name entries that are not in the output they describe `Tier 3`
+
+**Filed:** 2026-09-16.
+**Source:** review of PR #511 (SCAL-338450). The last-wins keying predates that PR; the
+*disagreement* between the warnings and the JSON is new with it.
+**Affects:** `tools/ts-cli/ts_cli/tableau/twb.py` (`extract_table_calc_addressing`).
+
+Both maps are keyed on an identifier that is not unique, so entries overwrite each other
+last-wins, while the warning list added by PR #511 appends once per *occurrence*. The two
+surfaces then contradict each other, and SKILL.md Step 3f reads both.
+
+**Confirmed by execution, two independent cases:**
+
+1. `column_level` is keyed on the calc id alone. Datasource `a` holding `[Calculation_1]` with
+   `<address><value>false</value>` and datasource `b` holding `[Calculation_1]` with
+   `<value>-1</value>` yields `column_level["[Calculation_1]"]["address_offset"] == -1` **and** a
+   warning saying an offset was skipped for `[Calculation_1]`. The degraded entry is gone; the
+   surviving entry is not the one the warning describes. Not contrived — SKILL.md Step 3g
+   documents copied/cloned datasources that "inherit all calculated fields from the original",
+   i.e. duplicate `[Calculation_NNN]` ids, as a routine shape.
+2. `ws_overrides[ws_name]` is keyed on the `<column-instance>` `column` attribute, which repeats
+   within a worksheet — Tableau writes one instance per derivation (`[sum:cost:qk]`,
+   `[usr:cost:qk]`, …) all carrying the same `column`. Two such instances, both with a
+   non-numeric address, give `len(warnings) == 2` and exactly **one** surviving entry. On a
+   large workbook this also multiplies the stderr echo by the derivation count.
+
+Neither warning's context string carries enough to disambiguate: case 1 has no datasource,
+case 2 has no instance name.
+
+**Degenerate case, same function.** A `<worksheet>` with no `name` attribute keys
+`ws_overrides` under Python `None` — serialized as the JSON key `"null"`, which Step 3f's
+`ws_overrides[W][calc_id]` lookup can never hit — and renders the warning as the literal text
+`worksheet None`.
+
+**Approach.** Key `column_level` on `(datasource, col_name)` and `ws_overrides` on the
+instance `name` rather than the `column` attribute, or at minimum widen both context strings
+so the warnings are distinguishable even while the keys collide. Skip worksheets with no name
+rather than keying on `None`. A test that asserts `len(warnings) == len(degraded entries)`
+pins the invariant that is currently violated.
+
+**Target:** next Tableau converter pass — take with BL-272, same function, same read.
+
+
+## BL-272 — five different answers to "non-numeric token in TWB XML", none of them shared `Tier 3`
+
+**Filed:** 2026-09-16.
+**Source:** review of PR #511 (SCAL-338450), which added the fifth.
+**Affects:** `tools/ts-cli/ts_cli/tableau/` — `twb.py`, `dashboards.py`, `set_extract.py`,
+`sets.py`.
+
+The same problem — Tableau writes a token where the parser expects an integer — is now handled
+five mutually inconsistent ways in one package:
+
+| Site | Handling | On a bad token |
+|---|---|---|
+| `dashboards.py:63` | `count.isdigit()` pre-check | silently skips (and nulls legitimate negatives) |
+| `dashboards.py:159` | `try`/`except (TypeError, ValueError)` | returns `None` for the whole tile |
+| `set_extract.py:237` | `try`/`except ValueError` | keeps the **raw string** |
+| `sets.py:64` | `try`/`except (TypeError, ValueError)` | keeps the **raw value** |
+| `twb.py` `_read_table_calc` (PR #511) | `try`/`except ValueError` | drops to `None`, plus a warnings list bolted onto one extractor |
+
+PR #511's choice is right for its site and its reasoning is sound — `.isdigit()` is False for
+negative offsets, and every numeric address in the 33-workbook corpus is negative, so an
+isdigit pre-check there would have silently nulled 26 working values across 4 workbooks to
+stop a loud crash in 2. That is the correct local call. The cost is structural: the next TWB
+token crash gets a sixth ad-hoc answer, nobody can predict what any of the five do, and
+`dashboards.py:63` is still running the approach PR #511's own docstring argues against.
+
+**The degradation channel has the same problem.** PR #511 threads a `warnings` list through
+one extractor, so a degradation in `extract_table_calc_addressing` is reported and an
+identical degradation in `extract_blends`, `detect_orphan_calcs`, `build_blend_plan` or
+`extract_dashboards` is not — reported or unreported according to which one happened to crash
+a customer, not according to what was lost.
+
+**Approach.** One `_safe_int(text) -> int | None` helper that keeps the raw token alongside the
+parsed value, and a single degradations channel threaded through all six `parse_cmd`
+extractors so any degradation surfaces the same way. Migrate `dashboards.py:63` off `.isdigit()`
+in the same pass — note it is a behaviour change there (negatives start parsing), so it needs
+its own corpus diff rather than being folded in blind.
+
+**Target:** next Tableau converter pass — take with BL-271.
+
+
+## BL-273 — `tools/ts-cli/CLAUDE.md` asserts a version it has not tracked for four releases `Tier 4`
+
+**Filed:** 2026-09-16.
+**Source:** review of PR #511 (SCAL-338450); drift predates that PR.
+**Affects:** `tools/ts-cli/CLAUDE.md:153`, `tools/validate/check_version_sync.py`.
+
+Line 153 reads `Current version: **0.135.0**. Run ...check_version_sync.py to verify.` — the
+package is at 0.139.0. The file is loaded at the start of every session working in
+`tools/ts-cli/`, so the stale number is read as current by every such session, and the
+sentence pointing at the verification script makes it look gated when it is not:
+`check_version_sync.py` compares `__init__.py` against `pyproject.toml` and never looks at
+this line. The "Adding a command" / "Adding an audit check" checklists in the same file say
+only "bump version in both `__init__.py` and `pyproject.toml`", so nothing prompts the edit.
+
+**Approach.** Prefer deleting the number over updating it — a hand-maintained copy of a value
+that is already gated in two other files is drift waiting to happen again, and the useful half
+of the sentence is the pointer to `check_version_sync.py`. If the number is wanted, extend
+`check_version_sync.py` to cover this line so it is gated rather than asserted.
+
+**Target:** next ts-cli version bump — whoever touches the version next.
+
+
+## BL-274 — two PRs can ship the same ts-cli version with zero conflicts and every gate green `Tier 2`
+
+**Filed:** 2026-09-16.
+**Source:** review of PR #511 (SCAL-338450), caught by simulating its merge against `main`.
+**Affects:** `tools/validate/check_version_sync.py`, `CHANGELOG.md`, `tools/ts-cli/pyproject.toml`,
+`tools/ts-cli/ts_cli/__init__.py`.
+
+**Demonstrated, not theorised.** PR #512 merged on 2026-09-16 releasing ts-cli **0.139.0**. PR
+#511, branched earlier from 0.138.0, also bumps to **0.139.0**. Both sides change the same two
+lines to the same value, so git sees an identical change on both branches and auto-merges with
+**no conflict at all** — `git merge-tree origin/main pr511-review` reports zero markers and the
+merged tree carries `version = "0.139.0"`. GitHub agrees: `mergeable=MERGEABLE`.
+
+Every existing gate passes. `check_version_sync.py` compares `__init__.py` against
+`pyproject.toml` and they still agree — the invariant it checks is *internal consistency*, not
+*novelty*, and the collision preserves internal consistency perfectly. The result is two
+distinct releases published under one version number, and a `CHANGELOG.md` carrying two
+entries that both claim 0.139.0.
+
+**This is the BL-171 shape in a different file.** `check_backlog_integrity.py` exists because
+two branches independently claimed BL-171 and "accept both" passed all 23 pre-commit checks —
+that validator now enforces *uniqueness* of a BL id. The version number has the same
+single-fixed-insertion-point structure, the same append-only CHANGELOG beside it, and no
+uniqueness rule. The version case is worse in one respect: the BL-171 collision at least
+produced a visible conflict, and this one does not, because agreeing on the same wrong value
+is invisible to a three-way merge.
+
+**Approach.** Extend `check_version_sync.py` with a novelty rule: on a PR that changes the
+version, assert the new value does not already appear in a `git tag`, in `CHANGELOG.md` on the
+merge base's `main`, or in `origin/main`'s `pyproject.toml`. That is the one check that fires
+here and cannot be satisfied by two branches making the same edit. A companion CHANGELOG rule
+— no two entries naming the same ts-cli version — covers the case where the version is bumped
+correctly but the changelog line is duplicated. Note this is a CI-only check: it needs
+`origin/main`, so it cannot be a pure pre-commit hook.
+
+**Target:** next validator pass — take with BL-229 and BL-231, both validator-coverage items.
