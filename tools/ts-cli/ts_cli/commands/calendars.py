@@ -244,3 +244,82 @@ def compare_cmd(
                          indent=2))
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from None
+
+
+import csv as _csv
+from datetime import date as _date
+from pathlib import Path
+
+from ts_cli.custom_calendar.rows import COLUMNS_10, COLUMNS_30
+from ts_cli.custom_calendar.validate import validate_rows, validate_set_labels
+
+
+def read_calendar_csv(path: str) -> Tuple[List[Dict[str, object]], List[str]]:
+    """Read a calendar CSV back into typed rows plus its contract column list.
+
+    A trailing discriminator column is tolerated and excluded from the contract.
+    """
+    with open(path, newline="", encoding="utf-8") as fh:
+        raw = list(_csv.DictReader(fh))
+    if not raw:
+        return [], []
+    header = list(raw[0].keys())
+    contract = list(COLUMNS_30) if len(header) >= 30 else list(COLUMNS_10)
+
+    rows: List[Dict[str, object]] = []
+    for r in raw:
+        typed: Dict[str, object] = {}
+        for col in contract:
+            val = r[col]
+            if col == "date" or col.endswith("_epoch"):
+                typed[col] = _date.fromisoformat(val)
+            elif col == "is_weekend":
+                typed[col] = val.strip().lower() == "true"
+            elif col.startswith(("day_number_", "week_number_", "month_number_",
+                                 "quarter_number_", "absolute_")):
+                typed[col] = int(val)
+            else:
+                typed[col] = val
+        rows.append(typed)
+    return rows, contract
+
+
+@app.command("validate")
+def validate_cmd(
+    csv_paths: List[str] = typer.Option(..., "--csv",
+                                        help="Calendar CSV to check (repeat for an RLS set)"),
+    allow_label_drift: bool = typer.Option(
+        False, "--allow-label-drift",
+        help="Downgrade cross-variant label mismatches from error to warning"),
+) -> None:
+    """Check calendars against the column contract and the structural invariants.
+
+    With two or more --csv paths, also checks cross-variant label consistency:
+    ThoughtSpot indexes label values across every row of the registered object
+    while RLS resolves a user to one variant, so AUGUST in one variant and AUG
+    in another offers both as search suggestions while only one can return rows.
+
+    Output: JSON to stdout. Exits non-zero if any finding has severity "error".
+
+    Examples:
+
+    \b
+      ts calendar validate --csv retail.csv
+      ts calendar validate --csv tenant_a.csv --csv tenant_b.csv
+    """
+    findings = []
+    variant_rows: Dict[str, List[Dict[str, object]]] = {}
+    for path in csv_paths:
+        rows, contract = read_calendar_csv(path)
+        variant_rows[Path(path).stem] = rows
+        for f in validate_rows(rows, columns=contract):
+            findings.append({"severity": f.severity, "code": f.code,
+                             "message": f.message, "source": path})
+
+    for f in validate_set_labels(variant_rows, allow_label_drift=allow_label_drift):
+        findings.append({"severity": f.severity, "code": f.code,
+                         "message": f.message, "source": "<set>"})
+
+    print(json.dumps({"findings": findings}, indent=2))
+    if any(f["severity"] == "error" for f in findings):
+        raise typer.Exit(1)

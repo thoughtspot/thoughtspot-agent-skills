@@ -96,3 +96,50 @@ def test_compare_cli_rejects_unknown_dimension():
         "--first-year", "2017", "--last-year", "2017",
     ])
     assert res.exit_code != 0
+
+
+def _gen(tmp_path, name, **extra):
+    out = tmp_path / name
+    args = ["generate", "--start-month", "February", "--start-day", "Monday",
+            "--pattern", "4-5-4", "--anchor", "nearest",
+            "--first-year", "2017", "--last-year", "2017", "--out", str(out)]
+    for k, v in extra.items():
+        args += [f"--{k.replace('_', '-')}", v]
+    res = runner.invoke(app, args)
+    assert res.exit_code == 0, res.output
+    return out
+
+
+def test_validate_passes_a_clean_calendar(tmp_path):
+    path = _gen(tmp_path, "clean.csv")
+    res = runner.invoke(app, ["validate", "--csv", str(path)])
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout)["findings"] == []
+
+
+def test_validate_fails_on_a_date_gap(tmp_path):
+    path = _gen(tmp_path, "gap.csv")
+    lines = path.read_text().splitlines()
+    path.write_text("\n".join(lines[:5] + lines[6:]) + "\n")
+    res = runner.invoke(app, ["validate", "--csv", str(path)])
+    assert res.exit_code != 0
+    assert "date-gap" in res.stdout
+
+
+def test_validate_flags_cross_variant_label_drift(tmp_path):
+    a = _gen(tmp_path, "a.csv")
+    b = _gen(tmp_path, "b.csv",
+             month_names="FEB,MAR,APR,MAY,JUN,JUL,AUG,SEP,OCT,NOV,DEC,JAN")
+    res = runner.invoke(app, ["validate", "--csv", str(a), "--csv", str(b)])
+    assert res.exit_code != 0
+    assert "label-drift" in res.stdout
+
+
+def test_allow_label_drift_downgrades_and_exits_zero(tmp_path):
+    a = _gen(tmp_path, "a2.csv")
+    b = _gen(tmp_path, "b2.csv",
+             month_names="FEB,MAR,APR,MAY,JUN,JUL,AUG,SEP,OCT,NOV,DEC,JAN")
+    res = runner.invoke(app, ["validate", "--csv", str(a), "--csv", str(b),
+                              "--allow-label-drift"])
+    assert res.exit_code == 0, res.output
+    assert any(f["severity"] == "warning" for f in json.loads(res.stdout)["findings"])
