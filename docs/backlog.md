@@ -9535,7 +9535,8 @@ outbound-leg finding.
 **Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
 (synthesis). Independently hit by all four run groups and the pilot. Raw captures at
 `.svrt/work/*/rt.sql`, `rtf.sql`, `*_exec.err` (**`.svrt/` is gitignored**).
-**Affects:** `tools/ts-cli/ts_cli/snowflake_ops.py` (`build-sv` dimension + metric emitters),
+**Affects:** `tools/ts-cli/ts_cli/sv_build_sv.py` (`build_sv_ddl` / `_classify_formula_column` —
+the `build-sv` dimension + metric emitters),
 `agents/cli/ts-convert-to-snowflake-sv/references/coverage-matrix.md` rows 13/18/20/21.
 **Status:** OPEN.
 
