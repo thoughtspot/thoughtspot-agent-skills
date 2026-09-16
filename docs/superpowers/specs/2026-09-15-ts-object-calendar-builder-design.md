@@ -135,10 +135,19 @@ value of one dimension and reports **only where they disagree**:
 
 Two properties make this worth a command rather than "run `preview` twice":
 
-- **A null result is informative.** A January-start calendar has *no* rows where
-  fiscal and gregorian year differ. Reporting "0 of 364 rows differ" tells the user the
-  choice is irrelevant for their calendar, which running two previews and eyeballing
-  them does not.
+- **A null result is informative.** When a fiscal year sits entirely inside one
+  Gregorian year, *no* rows differ, and reporting "0 of 364 rows differ" tells the user
+  the choice is irrelevant for their calendar — which running two previews and
+  eyeballing them does not.
+
+  **This is rarer than it looks, and that is the point.** An earlier draft of this spec
+  claimed a January-start calendar simply has no differing rows. That is false for
+  week-aligned calendars, because the anchor is seldom 1 January. Verified for
+  January/Monday/`first`: FY2023 runs 2023-01-02 → 2023-12-31 and differs nowhere, but
+  FY2022, FY2024, FY2025 and FY2026 all spill into the following Gregorian year, and
+  FY2024 — a 53-week year ending 2025-01-05 — differs on 5 rows. So even a January
+  start usually *does* make the basis choice matter. A user cannot be expected to work
+  that out; the command exists to tell them.
 - **`--vary anchor` surfaces the testing trap directly.** `first_divergence` is
   exactly the year where a short test range stops telling the truth (2019 for the
   motivating retail case). Making it a reported number is cheaper than hoping someone
