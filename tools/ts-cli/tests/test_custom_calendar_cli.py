@@ -178,3 +178,50 @@ def test_validate_continues_after_one_bad_csv_in_a_set(tmp_path):
               for f in payload["findings"])
     assert any(f["code"] == "date-gap" and f["source"] == str(good)
               for f in payload["findings"])
+
+
+import pytest
+from ts_cli.commands.calendars import build_register_payload
+
+
+def test_register_payload_defaults_to_from_existing_table():
+    payload = build_register_payload(
+        name="RetailCal", connection="conn1", database="CUSTOM_CALENDAR",
+        schema="PUBLIC", table="retail_cal", native=False, spec=None)
+    assert payload["creation_method"] == "FROM_EXISTING_TABLE"
+    assert payload["table_reference"] == {
+        "connection_identifier": "conn1", "database_name": "CUSTOM_CALENDAR",
+        "schema_name": "PUBLIC", "table_name": "retail_cal"}
+    assert "calendar_type" not in payload
+
+
+def test_native_payload_carries_generation_parameters():
+    from ts_cli.custom_calendar.spec import CalendarSpec
+    spec = CalendarSpec(start_month=2, start_day_of_week=1, pattern="4-5-4",
+                        anchor_rule="fixed52", first_year=2027, last_year=2027)
+    payload = build_register_payload(
+        name="N", connection="c", database="D", schema="S", table="T",
+        native=True, spec=spec)
+    assert payload["creation_method"] == "FROM_INPUT_PARAMS"
+    assert payload["calendar_type"] == "FOUR_FIVE_FOUR"
+    assert payload["month_offset"] == "February"
+    assert payload["start_day_of_week"] == "Monday"
+
+
+def test_native_refuses_non_fixed52_anchor_rules():
+    from ts_cli.custom_calendar.spec import CalendarSpec
+    for rule in ("nearest", "first"):
+        spec = CalendarSpec(start_month=2, start_day_of_week=1, pattern="4-5-4",
+                            anchor_rule=rule, first_year=2027, last_year=2027)
+        with pytest.raises(ValueError, match="fixed52"):
+            build_register_payload(name="N", connection="c", database="D",
+                                   schema="S", table="T", native=True, spec=spec)
+
+
+def test_native_refuses_13x4_which_the_api_cannot_express():
+    from ts_cli.custom_calendar.spec import CalendarSpec
+    spec = CalendarSpec(start_month=1, start_day_of_week=1, pattern="13x4",
+                        anchor_rule="fixed52", first_year=2027, last_year=2027)
+    with pytest.raises(ValueError, match="13x4"):
+        build_register_payload(name="N", connection="c", database="D",
+                               schema="S", table="T", native=True, spec=spec)

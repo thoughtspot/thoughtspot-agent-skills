@@ -12,7 +12,7 @@ from ts_cli.custom_calendar.grid import build_years
 from ts_cli.custom_calendar.labels import default_month_names
 from ts_cli.custom_calendar.rows import build_rows, columns_for
 from ts_cli.custom_calendar.spec import (
-    MONTHS_EN, CalendarSpec, LabelSpec, leap_index, parse_day_of_week,
+    DAYS_EN, MONTHS_EN, CalendarSpec, LabelSpec, leap_index, parse_day_of_week,
     periods_per_year, validate_labels, validate_spec,
 )
 
@@ -332,3 +332,137 @@ def validate_cmd(
     print(json.dumps({"findings": findings}, indent=2))
     if any(f["severity"] == "error" for f in findings):
         raise typer.Exit(1)
+
+
+from ts_cli.client import ThoughtSpotClient, resolve_profile
+
+# ThoughtSpot calendar_type values. 13x4 has no native equivalent.
+_API_CALENDAR_TYPE = {
+    "4-4-5": "FOUR_FOUR_FIVE",
+    "4-5-4": "FOUR_FIVE_FOUR",
+    "5-4-4": "FIVE_FOUR_FOUR",
+}
+
+
+def build_register_payload(*, name: str, connection: str, database: str, schema: str,
+                           table: str, native: bool,
+                           spec: Optional[CalendarSpec]) -> Dict[str, object]:
+    """Build the POST /api/rest/2.0/calendars/create body.
+
+    `native` uses FROM_INPUT_PARAMS, which is only correct for the `fixed52`
+    anchor rule: the API emits fixed 364-day years and never inserts a leap week,
+    so any other rule would silently ship a drifting calendar. Verified against
+    LULULEMON on 2026-09-15 — see the skill's references/anchor-rules.md.
+
+    Pure — no I/O — so it is unit-testable without a live instance.
+    """
+    payload: Dict[str, object] = {
+        "name": name,
+        "table_reference": {
+            "connection_identifier": connection,
+            "database_name": database,
+            "schema_name": schema,
+            "table_name": table,
+        },
+        "creation_method": "FROM_INPUT_PARAMS" if native else "FROM_EXISTING_TABLE",
+    }
+    if not native:
+        return payload
+
+    if spec is None:
+        raise ValueError("--native requires the generation options")
+    if spec.anchor_rule != "fixed52":
+        raise ValueError(
+            f"--native cannot express anchor rule '{spec.anchor_rule}'. The ThoughtSpot "
+            "API emits fixed 364-day years with no leap week, which matches only "
+            "'fixed52'. Generate a table and register it with FROM_EXISTING_TABLE instead."
+        )
+    if spec.pattern not in _API_CALENDAR_TYPE:
+        raise ValueError(
+            f"--native cannot express pattern '{spec.pattern}' — the API has no "
+            f"13x4 calendar type. Generate a table and register it instead."
+        )
+    payload.update({
+        "calendar_type": _API_CALENDAR_TYPE[spec.pattern],
+        "month_offset": MONTHS_EN[spec.start_month - 1],
+        "start_day_of_week": DAYS_EN[spec.start_day_of_week],
+        "start_date": f"{spec.start_month:02d}/01/{spec.first_year}",
+        "end_date": f"{spec.start_month:02d}/01/{spec.last_year + 1}",
+    })
+    return payload
+
+
+@app.command("register")
+def register_cmd(
+    name: str = typer.Option(..., "--name", help="Calendar name in ThoughtSpot"),
+    connection: str = typer.Option(..., "--connection", help="Connection name or GUID"),
+    database: str = typer.Option(..., "--database"),
+    schema: str = typer.Option(..., "--schema"),
+    table: str = typer.Option(..., "--table", help="Warehouse table or view to register"),
+    native: bool = typer.Option(False, "--native",
+                                help="Use FROM_INPUT_PARAMS (fixed52 anchor rule only)"),
+    start_month: Optional[str] = typer.Option(None, "--start-month"),
+    start_day: Optional[str] = typer.Option(None, "--start-day"),
+    pattern: str = typer.Option("4-5-4", "--pattern"),
+    anchor: str = typer.Option("nearest", "--anchor"),
+    first_year: Optional[int] = typer.Option(None, "--first-year"),
+    last_year: Optional[int] = typer.Option(None, "--last-year"),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Register a calendar with ThoughtSpot.
+
+    Default path is FROM_EXISTING_TABLE: register a table this CLI generated.
+    --native uses FROM_INPUT_PARAMS and is REFUSED for any anchor rule other
+    than fixed52, because the API never inserts a leap week.
+
+    Output: JSON from POST /api/rest/2.0/calendars/create, to stdout.
+
+    Examples:
+
+    \b
+      ts calendar register --name RetailCal --connection "Snowflake Prod" \\
+        --database CUSTOM_CALENDAR --schema PUBLIC --table retail_cal
+    """
+    spec = None
+    if native:
+        missing = [n for n, v in (("--start-month", start_month), ("--start-day", start_day),
+                                  ("--first-year", first_year), ("--last-year", last_year))
+                   if v is None]
+        if missing:
+            raise typer.BadParameter(f"--native requires {', '.join(missing)}")
+        spec, _ = build_spec_from_options(
+            start_month, start_day, pattern, anchor, first_year, last_year,
+            "last", "", "", "fiscal", "fiscal", "fiscal", "start", None, None)
+    try:
+        payload = build_register_payload(
+            name=name, connection=connection, database=database, schema=schema,
+            table=table, native=native, spec=spec)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from None
+
+    client = ThoughtSpotClient(resolve_profile(profile))
+    resp = client.post("/api/rest/2.0/calendars/create", json=payload)
+    print(json.dumps(resp.json()))
+
+
+@app.command("search")
+def search_cmd(
+    connection: Optional[str] = typer.Option(None, "--connection",
+                                             help="Connection name or GUID to scope the search"),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """List registered custom calendars, to verify what landed.
+
+    Output: JSON array from POST /api/rest/2.0/calendars/search, to stdout.
+
+    Examples:
+
+    \b
+      ts calendar search --connection "Snowflake Prod"
+    """
+    payload: Dict[str, object] = {}
+    if connection:
+        payload["connection_identifier"] = connection
+    client = ThoughtSpotClient(resolve_profile(profile))
+    resp = client.post("/api/rest/2.0/calendars/search", json=payload)
+    print(json.dumps(resp.json()))
