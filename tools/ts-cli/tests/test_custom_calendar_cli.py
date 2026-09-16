@@ -1,8 +1,49 @@
 import json
+import re
 from typer.testing import CliRunner
 from ts_cli.commands.calendars import app
 
 runner = CliRunner()
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+_BOX_DRAWING_RE = re.compile(r"[─-╿]")  # │ ╭ ╮ ╰ ╯ ─ and friends
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def cli_text(res) -> str:
+    """Flatten Typer/Rich CLI output into a single, wrap-independent string.
+
+    Typer renders a `BadParameter` (and other `UsageError`s) inside a Rich
+    panel and WRAPS the message to the console width Rich detects — which,
+    under `CliRunner`, comes from the `COLUMNS` env var (Typer's own click
+    fork forces plain-help formatting to width 80, but the *Rich* error
+    console is unaffected by that and auto-detects separately). A test that
+    asserts a multi-word phrase as a contiguous substring of the raw output
+    is therefore testing terminal width, not the message: varying `COLUMNS`
+    locally on this exact assertion shape flipped the result with the exit
+    code unchanged (correctly 2) throughout:
+
+        COLUMNS  substring present
+        100      True
+        80       True
+        70       False   <- CI-shaped width: the wrap lands inside the phrase
+        60       False
+        50       True
+
+    Do not "simplify" a `phrase in res.output` check back in — it is
+    reintroducing exactly this bug. Instead, match against `cli_text(res)`.
+
+    Reads `res.output` — the mixed stdout+stderr capture — rather than
+    `res.stdout` alone: Typer's Rich error console targets stderr
+    (`_get_rich_console(stderr=True)` in `rich_utils.py`), so `res.stdout`
+    would simply be missing the message. `res.output` is the union of both
+    streams in write order, so it holds the message regardless of which
+    stream a given Typer version happens to write it to — no separate
+    `res.stderr` fallback is needed.
+    """
+    text = _ANSI_RE.sub("", res.output)
+    text = _BOX_DRAWING_RE.sub(" ", text)
+    return _WHITESPACE_RE.sub(" ", text).strip()
 
 
 def test_preview_reports_year_spans_and_leap_periods():
@@ -167,7 +208,7 @@ def test_the_same_csv_twice_is_rejected_not_silently_deduplicated(tmp_path):
     path = _gen(tmp_path, "dup.csv")
     res = runner.invoke(app, ["validate", "--csv", str(path), "--csv", str(path)])
     assert res.exit_code != 0
-    assert "same file twice" in res.output
+    assert "same file twice" in cli_text(res)
 
 
 def test_a_28_column_csv_is_a_contract_error_not_a_ten_column_calendar(tmp_path):
@@ -386,7 +427,7 @@ def test_generate_ddl_requires_database_and_schema(tmp_path):
         "--out", str(tmp_path / "x.csv"), "--ddl", str(tmp_path / "x.sql"),
     ])
     assert res.exit_code != 0
-    assert "--ddl requires --database and --schema" in res.output
+    assert "--ddl requires --database and --schema" in cli_text(res)
 
 
 def test_ddl_only_options_without_ddl_are_rejected_not_ignored(tmp_path):
@@ -396,7 +437,7 @@ def test_ddl_only_options_without_ddl_are_rejected_not_ignored(tmp_path):
         "--out", str(tmp_path / "x.csv"), "--database", "D", "--schema", "S",
     ])
     assert res.exit_code != 0
-    assert "only apply with --ddl" in res.output
+    assert "only apply with --ddl" in cli_text(res)
 
 
 def test_validate_warns_a_ten_column_calendar_cannot_be_registered(tmp_path):
