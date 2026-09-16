@@ -465,7 +465,22 @@ rule is `fixed52`) → `search` to verify → Error Handling table → Changelog
 4. **`FROM_EXISTING_TABLE` schema validation.** The API errors if the referenced table
    does not match the required DDL, but the error shape is undocumented. Capture it so
    `validate` can pre-empt it with a better message.
-5. **Filter-widget behaviour for `13x4` period labels.** Two mechanisms, one confirmed
+5. **`--native`'s `start_date` / `end_date` convention is unconfirmed, and the published
+   API example cannot settle it.** `build_register_payload` constructs the range as the
+   nominal start of `first_year` through the nominal start of `last_year + 1`. That is a
+   defensible reading, but it is unverified against a live cluster — and the
+   `createCalendar` spec's own example pairs `start_date: "04/01/2025"` with
+   `end_date: "04/31/2025"`, which is not a valid date, so the documentation is
+   internally broken and proves nothing either way.
+   This matters disproportionately because `fixed52`'s entire risk profile is *silent
+   day-drift*: a wrong boundary produces a calendar that imports and validates cleanly
+   and is quietly short or long. The convention is now pinned by an exact-value test, so
+   a change is visible — but pinned is not the same as correct.
+   *What would resolve it:* register a `fixed52` calendar via `--native` on a live
+   cluster and compare the resulting row range against a locally generated `fixed52`
+   calendar for the same years. They must match day for day. **This is the
+   highest-value live check before `--native` is trusted.** Status: UNVERIFIED.
+6. **Filter-widget behaviour for `13x4` period labels.** Two mechanisms, one confirmed
    and mitigated, one open — see "13x4 carries a consumption risk" above.
    - *Confirmed:* lexical sort of `Period 1..13` does not preserve numeric order.
      Mitigated by zero-padding the default labels. No further action needed unless a
