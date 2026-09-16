@@ -572,7 +572,8 @@ read it from the parse-JSON `table_calc_addressing.column_level` field (Step 3):
 calc internal ID (e.g. `[Calculation_953355781789577216]`), each entry has
 `ordering_type` (`Rows` | `Columns` | `Table` | `CellInPane` | `Field`), `ordering_field`,
 `order_fields` (list), `quick_calc_type` (`PctTotal` | `PctDiff` | `Difference` |
-`PctRank` | `None`), and `address_offset` (int or `None`).
+`PctRank` | `None`), `address_offset` (int or `None`), and `address_value` (the raw
+`<address><value>` token, or `None` when the element is absent).
 
 Each `<worksheet>`'s `<column-instance>` elements can carry their own `<table-calc>` —
 these are **view-level overrides** that take precedence over the column-level definition
@@ -587,7 +588,9 @@ keyed by worksheet name then calc ID).
 `table_calc_addressing.warnings` (also echoed to stderr) lists entries whose
 `<address><value>` was non-numeric — Tableau writes `false` / `"All Pages"` there for
 non-offset addressing modes. Those entries parse normally except `address_offset`, which
-is `None`. It is a **skip, not a failure**: note it in the Step 12 report, don't stop.
+is `None`; the token itself is kept in `address_value`, so a non-offset mode is
+distinguishable from an absent `<address>` (where both are `None`) without reading the
+warning text. It is a **skip, not a failure**: note it in the Step 12 report, don't stop.
 
 ---
 

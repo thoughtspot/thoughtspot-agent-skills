@@ -115,6 +115,68 @@ def test_non_numeric_address_skips_and_warns_instead_of_crashing():
         assert bad in warning
 
 
+def test_format_parse_warnings_is_empty_when_nothing_degraded():
+    """The no-warning path runs on every normal parse — it must add nothing at
+    all to the summary line, not a stray newline."""
+    from ts_cli.tableau.twb import format_parse_warnings
+    assert format_parse_warnings({"warnings": []}) == ""
+    assert format_parse_warnings({"warnings": ["a", "b"]}) == "\nWARNING: a\nWARNING: b"
+
+
+def test_tds_root_is_scanned():
+    """A standalone .tds root IS the <datasource>, so `.//datasource//column`
+    matched nothing and the whole published-datasource path yielded no addressing."""
+    tds = """<datasource formatted-name='prod' caption='Prod'>
+      <column name='[Calculation_1]'><calculation class='tableau'>
+        <table-calc ordering-type='Rows'><address><value>-1</value></address></table-calc>
+      </calculation></column></datasource>"""
+    addr = extract_table_calc_addressing(ET.fromstring(tds))
+    assert addr["column_level"]["[Calculation_1]"]["address_offset"] == -1
+
+
+def test_warning_names_its_datasource():
+    """column_level is keyed on the calc id alone, so a duplicated id across two
+    datasources is last-wins — the warning has to say which one degraded."""
+    dup = """<workbook>
+      <datasource name='a' caption='Orders'><column name='[Calculation_1]'>
+        <calculation class='tableau'><table-calc>
+          <address><value>false</value></address></table-calc></calculation></column></datasource>
+      <datasource name='b' caption='Targets'><column name='[Calculation_1]'>
+        <calculation class='tableau'><table-calc>
+          <address><value>-1</value></address></table-calc></calculation></column></datasource>
+    </workbook>"""
+    addr = extract_table_calc_addressing(ET.fromstring(dup))
+    assert len(addr["warnings"]) == 1
+    assert "Orders" in addr["warnings"][0]
+
+
+def test_address_value_distinguishes_the_three_cases():
+    """Without the raw token, a non-offset mode and a missing element look identical."""
+    def entry(xml):
+        return extract_table_calc_addressing(
+            ET.fromstring(xml))["column_level"]["[Calculation_1]"]
+
+    non_offset = entry(NON_NUMERIC_ADDRESS_XML.format(value="false"))
+    assert (non_offset["address_value"], non_offset["address_offset"]) == ("false", None)
+
+    real_offset = entry(NON_NUMERIC_ADDRESS_XML.format(value="-1"))
+    assert (real_offset["address_value"], real_offset["address_offset"]) == ("-1", -1)
+
+    absent = entry("""
+    <workbook><datasource name='a'><column name='[Calculation_1]'>
+      <calculation class='tableau'><table-calc ordering-type='Rows'/></calculation>
+    </column></datasource></workbook>""")
+    assert (absent["address_value"], absent["address_offset"]) == (None, None)
+
+
+def test_whitespace_only_address_is_treated_as_absent():
+    """<value>   </value> and <value></value> mean the same thing — same result."""
+    blank = extract_table_calc_addressing(
+        ET.fromstring(NON_NUMERIC_ADDRESS_XML.format(value="   ")))
+    assert blank["warnings"] == []
+    assert blank["column_level"]["[Calculation_1]"]["address_value"] is None
+
+
 def test_negative_address_offset_still_parses():
     """``.isdigit()`` instead of try/except would turn these into None."""
     root = ET.fromstring(NON_NUMERIC_ADDRESS_XML.format(value="-2"))
@@ -136,6 +198,23 @@ WS_NON_NUMERIC_ADDRESS_XML = """
   </worksheet>
 </workbook>
 """
+
+
+def test_duplicate_column_instances_produce_distinguishable_warnings():
+    """Several <column-instance> share one `column`, so the dict is last-wins and
+    two degradations report as two warnings against one entry — they must differ."""
+    ws = """<workbook><worksheet name='S'>
+      <column-instance name='[sum:cost:qk]' column='[c]'><table-calc>
+        <address><value>false</value></address></table-calc></column-instance>
+      <column-instance name='[usr:cost:qk]' column='[c]'><table-calc>
+        <address><value>false</value></address></table-calc></column-instance>
+    </worksheet></workbook>"""
+    addr = extract_table_calc_addressing(ET.fromstring(ws))
+    assert len(addr["ws_overrides"]["S"]) == 1        # last-wins, unchanged
+    assert len(addr["warnings"]) == 2
+    assert addr["warnings"][0] != addr["warnings"][1]
+    assert "[sum:cost:qk]" in addr["warnings"][0]
+    assert "[usr:cost:qk]" in addr["warnings"][1]
 
 
 def test_worksheet_override_non_numeric_address_warns_with_worksheet_context():

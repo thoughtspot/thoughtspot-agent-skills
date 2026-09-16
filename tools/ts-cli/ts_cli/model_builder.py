@@ -43,6 +43,7 @@ from ts_cli.tableau.twb import (  # noqa: F401 — re-exported for back-compat
     extract_blends,
     extract_parameters,
     extract_table_calc_addressing,
+    format_parse_warnings,
     parse_twb,
 )
 

@@ -1967,7 +1967,9 @@ datasource caption), and `table_calc_addressing` (column-level + worksheet-overr
 `extract_table_calc_addressing`). `table_calc_addressing.warnings` lists
 non-fatal degradations — today, `<address><value>` tokens that are not numeric
 (Tableau writes e.g. `false` or `"All Pages"` for non-offset addressing modes):
-that entry's `address_offset` degrades to `null` and the warning is echoed to
+that entry's `address_offset` degrades to `null` (the raw token is kept in
+`address_value`, so a non-offset mode stays distinguishable from an absent
+`<address>` element) and the warning is echoed to
 stderr, rather than aborting the parse of the whole workbook (SCAL-338450).
 `blend_plan` is derived from `blends` +
 `datasources` by `build_blend_plan` (`ts_cli/tableau/build_model.py`) — connected

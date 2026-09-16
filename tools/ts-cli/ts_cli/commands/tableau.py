@@ -114,7 +114,7 @@ def parse_cmd(
         build_blend_plan,
         detect_orphan_calcs,
         extract_blends,
-        extract_table_calc_addressing,
+        extract_table_calc_addressing, format_parse_warnings,
         parse_twb,
     )
 
@@ -140,13 +140,9 @@ def parse_cmd(
     typer.echo(
         f"Parsed {len(parsed['datasources'])} datasource(s), "
         f"{len(parsed['blends'])} blend edge-set(s), "
-        f"{len(parsed['dashboards'])} dashboard(s)/{n_viz} viz -> {output_file}",
-        err=True,
+        f"{len(parsed['dashboards'])} dashboard(s)/{n_viz} viz -> {output_file}"
+        + format_parse_warnings(parsed["table_calc_addressing"]), err=True,
     )
-
-    # Non-fatal degradations; stderr keeps the --output JSON clean.
-    for w in parsed["table_calc_addressing"].get("warnings", []):
-        typer.echo(f"WARNING: {w}", err=True)
 
 
 @app.command("translate-formulas")

@@ -298,16 +298,24 @@ def extract_blends(root: ET.Element) -> dict:
     return graph
 
 
-def _read_table_calc(
-    tc: ET.Element, warnings: list | None = None, context: str = ""
-) -> dict:
+def _read_table_calc(tc: ET.Element, warnings: list, context: str) -> dict:
     """Read one ``<table-calc>`` element into an addressing entry.
 
     Tableau writes a non-numeric token into ``<address><value>`` for non-offset
     addressing modes (``false``, ``"All Pages"``), so a non-numeric value
-    degrades to ``address_offset: None`` — what the element-absent case already
-    produces — with a warning. Raising here abandoned the entire workbook parse
-    (SCAL-338450).
+    degrades to ``address_offset: None`` with a warning, rather than raising —
+    raising here abandoned the entire workbook parse (SCAL-338450).
+
+    ``address_value`` keeps the raw token so the three cases stay distinguishable
+    downstream without parsing the warning prose: no ``<address>`` element at all
+    (both fields ``None``), a non-offset addressing mode (``address_value`` set,
+    ``address_offset`` ``None``), and a real offset (both set). Whitespace-only
+    text is treated as absent so a pretty-printed TWB behaves like its compact
+    equivalent.
+
+    ``warnings`` and ``context`` are required, not optional: a caller that could
+    omit the list would degrade a value and record it nowhere, which is the
+    silent-loss class this function exists to close.
 
     ``try``/``except`` not ``.isdigit()``: the latter is False for negative
     offsets, which are legitimate.
@@ -318,19 +326,20 @@ def _read_table_calc(
         "order_fields": [o.get("field") for o in tc.findall("order")],
         "quick_calc_type": tc.get("type"),
         "address_offset": None,
+        "address_value": None,
     }
+    # First <value> only — an <address> carries one. Use findall if that changes.
     addr = tc.find("address/value")
-    if addr is not None and addr.text:
+    if addr is not None and addr.text and addr.text.strip():
+        entry["address_value"] = addr.text
         try:
             entry["address_offset"] = int(addr.text)
         except ValueError:
-            if warnings is not None:
-                where = f"{context}: " if context else ""
-                warnings.append(
-                    f"{where}non-numeric table-calc address value "
-                    f"{addr.text!r} — addressing offset skipped "
-                    f"(address_offset=None)"
-                )
+            warnings.append(
+                f"{context}: non-numeric table-calc address value "
+                f"{addr.text!r} — addressing offset skipped "
+                f"(address_offset=None)"
+            )
     return entry
 
 
@@ -343,18 +352,26 @@ def extract_table_calc_addressing(root: ET.Element) -> dict:
     """
     warnings: list = []
 
+    # Iterate via datasource_elements, not `.//datasource//column`: on a
+    # standalone .tds/.tdsx the root IS the <datasource>, which a descendant
+    # search cannot match, so that whole path silently yielded no addressing.
+    # Going datasource-first also lets a warning name which datasource it came
+    # from — column_level is keyed on the calc id alone, and two datasources can
+    # both define [Calculation_1] (Step 3g's copied-datasource case).
     column_level: dict = {}
-    for column in root.findall(".//datasource//column"):
-        calc = column.find("calculation[@class='tableau']")
-        if calc is None:
-            continue
-        tc = calc.find("table-calc")
-        if tc is None:
-            continue
-        col_name = column.get("name")
-        column_level[col_name] = _read_table_calc(
-            tc, warnings, f"column {col_name!r}"
-        )
+    for ds in datasource_elements(root):
+        ds_name = ds.get("caption") or ds.get("name") or ""
+        for column in ds.findall(".//column"):
+            calc = column.find("calculation[@class='tableau']")
+            if calc is None:
+                continue
+            tc = calc.find("table-calc")
+            if tc is None:
+                continue
+            col_name = column.get("name")
+            column_level[col_name] = _read_table_calc(
+                tc, warnings, f"datasource {ds_name!r}, column {col_name!r}"
+            )
 
     ws_overrides: dict = {}
     for ws in root.findall(".//worksheet"):
@@ -365,8 +382,15 @@ def extract_table_calc_addressing(root: ET.Element) -> dict:
             if tc is None:
                 continue
             ci_col = ci.get("column")
+            # Tableau writes one <column-instance> per derivation
+            # ([sum:cost:qk], [usr:cost:qk], ...) all carrying the same `column`,
+            # so this dict is last-wins and N instances can raise N warnings for
+            # one surviving entry. Naming the instance keeps them tellable apart.
+            ci_ctx = f"worksheet {ws_name!r}, column {ci_col!r}"
+            if ci.get("name"):
+                ci_ctx += f" ({ci.get('name')})"
             ws_overrides[ws_name][ci_col] = _read_table_calc(
-                tc, warnings, f"worksheet {ws_name!r}, column {ci_col!r}"
+                tc, warnings, ci_ctx
             )
 
     return {
@@ -374,6 +398,17 @@ def extract_table_calc_addressing(root: ET.Element) -> dict:
         "ws_overrides": ws_overrides,
         "warnings": warnings,
     }
+
+
+def format_parse_warnings(addressing: dict) -> str:
+    """Render ``extract_table_calc_addressing``'s warnings as stderr lines.
+
+    Takes the addressing dict so the caller appends one call to its existing
+    summary echo. Lives here, beside the code that produces the warnings, rather
+    than in ``commands/tableau.py`` — that module is ratcheted under BL-089 and
+    must not grow to carry it. Pure string formatting; the caller does the I/O.
+    """
+    return "".join(f"\nWARNING: {w}" for w in addressing["warnings"])
 
 
 def _strip_brackets(s: str) -> str:

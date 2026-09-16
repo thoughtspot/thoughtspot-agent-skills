@@ -53,6 +53,47 @@ def test_parse_writes_augmented_json(tmp_path):
     assert data["blend_plan"] == {"components": [], "ds_table_map": {}, "joins": []}
 
 
+# SCAL-338450 regressed at THIS layer, not in the extractor: a non-numeric
+# <address><value> raised out of parse_cmd, so the command exited non-zero and
+# wrote no output file, discarding an already-successful parse_twb. Asserting on
+# the extractor alone would not catch a raise reintroduced before the write, nor
+# a dropped warning emit. The worksheet <column-instance> path is the one that
+# fires on real workbooks.
+NON_NUMERIC_ADDRESS_TWB = """<?xml version='1.0'?>
+<workbook>
+  <datasource name='federated.a' caption='Orders'>
+    <relation name='ORDERS' type='table' table='[db].[s].[ORDERS]'/>
+    <column name='[Amount]' datatype='real' role='measure' caption='Amount'/>
+  </datasource>
+  <worksheet name='Heat Map'>
+    <column-instance column='[cost]'>
+      <table-calc ordering-type='Rows' type='PctDiff'>
+        <address><value>false</value></address>
+      </table-calc>
+    </column-instance>
+  </worksheet>
+</workbook>
+"""
+
+
+def test_parse_survives_non_numeric_address(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(NON_NUMERIC_ADDRESS_TWB)
+    out = tmp_path / "parsed.json"
+
+    result = runner.invoke(app, ["tableau", "parse", str(twb), "--output", str(out)])
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert out.exists(), "the shipped failure wrote no output file at all"
+    assert "WARNING" in result.stderr
+    assert "false" in result.stderr          # the offending token is named
+    assert "Heat Map" in result.stderr       # and where it came from
+
+    entry = json.loads(out.read_text())["table_calc_addressing"]
+    assert entry["ws_overrides"]["Heat Map"]["[cost]"]["address_offset"] is None
+    assert len(entry["warnings"]) == 1
+
+
 def test_parse_creates_missing_output_parent_dir(tmp_path):
     twb = tmp_path / "wb.twb"
     twb.write_text(TWB)
