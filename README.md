@@ -8,7 +8,7 @@ model authoring, multi-tenancy governance, and data querying. Packaged for
 
 ## Skills
 
-30 skills across six categories. Each ✓ in the runtime columns links to the
+31 skills across six categories. Each ✓ in the runtime columns links to the
 SKILL.md for that runtime. For why an individual skill exists, who tends to need it,
 and when to reach for it, see [skill personas](docs/skill-personas.md).
 
@@ -16,7 +16,7 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 |---|---|:-:|
 | [Setup](#setup) | Nothing else runs until credentials and data exist | 8 |
 | [Conversion](#conversion) | The semantics already exist elsewhere, and rebuilding them by hand is what stalls a migration | 9 |
-| [Semantic Authoring](#semantic-authoring) | A Model that imports cleanly can still answer badly or run slowly | 5 |
+| [Semantic Authoring](#semantic-authoring) | A Model that imports cleanly can still answer badly or run slowly | 6 |
 | [Platform & Governance](#platform--governance) | Many audiences, one definition, without a copy per tenant | 5 |
 | [Query](#query) | Getting data out programmatically, and seeing the SQL behind a disputed number | 1 |
 | [Recipes](#recipes) | The same analytical need recurs account after account | 2 |
@@ -73,6 +73,7 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 | [`ts-object-model-aggregates`](agents/cli/ts-object-model-aggregates/SKILL.md) | Audit a Model's Liveboards/Answers to recommend, generate, and wire aggregate Models (26.6 aggregate-aware routing) — signature mining, cost-based candidate ranking, gated DDL/TML generation ⚠️ pre-merge, open items unverified | [✓](agents/cli/ts-object-model-aggregates/SKILL.md) | — | — |
 | [`ts-object-model-alias`](agents/cli/ts-object-model-alias/SKILL.md) | Manage column aliases on a Model — language localization, tenant-based renaming, and combined tenant + locale matrices, via the `ts alias export/translate/build/import` pipeline | [✓](agents/cli/ts-object-model-alias/SKILL.md) | — | — |
 | [`ts-object-answer-promote`](agents/cli/ts-object-answer-promote/SKILL.md) | Promote formulas and parameters from a saved Answer into a Model | [✓](agents/cli/ts-object-answer-promote/SKILL.md) | — | — |
+| [`ts-object-calendar-builder`](agents/cli/ts-object-calendar-builder/SKILL.md) | Build week-aligned 4-4-5 / 4-5-4 / 5-4-4 / 13-period custom calendars with correct 52/53-week tiling, custom labels and RLS union calendars | [✓](agents/cli/ts-object-calendar-builder/SKILL.md) | — | — |
 
 </details>
 

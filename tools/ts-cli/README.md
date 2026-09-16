@@ -3814,3 +3814,106 @@ Re-running the same wave is a **no-op**: the merged document comes out byte-iden
 > everyone in the Org, admins included, so an admin session in the target Org matches the same
 > pathway a tenant user does. (That is the opposite of a *sharing* check, where an admin proves
 > nothing.) Confirmed live 2026-07-28: an ORG1 session shows `Segment` on the published master.
+
+## `ts calendar` — Custom calendar generation and registration
+
+Build week-aligned custom calendars (4-4-5, 4-5-4, 5-4-4, 13x4) with correct 52/53-week
+tiling, for the `ts-object-calendar-builder` skill. The pure grid/label/row logic lives in
+`ts_cli/custom_calendar/*`; `commands/calendars.py` only wires typer options and I/O.
+`preview` and `generate` share one option set (`--start-month`, `--start-day`, `--pattern`,
+`--anchor`, `--first-year`, `--last-year`, `--leap-week-period`, `--year-prefix`,
+`--quarter-prefix`, `--year-basis`, `--monthly-basis`, `--quarterly-basis`,
+`--fiscal-year-number`, `--month-names`, `--day-names`) so the two can never drift apart —
+see [the skill's anchor-rules reference](../../agents/cli/ts-object-calendar-builder/references/anchor-rules.md)
+for what each one means.
+
+### `ts calendar preview`
+
+Print the year/period shape (which years are 53 weeks, which period absorbs the extra
+week) without generating any rows — the confirmation gate before `generate`.
+
+```bash
+ts calendar preview --start-month February --start-day Monday \
+  --pattern 4-5-4 --anchor nearest --first-year 2015 --last-year 2026
+```
+
+**Output:** JSON to stdout — `{pattern, anchor_rule, periods_per_year, years[]}`, each year
+carrying `weeks`, `period_weeks[]` and `long_period`.
+
+### `ts calendar generate`
+
+Generate the calendar as a CSV matching the column contract.
+
+```bash
+ts calendar generate --start-month February --start-day Monday \
+  --pattern 4-5-4 --anchor nearest --first-year 2015 --last-year 2026 \
+  --out retail.csv
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--columns` | `30` | `10` (minimal) or `30` (full) column contract — see [calendar-table-contract.md](../../agents/cli/ts-object-calendar-builder/references/calendar-table-contract.md) |
+| `--out` | *(required)* | CSV output path |
+| `--discriminator-column` / `--discriminator-value` | — | Give both to tag every row with an RLS discriminator literal, for one variant of a union calendar |
+
+**Output:** the CSV at `--out`; a JSON summary (`{rows, columns, path}`) to stdout, row count to stderr.
+
+### `ts calendar compare`
+
+Show what one option choice actually changes before committing to it — reports only
+disagreements, so "0 of 364 rows differ" is a valid (and useful) answer.
+
+```bash
+ts calendar compare --vary anchor --start-month February --start-day Monday \
+  --pattern 4-5-4 --anchor nearest --first-year 2015 --last-year 2026
+```
+
+`--vary anchor` also reports `first_divergence` — the first year the anchor rules stop
+agreeing; any test range shorter than that makes the native ThoughtSpot API look correct
+when it silently isn't. `--vary` also accepts a label dimension (`month-names`,
+`day-names`, `year-prefix`, `quarter-prefix`) to isolate a label-only change.
+
+**Output:** JSON to stdout.
+
+### `ts calendar validate`
+
+Check one or more generated CSVs against the column contract and the structural
+invariants; with 2+ `--csv` paths, also checks cross-variant label consistency for a
+union/RLS calendar set.
+
+```bash
+ts calendar validate --csv tenant_a.csv --csv tenant_b.csv
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--csv` | *(required, repeatable)* | Calendar CSV to check — repeat for an RLS set |
+| `--allow-label-drift` | `false` | Downgrade cross-variant label mismatches from error to warning |
+
+**Output:** JSON `{findings[]}` to stdout, each with `severity`/`code`/`message`/`source`.
+Exits non-zero if any finding is `severity: error`.
+
+### `ts calendar register`
+
+Register a calendar with ThoughtSpot (`POST /api/rest/2.0/calendars/create`). Default path
+is `FROM_EXISTING_TABLE`, registering a table this CLI already generated and loaded.
+`--native` uses `FROM_INPUT_PARAMS` and is refused for any anchor rule other than
+`fixed52`, and for pattern `13x4` regardless of anchor — the native API has no 13-period
+calendar type and never inserts a leap week.
+
+```bash
+ts calendar register --name RetailCal --connection "Snowflake Prod" \
+  --database CUSTOM_CALENDAR --schema PUBLIC --table retail_cal
+```
+
+**Output:** JSON response from `calendars/create`, to stdout.
+
+### `ts calendar search`
+
+List registered custom calendars, to verify what landed.
+
+```bash
+ts calendar search --connection "Snowflake Prod"
+```
+
+**Output:** JSON array from `POST /api/rest/2.0/calendars/search`, to stdout.

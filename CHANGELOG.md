@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-09-16
+- feat: add ts-object-calendar-builder skill
+- chore: bump ts-cli to v0.139.0
+
 ## 2026-09-15
 - fix: `parse-sv` dropped two whole fields of every real Semantic View, silently and for
   82 ts-cli releases (introduced in v0.63.0, 2026-07-21; found at v0.137.0). `ai_sql_generation` / `ai_question_categorization` matched only an `=` form
