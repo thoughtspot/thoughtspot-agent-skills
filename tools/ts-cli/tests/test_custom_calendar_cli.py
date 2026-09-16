@@ -192,7 +192,14 @@ def test_register_payload_defaults_to_from_existing_table():
     assert payload["table_reference"] == {
         "connection_identifier": "conn1", "database_name": "CUSTOM_CALENDAR",
         "schema_name": "PUBLIC", "table_name": "retail_cal"}
+    # All five generation-only keys are set atomically in build_register_payload —
+    # assert every one absent, not just calendar_type, so a future change that
+    # splits them apart still gets caught here.
     assert "calendar_type" not in payload
+    assert "month_offset" not in payload
+    assert "start_day_of_week" not in payload
+    assert "start_date" not in payload
+    assert "end_date" not in payload
 
 
 def test_native_payload_carries_generation_parameters():
@@ -206,6 +213,32 @@ def test_native_payload_carries_generation_parameters():
     assert payload["calendar_type"] == "FOUR_FIVE_FOUR"
     assert payload["month_offset"] == "February"
     assert payload["start_day_of_week"] == "Monday"
+    # start_date/end_date pin the "nominal start of first_year through nominal
+    # start of last_year + 1" convention build_register_payload encodes today.
+    # This is NOT confirmed against a live cluster — the published createCalendar
+    # spec example is itself internally inconsistent (it pairs
+    # start_date: "04/01/2025" with end_date: "04/31/2025", and April 31 does not
+    # exist), so the spec cannot adjudicate this convention either way. The
+    # convention may well be right; these assertions exist to make a change to it
+    # visible and deliberate, not to certify it correct. If this ever needs to
+    # change, that is a convention decision to make consciously (ideally against
+    # a live cluster), not a "fix" for a failing test.
+    assert payload["start_date"] == "02/01/2027"
+    assert payload["end_date"] == "02/01/2028"
+
+
+def test_native_payload_date_range_spans_multiple_fiscal_years():
+    # Same convention-pinning intent as the single-year case above, but across a
+    # multi-year range so an off-by-one-year regression (e.g. using last_year
+    # instead of last_year + 1) is caught, not just an off-by-one-month one.
+    from ts_cli.custom_calendar.spec import CalendarSpec
+    spec = CalendarSpec(start_month=2, start_day_of_week=1, pattern="4-5-4",
+                        anchor_rule="fixed52", first_year=2027, last_year=2029)
+    payload = build_register_payload(
+        name="N", connection="c", database="D", schema="S", table="T",
+        native=True, spec=spec)
+    assert payload["start_date"] == "02/01/2027"
+    assert payload["end_date"] == "02/01/2030"
 
 
 def test_native_refuses_non_fixed52_anchor_rules():
