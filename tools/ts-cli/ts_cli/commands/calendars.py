@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import timedelta
 from typing import Dict, List, Optional, Tuple
 
 import typer
 
+from ts_cli.custom_calendar.anchors import resolve_anchor
 from ts_cli.custom_calendar.emit import write_csv
 from ts_cli.custom_calendar.grid import build_years
 from ts_cli.custom_calendar.labels import default_month_names
@@ -382,12 +384,18 @@ def build_register_payload(*, name: str, connection: str, database: str, schema:
             f"--native cannot express pattern '{spec.pattern}' — the API has no "
             f"13x4 calendar type. Generate a table and register it instead."
         )
+    # end_date is the last day the calendar actually covers — the day before the
+    # next fiscal year's anchor — not a nominal "start of last_year + 1". The
+    # nominal-start form overshoots into a partial fiscal period on the live API
+    # (verified 2026-09-16 against generate-csv — see references/open-items.md
+    # item #5), and the overshoot grows with the range.
+    last_day = resolve_anchor(spec, spec.last_year + 1) - timedelta(days=1)
     payload.update({
         "calendar_type": _API_CALENDAR_TYPE[spec.pattern],
         "month_offset": MONTHS_EN[spec.start_month - 1],
         "start_day_of_week": DAYS_EN[spec.start_day_of_week],
         "start_date": f"{spec.start_month:02d}/01/{spec.first_year}",
-        "end_date": f"{spec.start_month:02d}/01/{spec.last_year + 1}",
+        "end_date": last_day.strftime("%m/%d/%Y"),
     })
     return payload
 

@@ -213,24 +213,29 @@ def test_native_payload_carries_generation_parameters():
     assert payload["calendar_type"] == "FOUR_FIVE_FOUR"
     assert payload["month_offset"] == "February"
     assert payload["start_day_of_week"] == "Monday"
-    # start_date/end_date pin the "nominal start of first_year through nominal
-    # start of last_year + 1" convention build_register_payload encodes today.
-    # This is NOT confirmed against a live cluster — the published createCalendar
-    # spec example is itself internally inconsistent (it pairs
-    # start_date: "04/01/2025" with end_date: "04/31/2025", and April 31 does not
-    # exist), so the spec cannot adjudicate this convention either way. The
-    # convention may well be right; these assertions exist to make a change to it
-    # visible and deliberate, not to certify it correct. If this ever needs to
-    # change, that is a convention decision to make consciously (ideally against
-    # a live cluster), not a "fix" for a failing test.
+    # start_date/end_date convention verified live against `generate-csv` on
+    # 2026-09-16 (see open item #5): the old "nominal start of first_year
+    # through nominal start of last_year + 1" form for end_date produced a
+    # partial trailing fiscal period — the API's own row count ran 5 days past
+    # our generator's for a 3-year fixed52 range (1097 vs. 1092 rows), and the
+    # 5 extra days formed a stub 13th month rather than a clean cutoff. The
+    # confirmed rule: end_date is the last day the calendar actually covers —
+    # the day before the next fiscal year's anchor
+    # (`resolve_anchor(spec, last_year + 1) - 1 day`), which equals
+    # `build_rows(...)[-1]["date"]`. start_date is separately confirmed correct
+    # as-is: for fixed52 it equals `resolve_anchor(spec, first_year)` (the API
+    # snaps forward to the next start_day_of_week, the same rule `anchor_first`
+    # encodes), and matched the live first row (2027-02-01) exactly.
     assert payload["start_date"] == "02/01/2027"
-    assert payload["end_date"] == "02/01/2028"
+    assert payload["end_date"] == "01/30/2028"
 
 
 def test_native_payload_date_range_spans_multiple_fiscal_years():
     # Same convention-pinning intent as the single-year case above, but across a
     # multi-year range so an off-by-one-year regression (e.g. using last_year
     # instead of last_year + 1) is caught, not just an off-by-one-month one.
+    # This is also the range the live 2026-09-16 verification used, where the
+    # old formula's overshoot grew to 5 days (see open item #5).
     from ts_cli.custom_calendar.spec import CalendarSpec
     spec = CalendarSpec(start_month=2, start_day_of_week=1, pattern="4-5-4",
                         anchor_rule="fixed52", first_year=2027, last_year=2029)
@@ -238,7 +243,7 @@ def test_native_payload_date_range_spans_multiple_fiscal_years():
         name="N", connection="c", database="D", schema="S", table="T",
         native=True, spec=spec)
     assert payload["start_date"] == "02/01/2027"
-    assert payload["end_date"] == "02/01/2030"
+    assert payload["end_date"] == "01/27/2030"
 
 
 def test_native_refuses_non_fixed52_anchor_rules():
