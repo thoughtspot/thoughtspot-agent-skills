@@ -46,7 +46,9 @@ def test_parse_writes_augmented_json(tmp_path):
     assert ds["name"] == "Orders"
     assert ds["orphan_calcs"] == ["Ghost"]  # references MISSING:: table
     assert data["blends"] == {}
-    assert data["table_calc_addressing"] == {"column_level": {}, "ws_overrides": {}}
+    assert data["table_calc_addressing"] == {
+        "column_level": {}, "ws_overrides": {}, "warnings": []
+    }
     # No blends in this fixture — blend_plan is the all-empty shape.
     assert data["blend_plan"] == {"components": [], "ds_table_map": {}, "joins": []}
 

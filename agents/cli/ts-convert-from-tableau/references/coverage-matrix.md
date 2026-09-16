@@ -117,7 +117,7 @@ Use this as the canonical limitations reference.
 |---|---|---|---|
 | 70 | `SIZE()` (unpartitioned) | `sql_int_aggregate_op ( "COUNT(*) OVER ()" )` | Pass-through — context-free (no sort/partition attribute needed), so this is the one row-offset function `ts tableau build-model` actually translates (ts-cli v0.75.0). CLI-implemented in `functions.py::map_functions` |
 | 71 | String-aggregation CSV technique | `sql_string_aggregate_op("LISTAGG(...)")` | |
-| 72 | `<table-calc>` addressing extraction (Step 3f) | Sort/partition context recovery from TWB XML | `ordering-type`, `ordering-field`, `<order>` — extracted into `parse` output (`table_calc_addressing`) for SKILL.md's manual per-formula reasoning; NOT wired into `translate_formulas()`/`build-model`'s automated pipeline (see U10/U11) |
+| 72 | `<table-calc>` addressing extraction (Step 3f) | Sort/partition context recovery from TWB XML | `ordering-type`, `ordering-field`, `<order>` — extracted into `parse` output (`table_calc_addressing`) for SKILL.md's manual per-formula reasoning; NOT wired into `translate_formulas()`/`build-model`'s automated pipeline (see U10/U11). `address_offset` is `None` when Tableau writes a non-numeric `<address><value>` (`false`, `"All Pages"` — non-offset addressing modes), reported in `table_calc_addressing.warnings`; parsing continues (SCAL-338450) |
 
 ### Sets
 

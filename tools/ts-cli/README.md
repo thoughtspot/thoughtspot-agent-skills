@@ -1954,7 +1954,8 @@ ts tableau parse "workbook.twbx" --output parsed.json
     "joins": [{"with": "...", "table": "...", "on": "...", "type": "LEFT_OUTER",
                "cardinality": "MANY_TO_ONE"}]
   },
-  "table_calc_addressing": {"column_level": {...}, "ws_overrides": {...}}
+  "table_calc_addressing": {"column_level": {...}, "ws_overrides": {...},
+                            "warnings": ["..."]}
 }
 ```
 
@@ -1963,7 +1964,12 @@ their own datasource, direct + transitive), `blends` (the data-blend graph keyed
 datasource caption), and `table_calc_addressing` (column-level + worksheet-override
 `<table-calc>` sort context) are computed by the pure extractors in
 `ts_cli/tableau/twb.py` (`detect_orphan_calcs`, `extract_blends`,
-`extract_table_calc_addressing`). `blend_plan` is derived from `blends` +
+`extract_table_calc_addressing`). `table_calc_addressing.warnings` lists
+non-fatal degradations — today, `<address><value>` tokens that are not numeric
+(Tableau writes e.g. `false` or `"All Pages"` for non-offset addressing modes):
+that entry's `address_offset` degrades to `null` and the warning is echoed to
+stderr, rather than aborting the parse of the whole workbook (SCAL-338450).
+`blend_plan` is derived from `blends` +
 `datasources` by `build_blend_plan` (`ts_cli/tableau/build_model.py`) — connected
 components, a datasource→table map, and the flattened join list for every blend
 edge, ready for SKILL.md Step 5b to consume directly instead of re-deriving them by
