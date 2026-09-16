@@ -1,6 +1,6 @@
 # ts-object-calendar-builder — Custom Calendar Builder (Design)
 
-**Status:** design approved, implementation not started
+**Status:** implemented and reviewed on `feat/ts-object-calendar-builder` (2026-09-16). Open items 1, 4 and 6 remain unverified — see the skill's `references/open-items.md`.
 **Skill:** `agents/cli/ts-object-calendar-builder/`
 **CLI surface:** `ts calendar`
 **Date:** 2026-09-15

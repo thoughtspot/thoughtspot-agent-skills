@@ -52,6 +52,32 @@ captured live. Capturing it would let `ts calendar validate` pre-empt the
 same problem locally with a clearer message, before a `register` call ever
 reaches the API.
 
+**Partial finding — 2026-09-16, `semantic-sql` cluster.** The error *envelope* is now
+captured, for the case where the referenced table does not exist at all:
+
+```
+HTTP 400
+{"error":{"message":{"debug":{"code":10002, ...
+  "Error Code: INVALID_EXTERNAL_CALENDAR
+   Error Message: Table <db>.<schema>.<table> cannot be imported as calendar because:
+   Error Code: CONNECTION_METADATA_FETCH_ERROR
+   Error Message: Unable to fetch column metadata for external table : <db>.<schema>.<table>"
+```
+
+So: status 400, top-level code `10002`, calendar-specific code
+`INVALID_EXTERNAL_CALENDAR`, and a human-readable reason nested as a JSON-escaped
+string inside `error.message.debug.debug` — not a structured field list.
+
+**What this does NOT settle, and why the item stays open.** The probe used a
+*non-existent* table, so the failure came from metadata fetch, not from column
+comparison. The case this item actually cares about — a table that exists but whose
+columns do not match the contract — is still uncaptured, and it is the one whose
+message would show whether the API names the offending columns. Until that is seen,
+`ts calendar validate` cannot be tuned to pre-empt it with a matching message.
+
+*To finish this:* create a table on a connected warehouse with deliberately wrong
+columns (e.g. drop `is_weekend`), call `register` against it, and record the message.
+
 **Status: UNVERIFIED.**
 
 ## 5 — `--native`'s `start_date` / `end_date` convention — VERIFIED 2026-09-16
