@@ -66,7 +66,10 @@ On skill invocation, display this plan before doing any work:
 
 ---
 **ts-object-calendar-builder** — build a ThoughtSpot custom calendar the
-native API can't.
+native API can't, or relabel one that already exists.
+
+If you are relabelling an existing calendar's wrong month labels rather
+than building a new one, skip straight to Step 9 — Relabel.
 
 Steps:
   1.  Authenticate ...................................... auto
@@ -77,15 +80,18 @@ Steps:
   6.  Load to Snowflake .................................. auto
   7.  Register with ThoughtSpot .......................... auto
   8.  Verify what landed ................................. auto
+  9.  Relabel an existing calendar (alternate path) ...... you confirm (checkpoint)
 
-Confirmation required: Step 2, and the checkpoint in Step 3
+Confirmation required: Step 2, the checkpoint in Step 3, and the checkpoint
+in Step 9 (taken instead of Steps 1-8, not after them)
 Auto-executed: Steps 1, 4, 5, 6, 7, 8
 
 The native ThoughtSpot API never inserts a leap week — every fiscal year it
 generates is a fixed 364 days. That matches a real retail calendar only for
 a few years, then silently drifts. This skill generates the calendar
-correctly and only uses the native path where it is provably safe (anchor
-rule `fixed52`).
+correctly and only uses the native path where it is provably safe: anchor
+rule `fixed52`, and never for pattern `13x4` (the API has no 13-period
+calendar type at all, regardless of anchor rule).
 
 Ready to start? [Y / N]
 ---
@@ -136,6 +142,9 @@ Notes for gathering these, not to read verbatim to the user:
   period labels correctly on this build hasn't been confirmed live. If it
   turns out not to work, filter on `month_number_of_year` or a date range
   instead." See [references/anchor-rules.md](references/anchor-rules.md).
+  Also tell them `--native` (Step 7's fast path) is refused for `13x4`
+  regardless of anchor rule — the API has no 13-period calendar type — so a
+  `13x4` calendar always goes through Steps 4–6.
 - **If they answer yes to question 9**, question 5 onward repeats per
   variant (each tenant may have a different pattern, anchor rule, or year
   range), but the **label vocabulary from questions 6–8 is shared across
@@ -223,21 +232,33 @@ ts calendar generate --start-month "{start_month}" --start-day "{start_day}" \
 ```
 
 For an RLS set, run this once **per variant** — using that variant's own
-`--start-month` / `--pattern` / `--anchor` / year range, but the label flags
-(`--year-prefix`, `--month-names`, etc.) held identical across every
-variant — writing each CSV into the **same** `{out_dir}` and adding that
-variant's discriminator:
+`--start-month` / `--pattern` / `--anchor` / year range, but with every one
+of the following held **identical** across every variant: `--year-prefix`,
+`--quarter-prefix`, `--month-names`, `--day-names`, `--year-basis`,
+`--monthly-basis`, `--quarterly-basis`, `--fiscal-year-number`, and
+`--leap-week-period`. The design treats this whole label layer as
+set-level, not per-variant — see Step 2: drift here is exactly what breaks
+ThoughtSpot's search suggestions. Write each CSV into the **same**
+`{out_dir}` and add that variant's discriminator:
 
 ```bash
 ts calendar generate --start-month "{variant_start_month}" --start-day "{variant_start_day}" \
   --pattern "{variant_pattern}" --anchor "{variant_anchor}" \
   --first-year {variant_first_year} --last-year {variant_last_year} \
+  --leap-week-period "{leap_week_period}" \
   --year-prefix "{year_prefix}" --quarter-prefix "{quarter_prefix}" \
+  --year-basis "{year_basis}" --monthly-basis "{monthly_basis}" \
+  --quarterly-basis "{quarterly_basis}" --fiscal-year-number "{fiscal_year_number}" \
   --month-names "{month_names}" --day-names "{day_names}" \
   --columns {columns} --out "{out_dir}/{variant_table_name}.csv" \
   --discriminator-column "{discriminator_column}" \
   --discriminator-value "{variant_discriminator_value}"
 ```
+
+Every flag on the second line onward is copied **unchanged** from the
+set's shared label spec; only `--start-month`, `--start-day`, `--pattern`,
+`--anchor`, `--first-year`, `--last-year`, `--out`, and the two
+`--discriminator-*` flags vary by variant.
 
 Omit any flag the user didn't specify a non-default value for — every flag
 above has a documented default except `--start-month`, `--start-day`,
@@ -309,8 +330,9 @@ ts calendar register --name "{calendar_name}" --connection "{connection}" \
   --profile "{profile_name}"
 ```
 
-**Native fast path** — only when the confirmed anchor rule is `fixed52`,
-and only for a single (non-RLS) calendar. This skips Steps 4–6 entirely and
+**Native fast path** — only when the confirmed anchor rule is `fixed52`
+**and** the pattern is `4-4-5`, `4-5-4`, or `5-4-4` — never `13x4` — and
+only for a single (non-RLS) calendar. This skips Steps 4–6 entirely and
 asks ThoughtSpot to generate the calendar itself:
 
 ```bash
@@ -322,12 +344,20 @@ ts calendar register --name "{calendar_name}" --connection "{connection}" \
   --profile "{profile_name}"
 ```
 
-`--native` is **refused** for any other anchor rule — the CLI will not let
-this silently ship a drifting calendar. See open item 5 in
-[references/open-items.md](references/open-items.md) before relying on this
-path for anything beyond a quick check: the exact date range it registers
-has not yet been confirmed live against a locally generated `fixed52`
-calendar for the same years.
+`--native` is **refused for two separate reasons**, and the CLI will not
+let either one silently ship a wrong calendar:
+
+- **Any anchor rule other than `fixed52`** — the API emits fixed 364-day
+  years with no leap week, so `nearest` or `first` would drift silently.
+- **Pattern `13x4`** — the API has no 13-period calendar type to ask for.
+  This refusal is **independent of anchor rule**: a `13x4` spec with
+  `anchor fixed52` is still refused, because the pattern itself has no
+  native equivalent, not because of how it re-anchors.
+
+See open item 5 in [references/open-items.md](references/open-items.md)
+before relying on the native path for anything beyond a quick check: the
+exact date range it registers has not yet been confirmed live against a
+locally generated `fixed52` calendar for the same years.
 
 ---
 
@@ -344,12 +374,66 @@ once overall).
 
 ---
 
+## Step 9 — Relabel an Existing Calendar (Alternate Path)
+
+Take this path **instead of** Steps 1–8 when a calendar already exists in
+Snowflake and only its month labels are wrong — the ThoughtSpot-defect case
+from the top of this file: `monthly` carries the *fiscal* year, so a
+January period inside a December-start fiscal year reads `"January 2024"`
+for dates that are actually in January 2025. This does not regenerate the
+calendar or touch its ThoughtSpot registration; it produces a new,
+correctly-labelled table alongside the existing one.
+
+`{skill_dir}` below is the absolute path of the directory containing this
+SKILL.md (e.g. `~/.claude/skills/ts-object-calendar-builder` in Claude
+Code, `~/.snowflake/cortex/skills/...` in Cortex Code CLI) — substitute the
+real path when running.
+
+Ask which table needs fixing, then confirm before running anything —
+**checkpoint**, since this creates a new table:
+
+```
+Relabel {source_db}.{source_schema}.{source_table} -> {target_table}?
+The original table is left untouched. (Y / N):
+```
+
+Run the fix:
+
+```bash
+ts snowflake exec -f "{skill_dir}/references/relabel-calendar.sql" \
+  --sf-profile "{sf_profile_name}" \
+  --var source_db="{source_db}" --var source_schema="{source_schema}" \
+  --var source_table="{source_table}" --var target_table="{target_table}"
+```
+
+The four `--var` flags fill the placeholders in
+[references/relabel-calendar.sql](references/relabel-calendar.sql):
+`source_db` / `source_schema` / `source_table` name the existing table;
+`target_table` names the new one, created in the same database and schema.
+Every column is carried through unchanged except `year`, which the SQL
+recomputes from the Gregorian year of `date` instead of copying the source
+table's fiscal-year label.
+
+Then:
+
+- **If `{source_table}` was never registered with ThoughtSpot**, register
+  `{target_table}` following Step 7.
+- **If `{source_table}` is already registered**, this skill has no command
+  to repoint an existing calendar object's table reference (calendar
+  update/delete is out of scope — `ts calendar search` only verifies what
+  is registered, it doesn't change it). Ask the user whether to register
+  `{target_table}` as a new calendar object, or to repoint the existing one
+  by hand in the ThoughtSpot admin UI.
+
+---
+
 ## Error Handling
 
 | Symptom | Action |
 |---|---|
 | ThoughtSpot rejects the table with a schema-mismatch error on `register` | Run `ts calendar validate --csv {path}` first — it checks the same column contract locally with a clearer message. See [references/calendar-table-contract.md](references/calendar-table-contract.md); a common cause is an unquoted Snowflake identifier that got upper-cased |
 | `register --native` refused for the requested anchor | Expected — the native API cannot express `nearest` or `first` without silently drifting. Use the default (`FROM_EXISTING_TABLE`) path: generate, validate, load, then register without `--native` |
+| `register --native` refused for pattern `13x4`: `--native cannot express pattern '13x4' — the API has no 13x4 calendar type. Generate a table and register it instead.` | Expected, and independent of anchor rule — even `anchor fixed52` is refused for `13x4`, because the API has no 13-period calendar type at all. Use the default (`FROM_EXISTING_TABLE`) path: generate, validate, load, then register without `--native` |
 | `--native` registration times out or returns a 504 | Known issue on at least one cluster (`se-thoughtspot`) — see open item 2 in [references/open-items.md](references/open-items.md). All verified native-API behaviour in this skill comes from a different cluster. The default path (generate/validate/load/register) does not touch this endpoint and is unaffected |
 | `ts calendar validate` fails on cross-variant label drift | Either align the label vocabulary across variants (same `--month-names`, `--day-names`, prefixes) so search suggestions resolve to one variant, or, if the drift is a deliberate known exception, re-run `validate` with `--allow-label-drift` to downgrade it to a warning |
 | `ts load snowflake` reports the table already exists | Re-run with `--if-exists replace` (or `skip` to leave it alone) — the default (`error`) refuses to overwrite silently |

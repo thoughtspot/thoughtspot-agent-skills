@@ -4,8 +4,10 @@
 -- column carries the FISCAL year, so a January period inside a December-start
 -- fiscal year reads "January 2024" for dates in January 2025).
 --
--- Run with:
---   ts snowflake exec -f references/relabel-calendar.sql --sf-profile {profile} \
+-- Run with (--sf-profile takes <profile> directly, in angle brackets, not
+-- curly braces — curly braces below are --var-filled placeholders, and
+-- ts snowflake exec scans the whole file for them, comments included):
+--   ts snowflake exec -f references/relabel-calendar.sql --sf-profile <profile> \
 --     --var source_db=CUSTOM_CALENDAR --var source_schema=PUBLIC \
 --     --var source_table=julyoffset --var target_table=julyoffset_gregorian
 CREATE OR REPLACE TABLE "{source_db}"."{source_schema}"."{target_table}" AS (
