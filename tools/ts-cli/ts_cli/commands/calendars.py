@@ -266,6 +266,10 @@ def read_calendar_csv(path: str) -> Tuple[List[Dict[str, object]], List[str]]:
     header = list(raw[0].keys())
     contract = list(COLUMNS_30) if len(header) >= 30 else list(COLUMNS_10)
 
+    missing = [c for c in contract if c not in header]
+    if missing:
+        raise ValueError(f"CSV is missing contract column(s): {', '.join(missing)}")
+
     rows: List[Dict[str, object]] = []
     for r in raw:
         typed: Dict[str, object] = {}
@@ -310,7 +314,12 @@ def validate_cmd(
     findings = []
     variant_rows: Dict[str, List[Dict[str, object]]] = {}
     for path in csv_paths:
-        rows, contract = read_calendar_csv(path)
+        try:
+            rows, contract = read_calendar_csv(path)
+        except ValueError as exc:
+            findings.append({"severity": "error", "code": "column-contract",
+                             "message": str(exc), "source": path})
+            continue
         variant_rows[Path(path).stem] = rows
         for f in validate_rows(rows, columns=contract):
             findings.append({"severity": f.severity, "code": f.code,

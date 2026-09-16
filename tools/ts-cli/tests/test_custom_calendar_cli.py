@@ -143,3 +143,38 @@ def test_allow_label_drift_downgrades_and_exits_zero(tmp_path):
                               "--allow-label-drift"])
     assert res.exit_code == 0, res.output
     assert any(f["severity"] == "warning" for f in json.loads(res.stdout)["findings"])
+
+
+def _drop_column(path, column_name):
+    lines = path.read_text().splitlines()
+    header = lines[0].split(",")
+    idx = header.index(column_name)
+    mangled = [",".join(line.split(",")[:idx] + line.split(",")[idx + 1:]) for line in lines]
+    path.write_text("\n".join(mangled) + "\n")
+
+
+def test_validate_reports_missing_contract_column_without_crashing(tmp_path):
+    path = _gen(tmp_path, "missing_col.csv")
+    _drop_column(path, "quarter")
+    res = runner.invoke(app, ["validate", "--csv", str(path)])
+    assert res.exit_code != 0
+    payload = json.loads(res.stdout)  # must parse as JSON — no traceback on stdout
+    findings = payload["findings"]
+    assert any(f["code"] == "column-contract" and "quarter" in f["message"]
+              for f in findings)
+
+
+def test_validate_continues_after_one_bad_csv_in_a_set(tmp_path):
+    bad = _gen(tmp_path, "bad.csv")
+    good = _gen(tmp_path, "good.csv")
+    _drop_column(bad, "quarter")
+    good_lines = good.read_text().splitlines()
+    good.write_text("\n".join(good_lines[:5] + good_lines[6:]) + "\n")  # induce a date gap
+
+    res = runner.invoke(app, ["validate", "--csv", str(bad), "--csv", str(good)])
+    assert res.exit_code != 0
+    payload = json.loads(res.stdout)
+    assert any(f["code"] == "column-contract" and f["source"] == str(bad)
+              for f in payload["findings"])
+    assert any(f["code"] == "date-gap" and f["source"] == str(good)
+              for f in payload["findings"])
