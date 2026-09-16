@@ -1,6 +1,6 @@
 # ts-object-calendar-builder — Custom Calendar Builder (Design)
 
-**Status:** implemented and reviewed on `feat/ts-object-calendar-builder` (2026-09-16). Open items 1, 4 and 6 remain unverified — see the skill's `references/open-items.md`.
+**Status:** implemented, reviewed and live-verified on `feat/ts-object-calendar-builder` (2026-09-16). Open items 1 and 4 are now VERIFIED live; item 6 is split — registration verified, the filter-widget half still open (it needs a browser session, not a REST call). The live run also found three defects, all fixed in the same branch: `ts load snowflake` upper-cases columns so the documented load path could not produce a registrable table (Step 6 now re-aliases via `references/fix-column-case.sql`); `createCalendar` rejects the 10-column shape outright; and `--ddl` was specified but never implemented. See the skill's `references/open-items.md`.
 **Skill:** `agents/cli/ts-object-calendar-builder/`
 **CLI surface:** `ts calendar`
 **Date:** 2026-09-15
@@ -107,7 +107,7 @@ without the row expansion.
 |---|---|---|
 | `preview` | no | Print the year/period boundary table — which years are 53 weeks and which period is long — so the shape is confirmed before generating thousands of rows |
 | `compare` | no | Show what a given option choice actually changes, before committing to it — see below |
-| `generate` | no | Write the CSV; `--ddl` also emits Snowflake DDL; `--set` emits an RLS union |
+| `generate` | no | Write the CSV; `--ddl` also emits the Snowflake `CREATE TABLE` for the same shape (needs `--database`/`--schema`, optional `--table`). **`--set` was never built** — an RLS union is composed by the skill's Step 6c as a `UNION ALL` view over the per-variant tables, which is the corpus `rlscalendar` shape; `emit.union_sql()` remains the tested reference for that statement |
 | `validate` | no | Check a CSV or live table against the column contract and the internal invariants below |
 | `register` | yes | `createCalendar` via `FROM_EXISTING_TABLE`; `--native` uses `FROM_INPUT_PARAMS` |
 | `search` | yes | `POST /calendars/search` to verify what actually landed |
@@ -209,6 +209,10 @@ the **filter widget**, and there are two distinct mechanisms:
    `QUARTER_ONLY` and `PERIOD_ONLY` are documented as unsupported filter types.
    Whether `"PERIOD 1"` is accepted where a month name is expected is unverified.
    Quarters are unaffected — a 13-period year still has four.
+
+**Registration is not at risk** — live 2026-09-16, a `13x4` calendar with
+`Period 01`…`Period 13` labels registered successfully (200). Only the filter/consumption
+question below is open.
 
 **Mitigation, applied by default for `13x4`:** zero-pad the generated labels
 (`Period 01` … `Period 13`) so lexical and numeric order coincide. This costs nothing,
@@ -448,12 +452,13 @@ rule is `fixed52`) → `search` to verify → Error Handling table → Changelog
 
 ## Open items (verify live before/during implementation)
 
-1. **Non-English labels.** No table among the 42 in `CUSTOM_CALENDAR.PUBLIC` uses a
-   non-English label — `rlscalendarjapan` is English despite its name. Evidence is
-   strong but indirect: three mutually-incompatible styles ship in production
-   (`April`, `FEB`, `Period 1`), and no month-name parser would accept `Period 1`.
-   Needs a live round-trip registering a calendar with non-Latin month and day names.
-   Design is safe either way — ordering lives in the numeric columns.
+1. **Non-English labels — VERIFIED 2026-09-16.** A 30-column calendar with Japanese
+   month (`2月`…`1月`) and day (`日曜日`…`土曜日`) labels registered successfully
+   (200, calendar `643ff2ed`, deleted afterwards). Non-Latin labels are accepted; the
+   API does not parse the label strings and ordering lives in the numeric columns, as
+   the design assumed. The corpus had no such example — none of the 42 tables in
+   `CUSTOM_CALENDAR.PUBLIC` uses one, `rlscalendarjapan` included — so this replaces
+   an inference with direct evidence. Status: **VERIFIED**.
 2. **`generate-csv` is unavailable on `se-thoughtspot`.** Every request shape returns
    504 or times out, including the documented happy path (`MONTH_OFFSET` July,
    month-boundary start). The control failing is what makes this a cluster/endpoint
@@ -462,9 +467,16 @@ rule is `fixed52`) → `search` to verify → Error Handling table → Changelog
 3. **`fiscal_year_number` default.** Verified `start` on `semantic-sql` for July and
    December offsets. May be version- or config-dependent; re-check on another build
    before documenting it as invariant.
-4. **`FROM_EXISTING_TABLE` schema validation.** The API errors if the referenced table
-   does not match the required DDL, but the error shape is undocumented. Capture it so
-   `validate` can pre-empt it with a better message.
+4. **`FROM_EXISTING_TABLE` schema validation — VERIFIED 2026-09-16, and the answer is
+   that the API never says what is wrong.** Every contract violation returns the
+   identical response: HTTP 400, code `10002`, `INVALID_EXTERNAL_CALENDAR` wrapping
+   `CONNECTION_METADATA_FETCH_ERROR` ("Unable to fetch column metadata for external
+   table : `<db>.<schema>.<table>`"), with the reason as a JSON-escaped string inside
+   `error.message.debug.debug`. Identical for a missing column, a correct 10-column
+   table, a wrong type (`date` as TEXT), an extra column, and a table that does not
+   exist at all; control — a valid 30-column table — returns 200. **It never names the
+   offending column.** So `validate` cannot mirror the API's message and must catch
+   problems locally instead, which is what it does. Status: **VERIFIED**.
 5. **`--native`'s `start_date` / `end_date` convention — RESOLVED, and the original
    reading was WRONG.** The design shipped with `build_register_payload` constructing
    the range as the nominal start of `first_year` through the nominal start of
@@ -496,9 +508,13 @@ rule is `fixed52`) → `search` to verify → Error Handling table → Changelog
    `references/open-items.md` item 5).
 6. **Filter-widget behaviour for `13x4` period labels.** Two mechanisms, one confirmed
    and mitigated, one open — see "13x4 carries a consumption risk" above.
-   - *Confirmed:* lexical sort of `Period 1..13` does not preserve numeric order.
+   - *Closed:* lexical sort of `Period 1..13` does not preserve numeric order.
      Mitigated by zero-padding the default labels. No further action needed unless a
      user supplies custom unpadded labels, which `validate` should warn about.
+   - *Closed — VERIFIED 2026-09-16:* a `13x4` calendar with `Period 01`…`Period 13`
+     labels registers successfully (200, calendar `d2309815`, deleted afterwards). The
+     API accepts non-month `month` labels; `--native`'s `13x4` refusal is about
+     `FROM_INPUT_PARAMS` having no 13-period calendar type, not about the shape.
    - *Open:* whether the filter widget and the `MONTH_YEAR` date-filter type accept a
      non-month string as `month_name`, and whether the widget orders by
      `month_number_of_year` or by the label. The REST spec documents `month_name` as
@@ -507,7 +523,10 @@ rule is `fixed52`) → `search` to verify → Error Handling table → Changelog
    - *What would resolve it:* register a `13x4` calendar on a live cluster, build a
      Liveboard filter on the calendar's month column, and check (a) the order periods
      are listed in, (b) whether selecting `Period 13` filters correctly, (c) whether a
-     `MONTH_YEAR` filter via the REST API accepts a period label. Status: UNVERIFIED.
+     `MONTH_YEAR` filter via the REST API accepts a period label. `POST /calendars/search`
+     cannot answer it — it returns metadata only (name, connection, author, ids), with no
+     column values or ordering — so this needs a browser session, not a REST probe.
+     Status: registration VERIFIED, filter-widget half UNVERIFIED.
    - *If it fails:* `13x4` remains useful for query generation and aggregation; the
      workaround is to filter on `month_number_of_year` or on a date range rather than
      the period label. Document that rather than withdrawing the pattern.

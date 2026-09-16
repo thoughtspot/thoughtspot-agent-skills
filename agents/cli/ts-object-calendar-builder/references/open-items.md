@@ -6,19 +6,24 @@ it, and its current status. See
 `docs/superpowers/specs/2026-09-15-ts-object-calendar-builder-design.md` for
 the full design context these were verified against.
 
-## 1 — Non-English labels
+## 1 — Non-English labels — VERIFIED 2026-09-16
 
-No table among the 42 in `CUSTOM_CALENDAR.PUBLIC` uses a non-English label —
-`rlscalendarjapan` is English despite its name. The evidence that this
-matters is strong but indirect: three mutually-incompatible label styles
-already ship in production (`April`, `FEB`, `Period 1`), and no month-name
-parser would accept `Period 1` either, so localized labels are plausible but
-unconfirmed. Needs a live round-trip: register a calendar with non-Latin
-month and day names and confirm it imports and is searchable. The design is
-believed safe either way, because ordering lives in the numeric columns, not
-the label strings.
+**Non-Latin month and day labels are accepted.** A 30-column calendar whose
+`month` values were `2月`…`1月` and whose `day_of_week` values were
+`日曜日`…`土曜日` registered successfully via `FROM_EXISTING_TABLE` on
+`se-thoughtspot` (HTTP 200, calendar id `643ff2ed`). The probe calendar was
+deleted afterwards (204).
 
-**Status: UNVERIFIED.**
+This is now direct evidence rather than inference. The corpus contained no
+such example — none of the 42 tables in `CUSTOM_CALENDAR.PUBLIC` uses a
+non-English label, `rlscalendarjapan` included, which is English despite its
+name — so the earlier reading rested on the fact that three mutually
+incompatible label styles already ship in production (`April`, `FEB`,
+`Period 1`) and no month-name parser would accept `Period 1` either. That
+inference held: the API does not parse the label strings, and ordering lives
+in the numeric columns, exactly as the design assumed.
+
+**Status: VERIFIED 2026-09-16.**
 
 ## 2 — `generate-csv` unavailable on `se-thoughtspot`
 
@@ -43,17 +48,10 @@ it as an invariant that never varies.
 
 **Status: VERIFIED, re-check on another build.**
 
-## 4 — `FROM_EXISTING_TABLE` schema-validation error shape
+## 4 — `FROM_EXISTING_TABLE` schema-validation error shape — VERIFIED 2026-09-16
 
-The `createCalendar` API errors when the referenced warehouse table doesn't
-match the required column contract, but the exact error shape (status code,
-body structure, which mismatch is named) is undocumented and has not been
-captured live. Capturing it would let `ts calendar validate` pre-empt the
-same problem locally with a clearer message, before a `register` call ever
-reaches the API.
-
-**Partial finding — 2026-09-16, `semantic-sql` cluster.** The error *envelope* is now
-captured, for the case where the referenced table does not exist at all:
+**Captured live, and the answer is that the API never tells you what is
+wrong.** Every contract violation returns the *identical* response:
 
 ```
 HTTP 400
@@ -64,21 +62,39 @@ HTTP 400
    Error Message: Unable to fetch column metadata for external table : <db>.<schema>.<table>"
 ```
 
-So: status 400, top-level code `10002`, calendar-specific code
-`INVALID_EXTERNAL_CALENDAR`, and a human-readable reason nested as a JSON-escaped
-string inside `error.message.debug.debug` — not a structured field list.
+Status 400, top-level code `10002`, calendar-specific code
+`INVALID_EXTERNAL_CALENDAR`, and the human-readable reason nested as a
+JSON-escaped string inside `error.message.debug.debug` — not a structured
+field list.
 
-**What this does NOT settle, and why the item stays open.** The probe used a
-*non-existent* table, so the failure came from metadata fetch, not from column
-comparison. The case this item actually cares about — a table that exists but whose
-columns do not match the contract — is still uncaptured, and it is the one whose
-message would show whether the API names the offending columns. Until that is seen,
-`ts calendar validate` cannot be tuned to pre-empt it with a matching message.
+**The same response came back for every one of these**, on `se-thoughtspot`,
+2026-09-16:
 
-*To finish this:* create a table on a connected warehouse with deliberately wrong
-columns (e.g. drop `is_weekend`), call `register` against it, and record the message.
+| Probe | Response |
+|---|---|
+| Table does not exist | 400, identical body |
+| 30-column table missing one contract column | 400, identical body |
+| Correct 10-column table, correct types | 400, identical body |
+| 30-column table with `date` typed as TEXT | 400, identical body |
+| 30-column table with one extra column | 400, identical body |
+| **Control:** valid 30-column table | **200** |
 
-**Status: UNVERIFIED.**
+**It never names the offending column**, and it does not distinguish "table
+missing" from "table wrong" — the earlier partial finding read the
+`CONNECTION_METADATA_FETCH_ERROR` as a metadata-fetch failure specific to a
+non-existent table, and that reading was too generous: it is simply the only
+message this endpoint emits.
+
+**Consequence, and it is the useful half.** `ts calendar validate` cannot
+mirror the API's message, because the API has no message to mirror. It has to
+catch the problem locally instead — which is what it does: an exact header
+match against the 10- or 30-column contract plus at most one trailing
+discriminator, per-row contract shape, duplicate/missing dates, week-number
+range, and a `ten-column-not-registrable` warning for the shape this probe
+proved is rejected. Two of the five failing probes above (missing column,
+extra column) are caught by `validate` before a `register` call is made.
+
+**Status: VERIFIED 2026-09-16.**
 
 ## 5 — `--native`'s `start_date` / `end_date` convention — VERIFIED 2026-09-16
 
@@ -133,31 +149,45 @@ live-confirmed values, not the old placeholder ones.
 
 **Status: VERIFIED 2026-09-16.**
 
-## 6 — Filter-widget behaviour for `13x4` period labels
+## 6 — Filter-widget behaviour for `13x4` period labels — SPLIT
 
-Two independent mechanisms, one confirmed and mitigated, one still open —
-see [anchor-rules.md](anchor-rules.md) for the full discussion.
+Three mechanisms, two now closed and one still open — see
+[anchor-rules.md](anchor-rules.md) for the full discussion.
 
-- *Confirmed:* a lexical sort of `Period 1..13` does not preserve numeric
-  order (`Period 1, Period 10, Period 11, …, Period 2, …`). Mitigated by
-  zero-padding the default generated labels (`Period 01`…`Period 13`); no
+- *Closed (lexical sort):* a lexical sort of `Period 1..13` does not preserve
+  numeric order (`Period 1, Period 10, Period 11, …, Period 2, …`). Mitigated
+  by zero-padding the default generated labels (`Period 01`…`Period 13`); no
   further action needed unless a user supplies custom, unpadded
   `--month-names`, which `validate` should warn about.
-- *Open:* whether a Liveboard filter widget and the `MONTH_YEAR` date-filter
-  type accept a non-month string as `month_name`, and whether the widget
-  orders choices by `month_number_of_year` or by the label text. The REST
-  spec documents `month_name` as "Name of the month in uppercase" and lists
-  `PERIOD_ONLY` as an unsupported filter type, so the concern is real, but
-  its actual enforcement in the product has not been tested live.
+- *Closed (registration) — VERIFIED 2026-09-16:* a `13x4` calendar with
+  zero-padded `Period 01`…`Period 13` labels **registers successfully** via
+  `FROM_EXISTING_TABLE` on `se-thoughtspot` (HTTP 200, calendar id
+  `d2309815`; deleted afterwards, 204). A 13-period calendar with non-month
+  `month` labels is therefore accepted by the API — the refusal `--native`
+  carries for `13x4` is about `FROM_INPUT_PARAMS` having no 13-period
+  calendar *type*, not about the shape being unacceptable.
+- *Open (filter widget and `MONTH_YEAR` filters):* whether a Liveboard filter
+  widget and the `MONTH_YEAR` date-filter type accept a non-month string as
+  `month_name`, and whether the widget orders choices by
+  `month_number_of_year` or by the label text. The REST spec documents
+  `month_name` as "Name of the month in uppercase" and lists `PERIOD_ONLY` as
+  an unsupported filter type, so the concern is real, but its enforcement in
+  the product is untested.
 
-*What would resolve it:* register a `13x4` calendar on a live cluster,
-build a Liveboard filter on its month column, and check (a) the order
-periods are listed in, (b) whether selecting `Period 13` filters correctly,
-(c) whether a `MONTH_YEAR` filter via the REST API accepts a period label.
+*Why the open half stayed open on 2026-09-16:* `POST /calendars/search`
+returns metadata only — name, connection, author, ids — with no column values
+and no ordering information, so it cannot answer a question about what a
+widget displays. There is no REST surface for it.
+
+*What would resolve it (needs a browser session against a cluster with the
+`d2309815`-style calendar registered):* build a Liveboard filter on the
+calendar's month column and record (a) the order the periods are listed in,
+(b) whether selecting `Period 13` filters correctly, (c) whether a
+`MONTH_YEAR` filter submitted via the REST API accepts a period label.
 
 *If it fails:* `13x4` remains useful for query generation and aggregation —
 document the fallback (filter on `month_number_of_year` or a date range)
 rather than withdrawing the pattern.
 
-**Status: UNVERIFIED (the mitigated half is closed; the filter-widget half
-is open).**
+**Status: registration VERIFIED 2026-09-16; the filter-widget half remains
+UNVERIFIED.**

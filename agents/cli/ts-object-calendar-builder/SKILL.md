@@ -42,6 +42,7 @@ questions into a single prompt to cut round-trips.
 |---|---|
 | [references/calendar-table-contract.md](references/calendar-table-contract.md) | The 10/30-column schema, value formats, epoch exclusivity, the RLS discriminator column |
 | [references/anchor-rules.md](references/anchor-rules.md) | The three anchor rules, worked year tables, the `nearest`-vs-`first` divergence, leap-week placement, period patterns |
+| [references/fix-column-case.sql](references/fix-column-case.sql) | Parameterised CTAS that re-aliases a loaded table's UPPER_CASE columns to the quoted lower-case names the API requires — **required** in Step 6 |
 | [references/relabel-calendar.sql](references/relabel-calendar.sql) | Parameterised CTAS to fix an existing calendar's month labels without regenerating it |
 | [references/open-items.md](references/open-items.md) | Unverified or cluster-specific findings — read before trusting `--native` |
 | [tools/ts-cli/README.md](../../../tools/ts-cli/README.md) (`ts calendar`, `ts load`, `ts snowflake`) | Full flag reference for every command below |
@@ -77,7 +78,7 @@ Steps:
   3.  Preview + compare, confirm the shape ............... you confirm (checkpoint)
   4.  Generate the calendar CSV(s) ...................... auto
   5.  Validate against the column contract .............. auto
-  6.  Load to Snowflake .................................. auto
+  6.  Load to Snowflake, fix the column case ............ auto
   7.  Register with ThoughtSpot .......................... auto
   8.  Verify what landed ................................. auto
   9.  Relabel an existing calendar (alternate path) ...... you confirm (checkpoint)
@@ -137,11 +138,12 @@ Let's build your custom calendar.
 Notes for gathering these, not to read verbatim to the user:
 
 - **If they answer `13x4` to question 3**, tell them up front:
-  "13x4 is query-safe but filter-unverified — the numeric columns are fine
-  for aggregation, but whether a Liveboard filter widget accepts and orders
-  period labels correctly on this build hasn't been confirmed live. If it
-  turns out not to work, filter on `month_number_of_year` or a date range
-  instead." See [references/anchor-rules.md](references/anchor-rules.md).
+  "13x4 registers and queries fine — a `Period 01`…`Period 13` calendar was
+  registered live on 2026-09-16 — but it is filter-unverified: whether a
+  Liveboard filter widget accepts and orders period labels correctly on this
+  build hasn't been confirmed. If it turns out not to work, filter on
+  `month_number_of_year` or a date range instead."
+  See [references/anchor-rules.md](references/anchor-rules.md).
   Also tell them `--native` (Step 7's fast path) is refused for `13x4`
   regardless of anchor rule — the API has no 13-period calendar type — so a
   `13x4` calendar always goes through Steps 4–6.
@@ -228,7 +230,28 @@ ts calendar generate --start-month "{start_month}" --start-day "{start_day}" \
   --year-basis "{year_basis}" --monthly-basis "{monthly_basis}" \
   --quarterly-basis "{quarterly_basis}" --fiscal-year-number "{fiscal_year_number}" \
   --month-names "{month_names}" --day-names "{day_names}" \
-  --columns {columns} --out "{out_dir}/{table_name}.csv"
+  --columns 30 --out "{out_dir}/{table_name}_stage.csv"
+```
+
+**Always `--columns 30`.** The 10-column shape is real in the corpus but
+ThoughtSpot's `createCalendar` **rejects** it — verified live 2026-09-16 on a
+10.12+ build, for a pre-existing and a freshly created table alike, with
+correct types in both. `--columns 10` remains available for an intermediate
+artifact; it is not registrable, and `validate` warns when it sees one.
+
+**The `_stage` suffix is deliberate.** The table this CSV loads into is an
+intermediate — Step 6 rebuilds it under the real name with the column case the
+API requires. Naming it `{table_name}_stage.csv` is what makes the loaded
+table `{TABLE_NAME}_STAGE`.
+
+Add `--ddl` if you also want the `CREATE TABLE` statement for the registrable
+shape — quoted lower-case columns, contract types — for example to pre-create
+the table by hand or to hand it to a DBA:
+
+```bash
+ts calendar generate ... --out "{out_dir}/{table_name}_stage.csv" \
+  --ddl "{out_dir}/{table_name}.sql" --database "{database}" --schema "{schema}" \
+  --table "{table_name}"
 ```
 
 For an RLS set, run this once **per variant** — using that variant's own
@@ -250,7 +273,7 @@ ts calendar generate --start-month "{variant_start_month}" --start-day "{variant
   --year-basis "{year_basis}" --monthly-basis "{monthly_basis}" \
   --quarterly-basis "{quarterly_basis}" --fiscal-year-number "{fiscal_year_number}" \
   --month-names "{month_names}" --day-names "{day_names}" \
-  --columns {columns} --out "{out_dir}/{variant_table_name}.csv" \
+  --columns 30 --out "{out_dir}/{variant_table_name}_stage.csv" \
   --discriminator-column "{discriminator_column}" \
   --discriminator-value "{variant_discriminator_value}"
 ```
@@ -269,14 +292,14 @@ above has a documented default except `--start-month`, `--start-day`,
 ## Step 5 — Validate
 
 ```bash
-ts calendar validate --csv "{out_dir}/{table_name}.csv"
+ts calendar validate --csv "{out_dir}/{table_name}_stage.csv"
 ```
 
 For an RLS set, repeat `--csv` once per variant in a single call — this is
 what checks cross-variant label consistency, not just each file on its own:
 
 ```bash
-ts calendar validate --csv "{out_dir}/{variant_a}.csv" --csv "{out_dir}/{variant_b}.csv"
+ts calendar validate --csv "{out_dir}/{variant_a}_stage.csv" --csv "{out_dir}/{variant_b}_stage.csv"
 ```
 
 If it fails on label drift between variants and the drift is a deliberate,
@@ -287,42 +310,107 @@ downgrade it to a warning. Otherwise fix the vocabulary — see
 Stop and report the finding if `validate` exits non-zero for any other
 reason; do not proceed to load a table that fails its own contract.
 
+A `ten-column-not-registrable` **warning** (exit 0) means the CSV was
+generated with `--columns 10` and cannot be registered — regenerate it with
+`--columns 30` rather than carrying it into Step 6.
+
 ---
 
-## Step 6 — Load to Snowflake
+## Step 6 — Load to Snowflake, Fix the Column Case
+
+**The load on its own does not produce a registrable table — 6a and 6b are
+both required.** Snowflake folds an unquoted identifier to UPPER CASE, and
+`ts load snowflake` upper-cases every CSV header *and* emits its DDL
+unquoted, so the loaded table has columns `DATE`, `DAY_OF_WEEK`, … . The
+calendar contract is quoted lower-case (`"date"`, `"day_of_week"`, …), and
+ThoughtSpot **rejects** the upper-case table: HTTP 400,
+`INVALID_EXTERNAL_CALENDAR` wrapping `CONNECTION_METADATA_FETCH_ERROR`, a
+message that never names the offending column. Verified live 2026-09-16 —
+the identical rows registered 200 once re-aliased by 6b. `ts load snowflake`
+has no case-preserving flag, so the re-alias is a separate step rather than
+an option.
+
+### 6a — Load each CSV as a staging table
 
 `ts load snowflake --source` takes a **directory**, not a single file, and
 loads every `*.csv` in it as its own table (named from the file's stem,
-upper-cased with non-alphanumerics turned to underscores) — which is
-exactly what Step 4 already produced, one CSV per variant in `{out_dir}`:
+upper-cased with non-alphanumerics turned to underscores) — which is exactly
+what Step 4 produced, one `{...}_stage.csv` per variant in `{out_dir}`:
 
 ```bash
 ts load snowflake --source "{out_dir}" --profile "{sf_profile_name}" \
   --database "{database}" --schema "{schema}" --if-exists replace
 ```
 
-For a **single calendar**, this is the whole step — one CSV, one table.
+So `{table_name}_stage.csv` becomes the table `{TABLE_NAME}_STAGE`. Nothing
+in ThoughtSpot ever points at that table; it exists only as 6b's input.
 
-For an **RLS set**, this loads every variant as its own table in one call.
-Then create the union with a literal discriminator per source table:
+### 6b — Re-alias the columns to the contract
+
+Run this **once per table loaded in 6a**. `{skill_dir}` is the absolute path
+of the directory containing this SKILL.md (e.g.
+`~/.claude/skills/ts-object-calendar-builder` in Claude Code,
+`~/.snowflake/cortex/skills/...` in Cortex Code CLI) — substitute the real
+path when running:
+
+```bash
+ts snowflake exec -f "{skill_dir}/references/fix-column-case.sql" \
+  --sf-profile "{sf_profile_name}" \
+  --var source_db="{database}" --var source_schema="{schema}" \
+  --var source_table="{TABLE_NAME}_STAGE" --var target_table="{TABLE_NAME}"
+```
+
+[references/fix-column-case.sql](references/fix-column-case.sql) is a CTAS
+that selects all 30 contract columns by their UPPER_CASE names and aliases
+each to its quoted lower-case contract name. It also **casts** each to its
+contract type: `ts load snowflake` infers types from the **data**, so a
+calendar generated with no `--year-prefix` / `--quarter-prefix` loads its
+`year` *and* `quarter` label columns as `INTEGER` — and a label column typed
+as a number is another shape the API rejects. The column list and the types
+are pinned to the generator's own contract by a unit test, so the SQL and the
+contract cannot drift apart.
+
+`{TABLE_NAME}` — the re-aliased table — is what Step 7 registers. The
+`_STAGE` table can be dropped once 6b succeeds:
+
+```bash
+ts snowflake exec --sf-profile "{sf_profile_name}" \
+  -q "DROP TABLE IF EXISTS \"{database}\".\"{schema}\".\"{TABLE_NAME}_STAGE\""
+```
+
+### 6c — RLS sets only: union the variants
+
+Run 6b for **every** variant first, then union the re-aliased tables with a
+literal discriminator per source table:
 
 ```bash
 ts snowflake exec --sf-profile "{sf_profile_name}" -q "
 CREATE OR REPLACE VIEW \"{database}\".\"{schema}\".\"{union_table}\" AS (
-  SELECT *, '{discriminator_value_a}' AS \"{discriminator_column}\" FROM \"{database}\".\"{schema}\".\"{variant_a_table}\"
+  SELECT *, '{discriminator_value_a}' AS \"{discriminator_column}\" FROM \"{database}\".\"{schema}\".\"{VARIANT_A_TABLE}\"
   UNION ALL
-  SELECT *, '{discriminator_value_b}' AS \"{discriminator_column}\" FROM \"{database}\".\"{schema}\".\"{variant_b_table}\"
+  SELECT *, '{discriminator_value_b}' AS \"{discriminator_column}\" FROM \"{database}\".\"{schema}\".\"{VARIANT_B_TABLE}\"
 )"
 ```
 
 Add one more `UNION ALL` branch per additional variant. This is the same
 composition the corpus's own `rlscalendar` view uses.
 
+Every branch selects from the **re-aliased** table from 6b, never from the
+`_STAGE` one — a `SELECT *` over a staging table would carry the UPPER_CASE
+columns straight into the view.
+
+**The discriminator is added here, not carried through.** 6b names only the
+30 contract columns, so it drops the discriminator column Step 4 wrote into
+each variant CSV, and this union adds it back as a literal. That is
+deliberate: keeping the loaded copy *and* adding the literal would name the
+same column twice and Snowflake would reject the view outright.
+
 ---
 
 ## Step 7 — Register
 
-Default path — register the table (or view) just loaded:
+Default path — register the **re-aliased** table from Step 6b (or the union
+view from 6c), never the `_STAGE` table 6a created:
 
 ```bash
 ts calendar register --name "{calendar_name}" --connection "{connection}" \
@@ -463,7 +551,10 @@ Then:
 
 | Symptom | Action |
 |---|---|
-| ThoughtSpot rejects the table with a schema-mismatch error on `register` | Run `ts calendar validate --csv {path}` first — it checks the header against the same column contract locally (an exact match to the 10- or 30-column list, plus at most one trailing RLS discriminator column) with a clearer message. See [references/calendar-table-contract.md](references/calendar-table-contract.md); a common cause is an unquoted Snowflake identifier that got upper-cased |
+| `register` returns 400 `INVALID_EXTERNAL_CALENDAR` / `CONNECTION_METADATA_FETCH_ERROR` — "Unable to fetch column metadata for external table" | **This one message covers every contract violation** and never names the offending column — verified live across a missing column, a wrong type, an extra column and a correct 10-column table (open item 4). Check, in order: (a) Step 6b was actually run and you registered `{TABLE_NAME}`, not `{TABLE_NAME}_STAGE` — UPPER_CASE columns are the most common cause; (b) the table has all **30** columns, not 10; (c) `ts calendar validate --csv {path}` is clean. The API will not tell you which; `validate` will |
+| `register` fails on a table generated with `--columns 10` | Expected on 10.12+ — `createCalendar` requires all 30 columns even though the corpus documents a 10-column minimum (verified live 2026-09-16, pre-existing and freshly created tables alike). Regenerate with `--columns 30` and repeat Steps 5-7 |
+| `ts snowflake exec -f fix-column-case.sql` fails with "invalid identifier `"MONTHLY"`" or similar | The source table is not a loaded 30-column calendar — either it came from a `--columns 10` CSV, or 6a did not run. Regenerate at `--columns 30`, reload, and re-run 6b |
+| ThoughtSpot rejects the table with a schema-mismatch error on `register` | Run `ts calendar validate --csv {path}` first — it checks the header against the same column contract locally (an exact match to the 10- or 30-column list, plus at most one trailing RLS discriminator column) with a clearer message. See [references/calendar-table-contract.md](references/calendar-table-contract.md); a common cause is an unquoted Snowflake identifier that got upper-cased, which is exactly what Step 6b exists to repair |
 | `register --native` refused for the requested anchor | Expected — the native API cannot express `nearest` or `first` without silently drifting. Use the default (`FROM_EXISTING_TABLE`) path: generate, validate, load, then register without `--native` |
 | `register --native` refused for pattern `13x4`: `--native cannot express pattern '13x4' — the API has no 13x4 calendar type. Generate a table and register it instead.` | Expected, and independent of anchor rule — even `anchor fixed52` is refused for `13x4`, because the API has no 13-period calendar type at all. Use the default (`FROM_EXISTING_TABLE`) path: generate, validate, load, then register without `--native` |
 | `--native` registration times out or returns a 504 | Known issue on at least one cluster (`se-thoughtspot`) — see open item 2 in [references/open-items.md](references/open-items.md). All verified native-API behaviour in this skill comes from a different cluster. The default path (generate/validate/load/register) does not touch this endpoint and is unaffected |

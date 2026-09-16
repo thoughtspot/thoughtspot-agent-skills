@@ -8,6 +8,15 @@ these; `ts calendar validate` checks a CSV or a live table against them.
 
 ## Minimum shape (10 columns)
 
+**Not registrable.** These ten columns are the minimum the corpus documents,
+and every 30-column table starts with them, but ThoughtSpot's `createCalendar`
+**rejects a table that has only these ten** — verified live 2026-09-16 against
+a 10.12+ build, for a pre-existing table and a freshly created one, with
+correct types in both cases. The API requires all **30** columns. Treat
+`ts calendar generate --columns 10` as an intermediate artifact only;
+`ts calendar validate` raises a `ten-column-not-registrable` warning when it
+sees one.
+
 In order:
 
 | # | Column | Meaning |
@@ -97,11 +106,23 @@ quoted and lower-case** — `"date"`, `"day_of_week"`, `"is_weekend"`, and so
 on, exactly as written above. Snowflake folds unquoted identifiers to
 upper-case by default; if the DDL or load path lets that happen, the
 resulting table has columns named `DATE`, `DAY_OF_WEEK`, etc., and the
-ThoughtSpot API rejects the table as not matching the required schema. Both
-`ts calendar generate --ddl`-style output and `ts load snowflake` quote
-identifiers correctly — this note exists so a hand-edited DDL statement
-(for example, a variant of `relabel-calendar.sql`) doesn't reintroduce the
-problem.
+ThoughtSpot API rejects the table as not matching the required schema (HTTP
+400, `INVALID_EXTERNAL_CALENDAR` — a message that never names a column).
+
+**`ts load snowflake` does NOT preserve the case** — it derives each column
+name from the CSV header with `sanitise_name()`, which upper-cases it, and
+emits the DDL unquoted. It has no case-preserving flag. That is why the
+skill's Step 6 runs
+[`references/fix-column-case.sql`](fix-column-case.sql) after the load: a
+CTAS that re-aliases all 30 columns back to their quoted lower-case contract
+names and casts each to its contract type. Verified live 2026-09-16 — the
+same rows that were rejected as `DATE`/`DAY_OF_WEEK`/… registered 200 once
+re-aliased.
+
+`ts calendar generate --ddl` emits this shape directly, correctly quoted, for
+the case where the table is created by hand rather than loaded. The note
+above also exists so that a hand-edited DDL statement (for example, a variant
+of `relabel-calendar.sql`) doesn't reintroduce the problem.
 
 ## The row-level-security discriminator (column 31)
 

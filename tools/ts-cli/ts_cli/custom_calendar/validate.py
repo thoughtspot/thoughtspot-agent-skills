@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Dict, List, Sequence
 
+from ts_cli.custom_calendar.rows import COLUMNS_10
+
 # Closed vocabularies: a fixed set of values, so drift across variants breaks
 # ThoughtSpot's search suggestions (AUGUST vs AUG both offered, only one valid).
 CLOSED_VOCABULARY_COLUMNS = ("day_of_week", "month", "quarter")
@@ -31,6 +33,15 @@ def validate_rows(rows: Sequence[Dict[str, object]], *, columns: Sequence[str]) 
         return [Finding("error", "empty", "Calendar has no rows")]
 
     expected = list(columns)
+    if expected == list(COLUMNS_10):
+        findings.append(Finding(
+            "warning", "ten-column-not-registrable",
+            "This calendar uses the 10-column contract. ThoughtSpot's createCalendar "
+            "REJECTS a 10-column table (HTTP 400, INVALID_EXTERNAL_CALENDAR) even when "
+            "every column and type is correct — verified live 2026-09-16 against a "
+            "10.12+ build, against both a pre-existing and a freshly created table. "
+            "Regenerate with --columns 30 before loading and registering; the "
+            "10-column file is usable only as an intermediate artifact."))
     for i, row in enumerate(rows):
         if list(row.keys()) != expected:
             findings.append(Finding(

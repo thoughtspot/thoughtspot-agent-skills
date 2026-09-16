@@ -3852,11 +3852,20 @@ ts calendar generate --start-month February --start-day Monday \
 
 | Option | Default | Description |
 |---|---|---|
-| `--columns` | `30` | `10` (minimal) or `30` (full) column contract — see [calendar-table-contract.md](../../agents/cli/ts-object-calendar-builder/references/calendar-table-contract.md) |
+| `--columns` | `30` | `10` (minimal) or `30` (full) column contract — see [calendar-table-contract.md](../../agents/cli/ts-object-calendar-builder/references/calendar-table-contract.md). **Only 30 registers:** `createCalendar` rejects a 10-column table on 10.12+ even with correct types (verified live 2026-09-16); `10` is an intermediate artifact only, and `validate` warns when it sees one |
 | `--out` | *(required)* | CSV output path |
-| `--discriminator-column` / `--discriminator-value` | — | Give both to tag every row with an RLS discriminator literal, for one variant of a union calendar |
+| `--ddl` | — | Also write the Snowflake `CREATE TABLE` for the same shape to this path — quoted lower-case columns and contract types, which is what the API requires. Needs `--database` and `--schema` |
+| `--database` / `--schema` | — | Target database/schema for `--ddl`. Rejected without `--ddl` rather than silently ignored |
+| `--table` | `--out` stem | Table name for `--ddl` |
+| `--discriminator-column` / `--discriminator-value` | — | Give both to tag every row with an RLS discriminator literal, for one variant of a union calendar. `--discriminator-column` also adds the column to `--ddl` output |
 
-**Output:** the CSV at `--out`; a JSON summary (`{rows, columns, path}`) to stdout, row count to stderr.
+**Output:** the CSV at `--out`; a JSON summary (`{rows, columns, path}`, plus `ddl_path` when
+`--ddl` is given) to stdout, row count to stderr.
+
+Loading the CSV with `ts load snowflake` produces UPPER_CASE columns, which ThoughtSpot
+rejects — the skill's
+[`references/fix-column-case.sql`](../../agents/cli/ts-object-calendar-builder/references/fix-column-case.sql)
+re-aliases them afterwards. `--ddl` is the alternative for a table created by hand.
 
 ### `ts calendar compare`
 

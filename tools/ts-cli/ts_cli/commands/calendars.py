@@ -16,7 +16,7 @@ from ts_cli.custom_calendar.anchors import resolve_anchor
 from ts_cli.custom_calendar.compare import (
     LABEL_DIMENSIONS, compare_anchors, compare_labels,
 )
-from ts_cli.custom_calendar.emit import write_csv
+from ts_cli.custom_calendar.emit import snowflake_ddl, write_csv
 from ts_cli.custom_calendar.grid import build_years
 from ts_cli.custom_calendar.labels import default_month_names
 from ts_cli.custom_calendar.rows import COLUMNS_10, COLUMNS_30, build_rows, columns_for
@@ -166,8 +166,21 @@ def generate_cmd(
     year_basis: str = _O["year_basis"], monthly_basis: str = _O["monthly_basis"],
     quarterly_basis: str = _O["quarterly_basis"], fiscal_year_number: str = _O["fy_number"],
     month_names: Optional[str] = _O["month_names"], day_names: Optional[str] = _O["day_names"],
-    columns: int = typer.Option(30, "--columns", help="10 or 30"),
+    columns: int = typer.Option(
+        30, "--columns",
+        help="10 or 30. Only 30 can be REGISTERED: ThoughtSpot's createCalendar "
+             "rejects a 10-column table on 10.12+ even with correct types "
+             "(verified live 2026-09-16). Use 10 only as an intermediate artifact."),
     out: str = typer.Option(..., "--out", help="CSV output path"),
+    ddl: Optional[str] = typer.Option(
+        None, "--ddl",
+        help="Also write the Snowflake CREATE TABLE statement for this shape to this "
+             "path — quoted lower-case columns, which the API requires. "
+             "Needs --database and --schema."),
+    database: Optional[str] = typer.Option(None, "--database", help="Database name for --ddl"),
+    schema: Optional[str] = typer.Option(None, "--schema", help="Schema name for --ddl"),
+    table: Optional[str] = typer.Option(
+        None, "--table", help="Table name for --ddl (default: the --out file stem)"),
     discriminator_column: Optional[str] = typer.Option(
         None, "--discriminator-column", help="RLS discriminator column name"),
     discriminator_value: Optional[str] = typer.Option(
@@ -183,6 +196,10 @@ def generate_cmd(
       ts calendar generate --start-month February --start-day Monday \\
         --pattern 4-5-4 --anchor nearest --first-year 2015 --last-year 2026 \\
         --out retail.csv
+
+      ts calendar generate --start-month February --start-day Monday \\
+        --first-year 2015 --last-year 2026 --out retail.csv \\
+        --ddl retail.sql --database CUSTOM_CALENDAR --schema PUBLIC
     """
     spec, labels = build_spec_from_options(
         start_month, start_day, pattern, anchor, first_year, last_year,
@@ -191,6 +208,11 @@ def generate_cmd(
     if bool(discriminator_column) != bool(discriminator_value):
         raise typer.BadParameter(
             "--discriminator-column and --discriminator-value must be given together")
+    if ddl and not (database and schema):
+        raise typer.BadParameter("--ddl requires --database and --schema")
+    if not ddl and (database or schema or table):
+        raise typer.BadParameter(
+            "--database, --schema and --table only apply with --ddl")
 
     cols = columns_for(columns)
     rows = build_rows(spec, labels, columns=columns)
@@ -198,7 +220,15 @@ def generate_cmd(
     with open(out, "w", encoding="utf-8", newline="") as fh:
         write_csv(rows, cols, fh, discriminator=disc)
     print(f"Wrote {len(rows)} rows to {out}", file=sys.stderr)
-    print(json.dumps({"rows": len(rows), "columns": len(cols), "path": out}))
+
+    summary: Dict[str, object] = {"rows": len(rows), "columns": len(cols), "path": out}
+    if ddl:
+        statement = snowflake_ddl(table or Path(out).stem, cols, database=database,
+                                  schema=schema, discriminator=discriminator_column)
+        Path(ddl).write_text(statement + "\n", encoding="utf-8")
+        print(f"Wrote DDL to {ddl}", file=sys.stderr)
+        summary["ddl_path"] = ddl
+    print(json.dumps(summary))
 
 
 @app.command("compare")

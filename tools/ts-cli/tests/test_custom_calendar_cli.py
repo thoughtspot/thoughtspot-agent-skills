@@ -328,3 +328,95 @@ def test_native_refuses_13x4_which_the_api_cannot_express():
     with pytest.raises(ValueError, match="13x4"):
         build_register_payload(name="N", connection="c", database="D",
                                schema="S", table="T", native=True, spec=spec)
+
+
+# --- `generate --ddl` -------------------------------------------------------
+# The design spec promised `--ddl` from the start and the emitter shipped with
+# tests, but no CLI flag ever reached it: `emit.snowflake_ddl` was tested-but-
+# unreachable dead code for the whole branch, and `check_skill_flag_usage`
+# could not see it because no SKILL.md referenced it either. The quoting is the
+# point — an unquoted identifier folds to upper case in Snowflake and
+# ThoughtSpot then rejects the table (see references/fix-column-case.sql).
+
+def test_generate_ddl_emits_quoted_lowercase_columns(tmp_path):
+    out, ddl = tmp_path / "cal.csv", tmp_path / "cal.sql"
+    res = runner.invoke(app, [
+        "generate", "--start-month", "February", "--start-day", "Monday",
+        "--first-year", "2017", "--last-year", "2017", "--out", str(out),
+        "--ddl", str(ddl), "--database", "CUSTOM_CALENDAR", "--schema", "PUBLIC",
+        "--table", "RETAIL_CAL",
+    ])
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout)["ddl_path"] == str(ddl)
+    statement = ddl.read_text()
+    assert statement.startswith(
+        'CREATE OR REPLACE TABLE "CUSTOM_CALENDAR"."PUBLIC"."RETAIL_CAL" (')
+    assert '"date" DATE' in statement
+    assert '"is_weekend" BOOLEAN' in statement
+    assert '"day_of_week"' in statement and "DAY_OF_WEEK" not in statement
+
+
+def test_generate_ddl_table_name_defaults_to_the_out_stem(tmp_path):
+    out, ddl = tmp_path / "retail_cal.csv", tmp_path / "retail_cal.sql"
+    res = runner.invoke(app, [
+        "generate", "--start-month", "February", "--start-day", "Monday",
+        "--first-year", "2017", "--last-year", "2017", "--out", str(out),
+        "--ddl", str(ddl), "--database", "D", "--schema", "S",
+    ])
+    assert res.exit_code == 0, res.output
+    assert '"D"."S"."retail_cal"' in ddl.read_text()
+
+
+def test_generate_ddl_carries_the_rls_discriminator(tmp_path):
+    out, ddl = tmp_path / "a.csv", tmp_path / "a.sql"
+    res = runner.invoke(app, [
+        "generate", "--start-month", "February", "--start-day", "Monday",
+        "--first-year", "2017", "--last-year", "2017", "--out", str(out),
+        "--ddl", str(ddl), "--database", "D", "--schema", "S",
+        "--discriminator-column", "TS_CALENDAR_GROUP", "--discriminator-value", "a",
+    ])
+    assert res.exit_code == 0, res.output
+    assert "TS_CALENDAR_GROUP VARCHAR" in ddl.read_text()
+
+
+def test_generate_ddl_requires_database_and_schema(tmp_path):
+    res = runner.invoke(app, [
+        "generate", "--start-month", "February", "--start-day", "Monday",
+        "--first-year", "2017", "--last-year", "2017",
+        "--out", str(tmp_path / "x.csv"), "--ddl", str(tmp_path / "x.sql"),
+    ])
+    assert res.exit_code != 0
+    assert "--ddl requires --database and --schema" in res.output
+
+
+def test_ddl_only_options_without_ddl_are_rejected_not_ignored(tmp_path):
+    res = runner.invoke(app, [
+        "generate", "--start-month", "February", "--start-day", "Monday",
+        "--first-year", "2017", "--last-year", "2017",
+        "--out", str(tmp_path / "x.csv"), "--database", "D", "--schema", "S",
+    ])
+    assert res.exit_code != 0
+    assert "only apply with --ddl" in res.output
+
+
+def test_validate_warns_a_ten_column_calendar_cannot_be_registered(tmp_path):
+    # Live 2026-09-16: a 10-column table with correct types is rejected by
+    # createCalendar (400) whether pre-existing or freshly created. The file is
+    # still a legitimate intermediate, so this is a warning and exits 0.
+    out = tmp_path / "ten.csv"
+    runner.invoke(app, [
+        "generate", "--start-month", "February", "--start-day", "Monday",
+        "--first-year", "2017", "--last-year", "2017",
+        "--columns", "10", "--out", str(out),
+    ])
+    res = runner.invoke(app, ["validate", "--csv", str(out)])
+    assert res.exit_code == 0, res.output
+    findings = json.loads(res.stdout)["findings"]
+    assert [f["code"] for f in findings] == ["ten-column-not-registrable"]
+    assert findings[0]["severity"] == "warning"
+
+
+def test_validate_does_not_warn_on_the_thirty_column_contract(tmp_path):
+    path = _gen(tmp_path, "thirty.csv")
+    res = runner.invoke(app, ["validate", "--csv", str(path)])
+    assert json.loads(res.stdout)["findings"] == []

@@ -680,3 +680,54 @@ def test_compare_anchors_reports_first_divergence():
 def test_compare_anchors_flags_the_short_range_trap():
     out = compare_anchors(_lulu_spec(2015, 2026))
     assert out["nearest_vs_fixed52_first_divergence"] == 2019
+
+
+# --- the skill's reference SQL is a second copy of the column contract -------
+# Two .sql files under agents/cli/ts-object-calendar-builder/references/ name
+# all 30 contract columns by hand. They are executed by CoCo-less runtimes via
+# `ts snowflake exec`, so nothing else checks them against COLUMNS_30. A column
+# added to the contract and not to these files would produce a table that
+# imports nowhere and whose failure the API never explains (it returns the same
+# CONNECTION_METADATA_FETCH_ERROR for every contract violation — open item 4).
+
+import re as _re
+from pathlib import Path as _Path
+
+from ts_cli.custom_calendar.emit import _sql_type
+from ts_cli.custom_calendar.rows import COLUMNS_30 as _COLUMNS_30
+
+_REFERENCES = (_Path(__file__).resolve().parents[3]
+               / "agents" / "cli" / "ts-object-calendar-builder" / "references")
+_ALIAS_RE = _re.compile(r'AS "([a-z_]+)"')
+
+
+@pytest.mark.parametrize("name", ["fix-column-case.sql", "relabel-calendar.sql"])
+def test_reference_sql_selects_every_contract_column_in_order(name):
+    body = (_REFERENCES / name).read_text(encoding="utf-8")
+    # Columns carried through unchanged appear as a bare quoted name, the
+    # rewritten/cast ones as `... AS "name"`. Take the select list as written.
+    select_list = body.split("SELECT", 1)[1].split("FROM", 1)[0]
+    selected = []
+    for line in select_list.splitlines():
+        line = line.strip().rstrip(",")
+        if not line:
+            continue
+        alias = _ALIAS_RE.search(line)
+        selected.append(alias.group(1) if alias
+                        else line.strip('"').split('"')[0])
+    assert selected == list(_COLUMNS_30)
+
+
+def test_fix_column_case_sql_reads_upper_case_and_casts_to_contract_types():
+    body = (_REFERENCES / "fix-column-case.sql").read_text(encoding="utf-8")
+    for column in _COLUMNS_30:
+        assert f'"{column.upper()}"::{_sql_type(column)}' in body, column
+
+
+def test_fix_column_case_sql_has_no_placeholder_outside_the_four_vars():
+    # `ts snowflake exec` scans the WHOLE file, comments included, and aborts on
+    # any placeholder it cannot fill — so an illustrative {token} in the header
+    # comment would make the documented command fail before it reaches Snowflake.
+    body = (_REFERENCES / "fix-column-case.sql").read_text(encoding="utf-8")
+    found = set(_re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", body))
+    assert found == {"source_db", "source_schema", "source_table", "target_table"}
