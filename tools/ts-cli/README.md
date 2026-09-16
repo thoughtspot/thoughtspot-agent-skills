@@ -3827,6 +3827,18 @@ tiling, for the `ts-object-calendar-builder` skill. The pure grid/label/row logi
 see [the skill's anchor-rules reference](../../agents/cli/ts-object-calendar-builder/references/anchor-rules.md)
 for what each one means.
 
+**Two label options carry a ThoughtSpot filter-widget caveat**, and `validate` warns on
+both. A `month` label that is not a month name (`Period 01`, or any custom
+`--month-names`) **cannot be selected** in a filter widget; a prefixed `year`
+(`--year-prefix FY` → `FY2024`) **cannot be typed** into the year filter, which takes
+`YYYY` only. `--quarter-prefix` (`Q1`) is **unaffected** — the rule is specific to the
+year filter, so this is an asymmetry, not "prefixes break filters". Neither limits the
+calendar otherwise: date-range and dynamic filters ("this year") work, and query
+generation, grouping, aggregation and display are unaffected. Product knowledge confirmed
+at review 2026-09-16 (not an automated probe) — detail in
+[the skill's open-items.md](../../agents/cli/ts-object-calendar-builder/references/open-items.md)
+item 6.
+
 ### `ts calendar preview`
 
 Print the year/period shape (which years are 53 weeks, which period absorbs the extra
@@ -3915,6 +3927,15 @@ one trailing RLS discriminator column; anything else is a `column-contract` erro
 the missing or unexpected columns. Uniqueness and continuity of `date` are checked **per
 file**, not across the set — a union/RLS set deliberately repeats each date once per
 variant.
+
+Three checks are **warnings** (exit 0) rather than errors, because the calendar they
+describe is legitimate — just constrained: `ten-column-not-registrable` (the 10-column
+shape the API rejects), `month-label-not-filter-selectable` (a `month` label that is not
+a month name cannot be selected in a filter widget) and `year-label-not-filter-typeable`
+(the year filter takes `YYYY` only, so a `--year-prefix` value cannot be typed into it).
+The last two are mitigated by filtering on a date range, a dynamic filter ("this year"),
+or the numeric columns. A prefixed `quarter` (`Q1`) works and is deliberately not
+flagged.
 
 **Output:** JSON `{findings[]}` to stdout, each with `severity`/`code`/`message`/`source`.
 Exits non-zero if any finding is `severity: error`.

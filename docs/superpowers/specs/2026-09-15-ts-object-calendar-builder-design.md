@@ -1,6 +1,6 @@
 # ts-object-calendar-builder — Custom Calendar Builder (Design)
 
-**Status:** implemented, reviewed and live-verified on `feat/ts-object-calendar-builder` (2026-09-16). Open items 1 and 4 are now VERIFIED live; item 6 is split — registration verified, the filter-widget half still open (it needs a browser session, not a REST call). The live run also found three defects, all fixed in the same branch: `ts load snowflake` upper-cases columns so the documented load path could not produce a registrable table (Step 6 now re-aliases via `references/fix-column-case.sql`); `createCalendar` rejects the 10-column shape outright; and `--ddl` was specified but never implemented. See the skill's `references/open-items.md`.
+**Status:** implemented, reviewed and live-verified on `feat/ts-object-calendar-builder` (2026-09-16). Open items 1, 4 and 6 are now closed. Item 6's registration half was verified live; its filter-widget half was answered at PR review on 2026-09-16 from ThoughtSpot product knowledge (there is no REST surface that could probe it), and the answer generalises beyond `13x4`: a non-month `month` label is not selectable in a filter widget and a prefixed `year` (`FY2024`) is not typeable into the year filter, while a prefixed `quarter` (`Q1`) works — with date-range and dynamic filters, and all querying/grouping/display, unaffected. The live run also found three defects, all fixed in the same branch: `ts load snowflake` upper-cases columns so the documented load path could not produce a registrable table (Step 6 now re-aliases via `references/fix-column-case.sql`); `createCalendar` rejects the 10-column shape outright; and `--ddl` was specified but never implemented. See the skill's `references/open-items.md`.
 **Skill:** `agents/cli/ts-object-calendar-builder/`
 **CLI surface:** `ts calendar`
 **Date:** 2026-09-15
@@ -194,34 +194,48 @@ that is true of `PERIOD_CALENDAR` (12 periods) but false of
 `FISCAL_CALENDAR_13_PERIOD` (13 periods × 28 days, 364-day years, and a 371-day
 FY2023). Both tables exist in the corpus and they are different things.
 
-#### 13x4 carries a consumption risk that the other patterns do not
+#### 13x4 carries a consumption constraint that the other patterns do not
 
-Query generation is fine — the numeric columns carry all the ordering. The risk is in
-the **filter widget**, and there are two distinct mechanisms:
+Query generation is fine — the numeric columns carry all the ordering. The constraint
+is in the **filter widget**, via two distinct mechanisms, both now settled:
 
 1. **Lexical sort scrambles period order.** Confirmed against
    `FISCAL_CALENDAR_13_PERIOD` on 2026-09-15: sorting its `month` values as strings
    gives `Period 1, Period 10, Period 11, Period 12, Period 13, Period 2, …` —
    numeric order is not preserved. Any consumer that sorts the label rather than
    `month_number_of_year` lists periods wrongly.
-2. **The date-filter contract assumes month semantics.** `MONTH_YEAR` requires
-   `month_name`, documented as "Name of the month in uppercase", and `MONTH_ONLY`,
-   `QUARTER_ONLY` and `PERIOD_ONLY` are documented as unsupported filter types.
-   Whether `"PERIOD 1"` is accepted where a month name is expected is unverified.
-   Quarters are unaffected — a 13-period year still has four.
+2. **A non-month label cannot be selected in the filter widget** — confirmed at PR
+   review on 2026-09-16 from ThoughtSpot product knowledge, not an automated probe.
+   This is **not specific to `13x4`**: it applies to any custom `--month-names` value
+   that is not a real month name. A second limitation of the same family hits the
+   **year** filter, and a third case is explicitly fine:
+
+| Label column | Custom / prefixed value | Filter widget |
+|---|---|---|
+| `month` | non-month names (e.g. `Period 01`) | **not selectable** |
+| `year` | prefixed (e.g. `FY2024`) | **not typeable** — accepts `YYYY` only |
+| `quarter` | prefixed (e.g. `Q1`) | **works** |
+
+   So `--year-prefix FY` — an extremely common requirement, presented as an ordinary
+   option — costs typed year filtering, while `--quarter-prefix Q` costs nothing. The
+   design must not present this as a blanket "prefixes break filters".
 
 **Registration is not at risk** — live 2026-09-16, a `13x4` calendar with
-`Period 01`…`Period 13` labels registered successfully (200). Only the filter/consumption
-question below is open.
+`Period 01`…`Period 13` labels registered successfully (200).
 
 **Mitigation, applied by default for `13x4`:** zero-pad the generated labels
 (`Period 01` … `Period 13`) so lexical and numeric order coincide. This costs nothing,
-needs no product change, and removes mechanism 1 entirely. It does not address
-mechanism 2, which is open item 6.
+needs no product change, and removes mechanism 1 entirely.
 
-Because mechanism 2 is unresolved, `13x4` ships **documented as query-safe but
-filter-unverified**. The skill must say so when a user selects it rather than
-presenting it as equivalent to the 12-period patterns.
+**Mechanism 2 has no fix, only a mitigation — and the mitigation is the half that
+matters.** Filter by **date range** or by a **dynamic/relative filter** ("this year"),
+or on `month_number_of_year`; querying, grouping, aggregation and display are
+unaffected. So `13x4` ships **documented as query-safe with a constrained filter
+widget**, not as broken. The skill must say so when a user selects `13x4`, or sets
+`--month-names` or `--year-prefix`, rather than presenting any of them as
+unconstrained — and must say the mitigation in the same breath. `ts calendar validate`
+warns on both shapes (`month-label-not-filter-selectable`,
+`year-label-not-filter-typeable`) at warning severity, exit 0.
 
 ### Leap-week placement
 
@@ -506,30 +520,47 @@ rule is `fixed52`) → `search` to verify → Error Handling table → Changelog
    item existed to catch; the convention is pinned by exact-value unit tests against the
    live-confirmed values. Status: **VERIFIED 2026-09-16** (see the skill's
    `references/open-items.md` item 5).
-6. **Filter-widget behaviour for `13x4` period labels.** Two mechanisms, one confirmed
-   and mitigated, one open — see "13x4 carries a consumption risk" above.
-   - *Closed:* lexical sort of `Period 1..13` does not preserve numeric order.
-     Mitigated by zero-padding the default labels. No further action needed unless a
-     user supplies custom unpadded labels, which `validate` should warn about.
-   - *Closed — VERIFIED 2026-09-16:* a `13x4` calendar with `Period 01`…`Period 13`
+6. **Filter-widget behaviour for custom labels — VERIFIED 2026-09-16.** Wider than the
+   `13x4` question this item was opened for.
+   - *Provenance, and it bounds how this may be cited:* the filter-widget half was
+     answered by the repository owner, a ThoughtSpot solutions engineer, from direct
+     product knowledge, confirmed during PR review on 2026-09-16. **Expert product
+     knowledge, not a test result.** No REST surface could have produced it:
+     `POST /calendars/search` returns metadata only (name, connection, author, ids) —
+     no column values, no ordering — so this needed a person or a browser, not a probe.
+   - *Closed — lexical sort:* `Period 1..13` does not sort numerically as strings.
+     Mitigated by zero-padding the default labels. Custom unpadded `--month-names`
+     reintroduce it; `ts calendar validate` warns on any non-month label, covering it.
+   - *Closed — registration, by live API:* a `13x4` calendar with `Period 01`…`Period 13`
      labels registers successfully (200, calendar `d2309815`, deleted afterwards). The
      API accepts non-month `month` labels; `--native`'s `13x4` refusal is about
      `FROM_INPUT_PARAMS` having no 13-period calendar type, not about the shape.
-   - *Open:* whether the filter widget and the `MONTH_YEAR` date-filter type accept a
-     non-month string as `month_name`, and whether the widget orders by
-     `month_number_of_year` or by the label. The REST spec documents `month_name` as
-     "Name of the month in uppercase" and lists `PERIOD_ONLY` as unsupported, so the
-     assumption is real but its enforcement is untested.
-   - *What would resolve it:* register a `13x4` calendar on a live cluster, build a
-     Liveboard filter on the calendar's month column, and check (a) the order periods
-     are listed in, (b) whether selecting `Period 13` filters correctly, (c) whether a
-     `MONTH_YEAR` filter via the REST API accepts a period label. `POST /calendars/search`
-     cannot answer it — it returns metadata only (name, connection, author, ids), with no
-     column values or ordering — so this needs a browser session, not a REST probe.
-     Status: registration VERIFIED, filter-widget half UNVERIFIED.
-   - *If it fails:* `13x4` remains useful for query generation and aggregation; the
-     workaround is to filter on `month_number_of_year` or on a date range rather than
-     the period label. Document that rather than withdrawing the pattern.
+   - *Closed — the filter widget:* the limitation is confined to the **typed-value**
+     filter components, and it is an asymmetry, not a blanket rule:
+
+| Label column | Custom / prefixed value | Filter widget |
+|---|---|---|
+| `month` | non-month names (e.g. `Period 01`) | **not selectable** |
+| `year` | prefixed (e.g. `FY2024`) | **not typeable** — accepts `YYYY` only |
+| `quarter` | prefixed (e.g. `Q1`) | **works** |
+
+     **L1** — a month/period label that is not a month name cannot be selected; this
+     generalises to *any* custom `--month-names`, not just `13x4`. **L2** — the year
+     filter accepts `YYYY` only, so a `--year-prefix` value cannot be typed into it;
+     this matters disproportionately because the prefix is a very common requirement.
+     **`--quarter-prefix` works** and must not be warned against.
+   - *The qualification, and it carries equal weight:* the calendar remains fully
+     usable. Date-range filters and dynamic/relative filters ("this year") work; query
+     generation, grouping, aggregation and display are unaffected, because the numeric
+     columns carry all the true ordering. Custom labels do not break calendars — they
+     narrow which filter components accept typed input.
+   - *Not established, and not to be implied:* whether a localized real month name
+     (`2月`, `février`) reads to the widget as a month name (it registers fine — item 1),
+     and whether a `MONTH_YEAR` filter submitted through the REST API accepts a period
+     label. Neither changes the guidance; the mitigation is the same either way.
+   - Status: **VERIFIED 2026-09-16** — filter behaviour from expert product knowledge at
+     PR review, registration from a live API call. See the skill's
+     `references/open-items.md` item 6.
 
 ---
 

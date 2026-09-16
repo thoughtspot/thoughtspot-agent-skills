@@ -49,6 +49,56 @@ questions into a single prompt to cut round-trips.
 
 ---
 
+## Limitation — custom labels and the ThoughtSpot filter widget
+
+**Read this before choosing `--month-names` or `--year-prefix`.** Two
+ThoughtSpot filter-widget limitations constrain what a user can *type* into a
+filter on a custom calendar. They do not stop the calendar working, but a
+user who meets them after building a calendar will read them as a defect, so
+raise them at the point of choice (Step 2) rather than at the end.
+
+| Label column | Custom / prefixed value | Filter widget |
+|---|---|---|
+| `month` | non-month names (e.g. `Period 01`) | **not selectable** |
+| `year` | prefixed (e.g. `FY2024`) | **not typeable** — accepts `YYYY` only |
+| `quarter` | prefixed (e.g. `Q1`) | **works** |
+
+- **L1 — a month/period label that is not a month name cannot be selected in
+  the filter widget.** This is why a `13x4` calendar's `Period 01`…`Period 13`
+  labels can't be picked from a filter. It is **not** specific to `13x4`: it
+  applies to *any* `--month-names` value that is not a real month name.
+  *Mitigation:* filter with a **date range**, with a **dynamic/relative
+  filter** ("this year", "last quarter"), or on the numeric
+  `month_number_of_year` column.
+- **L2 — the year filter accepts only `YYYY`.** A calendar built with
+  `--year-prefix FY` has `year` values like `FY2024`, and those cannot be
+  typed into the year filter — it takes a four-digit year and nothing else.
+  `--year-prefix` is a very common requirement and the flag looks ordinary,
+  so say this when the user asks for one. *Mitigation:* the same — a **date
+  range** or a **dynamic/relative filter** ("this year") both work normally.
+- **`--quarter-prefix` is unaffected.** `Q1` *is* selectable. The `YYYY`-only
+  rule is specific to the year filter. Don't steer a user away from
+  `--quarter-prefix`.
+
+**The calendar is still fully usable — say this as loudly as the
+limitations.** Only the typed-value filter components are affected. Date
+range and dynamic filters work; **query generation, grouping, aggregation and
+display are unaffected**, because the numeric columns carry all the real
+ordering and the labels display exactly as written. This is not "custom
+labels break calendars" — it narrows which filter components accept typed
+input.
+
+`ts calendar validate` emits a warning (exit 0 — these calendars are
+legitimate) when it sees either shape: `month-label-not-filter-selectable`
+and `year-label-not-filter-typeable`.
+
+Provenance: ThoughtSpot product knowledge, confirmed at PR review on
+2026-09-16 — not an automated probe. Full detail, including what was *not*
+established, is in [references/open-items.md](references/open-items.md)
+item 6.
+
+---
+
 ## Prerequisites
 
 - `ts` CLI on PATH, version **0.139.0+**
@@ -126,11 +176,16 @@ Let's build your custom calendar.
                     first (first weekday on/after the 1st) /
                     fixed52 (fixed +364 days — matches the native API):
   5. Fiscal year range, first and last year (e.g. 2020-2027):
-  6. Year/quarter label prefixes, if any (e.g. FY, Q):
+  6. Year/quarter label prefixes, if any (e.g. FY, Q)? — a year prefix
+     (FY2024) can't be typed into ThoughtSpot's year filter; a quarter
+     prefix (Q1) is fine:
   7. Label basis for year / month / quarter — fiscal (default) or gregorian
      for each, independently:
   8. Non-default month or day names? (localization, abbreviation like FEB,
      or 13-period labels — leave blank for English full names)
+     Note: a label that is not a month name (Period 01, and any custom
+     vocabulary) can't be selected in a ThoughtSpot filter widget — the
+     calendar still filters by date range or "this year":
   9. Is this a per-tenant / row-level-security calendar (multiple variants
      sharing one registered object)?
 ```
@@ -139,11 +194,13 @@ Notes for gathering these, not to read verbatim to the user:
 
 - **If they answer `13x4` to question 3**, tell them up front:
   "13x4 registers and queries fine — a `Period 01`…`Period 13` calendar was
-  registered live on 2026-09-16 — but it is filter-unverified: whether a
-  Liveboard filter widget accepts and orders period labels correctly on this
-  build hasn't been confirmed. If it turns out not to work, filter on
-  `month_number_of_year` or a date range instead."
-  See [references/anchor-rules.md](references/anchor-rules.md).
+  registered live on 2026-09-16 — but its `Period NN` labels **cannot be
+  selected in a ThoughtSpot filter widget**, because the widget only takes
+  real month names there. Filter by date range, by a dynamic filter like
+  'this year', or on `month_number_of_year` instead. Nothing else is
+  affected: querying, grouping, aggregation and display all work normally."
+  See the Limitation section above and
+  [references/anchor-rules.md](references/anchor-rules.md).
   Also tell them `--native` (Step 7's fast path) is refused for `13x4`
   regardless of anchor rule — the API has no 13-period calendar type — so a
   `13x4` calendar always goes through Steps 4–6.
@@ -286,6 +343,15 @@ set's shared label spec; only `--start-month`, `--start-day`, `--pattern`,
 Omit any flag the user didn't specify a non-default value for — every flag
 above has a documented default except `--start-month`, `--start-day`,
 `--first-year`, `--last-year` and `--out`, which are required.
+
+**Before setting `--month-names` or `--year-prefix`, check the user has met
+the filter-widget limitation** — see
+[Limitation — custom labels and the ThoughtSpot filter widget](#limitation--custom-labels-and-the-thoughtspot-filter-widget)
+above. Non-month period labels can't be selected in a filter widget, and a
+prefixed year (`FY2024`) can't be typed into the year filter; both are still
+filterable by date range or a dynamic filter such as "this year", and neither
+affects querying, grouping or display. `--quarter-prefix` is unaffected.
+Step 5's `validate` repeats the warning, but by then the choice is made.
 
 ---
 
@@ -558,6 +624,9 @@ Then:
 | `register --native` refused for the requested anchor | Expected — the native API cannot express `nearest` or `first` without silently drifting. Use the default (`FROM_EXISTING_TABLE`) path: generate, validate, load, then register without `--native` |
 | `register --native` refused for pattern `13x4`: `--native cannot express pattern '13x4' — the API has no 13x4 calendar type. Generate a table and register it instead.` | Expected, and independent of anchor rule — even `anchor fixed52` is refused for `13x4`, because the API has no 13-period calendar type at all. Use the default (`FROM_EXISTING_TABLE`) path: generate, validate, load, then register without `--native` |
 | `--native` registration times out or returns a 504 | Known issue on at least one cluster (`se-thoughtspot`) — see open item 2 in [references/open-items.md](references/open-items.md). All verified native-API behaviour in this skill comes from a different cluster. The default path (generate/validate/load/register) does not touch this endpoint and is unaffected |
+| A user can't select `Period 01` (or any non-month label) in a filter widget | Expected — the widget only accepts real month names as typed values. Filter by date range, by a dynamic filter ("this year"), or on `month_number_of_year`. Querying, grouping and display are unaffected. See the Limitation section above |
+| A user can't type `FY2024` into the year filter | Expected — the year filter accepts `YYYY` only, so any `--year-prefix` value is unselectable there. Date-range and dynamic filters work normally. Quarter prefixes (`Q1`) are **not** affected. See the Limitation section above |
+| `ts calendar validate` warns `month-label-not-filter-selectable` or `year-label-not-filter-typeable` | Warning, exit 0 — the calendar is legitimate, just constrained in the filter widget. Either accept it and tell the user the mitigation (date range / dynamic filter), or drop the custom labels / prefix if filter typing matters more than the label text |
 | `ts calendar validate` fails on cross-variant label drift | Either align the label vocabulary across variants (same `--month-names`, `--day-names`, prefixes) so search suggestions resolve to one variant, or, if the drift is a deliberate known exception, re-run `validate` with `--allow-label-drift` to downgrade it to a warning |
 | `ts load snowflake` reports the table already exists | Re-run with `--if-exists replace` (or `skip` to leave it alone) — the default (`error`) refuses to overwrite silently |
 | `ts snowflake exec` aborts on an unfilled `{placeholder}` | A `--var` is missing for a token in the SQL — check every `{name}` in the query or file has a matching `--var name=value` |

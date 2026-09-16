@@ -132,32 +132,41 @@ each hold three periods, Q4 holds four (`Period 10`–`Period 13`).
 `13x4` is a genuine 13×28-day structure, not a relabelled `4-4-5` — it
 differs in period *count*, not just in label text.
 
-### `13x4` is query-safe but filter-unverified
+### `13x4` labels cannot be selected in a filter widget
 
 Query generation and aggregation are unaffected — the numeric columns
 (`month_number_of_year`, `absolute_week_number`, etc.) carry all the true
-ordering regardless of pattern. The open risk is specific to the **filter
-widget** and has two distinct mechanisms:
+ordering regardless of pattern. Two separate things touch the **labels**, and
+both are now settled:
 
 1. **Lexical sort scrambles period order.** Confirmed against
    `FISCAL_CALENDAR_13_PERIOD`: sorting `month` values as strings gives
    `Period 1, Period 10, Period 11, Period 12, Period 13, Period 2, …` — not
    numeric order. **Mitigated by default**: `13x4`'s generated labels are
    zero-padded (`Period 01` … `Period 13`) so lexical and numeric order
-   coincide. This is automatic and needs no user action unless custom,
-   unpadded `--month-names` are supplied.
-2. **The date-filter contract assumes month semantics, and this is
-   unverified.** ThoughtSpot's `MONTH_YEAR` filter type requires a
-   `month_name` documented as "Name of the month in uppercase," and
-   `MONTH_ONLY` / `QUARTER_ONLY` / `PERIOD_ONLY` are documented as
-   unsupported filter types. Whether a Liveboard filter widget accepts and
-   orders a non-month string like `"PERIOD 01"` the way it does a real
-   month name has not been checked against a live cluster.
+   coincide. Automatic; needs no user action unless custom, unpadded
+   `--month-names` are supplied, which `ts calendar validate` warns about.
+2. **A non-month label cannot be selected in the filter widget.** This is a
+   product limitation, confirmed at PR review on 2026-09-16 from ThoughtSpot
+   product knowledge (not an automated probe — there is no REST surface that
+   could be one). It is **not specific to `13x4`**: it applies to any custom
+   `--month-names` value that is not a real month name. A second, related
+   limitation affects the year filter, and a third case does *not*:
+
+| Label column | Custom / prefixed value | Filter widget |
+|---|---|---|
+| `month` | non-month names (e.g. `Period 01`) | **not selectable** |
+| `year` | prefixed (e.g. `FY2024`) | **not typeable** — accepts `YYYY` only |
+| `quarter` | prefixed (e.g. `Q1`) | **works** |
+
+**The pattern remains fully usable, and this is the half to say out loud.**
+Only the typed-value filter components are affected. A `13x4` calendar
+filters normally by **date range** and by **dynamic / relative filters**
+("this year"), or on `month_number_of_year`; registration, querying,
+grouping, aggregation and display are all unaffected. A `13x4` calendar with
+`Period 01`…`Period 13` labels registered live on 2026-09-16 (HTTP 200).
 
 **State this to the user whenever `13x4` is selected**, rather than
-presenting it as equivalent to the 12-period patterns: query generation and
-aggregation are safe; a period-based filter widget is not yet verified. If
-it turns out not to work, the pattern is still useful for query generation
-and aggregation — the fallback is to filter on `month_number_of_year` or on
-a date range rather than the period label. See open item 6 in
-[open-items.md](open-items.md).
+presenting it as equivalent to the 12-period patterns — but state the
+mitigation with it, because "this still works, here is how" is the
+actionable half. See open item 6 in [open-items.md](open-items.md).

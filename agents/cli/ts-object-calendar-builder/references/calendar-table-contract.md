@@ -23,9 +23,9 @@ In order:
 |---|---|---|
 | 1 | `date` | The calendar day |
 | 2 | `day_of_week` | Absolute day name (`Monday`, `Tuesday`, …) — see "day_of_week vs day_number_of_week" below |
-| 3 | `month` | Period label for this row (e.g. `February`, `Period 01`) |
+| 3 | `month` | Period label for this row (e.g. `February`, `Period 01`) — a non-month label is **not selectable in a filter widget**, see below |
 | 4 | `quarter` | Quarter label for this row (e.g. `Q1`) |
-| 5 | `year` | Fiscal year label for this row |
+| 5 | `year` | Fiscal year label for this row — a prefixed value (`FY2024`) **cannot be typed into the year filter**, see below |
 | 6 | `day_number_of_week` | Day position **relative to `start_day_of_week`** — see below |
 | 7 | `week_number_of_month` | 1-based week position within the period |
 | 8 | `week_number_of_quarter` | 1-based week position within the quarter |
@@ -98,6 +98,38 @@ the first day of the next period in any range query.
   (or the numeric `week_number_of_*` / `absolute_*_number` columns); the two
   `day_of_week`/`month`/`quarter` label columns are opaque display strings,
   not sort keys.
+
+## Label values and the ThoughtSpot filter widget
+
+The label columns are free text as far as *registration* goes — the API does
+not parse them, and non-Latin labels register fine (open item 1, live-verified
+2026-09-16). **Consumption is where the constraint is**, and only in the
+filter components that take a *typed value*:
+
+| Label column | Custom / prefixed value | Filter widget |
+|---|---|---|
+| `month` | non-month names (e.g. `Period 01`) | **not selectable** |
+| `year` | prefixed (e.g. `FY2024`) | **not typeable** — accepts `YYYY` only |
+| `quarter` | prefixed (e.g. `Q1`) | **works** |
+
+- A `month` label that is not a month name — `Period 01`, or any custom
+  `--month-names` value — cannot be selected in a filter widget.
+- The year filter accepts a four-digit `YYYY` only, so a `--year-prefix`
+  value (`FY2024`) cannot be typed into it.
+- A prefixed `quarter` (`Q1`) **is** selectable; the `YYYY`-only rule is
+  specific to the year filter.
+
+**The calendar is still fully usable.** Date-range filters and dynamic /
+relative filters ("this year") work regardless, and query generation,
+grouping, aggregation and display are unaffected — the numeric columns
+(`month_number_of_year`, `quarter_number_of_year`, `absolute_week_number`, …)
+carry all the real ordering. `ts calendar validate` warns (exit 0) on both
+shapes: `month-label-not-filter-selectable` and
+`year-label-not-filter-typeable`.
+
+Provenance: ThoughtSpot product knowledge, confirmed at PR review on
+2026-09-16 — not an automated probe. Full detail, and what was *not*
+established, is in [open-items.md](open-items.md) item 6.
 
 ## Snowflake column naming
 

@@ -114,13 +114,21 @@ _O = dict(
     last_year=typer.Option(..., "--last-year", help="Last fiscal year (inclusive)"),
     leap=typer.Option("last", "--leap-week-period",
                       help="Period absorbing a 53rd week: 'last' or an ordinal"),
-    year_prefix=typer.Option("", "--year-prefix", help="e.g. FY"),
+    year_prefix=typer.Option(
+        "", "--year-prefix",
+        help="e.g. FY — warning: ThoughtSpot's year filter accepts YYYY only, so a "
+             "prefixed year cannot be typed into it (date-range and dynamic filters "
+             "still work). --quarter-prefix is unaffected."),
     quarter_prefix=typer.Option("", "--quarter-prefix", help="e.g. Q"),
     year_basis=typer.Option("fiscal", "--year-basis", help="fiscal | gregorian"),
     monthly_basis=typer.Option("fiscal", "--monthly-basis", help="fiscal | gregorian"),
     quarterly_basis=typer.Option("fiscal", "--quarterly-basis", help="fiscal | gregorian"),
     fy_number=typer.Option("start", "--fiscal-year-number", help="start | end"),
-    month_names=typer.Option(None, "--month-names", help="Comma-separated period labels"),
+    month_names=typer.Option(
+        None, "--month-names",
+        help="Comma-separated period labels — warning: a label that is not a month "
+             "name (e.g. 'Period 01') cannot be selected in a ThoughtSpot filter "
+             "widget (date-range and dynamic filters still work)."),
     day_names=typer.Option(None, "--day-names", help="Comma-separated day labels, Sunday first"),
 )
 

@@ -461,3 +461,25 @@ def test_validate_does_not_warn_on_the_thirty_column_contract(tmp_path):
     path = _gen(tmp_path, "thirty.csv")
     res = runner.invoke(app, ["validate", "--csv", str(path)])
     assert json.loads(res.stdout)["findings"] == []
+
+
+def test_validate_warns_on_labels_the_filter_widget_cannot_take(tmp_path):
+    # Open item 6: non-month period labels cannot be SELECTED in a filter widget
+    # and a prefixed year cannot be TYPED into the year filter. Both are
+    # warnings (exit 0) — the calendar still works by date range / dynamic
+    # filter, and querying and display are unaffected.
+    out = tmp_path / "periods.csv"
+    gen = runner.invoke(app, [
+        "generate", "--start-month", "January", "--start-day", "Monday",
+        "--pattern", "13x4", "--first-year", "2021", "--last-year", "2021",
+        "--year-prefix", "FY", "--quarter-prefix", "Q", "--out", str(out),
+    ])
+    assert gen.exit_code == 0, gen.output
+    res = runner.invoke(app, ["validate", "--csv", str(out)])
+    assert res.exit_code == 0, res.output
+    findings = json.loads(res.stdout)["findings"]
+    codes = {f["code"] for f in findings}
+    assert codes == {"month-label-not-filter-selectable", "year-label-not-filter-typeable"}
+    assert all(f["severity"] == "warning" for f in findings)
+    # The quarter prefix (Q1) works in the widget and must NOT be flagged.
+    assert not any("quarter-prefix" in f["code"] for f in findings)

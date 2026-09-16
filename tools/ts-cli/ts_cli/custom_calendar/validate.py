@@ -10,6 +10,7 @@ from datetime import timedelta
 from typing import Dict, List, Sequence
 
 from ts_cli.custom_calendar.rows import COLUMNS_10
+from ts_cli.custom_calendar.spec import MONTHS_EN
 
 # Closed vocabularies: a fixed set of values, so drift across variants breaks
 # ThoughtSpot's search suggestions (AUGUST vs AUG both offered, only one valid).
@@ -18,12 +19,76 @@ CLOSED_VOCABULARY_COLUMNS = ("day_of_week", "month", "quarter")
 # date ranges, so only the FORMAT is comparable.
 DERIVED_LABEL_COLUMNS = ("year", "monthly", "quarterly")
 
+# Values ThoughtSpot's filter widget recognises as a month: the English month
+# names and their three-letter abbreviations (the corpus ships both `April` and
+# `FEB`). Anything else — `Period 01`, and see the caveat below — is a label the
+# widget cannot offer as a typed choice.
+_MONTH_NAME_TOKENS = frozenset(
+    [m.lower() for m in MONTHS_EN] + [m[:3].lower() for m in MONTHS_EN]
+)
+_YEAR_LABEL_RE = re.compile(r"^\d{4}$")
+_SAMPLE = 5
+
 
 @dataclass(frozen=True)
 class Finding:
     severity: str   # "error" | "warning"
     code: str
     message: str
+
+
+def _sample(values: List[str]) -> str:
+    shown = ", ".join(repr(v) for v in values[:_SAMPLE])
+    return shown + (f" (+{len(values) - _SAMPLE} more)" if len(values) > _SAMPLE else "")
+
+
+def _filter_widget_findings(rows: Sequence[Dict[str, object]]) -> List[Finding]:
+    """Label values ThoughtSpot's filter widget cannot take as TYPED input.
+
+    Both are product limitations of the typed-value filter components only. The
+    calendar stays fully usable: date-range filters and dynamic/relative filters
+    ("this year") work, and query generation, grouping, aggregation and display
+    are unaffected — the numeric columns carry the ordering. So both are
+    WARNINGS, not errors: these calendars are legitimate, just constrained.
+
+    Provenance: ThoughtSpot product knowledge confirmed at PR review on
+    2026-09-16 — NOT an automated probe, and there is no REST surface that could
+    be one. See the skill's references/open-items.md item 6.
+
+    `quarter` is deliberately NOT checked: a prefixed quarter label (`Q1`) IS
+    selectable. The YYYY-only rule is specific to the year filter.
+
+    Caveat on the month check: a real month name in another language is warned
+    about here too, because whether the widget reads one as a month name was not
+    established. Such a calendar registers fine (open item 1, live-verified).
+    """
+    findings: List[Finding] = []
+
+    months = sorted({str(r["month"]) for r in rows if "month" in r})
+    non_month = [m for m in months if m.strip().lower() not in _MONTH_NAME_TOKENS]
+    if non_month:
+        findings.append(Finding(
+            "warning", "month-label-not-filter-selectable",
+            f"month labels that are not month names cannot be SELECTED in a "
+            f"ThoughtSpot filter widget: {_sample(non_month)}. The calendar is "
+            "otherwise unaffected — querying, grouping, aggregation and display "
+            "all work, and it stays filterable by a date range, by a dynamic "
+            "filter (\"this year\"), or on month_number_of_year. Drop "
+            "--month-names only if typed month filtering matters more than the "
+            "label text."))
+
+    years = sorted({str(r["year"]) for r in rows if "year" in r})
+    non_numeric = [y for y in years if not _YEAR_LABEL_RE.match(y.strip())]
+    if non_numeric:
+        findings.append(Finding(
+            "warning", "year-label-not-filter-typeable",
+            f"ThoughtSpot's year filter accepts a four-digit YYYY only, so these "
+            f"year labels cannot be typed into it: {_sample(non_numeric)} "
+            "(--year-prefix is the usual cause). Date-range and dynamic filters "
+            "(\"this year\") work normally, and querying, grouping and display "
+            "are unaffected. --quarter-prefix is NOT subject to this."))
+
+    return findings
 
 
 def validate_rows(rows: Sequence[Dict[str, object]], *, columns: Sequence[str]) -> List[Finding]:
@@ -73,6 +138,8 @@ def validate_rows(rows: Sequence[Dict[str, object]], *, columns: Sequence[str]) 
                 "error", "week-number-range",
                 f"week_number_of_year {wn} on {r['date']} is outside 1..53"))
             break
+
+    findings.extend(_filter_widget_findings(rows))
     return findings
 
 

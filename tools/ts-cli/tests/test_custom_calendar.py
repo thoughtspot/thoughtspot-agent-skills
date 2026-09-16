@@ -731,3 +731,41 @@ def test_fix_column_case_sql_has_no_placeholder_outside_the_four_vars():
     body = (_REFERENCES / "fix-column-case.sql").read_text(encoding="utf-8")
     found = set(_re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", body))
     assert found == {"source_db", "source_schema", "source_table", "target_table"}
+
+
+# --- Filter-widget limitations (open item 6) ----------------------------------
+# Provenance: ThoughtSpot product knowledge confirmed at PR review 2026-09-16,
+# NOT an automated probe. Warnings only — such calendars are legitimate, just
+# constrained in the typed-value filter components.
+
+def test_non_month_period_labels_warn_they_cannot_be_filter_selected():
+    from ts_cli.custom_calendar.labels import default_month_names
+    rows = build_rows(_13x4_spec(2021, 2021),
+                      LabelSpec(month_names=default_month_names("13x4")))
+    findings = [f for f in validate_rows(rows, columns=COLUMNS_30)
+                if f.code == "month-label-not-filter-selectable"]
+    assert findings and findings[0].severity == "warning"
+    assert "Period 01" in findings[0].message
+
+
+def test_year_prefix_warns_the_year_filter_takes_four_digits_only():
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec(year_prefix="FY"))
+    findings = [f for f in validate_rows(rows, columns=COLUMNS_30)
+                if f.code == "year-label-not-filter-typeable"]
+    assert findings and findings[0].severity == "warning"
+    assert "FY2017" in findings[0].message
+
+
+def test_quarter_prefix_alone_raises_no_filter_warning():
+    # Q1 IS selectable in the filter widget — the YYYY-only rule is specific to
+    # the YEAR filter. Warning here would cost a capability for no reason.
+    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec(quarter_prefix="Q"))
+    assert validate_rows(rows, columns=COLUMNS_30) == []
+
+
+def test_abbreviated_english_months_raise_no_filter_warning():
+    # The corpus ships FEB alongside April; both are month names to the widget.
+    rows = build_rows(_lulu_spec(2017, 2017),
+                      LabelSpec(month_names=("FEB", "MAR", "APR", "MAY", "JUN", "JUL",
+                                             "AUG", "SEP", "OCT", "NOV", "DEC", "JAN")))
+    assert validate_rows(rows, columns=COLUMNS_30) == []
