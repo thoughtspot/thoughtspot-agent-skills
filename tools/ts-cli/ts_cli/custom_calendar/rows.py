@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Dict, List, Tuple
 
+from ts_cli.custom_calendar.anchors import sunday_index
 from ts_cli.custom_calendar.grid import build_years
 from ts_cli.custom_calendar.labels import render
 from ts_cli.custom_calendar.spec import CalendarSpec, LabelSpec, validate_labels, periods_per_year
@@ -80,7 +81,7 @@ def build_rows(spec: CalendarSpec, labels: LabelSpec, *, columns: int = 30) -> L
                     "week_number_of_month": since_period // 7 + 1,
                     "week_number_of_quarter": since_quarter // 7 + 1,
                     "week_number_of_year": week_of_year,
-                    "is_weekend": d.weekday() >= 5,
+                    "is_weekend": sunday_index(d) in (0, 6),
                     "monthly": lab["monthly"],
                     "quarterly": lab["quarterly"],
                     "day_number_of_month": since_period + 1,

@@ -354,10 +354,17 @@ let either one silently ship a wrong calendar:
   `anchor fixed52` is still refused, because the pattern itself has no
   native equivalent, not because of how it re-anchors.
 
-See open item 5 in [references/open-items.md](references/open-items.md)
-before relying on the native path for anything beyond a quick check: the
-exact date range it registers has not yet been confirmed live against a
-locally generated `fixed52` calendar for the same years.
+The date range it registers **is** confirmed live (open item 5 in
+[references/open-items.md](references/open-items.md), VERIFIED 2026-09-16).
+`end_date` is the last day the calendar actually covers — the day before the
+next fiscal year's anchor, `resolve_anchor(spec, last_year + 1) - 1 day` —
+not the nominal start of `last_year + 1`. The nominal form made ThoughtSpot
+generate a partial trailing fiscal period (1097 rows against our 1092 for a
+2027-2029 range), and the overshoot grew with the range. `start_date` stays
+the `MM/01/{first_year}` literal: the API snaps it forward to the next
+`start_day_of_week`, which is the same rule our `anchor_first` implements.
+With that correction the native calendar is byte-identical to the one this
+CLI generates for the same spec.
 
 ---
 
@@ -410,9 +417,34 @@ The four `--var` flags fill the placeholders in
 [references/relabel-calendar.sql](references/relabel-calendar.sql):
 `source_db` / `source_schema` / `source_table` name the existing table;
 `target_table` names the new one, created in the same database and schema.
-Every column is carried through unchanged except `year`, which the SQL
-recomputes from the Gregorian year of `date` instead of copying the source
-table's fiscal-year label.
+
+**Exactly what the SQL changes** — read this before running it, because the
+output is deliberately not uniform across the three year-bearing columns:
+
+| Column | What the SQL does |
+|---|---|
+| `year` | Recomputed as `YEAR("date")` — the **Gregorian** year, replacing the source's fiscal-year label |
+| `monthly` | Recomputed as `CONCAT("month", ' ', YEAR("date"))` — the period name with the **Gregorian** year, which is the defect this path exists to fix |
+| `quarterly` | **Carried through unchanged**, so it keeps the source's **fiscal** year |
+| all 27 others | Carried through unchanged |
+
+So the result has `monthly` on a Gregorian year basis and `quarterly` still
+on the fiscal one. That is intentional — the reported defect is the month
+label, and rewriting `quarterly` would silently renumber quarters that span
+a fiscal boundary — but it means the two columns disagree for dates in the
+straddling periods. Say so when offering this path.
+
+Two further constraints:
+
+- **The SQL assumes a 30-column source.** It names every contract column
+  explicitly, so a 10-column table, or one carrying an RLS discriminator as
+  column 31, fails or silently drops the extra column. Use the regenerate
+  path (Steps 1-8) for either.
+- **Any year prefix is dropped from the columns it rewrites.** `year` and
+  `monthly` are rebuilt from `YEAR("date")`, so a source labelled `FY2024`
+  / `January FY2024` comes back as `2024` / `January 2024`. `quarterly` is
+  copied verbatim and keeps its prefix, so the prefix survives on one
+  column and not the others.
 
 Then:
 
@@ -431,7 +463,7 @@ Then:
 
 | Symptom | Action |
 |---|---|
-| ThoughtSpot rejects the table with a schema-mismatch error on `register` | Run `ts calendar validate --csv {path}` first — it checks the same column contract locally with a clearer message. See [references/calendar-table-contract.md](references/calendar-table-contract.md); a common cause is an unquoted Snowflake identifier that got upper-cased |
+| ThoughtSpot rejects the table with a schema-mismatch error on `register` | Run `ts calendar validate --csv {path}` first — it checks the header against the same column contract locally (an exact match to the 10- or 30-column list, plus at most one trailing RLS discriminator column) with a clearer message. See [references/calendar-table-contract.md](references/calendar-table-contract.md); a common cause is an unquoted Snowflake identifier that got upper-cased |
 | `register --native` refused for the requested anchor | Expected — the native API cannot express `nearest` or `first` without silently drifting. Use the default (`FROM_EXISTING_TABLE`) path: generate, validate, load, then register without `--native` |
 | `register --native` refused for pattern `13x4`: `--native cannot express pattern '13x4' — the API has no 13x4 calendar type. Generate a table and register it instead.` | Expected, and independent of anchor rule — even `anchor fixed52` is refused for `13x4`, because the API has no 13-period calendar type at all. Use the default (`FROM_EXISTING_TABLE`) path: generate, validate, load, then register without `--native` |
 | `--native` registration times out or returns a 504 | Known issue on at least one cluster (`se-thoughtspot`) — see open item 2 in [references/open-items.md](references/open-items.md). All verified native-API behaviour in this skill comes from a different cluster. The default path (generate/validate/load/register) does not touch this endpoint and is unaffected |

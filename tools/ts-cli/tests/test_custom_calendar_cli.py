@@ -145,6 +145,71 @@ def test_allow_label_drift_downgrades_and_exits_zero(tmp_path):
     assert any(f["severity"] == "warning" for f in json.loads(res.stdout)["findings"])
 
 
+def test_same_basename_variants_are_distinct_not_merged(tmp_path):
+    """Two variants in different directories must not collapse into one.
+
+    Keying variants on Path(path).stem made a/cal.csv and b/cal.csv one entry,
+    so the cross-variant check saw len < 2 and returned no findings: a false
+    pass on the only check multi---csv mode exists for.
+    """
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    a = _gen(tmp_path / "a", "cal.csv")
+    b = _gen(tmp_path / "b", "cal.csv",
+             month_names="FEB,MAR,APR,MAY,JUN,JUL,AUG,SEP,OCT,NOV,DEC,JAN")
+    res = runner.invoke(app, ["validate", "--csv", str(a), "--csv", str(b)])
+    assert res.exit_code != 0, res.output
+    findings = json.loads(res.stdout)["findings"]
+    assert any(f["code"] == "label-drift" for f in findings), findings
+
+
+def test_the_same_csv_twice_is_rejected_not_silently_deduplicated(tmp_path):
+    path = _gen(tmp_path, "dup.csv")
+    res = runner.invoke(app, ["validate", "--csv", str(path), "--csv", str(path)])
+    assert res.exit_code != 0
+    assert "same file twice" in res.output
+
+
+def test_a_28_column_csv_is_a_contract_error_not_a_ten_column_calendar(tmp_path):
+    """Contract inference by header WIDTH let a malformed file pass clean.
+
+    A 30-column calendar minus `monthly` and `quarterly` is 28 wide, so
+    `len(header) >= 30` was false and it was read against the 10-column
+    contract — whose ten columns were all present — and validated clean.
+    """
+    path = _gen(tmp_path, "twenty_eight.csv")
+    _drop_column(path, "monthly")
+    _drop_column(path, "quarterly")
+    assert len(path.read_text().splitlines()[0].split(",")) == 28
+
+    res = runner.invoke(app, ["validate", "--csv", str(path)])
+    assert res.exit_code != 0, res.output
+    findings = json.loads(res.stdout)["findings"]
+    assert any(f["code"] == "column-contract" and "monthly" in f["message"]
+               and "quarterly" in f["message"] for f in findings), findings
+
+
+def test_a_trailing_discriminator_column_is_still_accepted(tmp_path):
+    """The one tolerated deviation from an exact contract match."""
+    path = _gen(tmp_path, "rls.csv",
+                discriminator_column="TSGROUP", discriminator_value="TENANT_A")
+    assert path.read_text().splitlines()[0].split(",")[-1] == "TSGROUP"
+    res = runner.invoke(app, ["validate", "--csv", str(path)])
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout)["findings"] == []
+
+
+def test_extra_columns_beyond_one_discriminator_are_rejected(tmp_path):
+    path = _gen(tmp_path, "two_extra.csv")
+    lines = path.read_text().splitlines()
+    path.write_text("\n".join(f"{ln},x,y" if i else f"{ln},X1,X2"
+                               for i, ln in enumerate(lines)) + "\n")
+    res = runner.invoke(app, ["validate", "--csv", str(path)])
+    assert res.exit_code != 0, res.output
+    assert any(f["code"] == "column-contract"
+               for f in json.loads(res.stdout)["findings"])
+
+
 def _drop_column(path, column_name):
     lines = path.read_text().splitlines()
     header = lines[0].split(",")

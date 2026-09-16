@@ -1,22 +1,30 @@
 """ts calendar — build, validate and register ThoughtSpot custom calendars."""
 from __future__ import annotations
 
+import csv as _csv
 import json
 import sys
+from datetime import date as _date
 from datetime import timedelta
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import typer
 
+from ts_cli.client import ThoughtSpotClient, resolve_profile
 from ts_cli.custom_calendar.anchors import resolve_anchor
+from ts_cli.custom_calendar.compare import (
+    LABEL_DIMENSIONS, compare_anchors, compare_labels,
+)
 from ts_cli.custom_calendar.emit import write_csv
 from ts_cli.custom_calendar.grid import build_years
 from ts_cli.custom_calendar.labels import default_month_names
-from ts_cli.custom_calendar.rows import build_rows, columns_for
+from ts_cli.custom_calendar.rows import COLUMNS_10, COLUMNS_30, build_rows, columns_for
 from ts_cli.custom_calendar.spec import (
     DAYS_EN, MONTHS_EN, CalendarSpec, LabelSpec, leap_index, parse_day_of_week,
     periods_per_year, validate_labels, validate_spec,
 )
+from ts_cli.custom_calendar.validate import validate_rows, validate_set_labels
 
 app = typer.Typer(help="Custom calendar generation and registration.")
 
@@ -193,11 +201,6 @@ def generate_cmd(
     print(json.dumps({"rows": len(rows), "columns": len(cols), "path": out}))
 
 
-from ts_cli.custom_calendar.compare import (
-    LABEL_DIMENSIONS, compare_anchors, compare_labels,
-)
-
-
 @app.command("compare")
 def compare_cmd(
     vary: str = typer.Option(..., "--vary",
@@ -248,12 +251,41 @@ def compare_cmd(
         raise typer.BadParameter(str(exc)) from None
 
 
-import csv as _csv
-from datetime import date as _date
-from pathlib import Path
+def match_contract(header: Sequence[str]) -> List[str]:
+    """Return the column contract a CSV header satisfies, or raise.
 
-from ts_cli.custom_calendar.rows import COLUMNS_10, COLUMNS_30
-from ts_cli.custom_calendar.validate import validate_rows, validate_set_labels
+    The header must equal `COLUMNS_10` or `COLUMNS_30` exactly, optionally
+    followed by exactly one extra trailing RLS discriminator column. Inferring
+    the contract from the header's WIDTH instead (the original implementation)
+    let a malformed file pass: a 30-column calendar minus `monthly` and
+    `quarterly` is 28 wide, so it was read against the 10-column contract, whose
+    ten columns were all present, and validated clean.
+    """
+    cols = list(header)
+    for contract in (COLUMNS_30, COLUMNS_10):
+        expected = list(contract)
+        if cols == expected:
+            return expected
+        # Exactly one trailing discriminator column (name is caller-chosen).
+        if len(cols) == len(expected) + 1 and cols[:len(expected)] == expected:
+            return expected
+
+    # No match: describe the failure against whichever contract it is closest to.
+    closest = max((COLUMNS_10, COLUMNS_30),
+                  key=lambda c: len(set(cols) & set(c)))
+    expected = list(closest)
+    missing = [c for c in expected if c not in cols]
+    unexpected = [c for c in cols if c not in expected]
+    detail: List[str] = []
+    if missing:
+        detail.append(f"missing column(s): {', '.join(missing)}")
+    if unexpected:
+        detail.append(f"unexpected column(s): {', '.join(unexpected)}")
+    if not detail:
+        detail.append(f"columns are out of contract order — expected {expected}")
+    raise ValueError(
+        f"CSV header does not match the {len(expected)}-column calendar contract "
+        f"(one trailing discriminator column is allowed): " + "; ".join(detail))
 
 
 def read_calendar_csv(path: str) -> Tuple[List[Dict[str, object]], List[str]]:
@@ -265,12 +297,7 @@ def read_calendar_csv(path: str) -> Tuple[List[Dict[str, object]], List[str]]:
         raw = list(_csv.DictReader(fh))
     if not raw:
         return [], []
-    header = list(raw[0].keys())
-    contract = list(COLUMNS_30) if len(header) >= 30 else list(COLUMNS_10)
-
-    missing = [c for c in contract if c not in header]
-    if missing:
-        raise ValueError(f"CSV is missing contract column(s): {', '.join(missing)}")
+    contract = match_contract(list(raw[0].keys()))
 
     rows: List[Dict[str, object]] = []
     for r in raw:
@@ -314,6 +341,19 @@ def validate_cmd(
       ts calendar validate --csv tenant_a.csv --csv tenant_b.csv
     """
     findings = []
+    # Keyed on the path AS GIVEN, never the basename: `a/cal.csv` and `b/cal.csv`
+    # both stem to "cal", which collapsed them into one variant so the
+    # cross-variant check saw len < 2 and silently returned no findings — a false
+    # pass on the single check multi---csv mode exists for.
+    seen: Dict[str, str] = {}
+    for path in csv_paths:
+        resolved = str(Path(path).resolve())
+        if resolved in seen:
+            raise typer.BadParameter(
+                f"--csv names the same file twice: '{seen[resolved]}' and '{path}'. "
+                "Each variant of an RLS set must be a distinct file.")
+        seen[resolved] = path
+
     variant_rows: Dict[str, List[Dict[str, object]]] = {}
     for path in csv_paths:
         try:
@@ -322,7 +362,7 @@ def validate_cmd(
             findings.append({"severity": "error", "code": "column-contract",
                              "message": str(exc), "source": path})
             continue
-        variant_rows[Path(path).stem] = rows
+        variant_rows[path] = rows
         for f in validate_rows(rows, columns=contract):
             findings.append({"severity": f.severity, "code": f.code,
                              "message": f.message, "source": path})
@@ -335,8 +375,6 @@ def validate_cmd(
     if any(f["severity"] == "error" for f in findings):
         raise typer.Exit(1)
 
-
-from ts_cli.client import ThoughtSpotClient, resolve_profile
 
 # ThoughtSpot calendar_type values. 13x4 has no native equivalent.
 _API_CALENDAR_TYPE = {

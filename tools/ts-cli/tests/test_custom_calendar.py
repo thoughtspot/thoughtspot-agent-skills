@@ -368,21 +368,41 @@ def test_row_count_matches_the_grid():
     assert len(rows18) == 371
 
 
-def test_day_number_of_week_is_relative_to_start_day():
-    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec())
-    first = rows[0]
-    assert first["date"] == date(2017, 1, 30)      # a Monday
+def test_start_day_moves_day_number_of_week_but_not_day_of_week_or_is_weekend():
+    """The distinction the whole day-numbering design rests on.
+
+    `day_number_of_week` is RELATIVE to the configured start day; `day_of_week`
+    and `is_weekend` are ABSOLUTE calendar facts. Build the same dates under a
+    Monday-start and a Sunday-start calendar and assert the first moves while
+    the other two do not — an assertion that restates the implementation
+    (`is_weekend == date.weekday() >= 5`) proves neither.
+    """
+    monday = {r["date"]: r
+              for r in build_rows(_lulu_spec(2017, 2017), LabelSpec())}
+    sunday = {r["date"]: r
+              for r in build_rows(_lulu_spec(2017, 2017, start_day_of_week=0),
+                                  LabelSpec())}
+    common = sorted(set(monday) & set(sunday))
+    assert len(common) == 364, "the two anchorings must overlap on a full year"
+
+    for d in common:
+        assert monday[d]["day_number_of_week"] != sunday[d]["day_number_of_week"], (
+            f"{d}: day_number_of_week must follow the start day")
+        assert monday[d]["day_of_week"] == sunday[d]["day_of_week"], (
+            f"{d}: day_of_week is an absolute weekday, not a start-day offset")
+        assert monday[d]["is_weekend"] == sunday[d]["is_weekend"], (
+            f"{d}: is_weekend is Saturday/Sunday, not start-day relative")
+
+    # Pin the absolute values so "identical" cannot be satisfied by both being wrong.
+    first = monday[date(2017, 1, 30)]                 # a Monday
     assert first["day_number_of_week"] == 1
+    assert sunday[date(2017, 1, 30)]["day_number_of_week"] == 2
     assert first["day_of_week"] == "Monday"
-    # Thursday, three days later, with a Monday start
-    assert rows[3]["day_number_of_week"] == 4
-    assert rows[3]["day_of_week"] == "Thursday"
-
-
-def test_is_weekend_is_saturday_sunday_regardless_of_start_day():
-    rows = build_rows(_lulu_spec(2017, 2017), LabelSpec())
-    for r in rows[:7]:
-        assert r["is_weekend"] == (r["date"].weekday() >= 5)
+    assert first["is_weekend"] is False
+    saturday = monday[date(2017, 2, 4)]
+    assert saturday["day_of_week"] == "Saturday"
+    assert saturday["is_weekend"] is True
+    assert sunday[date(2017, 2, 4)]["is_weekend"] is True
 
 
 def test_end_epochs_are_exclusive():

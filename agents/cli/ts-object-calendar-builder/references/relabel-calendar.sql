@@ -4,6 +4,20 @@
 -- column carries the FISCAL year, so a January period inside a December-start
 -- fiscal year reads "January 2024" for dates in January 2025).
 --
+-- What this rewrites, and what it deliberately does not:
+--   "year"      -> YEAR("date")                      (Gregorian)
+--   "monthly"   -> CONCAT("month", ' ', YEAR("date")) (Gregorian)
+--   "quarterly" -> carried through UNCHANGED, so it keeps the source's
+--                  FISCAL year. Rewriting it would silently renumber
+--                  quarters that straddle a fiscal boundary. The output
+--                  therefore has "monthly" and "quarterly" on different
+--                  year bases, by design.
+-- Any year prefix (FY2024) is dropped from "year" and "monthly", which are
+-- rebuilt numerically, but survives on "quarterly".
+-- This names all 30 contract columns explicitly, so it assumes a 30-column
+-- source: a 10-column table, or one carrying an RLS discriminator as column
+-- 31, will fail or lose that column. Regenerate instead in those cases.
+--
 -- Run with (--sf-profile takes <profile> directly, in angle brackets, not
 -- curly braces — curly braces below are --var-filled placeholders, and
 -- ts snowflake exec scans the whole file for them, comments included):

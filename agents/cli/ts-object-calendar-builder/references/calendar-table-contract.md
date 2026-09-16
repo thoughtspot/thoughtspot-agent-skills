@@ -112,6 +112,17 @@ uses both `TS_CALENDAR_GROUP` and `TSGROUP` for the same purpose on
 different tables, so there is no single canonical name to match. Pick one
 name and use it consistently across every variant in the same set;
 `ts calendar generate --discriminator-column` / `--discriminator-value` set
-it per variant, and `ts calendar validate --csv ... --csv ...` treats
-`(date, discriminator)` — not `date` alone — as the uniqueness key when two
-or more `--csv` paths are given.
+it per variant.
+
+**How `validate` treats the discriminator: it doesn't.** `read_calendar_csv`
+accepts exactly one trailing discriminator column and then drops it, so
+`validate` never sees its value. Date uniqueness and date continuity are
+checked **per file** — each `--csv` path is validated on its own — and there
+is no cross-file `(date, discriminator)` uniqueness key. That is sufficient
+for the way these sets are built (one file per variant, each covering every
+date once), but it means `validate` cannot catch two variants that were
+given the *same* discriminator value, or a single already-unioned file
+holding every variant's rows: the latter reads as a duplicate-date error.
+What `validate` does check across a set of two or more `--csv` paths is
+label consistency, which is a different failure and the reason multi-`--csv`
+mode exists.

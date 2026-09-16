@@ -213,7 +213,7 @@ the **filter widget**, and there are two distinct mechanisms:
 **Mitigation, applied by default for `13x4`:** zero-pad the generated labels
 (`Period 01` … `Period 13`) so lexical and numeric order coincide. This costs nothing,
 needs no product change, and removes mechanism 1 entirely. It does not address
-mechanism 2, which is open item 5.
+mechanism 2, which is open item 6.
 
 Because mechanism 2 is unresolved, `13x4` ships **documented as query-safe but
 filter-unverified**. The skill must say so when a user selects it rather than
@@ -465,21 +465,35 @@ rule is `fixed52`) → `search` to verify → Error Handling table → Changelog
 4. **`FROM_EXISTING_TABLE` schema validation.** The API errors if the referenced table
    does not match the required DDL, but the error shape is undocumented. Capture it so
    `validate` can pre-empt it with a better message.
-5. **`--native`'s `start_date` / `end_date` convention is unconfirmed, and the published
-   API example cannot settle it.** `build_register_payload` constructs the range as the
-   nominal start of `first_year` through the nominal start of `last_year + 1`. That is a
-   defensible reading, but it is unverified against a live cluster — and the
-   `createCalendar` spec's own example pairs `start_date: "04/01/2025"` with
-   `end_date: "04/31/2025"`, which is not a valid date, so the documentation is
-   internally broken and proves nothing either way.
-   This matters disproportionately because `fixed52`'s entire risk profile is *silent
-   day-drift*: a wrong boundary produces a calendar that imports and validates cleanly
-   and is quietly short or long. The convention is now pinned by an exact-value test, so
-   a change is visible — but pinned is not the same as correct.
-   *What would resolve it:* register a `fixed52` calendar via `--native` on a live
-   cluster and compare the resulting row range against a locally generated `fixed52`
-   calendar for the same years. They must match day for day. **This is the
-   highest-value live check before `--native` is trusted.** Status: UNVERIFIED.
+5. **`--native`'s `start_date` / `end_date` convention — RESOLVED, and the original
+   reading was WRONG.** The design shipped with `build_register_payload` constructing
+   the range as the nominal start of `first_year` through the nominal start of
+   `last_year + 1`. The published `createCalendar` example could not adjudicate it — it
+   pairs `start_date: "04/01/2025"` with `end_date: "04/31/2025"`, which is not a valid
+   date — so this was flagged as the highest-value live check before trusting
+   `--native`. That check was run, and it failed:
+
+   | Source | Rows | Range |
+   |---|---|---|
+   | Our generator (`build_rows`) | 1092 | 2027-02-01 .. 2030-01-27 |
+   | ThoughtSpot `generate-csv`, old payload | 1097 | 2027-02-01 .. 2030-02-01 |
+
+   The five extra days form a partial fiscal period — a stub 13th month past the true
+   year-end — and the overshoot **grows** with the requested range (2 days for one year,
+   5 for three), which is what identifies `end_date` rather than a fixed per-request pad
+   as the cause. `end_date` must be the last day the calendar actually covers, the day
+   before the next fiscal year's anchor: `resolve_anchor(spec, last_year + 1) - 1 day`,
+   which equals `build_rows(spec, ...)[-1]["date"]`. `build_register_payload` now
+   computes it that way and the corrected payload was re-verified live as byte-identical
+   to our generator's output for the same spec.
+
+   `start_date` was separately checked rather than assumed, and is correct as-is: the
+   API snaps a submitted `start_date` forward to the next `start_day_of_week`, the same
+   rule `anchor_first` implements, so the `MM/01/{first_year}` literal is an input to
+   that snap and not the first row's date. This closes the silent-day-drift risk the
+   item existed to catch; the convention is pinned by exact-value unit tests against the
+   live-confirmed values. Status: **VERIFIED 2026-09-16** (see the skill's
+   `references/open-items.md` item 5).
 6. **Filter-widget behaviour for `13x4` period labels.** Two mechanisms, one confirmed
    and mitigated, one open — see "13x4 carries a consumption risk" above.
    - *Confirmed:* lexical sort of `Period 1..13` does not preserve numeric order.

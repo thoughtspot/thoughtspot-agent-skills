@@ -3870,10 +3870,21 @@ ts calendar compare --vary anchor --start-month February --start-day Monday \
 
 `--vary anchor` also reports `first_divergence` — the first year the anchor rules stop
 agreeing; any test range shorter than that makes the native ThoughtSpot API look correct
-when it silently isn't. `--vary` also accepts a label dimension (`month-names`,
-`day-names`, `year-prefix`, `quarter-prefix`) to isolate a label-only change.
+when it silently isn't.
 
-**Output:** JSON to stdout.
+| Option | Default | Description |
+|---|---|---|
+| `--vary` | *(required)* | `anchor`, or one label dimension: `year-basis`, `monthly-basis`, `quarterly-basis`, `fiscal-year-number` |
+| `--max-samples` | `10` | Cap on the sample differing rows returned (label dimensions only — `--vary anchor` reports every year) |
+
+A label dimension re-renders every row under both of its values (`fiscal` vs `gregorian`,
+or `start` vs `end`) and reports the rows where the `year` / `monthly` / `quarterly`
+labels disagree. `--month-names`, `--day-names`, `--year-prefix` and `--quarter-prefix`
+are *inputs* to `compare`, not dimensions it can vary — they apply to both sides.
+
+**Output:** JSON to stdout — `{vary, values, total_rows, differing_rows, samples[]}` for a
+label dimension; `{vary, values, years[], first_divergence,
+nearest_vs_fixed52_first_divergence}` for `--vary anchor`.
 
 ### `ts calendar validate`
 
@@ -3887,8 +3898,14 @@ ts calendar validate --csv tenant_a.csv --csv tenant_b.csv
 
 | Option | Default | Description |
 |---|---|---|
-| `--csv` | *(required, repeatable)* | Calendar CSV to check — repeat for an RLS set |
+| `--csv` | *(required, repeatable)* | Calendar CSV to check — repeat for an RLS set. Each path must be a distinct file; the same file twice is an error |
 | `--allow-label-drift` | `false` | Downgrade cross-variant label mismatches from error to warning |
+
+The header must match the 10- or 30-column contract **exactly**, optionally followed by
+one trailing RLS discriminator column; anything else is a `column-contract` error naming
+the missing or unexpected columns. Uniqueness and continuity of `date` are checked **per
+file**, not across the set — a union/RLS set deliberately repeats each date once per
+variant.
 
 **Output:** JSON `{findings[]}` to stdout, each with `severity`/`code`/`message`/`source`.
 Exits non-zero if any finding is `severity: error`.

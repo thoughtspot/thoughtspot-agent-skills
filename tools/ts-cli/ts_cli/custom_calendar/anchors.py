@@ -33,7 +33,9 @@ def anchor_nearest(year: int, start_month: int, start_dow: int) -> date:
     delta = _forward_delta(target, start_dow)
     if delta == 0:
         return target
-    # delta days forward vs (7 - delta) days back; ties (delta==3 vs 4) go forward.
+    # delta days forward vs (7 - delta) days back. The two distances are never
+    # equal for an integer delta in 1..6 (that would need delta == 3.5), so
+    # there is no tie to break: delta <= 3 means forward is strictly closer.
     return target + timedelta(days=delta if delta <= 3 else delta - 7)
 
 
