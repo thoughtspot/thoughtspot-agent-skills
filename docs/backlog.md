@@ -10964,20 +10964,28 @@ correctly named and keyed.
 cache block (`<object id='_9BBB...'><properties>`) -- see BL-276.
 
 **Update 2026-09-10 -- operator fidelity.** `_extract_joins` never read a join clause's
-actual comparison operator, so a non-`=` clause (`<>`, `>=`, ...) was silently emitted as
-an equi-join `on:` clause. `=`, `>=`, `>`, `<`, `<=`, `!=` are the supported set --
-range/ASOF joins are documented for ThoughtSpot's `on:` syntax (thoughtspot-model-tml.md
-"Range / Inequality Joins"); Tableau's `<>` translates to ThoughtSpot's `!=`. Fix: the
-wrapper's `op` is read and mapped through `_JOIN_OPERATORS` (flat-shape clauses have no
-wrapper and default to `=`); any operator outside that map is skipped with a warning rather
-than emitted. `_extract_joins` now returns `(joins, warnings)`, threaded through `parse_twb`
-and `commands/tableau.py`'s validation-warnings aggregate into a "Join warnings" section in
-the migration report.
+actual comparison operator, so a non-`=` clause (`<>`, `>=`, ...) was either dropped with no
+warning or -- once the nested shape parsed -- would have been emitted as an equi-join `on:`
+clause, which silently changes every measure built on that join. Fix: the wrapper's `op` is
+read (flat-shape clauses have no wrapper and are equality by construction); **only `=` is
+migrated**, and any other operator is skipped with a warning rather than emitted.
+`_extract_joins` now returns `(joins, warnings)`, threaded through `parse_twb` and
+`commands/tableau.py`'s validation-warnings aggregate into a "Join warnings" section in the
+migration report.
 
-**Testing.** `TestExtractJoinsUsesRelationName` covers `>=` and `<>` propagating correctly,
-an ASOF-shaped composite (`A=B AND C>=D`) preserving both operators, and a genuinely
-unsupported operator (`LIKE`) still skipped and warned about, standalone and inside a
-composite key. Full suite: 4062/4062 passed.
+**Emitting the real operator was considered and rejected.** ThoughtSpot's `on:` does document
+range operators, but three things argue against it and nothing argues for it: no validator in
+this repo inspects the emitted `on:` operator, so a wrong one surfaces only at a customer's
+import; every join this builder writes carries `cardinality: MANY_TO_ONE`, which a range or
+not-equal relationship cannot satisfy; and BL-240 records `>=` returning materially wrong
+numbers on **both** legs of an ASOF join, i.e. the exact substitution this would have made.
+The 33-workbook corpus contains **no** non-equality join, so there is no demand to weigh
+against that risk. Non-equi support is deferred, not refused.
+
+**Testing.** `TestExtractJoinsUsesRelationName` covers `>=` and `<>` each skipped and
+reported, an ASOF-shaped composite (`A=B AND C>=D`) skipped **whole** rather than partially
+emitted, and a genuinely unsupported operator (`LIKE`) skipped and warned about, standalone
+and inside a composite key.
 
 **Update 2026-09-10 -- composite-key truncation.** `_extract_joins` only ever paired the
 first two leaves found (`exprs[0]`/`exprs[1]`) into one key. For a composite-key join
@@ -10989,14 +10997,24 @@ and every measure built on it silently double-counts.
 Fix: `_leaf_expressions()`/`_clause_operator()` replaced by `_collect_comparisons()`, which
 recurses into an `<expression op="AND">` node's children at any depth, returning one
 `(left, right, op)` triple per real comparison. `_extract_joins` now emits one key per
-comparison whose operator is in `_JOIN_OPERATORS`; if any comparison in a composite group
-uses an unsupported operator, the whole key is dropped rather than just the offending pair
+equality comparison; if any comparison in a composite group is not an equality, the whole
+key is dropped rather than just the offending pair
 -- a partial composite key carries the same fan-out risk as the original defect.
 
+**Update -- PR review.** `_join_key_column()` became `_join_key_operand()`, returning
+`(column, table)` rather than discarding the qualifier: on a nested `((A⋈B)⋈C)` the outer
+relation's direct children are a join node plus one table, so child order resolves only one
+side, and the qualifier is the only thing in the XML that pairs the clause with its tables
+(it also carries the operand order, which need not match child order). Clause selection
+narrowed to `./clause` -- a descendant search also picked up the inner relation's clause and
+welded two joins into one bogus composite. Only the `<clause>` node is unwrapped now; an
+`<expression>` keeps its operator, so `NOT(A=B)` is reported rather than read as the
+equality it wraps. All join extraction moved to `ts_cli/tableau/joins.py` (BL-069
+module-per-concern pattern, as `set_extract.py` before it), re-exported from `twb.py`.
+
 **Testing.** Cases covering a 2-condition flat AND, a 3-condition AND-of-AND, an ASOF-shaped
-composite (`A=B AND C>=D`, both operators preserved), and a composite mixing an equi
-condition with a genuinely unsupported operator (drops entirely). Full suite: 4062/4062
-passed.
+composite (`A=B AND C>=D`, skipped whole), and a composite mixing an equi condition with a
+genuinely unsupported operator (drops entirely).
 
 **Update 2026-09-10 -- function-wrapped operands.** `UPPER([OrderId]) = [OrderId]` (a
 case-insensitive join) was silently mishandled: the original code's leaf scan found
