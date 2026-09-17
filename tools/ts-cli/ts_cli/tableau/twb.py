@@ -217,7 +217,7 @@ def parse_twb(twb_path: str | Path) -> dict:
         seen_ds.add(ds_name)
 
         columns = _extract_columns(ds, tables)
-        joins = _extract_joins(ds)
+        joins, join_warnings = _extract_joins(ds)
         # Modern Tableau stores joins as logical relationships (the "noodle"), not physical
         # <relation join=...>; pick those up too, or a multi-table model imports with no join
         # and ThoughtSpot rejects it. See reference-tableau-model-discovery-algorithm.
@@ -232,6 +232,11 @@ def parse_twb(twb_path: str | Path) -> dict:
             "sql_views": sql_views,
             "columns": columns,
             "joins": joins,
+            # Non-fatal: clauses _extract_joins skipped — a non-equality
+            # operator, or an operand that is not a plain column reference.
+            # Surfaced to the caller instead of silently dropped, so
+            # build-model can fold them into its warnings/report.
+            "join_warnings": join_warnings,
             "calculated_fields": calcs,
             "calc_map": calc_map,
             "col_table_map": col_table_map,
@@ -679,36 +684,21 @@ def _extract_columns(ds: ET.Element, tables: list[dict]) -> list[dict]:
     return columns
 
 
-def _extract_joins(ds: ET.Element) -> list[dict]:
-    """Extract join definitions from a datasource."""
-    joins = []
-    for rel in ds.findall(".//relation[@join]"):
-        join_type = rel.get("join", "inner").upper()
-        clauses = rel.findall(".//clause")
-        join_keys = []
-        for clause in clauses:
-            exprs = clause.findall(".//expression")
-            if len(exprs) >= 2:
-                left = exprs[0].get("op", "")
-                right = exprs[1].get("op", "")
-                if left.startswith("[") and right.startswith("["):
-                    join_keys.append({
-                        "left": left.strip("[]"),
-                        "right": right.strip("[]"),
-                    })
-        if join_keys:
-            children = rel.findall("./relation[@type='table']")
-            left_table = right_table = ""
-            if len(children) >= 2:
-                left_table = children[0].get("name", "") or _strip_brackets(children[0].get("table", "")).split(".")[-1]
-                right_table = children[1].get("name", "") or _strip_brackets(children[1].get("table", "")).split(".")[-1]
-            joins.append({
-                "type": join_type,
-                "left_table": left_table,
-                "right_table": right_table,
-                "keys": join_keys,
-            })
-    return joins
+# ---------------------------------------------------------------------------
+# Physical join extraction (<relation join=...>)
+#
+# Split into ts_cli.tableau.joins (module-per-concern, BL-069 pattern) to keep
+# this file's line count in budget. Re-exported here so existing callers/tests
+# importing them from ts_cli.tableau.twb keep working unchanged.
+# ---------------------------------------------------------------------------
+
+from ts_cli.tableau.joins import (  # noqa: E402,F401
+    _clause_join_keys,
+    _collect_comparisons,
+    _extract_joins,
+    _join_key_operand,
+    _join_sides,
+)
 
 
 def _detail_id_count(view: dict) -> int:

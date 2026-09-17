@@ -55,6 +55,18 @@ Outcome legend: **✅ Model + Liveboard** · **◑ Model only** · **⊘ No acti
 
 **What was done** — datasources, tables/SQL views, joins, model, Spotter, # tiles, theme.
 
+**⚠ Join warnings** — present only when `validation_warnings` contains an entry from
+`_extract_joins`. Only **equality** joins are migrated; a clause using any other operator
+(`>=`, `>`, `<`, `<=`, `<>`) is skipped and reported — non-equi joins are not supported yet.
+A composite key containing one is skipped **whole**, never partially, because a join on part
+of a key fans out and silently double-counts every measure built on it. The relationship is
+**missing** from the generated model — flag it so the user can add an equivalent manually
+(e.g. as a formula-based filter) if it's load-bearing:
+
+| # | Tables | Operator | What to do |
+|---|---|---|---|
+| 1 | {left_table} ↔ {right_table} | `{op}` | Not a supported join operator — recreate the relationship as a formula/filter if needed, or add the equi-join columns manually |
+
 **Decisions made** — the non-obvious calls (blend → one SQL view, bins = formula vs cohort,
 dynamic vs anchored YoY, orphan worksheets added/left off, separate vs tabbed liveboards…).
 

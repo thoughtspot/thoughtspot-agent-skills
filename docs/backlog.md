@@ -72,6 +72,7 @@ are roughly ordered by value÷effort.
 | BL-204 | no plan-only helper for role-play alias synthesis -- Step 7.5 is done by hand | next converter pass |
 | ~~BL-199~~ | ~~`dependency.py`'s `_export_one` — same null-`edoc` crash BL-189 fixed, one call away~~ | DONE (2026-07-31) |
 | ~~BL-191~~ | ~~`dependency/mutate.py` reads Views through `column_id` (0/265 in the wild) — silent dangling refs~~ | DONE (2026-07-31) |
+| ~~BL-275~~ | ~~`_extract_joins` drops joins with a nested equality expression or a Custom-SQL join side~~ | DONE (2026-08-07) |
 | BL-183 | Validator: dangling `[formula_X]` refs in `ts tml lint` + CA-JSON table refs | with BL-178 |
 | BL-174 | from-Databricks forward leg: `INNER` join type, dropped `format:`, stamped `cardinality:` | next DBX pass |
 | BL-180 | from-Snowflake translator ignores `\|\|`→`concat` and NULL-preserving division | next formula pass |
@@ -109,6 +110,7 @@ are roughly ordered by value÷effort.
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
+| BL-276 | `_extract_joins` has no filter for object-graph-cached join duplicates | after BL-275 |
 | BL-184 | Worked-example reproducibility test (ground truth is never re-run) | after BL-178 |
 | BL-179 | from-Snowflake promotes the first synonym over the logical identifier | with BL-166 |
 | ~~BL-181~~ | ~~from-Snowflake classifies every fact `ATTRIBUTE` (no MEASURE branch)~~ | DONE (2026-07-31, ts-cli v0.128.0) — re-confirmed live 3× on 2026-09-08; coverage-matrix row 16 corrected then |
@@ -10738,3 +10740,182 @@ correctly but the changelog line is duplicated. Note this is a CI-only check: it
 `origin/main`, so it cannot be a pure pre-commit hook.
 
 **Target:** next validator pass — take with BL-229 and BL-231, both validator-coverage items.
+---
+
+## BL-275 -- `_extract_joins` drops joins with a nested equality expression or a Custom-SQL join side `Tier 1` -- **RESOLVED 2026-08-07**
+
+**Filed:** 2026-08-06. **Jira:** SCAL-330635.
+**Source:** `ts-convert-from-tableau` accuracy-testing pass (Keshav Sharma KT handoff) --
+found on `Multi level WB v0.twb`, a workbook built specifically to exercise multi-level
+formulas and multi-table joins. First concrete test case for
+`references/open-items.md` #3 (COLLECTION datasources -- DEFERRED since 2026-07-11 for
+lack of one).
+**Affects:** `tools/ts-cli/ts_cli/tableau/twb.py::_extract_joins` (lines 611-640),
+`tools/ts-cli/tests/test_model_builder.py::TestExtractJoinsUsesRelationName`.
+**Status:** **RESOLVED 2026-08-07** -- fixed in ts-cli **v0.138.0**, branch `SCAL-330635`.
+
+**The bug.** `ts tableau parse` reported 0 joins for this workbook, though the raw TWB XML
+has one:
+
+```xml
+<relation join='left' type='join'>
+  <clause type='join'>
+    <expression op='='>
+      <expression op='[Custom SQL Query].[Sales Person]' />
+      <expression op='[dim_sales_team_clean_updated.csv1].[Sales Person]' />
+    </expression>
+  </clause>
+  <relation name='Custom SQL Query' type='text'>SELECT ...</relation>
+  <relation name='dim_sales_team_clean_updated.csv1' type='table'>...</relation>
+</relation>
+```
+
+Three defects, all in `_extract_joins`: (1) `clause.findall(".//expression")` is recursive,
+so on this nested shape it returns 3 nodes (the wrapping `op='='` node plus its two
+children) -- `exprs[0]` became the wrapper, never a bracket reference, so
+`join_keys` stayed empty and the join was dropped, silently. (2)
+`rel.findall("./relation[@type='table']")` only recognized `type='table'` -- the Custom SQL
+side (`type='text'`) never resolved even with (1) fixed. (3) found while implementing the
+fix: the clause's expressions here are table-qualified (`[Table].[Col]`), but the caller
+(`model_builder.py`'s join `on:`-clause assembly, which prepends its own `table::` qualifier
+from `left_table`/`right_table`) expects a bare column name -- the existing
+`.strip("[]")` only strips outer brackets, which would have emitted the corrupted key
+`Custom SQL Query].[Sales Person` into the generated join `on:` clause.
+
+**The fix.** `_leaf_expressions()` walks to `<expression>` nodes with no `<expression>`
+children -- robust to arbitrary nesting depth, correct for both the flat (existing,
+already-tested) shape and the nested one. The table-side lookup now accepts `type='text'`
+alongside `type='table'`. `_join_key_column()` strips a table-qualified operand down to
+just the column name (`stripped.rsplit("].[", 1)[-1]` when `"].["` is present), leaving the
+bare-ref case (the existing test's shape) unchanged.
+
+**Testing.** Two new tests in `TestExtractJoinsUsesRelationName`:
+`test_join_with_nested_equality_and_custom_sql_side_not_dropped` (reproduces the exact bug
+shape above; asserts both table names resolve and `keys` is the bare
+`{"left": "Sales Person", "right": "Sales Person"}`) and
+`test_join_with_nested_equality_both_sides_table_not_dropped` (isolates the index-shift
+defect alone, nested equality with no Custom SQL side involved, to measure whether plain
+table-to-table joins were also silently affected). Full suite: 4059/4059 passed, no
+regressions. Live-verified: `ts tableau parse` on the real workbook went from 0 joins to 1,
+correctly named and keyed.
+
+**Known follow-on, deliberately not included in this fix:** the same workbook's live
+`<connection>` duplicates this join under a second, cached copy inside an object-graph
+cache block (`<object id='_9BBB...'><properties>`) -- see BL-276.
+
+**Update 2026-09-10 -- operator fidelity.** `_extract_joins` never read a join clause's
+actual comparison operator, so a non-`=` clause (`<>`, `>=`, ...) was either dropped with no
+warning or -- once the nested shape parsed -- would have been emitted as an equi-join `on:`
+clause, which silently changes every measure built on that join. Fix: the wrapper's `op` is
+read (flat-shape clauses have no wrapper and are equality by construction); **only `=` is
+migrated**, and any other operator is skipped with a warning rather than emitted.
+`_extract_joins` now returns `(joins, warnings)`, threaded through `parse_twb` and
+`commands/tableau.py`'s validation-warnings aggregate into a "Join warnings" section in the
+migration report.
+
+**Emitting the real operator was considered and rejected.** ThoughtSpot's `on:` does document
+range operators, but three things argue against it and nothing argues for it: no validator in
+this repo inspects the emitted `on:` operator, so a wrong one surfaces only at a customer's
+import; every join this builder writes carries `cardinality: MANY_TO_ONE`, which a range or
+not-equal relationship cannot satisfy; and BL-240 records `>=` returning materially wrong
+numbers on **both** legs of an ASOF join, i.e. the exact substitution this would have made.
+The 33-workbook corpus contains **no** non-equality join, so there is no demand to weigh
+against that risk. Non-equi support is deferred, not refused.
+
+**Testing.** `TestExtractJoinsUsesRelationName` covers `>=` and `<>` each skipped and
+reported, an ASOF-shaped composite (`A=B AND C>=D`) skipped **whole** rather than partially
+emitted, and a genuinely unsupported operator (`LIKE`) skipped and warned about, standalone
+and inside a composite key.
+
+**Update 2026-09-10 -- composite-key truncation.** `_extract_joins` only ever paired the
+first two leaves found (`exprs[0]`/`exprs[1]`) into one key. For a composite-key join
+(`A=B AND C=D`, or three conditions as a flat AND or nested AND-of-AND), every condition
+after the first was silently discarded -- one key emitted where two or three were authored,
+with clean TML and a clean lint. A join on a partial key doesn't fail import -- it fans out,
+and every measure built on it silently double-counts.
+
+Fix: `_leaf_expressions()`/`_clause_operator()` replaced by `_collect_comparisons()`, which
+recurses into an `<expression op="AND">` node's children at any depth, returning one
+`(left, right, op)` triple per real comparison. `_extract_joins` now emits one key per
+equality comparison; if any comparison in a composite group is not an equality, the whole
+key is dropped rather than just the offending pair
+-- a partial composite key carries the same fan-out risk as the original defect.
+
+**Update -- PR review.** `_join_key_column()` became `_join_key_operand()`, returning
+`(column, table)` rather than discarding the qualifier: on a nested `((A⋈B)⋈C)` the outer
+relation's direct children are a join node plus one table, so child order resolves only one
+side, and the qualifier is the only thing in the XML that pairs the clause with its tables
+(it also carries the operand order, which need not match child order). Clause selection
+narrowed to `./clause` -- a descendant search also picked up the inner relation's clause and
+welded two joins into one bogus composite. Only the `<clause>` node is unwrapped now; an
+`<expression>` keeps its operator, so `NOT(A=B)` is reported rather than read as the
+equality it wraps. All join extraction moved to `ts_cli/tableau/joins.py` (BL-069
+module-per-concern pattern, as `set_extract.py` before it), re-exported from `twb.py`.
+
+**Testing.** Cases covering a 2-condition flat AND, a 3-condition AND-of-AND, an ASOF-shaped
+composite (`A=B AND C>=D`, skipped whole), and a composite mixing an equi condition with a
+genuinely unsupported operator (drops entirely).
+
+**Update 2026-09-10 -- function-wrapped operands.** `UPPER([OrderId]) = [OrderId]` (a
+case-insensitive join) was silently mishandled: the original code's leaf scan found
+`UPPER`'s inner `[OrderId]` and the right-side `[OrderId]` as the only childless nodes, so
+the comparison silently unwrapped to bare `[OrderId] = [OrderId]` -- the function vanishes
+with no error. After the composite-key fix above, the terminal match required both sides of
+a comparison to be true leaves, so the whole clause silently returned nothing instead --
+still no trace.
+
+Fix: `_collect_comparisons`'s terminal match no longer requires both children to be
+leaves -- any two-child, non-`AND` node is handed through as one comparison. The
+bracket-prefix check in `_extract_joins` (which previously failed with no warning at all)
+now warns naming the unsupported operand and both tables, and drops the whole key when the
+comparison is part of a composite one.
+
+**Testing.** Two new cases: a standalone function-wrapped operand, and one inside a
+composite key. Full suite: 4067/4067 passed.
+
+---
+
+## BL-276 -- `_extract_joins` has no filter for object-graph-cached join duplicates `Tier 2`
+
+**Filed:** 2026-08-07. **Jira:** SCAL-330635 (follow-on, filed separately by request).
+**Source:** live-verification of BL-275's fix on `Multi level WB v0.twb` -- fixing the
+silent join-drop exposed a second, previously-invisible defect (masked until now because
+`_extract_joins` always returned 0 joins for this workbook regardless).
+**Affects:** `tools/ts-cli/ts_cli/tableau/twb.py::_extract_joins`.
+**Status:** OPEN.
+
+After BL-275's fix, `ts tableau parse` on this workbook reports the same join **twice**.
+The second copy lives inside `<object caption='Query 1' id='_9BBB096D8D91453E94133E5DAB1262E7'>
+<properties context=''><relation join='left' type='join'>...` -- Tableau's object-graph
+caching mechanism, tied to the *same* internal object ID that already produces the
+`__tableau_internal_object_id__` junk pseudo-columns this codebase already filters out
+elsewhere (`reconcile.py`'s `clean_columns`/`drop_junk_columns`). `_extract_tables` and
+`_metadata_column_records` already have working wrapper-detection logic for the analogous
+Extract-mirror case (tables/columns written twice, once live and once under `<extract>`'s
+own mirrored `<connection>`) -- that protection was never extended to `_extract_joins`,
+which currently walks every `<relation join=...>` anywhere under the datasource with no
+awareness of which one is live versus a cached mirror. A model with a duplicate join
+between the same two tables is likely to fail import (`ts tml import`) or produce a
+doubled `on:` clause.
+
+**Before writing a fix:** confirm "nested inside `<object>/<properties>`" is a reliable,
+general signal for "this is a cached mirror, skip it" -- not something derived from a
+single example. If it holds, the fix is a new filter analogous to
+`_wrapper_relation_names`/`_is_extract_wrapper`, applied inside `_extract_joins`.
+
+**Testing (once fixed):** a fixture combining a live join relation with a duplicate
+`<object id='...'><properties><relation join=...>` mirror of the same join; assert
+`_extract_joins` returns exactly one entry. Live-verify against `Multi level WB v0.twb`
+(1 join, not 2) after the fix.
+
+**Update 2026-09-10.** Confirmed live on `Multi level WB v0.twb`: `_extract_joins` still
+returns the same join twice -- the ancestor chain of the second copy is
+`relation -> properties -> object[id=_9BBB...] -> objects -> object-graph -> datasource`,
+distinct from the live copy's `relation -> connection -> datasource`, confirming the
+"nested inside `<object-graph>/<objects>`" signal this entry asked to verify. Concrete
+consequence: the duplicate reaches `model_tables[].joins[]` as two identical entries,
+`ts tableau build-model` doesn't run `lint_tml` itself so it emits silently, and the
+skill's Step 6 `ts tml lint` hard-fails on I14 (BL-202's duplicate-`(from_node,
+joins[].with)` guard) -- whose remedy (rename/alias a role-played dimension) misdiagnoses a
+cached mirror as a real duplicate relationship. Deferred to a follow-up change rather than
+fixed here; still OPEN, fix design unchanged.
