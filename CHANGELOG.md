@@ -5,11 +5,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
-## 2026-09-16
-- feat: add ts-object-calendar-builder skill
-- chore: bump ts-cli to v0.139.0
-
-## 2026-09-15
+## 2026-09-17
 - fix: `ts tableau parse` abandoned the **entire** workbook over one addressing token
   (introduced in v0.32.0, 2026-07-04, #180; found at v0.138.0). Tableau writes a
   non-numeric token into `<table-calc><address><value>` for non-offset addressing modes
@@ -28,7 +24,13 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
   unmigratable as a direct result; both now parse (121 calculated fields, 22 dashboards,
   96 viz previously unreachable). Corpus-verified: 33/33 parse, and the warning fires in
   exactly those 2 files — no other workbook changes behaviour (SCAL-338450)
+- chore: bump ts-cli to v0.140.0
+
+## 2026-09-16
+- feat: add ts-object-calendar-builder skill
 - chore: bump ts-cli to v0.139.0
+
+## 2026-09-15
 - fix: `parse-sv` dropped two whole fields of every real Semantic View, silently and for
   82 ts-cli releases (introduced in v0.63.0, 2026-07-21; found at v0.137.0). `ai_sql_generation` / `ai_question_categorization` matched only an `=` form
   that Snowflake **rejects** (`syntax error ... unexpected '='`) and `GET_DDL` never emits,
