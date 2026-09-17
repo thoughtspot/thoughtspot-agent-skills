@@ -905,7 +905,7 @@ class TestExtractJoinsUsesRelationName:
         # Bare column names — the caller (model_builder.py) prepends its own
         # `table::` qualifier; a table-qualified key here would corrupt the
         # emitted join `on:` clause.
-        assert joins[0]["keys"] == [{"left": "Sales Person", "right": "Sales Person", "op": "="}]
+        assert joins[0]["keys"] == [{"left": "Sales Person", "right": "Sales Person"}]
         assert warnings == []
 
     def test_join_with_nested_equality_both_sides_table_not_dropped(self):
@@ -929,14 +929,14 @@ class TestExtractJoinsUsesRelationName:
         assert len(joins) == 1
         assert joins[0]["left_table"] == "d_partner1"
         assert joins[0]["right_table"] == "orders"
-        assert joins[0]["keys"] == [{"left": "PartnerId", "right": "OrderPartnerId", "op": "="}]
+        assert joins[0]["keys"] == [{"left": "PartnerId", "right": "OrderPartnerId"}]
         assert warnings == []
 
-    def test_join_with_range_operator_propagated(self):
-        # A nested clause's wrapper op is the real comparison symbol, not
-        # always '='. ThoughtSpot's `on:` clause documents >=/>/</<= for
-        # range/ASOF joins — propagate the real operator instead of silently
-        # mislabeling a non-equi join as an equi-join.
+    def test_join_with_range_operator_reported_not_emitted(self):
+        # Non-equi joins are not supported yet. A range clause must be skipped
+        # and REPORTED — never emitted as an equi-join, which would silently
+        # change every measure built on it. main drops this shape with no
+        # warning at all; the warning is the improvement here.
         ds = self._make_ds('''
             <relation join="left" type="join">
                 <relation type="table" name="events" table="[db].[s].[events]" />
@@ -950,13 +950,14 @@ class TestExtractJoinsUsesRelationName:
             </relation>
         ''')
         joins, warnings = _extract_joins(ds)
-        assert len(joins) == 1
-        assert joins[0]["keys"] == [{"left": "EventTs", "right": "RateTs", "op": ">="}]
-        assert warnings == []
+        assert joins == []
+        assert len(warnings) == 1
+        assert "non-equi" in warnings[0] and ">=" in warnings[0]
 
-    def test_join_with_not_equal_operator_translated(self):
-        # Tableau writes not-equal as '<>' — translate to ThoughtSpot's '!='
-        # rather than dropping or mislabeling as an equi-join.
+    def test_join_with_not_equal_operator_reported_not_emitted(self):
+        # Tableau writes not-equal as '<>'. Skipped and reported like any other
+        # non-equality: a `!=` join is many-to-many, which the MANY_TO_ONE
+        # cardinality every emitted join carries cannot describe.
         ds = self._make_ds('''
             <relation join="inner" type="join">
                 <relation type="table" name="d_partner1" table="[db].[s].[d_partner]" />
@@ -970,13 +971,13 @@ class TestExtractJoinsUsesRelationName:
             </relation>
         ''')
         joins, warnings = _extract_joins(ds)
-        assert len(joins) == 1
-        assert joins[0]["keys"] == [{"left": "PartnerId", "right": "OrderPartnerId", "op": "!="}]
-        assert warnings == []
+        assert joins == []
+        assert len(warnings) == 1
+        assert "non-equi" in warnings[0] and "<>" in warnings[0]
 
     def test_join_with_mixed_equi_and_unsupported_clauses_keeps_only_equi(self):
         # A relation with more than one clause where only some use an
-        # operator outside _JOIN_OPERATORS — the equi clause must still be
+        # operator that is not an equality — the equi clause must still be
         # kept, only the unsupported one dropped and warned about.
         ds = self._make_ds('''
             <relation join="inner" type="join">
@@ -996,7 +997,7 @@ class TestExtractJoinsUsesRelationName:
         ''')
         joins, warnings = _extract_joins(ds)
         assert len(joins) == 1
-        assert joins[0]["keys"] == [{"left": "PartnerId", "right": "OrderPartnerId", "op": "="}]
+        assert joins[0]["keys"] == [{"left": "PartnerId", "right": "OrderPartnerId"}]
         assert len(warnings) == 1
         assert "LIKE" in warnings[0]
 
@@ -1026,8 +1027,8 @@ class TestExtractJoinsUsesRelationName:
         joins, warnings = _extract_joins(ds)
         assert len(joins) == 1
         assert joins[0]["keys"] == [
-            {"left": "OrderId", "right": "OrderId", "op": "="},
-            {"left": "LineItemId", "right": "LineItemId", "op": "="},
+            {"left": "OrderId", "right": "OrderId"},
+            {"left": "LineItemId", "right": "LineItemId"},
         ]
         assert warnings == []
 
@@ -1062,17 +1063,17 @@ class TestExtractJoinsUsesRelationName:
         joins, warnings = _extract_joins(ds)
         assert len(joins) == 1
         assert joins[0]["keys"] == [
-            {"left": "Col1", "right": "Col1B", "op": "="},
-            {"left": "Col2", "right": "Col2B", "op": "="},
-            {"left": "Col3", "right": "Col3B", "op": "="},
+            {"left": "Col1", "right": "Col1B"},
+            {"left": "Col2", "right": "Col2B"},
+            {"left": "Col3", "right": "Col3B"},
         ]
         assert warnings == []
 
-    def test_join_with_composite_key_asof_shape_preserved(self):
-        # ASOF-join shape (A=B AND C>=D) — ThoughtSpot's own documented ASOF
-        # example (thoughtspot-model-tml.md) is exactly this pattern: an
-        # equality condition plus a range condition combined with AND. Both
-        # conditions, with their own real operators, must survive.
+    def test_join_with_composite_key_asof_shape_reported_not_partially_emitted(self):
+        # ASOF-join shape (A=B AND C>=D). Non-equi is not supported yet, and the
+        # equality half must NOT be emitted on its own: a join on part of a
+        # composite key fans out and silently double-counts every measure built
+        # on it. So the whole clause is skipped and reported.
         ds = self._make_ds('''
             <relation join="left" type="join">
                 <relation type="table" name="trades" table="[db].[s].[trades]" />
@@ -1092,16 +1093,14 @@ class TestExtractJoinsUsesRelationName:
             </relation>
         ''')
         joins, warnings = _extract_joins(ds)
-        assert len(joins) == 1
-        assert joins[0]["keys"] == [
-            {"left": "Symbol", "right": "Symbol", "op": "="},
-            {"left": "TradeTs", "right": "RateTs", "op": ">="},
-        ]
-        assert warnings == []
+        assert joins == []
+        assert len(warnings) == 1
+        assert "non-equi" in warnings[0]
+        assert "(composite key)" in warnings[0]
 
     def test_join_with_composite_key_mixed_equi_and_unsupported_drops_whole_key(self):
         # Option (a): a composite key mixing an equi condition with one using
-        # an operator outside _JOIN_OPERATORS must drop the WHOLE key, not
+        # an operator that is not an equality must drop the WHOLE key, not
         # just the unsupported half — a partial composite key (2 of 3, 1 of 2)
         # is exactly as dangerous as the original truncation bug: it fans out
         # and double-counts silently, so it isn't safer than emitting nothing.
@@ -1130,6 +1129,53 @@ class TestExtractJoinsUsesRelationName:
         assert "rates" in warnings[0]
         assert "LIKE" in warnings[0]
         assert "composite key" in warnings[0]
+
+    def test_join_wrapped_in_not_is_skipped_never_inverted(self):
+        # The parser used to unwrap ANY single-child <expression>, so NOT(A=B)
+        # emitted A=B — the logical inverse of the authored join, with clean
+        # TML and a clean lint. Nothing downstream can detect that. Only the
+        # <clause> node is transparent now; an <expression> keeps its operator.
+        ds = self._make_ds('''
+            <relation join="inner" type="join">
+                <relation type="table" name="A" table="[db].[s].[A]" />
+                <relation type="table" name="B" table="[db].[s].[B]" />
+                <clause type="join">
+                    <expression op="NOT">
+                        <expression op="=">
+                            <expression op="[A_id]" />
+                            <expression op="[B_id]" />
+                        </expression>
+                    </expression>
+                </clause>
+            </relation>
+        ''')
+        joins, warnings = _extract_joins(ds)
+        assert joins == []           # never the inverse of what was authored
+        assert len(warnings) == 1
+        assert "no recognizable comparison" in warnings[0]
+
+    def test_join_with_blank_operator_is_reported_not_assumed_equality(self):
+        # A wrapper carrying no operator used to default to '=', contradicting
+        # the rule that an unrecognised operator is reported rather than
+        # guessed at. The legacy flat <clause> shape (no wrapper at all) is
+        # still equality by construction — covered by the tests above.
+        for attrs in ('op=""', ''):
+            ds = self._make_ds(f'''
+                <relation join="inner" type="join">
+                    <relation type="table" name="A" table="[db].[s].[A]" />
+                    <relation type="table" name="B" table="[db].[s].[B]" />
+                    <clause type="join">
+                        <expression {attrs}>
+                            <expression op="[A_id]" />
+                            <expression op="[B_id]" />
+                        </expression>
+                    </clause>
+                </relation>
+            ''')
+            joins, warnings = _extract_joins(ds)
+            assert joins == []
+            assert len(warnings) == 1
+            assert "non-equality operator" in warnings[0]
 
     def test_join_with_function_wrapped_operand_skipped_and_warned(self):
         # Blocking 3 (SCAL-330635 PR review) — UPPER([OrderId]) = [OrderId] (a
