@@ -3822,3 +3822,153 @@ Re-running the same wave is a **no-op**: the merged document comes out byte-iden
 > everyone in the Org, admins included, so an admin session in the target Org matches the same
 > pathway a tenant user does. (That is the opposite of a *sharing* check, where an admin proves
 > nothing.) Confirmed live 2026-07-28: an ORG1 session shows `Segment` on the published master.
+
+## `ts calendar` — Custom calendar generation and registration
+
+Build week-aligned custom calendars (4-4-5, 4-5-4, 5-4-4, 13x4) with correct 52/53-week
+tiling, for the `ts-object-calendar-builder` skill. The pure grid/label/row logic lives in
+`ts_cli/custom_calendar/*`; `commands/calendars.py` only wires typer options and I/O.
+`preview` and `generate` share one option set (`--start-month`, `--start-day`, `--pattern`,
+`--anchor`, `--first-year`, `--last-year`, `--leap-week-period`, `--year-prefix`,
+`--quarter-prefix`, `--year-basis`, `--monthly-basis`, `--quarterly-basis`,
+`--fiscal-year-number`, `--month-names`, `--day-names`) so the two can never drift apart —
+see [the skill's anchor-rules reference](../../agents/cli/ts-object-calendar-builder/references/anchor-rules.md)
+for what each one means.
+
+**Two label options carry a ThoughtSpot filter-widget caveat**, and `validate` warns on
+both. A `month` label that is not a month name (`Period 01`, or any custom
+`--month-names`) **cannot be selected** in a filter widget; a prefixed `year`
+(`--year-prefix FY` → `FY2024`) **cannot be typed** into the year filter, which takes
+`YYYY` only. `--quarter-prefix` (`Q1`) is **unaffected** — the rule is specific to the
+year filter, so this is an asymmetry, not "prefixes break filters". Neither limits the
+calendar otherwise: date-range and dynamic filters ("this year") work, and query
+generation, grouping, aggregation and display are unaffected. Product knowledge confirmed
+at review 2026-09-16 (not an automated probe) — detail in
+[the skill's open-items.md](../../agents/cli/ts-object-calendar-builder/references/open-items.md)
+item 6.
+
+### `ts calendar preview`
+
+Print the year/period shape (which years are 53 weeks, which period absorbs the extra
+week) without generating any rows — the confirmation gate before `generate`.
+
+```bash
+ts calendar preview --start-month February --start-day Monday \
+  --pattern 4-5-4 --anchor nearest --first-year 2015 --last-year 2026
+```
+
+**Output:** JSON to stdout — `{pattern, anchor_rule, periods_per_year, years[]}`, each year
+carrying `weeks`, `period_weeks[]` and `long_period`.
+
+### `ts calendar generate`
+
+Generate the calendar as a CSV matching the column contract.
+
+```bash
+ts calendar generate --start-month February --start-day Monday \
+  --pattern 4-5-4 --anchor nearest --first-year 2015 --last-year 2026 \
+  --out retail.csv
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--columns` | `30` | `10` (minimal) or `30` (full) column contract — see [calendar-table-contract.md](../../agents/cli/ts-object-calendar-builder/references/calendar-table-contract.md). **Only 30 registers:** `createCalendar` rejects a 10-column table on 10.12+ even with correct types (verified live 2026-09-16); `10` is an intermediate artifact only, and `validate` warns when it sees one |
+| `--out` | *(required)* | CSV output path |
+| `--ddl` | — | Also write the Snowflake `CREATE TABLE` for the same shape to this path — quoted lower-case columns and contract types, which is what the API requires. Needs `--database` and `--schema` |
+| `--database` / `--schema` | — | Target database/schema for `--ddl`. Rejected without `--ddl` rather than silently ignored |
+| `--table` | `--out` stem | Table name for `--ddl` |
+| `--discriminator-column` / `--discriminator-value` | — | Give both to tag every row with an RLS discriminator literal, for one variant of a union calendar. `--discriminator-column` also adds the column to `--ddl` output |
+
+**Output:** the CSV at `--out`; a JSON summary (`{rows, columns, path}`, plus `ddl_path` when
+`--ddl` is given) to stdout, row count to stderr.
+
+Loading the CSV with `ts load snowflake` produces UPPER_CASE columns, which ThoughtSpot
+rejects — the skill's
+[`references/fix-column-case.sql`](../../agents/cli/ts-object-calendar-builder/references/fix-column-case.sql)
+re-aliases them afterwards. `--ddl` is the alternative for a table created by hand.
+
+### `ts calendar compare`
+
+Show what one option choice actually changes before committing to it — reports only
+disagreements, so "0 of 364 rows differ" is a valid (and useful) answer.
+
+```bash
+ts calendar compare --vary anchor --start-month February --start-day Monday \
+  --pattern 4-5-4 --anchor nearest --first-year 2015 --last-year 2026
+```
+
+`--vary anchor` also reports `first_divergence` — the first year the anchor rules stop
+agreeing; any test range shorter than that makes the native ThoughtSpot API look correct
+when it silently isn't.
+
+| Option | Default | Description |
+|---|---|---|
+| `--vary` | *(required)* | `anchor`, or one label dimension: `year-basis`, `monthly-basis`, `quarterly-basis`, `fiscal-year-number` |
+| `--max-samples` | `10` | Cap on the sample differing rows returned (label dimensions only — `--vary anchor` reports every year) |
+
+A label dimension re-renders every row under both of its values (`fiscal` vs `gregorian`,
+or `start` vs `end`) and reports the rows where the `year` / `monthly` / `quarterly`
+labels disagree. `--month-names`, `--day-names`, `--year-prefix` and `--quarter-prefix`
+are *inputs* to `compare`, not dimensions it can vary — they apply to both sides.
+
+**Output:** JSON to stdout — `{vary, values, total_rows, differing_rows, samples[]}` for a
+label dimension; `{vary, values, years[], first_divergence,
+nearest_vs_fixed52_first_divergence}` for `--vary anchor`.
+
+### `ts calendar validate`
+
+Check one or more generated CSVs against the column contract and the structural
+invariants; with 2+ `--csv` paths, also checks cross-variant label consistency for a
+union/RLS calendar set.
+
+```bash
+ts calendar validate --csv tenant_a.csv --csv tenant_b.csv
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--csv` | *(required, repeatable)* | Calendar CSV to check — repeat for an RLS set. Each path must be a distinct file; the same file twice is an error |
+| `--allow-label-drift` | `false` | Downgrade cross-variant label mismatches from error to warning |
+
+The header must match the 10- or 30-column contract **exactly**, optionally followed by
+one trailing RLS discriminator column; anything else is a `column-contract` error naming
+the missing or unexpected columns. Uniqueness and continuity of `date` are checked **per
+file**, not across the set — a union/RLS set deliberately repeats each date once per
+variant.
+
+Three checks are **warnings** (exit 0) rather than errors, because the calendar they
+describe is legitimate — just constrained: `ten-column-not-registrable` (the 10-column
+shape the API rejects), `month-label-not-filter-selectable` (a `month` label that is not
+a month name cannot be selected in a filter widget) and `year-label-not-filter-typeable`
+(the year filter takes `YYYY` only, so a `--year-prefix` value cannot be typed into it).
+The last two are mitigated by filtering on a date range, a dynamic filter ("this year"),
+or the numeric columns. A prefixed `quarter` (`Q1`) works and is deliberately not
+flagged.
+
+**Output:** JSON `{findings[]}` to stdout, each with `severity`/`code`/`message`/`source`.
+Exits non-zero if any finding is `severity: error`.
+
+### `ts calendar register`
+
+Register a calendar with ThoughtSpot (`POST /api/rest/2.0/calendars/create`). Default path
+is `FROM_EXISTING_TABLE`, registering a table this CLI already generated and loaded.
+`--native` uses `FROM_INPUT_PARAMS` and is refused for any anchor rule other than
+`fixed52`, and for pattern `13x4` regardless of anchor — the native API has no 13-period
+calendar type and never inserts a leap week.
+
+```bash
+ts calendar register --name RetailCal --connection "Snowflake Prod" \
+  --database CUSTOM_CALENDAR --schema PUBLIC --table retail_cal
+```
+
+**Output:** JSON response from `calendars/create`, to stdout.
+
+### `ts calendar search`
+
+List registered custom calendars, to verify what landed.
+
+```bash
+ts calendar search --connection "Snowflake Prod"
+```
+
+**Output:** JSON array from `POST /api/rest/2.0/calendars/search`, to stdout.

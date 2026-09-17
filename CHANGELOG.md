@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-09-16
+- feat: add ts-object-calendar-builder skill
+- chore: bump ts-cli to v0.139.0
+
 ## 2026-09-15
 - fix: `ts tableau parse` abandoned the **entire** workbook over one addressing token
   (introduced in v0.32.0, 2026-07-04, #180; found at v0.138.0). Tableau writes a

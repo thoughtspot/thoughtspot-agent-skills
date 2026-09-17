@@ -14,11 +14,12 @@
 | ts-load-source-data | Y | — | — | — |
 | ts-migrate-orgs | Y | — | — | — |
 | ts-object-answer-promote | Y | — | — | — |
+| ts-object-calendar-builder | Y | — | — | — |
+| ts-object-model-agentql-query | Y | — | — | — |
 | ts-object-model-aggregates | Y | — | — | — |
 | ts-object-model-alias | Y | — | — | — |
 | ts-object-model-coach | Y | — | — | — |
 | ts-object-model-erd | Y | — | — | — |
-| ts-object-model-agentql-query | Y | — | — | — |
 | ts-profile-databricks | Y | — | — | — |
 | ts-profile-snowflake | — | Y | — | — |
 | ts-profile-tableau | Y | — | — | — |
@@ -27,6 +28,6 @@
 | ts-recipe-formula-business-days-snowflake | Y | — | — | — |
 | ts-recipe-formula-hms-display-snowflake | Y | — | — | — |
 | ts-security-columns | Y | — | — | — |
-| ts-setup-tenancy | Y | — | — | — |
 | ts-setup-sv | — | — | Y | — |
+| ts-setup-tenancy | Y | — | — | — |
 | ts-variable-timezone | Y | — | — | — |

@@ -69,6 +69,10 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
         "Interactive coaching workflow doesn't fit Snowsight stored-proc execution model",
     ("ts-object-model-erd", "coco-snowsight"):
         "TML parsing + HTML rendering require shell access; not supported in Snowsight stored-proc runtime",
+    ("ts-object-calendar-builder", "coco-snowsight"):
+        "CLI-only: generation runs in the ts CLI and the calendar is registered "
+        "through the REST v2 /calendars endpoints; CoCo has no ts CLI and no "
+        "stored-procedure equivalent for calendar registration.",
     ("ts-profile-snowflake", "coco-snowsight"):
         "CoCo Snowsight runs inside Snowflake — no Snowflake profile needed",
     ("ts-profile-databricks", "coco-snowsight"):

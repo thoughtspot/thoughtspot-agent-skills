@@ -28,6 +28,7 @@ imports `run_ts` yet needs no credentials; it just needs the CLI installed).
 | `smoke_ts_migrate_orgs.py` | ts-migrate-orgs | Pure |
 | `smoke_ts_object_model_alias.py` | ts-object-model-alias | Pure |
 | `smoke_ts_object_model_erd.py` | ts-object-model-erd | Pure |
+| `smoke_ts_object_calendar_builder.py` | ts-object-calendar-builder | Pure |
 | `smoke_ts-convert-to-databricks-mv.py` | ts-convert-to-databricks-mv (codified emitter) | Pure (`--live` opts in) |
 | `smoke_ts_convert_from_qlik.py` | ts-convert-from-qlik | CLI-only |
 | `smoke_ts_load_source_data.py` | ts-load-source-data | CLI-only |
