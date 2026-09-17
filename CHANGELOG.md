@@ -24,6 +24,22 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
   unmigratable as a direct result; both now parse (121 calculated fields, 22 dashboards,
   96 viz previously unreachable). Corpus-verified: 33/33 parse, and the warning fires in
   exactly those 2 files — no other workbook changes behaviour (SCAL-338450)
+- fix: `extract_table_calc_addressing` never scanned a `.tds`/`.tdsx` published datasource.
+  It searched `.//datasource//column`, which cannot match a tree whose **root is** the
+  `<datasource>` — the shape `datasource_elements()` exists for, and whose docstring names
+  the trap verbatim. `parse` accepted those inputs, exited 0 and wrote an empty
+  `table_calc_addressing`, indistinguishable from a datasource with no table calcs, so
+  Step 3f reasoned about LOOKUP/INDEX addressing from an empty map. Now iterates
+  `datasource_elements(root)`, which also lets each warning name the datasource it came
+  from. The 33-workbook corpus is all workbooks, so it never covered this path (BL-270,
+  which stays open for the two remaining sites: `set_extract.py` `count_native_sets` and
+  `extract_blends`)
+- feat: table-calc entries carry `address_value`, the raw `<address><value>` token, beside
+  `address_offset`. Three states were previously collapsed into one: no `<address>` element,
+  a non-offset addressing mode (`false`, `"All Pages"`), and a real offset all produced
+  `address_offset: null`. Consumers can now tell them apart from the structured output
+  instead of parsing the warning prose. Whitespace-only text is treated as absent, so a
+  pretty-printed TWB behaves like its compact equivalent
 - chore: bump ts-cli to v0.140.0
 
 ## 2026-09-16
