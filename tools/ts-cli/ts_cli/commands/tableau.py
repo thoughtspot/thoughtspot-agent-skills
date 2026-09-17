@@ -141,7 +141,7 @@ def parse_cmd(
         f"Parsed {len(parsed['datasources'])} datasource(s), "
         f"{len(parsed['blends'])} blend edge-set(s), "
         f"{len(parsed['dashboards'])} dashboard(s)/{n_viz} viz -> {output_file}"
-        + format_parse_warnings(parsed["table_calc_addressing"]), err=True,
+        + format_parse_warnings(parsed), err=True,
     )
 
 

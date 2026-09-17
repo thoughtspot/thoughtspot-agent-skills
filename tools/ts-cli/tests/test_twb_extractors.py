@@ -119,8 +119,20 @@ def test_format_parse_warnings_is_empty_when_nothing_degraded():
     """The no-warning path runs on every normal parse — it must add nothing at
     all to the summary line, not a stray newline."""
     from ts_cli.tableau.twb import format_parse_warnings
-    assert format_parse_warnings({"warnings": []}) == ""
-    assert format_parse_warnings({"warnings": ["a", "b"]}) == "\nWARNING: a\nWARNING: b"
+    assert format_parse_warnings({"unnamed_datasources": 0}) == ""
+    assert format_parse_warnings({
+        "unnamed_datasources": 0,
+        "table_calc_addressing": {"warnings": ["a", "b"]},
+    }) == "\nWARNING: a\nWARNING: b"
+
+
+def test_format_parse_warnings_reports_discarded_datasources():
+    """A zero result must never be indistinguishable from an empty file — that
+    silence is why every published datasource read as empty for months."""
+    from ts_cli.tableau.twb import format_parse_warnings
+    msg = format_parse_warnings({"unnamed_datasources": 2})
+    assert "2 <datasource> element(s) found but skipped" in msg
+    assert "formatted-name" in msg          # names what was looked for
 
 
 def test_tds_root_is_scanned():

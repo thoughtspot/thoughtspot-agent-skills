@@ -6,6 +6,23 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-09-17
+- fix: every `.tds`/`.tdsx` published datasource migrated **nothing** — `ts tableau parse`
+  reported `Parsed 0 datasource(s)` with exit code 0 and no warning, reading as though the
+  file were empty. A `.twb` datasource is named by `caption` (or `name`); a standalone
+  `.tds` root carries **neither**, naming itself with `formatted-name`. `parse_twb` read
+  only the first two, got `""`, and hit its own empty-name guard — so the datasource was
+  discarded *after* every extractor beneath it had already read the content correctly. The
+  three datasource-name lookups now share `datasource_name()`, the companion to the
+  existing `datasource_elements()` (which solves the sibling trap on the same file shape);
+  calculated fields also stop being labelled with an empty datasource. This is the
+  documented Step 3.5 flow — when a workbook uses a published datasource the skill asks the
+  user to supply the `.tds` so the physical model can be resolved, and that file was
+  contributing nothing. The `.tds` fixture in the suite carried `formatted-name` **and**
+  `caption`, a shape Tableau does not emit, so the tests stayed green throughout. Measured
+  across 5 real customer files: 0 → 5 datasources, 17 tables/SQL Views, 184 columns, 113
+  calculated fields. Joins remain 0 of 12 — those are relationship joins, blocked
+  separately in `_extract_noodle_joins` (SCAL-331323)
+- chore: bump ts-cli to v0.141.0
 - fix: `ts tableau parse` abandoned the **entire** workbook over one addressing token
   (introduced in v0.32.0, 2026-07-04, #180; found at v0.138.0). Tableau writes a
   non-numeric token into `<table-calc><address><value>` for non-offset addressing modes

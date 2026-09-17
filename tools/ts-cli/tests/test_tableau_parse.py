@@ -238,6 +238,69 @@ def test_parse_tdsx_file(tmp_path):
     _assert_tds_parsed(json.loads(out.read_text()))
 
 
+# SCAL-331323 — the fixture above carries BOTH `formatted-name` and `caption`,
+# so it exercised a shape Tableau does not emit for a published datasource and
+# the suite stayed green while every real .tds returned nothing. Real files
+# carry `formatted-name` ALONE: the name lookup returned "", the empty-name
+# guard in parse_twb discarded the datasource, and the command reported
+# "Parsed 0 datasource(s)" with exit code 0.
+TDS_NO_CAPTION = TDS.replace(
+    "<datasource formatted-name='tentpole_prod' caption='Tentpole Prod'>",
+    "<datasource formatted-name='tentpole_prod' inline='true' version='18.1'>",
+)
+
+
+def test_parse_tds_named_only_by_formatted_name(tmp_path):
+    tds = tmp_path / "published.tds"
+    tds.write_text(TDS_NO_CAPTION)
+    out = tmp_path / "parsed.json"
+
+    result = runner.invoke(app, ["tableau", "parse", str(tds), "--output", str(out)])
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    data = json.loads(out.read_text())
+    assert len(data["datasources"]) == 1, "the datasource was discarded for having no name"
+    ds = data["datasources"][0]
+    assert ds["name"] == "tentpole_prod"          # falls back to formatted-name
+    assert {t["name"] for t in ds["tables"]} == {"promotion_master", "product_metrics"}
+    assert len(ds["joins"]) == 1
+    # every calc is labelled with the datasource it came from, not ""
+    assert {c["datasource"] for c in ds["calculated_fields"]} == {"tentpole_prod"}
+
+
+def test_parse_warns_when_a_datasource_is_discarded(tmp_path):
+    """The silence is the bug's other half: a file whose datasource is thrown
+    away must not report the same thing as a file that had none."""
+    twb = tmp_path / "nameless.twb"
+    twb.write_text("""<?xml version='1.0'?>
+<workbook>
+  <datasource>
+    <relation name='ORDERS' type='table' table='[db].[s].[ORDERS]'/>
+  </datasource>
+</workbook>
+""")
+    out = tmp_path / "parsed.json"
+
+    result = runner.invoke(app, ["tableau", "parse", str(twb), "--output", str(out)])
+
+    assert result.exit_code == 0
+    assert json.loads(out.read_text())["datasources"] == []
+    assert "found but skipped" in result.stderr
+    assert "no usable name" in result.stderr
+
+
+def test_datasource_name_helper():
+    import xml.etree.ElementTree as ET
+    from ts_cli.tableau.twb import datasource_name
+    # .twb shapes win in order; a .tds root has only formatted-name
+    assert datasource_name(ET.fromstring("<datasource caption='C' name='N' formatted-name='F'/>")) == "C"
+    assert datasource_name(ET.fromstring("<datasource name='N' formatted-name='F'/>")) == "N"
+    assert datasource_name(ET.fromstring("<datasource formatted-name='F'/>")) == "F"
+    assert datasource_name(ET.fromstring("<datasource/>")) == ""
+    # an empty caption must fall through, not win — `.get(a, b)` would return ""
+    assert datasource_name(ET.fromstring("<datasource caption='' formatted-name='F'/>")) == "F"
+
+
 def test_datasource_elements_helper():
     import xml.etree.ElementTree as ET
     from ts_cli.tableau.twb import datasource_elements
