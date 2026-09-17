@@ -157,7 +157,7 @@ are roughly ordered by value÷effort.
 | BL-251 | `classify-columns` reports `SUM` for every raw measure regardless of declared aggregation — 7 of 7 | next `ts agentql` change |
 | BL-252 | `introspect` emits no `fqn`, so `build-model` collides on any generic table name (52 `DIM_PRODUCT` live) | next SF converter pass |
 | BL-253 | table alias dropped for the physical name — breaks every query citing the alias; masks BL-241 | next SF converter pass, before BL-241 |
-| BL-270 | table-calc addressing is empty for every `.tds`/`.tdsx` input — `.//datasource//column` cannot match a datasource-rooted tree | next Tableau converter pass |
+| BL-270 | datasource-root self-exclusion: `count_native_sets` returns 0 Sets and `extract_blends` returns `{}` on a `.tds` — third site fixed by #511 | next Tableau converter pass |
 | BL-274 | two PRs can ship the same ts-cli version with zero merge conflicts and every gate green — demonstrated on #511 vs #512 | next validator pass |
 
 ### Tier 3 — Opportunistic
@@ -10534,56 +10534,53 @@ gate: parse one blended workbook twice in the same test and assert the two outpu
 since that run's evidentiary value depends on it.
 
 
-## BL-270 — table-calc addressing is empty for every `.tds`/`.tdsx` input, silently `Tier 2`
+## BL-270 — the datasource-root self-exclusion: two sites left after #511 `Tier 2`
 
-**Filed:** 2026-09-16.
+**Filed:** 2026-09-16. **Partially resolved** 2026-09-17 (PR #511, ts-cli v0.140.0) — the
+`extract_table_calc_addressing` site is fixed; **two sites remain open**.
 **Source:** review of PR #511 (SCAL-338450); the defect predates that PR.
-**Affects:** `tools/ts-cli/ts_cli/tableau/twb.py` (`extract_table_calc_addressing`, line 321 on
-`main`), `agents/cli/ts-convert-from-tableau/SKILL.md` Step 3f.
+**Affects:** `tools/ts-cli/ts_cli/tableau/set_extract.py` (`count_native_sets`),
+`tools/ts-cli/ts_cli/tableau/twb.py` (`extract_blends`).
 
-`extract_table_calc_addressing` scans `root.findall(".//datasource//column")`. That XPath
-never matches when the root **is** the `<datasource>` element, which is precisely the
-`.tds`/`.tdsx` shape. Confirmed by executing the extractor against a `.tds`-shaped root: it
-returns `{"column_level": {}, "ws_overrides": {}}` regardless of content.
+A standalone `.tds`/`.tdsx` root **is** the `<datasource>` element, so any XPath of the form
+`.//datasource...` cannot match it — the tree excludes itself from its own search.
+`parse_cmd` advertises `.tds/.tdsx published-datasource file` and `load_xml_root` handles it,
+so these inputs are supported and reached, and degrade silently rather than erroring.
 
-**The repo already knows this trap and already solved it.** `datasource_elements()`
-(`twb.py:42`) exists for exactly this and its docstring names the failure verbatim — "a
-standalone `.tds`/`.tdsx` root **is** the `<datasource>` itself (`.//datasource` would not
-match it)". `parse_twb` (`twb.py:188`) uses the helper correctly. This one extractor does not.
-`parse_cmd`'s argument help advertises `.tds/.tdsx published-datasource file` and
-`load_xml_root` handles it, so the input is supported, reached, and silently degraded.
+`datasource_elements()` (`twb.py:42`) exists for exactly this and its docstring names the trap
+verbatim — "a standalone `.tds`/`.tdsx` root **is** the `<datasource>` itself (`.//datasource`
+would not match it)". `parse_twb` uses it correctly. The sites below do not.
+
+**State of the three sites, re-verified against `main` at v0.140.0:**
+
+| Site | `.tds` root | Status |
+|---|---|---|
+| `extract_table_calc_addressing` (`twb.py`) | populated | **FIXED** — PR #511 moved it to `datasource_elements(root)`, which also let each warning name its datasource |
+| `count_native_sets` (`set_extract.py:49`) | **0 native Sets** | open — scans `.//datasource//group` |
+| `extract_blends` (`twb.py:268`) | **`{}`** | open — builds `fed_to_caption` from `root.findall(".//datasource")` |
+
+**`extract_blends` is the subtler of the two.** Its early return on a missing
+`<datasource-relationships>` looks like protection and is not: a datasource-rooted tree that
+*does* carry relationships gets past the guard, finds no datasources to build `fed_to_caption`
+from, and still returns `{}`. Confirmed by execution on `main`. Treat the early return as a
+coincidence.
 
 **Silent in the way that matters:** `parse` exits 0, writes the output file, and emits an
-empty `table_calc_addressing` that is indistinguishable from a datasource that genuinely has
-no table calcs. Step 3f then reasons about LOOKUP/INDEX/RUNNING_SUM addressing from an empty
-map and produces a confidently wrong answer rather than a missing one.
+empty result indistinguishable from a datasource that genuinely has no Sets and no blends.
+Nothing downstream re-raises it.
 
-**Second-order consequence, recorded because it bounds an evidence claim.** PR #511 fixed a
-crash in `_read_table_calc` and verified it across a 33-workbook corpus. That corpus is
-workbooks. On the `.tds` path no column is ever visited, so the crash class could not have
-been *observed* there either — the corpus evidence does not extend to published datasources,
-and should not be cited as if it does.
+**What PR #511 settled, and what it did not.** #511 verified its crash fix across a
+33-workbook corpus. That corpus is workbooks, so it never exercised the `.tds` path at all —
+the corpus evidence still does not extend to published datasources, and should not be cited
+as if it does. The fix to the third site was reasoned from the XPath, not from the corpus.
 
-**Approach.** Replace the `.//datasource//column` scan with iteration over
-`datasource_elements(root)`, then `.//column` within each — the shape `parse_twb` already
-uses. Add a `.tds`-rooted fixture to `test_twb_extractors.py`; there is currently none for
-this extractor, which is why a docstring that names the trap sat next to code that falls into
-it.
-
-**Three sites share the self-exclusion, not one.** Confirmed by execution:
-
-- `set_extract.py:49` (`count_native_sets`) scans `.//datasource//group` — a `.tds` root
-  returns **0 native Sets** where the equivalent `.twb` returns 1.
-- `extract_blends` (`twb.py:268`) builds `fed_to_caption` from `root.findall(".//datasource")`,
-  which is empty on a datasource-rooted tree, so nothing resolves and the graph comes back
-  `{}`. Its early return on a missing `<datasource-relationships>` masks this for the ordinary
-  `.tds`, but a datasource-rooted tree that *does* carry relationships gets past the guard and
-  still returns `{}`. Treat the early return as a coincidence, not as protection.
-- `extract_table_calc_addressing` (`twb.py:321`), this item's subject.
-
-**On the PR #511 branch the `.tds` path emits no warning either** — the new `warnings` list is
-populated inside the column loop, and the loop never runs, so the degradation this item
-describes is invisible on exactly the surface added to make degradations visible.
+**Approach.** Same shape for both: iterate `datasource_elements(root)` and search within each,
+rather than searching for a descendant `<datasource>`. Add a `.tds`-rooted fixture for each —
+there is still none for `count_native_sets` or `extract_blends`, which is why a docstring that
+names the trap has sat beside code falling into it. Worth a sweep for any other
+`.//datasource` XPath at the same time; three were found by reading, and the count was wrong
+once already (`extract_blends` was first recorded as unaffected, then shown otherwise by
+execution).
 
 **Target:** next Tableau converter pass.
 
