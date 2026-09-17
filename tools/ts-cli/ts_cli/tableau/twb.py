@@ -51,6 +51,23 @@ def datasource_elements(root: ET.Element) -> list[ET.Element]:
     return root.findall(".//datasource")
 
 
+def datasource_name(ds: ET.Element) -> str:
+    """A datasource's display name, across all four accepted file shapes.
+
+    A ``.twb``/``.twbx`` datasource carries ``caption`` (falling back to
+    ``name``). A standalone ``.tds``/``.tdsx`` root carries **neither** — it
+    names itself with ``formatted-name``. Reading only the first two returns
+    ``""`` for every published datasource, and a caller that reads an empty
+    name as "no datasource here" then discards the whole file: the content is
+    extracted correctly and thrown away one step later, with no error and a
+    zero exit code.
+
+    Companion to ``datasource_elements`` — that one finds the datasource on a
+    ``.tds`` root, this one names it. Both traps have to be avoided to read one.
+    """
+    return ds.get("caption") or ds.get("name") or ds.get("formatted-name") or ""
+
+
 # ---------------------------------------------------------------------------
 # 6. Parameter extraction from TWB XML
 # ---------------------------------------------------------------------------
@@ -202,12 +219,20 @@ def parse_twb(twb_path: str | Path) -> dict:
 
     datasources = []
     seen_ds = set()
+    unnamed = 0
 
     for ds in datasource_elements(root):
-        ds_name = ds.get("caption", ds.get("name", ""))
+        ds_name = datasource_name(ds)
         if ds_name == "Parameters":
             continue
-        if not ds_name or ds_name in seen_ds:
+        if not ds_name:
+            # Counted, not silently dropped: this guard is why every published
+            # datasource read as an empty file for as long as it did. A future
+            # Tableau naming attribute would fail here identically, and the
+            # count is what makes that visible instead of a clean zero.
+            unnamed += 1
+            continue
+        if ds_name in seen_ds:
             continue
 
         tables = _extract_tables(ds)
@@ -249,6 +274,9 @@ def parse_twb(twb_path: str | Path) -> dict:
         # GENERATE pass (set->cohort is an agent-guided Phase-2a/2b/2c step) —
         # surfaced here so the caller can nudge instead of silently skipping.
         "sets_detected": count_native_sets(root),
+        # <datasource> elements found but discarded for having no usable name.
+        # Surfaced by format_parse_warnings so a zero result is never silent.
+        "unnamed_datasources": unnamed,
     }
 
 
@@ -360,7 +388,7 @@ def extract_table_calc_addressing(root: ET.Element) -> dict:
     # both define [Calculation_1] (Step 3g's copied-datasource case).
     column_level: dict = {}
     for ds in datasource_elements(root):
-        ds_name = ds.get("caption") or ds.get("name") or ""
+        ds_name = datasource_name(ds)
         for column in ds.findall(".//column"):
             calc = column.find("calculation[@class='tableau']")
             if calc is None:
@@ -400,15 +428,34 @@ def extract_table_calc_addressing(root: ET.Element) -> dict:
     }
 
 
-def format_parse_warnings(addressing: dict) -> str:
-    """Render ``extract_table_calc_addressing``'s warnings as stderr lines.
+def format_parse_warnings(parsed: dict) -> str:
+    """Render a parse result's non-fatal warnings as stderr lines.
 
-    Takes the addressing dict so the caller appends one call to its existing
+    Takes the whole parse result so the caller appends one call to its existing
     summary echo. Lives here, beside the code that produces the warnings, rather
     than in ``commands/tableau.py`` — that module is ratcheted under BL-089 and
     must not grow to carry it. Pure string formatting; the caller does the I/O.
+
+    Two sources today: non-numeric table-calc addressing, and datasources
+    discarded for having no usable name. The second exists because "0
+    datasources" and "0 datasources, and here is one we threw away" are
+    indistinguishable otherwise — which is how every published datasource read
+    as an empty file for months.
+
+    ``table_calc_addressing`` is `.get`-guarded because ``parse_twb`` does not
+    set it — ``parse_cmd`` adds it afterwards, so a caller holding only a
+    ``parse_twb`` result legitimately has no such key. ``unnamed_datasources``
+    comes from ``parse_twb`` itself and is always present.
     """
-    return "".join(f"\nWARNING: {w}" for w in addressing["warnings"])
+    addressing = parsed.get("table_calc_addressing") or {}
+    out = [f"\nWARNING: {w}" for w in addressing.get("warnings", [])]
+    unnamed = parsed["unnamed_datasources"]
+    if unnamed:
+        out.append(
+            f"\nWARNING: {unnamed} <datasource> element(s) found but skipped — no "
+            f"usable name (looked for caption, name, formatted-name)"
+        )
+    return "".join(out)
 
 
 def _strip_brackets(s: str) -> str:
@@ -784,7 +831,7 @@ def _extract_calculated_fields(ds: ET.Element) -> tuple[list[dict], dict[str, st
     """
     calcs = []
     calc_map = {}
-    ds_name = ds.get("caption", ds.get("name", ""))
+    ds_name = datasource_name(ds)
 
     for col in ds.findall("./column"):
         calc_el = col.find("calculation")
