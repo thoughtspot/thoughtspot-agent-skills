@@ -2,8 +2,10 @@
 
 Split out of `twb.py` (module-per-concern, BL-069 pattern) to keep that file's
 line count in budget — same reason `set_extract.py` was split out. Re-exported
-from `ts_cli.tableau.twb`, so existing callers and tests importing these names
-from there keep working unchanged.
+from `ts_cli.tableau.twb`, so the import path is unchanged — but only the path:
+`_extract_joins` returns `(joins, warnings)` in this same release where it used
+to return `joins`, and a caller left unadapted iterates that 2-tuple rather than
+raising.
 
 Imports nothing from `twb.py`, deliberately: `twb.py` imports this module, and
 the reverse would be a cycle.
@@ -20,6 +22,12 @@ import xml.etree.ElementTree as ET
 # and reported rather than guessed at. Tableau writes not-equal as `<>`.
 _SUPPORTED_JOIN_OPERATOR = "="
 
+# A ThoughtSpot join is a conjunction of key pairs, so a disjunction has no
+# representation at all — a target-model limit, not a parser gap. Named here
+# because `OR`'s two children are comparison nodes rather than columns, so the
+# operand check would otherwise fire first and report the `=` inside it.
+_DISJUNCTION_OPERATOR = "OR"
+
 
 def _relation_name(rel: ET.Element) -> str:
     """A join side's name: its own `name`, else the leaf of its `table` path."""
@@ -35,13 +43,21 @@ def _join_key_operand(op: str) -> tuple[str, str]:
     Mirrors `parse_ref()` in `_extract_noodle_joins`, same problem for the
     logical-relationship shape.
 
+    The table is the LEAF of the qualifier, so a deeper one
+    (``[Schema].[Table].[Col]``) yields `Table`, not `Schema].[Table`. That
+    matches `_relation_name`, which the result is compared against — a name
+    carrying the separator matches no relation and the join is dropped with no
+    warning. Leaf-keying means same-named tables in different schemas collapse
+    to one name; that is already true of `_relation_name` and so of this whole
+    module, not something this split introduces.
+
     Inherited limitation: `.strip("[]")` removes every leading/trailing bracket,
     so a column name ending in one (Tableau doubles a literal `]`) loses it.
     """
     stripped = op.strip("[]")
     if "].[" in stripped:
         table, column = stripped.rsplit("].[", 1)
-        return column, table
+        return column, table.rsplit("].[", 1)[-1]
     return stripped, ""
 
 
@@ -126,6 +142,17 @@ def _clause_join_keys(
     for left_expr, right_expr, raw_op in comparisons:
         left = left_expr.get("op", "")
         right = right_expr.get("op", "")
+        # Ahead of the operand check: an OR's operands are the comparison nodes
+        # it joins, so that check would report the supported `=` inside one of
+        # them as the problem and blame a function call that isn't there.
+        if raw_op.upper() == _DISJUNCTION_OPERATOR:
+            warnings.append(
+                f"join clause between {left_table!r} and {right_table!r} "
+                f"combines conditions with OR — a ThoughtSpot join is a "
+                f"conjunction of key pairs and cannot express a disjunction; "
+                f"skipped"
+            )
+            return None
         if not (left.startswith("[") and right.startswith("[")):
             bad = left if not left.startswith("[") else right
             warnings.append(
@@ -142,10 +169,20 @@ def _clause_join_keys(
                 f"joins are not supported yet, skipped"
             )
             return None
-        keys.append({
-            "left": _join_key_operand(left)[0],
-            "right": _join_key_operand(right)[0],
-        })
+        left_col, left_qual = _join_key_operand(left)
+        right_col, right_qual = _join_key_operand(right)
+        # `left`/`right` mean "belongs to left_table/right_table", but the
+        # relation's orientation is fixed by the FIRST qualified comparison and
+        # a later one may name its operands the other way round — the same join,
+        # written in the other direction. Re-orient against the resolved tables
+        # rather than trusting operand order. Only an unambiguous match swaps, so
+        # a bare operand falls through. `left_qual != right_qual` is what keeps a
+        # self-join out: there both comparisons against the resolved pair hold
+        # trivially, and the swap would reverse a correctly-ordered key.
+        if (left_qual != right_qual
+                and left_qual == right_table and right_qual == left_table):
+            left_col, right_col = right_col, left_col
+        keys.append({"left": left_col, "right": right_col})
     return keys
 
 
@@ -161,11 +198,29 @@ def _extract_joins(ds: ET.Element) -> tuple[list[dict], list[str]]:
         clauses = rel.findall("./clause")
         # Resolved up front so a skip warning can name the tables it means.
         left_table, right_table = _join_sides(rel, clauses)
+        if not (left_table and right_table):
+            # `_join_sides`' own sentinel for "no table pair" — a nested join
+            # whose clauses carry no qualifier, where child order sees a join
+            # node plus one table. An entry with a blank name binds to nothing
+            # in either `model_tables` builder, so emitting it loses the join
+            # two modules later with nothing said. Report it here instead.
+            warnings.append(
+                "join could not be resolved to a table pair — a nested join "
+                "whose clause operands carry no table qualifier; skipped"
+            )
+            continue
+        # Sibling <clause> nodes are conditions of ONE composite key — this loop
+        # merges them into a single join — so a failure in any of them makes the
+        # key partial, exactly as a failed condition inside one clause does.
+        # `_clause_join_keys` returns None for a deliberate skip, [] for nothing
+        # found; only the former abandons the relation.
         join_keys = []
         for clause in clauses:
             clause_keys = _clause_join_keys(clause, left_table, right_table, warnings)
-            if clause_keys:
-                join_keys.extend(clause_keys)
+            if clause_keys is None:
+                join_keys = None
+                break
+            join_keys.extend(clause_keys)
         if join_keys:
             joins.append({
                 "type": rel.get("join", "inner").upper(),

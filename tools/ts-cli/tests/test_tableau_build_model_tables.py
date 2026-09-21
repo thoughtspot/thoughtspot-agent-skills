@@ -565,3 +565,74 @@ def test_build_model_no_warning_and_zero_sets_detected_without_sets(tmp_path):
     assert payload[0]["cohorts_deferred"] == []
     assert payload[0]["cohort_files"] == []
     assert list(out_dir.glob("*.cohort.tml")) == []
+
+
+# ---------------------------------------------------------------------------
+# 7. Joins skipped by _extract_joins reach the user (SCAL-330635 review #9)
+# ---------------------------------------------------------------------------
+
+def _translate_with_join_warnings(ds):
+    """Run the one place join warnings are folded in, with no real formulas."""
+    return tableau_cmd._translate_and_validate(
+        ds, [], {}, {"param_map": {}, "parameters": []},
+    )
+
+
+def test_join_warnings_are_marked_and_reach_generate_flow(tmp_path):
+    ds = _ds(tables=[])
+    ds["join_warnings"] = ["join clause between 'a' and 'b' uses '>=', skipped"]
+
+    _, _, validation_issues, _ = _translate_with_join_warnings(ds)
+    result = _run_generate_flow(ds, tmp_path, validation_issues=validation_issues)
+
+    joins = [e for e in result["validation_warnings"] if e.get("kind") == "join"]
+    assert len(joins) == 1
+    assert joins[0]["name"] == ds["name"]
+    assert joins[0]["warnings"] == ds["join_warnings"]
+
+
+def test_join_warnings_survive_the_merge_flow(tmp_path):
+    # The regression that matters: _merge_flow stores `validation_issues`, so
+    # folding at the source is what gets join warnings onto a path that never
+    # carried them. Nothing to merge, so no import is attempted.
+    ds = _ds(tables=[])
+    ds["join_warnings"] = ["join clause between 'a' and 'b' uses '>=', skipped"]
+
+    _, _, validation_issues, _ = _translate_with_join_warnings(ds)
+    result = tableau_cmd._merge_flow(
+        ds=ds, name="Test", existing_guid="GUID", existing_tml={"model": {}},
+        cleaned_formulas=[], translated=[], skipped=[],
+        validation_issues=validation_issues, profile="p", dry_run=True,
+        max_retries=1,
+    )
+
+    joins = [e for e in result["validation_warnings"] if e.get("kind") == "join"]
+    assert len(joins) == 1
+    assert joins[0]["warnings"] == ds["join_warnings"]
+
+
+def test_join_warnings_are_echoed_to_stderr(tmp_path, capsys):
+    ds = _ds(tables=[])
+    ds["join_warnings"] = ["join clause between 'a' and 'b' uses '>=', skipped"]
+
+    _translate_with_join_warnings(ds)
+
+    err = capsys.readouterr().err
+    assert "Validation warnings: 1" in err
+    assert "uses '>=', skipped" in err
+
+
+def test_join_warning_is_not_pushed_out_of_the_stderr_cap(tmp_path, capsys):
+    # The echo prints only the first 10 entries, so an appended join warning
+    # would vanish behind ten formula issues. It is prepended for that reason.
+    ds = _ds(tables=[])
+    ds["join_warnings"] = ["join clause between 'a' and 'b' uses '>=', skipped"]
+    ds["calculated_fields"] = []
+    translated = [{"name": f"F{i}", "expr": "sum(("} for i in range(12)]
+
+    from ts_cli.tableau.build_model import join_warning_entries
+    from ts_cli.tableau_translate import validate_pre_import
+    issues = join_warning_entries(ds) + validate_pre_import(translated, set(), set())
+
+    assert len(issues) > 10
+    assert issues[0].get("kind") == "join"

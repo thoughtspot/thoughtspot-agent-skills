@@ -402,6 +402,19 @@ def build_generated_tables_map(
     return result
 
 
+def join_warning_entries(ds: dict) -> list[dict]:
+    """`validation_warnings` entries for the joins `_extract_joins` skipped.
+
+    Carries `kind` because the rest of that list is per-FORMULA —
+    `validate_pre_import` returns `{name: <formula name>, warnings}` — while
+    this is per-datasource: same shape, different meaning. The migration report
+    selects on the marker rather than matching warning text, which changes.
+    """
+    if not ds.get("join_warnings"):
+        return []
+    return [{"kind": "join", "name": ds["name"], "warnings": ds["join_warnings"]}]
+
+
 def build_blend_plan(blend_graph: dict, datasources: list[dict]) -> dict:
     """Assemble the full blend plan: components, table map, and joins.
 

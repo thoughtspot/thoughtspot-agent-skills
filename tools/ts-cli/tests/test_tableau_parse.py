@@ -76,6 +76,59 @@ NON_NUMERIC_ADDRESS_TWB = """<?xml version='1.0'?>
 """
 
 
+# SCAL-330635: `_extract_joins` returns (joins, warnings) and `parse_twb` puts the
+# warnings on the datasource as `join_warnings`. Both halves are unit-tested, the
+# wire between them was not — deleting that one assignment left every unit test
+# green while the whole reporting chain went dead. These two drive the real
+# command so the wiring is covered end to end; the pair is deliberate, since the
+# skip test alone passes just as well when nothing is extracted at all.
+def _join_twb(operator: str) -> str:
+    return f"""<?xml version='1.0'?>
+<workbook>
+  <datasource name='federated.a' caption='Orders'>
+    <relation join='inner' type='join'>
+      <relation name='ORDERS' type='table' table='[db].[s].[ORDERS]'/>
+      <relation name='RETURNS' type='table' table='[db].[s].[RETURNS]'/>
+      <clause type='join'>
+        <expression op='{operator}'>
+          <expression op='[ORDERS].[OrderId]'/>
+          <expression op='[RETURNS].[OrderId]'/>
+        </expression>
+      </clause>
+    </relation>
+    <column name='[Amount]' datatype='real' role='measure' caption='Amount'/>
+  </datasource>
+</workbook>
+"""
+
+
+def test_parse_reports_a_skipped_join_in_its_output(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(_join_twb("&gt;="))
+    out = tmp_path / "parsed.json"
+
+    result = runner.invoke(app, ["tableau", "parse", str(twb), "--output", str(out)])
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    ds = json.loads(out.read_text())["datasources"][0]
+    assert ds["joins"] == []
+    assert len(ds["join_warnings"]) == 1
+    assert "non-equi" in ds["join_warnings"][0]
+
+
+def test_parse_emits_a_supported_join_with_no_warnings(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(_join_twb("="))
+    out = tmp_path / "parsed.json"
+
+    result = runner.invoke(app, ["tableau", "parse", str(twb), "--output", str(out)])
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    ds = json.loads(out.read_text())["datasources"][0]
+    assert ds["join_warnings"] == []
+    assert ds["joins"][0]["keys"] == [{"left": "OrderId", "right": "OrderId"}]
+
+
 def test_parse_survives_non_numeric_address(tmp_path):
     twb = tmp_path / "wb.twb"
     twb.write_text(NON_NUMERIC_ADDRESS_TWB)

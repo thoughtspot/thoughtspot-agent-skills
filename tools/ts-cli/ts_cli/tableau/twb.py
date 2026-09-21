@@ -732,8 +732,9 @@ def _extract_columns(ds: ET.Element, tables: list[dict]) -> list[dict]:
 # Physical join extraction (<relation join=...>)
 #
 # Split into ts_cli.tableau.joins (module-per-concern, BL-069 pattern) to keep
-# this file's line count in budget. Re-exported here so existing callers/tests
-# importing them from ts_cli.tableau.twb keep working unchanged.
+# this file's line count in budget. Re-exported here so the import path is
+# unchanged — but only the path: `_extract_joins` returns `(joins, warnings)`
+# in this same release, and an unadapted caller iterates that tuple silently.
 # ---------------------------------------------------------------------------
 
 from ts_cli.tableau.joins import (  # noqa: E402,F401
