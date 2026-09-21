@@ -72,7 +72,8 @@ are roughly ordered by value÷effort.
 | BL-204 | no plan-only helper for role-play alias synthesis -- Step 7.5 is done by hand | next converter pass |
 | ~~BL-199~~ | ~~`dependency.py`'s `_export_one` — same null-`edoc` crash BL-189 fixed, one call away~~ | DONE (2026-07-31) |
 | ~~BL-191~~ | ~~`dependency/mutate.py` reads Views through `column_id` (0/265 in the wild) — silent dangling refs~~ | DONE (2026-07-31) |
-| ~~BL-275~~ | ~~`_extract_joins` drops joins with a nested equality expression or a Custom-SQL join side~~ | DONE (2026-08-07) |
+| BL-277 | a join whose two sides live in different collections (Custom SQL view ↔ physical table) is dropped by both `model_tables` builders, so a correctly extracted join never reaches the Model TML | with the next Tableau build-layer pass |
+| BL-275 | `_extract_joins` drops joins with a nested equality expression or a Custom-SQL join side — extraction fixed; a Custom-SQL-to-physical-table join is still dropped by both `model_tables` builders, so no join reaches the TML | PARTIAL — see BL-277 |
 | BL-183 | Validator: dangling `[formula_X]` refs in `ts tml lint` + CA-JSON table refs | with BL-178 |
 | BL-174 | from-Databricks forward leg: `INNER` join type, dropped `format:`, stamped `cardinality:` | next DBX pass |
 | BL-180 | from-Snowflake translator ignores `\|\|`→`concat` and NULL-preserving division | next formula pass |
@@ -147,7 +148,7 @@ are roughly ordered by value÷effort.
 | BL-024 | Close row-offset table-calc gap with window functions | — |
 | BL-026 | ts-object-liveboard-builder skill | — |
 | BL-028 | Audit mode: assess visualization layer | — |
-| BL-094 | Joins between SQL Views (multi-query Custom SQL) | — |
+| BL-094 | Joins between SQL Views (multi-query Custom SQL) | PARTIAL — extraction + view↔view emission fixed 2026-08-07; cardinality inference open |
 | BL-233 | `ts profiles add` stamps `dbx_profile` for a CLI profile the skill no longer creates | next Databricks pass |
 | BL-238 | I15 is one-directional and Model-only; `check_tml.py` leaves worked-example descriptions ungated | next validator pass |
 | BL-245 | `build-sv` drops every Model formula without `--formulas`, and no command produces that file | next SF converter pass |
@@ -2789,18 +2790,39 @@ NEEDS-REVIEW flag pointing at the token. Currently the SQL is passed through ver
 
 ---
 
-## BL-094 — Tableau: capture joins BETWEEN SQL Views (multi-query Custom SQL datasources) `Tier 2`
+## BL-094 — Tableau: capture joins BETWEEN SQL Views (multi-query Custom SQL datasources) `Tier 2` — **PARTIAL: extraction + view↔view emission fixed 2026-08-07, cardinality inference open**
 
 **Source:** 2026-07-06 PR #188, validated against `tableau/community-tableau-server-insights` ts_users.twb (6 joined Custom SQL Queries).
 **Affects:** ts-convert-from-tableau, `build-model` (`_extract_joins` / model join wiring).
-**Status:** OPEN.
+**Status:** PARTIAL — see the status correction below.
 
-`_extract_joins` reads only `relation[@type='table']` children, so a datasource that JOINS
+~~`_extract_joins` reads only `relation[@type='table']` children, so a datasource that JOINS
 several Custom SQL Queries (each now a SQL View) loses the joins between them — the model gets
-the SQL Views as unconnected `model_tables[]` with no `joins`. Needs join extraction over
+the SQL Views as unconnected `model_tables[]` with no `joins`.~~ Needs join extraction over
 `type='text'` relation children plus cardinality inference (deterministic only via a data probe;
 CTE-grain heuristic otherwise). This is the multi-query analogue of the single-view case shipped
 in #188 and overlaps the deferred "logical-relationship → join cardinality" gap.
+
+**Status correction (2026-09-21, SCAL-330635 review).** The struck sentence above is no longer
+true. BL-275 widened the join-side lookup to accept `type='text'`
+(`joins.py::_join_sides`), so a join between two Custom SQL Queries is now extracted; and
+`_sql_view_model_tables` (`model_builder.py:98`) already emitted view-to-view joins, so no
+second fix was needed on the emission side. Verified end to end — extraction through
+`model_tables[]` — producing `on: "[Query A::UserId] = [Query B::UserId]"` with
+`cardinality: MANY_TO_ONE`.
+
+**That verification used a constructed two-view fixture, not a real workbook.**
+`ts_users.twb` (this item's own 6-join source) has **not** been re-run, so the multi-query
+case at real arity is unconfirmed. Re-running it is the natural first step when this item is
+picked up.
+
+What remains is **cardinality inference**: the emitted join hardcodes `MANY_TO_ONE` and
+nothing infers the true cardinality. That is this item's park-note blocker and is unchanged
+by the above.
+
+A join with one SQL View side and one physical-table side is a **different** case — extracted
+correctly, then dropped, because both `model_tables` builders require both sides in the same
+collection. That is **BL-277**, not this item.
 
 **Park note (2026-07-23):** deferred; needs a cardinality-inference design decision (data-probe
 vs. CTE-grain heuristic, per this item's own text) before implementation can start.
@@ -8284,6 +8306,23 @@ detection one.
    `_extract_joins` drops `=` physical joins too and the blast radius is larger than step 2
    assumes.
 
+**Second drop mechanism (2026-09-21, SCAL-330635).** An audit of available Tableau
+workbooks found a composite relationship — an `AND` wrapping two or more equality
+conditions — is silently skipped, and appeared more often than the non-`=` operator case
+this item was filed for. `_extract_noodle_joins` matches only a **direct child**
+`expression[@op='=']`, so an `AND` wrapper makes `find` return `None` and the relationship
+is discarded whole. Every operator in it is `=`; the wrapper alone loses the join.
+
+That extractor returns a bare `list[dict]` and has no warnings channel, so the drop is
+unreported. `_extract_joins` gained `(joins, warnings)` under SCAL-330635 — threaded
+through `parse_twb` as `join_warnings`, marked `kind: "join"`, echoed to stderr — so step 2
+means extending that plumbing here and merging at the `twb.py` call site.
+
+**Any fix must keep composite-key extraction all-or-nothing.** Taking only the first
+equality turns a silent drop into a silent fan-out, double-counting every measure on the
+join — strictly worse. `joins.py::_clause_join_keys` is the pattern: it returns `None` for
+the whole clause when any condition fails.
+
 **Park note.** The Tableau converter was parked 2026-07-23. Steps 1–2 are small enough to
 fold into any Tableau touch; step 3 waits for the next real Tableau pass.
 
@@ -10902,7 +10941,65 @@ dependency on `strict: true` to catch the second of two open PRs. The version ru
 
 ---
 
-## BL-275 -- `_extract_joins` drops joins with a nested equality expression or a Custom-SQL join side `Tier 1` -- **RESOLVED 2026-08-07**
+## BL-277 — a mixed-collection join is extracted correctly and then dropped by both `model_tables` builders `Tier 1`
+
+**Filed:** 2026-09-21.
+**Source:** review of SCAL-330635. Split out of BL-275, which is now PARTIAL — extraction
+fixed there, emission open here.
+**Affects:** `tools/ts-cli/ts_cli/model_builder.py` (`_sql_view_model_tables`, and the
+physical-table `model_tables` assembly).
+
+A Tableau datasource can mix **physical tables** and **Custom SQL queries** (which become
+SQL Views). Two separate builders emit `model_tables[]`, and each keeps a join only when the
+counterpart sits in **its own** collection:
+
+| site | filter | collection |
+|---|---|---|
+| `model_builder.py:112` | `j["right_table"] in by_name` | SQL views only |
+| `model_builder.py:351` | `j["right_table"] in table_names` | physical tables only |
+
+A join *between* the two kinds matches neither, so it is silently discarded after extraction
+and `model_tables` is emitted with no `joins` key at all.
+
+**Observed** on a datasource joining a Custom SQL query to a physical table: `parse`
+reports the join with a SQL-view name on one side and a physical-table name on the other;
+`build-model` then emits `joins: 0` and `model_tables` for all three tables with no `joins`
+key. Reproduce by constructing that shape — one `type='text'` relation joined to one
+`type='table'` relation — rather than relying on a specific workbook.
+
+**Why it matters.** This is the outcome `_extract_joins`' own call site warns about — "a
+multi-table model imports with no join and ThoughtSpot rejects it". It converts "join
+missing from the model" into an import failure, or worse a cartesian result if the model
+does load. `ts tableau verify` notices but only as a WARNING (`tableau/verify.py:294`), so
+nothing fails.
+
+**Approach.** Match `right_table` against `table_names | by_name` in both builders, and
+resolve each key through whichever side owns it — `_resolve_view_key` currently maps
+physical→view column names for SQL views only, so the mixed pair needs the owning side
+chosen per key rather than per builder. Verify through `build-model` and quote the emitted
+`joins` block; parse-level evidence is what let BL-275 be marked resolved prematurely.
+
+**Target:** next Tableau build-layer pass.
+
+---
+
+## BL-275 -- `_extract_joins` drops joins with a nested equality expression or a Custom-SQL join side `Tier 1` -- **PARTIAL: extraction fixed 2026-08-07, emission still open**
+
+**Status corrected 2026-09-21 (review of SCAL-330635).** Marked RESOLVED on the strength of
+`ts tableau parse` alone — the changelog says so in its own words, "live-verified via
+`ts tableau parse` (0 joins → 1, correctly named and keyed)". Parse is the layer that was
+fixed; `build-model` is the layer the user experiences and it was never run. Re-verified on
+the datasource this item was filed from — a Custom SQL query joined to a physical table:
+
+```
+parse       JOIN left=<SQL view> right=<physical table>
+build-model joins: 0   (model_tables carries the tables and no joins key)
+```
+
+The extraction half is genuinely fixed. The emission half is **BL-277** — a join whose two
+sides live in different collections is dropped by both `model_tables` builders. So the
+symptom this item exists for, the one `_extract_joins`' own call site warns about ("a
+multi-table model imports with no join and ThoughtSpot rejects it"), is unchanged.
 
 **Filed:** 2026-08-06. **Jira:** SCAL-330635.
 **Source:** `ts-convert-from-tableau` accuracy-testing pass (Keshav Sharma KT handoff) --

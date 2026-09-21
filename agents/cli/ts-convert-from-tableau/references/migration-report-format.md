@@ -55,9 +55,16 @@ Outcome legend: **✅ Model + Liveboard** · **◑ Model only** · **⊘ No acti
 
 **What was done** — datasources, tables/SQL views, joins, model, Spotter, # tiles, theme.
 
-**⚠ Join warnings** — present only when `validation_warnings` contains an entry from
-`_extract_joins`. Only **equality** joins are migrated; a clause using any other operator
-(`>=`, `>`, `<`, `<=`, `<>`) is skipped and reported — non-equi joins are not supported yet.
+**⚠ Join warnings** — present only when `validation_warnings` contains an entry marked
+`kind: "join"`. Select on that marker, never on the warning text: the other entries in
+that list are per-formula and carry the same two other keys, and the wording changes.
+Only **equality** joins are migrated. ThoughtSpot itself supports range/inequality joins
+(see `tableau-tml-rules.md` "Range join alternative"), but this converter does not emit one
+from a Tableau join clause: every join it writes carries `cardinality: MANY_TO_ONE`, which a
+non-equality relationship cannot satisfy, and BL-240 records `>=` returning materially wrong
+numbers on both legs of an ASOF join. So a clause using any other operator
+(`>=`, `>`, `<`, `<=`, `<>`) is skipped and reported rather than guessed at. A date-range
+*filter formula* is a different path — Step 3.6 offers a range join there.
 A composite key containing one is skipped **whole**, never partially, because a join on part
 of a key fans out and silently double-counts every measure built on it. The relationship is
 **missing** from the generated model — flag it so the user can add an equivalent manually
@@ -65,7 +72,7 @@ of a key fans out and silently double-counts every measure built on it. The rela
 
 | # | Tables | Operator | What to do |
 |---|---|---|---|
-| 1 | {left_table} ↔ {right_table} | `{op}` | Not a supported join operator — recreate the relationship as a formula/filter if needed, or add the equi-join columns manually |
+| 1 | {left_table} ↔ {right_table} | `{op}` | Not auto-translated — recreate as a range join (Step 3.6) or a formula/filter if load-bearing, or add the equi-join columns manually |
 
 **Decisions made** — the non-obvious calls (blend → one SQL view, bins = formula vs cohort,
 dynamic vs anchored YoY, orphan worksheets added/left off, separate vs tabbed liveboards…).

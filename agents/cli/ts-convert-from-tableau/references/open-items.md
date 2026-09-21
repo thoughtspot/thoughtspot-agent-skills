@@ -22,14 +22,16 @@ live VALIDATE_ONLY behaviour
 
 ---
 
-## #3 — COLLECTION datasources — DEFERRED
+## #3 — COLLECTION datasources — OPEN (blocker premise no longer holds)
 
 Tableau COLLECTION datasources (multiple primary data sources combined) should generate
 one model per underlying table. This edge case is not handled.
 
-Status: DEFERRED — still open as of 2026-07-11; no committed target version or BL-NNN
-filed as of 2026-07-03, and no COLLECTION-datasource workbook has been encountered since;
-revisit if/when one is encountered
+Status: OPEN. Deferred 2026-07-03 for want of an example workbook; that reason no longer
+holds — BL-275 was diagnosed on a federated datasource combining hyper, postgres and
+textscan connections, which is this shape. What BL-275 fixed is join *extraction* only:
+one-model-per-underlying-table is untouched, and BL-277 covers the extracted join still
+being dropped before it reaches the TML. Both items now carry the analysis.
 
 ---
 
