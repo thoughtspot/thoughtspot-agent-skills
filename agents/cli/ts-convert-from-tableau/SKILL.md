@@ -160,7 +160,7 @@ When the user picks **M**, immediately ask **what to migrate** — this decides 
   3.  Parse TWB XML — extract tables, columns, joins,
       calculated fields, blend relationships,
       table-calc addressing ............................ auto
-  3.5 Resolve published datasources (sqlproxy → API) ... auto/you choose  [scope 1,2,4,5]
+  3.5 Resolve published datasources (API or .tds) ... auto/you choose  [scope 1,2,4,5]
   3.6 Confirm joins (present/suggest/range join option) . you confirm   [scope 1,2,4]
   4.  Confirm source tables (reuse/GUID/create/search) ..... you choose  [scope 1,2,4,5]
   4.5 Select ThoughtSpot connection (create path only) .... you choose  [scope 1,2,5]
@@ -473,8 +473,10 @@ ts tableau parse "{twb_path}" --output /tmp/ts_tableau_mig/{workbook_name}_parse
 
 The JSON contains `datasources[]` (each with `tables`, `columns`, `joins`,
 `calculated_fields`, `calc_map`, `col_table_map`, `orphan_calcs`), `parameters`,
-`param_map`, `blends`, and `table_calc_addressing`. All subsequent steps read
-these fields instead of re-deriving them.
+`param_map`, `blends`, `table_calc_addressing`, `dashboards`, `sets_detected`, and
+`skipped_datasources` (datasources found but not migrated, with a reason — check it
+whenever the datasource count looks low). All subsequent steps read these fields
+instead of re-deriving them.
 
 The parse output (from the `ts tableau parse` call above) contains the following, extracted from the TWB's XML structure:
 
@@ -627,24 +629,20 @@ from `orphan_calcs` so they enter the translation pipeline.
 
 ## Step 3.5 — Resolve Published Datasources (sqlproxy)
 
-> Runs only if Step 3 detected one or more datasources with `<connection class="sqlproxy">`
-> (TWB `<connection class="sqlproxy">` with a `dbname` naming the published datasource).
-> Skipped entirely if all datasources have direct warehouse connections.
+> Runs only if Step 3 found a `<connection class="sqlproxy">` (its `dbname` names the
+> published datasource). Skipped when every datasource connects to a warehouse directly.
 
-The TWB already carries every calculated field, column definition, and metadata record for
-a published datasource — what it lacks is the **physical table structure** (tables, joins,
-db/schema paths), which lives only in the datasource's `.tds`. Formula extraction and
-translation work from the TWB alone; resolving the physical model needs either the Tableau
-API or a supplied `.tds`/`.tdsx`. Full detail (what's in/out of the TWB, how to get the
-`.tds`, the field-resolution and CSV-download mechanics) is in
-[references/step-3-parse-fields.md](references/step-3-parse-fields.md) "Published
+The TWB carries the calculated fields and column definitions; it lacks the **physical table
+structure** (tables, joins, db/schema paths), which lives only in the datasource's `.tds`.
+Resolving it needs either the Tableau API or the `.tds`/`.tdsx` itself. Detail — what's
+in/out of the TWB, how to get the `.tds`, field-resolution and CSV-download mechanics — is
+in [references/step-3-parse-fields.md](references/step-3-parse-fields.md) "Published
 datasource (sqlproxy) resolution detail (Step 3.5)".
 
 ### Flow
 
-> **ASK before querying the Tableau API.** The user may be a consultant conducting a remote
-> migration without access to the customer's Tableau Server. Do NOT attempt any API call
-> before asking — a failed API call wastes 30–60 seconds and confuses the flow.
+> **ASK before any API call.** The user may have no access to the customer's Server — a
+> failed call wastes 30–60 seconds and confuses the flow.
 
 Prompt — **always, before any API call**:
 
@@ -654,15 +652,18 @@ Found {N} published datasource(s) hosted on Tableau Server:
   - {ds_caption_2} ({M} columns, {C} calculated fields extracted from TWB)
 
 The TWB already contains all column definitions and calculated fields.
-The Tableau API would additionally resolve the physical table structure
-(table names, joins, db/schema paths) — but this is optional.
+What's missing is the physical model (table names, joins, db/schema paths).
+It can come from the Server, or from the .tds file itself.
+  Y  Yes, I have Server access — query the Tableau API   (requires /ts-profile-tableau)
+  T  I have the .tds/.tdsx file(s)  — parse them directly
+  N  Neither — proceed with TWB metadata only            (consultant/remote migrations)
 
-Do you have access to the Tableau Server hosting these datasources?
-  Y  Yes — query the Tableau API for table structure   (requires /ts-profile-tableau)
-  N  No  — proceed with TWB metadata only              (common for consultant/remote migrations)
-
-Enter Y / N:
+Enter Y / T / N:
 ```
+
+**T (has the file)** — ask for each path, `ts tableau parse {file}.tds`, merge its
+tables/joins/db-schema into the matching parsed datasource, then proceed to Step 4 as **Y**
+does. No Server access needed; `parse` accepts `.tds`/`.tdsx` directly.
 
 **N (no API access)** — proceed with TWB-embedded metadata (columns + calc fields already
 extracted; physical table names come from `<metadata-record>` `parent-name`). **Skip to
@@ -2484,9 +2485,9 @@ suggested-but-unverified with its tokens for manual follow-up.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.42.0 | 2026-09-17 | **SCAL-331323 — Step 3.5 gains a `T` branch for a supplied `.tds`/`.tdsx` (prereq ts-cli v0.141.0).** It offered only `Y` (Tableau API) and `N` (TWB metadata only), so a consultant without Server access — the case `N` is labelled for — was routed past the physical model even while holding the `.tds`. `T` parses it and continues as `Y` does. Paid for inside the BL-128 ratchet by trimming restatements in the same section. |
 | 1.41.0 | 2026-09-15 | **SCAL-338450 — Step 3 no longer dies on a non-numeric table-calc address (prereq ts-cli v0.139.0).** Tableau writes `false` / `"All Pages"` into `<table-calc><address><value>` for non-offset addressing modes; a bare `int()` raised an uncaught `ValueError` out of `ts tableau parse`, so the **whole** workbook yielded nothing (no tables, joins, formulas, params, dashboards) and Steps 4+ were unreachable — 2 real customer workbooks were 100% unmigratable over one token on one worksheet. That entry's `address_offset` now degrades to `None` (the element-absent value) with a warning in the new `table_calc_addressing.warnings`. Corpus-verified 33/33 parse; no other file changes behaviour. |
 | 1.40.1 | 2026-08-26 | Use `ts metadata search --connection` instead of hand-filtering `dataSourceName`; the old instruction said **equals** where the CLI casefolds, so it dropped rows the CLI keeps (finding 11.1). |
 | 1.40.0 | 2026-07-30 | **BL-171 — `TRIM` stops emitting a bare `trim ( )`, and `LTRIM`/`RTRIM` are newly translated (ts-cli v0.126.1).** v1.39.2 corrected the mapping doc but left `ts_cli/tableau/functions.py` rewriting `TRIM(` → `trim ( `, which fails at import (`error_code 14516`) — that regex rewrite is gone and `TRIM` now joins `UPPER`/`LOWER`/`REPLACE`/`STARTSWITH`/`ENDSWITH` in `_ARG_HANDLERS`, emitting `sql_string_op ( "TRIM({0})" , s )`. `LTRIM`/`RTRIM` are **newly emitted** (they had no mapping at all — hence MINOR), completing coverage-matrix row #136 and the L9 pass-through list. 6 new tests including nesting (`TRIM(TRIM(x))`, `UPPER(TRIM(x))`). **All three emitted forms live-verified on se-thoughtspot 2026-07-30** (`VALIDATE_ONLY`, nothing persisted). |
-| 1.39.2 | 2026-07-29 | **BL-170 — corrected `TRIM` to a pass-through (docs only; CLI fix is BL-171).** Live verification on se-thoughtspot 2026-07-29 proved `trim` is **not** a native ThoughtSpot formula function (rejected with `Search did not find "trim ("`, the same signature as `upper`/`lower`). `tableau-formula-translation.md`'s `TRIM(s)` row moved from the native `trim ( s )` to `sql_string_op ( "TRIM({0})" , s )`, and `LTRIM`/`RTRIM` rows were added alongside it; the Pass-Through Fallback table and the CLI-status list gained the same three entries. `references/coverage-matrix.md` #18 dropped `TRIM` (now #135) and #136 covers `LTRIM`/`RTRIM`. `REPLACE`, `STARTSWITH` and `ENDSWITH` were **re-confirmed correct** in the same pass — no change. **Caveat: `ts_cli/tableau/functions.py` still rewrites `TRIM(` → `trim ( `, so translated formulas containing `TRIM` still fail at import until BL-171 lands** — review them by hand meanwhile. |
 
-**Older entries (v1.0.0–v1.39.1):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.39.2):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

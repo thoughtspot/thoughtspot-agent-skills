@@ -1931,7 +1931,7 @@ ts tableau parse "workbook.twbx" --output parsed.json
 
 | Flag | Required | Description |
 |---|---|---|
-| `twb_file` (arg) | yes | Path to `.twb` or `.twbx` file |
+| `twb_file` (arg) | yes | Path to a `.twb`/`.twbx` workbook, or a `.tds`/`.tdsx` published datasource |
 | `--output`, `-o` | yes | Output path for the parsed JSON |
 
 **Output file:**
@@ -1955,7 +1955,11 @@ ts tableau parse "workbook.twbx" --output parsed.json
                "cardinality": "MANY_TO_ONE"}]
   },
   "table_calc_addressing": {"column_level": {...}, "ws_overrides": {...},
-                            "warnings": ["..."]}
+                            "warnings": ["..."]},
+  "dashboards": [{"name": "...", "visuals": [{"title": "...", "mark": "...",
+                  "fields": [...], "bucket_tokens": {...}, "tile": {...}}]}],
+  "sets_detected": 0,
+  "skipped_datasources": [{"reason": "...", "detail": "..."}]
 }
 ```
 
@@ -1971,7 +1975,14 @@ that entry's `address_offset` degrades to `null` (the raw token is kept in
 `address_value`, so a non-offset mode stays distinguishable from an absent
 `<address>` element) and the warning is echoed to
 stderr, rather than aborting the parse of the whole workbook (SCAL-338450).
-`blend_plan` is derived from `blends` +
+`dashboards` carries one entry per `<dashboard>` with its visuals (title, mark class,
+fields, bucket tokens, grid tile). `sets_detected` counts native Tableau Sets so the
+caller can nudge rather than skip them silently (BL-131). `skipped_datasources` lists
+datasources that were found but not migrated, each with a `reason` and a `detail`
+naming which one — a datasource with no usable name, or one with nothing migratable
+inside; the duplicate-name skip is deliberately absent, since Tableau writes one
+`<datasource>` stub per worksheet and reporting correct dedupe would bury the rest
+(SCAL-331323). `blend_plan` is derived from `blends` +
 `datasources` by `build_blend_plan` (`ts_cli/tableau/build_model.py`) — connected
 components, a datasource→table map, and the flattened join list for every blend
 edge, ready for SKILL.md Step 5b to consume directly instead of re-deriving them by
@@ -2139,7 +2150,7 @@ ts tableau build-model "workbook.twbx" \
 
 | Flag | Required | Description |
 |---|---|---|
-| `twb_file` (arg) | yes | Path to `.twb` or `.twbx` file |
+| `twb_file` (arg) | yes | Path to a `.twb`/`.twbx` workbook, or a `.tds`/`.tdsx` published datasource |
 | `--connection`, `-c` | yes | ThoughtSpot connection name |
 | `--output-dir`, `-o` | no | Output directory (default: `.`) |
 | `--model-name`, `-m` | no | Model name (default: derived from datasource name) |

@@ -158,6 +158,7 @@ are roughly ordered by value÷effort.
 | BL-252 | `introspect` emits no `fqn`, so `build-model` collides on any generic table name (52 `DIM_PRODUCT` live) | next SF converter pass |
 | BL-253 | table alias dropped for the physical name — breaks every query citing the alias; masks BL-241 | next SF converter pass, before BL-241 |
 | BL-270 | datasource-root self-exclusion: `count_native_sets` returns 0 Sets and `extract_blends` returns `{}` on a `.tds` — third site fixed by #511 | next Tableau converter pass |
+| BL-275 | `_extract_noodle_joins` drops an AND-composite relationship and any whose operand lacks a `(Table)` suffix — 12 of 12 relationship joins lost across 5 real published datasources | next Tableau parser pass |
 | BL-274 | two PRs can ship the same ts-cli version with zero merge conflicts and every gate green — demonstrated on #511 vs #512 | next validator pass |
 
 ### Tier 3 — Opportunistic
@@ -10569,6 +10570,17 @@ coincidence.
 empty result indistinguishable from a datasource that genuinely has no Sets and no blends.
 Nothing downstream re-raises it.
 
+**Priority changed 2026-09-17 (SCAL-331323) — these sites are now reachable, not latent.**
+Until that PR a `.tds` produced no datasources at all, so neither site could be hit on the
+shape they fail for. It parses now, and `count_native_sets` immediately contradicts the
+same output it appears in: on a `.tds` carrying one Set, `sets_detected` is `0` while
+`datasources[0]["sets"]` lists it — and `commands/tableau.py:1386` gates the cohort nudge
+on `sets_detected > 0`, so the user is not told. The conversion itself is unaffected; it
+reads the per-datasource `sets`. `extract_blends`'s name lookup was converted to
+`datasource_name()` in that PR, but its `.//datasource` scan — the defect this item is
+about — was not. `tools/ts-cli/README.md` now documents `sets_detected` as counting native
+Sets, which is false on a `.tds` until this is fixed.
+
 **What PR #511 settled, and what it did not.** #511 verified its crash fix across a
 33-workbook corpus. That corpus is workbooks, so it never exercised the `.tds` path at all —
 the corpus evidence still does not extend to published datasources, and should not be cited
@@ -10701,6 +10713,57 @@ of the sentence is the pointer to `check_version_sync.py`. If the number is want
 
 **Target:** next ts-cli version bump — whoever touches the version next.
 
+
+## BL-275 — `_extract_noodle_joins` drops two relationship shapes that have nothing to do with the operator `Tier 2`
+
+**Filed:** 2026-09-17.
+**Source:** review of PR SCAL-331323, which unblocked `.tds`/`.tdsx` parsing and so made this
+function reachable for published datasources for the first time.
+**Affects:** `tools/ts-cli/ts_cli/tableau/twb.py` (`_extract_noodle_joins`).
+
+Modern Tableau writes joins as a relationship graph (the "noodle") rather than
+`<relation join=...>`. `_extract_noodle_joins` reads that graph and drops two shapes, both
+using `=`:
+
+1. **AND composite.** The lookup is `rel.find("./expression[@op='=']")` — a *direct child*.
+   An `AND` wraps its `=` nodes, so the find returns None and the relationship is skipped.
+2. **Bare operand.** Table identity is parsed out of the column text, so both sides must
+   carry a `(Table)` suffix (`if not (ltab and rtab): continue`). Tableau routinely writes
+   the base table's own column bare — `[METRIC_ID] = [CALC_METRIC_ID]`, or one side bare and
+   one suffixed.
+
+**Distinct from BL-219**, which is about the comparison *operator* — a relationship on any
+operator but `=` being dropped. Both shapes here use `=` and are still dropped, so fixing
+BL-219 does not fix them.
+
+**Measured** on the 5 real published datasources used to qualify SCAL-331323:
+
+| file | relationships | joins extracted |
+|---|---|---|
+| optimizely_production.tdsx | 9 | 0 |
+| gifting_dataset.tdsx | 1 | 0 |
+| Insights _ Campaign Data.tdsx | 1 | 0 |
+| cpg_lp_engagement.tdsx | 1 | 0 |
+| **total** | **12** | **0** |
+
+**Severity — which shape actually trips it.** A multi-table datasource reaching the model
+with no join is the outcome the `_extract_noodle_joins` call site warns about ("a multi-table
+model imports with no join and ThoughtSpot rejects it"), turning "migrated nothing" into
+"emits something that fails import". The 5 files above are mostly single-table or view-backed
+(3 tables against 14 SQL Views), where joins do not arise — so the loud-failure case needs a
+multi-table published datasource to appear. Worth confirming which of the 5, if any, is that
+shape before sizing the fix.
+
+**Approach.** Each `<relationship>` carries `first-end-point`/`second-end-point` `object-id`
+attributes that resolve directly to `<object caption=...>` in the same `<object-graph>`.
+Resolving table identity from those instead of parsing it out of the column text removes the
+suffix requirement entirely. Recursing into `AND` for the comparison list handles the
+composite. `_collect_comparisons` in the same file already does that recursion for the
+physical-join shape.
+
+**Target:** next Tableau parser pass.
+
+---
 
 ## BL-274 — two PRs can ship the same ts-cli version with zero conflicts and every gate green `Tier 2`
 

@@ -54,18 +54,13 @@ def datasource_elements(root: ET.Element) -> list[ET.Element]:
 def datasource_name(ds: ET.Element) -> str:
     """A datasource's display name, across all four accepted file shapes.
 
-    A ``.twb``/``.twbx`` datasource carries ``caption`` (falling back to
-    ``name``). A standalone ``.tds``/``.tdsx`` root carries **neither** — it
-    names itself with ``formatted-name``. Reading only the first two returns
-    ``""`` for every published datasource, and a caller that reads an empty
-    name as "no datasource here" then discards the whole file: the content is
-    extracted correctly and thrown away one step later, with no error and a
-    zero exit code.
-
-    Companion to ``datasource_elements`` — that one finds the datasource on a
-    ``.tds`` root, this one names it. Both traps have to be avoided to read one.
+    A ``.twb`` carries ``caption``/``name``; a standalone ``.tds`` root carries
+    neither and names itself with ``formatted-name``. Blank or whitespace-only
+    falls through rather than winning. Companion to ``datasource_elements``.
     """
-    return ds.get("caption") or ds.get("name") or ds.get("formatted-name") or ""
+    return ((ds.get("caption") or "").strip()
+            or (ds.get("name") or "").strip()
+            or (ds.get("formatted-name") or "").strip())
 
 
 # ---------------------------------------------------------------------------
@@ -219,18 +214,20 @@ def parse_twb(twb_path: str | Path) -> dict:
 
     datasources = []
     seen_ds = set()
-    unnamed = 0
+    # Datasources lost, with a reason, so a zero result is never silent. The
+    # `Parameters` and duplicate-name skips are deliberately not recorded —
+    # neither loses anything, and duplicates outnumber kept datasources ~20:1.
+    skipped: list[dict] = []
 
-    for ds in datasource_elements(root):
+    for idx, ds in enumerate(datasource_elements(root), 1):
         ds_name = datasource_name(ds)
         if ds_name == "Parameters":
             continue
         if not ds_name:
-            # Counted, not silently dropped: this guard is why every published
-            # datasource read as an empty file for as long as it did. A future
-            # Tableau naming attribute would fail here identically, and the
-            # count is what makes that visible instead of a clean zero.
-            unnamed += 1
+            skipped.append({
+                "reason": "no usable name",
+                "detail": f"element #{idx}; looked for caption, name, formatted-name",
+            })
             continue
         if ds_name in seen_ds:
             continue
@@ -238,6 +235,9 @@ def parse_twb(twb_path: str | Path) -> dict:
         tables = _extract_tables(ds)
         sql_views = _extract_sql_views(ds)
         if not tables and not sql_views:
+            # e.g. a .tds whose only relation is the [Extract] hyper cache.
+            skipped.append({"reason": "no tables or SQL views",
+                            "detail": f"element #{idx}; {ds_name}"})
             continue
         seen_ds.add(ds_name)
 
@@ -274,9 +274,9 @@ def parse_twb(twb_path: str | Path) -> dict:
         # GENERATE pass (set->cohort is an agent-guided Phase-2a/2b/2c step) —
         # surfaced here so the caller can nudge instead of silently skipping.
         "sets_detected": count_native_sets(root),
-        # <datasource> elements found but discarded for having no usable name.
-        # Surfaced by format_parse_warnings so a zero result is never silent.
-        "unnamed_datasources": unnamed,
+        # Datasources found but not migrated, each with a reason. Rendered by
+        # format_parse_warnings so a zero result is never silent.
+        "skipped_datasources": skipped,
     }
 
 
@@ -292,7 +292,7 @@ def extract_blends(root: ET.Element) -> dict:
         return {}
 
     fed_to_caption = {
-        ds.get("name"): ds.get("caption", ds.get("name", ""))
+        ds.get("name"): datasource_name(ds)
         for ds in root.findall(".//datasource")
         if ds.get("name")
     }
@@ -436,25 +436,22 @@ def format_parse_warnings(parsed: dict) -> str:
     than in ``commands/tableau.py`` — that module is ratcheted under BL-089 and
     must not grow to carry it. Pure string formatting; the caller does the I/O.
 
-    Two sources today: non-numeric table-calc addressing, and datasources
-    discarded for having no usable name. The second exists because "0
-    datasources" and "0 datasources, and here is one we threw away" are
-    indistinguishable otherwise — which is how every published datasource read
-    as an empty file for months.
+    Two sources today: non-numeric table-calc addressing, and datasources found
+    but not migrated. The second exists because "0 datasources" and "0
+    datasources, and here is one we threw away" are indistinguishable otherwise
+    — which is how every published datasource read as an empty file for months.
 
-    ``table_calc_addressing`` is `.get`-guarded because ``parse_twb`` does not
-    set it — ``parse_cmd`` adds it afterwards, so a caller holding only a
-    ``parse_twb`` result legitimately has no such key. ``unnamed_datasources``
-    comes from ``parse_twb`` itself and is always present.
+    Both keys are `.get`-guarded rather than indexed: ``parse_cmd`` adds
+    ``table_calc_addressing`` after ``parse_twb`` returns, and this function is
+    re-exported for back-compat, so it is also handed results written by an
+    older ts-cli. Staying total means an old input degrades instead of raising.
     """
     addressing = parsed.get("table_calc_addressing") or {}
     out = [f"\nWARNING: {w}" for w in addressing.get("warnings", [])]
-    unnamed = parsed["unnamed_datasources"]
-    if unnamed:
-        out.append(
-            f"\nWARNING: {unnamed} <datasource> element(s) found but skipped — no "
-            f"usable name (looked for caption, name, formatted-name)"
-        )
+    out += [
+        f"\nWARNING: datasource skipped — {s['reason']} ({s['detail']})"
+        for s in parsed.get("skipped_datasources") or []
+    ]
     return "".join(out)
 
 

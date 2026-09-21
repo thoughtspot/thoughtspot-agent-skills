@@ -12,7 +12,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
   `.tds` root carries **neither**, naming itself with `formatted-name`. `parse_twb` read
   only the first two, got `""`, and hit its own empty-name guard — so the datasource was
   discarded *after* every extractor beneath it had already read the content correctly. The
-  three datasource-name lookups now share `datasource_name()`, the companion to the
+  four datasource-name lookups now share `datasource_name()`, the companion to the
   existing `datasource_elements()` (which solves the sibling trap on the same file shape);
   calculated fields also stop being labelled with an empty datasource. This is the
   documented Step 3.5 flow — when a workbook uses a published datasource the skill asks the
@@ -20,8 +20,13 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
   contributing nothing. The `.tds` fixture in the suite carried `formatted-name` **and**
   `caption`, a shape Tableau does not emit, so the tests stayed green throughout. Measured
   across 5 real customer files: 0 → 5 datasources, 17 tables/SQL Views, 184 columns, 113
-  calculated fields. Joins remain 0 of 12 — those are relationship joins, blocked
-  separately in `_extract_noodle_joins` (SCAL-331323)
+  calculated fields. A datasource that is found but not migrated is now reported rather
+  than dropped silently — `skipped_datasources` in the parse output, echoed to stderr with
+  a reason and which element it was; the two ways a datasource is genuinely lost (no usable
+  name, nothing migratable inside) are recorded, while the duplicate-name skip is not,
+  since Tableau writes one `<datasource>` stub per worksheet and duplicates outnumber kept
+  datasources ~20:1. Joins remain 0 of 12 — these files carry relationship joins, and all
+  12 hit one of two shapes `_extract_noodle_joins` drops regardless of operator (BL-275)
 - chore: bump ts-cli to v0.141.0
 - fix: `ts tableau parse` abandoned the **entire** workbook over one addressing token
   (introduced in v0.32.0, 2026-07-04, #180; found at v0.138.0). Tableau writes a

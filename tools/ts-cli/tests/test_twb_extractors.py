@@ -119,20 +119,26 @@ def test_format_parse_warnings_is_empty_when_nothing_degraded():
     """The no-warning path runs on every normal parse — it must add nothing at
     all to the summary line, not a stray newline."""
     from ts_cli.tableau.twb import format_parse_warnings
-    assert format_parse_warnings({"unnamed_datasources": 0}) == ""
+    assert format_parse_warnings({"skipped_datasources": []}) == ""
     assert format_parse_warnings({
-        "unnamed_datasources": 0,
+        "skipped_datasources": [],
         "table_calc_addressing": {"warnings": ["a", "b"]},
     }) == "\nWARNING: a\nWARNING: b"
+    # total for a result written by an older ts-cli, which has neither key
+    assert format_parse_warnings({}) == ""
 
 
 def test_format_parse_warnings_reports_discarded_datasources():
     """A zero result must never be indistinguishable from an empty file — that
     silence is why every published datasource read as empty for months."""
     from ts_cli.tableau.twb import format_parse_warnings
-    msg = format_parse_warnings({"unnamed_datasources": 2})
-    assert "2 <datasource> element(s) found but skipped" in msg
-    assert "formatted-name" in msg          # names what was looked for
+    msg = format_parse_warnings({"skipped_datasources": [
+        {"reason": "no usable name", "detail": "looked for caption, name, formatted-name"},
+        {"reason": "no tables or SQL views", "detail": "World Indicators"},
+    ]})
+    assert msg.count("datasource skipped") == 2
+    assert "formatted-name" in msg              # names what was looked for
+    assert "World Indicators" in msg            # names which datasource
 
 
 def test_tds_root_is_scanned():
