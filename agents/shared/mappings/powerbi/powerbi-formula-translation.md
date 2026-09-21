@@ -1,4 +1,4 @@
-<!-- currency: powerbi — 2026-07 (DAX subset verified on ps-internal 26.x; ThoughtSpot target names re-verified on se-thoughtspot 2026-07-30 per BL-171 — `unique_count` (underscore), `trim`, `upper`, `lower`, `hour`, `minute`, `second` confirmed ABSENT; `MONTH` retargeted to `month_number` because `month` returns the month NAME) -->
+<!-- currency: powerbi — 2026-10 (gated shapes live-probed on ps-internal 2026-10-08) / 2026-07 (DAX subset verified on ps-internal 26.x; ThoughtSpot target names re-verified on se-thoughtspot 2026-07-30 per BL-171 — `unique_count` (underscore), `trim`, `upper`, `lower`, `hour`, `minute`, `second` confirmed ABSENT; `MONTH` retargeted to `month_number` because `month` returns the month NAME) -->
 # Power BI DAX → ThoughtSpot formula translation
 
 The translation map behind `ts powerbi build-model`. Verified against a live cluster, not
@@ -39,9 +39,30 @@ wrong answer.
 | DAX | ThoughtSpot | Reference |
 |---|---|---|
 | `CALCULATE(<agg>, <filter/cond>)` | `sum_if(<cond>, <agg-arg>)` | |
+| `CALCULATE(DISTINCTCOUNT(t[k]), NOT ISBLANK(t[g]))` | `unique_count_if ( [t::g] != null , [t::k] )` | whole-expression match only; any filter the parser cannot read refuses the shape |
+| `VAR a = CALCULATE(DISTINCTCOUNT(t[k]), …) VAR b = CALCULATE(DISTINCTCOUNT(t[k]), …) RETURN a/b` | two `unique_count_if` terms divided; `t[s] IN {…}` expands to ORs | both VARs must count the same key; a `RETURN` doing anything else (`DIVIDE(a,b)`, `1 - a/b`) is refused |
 | `CALCULATE(m, ALL(t[c]))` / `REMOVEFILTERS(t[c])` / `ALLSELECTED(t[c])` | `group_aggregate(m, query_groups()-{[t::c]}, query_filters()-{[t::c]})` | [worked-examples/powerbi/calculate-all-to-group-aggregate.md](../../worked-examples/powerbi/calculate-all-to-group-aggregate.md) |
 | measure / calc-column reference | `[formula_<name>]` id-reference (topo-sorted) | resolves on first import; name-refs do not |
 | `a - b` (two DATE columns) | `diff_days(a, b)` | day grain only; TS `diff_days(end, start)` = end − start, so the order is kept (BL-336) |
+
+### Why the gated shapes are Approximated, never Migrated
+
+`CALCULATE`'s column filter **replaces** any filter already on that column;
+`unique_count_if` **ANDs** its condition with the query filters. Live probe on a model
+built from a real report (ps-internal, 2026-10-08), the emitted form grouped by the very
+column it filters on:
+
+| Stage | emitted `unique_count_if` | Power BI `CALCULATE` would give |
+|---|--:|--:|
+| Early | 0 | 3812 |
+| On Time | 3812 | 3812 |
+| 1 week late | 0 | 3812 |
+| Less than 1 week late | 0 | 3812 |
+
+Row-local here, constant there. The two agree only while the board does not group by that
+column, so the label has to say Approximated. The same probe confirmed `unique_count_if`
+compiles and returns exactly what `unique count ( if … else null )` returns, which is why
+the shorter form is emitted.
 
 ## Rebuilt via a parameter (no 1:1 formula path)
 
