@@ -1667,8 +1667,11 @@ Save `{parked_formulas}` (the remaining parked list) for Steps 12 and 12.5.
 ---
 
 Report validation warnings regardless of pace:
-- If `validation_warnings` is non-empty: surface warnings — these indicate formulas
-  that may have syntax issues but were still attempted
+- If `validation_warnings` is non-empty: surface warnings. Entries are not all about
+  formulas — an entry marked `kind: "join"` reports a join `_extract_joins` skipped
+  (its `name` is the datasource, not a formula), and belongs in the report's Join
+  warnings section. An entry without that marker is a formula that may have syntax
+  issues but was still attempted.
 
 Do **not** manually assemble TML, write Python scripts to add formulas, or call
 `ts tml import` directly for Phase 2. The `build-model --existing-guid` command

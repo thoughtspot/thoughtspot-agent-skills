@@ -60,19 +60,39 @@ Outcome legend: **✅ Model + Liveboard** · **◑ Model only** · **⊘ No acti
 that list are per-formula and carry the same two other keys, and the wording changes.
 Only **equality** joins are migrated. ThoughtSpot itself supports range/inequality joins
 (see `tableau-tml-rules.md` "Range join alternative"), but this converter does not emit one
-from a Tableau join clause: every join it writes carries `cardinality: MANY_TO_ONE`, which a
+from a Tableau join clause: a join it writes carries `cardinality: MANY_TO_ONE` by default, which a
 non-equality relationship cannot satisfy, and BL-240 records `>=` returning materially wrong
-numbers on both legs of an ASOF join. So a clause using any other operator
-(`>=`, `>`, `<`, `<=`, `<>`) is skipped and reported rather than guessed at. A date-range
-*filter formula* is a different path — Step 3.6 offers a range join there.
-A composite key containing one is skipped **whole**, never partially, because a join on part
-of a key fans out and silently double-counts every measure built on it. The relationship is
-**missing** from the generated model — flag it so the user can add an equivalent manually
-(e.g. as a formula-based filter) if it's load-bearing:
+numbers on both legs of an ASOF join. A date-range *filter formula* is a different path —
+Step 3.6 offers a range join there.
 
-| # | Tables | Operator | What to do |
-|---|---|---|---|
-| 1 | {left_table} ↔ {right_table} | `{op}` | Not auto-translated — recreate as a range join (Step 3.6) or a formula/filter if load-bearing, or add the equi-join columns manually |
+Whatever the cause, the relationship is **missing** from the generated model — flag it so
+the user can add an equivalent manually if it's load-bearing. `_extract_joins` emits five
+kinds of warning; classify each by the phrase it carries:
+
+| Warning phrase | Category | Operator |
+|---|---|---|
+| `uses non-equality operator '{op}'` | Non-equality operator | `{op}` |
+| `has an unsupported operand '{op}'` | Unsupported operand — a function call such as `UPPER(…)` or `CONCAT(…)` | `{op}`, the function |
+| `combines conditions with OR` / `combines conditions with XOR` / `combines conditions side by side` | Combined conditions | the connective, or — |
+| `has no recognizable comparison` | No recognizable comparison — an unary operator such as `NOT`, or a shape the parser does not read | — |
+| `join could not be resolved to a table pair` | Unresolved table pair | — |
+
+Then render one row per warning. **Operator and Tables are both optional** — a category with
+no single operator to name leaves Operator as `—`, and the unresolved-table-pair warning
+names no tables at all, so Tables is `—` there too:
+
+| # | Tables | Category | Operator | What to do |
+|---|---|---|---|---|
+| 1 | {left_table} ↔ {right_table} | Non-equality operator | `>=` | Recreate as a range join (Step 3.6), or a formula/filter if load-bearing, or add equi-join columns manually |
+| 2 | {left_table} ↔ {right_table} | Unsupported operand | `UPPER` | The join depends on a computed value — add that column to the model, or join on the underlying columns |
+| 3 | {left_table} ↔ {right_table} | Combined conditions | `OR` | Only AND-combined equalities translate; recreate the intent as a filter |
+| 4 | {left_table} ↔ {right_table} | No recognizable comparison | — | Inspect the clause in Tableau and add the join by hand |
+| 5 | — | Unresolved table pair | — | Identify the two tables in Tableau and add the join by hand |
+
+A composite key is skipped **whole**, never partially — a join on part of a key fans out and
+silently double-counts every measure built on it. The first two categories carry
+`(composite key)` when that happened, so say the whole key was dropped rather than one
+condition.
 
 **Decisions made** — the non-obvious calls (blend → one SQL view, bins = formula vs cohort,
 dynamic vs anchored YoY, orphan worksheets added/left off, separate vs tabbed liveboards…).
