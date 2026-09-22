@@ -110,7 +110,13 @@ def main() -> int:
 
     try:
         if args.staged:
-            rels = [str(p) for p in staged_files(root) if str(p).endswith(".py")]
+            # staged_files() yields absolute paths; make them repo-relative so the
+            # message reads the same whichever mode produced it.
+            rels = [
+                str(p.relative_to(root)) if p.is_absolute() else str(p)
+                for p in staged_files(root)
+                if str(p).endswith(".py")
+            ]
         else:
             rels = [p for p in tracked_relpaths(root) if p.endswith(".py")]
     except Exception as exc:  # git absent, not a repo, index contention
