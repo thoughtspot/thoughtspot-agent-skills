@@ -1300,6 +1300,35 @@ class TestExtractJoinsUsesRelationName:
         assert "NAND" in warnings[0]
         assert "combines conditions" in warnings[0]
 
+    def test_blank_connective_does_not_render_a_gap(self):
+        # A `<expression>` with no `op` is not `=`, so the connective branch used
+        # to interpolate an empty string and emit "combines conditions with  —".
+        # The non-equality branch below it already had this guard; this one did
+        # not, and the text lands verbatim in the customer-facing migration report.
+        ds = self._make_ds('''
+            <relation join="inner" type="join">
+                <relation type="table" name="orders" table="[db].[s].[orders]" />
+                <relation type="table" name="returns" table="[db].[s].[returns]" />
+                <clause type="join">
+                    <expression>
+                        <expression op="=">
+                            <expression op="[orders].[A]" />
+                            <expression op="[returns].[A]" />
+                        </expression>
+                        <expression op="=">
+                            <expression op="[orders].[B]" />
+                            <expression op="[returns].[B]" />
+                        </expression>
+                    </expression>
+                </clause>
+            </relation>
+        ''')
+        joins, warnings = _extract_joins(ds)
+        assert joins == []
+        assert len(warnings) == 1
+        assert "conditions with  " not in warnings[0], warnings[0]
+        assert "(none)" in warnings[0]
+
     def test_join_key_operand_returns_the_leaf_of_any_qualifier_depth(self):
         # The table half is compared against `_relation_name`, which is a leaf,
         # so the qualifier must resolve to one too. A single rsplit left the

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import re
 
-from ts_cli.tableau.parsing import (  # noqa: F401 — re-exported for back-compat
+from ts_cli.tableau.parsing import (  # noqa: F401 — re-exported for in-repo test imports
     _extract_function_args,
     _find_last_top_level_else,
     _find_matching_brace,
@@ -102,7 +102,7 @@ from ts_cli.tableau.cleanup import (  # noqa: F401
     normalize_operator_spacing,
     strip_ifnull_zero,
 )
-from ts_cli.tableau.dag import (  # noqa: F401 — re-exported for back-compat
+from ts_cli.tableau.dag import (  # noqa: F401 — re-exported for in-repo test imports
     build_calc_id_map,
     build_dependency_dag,
     resolve_cross_references,
@@ -117,7 +117,7 @@ from ts_cli.tableau.params import (  # noqa: F401
     strip_parameter_prefix,
     substitute_sql_view_parameters,
 )
-from ts_cli.tableau.naming import (  # noqa: F401 — re-exported for back-compat
+from ts_cli.tableau.naming import (  # noqa: F401 — re-exported for in-repo test imports
     apply_name_clash_renames,
     detect_name_clashes,
 )

@@ -187,9 +187,19 @@ def _show(base: str, path: str, root: Path) -> str | None:
 
 
 def ts_cli_changed_against(base: str, root: Path) -> bool:
-    """Does this branch change shipped ts-cli code relative to ``base``?"""
-    out = _git(["diff", "--name-only", f"{base}...HEAD", "--", _TS_CLI_PACKAGE], root)
-    return bool(out and out.strip())
+    """Does this branch change shipped ts-cli code relative to ``base``?
+
+    Counts uncommitted work as well as committed. Run locally before the first
+    commit, ``HEAD`` can still equal ``base`` while the package is already
+    edited, and answering "novelty n/a" there is the same false confidence this
+    check exists to prevent — found by running this gate against its own PR. CI
+    checks out a clean tree, so the second probe only ever adds local accuracy.
+    """
+    committed = _git(["diff", "--name-only", f"{base}...HEAD", "--", _TS_CLI_PACKAGE], root)
+    if committed and committed.strip():
+        return True
+    dirty = _git(["status", "--porcelain", "--", _TS_CLI_PACKAGE], root)
+    return bool(dirty and dirty.strip())
 
 
 def main() -> int:

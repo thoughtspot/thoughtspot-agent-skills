@@ -1,7 +1,9 @@
 """Tableau TWB → ThoughtSpot Model TML builder.
 
 Pure functions: parsed TWB data in, import-ready model TML out. No I/O — TWB/TWBX
-XML parsing lives in ts_cli/tableau/twb.py (re-exported here for back-compat).
+XML parsing lives in ts_cli/tableau/twb.py (re-exported here so in-repo test
+imports keep working; this package is not published, so there is no external
+contract behind these names).
 
 This module fills the gap between the formula translator (tableau_translate.py)
 and the TML importer. The translator handles per-formula syntax; this module
@@ -24,7 +26,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ts_cli.tableau.dag import (  # noqa: F401 — re-exported for back-compat
+from ts_cli.tableau.dag import (  # noqa: F401 — re-exported for in-repo test imports
     build_formula_levels,
     resolve_all_internal_refs,
 )
@@ -34,7 +36,7 @@ from ts_cli.formula_common import (  # noqa: F401 — moved (BL-063 PR 5)
     fix_double_aggregation,
     resolve_name_collisions,
 )
-from ts_cli.tableau.twb import (  # noqa: F401 — re-exported for back-compat
+from ts_cli.tableau.twb import (  # noqa: F401 — re-exported for in-repo test imports
     _extract_joins,
     _extract_tables,
     _normalize_date_params,

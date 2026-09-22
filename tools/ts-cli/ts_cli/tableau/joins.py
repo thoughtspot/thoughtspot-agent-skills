@@ -138,6 +138,20 @@ def _join_sides(rel: ET.Element, clauses: list[ET.Element]) -> tuple[str, str]:
     return _relation_name(children[0]), _relation_name(children[1])
 
 
+def _connective_label(raw_op: str) -> str:
+    """How two conditions are combined, for the skip message.
+
+    `(none)` rather than an empty interpolation, matching the non-equality
+    branch in ``_clause_join_keys`` — a blank `op` is not `=`, so without this
+    the customer-facing report reads "combines conditions with  —". Extracted
+    rather than inlined to keep ``_clause_join_keys`` under the BL-089
+    complexity cap.
+    """
+    if raw_op == _SUPPORTED_JOIN_OPERATOR:
+        return "side by side"
+    return f"with {raw_op.upper() if raw_op else '(none)'}"
+
+
 def _clause_join_keys(
     clause: ET.Element, left_table: str, right_table: str, warnings: list[str]
 ) -> list[dict] | None:
@@ -162,8 +176,7 @@ def _clause_join_keys(
         # Ahead of the operand check, which would otherwise report the `=` inside
         # a combined condition and blame a function call that isn't there.
         if _is_condition(left_expr) or _is_condition(right_expr):
-            how = (f"with {raw_op.upper()}" if raw_op != _SUPPORTED_JOIN_OPERATOR
-                   else "side by side")
+            how = _connective_label(raw_op)
             warnings.append(
                 f"join clause between {left_table!r} and {right_table!r} combines "
                 f"conditions {how} — a ThoughtSpot join is a conjunction of key "

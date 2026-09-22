@@ -165,6 +165,7 @@ are roughly ordered by value÷effort.
 | ~~BL-274~~ | ~~two PRs can ship the same ts-cli version with zero merge conflicts and every gate green — demonstrated on #511 vs #512~~ | DONE (2026-09-22) |
 | BL-279 | the same collision on backlog ids: `check_backlog_integrity` enforces uniqueness within a tree, not novelty against `main` — demonstrated on #484 vs #516 | next validator pass |
 | BL-280 | a clause-derived table name is never checked against the relation's own children, so a qualifier one level above the table resolves to a name no relation carries and the join is dropped with no warning | with BL-277 |
+| BL-281 | a `<relation join=...>` carrying no `<clause>` is dropped with no warning — the last `_extract_joins` exit with no diagnostic, in the function whose contract is to report what it skips | next Tableau join-parser pass |
 
 ### Tier 3 — Opportunistic
 
@@ -11197,6 +11198,12 @@ joins[].with)` guard) -- whose remedy (rename/alias a role-played dimension) mis
 cached mirror as a real duplicate relationship. Deferred to a follow-up change rather than
 fixed here; still OPEN, fix design unchanged.
 
+**Audit finding (2026-09-22, SCAL-330635).** Independently reproduced on more than one
+workbook during a real-workbook audit, so the duplication is not specific to the datasource
+this item was filed from. One authored join was observed emitted three times. That also makes
+the duplicate count a confounder for any join-loss measurement taken from parse output, since
+the mirrors inflate the denominator.
+
 ---
 
 ## BL-280 — a clause-derived table name is never checked against the relation it belongs to `Tier 2`
@@ -11246,10 +11253,41 @@ correctly resolved or reported, never silently emitted with a name no relation c
 The existing `_join_sides` tests pin the qualifier-over-child-order convention and must
 continue to pass unchanged.
 
-**Audit finding (2026-09-22, SCAL-330635).** Independently reproduced on more than one
-workbook during a real-workbook audit, so the duplication is not specific to the datasource
-this item was filed from. One authored join was observed emitted three times. That also makes
-the duplicate count a confounder for any join-loss measurement taken from parse output, since
-the mirrors inflate the denominator.
-
 **Target:** next Tableau join-parser pass, with BL-277.
+
+---
+
+## BL-281 — a join relation with no `<clause>` is dropped silently, the last `_extract_joins` exit with no diagnostic `Tier 3`
+
+**Filed:** 2026-09-22.
+**Source:** review of PR #484, which built the join-warning channel and closed every other
+silent drop in this function. Found by enumerating the `return None` / falsy-`join_keys`
+exits and checking each against the warnings list.
+**Affects:** `tools/ts-cli/ts_cli/tableau/joins.py` (`_extract_joins`, `_join_sides`).
+
+A `<relation join="inner" type="join">` with two `<relation type="table">` children and **no
+`<clause>` at all** produces `joins: []` and `warnings: []` — no stderr line, nothing in the
+migration report, exit 0. Reproduced through the real CLI at `ed2911e`.
+
+**Why the existing guards miss it.** `_join_sides` resolves the table pair from child order,
+so the unresolved-pair guard cannot fire — it has a perfectly good pair. `clauses` is empty,
+so the loop body never runs, `join_keys` stays `[]`, and the falsy check drops the relation
+without reaching any `warnings.append`. Every other exit in this function was given a message
+by #484; this is the one left, which is why it is worth closing rather than tolerating.
+
+**Why it is not merely cosmetic.** The `join=` attribute is itself proof that a join was
+authored — Tableau does not write it otherwise. So the zero-clause case is precisely the
+shape that should warn. Tableau writes it for a cross join, and it is also what a clause
+shape this parser fails to recognise degrades into if `./clause` (rather than `.//clause`,
+which #484 deliberately narrowed) misses a nested placement. A parser change elsewhere can
+therefore convert a loud failure into this silent one.
+
+**Approach.** Warn when `rel.get("join")` is set and `clauses` is empty, naming the resolved
+pair — the table names are already in hand from `_join_sides`. Distinguish the cross-join
+reading from the unrecognised-shape reading in the text if that is cheap; if not, one message
+naming both possibilities beats the current silence. Reuse the `join_warnings` channel #484
+built, so it reaches the migration report's Join-warnings section with `kind: "join"` for
+free.
+
+**Target:** next Tableau join-parser pass, with BL-277 and BL-280.
+

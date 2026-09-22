@@ -134,3 +134,34 @@ def test_missing_base_is_an_error_not_a_skip():
         base_pyproject=None, base_changelog=None,
     )
     assert v, "unreadable base must be reported, never silently skipped"
+
+
+# --- the gate's own blind spot, found by running it against its own PR --------
+
+def _git(repo, *args):
+    import subprocess
+    subprocess.run(["git", "-C", str(repo), *args], check=True,
+                   capture_output=True, text=True)
+
+
+def test_uncommitted_package_edits_count_as_a_change(tmp_path):
+    # Run locally before the first commit, HEAD still equals the base while the
+    # package is already edited. Answering "no ts-cli change" there reports
+    # "novelty n/a" for a branch that is about to release — the same false
+    # confidence the two PASS messages were split up to avoid.
+    repo = tmp_path / "r"
+    pkg = repo / "tools" / "ts-cli" / "ts_cli"
+    pkg.mkdir(parents=True)
+    (pkg / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    _git(repo.parent, "init", "-q", str(repo))
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "branch", "base-ref")
+
+    assert cvs.ts_cli_changed_against("base-ref", repo) is False
+
+    (pkg / "mod.py").write_text("x = 2\n", encoding="utf-8")
+    assert cvs.ts_cli_changed_against("base-ref", repo) is True, \
+        "an uncommitted edit under the package must count as a change"
