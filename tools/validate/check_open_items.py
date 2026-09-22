@@ -20,11 +20,29 @@ import sys
 from pathlib import Path
 
 from _dirs import ALL_RUNTIMES
+from _novelty import (
+    BaseUnavailable,
+    merge_base_with_head,
+    novel_id_collisions,
+    read_at,
+    resolve_base,
+)
+# The index generator's header pattern, reused rather than re-derived so the two
+# cannot drift again. They already had: this module's `_ITEM_HEADER` was `##`-only
+# while the generator accepted `##` and `###`, so the index listed 20 ts-audit
+# items the checker could not see. Both accept both depths now.
+from generate_open_items_index import _HEADER_RE as _INDEX_HEADER_RE
 
 # Patterns that indicate an unresolved item
 # Item headers come in two styles across the repo: `## Item 4 — …` and `## #4 — …`.
 # The original regex only matched `## Item N`, so it silently ignored 6 of 7 files.
-_ITEM_HEADER = re.compile(r'^##\s+(#?\s*(?:Item\s+)?\d+[^\n]*)', re.MULTILINE)
+# `#{2,3}`, not `##`: `ts-audit/references/open-items.md` uses `###` for all 20 of
+# its items and `ts-object-model-aggregates` uses it for 3, so an `##`-only pattern
+# saw ZERO items in the first file and missed 3 in the second — including 10
+# UNVERIFIED ones the gate exists to surface. Matches the index generator's
+# `_HEADER_RE`, which has always accepted both depths; the two disagreeing is why
+# the index listed items the checker could not see.
+_ITEM_HEADER = re.compile(r'^#{2,3}\s+(#?\s*(?:Item\s+)?\d+[^\n]*)', re.MULTILINE)
 _PLACEHOLDER = re.compile(r'\[Record result here\]')
 
 # Status markers meaning "not verified before ship". Matched as whole tokens anywhere in
@@ -113,6 +131,43 @@ def _changed_files(base: str, repo_root: Path) -> set[str]:
     return {line.strip() for line in result.stdout.split("\0") if line.strip()}
 
 
+
+def _item_numbers(text: str) -> set[str]:
+    """Every `## #N` / `### #N` item number in one open-items.md."""
+    return {m.group(2) for m in _INDEX_HEADER_RE.finditer(text)}
+
+
+def item_novelty_violations(root: Path, base: str, files: list[Path]) -> list[str]:
+    """Item numbers this branch INTRODUCES that are already used on the base.
+
+    Per file: `#N` is scoped to its own open-items.md, so two skills both having
+    a `#3` is normal and must not fire.
+
+    This is the one rule that matters here, because a within-file duplicate cannot
+    be made strict: `ts-audit/references/open-items.md` deliberately carries a
+    VERIFIED block above an UNVERIFIED one, with #1-#4 and #8 in both — the same
+    item re-verified later, which is exactly what `parse_open_items`' "most
+    resolved wins" dedup exists for. Those pairs are present at the merge base on
+    both sides, so they are inherited, and the three-point rule ignores them.
+
+    What it does catch: two branches each appending a DIFFERENT `## #24`. Merged,
+    the dedup silently keeps one and the index never mentions the other — an open
+    item vanishing from the cross-skill triage view.
+    """
+    resolve_base(root, base)
+    merge_base = merge_base_with_head(root, base)
+
+    out: list[str] = []
+    for path in files:
+        rel = str(path.relative_to(root))
+        head = _item_numbers(path.read_text(encoding="utf-8"))
+        at_mb = _item_numbers(read_at(root, merge_base, rel))
+        at_base = _item_numbers(read_at(root, base, rel))
+        for num in novel_id_collisions(head, at_mb, at_base):
+            out.append(f"{rel}: #{num}")
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Flag unresolved items in references/open-items.md files."
@@ -147,6 +202,25 @@ def main() -> int:
     if not open_items_files:
         print("No open-items.md files found.")
         return 0
+
+    # Novelty is independent of --warn: a collision is not a pre-existing
+    # unresolved item to be tolerated, it is two branches claiming one number.
+    if args.base:
+        try:
+            collisions = item_novelty_violations(repo_root, args.base, open_items_files)
+        except BaseUnavailable as exc:
+            print(f"FAIL  open-items novelty: {exc}")
+            return 1
+        if collisions:
+            print(f"FAIL  item number introduced here but already used on {args.base}:")
+            for hit in collisions:
+                print(f"        {hit}")
+            print()
+            print("Both branches appended the next free number. Nothing conflicts in")
+            print("git, and `parse_open_items` dedups by number — 'most resolved wins' —")
+            print("so the merged index silently keeps one item and drops the other.")
+            print("Renumber the incoming one, in the file and in every citation.")
+            return 1
 
     total_fail = 0
     total_warn = 0

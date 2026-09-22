@@ -166,6 +166,7 @@ are roughly ordered by value÷effort.
 | ~~BL-279~~ | ~~the same collision on backlog ids: `check_backlog_integrity` enforces uniqueness within a tree, not novelty against `main` — demonstrated on #484 vs #516~~ | DONE (2026-09-22) |
 | BL-280 | a clause-derived table name is never checked against the relation's own children, so a qualifier one level above the table resolves to a name no relation carries and the join is dropped with no warning | with BL-277 |
 | BL-281 | a `<relation join=...>` carrying no `<clause>` is dropped with no warning — the last `_extract_joins` exit with no diagnostic, in the function whose contract is to report what it skips | next Tableau join-parser pass |
+| BL-282 | two DIFFERENT open items can share a `#N` inside one file with no gate — the novelty rule catches the cross-branch case, the within-file case is blocked by ts-audit's untagged verified/unverified double entries | next validator pass |
 
 ### Tier 3 — Opportunistic
 
@@ -11317,4 +11318,39 @@ built, so it reaches the migration report's Join-warnings section with `kind: "j
 free.
 
 **Target:** next Tableau join-parser pass, with BL-277 and BL-280.
+
+---
+
+## BL-282 — two different open items can share a `#N` within one file, and nothing says so `Tier 3`
+
+**Filed:** 2026-09-22.
+**Source:** building the `#N` novelty rule (the BL-274/BL-279 sweep). The cross-branch half
+shipped; this is the half that could not.
+**Affects:** `tools/validate/generate_open_items_index.py` (`parse_open_items`),
+`agents/cli/ts-audit/references/open-items.md`.
+
+`parse_open_items` keys items by number into `by_num` and resolves a clash with
+`_more_resolved` — "most resolved wins". So two genuinely different items sharing `#24` in one
+file produce **one** index row, silently, and the loser never appears in the cross-skill
+triage view. Headers tagged `(historical…)` are skipped earlier and are not the issue.
+
+**Why a strict within-file rule cannot ship yet.** `ts-audit/references/open-items.md`
+deliberately carries a VERIFIED block above an UNVERIFIED one, with `#1`–`#4` and `#8` in
+both — the same item, re-verified later, which is precisely what the dedup exists for. None of
+those five carry the `(historical…)` tag, so there is no discriminator between "same item,
+superseded" and "two different items collided". Failing on duplicates today would fail on five
+correct entries.
+
+**Approach.** Give the superseded copies a marker the parser already understands — either the
+existing `(historical…)` tag or an explicit `— SUPERSEDED BY` suffix — then fail on any
+remaining duplicate number within a file. The cleanup is five headers in one file; the rule is
+then a `Counter` over non-exempt headers, no git needed, so it runs on every commit rather than
+only against a base.
+
+**Already covered, do not re-derive:** the cross-branch case (two branches each appending a
+different `#24`) is caught by `check_open_items.py --base`, which fires because the number is
+absent at the merge base. The ts-audit pairs are present on both sides and are correctly
+treated as inherited.
+
+**Target:** next validator pass, with the remaining sweep items.
 
