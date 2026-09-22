@@ -167,6 +167,7 @@ are roughly ordered by value÷effort.
 | BL-280 | a clause-derived table name is never checked against the relation's own children, so a qualifier one level above the table resolves to a name no relation carries and the join is dropped with no warning | with BL-277 |
 | BL-281 | a `<relation join=...>` carrying no `<clause>` is dropped with no warning — the last `_extract_joins` exit with no diagnostic, in the function whose contract is to report what it skips | next Tableau join-parser pass |
 | BL-282 | two DIFFERENT open items can share a `#N` inside one file with no gate — the novelty rule catches the cross-branch case, the within-file case is blocked by ts-audit's untagged verified/unverified double entries | next validator pass |
+| BL-283 | `check-catalog.md` and the audit `check_id`s can drift with nothing to notice — 51 documented vs 50 emitted today, and the deferred-id table means a naive comparison is wrong | next validator pass |
 
 ### Tier 3 — Opportunistic
 
@@ -11353,4 +11354,43 @@ absent at the merge base. The ts-audit pairs are present on both sides and are c
 treated as inherited.
 
 **Target:** next validator pass, with the remaining sweep items.
+
+---
+
+## BL-283 — the ts-audit check catalog and the code it documents can drift unnoticed `Tier 3`
+
+**Filed:** 2026-09-22.
+**Source:** the BL-274/BL-279 collision sweep. The sweep listed audit `check_id`s as a
+collision candidate; investigating it found the collision half already covered and a
+different, live gap underneath.
+
+**Affects:** `agents/cli/ts-audit/references/check-catalog.md`,
+`tools/ts-cli/ts_cli/audit/checks_*.py`.
+
+**The collision half is already closed, and this is not it.** Two branches each adding
+`def check_a6(...)` is caught by `check_python_redefinitions.py` (shipped 2026-09-22):
+reintroducing a duplicate `def check_a1` makes it fail. So no novelty rule is needed for the
+function names.
+
+**What is actually open** is ordinary doc/code drift with no gate: the catalog documents
+**51** ids while the code emits **50** distinct ones. Nothing compares them. A check deleted
+from the code leaves a documented check that never runs; a check added without a catalog row
+is invisible to the skill that reads the catalog.
+
+**Why a naive comparison is wrong.** The one current discrepancy, `H6`, is *correct*: it sits
+in the catalog's "Deferred / Not assigned" table (`| H6 | Duplicate sets — deferred (requires
+deep set comparison) |`) and has a stub `def check_h6` at `checks_human.py:171` that emits
+nothing. Sibling rows there hold comma-separated ids (`P10, P12`; `S6, S7`) which a
+single-id regex silently skips, so the exemption is accidental rather than expressed. Any
+rule must read the main catalog table and the deferred table as different things.
+
+**Also note** `check_id` legitimately repeats within one function — `check_h10` emits `H10`
+three times, once per finding — so the rule is set equality between catalog and code, never
+"each id emitted once".
+
+**Approach.** Parse the main catalog table's ids and the `check_id="..."` literals, compare as
+sets, and exempt the deferred table explicitly rather than by regex accident. No git needed,
+so it runs on every commit.
+
+**Target:** next validator pass.
 

@@ -31,9 +31,18 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import sys
 from pathlib import Path
+
+from _novelty import (
+    BaseUnavailable,
+    merge_base_with_head,
+    novel_id_collisions,
+    read_at,
+    resolve_base,
+)
 
 # The one file allowed to enumerate the rule set.
 CANONICAL = Path("tools/ts-cli/ts_cli/tml_lint.py")
@@ -108,9 +117,68 @@ def declared_rules(canonical: Path) -> tuple[int, set[str]] | None:
     return None
 
 
+
+def emissions_by_function(src: str) -> dict[str, set[str]]:
+    """Rule id -> the set of top-level functions that emit it.
+
+    `emitted_rules` returns a SET, so two functions emitting `I16` collapse into
+    one member and the correctness check above still passes while two unrelated
+    defects share an id — `ts tml lint` then reports `I16:` for both, and a user
+    hitting the undocumented one is sent to the wrong invariant. That is the
+    merge shape: two branches each add a rule, wire it into a different block,
+    and both change the CANONICAL-RULE-SET marker from `.../I15` to `.../I15/I16`
+    — an IDENTICAL edit, so git merges it silently.
+
+    Attribution is per top-level function rather than per emission: one rule
+    legitimately emits its own id from several branches of its own logic.
+    """
+    out: dict[str, set[str]] = {}
+    for node in ast.parse(src).body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for sub in ast.walk(node):
+            texts: list[str] = []
+            if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                texts.append(sub.value)
+            elif isinstance(sub, ast.JoinedStr):
+                texts += [v.value for v in sub.values
+                          if isinstance(v, ast.Constant) and isinstance(v.value, str)]
+            for text in texts:
+                for n in re.findall(r"\bI(\d+):", text):
+                    out.setdefault(f"I{n}", set()).add(node.name)
+    return out
+
+
+def duplicate_emitters(src: str) -> list[tuple[str, list[str]]]:
+    """Ids emitted by more than one function — one id, two different defects."""
+    return sorted(
+        (rule, sorted(fns)) for rule, fns in emissions_by_function(src).items()
+        if len(fns) > 1
+    )
+
+
+def rule_novelty_violations(root: Path, base: str, canonical_rel: str) -> list[str]:
+    """Rule ids this branch INTRODUCES that already exist on the base."""
+    resolve_base(root, base)
+    merge_base = merge_base_with_head(root, base)
+
+    def ids_at(rev: str) -> set[str]:
+        text = read_at(root, rev, canonical_rel)
+        return {f"I{n}" for n in EMITTED_RE.findall(text)} if text else set()
+
+    head = {f"I{n}" for n in EMITTED_RE.findall(
+        (root / canonical_rel).read_text(encoding="utf-8"))}
+    return novel_id_collisions(head, ids_at(merge_base), ids_at(base))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
+    ap.add_argument(
+        "--base", default=None,
+        help="Also require every rule id this branch introduces to be unused on "
+             "this revision (e.g. --base origin/main). Needs git; CI passes it.",
+    )
     args = ap.parse_args()
     root = Path(args.root).resolve()
 
@@ -120,6 +188,29 @@ def main() -> int:
         return 1
 
     problems: list[str] = []
+
+    # 1a. one id, one rule. `emitted_rules` is a set, so a collision is invisible
+    # to the correctness check below: both ids collapse to one member and the
+    # enumeration still matches.
+    src = canonical.read_text(encoding="utf-8")
+    for rule, fns in duplicate_emitters(src):
+        problems.append(
+            f"{CANONICAL}: {rule} is emitted by {len(fns)} different functions "
+            f"({', '.join(fns)}) — `ts tml lint` reports one id for two unrelated "
+            f"defects, and the docs can only describe one of them")
+
+    # 1b. novelty: the same collision one branch earlier.
+    if args.base:
+        try:
+            for rule in rule_novelty_violations(root, args.base, str(CANONICAL)):
+                problems.append(
+                    f"{CANONICAL}: {rule} is introduced here but already exists on "
+                    f"{args.base} — both branches took the next free number, and the "
+                    f"CANONICAL-RULE-SET edit is identical on each so git merges it "
+                    f"silently")
+        except BaseUnavailable as exc:
+            print(f"FAIL  lint invariant novelty: {exc}")
+            return 1
 
     # 1. correctness
     emitted = emitted_rules(canonical)

@@ -31,6 +31,14 @@ import re
 import sys
 from pathlib import Path
 
+from _novelty import (
+    BaseUnavailable,
+    merge_base_with_head,
+    novel_id_collisions,
+    read_at,
+    resolve_base,
+)
+
 
 # Skills that need a coverage matrix but don't have one yet. Each justification
 # MUST carry a target date (YYYY-MM-DD) or a PR/backlog reference (#NNN / BL-NNN)
@@ -85,6 +93,55 @@ def find_convert_skills(root: Path) -> list[tuple[str, Path]]:
     return found
 
 
+# Every table in these matrices leads with an `| # |` column, and the ids are
+# stable rather than positional — 131 sits between 2 and 3 in the tableau matrix.
+# Two families share the namespace: bare numbers for constructs, `L<N>`/`U<N>`
+# for limitations and unmapped constructs. They are distinct strings, so one set
+# per file is correct.
+_ID_ROW_RE = re.compile(r"^\|\s*([A-Z]{0,2}\d+)\s*\|", re.MULTILINE)
+
+
+def matrix_ids(content: str) -> list[str]:
+    """Every leading-column id in a coverage matrix, in document order."""
+    return _ID_ROW_RE.findall(content)
+
+
+def duplicate_matrix_ids(content: str) -> list[str]:
+    """Ids appearing on more than one row of one matrix, sorted.
+
+    Needs no git, so it runs on every commit — and it is what catches the MERGED
+    state of two branches that each appended the same next-free id. There are
+    zero duplicates across all nine matrices today, so this can be strict from
+    the start (unlike open-items, where five legitimate same-number pairs block
+    the equivalent rule — see BL-282).
+    """
+    seen: set[str] = set()
+    dupes: set[str] = set()
+    for i in matrix_ids(content):
+        (dupes if i in seen else seen).add(i)
+    return sorted(dupes)
+
+
+def matrix_novelty_violations(root: Path, base: str, matrices: list[Path]) -> list[str]:
+    """Ids this branch INTRODUCES that are already used on the base, per matrix.
+
+    Ids are scoped per matrix: every skill numbers its own constructs from 1, so
+    a repo-wide set would collide on nearly every id.
+    """
+    resolve_base(root, base)
+    merge_base = merge_base_with_head(root, base)
+
+    out: list[str] = []
+    for path in matrices:
+        rel = str(path.relative_to(root))
+        head = set(matrix_ids(path.read_text(encoding="utf-8")))
+        at_mb = set(matrix_ids(read_at(root, merge_base, rel)))
+        at_base = set(matrix_ids(read_at(root, base, rel)))
+        for bad in novel_id_collisions(head, at_mb, at_base):
+            out.append(f"{rel}: {bad}")
+    return out
+
+
 def validate_matrix(matrix_path: Path) -> list[str]:
     """Check the coverage matrix has the required sections and format. Return errors."""
     errors: list[str] = []
@@ -92,6 +149,13 @@ def validate_matrix(matrix_path: Path) -> list[str]:
         content = matrix_path.read_text(encoding="utf-8")
     except OSError as e:
         return [f"Cannot read {matrix_path}: {e}"]
+
+    for dup in duplicate_matrix_ids(content):
+        errors.append(
+            f"id `{dup}` appears on more than one row — two branches likely each "
+            f"took the same next-free number; nothing conflicts in git because the "
+            f"rows land in different tables"
+        )
 
     if not re.search(r"##\s+Mapped\s+Constructs", content):
         errors.append("Missing '## Mapped Constructs' section")
@@ -151,6 +215,11 @@ def main() -> int:
     parser.add_argument(
         "--verbose", action="store_true", help="Print passing skills too"
     )
+    parser.add_argument(
+        "--base", default=None,
+        help="Also require every matrix id this branch introduces to be unused on "
+             "this revision (e.g. --base origin/main). Needs git; CI passes it.",
+    )
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
@@ -165,6 +234,22 @@ def main() -> int:
     # be traceable (dated or referenced), or the whole validator fails.
     for msg in _bad_backlog_justifications():
         failures.append(("(BACKLOG)", msg))
+
+    if args.base:
+        present = [
+            skill_dir / "references" / "coverage-matrix.md"
+            for name, skill_dir in skills
+            if name not in BACKLOG
+            and (skill_dir / "references" / "coverage-matrix.md").exists()
+        ]
+        try:
+            collisions = matrix_novelty_violations(root, args.base, present)
+        except BaseUnavailable as exc:
+            print(f"FAIL  coverage-matrix id novelty: {exc}")
+            return 1
+        for hit in collisions:
+            failures.append(("(NOVELTY)", f"id introduced here but already used on "
+                                          f"{args.base} — {hit}"))
 
     for name, skill_dir in skills:
         matrix_path = skill_dir / "references" / "coverage-matrix.md"

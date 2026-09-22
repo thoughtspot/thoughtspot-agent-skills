@@ -75,13 +75,13 @@ jobs:
           # Filesystem-state gates that previously ran ONLY in pre-commit (bypassable
           # via --no-verify with no server-side catch). They derive purely from repo
           # contents, so they work in a clean CI checkout.
-          python3 tools/validate/check_coverage_matrix.py --root . || rc=1
+          python3 tools/validate/check_coverage_matrix.py --root . --base origin/main || rc=1
           python3 tools/validate/check_formula_catalog.py --root . || rc=1
           python3 tools/validate/check_converter_parity.py --root . || rc=1
           python3 tools/validate/check_mapping_code_sync.py --root . || rc=1
           python3 tools/validate/check_harness_routing.py --root . || rc=1
           python3 tools/validate/check_no_v1_endpoints.py --root . || rc=1
-          python3 tools/validate/check_lint_invariant_list.py --root . || rc=1
+          python3 tools/validate/check_lint_invariant_list.py --root . --base origin/main || rc=1
           python3 tools/validate/check_no_inline_tml_gate.py --root . || rc=1
           python3 tools/validate/check_skill_cli_usage.py --root . || rc=1
           # 2026-07-03 audit-harvest validators (see .claude/rules/repo-audit.md).
