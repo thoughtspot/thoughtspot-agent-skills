@@ -60,6 +60,7 @@ jobs:
           python3 tools/validate/check_patterns.py --root . || rc=1
           python3 tools/validate/check_version_sync.py --root . --base origin/main || rc=1
           python3 tools/validate/check_module_health.py --root . || rc=1
+          python3 tools/validate/check_python_redefinitions.py --root . || rc=1
           python3 tools/validate/check_file_size.py --root . || rc=1
           python3 tools/validate/check_yaml.py --root . || rc=1
           python3 tools/validate/check_sv_yaml.py --root . || rc=1

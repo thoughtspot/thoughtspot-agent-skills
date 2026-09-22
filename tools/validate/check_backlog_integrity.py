@@ -62,6 +62,14 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from _novelty import (
+    BaseUnavailable,
+    merge_base_with_head,
+    novel_id_collisions,
+    read_at,
+    resolve_base,
+)
+
 BACKLOG_REL = "docs/backlog.md"
 ARCHIVE_REL = "docs/backlog-archive.md"
 
@@ -153,60 +161,22 @@ def cross_file_duplicates(root: Path) -> list[str]:
     return sorted(live & archived)
 
 
-def _read_at(rev: str, rel: str, root: Path) -> str:
-    """File contents at a revision, or "" when the path does not exist there.
-
-    A missing path is legitimate (the archive is optional, and both files
-    postdate parts of history); a missing *revision* is not, and is raised by
-    the caller before this runs.
-    """
-    result = subprocess.run(
-        ["git", "-C", str(root), "show", f"{rev}:{rel}"],
-        capture_output=True, text=True, check=False,
-    )
-    return result.stdout if result.returncode == 0 else ""
-
-
-def novel_id_collisions(
-    head_ids: set[str], merge_base_ids: set[str], base_ids: set[str]
-) -> list[str]:
-    """Rule 4 — ids this branch INTRODUCES that are already taken on the base.
-
-    Three points, not two. An id present on both the branch and the base is
-    normally just an item the branch inherited; it is a collision only when the
-    branch introduced it, which is what absence at the merge base establishes.
-    A two-point comparison would flag every inherited item and be turned off
-    within a day.
-
-    The converse is equally deliberate: ids the base gained that the branch has
-    never seen are ordinary drift, not a finding.
-    """
-    return sorted((head_ids - merge_base_ids) & base_ids)
-
-
 def id_novelty_violations(root: Path, base: str) -> list[str]:
-    """Rule 4 wiring. Raises GitUnavailable if the base cannot be resolved."""
-    probe = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"],
-        capture_output=True, text=True, check=False,
-    )
-    if probe.returncode != 0:
-        raise GitUnavailable(
-            f"base revision {base!r} could not be resolved. This rule needs the "
-            f"base ref (CI checks out with fetch-depth: 0). Omit --base for "
-            f"pre-commit or a non-git export."
-        )
-    mb = subprocess.run(
-        ["git", "-C", str(root), "merge-base", base, "HEAD"],
-        capture_output=True, text=True, check=False,
-    )
-    if mb.returncode != 0 or not mb.stdout.strip():
-        raise GitUnavailable(f"no merge base between {base!r} and HEAD")
-    merge_base = mb.stdout.strip()
+    """Rule 4 wiring. Raises GitUnavailable if the base cannot be resolved.
+
+    The rule itself lives in `_novelty.novel_id_collisions` — two validators grew
+    it independently within four days and the second copy shipped a bug the first
+    had already fixed, so it is centralised (same reasoning as `_git.py`).
+    """
+    try:
+        resolve_base(root, base)
+        merge_base = merge_base_with_head(root, base)
+    except BaseUnavailable as exc:
+        raise GitUnavailable(str(exc)) from exc
 
     def ids_at(rev: str) -> set[str]:
-        return set(section_headings(_read_at(rev, BACKLOG_REL, root))) | set(
-            section_headings(_read_at(rev, ARCHIVE_REL, root))
+        return set(section_headings(read_at(root, rev, BACKLOG_REL))) | set(
+            section_headings(read_at(root, rev, ARCHIVE_REL))
         )
 
     head_ids = set(section_headings(_read(root, BACKLOG_REL))) | set(

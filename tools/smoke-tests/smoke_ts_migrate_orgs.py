@@ -124,7 +124,6 @@ def test_the_skill_says_an_UNREADABLE_isolation_check_also_refuses():
 
 def test_the_engine_actually_makes_the_refusal_the_skill_promises():
     """Skill/engine drift is the hazard: an operator follows the skill."""
-    from ts_cli.migrate.apply_plan import unfiltered_target_problem
     assert unfiltered_target_problem({"SALES": 0}, "Sales")          # unfiltered -> refuse
     assert unfiltered_target_problem({}, "Sales")                    # unreadable -> refuse
     assert unfiltered_target_problem({"SALES": 1}, "Sales") is None  # filtered  -> pass

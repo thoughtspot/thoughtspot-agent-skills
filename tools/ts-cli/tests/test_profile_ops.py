@@ -216,8 +216,6 @@ class TestRemoveZshenvLine:
 # Profile JSON CRUD
 # ---------------------------------------------------------------------------
 
-from ts_cli import profile_ops
-
 
 @pytest.fixture
 def profile_dir(tmp_path, monkeypatch):

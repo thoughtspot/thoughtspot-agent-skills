@@ -15,7 +15,6 @@ from ts_cli.sv_naming import (  # noqa: F401  (re-exported for callers/tests)
     build_node_id_map,
     construct_formula_id,
     display_title,
-    display_title,
     fact_column_type,
 )
 from typing import Any, Callable

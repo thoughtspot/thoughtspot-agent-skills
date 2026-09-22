@@ -42,6 +42,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _novelty import BaseUnavailable, read_at, resolve_base
+
 try:
     import tomllib  # Python 3.11+
 except ImportError:
@@ -182,10 +184,6 @@ def _git(args: list[str], root: Path) -> str | None:
     return r.stdout if r.returncode == 0 else None
 
 
-def _show(base: str, path: str, root: Path) -> str | None:
-    return _git(["show", f"{base}:{path}"], root)
-
-
 def ts_cli_changed_against(base: str, root: Path) -> bool:
     """Does this branch change shipped ts-cli code relative to ``base``?
 
@@ -259,16 +257,18 @@ def main() -> int:
     # Rule 2 — novelty.
     if args.base:
         base = args.base
-        if _git(["rev-parse", "--verify", "--quiet", base], root=repo_root) is None:
-            print(f"FAIL  version novelty: base revision {base!r} could not be resolved.")
-            print("        This check needs the base ref (CI uses fetch-depth: 0).")
-            print("        Omit --base for pre-commit or a non-git export.")
+        # Resolve-or-fail lives in `_novelty` so this and check_backlog_integrity
+        # cannot drift apart; each maps the failure to its own exit code.
+        try:
+            resolve_base(repo_root, base)
+        except BaseUnavailable as exc:
+            print(f"FAIL  version novelty: {exc}")
             return 1
         ts_cli_changed = ts_cli_changed_against(base, repo_root)
         violations = novelty_violations(
             branch_version=pyproject_ver,
-            base_pyproject=_show(base, "tools/ts-cli/pyproject.toml", repo_root),
-            base_changelog=_show(base, "CHANGELOG.md", repo_root),
+            base_pyproject=read_at(repo_root, base, "tools/ts-cli/pyproject.toml"),
+            base_changelog=read_at(repo_root, base, "CHANGELOG.md"),
             ts_cli_changed=ts_cli_changed,
         )
         if violations:

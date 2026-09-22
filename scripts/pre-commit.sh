@@ -133,6 +133,13 @@ if echo "$STAGED" | grep -q '\.py$'; then
   run_check "module health"      "tools/validate/check_module_health.py --root $REPO_ROOT --staged"
 fi
 
+# Duplicate module-level bindings on staged Python. Python keeps the LAST binding
+# silently, and two branches adding the same name in different hunks merge clean —
+# see the module docstring for the audit-check case this was built from.
+if echo "$STAGED" | grep -q '\.py$'; then
+  run_check "py redefinitions"   "tools/validate/check_python_redefinitions.py --root $REPO_ROOT --staged"
+fi
+
 # Line-count gate on staged ts_cli modules (BL-070) — warn >500, fail >1000.
 # Complements the complexity ratchet: long-but-simple files slip past radon.
 if echo "$STAGED" | grep -q '^tools/ts-cli/ts_cli/.*\.py$'; then
