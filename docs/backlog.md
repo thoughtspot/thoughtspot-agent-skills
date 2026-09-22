@@ -235,7 +235,7 @@ are roughly ordered by value÷effort.
 | BL-237 | two sites still classify `data_panel_column_groups` as a `properties` key | next Snowflake pass |
 | BL-239 | `ts-from-databricks-rules.md` TML templates put nested keys at the column root | next Databricks pass |
 | BL-261 | `build-sv --help` cites `ts tml export --output-dir`, which does not exist | next `commands/snowflake.py` change |
-| BL-273 | `tools/ts-cli/CLAUDE.md:153` asserts `Current version: 0.135.0`; package is at 0.139.0 and nothing gates the line | next ts-cli version bump |
+| ~~BL-273~~ | ~~`tools/ts-cli/CLAUDE.md:153` asserts `Current version: 0.135.0`; package is at 0.139.0 and nothing gates the line~~ | DONE (2026-09-22) |
 
 ---
 
@@ -10693,7 +10693,7 @@ its own corpus diff rather than being folded in blind.
 **Target:** next Tableau converter pass — take with BL-271.
 
 
-## BL-273 — `tools/ts-cli/CLAUDE.md` asserts a version it has not tracked for four releases `Tier 4`
+## BL-273 — `tools/ts-cli/CLAUDE.md` asserts a version it has not tracked for four releases `Tier 4` -- **RESOLVED 2026-09-22**
 
 **Filed:** 2026-09-16.
 **Source:** review of PR #511 (SCAL-338450); drift predates that PR.
@@ -10713,6 +10713,28 @@ of the sentence is the pointer to `check_version_sync.py`. If the number is want
 `check_version_sync.py` to cover this line so it is gated rather than asserted.
 
 **Target:** next ts-cli version bump — whoever touches the version next.
+
+
+**Resolved 2026-09-22, by deletion — this item's stated preference.** The number is gone from
+`tools/ts-cli/CLAUDE.md`; the pointer to `check_version_sync.py` stayed, and the section now
+also states the novelty requirement BL-274's gate enforces, plus the `--base origin/main`
+invocation CI uses. The "Adding a command" and "Adding an audit check" checklists said only
+"bump version in both files" — still true but no longer sufficient — so both now say "to an
+unreleased number".
+
+Gating the line was the alternative this item offered, and was rejected for the reason the
+item gives: a hand-maintained copy of a value already gated in two files is drift waiting to
+happen again. Deleting it removes the failure mode rather than detecting it. By the time it
+was fixed the line read 0.135.0 against an actual 0.141.0 — six releases, not the four in the
+title.
+
+Surveyed for siblings before choosing: one live instance only. The other repo-wide hit,
+`docs/superpowers/specs/2026-07-25-ts-publish-orgs-design.md:213` ("Current version 0.97.0"),
+is a dated design document recording a point in time and is correct as written.
+
+**Not done:** no anti-pattern rule forbids a `Current version: **X.Y.Z**` line from coming
+back. One instance did not justify a new pattern, but `check_patterns.py` is where it would
+go if it recurs.
 
 
 ## BL-278 — `_extract_noodle_joins` drops two relationship shapes that have nothing to do with the operator `Tier 2`

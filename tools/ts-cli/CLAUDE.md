@@ -150,7 +150,18 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.135.0**. Run `python tools/validate/check_version_sync.py` to verify.
+The new version must also be **unreleased** — not `main`'s version, and not one already
+marked `bump ts-cli to vX.Y.Z` in `CHANGELOG.md`. Two branches picking the same number
+merge without a conflict, so this is gated rather than trusted (BL-274).
+
+```bash
+python tools/validate/check_version_sync.py                      # consistency
+python tools/validate/check_version_sync.py --base origin/main   # + novelty, as CI runs it
+```
+
+No current version is written here on purpose: a hand-maintained copy of a value already
+gated in two files is drift waiting to happen, and this line carried 0.135.0 for six
+releases while reading as authoritative to every session that loaded it (BL-273).
 
 ## Required dependencies
 
@@ -187,7 +198,7 @@ used anywhere in the repo.
 3. Add a reference entry to `README.md`
 4. Update any `SKILL.md` that uses the command
 5. Add unit tests in `tools/ts-cli/tests/`
-6. Bump version in both `__init__.py` and `pyproject.toml`
+6. Bump version in both `__init__.py` and `pyproject.toml` — to an unreleased number (see Version sync)
 
 ## Adding an audit check
 
@@ -199,5 +210,5 @@ used anywhere in the repo.
 3. Add unit tests in `tools/ts-cli/tests/` covering the check's logic.
 4. Add a row to `agents/cli/ts-audit/references/check-catalog.md` with the check ID,
    what it detects, and severity logic.
-5. Bump version in both `__init__.py` and `pyproject.toml`.
+5. Bump version in both `__init__.py` and `pyproject.toml`, to an unreleased number (see Version sync).
 6. Run `pytest tools/ts-cli/tests/` and `python tools/validate/check_version_sync.py`.
