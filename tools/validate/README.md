@@ -52,11 +52,33 @@ python tools/validate/check_yaml.py --path agents/shared/schemas/thoughtspot-tab
 ### `check_version_sync.py`
 
 Verifies `ts_cli/__init__.py __version__` matches `pyproject.toml version`.
-Both must be bumped together — this script enforces it.
+Both must be bumped together — this script enforces it. It also rejects a
+`CHANGELOG.md` that marks the same ts-cli release twice.
 
 ```bash
 python tools/validate/check_version_sync.py
 ```
+
+With `--base`, it additionally requires the version to be **unreleased** (BL-274):
+if the branch changes `tools/ts-cli/ts_cli`, its version must not be the base's
+version, nor any release already marked in the base's `CHANGELOG.md`.
+
+```bash
+python tools/validate/check_version_sync.py --base origin/main   # CI
+```
+
+`--base` is opt-in because it needs the base ref, which pre-commit and a
+`git archive` export do not have. CI passes it and checks out with
+`fetch-depth: 0`. When `--base` **is** passed and the ref cannot be resolved,
+that is a FAIL, not a skip — a gate that no-ops when it cannot see its input is
+decorative.
+
+Why this needs its own rule: two branches bumping to the *same* version change
+the same two lines to the same value, so git auto-merges with no conflict and the
+`__init__.py`/`pyproject.toml` invariant still holds. Consistency cannot see a
+collision; only novelty can. Two branches open at once still both pass — the
+second is caught when it updates from `main`, which branch protection's
+`strict: true` requires before merge.
 
 ---
 

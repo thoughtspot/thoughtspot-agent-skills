@@ -159,7 +159,8 @@ are roughly ordered by value÷effort.
 | BL-253 | table alias dropped for the physical name — breaks every query citing the alias; masks BL-241 | next SF converter pass, before BL-241 |
 | BL-270 | datasource-root self-exclusion: `count_native_sets` returns 0 Sets and `extract_blends` returns `{}` on a `.tds` — third site fixed by #511 | next Tableau converter pass |
 | BL-278 | `_extract_noodle_joins` drops an AND-composite relationship and any whose operand lacks a `(Table)` suffix — 12 of 12 relationship joins lost across 5 real published datasources | next Tableau parser pass |
-| BL-274 | two PRs can ship the same ts-cli version with zero merge conflicts and every gate green — demonstrated on #511 vs #512 | next validator pass |
+| ~~BL-274~~ | ~~two PRs can ship the same ts-cli version with zero merge conflicts and every gate green — demonstrated on #511 vs #512~~ | DONE (2026-09-22) |
+| BL-279 | the same collision on backlog ids: `check_backlog_integrity` enforces uniqueness within a tree, not novelty against `main` — demonstrated on #484 vs #516 | next validator pass |
 
 ### Tier 3 — Opportunistic
 
@@ -10765,7 +10766,7 @@ physical-join shape.
 
 ---
 
-## BL-274 — two PRs can ship the same ts-cli version with zero conflicts and every gate green `Tier 2`
+## BL-274 — two PRs can ship the same ts-cli version with zero conflicts and every gate green `Tier 2` -- **RESOLVED 2026-09-22**
 
 **Filed:** 2026-09-16.
 **Source:** review of PR #511 (SCAL-338450), caught by simulating its merge against `main`.
@@ -10801,3 +10802,77 @@ correctly but the changelog line is duplicated. Note this is a CI-only check: it
 `origin/main`, so it cannot be a pure pre-commit hook.
 
 **Target:** next validator pass — take with BL-229 and BL-231, both validator-coverage items.
+
+**Resolved 2026-09-22 (SCAL-331323 review follow-up).** `check_version_sync.py` gained the
+novelty rule, opt-in via `--base` and wired into CI as `--base origin/main`; the CI job
+already checks out with `fetch-depth: 0`, so the base ref is present. Two rules landed:
+
+1. If the branch changes `tools/ts-cli/ts_cli`, its version must be neither the base's
+   `pyproject.toml` version nor any release already marked `bump ts-cli to vX.Y.Z` in the
+   base's `CHANGELOG.md`. Scoped to the shipped package deliberately — a branch touching
+   only `tools/ts-cli/tests/` releases nothing and must not have to invent a version.
+2. No `CHANGELOG.md` may mark the same release twice. Needs no git, so it runs on every
+   commit, and it is what catches a correctly-bumped PR whose changelog line was duplicated
+   as well as the merged state of two colliding PRs.
+
+**Verified against the live recurrence, not only fixtures.** #484 (`60721ff9`) and #516 both
+bumped 0.140.0 → 0.141.0; #516 merged first as `67bc5f5`. Run against the real #484 head:
+`FAIL version novelty (0.141.0 against origin/main)`. Without `--base`, the same head still
+prints `PASS version sync: 0.141.0`, so pre-commit and `git archive` exports are unaffected.
+An unresolvable `--base` is a FAIL, not a skip. 12 unit tests in
+`tools/validate/tests/test_check_version_novelty.py`, one of which reconstructs the
+#484-vs-#516 collision.
+
+**Two limits, both deliberate.** The `git tag` source this item proposed is vacuous — the
+repo has **zero** tags, so `CHANGELOG.md` release markers are the only durable record of
+what shipped, and no dead tag-checking code was added. And two branches open at once still
+both pass, because neither has collided yet: the second is caught when it updates from
+`main`, which branch protection's `strict: true` requires before merge. That makes
+`strict: true` load-bearing for this gate — if it is ever turned off, the gate weakens to
+catching only PRs that happen to rebase.
+
+**Not covered here:** the same shape on backlog ids, which recurred simultaneously — see
+BL-279.
+
+---
+
+## BL-279 — the same collision on backlog ids: uniqueness is enforced within a tree, novelty against `main` is not `Tier 2`
+
+**Filed:** 2026-09-22.
+**Source:** review of PR #484 vs PR #516, caught by simulating their merge — the same way
+BL-274 was found, on the same day it was fixed.
+**Affects:** `tools/validate/check_backlog_integrity.py`, `docs/backlog.md`.
+
+**Demonstrated, not theorised.** `main`'s highest id was BL-274 — this file's own version
+collision item. #484 allocated BL-275/276/277 from that fencepost; #516 independently
+allocated BL-275 for an unrelated defect (`_extract_noodle_joins` dropping two relationship
+shapes). Simulating the merge produced **two index rows and two full entries under BL-275**,
+with no git conflict, because the two additions land in different places in the file and a
+three-way merge has no reason to object.
+
+`check_backlog_integrity.py` passes on each branch in isolation. It enforces *uniqueness
+within one tree* — which is precisely what BL-171 asked for, after two branches both claimed
+BL-171 — but it has no notion of *novelty against the base*, so it cannot see an id that is
+unique here and already taken there. Identical in shape to BL-274, in a different file, and
+missed for the same reason: the rule that exists checks internal consistency, and a
+collision preserves internal consistency.
+
+Backlog ids are worse than the version number in one respect: `check_backlog_integrity`
+Rule 2 already validates citations from `agents/`, `tools/` and `.github/`, so a duplicated
+id does not dangle — every citation resolves, to whichever entry the reader reaches first.
+
+**Instance fixed, class open.** #516's new item was renumbered BL-275 → BL-278 before merge
+(`66de6d1`), chosen over renumbering #484's because #484's BL-275 is filed 2026-08-06 and
+already cross-referenced from BL-277, `references/open-items.md` #3 and two dated changelog
+entries, while #516's was filed 2026-09-17 with a single citation. Nothing stops the next
+pair.
+
+**Approach.** Give `check_backlog_integrity.py` the rule BL-274's fix just added to
+`check_version_sync.py`: an opt-in `--base` that asserts no `## BL-NNN` heading introduced by
+the branch already exists at the base. Same opt-in shape (pre-commit and `git archive`
+exports have no base ref), same FAIL-not-skip on an unresolvable base, and the same
+dependency on `strict: true` to catch the second of two open PRs. The version rule's
+`novelty_violations` is the template.
+
+**Target:** next validator pass — with BL-229 and BL-231, as BL-274 proposed for itself.
+
