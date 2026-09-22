@@ -26,7 +26,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
   name, nothing migratable inside) are recorded, while the duplicate-name skip is not,
   since Tableau writes one `<datasource>` stub per worksheet and duplicates outnumber kept
   datasources ~20:1. Joins remain 0 of 12 — these files carry relationship joins, and all
-  12 hit one of two shapes `_extract_noodle_joins` drops regardless of operator (BL-275)
+  12 hit one of two shapes `_extract_noodle_joins` drops regardless of operator (BL-278)
 - chore: bump ts-cli to v0.141.0
 - fix: `ts tableau parse` abandoned the **entire** workbook over one addressing token
   (introduced in v0.32.0, 2026-07-04, #180; found at v0.138.0). Tableau writes a

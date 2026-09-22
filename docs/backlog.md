@@ -158,7 +158,7 @@ are roughly ordered by value÷effort.
 | BL-252 | `introspect` emits no `fqn`, so `build-model` collides on any generic table name (52 `DIM_PRODUCT` live) | next SF converter pass |
 | BL-253 | table alias dropped for the physical name — breaks every query citing the alias; masks BL-241 | next SF converter pass, before BL-241 |
 | BL-270 | datasource-root self-exclusion: `count_native_sets` returns 0 Sets and `extract_blends` returns `{}` on a `.tds` — third site fixed by #511 | next Tableau converter pass |
-| BL-275 | `_extract_noodle_joins` drops an AND-composite relationship and any whose operand lacks a `(Table)` suffix — 12 of 12 relationship joins lost across 5 real published datasources | next Tableau parser pass |
+| BL-278 | `_extract_noodle_joins` drops an AND-composite relationship and any whose operand lacks a `(Table)` suffix — 12 of 12 relationship joins lost across 5 real published datasources | next Tableau parser pass |
 | BL-274 | two PRs can ship the same ts-cli version with zero merge conflicts and every gate green — demonstrated on #511 vs #512 | next validator pass |
 
 ### Tier 3 — Opportunistic
@@ -10714,7 +10714,7 @@ of the sentence is the pointer to `check_version_sync.py`. If the number is want
 **Target:** next ts-cli version bump — whoever touches the version next.
 
 
-## BL-275 — `_extract_noodle_joins` drops two relationship shapes that have nothing to do with the operator `Tier 2`
+## BL-278 — `_extract_noodle_joins` drops two relationship shapes that have nothing to do with the operator `Tier 2`
 
 **Filed:** 2026-09-17.
 **Source:** review of PR SCAL-331323, which unblocked `.tds`/`.tdsx` parsing and so made this
