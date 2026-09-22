@@ -441,12 +441,15 @@ def format_parse_warnings(parsed: dict) -> str:
     than in ``commands/tableau.py`` — that module is ratcheted under BL-089 and
     must not grow to carry it. Pure string formatting; the caller does the I/O.
 
-    Two sources today: non-numeric table-calc addressing, and datasources found
-    but not migrated. The second exists because "0 datasources" and "0
-    datasources, and here is one we threw away" are indistinguishable otherwise
-    — which is how every published datasource read as an empty file for months.
+    Three sources today: non-numeric table-calc addressing, datasources found
+    but not migrated, and joins skipped by ``_extract_joins``. The second exists
+    because "0 datasources" and "0 datasources, and here is one we threw away"
+    are indistinguishable otherwise — which is how every published datasource
+    read as an empty file for months. The third is the same argument for joins:
+    `build-model` echoes them, and `parse` reporting a join count that silently
+    excludes the skipped ones is the shape that hid the first two.
 
-    Both keys are `.get`-guarded rather than indexed: ``parse_cmd`` adds
+    Every source key is `.get`-guarded rather than indexed: ``parse_cmd`` adds
     ``table_calc_addressing`` after ``parse_twb`` returns, and this function is
     re-exported for back-compat, so it is also handed results written by an
     older ts-cli. Staying total means an old input degrades instead of raising.
@@ -456,6 +459,11 @@ def format_parse_warnings(parsed: dict) -> str:
     out += [
         f"\nWARNING: datasource skipped — {s['reason']} ({s['detail']})"
         for s in parsed.get("skipped_datasources") or []
+    ]
+    out += [
+        f"\nWARNING: {w}"
+        for ds in parsed.get("datasources") or []
+        for w in ds.get("join_warnings") or []
     ]
     return "".join(out)
 

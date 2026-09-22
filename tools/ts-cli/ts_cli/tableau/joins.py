@@ -15,18 +15,35 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 
 # Only equality joins are emitted. ThoughtSpot's `joins[].on` documents range
-# operators, but nothing here inspects the emitted operator, every join this
-# builder writes carries `cardinality: MANY_TO_ONE` (which a non-equality
+# operators, but nothing here inspects the emitted operator, a join this builder
+# writes carries `cardinality: MANY_TO_ONE` by default (which a non-equality
 # relationship cannot satisfy), and BL-240 records `>=` returning materially
 # wrong numbers on both legs of an ASOF join. So a non-`=` clause is skipped
 # and reported rather than guessed at. Tableau writes not-equal as `<>`.
 _SUPPORTED_JOIN_OPERATOR = "="
 
-# A ThoughtSpot join is a conjunction of key pairs, so a disjunction has no
-# representation at all — a target-model limit, not a parser gap. Named here
-# because `OR`'s two children are comparison nodes rather than columns, so the
-# operand check would otherwise fire first and report the `=` inside it.
-_DISJUNCTION_OPERATOR = "OR"
+
+# Consulted on an OPERAND, not on the operator combining them. Arity alone
+# cannot tell `(A=B)` from `CONCAT([A],[B])` — both hold two children — so an
+# operand counts as a condition only when its own operator is one of these.
+# A connective absent from the set is still caught, because what is inspected is
+# its operands: `NAND` over two equalities is reported by name, since those
+# equalities are conditions whatever sits above them.
+_CONDITION_OPERATORS = frozenset({
+    "=", "<>", ">", ">=", "<", "<=", "AND", "OR", "XOR", "NOT",
+})
+
+
+def _is_condition(expr: ET.Element) -> bool:
+    """True when an operand is itself a comparison, not a column or a function call.
+
+    Both halves are needed: an equality sitting under a connective, or beside
+    another under one `<clause>`, carries a comparison operator AND two operands,
+    while ``UPPER([Col])`` fails the child count and ``CONCAT([A],[B])`` fails
+    the operator — both are reported as unsupported operands instead.
+    """
+    return (expr.get("op", "").upper() in _CONDITION_OPERATORS
+            and len(expr.findall("./expression")) >= 2)
 
 
 def _relation_name(rel: ET.Element) -> str:
@@ -142,15 +159,15 @@ def _clause_join_keys(
     for left_expr, right_expr, raw_op in comparisons:
         left = left_expr.get("op", "")
         right = right_expr.get("op", "")
-        # Ahead of the operand check: an OR's operands are the comparison nodes
-        # it joins, so that check would report the supported `=` inside one of
-        # them as the problem and blame a function call that isn't there.
-        if raw_op.upper() == _DISJUNCTION_OPERATOR:
+        # Ahead of the operand check, which would otherwise report the `=` inside
+        # a combined condition and blame a function call that isn't there.
+        if _is_condition(left_expr) or _is_condition(right_expr):
+            how = (f"with {raw_op.upper()}" if raw_op != _SUPPORTED_JOIN_OPERATOR
+                   else "side by side")
             warnings.append(
-                f"join clause between {left_table!r} and {right_table!r} "
-                f"combines conditions with OR — a ThoughtSpot join is a "
-                f"conjunction of key pairs and cannot express a disjunction; "
-                f"skipped"
+                f"join clause between {left_table!r} and {right_table!r} combines "
+                f"conditions {how} — a ThoughtSpot join is a conjunction of key "
+                f"pairs, so only AND-combined equalities are supported; skipped"
             )
             return None
         if not (left.startswith("[") and right.startswith("[")):
@@ -204,9 +221,11 @@ def _extract_joins(ds: ET.Element) -> tuple[list[dict], list[str]]:
             # node plus one table. An entry with a blank name binds to nothing
             # in either `model_tables` builder, so emitting it loses the join
             # two modules later with nothing said. Report it here instead.
+            cause = ("its clause operands carry no table qualifier and child "
+                     "order resolves only one side" if clauses else
+                     "it carries no join clause to read table names from")
             warnings.append(
-                "join could not be resolved to a table pair — a nested join "
-                "whose clause operands carry no table qualifier; skipped"
+                f"join could not be resolved to a table pair — {cause}; skipped"
             )
             continue
         # Sibling <clause> nodes are conditions of ONE composite key — this loop

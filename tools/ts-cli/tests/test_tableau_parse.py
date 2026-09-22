@@ -114,6 +114,10 @@ def test_parse_reports_a_skipped_join_in_its_output(tmp_path):
     assert ds["joins"] == []
     assert len(ds["join_warnings"]) == 1
     assert "non-equi" in ds["join_warnings"][0]
+    # Echoed, not just written to the JSON: a join count that silently excludes
+    # the skipped ones is the shape that hid the datasource-skip losses.
+    assert "WARNING" in result.stderr
+    assert "non-equi" in result.stderr
 
 
 def test_parse_emits_a_supported_join_with_no_warnings(tmp_path):
@@ -127,6 +131,7 @@ def test_parse_emits_a_supported_join_with_no_warnings(tmp_path):
     ds = json.loads(out.read_text())["datasources"][0]
     assert ds["join_warnings"] == []
     assert ds["joins"][0]["keys"] == [{"left": "OrderId", "right": "OrderId"}]
+    assert "WARNING" not in result.stderr
 
 
 def test_parse_survives_non_numeric_address(tmp_path):
