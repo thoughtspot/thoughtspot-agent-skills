@@ -163,7 +163,7 @@ are roughly ordered by value÷effort.
 | BL-270 | datasource-root self-exclusion: `count_native_sets` returns 0 Sets and `extract_blends` returns `{}` on a `.tds` — third site fixed by #511 | next Tableau converter pass |
 | BL-278 | `_extract_noodle_joins` drops an AND-composite relationship and any whose operand lacks a `(Table)` suffix — 12 of 12 relationship joins lost across 5 real published datasources | next Tableau parser pass |
 | ~~BL-274~~ | ~~two PRs can ship the same ts-cli version with zero merge conflicts and every gate green — demonstrated on #511 vs #512~~ | DONE (2026-09-22) |
-| BL-279 | the same collision on backlog ids: `check_backlog_integrity` enforces uniqueness within a tree, not novelty against `main` — demonstrated on #484 vs #516 | next validator pass |
+| ~~BL-279~~ | ~~the same collision on backlog ids: `check_backlog_integrity` enforces uniqueness within a tree, not novelty against `main` — demonstrated on #484 vs #516~~ | DONE (2026-09-22) |
 | BL-280 | a clause-derived table name is never checked against the relation's own children, so a qualifier one level above the table resolves to a name no relation carries and the join is dropped with no warning | with BL-277 |
 | BL-281 | a `<relation join=...>` carrying no `<clause>` is dropped with no warning — the last `_extract_joins` exit with no diagnostic, in the function whose contract is to report what it skips | next Tableau join-parser pass |
 
@@ -10907,7 +10907,7 @@ BL-279.
 
 ---
 
-## BL-279 — the same collision on backlog ids: uniqueness is enforced within a tree, novelty against `main` is not `Tier 2`
+## BL-279 — the same collision on backlog ids: uniqueness is enforced within a tree, novelty against `main` is not `Tier 2` -- **RESOLVED 2026-09-22**
 
 **Filed:** 2026-09-22.
 **Source:** review of PR #484 vs PR #516, caught by simulating their merge — the same way
@@ -10946,6 +10946,33 @@ dependency on `strict: true` to catch the second of two open PRs. The version ru
 `novelty_violations` is the template.
 
 **Target:** next validator pass — with BL-229 and BL-231, as BL-274 proposed for itself.
+
+**Resolved 2026-09-22.** `check_backlog_integrity.py` gained **Rule 4**, opt-in via `--base`
+and wired into CI as `--base origin/main`; the job already checks out with `fetch-depth: 0`.
+
+**Three points, not two.** An id present on both the branch and the base is normally just an
+item the branch inherited — it is a collision only when the branch *introduced* it, which is
+what absence at the merge base establishes. A two-point comparison would flag every inherited
+item and be switched off within a day. The converse is equally deliberate: ids the base gained
+that the branch has never seen are ordinary drift, not a finding.
+
+**Verified against the real collision, not only fixtures.** Replaying #516's pre-renumber head
+`ded1d002` against #484's head `60721ff9` as base: `Rule 4: ✗ BL-275`, exit 1. Replaying the
+renumbered head that actually shipped (`66de6d1`, BL-278) against the same base: clean. An
+unresolvable `--base` exits **2** — this module's established "could not run, NOT a pass" code,
+which CI's `|| rc=1` already treats as failure. 8 unit tests in
+`tools/validate/tests/test_check_backlog_id_novelty.py`, including the inherited-id and
+base-drift cases that a naive implementation gets wrong.
+
+The success line names Rule 4 only when `--base` was passed. Claiming a clean novelty check on
+a run that never made one is the same false confidence that was shipped and then fixed twice in
+`check_version_sync.py` (#518, #519) — worth stating because that slip recurred once already
+after being fixed.
+
+**Same limit as BL-274, inherited by construction.** Two branches open at once still both pass,
+because neither has collided yet; the second is caught when it updates from `main`, which
+branch protection's `strict: true` requires before merge. `strict: true` is load-bearing for
+both gates.
 
 ---
 

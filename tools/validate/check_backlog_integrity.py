@@ -23,6 +23,21 @@ history.
 
 Rule 3 — no git conflict markers in tracked text files. Previously ungated.
 
+Rule 4 (BL-279, opt-in via --base) — no BL id INTRODUCED by this branch may
+already own a section on the base. Rule 1 enforces uniqueness within one tree,
+which is what BL-171 asked for; it cannot see an id that is unique here and
+already taken there, because each branch passes in isolation and the two
+additions land in different places in the file, so a three-way merge has no
+reason to object. Demonstrated on #484 vs #516: `main`'s highest id was BL-274,
+both branches allocated BL-275 for unrelated defects, and the simulated merge
+carried two index rows and two full entries under one id. Three points are
+compared, not two — an id on both branch and base is normally just inherited,
+and only counts when absent at the merge base. `--base` is opt-in because it
+needs the base ref, which pre-commit and a `git archive` export do not have; CI
+passes it. Two branches open at once still both pass, since neither has collided
+yet; the second is caught when it updates from main, which branch protection's
+`strict: true` requires before merge.
+
 KNOWN LIMITATION (tested; do not assume otherwise). This does NOT catch the other
 half of the PR #356 near-miss: a stale `**Target:**` line git auto-merged onto the
 wrong item. After a naive accept-both, EACH of the two BL-171 sections carries
@@ -138,6 +153,68 @@ def cross_file_duplicates(root: Path) -> list[str]:
     return sorted(live & archived)
 
 
+def _read_at(rev: str, rel: str, root: Path) -> str:
+    """File contents at a revision, or "" when the path does not exist there.
+
+    A missing path is legitimate (the archive is optional, and both files
+    postdate parts of history); a missing *revision* is not, and is raised by
+    the caller before this runs.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(root), "show", f"{rev}:{rel}"],
+        capture_output=True, text=True, check=False,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def novel_id_collisions(
+    head_ids: set[str], merge_base_ids: set[str], base_ids: set[str]
+) -> list[str]:
+    """Rule 4 — ids this branch INTRODUCES that are already taken on the base.
+
+    Three points, not two. An id present on both the branch and the base is
+    normally just an item the branch inherited; it is a collision only when the
+    branch introduced it, which is what absence at the merge base establishes.
+    A two-point comparison would flag every inherited item and be turned off
+    within a day.
+
+    The converse is equally deliberate: ids the base gained that the branch has
+    never seen are ordinary drift, not a finding.
+    """
+    return sorted((head_ids - merge_base_ids) & base_ids)
+
+
+def id_novelty_violations(root: Path, base: str) -> list[str]:
+    """Rule 4 wiring. Raises GitUnavailable if the base cannot be resolved."""
+    probe = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"],
+        capture_output=True, text=True, check=False,
+    )
+    if probe.returncode != 0:
+        raise GitUnavailable(
+            f"base revision {base!r} could not be resolved. This rule needs the "
+            f"base ref (CI checks out with fetch-depth: 0). Omit --base for "
+            f"pre-commit or a non-git export."
+        )
+    mb = subprocess.run(
+        ["git", "-C", str(root), "merge-base", base, "HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    if mb.returncode != 0 or not mb.stdout.strip():
+        raise GitUnavailable(f"no merge base between {base!r} and HEAD")
+    merge_base = mb.stdout.strip()
+
+    def ids_at(rev: str) -> set[str]:
+        return set(section_headings(_read_at(rev, BACKLOG_REL, root))) | set(
+            section_headings(_read_at(rev, ARCHIVE_REL, root))
+        )
+
+    head_ids = set(section_headings(_read(root, BACKLOG_REL))) | set(
+        section_headings(_read(root, ARCHIVE_REL))
+    )
+    return novel_id_collisions(head_ids, ids_at(merge_base), ids_at(base))
+
+
 def defined_ids(root: Path) -> set[str]:
     """Every BL id that resolves to something. Deliberately broader than
     section_headings(): the archive index and the priority-index tables list ids
@@ -196,6 +273,12 @@ def conflict_markers(root: Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="Repository root (default: cwd)")
+    parser.add_argument(
+        "--base", default=None,
+        help="Also require every BL id this branch introduces to be unused on "
+             "this revision (e.g. --base origin/main). Needs git; CI passes it. "
+             "Omitted for pre-commit and for non-git exports.",
+    )
     args = parser.parse_args()
     root = Path(args.root).resolve()
 
@@ -221,6 +304,9 @@ def main() -> int:
     try:
         dangling = dangling_citations(root)
         markers = conflict_markers(root)
+        # Rule 4 shares the guard: an unresolvable base raises GitUnavailable and
+        # exits 2 ("could not run"), never 0. See the Exit codes block.
+        collisions = id_novelty_violations(root, args.base) if args.base else []
     except GitUnavailable as exc:
         # Rule 1 may have already found real violations above (problems is
         # populated before this try block runs) — print them rather than
@@ -246,6 +332,15 @@ def main() -> int:
         problems.append("  Either the id was renumbered and a citation was missed,")
         problems.append("  or the backlog entry was deleted instead of archived.")
 
+    if collisions:
+        problems.append(
+            f"BL id introduced here but already taken on {args.base} — Rule 4:")
+        problems.extend(f"  ✗ {bl_id}" for bl_id in collisions)
+        problems.append("  Both branches allocated from the same highest-id fencepost.")
+        problems.append("  Nothing conflicts in git, because the two entries land in")
+        problems.append("  different places in the file. Citation count decides which")
+        problems.append("  keeps the number; renumber the other, index row and all.")
+
     if markers:
         problems.append("Git conflict marker(s) in tracked file(s) — Rule 3:")
         problems.extend(f"  ✗ {hit}" for hit in markers[:20])
@@ -263,10 +358,13 @@ def main() -> int:
         print("see CLAUDE.md ('Resolving conflicts...') for the full decision procedure.")
         return 1
 
-    print(
-        "Backlog integrity clean: no duplicate BL ids, no dangling citations, "
-        "no conflict markers."
-    )
+    # Name Rule 4 only when it actually ran. Claiming a clean novelty check on a
+    # run that never made one is the false confidence these gates exist to stop —
+    # the same slip was shipped and then fixed twice in check_version_sync.
+    scope = "no duplicate BL ids, no dangling citations, no conflict markers"
+    if args.base:
+        scope += f", no id colliding with {args.base}"
+    print(f"Backlog integrity clean: {scope}.")
     return 0
 
 
