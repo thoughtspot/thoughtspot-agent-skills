@@ -67,11 +67,41 @@ def resolve_base(root: Path, base: str) -> str:
     return probe.stdout.strip()
 
 
+def effective_head(root: Path, base: str) -> str:
+    """HEAD, or the PR head when HEAD is GitHub's synthetic merge ref.
+
+    On a ``pull_request`` event ``actions/checkout`` checks out ``refs/pull/N/merge``
+    — a merge of the PR branch INTO the base. HEAD therefore already contains the
+    base, so ``merge-base(base, HEAD)`` is the base tip itself, and the novelty rule
+    ``(head_ids - merge_base_ids) & base_ids`` reduces to ``(h - b) & b`` = empty for
+    every input. The gate could not fire on the event it exists for (audit 17.2).
+
+    A merge ref is identifiable without guessing: HEAD is a merge commit whose FIRST
+    parent is exactly the base tip. In that case the PR's own tip is ``HEAD^2``, and
+    the merge base taken against it is the real fork point.
+
+    Ambiguity worth naming: a developer who merges the base into their branch locally
+    produces the same shape. Using ``HEAD^2`` there measures the branch as it was
+    before that merge, which is the conservative reading — ids it genuinely allocated
+    still count, ids it inherited through the merge do not.
+    """
+    if _run(["rev-parse", "--verify", "--quiet", "HEAD^2"], root).returncode != 0:
+        return "HEAD"  # not a merge commit
+    first_parent = _run(["rev-parse", "HEAD^1"], root).stdout.strip()
+    if first_parent and first_parent == resolve_base(root, base):
+        return "HEAD^2"
+    return "HEAD"
+
+
 def merge_base_with_head(root: Path, base: str) -> str:
-    """The merge base of `base` and HEAD. Raises BaseUnavailable if there is none."""
-    result = _run(["merge-base", base, "HEAD"], root)
+    """The merge base of `base` and the effective head.
+
+    Raises BaseUnavailable if there is none.
+    """
+    head = effective_head(root, base)
+    result = _run(["merge-base", base, head], root)
     if result.returncode != 0 or not result.stdout.strip():
-        raise BaseUnavailable(f"no merge base between {base!r} and HEAD")
+        raise BaseUnavailable(f"no merge base between {base!r} and {head}")
     return result.stdout.strip()
 
 

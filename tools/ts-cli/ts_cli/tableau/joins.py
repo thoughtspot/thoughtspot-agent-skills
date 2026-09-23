@@ -253,6 +253,19 @@ def _extract_joins(ds: ET.Element) -> tuple[list[dict], list[str]]:
                 join_keys = None
                 break
             join_keys.extend(clause_keys)
+        if join_keys is not None and not join_keys:
+            # Tables resolved, but no clause produced a key. The `None` case above
+            # is a deliberate skip and has already warned; reaching here silently
+            # means the key loop never ran — a `<relation join=...>` carrying no
+            # `<clause>` at all, whose two table children resolve fine. The
+            # relation is still dropped, so say so: this function's contract is to
+            # report what it skips, and a join present in the workbook was going
+            # missing from both the model and the migration report (audit 17.3).
+            warnings.append(
+                f"join between {left_table!r} and {right_table!r} carries no join "
+                f"clause to read keys from — a ThoughtSpot join needs at least one "
+                f"key pair; skipped"
+            )
         if join_keys:
             joins.append({
                 "type": rel.get("join", "inner").upper(),

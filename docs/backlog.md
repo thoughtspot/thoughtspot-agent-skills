@@ -165,7 +165,7 @@ are roughly ordered by value÷effort.
 | ~~BL-274~~ | ~~two PRs can ship the same ts-cli version with zero merge conflicts and every gate green — demonstrated on #511 vs #512~~ | DONE (2026-09-22) |
 | ~~BL-279~~ | ~~the same collision on backlog ids: `check_backlog_integrity` enforces uniqueness within a tree, not novelty against `main` — demonstrated on #484 vs #516~~ | DONE (2026-09-22) |
 | BL-280 | a clause-derived table name is never checked against the relation's own children, so a qualifier one level above the table resolves to a name no relation carries and the join is dropped with no warning | with BL-277 |
-| BL-281 | a `<relation join=...>` carrying no `<clause>` is dropped with no warning — the last `_extract_joins` exit with no diagnostic, in the function whose contract is to report what it skips | next Tableau join-parser pass |
+| ~~BL-281~~ | ~~a `<relation join=...>` carrying no `<clause>` is dropped with no warning — the last `_extract_joins` exit with no diagnostic, in the function whose contract is to report what it skips~~ | DONE (2026-09-22) |
 | BL-282 | two DIFFERENT open items can share a `#N` inside one file with no gate — the novelty rule catches the cross-branch case, the within-file case is blocked by ts-audit's untagged verified/unverified double entries | next validator pass |
 | BL-285 | `check_i7_gate` checks the I7 marker is in the procedure body, not that it *precedes* the untranslatable classification step — finding 9.3 asked for "within N lines" of it; a gate in the wrong section still passes | next validator pass |
 | BL-286 | the Genie runtime's two converters (`agents/databricks/skills/ts-convert-*`) carry no I7 gate and are outside `_dirs`, so `check_i7_gate` cannot see them — audit 9.17 expected 9.3's fix to reach them | with the next Genie review |
@@ -178,6 +178,7 @@ are roughly ordered by value÷effort.
 | BL-293 | `check_patterns` Checks 5-8 scan `*/SKILL.md` (Check 6 also scans `agents/shared/**/*.md`) but no skill-local `.py`, so a skill-local `.py` can carry a cloned `snowflake.connector.connect(` block (Check 7 / BL-079) or a `from ts_cli import …` (Check 8) with nothing looking. `check_no_inline_requests` was widened to `.py`; these four were not | next validator pass |
 | BL-294 | `ts-audit` open-item #7 still reads "Remaining: … wire the `--export-column-security-rules` flag into `ts tml export`" — half of that is now done (it is wired into `ts security column-rules export`, closing dep-manager #9). Decide whether `ts tml export` should carry it too, or whether CSR export stays on `ts security column-rules export` only — a general exporter taking a mechanism-specific option is a design call. Raised by audit 5.2, which closed the retrieval half and left this open | next ts-cli design pass |
 | BL-295 | `check_open_item_citations` has four known structural limits, none occupied today but all silent-wrong when they are: `owning_skill`'s 120-char window can bleed onto an unrelated skill name in either direction (fail-open or false-positive depending on which); `min(hits)` breaks an equal-distance tie lexicographically, so a name that is a substring of another resolves to the shorter; a `## Changelog` inside a code fence truncates `procedure_body` and leaves the rest of the file unscanned; and `.sh`/`.sql`/`.yaml`/`.tml` inside skill dirs, plus a skill's own `open-items.md`, are not scanned at all | next validator pass |
+| BL-296 | the physical Tableau join path asserts `left_table` = the MANY side from parse order, which carries no cardinality information — the sibling noodle path says so outright and infers MANY from CTE grain instead. Audit 17.1 proposed flipping the anchor from clause to child order; that swaps one arbitrary anchor for another, and child order cannot resolve a nested join at all | next Tableau parser pass |
 | BL-283 | `check-catalog.md` and the audit `check_id`s can drift with nothing to notice — 51 documented vs 50 emitted today, and the deferred-id table means a naive comparison is wrong | next validator pass |
 
 ### Tier 3 — Opportunistic
@@ -11334,7 +11335,52 @@ continue to pass unchanged.
 
 ---
 
-## BL-281 — a join relation with no `<clause>` is dropped silently, the last `_extract_joins` exit with no diagnostic `Tier 3`
+## BL-296 — Tableau physical joins claim a cardinality direction they cannot know `Tier 2`
+
+**Filed:** 2026-09-22, routing audit finding 17.1.
+**Affects:** `tools/ts-cli/ts_cli/tableau/joins.py` (`_join_sides`); contrast
+`tools/ts-cli/ts_cli/tableau/twb.py` (the noodle path).
+
+17.1 reported that PR #484/#519 changed `_join_sides` to resolve `(left_table,
+right_table)` from the first qualified comparison, and asked for child order to be
+restored for flat joins. Probing the parser changed the shape of the question.
+
+| Shape | clause anchor | child-order anchor |
+|---|---|---|
+| flat, operands in child order | `(ORDERS, RETURNS)` | `(ORDERS, RETURNS)` — agree |
+| flat, operands reversed | `(RETURNS, ORDERS)` | `(ORDERS, RETURNS)` — **disagree** |
+| nested `((A join B) join C)` | `(B, C)` | `['C']` — **cannot resolve** |
+
+The audit's fix only ever applied to the flat case; child order drops a nested join
+entirely, which is why the clause was made authoritative.
+
+**Why it matters:** `twb.py` documents `left_table` as the **MANY side** and pairs it with
+`cardinality: MANY_TO_ONE`, so a reversed pair inverts the cardinality.
+
+**Why flipping the anchor is not the fix.** Neither anchor is evidence of cardinality. The
+noodle path states it outright — *"Tableau defers cardinality to query time, so it is
+(almost always) absent from the file"* — and derives the MANY side from CTE grain. The
+physical path asserts from parse order and compensates nowhere.
+
+**What would settle it:** a real `.twb` with a flat join whose clause names its operands in
+the opposite order to its children. Neither shipped fixture discriminates.
+`tools/ts-cli/tests/test_tableau_joins_correctness.py` pins current behaviour so a future
+change is deliberate.
+
+**Exit:** apply the grain heuristic to the physical path, or stop stamping a
+direction-derived `MANY_TO_ONE` on joins parsed from it. Do not flip the anchor on doc
+evidence — this is a platform limit, verifiable only where it is enforced.
+
+---
+
+## ~~BL-281~~ — a join relation with no `<clause>` is dropped silently `Tier 3` — DONE (2026-09-22)
+
+**Closed 2026-09-22** by the angle-17 routing PR: `_extract_joins` now warns when the table
+pair resolves but no clause produced a key, naming both tables. The 2026-09-22 full audit
+re-found this independently as finding 17.3 — worth noting, because a backlog item and an
+audit finding describing the same defect is a signal the item was not being read when the
+sweep ran.
+
 
 **Filed:** 2026-09-22.
 **Source:** review of PR #484, which built the join-warning channel and closed every other
