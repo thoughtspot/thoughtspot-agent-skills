@@ -33,6 +33,13 @@ re-declared. `check_open_items.py` carries a comment explaining why: this module
 file's twenty items were invisible to the gate. A third copy here would be a third
 chance to drift.
 
+Known limits, stated so the gate does not imply more than it has (BL-295): the
+skill-name window can bleed onto an unrelated name in either direction; an
+equal-distance tie between a name and a name containing it resolves to the shorter;
+a ``## Changelog`` inside a code fence truncates the scan; and ``.sh``/``.sql``/
+``.yaml``/``.tml`` in skill dirs, plus a skill's own ``open-items.md``, are unscanned.
+None is occupied today; each is silent-wrong when it is.
+
 Exit codes:
   0 — every citation resolves
   1 — at least one dangling citation, or a citation in a skill with no open-items.md
