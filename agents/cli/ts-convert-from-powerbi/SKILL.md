@@ -65,6 +65,13 @@ Emits tables, columns, measures, relationships, pages, visuals. Read it; note an
 (the parser flags what it could not read rather than guessing).
 
 ### Step 1 — Build the model
+
+> **MANDATORY (I7) — before classifying any DAX measure as untranslatable, open
+> [`../../shared/mappings/powerbi/powerbi-formula-translation.md`](../../shared/mappings/powerbi/powerbi-formula-translation.md)
+> and check its Direct, Pattern rewrites, and Rebuilt-via-a-parameter tables. Do not decide
+> from syntax alone.**
+> See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
+
 ```bash
 ts powerbi build-model <path-to-.pbip> --connection "<TS connection>" \
   --db <DATABASE> --schema <SCHEMA> --model-name "<Model name>" --output out/ \
@@ -138,6 +145,7 @@ user as the deliverable.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.3 | 2026-09-22 | **I7 untranslatable gate added.** The skill reached its Step 1 DAX classification with no instruction to open [powerbi-formula-translation.md](../../shared/mappings/powerbi/powerbi-formula-translation.md) first, so an expression with a documented ThoughtSpot equivalent could be dropped on syntax recognition alone. Now gated by `check_i7_gate.py` (2026-09-22 audit finding 9.3 — the invariant was enforced by nothing and missing from 9 of 11 converters). |
 | 1.1.2 | 2026-08-03 | Render-robustness follow-up: lint the liveboard TML **before** import (Step 4) and let `ts tml verify-render` fail on the blank-chart case. A chart tile emitted with a type but no `chart.axis_configs` (or `custom_chart_config`) imports cleanly and **returns data (HTTP 200) yet draws blank** — the exact hole a hand-authored board fell through (a real board came back with 3 of 4 tiles blank). `ts tml lint` now flags such a tile pre-import and `verify-render` reports it under a new `blank_chart_tiles` field and exits non-zero, so a board that loads data but does not truly render can no longer pass the gate. Core rule reworded to name both failure modes (raw column → "No data source found"; no axis config → 200-but-blank). ts-cli v0.131.0. |
 | 1.1.1 | 2026-07-30 | **BL-171 — `_DAX_FUNC` stops emitting seven non-existent or wrong-meaning ThoughtSpot names (ts-cli v0.126.1).** `TRIM`/`UPPER`/`LOWER` mapped to bare `trim`/`upper`/`lower`, `HOUR`/`MINUTE`/`SECOND` to bare `hour`/`minute`/`second`, and `DISTINCTCOUNT` to `unique_count` — **none of those seven names exists in the ThoughtSpot formula parser** (live-disproved on se-thoughtspot: `upper`/`lower` 2026-06-13, the rest 2026-07-30), so every affected measure failed at import with `error_code 14516`. Now: `TRIM`/`UPPER`/`LOWER` → `sql_string_op("TRIM({0})", …)` pass-throughs (via the shared `wrap_passthrough_calls`), `HOUR` → `hour_of_day`, `DISTINCTCOUNT` → `unique count` (with a space), and `MINUTE`/`SECOND` are **flagged NEEDS REVIEW** rather than faked — ThoughtSpot has no minute/second extractor and the warehouse dialect isn't known at this layer. Separately, `MONTH` mapped to `month`, which exists but returns the month **name**; DAX `MONTH()` is numeric, so the target is `month_number` — a wrong *number*, not a failed import. Coverage matrix updated; 9 new tests; existing `test_distinctcount_maps_to_unique_count` had asserted the wrong expectation and is corrected. **All emitted forms live-verified on se-thoughtspot 2026-07-30** (`VALIDATE_ONLY`, nothing persisted). |
 | 1.1.0 | 2026-07-27 | Render-robustness: require `ts tml verify-render` as a gate after import; resolve the time-intelligence hard tail INTO the model before building the liveboard, via the new deterministic `ts powerbi build-timeintel` (Reference-Date SPLY/YoY measures, the live-verified measure-based pattern); add the "tiles come from the tool, never by hand" core rule (a hand-authored tile imports but fails to render with "No data source found") |

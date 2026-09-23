@@ -294,6 +294,14 @@ if echo "$STAGED" | grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validat
   run_check "no inline tml gate" "tools/validate/check_no_inline_tml_gate.py --root $REPO_ROOT"
 fi
 
+# I7 untranslatable gate — every conversion skill must tell the model to open its
+# formula-translation reference before calling an expression untranslatable. Covers
+# BOTH runtimes (CoCo executes the doc, so the gate matters there too). Runs when any
+# convert skill or the validator changes.
+if echo "$STAGED" | grep -qE '(^agents/(cli|coco-snowsight)/ts-convert-.*/SKILL\.md|tools/validate/check_i7_gate\.py)'; then
+  run_check "i7 gate"            "tools/validate/check_i7_gate.py --root $REPO_ROOT"
+fi
+
 # No inline Python TML assembly — CLI convert skills must use `ts tableau build-model`,
 # not hand-rolled Python heredocs for formula import. Runs when a convert skill or the
 # validator changes.

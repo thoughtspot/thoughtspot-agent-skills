@@ -83,6 +83,7 @@ jobs:
           python3 tools/validate/check_no_v1_endpoints.py --root . || rc=1
           python3 tools/validate/check_lint_invariant_list.py --root . --base origin/main || rc=1
           python3 tools/validate/check_no_inline_tml_gate.py --root . || rc=1
+          python3 tools/validate/check_i7_gate.py --root . || rc=1
           python3 tools/validate/check_skill_cli_usage.py --root . || rc=1
           # 2026-07-03 audit-harvest validators (see .claude/rules/repo-audit.md).
           python3 tools/validate/check_no_inline_requests.py --root . || rc=1

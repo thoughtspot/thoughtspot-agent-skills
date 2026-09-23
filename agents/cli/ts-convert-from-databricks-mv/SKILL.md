@@ -415,6 +415,13 @@ conditional aggregates, LOD `group_aggregate` (3-arg with `query_filters()`),
 dimension/measure lands in `translated[]` or `skipped[]` with a reason —
 review both.
 
+> **MANDATORY (I7) — before classifying any dimension or measure expression as
+> untranslatable, open
+> [`../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md`](../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md)
+> and check its Databricks → ThoughtSpot (Reverse Direction) tables and the
+> Untranslatable Patterns list. Do not decide from syntax alone.**
+> See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
+
 **3. Review the output with the user:**
 
 - **`skipped[]`** — each entry needs a decision: accept the omission, or build
@@ -835,6 +842,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.13.1 | 2026-09-22 | **I7 untranslatable gate added.** The skill reached its Step 6 `skipped[]` review with no instruction to open [ts-databricks-formula-translation.md](../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md) first, so an expression with a documented ThoughtSpot equivalent could be dropped on syntax recognition alone. Now gated by `check_i7_gate.py` (2026-09-22 audit finding 9.3 — the invariant was enforced by nothing and missing from 9 of 11 converters). |
 | 1.13.0 | 2026-09-02 | **BL-232 — column descriptions reached the TML at the wrong nesting level and were silently discarded on import (ts-cli v0.136.0).** An MV's `comment:` was written to `columns[].properties.description`, but ThoughtSpot expects `description` as a **sibling of `name`** and a Model import **silently ignores unknown keys inside `properties`** — so the TML linted clean, imported with `status_code OK`, and the descriptions were gone. Live-caught 2026-09-02 converting `dunder_mifflin_sales_mv`: 19 of 19 descriptions sent, 0 stored; relocating them to the column root and re-importing the same GUID restored all 19. Synonyms were unaffected because they were already placed correctly two lines away. This mattered most for Spotter, which reads column descriptions as AI context. The reverse leg (`build-mv`) had the mirror-image bug — it *read* `properties.description`, so a genuine ThoughtSpot Model's descriptions never reached an emitted MV `comment:`; the two cancelled out in a TS→MV→TS round-trip, which is how both survived. Worked examples corrected. |
 | 1.12.2 | 2026-08-26 | Use `ts metadata search --connection` instead of hand-filtering `dataSourceName`; the old instruction said **equals** where the CLI casefolds (finding 11.1). |
 | 1.12.1 | 2026-08-26 | Carry BL-074's prompt-batching rule — ask one question at a time for **dependent** decisions, batch **independent** ones. The rule reached 13 skills but omitted the four conversion skills, which are the most interactive in the repo by ask-count (finding 14.6). A `check_patterns` rule now enforces it above a question-count threshold. |

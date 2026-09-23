@@ -715,6 +715,13 @@ Present the following sections. If `build-mv` produced more than one entry in
 - Omitted columns:  {n}  (from summary.skipped — see Unmapped Report below)
 ```
 
+> **MANDATORY (I7) — before classifying any ThoughtSpot formula as untranslatable, open
+> [`../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md`](../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md)
+> and check its scalar, aggregate and window function tables, the SQL pass-through
+> section, and every `TS → Databricks` (to-direction) table — not the
+> `Databricks → ThoughtSpot (Reverse Direction)` section. Do not decide from syntax alone.**
+> See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
+
 **3. Unmapped Properties Report** — built from `summary.skipped[]` and
 `summary.warnings[]` (Step 5), in the format defined in
 [../../shared/mappings/ts-databricks/ts-databricks-properties.md](../../shared/mappings/ts-databricks/ts-databricks-properties.md).
@@ -964,6 +971,7 @@ If no (or no more models remain): the session is complete. No token cleanup need
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.3 | 2026-09-22 | **I7 untranslatable gate added.** The skill reached its Step 10 Unmapped Properties Report with no instruction to open [ts-databricks-formula-translation.md](../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md) first, so an expression with a documented ThoughtSpot equivalent could be dropped on syntax recognition alone. Now gated by `check_i7_gate.py` (2026-09-22 audit finding 9.3 — the invariant was enforced by nothing and missing from 9 of 11 converters). |
 | 1.4.2 | 2026-08-26 | Carry BL-074's prompt-batching rule — ask one question at a time for **dependent** decisions, batch **independent** ones. The rule reached 13 skills but omitted the four conversion skills, which are the most interactive in the repo by ask-count (finding 14.6). A `check_patterns` rule now enforces it above a question-count threshold. |
 | 1.4.1 | 2026-08-26 | Withdraw the claim that a `MANY_TO_ONE` join keeps an emitted MV at 17.3+ — the vendor availability matrix lists `rely.at_most_one_match` under 18.1 (finding 13.13). Emission unchanged |
 | 1.4.0 | 2026-07-31 | **BL-174 — join cardinality is declared once, in the form that does not raise the Runtime floor (ts-cli v0.127.0).** A `MANY_TO_ONE` model join emitted **both** `rely: { at_most_one_match: true }` **and** `cardinality: many_to_one`. The two are equivalent, `many_to_one` is the MV schema's own default, and `rely:` works on every Databricks Runtime while `cardinality:` is **18.1+ only** — so the redundant key silently moved the generated DDL's Runtime requirement from 17.3+ to 18.1+ for no semantic gain (fidelity report F5, `docs/reviews/2026-07-29-ossie-tpcds-fidelity.md`). Now `MANY_TO_ONE`/`ONE_TO_ONE`/unset emit `rely:` alone. **Also fixed in the same lines:** a `ONE_TO_MANY` join emitted `rely: { at_most_one_match: true }` and no `cardinality:`, i.e. the MV asserted the **opposite** cardinality to the Model's — it now emits `cardinality: one_to_many` and no `rely:`. The Prerequisites Runtime table is corrected accordingly: 18.1+ is needed for an explicit **`ONE_TO_MANY`** join (not `MANY_TO_ONE`) or a period-over-period measure. Coverage-matrix row #6 rewritten, new row #66 records that `joins[].type` is dropped and why a non-`LEFT_OUTER` model join is not reproducible in an MV. 4 new tests. |

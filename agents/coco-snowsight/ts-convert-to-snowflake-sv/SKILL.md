@@ -980,6 +980,15 @@ rm -f /tmp/ts_tml_*.json
 
 ### Step 9: Translate Formulas
 
+> **MANDATORY (I7) — before classifying any ThoughtSpot formula as untranslatable, open
+> [`../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md`](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
+> and check its Translation Decision Flowchart, the `ThoughtSpot → Snowflake` column of the
+> Scalar Functions tables, and the SQL Pass-Through Functions, Window and Analytical
+> Functions, Level of Detail (LOD) Functions and Semi-Additive Functions sections — then the
+> "Untranslatable Patterns", "Untranslatable LOD Patterns" and "Untranslatable Semi-Additive
+> Patterns" sections for the authoritative exclusions. Do not decide from syntax alone.**
+> See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
+
 > **MANDATORY — read the reference before assessing any formula:**
 > Open [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
 > and use its **Decision Flowchart** to classify every formula. Do **not** classify
@@ -1475,6 +1484,7 @@ Apply Steps 11b–12b (checkpoint + verify) from the standard workflow unchanged
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.1 | 2026-09-22 | **I7 untranslatable gate added.** Step 9 (Translate Formulas) reached its untranslatable verdict with no instruction to open [ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) first, so a ThoughtSpot formula with a documented Snowflake equivalent could be dropped on syntax recognition alone. The gate names the `ThoughtSpot → Snowflake` (forward) column explicitly — the reverse tables are the wrong side for this direction. Now gated by `check_i7_gate.py` (2026-09-22 audit finding 9.3). |
 | 1.3.0 | 2026-08-26 | **Finding 13.9 — an additive hardcoded filter is translatable.** `group_aggregate(..., query_filters() + {attr='v'})` now maps to `SUM(CASE WHEN ... THEN ... END)`; live-verified on Snowflake 10.30.101 that a semantic-view metric expression CAN carry a filter, which the shared mapping had denied while its own `sum_if` row asserted the opposite. Filters that *suppress* query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable, now for the correct reason. |
 | 1.2.2 | 2026-07-03 | Snowflake currency corrections: soften the "metrics are never top-level" rule to note the root-level derived-metrics exception (Key Structural Rule #1 in snowflake-schema.md). |
 | 1.2.1 | 2026-06-13 | Add LOD/window metric alias rule (error 010256) to Step 11 checklist; sync to CLI v1.2.2. |
