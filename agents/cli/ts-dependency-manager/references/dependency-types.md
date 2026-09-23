@@ -28,7 +28,7 @@ Status legend:
 | 6 | **Spotter feedback** | NLS coaching examples on a model | model's `--associated` export, type `nls_feedback` | Partial — v2 dependents `FEEDBACK` bucket on a model returns the GUIDs, but TML export of the GUID directly fails (open-item #18) | column-name in `feedback[].search_tokens` or `formula_info` references | update `search_tokens` (regex on `[OLD]` → `[NEW]`) | drop matching feedback entries from the list | Partial — read works via `--associated`; standalone GUID export broken |
 | 7 | **Monitor alert** | Threshold/anomaly alert on a viz | Liveboard/Answer's `--associated` export, type `monitor_alert` | Yes — Liveboard `--associated` export returns `monitor_alert` doc with all alerts on that liveboard | column-name in `monitor_alert[].personalised_view_info.filters[].column[]` (format `TABLE::COL_NAME`) | rewrite filter column refs; if alert's anchor viz is being removed, prompt user to delete the alert | drop filters whose column lists go to zero; if alert ends up filterless AND its viz is being removed, delete the alert | Implementable (auto via `ts metadata report`) |
 | 8 | **RLS rule** | Row-level security policy | inline in base table TML (`table.rls_rules`) | Yes — every base table TML returned by `--associated` includes its own `rls_rules` if any | column listed in `rls_rules.table_paths[].column[]` and referenced in `rules[].expr` as `[path_id::COL_NAME]` | update `table_paths[].column[]` and rewrite `rules[].expr` | **STOP CONDITION** — silently breaks access control. Block until user removes the rule via UI or explicitly accepts the security impact | Implementable (auto via `ts metadata report`) |
-| 9 | **Column security rule (CSR)** | Per-group column allowlist, scoped to a base table | own TML file `<TABLE>_CSR.column_security_rules` | **No on this build** — not returned by v2 `--associated` even on tables that have CSR; cs_tools has zero references; likely UI-download or VCS-commit only | column-name in `column_security_rules.rules[].column_name` | update matching `column_name` | drop matching rule(s); **STOP CONDITION** — dropping a CSR rule changes who can see the rest of the table's data | Partial — structure known, retrieval mechanism unverified (open-item #9) |
+| 9 | **Column security rule (CSR)** | Per-group column allowlist, scoped to a base table | own TML file `<TABLE>_CSR.column_security_rules` | **No on this build** — not returned by v2 `--associated` even on tables that have CSR; cs_tools has zero references; likely UI-download or VCS-commit only | column-name in `column_security_rules.rules[].column_name` | update matching `column_name` | drop matching rule(s); **STOP CONDITION** — dropping a CSR rule changes who can see the rest of the table's data | Partial — **retrievable** via `ts security column-rules export` (needs `export_options.export_column_security_rules: true` alongside `export_associated`; Beta 10.12+), but **not walked**: `ts metadata report` declares `csr_hits` and never populates it (BL-289) |
 | 10 | **Column alias TML** | Per-locale, per-org, per-group display names at model scope | own TML file `<MODEL>.column_alias` | Yes — the TML export returns the `column_alias` doc alongside the model when `export_options.export_with_column_aliases: true` is set; `ts metadata report` sets it on its `--associated` export and probes the doc, and `ts alias export` retrieves it standalone | model alias in `column_alias.columns[].name`; localized strings in `locales[].orgs[].groups[].entries[].alias` | rewrite the matching `columns[].name`; localized aliases left untouched by default (independent strings) | drop the matching `columns[]` entry entirely | Implementable (auto via `ts metadata report`) |
 | 11 | **Inline alias** (Model `name` vs `column_id`, Table `name` vs `db_column_name`, View `name` vs `search_output_column`) | TS-side label vs underlying ref | already in the standard Model/Table/View TML | Yes — comes back in every standard export | difference between `name` and the underlying field for the same column entry | depends on which layer the user is renaming (DB column vs label) — Step 3-N should distinguish | not applicable — alias goes away with the column | Implementable (full — CLI handles all layers) |
 | 12 | **Column-level ACLs** (sharing) | Who can MODIFY/READ this specific column | ORM records keyed by column GUID; fetched via `POST /api/rest/2.0/security/metadata/fetch-permissions` with `type: LOGICAL_COLUMN` | Yes — v2 endpoint works | not needed — ACLs are GUID-keyed and column GUIDs survive renames | none — ACLs follow the column automatically | none — orphaned ACLs become inert when the column is dropped | GUID-stable — no skill action needed |
@@ -102,7 +102,7 @@ What the skill walks during Step 4. Solid arrows = standard dependencies via v2 
      ▼    ▼
  [LIVEBOARD]
      │   │  ............→ [<MODEL>.column_alias]
-     │   │       (via --associated + the alias flag)
+     │   │       (#10 — verified via --associated + alias flag)
      │   │
      │   └ ............→ [nls_feedback]   (#6 partial via --associated)
      │
@@ -129,8 +129,10 @@ For source = **TABLE**:
 6. Filter all of the above by whether the affected COLUMN is actually referenced (TML scan) —
    surfaced on each dependent as `matched_columns[]` in the `ts metadata report` JSON
    (2026-07: SKILL.md Step 4's scope filter keys off this field, not `risk.reason` text)
-7. Skipped on this build: CSR (#9) — flag in the impact report's "Not Checked" section.
-   Column alias TML is **not** skipped: it comes back in that same `--associated`
+7. Not walked: CSR (#9) — retrievable via `ts security column-rules export`, but
+   `ts metadata report` does not probe it (BL-289), so it stays in the impact
+   report's "Not Checked" section until that is wired.
+   Column alias TML (#10) is **not** skipped: it comes back in that same `--associated`
    export when `export_with_column_aliases: true` is set, which `ts metadata report` does,
    and is probed straight from that response — no extra call
 
@@ -240,11 +242,10 @@ If you keep the viz (CONVERT_TO_TABLE), the alerts continue but lose this filter
 
   NOT CHECKED — manual review recommended
   ──────────────────────  ──────  ────────────────────────────────────────────
-  Column security rules   —       open item #9: structure known but not retrievable
-                                    via --associated on this build (likely UI-download
-                                    or VCS-commit only). Run a manual UI export of
-                                    DM_CUSTOMER_BIRD and review *_CSR.column_security_rules
-                                    if any rules reference ZIPCODE.
+  Column security rules   —       retrievable, but `ts metadata report` does not probe
+                                    it (BL-289). Run `ts security column-rules get
+                                    DM_CUSTOMER_BIRD` and check whether any rule names
+                                    ZIPCODE.
   Schedules               1       informational only — Schedule "TEST_LB_Daily" delivers
                                     the liveboard as PDF; column-agnostic, no action needed
 ```

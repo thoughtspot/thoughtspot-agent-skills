@@ -42,8 +42,8 @@ The example structure is verified in
 > [feedback-tml-verified-patterns.md](feedback-tml-verified-patterns.md). The
 > initial v1 finding (every non-bracket keyword REJECTED) was over-broad —
 > the rejections were caused by **wrong syntax positions / missing quotes**,
-> not by keyword banning. See [open-items.md #16](open-items.md) for the
-> recategorisation.
+> not by keyword banning. The recategorisation came from mining 53 existing
+> feedback entries across four champ-staging Models (2026-04-27).
 
 | Intent | Verified-working form | Common mistake (v1 emitted, REJECTED) |
 |---|---|---|
@@ -67,18 +67,21 @@ question or route via `DEFER` rather than emit a guess.
 
 ## 2. `formula_info[]` — when to generate, expression syntax
 
-> **Verified 2026-04-27 ([open-items.md #17](open-items.md)):** `formula_info[]`
-> on `REFERENCE_QUESTION` is REJECTED by the same parser bug that affects
-> `BUSINESS_TERM` (per [#12](open-items.md)). The parser tries to evaluate the
-> formula expression as a search query and fails. Until #17 lands a verified
-> syntax, generators must NOT emit `formula_info` on either entry type — instead
+> **Verified 2026-04-27 on champ-staging:** `formula_info[]`
+> on `REFERENCE_QUESTION` is REJECTED by the same parser behaviour that affects
+> `BUSINESS_TERM` (§4 below). Both formula-bearing Reference Questions tested — a
+> `cumulative_sum` and a `group_aggregate` share-of-total — failed with
+> `EDOC_FEEDBACK_TML_INVALID: Search did not find "<expression>" in your data or
+> metadata`: the parser evaluates the expression as a search query, not as a
+> formula. Until a verified syntax lands,
+> generators must NOT emit `formula_info` on either entry type — instead
 > emit a `MOVE_TO_NEW_FORMULA` proposal that routes the user to define the
 > formula on the Model first (via `/ts-object-answer-promote`), then reference
 > the formula's display name in `search_tokens`.
 >
-> The mapping below documents the eventual target syntax for when #17 is
-> verified — but the current import path is to drop these questions and
-> use the Model-formula workaround.
+> The mapping below documents the eventual target syntax for if and when the
+> parser accepts inline expressions — but the current import path is to drop
+> these questions and use the Model-formula workaround.
 
 Generate `formula_info[]` when the question's mathematical intent cannot be expressed by
 existing Model columns alone. Mapping by tier (from
@@ -233,8 +236,9 @@ Every `REFERENCE_QUESTION` entry sets:
   # axis_config: only if not omitted (per Section 3)
 ```
 
-For `BUSINESS_TERM` entries (Method B — verified working shape from
-[open-items.md #12](open-items.md), tested 2026-04-26 against champ-staging):
+For `BUSINESS_TERM` entries (Method B — shape verified 2026-04-26 against
+champ-staging, with both a physical column `[Customer Name]` and a Model formula
+`[Inventory Balance]` as the `search_tokens` target):
 
 ```yaml
 - id: "{auto-incrementing}"
@@ -245,7 +249,7 @@ For `BUSINESS_TERM` entries (Method B — verified working shape from
   search_tokens: "[{Existing Column or Formula Name}]"
   rating: UPVOTE
   display_mode: UNDEFINED      # REQUIRED
-  chart_type: KPI               # REQUIRED — KPI is universally safe; see open-items.md #11 for full whitelist
+  chart_type: KPI               # REQUIRED — KPI is safe for any BT; full whitelist in feedback-tml-verified-patterns.md
 ```
 
 **Critical constraint: BUSINESS_TERMs reference EXISTING Model artifacts only.** They
@@ -256,7 +260,7 @@ cannot create new formulas inline. Every BT must point at:
 
 **Do NOT include `formula_info` on a BUSINESS_TERM.** The schema documents this field
 but the API rejects every formula-expression syntax variant tested (verified
-[open-items.md #12](open-items.md)). The error is consistent: "Search did not find
+2026-04-26 on champ-staging). The error is consistent: "Search did not find
 <expression> in your data or metadata" — the parser is looking up the expression as
 a search bar query, not interpreting it as a formula.
 

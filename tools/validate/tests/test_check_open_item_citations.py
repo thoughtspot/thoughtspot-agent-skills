@@ -112,3 +112,58 @@ def test_body_citation_still_caught_when_a_changelog_exists(tmp_path):
           {"SKILL.md": "Body cites open-item #99.\n\n## Changelog\n\n| 1.0.0 | x |\n"},
           items=[1])
     assert len(run(tmp_path)) == 1
+
+
+# ── regression: spellings the first regex missed (hid 15 live pointers) ─────
+
+def test_dot_md_spelling_is_caught(tmp_path):
+    """`open-items.md #11` — the first cut required whitespace straight after `items`."""
+    skill(tmp_path, "ts-object-model-coach",
+          {"SKILL.md": "see open-items.md #11 for detail\n"}, items=[4])
+    assert len(run(tmp_path)) == 1
+
+
+def test_markdown_link_spelling_is_caught(tmp_path):
+    skill(tmp_path, "ts-object-model-coach",
+          {"SKILL.md": "see [open-items.md #12](references/open-items.md)\n"}, items=[4])
+    assert len(run(tmp_path)) == 1
+
+
+def test_underscore_spelling_is_caught(tmp_path):
+    skill(tmp_path, "ts-x", {"SKILL.md": "open_item #7\n"}, items=[1])
+    assert len(run(tmp_path)) == 1
+
+
+def test_dot_md_spelling_resolves_when_real(tmp_path):
+    skill(tmp_path, "ts-object-model-coach",
+          {"SKILL.md": "see open-items.md #4 for detail\n"}, items=[4])
+    assert run(tmp_path) == []
+
+
+# ── the bare markdown-link form (path resolves, item does not) ──────────────
+
+def test_bare_link_form_is_caught(tmp_path):
+    """`[#17](open-items.md)` — check_references passes it; the item is absent."""
+    skill(tmp_path, "ts-object-model-coach",
+          {"SKILL.md": "deferred, see [#17](references/open-items.md)\n"}, items=[4])
+    problems = run(tmp_path)
+    assert len(problems) == 1 and "#17 does not exist" in problems[0]
+
+
+def test_bare_link_form_resolves_when_real(tmp_path):
+    skill(tmp_path, "ts-object-model-coach",
+          {"SKILL.md": "see [#4](references/open-items.md)\n"}, items=[4])
+    assert run(tmp_path) == []
+
+
+def test_link_to_some_other_file_is_not_a_citation(tmp_path):
+    """`[#4](dependency-types.md)` is a section anchor, not an open-item pointer."""
+    skill(tmp_path, "ts-x", {"SKILL.md": "see [row #4](references/dependency-types.md)\n"},
+          items=[1])
+    assert run(tmp_path) == []
+
+
+def test_both_forms_on_one_line_report_once_each(tmp_path):
+    skill(tmp_path, "ts-x",
+          {"SKILL.md": "open-item #8 and [#9](references/open-items.md)\n"}, items=[1])
+    assert len(run(tmp_path)) == 2

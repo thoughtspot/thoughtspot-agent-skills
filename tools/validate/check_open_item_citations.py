@@ -44,8 +44,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _dirs import ALL_RUNTIMES, agents_path  # noqa: E402
 from generate_open_items_index import _HEADER_RE  # noqa: E402
 
-#: `open-item #9`, `open items #12`, `open item #19` — case-insensitive.
-CITATION_RE = re.compile(r"open[- ]items?\s+#(\d+)", re.IGNORECASE)
+#: `open-item #9`, `open items #12`, `open item #19`, `open-items.md #11`, and the
+#: markdown-link form `[open-items.md #11](open-items.md)`. The `.md` spelling was
+#: missed by the first cut of this regex, which required whitespace straight after
+#: `items` — it hid 15 live dangling pointers in one skill.
+CITATION_RE = re.compile(r"open[-_ ]items?(?:\.md)?\s*#(\d+)", re.IGNORECASE)
+
+#: The bare markdown-link form: ``[#17](references/open-items.md)``. The link *path*
+#: resolves, so ``check_references`` passes it while the item number points at nothing
+#: — the most invisible spelling of this defect, and 10 sites of it hid in one skill.
+LINK_CITATION_RE = re.compile(
+    r"\[[^\]]*?#(\d+)[^\]]*?\]\([^)]*open[-_]items?\.md[^)]*\)", re.IGNORECASE)
 
 #: How far back to look for a skill name that redirects the citation elsewhere.
 LOOKBACK = 120
@@ -104,10 +113,17 @@ def check_skill(skill: Path, root: Path, known: dict[str, Path]) -> list[str]:
         except (OSError, UnicodeDecodeError):
             continue
 
-        for m in CITATION_RE.finditer(procedure_body(text)):
-            number = m.group(1)
-            lineno = text.count("\n", 0, m.start()) + 1
-            named = owning_skill(text, m.start(), known)
+        body = procedure_body(text)
+        raw = [(m.start(), m.group(1)) for m in CITATION_RE.finditer(body)]
+        raw += [(m.start(), m.group(1)) for m in LINK_CITATION_RE.finditer(body)]
+        # `[open-items.md #12](…open-items.md)` matches BOTH patterns — one citation,
+        # so dedupe on (line, item) rather than match offset, which differs per pattern.
+        seen: dict[tuple[int, str], int] = {}
+        for start, number in sorted(raw):
+            key = (body.count("\n", 0, start) + 1, number)
+            seen.setdefault(key, start)
+        for (lineno, number), start in sorted(seen.items()):
+            named = owning_skill(text, start, known)
 
             if named and named != skill.name:
                 target = known[named] / "references" / "open-items.md"

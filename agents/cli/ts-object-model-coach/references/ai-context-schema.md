@@ -238,8 +238,10 @@ Before TML import, validate:
   enums.
 - Every value lex-checks as an enum or ref — **no free-text patterns** (rejects any
   value containing whitespace + alpha-only words that don't match a ref shape).
-- Total `ai_context` payload ≤ 400 chars per column (verified hard limit;
-  see `open-items.md #14`).
+- Total `ai_context` payload ≤ 400 chars per column (verified hard limit,
+  2026-04-27: the API fails the whole import with `OBJECT_INVALID_STATE: AI column
+  context exceeds maximum length of 400 characters for column: <columns>`, naming
+  every offending column in one response — nothing is truncated).
 
 Validation failures block import; the user is shown the offending columns and the
 specific rule that failed.

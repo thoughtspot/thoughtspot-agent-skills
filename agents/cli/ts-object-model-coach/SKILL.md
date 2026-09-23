@@ -857,9 +857,11 @@ Phrase → **existing** Model column or formula mappings, drawn from prose minin
 - The phrase targets an existing **Model formula** (column synonyms can't reach formulas)
 - OR the phrase needs `chart_type` / `display_mode` hints that a column synonym can't carry
 
-**BUSINESS_TERMs cannot create new formulas inline** (verified
-[open-items.md #12](references/open-items.md)). If a phrase needs a calculation that
-doesn't exist on the Model:
+**BUSINESS_TERMs cannot create new formulas inline** (verified 2026-04-26 on
+champ-staging: a `formula_info` expression on a BT is rejected with
+`EDOC_FEEDBACK_TML_INVALID` — *"Search did not find `<expression>` in your data or
+metadata"* — because the parser resolves the expression as a search-bar query, not as
+a formula definition). If a phrase needs a calculation that doesn't exist on the Model:
 1. The skill emits a `MOVE_TO_NEW_FORMULA` proposal in `business_terms.md`, NOT a
    default-KEEP BT entry
 2. The user is directed to add the formula via `/ts-object-answer-promote` (or
@@ -877,10 +879,12 @@ doesn't exist on the Model:
   search_tokens: "[Inventory Balance]"   # MUST reference existing column or formula
   rating: UPVOTE
   display_mode: UNDEFINED                 # REQUIRED
-  chart_type: KPI                         # REQUIRED (KPI is universally safe; see open-items.md #11)
+  chart_type: KPI                         # REQUIRED — KPI is safe for any BT; TABLE is rejected
 ```
 
-Do NOT include `formula_info` on BT entries — verified rejected by the API.
+Do NOT include `formula_info` on BT entries — verified rejected by the API. The full
+verified `chart_type` whitelist is in
+[feedback-tml-verified-patterns.md](references/feedback-tml-verified-patterns.md#chart_type--verified-working-values).
 
 See [token-mapping-rules.md §4](references/token-mapping-rules.md) for the full Method B
 specification.
@@ -1409,12 +1413,13 @@ before serialising.
 
 ### 8c. Build the merged feedback TML (surfaces 3, 4)
 
-> **Verified API behaviour (2026-04-27):** the `nls_feedback` TML import
-> wholesale REPLACES the Model's feedback collection with the payload. There
-> is no append/merge mode at the API. Per
-> [open-items.md #18](references/open-items.md) the skill simulates
-> merge-with-preservation by fetching existing entries first, then including
-> them in the import payload alongside the new ones.
+> **Verified API behaviour (2026-04-27, champ-staging):** the `nls_feedback` TML
+> import wholesale REPLACES the Model's feedback collection with the payload —
+> importing 40 new entries removed the 5 pre-existing ones, and neither
+> `--policy ALL_OR_NONE` nor `--no-create-new` changes that. There is no
+> append/merge mode at the API, so the skill simulates merge-with-preservation by
+> fetching existing entries first, then including them in the import payload
+> alongside the new ones.
 
 #### Step 1 — Use feedback fetched in Step 2b
 
@@ -1457,7 +1462,8 @@ value must follow the verified-working forms in
 [feedback-tml-verified-patterns.md](references/feedback-tml-verified-patterns.md).
 Forms not yet verified (untested keywords / positions) must NOT be emitted —
 either drop the question or route via `MOVE_TO_NEW_FORMULA` (per
-[#17](references/open-items.md)) / `DEFER`.
+[token-mapping-rules.md](references/token-mapping-rules.md) §2, which records the
+parser rejection) / `DEFER`.
 
 ### 8d. Save instructions.md (surface 5 — manual paste)
 
@@ -1478,14 +1484,21 @@ Ready to apply coaching to "{model_name}":
                                  (prose surface; ai_context contains no prose)
   Column Synonyms updates:      {N_syn_add} ADDs, {N_syn_keep} KEEPs
   Reference Questions to add:   {N_ref}      (existing: {N_existing_ref})
-                                 ⚠ {N_existing_ref} existing entries WILL BE
-                                  REPLACED by the import — see open-items.md #18
+                                 ⚠ The import REPLACES the whole feedback
+                                  collection (verified 2026-04-27); Step 8c
+                                  re-includes the {N_existing_ref} existing
+                                  entries so none are lost
                                  ⚠ Formula-bearing tiers (t2.cumulative,
                                   t3.avg_per, t3.ratio, t3.share_of_total, t4.*)
-                                  DEFERRED until #17 verified
+                                  DEFERRED — no verified importable form
+                                  (cumulative_sum and group_aggregate
+                                  share-of-total both rejected 2026-04-27)
                                  ⚠ Keyword-bearing tiers (t1.top_n,
                                   t2.recent_period, t2.this_vs_last,
-                                  t3.year_filter) DEFERRED until #16 verified
+                                  t3.year_filter) DEFERRED by the generator,
+                                  though question-taxonomy.md marks the first,
+                                  third and fourth ✅ Importable (verified
+                                  2026-04-27) — see BL-291
   Business Terms to add:        {N_bt}        (existing: {N_existing_bt})
   Model description:            {DESCRIPTION_ACTION}
   Data Model Instructions:      {N_instr} draft rule(s), {N_instr_bytes}/3000
@@ -1523,13 +1536,16 @@ ts tml import --file {run_dir}/after/feedback.tml \
   --profile "{profile_name}" --policy ALL_OR_NONE --no-create-new
 ```
 
-> **Open item:** standalone `nls_feedback` import vs bundled-with-model — see
-> [open-items.md](references/open-items.md) #2 for the verification test.
+> **Verified 2026-04-26 (champ-staging):** standalone `nls_feedback` import works —
+> 60 entries imported with `--policy ALL_OR_NONE --no-create-new`, and all 60
+> persisted on the Model. Bundling the feedback into the Model TML is not required.
 
 ### 9c. Smoke-test
 
 Verification is split between two endpoints — `--associated` does **NOT** surface
-feedback entries even when they exist (verified [open-items.md #2](references/open-items.md)).
+feedback entries even when they exist (verified 2026-04-26: the `--associated` export
+returns only `model` + `table` items, so feedback must be counted through the
+dependents path below).
 
 **For Model TML changes (surfaces 1, 2, 6) — use `--associated`:**
 
@@ -1542,7 +1558,9 @@ Parse the response and confirm column-by-column:
 - All `properties.ai_context` updates round-tripped (NB: `ai_context` lives in
   `properties.ai_context`)
 - All `properties.synonyms[]` additions round-tripped (NB: synonyms live in
-  `properties.synonyms`, NOT at column-level — see open-items.md #3)
+  `properties.synonyms`, NOT at column-level — a column-level `synonyms[]` is
+  silently dropped on import; verified 2026-04-26, 0/16 columns survived at
+  column level vs 16/16 under `properties`)
 - `model.description` matches if updated
 
 **For feedback entries (surfaces 3, 4) — use `ts metadata dependents`:**
@@ -1573,8 +1591,8 @@ Surface any silent drops to the user (known TML import failure modes per
 `feedback_ts_tml_import_constraints` memory). Common causes:
 - Formula expression syntax invalid (BUSINESS_TERM with bad formulas) — entries
   drop with EDOC_FEEDBACK_TML_INVALID error in the response
-- Invalid `chart_type` (e.g. `TABLE` is rejected; see open-items.md #11 for the
-  verified valid set)
+- Invalid `chart_type` (e.g. `TABLE` is rejected; the verified valid set is in
+  [feedback-tml-verified-patterns.md](references/feedback-tml-verified-patterns.md#chart_type--verified-working-values))
 - References to columns/formulas no longer in the Model
 
 ### 9d. Final report
@@ -1634,7 +1652,7 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
-| 2.4.1 | 2026-09-22 | **Removed a verification claim no open item records (audit 5.3 class).** `references/review-explainers.md` said Business Terms cannot define new formulas inline "(verified in open-item #12)"; this skill's items are #4, #6-#9, #13, #15 — there is no #12, so the claim read as sourced when nothing backed it. The constraint is left stated, the false provenance removed. Caught by the new `check_open_item_citations.py`. |
+| 2.4.2 | 2026-09-22 | **15 dangling open-item citations grounded, and three contradictions they were hiding (audit 5.3 class).** PR #31 (2026-06-01) trimmed this skill's open-items from 17 to 7, deleting items that had been VERIFIED against champ-staging in April 2026, and left every inbound reference behind. All 15 were recoverable from git, so each pointer is replaced by the **substance** it pointed at — the error code, the probe result, the date — which is what a reader was following it for and cannot rot by a file being deleted again. Three of them were masking real contradictions: (1) the Step 8e import gate warned that `{N} existing entries WILL BE REPLACED`, while Step 8c fetches and re-includes them precisely so none are lost — the skill was warning users of data loss its own code prevents; (2) standalone `nls_feedback` import was framed as an open question with a test to run, when that test passed in April 2026 (60 entries imported, all 60 persisted); (3) the tier-deferral gate said "DEFERRED until #16/#17 verified" when both were verified — #17 verified-*rejected* (so the deferral holds, the framing did not) and #16 verified *working* forms for tiers `question-taxonomy.md` marks ✅ Importable. (3) is a generator-behaviour question, so the framing is corrected and the substance is BL-291. The `chart_type` whitelist now lives in `feedback-tml-verified-patterns.md` with all 12 verified values instead of being cited from a deleted item. |
 | 2.4.0 | 2026-08-26 | Name `ts snowflake exec` at the SQL sites and define the previously-undefined `execute()` against it — the flag is `--sf-profile` (required) and the profile is `{sf_profile_name}`. Without this an executor improvised a connection each run, and the likeliest improvisation is the inlined connector a validator already bans in a SKILL.md (finding 5.2). Also flags the per-column sample loop as N round-trips where a batched form already exists. |
 | 2.3.4 | 2026-08-26 | Name `ts snowflake exec` at the SQL sites and define the previously-undefined `execute()` against it — an executor had to improvise a connection each run, and the likeliest improvisation is the inlined connector a validator already bans in a SKILL.md (finding 5.2). Also flags the per-column loop as N round-trips where a batched form exists. |
 | 2.3.3 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |

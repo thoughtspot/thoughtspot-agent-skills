@@ -13,13 +13,13 @@
 > | `t2.recent_period` | ⚠ Untested — `[Date].'last 30 days'` plausible | (skip until verified) |
 > | `t2.this_vs_last` | ✅ Importable | `[Amount] [Order Date] = 'this year' vs [Order Date] = 'last year'` |
 > | `t2.trend_by_dim` | ✅ Importable | `[Order Date].monthly [Product Category] [Amount]` |
-> | `t2.cumulative` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
+> | `t2.cumulative` | ❌ formula_info rejected — use Model-formula workaround | (no importable form) |
 > | `t3.dim_filter` | ✅ Importable | `[Amount] [Category] = 'printers'` |
 > | `t3.year_filter` | ✅ Importable | `[Order Date] = '2025' [Amount]` |
-> | `t3.avg_per` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
-> | `t3.ratio` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
-> | `t3.share_of_total` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
-> | `t4.*` (all) | ❌ All require formula_info — use Model-formula workaround | [#17](open-items.md) |
+> | `t3.avg_per` | ❌ formula_info rejected — use Model-formula workaround | (no importable form) |
+> | `t3.ratio` | ❌ formula_info rejected — use Model-formula workaround | (no importable form) |
+> | `t3.share_of_total` | ❌ formula_info rejected — use Model-formula workaround | (no importable form) |
+> | `t4.*` (all) | ❌ All require formula_info — use Model-formula workaround | (no importable form) |
 >
 > Workaround for ❌ patterns: define the required formula as a Model formula
 > first (via `/ts-object-answer-promote` or manual TML edit), then reference
