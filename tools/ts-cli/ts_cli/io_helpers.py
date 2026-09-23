@@ -73,7 +73,12 @@ def run_tml_import(
     from ts_cli.tml_common import extract_imported_guid
 
     model_tml_str = json.dumps(doc)
-    cmd = (f"source ~/.zshenv && ts tml import --policy {shlex.quote(policy)} "
+    # No `source ~/.zshenv &&`: under `bash -c`, sourcing a file that does not
+    # exist is fatal, so TML import failed outright on every machine without one
+    # — Windows, most Linux, any bash-default shell (audit 4.2). The CLI reads
+    # its credentials from the OS keyring and the environment it inherits, so the
+    # shell profile was never required to make the call work.
+    cmd = (f"ts tml import --policy {shlex.quote(policy)} "
            f"--profile {shlex.quote(profile)}")
     if no_create_new:
         cmd += " --no-create-new"

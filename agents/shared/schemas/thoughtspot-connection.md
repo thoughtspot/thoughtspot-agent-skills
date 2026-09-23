@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (validated in 2026-07-11 external sweep — no changes needed) -->
+<!-- currency: thoughtspot — 2026-09 (2026-09-23: corrected the connection-hierarchy claims against the 2026-08-26 live probe on se-thoughtspot, which found the warehouse database/table/column hierarchy empty for every auth type — the finding had landed in `.claude/rules/ts-cli.md` only, while this file, which every ts-convert-* skill reads, still named introspection as the way to check registration; prior: validated in the 2026-07-11 external sweep) -->
 
 # ThoughtSpot Connection — Reference
 
@@ -44,9 +44,25 @@ Returns a JSON array. Each entry includes:
 ```
 
 `data_warehouse_objects` and `details` are always `null` in the list response — they
-are not populated even if the connection has registered tables. Use
-`ts connections get {id}` to retrieve the full connection object including registered
-table/column hierarchy.
+are not populated even if the connection has registered tables.
+
+**The hierarchy is empty on `get` too — do not rely on connection introspection.**
+Live-probed on se-thoughtspot 2026-08-26: v2 `connection/search` returns connection
+metadata with an **empty** warehouse database/table/column hierarchy in every case
+tested — KEY_PAIR with and without `authentication_type`, and the SERVICE_ACCOUNT
+control. It is a ThoughtSpot limitation, not a request-shape problem, and there is no
+workaround. (The 2s → 16s timing jump when `authentication_type` is sent shows the
+parameter does reach live introspection; that work simply yields nothing.)
+
+To find tables already registered as ThoughtSpot objects, search the metadata and
+filter by connection:
+
+```bash
+ts metadata search --name "%{table}%" --profile {profile}
+# then filter on metadata_header.dataSourceName for a connection-scoped result
+```
+
+Full probe table: `.claude/rules/ts-cli.md`.
 
 `name` is what goes into `connection.name` in Table TML. Copy it verbatim —
 ThoughtSpot will return "connection not found" if the case is wrong.
@@ -149,10 +165,12 @@ type normalisation:
 ## Connection Object Structure (from API)
 
 The full connection object returned by `ts connections get {id}` includes the
-credential config and the registered table/column hierarchy. Useful for:
+credential config and the `data_warehouse_type`. The registered table/column
+hierarchy comes back **empty** (see above), so:
 
-- Checking whether a table is already registered before calling `add-tables`
-- Reading the `data_warehouse_type` to know which SQL types to use
+- Read `data_warehouse_type` to know which SQL types to use — this works
+- **Do not** use it to check whether a table is already registered before calling
+  `add-tables`; use `ts metadata search` filtered on `metadata_header.dataSourceName`
 
 ```bash
 ts connections get {connection_id} --profile {profile}

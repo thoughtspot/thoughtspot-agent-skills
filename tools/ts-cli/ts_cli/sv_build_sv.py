@@ -651,6 +651,14 @@ def _assemble_ddl(
 
     ddl_parts.append(f"  comment='{escape_comment(comment_text)}'")
     ddl_parts.append(f"  with extension (CA='{escape_comment(ca_json)}')")
+    # OR REPLACE drops the view and recreates it, taking every privilege granted
+    # on it with it. `COPY GRANTS` carries them over, and Snowflake places it
+    # last, after every other clause. The skill advertises "updating an existing
+    # Snowflake SV from a changed model" as a first-class flow — precisely the
+    # case where grants exist to lose, and where losing them is silent: the view
+    # keeps working for its owner and stops being queryable by the Cortex Analyst
+    # roles granted on it. (Audit 13.8 of 2026-07-11, re-found as 13.6a.)
+    ddl_parts.append("  COPY GRANTS")
 
     return "\n".join(ddl_parts) + "\n;"
 

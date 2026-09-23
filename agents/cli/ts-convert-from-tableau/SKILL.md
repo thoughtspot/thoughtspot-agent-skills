@@ -982,8 +982,8 @@ only if they're unsure, fetch the connection schema to resolve names:
 ```bash
 ts connections get {connection_id} --profile {profile_name}
 ```
-This can be slow and returns 404 on some connection types — **fallback, not the default**.
-If it returns no tables (empty `externalDatabases`) or fails, ask the user for the names.
+**Expect nothing back** — live-probed 2026-08-26, the warehouse hierarchy is empty for
+every auth type. Ask the user and take the names from them.
 
 A connection is **required** for any table being created — there is no skip path. A
 ThoughtSpot table is a logical object over a **live** connection to a physical table that
@@ -2488,6 +2488,7 @@ suggested-but-unverified with its tokens for manual follow-up.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.42.1 | 2026-09-23 | **Connection introspection understated how dead it is (audit 13.1).** The step hedged "404 on some connection types"; the 2026-08-26 probe found the hierarchy empty for **every** auth type. Now says to ask the user. |
 | 1.42.0 | 2026-09-17 | **SCAL-331323 — Step 3.5 gains a `T` branch for a supplied `.tds`/`.tdsx` (prereq ts-cli v0.141.0).** It offered only `Y` (Tableau API) and `N` (TWB metadata only), so a consultant without Server access — the case `N` is labelled for — was routed past the physical model even while holding the `.tds`. `T` parses it and continues as `Y` does. Paid for inside the BL-128 ratchet by trimming restatements in the same section. |
 | 1.41.0 | 2026-09-15 | **SCAL-338450 — Step 3 no longer dies on a non-numeric table-calc address (prereq ts-cli v0.139.0).** Tableau writes `false` / `"All Pages"` into `<table-calc><address><value>` for non-offset addressing modes; a bare `int()` raised an uncaught `ValueError` out of `ts tableau parse`, so the **whole** workbook yielded nothing (no tables, joins, formulas, params, dashboards) and Steps 4+ were unreachable — 2 real customer workbooks were 100% unmigratable over one token on one worksheet. That entry's `address_offset` now degrades to `None` (the element-absent value) with a warning in the new `table_calc_addressing.warnings`. Corpus-verified 33/33 parse; no other file changes behaviour. |
 | 1.40.1 | 2026-08-26 | Use `ts metadata search --connection` instead of hand-filtering `dataSourceName`; the old instruction said **equals** where the CLI casefolds, so it dropped rows the CLI keeps (finding 11.1). |
