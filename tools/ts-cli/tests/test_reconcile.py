@@ -13,6 +13,25 @@ def test_clean_column_name_drops_junk_and_empty():
     assert clean_column_name("__tableau_internal_object_id__].[_12CAA8") is None
     assert clean_column_name("") is None
     assert clean_column_name(None) is None
+    # Tableau's pivot pseudo-field names no warehouse column; emitting it gave
+    # every I12 lint finding (a bare column_id ThoughtSpot rejects at import).
+    assert clean_column_name(":Measure Names") is None
+
+
+def test_clean_column_name_keeps_real_columns_that_resemble_pseudo_fields():
+    """The pseudo-field is matched by EQUALITY, never as a substring or by a
+    leading-colon prefix — a real column is only ever one false positive away,
+    and these are the shapes that would trip a looser rule."""
+    assert clean_column_name("Measure Names") == "Measure Names"      # no leading colon
+    assert clean_column_name("Measure") == "Measure"
+    assert clean_column_name("Measures") == "Measures"
+    assert clean_column_name("My :Measure Names") == "My :Measure Names"
+    # a user column that merely STARTS with a colon is kept — pins "exact
+    # match, not prefix", so loosening that later has to be deliberate
+    assert clean_column_name(":Custom Thing") == ":Custom Thing"
+    # looks like a pseudo-field, is not one: it translates to a real SUM
+    # measure (formula_Number of Records), so dropping it deletes data
+    assert clean_column_name("Number of Records") == "Number of Records"
 
 def test_strip_suffix_in_expr():
     expr = "sum ( [vw::CUSTOMERS_RED_PERCENT (Custom SQL Query2)] ) / [vw::ORDERS (Custom SQL Query5)]"
@@ -146,9 +165,28 @@ def test_drop_junk_columns_strips_junk_without_table_stamp():
     assert [c["table"] for c in out] == ["d_partner", "d_partner1"]
 
 
+def test_drop_junk_columns_strips_pseudo_fields_on_multi_table():
+    """The multi-table path must drop the pseudo-field too. This is the half
+    I12 could not see: on a multi-table model the column is emitted
+    table-qualified (`TABLE:::Measure Names`), so the bare-column_id rule is
+    scoped out and nothing flagged it."""
+    cols = [
+        {"name": ":Measure Names", "db_column_name": ":Measure Names",
+         "column_type": "ATTRIBUTE", "data_type": "VARCHAR", "table": "ORDERS"},
+        {"name": "Measure Names", "db_column_name": "Measure Names",
+         "column_type": "ATTRIBUTE", "data_type": "VARCHAR", "table": "ORDERS"},
+        {"name": "Category", "db_column_name": "Category", "table": "ORDERS"},
+    ]
+    out = drop_junk_columns(cols)
+    # the pseudo-field goes; the real column that merely resembles it stays
+    assert [c["name"] for c in out] == ["Measure Names", "Category"]
+    assert [c["table"] for c in out] == ["ORDERS", "ORDERS"]
+
+
 def test_drop_junk_columns_matches_on_name_when_db_column_name_absent():
     cols = [
         {"name": "__tableau_internal_object_id__].[x_HASH"},
+        {"name": ":Measure Names"},
         {"name": "Category", "db_column_name": "Category"},
     ]
     out = drop_junk_columns(cols)

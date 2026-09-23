@@ -11,9 +11,40 @@ import re
 _SUFFIX = re.compile(r"\s*\(Custom SQL Query\d+\)")
 _JUNK = "__tableau_internal_object_id__"
 
+# Tableau's own internal pseudo-fields, which arrive as ordinary `<column>`
+# elements but name no warehouse column. Emitting one produces a Model column
+# whose `column_id` resolves to nothing — `:Measure Names` alone accounted for
+# every I12 `ts tml lint` finding (a bare `column_id` ThoughtSpot rejects at
+# import), plus the same column table-qualified (`TABLE:::Measure Names`) on
+# multi-table models, where I12 is scoped out and nothing flagged it at all.
+# `dashboards.py` recognises the same token on a shelf.
+#
+# Matched by EQUALITY, not as a substring like _JUNK (which arrives decorated,
+# `__tableau_internal_object_id__].[agg_booked_monthly (…)_HASH`) and not by
+# leading-colon prefix: a colon is Tableau's marker, but a prefix rule would
+# reach past the evidence and a real column is only ever one false positive
+# away. `:Measure Names` is the ONLY colon-prefixed column name in the
+# 41-workbook corpus. Add a member when another is actually observed.
+#
+# `Number of Records` is deliberately NOT here. It looks like a pseudo-field
+# and is not one: it translates to a real formula (`formula_Number of Records`,
+# a SUM measure), so dropping it would delete a measure the workbook uses.
+_PSEUDO_FIELDS = frozenset({":Measure Names"})
+
+
+def _is_internal_column(raw: str) -> bool:
+    """True for a Tableau-internal column that must never reach emitted TML.
+
+    Shared by ``clean_column_name`` (single-table path) and
+    ``drop_junk_columns`` (multi-table path) so the two cannot drift — the
+    parse records the marker in BOTH ``name`` and ``db_column_name``, so either
+    key may be the one passed in.
+    """
+    return _JUNK in raw or raw in _PSEUDO_FIELDS
+
 
 def clean_column_name(name: str | None) -> str | None:
-    if not name or _JUNK in name:
+    if not name or _is_internal_column(name):
         return None
     cleaned = _SUFFIX.sub("", name).strip()
     return cleaned or None
@@ -42,8 +73,9 @@ def clean_columns(columns: list[dict], table_name: str) -> list[dict]:
 
 
 def drop_junk_columns(columns: list[dict]) -> list[dict]:
-    """Drop __tableau_internal_object_id__ junk pseudo-columns (Fix #A —
-    multi-table companion to clean_columns).
+    """Drop Tableau-internal columns — ``__tableau_internal_object_id__`` junk
+    and the pseudo-fields in ``_PSEUDO_FIELDS`` (see ``_is_internal_column``)
+    — (Fix #A — multi-table companion to clean_columns).
 
     clean_columns() does this too, but it ALSO stamps every surviving column
     onto one ``table_name`` and dedupes by db_column_name within that single
@@ -59,7 +91,7 @@ def drop_junk_columns(columns: list[dict]) -> list[dict]:
     out: list[dict] = []
     for c in columns:
         raw = c.get("db_column_name") or c.get("name")
-        if raw and _JUNK in raw:
+        if raw and _is_internal_column(raw):
             continue
         out.append(c)
     return out
