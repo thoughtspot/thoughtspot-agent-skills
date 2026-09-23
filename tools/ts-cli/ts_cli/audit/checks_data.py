@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 from itertools import combinations
 
-from ts_cli.audit.context import AuditContext
+from ts_cli.audit.context import AuditContext, join_key_ids
 from ts_cli.audit.findings import Finding
 
 _ANGLE = "data_modeling"
@@ -79,16 +79,13 @@ def check_d2(ctx: AuditContext) -> list:
     for model in ctx.models:
         m = model.get("model", {})
         guid = ctx.guid_for(model)
-        col_types = {}
-        for c in (m.get("columns") or []):
-            cid = c.get("column_id", "")
-            dt = (c.get("db_column_properties") or {}).get("data_type", "")
-            col_types[cid] = dt
+        # Types come from the TABLE TMLs, not the model — see AuditContext.column_types.
+        col_types = ctx.column_types(model)
         for mt in (m.get("model_tables") or []):
             for j in (mt.get("joins") or []):
-                on_str = j.get("on", "")
-                parts = [p.strip() for p in on_str.replace("=", ",").split(",") if p.strip()]
-                varchar_keys = [p for p in parts if col_types.get(p, "").upper() in ("VARCHAR", "CHAR", "STRING", "TEXT")]
+                keys = join_key_ids(j.get("on", ""))
+                varchar_keys = [k for k in keys
+                                if col_types.get(k, "").upper() in ("VARCHAR", "CHAR", "STRING", "TEXT")]
                 if varchar_keys:
                     findings.append(Finding(
                         check_id="D2", angle=_ANGLE, severity="HIGH",
@@ -97,13 +94,17 @@ def check_d2(ctx: AuditContext) -> list:
                         detail=f"VARCHAR join key(s): {', '.join(varchar_keys)}",
                         metric=len(varchar_keys),
                     ))
-                if len(parts) > 2:
+                # A composite key is one operand pair per key. The previous split
+                # on `=`/`,` did not separate `and`, so a two-key join yielded
+                # three parts and reported `3 // 2 = 1` key — undercounting the
+                # very thing the check exists to surface.
+                if len(keys) > 2:
                     findings.append(Finding(
                         check_id="D2", angle=_ANGLE, severity="MEDIUM",
                         object_type="join", object_name=j.get("name", ""),
                         object_guid=guid,
-                        detail=f"Multi-column join ({len(parts)//2} keys)",
-                        metric=len(parts) // 2,
+                        detail=f"Multi-column join ({len(keys)//2} keys)",
+                        metric=len(keys) // 2,
                     ))
     return findings
 

@@ -64,7 +64,8 @@ def test_a3_flags_missing_instructions():
 def test_a3_passes_with_instructions():
     ctx = make_context(
         models=[_model(guid="m-1")],
-        ai_instructions={"m-1": {"instructions": "Some coaching text"}},
+        ai_instructions={"m-1": {"nl_instructions_info": [
+            {"instructions": ["Some coaching text"], "scope": "GLOBAL"}]}},
     )
     assert check_a3(ctx) == []
 
@@ -101,7 +102,8 @@ def test_a5_passes_ready():
     ]
     ctx = make_context(
         models=[_model(columns=cols, description="Sales model")],
-        ai_instructions={"m-1": {"instructions": "coaching"}},
+        ai_instructions={"m-1": {"nl_instructions_info": [
+            {"instructions": ["coaching"], "scope": "GLOBAL"}]}},
     )
     findings = check_a5(ctx)
     assert findings == [] or findings[0].severity == "INFO"

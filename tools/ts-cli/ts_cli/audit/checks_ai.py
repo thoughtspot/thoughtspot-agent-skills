@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from ts_cli.audit.context import AuditContext
+from ts_cli.audit.context import AuditContext, nl_instructions
 from ts_cli.audit.findings import Finding
 
 _ANGLE = "ai"
@@ -69,7 +69,7 @@ def check_a3(ctx: AuditContext) -> list:
             continue
         instr = ctx.ai_instructions[guid]
         has_instructions = bool(
-            instr.get("instructions")
+            nl_instructions(instr)
             or (m.get("model_instructions", {}).get("data_model_instructions") or "").strip()
         )
         if not has_instructions:
@@ -108,7 +108,7 @@ def check_a5(ctx: AuditContext) -> list:
         guid = ctx.guid_for(model)
         ai_instr = ctx.ai_instructions.get(guid, {}) if guid in ctx.ai_instructions else {}
         has_ai = bool(
-            ai_instr.get("instructions")
+            nl_instructions(ai_instr)
             or (m.get("model_instructions", {}).get("data_model_instructions") or "").strip()
         )
         has_desc = bool((m.get("description") or "").strip())

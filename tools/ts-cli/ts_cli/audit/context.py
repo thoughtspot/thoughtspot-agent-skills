@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -21,6 +22,34 @@ class AuditContext:
     def guid_for(self, tml: dict) -> str:
         return tml.get("guid", "")
 
+    def column_types(self, model: dict) -> dict:
+        """``TABLE::COL`` -> warehouse data type, for every column of every table
+        this model is built on.
+
+        Model columns carry no data type. The schema's own currency anchor records
+        it — "no data_type on formulas[]/columns[]" — so reading
+        ``columns[].db_column_properties.data_type`` off the MODEL yields "" for
+        every column, which is how the VARCHAR join-key checks shipped inert
+        (audit 14.1). The type lives on the Table TML the ``column_id`` resolves
+        to, keyed by the model_tables entry's ``alias`` (or ``name``).
+
+        A table with no TML in ``self.tables`` contributes nothing: its columns'
+        types are unknown, which a caller must not read as "not a string".
+        """
+        out: dict = {}
+        for mt in (model.get("model", {}).get("model_tables") or []):
+            table = self.tables.get(mt.get("fqn", ""))
+            if not table:
+                continue
+            prefix = mt.get("alias") or mt.get("name") or ""
+            for col in (table.get("table", {}).get("columns") or []):
+                name = col.get("name", "")
+                if not name:
+                    continue
+                dt = (col.get("db_column_properties") or {}).get("data_type", "")
+                out[f"{prefix}::{name}"] = dt
+        return out
+
     def tables_for_model(self, model: dict) -> list:
         result = []
         for mt in (model.get("model", {}).get("model_tables") or []):
@@ -28,6 +57,42 @@ class AuditContext:
             if fqn and fqn in self.tables:
                 result.append(self.tables[fqn])
         return result
+
+
+#: TML writes join operands bracketed: `[ORDERS::CUST_ID] = [CUST::ID]`.
+_BRACKETED = re.compile(r"\[([^\]]+)\]")
+
+
+def nl_instructions(ai_data: dict) -> list:
+    """Instruction strings from an ``ai/instructions/get`` response.
+
+    The response is ``{"nl_instructions_info": [{"instructions": [...],
+    "scope": "GLOBAL"}]}`` — there is no top-level ``instructions`` key.
+    ``checks_ai`` read one anyway, so the API half of A3/A5 never fired and a
+    Model coached through the UI reported HIGH "no coaching configured"
+    (BL-292). Its unit fixtures passed a shape the API never returns, which is
+    what kept it invisible.
+    """
+    out: list = []
+    for info in (ai_data or {}).get("nl_instructions_info") or []:
+        out.extend(info.get("instructions") or [])
+    return out
+
+
+def join_key_ids(on_str: str) -> list:
+    """Column ids referenced by a join ``on`` clause.
+
+    Splitting on ``=``/``,`` without stripping the brackets left
+    ``"[ORDERS::CUST_ID]"``, which matches no ``column_id`` anywhere — the first
+    of the two defects that made the VARCHAR join-key checks inert (audit 14.1).
+    An unbracketed clause is tolerated so a hand-built fixture still parses.
+    """
+    text = on_str or ""
+    bracketed = [m.strip() for m in _BRACKETED.findall(text) if m.strip()]
+    if bracketed:
+        return bracketed
+    parts = text.replace("=", ",").replace(" and ", ",").split(",")
+    return [p.strip() for p in parts if p.strip()]
 
 
 def make_context(

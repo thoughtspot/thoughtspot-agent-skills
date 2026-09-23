@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from ts_cli.audit.context import AuditContext
+from ts_cli.audit.context import AuditContext, join_key_ids
 from ts_cli.audit.findings import Finding
 
 _ANGLE = "performance"
@@ -139,16 +139,12 @@ def check_p6(ctx: AuditContext) -> list:
     findings = []
     for model in ctx.models:
         m = model.get("model", {})
-        col_types = {}
-        for c in (m.get("columns") or []):
-            cid = c.get("column_id", "")
-            dt = (c.get("db_column_properties") or {}).get("data_type", "")
-            col_types[cid] = dt
+        # Types come from the TABLE TMLs, not the model — see AuditContext.column_types.
+        col_types = ctx.column_types(model)
         for mt in (m.get("model_tables") or []):
             for j in (mt.get("joins") or []):
-                on_str = j.get("on", "")
-                parts = [p.strip() for p in on_str.replace("=", ",").split(",") if p.strip()]
-                varchar_keys = [p for p in parts if col_types.get(p, "").upper() in ("VARCHAR", "CHAR", "STRING", "TEXT")]
+                varchar_keys = [k for k in join_key_ids(j.get("on", ""))
+                                if col_types.get(k, "").upper() in ("VARCHAR", "CHAR", "STRING", "TEXT")]
                 if varchar_keys:
                     findings.append(Finding(
                         check_id="P6", angle=_ANGLE, severity="HIGH",
