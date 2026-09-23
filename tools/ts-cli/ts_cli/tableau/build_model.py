@@ -16,6 +16,9 @@ from ts_cli.model_builder import (
     fix_double_aggregation,
 )
 from ts_cli.tml_common import extract_imported_guid  # noqa: F401 — moved (BL-063 PR 5)
+from ts_cli.tableau.naming import (  # noqa: F401 — moved (SCAL-339750), re-exported
+    disambiguate_sql_view_names,
+)
 
 _CSQ_SUFFIX = re.compile(r"\s*\(Custom SQL Query\d*\)\s*$")
 _CSQ_IN_REF = re.compile(r"\[([^\]]+?)\s+\(\s*Custom SQL Query\d*\)\]")

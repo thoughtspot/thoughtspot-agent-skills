@@ -1358,7 +1358,7 @@ def build_model_cmd(
     --column-name-map also applies in MERGE mode (--existing-guid).
     """
     _validate_build_options(existing_guid, profile, connection_name, reconcile_table, reconcile_plan)
-    from ts_cli.model_builder import parse_twb
+    from ts_cli.model_builder import disambiguate_sql_view_names, parse_twb
 
     twb_path = Path(twb_file)
     if not twb_path.exists():
@@ -1392,7 +1392,7 @@ def build_model_cmd(
         )
 
     # Filter datasources
-    datasources = parsed["datasources"]
+    datasources = disambiguate_sql_view_names(parsed["datasources"])
     if datasource_name:
         datasources = [ds for ds in datasources if ds["name"] == datasource_name]
         if not datasources:

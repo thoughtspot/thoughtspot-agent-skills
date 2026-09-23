@@ -841,8 +841,11 @@ def split_for_phased_import(
 # cross-import until first attribute access, by which point both modules
 # have finished loading regardless of which one was imported first.
 
+_LAZY_FROM_TABLEAU_BUILD_MODEL = ("build_blend_plan", "disambiguate_sql_view_names")
+
+
 def __getattr__(name: str):
-    if name == "build_blend_plan":
-        from ts_cli.tableau.build_model import build_blend_plan
-        return build_blend_plan
+    if name in _LAZY_FROM_TABLEAU_BUILD_MODEL:
+        import ts_cli.tableau.build_model as _tableau_build_model
+        return getattr(_tableau_build_model, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

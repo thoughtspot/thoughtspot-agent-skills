@@ -2174,7 +2174,7 @@ against a real target schema.
 3. Resolve all internal references (`[Calculation_NNN]` and copy-style `[Field (copy)_NNN]`)
 4. Translate formulas to ThoughtSpot syntax (via `tableau_translate.py`, an orchestrator facade over the `ts_cli/tableau/` package — entry point unchanged)
 5. Resolve name collisions (formula/param clashes → rename; column/formula clashes → drop column)
-6. Build model TML with `formula_` prefix for cross-references and double-aggregation fix; **emit a `.sql_view.tml` per Custom SQL relation and reference it by name in `model_tables[]`** (physical/SQL-View column dedup applied)
+6. Build model TML with `formula_` prefix for cross-references and double-aggregation fix; **emit a `.sql_view.tml` per Custom SQL relation and reference it by name in `model_tables[]`** (physical/SQL-View column dedup applied; colliding SQL View names disambiguated first — see "SQL View emission" below)
 7. Split into phased import files — **SQL Views first** (they must exist before the model), then phase 0 = base, then per dependency level
 8. **GENERATE mode only** — emit one `.table.tml` per physical table (see "Table TML emission" below)
 
@@ -2234,6 +2234,41 @@ TML: `model.tables[].name` and `.fqn`, `model_tables[].name` and join `with`/`on
 endpoints, `columns[].column_id` table prefixes, and any `[TABLE::COL]` refs formula
 translation embeds via column scoping. Tables absent from the map pass through
 unchanged. Implemented by `apply_table_name_map()` in `ts_cli/tableau/build_model.py`.
+
+**SQL View emission and name disambiguation:** each Custom SQL relation
+(`<relation type='text'>`) becomes one `.sql_view.tml`, which the model references by
+name in `model_tables[]`. Tableau names an unnamed Custom SQL relation
+`Custom SQL Query` and numbers later ones *within the same datasource*
+(`Custom SQL Query1`, …) — so that name is unique per datasource and nothing more.
+A workbook whose datasources each contain one therefore yields several SQL Views all
+called `Custom SQL Query`, and since `build-model` writes every datasource into one
+output directory — and ThoughtSpot resolves `model_tables[].name` against a single
+Table/SQL-View namespace — each model would point at an ambiguous object.
+
+`build-model` resolves this before generating anything. A SQL View name is *contested*
+when more than one datasource declares it, or when a physical table anywhere in the
+workbook carries it; a contested name is rewritten as `Base (Datasource)`, falling back
+to `Base (Datasource N)` only if that exact string is already taken. Uncontested names
+are left exactly as written, so a workbook with no collision is unaffected.
+
+- **Every owner of a contested name is qualified**, not just the second and later ones,
+  so a view's name depends on its own datasource alone — adding, removing or reordering
+  an unrelated datasource cannot rename it. (A name that goes from uncontested to
+  contested does change, since uncontested names are deliberately left alone.)
+- **Physical table names are never renamed** — they must match the warehouse object. A
+  SQL View colliding with one is the side that gets qualified.
+- **Comparison is case-insensitive**, because ThoughtSpot is case-insensitive on object
+  names.
+- **Every reference follows the new name**: `model_tables[].name`, `columns[].column_id`
+  prefixes, join `with`/`on` endpoints, and the `[View::Column]` refs formula translation
+  embeds. The SQL body and `sql_output_column` are never rewritten.
+
+Names are chosen from the full datasource list before any `--datasource` filter, so a
+filtered run emits the same name as an unfiltered one. Implemented by
+`disambiguate_sql_view_names()` in `ts_cli/tableau/naming.py`. A physical table and
+a SQL View sharing one relation name *inside a single datasource* cannot be fully
+separated from the parsed representation — Tableau does not produce that shape; see
+BL-284.
 
 **Table TML emission (GENERATE mode only):** alongside the phased model TML,
 `build-model` also writes a `.table.tml` per physical table, so the output directory
