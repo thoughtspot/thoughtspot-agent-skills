@@ -205,8 +205,8 @@ WHAT THIS IS FOR
   They behave like column synonyms (Method A) but the target can be a Model
   formula, not just a column. Use this for phrases like "stock on hand" →
   [Inventory Balance] (a formula, not a column — synonyms can't reach it).
-  Business Terms cannot define new formulas inline (verified in open-item
-  #12) — if a phrase needs a calculation that doesn't yet exist on the Model,
+  Business Terms cannot define new formulas inline — if a phrase needs a
+  calculation that doesn't yet exist on the Model,
   the proposal is marked MOVE_TO_NEW_FORMULA and you create the Model formula
   first via /ts-object-answer-promote, then re-run this skill.
 

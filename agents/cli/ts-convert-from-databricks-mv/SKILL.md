@@ -66,10 +66,11 @@ covering `source:`, dimensions, measures, windows, joins, and `filter:`):
   `group_aggregate()` formulas — always 3 arguments: `group_aggregate(expr, {query}, query_filters())`.
 - Cross-measure references (`MEASURE(name)`, `ANY_VALUE(dim)`) must be **inlined** as
   full expressions during TML import — `[name]` cross-references fail during import
-  (open-items #4). After import, users can simplify formulas in the ThoughtSpot UI.
+  (invariant **I9**, `../../shared/schemas/ts-model-conversion-invariants.md`). After import, users can simplify formulas in the ThoughtSpot UI.
 - **Duplicate column_id:** when the same physical column appears as both an ATTRIBUTE
   dimension and a MEASURE (e.g., `COUNT(col)`), convert the measure to a formula to
-  avoid the "unique column_id" import error (open-items #2).
+  avoid the "unique column_id" import error (invariant **I8**,
+  `../../shared/schemas/ts-model-conversion-invariants.md`).
 
 ---
 
@@ -842,6 +843,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.13.2 | 2026-09-22 | **Two dangling open-item citations repointed (audit 5.3 class).** The cross-reference inlining rule cited `open-items #4` and the duplicate-`column_id` rule cited `open-items #2`; this skill's open-items.md has only `#1`, so both resolved to nothing. Both claims are in fact invariants — **I9** and **I8** — and now cite those. Caught by the new `check_open_item_citations.py`. |
 | 1.13.1 | 2026-09-22 | **I7 untranslatable gate added.** Step 6 surfaced the translator's `skipped[]` list for a proceed/omit decision with no instruction to open [ts-databricks-formula-translation.md](../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md) first, so an expression with a documented ThoughtSpot equivalent could be dropped on syntax recognition alone. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |
 | 1.13.0 | 2026-09-02 | **BL-232 — column descriptions reached the TML at the wrong nesting level and were silently discarded on import (ts-cli v0.136.0).** An MV's `comment:` was written to `columns[].properties.description`, but ThoughtSpot expects `description` as a **sibling of `name`** and a Model import **silently ignores unknown keys inside `properties`** — so the TML linted clean, imported with `status_code OK`, and the descriptions were gone. Live-caught 2026-09-02 converting `dunder_mifflin_sales_mv`: 19 of 19 descriptions sent, 0 stored; relocating them to the column root and re-importing the same GUID restored all 19. Synonyms were unaffected because they were already placed correctly two lines away. This mattered most for Spotter, which reads column descriptions as AI context. The reverse leg (`build-mv`) had the mirror-image bug — it *read* `properties.description`, so a genuine ThoughtSpot Model's descriptions never reached an emitted MV `comment:`; the two cancelled out in a TS→MV→TS round-trip, which is how both survived. Worked examples corrected. |
 | 1.12.2 | 2026-08-26 | Use `ts metadata search --connection` instead of hand-filtering `dataSourceName`; the old instruction said **equals** where the CLI casefolds (finding 11.1). |

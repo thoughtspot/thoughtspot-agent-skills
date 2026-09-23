@@ -89,7 +89,14 @@ def _iter_fenced_blocks(text: str) -> list[list[tuple[int, str]]]:
 
 
 def scan_file(path: Path) -> list[tuple[int, str]]:
-    """Return (lineno, reason) for each anti-pattern hit inside a code fence.
+    """Return (lineno, reason) for each anti-pattern hit in executable content.
+
+    In Markdown that means inside a code fence — prose legitimately *describes* the
+    endpoints. A skill-local ``.py`` file has no fences and is executable throughout,
+    so the whole file is scanned. Skills do ship such files and invoke them directly
+    (``ts-object-model-erd/build_erd.py``); before 2026-09-22 this gate and
+    ``check_patterns`` Check 5 both scanned Markdown only, so a skill could have held
+    the anti-pattern in the one place it would actually run (audit finding 5.5).
 
     Empty list = clean.
     """
@@ -99,7 +106,11 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
         return []
 
     hits: list[tuple[int, str]] = []
-    for block in _iter_fenced_blocks(text):
+    if path.suffix == ".py":
+        blocks = [list(enumerate(text.splitlines(), 1))]
+    else:
+        blocks = _iter_fenced_blocks(text)
+    for block in blocks:
         block_text = "\n".join(line for _, line in block)
         has_v2_marker = V2_ENDPOINT_MARKER in block_text
 
@@ -119,13 +130,22 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
     return hits
 
 
-def iter_skill_md_files(root: Path) -> list[Path]:
+#: Markdown carries the anti-pattern in fences; skill-local Python carries it outright.
+SCANNED_SUFFIXES = ("*.md", "*.py")
+
+
+def iter_skill_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for scan_root in SCAN_ROOTS:
         base = root / scan_root
         if base.is_dir():
-            files.extend(sorted(base.rglob("*.md")))
-    return files
+            for pattern in SCANNED_SUFFIXES:
+                files.extend(sorted(base.rglob(pattern)))
+    return sorted(set(files))
+
+
+#: Back-compat alias — this was the name before .py files came into scope.
+iter_skill_md_files = iter_skill_files
 
 
 def main() -> int:
@@ -136,7 +156,7 @@ def main() -> int:
 
     failures: list[str] = []
     scanned = 0
-    for path in iter_skill_md_files(root):
+    for path in iter_skill_files(root):
         rel = path.relative_to(root)
         if _is_exempt(rel):
             continue
@@ -154,7 +174,7 @@ def main() -> int:
         print("`ts` command per '.claude/rules/ts-cli.md#when-a-skill-needs-an-api-call'.")
         return 1
 
-    print(f"No inline requests/urllib anti-pattern in {scanned} skill doc(s).")
+    print(f"No inline requests/urllib anti-pattern in {scanned} skill file(s).")
     return 0
 
 

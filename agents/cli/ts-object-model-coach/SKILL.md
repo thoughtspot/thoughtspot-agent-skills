@@ -1634,6 +1634,7 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.4.1 | 2026-09-22 | **Removed a verification claim no open item records (audit 5.3 class).** `references/review-explainers.md` said Business Terms cannot define new formulas inline "(verified in open-item #12)"; this skill's items are #4, #6-#9, #13, #15 — there is no #12, so the claim read as sourced when nothing backed it. The constraint is left stated, the false provenance removed. Caught by the new `check_open_item_citations.py`. |
 | 2.4.0 | 2026-08-26 | Name `ts snowflake exec` at the SQL sites and define the previously-undefined `execute()` against it — the flag is `--sf-profile` (required) and the profile is `{sf_profile_name}`. Without this an executor improvised a connection each run, and the likeliest improvisation is the inlined connector a validator already bans in a SKILL.md (finding 5.2). Also flags the per-column sample loop as N round-trips where a batched form already exists. |
 | 2.3.4 | 2026-08-26 | Name `ts snowflake exec` at the SQL sites and define the previously-undefined `execute()` against it — an executor had to improvise a connection each run, and the likeliest improvisation is the inlined connector a validator already bans in a SKILL.md (finding 5.2). Also flags the per-column loop as N round-trips where a batched form exists. |
 | 2.3.3 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |

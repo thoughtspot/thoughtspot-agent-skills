@@ -49,14 +49,40 @@ to the column before removal; remove affected joins and report them.
 
 ---
 
-## #9 — Column security rule TML retrieval — OPEN
+## #9 — Column security rule TML retrieval — RESOLVED 2026-09-22
 
-TML structure is documented and detection/update logic is mechanical. The **retrieval
-mechanism** is the open question: on champ-staging, the v2 `--associated` export does
-not return CSR files. They appear only via the ThoughtSpot UI's Download TML zip or
-the `vcs/git/branches/commit` workflow.
+TML structure was documented and the detection/update logic was mechanical; the
+**retrieval mechanism** was the open question. The original observation was accurate
+but incomplete: a plain `--associated` export does not return CSR, which is why it
+looked UI-only. The export needs a second option alongside it.
 
-**Action:** Confirm retrieval mechanism. Re-test on Cloud 26.4.0+.
+**Finding:** CSR round-trips through TML as a sibling document — the same pattern as
+`column_alias` — and is retrievable via the API with **both**
+`export_associated: true` **and** `export_options.export_column_security_rules: true`.
+The option is Beta (10.12+); without it the CSR document simply is not in the
+response, which is exactly the empty result that made this look impossible.
+
+Shipped as `ts security column-rules export` (`tools/ts-cli/ts_cli/commands/security.py`).
+The read side — which columns are restricted and which groups can see each — is
+`ts security column-rules get`, returning one row per (table, column) with
+`group_names`.
+
+```bash
+ts security column-rules export "{table}" --out "{dir}" --profile "{profile}"
+ts security column-rules get "{table}" --profile "{profile}"
+```
+
+An empty result is a legitimate answer: a table with no secured columns has no
+document to return.
+
+**Consequence worth carrying:** CSR does **not** travel with publication
+(live-verified 2026-07-27), so a tenant Org needs its own document naming its own
+groups, imported separately. Preserving the exported document is what makes a
+tenant's configuration restorable rather than reconstructible from CLS grants.
+
+**Downstream closed by this:** `ts-object-model-aggregates` no longer asks the operator
+to recall whether base tables carry column security — it reads both mechanisms
+(2026-09-22 audit findings 5.1 / 5.2).
 
 ---
 

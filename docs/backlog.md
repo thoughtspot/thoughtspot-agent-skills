@@ -170,6 +170,7 @@ are roughly ordered by value÷effort.
 | BL-285 | `check_i7_gate` checks the I7 marker is in the procedure body, not that it *precedes* the untranslatable classification step — finding 9.3 asked for "within N lines" of it; a gate in the wrong section still passes | next validator pass |
 | BL-286 | the Genie runtime's two converters (`agents/databricks/skills/ts-convert-*`) carry no I7 gate and are outside `_dirs`, so `check_i7_gate` cannot see them — audit 9.17 expected 9.3's fix to reach them | with the next Genie review |
 | BL-287 | CoCo `ts-convert-from-snowflake-sv` changelog claims its I7 gate "mirrors the CLI skill v1.5.0", but CLI v1.5.0 covered N1/I5 and never had the gate — the CLI got it for the first time in PR #525 (audit 9.2, second half) | next mirror pass |
+| BL-288 | `ts-object-model-coach` designs a **structured** `model_instructions` with typed categories (`exclusion_rules`, `aggregation_defaults`, …) on the same key as the real field, which production code reads as a **free-text string** — writing it as designed would replace a string with a map | before any v1.1 TML write path |
 | BL-283 | `check-catalog.md` and the audit `check_id`s can drift with nothing to notice — 51 documented vs 50 emitted today, and the deferred-id table means a naive comparison is wrong | next validator pass |
 
 ### Tier 3 — Opportunistic

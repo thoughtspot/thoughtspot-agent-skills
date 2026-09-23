@@ -5,13 +5,13 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**151 total items** across 19 skills — **70 open**, 72 verified, 9 deferred
+**151 total items** across 19 skills — **69 open**, 73 verified, 9 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
 | ts-convert-to-databricks-mv | 9 | **8** | 1 | 0 |
-| ts-dependency-manager | 16 | **8** | 7 | 1 |
 | ts-object-model-aggregates | 20 | **8** | 11 | 1 |
+| ts-dependency-manager | 16 | **7** | 8 | 1 |
 | ts-object-model-coach | 7 | **7** | 0 | 0 |
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
 | ts-audit | 15 | **5** | 10 | 0 |
@@ -28,7 +28,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-object-model-agentql-query | 6 | **0** | 6 | 0 |
-### Untagged (70 items)
+### Untagged (69 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -68,7 +68,6 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-to-databricks-mv | #6 | `source.`-prefix in a single-source MV's `filter:`/exprs needs live verification | OPEN |
 | ts-convert-to-databricks-mv | #7 | 2-argument `{0}`-template SQL pass-through form is not implemented | OPEN |
 | ts-convert-to-databricks-mv | #8 | Live numeric fidelity of the codified emit path | OPEN |
-| ts-dependency-manager | #9 | Column security rule TML retrieval | OPEN |
 | ts-dependency-manager | #11 | Reusable Set (cohort) delete command | OPEN |
 | ts-dependency-manager | #13 | Chart `client_state_v2` stale column references | OPEN |
 | ts-dependency-manager | #14 | Cohort `pass_thru_filter` lost on round-trip | OPEN |

@@ -111,7 +111,7 @@ What the skill walks during Step 4. Solid arrows = standard dependencies via v2 
        [MODEL]    [VIEW]                   (#9 — retrieval unverified)
         / │ \      │ │
        /  │  \     │ │  ............→ [<MODEL>.column_alias]
-      /   │   ╲    │ │       (#10 — retrieval unverified)
+      /   │   ╲    │ │    (auto — via --associated + alias flag)
      /    │    ╲   │ │
     ▼     ▼     ▼  ▼ ▼
  [ANSWER] │  [SET]   ┊
@@ -141,8 +141,8 @@ python3 references/build_coverage.py --summary
 Sample output (regenerates from `references/dependency-types.md`):
 
 ```
-Coverage:  auto-detected (8): Model / Worksheet, View, Answer, Liveboard, Set / Cohort, Monitor alert, RLS rule, Inline alias
-           partial (3): Spotter feedback, Column security rule (CSR), Column alias TML
+Coverage:  auto-detected (9): Model / Worksheet, View, Answer, Liveboard, Set / Cohort, Monitor alert, RLS rule, Column alias TML, Inline alias
+           partial (2): Spotter feedback, Column security rule (CSR)
            informational (2): Schedule, Connection | no skill action (1): Column-level ACLs
            Full breakdown in references/dependency-types.md
 ```
@@ -256,9 +256,12 @@ the same recursive walk regardless of operation. After Step 5 renders the report
 audit mode **exits cleanly** at Step 5.5 (defined below) — it does NOT proceed to
 Step 6 / 7 / 8 / 9.
 
-**Scope 3 and 4** are deferred — see open-items.md #19 (whole-object section-per-column
-report) and #20 (repoint pre-flight column-gap analysis). For now, if the user picks
-3 or 4, print a notice and route them to scope 1 ("treat this as one-column for now").
+**Scope 3 and 4** are deferred. Scope 4 (repoint pre-flight column-gap analysis) is
+tracked as open-items.md #20. Scope 3 (whole-object section-per-column report) has **no**
+open item behind it — the item that did was closed on 2026-06-01, so the deferral below
+rests on the skill not having been rewired, not on an unanswered question. For now, if
+the user picks 3 or 4, print a notice and route them to scope 1 ("treat this as
+one-column for now").
 
 ```python
 if audit_scope in ("WHOLE", "REPOINT_PREFLIGHT"):
@@ -1187,6 +1190,7 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.0 | 2026-09-22 | **Open-item #9 resolved and two stale "cannot retrieve" claims retired (audit 5.2 / 5.3).** #9 called CSR retrieval the open question, on the accurate-but-incomplete observation that a plain `--associated` export returns no CSR. It needs a second option alongside it — `export_options.export_column_security_rules: true` (Beta, 10.12+) — and ships as `ts security column-rules export`/`get`. Separately, `dependency-types.md` row 10 called column-alias retrieval "No on this build" citing a non-existent open-item #10, when `ts alias export` retrieves it via `export_with_column_aliases: true`; row 10 is now Implementable and the alias doc is no longer listed as skipped. Five dangling citations resolved in all — the `#12` reference behind "drop model-level filters" is replaced by the real mechanism (`error_code 14518`, surfaced upstream as a YAML syntax error). Neither #10 nor #12 has ever existed; `check_open_item_citations.py` now makes that a commit failure. |
 | 1.4.2 | 2026-07-31 | **BL-191 — the View mutation paths were dead against real Views.** `ts dependency mutate`/`apply-change` bound `view_columns[]` on `column_id`, which does not exist in real View TML (0 of 265 columns across all 42 Views on se-thoughtspot, 2026-07-30 census; `search_output_column` on 265 of 265). Removing a formula therefore deleted the formula and **left its `view_columns[]` entry behind** — a dangling reference that breaks the import. Both bindings corrected to `search_output_column` / `formulas[].name`, matched so an aggregation or bucket decoration (`Total X`, `Month(X)`) is caught but an unrelated column sharing a word is not. **Also fixed:** `search_query` kept naming a formula that column removal had *cascaded* away (a View references its formulas from the search string by id, e.g. `[formula_PMPM month].monthly`) — it is now re-sanitized after the formula pass, taking the bucket modifier with the token. Two adjacent pre-existing gaps are filed rather than fixed: **BL-197** (`sanitize_search_query` misses the qualified `[table_path::col]` form) and **BL-198** (formula removal does not cascade transitively). Doc-side: the troubleshooting row asserting the `TABLE_PATH::col` format is replaced, and `references/dependency-types.md`'s View row + a new note carry the corrected detection signal. Requires ts-cli v0.127.1. |
 | 1.4.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 1.4.0 | 2026-07-08 | **Step 9 apply is now the codified `ts dependency apply-change` command** (BL-083 PR2). The ~1,060 lines of inline drift/delete/mutate/import/verify/set-delete pseudocode are replaced by a single plan-JSON-driven command; Step 9 now builds the plan and reads back a results JSON. Deterministic decisions (drift, obj_id derivation, the import/verify outcome matrix, post-import verification, 9c ordering, the set-delete consumer guard, and REMOVE_CHART-vs-REMOVE_COLUMN chart-axis-role classification) are extracted to tested `ts_cli/dependency/apply.py`. **Latent-bug fix:** the corrected execution order is deletes → dependents → source → sets (source LAST) — the old section bodies ran source-first, which error 14544 (“Deleted columns have dependents”) would reject whenever a dependent still referenced the column. Live-verified on se-thoughtspot; the test surfaced and fixed a mutation gap — **rollback now restores ROOT-first** (source table before dependents — one-pass, was two, open-item #25); the model-fix now strips **aliased** base columns matched by `column_id`/formula-expr, not just `name` (open-item #24). Chart-role surfacing in `ts metadata report` (open-item #22) and the mandatory live test of the corrected ordering (open-item #23) are follow-ups. Requires ts-cli v0.41.0. |

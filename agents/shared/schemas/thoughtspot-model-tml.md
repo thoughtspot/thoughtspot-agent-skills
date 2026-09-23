@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-30: live-verified on se-thoughtspot — columns[].description confirmed on formula-backed entries, no data_type on formulas[]/columns[], and the single join-type vocabulary INNER/LEFT_OUTER/RIGHT_OUTER/OUTER confirmed in both Model and Table contexts; earlier 2026-07-30: added columns[] properties.calendar / index_priority / is_attribution_dimension, widened index_type + currency_type from a product-docs sweep; also 2026-07-30, from a 500-document TML property census on se-thoughtspot covering 143 Models: added action_object_associations[] and columns[].properties.value_casing, extended geo_config with the country boolean and custom-map roles, rewrote the calendar value vocabulary, recorded index_priority as a non-integral number, loosened the joins[] either/or framing for 12 observed hybrids, and raised the lesson_plans evidence to 8 Models; prior: validated in 2026-07-11 external sweep; 2026-07-31: live-verified (VALIDATE_ONLY on se-thoughtspot) that an inline model join REQUIRES type and cardinality together -- "both  type and cardinality should be defined" -- and re-confirmed LEFT_OUTER accepted on a real Model's inline joins (BL-174)) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-30: live-verified on se-thoughtspot — columns[].description confirmed on formula-backed entries, no data_type on formulas[]/columns[], and the single join-type vocabulary INNER/LEFT_OUTER/RIGHT_OUTER/OUTER confirmed in both Model and Table contexts; earlier 2026-07-30: added columns[] properties.calendar / index_priority / is_attribution_dimension, widened index_type + currency_type from a product-docs sweep; also 2026-07-30, from a 500-document TML property census on se-thoughtspot covering 143 Models: added action_object_associations[] and columns[].properties.value_casing, extended geo_config with the country boolean and custom-map roles, rewrote the calendar value vocabulary, recorded index_priority as a non-integral number, loosened the joins[] either/or framing for 12 observed hybrids, and raised the lesson_plans evidence to 8 Models; prior: validated in 2026-07-11 external sweep; 2026-07-31: live-verified (VALIDATE_ONLY on se-thoughtspot) that an inline model join REQUIRES type and cardinality together -- "both  type and cardinality should be defined" -- and re-confirmed LEFT_OUTER accepted on a real Model's inline joins (BL-174); 2026-09-23: documented model_instructions.data_model_instructions, which had been absent from this file while being read in production -- written up from EXISTING live evidence (confirmed in exported TML, and the ai/instructions/get twin tested on champ-staging 2026-06-18), NOT from a new product probe, so the leading anchor date is deliberately left at 2026-07) -->
 
 # ThoughtSpot Model TML — Construction Reference
 
@@ -91,6 +91,7 @@ model:
 | `model.filters` | No | Model-level pre-filters applied before any query |
 | `model.joins_with` | No | Data augmentation joins at the model level (e.g. joining an uploaded CSV to the model) |
 | `model.properties` | No | Model-level settings |
+| `model.model_instructions` | No | Model-level natural-language coaching for Spotter — see `model_instructions` below. A sibling of `properties:`, not a key inside it. |
 | `model.lesson_plans` | No | In-product guided-lesson strings attached to the model — a list of `{lesson_id: <int>, lesson_plan_string: <string>}` entries, a sibling of `properties:` rather than a key inside it. **Shape confirmed 2026-07-30** against 8 real Models on `se-thoughtspot` (a 143-Model census; `lesson_id` is 0-based) (e.g. `{lesson_id: 0, lesson_plan_string: "What were [Sales] by [Store Region] in [Date].'last year' ?"}`). Pass through on round-trips; do not emit when generating a model. |
 
 ### `model_tables[]` fields
@@ -403,6 +404,55 @@ through only on a same-instance round trip. `geo_config` also appears on **formu
 | `is_bypass_rls` | false | Set true to bypass row-level security. **Always emitted on export** — 143 of 143 census Models carry it, every one `false` |
 | `join_progressive` | true | ThoughtSpot execution hint — always set true. Always emitted (143/143; `true` ×142, `false` ×1) |
 | `spotter_config.is_spotter_enabled` | true | Enables Spotter (AI search) for this model. Always emitted (143/143; `true` ×128, `false` ×15) |
+
+### `model_instructions`
+
+Model-level natural-language coaching for Spotter — what the UI calls **Data Model
+Instructions** (Settings → Coach Spotter → Instructions). It is the Model-scoped parallel to
+per-column `properties.ai_context`, and a **sibling of `properties:`**, not a key inside it.
+
+```yaml
+model:
+  name: MODEL_NAME
+  model_instructions:
+    data_model_instructions: |
+      "ACV" means Opportunity ACV, not Opportunity Software ACV.
+      Always filter using [Customer Zipcode] before aggregating regional totals.
+      Sort by the measure column descending unless the user says otherwise.
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `model_instructions` | map | No | Container only. Omit the whole key when the model has no instructions. **Absent is overwhelmingly the normal state** — the 2026-07-30 property census saw it on **0 of 143** Models on `se-thoughtspot` (it is set per-Model by a human coaching Spotter, so most Models never acquire one), and no consumer distinguishes an absent key from an empty map. |
+| `model_instructions.data_model_instructions` | string | No | **Free text, one string** — the whole instruction set, newline-separated. Not a list, and not a map of rule categories. |
+
+**It is prose, not structure.** Every reader in this repo treats the value as an opaque
+string: `.strip()`-and-test for presence, or substring search. Do **not** nest typed rule
+categories under `model_instructions:` — no such shape has been observed in exported TML.
+
+**Column references are bare display names in brackets** — `[Customer Zipcode]`, **not**
+`[TABLE::col]` and not a `column_id`. Because the text is free-form, nothing resolves those
+references: renaming or deleting a column leaves the instruction pointing at a name that no
+longer exists, silently and with no import error. This is why the dependency impact report
+scans the field as an "AI surface" alongside `properties.synonyms` before a column is removed
+or repointed.
+
+**Prose about the business goes in `model.description`; rules for Spotter go here.** The two
+are read together, and both are free text — the split is by audience, not by format.
+
+**Read path verified, write path not.** The field is confirmed **present in exported TML** and
+is read in production (Spotter/AI readiness checks and the dependency impact probe). Whether a
+TML *import* persists a value written into it has **not** been verified on a live instance —
+the product also exposes a dedicated write API, `POST /api/rest/2.0/ai/instructions/set`
+(Beta 10.15.0.cl, needs `CAN_USE_SPOTTER` + `SPOTTER_COACHING_PRIVILEGE`). Until the TML write
+is verified, **pass the field through on round-trips, and do not rely on TML import to author
+it** — use the API, or have the user paste the text in the UI. (Tracked as BL-030.)
+
+**The API twin returns a different shape.** `POST /api/rest/2.0/ai/instructions/get` (parameter
+`data_source_identifier`, *not* `metadata_identifier`) returns
+`nl_instructions_info[].instructions` as an **array of strings** with a `scope` (`GLOBAL`
+observed). The TML surface flattens that to a single string, so a consumer that checks only one
+of the two surfaces will under-report coverage — check both.
 
 ### `action_object_associations[]`
 
