@@ -440,7 +440,7 @@ or repointed.
 **Prose about the business goes in `model.description`; rules for Spotter go here.** The two
 are read together, and both are free text — the split is by audience, not by format.
 
-**Read path verified, write path not.** The field is confirmed **present in exported TML** and
+**Read path verified, write path not.** The field is **reported present in exported TML** by `ts-audit`'s open-item #5 — an undated, un-instanced entry, and the 2026-07-30 census found it in **0 of 143** Models, so treat presence as likely-but-unwitnessed rather than settled. It is
 is read in production (Spotter/AI readiness checks and the dependency impact probe). Whether a
 TML *import* persists a value written into it has **not** been verified on a live instance —
 the product also exposes a dedicated write API, `POST /api/rest/2.0/ai/instructions/set`

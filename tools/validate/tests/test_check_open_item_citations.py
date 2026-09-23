@@ -167,3 +167,54 @@ def test_both_forms_on_one_line_report_once_each(tmp_path):
     skill(tmp_path, "ts-x",
           {"SKILL.md": "open-item #8 and [#9](references/open-items.md)\n"}, items=[1])
     assert len(run(tmp_path)) == 2
+
+
+# ── agents/shared/ has no owning skill (the pre-commit trigger matches it) ──
+
+def shared_file(tmp_path, body, name="schemas/x.md"):
+    p = tmp_path / "agents" / "shared" / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body, encoding="utf-8")
+    return p
+
+
+def test_shared_file_citation_must_name_a_skill(tmp_path):
+    skill(tmp_path, "ts-x", {"SKILL.md": "x\n"}, items=[3])
+    p = shared_file(tmp_path, "required on every entry (open-items #12).\n")
+    known = {s.name: s for s in c.skill_dirs(tmp_path)}
+    problems = c.check_shared(p, tmp_path, known)
+    assert len(problems) == 1 and "names no skill" in problems[0]
+
+
+def test_shared_file_citation_naming_a_skill_resolves(tmp_path):
+    skill(tmp_path, "ts-object-answer-promote", {"SKILL.md": "x\n"}, items=[3])
+    p = shared_file(tmp_path, "see open-items.md #3 in ts-object-answer-promote for this\n")
+    known = {s.name: s for s in c.skill_dirs(tmp_path)}
+    assert c.check_shared(p, tmp_path, known) == []
+
+
+def test_shared_file_citation_naming_a_skill_that_lacks_it_fails(tmp_path):
+    skill(tmp_path, "ts-object-answer-promote", {"SKILL.md": "x\n"}, items=[3])
+    p = shared_file(tmp_path, "see open-item #99 in ts-object-answer-promote\n")
+    known = {s.name: s for s in c.skill_dirs(tmp_path)}
+    problems = c.check_shared(p, tmp_path, known)
+    assert len(problems) == 1 and "has no open-item #99" in problems[0]
+
+
+# ── lookback is bidirectional; nearest name wins ────────────────────────────
+
+def test_skill_named_after_the_citation_is_honoured(tmp_path):
+    """`see open-item #9 in ts-dependency-manager` — backward-only missed this."""
+    skill(tmp_path, "ts-dependency-manager", {"SKILL.md": "x\n"}, items=[9])
+    skill(tmp_path, "ts-object-model-aggregates",
+          {"SKILL.md": "see open-item #9 in ts-dependency-manager for detail\n"}, items=[1])
+    assert run(tmp_path) == []
+
+
+def test_nearest_skill_name_wins_over_a_farther_one(tmp_path):
+    skill(tmp_path, "ts-security-columns", {"SKILL.md": "x\n"}, items=[1])
+    skill(tmp_path, "ts-dependency-manager", {"SKILL.md": "x\n"}, items=[9])
+    skill(tmp_path, "ts-object-model-aggregates",
+          {"SKILL.md": "Choosing the mechanism is ts-security-columns' job. "
+                       "Retrieval is ts-dependency-manager open-item #9.\n"}, items=[1])
+    assert run(tmp_path) == []

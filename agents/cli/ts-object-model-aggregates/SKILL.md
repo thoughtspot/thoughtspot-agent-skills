@@ -722,7 +722,7 @@ rls = table_tml["table"].get("rls_rules")
 ```
 
 If `rls` is falsy, no base table carried RLS — nothing to show or confirm, proceed
-straight to the CLS question below.
+straight to the column-security step below.
 
 Otherwise, **confirm it actually attached live** — 6d's pass 2 can fail independently
 of pass 1 (the table exists either way), so a non-null GUID in 6d's output is not
@@ -769,54 +769,65 @@ Confirm this matches your intent before the aggregate Model is imported. (type C
 to proceed, anything else cancels this candidate)
 ```
 
-**Column security — read it, do not ask for it.** Two independent mechanisms can
-restrict columns on a base table, and an aggregate that reproduces a secured column
-without reproducing its restriction exposes that data to every user 26.6
-aggregate-aware routing sends to the aggregate. Both are readable. Run both against
-**every** base table backing the candidate:
+**Column security — CSR is read; CLS still has to be asked.** Two independent
+mechanisms restrict columns, and an aggregate that reproduces a secured column without
+reproducing its restriction exposes that data to every user 26.6 aggregate-aware routing
+sends to the aggregate. They are **not** equally readable, and treating them as if they
+were is how this step went wrong before.
+
+**Column Security Rules (CSR) — read them.** One row per (table, column) with the groups
+that can see it. It fails loudly on a permissions or feature-flag problem rather than
+returning empty, so an empty result really does mean "no rules":
 
 ```bash
-# 1. Column Security Rules (CSR) — rule-based, per (table, column) → groups
-ts security column-rules get "{base_table}" --profile "{profile}"
-
-# 2. Column-level sharing (CLS) — grant-based, per column principal
-ts share status "{base_table_guid}" --columns --profile "{profile}"
+for table_name, _db_table, _conn in physical_tables:
+    ts security column-rules get "{table_name}" --profile "{profile_name}"
 ```
 
-Read the results as follows:
+Each row carries `column_name` and `group_names` (the groups that CAN see it). No rows =
+no CSR on that table.
 
-| Command | Restricted when | Field to read |
-|---|---|---|
-| `column-rules get` | any row returned for the table | `column_name` + `group_names` — the groups that CAN see it |
-| `share status --columns` | a row whose `type` is a column carries a non-`NO_ACCESS` `permission` | `permission`, **not** `shared_permission` (live-verified 2026-07-26 — the names suggest the opposite) |
+**Column-level sharing (CLS) — one read cannot answer this, so ask.** `ts share status
+--columns` exists, but it cannot be used as a detector here, for three reasons verified on
+this repo's own cluster (`docs/superpowers/verification/2026-07-26-ts-share-live-verification.md`):
 
-An empty result from `column-rules get` is a legitimate answer meaning no secured
-columns, not a failure. On `share status`, an object's owner and admins always appear,
-so their presence alone is not a grant worth reporting.
+| Why not | Evidence |
+|---|---|
+| Column rows appear on *unsecured* tables | a security-free 25-column table returns 78 rows — 3 table + 75 column — each `MODIFY` for the admins and owner, who always appear |
+| A non-`NO_ACCESS` column row is a **grant**, not a restriction | revoked principals are *removed* from the response, not downgraded, so "non-NO_ACCESS ⇒ restricted" is true of every row that exists |
+| A failed read is indistinguishable from a clean one | `ts share status` prints a warning to **stderr** and returns `[]` with **exit 0** when the permissions call fails — a wrong Org or a missing privilege renders exactly like "nothing is shared" |
 
-Present what you found rather than asking the user to recall it:
+`/ts-security-columns` uses the same command correctly: as a **baseline** captured before a
+change and diffed against an after-state. This skill has no before-state to diff against,
+so it must not pretend to a verdict.
+
+Therefore, ask — but ask having already done the half that can be automated:
 
 ```
-Column security on the base tables for this aggregate:
+Column Security Rules found on the base tables (read via `ts security column-rules get`):
 
-  ORDERS     CSR: SALARY        → visible to [Finance, Exec]
-             CLS: (none)
-  CUSTOMERS  CSR: (none)
-             CLS: (none)
+  ORDERS     SALARY  → visible to [Finance, Exec]
+  CUSTOMERS  (none)
 
-The aggregate reproduces SALARY. Equivalent security must be applied to the
-aggregate table or the aggregate exposes it to every user routing reaches.
-(type CONFIRM once equivalent security is applied or scheduled, anything else
-cancels this candidate)
+CSR is covered. Column-level SHARING (CLS) cannot be read reliably in one pass —
+it is a grant model, and an unsecured table returns column rows too.
+
+Do any base tables use column-level sharing to hide columns from a group?
+(Y / N / UNSURE — if UNSURE, run `/ts-security-columns` against ORDERS, CUSTOMERS
+before continuing; do not guess)
 ```
 
-If **either** command reports a restricted column that the aggregate reproduces,
-require that explicit confirmation before continuing. If both come back empty, record
-"no column security detected on the base tables" in the run notes — that is a read
-result, not an assumption, and it is what a later reviewer needs to see.
+Require explicit confirmation that equivalent security is applied to the aggregate before
+continuing if **either** CSR reported a restricted column the aggregate reproduces, or the
+operator answered Y. **Do not proceed on UNSURE** — that is what `/ts-security-columns` is
+for, and an unsecured aggregate is not recoverable by a later check.
 
-Choosing *which* mechanism to apply to the aggregate is `/ts-security-columns`'s job,
-not this skill's — route the user there rather than picking for them.
+Record the CSR result in the run notes as a read result. Record the CLS answer as an
+**operator assertion**, named as such — a later reviewer needs to know which of the two
+was measured.
+
+Choosing *which* mechanism to apply to the aggregate is `/ts-security-columns`'s job, not
+this skill's — route the user there rather than picking for them.
 
 ### 6f. Import the aggregate Model
 
@@ -1077,7 +1088,7 @@ Remove once you're confident every generated aggregate is correct: rm -rf {workd
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1.0 | 2026-09-22 | **Column security is read, not guessed (audit 5.1).** Step 6e asked the operator "do any base tables have Column-Level Security? (Y / N — if unsure, check the UI)", citing CSR retrieval as an unverified open item on `ts-dependency-manager`. Both halves have been readable since v0.109.0: `ts security column-rules get` returns one row per (table, column) with `group_names`, and `ts share status --columns` covers column-level sharing. The step now runs both against every base table and presents what it found; the confirmation gate remains, but rests on a read rather than recall. A guessed "N" shipped an unsecured aggregate that 26.6 aggregate-aware routing then sent queries to. Also corrects a conflation — the old text said "CLS" while citing CSR, which are different mechanisms with different capabilities; choosing between them is `/ts-security-columns`'s job. |
+| 1.1.0 | 2026-09-22 | **CSR is read; CLS is asked honestly (audit 5.1).** Step 6e asked the operator "do any base tables have Column-Level Security? (Y / N — if unsure, check the UI)", citing CSR retrieval as an unverified open item. CSR **is** now readable — `ts security column-rules get` returns one row per (table, column) with `group_names` and fails loudly rather than returning empty — so that half is automated. CLS is **not**: `ts share status --columns` is a grant model whose column rows appear on unsecured tables too (a security-free 25-column table returns 75 of them), whose revoked principals are removed rather than downgraded, and which returns `[]` with exit 0 when the permissions call fails — so a single read cannot distinguish "nothing secured" from "could not read". `/ts-security-columns` uses the same command correctly, as a baseline for a later diff; this skill has no before-state, so it asks and refuses to proceed on UNSURE. The run notes now separate the read result from the operator assertion. Also corrects a conflation — the old text said "CLS" while citing CSR. |
 | 1.0.3 | 2026-07-24 | Update CLI references `ts spotql` → `ts agentql` (the command was renamed; `ts spotql` still works as a deprecated alias). No behaviour change. |
 | 1.0.2 | 2026-07-24 | Rename SpotQL → AgentQL in prose (external product name only; the `ts spotql` CLI and all identifiers are unchanged). No behaviour change. |
 | 1.0.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |

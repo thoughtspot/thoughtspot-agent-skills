@@ -1,5 +1,7 @@
 # `model_instructions` Schema — Declarative-Only Spec
 
+> **Before writing any of this to TML, read BL-288.** `model_instructions` is a real Model TML key holding a free-text **string** (`data_model_instructions`) that `audit/checks_ai.py` and `report/tml_probes.py` both read. Writing the typed categories below under that key does not error — it silently makes a coached Model read as uncoached: a HIGH-severity A3 "no coaching configured", A5's 25-point AI weight lost, and `find_ai_surface_uses` blind to every column named in the rules. See `agents/shared/schemas/thoughtspot-model-tml.md` for the shape the readers expect.
+
 `model_instructions` is the structured, machine-parsable channel for **global,
 untriggered guidance** about a Model. It carries rules the LLM should apply on
 every query — exclusions, defaults, formatting — plus meta-level facts about how

@@ -11,8 +11,12 @@ Status legend: **CONFIRMED** (direction known, needs live verification) | **VERI
 
 Documented as a feature ([Data Model Instructions](https://docs.thoughtspot.com/cloud/latest/data-model-instructions))
 with examples like *"When I ask for last month, use 'last 30 days' as a filter"* but the
-TML storage location is **not in the published TML schema or this project's
-[thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md)**.
+TML storage location is not in the published TML schema. **Half-closed 2026-09-22:**
+the field is now documented in
+[thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) as
+`model.model_instructions.data_model_instructions` (a free-text string). What remains
+open is the **write** path — whether TML import persists a value written there — and the
+`ai/instructions/set` API route this skill should use instead of manual paste.
 
 API probing (against champ-staging 2026-04-25) returned 500 on:
 - `/api/rest/2.0/sage/instructions`

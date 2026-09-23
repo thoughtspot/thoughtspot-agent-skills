@@ -6,13 +6,17 @@ check_open_item_citations.py — an `open-item #N` citation must resolve to a re
 `#N` novelty across branches). Nothing resolved a *reference* to one — so a citation
 could name an item that does not exist, and stay silent indefinitely.
 
-That is not hypothetical. The 2026-09-22 full audit (finding 5.3) found
-`ts-dependency-manager/references/dependency-types.md` citing `open-item #10` at four
-sites and `open-item #12` at one, in a file whose headings are #2,#3,#4,#9,#11,#13-#16,
-#18,#20-#25. Neither item has ever existed. The citation is what a reader follows to
-decide whether a CLI gap is real, so a dangling one does not merely rot — it makes a
-stale "we cannot do this yet" look sourced. Two findings that sweep traced back to
-exactly that (5.1 and 5.3).
+That is not hypothetical, and the real shape is worse than "someone typed a wrong
+number". `ts-dependency-manager/references/dependency-types.md` cited `#10` and `#12`,
+which its `open-items.md` does not have. Both **did** exist and were deleted as
+**resolved** — `2a25a6e` (2026-06-15) dropped #5/#10/#19/#22/#23/#24, and #10 read
+"Column alias TML — VERIFIED 2026-06-01 via export_with_column_aliases beta flag". So
+row 10's "retrieval mechanism unverified (open-item #10)" was not merely pointing at
+nothing; it was pointing at an item that said the **opposite**, three months earlier.
+
+That is the dominant failure mode: a resolved item is deleted and its inbound references
+keep asserting the superseded state. PR #31 (2026-06-01) did the same to
+`ts-object-model-coach`, trimming 17 items to 7 and leaving 31 references behind.
 
 Rule: inside a skill directory, every `open-item #N` / `open items #N` / `open item #N`
 citation must match an item heading in **that skill's** `references/open-items.md` —
@@ -56,7 +60,9 @@ CITATION_RE = re.compile(r"open[-_ ]items?(?:\.md)?\s*#(\d+)", re.IGNORECASE)
 LINK_CITATION_RE = re.compile(
     r"\[[^\]]*?#(\d+)[^\]]*?\]\([^)]*open[-_]items?\.md[^)]*\)", re.IGNORECASE)
 
-#: How far back to look for a skill name that redirects the citation elsewhere.
+#: How far either side of a citation to look for a skill name that redirects it.
+#: Both directions: "see ts-x open-item #3" and "see open-item #3 in ts-x" are equally
+#: natural, and a backward-only window scored the second as unqualified.
 LOOKBACK = 120
 
 SCANNED_SUFFIXES = {".md", ".py"}
@@ -81,6 +87,39 @@ def item_numbers(path: Path) -> set[str]:
         return set()
 
 
+def shared_files(root: Path) -> list[Path]:
+    """Files under ``agents/shared/`` — no owning skill, so citations must name one."""
+    base = root / "agents" / "shared"
+    if not base.is_dir():
+        return []
+    return sorted(f for f in base.rglob("*")
+                  if f.is_file() and f.suffix in SCANNED_SUFFIXES)
+
+
+def check_shared(path: Path, root: Path, known: dict[str, Path]) -> list[str]:
+    """A shared file is read by several skills, so an unqualified `#N` is ambiguous."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    body = procedure_body(text)
+    raw = [(m.start(), m.group(1)) for m in CITATION_RE.finditer(body)]
+    raw += [(m.start(), m.group(1)) for m in LINK_CITATION_RE.finditer(body)]
+    problems: list[str] = []
+    for start, number in sorted(set(raw)):
+        lineno = body.count("\n", 0, start) + 1
+        named = owning_skill(text, start, known)
+        if named is None:
+            problems.append(
+                f"  ✗ {path.relative_to(root)}:{lineno}: cites open-item #{number} but "
+                f"names no skill. A shared file has no owning open-items.md — write "
+                f"\"<skill> open-item #{number}\" or state the finding inline.")
+        elif number not in item_numbers(known[named] / "references" / "open-items.md"):
+            problems.append(
+                f"  ✗ {path.relative_to(root)}:{lineno}: {named} has no open-item #{number}")
+    return problems
+
+
 def skill_dirs(root: Path) -> list[Path]:
     out: list[Path] = []
     for runtime in ALL_RUNTIMES:
@@ -92,10 +131,18 @@ def skill_dirs(root: Path) -> list[Path]:
 
 def owning_skill(text: str, pos: int, known: dict[str, Path]) -> str | None:
     """A skill named just before the citation redirects it to that skill's file."""
-    window = text[max(0, pos - LOOKBACK): pos]
-    hits = [(window.rfind(name), name) for name in known if name in window]
-    hits = [(i, n) for i, n in hits if i >= 0]
-    return max(hits)[1] if hits else None
+    before = text[max(0, pos - LOOKBACK): pos]
+    after = text[pos: pos + LOOKBACK]
+    # Nearest name wins, measured by distance from the citation in either direction.
+    hits: list[tuple[int, str]] = []
+    for name in known:
+        i = before.rfind(name)
+        if i >= 0:
+            hits.append((len(before) - i, name))
+        j = after.find(name)
+        if j >= 0:
+            hits.append((j, name))
+    return min(hits)[1] if hits else None
 
 
 def check_skill(skill: Path, root: Path, known: dict[str, Path]) -> list[str]:
@@ -164,6 +211,11 @@ def main() -> int:
     failures: list[str] = []
     for skill in skills:
         failures.extend(check_skill(skill, root, known))
+    # agents/shared/ has no owning skill, but the pre-commit trigger matches it — a
+    # gate that runs on a file it never reads is the fail-open this rubric is about.
+    shared = shared_files(root)
+    for path in shared:
+        failures.extend(check_shared(path, root, known))
 
     if failures:
         print(f"\n{len(failures)} dangling open-item citation(s):\n")
@@ -175,7 +227,8 @@ def main() -> int:
         print("create an item to satisfy a reference.")
         return 1
 
-    print(f"All open-item citations resolve ({len(skills)} skill(s) scanned).")
+    print(f"All open-item citations resolve "
+          f"({len(skills)} skill(s) + {len(shared)} shared file(s) scanned).")
     return 0
 
 

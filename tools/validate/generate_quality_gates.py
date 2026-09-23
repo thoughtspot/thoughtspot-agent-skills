@@ -545,6 +545,10 @@ def _humanise_trigger(pattern: str) -> str:
         return "Shared mappings/schemas staged"
     if "pre-commit" in p or ("validate/" in p and "quality-gates" in p):
         return "Validators or pre-commit infrastructure staged"
+    # `\.(md|py)` spells markdown inside an alternation, so a literal `\.md` test
+    # misses it while `\.py` matches the validator's own filename in the pattern.
+    if ("\\.py" in p or "py)" in p) and ("\\.md" in p or "(md" in p):
+        return "Skill markdown or Python staged"
     if "\\.py" in p and "\\.md" not in p:
         return "Python files staged"
     if "agents/" in p and "\\.md" in p:

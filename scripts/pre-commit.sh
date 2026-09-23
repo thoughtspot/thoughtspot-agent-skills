@@ -319,7 +319,7 @@ fi
 # No inline requests/urllib — Claude skills use the `ts` CLI, never direct
 # requests/urllib calls to a ThoughtSpot endpoint (.claude/rules/ts-cli.md; audit
 # finding 5.2). Runs when a CLI/Claude SKILL.md or the validator changes.
-if echo "$STAGED" | grep -qE '(^agents/(cli|claude)/.*/SKILL\.md|tools/validate/check_no_inline_requests\.py)'; then
+if echo "$STAGED" | grep -qE '(^agents/(cli|claude)/.*\.(md|py)$|tools/validate/check_no_inline_requests\.py)'; then
   run_check "no inline requests" "tools/validate/check_no_inline_requests.py --root $REPO_ROOT"
 fi
 

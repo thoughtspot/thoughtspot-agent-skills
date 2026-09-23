@@ -326,7 +326,8 @@ Per `feedback_ts_tml_import_constraints` memory and verified open-items:
 2. `chart_type` must be UPPERCASE and from the verified valid set above.
    `TABLE` is rejected.
 3. `chart_type` and `display_mode` are required on every entry, including
-   BUSINESS_TERM (open-items #12).
+   BUSINESS_TERM (verified 2026-04-26 against champ-staging; omitting either
+   fails the import with `EDOC_FEEDBACK_TML_INVALID`).
 4. `formula_info` on BUSINESS_TERM is rejected — the API parses the expression
    as a search query, not a formula definition. Promote the formula to the
    Model first via `/ts-object-answer-promote`, then reference it in
