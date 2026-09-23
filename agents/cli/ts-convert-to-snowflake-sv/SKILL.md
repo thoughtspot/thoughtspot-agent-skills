@@ -715,16 +715,7 @@ tables. Log it in the Unmapped Properties Report under a new section:
 
 ### Step 8: Translate Formulas
 
-> **MANDATORY (I7) — before classifying any ThoughtSpot formula as untranslatable, open
-> [`../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md`](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
-> and check its Translation Decision Flowchart, the `ThoughtSpot → Snowflake` column of the
-> Scalar Functions tables, and the SQL Pass-Through Functions, Window and Analytical
-> Functions, Level of Detail (LOD) Functions and Semi-Additive Functions sections — then the
-> "Untranslatable Patterns", "Untranslatable LOD Patterns" and "Untranslatable Semi-Additive
-> Patterns" sections for the authoritative exclusions. Do not decide from syntax alone.**
-> See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
-
-> **MANDATORY — read the reference before assessing any formula:**
+> **MANDATORY (I7) — read the reference before assessing any formula:**
 > Open [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
 > and use its **Decision Flowchart** to classify every formula. Do **not** classify
 > a formula as untranslatable based on function name recognition alone. Patterns
@@ -736,9 +727,16 @@ tables. Log it in the Unmapped Properties Report under a new section:
 > | `sum(group_aggregate(sum(m), {attr}, query_filters()))` | Plain `SUM(m)` — outer sum + query_filters() simplifies |
 > | `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | Plain `SUM(m)` |
 > | `safe_divide(sum(m), [NamedMetric])` where NamedMetric is same measure at coarser grain | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` — contribution ratio pattern |
-| `group_aggregate(sum(m), {attr}, query_filters() + {region='east'})` | `SUM(CASE WHEN t.REGION = 'east' THEN t.M END)` — an *additive* hardcoded filter is translatable (corrected 2026-08-26, finding 13.9, live-verified). Only filters that **suppress** query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable |
+> | `group_aggregate(sum(m), {attr}, query_filters() + {region='east'})` | `SUM(CASE WHEN t.REGION = 'east' THEN t.M END)` — an *additive* hardcoded filter is translatable (corrected 2026-08-26, finding 13.9, live-verified). Only filters that **suppress** query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable |
 >
 > Consult the reference. Never reason from first principles about ThoughtSpot functions.
+>
+> This is the **to-** direction: check the `ThoughtSpot → Snowflake` column of the
+> Scalar Functions tables and the SQL Pass-Through, Window and Analytical, Level of
+> Detail (LOD) and Semi-Additive Functions sections — then the three "Untranslatable
+> …Patterns" sections for the authoritative exclusions. The `Snowflake → ThoughtSpot`
+> column is the wrong side here.
+> See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
 
 For each formula column (`formula_id` is set in `model.columns[]`):
 
@@ -1305,7 +1303,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.6.2 | 2026-09-22 | **I7 untranslatable gate added.** Step 8 (Translate Formulas) reached its untranslatable verdict with no instruction to open [ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) first, so a ThoughtSpot formula with a documented Snowflake equivalent could be dropped on syntax recognition alone. The gate names the `ThoughtSpot → Snowflake` (forward) column explicitly — the reverse tables are the wrong side for this direction. Now gated by `check_i7_gate.py` (2026-09-22 audit finding 9.3). |
+| 1.6.2 | 2026-09-22 | **I7 marker added to the existing Step 8 gate; no second gate added.** This skill already carried the repo's strongest anti-false-untranslatable text — "Do **not** classify a formula as untranslatable based on function name recognition alone" plus a six-row "Looks untranslatable / Actually translatable as" table. It was invisible to tooling for want of the marker. That block now carries `MANDATORY (I7)`, names the `ThoughtSpot → Snowflake` (forward) column as the side to check, and points back to the invariants doc. Also fixes a pre-existing bug in that block: one table row was missing its `>` prefix, so the blockquote terminated early and the last three rows rendered outside it. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |
 | 1.6.1 | 2026-08-26 | Carry BL-074's prompt-batching rule — ask one question at a time for **dependent** decisions, batch **independent** ones. The rule reached 13 skills but omitted the four conversion skills, which are the most interactive in the repo by ask-count (finding 14.6). A `check_patterns` rule now enforces it above a question-count threshold. |
 | 1.6.0 | 2026-08-26 | **Finding 13.9 — an additive hardcoded filter is translatable.** `group_aggregate(..., query_filters() + {attr='v'})` now maps to `SUM(CASE WHEN ... THEN ... END)`; live-verified on Snowflake 10.30.101 that a semantic-view metric expression CAN carry a filter, which the shared mapping had denied while its own `sum_if` row asserted the opposite. Filters that *suppress* query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable, now for the correct reason. |
 | 1.5.1 | 2026-07-29 | **BL-170 — the shared Snowflake formula mapping's ThoughtSpot side was corrected.** Live verification on se-thoughtspot 2026-07-29 proved `trim`, `ltrim`, `rtrim`, `replace`, `starts_with` and `ends_with` are not native ThoughtSpot functions, and that `in` requires curly braces. `ts-snowflake-formula-translation.md` is bidirectional, so this direction's left-hand (ThoughtSpot-source) column changed too: a TS model can never present `trim ( )`/`replace ( )`/`starts_with ( )` as input — the real input is the corresponding `sql_string_op` pass-through or composition, which this direction already unwraps correctly. Read as a narrowing of the accepted input set, not a new emission rule. |

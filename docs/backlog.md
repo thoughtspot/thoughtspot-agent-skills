@@ -167,6 +167,9 @@ are roughly ordered by value÷effort.
 | BL-280 | a clause-derived table name is never checked against the relation's own children, so a qualifier one level above the table resolves to a name no relation carries and the join is dropped with no warning | with BL-277 |
 | BL-281 | a `<relation join=...>` carrying no `<clause>` is dropped with no warning — the last `_extract_joins` exit with no diagnostic, in the function whose contract is to report what it skips | next Tableau join-parser pass |
 | BL-282 | two DIFFERENT open items can share a `#N` inside one file with no gate — the novelty rule catches the cross-branch case, the within-file case is blocked by ts-audit's untagged verified/unverified double entries | next validator pass |
+| BL-285 | `check_i7_gate` checks the I7 marker is in the procedure body, not that it *precedes* the untranslatable classification step — finding 9.3 asked for "within N lines" of it; a gate in the wrong section still passes | next validator pass |
+| BL-286 | the Genie runtime's two converters (`agents/databricks/skills/ts-convert-*`) carry no I7 gate and are outside `_dirs`, so `check_i7_gate` cannot see them — audit 9.17 expected 9.3's fix to reach them | with the next Genie review |
+| BL-287 | CoCo `ts-convert-from-snowflake-sv` changelog claims its I7 gate "mirrors the CLI skill v1.5.0", but CLI v1.5.0 covered N1/I5 and never had the gate — the CLI got it for the first time in PR #525 (audit 9.2, second half) | next mirror pass |
 | BL-283 | `check-catalog.md` and the audit `check_id`s can drift with nothing to notice — 51 documented vs 50 emitted today, and the deferred-id table means a naive comparison is wrong | next validator pass |
 
 ### Tier 3 — Opportunistic
@@ -7231,6 +7234,43 @@ someone regenerates, so they may lag reality in between. The rendered document n
 points readers at `git log -1 -- tools/validate/<validator>.py` for an authoritative answer. Dropping
 the column entirely was the alternative; it was not taken because the audit's angle-7 checklist uses
 the column as a starting point, and a labelled snapshot is more useful than nothing.
+
+---
+
+## BL-285 — the I7 gate checks presence, not position `Tier 2`
+
+**Filed:** 2026-09-22 while routing audit finding 9.3 (PR #525).
+**Affects:** `tools/validate/check_i7_gate.py`.
+
+9.3's prescribed outcome was to "assert the marker appears **within N lines of** an
+untranslatable/skipped classification step in every `ts-convert-*` SKILL.md". The shipped
+validator asserts presence in the procedure body (the `## Changelog` tail is excluded) and
+no more, because converters word that step too differently — `skipped[]`, `unsupported[]`,
+"NEEDS REVIEW", "could not translate" — for a regex to locate it without itself failing
+open, which would be the very class of defect this sweep was about.
+
+The docstring and failure message now say so explicitly rather than implying an ordering
+guarantee. Closing this means finding a position rule that is not itself fail-open; a
+plausible route is requiring the gate before the first occurrence of any term in a
+maintained signal list, and failing loudly when a converter matches none of them.
+
+---
+
+## BL-286 — the Genie runtime's converters are ungated for I7 `Tier 2`
+
+**Filed:** 2026-09-22 while routing audit finding 9.3 (PR #525).
+**Affects:** `agents/databricks/skills/ts-convert-from-databricks-mv`,
+`agents/databricks/skills/ts-convert-to-databricks-mv`.
+
+`check_i7_gate` scopes to `_dirs.ALL_RUNTIMES`, which deliberately excludes
+`agents/databricks/` (`.claude/rules/runtime-coverage.md`: that runtime sits outside the
+mirror/coverage tooling by design). So both Genie converters are unreached — and
+`ts-convert-to-databricks-mv/SKILL.md:149` lists untranslatable formulas with no gate.
+
+Audit finding 9.17 recorded these as "No action beyond 9.3", which assumed 9.3's fix would
+reach them. It does not. Either bring the Genie skills into a gate of their own or record
+in `runtime-coverage.md` that I7 is a manual review there — the point is that the
+assumption is now written down instead of inherited.
 
 ---
 

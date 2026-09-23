@@ -980,16 +980,7 @@ rm -f /tmp/ts_tml_*.json
 
 ### Step 9: Translate Formulas
 
-> **MANDATORY (I7) — before classifying any ThoughtSpot formula as untranslatable, open
-> [`../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md`](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
-> and check its Translation Decision Flowchart, the `ThoughtSpot → Snowflake` column of the
-> Scalar Functions tables, and the SQL Pass-Through Functions, Window and Analytical
-> Functions, Level of Detail (LOD) Functions and Semi-Additive Functions sections — then the
-> "Untranslatable Patterns", "Untranslatable LOD Patterns" and "Untranslatable Semi-Additive
-> Patterns" sections for the authoritative exclusions. Do not decide from syntax alone.**
-> See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
-
-> **MANDATORY — read the reference before assessing any formula:**
+> **MANDATORY (I7) — read the reference before assessing any formula:**
 > Open [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
 > and use its **Decision Flowchart** to classify every formula. Do **not** classify
 > a formula as untranslatable based on function name recognition alone. Patterns
@@ -1001,9 +992,16 @@ rm -f /tmp/ts_tml_*.json
 > | `sum(group_aggregate(sum(m), {attr}, query_filters()))` | Plain `SUM(m)` — outer sum + query_filters() simplifies |
 > | `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | Plain `SUM(m)` |
 > | `safe_divide(sum(m), [NamedMetric])` where NamedMetric is same measure at coarser grain | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` — contribution ratio pattern |
-| `group_aggregate(sum(m), {attr}, query_filters() + {region='east'})` | `SUM(CASE WHEN t.REGION = 'east' THEN t.M END)` — an *additive* hardcoded filter is translatable (corrected 2026-08-26, finding 13.9, live-verified). Only filters that **suppress** query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable |
+> | `group_aggregate(sum(m), {attr}, query_filters() + {region='east'})` | `SUM(CASE WHEN t.REGION = 'east' THEN t.M END)` — an *additive* hardcoded filter is translatable (corrected 2026-08-26, finding 13.9, live-verified). Only filters that **suppress** query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable |
 >
 > Consult the reference. Never reason from first principles about ThoughtSpot functions.
+>
+> This is the **to-** direction: check the `ThoughtSpot → Snowflake` column of the
+> Scalar Functions tables and the SQL Pass-Through, Window and Analytical, Level of
+> Detail (LOD) and Semi-Additive Functions sections — then the three "Untranslatable
+> …Patterns" sections for the authoritative exclusions. The `Snowflake → ThoughtSpot`
+> column is the wrong side here.
+> See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
 
 For each formula column (`formula_id` is set):
 
@@ -1484,7 +1482,7 @@ Apply Steps 11b–12b (checkpoint + verify) from the standard workflow unchanged
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.3.1 | 2026-09-22 | **I7 untranslatable gate added.** Step 9 (Translate Formulas) reached its untranslatable verdict with no instruction to open [ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) first, so a ThoughtSpot formula with a documented Snowflake equivalent could be dropped on syntax recognition alone. The gate names the `ThoughtSpot → Snowflake` (forward) column explicitly — the reverse tables are the wrong side for this direction. Now gated by `check_i7_gate.py` (2026-09-22 audit finding 9.3). |
+| 1.3.1 | 2026-09-22 | **I7 marker added to the existing Step 9 gate; no second gate added.** Mirrors the CLI change exactly — the existing "read the reference before assessing any formula" block, with its "Looks untranslatable / Actually translatable as" table, now carries `MANDATORY (I7)`, names the forward `ThoughtSpot → Snowflake` column, and references the invariants doc. Includes the same unprefixed-table-row fix. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |
 | 1.3.0 | 2026-08-26 | **Finding 13.9 — an additive hardcoded filter is translatable.** `group_aggregate(..., query_filters() + {attr='v'})` now maps to `SUM(CASE WHEN ... THEN ... END)`; live-verified on Snowflake 10.30.101 that a semantic-view metric expression CAN carry a filter, which the shared mapping had denied while its own `sum_if` row asserted the opposite. Filters that *suppress* query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable, now for the correct reason. |
 | 1.2.2 | 2026-07-03 | Snowflake currency corrections: soften the "metrics are never top-level" rule to note the root-level derived-metrics exception (Key Structural Rule #1 in snowflake-schema.md). |
 | 1.2.1 | 2026-06-13 | Add LOD/window metric alias rule (error 010256) to Step 11 checklist; sync to CLI v1.2.2. |

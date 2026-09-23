@@ -4,42 +4,51 @@ check_i7_gate.py — every conversion skill must carry the I7 untranslatable gat
 
 Invariant I7 (``agents/shared/schemas/ts-model-conversion-invariants.md``) requires
 each conversion skill to instruct the model to open its formula-translation reference
-*before* classifying an expression as untranslatable — "Do not decide from syntax
-alone." The invariant states the gate "appears before the untranslatable
-classification step in every skill".
+*before* classifying an expression as untranslatable — "do not decide from syntax
+alone."
 
-It did not. The 2026-09-22 full audit (finding 9.3) found the gate present in **2 of
-11** converters — ``ts-convert-from-tableau`` and the CoCo ``ts-convert-from-snowflake-sv``
-mirror — while every other converter reached a step that surfaces skipped or
-untranslatable expressions to the user with no instruction to check the reference
-first. ``ts-convert-to-snowflake-sv`` referred to untranslatable expressions fifteen
-times and cited I7 zero times. Nothing enforced the invariant anywhere, so the gap was
-invisible between full audits.
-
-The failure this causes is silent and lossy: an expression with a documented
-ThoughtSpot equivalent is dropped from the converted model on syntax recognition
-alone, and the user is asked to "proceed without them" with no signal that the
-translation was available.
+The 2026-09-22 full audit (finding 9.3) found the **marker convention** carried by 2
+of 11 converters. That is narrower than "9 skills gave no such instruction", and the
+distinction matters: ``ts-convert-to-snowflake-sv`` and its CoCo mirror already held a
+strong prose gate ("Do **not** classify a formula as untranslatable based on function
+name recognition alone") plus a "Looks untranslatable / Actually translatable as"
+table, and ``from-looker`` stated the rule and checklisted it. What none of them had
+was a *machine-checkable* marker, so no gate could tell a skill that instructs the
+model from one that does not — and the omission was invisible between full audits.
 
 Rule, per converter ``SKILL.md``:
 
-1. It cites exactly one ``*-formula-translation.md`` mapping (its source dialect).
+1. Its source dialect is derived from its directory name (``ts-convert-{from,to}-X``)
+   and resolved to the one mapping under ``agents/shared/mappings/`` that serves X.
 2. It contains at least one blockquote gate carrying the ``MANDATORY (I7)`` marker.
-3. That gate cites the same formula-translation mapping the skill uses.
+3. That gate cites **that dialect's** formula-translation mapping — not a sibling's.
 4. That gate points back to ``ts-model-conversion-invariants.md``.
 
-All four must hold in one gate block, so a marker in one place and a citation in
-another does not pass. A skill may carry the gate more than once (``from-tableau``
-carries it at both classification points); only one must be complete.
+All of 2-4 must hold in one blockquote, so a marker in one place and a citation in
+another does not pass.
 
 Scope is **discovered, never listed** — the glob is ``ts-convert-*`` across every
-runtime in ``_dirs``, so a new converter is gated from its first commit. This is the
-same principle as ``conversion-consistency-auditor``'s run-time discovery and
-``_dirs.py`` itself: a hand-kept list is what let the gap reach 9 converters.
+runtime in ``_dirs``, and the dialect→mapping resolution is by name match, so a new
+converter is gated from its first commit with no edit here. Same principle as
+``conversion-consistency-auditor``'s run-time discovery and ``_dirs.py`` itself.
+
+What this does NOT check, stated so the gate does not advertise more than it has:
+
+* **Proximity.** Finding 9.3 asked for the marker "within N lines of the untranslatable
+  classification step". Converters word that step too differently for a regex to find
+  it without itself failing open, so this checks *presence in the procedure body* and
+  excludes only the ``## Changelog`` tail. A gate in the wrong section of the procedure
+  passes. BL-285 tracks the proximity refinement.
+* **Semantics.** A blockquote carrying the marker but saying the opposite ("decide from
+  syntax alone, it is faster") passes. No text check can settle that; review does.
+
+``agents/databricks/`` (the Genie runtime) is deliberately out of scope — it sits
+outside the mirror/coverage tooling by design (``.claude/rules/runtime-coverage.md``),
+so its two converters are ungated here. BL-286 tracks that gap.
 
 Exit codes:
   0 — every conversion skill carries a complete I7 gate
-  1 — at least one is missing or incomplete
+  1 — at least one is missing or incomplete, or the scope came back empty
 
 Run manually:
     python3 tools/validate/check_i7_gate.py --root .
@@ -57,14 +66,57 @@ from _dirs import ALL_RUNTIMES, runtime_globs  # noqa: E402
 
 CONVERT_SUFFIX = "ts-convert-*/SKILL.md"
 
-#: The gate marker. Matched case-sensitively — it is a literal convention, not prose.
+#: The gate marker. Matched literally — it is a convention, not prose. Kept in step
+#: with the "Required gate" block in ts-model-conversion-invariants.md (I7).
 MARKER = "MANDATORY (I7)"
-
-#: A skill's source-dialect reference, e.g. `tableau-formula-translation.md`.
-MAPPING_RE = re.compile(r"[\w.-]*/([\w-]+-formula-translation\.md)")
 
 #: The invariants doc the gate must point back to.
 INVARIANTS_DOC = "ts-model-conversion-invariants.md"
+
+#: ``ts-convert-from-databricks-mv`` -> ``databricks``. The ``-sv``/``-mv`` tail names
+#: the artifact (semantic view / metric view), not the dialect.
+DIALECT_RE = re.compile(r"^ts-convert-(?:from|to)-(.+?)(?:-(?:sv|mv))?$")
+
+FENCE_RE = re.compile(r"^\s*(```|~~~)")
+COMMENT_OPEN, COMMENT_CLOSE = "<!--", "-->"
+
+
+def strip_noncontent(text: str) -> str:
+    """Blank out fenced code blocks and HTML comments, preserving line numbering.
+
+    A marker shown as an *example* inside a fence, or parked in a comment, is not an
+    instruction to the model and must not satisfy the gate.
+    """
+    out, in_fence, in_comment = [], False, False
+    for line in text.splitlines():
+        if in_comment:
+            out.append("")
+            if COMMENT_CLOSE in line:
+                in_comment = False
+            continue
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            out.append("")
+            continue
+        if in_fence:
+            out.append("")
+            continue
+        if COMMENT_OPEN in line and COMMENT_CLOSE not in line:
+            in_comment = True
+            out.append("")
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def procedure_body(text: str) -> str:
+    """The skill's procedure — everything above ``## Changelog``.
+
+    Changelog rows quote gates and cite sibling mappings routinely; scanning them
+    would let a historical note satisfy a live gate.
+    """
+    m = re.search(r"^##+\s+Changelog\s*$", text, re.M)
+    return text[: m.start()] if m else text
 
 
 def blockquote_runs(lines: list[str]) -> list[tuple[int, str]]:
@@ -85,34 +137,57 @@ def blockquote_runs(lines: list[str]) -> list[tuple[int, str]]:
     return runs
 
 
-def cited_mapping(text: str) -> str | None:
-    """The single formula-translation mapping this skill cites, if unambiguous."""
-    names = {m.group(1) for m in MAPPING_RE.finditer(text)}
-    return names.pop() if len(names) == 1 else None
+def dialect_of(skill_dir: str) -> str | None:
+    """``ts-convert-from-qlik`` -> ``qlik``."""
+    m = DIALECT_RE.match(skill_dir)
+    return m.group(1) if m else None
+
+
+def mapping_for_dialect(root: Path, dialect: str) -> str | None:
+    """The ``*-formula-translation.md`` filename serving this dialect, by name match.
+
+    Mapping directories are either the bare dialect (``qlik``, ``tableau``) or
+    ``ts-``-prefixed (``ts-snowflake``, ``ts-databricks``). Resolved by discovery so a
+    new dialect needs no edit here.
+    """
+    mappings = root / "agents" / "shared" / "mappings"
+    for candidate in (dialect, f"ts-{dialect}"):
+        d = mappings / candidate
+        if d.is_dir():
+            files = sorted(d.glob("*-formula-translation.md"))
+            if len(files) == 1:
+                return files[0].name
+    return None
 
 
 def check_skill(path: Path, root: Path) -> list[str]:
     """Problems with one converter SKILL.md; empty means it passes."""
     rel = path.relative_to(root)
     try:
-        text = path.read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8")
     except OSError as exc:
         return [f"  ✗ {rel}: unreadable ({exc})"]
 
-    mapping = cited_mapping(text)
+    skill_dir = path.parent.name
+    dialect = dialect_of(skill_dir)
+    if dialect is None:
+        return [f"  ✗ {rel}: cannot derive a source dialect from directory {skill_dir!r}"]
+
+    mapping = mapping_for_dialect(root, dialect)
     if mapping is None:
-        names = sorted({m.group(1) for m in MAPPING_RE.finditer(text)})
-        detail = f"cites {len(names)}: {', '.join(names)}" if names else "cites none"
         return [
-            f"  ✗ {rel}: no single formula-translation reference to gate against "
-            f"({detail}). A converter must cite exactly one source-dialect mapping."
+            f"  ✗ {rel}: no formula-translation mapping found for dialect {dialect!r} "
+            f"(looked in agents/shared/mappings/{dialect}/ and /ts-{dialect}/). "
+            f"A converter needs one before it can be gated."
         ]
 
-    gates = [(n, t) for n, t in blockquote_runs(text.splitlines()) if MARKER in t]
+    body = procedure_body(strip_noncontent(raw))
+    gates = [(n, t) for n, t in blockquote_runs(body.splitlines()) if MARKER in t]
     if not gates:
         return [
-            f"  ✗ {rel}: no `{MARKER}` gate. Add one before the step that classifies "
-            f"or surfaces untranslatable/skipped expressions, citing {mapping}."
+            f"  ✗ {rel}: no `{MARKER}` gate in the procedure body. Add one before the "
+            f"step that classifies or surfaces untranslatable/skipped expressions, "
+            f"citing {mapping}."
         ]
 
     for _lineno, gate in gates:
@@ -123,7 +198,7 @@ def check_skill(path: Path, root: Path) -> list[str]:
     for lineno, gate in gates:
         missing = []
         if mapping not in gate:
-            missing.append(f"does not cite {mapping}")
+            missing.append(f"does not cite {mapping} (this skill's dialect is {dialect})")
         if INVARIANTS_DOC not in gate:
             missing.append(f"does not reference {INVARIANTS_DOC}")
         problems.append(f"  ✗ {rel}:{lineno}: incomplete gate — {'; '.join(missing)}")
@@ -137,6 +212,12 @@ def main() -> int:
     root = Path(args.root).resolve()
 
     skills = sorted(runtime_globs(root, CONVERT_SUFFIX, ALL_RUNTIMES))
+    if not skills:
+        print(f"\nNo ts-convert-* skills found under {root}.")
+        print("This gate discovers its own scope, so an empty result means the layout")
+        print("moved or --root is wrong — not that every converter passes.")
+        return 1
+
     failures: list[str] = []
     for path in skills:
         failures.extend(check_skill(path, root))
@@ -150,8 +231,8 @@ def main() -> int:
         print("untranslatable. Without it, expressions with documented ThoughtSpot")
         print("equivalents are dropped on syntax recognition alone.")
         print()
-        print("The gate is a blockquote carrying the `MANDATORY (I7)` marker, citing the")
-        print("skill's own mapping and the invariants doc. Worked example:")
+        print("The gate is a blockquote carrying the `MANDATORY (I7)` marker, citing this")
+        print("skill's own dialect mapping and the invariants doc. Worked example:")
         print("  agents/cli/ts-convert-from-tableau/SKILL.md (Step A3)")
         print()
         print("See agents/shared/schemas/ts-model-conversion-invariants.md (I7).")

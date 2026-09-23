@@ -222,21 +222,38 @@ table:
 
 **Rule:** Before classifying any expression as untranslatable, the skill must explicitly
 instruct the model to open the formula-translation reference for that source dialect and
-check both the forward and reverse tables. Do not decide from syntax alone.
+check the tables for **the direction it is converting in**. Do not decide from syntax alone.
+
+**Direction matters.** A `from-*` converter checks the source→ThoughtSpot (reverse) tables;
+a `to-*` converter checks the ThoughtSpot→target (forward) ones. Sending a converter to the
+wrong side is worse than no gate — it reads as diligence while proving nothing. Where a
+mapping is bidirectional (ts-snowflake, ts-databricks), the gate must name the side, and
+may name the other explicitly as the side *not* to consult.
 
 **Failure mode:** Expressions that appear Snowflake-specific or Databricks-specific have
 documented ThoughtSpot equivalents. Skipping the reference causes valid columns to be
 omitted from the converted model.
 
-**Applies to:** All source dialects. Each skill must cite its own mapping file:
-- Tableau: `../../shared/mappings/tableau/tableau-formula-translation.md`
-- Snowflake SV: `../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md`
-- Databricks MV: `../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md`
+**Applies to:** every `ts-convert-*` skill, in every runtime under `_dirs`. Each cites the
+mapping for its own dialect — resolved by name from the skill directory
+(`ts-convert-{from,to}-X` → `agents/shared/mappings/{X,ts-X}/*-formula-translation.md`), so
+a new dialect needs no edit here. Today: tableau, ts-snowflake, ts-databricks, looker,
+powerbi, qlik, sisense.
 
-**Required gate (appears before the untranslatable classification step in every skill):**
-> MANDATORY: before classifying any expression as untranslatable, open the formula
-> reference for this source dialect and check the reverse table. Do not decide from
-> SQL syntax recognition alone.
+**Required gate — the marker is load-bearing.** `check_i7_gate.py` requires the literal
+string `MANDATORY (I7)` inside a blockquote that also cites this skill's dialect mapping
+and this file. Prose that states the rule without the marker is not enough: before
+2026-09-22 four skills instructed the model correctly in their own words and no gate could
+tell them apart from the five that said nothing.
+
+> **MANDATORY (I7) — before classifying any \<expression\> as untranslatable, open
+> [`<this skill's formula-translation mapping>`](<same path>)
+> and check \<the named sections, for this conversion direction\>. Do not decide from syntax alone.**
+> See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
+
+Name real section headings from the mapping file — a gate pointing at a section that does
+not exist sends the model nowhere. Worked example:
+`agents/cli/ts-convert-from-tableau/SKILL.md` (Step A3).
 
 ---
 

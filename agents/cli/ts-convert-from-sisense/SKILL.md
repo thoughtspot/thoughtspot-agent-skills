@@ -128,5 +128,5 @@ widgets, unresolved fields) for manual rebuild.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.0.1 | 2026-09-22 | **I7 untranslatable gate added.** The skill reached its Step 1 JAQL classification with no instruction to open [sisense-formula-translation.md](../../shared/mappings/sisense/sisense-formula-translation.md) first, so an expression with a documented ThoughtSpot equivalent could be dropped on syntax recognition alone. Now gated by `check_i7_gate.py` (2026-09-22 audit finding 9.3 — the invariant was enforced by nothing and missing from 9 of 11 converters). |
+| 1.0.1 | 2026-09-22 | **I7 untranslatable gate added.** Step 1 flagged JAQL formulas NEEDS REVIEW with no instruction to open [sisense-formula-translation.md](../../shared/mappings/sisense/sisense-formula-translation.md) first. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |
 | 1.0.0 | 2026-07-17 | Initial release — `ts sisense` parse / build-model / build-liveboard |
