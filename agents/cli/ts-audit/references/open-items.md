@@ -142,13 +142,8 @@ Additionally, dedicated endpoints exist: `fetchColumnSecurityRules`
 Beta 10.12.0.cl+. The fetch endpoint returns per-column rules with group IDs and source
 table details.
 
-**Partly done 2026-09-22:** the option is wired into `ts security column-rules export`
-(`export_associated` + `export_options.export_column_security_rules`), which closed
-`ts-dependency-manager` open-item #9.
-
-**Remaining:** live-verify the TML shape returned when the flag is set, and decide whether
-`ts tml export` should carry it too — a general exporter taking a CSR-specific option is a
-design call, not an oversight (BL-294).
+**Remaining:** Live-verify the TML shape returned when the flag is set, and wire the
+`--export-column-security-rules` flag into `ts tml export`.
 
 ---
 
