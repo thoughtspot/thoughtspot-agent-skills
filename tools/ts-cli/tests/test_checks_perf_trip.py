@@ -228,13 +228,6 @@ def test_p5_clean_when_the_model_has_no_tables():
     assert check_p5(_ctx(_model(columns=FACT_COLUMNS))) == []
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "checks_perf.py:112-116 iterates `constraints` as if it were a list of "
-    "constraint entries. The exported shape is a MAPPING -- {'constraint': [...]} "
-    "-- so `for c in constraints` yields the single key string 'constraint', which "
-    "never contains 'date_range_condition'. The suppression is dead: P5 reports "
-    "'No date constraints' on every fact model, including ones that carry a rolling "
-    "date window. Reported, not fixed."))
 def test_p5_a_real_date_constraint_should_suppress_the_finding():
     assert check_p5(_ctx(_p5_model(REAL_CONSTRAINTS))) == []
 

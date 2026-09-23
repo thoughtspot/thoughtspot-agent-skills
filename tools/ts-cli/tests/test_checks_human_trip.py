@@ -161,7 +161,8 @@ def test_h2_clean_model_returns_nothing():
 def test_h5_trips_on_a_set_with_no_dependents_of_its_own():
     ctx = make_context(
         models=[_model()],
-        dependents={MODEL_GUID: [_dep(SET_GUID, "FY24 Top Accounts", "SET", MODEL_GUID)]},
+        dependents={MODEL_GUID: [_dep(SET_GUID, "FY24 Top Accounts", "SET", MODEL_GUID)],
+                    SET_GUID: []},   # the set WAS looked up, and has no consumers
     )
     findings = check_h5(ctx)
     assert len(findings) == 1
@@ -189,35 +190,16 @@ def test_h5_ignores_dependents_that_are_not_sets():
     assert check_h5(ctx) == []
 
 
-def test_h5_cannot_say_no_under_the_map_build_context_actually_builds():
-    """Reachable, but vacuous in production — it flags every set that exists.
-
-    `build_context` fetches dependents only for models and tables:
-    `all_guids = list(set(model_guids + model_guids_from_tml + table_guids_from_tml))`
-    (context.py:190). A SET guid is never a query source, so
-    `ctx.dependents.get(set_guid, [])` (checks_human.py:160) is empty on every
-    real run regardless of how many answers consume the set. The
-    `test_h5_returns_nothing_when_the_set_has_a_consumer` fixture above is a
-    shape `build_context` never produces.
-
-    Pinned, not fixed: two heavily-used sets, both reported as orphans.
-    """
-    ctx = make_context(models=[_model()], dependents={
-        MODEL_GUID: [
-            _dep(SET_GUID, "FY24 Top Accounts", "SET", MODEL_GUID),
-            _dep("set-2", "Churn Risk Cohort", "SET", MODEL_GUID),
-        ],
-        # Nothing keyed by SET_GUID or "set-2" — exactly what build_context returns.
-    })
-    findings = check_h5(ctx)
-    assert len(findings) == 2, "both sets are called orphans on the production shape"
-
+# NOTE: the H5 'cannot say no' characterization test was removed when BL-302
+# was fixed — absence of a set guid now means 'not looked up', and the check is
+# silent. See tools/ts-cli/tests/test_dead_guards.py.
 
 def test_h5_labels_a_set_as_object_type_table():
     """Pinned, not fixed: the object_type is wrong (checks_human.py:164)."""
     ctx = make_context(models=[_model()], dependents={
-        MODEL_GUID: [_dep(SET_GUID, "FY24 Top Accounts", "SET", MODEL_GUID)]})
-    assert check_h5(ctx)[0].object_type == "table"
+        MODEL_GUID: [_dep(SET_GUID, "FY24 Top Accounts", "SET", MODEL_GUID)],
+        SET_GUID: []})
+    assert check_h5(ctx)[0].object_type == "set"
 
 
 # --------------------------------------------------------------------------- H6

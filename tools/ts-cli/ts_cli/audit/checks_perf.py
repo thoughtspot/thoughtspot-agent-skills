@@ -109,10 +109,14 @@ def check_p5(ctx: AuditContext) -> list:
     for model in ctx.models:
         m = model.get("model", {})
         cols = m.get("columns") or []
-        constraints = m.get("constraints") or []
-        has_date_constraint = any(
-            "date_range_condition" in str(c) for c in constraints
-        )
+        # `constraints` exports as a MAPPING — "the outer key is `constraints:`,
+        # which contains a single `constraint:` list". Iterating it yielded the
+        # key string "constraint", so the guard never fired and a model with a
+        # genuine rolling window was still reported as having none (BL-303).
+        # Searching the serialised value covers the mapping, a list, and any
+        # nesting the shape grows later.
+        constraints = m.get("constraints") or {}
+        has_date_constraint = "date_range_condition" in str(constraints)
         if has_date_constraint:
             continue
         fact_tables = rules.fact_tables(cols, m.get("model_tables") or [])

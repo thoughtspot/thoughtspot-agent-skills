@@ -157,11 +157,20 @@ def check_h5(ctx: AuditContext) -> list:
         for d in deps:
             if d.get("type") == "SET":
                 set_guid = d.get("guid", "")
-                set_deps = ctx.dependents.get(set_guid, [])
-                if not set_deps:
+                # `build_context` fetches dependents for models and tables only,
+                # so a SET guid is normally absent from this map. Absence means
+                # "not looked up", NOT "no consumers" — reporting an orphan from
+                # it asserted a lookup that never happened, and flagged every set
+                # in the environment (BL-302). Until the fetch covers sets, this
+                # check is correctly silent rather than confidently wrong.
+                if set_guid not in ctx.dependents:
+                    continue
+                if not ctx.dependents[set_guid]:
                     findings.append(Finding(
                         check_id="H5", angle=_ANGLE, severity="MEDIUM",
-                        object_type="table", object_name=d.get("name", ""),
+                        # CHECK_META calls H5 "Orphan sets"; the report keyed the
+                        # object as a table, so the row read as the wrong kind.
+                        object_type="set", object_name=d.get("name", ""),
                         object_guid=set_guid,
                         detail=f"Orphan set '{d.get('name', '')}' — zero consuming answers or liveboards",
                     ))
