@@ -81,8 +81,12 @@ CHECK_META: dict[str, dict[str, str]] = {
     "S3": {"desc": "PII without CLS or masking formula", "thresholds": "MEDIUM per column"},
     "S4": {"desc": "RLS bypass + PII columns in model", "thresholds": "HIGH per model"},
     "S5": {"desc": "Credentials in analytics", "thresholds": "CRITICAL per column"},
-    "S8": {"desc": "Overly permissive sharing (FULL access to all users)", "thresholds": "MEDIUM per object"},
-    "S9": {"desc": "Sharing to external groups", "thresholds": "INFO per object"},
+    # S8/S9 described sharing checks that do not exist anywhere in this module —
+    # `desc` is rendered as the finding TITLE, so every delivered report headlined
+    # an RLS finding as a sharing one, and implied a sharing audit had run. BL-298
+    # carries the unimplemented checks; these now say what the code does.
+    "S8": {"desc": "VARCHAR column used in an RLS rule", "thresholds": "MEDIUM per column"},
+    "S9": {"desc": "Function call in an RLS rule expression", "thresholds": "HIGH per rule"},
     "S10": {"desc": "RLS bypass enabled (disables row-level security)", "thresholds": "MEDIUM per model"},
 }
 

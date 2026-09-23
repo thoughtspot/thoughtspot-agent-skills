@@ -147,8 +147,8 @@ check ID appearing in reports).
 | S3 | PII without CLS or masking formula | MEDIUM per column |
 | S4 | RLS bypass + PII columns in model | HIGH per model |
 | S5 | Credentials in analytics | CRITICAL per column |
-| S8 | Overly permissive sharing (FULL access to all users group) | MEDIUM per object |
-| S9 | Sharing to external groups | INFO per object |
+| S8 | VARCHAR column used in an RLS rule | MEDIUM per column |
+| S9 | Function call in an RLS rule expression | HIGH per rule |
 | S10 | RLS bypass enabled (disables row-level security) | MEDIUM per model |
 
 ---

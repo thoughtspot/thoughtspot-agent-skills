@@ -169,6 +169,17 @@ def check_h5(ctx: AuditContext) -> list:
 
 
 def check_h6(ctx: AuditContext) -> list:
+    """H6 (duplicate sets) — DEFERRED, deliberately not in ``ALL_CHECKS``.
+
+    ``agents/cli/ts-audit/references/check-catalog.md`` lists it under
+    "Deferred / Not assigned": *"Duplicate sets — deferred (requires deep set
+    comparison)"*. The stub keeps the id allocated so it is not reused.
+
+    It carried no docstring and no registry entry, so nothing distinguished a
+    deliberate deferral from a check accidentally dropped from the registry —
+    which is exactly the shape of audit 6.1. `test_every_defined_check_is_registered`
+    now asserts that distinction, with this as the one declared exemption.
+    """
     return []
 
 
