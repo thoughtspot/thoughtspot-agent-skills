@@ -332,14 +332,8 @@ def test_p9_misses_a_friendly_display_name():
     assert check_p9(_ctx(_p9_model("Customer Id", "DEFAULT"))) == []
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "checks_perf.py:224 guards on `idx` being truthy, i.e. on index_type being "
-    "PRESENT. Per the table/model schemas, index_type is omitted for the default "
-    "(fully indexed) and set to DONT_INDEX to SUPPRESS indexing. The test is "
-    "inverted: DONT_INDEX -- the correctly-tuned column -- is reported as 'indexed "
-    "as ATTRIBUTE', while the genuinely indexed default (key absent) is missed. "
-    "Reported, not fixed."))
 def test_p9_index_type_sense_is_inverted():
+    """`index_type` absent means indexed; P9 used to test presence (BL-299, fixed)."""
     assert check_p9(_ctx(_p9_model("CUSTOMER_ID", "DONT_INDEX"))) == [], \
         "DONT_INDEX means NOT indexed"
     assert len(check_p9(_ctx(_p9_model("CUSTOMER_ID")))) == 1, \
@@ -380,12 +374,8 @@ def test_p11_clean_when_spotter_config_is_absent():
     assert check_p11(_ctx(m)) == []
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "checks_perf.py:242-243 counts columns where index_type is PRESENT, the same "
-    "inversion as P9 (checks_perf.py:224): 31 DONT_INDEX columns are reported as "
-    "'31 indexed columns', and 31 columns with the key omitted -- the indexed "
-    "default -- count as zero. Reported, not fixed."))
 def test_p11_index_type_sense_is_inverted():
+    """P11 counted columns carrying the key, not indexed ones (BL-299, fixed)."""
     assert check_p11(_ctx(_p11_model(31, "DONT_INDEX"))) == [], \
         "DONT_INDEX means NOT indexed"
     assert len(check_p11(_ctx(_p11_model(31)))) == 1, \

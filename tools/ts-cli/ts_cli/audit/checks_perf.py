@@ -194,9 +194,9 @@ def check_p9(ctx: AuditContext) -> list:
         for c in (m.get("columns") or []):
             props = c.get("properties") or {}
             ctype = props.get("column_type", "")
-            idx = props.get("index_type", "")
             name = c.get("name", "")
-            if ctype == "ATTRIBUTE" and idx and _ID_PATTERN.search(name):
+            if (ctype == "ATTRIBUTE" and rules.is_indexed(c)
+                    and _ID_PATTERN.search(name)):
                 findings.append(Finding(
                     check_id="P9", angle=_ANGLE, severity="MEDIUM",
                     object_type="column", object_name=name,
@@ -214,8 +214,7 @@ def check_p11(ctx: AuditContext) -> list:
         spotter = (props.get("spotter_config") or {}).get("is_spotter_enabled", False)
         if not spotter:
             continue
-        indexed = sum(1 for c in (m.get("columns") or [])
-                      if (c.get("properties") or {}).get("index_type"))
+        indexed = sum(1 for c in (m.get("columns") or []) if rules.is_indexed(c))
         if indexed > 30:
             findings.append(Finding(
                 check_id="P11", angle=_ANGLE, severity="INFO",

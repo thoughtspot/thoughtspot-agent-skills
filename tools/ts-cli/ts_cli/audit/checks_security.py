@@ -64,8 +64,9 @@ def check_s2(ctx: AuditContext) -> list:
             rls = t.get("rls_rules") or {}
             table_has_rls[t.get("name", "")] = bool(rls.get("rules"))
         for col, category, _ in pii:
-            idx = (col.get("properties") or {}).get("index_type", "")
-            if not idx:
+            # `index_type` absent means indexed by DEFAULT, which is the risk
+            # this check exists to report — testing presence skipped it (BL-299).
+            if not rules.is_indexed(col):
                 continue
             cid = col.get("column_id", "")
             table_name = cid.split("::")[0] if "::" in cid else ""

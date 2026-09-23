@@ -117,24 +117,17 @@ def test_s2_clean_model_returns_nothing():
     assert check_s2(ctx) == []
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "AUDIT FINDING — checks_security.py:67-68 `if not idx: continue` skips the "
-    "column that IS fully indexed. thoughtspot-model-tml.md:241: index_type is "
-    "'omit for full indexing (default)'. So the default-indexed PII column — the "
-    "risk S2 exists to report, and the commonest shape in exported TML — is the "
-    "one case S2 never fires on."))
 def test_s2_should_flag_a_default_indexed_pii_column():
+    """A PII column with no `index_type` is indexed by DEFAULT — the risk S2
+    exists to report, and the shape it used to skip (BL-299, fixed)."""
     ctx = make_context(models=[_model([_mcol("customer_email")])],
                        tables={TABLE_FQN: _table()})
     assert len(check_s2(ctx)) == 1
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "AUDIT FINDING — the same line, inverted the other way. DONT_INDEX means "
-    "text-search indexing is SUPPRESSED, yet it is truthy, so S2 emits HIGH "
-    "'PII column is indexed WITHOUT table RLS' about a column that is not "
-    "indexed at all."))
 def test_s2_should_not_flag_a_dont_index_pii_column():
+    """`DONT_INDEX` is the mitigation. S2 used to report it as the risk, and it
+    is the only value this repo writes (BL-299, fixed)."""
     ctx = make_context(models=[_model([_mcol("customer_email", index_type="DONT_INDEX")])],
                        tables={TABLE_FQN: _table()})
     assert check_s2(ctx) == []

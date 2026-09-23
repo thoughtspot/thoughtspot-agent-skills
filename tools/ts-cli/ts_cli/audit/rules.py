@@ -141,6 +141,30 @@ def rls_column_refs(table: dict):
             yield rule, col, dt, vc
 
 
+#: `index_type` suppresses indexing; every other documented value selects a
+#: strategy, and omitting the key means full indexing.
+NOT_INDEXED = "DONT_INDEX"
+
+
+def is_indexed(column: dict) -> bool:
+    """Whether a model column is text-search indexed.
+
+    The schema is explicit: *"`DONT_INDEX` suppresses text-search indexing …
+    Omit for full indexing (default)"*, with `DEFAULT`, `PREFIX_ONLY`,
+    `PREFIX_AND_SUBSTRING` and `PREFIX_AND_WORD_SUBSTRING` all selecting a
+    strategy rather than disabling one.
+
+    S2, P9 and P11 each tested *presence* of the key instead (BL-299), which
+    inverts both halves: a column indexed by default — the commonest shape in
+    exported TML, and the risk those checks exist to report — was invisible,
+    while a column deliberately tuned to `DONT_INDEX` was reported as indexed.
+    `DONT_INDEX` is also the only value this repo ever writes, so every
+    converter-produced model turned S2 into a pure false-positive generator.
+    """
+    idx = (column.get("properties") or {}).get("index_type", "")
+    return (idx or "").upper() != NOT_INDEXED
+
+
 def is_string_type(data_type: str) -> bool:
     """True for a warehouse string type. Empty (unknown) is not a string."""
     return (data_type or "").upper() in STRING_TYPES
