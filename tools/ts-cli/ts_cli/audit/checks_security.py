@@ -4,6 +4,7 @@ import re
 
 from ts_cli.audit.context import AuditContext
 from ts_cli.audit.findings import Finding
+from ts_cli.audit import rules
 
 _ANGLE = "security"
 
@@ -22,8 +23,8 @@ _CREDENTIAL_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-_FUNC_IN_EXPR = re.compile(r"\b(UPPER|LOWER|TRIM|CAST|CONCAT|CONTAINS|IF)\s*\(", re.IGNORECASE)
-_BRACKET_REF = re.compile(r"\[([^\]]+)\]")
+_FUNC_IN_EXPR = rules.FUNC_IN_EXPR  # one pattern, two angles (BL-304)
+_BRACKET_REF = rules.BRACKET_REF
 
 
 def _find_pii_columns(columns):
@@ -140,24 +141,15 @@ def check_s5(ctx: AuditContext) -> list:
 def check_s8(ctx: AuditContext) -> list:
     findings = []
     for fqn, table in ctx.tables.items():
-        t = table.get("table", {})
-        rls = t.get("rls_rules") or {}
-        cols = t.get("columns") or []
-        col_types = {c.get("name", ""): (c.get("db_column_properties") or {}).get("data_type", "")
-                     for c in cols}
-        for rule in (rls.get("rules") or []):
-            expr = rule.get("expr", "")
-            refs = _BRACKET_REF.findall(expr)
-            for ref in refs:
-                col_name = ref.split("::")[-1] if "::" in ref else ref
-                dt = col_types.get(col_name, "")
-                if dt.upper() in ("VARCHAR", "CHAR", "STRING", "TEXT"):
-                    findings.append(Finding(
-                        check_id="S8", angle=_ANGLE, severity="MEDIUM",
-                        object_type="column", object_name=col_name,
-                        object_guid=table.get("guid", ""),
-                        detail=f"VARCHAR RLS column '{col_name}'",
-                    ))
+        # Shared walk with P15, which adds a `value_casing` guard (BL-304).
+        for rule, col_name, dt, _vc in rules.rls_column_refs(table):
+            if rules.is_string_type(dt):
+                findings.append(Finding(
+                    check_id="S8", angle=_ANGLE, severity="MEDIUM",
+                    object_type="column", object_name=col_name,
+                    object_guid=table.get("guid", ""),
+                    detail=f"VARCHAR RLS column '{col_name}'",
+                ))
     return findings
 
 

@@ -4,13 +4,14 @@ import re
 
 from ts_cli.audit.context import AuditContext, join_key_ids
 from ts_cli.audit.findings import Finding
+from ts_cli.audit import rules
 
 _ANGLE = "performance"
 _SQL_PASSTHROUGH = re.compile(r"sql_(int|string|bool)_aggregate_op", re.IGNORECASE)
 _ID_PATTERN = re.compile(r"(_id|_guid|_uuid|transaction_id|row_id|surrogate_key)$", re.IGNORECASE)
-_FUNC_IN_EXPR = re.compile(r"\b(UPPER|LOWER|TRIM|CAST|CONCAT|CONTAINS|IF)\s*\(", re.IGNORECASE)
+_FUNC_IN_EXPR = rules.FUNC_IN_EXPR  # one pattern, two angles (BL-304)
 _IF_PATTERN = re.compile(r"\bif\s*\(", re.IGNORECASE)
-_BRACKET_REF = re.compile(r"\[([^\]]+)\]")
+_BRACKET_REF = rules.BRACKET_REF
 
 
 def _bfs_depth(graph, start):
@@ -92,8 +93,7 @@ def check_p4(ctx: AuditContext) -> list:
     for model in ctx.models:
         m = model.get("model", {})
         mt = m.get("model_tables") or []
-        props = m.get("properties") or {}
-        if len(mt) > 5 and not props.get("join_progressive", False):
+        if rules.is_wide_and_not_progressive(m):
             findings.append(Finding(
                 check_id="P4", angle=_ANGLE, severity="HIGH",
                 object_type="model", object_name=m.get("name", ""),
@@ -115,15 +115,7 @@ def check_p5(ctx: AuditContext) -> list:
         )
         if has_date_constraint:
             continue
-        fact_tables = set()
-        for mt in (m.get("model_tables") or []):
-            tname = mt.get("name", "")
-            table_cols = [c for c in cols
-                          if (c.get("column_id") or "").split("::")[0] == tname]
-            measures = sum(1 for c in table_cols
-                           if (c.get("properties") or {}).get("column_type") == "MEASURE")
-            if measures > 3:
-                fact_tables.add(tname)
+        fact_tables = rules.fact_tables(cols, m.get("model_tables") or [])
         if fact_tables:
             findings.append(Finding(
                 check_id="P5", angle=_ANGLE, severity="MEDIUM",
@@ -161,28 +153,11 @@ def check_p7(ctx: AuditContext) -> list:
     for model in ctx.models:
         m = model.get("model", {})
         mt = m.get("model_tables") or []
-        graph = {}
-        for t in mt:
-            tn = t.get("name", "")
-            for j in (t.get("joins") or []):
-                graph.setdefault(tn, []).append(j.get("with", ""))
-        if not graph:
-            continue
-        max_depth = 0
-        for start in graph:
-            visited = set()
-            stack = [(start, 0)]
-            while stack:
-                node, depth = stack.pop()
-                if node in visited:
-                    continue
-                visited.add(node)
-                max_depth = max(max_depth, depth)
-                for nb in graph.get(node, []):
-                    stack.append((nb, depth + 1))
-        if max_depth > 5:
+        max_depth = rules.join_depth(mt)
+        # Same bands D1 grades against — one definition, two presentations.
+        if max_depth > rules.JOIN_DEPTH_YELLOW:
             severity = "HIGH"
-        elif max_depth > 3:
+        elif max_depth > rules.JOIN_DEPTH_GREEN:
             severity = "MEDIUM"
         else:
             continue
@@ -201,13 +176,13 @@ def check_p8(ctx: AuditContext) -> list:
     for model in ctx.models:
         m = model.get("model", {})
         cols = m.get("columns") or []
-        if len(cols) > 75:
+        if len(cols) > rules.MAX_MODEL_COLUMNS:
             findings.append(Finding(
                 check_id="P8", angle=_ANGLE, severity="MEDIUM",
                 object_type="model", object_name=m.get("name", ""),
                 object_guid=ctx.guid_for(model),
                 detail=f"{len(cols)} columns — wider GROUP BY, more complex query plans",
-                metric=len(cols), threshold={"max": 75},
+                metric=len(cols), threshold={"max": rules.MAX_MODEL_COLUMNS},
             ))
     return findings
 
@@ -295,28 +270,15 @@ def check_p14(ctx: AuditContext) -> list:
 def check_p15(ctx: AuditContext) -> list:
     findings = []
     for fqn, table in ctx.tables.items():
-        t = table.get("table", {})
-        rls = t.get("rls_rules") or {}
-        cols = t.get("columns") or []
-        col_props = {}
-        for c in cols:
-            cn = c.get("name", "")
-            dt = (c.get("db_column_properties") or {}).get("data_type", "")
-            vc = (c.get("properties") or {}).get("value_casing", "")
-            col_props[cn] = (dt, vc)
-        for rule in (rls.get("rules") or []):
-            expr = rule.get("expr", "")
-            refs = _BRACKET_REF.findall(expr)
-            for ref in refs:
-                col_name = ref.split("::")[-1] if "::" in ref else ref
-                dt, vc = col_props.get(col_name, ("", ""))
-                if dt.upper() in ("VARCHAR", "CHAR", "STRING", "TEXT") and not vc:
-                    findings.append(Finding(
-                        check_id="P15", angle=_ANGLE, severity="MEDIUM",
-                        object_type="column", object_name=col_name,
-                        object_guid=table.get("guid", ""),
-                        detail=f"VARCHAR RLS column '{col_name}' without value_casing",
-                    ))
+        # Shared walk with S8; P15 is S8 plus the `value_casing` guard (BL-304).
+        for rule, col_name, dt, vc in rules.rls_column_refs(table):
+            if rules.is_string_type(dt) and not vc:
+                findings.append(Finding(
+                    check_id="P15", angle=_ANGLE, severity="MEDIUM",
+                    object_type="column", object_name=col_name,
+                    object_guid=table.get("guid", ""),
+                    detail=f"VARCHAR RLS column '{col_name}' without value_casing",
+                ))
     return findings
 
 

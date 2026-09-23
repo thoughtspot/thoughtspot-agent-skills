@@ -6,42 +6,21 @@ from itertools import combinations
 
 from ts_cli.audit.context import AuditContext, join_key_ids
 from ts_cli.audit.findings import Finding
+from ts_cli.audit import rules
 
 _ANGLE = "data_modeling"
 _SQL_PASSTHROUGH = re.compile(r"sql_(int|string|bool)_aggregate_op", re.IGNORECASE)
 
 
 def _join_depth(model_tables):
-    graph = {}
-    for t in model_tables:
-        tn = t.get("name", "")
-        for j in (t.get("joins") or []):
-            graph.setdefault(tn, []).append(j.get("with", ""))
-    if not graph:
-        return 0
-    max_d = 0
-    for start in graph:
-        visited = set()
-        stack = [(start, 0)]
-        while stack:
-            node, depth = stack.pop()
-            if node in visited:
-                continue
-            visited.add(node)
-            max_d = max(max_d, depth)
-            for nb in graph.get(node, []):
-                stack.append((nb, depth + 1))
-    return max_d
+    """Thin alias — the rule lives in `rules.join_depth` (BL-304)."""
+    return rules.join_depth(model_tables)
 
 
 def _table_role(columns, table_name):
-    table_cols = [c for c in columns
-                  if (c.get("column_id") or "").split("::")[0] == table_name]
-    if not table_cols:
-        return "unknown"
-    measures = sum(1 for c in table_cols
-                   if (c.get("properties") or {}).get("column_type") == "MEASURE")
-    return "fact" if measures > 3 else "dimension"
+    """Thin alias — the rule lives in `rules.table_role` (BL-304)."""
+    return rules.table_role(columns, table_name)
+
 
 
 def check_d1(ctx: AuditContext) -> list:
@@ -57,9 +36,9 @@ def check_d1(ctx: AuditContext) -> list:
         max_depth = _join_depth(mt)
         for label, val, green, yellow in [
             ("tables", len(mt), 10, 15),
-            ("columns", len(cols), 50, 75),
+            ("columns", len(cols), 50, rules.MAX_MODEL_COLUMNS),
             ("joins", joins_count, 8, 12),
-            ("join depth", max_depth, 3, 5),
+            ("join depth", max_depth, rules.JOIN_DEPTH_GREEN, rules.JOIN_DEPTH_YELLOW),
             ("formulas", len(formulas), 30, 50),
         ]:
             if val <= green:
@@ -139,8 +118,7 @@ def check_d4(ctx: AuditContext) -> list:
     for model in ctx.models:
         m = model.get("model", {})
         mt = m.get("model_tables") or []
-        props = m.get("properties") or {}
-        if len(mt) > 5 and not props.get("join_progressive", False):
+        if rules.is_wide_and_not_progressive(m):
             findings.append(Finding(
                 check_id="D4", angle=_ANGLE, severity="HIGH",
                 object_type="model", object_name=m.get("name", ""),

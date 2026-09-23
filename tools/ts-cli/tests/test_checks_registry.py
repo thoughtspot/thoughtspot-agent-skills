@@ -128,3 +128,66 @@ def test_registries_are_not_empty():
     """A module whose ALL_CHECKS is empty contributes nothing and says nothing."""
     empty = [m.__name__ for m in MODULES if not m.ALL_CHECKS]
     assert empty == [], f"modules with an empty ALL_CHECKS: {empty}"
+
+
+# ── BL-304: rules that used to exist twice now exist once ──────────────────
+
+def test_shared_rules_are_imported_not_re_implemented():
+    """The data/perf split was made by copying; six rules existed twice.
+
+    A threshold tuned in one angle silently left the other on the old value, and
+    `check_d2`/`check_p6` shipped the *same* two defects and had to be fixed twice
+    (#528). This asserts the duplicates stay collapsed: each module must reach the
+    shared rule rather than carry its own copy.
+    """
+    import re as _re
+    from pathlib import Path as _P
+    from ts_cli.audit import rules
+
+    src = _P(__file__).resolve().parents[1] / "ts_cli" / "audit"
+    offenders = []
+
+    # The regexes were declared identically in two modules.
+    for mod in ("checks_perf", "checks_security"):
+        text = (src / f"{mod}.py").read_text()
+        if _re.search(r"_FUNC_IN_EXPR\s*=\s*re\.compile", text):
+            offenders.append(f"{mod}: re-declares _FUNC_IN_EXPR")
+        if _re.search(r"_BRACKET_REF\s*=\s*re\.compile", text):
+            offenders.append(f"{mod}: re-declares _BRACKET_REF")
+
+    # The literal thresholds belong to `rules`, not to a check body.
+    perf = (src / "checks_perf.py").read_text()
+    if _re.search(r"len\(cols\)\s*>\s*75", perf):
+        offenders.append("checks_perf: hardcodes the 75-column ceiling")
+    if _re.search(r"measures\s*>\s*3", perf):
+        offenders.append("checks_perf: re-implements fact detection")
+    if _re.search(r"max_depth\s*>\s*[35]\b", perf):
+        offenders.append("checks_perf: hardcodes the join-depth bands")
+
+    data = (src / "checks_data.py").read_text()
+    if _re.search(r"len\(mt\)\s*>\s*5\s+and\s+not", data):
+        offenders.append("checks_data: re-implements the join_progressive predicate")
+
+    assert offenders == [], (
+        f"a rule has been copied back out of `rules.py`: {offenders}")
+
+
+def test_both_angles_still_report_a_shared_rule():
+    """Collapsing the code must not collapse the reporting.
+
+    A wide un-progressive model is legitimately both a modelling and a
+    performance finding; the angles are different lenses. Only the rule is shared.
+    """
+    from ts_cli.audit.checks_data import check_d4
+    from ts_cli.audit.checks_perf import check_p4
+
+    model = {"guid": "m-1", "model": {
+        "name": "Wide",
+        "model_tables": [{"name": f"T{i}"} for i in range(6)],
+        "properties": {"join_progressive": False},
+    }}
+    ctx = make_context(models=[model])
+    d4, p4 = check_d4(ctx), check_p4(ctx)
+    assert len(d4) == 1 and d4[0].check_id == "D4"
+    assert len(p4) == 1 and p4[0].check_id == "P4"
+    assert d4[0].metric == p4[0].metric == 6
