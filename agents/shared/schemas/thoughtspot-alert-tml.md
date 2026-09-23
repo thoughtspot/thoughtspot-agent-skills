@@ -154,8 +154,9 @@ them in the impact report but does not modify their TML:
 
 **Finding Alerts that reference an Answer:**
 There is no direct metadata search for `monitor_alert` type via the current `ts` CLI.
-See [open-items.md](../../../agents/cli/ts-dependency-manager/references/open-items.md) #6
-for the test script to find Alerts via TML scan or API.
+Export each Liveboard with `--associated`; attached `monitor_alert` docs come back in
+that same response (`ts-dependency-manager/references/dependency-types.md`, walking-order
+step 5). There is no standalone alert search to call.
 
 **`personalised_view_info.filters[].column` format:** `<table_name>::<column_name>` —
 the same `TABLE::COLUMN` format used in View TML column IDs. For a RENAME operation, if

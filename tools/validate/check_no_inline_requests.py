@@ -12,7 +12,7 @@ surface: `import requests`, `requests.<verb>(`, and direct `urllib` calls that h
 ThoughtSpot v2 REST path. The gap let ts-dependency-manager SKILL.md carry a stale
 "call v2 directly" instruction from 2026-05-11 to 2026-07-03 unnoticed (audit 5.1).
 
-Why code fences only (not full-file prose): SKILL.md files legitimately *describe* the
+Why code fences in Markdown (not full-file prose): SKILL.md files legitimately *describe* the
 anti-pattern in prose (e.g. this very validator's rationale, or a skill's own "don't do
 this" callout) without ever putting it in a runnable fence. Restricting the scan to
 fenced code blocks keeps that prose from tripping the check while still catching the

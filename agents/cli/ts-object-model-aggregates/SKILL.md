@@ -77,7 +77,7 @@ into a single prompt to cut round-trips.
 ## Prerequisites
 
 - ThoughtSpot profile configured — run `/ts-profile-thoughtspot` if not
-- `ts` CLI installed: `pip install -e tools/ts-cli` (v0.46.0+ — the `ts aggregate` group)
+- `ts` CLI installed: `pip install -e tools/ts-cli` (v0.109.0+ — `ts aggregate`, and `ts security column-rules` for Step 6e)
 - Python package: `pyyaml` (`pip install pyyaml`)
 - Snowflake profile (optional — only for connected-mode profiling/history/DDL
   execution) — `/ts-profile-snowflake` (Claude Code) or an active `cortex connections`
@@ -775,17 +775,40 @@ reproducing its restriction exposes that data to every user 26.6 aggregate-aware
 sends to the aggregate. They are **not** equally readable, and treating them as if they
 were is how this step went wrong before.
 
-**Column Security Rules (CSR) — read them.** One row per (table, column) with the groups
-that can see it. It fails loudly on a permissions or feature-flag problem rather than
-returning empty, so an empty result really does mean "no rules":
+**Column Security Rules (CSR) — read them, and handle the read failing.** One row per
+(table, column) with the groups that can see it. `_fetch_rules` raises on any non-2xx, so
+a permissions or feature-flag problem exits non-zero rather than returning empty — which
+means the three outcomes below are genuinely distinguishable, and must be kept apart:
 
-```bash
-for table_name, _db_table, _conn in physical_tables:
-    ts security column-rules get "{table_name}" --profile "{profile_name}"
+```python
+import json, subprocess
+
+csr_cmd = (
+    "ts security column-rules get "
+    + " ".join(f'"{t}"' for t, _db, _conn in physical_tables)
+    + f' --profile "{profile_name}"'
+)
+proc = subprocess.run(["bash", "-c", f"source ~/.zshenv && {csr_cmd}"],
+                      capture_output=True, text=True)
+csr_readable = proc.returncode == 0
+csr_rows = json.loads(proc.stdout) if csr_readable else []
 ```
 
-Each row carries `column_name` and `group_names` (the groups that CAN see it). No rows =
-no CSR on that table.
+One call covers every base table — `fetch` takes many identifiers per request.
+
+| Outcome | Meaning | What to do |
+|---|---|---|
+| exit 0, rules present | those columns are restricted, `group_names` lists who can see them | the aggregate must reproduce the restriction |
+| exit 0, every requested table present with no rules | no CSR on these tables | CSR is genuinely covered |
+| **non-zero exit** | CSR is **unreadable here** — Beta 10.12.0.cl+, feature-flagged **off by default**, so this is the expected state on most clusters | treat as **UNKNOWN**, never as "none" |
+
+Print `proc.stderr` when the read fails; `explain_csr_error` has a dedicated feature-flag
+branch and will say which case it is.
+
+Two further reasons an empty result is not proof of absence, both recorded live: reading
+CSR on a **published** table from a tenant Org returns a clean `[]`, and an identifier
+that does not resolve simply contributes no entry. So check each requested table appears
+in `csr_rows` — a missing table is UNKNOWN, not clear.
 
 **Column-level sharing (CLS) — one read cannot answer this, so ask.** `ts share status
 --columns` exists, but it cannot be used as a detector here, for three reasons verified on
@@ -809,8 +832,12 @@ Column Security Rules found on the base tables (read via `ts security column-rul
   ORDERS     SALARY  → visible to [Finance, Exec]
   CUSTOMERS  (none)
 
-CSR is covered. Column-level SHARING (CLS) cannot be read reliably in one pass —
-it is a grant model, and an unsecured table returns column rows too.
+{CSR_LINE}   <- "CSR: read, no restricted columns" | "CSR: <col> restricted to
+                  [<groups>]" | "CSR: COULD NOT READ (Beta flag off or no
+                  permission) — treat as unknown"
+
+Column-level SHARING (CLS) cannot be read reliably in one pass — it is a grant
+model, and an unsecured table returns column rows too.
 
 Do any base tables use column-level sharing to hide columns from a group?
 (Y / N / UNSURE — if UNSURE, run `/ts-security-columns` against ORDERS, CUSTOMERS
@@ -818,8 +845,10 @@ before continuing; do not guess)
 ```
 
 Require explicit confirmation that equivalent security is applied to the aggregate before
-continuing if **either** CSR reported a restricted column the aggregate reproduces, or the
-operator answered Y. **Do not proceed on UNSURE** — that is what `/ts-security-columns` is
+continuing if **any** of: CSR reported a restricted column, the CSR read failed (UNKNOWN),
+or the operator answered Y. Match CSR's `column_name` values against the aggregate's own
+columns before deciding a restriction is irrelevant — a dimension you grouped by is still
+that column. **Do not proceed on UNSURE, and do not proceed on UNKNOWN** — that is what `/ts-security-columns` is
 for, and an unsecured aggregate is not recoverable by a later check.
 
 Record the CSR result in the run notes as a read result. Record the CLS answer as an

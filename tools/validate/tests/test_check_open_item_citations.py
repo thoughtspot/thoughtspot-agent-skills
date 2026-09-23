@@ -17,10 +17,21 @@ def skill(tmp_path, name, files, items=None, runtime="cli"):
     return d
 
 
+def known_map(tmp_path):
+    """Name -> [dirs], as main() builds it: one name can exist in several runtimes."""
+    known = {}
+    for d in c.skill_dirs(tmp_path):
+        known.setdefault(d.name, []).append(d)
+    return known
+
+
 def run(tmp_path):
     skills = c.skill_dirs(tmp_path)
-    known = {s.name: s for s in skills}
-    return [p for s in skills for p in c.check_skill(s, tmp_path, known)]
+    known = known_map(tmp_path)
+    out = [p for s in skills for p in c.check_skill(s, tmp_path, known)]
+    for f in c.shared_files(tmp_path):
+        out.extend(c.check_shared(f, tmp_path, known))
+    return out
 
 
 def test_resolving_citation_passes(tmp_path):
@@ -181,7 +192,7 @@ def shared_file(tmp_path, body, name="schemas/x.md"):
 def test_shared_file_citation_must_name_a_skill(tmp_path):
     skill(tmp_path, "ts-x", {"SKILL.md": "x\n"}, items=[3])
     p = shared_file(tmp_path, "required on every entry (open-items #12).\n")
-    known = {s.name: s for s in c.skill_dirs(tmp_path)}
+    known = known_map(tmp_path)
     problems = c.check_shared(p, tmp_path, known)
     assert len(problems) == 1 and "names no skill" in problems[0]
 
@@ -189,14 +200,14 @@ def test_shared_file_citation_must_name_a_skill(tmp_path):
 def test_shared_file_citation_naming_a_skill_resolves(tmp_path):
     skill(tmp_path, "ts-object-answer-promote", {"SKILL.md": "x\n"}, items=[3])
     p = shared_file(tmp_path, "see open-items.md #3 in ts-object-answer-promote for this\n")
-    known = {s.name: s for s in c.skill_dirs(tmp_path)}
+    known = known_map(tmp_path)
     assert c.check_shared(p, tmp_path, known) == []
 
 
 def test_shared_file_citation_naming_a_skill_that_lacks_it_fails(tmp_path):
     skill(tmp_path, "ts-object-answer-promote", {"SKILL.md": "x\n"}, items=[3])
     p = shared_file(tmp_path, "see open-item #99 in ts-object-answer-promote\n")
-    known = {s.name: s for s in c.skill_dirs(tmp_path)}
+    known = known_map(tmp_path)
     problems = c.check_shared(p, tmp_path, known)
     assert len(problems) == 1 and "has no open-item #99" in problems[0]
 
@@ -218,3 +229,58 @@ def test_nearest_skill_name_wins_over_a_farther_one(tmp_path):
           {"SKILL.md": "Choosing the mechanism is ts-security-columns' job. "
                        "Retrieval is ts-dependency-manager open-item #9.\n"}, items=[1])
     assert run(tmp_path) == []
+
+
+# ── spellings that survived the second tightening (B1) ─────────────────────
+
+def test_backtick_before_hash_is_caught(tmp_path):
+    """``open-items.md`` #12`` — a backtick between the token and the number."""
+    skill(tmp_path, "ts-x", {"SKILL.md": "verified — see `open-items.md` #12\n"}, items=[1])
+    assert len(run(tmp_path)) == 1
+
+
+def test_link_close_paren_before_hash_is_caught(tmp_path):
+    """`](open-items.md) #16` — the number falls outside the link label."""
+    skill(tmp_path, "ts-x",
+          {"SKILL.md": "lives in [`open-items.md`](open-items.md) #16 and runs\n"}, items=[1])
+    assert len(run(tmp_path)) == 1
+
+
+def test_path_qualified_backtick_form_is_caught(tmp_path):
+    skill(tmp_path, "ts-object-model-coach", {"SKILL.md": "x\n"}, items=[4])
+    p = shared_file(tmp_path, "see `ts-object-model-coach/references/open-items.md` #12\n")
+    known = known_map(tmp_path)
+    problems = c.check_shared(p, tmp_path, known)
+    assert len(problems) == 1 and "has no open-item #12" in problems[0]
+
+
+# ── cross-runtime name collision (B2) ──────────────────────────────────────
+
+def test_same_name_in_two_runtimes_resolves_against_the_copy_that_has_items(tmp_path):
+    """cli and coco both carry ts-convert-from-snowflake-sv; only cli has open-items."""
+    skill(tmp_path, "ts-convert-from-snowflake-sv", {"SKILL.md": "x\n"},
+          items=[2, 3, 4, 5], runtime="cli")
+    skill(tmp_path, "ts-convert-from-snowflake-sv", {"SKILL.md": "x\n"},
+          items=None, runtime="coco-snowsight")
+    p = shared_file(tmp_path, "See ts-convert-from-snowflake-sv open-item #3 for the finding.\n")
+    known = known_map(tmp_path)
+    assert c.check_shared(p, tmp_path, known) == []
+
+
+def test_same_name_in_two_runtimes_still_fails_on_a_real_dangler(tmp_path):
+    skill(tmp_path, "ts-convert-from-snowflake-sv", {"SKILL.md": "x\n"},
+          items=[2, 3], runtime="cli")
+    skill(tmp_path, "ts-convert-from-snowflake-sv", {"SKILL.md": "x\n"},
+          items=None, runtime="coco-snowsight")
+    p = shared_file(tmp_path, "See ts-convert-from-snowflake-sv open-item #99.\n")
+    known = known_map(tmp_path)
+    problems = c.check_shared(p, tmp_path, known)
+    assert len(problems) == 1 and "has no open-item #99" in problems[0]
+
+
+def test_shared_citation_reports_once_not_twice(tmp_path):
+    """check_shared deduped on offset, so one citation printed twice."""
+    skill(tmp_path, "ts-object-model-coach", {"SKILL.md": "x\n"}, items=[4])
+    p = shared_file(tmp_path, "see [open-items.md #12](open-items.md) in ts-object-model-coach\n")
+    known = known_map(tmp_path)
+    assert len(c.check_shared(p, tmp_path, known)) == 1

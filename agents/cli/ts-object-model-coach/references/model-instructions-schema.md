@@ -623,9 +623,14 @@ rule — goes in `model.description` (the Model-level prose surface, parallel to
 
 ## Where `model_instructions` lives in TML
 
-**TBD — see [open-items.md #4](open-items.md).** The TML location for
-Model-level instructions has not yet been verified against a live tenant.
-Candidate locations under investigation:
+**Partly settled 2026-09-22 — see [open-items.md #4](open-items.md).** The location
+for Model-level instructions is `model.model_instructions.data_model_instructions`, a
+free-text **string**, documented in
+[thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) and read in
+production by `audit/checks_ai.py` and `report/tml_probes.py`. What is still unverified is
+the **write** path — whether TML import persists a value written there. The candidates
+below are retained for history; note that writing the typed categories in this document
+under that key is BL-288, not a supported shape:
 
 - `model.properties.instructions` (parallel to per-column `properties.ai_context`)
 - A top-level `model_instructions` key under `model:`

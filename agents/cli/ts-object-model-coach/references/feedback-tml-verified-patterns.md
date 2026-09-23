@@ -9,7 +9,8 @@ without rejection**.
 > with `metadata[].type: FEEDBACK` (4 source objects, 53 entries). Updated as
 > new patterns are observed.
 >
-> The mining script lives in [`open-items.md`](open-items.md) #16 and runs
+> The mining script — the one that produced these patterns from 53 entries across
+> four champ-staging Models (2026-04-27) — runs
 > against any reachable profile.
 
 ---
@@ -271,7 +272,7 @@ Mark each as VERIFIED here once observed.
 ## Maintenance
 
 This file is built from the mining script in
-[open-items.md](open-items.md) #16. Re-run quarterly (or when a new TS
+the mining pass described above. Re-run quarterly (or when a new TS
 release lands) to pick up new verified patterns. The script:
 
 1. Enumerates Models on each profile (`ts metadata search --subtype WORKSHEET --all`)

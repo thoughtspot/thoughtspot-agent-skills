@@ -16,7 +16,11 @@ nothing; it was pointing at an item that said the **opposite**, three months ear
 
 That is the dominant failure mode: a resolved item is deleted and its inbound references
 keep asserting the superseded state. PR #31 (2026-06-01) did the same to
-`ts-object-model-coach`, trimming 17 items to 7 and leaving 31 references behind.
+`ts-object-model-coach`, trimming 17 items to 7 and leaving its inbound references behind.
+
+Run against `origin/main`, this gate reports **39**. Do not quote a count taken from an
+earlier revision of the patterns below — each tightening found more, and two such counts
+reached a changelog before this note was written.
 
 Rule: inside a skill directory, every `open-item #N` / `open items #N` / `open item #N`
 citation must match an item heading in **that skill's** `references/open-items.md` —
@@ -49,14 +53,18 @@ from _dirs import ALL_RUNTIMES, agents_path  # noqa: E402
 from generate_open_items_index import _HEADER_RE  # noqa: E402
 
 #: `open-item #9`, `open items #12`, `open item #19`, `open-items.md #11`, and the
-#: markdown-link form `[open-items.md #11](open-items.md)`. The `.md` spelling was
-#: missed by the first cut of this regex, which required whitespace straight after
-#: `items` — it hid 15 live dangling pointers in one skill.
-CITATION_RE = re.compile(r"open[-_ ]items?(?:\.md)?\s*#(\d+)", re.IGNORECASE)
+#: markdown-link form, and the spellings that put a backtick, bracket or closing
+#: paren between the token and the number — ``open-items.md`` #12`` and
+#: ``](open-items.md) #16``. Each tightening of this pattern uncovered more live
+#: danglers (6 → 21 → 30), because fixing only what the gate could see left the
+#: rest in place.
+CITATION_RE = re.compile(
+    r"open[-_ ]items?(?:\.md)?[`\]\)\s]*#(\d+)", re.IGNORECASE)
 
 #: The bare markdown-link form: ``[#17](references/open-items.md)``. The link *path*
 #: resolves, so ``check_references`` passes it while the item number points at nothing
-#: — the most invisible spelling of this defect, and 10 sites of it hid in one skill.
+#: — the most invisible spelling of this defect, and several sites of it hid in one
+#: skill. Counts are deliberately not quoted here; see the note above.
 LINK_CITATION_RE = re.compile(
     r"\[[^\]]*?#(\d+)[^\]]*?\]\([^)]*open[-_]items?\.md[^)]*\)", re.IGNORECASE)
 
@@ -106,17 +114,26 @@ def check_shared(path: Path, root: Path, known: dict[str, Path]) -> list[str]:
     raw = [(m.start(), m.group(1)) for m in CITATION_RE.finditer(body)]
     raw += [(m.start(), m.group(1)) for m in LINK_CITATION_RE.finditer(body)]
     problems: list[str] = []
-    for start, number in sorted(set(raw)):
-        lineno = body.count("\n", 0, start) + 1
+    seen: dict[tuple[int, str], int] = {}
+    for start, number in sorted(raw):
+        seen.setdefault((body.count("\n", 0, start) + 1, number), start)
+    for (lineno, number), start in sorted(seen.items()):
         named = owning_skill(text, start, known)
         if named is None:
             problems.append(
                 f"  ✗ {path.relative_to(root)}:{lineno}: cites open-item #{number} but "
                 f"names no skill. A shared file has no owning open-items.md — write "
                 f"\"<skill> open-item #{number}\" or state the finding inline.")
-        elif number not in item_numbers(known[named] / "references" / "open-items.md"):
-            problems.append(
-                f"  ✗ {path.relative_to(root)}:{lineno}: {named} has no open-item #{number}")
+        else:
+            target_items = items_for(named, known)
+            if target_items is None:
+                problems.append(
+                    f"  ✗ {path.relative_to(root)}:{lineno}: cites {named} open-item "
+                    f"#{number}, but that skill has no open-items.md")
+            elif number not in target_items:
+                problems.append(
+                    f"  ✗ {path.relative_to(root)}:{lineno}: {named} has no "
+                    f"open-item #{number}")
     return problems
 
 
@@ -129,7 +146,26 @@ def skill_dirs(root: Path) -> list[Path]:
     return out
 
 
-def owning_skill(text: str, pos: int, known: dict[str, Path]) -> str | None:
+def items_for(name: str, known: dict[str, list[Path]]) -> set[str] | None:
+    """Item numbers for a skill name, across every runtime that carries it.
+
+    Three names exist in two runtimes at once (the naming rule *requires* the CLI and
+    CoCo copies share a name), and only one copy carries ``references/open-items.md``.
+    Keying by name alone let the copy without the file win, so a valid citation failed
+    with "has no open-item #N" when the truth was "that runtime has no open-items.md".
+    Returns None when no copy has the file at all.
+    """
+    found: set[str] = set()
+    have_file = False
+    for d in known.get(name, []):
+        f = d / "references" / "open-items.md"
+        if f.is_file():
+            have_file = True
+            found |= item_numbers(f)
+    return found if have_file else None
+
+
+def owning_skill(text: str, pos: int, known: dict[str, list[Path]]) -> str | None:
     """A skill named just before the citation redirects it to that skill's file."""
     before = text[max(0, pos - LOOKBACK): pos]
     after = text[pos: pos + LOOKBACK]
@@ -173,12 +209,12 @@ def check_skill(skill: Path, root: Path, known: dict[str, Path]) -> list[str]:
             named = owning_skill(text, start, known)
 
             if named and named != skill.name:
-                target = known[named] / "references" / "open-items.md"
-                if not target.is_file():
+                target_items = items_for(named, known)
+                if target_items is None:
                     problems.append(
                         f"  ✗ {path.relative_to(root)}:{lineno}: cites {named} "
                         f"open-item #{number}, but that skill has no open-items.md")
-                elif number not in item_numbers(target):
+                elif number not in target_items:
                     problems.append(
                         f"  ✗ {path.relative_to(root)}:{lineno}: {named} has no "
                         f"open-item #{number}")
@@ -207,7 +243,9 @@ def main() -> int:
         print(f"\nNo skill directories found under {root} — layout moved or --root wrong.")
         return 1
 
-    known = {d.name: d for d in skills}
+    known: dict[str, list[Path]] = {}
+    for d in skills:
+        known.setdefault(d.name, []).append(d)
     failures: list[str] = []
     for skill in skills:
         failures.extend(check_skill(skill, root, known))

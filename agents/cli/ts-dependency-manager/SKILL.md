@@ -108,7 +108,7 @@ What the skill walks during Step 4. Solid arrows = standard dependencies via v2 
              /       │       ╲              (#7 RLS — verified)
             /        │        ╲
            ▼         ▼         ╲- - -→ [<TABLE>_CSR.column_security_rules]
-       [MODEL]    [VIEW]                   (#9 — retrieval unverified)
+       [MODEL]    [VIEW]                   (#9 — retrievable, not yet walked)
         / │ \      │ │
        /  │  \     │ │  ............→ [<MODEL>.column_alias]
       /   │   ╲    │ │    (auto — via --associated + alias flag)
