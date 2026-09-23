@@ -86,6 +86,34 @@ def join_depth(model_tables: list) -> int:
     return max_d
 
 
+def table_key(model_table: dict) -> str:
+    """The prefix this model table's ``column_id`` values carry.
+
+    The model schema: ``column_id`` is ``TABLE_NAME::col``, where TABLE_NAME is
+    *"the `name:` (or `alias:`) from model_tables"*. Several checks keyed on
+    ``name`` alone, so a role-playing dimension — the whole reason an alias
+    exists — resolved to no columns: D10 called a fully-populated table a
+    zero-column leaf, D6 and D11 silently saw "unknown" (BL-305).
+    """
+    return model_table.get("alias") or model_table.get("name") or ""
+
+
+def join_label(model_table: dict, join: dict) -> str:
+    """A name for a join, which real TML does not give one.
+
+    ``model_tables[].joins[]`` carries no ``name`` key — none of the 493 joins in
+    the 2026-07-30 census has one — so every join finding was reported with an
+    empty ``object_name`` and could not be identified in the report. Prefers a
+    declared name if some future export grows one.
+    """
+    declared = join.get("name", "")
+    if declared:
+        return declared
+    left = table_key(model_table)
+    right = join.get("with", "")
+    return f"{left} -> {right}" if left and right else (left or right)
+
+
 def table_role(columns: list, table_name: str) -> str:
     """``"fact"``, ``"dimension"`` or ``"unknown"`` for one model table.
 

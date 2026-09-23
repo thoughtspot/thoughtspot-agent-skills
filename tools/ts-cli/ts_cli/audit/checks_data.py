@@ -68,7 +68,7 @@ def check_d2(ctx: AuditContext) -> list:
                 if varchar_keys:
                     findings.append(Finding(
                         check_id="D2", angle=_ANGLE, severity="HIGH",
-                        object_type="join", object_name=j.get("name", ""),
+                        object_type="join", object_name=rules.join_label(mt, j),
                         object_guid=guid,
                         detail=f"VARCHAR join key(s): {', '.join(varchar_keys)}",
                         metric=len(varchar_keys),
@@ -80,7 +80,7 @@ def check_d2(ctx: AuditContext) -> list:
                 if len(keys) > 2:
                     findings.append(Finding(
                         check_id="D2", angle=_ANGLE, severity="MEDIUM",
-                        object_type="join", object_name=j.get("name", ""),
+                        object_type="join", object_name=rules.join_label(mt, j),
                         object_guid=guid,
                         detail=f"Multi-column join ({len(keys)//2} keys)",
                         metric=len(keys) // 2,
@@ -99,14 +99,14 @@ def check_d3(ctx: AuditContext) -> list:
                 if jtype == "OUTER":
                     findings.append(Finding(
                         check_id="D3", angle=_ANGLE, severity="HIGH",
-                        object_type="join", object_name=j.get("name", ""),
+                        object_type="join", object_name=rules.join_label(mt, j),
                         object_guid=guid,
                         detail="FULL OUTER join causes performance issues",
                     ))
                 elif jtype in ("LEFT_OUTER", "RIGHT_OUTER"):
                     findings.append(Finding(
                         check_id="D3", angle=_ANGLE, severity="INFO",
-                        object_type="join", object_name=j.get("name", ""),
+                        object_type="join", object_name=rules.join_label(mt, j),
                         object_guid=guid,
                         detail=f"{jtype} join — may indicate data discrepancies",
                     ))
@@ -139,10 +139,10 @@ def check_d5(ctx: AuditContext) -> list:
         joined = set()
         for t in mt:
             for j in (t.get("joins") or []):
-                joined.add(t.get("name", ""))
+                joined.add(rules.table_key(t))
                 joined.add(j.get("with", ""))
         for t in mt:
-            tname = t.get("name", "")
+            tname = rules.table_key(t)
             if tname not in joined:
                 findings.append(Finding(
                     check_id="D5", angle=_ANGLE, severity="HIGH",
@@ -159,7 +159,7 @@ def check_d6(ctx: AuditContext) -> list:
         m = model.get("model", {})
         cols = m.get("columns") or []
         for mt in (m.get("model_tables") or []):
-            tname = mt.get("name", "")
+            tname = rules.table_key(mt)
             table_cols = [c for c in cols
                           if (c.get("column_id") or "").split("::")[0] == tname]
             if not table_cols:
@@ -273,7 +273,7 @@ def check_d10(ctx: AuditContext) -> list:
         joined = set()
         for t in mt:
             for j in (t.get("joins") or []):
-                joined.add(t.get("name", ""))
+                joined.add(rules.table_key(t))
                 joined.add(j.get("with", ""))
         for t in mt:
             tname = t.get("name", "")
@@ -306,14 +306,14 @@ def check_d11(ctx: AuditContext) -> list:
                 if from_role == "fact" and to_role == "fact":
                     findings.append(Finding(
                         check_id="D11", angle=_ANGLE, severity="MEDIUM",
-                        object_type="join", object_name=j.get("name", ""),
+                        object_type="join", object_name=rules.join_label(mt, j),
                         object_guid=ctx.guid_for(model),
                         detail=f"Fan-out risk: fact-to-fact join '{from_table}' -> '{tname}' with {cardinality}",
                     ))
                 else:
                     findings.append(Finding(
                         check_id="D11", angle=_ANGLE, severity="INFO",
-                        object_type="join", object_name=j.get("name", ""),
+                        object_type="join", object_name=rules.join_label(mt, j),
                         object_guid=ctx.guid_for(model),
                         detail=f"ONE_TO_MANY join '{from_table}' -> '{tname}'",
                     ))

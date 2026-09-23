@@ -58,11 +58,17 @@ def check_s2(ctx: AuditContext) -> list:
     for model in ctx.models:
         m = model.get("model", {})
         pii = _find_pii_columns(m.get("columns") or [])
+        # Keyed by the prefix a `column_id` actually carries — the model_tables
+        # alias when one is set, not the Table TML's display name. Keying on the
+        # display name meant a role-playing dimension never matched, so S2
+        # reported "WITHOUT table RLS" about a table that has RLS (BL-305).
         table_has_rls = {}
-        for fqn, table in ctx.tables.items():
-            t = table.get("table", {})
-            rls = t.get("rls_rules") or {}
-            table_has_rls[t.get("name", "")] = bool(rls.get("rules"))
+        for mt in (m.get("model_tables") or []):
+            table = ctx.tables.get(mt.get("fqn", ""))
+            if not table:
+                continue
+            rls = table.get("table", {}).get("rls_rules") or {}
+            table_has_rls[rules.table_key(mt)] = bool(rls.get("rules"))
         for col, category, _ in pii:
             # `index_type` absent means indexed by DEFAULT, which is the risk
             # this check exists to report — testing presence skipped it (BL-299).

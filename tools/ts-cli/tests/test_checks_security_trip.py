@@ -133,25 +133,9 @@ def test_s2_should_not_flag_a_dont_index_pii_column():
     assert check_s2(ctx) == []
 
 
-def test_s2_misses_table_rls_when_the_model_aliases_the_table():
-    """DOCUMENTS A SEVERITY DEFECT — asserts today's behaviour, not a requirement.
-
-    S2 keys `table_has_rls` by the Table TML's display name
-    (checks_security.py:64) but looks it up by the `column_id` prefix
-    (checks_security.py:70), which is the `model_tables` **alias** — see
-    `AuditContext.column_types` (context.py:44), `mt.get("alias") or
-    mt.get("name")`. A role-playing dimension therefore reports HIGH "WITHOUT
-    table RLS" about a table that has RLS.
-    """
-    ctx = make_context(
-        models=[_model([_mcol("customer_email", column_id="SHIP_TO::customer_email",
-                              index_type="PREFIX_AND_SUBSTRING")], alias="SHIP_TO")],
-        tables={TABLE_FQN: _table(_rls("ts_groups = [T_1::COUNTRY]"))},
-    )
-    findings = check_s2(ctx)
-    assert len(findings) == 1
-    assert findings[0].severity == "HIGH", "the table does have RLS — this is wrong"
-
+# NOTE: the S2 alias-blindness characterization test was removed when BL-305
+# was fixed — S2 now resolves RLS through model_tables, so an aliased table's
+# RLS is found. Covered by tools/ts-cli/tests/test_alias_and_join_names.py.
 
 # --------------------------------------------------------------------------
 # S3 — PII without CLS or masking formula

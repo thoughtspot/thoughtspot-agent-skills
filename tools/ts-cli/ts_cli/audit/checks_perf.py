@@ -144,7 +144,7 @@ def check_p6(ctx: AuditContext) -> list:
                 if varchar_keys:
                     findings.append(Finding(
                         check_id="P6", angle=_ANGLE, severity="HIGH",
-                        object_type="join", object_name=j.get("name", ""),
+                        object_type="join", object_name=rules.join_label(mt, j),
                         object_guid=ctx.guid_for(model),
                         detail=f"VARCHAR join key(s) — 2-5x slower than integer: {', '.join(varchar_keys)}",
                         metric=len(varchar_keys),

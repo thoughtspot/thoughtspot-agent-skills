@@ -187,7 +187,7 @@ are roughly ordered by value÷effort.
 | BL-302 | `build_context` fetches dependents for models and tables only, so a SET guid is never a key and `check_h5` can never learn whether a set has consumers. **Half closed 2026-09-23:** H5 no longer asserts an unmade lookup (it was reporting every set as an orphan) and is correctly silent instead — but it stays silent in production until the fetch covers sets, which needs a second typed pass and live verification | next ts-audit pass |
 | ~~BL-303~~ | ~~`check_p5`'s date-constraint suppression is dead on real TML — `constraints` exports as a mapping, so iterating yields the key string~~ | DONE (2026-09-23) |
 | ~~BL-304~~ | ~~the data/perf check split was made by copying, not extracting: `d4`≡`p4`, `s9`≡`p14` verbatim, `s8` ⊇ `p15`, `_join_depth`≡`p7`, `_table_role` twice, `d1`'s column rule ≡ `p8`~~ | DONE (2026-09-22) |
-| BL-305 | **alias blindness across `d6`, `d10`, `d11`, `s2`** — they key on `model_tables[].name` while `column_id` is prefixed by `alias or name`, so a role-playing dimension reports a fully-populated table as a zero-column leaf (D10) or silently resolves to no columns (D6/D11). `AuditContext.column_types` already does it right. Separately, every join finding is anonymous: `j.get("name")` on a structure with no `name` key in any of the 493 joins of the 2026-07-30 census | next ts-audit pass |
+| ~~BL-305~~ | ~~alias blindness in `d6`/`d10`/`d11`/`s2`, and join findings reported with an empty `object_name`~~ | DONE (2026-09-23) |
 | BL-283 | `check-catalog.md` and the audit `check_id`s can drift with nothing to notice — 51 documented vs 50 emitted today, and the deferred-id table means a naive comparison is wrong | next validator pass |
 
 ### Tier 3 — Opportunistic
