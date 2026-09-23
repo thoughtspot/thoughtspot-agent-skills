@@ -191,12 +191,20 @@ def check_h7(ctx: AuditContext) -> list:
             mt_fqn = mt.get("fqn", "")
             if mt_fqn:
                 model_table_fqns.add(mt_fqn)
+    # Every table guid we know of, whether or not a scoped model joins it.
+    table_guids = set(model_table_fqns) | set(ctx.tables)
     for answer in ctx.answers:
         a = answer.get("answer", {})
         aname = a.get("name", "")
         for tref in (a.get("tables") or []):
             fqn = tref.get("fqn", "")
-            if fqn and fqn not in model_table_fqns:
+            # `answer.tables[].fqn` is the object the answer was built on: a
+            # MODEL guid when healthy, a TABLE guid when it bypasses the model
+            # layer. `model_tables[].fqn` holds TABLE guids, so the old
+            # `not in` flagged every healthy answer and excused the one this
+            # check exists to find (BL-301). An fqn matching neither is an
+            # object we cannot resolve — unknown, not a bypass.
+            if fqn and fqn in table_guids:
                 findings.append(Finding(
                     check_id="H7", angle=_ANGLE, severity="MEDIUM",
                     object_type="answer", object_name=aname,

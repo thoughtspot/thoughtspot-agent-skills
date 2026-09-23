@@ -309,13 +309,27 @@ def check_p17(ctx: AuditContext) -> list:
     for model in ctx.models:
         m = model.get("model", {})
         formulas = m.get("formulas") or []
-        formula_names = {f.get("name", "") for f in formulas}
+        # A cross-reference is written as the formula's ID, and the schema fixes
+        # that id as "formula_" + name — so matching refs against NAMES could
+        # never hit, and the graph was always empty (BL-300). The only shape it
+        # did recognise, a bare display-name ref, fails on first import, so no
+        # exported model could carry it. Resolve both, keyed back to the name.
+        by_ref = {}
+        for f in formulas:
+            fname = f.get("name", "")
+            if not fname:
+                continue
+            by_ref[fname] = fname
+            fid = f.get("id", "")
+            if fid:
+                by_ref[fid] = fname
         graph = {}
         for f in formulas:
             fname = f.get("name", "")
             expr = f.get("expr", "")
             refs = _BRACKET_REF.findall(expr)
-            cross_refs = [r for r in refs if r in formula_names and r != fname]
+            cross_refs = [by_ref[r] for r in refs
+                          if r in by_ref and by_ref[r] != fname]
             if cross_refs:
                 graph[fname] = cross_refs
         for start in graph:

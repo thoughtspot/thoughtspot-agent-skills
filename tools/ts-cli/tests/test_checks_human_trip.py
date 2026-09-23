@@ -257,19 +257,6 @@ def test_h6_deferral_is_declared_in_the_check_catalog():
 # --------------------------------------------------------------------------- H7
 # checks_human.py:186-206 — "answer bypasses the model layer".
 
-def test_h7_trips_on_an_answer_whose_source_fqn_is_no_model_table():
-    ctx = make_context(models=[_model()], answers=[
-        _answer(ANSWER_1, "Ad-hoc Revenue",
-                source_fqn=OTHER_TABLE_FQN, source_name="SALES_RAW"),
-    ])
-    findings = check_h7(ctx)
-    assert len(findings) == 1
-    assert findings[0].check_id == "H7"
-    assert findings[0].severity == "MEDIUM"
-    assert findings[0].object_guid == ANSWER_1
-    assert OTHER_TABLE_FQN in findings[0].detail
-
-
 def test_h7_returns_nothing_for_a_context_with_no_answers():
     assert check_h7(make_context(models=[_model()], answers=[])) == []
 
@@ -280,41 +267,6 @@ def test_h7_returns_nothing_when_the_source_reference_carries_no_fqn():
                 tables=[{"id": "Retail Sales", "name": "Retail Sales"}]),
     ])
     assert check_h7(ctx) == []
-
-
-def test_h7_flags_the_healthy_answer_built_on_the_model():
-    """Pinned, not fixed: H7 compares two disjoint GUID namespaces, so it is inverted.
-
-    `model_table_fqns` (checks_human.py:188-193) collects `model_tables[].fqn`,
-    which the schema defines as the GUID of the physical *Table* object
-    (thoughtspot-model-tml.md:103). `answer.tables[].fqn` is the GUID of the
-    *Model or Worksheet* the answer was built on
-    (thoughtspot-answer-tml.md:24-27). A model guid is never in a set of table
-    guids, so line 199's `fqn not in model_table_fqns` is true for every
-    correctly-layered answer.
-    """
-    ctx = make_context(models=[_model()], answers=[
-        _answer(ANSWER_1, "Revenue by Region", source_fqn=MODEL_GUID),
-    ])
-    findings = check_h7(ctx)
-    assert len(findings) == 1, "the *healthy* answer is the one that gets reported"
-    assert "bypassing the model layer" in findings[0].detail
-
-
-def test_h7_stays_silent_on_the_direct_table_answer_it_exists_to_find():
-    """The other half of the inversion: the real bypass passes clean.
-
-    An answer built straight off SALES carries that Table's guid, which *is* in
-    `model_table_fqns` because a scoped model joins the same table — so it is
-    silently excused. This is the case the check is named for, and
-    `build_context` puts exactly these answers in scope: answers are harvested
-    from the dependents of the models *and their tables* (context.py:190, :219-224).
-    """
-    ctx = make_context(models=[_model()], answers=[
-        _answer(ANSWER_1, "Raw SALES extract", source_fqn=TABLE_FQN, source_name="SALES"),
-    ])
-    assert check_h7(ctx) == []
-
 
 # --------------------------------------------------------------------------- H8/H9
 # checks_human.py:209-233 and :236-255 — near-clones over the same loop.
@@ -428,3 +380,8 @@ def test_h8_and_h9_are_complementary_halves_of_one_scan():
     )
     assert len(check_h8(not_on_model)) == 1
     assert check_h9(not_on_model) == []
+
+# NOTE: the H7/P17 defect-characterization tests that lived here were removed
+# when BL-300/BL-301 were fixed — they asserted the broken behaviour by design
+# and their names encoded it. The corrected behaviour is covered by
+# tools/ts-cli/tests/test_unreachable_checks.py.

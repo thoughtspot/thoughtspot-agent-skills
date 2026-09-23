@@ -525,12 +525,6 @@ DISPLAY_REF_CHAIN = [
     for n, nxt in zip(CHAIN_NAMES, CHAIN_NAMES[1:] + [None])
 ]
 
-
-def test_p17_returns_nothing_for_a_four_deep_id_ref_chain():
-    """THE FINDING. A->B->C->D->E, written the only way TML writes it: zero findings."""
-    assert check_p17(_ctx(_model(formulas=ID_REF_CHAIN))) == []
-
-
 def test_p17_returns_nothing_for_a_real_exported_cross_reference():
     """Minimal reproduction against TML copied out of a live export."""
     assert check_p17(_ctx(_model(formulas=REAL_EXPORT_FORMULAS))) == []
@@ -547,12 +541,11 @@ def test_p17_only_fires_on_the_shape_that_fails_import():
     assert [(f.object_name, f.metric) for f in findings] == [("A", 4), ("B", 3)]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "checks_perf.py:351/357 matches bracket refs against formulas[].name, but TML "
-    "writes cross-references as formulas[].id, which is 'formula_' + name. The "
-    "token and the set element can never be equal, so `graph` is empty for every "
-    "model and P17 cannot return a finding on any importable TML. Reported, not "
-    "fixed."))
 def test_p17_should_see_the_chain_a_real_model_actually_carries():
     findings = check_p17(_ctx(_model(formulas=ID_REF_CHAIN)))
     assert [(f.object_name, f.metric) for f in findings] == [("A", 4), ("B", 3)]
+
+# NOTE: the H7/P17 defect-characterization tests that lived here were removed
+# when BL-300/BL-301 were fixed — they asserted the broken behaviour by design
+# and their names encoded it. The corrected behaviour is covered by
+# tools/ts-cli/tests/test_unreachable_checks.py.
