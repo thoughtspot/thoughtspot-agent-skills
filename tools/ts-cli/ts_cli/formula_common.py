@@ -414,9 +414,18 @@ def _passthrough_handler(op: str, template: str, arity: int, quote: str) -> Any:
 def wrap_passthrough_calls(
     text: str,
     templates: dict[str, tuple[str, str, int]],
-    quote: str = "'",
+    quote: str = '"',
 ) -> tuple[str, set[str]]:
     """Rewrite `fn(args...)` into a ThoughtSpot `sql_*_op` pass-through.
+
+    ``quote`` defaults to the DOUBLE-quoted outer template. It defaulted to a
+    single quote — a form nothing in this repo emits and nothing has verified
+    against the parser. Both live callers already override it, and
+    ``qlik/functions.py`` records why: taking the default made Qlik alone emit
+    the single-quoted form while its siblings and every example in the patterns
+    schema use the double-quoted one. A default reachable by omitting one keyword
+    argument, in the helper BL-171 created to stop emitting forms ThoughtSpot
+    rejects, is a trap rather than a convenience (audit 9.7).
 
     BL-171: a converter that renames a source function to a ThoughtSpot name
     which does not exist produces a formula rejected at import (error_code

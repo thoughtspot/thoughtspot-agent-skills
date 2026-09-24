@@ -27,6 +27,11 @@ import glob
 import os
 import subprocess
 
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _git import git_paths  # noqa: E402
+
 SOFT_WARN = 12_000
 HARD_FAIL = 25_000
 CHARS_PER_TOKEN = 4
@@ -85,11 +90,9 @@ def main(argv=None) -> int:
 
     files = _scan_files(root)
     if args.staged:
-        out = subprocess.run(
-            ["git", "-C", root, "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-            capture_output=True, text=True,
-        )
-        staged = set(out.stdout.splitlines())
+        staged = set(git_paths(
+            ["-C", str(root), "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            _Path(root)))
         files = [f for f in files if f in staged]
         if not files:
             print("PASS  skill context cost: no staged SKILL.md files")

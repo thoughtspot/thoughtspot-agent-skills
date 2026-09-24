@@ -72,6 +72,29 @@ def git_paths(args: Sequence[str], repo_root: Path) -> List[str]:
     return [p for p in result.stdout.split("\0") if p]
 
 
+def git_text(args: Sequence[str], repo_root: Path) -> str:
+    """Run ``git <args>`` and return raw stdout, failing loudly.
+
+    For the enumerations that are not a list of paths — diff *content*, where
+    ``-z`` and NUL-splitting do not apply. Same contract as :func:`git_paths`
+    otherwise: a missing git or a non-zero exit raises rather than returning the
+    empty string a caller would read as "nothing changed".
+    """
+    try:
+        result = subprocess.run(
+            ["git", *args], capture_output=True, text=True, cwd=repo_root, check=True,
+        )
+    except FileNotFoundError as exc:
+        raise GitEnumerationError(f"git not found: {exc}") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = " ".join((exc.stderr or "").split())[:200]
+        raise GitEnumerationError(
+            f"git {' '.join(args)} failed in {repo_root} "
+            f"(exit {exc.returncode}): {detail}"
+        ) from exc
+    return result.stdout
+
+
 def staged_files(repo_root: Path, *, diff_filter: str = "ACM") -> List[Path]:
     """Absolute paths of staged added/copied/modified files that exist on disk.
 

@@ -55,10 +55,14 @@ ALLOWED_TOP_LEVEL_FILES = {
 
 
 def _git(args: list[str], repo_root: Path) -> str:
-    result = subprocess.run(
-        ["git", *args], capture_output=True, text=True, cwd=repo_root, check=False,
-    )
-    return result.stdout
+    """NUL-joined git output, via the shared runner.
+
+    Was a local `subprocess.run(..., check=False)` whose empty stdout on a git
+    failure read as "nothing to report" — the fail-open this module's own gate
+    exists to prevent (audit 4.1). The name shadowed the `_git` module, which is
+    how the local copy survived the BL-218 migration.
+    """
+    return "\n".join(git_paths(args, repo_root))
 
 
 def tracked_but_ignored(repo_root: Path) -> list[str]:

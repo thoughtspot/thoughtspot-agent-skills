@@ -117,10 +117,7 @@ def main() -> int:
     args = parser.parse_args()
     root = Path(args.root).resolve()
 
-    all_tracked = set(
-        subprocess.run(["git", "ls-files", "-z"], capture_output=True, text=True, cwd=root)
-        .stdout.split("\0")
-    )
+    all_tracked = set(git_paths(["ls-files"], Path(root)))
     known_skills = _known_skill_names(root, all_tracked)
 
     failures: list[str] = []

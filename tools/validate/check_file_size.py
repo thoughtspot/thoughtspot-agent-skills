@@ -19,6 +19,11 @@ import argparse
 import os
 import subprocess
 
+import sys
+from pathlib import Path as _P
+sys.path.insert(0, str(_P(__file__).resolve().parent))
+from _git import git_paths  # noqa: E402
+
 SOFT_WARN = 500
 HARD_FAIL = 1000
 SCAN_ROOT = "tools/ts-cli/ts_cli"
@@ -67,11 +72,12 @@ def main(argv=None) -> int:
 
     files = _scan_files(root)
     if args.staged:
-        out = subprocess.run(
-            ["git", "-C", root, "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-            capture_output=True, text=True,
-        )
-        staged = set(out.stdout.splitlines())
+        # Via _git: a failing git invocation raises instead of yielding an
+        # empty list, which this gate would have read as "nothing staged" and
+        # reported PASS (audit 4.1).
+        staged = set(git_paths(
+            ["-C", root, "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            _P(root)))
         files = [f for f in files if f in staged]
         if not files:
             print("PASS  file size: no staged ts_cli modules")

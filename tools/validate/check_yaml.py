@@ -86,12 +86,9 @@ def main() -> int:
             target = repo_root / target
         md_files = [target]
     elif args.staged:
-        import subprocess
-        result = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM", "-z"],
-            capture_output=True, text=True, cwd=repo_root
-        )
-        staged = [repo_root / f for f in result.stdout.split("\0") if f.endswith(".md")]
+        staged = [repo_root / f for f in git_paths(
+            ["diff", "--cached", "--name-only", "--diff-filter=ACM"], repo_root)
+            if f.endswith(".md")]
         md_files = [f for f in staged if f.exists()]
     else:
         # Full repo scan — focus on reference/schema/mapping files

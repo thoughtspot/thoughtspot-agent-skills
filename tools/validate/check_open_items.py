@@ -33,6 +33,8 @@ from _novelty import (
 # items the checker could not see. Both accept both depths now.
 from generate_open_items_index import _HEADER_RE as _INDEX_HEADER_RE
 
+from _git import git_paths  # noqa: E402
+
 # Patterns that indicate an unresolved item
 # Item headers come in two styles across the repo: `## Item 4 — …` and `## #4 — …`.
 # The original regex only matched `## Item N`, so it silently ignored 6 of 7 files.
@@ -124,11 +126,7 @@ def check_open_items_file(path: Path) -> list[tuple[str, str]]:
 
 def _changed_files(base: str, repo_root: Path) -> set[str]:
     """Return repo-relative paths changed between ``base`` and HEAD."""
-    result = subprocess.run(
-        ["git", "diff", f"{base}...HEAD", "--name-only", "-z"],
-        capture_output=True, text=True, cwd=repo_root,
-    )
-    return {line.strip() for line in result.stdout.split("\0") if line.strip()}
+    return set(git_paths(["diff", f"{base}...HEAD", "--name-only"], repo_root))
 
 
 

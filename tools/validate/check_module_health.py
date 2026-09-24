@@ -35,6 +35,9 @@ import json
 import os
 import sys
 
+from pathlib import Path
+from _git import git_paths  # noqa: E402
+
 CAP = 15  # cyclomatic complexity above this must be baselined (radon: >15 = high-C/D+)
 
 BASELINE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -118,10 +121,9 @@ def main(argv=None):
 
     only = None
     if args.staged:
-        import subprocess
-        out = subprocess.run(["git", "-C", root, "diff", "--cached", "--name-only",
-                              "--diff-filter=ACM"], capture_output=True, text=True)
-        only = {ln for ln in out.stdout.splitlines() if ln.endswith(".py")}
+        only = {p for p in git_paths(
+            ["-C", root, "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            Path(root)) if p.endswith(".py")}
         if not only:
             return 0
 

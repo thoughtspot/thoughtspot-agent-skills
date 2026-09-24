@@ -116,11 +116,7 @@ def check_skill(skill_file: Path) -> list[str]:
 
 def get_tracked_files(repo_root: Path, path: str) -> set[str]:
     """Return git-tracked file paths under the given path (relative to repo root)."""
-    result = subprocess.run(
-        ["git", "ls-files", "-z", path],
-        capture_output=True, text=True, cwd=repo_root,
-    )
-    return {f for f in result.stdout.split("\0") if f}
+    return set(git_paths(["ls-files", path], repo_root))
 
 
 def collect_skill_files(repo_root: Path) -> list[Path]:

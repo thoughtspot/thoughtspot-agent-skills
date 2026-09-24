@@ -180,7 +180,7 @@ those is visible to any validator in this repo, which is the case for the angle 
 
 | | |
 |---|---|
-| **Cadence** | **Full sweep only** — never the weekly external one. It needs a live warehouse, a live cluster and ~100 disposable objects; that cost only earns out at the deliberate on-demand cadence. |
+| **Cadence** | **Operator-run, not workflow-run.** `.claude/workflows/repo-audit.js` contains no angle-15 finder, so a run invoked as `scope: "full"` does not measure fidelity and cannot say so — the 2026-09-22 sweep reported `scope=full` with angle 15 never executed (finding 18.1). Run it from `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md` by hand. Full-sweep cadence, never the weekly one. It needs a live warehouse, a live cluster and ~100 disposable objects; that cost only earns out at the deliberate on-demand cadence. |
 | **Fixture** | The upstream pattern corpus, staged one schema per pattern (they collide on shared table names — see the study's own amended spec). |
 | **Method** | Three-stage numeric comparison plus construct-level structural survival. The study's harness was throwaway by design; a rerunnable one is BL-247's neighbourhood, not a prerequisite. |
 
@@ -262,7 +262,7 @@ completes, and the report still arrives looking complete.
 |---|---|---|
 | Internal validators (1–10 where automated) | Every PR | pre-commit + CI |
 | **External sweep (13, 14, 16, 18)** | On demand, **when nudged** (~weekly threshold) | `Workflow({name: "repo-audit", args: {scope: "external"}})` |
-| Full deep audit (all angles, **incl. 15**) | On demand, **when nudged** (time or activity) + before a release / new runtime | `Workflow({name: "repo-audit", args: {scope: "full"}})` |
+| Full deep audit (all angles **the workflow implements** — 15 is NOT among them) | On demand, **when nudged** (time or activity) + before a release / new runtime | `Workflow({name: "repo-audit", args: {scope: "full"}})` |
 
 **No scheduled cron.** Execution is nudge-driven and on-demand, not automated — see
 the rationale under Freshness triggers.

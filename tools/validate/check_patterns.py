@@ -47,6 +47,11 @@ from pathlib import Path
 
 from _dirs import CLI_RUNTIMES, CLI_RUNTIME_PATHS
 
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _git import git_paths, git_text  # noqa: E402
+
 
 def check_connection_fqn_in_tml(file_path: Path) -> list[tuple[int, str]]:
     """
@@ -167,12 +172,10 @@ def check_stdin_tml_import_wrapper(file_path: Path) -> list[tuple[int, str, int,
 
 def get_staged_files(repo_root: Path, suffix: str, skip_dirs: set | None = None) -> list[Path]:
     """Return staged files with the given suffix, excluding skip_dirs."""
-    import subprocess
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM", "-z"],
-        capture_output=True, text=True, cwd=repo_root
-    )
-    paths = [repo_root / f for f in result.stdout.split("\0")
+    # Via _git: git failing now raises instead of yielding an empty list a
+    # gate would read as "nothing to check" and report PASS (audit 4.1).
+    paths = [repo_root / f for f in git_paths(
+        ["diff", "--cached", "--name-only", "--diff-filter=ACM"], repo_root)
              if f.endswith(suffix) and (repo_root / f).exists()]
     if skip_dirs:
         paths = [p for p in paths if not any(part in p.parts for part in skip_dirs)]
@@ -185,13 +188,11 @@ def get_staged_added_lines(repo_root: Path, file_path: Path) -> set[str]:
     Lines from the git diff that start with '+' (excluding the '+++' header).
     Used to distinguish pre-existing violations from newly introduced ones.
     """
-    import subprocess
-    result = subprocess.run(
-        ["git", "diff", "--cached", "-U0", "--", str(file_path)],
-        capture_output=True, text=True, cwd=repo_root,
-    )
+    # Diff CONTENT, not paths — `git_text` is the fail-loud runner for that
+    # shape; empty stdout from a failed git read as "no added lines" (audit 4.1).
     added = set()
-    for line in result.stdout.splitlines():
+    for line in git_text(["diff", "--cached", "-U0", "--", str(file_path)],
+                         repo_root).splitlines():
         if line.startswith("+") and not line.startswith("+++"):
             added.add(line[1:])  # strip the leading '+'
     return added
