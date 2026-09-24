@@ -493,3 +493,48 @@ def test_cli_verify_requires_exactly_one_of_model_or_dir(tmp_path):
     both = runner.invoke(app, ["tableau", "verify", "--parse", str(parsed_path),
                               "--model", str(model_path), "--dir", str(out)])
     assert both.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# SQL View name disambiguation (SCAL-339750)
+# ---------------------------------------------------------------------------
+
+def _ds_parsed(name, sql_views):
+    """Full `ts tableau parse` shape (``datasources: [...]``), which is what
+    carries the pre-disambiguation SQL View names."""
+    return {
+        "name": name, "tables": [], "sql_views": [{"name": v, "columns": []} for v in sql_views],
+        "columns": [], "joins": [], "calculated_fields": [], "orphan_calcs": [], "calc_map": {},
+        "col_table_map": {},
+    }
+
+
+def test_verify_accepts_a_model_built_from_disambiguated_sql_view_names():
+    """`build-model` renames a SQL View whose name collides across datasources; the
+    parse JSON on disk keeps the old name. Without the same pass here, the rename
+    reads as a dropped Custom-SQL relation and the fidelity gate hard-fails."""
+    parsed = {"datasources": [
+        _ds_parsed("Marketing", ["Custom SQL Query2"]),
+        _ds_parsed("Sales", ["Custom SQL Query2"]),
+    ]}
+    model = _model_tml(model_tables=[{"name": "Custom SQL Query2 (Sales)"}], name="Sales")
+
+    report = verify_conversion(parsed, model)
+
+    structural = next(c for c in report["checks"] if c["name"] == "structural")
+    errors = [f for f in structural["findings"] if f["severity"] == "ERROR"]
+    assert errors == []
+
+
+def test_verify_still_reports_a_genuinely_dropped_sql_view():
+    """The disambiguation pass must not blind the gate: a view absent from the model
+    for any other reason is still an ERROR."""
+    parsed = {"datasources": [_ds_parsed("Sales", ["Custom SQL Query2"])]}
+    model = _model_tml(model_tables=[{"name": "SOMETHING_ELSE"}], name="Sales")
+
+    report = verify_conversion(parsed, model)
+
+    structural = next(c for c in report["checks"] if c["name"] == "structural")
+    messages = [f["message"] for f in structural["findings"] if f["severity"] == "ERROR"]
+    assert any("Custom-SQL relation(s) dropped" in m for m in messages)
+    assert report["ok"] is False

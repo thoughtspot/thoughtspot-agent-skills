@@ -1341,17 +1341,17 @@ For each custom SQL relation identified in Step 3b (those with `source_type: "cu
 a `.sql_view.tml` file is generated. Follow the rules in `tableau-tml-rules.md` "SQL View
 TML Rules" and the full schema in `thoughtspot-sql-view-tml.md`.
 
+> **Emitted names may be qualified.** A name contested across the workbook becomes
+> `Base (Datasource)` — object name and filename both. See that file's "Name uniqueness
+> is workbook-wide", which also covers hand assembly.
+
 **Template:** see [references/step-5-tml-generation.md](references/step-5-tml-generation.md)
 "SQL View TML template (Step 5c)" for the full YAML shape.
 
-Key rules:
+Key rules (the rest are in `tableau-tml-rules.md` "Key differences from table TML"):
 - `connection.name` is **required** — use `{connection_name}` from Step 4.5
 - `sql_query` contains the full SQL text from the Tableau `<relation>` element (decode
   HTML entities)
-- `sql_output_column` must match a column name or alias from the SQL query output
-- Map Tableau column datatypes to ThoughtSpot types using the same mapping as table TMLs
-- No `db`, `schema`, `db_table`, or `db_column_properties` fields
-- File extension: `*.sql_view.tml`
 
 Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{Name}.sql_view.tml`.
 
@@ -2488,10 +2488,9 @@ suggested-but-unverified with its tokens for manual follow-up.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.43.0 | 2026-09-24 | **SCAL-339750 — emitted SQL View names are disambiguated across the workbook (prereq ts-cli v0.147.0).** A relation name is unique only within its datasource, so datasources each holding an unnamed Custom SQL relation emitted several SQL Views called `Custom SQL Query` into one namespace, each model resolving against whichever imported last. GENERATE mode now qualifies **every** owner of a contested name as `Base (Datasource)`, changing the `sql_view:` name **and the filename**; uncontested names are untouched and a physical table is never renamed. A **hand**-assembled model (blend merge, no-`.tds` multi-query) must apply the rule itself — see `tableau-tml-rules.md` "Name uniqueness is workbook-wide". The guarantee is cross-datasource: adding, removing or reordering an unrelated datasource cannot rename a view; it is not absolute order-independence. `--existing-guid` (MERGE) defers to the names the target model already uses and reconciles neither direction (BL-313). |
 | 1.42.1 | 2026-09-23 | **Connection introspection understated how dead it is (audit 13.1).** The step hedged "404 on some connection types"; the 2026-08-26 probe found the hierarchy empty for **every** auth type. Now says to ask the user. |
 | 1.42.0 | 2026-09-17 | **SCAL-331323 — Step 3.5 gains a `T` branch for a supplied `.tds`/`.tdsx` (prereq ts-cli v0.141.0).** It offered only `Y` (Tableau API) and `N` (TWB metadata only), so a consultant without Server access — the case `N` is labelled for — was routed past the physical model even while holding the `.tds`. `T` parses it and continues as `Y` does. Paid for inside the BL-128 ratchet by trimming restatements in the same section. |
 | 1.41.0 | 2026-09-15 | **SCAL-338450 — Step 3 no longer dies on a non-numeric table-calc address (prereq ts-cli v0.139.0).** Tableau writes `false` / `"All Pages"` into `<table-calc><address><value>` for non-offset addressing modes; a bare `int()` raised an uncaught `ValueError` out of `ts tableau parse`, so the **whole** workbook yielded nothing (no tables, joins, formulas, params, dashboards) and Steps 4+ were unreachable — 2 real customer workbooks were 100% unmigratable over one token on one worksheet. That entry's `address_offset` now degrades to `None` (the element-absent value) with a warning in the new `table_calc_addressing.warnings`. Corpus-verified 33/33 parse; no other file changes behaviour. |
-| 1.40.1 | 2026-08-26 | Use `ts metadata search --connection` instead of hand-filtering `dataSourceName`; the old instruction said **equals** where the CLI casefolds, so it dropped rows the CLI keeps (finding 11.1). |
-| 1.40.0 | 2026-07-30 | **BL-171 — `TRIM` stops emitting a bare `trim ( )`, and `LTRIM`/`RTRIM` are newly translated (ts-cli v0.126.1).** v1.39.2 corrected the mapping doc but left `ts_cli/tableau/functions.py` rewriting `TRIM(` → `trim ( `, which fails at import (`error_code 14516`) — that regex rewrite is gone and `TRIM` now joins `UPPER`/`LOWER`/`REPLACE`/`STARTSWITH`/`ENDSWITH` in `_ARG_HANDLERS`, emitting `sql_string_op ( "TRIM({0})" , s )`. `LTRIM`/`RTRIM` are **newly emitted** (they had no mapping at all — hence MINOR), completing coverage-matrix row #136 and the L9 pass-through list. 6 new tests including nesting (`TRIM(TRIM(x))`, `UPPER(TRIM(x))`). **All three emitted forms live-verified on se-thoughtspot 2026-07-30** (`VALIDATE_ONLY`, nothing persisted). |
 
-**Older entries (v1.0.0–v1.39.2):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.40.1):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

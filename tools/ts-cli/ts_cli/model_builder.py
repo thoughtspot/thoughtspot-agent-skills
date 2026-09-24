@@ -158,25 +158,30 @@ def _drop_sql_view_shadowed_columns(columns: list[dict], sql_views: list[dict]) 
     return [c for c in columns if c.get("name") not in sv_names]
 
 
-_SQLVIEW_REF_RE = re.compile(r"\[([^\]:]+)::([^\]]+)\]")
+# Same shape as `tml_lint._ON_REF_RE`: the view half admits `:` and the FIRST `::`
+# separates it from the column, so a qualifier built from a datasource caption
+# carrying a colon ("Custom SQL Query2 (Sales: EU)") still resolves.
+_SQLVIEW_REF_RE = re.compile(r"\[([^\[\]]+?)::([^\[\]]+?)\]")
 
 
-def _resolve_sqlview_refs(expr: str, view_cols: dict) -> str:
+def _resolve_sqlview_refs(expr: str, views_by_name: dict) -> str:
     """Resolve a physical column ref to the SQL View's disambiguated column name.
 
     A translated formula may reference `[Custom SQL Query2::BEHAVIOR]` while the view
     exposes that column as `BEHAVIOR (Custom SQL Query2)` (Tableau's collision caption
     when the same physical name appears in >1 query). Left unresolved, the import fails
-    with "Search did not find <column>". Deterministic: only rewrites a ref whose column
-    isn't a real view column but whose `<col> (<View>)` variant is.
+    with "Search did not find <column>". Resolution goes through `_resolve_view_key`,
+    which matches the physical name against the view's own `sql_output_column` — the
+    caption records the relation name the column was collided against, which is not
+    necessarily the view's current name. A ref that resolves to itself is left alone.
     """
     def sub(m):
         view, col = m.group(1), m.group(2)
-        cols = view_cols.get(view)
-        if not cols or col in cols:
+        sv = views_by_name.get(view)
+        if not sv:
             return m.group(0)
-        cand = f"{col} ({view})"
-        return f"[{view}::{cand}]" if cand in cols else m.group(0)
+        resolved = _resolve_view_key(sv, col)
+        return f"[{view}::{resolved}]" if resolved != col else m.group(0)
     return _SQLVIEW_REF_RE.sub(sub, expr)
 
 
@@ -247,13 +252,13 @@ def build_model_tml(
     model_tables = _build_model_tables(tables, columns, joins)
     model_tables.extend(_sql_view_model_tables(sql_views, joins))
 
-    view_cols = {sv["name"]: {c["name"] for c in sv.get("columns", [])} for sv in sql_views}
+    views_by_name = {sv["name"]: sv for sv in sql_views}
     model_formulas = []
     for f in translated_formulas:
         expr = f["expr"]
         expr = add_formula_prefix(expr, formula_names, param_names)
         expr = fix_double_aggregation(expr, formula_exprs)
-        expr = _resolve_sqlview_refs(expr, view_cols)   # BEHAVIOR → BEHAVIOR (Custom SQL Query2)
+        expr = _resolve_sqlview_refs(expr, views_by_name)  # BEHAVIOR → BEHAVIOR (Custom SQL Query2)
         model_formulas.append({
             "name": f["name"],
             "id": f"formula_{f['name']}",
@@ -841,8 +846,11 @@ def split_for_phased_import(
 # cross-import until first attribute access, by which point both modules
 # have finished loading regardless of which one was imported first.
 
+_LAZY_FROM_TABLEAU_BUILD_MODEL = ("build_blend_plan", "disambiguate_sql_view_names")
+
+
 def __getattr__(name: str):
-    if name == "build_blend_plan":
-        from ts_cli.tableau.build_model import build_blend_plan
-        return build_blend_plan
+    if name in _LAZY_FROM_TABLEAU_BUILD_MODEL:
+        import ts_cli.tableau.build_model as _tableau_build_model
+        return getattr(_tableau_build_model, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -245,6 +245,8 @@ are roughly ordered by value÷effort.
 | BL-269 | `build_blend_plan` disagrees with its own previous run on identical input — weakens the corpus-diff regression instrument | next Tableau converter pass |
 | BL-271 | table-calc warnings name entries that are not in the output they describe (last-wins keys vs per-occurrence warnings) | next Tableau converter pass |
 | BL-272 | five mutually inconsistent handlings of "non-numeric token in TWB XML"; degradation channel exists in one extractor of six | next Tableau converter pass |
+| BL-284 | a physical table and a SQL View sharing one relation name in one datasource are not fully separable from the parsed representation — `_sql_view_owns_column` is a conservative heuristic, undecidable when both declare the same column name; not present in the corpus | next Tableau converter pass |
+| BL-313 | MERGE mode skips SQL View disambiguation, so merging into a model that GENERATE built with this CLI emits the bare name where the target expects the qualified one | next Tableau converter pass |
 
 ### Tier 4 — Deferred
 
@@ -11504,3 +11506,107 @@ so it runs on every commit.
 
 **Target:** next validator pass.
 
+
+---
+
+## BL-284 — a physical table and a SQL View sharing one relation name in one datasource are not fully separable `Tier 3`
+
+**Filed:** 2026-09-22.
+**Source:** pre-PR review of the cross-datasource SQL View naming fix (SCAL-339750). Raised
+as a review finding against that change, not as an observed migration failure.
+
+**Affects:** `tools/ts-cli/ts_cli/tableau/naming.py`
+(`_rename_sql_view_in_datasource`, `_sql_view_owns_column`),
+`tools/ts-cli/ts_cli/tableau/twb.py` (`_build_column_table_map`, `_extract_tables`,
+`_extract_sql_views`).
+
+**The representation loses the distinction.** Ownership of a column or a join endpoint is
+recorded as a bare relation NAME: `_build_column_table_map` stores `column -> parent-name`,
+`columns[].table` carries the same string, and `joins[].left_table`/`right_table` name the
+relation. Both `_extract_tables` and `_extract_sql_views` take that name from the relation's
+`name` attribute. So if one datasource declared a physical table `Orders` *and* a Custom SQL
+relation `Orders`, every `"Orders"` in those three structures would belong to both relations
+and nothing downstream could say which. Tableau's own `parent-name` would be the identical
+string, so the information is not merely dropped by our parser — it is not expressed in the
+source either.
+
+**What shipped, and what it does not settle.** Renaming the SQL View for a collision used to
+rewrite those references by exact string equality, which repointed the *physical table's*
+columns and join endpoints at the renamed view. That is fixed: when the name is ambiguous,
+each reference is attributed before being rewritten — a column by whether the view declares
+it (`_sql_view_owns_column`, matching either the Tableau caption `name` or the remote
+`sql_output_column`, case-insensitively), a join endpoint by whether that side's key column
+belongs to the view — and anything not attributable to the view is left on the physical
+table. `_sql_view_owns_column` is a **conservative heuristic, not an ownership model**:
+
+- If the physical table and the SQL View both declare a column of the same name, the
+  reference is **inherently ambiguous** and the heuristic attributes it to the view. No
+  information exists in the parsed representation to decide it correctly.
+- A join clause carrying no `keys` on an ambiguous name is left on the physical table.
+- A view column absent from `sql_views[].columns` is left on the physical table.
+
+**Not observed in any real workbook.** Tableau assigns each relation a name that is unique
+within its datasource, across relation types: **0 of 3,815 raw `<datasource>` elements** in
+the 41-workbook corpus bind one relation name to more than one relation type, and all 209
+`type='table'` relations carry an explicit `name`, so the name-synthesizing fallback in
+`_extract_tables` (`name = rel_name or physical_name`) never fires either. The shape is
+reachable only by calling the public helper with hand-constructed input.
+
+**This is therefore a hardening item, not a GA failure.** Nothing here is a currently
+observed defect in a migration: no corpus workbook exercises the branch, and the corpus
+proves only that gating it left every real path byte-identical. Treat it as the ownership
+model this area will eventually need, not as a live bug.
+
+**Approach (when a real case appears, or the ownership model is revisited).** Carry relation
+identity rather than relation name through the parse — for example a per-column owner key
+that distinguishes the `type='table'` relation from the `type='text'` relation even when the
+two share a `name` — so attribution is exact instead of heuristic. That is a change to the
+parse contract (`col_table_map` is the translator's `scoped_columns`), so it is worth doing
+only against a real workbook that needs it. Until then the conservative heuristic holds, and
+its limits are the three bullets above.
+
+**Target:** next Tableau converter pass.
+
+---
+
+## BL-313 — MERGE mode cannot tell which SQL View spelling the target model uses `Tier 2`
+
+**Filed:** 2026-09-24. **Jira:** SCAL-339750 (follow-on, separated from that PR).
+**Source:** review of SCAL-339750, raised against the merge-mode guard landed there.
+**Affects:** `tools/ts-cli/ts_cli/commands/tableau.py` (`build_model_cmd`'s
+`disambiguate_sql_view_names` pre-pass), `tools/ts-cli/ts_cli/tableau/naming.py`.
+**Status:** OPEN.
+
+`disambiguate_sql_view_names` qualifies a SQL View name that more than one datasource
+declares (`Custom SQL Query` -> `Custom SQL Query (Sales)`), because GENERATE emits every
+datasource into one output directory and one ThoughtSpot namespace. MERGE (`--existing-guid`)
+emits nothing there — it adds formulas to a model that already exists — so the incoming
+names must match that model, and the pre-pass is skipped for it.
+
+Skipping is correct for a target built before the pre-pass existed. It is wrong for one the
+pre-pass itself produced:
+
+```
+GENERATE with the pre-pass   -> model_tables[] carries `Custom SQL Query (Sales)`
+later MERGE into that model  -> pre-pass skipped, formula emits `[Custom SQL Query::…]`
+                             -> table prefix names nothing in the target
+```
+
+Neither spelling is safe to assume: the same guard that fixes the pre-pass-era target breaks
+the post-pre-pass one. `filter_unresolvable_formulas` cannot catch either direction — it
+validates only the column portion after `::` (see its own docstring), so a ref whose column
+exists under a different table prefix is kept and imported.
+
+**Reproduce** by constructing the sequence: a workbook whose datasources declare the same
+Custom SQL relation name, built in GENERATE mode and imported, then re-run against the
+resulting model with `--existing-guid`.
+
+**Approach.** Resolve incoming SQL View names against the target's own
+`model_tables[]` rather than assuming either spelling — the behaviour
+`_load_table_name_map` already advertises for `--table-name-map` ("merge mode resolves
+tables from the existing model"). The pre-pass runs on the full datasource list before the
+per-datasource loop, while the target model is exported inside `_process_datasource`, so
+this needs the export hoisted or the reconciliation moved after it; it is not a
+one-line change, which is why the guard shipped first.
+
+**Target:** next Tableau converter pass.
