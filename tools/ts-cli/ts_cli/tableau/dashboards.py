@@ -13,6 +13,7 @@ from typing import Optional
 import xml.etree.ElementTree as ET
 
 from ts_cli.tableau.liveboard import leaf_name, role_for_shelf
+from ts_cli.tableau.reconcile import _PIVOT_PSEUDO_FIELDS, _is_internal_column
 
 # Tableau derivation → aggregate? (drives measure detection) and → date bucket keyword.
 _AGG = {"Sum", "Avg", "Average", "Count", "Cnt", "CntD", "Min", "Max", "Median",
@@ -105,7 +106,7 @@ def _ws_fields(ws: ET.Element, ci: dict, captions: dict) -> tuple[list, dict]:
 
     def add(inst_key: str, shelf: str) -> None:
         f = _resolve(inst_key, ci, captions)
-        if not f or f["name"] in seen:
+        if not f or _is_internal_column(f["name"]) or f["name"] in seen:
             return
         seen.add(f["name"])
         fields.append({"name": f["name"], "measure": f["measure"],
@@ -123,10 +124,12 @@ def _ws_fields(ws: ET.Element, ci: dict, captions: dict) -> tuple[list, dict]:
     for enc in ws.findall(".//encodings/color"):
         if _enc_ref(enc):
             add(_enc_ref(enc), "color")
-    # Measure Values: the shelf holds [Multiple Values]/[:Measure Names] pseudo-fields, so the
-    # real measures are the worksheet's column-instances (e.g. Behaviours & Events).
+    # Measure Values: the shelf holds Tableau's pivot pseudo-fields, so the real measures are
+    # the worksheet's column-instances (e.g. Behaviours & Events). Read off the raw shelf
+    # TEXT, deliberately — `add` filters the pseudo-fields out of the field list, so a
+    # trigger derived from that list would never fire.
     both = cols_text + rows_text
-    if "[Multiple Values]" in both or "[:Measure Names]" in both:
+    if any(f"[{tok}]" in both for tok in _PIVOT_PSEUDO_FIELDS):
         for inst_key in ci:
             add(inst_key, "measure-values")
     if not fields:                                  # value-only KPI fallback (text/label)

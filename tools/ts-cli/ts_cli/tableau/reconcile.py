@@ -17,30 +17,84 @@ _JUNK = "__tableau_internal_object_id__"
 # every I12 `ts tml lint` finding (a bare `column_id` ThoughtSpot rejects at
 # import), plus the same column table-qualified (`TABLE:::Measure Names`) on
 # multi-table models, where I12 is scoped out and nothing flagged it at all.
-# `dashboards.py` recognises the same token on a shelf.
+#
+# The members are Tableau's pivot pair: `dashboards.py` reads them together off
+# a shelf (`[Multiple Values]`/`[:Measure Names]`), which is the in-repo
+# evidence for the second one.
 #
 # Matched by EQUALITY, not as a substring like _JUNK (which arrives decorated,
 # `__tableau_internal_object_id__].[agg_booked_monthly (…)_HASH`) and not by
 # leading-colon prefix: a colon is Tableau's marker, but a prefix rule would
 # reach past the evidence and a real column is only ever one false positive
-# away. `:Measure Names` is the ONLY colon-prefixed column name in the
-# 41-workbook corpus. Add a member when another is actually observed.
+# away. Add a member to `_PSEUDO_FIELDS` when another is actually observed —
+# see the constants note below before touching `_PIVOT_PSEUDO_FIELDS`.
 #
-# `Number of Records` is deliberately NOT here. It looks like a pseudo-field
-# and is not one: it translates to a real formula (`formula_Number of Records`,
-# a SUM measure), so dropping it would delete a measure the workbook uses.
-_PSEUDO_FIELDS = frozenset({":Measure Names"})
+# The two do NOT carry the same false-positive risk, and only one is self-
+# marking. `:Measure Names` leads with Tableau's colon, so no user column
+# collides with it by accident. `Multiple Values` does not — it is a name a
+# user could legitimately choose. `dashboards.py` can afford that because it
+# tests the token against SHELF TEXT and the context disambiguates; this layer
+# sees a bare column list with no such context, so it matches on name alone.
+# Taken deliberately: the string is Tableau's own, and left unfiltered it emits
+# a phantom `TABLE::Multiple Values` no gate sees — I12 reads only a BARE
+# column_id, and the cross-reference check resolves because the same phantom is
+# written into the Table TML.
+#
+# `Number of Records` is deliberately NOT here, and the reason is not the one it
+# looks like. Tableau's built-in one is a CALCULATED field, and `_extract_columns`
+# skips any `<column>` carrying a `<calculation>` child before this runs — so it
+# never reaches this predicate at all. A warehouse column genuinely named that is
+# not a calculated field, does reach here, and must survive.
+#
+# Two DISTINCT meanings, deliberately separate constants:
+#
+#   _PIVOT_PSEUDO_FIELDS — one of these appearing in a worksheet's raw shelf text
+#     means "this worksheet is a Measure Values pivot". `dashboards.py` reads it
+#     as a TRIGGER.
+#   _PSEUDO_FIELDS       — these must never be emitted as real columns.
+#
+# They coincide today because the pivot pair is also the whole exclusion set. A
+# future filter-only member belongs in _PSEUDO_FIELDS alone: adding it to the
+# pivot pair would make an unrelated token fire the measure-values branch and
+# pull every column-instance into a worksheet's field list.
+_PIVOT_PSEUDO_FIELDS = frozenset({":Measure Names", "Multiple Values"})
+
+_PSEUDO_FIELDS = _PIVOT_PSEUDO_FIELDS   # | {"<filter-only member>"} — extend HERE, not above
 
 
 def _is_internal_column(raw: str) -> bool:
     """True for a Tableau-internal column that must never reach emitted TML.
 
-    Shared by ``clean_column_name`` (single-table path) and
-    ``drop_junk_columns`` (multi-table path) so the two cannot drift — the
-    parse records the marker in BOTH ``name`` and ``db_column_name``, so either
-    key may be the one passed in.
+    Shared by ``clean_column_name`` (single-table path), ``drop_junk_columns``
+    (multi-table path) and ``dashboards.py``'s field assembly, so they cannot
+    drift — the parse records the marker in BOTH ``name`` and
+    ``db_column_name``, so either key may be the one passed in.
+
+    The ``_SUFFIX``-normalised form is tested as well, still by EQUALITY. Nothing
+    in this repo shows Tableau decorating a pseudo-field, so this is defensive:
+    ``clean_column_name`` strips that suffix AFTER this check, so a decorated one
+    would be stripped back to the exact string the filter exists to remove, while
+    ``drop_junk_columns`` (which never strips) kept a third spelling.
     """
-    return _JUNK in raw or raw in _PSEUDO_FIELDS
+    return (_JUNK in raw
+            or raw in _PSEUDO_FIELDS
+            or _SUFFIX.sub("", raw).strip() in _PSEUDO_FIELDS)
+
+
+# The same members as a bracketed REFERENCE, for scanning formula expressions.
+_PSEUDO_REFS = frozenset(f"[{tok}]" for tok in _PSEUDO_FIELDS)
+
+
+def _references_internal_column(expr: str) -> bool:
+    """True when a formula expression references a column that never reaches TML.
+
+    Reference matching, not the name matching ``_is_internal_column`` does: a
+    pseudo-field is matched there by EQUALITY against a column name, so passing an
+    expression to it returns False for every member. Matching the BRACKETED form
+    keeps the false-positive discipline the name path has — ``[Multiple Values]``
+    cannot occur inside ``[My Multiple Values]``.
+    """
+    return _JUNK in expr or any(ref in expr for ref in _PSEUDO_REFS)
 
 
 def clean_column_name(name: str | None) -> str | None:
@@ -161,12 +215,13 @@ def validate_name_map(name_map: dict[str, str]) -> str | None:
 
 def drop_junk_formulas(formulas: list[dict]) -> tuple[list[dict], list[str]]:
     """Drop any formula whose expr references a __tableau_internal_object_id__
-    junk column (Tier-1 companion to clean_columns, which drops the junk
-    COLUMNS but leaves formulas referencing them dangling)."""
+    junk column, or any member of ``_PSEUDO_FIELDS`` (Tier-1 companion to
+    clean_columns, which drops those COLUMNS but leaves formulas referencing
+    them dangling)."""
     kept: list[dict] = []
     dropped: list[str] = []
     for f in formulas:
-        if _JUNK in f.get("expr", ""):
+        if _references_internal_column(f.get("expr", "")):
             dropped.append(f["name"])
         else:
             kept.append(f)

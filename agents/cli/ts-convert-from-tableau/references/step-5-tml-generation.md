@@ -169,7 +169,10 @@ The merge procedure:
    - All `model_tables[]` entries from every member datasource (tables + SQL views),
      resolved via `blend_plan["ds_table_map"]`
    - All `columns[]` from every member datasource (with `column_id` prefixed by the
-     correct table name: `TABLE_NAME::col_name`)
+     correct table name: `TABLE_NAME::col_name`) — **excluding Tableau's pivot
+     pseudo-fields** (`:Measure Names`, `Multiple Values`). They arrive in the parse as
+     ordinary columns but name no warehouse column, so a `column_id` built from one
+     resolves to nothing; `build-model` filters them, hand assembly must do it here.
    - All `formulas[]` from every member datasource
    - The joins from `blend_plan["joins"]` whose `table` belongs to this component
      (see next step)
