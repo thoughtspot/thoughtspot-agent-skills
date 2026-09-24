@@ -95,13 +95,22 @@ def _rename_sql_view_in_datasource(ds: dict, old: str, new: str) -> None:
     workbook) nothing is attributed and the rewrite is unconditional, exactly
     as before.
 
+    The comparison is EXACT, unlike the contested-name test in
+    ``disambiguate_sql_view_names``, which lowercases because ThoughtSpot is
+    case-insensitive on object names. Ambiguity here is a property of the parse
+    representation, where surfaces 2-4 hold an exact string: ``Orders`` and
+    ``orders`` are distinguishable keys there, so there is nothing to attribute
+    and the rewrite stays unconditional. Matching loosely would withhold the
+    rename from a view column the parse did not list, repointing it at the
+    physical table.
+
     Surfaces 2-4 are applied by ``_rename_column_owners`` and
     ``_rename_join_endpoints``; they are split out only to keep each piece under
     the complexity cap, and carry no logic this function did not already have.
     """
     view = next((sv for sv in ds.get("sql_views") or [] if sv.get("name") == old), None)
     ambiguous = view is not None and any(
-        (t.get("name") or "").lower() == old.lower() for t in ds.get("tables") or []
+        (t.get("name") or "") == old for t in ds.get("tables") or []
     )
 
     def owned(column: str | None) -> bool:
@@ -154,8 +163,11 @@ def disambiguate_sql_view_names(datasources: list[dict]) -> list[dict]:
     Custom SQL relation produced N SQL View documents all called
     ``Custom SQL Query``, each model pointing at an ambiguous object. The
     filenames were already disambiguated by datasource slug; the object names
-    were not. Live-reproduced across 10 of 41 corpus workbooks (up to 7 views
-    sharing one name in ``Hourly Sales Flash.twb``).
+    were not. Found by an audit of real Tableau workbooks, where several
+    datasources each declaring an unnamed Custom SQL relation emitted views under
+    one name and the models built from them resolved against whichever imported
+    last. Reproduce by constructing that shape — two datasources, each carrying
+    one unnamed ``<relation type='text'>``.
 
     A name is CONTESTED when more than one datasource declares it, or when a
     PHYSICAL table anywhere in the workbook claims it (the table keeps the name —
@@ -164,14 +176,23 @@ def disambiguate_sql_view_names(datasources: list[dict]) -> list[dict]:
     left exactly as written, so a workbook with no collision is untouched.
 
     Qualifying every owner — rather than letting the first keep the bare name —
-    is what makes the result stable. A view's name is then a pure function of
-    (its own name, its own datasource), so inserting, removing or reordering an
-    unrelated datasource cannot rename it. Under the first-owner-wins rule it
-    could: adding a datasource ahead of ``Goals`` moved the bare name to the
-    newcomer and renamed ``Goals``, which on a re-migration silently repoints
-    every object bound to the old name. (A name going from uncontested to
-    contested still renames — that is inherent, since an uncontested name is by
-    definition left alone.)
+    is what makes the result stable ACROSS DATASOURCES: inserting, removing or
+    reordering an unrelated datasource cannot rename a view. Under the
+    first-owner-wins rule it could: adding a datasource ahead of ``Goals`` moved
+    the bare name to the newcomer and renamed ``Goals``, which on a re-migration
+    silently repoints every object bound to the old name. (A name going from
+    uncontested to contested still renames — that is inherent, since an
+    uncontested name is by definition left alone.)
+
+    That is the guarantee, and it is not absolute order-independence. Two views
+    in ONE datasource whose names differ only in case share a qualifier, so
+    which one is ``Base (D)`` and which is ``Base (D 2)`` follows their
+    declaration order. It is deterministic for a given workbook, and either
+    outcome is internally consistent — every rewrite keys on the view's own
+    exact spelling, so its references follow whichever name it received — but
+    re-saving the workbook with those two relations reordered can swap them.
+    Tableau numbers sibling relations rather than case-varying them, so the
+    pair has to be hand-renamed to arise at all.
 
     Renames use the repo's existing collision idiom — ``Base (Qualifier)`` then
     ``Base (Qualifier N)``, as ``qlik/build_model.py`` and ``powerbi/build_model.py``

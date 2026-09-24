@@ -2252,9 +2252,12 @@ to `Base (Datasource N)` only if that exact string is already taken. Uncontested
 are left exactly as written, so a workbook with no collision is unaffected.
 
 - **Every owner of a contested name is qualified**, not just the second and later ones,
-  so a view's name depends on its own datasource alone — adding, removing or reordering
-  an unrelated datasource cannot rename it. (A name that goes from uncontested to
-  contested does change, since uncontested names are deliberately left alone.)
+  so adding, removing or reordering an unrelated datasource cannot rename a view. (A
+  name that goes from uncontested to contested does change, since uncontested names are
+  deliberately left alone.) The guarantee is cross-datasource: two views in *one*
+  datasource whose names differ only in case share a qualifier, and which receives the
+  ordinal follows their declaration order — deterministic per workbook, and consistent
+  either way, but not fixed across a re-save that reorders them.
 - **Physical table names are never renamed** — they must match the warehouse object. A
   SQL View colliding with one is the side that gets qualified.
 - **Comparison is case-insensitive**, because ThoughtSpot is case-insensitive on object
@@ -2262,6 +2265,11 @@ are left exactly as written, so a workbook with no collision is unaffected.
 - **Every reference follows the new name**: `model_tables[].name`, `columns[].column_id`
   prefixes, join `with`/`on` endpoints, and the `[View::Column]` refs formula translation
   embeds. The SQL body and `sql_output_column` are never rewritten.
+- **GENERATE mode only.** `--existing-guid` (MERGE) adds formulas to a model that already
+  exists, so the names that model already uses are authoritative and no renaming is
+  applied. Nothing reconciles the two: merging into a model a *previous* GENERATE run
+  qualified will emit the bare name where the target holds the qualified one. Tracked as
+  BL-313.
 
 Names are chosen from the full datasource list before any `--datasource` filter, so a
 filtered run emits the same name as an unfiltered one. Implemented by

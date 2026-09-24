@@ -158,7 +158,10 @@ def _drop_sql_view_shadowed_columns(columns: list[dict], sql_views: list[dict]) 
     return [c for c in columns if c.get("name") not in sv_names]
 
 
-_SQLVIEW_REF_RE = re.compile(r"\[([^\]:]+)::([^\]]+)\]")
+# Same shape as `tml_lint._ON_REF_RE`: the view half admits `:` and the FIRST `::`
+# separates it from the column, so a qualifier built from a datasource caption
+# carrying a colon ("Custom SQL Query2 (Sales: EU)") still resolves.
+_SQLVIEW_REF_RE = re.compile(r"\[([^\[\]]+?)::([^\[\]]+?)\]")
 
 
 def _resolve_sqlview_refs(expr: str, views_by_name: dict) -> str:

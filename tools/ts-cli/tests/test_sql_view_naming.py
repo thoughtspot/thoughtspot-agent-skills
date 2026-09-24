@@ -222,6 +222,48 @@ def test_formula_ref_resolves_when_caption_carries_the_pre_rename_relation():
     assert expr[expr.index("[") + 1:expr.index("]")] in column_ids
 
 
+def _colon_caption_model(marketing_caption, sales_caption):
+    """Two datasources contesting one Custom SQL name, the second captioned by the
+    caller. The view column carries a Tableau collision caption, so the formula's
+    plain physical ref has to be RESOLVED — the path a missed regex match skips."""
+    dss = [
+        _ds(marketing_caption, sql_views=[_sql_view("Custom SQL Query2", ["A"])]),
+        _ds(sales_caption, sql_views=[
+            _sql_view("Custom SQL Query2", [("BEHAVIOR (Custom SQL Query2)", "BEHAVIOR")])]),
+    ]
+    disambiguate_sql_view_names(dss)
+    renamed = dss[1]["sql_views"][0]["name"]
+    model = build_model_tml(
+        model_name="M", connection_name="CONN", tables=[], columns=[], joins=[],
+        parameters=[],
+        translated_formulas=[{"name": "Total", "expr": f"sum ( [{renamed}::BEHAVIOR] )"}],
+        sql_views=dss[1]["sql_views"],
+    )["model"]
+    expr = model["formulas"][0]["expr"]
+    return renamed, expr, {c.get("column_id") for c in model["columns"]}
+
+
+def test_formula_ref_resolves_when_the_qualifier_contains_a_colon():
+    """A datasource caption may contain a colon, so the qualified view name does too.
+    The reference grammar takes the FIRST `::` as the separator, so such a name is
+    still a single view half and its refs must resolve exactly as any other."""
+    renamed, expr, column_ids = _colon_caption_model("Marketing", "Sales: EU")
+
+    assert renamed == "Custom SQL Query2 (Sales: EU)"
+    assert expr == f"sum ( [{renamed}::BEHAVIOR (Custom SQL Query2)] )"
+    assert expr[expr.index("[") + 1:expr.index("]")] in column_ids
+
+
+def test_formula_ref_without_a_colon_qualifier_is_unchanged():
+    """The control for the case above — an ordinary qualifier keeps resolving
+    exactly as before, so widening the view half changed nothing else."""
+    renamed, expr, column_ids = _colon_caption_model("Marketing", "Sales")
+
+    assert renamed == "Custom SQL Query2 (Sales)"
+    assert expr == f"sum ( [{renamed}::BEHAVIOR (Custom SQL Query2)] )"
+    assert expr[expr.index("[") + 1:expr.index("]")] in column_ids
+
+
 def test_resolve_sqlview_refs_leaves_unresolvable_refs_alone():
     sv = _sql_view("V (DS)", [("BEHAVIOR (Custom SQL Query2)", "BEHAVIOR")])
     views = {sv["name"]: sv}
@@ -392,6 +434,37 @@ def test_cross_datasource_table_collision_still_rewrites_unconditionally():
     assert dss[0]["col_table_map"] == {"Unlisted": "Orders (SUPERSTORE SALES)"}
     assert dss[0]["columns"][0]["table"] == "Orders (SUPERSTORE SALES)"
     assert [t["name"] for t in dss[1]["tables"]] == ["Orders"]
+
+
+def test_case_variant_physical_table_does_not_withhold_the_rename():
+    # A physical table differing from the view only in CASE is a distinguishable
+    # key in col_table_map/columns[].table, so there is nothing to attribute and
+    # the rewrite must stay unconditional — same requirement as the
+    # cross-datasource shape above, for the same reason: the parse does not
+    # always list every view column, so `Unlisted` must still follow the rename
+    # rather than being left pointing at the physical table.
+    dss = [
+        _ds("D",
+            sql_views=[_sql_view("Orders", ["ViewCol"])],
+            tables=["orders"],
+            col_table_map={"Unlisted": "Orders", "PhysCol": "orders"},
+            columns=[{"name": "Unlisted", "table": "Orders"},
+                     {"name": "PhysCol", "table": "orders"}],
+            joins=[{"left_table": "orders", "right_table": "Other",
+                    "keys": [{"left": "PhysCol", "right": "x"}]}]),
+    ]
+    disambiguate_sql_view_names(dss)
+    ds = dss[0]
+
+    assert _view_names(dss) == ["Orders (D)"]
+    # the view's column follows the rename
+    assert ds["col_table_map"]["Unlisted"] == "Orders (D)"
+    assert ds["columns"][0]["table"] == "Orders (D)"
+    # the physical table and everything owned by it are untouched
+    assert [t["name"] for t in ds["tables"]] == ["orders"]
+    assert ds["col_table_map"]["PhysCol"] == "orders"
+    assert ds["columns"][1]["table"] == "orders"
+    assert ds["joins"][0]["left_table"] == "orders"
 
 
 def test_collision_detection_is_case_insensitive():

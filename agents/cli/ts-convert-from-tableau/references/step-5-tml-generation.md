@@ -1021,6 +1021,10 @@ cohort:
 
 ## SQL View TML template (Step 5c)
 
+> `name:` must be unique across the WHOLE workbook, not just its datasource — see
+> `tableau-tml-rules.md` "Name uniqueness is workbook-wide" for the qualification rule.
+> `build-model` applies it; hand assembly (below, and the blend merge) must apply it too.
+
 ```yaml
 sql_view:
   name: "Datasource Custom SQL"
