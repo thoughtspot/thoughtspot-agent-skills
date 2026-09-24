@@ -185,3 +185,12 @@ def test_no_disproved_name_ever_emitted():
         expr, _status, _note = translate_dax(dax)
         if expr is not None:
             _assert_clean(expr)
+
+
+def test_split_args_tracks_braces():
+    """DAX writes a value set as `T[Stage] IN {"a","b"}`. Without brace tracking the
+    commas inside the set split it into arguments that are not arguments, so every
+    CALCULATE carrying an IN-set was read wrongly."""
+    from ts_cli.powerbi.functions import _split_args
+    assert _split_args('DISTINCTCOUNT(T[k]), T[Stage] IN {"Early","On Time"}') == [
+        "DISTINCTCOUNT(T[k])", 'T[Stage] IN {"Early","On Time"}']

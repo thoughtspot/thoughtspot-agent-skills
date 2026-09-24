@@ -1,4 +1,4 @@
-<!-- coverage-matrix last-reviewed: 2026-07-16 -->
+<!-- coverage-matrix last-reviewed: 2026-09-21 -->
 # Coverage matrix — Power BI → ThoughtSpot
 
 Every Power BI construct and its conversion status. Cite in the migration report. Within
@@ -17,6 +17,9 @@ Mapped: **Mapped** (deterministic) · **Approximated** (mapped with a caveat).
 | Arithmetic, operators, `DIVIDE` | Mapped | `DIVIDE` → `safe_divide` |
 | `IF` / nested `IF` | Mapped | → conditional expressions |
 | `CALCULATE(<agg>, FILTER/cond)` | Approximated | → `sum_if`; verify vs Power BI |
+| `CALCULATE(DISTINCTCOUNT(T[key]), NOT ISBLANK(T[gate]))` | Mapped | gated distinct count → `unique count (if ([T::gate] != null) then [T::key] else null)` (`ts_cli/powerbi/gated.py`). A filter argument the parser cannot read refuses the whole shape rather than emitting a partial gate |
+| `VAR a = CALCULATE(DISTINCTCOUNT(T[key]), NOT ISBLANK(T[g1]), T[stage] IN {…}) VAR b = … RETURN a/b` | Mapped | gated ratio over one grain → two `unique count (if …)` terms divided; the `IN` set expands to ORs. Both VARs must count the same key or the shape is refused |
+| Either gated shape wrapped in `USERELATIONSHIP` | Approximated | the formula is right for the grain and wrong for a page slicing on the role-playing date, because a model cannot rewire which date the filter context applies to. Needs a union fact keyed by measure; the note says so |
 | `CALCULATE(m, ALL(Table[Col]))` / `REMOVEFILTERS` / `ALLSELECTED` | Approximated | → `group_aggregate(m, query_groups()-{cols}, query_filters()-{cols})` (worked example) |
 | Measure / calc-column cross-references | Mapped | `[formula_<name>]` id-refs, topo-sorted (resolve on first import — open-item #2) |
 | `CEILING/FLOOR(x[, significance])` | Mapped | 1-arg → `ceil/floor`; 2-arg → `ceil(x/sig)*sig` |
@@ -54,7 +57,7 @@ Flagged (needs a human; never faked) or Dropped (no ThoughtSpot equivalent).
 | Construct | Status | Notes |
 |---|---|---|
 | Point-in-time (`CALCULATE`+`ALL`+`MAX`, headcount-as-of-date) | Flagged | genuine manual rebuild |
-| Iterators (`SUMX`/`RANKX`/`EARLIER`), row-context, `VAR/RETURN`, `SWITCH` | Flagged | no safe deterministic port |
+| Iterators (`SUMX`/`RANKX`/`EARLIER`), row-context, `SWITCH`, and `VAR/RETURN` other than the gated ratio above | Flagged | no safe deterministic port |
 | Map / gauge / custom AppSource visual | Flagged/Approximated | needs a geo column / no map equivalent |
 | Tooltip page | Dropped | hover overlay, not a navigable tab |
 | Slicer / `basicShape` / buttons / text boxes | Dropped | filters / decorations, not data visuals |
