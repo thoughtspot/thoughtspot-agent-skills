@@ -100,6 +100,17 @@ _WINDOW_TABLECALC_RE = re.compile(r"\b(WINDOW_[A-Z]+)\s*\(", re.IGNORECASE)
 # extensions (external R/Python). SCRIPT_REAL/STR/INT/BOOL -> the same mechanism.
 # Neither has any ThoughtSpot equivalent.
 _MODEL_EXT_RE = re.compile(r"\b(MODEL_[A-Z_]+|SCRIPT_[A-Z]+)\s*\(", re.IGNORECASE)
+
+# Pass-through SQL. Tableau documents 13 members — seven RAWSQL_* and six
+# RAWSQLAGG_* (there is no RAWSQLAGG_SPATIAL) — and they embed raw warehouse SQL
+# in a calc, so they are not portable and have no ThoughtSpot equivalent.
+# tableau-formula-translation.md records this and the coverage matrix calls it
+# limitation L3 "Omit + log", but no code knew the name: a calc carrying one was
+# emitted verbatim into model TML, failed at import, and was silently dropped by
+# the retry loop with no MIGRATION_LIMITATIONS entry (audit 13.20). Matched by
+# prefix rather than by a list of 13, so a future member is caught the day
+# Tableau adds it — the same reasoning as MODEL_*/SCRIPT_* above.
+_RAWSQL_RE = re.compile(r"\b(RAWSQL(?:AGG)?_[A-Z]+)\s*\(", re.IGNORECASE)
 # RANK_* variants OTHER than the four with a documented disposition
 # (RANK/RANK_UNIQUE -> native rank(); RANK_DENSE/RANK_MODIFIED -> documented
 # pass-through; RANK_PERCENTILE -> native rank_percentile()). Anything else is a
@@ -133,6 +144,10 @@ def validate_output(expr: str) -> list[str]:
         errors.append(
             f"Tableau analytics-extension function has no ThoughtSpot equivalent: {fn} "
             f"(external R/Python via an analytics extension)")
+    for fn in sorted({m.group(1).upper() for m in _RAWSQL_RE.finditer(expr)}):
+        errors.append(
+            f"Tableau pass-through SQL has no ThoughtSpot equivalent: {fn} "
+            f"(embeds raw warehouse SQL — not portable)")
     # A RANK_* member with no documented disposition (finding 13.26).
     for fn in sorted({m.group(1).upper() for m in _RANK_UNKNOWN_RE.finditer(expr)}):
         errors.append(
