@@ -121,6 +121,22 @@ def _log(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
+def _table_key(parsed: dict) -> str:
+    """The key a Table TML is stored under in ``AuditContext.tables``.
+
+    Its GUID, because that is what ``model_tables[].fqn`` holds. This map used
+    to be keyed by the warehouse path ``db.schema.db_table``, so every
+    ``tables.get(mt["fqn"])`` compared a guid against a path and missed —
+    ``column_types`` returned ``{}`` on every real run, and P6/D2 could not
+    report a VARCHAR join key whatever their logic did. Falls back to the
+    warehouse path for a doc that carries no guid.
+    """
+    t = parsed.get("table", {})
+    warehouse_path = "{}.{}.{}".format(
+        t.get("db") or "", t.get("schema") or "", t.get("db_table") or "")
+    return parsed.get("guid") or warehouse_path
+
+
 def build_context(
     client: Any,
     model_guids: list,
@@ -159,10 +175,15 @@ def build_context(
             if tml_type == "model":
                 models.append(parsed)
             elif tml_type == "table":
-                fqn = (parsed.get("table", {}).get("db") or "") + "." + \
-                      (parsed.get("table", {}).get("schema") or "") + "." + \
-                      (parsed.get("table", {}).get("db_table") or "")
-                tables[fqn] = parsed
+                # Key by GUID, because that is what `model_tables[].fqn` holds.
+                # This map was keyed by the warehouse path "db.schema.db_table",
+                # so every `tables.get(mt["fqn"])` lookup compared a guid against
+                # a path and missed — `column_types` returned {} on every real
+                # run, and with it P6/D2 could never report a VARCHAR join key.
+                # `erd.py` carries a name-matching fallback written to work
+                # around exactly this rather than fix it. Falls back to the
+                # warehouse path when a doc carries no guid.
+                tables[_table_key(parsed)] = parsed
 
     model_guids_from_tml = [m.get("guid") for m in models if m.get("guid")]
     table_guids_from_tml = [t.get("guid") for t in tables.values() if t.get("guid")]

@@ -98,6 +98,59 @@ def table_key(model_table: dict) -> str:
     return model_table.get("alias") or model_table.get("name") or ""
 
 
+def model_joins(model: dict, tables: dict):
+    """Yield every join of a model, inline or referencing, in one shape.
+
+    A ``model_tables[].joins[]`` entry comes in two forms::
+
+        inline       {with, on, type, cardinality}     condition in the model
+        referencing  {with, referencing_join[, type]}  condition in the TABLE
+
+    For a referencing join the definition lives in the source Table TML's
+    ``joins_with[]``, keyed by the name ``referencing_join`` holds, and carries
+    ``{name, destination: {name, fqn}, on, type}``.
+
+    D2/D3/D11/P6 read only ``joins[].on``, so a referencing join looked like a
+    join with no keys and no type — and that is the dominant shape in practice.
+    Live-verified 2026-09-23: **0 of 6** joins in a real "Retail Sales - RLS"
+    model carried an inline ``on``, and one of them was a VARCHAR join key the
+    audit reported as zero (BL-306).
+
+    The model's own ``type`` wins where it sets one: observed live overriding a
+    table that says ``INNER`` with ``LEFT_OUTER``.
+
+    ``on`` comes back empty when the referenced table is not in scope. That is
+    *unknown*, not *no keys*, and a caller must not read it as clean.
+    """
+    for mt in (model.get("model_tables") or []):
+        by_name = _joins_with_index(mt, tables)
+        for j in (mt.get("joins") or []):
+            yield _resolve_join(mt, j, by_name)
+
+
+def _joins_with_index(model_table: dict, tables: dict) -> dict:
+    """``joins_with[]`` of this model table's source Table TML, keyed by name."""
+    table = (tables or {}).get(model_table.get("fqn", "")) or {}
+    return {j.get("name", ""): j
+            for j in (table.get("table", {}).get("joins_with") or [])}
+
+
+def _resolve_join(model_table: dict, join: dict, by_name: dict) -> dict:
+    """One join in the common shape, inline or referencing."""
+    ref = join.get("referencing_join", "")
+    base = by_name.get(ref, {}) if ref else {}
+    dest = base.get("destination") or {}
+    return {
+        "model_table": model_table,
+        "name": join.get("name") or ref or join_label(model_table, join),
+        "on": join.get("on") or base.get("on", ""),
+        # The model overrides the table's type where it declares one.
+        "type": join.get("type") or base.get("type", ""),
+        "with": join.get("with") or dest.get("name", ""),
+        "cardinality": join.get("cardinality", ""),
+    }
+
+
 def join_label(model_table: dict, join: dict) -> str:
     """A name for a join, which real TML does not give one.
 

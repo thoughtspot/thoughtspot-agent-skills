@@ -137,18 +137,21 @@ def check_p6(ctx: AuditContext) -> list:
         m = model.get("model", {})
         # Types come from the TABLE TMLs, not the model — see AuditContext.column_types.
         col_types = ctx.column_types(model)
-        for mt in (m.get("model_tables") or []):
-            for j in (mt.get("joins") or []):
-                varchar_keys = [k for k in join_key_ids(j.get("on", ""))
-                                if col_types.get(k, "").upper() in ("VARCHAR", "CHAR", "STRING", "TEXT")]
-                if varchar_keys:
-                    findings.append(Finding(
-                        check_id="P6", angle=_ANGLE, severity="HIGH",
-                        object_type="join", object_name=rules.join_label(mt, j),
-                        object_guid=ctx.guid_for(model),
-                        detail=f"VARCHAR join key(s) — 2-5x slower than integer: {', '.join(varchar_keys)}",
-                        metric=len(varchar_keys),
-                    ))
+        # Resolves referencing joins too — their condition lives in the source
+        # Table TML, and reading only `joins[].on` missed 6 of 6 real joins
+        # in a live model (BL-306).
+        for j in rules.model_joins(m, ctx.tables):
+            mt = j["model_table"]
+            varchar_keys = [k for k in join_key_ids(j["on"])
+                            if col_types.get(k, "").upper() in ("VARCHAR", "CHAR", "STRING", "TEXT")]
+            if varchar_keys:
+                findings.append(Finding(
+                    check_id="P6", angle=_ANGLE, severity="HIGH",
+                    object_type="join", object_name=j["name"],
+                    object_guid=ctx.guid_for(model),
+                    detail=f"VARCHAR join key(s) — 2-5x slower than integer: {', '.join(varchar_keys)}",
+                    metric=len(varchar_keys),
+                ))
     return findings
 
 
