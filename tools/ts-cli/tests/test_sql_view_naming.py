@@ -10,20 +10,24 @@ These tests pin both halves: that colliding names are disambiguated, and that
 the rename reaches every reference (``model_tables[].name``, ``column_id``,
 join ``with``/``on``, formula expressions, and the SQL View TML itself).
 """
-from ts_cli.model_builder import build_model_tml, build_sql_view_tml
+from ts_cli.model_builder import (
+    _resolve_sqlview_refs,
+    build_model_tml,
+    build_sql_view_tml,
+)
 from ts_cli.tableau.build_model import disambiguate_sql_view_names
 
 
 def _sql_view(name, columns, sql="SELECT 1"):
-    return {
-        "name": name,
-        "sql_query": sql,
-        "columns": [
-            {"name": c, "sql_output_column": c.lower(),
-             "column_type": "ATTRIBUTE", "data_type": "VARCHAR"}
-            for c in columns
-        ],
-    }
+    """A ``columns`` entry is a physical name, or a ``(caption, physical)`` pair when
+    the two differ — Tableau captions a column ``COL (Relation)`` where the same
+    physical column is exposed by more than one Custom SQL query."""
+    cols = []
+    for c in columns:
+        caption, phys = c if isinstance(c, tuple) else (c, c.lower())
+        cols.append({"name": caption, "sql_output_column": phys,
+                     "column_type": "ATTRIBUTE", "data_type": "VARCHAR"})
+    return {"name": name, "sql_query": sql, "columns": cols}
 
 
 def _ds(name, *, sql_views=(), tables=(), joins=(), columns=(), col_table_map=None):
@@ -188,6 +192,46 @@ def test_formula_expr_resolves_against_renamed_view():
     assert expr == "sum ( [Custom SQL Query (DS2)::Sales] )"
     # the referenced column_id actually exists on the renamed view
     assert f"{renamed}::Sales" in {c.get("column_id") for c in model["columns"]}
+
+
+def test_formula_ref_resolves_when_caption_carries_the_pre_rename_relation():
+    """A column captioned against the relation name — ``BEHAVIOR (Custom SQL Query2)``
+    — must still resolve after the view is renamed. The caption records the name the
+    column was collided against and does not follow the rename, so the emitted
+    ``formulas[].expr`` ref and the emitted ``column_id`` have to be reconciled through
+    the view's ``sql_output_column``, not through its current name."""
+    dss = [
+        _ds("Marketing", sql_views=[_sql_view("Custom SQL Query2", ["A"])]),
+        _ds("Sales", sql_views=[
+            _sql_view("Custom SQL Query2", [("BEHAVIOR (Custom SQL Query2)", "BEHAVIOR")])]),
+    ]
+    disambiguate_sql_view_names(dss)
+    renamed = dss[1]["sql_views"][0]["name"]
+    assert renamed == "Custom SQL Query2 (Sales)"
+
+    model = build_model_tml(
+        model_name="M", connection_name="CONN", tables=[], columns=[], joins=[],
+        parameters=[],
+        translated_formulas=[{"name": "Total", "expr": f"sum ( [{renamed}::BEHAVIOR] )"}],
+        sql_views=dss[1]["sql_views"],
+    )["model"]
+
+    expr = model["formulas"][0]["expr"]
+    column_ids = {c.get("column_id") for c in model["columns"]}
+    assert expr == f"sum ( [{renamed}::BEHAVIOR (Custom SQL Query2)] )"
+    assert expr[expr.index("[") + 1:expr.index("]")] in column_ids
+
+
+def test_resolve_sqlview_refs_leaves_unresolvable_refs_alone():
+    sv = _sql_view("V (DS)", [("BEHAVIOR (Custom SQL Query2)", "BEHAVIOR")])
+    views = {sv["name"]: sv}
+    # unknown view — untouched
+    assert _resolve_sqlview_refs("[Other::BEHAVIOR]", views) == "[Other::BEHAVIOR]"
+    # unknown column — untouched
+    assert _resolve_sqlview_refs("[V (DS)::NOPE]", views) == "[V (DS)::NOPE]"
+    # already the view's own column name — untouched
+    ref = "[V (DS)::BEHAVIOR (Custom SQL Query2)]"
+    assert _resolve_sqlview_refs(ref, views) == ref
 
 
 # ── 7. Existing distinct names remain unchanged ────────────────────────────
@@ -491,3 +535,101 @@ def test_facade_reexport_resolves_to_same_callable():
     # `ts tableau build-model` fails at import time.
     from ts_cli.model_builder import disambiguate_sql_view_names as facade
     assert facade is disambiguate_sql_view_names
+
+
+# ── 12. MERGE mode must not disambiguate (SCAL-339750) ─────────────────────
+#
+# Disambiguation exists because GENERATE emits every datasource into one output
+# directory and one ThoughtSpot namespace. MERGE emits nothing there — it adds
+# formulas to a model that already exists — so the incoming names have to match
+# that model, and a rename computed from the workbook cannot know them.
+
+import yaml  # noqa: E402
+
+from ts_cli.cli import app  # noqa: E402
+from runners import runner  # noqa: E402  (BL-139: one definition, see runners.py)
+
+
+def _csq_ds_xml(caption, view_name):
+    return f"""
+  <datasource caption='{caption}'>
+    <connection>
+      <relation name='{view_name}' type='text'>SELECT id, sales FROM db.sch.t</relation>
+      <metadata-records>
+        <metadata-record class='column'><remote-name>id</remote-name><local-name>[id]</local-name><local-type>integer</local-type><parent-name>[{view_name}]</parent-name></metadata-record>
+        <metadata-record class='column'><remote-name>sales</remote-name><local-name>[sales]</local-name><local-type>real</local-type><parent-name>[{view_name}]</parent-name></metadata-record>
+      </metadata-records>
+    </connection>
+    <column name='[sales]' caption='Sales' datatype='real' role='measure'/>
+  </datasource>"""
+
+
+def _twb(tmp_path, *datasource_xml):
+    twb = tmp_path / "wb.twb"
+    twb.write_text("<?xml version='1.0'?>\n<workbook><datasources>"
+                   + "".join(datasource_xml) + "</datasources></workbook>\n")
+    return twb
+
+
+def _capture_merge_ds(monkeypatch):
+    """Run merge mode without a live instance: stub the model export and capture the
+    datasource `_merge_flow` is handed."""
+    from ts_cli.commands import tableau as tableau_cmd
+    seen = {}
+
+    monkeypatch.setattr(tableau_cmd, "_export_model_tml",
+                        lambda guid, profile: {"model": {"model_tables": [], "columns": []}})
+
+    def fake_merge_flow(*, ds, **kwargs):
+        seen["ds"] = ds
+        return {"datasource": ds["name"], "formulas_added": 0}
+
+    monkeypatch.setattr(tableau_cmd, "_merge_flow", fake_merge_flow)
+    return seen
+
+
+def test_merge_mode_leaves_colliding_sql_view_names_unrenamed(tmp_path, monkeypatch):
+    seen = _capture_merge_ds(monkeypatch)
+    twb = _twb(tmp_path, _csq_ds_xml("Marketing", "Custom SQL Query"),
+               _csq_ds_xml("Sales", "Custom SQL Query"))
+
+    result = runner.invoke(app, [
+        "tableau", "build-model", str(twb), "--existing-guid", "GUID-1",
+        "--profile", "p", "--output-dir", str(tmp_path / "out"), "--dry-run",
+    ])
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    ds = seen["ds"]
+    assert [sv["name"] for sv in ds["sql_views"]] == ["Custom SQL Query"]
+    assert "Custom SQL Query" in set(ds["col_table_map"].values())
+    assert not any("(" in t for t in ds["col_table_map"].values())
+
+
+def test_generate_mode_still_disambiguates_colliding_sql_view_names(tmp_path):
+    twb = _twb(tmp_path, _csq_ds_xml("Marketing", "Custom SQL Query"),
+               _csq_ds_xml("Sales", "Custom SQL Query"))
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = runner.invoke(app, [
+        "tableau", "build-model", str(twb), "--connection", "CONN",
+        "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC",
+    ])
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    names = sorted(yaml.safe_load(p.read_text())["sql_view"]["name"]
+                   for p in out_dir.glob("*.sql_view.tml"))
+    assert names == ["Custom SQL Query (Marketing)", "Custom SQL Query (Sales)"]
+
+
+def test_merge_mode_uncontested_sql_view_name_is_unchanged(tmp_path, monkeypatch):
+    """The guard must not alter the no-collision case, which was already correct."""
+    seen = _capture_merge_ds(monkeypatch)
+    twb = _twb(tmp_path, _csq_ds_xml("Sales", "Orders Query"))
+
+    result = runner.invoke(app, [
+        "tableau", "build-model", str(twb), "--existing-guid", "GUID-1",
+        "--profile", "p", "--output-dir", str(tmp_path / "out"), "--dry-run",
+    ])
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert [sv["name"] for sv in seen["ds"]["sql_views"]] == ["Orders Query"]

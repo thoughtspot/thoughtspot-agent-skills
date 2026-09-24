@@ -246,6 +246,7 @@ are roughly ordered by value÷effort.
 | BL-271 | table-calc warnings name entries that are not in the output they describe (last-wins keys vs per-occurrence warnings) | next Tableau converter pass |
 | BL-272 | five mutually inconsistent handlings of "non-numeric token in TWB XML"; degradation channel exists in one extractor of six | next Tableau converter pass |
 | BL-284 | a physical table and a SQL View sharing one relation name in one datasource are not fully separable from the parsed representation — `_sql_view_owns_column` is a conservative heuristic, undecidable when both declare the same column name; not present in the corpus | next Tableau converter pass |
+| BL-313 | MERGE mode skips SQL View disambiguation, so merging into a model that GENERATE built with this CLI emits the bare name where the target expects the qualified one | next Tableau converter pass |
 
 ### Tier 4 — Deferred
 
@@ -11563,5 +11564,49 @@ two share a `name` — so attribution is exact instead of heuristic. That is a c
 parse contract (`col_table_map` is the translator's `scoped_columns`), so it is worth doing
 only against a real workbook that needs it. Until then the conservative heuristic holds, and
 its limits are the three bullets above.
+
+**Target:** next Tableau converter pass.
+
+---
+
+## BL-313 — MERGE mode cannot tell which SQL View spelling the target model uses `Tier 2`
+
+**Filed:** 2026-09-24. **Jira:** SCAL-339750 (follow-on, separated from that PR).
+**Source:** review of SCAL-339750, raised against the merge-mode guard landed there.
+**Affects:** `tools/ts-cli/ts_cli/commands/tableau.py` (`build_model_cmd`'s
+`disambiguate_sql_view_names` pre-pass), `tools/ts-cli/ts_cli/tableau/naming.py`.
+**Status:** OPEN.
+
+`disambiguate_sql_view_names` qualifies a SQL View name that more than one datasource
+declares (`Custom SQL Query` -> `Custom SQL Query (Sales)`), because GENERATE emits every
+datasource into one output directory and one ThoughtSpot namespace. MERGE (`--existing-guid`)
+emits nothing there — it adds formulas to a model that already exists — so the incoming
+names must match that model, and the pre-pass is skipped for it.
+
+Skipping is correct for a target built before the pre-pass existed. It is wrong for one the
+pre-pass itself produced:
+
+```
+GENERATE with the pre-pass   -> model_tables[] carries `Custom SQL Query (Sales)`
+later MERGE into that model  -> pre-pass skipped, formula emits `[Custom SQL Query::…]`
+                             -> table prefix names nothing in the target
+```
+
+Neither spelling is safe to assume: the same guard that fixes the pre-pass-era target breaks
+the post-pre-pass one. `filter_unresolvable_formulas` cannot catch either direction — it
+validates only the column portion after `::` (see its own docstring), so a ref whose column
+exists under a different table prefix is kept and imported.
+
+**Reproduce** by constructing the sequence: a workbook whose datasources declare the same
+Custom SQL relation name, built in GENERATE mode and imported, then re-run against the
+resulting model with `--existing-guid`.
+
+**Approach.** Resolve incoming SQL View names against the target's own
+`model_tables[]` rather than assuming either spelling — the behaviour
+`_load_table_name_map` already advertises for `--table-name-map` ("merge mode resolves
+tables from the existing model"). The pre-pass runs on the full datasource list before the
+per-datasource loop, while the target model is exported inside `_process_datasource`, so
+this needs the export hoisted or the reconciliation moved after it; it is not a
+one-line change, which is why the guard shipped first.
 
 **Target:** next Tableau converter pass.

@@ -1391,8 +1391,8 @@ def build_model_cmd(
             err=True,
         )
 
-    # Filter datasources
-    datasources = disambiguate_sql_view_names(parsed["datasources"])
+    # Filter datasources. MERGE must match the target model's own SQL View names.
+    datasources = parsed["datasources"] if existing_guid else disambiguate_sql_view_names(parsed["datasources"])
     if datasource_name:
         datasources = [ds for ds in datasources if ds["name"] == datasource_name]
         if not datasources:

@@ -71,7 +71,7 @@ from ts_cli.tableau.classify import (
     UNTRANSLATABLE_TIERS,
     classify_formulas,
 )
-from ts_cli.tableau.naming import detect_name_clashes
+from ts_cli.tableau.naming import detect_name_clashes, disambiguate_sql_view_names
 from ts_cli.tml_lint import lint_tml
 
 # ---------------------------------------------------------------------------
@@ -515,6 +515,10 @@ def verify_conversion(parsed: dict, model_tml: dict) -> dict:
     False iff any check carries an ERROR-severity finding.
     """
     model = (model_tml.get("model", model_tml) or {}) if isinstance(model_tml, dict) else {}
+    # `build-model` disambiguates colliding SQL View names; the parse JSON on disk does
+    # not, so the same pass runs here or a renamed view reads as a dropped one. Idempotent.
+    if isinstance(parsed, dict) and parsed.get("datasources"):
+        disambiguate_sql_view_names(parsed["datasources"])
     ds = _pick_datasource(parsed or {}, model.get("name", ""))
 
     classified = classify_formulas(
