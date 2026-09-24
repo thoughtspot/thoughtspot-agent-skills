@@ -55,6 +55,14 @@ def test_validator_does_not_pass_when_git_cannot_run(name, extra, tmp_path):
     root = Path(__file__).resolve().parents[1]
     r = subprocess.run([sys.executable, str(root / f"{name}.py"), "--root", str(tmp_path), *extra],
                        capture_output=True, text=True)
+    # A DECLARED skip is a legitimate zero — it is the opposite of a silent
+    # fail-open. `check_module_health` exits 0 with "SKIP … radon not installed"
+    # before it ever reaches git, and the pytest matrix job does not install
+    # radon while the `suite` job does. The rule is that a gate must not go
+    # green SILENTLY because it could not run.
+    if r.returncode == 0 and "SKIP" in r.stdout:
+        return
+
     assert r.returncode != 0, (
         f"{name} reported success on a non-repo:\n{r.stdout[-400:]}")
     # A non-zero exit is necessary but not sufficient: any crash satisfies it.
