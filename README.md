@@ -202,7 +202,8 @@ thoughtspot-agent-skills/
     ├── ts-cli/     — ThoughtSpot CLI used by CLI skills at runtime
     ├── validate/   — Static validators (runtime coverage, consistency)
     ├── fixtures/   — Captured cluster topologies for `ts tenancy` (reference multi-tenancy environment)
-    └── smoke-tests/ — End-to-end smoke tests requiring live credentials
+    ├── smoke-tests/ — End-to-end smoke tests requiring live credentials
+    └── ossie-roundtrip/ — Round-trips real Models through the Apache Ossie converter (lives upstream)
 ```
 
 ---
