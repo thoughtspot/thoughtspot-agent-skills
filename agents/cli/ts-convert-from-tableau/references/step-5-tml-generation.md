@@ -169,8 +169,14 @@ The merge procedure:
    - All `model_tables[]` entries from every member datasource (tables + SQL views),
      resolved via `blend_plan["ds_table_map"]`
    - All `columns[]` from every member datasource (with `column_id` prefixed by the
-     correct table name: `TABLE_NAME::col_name`)
-   - All `formulas[]` from every member datasource
+     correct table name: `TABLE_NAME::col_name`) — **excluding `:Measure Names`**,
+     Tableau's pivot pseudo-field. It arrives in the parse as an ordinary column but
+     names no warehouse column, so a `column_id` built from it resolves to nothing;
+     `build-model` filters it, hand assembly must do it here.
+   - All `formulas[]` from every member datasource — **except any whose expression
+     references an excluded column, and anything depending on those in turn**. Keeping
+     one emits a reference to a column the model does not contain; `build-model` drops
+     them and cascades to dependants, hand assembly must do the same.
    - The joins from `blend_plan["joins"]` whose `table` belongs to this component
      (see next step)
 

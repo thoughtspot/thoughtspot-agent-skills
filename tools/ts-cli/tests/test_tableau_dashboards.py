@@ -81,3 +81,103 @@ def test_tile_from_zone_coords():
 def test_worksheet_with_no_fields_returns_none():
     ws = ET.fromstring('<worksheet name="empty"><table/></worksheet>')
     assert worksheet_visual("empty", ws, {}) is None
+
+
+# ---------------------------------------------------------------------------
+# Tableau pivot pseudo-fields must not become liveboard fields (SCAL-338494)
+#
+# `reconcile.py` drops them from Model/Table TML, so a liveboard that still
+# named one would reference a column the Model does not have — and no gate
+# sees it (`lint_cross_references` is Model-only, `lint_tml` is clean on the
+# liveboard). The token stays a TRIGGER for the measure-values branch; it must
+# never become a field.
+# ---------------------------------------------------------------------------
+
+_REAL_MEASURE = ("<column-instance name='[sum:Units:qk]' column='[Units Sold]' "
+                 "derivation='Sum' type='quantitative'/>")
+_MN_INST = ("<column-instance name='[:Measure Names]' column='[:Measure Names]' "
+            "derivation='None' type='nominal'/>")
+_MV_INST = ("<column-instance name='[Multiple Values]' column='[Multiple Values]' "
+            "derivation='None' type='nominal'/>")
+
+
+def _ws(rows="", cols="", instances=""):
+    return ET.fromstring(
+        f"""<worksheet name='Scorecard'><table><view>
+              <datasource-dependencies datasource='federated.x'>
+                {instances}{_REAL_MEASURE}
+              </datasource-dependencies>
+            </view><rows>{rows}</rows><cols>{cols}</cols></table>
+            <mark class='Bar'/></worksheet>""")
+
+
+def _field_names(ws):
+    from ts_cli.tableau.dashboards import _instances, _ws_fields
+    return [f["name"] for f in _ws_fields(ws, _instances(ws), {})[0]]
+
+
+def test_shelf_ref_to_measure_names_is_not_emitted_as_a_field():
+    # resolves fine — `_resolve` returns it — but must not reach the field list
+    assert _field_names(_ws(rows="([federated.x].[:Measure Names])",
+                            instances=_MN_INST)) == ["Units Sold"]
+
+
+def test_measure_values_branch_does_not_emit_the_pseudo_field():
+    # the branch iterates EVERY column-instance, including the pseudo-field's own
+    assert _field_names(_ws(cols="([federated.x].[Multiple Values])",
+                            instances=_MN_INST)) == ["Units Sold"]
+
+
+def test_multiple_values_with_its_own_instance_is_not_emitted():
+    assert _field_names(_ws(cols="([federated.x].[Multiple Values])",
+                            instances=_MV_INST)) == ["Units Sold"]
+
+
+def test_measure_values_trigger_still_fires_without_a_pseudo_column_instance():
+    """The trigger reads the raw shelf TEXT, not the filtered field list. Filtering
+    the pseudo-fields inside `add()` must not disable it — a shelf naming only the
+    trigger still has to pull the worksheet's real measures through."""
+    names = _field_names(_ws(cols="([federated.x].[Multiple Values])"))
+    assert names == ["Units Sold"], "measure-values trigger was disabled by the filter"
+
+
+def test_a_filter_only_pseudo_field_does_not_become_a_pivot_trigger():
+    """`_PSEUDO_FIELDS` (never emit this column) and `_PIVOT_PSEUDO_FIELDS` (this
+    worksheet is a Measure Values pivot) are separate on purpose. Adding a filter-only
+    member must not make its token fire the measure-values branch, which pulls EVERY
+    column-instance into the field list.
+
+    The module is RELOADED after patching: `dashboards` binds the constant with
+    `from … import …`, so rebinding it on `reconcile` alone would leave the already-bound
+    name untouched and the test would pass whatever the trigger reads."""
+    import importlib
+    import ts_cli.tableau.reconcile as rec
+    import ts_cli.tableau.dashboards as dash
+
+    ws = _ws(cols="([federated.x].[Latitude (generated)])")
+    original = rec._PSEUDO_FIELDS
+    try:
+        rec._PSEUDO_FIELDS = frozenset(original | {"Latitude (generated)"})
+        importlib.reload(dash)
+        fields, _ = dash._ws_fields(ws, dash._instances(ws), {})
+        assert [f["name"] for f in fields] == [], "a filter-only member fired the pivot trigger"
+    finally:
+        rec._PSEUDO_FIELDS = original
+        importlib.reload(dash)
+
+
+def test_emitted_answer_tml_names_neither_pseudo_field():
+    import json
+    from ts_cli.tableau.liveboard import build_from_spec
+
+    ws = _ws(rows="([federated.x].[:Measure Names])",
+             cols="([federated.x].[Multiple Values])", instances=_MN_INST + _MV_INST)
+    visual = worksheet_visual("Scorecard", ws, {})
+    spec = {"report_name": "R", "model_name": "M", "model_fqn": "GUID",
+            "measure_names": ["Units Sold"],
+            "dashboards": [{"name": "D", "visuals": [
+                dict(visual, tile={"x": 0, "y": 0, "width": 6, "height": 6})]}]}
+    blob = json.dumps(build_from_spec(spec))
+    assert ":Measure Names" not in blob
+    assert "Multiple Values" not in blob
+    assert "Units Sold" in blob

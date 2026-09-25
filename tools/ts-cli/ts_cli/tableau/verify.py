@@ -72,6 +72,8 @@ from ts_cli.tableau.classify import (
     classify_formulas,
 )
 from ts_cli.tableau.naming import detect_name_clashes, disambiguate_sql_view_names
+from ts_cli.tableau.dag import resolve_all_internal_refs
+from ts_cli.tableau.reconcile import drop_junk_formulas
 from ts_cli.tml_lint import lint_tml
 
 # ---------------------------------------------------------------------------
@@ -324,6 +326,32 @@ def _expected_model_names(ds: dict, tiers: dict[str, str]) -> dict[str, str]:
     return detect_name_clashes(formula_names, column_names)
 
 
+def _generation_dropped_formulas(ds: dict) -> set[str]:
+    """Names generation removes via ``drop_junk_formulas`` — a deliberate absence from
+    ``model.formulas``, not a silent drop.
+
+    REPLAYS generation rather than re-testing its predicate, for the same reason
+    ``_expected_model_names`` replays the clash rule: a copy here would miss the cascade
+    (a dependant of a dropped formula is dropped with it) and would drift the first time
+    the drop conditions change.
+
+    Generation resolves internal calculation refs BEFORE dropping, so that step is
+    replayed too — Tableau writes a cross-reference as ``[Calculation_NNN]``, and without
+    resolving it the dependant's ref never matches the dropped caption and the cascade is
+    missed. Both helpers return new lists, so ``ds`` is never mutated; the dicts are keyed
+    with ``_formula_name``, the same key ``tiers`` uses, so the two sets line up.
+    """
+    resolved = resolve_all_internal_refs(
+        ds.get("calculated_fields", []) or [], ds.get("calc_map", {}) or {},
+    )
+    calcs = [
+        {"name": _formula_name(cf), "expr": cf.get("formula", "") or ""}
+        for cf in resolved
+    ]
+    _kept, dropped = drop_junk_formulas(calcs)
+    return set(dropped)
+
+
 def _formula_drop_check(
     ds: dict, model: dict, tiers: dict[str, str]
 ) -> tuple[list[dict], dict, list[str]]:
@@ -345,10 +373,12 @@ def _formula_drop_check(
     }
 
     name_clashes = _expected_model_names(ds, tiers)
+    intentionally_dropped = _generation_dropped_formulas(ds)
     missing_formulas = [
         n for n in translatable
         if n.strip().lower() not in model_formula_names
         and name_clashes.get(n, "").strip().lower() not in model_formula_names
+        and n not in intentionally_dropped
     ]
     findings: list[dict] = []
     if missing_formulas:
