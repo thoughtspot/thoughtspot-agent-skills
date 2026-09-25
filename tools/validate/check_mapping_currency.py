@@ -60,6 +60,14 @@ ANCHORED_FILES = (
     ".claude/rules/model-routing.md",
 )
 STALE_MONTHS = 6
+
+#: Paths in an upstream repo whose movement makes an anchor citing that repo
+#: suspect. An anchor on `docs/ossie/*` pins a spec commit and cites it by
+#: path:line throughout, so a converter landing upstream is irrelevant to it
+#: while a `core-spec/` change is not. Counting raw commits would cry wolf --
+#: apache/ossie ran 54 commits ahead of the anchored SHA while `core-spec/`
+#: moved only a handful of times.
+UPSTREAM_WATCHED_PATHS = ("core-spec/",)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # <!-- currency: snowflake — 2026-06 (Cortex Analyst GA) -->   (en/em dash or hyphen)
@@ -76,6 +84,72 @@ ANCHOR_RE = re.compile(
 )
 
 
+#: `apache/ossie @ b5da5d6` inside an anchor's context parenthetical. Optional --
+#: an anchor that cites no upstream commit is checked on age alone, as before.
+UPSTREAM_REF_RE = re.compile(
+    r"(?P<repo>[\w.-]+/[\w.-]+)\s*@\s*(?P<sha>[0-9a-f]{7,40})\b"
+)
+
+
+def upstream_drift(repo: str, sha: str, timeout: int = 15) -> tuple[int, int] | None:
+    """`(commits ahead, of those touching a watched path)`, or None if unknown.
+
+    Two calls, because the obvious one call does not work. `compare/{sha}...HEAD`
+    returns a `files` list capped at **300 entries**, ordered by path -- and in
+    apache/ossie the sixteen `converters/` directories exhaust that cap before
+    reaching `core-spec/`. The first version of this function used it and
+    reported "0 files touched core-spec" against a range that certainly touched
+    it, which would have read as "no drift" forever. So: ask for the anchored
+    commit's date, then ask for commits on the watched paths since that date.
+
+    Returns None rather than raising for every reason this can fail -- offline,
+    rate-limited, unknown SHA, GitHub down. A currency nudge must never turn a
+    network hiccup into a failed commit, which is also why it is opt-in.
+
+    `GITHUB_TOKEN` is used when present, purely for the rate limit.
+    """
+    import json
+    import os
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    token = os.environ.get("GITHUB_TOKEN")
+
+    def _get(path: str):
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{repo}/{path}",
+            headers={"Accept": "application/vnd.github+json"},
+        )
+        if token:
+            request.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.load(response)
+
+    try:
+        comparison = _get(f"compare/{sha}...HEAD")
+        ahead = comparison.get("ahead_by")
+        if ahead is None:
+            return None
+        anchored = _get(f"commits/{sha}")
+        since = (anchored.get("commit") or {}).get("committer", {}).get("date")
+        if not since:
+            return None
+        watched = 0
+        for watched_path in UPSTREAM_WATCHED_PATHS:
+            query = urllib.parse.urlencode(
+                {"path": watched_path.rstrip("/"), "since": since, "per_page": 100}
+            )
+            # `since` is inclusive of the anchored commit itself when that commit
+            # touched the path, so it is discounted by sha rather than by date.
+            watched += sum(
+                1 for c in _get(f"commits?{query}") or [] if not c.get("sha", "").startswith(sha)
+            )
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError, KeyError, AttributeError):
+        return None
+    return ahead, watched
+
+
 def _months_between(anchor: date, today: date) -> int:
     return (today.year - anchor.year) * 12 + (today.month - anchor.month)
 
@@ -86,9 +160,23 @@ def _months_between(anchor: date, today: date) -> int:
 BLOCKING_KINDS = {"missing", "malformed"}
 
 
-def check_file(path: Path, today: date) -> tuple[str, str] | None:
-    """Return (kind, message) for a missing/malformed/stale anchor, else None.
-    kind ∈ {"missing", "malformed", "stale"}."""
+def check_file(
+    path: Path, today: date, *, check_upstream: bool = False
+) -> tuple[str, str] | None:
+    """Return (kind, message) for a missing/malformed/stale/drifted anchor, else None.
+    kind ∈ {"missing", "malformed", "stale", "drifted"}.
+
+    `check_upstream` adds the network half: an anchor citing `<repo> @ <sha>` is
+    compared against that repo's HEAD. It is opt-in because the age check must
+    keep working offline in pre-commit, and because a nudge that needs GitHub to
+    be reachable would otherwise fail commits on a train.
+
+    Age alone was not enough. `docs/ossie/*` sat anchored at `apache/ossie @
+    b5da5d6` while upstream ran 54 commits ahead -- including the merge of the
+    converter those documents describe -- and the anchor read `2026-08`, so the
+    six-month age test stayed silent and would have until February. The anchor
+    recorded a SHA that nothing ever checked.
+    """
     try:
         # only need the head of the file — the anchor lives near the top
         head = "".join(path.read_text(encoding="utf-8").splitlines(keepends=True)[:15])
@@ -104,6 +192,16 @@ def check_file(path: Path, today: date) -> tuple[str, str] | None:
     age = _months_between(anchor, today)
     if age > STALE_MONTHS:
         return ("stale", f"currency anchor is {age} months old ({m.group('year')}-{m.group('month')}) — re-validate against the current product")
+
+    if check_upstream:
+        ref = UPSTREAM_REF_RE.search(head)
+        if ref:
+            drift = upstream_drift(ref.group("repo"), ref.group("sha"))
+            if drift is None:
+                return ("unknown", f"could not reach {ref.group('repo')} to check drift from {ref.group('sha')} — network, rate limit, or unknown commit")
+            ahead, watched = drift
+            if watched:
+                return ("drifted", f"anchored at {ref.group('repo')} @ {ref.group('sha')}, now {ahead} commit(s) behind — {watched} touched {', '.join(UPSTREAM_WATCHED_PATHS)}; re-validate and re-anchor")
     return None
 
 
@@ -139,6 +237,10 @@ def main() -> int:
     parser.add_argument("--root", default=".", help="Repo root (default: cwd)")
     parser.add_argument("--staged", action="store_true", help="Only staged mapping/schema files")
     parser.add_argument("--check", action="store_true", help="Exit 1 if any issue (default: warn-only)")
+    parser.add_argument("--check-upstream", action="store_true",
+                        help="Also compare anchors citing `<repo> @ <sha>` against that "
+                             "repo's HEAD. Needs network; off by default so pre-commit "
+                             "stays offline. For the external/weekly sweep.")
     args = parser.parse_args()
 
     repo_root = Path(args.root).resolve()
@@ -147,7 +249,7 @@ def main() -> int:
 
     issues: list[tuple[Path, str, str]] = []  # (rel, kind, msg)
     for f in files:
-        res = check_file(f, today)
+        res = check_file(f, today, check_upstream=args.check_upstream)
         if res:
             issues.append((f.relative_to(repo_root), res[0], res[1]))
 
@@ -162,7 +264,8 @@ def main() -> int:
         return 1 if (args.check and blocking) else 0
 
     if not args.staged:
-        print(f"All {len(files)} anchored file(s) have a current currency anchor.")
+        suffix = "" if args.check_upstream else " (age only — pass --check-upstream to check drift)"
+        print(f"All {len(files)} anchored file(s) have a current currency anchor{suffix}.")
     return 0
 
 

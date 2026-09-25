@@ -136,7 +136,7 @@ product. This is the **weekly specialist sweep**. Kept tractable by *currency an
 
 | # | Angle | What it checks | Enforcement |
 |---|---|---|---|
-| 13 | **Product currency** | Per-platform: are our mappings, schemas, and "untranslatable" verdicts still accurate against the product's *current* capabilities? Newly-possible translations, deprecated constructs, new artifact types (chart libraries, semantic-view / metric-view features), API & version drift. | Weekly specialist sweep (per platform) + `check_mapping_currency` (per-PR staleness nudge) |
+| 13 | **Product currency** | Per-platform: are our mappings, schemas, and "untranslatable" verdicts still accurate against the product's *current* capabilities? Newly-possible translations, deprecated constructs, new artifact types (chart libraries, semantic-view / metric-view features), API & version drift. | Weekly specialist sweep (per platform) + `check_mapping_currency` — per-PR staleness nudge (age), plus `--check-upstream` in the weekly sweep, which compares an anchor citing `<repo> @ <sha>` against that repo's HEAD and reports only the commits touching a watched path |
 | 14 | **Performance** | (a) *skill runtime* — redundant API round-trips, un-batched prompts, the obj_id read-back pattern; (b) *generated-artifact efficiency* — do emitted formulas use performant TS constructs (`group_aggregate` vs `sql_*_aggregate_op`, join cardinality) or slow ones; (c) *ts-cli* — pagination, token-cache reuse. | Weekly sweep + MANUAL |
 | 16 | **Dependency / supply-chain currency** | Python deps (`typer`, `requests`, `PyYAML`, `keyring`) — pinned ranges, known CVEs, EOL Python versions. | Weekly sweep + `pip-audit` gate (per-PR CI step over core + `[snowflake,qlik]` extras, plus weekly cron — see `.github/workflows/validate.yml`) |
 | 18 | **Harness / framework currency** | The Claude setup itself, checked against the current Claude Code + model lineup: `.claude/settings.json` (stale model pins, unused new settings), `.claude/agents/*.md` frontmatter (model/effort tiers vs `.claude/rules/model-routing.md` and the current model tiers), `.claude/workflows/` (capabilities the runner has gained), and the currency anchors on those `.claude/rules/*.md` files that carry one (today just `model-routing.md`, which `check_mapping_currency` nudges via `ANCHORED_FILES` — the rest are internal rules with no external state to go stale). Same pattern as angle 13, pointed inward — the quality framework goes stale exactly the way product mappings do (a pinned `claude-opus-4-6` sat in settings.json after the Claude 5 family shipped; found manually 2026-07-28). **Repo-scoped only — see the boundary note below.** | Weekly sweep + `check_audit_workflow_permissions.py` (asserts the sweep's own research tools stay pre-approved — finding 18.1) |
@@ -227,6 +227,19 @@ re-reviews everything; with them, each run is incremental.
 `check_mapping_currency.py` (per-PR, soft-warn) nudges when a changed mapping/schema file
 has a missing anchor, or one older than ~6 months. It never blocks — external knowledge
 can't gate a PR — but it keeps anchors from rotting.
+
+**Age alone is not enough, and the gap was real.** An anchor may also cite the upstream
+commit it was validated against (`apache/ossie @ b5da5d6`). Nothing checked that SHA:
+`docs/ossie/*` sat anchored while upstream ran 55 commits ahead — 14 of them touching
+`core-spec/`, including the one-document format change (#383) and the OSSIE_SQL_2026
+registration (#439) — and because the anchor read `2026-08` the six-month test stayed
+silent, and would have until February. `--check-upstream` closes that. It is **opt-in**
+because it needs the network, so pre-commit stays offline; the weekly sweep passes it.
+
+It reports only commits touching `UPSTREAM_WATCHED_PATHS`, not raw commit count: 55
+commits of converter work do not make a spec anchor stale, and a nudge that fired on
+every upstream merge would be ignored within a week. An unreachable upstream reports
+`unknown`, never "no drift".
 
 ---
 
