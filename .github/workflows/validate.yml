@@ -188,7 +188,7 @@ jobs:
         # an invocation with tools/ts-cli/tests.
         if: ${{ !cancelled() }}
         run: |
-          pytest tools/ts-cli/tests/ tools/validate/tests/ -q
+          pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ -q
           pytest agents/cli/ts-object-model-erd/tests/ -q
           pytest agents/databricks/tests/ -q
 
@@ -252,7 +252,7 @@ jobs:
       - name: Run unit + validator tests
         # Same three invocations as `suite` (see that job for why they're split).
         run: |
-          pytest tools/ts-cli/tests/ tools/validate/tests/ -q
+          pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ -q
           pytest agents/cli/ts-object-model-erd/tests/ -q
           pytest agents/databricks/tests/ -q
 

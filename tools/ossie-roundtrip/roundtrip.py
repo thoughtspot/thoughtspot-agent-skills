@@ -181,6 +181,27 @@ def portability(ossie_path: pathlib.Path) -> dict:
     }
 
 
+
+#: Apache's validator degrades silently when an optional parser is absent: it
+#: prints this warning and then "Validation PASSED", so a run that checked no
+#: SQL at all is indistinguishable from a clean one by exit status or by the
+#: PASSED line. Every "31/31 passed" measured while building this harness came
+#: from that path; with sqlglot present the real figure at the time was 29
+#: passed, 2 failed, 7 [SQL] findings.
+_SKIPPED_CHECK = re.compile(r"\[SQL\][^\n]*skipping SQL validation", re.I)
+
+
+def validator_verdict(stdout: str) -> str:
+    """PASSED, FAILED, or SKIPPED — three states, not two.
+
+    "A check did not run" is not "a check passed". Treating them as the same
+    thing is what let invalid SQL sit in this converter's output unnoticed, so
+    the skip is surfaced as its own verdict and `report` fails the run on it.
+    """
+    if _SKIPPED_CHECK.search(stdout):
+        return "SKIPPED"
+    return "PASSED" if "Validation PASSED" in stdout else "FAILED"
+
 def issue_codes(path: pathlib.Path) -> dict:
     if not path.exists():
         return {}
@@ -240,7 +261,7 @@ def check_corpus(corpus: pathlib.Path, converter: pathlib.Path, work: pathlib.Pa
             continue
 
         checked = run([str(python), str(validator), str(ossie)], cwd=ossie_root, env=env)
-        row["validator"] = "PASSED" if "Validation PASSED" in checked.stdout else "FAILED"
+        row["validator"] = validator_verdict(checked.stdout)
         row["portability"] = portability(ossie)
 
         back = out / "back"
@@ -268,10 +289,13 @@ def report(results, codes, totals, work, baseline) -> int:
     ]
     failed = [r["model"] for r in results if "failed" in r]
     invalid = [r["model"] for r in results if r.get("validator") == "FAILED"]
+    skipped = [r["model"] for r in results if r.get("validator") == "SKIPPED"]
 
     print(f"\nmodels checked            {len(results)}")
     print(f"Apache validator passed   {sum(1 for r in results if r.get('validator') == 'PASSED')}"
           f"/{len(results)}")
+    if skipped:
+        print(f"validator SKIPPED a check on {len(skipped)}/{len(results)} — see below")
     print(f"losing structure          {len(lost)}  {lost or ''}")
     print(f"failed to convert         {len(failed)}  {failed or ''}")
     print("\ncross-vendor portability (invisible to the validator):")
@@ -286,7 +310,7 @@ def report(results, codes, totals, work, baseline) -> int:
 
     summary = {
         "models": len(results), "lost_structure": lost, "failed": failed,
-        "invalid": invalid, "portability": dict(totals),
+        "invalid": invalid, "skipped_checks": skipped, "portability": dict(totals),
         "codes": {k: v for k, v in sorted(codes.items())},
     }
     (work / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -294,6 +318,19 @@ def report(results, codes, totals, work, baseline) -> int:
     print(f"\nwritten: {work / 'summary.json'}")
 
     status = 0
+    if skipped:
+        # Loud, and fatal. A quiet "some checks did not run" is the shape of
+        # defect this harness exists to catch, so it must not be one itself.
+        print(
+            f"\nFAIL: Apache's validator SKIPPED its SQL checks on {len(skipped)} "
+            f"model(s), so this run does NOT show them as valid.\n"
+            f"  The validator needs its optional parser. Install into the\n"
+            f"  interpreter that runs it:  sqlglot, pyyaml, jsonschema\n"
+            f"  e.g.  cd <converter> && uv add --dev sqlglot\n"
+            f"  Without it validate.py prints a warning and then 'Validation\n"
+            f"  PASSED' anyway, which is why this is failed rather than warned."
+        )
+        status = 1
     if lost or failed or invalid:
         print("\nFAIL: structure lost, conversion failed, or validator rejected a document")
         status = 1
