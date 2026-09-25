@@ -11,9 +11,107 @@ import re
 _SUFFIX = re.compile(r"\s*\(Custom SQL Query\d+\)")
 _JUNK = "__tableau_internal_object_id__"
 
+# Tableau's own internal pseudo-fields, which arrive as ordinary `<column>`
+# elements but name no warehouse column. Emitting one produces a Model column
+# whose `column_id` resolves to nothing, and no gate reports it in either shape:
+# on a single-table model the id comes out qualified (`ORDERS:::Measure Names`) and
+# the same phantom is written into that table's TML, so the cross-reference check
+# resolves it; on a genuine multi-table model no ownership resolves, so the id is
+# bare — and I12, which flags a bare `column_id`, is scoped to single-table models.
+#
+# Matched by EQUALITY, not as a substring like _JUNK (which arrives decorated,
+# `__tableau_internal_object_id__].[agg_booked_monthly (…)_HASH`) and not by
+# leading-colon prefix: a colon is Tableau's marker, but a prefix rule would
+# reach past the evidence and a real column is only ever one false positive
+# away. Add a member to `_PSEUDO_FIELDS` when one is actually observed as a
+# `<column>` — see the constants note below before touching
+# `_PIVOT_PSEUDO_FIELDS`.
+#
+# `Multiple Values` is deliberately NOT a member. It is the other half of
+# Tableau's Measure Values pivot and is recognised on a SHELF (see
+# `_PIVOT_PSEUDO_FIELDS`), but it has never been observed as a `<column>`; and
+# unlike its colon-led sibling it is a name a user could legitimately give a
+# warehouse column, so excluding it would delete real data.
+#
+# `Number of Records` is deliberately NOT here, and the reason is not the one it
+# looks like. Tableau's built-in one is a CALCULATED field, and `_extract_columns`
+# skips any `<column>` carrying a `<calculation>` child before this runs — so it
+# never reaches this predicate at all. A warehouse column genuinely named that is
+# not a calculated field, does reach here, and must survive.
+#
+# Three DISTINCT meanings, deliberately separate:
+#
+#   _PSEUDO_FIELDS       — column names that must never be emitted as real
+#                          warehouse columns. Evidence-gated: a member has been
+#                          observed as a `<column>`.
+#   _PIVOT_PSEUDO_FIELDS — tokens whose presence in raw shelf TEXT means "this
+#                          worksheet is a Measure Values pivot".
+#   _is_pivot_field      — a resolved worksheet FIELD that is one of those
+#                          tokens, so it is never emitted into an Answer.
+#
+# The last two share tokens on purpose — a pivot token should both fire the
+# branch and be kept out of the output — but they match different inputs. The
+# first is strictly narrower and is NOT an alias of the second.
+_PIVOT_PSEUDO_FIELDS = frozenset({":Measure Names", "Multiple Values"})
+
+_PSEUDO_FIELDS = frozenset({":Measure Names"})
+
+
+def _is_pivot_field(name: str) -> bool:
+    """True for a Measure Values pivot pseudo-field resolved as a worksheet FIELD.
+
+    Separate from ``_is_internal_column``: this is about what an Answer emits, not
+    what a Model may contain, so it reads the pivot tokens rather than the
+    (narrower) column-exclusion set.
+    """
+    return name in _PIVOT_PSEUDO_FIELDS
+
+
+def _is_internal_column(raw: str) -> bool:
+    """True for a Tableau-internal column that must never reach emitted TML.
+
+    Shared by ``clean_column_name`` (single-table path), ``drop_junk_columns``
+    (multi-table path) and ``dashboards.py``'s field assembly, so they cannot
+    drift — the parse records the marker in BOTH ``name`` and
+    ``db_column_name``, so either key may be the one passed in.
+
+    The ``_SUFFIX``-normalised form is tested as well, still by EQUALITY. Nothing
+    in this repo shows Tableau decorating a pseudo-field, so this is defensive:
+    ``clean_column_name`` strips that suffix AFTER this check, so a decorated one
+    would be stripped back to the exact string the filter exists to remove, while
+    ``drop_junk_columns`` (which never strips) kept a third spelling.
+    """
+    return (_JUNK in raw
+            or raw in _PSEUDO_FIELDS
+            or _SUFFIX.sub("", raw).strip() in _PSEUDO_FIELDS)
+
+
+# The same members as a REFERENCE, both forms a formula can carry: the bare
+# bracketed one, and the `TABLE::col` one `scope_columns` produces. For a name
+# that already starts with a colon the qualified form carries three
+# (`[ORDERS:::Measure Names]`), which is why this is built rather than written out.
+_PSEUDO_REFS = frozenset(
+    form for tok in _PSEUDO_FIELDS for form in (f"[{tok}]", f"::{tok}]")
+)
+
+
+def _references_internal_column(expr: str) -> bool:
+    """True when a formula expression references a column that never reaches TML.
+
+    Reference matching, not the name matching ``_is_internal_column`` does: a
+    pseudo-field is matched there by EQUALITY against a column name, so passing an
+    expression to it returns False for every member. Both forms a formula can carry
+    are matched — the bare ``[:Measure Names]`` and the ``TABLE::col`` one
+    ``scope_columns`` produces during translation, which runs BEFORE this — because
+    a ref to a column the parse knows is already qualified by the time it arrives.
+    Each form is anchored (``[`` or ``::``), so a longer name ending in a member's
+    text cannot match.
+    """
+    return _JUNK in expr or any(ref in expr for ref in _PSEUDO_REFS)
+
 
 def clean_column_name(name: str | None) -> str | None:
-    if not name or _JUNK in name:
+    if not name or _is_internal_column(name):
         return None
     cleaned = _SUFFIX.sub("", name).strip()
     return cleaned or None
@@ -42,8 +140,9 @@ def clean_columns(columns: list[dict], table_name: str) -> list[dict]:
 
 
 def drop_junk_columns(columns: list[dict]) -> list[dict]:
-    """Drop __tableau_internal_object_id__ junk pseudo-columns (Fix #A —
-    multi-table companion to clean_columns).
+    """Drop Tableau-internal columns — ``__tableau_internal_object_id__`` junk
+    and the pseudo-fields in ``_PSEUDO_FIELDS`` (see ``_is_internal_column``)
+    — (Fix #A — multi-table companion to clean_columns).
 
     clean_columns() does this too, but it ALSO stamps every surviving column
     onto one ``table_name`` and dedupes by db_column_name within that single
@@ -59,7 +158,7 @@ def drop_junk_columns(columns: list[dict]) -> list[dict]:
     out: list[dict] = []
     for c in columns:
         raw = c.get("db_column_name") or c.get("name")
-        if raw and _JUNK in raw:
+        if raw and _is_internal_column(raw):
             continue
         out.append(c)
     return out
@@ -127,18 +226,55 @@ def validate_name_map(name_map: dict[str, str]) -> str | None:
     return None
 
 
+# A formula cross-reference BEFORE `add_formula_prefix` runs: bare `[Name]`, not the
+# `[formula_Name]` form `model_builder._cascade_drop_dependents` matches. Bracket
+# contents are compared WHOLE and a `::`-qualified ref is skipped — the same test
+# `add_formula_prefix` uses to decide what counts as a formula reference.
+_BARE_REF = re.compile(r"\[([^\]]+)\]")
+
+
+def _cascade_dropped_formulas(
+    kept: list[dict], dropped: list[str]
+) -> tuple[list[dict], list[str]]:
+    """Drop every formula referencing a name already dropped, to a fixpoint.
+
+    Keyed on WHICH names went, never on why, so it behaves identically whatever
+    triggered the original drop. Without it the survivor keeps a bare `[Name]` that
+    `add_formula_prefix` can no longer resolve — the dropped name is gone from its
+    set by then — leaving a display-name reference, which invariant I9 records as
+    failing on first import.
+    """
+    dropped_set = set(dropped)
+    changed = True
+    while changed:
+        changed = False
+        survivors: list[dict] = []
+        for f in kept:
+            refs = {r for r in _BARE_REF.findall(f.get("expr", "")) if "::" not in r}
+            if refs & dropped_set:
+                name = f.get("name", "?")
+                dropped.append(name)
+                dropped_set.add(name)
+                changed = True
+            else:
+                survivors.append(f)
+        kept = survivors
+    return kept, dropped
+
+
 def drop_junk_formulas(formulas: list[dict]) -> tuple[list[dict], list[str]]:
     """Drop any formula whose expr references a __tableau_internal_object_id__
-    junk column (Tier-1 companion to clean_columns, which drops the junk
-    COLUMNS but leaves formulas referencing them dangling)."""
+    junk column, or any member of ``_PSEUDO_FIELDS`` (Tier-1 companion to
+    clean_columns, which drops those COLUMNS but leaves formulas referencing
+    them dangling)."""
     kept: list[dict] = []
     dropped: list[str] = []
     for f in formulas:
-        if _JUNK in f.get("expr", ""):
+        if _references_internal_column(f.get("expr", "")):
             dropped.append(f["name"])
         else:
             kept.append(f)
-    return kept, dropped
+    return _cascade_dropped_formulas(kept, dropped)
 
 
 def rewrite_expr_refs(expr: str, name_map: dict[str, str]) -> str:

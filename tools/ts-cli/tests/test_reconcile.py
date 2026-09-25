@@ -13,6 +13,62 @@ def test_clean_column_name_drops_junk_and_empty():
     assert clean_column_name("__tableau_internal_object_id__].[_12CAA8") is None
     assert clean_column_name("") is None
     assert clean_column_name(None) is None
+    # Tableau's pivot pseudo-field names no warehouse column; emitting it gave
+    # every I12 lint finding (a bare column_id ThoughtSpot rejects at import).
+    assert clean_column_name(":Measure Names") is None
+    # its shelf sibling is NOT a column pseudo-field — never observed as a
+    # `<column>`, and a legitimate warehouse column could carry that name
+    assert clean_column_name("Multiple Values") == "Multiple Values"
+
+
+def test_clean_column_name_keeps_real_columns_that_resemble_pseudo_fields():
+    """The pseudo-field is matched by EQUALITY, never as a substring or by a
+    leading-colon prefix — a real column is only ever one false positive away,
+    and these are the shapes that would trip a looser rule."""
+    assert clean_column_name("Measure Names") == "Measure Names"      # no leading colon
+    assert clean_column_name("Measure") == "Measure"
+    assert clean_column_name("Measures") == "Measures"
+    assert clean_column_name("My :Measure Names") == "My :Measure Names"
+    # a user column that merely STARTS with a colon is kept — pins "exact
+    # match, not prefix", so loosening that later has to be deliberate
+    assert clean_column_name(":Custom Thing") == ":Custom Thing"
+    # looks like a pseudo-field, is not one: Tableau's built-in one is a
+    # calculated field, which _extract_columns skips before this ever runs, and a
+    # warehouse column genuinely named that must survive
+    assert clean_column_name("Number of Records") == "Number of Records"
+    # nothing in the Multiple Values family is excluded — the token is a shelf
+    # trigger, not a column pseudo-field
+    assert clean_column_name("Multiple Value") == "Multiple Value"
+    assert clean_column_name("My Multiple Values") == "My Multiple Values"
+    assert clean_column_name("Multiple Values Sold") == "Multiple Values Sold"
+    # decorated, but the BASE is not a pseudo-field — the suffix is stripped and the
+    # column survives
+    assert clean_column_name("My Multiple Values (Custom SQL Query2)") == "My Multiple Values"
+    # Tableau's collision decoration for a non-Custom-SQL relation: `_SUFFIX` does not
+    # match it, so the caption is preserved verbatim
+    assert clean_column_name("LineItemId (agg_booked_monthly)") == "LineItemId (agg_booked_monthly)"
+
+def test_decorated_pseudo_fields_are_dropped_on_both_paths():
+    """Defensive, not a confirmed Tableau shape: nothing in this repo shows Tableau
+    decorating a pseudo-field. But `_SUFFIX` stripping runs AFTER the filter in
+    `clean_column_name`, so a decorated one would be stripped back to the exact string
+    the filter exists to remove — and `drop_junk_columns`, which never strips, would keep
+    a third spelling. Both paths now normalise before the equality test."""
+    for raw in (":Measure Names (Custom SQL Query2)",
+                ":Measure Names "):
+        assert clean_column_name(raw) is None, raw
+        assert drop_junk_columns([{"name": raw}]) == [], raw
+
+    # real columns that merely resemble the decorated shapes are untouched
+    kept = drop_junk_columns([
+        {"name": "My Multiple Values (Custom SQL Query2)"},
+        {"name": "Multiple Values (Custom SQL Query1)"},
+        {"name": "LineItemId (agg_booked_monthly)"},
+    ])
+    assert [c["name"] for c in kept] == [
+        "My Multiple Values (Custom SQL Query2)", "Multiple Values (Custom SQL Query1)",
+        "LineItemId (agg_booked_monthly)"]
+
 
 def test_strip_suffix_in_expr():
     expr = "sum ( [vw::CUSTOMERS_RED_PERCENT (Custom SQL Query2)] ) / [vw::ORDERS (Custom SQL Query5)]"
@@ -114,13 +170,80 @@ def test_apply_reconciliation_dedupes_convergent_target():
 from ts_cli.tableau.reconcile import drop_junk_formulas
 
 def test_drop_junk_formulas():
+    """Companion to the column filters: a formula referencing a column that never
+    reaches TML must go too, or it is emitted as a dangling ref that no gate sees
+    (`lint_cross_references` does not inspect `formulas[].expr`, and
+    `filter_unresolvable_formulas` runs only on the MERGE path).
+
+    BOTH reference forms are matched: the bare bracketed one, and the `TABLE::col`
+    one `scope_columns` produces during translation — which runs BEFORE this, so a
+    ref to a column with a metadata-record is already qualified by the time it
+    arrives. For `:Measure Names` the qualified form carries three colons.
+
+    `Multiple Values` is NOT matched: it is a shelf trigger, not a column
+    pseudo-field, so a formula over a warehouse column of that name must survive."""
     formulas = [
         {"name": "F_junk", "expr": "sum ( [vw::__tableau_internal_object_id__].[_12CAA8] )", "column_type": "MEASURE"},
+        {"name": "F_measure_names", "expr": "sum ( [vw::SALES] ) + unique count ( [:Measure Names] )",
+         "column_type": "MEASURE"},
+        {"name": "F_measure_names_qualified",
+         "expr": "unique count ( [ORDERS:::Measure Names] )", "column_type": "MEASURE"},
+        {"name": "F_real_multiple_values", "expr": "sum ( [Multiple Values] )", "column_type": "MEASURE"},
+        {"name": "F_real_mv_qualified", "expr": "sum ( [RESPONSES::Multiple Values] )", "column_type": "MEASURE"},
+        {"name": "F_near_miss", "expr": "sum ( [T::My Multiple Values] )", "column_type": "MEASURE"},
+        {"name": "F_near_miss_2", "expr": "sum ( [T::Multiple Values Sold] )", "column_type": "MEASURE"},
         {"name": "F_clean", "expr": "sum ( [vw::CAMPAIGN_ID] )", "column_type": "MEASURE"},
     ]
     kept, dropped = drop_junk_formulas(formulas)
-    assert [f["name"] for f in kept] == ["F_clean"]
-    assert dropped == ["F_junk"]
+    assert [f["name"] for f in kept] == [
+        "F_real_multiple_values", "F_real_mv_qualified", "F_near_miss", "F_near_miss_2", "F_clean"]
+    assert dropped == ["F_junk", "F_measure_names", "F_measure_names_qualified"]
+
+
+def test_drop_junk_formulas_cascades_to_dependants():
+    """Dropping a formula leaves its dependants referencing a name that no longer
+    exists. `add_formula_prefix` runs AFTER this and resolves `[Name]` only for names
+    still present, so the survivor would keep a bare display-name reference — the form
+    invariant I9 records as failing on first import. Cascade to a fixpoint instead.
+
+    Keyed on which names were dropped, not why, so the `_JUNK` and `:Measure Names`
+    triggers behave identically."""
+    formulas = [
+        {"name": "MNCount", "expr": "unique count ( [:Measure Names] )"},
+        {"name": "Derived", "expr": "sum ( [ORDERS::SALES] ) / [MNCount]"},
+        {"name": "Downstream", "expr": "[Derived] * 2"},
+        {"name": "Clean", "expr": "sum ( [ORDERS::SALES] )"},
+    ]
+    kept, dropped = drop_junk_formulas(formulas)
+    assert [f["name"] for f in kept] == ["Clean"]
+    assert dropped == ["MNCount", "Derived", "Downstream"]
+
+
+def test_drop_junk_formulas_cascade_is_trigger_agnostic():
+    """The pre-existing `_JUNK` trigger cascades the same way — this path predates
+    the pseudo-field members and was equally affected."""
+    formulas = [
+        {"name": "JunkCount", "expr": "unique count ( [__tableau_internal_object_id__].[_1A] )"},
+        {"name": "Derived", "expr": "sum ( [ORDERS::SALES] ) / [JunkCount]"},
+    ]
+    kept, dropped = drop_junk_formulas(formulas)
+    assert kept == []
+    assert dropped == ["JunkCount", "Derived"]
+
+
+def test_drop_junk_formulas_cascade_does_not_false_positive():
+    """A bracket's contents are compared WHOLE and a `::`-qualified ref is skipped —
+    the same test `add_formula_prefix` applies — so none of these reference `MNCount`."""
+    formulas = [
+        {"name": "MNCount", "expr": "unique count ( [:Measure Names] )"},
+        {"name": "NearMiss", "expr": "sum ( [My MNCount] )"},
+        {"name": "Substring", "expr": "sum ( [MNCountTotal] )"},
+        {"name": "QualifiedCol", "expr": "sum ( [ORDERS::MNCount] )"},
+        {"name": "RefsSurvivor", "expr": "[NearMiss] + 1"},
+    ]
+    kept, dropped = drop_junk_formulas(formulas)
+    assert [f["name"] for f in kept] == ["NearMiss", "Substring", "QualifiedCol", "RefsSurvivor"]
+    assert dropped == ["MNCount"]
 
 
 def test_drop_junk_columns_strips_junk_without_table_stamp():
@@ -146,13 +269,35 @@ def test_drop_junk_columns_strips_junk_without_table_stamp():
     assert [c["table"] for c in out] == ["d_partner", "d_partner1"]
 
 
+def test_drop_junk_columns_strips_pseudo_fields_on_multi_table():
+    """The multi-table path must drop the pseudo-field too. This is the half
+    I12 could not see: on a multi-table model the column is emitted
+    table-qualified (`TABLE:::Measure Names`), so the bare-column_id rule is
+    scoped out and nothing flagged it."""
+    cols = [
+        {"name": ":Measure Names", "db_column_name": ":Measure Names",
+         "column_type": "ATTRIBUTE", "data_type": "VARCHAR", "table": "ORDERS"},
+        {"name": "Measure Names", "db_column_name": "Measure Names",
+         "column_type": "ATTRIBUTE", "data_type": "VARCHAR", "table": "ORDERS"},
+        {"name": "Multiple Values", "db_column_name": "Multiple Values",
+         "column_type": "ATTRIBUTE", "data_type": "VARCHAR", "table": "ORDERS"},
+        {"name": "Category", "db_column_name": "Category", "table": "ORDERS"},
+    ]
+    out = drop_junk_columns(cols)
+    # the pseudo-field goes; the real column, and the shelf-token-named one, stay
+    assert [c["name"] for c in out] == ["Measure Names", "Multiple Values", "Category"]
+    assert [c["table"] for c in out] == ["ORDERS", "ORDERS", "ORDERS"]
+
+
 def test_drop_junk_columns_matches_on_name_when_db_column_name_absent():
     cols = [
         {"name": "__tableau_internal_object_id__].[x_HASH"},
+        {"name": ":Measure Names"},
+        {"name": "Multiple Values"},
         {"name": "Category", "db_column_name": "Category"},
     ]
     out = drop_junk_columns(cols)
-    assert [c["name"] for c in out] == ["Category"]
+    assert [c["name"] for c in out] == ["Multiple Values", "Category"]
 
 
 from ts_cli.tableau.reconcile import rewrite_expr_refs, rewrite_formula_refs
