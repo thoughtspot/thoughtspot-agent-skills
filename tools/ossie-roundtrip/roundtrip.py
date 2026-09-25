@@ -40,7 +40,22 @@ DIALECT_VENDOR = "THOUGHTSPOT"
 #: reference names something the document actually declares -- the defect behind
 #: apache/ossie#459, which Apache's validator cannot see because the expression
 #: is valid SQL regardless.
-_QUALIFIED_REF = re.compile(r"\b([A-Za-z_][\w]*)\.([A-Za-z_][\w]*)\b")
+#: Either half may be a double-quoted identifier: a display name carrying a space
+#: or colon is quoted on emission, and those are exactly the names most likely to
+#: differ from a field name. A bare-identifier-only pattern undercounted by 23 of
+#: 348 on the corpus -- silently, and in the conservative direction, which is the
+#: kind of undercount that reads as reassurance.
+_IDENT = r'(?:"[^"]*"|[A-Za-z_]\w*)'
+_QUALIFIED_REF = re.compile(rf"(?<![\w.]){_IDENT}\.{_IDENT}")
+
+
+def _split_ref(text: str) -> tuple[str, str]:
+    """`ORDERS."Net Amount"` -> `("ORDERS", "Net Amount")`, quotes stripped."""
+    if text.startswith('"'):
+        closing = text.index('"', 1)
+        return text[1:closing], text[closing + 2:].strip('"')
+    dataset, _, column = text.partition(".")
+    return dataset, column.strip('"')
 
 
 def run(cmd, **kw):
@@ -121,6 +136,28 @@ def export_corpus(profile: str, corpus: pathlib.Path, limit: int) -> int:
 # measurement
 # ---------------------------------------------------------------------------
 
+def model_column_names(paths) -> set[str]:
+    """Every `columns[].name` in the Model document.
+
+    Counts cannot see a rename: tables, columns, formulas and joins are all
+    unchanged while a user-visible column comes back called something else. It
+    happened on 5 of 31 real models, and one of them (`58435d2b`, `date` ->
+    `Date2`) carries `lesson_plan_string` entries still naming the old column,
+    so the saved questions break against the returned Model. This harness
+    reported "losing structure 0" for that run.
+    """
+    import yaml
+    names: set[str] = set()
+    for path in paths:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        model = doc.get("model") or doc.get("worksheet")
+        if model:
+            names.update(
+                c["name"] for c in model.get("columns") or [] if isinstance(c, dict) and "name" in c
+            )
+    return names
+
+
 def tml_shape(paths) -> dict:
     """Structural census of a TML document set, for in-vs-out comparison."""
     import yaml
@@ -154,20 +191,35 @@ def portability(ossie_path: pathlib.Path) -> dict:
         for ds in doc.get("datasets") or []
     }
 
-    refs = unresolvable = 0
-    for ds in doc.get("datasets") or []:
-        for field in ds.get("fields") or []:
-            for entry in (field.get("expression") or {}).get("dialects") or []:
-                if entry.get("dialect") != DIALECT_PORTABLE:
-                    continue
-                for dataset_name, column in _QUALIFIED_REF.findall(entry.get("expression") or ""):
-                    if dataset_name not in fields_by_dataset:
-                        continue
-                    refs += 1
-                    if column.casefold() not in fields_by_dataset[dataset_name]:
-                        unresolvable += 1
+    def scan(expression: str | None) -> tuple[int, int]:
+        seen = bad = 0
+        for match in _QUALIFIED_REF.finditer(expression or ""):
+            dataset_name, column = _split_ref(match.group(0))
+            if dataset_name not in fields_by_dataset:
+                continue
+            seen += 1
+            if column.casefold() not in fields_by_dataset[dataset_name]:
+                bad += 1
+        return seen, bad
 
+    def portable_expressions(holder: dict):
+        for entry in (holder.get("expression") or {}).get("dialects") or []:
+            if entry.get("dialect") == DIALECT_PORTABLE:
+                yield entry.get("expression")
+
+    # BOTH fields and metrics. Scanning fields only reported 0/0 while every one
+    # of 348 metric references named a column no field declares -- the harness
+    # was blind to a defect of exactly the kind it exists to catch, in output it
+    # had just called clean. Found by an independent review, not by this tool.
+    refs = unresolvable = 0
+    holders = [f for ds in doc.get("datasets") or [] for f in ds.get("fields") or []]
     metrics = doc.get("metrics") or []
+    for holder in holders + list(metrics):
+        for expression in portable_expressions(holder):
+            seen, bad = scan(expression)
+            refs += seen
+            unresolvable += bad
+
     portable_metrics = sum(
         1 for m in metrics
         if any(e.get("dialect") != DIALECT_VENDOR
@@ -250,6 +302,7 @@ def check_corpus(corpus: pathlib.Path, converter: pathlib.Path, work: pathlib.Pa
         out.mkdir(parents=True, exist_ok=True)
         ossie = out / "model.ossie.yaml"
         row = {"model": name, "source": tml_shape(sources)}
+        source_columns = model_column_names(sources)
 
         forward = run([str(python), "-m", "ossie_thoughtspot.cli", "to-ossie",
                        *[str(p) for p in sources], "-o", str(ossie),
@@ -269,7 +322,11 @@ def check_corpus(corpus: pathlib.Path, converter: pathlib.Path, work: pathlib.Pa
              "-o", str(back), "--issues", str(out / "reverse.json"), "--force"],
             cwd=converter, env=env)
         if back.exists():
-            row["returned"] = tml_shape(sorted(back.glob("*.tml")))
+            returned_paths = sorted(back.glob("*.tml"))
+            row["returned"] = tml_shape(returned_paths)
+            lost_names = sorted(source_columns - model_column_names(returned_paths))
+            if lost_names:
+                row["renamed_columns"] = lost_names
         else:
             row["failed"] = "to-tml produced nothing"
 
@@ -290,6 +347,7 @@ def report(results, codes, totals, work, baseline) -> int:
     failed = [r["model"] for r in results if "failed" in r]
     invalid = [r["model"] for r in results if r.get("validator") == "FAILED"]
     skipped = [r["model"] for r in results if r.get("validator") == "SKIPPED"]
+    renamed = [(r["model"], r["renamed_columns"]) for r in results if r.get("renamed_columns")]
 
     print(f"\nmodels checked            {len(results)}")
     print(f"Apache validator passed   {sum(1 for r in results if r.get('validator') == 'PASSED')}"
@@ -297,6 +355,8 @@ def report(results, codes, totals, work, baseline) -> int:
     if skipped:
         print(f"validator SKIPPED a check on {len(skipped)}/{len(results)} — see below")
     print(f"losing structure          {len(lost)}  {lost or ''}")
+    print(f"renaming Model columns    {len(renamed)}"
+          + ("".join(f"\n    {m}: {', '.join(n)}" for m, n in renamed) if renamed else ""))
     print(f"failed to convert         {len(failed)}  {failed or ''}")
     print("\ncross-vendor portability (invisible to the validator):")
     refs, bad = totals["qualified_refs"], totals["unresolvable_refs"]
@@ -310,7 +370,8 @@ def report(results, codes, totals, work, baseline) -> int:
 
     summary = {
         "models": len(results), "lost_structure": lost, "failed": failed,
-        "invalid": invalid, "skipped_checks": skipped, "portability": dict(totals),
+        "invalid": invalid, "skipped_checks": skipped,
+        "renamed_columns": {m: n for m, n in renamed}, "portability": dict(totals),
         "codes": {k: v for k, v in sorted(codes.items())},
     }
     (work / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -331,8 +392,9 @@ def report(results, codes, totals, work, baseline) -> int:
             f"  PASSED' anyway, which is why this is failed rather than warned."
         )
         status = 1
-    if lost or failed or invalid:
-        print("\nFAIL: structure lost, conversion failed, or validator rejected a document")
+    if lost or failed or invalid or renamed:
+        print("\nFAIL: structure lost, a column was renamed, conversion failed, or the "
+              "validator rejected a document")
         status = 1
     if baseline and baseline.exists():
         status = max(status, compare(json.loads(baseline.read_text(encoding="utf-8")), summary))

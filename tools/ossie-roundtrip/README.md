@@ -56,10 +56,16 @@ Improvements are reported but never fail the run — only regressions do.
 
 **Apache's validator** — every converted document, via the real `validation/validate.py`.
 
+**Column names**, not just counts — a Model column that comes back renamed is reported and
+fails the run. Counts cannot see it: tables, columns, formulas and joins were all unchanged
+on 5 of 31 real models whose columns were renamed, one of them carrying saved questions
+that still name the old column (apache/ossie#468).
+
 **Cross-vendor portability**, which the validator cannot see:
 
 - *qualified references naming no declared field* — a portable expression that resolves
-  against nothing. Valid SQL, so validation passes it (apache/ossie#459).
+  against nothing. Valid SQL, so validation passes it (apache/ossie#459). Scanned over
+  **fields and metrics**, with quoted identifiers counted.
 - *metrics carrying a portable dialect* — a metric with only a `THOUGHTSPOT` expression is
   **dropped outright** by every vendor converter, so this is the number that decides
   whether a converted model means anything outside ThoughtSpot.
@@ -78,6 +84,13 @@ the run reports on code you are not testing, and reports it as a pass. This tool
 **A missing validator is not a failing validator.** An earlier revision recorded
 "validator FAILED" for all 31 models when `validate.py` was simply absent. It now refuses
 to start and tells you to pass `--validator`.
+
+**Measuring half the document reads as measuring all of it.** An earlier revision scanned
+only a dataset's `fields` for unresolvable references and reported `0/0` on output where
+**348 of 348 metric references** named a column no field declares — a defect of exactly the
+kind this harness exists to catch, in output it had just called clean. It was found by an
+independent adversarial review, not by this tool. It now scans both, and its count agrees
+with that review's (348/348).
 
 **A skipped check is not a passing check.** Apache's validator degrades silently when
 `sqlglot` is absent — it prints a warning, then prints `Validation PASSED`, and exits
