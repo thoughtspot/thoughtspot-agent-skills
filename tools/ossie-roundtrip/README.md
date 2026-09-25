@@ -46,7 +46,7 @@ python3 roundtrip.py check --corpus ./corpus --converter <path> --work ./after \
 ```
 
 Exit codes: `0` clean, `1` a model lost structure / failed / regressed against the
-baseline, `2` misconfigured.
+baseline / **had a check skipped**, `2` misconfigured.
 
 Improvements are reported but never fail the run — only regressions do.
 
@@ -79,8 +79,22 @@ the run reports on code you are not testing, and reports it as a pass. This tool
 "validator FAILED" for all 31 models when `validate.py` was simply absent. It now refuses
 to start and tells you to pass `--validator`.
 
+**A skipped check is not a passing check.** Apache's validator degrades silently when
+`sqlglot` is absent — it prints a warning, then prints `Validation PASSED`, and exits
+zero. An earlier revision looked only for that second line, so every run against a
+converter venv without sqlglot reported a clean 31/31 with no SQL expression parsed at
+all. With sqlglot present the real figure at the time was 29 passed and 2 failed, on
+output already reported as valid. The verdict is now three-state — `PASSED`, `FAILED`,
+`SKIPPED` — and a skipped check **fails** the run rather than warning, because a quiet
+"some checks did not run" is the exact shape of defect this harness exists to catch.
+
 ## Requirements
 
 `export` needs the `ts` CLI and a ThoughtSpot profile. `check` needs a converter working
 tree with its venv built (`cd converters/thoughtspot && uv sync`) and PyYAML available to
 the interpreter running this script.
+
+The converter's venv is also the interpreter Apache's validator runs under, so it needs
+the validator's own optional dependencies — **`sqlglot`, `pyyaml`, `jsonschema`**. Without
+`sqlglot` the SQL half of validation does not run, and the harness fails the run rather
+than reporting a pass.
