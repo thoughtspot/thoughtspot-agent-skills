@@ -13,32 +13,25 @@ _JUNK = "__tableau_internal_object_id__"
 
 # Tableau's own internal pseudo-fields, which arrive as ordinary `<column>`
 # elements but name no warehouse column. Emitting one produces a Model column
-# whose `column_id` resolves to nothing — `:Measure Names` alone accounted for
-# every I12 `ts tml lint` finding (a bare `column_id` ThoughtSpot rejects at
-# import), plus the same column table-qualified (`TABLE:::Measure Names`) on
-# multi-table models, where I12 is scoped out and nothing flagged it at all.
-#
-# The members are Tableau's pivot pair: `dashboards.py` reads them together off
-# a shelf (`[Multiple Values]`/`[:Measure Names]`), which is the in-repo
-# evidence for the second one.
+# whose `column_id` resolves to nothing, and no gate reports it in either shape:
+# on a single-table model the id comes out qualified (`ORDERS:::Measure Names`) and
+# the same phantom is written into that table's TML, so the cross-reference check
+# resolves it; on a genuine multi-table model no ownership resolves, so the id is
+# bare — and I12, which flags a bare `column_id`, is scoped to single-table models.
 #
 # Matched by EQUALITY, not as a substring like _JUNK (which arrives decorated,
 # `__tableau_internal_object_id__].[agg_booked_monthly (…)_HASH`) and not by
 # leading-colon prefix: a colon is Tableau's marker, but a prefix rule would
 # reach past the evidence and a real column is only ever one false positive
-# away. Add a member to `_PSEUDO_FIELDS` when another is actually observed —
-# see the constants note below before touching `_PIVOT_PSEUDO_FIELDS`.
+# away. Add a member to `_PSEUDO_FIELDS` when one is actually observed as a
+# `<column>` — see the constants note below before touching
+# `_PIVOT_PSEUDO_FIELDS`.
 #
-# The two do NOT carry the same false-positive risk, and only one is self-
-# marking. `:Measure Names` leads with Tableau's colon, so no user column
-# collides with it by accident. `Multiple Values` does not — it is a name a
-# user could legitimately choose. `dashboards.py` can afford that because it
-# tests the token against SHELF TEXT and the context disambiguates; this layer
-# sees a bare column list with no such context, so it matches on name alone.
-# Taken deliberately: the string is Tableau's own, and left unfiltered it emits
-# a phantom `TABLE::Multiple Values` no gate sees — I12 reads only a BARE
-# column_id, and the cross-reference check resolves because the same phantom is
-# written into the Table TML.
+# `Multiple Values` is deliberately NOT a member. It is the other half of
+# Tableau's Measure Values pivot and is recognised on a SHELF (see
+# `_PIVOT_PSEUDO_FIELDS`), but it has never been observed as a `<column>`; and
+# unlike its colon-led sibling it is a name a user could legitimately give a
+# warehouse column, so excluding it would delete real data.
 #
 # `Number of Records` is deliberately NOT here, and the reason is not the one it
 # looks like. Tableau's built-in one is a CALCULATED field, and `_extract_columns`
@@ -46,20 +39,32 @@ _JUNK = "__tableau_internal_object_id__"
 # never reaches this predicate at all. A warehouse column genuinely named that is
 # not a calculated field, does reach here, and must survive.
 #
-# Two DISTINCT meanings, deliberately separate constants:
+# Three DISTINCT meanings, deliberately separate:
 #
-#   _PIVOT_PSEUDO_FIELDS — one of these appearing in a worksheet's raw shelf text
-#     means "this worksheet is a Measure Values pivot". `dashboards.py` reads it
-#     as a TRIGGER.
-#   _PSEUDO_FIELDS       — these must never be emitted as real columns.
+#   _PSEUDO_FIELDS       — column names that must never be emitted as real
+#                          warehouse columns. Evidence-gated: a member has been
+#                          observed as a `<column>`.
+#   _PIVOT_PSEUDO_FIELDS — tokens whose presence in raw shelf TEXT means "this
+#                          worksheet is a Measure Values pivot".
+#   _is_pivot_field      — a resolved worksheet FIELD that is one of those
+#                          tokens, so it is never emitted into an Answer.
 #
-# They coincide today because the pivot pair is also the whole exclusion set. A
-# future filter-only member belongs in _PSEUDO_FIELDS alone: adding it to the
-# pivot pair would make an unrelated token fire the measure-values branch and
-# pull every column-instance into a worksheet's field list.
+# The last two share tokens on purpose — a pivot token should both fire the
+# branch and be kept out of the output — but they match different inputs. The
+# first is strictly narrower and is NOT an alias of the second.
 _PIVOT_PSEUDO_FIELDS = frozenset({":Measure Names", "Multiple Values"})
 
-_PSEUDO_FIELDS = _PIVOT_PSEUDO_FIELDS   # | {"<filter-only member>"} — extend HERE, not above
+_PSEUDO_FIELDS = frozenset({":Measure Names"})
+
+
+def _is_pivot_field(name: str) -> bool:
+    """True for a Measure Values pivot pseudo-field resolved as a worksheet FIELD.
+
+    Separate from ``_is_internal_column``: this is about what an Answer emits, not
+    what a Model may contain, so it reads the pivot tokens rather than the
+    (narrower) column-exclusion set.
+    """
+    return name in _PIVOT_PSEUDO_FIELDS
 
 
 def _is_internal_column(raw: str) -> bool:
@@ -81,8 +86,13 @@ def _is_internal_column(raw: str) -> bool:
             or _SUFFIX.sub("", raw).strip() in _PSEUDO_FIELDS)
 
 
-# The same members as a bracketed REFERENCE, for scanning formula expressions.
-_PSEUDO_REFS = frozenset(f"[{tok}]" for tok in _PSEUDO_FIELDS)
+# The same members as a REFERENCE, both forms a formula can carry: the bare
+# bracketed one, and the `TABLE::col` one `scope_columns` produces. For a name
+# that already starts with a colon the qualified form carries three
+# (`[ORDERS:::Measure Names]`), which is why this is built rather than written out.
+_PSEUDO_REFS = frozenset(
+    form for tok in _PSEUDO_FIELDS for form in (f"[{tok}]", f"::{tok}]")
+)
 
 
 def _references_internal_column(expr: str) -> bool:
@@ -90,9 +100,12 @@ def _references_internal_column(expr: str) -> bool:
 
     Reference matching, not the name matching ``_is_internal_column`` does: a
     pseudo-field is matched there by EQUALITY against a column name, so passing an
-    expression to it returns False for every member. Matching the BRACKETED form
-    keeps the false-positive discipline the name path has — ``[Multiple Values]``
-    cannot occur inside ``[My Multiple Values]``.
+    expression to it returns False for every member. Both forms a formula can carry
+    are matched — the bare ``[:Measure Names]`` and the ``TABLE::col`` one
+    ``scope_columns`` produces during translation, which runs BEFORE this — because
+    a ref to a column the parse knows is already qualified by the time it arrives.
+    Each form is anchored (``[`` or ``::``), so a longer name ending in a member's
+    text cannot match.
     """
     return _JUNK in expr or any(ref in expr for ref in _PSEUDO_REFS)
 
@@ -213,6 +226,42 @@ def validate_name_map(name_map: dict[str, str]) -> str | None:
     return None
 
 
+# A formula cross-reference BEFORE `add_formula_prefix` runs: bare `[Name]`, not the
+# `[formula_Name]` form `model_builder._cascade_drop_dependents` matches. Bracket
+# contents are compared WHOLE and a `::`-qualified ref is skipped — the same test
+# `add_formula_prefix` uses to decide what counts as a formula reference.
+_BARE_REF = re.compile(r"\[([^\]]+)\]")
+
+
+def _cascade_dropped_formulas(
+    kept: list[dict], dropped: list[str]
+) -> tuple[list[dict], list[str]]:
+    """Drop every formula referencing a name already dropped, to a fixpoint.
+
+    Keyed on WHICH names went, never on why, so it behaves identically whatever
+    triggered the original drop. Without it the survivor keeps a bare `[Name]` that
+    `add_formula_prefix` can no longer resolve — the dropped name is gone from its
+    set by then — leaving a display-name reference, which invariant I9 records as
+    failing on first import.
+    """
+    dropped_set = set(dropped)
+    changed = True
+    while changed:
+        changed = False
+        survivors: list[dict] = []
+        for f in kept:
+            refs = {r for r in _BARE_REF.findall(f.get("expr", "")) if "::" not in r}
+            if refs & dropped_set:
+                name = f.get("name", "?")
+                dropped.append(name)
+                dropped_set.add(name)
+                changed = True
+            else:
+                survivors.append(f)
+        kept = survivors
+    return kept, dropped
+
+
 def drop_junk_formulas(formulas: list[dict]) -> tuple[list[dict], list[str]]:
     """Drop any formula whose expr references a __tableau_internal_object_id__
     junk column, or any member of ``_PSEUDO_FIELDS`` (Tier-1 companion to
@@ -225,7 +274,7 @@ def drop_junk_formulas(formulas: list[dict]) -> tuple[list[dict], list[str]]:
             dropped.append(f["name"])
         else:
             kept.append(f)
-    return kept, dropped
+    return _cascade_dropped_formulas(kept, dropped)
 
 
 def rewrite_expr_refs(expr: str, name_map: dict[str, str]) -> str:

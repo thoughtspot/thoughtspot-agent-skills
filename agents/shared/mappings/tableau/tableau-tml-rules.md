@@ -375,6 +375,26 @@ sql_view:
       aggregation: SUM
 ```
 
+### Tableau's pivot pseudo-field is not a column
+
+`:Measure Names` arrives as an ordinary `<column>` element but names no warehouse
+column, so a `column_id` built from it resolves to nothing. Exclude it — and drop any
+formula whose expression references it, then anything depending on those in turn,
+since a surviving dependant emits a reference to a column the model does not contain.
+
+Neither omission is caught by a gate: on a single-table model the id comes out
+table-qualified and the same phantom is written into that table's TML, so the
+cross-reference check resolves it; on a multi-table model the id is bare and I12, the
+rule that flags a bare `column_id`, is scoped to single-table models.
+
+`Multiple Values`, the other half of Tableau's Measure Values pivot, is **not** excluded
+as a column. It is a shelf token — its presence on a worksheet's shelf means the real
+measures are that worksheet's column-instances — and a warehouse column could
+legitimately carry that name.
+
+`ts tableau build-model` applies all of this automatically. **Hand assembly does not** —
+the parse's `columns[]` and `calculated_fields[]` carry them, so apply it yourself.
+
 ### Name uniqueness is workbook-wide, not per datasource
 
 Tableau names an unnamed Custom SQL relation `Custom SQL Query` and numbers later ones

@@ -13,7 +13,11 @@ from typing import Optional
 import xml.etree.ElementTree as ET
 
 from ts_cli.tableau.liveboard import leaf_name, role_for_shelf
-from ts_cli.tableau.reconcile import _PIVOT_PSEUDO_FIELDS, _is_internal_column
+from ts_cli.tableau.reconcile import (
+    _PIVOT_PSEUDO_FIELDS,
+    _is_internal_column,
+    _is_pivot_field,
+)
 
 # Tableau derivation → aggregate? (drives measure detection) and → date bucket keyword.
 _AGG = {"Sum", "Avg", "Average", "Count", "Cnt", "CntD", "Min", "Max", "Median",
@@ -106,7 +110,8 @@ def _ws_fields(ws: ET.Element, ci: dict, captions: dict) -> tuple[list, dict]:
 
     def add(inst_key: str, shelf: str) -> None:
         f = _resolve(inst_key, ci, captions)
-        if not f or _is_internal_column(f["name"]) or f["name"] in seen:
+        if (not f or _is_internal_column(f["name"]) or _is_pivot_field(f["name"])
+                or f["name"] in seen):
             return
         seen.add(f["name"])
         fields.append({"name": f["name"], "measure": f["measure"],
