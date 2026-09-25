@@ -97,6 +97,10 @@ jobs:
           # Presence gate: every shared mapping/schema must carry a currency anchor
           # (staleness is soft and never fails — only missing/malformed anchors do).
           python3 tools/validate/check_mapping_currency.py --root . --check || rc=1
+          # Cross-REPO: needs an apache/ossie checkout, which CI does not have, so
+          # this reports "skipping" and exits 0 there. It earns its keep locally and
+          # in the sweep; running it here keeps it from silently rotting.
+          python3 tools/validate/check_ossie_mapping_sync.py --root . --check || rc=1
           python3 tools/validate/generate_open_items_index.py --root . --check || rc=1
           python3 tools/validate/check_mirror_sync.py || rc=1
           python3 tools/validate/generate_parity.py --check || rc=1
