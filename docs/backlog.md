@@ -247,6 +247,7 @@ are roughly ordered by value÷effort.
 | BL-272 | five mutually inconsistent handlings of "non-numeric token in TWB XML"; degradation channel exists in one extractor of six | next Tableau converter pass |
 | BL-284 | a physical table and a SQL View sharing one relation name in one datasource are not fully separable from the parsed representation — `_sql_view_owns_column` is a conservative heuristic, undecidable when both declare the same column name; not present in the corpus | next Tableau converter pass |
 | BL-313 | MERGE mode skips SQL View disambiguation, so merging into a model that GENERATE built with this CLI emits the bare name where the target expects the qualified one | next Tableau converter pass |
+| BL-314 | nothing tells an author that a deliberate parse→TML transformation must also be declared to `tableau/verify.py`; three PRs have broken the fidelity gate the same way and the rule is prose in CLAUDE.md, not a check | next validator pass |
 
 ### Tier 4 — Deferred
 
@@ -11610,3 +11611,50 @@ this needs the export hoisted or the reconciliation moved after it; it is not a
 one-line change, which is why the guard shipped first.
 
 **Target:** next Tableau converter pass.
+
+---
+
+## BL-314 — a parse→TML transformation must be declared to `verify.py`, and nothing enforces it `Tier 2`
+
+**Filed:** 2026-09-25.
+**Source:** review of PR #532, which broke `ts tableau verify` the same way PR #529 did one
+PR earlier. Raised as a review finding against that change, not as a migration failure.
+
+**Affects:** `tools/ts-cli/ts_cli/tableau/verify.py`, `scripts/pre-commit.sh`,
+`CLAUDE.md` (change-impact map).
+
+**The shape.** `verify.py` diffs a **pre-conversion parse** against **post-conversion
+output** — `_table_check` compares `sql_views[].name`/`tables[].name` against
+`model_tables[].name`, `_formula_drop_check` compares TRANSLATABLE-tiered calcs against
+`model.formulas`. That is exactly what makes it a useful fidelity gate, and exactly what
+makes it fragile: **any deliberate transformation between those two points reads as a
+defect.** The gate then hard-fails on correct output, and `SKILL.md` tells the operator a
+structural ERROR means "investigate before importing".
+
+**Three instances, none of which the author was warned about:**
+
+| Transformation | How verify was taught | When |
+|---|---|---|
+| calc renamed on a name clash with a physical column | `_expected_model_names` reproduces the rename recipe | pre-existing; live-reproduced on Ads Commercial Dashboard |
+| SQL View names disambiguated across datasources | `verify_conversion` re-runs the idempotent pass | PR #529 |
+| formula dropped for referencing a pseudo-field | **not yet** | PR #532 (open) |
+
+The first exists *because* the same thing happened before. So this is a recurring class,
+which under the two-bucket rule is the case for promoting it to a check rather than
+re-finding it each time.
+
+**What shipped instead.** A change-impact map row in `CLAUDE.md`, stating the requirement
+and that a fix must come with a test proving the gate still fires for a genuine drop — a
+change that merely silences the check is worse than the false positive it removes. That is
+guidance an author has to read, not a gate.
+
+**Approach.** A soft pre-commit nudge in the shape of `suggest_dependency_types.py`: when a
+staged change touches the transformation layer (`ts_cli/tableau/reconcile.py`,
+`naming.py`, `build_model.py`, `model_builder.py`) without also staging
+`ts_cli/tableau/verify.py` or `tests/test_tableau_verify.py`, print a reminder. Never
+blocks — it cannot know whether a given edit is a transformation — but it puts the question
+in front of the author at the moment it is cheap. Needs a new `suggest_*.py` (the precedent
+is 159 lines), a `$STAGED` grep in `pre-commit.sh`, and a `generate_quality_gates --check`
+regeneration, which is why it did not ride along with the one-line map row.
+
+**Target:** next validator pass.
