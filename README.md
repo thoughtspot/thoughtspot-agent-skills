@@ -8,14 +8,14 @@ model authoring, multi-tenancy governance, and data querying. Packaged for
 
 ## Skills
 
-31 skills across six categories. Each ✓ in the runtime columns links to the
+32 skills across six categories. Each ✓ in the runtime columns links to the
 SKILL.md for that runtime. For why an individual skill exists, who tends to need it,
 and when to reach for it, see [skill personas](docs/skill-personas.md).
 
 | Category | Problem it solves | Skills |
 |---|---|:-:|
 | [Setup](#setup) | Nothing else runs until credentials and data exist | 8 |
-| [Conversion](#conversion) | The semantics already exist elsewhere, and rebuilding them by hand is what stalls a migration | 9 |
+| [Conversion](#conversion) | The semantics already exist elsewhere, and rebuilding them by hand is what stalls a migration | 10 |
 | [Semantic Authoring](#semantic-authoring) | A Model that imports cleanly can still answer badly or run slowly | 6 |
 | [Platform & Governance](#platform--governance) | Many audiences, one definition, without a copy per tenant | 5 |
 | [Query](#query) | Getting data out programmatically, and seeing the SQL behind a disputed number | 1 |
@@ -57,6 +57,7 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 | [`ts-convert-to-snowflake-sv`](agents/cli/ts-convert-to-snowflake-sv/SKILL.md) | Convert a ThoughtSpot model to a Snowflake Semantic View (single, split by domain, or update existing) | Snowflake | [coverage](agents/cli/ts-convert-to-snowflake-sv/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-to-snowflake-sv/SKILL.md) | [✓](agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md) | — |
 | [`ts-convert-from-snowflake-sv`](agents/cli/ts-convert-from-snowflake-sv/SKILL.md) | Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing) | Snowflake | [coverage](agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-from-snowflake-sv/SKILL.md) | [✓](agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md) | — |
 | [`ts-convert-from-tableau`](agents/cli/ts-convert-from-tableau/SKILL.md) | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration | Tableau | [coverage](agents/cli/ts-convert-from-tableau/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-from-tableau/SKILL.md) | — | — |
+| [`ts-link-semantic-layer`](agents/cli/ts-link-semantic-layer/SKILL.md) | **Link, don't convert:** register a Snowflake Semantic View, Databricks Metric View, Honeydew, Cube or Kyvos object as one Table plus a thin, formula-free Model, so the platform generates the SQL from its own definitions. Carries descriptions, synonyms, ai_context and Spotter instructions; one switch sets measures to `AGGREGATE` or their standard aggregation | Any semantic layer | — | [✓](agents/cli/ts-link-semantic-layer/SKILL.md) | — | — |
 
 </details>
 

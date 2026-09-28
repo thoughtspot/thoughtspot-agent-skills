@@ -77,6 +77,11 @@ FAMILY_PATTERNS: dict[str, tuple[re.Pattern, str]] = {
         re.compile(r"ts-audit"),
         "environment / object audit: ts-audit",
     ),
+    "ts-link-*": (
+        re.compile(r"ts-link-[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*"),
+        "register an external semantic object for direct query, no conversion: "
+        "ts-link-{source-class}",
+    ),
     "ts-load-*": (
         re.compile(r"ts-load-[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*"),
         "data loading: ts-load-{specifier}",

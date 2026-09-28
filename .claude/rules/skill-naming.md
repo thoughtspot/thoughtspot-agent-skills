@@ -20,7 +20,7 @@ extend the rule with a new one.
 
 ---
 
-## The eleven families
+## The families
 
 | # | Family | Pattern | Semantic | Members |
 |---|---|---|---|---|
@@ -36,6 +36,7 @@ extend the rule with a new one.
 | 10 | `ts-publish-*` | `ts-publish-{target}` | Distribute a master object to a set of destinations **without copying it**, including the variable definition and metadata parameterization that distribution requires. Second token is the destination class. | `ts-publish-orgs` |
 | 11 | `ts-security-*` | `ts-security-{aspect}` | Cross-object, cross-Org security configuration that **chooses between mechanisms** rather than driving one. Second token names the aspect secured (`columns`, `rls`). | `ts-security-columns`, `ts-security-rls` *(planned)* |
 | 12 | `ts-migrate-*` | `ts-migrate-{destination-class}` | Move an **existing estate** onto a new platform pattern and **retire the old one**. Second token is the destination class. Spans many object types across two Orgs and is destructive at the source. | `ts-migrate-orgs` |
+| 13 | `ts-link-*` | `ts-link-{source-class}` | Register an **external semantic object** (Semantic View, Metric View, Honeydew / Cube / Kyvos model) so ThoughtSpot queries it directly and the platform generates the SQL: one Table over the object plus a thin, formula-free Model. Second token names the class of source linked. | `ts-link-semantic-layer` |
 
 ---
 
@@ -194,7 +195,24 @@ Distinct from `ts-convert-*` (no format change — the same TML lands in a
 different Org) and from `ts-object-*` (a migration's unit is a tenant, not an
 object).
 
-### 13. None of the above match
+### 13. Does the skill make an external semantic object queryable WITHOUT translating it?
+
+→ **`ts-link-*`**. Pattern: `ts-link-{source-class}`.
+
+The source platform keeps the metric logic; ThoughtSpot gets a Table over the semantic
+object and a Model that references only that Table — no joins, no formulas — carrying
+column roles, aggregations and search metadata (descriptions, synonyms, ai_context,
+Spotter instructions).
+
+Distinct from `ts-convert-*`, which *translates* the source's semantics into ThoughtSpot
+joins and formulas. The split is deliberate and mechanical, not only semantic: the
+angle-9 `conversion-consistency-auditor` globs `ts-convert-*`, and its invariants,
+coverage matrices and fidelity gates would read a formula-free Model as a defect.
+Distinct from `ts-setup-*` (infrastructure or disposable scaffolding for other skills —
+a link produces a durable end-user Model) and from `ts-object-*` (no existing
+ThoughtSpot object is operated on; one is created).
+
+### 14. None of the above match
 
 → **Extend the rule**. See "Adding a new family" below. The validator
 will fail until either (a) a new family is added or (b) the skill is

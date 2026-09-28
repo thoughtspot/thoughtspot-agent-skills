@@ -11,6 +11,7 @@
 | ts-convert-to-databricks-mv | Y | — | — | Y |
 | ts-convert-to-snowflake-sv | Y | — | Y | — |
 | ts-dependency-manager | Y | — | — | — |
+| ts-link-semantic-layer | Y | — | — | — |
 | ts-load-source-data | Y | — | — | — |
 | ts-migrate-orgs | Y | — | — | — |
 | ts-object-answer-promote | Y | — | — | — |

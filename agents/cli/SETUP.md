@@ -113,6 +113,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-erd \
       ~/.snowflake/cortex/skills/ts-object-model-erd
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-link-semantic-layer \
+      ~/.snowflake/cortex/skills/ts-link-semantic-layer
+
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-calendar-builder \
       ~/.snowflake/cortex/skills/ts-object-calendar-builder
 
@@ -206,6 +209,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-erd \
       ~/.claude/skills/ts-object-model-erd
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-link-semantic-layer \
+      ~/.claude/skills/ts-link-semantic-layer
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-calendar-builder \
       ~/.claude/skills/ts-object-calendar-builder

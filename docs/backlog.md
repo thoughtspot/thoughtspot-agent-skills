@@ -202,7 +202,7 @@ are roughly ordered by value÷effort.
 | BL-318 | Re-running a converter (or `ts-link-*`) discards ThoughtSpot-side edits — detect existing objects, diff TS-side changes, prompt keep/discard | next converter pass |
 | BL-319 | CLI SV Mode C promises deep-copy + KEEP/MERGE but `build-model --existing-guid` regenerates from the SV — overwrites TS-side edits | next SF converter edit |
 | BL-320 | Databricks type map lacks `timestamp_ltz` (and other converters' LTZ/TZ variants) | with BL-130 |
-| BL-321 | New `ts-link-*` family + `ts-link-semantic-layer` skill: register a semantic-layer object (SF SV, DBX MV, Honeydew, Cube, Kyvos) as one Table + a thin formula-free Model | next skill |
+| BL-321 | `ts-link-*` family + `ts-link-semantic-layer` — v1 shipped; open items #2–#5 remain (Honeydew/Cube/Kyvos metadata + aggregation mode) | with platform access |
 
 ### Tier 3 — Opportunistic
 
@@ -11899,6 +11899,16 @@ part of BL-130. The `ts-link-*` builder should share this map rather than carry 
 ## BL-321 — `ts-link-*` family and `ts-link-semantic-layer` skill `Tier 2`
 
 **Filed:** 2026-09-28. **Decided:** family name `ts-link-*` (user, 2026-09-28).
+
+**Status: v1 shipped 2026-09-28** — `ts-link-semantic-layer` 1.0.0 + `ts link build`
+(ts-cli 0.150.0). Design changed from the plan below at the user's direction: **no
+per-platform adapters** — one normalized spec and one `--aggregation aggregate|standard`
+switch; re-run preservation parked (BL-318). Remaining: the skill's open items #2–#5
+(Honeydew/Cube/Kyvos metadata, Cube/Kyvos aggregation mode, COUNT_DISTINCT coercion,
+instructions replace-vs-append). The builder carries its own type map (including
+`timestamp_ltz`, and the no-scale → INT64 rule shared with `sv_introspect`) rather than
+`mv_tml`'s, because it must reject unknown types where the Snowflake map defaults to VARCHAR —
+a deliberate third map, so BL-130's type audit should cover it. BL-320 no longer blocks linking.
 
 **What it does.** Instead of *converting* a semantic-layer object into ThoughtSpot joins and
 formulas, register the object itself so ThoughtSpot queries it and the platform generates the

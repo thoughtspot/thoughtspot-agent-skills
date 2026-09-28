@@ -4026,3 +4026,51 @@ ts calendar search --connection "Snowflake Prod"
 ```
 
 **Output:** JSON array from `POST /api/rest/2.0/calendars/search`, to stdout.
+
+## `ts link` — Link a semantic-layer object for direct query
+
+Register a semantic object (Snowflake Semantic View, Databricks Metric View, Honeydew, Cube,
+Kyvos) as a ThoughtSpot Table plus a thin Model that references only that Table — no joins,
+no formulas. The platform generates the SQL from its own definitions. Used by the
+`ts-link-semantic-layer` skill. Creates new objects only (re-linking: BL-318).
+
+### `ts link build`
+
+```bash
+ts link build --spec spec.json --aggregation aggregate --model-name "Semantic SQL - Sales" --dry-run
+TS_ORG=1111689045 ts link build --spec spec.json --aggregation aggregate \
+    --model-name "Semantic SQL - Sales" --profile my-profile
+ts link build --spec hd.json --aggregation standard --model-name "Sales (Honeydew)" \
+    --default-aggregation SUM
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--spec` | required | Normalized spec JSON: `connection`, `db`, `schema`, `db_table`, optional `description` / `instructions`, and `columns[]` of `{name, data_type, kind, description?, synonyms?, ai_context?, display_name?, aggregation?, expr?}` |
+| `--aggregation` | required | `aggregate` — every measure `AGGREGATE`. `standard` — each measure's own aggregation from `aggregation`, else inferred from the outermost function of `expr` (`SUM(x)`, `COUNT(DISTINCT x)`, `SUM(x) FILTER (WHERE …)`) |
+| `--model-name` | required | Model display name |
+| `--table-name` | spec `db_table` | ThoughtSpot Table name |
+| `--naming` | `humanize` | Model column names: `humanize` (`revenue_gbp` → `Revenue GBP`) or `raw`; a column's `display_name` always wins |
+| `--default-aggregation` | none | `standard` mode only (ignored otherwise): aggregation for measures with no explicit or inferable one. Without it they fail the build, listed |
+| `--spotter/--no-spotter` | on | Spotter on the Model |
+| `--output-dir` | `.` | Where `table.tml` and `model.tml` are written (overwritten if present) |
+| `--profile`, `-p` | first profile / `TS_PROFILE` | ThoughtSpot profile; the Org comes from `TS_ORG` |
+| `--dry-run` | off | Build and write TML only |
+
+Behaviour:
+
+- **Non-numeric measures are skipped** and listed in `skipped`: ThoughtSpot coerces a
+  non-numeric MEASURE to ATTRIBUTE, which queries the platform measure without its measure
+  function (Databricks: `METRIC_VIEW_MISSING_MEASURE_FUNCTION`).
+- **Spotter instructions** are written with `POST /api/rest/2.0/ai/instructions/set`
+  (scope `GLOBAL`), never TML — a TML import reports OK but persists nothing. A failure is
+  reported in `instructions_result` and does not undo the link.
+- **Coercion check:** after import the Model is re-exported and every column's
+  `column_type` / `aggregation` compared with what was sent; differences land in `coerced`.
+- **Already linked:** ThoughtSpot matches a Table on `connection/db/schema/db_table`, not
+  name, and refuses a second one; the command exits 1 with `existing_table_guid`.
+
+**Output:** JSON summary to stdout — counts, `aggregation_source`, `skipped`, `instructions`,
+`warnings`, `table_guid`, `model_guid`, `instructions_result`, `coerced`, and `error` on
+failure. Once the Table exists, every later failure (HTTP error, client exit, non-JSON body)
+is reported with `table_guid` on stdout — never an exit that loses it.

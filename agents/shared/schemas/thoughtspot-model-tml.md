@@ -440,13 +440,18 @@ or repointed.
 **Prose about the business goes in `model.description`; rules for Spotter go here.** The two
 are read together, and both are free text — the split is by audience, not by format.
 
-**Read path verified, write path not.** The field is **reported present in exported TML** by `ts-audit`'s open-item #5 — an undated, un-instanced entry, and the 2026-07-30 census found it in **0 of 143** Models, so treat presence as likely-but-unwitnessed rather than settled.
-It is read in production (Spotter/AI readiness checks and the dependency impact probe). Whether a
-TML *import* persists a value written into it has **not** been verified on a live instance —
-the product also exposes a dedicated write API, `POST /api/rest/2.0/ai/instructions/set`
-(Beta 10.15.0.cl, needs `CAN_USE_SPOTTER` + `SPOTTER_COACHING_PRIVILEGE`). Until the TML write
-is verified, **pass the field through on round-trips, and do not rely on TML import to author
-it** — use the API, or have the user paste the text in the UI. (Tracked as BL-030.)
+**Neither path works through TML — use the API (live-verified 2026-09-28).** On
+`nebula-ts-semview` a Model imported with `model_instructions.data_model_instructions` reported
+`OK`, yet `POST /api/rest/2.0/ai/instructions/get` returned `{"nl_instructions_info":[]}`: the
+import **persists nothing**. After `POST /api/rest/2.0/ai/instructions/set` (Beta 10.15.0.cl,
+needs `CAN_USE_SPOTTER` + edit access or `SPOTTER_COACHING_PRIVILEGE`) succeeded, a TML export of
+the same Model still had **no** `model_instructions` key. So TML is neither a write path nor a
+read path on that build: **write with `ai/instructions/set`, read with `ai/instructions/get`**,
+and treat an absent TML key as "unknown", not "none". (`ts-audit`'s open-item #5 reports the
+field present in exported TML on another build — undated and un-instanced; the 2026-07-30 census
+found it in 0 of 143 Models.) Readers that use only the TML field (`tml_probes.py`,
+`audit/checks_ai.py`) under-report. `ts link build` writes instructions via the API for this
+reason. Whether `set` replaces or appends is not yet known. (BL-030.)
 
 **The API twin returns a different shape.** `POST /api/rest/2.0/ai/instructions/get` (parameter
 `data_source_identifier`, *not* `metadata_identifier`) returns
