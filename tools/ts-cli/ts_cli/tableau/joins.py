@@ -216,10 +216,58 @@ def _clause_join_keys(
     return keys
 
 
+def _join_identity(join: dict) -> tuple:
+    """Everything an emitted join consists of, as a comparable key.
+
+    The emitted dict holds exactly these four things, so two joins with equal
+    identity are the same join written twice — never two relationships that
+    merely resemble each other. The key pairs are SORTED: a composite key is a
+    set of conditions, so the same join with its clauses in the other order is
+    still the same join. Order within a pair is kept (``left``/``right`` bind to
+    the resolved tables), so a self-join's two directions stay distinct.
+    """
+    return (
+        join["type"],
+        join["left_table"],
+        join["right_table"],
+        tuple(sorted((k["left"], k["right"]) for k in join["keys"])),
+    )
+
+
 def _extract_joins(ds: ET.Element) -> tuple[list[dict], list[str]]:
-    """Extract join definitions from a datasource → ``(joins, warnings)``."""
+    """Extract join definitions from a datasource → ``(joins, warnings)``.
+
+    Identical joins are collapsed to the first occurrence. Tableau writes one
+    authored join into the file several times over, and this walk is
+    ``.//relation[@join]`` — every such relation anywhere under the datasource —
+    so without this every mirror is emitted as its own join. Two mechanisms
+    produce them, and a real workbook hits both at once, emitting one authored
+    join three times:
+
+    * ``_.fcp.ObjectModelEncapsulateLegacy.{true,false}...relation`` — the same
+      physical tree written twice under ``<connection>``, once per setting of
+      that feature flag, so either reader finds a tree it understands.
+    * ``<object-graph>/<objects>/<object>/<properties>`` — each logical object's
+      own copy of the physical tree it is built from.
+
+    Deduplicating on the emitted VALUE rather than skipping those subtrees is
+    deliberate, and evidence is what decided it: an object-graph ``<properties>``
+    tree is not always a mirror. An audit of real workbooks found it can be
+    RICHER than the ``<connection>`` tree, carrying a further table joined onto
+    the pair the live tree stops at — so excluding the subtree (the shape BL-276
+    originally proposed, by analogy with ``_is_extract_wrapper``) deletes a join
+    no other part of the file records, and nothing downstream could notice. A
+    value comparison cannot: a copy is dropped only once something identical has
+    already been kept.
+
+    Nothing is warned about. The contract of ``warnings`` here is to report what
+    was SKIPPED, and a collapsed duplicate loses nothing — the join is still
+    emitted. Reporting it would file the file format's own redundancy as a
+    migration finding.
+    """
     joins = []
     warnings: list[str] = []
+    seen: set[tuple] = set()
     for rel in ds.findall(".//relation[@join]"):
         # `./clause`, NOT `.//clause`: on a nested join a descendant search also
         # picks up the inner relation's clause, welding two separate joins into
@@ -267,10 +315,15 @@ def _extract_joins(ds: ET.Element) -> tuple[list[dict], list[str]]:
                 f"key pair; skipped"
             )
         if join_keys:
-            joins.append({
+            join = {
                 "type": rel.get("join", "inner").upper(),
                 "left_table": left_table,
                 "right_table": right_table,
                 "keys": join_keys,
-            })
+            }
+            identity = _join_identity(join)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            joins.append(join)
     return joins, warnings

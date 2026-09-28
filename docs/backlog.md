@@ -114,7 +114,7 @@ are roughly ordered by value÷effort.
 | BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
-| BL-276 | `_extract_joins` has no filter for object-graph-cached join duplicates | after BL-275 |
+| ~~BL-276~~ | ~~`_extract_joins` has no filter for object-graph-cached join duplicates~~ | DONE (2026-09-28, ts-cli v0.152.0) — fixed as a value dedup; the subtree exclusion this item proposed was disproven |
 | BL-184 | Worked-example reproducibility test (ground truth is never re-run) | after BL-178 |
 | BL-179 | from-Snowflake promotes the first synonym over the logical identifier | with BL-166 |
 | ~~BL-181~~ | ~~from-Snowflake classifies every fact `ATTRIBUTE` (no MEASURE branch)~~ | DONE (2026-07-31, ts-cli v0.128.0) — re-confirmed live 3× on 2026-09-08; coverage-matrix row 16 corrected then |
@@ -11288,8 +11288,10 @@ composite key. Full suite: 4067/4067 passed.
 **Source:** live-verification of BL-275's fix on `Multi level WB v0.twb` -- fixing the
 silent join-drop exposed a second, previously-invisible defect (masked until now because
 `_extract_joins` always returned 0 joins for this workbook regardless).
-**Affects:** `tools/ts-cli/ts_cli/tableau/twb.py::_extract_joins`.
-**Status:** OPEN.
+**Affects:** `tools/ts-cli/ts_cli/tableau/joins.py::_extract_joins` (the function
+moved out of `twb.py` after this item was filed).
+**Status:** **DONE** (2026-09-28, SCAL-326660, ts-cli v0.152.0) — but NOT as designed
+below; see the closing note.
 
 After BL-275's fix, `ts tableau parse` on this workbook reports the same join **twice**.
 The second copy lives inside `<object caption='Query 1' id='_9BBB096D8D91453E94133E5DAB1262E7'>
@@ -11332,6 +11334,43 @@ workbook during a real-workbook audit, so the duplication is not specific to the
 this item was filed from. One authored join was observed emitted three times. That also makes
 the duplicate count a confounder for any join-loss measurement taken from parse output, since
 the mirrors inflate the denominator.
+
+**Closed 2026-09-28 (SCAL-326660) — the proposed design was wrong.** This item asked for
+the signal to be confirmed general before a fix was written. It is not, and the check is
+what found it.
+
+Two mechanisms duplicate a join, not one, and the object-graph copy this item describes is
+the minor of them. The dominant one is a sibling pair of
+`_.fcp.ObjectModelEncapsulateLegacy.{true,false}...relation` wrappers under `<connection>`
+— the same physical tree written twice, once per setting of that feature flag, so either
+reader finds a tree it understands. A datasource carrying both mechanisms emits one
+authored join three times, which is the triplication the 2026-09-22 audit note reports.
+
+The `_is_extract_wrapper`-style subtree exclusion proposed above **deletes real joins**. A
+logical object's `<properties>` tree is not reliably a mirror: it can be RICHER than the
+`<connection>` tree, carrying a further table joined onto the pair the live tree stops at.
+Excluding the subtree drops that join, and because no other part of the file records it,
+nothing downstream can notice — the failure would have been a silent loss introduced by a
+fix for a duplicate.
+
+Worth recording as method, because the first measurement agreed with the proposed design
+and was wrong: an `ElementTree` path of `.//object-graph//relation[@join]` does not match
+`_.fcp.ObjectModelEncapsulateLegacy.true...object-graph`, since the feature-flag prefix is
+part of the tag. That undercount made the exclusion look safe. Any future scan of this
+tree must strip the `_.fcp.<Feature>.<true|false>...` prefix before matching a tag.
+
+Fixed instead by collapsing identical joins to the first occurrence, comparing the emitted
+VALUE. A copy is dropped only once something identical has already been kept, so a join
+that exists in exactly one place always survives wherever it sits. Identity is the whole
+emitted join — type, both tables, and the key columns — with the key pairs compared as a
+set, so a composite key written in the other order is recognised as the same join while
+two relationships between one table pair on different columns both survive and I14 still
+fires on the real case. No warning is emitted: nothing is lost, and the file format's own
+redundancy is not a migration finding.
+
+Regression tests in `tools/ts-cli/tests/test_tableau_joins_correctness.py` cover both
+mechanisms, the richer-object-graph case that rules out subtree exclusion, and the
+over-collapse guards.
 
 ---
 

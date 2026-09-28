@@ -106,3 +106,110 @@ def test_reversed_clause_still_pairs_keys_with_the_right_tables():
     assert warnings == []
     assert joins[0]["left_table"] == "RETURNS"
     assert joins[0]["keys"] == [{"left": "OrderId", "right": "OrderId"}]
+
+
+# ── BL-276 — one authored join written into the file several times ─────────
+
+OG = """<object-graph><objects>
+  <object caption='Query 1' id='_9BBB096D8D91453E94133E5DAB1262E7'>
+    <properties context=''>{inner}</properties>
+  </object>
+</objects></object-graph>"""
+
+GOOD = FLAT.format(clause=EQ.format(l="ORDERS", r="RETURNS"))
+
+
+def test_object_graph_mirror_of_a_join_is_collapsed():
+    """BL-276's reported shape: the live copy under `<connection>`, a cached
+    copy under `<object-graph>/<objects>/<object>/<properties>`.
+
+    Reaching `model_tables[].joins[]` twice, this tripped I14 at the skill's
+    Step 6 — whose remedy (alias a role-played dimension) misdiagnoses a mirror
+    as a real duplicate relationship.
+    """
+    joins, warnings = _extract_joins(ds(
+        f"<connection class='federated'>{GOOD}</connection>" + OG.format(inner=GOOD)
+    ))
+    assert len(joins) == 1
+    assert joins[0]["left_table"] == "ORDERS" and joins[0]["right_table"] == "RETURNS"
+    assert warnings == []
+
+
+def test_encapsulate_legacy_variant_pair_is_collapsed():
+    """The other, undocumented mechanism — and the dominant one in real files.
+
+    Tableau writes the same physical tree twice under `<connection>`, once per
+    setting of the `ObjectModelEncapsulateLegacy` feature flag, so either reader
+    finds a tree it understands. BL-276 described only the object-graph copy; a
+    real workbook carries both mechanisms at once and emits one authored join
+    three times.
+    """
+    joins, _ = _extract_joins(ds(
+        "<connection class='federated'>"
+        f"<_.fcp.ObjectModelEncapsulateLegacy.false...relation>{GOOD}"
+        "</_.fcp.ObjectModelEncapsulateLegacy.false...relation>"
+        f"<_.fcp.ObjectModelEncapsulateLegacy.true...relation>{GOOD}"
+        "</_.fcp.ObjectModelEncapsulateLegacy.true...relation>"
+        "</connection>"
+    ))
+    assert len(joins) == 1
+
+
+def test_a_join_found_only_under_object_graph_is_kept():
+    """The reason this is a value dedup and not a subtree exclusion.
+
+    BL-276 proposed skipping object-graph joins outright, by analogy with
+    `_is_extract_wrapper`. Real workbooks disprove the premise: a logical
+    object's `<properties>` tree can be RICHER than the `<connection>` tree,
+    carrying a join the live tree does not have. Excluding the subtree deletes a
+    join no other part of the file records, and nothing downstream could notice.
+    """
+    other = FLAT.replace("RETURNS", "USERS").format(
+        clause=EQ.format(l="ORDERS", r="USERS"))
+    joins, _ = _extract_joins(ds(
+        f"<connection class='federated'>{GOOD}</connection>" + OG.format(inner=other)
+    ))
+    assert len(joins) == 2
+    assert {j["right_table"] for j in joins} == {"RETURNS", "USERS"}
+
+
+def test_same_table_pair_with_different_keys_is_not_collapsed():
+    """Dedup must not mask a genuine duplicate relationship.
+
+    Two joins between one pair on DIFFERENT columns is the real I14 case, whose
+    remedy is to alias the role-played table. Identity includes the keys, so
+    both survive and the lint still fires.
+    """
+    a = FLAT.format(clause=EQ.format(l="ORDERS", r="RETURNS"))
+    b = FLAT.format(clause="""<clause type='join'><expression op='='>
+      <expression op='[ORDERS].[ShipId]'/><expression op='[RETURNS].[ShipId]'/>
+    </expression></clause>""")
+    joins, _ = _extract_joins(ds(f"<connection class='federated'>{a}{b}</connection>"))
+    assert len(joins) == 2
+
+
+def test_composite_key_written_in_the_other_order_is_still_one_join():
+    """A composite key is a SET of conditions, so clause order does not make a
+    second join. Identity sorts the pairs for exactly this reason."""
+    def composite(first, second):
+        return FLAT.format(clause=(
+            f"<clause type='join'><expression op='='>"
+            f"<expression op='[ORDERS].[{first}]'/><expression op='[RETURNS].[{first}]'/>"
+            f"</expression></clause>"
+            f"<clause type='join'><expression op='='>"
+            f"<expression op='[ORDERS].[{second}]'/><expression op='[RETURNS].[{second}]'/>"
+            f"</expression></clause>"))
+    joins, _ = _extract_joins(ds(
+        "<connection class='federated'>"
+        + composite("OrderId", "ShipId") + composite("ShipId", "OrderId")
+        + "</connection>"))
+    assert len(joins) == 1
+    assert len(joins[0]["keys"]) == 2
+
+
+def test_join_type_is_part_of_identity():
+    """Same tables, same keys, different join type is a different join."""
+    inner = FLAT.format(clause=EQ.format(l="ORDERS", r="RETURNS"))
+    left = inner.replace("join='inner'", "join='left'", 1)
+    joins, _ = _extract_joins(ds(f"<connection class='federated'>{inner}{left}</connection>"))
+    assert {j["type"] for j in joins} == {"INNER", "LEFT"}
