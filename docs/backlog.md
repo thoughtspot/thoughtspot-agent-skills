@@ -91,6 +91,7 @@ are roughly ordered by value÷effort.
 | BL-244 | SV `variables` translate 8/8 / 0 skipped (false success), then fail at import and re-deploy | next SF converter pass, with BL-031 |
 | ~~BL-315~~ | ~~from-Databricks: a `range: current` + `offset:` window ordered by a raw date drops the offset silently — prior-year measures return this year's number~~ | DONE (2026-09-28) |
 | BL-322 | from-Databricks period comparisons (`range: current` + `offset:`) were translated to a row-lag that is right only at one grain and silently wrong elsewhere — now skipped by default; the correct date-shifted-join translation is not built | next DBX pass |
+| BL-323 | from-Snowflake window metrics: every framed window except the unbounded running total is mistranslated silently (frame size ignored; RANGE / FOLLOWING / default frames become grand totals), and no translated window can enforce the grain Snowflake requires | next SF formula pass, with BL-242 |
 
 ### Tier 2 — Schedule soon
 
@@ -11997,3 +11998,66 @@ machinery exists (skill v1.9.0); the date-dimension synthesis and offset join do
 `moving_*` (BL-098 density). Decide whether they get the same default-skip treatment.
 
 **Target:** next DBX pass.
+
+## BL-323 — from-Snowflake window metrics are mistranslated, and the grain Snowflake enforces cannot be enforced in ThoughtSpot `Tier 1`
+
+**Filed:** 2026-09-28.
+**Source:** review of the Snowflake converter prompted by BL-322 (the Databricks period-
+comparison finding). Translator behaviour below was reproduced offline by calling
+`sv_translate._translate_window` directly; Snowflake semantics are quoted from the Snowflake
+docs (*Querying semantic views*, fetched 2026-09-28). Not yet measured live on a Snowflake
+pair — see "Verify".
+
+**Affects:** `tools/ts-cli/ts_cli/sv_translate.py` (`_parse_frame`, `_translate_window`),
+`ts-convert-from-snowflake-sv`, `agents/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md`.
+
+**1 — the frame is not read. Silent wrong numbers at every grain.** `_parse_frame` reduces
+the frame to one of `cumulative` / `moving` / `other` and `_translate_window` emits a fixed
+form for each, so the frame's size and direction are discarded:
+
+| Snowflake window metric (`SUM(m) OVER (…)`) | Emitted | Wrong because |
+|---|---|---|
+| `ORDER BY day ROWS BETWEEN 6 PRECEDING AND CURRENT ROW` (7-row) | `moving_sum ( m , -1 , 0 , day )` | N ignored — hard-coded `-1 , 0` |
+| `… 2 PRECEDING AND CURRENT ROW` (3-row) | the same `moving_sum ( m , -1 , 0 , day )` | identical to the 7-row |
+| `… 12 PRECEDING AND 12 PRECEDING` (a lag via frame) | the same `moving_sum ( m , -1 , 0 , month )` | a lag becomes the same formula |
+| `… CURRENT ROW AND 6 FOLLOWING` | `group_sum ( m )` | a leading window becomes a **grand total** |
+| `ORDER BY month` with no frame (SQL default: `RANGE UNBOUNDED PRECEDING` = running total) | `group_sum ( m )` | a running total becomes a **grand total** |
+| `RANGE BETWEEN INTERVAL '6 days' PRECEDING AND CURRENT ROW` | `group_sum ( m )` | a rolling average becomes a **grand total** |
+| `PARTITION BY year ORDER BY month ROWS UNBOUNDED PRECEDING` (YTD) | `cumulative_sum ( m , month )` | partition dropped — BL-242 |
+
+The RANGE-interval and LAG forms are exactly the two examples Snowflake's own docs give for
+window metrics, so this is the mainstream shape, not a corner.
+
+**2 — grain: Snowflake enforces it, ThoughtSpot cannot.** Snowflake requires the window's
+`ORDER BY` / `PARTITION BY [EXCLUDING]` dimensions in every query that returns the metric
+(*"you must also return the dimensions specified in … ORDER BY"*; otherwise *"Dimension
+'DATE.DATE' used in a window function metric must be requested in the query"*). So on
+Snowflake the wrong-grain query of BL-322 is impossible — it errors. A ThoughtSpot
+`moving_* / cumulative_*` formula carries no such rule, and measured on the Databricks pair
+(BL-322) the same functions at the wrong grain return NULL, a plausible wrong number, or a
+changed row count. Even a correctly-framed translation is therefore safe only when queried at
+its order grain, with nothing to stop anyone querying it otherwise.
+
+**3 — rows vs periods.** Snowflake `ROWS` frames and `LAG(m, n)` count rows of the result,
+like `moving_*` — same semantics at the order grain on dense data. `RANGE BETWEEN INTERVAL …`
+counts calendar time, which no ThoughtSpot formula does (BL-322's root cause). `LAG`/`LEAD` are
+refused today (L15, BL-260) — a correct, loud refusal; a future "fix" mapping `LAG` to a
+`moving_sum` lag would reintroduce BL-322 exactly and must not be done.
+
+**Approach.**
+1. Read the frame: emit `moving_* ( m , n , 0 , order )` for `n PRECEDING AND CURRENT ROW`
+   (and the matching start/end for FOLLOWING / offset frames), using the Databricks-verified
+   argument convention; refuse anything else loudly rather than falling through to `group_*`.
+   An `ORDER BY` with no frame is SQL's running total, not a grand total.
+2. Refuse `RANGE BETWEEN INTERVAL …` by default with a BL-322-style reason (period-based; no
+   formula equivalent); the date-shifted join from BL-322 is the correct target.
+3. Carry the order grain into the column description / Spotter instructions for every window
+   that is emitted, since ThoughtSpot cannot enforce Snowflake's required-dimension rule — and
+   consider the same default-skip + opt-in flag as BL-322 for `ROWS` frames.
+4. Fix BL-242 (fixed partition) in the same pass — same function.
+
+**Verify.** Extend the ts-model-parity metric matrix (three-sided; built for BL-322) with a
+Snowflake Semantic View pair so each mapping is number-matched against Snowflake at its own
+grain and at every other grain before it ships.
+
+**Target:** next SF formula pass, with BL-242.
