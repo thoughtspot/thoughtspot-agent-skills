@@ -199,6 +199,10 @@ are roughly ordered by value÷effort.
 | BL-283 | `check-catalog.md` and the audit `check_id`s can drift with nothing to notice — 51 documented vs 50 emitted today, and the deferred-id table means a naive comparison is wrong | next validator pass |
 | ~~BL-316~~ | ~~from-Databricks translator gaps found converting a 136-measure budget/forecast MV — 88 needed hand authoring; two ThoughtSpot window limits to document~~ | DONE (2026-09-28) |
 | BL-317 | `IN`/`NOT IN` and share-of-total have 2–3 ThoughtSpot spellings across converters; the DBX to-direction `in(…)` row is one the catalog says fails import | next converter-parity pass |
+| BL-318 | Re-running a converter (or `ts-link-*`) discards ThoughtSpot-side edits — detect existing objects, diff TS-side changes, prompt keep/discard | next converter pass |
+| BL-319 | CLI SV Mode C promises deep-copy + KEEP/MERGE but `build-model --existing-guid` regenerates from the SV — overwrites TS-side edits | next SF converter edit |
+| BL-320 | Databricks type map lacks `timestamp_ltz` (and other converters' LTZ/TZ variants) | with BL-130 |
+| BL-321 | New `ts-link-*` family + `ts-link-semantic-layer` skill: register a semantic-layer object (SF SV, DBX MV, Honeydew, Cube, Kyvos) as one Table + a thin formula-free Model | next skill |
 
 ### Tier 3 — Opportunistic
 
@@ -1246,6 +1250,29 @@ requiring `CAN_USE_SPOTTER` + `SPOTTER_COACHING_PRIVILEGE`.
 2. Add a `ts` command wrapping set/get; replace the manual-paste fallback in model-coach Step 6.5/8b/9a.
 3. Re-frame `model-instructions-schema.md` "Where it lives in TML" around the API (scope `GLOBAL` only today), not a TML round-trip — re-validate the round-trip assumption before any v1.1 TML work.
 4. Add a model-level instructions note to `thoughtspot-model-tml.md` once the API-vs-TML question is settled (`tml_probes.py:129` already reads `model.model_instructions.data_model_instructions`).
+
+### Live probe 2026-09-28 (approach step 1 done)
+
+On `nebula-ts-semview` (DBX Org), Model `3fee09f8-35a8-49cd-8a84-777b83d694a6`:
+
+| Path | Result |
+|---|---|
+| TML import with `model.model_instructions.data_model_instructions` | Import `OK`, but **not persisted** — `ai/instructions/get` returns `{"nl_instructions_info":[]}` |
+| `POST ai/instructions/set` `{data_source_identifier, nl_instructions_info:[{instructions:[text], scope:"GLOBAL"}]}` | `{"success":true}` HTTP 200; `get` returns the text |
+| TML export after a successful API `set` | `model_instructions` **absent** — TML is neither a write nor a read path on this build |
+
+Consequences: `tml_probes.py:129` and `audit/checks_ai.py` read a TML field that does not
+carry the value here — only `audit/context.py:231` (API `get`) sees it. Whether `set`
+replaces or appends is **unverified** — assume replace, so any writer must `get` and merge first.
+
+### Scope widened: converters and `ts-link-*` also need the write
+
+No converter writes instructions today. Snowflake SV `ai_sql_generation` /
+`ai_question_categorization` is parsed (`sv_parse.py:908-936`) and dropped by
+`build_model_tml_sv`; a Databricks MV top-level `comment:` carrying Spotter guidance lands
+only in `model.description`. The `ts` command this item adds (overlaps BL-311's
+`setNLInstructions` wrapper — do it once) should be called from both from-converters and
+from `ts-link-semantic-layer`, behind the BL-318 keep/discard check.
 
 **Target:** 2026-09-30.
 
@@ -11779,3 +11806,135 @@ shared emitter. Then add a `check_converter_parity` spelling rule for share-of-t
 third spelling cannot appear.
 
 **Target:** next converter-parity pass.
+
+---
+
+## BL-318 — re-running a converter discards ThoughtSpot-side edits; detect, diff, prompt keep/discard `Tier 2`
+
+**Filed:** 2026-09-28.
+**Source:** a cross-converter review of re-run behaviour, prompted by the `ts-link-*` design.
+
+**Problem.** After a first conversion, users add content in ThoughtSpot: column
+descriptions, synonyms, `ai_context`, table `rls_rules`, extra formulas/columns,
+parameters, joins, Spotter instructions. Re-running the same skill on the same source
+should surface those edits and ask whether to keep or discard them. Today:
+
+| Skill | Finds existing Model? | Re-run result | TS-side edits |
+|---|---|---|---|
+| snowflake-sv (CLI) A/B | No (tables only) | New object, or overwrite via `--existing-guid` | Lost |
+| snowflake-sv (CLI) Mode C | Manual GUID/name | In place | Documented as preserved; **code overwrites** — BL-319 |
+| snowflake-sv (CoCo) Mode C | Manual GUID/name | In place, deep-copy | Preserved (reference behaviour) |
+| databricks-mv (CLI + Genie) | No; no update mode | New object or overwrite | Lost |
+| tableau | Model pick for liveboards only | Merge mode adds new formulas | Preserved (additive), but source changes to existing columns never applied |
+| looker / powerbi / qlik / sisense | No | Always a new object (no `guid` emitted) | Duplicate |
+
+Only one shared helper exists (`model_builder.merge_formulas_into_model`, Tableau-only,
+formulas-only). Table RLS survives only where a skill edits the *exported* Table TML;
+skills that emit fresh Table TML never look at an existing table.
+
+**Approach.**
+1. Shared detection: search Model + Tables by name/`db`/`schema`/`db_table` before build;
+   if found, offer update-in-place (reuse GUID) vs new.
+2. Shared diff (`ts_cli/rerun_diff.py` or extend `ts snowflake diff`): export existing
+   TML + `ai/instructions/get` (instructions are not in TML — BL-030), compare to the
+   generated doc, classify each delta as *source-changed* vs *TS-added/TS-edited* per
+   kind (description, synonyms, ai_context, rls_rules, formula, column, parameter, join,
+   instructions).
+3. One prompt: keep all TS-side edits (default) / discard all / per-item. Apply to a
+   deep copy of the exported TML (the CoCo Mode C pattern), never a regenerate.
+4. Adopt in every `ts-convert-from-*` **and** `ts-link-semantic-layer` from its first
+   version. Subsumes the "never overwritten" rules of BL-021 Mode D; BL-021 keeps the
+   selective-sync UX on top.
+
+**Side finding (verify, likely a one-liner):** powerbi SKILL.md:90-91 and qlik
+SKILL.md:96-97 pass TML files positionally to `ts tml import`, which takes only
+`--file`/`--dir`.
+
+**Target:** next converter pass.
+
+---
+
+## BL-319 — CLI Snowflake Mode C overwrites the TS-side edits it promises to keep `Tier 1`
+
+**Filed:** 2026-09-28. **Source:** BL-318 review; verified against the code.
+
+`agents/cli/ts-convert-from-snowflake-sv/SKILL.md` Step C5 says "Deep-copy the existing
+Model TML. Apply only the confirmed changes" and defers to the KEEP/MERGE and
+"never touch `ai_context` / Instructions" rules in `references/step-c-update-mode.md`.
+The command it then runs, `ts snowflake build-model --existing-guid`, rebuilds the
+model from `parsed.json`/`translated.json` (`sv_build_model.py:395-438`) and only stamps
+the GUID at the root (`:436-437`); `commands/snowflake.py` never exports the existing
+model. So the user's per-column KEEP/MERGE answers, `ai_context`, TS-added formulas,
+columns, parameters and joins are absent from the imported document. The CoCo mirror
+does this correctly (deep-copy + `no_create_new`).
+
+**Approach.** Give `build-model` a `--merge-into <exported.json>` path (or a separate
+`ts snowflake apply-update`) that applies the C4 decisions to a deep copy; test that an
+`ai_context`, a TS-only formula and a KEEP description all survive. Fold into BL-318's
+shared diff if that lands first.
+
+**Target:** next SF converter edit.
+
+---
+
+## BL-320 — Databricks type map lacks `timestamp_ltz` `Tier 3`
+
+**Filed:** 2026-09-28. **Source:** building a `ts-link-*` Table for
+`agent_skills.business_forecast.business_reporting_mv`, whose `DATE_TRUNC` dimensions
+(`month`, `week_mond`) are `timestamp_ltz`.
+
+`ts_cli/databricks/mv_tml.py:_DBX_TYPE_MAP` maps `timestamp` and `timestamp_ntz` only, so
+`map_dbx_type("timestamp_ltz")` falls through. Snowflake already maps `TIMESTAMP_LTZ` →
+`DATE_TIME` (`sv_introspect.py:23-24`); Qlik's map has only `timestamp`
+(`qlik/build_model.py:29-35`).
+
+**Approach.** Add `timestamp_ltz` → `DATE_TIME` to the DBX map (and the reverse map's
+expectations), with a unit test; sweep the other converters' maps for LTZ/TZ variants as
+part of BL-130. The `ts-link-*` builder should share this map rather than carry its own.
+
+**Target:** with BL-130.
+
+---
+
+## BL-321 — `ts-link-*` family and `ts-link-semantic-layer` skill `Tier 2`
+
+**Filed:** 2026-09-28. **Decided:** family name `ts-link-*` (user, 2026-09-28).
+
+**What it does.** Instead of *converting* a semantic-layer object into ThoughtSpot joins and
+formulas, register the object itself so ThoughtSpot queries it and the platform generates the
+SQL: one Table over the semantic object + one Model referencing only that Table, no formulas.
+Metadata carried: descriptions, synonyms, `ai_context` where the source has it, Spotter
+instructions (via API — BL-030). Measures → `MEASURE`, dimensions → `ATTRIBUTE`.
+
+**Why a new family.** Not `ts-setup-*` — that is infrastructure or disposable scaffolding for
+other skills; this is a durable end-user Model. Not `ts-convert-*` — the angle-9 auditor globs
+`ts-convert-*`, and its invariants, coverage matrix and fidelity gates would all read a
+formula-free Model as a defect. Adding the family needs `skill-naming.md` row,
+`check_skill_naming.py` `FAMILY_PATTERNS`, and the root `CLAUDE.md` family list.
+
+**Shape.** One skill, per-platform adapters (metadata extraction + aggregation rule), one
+shared builder over a normalized column list:
+
+| Platform | Measure aggregation | Status |
+|---|---|---|
+| Snowflake SV | `AGGREGATE` | manually built, SF Org |
+| Databricks MV | `AGGREGATE` | **prototyped 2026-09-28** — see below |
+| Honeydew | the metric's logical aggregation (`SUM`, `COUNT_DISTINCT`, …) | manually built, HD Org |
+| Cube, Kyvos | TBD | user testing |
+
+**Prototype findings (DBX Org, `nebula-ts-semview`).** `business_reporting_mv` → Table
+`39570acf-7364-4860-a1c4-599c4a9d75b3` + Model `3fee09f8-35a8-49cd-8a84-777b83d694a6`
+(157 columns, 25 with synonyms). AgentQL compiles measures to `MEASURE(col)`; a window
+measure the converter cannot parse (`py_monthly_revenue_gbp`, subquery + window) returns
+correct prior-year values.
+
+- **Non-numeric measures must be skipped and reported.** ThoughtSpot rejects a DATE
+  `MEASURE` and silently coerces it to `ATTRIBUTE`; as an attribute it is emitted bare
+  (`GROUP BY col` / `max(col)`), which Databricks refuses with
+  `METRIC_VIEW_MISSING_MEASURE_FUNCTION` (verified for `last_available_date`, a
+  `MAX(dt)` measure). Workaround is at source: expose a numeric twin.
+- Instructions: TML does not persist them; the API does (BL-030).
+- Type map: needs `timestamp_ltz` (BL-320).
+- Re-run: must detect the existing Table/Model and apply BL-318's keep/discard prompt from v1.
+
+**Target:** next skill.
