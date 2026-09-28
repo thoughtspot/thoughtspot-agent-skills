@@ -91,13 +91,6 @@ SCALAR_LOD_NOTE = (
     "scalar subquery {sql} -> group_aggregate ( … , {{ }} , {{ }} ): whole-table, "
     "blind to the query's grouping and search filters, like the subquery "
     "(BL-316 item 1).")
-SCALAR_MV_FILTER_NOTE = (
-    "this MV has a global filter: ({flt}), which build-model mirrors into the "
-    "model's filters: block. group_aggregate ( … , {{ }} , {{ }} ) still applies "
-    "model-level filters (A3), but the Databricks subquery {sql} reads the "
-    "UNFILTERED source — so the ThoughtSpot value is computed over filtered rows "
-    "and can differ. Check it, or move the filter into the subquery's WHERE.")
-
 
 def make_resolver(tables: dict, scalars: list[dict] | None = None,
                   in_window: bool = False,
@@ -137,7 +130,7 @@ def _scalar_text(scalars: list[dict], n: int, tables: dict,
                 f"MAX(<the window's order date column>) has a row-level stand-in "
                 f"(group_aggregate cannot nest inside moving_sum)")
         return _SCALAR_IN_WINDOW
-    arg = translate_sql_expr(sc["arg"], base)
+    arg = "1" if sc["arg"].strip() == "*" else translate_sql_expr(sc["arg"], base)
     if sc["where"] is not None:
         arg = f"if ( {translate_sql_expr(sc['where'], base)} ) then {arg} else null"
     return f"group_aggregate ( {_LOD_AGG[sc['agg']]} ( {arg} ) , {{ }} , {{ }} )"
@@ -309,7 +302,10 @@ def _translate_conditional(measure: dict, resolver) -> str:
         return translate_sql_expr(e, resolver)
     agg = e[m.start("agg"):m.end("agg")].upper()
     distinct = bool(m.group("distinct"))
-    inner = translate_sql_expr(e[m.start("inner"):m.end("inner")], resolver)
+    inner_sql = e[m.start("inner"):m.end("inner")]
+    # COUNT(*) FILTER (…) -> count_if ( c , 1 ), as count ( 1 ) everywhere else
+    inner = ("1" if inner_sql.strip() == "*"
+             else translate_sql_expr(inner_sql, resolver))
     cond = translate_sql_expr(e[m.start("cond"):m.end("cond")], resolver)
     if agg == "COUNT" and distinct:
         return f"unique_count_if ( {cond} , {inner} )"
@@ -381,6 +377,18 @@ def translate_metric_view(parsed: dict, tables: dict) -> dict:
 
     deferred: list[dict] = []
     for m in parsed["measures"]:
+        if parsed.get("filter") is not None and m.get("scalar_subqueries"):
+            # group_aggregate ( … , { } , { } ) is model-filter-AWARE (A3) and
+            # build-model mirrors the MV filter: into the model, while the
+            # Databricks subquery reads the unfiltered source — the numbers
+            # would differ with nothing flagging it (review 2026-09-28).
+            skipped.append({"name": m["name"], "role": "measure", "reason": (
+                "scalar subquery on an MV with a global filter: — the Databricks "
+                "subquery reads the unfiltered source, but group_aggregate ( … , { } , "
+                "{ } ) would apply the mirrored model filter. Move the filter into "
+                "the subquery's WHERE (or accept the difference) and build manually")})
+            skip_names.add(m["name"])
+            continue
         refs = list(m["cross_refs"]) + list(m["lod_refs"])
         if refs:
             dag[m["name"]] = refs
@@ -395,8 +403,6 @@ def translate_metric_view(parsed: dict, tables: dict) -> dict:
 
     _translate_cross_measures(deferred, parsed, tables, translated, skipped,
                               by_name, skip_names, window_measures)
-
-    _flag_scalars_under_mv_filter(parsed, by_name)
 
     filter_out = None
     total = len(parsed["dimensions"]) + len(parsed["measures"])
@@ -413,22 +419,6 @@ def translate_metric_view(parsed: dict, tables: dict) -> dict:
             "window_measures": window_measures,
             "stats": {"total": total, "translated": total - n_skipped,
                       "skipped": n_skipped}}
-
-
-def _flag_scalars_under_mv_filter(parsed: dict, by_name: dict) -> None:
-    """C (review 2026-09-28): a lifted scalar is NOT blind to the model-level
-    filter build-model mirrors from the MV's global filter: — annotate it."""
-    if parsed.get("filter") is None:
-        return
-    for m in parsed["measures"]:
-        entry = by_name.get(m["name"])
-        if entry is None or entry.get("output_kind") != "formula":
-            continue
-        for sc in m.get("scalar_subqueries") or []:
-            entry["annotations"].append({
-                "kind": "scalar_under_mv_filter",
-                "detail": SCALAR_MV_FILTER_NOTE.format(flt=parsed["filter"],
-                                                       sql=sc["sql"])})
 
 
 def normalize_tables(tables: dict) -> dict:

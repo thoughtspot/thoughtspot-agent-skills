@@ -528,12 +528,15 @@ It is valid inside a row-level condition, e.g. `sum_if ( … and [dt] <= group_a
 **Caveat — an MV with a global `filter:`.** `{ }` is search-filter-blind but
 **model-filter-aware** (A3, above), and build-model mirrors the MV's `filter:` into the
 model's `filters:` block. The Databricks subquery reads the *unfiltered* source, so on a
-filtered MV the ThoughtSpot value is computed over fewer rows. The translator attaches a
-`scalar_under_mv_filter` annotation in that case; check the value, or move the filter
-into the subquery's `WHERE` so both sides agree.
+filtered MV the ThoughtSpot value is computed over fewer rows. The translator therefore
+**refuses** a scalar subquery on an MV that has a global `filter:` (it lands in
+`skipped[]` with the reason); move the filter into the subquery's `WHERE` so both sides
+agree, then build the formula manually.
 
 **Recognised shape only:** `( SELECT <SUM|COUNT|AVG|MIN|MAX>(<expr>) FROM <the MV's
-source FQN> [WHERE <cond>] )` — no alias, join, `GROUP BY`, nested `SELECT` or comma.
+source FQN> [WHERE <cond>] )` — no alias, join, `GROUP BY`, nested `SELECT`, comma, or
+**qualified column reference** (`source.region` may correlate with the outer row, and
+lifting it would turn the correlation into a tautology). `COUNT(*)` emits `count ( 1 )`.
 `parse-mv` lifts it to a `__MVSCALAR_n__` placeholder and records it under the
 measure's `scalar_subqueries`. Every other subquery stays untranslatable.
 
@@ -660,7 +663,7 @@ All rows below were number-matched against a Databricks Metric View on dense dat
 |---|---|---|
 | `order: <raw date>`, `range: current`, `offset: -364 day` | `moving_sum ( [m] , 364 , -364 , [date] )` | **BL-315:** `ts-cli` before 0.149.0 emitted `last_value(…)` here with the offset dropped — the "prior year" measure returned this year's number. An `offset:` always means LAG; `last_value` is only for an offset-less raw-date window. `-N week` at day grain lags 7N rows; a month/quarter/year offset at day grain is not a fixed row count and is refused |
 | `order: week` where `week` is a date-shifted truncation (`DATE_ADD(DATE_TRUNC('WEEK', DATE_ADD(dt, 3)), -3)`), `offset: -364 day` | `moving_sum ( [m] , 52 , -52 , [formula_Week] )` | Order by the **dimension's own formula**. Ordering by `[dt]` forces the query to daily grain and returns NULL — `start_of_month(dt)` is a recognised bucket of `dt`, a shifted week is not. Every week-grain order is formula-ordered (a plain `DATE_TRUNC('WEEK', dt)` is untested and carries a pending-verification note) |
-| `expr: SUM(a) / NULLIF(SUM(b), 0)` + any `window:` | `safe_divide ( moving_sum ( [a] , … ) , moving_sum ( [b] , … ) )` | The window applies to **every** aggregate. Same for `last_value`/`cumulative_sum`/trailing ranges |
+| `expr: SUM(a) / NULLIF(SUM(b), 0)` + any `window:` | `safe_divide ( moving_sum ( [a] , … ) , moving_sum ( [b] , … ) )` | The window applies to **every** aggregate. Same for `last_value`/`cumulative_sum`/trailing ranges. A **nested** aggregate (`SUM(SUM(a))`) is refused — it would be windowed twice |
 | `expr: SUM(x) FILTER (WHERE c)` + `window:` | `moving_sum ( if ( c ) then [x] else null , … )` | FILTER-equivalent: non-matching rows contribute NULL |
 
 **Two ThoughtSpot limits (live-probed 2026-09-28):**
@@ -819,7 +822,7 @@ formula equivalents:
 | `x IS NULL` | `isnull(x)` |
 | `NOT expr` | `not(expr)` |
 | `x IN (a, b, c)` | `( [x] = a or [x] = b or [x] = c )` — the form the translator emits; `in(x, a, b, c)` is rejected at import (`thoughtspot-formula-patterns.md`). The to-direction row near the top of this file still shows `in(…)` — BL-317 |
-| `x NOT IN (a, b)` | `( [x] != a and [x] != b )` — Live-verified 2026-09-28 (BL-316) |
+| `x NOT IN (a, b)` | `( [x] != a and [x] != b )` — Live-verified 2026-09-28 (BL-316). A `NULL` in the list is refused: SQL makes that `NOT IN` never true, which the `!=` chain would not reproduce |
 | `COUNT(*)` | `count ( 1 )` — TS has no `COUNT(*)` syntax |
 | `AGG(x) FILTER (WHERE cond)` | `agg_if ( cond , [x] )` — native `*_if` function; see Conditional Aggregates section. Applies to **every** aggregate call in an expression, e.g. `SUM(a) FILTER (WHERE c) / NULLIF(SUM(b), 0)` → `safe_divide ( sum_if ( c , [a] ) , sum ( [b] ) )` (BL-316, 2026-09-28) |
 | `SUM(SUM(x)) OVER ()` | `group_aggregate ( sum ( [x] ) , { } , query_filters ( ) )` — grand total of the result rows, filters kept (share-of-total denominators). Only an empty `OVER ()`, and only SUM of SUM/COUNT, MIN of MIN, MAX of MAX. The argument must be exactly one aggregate call — `SUM(SUM(a)/SUM(b)) OVER ()` is refused. Live-verified 2026-09-28 (BL-316) |

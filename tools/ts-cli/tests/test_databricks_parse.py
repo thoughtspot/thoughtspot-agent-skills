@@ -1168,6 +1168,8 @@ measures:
     expr: SUM(x) / (SELECT SUM(x) FROM cat.sch.other)
   - name: grouped
     expr: SUM(x) / (SELECT SUM(x) FROM cat.sch.agg GROUP BY y)
+  - name: correlated
+    expr: SUM(x) / (SELECT SUM(x) FROM cat.sch.agg WHERE region = source.region)
 """
 
     def test_lifted_and_recorded(self):
@@ -1184,7 +1186,8 @@ measures:
     def test_other_shapes_stay_unsupported(self):
         from ts_cli.databricks.mv_parse import parse_metric_view
         out = parse_metric_view(self.YAML)
-        assert {u["name"] for u in out["unsupported"]} == {"other_table", "grouped"}
+        assert {u["name"] for u in out["unsupported"]} == {"other_table", "grouped",
+                                                           "correlated"}
         assert all("subquery" in u["detail"] for u in out["unsupported"])
 
     def test_measure_without_subquery_has_no_key(self):

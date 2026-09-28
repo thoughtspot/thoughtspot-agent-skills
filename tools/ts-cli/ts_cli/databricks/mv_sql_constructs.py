@@ -62,7 +62,12 @@ def _construct_not(cur, resolver, units: list[str]) -> None:
         # BL-316 item 3 — `x NOT IN (a, b)` -> ( x != a and x != b )
         cur.advance()
         operand = _pop_operand(units, "NOT IN")
-        ands = " and ".join(f"{operand} != {v}" for v in _in_values(cur, resolver))
+        values = _in_values(cur, resolver)
+        if "null" in values:
+            raise UntranslatableError(
+                "NOT IN with a NULL in the list is never true in SQL; the != chain "
+                "would not reproduce that — rewrite without the NULL")
+        ands = " and ".join(f"{operand} != {v}" for v in values)
         units.append(f"( {ands} )")
         return
     if kind == "kw" and text in ("BETWEEN", "LIKE"):

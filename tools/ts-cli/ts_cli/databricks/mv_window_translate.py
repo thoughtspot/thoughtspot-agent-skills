@@ -58,8 +58,11 @@ _ORDER_BY_FORMULA = (
 # (order grain, offset unit) pairs whose LAG was number-matched against
 # Databricks: month/month at N=1 (matrix C6) and N=12, day/day at N=364,
 # week/day at 364 days = 52 rows (2026-09-28, nebula-ts-semview).
-_LAG_VERIFIED = {("month", "month"), ("day", "day"), ("week", "day")}
-_ORDER_FN_OK = frozenset({"DATE_ADD", "DATE_SUB", "DATE_TRUNC"})
+_LAG_VERIFIED = {("month", "month", 1), ("month", "month", 12),
+                 ("day", "day", 364), ("week", "day", 364)}
+# DATE_SUB is deliberately absent: mv_sql does not translate it, so an order
+# dimension using it would be skipped while the LAG still named its formula.
+_ORDER_FN_OK = frozenset({"DATE_ADD", "DATE_TRUNC"})
 _C8_PENDING = (
     "period-offset translation live-verified only for N=1 at month grain "
     "(matrix C6); this {grain}-grain / {unit}-offset combination is the "
@@ -112,8 +115,15 @@ def translate_window_measure(measure: dict, dimensions: list[dict],
     wrapped: list[str] = []
 
     def hook(agg: str, inner: str) -> str:
-        wrapped.append(agg)
-        return wrap(agg, inner)
+        # An aggregate nested inside another (SUM(SUM(a))) would be windowed
+        # twice — cumulative_sum ( cumulative_sum ( … ) ) — refuse it.
+        if any(w in inner for w in wrapped):
+            raise UntranslatableError(
+                "nested aggregate inside a windowed measure: the window would "
+                "apply twice")
+        out = wrap(agg, inner)
+        wrapped.append(out)
+        return out
 
     resolver = make_resolver(tables, measure.get("scalar_subqueries"),
                              in_window=True, window_date_ref=order.get("date_ref"))
@@ -122,7 +132,7 @@ def translate_window_measure(measure: dict, dimensions: list[dict],
         raise UntranslatableError(
             "windowed measure expr contains no aggregate for the window to "
             "apply to (worked-example rule 9)")
-    if order.get("formula_title"):
+    if order.get("formula_title") and order["sort_ref"] in ts:
         annotations.append({"kind": "order_by_formula", "detail":
                             _ORDER_BY_FORMULA.format(title=order["formula_title"],
                                                      order=window["order"])})
@@ -177,6 +187,12 @@ def _find_order_dim(order_name: str, dimensions: list[dict],
         if shifted is not None:
             unit, column = shifted
             title = display_title(dim)
+            try:  # the LAG references this dimension's formula: it must exist
+                translate_sql_expr(stripped, resolver)
+            except UntranslatableError as exc:
+                raise UntranslatableError(
+                    f"window order dimension '{order_name}' does not translate "
+                    f"({exc}), so the window cannot be ordered by it") from exc
             return {"grain": unit, "sort_ref": f"[{formula_id(title)}]",
                     "formula_title": title, "date_ref": resolver(column)}
         if m and not _PLAIN_COLUMN_RE.match(m.group(2).strip()):
@@ -196,28 +212,46 @@ def _find_order_dim(order_name: str, dimensions: list[dict],
 
 def _shifted_trunc_unit(expr: str) -> tuple[str, str] | None:
     """(unit, column) of an expr that is one DATE_TRUNC('<unit>', …) of ONE
-    column, wrapped only in DATE_ADD/DATE_SUB shifts — else None."""
+    column, wrapped only in DATE_ADD shifts by integer literals — else None."""
     from ts_cli.databricks.mv_sql import tokenize
     try:
         toks = tokenize(expr)
     except UntranslatableError:
         return None
     fns, cols, units = [], set(), []
-    for i, (kind, text) in enumerate(toks):
-        nxt = toks[i + 1] if i + 1 < len(toks) else (None, None)
-        if kind == "ident" and nxt == ("op", "("):
-            fns.append(text.upper())
-        elif kind == "ident":
-            cols.add(text)
-        elif kind == "string":
-            units.append(text.strip("'").lower())
-        elif kind not in ("op", "number"):
-            return None
+    for i, tok in enumerate(toks):
+        role = _shift_token_role(toks, i)
+        if role is None:
+            return None  # arithmetic or anything else: not a plain date shift
+        if role == "fn":
+            fns.append(tok[1].upper())
+        elif role == "col":
+            cols.add(tok[1])
+        elif role == "unit":
+            units.append(tok[1].strip("'").lower())
     if (fns.count("DATE_TRUNC") != 1 or not set(fns) <= _ORDER_FN_OK
             or len(cols) != 1 or len(units) != 1
             or units[0] not in _TRUNC_GRAINS):
         return None
     return units[0], next(iter(cols))
+
+
+def _shift_token_role(toks: list, i: int) -> str | None:
+    """fn | col | unit | punct for a token allowed in a date-shifted truncation."""
+    kind, text = toks[i]
+    prv = toks[i - 1][1] if i else None
+    nxt = toks[i + 1] if i + 1 < len(toks) else (None, None)
+    if kind == "ident":
+        return "fn" if nxt == ("op", "(") else "col"
+    if kind == "string":
+        return "unit"
+    if kind == "op" and text in ("(", ")", ","):
+        return "punct"
+    if kind == "op" and text == "-" and nxt[0] == "number" and prv in ("(", ","):
+        return "punct"  # a negative integer argument: DATE_ADD(x, -3)
+    if kind == "number" and prv in (",", "-"):
+        return "punct"
+    return None
 
 
 def _moving_wrap(window, order, annotations):
@@ -337,7 +371,7 @@ def _lag_wrap(window, order, offset, annotations):
     p = _lag_periods(order["grain"], offset)
     annotations.append({"kind": "one_row_per_period",
                         "detail": _ONE_ROW_PER_PERIOD.format(order=window["order"])})
-    if (order["grain"], offset["unit"]) not in _LAG_VERIFIED:
+    if (order["grain"], offset["unit"], abs(offset["n"])) not in _LAG_VERIFIED:
         annotations.append({"kind": "pending_verification",
                             "detail": _C8_PENDING.format(
                                 grain=order["grain"], unit=offset["unit"])})

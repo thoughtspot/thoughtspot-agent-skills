@@ -158,7 +158,11 @@ _SCALAR_SUBQUERY_RE = re.compile(
     rf"(?P<fqn>{_DOT_PATH})\s*(?:WHERE\s+(?P<where>.+?))?\s*\)$",
     re.IGNORECASE | re.DOTALL)
 _SCALAR_REJECT_RE = re.compile(
-    r"\b(SELECT|JOIN|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|UNION|OVER)\b|,",
+    r"\b(SELECT|JOIN|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|UNION|OVER)\b|,"
+    # a qualified reference (`source.region`, `o.id`) may correlate with the
+    # outer row; lifting it to a whole-table LOD would turn the correlation
+    # into a tautology (review 2026-09-28). Only bare columns are lifted.
+    rf"|{_IDENT}\s*\.\s*{_IDENT}",
     re.IGNORECASE)
 
 

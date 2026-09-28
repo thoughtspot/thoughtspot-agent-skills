@@ -305,6 +305,10 @@ class TestPostfixConstructs:
             "[TRANSACTIONS::a] = 'c' and ( [TRANSACTIONS::v] != 'Media' and "
             "[TRANSACTIONS::v] != 'Data Services' )")
 
+    def test_not_in_with_null_raises(self):
+        with pytest.raises(UntranslatableError, match="NULL"):
+            t("x NOT IN ('a', NULL)")
+
     def test_not_between_still_raises(self):
         with pytest.raises(UntranslatableError, match="NOT BETWEEN"):
             t("x NOT BETWEEN 1 AND 2")

@@ -619,6 +619,62 @@ class TestFormulaOrderedWeek:
                 dims, TABLES)
 
 
+class TestWindowReviewGuards:
+    """Adversarial review 2026-09-28."""
+
+    def test_nested_aggregate_in_window_raises(self):
+        with pytest.raises(UntranslatableError, match="nested aggregate"):
+            translate_window_measure(
+                _win_measure("m", "SUM(SUM(a))", "complex", _window("date", "cumulative")),
+                BF_DIMS, TABLES)
+
+    def test_untranslatable_order_dim_raises(self):
+        # passes the shifted-trunc shape check, but its column's alias is unmapped
+        dims = BF_DIMS + [_dim("odd_week", "DATE_ADD(DATE_TRUNC('WEEK', nope.dt), -3)",
+                               "computed")]
+        with pytest.raises(UntranslatableError, match="does not translate"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("odd_week", "current", offset=_offset(-1, "week")),
+                             physical_ref="x", agg_function="SUM"),
+                dims, TABLES)
+
+    def test_date_sub_order_dim_not_formula_ordered(self):
+        dims = BF_DIMS + [_dim("sub_week", "DATE_SUB(DATE_TRUNC('WEEK', DATE_ADD(dt, 3)), 3)",
+                               "computed")]
+        with pytest.raises(UntranslatableError, match="cannot determine"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("sub_week", "current", offset=_offset(-1, "week")),
+                             physical_ref="x", agg_function="SUM"),
+                dims, TABLES)
+
+    def test_arithmetic_is_not_a_date_shift(self):
+        dims = BF_DIMS + [_dim("minus", "DATE_TRUNC('MONTH', dt) - 3", "computed")]
+        with pytest.raises(UntranslatableError, match="cannot determine"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("minus", "current", offset=_offset(-1, "month")),
+                             physical_ref="x", agg_function="SUM"),
+                dims, TABLES)
+
+    def test_order_by_formula_only_when_used(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(x)", "simple", _window("week", "current"),
+                         physical_ref="x", agg_function="SUM"),
+            BF_DIMS, TABLES)
+        assert out["ts_expr"] == "sum ( [TRANSACTIONS::x] )"
+        assert "order_by_formula" not in [a["kind"] for a in out["annotations"]]
+
+    def test_unverified_n_keeps_pending(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(x)", "simple",
+                         _window("date", "current", offset=_offset(-7, "day")),
+                         physical_ref="x", agg_function="SUM"),
+            BF_DIMS, TABLES)
+        assert "pending_verification" in [a["kind"] for a in out["annotations"]]
+
+
 class TestRatioWindow:
     """BL-316 item 7 — the window applies to each aggregate of a ratio."""
 
@@ -712,18 +768,24 @@ class TestScalarSubquery:
                              scalar_subqueries=[dict(LAST_ACTUAL, arg="ship_dt")]),
                 BF_DIMS, TABLES)
 
-    def test_scalar_under_mv_filter_is_annotated(self):
-        # review finding C: the mirrored model filter still applies to {} LODs
+    def test_scalar_under_mv_filter_is_refused(self):
+        # review: {} LODs still apply the mirrored model filter; the subquery doesn't
         m = _measure(
             "capped", "SUM(x) FILTER (WHERE dt <= __MVSCALAR_0__)", "conditional",
             scalar_subqueries=[LAST_ACTUAL])
         out = translate_metric_view(_parsed(dimensions=[], measures=[m],
                                             filter_sql="region = 'EU'"), TABLES)
-        kinds = [a["kind"] for a in out["translated"][0]["annotations"]]
-        assert "scalar_under_mv_filter" in kinds
+        assert out["translated"] == []
+        assert "unfiltered source" in out["skipped"][0]["reason"]
         out2 = translate_metric_view(_parsed(dimensions=[], measures=[m]), TABLES)
-        assert "scalar_under_mv_filter" not in [
-            a["kind"] for a in out2["translated"][0]["annotations"]]
+        assert out2["skipped"] == [] and len(out2["translated"]) == 1
+
+    def test_count_star_scalar_is_count_1(self):
+        sc = dict(LAST_ACTUAL, agg="COUNT", arg="*", where=None)
+        out = translate_measure(_measure(
+            "m", "SUM(x) / NULLIF(__MVSCALAR_0__, 0)", "complex",
+            scalar_subqueries=[sc]), TABLES)
+        assert "group_aggregate ( count ( 1 ) , { } , { } )" in out["ts_expr"]
 
     def test_non_max_scalar_inside_window_raises(self):
         with pytest.raises(UntranslatableError, match=r"only\s+MAX"):
