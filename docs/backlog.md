@@ -89,7 +89,7 @@ are roughly ordered by value÷effort.
 | BL-242 | fixed `PARTITION BY` silently dropped from every cumulative/moving window — YTD becomes a lifetime total | next formula pass, with BL-180 |
 | BL-243 | `with tag` folded into the metric expr — destroys all 5 metrics, `build-model` still exits 0 | next SF converter pass |
 | BL-244 | SV `variables` translate 8/8 / 0 skipped (false success), then fail at import and re-deploy | next SF converter pass, with BL-031 |
-| BL-315 | from-Databricks: a `range: current` + `offset:` window ordered by a raw date drops the offset silently — prior-year measures return this year's number | next DBX pass |
+| ~~BL-315~~ | ~~from-Databricks: a `range: current` + `offset:` window ordered by a raw date drops the offset silently — prior-year measures return this year's number~~ | DONE (2026-09-28) |
 
 ### Tier 2 — Schedule soon
 
@@ -197,7 +197,7 @@ are roughly ordered by value÷effort.
 | ~~BL-304~~ | ~~the data/perf check split was made by copying, not extracting: `d4`≡`p4`, `s9`≡`p14` verbatim, `s8` ⊇ `p15`, `_join_depth`≡`p7`, `_table_role` twice, `d1`'s column rule ≡ `p8`~~ | DONE (2026-09-22) |
 | ~~BL-305~~ | ~~alias blindness in `d6`/`d10`/`d11`/`s2`, and join findings reported with an empty `object_name`~~ | DONE (2026-09-23) |
 | BL-283 | `check-catalog.md` and the audit `check_id`s can drift with nothing to notice — 51 documented vs 50 emitted today, and the deferred-id table means a naive comparison is wrong | next validator pass |
-| BL-316 | from-Databricks translator gaps found converting a 136-measure budget/forecast MV — 88 needed hand authoring; two ThoughtSpot window limits to document | next DBX pass |
+| ~~BL-316~~ | ~~from-Databricks translator gaps found converting a 136-measure budget/forecast MV — 88 needed hand authoring; two ThoughtSpot window limits to document~~ | DONE (2026-09-28) |
 
 ### Tier 3 — Opportunistic
 
@@ -11661,7 +11661,7 @@ regeneration, which is why it did not ride along with the one-line map row.
 
 **Target:** next validator pass.
 
-## BL-315 — a day-grain `offset:` window is translated with its offset dropped `Tier 1`
+## ~~BL-315~~ — a day-grain `offset:` window is translated with its offset dropped `Tier 1` — DONE (2026-09-28)
 
 **Filed:** 2026-09-28.
 **Source:** live conversion of a 136-measure budget/forecast Metric View
@@ -11695,9 +11695,14 @@ whenever `offset` is set; `last_value` is right only for an offset-less semi-add
 **Test to add:** a day-grain `offset: -N day` window must yield `moving_sum (…, N, -N, …)`
 and never `last_value`.
 
-**Target:** next DBX pass.
+**Resolution (2026-09-28, ts-cli v0.149.0).** `_current_wrap` now checks `offset` before
+the raw-date branch, so an offset always routes to the LAG; `-N week` at day grain lags 7N
+rows, and a month/quarter/year offset at day grain is refused rather than approximated.
+Regression guard: `TestBL315DayGrainOffset` asserts `last_value` never appears when an
+offset is set. Re-running the budget/forecast MV through the fixed CLI reproduced the
+live-verified prior-year numbers exactly.
 
-## BL-316 — from-Databricks translator gaps from a budget/forecast Metric View `Tier 2`
+## ~~BL-316~~ — from-Databricks translator gaps from a budget/forecast Metric View `Tier 2` — DONE (2026-09-28)
 
 **Filed:** 2026-09-28.
 **Source:** same conversion as BL-315. 48 of 136 measures translated unaided; the other 88
@@ -11731,4 +11736,13 @@ from the NULL-vs-0 already tracked as BL-180).
 **Two-bucket exit.** Items 1–7 are translator work (one PR, each with a test). The two limits
 are mapping-doc rows plus annotation text.
 
-**Target:** next DBX pass.
+**Resolution (2026-09-28, ts-cli v0.149.0).** All seven items are translator code with unit
+tests, and both limits are documented (the `one_row_per_period` annotation now states the
+filter limit; the scalar-in-window stand-in `add_days ( today ( ) , -1 )` carries a
+`cap_assumption` annotation — option (a), chosen by the user). The windowed-measure
+translator now applies the window to **every** aggregate via a tokenizer hook, instead of
+stripping one outer aggregate. The unmodified MV now translates **158/158, 0 skipped** (was
+70/158 plus the BL-315 silent wrong answer); 157 of 158 formulas are text-identical to the
+hand-verified conversion after normalising equivalent spellings, and the model rebuilt from
+the CLI's output alone number-matched Databricks on channel share, budget/eCPC variance,
+revenue per booking and daily/weekly/monthly prior-year measures.

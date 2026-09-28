@@ -1149,3 +1149,47 @@ class TestParseMvCli:
         assert result.exit_code == 0, result.stdout + _stderr(result)
         err = _stderr(result)
         assert "WARNING" in err and "BL-098" in err
+
+
+
+class TestScalarSubqueryLifting:
+    """BL-316 item 1 — parse-mv lifts a whole-table scalar subquery over the
+    MV's own source into a placeholder instead of rejecting the measure."""
+
+    YAML = """version: 1.1
+source: cat.sch.agg
+dimensions:
+  - name: date
+    expr: dt
+measures:
+  - name: capped
+    expr: SUM(x) FILTER (WHERE observation = 'budget' AND dt <= (SELECT MAX(dt) FROM cat.sch.agg WHERE observation = 'current'))
+  - name: other_table
+    expr: SUM(x) / (SELECT SUM(x) FROM cat.sch.other)
+  - name: grouped
+    expr: SUM(x) / (SELECT SUM(x) FROM cat.sch.agg GROUP BY y)
+"""
+
+    def test_lifted_and_recorded(self):
+        from ts_cli.databricks.mv_parse import parse_metric_view
+        out = parse_metric_view(self.YAML)
+        m = next(x for x in out["measures"] if x["name"] == "capped")
+        assert m["expr"] == ("SUM(x) FILTER (WHERE observation = 'budget' AND "
+                             "dt <= __MVSCALAR_0__)")
+        assert m["expr_kind"] == "conditional"
+        assert m["scalar_subqueries"] == [{
+            "agg": "MAX", "arg": "dt", "where": "observation = 'current'",
+            "sql": "(SELECT MAX(dt) FROM cat.sch.agg WHERE observation = 'current')"}]
+
+    def test_other_shapes_stay_unsupported(self):
+        from ts_cli.databricks.mv_parse import parse_metric_view
+        out = parse_metric_view(self.YAML)
+        assert {u["name"] for u in out["unsupported"]} == {"other_table", "grouped"}
+        assert all("subquery" in u["detail"] for u in out["unsupported"])
+
+    def test_measure_without_subquery_has_no_key(self):
+        from ts_cli.databricks.mv_parse import parse_metric_view
+        out = parse_metric_view(self.YAML.replace(
+            "(SELECT MAX(dt) FROM cat.sch.agg WHERE observation = 'current')", "dt"))
+        m = next(x for x in out["measures"] if x["name"] == "capped")
+        assert "scalar_subqueries" not in m

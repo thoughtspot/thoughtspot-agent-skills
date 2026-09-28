@@ -295,9 +295,19 @@ class TestPostfixConstructs:
         with pytest.raises(UntranslatableError, match="LIKE"):
             t("s LIKE 'a%'")
 
-    def test_not_in_raises(self):
-        with pytest.raises(UntranslatableError, match="NOT IN"):
-            t("x NOT IN (1, 2)")
+    def test_not_in_becomes_and_chain(self):
+        # BL-316 item 3 (was a documented gap until 2026-09-28)
+        assert t("x NOT IN (1, 2)") == \
+            "( [TRANSACTIONS::x] != 1 and [TRANSACTIONS::x] != 2 )"
+
+    def test_not_in_after_and(self):
+        assert t("a = 'c' AND v NOT IN ('Media', 'Data Services')") == (
+            "[TRANSACTIONS::a] = 'c' and ( [TRANSACTIONS::v] != 'Media' and "
+            "[TRANSACTIONS::v] != 'Data Services' )")
+
+    def test_not_between_still_raises(self):
+        with pytest.raises(UntranslatableError, match="NOT BETWEEN"):
+            t("x NOT BETWEEN 1 AND 2")
 
     def test_not_comparison_wraps(self):
         assert t("NOT status = 'Completed'") == \
@@ -377,3 +387,76 @@ class TestSafeDivide:
     def test_coalesce_three_args_raises(self):
         with pytest.raises(UntranslatableError, match="COALESCE"):
             t("COALESCE(a, b, c)")
+
+
+class TestAggregateFilterClause:
+    """BL-316 item 4 — FILTER (WHERE …) anywhere in an expression, not only as
+    the whole measure (the `FILTER … / NULLIF(…)` shape used to fail)."""
+
+    def test_filter_then_divide(self):
+        assert t("SUM(r) FILTER (WHERE o = 'current') / NULLIF(SUM(s), 0)") == (
+            "safe_divide ( sum_if ( [TRANSACTIONS::o] = 'current' , "
+            "[TRANSACTIONS::r] ) , sum ( [TRANSACTIONS::s] ) )")
+
+    def test_filter_both_sides_of_minus(self):
+        assert t("SUM(r) FILTER (WHERE o = 'a') - SUM(r) FILTER (WHERE o = 'b')") == (
+            "sum_if ( [TRANSACTIONS::o] = 'a' , [TRANSACTIONS::r] ) - "
+            "sum_if ( [TRANSACTIONS::o] = 'b' , [TRANSACTIONS::r] )")
+
+    def test_count_distinct_filter(self):
+        assert t("COUNT(DISTINCT c) FILTER (WHERE o = 'a') * 1") == (
+            "unique_count_if ( [TRANSACTIONS::o] = 'a' , [TRANSACTIONS::c] ) * 1")
+
+    def test_median_filter_raises(self):
+        with pytest.raises(UntranslatableError, match="no native"):
+            t("MEDIAN(x) FILTER (WHERE o = 'a') + 1")
+
+    def test_filter_without_where_raises(self):
+        with pytest.raises(UntranslatableError, match="FILTER expects"):
+            t("SUM(x) FILTER (o = 'a') + 1")
+
+
+class TestEmptyOverWindow:
+    """BL-316 item 5 — SUM(SUM(x)) OVER () share-of-total denominator."""
+
+    def test_sum_of_sum(self):
+        # safe_divide binds the unit left of '/' (pre-existing NULLIF collapse):
+        # a * (100 / b) == (a * 100) / b, zero divisor included
+        assert t("SUM(x) * 100.0 / NULLIF(SUM(SUM(x)) OVER (), 0)") == (
+            "sum ( [TRANSACTIONS::x] ) * safe_divide ( 100.0 , group_aggregate "
+            "( sum ( [TRANSACTIONS::x] ) , { } , query_filters ( ) ) )")
+
+    def test_sum_of_count(self):
+        assert t("SUM(COUNT(x)) OVER ()") == \
+            "group_aggregate ( count ( [TRANSACTIONS::x] ) , { } , query_filters ( ) )"
+
+    def test_sum_of_avg_raises(self):
+        # a sum of per-group averages is not an average — no LOD equivalent
+        with pytest.raises(UntranslatableError, match="roll-up"):
+            t("SUM(AVG(x)) OVER ()")
+
+    def test_partitioned_over_raises(self):
+        with pytest.raises(UntranslatableError, match="empty OVER"):
+            t("SUM(SUM(x)) OVER (PARTITION BY r)")
+
+
+class TestAggregateHook:
+    """BL-316 item 7 — the window hook wraps every aggregate."""
+
+    @staticmethod
+    def hook(agg, inner):
+        return f"W{agg} ( {inner} )"
+
+    def test_each_side_of_ratio_wrapped(self):
+        assert translate_sql_expr("SUM(a) / NULLIF(SUM(b), 0)", _resolver,
+                                  agg_hook=self.hook) == (
+            "safe_divide ( WSUM ( [TRANSACTIONS::a] ) , WSUM ( [TRANSACTIONS::b] ) )")
+
+    def test_filter_becomes_null_else_under_hook(self):
+        assert translate_sql_expr("SUM(a) FILTER (WHERE o = 'x')", _resolver,
+                                  agg_hook=self.hook) == (
+            "WSUM ( if ( [TRANSACTIONS::o] = 'x' ) then [TRANSACTIONS::a] else null )")
+
+    def test_count_distinct_under_hook_raises(self):
+        with pytest.raises(UntranslatableError, match="DISTINCT"):
+            translate_sql_expr("COUNT(DISTINCT a)", _resolver, agg_hook=self.hook)

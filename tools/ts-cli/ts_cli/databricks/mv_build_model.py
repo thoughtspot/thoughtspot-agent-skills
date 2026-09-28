@@ -9,14 +9,11 @@ from __future__ import annotations
 
 import re
 
-from ts_cli.databricks.mv_translate import normalize_tables, reused_physicals
+from ts_cli.databricks.mv_translate import (  # noqa: F401 — display_title re-exported
+    display_title, normalize_tables, reused_physicals)
 from ts_cli.formula_common import (add_formula_prefix, fix_double_aggregation,
                                    promote_duplicate_column_ids,
                                    resolve_name_collisions)
-
-
-def display_title(entry: dict) -> str:
-    return entry.get("display_name") or entry["name"].replace("_", " ").title()
 
 
 def _currency_type(entry: dict) -> dict | None:

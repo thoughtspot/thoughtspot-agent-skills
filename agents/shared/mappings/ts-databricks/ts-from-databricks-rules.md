@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-08 (PR1 window deep-analysis 2026-07-09: MV→TS window translations live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading anchor args corrected (C1/C3), leading/all/cumulative/semi-additive confirmed (C3/C4/C5/C7), period-filter offset corrected from wall-clock sum_if to row-relative moving_sum LAG idiom (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-31 BL-174: MV join type re-confirmed LEFT OUTER against the vendor joins doc and the MV->TS join type corrected from INNER to LEFT_OUTER; cardinality documented as mandatory on the TS side (live-probed VALIDATE_ONLY: "both  type and cardinality should be defined"); the currency format row's TS field corrected from currency_code to currency_type.iso_code and now implemented); 2026-08-26 finding 13.13: the "rely: works on every Runtime" claim WITHDRAWN -- the vendor feature-availability matrix lists join optimization with rely.at_most_one_match under 18.1 while the YAML reference gates only one-to-many joins; both readings recorded, unverifiable on our workspace (both channels run DBSQL 2026.35), 18.1+ is now the documented floor; 2026-08-26 finding 13.17: the `window:` Experimental caution is WITHDRAWN -- re-fetched the YAML reference and no Experimental/Preview/Beta label appears on it, so finding 13.11's standing "re-check window first" instruction is discharged. NB the finding's claim that the vendor now publishes the frame table is NOT true of the YAML reference, so this repo's live-verified frame semantics remain the authority -->
+<!-- currency: databricks — 2026-09 (2026-09-28 BL-315/BL-316: day-grain offset -> LAG (was silently last_value), week grain formula-ordered LAG, ratio windows wrap every aggregate, whole-table scalar subquery -> group_aggregate(…,{},{}); PR1 window deep-analysis 2026-07-09: MV→TS window translations live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading anchor args corrected (C1/C3), leading/all/cumulative/semi-additive confirmed (C3/C4/C5/C7), period-filter offset corrected from wall-clock sum_if to row-relative moving_sum LAG idiom (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-31 BL-174: MV join type re-confirmed LEFT OUTER against the vendor joins doc and the MV->TS join type corrected from INNER to LEFT_OUTER; cardinality documented as mandatory on the TS side (live-probed VALIDATE_ONLY: "both  type and cardinality should be defined"); the currency format row's TS field corrected from currency_code to currency_type.iso_code and now implemented); 2026-08-26 finding 13.13: the "rely: works on every Runtime" claim WITHDRAWN -- the vendor feature-availability matrix lists join optimization with rely.at_most_one_match under 18.1 while the YAML reference gates only one-to-many joins; both readings recorded, unverifiable on our workspace (both channels run DBSQL 2026.35), 18.1+ is now the documented floor; 2026-08-26 finding 13.17: the `window:` Experimental caution is WITHDRAWN -- re-fetched the YAML reference and no Experimental/Preview/Beta label appears on it, so finding 13.11's standing "re-check window first" instruction is discharged. NB the finding's claim that the vendor now publishes the frame table is NOT true of the YAML reference, so this repo's live-verified frame semantics remain the authority -->
 
 # Reverse Mapping Rules Reference
 
@@ -236,8 +236,12 @@ Does the measure have a `window:` section?
                                    start=-1, end=N; inclusive: start=0, end=N-1 —
                                    see Leading Window below; Live-verified 2026-07-09)
         range: cumulative      → cumulative_sum (Live-verified 2026-07-09)
-        range: current + raw date order        → last_value/first_value (semi-additive;
+        range: current + raw date order, no offset → last_value/first_value (semi-additive;
                                                    Live-verified 2026-07-09)
+        range: current + raw date order, offset: -N day|week → moving_sum(m, N, -N, date)
+                                                   (LAG in day rows; BL-315 — was silently
+                                                   last_value with the offset dropped;
+                                                   Live-verified 2026-09-28)
         range: current + truncated period, no offset → plain sum(m) at the query grain
                                                    (Live-verified 2026-07-09 — see Period
                                                    Filter below; this is row-relative, NOT
@@ -246,6 +250,10 @@ Does the measure have a `window:` section?
                                                    (LAG idiom; Live-verified 2026-07-09 —
                                                    one-row-per-period caveat, see Period
                                                    Filter below)
+        range: current + week / date-shifted truncation, offset → moving_sum(m, N, -N, [Dim])
+                                                   (ordered by the dimension's formula;
+                                                   Live-verified 2026-09-28)
+        any range, expr with several aggregates (ratio) → the window wraps EACH aggregate
         range: all              → group_aggregate(sum(m), {partition dims}, query_filters())
                                    (Live-verified 2026-07-09 — see All-Partition Window below)
         
@@ -275,7 +283,10 @@ Is expr a simple aggregate? (single AGG function wrapping a column or simple exp
   NO  → Does expr contain MEASURE() or ANY_VALUE()?
           YES → Cross-measure reference (see below)
   NO  → Does expr contain (SELECT ...)?
-          YES → Subquery — untranslatable, log in Unmapped Report
+          YES → (SELECT AGG(x) FROM <MV source> [WHERE c]) → group_aggregate ( … , { } , { } )
+                (whole-table scalar; see ts-databricks-formula-translation.md "Scalar
+                Subqueries over the MV Source"). Any other subquery — untranslatable,
+                log in Unmapped Report
   NO  → Formula MEASURE (ratios, nested aggregates, arithmetic)
           Create a formulas[] entry with translated expression
 ```
@@ -647,7 +658,12 @@ type of measure and the `order:` dimension. Use this classification:
 
 ```
 Does the window have `range: current`?
-  YES → Is `order:` a raw date dimension (not a truncated period)?
+  YES → Does it have an `offset:`?
+          YES → LAG: moving_sum ( [m] , N , -N , <order> ) — N = offset in rows of the
+                order grain (day: -364 day → 364; week: -364 day → 52; month: -12 month → 12);
+                <order> is [date], or [<Dim>] for a week / date-shifted order dimension
+                (BL-315: this check must come BEFORE the raw-date branch)
+        Is `order:` a raw date dimension (not a truncated period)?
           YES → True semi-additive (snapshot metric)
                 → last_value ( sum ( [m] ) , query_groups ( ) , { [date] } )   [semiadditive: last]
                 → first_value ( sum ( [m] ) , query_groups ( ) , { [date] } )  [semiadditive: first]

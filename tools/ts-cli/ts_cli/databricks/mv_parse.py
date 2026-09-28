@@ -22,6 +22,7 @@ from ts_cli.databricks.mv_expr import (  # noqa: F401 — re-exported API
     classify_dimension_expr,
     classify_measure_expr,
     extract_cross_refs,
+    extract_scalar_subqueries,
     split_dot_path,
     strip_sql_comments,
 )
@@ -236,7 +237,8 @@ def _parse_dimension(d: dict, unsupported: list) -> dict | None:
             "partition_by": cls.get("partition_by", [])}
 
 
-def _parse_measure(m: dict, unsupported: list, warnings: list) -> dict | None:
+def _parse_measure(m: dict, unsupported: list, warnings: list,
+                   source_fqn: str | None = None) -> dict | None:
     name, expr = m.get("name"), m.get("expr")
     if not name or expr is None:
         unsupported.append(_unsupported_entry(
@@ -244,7 +246,9 @@ def _parse_measure(m: dict, unsupported: list, warnings: list) -> dict | None:
         return None
     if _bad_synonyms(m, "measure", name, unsupported):
         return None
-    expr = str(expr)
+    expr, scalars = extract_scalar_subqueries(str(expr), source_fqn)
+    if not scalars:
+        expr = str(m.get("expr"))  # untouched unless a subquery was lifted
     cls = classify_measure_expr(expr)
     if cls["expr_kind"] == "unsupported":
         unsupported.append(_unsupported_entry(
@@ -273,7 +277,8 @@ def _parse_measure(m: dict, unsupported: list, warnings: list) -> dict | None:
             "comment": m.get("comment"),
             "synonyms": list(m.get("synonyms") or []),
             "format": m.get("format"),
-            "window": window}
+            "window": window,
+            **({"scalar_subqueries": scalars} if scalars else {})}
 
 
 def _check_unknown_top_keys(doc: dict, unsupported: list) -> None:
@@ -317,7 +322,8 @@ def _resolve_dimensions(doc: dict, unsupported: list) -> list[dict]:
     return dims
 
 
-def _resolve_measures(doc: dict, unsupported: list, warnings: list) -> list[dict]:
+def _resolve_measures(doc: dict, unsupported: list, warnings: list,
+                      source: dict | None = None) -> list[dict]:
     measures_raw = doc.get("measures") or []
     if not isinstance(measures_raw, list):
         unsupported.append(_unsupported_entry(
@@ -325,9 +331,13 @@ def _resolve_measures(doc: dict, unsupported: list, warnings: list) -> list[dict
             f"measures must be a list, got {type(measures_raw).__name__}"))
         measures_raw = []
     measures: list[dict] = []
+    # Only a physical-table source can be the target of a lifted scalar
+    # subquery (BL-316 item 1); a SQL-query source keeps the subquery check.
+    source_fqn = (source["raw"] if source and source.get("kind") == "table_fqn"
+                  else None)
     for m in measures_raw:
         entry = _parse_measure(m if isinstance(m, dict) else {},
-                               unsupported, warnings)
+                               unsupported, warnings, source_fqn)
         if entry:
             measures.append(entry)
     return measures
@@ -383,7 +393,8 @@ def parse_metric_view(yaml_text: str) -> dict:
         joins_val = None
     result["joins"] = parse_joins(joins_val, "source", unsupported)
     result["dimensions"] = _resolve_dimensions(doc, unsupported)
-    result["measures"] = _resolve_measures(doc, unsupported, warnings)
+    result["measures"] = _resolve_measures(doc, unsupported, warnings,
+                                           result["source"])
 
     # BL-099 #3 — duplicate identifiers across dimensions + measures would
     # double-emit downstream (mv_name-keyed lookups are last-write-wins).

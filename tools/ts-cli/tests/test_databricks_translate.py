@@ -511,6 +511,203 @@ class TestWindowMeasures:
                 DIMS, TABLES)
 
 
+# --- BL-315 / BL-316 (2026-09-28): budget/forecast Metric View constructs ----
+
+FWK = "DATE_ADD(DATE_TRUNC('WEEK', DATE_ADD(dt, 3)), -3)"
+BF_DIMS = [
+    _dim("date", "dt", "direct"),
+    _dim("month", "DATE_TRUNC('MONTH', dt)", "computed"),
+    _dim("week", FWK, "computed"),
+    _dim("week_mond", "DATE_TRUNC('WEEK', dt)", "computed"),
+]
+LAST_ACTUAL = {"agg": "MAX", "arg": "dt", "where": "observation = 'current'",
+               "sql": "(SELECT MAX(dt) FROM c.s.t WHERE observation = 'current')"}
+GA = ("group_aggregate ( max ( if ( [TRANSACTIONS::observation] = 'current' ) "
+      "then [TRANSACTIONS::dt] else null ) , { } , { } )")
+
+
+def _offset(n, unit):
+    return {"n": n, "unit": unit}
+
+
+class TestBL315DayGrainOffset:
+    """A day-grain `range: current` + `offset:` used to return last_value with
+    the offset silently dropped — a prior-year measure gave this year's value."""
+
+    def test_day_offset_is_a_lag_never_last_value(self):
+        out = translate_window_measure(
+            _win_measure("py_daily", "SUM(x) FILTER (WHERE observation = 'current')",
+                         "conditional", _window("date", "current",
+                                                offset=_offset(-364, "day"))),
+            BF_DIMS, TABLES)
+        assert "last_value" not in out["ts_expr"]
+        assert out["ts_expr"] == (
+            "moving_sum ( if ( [TRANSACTIONS::observation] = 'current' ) then "
+            "[TRANSACTIONS::x] else null , 364 , -364 , [TRANSACTIONS::dt] )")
+        kinds = [a["kind"] for a in out["annotations"]]
+        assert kinds == ["one_row_per_period"]  # day/day is live-verified
+
+    def test_week_offset_at_day_grain_counts_days(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(x)", "simple",
+                         _window("date", "current", offset=_offset(-2, "week")),
+                         physical_ref="x", agg_function="SUM"),
+            BF_DIMS, TABLES)
+        assert " , 14 , -14 , " in out["ts_expr"]
+
+    def test_month_offset_at_day_grain_raises(self):
+        with pytest.raises(UntranslatableError, match="not a fixed number"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("date", "current", offset=_offset(-1, "month")),
+                             physical_ref="x", agg_function="SUM"),
+                BF_DIMS, TABLES)
+
+    def test_no_offset_day_grain_still_semiadditive(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(x)", "simple", _window("date", "current"),
+                         physical_ref="x", agg_function="SUM"),
+            BF_DIMS, TABLES)
+        assert out["ts_expr"].startswith("last_value ( sum ( [TRANSACTIONS::x] )")
+
+
+class TestFormulaOrderedWeek:
+    """BL-316 item 6 — a non-bucket (date-shifted) order dimension."""
+
+    def test_friday_week_lag_orders_by_formula(self):
+        out = translate_window_measure(
+            _win_measure("py_weekly", "SUM(x)", "simple",
+                         _window("week", "current", offset=_offset(-364, "day")),
+                         physical_ref="x", agg_function="SUM"),
+            BF_DIMS, TABLES)
+        assert out["ts_expr"] == "moving_sum ( [TRANSACTIONS::x] , 52 , -52 , [Week] )"
+        kinds = [a["kind"] for a in out["annotations"]]
+        assert kinds == ["one_row_per_period", "order_by_formula"]
+
+    def test_plain_week_trunc_also_formula_ordered(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(x)", "simple",
+                         _window("week_mond", "current", offset=_offset(-1, "week")),
+                         physical_ref="x", agg_function="SUM"),
+            BF_DIMS, TABLES)
+        assert out["ts_expr"].endswith(", 1 , -1 , [Week Mond] )")
+        assert "pending_verification" in [a["kind"] for a in out["annotations"]]
+
+    def test_week_offset_not_multiple_of_7_raises(self):
+        with pytest.raises(UntranslatableError, match="divide evenly"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("week", "current", offset=_offset(-10, "day")),
+                             physical_ref="x", agg_function="SUM"),
+                BF_DIMS, TABLES)
+
+    def test_trailing_over_formula_order_raises(self):
+        with pytest.raises(UntranslatableError, match="derived order"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("week", "cumulative"),
+                             physical_ref="x", agg_function="SUM"),
+                BF_DIMS, TABLES)
+
+    def test_two_columns_is_not_a_shifted_trunc(self):
+        dims = BF_DIMS + [_dim("odd", "DATE_ADD(DATE_TRUNC('WEEK', a), b)", "computed")]
+        with pytest.raises(UntranslatableError, match="cannot determine"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("odd", "current", offset=_offset(-7, "day")),
+                             physical_ref="x", agg_function="SUM"),
+                dims, TABLES)
+
+
+class TestRatioWindow:
+    """BL-316 item 7 — the window applies to each aggregate of a ratio."""
+
+    def test_ratio_monthly_lag(self):
+        out = translate_window_measure(
+            _win_measure("py_ecpc", "SUM(r) / NULLIF(SUM(c), 0)", "complex",
+                         _window("month", "current", offset=_offset(-12, "month"))),
+            BF_DIMS, TABLES)
+        assert out["ts_expr"] == (
+            "safe_divide ( moving_sum ( [TRANSACTIONS::r] , 12 , -12 , [TRANSACTIONS::dt] ) , "
+            "moving_sum ( [TRANSACTIONS::c] , 12 , -12 , [TRANSACTIONS::dt] ) )")
+        # month/month is verified at N=12: no C8 annotation
+        assert [a["kind"] for a in out["annotations"]] == ["one_row_per_period"]
+
+    def test_ratio_semiadditive_last(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(r) / NULLIF(SUM(c), 0)", "complex",
+                         _window("date", "current")),
+            BF_DIMS, TABLES)
+        assert out["ts_expr"].count("last_value") == 2
+
+    def test_no_aggregate_raises(self):
+        with pytest.raises(UntranslatableError, match="no aggregate"):
+            translate_window_measure(
+                _win_measure("m", "x + 1", "complex",
+                             _window("month", "current", offset=_offset(-1, "month"))),
+                BF_DIMS, TABLES)
+
+
+class TestScalarSubquery:
+    """BL-316 item 1 — a whole-table scalar subquery over the MV's own source."""
+
+    def test_budget_cap_is_whole_table_lod(self):
+        out = translate_measure(_measure(
+            "budget_capped",
+            "SUM(x) FILTER (WHERE observation = 'budget' AND dt <= __MVSCALAR_0__)",
+            "conditional", scalar_subqueries=[LAST_ACTUAL]), TABLES)
+        assert out["ts_expr"] == (
+            "sum_if ( [TRANSACTIONS::observation] = 'budget' and "
+            f"[TRANSACTIONS::dt] <= {GA} , [TRANSACTIONS::x] )")
+        assert [a["kind"] for a in out["annotations"]] == ["scalar_subquery"]
+
+    def test_no_where_clause(self):
+        sc = dict(LAST_ACTUAL, where=None, agg="SUM", arg="x")
+        out = translate_measure(_measure(
+            "share", "SUM(x) / NULLIF(__MVSCALAR_0__, 0)", "complex",
+            scalar_subqueries=[sc]), TABLES)
+        assert "group_aggregate ( sum ( [TRANSACTIONS::x] ) , { } , { } )" in out["ts_expr"]
+
+    def test_inside_window_uses_yesterday_option_a(self):
+        out = translate_window_measure(
+            _win_measure("py_monthly",
+                         "SUM(x) FILTER (WHERE dt <= DATE_ADD(__MVSCALAR_0__, -364))",
+                         "conditional",
+                         _window("month", "current", offset=_offset(-12, "month")),
+                         scalar_subqueries=[LAST_ACTUAL]),
+            BF_DIMS, TABLES)
+        assert "group_aggregate" not in out["ts_expr"]  # cannot nest in moving_sum
+        assert ("add_days ( add_days ( today ( ) , -1 ) , - 364 )"
+                in out["ts_expr"])
+        assert "cap_assumption" in [a["kind"] for a in out["annotations"]]
+
+    def test_non_max_scalar_inside_window_raises(self):
+        with pytest.raises(UntranslatableError, match=r"only\s+MAX"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x) / NULLIF(__MVSCALAR_0__, 0)", "complex",
+                             _window("month", "current", offset=_offset(-1, "month")),
+                             scalar_subqueries=[dict(LAST_ACTUAL, agg="SUM", arg="x")]),
+                BF_DIMS, TABLES)
+
+
+class TestConditionalFallback:
+    """BL-316 item 4 — `FILTER (…) / NULLIF (…)` used to reach the tokenizer
+    as a half-expression ("unexpected trailing token ')'")."""
+
+    def test_filter_then_ratio(self):
+        out = translate_measure(_measure(
+            "rps", "SUM(r) FILTER (WHERE o = 'current') / NULLIF(SUM(s), 0)",
+            "conditional"), TABLES)
+        assert out["ts_expr"] == (
+            "safe_divide ( sum_if ( [TRANSACTIONS::o] = 'current' , "
+            "[TRANSACTIONS::r] ) , sum ( [TRANSACTIONS::s] ) )")
+
+    def test_whole_expression_filter_unchanged(self):
+        out = translate_measure(_measure(
+            "m", "SUM(r) FILTER (WHERE o = 'current')", "conditional"), TABLES)
+        assert out["ts_expr"] == "sum_if ( [TRANSACTIONS::o] = 'current' , [TRANSACTIONS::r] )"
+
+
 def _parsed(dimensions=(), measures=(), filter_sql=None):
     return {"version": "1.1", "comment": None,
             "source": {"kind": "table_fqn", "raw": "c.s.t", "parts": ["c", "s", "t"],

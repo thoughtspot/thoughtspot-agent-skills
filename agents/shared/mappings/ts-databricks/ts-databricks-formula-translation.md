@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-08 (PR1 window deep-analysis 2026-07-09: all 5 range values + inclusive|exclusive anchor modifier live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading moving_sum args corrected (C1/C3), exclusive default confirmed (C2), all/cumulative/semi-additive confirmed (C4/C5/C7), period-filter offset corrected to row-relative (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: corrected the "Parameter References (untranslatable)" flowchart node and Untranslatable Patterns table row — MV `parameters:` IS a GA construct (18.2+); auto-translation is deferred, not "doesn't exist" (findings 13.1/13.10, deferred to 13.2)) -->
+<!-- currency: databricks — 2026-09 (2026-09-28 BL-315/BL-316, budget/forecast MV number-matched on nebula-ts-semview: whole-table scalar subquery -> group_aggregate(…,{},{}); NOT IN; FILTER on any aggregate; SUM(SUM(x)) OVER (); day-grain offset LAG (was dropped); week grain + formula-ordered LAG; ratio windows; group_aggregate cannot nest in moving_sum; a lag reads only filter-surviving rows; PR1 window deep-analysis 2026-07-09: all 5 range values + inclusive|exclusive anchor modifier live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading moving_sum args corrected (C1/C3), exclusive default confirmed (C2), all/cumulative/semi-additive confirmed (C4/C5/C7), period-filter offset corrected to row-relative (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: corrected the "Parameter References (untranslatable)" flowchart node and Untranslatable Patterns table row — MV `parameters:` IS a GA construct (18.2+); auto-translation is deferred, not "doesn't exist" (findings 13.1/13.10, deferred to 13.2)) -->
 
 # Formula Translation Reference — Databricks
 
@@ -20,7 +20,8 @@ ThoughtSpot models.
 ```
 Formula / Expression contains...
 ├── [word] with no ::           → Parameter References (see note below — not yet auto-translated)
-├── (SELECT ... FROM ...)       → Subquery (untranslatable — log in Unmapped Report)
+├── (SELECT AGG(x) FROM <MV source> [WHERE c]) → Scalar Subquery → group_aggregate ( … , { } , { } )
+├── (SELECT ... FROM ...) other → Subquery (untranslatable — log in Unmapped Report)
 ├── -- or /* ... */             → SQL Comments (strip before translating)
 ├── *_if(cond, x)               → Conditional Aggregates (native *_if functions)
 ├── AGG(...) FILTER (WHERE ...) → Conditional Aggregates (FILTER WHERE clause)
@@ -502,6 +503,38 @@ finding, not a working alternative to `{}`.
 
 ---
 
+## Scalar Subqueries over the MV Source (verified 2026-09-28)
+
+A budget/forecast MV caps budget to the latest actuals date with an uncorrelated
+scalar subquery over **its own source table**:
+
+```sql
+SUM(revenue_gbp) FILTER (WHERE observation = 'budget'
+  AND dt <= (SELECT MAX(dt) FROM <source> WHERE observation = 'current'))
+```
+
+The subquery ignores the outer query's grouping and filters. `group_aggregate` with
+empty groupings **and** empty filters has exactly that meaning:
+
+| Databricks | ThoughtSpot |
+|---|---|
+| `(SELECT MAX(dt) FROM <source> WHERE c)` | `group_aggregate ( max ( if ( c ) then [dt] else null ) , { } , { } )` |
+| `(SELECT SUM(x) FROM <source>)` | `group_aggregate ( sum ( [x] ) , { } , { } )` |
+
+It is valid inside a row-level condition, e.g. `sum_if ( … and [dt] <= group_aggregate ( … ) , [x] )`
+(number-matched against Databricks 2026-09-28, BL-316).
+
+**Recognised shape only:** `( SELECT <SUM|COUNT|AVG|MIN|MAX>(<expr>) FROM <the MV's
+source FQN> [WHERE <cond>] )` — no alias, join, `GROUP BY`, nested `SELECT` or comma.
+`parse-mv` lifts it to a `__MVSCALAR_n__` placeholder and records it under the
+measure's `scalar_subqueries`. Every other subquery stays untranslatable.
+
+**Inside a windowed measure** (`window:`), the LOD cannot be used (limit 2 above).
+A `MAX(<date>)` scalar is emitted as `add_days ( today ( ) , -1 )` — "the latest
+actuals are yesterday" — with a `cap_assumption` annotation. That equals the
+subquery only while the source is loaded through yesterday; on a stale load the cap
+drifts one day per day. Any other aggregate inside a window is refused.
+
 ## Cross-Measure References (verified 2026-05-25)
 
 Metric Views support referencing other measures and dimensions from within measure
@@ -603,8 +636,32 @@ multiple rows per period) needs a period-grain pre-aggregation first.
 | `sum(m)` at month/quarter/year grain | `expr: SUM(m)` + `window: [{order: month_dim, range: current, semiadditive: last}]` | Current period, no offset |
 | `moving_sum([m], 1, -1, [date])` | `expr: SUM(m)` + `window: [{order: month_dim, semiadditive: last, range: current, offset: -1 month}]` | Previous month (LAG(1)) — Live-verified 2026-07-09 |
 | `moving_sum([m], 1, -1, [date])` | `expr: SUM(m)` + `window: [{order: quarter_dim, semiadditive: last, range: current, offset: -3 month}]` | Previous quarter (LAG(1) at quarter grain) — Deferred (C8), not separately live-tested |
-| `moving_sum([m], 12, -12, [date])` | `expr: SUM(m)` + `window: [{order: month_dim, semiadditive: last, range: current, offset: -1 year}]` | Same month last year (LAG(12)) — Deferred (C8), not separately live-tested at N=12 |
+| `moving_sum([m], 12, -12, [date])` | `expr: SUM(m)` + `window: [{order: month_dim, semiadditive: last, range: current, offset: -1 year}]` | Same month last year (LAG(12)). The `-12 month` spelling was number-matched 2026-09-28 (BL-316); the `-1 year` spelling is the same N and is not separately tested |
 | `moving_sum([m], 1, -1, [date])` | `expr: SUM(m)` + `window: [{order: year_dim, semiadditive: last, range: current, offset: -1 year}]` | Previous year (LAG(1) at year grain) — Deferred (C8), not separately live-tested |
+
+#### Databricks → TS: offsets at day and week grain, ratios (2026-09-28, BL-315/BL-316)
+
+All rows below were number-matched against a Databricks Metric View on dense data
+(`agent_skills.business_forecast.business_reporting_mv`, nebula-ts-semview):
+
+| Databricks MV YAML | ThoughtSpot formula | Notes |
+|---|---|---|
+| `order: <raw date>`, `range: current`, `offset: -364 day` | `moving_sum ( [m] , 364 , -364 , [date] )` | **BL-315:** `ts-cli` before 0.149.0 emitted `last_value(…)` here with the offset dropped — the "prior year" measure returned this year's number. An `offset:` always means LAG; `last_value` is only for an offset-less raw-date window. `-N week` at day grain lags 7N rows; a month/quarter/year offset at day grain is not a fixed row count and is refused |
+| `order: week` where `week` is a date-shifted truncation (`DATE_ADD(DATE_TRUNC('WEEK', DATE_ADD(dt, 3)), -3)`), `offset: -364 day` | `moving_sum ( [m] , 52 , -52 , [formula_Week] )` | Order by the **dimension's own formula**. Ordering by `[dt]` forces the query to daily grain and returns NULL — `start_of_month(dt)` is a recognised bucket of `dt`, a shifted week is not. Every week-grain order is formula-ordered (a plain `DATE_TRUNC('WEEK', dt)` is untested and carries a pending-verification note) |
+| `expr: SUM(a) / NULLIF(SUM(b), 0)` + any `window:` | `safe_divide ( moving_sum ( [a] , … ) , moving_sum ( [b] , … ) )` | The window applies to **every** aggregate. Same for `last_value`/`cumulative_sum`/trailing ranges |
+| `expr: SUM(x) FILTER (WHERE c)` + `window:` | `moving_sum ( if ( c ) then [x] else null , … )` | FILTER-equivalent: non-matching rows contribute NULL |
+
+**Two ThoughtSpot limits (live-probed 2026-09-28):**
+
+1. **A lag reads only rows that survive the query's filters.** Filter a query to
+   May–Sep 2026 and a prior-year `moving_sum` LAG returns NULL; the Databricks
+   window reaches outside the filter and returns a value. The prior period must be
+   inside the query's date range. Every LAG translation carries this in its
+   `one_row_per_period` annotation.
+2. **`group_aggregate` cannot sit inside a `moving_sum`.** Every variant fails at query
+   compile with `Failed to transform QuerySpec`. So a scalar subquery used *inside a
+   windowed measure* is emitted as `add_days ( today ( ) , -1 )` — see the next
+   section.
 
 **Growth % formulas (MoM, YoY)** inline both period expressions directly — no
 cross-formula references needed:
@@ -695,7 +752,7 @@ These Databricks MV expression patterns cannot be translated to ThoughtSpot form
 
 | Pattern | Reason |
 |---|---|
-| Subquery in `expr`: `(SELECT ... FROM ...)` | ThoughtSpot formulas cannot contain SQL subqueries |
+| Subquery in `expr`: `(SELECT ... FROM ...)` — any shape **other than** the whole-table scalar over the MV's own source (see "Scalar Subqueries over the MV Source") | ThoughtSpot formulas cannot contain SQL subqueries |
 | `source:` as SELECT statement: `source: (SELECT ... FROM ...)` | Not a table reference — requires creating a Databricks VIEW first |
 | Correlated window with non-standard frame | No direct TS equivalent for arbitrary window frames |
 
@@ -750,13 +807,16 @@ formula equivalents:
 | `x IS NULL` | `isnull(x)` |
 | `NOT expr` | `not(expr)` |
 | `x IN (a, b, c)` | `in(x, a, b, c)` |
+| `x NOT IN (a, b)` | `( [x] != a and [x] != b )` — Live-verified 2026-09-28 (BL-316) |
 | `COUNT(*)` | `count ( 1 )` — TS has no `COUNT(*)` syntax |
-| `AGG(x) FILTER (WHERE cond)` | `agg_if ( cond , [x] )` — native `*_if` function; see Conditional Aggregates section |
+| `AGG(x) FILTER (WHERE cond)` | `agg_if ( cond , [x] )` — native `*_if` function; see Conditional Aggregates section. Applies to **every** aggregate call in an expression, e.g. `SUM(a) FILTER (WHERE c) / NULLIF(SUM(b), 0)` → `safe_divide ( sum_if ( c , [a] ) , sum ( [b] ) )` (BL-316, 2026-09-28) |
+| `SUM(SUM(x)) OVER ()` | `group_aggregate ( sum ( [x] ) , { } , query_filters ( ) )` — grand total of the result rows, filters kept (share-of-total denominators). Only an empty `OVER ()`, and only SUM of SUM/COUNT, MIN of MIN, MAX of MAX. Live-verified 2026-09-28 (BL-316) |
 | `SUM(x) OVER (PARTITION BY dim)` | `group_aggregate(sum([x]), {[dim]}, query_filters())` — LOD dimension |
 | `MEASURE(name)` | `[name]` — cross-measure reference |
 | `ANY_VALUE(name)` | `[name]` — dimension reference from measure |
 | `MEASURE(a) / ANY_VALUE(b)` | `[a] / [b]` — cross-measure ratio |
-| `(SELECT ... FROM ...)` | **Untranslatable** — subquery; log in Unmapped Report |
+| `(SELECT MAX(dt) FROM <MV source> WHERE c)` | `group_aggregate ( max ( if ( c ) then [dt] else null ) , { } , { } )` — see "Scalar Subqueries over the MV Source" |
+| `(SELECT ... FROM ...)` (any other shape) | **Untranslatable** — subquery; log in Unmapped Report |
 
 **LOD row above (A1/A2) and cross-measure/ratio rows (B1)** — see the fuller LOD
 Functions and Cross-Measure References sections earlier in this file for the

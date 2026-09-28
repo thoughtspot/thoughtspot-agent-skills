@@ -80,9 +80,14 @@ def tokenize(sql: str) -> list[tuple[str, str]]:
 
 
 class _Cursor:
-    def __init__(self, toks: list[tuple[str, str]]):
+    def __init__(self, toks: list[tuple[str, str]], agg_hook=None):
         self.toks = toks
         self.i = 0
+        # BL-316 item 7 — windowed measures: when set, every aggregate call is
+        # handed to agg_hook(AGG_NAME, inner_ts) instead of being emitted, so a
+        # window wraps EACH aggregate (a ratio's numerator and denominator
+        # alike). None for ordinary expressions.
+        self.agg_hook = agg_hook
 
     def peek(self, ahead: int = 0) -> tuple[str | None, str | None]:
         j = self.i + ahead
@@ -137,13 +142,17 @@ def _try_json_path(sql: str, resolver: Callable[[str], str]) -> str | None:
             f"{resolver(ref)} )")
 
 
-def translate_sql_expr(sql: str, resolver: Callable[[str], str]) -> str:
-    """Translate one Databricks SQL expression to ThoughtSpot formula text."""
+def translate_sql_expr(sql: str, resolver: Callable[[str], str],
+                       agg_hook: Callable[[str, str], str] | None = None) -> str:
+    """Translate one Databricks SQL expression to ThoughtSpot formula text.
+
+    agg_hook (windowed measures only): called as agg_hook(AGG, inner_ts) for
+    every aggregate call; its return value replaces that call."""
     cleaned = strip_sql_comments(sql)
     json_out = _try_json_path(cleaned, resolver)
     if json_out is not None:
         return json_out
-    cur = _Cursor(tokenize(cleaned))
+    cur = _Cursor(tokenize(cleaned), agg_hook)
     out = _expr(cur, resolver)
     kind, text = cur.peek()
     if kind is not None:
@@ -295,7 +304,8 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
     if name == "EXTRACT":
         return _call_extract(cur, resolver)
     if name == "COUNT":
-        return _call_count(cur, resolver)
+        label, inner = _call_count(cur, resolver)
+        return _finish_aggregate(label, inner, cur, resolver)
     if name in _PASS_THROUGH_HINT:
         return _call_pass_through(name, cur, resolver)
     if name == "TO_DATE":
@@ -307,6 +317,9 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
     if name == "IF":
         return _call_if(cur, resolver)
     args = _call_args(cur, resolver, agg=name)
+    if name in _AGGREGATES:
+        _need(args, 1, name)
+        return _finish_aggregate(name, args[0], cur, resolver)
     if name == "DATE_TRUNC":
         return _call_date_trunc(args)
     if name == "MONTHS_BETWEEN":
@@ -392,20 +405,106 @@ def _call_args(cur: _Cursor, resolver, agg: str | None = None) -> list[str]:
         return args
 
 
-def _call_count(cur: _Cursor, resolver) -> str:
+def _call_count(cur: _Cursor, resolver) -> tuple[str, str]:
+    """-> (label, inner): label is COUNT or COUNT_DISTINCT."""
     kind, text = cur.peek()
     if kind == "op" and text == "*":
         cur.advance()
         cur.expect_op(")")
-        return _emit("count", ["1"])
+        return "COUNT", "1"
     if kind == "kw" and text == "DISTINCT":
         cur.advance()
         args = _call_args(cur, resolver)
         _need(args, 1, "COUNT(DISTINCT …)")
-        return f"unique count ( {args[0]} )"
+        return "COUNT_DISTINCT", args[0]
     args = _call_args(cur, resolver)
     _need(args, 1, "COUNT")
-    return _emit("count", args)
+    return "COUNT", args[0]
+
+
+# --- aggregates: FILTER (WHERE …), OVER (), window hook (BL-316) ------------
+
+_AGGREGATES = frozenset({"SUM", "AVG", "MIN", "MAX", "STDDEV", "VARIANCE",
+                         "MEDIAN"})
+_AGG_FN = {"SUM": "sum", "AVG": "average", "MIN": "min", "MAX": "max",
+           "COUNT": "count", "STDDEV": "stddev", "VARIANCE": "variance",
+           "MEDIAN": "median"}
+_AGG_IF_FN = {"SUM": "sum_if", "COUNT": "count_if", "AVG": "average_if",
+              "MIN": "min_if", "MAX": "max_if", "STDDEV": "stddev_if",
+              "VARIANCE": "variance_if", "COUNT_DISTINCT": "unique_count_if"}
+# SUM(inner) OVER () is a grand total only when summing is the inner
+# aggregate's own roll-up; MIN/MAX likewise. SUM(AVG(x)) OVER () is a sum of
+# per-group averages, not an average — no group_aggregate equivalent.
+_OVER_ROLLUP = {"SUM": ("sum (", "count ("), "MIN": ("min (",),
+                "MAX": ("max (",)}
+
+
+def _emit_aggregate(label: str, inner: str) -> str:
+    if label == "COUNT_DISTINCT":
+        return f"unique count ( {inner} )"
+    return _emit(_AGG_FN[label], [inner])
+
+
+def _maybe_filter(cur: _Cursor, resolver) -> str | None:
+    """Consume `FILTER ( WHERE cond )` if present; return translated cond."""
+    kind, text = cur.peek()
+    if not (kind == "kw" and text == "FILTER"):
+        return None
+    cur.advance()
+    cur.expect_op("(")
+    k2, t2 = cur.advance()
+    if not (k2 == "kw" and t2 == "WHERE"):
+        raise UntranslatableError("FILTER expects '( WHERE <condition> )'")
+    cond = _expr(cur, resolver)
+    cur.expect_op(")")
+    return cond
+
+
+def _finish_aggregate(label: str, inner: str, cur: _Cursor, resolver) -> str:
+    """An aggregate call's ')' has been consumed: apply FILTER/OVER/hook."""
+    cond = _maybe_filter(cur, resolver)
+    if cur.agg_hook is not None:
+        if label == "COUNT_DISTINCT":
+            raise UntranslatableError(
+                "COUNT(DISTINCT …) inside a windowed measure has no "
+                "moving_/cumulative_ equivalent")
+        if cond is not None:
+            # FILTER-equivalent: non-matching rows contribute NULL
+            inner = f"if ( {cond} ) then {inner} else null"
+        return cur.agg_hook(label, inner)
+    if cond is not None:
+        fn = _AGG_IF_FN.get(label)
+        if fn is None:
+            raise UntranslatableError(
+                f"aggregate '{label}' under FILTER (WHERE …) has no native "
+                f"*_if function mapping (ts-databricks-formula-translation.md)")
+        return f"{fn} ( {cond} , {inner} )"
+    out = _emit_aggregate(label, inner)
+    kind, text = cur.peek()
+    if kind == "kw" and text == "OVER":
+        return _over_empty(label, inner, cur)
+    return out
+
+
+def _over_empty(label: str, inner: str, cur: _Cursor) -> str:
+    """AGG(AGG(x)) OVER () -> group_aggregate ( AGG(x) , { } , query_filters ( ) ).
+
+    The empty window is the grand total of the query's result rows — every
+    grouping column dropped, every filter kept (BL-316 item 5, live-verified
+    2026-09-28). PARTITION BY / ORDER BY windows are not mapped here."""
+    cur.advance()  # OVER
+    cur.expect_op("(")
+    kind, text = cur.peek()
+    if not (kind == "op" and text == ")"):
+        raise UntranslatableError(
+            "only an empty OVER () window is mapped on a measure "
+            "(PARTITION BY / ORDER BY need a per-MV judgment call)")
+    cur.advance()
+    if not inner.startswith(_OVER_ROLLUP.get(label, ())):
+        raise UntranslatableError(
+            f"{label}(…) OVER () is mapped only as a grand-total roll-up of the "
+            f"same aggregate (SUM of SUM/COUNT, MIN of MIN, MAX of MAX)")
+    return f"group_aggregate ( {inner} , {{ }} , query_filters ( ) )"
 
 
 def _call_extract(cur: _Cursor, resolver) -> str:

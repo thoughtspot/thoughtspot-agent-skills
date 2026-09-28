@@ -58,7 +58,14 @@ def _terminates_operand(nk: str | None, nt: str | None) -> bool:
 def _construct_not(cur, resolver, units: list[str]) -> None:
     from ts_cli.databricks.mv_sql import UntranslatableError, _expr
     kind, text = cur.peek()
-    if kind == "kw" and text in ("IN", "BETWEEN", "LIKE"):
+    if kind == "kw" and text == "IN":
+        # BL-316 item 3 — `x NOT IN (a, b)` -> ( x != a and x != b )
+        cur.advance()
+        operand = _pop_operand(units, "NOT IN")
+        ands = " and ".join(f"{operand} != {v}" for v in _in_values(cur, resolver))
+        units.append(f"( {ands} )")
+        return
+    if kind == "kw" and text in ("BETWEEN", "LIKE"):
         raise UntranslatableError(
             f"NOT {text} has no documented ThoughtSpot mapping")
     if kind == "ident":
@@ -192,9 +199,9 @@ def _construct_is(cur, units: list[str]) -> None:
     raise UntranslatableError("IS supports only IS NULL / IS NOT NULL")
 
 
-def _construct_in(cur, resolver, units: list[str]) -> None:
+def _in_values(cur, resolver) -> list[str]:
+    """Parse the parenthesized value list after IN / NOT IN."""
     from ts_cli.databricks.mv_sql import _expr
-    operand = _pop_operand(units, "IN")
     cur.expect_op("(")
     values: list[str] = []
     while True:
@@ -204,8 +211,12 @@ def _construct_in(cur, resolver, units: list[str]) -> None:
             cur.advance()
             continue
         cur.expect_op(")")
-        break
-    ors = " or ".join(f"{operand} = {v}" for v in values)
+        return values
+
+
+def _construct_in(cur, resolver, units: list[str]) -> None:
+    operand = _pop_operand(units, "IN")
+    ors = " or ".join(f"{operand} = {v}" for v in _in_values(cur, resolver))
     units.append(f"( {ors} )")
 
 

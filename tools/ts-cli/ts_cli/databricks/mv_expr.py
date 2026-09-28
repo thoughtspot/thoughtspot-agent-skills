@@ -145,6 +145,85 @@ def _split_top_level(s: str, sep: str = ",") -> list[str]:
     return parts
 
 
+# BL-316 item 1 — an uncorrelated scalar subquery over the MV's OWN source, e.g.
+# `(SELECT MAX(dt) FROM <source> WHERE observation = 'current')`, is a whole-table
+# scalar: it ignores the outer query's grouping AND filters. ThoughtSpot's
+# `group_aggregate ( agg ( … ) , { } , { } )` has exactly those semantics
+# (live-verified 2026-09-28, nebula-ts-semview). Any other subquery shape —
+# another table, a join, GROUP BY, a nested SELECT — stays unsupported.
+SCALAR_PLACEHOLDER = "__MVSCALAR_{n}__"
+SCALAR_AGGS = frozenset({"MAX", "MIN", "SUM", "COUNT", "AVG"})
+_SCALAR_SUBQUERY_RE = re.compile(
+    rf"^\(\s*SELECT\s+(?P<agg>[A-Za-z_]\w*)\s*\((?P<arg>.+)\)\s+FROM\s+"
+    rf"(?P<fqn>{_DOT_PATH})\s*(?:WHERE\s+(?P<where>.+?))?\s*\)$",
+    re.IGNORECASE | re.DOTALL)
+_SCALAR_REJECT_RE = re.compile(
+    r"\b(SELECT|JOIN|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|UNION|OVER)\b|,",
+    re.IGNORECASE)
+
+
+def _matching_paren(s: str, i: int) -> int:
+    """s[i] == '(' (string literals already masked) -> index of its ')', or -1."""
+    depth = 0
+    for j in range(i, len(s)):
+        if s[j] == "(":
+            depth += 1
+        elif s[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
+
+
+def _norm_fqn(path: str) -> str:
+    return ".".join(seg.lower() for seg in split_dot_path(path.strip()))
+
+
+def extract_scalar_subqueries(expr: str, source_fqn: str | None
+                              ) -> tuple[str, list[dict]]:
+    """Replace each whole-table scalar subquery over `source_fqn` with a
+    `__MVSCALAR_n__` placeholder.
+
+    Returns (rewritten_expr, [{agg, arg, where, sql}, ...]). Unrecognized
+    subqueries are left in place so the caller's subquery check still fires
+    (fail loud). The rewritten text is comment-stripped.
+    """
+    e = strip_sql_comments(expr)
+    if source_fqn is None:
+        return e, []
+    masked = mask_string_literals(e)
+    target = _norm_fqn(source_fqn)
+    pieces: list[str] = []
+    scalars: list[dict] = []
+    last = 0
+    for m in _SUBQUERY_RE.finditer(masked):
+        start = m.start()
+        if start < last:
+            continue  # nested inside a subquery already consumed
+        end = _matching_paren(masked, start)
+        if end < 0:
+            break
+        seg_m = masked[start:end + 1]
+        sm = _SCALAR_SUBQUERY_RE.match(seg_m)
+        if (sm is None or sm.group("agg").upper() not in SCALAR_AGGS
+                or _norm_fqn(sm.group("fqn")) != target
+                or _SCALAR_REJECT_RE.search(sm.group("arg"))
+                or _SCALAR_REJECT_RE.search(sm.group("where") or "")):
+            continue
+        seg = e[start:end + 1]
+        where = sm.group("where")
+        scalars.append({
+            "agg": sm.group("agg").upper(),
+            "arg": seg[sm.start("arg"):sm.end("arg")].strip(),
+            "where": None if where is None else seg[sm.start("where"):sm.end("where")].strip(),
+            "sql": seg})
+        pieces.append(e[last:start])
+        pieces.append(SCALAR_PLACEHOLDER.format(n=len(scalars) - 1))
+        last = end + 1
+    pieces.append(e[last:])
+    return "".join(pieces), scalars
+
+
 def extract_cross_refs(expr: str) -> tuple[list[str], list[str]]:
     """Return (MEASURE() names, ANY_VALUE() names) in source order."""
     e = strip_sql_comments(expr)
