@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 from ts_cli.databricks.mv_translate import (  # noqa: F401 — display_title re-exported
-    display_title, normalize_tables, reused_physicals)
+    display_title, formula_id, normalize_tables, reused_physicals)
 from ts_cli.formula_common import (add_formula_prefix, fix_double_aggregation,
                                    promote_duplicate_column_ids,
                                    resolve_name_collisions)
@@ -137,7 +137,7 @@ def build_columns_and_formulas(
     def _emit(candidate: dict, *, is_formula: bool) -> None:
         entry = candidate["entry"]
         if is_formula:
-            formula = {"id": f"formula_{candidate['name']}",
+            formula = {"id": formula_id(candidate["name"]),
                       "name": candidate["name"], "expr": candidate["expr"]}
             if entry["column_type"] == "ATTRIBUTE":
                 formula["properties"] = {"column_type": "ATTRIBUTE"}

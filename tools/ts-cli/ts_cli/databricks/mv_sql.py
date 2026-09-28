@@ -88,6 +88,9 @@ class _Cursor:
         # window wraps EACH aggregate (a ratio's numerator and denominator
         # alike). None for ordinary expressions.
         self.agg_hook = agg_hook
+        # emitted aggregate text -> its label, so OVER () can prove its argument
+        # is exactly one aggregate call (not a ratio of two)
+        self.emitted_aggs: dict[str, str] = {}
 
     def peek(self, ahead: int = 0) -> tuple[str | None, str | None]:
         j = self.i + ahead
@@ -435,8 +438,7 @@ _AGG_IF_FN = {"SUM": "sum_if", "COUNT": "count_if", "AVG": "average_if",
 # SUM(inner) OVER () is a grand total only when summing is the inner
 # aggregate's own roll-up; MIN/MAX likewise. SUM(AVG(x)) OVER () is a sum of
 # per-group averages, not an average — no group_aggregate equivalent.
-_OVER_ROLLUP = {"SUM": ("sum (", "count ("), "MIN": ("min (",),
-                "MAX": ("max (",)}
+_OVER_ROLLUP = {"SUM": {"SUM", "COUNT"}, "MIN": {"MIN"}, "MAX": {"MAX"}}
 
 
 def _emit_aggregate(label: str, inner: str) -> str:
@@ -483,6 +485,7 @@ def _finish_aggregate(label: str, inner: str, cur: _Cursor, resolver) -> str:
     kind, text = cur.peek()
     if kind == "kw" and text == "OVER":
         return _over_empty(label, inner, cur)
+    cur.emitted_aggs[out] = label
     return out
 
 
@@ -500,7 +503,9 @@ def _over_empty(label: str, inner: str, cur: _Cursor) -> str:
             "only an empty OVER () window is mapped on a measure "
             "(PARTITION BY / ORDER BY need a per-MV judgment call)")
     cur.advance()
-    if not inner.startswith(_OVER_ROLLUP.get(label, ())):
+    # The argument must be exactly ONE aggregate call: SUM(SUM(a)/SUM(b)) OVER ()
+    # is a sum of per-group ratios, which no group_aggregate reproduces.
+    if cur.emitted_aggs.get(inner) not in _OVER_ROLLUP.get(label, set()):
         raise UntranslatableError(
             f"{label}(…) OVER () is mapped only as a grand-total roll-up of the "
             f"same aggregate (SUM of SUM/COUNT, MIN of MIN, MAX of MAX)")

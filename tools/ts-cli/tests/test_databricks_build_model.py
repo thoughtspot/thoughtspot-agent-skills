@@ -1421,3 +1421,41 @@ class TestRolePlayFromDatabricks:
         withs = {j["with"] for j in fact["joins"]}
         # reused-physical joins reference the alias; single-use uses the physical name
         assert {"account", "bill_to", "CONTACT"} <= withs
+
+
+
+class TestFormulaOrderedWindowEndToEnd:
+    """Review finding D: the week-ordered LAG must reference a formula id that
+    exists in the FINAL model TML, not rely on a later rewrite."""
+
+    YAML = """version: 1.1
+source: c.s.agg
+dimensions:
+  - name: date
+    expr: dt
+  - name: week
+    expr: "DATE_ADD(DATE_TRUNC('WEEK', DATE_ADD(dt, 3)), -3)"
+measures:
+  - name: py_weekly_redirects
+    expr: SUM(r) FILTER (WHERE o = 'current' AND dt <= DATE_ADD((SELECT MAX(dt) FROM c.s.agg WHERE o = 'current'), -364))
+    window:
+      - order: week
+        semiadditive: last
+        range: current
+        offset: -364 day
+"""
+
+    def test_lag_references_the_week_formula_id(self):
+        parsed = parse_metric_view(self.YAML)
+        assert not parsed["unsupported"]
+        translated = translate_metric_view(parsed, {"source": "AGG"})
+        assert not translated["skipped"]
+        doc, _ = build_model_tml_dbx(model_name="M", parsed=parsed,
+                                     translated_doc=translated,
+                                     tables={"source": "AGG"})
+        formulas = {f["name"]: f for f in doc["model"]["formulas"]}
+        assert formulas["Week"]["id"] == "formula_Week"
+        expr = formulas["Py Weekly Redirects"]["expr"]
+        assert expr.endswith(", 52 , -52 , [formula_Week] )")
+        assert "add_days ( add_days ( today ( ) , -1 ) , - 364 )" in expr
+        assert validate_tml_invariants(doc) == []

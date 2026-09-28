@@ -514,7 +514,8 @@ SUM(revenue_gbp) FILTER (WHERE observation = 'budget'
 ```
 
 The subquery ignores the outer query's grouping and filters. `group_aggregate` with
-empty groupings **and** empty filters has exactly that meaning:
+empty groupings **and** empty filters has that meaning for the query's grouping and
+**search** filters:
 
 | Databricks | ThoughtSpot |
 |---|---|
@@ -524,16 +525,27 @@ empty groupings **and** empty filters has exactly that meaning:
 It is valid inside a row-level condition, e.g. `sum_if ( … and [dt] <= group_aggregate ( … ) , [x] )`
 (number-matched against Databricks 2026-09-28, BL-316).
 
+**Caveat — an MV with a global `filter:`.** `{ }` is search-filter-blind but
+**model-filter-aware** (A3, above), and build-model mirrors the MV's `filter:` into the
+model's `filters:` block. The Databricks subquery reads the *unfiltered* source, so on a
+filtered MV the ThoughtSpot value is computed over fewer rows. The translator attaches a
+`scalar_under_mv_filter` annotation in that case; check the value, or move the filter
+into the subquery's `WHERE` so both sides agree.
+
 **Recognised shape only:** `( SELECT <SUM|COUNT|AVG|MIN|MAX>(<expr>) FROM <the MV's
 source FQN> [WHERE <cond>] )` — no alias, join, `GROUP BY`, nested `SELECT` or comma.
 `parse-mv` lifts it to a `__MVSCALAR_n__` placeholder and records it under the
 measure's `scalar_subqueries`. Every other subquery stays untranslatable.
 
-**Inside a windowed measure** (`window:`), the LOD cannot be used (limit 2 above).
-A `MAX(<date>)` scalar is emitted as `add_days ( today ( ) , -1 )` — "the latest
-actuals are yesterday" — with a `cap_assumption` annotation. That equals the
-subquery only while the source is loaded through yesterday; on a stale load the cap
-drifts one day per day. Any other aggregate inside a window is refused.
+**Inside a windowed measure** (`window:`), the LOD cannot be used — see limit 2 in
+"Databricks → TS: offsets at day and week grain, ratios" (Semi-Additive / Period-Filter
+section, below). A scalar `MAX(<col>)` is emitted as `add_days ( today ( ) , -1 )` —
+"the latest actuals are yesterday" — **only when `<col>` is the date column the window
+is ordered by** (the one column proven to be a date; for a formula-ordered week, the
+column it truncates). The `cap_assumption` annotation names the subquery's `WHERE`,
+because the stand-in cannot honour it. That equals the subquery only while that data is
+loaded through yesterday; on a stale load the cap drifts one day per day. Any other
+aggregate, or `MAX` of any other column, inside a window is refused.
 
 ## Cross-Measure References (verified 2026-05-25)
 
@@ -660,8 +672,8 @@ All rows below were number-matched against a Databricks Metric View on dense dat
    `one_row_per_period` annotation.
 2. **`group_aggregate` cannot sit inside a `moving_sum`.** Every variant fails at query
    compile with `Failed to transform QuerySpec`. So a scalar subquery used *inside a
-   windowed measure* is emitted as `add_days ( today ( ) , -1 )` — see the next
-   section.
+   windowed measure* is emitted as `add_days ( today ( ) , -1 )` — see "Scalar
+   Subqueries over the MV Source" (above).
 
 **Growth % formulas (MoM, YoY)** inline both period expressions directly — no
 cross-formula references needed:
@@ -806,11 +818,11 @@ formula equivalents:
 | `COALESCE(x / NULLIF(y, 0), 0)` | `safe_divide(x, y)` |
 | `x IS NULL` | `isnull(x)` |
 | `NOT expr` | `not(expr)` |
-| `x IN (a, b, c)` | `in(x, a, b, c)` |
+| `x IN (a, b, c)` | `( [x] = a or [x] = b or [x] = c )` — the form the translator emits; `in(x, a, b, c)` is rejected at import (`thoughtspot-formula-patterns.md`). The to-direction row near the top of this file still shows `in(…)` — BL-317 |
 | `x NOT IN (a, b)` | `( [x] != a and [x] != b )` — Live-verified 2026-09-28 (BL-316) |
 | `COUNT(*)` | `count ( 1 )` — TS has no `COUNT(*)` syntax |
 | `AGG(x) FILTER (WHERE cond)` | `agg_if ( cond , [x] )` — native `*_if` function; see Conditional Aggregates section. Applies to **every** aggregate call in an expression, e.g. `SUM(a) FILTER (WHERE c) / NULLIF(SUM(b), 0)` → `safe_divide ( sum_if ( c , [a] ) , sum ( [b] ) )` (BL-316, 2026-09-28) |
-| `SUM(SUM(x)) OVER ()` | `group_aggregate ( sum ( [x] ) , { } , query_filters ( ) )` — grand total of the result rows, filters kept (share-of-total denominators). Only an empty `OVER ()`, and only SUM of SUM/COUNT, MIN of MIN, MAX of MAX. Live-verified 2026-09-28 (BL-316) |
+| `SUM(SUM(x)) OVER ()` | `group_aggregate ( sum ( [x] ) , { } , query_filters ( ) )` — grand total of the result rows, filters kept (share-of-total denominators). Only an empty `OVER ()`, and only SUM of SUM/COUNT, MIN of MIN, MAX of MAX. The argument must be exactly one aggregate call — `SUM(SUM(a)/SUM(b)) OVER ()` is refused. Live-verified 2026-09-28 (BL-316) |
 | `SUM(x) OVER (PARTITION BY dim)` | `group_aggregate(sum([x]), {[dim]}, query_filters())` — LOD dimension |
 | `MEASURE(name)` | `[name]` — cross-measure reference |
 | `ANY_VALUE(name)` | `[name]` — dimension reference from measure |

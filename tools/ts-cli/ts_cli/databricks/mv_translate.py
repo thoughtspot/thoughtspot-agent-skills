@@ -65,6 +65,12 @@ def resolve_parts(tables: dict, path: str) -> tuple[str, str]:
     return node, column
 
 
+def formula_id(title: str) -> str:
+    """The formulas[].id build-model stamps for a formula column named `title`.
+    One owner (I13): build-model and the formula-ordered window both use it."""
+    return f"formula_{title}"
+
+
 def display_title(entry: dict) -> str:
     """The ThoughtSpot column name build-model gives a parsed/translated entry."""
     return entry.get("display_name") or entry["name"].replace("_", " ").title()
@@ -79,39 +85,58 @@ _SCALAR_IN_WINDOW = "add_days ( today ( ) , -1 )"
 SCALAR_WINDOW_ASSUMPTION = (
     "scalar subquery {sql} is emitted as add_days ( today ( ) , -1 ): "
     "ThoughtSpot cannot nest group_aggregate inside moving_sum, so the latest "
-    "{arg} is assumed to be yesterday. Exact only while the source is loaded "
-    "through yesterday; on a stale load the cap drifts one day per day behind.")
+    "{arg}{where} is assumed to be yesterday. Exact only while that data is "
+    "loaded through yesterday; on a stale load the cap drifts one day per day.")
 SCALAR_LOD_NOTE = (
-    "scalar subquery {sql} -> group_aggregate ( … , {{ }} , {{ }} ): whole-table "
-    "and filter-blind, like the subquery (BL-316 item 1).")
+    "scalar subquery {sql} -> group_aggregate ( … , {{ }} , {{ }} ): whole-table, "
+    "blind to the query's grouping and search filters, like the subquery "
+    "(BL-316 item 1).")
+SCALAR_MV_FILTER_NOTE = (
+    "this MV has a global filter: ({flt}), which build-model mirrors into the "
+    "model's filters: block. group_aggregate ( … , {{ }} , {{ }} ) still applies "
+    "model-level filters (A3), but the Databricks subquery {sql} reads the "
+    "UNFILTERED source — so the ThoughtSpot value is computed over filtered rows "
+    "and can differ. Check it, or move the filter into the subquery's WHERE.")
 
 
 def make_resolver(tables: dict, scalars: list[dict] | None = None,
-                  in_window: bool = False) -> Callable[[str], str]:
+                  in_window: bool = False,
+                  window_date_ref: str | None = None) -> Callable[[str], str]:
     """Column resolver; also expands `__MVSCALAR_n__` placeholders that
-    parse-mv lifted out of the measure (BL-316 item 1)."""
+    parse-mv lifted out of the measure (BL-316 item 1).
+
+    window_date_ref: inside a windowed measure, the resolved date column the
+    window is ordered by — the only column a scalar MAX may stand in for."""
     def resolve(path: str) -> str:
         m = _SCALAR_RE.match(path.strip())
         if m:
-            return _scalar_text(scalars or [], int(m.group(1)), tables, in_window)
+            return _scalar_text(scalars or [], int(m.group(1)), tables, in_window,
+                                window_date_ref)
         table, column = resolve_parts(tables, path)
         return f"[{table}::{column}]"
     return resolve
 
 
 def _scalar_text(scalars: list[dict], n: int, tables: dict,
-                 in_window: bool) -> str:
+                 in_window: bool, window_date_ref: str | None = None) -> str:
     if n >= len(scalars):
         raise UntranslatableError(f"scalar placeholder #{n} has no parsed subquery")
     sc = scalars[n]
+    base = make_resolver(tables)
     if in_window:
-        if sc["agg"] != "MAX":
+        # The yesterday stand-in is only meaningful for the latest value of the
+        # window's OWN date column — the one column proven to be a date. MAX of
+        # anything else (an amount, another date) is refused, not guessed.
+        try:
+            arg_ref = base(sc["arg"])
+        except UntranslatableError:
+            arg_ref = None
+        if sc["agg"] != "MAX" or window_date_ref is None or arg_ref != window_date_ref:
             raise UntranslatableError(
                 f"scalar subquery {sc['sql']} inside a windowed measure: only "
-                f"MAX(<date>) has a row-level stand-in (group_aggregate cannot "
-                f"nest inside moving_sum)")
+                f"MAX(<the window's order date column>) has a row-level stand-in "
+                f"(group_aggregate cannot nest inside moving_sum)")
         return _SCALAR_IN_WINDOW
-    base = make_resolver(tables)
     arg = translate_sql_expr(sc["arg"], base)
     if sc["where"] is not None:
         arg = f"if ( {translate_sql_expr(sc['where'], base)} ) then {arg} else null"
@@ -121,7 +146,9 @@ def _scalar_text(scalars: list[dict], n: int, tables: dict,
 def scalar_annotations(measure: dict, in_window: bool) -> list[dict]:
     template = SCALAR_WINDOW_ASSUMPTION if in_window else SCALAR_LOD_NOTE
     kind = "cap_assumption" if in_window else "scalar_subquery"
-    return [{"kind": kind, "detail": template.format(sql=sc["sql"], arg=sc["arg"])}
+    return [{"kind": kind, "detail": template.format(
+                sql=sc["sql"], arg=sc["arg"],
+                where=(f" where {sc['where']}" if sc.get("where") else ""))}
             for sc in measure.get("scalar_subqueries") or []]
 
 
@@ -369,6 +396,8 @@ def translate_metric_view(parsed: dict, tables: dict) -> dict:
     _translate_cross_measures(deferred, parsed, tables, translated, skipped,
                               by_name, skip_names, window_measures)
 
+    _flag_scalars_under_mv_filter(parsed, by_name)
+
     filter_out = None
     total = len(parsed["dimensions"]) + len(parsed["measures"])
     if parsed["filter"] is not None:
@@ -384,6 +413,22 @@ def translate_metric_view(parsed: dict, tables: dict) -> dict:
             "window_measures": window_measures,
             "stats": {"total": total, "translated": total - n_skipped,
                       "skipped": n_skipped}}
+
+
+def _flag_scalars_under_mv_filter(parsed: dict, by_name: dict) -> None:
+    """C (review 2026-09-28): a lifted scalar is NOT blind to the model-level
+    filter build-model mirrors from the MV's global filter: — annotate it."""
+    if parsed.get("filter") is None:
+        return
+    for m in parsed["measures"]:
+        entry = by_name.get(m["name"])
+        if entry is None or entry.get("output_kind") != "formula":
+            continue
+        for sc in m.get("scalar_subqueries") or []:
+            entry["annotations"].append({
+                "kind": "scalar_under_mv_filter",
+                "detail": SCALAR_MV_FILTER_NOTE.format(flt=parsed["filter"],
+                                                       sql=sc["sql"])})
 
 
 def normalize_tables(tables: dict) -> dict:

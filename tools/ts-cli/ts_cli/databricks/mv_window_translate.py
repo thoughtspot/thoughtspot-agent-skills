@@ -116,7 +116,7 @@ def translate_window_measure(measure: dict, dimensions: list[dict],
         return wrap(agg, inner)
 
     resolver = make_resolver(tables, measure.get("scalar_subqueries"),
-                             in_window=True)
+                             in_window=True, window_date_ref=order.get("date_ref"))
     ts = translate_sql_expr(measure["expr"], resolver, agg_hook=hook)
     if not wrapped:
         raise UntranslatableError(
@@ -147,9 +147,11 @@ def _find_order_dim(order_name: str, dimensions: list[dict],
 
     'day' == raw date. A week grain, or any truncation wrapped in date shifts
     (the Friday-start `DATE_ADD(DATE_TRUNC('WEEK', DATE_ADD(dt, 3)), -3)`), is
-    ordered by the dimension's own formula (BL-316 item 6); build-model's
-    add_formula_prefix turns `[Week]` into `[formula_Week]`."""
-    from ts_cli.databricks.mv_translate import display_title, make_resolver
+    ordered by the dimension's own formula (BL-316 item 6), referenced by the
+    same formula_id() build-model stamps — a renamed/colliding formula then
+    fails `ts tml lint`'s dangling-ref check instead of importing wrong.
+    'date_ref' is the resolved underlying date column."""
+    from ts_cli.databricks.mv_translate import display_title, formula_id, make_resolver
     dim = next((d for d in dimensions if d["name"] == order_name), None)
     if dim is None:
         raise UntranslatableError(
@@ -157,7 +159,8 @@ def _find_order_dim(order_name: str, dimensions: list[dict],
             f"dimensions")
     resolver = make_resolver(tables)
     if dim["kind"] == "direct":
-        return {"grain": "day", "sort_ref": resolver(dim["expr"])}
+        ref = resolver(dim["expr"])
+        return {"grain": "day", "sort_ref": ref, "date_ref": ref}
     if dim["kind"] == "computed":
         stripped = dim["expr"].strip()
         m = _DATE_TRUNC_DIM_RE.match(stripped)
@@ -165,14 +168,17 @@ def _find_order_dim(order_name: str, dimensions: list[dict],
             unit = m.group(1).lower()
             inner = m.group(2).strip()
             if unit == "day":
-                return {"grain": "day", "sort_ref": resolver(inner)}
+                ref = resolver(inner)
+                return {"grain": "day", "sort_ref": ref, "date_ref": ref}
             if unit in _GRAIN_MONTHS:
-                return {"grain": unit, "sort_ref": resolver(inner)}
-        unit = _shifted_trunc_unit(stripped)
-        if unit is not None:
+                ref = resolver(inner)
+                return {"grain": unit, "sort_ref": ref, "date_ref": ref}
+        shifted = _shifted_trunc_unit(stripped)
+        if shifted is not None:
+            unit, column = shifted
             title = display_title(dim)
-            return {"grain": unit, "sort_ref": f"[{title}]",
-                    "formula_title": title}
+            return {"grain": unit, "sort_ref": f"[{formula_id(title)}]",
+                    "formula_title": title, "date_ref": resolver(column)}
         if m and not _PLAIN_COLUMN_RE.match(m.group(2).strip()):
             raise UntranslatableError(
                 f"order dimension '{order_name}' truncates a non-column "
@@ -188,9 +194,9 @@ def _find_order_dim(order_name: str, dimensions: list[dict],
         f"DATE_TRUNC('<unit>', col), or a date-shifted DATE_TRUNC of one column)")
 
 
-def _shifted_trunc_unit(expr: str) -> str | None:
-    """Unit of an expr that is one DATE_TRUNC('<unit>', …) of ONE column,
-    wrapped only in DATE_ADD/DATE_SUB shifts — else None."""
+def _shifted_trunc_unit(expr: str) -> tuple[str, str] | None:
+    """(unit, column) of an expr that is one DATE_TRUNC('<unit>', …) of ONE
+    column, wrapped only in DATE_ADD/DATE_SUB shifts — else None."""
     from ts_cli.databricks.mv_sql import tokenize
     try:
         toks = tokenize(expr)
@@ -211,7 +217,7 @@ def _shifted_trunc_unit(expr: str) -> str | None:
             or len(cols) != 1 or len(units) != 1
             or units[0] not in _TRUNC_GRAINS):
         return None
-    return units[0]
+    return units[0], next(iter(cols))
 
 
 def _moving_wrap(window, order, annotations):

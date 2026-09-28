@@ -198,6 +198,7 @@ are roughly ordered by value÷effort.
 | ~~BL-305~~ | ~~alias blindness in `d6`/`d10`/`d11`/`s2`, and join findings reported with an empty `object_name`~~ | DONE (2026-09-23) |
 | BL-283 | `check-catalog.md` and the audit `check_id`s can drift with nothing to notice — 51 documented vs 50 emitted today, and the deferred-id table means a naive comparison is wrong | next validator pass |
 | ~~BL-316~~ | ~~from-Databricks translator gaps found converting a 136-measure budget/forecast MV — 88 needed hand authoring; two ThoughtSpot window limits to document~~ | DONE (2026-09-28) |
+| BL-317 | `IN`/`NOT IN` and share-of-total have 2–3 ThoughtSpot spellings across converters; the DBX to-direction `in(…)` row is one the catalog says fails import | next converter-parity pass |
 
 ### Tier 3 — Opportunistic
 
@@ -11746,3 +11747,35 @@ stripping one outer aggregate. The unmodified MV now translates **158/158, 0 ski
 hand-verified conversion after normalising equivalent spellings, and the model rebuilt from
 the CLI's output alone number-matched Databricks on channel share, budget/eCPC variance,
 revenue per booking and daily/weekly/monthly prior-year measures.
+
+## BL-317 — one construct, several ThoughtSpot spellings: `IN`/`NOT IN` and share-of-total `Tier 2`
+
+**Filed:** 2026-09-28.
+**Source:** the conversion-consistency audit of the BL-315/BL-316 PR (angle 9,
+implementation drift). Not fixed there because each item reaches past the Databricks
+converter into a sibling's code or the shared catalog.
+
+**Affects:** `ts_cli/sv_sql.py` (`_construct_in`/`_construct_not`),
+`ts_cli/databricks/mv_sql_constructs.py`, `ts_cli/sv_translate.py`,
+`agents/shared/schemas/thoughtspot-formula-patterns.md`,
+`agents/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md`,
+`agents/shared/mappings/ts-databricks/ts-databricks-formula-translation.md`.
+
+| Construct | Spellings today |
+|---|---|
+| `x NOT IN (a, b)` | DBX code: `( [x] != a and [x] != b )`. Snowflake doc, Qlik CL07, formula-patterns: `not ( [x] in { a , b } )`. Snowflake **code refuses it** (`sv_sql.py`), so that converter's doc and code also disagree |
+| `x IN (a, b)` | DBX code and Snowflake code: `( [x] = a or [x] = b )` (the two `_construct_in` bodies are copies). Formula-patterns: `[x] in { a , b }`. DBX formula-translation's **to-direction** row still shows `in(x, a, b, c)`, a form the catalog says fails import |
+| `SUM(m) OVER ()` (share of total) | DBX, Tableau, Looker: `group_aggregate ( sum ( m ) , { } , query_filters ( ) )`. Snowflake SV: `group_sum ( m )` |
+
+Every pair means the same thing, NULL handling included, so none of these is a wrong
+number. Each is a second spelling of one target construct, which is what BL-217 exists
+to stop.
+
+**Approach.** Pick one canonical form per construct in `thoughtspot-formula-patterns.md`
+(live-check `not ( [x] in { … } )` first, since it needs `>-` YAML because of the braces);
+add `emit_in_list(operand, values, negate)` to `formula_common.py` and import it from both
+`_construct_in`s; correct the DBX to-direction `in(…)` row; give Snowflake NOT IN the
+shared emitter. Then add a `check_converter_parity` spelling rule for share-of-total, so a
+third spelling cannot appear.
+
+**Target:** next converter-parity pass.

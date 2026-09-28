@@ -435,6 +435,13 @@ class TestEmptyOverWindow:
         with pytest.raises(UntranslatableError, match="roll-up"):
             t("SUM(AVG(x)) OVER ()")
 
+    def test_sum_of_ratio_raises(self):
+        # review finding A: a sum of per-group ratios is not a ratio of totals
+        with pytest.raises(UntranslatableError, match="roll-up"):
+            t("SUM(SUM(a) / SUM(b)) OVER ()")
+        with pytest.raises(UntranslatableError, match="roll-up"):
+            t("SUM(SUM(a) * 2) OVER ()")
+
     def test_partitioned_over_raises(self):
         with pytest.raises(UntranslatableError, match="empty OVER"):
             t("SUM(SUM(x)) OVER (PARTITION BY r)")

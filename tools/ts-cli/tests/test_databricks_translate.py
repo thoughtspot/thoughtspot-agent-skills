@@ -580,7 +580,7 @@ class TestFormulaOrderedWeek:
                          _window("week", "current", offset=_offset(-364, "day")),
                          physical_ref="x", agg_function="SUM"),
             BF_DIMS, TABLES)
-        assert out["ts_expr"] == "moving_sum ( [TRANSACTIONS::x] , 52 , -52 , [Week] )"
+        assert out["ts_expr"] == "moving_sum ( [TRANSACTIONS::x] , 52 , -52 , [formula_Week] )"
         kinds = [a["kind"] for a in out["annotations"]]
         assert kinds == ["one_row_per_period", "order_by_formula"]
 
@@ -590,7 +590,7 @@ class TestFormulaOrderedWeek:
                          _window("week_mond", "current", offset=_offset(-1, "week")),
                          physical_ref="x", agg_function="SUM"),
             BF_DIMS, TABLES)
-        assert out["ts_expr"].endswith(", 1 , -1 , [Week Mond] )")
+        assert out["ts_expr"].endswith(", 1 , -1 , [formula_Week Mond] )")
         assert "pending_verification" in [a["kind"] for a in out["annotations"]]
 
     def test_week_offset_not_multiple_of_7_raises(self):
@@ -680,6 +680,50 @@ class TestScalarSubquery:
         assert ("add_days ( add_days ( today ( ) , -1 ) , - 364 )"
                 in out["ts_expr"])
         assert "cap_assumption" in [a["kind"] for a in out["annotations"]]
+
+    def test_scalar_on_formula_ordered_week_uses_underlying_date(self):
+        out = translate_window_measure(
+            _win_measure("py_weekly",
+                         "SUM(x) FILTER (WHERE dt <= DATE_ADD(__MVSCALAR_0__, -364))",
+                         "conditional",
+                         _window("week", "current", offset=_offset(-364, "day")),
+                         scalar_subqueries=[LAST_ACTUAL]),
+            BF_DIMS, TABLES)
+        assert "add_days ( add_days ( today ( ) , -1 ) , - 364 )" in out["ts_expr"]
+        cap = next(a for a in out["annotations"] if a["kind"] == "cap_assumption")
+        assert "where observation = 'current'" in cap["detail"]  # WHERE not hidden
+
+    def test_max_of_non_date_inside_window_raises(self):
+        # review finding B: MAX(amount) is not "the latest date"
+        with pytest.raises(UntranslatableError, match="order date column"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x) FILTER (WHERE x <= __MVSCALAR_0__)",
+                             "conditional",
+                             _window("month", "current", offset=_offset(-1, "month")),
+                             scalar_subqueries=[dict(LAST_ACTUAL, arg="amount")]),
+                BF_DIMS, TABLES)
+
+    def test_max_of_other_date_inside_window_raises(self):
+        with pytest.raises(UntranslatableError, match="order date column"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x) FILTER (WHERE dt <= __MVSCALAR_0__)",
+                             "conditional",
+                             _window("month", "current", offset=_offset(-1, "month")),
+                             scalar_subqueries=[dict(LAST_ACTUAL, arg="ship_dt")]),
+                BF_DIMS, TABLES)
+
+    def test_scalar_under_mv_filter_is_annotated(self):
+        # review finding C: the mirrored model filter still applies to {} LODs
+        m = _measure(
+            "capped", "SUM(x) FILTER (WHERE dt <= __MVSCALAR_0__)", "conditional",
+            scalar_subqueries=[LAST_ACTUAL])
+        out = translate_metric_view(_parsed(dimensions=[], measures=[m],
+                                            filter_sql="region = 'EU'"), TABLES)
+        kinds = [a["kind"] for a in out["translated"][0]["annotations"]]
+        assert "scalar_under_mv_filter" in kinds
+        out2 = translate_metric_view(_parsed(dimensions=[], measures=[m]), TABLES)
+        assert "scalar_under_mv_filter" not in [
+            a["kind"] for a in out2["translated"][0]["annotations"]]
 
     def test_non_max_scalar_inside_window_raises(self):
         with pytest.raises(UntranslatableError, match=r"only\s+MAX"):

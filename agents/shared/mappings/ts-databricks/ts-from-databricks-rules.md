@@ -661,7 +661,7 @@ Does the window have `range: current`?
   YES → Does it have an `offset:`?
           YES → LAG: moving_sum ( [m] , N , -N , <order> ) — N = offset in rows of the
                 order grain (day: -364 day → 364; week: -364 day → 52; month: -12 month → 12);
-                <order> is [date], or [<Dim>] for a week / date-shifted order dimension
+                <order> is [date], or [formula_<Dim>] for a week / date-shifted order dimension
                 (BL-315: this check must come BEFORE the raw-date branch)
         Is `order:` a raw date dimension (not a truncated period)?
           YES → True semi-additive (snapshot metric)
