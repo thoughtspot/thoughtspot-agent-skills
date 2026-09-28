@@ -654,7 +654,31 @@ multiple rows per period) needs a period-grain pre-aggregation first.
 | `moving_sum([m], 12, -12, [date])` | `expr: SUM(m)` + `window: [{order: month_dim, semiadditive: last, range: current, offset: -1 year}]` | Same month last year (LAG(12)). The `-12 month` spelling was number-matched 2026-09-28 (BL-316); the `-1 year` spelling is the same N and is not separately tested |
 | `moving_sum([m], 1, -1, [date])` | `expr: SUM(m)` + `window: [{order: year_dim, semiadditive: last, range: current, offset: -1 year}]` | Previous year (LAG(1) at year grain) — Deferred (C8), not separately live-tested |
 
-#### Databricks → TS: offsets at day and week grain, ratios (2026-09-28, BL-315/BL-316)
+#### ⚠ Period comparisons are NOT translated by default (BL-322, 2026-09-28)
+
+**`range: current` + `offset:` has no safe ThoughtSpot formula.** The Metric View counts
+calendar **periods** of its `order:` dimension; `moving_sum ( m , N , -N , order )` counts
+**rows of the query result**, and a formula cannot see the grain it is queried at. Measured
+against Databricks on a 136-measure budget/forecast MV (ts-model-parity metric matrix, 2,161
+outcomes):
+
+| Query | Metric View | row-lag formula |
+|---|---|---|
+| grouped by the window's own order dimension, every period present | prior-period value | **same** (exact) |
+| + extra non-time dimensions (month × vertical) | prior-period value per group | **same** |
+| coarser grain (`py_daily` by month) | prior-year value of each month's last day (`semiadditive: last`) | **NULL** |
+| finer grain (`py_monthly` by date) | the month's value on every day | **the value N DAYS back — a plausible wrong number** |
+| a period missing in a group | still the correct prior period | **silently shifted to the wrong period** |
+
+So `ts databricks translate-formulas` now puts every such measure in `skipped[]` with the
+reason. The correct translation is a **date-shifted join** — the fact role-played on
+`date + offset` against a shared date dimension — which is additive and right at every grain
+(design pending, BL-322). `--allow-row-lag` restores the approximation below for a user who
+will only query at the window's own grain; every emitted measure then carries a
+`row_lag_approximation` annotation. The `trailing` / `leading` mappings share the same
+rows-vs-periods root cause (BL-098 density); BL-322 tracks treating them the same way.
+
+#### Databricks → TS: offsets at day and week grain, ratios (2026-09-28, BL-315/BL-316) — opt-in only, `--allow-row-lag`
 
 All rows below were number-matched against a Databricks Metric View on dense data
 (`agent_skills.business_forecast.business_reporting_mv`, nebula-ts-semview):

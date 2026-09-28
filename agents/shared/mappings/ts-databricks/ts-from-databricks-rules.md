@@ -659,7 +659,10 @@ type of measure and the `order:` dimension. Use this classification:
 ```
 Does the window have `range: current`?
   YES → Does it have an `offset:`?
-          YES → LAG: moving_sum ( [m] , N , -N , <order> ) — N = offset in rows of the
+          YES → NOT TRANSLATED by default — skipped[] with the reason (BL-322): the
+                MV counts calendar periods, moving_sum counts query rows, and they
+                diverge silently at any other grain. With --allow-row-lag only:
+                LAG: moving_sum ( [m] , N , -N , <order> ) — N = offset in rows of the
                 order grain (day: -364 day → 364; week: -364 day → 52; month: -12 month → 12);
                 <order> is [date], or [formula_<Dim>] for a week / date-shifted order dimension
                 (BL-315: this check must come BEFORE the raw-date branch)

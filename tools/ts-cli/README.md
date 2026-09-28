@@ -3320,6 +3320,7 @@ ts databricks translate-formulas \
 | `--input` / `-i` | yes | `parsed.json` produced by `ts databricks parse-mv` |
 | `--output` / `-o` | yes | Output path for the translated formulas JSON |
 | `--tables` / `-t` | yes | JSON object mapping MV alias paths to ThoughtSpot table names — a `"source"` key is required (the MV's base table alias); nested join aliases (e.g. `"orders.customers"`) map to their joined ThoughtSpot table. Or the literal `auto` to derive the whole map from `--input` (BL-205) |
+| `--allow-row-lag` | no | Emit period-comparison windows (`range: current` + `offset:`) as the `moving_sum` row-lag **approximation** instead of skipping them (BL-322). Off by default: the approximation is correct only when the query is grouped by exactly the window's order dimension with every period present — at any other grain it returns NULL or a plausible wrong number with no warning. Each emitted measure carries a `row_lag_approximation` annotation |
 
 **Output:** `{"translated": [...], "skipped": [...], "filter": {...}|null,
 "dependency_dag": {...}, "window_measures": [...], "stats": {"total":

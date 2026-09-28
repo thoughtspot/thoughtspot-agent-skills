@@ -90,6 +90,7 @@ are roughly ordered by value÷effort.
 | BL-243 | `with tag` folded into the metric expr — destroys all 5 metrics, `build-model` still exits 0 | next SF converter pass |
 | BL-244 | SV `variables` translate 8/8 / 0 skipped (false success), then fail at import and re-deploy | next SF converter pass, with BL-031 |
 | ~~BL-315~~ | ~~from-Databricks: a `range: current` + `offset:` window ordered by a raw date drops the offset silently — prior-year measures return this year's number~~ | DONE (2026-09-28) |
+| BL-322 | from-Databricks period comparisons (`range: current` + `offset:`) were translated to a row-lag that is right only at one grain and silently wrong elsewhere — now skipped by default; the correct date-shifted-join translation is not built | next DBX pass |
 
 ### Tier 2 — Schedule soon
 
@@ -11948,3 +11949,51 @@ correct prior-year values.
 - Re-run: must detect the existing Table/Model and apply BL-318's keep/discard prompt from v1.
 
 **Target:** next skill.
+
+## BL-322 — period comparisons have no safe formula translation; build the date-shifted join `Tier 1`
+
+**Filed:** 2026-09-28.
+**Source:** the ts-model-parity metric matrix — 2,161 measure × cell outcomes comparing a
+converted Model (B), a linked Metric View Model (A) and the Metric View queried directly on
+Databricks (the reference), for `agent_skills.business_forecast.business_reporting_mv`.
+
+**Affects:** `ts_cli/databricks/mv_window_translate.py` (`_current_wrap`, `_lag_wrap`),
+`ts-convert-from-databricks-mv`, both Databricks mapping docs.
+
+**The defect.** A Metric View period comparison — `window: [{order: <period>, range: current,
+offset: -N <unit>}]`, i.e. every prior-year / prior-month measure — was translated to
+`moving_sum ( m , N , -N , order )`. The MV counts calendar **periods** of its order
+dimension; `moving_sum` counts **rows of the query result**, and a ThoughtSpot formula cannot
+see the grain it is queried at. Measured (Model A matched Databricks in every case):
+
+| Query | Databricks MV | row-lag formula (B) |
+|---|---|---|
+| own grain (`py_monthly` by month), + extra dims (× vertical) | prior-period value | **exact** |
+| coarser (`py_daily_redirects` by month) | 737,575 = prior-year value of the month's last day | **NULL** |
+| finer (`py_monthly_redirects` by date) | 24,928,945 = the month's value on every day | **902,538 = redirects 12 days earlier**, then 0 |
+| a period missing in a group | the correct prior period | a silently shifted period (reasoned; the synthetic data has no gaps) |
+
+The finer-grain case is the dangerous one: a believable number with nothing to flag it, and
+Spotter will group a `py_monthly_*` measure by date. The mapping was "live-verified" (window
+claim matrix C6) only at the order grain on dense data — it proved the idiom *can* match,
+not that it is safe. BL-315 then extended it to day and week grain.
+
+**What shipped (ts-cli v0.151.0).** Such windows now go to `skipped[]` with a reason naming
+the rows-vs-periods mismatch and the alternative. `--allow-row-lag` restores the
+approximation for a user who will only query at the window's own grain; each measure then
+carries a `row_lag_approximation` annotation. Coverage matrix #37/#80/#81 re-scoped; new
+limitation L14.
+
+**The correct translation — still to build.** A date-shifted join: the fact table role-played
+(`alias:`) and joined to a shared date dimension on `date + offset`, so a prior-period measure
+is a plain `sum` over shifted rows. Additive, so correct at **every** grain, immune to gaps,
+survives date filters, and needs no `today()` cap. It deliberately differs from the MV in one
+place: at a coarser grain it returns the prior-period **total**, not `semiadditive: last`'s
+last-day value — right for flow metrics (sessions, revenue), wrong for snapshots (balances), so
+the translation must choose by metric type and declare the difference. The role-play
+machinery exists (skill v1.9.0); the date-dimension synthesis and offset join do not.
+
+**Same class, not yet changed.** `range: trailing|leading N <unit>` also map to a row-positional
+`moving_*` (BL-098 density). Decide whether they get the same default-skip treatment.
+
+**Target:** next DBX pass.

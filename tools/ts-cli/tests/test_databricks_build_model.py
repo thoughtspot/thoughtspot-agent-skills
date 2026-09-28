@@ -1448,7 +1448,7 @@ measures:
     def test_lag_references_the_week_formula_id(self):
         parsed = parse_metric_view(self.YAML)
         assert not parsed["unsupported"]
-        translated = translate_metric_view(parsed, {"source": "AGG"})
+        translated = translate_metric_view(parsed, {"source": "AGG"}, allow_row_lag=True)
         assert not translated["skipped"]
         doc, _ = build_model_tml_dbx(model_name="M", parsed=parsed,
                                      translated_doc=translated,

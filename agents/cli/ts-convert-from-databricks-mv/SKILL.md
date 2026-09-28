@@ -459,6 +459,14 @@ Databricks conditions in one formula. Every entry carrying a
 `lod_filter_asymmetry` annotation needs this judgment call made explicitly
 with the user.
 
+**Period comparisons are skipped by default (BL-322).** A `range: current` +
+`offset:` window (prior year / prior month) lands in `skipped[]`: ThoughtSpot has no
+formula that counts calendar periods the way the Metric View does, and the row-lag
+approximation returns NULL or a plausible wrong number at any grain other than the
+window's own. Tell the user which measures were skipped and why. Only if they will
+query each one exclusively at its own grain, re-run translate-formulas with
+`--allow-row-lag`, and write that restriction into the measure's description.
+
 **Scalar-cap and date-filter caveats (2026-09-28, BL-316).** Surface every
 `cap_assumption` annotation: a scalar subquery used inside a windowed measure is
 emitted as `add_days ( today ( ) , -1 )` because ThoughtSpot cannot nest
@@ -850,6 +858,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.15.0 | 2026-09-28 | **Period comparisons are no longer translated by default (ts-cli v0.151.0, BL-322).** `range: current` + `offset:` windows went to `moving_sum ( m , N , -N , order )`, a row-lag that is exact only when the query is grouped by the window's own order dimension with every period present. Measured against Databricks with the ts-model-parity metric matrix on a 136-measure budget/forecast MV: at a coarser grain it returns NULL, at a finer grain a plausible wrong number (`py_monthly` by date = the value 12 days back), and with a gap a silently shifted period. They now land in `skipped[]` with the reason; `--allow-row-lag` restores the approximation with a `row_lag_approximation` annotation. Coverage matrix #37/#80/#81 and new limitation L14. |
 | 1.14.0 | 2026-09-28 | **Budget/forecast Metric Views convert end to end (ts-cli v0.149.0, BL-315/BL-316).** (1) **Fix — a day-grain window `offset:` was dropped silently:** `range: current` + `offset: -364 day` ordered by a raw date became `last_value(…)`, so "prior year" returned this year's value; it is now the `moving_sum` LAG. (2) **New mappings**, each number-matched against Databricks: a whole-table scalar subquery over the MV's own source (`(SELECT MAX(dt) FROM <source> WHERE …)`) → `group_aggregate(…, {}, {})`; `NOT IN`; `FILTER (WHERE …)` anywhere in an expression; `SUM(SUM(x)) OVER ()`; week-grain / date-shifted order dimensions (ordered by the dimension's formula); windows on ratio measures. (3) **Two new caveats surfaced at Step 10:** a LAG returns NULL when the query's date filter excludes the prior period (`one_row_per_period` text), and a scalar cap inside a window is emitted as `today() - 1` (`cap_assumption`). Coverage matrix rows #80–#87, L13. Refused rather than approximated (each lands in `skipped[]` with a reason): a scalar subquery on an MV with a global `filter:`, a correlated scalar subquery, `MAX` of anything but the window's order date inside a window, a nested aggregate in a window, `NOT IN` with a `NULL`, and `SUM(SUM(a)/SUM(b)) OVER ()`. |
 | 1.13.2 | 2026-09-22 | **Two dangling open-item citations repointed (audit 5.3 class).** The cross-reference inlining rule cited `open-items #4` and the duplicate-`column_id` rule cited `open-items #2`; this skill's open-items.md has only `#1`, so both resolved to nothing. Both claims are in fact invariants — **I9** and **I8** — and now cite those. Caught by the new `check_open_item_citations.py`. |
 | 1.13.1 | 2026-09-22 | **I7 untranslatable gate added.** Step 6 surfaced the translator's `skipped[]` list for a proceed/omit decision with no instruction to open [ts-databricks-formula-translation.md](../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md) first, so an expression with a documented ThoughtSpot equivalent could be dropped on syntax recognition alone. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |

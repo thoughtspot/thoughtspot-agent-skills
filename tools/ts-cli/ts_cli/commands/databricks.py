@@ -82,6 +82,11 @@ def translate_formulas_cmd(
         help="JSON object mapping MV alias paths to ThoughtSpot table "
              "names ('source' key required), or the literal 'auto' to derive it "
              "from --input (diagram/preview only)"),
+    allow_row_lag: bool = typer.Option(
+        False, "--allow-row-lag",
+        help="Emit period-comparison windows (range: current + offset) as the "
+             "moving_sum row-lag APPROXIMATION instead of skipping them. Correct "
+             "only at the window's own grain with no gaps (BL-322)."),
 ) -> None:
     """Translate parsed Metric View expressions to ThoughtSpot formulas.
 
@@ -110,7 +115,7 @@ def translate_formulas_cmd(
     else:
         tables = _load_json(tables_file, "tables map")
     try:
-        result = translate_metric_view(parsed, tables)
+        result = translate_metric_view(parsed, tables, allow_row_lag=allow_row_lag)
     except ValueError as exc:
         typer.echo(f"Invalid --tables map: {exc}", err=True)
         raise SystemExit(1)

@@ -51,6 +51,27 @@ _ONE_ROW_PER_PERIOD = (
     "filters must also keep the rows the lag reads: a date filter that "
     "excludes the prior period returns NULL where Databricks still returns a "
     "value (live-verified 2026-09-28).")
+# BL-322 (2026-09-28): a period comparison has no SAFE ThoughtSpot formula.
+# The MV window counts calendar PERIODS of its order dimension; moving_sum
+# counts ROWS of the query result, and a formula cannot see the query's grain.
+# Number-matched against Databricks on a 136-measure budget/forecast MV
+# (ts-model-parity metric matrix): exact ONLY at the order grain with no gaps;
+# py_daily by month -> NULL, py_monthly by date -> the value N DAYS back (a
+# plausible wrong number), a gap -> a silently shifted period.
+ROW_LAG_UNSAFE = (
+    "range: current + offset '{offset}' (a period comparison) has no safe "
+    "ThoughtSpot formula: moving_sum counts query ROWS, the Metric View counts "
+    "calendar PERIODS of '{order}'. They agree only when the query is grouped by "
+    "exactly '{order}', every period is present in every group, and no filter "
+    "excludes the prior period - otherwise ThoughtSpot returns NULL or a "
+    "plausible wrong number with no warning (live-measured 2026-09-28, BL-322). "
+    "Build it as a date-shifted join (the fact role-played on date + offset), or "
+    "re-run translate-formulas with --allow-row-lag to accept the approximation.")
+_ROW_LAG_APPROX = (
+    "ROW-LAG APPROXIMATION (--allow-row-lag): correct only when grouped by exactly "
+    "'{order}' with every period present in every group and the prior period not "
+    "filtered out. At any other grain it returns NULL or a wrong value silently "
+    "(BL-322). Restrict its use in the column description / Spotter instructions.")
 _ORDER_BY_FORMULA = (
     "ordered by the '{title}' formula, not the raw date column: '{order}' is "
     "not a bucket of the date, and a date-ordered moving_sum forces the query "
@@ -75,7 +96,7 @@ _NOT_LIVE_TESTED = (
 
 
 def translate_window_measure(measure: dict, dimensions: list[dict],
-                             tables: dict) -> dict:
+                             tables: dict, allow_row_lag: bool = False) -> dict:
     """Translate a windowed measure per the rules-doc decision tree.
 
     The window is applied to EVERY aggregate in the expression (BL-316 item
@@ -111,7 +132,7 @@ def translate_window_measure(measure: dict, dimensions: list[dict],
     elif rng["type"] == "cumulative":
         wrap = _cumulative_wrap(order, annotations)
     else:
-        wrap = _current_wrap(window, order, annotations)
+        wrap = _current_wrap(window, order, annotations, allow_row_lag)
     wrapped: list[str] = []
 
     def hook(agg: str, inner: str) -> str:
@@ -304,12 +325,19 @@ _CURRENT_AGGS = {"SUM", "AVG", "MIN", "MAX", "COUNT", "STDDEV", "VARIANCE"}
 _LOWER = {"AVG": "average", "STDDEV": "stddev", "VARIANCE": "variance"}
 
 
-def _current_wrap(window, order, annotations):
+def _current_wrap(window, order, annotations, allow_row_lag: bool = False):
     offset = window["offset"]
     if offset is not None:
         # BL-315: the day-grain branch below used to run first and return
-        # last_value(...) with the offset silently dropped — a prior-year
-        # measure returned this year's number. An offset always means LAG.
+        # last_value(...) with the offset silently dropped. BL-322: the LAG
+        # that replaced it is itself only safe at one grain, so it is no
+        # longer emitted by default - refused with the reason instead.
+        if not allow_row_lag:
+            raise UntranslatableError(ROW_LAG_UNSAFE.format(
+                offset=window.get("raw_offset") or f"{offset['n']} {offset['unit']}",
+                order=window["order"]))
+        annotations.append({"kind": "row_lag_approximation",
+                            "detail": _ROW_LAG_APPROX.format(order=window["order"])})
         return _lag_wrap(window, order, offset, annotations)
 
     def check(agg: str) -> str:

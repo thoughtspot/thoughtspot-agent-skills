@@ -359,7 +359,8 @@ def _balanced(s: str) -> bool:
 _PLACEHOLDER_RE = re.compile(r"__MVREF_(\d+)__")
 
 
-def translate_metric_view(parsed: dict, tables: dict) -> dict:
+def translate_metric_view(parsed: dict, tables: dict, *,
+                          allow_row_lag: bool = False) -> dict:
     """Translate a parse-mv result. Content failures -> skipped[]; only a
     malformed tables map raises (ValueError -> command exit 1)."""
     tables = normalize_tables(tables)
@@ -394,7 +395,8 @@ def translate_metric_view(parsed: dict, tables: dict) -> dict:
             dag[m["name"]] = refs
             deferred.append(m)
             continue
-        fn = ((lambda m=m: translate_window_measure(m, parsed["dimensions"], tables))
+        fn = ((lambda m=m: translate_window_measure(m, parsed["dimensions"], tables,
+                                                    allow_row_lag))
               if m.get("window") else (lambda m=m: translate_measure(m, tables)))
         if m.get("window"):
             window_measures.append(m["name"])
@@ -402,7 +404,7 @@ def translate_metric_view(parsed: dict, tables: dict) -> dict:
                         translated, skipped, by_name, skip_names)
 
     _translate_cross_measures(deferred, parsed, tables, translated, skipped,
-                              by_name, skip_names, window_measures)
+                              by_name, skip_names, window_measures, allow_row_lag)
 
     filter_out = None
     total = len(parsed["dimensions"]) + len(parsed["measures"])
@@ -487,7 +489,8 @@ def _kahn_order(deferred: list[dict], names: set[str]) -> list[str]:
 
 
 def _translate_cross_measures(deferred, parsed, tables, translated, skipped,
-                              by_name, skip_names, window_measures) -> None:
+                              by_name, skip_names, window_measures,
+                              allow_row_lag: bool = False) -> None:
     """Kahn topo-sort the MEASURE()/ANY_VALUE() referrers, inline in order."""
     names = {m["name"] for m in deferred}
     waiting = {m["name"]: m for m in deferred}
@@ -498,7 +501,7 @@ def _translate_cross_measures(deferred, parsed, tables, translated, skipped,
             window_measures.append(m_name)
         _translate_item(
             lambda m=m: _inline_and_translate(m, parsed, tables, by_name,
-                                              skip_names),
+                                              skip_names, allow_row_lag),
             m_name, "measure", translated, skipped, by_name, skip_names)
     for m_name in names - set(order):  # cycle members
         if waiting[m_name].get("window"):
@@ -509,9 +512,10 @@ def _translate_cross_measures(deferred, parsed, tables, translated, skipped,
         skip_names.add(m_name)
 
 
-def _inline_and_translate(m, parsed, tables, by_name, skip_names) -> dict:
+def _inline_and_translate(m, parsed, tables, by_name, skip_names,
+                          allow_row_lag: bool = False) -> dict:
     if m.get("window"):
-        return translate_window_measure(m, parsed["dimensions"], tables)
+        return translate_window_measure(m, parsed["dimensions"], tables, allow_row_lag)
     entry = translate_measure(m, tables)
     refs = entry["inlined_refs"]
 
