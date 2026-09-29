@@ -1,0 +1,20 @@
+<!-- Plotly is loaded here, in the HTML tab, because that is the shape ThoughtSpot
+     documents for CDN libraries and the one this chart's working predecessor used.
+     chart.js still carries a bounded dynamic loader as a fallback, so the tile
+     renders (or says why it cannot) whichever path the cluster allows. -->
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+<div id="chart">
+  <div class="wrapper">
+    <div class="breadcrumb" id="breadcrumb"></div>
+    <div class="svg-wrap">
+      <div id="sunburst"></div>
+      <div class="ring-guide" aria-hidden="true">
+        <span class="rg-arrow">Inner to Outer</span>
+        <span>Region</span><span class="rg-sep">&rsaquo;</span>
+        <span>State</span><span class="rg-sep">&rsaquo;</span>
+        <span>Item Type</span>
+      </div>
+    </div>
+  </div>
+</div>

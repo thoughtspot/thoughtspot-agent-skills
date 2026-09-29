@@ -86,6 +86,11 @@ FAMILY_PATTERNS: dict[str, tuple[re.Pattern, str]] = {
         re.compile(r"ts-load-[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*"),
         "data loading: ts-load-{specifier}",
     ),
+    "ts-custom-charts-*": (
+        re.compile(r"ts-custom-charts-[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*"),
+        "custom chart (BYOC) tiles and the Liveboards built from them: "
+        "ts-custom-charts-{specifier}",
+    ),
 }
 
 # Skills that legitimately don't match any family. Each entry must include a

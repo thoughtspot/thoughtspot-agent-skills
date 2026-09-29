@@ -1,0 +1,169 @@
+/* -------------------------------------------------------
+   SENTINEL: must NOT be display:none and must have size.
+   Keep it tiny/offscreen but mountable.
+-------------------------------------------------------- */
+#muze-sentinel{
+  position: absolute;
+  left: -9999px;
+  top: -9999px;
+  width: 20px;
+  height: 20px;
+  opacity: 0.01;     /* ok */
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* -------------------------------------------------------
+   INVOICE FORM  +  PAGINATED "PAPER" LAYOUT
+   Page size / orientation / margin come from CSS vars
+   (--page-w / --page-h / --page-margin) injected by
+   invoice.js -> applyPageSetup(), so the PAGE_* config
+   constants drive BOTH the on-screen Viewer and Export.
+-------------------------------------------------------- */
+html, body{
+  height: 100%;
+  margin: 0;
+}
+
+#invoice-root{
+  box-sizing: border-box;
+  min-height: 100%;
+  font-family: Arial, sans-serif;
+  color: #111;
+}
+
+/* one invoice = one sheet of paper. Padding = printable margin. */
+.invoice-page{
+  box-sizing: border-box;
+  padding: var(--page-margin, 48px);
+  background: #fff;
+}
+
+/* ---------- VIEWER: WYSIWYG paper sheets on a desk ---------- */
+@media screen{
+  #invoice-root{
+    background: #e9e9ed;            /* "desk" behind the pages */
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;       /* sheets centered via margin-inline:auto */
+    gap: 24px;
+    overflow: auto;
+  }
+  .invoice-page{
+    width: var(--page-w, 816px);
+    min-height: var(--page-h, 1056px);
+    margin-inline: auto;           /* center, but stay scroll-safe when narrow */
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+  }
+  /* pin footer to the bottom of the sheet */
+  .invoice-page .footer{
+    margin-top: auto;
+  }
+
+  /* "Download PDF" button — fixed so it stays reachable while scrolling */
+  .invoice-download-btn{
+    position: fixed;
+    top: 12px;
+    right: 16px;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font: 600 13px/1 Arial, sans-serif;
+    color: #fff;
+    background: #2563eb;
+    border: none;
+    border-radius: 6px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+  }
+  .invoice-download-btn:hover{
+    background: #1d4ed8;
+  }
+}
+
+/* ---------- EXPORT / PRINT: one invoice per physical page ---------- */
+@media print{
+  #invoice-root{
+    background: #fff;
+    padding: 0;
+    display: block;
+  }
+  .invoice-page{
+    box-shadow: none;
+  }
+  /* page break per invoice; avoid a trailing blank page */
+  .invoice-page{
+    break-after: page;
+    page-break-after: always;
+  }
+  .invoice-page:last-child{
+    break-after: auto;
+    page-break-after: auto;
+  }
+  /* the offscreen Muze sentinel + the on-screen button must never print */
+  #muze-sentinel,
+  .invoice-download-btn{
+    display: none !important;
+  }
+}
+
+.header{
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.header-left{ width: 58%; }
+.header-right{ width: 40%; text-align: right; }
+
+.table-header,
+.table-row{
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+.table-header{
+  font-weight: bold;
+  border-bottom: 1px solid #777;
+}
+.table-row{
+  border-bottom: 1px solid #ddd;
+}
+.col-desc{ width: 70%; }
+.col-amt{ width: 30%; text-align: right; }
+
+.footer{
+  display: flex;
+  justify-content: space-between;
+  margin-top: 35px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.footer-right{
+  font-style: italic;
+  text-align: right;
+}
+
+/* visible debug so you ALWAYS know where it is failing */
+.debug{
+  border: 1px solid #444;
+  background: #fafafa;
+  padding: 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.debug pre{
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 8px;
+  overflow: auto;
+  max-height: 140px;
+}
+.ok{ color: #0a7a0a; font-weight: bold; }
+.bad{ color: #b00020; font-weight: bold; }

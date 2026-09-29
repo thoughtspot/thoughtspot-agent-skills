@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>New / Used Flag summary — pivot chart, local preview</title>
+  <link rel="stylesheet" href="chart.css">
+</head>
+<body>
+<!--
+  Local preview only. The mock `viz` lives here rather than in chart.js, so nothing
+  ships to production that production does not need. Numbers are the live tile's.
+
+  Two things are deliberately awkward: `__id__` is in the schema (the query returns it),
+  and "vs. Last Month (NNR)" carries a non-breaking space before "(NNR)" — that is the
+  real name TS returned, and the exact-match lookup missed it in the first cut.
+-->
+<div id="chart"></div>
+<script>
+  globalThis.viz = {
+    getDataFromSearchQuery: () => ({
+      getData: () => ({
+        schema: [
+          { name: '__id__',               type: 'ATTRIBUTE' },
+          { name: 'New / Used Flag',      type: 'ATTRIBUTE' },
+          { name: 'New Retail',           type: 'MEASURE' },
+          { name: 'vs. Last Year (NR)',   type: 'MEASURE' },
+          { name: 'vs. Last Month (NR)',  type: 'MEASURE' },
+          { name: 'New Non-Retail',       type: 'MEASURE' },
+          { name: 'vs. Last Year (NNR)',  type: 'MEASURE' },
+          { name: 'vs. Last Month (NNR)', type: 'MEASURE' },
+          { name: 'New Total',            type: 'MEASURE' },
+          { name: 'vs. Last Year',        type: 'MEASURE' },
+          { name: 'vs. Last Month',       type: 'MEASURE' },
+        ],
+        data: [
+          ['0', 'New', 1120000, 0.071, -0.081, 254000, -0.056, 0.147, 1480000, 0.147, 0.073],
+        ],
+      }),
+    }),
+    events: { emitRenderCompletedEvent() {} },
+  };
+</script>
+<script type="module" src="chart.js"></script>
+</body>
+</html>

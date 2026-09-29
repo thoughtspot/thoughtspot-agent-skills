@@ -1,0 +1,143 @@
+#!/usr/bin/env node
+// cluster-shot.mjs --url <liveboard url> --tabs "01 About,02 Pulse" [--out dir] [--wait 9] [--profile dir]
+//                  [--login-timeout 300] [--scroll-wait 8] [--no-scroll] [--filter "Region=West"]
+//   --filter clicks the named filter chip, picks the value and applies it before capturing, to prove the tiles
+//   survive a filtered view.
+//   Each tab is captured screenful by screenful: the tallest scrolling container is found and scrolled, so a
+//   long tab yields <tab>-1.png, <tab>-2.png ... (use --no-scroll for a single viewport shot).
+//
+// Opens a Liveboard in a real, logged-in ThoughtSpot session and screenshots each tab, then
+// inspects every custom-chart iframe for the failure texts that a local preview cannot show:
+// "Chart did not render", "Something went wrong", the chart's own "No data yet" / stack paint.
+//
+// This is the check that closes the gap between the local preview and the cluster. It is headed
+// on purpose: SSO (Okta, SAML) needs a human once. The session lives in a persistent profile
+// (default ~/.cache/amuzing-chart/cluster-profile, outside the repo), so later runs are silent.
+//
+// Prints a report and the PNG paths. Exit 0 when every tab screenshot was taken.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { chartSkill } from "./chart-skill.mjs";
+// Playwright and Chromium are the ones the chart skill's doctor installed.
+const { launchOptions, loadPlaywright, resolveBrowser, resolveEnv } = await import(pathToFileURL(path.join(chartSkill(), "helpers", "env.mjs")).href);
+
+const argv = process.argv.slice(2);
+const opt = {};
+for (let i = 0; i < argv.length; i++) if (argv[i].startsWith("--")) opt[argv[i].slice(2)] = argv[++i];
+if (!opt.url) { console.error('usage: cluster-shot.mjs --url <liveboard url> [--tabs "a,b"] [--out dir] [--wait seconds]'); process.exit(2); }
+
+const env = resolveEnv({});
+const out = path.resolve(opt.out || path.join(env.home, "runs", "_cluster"));
+const profile = path.resolve(opt.profile || path.join(os.homedir(), ".cache", "amuzing-chart", "cluster-profile"));
+const tabs = (opt.tabs || "").split(",").map((s) => s.trim()).filter(Boolean);
+const waitMs = Number(opt.wait || 9) * 1000;
+const loginTimeout = Number(opt["login-timeout"] || 300) * 1000;
+const scrollWaitMs = Number(opt["scroll-wait"] || 8) * 1000; // tiles load lazily as they scroll into view
+fs.mkdirSync(out, { recursive: true });
+fs.mkdirSync(profile, { recursive: true });
+
+const pw = await loadPlaywright(env);
+if (!pw) { console.error("playwright not found - run the chart skill's doctor: node <ts-custom-charts-builder>/helpers/env.mjs"); process.exit(1); }
+const exe = resolveBrowser(pw);
+if (!exe) { console.error("no Chromium found - run the chart skill's doctor: node <ts-custom-charts-builder>/helpers/env.mjs"); process.exit(1); }
+
+const host = new URL(opt.url).host;
+const ctx = await pw.chromium.launchPersistentContext(profile, { ...launchOptions(exe, { headless: false }), viewport: { width: 1600, height: 1000 } });
+const page = ctx.pages()[0] || (await ctx.newPage());
+try {
+  await page.goto(opt.url, { waitUntil: "domcontentloaded" });
+
+  // Logged in when we are on the cluster host, not on an SSO page, and a liveboard has rendered.
+  const ready = () => page.evaluate((h) => location.host === h && !/login|okta|saml|sso/i.test(location.href) && !!document.querySelector("[data-testid], .ts-app, app-root, #app") && document.body.innerText.length > 200, host).catch(() => false);
+  const t0 = Date.now();
+  let said = false;
+  while (!(await ready())) {
+    if (!said) { console.log("waiting for you to sign in to " + host + " in the browser window ..."); said = true; }
+    if (Date.now() - t0 > loginTimeout) { console.error("timed out waiting for login"); process.exitCode = 1; throw new Error("login timeout"); }
+    await page.waitForTimeout(2000);
+  }
+  if (said) { console.log("signed in"); await page.goto(opt.url, { waitUntil: "domcontentloaded" }); }
+  await page.waitForTimeout(waitMs);
+  let filterDone = false;
+  async function applyFilter() {
+    if (!opt.filter || filterDone) return;
+    filterDone = true;
+    const [fcol, fval] = opt.filter.split("=");
+    try {
+      await page.getByText(new RegExp("^" + fcol + "\\b", "i")).first().click({ timeout: 8000 });
+      await page.waitForTimeout(1500);
+      await page.getByText(fval, { exact: true }).first().click({ timeout: 8000 });
+      await page.waitForTimeout(600);
+      const btn = page.getByRole("button", { name: /update|apply|done/i }).first();
+      if (await btn.count()) await btn.click();
+      await page.waitForTimeout(4000);
+      console.log("filter applied: " + opt.filter);
+    } catch (e) { console.log("filter NOT applied: " + String(e.message).split("\n")[0]); }
+  }
+
+
+  async function report(label) {
+    const frames = page.frames().filter((f) => f !== page.mainFrame());
+    const findings = [];
+    for (const f of frames) {
+      let t = "";
+      try { t = (await f.evaluate(() => document.body ? document.body.innerText : "")).trim(); } catch { continue; }
+      if (!t) continue;
+      const bad = /Chart did not render|Something went wrong|Error:|TypeError|ReferenceError|Column not found|No data yet|is not defined|Cannot read/i.exec(t);
+      if (bad) findings.push({ frame: f.url().slice(0, 60), hit: bad[0], text: t.slice(0, 200).replace(/\s+/g, " ") });
+    }
+    const main = (await page.evaluate(() => document.body.innerText).catch(() => "")).match(/Chart did not render|Something went wrong/g) || [];
+    console.log(`[${label}] iframes=${frames.length} problems=${findings.length + main.length}`);
+    findings.forEach((x) => console.log("   - " + x.hit + " | " + x.text));
+    return findings.length + main.length;
+  }
+
+  let problems = 0;
+  const shots = [];
+  if (!tabs.length) {
+    const p = path.join(out, "liveboard.png");
+    await page.screenshot({ path: p, fullPage: false }); shots.push(p);
+    problems += await report("liveboard");
+  }
+  for (const name of tabs) {
+    const tab = page.getByText(name, { exact: true }).first();
+    try { await tab.click({ timeout: 8000 }); } catch { console.log(`[${name}] tab not found`); problems++; continue; }
+    await page.waitForTimeout(waitMs);
+    await applyFilter();
+    const base = name.replace(/[^\w]+/g, "-").toLowerCase();
+    if (opt["no-scroll"] !== undefined) {
+      const p = path.join(out, base + ".png");
+      await page.screenshot({ path: p, fullPage: false }); shots.push(p);
+    } else {
+      const info = await page.evaluate(() => {
+        let best = null;
+        for (const e of document.querySelectorAll("*")) {
+          const cs = getComputedStyle(e);
+          if ((cs.overflowY === "auto" || cs.overflowY === "scroll") && e.scrollHeight > e.clientHeight + 60 && (!best || e.scrollHeight > best.scrollHeight)) best = e;
+        }
+        if (!best) return null;
+        best.setAttribute("data-shot-scroller", "1");
+        return { h: best.scrollHeight, c: best.clientHeight };
+      });
+      const step = info ? Math.max(300, info.c - 120) : 0;
+      const n = info ? Math.min(8, Math.ceil((info.h - info.c) / step) + 1) : 1;
+      for (let i = 0; i < n; i++) {
+        if (info) { await page.evaluate((y) => { document.querySelector("[data-shot-scroller]").scrollTop = y; }, i * step); await page.waitForTimeout(i ? scrollWaitMs : 300); }
+        const p = path.join(out, base + "-" + (i + 1) + ".png");
+        await page.screenshot({ path: p, fullPage: false }); shots.push(p);
+        if (i) problems += 0;
+      }
+      if (info) await page.evaluate(() => { document.querySelector("[data-shot-scroller]").scrollTop = 0; });
+    }
+    problems += await report(name);
+  }
+  shots.forEach((s) => console.log("png: " + s));
+  console.log(problems ? `problems: ${problems}` : "no tile reported a failure text");
+} catch (e) {
+  if (!process.exitCode) console.error("cluster-shot:", e.message);
+  process.exitCode = process.exitCode || 1;
+} finally {
+  await ctx.close().catch(() => {});
+}

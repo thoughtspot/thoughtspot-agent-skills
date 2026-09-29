@@ -1,0 +1,468 @@
+/* ==== amuzing core v1 | source: library/_shared/core.js | run helpers/sync-core.mjs, do not edit inside a chart ==== */
+const AZ = (function () {
+  // -- theme: one palette for the whole Liveboard -------------------------------
+  // Families are validated categorical hues (dataviz validator, light surface).
+  // Region is never a hue: it is shown by position, label or a slate ramp, so a
+  // colour keeps exactly one meaning across every tile.
+  const T = {
+    ink: '#1E1E24', ink2: '#52525B', muted: '#8A8A94', grid: '#E6E7EA', surface: '#FFFFFF',
+    good: '#1F7A4D', bad: '#B3261E',
+    slate: ['#EEF0F3', '#D5DAE1', '#B4BDC9', '#8E9AAB', '#6A7891', '#4A5872', '#2F3B54', '#1E293B'],
+    family: {
+      'Outerwear': '#D1543A', 'Tops and dresses': '#2A6FD0', 'Bottoms': '#0F9D8A',
+      'Swim and basics': '#D99A00', 'Accessories': '#C2477A'
+    },
+    font: "Geist, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+  };
+  // Editorial grouping of the model's 15 item types (not a model column).
+  const FAMILY_OF = {
+    Jackets: 'Outerwear', Vests: 'Outerwear', Sweatshirts: 'Outerwear', Sweaters: 'Outerwear',
+    Shirts: 'Tops and dresses', Dresses: 'Tops and dresses',
+    Pants: 'Bottoms', Jeans: 'Bottoms', Shorts: 'Bottoms', Skirts: 'Bottoms',
+    Swimwear: 'Swim and basics', Underwear: 'Swim and basics', Socks: 'Swim and basics',
+    Bags: 'Accessories', Headwear: 'Accessories'
+  };
+  const familyOf = (item) => FAMILY_OF[item] || FAMILY_OF[String(item || '').replace(/^./, (c) => c.toUpperCase())] || 'Other';
+  const familyColor = (item) => T.family[familyOf(item)] || T.muted;
+
+  // -- host access ------------------------------------------------------------
+  // Bare viz identifier, never globalThis.viz (see hard-rules.md).
+  function host() {
+    try { if (typeof viz !== 'undefined' && viz) return viz; } catch (e) {}
+    return null;
+  }
+  const cellVal = (v) => {
+    if (v == null || typeof v !== 'object') return v;
+    try {
+      const raw = typeof v.value === 'function' ? v.value() : v.value;
+      return raw ?? v._value ?? v.v ?? v.formatted ?? v.f ?? null;
+    } catch (e) { return v._value ?? null; }
+  };
+  // Live rows as objects keyed by column name, or null when the tile has no data.
+  function liveData() {
+    try {
+      const h = host();
+      const dm = h && h.getDataFromSearchQuery && h.getDataFromSearchQuery();
+      const raw = dm && dm.getData();
+      if (!raw || !raw.data || !raw.data.length) return null;
+      const schema = raw.schema || [];
+      const rows = raw.data.map((arr) => {
+        const o = {};
+        schema.forEach((c, i) => { o[c.name] = cellVal(arr[i]); });
+        return o;
+      });
+      return { schema, rows };
+    } catch (e) { console.warn('[chart] live data unavailable:', e); return null; }
+  }
+  // Resolve a column by regex against the schema (the host renames: Total sales, Month(date)).
+  function col(schema, re, opt) {
+    const c = schema.find((s) => re.test(s.name));
+    if (!c && !(opt && opt.optional)) throw new Error('Column not found in the search: ' + re + ' | have: ' + schema.map((s) => s.name).join(', '));
+    return c ? c.name : null;
+  }
+  const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
+  // Dates arrive as epoch ms (or seconds from other paths); normalise to ms.
+  const ms = (v) => { const n = Number(v); return n < 1e11 ? n * 1000 : n; };
+
+  // -- formatting -------------------------------------------------------------
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const money = (n, d) => {
+    const a = Math.abs(n), s = n < 0 ? '-' : '';
+    if (a >= 1e9) return s + '$' + (a / 1e9).toFixed(d ?? 2) + 'B';
+    if (a >= 1e6) return s + '$' + (a / 1e6).toFixed(d ?? 1) + 'M';
+    if (a >= 1e3) return s + '$' + (a / 1e3).toFixed(d ?? 0) + 'K';
+    return s + '$' + a.toFixed(d ?? 0);
+  };
+  const int = (n) => { const a = Math.abs(n); return a >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : a >= 1e3 ? (n / 1e3).toFixed(a >= 1e5 ? 0 : 1) + 'K' : String(Math.round(n)); };
+  const pct = (x, d, signed) => (signed && x > 0 ? '+' : '') + (x * 100).toFixed(d ?? 1) + '%';
+  // Signed gap in percentage points, e.g. pts(0.009) -> '+0.9 pts'
+  const pts = (x, d) => (x > 0 ? '+' : '') + (x * 100).toFixed(d ?? 1) + ' pts';
+  const monthLabel = (t) => { const d = new Date(t); return MON[d.getUTCMonth()] + ' ' + d.getUTCFullYear(); };
+  const monthShort = (t) => MON[new Date(t).getUTCMonth()];
+  const year = (t) => new Date(t).getUTCFullYear();
+  const isoDay = (t) => new Date(t).toISOString().slice(0, 10);
+
+  // -- same-period comparison: latest month in the data drives "YTD" ---------
+  // rows: [{t: ms(month start), v: number}] at monthly grain.
+  function ytd(rows) {
+    if (!rows.length) return null;
+    const last = Math.max.apply(null, rows.map((r) => r.t));
+    const ly = year(last), lm = new Date(last).getUTCMonth();
+    let cur = 0, prev = 0, nCur = 0, nPrev = 0;
+    rows.forEach((r) => {
+      const d = new Date(r.t), y = d.getUTCFullYear(), m = d.getUTCMonth();
+      if (m > lm) return;
+      if (y === ly) { cur += r.v; nCur++; } else if (y === ly - 1) { prev += r.v; nPrev++; }
+    });
+    return { cur, prev, delta: cur - prev, pct: prev ? cur / prev - 1 : null, lastMs: last, year: ly, month: lm, through: monthLabel(last), comparable: nCur === nPrev && nPrev > 0 };
+  }
+
+  // -- CDN loader: bounded, with fallback hosts (a hung request fires neither onload nor onerror)
+  function loadScript(urls, isReady, timeoutMs) {
+    const list = [].concat(urls);
+    const tryOne = (i) => new Promise((resolve, reject) => {
+      if (isReady()) return resolve();
+      if (i >= list.length) return reject(new Error('Library could not be loaded from: ' + list.join(' , ')));
+      const s = document.createElement('script');
+      let done = false;
+      const next = () => { if (done) return; done = true; s.remove(); tryOne(i + 1).then(resolve, reject); };
+      const t = setTimeout(next, timeoutMs || 8000);
+      s.src = list[i];
+      s.onload = () => { if (done) return; done = true; clearTimeout(t); isReady() ? resolve() : tryOne(i + 1).then(resolve, reject); };
+      s.onerror = () => { clearTimeout(t); next(); };
+      document.head.appendChild(s);
+    });
+    // The HTML tab may already carry a <script src> for this library: if so, give it a moment to finish before
+    // injecting a second copy. If no such tag exists, inject at once (no wait).
+    const tagged = list.some((u) => document.querySelector('script[src="' + u + '"]'));
+    if (!tagged) return tryOne(0);
+    return new Promise((resolve, reject) => {
+      let waited = 0;
+      const poll = () => { if (isReady()) return resolve(); if ((waited += 100) >= 3000) return tryOne(0).then(resolve, reject); setTimeout(poll, 100); };
+      poll();
+    });
+  }
+
+  // -- mount + boot ------------------------------------------------------------
+  function mount() {
+    let el = document.getElementById('chart');
+    if (!el) { el = document.createElement('div'); el.id = 'chart'; document.body.appendChild(el); }
+    return el;
+  }
+  function paint(el, html) { (el || document.getElementById('chart') || document.body).innerHTML = html; }
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function done() {
+    try { host().events.emitRenderCompletedEvent(); } catch (e) { console.warn('[chart] emitRenderCompletedEvent unavailable:', e); }
+  }
+
+  // -- motion: small, motivated, and off under prefers-reduced-motion ---------
+  const reduced = () => { try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; } };
+  const EASE = { out: (t) => 1 - Math.pow(1 - t, 3), inOut: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2), spring: (t) => 1 - Math.pow(1 - t, 4) * Math.cos(t * 9) * (1 - t) };
+  // tween(ms, step, done, easing): calls step(0..1) each frame; returns a cancel function.
+  // With reduced motion it jumps straight to step(1).
+  function tween(ms, step, done, easing) {
+    const ez = easing || EASE.out;
+    if (reduced() || !ms) { step(1); if (done) done(); return () => {}; }
+    let raf = 0, t0 = 0, dead = false;
+    const f = (t) => { if (dead) return; if (!t0) t0 = t; const k = Math.min(1, (t - t0) / ms); step(ez(k)); if (k < 1) raf = requestAnimationFrame(f); else if (done) done(); };
+    raf = requestAnimationFrame(f);
+    return () => { dead = true; cancelAnimationFrame(raf); };
+  }
+  // animator(): a tween runner that cancels its previous run on re-entry, so rapid toggles never fight.
+  //   const go = AZ.animator(); go(400, (k) => draw(k), done); go(400, ...) again cancels the first.
+  function animator() { let cancel = null; const run = (ms, step, done, easing) => { if (cancel) cancel(); cancel = tween(ms, step, done, easing); return cancel; }; run.stop = () => { if (cancel) cancel(); cancel = null; }; return run; }
+  // Count a number up into an element: countUp(node, 142100000, AZ.money, 700)
+  function countUp(node, to, fmt, ms, from) {
+    const a = from == null ? 0 : from;
+    return tween(ms || 700, (k) => { node.textContent = fmt(a + (to - a) * k); });
+  }
+  // Linear interpolation helper for tweens.
+  const lerp = (a, b, k) => a + (b - a) * k;
+  // Wait for web fonts and one animation frame so layout is final before you measure an element.
+  const settle = () => new Promise((res) => {
+    const done = () => requestAnimationFrame(() => requestAnimationFrame(res));
+    try { if (document.fonts && document.fonts.ready) { Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 400))]).then(done, done); return; } } catch (e) {}
+    done();
+  });
+  // Breadcrumb for drill-down: crumbs(['All sales', 'Outerwear'], (index) => jumpTo(index)) -> html.
+  // Wire clicks with AZ.wireCrumbs(el, onJump). The last crumb is the current level and is not a button.
+  const crumbs = (names) => '<nav class="az-crumbs" aria-label="Drill path">' + names.map((n, i) => (i < names.length - 1 ? '<button type="button" class="az-crumb" data-i="' + i + '">' + esc(n) + '</button><span class="az-sep">/</span>' : '<span class="az-crumb now">' + esc(n) + '</span>')).join('') + '</nav>';
+  function wireCrumbs(root, onJump) { root.querySelectorAll('.az-crumb[data-i]').forEach((b) => b.addEventListener('click', () => onJump(Number(b.getAttribute('data-i'))))); }
+
+  // boot({ need: 'plain-English list of what the search must return', render(ctx) })
+  // ctx = { el, rows, schema, w, h, redraw }; render may be async and may return a cleanup fn.
+  function boot(opts) {
+    let el = null, cleanup = null, lastW = 0, lastH = 0, timer = null, running = false;
+    const run = async (first) => {
+      if (running) return; running = true;
+      try {
+        el = mount();
+        const data = liveData();
+        if (!data) {
+          paint(el, '<div class="az-empty"><b>No data yet</b><span>Attach a search with: ' + esc(opts.need) + '</span></div>');
+          return;
+        }
+        if (typeof cleanup === 'function') { try { cleanup(); } catch (e) {} cleanup = null; }
+        const r = el.getBoundingClientRect();
+        lastW = Math.round(r.width); lastH = Math.round(r.height);
+        cleanup = await opts.render({ el, rows: data.rows, schema: data.schema, w: lastW, h: lastH, redraw: () => run(false) });
+        // Smooth entrance on first paint, a soft cross-fade on every redraw (toggle, drill, resize).
+        el.classList.remove('az-in', 'az-swap'); void el.offsetWidth; el.classList.add(first ? 'az-in' : 'az-swap');
+      } catch (err) {
+        console.error('[chart] render failed:', err);
+        paint(el, '<pre class="az-err">' + esc(err && err.stack || err) + '</pre>');
+      } finally {
+        running = false;
+        if (first) done();
+      }
+    };
+    run(true);
+    if (typeof ResizeObserver !== 'undefined') {
+      // Observe the chart container itself: a Liveboard tile resizes while the window does not.
+      new ResizeObserver(() => {
+        const t = mount(), r = t.getBoundingClientRect();
+        if (Math.abs(r.width - lastW) < 2 && Math.abs(r.height - lastH) < 2) return;
+        clearTimeout(timer); timer = setTimeout(() => run(false), 120);
+      }).observe(mount());
+    }
+  }
+
+  // -- tooltip: one look for every tile ---------------------------------------
+  // const tip = AZ.tip(el); tip.show(html, x, y) with x,y in px relative to el; tip.hide().
+  function tip(root) {
+    root.style.position = root.style.position || 'relative';
+    const d = document.createElement('div');
+    d.className = 'az-tip';
+    root.appendChild(d);
+    return {
+      show(html, x, y) {
+        d.innerHTML = html; d.style.opacity = '1';
+        const rw = root.clientWidth, rh = root.clientHeight, w = d.offsetWidth, h = d.offsetHeight;
+        let left = x + 14, top = y - h - 10;
+        if (left + w > rw - 4) left = x - w - 14;
+        if (left < 4) left = 4;
+        if (top < 4) top = Math.min(rh - h - 4, y + 16);
+        d.style.left = Math.round(left) + 'px'; d.style.top = Math.round(top) + 'px';
+      },
+      hide() { d.style.opacity = '0'; },
+      el: d
+    };
+  }
+  const row = (k, v, swatch) => '<div class="az-tr"><span class="az-tk">' + (swatch ? '<i style="background:' + swatch + '"></i>' : '') + esc(k) + '</span><span class="az-tv">' + esc(v) + '</span></div>';
+
+  return { tip, row, settle, reduced, EASE, tween, animator, countUp, lerp, crumbs, wireCrumbs, T, FAMILY_OF, familyOf, familyColor, host, cellVal, liveData, col, num, ms, money, int, pct, pts, monthLabel, monthShort, year, isoDay, MON, ytd, loadScript, mount, paint, esc, boot };
+})();
+/* ==== end amuzing core ==== */
+
+// Search: [sales] [store] [state] [region]
+// Bubble map with a drill. Level 1: one bubble per state at its centroid, sized by summed sales or by store count.
+// Level 2: click a state and the view zooms (viewBox tween) onto it while its bubble breaks into one bubble per store.
+// Stores are arranged around the state centre, never placed by latitude/longitude (the model's coordinates are unreliable).
+// The map is inline pre-projected Albers paths (us-atlas states-albers-10m), so no library and no fetch are needed.
+// Interactions: Sales / Stores toggle (both levels, radii tween); hover a state, bubble or store; click a state to zoom in;
+// crumbs, Back button and Escape zoom out.
+// Pre-projected US states (Albers, viewBox 0 0 975 610), simplified. Source: us-atlas@3 states-albers-10m (ISC).
+// Inline because tiles cannot fetch(). c = state centroid in the same coordinates.
+const US_STATES = {"Alabama":{"d":"M641.6 384L689.2 379.7L702.5 427L707.8 436.5L707.3 438.8L709.6 439.9L706.7 443.2L705.9 450.1L708.6 457.1L708.3 464.8L710.8 468.8L660.7 474L660.3 477L665.4 481.9L664.6 484.7L666.3 486.4L664.7 489.5L655.2 492L659.1 490.2L655.9 487.8L655.4 483.1L653.4 481.7L651.6 490.2L646.5 489.5L642.2 455L643.7 386.2L641.6 384L641.6 384Z","c":[671.6,432.2]},"Alaska":{"d":"M99.1 569.9L103.4 565.2L102.9 567.5L105 567.5L104.7 569.1L99.1 569.9L99.1 569.9ZM93.3 575.4L95.7 573.1L97.1 574.4L96.9 571.9L99.5 571.6L99 570.7L101.3 571.6L103.1 570.6L103.2 573.5L104.5 573.3L103.8 574.9L102 574.3L102.6 575.3L100.2 576.9L101.5 577.1L99.7 578.4L99.5 576.8L96 580.4L97.5 577.1L95.4 579.6L93.3 575.4L93.3 575.4ZM44.2 547.5L49.5 546.7L51 551.2L48.4 552L44.2 547.5L44.2 547.5ZM31.3 600.8L36.7 599.1L36.1 596.7L39.8 597.5L38 598.9L40.1 598.2L36.6 600.9L31.3 600.8L31.3 600.8ZM50.7 504.5L63.9 499.5L65.7 499.7L65.2 503.9L71.4 505.1L72.5 503.4L74.3 503.7L71.4 502.5L69.7 498.2L70.7 497.6L72.6 501.9L71.9 499.6L73.2 497.6L66.5 495.6L66.2 492.3L59.4 484.4L61.5 480.8L67.2 481.3L69.5 480L71.7 475L75.3 471.4L78.2 471.3L82.9 467.9L86.7 468.1L89.3 465.1L92.5 466.1L91.5 468.6L94 466.3L96.2 469.2L98.7 468L101.4 468.7L100.9 470.4L102.8 470.8L102.4 471.8L108.9 470.8L121.6 473.8L126 471.7L132.9 474.4L147.3 547.1L151.4 547.2L154.5 545.1L154.6 547.3L162.3 552.4L163.6 554.8L166.5 551.9L166.5 548.3L169.4 545.9L172.6 549.3L180.8 553.8L191.6 565.6L200.1 566.6L202.9 572.6L201.4 577.9L198.4 575L197.6 570.6L198.1 575.1L194.4 573.7L194.1 570.7L193.9 574L192.8 573.7L192.2 568.8L191.1 571.8L189.2 570.5L190.4 567.2L183.2 563.5L181.4 559.6L183.6 560L181 559.1L178.4 555.8L176.2 556.8L170.3 549.6L174.7 557.7L172.7 556.5L170.8 557.2L169.2 554.1L167.1 553.4L165.7 554.3L169 555.3L170.3 557.4L168 559.3L160 554.5L153 552.1L153.4 547.9L151 551.3L146.3 550.7L146.8 549.7L140.6 550L135.3 551.6L134 553.4L135.8 551.2L132.3 550.3L132.3 548.5L130.8 549.7L128 548.9L128.8 547.8L125.3 550.6L125.4 549L128.4 547.8L124.8 547L126.7 545.9L125.3 546.4L124.8 544L123.6 545.6L123.1 544.2L122.8 545.7L119.2 547.1L119 545L118.7 549.7L119.6 548.7L121.1 552.9L120.3 553.9L118.9 552.4L118.7 554L114.9 555L114.7 552.9L113.7 556.8L112.5 555.7L111.3 558.7L110.5 557.4L108.8 560.4L105.8 561L105.2 559L108.7 555.9L106.7 557.2L105.2 556.2L106.9 552.5L106.7 548.5L110.5 545.8L112.1 547.1L115.5 546.8L111.6 544.8L113.2 542L111.9 544.1L109.4 543.8L106.3 546.2L101.4 555.4L99.8 555.5L100.5 556.9L96.2 559.5L96 562.3L99.6 563.5L96.4 566.5L95.8 569.3L88 573.7L85.8 575.8L86.6 576.7L85.6 578.3L82.8 579.9L82 579.1L79.7 582.1L77.7 581.9L77 582.9L78.5 583.9L76.7 585.8L76.1 584.8L76 585.9L72.2 586.5L71 588.6L71.7 586.8L70.6 586.4L64.1 589.7L62.9 589.5L63.7 587.5L62.6 587.5L60.6 591.3L58.2 591.4L57.8 589.3L57.7 592L54.8 591L55.6 591.9L53.9 592.8L55.2 594.1L54 593.3L46.7 594.8L48.6 591.6L53.4 590.8L54.2 592.2L54.5 590.3L56.5 590.1L62 585.2L66.5 584.6L66.3 586.9L66.5 585.7L68.7 586.9L67.5 585L68.6 583L75.2 578.8L76.4 579.3L77.9 575.9L80.9 573.4L82.4 566L84.4 563.1L79.6 565L78.1 563.5L78.4 561.8L76.4 566.6L71 560.7L64.7 564.1L64.2 558.3L65.8 556.7L63.8 551.1L60.7 553.1L56.6 552.7L53.4 547.4L54.2 546.8L52.6 546.7L54.7 542.9L53.8 541.4L52.7 541.9L52.5 538.6L51.1 538.2L52.6 537.2L51.8 535.9L53.4 535.9L53.7 533.6L59.6 526L64.3 527.9L67.5 524.9L71.5 525.2L73 523.2L72.7 519.5L71 517.8L73.7 515.7L72.5 514L66.5 518L65.6 515.4L65.9 516.7L59.1 516L55.2 514.1L53.9 509.4L55.9 508.7L50.7 504.5L50.7 504.5ZM34.4 517.8L35.3 516.1L37.7 518.5L39.4 517.9L44.8 522.4L40.8 524.5L37.5 519.7L34.4 519.3L34.4 517.8L34.4 517.8ZM184.9 573.1L185 569.8L186.8 569.5L192.7 574.5L191.2 575L194.4 575.9L195.7 580.1L193.4 580.2L192.1 577.4L191.8 578.9L189.6 577.5L193 580.4L192 581.3L189.2 577.9L188.2 578.3L189.4 576.3L185.8 574.3L186.1 572.3L184.9 573.1L184.9 573.1ZM180.3 567.2L182.4 566.9L181.9 564.6L185.4 564.3L188.7 566.7L186.3 568.6L183.9 568.5L183.4 573.2L180.3 567.2L180.3 567.2ZM174.6 555.9L176.1 557.5L178.2 556.9L180.2 559.2L180.8 560.6L178.7 558.9L181.4 562.6L179.6 565.9L174.6 555.9L174.6 555.9ZM173.9 564.8L174.6 562.9L177.2 563.4L180.8 572.7L175.5 568.5L175.5 565.3L173.9 564.8L173.9 564.8ZM169.1 561.4L169.1 558.6L171.5 557.8L175.3 558.7L177.1 562.7L173.7 562.2L173 564.7L169.1 561.4L169.1 561.4Z","c":[102.5,523.2]},"Arizona":{"d":"M145.1 407L148.8 406.9L150.3 405.1L150.2 400.8L147.4 400.1L147 398.6L148.3 394.9L147.5 393.9L148 391.7L152.4 389.1L153.9 380.5L156.8 377L162.8 373.6L158.9 369.3L158.5 363.2L156.2 359.1L157.1 354L158.7 352.8L159.5 331.4L166.6 331.5L168.4 334.8L170 334.9L172.6 331.5L176 313.3L264.6 328L246.8 456.3L208.2 450.5L142.3 411.7L145.1 407L145.1 407Z","c":[208,382.4]},"Colorado":{"d":"M277.1 237.2L333.1 244L395.3 249L389.7 340.7L336.7 336.5L264.6 328L277.1 237.2L277.1 237.2Z","c":[331.5,289.9]},"Florida":{"d":"M793.7 604.2L800.5 597.7L805.1 600.1L793.7 604.2L793.7 604.2ZM710.8 468.8L714.2 475L765.8 471.5L767.3 476L769.7 475.6L768.7 466L770 464.9L780.5 466.3L787 486.3L794.9 499.6L804.6 511L806.1 513.6L805 517.2L806.6 521.9L822.1 549L823.8 574.5L822.7 572.9L821.8 573.7L820.8 578.1L821.8 581.3L820.7 583L822.4 582.7L824 577.8L823.8 580.3L821.6 586.6L816.4 593.2L819.7 586.1L806.9 589.7L805.5 588.9L805.3 585L800.6 577.8L793.1 574.2L791.9 575.4L786.5 564.2L783 561.3L781.4 562.6L779.2 558.4L781 558.5L780.4 552L778.5 553.2L779.5 555.9L777.3 557.8L765.2 540.9L767 541L770.6 535L770.6 531.9L769 531.7L769.7 533.8L767.9 533.5L767.6 530.8L764.7 529.8L764.2 531.7L767.4 534.3L765.1 539.2L761.9 533.4L760.7 526.1L762.7 529.5L761.9 527.3L763.6 520.7L761.9 510.2L758.9 505.1L755 504.9L754 506.1L752.9 503.1L746.1 498.3L745.3 494.9L742.8 494.1L739.3 489.9L732.2 486.7L727.4 487.4L725.8 489.7L726.4 492.2L722.7 492.3L716.3 497.4L715.7 496L714.3 497.8L711.8 498L714.2 499.9L720.1 496L713.7 500.8L710 499.1L707.4 499.8L705.7 496.1L706.2 495L707.6 499.1L708.1 496.6L705.7 493.6L688.8 486.2L678.4 486.1L663.7 490.1L666.3 486.4L664.6 484.7L665.1 480.9L660.3 477L660.7 474L710.8 468.8L710.8 468.8Z","c":[767.6,516]},"Georgia":{"d":"M689.2 379.7L734.9 373.7L731.6 379L731.7 381.5L738.4 385.4L741.1 385.4L748.3 396.2L761.9 405.8L761.6 407.7L765.7 411.8L771.3 414.4L774 422.7L778.7 425.8L781.4 433.4L786.9 434.7L784.7 438.9L783.3 438.7L783.6 441.1L781.4 442.3L782.9 444.6L780.7 447L782.4 447.1L781.3 454.4L778.3 460.2L779.9 459.9L780.1 466.1L770 464.9L768.7 466L769.7 475.6L767.3 476L765.8 471.5L713.2 474.2L708.3 464.8L708.6 457.1L705.9 450.1L706.7 443.2L709.6 439.9L707.3 438.8L707.8 436.5L702.5 427L689.2 379.7L689.2 379.7Z","c":[736,428]},"Indiana":{"d":"M640.3 229.8L644.9 231.4L651.9 227.6L685.6 223.9L692.5 284.3L691.3 285.7L692.2 289.1L693.7 289.3L693.5 291.6L687.5 294.5L682.9 294.1L683.6 298.2L678.7 305.1L677.1 305.1L676 311L674.1 312.8L669.8 310.7L668.2 307.9L664.4 316.1L659.7 313.6L655.3 318.7L650.6 315.6L648.3 316.5L646.7 315L646.7 318.3L645.3 316.8L642.7 317.7L641.3 316.7L640.9 320.2L638 317.4L639.5 317.5L638.7 314.3L640.5 311.8L639.4 310.3L640.2 308.2L641.5 308.6L646.8 296.6L643.5 287.9L645 283.6L640.3 229.8L640.3 229.8Z","c":[665.4,269.1]},"Kansas":{"d":"M393.9 271.9L453.9 274.6L509.9 275.2L513.1 278.1L516.5 277.7L517.3 281.4L516.1 281L513.5 285.8L517.3 289.1L518.5 293.2L522.6 294.4L522.8 343.8L458.9 343.6L389.7 340.7L393.9 271.9L393.9 271.9Z","c":[456.2,309.3]},"Maine":{"d":"M910.2 150.1L907.8 149.2L907.5 147.2L903.6 143.5L890.9 102.4L891.8 101.2L894.8 103.1L894.3 99.3L897.3 98.8L895.2 96.3L900 86.1L897.7 79.7L899.9 73.8L899.1 67.5L905.9 47.6L908.8 47.5L910 51.5L912.5 52.3L919.6 47.6L919.7 45.9L922.6 45.8L929.7 49.7L938.7 79.9L944.6 79.9L946.1 87L949.5 89.7L949.8 88.1L952 88.1L957.1 94.8L955 99.4L953.8 100.3L952.8 98.6L951.5 99.6L952.4 100.5L949.6 103.1L951.1 104.1L950.2 105.6L946.8 104.3L946.3 107.5L944 108.4L943.8 110.3L941.4 109.7L942.2 113L938.9 113.7L937.4 111.9L938.1 109.7L935.4 111.3L937 114L936.3 116.8L937.3 119.8L934.5 117L934.5 114.7L931.9 114.3L931 110.1L928.5 112.6L929.7 113.9L928.9 118.7L930.2 122.9L928.6 123.2L927.1 126.5L927 124.7L924.8 124.8L924.4 127.8L923.5 127L919.7 132.2L918.1 130.9L915.1 134.1L914.8 137.5L912.8 138.3L912.9 142.3L911.2 143.3L910.2 150.1L910.2 150.1Z","c":[919,93.6]},"Massachusetts":{"d":"M918.3 188.3L921.3 184.4L923.8 186L924.2 185.1L924.6 186.7L919.6 189.2L918.3 188.3L918.3 188.3ZM871 167.6L902.9 160.7L906.2 156L909.5 154.8L911.2 158.5L914.3 158.4L913.8 160.4L910.6 162.2L910 168.6L911.8 167.4L915 169L917 171.2L916.4 173.3L919.4 174.4L921.7 177.7L925.5 177.8L928.8 175.1L926.2 170L923.6 170L926.7 169.7L930.1 174.2L930.9 178.5L930.6 179.8L929.7 177.6L924.7 179.9L916.1 187.6L920 183.3L919.6 179.8L917.9 179.4L917.7 181.7L915.4 182.8L915.4 185.3L912.8 186.4L911.6 182.9L907.7 181L905.5 176L882.3 182.5L871.2 184L871 167.6L871 167.6Z","c":[897.5,172.6]},"Minnesota":{"d":"M479.5 70.7L510.8 70.8L510.7 62.2L513.7 62.5L515.6 64.1L518.6 76.5L530.7 78.8L531.5 81.3L536.5 80.5L538.2 78.6L543.7 78.5L549.1 80.2L548 82L551.1 82.2L553.4 87.3L554.9 86.6L554.9 84.2L558.1 84L559.7 86.7L565.9 89.3L565.8 90.7L570.6 89.6L576 85.7L578.1 88.9L587.6 88L591.8 90.6L597.6 89.5L579 99.5L558.9 119.4L560.2 121.1L559 120.2L555.9 122.3L556.4 135.6L550.1 139.9L547.6 144L547.5 147.3L549.3 147.4L551.3 149.9L549.7 153.6L549.3 165.9L553.6 169.9L556.9 170.1L563.9 174.9L564.9 177.8L572.3 182.2L575.6 187.1L576.3 193.3L490.6 195.2L490.8 154.3L487.1 151.7L484.4 147.3L488.8 142.5L489.3 136.5L485.5 123.3L484.9 102.5L480.5 89.4L481.4 77.7L479.5 70.7L479.5 70.7Z","c":[524.7,132]},"New Jersey":{"d":"M849.2 245.8L850.8 241.4L854.8 238.7L854.8 236.9L860.6 230.8L853.7 226.4L849.9 220.8L851.5 216.1L849.6 213.8L853.2 205.9L855 204L870.1 209L869.2 216.4L866.9 218.3L866.6 221.4L868 222.5L871.5 221.5L873.2 237.3L865.4 257.2L862.6 259L862.9 253.8L860.3 253.1L858.6 254.3L850.4 249.5L849.2 245.8L849.2 245.8Z","c":[861.5,230.2]},"North Carolina":{"d":"M863.3 349.7L870.9 343.2L870.3 335.7L868.6 332.1L870.7 335.7L871.3 344.1L863.3 349.7L863.3 349.7ZM755.5 334L794.2 328.7L858.8 315.9L868.4 331.7L864 327.6L859.7 318.9L856.8 316.9L855.9 317.5L858.4 318.9L862.3 326.4L859.3 323L860 324.7L857.9 324.6L854.4 322.8L857.3 325.6L855.3 326.7L853.3 325.7L854.8 327.4L850.1 326.4L853.3 327.6L848.7 330.8L845.6 328.1L845.5 325.1L845 328.3L847.4 332.7L858 329.2L859.9 336.6L860.2 329.5L861.9 328.7L864.9 331.9L865.7 336.1L863 337.9L859.7 344.3L853.4 344.7L850.9 342L853.1 340.5L850.1 342.1L851.6 344.7L843 343.4L844.4 345L853.4 345.8L854.2 347.1L852.7 351.9L849.6 355L845.9 353.5L846.2 354.7L850.5 355.8L854.8 352.9L855 351.4L856.9 353.2L858 353.1L857.1 351.8L858.7 352.1L859.2 353.5L855.9 360.3L853.7 358.3L853.1 360.2L856.1 360.9L862.9 350L856.1 362.4L853.1 360.6L846.8 362.6L838 370.5L834.5 376.7L833.4 384.1L829.2 383.5L822.8 386.1L798.1 368.4L777.6 371.5L777.5 368.8L774.1 365.4L772.4 367.1L772 364.7L747.2 367L734.9 373.7L712.7 376.8L712.6 371.4L717.3 369.2L717 366.7L719.2 363.8L726.3 361.7L731.6 356.5L734.6 355.9L735.7 351.7L737.2 352.1L740.1 348.3L741.8 350.7L746.1 345.9L750.7 345.5L752.4 341.1L755.7 339.8L755.5 334L755.5 334Z","c":[801,350.6]},"North Dakota":{"d":"M376.9 65.7L431.2 69.3L479.5 70.7L481.4 77.7L480.5 89.4L484.9 102.5L485.5 123.3L488.6 130.9L489.1 139.9L432.2 138.3L371.1 134.3L376.9 65.7L376.9 65.7Z","c":[429.1,104.1]},"Oklahoma":{"d":"M372.5 339.4L443.3 343.1L522.8 343.8L523 355.3L526.8 380.5L526.4 420.7L519.6 418.5L517.3 415.7L512.4 413.5L511.4 415.4L506.5 415.4L506.2 414.2L500.9 416.3L499.2 415.2L496.1 416.1L491.6 419.8L486.2 416L487.1 415.2L485.4 414.7L483.8 416.6L479.4 413.7L477.5 418.8L476.1 418.5L475.4 414.4L471.3 416.6L470.7 414.6L466.5 412.7L463.1 415.8L460.9 414.6L461.7 412.5L459 412.1L458.5 408.7L457.6 409.6L454 408.5L451.7 410.6L448.7 408.2L446.6 409.1L442.5 406.8L438.7 406.8L438.4 404L435.3 401.1L434.9 402.9L429.4 402.6L425.9 398.5L423.9 398.3L425.8 353.9L371.6 350.8L372.5 339.4L372.5 339.4Z","c":[470.7,376.1]},"Pennsylvania":{"d":"M756.1 209L767.5 200.3L768.6 206.4L840.9 192.1L843.2 194.8L846.3 195.3L849.7 202.4L853.9 202.5L855 204L849.6 213.8L851.5 216.1L849.9 220.8L853.7 226.4L860.6 230.8L854.8 236.9L854.8 238.7L850.8 241.4L846.5 241.9L844.9 244.6L764.5 259.9L756.1 209L756.1 209Z","c":[805.8,225.6]},"South Dakota":{"d":"M369.1 155.7L371.1 134.3L432.2 138.3L489.1 139.9L488.8 142.5L484.4 147.3L487.1 151.7L490.8 154.3L490.6 195.2L488.2 195.2L489.5 197.9L488.8 201.5L490 201.5L490.8 203.9L487.5 211.9L490.6 218.3L488 217.9L486.6 214.7L477.9 210.1L467.8 209.4L464.3 211.7L456.8 206.2L365.3 201L369.1 155.7L369.1 155.7Z","c":[429.7,172.3]},"Texas":{"d":"M371.6 350.8L425.8 353.9L423.9 398.3L425.9 398.5L429.4 402.6L434.9 402.9L435.3 401.1L438.4 404L438.7 406.8L442.5 406.8L446.6 409.1L448.7 408.2L451.7 410.6L454 408.5L457.6 409.6L458.5 408.7L459 412.1L461.7 412.5L460.9 414.6L463.1 415.8L467.5 412.8L472.3 416.6L475.4 414.4L476.1 418.5L477.5 418.8L479.4 413.7L483.8 416.6L485.4 414.7L487.1 415.2L486.2 416L491.6 419.8L496.1 416.1L499.2 415.2L500.9 416.3L506.2 414.2L506.5 415.4L511.4 415.4L512.4 413.5L517.3 415.7L519.6 418.5L525.8 421.2L526.9 420.5L528.8 422.8L532.1 421.6L534.8 422.5L535.5 457.9L539.8 463L539.6 467L541.8 469.1L546.1 479.9L545.5 484.5L542.1 491L543.1 502.1L538.9 507.5L540.6 510.6L534.8 511.5L522.2 518.2L524.2 515.5L527.7 514.4L526.7 513.3L522.1 514.3L523.8 510.6L522.5 508.6L520.2 511.2L518.4 510.5L517.4 513.8L519.6 515.1L519.9 519.4L514.7 522.2L514.6 523.9L521.5 518.4L523.1 518.8L510.3 529.5L492 539.2L477.8 551.1L471.8 561.9L470 570.2L474.2 592.2L471.8 581.9L470.1 581.5L471.3 581L469.5 574L470.4 563.6L476.2 551L482.2 544.8L489.2 541.4L489 539.7L484.3 542L483.8 539.9L482.5 539.9L482 544L479.3 546.3L477.2 544.8L473.6 547L475.2 547.7L477.4 546.5L474.1 553L468 551.5L472.7 555.8L469.4 564.3L467.4 565.3L467.3 563.3L465 566L469.2 565.7L468.5 580.3L471.8 588L471.5 591.7L474.3 592.7L474.4 595.1L469.7 596.1L469.7 597.6L466.7 596.6L464.1 593.5L451.8 592.1L447.4 588.6L443.2 588.2L440.1 585.1L434.9 584.3L431.4 574.1L427.9 569.9L428.2 564.8L426.3 563.3L427.1 557.7L419.9 552.1L419 548L412 540.8L411.3 535.8L408.3 532.1L405.1 521.7L398.1 513.5L394.2 511.5L394.2 509.3L393.6 510.6L391.5 506.3L377.8 504.7L373.4 502.6L372.4 504.9L366.4 505.5L362 513.6L362 516.1L359.4 517.5L356.8 521.6L350.7 519.8L348.3 517L337.2 510.9L331.3 505.3L327.7 497.8L328.1 492L325.2 486.9L324.4 481.9L315.8 475.4L306.2 462.7L301.7 459.9L299 453.5L294.9 450.9L295.1 447L362.9 453.3L371.6 350.8L371.6 350.8Z","c":[434.1,469.3]},"Wyoming":{"d":"M369.1 155.7L361.4 246.5L301.1 240.3L243.5 232.2L257.8 142L320.8 150.9L369.1 155.7L369.1 155.7Z","c":[307.8,195.3]},"Connecticut":{"d":"M871.2 184L882.3 182.5L898.7 177.7L902.1 192.8L890.9 197.9L885 199.4L884.7 198.4L881.9 202.6L874.1 208.3L872.3 206L875.7 202.6L874.1 201L871.2 184L871.2 184Z","c":[885.9,190.5]},"Missouri":{"d":"M502 261.9L530.6 261.8L570.9 259.6L572.8 261.1L576.5 264.7L575.2 270.5L578.1 279.5L589.7 289.9L591.3 297.3L593.4 298.3L594.9 296.1L601 298.4L597.6 309.3L597.6 313.2L605.6 318.5L605.2 320.3L607.1 319.7L613.3 324.3L615.4 331L613.8 333.4L616.7 338.9L618.6 340L618.8 338.2L621.8 340.3L620.2 349.5L617.4 348.6L616.3 352.2L615.6 349.8L614 350.3L615.4 354.2L613.6 355.9L615.1 356.7L612.1 357.7L614.2 360.1L612.4 363.1L600.2 364L605.2 357.3L603.6 352.2L523 355.3L522.6 294.4L518.5 293.2L517.3 289.1L513.5 285.8L516.1 281L517.3 281.4L516.5 277.7L513.1 278.1L508.2 274.5L508.4 272.3L503.3 264.5L503.6 262.4L502.1 263.2L502 261.9L502 261.9Z","c":[560.4,311.7]},"West Virginia":{"d":"M733.2 294.8L737.9 293.5L738 290.5L739.9 289.3L738.6 285.4L741.4 279.5L744 282.7L746 281.3L744.6 277.8L746.4 273.1L748.1 273L749.8 269.4L751.7 270.6L753.7 269.4L758.8 263L760.9 246.6L758.9 241L761.1 239.2L764.5 259.9L782.3 256.9L784.1 268.5L789.7 261.4L792.3 261.6L794.2 256.7L797 258.6L800.4 258.3L800.4 256.6L804.5 253.4L807.7 255L810.8 254.4L810.6 256.4L813.9 260.3L812.9 264.9L802.6 259.1L802.9 266L796.6 276.6L794 275L790.3 285.9L783.8 282.9L782.6 290.6L776 305.1L777.5 306.3L775.9 308.1L776.6 309.3L768.8 313.7L767 312.7L766.7 315.4L761.3 318.1L758.5 316.2L755.4 319.7L753.4 320.1L748.2 316.7L746.8 314.7L747.9 313.7L740.9 311.1L733.2 300.7L733.2 294.8L733.2 294.8Z","c":[766.7,284.6]},"Illinois":{"d":"M576.5 264.7L576.5 260.9L581.2 257.8L581.5 254.5L583.6 251.8L583.7 247.9L580.7 244.7L581.6 240.8L591.3 237.7L595.5 231L595.5 223.8L591.6 221.6L587 215.4L634.2 212.4L634 216.8L640.3 229.8L645 283.6L643.5 287.9L646.8 296.6L641.5 308.6L640.2 308.2L639.4 310.3L640.5 311.8L638.7 314.3L639.5 317.5L638 317.4L639.4 319.7L637.3 323.1L639 327.3L632.2 329.8L633.1 336.9L624.4 334.1L620.6 337.5L621.2 339.9L618.8 338.2L618.6 340L616.7 338.9L613.8 333.4L615.4 331L613.3 324.3L607.1 319.7L605.2 320.3L605.6 318.5L597.6 313.2L597.6 309.3L601 298.4L594.9 296.1L592.7 298.5L590.2 294.4L589.7 289.9L578.1 279.5L575.2 270.5L576.5 264.7L576.5 264.7Z","c":[615,270.1]},"New Mexico":{"d":"M264.6 328L315.3 334.3L372.5 339.4L362.9 453.3L295.1 447L294.3 449.3L296.3 452.1L264.2 448.2L262.9 458.4L246.8 456.3L264.6 328L264.6 328Z","c":[310.6,393.3]},"Arkansas":{"d":"M523 355.3L603.6 352.2L605.2 357.3L600.2 364L611.9 363.1L613.7 365.2L611.5 365.7L612.7 367.3L608.4 369.4L609 371.2L610.1 370.8L608.4 372.9L609.2 374.5L607 373.8L606.9 377.1L606.6 375.7L604.8 376.8L606.6 377.6L605.1 379.7L607.1 383.2L605.2 383.8L604.6 385.9L603.1 385.7L604 388.7L600.9 390.5L599.8 389.5L600.5 392.4L599.4 393L599.3 391.4L598.4 393L600.4 394.3L598.9 395.3L598.1 394.5L598.6 400.4L597.3 402.4L595.3 401.6L593.9 405.3L592.3 405.2L594.5 405.8L592 407L593.4 409.4L589.7 410.8L591.8 415.1L588.9 415.5L588.9 416.6L591.1 417.7L587.4 417.8L589.3 419.6L587.6 420.4L588.5 421.8L587.6 423.2L588.9 421.8L588.9 424.5L590.9 423.3L589.5 425.1L590.4 427.7L591.4 426.9L590.7 429.8L588.6 430.7L590.1 431.7L589.4 433.1L535 434.7L534.8 422.5L532.1 421.6L528.8 422.8L526.4 420.7L526.8 380.5L523 355.3L523 355.3Z","c":[563.6,391]},"California":{"d":"M77.2 374.3L81.1 376.9L81.3 379.5L78.9 378.3L79 376.1L77.2 374.3L77.2 374.3ZM56.6 355L63.6 357.8L59.5 358.6L56.9 357.4L56.6 355L56.6 355ZM50.3 355.2L54.1 355.4L54.9 357.8L51.9 358.1L50.3 355.2L50.3 355.2ZM32.6 160L100.5 179.2L83.3 245.5L156.8 356.2L156.2 359.1L158.5 363.2L158.9 369.3L162.8 373.6L156.8 377L153.9 380.5L152.4 389.1L148 391.7L147 398.6L147.4 400.1L150.2 400.8L150.7 403.8L148.8 406.9L99.5 401.7L99.7 399.5L97.9 398.1L98.7 387.7L96.5 382.3L87.9 371L82.1 369.3L83 367.2L81.7 362.5L76.4 361.8L71 358.1L65 349.3L48.8 344.3L46.5 340.5L49.8 328.1L46.4 325.7L46.9 320.1L41.6 313.3L39.7 305L34.8 296.1L35.1 289.9L38.1 289L39.7 285.9L39.2 282.7L38.3 281.4L35.1 281L31.4 274.3L33.3 260.8L35.3 260.7L34.7 265.7L39.3 270.3L38.6 265L36.4 261.7L37.3 259L35.8 257.2L39.2 256.3L38.9 254.7L35.7 253.7L34.4 257.6L35.2 259L34.2 258.4L33.2 259.9L28.5 253.7L26.2 253.5L28.5 247.8L20.1 229.8L24 209.2L18.5 197.2L18.9 193.1L27.7 181.7L27.7 178.9L31.3 172.9L31.6 165.8L30.4 164.4L32.6 160L32.6 160Z","c":[82.1,288.1]},"Delaware":{"d":"M844.9 244.6L846.5 241.9L850.8 241.4L848.6 245.5L849.3 249.3L852.8 252.5L856.8 260.7L861.3 262.7L863.7 270.3L852.6 272.5L844.9 244.6L844.9 244.6Z","c":[853.3,260]},"District of Columbia":{"d":"M825.9 267L827 265.3L829.7 267.2L827.9 269.9L825.9 267L825.9 267Z","c":[827.8,267.3]},"Hawaii":{"d":"M305.4 584.5L310.2 579.2L308.6 574L309.7 572.5L322.2 578.3L326.3 582L326.1 584.5L327.9 584.4L331.9 590.3L328.6 593.3L321.8 595.2L317.3 598.1L313.8 603.1L308.4 598.5L309.1 593.7L305.4 584.5L305.4 584.5ZM291.6 557.9L293.9 555.4L296.4 558.5L301.6 557.7L306.5 560.7L306.8 562.4L305.4 563.9L298.5 565.6L297.1 564.8L296.7 561.1L293.1 560.2L291.6 557.9L291.6 557.9ZM283.9 558.3L287.4 558L289.3 560.4L285.9 562.1L283.9 558.3L283.9 558.3ZM278.6 553.8L279.6 551.2L291.4 552.6L287.8 555L278.6 553.8L278.6 553.8ZM258.1 543L261.3 542.9L264.7 540L267.3 545.8L268.7 546.8L269.9 545.8L271.4 549.4L261.5 549.3L258.1 543L258.1 543ZM226.1 532.6L227.3 530.2L231 528.2L234.3 528.1L236.6 530.2L235.8 534.3L233.3 536.3L230 535.8L226.1 532.6L226.1 532.6ZM216.3 536.6L220 533.2L219.8 535.6L217.1 538.2L216.3 536.6L216.3 536.6Z","c":[299.4,573.1]},"Iowa":{"d":"M490.6 195.2L576.3 193.3L576.5 196.3L579.2 198.7L577.4 201.6L579.9 210.5L585.6 212.4L591.6 221.6L595.5 223.8L595.5 231L591.3 237.7L581.6 240.8L580.7 244.7L583.7 247.9L583.6 251.8L581.5 254.5L581.2 257.8L576.5 260.9L576.5 264.7L570.9 259.6L530.6 261.8L502 261.9L499.9 258.5L501.2 255.1L500.7 248.2L499.5 248.1L499.3 241.9L496.4 239.9L495.9 230.2L493.5 228.5L491.1 221.5L491.4 218.4L487.6 213.3L490.8 203.9L490 201.5L488.8 201.5L489.5 197.9L488.2 195.2L490.6 195.2L490.6 195.2Z","c":[539.9,227.3]},"Kentucky":{"d":"M621.2 339.9L620.6 337.5L623.1 334.2L633.1 336.9L632.2 329.8L639 327.3L637.3 323.1L639.4 319.7L641.5 319.4L641.3 316.7L642.7 317.7L645.3 316.8L646.7 318.3L646.7 315L648.3 316.5L650.6 315.6L655.3 318.7L656.7 315.7L660.8 313.4L664.4 316.1L668.2 307.9L669.8 310.7L674.1 312.8L676 311L677.1 305.1L678.7 305.1L683.6 298.2L682.9 294.1L687.5 294.5L693.5 291.6L693.7 289.3L692.2 289.1L691.3 285.7L693.7 283.2L696.4 284.6L698.5 283.2L701.7 285.5L703.9 289.8L710.2 290.2L713.9 292.7L716.2 290.6L720.6 292.4L727 287.9L728.4 291.7L732.8 293.7L734.1 298.3L733.2 300.7L736.9 304.4L736.4 305.6L740.9 311.1L747.1 313.2L741.2 320.4L735.2 324.6L733.1 330.3L729.8 331.5L729 334.2L719.6 339.2L644.8 346.1L640.8 345.4L641.4 349.5L616.9 351.3L617.4 348.6L620.2 349.5L621.2 347.2L621.2 339.9L621.2 339.9Z","c":[688.2,321]},"Maryland":{"d":"M782.3 256.9L844.9 244.6L852.6 272.5L863.7 270.3L862.5 280.5L851.6 285.3L852.5 281.9L851.2 281.8L851.9 280.3L849.9 281.2L849.6 279.5L851.2 278.7L849.7 277.8L850.2 275.4L848.9 278.3L847.7 275.6L847.6 278.7L846.1 279.2L841.4 274.1L842.6 273.6L842.5 270.7L846.4 271.3L841.6 268.4L840.3 269.8L840.8 265.9L842.3 266.1L841.6 263.9L839 266.3L839.4 261.7L840.1 262.9L841.9 262.2L841.8 260L841.1 262.1L839.3 259.3L840.2 254.7L842.9 253.3L842.6 248.9L840.5 249.9L841.6 251.7L839.2 254.5L838.3 252.4L838.5 255.8L836.8 254L837.6 257L836.3 258.8L833.5 257.8L838 262.7L836.2 268.8L838.1 274L841 276.7L839.9 278.3L841.6 278.7L843.8 284.2L841.2 281.9L840.8 283.3L838.3 281.3L834.6 281.5L833 279L833.8 281.3L832.2 280.7L829.9 277.6L826.1 279.8L825.6 276L829.7 267.2L827 265.3L825.9 267L819.4 265L818.2 264.2L818.7 261.5L813.2 260.2L810.1 255.4L810.8 254.4L807.7 255L804.5 253.4L798.6 258.6L794.2 256.7L792.3 261.6L789.7 261.4L784.1 268.5L782.3 256.9L782.3 256.9Z","c":[831.6,263.5]},"Michigan":{"d":"M651.9 227.6L655.1 224.2L659.8 210.2L659.4 200.2L652.4 184.3L653.8 180.1L651.9 174.9L655.2 168L654.7 161.1L657.1 158.7L657.1 154.9L661.1 153.5L664.8 147.2L663.9 155.9L665 157.2L666.3 152L666.1 157.6L667.8 153.2L667.3 145.5L674.2 141.9L671.2 140.3L670.5 138.3L672.9 134.4L671.7 133.8L675.4 132.7L680.6 135.2L684.6 135.1L686.6 137.8L696.7 139.9L701.3 147L699.1 146.2L698.4 147.2L702.2 153.9L702.4 162.5L699.8 164.4L699.2 169.4L694.4 173.2L694.1 177.1L695.1 178.8L699 180.2L702 176.6L702.1 173L702.5 173.9L703.7 172.6L702.4 172.1L709.9 167.7L713 169.1L721.5 191.2L720.9 199.8L718.5 202.2L717.8 200.5L719.1 198.7L716.3 199.4L715.1 206.5L712.9 207.6L712.5 212.9L708.3 221.7L685.8 225.4L685.6 223.9L651.9 227.6L651.9 227.6ZM601.4 92.4L613.6 84.4L610.1 88.7L605.2 91.4L606.6 91.7L603.5 93.3L601.4 92.4L601.4 92.4ZM585.3 123.1L591.3 120.2L594.8 116.8L600.5 115.8L606.9 111.9L618.6 100.5L624.4 99.7L625.9 101.1L622.2 101.8L615.4 111.8L615.6 116.6L620.1 111.5L618.2 114.7L619.7 113L624 112.5L628.3 114.3L633.1 120.8L638.5 119.7L641.8 121.6L642.2 120.6L643.6 121.4L643.2 119L645.3 120.6L651.8 115.2L662 114L670 111L669 112.8L669.8 117.6L675.7 116.8L676.5 118.3L679 116.1L683.4 114.8L684.4 121.5L682.5 123L684.5 122.7L689 126.3L690.2 126.2L689.4 123.8L692.3 123.4L695.2 125.8L694 127.6L685.2 127.2L681.2 128.8L676.5 126.6L675.7 131.6L671.2 128.3L662.9 127.3L660.4 130.5L651.3 131.9L646.8 140L645 138.4L647.3 133.5L645.8 134.9L643.6 134.5L643 137.7L641.4 138.5L639.9 135.4L632.4 153L629.9 151.5L630.2 146.5L627.3 147L628.2 140.2L624.6 137.7L623.1 138.1L622.7 135L611.9 133.8L606.7 131.4L590.3 128L588.3 124.2L585.3 123.1L585.3 123.1Z","c":[669.5,167.1]},"Mississippi":{"d":"M589.4 433.1L590.1 431.7L588.6 430.7L590.7 429.8L591.4 426.9L590.4 427.7L589.5 425.1L590.9 423.3L588.9 424.5L588.9 421.8L587.6 423.2L588.5 421.8L587.6 420.4L589.3 419.6L587.4 417.8L591.1 417.7L588.9 416.6L588.9 415.5L591.8 415.1L589.7 410.8L593.4 409.4L592 407L594.5 405.8L592.3 405.2L593.9 405.3L595.3 401.6L597.3 402.4L598.6 400.4L598.1 394.5L598.9 395.3L600.4 394.3L598.4 393L599.3 391.4L599.4 393L600.5 392.4L599.8 389.5L600.9 390.5L604 388.7L602.8 386.7L641.6 384L643.7 386.2L642.2 455L646.5 489.5L644.4 490.8L636.2 489.7L629.1 492.3L628.5 490.7L626.2 495.2L623.9 495.5L617.6 484.9L619.6 477.2L582.6 479.2L584 478.2L582.2 473.1L584.6 472.8L583.3 470L583.9 469.2L585.3 470.7L584.4 467L586.4 466L584.2 465.1L586.5 464.8L586.4 462.8L589 461.4L587 461.4L587.4 459.5L592.3 455.5L590.6 454.6L591.8 454.8L593.4 452.2L590.5 452.9L590.4 451.5L593.6 450.9L595.4 448.2L593.6 447.8L593.3 445.5L590.9 444.9L591.2 443.9L593.4 444.5L591.5 443.2L592.5 441.1L590.8 442.6L590.1 441.4L591.8 439.3L589.8 439L591.3 435.6L590.9 433.6L589.8 435.4L588.6 434.8L589.4 433.1L589.4 433.1Z","c":[618.1,437.5]},"Montana":{"d":"M198.1 39L284.5 54.8L376.9 65.7L369.4 155.7L320.8 150.9L257.8 142L256 153.9L251.5 146.7L249.9 147.5L249.1 151.2L243.8 151.1L243.3 149.7L239.3 150.1L236.7 148.5L234.6 150.9L228.5 149L227 151.6L224.8 149.1L224.1 141.5L222.5 140.1L220.8 140.7L219.4 138.5L220.2 134.2L216.9 127.4L216.9 121L214.6 118.2L208.1 122.6L205.2 119.7L206.4 117.5L205.8 114.9L209.1 113.1L208.1 107.3L213.4 96.3L208.9 95.6L208.1 93.1L206.8 93.8L200.8 79.7L195.3 74.3L197 74.2L195.8 71.8L196.8 68.7L193.3 61.5L198.1 39L198.1 39Z","c":[286.9,99.7]},"New Hampshire":{"d":"M886.1 110.5L885.8 105.4L887.8 103.3L890.5 103.9L890.9 102.4L903.6 143.5L907.5 147.2L907.8 149.2L910.2 150.1L909.5 154.8L906.2 156L902.9 160.7L884.1 164.8L881.7 161.7L882.7 158.5L880.6 145.8L883.1 133L881.8 127.9L885.1 126.3L887.9 122.1L885.6 116.8L886.1 110.5L886.1 110.5Z","c":[892.6,140.2]},"New York":{"d":"M767.5 200.3L776.4 192.1L780.3 186.1L775.5 180.1L774.8 176L783.8 171.7L795.8 170.3L799.8 171.9L811.4 167.8L819.6 159.9L818.1 154.9L816.9 154.4L819.3 152.5L814.7 150.3L815 146.4L820.5 141.3L828.6 127.9L834.4 123.1L857.6 117.8L859.2 127.3L861.4 130.5L861.3 139.5L864.1 145.3L863.9 149.7L865.6 148.3L867.1 150.3L871 167.6L870.6 183.2L874.1 201L875.7 202.6L872.3 206L874.1 208.3L872.2 212L873 213L877.1 208.5L881.6 208.4L882.7 206.7L890.9 204.2L896.5 198.7L895.6 200.6L899.5 201.8L903.1 198.9L885.7 213L871.7 219.3L869.2 216.4L870.1 209L855 204L853.9 202.5L849.7 202.4L846.3 195.3L843.2 194.8L840.9 192.1L768.6 206.4L767.5 200.3L767.5 200.3Z","c":[833.9,171.8]},"Ohio":{"d":"M685.8 225.4L708.3 221.7L717.6 225.5L719 223.6L725.6 227.4L733 223.3L737.5 223.2L744.2 215.9L756.1 209L761.1 239.2L758.9 241L760.9 246.6L758.8 263L753.7 269.4L751.7 270.6L749.8 269.4L748.1 273L746.4 273.1L744.6 277.8L746 281.3L744 282.7L741.4 279.5L740.2 281L738.6 285.4L739.9 289.3L738 290.5L737.9 293.5L733.2 294.8L728.4 291.7L727 287.9L720.6 292.4L716.2 290.6L713.9 292.7L710.2 290.2L703.9 289.8L701.7 285.5L698.5 283.2L696.4 284.6L693.7 283.2L692.5 284.3L685.8 225.4L685.8 225.4Z","c":[723.8,252.9]},"Oregon":{"d":"M71 70.2L72.9 73.5L77 73.8L79.5 76.9L79 86.8L84.9 91.1L93.8 89.9L101.1 91.9L102.8 94.7L112 93.9L115.3 95.9L129.4 94.2L136.2 95.7L138.7 94.8L170.5 102.4L172 106.8L175 109L175.7 112.3L166.8 124.1L166.6 126.2L161.9 129.9L157.4 136.6L157.9 139.9L160.9 141.2L161.7 143.3L157.9 150.5L148.9 190.7L83.7 174.8L32.6 160L31.6 158.4L31.4 151.6L33.8 144.6L32.8 139.9L45.4 120.7L58.3 89.6L62.2 75L63.6 73.9L63.8 68.9L65.7 71.1L71 70.2L71 70.2Z","c":[102.6,134.1]},"Tennessee":{"d":"M611.9 363.1L614.2 360.1L612.2 357.3L615.1 356.7L613.6 355.9L615.4 354.2L614.7 351.5L641.4 349.5L640.8 345.4L644.8 346.1L704.2 340.8L756 333.4L755.7 339.8L752.4 341.1L750.7 345.5L746.1 345.9L741.8 350.7L740.1 348.3L737.2 352.1L735.7 351.7L734.6 355.9L731.6 356.5L726.3 361.7L719.2 363.8L717 366.7L717.3 369.2L712.6 371.4L712.7 376.8L602.8 386.7L607.1 383.2L605.1 379.7L606.6 377.6L604.8 376.8L606.6 375.7L606.9 377.1L607 373.8L609.2 374.5L608.4 372.9L610.1 370.8L609 371.2L608.4 369.4L612.7 367.3L611.5 365.7L613.7 365.2L611.9 363.1L611.9 363.1Z","c":[673.5,361.2]},"Utah":{"d":"M197.7 201.1L247.2 209.6L243.5 232.2L277.1 237.2L264.6 328L176 313.3L197.7 201.1L197.7 201.1Z","c":[226.7,268.8]},"Virginia":{"d":"M855.5 283.8L862.5 280.5L861.3 284.3L859.2 285.8L856.6 301.3L854.2 304.2L852.6 296.6L853.7 287.9L855.6 285.9L854.2 285.2L855.5 283.8L855.5 283.8ZM747.1 313.2L748.2 316.7L753.4 320.1L755.4 319.7L758.5 316.2L761.3 318.1L766.7 315.4L767 312.7L768.8 313.7L776.6 309.3L775.9 308.1L777.5 306.3L776 305.1L782.6 290.6L783.8 282.9L790.3 285.9L794 275L796.6 276.6L802.9 266L802.6 259.1L812.9 264.9L813.9 260.3L816.6 260.2L818.7 261.5L818.2 264.2L826.9 267.6L828.2 271.6L827.1 273.8L825.1 274L824.5 278.6L825.8 280.9L829.6 278.7L831.9 282.6L838.2 282.9L840.5 285.2L845.9 287.3L845.1 289.3L846.2 293.2L845.1 294L842.3 293.8L840.5 291.3L834 287.8L842.2 294.6L846.4 294.9L845.5 296.1L847.8 297.3L848 300.4L845.1 298.9L846.9 301.5L844.5 302.6L848.6 304.6L849 307.5L847.3 308.7L842.9 306L841.9 303.8L836.6 304.6L840.5 305.7L841.3 304.4L842.2 307.4L846.3 310.5L849.3 310.1L849.8 308.1L854.4 308L858.8 315.9L780.3 331.1L719.8 338.7L729 334.2L729.8 331.5L733.1 330.3L735.2 324.6L741.2 320.4L747.1 313.2L747.1 313.2Z","c":[802.6,304.4]},"Washington":{"d":"M95 31L98.5 27.7L99.3 30.6L95.8 31.6L97.4 32.7L97.1 36.6L98.3 35.1L99.6 36.9L98.7 39.7L97.9 37.5L96.7 37.6L96.8 33.1L95 31L95 31ZM91 21.2L92.6 21.1L94 22.9L93.4 21.4L95.9 19.9L98.1 21.8L95.6 26.6L91.6 23.8L91 21.2L91 21.2ZM183.6 35.9L170.1 94.1L171.3 98.5L170.5 102.4L138.7 94.8L136.2 95.7L129.4 94.2L115.3 95.9L112 93.9L102.8 94.7L101.1 91.9L93.8 89.9L84.9 91.1L79 86.8L80.1 80L77 73.8L72.9 73.5L72 70.3L68.6 68.5L65.9 69.2L64.2 66.9L63 67.6L65.5 59.8L64.7 65.5L65.6 65.8L65.9 63.1L67.5 62.7L67.2 60.2L69.7 59L65.9 57.2L66.3 53.6L66.8 54.6L70.7 53.9L67.5 50.7L65.8 52.9L67.2 47.5L67.6 34.1L65.5 28.3L66 23.6L68.1 20.5L67.4 19.1L76.9 27.1L85.2 30.8L88.9 30.7L90.2 33L92 33.3L92 35.6L92.7 33.1L94.6 32.9L93.7 33.9L93.9 35L95.3 34L94.3 36L95.3 39.1L91 42.7L91.1 40.4L83.8 48.2L87.7 48.6L84.6 47.6L95.6 39.9L95.7 37.9L96.6 39L92.4 52.4L91.2 53.6L90.2 51.8L91.1 50.1L90.1 50.6L90.5 53.7L89.1 55.2L87.9 51.7L89.1 50.1L87.6 51.3L87 53.6L89.4 55.7L92.8 51.7L93.9 53.2L96.1 51.9L96.1 46.6L97.5 46.2L96.5 44.8L101.5 38.7L100.5 32.6L99.1 33.1L100 36.3L98.2 34.1L98.7 31.6L100.5 32L100.9 30.4L99.5 27.4L97.9 27.5L97.5 26.4L99.1 25.3L100.9 27L101 24.9L102.4 24.4L101.9 20.2L99.6 20.5L98.8 15.5L100 14.4L183.6 35.9L183.6 35.9Z","c":[124.2,58.9]},"Wisconsin":{"d":"M560.2 121.1L563.3 121.4L578.3 114.6L579.7 116.1L577 122.8L580.2 120.5L588.3 124.2L590.3 128L606.7 131.4L611.9 133.8L622.7 135L623.1 138.1L624.6 137.7L628.2 140.2L627.3 147L630.2 146.5L629.9 151.5L632.4 153L632 155.7L629 156.6L626.9 162.1L626.8 166.2L630.6 163.3L632.6 158.9L635.8 158.1L637.9 150.9L641.6 147.6L641 152.4L635.5 165.1L635.4 173.6L633.5 175.5L632.5 180.8L633.4 185.3L630.8 195.3L634.1 205.7L634.2 212.4L587 215.4L585.6 212.4L579.9 210.5L577.4 201.6L579.2 198.7L576.5 196.3L574.9 185.5L572.3 182.2L564.9 177.8L563.9 174.9L556.9 170.1L553.6 169.9L549.3 165.9L549.7 153.6L551.3 149.9L549.3 147.4L547.5 147.3L547.6 144L550.1 139.9L556.4 135.6L555.9 122.3L559 120.2L560.2 121.1L560.2 121.1Z","c":[594.7,166.6]},"Nebraska":{"d":"M365.3 201L456.8 206.2L464.3 211.7L467.8 209.4L476.4 209.5L484.7 213.4L488 217.9L491.4 218.4L492.3 225.8L494.2 229.6L495.9 230.2L495.3 231.7L496.9 234L496.4 239.9L499.3 241.9L498.9 244.7L500.1 245.2L499.2 245.8L499.5 248.1L500.7 248.2L501.2 255.1L499.9 258.5L502.3 261.3L502.1 263.2L503.6 262.4L504.7 268.1L507.1 270L508.2 274.5L509.9 275.2L453.9 274.6L393.9 271.9L395.3 249L361.4 246.5L365.3 201L365.3 201Z","c":[434.1,238.8]},"South Carolina":{"d":"M734.9 373.7L747.2 367L772 364.7L772.4 367.1L774.1 365.4L777.5 368.8L777.6 371.5L798.1 368.4L822.8 386.1L816.3 392.2L813.5 398.8L813.6 403.6L811 407.9L806.9 408.6L807.4 410.8L802.9 415.1L802.1 414.5L802.5 416.8L800.6 419L794.9 422.9L792.2 422.9L793 426.9L790 428.8L788.3 427.5L787.4 428.4L789.5 429.8L785.3 434.5L781.4 433.4L778.7 425.8L774 422.7L771.3 414.4L765.7 411.8L761.6 407.7L761.9 405.8L748.3 396.2L741.1 385.4L738.4 385.4L731.7 381.5L731.6 379L734.9 373.7L734.9 373.7Z","c":[779.3,392.4]},"Idaho":{"d":"M170.5 102.4L171.3 98.5L170.1 94.1L183.6 35.9L198.1 39L193.3 61.5L196.8 68.7L195.8 71.8L197 74.2L195.3 74.3L200.8 79.7L206.8 93.8L208.1 93.1L208.9 95.6L213.4 96.3L208.1 107.3L209.1 113.1L205.8 114.9L206.4 117.5L205.2 119.7L208.1 122.6L214.6 118.2L216.9 121L216.9 127.4L220.2 134.2L219.4 138.5L220.8 140.7L222.5 140.1L224.1 141.5L224.8 149.1L227 151.6L228.5 149L234.6 150.9L236.7 148.5L239.3 150.1L243.3 149.7L243.8 151.1L249.1 151.2L249.9 147.5L251.5 146.7L256 153.9L247.2 209.6L200.2 201.7L148.9 190.7L157.9 150.5L161.7 143.3L160.9 141.2L157.9 139.9L157.4 136.6L161.9 129.9L166.6 126.2L166.8 124.1L175.7 112.3L175 109L172 106.8L170.5 102.4L170.5 102.4Z","c":[198.8,146.6]},"Nevada":{"d":"M100.5 179.2L197.7 201.1L172.6 331.5L170 334.9L168.4 334.8L166.6 331.5L159.5 331.4L158.7 352.8L156.8 356.2L83.3 245.5L100.5 179.2L100.5 179.2Z","c":[142.1,251.9]},"Vermont":{"d":"M857.6 117.8L886.1 110.5L885.6 116.8L887.9 122.1L885.1 126.3L881.8 127.9L883.1 133L880.6 145.8L882.7 158.5L881.7 161.7L884.1 164.8L871 167.6L870.3 166.5L867.1 150.3L865.6 148.3L863.9 149.7L864.1 145.3L861.3 139.5L861.4 130.5L859.2 127.3L857.6 117.8L857.6 117.8Z","c":[873.3,136]},"Louisiana":{"d":"M576.5 511.5L579.9 510.5L582.6 512L580 513.9L576.5 511.5L576.5 511.5ZM535 434.7L589.4 433.1L588.6 434.8L589.8 435.4L590.9 433.6L589.8 439L591.8 439.3L590.1 441.4L590.8 442.6L592.5 441.1L591.5 443.2L593.4 444.5L591.2 443.9L590.9 444.9L593.3 445.5L593.6 447.8L595.4 448.2L593.6 450.9L590.4 451.5L590.5 452.9L593.4 452.2L591.8 454.8L590.6 454.6L592.3 455.5L587.4 459.5L587 461.4L589 461.4L586.4 462.8L586.5 464.8L584.2 465.1L586.4 466L584.4 467L585.3 470.7L583.9 469.2L583.3 470L584.6 472.8L582.2 473.1L584 478.2L582.6 479.2L619.6 477.2L617.6 484.9L621.2 489.5L622.9 494.5L624.8 495.4L621.2 499.1L618.5 499.8L619 501.1L621.1 500.7L621.9 502.7L623.8 502.3L625.7 497.6L627.9 498.5L626.9 499.9L628.2 501.3L631.1 499.7L629.2 501.8L630.5 502.2L628 503L630.2 503.5L629.7 504.7L628.1 504.1L626.7 507.3L625.4 505.7L625.4 507.5L622.8 507.8L624.1 509.1L622.5 508.2L622.5 509.6L626.3 513.4L630.2 513.1L631.7 514.7L632.4 513.8L634.8 517.2L636.1 516.6L634.2 521.8L631.8 519.9L628.8 523.6L631.1 517.7L628.6 519.1L623.8 515.7L619.8 515.3L612.6 521.1L610.8 517.1L609.8 516.3L608.8 518L608.1 515.4L607.3 516.7L604.9 516.6L603.2 520.7L599.9 522.5L597.9 519.8L591.5 518.6L590.3 517.5L591.6 516L594.6 518.3L594.3 516.3L592.5 514.3L590.2 515.4L589.6 512.7L587.7 513.7L585.7 510.1L583.8 510.2L584.2 507.9L579.1 508.6L580 505.9L572.8 507.9L576.1 511.6L570.6 513.1L553.6 508.2L540.6 510.4L538.9 507.5L543.1 502.1L542.1 491L545.5 484.5L546.1 479.9L541.8 469.1L539.6 467L539.8 463L535.5 457.9L535 434.7L535 434.7Z","c":[576.3,478.4]},"Rhode Island":{"d":"M910.5 182.8L911.6 182.9L912.8 186.4L911.8 187.6L910.5 184L911 187.2L909.1 188.3L910.5 182.8L910.5 182.8ZM901.7 193.5L902.2 191.1L898.8 178L905.5 176L909.9 183L909.3 184L906.7 181.2L907.6 190.7L901.7 193.5L901.7 193.5Z","c":[904.7,184.3]}};
+
+let metric = 'sales';
+let drill = null;    // state name when zoomed to the store level
+let lastR = null;    // { level, metric, px } radius memory so a toggle tweens instead of jumping
+const zipOf = (n) => { const m = /\((\d+)\)/.exec(n); return m ? m[1] : n; };
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+AZ.boot({
+  need: 'sales by store, state and region, e.g. [sales] [store] [state] [region]',
+  render: async ({ el, rows, schema, redraw }) => {
+    const sK = AZ.col(schema, /store/i), tK = AZ.col(schema, /state/i), rK = AZ.col(schema, /region/i, { optional: true }), vK = AZ.col(schema, /sales/i);
+    const S = new Map();
+    let total = 0, nStores = 0;
+    rows.forEach((r) => {
+      const st = String(r[tK]), v = AZ.num(r[vK]);
+      if (!S.has(st)) S.set(st, { st: st, region: rK ? String(r[rK]) : '', sales: 0, stores: [] });
+      const o = S.get(st); o.sales += v; o.stores.push({ n: String(r[sK]), v: v }); total += v; nStores++;
+    });
+    const list = Array.from(S.values());
+    const placed = list.filter((o) => US_STATES[o.st]);
+    if (!placed.length || total <= 0) {
+      AZ.paint(el, '<div class="az-empty"><b>No states to place</b><span>The current filter returns no state rows. Search: [sales] [store] [state] [region]</span></div>');
+      return;
+    }
+    if (drill && !(S.has(drill) && US_STATES[drill])) drill = null;
+    const val = (o) => (metric === 'sales' ? o.sales : o.stores.length);
+    const maxV = Math.max.apply(null, placed.map(val));
+    const ranked = placed.slice().sort((a, b) => val(b) - val(a) || b.sales - a.sales);
+    const two = placed.slice().sort((a, b) => b.sales - a.sales).slice(0, 2);
+    const twoShare = two.reduce((t, o) => t + o.sales, 0) / total, twoStores = two.reduce((t, o) => t + o.stores.length, 0);
+    const lineAll = placed.length === 1
+      ? '<b>' + AZ.esc(placed[0].st) + '</b>: ' + AZ.money(placed[0].sales, 1) + ' from ' + placed[0].stores.length + ' of ' + nStores + ' stores.'
+      : '<b>' + AZ.esc(two[0].st) + ' and ' + AZ.esc(two[1].st) + '</b> hold ' + AZ.pct(twoShare, 0) + ' of sales from ' + twoStores + ' of ' + nStores + ' stores.';
+    const fmt = (o) => (metric === 'sales' ? AZ.money(o.sales, 1) : o.stores.length + (o.stores.length === 1 ? ' store' : ' stores'));
+    const plural = (n) => n + (n === 1 ? ' store' : ' stores');
+
+    el.innerHTML =
+      '<div class="sb-top"><div class="sb-title" id="sb-title"></div><div class="sb-seg" role="group" aria-label="Bubble size"><button type="button" data-m="sales" class="' + (metric === 'sales' ? 'on' : '') + '">Sales</button><button type="button" data-m="stores" class="' + (metric === 'stores' ? 'on' : '') + '">Stores</button></div></div>'
+      + '<div class="sb-line" id="sb-line"></div>'
+      + '<div class="sb-map" id="sb-map"></div>'
+      + '<div class="sb-read" id="sb-read"></div>'
+      + '<div class="sb-cap" id="sb-cap"></div>';
+    el.querySelectorAll('.sb-seg button').forEach((b) => b.addEventListener('click', () => { metric = b.getAttribute('data-m'); redraw(); }));
+
+    const map = document.getElementById('sb-map'), read = document.getElementById('sb-read');
+    await AZ.settle();
+    const W = Math.max(200, map.clientWidth), H = Math.max(120, map.clientHeight), asp = W / H;
+    const vw0 = Math.max(975, 610 * asp), vh0 = vw0 / asp;
+    const HOME = [487.5 - vw0 / 2, 305 - vh0 / 2, vw0, vh0];
+    const sc = W / vw0, fs = 12 / sc, rmax = Math.min(52, Math.max(20, 40 / sc * 0.72));
+    const rad = (o) => Math.max(4 / sc, rmax * (metric === 'sales' ? 1 : 0.72) * Math.sqrt(val(o) / maxV));
+    let s = '<g>';
+    Object.keys(US_STATES).forEach((k) => { s += '<path class="sb-st' + (S.has(k) ? ' has' : '') + '" data-s="' + AZ.esc(k) + '" d="' + US_STATES[k].d + '"/>'; });
+    s += '</g><g>';
+    // big bubbles first so small ones stay on top
+    ranked.forEach((o) => { const c = US_STATES[o.st].c; s += '<circle class="sb-b" tabindex="0" role="button" aria-label="' + AZ.esc(o.st) + ': zoom to its stores" data-s="' + AZ.esc(o.st) + '" cx="' + c[0] + '" cy="' + c[1] + '" r="' + rad(o).toFixed(1) + '"/>'; });
+    s += '</g><g>';
+    const maxLab = W < 380 ? 3 : 4, topN = ranked.slice(0, 8), taken = placed.map((o) => { const c = US_STATES[o.st].c, r = rad(o); return { x0: c[0] - r, x1: c[0] + r, y0: c[1] - r, y1: c[1] + r }; });
+    let nLab = 0;
+    topN.forEach((o) => {
+      if (nLab >= maxLab) return;
+      const c = US_STATES[o.st].c, r = rad(o), tw = (o.st.length + fmt(o).length + 1) * fs * 0.55, th = fs * 1.2;
+      const cand = [
+        { x: c[0], y: c[1] + r + fs * 1.05, a: 'middle' }, { x: c[0], y: c[1] - r - fs * 0.35, a: 'middle' },
+        { x: c[0] + r + 4, y: c[1] + fs * 0.35, a: 'start' }, { x: c[0] - r - 4, y: c[1] + fs * 0.35, a: 'end' }
+      ];
+      const box = (p) => ({ x0: p.a === 'middle' ? p.x - tw / 2 : p.a === 'start' ? p.x : p.x - tw, x1: p.a === 'middle' ? p.x + tw / 2 : p.a === 'start' ? p.x + tw : p.x, y0: p.y - th, y1: p.y + th * 0.25 });
+      const clash = (b) => taken.some((t) => b.x0 < t.x1 && b.x1 > t.x0 && b.y0 < t.y1 && b.y1 > t.y0) || b.x0 < HOME[0] || b.x1 > HOME[0] + HOME[2] || b.y0 < HOME[1];
+      const pick = cand.find((p) => !clash(box(p)));
+      if (!pick) return;
+      taken.push(box(pick)); nLab++;
+      s += '<text class="sb-lab" data-s="' + AZ.esc(o.st) + '" x="' + pick.x.toFixed(1) + '" y="' + pick.y.toFixed(1) + '" text-anchor="' + pick.a + '" font-size="' + fs.toFixed(1) + '" font-weight="600" style="stroke-width:' + (3.5 / sc).toFixed(1) + 'px">' + AZ.esc(o.st) + ' <tspan font-weight="400">' + AZ.esc(fmt(o)) + '</tspan></text>';
+    });
+    s += '</g><g id="sb-stores"></g>';
+    map.innerHTML = '<svg id="sb-svg" viewBox="' + HOME.join(' ') + '" preserveAspectRatio="xMidYMid meet">' + s + '</svg>';
+
+    const svg = document.getElementById('sb-svg'), gS = document.getElementById('sb-stores');
+    const paths = Array.from(svg.querySelectorAll('.sb-st')), bubs = Array.from(svg.querySelectorAll('.sb-b')), labs = Array.from(svg.querySelectorAll('.sb-lab'));
+    const tip = AZ.tip(el);
+    const NS = 'http://www.w3.org/2000/svg';
+    let cancel = null, cur = 0, busy = false, tgt = null;
+
+    // ---- level 1 bubble radii tween when the metric flips
+    const px1 = {};
+    bubs.forEach((b) => { px1['s:' + b.getAttribute('data-s')] = Number(b.getAttribute('r')) * sc; });
+    if (!drill && lastR && lastR.level === 0 && lastR.metric !== metric) {
+      const from = bubs.map((b) => (lastR.px['s:' + b.getAttribute('data-s')] || 0) / sc), to = bubs.map((b) => Number(b.getAttribute('r')));
+      bubs.forEach((b, i) => b.setAttribute('r', from[i]));
+      cancel = AZ.tween(450, (k) => bubs.forEach((b, i) => b.setAttribute('r', AZ.lerp(from[i], to[i], k))), null, AZ.EASE.inOut);
+    }
+    if (!drill) lastR = { level: 0, metric: metric, px: px1 };
+
+    // ---- level 2 prep: target viewBox and store layout for one state
+    const prep = (name, animateRadii) => {
+      const o = S.get(name), bb = svg.querySelector('.sb-st[data-s="' + name.replace(/"/g, '') + '"]').getBBox();
+      const vwT = Math.max(bb.width * 1.5, bb.height * 1.5 * asp, 975 / 9), vhT = vwT / asp;
+      const cx = bb.x + bb.width / 2, cy = bb.y + bb.height / 2;
+      const VIEW = [cx - vwT / 2, cy - vhT / 2, vwT, vhT], u = vwT / W;
+      const stores = o.stores.slice().sort((a, b) => b.v - a.v), n = stores.length, maxS = stores[0].v || 1;
+      const mn = Math.min(W, H);
+      const Rf = n < 2 ? 0 : Math.max(1.2, 1.1 / Math.sin(Math.PI / n));
+      const rmaxPx = Math.min(mn * 0.15, mn * 0.36 / (Rf + 1));
+      const items = stores.map((x, i) => {
+        let ang, rr;
+        if (n <= 7) { ang = -Math.PI / 2 + i * 2 * Math.PI / n; rr = Rf * rmaxPx; }
+        else { ang = i * 2.39996; rr = rmaxPx * 1.15 * Math.sqrt(i + 0.6) * 0.95; }
+        const rp = metric === 'sales' ? Math.max(9, rmaxPx * Math.sqrt(x.v / maxS)) : rmaxPx * 0.72;
+        return { n: x.n, zip: zipOf(x.n), v: x.v, tx: cx + Math.cos(ang) * rr * u, ty: cy + Math.sin(ang) * rr * u, r: rp * u, rp: rp };
+      });
+      const c0 = US_STATES[name].c;
+      let h = '';
+      items.forEach((it, i) => { h += '<circle class="sb-s" tabindex="0" data-i="' + i + '" cx="' + c0[0] + '" cy="' + c0[1] + '" r="0" opacity="0"/>'; });
+      items.forEach((it, i) => {
+        const lab = it.zip + ' ';
+        h += '<text class="sb-lab sb-sl" data-i="' + i + '" x="' + it.tx.toFixed(2) + '" y="' + (it.ty + it.r + 13 * u).toFixed(2) + '" text-anchor="middle" font-size="' + (11 * u).toFixed(2) + '" font-weight="600" opacity="0" style="stroke-width:' + (3.5 * u).toFixed(2) + 'px">' + AZ.esc(lab) + '<tspan font-weight="400">' + AZ.esc(metric === 'sales' ? AZ.money(it.v, 1) : '1 store') + '</tspan></text>';
+      });
+      gS.innerHTML = h;
+      const circles = Array.from(gS.querySelectorAll('.sb-s')), texts = Array.from(gS.querySelectorAll('.sb-sl'));
+      circles.forEach((c, i) => {
+        const it = items[i];
+        c.addEventListener('mousemove', (e) => {
+          if (busy) return;
+          const b = el.getBoundingClientRect();
+          tip.show('<b>' + AZ.esc(it.n) + '</b>' + AZ.row('Sales', AZ.money(it.v, 2), '#FFFFFF') + AZ.row('Share of ' + name, AZ.pct(it.v / o.sales, 1)) + AZ.row('Share of total', AZ.pct(it.v / total, 1)), e.clientX - b.left, e.clientY - b.top);
+        });
+        c.addEventListener('mouseleave', () => tip.hide());
+      });
+      tgt = { name: name, VIEW: VIEW, items: items, circles: circles, texts: texts, c0: c0 };
+      // radius memory for the toggle tween at this level
+      const px2 = {}; items.forEach((it) => { px2['b:' + it.n] = it.rp; });
+      return px2;
+    };
+
+    // ---- one function draws every frame of the zoom: k = 0 whole map, k = 1 the state
+    const step = (k) => {
+      cur = k;
+      if (!tgt) return;
+      const V = HOME.map((a, i) => AZ.lerp(a, tgt.VIEW[i], k));
+      svg.setAttribute('viewBox', V.join(' '));
+      const o = 1 - k;
+      paths.forEach((p) => { if (p.getAttribute('data-s') !== tgt.name) { p.style.opacity = o; } });
+      bubs.forEach((b) => { b.style.opacity = b.getAttribute('data-s') === tgt.name ? Math.max(0, 1 - k * 2.5) : o; });
+      labs.forEach((t) => { t.style.opacity = t.getAttribute('data-s') === tgt.name ? Math.max(0, 1 - k * 4) : o; });
+      const ke = clamp01((k - 0.2) / 0.8), kt = clamp01((k - 0.55) / 0.45);
+      tgt.items.forEach((it, i) => {
+        const c = tgt.circles[i];
+        c.setAttribute('cx', AZ.lerp(tgt.c0[0], it.tx, ke)); c.setAttribute('cy', AZ.lerp(tgt.c0[1], it.ty, ke));
+        c.setAttribute('r', Math.max(0.01, it.r * ke)); c.setAttribute('opacity', ke);
+        tgt.texts[i].setAttribute('opacity', kt);
+      });
+    };
+    const reset = () => {
+      paths.forEach((p) => { p.style.opacity = ''; }); bubs.forEach((b) => { b.style.opacity = ''; }); labs.forEach((t) => { t.style.opacity = ''; });
+      gS.innerHTML = ''; tgt = null; cur = 0; svg.setAttribute('viewBox', HOME.join(' '));
+    };
+
+    // ---- header, readout, caption follow the level
+    const paintHead = () => {
+      const title = document.getElementById('sb-title'), line = document.getElementById('sb-line'), cap = document.getElementById('sb-cap');
+      if (!drill) {
+        title.textContent = 'Sales by state'; line.innerHTML = lineAll;
+        cap.textContent = 'Bubble area shows ' + (metric === 'sales' ? 'summed sales' : 'store count') + '. Bubbles sit at state centres; stores are placed by state, not by coordinates.';
+        read.innerHTML = '<div>Click a state to zoom in on its stores.</div>';
+      } else {
+        const o = S.get(drill), per = o.sales / o.stores.length;
+        title.innerHTML = AZ.crumbs(['United States', drill]); AZ.wireCrumbs(title, () => go(null));
+        line.innerHTML = '<b>' + AZ.esc(drill) + '</b>: ' + AZ.money(o.sales, 1) + ' from ' + plural(o.stores.length) + ', ' + AZ.pct(o.sales / total, 1) + ' of sales.';
+        cap.textContent = metric === 'sales' ? 'Bubble area shows the sales of each store. Stores are arranged around the state centre, labelled by zip code, not placed by coordinates.' : 'Each bubble is one store, so all are the same size. Stores are arranged around the state centre, not placed by coordinates.';
+        read.innerHTML = '<div><b>' + AZ.esc(o.st) + '</b>' + (o.region ? ' (' + AZ.esc(o.region) + ')' : '') + ': ' + AZ.money(per, 1) + ' per store'
+          + '<span class="st">' + o.stores.slice().sort((a, b) => b.v - a.v).map((x) => AZ.esc(x.n) + ' ' + AZ.money(x.v, 1)).join('  |  ') + '</span></div><button type="button" class="sb-x" id="sb-x">Back</button>';
+        document.getElementById('sb-x').addEventListener('click', () => go(null));
+      }
+      svg.classList.toggle('drilled', !!drill);
+    };
+
+    const go = (name) => {
+      if (cancel) cancel();
+      tip.hide();
+      const from = cur;
+      if (name) { if (!tgt || tgt.name !== name) { reset(); prep(name); } drill = name; } else { drill = null; }
+      paintHead();
+      busy = true;
+      const to = name ? 1 : 0;
+      cancel = AZ.tween(520, (k) => step(AZ.lerp(from, to, k)), () => { busy = false; if (!to) reset(); }, AZ.EASE.inOut);
+    };
+
+    // ---- initial state: straight to the drilled frame after a redraw, with the radii tween for a toggle
+    if (drill) {
+      const px2 = prep(drill);
+      if (lastR && lastR.level === 1 && lastR.name === drill && lastR.metric !== metric) {
+        const to = tgt.items.map((it) => it.r), from = tgt.items.map((it) => (lastR.px['b:' + it.n] || 0) / (W / tgt.VIEW[2]));
+        tgt.items.forEach((it, i) => { it.r = from[i]; });
+        cancel = AZ.tween(450, (k) => { tgt.items.forEach((it, i) => { it.r = AZ.lerp(from[i], to[i], k); }); step(1); }, () => { tgt.items.forEach((it, i) => { it.r = to[i]; }); step(1); }, AZ.EASE.inOut);
+      } else step(1);
+      lastR = { level: 1, name: drill, metric: metric, px: px2 };
+    }
+    paintHead();
+
+    paths.concat(bubs).forEach((n) => {
+      const k = n.getAttribute('data-s'), o = S.get(k);
+      if (!o) return;
+      n.addEventListener('mousemove', (e) => {
+        if (busy) return;
+        const b = el.getBoundingClientRect();
+        tip.show('<b>' + AZ.esc(o.st) + '</b>' + (o.region ? AZ.row('Region', o.region) : '') + AZ.row('Stores', String(o.stores.length)) + AZ.row('Sales', AZ.money(o.sales, 2), '#FFFFFF') + AZ.row('Share of total', AZ.pct(o.sales / total, 1)), e.clientX - b.left, e.clientY - b.top);
+      });
+      n.addEventListener('mouseleave', () => tip.hide());
+      n.addEventListener('click', () => { if (!drill && !busy) go(k); });
+      n.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !drill && !busy) { e.preventDefault(); go(k); } });
+    });
+    // states with no data: a plain hint on hover
+    paths.forEach((p) => {
+      const k = p.getAttribute('data-s');
+      if (S.has(k)) return;
+      p.addEventListener('mousemove', (e) => { if (busy) return; const b = el.getBoundingClientRect(); tip.show('<b>' + AZ.esc(k) + '</b>' + AZ.row('Stores', 'none in this search'), e.clientX - b.left, e.clientY - b.top); });
+      p.addEventListener('mouseleave', () => tip.hide());
+    });
+    const onKey = (e) => { if (e.key === 'Escape' && drill) go(null); };
+    window.addEventListener('keydown', onKey);
+    return () => { if (cancel) cancel(); window.removeEventListener('keydown', onKey); };
+  }
+});

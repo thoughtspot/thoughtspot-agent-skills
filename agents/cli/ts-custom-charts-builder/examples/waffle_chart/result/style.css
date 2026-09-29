@@ -1,0 +1,153 @@
+:root {
+  --bg: #F7F5FF;
+  --card: #ffffff;
+  --text: #1a1f4a;
+  --muted: #7a85a3;
+  --dim: #5b6478;
+  --track: #eceaf3;
+  --border: #f0eff7;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  overflow: auto;
+}
+
+#chart { width: 100%; min-height: 100%; }
+
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 14px 16px;
+}
+
+/* Summary row — slim header with big %, two-color split bar (occupied vs
+   available in the same purples used by the bed icons), and inline counts. */
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: var(--card);
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-bottom: 8px;
+}
+.sum-left {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.sum-pct {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.sum-pct-unit {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+  margin-left: 1px;
+}
+.sum-cap {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 600;
+}
+.sum-bar {
+  display: flex;
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  min-width: 100px;
+  background: var(--track);
+}
+.sum-occ { background: linear-gradient(90deg, #8C62F5, #6A4ABA); transition: width .4s ease; }
+.sum-avl { background: #E8DFFB; }
+.sum-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.sum-stats .sum-num {
+  color: var(--text);
+  font-weight: 600;
+}
+.sum-sep {
+  color: #c9c4dd;
+}
+
+/* Legend ------------------------------------------------------------- */
+.key {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 10px;
+  color: var(--dim);
+  margin-bottom: 10px;
+  padding-left: 2px;
+}
+.key-item { display: flex; align-items: center; gap: 5px; }
+.key-item svg { width: 18px; height: 11px; }
+.key-hint { margin-left: auto; color: #9aa3b8; }
+
+/* Per-unit cards ----------------------------------------------------- */
+.unit { background: var(--card); border-radius: 8px; padding: 10px 12px; margin-bottom: 7px; }
+.unit-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.unit-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+.unit-name { font-size: 12px; font-weight: 600; color: var(--text); flex-shrink: 0; }
+.unit-spacer { flex: 1; }
+.unit-bar { width: 56px; height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; flex-shrink: 0; }
+.unit-bar-fill { height: 100%; border-radius: 3px; }
+.unit-meta { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; flex-shrink: 0; min-width: 68px; text-align: right; }
+
+/* Bed grid — flex-wrap with fixed pixel beds keeps icons compact even if
+   host CSS overrides grid column widths or stretches the wrap container. */
+.unit-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  max-width: 520px;
+}
+.bed {
+  width: 22px;
+  height: 14px;
+  flex: 0 0 22px;
+  cursor: default;
+  transition: transform .12s ease;
+}
+.bed:hover { transform: scale(2); z-index: 5; position: relative; }
+.bed svg { display: block; width: 100%; height: 100%; }
+
+.empty {
+  width: 100%;
+  padding: 60px 0;
+  text-align: center;
+  color: #9588b8;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 560px) {
+  .summary { flex-wrap: wrap; gap: 10px; }
+  .sum-bar { order: 3; flex-basis: 100%; }
+  .unit-grid { max-width: 100%; }
+}

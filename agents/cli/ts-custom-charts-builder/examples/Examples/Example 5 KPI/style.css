@@ -1,0 +1,103 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+}
+
+#chart {
+  width: 100%;
+  padding: 0;
+  margin: 0;
+}
+
+#kpi-card {
+  background: transparent;
+  padding: 28px 32px 24px 32px;
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+#kpi-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#kpi-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+#kpi-big-number {
+  font-size: 52px;
+  font-weight: 800;
+  color: #1b5e20;
+  line-height: 1;
+  letter-spacing: -2px;
+}
+
+#kpi-year-label {
+  font-size: 16px;
+  color: #555;
+  font-weight: 500;
+}
+
+#kpi-bar-wrapper {
+  position: relative;
+  width: 100%;
+  height: 22px;
+}
+
+#progressChart {
+  width: 100% !important;
+  height: 22px !important;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+#kpi-tick {
+  position: absolute;
+  top: 0;
+  height: 22px;
+  width: 3px;
+  background: #1b5e20;
+  border-radius: 2px;
+  transform: translateX(-50%);
+}
+
+#kpi-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#kpi-label-left {
+  font-size: 11px;
+  color: #888;
+}
+
+#kpi-label-right {
+  font-size: 11px;
+  color: #1b5e20;
+  font-weight: 600;
+}
+
+#kpi-footer {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid #f0f0f0;
+  padding-top: 12px;
+}
+
+#kpi-baseline, #kpi-target {
+  font-size: 11px;
+  color: #aaa;
+}
+
+#kpi-target {
+  color: #1b5e20;
+  font-weight: 600;
+}

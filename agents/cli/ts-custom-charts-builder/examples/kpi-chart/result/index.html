@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Opportunity Rate KPI</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="chart"></div>
+
+<script type="module">
+  // Local preview shim — in ThoughtSpot Muze Studio, `viz` is provided by the host.
+  window.viz = {
+    getDataFromSearchQuery: () => ({ getData: () => ({ schema: [], data: [] }) }),
+    events: { emitRenderCompletedEvent: () => {} },
+  };
+  try {
+    await import('./script.js');
+  } catch (err) {
+    document.getElementById('chart').innerHTML =
+      '<div class="error-display">JS Error: ' + err.message + '\n\n' + err.stack + '</div>';
+    console.error('Chart error:', err);
+  }
+</script>
+</body>
+</html>

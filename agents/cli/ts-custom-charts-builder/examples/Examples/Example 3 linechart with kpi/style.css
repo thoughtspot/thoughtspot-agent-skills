@@ -1,0 +1,84 @@
+/* Force the iframe root to exactly match the tile size */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+* { box-sizing: border-box; }
+
+#chart {
+  font-family: sans-serif;
+  background: #fff;
+  color: #222;
+  padding: 16px 20px;
+  width: 100%;
+  height: 100vh;          /* 100vh = exact iframe/tile height in ThoughtSpot */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Legend — fixed, never grows */
+.legend {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: #666;
+  flex-wrap: wrap;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.legend-swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+.legend-dashed-label { margin-left: 2px; }
+
+/* Chart area — takes ALL remaining space between legend and KPI cards */
+.chart-wrap {
+  flex: 1 1 0;            /* grow to fill, shrink to nothing if needed */
+  min-height: 0;          /* critical — allows flex child to shrink below content size */
+  width: 100%;
+  position: relative;
+}
+
+/* Canvas fills the wrapper exactly — Chart.js reads wrapper size */
+.chart-wrap canvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* KPI cards — fixed, never grows */
+.metrics {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+.metric-card {
+  flex: 1;
+  background: #f5f5f5;
+  border-radius: 6px;
+  padding: 8px 10px;
+  text-align: center;
+  min-width: 0;
+}
+.metric-label {
+  font-size: 10px;
+  color: #888;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.metric-value {
+  font-size: 16px;
+  font-weight: 500;
+  color: #222;
+  white-space: nowrap;
+}

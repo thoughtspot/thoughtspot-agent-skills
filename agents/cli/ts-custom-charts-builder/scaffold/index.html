@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ThoughtSpot chart preview</title>
+    <link rel="stylesheet" href="/vendor/muze/muze.css" />
+    <style>
+      /* Deliberately NO `height: 100%` here. A ThoughtSpot tile's <body> has no
+         explicit height, and `html, body { height: 100% }` in chart.css is what
+         a chart needs to keep a percentage-height layout from collapsing there.
+         Supplying it from the preview would make every chart look correct and
+         hide that requirement completely — which is exactly how a chart that
+         renders here ships as a blank tile. #tile is positioned `fixed` instead
+         of `absolute` so it sizes off the viewport and needs no body height. */
+      html, body { margin: 0; background: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+
+      /* Approximates a Liveboard tile: the chart sizes itself to this box, which is
+         what makes the ResizeObserver contract testable. `snap.mjs --tile WxH` resizes
+         this box without touching the window, as a Liveboard does. */
+      #tile { position: fixed; inset: 16px 16px 34px 16px; border: 1px solid #e3e3e3;
+        border-radius: 6px; overflow: hidden; background: #fff; }
+      #chart-host { width: 100%; height: 100%; }
+
+      #status { position: fixed; left: 16px; right: 16px; bottom: 8px; height: 18px;
+        font: 11px/18px ui-monospace, "SF Mono", Menlo, monospace; color: #999; }
+      #status.ok    { color: #2e7d32; }
+      #status.warn  { color: #b26a00; }
+      #status.error { color: #c0392b; font-weight: 500; }
+
+      .preview-error { color: #d93025; white-space: pre-wrap; padding: 12px;
+        font: 12px/1.5 ui-monospace, Menlo, monospace; margin: 0; }
+
+      /* The CDN Muze build ships without these; the real host supplies its own theme.
+         Preview-only — never copy into chart.css. */
+      .muze-tracker, .muze-tracker-group { fill: transparent !important; }
+      .muze-grid-lines line, .muze-grid-lines path { stroke: #ececec; stroke-width: 1px; fill: none; }
+      .muze-axis line, .muze-axis path.domain { stroke: #b0b0b0; fill: none; }
+      .muze-axis text, .muze-axis-name text { fill: #555; }
+      .muze-layer-group { fill: none; }
+      .muze-title text, .muze-subtitle text { fill: #222; }
+      .muze-legend text { fill: #444; }
+    </style>
+  </head>
+  <body>
+    <div id="tile"><div id="chart-host"></div></div>
+    <div id="status">initializing…</div>
+
+    <!-- Muze is imported by preview.js from vendor/ (its CSS is linked above), not loaded from a CDN.
+         The CDN build (@chartshq/muze 2.x) is the ASYNC API — no loadDataSync,
+         DataModel.onReady() instead — which is not what BYOC exposes. Previewing
+         against it would validate charts that cannot run on a tile. -->
+    <script type="module" src="/src/preview.js"></script>
+  </body>
+</html>

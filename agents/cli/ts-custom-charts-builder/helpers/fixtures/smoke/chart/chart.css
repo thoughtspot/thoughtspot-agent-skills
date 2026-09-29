@@ -1,0 +1,8 @@
+html, body { height: 100%; margin: 0; }
+#chart { position: relative; width: 100%; height: 100%; font: 12px system-ui, sans-serif; }
+#chart svg { display: block; }
+.is-sample::before {
+  content: 'sample data'; position: absolute; top: 6px; right: 8px;
+  font: 10px/1 system-ui, sans-serif; text-transform: uppercase; color: #8a6d3b;
+  background: #fdf3d8; border-radius: 3px; padding: 3px 6px;
+}
