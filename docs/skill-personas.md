@@ -336,6 +336,43 @@ and each SE solves it from scratch. A recipe is the solved version, deployable i
 
 ---
 
+## Custom Charts
+
+Custom chart (BYOC) tiles, and Liveboards made of them.
+
+The shared business problem: a native chart cannot always show the story a customer needs
+to see, and a hand-written custom chart that looked fine locally often ships as a blank or
+broken tile, because the host passes data and sizes the tile differently from a local page.
+
+### `ts-custom-charts-builder`
+
+- **Business problem.** A demo or customer request calls for a visual ThoughtSpot does not
+  have natively (a Sankey, a hex cartogram, a bullet chart), and building a custom chart by
+  hand means several paste-and-reload rounds in the product before it renders.
+- **Who asks.** SE building a differentiated demo, PS delivering a bespoke visual, anyone
+  rebuilding or debugging an existing custom chart tile.
+- **Use when** you need paste-ready `chart.html` / `chart.css` / `chart.js` for a tile.
+  Start from the nearest of the 53 library charts where one fits.
+- **Watch for** the first run installing Playwright and Chromium into the skill's
+  `helpers/`. A chart is only verified in ThoughtSpot once it has been screenshotted there
+  (see `ts-custom-charts-liveboard-builder`); before that it is verified against a stub.
+
+### `ts-custom-charts-liveboard-builder`
+
+- **Business problem.** A set of good charts is not a story. A storytelling demo
+  Liveboard of custom tiles takes days to plan, lay out and import by hand, and one wrong
+  character in a pasted tile breaks it.
+- **Who asks.** SE preparing a flagship demo on a customer's own Model, PM or marketing
+  wanting a showcase Liveboard.
+- **Use when** you want a whole Liveboard of custom charts across numbered tabs, each tab
+  answering one question, with narrative tiles and filters, imported and screenshotted on a
+  real cluster.
+- **Watch for** it needing the ThoughtSpot MCP (`execute-thoughtspot-code`) and a
+  logged-in browser for the screenshots. It patches the target Liveboard itself and
+  creates no other objects.
+
+---
+
 ## Keeping this page honest
 
 This page is hand-maintained and is not currently validated against the skills it
