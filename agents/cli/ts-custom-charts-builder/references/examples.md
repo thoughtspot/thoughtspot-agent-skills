@@ -18,8 +18,8 @@ Two rules for using them:
 
 ## Start here: the library
 
-`library/` holds 53 charts built on real data. Each was iterated in the preview, is interactive, and was checked in
-a real cluster. They share one core (`library/_shared/core.js`: theme, column lookup, tooltip, CDN loader, motion,
+`library/` holds 58 charts built on real data. Each was iterated in the preview and is interactive; all but the four
+marked *preview only* in `references/library.md` were also checked in a real cluster. They share one core (`library/_shared/core.js`: theme, column lookup, tooltip, CDN loader, motion,
 crumbs, boot). **Look for your shape in this table first**, then in `references/library.md` (every chart by tab,
 library and search). Use the `examples/` files further down only for shapes the library lacks, or for the
 Muze workarounds they document.
@@ -41,6 +41,10 @@ Muze workarounds they document.
 | Table with inline marks | `library/who-product-table` | hand HTML | Sort, share bars, sparklines; supersedes `examples/table-pivot/table-chart` for flat tables |
 | Parallel coordinates | `library/who-store-parallel` | D3 | Brush an axis to filter lines |
 | Beeswarm | `library/who-product-beeswarm` | D3 force | Collision layout that fits the tile |
+| Pivot table with subtotals | `library/where-region-pivot` | hand HTML | Rows and columns expand both ways; ratio totals computed as sum over sum at every level, so they match ThoughtSpot. Supersedes `examples/table-pivot/pivot-table` |
+| League table with movement and form | `library/who-store-league` | hand HTML | Rank change against the same window last year, a five-month form strip, partial-month detection. Supersedes `examples/League Table` and `examples/Scoreboard-chart` |
+| Diverging bar, drill to members | `library/what-premium-diverging` | Muze | Muze bars coloured per point, own axis and labels; the workarounds for Muze's band-height floor and remount-on-update. Supersedes `examples/Examples/Example 2 diverging axis` |
+| Growth split into volume and price | `library/pulse-family-growth` | hand HTML and SVG | Small-multiple cards with an exact units/price decomposition and like-for-like windows derived from the rows. Supersedes `examples/Examples/Example 4 growth comp` |
 
 The narrative tiles (tab banners, About) are one template in the `ts-custom-charts-liveboard-builder` skill (`narratives/`), driven by a config per tab.
 
@@ -54,7 +58,7 @@ These predate the preview loop and the shared core. Entries marked *superseded* 
 |---|---|---|
 | `examples/Examples/Example 1 bubble chart/` | Bubble chart, ~490 lines | `encodingTransform` plus an SVG overlay group. Muze's point-size range clamps around 50px, so the native marks are kept invisible and the bubbles are drawn into a cleared overlay — the only way to get large bubbles without leaking nodes across re-mounts |
 | `examples/Examples/Department bubble chart/` | Same shape, smaller | The same overlay pattern with a `ResizeObserver`, and a shorter read |
-| `examples/Examples/Example 2 diverging axis/` | Diverging bar, ~300 lines | Axis domain control and `encodingTransform` for a two-sided scale |
+| `examples/Examples/Example 2 diverging axis/` | Diverging bar, ~300 lines | *Superseded by `library/what-premium-diverging`.* Axis domain control and `encodingTransform` for a two-sided scale |
 | `examples/invoice_muze/invoice.js` | Invoice-style layout, ~510 lines | The cleanest **mode C** in the repo: `USE_SAMPLE_DATA` flag, `DataModel.loadDataSync` for the baked rows, `getDataFromSearchQuery()` for live, one render path for both |
 | `examples/funnel-chart/result/` | Funnel | Muze canvas underneath, polygons hand-drawn in SVG on top. Also the domain-mutation workaround: Muze reverses categorical domain arrays on re-mount, so pass `.slice()` and re-config every mount |
 
@@ -99,11 +103,11 @@ all fixed in `examples/retail-apparel-sunburst/`:
 
 | Path | What it is | Worth reading for |
 |---|---|---|
-| `examples/table-pivot/pivot-table/newused-summary/` | Pivot table, ~720 lines | The most worked-over file here. A `CONFIG` block at the top is the whole interface; below it are the aggregation rules that make totals match TS — `weightedTotal`, `totalFrom`, `ratioTotal`, `computed` — plus `cellVal` for object-wrapped cells and loose column-name matching for non-breaking spaces. Read it before any pivot or crosstab |
+| `examples/table-pivot/pivot-table/newused-summary/` | Pivot table, ~720 lines | *Superseded by `library/where-region-pivot`* for a region by family pivot; still the fullest `CONFIG` reference. The most worked-over file here. A `CONFIG` block at the top is the whole interface; below it are the aggregation rules that make totals match TS — `weightedTotal`, `totalFrom`, `ratioTotal`, `computed` — plus `cellVal` for object-wrapped cells and loose column-name matching for non-breaking spaces. Read it before any pivot or crosstab |
 | `examples/table-pivot/table-chart/newused-summary/` | Flat table, ~210 lines | *Superseded by `library/who-product-table`.* The same CONFIG idea without the pivot machinery |
 | `examples/waffle_chart/result/` | Waffle grid, ~230 lines | Cards built with `createElement`, no library |
 | `examples/progression-funnel/progression-funnel.js` | Funnel, ~280 lines | Pure DOM funnel; `_progression_funnel_demo.html` beside it is a standalone preview |
-| `examples/Examples/Example 4 growth comp/` | Growth comparison | DOM plus `ResizeObserver`, no charting library at all |
+| `examples/Examples/Example 4 growth comp/` | Growth comparison | *Superseded by `library/pulse-family-growth`.* DOM plus `ResizeObserver`, no charting library at all |
 
 ## Raw SVG
 
@@ -113,6 +117,8 @@ all fixed in `examples/retail-apparel-sunburst/`:
 | `examples/kpi-chart/result/` | KPI tile, ~150 lines | *Superseded by the `library/kpi-*` charts.* Small, typography-led, resize-aware. Has a `README.md` |
 
 ## Self-contained HTML (everything in the HTML tab)
+
+*Both superseded by `library/who-store-league`* for a standings table; read these only for the single-file shape.
 
 `examples/League Table/` puts all markup, CSS and script in `.html`, leaving the `.js`
 and `.css` tabs empty. Interactive: dropdowns and filter chips driving a re-render.

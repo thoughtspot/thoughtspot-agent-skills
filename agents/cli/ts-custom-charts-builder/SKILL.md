@@ -1,6 +1,6 @@
 ---
 name: ts-custom-charts-builder
-description: Build a ThoughtSpot custom chart (BYOC) as three paste-ready files — chart.html, chart.css, chart.js — by iterating in a real browser until the render is right. Opens a preview the user watches (a headed window in Claude Code; headless screenshots in the Claude app or wherever no window can open), screenshots each attempt, critiques it with vision, and fixes the top defect. Use when the user wants a ThoughtSpot custom chart, a BYOC tile, a Muze chart, or wants an existing chart tile rebuilt, debugged, or converted between sample and live data. Covers Muze, D3, ECharts, Plotly, Chart.js, gridjs, hand-built HTML tables, and raw SVG, and hands finished tiles to the ts-custom-charts-liveboard-builder skill to put on a Liveboard. Ships a library of proven live-data charts under library/. Not for native ThoughtSpot chart configuration or non-ThoughtSpot charting work.
+description: Build a ThoughtSpot custom chart (BYOC) as three paste-ready files — chart.html, chart.css, chart.js — by iterating in a real browser until the render is right. Starts with an intake that checks the prerequisites and asks the model, data mode, search, library and destination as pick-from-a-list questions; can save the finished chart as a ThoughtSpot answer and screenshot it in a logged-in browser. Opens a preview the user watches (a headed window in Claude Code; headless screenshots in the Claude app or wherever no window can open), screenshots each attempt, critiques it with vision, and fixes the top defect. Use when the user wants a ThoughtSpot custom chart, a BYOC tile, a Muze chart, or wants an existing chart tile rebuilt, debugged, or converted between sample and live data. Covers Muze, D3, ECharts, Plotly, Chart.js, gridjs, hand-built HTML tables, and raw SVG, and hands finished tiles to the ts-custom-charts-liveboard-builder skill to put on a Liveboard. Ships a library of proven live-data charts under library/. Not for native ThoughtSpot chart configuration or non-ThoughtSpot charting work.
 ---
 
 # ThoughtSpot custom chart builder
@@ -33,10 +33,14 @@ screenshot.
 | User has an existing tile that misbehaves | **Debug** — start from their files, skip to the loop |
 | User wants sample→live or live→sample | **Convert** — read `references/byoc-data-modes.md`, change the mode, verify both |
 | User wants a chart that a library chart already covers | **Adapt** - open `references/library.md`, copy the nearest `library/<slug>/`, change the search and copy, then run the loop |
-| User wants finished tiles on a Liveboard, or a whole Liveboard | **Hand over** - `## Step 9`; the Liveboard work is the `ts-custom-charts-liveboard-builder` skill |
-| Ambiguous | Ask once, briefly, then go |
+| User wants finished tiles on a Liveboard, or a whole Liveboard | **Hand over** - `## Step 10`; the Liveboard work is the `ts-custom-charts-liveboard-builder` skill |
+| Ambiguous | The Step 0 intake settles it |
 
-## Step 0 — doctor (every run, one Bash call)
+Every route starts with Step 0. A **Debug** run asks only the destination and check questions.
+
+## Step 0 — doctor and intake
+
+### 0a. Doctor (every run, one Bash call)
 
 `<SKILL>` is the folder this SKILL.md lives in. Typical values: Claude Code,
 `~/.claude/skills/<name>` or `<project>/.claude/skills/<name>`; the Claude app,
@@ -71,6 +75,52 @@ If `deps: missing`, the `fix:` line is the command that fixes it:
 Chromium is pinned to the Playwright version, so a cached build can look present and
 still fail to launch. Note `cdn:` for Library choice below.
 
+Also check whether the ThoughtSpot MCP tool `execute-thoughtspot-code` is connected. If it is, one
+read-only call returns the signed-in user, the org, the cluster name and the models. The token is bound
+to one org, so that is the org you work in. Search models by name: an org can hold hundreds of logical
+tables and an unfiltered listing is cut off before the one the user means.
+
+```js
+const me = (await ts.get('/api/rest/2.0/auth/session/user')).body;
+const sys = (await ts.get('/api/rest/2.0/system')).body;            // sys.name is the cluster, e.g. ps-internal
+const r = await ts.post('/api/rest/2.0/metadata/search', { metadata: [{ type: 'LOGICAL_TABLE', name_pattern: '%<words from the request>%' }], record_size: 50 });
+const models = (Array.isArray(r.body) ? r.body : []).filter((m) => ['WORKSHEET', 'MODEL'].includes((m.metadata_header || {}).type));
+return { user: me.name, org: me.current_org.name, cluster: sys.name, models: models.map((m) => ({ name: m.metadata_name, guid: m.metadata_id })) };
+```
+
+For the model's columns (round 2), the same search with `identifier: '<guid>'` and `include_details: true`
+returns `metadata_detail.columns` (name, `ATTRIBUTE` or `MEASURE`, data type).
+
+Show the user one short block before asking anything: browser mode, CDN reach, MCP connected or not
+(and which org), and what each missing piece rules out (no MCP: no real data and no saved answer; no
+browser window: no check in ThoughtSpot).
+
+### 0b. Intake: ask with choices
+
+Use the `AskUserQuestion` tool so the user picks instead of typing. It takes up to 4 questions per
+call and 2 to 4 options each, and adds "Other" for free text by itself. Build the options from what 0a
+found, never from placeholders; put the likely pick first and add "(Recommended)" to it. Skip any
+question the user's message already answered.
+
+Round 1:
+
+| Header | Question | Options |
+|---|---|---|
+| Model | Which model should the chart read? | Up to 3 models from 0a, the most likely first, plus "No model: sample data only". Skip when the MCP is not connected |
+| Data | How should the chart get its data? | "Live with sample fallback (Recommended)", "Live only", "Sample only" (modes C, B, A in Step 2) |
+| Result | Where should the finished chart go? | "Files only", "Save as an answer in ThoughtSpot", "Add to a Liveboard". Offer the last two only when the MCP is connected |
+| Check | Testing in ThoughtSpot opens a browser window where you sign in once (SSO). Include it? | "Yes, I will sign in when the window opens (Recommended)", "No, verify in the local preview only". Ask only when the result is an answer or a Liveboard and 0a found a browser that can open a window |
+
+Round 2, after a quick column list of the chosen model:
+
+| Header | Question | Options |
+|---|---|---|
+| Search | Which search should the chart run? | 2 or 3 searches you draft from the columns and the request, for example `[sales] [region] [date].monthly`. "Other" takes the user's own |
+| Library | Which chart library? | "Pick for me (Recommended)", then the two or three that fit this shape from Library choice below |
+
+If `AskUserQuestion` is not available, ask the same questions in one message as a numbered list with
+lettered options, and wait for the answers. Write the answers into `<RUNS>/<SLUG>/intent.txt` in Step 3.
+
 ## Step 1 — load knowledge
 
 Read before writing any chart code, in this order:
@@ -91,7 +141,7 @@ installed.
 
 ## Step 2 — settle the data mode
 
-Do this before writing code, and ask if the user has not said. Default to **C**.
+Use the intake answer (Step 0). Default to **C**.
 
 - **A — sample only.** Rows baked in. Demos, layout, print work.
 - **B — live only.** `getDataFromSearchQuery()`. A tile bound to a real search.
@@ -102,8 +152,9 @@ Do this before writing code, and ask if the user has not said. Default to **C**.
 Skeletons are in `references/byoc-data-modes.md`. Follow them; do not improvise a
 fourth shape.
 
-If the user has a real search, ask them to paste the `Available Columns` block from
-their chart editor and map the field constants onto those exact names.
+With a model and search from the intake, the column names come from `searchdata` (Step 3). Without
+the MCP, ask the user to paste the `Available Columns` block from their chart editor and map the field
+constants onto those exact names.
 
 ## Step 3 — run dir and dataset
 
@@ -212,7 +263,9 @@ node "<SKILL>/helpers/snap.mjs" "<SLUG>" 94 --data noviz     # no host at all - 
 ```
 
 Read each PNG — `status: ok` is not the same as correct, and each of these fails
-differently. Use distinct attempt numbers so the four frames survive as evidence.
+differently. Use distinct attempt numbers so the four frames survive as evidence. To run several in a loop,
+use `bash -c '...'`: zsh (the macOS default) does not split `$args`, so the flags arrive as one argument,
+are ignored, and the PNGs get names like `91 --data absent.png`.
 
 Then two more, neither of which the loop exercises.
 
@@ -246,7 +299,10 @@ node "<SKILL>/helpers/probe.mjs" "<SLUG>" --tile 620x400 --click-sel ".wedge" --
 **Empty the HTML tab and re-snap.** `chart.js` must build its own mount points. A
 chart that only renders when `chart.html` is present fails on a host that evaluates
 the JS first — which surfaces as the host's own "Chart did not render" over an empty
-tile, with nothing useful in the console.
+tile, with nothing useful in the console. Judge this one by the status line and
+`console-errors`, not the PNG: the created `#chart` lands on `<body>` outside the preview's tile
+box, so it lays out at window size and the screenshot shows only its top-left corner. On a real
+tile the body is the tile. Restore `chart.html` afterwards.
 
 ## Step 7 — emit
 
@@ -278,7 +334,41 @@ node "<SKILL>/helpers/close-preview.mjs" "<SLUG>"
 Always, on success or when the user says stop. In headless mode there is no window
 and it says so — harmless.
 
-## Step 9 - put it on a Liveboard (optional)
+## Step 9 - save it as an answer and check it in ThoughtSpot (optional)
+
+Only when the intake chose "Save as an answer in ThoughtSpot". It needs the MCP and a live chart (mode B
+or C) built on the intake search. The answer is the one object this creates; make no scratch answers.
+
+1. **Pack.** `answer-pack.mjs` turns the three files into one block of MCP code. The files go unchanged,
+   so the answer runs exactly what the preview ran.
+   ```bash
+   node "<SKILL>/helpers/answer-pack.mjs" "<OUT>/<SLUG>" --model <model guid> --search "<search>" --name "<title>" --commit > "<RUNS>/<SLUG>/answer-commit.js"
+   ```
+   To update an answer made earlier, add `--answer <guid>`: it updates in place instead of making a copy.
+2. **Validate and commit in one paste.** `--commit` runs a `VALIDATE_ONLY` import first and commits only
+   if it passes, so there is one block to send; `--validate` alone is for checking without writing. Read the
+   file and paste it, unchanged, as the `code` of `execute-thoughtspot-code` with
+   `confirm_write_operations: true` (a validate counts as a write too). A commit succeeds when it returns
+   `validate.status_code: OK`, `import.status_code: OK`, `chartType: MUZE_STUDIO`, `roundTripOk: true` and a
+   `guid`. The block carries the whole core (about 30 KB); copy it exactly, the checksum catches any slip.
+   `CHECKSUM MISMATCH` means the paste was altered: resend the block. Put the guid in
+   `<OUT>/<SLUG>/README.md` so the next change updates the same answer.
+3. **Open it.** The answer is at `https://<cluster host>/#/saved-answer/<guid>`. The MCP does not expose
+   the host (its configuration points at a proxy). `sys.name` from Step 0a names the cluster, and the host
+   is usually `<name>.thoughtspot.cloud`; after a first screenshot run, the profile's history
+   (`~/.cache/amuzing-chart/cluster-profile/Default/History`) has it too. Confirm with the user if unsure.
+4. **Screenshot it**, unless the intake chose "verify in the local preview only". A headed Chromium
+   with a persistent profile opens, and the first time the user signs in (SSO) in it, so remind them
+   right before:
+   ```bash
+   node "<SKILL>/helpers/cluster-shot.mjs" --url "<answer url>" --name "<SLUG>" --out "<OUT>/<SLUG>/cluster" --wait 10
+   ```
+   Read the PNG and the `problems` line (failure text found inside the chart frame). A fix goes back
+   through the loop (Step 5) and Step 6, then is sent again with `--answer <guid> --commit`.
+
+Where no window can open (the Claude app), skip step 4 and report the chart as verified in preview only.
+
+## Step 10 - put it on a Liveboard (optional)
 
 Publishing tiles to a Liveboard, and building a whole storytelling Liveboard of them, is the sibling
 skill **ts-custom-charts-liveboard-builder** (patches the Liveboard through the ThoughtSpot MCP, narrative
@@ -287,7 +377,7 @@ tiles, filters, round-trip proof, in-cluster screenshots). To hand a chart over:
 1. Build it to `references/library-contract.md` (shared core, ASCII, no template strings).
 2. `node "<SKILL>/helpers/sync-core.mjs" "<RUNS>/<SLUG>/chart"`, then
    `node "<SKILL>/helpers/library-emit.mjs" <SLUG> --title ... --search ... --tile WxH ...` publishes it to
-   `library/<slug>/` (refuses non-ASCII or a drifted core). `python3 "<SKILL>/helpers/make-index.py"`
+   `library/<slug>/` (refuses non-ASCII or a drifted core). `--png` is relative to the run folder (`attempts/03.520x400.png`), not the repo. `python3 "<SKILL>/helpers/make-index.py"`
    refreshes `references/library.md`.
 
 Without that skill or the MCP, hand the user the three files and the search to bind.
@@ -337,7 +427,7 @@ than an honest question.
 - Do not leave the preview daemon running.
 - Do not run `playwright install` in the Claude app, and do not rely on a background
   process surviving there — `snap.mjs` needs neither.
-- Do not claim a chart is verified against ThoughtSpot unless it has been screenshotted there (`ts-custom-charts-liveboard-builder`'s `cluster-shot.mjs`). Otherwise it is verified against a faithful stub; the Muze build, theme and network rules differ. Say "verified in preview".
+- Do not claim a chart is verified against ThoughtSpot unless it has been screenshotted there (`helpers/cluster-shot.mjs`, Step 9). Otherwise it is verified against a faithful stub; the Muze build, theme and network rules differ. Say "verified in preview".
 - Do not ship a chart nothing reacts to, or one that invents rows when the search returns none.
 
 ---
@@ -346,4 +436,5 @@ than an honest question.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-09-29 | Step 0 adds an intake after the doctor: it checks the ThoughtSpot MCP and shows what is missing, then asks the model, data mode, search, library and destination as pick-from-a-list questions built from the org. New Step 9 saves the chart as a ThoughtSpot answer (`helpers/answer-pack.mjs` and `answer-patch.js`: checksum, validate and commit in one paste, round-trip) and screenshots it in a logged-in browser with `helpers/cluster-shot.mjs`, which moved here from the Liveboard skill. Library grown to 58 charts (a Muze state scatter, and four rebuilt from the older examples, marked preview only). Muze point marks render at half opacity (hard-rules); notes on model lookup, the cluster host and zsh loops. Verified end to end on ps-internal |
 | 1.0.0 | 2026-09-29 | Initial release in this library (ported from thoughtspot-amuzing-chart 1.4.1). Builds a ThoughtSpot custom chart (BYOC) as paste-ready chart.html / chart.css / chart.js by iterating in a real browser against a faithful `viz` stub, screenshotting and critiquing each attempt. Ships a library of 53 live-data charts with a shared core, and hands finished tiles to `ts-custom-charts-liveboard-builder`. |

@@ -9,9 +9,8 @@
 // every later command, which browser will be used, and the one command that
 // fixes a missing dependency. Exit 0 when `deps: ok`, 1 otherwise.
 //
-// Nothing here may name the skill: the same folder ships as
-// `thoughtspot-amuzing-chart` in its own repo and as `ts-custom-charts-builder`
-// in the thoughtspot-agent-skills library, so the name is read off the directory.
+// Nothing here may name the skill: an install may still use an older folder name
+// (`thoughtspot-amuzing-chart`), so the name is read off the directory.
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";

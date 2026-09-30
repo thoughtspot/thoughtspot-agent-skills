@@ -21,8 +21,10 @@ const MARK = /\/\* amuzing-slug: ([\w-]+) \*\//;
 
 // 1. checksums
 const badSha = [];
-for (const [slug, t] of Object.entries(P.tiles)) for (const k of Object.keys(t.sha)) if ((await sha256(t.f[k])) !== t.sha[k]) badSha.push(slug + '.' + k);
-if (P.core) for (const k of ['js', 'css']) if ((await sha256(P.core[k])) !== P.core.sha[k]) badSha.push('core.' + k);
+for (const [slug, t] of Object.entries(P.tiles)) if (t.sha) for (const k of Object.keys(t.sha)) if ((await sha256(t.f[k])) !== t.sha[k]) badSha.push(slug + '.' + k);
+// The spec sets every title, search and position on the Liveboard, so a slip in it is checked like chart code.
+if (P.specSha && (await sha256(JSON.stringify(P.spec))) !== P.specSha) badSha.push('spec');
+if (P.core && !P.core.ref) for (const k of ['js', 'css']) if ((await sha256(P.core[k])) !== P.core.sha[k]) badSha.push('core.' + k);
 if (badSha.length) return { refused: 'CHECKSUM MISMATCH - nothing written, resend this block unchanged', badSha };
 
 // 2. current Liveboard
@@ -39,8 +41,48 @@ for (const tab of ((doc0.layout && doc0.layout.tabs) || [])) for (const tl of ta
   const m = MARK.exec(c.js); if (m) bySlug[m[1]] = c;
   byPos[tab.name + '|' + tl.x + '|' + tl.y] = c;
 }
-const core = P.core ? { js: P.core.js, css: P.core.css } : null; // every block carries the (trimmed) shared core
+// The shared core travels in the block, or (core.ref) is taken from any tile already on this Liveboard whose
+// core matches the checksum, which saves pasting it again in every block after the first.
+let core = P.core && !P.core.ref ? { js: P.core.js, css: P.core.css } : null;
+if (P.core && P.core.ref) {
+  let js = null, css = null;
+  for (const c of [...Object.values(bySlug), ...Object.values(byPos)]) {
+    const i = c.js.indexOf(END_JS), k = c.css.indexOf(END_CSS);
+    if (!js && i >= 0) { const x = c.js.slice(0, i + END_JS.length); if ((await sha256(x)) === P.core.sha.js) js = x; }
+    if (!css && k >= 0) { const x = c.css.slice(0, k + END_CSS.length); if ((await sha256(x)) === P.core.sha.css) css = x; }
+    if (js && css) break;
+  }
+  if (!js || !css) return { refused: 'core.ref: no tile on this Liveboard carries the current core (' + (js ? '' : 'js ') + (css ? '' : 'css') + '); send this block without --core-ref' };
+  core = { js, css };
+}
 const bodyOf = (c) => ({ js: c.js.slice(c.js.indexOf(END_JS) + END_JS.length), css: c.css.slice(c.css.indexOf(END_CSS) + END_CSS.length) });
+
+// Tiles sent by reference: copy the body from the source Liveboard when it matches the library checksums.
+const needCode = [];
+const refs = Object.entries(P.tiles).filter(([, t]) => t.ref);
+if (refs.length) {
+  const same = P.reuse === LB.guid; // reusing from this Liveboard stamps slug markers on older tiles, no paste
+  const exR = same ? ex0 : await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: P.reuse, type: 'LIVEBOARD' }], edoc_format: 'JSON' });
+  // Tiles are found by slug marker, then (on this Liveboard) by grid position, then by title when it is unique.
+  const src = {}, byTitle = {}, dupTitle = {};
+  if (exR.status === 200 && exR.body && exR.body[0] && exR.body[0].edoc) for (const v of JSON.parse(exR.body[0].edoc).liveboard.visualizations || []) {
+    if (!v.answer || !v.answer.chart || !v.answer.chart.custom_visual_props) continue;
+    const code = JSON.parse(JSON.parse(v.answer.chart.custom_visual_props).clientState).playground.code;
+    const c = { js: unb64(code.jsCodeBase64), css: unb64(code.cssCodeBase64), html: unb64(code.htmlCodeBase64) };
+    const m = MARK.exec(c.js); if (m) src[m[1]] = c; else { if (byTitle[v.answer.name]) dupTitle[v.answer.name] = true; byTitle[v.answer.name] = c; }
+  }
+  const posOf = {}; if (same) for (const tab of spec.tabs) for (const x of tab.tiles) posOf[x.slug] = byPos[tab.name + '|' + x.x + '|' + x.y];
+  for (const [slug, t] of refs) {
+    const c = src[slug] || posOf[slug] || (dupTitle[t.ref.title] ? null : byTitle[t.ref.title]);
+    if (!c || c.js.indexOf(END_JS) < 0) { needCode.push(slug + ' (not on ' + P.reuse + ')'); delete P.tiles[slug]; continue; }
+    const b = bodyOf(c), legacyCss = c.css.indexOf(END_CSS) < 0; // older tiles lost the CSS core markers when comments were stripped
+    const cssOk = legacyCss ? (await sha256(c.css)) === t.ref.cssLegacy : (await sha256(b.css.trim())) === t.ref.css;
+    const ok = cssOk && (await sha256(b.js.replace(MARK, '').trim())) === t.ref.js && (await sha256(c.html)) === t.ref.html;
+    if (!ok) { needCode.push(slug + ' (differs from the library)'); delete P.tiles[slug]; continue; }
+    // A legacy tile keeps its whole CSS; the JS body gets the slug marker so the next patch finds it by slug.
+    P.tiles[slug] = { body: { js: '\n/* amuzing-slug: ' + slug + ' */' + (b.js.replace(MARK, '').startsWith('\n') ? '' : '\n') + b.js.replace(MARK, ''), css: legacyCss ? null : b.css, cssWhole: legacyCss ? c.css : null, html: c.html } };
+  }
+}
 
 // read-only drift check: live tile body against the local body
 if (MODE === 'check') {
@@ -69,10 +111,11 @@ for (const tab of spec.tabs) {
   const tiles = [];
   for (const t of tab.tiles) {
     let code, from;
-    if (P.tiles[t.slug]) { const f = P.tiles[t.slug].f; code = { js: core.js + '\n' + f.js, css: core.css + '\n' + f.css, html: f.html }; from = 'payload'; }
+    if (P.tiles[t.slug] && P.tiles[t.slug].body) { const bd = P.tiles[t.slug].body; code = { js: core.js + bd.js, css: bd.cssWhole || core.css + bd.css, html: bd.html }; from = 'payload'; }
+    else if (P.tiles[t.slug]) { const f = P.tiles[t.slug].f; code = { js: core.js + '\n' + f.js, css: core.css + '\n' + f.css, html: f.html }; from = 'payload'; }
     else if (bySlug[t.slug]) { code = bySlug[t.slug]; from = 'kept'; }
     else if (byPos[tab.name + '|' + t.x + '|' + t.y]) { code = byPos[tab.name + '|' + t.x + '|' + t.y]; from = 'kept (position)'; }
-    else { report.push({ slug: t.slug, from: 'MISSING - not on the Liveboard and not in this payload' }); continue; }
+    else { report.push({ slug: t.slug, from: (P.pending || []).includes(t.slug) ? 'pending' : 'MISSING - not on the Liveboard and not in this payload' }); continue; }
     if (!(t.search in COLS)) {
       const q = await ts.post('/api/rest/2.0/searchdata', { logical_table_identifier: model.guid, query_string: t.search, record_size: 1 });
       COLS[t.search] = q.status === 200 && q.body.contents && q.body.contents[0] ? q.body.contents[0].column_names : null;
@@ -111,15 +154,26 @@ const summary = {
   mode: MODE, tmlKB: Math.round(text.length / 1024), tiles: vizzes.length,
   replaced: report.filter((r) => r.from === 'payload').map((r) => r.slug),
   keptByPosition: report.filter((r) => r.from === 'kept (position)').length,
-  problems: report.filter((r) => /MISSING|FAILED/.test(r.from))
+  problems: report.filter((r) => /MISSING|FAILED/.test(r.from)),
+  pending: report.filter((r) => r.from === 'pending').map((r) => r.slug)
 };
+if (needCode.length) summary.needCode = needCode;
+if (!summary.replaced.length) { summary.skipped = 'nothing in this block to write; send the needCode charts without --reuse'; return summary; }
 if (summary.tmlKB > 2000) summary.warning = 'TML over 2 MB; imports near 2.8 MB have reset the connection';
 
-// 4. import and prove
-const imp = await ts.post('/api/rest/2.0/metadata/tml/import', { metadata_tmls: [text], import_policy: MODE === 'commit' ? 'ALL_OR_NONE' : 'VALIDATE_ONLY', create_new: false });
-const r0 = imp.body && imp.body[0] && imp.body[0].response;
+// 4. import and prove. A commit validates first in the same call, so one paste per block does both.
+const importAs = async (policy) => {
+  const imp = await ts.post('/api/rest/2.0/metadata/tml/import', { metadata_tmls: [text], import_policy: policy, create_new: false });
+  return { r: imp.body && imp.body[0] && imp.body[0].response, raw: imp.body };
+};
+const v = await importAs('VALIDATE_ONLY');
+summary.validate = v.r && v.r.status;
+if (!v.r || !v.r.status || v.r.status.status_code !== 'OK') { summary.raw = JSON.stringify(v.raw).slice(0, 1200); return summary; }
+if (MODE !== 'commit') return summary;
+const c = await importAs('ALL_OR_NONE');
+const r0 = c.r;
 summary.import = r0 && r0.status;
-if (!r0 || !r0.status || r0.status.status_code !== 'OK') { summary.raw = JSON.stringify(imp.body).slice(0, 1200); return summary; }
+if (!r0 || !r0.status || r0.status.status_code !== 'OK') { summary.raw = JSON.stringify(c.raw).slice(0, 1200); return summary; }
 if (MODE === 'commit') {
   const ex = await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: LB.guid, type: 'LIVEBOARD' }], edoc_format: 'JSON' });
   const back = [];

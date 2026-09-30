@@ -4,6 +4,8 @@ Every chart here runs on the model **(Sample) Retail - Apparel**, reads only wha
 
 Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, tooltip, bounded CDN loader, boot), `library/_shared/us-states.js` (inline US map). The Liveboard that arranges them, and the tools that build it, are in the sibling skill `ts-custom-charts-liveboard-builder`.
 
+Charts marked *(preview only)* were built on real search output and passed the loop, the edge checks and `probe.mjs`, but have not been on a Liveboard or screenshotted in a cluster yet (a `.preview-only` file in the chart folder; delete it once the chart has been seen on a tile).
+
 | Chart | Tab | Tile | Built with | Search |
 |---|---|---|---|---|
 | `about-guide` How to read this Liveboard | 01 About | 12x4 grid units | HTML (no chart library) | `[sales] [item type]` |
@@ -16,6 +18,7 @@ Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, too
 | `kpi-quarter-pairs` Quarter pairs, drill to months | 02 Pulse | 3x4 grid units | HTML and inline SVG (no chart library) | `[sales] [quantity purchased] [date].monthly` |
 | `kpi-ring` Sales year to date, ring | 02 Pulse | 3x4 grid units | HTML and inline SVG (no chart library) | `[sales] [quantity purchased] [date].monthly` |
 | `kpi-sparkbars` Monthly columns, drill to a month | 02 Pulse | 3x4 grid units | HTML and inline SVG (no chart library) | `[sales] [quantity purchased] [date].monthly` |
+| `pulse-family-growth` Sales change by family: units or price *(preview only)* | 02 Pulse | 12x6 grid units | Hand-built HTML and SVG (no CDN) | `[sales] [quantity purchased] [item type] [date].monthly` |
 | `pulse-pace-lines` Sales pace by year | 02 Pulse | 8x6 grid units | none (plain SVG) | `[sales] [date].monthly` |
 | `pulse-region-bridge` YTD sales by region | 02 Pulse | 4x6 grid units | none (inline SVG) | `[sales] [region] [state] [date].quarterly` |
 | `pulse-kpi-asp` Average selling price | Pulse | 3x4 grid units | HTML and inline SVG (no chart library) | `[sales] [quantity purchased] [date].monthly` |
@@ -24,8 +27,10 @@ Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, too
 | `pulse-kpi-units` Units sold, year to date | Pulse | 3x4 grid units | HTML and inline SVG (no chart library) | `[sales] [quantity purchased] [date].monthly` |
 | `pulse-monthly-line` Monthly sales against last year | Pulse | 8x6 grid units | Muze (line), with an HTML header and legend | `[sales] [date].monthly` |
 | `banner-where` Where banner | 03 Where | 12x4 grid units | HTML (no chart library) | `[sales] [region] [state]` |
+| `state-sales-units` Sales against units by state | 03 Where | 6x6 grid units | Muze point layer, with an SVG overlay | `[sales] [quantity purchased] [state]` |
 | `where-hex-cartogram` US state hex map of sales | 03 Where | 5x7 grid units | none (inline SVG) | `[sales] [state]` |
 | `where-region-item-heatmap` Region by item type heatmap | 03 Where | 6x6 grid units | none (HTML grid) | `[sales] [region] [item type]` |
+| `where-region-pivot` Region by family pivot *(preview only)* | 03 Where | 12x7 grid units | Plain HTML table (no CDN) | `[sales] [quantity purchased] [region] [state] [item type]` |
 | `where-state-bubbles` Sales bubble map by state | 03 Where | 7x7 grid units | none (inline SVG; pre-projected us-atlas states-albers-10m paths embedded in chart.js) | `[sales] [store] [state] [region]` |
 | `where-store-dumbbell` Store sales, this year vs last | 03 Where | 6x6 grid units | none (inline SVG) | `[sales] [store] [date].quarterly` |
 | `where-store-wall` Quarterly sales by store | 03 Where | 12x7 grid units | none (plain SVG) | `[sales] [store] [date].quarterly` |
@@ -34,6 +39,7 @@ Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, too
 | `what-marimekko` Region by family Marimekko | 04 What | 6x7 grid units | pure SVG, no library | `[sales] [region] [item type]` |
 | `what-money-sankey` Where the money flows: region to family to item type | 04 What | 12x7 grid units | echarts@5 via cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js (fallback unpkg.com/echarts@5/dist/echarts.min.js) | `[sales] [region] [item type]` |
 | `what-pareto` Products that make 80% of sales | 04 What | 6x7 grid units | echarts@5 via cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js (fallback unpkg.com/echarts@5/dist/echarts.min.js) | `[product] [item type] [sales] [quantity purchased]` |
+| `what-premium-diverging` Premium or volume, by item type *(preview only)* | 04 What | 8x7 grid units | Muze | `[sales] [quantity purchased] [item type] [product]` |
 | `what-price-volume` Price against volume by item type | 04 What | 8x6 grid units | Hand-built inline SVG, no external library | `[sales] [quantity purchased] [item type]` |
 | `what-quadrant-guide` How to read price against volume | 04 What | 4x6 grid units | Plain HTML and CSS, no external library | `[sales] [quantity purchased] [item type]` |
 | `what-radial-bars` Item types as radial bars | 04 What | 6x6 grid units | d3@7 (d3-hierarchy, d3-shape, d3-chord) from https://cdn.jsdelivr.net/npm/d3@7 (fallback https://unpkg.com/d3@7) | `[sales] [item type] [product]` |
@@ -51,6 +57,7 @@ Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, too
 | `who-product-beeswarm` Every product by price per unit | 06 Who | 6x6 grid units | d3@7 force simulation and scales (cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js, fallback unpkg.com) | `[product] [item type] [sales] [quantity purchased]` |
 | `who-product-table` Products by sales | 06 Who | 12x7 grid units | Plain HTML table (no CDN) | `[product] [item type] [sales] [quantity purchased]` |
 | `who-region-profile` Region profiles: family mix against average | 06 Who | 6x6 grid units | Plain HTML/CSS bars (no CDN) | `[sales] [region] [item type]` |
+| `who-store-league` Store league: position, movement and form *(preview only)* | 06 Who | 12x7 grid units | Plain HTML table (no CDN) | `[sales] [store] [region] [date].monthly [date].'this year' [date].'last year'` |
 | `who-store-parallel` Stores across five measures | 06 Who | 12x6 grid units | Plain SVG and HTML (no CDN) | `[sales] [quantity purchased] [store] [date].quarterly` |
 | `who-store-race` Store race: cumulative sales by quarter | 06 Who | 12x7 grid units | Plain HTML/CSS, requestAnimationFrame clock (no CDN) | `[sales] [store] [date].quarterly` |
 | `banner-next` Next banner | 07 Next | 12x4 grid units | HTML (no chart library) | `[sales] [quantity purchased] [date].monthly` |
@@ -72,6 +79,7 @@ Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, too
 - **kpi-quarter-pairs**: Sales, Units, Price toggle. Columns grow in. Hover a pair. Click a pair or use arrow keys and Enter to see its months; Escape or Back closes.
 - **kpi-ring**: Sales, Units, Price toggle with the arc tweening from the old share. Hover the ring for both figures. The centre number counts up.
 - **kpi-sparkbars**: Sales, Units, Price toggle. Columns rise in staggered. Hover a column for the month. Click a column or use arrow keys and Enter to compare that month with the same month a year earlier; Escape or Back closes.
+- **pulse-family-growth**: Period toggle (Year to date against the same months a year earlier / Latest full year against the prior year) tweens values and bars in place; hover a card or a row for sales, units and price per unit in both periods plus the units and price effects, with the bar row under the pointer emphasised; click a card (or Enter) to expand it into its item types (All families expands into the families) while the others compress into a strip, click it again or press Escape to close
 - **pulse-pace-lines**: Lines draw on left to right; hover a month for every year's cumulative sales; click a line or its label (or Enter) to open that year as monthly columns against the previous year outline; crumbs, Back and Escape return
 - **pulse-region-bridge**: Hover a row for both years and the change; click a region step (or Enter) to split it into its states with the bridge re-scaled to that region (crumbs All regions / West, Back or Escape return); click a total or a state to isolate it, Show all clears
 - **pulse-kpi-asp**: YTD and All toggle. Hover the sparkline for the month, its value and the change on the same month a year earlier.
@@ -80,8 +88,10 @@ Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, too
 - **pulse-kpi-units**: YTD and All toggle. Hover the sparkline for the month, its value and the change on the same month a year earlier.
 - **pulse-monthly-line**: Hover for month, sales, same month last year and the change. Click the key to hide or show the last-year line. The two largest month-on-month steps are marked from the data.
 - **banner-where**: Hover a number for how it is calculated. Click a prompt to copy it, then paste it into Spotter.
+- **state-sales-units**: Hover a dot for sales, units, sales per unit and its gap to average; click a dot to pin it (others dim); click again or the background to clear
 - **where-hex-cartogram**: Sales / Share of total toggle (header line, tooltip, readout, hex figures when wide); hover a hex; click a hex to pin it with a readout; Unpin clears
 - **where-region-item-heatmap**: Sales / Share of region toggle; hover a cell for sales, shares and rank; click a row or column header to isolate it
+- **where-region-pivot**: Sales / Units / Price per unit toggle (share bars tween); click a region row to show its states and a family header to show its item types (height and column-width tweens); Expand all / Collapse all (one Expand/Collapse button below 360px); hover a cell to highlight its row and column with a tooltip giving sales, units, share of row, share of column and price per unit against the region
 - **where-state-bubbles**: Sales / Stores toggle sets bubble size at both levels (radii tween); hover a state, bubble or store; click a state to zoom (viewBox tween) while its bubble breaks into one bubble per store labelled by zip code; crumbs, Back and Escape zoom out
 - **where-store-dumbbell**: Sort toggle (rows glide to their new place); hover a row for both years and rank; click a row to expand it in place into its quarterly line (this year solid, last year dashed slate) with the readout below; click again, Collapse or Escape closes; list scrolls
 - **where-store-wall**: Scale toggle (same or own), sort toggle (Sales, Change vs last year, Name) tween in place; minis rise in with a stagger; hover a mini for the quarter under the pointer; click a store (or Enter) to FLIP-expand it to a full quarterly chart against the same quarters a year earlier; crumbs, Back and Escape shrink it back
@@ -90,6 +100,7 @@ Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, too
 - **what-marimekko**: Hover a segment for sales and shares; click a column to widen it to the full tile and split families into item types; crumbs, Back, Escape.
 - **what-money-sankey**: Hover a node or flow to highlight adjacent flows; click a node to isolate its flows and dim the rest; click background or Show all to clear
 - **what-pareto**: Item type chips (top 6 plus All) re-rank and re-animate the Pareto; hover for rank, product, sales and cumulative share; click a bar to open a detail card (sales, units, price against the item type average, rank in the item type) with an animated highlight along the cumulative line; Top 50 / All toggle; Escape or Close dismisses
+- **what-premium-diverging**: Hover a row for share of sales, share of units, the gap, and price per unit against the average; the hovered bar stays, others dim, and a ruler reads the scale. Click a bar (or arrow keys and Enter) to see that item type's products, measured the same way inside the item type (top 12 by gap); the crumb or Escape goes back. Toggle between gap in pts and price index; the bars morph between the two.
 - **what-price-volume**: Hover a bubble for details; click a bubble or a family in the key to isolate that family; click background to clear
 - **what-quadrant-guide**: Click a quadrant to expand its members with units, price and sales; hovering dims the other quadrants
 - **what-radial-bars**: Hover a bar; click a bar to swap to that item type's top 12 products (bars retract then grow); crumbs, Back, Escape.
@@ -107,6 +118,7 @@ Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, too
 - **who-product-beeswarm**: dots settle from the price line into a force-simulation swarm; family chips filter (others dim); hover a dot; click a dot (Enter/Space on the 12 largest) to open its card (sales, units, price vs item type average, rank) with item type peers highlighted and the average marked; Back, crumbs and Escape close
 - **who-product-table**: Click a header to sort (rows glide); search by name; family chips filter; Show 25 more; hover row tooltip; click a row to open a detail row with sales, units and price against the item type average, its rank in the item type and animated bars (one row open at a time, click again or Escape closes)
 - **who-region-profile**: Hover a family row for the region's share, the average and the gap in points; click a region to enlarge it and dim the rest; click again to restore
+- **who-store-league**: Region chips filter (rows glide, FLIP); click a header to sort by position, movement, store, region, YTD sales, change or form (rows glide); hover a row for YTD, same months last year, change, position change and form count, plus a line explaining the hovered column; hover a form square for that month against the same month a year earlier; click a row (or Enter) to open its monthly bars, this year in ink against last year in slate, bars grow in; hover a month for both values; click again or Escape closes
 - **who-store-parallel**: lines draw in with a stagger; drag on any axis to brush and filter (matches stay ink, the rest fade), click an axis to clear its brush; hover a line for the store (nearest-line hit test); click a line to pin it and list its values and ranks; Reset and Escape
 - **who-store-race**: Play/Pause (Play restarts from the first quarter); scrub slider over quarters; hover for store, rank, cumulative and quarter sales; click a store to follow it (heavier outline, pinned rank row if it leaves the top 10)
 - **banner-next**: Hover a number for how it is calculated. Click a prompt to copy it, then paste it into Spotter.

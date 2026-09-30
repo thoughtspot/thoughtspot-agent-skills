@@ -352,7 +352,7 @@ broken tile, because the host passes data and sizes the tile differently from a 
 - **Who asks.** SE building a differentiated demo, PS delivering a bespoke visual, anyone
   rebuilding or debugging an existing custom chart tile.
 - **Use when** you need paste-ready `chart.html` / `chart.css` / `chart.js` for a tile.
-  Start from the nearest of the 53 library charts where one fits.
+  Start from the nearest of the 58 library charts where one fits.
 - **Watch for** the first run installing Playwright and Chromium into the skill's
   `helpers/`. A chart is only verified in ThoughtSpot once it has been screenshotted there
   (see `ts-custom-charts-liveboard-builder`); before that it is verified against a stub.

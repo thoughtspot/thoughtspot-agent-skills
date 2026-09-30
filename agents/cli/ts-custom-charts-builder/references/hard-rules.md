@@ -37,13 +37,14 @@ by reading the code, not the screenshot. Check these before emitting final files
 
 ## Verified in a real cluster (ps-internal, release 26.8) - the preview cannot tell you these
 
-Found by screenshotting a Liveboard in a logged-in browser with `cluster-shot.mjs` (skill `ts-custom-charts-liveboard-builder`).
+Found by screenshotting a Liveboard in a logged-in browser with `helpers/cluster-shot.mjs`.
 
 | Rule | Why |
 |---|---|
 | **`fetch()` to any external URL is blocked** ("Network requests are blocked for security. Charts cannot make ...") | Tiles run in a sandboxed iframe. Inline every data file, GeoJSON and topology in `chart.js` (see `library/_shared/us-states.js`). The preview happily fetches, so a chart that fetches passes locally and paints an error on the tile. |
 | `<script src>` from cdn.jsdelivr.net and unpkg **does** load (d3@7, echarts@5, topojson-client@3 verified) | Use it for libraries; keep the bounded `AZ.loadScript` fallback. |
 | Muze's axis-title text (for example "Month") survives class-based CSS in ThoughtSpot's Muze build | Remove the `svg text` nodes whose text equals the field name after `afterRendered`, as `library/pulse-monthly-line` does. |
+| Muze draws each **point** mark inside a `g.muze-layer-point` at `opacity: 0.5` | Ink dots render light grey whatever fill you set. Reset it in CSS (`[class*="muze-layer-point"] { opacity: 1 !important; }`) and do your own dimming. Point marks are `<path>` circles with no data attached; match them to rows by rank on a unique measure. |
 | Muze ignores `.color({ range })` on **line** marks and leaves stroke-width at 0 | Set `stroke`, `stroke-width` and `fill: none` yourself once every path has a `d` attribute. Layer order is alphabetical by series value. |
 | Muze's native tooltip totals series ("Total (2)") and its crosshair snaps half a step off the pointer | Hide `[class*="muze-tooltip"]` and `.muze-crossline-group`; draw your own from `path.getScreenCTM()` **read on every mouse move** (the layer animates in, so a value captured at first paint goes stale). |
 | Tile size is decided by the Liveboard, not the window | Observe `#chart` with a `ResizeObserver` (the shared core does), never `document.body`. |

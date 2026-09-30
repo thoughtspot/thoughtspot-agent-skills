@@ -16,7 +16,8 @@ for d in sorted(glob.glob(os.path.join(LIB, "*"))):
     tile = cell("Tile")
     tab = re.search(r"\((\d\d \w+|[A-Za-z0-9 ]+) tab\)", tile)
     interactions = re.search(r"## Interactions\n(.+?)\n\n", t, re.S)
-    rows.append(dict(slug=slug, title=title.group(1) if title else slug, search=cell("Search").strip("`"), lib=cell("Library"), tile=re.sub(r"\s*\(.*\)", "", tile), tab=(tab.group(1) if tab else ""), inter=(interactions.group(1).replace("\n", " ") if interactions else "")))
+    preview_only = os.path.exists(os.path.join(d, ".preview-only"))
+    rows.append(dict(preview_only=preview_only, slug=slug, title=title.group(1) if title else slug, search=cell("Search").strip("`"), lib=cell("Library"), tile=re.sub(r"\s*\(.*\)", "", tile), tab=(tab.group(1) if tab else ""), inter=(interactions.group(1).replace("\n", " ") if interactions else "")))
 order = ["01 About", "About", "02 Pulse", "Pulse", "03 Where", "Where", "04 What", "What", "05 When", "When", "06 Who", "Who", "07 Next", "Next", ""]
 def key(r):
     return (order.index(r["tab"]) if r["tab"] in order else 99, r["slug"])
@@ -24,9 +25,10 @@ rows.sort(key=key)
 out = ["# Library: proven live-data charts\n",
 "Every chart here runs on the model **(Sample) Retail - Apparel**, reads only what its search returns (data mode B, an empty state names the search), is interactive, and passed the loop, the edge checks, `probe.mjs` and a screenshot in a real cluster. Start from the nearest one: copy `library/<slug>/`, change the search and the copy, run the loop.\n",
 "Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, tooltip, bounded CDN loader, boot), `library/_shared/us-states.js` (inline US map). The Liveboard that arranges them, and the tools that build it, are in the sibling skill `ts-custom-charts-liveboard-builder`.\n",
+"Charts marked *(preview only)* were built on real search output and passed the loop, the edge checks and `probe.mjs`, but have not been on a Liveboard or screenshotted in a cluster yet (a `.preview-only` file in the chart folder; delete it once the chart has been seen on a tile).\n",
 "| Chart | Tab | Tile | Built with | Search |", "|---|---|---|---|---|"]
 for r in rows:
-    out.append(f"| `{r['slug']}` {r['title']} | {r['tab']} | {r['tile']} | {r['lib']} | `{r['search']}` |")
+    out.append(f"| `{r['slug']}` {r['title']}{' *(preview only)*' if r['preview_only'] else ''} | {r['tab']} | {r['tile']} | {r['lib']} | `{r['search']}` |")
 out.append("\n## What each one does when you touch it\n")
 for r in rows:
     out.append(f"- **{r['slug']}**: {r['inter']}")

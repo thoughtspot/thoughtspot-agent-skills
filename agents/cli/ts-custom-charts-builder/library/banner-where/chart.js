@@ -257,12 +257,13 @@ const CFG = {
     const reg = groupSum(rows, rK, vK), st = groupSum(rows, sK, vK), tot = sum(st.map((x) => x.v));
     if (!tot) return { lead: 'No sales in this view.', stats: [] };
     const two = st.length > 1 ? st[0].v + st[1].v : st[0].v;
-    const lead = reg[0].k + ' is the largest region at ' + pct(reg[0].v / tot, 0) + ' of sales. '
+    const one = reg.length === 1; // a region filter leaves one: a 100% share says nothing
+    const lead = (one ? 'Only the ' + reg[0].k + ' region is in this view. ' : reg[0].k + ' is the largest region at ' + pct(reg[0].v / tot, 0) + ' of sales. ')
       + (st.length > 1 ? st[0].k + ' and ' + st[1].k + ' together make ' + pct(two / tot, 0) + ', ahead of the other ' + (st.length - 2) + ' state' + (st.length - 2 === 1 ? '' : 's') + '.' : st[0].k + ' is the only state in this view.');
     return {
       lead: lead,
       stats: [
-        { v: pct(reg[0].v / tot, 0), k: reg[0].k + ', the largest region', note: 'Sales of the ' + reg[0].k + ' region (' + money(reg[0].v) + ') as a share of all sales in this view (' + money(tot) + ').' },
+        one ? { v: money(tot), k: reg[0].k + ' region sales in this view', note: 'Sales of the ' + reg[0].k + ' region, the only region in the current filter.' } : { v: pct(reg[0].v / tot, 0), k: reg[0].k + ', the largest region', note: 'Sales of the ' + reg[0].k + ' region (' + money(reg[0].v) + ') as a share of all sales in this view (' + money(tot) + ').' },
         { v: pct(two / tot, 0), k: 'Top two states together', note: (st.length > 1 ? st[0].k + ' (' + money(st[0].v) + ') and ' + st[1].k + ' (' + money(st[1].v) + ')' : st[0].k) + ' as a share of sales in this view.' },
         { v: String(st.length), k: 'States with sales, in ' + reg.length + ' region' + (reg.length === 1 ? '' : 's'), note: 'Count of distinct states in the current filter.' }
       ]
