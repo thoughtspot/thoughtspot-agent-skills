@@ -37,7 +37,6 @@ extend the rule with a new one.
 | 11 | `ts-security-*` | `ts-security-{aspect}` | Cross-object, cross-Org security configuration that **chooses between mechanisms** rather than driving one. Second token names the aspect secured (`columns`, `rls`). | `ts-security-columns`, `ts-security-rls` *(planned)* |
 | 12 | `ts-migrate-*` | `ts-migrate-{destination-class}` | Move an **existing estate** onto a new platform pattern and **retire the old one**. Second token is the destination class. Spans many object types across two Orgs and is destructive at the source. | `ts-migrate-orgs` |
 | 13 | `ts-link-*` | `ts-link-{source-class}` | Register an **external semantic object** (Semantic View, Metric View, Honeydew / Cube / Kyvos model) so ThoughtSpot queries it directly and the platform generates the SQL: one Table over the object plus a thin, formula-free Model. Second token names the class of source linked. | `ts-link-semantic-layer` |
-| 14 | `ts-custom-charts-*` | `ts-custom-charts-{specifier}` | Build ThoughtSpot **custom chart (BYOC)** tiles — chart.html / chart.css / chart.js rendered by the host's `viz` runtime — or a Liveboard made of them. Specifier names what is produced (`builder` for one tile, `liveboard-builder` for a Liveboard of tiles). | `ts-custom-charts-builder`, `ts-custom-charts-liveboard-builder` |
 
 ---
 
@@ -213,18 +212,7 @@ Distinct from `ts-setup-*` (infrastructure or disposable scaffolding for other s
 a link produces a durable end-user Model) and from `ts-object-*` (no existing
 ThoughtSpot object is operated on; one is created).
 
-### 14. Does the skill build custom chart (BYOC) tiles, or a Liveboard made of them?
-
-→ **`ts-custom-charts-*`**. Pattern: `ts-custom-charts-{specifier}`.
-
-The output is front-end code (HTML, CSS, JS) that runs inside ThoughtSpot's custom-chart
-host, not TML for a native object, and the skills share a chart library, a browser
-preview harness and a render stub. Distinct from `ts-object-*` (the unit is a chart
-tile's code, not an existing ThoughtSpot object) and from `ts-recipe-liveboard-*` (a
-recipe builds one analytical pattern from native objects; these build arbitrary
-custom visuals and whole Liveboards of them).
-
-### 15. None of the above match
+### 14. None of the above match
 
 → **Extend the rule**. See "Adding a new family" below. The validator
 will fail until either (a) a new family is added or (b) the skill is

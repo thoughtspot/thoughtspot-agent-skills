@@ -226,6 +226,19 @@ jobs:
             python3 "tools/smoke-tests/$s.py"
           done
 
+      - name: Run the custom chart skills' smoke suites
+        # Credential-free: they pack the worked example, run the sandbox code that writes Answers and
+        # Liveboards against a mock `ts` (proving an update keeps what the skill does not own), and render
+        # the fixture chart headless. SMOKE_REQUIRE_BROWSER=1 turns a missing Playwright into a failure,
+        # so the render steps cannot skip silently here.
+        if: ${{ !cancelled() }}
+        env:
+          SMOKE_REQUIRE_BROWSER: "1"
+        run: |
+          (cd agents/cli/ts-object-answer-chart-builder/helpers && npm ci && npx playwright install --with-deps chromium)
+          python3 tools/smoke-tests/smoke_ts_object_answer_chart_builder.py
+          python3 tools/smoke-tests/smoke_ts_object_liveboard_builder.py
+
   # Cross-version pytest matrix. The `suite` job above runs the full suite on 3.12; this
   # job re-runs ONLY the unit/validator tests on the rest of the declared support range
   # (pyproject `requires-python = ">=3.10,<3.15"`). Validators/linters stay single-version in

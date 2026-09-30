@@ -344,7 +344,7 @@ The shared business problem: a native chart cannot always show the story a custo
 to see, and a hand-written custom chart that looked fine locally often ships as a blank or
 broken tile, because the host passes data and sizes the tile differently from a local page.
 
-### `ts-custom-charts-builder`
+### `ts-object-answer-chart-builder`
 
 - **Business problem.** A demo or customer request calls for a visual ThoughtSpot does not
   have natively (a Sankey, a hex cartogram, a bullet chart), and building a custom chart by
@@ -355,9 +355,9 @@ broken tile, because the host passes data and sizes the tile differently from a 
   Start from the nearest of the 58 library charts where one fits.
 - **Watch for** the first run installing Playwright and Chromium into the skill's
   `helpers/`. A chart is only verified in ThoughtSpot once it has been screenshotted there
-  (see `ts-custom-charts-liveboard-builder`); before that it is verified against a stub.
+  (see `ts-object-liveboard-builder`); before that it is verified against a stub.
 
-### `ts-custom-charts-liveboard-builder`
+### `ts-object-liveboard-builder`
 
 - **Business problem.** A set of good charts is not a story. A storytelling demo
   Liveboard of custom tiles takes days to plan, lay out and import by hand, and one wrong

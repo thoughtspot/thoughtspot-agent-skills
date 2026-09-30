@@ -30,8 +30,8 @@ imports `run_ts` yet needs no credentials; it just needs the CLI installed).
 | `smoke_ts_object_model_erd.py` | ts-object-model-erd | Pure |
 | `smoke_ts_link_semantic_layer.py` | ts-link-semantic-layer | Pure |
 | `smoke_ts_object_calendar_builder.py` | ts-object-calendar-builder | Pure |
-| `smoke_ts_custom_charts_builder.py` | ts-custom-charts-builder | Pure (needs `node`; the two render steps skip without the helpers' Playwright + Chromium) |
-| `smoke_ts_custom_charts_liveboard_builder.py` | ts-custom-charts-liveboard-builder | Pure (needs `node`) |
+| `smoke_ts_object_answer_chart_builder.py` | ts-object-answer-chart-builder | Pure (needs `node`; the two render steps skip without the helpers' Playwright + Chromium) |
+| `smoke_ts_object_liveboard_builder.py` | ts-object-liveboard-builder | Pure (needs `node`) |
 | `smoke_ts-convert-to-databricks-mv.py` | ts-convert-to-databricks-mv (codified emitter) | Pure (`--live` opts in) |
 | `smoke_ts_convert_from_qlik.py` | ts-convert-from-qlik | CLI-only |
 | `smoke_ts_load_source_data.py` | ts-load-source-data | CLI-only |
