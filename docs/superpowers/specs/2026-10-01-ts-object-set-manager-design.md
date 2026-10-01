@@ -55,6 +55,7 @@ These findings shape the design. Several contradict what existing repo code assu
 | F8 | Unsharing the Answer **does not** remove the copied Set grant (a Set serves many Answers) | Set grants only accumulate → stale grants are a real class (§5 `UNEXPLAINED`) |
 | F9 | To use a Set in an Answer you must already own it with edit, or hold view on it (user, product knowledge) | An Answer owner's grant on the Set is a **precondition**, not a copy (§5 `REQUIRED`) |
 | F10 | Several principals can hold edit on a Set (one share call, read back) — but a non-admin with Set edit and no Model access gets a generic error on save | Edit is not usable on its own; parked (BL-326). v1 reports edit grants as-is and does not judge them |
+| F12 | (2026-10-02) A cluster-wide paged `LOGICAL_COLUMN` search did not finish in 2h45m on se-thoughtspot (>144k rows; page latency linear in offset — Appendix A). The internal per-Model listing `GET /callosum/v1/metadata/detail/{model}?type=LOGICAL_TABLE&fetchcohortcolumnsonly=true` (Confluence SAGE/4309319694) returns every Set on a Model in 0.3–1.7s with the v2 bearer token; blank-`type` Sets still carry `cohortConfig` | **Discovery uses the per-Model listing.** Membership = presence of `cohortConfig`. Private/undocumented endpoint: a 404 means the build moved it |
 | F11 | `EFFECTIVE` permissions on se-thoughtspot list ~115 users with MODIFY on everything | Provenance uses `DEFINED` grants only; `EFFECTIVE` is useless on admin-heavy clusters |
 
 ---
@@ -97,7 +98,7 @@ Pure functions, unit-testable with no live cluster. `commands/sets.py` is the on
 | Module | One job | Depends on |
 |---|---|---|
 | `scope.py` | Selectors → de-duplicated `[{org, model_guid, model_name}]` | — |
-| `discover.py` | Model → reusable Sets: paged `LOGICAL_COLUMN` search filtered by `owner == model_guid`, each candidate confirmed by TML export with a `cohort:` root. Never reads `metadata_header.type` (F2) | — |
+| `discover.py` | Model → reusable Sets: one per-Model cohort listing call (F12); membership by `cohortConfig`, never by `type` (F2) | — |
 | `consumers.py` | Set → dependents (`LOGICAL_COLUMN`, F5). For each Liveboard dependent: the visualizations whose `answer.cohorts[]` or `search_query` reference the Set, and whether any `liveboard.filters[].column[]` names it | — |
 | `classify.py` | Set + consumers → class (§4) | `consumers` output |
 | `grants.py` | DEFINED grants on the Set + grants and owners of its consumers → provenance per grant (§5) | `consumers` output |
@@ -184,8 +185,7 @@ is deliberately conservative: it puts a grant in front of a reviewer rather than
 
 | Situation | Behaviour |
 |---|---|
-| A column-search page times out | Retry with a smaller page; then per-Model fallback; scan note. Never report "0 Sets" for a failed scan |
-| Candidate TML export FORBIDDEN / failed | Listed as "unconfirmed" in scan notes — not counted, not dropped. FORBIDDEN cached 24h (as `ts-audit`) |
+| A Model's cohort listing fails or returns a non-list | That Model is `INCOMPLETE` with `set_count: null` and a scan note. Never report "0 Sets" for a failed lookup |
 | A dependent's TML unreadable | Set → `REVIEW_MANUAL` with reason |
 | Grants unreadable | Provenance `UNKNOWN` for that Set; scan note; classification unaffected |
 | A selector matches nothing | Error before any scan |
@@ -203,6 +203,8 @@ is deliberately conservative: it puts a grant in front of a reviewer rather than
 - **Smoke** — `tools/smoke-tests/smoke_ts_object_set_manager.py` against se-thoughtspot,
   Model **Dunder Mifflin** (`829a3344-657c-4d34-918d-84a7438afb59`). Expected:
 
+  Dunder Mifflin owns **9** Sets (Appendix A, 2026-10-02); the three below have known classes:
+
   | Set | Dependents | Class |
   |---|---|---|
   | Product Basket 1 | 0 | `REVIEW_DELETE` |
@@ -212,9 +214,9 @@ is deliberately conservative: it puts a grant in front of a reviewer rather than
   Each Set's only grant (its author, MODIFY) reads `DIRECT`. These are the post-cleanup
   baseline; the smoke must re-derive rather than hard-code if the fixture drifts.
 
-- **First live checks in the plan** — (a) does paged `LOGICAL_COLUMN` discovery complete at
-  se-thoughtspot scale; (b) Liveboard visualization and filter detection against a real
-  Liveboard that uses a Set (none found yet — find or build one).
+- **First live checks in the plan** — done 2026-10-01/02, Appendix A: paged discovery infeasible
+  (→ F12); Liveboard fixture *Formula LB - SC* `da4f1be1-b6cd-47a2-84bd-f8cffe1d0696` (`Viz_2`, Set
+  *Top Brands*); Sets are also referenced inside viz formulas; no Liveboard-filter fixture found.
 
 ---
 
@@ -259,3 +261,4 @@ Read-only probes on se-thoughtspot (Primary Org). The probe scripts were throwaw
 | Liveboard using a Set | **Found, no build needed.** Fixture: **`da4f1be1-b6cd-47a2-84bd-f8cffe1d0696` *Formula LB - SC*** (3 vizzes). `Viz_2` (viz_guid `a3c94a83-e5b5-4e55-a27a-936652429b25`) uses Set `69f6aed0-503f-4ded-87b2-bac3ffe391af` *Top Brands* in `search_query` (`… top [Top Brands]`). Liveboard filter on the Set: **no**. Alternate with two Sets: `eb3871ab-c026-4459-ad2e-aad002cc7f3b` *Dynamic Set Selection*, `Viz_1` (viz_guid `a79d5565-…`), which references Sets *mytop5* `3fbe9ac6-…` and *mytop10* `8c1cbe6e-…` inside a viz formula and not in `search_query`. Filter: no. Other Set-using Liveboards: *Just Eat v3* `73df2a30-…` (`Viz_7`, *Promotion Id set*) plus 3 copies; *Aditi D's Demo Retail Liveboard* `2d3898fb-…` (`Viz_33`); *Demo fis lib* `9d0f02cf-…` (`Viz_18`, `Viz_22`); *PM Condor* / *easyJet InFlight Retail Analysis* (*Promotion Type set*). **None of the 6 exported had a Liveboard-level filter on a Set**, and none carried `answer.cohorts` for a reusable Set: reuse shows only as `[Set Name]` in `search_query`/columns or inside a formula |
 
 **Consequences for Task 2.** A cluster-wide paged scan is not viable on se-thoughtspot. It runs for hours, and late pages approach the 120s timeout. The `INCOMPLETE` fallback is therefore the *normal* path on this cluster, not an edge case. Discovery needs a narrower scope: per Org, as F3 already says, or per Model owner. There is no confirmed server-side way to filter `LOGICAL_COLUMN` by owner yet (not probed here).
+| Per-Model cohort listing (2026-10-02) | `GET /callosum/v1/metadata/detail/{model}?type=LOGICAL_TABLE&showhidden=false&dropquestiondetails=false&fetchcohortcolumnsonly=true` (no `doUpdate`), v2 bearer token: **200**. Dunder Mifflin 1.7s → 9 Sets (QS - Min Quantity, QS - Minimum tableDate, QS - Maximum tableDate, Ranked Products, Ranked Products By Region, Basket Analysis Set For Insights Hour, Product Basket 1/2/PC; 3 with blank `type`, all with `cohortConfig`). TEST_SV_DMSI_AI_CONTEXT 0.3s → 3 (Static Top 10, Customer State set, Product Category set `SIMPLE/GROUP_BASED`). Source: Confluence SAGE/4309319694 |
