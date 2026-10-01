@@ -62,8 +62,12 @@ def _all_org_ids(profile: Optional[str]) -> Tuple[List[str], List[dict]]:
             ids.append(str(o["orgId"]))
             continue
         detail = f"status {o.get('status')!r}, orgId {o.get('orgId')!r}; not scanned"
+        # "inactive" is a scope choice; "malformed" (no orgId or no status) means an Org we
+        # could not read, so the report's totals become a floor (render._floor_note).
+        reason = "malformed" if o.get("status") is None or o.get("orgId") is None \
+            else "inactive"
         _err(f"skipping Org {o.get('orgName')!r}: {detail}")
-        notes.append({"kind": "org_skipped",
+        notes.append({"kind": "org_skipped", "reason": reason,
                       "object": f"{o.get('orgName')} ({o.get('orgId')})", "detail": detail})
     return ids, notes
 

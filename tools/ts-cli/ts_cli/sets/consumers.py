@@ -58,6 +58,21 @@ def _dependents_hidden(dep_objects: dict) -> bool:
         dep_objects.get("areInaccessibleDependentsReturned") is not True
 
 
+def _own_item(body: list, guid: str):
+    """The response item for this Set — matched the way `_normalize_dependents_response`
+    keys its `source_guid` (`metadata_id`, falling back to `identifier`) — and only when its
+    `dependent_objects.dependents` carries a dict under that GUID. `None` otherwise."""
+    for item in body:
+        if not isinstance(item, dict):
+            continue
+        if (item.get("metadata_id") or item.get("identifier") or "") != guid:
+            continue
+        deps = (item.get("dependent_objects") or {}).get("dependents")
+        if isinstance(deps, dict) and isinstance(deps.get(guid), dict):
+            return item
+    return None
+
+
 def fetch_consumers(client, set_ref: dict) -> dict:
     from ts_cli.commands.metadata import _build_dependents_payload, _normalize_dependents_response
     out: Dict = {"dependents": [], "liveboards": {}, "unreadable": [], "other_types": [],
@@ -77,9 +92,15 @@ def fetch_consumers(client, set_ref: dict) -> dict:
         # `returned` counts as not returned. Live 2026-10-02 (se-thoughtspot, ruling R17):
         # an admin gets BOTH true with the full list, and reading only the first flag
         # turned every used Set into REVIEW_MANUAL. Still list what IS visible.
-        hidden = any(_dependents_hidden(item.get("dependent_objects") or {})
-                     for item in body if isinstance(item, dict))
-        rows = _normalize_dependents_response(body)
+        item = _own_item(body, set_ref["guid"])
+        if item is None:
+            # `[]`, an item with no dependents map, or an item for another GUID must not
+            # read as "no dependents" (final review must-fix 1, spec §7). A present
+            # `{"<guid>": {}}` IS a real zero (open item #5) and passes this check.
+            out["error"] = "dependents response did not include this Set"
+            return out
+        hidden = _dependents_hidden(item.get("dependent_objects") or {})
+        rows = _normalize_dependents_response([item])
     except (Exception, SystemExit) as exc:
         out["error"] = f"dependents lookup failed: {exc!r}"
         return out

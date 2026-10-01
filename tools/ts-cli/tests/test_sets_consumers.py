@@ -164,3 +164,56 @@ def test_non_liveboard_export_is_unreadable():
     out = fetch_consumers(_client(deps, {"l1": {"answer": {"name": "x"}}}), SET)
     assert out["unreadable"][0]["reason"] == "export was not Liveboard TML"
     assert "l1" not in out["liveboards"]
+
+
+# --- The dependents response must be about THIS Set (final review, must-fix 1) ---
+
+def test_empty_dependents_response_is_error_not_zero():
+    out = fetch_consumers(_client({}, {}, dep_payload=[]), SET)
+    assert out["error"] == "dependents response did not include this Set"
+    assert out["dependents"] == []
+
+
+def test_item_without_dependents_map_is_error():
+    out = fetch_consumers(_client({}, {}, dep_payload=[
+        {"metadata_id": "s1", "dependent_objects": {}}]), SET)
+    assert out["error"] == "dependents response did not include this Set"
+
+
+def test_item_with_dependents_map_missing_this_guid_is_error():
+    out = fetch_consumers(_client({}, {}, dep_payload=[
+        {"metadata_id": "s1", "dependent_objects": {"dependents": {"other": {}}}}]), SET)
+    assert out["error"] == "dependents response did not include this Set"
+
+
+def test_wrong_guid_item_is_error_and_its_rows_are_not_used():
+    rows = {"QUESTION_ANSWER_BOOK": [{"id": "a9", "name": "Not ours", "author": "u"}]}
+    out = fetch_consumers(_client({}, {}, dep_payload=[
+        {"metadata_id": "other", "dependent_objects": {"dependents": {"other": rows}}}]), SET)
+    assert out["error"] == "dependents response did not include this Set"
+    assert out["dependents"] == [] and out["other_types"] == []
+
+
+def test_only_this_sets_item_rows_are_used():
+    ours = {"QUESTION_ANSWER_BOOK": [{"id": "a1", "name": "Ans", "author": "u"}]}
+    theirs = {"QUESTION_ANSWER_BOOK": [{"id": "a9", "name": "Not ours", "author": "u"}]}
+    out = fetch_consumers(_client({}, {}, dep_payload=[
+        {"metadata_id": "other", "dependent_objects": {"dependents": {"other": theirs}}},
+        {"metadata_id": "s1", "dependent_objects": {"dependents": {"s1": ours}}}]), SET)
+    assert out["error"] is None
+    assert [d["guid"] for d in out["dependents"]] == ["a1"]
+
+
+def test_this_sets_item_with_empty_map_is_a_real_zero():
+    # Open item #5: an unused Set comes back as {"<guid>": {}} — a genuine "no dependents".
+    out = fetch_consumers(_client({}, {}, dep_payload=[
+        {"metadata_id": "s1", "dependent_objects": {"dependents": {"s1": {}}}}]), SET)
+    assert out["error"] is None and out["dependents"] == []
+
+
+def test_hidden_flag_on_another_items_is_ignored_only_ours_counts():
+    out = fetch_consumers(_client({}, {}, dep_payload=[
+        {"metadata_id": "other", "dependent_objects": {
+            "hasInaccessibleDependents": True, "dependents": {"other": {}}}},
+        {"metadata_id": "s1", "dependent_objects": {"dependents": {"s1": {}}}}]), SET)
+    assert out["error"] is None

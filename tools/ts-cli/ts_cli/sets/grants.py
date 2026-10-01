@@ -73,8 +73,10 @@ def provenance(set_grants: List[dict], consumer_grants: Dict[str, List[dict]],
                owner_ids: set) -> List[dict]:
     """Label each Set grant. First match wins; REQUIRED before EXPLAINED (spec §5).
     Matching is by same principal — group membership is never expanded. A `NO_ACCESS` row
-    is not access, so it is dropped: it must never surface as a revocation candidate."""
-    granted = {gr["principal_id"] for gs in consumer_grants.values() for gr in gs}
+    is not access, so it is dropped: it must never surface as a revocation candidate. The
+    same holds on the consumer side: a `NO_ACCESS` row there explains nothing."""
+    granted = {gr["principal_id"] for gs in consumer_grants.values() for gr in gs
+               if gr.get("permission") != "NO_ACCESS"}
     out = []
     for gr in set_grants:
         if gr["permission"] == "NO_ACCESS":

@@ -134,3 +134,9 @@ def test_no_access_is_dropped_from_provenance():
 def test_unknown_grants_sentinel():
     assert UNKNOWN_GRANTS == [{"principal_id": "", "principal_name": "", "principal_type": "",
                                "permission": "", "provenance": "UNKNOWN"}]
+
+
+def test_no_access_on_consumer_does_not_explain_a_set_grant():
+    # Final review must-fix 2: NO_ACCESS on the consumer is not access, so it cannot
+    # explain a READ_ONLY grant on the Set.
+    assert _prov([g("u1", "READ_ONLY")], {"a1": [g("u1", "NO_ACCESS")]}) == {"u1": "UNEXPLAINED"}

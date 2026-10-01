@@ -261,3 +261,14 @@ def test_h4_is_silent_when_a_model_has_an_answer_beside_its_sets():
         {"guid": "s1", "type": "SET", "name": "B"},
         {"guid": "a1", "type": "ANSWER", "name": "Q"}]})
     assert check_h4(ctx) == []
+
+
+@patch("ts_cli.audit.context.discover_sets")
+def test_h5_is_silent_when_the_set_dependents_response_is_empty(disc):
+    """Final review must-fix 1 + R14: a `[]` dependents body is not "zero consumers".
+    The real fetch_consumers errors, so the Set is not recorded and H5 stays silent."""
+    from ts_cli.audit.checks_human import check_h5
+    disc.return_value = _ONE_SET
+    ctx = _build_with_one_model("m1", angles=["H"])   # every search returns []
+    assert "s1" not in ctx.dependents and check_h5(ctx) == []
+    assert any("s1" in w and "did not include this Set" in w for w in ctx.warnings)

@@ -78,10 +78,22 @@ def _count(m: dict) -> str:
     return str(m["set_count"])
 
 
+def _malformed_org_skips(inv: dict) -> int:
+    """Top-level `org_skipped` notes for an Org row that was MALFORMED (missing `orgId` or
+    `status`). Skipping a non-ACTIVE Org is a scope choice; skipping a row we could not read
+    means an Org may hold Sets we never counted. A note without `reason` (written before it
+    existed) cannot prove it was a scope choice, so it counts as malformed (spec §7)."""
+    return sum(1 for n in inv.get("notes") or []
+               if n.get("kind") == "org_skipped" and n.get("reason") != "inactive")
+
+
 def _floor_note(inv: dict) -> str:
-    """Non-empty when an INCOMPLETE Model means the totals undercount."""
+    """Non-empty when an INCOMPLETE Model or an unreadable Org row means the totals undercount."""
     n = inv["summary"].get("models_incomplete") or 0
-    return f"({n} Model(s) incomplete — totals are a floor)" if n else ""
+    k = _malformed_org_skips(inv)
+    parts = ([f"{n} Model(s) incomplete"] if n else []) + \
+        ([f"{k} Org row(s) unreadable and not scanned"] if k else [])
+    return f"({'; '.join(parts)} — totals are a floor)" if parts else ""
 
 
 def _summary_values(inv: dict) -> List[str]:
@@ -93,9 +105,9 @@ def _summary_values(inv: dict) -> List[str]:
 
 def _dep_count(x: dict) -> str:
     """Never present a possibly-short dependents list as a total. A record without the
-    flag (written before it existed) is read as complete."""
+    flag (written before it existed) is read as INCOMPLETE — absence proves nothing (§7)."""
     n = len(x["dependents"])
-    if x.get("dependents_complete", True):
+    if x.get("dependents_complete", False):
         return str(n)
     return f"≥{n} (incomplete)" if n else "unknown (lookup incomplete)"
 

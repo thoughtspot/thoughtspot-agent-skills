@@ -10,7 +10,7 @@ def _grant(name, prov, ptype="USER", perm="READ_ONLY"):
 def _set(name="Basket", cls="REVIEW_DELETE", grants=None, guid="s1"):
     return {"guid": guid, "name": name, "class": cls, "reason": "r", "target": None,
             "cohort_type": "ADVANCED", "anchor_column": "col-guid-1", "author": "pin",
-            "dependents": [], "liveboards": {},
+            "dependents": [], "dependents_complete": True, "liveboards": {},
             "grants": grants or [_grant("pin", "DIRECT", perm="MODIFY")]}
 
 
@@ -189,3 +189,38 @@ def test_summary_unknown_grants_field_is_preferred():
     row = next(line for line in render_markdown(inv).splitlines()
                if line.startswith("| 1 | 0 | 1 |"))
     assert row.rstrip().endswith("| 7 |")
+
+
+def test_missing_dependents_complete_flag_reads_as_unknown():
+    # Final review must-fix 3: a record without the flag is NOT assumed complete.
+    inv = _inv()
+    _only_set(inv).pop("dependents_complete", None)
+    assert "unknown (lookup incomplete)" in _md_set_row(render_markdown(inv))
+
+
+# --- Skipped Orgs: scope choice vs floor (final review should-fix 6) ---------------
+
+def _sets_cell(md):
+    line = next(l for l in md.splitlines() if l.startswith("| 1 |"))
+    return line.split("|")[3].strip()
+
+
+def test_inactive_org_skip_is_a_scope_choice_not_a_floor():
+    top = [{"kind": "org_skipped", "reason": "inactive", "object": "Old (7)",
+            "detail": "status 'INACTIVE', orgId 7; not scanned"}]
+    md = render_markdown(_inv(top_notes=top))
+    assert _sets_cell(md) == "1" and "floor" not in md
+
+
+def test_malformed_org_row_marks_totals_as_floor():
+    top = [{"kind": "org_skipped", "reason": "malformed", "object": "NoId (None)",
+            "detail": "status 'ACTIVE', orgId None; not scanned"}]
+    inv = _inv(top_notes=top)
+    md, html = render_markdown(inv), render_html(inv)
+    assert _sets_cell(md) == "≥1" and "floor" in md and "floor" in html
+
+
+def test_org_skip_without_reason_is_read_as_malformed():
+    # A note written before `reason` existed cannot prove it was a scope choice (§7).
+    top = [{"kind": "org_skipped", "object": "Old (7)", "detail": "status 'INACTIVE'"}]
+    assert _sets_cell(render_markdown(_inv(top_notes=top))) == "≥1"

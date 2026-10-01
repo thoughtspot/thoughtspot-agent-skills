@@ -100,6 +100,7 @@ def test_all_org_ids_pages_and_keeps_active_only():
         ids, notes = sets_cmd._all_org_ids("p")
     assert ids == ["0"]
     assert [(n["kind"], n["object"]) for n in notes] == [("org_skipped", "Old (7)")]
+    assert notes[0]["reason"] == "inactive"
     body = client.post.call_args.kwargs["json"]
     assert client.post.call_args.args[0] == "/api/rest/2.0/orgs/search"
     assert body["record_offset"] == 0 and body["record_size"] > 0
@@ -128,6 +129,7 @@ def test_org_rows_missing_status_or_id_are_skipped_with_notes():
         ids, notes = sets_cmd._all_org_ids("p")
     assert ids == ["0"]
     assert [n["object"] for n in notes] == ["NoStatus (4)", "NoId (None)"]
+    assert [n["reason"] for n in notes] == ["malformed", "malformed"]
 
 
 @patch("ts_cli.commands.sets.resolve_profile", side_effect=lambda p: p or "def")
