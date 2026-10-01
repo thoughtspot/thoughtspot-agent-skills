@@ -164,10 +164,10 @@ def scan_sets(
     number: how many tenants actually use Sets. That decides whether Sets support gates
     the whole programme or is a tail of stragglers.
 
-    A Set creates a `COHORT_*` `LOGICAL_COLUMN` owned by the Model, which blocks
-    publishing that Model **and every Answer and Liveboard on it, used or not**. A Set's
-    header `type` is often blank, so membership is decided by `cohortConfig` in the
-    listing, never by type (BL-325). The
+    A Set creates a `LOGICAL_COLUMN` owned by the Model, which blocks publishing that
+    Model **and every Answer and Liveboard on it, used or not**. Membership is
+    `cohortConfig` in the listing; the header type is often blank, so never decide by
+    type (BL-325). The
     column is invisible in TML, so this reads each Model's cohort listing — a TML
     inspection would report a clean Model that is in fact blocked, and a lift-and-shift
     would drop the Set silently rather than fail. A Model whose listing fails is reported

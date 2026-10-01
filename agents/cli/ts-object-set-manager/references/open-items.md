@@ -3,7 +3,7 @@
 Items that need verification against a live ThoughtSpot instance before the skill is
 considered fully verified. Update each item with findings after testing.
 
-Status legend: **VERIFIED** (tested live) | **OPEN** (not yet verified)
+Status legend: **VERIFIED** (tested live) | **OPEN** (not yet verified) | **DEFERRED** (decided later, tracked in the backlog)
 
 Fixture cluster: se-thoughtspot. Model *Dunder Mifflin* `829a3344-657c-4d34-918d-84a7438afb59`.
 
@@ -125,3 +125,36 @@ Live re-verification, same admin profile, read-only:
 
 Still unobserved: a non-admin caller, for whom `returned` should be false and the error should
 fire. The unit test pins that branch; no live non-admin run was made.
+
+## #7 — Migrate gate — cohort listing for unresolvable / cross-Org / hidden — VERIFIED 2026-10-02
+
+Read-only, se-thoughtspot, admin profile, worktree code via the PATH shim. Only `GET` on the
+cohort listing, `POST metadata/search` and `GET auth/session/user`; no `doUpdate`. The question:
+does the listing ever answer **200 `[]`** for a GUID that is not a Model visible in the caller's
+Org? If it did, `discover_sets` would read "not found" as "0 Sets" and `migrate apply` would pass
+a Model it never inspected.
+
+| Probe | Org | Result |
+|---|---|---|
+| (a) bogus GUID `00000000-0000-0000-0000-000000000000` | Primary | **HTTP 404**, `code 13003`, "Object with Id … of type: LOGICAL_TABLE not found" |
+| (b) Answer GUID `b8b5788b-986f-4999-9408-224d88082e3f` | Primary | **HTTP 403**, `code 10003`, `debug: [null]` |
+| (c) Dunder Mifflin `829a3344-…` (Primary-owned) | DamianTest `1859868966` (session read back as DamianTest) | **HTTP 404**, `code 13003`, not found; `metadata/search` of the GUID from DamianTest: `[]` |
+| (c′) the 17 Models visible in DamianTest (all Primary-owned system/sample Models; DamianTest owns none) | DamianTest | 200 for each. 16 return `[]` from both Orgs. *TS: BI Server* `eaab6de7-…` returns `[]` from DamianTest but **4 Sets from Primary** (*Monthly User Logins*, *First Use*, *uc users set*, *Org Name セット*). `metadata/search` of each of those four Set GUIDs: 1 hit from Primary, **0 from DamianTest** — they are Primary-Org objects, so the per-Org listing is consistent with what that Org can see |
+| (d) `showhidden=true` vs `false` | Primary | Dunder Mifflin: 9 Sets either way. **Sweep of all 1,908 Primary Models**: 418 Sets across 108 Models with `false`, 418 with `true`, no Model differs, and no row carries `header.isHidden: true` |
+| (e) `ts migrate scan-sets --source-profile se-thoughtspot --source-org DamianTest --all-models` (docstring: read-only) | DamianTest | exit 0; `DamianTest: no Models in scope`; `scanned {orgs: 1, models: 0}`, `summary` all zero, `models_incomplete: 0`, no notes. `--all-models` keeps Models the Org **owns**, and DamianTest owns none |
+
+**Decision rule — not triggered.** Every unresolvable GUID (a, b, c) is an HTTP error. The client
+exits on it, `discover_sets` records `discovery_failed`, and the Model is `INCOMPLETE`, so
+`migrate apply` refuses it. No resolvability check was added: a `metadata/search` pre-check would
+cost a call per Model and guard a case that does not occur on this build.
+
+**`showhidden` — unchanged (`false`).** No difference across 418 Sets, but no hidden Set exists on
+the cluster, so this shows only that `false` drops nothing *here*. It does not prove a hidden Set
+would be listed. Re-probe if a hidden Set is ever created; switching to `true` is the safe
+direction if it turns out to matter.
+
+**Cross-Org reading (c′).** A Model shared into a tenant Org lists only the Sets that Org can see.
+That is right for a tenant migration (`apply` and `scan-sets --all-models` only take Models the
+Org owns), but a `ts sets inventory --org <tenant>` over a Primary-owned Model reports the
+tenant's Sets on it, not Primary's.
+
