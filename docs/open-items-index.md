@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**161 total items** across 21 skills — **73 open**, 75 verified, 13 deferred
+**162 total items** across 21 skills — **71 open**, 78 verified, 13 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -18,19 +18,19 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-qlik | 6 | **5** | 0 | 1 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
-| ts-object-set-manager | 5 | **4** | 1 | 0 |
 | ts-convert-from-tableau | 17 | **3** | 12 | 2 |
 | ts-load-source-data | 3 | **3** | 0 | 0 |
 | ts-publish-orgs | 8 | **3** | 4 | 1 |
 | ts-convert-from-sisense | 5 | **2** | 2 | 1 |
 | ts-object-calendar-builder | 6 | **2** | 4 | 0 |
+| ts-object-set-manager | 6 | **2** | 4 | 0 |
 | ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
 | ts-security-columns | 6 | **1** | 5 | 0 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-link-semantic-layer | 5 | **0** | 1 | 4 |
 | ts-object-model-agentql-query | 6 | **0** | 6 | 0 |
-### Untagged (73 items)
+### Untagged (71 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -101,10 +101,8 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-object-model-coach | #9 | Whether column `synonyms` and `BUSINESS_TERM` produce identical Spotter behaviour | OPEN |
 | ts-object-model-coach | #13 | Verified TS period-over-period growth-% formula | OPEN |
 | ts-object-model-coach | #15 | Cross-Model consistency heuristic calibration | OPEN |
-| ts-object-set-manager | #2 | Liveboard visualization detection | OPEN |
-| ts-object-set-manager | #3 | Liveboard / Answer author as owner (REQUIRED) | OPEN |
 | ts-object-set-manager | #4 | Liveboard-filter detection (KEEP_FILTER) | OPEN |
-| ts-object-set-manager | #5 | Dependents response with no item for the Set | OPEN |
+| ts-object-set-manager | #6 | `hasInaccessibleDependents` with `areInaccessibleDependentsReturned` | OPEN |
 | ts-publish-orgs | #6 | Connection-property variables are not discovered | OPEN |
 | ts-publish-orgs | #7 | `--source db` is Snowflake-only | OPEN |
 | ts-publish-orgs | #8 | Sharing is a separate capability, not yet built | OPEN |

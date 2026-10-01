@@ -25,32 +25,83 @@ page latency linear in offset). See spec Appendix A.
 The endpoint is private and undocumented: a 404 on a newer build means it moved, and every
 Model then reads `INCOMPLETE` with a `discovery_failed` note.
 
-## #2 — Liveboard visualization detection — OPEN
+## #2 — Liveboard visualization detection — VERIFIED 2026-10-02
 
 Detection matches `[Set Name]` (literal, case-insensitive) in each visualization's
 `search_query`, its `formulas[].expr`, and `answer_columns[].name`.
 
-Fixture: Liveboard *Formula LB - SC* `da4f1be1-b6cd-47a2-84bd-f8cffe1d0696`, whose `Viz_2`
-(viz_guid `a3c94a83-e5b5-4e55-a27a-936652429b25`) uses Set *Top Brands*
-`69f6aed0-503f-4ded-87b2-bac3ffe391af` in `search_query`. Expected: *Top Brands* lists the
-Liveboard with `Viz_2` as its visualization. To verify live in Task 12.
+**Original fixture is gone.** Liveboard *Formula LB - SC* `da4f1be1-b6cd-47a2-84bd-f8cffe1d0696`
+no longer exists on se-thoughtspot: `metadata/search` by GUID returns nothing, a name search
+for `%Formula LB%` returns nothing, and TML export answers 400 / 10002 "Specified identifier
+doesn't exist". Set *Top Brands* `69f6aed0-…` is still there (Model *Retail Sales - RP*
+`e2806e7c-87d3-44b7-b230-69efb6183045`), and its raw v2 dependents are now empty
+(`dependents: {<set>: {}}`, `hasInaccessibleDependents: false`). `ts sets inventory` reads it
+as `REVIEW_DELETE`, which is consistent with what the API now returns.
 
-## #3 — Liveboard / Answer author as owner (REQUIRED) — OPEN
+Verified on two other fixtures instead, one per match path:
+
+| Path | Set (Model) | Liveboard | Result |
+|---|---|---|---|
+| `search_query` + `answer_columns` | *Promotion Id set* `223a23fc-f5af-4460-908f-e72a9257000e` (Model *Just Eat v3* `8b07b2bc-…`) | *Just Eat v3* `73df2a30-e378-44c3-a113-00f269717d19`, plus *Luke Copy of Just Eat v3* `ee7f0be1-…` and *Food Supy Liveboard* `de54cbe2-…` | All three listed, each with `Viz_7` *Promotion Impact on AOV* (`average [Order Revenue] [Promotion Id set]`), `filter: false` |
+| `formulas[].expr` | *mytop5* `3fbe9ac6-…`, *mytop10* `8c1cbe6e-…` (Model *Paul - Snowflake Retapp* `5bb6feec-…`) | *Dynamic Set Selection* `eb3871ab-c026-4459-ad2e-aad002cc7f3b` | Both Sets list it with `Viz_1` *Total Sales by fx*, `filter: false` |
+
+**Divergence (class, not detection).** All four Sets above classify `REVIEW_MANUAL`, because
+their dependents response carries `hasInaccessibleDependents: true`. See #6. With that flag
+read as benign, *mytop5* / *mytop10* classify `CANDIDATE_VIZ` (one visualization), as the
+dependents imply.
+
+## #3 — Liveboard / Answer author as owner (REQUIRED) — VERIFIED 2026-10-02
 
 Dependents report `author`; provenance treats the author as the owner, so the author's view
-grant on the Set reads `REQUIRED`. Verify against an object whose owner changed after
-creation.
+grant on the Set reads `REQUIRED`.
+
+Checked on *Advanced Basket Analysis* `b8b5788b-986f-4999-9408-224d88082e3f` and *Basket
+Analysis* `4ab96c01-87e9-46ba-994a-3689eb85ffef` (dependents of *Product Basket 2* / *PC*).
+The dependents item's `author` (`1401d07c-…`, pinelopi.chamalelli) **equals** the Answer's own
+`metadata/search` header `author` / `authorName`. The header `owner` field is **not a user**:
+on an Answer it is the Answer's own GUID (`owner == metadata_id` on both). So `author` is
+the only user-valued owner field ThoughtSpot exposes, and reading it as owner is correct.
+
+Not exercised live: (a) an object whose ownership was transferred (*Advanced Basket
+Analysis* has a different `modifiedBy`, but that is an edit, not a transfer); (b) a
+`REQUIRED` label itself — every consumer author on the fixtures holds `MODIFY` on the Set,
+so `DIRECT` wins first. `REQUIRED` stays covered by unit tests.
 
 ## #4 — Liveboard-filter detection (KEEP_FILTER) — OPEN
 
 Detection matches the Set name in `liveboard.filters[].column[]`. No live fixture exists:
 none of the six Set-using Liveboards exported on se-thoughtspot (spec Appendix A) has a
-Liveboard-level filter on a Set. `KEEP_FILTER` is covered by unit tests only. Verify once a
-Liveboard with a Set filter is available.
+Liveboard-level filter on a Set, and none of the four checked on 2026-10-02 (#2) does either
+(`filter: false` on all; *Just Eat v3* `filters: []`). `KEEP_FILTER` is covered by unit tests
+only. Deferred to v2 / a built fixture.
 
-## #5 — Dependents response with no item for the Set — OPEN
+## #5 — Dependents response with no item for the Set — VERIFIED 2026-10-02
 
-When the dependents response carries no item for the Set's GUID, the engine reads it as "no
-dependents" (and so `REVIEW_DELETE`). Confirm that is what the API means rather than a
-silent failure. Verify on *Product Basket 1* `cf2d7861-9417-4b1d-845a-8f70eb0f0270`, which
-had no dependents in Appendix A, in Task 12.
+Raw v2 dependents (`_build_dependents_payload([guid], "LOGICAL_COLUMN")`) for *Product
+Basket 1* `cf2d7861-9417-4b1d-845a-8f70eb0f0270`, which has no dependents, returns **one item
+for the Set, with an empty bucket map**, not a missing item:
+
+```json
+[{"metadata_id": "cf2d7861-…", "metadata_type": "LOGICAL_COLUMN",
+  "dependent_objects": {"dependents": {"cf2d7861-…": {}},
+                        "hasInaccessibleDependents": false,
+                        "areInaccessibleDependentsReturned": false}}]
+```
+
+Same shape for *Top Brands* (#2). So "no dependents" is an explicit empty result, and reading
+it as `REVIEW_DELETE` is what the API means. A response with **no** item for the Set was not
+observed; the engine still reads that as no dependents, which remains unverified.
+
+## #6 — `hasInaccessibleDependents` with `areInaccessibleDependentsReturned` — OPEN (defect)
+
+Found 2026-10-02. The engine (`ts_cli/sets/consumers.py`) treats
+`hasInaccessibleDependents: true` as "some dependents hidden", so the Set reads
+`REVIEW_MANUAL` and its grants `UNKNOWN`/uncertain. For an admin caller the response also
+carries `areInaccessibleDependentsReturned: true`, meaning the hidden dependents **were**
+returned. Raw evidence: *Product Basket 2* `4f39eea6-…` and *PC* `cad1b0d6-…` both carry
+`hasInaccessibleDependents: true, areInaccessibleDependentsReturned: true` with their full
+Answer lists (1 and 2). Effect on se-thoughtspot (admin profile): the smoke fails (PB2 and PC
+read `REVIEW_MANUAL`, expected `CANDIDATE_ANSWER` / `KEEP_SHARED`); every Set with a dependent
+on the fixtures checked reads `REVIEW_MANUAL`; `ts audit` H5 skips those Sets with a warning.
+A scratch counterfactual that clears the flag in that case restores every expected class.
+Routed to the controller; not fixed in Task 12.

@@ -262,3 +262,19 @@ Read-only probes on se-thoughtspot (Primary Org). The probe scripts were throwaw
 
 **Consequences for Task 2.** A cluster-wide paged scan is not viable on se-thoughtspot. It runs for hours, and late pages approach the 120s timeout. The `INCOMPLETE` fallback is therefore the *normal* path on this cluster, not an edge case. Discovery needs a narrower scope: per Org, as F3 already says, or per Model owner. There is no confirmed server-side way to filter `LOGICAL_COLUMN` by owner yet (not probed here).
 | Per-Model cohort listing (2026-10-02) | `GET /callosum/v1/metadata/detail/{model}?type=LOGICAL_TABLE&showhidden=false&dropquestiondetails=false&fetchcohortcolumnsonly=true` (no `doUpdate`), v2 bearer token: **200**. Dunder Mifflin 1.7s → 9 Sets (QS - Min Quantity, QS - Minimum tableDate, QS - Maximum tableDate, Ranked Products, Ranked Products By Region, Basket Analysis Set For Insights Hour, Product Basket 1/2/PC; 3 with blank `type`, all with `cohortConfig`). TEST_SV_DMSI_AI_CONTEXT 0.3s → 3 (Static Top 10, Customer State set, Product Category set `SIMPLE/GROUP_BASED`). Source: Confluence SAGE/4309319694 |
+
+---
+
+## Appendix B — live verification (2026-10-02)
+
+Read-only, se-thoughtspot Primary Org, admin profile, worktree code via a PATH shim.
+
+| Check | Result |
+|---|---|
+| Smoke (`smoke_ts_object_set_manager.py`, Dunder Mifflin) | **FAIL.** auth, inventory PASS; 9 Sets. *Product Basket 1* `REVIEW_DELETE` as expected; *Product Basket 2* and *PC* `REVIEW_MANUAL` (expected `CANDIDATE_ANSWER` / `KEEP_SHARED`) because their dependents carry `hasInaccessibleDependents: true` alongside `areInaccessibleDependentsReturned: true` (open item #6) |
+| `--model-contains DUNDER` | 5 Models matched (dry run and full); 14 Sets, `REVIEW_DELETE` 11 / `REVIEW_MANUAL` 3, 0 incomplete, 0 unexplained, 0 unknown grants; ~15s. `report.html` and `report.md` written. *Static Top 10* not in scope |
+| Provenance, TEST_SV_DMSI_AI_CONTEXT | *Static Top 10*: michelle `DIRECT`, damian `DIRECT`, ashok `DIRECT` (all MODIFY). The other two Sets: damian `DIRECT`. All three Sets `REVIEW_MANUAL` (#6) |
+| Liveboard viz detection (#2) | Fixture *Formula LB - SC* no longer exists; *Top Brands* now has 0 dependents → `REVIEW_DELETE`. Verified instead on *Just Eat v3* (`search_query`, `Viz_7`, 3 Liveboards) and *Dynamic Set Selection* (formula, `Viz_1`, *mytop5* / *mytop10*) |
+| Empty dependents (#5) | One item for the Set with an empty bucket map `{}`, not a missing item |
+| Author as owner (#3) | Dependents `author` = Answer header `author`; header `owner` is the Answer's own GUID |
+| `ts audit run --angles H`, Dunder Mifflin | H5 flags exactly the 6 `REVIEW_DELETE` Sets incl. *Product Basket 1*; no Set with dependents flagged; 3 Sets skipped with a warning (#6). **But 18 findings for 6 Sets**: each Set is emitted once per source that lists it (the Model plus each underlying Table's `COHORT` bucket). No H4 finding |
