@@ -31,6 +31,17 @@ into blocks, and each block patches the Liveboard itself (`<L>/scripts/patch.js`
 4. it imports, and after a commit exports again and proves the composed code came back, nothing it did not
    own was lost, and every tab holds its tiles (matched by content: ThoughtSpot may renumber viz ids).
 
+**What ThoughtSpot changes on re-export** (seen on a live run on ps-internal, 2026-10-01), and how the round
+trip allows for it:
+
+- Visualization ids are renumbered on import (a tile sent as `Viz_50` came back as `Viz_2`): tiles are
+  matched by content and tab placement, never by id alone.
+- Default style properties are added (one sent, seven came back: `lb_brand_color`, `kpi_hero_font_size` ...),
+  and `viz_guid`, tab `id`, table `headline_aggregation` and native chart `client_state_v2` details are
+  filled in: every field sent must come back with the same value; fields ThoughtSpot adds are allowed.
+- Answer formula ids are rewritten (`f_spu` became `formula_Sales per unit`, with `was_auto_generated`
+  added): formulas are matched by name. Base64 padding is written as `\u003d` in the export text.
+
 Nothing else is created in ThoughtSpot. An earlier version stored every chart as its own
 `zz-amuzing-store-<slug>` Liveboard and assembled from those: 56 objects in the user's library that they
 never asked for. Do not bring that back.

@@ -354,17 +354,19 @@ try {
   summary.roundTripError = 'the commit landed but the Liveboard could not be exported to check it (' + String(e && e.message || e).slice(0, 200) + '); run --check, and restore from the backup if anything is wrong';
   return summary;
 }
-// A tile counts as composed when its code is what was composed, matched by its id first and by code alone when
-// ThoughtSpot renumbered it (not by its marker: a user's copy of a skill tile carries the marker, and even the
-// same code, and is the user's).
-const want = {}, wantById = {};
-for (const r of report.filter((x) => x.js)) { const k = r.js + '|' + r.css; want[k] = (want[k] || 0) + 1; wantById[r.id] = k; }
+// A tile counts as composed when its code is what was composed, matched where it sits (tab, x, y) first and by
+// code alone otherwise. Never by id (ThoughtSpot renumbers them on import, seen live) and never by marker: a
+// user's copy of a skill tile carries the marker, and even the same code, and is the user's.
+const placeOf = (tabs) => { const m = {}; for (const t of tabs || []) for (const x of t.tiles || []) m[x.visualization_id] = t.name + '|' + x.x + '|' + x.y; return m; };
+const sentPlace = placeOf(layoutTabs), backPlace = placeOf(back.layout && back.layout.tabs);
+const want = {}, wantAt = {};
+for (const r of report.filter((x) => x.js)) { const k = r.js + '|' + r.css; want[k] = (want[k] || 0) + 1; wantAt[k + '@' + sentPlace[r.id]] = (wantAt[k + '@' + sentPlace[r.id]] || 0) + 1; }
 const got = {}, rest = [], othersBack = [];
 let othersAfter = 0;
 const keyOf = async (bv) => { const bc = codeOf(bv); return bc ? (await sha256(bc.js)).slice(0, 12) + '|' + (await sha256(bc.css)).slice(0, 12) : null; };
 for (const bv of back.visualizations || []) {
-  const k = await keyOf(bv);
-  if (k && wantById[bv.id] === k && (got[k] || 0) < want[k]) got[k] = (got[k] || 0) + 1; else rest.push([bv, k]);
+  const k = await keyOf(bv), at = k + '@' + backPlace[bv.id];
+  if (k && wantAt[at] > 0) { wantAt[at]--; got[k] = (got[k] || 0) + 1; } else rest.push([bv, k]);
 }
 for (const [bv, k] of rest) {
   if (k && (got[k] || 0) < (want[k] || 0)) { got[k] = (got[k] || 0) + 1; continue; }
@@ -377,7 +379,9 @@ const lost = [];
 const pool = [...othersBack];
 for (const v of (doc0.visualizations || []).filter((x) => !owned.has(x.id))) {
   const bare = { ...v, id: undefined };
-  let i = pool.findIndex((b) => b.id === v.id && covers(bare, b));
+  // Matched where it sat first (ids are renumbered), then anywhere.
+  const was = placeOf(doc0.layout && doc0.layout.tabs)[v.id];
+  let i = pool.findIndex((b) => backPlace[b.id] === was && covers(bare, b));
   if (i < 0) i = pool.findIndex((b) => covers(bare, b));
   if (i >= 0) pool.splice(i, 1); else lost.push(v.answer ? v.answer.name : v.note_tile ? 'a note (' + v.id + ')' : v.id);
 }
@@ -400,9 +404,12 @@ for (const t of layoutTabs) {
 const fKey = (f) => stable({ c: f.column, o: f.oper, v: f.values, d: f.display_name, m: f.is_mandatory, s: f.is_single_value, df: f.date_filter, n: (f.excluded_visualizations || []).length });
 const settingsBad = [];
 if (stable((lb.filters || []).map(fKey).sort()) !== stable((back.filters || []).map(fKey).sort())) settingsBad.push('filters');
-if (!covers(lb.parameters || [], back.parameters || [])) settingsBad.push('parameters');
-if (!covers(lb.style || {}, back.style || {})) settingsBad.push('style');
-if (!covers(lb.ordered_chips || [], back.ordered_chips || [])) settingsBad.push('ordered_chips');
+// Lists keyed by name: each entry sent must come back unchanged; ThoughtSpot adds defaults on re-export (a live
+// run returned six style properties for the one sent), so entries it adds are allowed.
+const keyed = (sent, got, key) => (sent || []).every((s) => (got || []).some((g) => key(g) === key(s) && covers(s, g)));
+if (!keyed(lb.parameters, back.parameters, (p) => p.name || p.id)) settingsBad.push('parameters');
+if (!keyed(lb.style && lb.style.style_properties, back.style && back.style.style_properties, (p) => p.name)) settingsBad.push('style');
+if (!keyed(lb.ordered_chips, back.ordered_chips, (c) => c.type + '|' + c.name)) settingsBad.push('ordered_chips');
 if (lb.name !== back.name) settingsBad.push('name');
 if ((lb.description || '') !== (back.description || '')) settingsBad.push('description');
 summary.roundTripAllOk = !failed.length && !extra && !lost.length && !layoutBad.length && !settingsBad.length;

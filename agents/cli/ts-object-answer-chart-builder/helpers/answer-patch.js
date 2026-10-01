@@ -96,7 +96,12 @@ if (old) {
   if (old.display_mode && old.display_mode !== answer.display_mode) replaced.push('display_mode ' + old.display_mode);
   if (oldChart) {
     // The old custom chart's code and visual settings (columns, legend, labels...) and its field mapping.
-    if (oldChart.custom_visual_props && oldChart.custom_visual_props !== answer.chart.custom_visual_props) replaced.push('custom chart code and visual settings (custom_visual_props)');
+    // Compared by content: ThoughtSpot re-serialises these props on export, so the strings differ even when the
+    // code and settings are the same (seen on a live run).
+    const props = (s) => { try { const o = JSON.parse(s); const cs = JSON.parse(o.clientState || '{}'); const c = (cs.playground && cs.playground.code) || {}; return { code: [c.jsCodeBase64, c.cssCodeBase64, c.htmlCodeBase64].map((x) => unb64(x || '')), rest: JSON.stringify(Object.keys(o).filter((k) => k !== 'clientState').sort().map((k) => [k, o[k]])) }; } catch (e) { return null; } };
+    const a = props(oldChart.custom_visual_props), b = props(answer.chart.custom_visual_props);
+    if (oldChart.custom_visual_props && (!a || !b || JSON.stringify(a.code) !== JSON.stringify(b.code))) replaced.push('custom chart code (custom_visual_props)');
+    if (a && b && a.rest !== b.rest) replaced.push('custom chart visual settings (custom_visual_props)');
     if (oldChart.custom_chart_config && JSON.stringify(oldChart.custom_chart_config) !== JSON.stringify(answer.chart.custom_chart_config)) replaced.push('custom chart field mapping (custom_chart_config)');
   }
   if (P.description !== undefined && old.description && old.description !== P.description) replaced.push('description');
@@ -151,8 +156,9 @@ if (MODE === 'commit') {
   };
   const byName = (a, k) => Object.fromEntries(((a && a[k]) || []).map((x) => [x.name || x.id || x.column_id, x]));
   for (const k of ['formulas', 'parameters']) {
+    // Matched by name; the id is ThoughtSpot's to rewrite (f_spu came back as "formula_Sales per unit" live).
     const want = byName(old, k), have = byName(back, k);
-    const miss = Object.keys(want).filter((n) => !(n in have)), diff = Object.keys(want).filter((n) => n in have && !covers(want[n], have[n]));
+    const miss = Object.keys(want).filter((n) => !(n in have)), diff = Object.keys(want).filter((n) => n in have && !covers({ ...want[n], id: undefined }, have[n]));
     if (miss.length) failed.push(k + ' lost: ' + miss.join(', '));
     if (diff.length) failed.push(k + ' changed: ' + diff.join(', '));
   }

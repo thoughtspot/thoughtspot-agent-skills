@@ -148,5 +148,18 @@ const cf = mock({ mutate: (a) => { a.answer_columns.find((c) => c.name === "Tota
 const cfr = await new AsyncFunction("ts", pack(["--answer", GUID, "--backup", backup]))(cf.ts);
 expect(cfr.roundTripOk === false && (cfr.roundTripFailed || []).some((x) => /column settings changed: Total Sales/.test(x)), "round trip: a changed column format fails");
 
+// Live run findings: ThoughtSpot rewrites formula ids on import, and re-serialises custom_visual_props. Neither is
+// a change: the round trip passes, and an update with the same files does not list the code as replaced.
+const fid = mock({ mutate: (a) => { a.formulas = a.formulas.map((f) => ({ ...f, id: "formula_" + f.name, was_auto_generated: false })); } });
+const fidr = await new AsyncFunction("ts", pack(["--answer", GUID, "--backup", backup]))(fid.ts);
+expect(fidr.roundTripOk === true, "round trip: a formula id rewritten by ThoughtSpot is not a change");
+const cr = mock(); await new AsyncFunction("ts", pack([]))(cr.ts);
+const sameAns = JSON.parse(JSON.stringify(cr.stored)); sameAns.guid = GUID;
+sameAns.answer.chart.custom_visual_props = JSON.stringify(JSON.parse(sameAns.answer.chart.custom_visual_props), null, 1); // re-serialised
+fs.writeFileSync(backup, JSON.stringify(sameAns));
+const sm = mock({ existing: sameAns });
+const smr = await new AsyncFunction("ts", pack(["--answer", GUID, "--backup", backup]))(sm.ts);
+expect(!(smr.replaced || []).some((r) => /custom chart code/.test(r)), "update: the same files are not listed as replaced code");
+
 fs.rmSync(scratch, { recursive: true, force: true });
 console.log(JSON.stringify({ ok: !failures.length, failures, created, updated }));

@@ -58,7 +58,7 @@ function docs(txt) {
 }
 
 export function checkBackup(file, guid, type) {
-  const stop = (m) => { console.error("--backup " + file + ": " + m); process.exit(2); };
+  const stop = (m) => { console.error("--backup" + (file ? " " + file : "") + ": " + m); process.exit(2); };
   if (!file) stop("missing; export the " + type + "'s TML first (ts tml export, or Export TML in ThoughtSpot) to ~/.cache/ts-charts/backups/");
   let f;
   try { f = fs.realpathSync(path.resolve(file)); } catch { stop("does not exist"); }

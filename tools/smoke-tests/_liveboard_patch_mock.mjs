@@ -266,6 +266,17 @@ const tampered = withBackup.replace(/"vizIds":\["Viz_1"/, '"vizIds":["Viz_X"');
 const tb = await run(tampered, base());
 expect(/CHECKSUM/.test(tb.summary.refused || "") && !tb.imports.length, "backup: an edited backup summary fails the checksum");
 
+// What a live run on ps-internal showed ThoughtSpot doing on re-export: ids renumbered, six default style
+// properties added, viz_guid and tab ids filled in. None of it is a loss.
+const reexport = (l) => {
+  const map = {}; l.visualizations.forEach((v, i) => { map[v.id] = "Viz_" + (i + 1); v.id = map[v.id]; v.viz_guid = "00000000-0000-0000-0000-0000000001" + String(i).padStart(2, "0"); });
+  l.layout.tabs.forEach((t, i) => { t.id = "tab-" + i; t.tiles.forEach((x) => { x.visualization_id = map[x.visualization_id] || x.visualization_id; }); });
+  l.filters.forEach((f) => { if (f.excluded_visualizations) f.excluded_visualizations = f.excluded_visualizations.map((id) => map[id] || id); });
+  l.style.style_properties.push({ name: "lb_brand_color", value: "LBC_A" }, { name: "hide_group_description", value: "true" }, { name: "kpi_hero_font_size", value: "M" });
+};
+const rx = await run(withBackup, base(), { mutate: reexport });
+expect(rx.summary.roundTripAllOk === true, "round trip: ThoughtSpot's re-export changes (renumbered ids, default style, viz_guid, tab ids) are not a loss");
+
 // The round trip allows fields ThoughtSpot adds on re-export, and catches swaps, lost style and lost chips.
 const dm = await run(withBackup, base(), { mutate: (l) => { l.visualizations.find((x) => x.id === "Viz_1").answer.display_mode = "CHART_MODE"; } });
 expect(dm.summary.roundTripAllOk === true, "round trip: a default field added on re-export is not a loss");
