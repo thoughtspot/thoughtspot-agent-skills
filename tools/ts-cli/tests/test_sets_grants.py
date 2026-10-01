@@ -69,6 +69,7 @@ def test_fetch_grants_uses_defined_and_typed_objects():
     cons = {"dependents": [{"guid": "a1", "type": "ANSWER"}, {"guid": "l1", "type": "LIVEBOARD"}]}
     out = fetch_grants(c, "s1", cons)
     assert seen["permission_type"] == "DEFINED"
+    assert seen["record_offset"] == 0 and seen["record_size"] == -1
     assert {"identifier": "s1", "type": "LOGICAL_COLUMN"} in seen["metadata"]
     assert {"identifier": "l1", "type": "LIVEBOARD"} in seen["metadata"]
     assert set(out) == {"s1", "a1"}
@@ -79,14 +80,55 @@ def test_fetch_grants_failure_is_none():
     assert fetch_grants(c, "s1", {"dependents": []}) is None
 
 
-def test_missing_set_entry_yields_empty_grant_list_not_error():
-    # The API always returns an entry per requested object, so a missing Set entry is
-    # read as "no grants on the Set" — the dict is still returned, never None or a raise.
+def _client_returning(body):
+    c = MagicMock(); c.post.return_value = MagicMock(json=lambda: body)
+    return c
+
+
+def test_missing_set_entry_is_unknown(capsys):
+    # DEFINED returns a PRESENT entry with an empty list for "nothing shared" (share.py,
+    # live 2026-07-26), so an absent Set entry is an anomaly and must read as UNKNOWN.
     resp = {"metadata_permission_details": [RESP["metadata_permission_details"][1]]}
-    c = MagicMock(); c.post.return_value = MagicMock(json=lambda: resp)
-    out = fetch_grants(c, "s1", {"dependents": [{"guid": "a1", "type": "ANSWER"}]})
-    assert out is not None and "s1" not in out
-    assert provenance(out.get("s1", []), {"a1": out["a1"]}, set()) == []
+    out = fetch_grants(_client_returning(resp), "s1", {"dependents": [{"guid": "a1", "type": "ANSWER"}]})
+    assert out is None
+    assert "s1" in capsys.readouterr().err
+
+
+def test_present_empty_set_entry_is_no_grants():
+    resp = {"metadata_permission_details": [{"metadata_id": "s1", "principal_permission_info": []}]}
+    assert fetch_grants(_client_returning(resp), "s1", {"dependents": []}) == {"s1": []}
+
+
+def test_missing_consumer_entry_is_tolerated():
+    resp = {"metadata_permission_details": [RESP["metadata_permission_details"][0]]}
+    out = fetch_grants(_client_returning(resp), "s1", {"dependents": [{"guid": "a1", "type": "ANSWER"}]})
+    assert set(out) == {"s1"}
+
+
+def test_empty_body_is_none():
+    assert fetch_grants(_client_returning({}), "s1", {"dependents": []}) is None
+
+
+def test_non_list_details_is_none(capsys):
+    body = {"metadata_permission_details": {"metadata_id": "s1"}}
+    assert fetch_grants(_client_returning(body), "s1", {"dependents": []}) is None
+    assert "metadata_permission_details" in capsys.readouterr().err
+
+
+def test_non_dict_body_is_none():
+    assert fetch_grants(_client_returning([]), "s1", {"dependents": []}) is None
+
+
+def test_json_decode_error_is_none(capsys):
+    def boom():
+        raise ValueError("not json")
+    c = MagicMock(); c.post.return_value = MagicMock(json=boom)
+    assert fetch_grants(c, "s1", {"dependents": []}) is None
+    assert "fetch-permissions failed for s1" in capsys.readouterr().err
+
+
+def test_no_access_is_dropped_from_provenance():
+    assert _prov([g("u1", "NO_ACCESS"), g("u2", "READ_ONLY")]) == {"u2": "UNEXPLAINED"}
 
 
 def test_unknown_grants_sentinel():
