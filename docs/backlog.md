@@ -12191,6 +12191,9 @@ delete `REVIEW_DELETE` Sets (needs ts-dependency-manager open item #11); convert
 (needs open items #14 and #16 resolved); revoke `UNEXPLAINED` grants (never `REQUIRED` or
 `DIRECT`). Each action after explicit confirmation.
 
+**Gate:** v2 must not act on CANDIDATE_* until open item #4 is verified and a non-admin probe
+confirms `areInaccessibleDependentsReturned` semantics.
+
 **Target:** fast follow to v1.
 
 ---

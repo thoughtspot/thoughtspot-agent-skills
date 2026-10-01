@@ -67,13 +67,15 @@ Analysis* has a different `modifiedBy`, but that is an edit, not a transfer); (b
 `REQUIRED` label itself — every consumer author on the fixtures holds `MODIFY` on the Set,
 so `DIRECT` wins first. `REQUIRED` stays covered by unit tests.
 
-## #4 — Liveboard-filter detection (KEEP_FILTER) — OPEN
+## #4 — Liveboard-filter detection (KEEP_FILTER) — DEFERRED to BL-327
 
 Detection matches the Set name in `liveboard.filters[].column[]`. No live fixture exists:
 none of the six Set-using Liveboards exported on se-thoughtspot (spec Appendix A) has a
 Liveboard-level filter on a Set, and none of the four checked on 2026-10-02 (#2) does either
 (`filter: false` on all; *Just Eat v3* `filters: []`). `KEEP_FILTER` is covered by unit tests
-only. Deferred to v2 / a built fixture.
+only. **DEFERRED to BL-327** (v2 / a built fixture). Until then the report's `CANDIDATE_VIZ`
+NEXT text and SKILL.md Step 6 tell the operator to check each `CANDIDATE_VIZ` by hand for
+Liveboard filters, and v2 must not act on `CANDIDATE_*` until this item is verified.
 
 ## #5 — Dependents response with no item for the Set — VERIFIED 2026-10-02
 

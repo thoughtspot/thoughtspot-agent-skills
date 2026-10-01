@@ -224,3 +224,9 @@ def test_org_skip_without_reason_is_read_as_malformed():
     # A note written before `reason` existed cannot prove it was a scope choice (§7).
     top = [{"kind": "org_skipped", "object": "Old (7)", "detail": "status 'INACTIVE'"}]
     assert _sets_cell(render_markdown(_inv(top_notes=top))) == "≥1"
+
+
+def test_candidate_viz_next_text_carries_the_filter_caveat():
+    # Final review should-fix 8: filter detection is not verified live (open item #4).
+    md = render_markdown(_inv(cls="CANDIDATE_VIZ"))
+    assert "check by hand for Liveboard filters" in _md_set_row(md)

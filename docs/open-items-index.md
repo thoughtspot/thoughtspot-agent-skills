@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**162 total items** across 21 skills — **70 open**, 79 verified, 13 deferred
+**162 total items** across 21 skills — **69 open**, 79 verified, 14 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -24,13 +24,13 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-sisense | 5 | **2** | 2 | 1 |
 | ts-object-calendar-builder | 6 | **2** | 4 | 0 |
 | ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
-| ts-object-set-manager | 6 | **1** | 5 | 0 |
 | ts-security-columns | 6 | **1** | 5 | 0 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-link-semantic-layer | 5 | **0** | 1 | 4 |
 | ts-object-model-agentql-query | 6 | **0** | 6 | 0 |
-### Untagged (70 items)
+| ts-object-set-manager | 6 | **0** | 5 | 1 |
+### Untagged (69 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -101,7 +101,6 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-object-model-coach | #9 | Whether column `synonyms` and `BUSINESS_TERM` produce identical Spotter behaviour | OPEN |
 | ts-object-model-coach | #13 | Verified TS period-over-period growth-% formula | OPEN |
 | ts-object-model-coach | #15 | Cross-Model consistency heuristic calibration | OPEN |
-| ts-object-set-manager | #4 | Liveboard-filter detection (KEEP_FILTER) | OPEN |
 | ts-publish-orgs | #6 | Connection-property variables are not discovered | OPEN |
 | ts-publish-orgs | #7 | `--source db` is Snowflake-only | OPEN |
 | ts-publish-orgs | #8 | Sharing is a separate capability, not yet built | OPEN |

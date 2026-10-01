@@ -1,7 +1,7 @@
 # ts-object-set-manager — design (v1: report only)
 
 **Date:** 2026-10-01
-**Status:** approved design, awaiting spec review
+**Status:** approved; implemented
 **Branch:** `feat/ts-object-set-manager`
 **Backlog:** BL-324 (Model dependents omit Sets), BL-325 (`scan-sets` discovery), BL-326 (Set
 MODIFY without Model access — parked), BL-327 (v2 actions), BL-328 (connection scope — parked),
@@ -99,7 +99,7 @@ Pure functions, unit-testable with no live cluster. `commands/sets.py` is the on
 |---|---|---|
 | `scope.py` | Selectors → de-duplicated `[{org, model_guid, model_name}]` | — |
 | `discover.py` | Model → reusable Sets: one per-Model cohort listing call (F12); membership by `cohortConfig`, never by `type` (F2) | — |
-| `consumers.py` | Set → dependents (`LOGICAL_COLUMN`, F5). For each Liveboard dependent: the visualizations whose `search_query`, `answer_columns[].name` or `formulas[].expr` reference `[Set Name]` (literal, case-insensitive), and whether any `liveboard.filters[].column[]` names it. A true `dependent_objects.hasInaccessibleDependents` on any response item sets `error` (visible dependents are still listed); a Liveboard export that fails or is not Liveboard TML goes to `unreadable` | — |
+| `consumers.py` | Set → dependents (`LOGICAL_COLUMN`, F5). For each Liveboard dependent: the visualizations whose `search_query`, `answer_columns[].name` or `formulas[].expr` reference `[Set Name]` (literal, case-insensitive), and whether any `liveboard.filters[].column[]` names it. Only the response item whose `metadata_id` is the Set, with a dict under that GUID in `dependent_objects.dependents`, is read; anything else (`[]`, no map, another GUID) sets `error`. Dependents are hidden — `error`, visible dependents still listed — only when `hasInaccessibleDependents` is true and `areInaccessibleDependentsReturned` is not true (R17); a Liveboard export that fails or is not Liveboard TML goes to `unreadable` | — |
 | `classify.py` | Set + consumers → class (§4) | `consumers` output |
 | `grants.py` | DEFINED grants on the Set + grants and owners of its consumers → provenance per grant (§5) | `consumers` output |
 | `render.py` | Inventory JSON → HTML + Markdown | — |
@@ -263,13 +263,13 @@ Read-only probes on se-thoughtspot (Primary Org). The probe scripts were throwaw
 | `sort_options` `CREATED`/`MODIFIED` `DESC` on `LOGICAL_COLUMN` search | Honoured, and fast at low offsets (~2–3s per 500 page). It finds only *recent* Sets: none of Dunder Mifflin's were created after 2026-09-28. Not a discovery route |
 | Set → dependents (`--type LOGICAL_COLUMN`) | `cf2d7861` none; `4f39eea6` ANSWER×1; `cad1b0d6` ANSWER×2; `60a9794b` *Static Top 10* ANSWER×1 (*Testing Share by Edit*); `b929a421` *QS - Minimum tableDate* ANSWER×1 **+ SET×1** (a Set depending on a Set). None of these has a LIVEBOARD dependent |
 | Liveboard using a Set | **Found, no build needed.** Fixture: **`da4f1be1-b6cd-47a2-84bd-f8cffe1d0696` *Formula LB - SC*** (3 vizzes). `Viz_2` (viz_guid `a3c94a83-e5b5-4e55-a27a-936652429b25`) uses Set `69f6aed0-503f-4ded-87b2-bac3ffe391af` *Top Brands* in `search_query` (`… top [Top Brands]`). Liveboard filter on the Set: **no**. Alternate with two Sets: `eb3871ab-c026-4459-ad2e-aad002cc7f3b` *Dynamic Set Selection*, `Viz_1` (viz_guid `a79d5565-…`), which references Sets *mytop5* `3fbe9ac6-…` and *mytop10* `8c1cbe6e-…` inside a viz formula and not in `search_query`. Filter: no. Other Set-using Liveboards: *Just Eat v3* `73df2a30-…` (`Viz_7`, *Promotion Id set*) plus 3 copies; *Aditi D's Demo Retail Liveboard* `2d3898fb-…` (`Viz_33`); *Demo fis lib* `9d0f02cf-…` (`Viz_18`, `Viz_22`); *PM Condor* / *easyJet InFlight Retail Analysis* (*Promotion Type set*). **None of the 6 exported had a Liveboard-level filter on a Set**, and none carried `answer.cohorts` for a reusable Set: reuse shows only as `[Set Name]` in `search_query`/columns or inside a formula |
+| Per-Model cohort listing (2026-10-02) | `GET /callosum/v1/metadata/detail/{model}?type=LOGICAL_TABLE&showhidden=false&dropquestiondetails=false&fetchcohortcolumnsonly=true` (no `doUpdate`), v2 bearer token: **200**. Dunder Mifflin 1.7s → 9 Sets (QS - Min Quantity, QS - Minimum tableDate, QS - Maximum tableDate, Ranked Products, Ranked Products By Region, Basket Analysis Set For Insights Hour, Product Basket 1/2/PC; 3 with blank `type`, all with `cohortConfig`). TEST_SV_DMSI_AI_CONTEXT 0.3s → 3 (Static Top 10, Customer State set, Product Category set `SIMPLE/GROUP_BASED`). Source: Confluence SAGE/4309319694 |
 
-> **Note (2026-10-02):** the *Formula LB - SC* fixture in the row above has since been deleted
+> **Note (2026-10-02):** the *Formula LB - SC* fixture in the "Liveboard using a Set" row above has since been deleted
 > from se-thoughtspot. Open item #2 was verified on *Just Eat v3* (`search_query`, `Viz_7`) and
 > *Dynamic Set Selection* (formula, `Viz_1`) — see Appendix B. The row is kept as the historic record.
 
 **Consequences for Task 2.** A cluster-wide paged scan is not viable on se-thoughtspot. It runs for hours, and late pages approach the 120s timeout. The `INCOMPLETE` fallback is therefore the *normal* path on this cluster, not an edge case. Discovery needs a narrower scope: per Org, as F3 already says, or per Model owner. There is no confirmed server-side way to filter `LOGICAL_COLUMN` by owner yet (not probed here).
-| Per-Model cohort listing (2026-10-02) | `GET /callosum/v1/metadata/detail/{model}?type=LOGICAL_TABLE&showhidden=false&dropquestiondetails=false&fetchcohortcolumnsonly=true` (no `doUpdate`), v2 bearer token: **200**. Dunder Mifflin 1.7s → 9 Sets (QS - Min Quantity, QS - Minimum tableDate, QS - Maximum tableDate, Ranked Products, Ranked Products By Region, Basket Analysis Set For Insights Hour, Product Basket 1/2/PC; 3 with blank `type`, all with `cohortConfig`). TEST_SV_DMSI_AI_CONTEXT 0.3s → 3 (Static Top 10, Customer State set, Product Category set `SIMPLE/GROUP_BASED`). Source: Confluence SAGE/4309319694 |
 
 ---
 

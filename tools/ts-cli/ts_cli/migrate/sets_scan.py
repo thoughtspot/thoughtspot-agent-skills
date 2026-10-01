@@ -11,7 +11,8 @@ and its output is a fleet roll-up rather than a per-tenant mapping file.
 
 **Why Sets block, in three verified facts** (nebula, 2026-07-26):
 
-1. A Set creates a `LOGICAL_COLUMN` of subtype `COHORT_*` **owned by the Model**.
+1. A Set creates a `LOGICAL_COLUMN` **owned by the Model**. Membership is `cohortConfig`;
+   the header type is often blank, so a `COHORT_*` subtype is not a reliable signal (BL-325).
 2. That column **does not appear in the Model's TML at all** -- the Model exported ten
    columns and the cohort column was not among them.
 3. It **blocks publishing** the Model and every Answer and Liveboard on it, used or not.

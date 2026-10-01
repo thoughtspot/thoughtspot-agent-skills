@@ -92,6 +92,10 @@ Lead with `summary` from the inventory JSON (`models`, `models_incomplete`, `set
 
 A Set referenced only inside a visualization's formula counts as used.
 
+**Liveboard-filter detection is not yet verified live** (open item #4). A `CANDIDATE_VIZ`
+Set might in fact be a Liveboard filter, so say that each `CANDIDATE_VIZ` must be checked
+by hand for Liveboard filters before anything is moved.
+
 When a Set's `dependents_complete` is `false`, its dependents list may be short: the report
 shows the count as "unknown" or "≥N". Say that the count is a floor, not a total.
 
@@ -101,12 +105,13 @@ shows the count as "unknown" or "≥N". Say that the count is a floor, not a tot
 | `REQUIRED` | Owner of content that uses the Set — revoking breaks it |
 | `EXPLAINED` | Holds a grant on content that uses the Set (copied at share time) |
 | `UNEXPLAINED` | No content explains it — likely left over; review |
-| `UNKNOWN` | Could not determine — not offered for review. Grants were unreadable, or the Set's consumers are uncertain (hidden dependents, a dependent with no author, a dependent of another type) |
+| `UNKNOWN` | Could not determine — not offered for review. Grants were unreadable, or the Set's consumers are uncertain (a failed dependents lookup, hidden dependents, a dependent with no author, a dependent of another type) |
 
 Only `UNEXPLAINED` grants go on the review list. For grant changes today, point to `ts share`.
 
 Always read out the **Scan notes** — the top-level `notes[]` (`org_skipped`) and each Org's
-`notes[]`:
+`notes[]`. An `org_skipped` note with `reason: "malformed"` (an Org row with no `orgId` or
+`status`) makes the totals a floor; `reason: "inactive"` is a scope choice:
 
 | Note kind | Say |
 |---|---|
@@ -130,8 +135,9 @@ Say plainly that nothing was changed.
 - Granting **edit** on a Set without access to its Model fails on save (BL-326, parked).
 - `REVIEW_DELETE` cannot see unsaved ad-hoc searches.
 - Group membership is not expanded: a user explained only via their group reads `UNEXPLAINED`.
-- Liveboard-filter detection (`KEEP_FILTER`) has no live fixture yet; it is covered by unit
-  tests only (open item #4).
+- **Liveboard-filter detection (`KEEP_FILTER`) is not yet verified live** — no fixture
+  exists, so it is covered by unit tests only (open item #4, DEFERRED to BL-327). Check every
+  `CANDIDATE_VIZ` by hand for Liveboard filters.
 
 ---
 

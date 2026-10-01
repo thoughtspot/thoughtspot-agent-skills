@@ -3728,8 +3728,8 @@ without waiting for the platform.
              {"org": "Tenant2", "model": "Ops", "model_guid": "...",
               "cohort_columns": [{"name": "(discovery incomplete)", "guid": ""}],
               "dependents": []}],
- "discovery_notes": [{"kind": "discovery_failed", "object": "Ops (...)",
-                      "detail": "cohort listing failed: ..."}]}
+ "discovery_notes": [{"org": "Tenant2", "kind": "discovery_failed",
+                      "object": "Ops (...)", "detail": "cohort listing failed: ..."}]}
 ```
 
 `summary.models_incomplete` counts the Models in `blocked` **only** because their cohort
@@ -3806,7 +3806,7 @@ name `[Set Name]`, and reads `DEFINED` grants on the Set and its consumers.
 | `…sets[]` | `guid, name, model_guid, model_name, author, cohort_type, grouping_type, anchor_column, class, reason, target, dependents[], dependents_complete, liveboards{}, grants[]` |
 | `…dependents_complete` | `false` when the dependents list may be short (failed or partial lookup, an uninspected dependent type, an unreadable export). The report then shows the count as "unknown" or "≥N", never as a total |
 | `…grants[]` | `{principal_id, principal_name, principal_type, permission, provenance}` |
-| `notes[]` (top level) | `org_skipped` |
+| `notes[]` (top level) | `org_skipped`, with `reason`: `inactive` (a scope choice) or `malformed` (no `orgId`/`status` — the report marks the totals a floor) |
 | `summary` | `models, models_incomplete, sets, by_class, unexplained_grants, unknown_grants` |
 
 `--dry-run` output is `{schema, dry_run: true, scope, orgs: [{org, models}], notes}`.
@@ -3832,7 +3832,7 @@ A Set referenced only inside a visualization formula counts as used.
 | `REQUIRED` | View, and the principal owns (authored) content that uses the Set — revoking breaks it |
 | `EXPLAINED` | View, and the principal holds a grant on content that uses the Set (copied at share time) |
 | `UNEXPLAINED` | View, and no consumer explains it — the only label on the review list |
-| `UNKNOWN` | Grants could not be read, **or** consumers are uncertain (hidden dependents, a dependent with no author, an uninspected dependent type), so `EXPLAINED`/`UNEXPLAINED` cannot be decided |
+| `UNKNOWN` | Grants could not be read, **or** consumers are uncertain (a failed dependents lookup, hidden dependents, a dependent with no author, an uninspected dependent type), so `EXPLAINED`/`UNEXPLAINED` cannot be decided |
 
 `NO_ACCESS` grants are dropped.
 
