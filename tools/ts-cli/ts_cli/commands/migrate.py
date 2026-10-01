@@ -166,9 +166,10 @@ def scan_sets(
 
     A Set creates a `COHORT_*` `LOGICAL_COLUMN` owned by the Model, which blocks
     publishing that Model **and every Answer and Liveboard on it, used or not**. The
-    column is invisible in TML, so this scans `metadata/search` — a TML inspection would
-    report a clean Model that is in fact blocked, and a lift-and-shift would drop the Set
-    silently rather than fail.
+    column is invisible in TML, so this reads each Model's cohort listing — a TML
+    inspection would report a clean Model that is in fact blocked, and a lift-and-shift
+    would drop the Set silently rather than fail. A Model whose listing fails is reported
+    as blocked (`(discovery incomplete)`), never as clean.
 
     Examples:
 
@@ -206,10 +207,13 @@ def scan_sets(
             continue
         scanned_models += len(models)
 
-        # ONE LOGICAL_COLUMN search per Org, sliced per Model. The scan's justification is
-        # being cheap enough to run fleet-wide, so it must not scale with Model count.
-        rows = discover.all_cohort_column_rows(client)
-        by_owner = sets_scan.extract_cohort_columns(rows, [m["guid"] for m in models])
+        # Shared Set discovery (BL-325): one cheap cohort-listing call per Model
+        # (0.3-1.7s live), membership by `cohortConfig`, never by header type. The old
+        # cluster-wide LOGICAL_COLUMN search did not finish in 2h45m on se-thoughtspot.
+        # A Model whose listing fails maps to a `(discovery incomplete)` sentinel, so it
+        # is reported BLOCKED rather than clean.
+        from ts_cli.sets.discover import by_owner as _by_owner, discover_sets
+        by_owner = _by_owner(discover_sets(client, models))
 
         for entry in models:
             cohort = by_owner.get(entry["guid"])
@@ -217,6 +221,8 @@ def scan_sets(
                 continue
             dependents: List[dict] = []
             for column in cohort:
+                if not column["guid"]:
+                    continue   # the incomplete sentinel: blocked, but nothing to look up
                 dependents += sets_scan.normalise_dependents(
                     discover.column_dependents(client, column["guid"]))
             blocked.append(sets_scan.build_blocked_entry(
@@ -299,11 +305,11 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
         # in the Model's TML and the audit never queries LOGICAL_COLUMN, so without
         # this a bare apply proceeds and drops the tenant's Sets silently -- exactly
         # what the documented "refuses, no override" contract promises cannot happen
-        # (audit 2026-07-29 finding 17.6). One search for the whole Org.
-        from ts_cli.migrate import sets_scan
-        blocked = set(sets_scan.extract_cohort_columns(
-            discover.all_cohort_column_rows(source_client),
-            [g for g in guids_by_name.values() if g]))
+        # (audit 2026-07-29 finding 17.6). Shared discovery, one call per mapped Model
+        # (BL-325); a Model whose listing fails counts as blocked, so apply refuses.
+        from ts_cli.sets.discover import by_owner as _by_owner, discover_sets
+        blocked = set(_by_owner(discover_sets(
+            source_client, [{"guid": g, "name": n} for n, g in guids_by_name.items() if g])))
     problems = validate_apply(
         rows, blocked_model_guids=blocked,
         model_guids_by_name={k: v for k, v in guids_by_name.items() if v})

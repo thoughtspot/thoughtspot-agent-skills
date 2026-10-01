@@ -3699,8 +3699,12 @@ Verified live 2026-07-26. Three facts:
 
 Fact 2 is the dangerous one, and it dictates the implementation: because the column is
 invisible in TML, a lift-and-shift would **silently drop** Sets rather than fail. So the
-scan queries `metadata/search` for `COHORT_*` subtypes — a TML inspection reports a clean
-Model that is in fact blocked.
+scan reads each Model's cohort listing through the shared Set discovery
+(`ts_cli/sets/discover.py`) — a TML inspection reports a clean Model that is in fact
+blocked. Membership is the presence of `cohortConfig`, never the header `type`, which was
+blank on 2 of 3 live Sets (BL-325). A Model whose listing fails is reported **blocked**,
+with the cohort column `(discovery incomplete)`, never clean; `apply`'s self-scan refuses it
+the same way.
 
 ### Output
 
@@ -3732,9 +3736,10 @@ low-risk tenants migrate now, Sets-using tenants form a later batch.
 
 ### Cost
 
-One `LOGICAL_COLUMN` search per Org, sliced per Model — deliberately not one call per
-Model, because being cheap enough to run fleet-wide is the command's whole justification.
-Dependents are walked only for Models that actually carry a cohort column.
+One cohort-listing call per Model (0.3–1.7s each, live). The earlier design — one
+cluster-wide `LOGICAL_COLUMN` search per Org — did not finish in 2h45m on se-thoughtspot
+(BL-325). Dependents are walked only for Models that actually carry a cohort column, and
+are queried as `LOGICAL_COLUMN`; the default `LOGICAL_TABLE` returns nothing for a Set.
 
 ---
 

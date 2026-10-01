@@ -12131,7 +12131,7 @@ exists.
 **Filed:** 2026-10-01.
 **Source:** live probes on se-thoughtspot, 2026-09-30 (Model *Dunder Mifflin*, `829a3344-…`; Set *Static Top 10*, `60a9794b-…`). Design: `docs/superpowers/specs/2026-10-01-ts-object-set-manager-design.md`.
 
-**Finding.** Two defects in `migrate/sets_scan.py` + `migrate/discover.py`:
+**Finding.** Three defects in `migrate/sets_scan.py` + `migrate/discover.py`:
 
 1. `is_cohort_row` matches `metadata_header.type` by `COHORT` prefix. Two of the three live
    Sets had `type: ''` (only the newest read `COHORT_ADVANCED`), so they are not counted — a
@@ -12139,9 +12139,16 @@ exists.
    exact failure the scan exists to prevent.
 2. Discovery issues one unpaged cluster-wide `LOGICAL_COLUMN` search; on se-thoughtspot it timed
    out three times (60s each). `subtypes: [COHORT_*]` cannot narrow it — the enum rejects it.
+3. `discover.column_dependents` called `_collect_dependents` with the default
+   `LOGICAL_TABLE`; a Set's dependents need `LOGICAL_COLUMN`, so every blocked Model's
+   Answer/Liveboard list was empty. Also: `publish_planning._cohort_columns` has the same
+   `type`-prefix defect as (1) — not yet switched.
 
-**Fix.** Switch `scan-sets` to the shared `ts_cli/sets/discover.py` (paged, owner-filtered,
-confirmed by export, never reads `type`).
+**Fix.** Switch `scan-sets` and `apply`'s self-scan to the shared `ts_cli/sets/discover.py`
+(one cohort-listing call per Model, membership by `cohortConfig`, never reads `type`; a failed
+listing reports the Model blocked, never clean), and query Set dependents as `LOGICAL_COLUMN`.
+The type-prefix helpers (`is_cohort_row`, `extract_cohort_columns`, `all_cohort_column_rows`)
+are deleted. `publish_planning._cohort_columns` remains open.
 
 **Target:** with ts-object-set-manager v1.
 

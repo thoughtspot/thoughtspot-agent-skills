@@ -17,7 +17,8 @@ and its output is a fleet roll-up rather than a per-tenant mapping file.
 3. It **blocks publishing** the Model and every Answer and Liveboard on it, used or not.
 
 Fact 2 is the dangerous one, and it is the reason this scan exists rather than a TML
-inspection: because the column is invisible in TML, a lift-and-shift would **silently
+inspection. Detection itself lives in `ts_cli.sets.discover` (BL-325: the old header-type
+prefix match missed Sets whose type was blank, 2 of 3 live): because the column is invisible in TML, a lift-and-shift would **silently
 drop** Sets rather than fail, and nobody would notice until a tenant asked where theirs
 went. A TML-based check would report a clean Model that is in fact blocked.
 """
@@ -25,50 +26,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Set
 
-# A Set's column carries a `COHORT_*` subtype (`COHORT_SIMPLE` observed live). Matched by
-# prefix rather than equality so a future COHORT_ variant is not silently missed -- the
-# failure mode of an exact match here is reporting a blocked Model as clean.
-COHORT_PREFIX = "COHORT"
-
 # Only these can depend on a cohort column in a way that matters for migration. A
 # dependent of another type is recorded but never counted as an affected object.
 REPORTABLE_DEPENDENT_TYPES = ("ANSWER", "LIVEBOARD")
-
-
-def is_cohort_row(row: Dict[str, Any]) -> bool:
-    """Is this `metadata/search` row a Set's cohort column?"""
-    header = row.get("metadata_header") or {}
-    return str(header.get("type", "")).upper().startswith(COHORT_PREFIX)
-
-
-def extract_cohort_columns(rows: Iterable[Dict[str, Any]],
-                           owner_guids: Iterable[str]) -> Dict[str, List[Dict[str, str]]]:
-    """`{owner_guid: [{"name", "guid"}]}` for cohort columns owned by the named objects.
-
-    Mirrors `publish_planning._cohort_columns`, which the spec names as the reference
-    implementation, but keyed BY OWNER rather than flattened: a fleet report has to say
-    which Model is blocked, not merely that something is.
-
-    Rows whose owner is not in `owner_guids` are skipped, so the caller can pass one
-    cluster-wide `LOGICAL_COLUMN` search and slice it per Model without re-querying.
-    """
-    owners = set(owner_guids)
-    found: Dict[str, List[Dict[str, str]]] = {}
-    for row in rows or ():
-        if not is_cohort_row(row):
-            continue
-        header = row.get("metadata_header") or {}
-        owner = header.get("owner")
-        if owner not in owners:
-            continue
-        name = row.get("metadata_name") or header.get("name")
-        guid = row.get("metadata_id") or header.get("id")
-        if not name or not guid:
-            continue
-        bucket = found.setdefault(owner, [])
-        if not any(existing["guid"] == guid for existing in bucket):
-            bucket.append({"name": name, "guid": guid})
-    return {owner: sorted(cols, key=lambda c: c["name"]) for owner, cols in found.items()}
 
 
 def normalise_dependents(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, str]]:

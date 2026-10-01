@@ -80,24 +80,40 @@ def test_content_with_no_source_grants_gets_none():
 _MODEL_ROW = {"metadata_id": "g1", "metadata_name": "Sales",
               "metadata_type": "LOGICAL_TABLE",
               "metadata_header": {"ownerOrgId": 1}}
-_COHORT_ROW = {"metadata_id": "cc-1", "metadata_name": "Region Set",
-               "metadata_header": {"owner": "g1", "type": "COHORT_ATTRIBUTE"}}
+# A row of the per-Model cohort listing (`/callosum/v1/metadata/detail/{guid}`,
+# fetchcohortcolumnsonly). Membership is `cohortConfig`, never the header type (BL-325).
+_COHORT_ROW = {"header": {"id": "cc-1", "name": "Region Set", "type": "COHORT_ATTRIBUTE"},
+               "cohortConfig": {"name": "Region Set"}}
 
 
-def _client(cohort_rows):
+def _client(cohort_rows, fail_discovery=False):
+    """Mock source client. `client.get` serves the session read-back and the per-Model
+    cohort listing; `fail_discovery` makes the listing exit as the client does after
+    its own retries."""
     def post(path, json=None, **kw):
         if "metadata/search" in path:
             meta = (json or {}).get("metadata", [{}])[0]
-            if meta.get("type") == "LOGICAL_COLUMN":
-                return MagicMock(json=lambda: list(cohort_rows))
             if meta.get("name_pattern"):
                 return MagicMock(json=lambda: [_MODEL_ROW])
         return MagicMock(json=lambda: [])
 
+    def get(path, params=None, **kw):
+        if "/callosum/v1/metadata/detail/" in path:
+            if fail_discovery:
+                raise SystemExit(1)
+            rows = list(cohort_rows) if path.endswith("/g1") else []
+            return MagicMock(json=lambda: rows)
+        return MagicMock(json=lambda: {"current_org": {"id": 1}})
+
     client = MagicMock()
     client.post.side_effect = post
-    client.get.return_value = MagicMock(json=lambda: {"current_org": {"id": 1}})
+    client.get.side_effect = get
     return client
+
+
+def _detail_gets(client):
+    return [c for c in client.get.call_args_list
+            if "/callosum/v1/metadata/detail/" in c.args[0]]
 
 
 def _write_single_model_mapping(tmp_path):
@@ -150,9 +166,110 @@ def test_a_supplied_sets_scan_skips_the_self_scan(mock_cls, _rp, tmp_path):
                                  "--source-profile", "src",
                                  "--target-profile", "tgt", "--dry-run"])
     assert "SET_BLOCKER" not in result.stderr
-    column_searches = [c for c in client.post.call_args_list
-                       if "metadata/search" in c.args[0]
-                       and (c.kwargs.get("json") or {}).get("metadata",
-                                                            [{}])[0].get("type")
-                       == "LOGICAL_COLUMN"]
-    assert not column_searches
+    assert not _detail_gets(client)
+
+
+# ---------------------------------------------------------------------------
+# BL-325 -- the gate uses shared Set discovery
+# ---------------------------------------------------------------------------
+
+def test_column_dependents_queries_logical_column():
+    """BL-325 (3): Set dependents need type LOGICAL_COLUMN; the default returns none."""
+    from ts_cli.migrate.discover import column_dependents
+    seen = {}
+    c = MagicMock()
+    c.post.side_effect = lambda path, json=None, **kw: (seen.update(json), MagicMock(json=lambda: []))[1]
+    column_dependents(c, "s1")
+    assert seen["metadata"][0]["type"] == "LOGICAL_COLUMN"
+
+
+def _apply(tmp_path):
+    _write_single_model_mapping(tmp_path)
+    return runner.invoke(app, ["migrate", "apply", "-d", str(tmp_path),
+                               "--source-profile", "src",
+                               "--target-profile", "tgt", "--dry-run"])
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_a_blank_type_set_still_blocks_apply(mock_cls, _rp, tmp_path):
+    """BL-325 (1): 2 of 3 live Sets had a blank header type."""
+    mock_cls.return_value = _client([dict(_COHORT_ROW, header=dict(_COHORT_ROW["header"], type=""))])
+    result = _apply(tmp_path)
+    assert result.exit_code == 1 and "SET_BLOCKER" in result.stderr
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_apply_refuses_when_discovery_for_the_mapped_model_fails(mock_cls, _rp, tmp_path):
+    """A failed cohort listing must make the gate stricter, never looser: a Model whose
+    Sets could not be listed is treated as blocked, not as clean."""
+    client = _client([], fail_discovery=True)
+    mock_cls.return_value = client
+    result = _apply(tmp_path)
+    assert _detail_gets(client)
+    assert result.exit_code == 1 and "SET_BLOCKER" in result.stderr
+
+
+_LONG_GUID = "00000000-0000-0000-0000-0000000000g1"
+
+
+def _scan(client):
+    with patch("ts_cli.commands.share._client_for_org", return_value=client):
+        return runner.invoke(app, ["migrate", "scan-sets", "--model", _LONG_GUID,
+                                   "--source-profile", "src"])
+
+
+def _scan_client(cohort_rows, fail_discovery=False, dependents=()):
+    client = _client(cohort_rows, fail_discovery)
+    base_get = client.get.side_effect
+
+    def get(path, params=None, **kw):
+        if path.endswith("/" + _LONG_GUID):
+            path = path[: -len(_LONG_GUID)] + "g1"
+        return base_get(path, params=params, **kw)
+
+    def post(path, json=None, **kw):
+        if "metadata/search" in path:
+            meta = (json or {}).get("metadata", [{}])[0]
+            if meta.get("type") == "LOGICAL_COLUMN":
+                return MagicMock(json=lambda: [{"dependent_objects": {
+                    "dependents": {meta.get("identifier", ""): {"QUESTION_ANSWER_BOOK": list(dependents)}}}}])
+        return MagicMock(json=lambda: [])
+
+    client.get.side_effect = get
+    client.post.side_effect = post
+    return client
+
+
+def test_scan_sets_blocks_a_blank_type_set_and_queries_its_dependents_as_logical_column():
+    client = _scan_client([dict(_COHORT_ROW, header=dict(_COHORT_ROW["header"], type=""))])
+    result = _scan(client)
+    assert result.exit_code == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["summary"]["models_blocked"] == 1
+    assert report["blocked"][0]["cohort_columns"] == [{"name": "Region Set", "guid": "cc-1"}]
+    dep_calls = [c.kwargs["json"]["metadata"][0] for c in client.post.call_args_list
+                 if "metadata/search" in c.args[0]]
+    assert dep_calls and all(m["type"] == "LOGICAL_COLUMN" and m["identifier"] == "cc-1"
+                             for m in dep_calls)
+
+
+def test_scan_sets_reports_a_failed_discovery_as_blocked_without_a_blank_dependents_lookup():
+    """Amendment 2: the `(discovery incomplete)` sentinel has guid "" -- it must still
+    block the Model, and must never be passed to `column_dependents`."""
+    client = _scan_client([], fail_discovery=True)
+    with patch("ts_cli.migrate.discover.column_dependents") as deps:
+        result = _scan(client)
+    assert result.exit_code == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["summary"]["models_blocked"] == 1
+    assert report["blocked"][0]["cohort_columns"] == [
+        {"name": "(discovery incomplete)", "guid": ""}]
+    assert not deps.call_args_list
+
+
+def test_scan_sets_leaves_a_clean_model_unblocked():
+    result = _scan(_scan_client([]))
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout)["summary"]["models_blocked"] == 0
