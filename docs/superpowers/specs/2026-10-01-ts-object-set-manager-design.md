@@ -241,3 +241,21 @@ Per the root `CLAUDE.md` change-impact map:
 | Granting edit on Sets | BL-326 — parked by the user |
 | Connection scope | BL-328 — parked |
 | Answer-level Set inventory (`answer.cohorts[]`) | Not requested; v1 covers reusable Sets only |
+
+---
+
+## Appendix A — live checks (2026-10-01)
+
+Read-only probes on se-thoughtspot (Primary Org). The probe scripts were throwaway and are not committed.
+
+| Check | Result |
+|---|---|
+| Paged `LOGICAL_COLUMN` search, page size 500 | **Did not finish.** At least **144,000 rows** (offsets 0–143,500, every page full) seen across **2h45m** of page time (0–76,000: 2,659s; 76,000–144,000: 7,198s) before the 2h background cap stopped it. No HTTP errors and no client timeouts at 120s. **Page latency grows linearly with offset:** ~4.7s at offset 0, ~17s at 50k, ~30s at 75k, ~55s at 110k, 71–86s at 140k+. The slowest page took 85.8s, so the 120s timeout would trip soon after. In the first 76,000 rows: 4,580 distinct `owner` values. 63 rows read `metadata_header.type` `COHORT_*` (44 ADVANCED, 19 SIMPLE), a lower bound because of F2 |
+| Where Dunder Mifflin's columns sit | All 34 rows owned by `829a3344-…` were at offset > 76,000. None were in the first 76,000. Default ordering is therefore no shortcut |
+| Dunder Mifflin Sets (full GUIDs) | `cf2d7861-9417-4b1d-845a-8f70eb0f0270` *Product Basket 1* (`COHORT_ADVANCED`); `4f39eea6-c51e-498a-8acc-fad2f5f58249` *Product Basket 2* (type **blank**); `cad1b0d6-3db6-4076-8595-b939e9b13b00` *Product Basket PC* (type **blank**). Re-confirms F2. The same Model also owns `COHORT_ADVANCED` rows *QS - Maximum tableDate*, *QS - Minimum tableDate*, *QS - Min Quantity*, *Ranked Products* and *Basket Analysis Set For Insights Hour*. Blank-type candidates such as *Ranked Products By Region* need a TML check |
+| Per-Model route (`metadata/search` of the Model, `LOGICAL_TABLE`, `include_details`) | 200, 109,778 bytes, 2.0s. **None of the three Set GUIDs appear.** `metadata_detail.columns` has 25 entries, all physical/formula columns. No key mentions `cohort`. The route is **ruled out**, alongside v2 Model dependents and v1 `dependency/logicaltable` |
+| `sort_options` `CREATED`/`MODIFIED` `DESC` on `LOGICAL_COLUMN` search | Honoured, and fast at low offsets (~2–3s per 500 page). It finds only *recent* Sets: none of Dunder Mifflin's were created after 2026-09-28. Not a discovery route |
+| Set → dependents (`--type LOGICAL_COLUMN`) | `cf2d7861` none; `4f39eea6` ANSWER×1; `cad1b0d6` ANSWER×2; `60a9794b` *Static Top 10* ANSWER×1 (*Testing Share by Edit*); `b929a421` *QS - Minimum tableDate* ANSWER×1 **+ SET×1** (a Set depending on a Set). None of these has a LIVEBOARD dependent |
+| Liveboard using a Set | **Found, no build needed.** Fixture: **`da4f1be1-b6cd-47a2-84bd-f8cffe1d0696` *Formula LB - SC*** (3 vizzes). `Viz_2` (viz_guid `a3c94a83-e5b5-4e55-a27a-936652429b25`) uses Set `69f6aed0-503f-4ded-87b2-bac3ffe391af` *Top Brands* in `search_query` (`… top [Top Brands]`). Liveboard filter on the Set: **no**. Alternate with two Sets: `eb3871ab-c026-4459-ad2e-aad002cc7f3b` *Dynamic Set Selection*, `Viz_1` (viz_guid `a79d5565-…`), which references Sets *mytop5* `3fbe9ac6-…` and *mytop10* `8c1cbe6e-…` inside a viz formula and not in `search_query`. Filter: no. Other Set-using Liveboards: *Just Eat v3* `73df2a30-…` (`Viz_7`, *Promotion Id set*) plus 3 copies; *Aditi D's Demo Retail Liveboard* `2d3898fb-…` (`Viz_33`); *Demo fis lib* `9d0f02cf-…` (`Viz_18`, `Viz_22`); *PM Condor* / *easyJet InFlight Retail Analysis* (*Promotion Type set*). **None of the 6 exported had a Liveboard-level filter on a Set**, and none carried `answer.cohorts` for a reusable Set: reuse shows only as `[Set Name]` in `search_query`/columns or inside a formula |
+
+**Consequences for Task 2.** A cluster-wide paged scan is not viable on se-thoughtspot. It runs for hours, and late pages approach the 120s timeout. The `INCOMPLETE` fallback is therefore the *normal* path on this cluster, not an edge case. Discovery needs a narrower scope: per Org, as F3 already says, or per Model owner. There is no confirmed server-side way to filter `LOGICAL_COLUMN` by owner yet (not probed here).
