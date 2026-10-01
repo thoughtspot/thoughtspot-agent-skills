@@ -171,6 +171,54 @@ def test_set_whose_only_dependent_is_another_set_keeps_h5_silent(disc, cons):
     assert any("s1" in w for w in ctx.warnings)
 
 
+def _client_with_set_dependents(guid, dep_rows):
+    """Model export + a Set dependents lookup carrying BOTH inaccessible flags true —
+    the admin shape observed live on se-thoughtspot 2026-10-02 (ruling R17)."""
+    edoc = yaml.safe_dump(_sample_model(name="Sales", guid=guid))
+
+    def post(url, json=None, **_kw):
+        if url.endswith("/metadata/tml/export"):
+            return _resp([{"edoc": edoc}])
+        md = (json or {}).get("metadata") or [{}]
+        if url.endswith("/metadata/search") and md[0].get("type") == "LOGICAL_COLUMN":
+            return _resp([{"metadata_id": "s1", "dependent_objects": {
+                "hasInaccessibleDependents": True,
+                "areInaccessibleDependentsReturned": True,
+                "dependents": {"s1": dep_rows}}}])
+        return _resp([])
+
+    client = MagicMock()
+    client.post.side_effect = post
+    return client
+
+
+@pytest.mark.parametrize("dep_rows,orphan", [
+    ({}, True),
+    ({"QUESTION_ANSWER_BOOK": [{"id": "a1", "name": "Uses B", "author": "u"}]}, False),
+])
+@patch("ts_cli.audit.context.discover_sets")
+def test_h5_records_sets_whose_hidden_dependents_were_returned(disc, dep_rows, orphan):
+    """R17 end to end through the real fetch_consumers: has+returned is a clean lookup,
+    so the Set is recorded and H5 decides on what was returned."""
+    from ts_cli.audit.checks_human import check_h5
+    from ts_cli.audit.context import build_context
+    disc.return_value = _ONE_SET
+    ctx = build_context(_client_with_set_dependents("m1", dep_rows), ["m1"], ["H"])
+    assert "s1" in ctx.dependents
+    assert not any("s1" in w for w in ctx.warnings)
+    assert [f.object_guid for f in check_h5(ctx)] == (["s1"] if orphan else [])
+
+
+def test_h5_emits_one_finding_per_set_listed_by_several_sources():
+    """R18: the same Set appears under the Model AND each underlying Table's COHORT
+    bucket. One finding per Set, not one per source."""
+    from ts_cli.audit.checks_human import check_h5
+    row = {"type": "SET", "guid": "s1", "name": "B"}
+    ctx = make_context(models=[], tables={})
+    ctx.dependents = {"m1": [dict(row)], "t1": [dict(row)], "t2": [dict(row)], "s1": []}
+    assert [f.object_guid for f in check_h5(ctx)] == ["s1"]
+
+
 @patch("ts_cli.audit.context.fetch_consumers")
 @patch("ts_cli.audit.context.discover_sets")
 def test_incomplete_discovery_is_a_warning_and_invents_no_set_rows(disc, cons):

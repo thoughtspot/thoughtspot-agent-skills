@@ -156,10 +156,16 @@ def check_h4(ctx: AuditContext) -> list:
 
 def check_h5(ctx: AuditContext) -> list:
     findings = []
+    # R18: the same Set is listed under the Model AND under each underlying Table's
+    # COHORT bucket. Emit once per Set guid, not once per source that lists it.
+    seen = set()
     for deps in ctx.dependents.values():
         for d in deps:
             if d.get("type") == "SET":
                 set_guid = d.get("guid", "")
+                if set_guid in seen:
+                    continue
+                seen.add(set_guid)
                 # `build_context` records a SET guid here only when the Set's
                 # consumer lookup was clean (`_add_set_dependents`, BL-324).
                 # Absence means "not looked up", NOT "no consumers" — reporting

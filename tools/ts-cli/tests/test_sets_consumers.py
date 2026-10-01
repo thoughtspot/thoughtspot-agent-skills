@@ -49,7 +49,11 @@ def test_substring_is_not_use():
     assert liveboard_usage(doc, "Top 10 [Q1]")["vizzes"] == []
 
 
-def _client(dep_rows, lb_docs, dep_error=False, dep_payload=None, hidden=False):
+_MISSING = object()
+
+
+def _client(dep_rows, lb_docs, dep_error=False, dep_payload=None, hidden=False,
+            returned=False):
     def post(path, json=None, **kw):
         if "metadata/search" in path:
             if dep_error:
@@ -57,10 +61,10 @@ def _client(dep_rows, lb_docs, dep_error=False, dep_payload=None, hidden=False):
             assert json["metadata"][0]["type"] == "LOGICAL_COLUMN"   # F5
             if dep_payload is not None:
                 return MagicMock(json=lambda: dep_payload)
-            return MagicMock(json=lambda: [{"metadata_id": "s1", "dependent_objects": {
-                "areInaccessibleDependentsReturned": False,
-                "hasInaccessibleDependents": hidden,
-                "dependents": {"s1": dep_rows}}}])
+            dobj = {"hasInaccessibleDependents": hidden, "dependents": {"s1": dep_rows}}
+            if returned is not _MISSING:
+                dobj["areInaccessibleDependentsReturned"] = returned
+            return MagicMock(json=lambda: [{"metadata_id": "s1", "dependent_objects": dobj}])
         if "tml/export" in path:
             doc = lb_docs.get(json["metadata"][0]["identifier"])
             if doc is None:
@@ -122,6 +126,29 @@ def test_inaccessible_dependents_sets_error_but_lists_visible():
 def test_inaccessible_dependents_with_none_visible_is_still_error():
     out = fetch_consumers(_client({}, {}, hidden=True), SET)
     assert out["error"] and out["dependents"] == []
+
+
+def test_inaccessible_dependents_that_were_returned_are_not_an_error():
+    # R17, live 2026-10-02: an admin gets has=true AND returned=true — the hidden
+    # dependents are in the list, so the lookup is complete.
+    deps = {"QUESTION_ANSWER_BOOK": [{"id": "a1", "name": "Ans", "author": "u1"}]}
+    out = fetch_consumers(_client(deps, {}, hidden=True, returned=True), SET)
+    assert out["error"] is None
+    assert [d["guid"] for d in out["dependents"]] == ["a1"]
+
+
+def test_inaccessible_dependents_not_returned_is_error():
+    deps = {"QUESTION_ANSWER_BOOK": [{"id": "a1", "name": "Ans", "author": "u1"}]}
+    out = fetch_consumers(_client(deps, {}, hidden=True, returned=False), SET)
+    assert out["error"] == ("some dependents are not visible to this user "
+                            "(hasInaccessibleDependents)")
+
+
+def test_inaccessible_dependents_with_returned_flag_missing_is_error():
+    deps = {"QUESTION_ANSWER_BOOK": [{"id": "a1", "name": "Ans", "author": "u1"}]}
+    out = fetch_consumers(_client(deps, {}, hidden=True, returned=_MISSING), SET)
+    assert out["error"] and "hasInaccessibleDependents" in out["error"]
+    assert [d["guid"] for d in out["dependents"]] == ["a1"]
 
 
 def test_non_dict_export_is_unreadable():

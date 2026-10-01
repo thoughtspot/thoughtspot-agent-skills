@@ -52,6 +52,12 @@ def liveboard_usage(doc: dict, set_name: str) -> dict:
     return {"vizzes": vizzes, "filter": in_filter}
 
 
+def _dependents_hidden(dep_objects: dict) -> bool:
+    """True when some dependents are inaccessible AND were not returned (ruling R17)."""
+    return bool(dep_objects.get("hasInaccessibleDependents")) and \
+        dep_objects.get("areInaccessibleDependentsReturned") is not True
+
+
 def fetch_consumers(client, set_ref: dict) -> dict:
     from ts_cli.commands.metadata import _build_dependents_payload, _normalize_dependents_response
     out: Dict = {"dependents": [], "liveboards": {}, "unreadable": [], "other_types": [],
@@ -64,9 +70,14 @@ def fetch_consumers(client, set_ref: dict) -> dict:
             # _normalize_dependents_response maps a non-list body to [] — which would read
             # as "no dependents". A failure must never become the more favourable result.
             raise ValueError(f"unexpected dependents response shape: {type(body).__name__}")
-        # The API omits dependents the caller cannot see; this flag is the only signal.
-        # Read it BEFORE normalising (which drops it). Still list what IS visible.
-        hidden = any(((item.get("dependent_objects") or {}).get("hasInaccessibleDependents"))
+        # Two flags, read BEFORE normalising (which drops both):
+        #   hasInaccessibleDependents         — dependents exist that the caller cannot see;
+        #   areInaccessibleDependentsReturned — those dependents were nonetheless returned.
+        # Only has=true WITHOUT returned=true means the list is incomplete; a missing
+        # `returned` counts as not returned. Live 2026-10-02 (se-thoughtspot, ruling R17):
+        # an admin gets BOTH true with the full list, and reading only the first flag
+        # turned every used Set into REVIEW_MANUAL. Still list what IS visible.
+        hidden = any(_dependents_hidden(item.get("dependent_objects") or {})
                      for item in body if isinstance(item, dict))
         rows = _normalize_dependents_response(body)
     except (Exception, SystemExit) as exc:
