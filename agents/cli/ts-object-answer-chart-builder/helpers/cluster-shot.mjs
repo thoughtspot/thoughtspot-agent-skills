@@ -46,6 +46,12 @@ function profileOf(u) {
   const rel = path.relative(profiles, dir);
   return rel && !rel.startsWith("..") && !path.isAbsolute(rel) && !rel.includes(path.sep) ? dir : null;
 }
+// The profiles folder itself must be a real folder inside the cache: a symlink there would point a removal
+// somewhere else.
+if (fs.existsSync(profiles) && (fs.lstatSync(profiles).isSymbolicLink() || path.relative(fs.realpathSync(cacheRoot()), fs.realpathSync(profiles)) !== "cluster-profiles")) {
+  console.error(profiles + " is a link or lies outside " + cacheRoot() + "; refusing to touch it. Remove it by hand.");
+  process.exit(2);
+}
 if (opt.logout) {
   const targets = opt.logout === "all" ? [profiles, legacy] : [profileOf(opt.logout)];
   if (!targets[0]) { console.error("--logout takes a cluster URL, a host name or all; not a host: " + JSON.stringify(opt.logout)); process.exit(2); }

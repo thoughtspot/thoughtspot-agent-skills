@@ -20,6 +20,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { chartDirOf } from "./env.mjs";
+import { checkBackup, GUID } from "./backup-check.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -33,17 +34,8 @@ if (pos.length !== 1 || !P.model || !P.search || !P.name) {
   process.exit(2);
 }
 
-if (P.guid && MODE === "commit") {
-  const f = val("--backup") && path.resolve(val("--backup"));
-  const stop = (m) => { console.error("--backup: " + m); process.exit(2); };
-  if (!f) stop("updating answer " + P.guid + " needs a backup of it first: export its TML (ts tml export, or Export TML in ThoughtSpot) to ~/.cache/ts-charts/backups/ and pass --backup <file>");
-  if (!fs.existsSync(f) || !fs.statSync(f).size) stop(f + " is missing or empty");
-  const txt = fs.readFileSync(f, "utf8");
-  if (!txt.includes(P.guid)) stop(f + " does not name answer " + P.guid);
-  if (Date.now() - fs.statSync(f).mtimeMs > 24 * 3600 * 1000) stop(f + " is more than a day old; export it again");
-  for (let d = path.dirname(f); ; d = path.dirname(d)) { if (fs.existsSync(path.join(d, ".git"))) stop(f + " is inside the git working tree " + d + "; keep backups out of repos"); if (d === path.dirname(d)) break; }
-  P.backup = { file: path.basename(f), bytes: txt.length };
-}
+if (P.guid && !GUID.test(P.guid)) { console.error("--answer takes the answer's guid, not " + JSON.stringify(P.guid)); process.exit(2); }
+if (P.guid && MODE === "commit") P.backup = checkBackup(val("--backup"), P.guid, "answer");
 // A path to a folder with the three files, or a library slug (the user's library first, then the shipped one).
 let dir = path.resolve(pos[0]);
 if (!fs.existsSync(path.join(dir, "chart.js"))) dir = chartDirOf(pos[0]);

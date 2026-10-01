@@ -30,7 +30,8 @@ const ms = await ts.post('/api/rest/2.0/metadata/search', { metadata: [{ type: '
 if (ms.status !== 200 || !ms.body || !ms.body.length) return { refused: 'model not found: ' + P.model, http: ms.status };
 const model = { guid: ms.body[0].metadata_id, name: ms.body[0].metadata_name };
 const q = await ts.post('/api/rest/2.0/searchdata', { logical_table_identifier: model.guid, query_string: P.search, record_size: 1 });
-const cols = q.status === 200 && q.body.contents && q.body.contents[0] ? q.body.contents[0].column_names : null;
+const cn = q.status === 200 && q.body && q.body.contents && q.body.contents[0] && q.body.contents[0].column_names;
+const cols = Array.isArray(cn) && cn.length ? cn : null; // no columns is a failed search, not an empty chart
 if (!cols) return { refused: 'search failed on ' + model.name + ': ' + P.search, raw: JSON.stringify(q.body).slice(0, 600) };
 let old = null;
 if (P.guid) {
@@ -69,7 +70,8 @@ if (old) {
   const oldTable = old.table || null, oldTc = byName(oldTable && oldTable.table_columns, 'column_id');
   const oldChart = old.chart && old.chart.type === 'MUZE_STUDIO' ? old.chart : null;
   const oldCc = byName(oldChart && oldChart.chart_columns, 'column_id');
-  const tablesOk = (old.tables || []).some((t) => t.fqn === model.guid || t.id === model.name || t.name === model.name);
+  // The old tables are kept only when they point at this model: by fqn when they have one, by name otherwise.
+  const tablesOk = (old.tables || []).some((t) => (t.fqn ? t.fqn === model.guid : t.id === model.name || t.name === model.name));
   merged = {
     ...old, ...answer,
     name: answer.name, search_query: answer.search_query,
@@ -91,6 +93,12 @@ if (old) {
   if (!tablesOk && old.tables) replaced.push('tables (the model changed)');
   if (old.chart && !oldChart) replaced.push('chart: a native ' + old.chart.type + ' chart and its settings');
   if (old.display_mode && old.display_mode !== answer.display_mode) replaced.push('display_mode ' + old.display_mode);
+  if (oldChart) {
+    // The old custom chart's code and visual settings (columns, legend, labels...) and its field mapping.
+    if (oldChart.custom_visual_props && oldChart.custom_visual_props !== answer.chart.custom_visual_props) replaced.push('custom chart code and visual settings (custom_visual_props)');
+    if (oldChart.custom_chart_config && JSON.stringify(oldChart.custom_chart_config) !== JSON.stringify(answer.chart.custom_chart_config)) replaced.push('custom chart field mapping (custom_chart_config)');
+  }
+  if (P.description !== undefined && old.description && old.description !== P.description) replaced.push('description');
 }
 const tml = P.guid ? { guid: P.guid, answer: merged } : { answer };
 const text = JSON.stringify(tml);
@@ -114,15 +122,31 @@ if (!r0 || !r0.status || r0.status.status_code !== 'OK') { summary.raw = JSON.st
 if (MODE === 'commit') {
   const guid = (r0.header && (r0.header.id_guid || r0.header.id)) || P.guid;
   summary.guid = guid;
-  const ex = await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: guid, type: 'ANSWER' }], edoc_format: 'JSON' });
-  const back = JSON.parse(ex.body[0].edoc).answer;
-  const code = JSON.parse(JSON.parse(back.chart.custom_visual_props).clientState).playground.code;
-  const got = { html: await sha256(unb64(code.htmlCodeBase64)), css: await sha256(unb64(code.cssCodeBase64)), js: await sha256(unb64(code.jsCodeBase64)) };
-  summary.chartType = back.chart.type;
-  const failed = ['html', 'css', 'js'].filter((k) => got[k] !== P.sha[k]);
-  // Formulas and parameters the answer had must still be there, by name.
-  const names = (a, k) => ((a && a[k]) || []).map((x) => x.name || x.id).sort();
-  for (const k of ['formulas', 'parameters']) { const want = names(old, k), have = names(back, k); const miss = want.filter((n) => !have.includes(n)); if (miss.length) failed.push(k + ': ' + miss.join(', ')); }
+  let back;
+  try {
+    const ex = await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: guid, type: 'ANSWER' }], edoc_format: 'JSON' });
+    back = JSON.parse(ex.body[0].edoc).answer;
+  } catch (e) {
+    summary.roundTripOk = false;
+    summary.roundTripError = 'the commit landed but the answer could not be exported to check it (' + String(e && e.message || e).slice(0, 200) + '); open it, and restore from the backup if anything is wrong';
+    return summary;
+  }
+  const failed = [];
+  let code = null;
+  try { code = JSON.parse(JSON.parse(back.chart.custom_visual_props).clientState).playground.code; } catch (e) { failed.push('chart code unreadable'); }
+  if (code) {
+    const got = { html: await sha256(unb64(code.htmlCodeBase64 || '')), css: await sha256(unb64(code.cssCodeBase64 || '')), js: await sha256(unb64(code.jsCodeBase64 || '')) };
+    for (const k of ['html', 'css', 'js']) if (got[k] !== P.sha[k]) failed.push(k);
+  }
+  summary.chartType = back.chart && back.chart.type;
+  // Formulas and parameters the answer had must still be there, unchanged.
+  const byName = (a, k) => Object.fromEntries(((a && a[k]) || []).map((x) => [x.name || x.id, JSON.stringify(x)]));
+  for (const k of ['formulas', 'parameters']) {
+    const want = byName(old, k), have = byName(back, k);
+    const miss = Object.keys(want).filter((n) => !(n in have)), diff = Object.keys(want).filter((n) => n in have && have[n] !== want[n]);
+    if (miss.length) failed.push(k + ' lost: ' + miss.join(', '));
+    if (diff.length) failed.push(k + ' changed: ' + diff.join(', '));
+  }
   summary.roundTripOk = !failed.length;
   if (failed.length) summary.roundTripFailed = failed;
 }

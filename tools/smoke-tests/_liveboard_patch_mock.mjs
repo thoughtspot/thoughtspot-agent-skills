@@ -81,18 +81,21 @@ const base = () => JSON.parse(JSON.stringify({
   }
 }));
 
-// A mock cluster. `opts.search` fails searches; `opts.lose` drops a visualization on import (a server-side loss).
+// A mock cluster. `opts.search` fails searches, `opts.cols` sets the columns a search returns; `opts.lose` drops a
+// visualization on import and `opts.mutate` edits what was imported (server-side changes); `opts.exportDown`
+// fails every export after the commit.
 function cluster(doc, opts = {}) {
   const st = { stored: JSON.parse(JSON.stringify(doc)), imports: [] };
   st.ts = {
     async post(url, body) {
-      if (url.endsWith("/metadata/tml/export")) return { status: 200, body: [{ edoc: JSON.stringify(st.stored) }] };
-      if (url.endsWith("/searchdata")) return opts.search === "fail" ? { status: 500, body: { error: "timeout" } } : { status: 200, body: { contents: [{ column_names: ["Region", "Total Sales"] }] } };
+      if (url.endsWith("/metadata/tml/export")) { if (opts.exportDown && st.imports.includes("ALL_OR_NONE")) throw new Error("socket hang up"); return { status: 200, body: [{ edoc: JSON.stringify(st.stored) }] }; }
+      if (url.endsWith("/searchdata")) return opts.search === "fail" ? { status: 500, body: { error: "timeout" } } : { status: 200, body: { contents: [{ column_names: opts.cols || ["Region", "Total Sales"] }] } };
       if (url.endsWith("/metadata/tml/import")) {
         st.imports.push(body.import_policy);
         if (body.import_policy === "ALL_OR_NONE") {
           st.stored = JSON.parse(body.metadata_tmls[0]);
           if (opts.lose) st.stored.liveboard.visualizations = st.stored.liveboard.visualizations.filter((v) => v.id !== opts.lose);
+          if (opts.mutate) opts.mutate(st.stored.liveboard);
         }
         return { status: 200, body: [{ response: { status: { status_code: "OK" } } }] };
       }
@@ -156,10 +159,12 @@ expect(same(sf.imports, ["VALIDATE_ONLY"]) && same(sf.stored, base()), "failed s
 // 4. An untabbed Liveboard is refused before anything is composed.
 const flat = base(); flat.liveboard.layout = { tiles: flat.liveboard.layout.tabs.flatMap((t) => t.tiles) };
 const un = await run(withBackup, flat);
-expect(/no tabs/.test(un.summary.refused || "") && !un.imports.length && same(un.stored, flat), "untabbed: refused, nothing imported");
+expect(/without tabs/.test(un.summary.refused || "") && !un.imports.length && same(un.stored, flat), "untabbed: refused, nothing imported");
 
-// 5. Two tiles marked with one slug and neither at its spec position: no telling which is the skill's.
+// 5. Two tiles marked with one slug on a spec tab, neither at its spec position: no telling which is the skill's.
 const tie = base(); tie.liveboard.layout.tabs[0].tiles[0].x = 6;
+tie.liveboard.layout.tabs[2].tiles = tie.liveboard.layout.tabs[2].tiles.filter((x) => x.visualization_id !== "Viz_6");
+tie.liveboard.layout.tabs[0].tiles.push({ visualization_id: "Viz_6", x: 0, y: 20, width: 12, height: 4 });
 const t5 = await run(withBackup, tie);
 expect(has(t5.summary, /about-guide: 2 tiles/) && same(t5.stored, tie), "copy conflict: reported, Liveboard unchanged");
 
@@ -176,5 +181,48 @@ expect(a2.summary.roundTripAllOk === true && same(a2.summary.marked, ["about-gui
 // 7. A loss on the server side fails the round trip.
 const lo = await run(withBackup, base(), { lose: "Viz_2" });
 expect(lo.summary.roundTripAllOk === false && (lo.summary.roundTripLost || []).length === 1, "server-side loss: the round trip fails and names it");
+
+// 8. A search that returns no columns is a failed search, not a tile with no columns.
+const ec = await run(withBackup, base(), { cols: [] });
+expect(has(ec.summary, /SEARCH FAILED/) && same(ec.imports, ["VALIDATE_ONLY"]) && same(ec.stored, base()), "empty columns: refused, Liveboard unchanged");
+
+// 9. A layout with both layout.tiles and tabs is refused (merging would orphan the untabbed tiles).
+const mixed = base(); mixed.liveboard.layout.tiles = [{ visualization_id: "Viz_2", x: 0, y: 0, width: 6, height: 2 }];
+const mx = await run(withBackup, mixed);
+expect(/without tabs/.test(mx.summary.refused || "") && !mx.imports.length && same(mx.stored, mixed), "mixed layout: refused, nothing imported");
+
+// 10. A marked tile on a tab the spec does not name is the user's, even when it is the only one of its slug.
+const lone = base(); lone.liveboard.visualizations = lone.liveboard.visualizations.filter((x) => x.id !== "Viz_4");
+lone.liveboard.layout.tabs[0].tiles = lone.liveboard.layout.tabs[0].tiles.filter((x) => x.visualization_id !== "Viz_4");
+const ln = await run(pack("--backup", backupFile, "--max", "900000", "about-guide"), lone);
+const lnAfter = ln.stored.liveboard;
+expect(ln.summary.roundTripAllOk === true && same(lnAfter.visualizations.find((x) => x.id === "Viz_6"), copy) && lnAfter.layout.tabs.find((t) => t.name === "Mine").tiles.some((t) => t.visualization_id === "Viz_6"), "lone copy on the user's tab: kept verbatim in place, the spec tile built fresh");
+
+// 11. Server-side changes to what the skill did not own fail the round trip.
+for (const [what, mutate] of [
+  ["parameters dropped", (l) => { delete l.parameters; }],
+  ["a user filter changed", (l) => { l.filters.find((f) => f.column[0] === "region").values = ["East"]; }],
+  ["Liveboard renamed", (l) => { l.name = "Renamed"; }],
+  ["a native chart's settings changed", (l) => { l.visualizations.find((x) => x.id === "Viz_1").answer.chart.axis_configs = [{ y: ["Total Sales"] }]; }],
+  ["a tab tile points at a missing visualization", (l) => { l.layout.tabs.find((t) => t.name === "Notes").tiles[0].visualization_id = "Viz_99"; }],
+]) {
+  const r = await run(withBackup, base(), { mutate });
+  expect(r.summary.roundTripAllOk === false, "server-side change caught: " + what);
+}
+
+// 12. An export failure after the commit is reported, not thrown.
+const ed = await run(withBackup, base(), { exportDown: true });
+expect(ed.summary.roundTripAllOk === false && /commit landed/.test(ed.summary.roundTripError || ""), "export down after commit: reported, not thrown");
+
+// 13. Backups that only look right.
+const future = path.join(scratch, "future.json"); fs.writeFileSync(future, JSON.stringify({ guid: LB, liveboard: {} })); fs.utimesSync(future, new Date("2099-01-01"), new Date("2099-01-01"));
+expect(packFails("--backup", future), "backup: a future-dated file is refused");
+const mention = path.join(scratch, "mention.json"); fs.writeFileSync(mention, JSON.stringify({ guid: OTHER_LB, liveboard: { description: "copied from " + LB } }));
+expect(packFails("--backup", mention), "backup: another Liveboard that only mentions this guid is refused");
+const repoDir = path.join(scratch, "repo"); fs.mkdirSync(path.join(repoDir, ".git"), { recursive: true });
+fs.writeFileSync(path.join(repoDir, "b.json"), JSON.stringify({ guid: LB, liveboard: {} }));
+const link = path.join(scratch, "link.json"); fs.symlinkSync(path.join(repoDir, "b.json"), link);
+expect(packFails("--backup", link), "backup: a symlink to a file inside a git tree is refused");
+expect(packFails("--backup"), "--backup with no value exits 2");
 
 console.log(JSON.stringify({ ok: !failures.length, failures, summary }));

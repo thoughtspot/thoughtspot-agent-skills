@@ -56,14 +56,16 @@ const doc0 = JSON.parse(ex0.body[0].edoc).liveboard;
 const vizById = {}; (doc0.visualizations || []).forEach((v) => { vizById[v.id] = v; });
 const conflicts = [];
 // A Liveboard laid out without tabs keeps its tiles in layout.tiles; the skill writes tabs, and merging the two
-// would orphan those tiles, so it stops.
-const untabbed = !!(doc0.layout && (doc0.layout.tiles || []).length && !(doc0.layout.tabs || []).length);
-if (untabbed) return { refused: 'NOT COMMITTED - this Liveboard has no tabs (its tiles are in layout.tiles); add a tab in ThoughtSpot first, or build on a new Liveboard. Nothing was written' };
+// would orphan those tiles, so it stops. That includes a layout that has both.
+if (doc0.layout && (doc0.layout.tiles || []).length) return { refused: 'NOT COMMITTED - this Liveboard lays tiles out without tabs (layout.tiles' + ((doc0.layout.tabs || []).length ? ', next to tabs' : '') + '); add a tab in ThoughtSpot and move every tile into tabs first, or build on a new Liveboard. Nothing was written' };
 // Every custom chart that carries the core, with where it sits.
 const specPos = {}; for (const tab of spec.tabs) for (const t of tab.tiles) specPos[tab.name + '|' + t.x + '|' + t.y] = t.slug;
 const specSlugs = new Set(Object.values(specPos));
+// Only tabs the spec names hold the skill's tiles. A marked tile on any other tab is the user's (a copy they
+// moved to a tab of their own) and is never touched.
+const specTabNames = new Set(spec.tabs.map((t) => t.name));
 const cands = [];
-for (const tab of ((doc0.layout && doc0.layout.tabs) || [])) for (const tl of tab.tiles || []) {
+for (const tab of ((doc0.layout && doc0.layout.tabs) || []).filter((t) => specTabNames.has(t.name))) for (const tl of tab.tiles || []) {
   const c = codeOf(vizById[tl.visualization_id]);
   if (!hasCore(c)) continue;
   const m = MARK.exec(c.js), pos = tab.name + '|' + tl.x + '|' + tl.y;
@@ -183,7 +185,8 @@ for (const tab of spec.tabs) {
     }
     if (!(t.search in COLS)) {
       const q = await ts.post('/api/rest/2.0/searchdata', { logical_table_identifier: model.guid, query_string: t.search, record_size: 1 });
-      COLS[t.search] = q.status === 200 && q.body && q.body.contents && q.body.contents[0] ? q.body.contents[0].column_names : null;
+      const cn = q.status === 200 && q.body && q.body.contents && q.body.contents[0] && q.body.contents[0].column_names;
+      COLS[t.search] = Array.isArray(cn) && cn.length ? cn : null; // no columns is a failed search, not an empty tile
     }
     const cols = COLS[t.search];
     // A failed search never costs the tile: an existing one stays exactly as it is, and the commit is refused.
@@ -314,13 +317,22 @@ summary.import = r0 && r0.status;
 if (!r0 || !r0.status || r0.status.status_code !== 'OK') { summary.raw = JSON.stringify(c.raw).slice(0, 1200); return summary; }
 // The proof. ThoughtSpot may renumber visualization ids, so it compares contents:
 //   - every composed chart comes back exactly once with the code that was composed;
-//   - every visualization the skill did not own BEFORE the patch comes back (fingerprint: kind, title, chart
-//     type and search for answers, the whole tile otherwise), so a loss shows even when the count is right;
-//   - only owned tiles the spec dropped are gone, and each tab holds the tiles it was given, in a tabbed layout.
-const fp = async (v) => v.answer ? 'A|' + v.answer.name + '|' + ((v.answer.chart && v.answer.chart.type) || '') + '|' + (v.answer.search_query || '')
-  : 'O|' + (await sha256(JSON.stringify({ ...v, id: undefined })));
-const ex = await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: LB.guid, type: 'LIVEBOARD' }], edoc_format: 'JSON' });
-const back = JSON.parse(ex.body[0].edoc).liveboard;
+//   - every visualization the skill did not own BEFORE the patch comes back unchanged (the whole tile, keys
+//     sorted, id aside), so a loss or an edit shows even when the count is right;
+//   - the Liveboard's name, description, parameters and filters are what was sent; each tab holds the tiles it
+//     was given and every tile points at a visualization that exists; layout.tiles is unset.
+// If the export after the commit fails, the commit has landed: say so instead of throwing.
+const stable = (x) => Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x);
+const fp = async (v) => (await sha256(stable({ ...v, id: undefined }))).slice(0, 24);
+let back;
+try {
+  const ex = await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: LB.guid, type: 'LIVEBOARD' }], edoc_format: 'JSON' });
+  back = JSON.parse(ex.body[0].edoc).liveboard;
+} catch (e) {
+  summary.roundTripAllOk = false;
+  summary.roundTripError = 'the commit landed but the Liveboard could not be exported to check it (' + String(e && e.message || e).slice(0, 200) + '); run --check, and restore from the backup if anything is wrong';
+  return summary;
+}
 // A tile counts as composed when its code is what was composed, matched by its id first and by code alone when
 // ThoughtSpot renumbered it (not by its marker: a user's copy of a skill tile carries the marker, and even the
 // same code, and is the user's).
@@ -340,14 +352,28 @@ for (const [bv, k] of rest) {
 }
 const failed = report.filter((r) => r.js).filter((r) => { const k = r.js + '|' + r.css; if ((got[k] || 0) > 0) { got[k]--; return false; } return true; }).map((r) => r.slug);
 const lost = [];
-for (const v of (doc0.visualizations || []).filter((x) => !owned.has(x.id))) { const f = await fp(v); if (otherBag[f]) otherBag[f]--; else lost.push(v.answer ? v.answer.name : v.id); }
+for (const v of (doc0.visualizations || []).filter((x) => !owned.has(x.id))) { const f = await fp(v); if (otherBag[f]) otherBag[f]--; else lost.push(v.answer ? v.answer.name : v.note_tile ? 'a note (' + v.id + ')' : v.id); }
 const extra = othersAfter - (others.length - lost.length); // anything back that was neither composed nor kept
 const layoutBad = [];
+const backIds = new Set((back.visualizations || []).map((v) => v.id));
 if (back.layout && (back.layout.tiles || []).length) layoutBad.push('layout.tiles is set');
-for (const t of layoutTabs) { const bt = ((back.layout && back.layout.tabs) || []).find((x) => x.name === t.name); if (!bt || (bt.tiles || []).length !== t.tiles.length) layoutBad.push(t.name); }
-summary.roundTripAllOk = !failed.length && !extra && !lost.length && !layoutBad.length;
+for (const t of layoutTabs) {
+  const bt = ((back.layout && back.layout.tabs) || []).find((x) => x.name === t.name);
+  if (!bt || (bt.tiles || []).length !== t.tiles.length) layoutBad.push(t.name);
+  else if (bt.tiles.some((x) => !backIds.has(x.visualization_id))) layoutBad.push(t.name + ' (a tile points at a missing visualization)');
+}
+// Filters compare on what the user sees (column, operator, values, label, mandatory, single value); ids in
+// their exclusions may be renumbered, so only their count is compared.
+const fKey = (f) => stable({ c: f.column, o: f.oper, v: f.values, d: f.display_name, m: f.is_mandatory, s: f.is_single_value, df: f.date_filter, n: (f.excluded_visualizations || []).length });
+const settingsBad = [];
+if (stable((lb.filters || []).map(fKey).sort()) !== stable((back.filters || []).map(fKey).sort())) settingsBad.push('filters');
+if (stable(lb.parameters || []) !== stable(back.parameters || [])) settingsBad.push('parameters');
+if (lb.name !== back.name) settingsBad.push('name');
+if ((lb.description || '') !== (back.description || '')) settingsBad.push('description');
+summary.roundTripAllOk = !failed.length && !extra && !lost.length && !layoutBad.length && !settingsBad.length;
 if (failed.length) summary.roundTripFailed = failed;
 if (extra) summary.roundTripUnexpected = extra;
 if (lost.length) summary.roundTripLost = lost;
 if (layoutBad.length) summary.roundTripLayout = layoutBad;
+if (settingsBad.length) summary.roundTripChanged = settingsBad;
 return summary;

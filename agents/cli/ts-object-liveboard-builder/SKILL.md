@@ -175,7 +175,8 @@ that export.
 tiles are replaced when their chart is in the block, keep their code otherwise, and are removed when the
 spec no longer places them. Nothing else is touched: native charts, notes, custom charts it did not build
 (a chart pinned from an answer carries the shared core but no marker), tiles copied from another
-Liveboard (their marker names that one), a user's copy of a skill tile (two tiles marked with one slug:
+Liveboard (their marker names that one), any tile on a tab the spec does not name (a copy the user moved to
+a tab of their own is theirs), a user's copy of a skill tile on a spec tab (two tiles marked with one slug:
 the one at the spec position is the skill's), tabs the spec does not name, parameters, style, and the
 Liveboard's own name and description. A filter the Liveboard already has on a spec column stays the
 user's (values, label, mandatory, its exclusions); the spec only decides which of the skill's tiles it
@@ -188,7 +189,8 @@ the spec positions.
 
 **A commit writes only a clean state.** Any problem refuses it and leaves the Liveboard unchanged: a failed
 search (the tile it would have rebuilt stays as it is), a spec tile with no code (`MISSING`), an ownership
-conflict, tiles to adopt, a Liveboard laid out without tabs (refused before anything is composed: add a
+conflict, tiles to adopt, a search that returns no columns, a Liveboard with any tile laid out without
+tabs (`layout.tiles`, alone or next to tabs; refused before anything is composed: move every tile into a
 tab in ThoughtSpot first, or build on a new Liveboard). Tiles that later blocks of the same run will
 send are `pending`, not problems.
 
@@ -196,14 +198,17 @@ send are `pending`, not problems.
 the block was built with `--backup <file>`: a TML export of this Liveboard taken before the commit, from
 `ts tml export <guid> --profile <name> > ~/.cache/ts-charts/backups/<guid>-<date>.json` when a `ts`
 profile is set up, or the Liveboard's **Export TML** menu item otherwise. `liveboard-pack.mjs` checks the
-file names the Liveboard's guid, is under a day old and sits outside any git working tree. Tell the user
+file is a TML export of this Liveboard (its top-level guid and `liveboard` key), is under a day old (and
+not dated ahead), and its real path sits outside any git working tree. Tell the user
 where it is; restore by importing it (`ts tml import`, or **Import TML** in ThoughtSpot). A Liveboard the
 skill created and fills with its own tiles needs none.
 
 After a commit the block exports the Liveboard again and proves: every composed tile carries the code
-that was composed, every visualization the skill did not own before the patch is still there (matched by
-title, chart type and search, so a loss shows even when the count is right), and every tab holds the tiles
-it was given. `--commit` requires `--liveboard <dir>` and a spec with real guids, so it never falls back
+that was composed; every visualization the skill did not own before the patch is still there unchanged
+(the whole tile, id aside, so an edit shows as well as a loss); the Liveboard's name, description,
+parameters and filters are what was sent; and every tab holds the tiles it was given, each pointing at a
+visualization that exists. If the export after the commit fails, the summary says the commit landed
+(`roundTripError`) instead of throwing: run `--check`, and restore from the backup if anything is wrong. `--commit` requires `--liveboard <dir>` and a spec with real guids, so it never falls back
 to the worked example.
 
 Read the file and paste **each block between the `=====` lines
@@ -216,7 +221,7 @@ Every block leaves a complete, working Liveboard, so a build can stop between bl
    and the slugs you meant in `replaced`. `refused: NOT COMMITTED ...` means nothing was written: fix what it
    names and send the block again. `kept` counts the visualizations the skill does not own; `removed`,
    `marked`, `droppedTabs` and `shiftedBelowCharts` list anything else it changed: tell the user.
-   `roundTripLost`, `roundTripLayout` or `roundTripFailed` after a commit mean the import changed more than
+   `roundTripLost`, `roundTripChanged`, `roundTripLayout` or `roundTripFailed` after a commit mean the import changed more than
    was composed: restore from the backup and tell the user. On a first build, tiles still to come in later blocks are listed
    under `pending`, not `problems`. `CHECKSUM MISMATCH` means the paste was altered: resend the block.
 3. Send only what changed. A new Liveboard needs every tile once (`--all`, several blocks).

@@ -40,10 +40,11 @@ const lib = path.join(chartSkill(), "library");
 // A slug is the user's own chart (~/.cache/ts-charts/library, from library-emit or build-narratives) when there is
 // one, else the shipped library's.
 const { chartDirOf } = await import(pathToFileURL(path.join(chartSkill(), "helpers", "env.mjs")).href);
+const { checkBackup } = await import(pathToFileURL(path.join(chartSkill(), "helpers", "backup-check.mjs")).href);
 const argv = process.argv.slice(2);
 const VALUED = new Set(["--max", "--liveboard", "--reuse", "--backup"]);
 const flags = new Set(argv.filter((a, i) => a.startsWith("--") && !VALUED.has(argv[i - 1])));
-const val = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
+const val = (k, d) => { const i = argv.indexOf(k); if (i < 0) return d; const v = argv[i + 1]; if (v === undefined || v.startsWith("--")) { console.error(k + " needs a value"); process.exit(2); } return v; };
 const MAX = Number(val("--max", 60000));
 // A commit writes to a real Liveboard, so it never falls back to the worked example: name the folder.
 if (flags.has("--commit") && !argv.includes("--liveboard")) { console.error("--commit needs --liveboard <dir>: the folder whose liveboard.spec.json names the Liveboard to write"); process.exit(2); }
@@ -59,17 +60,7 @@ const unset = [["liveboard", spec.liveboard.guid], ["model", spec.liveboard.mode
 // LIVEBOARD_PACK_OFFLINE lets the smoke tests build blocks for placeholder guids; a commit never gets that pass.
 if (unset.length && !flags.has("--list") && (MODE === "commit" || !process.env.LIVEBOARD_PACK_OFFLINE)) { console.error("the spec has no real " + unset.map(([k]) => k).join(" or ") + " guid; set it in make-spec.py (the worked example reads LIVEBOARD_GUID and MODEL_GUID) and re-run it"); process.exit(2); }
 // The backup: checked here, on disk, because the sandbox cannot see files. The sandbox gets its name and checksum.
-let backup = null;
-if (val("--backup", null)) {
-  const f = path.resolve(val("--backup"));
-  const stop = (m) => { console.error("--backup " + f + ": " + m); process.exit(2); };
-  if (!fs.existsSync(f) || !fs.statSync(f).size) stop("missing or empty");
-  const txt = fs.readFileSync(f, "utf8");
-  if (!txt.includes(spec.liveboard.guid)) stop("does not name Liveboard " + spec.liveboard.guid + "; export that Liveboard's TML");
-  if (Date.now() - fs.statSync(f).mtimeMs > 24 * 3600 * 1000) stop("is more than a day old; export it again");
-  for (let d = path.dirname(f); ; d = path.dirname(d)) { if (fs.existsSync(path.join(d, ".git"))) stop("is inside the git working tree " + d + "; keep backups out of repos (~/.cache/ts-charts/backups)"); if (d === path.dirname(d)) break; }
-  backup = { file: path.basename(f), bytes: txt.length, sha: crypto.createHash("sha256").update(txt).digest("hex").slice(0, 16) };
-}
+const backup = val("--backup", null) ? checkBackup(val("--backup"), spec.liveboard.guid, "liveboard") : null;
 const specSlugs = spec.tabs.flatMap((t) => t.tiles.map((x) => x.slug));
 let slugs = argv.filter((a, i) => !a.startsWith("--") && !VALUED.has(argv[i - 1]));
 if (flags.has("--all") || MODE === "check") slugs = [...new Set([...slugs, ...specSlugs])];

@@ -354,7 +354,8 @@ or C) built on the intake search. The answer is the one object this creates; mak
    **The backup is required** for an update commit, and checked: export the answer first with
    `ts tml export <guid> --profile <name> > ~/.cache/ts-charts/backups/<guid>-<date>.json` when a `ts`
    profile is set up, or its **Export TML** menu item otherwise. `answer-pack.mjs` refuses a file that is
-   missing, does not name the answer's guid, is over a day old or sits inside a git working tree, and the
+   missing, is not an export of this answer (top-level guid and `answer` key), is over a day old or dated
+   ahead, or whose real path sits inside a git working tree, and the
    sandbox refuses an update built without one. Restore by importing that TML (`ts tml import`, or
    **Import TML** in ThoughtSpot). Say where the backup is before committing.
 2. **Validate and commit in one paste.** `--commit` runs a `VALIDATE_ONLY` import first and commits only
@@ -362,7 +363,8 @@ or C) built on the intake search. The answer is the one object this creates; mak
    file and paste it, unchanged, as the `code` of `execute-thoughtspot-code` with
    `confirm_write_operations: true` (a validate counts as a write too). A commit succeeds when it returns
    `validate.status_code: OK`, `import.status_code: OK`, `chartType: MUZE_STUDIO`, `roundTripOk: true` and a
-   `guid`. The round trip also checks every formula and parameter the answer had is still there; a
+   `guid`. The round trip also checks every formula and parameter the answer had is still there and
+   unchanged; a `roundTripError` means the commit landed but could not be checked; a
    `roundTripFailed` naming one means restore from the backup. The block carries the whole core (about 30 KB); copy it exactly, the checksum catches any slip.
    `CHECKSUM MISMATCH` means the paste was altered: resend the block. Put the guid in
    `<OUT>/<SLUG>/README.md` so the next change updates the same answer.

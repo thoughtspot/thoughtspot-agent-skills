@@ -38,13 +38,14 @@ function mock(opts = {}) {
   state.ts = {
     async post(url, body) {
       if (url.endsWith("/metadata/search")) return { status: 200, body: [{ metadata_id: "m-1", metadata_name: "Mock model" }] };
-      if (url.endsWith("/searchdata")) return { status: 200, body: { contents: [{ column_names: ["Region", "Total Sales"] }] } };
-      if (url.endsWith("/metadata/tml/export")) return { status: 200, body: [{ edoc: JSON.stringify(state.stored || existing) }] };
+      if (url.endsWith("/searchdata")) return { status: 200, body: { contents: [{ column_names: opts.cols || ["Region", "Total Sales"] }] } };
+      if (url.endsWith("/metadata/tml/export")) { if (opts.exportDown && state.stored) throw new Error("socket hang up"); return { status: 200, body: [{ edoc: JSON.stringify(state.stored || opts.existing || existing) }] }; }
       if (url.endsWith("/metadata/tml/import")) {
         state.imports.push(body.import_policy + (body.create_new ? "+new" : ""));
         if (body.import_policy === "ALL_OR_NONE") {
           state.stored = JSON.parse(body.metadata_tmls[0]);
           if (opts.loseFormulas) delete state.stored.answer.formulas;
+          if (opts.mutate) opts.mutate(state.stored.answer);
         }
         return { status: 200, body: [{ response: { status: { status_code: "OK" }, header: { id_guid: GUID } } }] };
       }
@@ -90,7 +91,41 @@ expect((updated.kept || []).includes("formulas") && (updated.kept || []).some((k
 // A formula lost on the server side fails the round trip.
 const c = mock({ loseFormulas: true });
 const lost = await new AsyncFunction("ts", pack(["--answer", GUID, "--backup", backup]))(c.ts);
-expect(lost.roundTripOk === false && (lost.roundTripFailed || []).some((x) => /formulas: growth/.test(x)), "update: a lost formula fails the round trip");
+expect(lost.roundTripOk === false && (lost.roundTripFailed || []).some((x) => /formulas lost: growth/.test(x)), "update: a lost formula fails the round trip");
+
+// A search with no columns is refused, nothing imported.
+const e = mock({ cols: [] });
+const empty = await new AsyncFunction("ts", pack([]))(e.ts);
+expect(/search failed/.test(empty.refused || "") && !e.imports.length, "empty columns: refused, nothing imported");
+
+// A formula whose expression changed on the server fails the round trip.
+const fx = mock({ mutate: (a) => { a.formulas[0].expr = "[sales] * 2"; } });
+const fxr = await new AsyncFunction("ts", pack(["--answer", GUID, "--backup", backup]))(fx.ts);
+expect(fxr.roundTripOk === false && (fxr.roundTripFailed || []).some((x) => /formulas changed: growth/.test(x)), "update: a changed formula fails the round trip");
+
+// An export failure after the commit is reported, not thrown.
+const ed = mock({ exportDown: true });
+const edr = await new AsyncFunction("ts", pack([]))(ed.ts);
+expect(edr.roundTripOk === false && /commit landed/.test(edr.roundTripError || ""), "export down after commit: reported, not thrown");
+
+// Updating a custom chart reports its replaced code, field mapping and description; tables of another model
+// with the same name are replaced and reported.
+const muze = JSON.parse(JSON.stringify(existing));
+muze.answer.description = "The user's words";
+muze.answer.tables = [{ id: "Mock model", name: "Mock model", fqn: "another-guid" }];
+muze.answer.chart = { type: "MUZE_STUDIO", custom_visual_props: "{\"legendVisualProps\":{\"show\":false}}", custom_chart_config: [{ key: "basic", dimensions: [] }] };
+const mz = mock({ existing: muze });
+const mzr = await new AsyncFunction("ts", pack(["--answer", GUID, "--backup", backup, "--description", "New words"]))(mz.ts);
+const mrep = (mzr.replaced || []).join(" | ");
+expect(/custom_visual_props/.test(mrep) && /custom_chart_config/.test(mrep) && /description/.test(mrep) && /tables/.test(mrep), "update: replaced custom chart settings, description and tables reported");
+expect(mz.stored && mz.stored.answer.tables[0].fqn === "m-1", "update: tables of another model replaced");
+
+// The packer: --answer must be a guid; backups must be the answer's own, current, and outside git.
+expect(packFails(["--answer", "a", "--backup", backup]), "update: --answer that is not a guid refused");
+const future = path.join(scratch, "future.json"); fs.writeFileSync(future, JSON.stringify(existing)); fs.utimesSync(future, new Date("2099-01-01"), new Date("2099-01-01"));
+expect(packFails(["--answer", GUID, "--backup", future]), "update: future-dated backup refused");
+const mention = path.join(scratch, "mention.json"); fs.writeFileSync(mention, JSON.stringify({ guid: "00000000-0000-0000-0000-0000000000a2", answer: { description: GUID } }));
+expect(packFails(["--answer", GUID, "--backup", mention]), "update: backup of another answer that mentions the guid refused");
 
 fs.rmSync(scratch, { recursive: true, force: true });
 console.log(JSON.stringify({ ok: !failures.length, failures, created, updated }));
