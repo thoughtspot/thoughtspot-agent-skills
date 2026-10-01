@@ -172,3 +172,21 @@ def test_report_writes_html_and_markdown(tmp_path):
     assert (tmp_path / "out" / "report.html").read_text().startswith("<!doctype html>")
     assert "Reusable Set inventory" in (tmp_path / "out" / "report.md").read_text()
     assert out["html"].endswith("report.html")
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("doc", [
+    {"schema": "ts-sets-inventory/1", "orgs": []},
+    {"schema": "ts-sets-inventory/1", "summary": {}},
+    {"schema": "ts-sets-inventory/1", "summary": {}, "orgs": {"not": "a list"}},
+    {"schema": "ts-sets-inventory/1", "summary": [], "orgs": []},
+], ids=["no_summary", "no_orgs", "orgs_not_list", "summary_not_dict"])
+def test_report_refuses_malformed_document(tmp_path, doc):
+    p = tmp_path / "i.json"
+    p.write_text(json.dumps(doc))
+    r = runner.invoke(app, ["sets", "report", str(p), "-o", str(tmp_path / "out")])
+    assert r.exit_code == 1
+    assert "Traceback" not in r.stderr
+    assert not (tmp_path / "out").exists()

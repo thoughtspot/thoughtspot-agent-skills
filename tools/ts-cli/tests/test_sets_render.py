@@ -54,11 +54,13 @@ def test_names_are_html_escaped():
 
 
 def test_html_escapes_org_model_and_note_text():
-    inv = _inv(notes=[{"kind": "dependents_failed", "object": "<b>o</b>", "detail": "<i>d</i>"}])
+    inv = _inv(notes=[{"kind": "dependents_failed", "object": "<b>o</b>", "detail": "<i>d</i>"}],
+               grants=[_grant("<u>p</u>", "UNEXPLAINED")])
     inv["orgs"][0]["org"] = "<org>"
     inv["orgs"][0]["models"][0]["name"] = "<model>"
+    inv["orgs"][0]["models"][0]["sets"][0]["reason"] = "<em>why</em>"
     html = render_html(inv)
-    for raw in ("<org>", "<model>", "<b>o</b>", "<i>d</i>"):
+    for raw in ("<org>", "<model>", "<b>o</b>", "<i>d</i>", "<em>why</em>", "<u>p</u>"):
         assert raw not in html
 
 
@@ -115,3 +117,75 @@ def test_liveboard_usage_shown_in_html_detail():
     s["liveboards"] = {"lb1": {"vizzes": [{"id": "v1", "title": "Top <baskets>"}], "filter": True}}
     html = render_html(inv)
     assert "Sales LB" in html and "Top &lt;baskets&gt;" in html and "Liveboard filter" in html
+
+
+def _only_set(inv):
+    return inv["orgs"][0]["models"][0]["sets"][0]
+
+
+def _md_set_row(md, name="Basket"):
+    return next(line for line in md.splitlines() if line.startswith(f"| {name} |"))
+
+
+def test_failed_empty_dependents_lookup_never_reads_zero():
+    inv = _inv()
+    _only_set(inv).update(dependents=[], dependents_complete=False)
+    md, html = render_markdown(inv), render_html(inv)
+    row = _md_set_row(md)
+    assert "| 0 |" not in row and "unknown (lookup incomplete)" in row
+    assert "unknown (lookup incomplete)" in html and "0 dependent(s)" not in html
+
+
+def test_partial_dependents_lookup_reads_as_floor():
+    inv = _inv()
+    _only_set(inv).update(dependents=[{"guid": "a", "name": "A", "type": "ANSWER",
+                                       "author_id": "u"}], dependents_complete=False)
+    md, html = render_markdown(inv), render_html(inv)
+    assert "≥1 (incomplete)" in _md_set_row(md)
+    assert "≥1 (incomplete)" in html
+
+
+def test_complete_dependents_lookup_shows_plain_count():
+    inv = _inv()
+    _only_set(inv)["dependents_complete"] = True
+    assert "| 0 |" in _md_set_row(render_markdown(inv))
+
+
+def test_markdown_set_table_has_reason_column():
+    inv = _inv()
+    _only_set(inv)["reason"] = "no consumers found"
+    md = render_markdown(inv)
+    assert "| Reason |" in md and "no consumers found" in _md_set_row(md)
+
+
+def test_null_fields_do_not_crash_and_render_blank():
+    inv = _inv()
+    _only_set(inv).update(author=None, anchor_column=None, reason=None, cohort_type=None)
+    html, md = render_html(inv), render_markdown(inv)
+    assert "None" not in html and "None" not in _md_set_row(md)
+
+
+def test_markdown_escapes_html_and_backticks():
+    md = render_markdown(_inv(set_name="<img src=x>`code`"))
+    assert "<img" not in md and "&lt;img src=x&gt;" in md and "\\`code\\`" in md
+
+
+def test_incomplete_models_make_sets_total_a_floor():
+    inv = _inv()
+    inv["summary"].update(models=2, models_incomplete=1)
+    for out in (render_markdown(inv), render_html(inv)):
+        assert "≥1" in out
+        assert "(1 Model(s) incomplete — totals are a floor)" in out
+
+
+def test_complete_scan_sets_total_is_plain():
+    md = render_markdown(_inv())
+    assert "totals are a floor" not in md and "| 1 | 0 | 1 |" in md
+
+
+def test_summary_unknown_grants_field_is_preferred():
+    inv = _inv(grants=[_grant("u", "UNKNOWN")])
+    inv["summary"]["unknown_grants"] = 7
+    row = next(line for line in render_markdown(inv).splitlines()
+               if line.startswith("| 1 | 0 | 1 |"))
+    assert row.rstrip().endswith("| 7 |")

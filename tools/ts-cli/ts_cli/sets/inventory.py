@@ -41,6 +41,12 @@ def build_set_record(set_ref: dict, consumers: dict, cls: dict, grants) -> dict:
                         for g in labelled]
     return dict(set_ref, **{"class": cls["class"], "reason": cls["reason"],
                             "target": cls["target"], "dependents": consumers["dependents"],
+                            # False when the dependents list may be short: a failed or
+                            # partial lookup, an uninspected type, or an unreadable export.
+                            # The renderer must then never show the count as a total.
+                            "dependents_complete": not (consumers.get("error")
+                                                        or consumers.get("other_types")
+                                                        or consumers.get("unreadable")),
                             "liveboards": consumers["liveboards"], "grants": labelled})
 
 
@@ -79,6 +85,10 @@ def inventory_org(client, label: str, models: List[dict]) -> dict:
     return {"org": label, "models": out_models, "notes": notes}
 
 
+def _grants_with(sets: List[dict], prov: str) -> int:
+    return sum(1 for s in sets for g in s["grants"] if g["provenance"] == prov)
+
+
 def summarise(orgs: List[dict]) -> dict:
     models = [m for o in orgs for m in o["models"]]
     sets = [s for m in models for s in m["sets"]]
@@ -86,5 +96,5 @@ def summarise(orgs: List[dict]) -> dict:
             "models_incomplete": sum(1 for m in models if m["discovery"] == "INCOMPLETE"),
             "sets": len(sets),
             "by_class": dict(Counter(s["class"] for s in sets)),
-            "unexplained_grants": sum(1 for s in sets for g in s["grants"]
-                                      if g["provenance"] == "UNEXPLAINED")}
+            "unexplained_grants": _grants_with(sets, "UNEXPLAINED"),
+            "unknown_grants": _grants_with(sets, "UNKNOWN")}

@@ -171,8 +171,27 @@ def test_unexpected_classify_error_propagates():
 def test_summary_counts():
     orgs = [{"models": [{"discovery": "COMPLETE", "set_count": 2, "sets": [
         {"class": "REVIEW_DELETE", "grants": [{"provenance": "UNEXPLAINED"}]},
-        {"class": "KEEP_SHARED", "grants": [{"provenance": "DIRECT"}]}]},
+        {"class": "KEEP_SHARED", "grants": [{"provenance": "DIRECT"},
+                                            {"provenance": "UNKNOWN"}]}]},
         {"discovery": "INCOMPLETE", "set_count": None, "sets": []}]}]
     s = inv.summarise(orgs)
     assert s == {"models": 2, "models_incomplete": 1, "sets": 2,
-                 "by_class": {"REVIEW_DELETE": 1, "KEEP_SHARED": 1}, "unexplained_grants": 1}
+                 "by_class": {"REVIEW_DELETE": 1, "KEEP_SHARED": 1}, "unexplained_grants": 1,
+                 "unknown_grants": 1}
+
+
+# --- dependents_complete (R13) -------------------------------------------------------
+
+def test_dependents_complete_true_when_lookup_certain():
+    assert inv.build_set_record(SET, CONS, CLS, None)["dependents_complete"] is True
+
+
+@pytest.mark.parametrize("extra", [
+    {"error": "dependents lookup failed: boom", "dependents": []},
+    {"error": "some dependents are not visible to this user (hasInaccessibleDependents)"},
+    {"other_types": [{"guid": "x", "name": "X", "type": "WEIRD"}]},
+    {"unreadable": [{"guid": "l", "name": "L", "reason": "export refused"}]},
+], ids=["error", "inaccessible", "other_types", "unreadable"])
+def test_dependents_complete_false_when_lookup_uncertain(extra):
+    rec = inv.build_set_record(SET, dict(CONS, **extra), CLS, None)
+    assert rec["dependents_complete"] is False

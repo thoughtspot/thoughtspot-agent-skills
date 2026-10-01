@@ -182,6 +182,9 @@ def report(
     if not isinstance(inv, dict) or inv.get("schema") != SCHEMA or inv.get("dry_run"):
         _err(f"Not a full {SCHEMA} document (dry-run output cannot be rendered)")
         raise typer.Exit(1)
+    if not isinstance(inv.get("summary"), dict) or not isinstance(inv.get("orgs"), list):
+        _err(f"Malformed {SCHEMA} document: needs a `summary` object and an `orgs` list")
+        raise typer.Exit(1)
     target = Path(out_dir)
     target.mkdir(parents=True, exist_ok=True)
     (target / "report.html").write_text(render_html(inv), encoding="utf-8")
