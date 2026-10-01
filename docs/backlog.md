@@ -205,6 +205,11 @@ are roughly ordered by value÷effort.
 | BL-319 | CLI SV Mode C promises deep-copy + KEEP/MERGE but `build-model --existing-guid` regenerates from the SV — overwrites TS-side edits | next SF converter edit |
 | BL-320 | Databricks type map lacks `timestamp_ltz` (and other converters' LTZ/TZ variants) | with BL-130 |
 | BL-321 | `ts-link-*` family + `ts-link-semantic-layer` — v1 shipped; open items #2–#5 remain (Honeydew/Cube/Kyvos metadata + aggregation mode) | with platform access |
+| BL-324 | A Model's v2 dependents do not list its Sets (no `COHORT` bucket, live 2026-09-30) — `ts-audit` Set discovery finds nothing, so H5 cannot fire even with BL-302 fixed | with ts-object-set-manager v1 |
+| BL-325 | `ts migrate scan-sets` misses Sets whose `metadata_header.type` is blank (2 of 3 live) and its one cluster-wide `LOGICAL_COLUMN` search times out — the Org-migration gate can report a Set-blocked Model clean | with ts-object-set-manager v1 |
+| BL-326 | Set MODIFY granted via API without access to the Set's Model fails on save with a generic error; the API accepts and reads back a grant that cannot work — **parked by the user** | parked |
+| BL-327 | ts-object-set-manager v2 — act on the v1 report: delete `REVIEW_DELETE` Sets, convert `CANDIDATE_*` to answer-/viz-level, revoke `UNEXPLAINED` grants | fast follow to v1 |
+| BL-328 | ts-object-set-manager connection scope (connection → tables → Models) — **parked** | parked |
 
 ### Tier 3 — Opportunistic
 
@@ -12100,3 +12105,84 @@ Snowflake Semantic View pair so each mapping is number-matched against Snowflake
 grain and at every other grain before it ships.
 
 **Target:** next SF formula pass, with BL-242.
+
+---
+
+## BL-324 — A Model's dependents do not list its Sets `Tier 2`
+
+**Filed:** 2026-10-01.
+**Source:** live probes on se-thoughtspot, 2026-09-30 (Model *Dunder Mifflin*, `829a3344-…`; Set *Static Top 10*, `60a9794b-…`). Design: `docs/superpowers/specs/2026-10-01-ts-object-set-manager-design.md`.
+
+**Finding.** `ts metadata dependents <model>` on a Model that owns three reusable Sets returned
+Answers and a Liveboard but no `COHORT` bucket, so no `SET` rows. `ts-audit` discovers Sets this
+way (Step 3), so it finds none, and `check_h5` stays silent even once BL-302's second typed pass
+exists.
+
+**Fix.** Discover Sets by owner-filtered `LOGICAL_COLUMN` search confirmed by TML export
+(`ts_cli/sets/discover.py`), and have `check_h5` consume Set dependents fetched with
+`--type LOGICAL_COLUMN`. Closes BL-302 alongside.
+
+**Target:** with ts-object-set-manager v1.
+
+---
+
+## BL-325 — `scan-sets` misses blank-type Sets and times out `Tier 2`
+
+**Filed:** 2026-10-01.
+**Source:** live probes on se-thoughtspot, 2026-09-30 (Model *Dunder Mifflin*, `829a3344-…`; Set *Static Top 10*, `60a9794b-…`). Design: `docs/superpowers/specs/2026-10-01-ts-object-set-manager-design.md`.
+
+**Finding.** Two defects in `migrate/sets_scan.py` + `migrate/discover.py`:
+
+1. `is_cohort_row` matches `metadata_header.type` by `COHORT` prefix. Two of the three live
+   Sets had `type: ''` (only the newest read `COHORT_ADVANCED`), so they are not counted — a
+   Set-blocked Model reads clean, and a lift-and-shift drops its Sets silently, which is the
+   exact failure the scan exists to prevent.
+2. Discovery issues one unpaged cluster-wide `LOGICAL_COLUMN` search; on se-thoughtspot it timed
+   out three times (60s each). `subtypes: [COHORT_*]` cannot narrow it — the enum rejects it.
+
+**Fix.** Switch `scan-sets` to the shared `ts_cli/sets/discover.py` (paged, owner-filtered,
+confirmed by export, never reads `type`).
+
+**Target:** with ts-object-set-manager v1.
+
+---
+
+## BL-326 — Set MODIFY without Model access fails on save `Tier 2`
+
+**Filed:** 2026-10-01.
+**Source:** live probes on se-thoughtspot, 2026-09-30 (Model *Dunder Mifflin*, `829a3344-…`; Set *Static Top 10*, `60a9794b-…`). Design: `docs/superpowers/specs/2026-10-01-ts-object-set-manager-design.md`.
+
+**Finding.** `security/metadata/share` granting MODIFY on a Set (`LOGICAL_COLUMN`) returns 204
+and reads back, and several principals can hold it. A non-admin user so granted, with no access
+to the Set's Model, gets a generic error on save in the UI.
+
+**Status.** **Parked by the user** — the cause is known to them. Not to be re-probed unprompted.
+ts-object-set-manager v1 reports edit grants as-is and does not judge them.
+
+**Target:** parked.
+
+---
+
+## BL-327 — ts-object-set-manager v2: act on the report `Tier 2`
+
+**Filed:** 2026-10-01. Design: `docs/superpowers/specs/2026-10-01-ts-object-set-manager-design.md` §10.
+
+**Scope.** From the v1 inventory, with backup and rollback via the dependency engine:
+delete `REVIEW_DELETE` Sets (needs ts-dependency-manager open item #11); convert
+`CANDIDATE_ANSWER` / `CANDIDATE_VIZ` Sets into the Answer's or visualization's `cohorts[]`
+(needs open items #14 and #16 resolved); revoke `UNEXPLAINED` grants (never `REQUIRED` or
+`DIRECT`). Each action after explicit confirmation.
+
+**Target:** fast follow to v1.
+
+---
+
+## BL-328 — ts-object-set-manager connection scope `Tier 2`
+
+**Filed:** 2026-10-01. Design: `docs/superpowers/specs/2026-10-01-ts-object-set-manager-design.md` §3.1.
+
+**Scope.** Select one or more connections and review all Models on them. Models carry no
+connection field, so resolve connection → tables (`metadata_header.dataSourceName`) → Models
+via table dependents, de-duplicating Models that span connections. **Parked by the user.**
+
+**Target:** parked.
