@@ -129,7 +129,7 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 | Skill | What it builds | CLI | Snowsight | DBX |
 |---|---|:-:|:-:|:-:|
 | [`ts-object-answer-chart-builder`](agents/cli/ts-object-answer-chart-builder/SKILL.md) | A custom chart tile as paste-ready `chart.html` / `chart.css` / `chart.js` (Muze, D3, ECharts, Plotly, Chart.js, tables, SVG), iterated in a real browser against a faithful `viz` stub until the render is right; can save it as an answer and check it in ThoughtSpot; ships a library of 58 live-data charts | [✓](agents/cli/ts-object-answer-chart-builder/SKILL.md) | — | — |
-| [`ts-object-liveboard-builder`](agents/cli/ts-object-liveboard-builder/SKILL.md) | A storytelling Liveboard of custom-chart tiles across numbered tabs on a real Model: asks what to build, plans the tabs, builds each tile with `ts-object-answer-chart-builder`, adds narrative tiles and filters, patches the Liveboard through the ThoughtSpot MCP, and screenshots every tab | [✓](agents/cli/ts-object-liveboard-builder/SKILL.md) | — | — |
+| [`ts-object-liveboard-chart-builder`](agents/cli/ts-object-liveboard-chart-builder/SKILL.md) | A storytelling Liveboard of custom-chart tiles across numbered tabs on a real Model: asks what to build, plans the tabs, builds each tile with `ts-object-answer-chart-builder`, adds narrative tiles and filters, patches the Liveboard through the ThoughtSpot MCP, and screenshots every tab | [✓](agents/cli/ts-object-liveboard-chart-builder/SKILL.md) | — | — |
 
 </details>
 

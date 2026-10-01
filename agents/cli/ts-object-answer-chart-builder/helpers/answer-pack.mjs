@@ -25,6 +25,11 @@ import { checkBackup, GUID } from "./backup-check.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 const VALUED = new Set(["--model", "--search", "--name", "--description", "--answer", "--backup"]);
+// A valued flag must have a value: a trailing `--answer` must not quietly build a commit for a NEW answer, and
+// `--search --name n` must not search for "--name".
+for (const [i, a] of argv.entries()) if (VALUED.has(a) && (argv[i + 1] === undefined || argv[i + 1].startsWith("--"))) { console.error(a + " needs a value"); process.exit(2); }
+const unknown = argv.filter((a, i) => a.startsWith("--") && !VALUED.has(a) && !["--commit", "--validate"].includes(a) && !VALUED.has(argv[i - 1]));
+if (unknown.length) { console.error("unknown option " + unknown.join(", ")); process.exit(2); }
 const val = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
 const pos = argv.filter((a, i) => !a.startsWith("--") && !VALUED.has(argv[i - 1]));
 const MODE = argv.includes("--commit") ? "commit" : "validate";
@@ -34,8 +39,12 @@ if (pos.length !== 1 || !P.model || !P.search || !P.name) {
   process.exit(2);
 }
 
-if (P.guid && !GUID.test(P.guid)) { console.error("--answer takes the answer's guid, not " + JSON.stringify(P.guid)); process.exit(2); }
-if (P.guid && MODE === "commit") P.backup = checkBackup(val("--backup"), P.guid, "answer");
+if (P.guid && (!GUID.test(P.guid) || /^[0-]+$/.test(P.guid))) { console.error("--answer takes the answer's guid, not " + JSON.stringify(P.guid)); process.exit(2); }
+if (P.guid) P.guid = P.guid.toLowerCase();
+if (P.guid && MODE === "commit") {
+  P.backup = checkBackup(val("--backup"), P.guid, "answer");
+  P.backupSha = crypto.createHash("sha256").update(JSON.stringify(P.backup), "utf8").digest("hex");
+}
 // A path to a folder with the three files, or a library slug (the user's library first, then the shipped one).
 let dir = path.resolve(pos[0]);
 if (!fs.existsSync(path.join(dir, "chart.js"))) dir = chartDirOf(pos[0]);

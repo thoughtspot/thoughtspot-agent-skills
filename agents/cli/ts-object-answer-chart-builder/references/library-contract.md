@@ -5,7 +5,7 @@ skill's folder, and `<RUNS>` the `runs-root:` the doctor (`helpers/env.mjs`) pri
 bounded CDN loader, motion, crumbs, `AZ.boot`). Reference charts that meet the bar: `library/pulse-monthly-line`
 (Muze), `library/pulse-kpi-sales` (inline SVG), `library/what-sunburst` (Plotly drill).
 
-Charts that go on a Liveboard are then sent to the Liveboard and checked by the `ts-object-liveboard-builder`
+Charts that go on a Liveboard are then sent to the Liveboard and checked by the `ts-object-liveboard-chart-builder`
 skill; nothing in this file needs the ThoughtSpot MCP except the real-data fixture.
 
 ## 1. Hard contract
@@ -45,7 +45,7 @@ Every chart must respond to the pointer. Minimum: a hover tooltip built with `AZ
 5. Edge checks (use `bash -c` for loops: zsh does not split an unquoted `$args`; `snap.mjs` also accepts `--data=absent` and `--tile=620x400`): `--data absent`, `--data wrapped`, `--data empty`, `--tile 620x400`, `--tile 1400x500`, `--tile 400x300`. The empty state must name the search. (`--data noviz` warns about render-complete by design in mode B.)
 6. Filter-resilience check: temporarily edit a copy of the fixture to one region / one item type / 3 months and confirm the chart still draws or shows a clean message.
 7. Publish: `node $S/helpers/library-emit.mjs <slug> --title ... --tab <Tab> --tile WxH --lib "..." --search "..." --question "..." --interactions "..." --notes "..." --png attempts/<final>.png`. It refuses non-ASCII or drifted core.
-8. To put it on a Liveboard, hand over to the `ts-object-liveboard-builder` skill.
+8. To put it on a Liveboard, hand over to the `ts-object-liveboard-chart-builder` skill.
 
 ## 5. Motion, drill-down and variety
 

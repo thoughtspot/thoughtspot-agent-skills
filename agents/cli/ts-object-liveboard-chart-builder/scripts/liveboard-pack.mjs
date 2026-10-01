@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // liveboard-pack.mjs [--liveboard <dir>] [--commit | --validate | --check]   (--commit requires --liveboard) (<slug> ... | --all)
-//                   [--backup <file>] [--adopt] [--reuse <guid>] [--core-ref] [--max 60000] [--list]
+//                   [--backup <file>] [--adopt] [--adopt-by-position] [--reuse <guid>] [--core-ref] [--max 60000] [--list]
 //
 // Turns library charts into ready-to-paste MCP code that writes them straight into the target Liveboard.
 // The Liveboard is its own store: nothing else is created in ThoughtSpot.
@@ -22,8 +22,10 @@
 //               ThoughtSpot). Required for --commit when the Liveboard holds anything the skill does not own: the
 //               sandbox refuses the commit without it. The file must name the Liveboard's guid, be under a day
 //               old, and sit outside any git working tree.
-//   --adopt     take over tiles written before owner markers existed (the shared core plus a spec slug, or at a
-//               spec position, with no owner marker). Without it such tiles stop the commit, so nothing is doubled.
+//   --adopt     take over tiles written before owner markers existed: the shared core and a spec slug marker, with
+//               no owner marker. Without it such tiles stop the commit, so nothing is doubled.
+//   --adopt-by-position  also take over unmarked core tiles that sit at a spec position (no slug marker). Kept
+//               separate because such a tile can be a chart the user pinned from an answer.
 //   --reuse <liveboard guid>  send only checksums for these charts: the sandbox copies each one from that Liveboard
 //               (found by its slug marker) when its body matches the library, and lists the rest under needCode.
 //               Use it for library charts already on another Liveboard in the same cluster; it saves the paste.
@@ -58,9 +60,12 @@ const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const realGuid = (g) => GUID.test(g || "") && !/^[0-]+$/.test(g);
 const unset = [["liveboard", spec.liveboard.guid], ["model", spec.liveboard.model && spec.liveboard.model.guid]].filter(([, g]) => !realGuid(g));
 // LIVEBOARD_PACK_OFFLINE lets the smoke tests build blocks for placeholder guids; a commit never gets that pass.
+// Guids are compared in lower case in the sandbox; the spec's is normalised here too.
+spec.liveboard.guid = String(spec.liveboard.guid || "").toLowerCase();
 if (unset.length && !flags.has("--list") && (MODE === "commit" || !process.env.LIVEBOARD_PACK_OFFLINE)) { console.error("the spec has no real " + unset.map(([k]) => k).join(" or ") + " guid; set it in make-spec.py (the worked example reads LIVEBOARD_GUID and MODEL_GUID) and re-run it"); process.exit(2); }
 // The backup: checked here, on disk, because the sandbox cannot see files. The sandbox gets its name and checksum.
 const backup = val("--backup", null) ? checkBackup(val("--backup"), spec.liveboard.guid, "liveboard") : null;
+const backupSha = backup ? crypto.createHash("sha256").update(JSON.stringify(backup), "utf8").digest("hex") : null;
 const specSlugs = spec.tabs.flatMap((t) => t.tiles.map((x) => x.slug));
 let slugs = argv.filter((a, i) => !a.startsWith("--") && !VALUED.has(argv[i - 1]));
 if (flags.has("--all") || MODE === "check") slugs = [...new Set([...slugs, ...specSlugs])];
@@ -129,7 +134,7 @@ const src = (payload) => {
   out.push("core: " + (payload.core && payload.core.ref ? "{ ref: true, sha: " + JSON.stringify(payload.core.sha) + " }" : payload.core ? "{ js: " + raw(payload.core.js) + ",\ncss: " + raw(payload.core.css) + ",\nsha: " + JSON.stringify(payload.core.sha) + " }" : "null") + ",");
   out.push("tiles: {");
   for (const [slug, t] of Object.entries(payload.tiles)) if (t.ref) out.push(JSON.stringify(slug) + ": { ref: " + JSON.stringify(t.ref) + " },"); else out.push(JSON.stringify(slug) + ": { f: { html: " + raw(t.f.html) + ",\ncss: " + raw(t.f.css) + ",\njs: " + raw(t.f.js) + " },\nsha: " + JSON.stringify(t.sha) + " },");
-  out.push("},", "reuse: " + JSON.stringify(REUSE) + ",", "adopt: " + JSON.stringify(flags.has("--adopt")) + ",", "backup: " + JSON.stringify(backup) + ",", "pending: " + JSON.stringify(payload.pending || []) + ",", "bodySha: " + JSON.stringify(payload.bodySha), "}");
+  out.push("},", "reuse: " + JSON.stringify(REUSE) + ",", "adopt: " + JSON.stringify(flags.has("--adopt") || flags.has("--adopt-by-position")) + ",", "adoptByPosition: " + JSON.stringify(flags.has("--adopt-by-position")) + ",", "backup: " + JSON.stringify(backup) + ",", "backupSha: " + JSON.stringify(backupSha) + ",", "pending: " + JSON.stringify(payload.pending || []) + ",", "bodySha: " + JSON.stringify(payload.bodySha), "}");
   return out.join("\n");
 };
 const block = (payload) => tpl.replace("'__MODE__'", () => JSON.stringify(MODE)).replace("__PAYLOAD__", () => src(payload));

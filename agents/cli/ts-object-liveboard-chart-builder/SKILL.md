@@ -1,5 +1,5 @@
 ---
-name: ts-object-liveboard-builder
+name: ts-object-liveboard-chart-builder
 description: Build or rebuild a whole ThoughtSpot Liveboard made of custom charts (BYOC / Muze Studio tiles) that tells one story across numbered tabs, on a real model, through the ThoughtSpot MCP. Starts with an intake that checks the prerequisites and asks the model, Liveboard, story, audience, size, filters and sign-in as pick-from-a-list questions. Profiles the model, plans the tabs and the question each answers, has each tile built with the ts-object-answer-chart-builder skill against real search results, writes the narrative tiles (About, tab banners), adds Liveboard filters, imports the Liveboard (validate, then commit, then a round-trip proof), and screenshots every tab in a logged-in browser. Use when the user wants a storytelling or demo Liveboard of custom charts, wants tiles added to or rearranged on such a Liveboard, or wants the Amuzing chart samples Liveboard rebuilt. Needs the ts-object-answer-chart-builder skill installed alongside and the ThoughtSpot MCP (execute-thoughtspot-code). Not for a single chart (use ts-object-answer-chart-builder) or for Liveboards of native ThoughtSpot charts.
 ---
 
@@ -171,7 +171,8 @@ In the sandbox (`<L>/scripts/patch.js`) it checks every sha256, exports the Live
 that export.
 
 **What the skill owns.** A tile is the skill's only when its code carries the owner marker
-`/* ts-lb-owner: <this Liveboard's guid> */`, which the skill writes into every tile it composes. Those
+`/* ts-lb-owner: <this Liveboard's guid> */` (guids compare in lower case), which the skill writes into
+every tile it composes. Those
 tiles are replaced when their chart is in the block, keep their code otherwise, and are removed when the
 spec no longer places them. Nothing else is touched: native charts, notes, custom charts it did not build
 (a chart pinned from an answer carries the shared core but no marker), tiles copied from another
@@ -184,8 +185,10 @@ skips. If the skill's tiles would overlap the user's own on a shared tab, the us
 
 **Tiles from before owner markers** (the shared core and a spec slug, or at a spec position, with no
 marker) stop the commit and are listed under `problems`. If they are the skill's, build the block again
-with `--adopt`, which takes them over and marks them (listed under `marked`); otherwise move them off
-the spec positions.
+with `--adopt`, which takes over those with a slug marker and marks them (listed under `marked`). A tile
+matched only by its position could be a chart the user pinned there, so it also needs
+`--adopt-by-position`. Otherwise move them off the spec positions. An owned tile whose slug comment was
+removed and that sits off every spec position cannot be placed: it stops the commit too.
 
 **A commit writes only a clean state.** Any problem refuses it and leaves the Liveboard unchanged: a failed
 search (the tile it would have rebuilt stays as it is), a spec tile with no code (`MISSING`), an ownership
@@ -198,16 +201,19 @@ send are `pending`, not problems.
 the block was built with `--backup <file>`: a TML export of this Liveboard taken before the commit, from
 `ts tml export <guid> --profile <name> > ~/.cache/ts-charts/backups/<guid>-<date>.json` when a `ts`
 profile is set up, or the Liveboard's **Export TML** menu item otherwise. `liveboard-pack.mjs` checks the
-file is a TML export of this Liveboard (its top-level guid and `liveboard` key), is under a day old (and
-not dated ahead), and its real path sits outside any git working tree. Tell the user
+file is a full TML export of this Liveboard (JSON or YAML: its top-level guid, the `liveboard` key and its
+visualizations; a stub or a cut-off file is refused), is under a day old (and not dated ahead), and its
+real path sits outside any git working tree. The block carries the backup's visualization ids under a
+checksum, and the sandbox refuses the commit unless every visualization on the Liveboard now is in the
+backup, so a copy of an older backup does not pass. Tell the user
 where it is; restore by importing it (`ts tml import`, or **Import TML** in ThoughtSpot). A Liveboard the
 skill created and fills with its own tiles needs none.
 
 After a commit the block exports the Liveboard again and proves: every composed tile carries the code
-that was composed; every visualization the skill did not own before the patch is still there unchanged
-(the whole tile, id aside, so an edit shows as well as a loss); the Liveboard's name, description,
-parameters and filters are what was sent; and every tab holds the tiles it was given, each pointing at a
-visualization that exists. If the export after the commit fails, the summary says the commit landed
+that was composed; every visualization the skill did not own before the patch is still there with every
+field it had, at the same value (fields ThoughtSpot adds on re-export, and key order, are allowed); the
+Liveboard's name, description, parameters, filters, style and filter chips are what was sent; and every
+tab holds the same tiles at the same places, each pointing at a visualization that exists. If the export after the commit fails, the summary says the commit landed
 (`roundTripError`) instead of throwing: run `--check`, and restore from the backup if anything is wrong. `--commit` requires `--liveboard <dir>` and a spec with real guids, so it never falls back
 to the worked example.
 

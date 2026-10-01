@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-smoke_ts_object_liveboard_builder.py — smoke test for ts-object-liveboard-builder.
+smoke_ts_object_liveboard_chart_builder.py — smoke test for ts-object-liveboard-chart-builder.
 
 Verifies the offline half of the pipeline on the bundled worked example
 (liveboards/amuzing-chart-samples):
@@ -20,7 +20,7 @@ Pasting them into execute-thoughtspot-code and cluster-shot.mjs need a cluster
 and are covered by the live run described in the SKILL.md.
 
 Usage:
-    python tools/smoke-tests/smoke_ts_object_liveboard_builder.py
+    python tools/smoke-tests/smoke_ts_object_liveboard_chart_builder.py
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from _common import SmokeTestResult  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-SKILL_DIR = REPO_ROOT / "agents" / "cli" / "ts-object-liveboard-builder"
+SKILL_DIR = REPO_ROOT / "agents" / "cli" / "ts-object-liveboard-chart-builder"
 EXAMPLE = SKILL_DIR / "liveboards" / "amuzing-chart-samples"
 PACK = SKILL_DIR / "scripts" / "liveboard-pack.mjs"
 BLOCK_SEP = re.compile(r"^=====.*$", re.M)
@@ -114,7 +114,7 @@ def step_merge_keeps_unowned(td: str) -> str:
 
 
 def main() -> int:
-    print("smoke_ts_object_liveboard_builder — offline pack of the worked example")
+    print("smoke_ts_object_liveboard_chart_builder — offline pack of the worked example")
     print()
 
     r = SmokeTestResult()

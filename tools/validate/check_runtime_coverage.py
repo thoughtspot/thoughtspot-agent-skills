@@ -40,7 +40,7 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     ("ts-object-answer-chart-builder", "coco-snowsight"):
         "CLI-only: iterates chart code in a local browser (Playwright) and reads the "
         "screenshots; Snowsight has no shell or browser, and the skill touches no warehouse.",
-    ("ts-object-liveboard-builder", "coco-snowsight"):
+    ("ts-object-liveboard-chart-builder", "coco-snowsight"):
         "CLI-only: drives the ThoughtSpot MCP and a local logged-in browser to build and "
         "screenshot a Liveboard of custom charts; no Snowsight equivalent, no warehouse step.",
     ("ts-migrate-orgs", "coco-snowsight"):

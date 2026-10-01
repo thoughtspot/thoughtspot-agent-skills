@@ -7,7 +7,7 @@ tile on the same contract and makes the reports mergeable.
 
 You are building custom chart tiles for the ThoughtSpot Liveboard **<LIVEBOARD NAME>** (guid `<guid>`),
 tab **<TAB>**, on the model **<MODEL NAME>** (guid `<model guid>`, org <ORG>). `$S` is the
-ts-object-answer-chart-builder skill at `<path>`; `$L` is ts-object-liveboard-builder at `<path>`.
+ts-object-answer-chart-builder skill at `<path>`; `$L` is ts-object-liveboard-chart-builder at `<path>`.
 
 Read, in this order, before writing anything:
 1. `$S/references/library-contract.md` (the whole file: the contract every tile follows).

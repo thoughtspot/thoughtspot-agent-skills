@@ -14,7 +14,6 @@ const [skill, chartDir] = process.argv.slice(2);
 const GUID = "00000000-0000-0000-0000-0000000000a1";
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "answer_mock_"));
 const backup = path.join(scratch, "answer-backup.json");
-fs.writeFileSync(backup, JSON.stringify({ guid: GUID, answer: { name: "Old name" } }));
 const pack = (extra) => execFileSync("node", [path.join(skill, "helpers", "answer-pack.mjs"), chartDir, "--model", "Mock model",
   "--search", "[sales] [region]", "--name", "Mock chart", "--commit", ...extra], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, XDG_CACHE_HOME: scratch } });
 const packFails = (extra) => { try { pack(extra); return false; } catch (e) { return e.status === 2; } };
@@ -32,6 +31,8 @@ const existing = {
     display_mode: "TABLE_MODE"
   }
 };
+
+fs.writeFileSync(backup, JSON.stringify(existing)); // a full export of the answer as it is now
 
 function mock(opts = {}) {
   const state = { stored: null, imports: [] };
@@ -126,6 +127,26 @@ const future = path.join(scratch, "future.json"); fs.writeFileSync(future, JSON.
 expect(packFails(["--answer", GUID, "--backup", future]), "update: future-dated backup refused");
 const mention = path.join(scratch, "mention.json"); fs.writeFileSync(mention, JSON.stringify({ guid: "00000000-0000-0000-0000-0000000000a2", answer: { description: GUID } }));
 expect(packFails(["--answer", GUID, "--backup", mention]), "update: backup of another answer that mentions the guid refused");
+
+// Third review: flags without values, all-zero guids, stubs and stale backups.
+expect(packFails(["--answer"]), "packer: a trailing --answer with no value exits 2");
+const raw = (args) => { try { execFileSync("node", [path.join(skill, "helpers", "answer-pack.mjs"), chartDir, ...args], { stdio: "ignore", env: { ...process.env, XDG_CACHE_HOME: scratch } }); return 0; } catch (e) { return e.status; } };
+expect(raw(["--model", "Mock model", "--search", "--name", "n"]) === 2, "packer: `--search --name n` exits 2 instead of searching for \"--name\"");
+expect(packFails(["--answer", "00000000-0000-0000-0000-000000000000", "--backup", backup]), "packer: an all-zero guid is refused");
+const astub = path.join(scratch, "astub.json"); fs.writeFileSync(astub, JSON.stringify({ guid: GUID, answer: {} }));
+expect(packFails(["--answer", GUID, "--backup", astub]), "packer: a stub answer backup is refused");
+const astale = path.join(scratch, "astale.json"); fs.writeFileSync(astale, JSON.stringify({ guid: GUID, answer: { ...existing.answer, search_query: "[sales]" } }));
+const st = mock();
+const str = await new AsyncFunction("ts", pack(["--answer", GUID, "--backup", astale]))(st.ts);
+expect(/not of this answer as it is now/.test(str.refused || "") && same(st.imports, ["VALIDATE_ONLY"]), "sandbox: a backup of an older answer is refused");
+
+// The round trip allows key order and added defaults, and catches a changed column format.
+const ro = mock({ mutate: (a) => { a.formulas = a.formulas.map((f) => ({ expr: f.expr, name: f.name, id: f.id, properties: {} })); } });
+const ror = await new AsyncFunction("ts", pack(["--answer", GUID, "--backup", backup]))(ro.ts);
+expect(ror.roundTripOk === true, "round trip: formula keys reordered and a field added is not a change");
+const cf = mock({ mutate: (a) => { a.answer_columns.find((c) => c.name === "Total Sales").format = { category: "NUMBER" }; } });
+const cfr = await new AsyncFunction("ts", pack(["--answer", GUID, "--backup", backup]))(cf.ts);
+expect(cfr.roundTripOk === false && (cfr.roundTripFailed || []).some((x) => /column settings changed: Total Sales/.test(x)), "round trip: a changed column format fails");
 
 fs.rmSync(scratch, { recursive: true, force: true });
 console.log(JSON.stringify({ ok: !failures.length, failures, created, updated }));

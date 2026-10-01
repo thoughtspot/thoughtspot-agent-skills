@@ -38,7 +38,7 @@ migration hits the same issue.
   CoCo skills use stored procedures (`TS_EXPORT_TML`, `TS_IMPORT_TML`, etc.) instead.
 - Sandbox code sent through the ThoughtSpot MCP's `execute-thoughtspot-code` — today
   `ts-object-answer-chart-builder/helpers/answer-patch.js` and
-  `ts-object-liveboard-builder/scripts/patch.js`. That code runs inside the MCP's sandbox, not on
+  `ts-object-liveboard-chart-builder/scripts/patch.js`. That code runs inside the MCP's sandbox, not on
   the user's machine: there is no `ts` CLI to call, auth is the MCP's own session, and the only
   client is the `ts.post` it provides. The skills need no `ts` profile at all. Keep such code in
   one checked-in file per skill (not inline in SKILL.md), validate before every commit

@@ -37,7 +37,8 @@ const codeOf = (v) => {
 };
 const hasCore = (c) => !!c && c.js.indexOf(END_JS) >= 0;
 const OWNER = /\/\* ts-lb-owner: ([\w-]+) \*\/\n?/;
-const ownerOf = (c) => { const m = c && OWNER.exec(c.js); return m ? m[1] : null; };
+// Guids compare in lower case: a spec guid typed in upper case must not turn every tile into "not ours".
+const ownerOf = (c) => { const m = c && OWNER.exec(c.js); return m ? m[1].toLowerCase() : null; };
 const strip = (js) => js.replace(MARK, '').replace(OWNER, '');
 
 // 1. checksums
@@ -45,11 +46,13 @@ const badSha = [];
 for (const [slug, t] of Object.entries(P.tiles)) if (t.sha) for (const k of Object.keys(t.sha)) if ((await sha256(t.f[k])) !== t.sha[k]) badSha.push(slug + '.' + k);
 // The spec sets every title, search and position on the Liveboard, so a slip in it is checked like chart code.
 if (P.specSha && (await sha256(JSON.stringify(P.spec))) !== P.specSha) badSha.push('spec');
+// The backup's summary (name, size, checksum, the visualization ids it holds) is checked like the code.
+if (P.backup && (await sha256(JSON.stringify(P.backup))) !== P.backupSha) badSha.push('backup');
 if (P.core && !P.core.ref) for (const k of ['js', 'css']) if ((await sha256(P.core[k])) !== P.core.sha[k]) badSha.push('core.' + k);
 if (badSha.length) return { refused: 'CHECKSUM MISMATCH - nothing written, resend this block unchanged', badSha };
 
 // 2. current Liveboard
-const spec = P.spec, LB = spec.liveboard, model = LB.model;
+const spec = P.spec, LB = spec.liveboard, model = LB.model, LBG = String(LB.guid).toLowerCase();
 const ex0 = await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: LB.guid, type: 'LIVEBOARD' }], edoc_format: 'JSON' });
 if (ex0.status !== 200 || !ex0.body || !ex0.body[0] || !ex0.body[0].edoc) return { refused: 'Liveboard ' + LB.guid + ' not found or not exportable; create it first (an empty Liveboard is enough)', http: ex0.status };
 const doc0 = JSON.parse(ex0.body[0].edoc).liveboard;
@@ -77,10 +80,15 @@ const owned = new Set(), bySlug = {}, idBySlug = {}, byPos = {}, idByPos = {}, a
 const take = (k) => { owned.add(k.id); const s = k.slug || specPos[k.pos]; bySlug[s] = k.c; idBySlug[s] = k.id; byPos[k.pos] = k.c; idByPos[k.pos] = k.id; };
 const groups = {};
 for (const k of cands) {
-  const mine = k.owner === LB.guid, legacy = !k.owner && (k.slug ? specSlugs.has(k.slug) : !!specPos[k.pos]);
+  const mine = k.owner === LBG, legacy = !k.owner && (k.slug ? specSlugs.has(k.slug) : !!specPos[k.pos]);
   if (!mine && !legacy) continue; // another Liveboard's tile, or a chart pinned from an answer: not ours
-  if (legacy && !P.adopt) { adoptable.push((k.slug || specPos[k.pos]) + ' (' + k.title + ')'); continue; }
+  // --adopt takes over tiles with a slug marker; a tile matched only by its position (it could be a chart the
+  // user pinned there) needs --adopt-by-position as well.
+  if (legacy && !(k.slug ? P.adopt : P.adoptByPosition)) { adoptable.push((k.slug || specPos[k.pos]) + ' (' + k.title + (k.slug ? '' : ', matched by position only') + ')'); continue; }
   const s = k.slug || specPos[k.pos];
+  // An owned tile whose slug comment was removed and that sits off every spec position cannot be placed:
+  // stop rather than remove it.
+  if (!s) { conflicts.push('the tile "' + k.title + '" at ' + k.pos + ' carries this Liveboard\'s owner marker but no slug marker and is not at a spec position; restore its "amuzing-slug" comment, move it back to its spec position, or remove its owner marker to make it yours'); continue; }
   (groups[s] = groups[s] || []).push(k);
 }
 for (const [s, ks] of Object.entries(groups)) {
@@ -91,7 +99,7 @@ for (const [s, ks] of Object.entries(groups)) {
   if (at.length === 1) take(at[0]);
   else conflicts.push(s + ': ' + ks.length + ' tiles carry its marker (' + ks.map((k) => k.title + ' at ' + k.pos).join('; ') + ') and none sits at its spec position; remove the copy or move the original back');
 }
-if (adoptable.length) conflicts.push('tiles that look like this skill\'s but carry no owner marker (written before markers, or pinned from an answer): ' + adoptable.join(', ') + '. If they are the skill\'s, send this block again built with --adopt; otherwise move them off the spec positions');
+if (adoptable.length) conflicts.push('tiles that look like this skill\'s but carry no owner marker (written before markers, or pinned from an answer): ' + adoptable.join(', ') + '. If they are the skill\'s, send this block again built with --adopt (and --adopt-by-position for tiles matched by position only); otherwise move them off the spec positions');
 // The shared core travels in the block, or (core.ref) is taken from any tile already on this Liveboard whose
 // core matches the checksum, which saves pasting it again in every block after the first.
 let core = P.core && !P.core.ref ? { js: P.core.js, css: P.core.css } : null;
@@ -130,7 +138,7 @@ if (refs.length) {
     if (!ok) { needCode.push(slug + ' (differs from the library)'); delete P.tiles[slug]; continue; }
     // A legacy tile keeps its whole CSS; the JS body gets the slug marker so the next patch finds it by slug.
     const rest = strip(b.js);
-    P.tiles[slug] = { body: { js: '\n/* amuzing-slug: ' + slug + ' */\n/* ts-lb-owner: ' + LB.guid + ' */' + (rest.startsWith('\n') ? '' : '\n') + rest, css: legacyCss ? null : b.css, cssWhole: legacyCss ? c.css : null, html: c.html } };
+    P.tiles[slug] = { body: { js: '\n/* amuzing-slug: ' + slug + ' */\n/* ts-lb-owner: ' + LBG + ' */' + (rest.startsWith('\n') ? '' : '\n') + rest, css: legacyCss ? null : b.css, cssWhole: legacyCss ? c.css : null, html: c.html } };
   }
 }
 
@@ -158,7 +166,7 @@ if (MODE === 'check') {
 }
 
 // 3. compose: the owned tiles, merged into everything else the Liveboard already has
-const OWNER_LINE = '/* ts-lb-owner: ' + LB.guid + ' */';
+const OWNER_LINE = '/* ts-lb-owner: ' + LBG + ' */';
 const MEASURE = /^(Total|Average|Unique Number|Max|Min|Count|Sum)\b/i;
 const CSV2 = JSON.stringify({ version: 'V4DOT2', chartProperties: { chartSpecific: { dataFieldArea: 'column' } }, columnProperties: [], axisProperties: [] });
 const used = new Set(Object.keys(vizById));
@@ -311,6 +319,12 @@ if (MODE !== 'commit') return summary;
 if (summary.problems.length) { summary.refused = 'NOT COMMITTED - fix the problems above; the Liveboard is unchanged'; return summary; }
 // Content the skill does not own is only touched with a backup of it on disk (liveboard-pack --backup).
 if (others.length && !P.backup) { summary.refused = 'NOT COMMITTED - this Liveboard holds ' + others.length + ' visualization(s) the skill does not own; export a backup and build the block with --backup <file>'; return summary; }
+// The backup must be of the Liveboard as it is now: every visualization it holds is in the backup.
+if (P.backup) {
+  const inBackup = new Set(P.backup.vizIds || []);
+  const missing = (doc0.visualizations || []).filter((v) => !inBackup.has(v.id)).map((v) => (v.answer ? v.answer.name : v.id));
+  if (missing.length) { summary.refused = 'NOT COMMITTED - the backup ' + P.backup.file + ' is not of this Liveboard as it is now (it lacks ' + missing.slice(0, 5).join(', ') + (missing.length > 5 ? ' and ' + (missing.length - 5) + ' more' : '') + '); export it again'; return summary; }
+}
 const c = await importAs('ALL_OR_NONE');
 const r0 = c.r;
 summary.import = r0 && r0.status;
@@ -323,7 +337,14 @@ if (!r0 || !r0.status || r0.status.status_code !== 'OK') { summary.raw = JSON.st
 //     was given and every tile points at a visualization that exists; layout.tiles is unset.
 // If the export after the commit fails, the commit has landed: say so instead of throwing.
 const stable = (x) => Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x);
-const fp = async (v) => (await sha256(stable({ ...v, id: undefined }))).slice(0, 24);
+// `after` still holds everything `before` had, with the same values. Fields ThoughtSpot adds on re-export (a
+// default display_mode, say) are allowed; anything lost or changed is not. Key order never matters.
+const covers = (before, after) => {
+  if (before === null || typeof before !== 'object') return before === after || (before === undefined);
+  if (Array.isArray(before)) return Array.isArray(after) && after.length === before.length && before.every((x, i) => covers(x, after[i]));
+  return !!after && typeof after === 'object' && !Array.isArray(after) && Object.keys(before).every((k) => before[k] === undefined || covers(before[k], after[k]));
+};
+const label = (v) => v ? (v.answer ? 'A|' + v.answer.name + '|' + ((v.answer.chart && v.answer.chart.type) || '') : v.note_tile ? 'N' : 'O') : 'MISSING';
 let back;
 try {
   const ex = await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: LB.guid, type: 'LIVEBOARD' }], edoc_format: 'JSON' });
@@ -338,7 +359,7 @@ try {
 // same code, and is the user's).
 const want = {}, wantById = {};
 for (const r of report.filter((x) => x.js)) { const k = r.js + '|' + r.css; want[k] = (want[k] || 0) + 1; wantById[r.id] = k; }
-const got = {}, otherBag = {}, rest = [];
+const got = {}, rest = [], othersBack = [];
 let othersAfter = 0;
 const keyOf = async (bv) => { const bc = codeOf(bv); return bc ? (await sha256(bc.js)).slice(0, 12) + '|' + (await sha256(bc.css)).slice(0, 12) : null; };
 for (const bv of back.visualizations || []) {
@@ -348,26 +369,40 @@ for (const bv of back.visualizations || []) {
 for (const [bv, k] of rest) {
   if (k && (got[k] || 0) < (want[k] || 0)) { got[k] = (got[k] || 0) + 1; continue; }
   othersAfter++;
-  const f = await fp(bv); otherBag[f] = (otherBag[f] || 0) + 1;
+  othersBack.push(bv);
 }
 const failed = report.filter((r) => r.js).filter((r) => { const k = r.js + '|' + r.css; if ((got[k] || 0) > 0) { got[k]--; return false; } return true; }).map((r) => r.slug);
 const lost = [];
-for (const v of (doc0.visualizations || []).filter((x) => !owned.has(x.id))) { const f = await fp(v); if (otherBag[f]) otherBag[f]--; else lost.push(v.answer ? v.answer.name : v.note_tile ? 'a note (' + v.id + ')' : v.id); }
+// Each visualization the skill did not own comes back covering what it was, matched by id first.
+const pool = [...othersBack];
+for (const v of (doc0.visualizations || []).filter((x) => !owned.has(x.id))) {
+  const bare = { ...v, id: undefined };
+  let i = pool.findIndex((b) => b.id === v.id && covers(bare, b));
+  if (i < 0) i = pool.findIndex((b) => covers(bare, b));
+  if (i >= 0) pool.splice(i, 1); else lost.push(v.answer ? v.answer.name : v.note_tile ? 'a note (' + v.id + ')' : v.id);
+}
 const extra = othersAfter - (others.length - lost.length); // anything back that was neither composed nor kept
 const layoutBad = [];
 const backIds = new Set((back.visualizations || []).map((v) => v.id));
 if (back.layout && (back.layout.tiles || []).length) layoutBad.push('layout.tiles is set');
+// Each tab holds the same tiles, by what they are and where they sit (ids may be renumbered).
+const sentById = {}; for (const v of lb.visualizations) sentById[v.id] = v;
+const backById = {}; for (const v of back.visualizations || []) backById[v.id] = v;
+const place = (byId) => (x) => label(byId[x.visualization_id]) + '@' + x.x + ',' + x.y + ',' + x.width + 'x' + x.height;
 for (const t of layoutTabs) {
   const bt = ((back.layout && back.layout.tabs) || []).find((x) => x.name === t.name);
-  if (!bt || (bt.tiles || []).length !== t.tiles.length) layoutBad.push(t.name);
-  else if (bt.tiles.some((x) => !backIds.has(x.visualization_id))) layoutBad.push(t.name + ' (a tile points at a missing visualization)');
+  if (!bt) { layoutBad.push(t.name + ' (tab missing)'); continue; }
+  if ((bt.tiles || []).some((x) => !backIds.has(x.visualization_id))) layoutBad.push(t.name + ' (a tile points at a missing visualization)');
+  else if (stable(t.tiles.map(place(sentById)).sort()) !== stable((bt.tiles || []).map(place(backById)).sort())) layoutBad.push(t.name + ' (tiles moved, swapped or missing)');
 }
 // Filters compare on what the user sees (column, operator, values, label, mandatory, single value); ids in
 // their exclusions may be renumbered, so only their count is compared.
 const fKey = (f) => stable({ c: f.column, o: f.oper, v: f.values, d: f.display_name, m: f.is_mandatory, s: f.is_single_value, df: f.date_filter, n: (f.excluded_visualizations || []).length });
 const settingsBad = [];
 if (stable((lb.filters || []).map(fKey).sort()) !== stable((back.filters || []).map(fKey).sort())) settingsBad.push('filters');
-if (stable(lb.parameters || []) !== stable(back.parameters || [])) settingsBad.push('parameters');
+if (!covers(lb.parameters || [], back.parameters || [])) settingsBad.push('parameters');
+if (!covers(lb.style || {}, back.style || {})) settingsBad.push('style');
+if (!covers(lb.ordered_chips || [], back.ordered_chips || [])) settingsBad.push('ordered_chips');
 if (lb.name !== back.name) settingsBad.push('name');
 if ((lb.description || '') !== (back.description || '')) settingsBad.push('description');
 summary.roundTripAllOk = !failed.length && !extra && !lost.length && !layoutBad.length && !settingsBad.length;

@@ -355,9 +355,9 @@ broken tile, because the host passes data and sizes the tile differently from a 
   Start from the nearest of the 58 library charts where one fits.
 - **Watch for** the first run installing Playwright and Chromium into the skill's
   `helpers/`. A chart is only verified in ThoughtSpot once it has been screenshotted there
-  (see `ts-object-liveboard-builder`); before that it is verified against a stub.
+  (see `ts-object-liveboard-chart-builder`); before that it is verified against a stub.
 
-### `ts-object-liveboard-builder`
+### `ts-object-liveboard-chart-builder`
 
 - **Business problem.** A set of good charts is not a story. A storytelling demo
   Liveboard of custom tiles takes days to plan, lay out and import by hand, and one wrong

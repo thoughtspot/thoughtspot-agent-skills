@@ -46,7 +46,7 @@ Muze workarounds they document.
 | Diverging bar, drill to members | `library/what-premium-diverging` | Muze | Muze bars coloured per point, own axis and labels; the workarounds for Muze's band-height floor and remount-on-update. Supersedes `examples/Examples/Example 2 diverging axis` |
 | Growth split into volume and price | `library/pulse-family-growth` | hand HTML and SVG | Small-multiple cards with an exact units/price decomposition and like-for-like windows derived from the rows. Supersedes `examples/Examples/Example 4 growth comp` |
 
-The narrative tiles (tab banners, About) are one template in the `ts-object-liveboard-builder` skill (`narratives/`), driven by a config per tab.
+The narrative tiles (tab banners, About) are one template in the `ts-object-liveboard-chart-builder` skill (`narratives/`), driven by a config per tab.
 
 ## Older examples
 

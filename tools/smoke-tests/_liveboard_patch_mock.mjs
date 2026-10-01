@@ -1,9 +1,9 @@
-// Runs ts-object-liveboard-builder's sandbox code (scripts/patch.js, as packed by liveboard-pack.mjs) against a
+// Runs ts-object-liveboard-chart-builder's sandbox code (scripts/patch.js, as packed by liveboard-pack.mjs) against a
 // mock `ts` holding Liveboards the skill does not fully own, and checks that nothing it does not own is lost:
 // the merge keeps the user's content, and every way of losing it the review found (a user's copy of a skill
 // tile, a chart pinned from an answer, a failed search, an untabbed Liveboard, tiles from before owner markers,
 // no backup, a loss on the server side) either keeps the content or refuses to commit.
-// Called by smoke_ts_object_liveboard_builder.py; prints one JSON line: { ok, failures, summary }.
+// Called by smoke_ts_object_liveboard_chart_builder.py; prints one JSON line: { ok, failures, summary }.
 //
 //   node _liveboard_patch_mock.mjs <liveboard skill dir> <scratch dir>
 import fs from "node:fs";
@@ -32,8 +32,7 @@ const spec = {
   ] }]
 };
 fs.writeFileSync(path.join(lbDir, "liveboard.spec.json"), JSON.stringify(spec));
-const backupFile = path.join(scratch, "backup.json");
-fs.writeFileSync(backupFile, JSON.stringify({ guid: LB, liveboard: { name: "backup" } }));
+const backupFile = path.join(scratch, "backup.json"); // written below, once base() exists: a full export
 const pack = (...extra) => execFileSync("node", [path.join(skill, "scripts", "liveboard-pack.mjs"), "--liveboard", lbDir, "--commit", "banner-next", ...extra],
   { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, XDG_CACHE_HOME: cache } });
 const packFails = (...extra) => { try { pack(...extra); return false; } catch (e) { return e.status === 2; } };
@@ -44,7 +43,7 @@ const custom = (js) => JSON.stringify({ clientState: JSON.stringify({ version: 1
 const jsOf = (x) => Buffer.from(JSON.parse(JSON.parse(x.answer.chart.custom_visual_props).clientState).playground.code.jsCodeBase64, "base64").toString();
 const tile = (slug, owner) => custom("/* core */\n" + END_JS + "\n/* amuzing-slug: " + slug + " */\n" + (owner ? "/* ts-lb-owner: " + owner + " */\n" : "") + "render();");
 const viz = (id, name, props) => ({ id, answer: { name, search_query: "[sales] [region]", chart: { type: "MUZE_STUDIO", custom_visual_props: props } } });
-const native = { id: "Viz_1", answer: { name: "Native revenue", search_query: "[sales]", chart: { type: "COLUMN" } } };
+const native = { id: "Viz_1", answer: { name: "Native revenue", search_query: "[sales]", chart: { type: "COLUMN", axis_configs: [{ x: ["Region"], y: ["Total Sales"] }] } } };
 const note = { id: "Viz_2", note_tile: { html_parsed_string: "<p>Keep me</p>" } };
 const foreign = viz("Viz_5", "Someone else's custom chart", custom("plain();"));
 const stale = viz("Viz_3", "Old chart", tile("old-chart", LB));
@@ -80,6 +79,8 @@ const base = () => JSON.parse(JSON.stringify({
     style: { style_properties: [{ name: "lb_border_type", value: "SQUARE" }, { name: "hide_group_title", value: "true" }] }
   }
 }));
+
+fs.writeFileSync(backupFile, JSON.stringify(base()));
 
 // A mock cluster. `opts.search` fails searches, `opts.cols` sets the columns a search returns; `opts.lose` drops a
 // visualization on import and `opts.mutate` edits what was imported (server-side changes); `opts.exportDown`
@@ -203,7 +204,7 @@ for (const [what, mutate] of [
   ["parameters dropped", (l) => { delete l.parameters; }],
   ["a user filter changed", (l) => { l.filters.find((f) => f.column[0] === "region").values = ["East"]; }],
   ["Liveboard renamed", (l) => { l.name = "Renamed"; }],
-  ["a native chart's settings changed", (l) => { l.visualizations.find((x) => x.id === "Viz_1").answer.chart.axis_configs = [{ y: ["Total Sales"] }]; }],
+  ["a native chart's settings changed", (l) => { l.visualizations.find((x) => x.id === "Viz_1").answer.chart.axis_configs = [{ x: ["Store"], y: ["Total Sales"] }]; }],
   ["a tab tile points at a missing visualization", (l) => { l.layout.tabs.find((t) => t.name === "Notes").tiles[0].visualization_id = "Viz_99"; }],
 ]) {
   const r = await run(withBackup, base(), { mutate });
@@ -215,14 +216,67 @@ const ed = await run(withBackup, base(), { exportDown: true });
 expect(ed.summary.roundTripAllOk === false && /commit landed/.test(ed.summary.roundTripError || ""), "export down after commit: reported, not thrown");
 
 // 13. Backups that only look right.
-const future = path.join(scratch, "future.json"); fs.writeFileSync(future, JSON.stringify({ guid: LB, liveboard: {} })); fs.utimesSync(future, new Date("2099-01-01"), new Date("2099-01-01"));
+const future = path.join(scratch, "future.json"); fs.writeFileSync(future, JSON.stringify(base())); fs.utimesSync(future, new Date("2099-01-01"), new Date("2099-01-01"));
 expect(packFails("--backup", future), "backup: a future-dated file is refused");
 const mention = path.join(scratch, "mention.json"); fs.writeFileSync(mention, JSON.stringify({ guid: OTHER_LB, liveboard: { description: "copied from " + LB } }));
 expect(packFails("--backup", mention), "backup: another Liveboard that only mentions this guid is refused");
 const repoDir = path.join(scratch, "repo"); fs.mkdirSync(path.join(repoDir, ".git"), { recursive: true });
-fs.writeFileSync(path.join(repoDir, "b.json"), JSON.stringify({ guid: LB, liveboard: {} }));
+fs.writeFileSync(path.join(repoDir, "b.json"), JSON.stringify(base()));
 const link = path.join(scratch, "link.json"); fs.symlinkSync(path.join(repoDir, "b.json"), link);
 expect(packFails("--backup", link), "backup: a symlink to a file inside a git tree is refused");
 expect(packFails("--backup"), "--backup with no value exits 2");
+
+// 14. Third review.
+// A spec guid in upper case: the lower-case owner markers still match, nothing is doubled.
+const upDir = path.join(scratch, "lb-upper"); fs.mkdirSync(upDir, { recursive: true });
+fs.writeFileSync(path.join(upDir, "liveboard.spec.json"), JSON.stringify({ ...spec, liveboard: { ...spec.liveboard, guid: LB.toUpperCase() } }));
+const upBlock = execFileSync("node", [path.join(skill, "scripts", "liveboard-pack.mjs"), "--liveboard", upDir, "--commit", "banner-next", "--backup", backupFile], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, XDG_CACHE_HOME: cache } });
+const up = await run(upBlock, base());
+expect(up.summary.roundTripAllOk === true && up.stored.liveboard.visualizations.length === 8 && same(up.summary.removed, ["Old chart"]), "guid case: upper-case spec guid matches lower-case markers, nothing doubled");
+
+// An owned tile whose slug comment was removed, off its spec position: refused, not removed.
+const noSlug = base();
+noSlug.liveboard.visualizations.push(viz("Viz_9", "My edited chart", custom("/* core */\n" + END_JS + "\n/* ts-lb-owner: " + LB + " */\nedited();")));
+noSlug.liveboard.layout.tabs[0].tiles.push({ visualization_id: "Viz_9", x: 0, y: 30, width: 6, height: 4 });
+fs.writeFileSync(path.join(scratch, "backup-noslug.json"), JSON.stringify(noSlug));
+const ns = await run(pack("--backup", path.join(scratch, "backup-noslug.json")), noSlug);
+expect(has(ns.summary, /no slug marker/) && same(ns.stored, noSlug), "owned tile without slug off position: refused, Liveboard unchanged");
+
+// --adopt does not take a tile matched only by position (it may be a pinned answer chart); --adopt-by-position does.
+const byPos = base(); byPos.liveboard.visualizations = byPos.liveboard.visualizations.map((x) => (x.id === "Viz_4" ? viz("Viz_4", "Pinned at a spec position", custom("/* core */\n" + END_JS + "\nmine();")) : x));
+const bp1 = await run(pack("--backup", backupFile, "--adopt"), byPos);
+expect(has(bp1.summary, /matched by position only/) && same(bp1.stored, byPos), "adopt: a position-only match is refused under --adopt");
+const bp2 = await run(pack("--backup", backupFile, "--adopt-by-position"), byPos);
+expect(bp2.summary.roundTripAllOk === true && same(bp2.summary.marked, ["about-guide"]), "adopt: --adopt-by-position takes it over");
+
+// Backups: a stub is refused by the packer, and a backup of an older state is refused by the sandbox.
+const stub = path.join(scratch, "stub.json"); fs.writeFileSync(stub, JSON.stringify({ guid: LB, liveboard: {} }));
+expect(packFails("--backup", stub), "backup: a stub with no visualizations is refused");
+const yamlStub = path.join(scratch, "stub.tml"); fs.writeFileSync(yamlStub, "guid: " + LB + "\nliveboard:\n");
+expect(packFails("--backup", yamlStub), "backup: a two-line YAML stub is refused");
+const older = JSON.parse(JSON.stringify(base())); older.liveboard.visualizations = older.liveboard.visualizations.filter((x) => x.id !== "Viz_2");
+const olderFile = path.join(scratch, "older.json"); fs.writeFileSync(olderFile, JSON.stringify(older));
+const ob = await run(pack("--backup", olderFile), base());
+expect(/not of this Liveboard as it is now/.test(ob.summary.refused || "") && same(ob.imports, ["VALIDATE_ONLY"]), "backup: a backup that lacks a current visualization is refused in the sandbox");
+const yamlFull = path.join(scratch, "full.tml");
+fs.writeFileSync(yamlFull, "guid: " + LB + "\nliveboard:\n  name: x\n  visualizations:\n" + base().liveboard.visualizations.map((v) => "  - id: " + v.id + "\n    answer:\n      name: n\n").join("") + "  layout:\n    tabs: []\n");
+const yf = await run(pack("--backup", yamlFull), base());
+expect(yf.summary.roundTripAllOk === true, "backup: a full YAML export is accepted");
+const tampered = withBackup.replace(/"vizIds":\["Viz_1"/, '"vizIds":["Viz_X"');
+const tb = await run(tampered, base());
+expect(/CHECKSUM/.test(tb.summary.refused || "") && !tb.imports.length, "backup: an edited backup summary fails the checksum");
+
+// The round trip allows fields ThoughtSpot adds on re-export, and catches swaps, lost style and lost chips.
+const dm = await run(withBackup, base(), { mutate: (l) => { l.visualizations.find((x) => x.id === "Viz_1").answer.display_mode = "CHART_MODE"; } });
+expect(dm.summary.roundTripAllOk === true, "round trip: a default field added on re-export is not a loss");
+for (const [what, mutate] of [
+  ["user tiles swapped between tabs", (l) => { const n = l.layout.tabs.find((t) => t.name === "Notes"), m = l.layout.tabs.find((t) => t.name === "Mine"); const a = n.tiles[0].visualization_id; n.tiles[0].visualization_id = m.tiles[1].visualization_id; m.tiles[1].visualization_id = a; }],
+  ["a user tile moved", (l) => { l.layout.tabs.find((t) => t.name === "Notes").tiles[1].y = 40; }],
+  ["style lost", (l) => { delete l.style; }],
+  ["ordered chips lost", (l) => { delete l.ordered_chips; }],
+]) {
+  const r = await run(withBackup, base(), { mutate });
+  expect(r.summary.roundTripAllOk === false, "server-side change caught: " + what);
+}
 
 console.log(JSON.stringify({ ok: !failures.length, failures, summary }));

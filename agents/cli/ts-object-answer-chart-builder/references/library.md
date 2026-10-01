@@ -2,7 +2,7 @@
 
 Every chart here runs on the model **(Sample) Retail - Apparel**, reads only what its search returns (data mode B, an empty state names the search), is interactive, and passed the loop, the edge checks, `probe.mjs` and a screenshot in a real cluster. Start from the nearest one: copy `library/<slug>/`, change the search and the copy, run the loop.
 
-Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, tooltip, bounded CDN loader, boot), `library/_shared/us-states.js` (inline US map). The Liveboard that arranges them, and the tools that build it, are in the sibling skill `ts-object-liveboard-builder`.
+Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, tooltip, bounded CDN loader, boot), `library/_shared/us-states.js` (inline US map). The Liveboard that arranges them, and the tools that build it, are in the sibling skill `ts-object-liveboard-chart-builder`.
 
 Charts marked *(preview only)* were built on real search output and passed the loop, the edge checks and `probe.mjs`, but have not been on a Liveboard or screenshotted in a cluster yet (a `.preview-only` file in the chart folder; delete it once the chart has been seen on a tile).
 

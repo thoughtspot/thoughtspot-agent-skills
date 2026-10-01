@@ -1,6 +1,6 @@
 ---
 name: ts-object-answer-chart-builder
-description: Build a ThoughtSpot custom chart (BYOC) as three paste-ready files — chart.html, chart.css, chart.js — by iterating in a real browser until the render is right. Starts with an intake that checks the prerequisites and asks the model, data mode, search, library and destination as pick-from-a-list questions; can save the finished chart as a ThoughtSpot answer and screenshot it in a logged-in browser. Opens a preview the user watches (a headed window in Claude Code; headless screenshots in the Claude app or wherever no window can open), screenshots each attempt, critiques it with vision, and fixes the top defect. Use when the user wants a ThoughtSpot custom chart, a BYOC tile, a Muze chart, or wants an existing chart tile rebuilt, debugged, or converted between sample and live data. Covers Muze, D3, ECharts, Plotly, Chart.js, gridjs, hand-built HTML tables, and raw SVG, and hands finished tiles to the ts-object-liveboard-builder skill to put on a Liveboard. Ships a library of proven live-data charts under library/. Not for native ThoughtSpot chart configuration or non-ThoughtSpot charting work.
+description: Build a ThoughtSpot custom chart (BYOC) as three paste-ready files — chart.html, chart.css, chart.js — by iterating in a real browser until the render is right. Starts with an intake that checks the prerequisites and asks the model, data mode, search, library and destination as pick-from-a-list questions; can save the finished chart as a ThoughtSpot answer and screenshot it in a logged-in browser. Opens a preview the user watches (a headed window in Claude Code; headless screenshots in the Claude app or wherever no window can open), screenshots each attempt, critiques it with vision, and fixes the top defect. Use when the user wants a ThoughtSpot custom chart, a BYOC tile, a Muze chart, or wants an existing chart tile rebuilt, debugged, or converted between sample and live data. Covers Muze, D3, ECharts, Plotly, Chart.js, gridjs, hand-built HTML tables, and raw SVG, and hands finished tiles to the ts-object-liveboard-chart-builder skill to put on a Liveboard. Ships a library of proven live-data charts under library/. Not for native ThoughtSpot chart configuration or non-ThoughtSpot charting work.
 ---
 
 # ThoughtSpot custom chart builder
@@ -33,7 +33,7 @@ screenshot.
 | User has an existing tile that misbehaves | **Debug** — start from their files, skip to the loop |
 | User wants sample→live or live→sample | **Convert** — read `references/byoc-data-modes.md`, change the mode, verify both |
 | User wants a chart that a library chart already covers | **Adapt** - open `references/library.md`, copy the nearest `library/<slug>/`, change the search and copy, then run the loop |
-| User wants finished tiles on a Liveboard, or a whole Liveboard | **Hand over** - `## Step 10`; the Liveboard work is the `ts-object-liveboard-builder` skill |
+| User wants finished tiles on a Liveboard, or a whole Liveboard | **Hand over** - `## Step 10`; the Liveboard work is the `ts-object-liveboard-chart-builder` skill |
 | Ambiguous | The Step 0 intake settles it |
 
 Every route starts with Step 0. A **Debug** run asks only the destination and check questions.
@@ -354,17 +354,17 @@ or C) built on the intake search. The answer is the one object this creates; mak
    **The backup is required** for an update commit, and checked: export the answer first with
    `ts tml export <guid> --profile <name> > ~/.cache/ts-charts/backups/<guid>-<date>.json` when a `ts`
    profile is set up, or its **Export TML** menu item otherwise. `answer-pack.mjs` refuses a file that is
-   missing, is not an export of this answer (top-level guid and `answer` key), is over a day old or dated
-   ahead, or whose real path sits inside a git working tree, and the
-   sandbox refuses an update built without one. Restore by importing that TML (`ts tml import`, or
+   missing, is not a full export of this answer (top-level guid, `answer` key, its search and tables), is
+   over a day old or dated ahead, or whose real path sits inside a git working tree, and the
+   sandbox refuses an update built without one, or with a backup whose search is not the answer's search now. Restore by importing that TML (`ts tml import`, or
    **Import TML** in ThoughtSpot). Say where the backup is before committing.
 2. **Validate and commit in one paste.** `--commit` runs a `VALIDATE_ONLY` import first and commits only
    if it passes, so there is one block to send; `--validate` alone is for checking without writing. Read the
    file and paste it, unchanged, as the `code` of `execute-thoughtspot-code` with
    `confirm_write_operations: true` (a validate counts as a write too). A commit succeeds when it returns
    `validate.status_code: OK`, `import.status_code: OK`, `chartType: MUZE_STUDIO`, `roundTripOk: true` and a
-   `guid`. The round trip also checks every formula and parameter the answer had is still there and
-   unchanged; a `roundTripError` means the commit landed but could not be checked; a
+   `guid`. The round trip also checks every formula, parameter, kept column setting and table setting
+   came back with the values it had (fields ThoughtSpot adds on re-export, and key order, are allowed); a `roundTripError` means the commit landed but could not be checked; a
    `roundTripFailed` naming one means restore from the backup. The block carries the whole core (about 30 KB); copy it exactly, the checksum catches any slip.
    `CHECKSUM MISMATCH` means the paste was altered: resend the block. Put the guid in
    `<OUT>/<SLUG>/README.md` so the next change updates the same answer.
@@ -391,7 +391,7 @@ Where no window can open (the Claude app), skip step 4 and report the chart as v
 ## Step 10 - put it on a Liveboard (optional)
 
 Publishing tiles to a Liveboard, and building a whole storytelling Liveboard of them, is the sibling
-skill **ts-object-liveboard-builder** (patches the Liveboard through the ThoughtSpot MCP, narrative
+skill **ts-object-liveboard-chart-builder** (patches the Liveboard through the ThoughtSpot MCP, narrative
 tiles, filters, round-trip proof, in-cluster screenshots). To hand a chart over:
 
 1. Build it to `references/library-contract.md` (shared core, ASCII, no template strings).
@@ -459,4 +459,4 @@ than an honest question.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.0.0 | 2026-09-30 | Initial release (ported from thoughtspot-amuzing-chart 1.4.1). Builds a ThoughtSpot custom chart (BYOC) as paste-ready chart.html / chart.css / chart.js by iterating in a real browser against a faithful `viz` stub, screenshotting and critiquing each attempt. Step 0 checks the prerequisites and asks what to build as pick-from-a-list questions. Ships a library of 58 live-data charts with a shared core. Step 9 saves the chart as an answer through the ThoughtSpot MCP (checksum, validate then commit, round trip); an update merges into the existing answer (keeps formulas, parameters, column formats and table settings, and reports what it replaced), needs a checked backup, and its round trip proves the formulas and parameters survived. Screenshots in ThoughtSpot use a per-cluster sign-in profile (0700) that is removed at the end unless the user keeps it. Run folders, deliverables and published charts (the user's library) live under `~/.cache/ts-charts`, outside any repo. Hands finished tiles to `ts-object-liveboard-builder` |
+| 1.0.0 | 2026-09-30 | Initial release (ported from thoughtspot-amuzing-chart 1.4.1). Builds a ThoughtSpot custom chart (BYOC) as paste-ready chart.html / chart.css / chart.js by iterating in a real browser against a faithful `viz` stub, screenshotting and critiquing each attempt. Step 0 checks the prerequisites and asks what to build as pick-from-a-list questions. Ships a library of 58 live-data charts with a shared core. Step 9 saves the chart as an answer through the ThoughtSpot MCP (checksum, validate then commit, round trip); an update merges into the existing answer (keeps formulas, parameters, column formats and table settings, and reports what it replaced), needs a checked backup, and its round trip proves the formulas and parameters survived. Screenshots in ThoughtSpot use a per-cluster sign-in profile (0700) that is removed at the end unless the user keeps it. Run folders, deliverables and published charts (the user's library) live under `~/.cache/ts-charts`, outside any repo. Hands finished tiles to `ts-object-liveboard-chart-builder` |

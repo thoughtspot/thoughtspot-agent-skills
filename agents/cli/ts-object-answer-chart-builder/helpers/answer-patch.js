@@ -23,6 +23,7 @@ const sha256 = async (s) => [...new Uint8Array(await crypto.subtle.digest('SHA-2
 // 1. checksums
 const badSha = [];
 for (const k of ['html', 'css', 'js']) if ((await sha256(P.f[k])) !== P.sha[k]) badSha.push(k);
+if (P.backup && (await sha256(JSON.stringify(P.backup))) !== P.backupSha) badSha.push('backup');
 if (badSha.length) return { refused: 'CHECKSUM MISMATCH - nothing written, resend this block unchanged', badSha };
 
 // 2. model and columns
@@ -115,6 +116,8 @@ summary.validate = v.r && v.r.status;
 if (!v.r || !v.r.status || v.r.status.status_code !== 'OK') { summary.raw = JSON.stringify(v.raw).slice(0, 1200); return summary; }
 if (MODE !== 'commit') return summary;
 if (P.guid && !P.backup) { summary.refused = 'NOT COMMITTED - updating an answer needs a backup of it first: export its TML and build the block with --backup <file>'; return summary; }
+// The backup must be of the answer as it is now.
+if (P.guid && P.backup.search !== (old.search_query || '')) { summary.refused = 'NOT COMMITTED - the backup ' + P.backup.file + ' is not of this answer as it is now (its search differs); export it again'; return summary; }
 const c = await importAs('ALL_OR_NONE');
 const r0 = c.r;
 summary.import = r0 && r0.status;
@@ -139,13 +142,25 @@ if (MODE === 'commit') {
     for (const k of ['html', 'css', 'js']) if (got[k] !== P.sha[k]) failed.push(k);
   }
   summary.chartType = back.chart && back.chart.type;
-  // Formulas and parameters the answer had must still be there, unchanged.
-  const byName = (a, k) => Object.fromEntries(((a && a[k]) || []).map((x) => [x.name || x.id, JSON.stringify(x)]));
+  // What the update kept must come back as it was sent: formulas, parameters, the settings of kept columns, the
+  // table view's settings. Fields ThoughtSpot adds on re-export are allowed, and key order never matters.
+  const covers = (b, a) => {
+    if (b === null || typeof b !== 'object') return b === a || b === undefined;
+    if (Array.isArray(b)) return Array.isArray(a) && a.length === b.length && b.every((x, i) => covers(x, a[i]));
+    return !!a && typeof a === 'object' && !Array.isArray(a) && Object.keys(b).every((k) => b[k] === undefined || covers(b[k], a[k]));
+  };
+  const byName = (a, k) => Object.fromEntries(((a && a[k]) || []).map((x) => [x.name || x.id || x.column_id, x]));
   for (const k of ['formulas', 'parameters']) {
     const want = byName(old, k), have = byName(back, k);
-    const miss = Object.keys(want).filter((n) => !(n in have)), diff = Object.keys(want).filter((n) => n in have && have[n] !== want[n]);
+    const miss = Object.keys(want).filter((n) => !(n in have)), diff = Object.keys(want).filter((n) => n in have && !covers(want[n], have[n]));
     if (miss.length) failed.push(k + ' lost: ' + miss.join(', '));
     if (diff.length) failed.push(k + ' changed: ' + diff.join(', '));
+  }
+  if (old) {
+    const sentCols = byName(merged, 'answer_columns'), backCols = byName(back, 'answer_columns');
+    const badCols = Object.keys(sentCols).filter((n) => !covers(sentCols[n], backCols[n]));
+    if (badCols.length) failed.push('column settings changed: ' + badCols.join(', '));
+    if (merged.table && !covers({ ...merged.table, table_columns: undefined, ordered_column_ids: undefined }, back.table)) failed.push('table settings changed');
   }
   summary.roundTripOk = !failed.length;
   if (failed.length) summary.roundTripFailed = failed;

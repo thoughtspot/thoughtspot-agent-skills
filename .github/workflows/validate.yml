@@ -237,7 +237,7 @@ jobs:
         run: |
           (cd agents/cli/ts-object-answer-chart-builder/helpers && npm ci && npx playwright install --with-deps chromium)
           python3 tools/smoke-tests/smoke_ts_object_answer_chart_builder.py
-          python3 tools/smoke-tests/smoke_ts_object_liveboard_builder.py
+          python3 tools/smoke-tests/smoke_ts_object_liveboard_chart_builder.py
 
   # Cross-version pytest matrix. The `suite` job above runs the full suite on 3.12; this
   # job re-runs ONLY the unit/validator tests on the rest of the declared support range
