@@ -1,3 +1,4 @@
+import pytest
 from ts_cli.audit.context import AuditContext, make_context
 
 
@@ -187,3 +188,28 @@ def test_set_discovery_only_runs_for_the_h_angle(disc, cons):
     _build_with_one_model("m1", angles=["A", "D", "P", "S"])
     disc.assert_not_called()
     cons.assert_not_called()
+
+
+# ── R15: SET rows do not make a Model "used" for H4 ────────────────────────
+
+@pytest.mark.parametrize("error", [None, "dependents lookup failed"])
+@patch("ts_cli.audit.context.fetch_consumers")
+@patch("ts_cli.audit.context.discover_sets")
+def test_h4_fires_for_a_model_whose_only_dependents_are_sets(disc, cons, error):
+    """A Set is a column on the Model, so anything using it is already a Model
+    dependent. A SET row alone must not clear an orphan Model — clean or failed lookup."""
+    from ts_cli.audit.checks_human import check_h4
+    disc.return_value = _ONE_SET
+    cons.return_value = _cons(error=error)
+    ctx = _build_with_one_model("m1", angles=["H"])
+    assert any(d.get("type") == "SET" for d in ctx.dependents["m1"])  # kept for H5
+    assert [f.object_guid for f in check_h4(ctx)] == ["m1"]
+    assert check_h4(ctx)[0].detail == "Orphan model — zero dependents (no answers or liveboards)"
+
+
+def test_h4_is_silent_when_a_model_has_an_answer_beside_its_sets():
+    from ts_cli.audit.checks_human import check_h4
+    ctx = make_context(models=[_sample_model(guid="m1")], dependents={"m1": [
+        {"guid": "s1", "type": "SET", "name": "B"},
+        {"guid": "a1", "type": "ANSWER", "name": "Q"}]})
+    assert check_h4(ctx) == []

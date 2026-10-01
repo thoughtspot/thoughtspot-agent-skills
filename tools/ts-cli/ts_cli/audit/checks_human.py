@@ -139,14 +139,17 @@ def check_h4(ctx: AuditContext) -> list:
     findings = []
     for model in ctx.models:
         guid = ctx.guid_for(model)
-        deps = ctx.dependents.get(guid, [])
+        # A Set is a column on the Model, so any Answer/Liveboard using it is
+        # already a Model dependent. A SET row alone never makes a Model "used"
+        # (ruling R15) — they stay in `dependents` for H5 only.
+        deps = [d for d in ctx.dependents.get(guid, []) if d.get("type") != "SET"]
         if not deps:
             findings.append(Finding(
                 check_id="H4", angle=_ANGLE, severity="MEDIUM",
                 object_type="model",
                 object_name=model.get("model", {}).get("name", ""),
                 object_guid=guid,
-                detail="Orphan model — zero dependents (no answers, liveboards, or sets)",
+                detail="Orphan model — zero dependents (no answers or liveboards)",
             ))
     return findings
 

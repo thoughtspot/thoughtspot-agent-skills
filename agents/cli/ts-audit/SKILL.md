@@ -226,6 +226,7 @@ Model's dependents, and looks up each Set's own consumers for H5. A Set whose
 consumer lookup fails, hides dependents from this user, or is consumed only by
 another Set is **not** reported as an orphan — the audit records a warning instead.
 A Model whose Set listing is incomplete contributes no Set rows, only a warning.
+H4 ignores Set rows: a Model whose only dependents are Sets is still an orphan.
 
 **For H angle (formula checks) — also enumerate answers:**
 
@@ -420,7 +421,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
-| 2.4.3 | 2026-10-02 | H5 orphan-Set check now fires: Sets discovered directly rather than from Model dependents (BL-302, BL-324). A Set whose consumer lookup fails, hides dependents, or is consumed only by another Set stays unreported with a warning. |
+| 2.4.3 | 2026-10-02 | H5 orphan-Set check now fires: Sets discovered directly rather than from Model dependents (BL-302, BL-324). A Set whose consumer lookup fails, hides dependents, or is consumed only by another Set stays unreported with a warning. H4 ignores Set rows, so a Model with only Sets is still an orphan. |
 | 2.4.2 | 2026-08-26 | Record why Step 3-4 connection scoping does **not** use `ts metadata search --connection`: the flag keeps only rows with a matching `dataSourceName`, which worksheets/models/answers do not carry, so it would enumerate zero of them — and it takes a single connection where Step 2c offers several. Keep the hand filter, but compare case-insensitively (finding 11.1). |
 | 2.4.1 | 2026-07-03 | Fix stale Phase 2 cross-reference — "OI-6 through OI-9" corrected to "#9 through #12", matching the actual numbering in `references/open-items.md` (audit finding 5.4). |
 | 2.4.0 | 2026-07-03 | Fix 3 audit bugs: (1) scorecard missing 77% of findings — child-object findings (columns, joins, formulas) now match by GUID, not lookup index; (2) false orphan models from pagination — `record_size: -1` in dependent payload; (3) false orphan models from associated export — dependent fetch now covers all model GUIDs from TML, not just input list. Batch size reduced 25→15 for reliability. |

@@ -106,7 +106,7 @@ check ID appearing in reports).
 | H1 | Column name quality (anti-pattern regexes) | LOW per bad name |
 | H2 | Description quality (too-short, boilerplate) | LOW per violation |
 | H3 | Unnecessary hidden columns (not referenced by formulas) | MEDIUM per column |
-| H4 | Orphan models (zero dependents) | MEDIUM per model |
+| H4 | Orphan models (zero dependents other than Sets — a Set's consumers are already Model dependents) | MEDIUM per model |
 | H5 | Orphan sets (zero consumers). Sets discovered via `ts_cli.sets.discover` (not Model dependents — BL-324); a Set whose consumer lookup fails, hides dependents, or is consumed only by another Set is not reported (warning instead) | MEDIUM per set |
 | H7 | Direct table connections (bypasses semantic layer) | MEDIUM per answer |
 | H8 | Formula promotion candidates (duplicated in 2+ answers) | HIGH — link to /ts-object-answer-promote |

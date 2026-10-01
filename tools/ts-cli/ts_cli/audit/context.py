@@ -310,7 +310,7 @@ def build_context(
                     if parsed and detect_tml_type(parsed) == "answer":
                         answers.append(parsed)
         # After the answer export, so Set consumers do not widen the answer set.
-        # H4 does see the SET rows: a Model with Sets is not "zero dependents".
+        # The SET rows are for H5; check_h4 ignores them (ruling R15).
         _add_set_dependents(client, _model_refs(models, model_guids), dependents, warnings)
 
     _log(f"Context ready: {len(models)} model(s), {len(tables)} table(s), "
