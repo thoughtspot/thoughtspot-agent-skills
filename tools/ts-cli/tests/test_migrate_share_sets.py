@@ -4,6 +4,8 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ts_cli.cli import app
 from ts_cli.migrate import apply_exec
 from ts_cli.migrate.apply_plan import (STEP_MOVE_SHIELDED, STEP_REWRITE_CONTENT,
@@ -160,12 +162,37 @@ def test_a_supplied_sets_scan_skips_the_self_scan(mock_cls, _rp, tmp_path):
     mock_cls.return_value = client
     _write_single_model_mapping(tmp_path)
     scan = tmp_path / "sets-scan.json"
-    scan.write_text(json.dumps({"blocked": []}))
+    scan.write_text(json.dumps({"blocked": [], "summary": {"models_incomplete": 0},
+                                "discovery_notes": []}))
     result = runner.invoke(app, ["migrate", "apply", "-d", str(tmp_path),
                                  "--sets-scan", str(scan),
                                  "--source-profile", "src",
                                  "--target-profile", "tgt", "--dry-run"])
     assert "SET_BLOCKER" not in result.stderr
+    assert not _detail_gets(client)
+
+
+@pytest.mark.parametrize("doc", [
+    {"blocked": []},
+    {"blocked": [], "summary": {"models_blocked": 0}},
+])
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_a_pre_bl325_sets_scan_is_refused(mock_cls, _rp, tmp_path, doc):
+    """Final review must-fix 5: a scan file with neither `discovery_notes` nor
+    `summary.models_incomplete` predates BL-325, whose old COHORT-prefix detection
+    missed Sets with a blank header type. Trusting it would read "missed" as "clean"."""
+    client = _client([_COHORT_ROW])
+    mock_cls.return_value = client
+    _write_single_model_mapping(tmp_path)
+    scan = tmp_path / "sets-scan.json"
+    scan.write_text(json.dumps(doc))
+    result = runner.invoke(app, ["migrate", "apply", "-d", str(tmp_path),
+                                 "--sets-scan", str(scan),
+                                 "--source-profile", "src",
+                                 "--target-profile", "tgt", "--dry-run"])
+    assert result.exit_code == 1
+    assert "predates BL-325" in result.stderr and "scan-sets" in result.stderr
     assert not _detail_gets(client)
 
 
@@ -304,6 +331,8 @@ def test_apply_says_a_refusal_is_due_to_failed_discovery(mock_cls, _rp, tmp_path
     assert result.exit_code == 1 and "SET_BLOCKER" in result.stderr
     assert "discovery_failed" in result.stderr
     assert "Set discovery FAILED" in result.stderr
+    # Final review must-fix 5: a scan file cannot fix a failed listing, so never advise one.
+    assert "--sets-scan" not in result.stderr
 
 
 @patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")

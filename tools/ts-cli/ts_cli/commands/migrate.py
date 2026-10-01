@@ -338,10 +338,22 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
         if guid and guid in incomplete:
             # A private endpoint that moved would refuse every apply; say so rather than
             # let SET_BLOCKER read as a confirmed Set.
+            # No --sets-scan advice: a scan file runs the same discovery, so it cannot
+            # succeed where this listing failed (final review must-fix 5).
             _err(f"  note: '{name}' is refused because Set discovery FAILED for it, not "
-                 "because a Set was confirmed. Fix discovery (see notes above) or pass "
-                 "--sets-scan, then re-run.")
+                 "because a Set was confirmed. Fix discovery (see notes above), then re-run.")
     raise typer.Exit(code=1)
+
+
+def _is_post_bl325_scan(doc) -> bool:
+    """A `sets-scan.json` written by the shared-discovery scanner (BL-325) carries
+    `discovery_notes` and `summary.models_incomplete`. Older files used the COHORT-prefix
+    match that missed blank-type Sets, so their `blocked[]` cannot be trusted as complete."""
+    if not isinstance(doc, dict):
+        return False
+    summary = doc.get("summary")
+    return "discovery_notes" in doc or (isinstance(summary, dict)
+                                        and "models_incomplete" in summary)
 
 
 def _err_discovery_notes(found: dict, label: str = "") -> None:
@@ -393,7 +405,13 @@ def apply_migration(
     # cohort scan itself rather than treating "not scanned" as "not blocked".
     blocked = None
     if sets_scan:
-        blocked = blocked_model_guids(_json.loads(Path(sets_scan).read_text()))
+        scan_doc = _json.loads(Path(sets_scan).read_text())
+        if not _is_post_bl325_scan(scan_doc):
+            _refuse(f"{sets_scan} has neither `discovery_notes` nor "
+                    "`summary.models_incomplete`, so it predates BL-325 — whose COHORT-prefix "
+                    "detection missed Sets with a blank header type. Re-run `ts migrate "
+                    "scan-sets`, or omit --sets-scan and let apply scan itself")
+        blocked = blocked_model_guids(scan_doc)
 
     source_client = _org_client(source_profile, source_org)
     target_client = _org_client(target_profile, target_org)

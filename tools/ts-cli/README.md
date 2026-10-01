@@ -3880,6 +3880,10 @@ ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan --resume
 `--plan-dir` holds the approved `column-mapping.csv` from `ts migrate audit`, and receives
 `backup/` and the `state.json` ledger.
 
+`--sets-scan` is optional: without it apply runs the Set discovery itself. A scan file with
+neither `discovery_notes` nor `summary.models_incomplete` predates BL-325 (its detection
+missed blank-type Sets) and is **refused** — re-run `ts migrate scan-sets`.
+
 **One Model per apply.** A mapping covering several Models (`audit --all-models` writes
 one by design) is **refused**: apply binds every rewritten object to ONE published
 target, so Model B's content would land on Model A's master — imports cleanly, renders
