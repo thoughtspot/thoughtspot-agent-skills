@@ -33,7 +33,7 @@ def parse_cohort_columns(rows, model: dict) -> List[dict]:
         if not isinstance(cfg, dict):
             continue
         h = r.get("header") or {}
-        out.append({"guid": h.get("id", ""), "name": h.get("name") or cfg.get("name", ""),
+        out.append({"guid": h.get("id", ""), "name": h.get("name") or cfg.get("name") or "",
                     "model_guid": model["guid"], "model_name": model["name"],
                     "author": h.get("authorName", ""), "cohort_type": cfg.get("cohort_type", ""),
                     "grouping_type": cfg.get("cohort_grouping_type", ""),
@@ -41,23 +41,41 @@ def parse_cohort_columns(rows, model: dict) -> List[dict]:
     return sorted(out, key=lambda s: s["name"].casefold())
 
 
+def _is_well_formed(row) -> bool:
+    """A row in a cohort-only listing must be a recognisable Set; anything else is an anomaly."""
+    if not isinstance(row, dict) or not isinstance(row.get("cohortConfig"), dict):
+        return False
+    h = row.get("header")
+    if not isinstance(h, dict) or not h.get("id"):
+        return False
+    return bool(h.get("name") or row["cohortConfig"].get("name"))
+
+
 def discover_sets(client, models: List[dict]) -> dict:
     result: Dict = {"sets": {}, "incomplete": [], "notes": []}
     for m in models:
+        obj = f"{m['name']} ({m['guid']})"
         try:
             resp = client.get(COHORT_DETAIL.format(guid=m["guid"]), params=dict(_PARAMS),
                               timeout=120)
             rows = resp.json()
+            if not isinstance(rows, list):
+                result["incomplete"].append(m["guid"])
+                result["notes"].append(_note("discovery_failed", obj,
+                                             f"unexpected cohort listing response: {str(rows)[:200]}"))
+                continue
+            bad = sum(1 for r in rows if not _is_well_formed(r))
+            if bad:
+                # Every row of a cohort-only listing should be a Set: an unrecognised row
+                # means we cannot claim the Model's Set list is complete (spec section 7).
+                result["incomplete"].append(m["guid"])
+                result["notes"].append(_note("unrecognised_row", obj,
+                                             f"{bad} of {len(rows)} cohort listing rows not a recognisable Set"))
+                continue
+            result["sets"][m["guid"]] = parse_cohort_columns(rows, m)
         except (Exception, SystemExit) as exc:  # the client exits after its own retries
             result["incomplete"].append(m["guid"])
-            result["notes"].append(_note("discovery_failed", m["name"], f"cohort listing failed: {exc!r}"))
-            continue
-        if not isinstance(rows, list):
-            result["incomplete"].append(m["guid"])
-            result["notes"].append(_note("discovery_failed", m["name"],
-                                         f"unexpected cohort listing response: {str(rows)[:200]}"))
-            continue
-        result["sets"][m["guid"]] = parse_cohort_columns(rows, m)
+            result["notes"].append(_note("discovery_failed", obj, f"cohort listing failed: {exc!r}"))
     return result
 
 
@@ -70,8 +88,8 @@ def by_owner(result: dict) -> Dict[str, List[dict]]:
 
 
 def export_doc(client, guid: str) -> Optional[dict]:
-    from ts_cli.commands.tml import parse_edoc
     try:
+        from ts_cli.commands.tml import parse_edoc
         resp = client.post(EXPORT, json={"metadata": [{"identifier": guid}],
                                          "export_associated": False, "export_fqn": True,
                                          "formattype": "YAML"})

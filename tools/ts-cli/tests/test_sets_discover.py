@@ -74,3 +74,63 @@ def test_by_owner_marks_incomplete_models_blocked():
     res = {"sets": {"m1": []}, "incomplete": ["m2"], "notes": []}
     assert by_owner(res)["m2"][0]["name"] == "(discovery incomplete)"
     assert "m1" not in by_owner(res)
+
+
+# --- fix round 1: anomalies make the result less certain, never more favourable ---
+from ts_cli.sets.discover import export_doc  # noqa: E402
+
+
+def test_row_lacking_cohort_config_makes_model_incomplete():
+    out = discover_sets(_client({"m1": [_row("s1", "Basket"), _row("c1", "Amount", cfg=False)]}), [M])
+    assert "m1" not in out["sets"] and out["incomplete"] == ["m1"]
+    (note,) = out["notes"]
+    assert note["kind"] == "unrecognised_row" and "1 of 2" in note["detail"]
+    assert note["object"] == "Dunder (m1)"
+
+
+def test_non_dict_element_is_incomplete_without_exception():
+    out = discover_sets(_client({"m1": [_row("s1", "Basket"), "x"]}), [M])
+    assert "m1" not in out["sets"] and out["incomplete"] == ["m1"]
+    assert out["notes"][0]["kind"] == "unrecognised_row"
+
+
+def test_empty_header_id_is_incomplete():
+    out = discover_sets(_client({"m1": [_row("", "Basket")]}), [M])
+    assert out["incomplete"] == ["m1"] and "m1" not in out["sets"]
+
+
+def test_runtime_error_is_incomplete():
+    out = discover_sets(_client({"m1": RuntimeError("boom")}), [M])
+    assert out["incomplete"] == ["m1"] and "m1" not in out["sets"]
+    assert out["notes"][0]["kind"] == "discovery_failed"
+    assert out["notes"][0]["object"] == "Dunder (m1)"
+
+
+def test_one_failing_model_does_not_affect_another():
+    m2 = {"guid": "m2", "name": "Other"}
+    out = discover_sets(_client({"m1": ["x"], "m2": [_row("s9", "Gamma")]}), [M, m2])
+    assert out["incomplete"] == ["m1"] and [s["guid"] for s in out["sets"]["m2"]] == ["s9"]
+
+
+def test_by_owner_lists_sets():
+    res = {"sets": {"m1": parse_cohort_columns([_row("s1", "Basket")], M)}, "incomplete": [], "notes": []}
+    assert by_owner(res) == {"m1": [{"name": "Basket", "guid": "s1"}]}
+
+
+def test_parse_name_none_falls_back_to_empty():
+    r = _row("s1", None)
+    r["cohortConfig"]["name"] = None
+    (s,) = parse_cohort_columns([r], M)
+    assert s["name"] == ""
+
+
+def test_export_doc_parses_edoc():
+    c = MagicMock()
+    c.post.return_value = MagicMock(json=lambda: [{"edoc": "cohort:\n  name: X\n"}])
+    assert export_doc(c, "g1") == {"cohort": {"name": "X"}}
+
+
+def test_export_doc_none_on_failure():
+    c = MagicMock()
+    c.post.side_effect = SystemExit(1)
+    assert export_doc(c, "g1") is None
