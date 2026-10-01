@@ -22,9 +22,10 @@ _NEEDS_COMPLETE_CONSUMERS = {"EXPLAINED", "UNEXPLAINED"}
 def _consumers_uncertain(consumers: dict) -> bool:
     """Hidden dependents (or a failed lookup) or a dependent with no owner: an owner we
     cannot see would read UNEXPLAINED and land on the review list (spec §6.1 says that
-    list never holds a REQUIRED grant)."""
-    return bool(consumers.get("error")) or any(
-        not d.get("author_id") for d in consumers["dependents"])
+    list never holds a REQUIRED grant). An `other_types` consumer carries no owner in the
+    record, so its owner is equally invisible (R12)."""
+    return (bool(consumers.get("error")) or bool(consumers.get("other_types"))
+            or any(not d.get("author_id") for d in consumers["dependents"]))
 
 
 def build_set_record(set_ref: dict, consumers: dict, cls: dict, grants) -> dict:
@@ -61,6 +62,14 @@ def inventory_org(client, label: str, models: List[dict]) -> dict:
             if cons.get("error"):
                 notes.append({"kind": "dependents_failed", "object": obj,
                               "detail": cons["error"]})
+            for u in cons.get("unreadable") or []:
+                notes.append({"kind": "export_unreadable",
+                              "object": f"{obj} / {u['name']} ({u['guid']})",
+                              "detail": u["reason"]})
+            for o in cons.get("other_types") or []:
+                notes.append({"kind": "unrecognised_dependent",
+                              "object": f"{obj} / {o['name']} ({o['guid']})",
+                              "detail": f"type {o['type']} not inspected"})
             if grants is None:
                 notes.append({"kind": "grants_unreadable", "object": obj,
                               "detail": "fetch-permissions failed or returned an unusable "

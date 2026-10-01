@@ -97,7 +97,9 @@ def test_all_org_ids_pages_and_keeps_active_only():
         {"orgId": 7, "orgName": "Old", "status": "INACTIVE"}]
     with patch("ts_cli.client.ThoughtSpotClient", return_value=client), \
          patch("ts_cli.commands.sets.resolve_profile", return_value="p"):
-        assert sets_cmd._all_org_ids("p") == ["0"]
+        ids, notes = sets_cmd._all_org_ids("p")
+    assert ids == ["0"]
+    assert [(n["kind"], n["object"]) for n in notes] == [("org_skipped", "Old (7)")]
     body = client.post.call_args.kwargs["json"]
     assert client.post.call_args.args[0] == "/api/rest/2.0/orgs/search"
     assert body["record_offset"] == 0 and body["record_size"] > 0
@@ -107,9 +109,36 @@ def test_all_org_ids_pages_and_keeps_active_only():
 @patch("ts_cli.commands.sets.inventory_org", side_effect=_fake_inventory)
 @patch("ts_cli.commands.sets._models_in", return_value=MODELS)
 @patch("ts_cli.commands.sets._client", return_value=object())
-@patch("ts_cli.commands.sets._all_org_ids", return_value=["0", "3"])
+@patch("ts_cli.commands.sets._all_org_ids", return_value=(["0", "3"], []))
 def test_all_orgs_scans_each_org(_ids, client, _m, _inv, _rp):
     r = runner.invoke(app, ["sets", "inventory", "--all-orgs", "--profile", "p"])
     assert r.exit_code == 0, r.stderr
     assert [o["org"] for o in json.loads(r.stdout)["orgs"]] == ["0", "3"]
     assert [c.args[1] for c in client.call_args_list] == ["0", "3"]
+
+
+def test_org_rows_missing_status_or_id_are_skipped_with_notes():
+    client = MagicMock()
+    client.post.return_value.json.return_value = [
+        {"orgId": 0, "orgName": "Primary", "status": "ACTIVE"},
+        {"orgId": 4, "orgName": "NoStatus"},
+        {"orgName": "NoId", "status": "ACTIVE"}]
+    with patch("ts_cli.client.ThoughtSpotClient", return_value=client), \
+         patch("ts_cli.commands.sets.resolve_profile", return_value="p"):
+        ids, notes = sets_cmd._all_org_ids("p")
+    assert ids == ["0"]
+    assert [n["object"] for n in notes] == ["NoStatus (4)", "NoId (None)"]
+
+
+@patch("ts_cli.commands.sets.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.sets.inventory_org", side_effect=_fake_inventory)
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=object())
+def test_skipped_orgs_appear_in_output_notes(_c, _m, _inv, _rp):
+    skipped = [{"kind": "org_skipped", "object": "Old (7)", "detail": "status 'INACTIVE'"}]
+    with patch("ts_cli.commands.sets._all_org_ids", return_value=(["0"], skipped)):
+        r = runner.invoke(app, ["sets", "inventory", "--all-orgs", "--profile", "p"])
+        d = runner.invoke(app, ["sets", "inventory", "--all-orgs", "--dry-run", "--profile", "p"])
+    assert r.exit_code == 0 and d.exit_code == 0, r.stderr
+    assert json.loads(r.stdout)["notes"] == skipped
+    assert json.loads(d.stdout)["notes"] == skipped

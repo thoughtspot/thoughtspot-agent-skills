@@ -5,7 +5,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import typer
 
@@ -49,20 +49,23 @@ def _dedupe(models: List[dict]) -> List[dict]:
     return out
 
 
-def _all_org_ids(profile: Optional[str]) -> List[str]:
+def _all_org_ids(profile: Optional[str]) -> Tuple[List[str], List[dict]]:
     """Numeric ids (as strings, which `_client_for_org` accepts) of every ACTIVE Org,
-    fully paginated via `ts orgs search`'s listing. Skipped Orgs are named on stderr."""
+    fully paginated via `ts orgs search`'s listing, plus an `org_skipped` note for every
+    other row (not ACTIVE, or missing `status`/`orgId`) — also named on stderr."""
     from ts_cli.client import ThoughtSpotClient
     from ts_cli.commands.orgs import list_orgs
     rows = list_orgs(ThoughtSpotClient(resolve_profile(profile)))
-    ids = []
+    ids, notes = [], []
     for o in rows:
         if o.get("status") == "ACTIVE" and o.get("orgId") is not None:
             ids.append(str(o["orgId"]))
-        else:
-            _err(f"skipping Org {o.get('orgName')!r} (id {o.get('orgId')}, "
-                 f"status {o.get('status')})")
-    return ids
+            continue
+        detail = f"status {o.get('status')!r}, orgId {o.get('orgId')!r}; not scanned"
+        _err(f"skipping Org {o.get('orgName')!r}: {detail}")
+        notes.append({"kind": "org_skipped",
+                      "object": f"{o.get('orgName')} ({o.get('orgId')})", "detail": detail})
+    return ids, notes
 
 
 def _clean_selectors(flag: str, values: List[str]) -> List[str]:
@@ -126,7 +129,13 @@ def inventory(
         raise typer.Exit(1)
     model = _clean_selectors("--model", model)
     model_contains = _clean_selectors("--model-contains", model_contains)
-    orgs: List[Optional[str]] = _all_org_ids(profile) if all_orgs else (list(org) or [None])
+    org_notes: List[dict] = []
+    orgs: List[Optional[str]]
+    if all_orgs:
+        ids, org_notes = _all_org_ids(profile)
+        orgs = list(ids)
+    else:
+        orgs = list(org) or [None]
     if not orgs:
         _err("--all-orgs found no ACTIVE Org")
         raise typer.Exit(1)
@@ -136,7 +145,8 @@ def inventory(
         n = sum(len(c) for _, _, c in plans)
         _err(f"{n} Model(s) in scope across {len(plans)} Org(s); rough estimate {max(1, n * 5)}s+")
         print(json.dumps({"schema": SCHEMA, "dry_run": True, "scope": scope,
-                          "orgs": [{"org": label, "models": c} for label, _, c in plans]}, indent=2))
+                          "orgs": [{"org": label, "models": c} for label, _, c in plans],
+                          "notes": org_notes}, indent=2))
         return
     results = []
     for label, client, chosen in plans:
@@ -145,5 +155,5 @@ def inventory(
     doc = {"schema": SCHEMA,
            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "profile": resolve_profile(profile), "scope": scope,
-           "orgs": results, "summary": summarise(results)}
+           "orgs": results, "notes": org_notes, "summary": summarise(results)}
     _emit(doc, output)

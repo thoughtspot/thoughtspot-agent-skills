@@ -77,6 +77,28 @@ def test_uncertain_consumers_keep_required():
     assert [g["provenance"] for g in rec["grants"]] == ["REQUIRED"]
 
 
+# --- R12: other_types consumers make provenance uncertain ---------------------------
+
+def _cons_other_types():
+    return dict(CONS, other_types=[{"guid": "f1", "name": "Fb", "type": "FEEDBACK"}])
+
+
+def test_other_types_consumer_makes_view_grant_unknown():
+    """Review probe: the FEEDBACK consumer's owner (u7) holds READ_ONLY on the Set but
+    its author_id is not in the record, so it would read UNEXPLAINED."""
+    grants = {"s1": [_grant("u7", "READ_ONLY")], "a1": []}
+    rec = inv.build_set_record(SET, _cons_other_types(), CLS, grants)
+    assert [g["provenance"] for g in rec["grants"]] == ["UNKNOWN"]
+    assert inv.summarise([{"models": [{"discovery": "COMPLETE", "sets": [rec]}]}])[
+        "unexplained_grants"] == 0
+
+
+def test_other_types_consumer_keeps_modify_direct():
+    grants = {"s1": [_grant("u7", "MODIFY")], "a1": []}
+    rec = inv.build_set_record(SET, _cons_other_types(), CLS, grants)
+    assert [g["provenance"] for g in rec["grants"]] == ["DIRECT"]
+
+
 # --- inventory_org ------------------------------------------------------------------
 
 def test_incomplete_model_has_null_set_count_never_zero():
@@ -113,6 +135,24 @@ def test_unreadable_grants_recorded_as_note():
     notes = [n for n in out["notes"] if n["kind"] == "grants_unreadable"]
     assert len(notes) == 1 and notes[0]["object"] == "M / B"
     assert out["models"][0]["sets"][0]["grants"][0]["provenance"] == "UNKNOWN"
+
+
+def test_unreadable_export_recorded_as_note():
+    cons = dict(CONS, dependents=CONS["dependents"] + [
+        {"guid": "l1", "name": "LB", "type": "LIVEBOARD", "author_id": "u2"}],
+        unreadable=[{"guid": "l1", "name": "LB",
+                     "reason": "Liveboard TML export failed or was refused"}])
+    out = _run_org(cons, {"s1": []})
+    (n,) = [n for n in out["notes"] if n["kind"] == "export_unreadable"]
+    assert n == {"kind": "export_unreadable", "object": "M / B / LB (l1)",
+                 "detail": "Liveboard TML export failed or was refused"}
+
+
+def test_unrecognised_dependent_recorded_as_note():
+    out = _run_org(_cons_other_types(), {"s1": []})
+    (n,) = [n for n in out["notes"] if n["kind"] == "unrecognised_dependent"]
+    assert n == {"kind": "unrecognised_dependent", "object": "M / B / Fb (f1)",
+                 "detail": "type FEEDBACK not inspected"}
 
 
 def test_unexpected_classify_error_propagates():
