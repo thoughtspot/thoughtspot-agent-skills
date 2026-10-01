@@ -157,3 +157,34 @@ def inventory(
            "profile": resolve_profile(profile), "scope": scope,
            "orgs": results, "notes": org_notes, "summary": summarise(results)}
     _emit(doc, output)
+
+
+@app.command("report")
+def report(
+    inventory_path: str = typer.Argument(..., help="sets-inventory.json from `ts sets inventory`."),
+    out_dir: str = typer.Option(".", "-o", "--output", help="Directory for report.html + report.md."),
+) -> None:
+    """Render an inventory as report.html (self-contained) and report.md.
+
+    Output: JSON {"html": path, "markdown": path} on stdout. Refuses dry-run output.
+
+    Examples:
+
+    \b
+      ts sets report ./sets-inventory.json -o ./sets-report
+    """
+    from ts_cli.sets.render import render_html, render_markdown
+    try:
+        inv = json.loads(Path(inventory_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        _err(f"Cannot read inventory {inventory_path}: {exc}")
+        raise typer.Exit(1)
+    if not isinstance(inv, dict) or inv.get("schema") != SCHEMA or inv.get("dry_run"):
+        _err(f"Not a full {SCHEMA} document (dry-run output cannot be rendered)")
+        raise typer.Exit(1)
+    target = Path(out_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "report.html").write_text(render_html(inv), encoding="utf-8")
+    (target / "report.md").write_text(render_markdown(inv), encoding="utf-8")
+    print(json.dumps({"html": str(target / "report.html"),
+                      "markdown": str(target / "report.md")}))

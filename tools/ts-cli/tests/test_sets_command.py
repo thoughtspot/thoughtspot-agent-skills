@@ -142,3 +142,33 @@ def test_skipped_orgs_appear_in_output_notes(_c, _m, _inv, _rp):
     assert r.exit_code == 0 and d.exit_code == 0, r.stderr
     assert json.loads(r.stdout)["notes"] == skipped
     assert json.loads(d.stdout)["notes"] == skipped
+
+
+def test_report_refuses_dry_run(tmp_path):
+    p = tmp_path / "i.json"
+    p.write_text(json.dumps({"schema": "ts-sets-inventory/1", "dry_run": True}))
+    r = runner.invoke(app, ["sets", "report", str(p), "-o", str(tmp_path / "out")])
+    assert r.exit_code == 1
+    assert not (tmp_path / "out").exists()
+
+
+def test_report_refuses_wrong_schema(tmp_path):
+    p = tmp_path / "i.json"
+    p.write_text(json.dumps({"schema": "something-else/1"}))
+    r = runner.invoke(app, ["sets", "report", str(p), "-o", str(tmp_path)])
+    assert r.exit_code == 1
+
+
+def test_report_writes_html_and_markdown(tmp_path):
+    inv = {"schema": "ts-sets-inventory/1", "generated_at": "t", "profile": "se",
+           "scope": {}, "notes": [], "orgs": [{"org": "Primary", "notes": [], "models": []}],
+           "summary": {"models": 0, "models_incomplete": 0, "sets": 0, "by_class": {},
+                       "unexplained_grants": 0}}
+    p = tmp_path / "i.json"
+    p.write_text(json.dumps(inv))
+    r = runner.invoke(app, ["sets", "report", str(p), "-o", str(tmp_path / "out")])
+    assert r.exit_code == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert (tmp_path / "out" / "report.html").read_text().startswith("<!doctype html>")
+    assert "Reusable Set inventory" in (tmp_path / "out" / "report.md").read_text()
+    assert out["html"].endswith("report.html")

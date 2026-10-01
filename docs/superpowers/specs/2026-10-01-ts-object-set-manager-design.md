@@ -163,7 +163,7 @@ is deliberately conservative: it puts a grant in front of a reviewer rather than
 | Per Model | One row per Set: name, column vs query Set, anchor column, author, dependent count, class, v2 next action |
 | Set detail (expandable) | Dependents — Answers; Liveboards with the visualizations and filters using the Set — and the grant table with provenance |
 | Review lists | `REVIEW_DELETE` Sets and `UNEXPLAINED` grants; clipboard copy. Never contains a `REQUIRED` grant |
-| Scan notes | Every skipped or degraded object by name: unconfirmed candidates, refused exports, unrecognised dependent types, page timeouts and their fallback |
+| Scan notes | Every skipped or degraded object by name, from the top-level and per-Org `notes[]`: `discovery_failed`, `unrecognised_row`, `dependents_failed`, `export_unreadable`, `unrecognised_dependent`, `grants_unreadable`, `org_skipped` |
 
 ### 6.2 Skill steps
 
