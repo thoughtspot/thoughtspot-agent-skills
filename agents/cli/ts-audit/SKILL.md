@@ -217,10 +217,15 @@ ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile "{profile_name}"
 ts metadata dependents "{model_guid}" --profile "{profile_name}"
 ```
 
-Store the full response in `corpus.dependents[model_guid]`. D angle uses
-dependents to discover Sets (COHORT bucket — not searchable via
-`ts metadata search`). H angle uses dependents for H4 (orphan model
-detection) and H8 (formula promotion candidates).
+Store the full response in `corpus.dependents[model_guid]`. H angle uses
+dependents for H4 (orphan model detection) and H8 (formula promotion candidates).
+
+Sets are **not** in a Model's dependents (BL-324); `ts audit run` discovers them
+directly when H is selected (one cohort listing per Model), adds each Set to its
+Model's dependents, and looks up each Set's own consumers for H5. A Set whose
+consumer lookup fails, hides dependents from this user, or is consumed only by
+another Set is **not** reported as an orphan — the audit records a warning instead.
+A Model whose Set listing is incomplete contributes no Set rows, only a warning.
 
 **For H angle (formula checks) — also enumerate answers:**
 
@@ -415,6 +420,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.4.3 | 2026-10-02 | H5 orphan-Set check now fires: Sets discovered directly rather than from Model dependents (BL-302, BL-324). A Set whose consumer lookup fails, hides dependents, or is consumed only by another Set stays unreported with a warning. |
 | 2.4.2 | 2026-08-26 | Record why Step 3-4 connection scoping does **not** use `ts metadata search --connection`: the flag keeps only rows with a matching `dataSourceName`, which worksheets/models/answers do not carry, so it would enumerate zero of them — and it takes a single connection where Step 2c offers several. Keep the hand filter, but compare case-insensitively (finding 11.1). |
 | 2.4.1 | 2026-07-03 | Fix stale Phase 2 cross-reference — "OI-6 through OI-9" corrected to "#9 through #12", matching the actual numbering in `references/open-items.md` (audit finding 5.4). |
 | 2.4.0 | 2026-07-03 | Fix 3 audit bugs: (1) scorecard missing 77% of findings — child-object findings (columns, joins, formulas) now match by GUID, not lookup index; (2) false orphan models from pagination — `record_size: -1` in dependent payload; (3) false orphan models from associated export — dependent fetch now covers all model GUIDs from TML, not just input list. Batch size reduced 25→15 for reliability. |

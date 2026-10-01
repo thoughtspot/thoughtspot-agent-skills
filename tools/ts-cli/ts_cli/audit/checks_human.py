@@ -157,12 +157,11 @@ def check_h5(ctx: AuditContext) -> list:
         for d in deps:
             if d.get("type") == "SET":
                 set_guid = d.get("guid", "")
-                # `build_context` fetches dependents for models and tables only,
-                # so a SET guid is normally absent from this map. Absence means
-                # "not looked up", NOT "no consumers" — reporting an orphan from
-                # it asserted a lookup that never happened, and flagged every set
-                # in the environment (BL-302). Until the fetch covers sets, this
-                # check is correctly silent rather than confidently wrong.
+                # `build_context` records a SET guid here only when the Set's
+                # consumer lookup was clean (`_add_set_dependents`, BL-324).
+                # Absence means "not looked up", NOT "no consumers" — reporting
+                # an orphan from it asserted a lookup that never happened, and
+                # flagged every set in the environment (BL-302). Stay silent.
                 if set_guid not in ctx.dependents:
                     continue
                 if not ctx.dependents[set_guid]:
