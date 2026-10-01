@@ -22,12 +22,14 @@ context is slow, and one wrong character corrupts a tile. So `<L>/scripts/livebo
 into blocks, and each block patches the Liveboard itself (`<L>/scripts/patch.js`):
 
 1. every chart and the core carry a sha256; the sandbox refuses the whole block on any mismatch;
-2. it exports the Liveboard and indexes its tiles by the `/* amuzing-slug: <slug> */` marker at the top of
-   each chart body (tiles imported before markers existed are matched by tab name and grid position);
-3. it builds the whole TML from the spec: charts in the block replace their tile, every other tile keeps its
-   current code, spec tiles with no code anywhere are left out and listed under `problems`;
-4. it imports, and after a commit exports again and compares every tile's JS and CSS sha256 **in order**
-   (ThoughtSpot renumbers viz ids).
+2. it exports the Liveboard and finds the skill's tiles: those whose code carries
+   `/* ts-lb-owner: <this Liveboard's guid> */` (with `/* amuzing-slug: <slug> */` naming the chart). Tiles
+   from before owner markers are taken over only with `--adopt`;
+3. it merges into the export: charts in the block replace their tile, the skill's other tiles keep their
+   code, and everything it does not own is kept as it is (SKILL.md Step 6). Any problem (a failed search, a
+   missing tile, an ownership conflict, no backup of content it does not own) refuses the commit;
+4. it imports, and after a commit exports again and proves the composed code came back, nothing it did not
+   own was lost, and every tab holds its tiles (matched by content: ThoughtSpot may renumber viz ids).
 
 Nothing else is created in ThoughtSpot. An earlier version stored every chart as its own
 `zz-amuzing-store-<slug>` Liveboard and assembled from those: 56 objects in the user's library that they
@@ -67,5 +69,6 @@ warns past 2000. Past about 2 MB: share code between tiles with
   To see what a live tile really runs, evaluate in its frame (for example `!!window.Plotly`).
 - A stale core copy inside a chart only misleads the preview (every block sends the current core);
   `liveboard-pack.mjs` warns, and `<C>/helpers/sync-core.mjs` fixes it.
-- Drag-and-drop layout edits made in the ThoughtSpot UI are overwritten by the next block, which lays the
-  Liveboard out from the spec. Move tiles in `make-spec.py`, not in the UI.
+- Drag-and-drop moves of the skill's own tiles made in the ThoughtSpot UI are overwritten by the next block,
+  which places them from the spec. Move them in `make-spec.py`, not in the UI. The user's own tiles keep
+  their place (or move below the skill's when they would overlap).

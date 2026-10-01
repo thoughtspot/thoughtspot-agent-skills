@@ -345,18 +345,25 @@ or C) built on the intake search. The answer is the one object this creates; mak
    ```bash
    node "<SKILL>/helpers/answer-pack.mjs" "<OUT>/<SLUG>" --model <model guid> --search "<search>" --name "<title>" --commit > "<RUNS>/<SLUG>/answer-commit.js"
    ```
-   To update an answer made earlier, add `--answer <guid>`: it updates in place instead of making a copy.
-   An update merges into the answer's exported TML: the search, columns and chart are replaced, and its
-   formulas, parameters and other settings are kept (`keptFromAnswer` lists them). If this skill did not
-   create that answer, back it up first: `ts tml export <guid> --profile <name> > <RUNS>/<SLUG>/answer-backup.json`
-   when a `ts` profile is set up, or the answer's **Export TML** menu item otherwise. Restore by importing
-   that TML (`ts tml import`, or **Import TML** in ThoughtSpot). Say where the backup is before committing.
+   To update an answer made earlier, add `--answer <guid> --backup <file>`: it updates in place instead of
+   making a copy. An update merges into the answer's exported TML. It sets the search, the chart type and
+   code, and the column lists; it keeps formulas, parameters, the settings (formats) of columns still in the
+   search, the table view's settings, the tables when they include the model, and every other top-level key.
+   The summary lists both: `kept`, and `replaced` (for example a native chart and its axes, a table display
+   mode, columns the new search drops). Tell the user what is under `replaced`.
+   **The backup is required** for an update commit, and checked: export the answer first with
+   `ts tml export <guid> --profile <name> > ~/.cache/ts-charts/backups/<guid>-<date>.json` when a `ts`
+   profile is set up, or its **Export TML** menu item otherwise. `answer-pack.mjs` refuses a file that is
+   missing, does not name the answer's guid, is over a day old or sits inside a git working tree, and the
+   sandbox refuses an update built without one. Restore by importing that TML (`ts tml import`, or
+   **Import TML** in ThoughtSpot). Say where the backup is before committing.
 2. **Validate and commit in one paste.** `--commit` runs a `VALIDATE_ONLY` import first and commits only
    if it passes, so there is one block to send; `--validate` alone is for checking without writing. Read the
    file and paste it, unchanged, as the `code` of `execute-thoughtspot-code` with
    `confirm_write_operations: true` (a validate counts as a write too). A commit succeeds when it returns
    `validate.status_code: OK`, `import.status_code: OK`, `chartType: MUZE_STUDIO`, `roundTripOk: true` and a
-   `guid`. The block carries the whole core (about 30 KB); copy it exactly, the checksum catches any slip.
+   `guid`. The round trip also checks every formula and parameter the answer had is still there; a
+   `roundTripFailed` naming one means restore from the backup. The block carries the whole core (about 30 KB); copy it exactly, the checksum catches any slip.
    `CHECKSUM MISMATCH` means the paste was altered: resend the block. Put the guid in
    `<OUT>/<SLUG>/README.md` so the next change updates the same answer.
 3. **Open it.** The answer is at `https://<cluster host>/#/saved-answer/<guid>`. The MCP does not expose
@@ -388,8 +395,11 @@ tiles, filters, round-trip proof, in-cluster screenshots). To hand a chart over:
 1. Build it to `references/library-contract.md` (shared core, ASCII, no template strings).
 2. `node "<SKILL>/helpers/sync-core.mjs" "<RUNS>/<SLUG>/chart"`, then
    `node "<SKILL>/helpers/library-emit.mjs" <SLUG> --title ... --search ... --tile WxH ...` publishes it to
-   `library/<slug>/` (refuses non-ASCII or a drifted core). `--png` is relative to the run folder (`attempts/03.520x400.png`), not the repo. `python3 "<SKILL>/helpers/make-index.py"`
-   refreshes `references/library.md`.
+   the user's library, `~/.cache/ts-charts/library/<slug>/`, outside any repo because its preview shows
+   live data (refuses non-ASCII or a drifted core). The Liveboard skill and `answer-pack.mjs` find it there
+   by slug. `--into-skill` writes into this skill's shipped `library/` instead: only for maintainers adding a
+   chart to the shipped library, with a preview that shows no customer data. `--png` is relative to the run folder (`attempts/03.520x400.png`), not the repo. `python3 "<SKILL>/helpers/make-index.py"`
+   refreshes `references/library.md` after an `--into-skill` publish.
 
 Without that skill or the MCP, hand the user the three files and the search to bind.
 
@@ -447,4 +457,4 @@ than an honest question.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.0.0 | 2026-09-29 | Initial release (ported from thoughtspot-amuzing-chart 1.4.1). Builds a ThoughtSpot custom chart (BYOC) as paste-ready chart.html / chart.css / chart.js by iterating in a real browser against a faithful `viz` stub, screenshotting and critiquing each attempt. Step 0 checks the prerequisites and asks what to build as pick-from-a-list questions. Ships a library of 58 live-data charts with a shared core. Step 9 saves the chart as an answer through the ThoughtSpot MCP (checksum, validate then commit, round trip); an update merges into the existing answer and keeps its formulas and parameters. Screenshots in ThoughtSpot use a per-cluster sign-in profile (0700) that is removed at the end unless the user keeps it. Run folders and deliverables live under `~/.cache/ts-charts`, outside any repo. Hands finished tiles to `ts-object-liveboard-builder` |
+| 1.0.0 | 2026-09-30 | Initial release (ported from thoughtspot-amuzing-chart 1.4.1). Builds a ThoughtSpot custom chart (BYOC) as paste-ready chart.html / chart.css / chart.js by iterating in a real browser against a faithful `viz` stub, screenshotting and critiquing each attempt. Step 0 checks the prerequisites and asks what to build as pick-from-a-list questions. Ships a library of 58 live-data charts with a shared core. Step 9 saves the chart as an answer through the ThoughtSpot MCP (checksum, validate then commit, round trip); an update merges into the existing answer (keeps formulas, parameters, column formats and table settings, and reports what it replaced), needs a checked backup, and its round trip proves the formulas and parameters survived. Screenshots in ThoughtSpot use a per-cluster sign-in profile (0700) that is removed at the end unless the user keeps it. Run folders, deliverables and published charts (the user's library) live under `~/.cache/ts-charts`, outside any repo. Hands finished tiles to `ts-object-liveboard-builder` |

@@ -5,10 +5,13 @@
 //   1. checks the three chart files against their sha256 (a mistyped paste is refused, nothing is written);
 //   2. resolves the model, and runs the search once for its column names;
 //   3. builds one answer TML with a MUZE_STUDIO chart carrying the files. With a guid it merges into that
-//      answer's exported TML: the search, columns and chart are replaced, and everything else it has (formulas,
-//      parameters, other settings) is kept;
-//   4. imports (VALIDATE_ONLY or ALL_OR_NONE), and after a commit exports the answer and proves it carries
-//      exactly the files that were sent.
+//      answer's exported TML. It sets the search, the chart type and code, and the column lists; it keeps
+//      everything else: formulas, parameters, the per-column settings (formats) of columns still in the
+//      search, the table view's settings, the tables when they include the model, and other top-level keys.
+//      The summary lists what was kept (`kept`) and what was replaced (`replaced`), so nothing goes silently;
+//   4. imports (VALIDATE_ONLY, then ALL_OR_NONE for a commit; an update commits only with a backup named by
+//      answer-pack --backup), and after a commit exports the answer and proves it carries exactly the files
+//      that were sent and still has every formula and parameter it had.
 // It creates nothing but the answer the user asked for.
 const MODE = '__MODE__'; // 'validate' | 'commit'
 const P = __PAYLOAD__;
@@ -55,14 +58,44 @@ const answer = {
   display_mode: 'CHART_MODE'
 };
 if (P.description) answer.description = P.description;
-// Updating: start from what the answer already has, so formulas, parameters and other settings survive. Chart
-// settings carry over only from a custom chart; a native chart's axes would not fit this one.
-const oldChart = old && old.chart && old.chart.type === 'MUZE_STUDIO' ? old.chart : {};
-const merged = old ? { ...old, ...answer, chart: { ...oldChart, ...answer.chart } } : answer;
+// Updating: start from what the answer already has. Chart settings carry over only from a custom chart; a
+// native chart's axes would not fit this one (they are listed under `replaced`).
+let merged = answer;
+const kept = [], replaced = [];
+if (old) {
+  const byName = (xs, k) => Object.fromEntries((xs || []).map((x) => [x[k], x]));
+  const oldCols = byName(old.answer_columns, 'name');
+  const keepCols = cols.filter((c) => oldCols[c] && Object.keys(oldCols[c]).length > 1);
+  const oldTable = old.table || null, oldTc = byName(oldTable && oldTable.table_columns, 'column_id');
+  const oldChart = old.chart && old.chart.type === 'MUZE_STUDIO' ? old.chart : null;
+  const oldCc = byName(oldChart && oldChart.chart_columns, 'column_id');
+  const tablesOk = (old.tables || []).some((t) => t.fqn === model.guid || t.id === model.name || t.name === model.name);
+  merged = {
+    ...old, ...answer,
+    name: answer.name, search_query: answer.search_query,
+    tables: tablesOk ? old.tables : answer.tables,
+    answer_columns: cols.map((c) => oldCols[c] || { name: c }),
+    table: oldTable ? { ...oldTable, table_columns: cols.map((c) => oldTc[c] || { column_id: c }), ordered_column_ids: cols } : answer.table,
+    chart: { ...(oldChart || {}), ...answer.chart, chart_columns: cols.map((c) => oldCc[c] || { column_id: c }), custom_visual_props: answer.chart.custom_visual_props }
+  };
+  if (oldChart && oldChart.client_state_v2) merged.chart.client_state_v2 = oldChart.client_state_v2;
+  for (const k of Object.keys(old)) if (!(k in answer)) kept.push(k);
+  if (keepCols.length) kept.push('answer_columns settings: ' + keepCols.join(', '));
+  if (oldTable) kept.push('table settings');
+  if (tablesOk) kept.push('tables');
+  if (oldChart) kept.push('custom chart settings');
+  const gone = (old.answer_columns || []).map((c) => c.name).filter((n) => !cols.includes(n));
+  if (gone.length) replaced.push('columns no longer in the search: ' + gone.join(', '));
+  if (old.search_query !== answer.search_query) replaced.push('search_query');
+  if (old.name !== answer.name) replaced.push('name');
+  if (!tablesOk && old.tables) replaced.push('tables (the model changed)');
+  if (old.chart && !oldChart) replaced.push('chart: a native ' + old.chart.type + ' chart and its settings');
+  if (old.display_mode && old.display_mode !== answer.display_mode) replaced.push('display_mode ' + old.display_mode);
+}
 const tml = P.guid ? { guid: P.guid, answer: merged } : { answer };
 const text = JSON.stringify(tml);
 const summary = { mode: MODE, model: model.name, columns: cols, tmlKB: Math.round(text.length / 1024) };
-if (old) summary.keptFromAnswer = Object.keys(old).filter((k) => !(k in answer));
+if (old) { summary.kept = kept; summary.replaced = replaced; }
 
 // 4. import and prove. A commit validates first in the same call, so one paste does both.
 const importAs = async (policy) => {
@@ -73,6 +106,7 @@ const v = await importAs('VALIDATE_ONLY');
 summary.validate = v.r && v.r.status;
 if (!v.r || !v.r.status || v.r.status.status_code !== 'OK') { summary.raw = JSON.stringify(v.raw).slice(0, 1200); return summary; }
 if (MODE !== 'commit') return summary;
+if (P.guid && !P.backup) { summary.refused = 'NOT COMMITTED - updating an answer needs a backup of it first: export its TML and build the block with --backup <file>'; return summary; }
 const c = await importAs('ALL_OR_NONE');
 const r0 = c.r;
 summary.import = r0 && r0.status;
@@ -85,7 +119,11 @@ if (MODE === 'commit') {
   const code = JSON.parse(JSON.parse(back.chart.custom_visual_props).clientState).playground.code;
   const got = { html: await sha256(unb64(code.htmlCodeBase64)), css: await sha256(unb64(code.cssCodeBase64)), js: await sha256(unb64(code.jsCodeBase64)) };
   summary.chartType = back.chart.type;
-  summary.roundTripOk = ['html', 'css', 'js'].every((k) => got[k] === P.sha[k]);
-  if (!summary.roundTripOk) summary.roundTripFailed = ['html', 'css', 'js'].filter((k) => got[k] !== P.sha[k]);
+  const failed = ['html', 'css', 'js'].filter((k) => got[k] !== P.sha[k]);
+  // Formulas and parameters the answer had must still be there, by name.
+  const names = (a, k) => ((a && a[k]) || []).map((x) => x.name || x.id).sort();
+  for (const k of ['formulas', 'parameters']) { const want = names(old, k), have = names(back, k); const miss = want.filter((n) => !have.includes(n)); if (miss.length) failed.push(k + ': ' + miss.join(', ')); }
+  summary.roundTripOk = !failed.length;
+  if (failed.length) summary.roundTripFailed = failed;
 }
 return summary;

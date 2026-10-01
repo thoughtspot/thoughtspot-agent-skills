@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // answer-pack.mjs <chart dir | library slug> --model <guid or name> --search "<search>" --name "<answer name>"
-//                 [--description "..."] [--answer <guid>] [--validate | --commit]
+//                 [--description "..."] [--answer <guid> --backup <file>] [--validate | --commit]
 //
 // Turns one chart (chart.html, chart.css, chart.js) into ready-to-paste MCP code that saves it as an answer
 // in ThoughtSpot: a search on the model, shown as a custom chart (MUZE_STUDIO) running these three files.
-// Without --answer it creates a new answer; with --answer <guid> it updates that one in place.
+// Without --answer it creates a new answer; with --answer <guid> it updates that one in place, and a commit then
+// needs --backup <file>: a TML export of that answer (ts tml export, or Export TML in ThoughtSpot) that names its
+// guid, is under a day old and sits outside any git working tree. The sandbox refuses the update without it.
 //
 //   --validate  (default) VALIDATE_ONLY import; changes nothing
 //   --commit    VALIDATE_ONLY first, and only if that passes an ALL_OR_NONE import, in the same call; then exports
@@ -17,10 +19,11 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { chartDirOf } from "./env.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
-const VALUED = new Set(["--model", "--search", "--name", "--description", "--answer"]);
+const VALUED = new Set(["--model", "--search", "--name", "--description", "--answer", "--backup"]);
 const val = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
 const pos = argv.filter((a, i) => !a.startsWith("--") && !VALUED.has(argv[i - 1]));
 const MODE = argv.includes("--commit") ? "commit" : "validate";
@@ -30,10 +33,21 @@ if (pos.length !== 1 || !P.model || !P.search || !P.name) {
   process.exit(2);
 }
 
-// A path to a folder with the three files, or a slug under library/.
+if (P.guid && MODE === "commit") {
+  const f = val("--backup") && path.resolve(val("--backup"));
+  const stop = (m) => { console.error("--backup: " + m); process.exit(2); };
+  if (!f) stop("updating answer " + P.guid + " needs a backup of it first: export its TML (ts tml export, or Export TML in ThoughtSpot) to ~/.cache/ts-charts/backups/ and pass --backup <file>");
+  if (!fs.existsSync(f) || !fs.statSync(f).size) stop(f + " is missing or empty");
+  const txt = fs.readFileSync(f, "utf8");
+  if (!txt.includes(P.guid)) stop(f + " does not name answer " + P.guid);
+  if (Date.now() - fs.statSync(f).mtimeMs > 24 * 3600 * 1000) stop(f + " is more than a day old; export it again");
+  for (let d = path.dirname(f); ; d = path.dirname(d)) { if (fs.existsSync(path.join(d, ".git"))) stop(f + " is inside the git working tree " + d + "; keep backups out of repos"); if (d === path.dirname(d)) break; }
+  P.backup = { file: path.basename(f), bytes: txt.length };
+}
+// A path to a folder with the three files, or a library slug (the user's library first, then the shipped one).
 let dir = path.resolve(pos[0]);
-if (!fs.existsSync(path.join(dir, "chart.js"))) dir = path.join(here, "..", "library", pos[0]);
-if (!fs.existsSync(path.join(dir, "chart.js"))) { console.error("no chart.js in " + pos[0] + " (or library/" + pos[0] + ")"); process.exit(2); }
+if (!fs.existsSync(path.join(dir, "chart.js"))) dir = chartDirOf(pos[0]);
+if (!dir) { console.error("no chart.js in " + pos[0] + " (or a library chart of that slug)"); process.exit(2); }
 const read = (f) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), "utf8") : "");
 P.f = { html: read("chart.html"), css: read("chart.css"), js: read("chart.js") };
 const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");

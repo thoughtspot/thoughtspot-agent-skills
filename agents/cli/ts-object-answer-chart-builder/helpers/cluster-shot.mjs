@@ -31,26 +31,36 @@ const opt = {};
 for (let i = 0; i < argv.length; i++) if (argv[i].startsWith("--")) opt[argv[i].slice(2)] = argv[++i];
 
 const profiles = path.join(cacheRoot(), "cluster-profiles");
-const hostOf = (u) => (/^https?:\/\//.test(u) ? new URL(u).host : u).replace(/[^\w.-]+/g, "_");
+// Before per-cluster profiles, one profile was shared by every cluster. It is never reused (it would belong to
+// whichever cluster ran first); --logout all removes it.
+const legacy = path.join(os.homedir(), ".cache", "amuzing-chart", "cluster-profile");
+// The profile folder of a cluster: its host name, checked to be one, so no input can name a folder outside
+// cluster-profiles (".." included). Returns null for anything that is not a host.
+const HOST = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::\d{1,5})?$/i;
+function profileOf(u) {
+  let h = String(u || "").trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(h)) { try { h = new URL(h).host; } catch { return null; } }
+  h = h.toLowerCase();
+  if (!HOST.test(h)) return null;
+  const dir = path.join(profiles, h.replace(":", "_"));
+  const rel = path.relative(profiles, dir);
+  return rel && !rel.startsWith("..") && !path.isAbsolute(rel) && !rel.includes(path.sep) ? dir : null;
+}
 if (opt.logout) {
-  const target = opt.logout === "all" ? profiles : path.join(profiles, hostOf(opt.logout));
-  fs.rmSync(target, { recursive: true, force: true });
-  console.log("signed out: removed " + target);
+  const targets = opt.logout === "all" ? [profiles, legacy] : [profileOf(opt.logout)];
+  if (!targets[0]) { console.error("--logout takes a cluster URL, a host name or all; not a host: " + JSON.stringify(opt.logout)); process.exit(2); }
+  const gone = targets.filter((t) => fs.existsSync(t));
+  for (const t of gone) fs.rmSync(t, { recursive: true, force: true });
+  console.log(gone.length ? "signed out: removed " + gone.join(", ") : "no saved sign-in for " + opt.logout + " (nothing to remove)");
   process.exit(0);
 }
 if (!opt.url) { console.error('usage: cluster-shot.mjs --url <liveboard or answer url> [--tabs "a,b"] [--name answer] [--out dir] [--wait seconds]\n       cluster-shot.mjs --logout <cluster url or host | all>'); process.exit(2); }
 
 const env = resolveEnv({});
 const out = path.resolve(opt.out || path.join(env.home, "runs", "_cluster"));
-const profile = path.resolve(opt.profile || path.join(profiles, hostOf(opt.url)));
-// Before per-cluster profiles, one profile was shared by every cluster. The first run afterwards adopts it
-// for its own cluster, so a user who is already signed in is not asked again.
-const legacy = path.join(os.homedir(), ".cache", "amuzing-chart", "cluster-profile");
-if (!opt.profile && !fs.existsSync(profile) && fs.existsSync(legacy)) {
-  fs.mkdirSync(profiles, { recursive: true, mode: 0o700 });
-  fs.renameSync(legacy, profile);
-  console.log("moved the old shared sign-in profile to " + profile);
-}
+const profile = opt.profile ? path.resolve(opt.profile) : profileOf(opt.url);
+if (!profile) { console.error("--url is not a cluster URL: " + opt.url); process.exit(2); }
+if (fs.existsSync(legacy)) console.log("note: an old shared sign-in profile is still at " + legacy + "; --logout all removes it");
 const tabs = (opt.tabs || "").split(",").map((s) => s.trim()).filter(Boolean);
 const waitMs = Number(opt.wait || 9) * 1000;
 const loginTimeout = Number(opt["login-timeout"] || 300) * 1000;

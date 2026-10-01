@@ -2,7 +2,8 @@
 
 The worked example: 50 custom chart tiles in 7 tabs on **(Sample) Retail - Apparel**,
 the sample model most clusters ship. The guids differ per cluster, so the committed spec carries placeholders:
-run `LIVEBOARD_GUID=... MODEL_GUID=... python3 make-spec.py` to point it at your own Liveboard and model.
+run `LIVEBOARD_GUID=... MODEL_GUID=... python3 make-spec.py` to point it at your own Liveboard and model. That
+spec is written to `~/.cache/ts-charts/liveboards/amuzing-chart-samples/` (`<W>` below), never over this folder.
 
 ## The story
 
@@ -39,14 +40,17 @@ the 15 item types, not a model column); region is slate.
 
 - `make-spec.py` writes `liveboard.spec.json` (the tile table, filters, style). Edit the table, run it.
 - `narratives/<slug>.cfg.js`: one per narrative tile (About hero, guide, seven banners), rendered by
-  `<L>/narratives/render.js` into `<C>/library/<slug>/` by `scripts/build-narratives.mjs`.
+  `<L>/narratives/render.js` by `scripts/build-narratives.mjs` into the user's library
+  (`~/.cache/ts-charts/library/<slug>/`; `--into-skill` refreshes the shipped copies in `<C>/library/`).
 - The charts are in `<C>/library/`; `<C>/references/library.md` lists them by tab.
 
 ## Rebuild
 
 ```bash
 node <L>/scripts/build-narratives.mjs
-node <L>/scripts/liveboard-pack.mjs --commit --all > p.js      # several blocks; paste each in order
-node <L>/scripts/liveboard-pack.mjs --check > check.js         # then expect stale: [] and missing: []
+node <L>/scripts/liveboard-pack.mjs --liveboard <W> --commit --all --backup <export of the Liveboard> > p.js   # paste each block in order
+node <L>/scripts/liveboard-pack.mjs --liveboard <W> --check > check.js         # then expect stale: [] and missing: []
 ```
+On a Liveboard built before owner markers (the live *Amuzing chart samples* was), the first commit lists its
+tiles under `problems` as tiles to adopt: build it once more with `--adopt` to take them over and mark them.
 See `SKILL.md` Step 6.

@@ -5,7 +5,9 @@ grid units on a 12 column grid.
 
 The guids are per cluster, so they come from the environment and are never committed:
     LIVEBOARD_GUID=<your Liveboard> MODEL_GUID=<(Sample) Retail - Apparel on your cluster> python3 make-spec.py
-Without them the spec carries placeholders, and liveboard-pack refuses to send it."""
+With them the spec is written to ~/.cache/ts-charts/liveboards/<this folder's name>/liveboard.spec.json (outside
+any repo) and that folder is what --liveboard takes. Without them it is written here with placeholders, which
+liveboard-pack refuses to send. SPEC_OUT=<folder> overrides where it goes."""
 import json, os
 HERE = os.path.dirname(os.path.abspath(__file__))
 M = "[sales] [quantity purchased] [date].monthly"
@@ -95,7 +97,12 @@ spec = {
   "style": [{"name": "lb_border_type", "value": "CURVED"}, {"name": "hide_group_title", "value": "false"}, {"name": "hide_tile_description", "value": "false"}],
   "tabs": [{"name": n, "tiles": tl} for n, tl in TABS],
 }
-out = os.path.join(HERE, "liveboard.spec.json")
+real = "LIVEBOARD_GUID" in os.environ or "MODEL_GUID" in os.environ
+xdg = os.environ.get("XDG_CACHE_HOME", "")
+cache = os.path.join(xdg if os.path.isabs(xdg) else os.path.expanduser("~/.cache"), "ts-charts")
+dest = os.environ.get("SPEC_OUT") or (os.path.join(cache, "liveboards", os.path.basename(HERE)) if real else HERE)
+os.makedirs(dest, exist_ok=True)
+out = os.path.join(dest, "liveboard.spec.json")
 json.dump(spec, open(out, "w"), separators=(",", ":"))
 open(out, "a").write("\n")
-print(sum(len(tl) for _, tl in TABS), "tiles in", len(TABS), "tabs")
+print(sum(len(tl) for _, tl in TABS), "tiles in", len(TABS), "tabs ->", out)

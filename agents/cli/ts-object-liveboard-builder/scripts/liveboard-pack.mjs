@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// liveboard-pack.mjs [--liveboard <dir>] [--commit | --validate | --check]   (--commit requires --liveboard) (<slug> ... | --all) [--max 60000] [--list]
+// liveboard-pack.mjs [--liveboard <dir>] [--commit | --validate | --check]   (--commit requires --liveboard) (<slug> ... | --all)
+//                   [--backup <file>] [--adopt] [--reuse <guid>] [--core-ref] [--max 60000] [--list]
 //
 // Turns library charts into ready-to-paste MCP code that writes them straight into the target Liveboard.
 // The Liveboard is its own store: nothing else is created in ThoughtSpot.
@@ -17,6 +18,12 @@
 //   --core-ref  send the shared core as a checksum only: the sandbox takes it from a tile already on the Liveboard.
 //               Blocks after the first in one --commit run do this by themselves, since the first block puts the
 //               core there (a --validate run writes nothing, so every block carries the core).
+//   --backup <file>  a TML export of the Liveboard taken before this commit (ts tml export, or Export TML in
+//               ThoughtSpot). Required for --commit when the Liveboard holds anything the skill does not own: the
+//               sandbox refuses the commit without it. The file must name the Liveboard's guid, be under a day
+//               old, and sit outside any git working tree.
+//   --adopt     take over tiles written before owner markers existed (the shared core plus a spec slug, or at a
+//               spec position, with no owner marker). Without it such tiles stop the commit, so nothing is doubled.
 //   --reuse <liveboard guid>  send only checksums for these charts: the sandbox copies each one from that Liveboard
 //               (found by its slug marker) when its body matches the library, and lists the rest under needCode.
 //               Use it for library charts already on another Liveboard in the same cluster; it saves the paste.
@@ -26,11 +33,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { chartSkill, skillDir } from "./chart-skill.mjs";
 
 const lib = path.join(chartSkill(), "library");
+// A slug is the user's own chart (~/.cache/ts-charts/library, from library-emit or build-narratives) when there is
+// one, else the shipped library's.
+const { chartDirOf } = await import(pathToFileURL(path.join(chartSkill(), "helpers", "env.mjs")).href);
 const argv = process.argv.slice(2);
-const VALUED = new Set(["--max", "--liveboard", "--reuse"]);
+const VALUED = new Set(["--max", "--liveboard", "--reuse", "--backup"]);
 const flags = new Set(argv.filter((a, i) => a.startsWith("--") && !VALUED.has(argv[i - 1])));
 const val = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 const MAX = Number(val("--max", 60000));
@@ -43,8 +54,22 @@ const MODE = flags.has("--check") ? "check" : flags.has("--commit") ? "commit" :
 const spec = JSON.parse(fs.readFileSync(path.join(LB, "liveboard.spec.json"), "utf8"));
 if (!spec.liveboard) { console.error("liveboard.spec.json needs a top-level \"liveboard\" key (re-run make-spec.py)"); process.exit(2); }
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const unset = [["liveboard", spec.liveboard.guid], ["model", spec.liveboard.model && spec.liveboard.model.guid]].filter(([, g]) => !GUID.test(g || ""));
-if (unset.length && !flags.has("--list") && !process.env.LIVEBOARD_PACK_OFFLINE) { console.error("the spec has no real " + unset.map(([k]) => k).join(" or ") + " guid; set it in make-spec.py (the worked example reads LIVEBOARD_GUID and MODEL_GUID) and re-run it"); process.exit(2); }
+const realGuid = (g) => GUID.test(g || "") && !/^[0-]+$/.test(g);
+const unset = [["liveboard", spec.liveboard.guid], ["model", spec.liveboard.model && spec.liveboard.model.guid]].filter(([, g]) => !realGuid(g));
+// LIVEBOARD_PACK_OFFLINE lets the smoke tests build blocks for placeholder guids; a commit never gets that pass.
+if (unset.length && !flags.has("--list") && (MODE === "commit" || !process.env.LIVEBOARD_PACK_OFFLINE)) { console.error("the spec has no real " + unset.map(([k]) => k).join(" or ") + " guid; set it in make-spec.py (the worked example reads LIVEBOARD_GUID and MODEL_GUID) and re-run it"); process.exit(2); }
+// The backup: checked here, on disk, because the sandbox cannot see files. The sandbox gets its name and checksum.
+let backup = null;
+if (val("--backup", null)) {
+  const f = path.resolve(val("--backup"));
+  const stop = (m) => { console.error("--backup " + f + ": " + m); process.exit(2); };
+  if (!fs.existsSync(f) || !fs.statSync(f).size) stop("missing or empty");
+  const txt = fs.readFileSync(f, "utf8");
+  if (!txt.includes(spec.liveboard.guid)) stop("does not name Liveboard " + spec.liveboard.guid + "; export that Liveboard's TML");
+  if (Date.now() - fs.statSync(f).mtimeMs > 24 * 3600 * 1000) stop("is more than a day old; export it again");
+  for (let d = path.dirname(f); ; d = path.dirname(d)) { if (fs.existsSync(path.join(d, ".git"))) stop("is inside the git working tree " + d + "; keep backups out of repos (~/.cache/ts-charts/backups)"); if (d === path.dirname(d)) break; }
+  backup = { file: path.basename(f), bytes: txt.length, sha: crypto.createHash("sha256").update(txt).digest("hex").slice(0, 16) };
+}
 const specSlugs = spec.tabs.flatMap((t) => t.tiles.map((x) => x.slug));
 let slugs = argv.filter((a, i) => !a.startsWith("--") && !VALUED.has(argv[i - 1]));
 if (flags.has("--all") || MODE === "check") slugs = [...new Set([...slugs, ...specSlugs])];
@@ -84,7 +109,8 @@ core.sha = { js: sha(core.js), css: sha(core.css) };
 
 const tiles = {}, bodySha = {};
 for (const slug of slugs) {
-  const d = path.join(lib, slug);
+  const d = chartDirOf(slug, chartSkill());
+  if (!d) { console.error("no library chart " + slug + " (in ~/.cache/ts-charts/library or the shipped library)"); process.exit(2); }
   const read = (f) => fs.readFileSync(path.join(d, f), "utf8");
   const html = read("chart.html"), cssFull = read("chart.css"), jsFull = read("chart.js");
   if (!jsFull.includes(coreJsFile)) console.error("warning: " + slug + "/chart.js has an out-of-date core copy; the Liveboard gets the current core, run sync-core so the preview matches");
@@ -102,7 +128,8 @@ if (flags.has("--list")) {
   process.exit(0);
 }
 
-const tpl = fs.readFileSync(path.join(skillDir, "scripts", "patch.js"), "utf8");
+// The template's whole-line comments are for readers of patch.js; every block would carry them, so they are dropped.
+const tpl = fs.readFileSync(path.join(skillDir, "scripts", "patch.js"), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
 // Chart code goes in as String.raw literals with real line breaks (lint above guarantees no backtick or ${), so
 // a block reads line by line when it is pasted; everything else is JSON. The sandbox re-checks every sha256.
 const raw = (x) => "String.raw`" + x + "`";
@@ -111,7 +138,7 @@ const src = (payload) => {
   out.push("core: " + (payload.core && payload.core.ref ? "{ ref: true, sha: " + JSON.stringify(payload.core.sha) + " }" : payload.core ? "{ js: " + raw(payload.core.js) + ",\ncss: " + raw(payload.core.css) + ",\nsha: " + JSON.stringify(payload.core.sha) + " }" : "null") + ",");
   out.push("tiles: {");
   for (const [slug, t] of Object.entries(payload.tiles)) if (t.ref) out.push(JSON.stringify(slug) + ": { ref: " + JSON.stringify(t.ref) + " },"); else out.push(JSON.stringify(slug) + ": { f: { html: " + raw(t.f.html) + ",\ncss: " + raw(t.f.css) + ",\njs: " + raw(t.f.js) + " },\nsha: " + JSON.stringify(t.sha) + " },");
-  out.push("},", "reuse: " + JSON.stringify(REUSE) + ",", "pending: " + JSON.stringify(payload.pending || []) + ",", "bodySha: " + JSON.stringify(payload.bodySha), "}");
+  out.push("},", "reuse: " + JSON.stringify(REUSE) + ",", "adopt: " + JSON.stringify(flags.has("--adopt")) + ",", "backup: " + JSON.stringify(backup) + ",", "pending: " + JSON.stringify(payload.pending || []) + ",", "bodySha: " + JSON.stringify(payload.bodySha), "}");
   return out.join("\n");
 };
 const block = (payload) => tpl.replace("'__MODE__'", () => JSON.stringify(MODE)).replace("__PAYLOAD__", () => src(payload));

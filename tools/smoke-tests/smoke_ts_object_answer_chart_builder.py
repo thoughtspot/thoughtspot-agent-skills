@@ -112,7 +112,29 @@ def step_answer_patch() -> str:
     r = json.loads(p.stdout.strip().splitlines()[-1])
     if not r["ok"]:
         raise AssertionError("; ".join(r["failures"]))
-    return f"kept from the old answer: {r['updated'].get('keptFromAnswer')}"
+    u = r["updated"]
+    return f"kept {u.get('kept')}; replaced {u.get('replaced')}"
+
+
+def step_logout_stays_in_profiles() -> str:
+    """cluster-shot --logout deletes one cluster's sign-in profile and nothing else, whatever it is given."""
+    with tempfile.TemporaryDirectory(prefix="ts_object_logout_") as xdg:
+        cache = Path(xdg) / "ts-charts"
+        (cache / "cluster-profiles" / "a.example.com").mkdir(parents=True)
+        (cache / "runs" / "keep").mkdir(parents=True)
+        shot = str(SKILL_DIR / "helpers" / "cluster-shot.mjs")
+        for bad in ["..", "https://../", "../runs", "a/../..", "not a host"]:
+            p = _node([shot, "--logout", bad], {"XDG_CACHE_HOME": xdg})
+            if p.returncode != 2:
+                raise AssertionError(f"--logout {bad!r} exited {p.returncode}: {p.stdout.strip()}")
+        if not (cache / "runs" / "keep").is_dir():
+            raise AssertionError("a bad --logout removed something outside cluster-profiles")
+        p = _node([shot, "--logout", "HTTPS://A.example.com/#/pinboard/x"], {"XDG_CACHE_HOME": xdg})
+        if p.returncode != 0 or (cache / "cluster-profiles" / "a.example.com").exists():
+            raise AssertionError(f"--logout of an upper-case URL did not remove its profile: {p.stdout.strip()}")
+        if not (cache / "runs" / "keep").is_dir():
+            raise AssertionError("--logout removed the runs folder")
+    return "bad hosts refused, only the named profile removed"
 
 
 def main() -> int:
@@ -129,9 +151,13 @@ def main() -> int:
     if ok:
         r.info(f"{n} library chart(s)")
 
-    ok, kept = r.step("save as answer: create, and update keeping formulas", step_answer_patch)
+    ok, kept = r.step("save as answer: create, and update keeping formulas, formats, settings", step_answer_patch)
     if ok:
         r.info(kept)
+
+    ok, out = r.step("sign-out removes only that cluster's profile", step_logout_stays_in_profiles)
+    if ok:
+        r.info(out)
 
     with tempfile.TemporaryDirectory(prefix="ts_object_answer_chart_smoke_") as home:
         ok, doctor = r.step("doctor resolves paths", step_doctor, home)

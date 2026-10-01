@@ -11,7 +11,7 @@ ts-object-answer-chart-builder skill at `<path>`; `$L` is ts-object-liveboard-bu
 
 Read, in this order, before writing anything:
 1. `$S/references/library-contract.md` (the whole file: the contract every tile follows).
-2. `$L/liveboards/<name>/README.md` (what the data holds and its traps).
+2. `<W>/README.md`, the Liveboard's working folder under `~/.cache/ts-charts/liveboards/` (what the data holds and its traps).
 3. `$S/references/examples.md` "Start here" and the library charts named for your tiles.
 
 Your tiles:

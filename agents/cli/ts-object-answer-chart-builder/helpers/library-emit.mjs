@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 // library-emit.mjs <slug> --title "..." --search "[sales] [date].monthly" --question "..." \
 //                  --lib "Muze" --tile "8x6" --interactions "hover tooltip; click key to hide series" \
-//                  [--notes "..."] [--png attempts/NN.WxH.png] [--tab Pulse]
+//                  [--notes "..."] [--png attempts/NN.WxH.png] [--tab Pulse] [--into-skill]
 //   --png is relative to the RUN directory (runs/<slug>/), not the repo root.
 //
-// Publishes a finished run into library/<slug>/ :
+// Publishes a finished run into the user's library, ~/.cache/ts-charts/library/<slug>/ (outside any repo: the
+// preview is a screenshot of live data). liveboard-pack and answer-pack find it there by slug. --into-skill
+// writes into this skill's own library/ instead; that is for maintainers adding a chart to the shipped
+// library, and its preview must not show customer data.
 //   chart.html chart.css chart.js   the three files, byte for byte
 //   preview.png                     the screenshot you name with --png (default: newest full-size snap)
 //   query.txt                       the search the tile is bound to
@@ -15,9 +18,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { resolveEnv } from "./env.mjs";
+import { resolveEnv, userLibrary } from "./env.mjs";
 
-const args = process.argv.slice(2);
+const all = process.argv.slice(2);
+const intoSkill = all.includes("--into-skill");
+const args = all.filter((a) => a !== "--into-skill");
 const opt = {};
 const pos = [];
 for (let i = 0; i < args.length; i++) {
@@ -32,7 +37,7 @@ if (!slug || need.some((k) => !opt[k])) {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const skill = path.resolve(here, "..");
 const env = resolveEnv({ slug });
-const dest = path.join(skill, "library", slug);
+const dest = path.join(intoSkill ? path.join(skill, "library") : userLibrary(), slug);
 const files = ["chart.html", "chart.css", "chart.js"];
 
 for (const f of files) if (!fs.existsSync(path.join(env.chartDir, f))) { console.error("missing " + path.join(env.chartDir, f)); process.exit(1); }
@@ -87,4 +92,4 @@ chart.html into the HTML tab, chart.css into the CSS tab, chart.js into the JS t
 The block between the \`amuzing core\` markers is shared: change it in \`library/_shared/\` and run \`helpers/sync-core.mjs\`.
 `;
 fs.writeFileSync(path.join(dest, "README.md"), readme);
-console.log("published library/" + slug + "  (" + files.length + " files + preview.png, query.txt, README.md)");
+console.log("published " + dest + "  (" + files.length + " files + preview.png, query.txt, README.md)");

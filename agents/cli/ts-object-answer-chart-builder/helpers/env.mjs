@@ -87,9 +87,21 @@ function headlessDefault() {
   return !hasDisplay();
 }
 
-// ~/.cache/ts-charts (or $XDG_CACHE_HOME/ts-charts): run folders, deliverables, browser deps and sign-in profiles.
+// ~/.cache/ts-charts (or $XDG_CACHE_HOME/ts-charts): run folders, deliverables, browser deps, sign-in profiles,
+// backups, Liveboard working folders and the user's own library. A relative $XDG_CACHE_HOME is ignored (the
+// XDG spec says so), since it would resolve against whatever folder the command runs in, a repo included.
 export function cacheRoot() {
-  return path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "ts-charts");
+  const xdg = process.env.XDG_CACHE_HOME;
+  return path.join(xdg && path.isAbsolute(xdg) ? xdg : path.join(os.homedir(), ".cache"), "ts-charts");
+}
+
+// Charts published from a run (library-emit, build-narratives) go to the user's library under the cache, not
+// into the skill folder: their previews and narratives come from live data, and the skill folder may be a
+// repo checkout. A slug resolves to the user's copy first, then the shipped library/.
+export const userLibrary = () => path.join(cacheRoot(), "library");
+export function chartDirOf(slug, skillDir = path.resolve(here, "..")) {
+  for (const d of [path.join(userLibrary(), slug), path.join(skillDir, "library", slug)]) if (fs.existsSync(path.join(d, "chart.js"))) return d;
+  return null;
 }
 
 export function resolveEnv({ slug } = {}) {

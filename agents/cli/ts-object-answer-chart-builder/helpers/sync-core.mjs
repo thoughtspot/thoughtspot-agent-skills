@@ -13,10 +13,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cacheRoot, userLibrary } from './env.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const skill = path.resolve(here, '..');
-const home = process.env.TS_CHART_PROJECT_ROOT || path.resolve(skill, '..', '..');
+const home = process.env.TS_CHART_HOME || cacheRoot();
 const shared = path.join(skill, 'library', '_shared');
 
 const args = process.argv.slice(2);
@@ -32,7 +33,7 @@ function targets() {
   if (dirs.length) return dirs;
   const out = [];
   const lib = path.join(skill, 'library');
-  for (const d of fs.readdirSync(lib)) if (!d.startsWith('_')) out.push(path.join(lib, d));
+  for (const l of [lib, userLibrary()]) if (fs.existsSync(l)) for (const d of fs.readdirSync(l)) if (!d.startsWith('_')) out.push(path.join(l, d));
   const runs = path.join(home, 'runs');
   if (fs.existsSync(runs)) for (const d of fs.readdirSync(runs)) out.push(path.join(runs, d, 'chart'));
   return out.filter((d) => fs.existsSync(d) && fs.statSync(d).isDirectory());

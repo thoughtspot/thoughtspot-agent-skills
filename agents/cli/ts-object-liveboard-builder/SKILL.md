@@ -15,6 +15,11 @@ the story, the tabs, the layout, the narrative tiles, the filters, the import an
 `TS_ANSWER_CHART_SKILL`). The worked example is `<L>/liveboards/amuzing-chart-samples/`: 50 tiles in
 7 tabs on **(Sample) Retail - Apparel**, live as the Liveboard *Amuzing chart samples*.
 
+`<W>` is the working folder of the Liveboard you build: `~/.cache/ts-charts/liveboards/<name>/` (or under
+`$XDG_CACHE_HOME`). It holds the profile findings, the spec with real guids and the narrative configs, so it
+lives outside any repo; never create Liveboard folders inside `<L>`. Charts you publish go to the user's
+library, `~/.cache/ts-charts/library/<slug>/`, which the scripts read before `<C>/library/`.
+
 Use ThoughtSpot's words: **Liveboard**, tile, tab, filter, model, search. Not "board" or "dashboard".
 
 ## Route first
@@ -79,7 +84,7 @@ screenshots cannot run here. For an existing Liveboard, skip **Size** and ask wh
 If `AskUserQuestion` is not available, ask the same questions in one message as a numbered list with
 lettered options, and wait for the answers.
 
-Write the answers at the top of `<L>/liveboards/<name>/README.md`. Steps 1, 2, 3 and 7 follow them.
+Write the answers at the top of `<W>/README.md`. Steps 1, 2, 3 and 7 follow them.
 
 ## Step 1 - profile the model (MCP)
 
@@ -87,8 +92,8 @@ Profile the model chosen in Step 0. List its columns and run a few `searchdata` 
 the date range and grain, totals by year and month, the top and bottom of each attribute. Look for the
 **story**: steps, trends, concentration, seasonality, what is flat. Write down what the data cannot
 support (no cost column means no margin talk). Note data-quality traps (partial first and last periods,
-wrong coordinates, renamed columns). Put the findings in `<L>/liveboards/<name>/README.md`; the
-example's is the template.
+wrong coordinates, renamed columns). Put the findings in `<W>/README.md`; the
+example's (`<L>/liveboards/amuzing-chart-samples/README.md`) is the template.
 
 ## Step 2 - plan the story and tabs
 
@@ -117,23 +122,26 @@ return r.body[0].response.header.id_guid;   // confirm_write_operations: true
 
 ## Step 4 - build the tiles
 
-Each tile is a chart in `<C>/library/<slug>/`, built by the chart skill's procedure with a **real-data
+Each tile is a library chart (the user's library, or `<C>/library/<slug>/`), built by the chart skill's procedure with a **real-data
 fixture** (the tile's exact search through `searchdata`) and the library contract. Reuse a library chart
 when one fits (change its search and copy; keep the slug if it is the same chart). For many tiles,
 brief parallel subagents, one tab each, with `references/tile-brief.md`.
 
 Narrative tiles (About hero, guide, tab banners) are not hand-built: write one
-`<L>/liveboards/<name>/narratives/<slug>.cfg.js` per tile (copy the example's), then
-`node <L>/scripts/build-narratives.mjs --liveboard <L>/liveboards/<name>`. Their copy is computed from
-the rows, so it follows the filters. Narratives land in the shared chart library by slug, so give each
+`<W>/narratives/<slug>.cfg.js` per tile (copy the example's), then
+`node <L>/scripts/build-narratives.mjs --liveboard <W>`. Their copy is computed from
+the rows, so it follows the filters. Narratives land in the user's library by slug, so give each
 Liveboard its own (`<liveboard>-banner-where`, not `banner-where`): the builder records the owner in
-`library/<slug>/.narrative` and refuses a slug another Liveboard owns.
+`<slug>/.narrative` and refuses a slug another Liveboard owns, in either library.
 
 ## Step 5 - the spec
 
-Copy `liveboards/amuzing-chart-samples/make-spec.py` to your Liveboard's folder, edit the tile table
-(slug, title, search, x, y, w, h, description, whether filters apply), the filters and the Liveboard guid,
-and run it. It writes `liveboard.spec.json`. Rows of each tab must fill 12 columns without overlap.
+Copy `<L>/liveboards/amuzing-chart-samples/make-spec.py` to `<W>`, edit the tile table
+(slug, title, search, x, y, w, h, description, whether filters apply) and the filters, and run it with the
+guids in the environment: `LIVEBOARD_GUID=<guid> MODEL_GUID=<guid> SPEC_OUT=<W> python3 <W>/make-spec.py`.
+It writes `<W>/liveboard.spec.json`. Rows of each tab must fill 12 columns without overlap. (Run in
+the example folder without `SPEC_OUT`, it writes the real-guid spec to
+`~/.cache/ts-charts/liveboards/amuzing-chart-samples/`, never over the tracked example.)
 
 ## Step 6 - write the tiles into the Liveboard (MCP)
 
@@ -160,27 +168,56 @@ slip in chart code.
 
 Each block carries some charts (up to `--max`, default 60,000 characters), the spec and the shared core.
 In the sandbox (`<L>/scripts/patch.js`) it checks every sha256, exports the Liveboard and **merges** into
-that export. The skill owns only the custom-chart tiles that carry the shared core: those charts' tiles
-are replaced, its other tiles keep their code, and its tiles the spec no longer places are removed.
-Everything else on the Liveboard stays as it is: native charts, notes, custom charts it did not build,
-tabs the spec does not name, filters (a spec filter on the same column keeps the chosen values),
-parameters and style. If the skill's tiles would overlap the user's own on a shared tab, the user's move
-below them. It then imports, and after a commit proves by export that every owned tile carries the code
-that was composed and every other visualization is still there. `--commit` requires `--liveboard <dir>`,
-so it never falls back to the worked example.
+that export.
 
-**Back up a Liveboard the skill did not create** before its first commit:
-`ts tml export <guid> --profile <name> > ~/.cache/ts-charts/backups/<guid>-<date>.json` when a `ts` profile is
-set up, or the Liveboard's **Export TML** menu item otherwise. Keep the backup out of any repo. Restore
-by importing it (`ts tml import`, or **Import TML** in ThoughtSpot). Tell the user where it is. Read the file and paste **each block between the `=====` lines
+**What the skill owns.** A tile is the skill's only when its code carries the owner marker
+`/* ts-lb-owner: <this Liveboard's guid> */`, which the skill writes into every tile it composes. Those
+tiles are replaced when their chart is in the block, keep their code otherwise, and are removed when the
+spec no longer places them. Nothing else is touched: native charts, notes, custom charts it did not build
+(a chart pinned from an answer carries the shared core but no marker), tiles copied from another
+Liveboard (their marker names that one), a user's copy of a skill tile (two tiles marked with one slug:
+the one at the spec position is the skill's), tabs the spec does not name, parameters, style, and the
+Liveboard's own name and description. A filter the Liveboard already has on a spec column stays the
+user's (values, label, mandatory, its exclusions); the spec only decides which of the skill's tiles it
+skips. If the skill's tiles would overlap the user's own on a shared tab, the user's move below them.
+
+**Tiles from before owner markers** (the shared core and a spec slug, or at a spec position, with no
+marker) stop the commit and are listed under `problems`. If they are the skill's, build the block again
+with `--adopt`, which takes them over and marks them (listed under `marked`); otherwise move them off
+the spec positions.
+
+**A commit writes only a clean state.** Any problem refuses it and leaves the Liveboard unchanged: a failed
+search (the tile it would have rebuilt stays as it is), a spec tile with no code (`MISSING`), an ownership
+conflict, tiles to adopt, a Liveboard laid out without tabs (refused before anything is composed: add a
+tab in ThoughtSpot first, or build on a new Liveboard). Tiles that later blocks of the same run will
+send are `pending`, not problems.
+
+**Backup.** When the Liveboard holds anything the skill does not own, the sandbox refuses the commit unless
+the block was built with `--backup <file>`: a TML export of this Liveboard taken before the commit, from
+`ts tml export <guid> --profile <name> > ~/.cache/ts-charts/backups/<guid>-<date>.json` when a `ts`
+profile is set up, or the Liveboard's **Export TML** menu item otherwise. `liveboard-pack.mjs` checks the
+file names the Liveboard's guid, is under a day old and sits outside any git working tree. Tell the user
+where it is; restore by importing it (`ts tml import`, or **Import TML** in ThoughtSpot). A Liveboard the
+skill created and fills with its own tiles needs none.
+
+After a commit the block exports the Liveboard again and proves: every composed tile carries the code
+that was composed, every visualization the skill did not own before the patch is still there (matched by
+title, chart type and search, so a loss shows even when the count is right), and every tab holds the tiles
+it was given. `--commit` requires `--liveboard <dir>` and a spec with real guids, so it never falls back
+to the worked example.
+
+Read the file and paste **each block between the `=====` lines
 unchanged** as the `code` of `execute-thoughtspot-code` with `confirm_write_operations: true`, in order.
 Every block leaves a complete, working Liveboard, so a build can stop between blocks.
 
 1. `--commit` runs a `VALIDATE_ONLY` import first and commits only if it passes, so each block is pasted
    once. `--validate` alone checks without writing.
 2. Success is `validate.status_code: OK`, `import.status_code: OK`, `roundTripAllOk: true`, `problems: []`,
-   and the slugs you meant in `replaced`. `kept` counts the visualizations the skill does not own;
-   `removed`, `droppedTabs` and `shiftedBelowCharts` list anything else it changed: tell the user. On a first build, tiles still to come in later blocks are listed
+   and the slugs you meant in `replaced`. `refused: NOT COMMITTED ...` means nothing was written: fix what it
+   names and send the block again. `kept` counts the visualizations the skill does not own; `removed`,
+   `marked`, `droppedTabs` and `shiftedBelowCharts` list anything else it changed: tell the user.
+   `roundTripLost`, `roundTripLayout` or `roundTripFailed` after a commit mean the import changed more than
+   was composed: restore from the backup and tell the user. On a first build, tiles still to come in later blocks are listed
    under `pending`, not `problems`. `CHECKSUM MISMATCH` means the paste was altered: resend the block.
 3. Send only what changed. A new Liveboard needs every tile once (`--all`, several blocks).
 
@@ -232,4 +269,4 @@ Update the example's README when the story changes.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.0.0 | 2026-09-29 | Initial release (ported from thoughtspot-amuzing-liveboard 2.0.0). Builds a storytelling Liveboard of custom-chart tiles across numbered tabs on a real model through the ThoughtSpot MCP. Step 0 checks the prerequisites and asks the model, Liveboard, story, audience, size (including a pilot), filters and sign-in as pick-from-a-list questions. Plans tabs, has tiles built by `ts-object-answer-chart-builder`, writes narrative tiles, adds filters, and patches the Liveboard in checksummed blocks (validate then commit in one paste, `--reuse` and `--core-ref` to avoid re-pasting charts). A patch merges into the exported Liveboard and changes only the tiles the skill owns; `--commit` requires `--liveboard`. Screenshots every tab with a per-cluster sign-in profile that is removed at the end unless the user keeps it |
+| 1.0.0 | 2026-09-30 | Initial release (ported from thoughtspot-amuzing-liveboard 2.0.0). Builds a storytelling Liveboard of custom-chart tiles across numbered tabs on a real model through the ThoughtSpot MCP. Step 0 checks the prerequisites and asks the model, Liveboard, story, audience, size (including a pilot), filters and sign-in as pick-from-a-list questions. Plans tabs, has tiles built by `ts-object-answer-chart-builder`, writes narrative tiles, adds filters, and patches the Liveboard in checksummed blocks (validate then commit in one paste, `--reuse` and `--core-ref` to avoid re-pasting charts). A patch merges into the exported Liveboard and changes only the tiles carrying its owner marker for that Liveboard (`--adopt` takes over older tiles); any problem refuses the commit, content the skill does not own is written only with a checked `--backup`, and the round trip proves nothing it does not own was lost. Working folders, specs with real guids and published charts live under `~/.cache/ts-charts`; `--commit` requires `--liveboard` and real guids. Screenshots every tab with a per-cluster sign-in profile that is removed at the end unless the user keeps it |

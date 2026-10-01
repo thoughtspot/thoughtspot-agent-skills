@@ -9,8 +9,11 @@ Verifies the offline half of the pipeline on the bundled worked example
   3. Every block is syntactically valid JavaScript for the MCP sandbox
   4. The sandbox code (scripts/patch.js) run against a mock `ts` merges into a
      Liveboard it does not fully own: native charts, notes, other custom charts,
-     tabs, filters, parameters and style survive; only the skill's own tiles
-     are replaced or removed (_liveboard_patch_mock.mjs)
+     a chart pinned from an answer, a user's copy of a skill tile, tiles of
+     another Liveboard, tabs, filters, parameters, style and the name survive;
+     a failed search, an untabbed Liveboard, an ownership conflict, tiles to
+     adopt and a missing backup refuse the commit; a loss on import fails the
+     round trip (_liveboard_patch_mock.mjs)
 
 Does NOT require a live ThoughtSpot instance: the blocks are built, not sent.
 Pasting them into execute-thoughtspot-code and cluster-shot.mjs need a cluster
@@ -59,12 +62,20 @@ def step_find_chart_skill() -> str:
     return p.stdout.strip()
 
 
-def step_pack(out: Path) -> tuple[int, str]:
+def step_pack(out: Path, td: str) -> tuple[int, str]:
     spec = json.loads((EXAMPLE / "liveboard.spec.json").read_text())
     # The committed example carries placeholder guids; OFFLINE lets the pack build blocks that are never sent.
     p = subprocess.run(["node", str(PACK), "--liveboard", str(EXAMPLE), "--validate", "--all"],
                        capture_output=True, text=True, timeout=180,
-                       env={**os.environ, "LIVEBOARD_PACK_OFFLINE": "1"})
+                       env={**os.environ, "LIVEBOARD_PACK_OFFLINE": "1", "XDG_CACHE_HOME": td})
+    if p.returncode != 0:
+        raise AssertionError(f"liveboard-pack exited {p.returncode}: {p.stderr.strip()[-400:]}")
+    # A commit never gets the offline pass: placeholder guids are refused.
+    c = subprocess.run(["node", str(PACK), "--liveboard", str(EXAMPLE), "--commit", "--all"],
+                       capture_output=True, text=True, timeout=180,
+                       env={**os.environ, "LIVEBOARD_PACK_OFFLINE": "1", "XDG_CACHE_HOME": td})
+    if c.returncode != 2:
+        raise AssertionError(f"--commit with placeholder guids exited {c.returncode}, expected 2")
     if p.returncode != 0:
         raise AssertionError(f"liveboard-pack exited {p.returncode}: {p.stderr.strip()[-400:]}")
     out.write_text(p.stdout)
@@ -119,7 +130,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="ts_object_liveboard_smoke_") as td:
         out = Path(td) / "blocks.txt"
-        ok, packed = r.step("pack the worked example (validate, --all)", step_pack, out)
+        ok, packed = r.step("pack the worked example (validate, --all)", step_pack, out, td)
         if ok:
             r.info(packed[1])
             ok, n = r.step("every block parses as sandbox code", step_blocks_parse, out, td)
