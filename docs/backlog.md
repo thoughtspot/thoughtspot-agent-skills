@@ -194,7 +194,7 @@ are roughly ordered by value÷effort.
 | ~~BL-299~~ | ~~`index_type` sense inverted in three checks (S2, P9, P11) — presence tested instead of value, so default-indexed PII was invisible and `DONT_INDEX` false-positived~~ | DONE (2026-09-23) |
 | ~~BL-300~~ | ~~`check_p17` cannot fire on any model the audit can see — it matches formula cross-references by display name; real TML refs are `formula_<name>` ids, and a display-name ref fails on first import~~ | DONE (2026-09-23) |
 | ~~BL-301~~ | ~~`check_h7` compares two disjoint GUID namespaces and is inverted — every healthy answer flagged, the direct-table answer it exists to find silently excused~~ | DONE (2026-09-23) |
-| BL-302 | `build_context` fetches dependents for models and tables only, so a SET guid is never a key and `check_h5` can never learn whether a set has consumers. **Half closed 2026-09-23:** H5 no longer asserts an unmade lookup (it was reporting every set as an orphan) and is correctly silent instead — but it stays silent in production until the fetch covers sets, which needs a second typed pass and live verification | next ts-audit pass |
+| ~~BL-302~~ | ~~`build_context` fetches dependents for models and tables only, so a SET guid is never a key and `check_h5` can never learn whether a set has consumers~~ | DONE (2026-10-02 — H5 discovers Sets through the shared per-Model cohort listing and reads their dependents as `LOGICAL_COLUMN`, with BL-324) |
 | ~~BL-303~~ | ~~`check_p5`'s date-constraint suppression is dead on real TML — `constraints` exports as a mapping, so iterating yields the key string~~ | DONE (2026-09-23) |
 | ~~BL-304~~ | ~~the data/perf check split was made by copying, not extracting: `d4`≡`p4`, `s9`≡`p14` verbatim, `s8` ⊇ `p15`, `_join_depth`≡`p7`, `_table_role` twice, `d1`'s column rule ≡ `p8`~~ | DONE (2026-09-22) |
 | ~~BL-305~~ | ~~alias blindness in `d6`/`d10`/`d11`/`s2`, and join findings reported with an empty `object_name`~~ | DONE (2026-09-23) |
@@ -205,11 +205,12 @@ are roughly ordered by value÷effort.
 | BL-319 | CLI SV Mode C promises deep-copy + KEEP/MERGE but `build-model --existing-guid` regenerates from the SV — overwrites TS-side edits | next SF converter edit |
 | BL-320 | Databricks type map lacks `timestamp_ltz` (and other converters' LTZ/TZ variants) | with BL-130 |
 | BL-321 | `ts-link-*` family + `ts-link-semantic-layer` — v1 shipped; open items #2–#5 remain (Honeydew/Cube/Kyvos metadata + aggregation mode) | with platform access |
-| BL-324 | A Model's v2 dependents do not list its Sets (no `COHORT` bucket, live 2026-09-30) — `ts-audit` Set discovery finds nothing, so H5 cannot fire even with BL-302 fixed | with ts-object-set-manager v1 |
-| BL-325 | `ts migrate scan-sets` misses Sets whose `metadata_header.type` is blank (2 of 3 live) and its one cluster-wide `LOGICAL_COLUMN` search times out — the Org-migration gate can report a Set-blocked Model clean | with ts-object-set-manager v1 |
+| ~~BL-324~~ | ~~A Model's v2 dependents do not list its Sets (no `COHORT` bucket, live 2026-09-30) — `ts-audit` Set discovery finds nothing, so H5 cannot fire even with BL-302 fixed~~ | DONE (2026-10-02 — with ts-object-set-manager v1) |
+| BL-325 | `ts migrate scan-sets` misses Sets whose `metadata_header.type` is blank (2 of 3 live) and its one cluster-wide `LOGICAL_COLUMN` search times out — the Org-migration gate can report a Set-blocked Model clean | **Done for `scan-sets` and `apply` 2026-10-02; remains: `publish_planning._cohort_columns` still matches by `type` prefix** | next ts-publish pass |
 | BL-326 | Set MODIFY granted via API without access to the Set's Model fails on save with a generic error; the API accepts and reads back a grant that cannot work — **parked by the user** | parked |
 | BL-327 | ts-object-set-manager v2 — act on the v1 report: delete `REVIEW_DELETE` Sets, convert `CANDIDATE_*` to answer-/viz-level, revoke `UNEXPLAINED` grants | fast follow to v1 |
 | BL-328 | ts-object-set-manager connection scope (connection → tables → Models) — **parked** | parked |
+| BL-329 | Audit H angle runs Set discovery through `fetch_consumers`, which exports every Liveboard that uses a Set — Liveboard detail H5 never reads; slow on large estates. Add a lightweight consumers mode | next ts-audit pass |
 
 ### Tier 3 — Opportunistic
 
@@ -12108,7 +12109,7 @@ grain and at every other grain before it ships.
 
 ---
 
-## BL-324 — A Model's dependents do not list its Sets `Tier 2`
+## ~~BL-324~~ — A Model's dependents do not list its Sets `Tier 2` — DONE (2026-10-02)
 
 **Filed:** 2026-10-01.
 **Source:** live probes on se-thoughtspot, 2026-09-30 (Model *Dunder Mifflin*, `829a3344-…`; Set *Static Top 10*, `60a9794b-…`). Design: `docs/superpowers/specs/2026-10-01-ts-object-set-manager-design.md`.
@@ -12121,6 +12122,12 @@ exists.
 **Fix.** Discover Sets by owner-filtered `LOGICAL_COLUMN` search confirmed by TML export
 (`ts_cli/sets/discover.py`), and have `check_h5` consume Set dependents fetched with
 `--type LOGICAL_COLUMN`. Closes BL-302 alongside.
+
+**Resolution (2026-10-02).** The owner-filtered search proved unworkable (a cluster-wide paged
+`LOGICAL_COLUMN` search did not finish in 2h45m — spec Appendix A). Discovery instead uses the
+internal per-Model cohort listing in `ts_cli/sets/discover.py`; `audit/context.py` feeds the
+Sets it finds, with dependents read as `LOGICAL_COLUMN`, to `check_h5`. BL-302 closed with it.
+Follow-up cost: BL-329.
 
 **Target:** with ts-object-set-manager v1.
 
@@ -12150,7 +12157,11 @@ listing reports the Model blocked, never clean), and query Set dependents as `LO
 The type-prefix helpers (`is_cohort_row`, `extract_cohort_columns`, `all_cohort_column_rows`)
 are deleted. `publish_planning._cohort_columns` remains open.
 
-**Target:** with ts-object-set-manager v1.
+**Status (2026-10-02).** Done for `scan-sets` and `apply`. **Remains:** switch
+`publish_planning._cohort_columns` to `ts_cli/sets/discover.py` — it still matches by the
+`type` prefix, so the publish planner can miss a blank-type Set.
+
+**Target:** with ts-object-set-manager v1 (scan-sets/apply); next ts-publish pass (`publish_planning`).
 
 ---
 
@@ -12193,3 +12204,21 @@ connection field, so resolve connection → tables (`metadata_header.dataSourceN
 via table dependents, de-duplicating Models that span connections. **Parked by the user.**
 
 **Target:** parked.
+
+---
+
+## BL-329 — Audit H5 Set discovery exports Liveboards it never reads `Tier 2`
+
+**Filed:** 2026-10-02. Source: ts-object-set-manager v1 (BL-302/BL-324 fix).
+
+**Finding.** The audit H angle discovers Sets and their dependents through
+`ts_cli.sets.consumers.fetch_consumers` (`audit/context.py`). That function exports the TML of
+every Liveboard dependent of every Set, to find the visualizations and filters naming it —
+detail `check_h5` never reads (it needs only whether a Set has consumers). On a large estate
+that is one TML export per Set-using Liveboard per Set, which makes the audit materially slower.
+
+**Fix.** Add a lightweight consumers mode (dependents lookup only, no Liveboard export) and use
+it from the audit. Keep the hidden-dependents and failure signals: a failed lookup must still
+never read as "no consumers".
+
+**Target:** next ts-audit pass.

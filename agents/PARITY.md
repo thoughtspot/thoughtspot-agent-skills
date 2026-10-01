@@ -21,6 +21,7 @@
 | ts-object-model-alias | Y | — | — | — |
 | ts-object-model-coach | Y | — | — | — |
 | ts-object-model-erd | Y | — | — | — |
+| ts-object-set-manager | Y | — | — | — |
 | ts-profile-databricks | Y | — | — | — |
 | ts-profile-snowflake | — | Y | — | — |
 | ts-profile-tableau | Y | — | — | — |
