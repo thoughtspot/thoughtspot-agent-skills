@@ -217,6 +217,10 @@ is deliberately conservative: it puts a grant in front of a reviewer rather than
 - **First live checks in the plan** — done 2026-10-01/02, Appendix A: paged discovery infeasible
   (→ F12); Liveboard fixture *Formula LB - SC* `da4f1be1-b6cd-47a2-84bd-f8cffe1d0696` (`Viz_2`, Set
   *Top Brands*); Sets are also referenced inside viz formulas; no Liveboard-filter fixture found.
+  > **Note (2026-10-02):** *Formula LB - SC* has since been deleted from se-thoughtspot (search
+  > by GUID and by name returns nothing; TML export 400/10002). Open item #2 was verified on
+  > *Just Eat v3* (`search_query`, `Viz_7`) and *Dynamic Set Selection* (formula, `Viz_1`)
+  > instead — see Appendix B. The citation above is left as the historic record.
 
 ---
 
@@ -260,6 +264,10 @@ Read-only probes on se-thoughtspot (Primary Org). The probe scripts were throwaw
 | Set → dependents (`--type LOGICAL_COLUMN`) | `cf2d7861` none; `4f39eea6` ANSWER×1; `cad1b0d6` ANSWER×2; `60a9794b` *Static Top 10* ANSWER×1 (*Testing Share by Edit*); `b929a421` *QS - Minimum tableDate* ANSWER×1 **+ SET×1** (a Set depending on a Set). None of these has a LIVEBOARD dependent |
 | Liveboard using a Set | **Found, no build needed.** Fixture: **`da4f1be1-b6cd-47a2-84bd-f8cffe1d0696` *Formula LB - SC*** (3 vizzes). `Viz_2` (viz_guid `a3c94a83-e5b5-4e55-a27a-936652429b25`) uses Set `69f6aed0-503f-4ded-87b2-bac3ffe391af` *Top Brands* in `search_query` (`… top [Top Brands]`). Liveboard filter on the Set: **no**. Alternate with two Sets: `eb3871ab-c026-4459-ad2e-aad002cc7f3b` *Dynamic Set Selection*, `Viz_1` (viz_guid `a79d5565-…`), which references Sets *mytop5* `3fbe9ac6-…` and *mytop10* `8c1cbe6e-…` inside a viz formula and not in `search_query`. Filter: no. Other Set-using Liveboards: *Just Eat v3* `73df2a30-…` (`Viz_7`, *Promotion Id set*) plus 3 copies; *Aditi D's Demo Retail Liveboard* `2d3898fb-…` (`Viz_33`); *Demo fis lib* `9d0f02cf-…` (`Viz_18`, `Viz_22`); *PM Condor* / *easyJet InFlight Retail Analysis* (*Promotion Type set*). **None of the 6 exported had a Liveboard-level filter on a Set**, and none carried `answer.cohorts` for a reusable Set: reuse shows only as `[Set Name]` in `search_query`/columns or inside a formula |
 
+> **Note (2026-10-02):** the *Formula LB - SC* fixture in the row above has since been deleted
+> from se-thoughtspot. Open item #2 was verified on *Just Eat v3* (`search_query`, `Viz_7`) and
+> *Dynamic Set Selection* (formula, `Viz_1`) — see Appendix B. The row is kept as the historic record.
+
 **Consequences for Task 2.** A cluster-wide paged scan is not viable on se-thoughtspot. It runs for hours, and late pages approach the 120s timeout. The `INCOMPLETE` fallback is therefore the *normal* path on this cluster, not an edge case. Discovery needs a narrower scope: per Org, as F3 already says, or per Model owner. There is no confirmed server-side way to filter `LOGICAL_COLUMN` by owner yet (not probed here).
 | Per-Model cohort listing (2026-10-02) | `GET /callosum/v1/metadata/detail/{model}?type=LOGICAL_TABLE&showhidden=false&dropquestiondetails=false&fetchcohortcolumnsonly=true` (no `doUpdate`), v2 bearer token: **200**. Dunder Mifflin 1.7s → 9 Sets (QS - Min Quantity, QS - Minimum tableDate, QS - Maximum tableDate, Ranked Products, Ranked Products By Region, Basket Analysis Set For Insights Hour, Product Basket 1/2/PC; 3 with blank `type`, all with `cohortConfig`). TEST_SV_DMSI_AI_CONTEXT 0.3s → 3 (Static Top 10, Customer State set, Product Category set `SIMPLE/GROUP_BASED`). Source: Confluence SAGE/4309319694 |
 
@@ -278,3 +286,8 @@ Read-only, se-thoughtspot Primary Org, admin profile, worktree code via a PATH s
 | Empty dependents (#5) | One item for the Set with an empty bucket map `{}`, not a missing item |
 | Author as owner (#3) | Dependents `author` = Answer header `author`; header `owner` is the Answer's own GUID |
 | `ts audit run --angles H`, Dunder Mifflin | H5 flags exactly the 6 `REVIEW_DELETE` Sets incl. *Product Basket 1*; no Set with dependents flagged; 3 Sets skipped with a warning (#6). **But 18 findings for 6 Sets**: each Set is emitted once per source that lists it (the Model plus each underlying Table's `COHORT` bucket). No H4 finding |
+| **After fix** — smoke, Dunder Mifflin (R17/R18, commit `3e6518a`) | **PASS.** 9 Sets. *Product Basket 1* `REVIEW_DELETE`, *Product Basket 2* `CANDIDATE_ANSWER`, *PC* `KEEP_SHARED`. *QS - Minimum tableDate* stays `REVIEW_MANUAL`: its only dependent is another Set (*QS - Min Quantity*), which is the intended R5 outcome, not #6 |
+| **After fix** — `--model-contains DUNDER` | 5 Models, 14 Sets: `REVIEW_DELETE` 11 / `CANDIDATE_ANSWER` 1 / `KEEP_SHARED` 1 / `REVIEW_MANUAL` 1 (the Set-on-Set case above); 0 incomplete, 0 unexplained, 0 unknown grants. Report written |
+| **After fix** — TEST_SV_DMSI_AI_CONTEXT `889a704f-…` | 3 Sets, all `dependents_complete` true: *Static Top 10* `CANDIDATE_ANSWER` (1 Answer), *Customer State set* `CANDIDATE_ANSWER` (1 Answer), *Product Category set* `KEEP_SHARED` (2 Answers) |
+| **After fix** — *Paul - Snowflake Retapp* | *mytop5*, *mytop10* `CANDIDATE_VIZ` (one viz each on *Dynamic Set Selection*), matching the #2 counterfactual |
+| **After fix** — `ts audit run --angles H`, Dunder Mifflin | **6 findings, all H5, one per Set**: the 6 `REVIEW_DELETE` Sets incl. *Product Basket 1*. No Set with dependents flagged. One warning only: *QS - Minimum tableDate* (Set-on-Set dependent, R14). No H4 |

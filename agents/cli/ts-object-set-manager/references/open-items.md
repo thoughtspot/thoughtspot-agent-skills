@@ -45,10 +45,10 @@ Verified on two other fixtures instead, one per match path:
 | `search_query` + `answer_columns` | *Promotion Id set* `223a23fc-f5af-4460-908f-e72a9257000e` (Model *Just Eat v3* `8b07b2bc-…`) | *Just Eat v3* `73df2a30-e378-44c3-a113-00f269717d19`, plus *Luke Copy of Just Eat v3* `ee7f0be1-…` and *Food Supy Liveboard* `de54cbe2-…` | All three listed, each with `Viz_7` *Promotion Impact on AOV* (`average [Order Revenue] [Promotion Id set]`), `filter: false` |
 | `formulas[].expr` | *mytop5* `3fbe9ac6-…`, *mytop10* `8c1cbe6e-…` (Model *Paul - Snowflake Retapp* `5bb6feec-…`) | *Dynamic Set Selection* `eb3871ab-c026-4459-ad2e-aad002cc7f3b` | Both Sets list it with `Viz_1` *Total Sales by fx*, `filter: false` |
 
-**Divergence (class, not detection).** All four Sets above classify `REVIEW_MANUAL`, because
-their dependents response carries `hasInaccessibleDependents: true`. See #6. With that flag
-read as benign, *mytop5* / *mytop10* classify `CANDIDATE_VIZ` (one visualization), as the
-dependents imply.
+**Divergence (class, not detection) — resolved by #6.** All four Sets above classified
+`REVIEW_MANUAL`, because their dependents response carries `hasInaccessibleDependents: true`.
+After the #6 fix (2026-10-02) *mytop5* / *mytop10* classify `CANDIDATE_VIZ` (one
+visualization), as the dependents imply.
 
 ## #3 — Liveboard / Answer author as owner (REQUIRED) — VERIFIED 2026-10-02
 
@@ -92,7 +92,7 @@ Same shape for *Top Brands* (#2). So "no dependents" is an explicit empty result
 it as `REVIEW_DELETE` is what the API means. A response with **no** item for the Set was not
 observed; the engine still reads that as no dependents, which remains unverified.
 
-## #6 — `hasInaccessibleDependents` with `areInaccessibleDependentsReturned` — OPEN (defect)
+## #6 — `hasInaccessibleDependents` with `areInaccessibleDependentsReturned` — VERIFIED 2026-10-02 (fixed)
 
 Found 2026-10-02. The engine (`ts_cli/sets/consumers.py`) treats
 `hasInaccessibleDependents: true` as "some dependents hidden", so the Set reads
@@ -105,3 +105,21 @@ read `REVIEW_MANUAL`, expected `CANDIDATE_ANSWER` / `KEEP_SHARED`); every Set wi
 on the fixtures checked reads `REVIEW_MANUAL`; `ts audit` H5 skips those Sets with a warning.
 A scratch counterfactual that clears the flag in that case restores every expected class.
 Routed to the controller; not fixed in Task 12.
+
+**Fixed 2026-10-02 (ruling R17, commit `3e6518a`).** `fetch_consumers` now treats dependents
+as hidden only when some item has `hasInaccessibleDependents: true` **and**
+`areInaccessibleDependentsReturned` is not `true` (missing counts as not true). Unit tests in
+`tests/test_sets_consumers.py` cover both-true (no error, dependents listed), returned=false
+(error) and returned missing (error); `tests/test_audit_context.py` runs the real
+`fetch_consumers` through `build_context` to show H5 now records such Sets.
+
+Live re-verification, same admin profile, read-only:
+- Smoke on Dunder Mifflin: **PASS** — PB1 `REVIEW_DELETE`, PB2 `CANDIDATE_ANSWER`, PC `KEEP_SHARED`.
+- TEST_SV_DMSI_AI_CONTEXT: *Static Top 10* and *Customer State set* `CANDIDATE_ANSWER`,
+  *Product Category set* `KEEP_SHARED`, all `dependents_complete` true.
+- *Paul - Snowflake Retapp*: *mytop5* / *mytop10* `CANDIDATE_VIZ`.
+- `ts audit run --angles H` on Dunder Mifflin: no `hasInaccessibleDependents` warnings; Sets
+  with dependents are recorded and not flagged.
+
+Still unobserved: a non-admin caller, for whom `returned` should be false and the error should
+fire. The unit test pins that branch; no live non-admin run was made.
