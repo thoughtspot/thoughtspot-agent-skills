@@ -14,6 +14,38 @@ _profile_option = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE",
                                help="Profile name (default: first profile or TS_PROFILE env var)")
 
 
+ORGS_SEARCH = "/api/rest/2.0/orgs/search"
+_PAGE_SIZE = 50
+
+
+def _build_payload(offset_val: int, size: int, status: Optional[str] = None,
+                   name: Optional[str] = None) -> dict:
+    payload: dict = {"record_offset": offset_val, "record_size": size}
+    if status:
+        payload["status"] = status
+    if name:
+        payload["name_pattern"] = name
+    return payload
+
+
+def list_orgs(client, *, status: Optional[str] = None,
+              name: Optional[str] = None) -> List[dict]:
+    """Every Org matching the filters, auto-paginated. Rows carry orgId, orgName,
+    description and status. Shared by `ts orgs search` and `ts sets inventory --all-orgs`."""
+    all_results: List[dict] = []
+    offset = 0
+    while True:
+        resp = client.post(ORGS_SEARCH, json=_build_payload(offset, _PAGE_SIZE, status, name))
+        page = resp.json()
+        if not isinstance(page, list) or not page:
+            break
+        all_results.extend(page)
+        if len(page) < _PAGE_SIZE:
+            break
+        offset += _PAGE_SIZE
+    return all_results
+
+
 @app.command("search")
 def search(
     status: Optional[str] = typer.Option(None, "--status",
@@ -42,36 +74,11 @@ def search(
       ts orgs search --status ACTIVE --profile production
     """
     client = ThoughtSpotClient(resolve_profile(profile))
-
-    def _build_payload(offset_val: int, size: int) -> dict:
-        payload: dict = {
-            "record_offset": offset_val,
-            "record_size": size,
-        }
-        if status:
-            payload["status"] = status
-        if name:
-            payload["name_pattern"] = name
-        return payload
-
     if limit is not None:
-        resp = client.post("/api/rest/2.0/orgs/search", json=_build_payload(0, limit))
+        resp = client.post(ORGS_SEARCH, json=_build_payload(0, limit, status, name))
         print(json.dumps(resp.json()))
         return
-
-    page_size = 50
-    all_results: List[dict] = []
-    offset = 0
-    while True:
-        resp = client.post("/api/rest/2.0/orgs/search", json=_build_payload(offset, page_size))
-        page = resp.json()
-        if not isinstance(page, list) or not page:
-            break
-        all_results.extend(page)
-        if len(page) < page_size:
-            break
-        offset += page_size
-    print(json.dumps(all_results))
+    print(json.dumps(list_orgs(client, status=status, name=name)))
 
 
 @app.command("create")
