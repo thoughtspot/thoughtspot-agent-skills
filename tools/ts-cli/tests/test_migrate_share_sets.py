@@ -273,3 +273,43 @@ def test_scan_sets_leaves_a_clean_model_unblocked():
     result = _scan(_scan_client([]))
     assert result.exit_code == 0, result.stderr
     assert json.loads(result.stdout)["summary"]["models_blocked"] == 0
+
+
+# ---------------------------------------------------------------------------
+# BL-325 review fix -- discovery notes reach the operator
+# ---------------------------------------------------------------------------
+
+def test_scan_sets_surfaces_a_failed_listing_in_stderr_and_the_report():
+    result = _scan(_scan_client([], fail_discovery=True))
+    assert result.exit_code == 0, result.stderr
+    assert "discovery_failed" in result.stderr and "cohort listing failed" in result.stderr
+    report = json.loads(result.stdout)
+    assert report["summary"]["models_incomplete"] == 1
+    assert [n["kind"] for n in report["discovery_notes"]] == ["discovery_failed"]
+    # Additive: blocked[] still carries the Model.
+    assert report["summary"]["models_blocked"] == 1
+
+
+def test_scan_sets_clean_run_has_no_incomplete_models():
+    report = json.loads(_scan(_scan_client([])).stdout)
+    assert report["summary"]["models_incomplete"] == 0
+    assert report["discovery_notes"] == []
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_apply_says_a_refusal_is_due_to_failed_discovery(mock_cls, _rp, tmp_path):
+    mock_cls.return_value = _client([], fail_discovery=True)
+    result = _apply(tmp_path)
+    assert result.exit_code == 1 and "SET_BLOCKER" in result.stderr
+    assert "discovery_failed" in result.stderr
+    assert "Set discovery FAILED" in result.stderr
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_apply_with_a_confirmed_set_has_no_failed_discovery_line(mock_cls, _rp, tmp_path):
+    mock_cls.return_value = _client([_COHORT_ROW])
+    result = _apply(tmp_path)
+    assert result.exit_code == 1 and "SET_BLOCKER" in result.stderr
+    assert "Set discovery FAILED" not in result.stderr

@@ -3693,7 +3693,9 @@ ts migrate scan-sets --models-file candidates.csv --source-profile prod
 
 Verified live 2026-07-26. Three facts:
 
-1. A Set creates a `LOGICAL_COLUMN` of subtype `COHORT_*` **owned by the Model**.
+1. A Set creates a `LOGICAL_COLUMN` **owned by the Model**. Its header `type` is often
+   blank (2 of 3 live Sets; only some read `COHORT_*`), so membership is decided by the
+   presence of `cohortConfig` in the Model's cohort listing, never by type (BL-325).
 2. It **does not appear in the Model's TML at all**.
 3. It **blocks publishing** the Model and every Answer and Liveboard on it, used or not.
 

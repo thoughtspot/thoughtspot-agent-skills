@@ -17,10 +17,13 @@ and its output is a fleet roll-up rather than a per-tenant mapping file.
 3. It **blocks publishing** the Model and every Answer and Liveboard on it, used or not.
 
 Fact 2 is the dangerous one, and it is the reason this scan exists rather than a TML
-inspection. Detection itself lives in `ts_cli.sets.discover` (BL-325: the old header-type
-prefix match missed Sets whose type was blank, 2 of 3 live): because the column is invisible in TML, a lift-and-shift would **silently
+inspection: because the column is invisible in TML, a lift-and-shift would **silently
 drop** Sets rather than fail, and nobody would notice until a tenant asked where theirs
 went. A TML-based check would report a clean Model that is in fact blocked.
+
+Detection lives in `ts_cli.sets.discover`, not here. Membership is the presence of
+`cohortConfig`; the header `type` is often blank (2 of 3 live Sets), which is why the old
+`COHORT` prefix match missed them (BL-325).
 """
 from __future__ import annotations
 
@@ -61,12 +64,17 @@ def build_blocked_entry(org: str, model_name: str, model_guid: str,
 
 
 def build_scan_report(scanned_orgs: Iterable[str], scanned_models: int,
-                      blocked: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+                      blocked: Iterable[Dict[str, Any]],
+                      discovery_notes: Optional[List[Dict[str, Any]]] = None,
+                      models_incomplete: int = 0) -> Dict[str, Any]:
     """The `sets-scan.json` document.
 
     `scanned` carries the denominator deliberately. "Three blocked Orgs" is not a decision;
     "three of twelve" is -- and the whole purpose of Phase 0 is to size the problem before
     committing to build Phase 2.
+
+    `models_incomplete` counts Models in `blocked` only because discovery failed, and
+    `discovery_notes` says why, so a failed listing is never read as a confirmed Set.
     """
     blocked = sorted(blocked, key=lambda b: (b["org"], b["model"]))
     orgs = sorted({b["org"] for b in blocked})
@@ -75,8 +83,10 @@ def build_scan_report(scanned_orgs: Iterable[str], scanned_models: int,
         "scanned": {"orgs": len(list(scanned_orgs)), "models": scanned_models},
         "summary": {"orgs_blocked": len(orgs),
                     "models_blocked": len(blocked),
-                    "objects_affected": objects_affected},
+                    "objects_affected": objects_affected,
+                    "models_incomplete": models_incomplete},
         "blocked": blocked,
+        "discovery_notes": list(discovery_notes or []),
     }
 
 
@@ -99,6 +109,13 @@ def render_scan_markdown(report: Dict[str, Any]) -> str:
         f"| Answers / Liveboards affected | **{summary.get('objects_affected', 0)}** |",
         "",
     ]
+    notes = report.get("discovery_notes") or []
+    if summary.get("models_incomplete") or notes:
+        lines += [f"**{summary.get('models_incomplete', 0)} Model(s) are counted blocked only "
+                  "because Set discovery failed** — `(discovery incomplete)`, not a confirmed "
+                  "Set. Re-run once discovery succeeds.", ""]
+        lines += [f"- {n.get('org', '')} {n['kind']}: {n['object']} — {n['detail']}"
+                  for n in notes] + [""]
 
     if not blocked:
         lines += [

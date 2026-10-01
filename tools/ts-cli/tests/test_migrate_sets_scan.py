@@ -59,7 +59,7 @@ def test_the_report_carries_the_DENOMINATOR_not_just_the_count():
     report = build_scan_report(["T1", "T2", "T3"], scanned_models=9, blocked=[_blocked()])
     assert report["scanned"] == {"orgs": 3, "models": 9}
     assert report["summary"] == {"orgs_blocked": 1, "models_blocked": 1,
-                                 "objects_affected": 1}
+                                 "objects_affected": 1, "models_incomplete": 0}
 
 
 def test_a_clean_fleet_reports_zero_rather_than_omitting_the_summary():
@@ -153,3 +153,12 @@ def test_list_models_filters_to_models_the_org_actually_owns():
     # Without the filter the caller still gets everything visible — the audit path relies
     # on that, so the narrowing must stay opt-in.
     assert len(discover.list_models(_Client())) == 2
+
+
+def test_markdown_flags_models_blocked_only_by_failed_discovery():
+    report = build_scan_report(["T1"], 1, [build_blocked_entry(
+        "T1", "Sales", "g1", [{"name": "(discovery incomplete)", "guid": ""}], [])],
+        discovery_notes=[{"org": "T1", "kind": "discovery_failed", "object": "Sales (g1)",
+                          "detail": "cohort listing failed"}], models_incomplete=1)
+    md = render_scan_markdown(report)
+    assert "only because Set discovery failed" in md and "cohort listing failed" in md

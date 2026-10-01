@@ -165,7 +165,9 @@ def scan_sets(
     the whole programme or is a tail of stragglers.
 
     A Set creates a `COHORT_*` `LOGICAL_COLUMN` owned by the Model, which blocks
-    publishing that Model **and every Answer and Liveboard on it, used or not**. The
+    publishing that Model **and every Answer and Liveboard on it, used or not**. A Set's
+    header `type` is often blank, so membership is decided by `cohortConfig` in the
+    listing, never by type (BL-325). The
     column is invisible in TML, so this reads each Model's cohort listing — a TML
     inspection would report a clean Model that is in fact blocked, and a lift-and-shift
     would drop the Set silently rather than fail. A Model whose listing fails is reported
@@ -191,6 +193,8 @@ def scan_sets(
 
     orgs: List[Optional[str]] = list(source_org) or [None]
     blocked: List[dict] = []
+    discovery_notes: List[dict] = []
+    models_incomplete = 0
     scanned_models = 0
 
     for org in orgs:
@@ -213,7 +217,11 @@ def scan_sets(
         # A Model whose listing fails maps to a `(discovery incomplete)` sentinel, so it
         # is reported BLOCKED rather than clean.
         from ts_cli.sets.discover import by_owner as _by_owner, discover_sets
-        by_owner = _by_owner(discover_sets(client, models))
+        found = discover_sets(client, models)
+        _err_discovery_notes(found, label)
+        discovery_notes += [dict(n, org=label) for n in found["notes"]]
+        models_incomplete += len(set(found["incomplete"]))
+        by_owner = _by_owner(found)
 
         for entry in models:
             cohort = by_owner.get(entry["guid"])
@@ -231,7 +239,9 @@ def scan_sets(
         _err(f"{label}: scanned {len(models)} model(s)")
 
     report = sets_scan.build_scan_report([o or "(default)" for o in orgs],
-                                         scanned_models, blocked)
+                                         scanned_models, blocked,
+                                         discovery_notes=discovery_notes,
+                                         models_incomplete=models_incomplete)
     print(json.dumps(report, indent=2))
 
     if out_dir:
@@ -245,7 +255,9 @@ def scan_sets(
     summary = report["summary"]
     _err(f"Sets scan: {summary['models_blocked']} of {scanned_models} model(s) blocked "
          f"across {summary['orgs_blocked']} Org(s); "
-         f"{summary['objects_affected']} Answer(s)/Liveboard(s) affected.")
+         f"{summary['objects_affected']} Answer(s)/Liveboard(s) affected"
+         + (f"; {summary['models_incomplete']} blocked only because discovery failed."
+            if summary["models_incomplete"] else "."))
 
 
 def _org_client(profile: Optional[str], org: Optional[str]):
@@ -300,6 +312,7 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
                          for n in names}
     except discover.AmbiguousModelName as exc:
         _refuse(str(exc))
+    incomplete: set = set()
     if blocked is None:
         # No --sets-scan supplied, so apply scans itself. Cohort columns are invisible
         # in the Model's TML and the audit never queries LOGICAL_COLUMN, so without
@@ -308,8 +321,11 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
         # (audit 2026-07-29 finding 17.6). Shared discovery, one call per mapped Model
         # (BL-325); a Model whose listing fails counts as blocked, so apply refuses.
         from ts_cli.sets.discover import by_owner as _by_owner, discover_sets
-        blocked = set(_by_owner(discover_sets(
-            source_client, [{"guid": g, "name": n} for n, g in guids_by_name.items() if g])))
+        found = discover_sets(
+            source_client, [{"guid": g, "name": n} for n, g in guids_by_name.items() if g])
+        _err_discovery_notes(found)
+        incomplete = set(found["incomplete"])
+        blocked = set(_by_owner(found))
     problems = validate_apply(
         rows, blocked_model_guids=blocked,
         model_guids_by_name={k: v for k, v in guids_by_name.items() if v})
@@ -318,7 +334,22 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
     _err("Refused. This mapping cannot be applied:")
     for problem in problems:
         _err(f"  - {problem}")
+    for name, guid in guids_by_name.items():
+        if guid and guid in incomplete:
+            # A private endpoint that moved would refuse every apply; say so rather than
+            # let SET_BLOCKER read as a confirmed Set.
+            _err(f"  note: '{name}' is refused because Set discovery FAILED for it, not "
+                 "because a Set was confirmed. Fix discovery (see notes above) or pass "
+                 "--sets-scan, then re-run.")
     raise typer.Exit(code=1)
+
+
+def _err_discovery_notes(found: dict, label: str = "") -> None:
+    """Every discovery note to stderr: an incomplete Model is reported blocked, and the
+    operator must be able to tell a failed listing from a confirmed Set (spec section 7)."""
+    prefix = f"{label}: " if label else ""
+    for note in found.get("notes", []):
+        _err(f"{prefix}{note['kind']}: {note['object']} — {note['detail']}")
 
 
 @app.command("apply")
