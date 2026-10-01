@@ -49,7 +49,7 @@ def test_substring_is_not_use():
     assert liveboard_usage(doc, "Top 10 [Q1]")["vizzes"] == []
 
 
-def _client(dep_rows, lb_docs, dep_error=False, dep_payload=None):
+def _client(dep_rows, lb_docs, dep_error=False, dep_payload=None, hidden=False):
     def post(path, json=None, **kw):
         if "metadata/search" in path:
             if dep_error:
@@ -58,12 +58,15 @@ def _client(dep_rows, lb_docs, dep_error=False, dep_payload=None):
             if dep_payload is not None:
                 return MagicMock(json=lambda: dep_payload)
             return MagicMock(json=lambda: [{"metadata_id": "s1", "dependent_objects": {
+                "areInaccessibleDependentsReturned": False,
+                "hasInaccessibleDependents": hidden,
                 "dependents": {"s1": dep_rows}}}])
         if "tml/export" in path:
             doc = lb_docs.get(json["metadata"][0]["identifier"])
             if doc is None:
                 raise SystemExit(1)
-            return MagicMock(json=lambda: [{"edoc": yaml.safe_dump(doc)}])
+            edoc = doc if isinstance(doc, str) else yaml.safe_dump(doc)
+            return MagicMock(json=lambda: [{"edoc": edoc}])
         raise AssertionError(path)
     c = MagicMock(); c.post.side_effect = post
     return c
@@ -107,3 +110,30 @@ def test_malformed_dependents_response_sets_error():
     # A non-list body would normalise to [] — that must not read as "no dependents".
     out = fetch_consumers(_client({}, {}, dep_payload={"error": "boom"}), SET)
     assert out["error"] and out["dependents"] == []
+
+
+def test_inaccessible_dependents_sets_error_but_lists_visible():
+    deps = {"QUESTION_ANSWER_BOOK": [{"id": "a1", "name": "Ans", "author": "u1"}]}
+    out = fetch_consumers(_client(deps, {}, hidden=True), SET)
+    assert out["error"] and "hasInaccessibleDependents" in out["error"]
+    assert [d["guid"] for d in out["dependents"]] == ["a1"]
+
+
+def test_inaccessible_dependents_with_none_visible_is_still_error():
+    out = fetch_consumers(_client({}, {}, hidden=True), SET)
+    assert out["error"] and out["dependents"] == []
+
+
+def test_non_dict_export_is_unreadable():
+    deps = {"PINBOARD_ANSWER_BOOK": [{"id": "l1", "name": "LB", "author": "u2"}]}
+    out = fetch_consumers(_client(deps, {"l1": "just a string"}), SET)
+    assert out["unreadable"] == [{"guid": "l1", "name": "LB",
+                                  "reason": "export was not Liveboard TML"}]
+    assert "l1" not in out["liveboards"]
+
+
+def test_non_liveboard_export_is_unreadable():
+    deps = {"PINBOARD_ANSWER_BOOK": [{"id": "l1", "name": "LB", "author": "u2"}]}
+    out = fetch_consumers(_client(deps, {"l1": {"answer": {"name": "x"}}}), SET)
+    assert out["unreadable"][0]["reason"] == "export was not Liveboard TML"
+    assert "l1" not in out["liveboards"]

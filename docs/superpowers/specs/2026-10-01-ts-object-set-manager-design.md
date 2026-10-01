@@ -99,7 +99,7 @@ Pure functions, unit-testable with no live cluster. `commands/sets.py` is the on
 |---|---|---|
 | `scope.py` | Selectors → de-duplicated `[{org, model_guid, model_name}]` | — |
 | `discover.py` | Model → reusable Sets: one per-Model cohort listing call (F12); membership by `cohortConfig`, never by `type` (F2) | — |
-| `consumers.py` | Set → dependents (`LOGICAL_COLUMN`, F5). For each Liveboard dependent: the visualizations whose `answer.cohorts[]` or `search_query` reference the Set, and whether any `liveboard.filters[].column[]` names it | — |
+| `consumers.py` | Set → dependents (`LOGICAL_COLUMN`, F5). For each Liveboard dependent: the visualizations whose `search_query`, `answer_columns[].name` or `formulas[].expr` reference `[Set Name]` (literal, case-insensitive), and whether any `liveboard.filters[].column[]` names it. A true `dependent_objects.hasInaccessibleDependents` on any response item sets `error` (visible dependents are still listed); a Liveboard export that fails or is not Liveboard TML goes to `unreadable` | — |
 | `classify.py` | Set + consumers → class (§4) | `consumers` output |
 | `grants.py` | DEFINED grants on the Set + grants and owners of its consumers → provenance per grant (§5) | `consumers` output |
 | `render.py` | Inventory JSON → HTML + Markdown | — |

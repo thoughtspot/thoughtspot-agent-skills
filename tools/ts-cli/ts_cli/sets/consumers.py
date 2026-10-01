@@ -64,10 +64,16 @@ def fetch_consumers(client, set_ref: dict) -> dict:
             # _normalize_dependents_response maps a non-list body to [] — which would read
             # as "no dependents". A failure must never become the more favourable result.
             raise ValueError(f"unexpected dependents response shape: {type(body).__name__}")
+        # The API omits dependents the caller cannot see; this flag is the only signal.
+        # Read it BEFORE normalising (which drops it). Still list what IS visible.
+        hidden = any(((item.get("dependent_objects") or {}).get("hasInaccessibleDependents"))
+                     for item in body if isinstance(item, dict))
         rows = _normalize_dependents_response(body)
     except (Exception, SystemExit) as exc:
         out["error"] = f"dependents lookup failed: {exc!r}"
         return out
+    if hidden:
+        out["error"] = "some dependents are not visible to this user (hasInaccessibleDependents)"
     for r in rows:
         dep = {"guid": r["guid"], "name": r["name"], "type": r["type"], "author_id": r["author_id"]}
         if r["type"] not in _KNOWN:
@@ -79,6 +85,10 @@ def fetch_consumers(client, set_ref: dict) -> dict:
             if doc is None:
                 out["unreadable"].append({"guid": r["guid"], "name": r["name"],
                                           "reason": "Liveboard TML export failed or was refused"})
+            elif not isinstance(doc, dict) or "liveboard" not in doc:
+                # Never read a non-Liveboard export as "read, no usage".
+                out["unreadable"].append({"guid": r["guid"], "name": r["name"],
+                                          "reason": "export was not Liveboard TML"})
             else:
                 out["liveboards"][r["guid"]] = liveboard_usage(doc, set_ref["name"])
     return out
