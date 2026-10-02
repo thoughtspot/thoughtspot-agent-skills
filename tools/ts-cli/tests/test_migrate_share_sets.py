@@ -175,6 +175,12 @@ def test_a_supplied_sets_scan_skips_the_self_scan(mock_cls, _rp, tmp_path):
 @pytest.mark.parametrize("doc", [
     {"blocked": []},
     {"blocked": [], "summary": {"models_blocked": 0}},
+    # One marker alone is a hand-edited or truncated file, not a BL-325 scan.
+    {"blocked": [], "discovery_notes": []},
+    {"blocked": [], "summary": {"models_incomplete": 0}},
+    # Present but the wrong shape.
+    {"blocked": [], "discovery_notes": "none", "summary": {"models_incomplete": 0}},
+    {"blocked": [], "discovery_notes": [], "summary": ["models_incomplete"]},
 ])
 @patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
 @patch("ts_cli.commands.migrate.ThoughtSpotClient")
@@ -193,6 +199,28 @@ def test_a_pre_bl325_sets_scan_is_refused(mock_cls, _rp, tmp_path, doc):
                                  "--target-profile", "tgt", "--dry-run"])
     assert result.exit_code == 1
     assert "predates BL-325" in result.stderr and "scan-sets" in result.stderr
+    assert not _detail_gets(client)
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_a_genuine_build_scan_report_is_accepted(mock_cls, _rp, tmp_path):
+    """The tightened check must still accept what `scan-sets` actually writes."""
+    from ts_cli.migrate.sets_scan import build_scan_report
+    from ts_cli.commands.migrate import _is_post_bl325_scan
+    report = build_scan_report(["T1"], scanned_models=1, blocked=[])
+    assert _is_post_bl325_scan(report)
+    client = _client([_COHORT_ROW])
+    mock_cls.return_value = client
+    _write_single_model_mapping(tmp_path)
+    scan = tmp_path / "sets-scan.json"
+    scan.write_text(json.dumps(report))
+    result = runner.invoke(app, ["migrate", "apply", "-d", str(tmp_path),
+                                 "--sets-scan", str(scan),
+                                 "--source-profile", "src",
+                                 "--target-profile", "tgt", "--dry-run"])
+    assert "predates BL-325" not in result.stderr
+    assert "SET_BLOCKER" not in result.stderr
     assert not _detail_gets(client)
 
 

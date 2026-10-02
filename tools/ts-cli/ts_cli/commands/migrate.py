@@ -346,14 +346,16 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
 
 
 def _is_post_bl325_scan(doc) -> bool:
-    """A `sets-scan.json` written by the shared-discovery scanner (BL-325) carries
-    `discovery_notes` and `summary.models_incomplete`. Older files used the COHORT-prefix
-    match that missed blank-type Sets, so their `blocked[]` cannot be trusted as complete."""
+    """A `sets-scan.json` written by the shared-discovery scanner (BL-325) carries BOTH
+    `discovery_notes` (a list) and `summary.models_incomplete`: `build_scan_report` always
+    writes the pair. Older files used the COHORT-prefix match that missed blank-type Sets,
+    so their `blocked[]` cannot be trusted as complete. Requiring both markers means a
+    hand-edited or truncated file carrying only one does not pass this destructive gate."""
     if not isinstance(doc, dict):
         return False
     summary = doc.get("summary")
-    return "discovery_notes" in doc or (isinstance(summary, dict)
-                                        and "models_incomplete" in summary)
+    return (isinstance(doc.get("discovery_notes"), list)
+            and isinstance(summary, dict) and "models_incomplete" in summary)
 
 
 def _err_discovery_notes(found: dict, label: str = "") -> None:
