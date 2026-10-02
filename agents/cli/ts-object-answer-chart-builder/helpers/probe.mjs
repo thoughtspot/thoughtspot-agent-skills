@@ -18,14 +18,21 @@
 //            marks (svg circle/rect/path, buttons, [tabindex]), and report how many changed the DOM (a
 //            tooltip, a highlight). Sparse charts (scatter, bubble) are judged on their marks, not on the
 //            middle line. A tile where nothing changes anywhere is not interactive.
+//            "Changed the DOM" means a state signature changed: elements whose class carries a
+//            hover/active/selected/tooltip/focus token, the visibility and text of tooltips,
+//            aria-selected / data-active, and the inline style / paint attributes (opacity, fill, stroke,
+//            stroke-width, font-weight) of marks, which is how D3 charts highlight without a class.
+//            Geometry (d, transform, x, y, r, ...) is ignored since it animates. Unrelated classes do not count; the
+//            baseline is sampled twice before the pointer moves and `sweep: UNSTABLE baseline` is
+//            printed (nothing counted) when the two differ.
 //   --eval-first  run a JS expression BEFORE the hover/click screenshot (set a slider, open an accordion),
 //            so the screenshot captures the state it produces.
 //
 // Always headless, always its own server; never disturbs the headed preview.
-// Exit codes: 0 ok, 1 fatal, 2 usage
+// Exit codes: 0 ok, 1 fatal, 2 usage or the chart never settled (`status: TIMEOUT ...`)
 import fs from "node:fs";
 import path from "node:path";
-import { parseTile } from "./capture.mjs";
+import { parseTile, settle, SETTLE_MS } from "./capture.mjs";
 import { launchOptions, loadPlaywright, resolveBrowser, resolveEnv, VIEWPORT } from "./env.mjs";
 import { startServer } from "./serve.mjs";
 
@@ -70,8 +77,14 @@ try {
     await page.setViewportSize({ width: Math.max(VIEWPORT.viewport.width, tile.width + 32), height: Math.max(VIEWPORT.viewport.height, tile.height + 50) });
   }
   await page.goto(`${server.url}/?data=${opt.data || "live"}`, { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => { const s = document.getElementById("status"); return s && /^(ok|warn|error)$/.test(s.className); }, { timeout: 20000 }).catch(() => {});
-  await page.waitForTimeout(700);
+  const settled = await settle(page);
+  if (!settled) {
+    // Loud, and exit 2: the probe still runs so the sweep/eval output is available, but a chart that never
+    // settled is not a working chart.
+    const st = await page.evaluate(() => { const s = document.getElementById("status"); return { text: s?.textContent ?? "", kind: s?.className ?? "" }; });
+    console.log(`status: TIMEOUT render-complete never fired after ${Math.round(SETTLE_MS / 1000)}s (preview status stayed [${st.kind || "pending"}] ${JSON.stringify(st.text)})`);
+    process.exitCode = 2;
+  }
   if (tile) {
     await page.evaluate(({ width, height }) => {
       const t = document.getElementById("tile");
@@ -110,11 +123,51 @@ try {
     console.log("png: " + png);
   }
   if (opt.sweep) {
+    // A state signature, not innerHTML.length: three parts, each of which only a hover/selection should move.
+    //   a) elements whose class carries hover/active/selected/tooltip/focus as a whole token or a prefix
+    //      (`hovered`, `is-active`, `bar--selected`, `az-tip` does not qualify here but is caught by b)
+    //   b) the visibility and text of tooltips: [role=tooltip] and classes containing tooltip or tip
+    //   c) the count and text of elements carrying aria-selected / data-active
+    //   d) the inline `style` and the paint attributes (opacity, fill, stroke, stroke-width, font-weight) of every
+    //      svg mark and HTML element: D3 charts highlight by setting these directly, with no class. Geometry
+    //      attributes (d, transform, x, y, cx, cy, width, height, r) are left out because they animate.
     const sig = () => page.evaluate(() => {
       const h = document.getElementById("chart-host") || document.body;
-      return h.innerHTML.length + "|" + h.querySelectorAll("[class*=tip],[class*=tooltip],[class*=hover],[class*=active],[class*=hl],[class*=dim],[class*=on]").length + "|" + [...h.querySelectorAll("*")].filter((e) => getComputedStyle(e).opacity !== "1" && e.tagName !== "STYLE").length;
+      const STATE = /(^|[-_:])(hover|active|selected|tooltip|focus)/i;
+      const text = (e, n) => (e.textContent || "").replace(/\s+/g, " ").trim().slice(0, n);
+      const cls = (e) => e.getAttribute("class") || "";
+      const stateEls = [...h.querySelectorAll("[class]")].filter((e) => cls(e).split(/\s+/).some((t) => STATE.test(t)));
+      const a = stateEls.map((e) => e.tagName + "." + cls(e) + "=" + text(e, 60)).join(",");
+      const tips = [...h.querySelectorAll("[role=tooltip],[class*=tooltip],[class*=tip]")].map((e) => {
+        const cs = getComputedStyle(e), r = e.getBoundingClientRect();
+        const vis = cs.display !== "none" && cs.visibility !== "hidden" && Number(cs.opacity) > 0.05 && r.width > 0 && r.height > 0;
+        return (vis ? "v:" + text(e, 120) : "h");
+      }).join(",");
+      const sel = [...h.querySelectorAll("[aria-selected],[data-active]")];
+      const c = sel.length + ":" + sel.map((e) => (e.getAttribute("aria-selected") ?? "") + "/" + (e.getAttribute("data-active") ?? "") + "=" + text(e, 40)).join(",");
+      const PAINT = ["opacity", "fill", "stroke", "stroke-width", "font-weight"];
+      const d = [...h.querySelectorAll("path, rect, circle, line, g, text, ellipse, polygon, polyline, *:not(svg *)")]
+        .filter((e) => e.tagName !== "STYLE" && e.tagName !== "SCRIPT")
+        .map((e) => (e.getAttribute("style") || "") + ";" + PAINT.map((k) => e.getAttribute(k) ?? "").join(";"))
+        .join("/");
+      return "a[" + stateEls.length + "]" + a + "|b[" + tips + "]|c[" + c + "]|d[" + d + "]";
     });
-    const base = await sig();
+    // Baseline after settle, the tile resize and an extra pause for the entrance animation, sampled twice with
+    // the pointer still outside the tile. A baseline that moves on its own would count animation as a reaction.
+    await page.waitForTimeout(400);
+    let base = await sig();
+    await page.waitForTimeout(250);
+    let again = await sig();
+    if (base !== again) {
+      // One more chance for a slow entrance animation before giving up on the sweep.
+      await page.waitForTimeout(800);
+      base = await sig();
+      await page.waitForTimeout(250);
+      again = await sig();
+    }
+    if (base !== again) {
+      console.log("sweep: UNSTABLE baseline (animation still running)  <- not counted as interactive; re-run, or let the chart settle before emitRenderCompletedEvent");
+    } else {
     const seen = new Set([base]);
     let n = 0;
     for (const fx of [0.15, 0.32, 0.5, 0.68, 0.85]) {
@@ -144,6 +197,7 @@ try {
     }
     const hit = n + nm;
     console.log(`sweep: ${hit} of ${total} points changed the DOM (${n} of 5 on the middle line, ${nm} of ${marks.length} on marks)` + (hit === 0 ? "  <- NOT INTERACTIVE (no tooltip or highlight reacted)" : ""));
+    }
   }
   if (opt.eval) {
     const out = await page.evaluate(async (src) => {

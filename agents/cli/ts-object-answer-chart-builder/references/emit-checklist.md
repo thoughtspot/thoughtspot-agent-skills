@@ -82,7 +82,11 @@ Three differences the loop cannot catch. Check them by reading.
 
 - [ ] Column names live in UPPER_SNAKE_CASE constants, used everywhere.
 - [ ] Non-default colors, labels, precision, thresholds are in one `// ─── Customize ───`
-      block — and that block is absent entirely if there was nothing to put in it.
+      block above the render function — and that block is absent entirely if there was
+      nothing to put in it. Grouped by purpose (`COLORS`, `LABELS`, `PRECISION`, `FORMAT`,
+      `THRESHOLDS`), never mixed; a category-to-colour map with two or more entries always
+      lives in `COLORS`; no inline magic strings or numbers for a non-default value further
+      down. Field-name constants stay next to the schema: they map to data, not visuals.
 - [ ] Config that could be deleted without changing the render has been deleted.
 - [ ] No `console.log`, debug overlays, or commented-out experiments.
 

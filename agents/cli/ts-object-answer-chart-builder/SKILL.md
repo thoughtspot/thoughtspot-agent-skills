@@ -1,6 +1,6 @@
 ---
 name: ts-object-answer-chart-builder
-description: Build a ThoughtSpot custom chart (BYOC) as three paste-ready files — chart.html, chart.css, chart.js — by iterating in a real browser until the render is right. Starts with an intake that checks the prerequisites and asks the model, data mode, search, library and destination as pick-from-a-list questions; can save the finished chart as a ThoughtSpot answer and screenshot it in a logged-in browser. Opens a preview the user watches (a headed window in Claude Code; headless screenshots in the Claude app or wherever no window can open), screenshots each attempt, critiques it with vision, and fixes the top defect. Use when the user wants a ThoughtSpot custom chart, a BYOC tile, a Muze chart, or wants an existing chart tile rebuilt, debugged, or converted between sample and live data. Covers Muze, D3, ECharts, Plotly, Chart.js, gridjs, hand-built HTML tables, and raw SVG, and hands finished tiles to the ts-object-liveboard-chart-builder skill to put on a Liveboard. Ships a library of proven live-data charts under library/. Not for native ThoughtSpot chart configuration or non-ThoughtSpot charting work.
+description: Build a ThoughtSpot custom chart (BYOC) as three paste-ready files, chart.html, chart.css and chart.js, by iterating in a real browser until the render is right: an intake with pick-from-a-list questions (model, data mode, search, library, destination), a preview the user watches or headless screenshots where no window can open, a vision critique of every attempt, and checks for missing, wrapped and empty data, tile resizes and pointer interaction. Can save the finished chart as a ThoughtSpot answer and screenshot it in a logged-in browser. Use when the user wants a ThoughtSpot custom chart, a BYOC tile, a Muze chart, or an existing chart tile rebuilt, debugged, or converted between sample and live data. Covers Muze, D3, ECharts, Plotly, Chart.js, gridjs, HTML tables and raw SVG, ships a library of proven live-data charts under library/, and hands finished tiles to ts-object-liveboard-chart-builder. Not for native ThoughtSpot chart configuration or non-ThoughtSpot charting work.
 ---
 
 # ThoughtSpot custom chart builder
@@ -126,17 +126,16 @@ lettered options, and wait for the answers. Write the answers into `<RUNS>/<SLUG
 Read before writing any chart code, in this order:
 
 1. `references/byoc-data-modes.md` — sample vs. live vs. both. **Always.**
-2. `references/hard-rules.md` — the silent failures, and how each one shows up.
-3. `references/examples.md` — the working charts under `examples/`, indexed by shape.
-   Find the nearest one and read it before writing; it settles the API questions
-   faster than the reference does and carries the workarounds already found.
-4. `references/system-prompt.md` — long-form recipes and patterns.
-5. `references/muze-api-reference.md` — when the chart is Muze.
-6. `references/taste-rules.md` — the design bans and copy rules every chart is critiqued against (no emojis, no em-dashes, one accent rule, specific copy).
-7. `references/library.md` — the proven live-data charts in `library/`, indexed by question. Start from the nearest one.
-8. `references/library-starters.md` — per-library starters and traps (CDN loading, drill-down, motion) learned in real tiles. Read it before using a library for the first time.
+2. `references/hard-rules.md` — the silent failures, how each one shows up, and the recipes that avoid them. **Always.**
+3. `references/taste-rules.md` — the design bans and copy rules every chart is critiqued against (no emojis, no em-dashes, one accent rule, specific copy). **Always.**
+4. `references/library.md` — the proven live-data charts in `library/`, indexed by question. **Always.** Start from the nearest one and read its `chart.js` before writing; it settles the API questions faster than any reference and carries the workarounds already found.
+5. `references/library-starters.md` — per-library starters and traps (CDN loading, drill-down, motion) learned in real tiles. The first time a run uses a library other than Muze.
+6. `references/muze-api-reference.md` — only when the chart is Muze. Section 0 (Recipes: sizing, encodingTransform data access, labels, reference lines, dual axis, diverging bars, date ticks, formatting, KPI tiles) first, then only the API sections the chart needs, not the whole file.
+7. `references/examples.md` — the older charts under `examples/`, indexed by shape. Only when no library chart is close; most of its entries are superseded by the library.
 
-All eight ship with the skill; paths are relative to the skill folder, wherever it is
+Read 1 to 4 on every run, 5 to 7 only when their condition holds. Nothing else needs reading
+before the first attempt: `emit-checklist.md` belongs to Step 7 and `library-contract.md` to
+Step 10. All seven ship with the skill; paths are relative to the skill folder, wherever it is
 installed.
 
 ## Step 2 — settle the data mode
@@ -226,7 +225,9 @@ For `attempt = 01..8`:
    console errors, whether `emitRenderCompletedEvent` fired.
 4. **Critique.** Read the PNG with the Read tool. **Read the diagnostic block too** —
    a chart that throws still screenshots, just empty, and the two failures need
-   different fixes. Write `attempts/NN.critique.md`:
+   different fixes. `status: TIMEOUT` (snap exits 2) means render-complete never fired:
+   the PNG is whatever was on screen at the deadline, not a finished render, so treat
+   it as `OFF` and fix the boot before judging the picture. Write `attempts/NN.critique.md`:
    ```
    VERDICT: MATCH | CLOSE | OFF
    DEFECTS:
@@ -294,7 +295,7 @@ node "<SKILL>/helpers/probe.mjs" "<SLUG>" --tile 620x400 --click 0.9,0.1 --out 9
 node "<SKILL>/helpers/probe.mjs" "<SLUG>" --tile 620x400 --click-sel ".wedge" --wait 900 --after "document.querySelector(\".crumbs\").innerText" --out 99   # read what a drill changed
 ```
 
-`--eval "js"` inspects the DOM after the interaction. A chart whose sweep reports `NOT INTERACTIVE` is not done. Click-only charts (toggles, expanders) report 0 on the sweep by design: verify those with `--click`.
+`--eval "js"` inspects the DOM after the interaction. A chart whose sweep reports `NOT INTERACTIVE` is not done. `sweep: UNSTABLE` means an animation was still running when the sweep started, so nothing was proved: let the entrance finish (`AZ.settle()`) or shorten it, then probe again. Click-only charts (toggles, expanders) report 0 on the sweep by design: verify those with `--click`.
 
 **Empty the HTML tab and re-snap.** `chart.js` must build its own mount points. A
 chart that only renders when `chart.html` is present fails on a host that evaluates
@@ -378,8 +379,13 @@ or C) built on the intake search. The answer is the one object this creates; mak
    ```bash
    node "<SKILL>/helpers/cluster-shot.mjs" --url "<answer url>" --name "<SLUG>" --out "<OUT>/<SLUG>/cluster" --wait 10
    ```
-   Read the PNG and the `problems` line (failure text found inside the chart frame). A fix goes back
-   through the loop (Step 5) and Step 6, then is sent again with `--answer <guid> --commit`.
+   Read the PNG and the `problems` line (failure text found inside the chart frame). Each tab line reads
+   `rendered=N of M custom-chart tiles`: M comes from the Liveboard's own export, N counts the chart frames that drew
+   an svg, canvas, table, image or text at any scroll stop. It exits 2 when a tab was not found, fewer tiles rendered
+   than the tab holds, or a tile shows failure text, so a non-zero exit is a defect, not a hiccup. A tile still loading
+   counts as not rendered: raise `--wait` (or `--scroll-wait` for tiles below the fold) and run it again before
+   debugging the chart. `--debug-frames` prints every frame and how it was classified. A fix goes
+   back through the loop (Step 5) and Step 6, then is sent again with `--answer <guid> --commit`.
 5. **Sign out**, unless the intake chose to stay signed in: the saved session is a credential and does not
    outlive the run.
    ```bash
@@ -396,8 +402,9 @@ tiles, filters, round-trip proof, in-cluster screenshots). To hand a chart over:
 
 1. Build it to `references/library-contract.md` (shared core, ASCII, no template strings).
 2. `node "<SKILL>/helpers/sync-core.mjs" "<RUNS>/<SLUG>/chart"`, then
-   `node "<SKILL>/helpers/library-emit.mjs" <SLUG> --title ... --search ... --tile WxH ...` publishes it to
-   the user's library, `~/.cache/ts-charts/library/<slug>/`, outside any repo because its preview shows
+   `node "<SKILL>/helpers/library-emit.mjs" <SLUG> --title ... --search ... --tile WxH ...` (`--tile` in
+   Liveboard grid units, `8x6`; `--model "<name>"` and `--mode A|B|C` for the README, defaulting to the sample
+   model and mode B) publishes it to the user's library, `~/.cache/ts-charts/library/<slug>/`, outside any repo because its preview shows
    live data (refuses non-ASCII or a drifted core). The Liveboard skill and `answer-pack.mjs` find it there
    by slug. `--into-skill` writes into this skill's shipped `library/` instead: only for maintainers adding a
    chart to the shipped library, with a preview that shows no customer data. `--png` is relative to the run folder (`attempts/03.520x400.png`), not the repo. `python3 "<SKILL>/helpers/make-index.py"`

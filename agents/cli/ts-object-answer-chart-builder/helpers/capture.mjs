@@ -37,14 +37,21 @@ export function parseTile(spec) {
 // Settle on the preview's own status line rather than a selector — the chart may
 // be an SVG, a canvas, or a plain HTML table, and waiting for "#chart svg" would
 // hang forever on the last two.
-async function settle(page) {
-  await page
+//
+// Returns false when the status never reached ok/warn/error within SETTLE_MS: the
+// chart hung (an unresolved await, a CDN that never answers) and render-complete
+// never fired. The caller must say so loudly; a swallowed timeout reads as a
+// chart that merely has not finished yet.
+export const SETTLE_MS = 20000;
+export async function settle(page, timeout = SETTLE_MS) {
+  const settled = await page
     .waitForFunction(() => {
       const s = document.getElementById("status");
       return s && /^(ok|warn|error)$/.test(s.className);
-    }, { timeout: 20000 })
-    .catch(() => {});
+    }, { timeout })
+    .then(() => true, () => false);
   await page.waitForTimeout(700); // animations / late layout
+  return settled;
 }
 
 // Resize the CONTAINER, never the window. A Liveboard tile resizes while the
@@ -97,7 +104,7 @@ export async function captureTile(page, { url, outPath, tile }) {
                                    height: Math.max(vp.height, tile.height + 50) });
     }
     await page.goto(url, { waitUntil: "domcontentloaded" });
-    await settle(page);
+    const settled = await settle(page);
     if (tile) await resizeTile(page, tile);
 
     const status = await page.evaluate(() => {
@@ -111,7 +118,8 @@ export async function captureTile(page, { url, outPath, tile }) {
     const tileEl = await page.$("#tile");
     await (tileEl ?? page).screenshot({ path: outPath });
 
-    return { status, heightChain: diag.heightChain, fit, consoleErrors };
+    // timedOut: the diagnostic block prints `status: TIMEOUT ...` and the caller exits 2.
+    return { status, heightChain: diag.heightChain, fit, consoleErrors, timedOut: !settled, settleMs: SETTLE_MS };
   } finally {
     page.off("console", onConsole);
     page.off("pageerror", onPageError);
@@ -124,7 +132,13 @@ export function printDiag(result, { mode, png, userPng, dataMode, tile }) {
   console.log(`png: ${png}`);
   if (userPng) console.log(`user-png: ${userPng}`);
   console.log(`data-mode: ${dataMode}`);
-  console.log(`status: [${result.status.kind || "pending"}] ${result.status.text}`);
+  if (result.timedOut) {
+    // Unmistakable on purpose: the PNG is still written, but the chart never settled.
+    console.log(`status: TIMEOUT render-complete never fired after ${Math.round(result.settleMs / 1000)}s` +
+                ` (preview status stayed [${result.status.kind || "pending"}] ${JSON.stringify(result.status.text)})`);
+  } else {
+    console.log(`status: [${result.status.kind || "pending"}] ${result.status.text}`);
+  }
 
   // The tile's <body> has no explicit height; the preview's #chart-host does. A
   // chart sized with `height: 100%` therefore renders here and collapses to a

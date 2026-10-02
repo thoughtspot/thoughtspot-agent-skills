@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // cluster-shot.mjs --url <liveboard or answer url> [--tabs "01 About,02 Pulse"] [--name answer] [--out dir] [--wait 9]
-//                  [--profile dir] [--login-timeout 300] [--scroll-wait 8] [--no-scroll] [--filter "Region=West"]
+//                  [--profile dir] [--login-timeout 300] [--scroll-wait 8] [--no-scroll] [--filter "Region=West"] [--debug-frames]
 // cluster-shot.mjs --logout <cluster url or host | all>
 //   Without --tabs it takes one shot of the page as <name>.png (default "liveboard"): use this for a saved answer.
 //   --filter clicks the named filter chip, picks the value and applies it before capturing, to prove the tiles
@@ -19,21 +19,28 @@
 // same skill run are silent. --logout deletes that profile, which signs the user out; the skills run it at
 // the end unless the user chose to stay signed in (security.md: cached sessions are cleaned up at skill end).
 //
-// Prints a report and the PNG paths. Exit 0 when every tab screenshot was taken.
+// Prints a report and the PNG paths. Exit 0 when every tab screenshot was taken and no tile reported a failure
+// text; exit 2 when a tab was not found, a tab has no chart frame or only blank ones, fewer custom-chart tiles rendered than the Liveboard holds on that tab, or a frame showed a failure text (the `problems:` line says how
+// many); exit 1 on a fatal error (login timeout, browser).
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 // Playwright and Chromium are the ones the doctor (env.mjs) installed.
 import { cacheRoot, launchOptions, loadPlaywright, resolveBrowser, resolveEnv } from "./env.mjs";
 
 const argv = process.argv.slice(2);
 const opt = {};
-for (let i = 0; i < argv.length; i++) if (argv[i].startsWith("--")) opt[argv[i].slice(2)] = argv[++i];
+const BOOL = new Set(["no-scroll", "debug-frames"]); // flags that take no value
+for (let i = 0; i < argv.length; i++) {
+  if (!argv[i].startsWith("--")) continue;
+  const k = argv[i].slice(2);
+  opt[k] = BOOL.has(k) ? true : argv[++i];
+}
 
 const profiles = path.join(cacheRoot(), "cluster-profiles");
 // Before per-cluster profiles, one profile was shared by every cluster. It is never reused (it would belong to
 // whichever cluster ran first); --logout all removes it.
-const legacy = path.join(os.homedir(), ".cache", "amuzing-chart", "cluster-profile");
+// Same cache folder resolution as env.mjs ($XDG_CACHE_HOME or ~/.cache), one level up from ts-charts.
+const legacy = path.join(path.dirname(cacheRoot()), "amuzing-chart", "cluster-profile");
 // The profile folder of a cluster: its host name, checked to be one, so no input can name a folder outside
 // cluster-profiles (".." included). Returns null for anything that is not a host.
 const HOST = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::\d{1,5})?$/i;
@@ -60,6 +67,8 @@ if (opt.logout) {
   console.log(gone.length ? "signed out: removed " + gone.join(", ") : "no saved sign-in for " + opt.logout + " (nothing to remove)");
   process.exit(0);
 }
+// A bare host ("my.thoughtspot.cloud") is a URL too.
+if (opt.url && !/^[a-z][a-z0-9+.-]*:\/\//i.test(opt.url)) opt.url = "https://" + opt.url;
 if (!opt.url) { console.error('usage: cluster-shot.mjs --url <liveboard or answer url> [--tabs "a,b"] [--name answer] [--out dir] [--wait seconds]\n       cluster-shot.mjs --logout <cluster url or host | all>'); process.exit(2); }
 
 const env = resolveEnv({});
@@ -103,7 +112,8 @@ try {
     filterDone = true;
     const [fcol, fval] = opt.filter.split("=");
     try {
-      await page.getByText(new RegExp("^" + fcol + "\\b", "i")).first().click({ timeout: 8000 });
+      const esc = fcol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); // the filter name is text, not a pattern
+      await page.getByText(new RegExp("^" + esc + "\\b", "i")).first().click({ timeout: 8000 });
       await page.waitForTimeout(1500);
       await page.getByText(fval, { exact: true }).first().click({ timeout: 8000 });
       await page.waitForTimeout(600);
@@ -115,18 +125,71 @@ try {
   }
 
 
+  // Every frame on the page with what it holds. Chart tiles render into frames of their own; ThoughtSpot also adds
+  // helper frames, so a frame counts as a rendered chart only when it holds marks (svg, canvas, table, img) or text.
+  async function survey() {
+    const rows = [];
+    for (const f of page.frames()) {
+      if (f === page.mainFrame()) continue;
+      let r = null;
+      try {
+        r = await f.evaluate(() => {
+          const b = document.body;
+          if (!b) return { text: "", marks: 0, w: 0, h: 0 };
+          const marks = [...b.querySelectorAll("svg,canvas,table,img")].filter((e) => { const q = e.getBoundingClientRect(); return q.width > 4 && q.height > 4; }).length;
+          return { text: b.innerText.trim(), marks, w: innerWidth, h: innerHeight };
+        });
+      } catch { r = null; }
+      rows.push({ f, url: f.url(), ...(r || { text: "", marks: 0, w: 0, h: 0, dead: true }) });
+    }
+    return rows;
+  }
+  const isChart = (r) => !r.dead && r.w > 40 && r.h > 40 && (r.marks > 0 || r.text.length > 0);
+  // How many custom-chart tiles each tab should show, from the Liveboard's own export (same-origin, signed in).
+  async function expectedTiles() {
+    const m = /#\/(?:pinboard|liveboard)\/([0-9a-f-]{36})/i.exec(opt.url);
+    if (!m) return null;
+    return page.evaluate(async (guid) => {
+      try {
+        const r = await fetch("/api/rest/2.0/metadata/tml/export", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "application/json", "X-Requested-By": "ThoughtSpot" }, body: JSON.stringify({ metadata: [{ identifier: guid, type: "LIVEBOARD" }], edoc_format: "JSON" }) });
+        if (!r.ok) return { error: "http " + r.status };
+        const lb = JSON.parse((await r.json())[0].edoc).liveboard;
+        const custom = new Set((lb.visualizations || []).filter((v) => v.answer && v.answer.chart && /MUZE_STUDIO|CUSTOM/i.test(v.answer.chart.type || "")).map((v) => v.id));
+        const byTab = {};
+        for (const t of (lb.layout && lb.layout.tabs) || []) byTab[t.name] = (t.tiles || []).filter((x) => custom.has(x.visualization_id)).length;
+        return { byTab };
+      } catch (e) { return { error: String(e && e.message || e).slice(0, 120) }; }
+    }, m[1]);
+  }
+  const expected = await expectedTiles();
+  if (expected && expected.error) console.log("tile count: unavailable (" + expected.error + "); only failure text and empty tabs are checked");
+  let seen = new Set(); // rendered chart frames seen at any scroll position of the current tab
+
+  async function look() {
+    for (const r of await survey()) if (isChart(r)) seen.add(r.f);
+  }
+
   async function report(label) {
     const frames = page.frames().filter((f) => f !== page.mainFrame());
     const findings = [];
+    let withContent = 0; // ThoughtSpot adds helper frames of its own, so judge the tab, not each frame
+    if (!frames.length) findings.push({ frame: "page", hit: "no chart frame", text: "the page has no chart frames: still loading (raise --wait), or the tab is empty" });
     for (const f of frames) {
-      let t = "";
-      try { t = (await f.evaluate(() => document.body ? document.body.innerText : "")).trim(); } catch { continue; }
+      let t = "", nodes = 0;
+      try { [t, nodes] = await f.evaluate(() => [document.body ? document.body.innerText : "", document.body ? document.body.querySelectorAll("svg,canvas,img,table,div,span").length : 0]); } catch { continue; }
+      t = t.trim();
+      if (t || nodes) withContent++;
       if (!t) continue;
       const bad = /Chart did not render|Something went wrong|Error:|TypeError|ReferenceError|Column not found|No data yet|is not defined|Cannot read/i.exec(t);
       if (bad) findings.push({ frame: f.url().slice(0, 60), hit: bad[0], text: t.slice(0, 200).replace(/\s+/g, " ") });
     }
+    if (frames.length && !withContent) findings.push({ frame: "page", hit: "blank frames", text: "no chart frame has any content: still loading (raise --wait), or every tile is blank" });
+    await look();
+    const want = expected && expected.byTab ? expected.byTab[label] : undefined;
+    if (want != null && seen.size < want) findings.push({ frame: "page", hit: "blank tiles", text: seen.size + " of " + want + " custom-chart tiles rendered: the rest are blank or still loading (raise --wait or --scroll-wait)" });
+    if (opt["debug-frames"]) for (const r of await survey()) console.log("   frame " + (isChart(r) ? "chart " : "other ") + r.w + "x" + r.h + " marks=" + r.marks + " text=" + r.text.length + " " + r.url.slice(0, 80));
     const main = (await page.evaluate(() => document.body.innerText).catch(() => "")).match(/Chart did not render|Something went wrong/g) || [];
-    console.log(`[${label}] iframes=${frames.length} problems=${findings.length + main.length}`);
+    console.log(`[${label}] iframes=${frames.length} rendered=${seen.size}${want != null ? " of " + want + " custom-chart tiles" : ""} problems=${findings.length + main.length}`);
     findings.forEach((x) => console.log("   - " + x.hit + " | " + x.text));
     return findings.length + main.length;
   }
@@ -142,10 +205,11 @@ try {
   for (const name of tabs) {
     const tab = page.getByText(name, { exact: true }).first();
     try { await tab.click({ timeout: 8000 }); } catch { console.log(`[${name}] tab not found`); problems++; continue; }
+    seen = new Set();
     await page.waitForTimeout(waitMs);
     await applyFilter();
     const base = name.replace(/[^\w]+/g, "-").toLowerCase();
-    if (opt["no-scroll"] !== undefined) {
+    if (opt["no-scroll"]) {
       const p = path.join(out, base + ".png");
       await page.screenshot({ path: p, fullPage: false }); shots.push(p);
     } else {
@@ -165,7 +229,7 @@ try {
         if (info) { await page.evaluate((y) => { document.querySelector("[data-shot-scroller]").scrollTop = y; }, i * step); await page.waitForTimeout(i ? scrollWaitMs : 300); }
         const p = path.join(out, base + "-" + (i + 1) + ".png");
         await page.screenshot({ path: p, fullPage: false }); shots.push(p);
-        if (i) problems += 0;
+        await look();
       }
       if (info) await page.evaluate(() => { document.querySelector("[data-shot-scroller]").scrollTop = 0; });
     }
@@ -173,6 +237,7 @@ try {
   }
   shots.forEach((s) => console.log("png: " + s));
   console.log(problems ? `problems: ${problems}` : "no tile reported a failure text");
+  if (problems) process.exitCode = 2;
 } catch (e) {
   if (!process.exitCode) console.error("cluster-shot:", e.message);
   process.exitCode = process.exitCode || 1;

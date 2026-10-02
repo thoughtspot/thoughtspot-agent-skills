@@ -2,7 +2,11 @@
 // library-emit.mjs <slug> --title "..." --search "[sales] [date].monthly" --question "..." \
 //                  --lib "Muze" --tile "8x6" --interactions "hover tooltip; click key to hide series" \
 //                  [--notes "..."] [--png attempts/NN.WxH.png] [--tab Pulse] [--into-skill]
+//                  [--model "(Sample) Retail - Apparel"] [--mode A|B|C]
+//   --tile is the Liveboard footprint in grid units, WxH (e.g. 8x6); it is written to the README as given.
 //   --png is relative to the RUN directory (runs/<slug>/), not the repo root.
+//   --model names the model the search runs on; --mode is the data mode (references/byoc-data-modes.md).
+//   Both default to the shipped library's values, (Sample) Retail - Apparel and B.
 //
 // Publishes a finished run into the user's library, ~/.cache/ts-charts/library/<slug>/ (outside any repo: the
 // preview is a screenshot of live data). liveboard-pack and answer-pack find it there by slug. --into-skill
@@ -23,17 +27,32 @@ import { resolveEnv, userLibrary } from "./env.mjs";
 const all = process.argv.slice(2);
 const intoSkill = all.includes("--into-skill");
 const args = all.filter((a) => a !== "--into-skill");
+const VALUED = new Set(["title", "search", "question", "lib", "tile", "interactions", "notes", "png", "tab", "model", "mode"]);
 const opt = {};
 const pos = [];
 for (let i = 0; i < args.length; i++) {
-  if (args[i].startsWith("--")) opt[args[i].slice(2)] = args[++i]; else pos.push(args[i]);
+  if (!args[i].startsWith("--")) { pos.push(args[i]); continue; }
+  const k = args[i].slice(2);
+  if (!VALUED.has(k)) { console.error("unknown option --" + k); process.exit(2); }
+  // A valued flag must have a value: `--model --mode B` must not record "--mode" as the model.
+  if (args[i + 1] === undefined || args[i + 1].startsWith("--")) { console.error("--" + k + " needs a value"); process.exit(2); }
+  opt[k] = args[++i];
 }
 const [slug] = pos;
 const need = ["title", "search", "question", "lib", "tile", "interactions"];
-if (!slug || need.some((k) => !opt[k])) {
-  console.error('usage: library-emit.mjs <slug> --title T --search S --question Q --lib L --tile WxH --interactions I [--notes N] [--png P] [--tab T]');
+if (!slug || pos.length !== 1 || need.some((k) => !opt[k])) {
+  console.error('usage: library-emit.mjs <slug> --title T --search S --question Q --lib L --tile WxH --interactions I [--notes N] [--png P] [--tab T] [--model M] [--mode A|B|C]');
   process.exit(2);
 }
+if (!/^\d+x\d+$/.test(opt.tile)) { console.error("--tile expects grid units WxH, e.g. 8x6 (got " + JSON.stringify(opt.tile) + ")"); process.exit(2); }
+const model = opt.model ?? "(Sample) Retail - Apparel";
+const mode = (opt.mode ?? "B").toUpperCase();
+if (!/^[ABC]$/.test(mode)) { console.error("--mode expects A, B or C (got " + JSON.stringify(opt.mode) + ")"); process.exit(2); }
+const MODE_TEXT = {
+  A: "A, sample only. Renders its baked-in rows; the search is not read.",
+  B: "B, live only. With no rows it shows an empty state that names the search.",
+  C: "C, live, falling back to sample. With no rows it renders the baked-in sample and badges it.",
+};
 const here = path.dirname(fileURLToPath(import.meta.url));
 const skill = path.resolve(here, "..");
 const env = resolveEnv({ slug });
@@ -77,11 +96,11 @@ ${opt.question}
 
 | | |
 |---|---|
-| Model | (Sample) Retail - Apparel |
+| Model | ${model} |
 | Search | \`${opt.search}\` |
 | Library | ${opt.lib} |
 | Tile | ${opt.tile} grid units${opt.tab ? " (" + opt.tab + " tab)" : ""} |
-| Data mode | B, live only. With no rows it shows an empty state that names the search. |
+| Data mode | ${MODE_TEXT[mode]} |
 | CDN | ${cdn.length ? cdn.join(", ") : "none"} |
 
 ## Interactions

@@ -14,9 +14,10 @@
 //      charts, notes, other custom charts, tabs, filters, parameters, style, its name) is kept as it is;
 //   4. imports VALIDATE_ONLY, and a commit (ALL_OR_NONE) only when nothing is wrong: any problem (a failed
 //      search, a missing tile, an ownership conflict, an untabbed Liveboard, no backup of content the skill
-//      does not own) refuses the commit. After a commit it exports again and proves every owned tile carries
-//      the code that was composed, every visualization it does not own is still there, and the tabs hold the
-//      tiles they were given.
+//      does not own) refuses the commit. Right before the commit it exports the Liveboard once more and refuses
+//      when anything changed since step 2 (an edit made in ThoughtSpot meanwhile would be overwritten). After a
+//      commit it exports again and proves every owned tile carries the code that was composed, every
+//      visualization it does not own is still there, and the tabs hold the tiles they were given.
 // It creates no other object in ThoughtSpot.
 const MODE = '__MODE__'; // 'validate' | 'commit' | 'check'
 const P = __PAYLOAD__;
@@ -53,9 +54,15 @@ if (badSha.length) return { refused: 'CHECKSUM MISMATCH - nothing written, resen
 
 // 2. current Liveboard
 const spec = P.spec, LB = spec.liveboard, model = LB.model, LBG = String(LB.guid).toLowerCase();
-const ex0 = await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: LB.guid, type: 'LIVEBOARD' }], edoc_format: 'JSON' });
-if (ex0.status !== 200 || !ex0.body || !ex0.body[0] || !ex0.body[0].edoc) return { refused: 'Liveboard ' + LB.guid + ' not found or not exportable; create it first (an empty Liveboard is enough)', http: ex0.status };
-const doc0 = JSON.parse(ex0.body[0].edoc).liveboard;
+const nameOf = (v) => (v && v.answer && v.answer.name) || (v && v.id) || '?';
+const exportLb = (guid) => ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: guid, type: 'LIVEBOARD' }], edoc_format: 'JSON' });
+const edocOf = (ex) => ex && ex.status === 200 && ex.body && ex.body[0] && ex.body[0].edoc ? ex.body[0].edoc : null;
+// The Liveboard document of an export, or null when the edoc is not the JSON of a Liveboard.
+const docOf = (ex) => { try { const d = JSON.parse(edocOf(ex)); return d && d.liveboard && typeof d.liveboard === 'object' ? d.liveboard : null; } catch (e) { return null; } };
+const ex0 = await exportLb(LB.guid);
+if (!edocOf(ex0)) return { refused: 'Liveboard ' + LB.guid + ' not found or not exportable; create it first (an empty Liveboard is enough)', http: ex0.status };
+const doc0 = docOf(ex0);
+if (!doc0) return { refused: 'the export of Liveboard ' + LB.guid + ' is not a Liveboard TML document (its edoc has no parsable "liveboard"); nothing was written. Check the guid names a Liveboard' };
 const vizById = {}; (doc0.visualizations || []).forEach((v) => { vizById[v.id] = v; });
 const conflicts = [];
 // A Liveboard laid out without tabs keeps its tiles in layout.tiles; the skill writes tabs, and merging the two
@@ -72,7 +79,7 @@ for (const tab of ((doc0.layout && doc0.layout.tabs) || []).filter((t) => specTa
   const c = codeOf(vizById[tl.visualization_id]);
   if (!hasCore(c)) continue;
   const m = MARK.exec(c.js), pos = tab.name + '|' + tl.x + '|' + tl.y;
-  cands.push({ id: tl.visualization_id, c, pos, slug: m ? m[1] : null, owner: ownerOf(c), title: vizById[tl.visualization_id].answer.name });
+  cands.push({ id: tl.visualization_id, c, pos, slug: m ? m[1] : null, owner: ownerOf(c), title: nameOf(vizById[tl.visualization_id]) });
 }
 // Owned: marked with this Liveboard's guid. Adoptable: no owner marker, and its slug (or, unmarked, its
 // position) is in the spec; taken over only with --adopt, otherwise the commit is refused so nothing is doubled.
@@ -120,13 +127,16 @@ const bodyOf = (c) => ({ js: c.js.slice(c.js.indexOf(END_JS) + END_JS.length), c
 const needCode = [];
 const refs = Object.entries(P.tiles).filter(([, t]) => t.ref);
 if (refs.length) {
-  const same = P.reuse === LB.guid; // reusing from this Liveboard stamps slug markers on older tiles, no paste
-  const exR = same ? ex0 : await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: P.reuse, type: 'LIVEBOARD' }], edoc_format: 'JSON' });
+  // Guids compare in lower case (the spec's is lowercased by liveboard-pack.mjs; --reuse is typed by hand).
+  const same = String(P.reuse || '').toLowerCase() === LBG; // reusing from this Liveboard stamps slug markers on older tiles, no paste
+  const exR = same ? ex0 : await exportLb(P.reuse);
+  const docR = same ? doc0 : docOf(exR);
+  if (!docR) return { refused: 'the reuse Liveboard ' + P.reuse + ' could not be exported or is not a Liveboard (http ' + exR.status + '); check the guid, or send the block without --reuse. Nothing was written' };
   // Tiles are found by slug marker, then (on this Liveboard) by grid position, then by title when it is unique.
   const src = {}, byTitle = {}, dupTitle = {};
-  if (exR.status === 200 && exR.body && exR.body[0] && exR.body[0].edoc) for (const v of JSON.parse(exR.body[0].edoc).liveboard.visualizations || []) {
+  for (const v of docR.visualizations || []) {
     const c = codeOf(v); if (!c) continue;
-    const m = MARK.exec(c.js); if (m) src[m[1]] = c; else { if (byTitle[v.answer.name]) dupTitle[v.answer.name] = true; byTitle[v.answer.name] = c; }
+    const m = MARK.exec(c.js), n = nameOf(v); if (m) src[m[1]] = c; else { if (byTitle[n]) dupTitle[n] = true; byTitle[n] = c; }
   }
   const posOf = {}; if (same) for (const tab of spec.tabs) for (const x of tab.tiles) posOf[x.slug] = byPos[tab.name + '|' + x.x + '|' + x.y];
   for (const [slug, t] of refs) {
@@ -191,6 +201,25 @@ for (const tab of spec.tabs) {
       code = { ...code, js: MARK.test(code.js) ? mark(code.js) : code.js.replace(END_JS, END_JS + '\n/* amuzing-slug: ' + t.slug + ' */\n' + OWNER_LINE) };
       from = 'kept, marked';
     }
+    const prevId = [idBySlug[t.slug], idByPos[pos]].find((x) => x && !taken.has(x));
+    // The search is run only for tiles this block composes afresh: charts in the payload, kept tiles whose search
+    // or model changed, and kept tiles that need a marker. A kept tile whose code is untouched and whose answer
+    // already runs the spec's search on the spec's model is carried over as it is (title and description from
+    // the spec), the way a failed search already carries a tile: its columns are the ones it has. So a block
+    // costs one searchdata call per distinct search it rebuilds, not one per spec tile, and every search that
+    // does run still refuses the commit when it fails.
+    const prev = prevId && vizById[prevId], pa = prev && prev.answer;
+    const sameAnswer = (from === 'kept' || from === 'kept (position)') && prevId === (from === 'kept' ? idBySlug[t.slug] : idByPos[pos]) && pa && pa.search_query === t.search && (pa.tables || []).some((x) => x && x.fqn === model.guid) && Array.isArray(pa.answer_columns) && pa.answer_columns.length > 0;
+    if (sameAnswer) {
+      const answer = { ...pa, name: t.title };
+      if (t.description) answer.description = t.description; else delete answer.description;
+      taken.add(prevId);
+      vizzes.push({ ...prev, answer });
+      if (t.filters === false) excluded.push(prevId);
+      tiles.push({ visualization_id: prevId, x: t.x, 'y': t.y, height: t.h, width: t.w });
+      report.push({ slug: t.slug, from, id: prevId, js: (await sha256(code.js)).slice(0, 12), css: (await sha256(code.css)).slice(0, 12) });
+      continue;
+    }
     if (!(t.search in COLS)) {
       const q = await ts.post('/api/rest/2.0/searchdata', { logical_table_identifier: model.guid, query_string: t.search, record_size: 1 });
       const cn = q.status === 200 && q.body && q.body.contents && q.body.contents[0] && q.body.contents[0].column_names;
@@ -198,7 +227,6 @@ for (const tab of spec.tabs) {
     }
     const cols = COLS[t.search];
     // A failed search never costs the tile: an existing one stays exactly as it is, and the commit is refused.
-    const prevId = [idBySlug[t.slug], idByPos[pos]].find((x) => x && !taken.has(x));
     if (!cols) {
       report.push({ slug: t.slug, from: 'SEARCH FAILED: ' + t.search });
       if (prevId) { taken.add(prevId); vizzes.push(vizById[prevId]); tiles.push({ visualization_id: prevId, x: t.x, 'y': t.y, height: t.h, width: t.w }); }
@@ -228,7 +256,7 @@ for (const tab of spec.tabs) {
   specTabs.push({ name: tab.name, description: tab.description || '', tiles });
 }
 // Owned tiles the spec no longer places are removed; everything the skill does not own is kept verbatim.
-const removed = [...owned].filter((id) => !taken.has(id)).map((id) => vizById[id].answer.name);
+const removed = [...owned].filter((id) => !taken.has(id)).map((id) => nameOf(vizById[id]));
 const others = (doc0.visualizations || []).filter((v) => !owned.has(v.id));
 const finalIds = new Set([...others.map((v) => v.id), ...vizzes.map((v) => v.id)]);
 
@@ -292,7 +320,7 @@ const lb = { ...doc0, name: doc0.name || LB.name, description: doc0.description 
 if (chips.length) lb.ordered_chips = chips;
 const text = JSON.stringify({ guid: LB.guid, liveboard: lb });
 const summary = {
-  mode: MODE, tmlKB: Math.round(text.length / 1024), tiles: vizzes.length, kept: others.length,
+  mode: MODE, tmlKB: Math.round(text.length / 1024), tiles: vizzes.length, kept: others.length, searches: Object.keys(COLS).length,
   replaced: report.filter((r) => r.from === 'payload').map((r) => r.slug),
   keptByPosition: report.filter((r) => r.from === 'kept (position)').length,
   marked: report.filter((r) => r.from === 'kept, marked').map((r) => r.slug),
@@ -325,6 +353,22 @@ if (P.backup) {
   const missing = (doc0.visualizations || []).filter((v) => !inBackup.has(v.id)).map((v) => (v.answer ? v.answer.name : v.id));
   if (missing.length) { summary.refused = 'NOT COMMITTED - the backup ' + P.backup.file + ' is not of this Liveboard as it is now (it lacks ' + missing.slice(0, 5).join(', ') + (missing.length > 5 ? ' and ' + (missing.length - 5) + ' more' : '') + '); export it again'; return summary; }
 }
+const stable = (x) => Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x);
+// The compose merged into the export taken at the start. An edit made in ThoughtSpot since then (a tile moved, a
+// filter or a note changed, a tile added) would be overwritten by the import, and the round trip, which starts
+// from that first export, would not see it. So the Liveboard is exported once more right before the commit and
+// compared: the raw document first, then (ThoughtSpot may rewrite volatile fields) everything the compose took
+// from the first export: each visualization's id, name, search, chart type, chart code and note, the layout, the
+// filters, the name, description, parameters, style and chips. Any difference refuses the commit.
+const shape = (d) => stable({
+  v: (d.visualizations || []).map((v) => ({ id: v.id, n: v.answer && v.answer.name, s: v.answer && v.answer.search_query, t: v.answer && v.answer.chart && v.answer.chart.type, c: v.answer && v.answer.chart && v.answer.chart.custom_visual_props, note: v.note_tile })),
+  l: d.layout, f: d.filters, n: d.name, d: d.description, p: d.parameters, st: d.style, ch: d.ordered_chips
+});
+const ex1 = await exportLb(LB.guid);
+const doc1 = docOf(ex1);
+if (!doc1) { summary.refused = 'NOT COMMITTED - the Liveboard could not be exported again before the commit (http ' + ex1.status + '); send the block again'; return summary; }
+if (edocOf(ex1) !== edocOf(ex0) && shape(doc1) !== shape(doc0)) { summary.recheck = 'changed'; summary.refused = 'NOT COMMITTED - Liveboard changed during the patch; send the block again'; return summary; }
+summary.recheck = 'unchanged';
 const c = await importAs('ALL_OR_NONE');
 const r0 = c.r;
 summary.import = r0 && r0.status;
@@ -336,7 +380,6 @@ if (!r0 || !r0.status || r0.status.status_code !== 'OK') { summary.raw = JSON.st
 //   - the Liveboard's name, description, parameters and filters are what was sent; each tab holds the tiles it
 //     was given and every tile points at a visualization that exists; layout.tiles is unset.
 // If the export after the commit fails, the commit has landed: say so instead of throwing.
-const stable = (x) => Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x);
 // `after` still holds everything `before` had, with the same values. Fields ThoughtSpot adds on re-export (a
 // default display_mode, say) are allowed; anything lost or changed is not. Key order never matters.
 const covers = (before, after) => {
@@ -345,13 +388,11 @@ const covers = (before, after) => {
   return !!after && typeof after === 'object' && !Array.isArray(after) && Object.keys(before).every((k) => before[k] === undefined || covers(before[k], after[k]));
 };
 const label = (v) => v ? (v.answer ? 'A|' + v.answer.name + '|' + ((v.answer.chart && v.answer.chart.type) || '') : v.note_tile ? 'N' : 'O') : 'MISSING';
-let back;
-try {
-  const ex = await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: LB.guid, type: 'LIVEBOARD' }], edoc_format: 'JSON' });
-  back = JSON.parse(ex.body[0].edoc).liveboard;
-} catch (e) {
+let back = null, exErr = '';
+try { const ex = await exportLb(LB.guid); back = docOf(ex); if (!back) exErr = 'http ' + ex.status + ', no Liveboard document in the export'; } catch (e) { exErr = String(e && e.message || e).slice(0, 200); }
+if (!back) {
   summary.roundTripAllOk = false;
-  summary.roundTripError = 'the commit landed but the Liveboard could not be exported to check it (' + String(e && e.message || e).slice(0, 200) + '); run --check, and restore from the backup if anything is wrong';
+  summary.roundTripError = 'the commit landed but the Liveboard could not be exported to check it (' + exErr + '); run --check, and restore from the backup if anything is wrong';
   return summary;
 }
 // A tile counts as composed when its code is what was composed, matched where it sits (tab, x, y) first and by

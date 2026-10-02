@@ -18,7 +18,8 @@
 // --tile WxH resizes the tile container (not the window) before capturing and
 // reports whether the chart followed it — the check a Liveboard tile resize needs.
 //
-// Exit codes: 0 ok · 1 fatal · 2 usage
+// Exit codes: 0 ok · 1 fatal · 2 usage, or the chart never settled (`status: TIMEOUT ...`;
+// the PNG is still written)
 
 import fs from "node:fs";
 import path from "node:path";
@@ -94,6 +95,7 @@ try {
       url: `http://localhost:${cfg.previewPort}/?data=${dataMode}&watch=1`, outPath, tile,
     });
     printDiag(result, { mode: "headed", png: outPath, userPng: copyForUser(outPath), dataMode, tile });
+    if (result.timedOut) process.exitCode = 2;
   } else {
     // Headless fallback: a server and a browser for this capture only.
     const seeded = seedChartFiles(env.chartDir);
@@ -110,6 +112,7 @@ try {
       ? (env.display ? "TS_CHART_HEADLESS=1" : "no display")
       : standalone ? "--standalone" : `no headed preview reachable - run start-preview.mjs ${slug} for the window`;
     printDiag(result, { mode: `headless (${why})`, png: outPath, userPng: copyForUser(outPath), dataMode, tile });
+    if (result.timedOut) process.exitCode = 2;
   }
 } catch (e) {
   console.error("[snap] error:", e.message);

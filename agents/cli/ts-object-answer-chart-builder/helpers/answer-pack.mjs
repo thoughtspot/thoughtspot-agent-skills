@@ -40,6 +40,8 @@ if (pos.length !== 1 || !P.model || !P.search || !P.name) {
 }
 
 if (P.guid && (!GUID.test(P.guid) || /^[0-]+$/.test(P.guid))) { console.error("--answer takes the answer's guid, not " + JSON.stringify(P.guid)); process.exit(2); }
+// A backup only makes sense for an update; without --answer it would quietly be ignored and a NEW answer created.
+if (val("--backup") !== undefined && !P.guid) { console.error("--backup needs --answer <guid>: a backup belongs to the answer being updated"); process.exit(2); }
 if (P.guid) P.guid = P.guid.toLowerCase();
 if (P.guid && MODE === "commit") {
   P.backup = checkBackup(val("--backup"), P.guid, "answer");
@@ -55,8 +57,9 @@ const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 P.sha = { html: sha(P.f.html), css: sha(P.f.css), js: sha(P.f.js) };
 
 // Code goes in as String.raw with real line breaks when it can (easier to paste faithfully), JSON otherwise.
+// A trailing backslash would escape the closing backtick, so that goes as JSON too.
 // The sandbox re-checks every sha256 either way.
-const lit = (x) => (x.includes("`") || x.includes("${") || /\\u|\r/.test(x) ? JSON.stringify(x) : "String.raw`" + x + "`");
+const lit = (x) => (x.includes("`") || x.includes("${") || /\\u|\r/.test(x) || x.endsWith("\\") ? JSON.stringify(x) : "String.raw`" + x + "`");
 const { f, ...rest } = P;
 const payload = "{ ...(" + JSON.stringify(rest) + "),\nf: { html: " + lit(f.html) + ",\ncss: " + lit(f.css) + ",\njs: " + lit(f.js) + " } }";
 const tpl = fs.readFileSync(path.join(here, "answer-patch.js"), "utf8");

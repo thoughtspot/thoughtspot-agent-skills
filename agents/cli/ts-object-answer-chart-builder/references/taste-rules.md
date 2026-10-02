@@ -35,6 +35,8 @@ palette validator. Take the principles, not the React and Tailwind machinery.
 
 - One family (Geist via the Google Fonts link, system fallback), a small fixed scale (11 / 12 / 13 / 14,
   hero 30 to 40), tabular numerals for anything numeric, tight tracking on hero numbers only.
+- Every label fully visible: no overlap, no clipping. Short formats (`$169K`, not `$169,000`); stagger or omit
+  labels that would collide; keep a label inside the plot by flipping its anchor rather than letting it clip.
 - **One radius scale.** 6px on controls and tooltips; charts have no rounded-everything card soup.
 - **Eyebrows are rationed.** A small label above a heading is allowed once per view, not above every block.
 - **Cards only when elevation means something.** The Liveboard tile already is the card; do not draw another.

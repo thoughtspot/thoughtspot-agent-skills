@@ -33,9 +33,81 @@ real ThoughtSpot tile. All of it was verified in a cluster screenshot unless mar
 
 ## Muze
 
-See `references/system-prompt.md` and the "Verified in a real cluster" table in `references/hard-rules.md`.
-Short version: set stroke colour and width yourself on line marks, hide the native tooltip, crosshair and the
-`muze-columnHeader` cells, draw your own hover from `path.getScreenCTM()` read on every move.
+See section 0 (Recipes) of `references/muze-api-reference.md` and the "Verified in a real cluster" table in
+`references/hard-rules.md`. Short version: set stroke colour and width yourself on line marks, hide the native
+tooltip, crosshair and the `muze-columnHeader` cells, draw your own hover from `path.getScreenCTM()` read on
+every move.
+
+## Chart.js (chart.js@4)
+
+Not in the preview's vendored set, so verify it on a tile. Load `https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js`
+through `AZ.loadScript` (bounded, with a fallback host); reference `window.Chart` after it resolves. Plugins load
+the same way afterwards and register on `window.Chart` by themselves.
+
+- `responsive: true, maintainAspectRatio: false` inside a flex parent (`flex: 1 1 0; min-height: 0`). That option
+  listens to `window.resize` only, so the core's `ResizeObserver` on `#chart` is still what re-fits a tile. Keep
+  the instance in a module-scope variable and `chart?.destroy()` before re-creating on a redraw.
+- **Plugin CDN URLs need the explicit `/dist/<file>.min.js` path.** `.../chartjs-plugin-datalabels@2` alone
+  returns 404 on jsdelivr, the plugin never registers, and the chart silently renders without labels:
+  `https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2/dist/chartjs-plugin-datalabels.min.js`,
+  `https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3/dist/chartjs-plugin-annotation.min.js`,
+  `https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@0.12/dist/chartjs-chart-sankey.min.js`.
+- Bar plus line with bars coloured above or below plan: two bar datasets, each `null` where the other owns the
+  row, plus the plan line. `chartjs-plugin-datalabels` for the bar values.
+
+```javascript
+datasets: [
+  { type: 'bar', label: 'Below Plan', data: actuals.map((v,i) => v < plan[i] ? v : null), backgroundColor: '#16a34a' },
+  { type: 'bar', label: 'Above Plan', data: actuals.map((v,i) => v >= plan[i] ? v : null), backgroundColor: '#dc2626' },
+  { type: 'line', label: 'Plan', data: plan, borderDash: [6,4], borderColor: '#3b82f6', fill: false },
+]
+```
+
+- Background performance bands on a line chart: a plugin that fills rects in `beforeDraw`, reading pixel extents
+  from `chart.chartArea` and `chart.scales.y.getPixelForValue(v)`.
+
+```javascript
+const bandPlugin = {
+  id: 'bands',
+  beforeDraw(chart) {
+    const { ctx: c, chartArea: { top, bottom, left, right }, scales: { y } } = chart;
+    [{ yMin: 80, yMax: 100, color: 'rgba(45,212,191,0.18)' },
+     { yMin: 40, yMax: 80,  color: 'rgba(200,200,200,0.15)' },
+     { yMin: 0,  yMax: 40,  color: 'rgba(252,165,165,0.22)' }].forEach(({ yMin, yMax, color }) => {
+      const yT = y.getPixelForValue(yMax), yB = y.getPixelForValue(yMin);
+      c.save(); c.fillStyle = color;
+      c.fillRect(left, Math.max(yT, top), right - left, Math.min(yB, bottom) - Math.max(yT, top));
+      c.restore();
+    });
+  },
+};
+new Chart(ctx, { type: 'line', plugins: [bandPlugin], ... });
+```
+
+- Horizontal progress meter (actual vs target): `type: 'bar', indexAxis: 'y'`, two stacked datasets (actual and
+  the gap to target), `borderRadius` per side, hidden axes; `chartjs-plugin-datalabels` for the centre value and
+  `chartjs-plugin-annotation` for a dashed target line, or an absolutely positioned `<div>` with
+  `transform: translateX(-50%)` as the tick.
+- Sankey (`chartjs-chart-sankey`): `type: 'sankey'`, data as `[{ from, to, flow }]`, `colorFrom` / `colorTo`
+  callbacks of `(context) => colorMap[context.dataset.data[context.dataIndex].from]`. Node labels are
+  single-line; `\n` renders literally. The library's sankey is on ECharts.
+- Smooth line through 2 or 3 sparse anchors (2024, 2035, 2050) without overshoot: damped cubic Hermite,
+  inlined.
+
+```javascript
+function smoothInterp(y0, v0, y1, v1, y2, v2, yr) {
+  if (yr <= y0) return v0;
+  if (yr >= y2) return v2;
+  // damped cubic Hermite — t in [0,1] across the segment
+  const segStart = yr <= y1 ? y0 : y1;
+  const segEnd   = yr <= y1 ? y1 : y2;
+  const vStart   = yr <= y1 ? v0 : v1;
+  const vEnd     = yr <= y1 ? v1 : v2;
+  const t = (yr - segStart) / (segEnd - segStart);
+  const damp = t * t * (3 - 2 * t);
+  return vStart + (vEnd - vStart) * damp;
+}
+```
 
 ## Hand SVG and HTML (most tiles)
 
@@ -44,6 +116,34 @@ Short version: set stroke colour and width yourself on line marks, hide the nati
   call `redraw()`; keep their state in module-scope variables so it survives a redraw and a resize.
 - Part periods: a first or last quarter or year whose total is far below its neighbours is partial. Detect it
   from the rows and label it.
+- Size an inline SVG with a `viewBox` computed from the measured width (`0 0 w h`), guarded by `w > 0`, so it
+  re-fits on every `redraw`. The core's observer and `requestAnimationFrame` batching already stop thrash.
+- Semi-circle gauge: two arc paths, a track from 180 to 360 degrees and a fill to `180 + pct * 180`, both with
+  `stroke-linecap="round"`; the SVG only needs the top half (`viewBox="0 0 160 90"` for r=60, cx=80, cy=80).
+
+```javascript
+function arcPath(cx, cy, r, startAngle, endAngle) {
+  const x1 = cx + r * Math.cos(startAngle), y1 = cy + r * Math.sin(startAngle);
+  const x2 = cx + r * Math.cos(endAngle),   y2 = cy + r * Math.sin(endAngle);
+  const large = (endAngle - startAngle) > Math.PI ? 1 : 0;
+  return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
+}
+// Track (full): arcPath(cx, cy, r, Math.PI, 2*Math.PI)
+// Fill:         arcPath(cx, cy, r, Math.PI, Math.PI + (pct/100)*Math.PI)
+```
+
+  (The snippet above uses a template literal for readability; a shipped chart builds the string with `+`.)
+- Slope or bump chart (rank over time) on an HTML5 canvas: container `flex: 1 1 0; min-height: 0`;
+  `canvas.width = wrap.offsetWidth * devicePixelRatio` and scale the context for HiDPI;
+  `xForYear(yr) = padL + ((yr - minYr) / (maxYr - minYr)) * chartW`;
+  `yForRank(r) = padT + ((r - 1) / (N - 1)) * chartH` (rank 1 at the top); lines with
+  `beginPath / moveTo / lineTo / stroke`; left labels `textAlign = 'right'`, right labels `'left'`; dots at
+  anchor years with `arc(x, y, 3, 0, Math.PI * 2)`.
+- A gradient edge on a text card: prefer a sibling `<div>` (`width: 6px; align-self: stretch; flex-shrink: 0`)
+  in a flex row over `border-image` on `border-left`, which paints as one solid colour when the card's height is
+  not resolved at paint time. Use it only where the taste rules allow a gradient at all.
+- A text-only tile (quote, attribution, intro) is chart.html plus chart.css; chart.js only boots and signals
+  render-complete.
 
 ## Tooling notes (macOS)
 

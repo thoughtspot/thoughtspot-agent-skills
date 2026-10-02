@@ -8,6 +8,709 @@
 > anything here conflicts with SKILL.md or the references/ files (especially
 > references/hard-rules.md), those win. In BYOC, `muze` comes from the host's `viz`
 > global and is synchronous — `canvas = muze.canvas();`, no `muze()` factory call.
+> Section 0 holds the working recipes; sections 1 to 21 are the API itself.
+
+---
+
+## 0. Recipes
+
+Working patterns for a BYOC tile, kept from the older Muze Studio pipeline. Apply one when the
+chart calls for it, not unconditionally. Every rule they lean on is in references/hard-rules.md.
+
+### 0.1 Responsive sizing (Muze without the shared core)
+
+Read the size from `#chart`, rebuild the canvas only when data changes, re-fit when size changes.
+The retained-canvas re-mount (`canvas.width(w).height(h).mount(el)`) re-layouts in place with no
+flicker and no entry animation re-run (verified on v4.7.10). Charts built on `AZ.boot` already get
+this from the core.
+
+```javascript
+let currentData = SAMPLE_DATA;
+let canvas = null;                    // module-scope; applySize() reads this. NEVER shadow with `const canvas` inside renderChart.
+const el = document.getElementById('chart');
+
+function renderChart(data) {
+  if (data) currentData = data;
+  const dm = new DataModel(DataModel.loadDataSync(currentData, schema));
+  canvas = muze.canvas()
+    .data(dm)
+    .rows([Y_FIELD])
+    .columns([X_FIELD])
+    .layers([/* ... */]);
+  applySize();
+}
+
+function applySize() {
+  if (!canvas) return;
+  const w = el.clientWidth, h = el.clientHeight;
+  if (w <= 0 || h <= 0) return;        // tile not laid out yet
+  canvas.width(w).height(h).mount(el);
+}
+
+renderChart();
+window.updateChart = renderChart;       // host can call window.updateChart(newRows) later
+
+let _rafId = null;
+new ResizeObserver(() => {
+  if (_rafId) cancelAnimationFrame(_rafId);
+  _rafId = requestAnimationFrame(() => { applySize(); _rafId = null; });
+}).observe(el);
+```
+
+No `window.addEventListener('resize', ...)`: the observer on `#chart` covers it and fires for
+tile resizes the window never sees. Hardcode pixel dimensions only when the user asks for them.
+
+### 0.2 Reading row data inside `encodingTransform`
+
+`p.data`, `p.row`, `p.datum` and `p.datum.dataObj` are all undefined inside `encodingTransform`
+(they work in `encoding.color.value` and `encoding.size.value`, a different context). The only
+reliable access is the layer's DataModel plus a schema index. `p?.datum?.dataObj?.[FIELD]` returns
+undefined for every row with no error.
+
+```javascript
+encodingTransform: (points, layer) => {
+  const result = layer.data().getData();
+  const cols = result.schema.map(s => s.name);
+  const cityIdx = cols.indexOf(CITY_FIELD);
+  points.forEach((p, i) => {
+    const city = cityIdx >= 0 ? result.data[i][cityIdx] : null;
+    p.style = Object.assign(p.style || {}, { fill: COLORS[city] });
+  });
+  return points;
+}
+```
+
+This fill override is also the escape hatch when the alphabetical `range` mapping (0.4) is fragile.
+
+### 0.3 Helper layers, one-mark-per-row charts
+
+- `interactive: false` and `calculateDomain: false` on every layer that is not a primary data mark
+  (reference markers, annotation layers). They stop it eating hover events and expanding the axis.
+- `autoGroupBy: { disabled: true }` for scatter, bubble and any chart that must draw one mark per
+  row. Without it Muze groups by dimensions and collapses rows. Usually wrong for bar, line, area.
+
+### 0.4 Colour
+
+- Prefer the field name: `.color('Category')` or `encoding: { color: 'Category' }`, and let the
+  default palette assign. Never list dimension values in `domainRangeMap` or `domain`: it breaks
+  when the data changes, and `domain` inside `.color()` silently kills `range` too.
+- Custom `range` only when the user asks, the chart semantically needs it (profit/loss), or the
+  target plainly shows it. Then `.color({ field, range: [...] })` with **no `domain`**.
+- `range` is assigned in **alphabetical, case-sensitive JS order** of the field's values; data
+  order is irrelevant. `'Engagement' < 'eNPS'` because `'E' < 'e'`. Work it out with
+  `[...new Set(data.map(d => d[FIELD]))].sort()`. When the order is fragile (renaming a category
+  would shuffle colours), set `p.style.fill` per row via 0.2 instead.
+- Conditional colour (positive green, negative red): a value function in the layer encoding, not a
+  domain map.
+
+### 0.5 Labels
+
+- `axes.*.domain` is ignored, so headroom for bar-end labels cannot be bought from config. Use
+  shorter formats (`$169K`, not `$169,000`), inside-bar labels (`'text-anchor': 'end'` and
+  `p.update.x -= 4`), or post-render SVG labels (0.6).
+- Stagger or omit labels that would overlap: compare neighbouring pixel positions against the
+  label width (`deps.smartLabel.getOriSize(text)`) before drawing.
+- `calculateDomain: false` on every text layer so label positions do not expand the axis.
+- Relative nudges may keep a null guard, because skipping a cross-panel null point is fine; absolute
+  positions are assigned unconditionally (hard rule). Muze text marks default to
+  `text-anchor: middle`, so a bar-end label needs about +22px (half label width plus a gap), not +4:
+
+```javascript
+encodingTransform: (points) => {
+  points.forEach(p => {
+    if (p.update && p.update.x != null) {  // guard OK: relative nudge
+      p.update.x += 6;
+    }
+    p.style = Object.assign(p.style || {}, {
+      'font-size': '11px',
+      'font-weight': '600',
+      'text-anchor': 'start'
+    });
+  });
+  return points;
+},
+calculateDomain: false
+```
+
+### 0.6 Point and bubble labels without a text layer (TS-safe)
+
+A top-level `mark: 'text'` layer beside bar or point marks throws
+`this._onPropagationDone is not a function` in ThoughtSpot and breaks hover, even with
+`interactive: false`. Capture pixel positions in the data layer's `encodingTransform`, then draw
+SVG text in `afterRendered`. In a recipe that still shows a `mark: 'text'` layer (0.9, 0.10),
+replace it with this at ship time; the offsets carry over.
+
+```javascript
+// In the bubble/point layer, capture pixel coords during encodingTransform:
+const pointPixels = {};
+{
+  mark: 'point',
+  className: 'city-layer',  // give the layer a className to find it later
+  encoding: { x: { field: X_FIELD }, y: { field: Y_FIELD }, /* ... */ },
+  encodingTransform: (points, layer) => {
+    const result = layer.data().getData();
+    const cols = result.schema.map((s) => s.name);
+    const labelIdx = cols.indexOf(LABEL_FIELD);
+    points.forEach((p, i) => {
+      const row = result.data[i];
+      if (row && labelIdx >= 0) {
+        pointPixels[row[labelIdx]] = { px: p.update.x, py: p.update.y };
+      }
+    });
+    return points;
+  },
+}
+
+// Then in afterRendered, draw labels as SVG text at the captured coords:
+canvas.once('afterRendered', () => {
+  const svg = document.querySelector('#chart svg');
+  const NS = 'http://www.w3.org/2000/svg';
+  Object.entries(pointPixels).forEach(([label, { px, py }]) => {
+    const t = document.createElementNS(NS, 'text');
+    t.setAttribute('x', px + 14); t.setAttribute('y', py - 4);
+    t.setAttribute('fill', '#333');
+    t.setAttribute('font-size', '11');
+    t.setAttribute('text-anchor', 'start');
+    t.setAttribute('pointer-events', 'none');
+    t.textContent = label;
+    svg.appendChild(t);
+  });
+});
+```
+
+### 0.7 Post-render SVG overlays (reference lines, trend lines, annotations)
+
+**Timing.** `afterRendered` sometimes fires before the paths are in the DOM. Combine it with a
+bounded poll:
+
+```javascript
+canvas.once('afterRendered', () => {
+  let attempts = 0;
+  const tryRun = () => {
+    if (document.querySelector('#chart svg path')) {
+      injectOverlays();
+    } else if (attempts++ < 40) {
+      setTimeout(tryRun, 100);
+    }
+  };
+  tryRun();
+});
+```
+
+**Pixel from data, two anchors.** Capture two known points' pixels in the data layer's
+`encodingTransform`, derive a linear map, and position overlay elements in data space:
+
+```javascript
+const captured = {};
+// inside encodingTransform of the point layer:
+captured[city] = { px: p.update.x, py: p.update.y };
+// after render, with two known cities A and B:
+const m = (captured[B].px - captured[A].px) / (valB - valA);
+const c = captured[A].px - m * valA;
+const toPix = v => m * v + c;
+```
+
+**Drawing.** Always `createElementNS`; `createElement` makes nodes that never render.
+
+```javascript
+const NS = 'http://www.w3.org/2000/svg';
+const rootSvg = document.querySelector('#chart svg');
+const g = document.createElementNS(NS, 'g');
+g.setAttribute('clip-path', 'url(#muze-ov-clip)');
+g.setAttribute('pointer-events', 'none');
+const ln = document.createElementNS(NS, 'line');
+ln.setAttribute('x1', toPix(meanX)); ln.setAttribute('y1', plotTop);
+ln.setAttribute('x2', toPix(meanX)); ln.setAttribute('y2', plotBottom);
+ln.setAttribute('stroke', COLORS.neutral);
+ln.setAttribute('stroke-dasharray', '5 5');
+g.appendChild(ln);
+rootSvg.appendChild(g);
+```
+
+**Muze's SVG structure, for horizontal bar charts.**
+
+- Muze nests SVGs. `document.querySelector('#chart svg')` returns the y-axis SVG (about 100px
+  wide), not the plot. Select the **widest** SVG.
+- Horizontal bars are `<line>` elements whose `x2` stays at 0 (CSS transforms place them). Bar
+  positions cannot be read from attributes or `getBoundingClientRect()`, during or after animation.
+- The y-axis is a tall narrow `<path>` (height over 100px, width under 5px) and its bounding box is
+  readable right after render. Plot width is about `svgWidth - plotLeft - 60` (right margin for
+  bar-end labels and padding).
+
+A continuous dashed vertical reference line, built on those facts:
+
+```javascript
+// Fire after Muze animations (~1000ms). Retries until ready.
+function injectDashedRefLine() {
+  const allSvgs = Array.from(document.querySelectorAll('#chart svg'));
+  if (!allSvgs.length) { setTimeout(injectDashedRefLine, 100); return; }
+
+  // Pick the widest SVG — that's the plot area (not the y-axis sidebar)
+  const rootSvg = allSvgs.reduce((w, s) =>
+    s.getBoundingClientRect().width > w.getBoundingClientRect().width ? s : w, allSvgs[0]);
+  const rootBB = rootSvg.getBoundingClientRect();
+  if (rootBB.width < 200) { setTimeout(injectDashedRefLine, 100); return; }
+
+  // Y-axis line: tall (>100px), narrow (<5px) — exists across ALL nested SVGs
+  const yAxis = Array.from(document.querySelectorAll('#chart path')).find(el => {
+    const bb = el.getBoundingClientRect();
+    return bb.height > 100 && bb.width < 5;
+  });
+  if (!yAxis) { setTimeout(injectDashedRefLine, 100); return; }
+
+  const yBB        = yAxis.getBoundingClientRect();
+  const plotLeft   = (yBB.left + yBB.right) / 2 - rootBB.left; // may be negative (y-axis is left of plot SVG)
+  const plotTop    = yBB.top    - rootBB.top;
+  const plotBottom = yBB.bottom - rootBB.top;
+  const plotWidth  = rootBB.width - plotLeft - 60;  // 60px right margin for bar-end labels
+
+  // refX in plot-SVG coordinates
+  const refX = plotLeft + (MARKET_NORM / AXIS_MAX) * plotWidth;
+
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('x1', refX);  line.setAttribute('x2', refX);
+  line.setAttribute('y1', plotTop); line.setAttribute('y2', plotBottom);
+  line.setAttribute('stroke', '#C0622F');
+  line.setAttribute('stroke-dasharray', '6 4');
+  line.setAttribute('stroke-width', '1.5');
+  rootSvg.appendChild(line);  // append to the plot SVG, not querySelector result
+}
+setTimeout(injectDashedRefLine, 1100);
+```
+
+### 0.8 Reference markers inside Muze
+
+Three shapes, from cheapest to most faithful. `p.update.x` is **pixels**; convert a data value
+through `layer.measurement().width` and the axis domain max. `x: { value: () => CONST }` is also
+taken as pixels.
+
+A hairline `tick` (its `size` is a fraction of the row band, so `0.02`, not `0.6`), with no
+`source` property (a DataModel built inside `source` crashes with `e.getDomain is not a function`):
+
+```javascript
+{ mark: 'tick',
+  encoding: { x: TARGET_FIELD, color: { value: () => '#dc2626' } },
+  size: { value: () => 0.02 },     // thin hairline, NOT 0.6
+  calculateDomain: false, interactive: false }
+```
+
+A `point` layer repositioned to the reference x. `mark: 'line'` ignores `p.update.x`, so this is
+the mark to use; it draws one dot per row at the same x, a dotted vertical marker:
+
+```javascript
+{
+  mark: 'point',
+  encoding: { x: COMPA_NORM_FIELD, color: { value: () => '#C0622F' }, size: { value: () => 0.05 }, shape: { value: () => 'circle' } },
+  encodingTransform: (points, layer) => {
+    const refPixel = (MARKET_NORM / AXIS_MAX) * layer.measurement().width;
+    points.forEach(p => { if (p.update && p.update.x != null) p.update.x = refPixel; });
+    return points;
+  },
+  calculateDomain: false, interactive: false
+}
+```
+
+A continuous dashed line: post-render SVG, 0.7.
+
+### 0.9 Dual-axis overlay: bar plus point with different scales
+
+How Muze reads several measures in `.columns()` (same for `.rows()`, see section 14):
+
+- `columns([share(A, B)])`: one shared axis and scale. Only for same-unit measures (min/max temp).
+  With different units the small measure pins near zero.
+- `columns([[A], [B]])`: **two x-axes in one panel**, overlaid. Each layer maps to its panel through
+  its `encoding.x` field. This is the pattern for bars with a diamond on a second scale.
+- `columns([A, B])`: separate stacked panels. Only for targets that really show two chart areas.
+
+Normalise the second measure onto the first's scale so the marks spread across the width, and
+reverse the normalisation in that axis's `tickFormat`.
+
+```javascript
+// ── Normalization parameters — match to your data range ──
+const RATIO_MIN  = 0.88;   // slightly below actual minimum compa-ratio
+const RATIO_MAX  = 1.08;   // slightly above actual maximum compa-ratio
+const SALARY_MAX = 180000; // approximately the max salary value in your dataset
+
+// ── Data: add normalized column (maps ratio onto salary scale) ──
+const rawRows = [
+  { Department: 'Engineering', AvgBaseSalary: 169000, CompaRatio: 0.96 },
+  { Department: 'Product',     AvgBaseSalary: 156000, CompaRatio: 1.01 },
+  // ... more rows
+];
+const data = rawRows.map(row => ({
+  ...row,
+  CompaRatioNorm: ((row.CompaRatio - RATIO_MIN) / (RATIO_MAX - RATIO_MIN)) * SALARY_MAX
+  // e.g. ratio 0.88 → 0, ratio 1.00 → 108000, ratio 1.08 → 180000
+}));
+
+const schema = [
+  { name: 'Department',    type: 'dimension' },
+  { name: 'AvgBaseSalary', type: 'measure', defAggFn: 'avg' },
+  { name: 'CompaRatio',    type: 'measure', defAggFn: 'avg' },
+  { name: 'CompaRatioNorm', type: 'measure', defAggFn: 'avg' },
+];
+
+const DEPT_FIELD       = 'Department';
+const SALARY_FIELD     = 'AvgBaseSalary';
+const COMPA_FIELD      = 'CompaRatio';
+const COMPA_NORM_FIELD = 'CompaRatioNorm';
+
+const dm = new DataModel(DataModel.loadDataSync(data, schema));
+
+// Reference line: normalized x-position for compa-ratio = 1.0
+const MARKET_NORM = ((1.0 - RATIO_MIN) / (RATIO_MAX - RATIO_MIN)) * SALARY_MAX;
+
+canvas
+  .data(dm)
+  .rows([DEPT_FIELD])
+  // CRITICAL ORDER: [[COMPA_NORM_FIELD], [SALARY_FIELD]] — first field = TOP axis, second = BOTTOM axis
+  // In Muze horizontal bar chart, first column = top x-axis, second column = bottom x-axis
+  .columns([[COMPA_NORM_FIELD], [SALARY_FIELD]])
+  .layers([
+    // Bar: salary (maps to SALARY_FIELD panel — bottom axis)
+    {
+      mark: 'bar',
+      encoding: {
+        x: SALARY_FIELD,
+        color: { value: () => '#1B3A2F' }
+      }
+    },
+    // Text: salary labels at bar ends (also maps to SALARY_FIELD panel)
+    // ThoughtSpot note: a top-level text layer alongside bar/point breaks TS
+    // interaction propagation (hard rule) — in the shipped chart, drop this layer
+    // and inject the labels via SVG in `afterRendered` instead (recipe 0.6).
+    // Muze text marks default to text-anchor:middle, so use +22px to center the label
+    // just beyond the bar end (~18px half-width + 4px gap). Use calculateDomain:false
+    // so label positions don't expand the axis domain.
+    {
+      mark: 'text',
+      encoding: {
+        x: SALARY_FIELD,
+        text: {
+          field: SALARY_FIELD,
+          formatter: (d) => {
+            const v = typeof d === 'object' ? d.rawValue : d;
+            return '$' + Math.round(v / 1000) + 'K';
+          }
+        },
+        color: { value: () => '#444444' }
+      },
+      encodingTransform: (points) => {
+        points.forEach(p => {
+          if (p.update && p.update.x != null) { p.update.x += 22; }  // guard OK — relative nudge (cross-panel points are null); +22 because text-anchor defaults to middle
+        });
+        return points;
+      },
+      calculateDomain: false
+    },
+    // Point: compa-ratio diamond (maps to COMPA_NORM_FIELD panel — top axis) — size MUST be 0.05
+    {
+      mark: 'point',
+      encoding: {
+        x: COMPA_NORM_FIELD,
+        color: { value: () => '#E8744F' },
+        shape: { value: () => 'diamond' },
+        size: { value: () => 0.05 }   // NEVER exceed 0.05 — larger values fill the entire row
+      }
+    },
+    // Reference line at compa-ratio = 1.0
+    // CRITICAL: p.update.x is in PIXELS (not data values). Convert MARKET_NORM
+    // to pixels using layer.measurement().width and the axis domain max (AXIS_MAX).
+    // Never set p.update.x = MARKET_NORM directly — that places it 120,000px off-screen.
+    {
+      mark: 'point',
+      encoding: {
+        x: COMPA_NORM_FIELD,
+        color: { value: () => '#C0622F' },
+        shape: { value: () => 'circle' },
+        size: { value: () => 0.05 },
+        opacity: { value: () => 0.7 }
+      },
+      encodingTransform: (points, layer) => {
+        // Use the axis domain max here. If you set domain: [0, SALARY_MAX], use SALARY_MAX.
+        // If you added headroom (e.g., AXIS_MAX = SALARY_MAX * 1.08), use that instead.
+        const refPixel = (MARKET_NORM / SALARY_MAX) * layer.measurement().width;
+        points.forEach(p => {
+          if (p.update && p.update.x != null) p.update.x = refPixel;
+        });
+        return points;
+      },
+      calculateDomain: false,
+      interactive: false
+    }
+  ])
+  .config({
+    axes: {
+      x: {
+        fields: {
+          [COMPA_NORM_FIELD]: {
+            showAxisName: true,
+            name: 'Compa-Ratio',
+            tickFormat: (d) => {
+              const v = typeof d === 'object' ? d.rawValue : d;
+              // Reverse-normalize: convert from salary-scale back to compa-ratio
+              const original = RATIO_MIN + (v / SALARY_MAX) * (RATIO_MAX - RATIO_MIN);
+              return original.toFixed(2);
+            }
+          },
+          [SALARY_FIELD]: {
+            showAxisName: true,
+            name: 'Avg Base Salary',
+            tickFormat: (d) => {
+              const v = typeof d === 'object' ? d.rawValue : d;
+              return '$' + Math.round(v / 1000) + 'K';
+            }
+          }
+        }
+      },
+      y: {
+        showAxisName: false,
+        fields: {
+          [DEPT_FIELD]: {
+            ordering: {
+              type: 'field',
+              direction: 'desc',
+              field: { name: SALARY_FIELD, aggregation: 'avg' }
+            }
+          }
+        }
+      }
+    },
+    legend: { show: false }
+  })
+  // Title/subtitle only because the source image showed them — omit otherwise (Liveboard provides its own).
+  .title('Salary and Compa-Ratio by Department')
+  .subtitle('Bars = avg base salary | Diamonds = compa-ratio | 1.0 = on market')
+  // Size via applySize() (recipe 0.1) — no fixed .width()/.height().
+  // Budget ~70px per row + 200px overhead so both axes and the bar-end labels fit.
+  .mount('#chart');
+```
+
+Rules the recipe depends on:
+
+1. Column order: `[[COMPA_NORM_FIELD], [SALARY_FIELD]]`, first = top axis, second = bottom axis.
+2. Tuple, not `share()`.
+3. `axes.x.fields` per-field config, both fields; not the generic `axes.x`.
+4. Normalisation `((ratio - RATIO_MIN) / (RATIO_MAX - RATIO_MIN)) * SALARY_MAX`, not `ratio * 100000`.
+5. Reference marker: a `point` layer plus pixel conversion (0.8). Not `tick` (renders as bars
+   here), and never `p.update.x = MARKET_NORM`.
+6. Sort rows by the bar measure with `ordering` on the dimension field.
+7. Both axes need room: about 70px per row plus 200px.
+
+### 0.10 Diverging bars from a centred zero
+
+Two metrics per category, one going left and one right: long-form data with one metric stored as
+**negative values**, sub-rows so each category renders two bars, and `Math.abs` on both the axis
+and the labels.
+
+```javascript
+const schema = [
+  { name: 'Department', type: 'dimension' },
+  { name: 'Metric',     type: 'dimension' },
+  { name: 'Value',      type: 'measure', defAggFn: 'sum' },
+];
+
+// Engagement stored NEGATIVE → bar goes left of zero. eNPS positive → bar goes right.
+const data = [
+  { Department: 'Engineering', Metric: 'Engagement', Value: -82.1 },
+  { Department: 'Engineering', Metric: 'eNPS',       Value:  38.4 },
+  // ... one row per (department, metric)
+];
+
+const DEPT_FIELD   = 'Department';
+const METRIC_FIELD = 'Metric';
+const VALUE_FIELD  = 'Value';
+
+// Range is alphabetically assigned by metric value.
+// 'Engagement' < 'eNPS' (uppercase 'E' < lowercase 'e' in JS) → range[0] = Engagement.
+const COLORS = {
+  Engagement: '#1B3A2F',
+  eNPS:       '#A89A5A',
+};
+
+canvas
+  .data(dm)
+  .rows([DEPT_FIELD, METRIC_FIELD])              // sub-rows → two bars per dept
+  .columns([VALUE_FIELD])
+  .color({
+    field: METRIC_FIELD,
+    range: [COLORS.Engagement, COLORS.eNPS],     // alphabetical; NO domain
+  })
+  .layers([
+    { mark: 'bar', encoding: { x: VALUE_FIELD } },
+    // TS note: top-level text layers break interaction propagation (hard rule) —
+    // in the shipped chart inject these labels via SVG in `afterRendered` instead (recipe 0.6).
+    {
+      mark: 'text',
+      encoding: {
+        x: VALUE_FIELD,
+        text: {
+          field: VALUE_FIELD,
+          formatter: (d) => {
+            const v = typeof d === 'object' ? d.rawValue : d;
+            return Math.abs(v).toFixed(1);       // hide the negative sign
+          },
+        },
+        color: { value: () => '#333333' },
+      },
+      encodingTransform: (points, layer) => {
+        // Use the axis scale to find the zero pixel, then flip text-anchor per side.
+        const xScale = layer.axes()?.x?.scale?.();
+        const zeroX  = xScale ? xScale(0) : null;
+        points.forEach(p => {
+          const isNeg = zeroX !== null && p.update.x < zeroX;
+          if (isNeg) { p.update.x -= 4; p.style = Object.assign(p.style || {}, { 'text-anchor': 'end',   'font-size': '10px', 'font-weight': '600' }); }
+          else       { p.update.x += 4; p.style = Object.assign(p.style || {}, { 'text-anchor': 'start', 'font-size': '10px', 'font-weight': '600' }); }
+        });
+        return points;
+      },
+      calculateDomain: false,
+    },
+  ])
+  .config({
+    axes: {
+      x: {
+        tickFormat: (d) => {
+          const v = typeof d === 'object' ? d.rawValue : d;
+          return String(Math.abs(Math.round(v)));   // axis labels show |value|
+        },
+      },
+      y: {
+        showAxisName: false,
+        fields: { [METRIC_FIELD]: { show: false } }, // hide the inner sub-row label
+      },
+    },
+    legend: { show: true, position: 'top' },
+  });
+```
+
+The `layer.axes().x.scale()(0)` trick (find the zero pixel, flip `text-anchor` per side) works
+for any label that must sit on the outer side of a signed bar.
+
+### 0.11 Temporal x-axis ticks in ThoughtSpot
+
+ThoughtSpot types any dimension whose name contains `quarter`, `month`, `year`, `date`, `week` or
+`day` (case-insensitive, for example `Quarter (Order Date)`) as `subtype: "temporal"` and feeds
+Muze millisecond `rawValue`s. Muze then draws calendar-boundary ticks (`October`, `2024`, `April`)
+instead of the `Q4 2023` the table shows. The preview cannot show this: there the field is a plain
+string. Only `axes.x.fields[FIELD].tickFormat` is honoured for temporal axes; the root
+`axes.x.tickFormat` is never called. `d` is `{ formattedValue, rawValue }`; derive the label from
+`rawValue` with UTC getters so it does not shift with the viewer's timezone.
+
+```javascript
+.config({
+  axes: {
+    x: {
+      fields: {
+        [QUARTER_FIELD]: {                              // <-- per-field, NOT root axes.x
+          tickFormat: function (d) {
+            var ms = d && typeof d === 'object' ? d.rawValue : d;
+            var date = new Date(ms);
+            if (isNaN(date.getTime())) return String(d); // preview (string fallthrough)
+            var q = Math.floor(date.getUTCMonth() / 3) + 1;
+            return 'Q' + q + ' ' + date.getUTCFullYear();
+            // Month dimension:   date.toLocaleString('en', { month: 'short', timeZone: 'UTC' }) + ' ' + date.getUTCFullYear()
+            // Year dimension:    String(date.getUTCFullYear())
+            // Date dimension:    date.toISOString().slice(0, 10)
+          }
+        }
+      }
+    }
+  }
+})
+```
+
+Pick the branch that matches the grain. Do not add it to non-temporal dimensions.
+
+Keep `Year` (any temporal field) `type: 'dimension'`. Typed as a measure on a line chart Muze
+treats x and y as a scatter relationship and aggregates: scatter points, an x-axis of `0-2200`,
+a collapsed y-scale. For a smooth line across years, generate one row per year.
+
+### 0.12 Measure formatting is the chart's job
+
+Table-mode display formats never reach the chart: `Field.formattedData()` returns raw numbers
+(a percent column returns `5.1865`, not `"518.65%"`), the schema carries only
+`name/type/subtype/defAggFn`, `data.getFieldsConfig` does not exist, and `viz.formatters` exposes
+`NumberFormatter`/`DateFormatter` classes with no "format like the table" helper. When the target
+shows currency, percent or thousands, emit a `tickFormat` and promote the choice into the
+Customize block. Skip it for plainly raw measures (counts, scores).
+
+```javascript
+const FORMAT = {
+  yAxis: 'currency',  // 'currency' | 'percent' | 'thousands' | 'raw'
+  decimals: 0
+};
+
+function formatMeasure(d) {
+  const v = d && typeof d === 'object' ? d.rawValue : d;
+  if (v == null || isNaN(v)) return '';
+  switch (FORMAT.yAxis) {
+    case 'percent':
+      return (v * 100).toFixed(FORMAT.decimals) + '%';
+    case 'currency':
+      if (v >= 1e6) return '$' + (v / 1e6).toFixed(FORMAT.decimals) + 'M';
+      if (v >= 1e3) return '$' + (v / 1e3).toFixed(FORMAT.decimals) + 'K';
+      return '$' + v.toFixed(FORMAT.decimals);
+    case 'thousands':
+      if (v >= 1e6) return (v / 1e6).toFixed(FORMAT.decimals) + 'M';
+      if (v >= 1e3) return (v / 1e3).toFixed(FORMAT.decimals) + 'K';
+      return v.toFixed(FORMAT.decimals);
+    default:
+      return String(v);
+  }
+}
+
+// Then in axes config:
+.config({
+  axes: {
+    y: {
+      tickFormat: formatMeasure
+    }
+  }
+})
+```
+
+### 0.13 Tooltip formatter
+
+Never set `tooltip.mode`; configure `formatter` only. `dataStore.getData()` is a direct call.
+
+```javascript
+interaction: {
+  tooltip: {
+    // No `mode` property — leave it default
+    formatter: (dataStore) => {
+      const result = dataStore.getData();  // direct call, no defensive null-check
+      const cols = result.schema.map((s) => s.name);
+      const row  = result.data[0];
+      if (!row) return [];
+      // ... build tooltip rows
+    }
+  }
+}
+```
+
+In a real tile the native tooltip totals series and the crosshair snaps off the pointer; the
+library charts hide both and draw their own (references/hard-rules.md, "Verified in a real
+cluster"). Use this formatter when the native tooltip is acceptable.
+
+### 0.14 KPI card built from Muze text layers
+
+The library's `kpi-*` charts are inline SVG and are the better starting point. When the card must
+be Muze (data-bound through a DataModel), the shape is the one in section 8, "Full Example — KPI
+Card", plus:
+
+- One text layer per visual element (status badge, main value, change indicator, comparison),
+  each positioned by `encodingTransform` with **absolute pixel values**, assigned unconditionally.
+  `layer.measurement()` gives `{ width, height }` for centring.
+- `rows` needs at least one measure and `columns` at least one dimension or Muze creates no
+  plotting area; hide those axes, gridlines, borders and the legend in config.
+- `autoGroupBy: { disabled: true }` so the rows are not aggregated.
+- Pre-formatted display strings (`DisplayValue: '$124.29M'`) work well as dimension fields and
+  avoid aggregation. Numeric measures work with a `formatter`; compose multi-field strings by
+  reading the row in the formatter.
+- `muze.Operators.html` only inside `encodingTransform`, never in `.title()` / `.subtitle()`.
+- A sparkline is a line layer with hidden axes beneath the text layers.
+- Design target about 250x200, sized by the responsive pattern, not hardcoded.
 
 ---
 
@@ -564,7 +1267,7 @@ An array of point objects. Each point represents one rendered data mark. Mutate 
 
   // ── Data references ──
   rowId: number,              // Unique row identifier
-  data: object,               // WARNING: undefined inside encodingTransform — use layer.data().getData() + schema index (system-prompt.md, Production Pattern 1)
+  data: object,               // WARNING: undefined inside encodingTransform — use layer.data().getData() + schema index (recipe 0.2)
   source: any,                // Source information
   meta: object,               // Metadata (lastInteraction, etc.)
 

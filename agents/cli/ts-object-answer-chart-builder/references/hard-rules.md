@@ -5,8 +5,8 @@ file is that most are invisible in a screenshot, so the iterate loop will happil
 converge on a chart that is broken. Each rule below says how to *detect* it, not just
 what to avoid.
 
-`references/system-prompt.md` has the long-form explanation and a worked alternative
-for most of these. Read it when a rule bites and the fix is not obvious.
+Section 0 of `references/muze-api-reference.md` (Recipes) has the worked alternative for
+most of the Muze ones. Read it when a rule bites and the fix is not obvious.
 
 ---
 
@@ -33,7 +33,7 @@ by reading the code, not the screenshot. Check these before emitting final files
 | A CDN load must be **bounded** and must list a fallback host | `onerror` covers a blocked host. A request that *hangs* fires neither `onload` nor `onerror`, so the promise never settles, top-level `await` never returns, `emitRenderCompletedEvent()` never fires, and the host shows a bare "Chart did not render" over an empty tile. Wrap the injection in a `setTimeout` reject and try a second CDN. |
 | `chart.js` must build its own mount points if they are missing | The host assembles the three tabs and the order is not contractual. `document.getElementById('chart')` at module scope returns `null` when the JS evaluates before the HTML tab's markup lands, or when someone pastes only the JS. The library then throws on a null container, the `catch` guard `if (el)` skips painting, and the tile is blank with no error anywhere. Resolve elements inside boot and `createElement` whatever is absent. |
 | Error painting must not depend on the element that failed | `catch { if (stageEl) stageEl.innerHTML = err.stack }` paints nothing when `stageEl` is the null that caused the throw. Fall back `stage -> #chart -> document.body`. |
-| A CDN library's `<script src>` belongs in **chart.html**, with the dynamic loader as the fallback | `references/system-prompt.md` is explicit about this ("add the CDN URL to the HTML tab instead"), and every chart that has actually run on a tile does it that way. The HTML tab executes script tags. Keep the bounded dynamic loader too — some clusters serve the tabs in an order that leaves the tag unfinished, and a chart with only one of the two paths has a single point of failure. If both are present, poll for `window.<Lib>` before injecting, or the tile downloads the library twice. |
+| A CDN library's `<script src>` belongs in **chart.html**, with the dynamic loader as the fallback | The host's documented shape is the CDN URL in the HTML tab, and every chart that has actually run on a tile does it that way. The HTML tab executes script tags. Keep the bounded dynamic loader too — some clusters serve the tabs in an order that leaves the tag unfinished, and a chart with only one of the two paths has a single point of failure. If both are present, poll for `window.<Lib>` before injecting, or the tile downloads the library twice. |
 
 ## Verified in a real cluster (release 26.8) - the preview cannot tell you these
 
@@ -86,6 +86,16 @@ html, body { height: 100%; margin: 0; }
 Content-sized charts (KPI cards, quote cards) want the opposite — `height: auto` and
 a content-driven `min-height`. The rule only bites percentage-height layouts.
 
+The sibling trap in a chart-plus-KPI-strip layout is the missing `min-height: 0`:
+without it a flex child never shrinks below its content size and the chart area does
+not re-fit on resize.
+
+```css
+#chart            { display: flex; flex-direction: column; height: 100%; }
+.chart-wrap       { flex: 1 1 0; min-height: 0; position: relative; }
+.metrics          { flex: 0 0 auto; }
+```
+
 **Detect it:** the `height-chain:` line in the snap diagnostic block. It reports
 `BROKEN` with both measurements. Do not rely on the screenshot — the preview's own
 wrappers make the chart look right.
@@ -124,22 +134,23 @@ the global. A chart reading `globalThis.viz` shows the sample-data badge in
 
 | Rule | How it shows |
 |---|---|
-| `point` `size` above `0.05` | Dots fill the whole row — obvious once you know it is a size bug and not a data bug. Area-based scale. |
+| `point` `size` above `0.05` | Dots fill the whole row — obvious once you know it is a size bug and not a data bug. Area-based scale. The only exception is a bubble chart where the user asks for large bubbles. |
 | `tick` `size` is a band-fraction | Use `0.02` for hairlines; larger reads as a fat block. |
-| `p.update.x` in `encodingTransform` is **pixels**, not data | Marks pile up at the left edge. Convert via `layer.measurement().width`. |
-| Guarding that assignment with `if (p.update.x != null)` | The guard skips when it is null (common on text-only KPI layers) and the label lands at (0,0) or off-canvas. Assign unconditionally. |
+| `p.update.x` in `encodingTransform` is **pixels**, not data | Marks pile up at the left edge, or 120,000px off-screen. Convert via `layer.measurement().width` and the axis max. `x: { value: () => CONST }` is taken as pixels too. Small nudges (`+= 6`) are fine, they already are pixels. |
+| Guarding that assignment with `if (p.update.x != null)` | The guard skips when it is null (common on text-only KPI layers) and the label lands at (0,0) or off-canvas. Assign absolute positions unconditionally. A guard is acceptable only around a relative nudge (`+=`), where skipping a cross-panel null point is harmless. |
 | `share()` across measures with different scales | Everything pins near zero. Use the dual-axis tuple pattern. |
 | `domain` inside `.color({...})` | Silently kills `range` too — palette reverts to default blue/orange. Pass `range` only, ordered alphabetically by category value. |
 | `domain: [...]` on an axis | Silently ignored; the axis keeps its computed range. |
 | A temporal field typed `type: 'measure'` on a line chart | The chart collapses. |
-| Root `axes.x.tickFormat` on a temporal field | Ignored. Use `axes.x.fields[FIELD].tickFormat` with `d.rawValue` as an ms timestamp. |
+| Root `axes.x.tickFormat` on a temporal field | Ignored. Use `axes.x.fields[FIELD].tickFormat` with `d.rawValue` as an ms timestamp. Not visible in the preview, where the field is a plain string: ThoughtSpot types any dimension named with `quarter`, `month`, `year`, `date`, `week` or `day` as temporal and feeds ms values (recipe 0.11). |
 
 ## Crashes — the preview shows the stack, so these are cheap
 
 - `p.text.*` in `encodingTransform` — undefined.
-- Text inside a bar or point layer's `encodingTransform` — those layers do not render text; use a separate layer.
+- Text inside a bar or point layer's `encodingTransform` — those layers do not render text; a bar layer's transform only moves geometry or adds styles. Labels go in via SVG in `afterRendered` (recipe 0.6).
 - Constructing a new `DataModel` inside `source` — `e.getDomain is not a function`.
-- Repositioning `mark: 'line'` via `encodingTransform` — ignored; use `mark: 'point'`.
+- Repositioning `mark: 'line'` via `encodingTransform` — ignored; use `mark: 'point'` (recipe 0.8).
+- A temporal field typed `measure` on a line chart — scatter points, an x-axis of `0-2200`, a collapsed y-scale. Keep it a dimension; for a smooth line, one row per year.
 - `muze.Operators.html` in `.title()` / `.subtitle()` — renders the markup verbatim.
 - Passing an object-wrapped cell into gridjs or a formatter — opaque "Script error." Run `--data wrapped` to catch it.
 - Invented methods. `DataModel.onReady()`, `canvas.scrollConfig()`, `canvas.onready()`, `canvas.tooltip()`, `loadScript()`, `waitForLib()` do not exist.
@@ -194,8 +205,15 @@ step 6 in `SKILL.md` for why that test lies.
 
 ## Defaults first
 
-Muze renders a complete chart from `rows`, `columns`, `data`, and `mount`. Before
-emitting any config block, ask whether deleting it changes the render. If not, delete
-it. Do not call `.title()` / `.subtitle()` unless the target visibly has one inside
-the chart frame — Liveboard tiles draw their own title, so a chart-internal one is a
-duplicate header.
+Muze renders a complete chart from `rows`, `columns`, `data`, and `mount`: axis names
+from field names, horizontal gridlines, a default blue, no legend without a colour or
+size encoding, raw numeric ticks. Before emitting any config block, ask whether deleting
+it changes the render. If not, delete it.
+
+- `tickFormat` only when the target shows formatted ticks (`$11M`, not `11000000`).
+- A `color.value` override only when the target colour clearly differs from the default.
+- `axes.x/y.name` plus `showAxisName` only for a label that differs from the field name.
+- `gridLines`, `legend.show: false`, `axes.*.show: false` only when the default is wrong.
+- Do not call `.title()` / `.subtitle()` unless the target visibly has one inside the
+  chart frame — Liveboard tiles draw their own title, so a chart-internal one is a
+  duplicate header. Plain ASCII strings only when you do.
