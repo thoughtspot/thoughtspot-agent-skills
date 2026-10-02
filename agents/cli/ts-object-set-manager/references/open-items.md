@@ -67,14 +67,14 @@ Analysis* has a different `modifiedBy`, but that is an edit, not a transfer); (b
 `REQUIRED` label itself — every consumer author on the fixtures holds `MODIFY` on the Set,
 so `DIRECT` wins first. `REQUIRED` stays covered by unit tests.
 
-## #4 — Liveboard-filter detection (KEEP_FILTER) — VERIFIED 2026-10-02 (filter + viz Liveboard)
+## #4 — Liveboard-filter detection (KEEP_FILTER) — VERIFIED 2026-10-02 for a Liveboard that uses the Set as a filter AND in a viz
 
 Detection matches the Set name in `liveboard.filters[].column[]` (literal, case-insensitive).
 No existing Liveboard on se-thoughtspot had a Liveboard-level filter on a Set (spec
 Appendix A; #2), so a probe was built, with the user's explicit authorisation, and deleted afterwards.
 
 **Probe.** Liveboard `ZZ Set Filter Probe (delete me)`, created with `ts tml import
---create-new --policy ALL_OR_NONE`, returned GUID `5955975e-e6c6-45d9-9e93-76404fda2622`
+--create-new --policy ALL_OR_NONE`, returned GUID `5955975e-…`
 (status OK). It has one TABLE_MODE viz modelled on Answer *Testing Share by Edit*
 `b7de443c-…` (`tables[].fqn` = Model TEST_SV_DMSI_AI_CONTEXT `889a704f-…`, `search_query:
 "[Static Top 10] [Amount]"`), plus a Liveboard filter with `column: [Static Top 10]`. A Set
@@ -112,13 +112,9 @@ by this run; a name search before the import returned `[]`). It was then deleted
 `POST /api/rest/2.0/metadata/delete` `{"metadata":[{"identifier":"5955975e-…","type":"LIVEBOARD"}]}`,
 which returned **204**. Afterwards, search by GUID and by name returned `[]`.
 
-**Not verified: a Liveboard that uses the Set ONLY as a filter.** The probe also used the
-Set in its viz, so the run does not show whether ThoughtSpot lists a filter-only
-Liveboard as a dependent of the Set. If it does not, the engine never fetches that
-Liveboard, and the Set reads as whatever its other dependents imply (`CANDIDATE_*` or
-`REVIEW_DELETE`). That is the unsafe direction. Closing it needs a second probe whose viz
-does not reference the Set. The report and SKILL.md still say to check `CANDIDATE_*` Sets by
-hand for filter-only Liveboards, and BL-327 stays gated on it.
+**Scope of this item.** The probe also used the Set in its viz, so #4 proves detection only
+once the Liveboard is fetched as a dependent. Whether a Liveboard that uses the Set *only* as a
+filter is listed as a dependent is a separate question — see **#8**.
 
 ## #5 — Dependents response with no item for the Set — VERIFIED 2026-10-02
 
@@ -201,3 +197,63 @@ That is right for a tenant migration (`apply` and `scan-sets --all-models` only 
 Org owns), but a `ts sets inventory --org <tenant>` over a Primary-owned Model reports the
 tenant's Sets on it, not Primary's.
 
+## #8 — Filter-only Liveboard listed as a Set dependent — VERIFIED 2026-10-02
+
+Split out of #4. The question: when a Liveboard uses a Set **only** as a Liveboard filter, and
+no visualization's `search_query`, `answer_columns` or `formulas` reference the Set, does
+ThoughtSpot list that Liveboard as a dependent of the Set? If not, the engine would never fetch
+it and the Set would read `CANDIDATE_*` or `REVIEW_DELETE` — the unsafe direction.
+
+**Probe** (write probe, user-authorised; se-thoughtspot Primary Org, admin profile, worktree code
+via the PATH shim). Liveboard `ZZ Set Filter-Only Probe (delete me)`, created with `ts tml import
+--create-new --policy ALL_OR_NONE`, returned GUID `aff4a8a6-…` (status OK, accepted first try).
+One TABLE_MODE viz on Model TEST_SV_DMSI_AI_CONTEXT `889a704f-…` whose search does **not**
+mention the Set, plus a Liveboard filter on *Static Top 10* `60a9794b-…`:
+
+```yaml
+visualizations:
+- id: Viz_1
+  answer:
+    name: "Amount probe"
+    tables: [{id: TEST_SV_DMSI_AI_CONTEXT, name: TEST_SV_DMSI_AI_CONTEXT, fqn: 889a704f-…}]
+    search_query: "[Amount]"
+    answer_columns: [{name: Total Amount}]
+filters:
+- column: [Static Top 10]
+  display_name: ''
+  is_mandatory: false
+  is_single_value: false
+```
+
+The TML export stored the filter exactly as in #4 (`filters: [{column: ["Static Top 10"], …}]`,
+`ordered_chips: [{name: Static Top 10, type: FILTER}]`), and the viz's `search_query` stayed
+`[Amount]`. So a filter on a Set that no visualization uses **can** be created via TML.
+
+| Check (probe present) | Result |
+|---|---|
+| Raw v2 dependents of the Set, `LOGICAL_COLUMN` (`_build_dependents_payload`) | 200. `PINBOARD_ANSWER_BOOK`: **the probe** `aff4a8a6-…`; `QUESTION_ANSWER_BOOK`: *Testing Share by Edit* `b7de443c-…`. `hasInaccessibleDependents: true`, `areInaccessibleDependentsReturned: true` (admin; #6) |
+| Raw v2 dependents of the Model, `LOGICAL_TABLE` | 200. `PINBOARD_ANSWER_BOOK`: the probe; plus 5 Answers and 5 `FEEDBACK` rows |
+| `ts sets inventory --model 889a704f-…` | *Static Top 10* **`KEEP_FILTER`** ("used as a Liveboard filter"), `target: null`, dependents *Testing Share by Edit* (ANSWER) + the probe (LIVEBOARD), `dependents_complete: true`, `liveboards: {aff4a8a6-…: {vizzes: [], filter: true}}` |
+
+| | *Static Top 10* class | Dependents | `liveboards` |
+|---|---|---|---|
+| BEFORE | `CANDIDATE_ANSWER` ("one Answer") | *Testing Share by Edit* | `{}` |
+| AFTER (probe present) | **`KEEP_FILTER`** | + the probe (`LIVEBOARD`) | `{aff4a8a6-…: {vizzes: [], filter: true}}` |
+| After cleanup | `CANDIDATE_ANSWER` ("one Answer") | *Testing Share by Edit* | `{}` |
+
+The other two Sets kept their classes throughout. Summary BEFORE and after cleanup identical
+(`CANDIDATE_ANSWER` 2, `KEEP_SHARED` 1).
+
+**Cleanup.** A name search before the import returned `[]`. Before deleting, `metadata/search`
+by GUID and type `LIVEBOARD` returned exactly one row: the probe's name, type `LIVEBOARD`, author
+the profile user, created 2026-10-02 03:11 UTC (this run). Deleted with `POST
+/api/rest/2.0/metadata/delete` `{"metadata":[{"identifier":"aff4a8a6-…","type":"LIVEBOARD"}]}`
+→ **204**. Afterwards `ts metadata search --guid … --type LIVEBOARD` and a name search both
+returned `[]`. No callosum delete and no `doUpdate` were used.
+
+**Result.** A filter-only Liveboard **is** listed as a dependent of the Set, and the engine
+classifies the Set `KEEP_FILTER`. Both Liveboard shapes (filter + viz, #4; filter only, #8) are
+verified, so the report needs no hand-check for filter-only Liveboards.
+
+Not covered: a non-admin caller (see #6 — BL-327 gate (b)); a Liveboard filter on a Set from a
+*different* Model than the Liveboard's vizzes.

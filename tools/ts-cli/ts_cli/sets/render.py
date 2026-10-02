@@ -15,9 +15,7 @@ NEXT = {"KEEP_FILTER": "Keep reusable (Liveboard filter)",
         "REVIEW_MANUAL": "Inspect by hand",
         "KEEP_SHARED": "Keep reusable",
         "CANDIDATE_ANSWER": "v2: move into the Answer",
-        "CANDIDATE_VIZ": "v2: move into the visualization — check by hand for Liveboard "
-                         "filters first (a filter-only Liveboard is not verified to be "
-                         "listed as a dependent)",
+        "CANDIDATE_VIZ": "v2: move into the visualization",
         "REVIEW_DELETE": "Review for deletion (check ad-hoc use)"}
 UNKNOWN_LABEL = "Unknown grants (could not determine)"
 ANCHOR_LABEL = "Anchor (column id)"

@@ -1,5 +1,7 @@
 """`ts_cli.sets.render` — review lists, Markdown and self-contained HTML."""
-from ts_cli.sets.render import render_html, render_markdown, review_lists
+import pytest
+
+from ts_cli.sets.render import NEXT, render_html, render_markdown, review_lists
 
 
 def _grant(name, prov, ptype="USER", perm="READ_ONLY"):
@@ -226,8 +228,17 @@ def test_org_skip_without_reason_is_read_as_malformed():
     assert _sets_cell(render_markdown(_inv(top_notes=top))) == "≥1"
 
 
-def test_candidate_viz_next_text_carries_the_filter_caveat():
-    # Final review should-fix 8 / open item #4: filter detection is verified live for a
-    # Liveboard that also uses the Set in a viz, not for a filter-only Liveboard.
-    md = render_markdown(_inv(cls="CANDIDATE_VIZ"))
-    assert "check by hand for Liveboard filters" in _md_set_row(md)
+@pytest.mark.parametrize("cls", ["CANDIDATE_ANSWER", "CANDIDATE_VIZ", "REVIEW_DELETE"])
+def test_next_text_carries_no_filter_only_caveat(cls):
+    # Open item #8 (2026-10-02): a Liveboard that uses the Set ONLY as a filter is listed
+    # as a dependent and classifies KEEP_FILTER, so no class's NEXT text may tell the
+    # reader to hunt for filter-only Liveboards by hand.
+    inv = _inv(cls=cls)
+    md, html = render_markdown(inv), render_html(inv)
+    for text in (md, html):
+        assert "check by hand for Liveboard filters" not in text
+        assert "not verified to be listed" not in text
+
+
+def test_candidate_viz_next_text_is_plain():
+    assert NEXT["CANDIDATE_VIZ"] == "v2: move into the visualization"

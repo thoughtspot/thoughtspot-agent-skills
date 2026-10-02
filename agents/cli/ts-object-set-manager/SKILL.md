@@ -92,12 +92,10 @@ Lead with `summary` from the inventory JSON (`models`, `models_incomplete`, `set
 
 A Set referenced only inside a visualization's formula counts as used.
 
-**Liveboard-filter detection is verified live** (open item #4) when the filtering Liveboard is
-a dependent of the Set. It was proved on a Liveboard that also used the Set in a visualization.
-It is **not verified** that a Liveboard using the Set *only* as a filter is listed as a
-dependent. If it is not, that Liveboard is never inspected. So say that each `CANDIDATE_VIZ`
-(and `CANDIDATE_ANSWER`) must still be checked by hand for filter-only Liveboards before
-anything is moved.
+**Liveboard-filter detection is verified live for both Liveboard shapes**: a Liveboard that
+uses the Set as a filter and in a visualization (open item #4), and a Liveboard that uses the
+Set *only* as a filter (open item #8). In both, ThoughtSpot lists the Liveboard as a dependent
+of the Set, and the Set reads `KEEP_FILTER`. No hand-check for filter-only Liveboards is needed.
 
 When a Set's `dependents_complete` is `false`, its dependents list may be short: the report
 shows the count as "unknown" or "≥N". Say that the count is a floor, not a total.
@@ -138,10 +136,9 @@ Say plainly that nothing was changed.
 - Granting **edit** on a Set without access to its Model fails on save (BL-326, parked).
 - `REVIEW_DELETE` cannot see unsaved ad-hoc searches.
 - Group membership is not expanded: a user explained only via their group reads `UNEXPLAINED`.
-- **`KEEP_FILTER` is verified live only for a Liveboard that is already a dependent of the Set**
-  (open item #4, proved with a probe that also used the Set in a viz). Whether a
-  filter-only Liveboard is listed as a dependent is unverified, so check every `CANDIDATE_*`
-  Set by hand for filter-only Liveboards.
+- **`KEEP_FILTER` was verified live with an admin profile** (open items #4 and #8: filter +
+  viz, and filter only). A non-admin caller was not run: for one, hidden dependents should make
+  the Set `REVIEW_MANUAL` (#6), which is unit-tested but not observed live.
 
 ---
 
