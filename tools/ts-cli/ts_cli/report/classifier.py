@@ -48,14 +48,15 @@ def classify_dependent(dep: DependentEntry, sig: DependentSignals) -> RiskTag:
     return RiskTag(tag="LOW", reason="no high-risk signals")
 
 
-_TAG_ORDER = {"SAFE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "STOP": 4}
+_TAG_ORDER = {"SAFE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "UNVERIFIED": 4, "STOP": 5}
 
 _TAG_TO_RECOMMENDATION = {
-    "SAFE":   "SAFE_TO_DROP",
-    "LOW":    "REVIEW_RECOMMENDED",
-    "MEDIUM": "PLAN_REQUIRED",
-    "HIGH":   "PLAN_REQUIRED_WITH_PER_VIZ_DECISIONS",
-    "STOP":   "BLOCKED_RESOLVE_RLS_FIRST",
+    "SAFE":       "SAFE_TO_DROP",
+    "LOW":        "REVIEW_RECOMMENDED",
+    "MEDIUM":     "PLAN_REQUIRED",
+    "HIGH":       "PLAN_REQUIRED_WITH_PER_VIZ_DECISIONS",
+    "UNVERIFIED": "BLOCKED_VERIFY_SECURITY_FIRST",
+    "STOP":       "BLOCKED_RESOLVE_RLS_FIRST",
 }
 
 
@@ -64,6 +65,8 @@ class AggregateInputs:
     per_dependent_tags: List[RiskTag] = field(default_factory=list)
     rls_hits: List[dict] = field(default_factory=list)
     csr_hits: List[dict] = field(default_factory=list)
+    # "<row type>: <why>" for each security check (RLS, CSR) that did not run.
+    unverified_security: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -84,6 +87,14 @@ def aggregate_classification(inp: AggregateInputs) -> AggregateResult:
         return AggregateResult(
             aggregate=RiskTag(tag="STOP", reason="; ".join(reasons)),
             recommendation="BLOCKED_RESOLVE_RLS_FIRST",
+        )
+    # A security check that did not run means "unknown", never "none": no
+    # verdict that lets a removal proceed (SAFE through HIGH) may stand on it.
+    if inp.unverified_security:
+        return AggregateResult(
+            aggregate=RiskTag(tag="UNVERIFIED",
+                              reason="not checked — " + "; ".join(inp.unverified_security)),
+            recommendation="BLOCKED_VERIFY_SECURITY_FIRST",
         )
     if not inp.per_dependent_tags:
         return AggregateResult(

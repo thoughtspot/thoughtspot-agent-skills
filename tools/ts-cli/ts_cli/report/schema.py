@@ -10,12 +10,15 @@ from typing import List, Optional
 
 SCHEMA_VERSION = "1.0"
 
-RISK_TAGS = ("SAFE", "LOW", "MEDIUM", "HIGH", "STOP")
+# UNVERIFIED is aggregate-only: the RLS or CSR check did not run, so the report
+# cannot say whether removing the source changes who sees what.
+RISK_TAGS = ("SAFE", "LOW", "MEDIUM", "HIGH", "UNVERIFIED", "STOP")
 RECOMMENDATIONS = (
     "SAFE_TO_DROP",
     "REVIEW_RECOMMENDED",
     "PLAN_REQUIRED",
     "PLAN_REQUIRED_WITH_PER_VIZ_DECISIONS",
+    "BLOCKED_VERIFY_SECURITY_FIRST",
     "BLOCKED_RESOLVE_RLS_FIRST",
 )
 
@@ -48,7 +51,8 @@ class SourceDescriptor:
     guid: str
     type: str       # LOGICAL_TABLE, LOGICAL_COLUMN, etc.
     name: str
-    parent: Optional[dict] = None   # {"guid": ..., "name": ..., "type": ...} when source is a column
+    parent: Optional[dict] = None   # {"guid", "name", "type", "subtype"} of the owning object when source is a column
+    subtype: Optional[str] = None   # LOGICAL_TABLE subtype: ONE_TO_ONE_LOGICAL (table), WORKSHEET (Model), ...
 
     def to_dict(self):
         return asdict(self)

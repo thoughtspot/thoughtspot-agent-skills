@@ -146,6 +146,18 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     ("qlik", "resolve_name_collisions"):
         "Gap, not a design choice — Qlik emits formula columns; #440 copied this "
         "converter's structure and inherited the same gap. Close it (BL-217 part 2).",
+    ("dbt", "resolve_name_collisions"):
+        "Gap, not a design choice — dbt emits formula columns (ts_formula tags and "
+        "translated MetricFlow metrics) and can collide exactly as #440 did. It has its "
+        "own narrower find_display_name_collisions in dbt/tags.py, which detects but "
+        "does not resolve, and does not cover formula-vs-column collisions. Close it "
+        "(BL-217 part 2).",
+    ("dbt", "fix_double_aggregation"):
+        "Gap, not a design choice — dbt assembles its Model TML directly rather than "
+        "delegating to model_builder.build_model_tml, so it does not inherit the shared "
+        "emitter's pass. A MetricFlow derived metric referencing an already-aggregated "
+        "metric, or a hand-authored ts_formula wrapping one in sum(), double-aggregates. "
+        "Close it (BL-217 part 2).",
     # ("qlik", "fix_double_aggregation") was here and was FALSE — retired 2026-08-28.
     # Qlik delegates to model_builder.build_model_tml, which applies the helper, so
     # the entry exempted a converter that was never diverging. See B1 in the module

@@ -108,7 +108,7 @@ What the skill walks during Step 4. Solid arrows = standard dependencies via v2 
              /       │       ╲              (#7 RLS — verified)
             /        │        ╲
            ▼         ▼         ╲- - -→ [<TABLE>_CSR.column_security_rules]
-       [MODEL]    [VIEW]                   (#9 — retrievable, not yet walked)
+       [MODEL]    [VIEW]                   (#9 — auto via the owning table)
         / │ \      │ │
        /  │  \     │ │  ............→ [<MODEL>.column_alias]
       /   │   ╲    │ │    (auto — via --associated + alias flag)
@@ -141,13 +141,13 @@ python3 references/build_coverage.py --summary
 Sample output (regenerates from `references/dependency-types.md`):
 
 ```
-Coverage:  auto-detected (9): Model / Worksheet, View, Answer, Liveboard, Set / Cohort, Monitor alert, RLS rule, Column alias TML, Inline alias
-           partial (2): Spotter feedback, Column security rule (CSR)
+Coverage:  auto-detected (10): Model / Worksheet, View, Answer, Liveboard, Set / Cohort, Monitor alert, RLS rule, Column security rule (CSR), Column alias TML, Inline alias
+           partial (1): Spotter feedback
            informational (2): Schedule, Connection | no skill action (1): Column-level ACLs
            Full breakdown in references/dependency-types.md
 ```
 
-If a status changes (e.g. BL-289 wires CSR into the walk), update
+If a status changes (e.g. open-item #9, CSR walked via the owning table), update
 `references/dependency-types.md` only — this block re-renders. Do **not** hardcode
 the list anywhere in SKILL.md.
 
@@ -503,6 +503,22 @@ When `classification.aggregate.tag == "STOP"`, surface to the user:
 > Resolve via the ThoughtSpot UI (remove or rewrite the RLS rule) before re-running this skill.
 
 For Audit mode, stop after this step. For Remove / Repoint, proceed to Step 6 only if the user explicitly accepts the STOP impact.
+
+When `classification.aggregate.tag == "UNVERIFIED"` (recommendation
+`BLOCKED_VERIFY_SECURITY_FIRST`), the RLS or column-security check did not run, so the
+report **cannot** say the change is safe — `found: 0` on an unchecked row means "did not
+look", not "none". Surface to the user:
+
+> ⚠️ SECURITY NOT VERIFIED — `{recommendation}`
+>
+> {reason}
+>
+> Check these rules before removing anything. For a Model or a Model's column, run the
+> report on the underlying table's column (the rules live there). For a failed probe,
+> see `warnings[]` and re-run.
+
+Handle it exactly like STOP: stop after this step in Audit mode, and for Remove /
+Repoint proceed to Step 6 only if the user explicitly accepts the unverified impact.
 
 ---
 
@@ -1190,6 +1206,7 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.0 | 2026-10-02 | **Column security rules are walked, and an unchecked security row now blocks `SAFE`** (open-item #9, BL-289; PR #506 review blockers 1 and 6). `ts metadata report` resolves a column GUID's owning table from its header `owner`, exports that table for `rls_rules` (the export API rejects a column GUID outright, so column reports used to abort) and fetches its column security rules; a whole-table source counts every rule on the table. A Model, or a Model's column, reports both rows unchecked because the rules live on base tables. Any unchecked RLS/CSR row gives the new `UNVERIFIED` verdict (`BLOCKED_VERIFY_SECURITY_FIRST`), which Step 5 handles like STOP. All live-verified on embed-1 staging against a real RLS rule and a real CSR rule. |
 | 1.4.3 | 2026-09-22 | **Open-item #9 resolved; the column-alias "cannot retrieve" claim retired, the CSR one corrected rather than retired (audit 5.2 / 5.3).** #9 called CSR retrieval the open question, on the accurate-but-incomplete observation that a plain `--associated` export returns no CSR. It needs a second option alongside it — `export_options.export_column_security_rules: true` (Beta, 10.12+) — and ships as `ts security column-rules export`/`get`. Separately, `dependency-types.md` row 10 called column-alias retrieval "No on this build" citing a non-existent open-item #10, when `ts alias export` retrieves it via `export_with_column_aliases: true`; row 10 is now Implementable and the alias doc is no longer listed as skipped. Five dangling citations resolved in all — the `#12` reference behind "drop model-level filters" is replaced by the real mechanism (`error_code 14518`, surfaced upstream as a YAML syntax error). Both #10 and #12 once existed and were deleted as resolved in 2026-06 without updating their inbound references — `check_open_item_citations.py` now makes that a commit failure. **CSR's status is corrected, not promoted:** it is now retrievable, but `ts metadata report` still does not probe it (`csr_hits` is declared and never populated), so row 9 stays Partial for that reason instead of the retired one. BL-289 tracks wiring the walk. |
 | 1.4.2 | 2026-07-31 | **BL-191 — the View mutation paths were dead against real Views.** `ts dependency mutate`/`apply-change` bound `view_columns[]` on `column_id`, which does not exist in real View TML (0 of 265 columns across all 42 Views on se-thoughtspot, 2026-07-30 census; `search_output_column` on 265 of 265). Removing a formula therefore deleted the formula and **left its `view_columns[]` entry behind** — a dangling reference that breaks the import. Both bindings corrected to `search_output_column` / `formulas[].name`, matched so an aggregation or bucket decoration (`Total X`, `Month(X)`) is caught but an unrelated column sharing a word is not. **Also fixed:** `search_query` kept naming a formula that column removal had *cascaded* away (a View references its formulas from the search string by id, e.g. `[formula_PMPM month].monthly`) — it is now re-sanitized after the formula pass, taking the bucket modifier with the token. Two adjacent pre-existing gaps are filed rather than fixed: **BL-197** (`sanitize_search_query` misses the qualified `[table_path::col]` form) and **BL-198** (formula removal does not cascade transitively). Doc-side: the troubleshooting row asserting the `TABLE_PATH::col` format is replaced, and `references/dependency-types.md`'s View row + a new note carry the corrected detection signal. Requires ts-cli v0.127.1. |
 | 1.4.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |

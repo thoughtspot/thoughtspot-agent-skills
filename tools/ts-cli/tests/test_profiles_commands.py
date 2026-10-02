@@ -20,6 +20,7 @@ def profile_dir(tmp_path, monkeypatch):
         "snowflake": tmp_path / "snowflake-profiles.json",
         "databricks": tmp_path / "databricks-profiles.json",
         "tableau": tmp_path / "tableau-profiles.json",
+        "dbt-cloud": tmp_path / "dbt-cloud-profiles.json",
     }
     monkeypatch.setattr(profile_ops, "PROFILE_PATHS", paths)
     return paths
@@ -83,6 +84,28 @@ class TestListCommand:
         assert result.exit_code == 0
         assert "Staging" in result.output
         assert "python" in result.output
+
+    def test_list_json_dbt_cloud(self, profile_dir):
+        profile_dir["dbt-cloud"].write_text(json.dumps([
+            {"name": "Sales", "dbt_url": "https://cloud.getdbt.com",
+             "account_id": "1", "project_id": "2", "token_env": "DBT_CLOUD_TOKEN_SALES"}
+        ]))
+        result = runner.invoke(app, ["list", "--json", "--dbt-cloud"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data[0]["name"] == "Sales"
+        assert "token_env" not in data[0]
+
+    def test_list_dbt_cloud_table_format(self, profile_dir):
+        profile_dir["dbt-cloud"].write_text(json.dumps([
+            {"name": "Sales", "auth_type": "token", "dbt_url": "https://cloud.getdbt.com",
+             "account_id": "1", "project_id": "2"}
+        ]))
+        result = runner.invoke(app, ["list", "--dbt-cloud"])
+        assert result.exit_code == 0
+        assert "Sales" in result.output
+        assert "account=1" in result.output
+        assert "project=2" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +200,28 @@ class TestAddCommand:
         data = json.loads(result.output)
         assert data["env_var"] == "TABLEAU_PAT_SECRET_CLOUD"
         assert data["keychain_account"] == "my-token"
+
+    def test_add_dbt_cloud_token(self, profile_dir):
+        result = runner.invoke(app, [
+            "add",
+            "--platform", "dbt-cloud",
+            "--name", "Sales",
+            "--auth-type", "token",
+            "--field", "dbt_url=https://cloud.getdbt.com",
+            "--field", "account_id=1",
+            "--field", "project_id=2",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["slug"] == "sales"
+        assert data["env_var"] == "DBT_CLOUD_TOKEN_SALES"
+        assert data["keychain_service"] == "dbt-cloud-sales"
+        assert data["keychain_account"] == "token"
+        assert data["profile"]["token_env"] == "DBT_CLOUD_TOKEN_SALES"
+        assert data["profile"]["dbt_url"] == "https://cloud.getdbt.com"
+        assert data["profile"]["account_id"] == "1"
+        assert data["profile"]["project_id"] == "2"
+        assert data["keychain_store_commands"] is not None
 
     def test_add_saves_to_disk(self, profile_dir):
         runner.invoke(app, [
@@ -305,6 +350,19 @@ class TestUpdateCommand:
         ])
         assert result.exit_code != 0
 
+    def test_update_dbt_cloud_project_id(self, profile_dir):
+        profile_dir["dbt-cloud"].write_text(json.dumps([
+            {"name": "Sales", "dbt_url": "https://cloud.getdbt.com",
+             "account_id": "1", "project_id": "old", "token_env": "DBT_CLOUD_TOKEN_SALES"}
+        ]))
+        result = runner.invoke(app, [
+            "update", "--platform", "dbt-cloud", "--name", "Sales",
+            "--field", "project_id=new",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["profile"]["project_id"] == "new"
+
     def test_update_coerces_bool_field_to_boolean(self, profile_dir):
         profile_dir["thoughtspot"].write_text(json.dumps([
             {"name": "Private", "base_url": "https://172.32.6.115:8443",
@@ -349,6 +407,18 @@ class TestRemoveCommand:
         ])
         assert result.exit_code != 0
 
+    def test_remove_dbt_cloud(self, profile_dir):
+        profile_dir["dbt-cloud"].write_text(json.dumps([
+            {"name": "Sales", "auth_type": "token", "token_env": "DBT_CLOUD_TOKEN_SALES"}
+        ]))
+        result = runner.invoke(app, [
+            "remove", "--platform", "dbt-cloud", "--name", "Sales",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["keychain_service"] == "dbt-cloud-sales"
+        assert data["env_var_to_remove"] == "DBT_CLOUD_TOKEN_SALES"
+
     def test_remove_infers_auth_type(self, profile_dir):
         profile_dir["thoughtspot"].write_text(json.dumps([
             {"name": "Staging", "token_env": "THOUGHTSPOT_TOKEN_STAGING"}
@@ -391,6 +461,18 @@ class TestSyncEnvCommand:
         platforms = {line["platform"] for line in data["lines"]}
         assert "thoughtspot" in platforms
         assert "snowflake" in platforms
+
+    def test_sync_env_dbt_cloud(self, profile_dir):
+        profile_dir["dbt-cloud"].write_text(json.dumps([
+            {"name": "Sales", "auth_type": "token", "token_env": "DBT_CLOUD_TOKEN_SALES",
+             "dbt_url": "https://cloud.getdbt.com", "account_id": "1", "project_id": "2"}
+        ]))
+        result = runner.invoke(app, ["sync-env", "--platform", "dbt-cloud"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["lines"]) == 1
+        assert data["lines"][0]["env_var"] == "DBT_CLOUD_TOKEN_SALES"
+        assert "export" in data["lines"][0]["line"]
 
     def test_sync_env_skips_keyless_auth(self, profile_dir):
         profile_dir["snowflake"].write_text(json.dumps([

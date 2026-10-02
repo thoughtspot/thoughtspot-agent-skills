@@ -1,0 +1,53 @@
+{
+  "table": {
+    "name": "APPOINTMENTS",
+    "db": "DL_TEST",
+    "schema": "DBT_DLEE_PROD",
+    "db_table": "APPOINTMENTS",
+    "columns": [
+      {
+        "name": "Barber Id",
+        "db_column_name": "BARBER_ID",
+        "db_column_properties": {
+          "data_type": "INT64"
+        }
+      },
+      {
+        "name": "Appointment Date",
+        "db_column_name": "APPOINTMENT_DATE",
+        "db_column_properties": {
+          "data_type": "DATE"
+        }
+      },
+      {
+        "name": "Service Amount",
+        "db_column_name": "SERVICE_AMOUNT",
+        "db_column_properties": {
+          "data_type": "DOUBLE"
+        }
+      }
+    ],
+    "rls_rules": {
+      "tables": [
+        {
+          "name": "APPOINTMENTS"
+        }
+      ],
+      "table_paths": [
+        {
+          "id": "appointments",
+          "table": "APPOINTMENTS",
+          "column": [
+            "BARBER_ID"
+          ]
+        }
+      ],
+      "rules": [
+        {
+          "name": "own_appointments_only",
+          "expr": "[BARBER_ID] = ts_username"
+        }
+      ]
+    }
+  }
+}

@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**164 total items** across 21 skills — **69 open**, 82 verified, 13 deferred
+**200 total items** across 23 skills — **77 open**, 109 verified, 14 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -16,7 +16,9 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
 | ts-audit | 15 | **5** | 10 | 0 |
 | ts-convert-from-qlik | 6 | **5** | 0 | 1 |
+| ts-convert-from-dbt | 18 | **4** | 14 | 0 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
+| ts-convert-to-dbt | 18 | **4** | 13 | 1 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
 | ts-convert-from-tableau | 17 | **3** | 12 | 2 |
 | ts-load-source-data | 3 | **3** | 0 | 0 |
@@ -30,7 +32,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-link-semantic-layer | 5 | **0** | 1 | 4 |
 | ts-object-model-agentql-query | 6 | **0** | 6 | 0 |
 | ts-object-set-manager | 8 | **0** | 8 | 0 |
-### Untagged (69 items)
+### Untagged (77 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -41,6 +43,10 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-audit | #11 | User Action enum | UNVERIFIED |
 | ts-audit | #12 | Query Text column parsability | UNVERIFIED |
 | ts-audit | #13 | Liveboard viz fingerprinting | UNVERIFIED |
+| ts-convert-from-dbt | #3 | dbt construct coverage beyond "models" | OPEN |
+| ts-convert-from-dbt | #5 | Certified-warehouse enforcement point | OPEN |
+| ts-convert-from-dbt | #7 | `generate-sync-tml` has no diff/dry-run | OPEN |
+| ts-convert-from-dbt | #12 | `generate-sync-tml` 500s on resync after structural edits | OPEN |
 | ts-convert-from-looker | #1 | `type: number` cross-measure SQL inlining edge cases | OPEN |
 | ts-convert-from-looker | #3 | Multiple explores that share views: one model or separate models | OPEN |
 | ts-convert-from-looker | #4 | `sql_always_where:` → ThoughtSpot RLS | OPEN |
@@ -70,6 +76,10 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-to-databricks-mv | #6 | `source.`-prefix in a single-source MV's `filter:`/exprs needs live verification | OPEN |
 | ts-convert-to-databricks-mv | #7 | 2-argument `{0}`-template SQL pass-through form is not implemented | OPEN |
 | ts-convert-to-databricks-mv | #8 | Live numeric fidelity of the codified emit path | OPEN |
+| ts-convert-to-dbt | #2 | Legacy MetricFlow spec (semantic_models.yml) | OPEN |
+| ts-convert-to-dbt | #6 | Entity naming collision across unrelated Models | OPEN |
+| ts-convert-to-dbt | #13 | Column Security Rules (CSR) not in Table TML | OPEN |
+| ts-convert-to-dbt | #16 | `ts_column_exclude` is read but never written | OPEN |
 | ts-dependency-manager | #11 | Reusable Set (cohort) delete command | OPEN |
 | ts-dependency-manager | #13 | Chart `client_state_v2` stale column references | OPEN |
 | ts-dependency-manager | #14 | Cohort `pass_thru_filter` lost on round-trip | OPEN |

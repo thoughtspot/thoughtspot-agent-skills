@@ -84,6 +84,33 @@ class TestResolveSourceGuid:
         assert desc.input == guid
 
 
+    def test_column_guid_resolves_its_owner_as_parent(self):
+        """A column header's `owner` is the owning table/Model (live-verified
+        2026-10-02); the owner lookup says which. RLS/CSR need that table."""
+        guid = "baa451a6-02a0-42d1-8347-8cd4af13b505"
+        col = _mk_hit(guid, "ZIPCODE", type_="LOGICAL_COLUMN", subtype="")
+        col["metadata_header"]["owner"] = "tbl-1"
+        client = MagicMock()
+        r1, r2 = MagicMock(), MagicMock()
+        r1.json.return_value = [col]
+        r2.json.return_value = [_mk_hit("tbl-1", "CUSTOMERS")]
+        client.post.side_effect = [r1, r2]
+
+        desc = resolve_source(guid, client)
+        assert desc.type == "LOGICAL_COLUMN"
+        assert desc.subtype is None
+        assert desc.parent == {"guid": "tbl-1", "name": "CUSTOMERS", "type": "LOGICAL_TABLE",
+                               "subtype": "ONE_TO_ONE_LOGICAL"}
+        assert client.post.call_args_list[1].kwargs["json"]["metadata"] == [{"identifier": "tbl-1"}]
+
+    def test_column_guid_without_owner_has_no_parent(self):
+        guid = "baa451a6-02a0-42d1-8347-8cd4af13b505"
+        client = _mk_client([_mk_hit(guid, "ZIPCODE", type_="LOGICAL_COLUMN", subtype="")])
+        desc = resolve_source(guid, client)
+        assert desc.parent is None
+        assert client.post.call_count == 1
+
+
 class TestResolveSourceThreePartName:
     def test_resolves_unique_match(self):
         client = _mk_client([_mk_hit("g-1", "DB.SCH.T")])
@@ -161,7 +188,8 @@ class TestResolveFourPartColumn:
         assert desc.type == "LOGICAL_COLUMN"
         assert desc.guid == "col-1"
         assert desc.name == "COL"
-        assert desc.parent == {"guid": "tbl-1", "name": "DB.SCH.TBL", "type": "LOGICAL_TABLE"}
+        assert desc.parent == {"guid": "tbl-1", "name": "DB.SCH.TBL", "type": "LOGICAL_TABLE",
+                               "subtype": "ONE_TO_ONE_LOGICAL"}
 
     def test_column_not_found_raises(self, monkeypatch):
         table_hit = _mk_hit("tbl-1", "DB.SCH.TBL")

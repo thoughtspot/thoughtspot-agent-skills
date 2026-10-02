@@ -167,3 +167,85 @@ class TestFindAiSurfaceUses:
     def test_no_ai_uses(self):
         model_tml = {"model": {"columns": []}}
         assert find_ai_surface_uses(model_tml, {"X"}) == []
+
+
+from ts_cli.report.tml_probes import (
+    find_formula_column_uses,
+    find_model_filter_column_uses,
+    find_sql_view_column_uses,
+)
+
+
+class TestFindFormulaColumnUses:
+    def test_finds_physical_column_in_formula_expr(self):
+        model_tml = {
+            "model": {
+                "formulas": [
+                    {"id": "f1", "name": "Unique Franchises", "expr": "unique count [franchiseID]"},
+                    {"id": "f2", "name": "Revenue", "expr": "sum [revenue]"},
+                ],
+            }
+        }
+        hits = find_formula_column_uses(model_tml, "franchiseID")
+        assert len(hits) == 1
+        assert hits[0]["formula_id"] == "f1"
+        assert hits[0]["name"] == "Unique Franchises"
+
+    def test_case_insensitive_match(self):
+        model_tml = {"model": {"formulas": [{"id": "f1", "name": "X", "expr": "[FranchiseID]"}]}}
+        assert len(find_formula_column_uses(model_tml, "franchiseid")) == 1
+
+    def test_no_formulas_returns_empty(self):
+        assert find_formula_column_uses({"model": {}}, "franchiseID") == []
+
+    def test_empty_physical_column_returns_empty(self):
+        model_tml = {"model": {"formulas": [{"id": "f1", "name": "X", "expr": "[anything]"}]}}
+        assert find_formula_column_uses(model_tml, "") == []
+
+
+class TestFindModelFilterColumnUses:
+    def test_finds_column_in_model_filter(self):
+        model_tml = {
+            "model": {
+                "filters": [{"column": "STATUS", "oper": "EQ", "values": ["ACTIVE"]}],
+            }
+        }
+        hits = find_model_filter_column_uses(model_tml, {"STATUS"})
+        assert len(hits) == 1
+        assert hits[0]["column"] == "STATUS"
+
+    def test_no_filters_returns_empty(self):
+        assert find_model_filter_column_uses({"model": {}}, {"STATUS"}) == []
+
+    def test_column_not_targeted_returns_empty(self):
+        model_tml = {"model": {"filters": [{"column": "OTHER"}]}}
+        assert find_model_filter_column_uses(model_tml, {"STATUS"}) == []
+
+
+class TestFindSqlViewColumnUses:
+    def test_finds_column_in_sql_query(self):
+        doc = {"guid": "sv-1", "sql_view": {"name": "V", "sql_query": "SELECT franchiseID FROM t"}}
+        hit = find_sql_view_column_uses(doc, "franchiseID")
+        assert hit is not None
+        assert hit["guid"] == "sv-1"
+        assert hit["in_sql"] is True
+        assert hit["in_output_columns"] is False
+
+    def test_finds_column_in_output_columns(self):
+        doc = {
+            "guid": "sv-1",
+            "sql_view": {
+                "name": "V", "sql_query": "SELECT * FROM t",
+                "sql_view_columns": [{"sql_output_column": "franchiseID"}],
+            },
+        }
+        hit = find_sql_view_column_uses(doc, "franchiseID")
+        assert hit is not None
+        assert hit["in_output_columns"] is True
+
+    def test_no_sql_view_block_returns_none(self):
+        assert find_sql_view_column_uses({"guid": "sv-1"}, "franchiseID") is None
+
+    def test_column_not_referenced_returns_none(self):
+        doc = {"guid": "sv-1", "sql_view": {"name": "V", "sql_query": "SELECT other FROM t"}}
+        assert find_sql_view_column_uses(doc, "franchiseID") is None

@@ -30,4 +30,24 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+
+@pytest.fixture(autouse=True)
+def isolated_dbt_artifact_cache(tmp_path, monkeypatch):
+    """Give every test its own dbt Cloud artifact cache directory.
+
+    `ts_cli.dbt.cloud_api.fetch_artifact` caches a run's artifacts in the OS
+    temp dir keyed on `(profile slug, run_id, artifact)`. Test fixtures reuse
+    small run ids (7, 99), so without this a manifest written by one test is
+    served to the next -- the second test's fake HTTP is never called and its
+    call-count assertion fails, or worse, passes for the wrong reason. Autouse
+    because a test that forgets it fails somewhere else entirely.
+    """
+    from ts_cli.dbt import cloud_api
+
+    monkeypatch.setattr(
+        cloud_api, "artifact_cache_path",
+        lambda ctx, run_id, name: tmp_path / f"artifact_{ctx.slug}_{run_id}_{name}")

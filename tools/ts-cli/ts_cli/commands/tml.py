@@ -316,6 +316,11 @@ def export_tml(
     include_guid: bool = typer.Option(True, "--include-guid/--no-guid",
                                       help="Include guid at document root. "
                                            "Default: true. Use --no-guid to omit."),
+    split_dir: Optional[str] = typer.Option(
+        None, "--split-dir",
+        help="Write each parsed item to its own JSON file in this directory "
+             "(model.json / table_<NAME>.json / <type>_<guid>.json) instead of "
+             "passing the whole array through stdout. Implies --parse."),
 ) -> None:
     """Export TML for one or more objects.
 
@@ -326,6 +331,14 @@ def export_tml(
     With --parse, each edoc is parsed from YAML (or JSON) into a structured
     object. Non-printable characters are stripped automatically. This
     eliminates the boilerplate parse loop that every skill otherwise needs.
+
+    With --split-dir, each parsed item is written to its own file in that
+    directory rather than returned as one array — the shape `ts dbt-export
+    build`/`diff`/`sync` read with --model and --tables-dir. Naming is
+    `model.json` for the Model, `table_<TABLE NAME>.json` per Table, and
+    `<type>_<guid>.json` for anything else. stdout becomes a small manifest of
+    what was written, so a 40-table export no longer passes through the caller's
+    context purely to be re-emitted as files.
 
     With --parse, an item with no edoc content (a FORBIDDEN or OBJECT_INVALID_STATE
     object -- no view access, or a broken object) is skipped rather than aborting
@@ -347,6 +360,7 @@ def export_tml(
       ts tml export abc-123 --fqn --associated --parse
       ts tml export abc-123 def-456 --format JSON
       ts tml export abc-123 --include-obj-id --include-obj-id-ref --no-guid --parse
+      ts tml export abc-123 --associated --split-dir ./export
     """
     if type and type.upper() == "FEEDBACK":
         raise SystemExit(
@@ -388,7 +402,7 @@ def export_tml(
     resp = client.post("/api/rest/2.0/metadata/tml/export", json=body)
     data = resp.json()
 
-    if not parse:
+    if not parse and not split_dir:
         print(json.dumps(data))
         return
 
@@ -401,12 +415,60 @@ def export_tml(
             continue
         result.append(parsed_item)
 
+    if split_dir:
+        written = _write_split_dir(result, Path(split_dir))
+        print(json.dumps({"split_dir": str(Path(split_dir)), "written": written}, indent=2))
+        typer.echo(f"  {len(written)} file(s) written to {split_dir}", err=True)
+        if skipped:
+            raise SystemExit(1)
+        return
+
     # JSON to stdout regardless -- skills pipe it, and the ts-cli convention is
     # structured data on stdout with diagnostics on stderr (see `tml import`'s
     # import_failures handling above). The exit code is what changes.
     print(json.dumps(result))
     if skipped:
         raise SystemExit(1)
+
+
+def _split_file_name(item: dict, used: set) -> str:
+    """Filename for one parsed export item, unique within `used`.
+
+    `model.json` / `table_<NAME>.json` is the layout `ts dbt-export` reads with
+    `--model` and `--tables-dir`; anything else falls back to
+    `<type>_<guid>.json`. A duplicate name (two Tables with the same name in
+    different schemas, which an Org happily holds) gets its guid appended
+    rather than overwriting the first — a silent overwrite here would drop a
+    table from the generated dbt project with no diagnostic anywhere.
+    """
+    tml = item.get("tml") or {}
+    kind = item.get("type") or "object"
+    if kind == "model":
+        base = "model"
+    elif kind == "table":
+        base = f"table_{(tml.get('table') or {}).get('name') or item.get('guid', 'unnamed')}"
+    else:
+        base = f"{kind}_{item.get('guid', 'unnamed')}"
+
+    base = "".join(c if c.isalnum() or c in "._- " else "_" for c in base)
+    name = f"{base}.json"
+    if name in used:
+        name = f"{base}_{item.get('guid', len(used))}.json"
+    used.add(name)
+    return name
+
+
+def _write_split_dir(items: List[dict], out: Path) -> List[str]:
+    """Write each parsed item to its own JSON file; return the relative names."""
+    out.mkdir(parents=True, exist_ok=True)
+    used: set = set()
+    written: List[str] = []
+    for item in items:
+        name = _split_file_name(item, used)
+        (out / name).write_text(json.dumps(item.get("tml") or {}, indent=2),
+                                encoding="utf-8")
+        written.append(name)
+    return written
 
 
 def _parse_export_item(item: dict, format: str) -> Optional[dict]:
@@ -540,9 +602,13 @@ def import_tml(
     # lives in the body, not the status code -- so `resp.ok` alone reports success on an
     # import that did nothing (BL-138). Collected BEFORE the GUID back-fill below, which
     # deliberately skips non-OK items and would otherwise be the only thing that noticed.
-    from ts_cli.tml_common import format_import_failures, tml_import_failures
+    from ts_cli.tml_common import (
+        IMPORTED_STATUS_CODES, format_import_failures, format_import_warnings,
+        tml_import_failures, tml_import_warnings,
+    )
 
     import_failures = tml_import_failures(data)
+    import_warnings = tml_import_warnings(data)
 
     # ThoughtSpot often returns an empty object list despite a successful import.
     # For each OK response with no GUID, search by name and back-fill the GUID.
@@ -552,7 +618,7 @@ def import_tml(
     for item in items:
         response_block = item.get("response", {})
         status = response_block.get("status", {})
-        if status.get("status_code") != "OK":
+        if status.get("status_code") not in IMPORTED_STATUS_CODES:
             continue
         obj_list = response_block.get("object", [])
         if extract_imported_guid([item]):
@@ -587,6 +653,10 @@ def import_tml(
     # JSON to stdout even on failure -- skills pipe it, and the ts-cli convention is
     # structured data on stdout with diagnostics on stderr. The exit code is what changes.
     print(json.dumps(data))
+    # WARNING items DID import (live-verified 2026-09-09): say so on stderr, exit 0.
+    if import_warnings:
+        for line in format_import_warnings(import_warnings, "Imported TML"):
+            print(line, file=sys.stderr)
     if import_failures:
         for line in format_import_failures(import_failures, "Could not import TML"):
             print(line, file=sys.stderr)
