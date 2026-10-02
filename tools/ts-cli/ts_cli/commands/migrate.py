@@ -409,7 +409,7 @@ def apply_migration(
     if sets_scan:
         scan_doc = _json.loads(Path(sets_scan).read_text())
         if not _is_post_bl325_scan(scan_doc):
-            _refuse(f"{sets_scan} has neither `discovery_notes` nor "
+            _refuse(f"{sets_scan} does not carry both `discovery_notes` (list) and "
                     "`summary.models_incomplete`, so it predates BL-325 — whose COHORT-prefix "
                     "detection missed Sets with a blank header type. Re-run `ts migrate "
                     "scan-sets`, or omit --sets-scan and let apply scan itself")

@@ -185,8 +185,8 @@ def test_a_supplied_sets_scan_skips_the_self_scan(mock_cls, _rp, tmp_path):
 @patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
 @patch("ts_cli.commands.migrate.ThoughtSpotClient")
 def test_a_pre_bl325_sets_scan_is_refused(mock_cls, _rp, tmp_path, doc):
-    """Final review must-fix 5: a scan file with neither `discovery_notes` nor
-    `summary.models_incomplete` predates BL-325, whose old COHORT-prefix detection
+    """Final review must-fix 5: a scan file that does not carry both `discovery_notes`
+    (a list) and `summary.models_incomplete` predates BL-325, whose old COHORT-prefix detection
     missed Sets with a blank header type. Trusting it would read "missed" as "clean"."""
     client = _client([_COHORT_ROW])
     mock_cls.return_value = client
@@ -199,6 +199,11 @@ def test_a_pre_bl325_sets_scan_is_refused(mock_cls, _rp, tmp_path, doc):
                                  "--target-profile", "tgt", "--dry-run"])
     assert result.exit_code == 1
     assert "predates BL-325" in result.stderr and "scan-sets" in result.stderr
+    # The message must describe the both-markers rule, not "has neither" (wrong for a
+    # file carrying one marker).
+    stderr = " ".join(result.stderr.split())
+    assert "does not carry both `discovery_notes` (list) and `summary.models_incomplete`" in stderr
+    assert "has neither" not in stderr
     assert not _detail_gets(client)
 
 
