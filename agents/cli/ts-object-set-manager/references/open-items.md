@@ -197,7 +197,7 @@ That is right for a tenant migration (`apply` and `scan-sets --all-models` only 
 Org owns), but a `ts sets inventory --org <tenant>` over a Primary-owned Model reports the
 tenant's Sets on it, not Primary's.
 
-## #8 — Filter-only Liveboard listed as a Set dependent — VERIFIED 2026-10-02
+## #8 — Filter-only Liveboard listed as a Set dependent — VERIFIED 2026-10-02 (admin profile; cross-Model filter untested)
 
 Split out of #4. The question: when a Liveboard uses a Set **only** as a Liveboard filter, and
 no visualization's `search_query`, `answer_columns` or `formulas` reference the Set, does

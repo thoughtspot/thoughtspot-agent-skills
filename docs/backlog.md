@@ -211,6 +211,7 @@ are roughly ordered by value÷effort.
 | BL-327 | ts-object-set-manager v2 — act on the v1 report: delete `REVIEW_DELETE` Sets, convert `CANDIDATE_*` to answer-/viz-level, revoke `UNEXPLAINED` grants | fast follow to v1 |
 | BL-328 | ts-object-set-manager connection scope (connection → tables → Models) — **parked** | parked |
 | BL-329 | Audit H angle runs Set discovery through `fetch_consumers`, which exports every Liveboard that uses a Set — Liveboard detail H5 never reads; slow on large estates. Add a lightweight consumers mode | next ts-audit pass |
+| BL-330 | `ts migrate apply --sets-scan FILE` trusts any post-BL-325 scan for any Model — nothing checks the scan covered the mapped Model or the source Org; a scan of another Org (or `scanned.models: 0`) lets `apply` pass an uninspected Model | next ts-migrate pass |
 
 ### Tier 3 — Opportunistic
 
@@ -12227,3 +12228,23 @@ it from the audit. Keep the hidden-dependents and failure signals: a failed look
 never read as "no consumers".
 
 **Target:** next ts-audit pass.
+
+---
+
+## BL-330 — `apply --sets-scan` does not check what the scan covered `Tier 2`
+
+**Filed:** 2026-10-02. **Source:** final-review fix-wave re-review of the
+ts-object-set-manager branch (PR #554) — pre-existing, not introduced there.
+
+**Finding.** `blocked_model_guids` (`ts_cli/migrate/sets_scan.py`) returns only the GUIDs a
+scan marked blocked. `apply` refuses a mapped Model only if its GUID is in that set. Nothing
+checks that the scan inspected that Model, or ran in the source Org: a valid scan of a
+different Org, or one with `scanned.models: 0` (live on DamianTest 2026-10-02), lets `apply`
+pass a Model that was never inspected. The pre-BL-325 marker check (both `discovery_notes`
+and `summary.models_incomplete` required) does not close this.
+
+**Fix.** Record the scanned Org and Model GUIDs in the scan file; in `apply`, refuse when a
+mapped source Model is not in the scan's covered set or the scan's Org differs from
+`--source-org`. Tests for both, plus a test that a covering scan is accepted.
+
+**Target:** next ts-migrate pass.

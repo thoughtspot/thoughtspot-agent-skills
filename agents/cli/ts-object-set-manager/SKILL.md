@@ -129,7 +129,8 @@ A Set referenced only inside a visualization's formula counts as used.
 **Liveboard-filter detection is verified live for both Liveboard shapes**: a Liveboard that
 uses the Set as a filter and in a visualization (open item #4), and a Liveboard that uses the
 Set *only* as a filter (open item #8). In both, ThoughtSpot lists the Liveboard as a dependent
-of the Set, and the Set reads `KEEP_FILTER`. No hand-check for filter-only Liveboards is needed.
+of the Set, and the Set reads `KEEP_FILTER`. No hand-check for filter-only Liveboards is needed
+(verified with an admin profile; a filter on a Set from a different Model than the vizzes is untested — #8).
 
 When a Set's `dependents_complete` is `false`, its dependents list may be short: the report
 shows the count as "unknown" or "≥N". Say that the count is a floor, not a total.
