@@ -159,6 +159,9 @@ def inventory(
     doc = {"schema": SCHEMA,
            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "profile": resolve_profile(profile), "scope": scope,
+           # For report links only (Model / Answer / Liveboard pages). Every Org client
+           # shares the cluster's base URL; None when it cannot be read.
+           "base_url": next((getattr(c, "base_url", None) for _, c, _ in plans), None),
            "orgs": results, "notes": org_notes, "summary": summarise(results)}
     _emit(doc, output)
 

@@ -192,3 +192,27 @@ def test_report_refuses_malformed_document(tmp_path, doc):
     assert r.exit_code == 1
     assert "Traceback" not in r.stderr
     assert not (tmp_path / "out").exists()
+
+
+class _BaseClient:
+    base_url = "https://se.example.thoughtspot.cloud"
+
+
+@patch("ts_cli.commands.sets.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.sets.inventory_org", side_effect=_fake_inventory)
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=_BaseClient())
+def test_inventory_records_base_url_for_report_links(_c, _m, _inv, _rp):
+    r = runner.invoke(app, ["sets", "inventory", "--model-contains", "dunder", "--profile", "p"])
+    assert r.exit_code == 0, r.stderr
+    assert json.loads(r.stdout)["base_url"] == "https://se.example.thoughtspot.cloud"
+
+
+@patch("ts_cli.commands.sets.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.sets.inventory_org", side_effect=_fake_inventory)
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=object())
+def test_inventory_without_a_base_url_omits_it(_c, _m, _inv, _rp):
+    r = runner.invoke(app, ["sets", "inventory", "--model-contains", "dunder", "--profile", "p"])
+    assert r.exit_code == 0, r.stderr
+    assert json.loads(r.stdout)["base_url"] is None

@@ -109,7 +109,9 @@ per Set a dependents lookup, a TML export of each Liveboard dependent, and one g
     ts sets report ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/sets-inventory.json \
       -o ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/
 
-Open `report.html`. `report.md` carries the same content.
+Open `report.html`. `report.md` carries the same content. Models, Answers and Liveboards
+are links into ThoughtSpot (Sets have no page of their own); a link opens in the Org the
+browser is signed in to.
 
 ## Step 6 — Walk through
 
@@ -181,4 +183,5 @@ Say plainly that nothing was changed.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-10-02 | Report links Models, Answers and Liveboards into ThoughtSpot (ts-cli 0.153.1) |
 | 1.0.0 | 2026-10-02 | Initial release — report-only reusable Set inventory: scope by Model/Org/Cluster, classification, grant provenance |

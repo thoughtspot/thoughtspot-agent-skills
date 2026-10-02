@@ -242,3 +242,66 @@ def test_next_text_carries_no_filter_only_caveat(cls):
 
 def test_candidate_viz_next_text_is_plain():
     assert NEXT["CANDIDATE_VIZ"] == "v2: move into the visualization"
+
+
+# ---------------------------------------------------------------- links (0.153.1)
+
+from ts_cli.sets.render import object_url  # noqa: E402
+
+BASE = "https://se.example.thoughtspot.cloud"
+MG = "829a3344-657c-4d34-918d-84a7438afb59"
+AG = "b8b5788b-986f-4999-9408-224d88082e3f"
+LG = "da4f1be1-b6cd-47a2-84bd-f8cffe1d0696"
+
+
+def _linked_inv():
+    inv = _inv()
+    inv["base_url"] = BASE
+    m = inv["orgs"][0]["models"][0]
+    m["guid"] = MG
+    s = m["sets"][0]
+    s.update(dependents_complete=True, dependents=[
+        {"guid": AG, "name": "Basket Analysis", "type": "ANSWER", "author_id": "u"},
+        {"guid": LG, "name": "Sales LB", "type": "LIVEBOARD", "author_id": "u"}],
+        liveboards={LG: {"vizzes": [{"id": "Viz_2", "title": "Top"}], "filter": True}})
+    return inv
+
+
+def test_object_url_per_type():
+    assert object_url(BASE, "MODEL", MG) == f"{BASE}/#/data/tables/{MG}"
+    assert object_url(BASE + "/", "ANSWER", AG) == f"{BASE}/#/saved-answer/{AG}"
+    assert object_url(BASE, "LIVEBOARD", LG) == f"{BASE}/#/pinboard/{LG}"
+
+
+def test_object_url_refuses_what_it_cannot_link():
+    assert object_url(BASE, "SET", MG) is None              # a Set has no page
+    assert object_url(None, "MODEL", MG) is None            # no base_url
+    assert object_url("javascript:alert(1)", "MODEL", MG) is None
+    assert object_url(BASE, "MODEL", 'x"><script>') is None  # not a GUID
+
+
+def test_html_links_models_answers_and_liveboards():
+    html = render_html(_linked_inv())
+    assert f'href="{BASE}/#/data/tables/{MG}"' in html
+    assert f'href="{BASE}/#/saved-answer/{AG}"' in html
+    assert f'href="{BASE}/#/pinboard/{LG}"' in html
+    assert 'target="_blank"' in html and 'rel="noopener"' in html
+    # viz / filter lines name the Liveboard (linked), not just its GUID
+    lb = f'<a href="{BASE}/#/pinboard/{LG}" target="_blank" rel="noopener">Sales LB</a>'
+    assert f"<li>Liveboard {lb} — Liveboard filter</li>" in html
+    assert f"<li>Liveboard {lb} — viz Viz_2: Top</li>" in html
+
+
+def test_markdown_links_models_and_dependents():
+    md = render_markdown(_linked_inv())
+    assert f"/ [Dunder]({BASE}/#/data/tables/{MG})" in md
+    assert f"[Basket Analysis]({BASE}/#/saved-answer/{AG})" in md
+    assert f"[Sales LB]({BASE}/#/pinboard/{LG})" in md
+
+
+def test_no_base_url_renders_plain_names():
+    inv = _linked_inv()
+    del inv["base_url"]
+    html, md = render_html(inv), render_markdown(inv)
+    assert "href=" not in html and "](http" not in md
+    assert "Basket Analysis" in html and "Basket Analysis" in md

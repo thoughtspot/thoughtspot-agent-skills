@@ -3858,6 +3858,13 @@ A Set referenced only inside a visualization formula counts as used.
 row per Set per Model, expandable dependents and grants, the review lists (`REVIEW_DELETE`
 Sets and `UNEXPLAINED` grants — never a `REQUIRED` one) and every scan note.
 
+**Links.** `ts sets inventory` records the cluster's `base_url` in the document, and the report
+links every object that has a ThoughtSpot page: Models (`/#/data/tables/{guid}`), Answers
+(`/#/saved-answer/{guid}`) and Liveboards (`/#/pinboard/{guid}`), opening in a new tab in
+the HTML and as `[name](url)` in the Markdown, which also lists each used Set's dependents.
+Sets are not linked (a Set is a hidden column on its Model and has no page). A link opens in
+the Org the browser is signed in to. An inventory without `base_url` renders unlinked.
+
 ---
 
 ## `ts migrate apply` / `rollback` — Phase 2: move one tenant onto the published Model

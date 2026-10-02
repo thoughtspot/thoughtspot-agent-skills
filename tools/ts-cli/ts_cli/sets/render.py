@@ -6,8 +6,9 @@ renderer never re-sorts. An INCOMPLETE Model is shown as "unknown", never as zer
 """
 from __future__ import annotations
 
+import re
 from html import escape
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 CLASS_ORDER = ["KEEP_FILTER", "REVIEW_MANUAL", "KEEP_SHARED", "CANDIDATE_ANSWER",
                "CANDIDATE_VIZ", "REVIEW_DELETE"]
@@ -29,6 +30,40 @@ def _s(v) -> str:
 def e(v) -> str:
     """HTML-escape any value, null-safe."""
     return escape(_s(v))
+
+
+# ---------------------------------------------------------------- links
+
+# Only objects ThoughtSpot has a page for. A Set is a hidden column on its Model — no page.
+_ROUTES = {"MODEL": "/#/data/tables/", "ANSWER": "/#/saved-answer/", "LIVEBOARD": "/#/pinboard/"}
+_GUID = re.compile(r"^[0-9a-fA-F-]{8,64}$")
+
+
+def object_url(base_url, kind: str, guid) -> Optional[str]:
+    """Deep link to a Model, Answer or Liveboard, or None when one cannot be built safely:
+    no or non-http(s) base, a kind with no page, or a value that is not a GUID."""
+    base = _s(base_url).rstrip("/")
+    if not base.startswith(("https://", "http://")) or kind not in _ROUTES:
+        return None
+    if not _GUID.match(_s(guid)):
+        return None
+    return f"{base}{_ROUTES[kind]}{guid}"
+
+
+def _h_link(base_url, kind: str, guid, label) -> str:
+    url = object_url(base_url, kind, guid)
+    if not url:
+        return e(label)
+    return f'<a href="{e(url)}" target="_blank" rel="noopener">{e(label)}</a>'
+
+
+def _md_link(base_url, kind: str, guid, label) -> str:
+    url = object_url(base_url, kind, guid)
+    return f"[{_md(label)}]({url})" if url else _md(label)
+
+
+def _dep_names(x: dict) -> dict:
+    return {d["guid"]: d.get("name") or d["guid"] for d in x.get("dependents") or []}
 
 
 def _models(inv: dict) -> Iterator[Tuple[dict, dict]]:
@@ -147,10 +182,24 @@ def _md_table(headers: List[str], rows: List[List[str]]) -> List[str]:
 def _md_models(inv: dict) -> List[str]:
     out: List[str] = []
     for o, m in _models(inv):
-        out += ["", f"## {_md(o['org'])} / {_md(m['name'])} — {_count(m)} Set(s)", ""]
+        base = inv.get("base_url")
+        title = _md_link(base, "MODEL", m.get("guid"), m["name"])
+        out += ["", f"## {_md(o['org'])} / {title} — {_count(m)} Set(s)", ""]
         if m["sets"]:
             out += _md_table(SET_HEADERS, [_set_cells(x) for x in m["sets"]])
+            out += _md_dependents(base, m["sets"])
     return out
+
+
+def _md_dependents(base, sets: List[dict]) -> List[str]:
+    """Each used Set's dependents, linked. Sets with none are already in the table."""
+    lines: List[str] = []
+    for x in sets:
+        deps = [_md_link(base, d.get("type"), d.get("guid"), d.get("name") or d.get("guid"))
+                + f" ({_md(d.get('type'))})" for d in x.get("dependents") or []]
+        if deps:
+            lines.append(f"- **{_md(x.get('name'))}** → " + ", ".join(deps))
+    return ["", "Dependents:", ""] + lines if lines else []
 
 
 def _md_review(inv: dict) -> List[str]:
@@ -191,13 +240,16 @@ def _h_table(headers: List[str], rows: List[List[str]]) -> str:
     return f"<table><tr>{head}</tr>{body}</table>"
 
 
-def _h_dependents(x: dict) -> str:
-    items = [f"<li>{e(d['type'])}: {e(d['name'])}</li>" for d in x["dependents"]]
+def _h_dependents(x: dict, base=None) -> str:
+    items = [f"<li>{e(d['type'])}: {_h_link(base, d['type'], d.get('guid'), d['name'])}</li>"
+             for d in x["dependents"]]
+    names = _dep_names(x)
     for lb_guid, u in (x.get("liveboards") or {}).items():
-        items += [f"<li>Liveboard {e(lb_guid)} — viz {e(v['id'])}: {e(v['title'])}</li>"
+        lb = _h_link(base, "LIVEBOARD", lb_guid, names.get(lb_guid, lb_guid))
+        items += [f"<li>Liveboard {lb} — viz {e(v['id'])}: {e(v['title'])}</li>"
                   for v in u.get("vizzes") or []]
         if u.get("filter"):
-            items.append(f"<li>Liveboard {e(lb_guid)} — Liveboard filter</li>")
+            items.append(f"<li>Liveboard {lb} — Liveboard filter</li>")
     return "<ul>" + ("".join(items) or "<li>none</li>") + "</ul>"
 
 
@@ -211,20 +263,22 @@ def _h_grants(x: dict) -> str:
             f"<th>Provenance</th></tr>{rows}</table>")
 
 
-def _h_set_detail(x: dict) -> str:
+def _h_set_detail(x: dict, base=None) -> str:
     return (f"<details><summary><b>{e(x['name'])}</b> · {e(x['class'])} · "
             f"{e(_dep_count(x))} dependent(s) · {e(NEXT.get(x['class'], ''))}</summary>"
-            f"<p>{e(x.get('reason'))}</p><h4>Dependents</h4>{_h_dependents(x)}"
+            f"<p>{e(x.get('reason'))}</p><h4>Dependents</h4>{_h_dependents(x, base)}"
             f"<h4>Grants</h4>{_h_grants(x)}</details>")
 
 
 def _h_models(inv: dict) -> str:
     parts = []
     for o, m in _models(inv):
-        parts.append(f"<h2>{e(o['org'])} / {e(m['name'])} — {e(_count(m))} Set(s)</h2>")
+        base = inv.get("base_url")
+        title = _h_link(base, "MODEL", m.get("guid"), m["name"])
+        parts.append(f"<h2>{e(o['org'])} / {title} — {e(_count(m))} Set(s)</h2>")
         if m["sets"]:
             parts.append(_h_table(SET_HEADERS, [_set_cells(x) for x in m["sets"]]))
-            parts += [_h_set_detail(x) for x in m["sets"]]
+            parts += [_h_set_detail(x, base) for x in m["sets"]]
     return "\n".join(parts)
 
 
