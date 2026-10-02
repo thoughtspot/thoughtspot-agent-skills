@@ -67,15 +67,58 @@ Analysis* has a different `modifiedBy`, but that is an edit, not a transfer); (b
 `REQUIRED` label itself — every consumer author on the fixtures holds `MODIFY` on the Set,
 so `DIRECT` wins first. `REQUIRED` stays covered by unit tests.
 
-## #4 — Liveboard-filter detection (KEEP_FILTER) — DEFERRED to BL-327
+## #4 — Liveboard-filter detection (KEEP_FILTER) — VERIFIED 2026-10-02 (filter + viz Liveboard)
 
-Detection matches the Set name in `liveboard.filters[].column[]`. No live fixture exists:
-none of the six Set-using Liveboards exported on se-thoughtspot (spec Appendix A) has a
-Liveboard-level filter on a Set, and none of the four checked on 2026-10-02 (#2) does either
-(`filter: false` on all; *Just Eat v3* `filters: []`). `KEEP_FILTER` is covered by unit tests
-only. **DEFERRED to BL-327** (v2 / a built fixture). Until then the report's `CANDIDATE_VIZ`
-NEXT text and SKILL.md Step 6 tell the operator to check each `CANDIDATE_VIZ` by hand for
-Liveboard filters, and v2 must not act on `CANDIDATE_*` until this item is verified.
+Detection matches the Set name in `liveboard.filters[].column[]` (literal, case-insensitive).
+No existing Liveboard on se-thoughtspot had a Liveboard-level filter on a Set (spec
+Appendix A; #2), so a probe was built, with the user's explicit authorisation, and deleted afterwards.
+
+**Probe.** Liveboard `ZZ Set Filter Probe (delete me)`, created with `ts tml import
+--create-new --policy ALL_OR_NONE`, returned GUID `5955975e-e6c6-45d9-9e93-76404fda2622`
+(status OK). It has one TABLE_MODE viz modelled on Answer *Testing Share by Edit*
+`b7de443c-…` (`tables[].fqn` = Model TEST_SV_DMSI_AI_CONTEXT `889a704f-…`, `search_query:
+"[Static Top 10] [Amount]"`), plus a Liveboard filter with `column: [Static Top 10]`. A Set
+**can** be a Liveboard filter via TML. The import was accepted on the first attempt.
+
+**Stored form** (TML export of the probe): the plain Set name, with no `Model::` prefix and no column id:
+
+```yaml
+filters:
+- column:
+  - Static Top 10
+  is_mandatory: false
+  is_single_value: false
+  display_name: ''
+ordered_chips:
+- name: Static Top 10
+  type: FILTER
+```
+
+`consumers.liveboard_usage` already matches this form, so no code change was needed.
+`tests/test_sets_consumers.py::test_filter_block_as_exported_live_is_detected` pins the
+exported block verbatim.
+
+| | *Static Top 10* `60a9794b-…` class | Dependents | `liveboards` |
+|---|---|---|---|
+| BEFORE | `CANDIDATE_ANSWER` ("one Answer") | *Testing Share by Edit* | `{}` |
+| AFTER (probe present) | **`KEEP_FILTER`** ("used as a Liveboard filter") | + the probe (`LIVEBOARD`), `dependents_complete: true` | `{5955975e-…: {vizzes: [Viz_1 "Static Top 10 probe"], filter: true}}` |
+| After cleanup | `CANDIDATE_ANSWER` ("one Answer") | *Testing Share by Edit* | `{}` |
+
+The other two Sets on the Model kept their classes throughout (*Customer State set*
+`CANDIDATE_ANSWER`, *Product Category set* `KEEP_SHARED`).
+
+**Cleanup.** The GUID was re-confirmed (name, type `LIVEBOARD`, author = profile user, created
+by this run; a name search before the import returned `[]`). It was then deleted with
+`POST /api/rest/2.0/metadata/delete` `{"metadata":[{"identifier":"5955975e-…","type":"LIVEBOARD"}]}`,
+which returned **204**. Afterwards, search by GUID and by name returned `[]`.
+
+**Not verified: a Liveboard that uses the Set ONLY as a filter.** The probe also used the
+Set in its viz, so the run does not show whether ThoughtSpot lists a filter-only
+Liveboard as a dependent of the Set. If it does not, the engine never fetches that
+Liveboard, and the Set reads as whatever its other dependents imply (`CANDIDATE_*` or
+`REVIEW_DELETE`). That is the unsafe direction. Closing it needs a second probe whose viz
+does not reference the Set. The report and SKILL.md still say to check `CANDIDATE_*` Sets by
+hand for filter-only Liveboards, and BL-327 stays gated on it.
 
 ## #5 — Dependents response with no item for the Set — VERIFIED 2026-10-02
 

@@ -92,9 +92,12 @@ Lead with `summary` from the inventory JSON (`models`, `models_incomplete`, `set
 
 A Set referenced only inside a visualization's formula counts as used.
 
-**Liveboard-filter detection is not yet verified live** (open item #4). A `CANDIDATE_VIZ`
-Set might in fact be a Liveboard filter, so say that each `CANDIDATE_VIZ` must be checked
-by hand for Liveboard filters before anything is moved.
+**Liveboard-filter detection is verified live** (open item #4) when the filtering Liveboard is
+a dependent of the Set. It was proved on a Liveboard that also used the Set in a visualization.
+It is **not verified** that a Liveboard using the Set *only* as a filter is listed as a
+dependent. If it is not, that Liveboard is never inspected. So say that each `CANDIDATE_VIZ`
+(and `CANDIDATE_ANSWER`) must still be checked by hand for filter-only Liveboards before
+anything is moved.
 
 When a Set's `dependents_complete` is `false`, its dependents list may be short: the report
 shows the count as "unknown" or "≥N". Say that the count is a floor, not a total.
@@ -135,9 +138,10 @@ Say plainly that nothing was changed.
 - Granting **edit** on a Set without access to its Model fails on save (BL-326, parked).
 - `REVIEW_DELETE` cannot see unsaved ad-hoc searches.
 - Group membership is not expanded: a user explained only via their group reads `UNEXPLAINED`.
-- **Liveboard-filter detection (`KEEP_FILTER`) is not yet verified live** — no fixture
-  exists, so it is covered by unit tests only (open item #4, DEFERRED to BL-327). Check every
-  `CANDIDATE_VIZ` by hand for Liveboard filters.
+- **`KEEP_FILTER` is verified live only for a Liveboard that is already a dependent of the Set**
+  (open item #4, proved with a probe that also used the Set in a viz). Whether a
+  filter-only Liveboard is listed as a dependent is unverified, so check every `CANDIDATE_*`
+  Set by hand for filter-only Liveboards.
 
 ---
 

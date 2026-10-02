@@ -227,6 +227,7 @@ def test_org_skip_without_reason_is_read_as_malformed():
 
 
 def test_candidate_viz_next_text_carries_the_filter_caveat():
-    # Final review should-fix 8: filter detection is not verified live (open item #4).
+    # Final review should-fix 8 / open item #4: filter detection is verified live for a
+    # Liveboard that also uses the Set in a viz, not for a filter-only Liveboard.
     md = render_markdown(_inv(cls="CANDIDATE_VIZ"))
     assert "check by hand for Liveboard filters" in _md_set_row(md)

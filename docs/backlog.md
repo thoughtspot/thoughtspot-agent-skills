@@ -12191,8 +12191,10 @@ delete `REVIEW_DELETE` Sets (needs ts-dependency-manager open item #11); convert
 (needs open items #14 and #16 resolved); revoke `UNEXPLAINED` grants (never `REQUIRED` or
 `DIRECT`). Each action after explicit confirmation.
 
-**Gate:** v2 must not act on CANDIDATE_* until open item #4 is verified and a non-admin probe
-confirms `areInaccessibleDependentsReturned` semantics.
+**Gate:** v2 must not act on CANDIDATE_* until (a) a filter-only Liveboard (a Set used as a
+Liveboard filter and in no viz) is shown to be listed as a dependent of the Set. Open item #4
+verified detection on 2026-10-02, but only for a Liveboard that also used the Set in a viz.
+And (b) a non-admin probe must confirm `areInaccessibleDependentsReturned` semantics.
 
 **Target:** fast follow to v1.
 

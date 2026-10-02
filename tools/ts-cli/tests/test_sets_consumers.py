@@ -44,6 +44,18 @@ def test_filter_use_is_detected():
     assert liveboard_usage(doc, "Top 10 [Q1]")["filter"] is True
 
 
+def test_filter_block_as_exported_live_is_detected():
+    """Open item #4, verified 2026-10-02: the `filters:` block ThoughtSpot stored for a
+    Liveboard-level filter on Set *Static Top 10* (probe Liveboard, se-thoughtspot), copied
+    verbatim from its TML export. TS stores the plain Set name, no `Model::` prefix."""
+    exported = {"liveboard": {
+        "visualizations": [],
+        "filters": [{"column": ["Static Top 10"], "is_mandatory": False,
+                     "is_single_value": False, "display_name": ""}],
+        "ordered_chips": [{"name": "Static Top 10", "type": "FILTER"}]}}
+    assert liveboard_usage(exported, "Static Top 10")["filter"] is True
+
+
 def test_substring_is_not_use():
     doc = _lb([_viz("Viz_1", "A", "[Top 10 [Q1]s]")])
     assert liveboard_usage(doc, "Top 10 [Q1]")["vizzes"] == []
