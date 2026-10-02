@@ -8,7 +8,7 @@ model authoring, multi-tenancy governance, and data querying. Packaged for
 
 ## Skills
 
-32 skills across six categories. Each ✓ in the runtime columns links to the
+34 skills across seven categories. Each ✓ in the runtime columns links to the
 SKILL.md for that runtime. For why an individual skill exists, who tends to need it,
 and when to reach for it, see [skill personas](docs/skill-personas.md).
 
@@ -20,6 +20,7 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 | [Platform & Governance](#platform--governance) | Many audiences, one definition, without a copy per tenant | 5 |
 | [Query](#query) | Getting data out programmatically, and seeing the SQL behind a disputed number | 1 |
 | [Recipes](#recipes) | The same analytical need recurs account after account | 2 |
+| [Custom Charts](#custom-charts) | A native chart can't show the story, and a hand-built custom chart ships as a blank tile | 2 |
 
 <a id="setup"></a>
 <details open>
@@ -117,6 +118,19 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 |---|---|:-:|:-:|:-:|
 | [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax | [✓](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | — | — |
 | [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings | [✓](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | — | — |
+
+</details>
+
+<a id="custom-charts"></a>
+<details>
+<summary><strong>Custom Charts</strong> — Build custom chart (BYOC) tiles and Liveboards made of them</summary>
+
+&nbsp;
+
+| Skill | What it builds | CLI | Snowsight | DBX |
+|---|---|:-:|:-:|:-:|
+| [`ts-object-answer-chart-builder`](agents/cli/ts-object-answer-chart-builder/SKILL.md) | A custom chart tile as paste-ready `chart.html` / `chart.css` / `chart.js` (Muze, D3, ECharts, Plotly, Chart.js, tables, SVG), iterated in a real browser against a faithful `viz` stub until the render is right; can save it as an answer and check it in ThoughtSpot; ships a library of 58 live-data charts | [✓](agents/cli/ts-object-answer-chart-builder/SKILL.md) | — | — |
+| [`ts-object-liveboard-chart-builder`](agents/cli/ts-object-liveboard-chart-builder/SKILL.md) | A storytelling Liveboard of custom-chart tiles across numbered tabs on a real Model: asks what to build, plans the tabs, builds each tile with `ts-object-answer-chart-builder`, adds narrative tiles and filters, patches the Liveboard through the ThoughtSpot MCP, and screenshots every tab | [✓](agents/cli/ts-object-liveboard-chart-builder/SKILL.md) | — | — |
 
 </details>
 

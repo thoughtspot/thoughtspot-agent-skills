@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Care Hierarchy Sunburst</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+<div id="chart">
+  <div class="wrapper">
+    <div class="breadcrumb" id="breadcrumb"></div>
+    <div class="svg-wrap" id="svgWrap">
+      <div id="sunburst"></div>
+      <div class="ring-guide" aria-hidden="true">
+        <span class="rg-arrow">Inner → Outer</span>
+        <span>Unit Type</span><span class="rg-sep">›</span>
+        <span>Unit Name</span><span class="rg-sep">›</span>
+        <span>Specialty</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

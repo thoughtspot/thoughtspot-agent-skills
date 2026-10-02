@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pivot table — local preview</title>
+  <link rel="stylesheet" href="pivot-table.css">
+</head>
+<body style="margin:0;font-family:Inter,system-ui,sans-serif">
+<!--
+  Local preview only. The mock `viz` and the test CONFIG live here rather than in
+  pivot-table.js, so nothing ships to production that production does not need.
+
+  Pick a case with ?case=<name>:
+    sales    default — the "Type of Sale" tile, measures across the top
+    share    a pctOfColumn tile: every column reads 100%
+    volume   measures down the left, months across the top
+    tiers    data keyed by underlying column names + rows out of order
+-->
+<div id="chart"></div>
+<script>
+  const M = m => Date.UTC(2025, m, 1);
+
+  const CASES = {
+    // Mirrors the native tile this migration replaces: one row dimension, six
+    // measures across the top, deltas coloured by sign, grand total at the bottom.
+    sales: {
+      schema: [
+        { name: 'Type of Sale',   type: 'ATTRIBUTE' },
+        { name: 'Retail Sales',   type: 'MEASURE' },
+        { name: 'vs. Last Year',  type: 'MEASURE' },
+        { name: 'vs. Last Month', type: 'MEASURE' },
+        { name: 'Retail Sales %', type: 'MEASURE' },
+        { name: 'vs Last Year',   type: 'MEASURE' },
+        { name: 'vs Last Month',  type: 'MEASURE' },
+      ],
+      // The last two columns are percentage-POINT deltas, so they cancel to 0 across
+      // the mix; the two before them are growth RATES, rebuilt against Retail Sales.
+      data: [
+        ['Cash Sales',    224000, 0.033, -0.042, 0.20072, -0.70,  0.80],
+        ['Finance Sales', 643000, 0.105, -0.091, 0.57616,  1.80, -0.65],
+        ['Lease Sales',   249000, 0.022, -0.088, 0.22312, -1.10, -0.15],
+      ],
+      config: {
+        rowDims: ['Type of Sale'],
+        colDims: [],
+        measures: ['Retail Sales', 'vs. Last Year', 'vs. Last Month',
+                   'Retail Sales %', 'vs Last Year', 'vs Last Month'],
+        placement: 'columns',
+        summaryMode: 'none',
+        formats: {
+          'Retail Sales':   { type: 'thousands', decimals: 0 },
+          'vs. Last Year':  { type: 'percent', decimals: 1, fraction: true },
+          'vs. Last Month': { type: 'percent', decimals: 1, fraction: true },
+          'Retail Sales %': { type: 'percent', decimals: 1, fraction: true },
+          'vs Last Year':   { type: 'number', decimals: 1 },
+          'vs Last Month':  { type: 'number', decimals: 1 },
+        },
+        signColors: {
+          'vs. Last Year':  { neg: '#FF69B4', pos: '#31563A' },
+          'vs. Last Month': { neg: '#FF69B4', pos: '#31563A' },
+          'vs Last Year':   { neg: '#FF69B4', pos: '#31563A' },
+          'vs Last Month':  { neg: '#FF69B4', pos: '#31563A' },
+        },
+        grandTotal: true,
+        ratioTotal: { 'vs. Last Year': 'Retail Sales', 'vs. Last Month': 'Retail Sales' },
+        noTotal: [],
+      },
+    },
+
+    // Raw weights re-expressed as a share of each column (Viz_11 and friends).
+    share: {
+      schema: [
+        { name: 'Credit Score', type: 'ATTRIBUTE' },
+        { name: 'Month',        type: 'ATTRIBUTE' },
+        { name: 'Total',        type: 'MEASURE' },
+      ],
+      data: [
+        ['A - 740+', M(3), 4200], ['B - 660+', M(3), 3300], ['C - 620+', M(3), 2500],
+        ['A - 740+', M(4), 4500], ['B - 660+', M(4), 3100], ['C - 620+', M(4), 2400],
+      ],
+      config: {
+        rowDims: ['Credit Score'], colDims: ['Month'], measures: ['Total'],
+        placement: 'columns', summaryMode: 'pctOfColumn',
+        formats: { 'Total': { type: 'percent', decimals: 1, fraction: true } },
+        signColors: {}, grandTotal: true, rowTotal: true, ratioTotal: {}, noTotal: [],
+      },
+    },
+
+    // Measures down the left with the months spread across the top — the native
+    // 13-month trend layout, corner reading Measures / Values.
+    volume: {
+      schema: [
+        { name: 'Sales Month',    type: 'ATTRIBUTE' },
+        { name: 'New Total',      type: 'MEASURE' },
+        { name: 'Retail Sales',   type: 'MEASURE' },
+        { name: 'New Non-Retail', type: 'MEASURE' },
+      ],
+      data: [
+        [Date.UTC(2025, 5, 1), 1263000, 1042000, 221000],
+        [Date.UTC(2025, 6, 1), 1396000, 1183000, 213000],
+        [Date.UTC(2025, 7, 1), 1470000, 1274000, 196000],
+        [Date.UTC(2025, 8, 1), 1244000, 1075000, 170000],
+        [Date.UTC(2025, 9, 1), 1277000, 1085000, 192000],
+        [Date.UTC(2025, 10, 1), 1288000, 1066000, 222000],
+        [Date.UTC(2025, 11, 1), 1469000, 1206000, 263000],
+        [Date.UTC(2026, 0, 1), 1105000, 883000, 222000],
+        [Date.UTC(2026, 1, 1), 1178000, 939000, 239000],
+        [Date.UTC(2026, 2, 1), 1389000, 1137000, 251000],
+        [Date.UTC(2026, 3, 1), 1381000, 1132000, 249000],
+        [Date.UTC(2026, 4, 1), 1481000, 1214000, 267000],
+        [Date.UTC(2026, 5, 1), 1362000, 1116000, 246000],
+      ],
+      config: {
+        rowDims: [], colDims: ['Sales Month'],
+        measures: ['New Total', 'Retail Sales', 'New Non-Retail'],
+        placement: 'rows', summaryMode: 'none',
+        formats: {
+          'New Total':      { type: 'thousands', decimals: 0 },
+          'Retail Sales':   { type: 'thousands', decimals: 0 },
+          'New Non-Retail': { type: 'thousands', decimals: 0 },
+        },
+        signColors: {}, grandTotal: true, rowTotal: true, ratioTotal: {}, noTotal: [],
+      },
+    },
+    // Reproduces the live failure: the data arrives under the UNDERLYING column names
+    // (YoY / MoM / Credit Score Bands) while CONFIG is written in display names, and
+    // the rows arrive in reverse of the order the native pivot shows.
+    tiers: {
+      schema: [
+        { name: 'Credit Score Bands',      type: 'ATTRIBUTE' },
+        { name: 'Month(Date of Purchase)', type: 'ATTRIBUTE' },
+        { name: 'Current Month',           type: 'MEASURE' },
+        { name: 'YoY',                     type: 'MEASURE' },
+        { name: 'MoM',                     type: 'MEASURE' },
+      ],
+      data: [
+        ['D - Below 620', Date.UTC(2026,5,1), 0.101,  1.6,  0.0],
+        ['C - 620 to 659', Date.UTC(2026,5,1), 0.070, 0.2,  0.0],
+        ['B - 660 to 739', Date.UTC(2026,5,1), 0.212, -1.1, -0.5],
+        ['A - 740+',       Date.UTC(2026,5,1), 0.617, -0.7,  0.4],
+      ],
+      config: {
+        rowDims: ['Credit Score'], colDims: [],
+        measures: ['Current Month', 'vs. Last Year', 'vs. Last Month'],
+        placement: 'columns', summaryMode: 'none',
+        formats: {
+          'Current Month':  { type: 'percent', decimals: 1, fraction: true },
+          'vs. Last Year':  { type: 'number', decimals: 1 },
+          'vs. Last Month': { type: 'number', decimals: 1 },
+        },
+        signColors: {
+          'vs. Last Year':  { neg: '#FF69B4', pos: '#31563A' },
+          'vs. Last Month': { neg: '#FF69B4', pos: '#31563A' },
+        },
+        grandTotal: true, ratioTotal: {}, noTotal: [],
+        aliases: { 'Credit Score': 'Credit Score Bands', 'vs. Last Year': 'YoY', 'vs. Last Month': 'MoM' },
+        sortRows: 'asc',
+      },
+    },
+    // "New Loans by Term Mix (%)": months arrive SHUFFLED and as strings, a
+    // pctOfColumn summary, and a bold Total column down the right.
+    termmix: {
+      schema: [
+        { name: 'Term (Average) - Market Analysis', type: 'ATTRIBUTE' },
+        { name: 'Month',            type: 'ATTRIBUTE' },
+        { name: 'Total Str Weight', type: 'MEASURE' },
+      ],
+      data: [
+        ['64-72','2025-12',363],['12-48','2025-12',114],['76+','2025-12',200],['73-75','2025-12',78],['49-63','2025-12',245],
+        ['64-72','2025-06',370],['12-48','2025-06',104],['76+','2025-06',241],['73-75','2025-06',80],['49-63','2025-06',206],
+        ['64-72','2025-08',368],['12-48','2025-08',114],['76+','2025-08',226],['73-75','2025-08',74],['49-63','2025-08',218],
+      ],
+      config: {
+        rowDims: ['Term'], colDims: ['Month'], measures: ['Total'],
+        placement: 'columns', summaryMode: 'pctOfColumn',
+        formats: { 'Total': { type: 'percent', decimals: 1, fraction: true } },
+        signColors: {}, grandTotal: true, rowTotal: true, ratioTotal: {}, noTotal: [],
+        aliases: { 'Term': 'Term (Average) - Market Analysis', 'Total': 'Total Str Weight' },
+        sortRows: 'asc',
+      },
+    },
+
+    // "Annual Volume": a Year-grain date column, which must read 2023 not Jan 2023.
+    annualvol: {
+      schema: [
+        { name: 'Year(MonthOfSale)', type: 'ATTRIBUTE' },
+        { name: '12-48', type: 'MEASURE' },
+        { name: '49-63', type: 'MEASURE' },
+      ],
+      data: [
+        [Date.UTC(2024,0,1), 860000, 1510000],
+        [Date.UTC(2023,0,1), 940000, 1380000],
+        [Date.UTC(2025,0,1), 830000, 1630000],
+      ],
+      config: {
+        rowDims: [], colDims: ['Month'], measures: ['12-48', '49-63'],
+        placement: 'rows', summaryMode: 'none',
+        formats: { '12-48': { type: 'millions', decimals: 2 }, '49-63': { type: 'millions', decimals: 2 } },
+        signColors: {}, grandTotal: true, rowTotal: true, ratioTotal: {}, noTotal: [],
+        aliases: { 'Month': 'Year(MonthOfSale)' }, sortRows: 'asc',
+      },
+    },
+    // "Lender Share of Loans (%)" at its real tile width: a long row-dim label plus
+    // three measures is what was overflowing into a horizontal scrollbar.
+    lender: {
+      schema: [
+        { name: 'Lender Segment', type: 'ATTRIBUTE' },
+        { name: 'Current Month',  type: 'MEASURE' },
+        { name: 'YoY',            type: 'MEASURE' },
+        { name: 'MoM',            type: 'MEASURE' },
+      ],
+      data: [
+        ['Bank', 0.281, -2.6, -0.6], ['Captive', 0.554, -0.7, -0.1],
+        ['Credit Union', 0.123, 2.3, 0.6], ['Independent', 0.039, 1.0, 0.0],
+        ['Other', 0.002, -0.04, -0.02],
+      ],
+      config: {
+        rowDims: ['Lender Segment'], colDims: [],
+        measures: ['Current Month', 'vs. Last Year', 'vs. Last Month'],
+        placement: 'columns', summaryMode: 'none',
+        formats: {
+          'Current Month':  { type: 'percent', decimals: 1, fraction: true },
+          'vs. Last Year':  { type: 'number', decimals: 1 },
+          'vs. Last Month': { type: 'number', decimals: 1 },
+        },
+        signColors: {
+          'vs. Last Year':  { neg: '#FF69B4', pos: '#31563A' },
+          'vs. Last Month': { neg: '#FF69B4', pos: '#31563A' },
+        },
+        grandTotal: true, rowTotal: false, ratioTotal: {}, noTotal: [],
+        aliases: { 'vs. Last Year': 'YoY', 'vs. Last Month': 'MoM' },
+        sortRows: 'asc',
+      },
+    },
+    // The live failure on the Snapshot-family tiles: 3 months x 4 tiers, where the
+    // group_aggregate columns are non-null on ONE row and YoY/MoM are null in every
+    // row. The chart must rebuild them from Current/Previous after aggregating.
+    snapshot: {
+      schema: [
+        { name: 'Credit Score',            type: 'ATTRIBUTE' },
+        { name: 'Month(Date of Purchase)', type: 'ATTRIBUTE' },
+        { name: 'Current Month',           type: 'MEASURE' },
+        { name: 'Previous Month',          type: 'MEASURE' },
+        { name: 'Previous Year',           type: 'MEASURE' },
+        { name: 'vs. Last Year',           type: 'MEASURE' },
+        { name: 'vs. Last Month',          type: 'MEASURE' },
+      ],
+      data: [
+        ['A - 740+',       Date.UTC(2026,3,1), null, null, null, null, null],
+        ['A - 740+',       Date.UTC(2026,4,1), null, null, null, null, null],
+        ['A - 740+',       Date.UTC(2026,5,1), 0.629, 0.625, 0.636, null, null],
+        ['B - 660 to 739', Date.UTC(2026,3,1), null, null, null, null, null],
+        ['B - 660 to 739', Date.UTC(2026,4,1), null, null, null, null, null],
+        ['B - 660 to 739', Date.UTC(2026,5,1), 0.214, 0.219, 0.225, null, null],
+        ['C - 620 to 659', Date.UTC(2026,3,1), null, null, null, null, null],
+        ['C - 620 to 659', Date.UTC(2026,5,1), 0.067, 0.067, 0.065, null, null],
+        ['D - Below 620',  Date.UTC(2026,3,1), null, null, null, null, null],
+        ['D - Below 620',  Date.UTC(2026,5,1), 0.091, 0.089, 0.075, null, null],
+      ],
+      config: {
+        rowDims: ['Credit Score'], colDims: [],
+        measures: ['Current Month', 'vs. Last Year', 'vs. Last Month'],
+        placement: 'columns', summaryMode: 'none',
+        formats: {
+          'Current Month':  { type: 'percent', decimals: 1, fraction: true },
+          'vs. Last Year':  { type: 'number', decimals: 1 },
+          'vs. Last Month': { type: 'number', decimals: 1 },
+        },
+        signColors: {
+          'vs. Last Year':  { neg: '#FF69B4', pos: '#31563A' },
+          'vs. Last Month': { neg: '#FF69B4', pos: '#31563A' },
+        },
+        grandTotal: true, rowTotal: false, ratioTotal: {}, noTotal: [],
+        computed: {
+          'vs. Last Year':  { op: 'diff', a: 'Current Month', b: 'Previous Year',  scale: 100 },
+          'vs. Last Month': { op: 'diff', a: 'Current Month', b: 'Previous Month', scale: 100 },
+        },
+        aliases: {}, sortRows: 'asc',
+      },
+    },
+    // The "Annual" tile: rows arrive per MONTH but the tile shows years, so a share
+    // measure would be summed twelve times over (1,200% grand total). The share is
+    // carried as its base amount instead and divided once, per column, by
+    // pctOfColumn — which is both the right weighting and a 100% total.
+    annual: {
+      schema: [
+        { name: 'Type of Sale',      type: 'ATTRIBUTE' },
+        { name: 'Sales Year',        type: 'ATTRIBUTE' },
+        { name: 'Month(Sales Month)', type: 'ATTRIBUTE' },
+        { name: 'Retail Sales',      type: 'MEASURE' },
+      ],
+      // Twelve months a year, three years. December runs heavier than average and is
+      // mixed differently, so an unweighted mean of monthly shares would NOT match.
+      data: (() => {
+        const rows = [], mix = { 2023: [0.299, 0.699, 0.002], 2024: [0.306, 0.690, 0.004] };
+        for (const y of [2023, 2024]) {
+          for (let m = 0; m < 12; m++) {
+            const total = m === 11 ? 1600000 : 900000;
+            const w = m === 11 ? [0.24, 0.75, 0.01] : mix[y];
+            ['Cash Sales', 'Finance Sales', 'Lease Sales'].forEach((t, i) => {
+              rows.push([t, String(y), Date.UTC(y, m, 1), Math.round(total * w[i])]);
+            });
+          }
+        }
+        return rows;
+      })(),
+      config: {
+        rowDims: ['Type of Sale'], colDims: ['Sales Year'],
+        measures: ['Sales %'],
+        placement: 'columns', summaryMode: 'pctOfColumn',
+        formats: { 'Sales %': { type: 'percent', decimals: 1, fraction: true } },
+        signColors: {}, grandTotal: true, rowTotal: false,
+        ratioTotal: {}, noTotal: [], computed: {},
+        aliases: { 'Sales %': 'Retail Sales' }, sortRows: 'asc',
+      },
+    },
+  };
+
+  const picked = CASES[new URLSearchParams(location.search).get('case')] || CASES.sales;
+  globalThis.__PIVOT_TEST_CONFIG__ = picked.config;
+  globalThis.viz = {
+    getDataFromSearchQuery: () => ({ getData: () => picked }),
+    events: { emitRenderCompletedEvent() {} },
+  };
+</script>
+<script type="module" src="pivot-table.js"></script>
+</body>
+</html>

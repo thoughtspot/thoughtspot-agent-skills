@@ -36,6 +36,13 @@ migration hits the same issue.
   before a CLI command is written. These are temporary scaffolding, not skill logic.
 - `agents/coco-snowsight/` — CoCo runs inside Snowsight and cannot install or invoke the `ts` CLI.
   CoCo skills use stored procedures (`TS_EXPORT_TML`, `TS_IMPORT_TML`, etc.) instead.
+- Sandbox code sent through the ThoughtSpot MCP's `execute-thoughtspot-code` — today
+  `ts-object-answer-chart-builder/helpers/answer-patch.js` and
+  `ts-object-liveboard-chart-builder/scripts/patch.js`. That code runs inside the MCP's sandbox, not on
+  the user's machine: there is no `ts` CLI to call, auth is the MCP's own session, and the only
+  client is the `ts.post` it provides. The skills need no `ts` profile at all. Keep such code in
+  one checked-in file per skill (not inline in SKILL.md), validate before every commit
+  (`VALIDATE_ONLY`, then `ALL_OR_NONE`), and cover it with a mock-`ts` smoke test.
 
 ---
 

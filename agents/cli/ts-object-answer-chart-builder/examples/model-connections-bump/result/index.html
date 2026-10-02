@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Model Connections — bump chart</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="chart">
+  <div class="chart-header">
+    <div class="chart-title">Ranking of activities performed online, by year: 2005–2016</div>
+    <div class="year-labels">
+      <span>2005</span>
+      <span>2016</span>
+    </div>
+  </div>
+  <canvas id="bumpChart"></canvas>
+  <div class="chart-footer">Data source: ISTAT, Multipurpose Survey on Households — period 2005–2016</div>
+</div>
+
+<script type="module">
+  // Local preview shim — in ThoughtSpot Muze Studio, `viz` is provided by the host.
+  // The chart only uses DataModel to round-trip its inline rows, so a minimal
+  // stand-in (same loadDataSync/getData surface) is enough for local preview.
+  class ShimDataModel {
+    static loadDataSync(data, schema) { return { data, schema }; }
+    constructor(formatted) { this._formatted = formatted; }
+    getData() {
+      const { data, schema } = this._formatted;
+      return { schema, data: data.map(row => schema.map(s => row[s.name])) };
+    }
+  }
+  window.viz = {
+    muze: { DataModel: ShimDataModel },
+    getDataFromSearchQuery: () => ({ getData: () => ({ schema: [], data: [] }) }),
+    events: { emitRenderCompletedEvent: () => {} },
+  };
+  try {
+    await import('./script.js');
+  } catch (err) {
+    document.getElementById('chart').innerHTML =
+      '<div class="error-display">JS Error: ' + err.message + '\n\n' + err.stack + '</div>';
+    console.error('Chart error:', err);
+  }
+</script>
+</body>
+</html>

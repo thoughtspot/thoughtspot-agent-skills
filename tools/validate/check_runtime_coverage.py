@@ -37,6 +37,12 @@ from _dirs import ALL_RUNTIMES
 # ("<skill>", "<runtime>") here.
 EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- CoCo Snowsight divergences (skill exists in claude, not in coco-snowsight) ---
+    ("ts-object-answer-chart-builder", "coco-snowsight"):
+        "CLI-only: iterates chart code in a local browser (Playwright) and reads the "
+        "screenshots; Snowsight has no shell or browser, and the skill touches no warehouse.",
+    ("ts-object-liveboard-chart-builder", "coco-snowsight"):
+        "CLI-only: drives the ThoughtSpot MCP and a local logged-in browser to build and "
+        "screenshot a Liveboard of custom charts; no Snowsight equivalent, no warehouse step.",
     ("ts-migrate-orgs", "coco-snowsight"):
         "CLI-only: drives a destructive cross-Org cutover through the `ts` CLI "
         "and a local state ledger, neither of which exists in Snowsight.",

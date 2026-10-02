@@ -1,0 +1,211 @@
+/* ============================================
+   CUSTOMIZE HERE
+   ============================================ */
+:root {
+  --font-size: 13px;
+  --font-size-print: 10pt;
+
+  --text-color: #000;
+  --header-bg: #f5f5f5;
+  --header-bg-print: #e5e5e5;
+
+  --border-color: #333;
+  --border-color-print: #000;
+
+  --cell-padding: 5px 8px;
+  --cell-padding-print: 5px 8px;
+
+  --font-weight-header: 600;
+
+  --dim-bg: #fafafa;
+  --total-bg: #f0f0f8;
+  --grand-total-bg: #e8e8f4;
+  --group-start-border: #999;
+}
+
+/* ============================================
+   BASE
+   ============================================ */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+#chart {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.pivot-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px;
+}
+
+/* ============================================
+   TABLE
+   ============================================ */
+.pivot-table {
+  border-collapse: collapse;
+  /* `min-width`, not `width`: a wide tile (Retail Sales Mix) still gets the table
+     stretched across it instead of a white gutter, but a narrow tile lets the table keep
+     its natural width and scroll. `width: 100%` forced the columns to fit the tile no
+     matter how narrow, which is what crushed the headers. */
+  min-width: 100%;
+}
+
+.pivot-warn {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #8a5300;
+  background: #fff6e5;
+  border-bottom: 1px solid #f0d9a8;
+}
+
+.pivot-table th,
+.pivot-table td {
+  border: 1px solid var(--border-color);
+  padding: var(--cell-padding);
+  font-size: var(--font-size);
+  color: var(--text-color);
+  white-space: nowrap;
+  /* Header cells wrap to two lines while value cells do not, so without this the
+     numbers in a two-line header row sit at the bottom of the cell. */
+  vertical-align: middle;
+}
+
+/* The label column absorbs spare width in a wide tile so the value columns stay at
+   content width. `max-width` keeps it from being handed slack a narrow tile does not
+   have — with a plain `width: 100%` it claimed the row and squeezed the value columns
+   until their headers broke apart. */
+.pivot-table .dim-header,
+.pivot-table .dim-cell {
+  width: auto;
+  min-width: 0;
+}
+
+/* ── HEADER ──────────────────────────────── */
+.pivot-table thead th {
+  background: var(--header-bg);
+  font-weight: var(--font-weight-header);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* Headers wrap between words, so "vs. Last Month" can sit on two lines rather than
+     forcing the table wider. Never inside a word: `overflow-wrap: anywhere` let the
+     browser break "Current" into "Curren / t" the moment the column got tight. */
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.dim-header {
+  text-align: left;
+  background: var(--header-bg) !important;
+}
+
+.col-group {
+  text-align: center;
+}
+
+.col-value-header {
+  text-align: right;
+}
+
+.measure-header {
+  text-align: right;
+  font-size: 11px;
+  color: #555;
+  font-weight: 500;
+}
+
+/* Visual separator between col groups (multi-measure only) */
+.group-start {
+  border-left: 2px solid var(--group-start-border) !important;
+}
+
+/* ── TOTALS COLUMN / ROW ────────────────── */
+/* The Total column reads as a summary, so it is bold like the total row. */
+.total-col,
+.pivot-table thead th.total-col {
+  background: var(--total-bg) !important;
+  font-weight: 700;
+}
+
+.total-row td {
+  background: var(--total-bg);
+  font-weight: 600;
+}
+
+.total-row-label {
+  background: var(--total-bg) !important;
+  font-weight: 700;
+}
+
+.grand-total {
+  background: var(--grand-total-bg) !important;
+  font-weight: 700;
+}
+
+/* ── BODY ────────────────────────────────── */
+.dim-cell {
+  background: var(--dim-bg);
+  font-weight: 500;
+  text-align: left;
+}
+
+.value-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.value-cell.empty {
+  color: #bbb;
+}
+
+/* ============================================
+   PRINT
+   ============================================ */
+@media print {
+  html, body, #chart, .pivot-scroll {
+    height: auto;
+    overflow: visible;
+  }
+
+  /* No blanket `color`: the sign colours on the delta columns are set inline and
+     must survive to PDF — reproducing them in print is the point of the migration. */
+  .pivot-table th,
+  .pivot-table td {
+    font-size: var(--font-size-print);
+    padding: var(--cell-padding-print);
+    border: 1px solid var(--border-color-print);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Repeat the header on every printed page rather than only the first. */
+  .pivot-table thead { display: table-header-group; }
+
+  .pivot-table thead th {
+    background: var(--header-bg-print);
+    position: static;
+  }
+
+  .pivot-table tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}

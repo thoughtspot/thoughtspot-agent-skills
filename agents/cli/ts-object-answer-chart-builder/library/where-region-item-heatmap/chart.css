@@ -1,0 +1,62 @@
+/* ==== amuzing core css v1 | source: library/_shared/core.css | run helpers/sync-core.mjs, do not edit inside a chart ==== */
+:root {
+  --az-ink: #1E1E24; --az-ink2: #52525B; --az-muted: #8A8A94; --az-grid: #E6E7EA; --az-surface: #FFFFFF;
+  --az-good: #1F7A4D; --az-bad: #B3261E;
+  --az-slate-0: #EEF0F3; --az-slate-1: #D5DAE1; --az-slate-2: #B4BDC9; --az-slate-3: #8E9AAB; --az-slate-4: #6A7891; --az-slate-5: #4A5872; --az-slate-6: #2F3B54; --az-slate-7: #1E293B;
+  --az-font: Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+html, body { height: 100%; margin: 0; }
+body { background: var(--az-surface); color: var(--az-ink); font-family: var(--az-font); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; overflow: hidden; }
+#chart { height: 100%; position: relative; box-sizing: border-box; }
+.az-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 16px; text-align: center; color: var(--az-ink2); font-size: 13px; line-height: 1.4; }
+.az-empty b { color: var(--az-ink); font-size: 14px; font-weight: 600; }
+.az-err { margin: 0; padding: 12px; color: var(--az-bad); white-space: pre-wrap; font: 12px/1.5 ui-monospace, Menlo, monospace; }
+.az-tip { position: absolute; left: 0; top: 0; z-index: 20; pointer-events: none; opacity: 0; transition: opacity .12s ease; background: var(--az-ink); color: #fff; border-radius: 6px; padding: 8px 10px; font-size: 12px; line-height: 1.45; min-width: 120px; max-width: 260px; box-shadow: 0 2px 10px rgba(30, 30, 36, .22); }
+.az-tip b { font-weight: 600; display: block; margin-bottom: 3px; }
+.az-tr { display: flex; justify-content: space-between; gap: 14px; }
+.az-tk { color: #C9CDD6; display: inline-flex; align-items: center; gap: 6px; }
+.az-tk i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.az-tv { font-weight: 600; }
+/* motion: opacity only, so hover geometry (getScreenCTM, bounding boxes) is never off during an animation */
+@keyframes az-fade { from { opacity: 0; } to { opacity: 1; } }
+/* the tooltip is excluded: its opacity is driven by hover, and an animation fill would pin it visible */
+#chart.az-in > *:not(.az-tip) { animation: az-fade .38s cubic-bezier(.2, .7, .2, 1) both; }
+#chart.az-swap > *:not(.az-tip) { animation: az-fade .2s ease both; }
+@media (prefers-reduced-motion: reduce) { #chart.az-in > *, #chart.az-swap > * { animation: none; } }
+/* drill-down breadcrumb */
+.az-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; font-size: 12px; line-height: 1.4; color: var(--az-ink2); }
+.az-crumb { all: unset; cursor: pointer; color: var(--az-ink2); border-radius: 6px; padding: 2px 6px; }
+.az-crumb:hover { background: #F1F2F4; color: var(--az-ink); }
+.az-crumb:focus-visible { outline: 2px solid var(--az-ink); outline-offset: 1px; }
+.az-crumb.now { cursor: default; color: var(--az-ink); font-weight: 600; padding: 2px 6px; }
+.az-sep { color: var(--az-muted); }
+/* ==== end amuzing core css ==== */
+
+#chart { display: flex; flex-direction: column; padding: 14px 14px 10px; gap: 8px; overflow: hidden; }
+.hm-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none; }
+.hm-title { font-size: 13px; line-height: 1.3; font-weight: 600; }
+.hm-line { font-size: 12px; line-height: 1.4; color: var(--az-ink2); flex: none; margin-top: -4px; }
+.hm-line b { color: var(--az-ink); font-weight: 600; }
+.hm-seg { display: inline-flex; border: 1px solid var(--az-grid); border-radius: 6px; overflow: hidden; flex: none; }
+.hm-seg button { all: unset; cursor: pointer; font-size: 11px; line-height: 1; padding: 6px 8px; color: var(--az-muted); white-space: nowrap; }
+.hm-seg button + button { border-left: 1px solid var(--az-grid); }
+.hm-seg button.on { background: var(--az-ink); color: #fff; }
+.hm-seg button:not(.on):hover { background: #F1F2F4; color: var(--az-ink); }
+.hm-seg button:focus-visible { outline: 2px solid var(--az-ink); outline-offset: -2px; }
+.hm-grid { flex: 1 1 auto; min-height: 0; display: grid; gap: 2px; align-items: stretch; }
+.hm-fam { height: 6px; border-radius: 2px; align-self: end; }
+.hm-ch { all: unset; cursor: pointer; box-sizing: border-box; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; line-height: 1; color: var(--az-ink2); text-align: left; display: flex; align-items: center; justify-content: flex-start; padding: 2px 0; white-space: nowrap; min-height: 0; }
+.hm-rh { all: unset; cursor: pointer; box-sizing: border-box; font-size: 12px; font-weight: 500; color: var(--az-ink); display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; }
+.hm-ch:hover, .hm-rh:hover, .hm-ch.on, .hm-rh.on { color: var(--az-ink); font-weight: 600; }
+.hm-ch:focus-visible, .hm-rh:focus-visible { outline: 2px solid var(--az-ink); outline-offset: 1px; }
+.hm-c { border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; overflow: hidden; min-height: 0; transition: opacity .15s ease; box-sizing: border-box; }
+.hm-c:hover { outline: 2px solid var(--az-ink); outline-offset: -1px; }
+.hm-c.none { background: transparent; border: 1px dashed var(--az-grid); }
+.hm-dim { opacity: .25; }
+.hm-key { flex: none; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; line-height: 1.3; color: var(--az-muted); align-items: center; }
+.hm-key span { display: inline-flex; align-items: center; gap: 5px; }
+.hm-key i { width: 12px; height: 6px; border-radius: 2px; display: inline-block; }
+.hm-ramp { display: inline-flex; }
+.hm-ramp i { width: 9px; height: 10px; border-radius: 0; }
+.hm-clear { all: unset; cursor: pointer; margin-left: auto; font-size: 11px; color: var(--az-ink); border: 1px solid var(--az-grid); border-radius: 6px; padding: 3px 7px; visibility: hidden; }
+.hm-clear:focus-visible { outline: 2px solid var(--az-ink); outline-offset: 1px; }

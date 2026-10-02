@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Security Triage Funnel</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../public/muze/muze.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrapper">
+  <div class="header">
+    <div class="title">Security Triage Funnel</div>
+    <div class="subtitle">Event Count → Alert Count → Incident Count</div>
+  </div>
+  <div id="chart"></div>
+</div>
+
+<script type="module">
+  // Local preview shim — in ThoughtSpot Muze Studio, `viz` is provided by the host.
+  import muze from '../../../public/muze/muze.js';
+  const _env = muze();
+  muze.canvas = (...args) => _env.canvas(...args);
+  window.viz = {
+    muze,
+    getDataFromSearchQuery: () => ({ getData: () => ({ schema: [], data: [] }) }),
+    events: { emitRenderCompletedEvent: () => {} },
+  };
+  window.__muzeSilent = true;
+  try {
+    await import('./script.js');
+  } catch (err) {
+    document.getElementById('chart').innerHTML =
+      '<div class="error-display">JS Error: ' + err.message + '\n\n' + err.stack + '</div>';
+    console.error('Chart error:', err);
+  }
+</script>
+</body>
+</html>

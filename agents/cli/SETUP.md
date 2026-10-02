@@ -219,6 +219,12 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-erd \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-link-semantic-layer \
       ~/.claude/skills/ts-link-semantic-layer
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-chart-builder \
+      ~/.claude/skills/ts-object-answer-chart-builder
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-liveboard-chart-builder \
+      ~/.claude/skills/ts-object-liveboard-chart-builder
+
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-calendar-builder \
       ~/.claude/skills/ts-object-calendar-builder
 

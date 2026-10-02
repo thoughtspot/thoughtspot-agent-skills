@@ -1,0 +1,281 @@
+/* ============================================
+   CUSTOMIZE HERE
+   ============================================ */
+:root {
+  --font-size: 14px;
+  --font-size-print: 11pt;
+
+  --text-color: #000;
+  --header-bg: #f5f5f5;
+  --header-bg-print: #e5e5e5;
+
+  --border-color: #333;
+  --border-color-print: #000;
+
+  --cell-padding: 8px 10px;
+  --cell-padding-print: 6px 8px;
+
+  --font-weight-header: 600;
+  --font-weight-header-print: 700;
+
+  --sort-color: #999;
+  --sort-color-active: #000;
+}
+
+/* ============================================
+   BASE
+   ============================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+#chart {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Grid scrolls here so the toolbar stays fixed above it. */
+#gridHost {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px;
+}
+
+/* ============================================
+   RUNTIME CONTROLS (toolbar + gear panel)
+   ============================================ */
+.tc-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  height: 36px;
+  align-items: center;
+  padding: 0 8px;
+  border-bottom: 1px solid #e2e2e2;
+  background: #fff;
+}
+
+.tc-btn {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 5px 9px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  background: #fafafa;
+  color: #333;
+  cursor: pointer;
+}
+.tc-btn:hover:not(:disabled) { background: #f0f0f0; border-color: #aaa; }
+.tc-btn:disabled { opacity: 0.35; cursor: default; }
+.tc-mini { padding: 2px 5px; font-size: 10px; }
+.tc-gear { font-size: 15px; }
+
+.tc-panel {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  z-index: 10;
+  max-width: 100%;
+  max-height: 70%;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 0 0 0 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  padding: 8px 10px;
+}
+.tc-panel[hidden] { display: none; }
+
+.tc-panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  margin: 2px 2px 8px;
+}
+
+.tc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tc-move { display: inline-flex; flex-direction: column; gap: 1px; }
+.tc-name {
+  flex: 0 0 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.tc-sel { font: inherit; font-size: 12px; padding: 2px 4px; }
+.tc-num { width: 42px; font: inherit; font-size: 12px; padding: 2px 4px; }
+.tc-cur { width: 46px; font: inherit; font-size: 12px; padding: 2px 4px; text-transform: uppercase; }
+.tc-field { display: inline-flex; align-items: center; gap: 3px; color: #555; }
+.tc-colors { display: inline-flex; gap: 4px; }
+.tc-color { display: inline-flex; align-items: center; gap: 2px; }
+.tc-color-lbl { color: #888; width: 8px; text-align: center; }
+.tc-color input[type="color"] { width: 22px; height: 20px; padding: 0; border: 1px solid #ccc; }
+
+/* ============================================
+   TABLE
+   ============================================ */
+.gridjs-container,
+.gridjs-wrapper {
+  width: 100%;
+  overflow: visible;
+}
+
+.gridjs-table {
+  /* `min-width` rather than `width`: the table still fills a wide tile, but a narrow one
+     lets it grow and scroll instead of crushing ten columns into the tile. With
+     `table-layout: fixed` every column got an equal, far-too-small share and the headers
+     broke mid-word ("Ne w Ret ail"). */
+  min-width: 100%;
+  table-layout: auto;
+  border-collapse: collapse;
+}
+
+.gridjs-th,
+.gridjs-td {
+  border: 1px solid var(--border-color);
+  padding: var(--cell-padding);
+  font-size: var(--font-size);
+  color: var(--text-color);
+  text-align: left;
+  /* Wrap between words only. `break-word` splits inside a word as soon as a column is
+     narrower than its longest word, which is what produced the shredded headers. */
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+/* Numbers read as a column when they share a right edge. */
+.gridjs-td:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.gridjs-th {
+  background: var(--header-bg);
+  font-weight: var(--font-weight-header);
+  position: relative;
+  padding-right: 28px;
+}
+
+/* ============================================
+   SORT BUTTONS
+   ============================================ */
+button.gridjs-sort {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  appearance: none;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 10px 10px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  width: 12px;
+  height: 14px;
+  cursor: pointer;
+  font-size: 0;
+  color: transparent;
+}
+
+.gridjs-sort-neutral {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M6 1L2 5h8z' fill='%23999'/><path d='M6 11L2 7h8z' fill='%23999'/></svg>");
+  opacity: 0.6;
+}
+
+.gridjs-sort-asc {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M6 3L2 8h8z' fill='%23000'/></svg>");
+}
+
+.gridjs-sort-desc {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M6 9L2 4h8z' fill='%23000'/></svg>");
+}
+
+button.gridjs-sort:hover {
+  opacity: 1;
+}
+
+/* ============================================
+   PRINT
+   ============================================ */
+@media print {
+  html, body, #chart {
+    height: auto;
+    overflow: visible;
+  }
+
+  /* Controls never print. */
+  .tc-toolbar,
+  .tc-panel {
+    display: none;
+  }
+
+  /* On screen the table may exceed the tile and scroll; paper has no scrollbar, so a
+     wider-than-page table is silently clipped — the last three Snapshot columns went
+     missing that way. `width` forces it onto the page; headers wrap between words to
+     absorb the difference. */
+  .gridjs-table {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .gridjs-td:not(:first-child) {
+    white-space: normal;
+  }
+
+  /* No blanket `color`: the sign colours on the delta columns are set inline and
+     must survive to PDF — reproducing them in print is the point of the migration. */
+  .gridjs-th,
+  .gridjs-td {
+    font-size: var(--font-size-print);
+    padding: var(--cell-padding-print);
+    border: 1px solid var(--border-color-print);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .gridjs-th {
+    background: var(--header-bg-print);
+    font-weight: var(--font-weight-header-print);
+  }
+
+  /* Repeat the header on every printed page rather than only the first. */
+  .gridjs-head, .gridjs-table thead { display: table-header-group; }
+
+  button.gridjs-sort {
+    display: none;
+  }
+
+  .gridjs-tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}

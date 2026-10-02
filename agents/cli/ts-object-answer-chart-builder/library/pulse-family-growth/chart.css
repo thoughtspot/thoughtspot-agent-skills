@@ -1,0 +1,115 @@
+/* ==== amuzing core css v1 | source: library/_shared/core.css | run helpers/sync-core.mjs, do not edit inside a chart ==== */
+:root {
+  --az-ink: #1E1E24; --az-ink2: #52525B; --az-muted: #8A8A94; --az-grid: #E6E7EA; --az-surface: #FFFFFF;
+  --az-good: #1F7A4D; --az-bad: #B3261E;
+  --az-slate-0: #EEF0F3; --az-slate-1: #D5DAE1; --az-slate-2: #B4BDC9; --az-slate-3: #8E9AAB; --az-slate-4: #6A7891; --az-slate-5: #4A5872; --az-slate-6: #2F3B54; --az-slate-7: #1E293B;
+  --az-font: Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+html, body { height: 100%; margin: 0; }
+body { background: var(--az-surface); color: var(--az-ink); font-family: var(--az-font); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; overflow: hidden; }
+#chart { height: 100%; position: relative; box-sizing: border-box; }
+.az-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 16px; text-align: center; color: var(--az-ink2); font-size: 13px; line-height: 1.4; }
+.az-empty b { color: var(--az-ink); font-size: 14px; font-weight: 600; }
+.az-err { margin: 0; padding: 12px; color: var(--az-bad); white-space: pre-wrap; font: 12px/1.5 ui-monospace, Menlo, monospace; }
+.az-tip { position: absolute; left: 0; top: 0; z-index: 20; pointer-events: none; opacity: 0; transition: opacity .12s ease; background: var(--az-ink); color: #fff; border-radius: 6px; padding: 8px 10px; font-size: 12px; line-height: 1.45; min-width: 120px; max-width: 260px; box-shadow: 0 2px 10px rgba(30, 30, 36, .22); }
+.az-tip b { font-weight: 600; display: block; margin-bottom: 3px; }
+.az-tr { display: flex; justify-content: space-between; gap: 14px; }
+.az-tk { color: #C9CDD6; display: inline-flex; align-items: center; gap: 6px; }
+.az-tk i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.az-tv { font-weight: 600; }
+/* motion: opacity only, so hover geometry (getScreenCTM, bounding boxes) is never off during an animation */
+@keyframes az-fade { from { opacity: 0; } to { opacity: 1; } }
+/* the tooltip is excluded: its opacity is driven by hover, and an animation fill would pin it visible */
+#chart.az-in > *:not(.az-tip) { animation: az-fade .38s cubic-bezier(.2, .7, .2, 1) both; }
+#chart.az-swap > *:not(.az-tip) { animation: az-fade .2s ease both; }
+@media (prefers-reduced-motion: reduce) { #chart.az-in > *, #chart.az-swap > * { animation: none; } }
+/* drill-down breadcrumb */
+.az-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; font-size: 12px; line-height: 1.4; color: var(--az-ink2); }
+.az-crumb { all: unset; cursor: pointer; color: var(--az-ink2); border-radius: 6px; padding: 2px 6px; }
+.az-crumb:hover { background: #F1F2F4; color: var(--az-ink); }
+.az-crumb:focus-visible { outline: 2px solid var(--az-ink); outline-offset: 1px; }
+.az-crumb.now { cursor: default; color: var(--az-ink); font-weight: 600; padding: 2px 6px; }
+.az-sep { color: var(--az-muted); }
+/* ==== end amuzing core css ==== */
+
+#chart { display: flex; flex-direction: column; padding: 12px 14px; gap: 3px; }
+.fg-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.fg-t { font-size: 14px; font-weight: 600; color: var(--az-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fg-seg { flex: none; display: inline-flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--az-slate-0); }
+.fg-seg button { all: unset; cursor: pointer; font-size: 12px; line-height: 1.3; padding: 3px 8px; border-radius: 6px; color: var(--az-ink2); }
+.fg-seg button.on { background: var(--az-surface); color: var(--az-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(30, 30, 36, .14); }
+.fg-seg button:disabled { opacity: .4; cursor: default; }
+.fg-seg button:focus-visible { outline: 2px solid var(--az-ink); outline-offset: 1px; }
+.fg-lead { flex: none; margin: 2px 0 0; font-size: 13px; font-weight: 600; line-height: 1.35; color: var(--az-ink); }
+.fg-cap { flex: none; margin: 0 0 5px; font-size: 11px; line-height: 1.35; color: var(--az-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fg-grid { flex: 1 1 auto; min-height: 0; display: grid; gap: 8px; }
+
+.fg-card { position: relative; box-sizing: border-box; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--az-grid); border-radius: 6px; background: var(--az-surface); cursor: pointer; outline: none; transition: border-color .15s ease, background-color .15s ease; will-change: transform; }
+.fg-card.hov { border-color: var(--az-slate-3); background: #F6F7F9; }
+.fg-card:focus-visible { outline: 2px solid var(--az-ink); outline-offset: 1px; }
+.fg-nm { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--az-ink); min-width: 0; }
+.fg-nm i { flex: none; width: 10px; height: 10px; border-radius: 3px; }
+.fg-nm span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fg-cp { display: none; margin-left: auto; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.fg-val { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; min-width: 0; }
+.fg-s { font-size: 14px; font-weight: 600; color: var(--az-ink); letter-spacing: -.01em; }
+.fg-d, .fg-p { font-size: 12px; font-weight: 600; }
+.fg-p { margin-left: auto; }
+.fg-sum { display: none; font-size: 12px; color: var(--az-ink2); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fg-card.open .fg-sum { display: inline; }
+#chart.fg-cmp .fg-card.open .fg-sum { display: none; }
+.up { color: var(--az-good); }
+.dn { color: var(--az-bad); }
+.fg-bars { display: flex; flex-direction: column; gap: calc(var(--fg-bh, 8px) / 2); }
+.fg-br { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--az-ink2); min-width: 0; }
+.fg-bl { flex: none; width: 34px; }
+.fg-ba { flex: none; width: 50px; text-align: right; color: var(--az-ink); white-space: nowrap; }
+.fg-tr { position: relative; flex: 1 1 auto; height: var(--fg-bh, 8px); min-width: 20px; }
+.fg-row .fg-tr { height: 8px; }
+.fg-z { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--az-slate-3); }
+.fg-b { position: absolute; top: 0; height: 100%; left: 50%; width: 0; border-radius: 1px; }
+.fg-b.v { background: var(--az-slate-6); }
+.fg-b.p { background: var(--az-slate-3); }
+.fg-none { display: none; font-size: 11px; color: var(--az-muted); line-height: 1.3; }
+.fg-card.none .fg-bars { display: none; }
+.fg-card.none .fg-none { display: block; }
+.fg-det { display: none; }
+
+/* compact cards (narrow tiles): drop the amounts, the tooltip carries them */
+#chart.fg-cmp .fg-ba, #chart.fg-cmp .fg-d { display: none; }
+#chart.fg-cmp .fg-card { padding: 6px 8px; gap: 4px; }
+#chart.fg-cmp .fg-bl { width: 30px; }
+#chart.fg-nar .fg-cap { display: none; }
+#chart.fg-nar .fg-lead { font-size: 12px; }
+
+/* one card open: the rest compress into a strip */
+.fg-grid.x .fg-card:not(.open) { flex-direction: row; align-items: center; justify-content: flex-start; padding: 4px 8px; gap: 6px; }
+.fg-grid.x .fg-card:not(.open) .fg-val, .fg-grid.x .fg-card:not(.open) .fg-bars, .fg-grid.x .fg-card:not(.open) .fg-none { display: none; }
+.fg-grid.x .fg-card:not(.open) .fg-nm { flex: 1 1 auto; font-weight: 500; color: var(--az-ink2); }
+.fg-grid.x .fg-card:not(.open) .fg-cp { display: inline; }
+#chart.fg-cmp .fg-grid.x .fg-card:not(.open) .fg-nm span { display: none; }
+#chart.fg-cmp .fg-grid.x .fg-card:not(.open) .fg-cp { margin-left: 0; font-size: 11px; }
+.fg-card.open { justify-content: flex-start; border-color: var(--az-slate-3); }
+.fg-card.open .fg-bars { display: none; }
+.fg-card.open .fg-det { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.fg-card.open .fg-val { flex: none; }
+.fg-rh, .fg-row { display: grid; grid-template-columns: minmax(70px, 1.1fr) 58px minmax(60px, 2fr) minmax(60px, 2fr); align-items: center; gap: 10px; font-size: 11px; }
+.fg-rh { color: var(--az-muted); padding: 2px 4px 4px; border-bottom: 1px solid var(--az-grid); }
+.fg-rh span:nth-child(2) { text-align: right; }
+.fg-row { flex: 1 1 0; max-height: 34px; min-height: 18px; padding: 0 4px; border-radius: 6px; color: var(--az-ink); }
+.fg-row.hov { background: var(--az-slate-0); }
+.fg-rn { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.fg-rn i { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.fg-rd { text-align: right; font-weight: 600; white-space: nowrap; }
+.fg-rc { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.fg-rc em { flex: none; width: 50px; font-style: normal; text-align: right; color: var(--az-ink2); white-space: nowrap; }
+.fg-rnote { font-size: 11px; color: var(--az-muted); padding: 4px; }
+#chart.fg-cmp .fg-rh, #chart.fg-cmp .fg-row { grid-template-columns: minmax(52px, 1fr) 44px minmax(30px, 1fr) minmax(30px, 1fr); gap: 6px; }
+#chart.fg-cmp .fg-rc em { display: none; }
+.fg-tn { margin-top: 4px; color: #C9CDD6; font-size: 11px; }
+#chart.fg-cmp .fg-grid.x { gap: 4px; }
+#chart.fg-cmp .fg-grid.x .fg-card:not(.open) { padding: 3px 4px; gap: 3px; justify-content: center; }
+#chart.fg-cmp .fg-grid.x .fg-card:not(.open) .fg-nm { flex: none; gap: 3px; }
+#chart.fg-cmp .fg-grid.x .fg-card:not(.open) .fg-nm i { width: 7px; height: 7px; border-radius: 2px; }
+.fg-br.hl { color: var(--az-ink); font-weight: 600; }
+.fg-br.hl .fg-b { filter: brightness(.82); }

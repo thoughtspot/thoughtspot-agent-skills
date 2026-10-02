@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Table chart — local preview</title>
+  <link rel="stylesheet" href="table-chart-gridjs.css">
+</head>
+<body style="margin:0;font-family:Inter,system-ui,sans-serif">
+<!--
+  Local preview only. The mock `viz` and the test CONFIG live here rather than in
+  table-chart-gridjs.js, so nothing ships to production that production does not need.
+
+  Covers a hidden column, a column reordered by CONFIG, sign colours, and one cell
+  wrapped as { value(){...} } — some clusters return cells that way.
+-->
+<div id="chart"></div>
+<script>
+  const wrapped = { value() { return 271854.207; } };
+  globalThis.__TABLE_TEST_CONFIG__ = {
+    columns: ['Type of Sale', 'Retail Sales', 'Retail Sales %', 'vs. Last Year'],
+    hidden: ['__id__'],
+    formats: {
+      'Retail Sales':   { type: 'thousands', decimals: 0 },
+      'Retail Sales %': { type: 'percent', decimals: 1, fraction: true },
+      'vs. Last Year':  { type: 'number', decimals: 1 },
+    },
+    signColors: { 'vs. Last Year': { neg: '#FF69B4', pos: '#31563A' } },
+  };
+  globalThis.viz = {
+    getDataFromSearchQuery: () => ({
+      getData: () => ({
+        schema: [
+          { name: '__id__',         type: 'ATTRIBUTE' },
+          { name: 'Type of Sale',   type: 'ATTRIBUTE' },
+          { name: 'vs. Last Year',  type: 'MEASURE' },
+          { name: 'Retail Sales',   type: 'MEASURE' },
+          { name: 'Retail Sales %', type: 'MEASURE' },
+        ],
+        data: [
+          ['r1', 'Cash Sales',    -0.7, wrapped, 0.20072],
+          ['r2', 'Finance Sales',  1.8, 643000,  0.57616],
+          ['r3', 'Lease Sales',   -1.1, 249000,  0.22312],
+        ],
+      }),
+    }),
+    events: { emitRenderCompletedEvent() {} },
+  };
+</script>
+<script type="module" src="table-chart-gridjs.js"></script>
+</body>
+</html>
