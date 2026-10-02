@@ -227,6 +227,9 @@ consumer lookup fails, hides dependents from this user, or is consumed only by
 another Set is **not** reported as an orphan — the audit records a warning instead.
 A Model whose Set listing is incomplete contributes no Set rows, only a warning.
 H4 ignores Set rows: a Model whose only dependents are Sets is still an orphan.
+The Set discovery and the consumer lookup are the shared `tools/ts-cli/ts_cli/sets/`
+modules (`discover.py`, `consumers.py`), the same code behind `/ts-object-set-manager` and
+the `/ts-migrate-orgs` Set gate. That skill's "How it works" section describes the API steps.
 
 **For H angle (formula checks) — also enumerate answers:**
 

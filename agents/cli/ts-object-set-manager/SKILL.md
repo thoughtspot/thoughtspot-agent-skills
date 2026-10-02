@@ -18,6 +18,40 @@ read-only.** Deleting, converting to answer-level and revoking grants are v2 (BL
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | Auth |
 | [../../../tools/ts-cli/README.md](../../../tools/ts-cli/README.md) | `ts sets` — every flag, output key and note kind |
 
+## How it works
+
+The skill runs two CLI commands. All the logic is in `tools/ts-cli/ts_cli/sets/`, one
+module per job, and `ts sets` is the only entry point. Every ThoughtSpot call is read-only.
+
+| Step | Module | API | What it answers |
+|---|---|---|---|
+| 1. Sets on a Model | `discover.py` | `GET /callosum/v1/metadata/detail/{model}?type=LOGICAL_TABLE&fetchcohortcolumnsonly=true` (private, undocumented; never sends `doUpdate`) | Every reusable Set the Model owns. A row is a Set if it has a `cohortConfig`. Never decide by header `type`: it is often blank |
+| 2. What depends on each Set | `consumers.py` | v2 `POST metadata/search`, with dependents, for the Set's GUID with **type `LOGICAL_COLUMN`** | The Answers and Liveboards that use the Set, including a Liveboard that uses it only as a filter. The default type returns nothing for a Set |
+| 3. Where inside each Liveboard | `consumers.py` | v2 `metadata/tml/export` of each Liveboard from step 2 | Step 2 names the Liveboard, not the visualization. This step finds the visualizations that reference `[Set Name]` in their search, columns or formulas, and whether the Set is a Liveboard filter |
+| 4. Class | `classify.py` | — | `KEEP_FILTER` → `REVIEW_MANUAL` → `KEEP_SHARED` → `CANDIDATE_ANSWER` / `CANDIDATE_VIZ` → `REVIEW_DELETE`. The first matching rule wins, so any uncertainty resolves before a candidate verdict |
+| 5. Where each grant came from | `grants.py` | v2 `security/metadata/fetch-permissions`, `DEFINED` only | For each grant on the Set: `DIRECT`, `REQUIRED`, `EXPLAINED`, `UNEXPLAINED` or `UNKNOWN`, worked out against the grants and owners of the Set's dependents |
+| 6. Inventory and report | `inventory.py`, `render.py` | — | `sets-inventory.json`, then `report.html` and `report.md` |
+
+**Why step 1 is a private endpoint.** No public route lists a Model's Sets. A Model's
+dependents do not include them (BL-324). A cluster-wide `LOGICAL_COLUMN` search did not finish
+in 2h45m on se-thoughtspot. The legacy v1 dependency API returns the same results as v2.
+
+**The rule every step follows: a failure makes the report less certain, never more
+favourable.** Some examples:
+- A Model whose listing fails is `INCOMPLETE`, and its Set count is unknown, never 0.
+- A dependents response that does not include the Set, or reports hidden dependents, sends the
+  Set to `REVIEW_MANUAL`.
+- Grants that cannot be read are `UNKNOWN`.
+Every degraded object is named in the report's scan notes.
+
+**Shared with two other skills.** `discover.py` is also the Set detection behind
+`/ts-migrate-orgs` (`ts migrate scan-sets` and the self-scan in `ts migrate apply`). Together
+with `consumers.py`, it also powers `/ts-audit`'s H5 orphan-Set check. A change to either
+module changes all three skills.
+
+The full design and the live evidence are in the spec linked under References (§2 findings
+F1–F12, Appendices A and B).
+
 ## Step 0 — Overview
 
 Display, then wait for Y:
