@@ -10,60 +10,9 @@ from ts_cli.migrate.sets_scan import (
     blocked_model_guids,
     build_blocked_entry,
     build_scan_report,
-    extract_cohort_columns,
-    is_cohort_row,
     normalise_dependents,
     render_scan_markdown,
 )
-
-
-def _col(guid, name, owner, subtype="COHORT_SIMPLE"):
-    return {"metadata_id": guid, "metadata_name": name,
-            "metadata_header": {"id": guid, "name": name, "type": subtype, "owner": owner}}
-
-
-# ---------------------------------------------------------------------------
-# Detection
-# ---------------------------------------------------------------------------
-
-def test_a_cohort_subtype_is_detected():
-    assert is_cohort_row(_col("c1", "RSET_QTY_BINS", "m1"))
-
-
-def test_an_ordinary_column_is_not():
-    assert not is_cohort_row(_col("c1", "AMOUNT", "m1", subtype="FORMULA"))
-
-
-def test_detection_matches_the_cohort_PREFIX_not_one_exact_subtype():
-    """`COHORT_SIMPLE` is what was observed live, but matching it exactly would silently
-    miss a future COHORT_ variant — and the failure mode of missing one is reporting a
-    blocked Model as clean, which is the whole thing this command prevents."""
-    assert is_cohort_row(_col("c1", "X", "m1", subtype="COHORT_COMPLEX"))
-    assert is_cohort_row(_col("c1", "X", "m1", subtype="cohort_simple"))   # case-insensitive
-
-
-def test_columns_are_attributed_to_their_owning_model():
-    rows = [_col("c1", "BINS", "m1"), _col("c2", "TIERS", "m2"),
-            _col("c3", "AMOUNT", "m1", subtype="FORMULA")]
-    found = extract_cohort_columns(rows, ["m1", "m2"])
-    assert [c["name"] for c in found["m1"]] == ["BINS"]      # FORMULA excluded
-    assert [c["name"] for c in found["m2"]] == ["TIERS"]
-
-
-def test_columns_owned_by_out_of_scope_models_are_ignored():
-    """One cluster-wide LOGICAL_COLUMN search is sliced per Model, so rows for Models
-    nobody asked about must not leak into the report."""
-    rows = [_col("c1", "BINS", "m1"), _col("c2", "OTHER", "m_elsewhere")]
-    assert set(extract_cohort_columns(rows, ["m1"])) == {"m1"}
-
-
-def test_a_model_with_no_cohort_column_is_simply_absent():
-    assert extract_cohort_columns([_col("c1", "BINS", "m1")], ["m1", "m2"]).keys() == {"m1"}
-
-
-def test_duplicate_rows_for_one_column_collapse():
-    rows = [_col("c1", "BINS", "m1"), _col("c1", "BINS", "m1")]
-    assert len(extract_cohort_columns(rows, ["m1"])["m1"]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +59,7 @@ def test_the_report_carries_the_DENOMINATOR_not_just_the_count():
     report = build_scan_report(["T1", "T2", "T3"], scanned_models=9, blocked=[_blocked()])
     assert report["scanned"] == {"orgs": 3, "models": 9}
     assert report["summary"] == {"orgs_blocked": 1, "models_blocked": 1,
-                                 "objects_affected": 1}
+                                 "objects_affected": 1, "models_incomplete": 0}
 
 
 def test_a_clean_fleet_reports_zero_rather_than_omitting_the_summary():
@@ -204,3 +153,12 @@ def test_list_models_filters_to_models_the_org_actually_owns():
     # Without the filter the caller still gets everything visible — the audit path relies
     # on that, so the narrowing must stay opt-in.
     assert len(discover.list_models(_Client())) == 2
+
+
+def test_markdown_flags_models_blocked_only_by_failed_discovery():
+    report = build_scan_report(["T1"], 1, [build_blocked_entry(
+        "T1", "Sales", "g1", [{"name": "(discovery incomplete)", "guid": ""}], [])],
+        discovery_notes=[{"org": "T1", "kind": "discovery_failed", "object": "Sales (g1)",
+                          "detail": "cohort listing failed"}], models_incomplete=1)
+    md = render_scan_markdown(report)
+    assert "only because Set discovery failed" in md and "cohort listing failed" in md

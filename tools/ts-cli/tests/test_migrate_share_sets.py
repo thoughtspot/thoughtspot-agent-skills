@@ -4,6 +4,8 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ts_cli.cli import app
 from ts_cli.migrate import apply_exec
 from ts_cli.migrate.apply_plan import (STEP_MOVE_SHIELDED, STEP_REWRITE_CONTENT,
@@ -80,24 +82,40 @@ def test_content_with_no_source_grants_gets_none():
 _MODEL_ROW = {"metadata_id": "g1", "metadata_name": "Sales",
               "metadata_type": "LOGICAL_TABLE",
               "metadata_header": {"ownerOrgId": 1}}
-_COHORT_ROW = {"metadata_id": "cc-1", "metadata_name": "Region Set",
-               "metadata_header": {"owner": "g1", "type": "COHORT_ATTRIBUTE"}}
+# A row of the per-Model cohort listing (`/callosum/v1/metadata/detail/{guid}`,
+# fetchcohortcolumnsonly). Membership is `cohortConfig`, never the header type (BL-325).
+_COHORT_ROW = {"header": {"id": "cc-1", "name": "Region Set", "type": "COHORT_ATTRIBUTE"},
+               "cohortConfig": {"name": "Region Set"}}
 
 
-def _client(cohort_rows):
+def _client(cohort_rows, fail_discovery=False):
+    """Mock source client. `client.get` serves the session read-back and the per-Model
+    cohort listing; `fail_discovery` makes the listing exit as the client does after
+    its own retries."""
     def post(path, json=None, **kw):
         if "metadata/search" in path:
             meta = (json or {}).get("metadata", [{}])[0]
-            if meta.get("type") == "LOGICAL_COLUMN":
-                return MagicMock(json=lambda: list(cohort_rows))
             if meta.get("name_pattern"):
                 return MagicMock(json=lambda: [_MODEL_ROW])
         return MagicMock(json=lambda: [])
 
+    def get(path, params=None, **kw):
+        if "/callosum/v1/metadata/detail/" in path:
+            if fail_discovery:
+                raise SystemExit(1)
+            rows = list(cohort_rows) if path.endswith("/g1") else []
+            return MagicMock(json=lambda: rows)
+        return MagicMock(json=lambda: {"current_org": {"id": 1}})
+
     client = MagicMock()
     client.post.side_effect = post
-    client.get.return_value = MagicMock(json=lambda: {"current_org": {"id": 1}})
+    client.get.side_effect = get
     return client
+
+
+def _detail_gets(client):
+    return [c for c in client.get.call_args_list
+            if "/callosum/v1/metadata/detail/" in c.args[0]]
 
 
 def _write_single_model_mapping(tmp_path):
@@ -144,15 +162,216 @@ def test_a_supplied_sets_scan_skips_the_self_scan(mock_cls, _rp, tmp_path):
     mock_cls.return_value = client
     _write_single_model_mapping(tmp_path)
     scan = tmp_path / "sets-scan.json"
-    scan.write_text(json.dumps({"blocked": []}))
+    scan.write_text(json.dumps({"blocked": [], "summary": {"models_incomplete": 0},
+                                "discovery_notes": []}))
     result = runner.invoke(app, ["migrate", "apply", "-d", str(tmp_path),
                                  "--sets-scan", str(scan),
                                  "--source-profile", "src",
                                  "--target-profile", "tgt", "--dry-run"])
     assert "SET_BLOCKER" not in result.stderr
-    column_searches = [c for c in client.post.call_args_list
-                       if "metadata/search" in c.args[0]
-                       and (c.kwargs.get("json") or {}).get("metadata",
-                                                            [{}])[0].get("type")
-                       == "LOGICAL_COLUMN"]
-    assert not column_searches
+    assert not _detail_gets(client)
+
+
+@pytest.mark.parametrize("doc", [
+    {"blocked": []},
+    {"blocked": [], "summary": {"models_blocked": 0}},
+    # One marker alone is a hand-edited or truncated file, not a BL-325 scan.
+    {"blocked": [], "discovery_notes": []},
+    {"blocked": [], "summary": {"models_incomplete": 0}},
+    # Present but the wrong shape.
+    {"blocked": [], "discovery_notes": "none", "summary": {"models_incomplete": 0}},
+    {"blocked": [], "discovery_notes": [], "summary": ["models_incomplete"]},
+])
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_a_pre_bl325_sets_scan_is_refused(mock_cls, _rp, tmp_path, doc):
+    """Final review must-fix 5: a scan file that does not carry both `discovery_notes`
+    (a list) and `summary.models_incomplete` predates BL-325, whose old COHORT-prefix detection
+    missed Sets with a blank header type. Trusting it would read "missed" as "clean"."""
+    client = _client([_COHORT_ROW])
+    mock_cls.return_value = client
+    _write_single_model_mapping(tmp_path)
+    scan = tmp_path / "sets-scan.json"
+    scan.write_text(json.dumps(doc))
+    result = runner.invoke(app, ["migrate", "apply", "-d", str(tmp_path),
+                                 "--sets-scan", str(scan),
+                                 "--source-profile", "src",
+                                 "--target-profile", "tgt", "--dry-run"])
+    assert result.exit_code == 1
+    assert "predates BL-325" in result.stderr and "scan-sets" in result.stderr
+    # The message must describe the both-markers rule, not "has neither" (wrong for a
+    # file carrying one marker).
+    stderr = " ".join(result.stderr.split())
+    assert "does not carry both `discovery_notes` (list) and `summary.models_incomplete`" in stderr
+    assert "has neither" not in stderr
+    assert not _detail_gets(client)
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_a_genuine_build_scan_report_is_accepted(mock_cls, _rp, tmp_path):
+    """The tightened check must still accept what `scan-sets` actually writes."""
+    from ts_cli.migrate.sets_scan import build_scan_report
+    from ts_cli.commands.migrate import _is_post_bl325_scan
+    report = build_scan_report(["T1"], scanned_models=1, blocked=[])
+    assert _is_post_bl325_scan(report)
+    client = _client([_COHORT_ROW])
+    mock_cls.return_value = client
+    _write_single_model_mapping(tmp_path)
+    scan = tmp_path / "sets-scan.json"
+    scan.write_text(json.dumps(report))
+    result = runner.invoke(app, ["migrate", "apply", "-d", str(tmp_path),
+                                 "--sets-scan", str(scan),
+                                 "--source-profile", "src",
+                                 "--target-profile", "tgt", "--dry-run"])
+    assert "predates BL-325" not in result.stderr
+    assert "SET_BLOCKER" not in result.stderr
+    assert not _detail_gets(client)
+
+
+# ---------------------------------------------------------------------------
+# BL-325 -- the gate uses shared Set discovery
+# ---------------------------------------------------------------------------
+
+def test_column_dependents_queries_logical_column():
+    """BL-325 (3): Set dependents need type LOGICAL_COLUMN; the default returns none."""
+    from ts_cli.migrate.discover import column_dependents
+    seen = {}
+    c = MagicMock()
+    c.post.side_effect = lambda path, json=None, **kw: (seen.update(json), MagicMock(json=lambda: []))[1]
+    column_dependents(c, "s1")
+    assert seen["metadata"][0]["type"] == "LOGICAL_COLUMN"
+
+
+def _apply(tmp_path):
+    _write_single_model_mapping(tmp_path)
+    return runner.invoke(app, ["migrate", "apply", "-d", str(tmp_path),
+                               "--source-profile", "src",
+                               "--target-profile", "tgt", "--dry-run"])
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_a_blank_type_set_still_blocks_apply(mock_cls, _rp, tmp_path):
+    """BL-325 (1): 2 of 3 live Sets had a blank header type."""
+    mock_cls.return_value = _client([dict(_COHORT_ROW, header=dict(_COHORT_ROW["header"], type=""))])
+    result = _apply(tmp_path)
+    assert result.exit_code == 1 and "SET_BLOCKER" in result.stderr
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_apply_refuses_when_discovery_for_the_mapped_model_fails(mock_cls, _rp, tmp_path):
+    """A failed cohort listing must make the gate stricter, never looser: a Model whose
+    Sets could not be listed is treated as blocked, not as clean."""
+    client = _client([], fail_discovery=True)
+    mock_cls.return_value = client
+    result = _apply(tmp_path)
+    assert _detail_gets(client)
+    assert result.exit_code == 1 and "SET_BLOCKER" in result.stderr
+
+
+_LONG_GUID = "00000000-0000-0000-0000-0000000000g1"
+
+
+def _scan(client):
+    with patch("ts_cli.commands.share._client_for_org", return_value=client):
+        return runner.invoke(app, ["migrate", "scan-sets", "--model", _LONG_GUID,
+                                   "--source-profile", "src"])
+
+
+def _scan_client(cohort_rows, fail_discovery=False, dependents=()):
+    client = _client(cohort_rows, fail_discovery)
+    base_get = client.get.side_effect
+
+    def get(path, params=None, **kw):
+        if path.endswith("/" + _LONG_GUID):
+            path = path[: -len(_LONG_GUID)] + "g1"
+        return base_get(path, params=params, **kw)
+
+    def post(path, json=None, **kw):
+        if "metadata/search" in path:
+            meta = (json or {}).get("metadata", [{}])[0]
+            if meta.get("type") == "LOGICAL_COLUMN":
+                return MagicMock(json=lambda: [{"dependent_objects": {
+                    "dependents": {meta.get("identifier", ""): {"QUESTION_ANSWER_BOOK": list(dependents)}}}}])
+        return MagicMock(json=lambda: [])
+
+    client.get.side_effect = get
+    client.post.side_effect = post
+    return client
+
+
+def test_scan_sets_blocks_a_blank_type_set_and_queries_its_dependents_as_logical_column():
+    client = _scan_client([dict(_COHORT_ROW, header=dict(_COHORT_ROW["header"], type=""))])
+    result = _scan(client)
+    assert result.exit_code == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["summary"]["models_blocked"] == 1
+    assert report["blocked"][0]["cohort_columns"] == [{"name": "Region Set", "guid": "cc-1"}]
+    dep_calls = [c.kwargs["json"]["metadata"][0] for c in client.post.call_args_list
+                 if "metadata/search" in c.args[0]]
+    assert dep_calls and all(m["type"] == "LOGICAL_COLUMN" and m["identifier"] == "cc-1"
+                             for m in dep_calls)
+
+
+def test_scan_sets_reports_a_failed_discovery_as_blocked_without_a_blank_dependents_lookup():
+    """Amendment 2: the `(discovery incomplete)` sentinel has guid "" -- it must still
+    block the Model, and must never be passed to `column_dependents`."""
+    client = _scan_client([], fail_discovery=True)
+    with patch("ts_cli.migrate.discover.column_dependents") as deps:
+        result = _scan(client)
+    assert result.exit_code == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["summary"]["models_blocked"] == 1
+    assert report["blocked"][0]["cohort_columns"] == [
+        {"name": "(discovery incomplete)", "guid": ""}]
+    assert not deps.call_args_list
+
+
+def test_scan_sets_leaves_a_clean_model_unblocked():
+    result = _scan(_scan_client([]))
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout)["summary"]["models_blocked"] == 0
+
+
+# ---------------------------------------------------------------------------
+# BL-325 review fix -- discovery notes reach the operator
+# ---------------------------------------------------------------------------
+
+def test_scan_sets_surfaces_a_failed_listing_in_stderr_and_the_report():
+    result = _scan(_scan_client([], fail_discovery=True))
+    assert result.exit_code == 0, result.stderr
+    assert "discovery_failed" in result.stderr and "cohort listing failed" in result.stderr
+    report = json.loads(result.stdout)
+    assert report["summary"]["models_incomplete"] == 1
+    assert [n["kind"] for n in report["discovery_notes"]] == ["discovery_failed"]
+    # Additive: blocked[] still carries the Model.
+    assert report["summary"]["models_blocked"] == 1
+
+
+def test_scan_sets_clean_run_has_no_incomplete_models():
+    report = json.loads(_scan(_scan_client([])).stdout)
+    assert report["summary"]["models_incomplete"] == 0
+    assert report["discovery_notes"] == []
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_apply_says_a_refusal_is_due_to_failed_discovery(mock_cls, _rp, tmp_path):
+    mock_cls.return_value = _client([], fail_discovery=True)
+    result = _apply(tmp_path)
+    assert result.exit_code == 1 and "SET_BLOCKER" in result.stderr
+    assert "discovery_failed" in result.stderr
+    assert "Set discovery FAILED" in result.stderr
+    # Final review must-fix 5: a scan file cannot fix a failed listing, so never advise one.
+    assert "--sets-scan" not in result.stderr
+
+
+@patch("ts_cli.commands.migrate.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.migrate.ThoughtSpotClient")
+def test_apply_with_a_confirmed_set_has_no_failed_discovery_line(mock_cls, _rp, tmp_path):
+    mock_cls.return_value = _client([_COHORT_ROW])
+    result = _apply(tmp_path)
+    assert result.exit_code == 1 and "SET_BLOCKER" in result.stderr
+    assert "Set discovery FAILED" not in result.stderr

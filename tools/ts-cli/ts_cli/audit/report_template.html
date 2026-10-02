@@ -1065,6 +1065,7 @@ function severityPill(sev){
 
 function tsLink(clusterUrl, guid, type){
   if(!clusterUrl || !guid) return "";
+  if(type === "SET") return "";  /* a Set has no page of its own; data/tables/<set> is a broken link */
   var path = type === "ANSWER" ? "saved-answer" : (type === "LIVEBOARD" ? "pinboard" : "data/tables");
   return '<a class="dep-link ts-link-btn" href="'+clusterUrl+'/#/'+path+'/'+guid+'" target="_blank" rel="noopener">Open ↗</a>';
 }

@@ -3693,14 +3693,20 @@ ts migrate scan-sets --models-file candidates.csv --source-profile prod
 
 Verified live 2026-07-26. Three facts:
 
-1. A Set creates a `LOGICAL_COLUMN` of subtype `COHORT_*` **owned by the Model**.
+1. A Set creates a `LOGICAL_COLUMN` **owned by the Model**. Its header `type` is often
+   blank (2 of 3 live Sets; only some read `COHORT_*`), so membership is decided by the
+   presence of `cohortConfig` in the Model's cohort listing, never by type (BL-325).
 2. It **does not appear in the Model's TML at all**.
 3. It **blocks publishing** the Model and every Answer and Liveboard on it, used or not.
 
 Fact 2 is the dangerous one, and it dictates the implementation: because the column is
 invisible in TML, a lift-and-shift would **silently drop** Sets rather than fail. So the
-scan queries `metadata/search` for `COHORT_*` subtypes — a TML inspection reports a clean
-Model that is in fact blocked.
+scan reads each Model's cohort listing through the shared Set discovery
+(`ts_cli/sets/discover.py`) — a TML inspection reports a clean Model that is in fact
+blocked. Membership is the presence of `cohortConfig`, never the header `type`, which was
+blank on 2 of 3 live Sets (BL-325). A Model whose listing fails is reported **blocked**,
+with the cohort column `(discovery incomplete)`, never clean; `apply`'s self-scan refuses it
+the same way.
 
 ### Output
 
@@ -3714,11 +3720,23 @@ without waiting for the platform.
 
 ```json
 {"scanned": {"orgs": 12, "models": 340},
- "summary": {"orgs_blocked": 3, "models_blocked": 4, "objects_affected": 17},
+ "summary": {"orgs_blocked": 3, "models_blocked": 4, "objects_affected": 17,
+             "models_incomplete": 1},
  "blocked": [{"org": "Tenant1", "model": "Sales", "model_guid": "...",
               "cohort_columns": [{"name": "RSET_QTY_BINS", "guid": "..."}],
-              "dependents": [{"type": "ANSWER", "name": "Q4 cohort view", "guid": "..."}]}]}
+              "dependents": [{"type": "ANSWER", "name": "Q4 cohort view", "guid": "..."}]},
+             {"org": "Tenant2", "model": "Ops", "model_guid": "...",
+              "cohort_columns": [{"name": "(discovery incomplete)", "guid": ""}],
+              "dependents": []}],
+ "discovery_notes": [{"org": "Tenant2", "kind": "discovery_failed",
+                      "object": "Ops (...)", "detail": "cohort listing failed: ..."}]}
 ```
+
+`summary.models_incomplete` counts the Models in `blocked` **only** because their cohort
+listing failed or returned a row that is not a recognisable Set; `discovery_notes` (kinds
+`discovery_failed`, `unrecognised_row`) names each one and why. Such a Model is blocked
+because its Set list is unknown, not because a Set was found — check it before planning
+around it.
 
 ### What happens to a blocked tenant
 
@@ -3732,9 +3750,120 @@ low-risk tenants migrate now, Sets-using tenants form a later batch.
 
 ### Cost
 
-One `LOGICAL_COLUMN` search per Org, sliced per Model — deliberately not one call per
-Model, because being cheap enough to run fleet-wide is the command's whole justification.
-Dependents are walked only for Models that actually carry a cohort column.
+One cohort-listing call per Model (0.3–1.7s each, live). The earlier design — one
+cluster-wide `LOGICAL_COLUMN` search per Org — did not finish in 2h45m on se-thoughtspot
+(BL-325). Dependents are walked only for Models that actually carry a cohort column, and
+are queried as `LOGICAL_COLUMN`; the default `LOGICAL_TABLE` returns nothing for a Set.
+
+---
+
+## `ts sets` — reusable Set inventory and report (read-only)
+
+Used by the `ts-object-set-manager` skill. Reports every **reusable Set** (cohort) on the
+scoped Models: what depends on it, a class (keep / candidate / review), and where every
+grant on it came from. **Changes nothing.**
+
+```bash
+ts sets inventory --model-contains DUNDER -p se
+ts sets inventory --org ORG1 --dry-run -p se
+ts sets inventory --all-orgs -o ./sets-inventory.json -p se
+ts sets report ./sets-inventory.json -o ./sets-report
+```
+
+### `ts sets inventory`
+
+| Option | Meaning |
+|---|---|
+| `--model <guid\|exact name>` | Repeatable. Combinable with the others; Models are de-duplicated by GUID |
+| `--model-contains <text>` | Repeatable; case-insensitive substring of a Model name |
+| `--org <name\|id>` | Repeatable; every Model that Org **owns** (visibility is not ownership). Without `--org`, the profile's default Org |
+| `--all-orgs` | Cluster scope: every ACTIVE Org in turn. **Ignores `--org`.** A non-ACTIVE Org is skipped and recorded as an `org_skipped` note |
+| `--dry-run` | Resolve scope only — Models matched per Org on stdout, a rough time estimate on stderr. No Set scan |
+| `-o`, `--output <path>` | Also write the JSON to this file (stdout always carries it) |
+| `--profile`, `-p` | Profile (or `TS_PROFILE`) |
+
+At least one scope flag is required. A selector that matches no Model in any Org exits 1
+with `No Model matched: …` before anything is scanned. There is no connection scope yet
+(BL-328).
+
+**How it works.** Per Model, one call to the internal cohort listing
+`GET /callosum/v1/metadata/detail/{model}?type=LOGICAL_TABLE&fetchcohortcolumnsonly=true`
+(0.3–1.7s live). This endpoint is **private and undocumented** (Confluence SAGE/4309319694);
+a 404 means the build moved it. The public routes do not work: Model dependents omit Sets,
+and a cluster-wide `LOGICAL_COLUMN` search did not finish in 2h45m. Set membership is the
+presence of `cohortConfig`, never the header `type`, which is often blank. Per Set it then
+reads dependents (as `LOGICAL_COLUMN`), exports each Liveboard dependent's TML to find the
+visualizations (`search_query`, `answer_columns[].name`, formula `expr`) and filters that
+name `[Set Name]`, and reads `DEFINED` grants on the Set and its consumers.
+
+**Output** — JSON, schema `ts-sets-inventory/1`:
+
+| Key | Content |
+|---|---|
+| `schema`, `generated_at`, `profile`, `scope` | Run metadata; `scope` echoes the selectors |
+| `orgs[]` | `{org, models[], notes[]}` per Org scanned |
+| `orgs[].models[]` | `{guid, name, discovery, set_count, sets[]}`. `discovery` is `COMPLETE` or `INCOMPLETE`; an `INCOMPLETE` Model has `set_count: null` — **unknown, not zero** |
+| `…sets[]` | `guid, name, model_guid, model_name, author, cohort_type, grouping_type, anchor_column, class, reason, target, dependents[], dependents_complete, liveboards{}, grants[]` |
+| `…dependents_complete` | `false` when the dependents list may be short (failed or partial lookup, an uninspected dependent type, an unreadable export). The report then shows the count as "unknown" or "≥N", never as a total |
+| `…grants[]` | `{principal_id, principal_name, principal_type, permission, provenance}` |
+| `notes[]` (top level) | `org_skipped`, with `reason`: `inactive` (a scope choice) or `malformed` (no `orgId`/`status` — the report marks the totals a floor) |
+| `summary` | `models, models_incomplete, sets, by_class, unexplained_grants, unknown_grants` |
+
+`--dry-run` output is `{schema, dry_run: true, scope, orgs: [{org, models}], notes}`.
+
+**Classes** — first matching rule wins; uncertainty is resolved before any candidate verdict:
+
+| Class | Rule |
+|---|---|
+| `KEEP_FILTER` | Named in a Liveboard filter |
+| `REVIEW_MANUAL` | A dependent lookup failed or hid dependents, a Liveboard export was unreadable, a dependent is another type (including another Set), or a Liveboard depends on the Set but no visualization or filter naming it was found. `reason` says which |
+| `KEEP_SHARED` | 2+ dependent objects, or one Liveboard with 2+ visualizations using it |
+| `CANDIDATE_ANSWER` | Exactly one dependent, an Answer (`target` names it) |
+| `CANDIDATE_VIZ` | Exactly one dependent, a Liveboard, one visualization (`target` names the viz) |
+| `REVIEW_DELETE` | No recorded dependents — unsaved ad-hoc searches are invisible |
+
+A Set referenced only inside a visualization formula counts as used.
+
+**Provenance** — per `DEFINED` grant on the Set; same-principal matching, groups not expanded:
+
+| Provenance | Rule |
+|---|---|
+| `DIRECT` | Edit (MODIFY) grant |
+| `REQUIRED` | View, and the principal owns (authored) content that uses the Set — revoking breaks it |
+| `EXPLAINED` | View, and the principal holds a grant on content that uses the Set (copied at share time) |
+| `UNEXPLAINED` | View, and no consumer explains it — the only label on the review list |
+| `UNKNOWN` | Grants could not be read, **or** consumers are uncertain (a failed dependents lookup, hidden dependents, a dependent with no author, an uninspected dependent type), so `EXPLAINED`/`UNEXPLAINED` cannot be decided |
+
+`NO_ACCESS` grants are dropped.
+
+**Per-Org `notes[]` kinds** — every one names the object:
+
+| Kind | Meaning |
+|---|---|
+| `discovery_failed` | A Model's cohort listing failed or returned a non-list; the Model is `INCOMPLETE` |
+| `unrecognised_row` | The listing returned a row that is not a recognisable Set; the Model is `INCOMPLETE` |
+| `dependents_failed` | A Set's dependents lookup failed or reported inaccessible dependents |
+| `export_unreadable` | A Liveboard dependent's TML export failed or was not Liveboard TML |
+| `unrecognised_dependent` | A dependent of a type not inspected (e.g. another Set) |
+| `grants_unreadable` | `fetch-permissions` failed; that Set's provenance is `UNKNOWN` |
+
+### `ts sets report <inventory.json>`
+
+| Option | Default | Meaning |
+|---|---|---|
+| `<inventory.json>` | required | Full output of `ts sets inventory` (dry-run output is refused, exit 1) |
+| `-o`, `--output <dir>` | `.` | Directory for `report.html` (self-contained) and `report.md` |
+
+**Output:** `{"html": path, "markdown": path}` on stdout. The report carries the summary, a
+row per Set per Model, expandable dependents and grants, the review lists (`REVIEW_DELETE`
+Sets and `UNEXPLAINED` grants — never a `REQUIRED` one) and every scan note.
+
+**Links.** `ts sets inventory` records the cluster's `base_url` in the document, and the report
+links every object that has a ThoughtSpot page: Models (`/#/data/tables/{guid}`), Answers
+(`/#/saved-answer/{guid}`) and Liveboards (`/#/pinboard/{guid}`), opening in a new tab in
+the HTML and as `[name](url)` in the Markdown, which also lists each used Set's dependents.
+Sets are not linked (a Set is a hidden column on its Model and has no page). A link opens in
+the Org the browser is signed in to. An inventory without `base_url` renders unlinked.
 
 ---
 
@@ -3757,6 +3886,10 @@ ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan --resume
 
 `--plan-dir` holds the approved `column-mapping.csv` from `ts migrate audit`, and receives
 `backup/` and the `state.json` ledger.
+
+`--sets-scan` is optional: without it apply runs the Set discovery itself. A scan file that
+does not carry both `discovery_notes` (list) and `summary.models_incomplete` predates BL-325 (its detection
+missed blank-type Sets) and is **refused** — re-run `ts migrate scan-sets`.
 
 **One Model per apply.** A mapping covering several Models (`audit --all-models` writes
 one by design) is **refused**: apply binds every rewritten object to ONE published

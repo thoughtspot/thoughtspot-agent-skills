@@ -11,7 +11,8 @@ and its output is a fleet roll-up rather than a per-tenant mapping file.
 
 **Why Sets block, in three verified facts** (nebula, 2026-07-26):
 
-1. A Set creates a `LOGICAL_COLUMN` of subtype `COHORT_*` **owned by the Model**.
+1. A Set creates a `LOGICAL_COLUMN` **owned by the Model**. Membership is `cohortConfig`;
+   the header type is often blank, so a `COHORT_*` subtype is not a reliable signal (BL-325).
 2. That column **does not appear in the Model's TML at all** -- the Model exported ten
    columns and the cohort column was not among them.
 3. It **blocks publishing** the Model and every Answer and Liveboard on it, used or not.
@@ -20,55 +21,18 @@ Fact 2 is the dangerous one, and it is the reason this scan exists rather than a
 inspection: because the column is invisible in TML, a lift-and-shift would **silently
 drop** Sets rather than fail, and nobody would notice until a tenant asked where theirs
 went. A TML-based check would report a clean Model that is in fact blocked.
+
+Detection lives in `ts_cli.sets.discover`, not here. Membership is the presence of
+`cohortConfig`; the header `type` is often blank (2 of 3 live Sets), which is why the old
+`COHORT` prefix match missed them (BL-325).
 """
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Set
 
-# A Set's column carries a `COHORT_*` subtype (`COHORT_SIMPLE` observed live). Matched by
-# prefix rather than equality so a future COHORT_ variant is not silently missed -- the
-# failure mode of an exact match here is reporting a blocked Model as clean.
-COHORT_PREFIX = "COHORT"
-
 # Only these can depend on a cohort column in a way that matters for migration. A
 # dependent of another type is recorded but never counted as an affected object.
 REPORTABLE_DEPENDENT_TYPES = ("ANSWER", "LIVEBOARD")
-
-
-def is_cohort_row(row: Dict[str, Any]) -> bool:
-    """Is this `metadata/search` row a Set's cohort column?"""
-    header = row.get("metadata_header") or {}
-    return str(header.get("type", "")).upper().startswith(COHORT_PREFIX)
-
-
-def extract_cohort_columns(rows: Iterable[Dict[str, Any]],
-                           owner_guids: Iterable[str]) -> Dict[str, List[Dict[str, str]]]:
-    """`{owner_guid: [{"name", "guid"}]}` for cohort columns owned by the named objects.
-
-    Mirrors `publish_planning._cohort_columns`, which the spec names as the reference
-    implementation, but keyed BY OWNER rather than flattened: a fleet report has to say
-    which Model is blocked, not merely that something is.
-
-    Rows whose owner is not in `owner_guids` are skipped, so the caller can pass one
-    cluster-wide `LOGICAL_COLUMN` search and slice it per Model without re-querying.
-    """
-    owners = set(owner_guids)
-    found: Dict[str, List[Dict[str, str]]] = {}
-    for row in rows or ():
-        if not is_cohort_row(row):
-            continue
-        header = row.get("metadata_header") or {}
-        owner = header.get("owner")
-        if owner not in owners:
-            continue
-        name = row.get("metadata_name") or header.get("name")
-        guid = row.get("metadata_id") or header.get("id")
-        if not name or not guid:
-            continue
-        bucket = found.setdefault(owner, [])
-        if not any(existing["guid"] == guid for existing in bucket):
-            bucket.append({"name": name, "guid": guid})
-    return {owner: sorted(cols, key=lambda c: c["name"]) for owner, cols in found.items()}
 
 
 def normalise_dependents(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, str]]:
@@ -101,12 +65,17 @@ def build_blocked_entry(org: str, model_name: str, model_guid: str,
 
 
 def build_scan_report(scanned_orgs: Iterable[str], scanned_models: int,
-                      blocked: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+                      blocked: Iterable[Dict[str, Any]],
+                      discovery_notes: Optional[List[Dict[str, Any]]] = None,
+                      models_incomplete: int = 0) -> Dict[str, Any]:
     """The `sets-scan.json` document.
 
     `scanned` carries the denominator deliberately. "Three blocked Orgs" is not a decision;
     "three of twelve" is -- and the whole purpose of Phase 0 is to size the problem before
     committing to build Phase 2.
+
+    `models_incomplete` counts Models in `blocked` only because discovery failed, and
+    `discovery_notes` says why, so a failed listing is never read as a confirmed Set.
     """
     blocked = sorted(blocked, key=lambda b: (b["org"], b["model"]))
     orgs = sorted({b["org"] for b in blocked})
@@ -115,8 +84,10 @@ def build_scan_report(scanned_orgs: Iterable[str], scanned_models: int,
         "scanned": {"orgs": len(list(scanned_orgs)), "models": scanned_models},
         "summary": {"orgs_blocked": len(orgs),
                     "models_blocked": len(blocked),
-                    "objects_affected": objects_affected},
+                    "objects_affected": objects_affected,
+                    "models_incomplete": models_incomplete},
         "blocked": blocked,
+        "discovery_notes": list(discovery_notes or []),
     }
 
 
@@ -139,6 +110,13 @@ def render_scan_markdown(report: Dict[str, Any]) -> str:
         f"| Answers / Liveboards affected | **{summary.get('objects_affected', 0)}** |",
         "",
     ]
+    notes = report.get("discovery_notes") or []
+    if summary.get("models_incomplete") or notes:
+        lines += [f"**{summary.get('models_incomplete', 0)} Model(s) are counted blocked only "
+                  "because Set discovery failed** — `(discovery incomplete)`, not a confirmed "
+                  "Set. Re-run once discovery succeeds.", ""]
+        lines += [f"- {n.get('org', '')} {n['kind']}: {n['object']} — {n['detail']}"
+                  for n in notes] + [""]
 
     if not blocked:
         lines += [

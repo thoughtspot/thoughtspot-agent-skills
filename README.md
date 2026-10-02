@@ -71,6 +71,7 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 | Skill | What it does | CLI | Snowsight | DBX |
 |---|---|:-:|:-:|:-:|
 | [`ts-object-model-coach`](agents/cli/ts-object-model-coach/SKILL.md) | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements | [✓](agents/cli/ts-object-model-coach/SKILL.md) | — | — |
+| [`ts-object-set-manager`](agents/cli/ts-object-set-manager/SKILL.md) | Inventory reusable Sets — dependents, delete/answer-level candidates, grant provenance (report only) | [✓](agents/cli/ts-object-set-manager/SKILL.md) | — | — |
 | [`ts-object-model-erd`](agents/cli/ts-object-model-erd/SKILL.md) | Render a Model into a self-contained HTML ERD — tables, joins, columns, RLS, findings — shareable without ThoughtSpot login | [✓](agents/cli/ts-object-model-erd/SKILL.md) | — | — |
 | [`ts-object-model-aggregates`](agents/cli/ts-object-model-aggregates/SKILL.md) | Audit a Model's Liveboards/Answers to recommend, generate, and wire aggregate Models (26.6 aggregate-aware routing) — signature mining, cost-based candidate ranking, gated DDL/TML generation ⚠️ pre-merge, open items unverified | [✓](agents/cli/ts-object-model-aggregates/SKILL.md) | — | — |
 | [`ts-object-model-alias`](agents/cli/ts-object-model-alias/SKILL.md) | Manage column aliases on a Model — language localization, tenant-based renaming, and combined tenant + locale matrices, via the `ts alias export/translate/build/import` pipeline | [✓](agents/cli/ts-object-model-alias/SKILL.md) | — | — |

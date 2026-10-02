@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ts_cli.commands.tml import parse_edoc, detect_tml_type
+from ts_cli.sets.consumers import fetch_consumers
+from ts_cli.sets.discover import discover_sets
 
 
 @dataclass
@@ -137,6 +139,51 @@ def _table_key(parsed: dict) -> str:
     return parsed.get("guid") or warehouse_path
 
 
+def _model_refs(models: list, model_guids: list) -> list:
+    """``{"guid", "name"}`` per Model in scope, named from its exported TML where we have it."""
+    names = {m["guid"]: (m.get("model") or {}).get("name") for m in models if m.get("guid")}
+    guids = dict.fromkeys(list(model_guids) + [m.get("guid") for m in models])
+    return [{"guid": g, "name": names.get(g) or g} for g in guids if g]
+
+
+def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
+                        warnings: list) -> None:
+    """Record each discovered Set under its Model, and its consumers under its own GUID.
+
+    Sets are not in a Model's dependents (BL-324), so H5 had nothing to read.
+    ``dependents[set_guid]`` is written ONLY when the consumer lookup is clean
+    (no ``error``, no ``other_types``). Absence means "not looked up", which
+    ``check_h5`` treats as silence, never as an orphan (BL-302). A Set whose
+    dependents are hidden from this user, or whose only dependent is another Set,
+    must not read as unused (ruling R14). A Model whose Set listing is incomplete
+    contributes no Set rows at all — only a warning.
+    """
+    if not model_refs:
+        return
+    _log("Discovering Sets...")
+    found = discover_sets(client, model_refs)
+    for model_guid, sets in found["sets"].items():
+        rows = dependents.setdefault(model_guid, [])
+        known = {d.get("guid") for d in rows if d.get("type") == "SET"}
+        for s in sets:
+            if s["guid"] not in known:
+                rows.append({"source_guid": model_guid, "guid": s["guid"], "name": s["name"],
+                             "type": "SET", "raw_bucket": "COHORT"})
+            cons = fetch_consumers(client, s)
+            if cons.get("error") or cons.get("other_types"):
+                why = cons.get("error") or "has dependents of a type H5 does not read: " + \
+                    ", ".join(sorted({o.get("type", "?") for o in cons["other_types"]}))
+                msg = f"Set {s['name']} ({s['guid']}): orphan check skipped — {why}"
+                _log(f"Warning: {msg}")
+                warnings.append(msg)
+                continue
+            dependents[s["guid"]] = [dict(d, source_guid=s["guid"]) for d in cons["dependents"]]
+    for note in found["notes"]:
+        msg = f"Set discovery {note['kind']} for {note['object']}: {note['detail']}"
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
+
+
 def build_context(
     client: Any,
     model_guids: list,
@@ -262,6 +309,9 @@ def build_context(
                     parsed = parse_edoc(edoc, "YAML")
                     if parsed and detect_tml_type(parsed) == "answer":
                         answers.append(parsed)
+        # After the answer export, so Set consumers do not widen the answer set.
+        # The SET rows are for H5; check_h4 ignores them (ruling R15).
+        _add_set_dependents(client, _model_refs(models, model_guids), dependents, warnings)
 
     _log(f"Context ready: {len(models)} model(s), {len(tables)} table(s), "
          f"{len(answers)} answer(s)")

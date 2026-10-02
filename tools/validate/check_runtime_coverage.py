@@ -73,6 +73,9 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
         "CLI only — depends on ts CLI for all operations",
     ("ts-object-model-coach", "coco-snowsight"):
         "Interactive coaching workflow doesn't fit Snowsight stored-proc execution model",
+    ("ts-object-set-manager", "coco-snowsight"):
+        "CLI-only: Set inventory runs the ts CLI against ThoughtSpot and is not part of "
+        "the Snowflake conversion pipeline CoCo is scoped to.",
     ("ts-object-model-erd", "coco-snowsight"):
         "TML parsing + HTML rendering require shell access; not supported in Snowsight stored-proc runtime",
     ("ts-link-semantic-layer", "coco-snowsight"):

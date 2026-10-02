@@ -164,11 +164,14 @@ def scan_sets(
     number: how many tenants actually use Sets. That decides whether Sets support gates
     the whole programme or is a tail of stragglers.
 
-    A Set creates a `COHORT_*` `LOGICAL_COLUMN` owned by the Model, which blocks
-    publishing that Model **and every Answer and Liveboard on it, used or not**. The
-    column is invisible in TML, so this scans `metadata/search` — a TML inspection would
-    report a clean Model that is in fact blocked, and a lift-and-shift would drop the Set
-    silently rather than fail.
+    A Set creates a `LOGICAL_COLUMN` owned by the Model, which blocks publishing that
+    Model **and every Answer and Liveboard on it, used or not**. Membership is
+    `cohortConfig` in the listing; the header type is often blank, so never decide by
+    type (BL-325). The
+    column is invisible in TML, so this reads each Model's cohort listing — a TML
+    inspection would report a clean Model that is in fact blocked, and a lift-and-shift
+    would drop the Set silently rather than fail. A Model whose listing fails is reported
+    as blocked (`(discovery incomplete)`), never as clean.
 
     Examples:
 
@@ -190,6 +193,8 @@ def scan_sets(
 
     orgs: List[Optional[str]] = list(source_org) or [None]
     blocked: List[dict] = []
+    discovery_notes: List[dict] = []
+    models_incomplete = 0
     scanned_models = 0
 
     for org in orgs:
@@ -206,10 +211,17 @@ def scan_sets(
             continue
         scanned_models += len(models)
 
-        # ONE LOGICAL_COLUMN search per Org, sliced per Model. The scan's justification is
-        # being cheap enough to run fleet-wide, so it must not scale with Model count.
-        rows = discover.all_cohort_column_rows(client)
-        by_owner = sets_scan.extract_cohort_columns(rows, [m["guid"] for m in models])
+        # Shared Set discovery (BL-325): one cheap cohort-listing call per Model
+        # (0.3-1.7s live), membership by `cohortConfig`, never by header type. The old
+        # cluster-wide LOGICAL_COLUMN search did not finish in 2h45m on se-thoughtspot.
+        # A Model whose listing fails maps to a `(discovery incomplete)` sentinel, so it
+        # is reported BLOCKED rather than clean.
+        from ts_cli.sets.discover import by_owner as _by_owner, discover_sets
+        found = discover_sets(client, models)
+        _err_discovery_notes(found, label)
+        discovery_notes += [dict(n, org=label) for n in found["notes"]]
+        models_incomplete += len(set(found["incomplete"]))
+        by_owner = _by_owner(found)
 
         for entry in models:
             cohort = by_owner.get(entry["guid"])
@@ -217,6 +229,8 @@ def scan_sets(
                 continue
             dependents: List[dict] = []
             for column in cohort:
+                if not column["guid"]:
+                    continue   # the incomplete sentinel: blocked, but nothing to look up
                 dependents += sets_scan.normalise_dependents(
                     discover.column_dependents(client, column["guid"]))
             blocked.append(sets_scan.build_blocked_entry(
@@ -225,7 +239,9 @@ def scan_sets(
         _err(f"{label}: scanned {len(models)} model(s)")
 
     report = sets_scan.build_scan_report([o or "(default)" for o in orgs],
-                                         scanned_models, blocked)
+                                         scanned_models, blocked,
+                                         discovery_notes=discovery_notes,
+                                         models_incomplete=models_incomplete)
     print(json.dumps(report, indent=2))
 
     if out_dir:
@@ -239,7 +255,9 @@ def scan_sets(
     summary = report["summary"]
     _err(f"Sets scan: {summary['models_blocked']} of {scanned_models} model(s) blocked "
          f"across {summary['orgs_blocked']} Org(s); "
-         f"{summary['objects_affected']} Answer(s)/Liveboard(s) affected.")
+         f"{summary['objects_affected']} Answer(s)/Liveboard(s) affected"
+         + (f"; {summary['models_incomplete']} blocked only because discovery failed."
+            if summary["models_incomplete"] else "."))
 
 
 def _org_client(profile: Optional[str], org: Optional[str]):
@@ -294,16 +312,20 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
                          for n in names}
     except discover.AmbiguousModelName as exc:
         _refuse(str(exc))
+    incomplete: set = set()
     if blocked is None:
         # No --sets-scan supplied, so apply scans itself. Cohort columns are invisible
         # in the Model's TML and the audit never queries LOGICAL_COLUMN, so without
         # this a bare apply proceeds and drops the tenant's Sets silently -- exactly
         # what the documented "refuses, no override" contract promises cannot happen
-        # (audit 2026-07-29 finding 17.6). One search for the whole Org.
-        from ts_cli.migrate import sets_scan
-        blocked = set(sets_scan.extract_cohort_columns(
-            discover.all_cohort_column_rows(source_client),
-            [g for g in guids_by_name.values() if g]))
+        # (audit 2026-07-29 finding 17.6). Shared discovery, one call per mapped Model
+        # (BL-325); a Model whose listing fails counts as blocked, so apply refuses.
+        from ts_cli.sets.discover import by_owner as _by_owner, discover_sets
+        found = discover_sets(
+            source_client, [{"guid": g, "name": n} for n, g in guids_by_name.items() if g])
+        _err_discovery_notes(found)
+        incomplete = set(found["incomplete"])
+        blocked = set(_by_owner(found))
     problems = validate_apply(
         rows, blocked_model_guids=blocked,
         model_guids_by_name={k: v for k, v in guids_by_name.items() if v})
@@ -312,7 +334,36 @@ def _validate_or_exit(source_client, rows, blocked, names) -> None:
     _err("Refused. This mapping cannot be applied:")
     for problem in problems:
         _err(f"  - {problem}")
+    for name, guid in guids_by_name.items():
+        if guid and guid in incomplete:
+            # A private endpoint that moved would refuse every apply; say so rather than
+            # let SET_BLOCKER read as a confirmed Set.
+            # No --sets-scan advice: a scan file runs the same discovery, so it cannot
+            # succeed where this listing failed (final review must-fix 5).
+            _err(f"  note: '{name}' is refused because Set discovery FAILED for it, not "
+                 "because a Set was confirmed. Fix discovery (see notes above), then re-run.")
     raise typer.Exit(code=1)
+
+
+def _is_post_bl325_scan(doc) -> bool:
+    """A `sets-scan.json` written by the shared-discovery scanner (BL-325) carries BOTH
+    `discovery_notes` (a list) and `summary.models_incomplete`: `build_scan_report` always
+    writes the pair. Older files used the COHORT-prefix match that missed blank-type Sets,
+    so their `blocked[]` cannot be trusted as complete. Requiring both markers means a
+    hand-edited or truncated file carrying only one does not pass this destructive gate."""
+    if not isinstance(doc, dict):
+        return False
+    summary = doc.get("summary")
+    return (isinstance(doc.get("discovery_notes"), list)
+            and isinstance(summary, dict) and "models_incomplete" in summary)
+
+
+def _err_discovery_notes(found: dict, label: str = "") -> None:
+    """Every discovery note to stderr: an incomplete Model is reported blocked, and the
+    operator must be able to tell a failed listing from a confirmed Set (spec section 7)."""
+    prefix = f"{label}: " if label else ""
+    for note in found.get("notes", []):
+        _err(f"{prefix}{note['kind']}: {note['object']} — {note['detail']}")
 
 
 @app.command("apply")
@@ -356,7 +407,13 @@ def apply_migration(
     # cohort scan itself rather than treating "not scanned" as "not blocked".
     blocked = None
     if sets_scan:
-        blocked = blocked_model_guids(_json.loads(Path(sets_scan).read_text()))
+        scan_doc = _json.loads(Path(sets_scan).read_text())
+        if not _is_post_bl325_scan(scan_doc):
+            _refuse(f"{sets_scan} does not carry both `discovery_notes` (list) and "
+                    "`summary.models_incomplete`, so it predates BL-325 — whose COHORT-prefix "
+                    "detection missed Sets with a blank header type. Re-run `ts migrate "
+                    "scan-sets`, or omit --sets-scan and let apply scan itself")
+        blocked = blocked_model_guids(scan_doc)
 
     source_client = _org_client(source_profile, source_org)
     target_client = _org_client(target_profile, target_org)

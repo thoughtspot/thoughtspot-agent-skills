@@ -139,30 +139,38 @@ def check_h4(ctx: AuditContext) -> list:
     findings = []
     for model in ctx.models:
         guid = ctx.guid_for(model)
-        deps = ctx.dependents.get(guid, [])
+        # A Set is a column on the Model, so any Answer/Liveboard using it is
+        # already a Model dependent. A SET row alone never makes a Model "used"
+        # (ruling R15) — they stay in `dependents` for H5 only.
+        deps = [d for d in ctx.dependents.get(guid, []) if d.get("type") != "SET"]
         if not deps:
             findings.append(Finding(
                 check_id="H4", angle=_ANGLE, severity="MEDIUM",
                 object_type="model",
                 object_name=model.get("model", {}).get("name", ""),
                 object_guid=guid,
-                detail="Orphan model — zero dependents (no answers, liveboards, or sets)",
+                detail="Orphan model — zero dependents (no answers or liveboards)",
             ))
     return findings
 
 
 def check_h5(ctx: AuditContext) -> list:
     findings = []
+    # R18: the same Set is listed under the Model AND under each underlying Table's
+    # COHORT bucket. Emit once per Set guid, not once per source that lists it.
+    seen = set()
     for deps in ctx.dependents.values():
         for d in deps:
             if d.get("type") == "SET":
                 set_guid = d.get("guid", "")
-                # `build_context` fetches dependents for models and tables only,
-                # so a SET guid is normally absent from this map. Absence means
-                # "not looked up", NOT "no consumers" — reporting an orphan from
-                # it asserted a lookup that never happened, and flagged every set
-                # in the environment (BL-302). Until the fetch covers sets, this
-                # check is correctly silent rather than confidently wrong.
+                if set_guid in seen:
+                    continue
+                seen.add(set_guid)
+                # `build_context` records a SET guid here only when the Set's
+                # consumer lookup was clean (`_add_set_dependents`, BL-324).
+                # Absence means "not looked up", NOT "no consumers" — reporting
+                # an orphan from it asserted a lookup that never happened, and
+                # flagged every set in the environment (BL-302). Stay silent.
                 if set_guid not in ctx.dependents:
                     continue
                 if not ctx.dependents[set_guid]:

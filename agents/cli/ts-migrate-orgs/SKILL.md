@@ -37,6 +37,16 @@ Model's TML at all**, and it blocks publishing the Model and every Answer and Li
 it. Because it is invisible in TML, a lift-and-shift would **silently drop it** rather than
 fail — nobody notices until a tenant asks where theirs went.
 
+**How Sets are found.** The scan uses the shared Set discovery in
+`tools/ts-cli/ts_cli/sets/discover.py`, which is also used by `/ts-object-set-manager` and
+`/ts-audit` H5. It makes one per-Model cohort listing call
+(`/callosum/v1/metadata/detail/{model}?fetchcohortcolumnsonly=true`, private), decides
+membership by `cohortConfig`, never by header `type`, and reads each Set's dependents as
+`LOGICAL_COLUMN` (BL-325). A Model whose listing fails is reported **blocked**, never clean.
+`summary.models_incomplete` and the top-level `discovery_notes` say which Models are blocked
+only because discovery failed. `apply --sets-scan` refuses a scan file that lacks those two
+markers, because such a file predates this fix.
+
 Read `scan/sets-scan.md`. It names the specific Answers and Liveboards, because "blocked"
 alone is a dead end while "blocked by these four Answers" is something a tenant can act on.
 
@@ -286,6 +296,7 @@ cutover it holds nothing but this migration's output.
 
 | Version | Date | Summary |
 |---|---|---|
+| 3.0.2 | 2026-10-02 | Step 1 explains how Sets are found: the shared per-Model cohort listing (BL-325). It also covers `models_incomplete` / `discovery_notes`, and the refusal of `--sets-scan` files that predate this fix |
 | 3.0.1 | 2026-07-28 | For aliases the Org of the session is what matters, not admin-vs-user — `TS_WILDCARD_ALL` covers admins too |
 | 3.0.0 | 2026-07-28 | Step 7 is a command, not prose: `ts migrate aliases` derives the wave's aliases from the approved mapping and REFUSES a partial export |
 | 2.4.0 | 2026-07-28 | Give the grant read-back command, now that `ts share status --org` resolves tenant-owned objects (BL-153) |
