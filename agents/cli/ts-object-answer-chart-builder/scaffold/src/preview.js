@@ -20,8 +20,20 @@
 //    sample rows and never fires emitRenderCompletedEvent. Withholding the
 //    global is what makes that failure visible here instead of on a tile.
 
-import muze from "../vendor/muze/muze.js";
 import { buildViz } from "./viz-stub.js";
+
+// No Muze build ships with the skill. If the user supplied one (see env.mjs, TS_MUZE_DIR), the server serves it
+// under /vendor/muze/ and Muze charts get viz.muze here as on a tile; otherwise viz.muze is undefined and the
+// diagnostic block says so, so a Muze chart that fails is not mistaken for a chart defect.
+let muze = null;
+try {
+  const has = await (await fetch("/__muze", { cache: "no-store" })).json();
+  if (!has.available) throw new Error("no Muze build");
+  muze = (await import("/vendor/muze/muze.js")).default ?? null;
+  const link = document.createElement("link");
+  link.rel = "stylesheet"; link.href = "/vendor/muze/muze.css";
+  document.head.appendChild(link);
+} catch { muze = null; }
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
@@ -32,7 +44,7 @@ const statusEl = document.getElementById("status");
 const hostEl = document.getElementById("chart-host");
 
 // Read by snap.mjs and printed in the diagnostic block.
-globalThis.__previewDiagnostics = { heightChain: null };
+globalThis.__previewDiagnostics = { heightChain: null, muze: muze ? "available" : "unavailable" };
 
 function setStatus(text, kind = "") {
   statusEl.textContent = text;

@@ -40,7 +40,7 @@ every move.
 
 ## Chart.js (chart.js@4)
 
-Not in the preview's vendored set, so verify it on a tile. Load `https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js`
+Loaded from a CDN, so it cannot be previewed where the doctor reports `cdn: blocked`; verify it on a tile. Load `https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js`
 through `AZ.loadScript` (bounded, with a fallback host); reference `window.Chart` after it resolves. Plugins load
 the same way afterwards and register on `window.Chart` by themselves.
 

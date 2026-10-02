@@ -3,15 +3,16 @@
 //
 // Serves the scaffold straight out of the (possibly read-only) skill folder and
 // the chart files out of the run dir, so a run needs no copy and no npm install.
-// Nothing here needs bundling: muze.js is a plain ES module and the chart files
+// Nothing here needs bundling: a Muze build is a plain ES module and the chart files
 // are fetched as text, exactly as the ThoughtSpot host treats them.
 //
 //   node serve.mjs <slug> [--port N]      manual debugging
 //
 // Routes:
 //   /, /index.html            scaffold/index.html
-//   /src/*, /vendor/*         scaffold
-//   /assets/*                 scaffold/vendor/muze/assets — Muze builds its worker
+//   /src/*                    scaffold
+//   /vendor/muze/*            the user's own Muze build (TS_MUZE_DIR, or <home>/muze); none ships
+//   /assets/*                 <muze dir>/assets — Muze builds its worker
 //                             URL as the origin-absolute /assets/transform-data-worker-*.js
 //   /chart/*, /sample-data.json   the run dir, never cached
 //   /__mtime                  newest mtime of the chart files, polled by the headed
@@ -47,10 +48,13 @@ function newestMtime(runDir) {
   return max;
 }
 
-export function startServer({ scaffoldDir, runDir, port = 0, host = "127.0.0.1" }) {
+export function startServer({ scaffoldDir, runDir, port = 0, host = "127.0.0.1", muzeDir = resolveEnv({}).muzeDir }) {
   const scaffold = path.resolve(scaffoldDir);
   const run = path.resolve(runDir);
-  const muzeAssets = path.join(scaffold, "vendor", "muze", "assets");
+  // The user's own Muze build, if any (none ships with the skill). Missing files answer 404 and the preview
+  // reports Muze as unavailable.
+  const muze = path.resolve(muzeDir);
+  const muzeAssets = path.join(muze, "assets");
 
   const server = http.createServer((req, res) => {
     const headers = { "Content-Security-Policy": "frame-ancestors *" };
@@ -63,6 +67,14 @@ export function startServer({ scaffoldDir, runDir, port = 0, host = "127.0.0.1" 
     // diagnostic block's console errors and reads like a chart defect.
     if (p === "/favicon.ico") { res.writeHead(204, headers); res.end(); return; }
 
+    // Whether the user has a Muze build, so the preview imports it only when it exists (a 404 would land in
+    // the diagnostic block's console errors and read like a chart defect).
+    if (p === "/__muze") {
+      res.writeHead(200, { ...headers, "Content-Type": MIME[".json"], "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ available: fs.existsSync(path.join(muze, "muze.js")) }));
+      return;
+    }
+
     if (p === "/__mtime") {
       res.writeHead(200, { ...headers, "Content-Type": MIME[".json"], "Cache-Control": "no-store" });
       res.end(JSON.stringify({ mtime: newestMtime(run) }));
@@ -71,7 +83,8 @@ export function startServer({ scaffoldDir, runDir, port = 0, host = "127.0.0.1" 
 
     let file = null;
     if (p === "/" || p === "/index.html") file = path.join(scaffold, "index.html");
-    else if (p.startsWith("/src/") || p.startsWith("/vendor/")) file = safeJoin(scaffold, p);
+    else if (p.startsWith("/vendor/muze/")) file = safeJoin(muze, p.slice("/vendor/muze/".length));
+    else if (p.startsWith("/src/")) file = safeJoin(scaffold, p);
     else if (p.startsWith("/assets/")) file = safeJoin(muzeAssets, p.slice("/assets/".length));
     else if (p.startsWith("/chart/") || p === "/sample-data.json") {
       file = safeJoin(run, p);

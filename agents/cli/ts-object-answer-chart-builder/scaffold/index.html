@@ -3,7 +3,6 @@
   <head>
     <meta charset="utf-8" />
     <title>ThoughtSpot chart preview</title>
-    <link rel="stylesheet" href="/vendor/muze/muze.css" />
     <style>
       /* Deliberately NO `height: 100%` here. A ThoughtSpot tile's <body> has no
          explicit height, and `html, body { height: 100% }` in chart.css is what
@@ -46,10 +45,9 @@
     <div id="tile"><div id="chart-host"></div></div>
     <div id="status">initializing…</div>
 
-    <!-- Muze is imported by preview.js from vendor/ (its CSS is linked above), not loaded from a CDN.
-         The CDN build (@chartshq/muze 2.x) is the ASYNC API — no loadDataSync,
-         DataModel.onReady() instead — which is not what BYOC exposes. Previewing
-         against it would validate charts that cannot run on a tile. -->
+    <!-- No Muze build ships with the skill. preview.js imports the user's own build from /vendor/muze/ when
+         there is one (TS_MUZE_DIR) and links its CSS. The CDN build (@chartshq/muze 2.x) is the ASYNC API,
+         which is not what BYOC exposes, so it is never used as a stand-in. -->
     <script type="module" src="/src/preview.js"></script>
   </body>
 </html>

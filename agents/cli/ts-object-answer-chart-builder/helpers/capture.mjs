@@ -119,7 +119,7 @@ export async function captureTile(page, { url, outPath, tile }) {
     await (tileEl ?? page).screenshot({ path: outPath });
 
     // timedOut: the diagnostic block prints `status: TIMEOUT ...` and the caller exits 2.
-    return { status, heightChain: diag.heightChain, fit, consoleErrors, timedOut: !settled, settleMs: SETTLE_MS };
+    return { status, heightChain: diag.heightChain, muze: diag.muze, fit, consoleErrors, timedOut: !settled, settleMs: SETTLE_MS };
   } finally {
     page.off("console", onConsole);
     page.off("pageerror", onPageError);
@@ -144,6 +144,10 @@ export function printDiag(result, { mode, png, userPng, dataMode, tile }) {
   // chart sized with `height: 100%` therefore renders here and collapses to a
   // blank tile there, with nothing in the console either side. preview.js
   // measures both, so report it rather than leaving it to the screenshot.
+  // No Muze build ships with the skill. A Muze chart previewed without one cannot render; say so, so the failure
+  // is read as "not previewable here" and not as a chart defect.
+  if (result.muze === "unavailable") console.log("muze: unavailable in this preview (no Muze build installed; see the doctor's muze line). A Muze chart cannot be verified here: report it as not previewed and check it in ThoughtSpot");
+
   const hc = result.heightChain;
   if (hc) {
     console.log(

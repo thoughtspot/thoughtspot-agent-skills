@@ -141,7 +141,11 @@ export function resolveEnv({ slug } = {}) {
     headless: headlessDefault(),
     display: hasDisplay(),
     helpersWritable: isWritable(here),
+    // No Muze build ships with this skill (its license does not allow redistribution). A user who is licensed
+    // to use one puts it here, or points TS_MUZE_DIR at it, and the preview uses it for Muze charts.
+    muzeDir: path.resolve(process.env.TS_MUZE_DIR || path.join(home, "muze")),
   };
+  env.muze = fs.existsSync(path.join(env.muzeDir, "muze.js"));
   if (slug) {
     env.slug = slug;
     env.runDir = path.join(env.runsRoot, slug);
@@ -330,6 +334,7 @@ async function doctor(argv) {
     ["browser-launch", launch],
     ["cdn", noProbe ? "skipped" : await cdnReachable()],
     ["fonts", fontFamilies()],
+    ["muze", env.muze ? `found (${env.muzeDir})` : `not installed - Muze charts cannot be previewed here; verify them in ThoughtSpot (Step 9). To preview them, put a Muze build you are licensed to use (muze.js, muze.css, assets/) in ${env.muzeDir}, or set TS_MUZE_DIR`],
   ];
   if (slug) {
     lines.push(["run-dir", env.runDir], ["chart-dir", env.chartDir],

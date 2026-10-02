@@ -73,7 +73,8 @@ If `deps: missing`, the `fix:` line is the command that fixes it:
 
 `browser-launch:` actually starts Chromium, which is the only reliable check:
 Chromium is pinned to the Playwright version, so a cached build can look present and
-still fail to launch. Note `cdn:` for Library choice below.
+still fail to launch. Note `cdn:` and `muze:` for Library choice below: no Muze build ships with the skill, so
+Muze charts preview only when the user has installed their own (`muze: found`).
 
 Also check whether the ThoughtSpot MCP tool `execute-thoughtspot-code` is connected. If it is, one
 read-only call returns the signed-in user, the org, the cluster name and the models. The token is bound
@@ -417,7 +418,10 @@ Without that skill or the MCP, hand the user the three files and the search to b
 Start from a library chart: the "Start here" table at the top of `references/examples.md`
 maps shapes (animated drill, map zoom, flow, KPI variants, what-if, beeswarm ...) to a
 proven chart under `library/`. Copy its technique; keep the shared core. Otherwise,
-Muze by default, and pick by what the chart is — `references/examples.md` has a working
+pick by what the chart is. Muze is the default only when the doctor reports `muze: found`; without it a Muze chart
+cannot render in the preview (the diagnostic block says `muze: unavailable`), so prefer D3, a hand-built table or raw
+SVG when they fit, and when only Muze fits, write it, mark it **not previewed**, and verify it in ThoughtSpot (Step 9);
+ThoughtSpot supplies Muze itself. Pick by shape — `references/examples.md` has a working
 file for each of these rows:
 
 - **Muze** — bar, line, area, scatter, bubble, box, waterfall, pie, heatmap,
@@ -438,7 +442,7 @@ file for each of these rows:
 
 **When the doctor reports `cdn: blocked`** (usual in the Claude app), the CDN libraries
 cannot load in the preview, so a Chart.js / Plotly / gridjs chart cannot be verified
-there. Prefer Muze (vendored), a hand-built table, or raw SVG when they fit. When only
+there. Prefer a hand-built table or raw SVG (or Muze, when `muze: found`) when they fit. When only
 a CDN library fits, write it anyway and tell the user it is **not previewed** — never
 report MATCH on a render that could not load its library.
 
