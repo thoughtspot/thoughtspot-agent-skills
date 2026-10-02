@@ -88,7 +88,9 @@ export function buildViz({ muze, dataset, mode }) {
   }
 
   const viz = {
-    muze: muzeShim,
+    // A getter, so the diagnostics know whether the chart asked for Muze at all: the "no Muze build" warning
+    // is only meaningful for a chart that uses it.
+    get muze() { globalThis.__previewDiagnostics && (globalThis.__previewDiagnostics.muzeRequested = true); return muzeShim; },
     events: {
       // The real host uses this to decide a tile is done; Liveboard PDF export
       // blocks until every tile reports in. Surfaced in the status bar so a
