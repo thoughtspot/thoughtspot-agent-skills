@@ -9,6 +9,8 @@ import importlib.util
 import pathlib
 import sys
 
+import pytest
+
 _MODULE = pathlib.Path(__file__).resolve().parents[1] / "check_ossie_mapping_sync.py"
 _spec = importlib.util.spec_from_file_location("_ossie_mapping_sync", _MODULE)
 mod = importlib.util.module_from_spec(_spec)
@@ -16,6 +18,14 @@ sys.modules[_spec.name] = mod
 _spec.loader.exec_module(mod)
 
 HEADER = "| Construct | Class | Rendering | Note |\n|---|---|---|---|\n"
+
+
+@pytest.fixture(autouse=True)
+def _no_machine_checkout(monkeypatch):
+    # find_upstream also searches CONVENTIONAL and $OSSIE_ROOT, which are real paths on a
+    # developer machine; a real ../ossie checkout made the "missing" cases find it.
+    monkeypatch.setattr(mod, "CONVENTIONAL", ())
+    monkeypatch.delenv("OSSIE_ROOT", raising=False)
 
 
 def _doc(tmp_path, name, rows):
