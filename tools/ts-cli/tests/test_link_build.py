@@ -284,3 +284,63 @@ def test_diff_treats_omitted_sum_as_default():
         {"column_id": "t::a", "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
     exported = {"model": {"columns": [{"column_id": "t::a", "properties": {"column_type": "MEASURE"}}]}}
     assert diff_column_roles(expected, exported) == []
+
+
+class TestFacts:
+    """Snowflake Semantic View FACTS: row-level, no aggregation of their own. The platform
+    rejects AGG() on a fact, so a fact must never be AGGREGATE (live-verified 2026-10-05)."""
+
+    GP = {"name": "gross_profit", "data_type": "NUMBER(11,2)", "kind": "fact",
+          "expr": "gross - costs", "description": "Gross minus costs"}
+
+    @staticmethod
+    def _props(t, name):
+        return {c["name"]: c for c in t["table"]["columns"]}[name]["properties"]
+
+    @pytest.mark.parametrize("mode", ["aggregate", "standard"])
+    def test_fact_defaults_to_sum_never_aggregate(self, mode):
+        t, m, r = build_link_tml(_spec([DIM, REV, self.GP]), aggregation_mode=mode, model_name="S")
+        assert self._props(t, "gross_profit") == {
+            "column_type": "MEASURE", "aggregation": "SUM", "index_type": "DONT_INDEX"}
+        mc = {c["column_id"]: c for c in m["model"]["columns"]}["sales_mv::gross_profit"]
+        assert mc["properties"]["aggregation"] == "SUM"
+        assert r["facts"] == 1 and r["aggregation_source"]["fact-default"] == 1
+
+    def test_metric_still_aggregate_alongside_fact(self):
+        t, _, _ = build_link_tml(_spec([DIM, REV, self.GP]), aggregation_mode="aggregate", model_name="S")
+        assert self._props(t, "revenue_gbp")["aggregation"] == "AGGREGATE"
+
+    def test_declared_default_aggregation_wins(self):
+        gp = dict(self.GP, aggregation="avg")
+        t, _, r = build_link_tml(_spec([DIM, gp]), aggregation_mode="aggregate", model_name="S")
+        assert self._props(t, "gross_profit")["aggregation"] == "AVERAGE"
+        assert r["aggregation_source"] == {"fact-declared": 1}
+
+    def test_fact_ignores_expr_and_default_aggregation_option(self):
+        # A fact expr is row-level; --default-aggregation is for standard-mode measures.
+        gp = dict(self.GP, expr="MAX(gross)")
+        t, _, _ = build_link_tml(_spec([gp]), aggregation_mode="standard", model_name="S",
+                                 default_aggregation="max")
+        assert self._props(t, "gross_profit")["aggregation"] == "SUM"
+
+    @pytest.mark.parametrize("bad", ["aggregate", "AGGREGATE"])
+    def test_aggregate_fact_refused(self, bad):
+        with pytest.raises(LinkSpecError, match="gross_profit: a fact cannot be AGGREGATE"):
+            build_link_tml(_spec([dict(self.GP, aggregation=bad)]),
+                           aggregation_mode="aggregate", model_name="S")
+
+    def test_unrecognised_fact_aggregation_refused(self):
+        with pytest.raises(LinkSpecError, match="gross_profit: unrecognised aggregation"):
+            build_link_tml(_spec([dict(self.GP, aggregation="median-ish")]),
+                           aggregation_mode="aggregate", model_name="S")
+
+    def test_non_numeric_fact_is_attribute_not_skipped(self):
+        shipped = {"name": "ship_date", "data_type": "date", "kind": "fact"}
+        t, _, r = build_link_tml(_spec([DIM, shipped]), aggregation_mode="aggregate", model_name="S")
+        assert self._props(t, "ship_date")["column_type"] == "ATTRIBUTE"
+        assert "aggregation" not in self._props(t, "ship_date")
+        assert r["skipped"] == [] and r["facts"] == 1
+
+    def test_unknown_kind_message_lists_fact(self):
+        with pytest.raises(LinkSpecError, match="'measure', 'fact', 'attribute' or 'dimension'"):
+            build_link_tml(_spec([dict(DIM, kind="metricish")]), aggregation_mode="aggregate", model_name="S")

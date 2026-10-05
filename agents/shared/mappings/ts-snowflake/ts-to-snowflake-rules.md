@@ -24,8 +24,10 @@ Is formula_id set?
 
 ## Aggregation Functions
 
-Used in `expr` for `metrics` entries only. There is no `default_aggregation` field
-in the Snowflake Semantic View schema — the aggregation is embedded in the `expr`.
+Used in `expr` for `metrics` entries only. A metric has no `default_aggregation` field — the
+aggregation is embedded in the `expr`. (A **fact** may carry `default_aggregation` in YAML,
+but only as Cortex Analyst metadata: Snowflake stores it in the `CA` extension and its SQL
+ignores it — verified 2026-10-05. This converter emits none.)
 
 | ThoughtSpot `aggregation` | Snowflake `expr` wrapper |
 |---|---|
@@ -109,7 +111,7 @@ here because it remains a valid way to create a Semantic View and shares most fi
 semantics with the DDL. Do not treat this section as the current converter output format.
 
 Fields are **nested under their owning table** in the output YAML, not at the top level.
-Do not include `default_aggregation` — it is not supported. `sample_values` IS valid and Snowflake recommends it for Cortex Analyst accuracy.
+Do not include `default_aggregation` on a metric — it is not supported there (on a fact it is accepted but is Cortex Analyst metadata only; see Aggregation Functions above). `sample_values` IS valid and Snowflake recommends it for Cortex Analyst accuracy.
 
 **Table entry (with primary_key — required when table is the right side of a relationship):**
 ```yaml

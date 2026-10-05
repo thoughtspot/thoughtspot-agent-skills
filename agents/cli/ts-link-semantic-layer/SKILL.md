@@ -100,6 +100,14 @@ post-import `coerced` check reports it if it happens.
 For Cube and Kyvos, ask the user — which mode they accept is not yet established
 ([open item #3](references/open-items.md)).
 
+**Facts are outside the mode.** A Snowflake Semantic View `FACT` is a row-level expression
+with no aggregation of its own (`GROSS_PROFIT AS gross - costs`). Snowflake rejects `AGG()` on
+a fact (*Unsupported feature 'AGG'*) but runs any standard aggregate, so a `kind: fact`
+column is **never** `AGGREGATE`: it gets its declared `aggregation` (the view's
+`default_aggregation`), or `SUM`, in either mode. A non-numeric fact becomes an attribute.
+Marking a fact `AGGREGATE` breaks every search that touches it — ThoughtSpot even rewrites an
+explicit `SUM`/`AVG` to `AGG()` ([open item #6](references/open-items.md)).
+
 ---
 
 ## Step 4: Build the spec
@@ -117,7 +125,9 @@ platform's metadata:
     {"name": "region", "data_type": "string", "kind": "attribute",
      "description": "…", "synonyms": ["area"]},
     {"name": "revenue", "data_type": "decimal(28,2)", "kind": "measure",
-     "expr": "SUM(amount)", "description": "…", "ai_context": "…"}
+     "expr": "SUM(amount)", "description": "…", "ai_context": "…"},
+    {"name": "gross_profit", "data_type": "NUMBER(11,2)", "kind": "fact",
+     "aggregation": "avg"}
   ]
 }
 ```
@@ -126,18 +136,19 @@ platform's metadata:
 |---|---|---|
 | `name` | yes | The column name **as the platform exposes it when queried** — becomes `db_column_name` |
 | `data_type` | yes | Platform type (`decimal(28,2)`, `VARCHAR(16777216)`, `timestamp_ltz`) or a ThoughtSpot type |
-| `kind` | yes | `measure` or `attribute` (`dimension` is accepted as `attribute`) |
+| `kind` | yes | `measure`, `fact` or `attribute` (`dimension` is accepted as `attribute`). `fact` is a Snowflake Semantic View FACT — see Step 3 |
 | `description` | no | Carried to the Table and Model column |
 | `synonyms`, `ai_context` | no | Carried to the Model column (a string `synonyms` is one synonym) |
 | `display_name` | no | Model column name; otherwise humanized (`revenue_gbp` → `Revenue GBP`) |
 | `aggregation`, `expr` | standard mode | See Step 3 |
+| `aggregation` | facts, when declared | The fact's `default_aggregation`; omit for `SUM`. `AGGREGATE` is refused |
 
 Where the metadata lives:
 
 | Platform | Source of the spec |
 |---|---|
 | **Databricks Metric View** | `DESCRIBE TABLE EXTENDED {fqn} AS JSON`: `columns[]` gives each column's type (append `(precision,scale)` for decimals); `view_text` is the YAML, whose `dimensions[]` / `measures[]` give `kind`, `expr`, `comment` → `description`, `synonyms`, `display_name`; top-level `comment` → `description`. Verified 2026-09-28 |
-| **Snowflake Semantic View** | `DESCRIBE SEMANTIC VIEW {fqn}`: one row per property. `object_kind` DIMENSION → attribute, METRIC → measure; `object_name` → `name`; properties `DATA_TYPE`, `EXPRESSION`, `COMMENT`, `SYNONYMS` (a JSON array string); the row with no `object_kind` and property `COMMENT` → object `description`. Verified 2026-09-28: output matched a hand-built Table on all 31 columns |
+| **Snowflake Semantic View** | `DESCRIBE SEMANTIC VIEW {fqn}`: one row per property. `object_kind` DIMENSION → attribute, METRIC → measure, **FACT → fact**; `object_name` → `name`; properties `DATA_TYPE`, `EXPRESSION`, `COMMENT`, `SYNONYMS` (a JSON array string); the row with no `object_kind` and property `COMMENT` → object `description`. Verified 2026-09-28: output matched a hand-built Table on all 31 columns. **A fact's `default_aggregation` is not in `DESCRIBE`** — it lives only in the Cortex Analyst extension. Read it from `SELECT SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW('{fqn}')` (`tables[].facts[].default_aggregation`) and put it in the fact's `aggregation`. Snowflake's SQL ignores it, but copying it keeps ThoughtSpot's default answer the same as Cortex Analyst's. Verified 2026-10-05 |
 | **Honeydew, Cube, Kyvos** | Ask the user for the object's metric and attribute list (names as queried, types, descriptions, and each metric's aggregation). [Open item #2](references/open-items.md) |
 
 Only include what the source actually has. Do not invent descriptions or synonyms. If the
@@ -155,7 +166,8 @@ ts link build --spec spec.json --aggregation {mode} --model-name "{model_name}" 
   --output-dir ./link/{object_name} --dry-run
 ```
 
-Show the user the summary: attribute and measure counts, how aggregations were decided,
+Show the user the summary: attribute, measure and fact counts, how aggregations were decided
+(`aggregation_source`: `fact-default` = SUM because none was declared),
 how many columns carry synonyms / descriptions / ai_context, and **every skipped column**.
 
 **Non-numeric measures are skipped.** ThoughtSpot rejects a non-numeric MEASURE and silently
@@ -207,6 +219,10 @@ TS_ORG={org} ts agentql fetch-data \
   -m {model_guid} --profile {profile}
 ```
 
+**Do not mix `AGG()` with `SUM`/`AVG`/`COUNT` in one query** — on a linked model that query
+shape is planned as two levels that group by the metric, and the platform rejects it
+([open item #7](references/open-items.md)). Verify a fact separately, with `SUM("{Fact}")`.
+
 `status: SUCCESS` with rows means the platform accepted ThoughtSpot's SQL. To check the
 numbers, run the equivalent query on the platform directly and compare. See
 [ts-object-model-agentql-query](../ts-object-model-agentql-query/SKILL.md) for more.
@@ -224,4 +240,5 @@ columns and why, the instructions outcome, any `coerced` entries, and the query 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-10-06 | Snowflake Semantic View **facts**: new spec `kind: fact`, never `AGGREGATE` (Snowflake rejects `AGG()` on a fact); takes the view's `default_aggregation` from the YAML export, else `SUM`; non-numeric facts become attributes. Documents the SpotQL mixed-aggregate planner bug (open item #7). Requires ts-cli 0.154.0 |
 | 1.0.0 | 2026-09-28 | Initial release: `ts link build` creates a Table over a semantic object plus a thin, formula-free Model; one aggregation switch (`aggregate` / `standard`) instead of per-platform adapters; skips non-numeric measures; writes Spotter instructions via the API; re-exports to catch silent role coercion |

@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-10-06
+- chore: bump ts-cli to v0.154.0 — `ts link build` accepts `kind: fact` (Snowflake Semantic View FACTS). A fact is never `AGGREGATE`, whatever the mode: Snowflake rejects `AGG()` on a fact, and a fact marked `AGGREGATE` failed every search in a live test (ThoughtSpot rewrites even an explicit `SUM`/`AVG` to `AGG()`). A numeric fact takes its declared `default_aggregation`, else `SUM`; a non-numeric fact becomes an attribute. `ts-link-semantic-layer` 1.1.0 reads facts and their defaults, and records the SpotQL mixed-aggregate planner bug (open item #7)
+
 ## 2026-10-02
 - chore: bump ts-cli to v0.153.1 — `ts sets report` links Models, Answers and Liveboards (the inventory now records the cluster `base_url`; Sets have no page and stay unlinked); the Markdown report also lists each used Set's dependents
 - feat: add **ts-object-set-manager** skill — a report-only inventory of reusable Sets (cohorts). Scope by Model (GUID, exact name, or name-contains), Org, or the whole cluster; per Set it records what depends on it, a class (`KEEP_FILTER`, `REVIEW_MANUAL`, `KEEP_SHARED`, `CANDIDATE_ANSWER`, `CANDIDATE_VIZ`, `REVIEW_DELETE`) and the provenance of every grant (`DIRECT`, `REQUIRED`, `EXPLAINED`, `UNEXPLAINED`, `UNKNOWN`), and renders an HTML + Markdown report with review lists and scan notes. Uncertainty is never read as the favourable verdict: a Model whose Set listing fails is `INCOMPLETE` with an unknown count, an uncertain dependents list is shown as "≥N", and only `UNEXPLAINED` grants reach the review list. Changes nothing; acting on the report is v2 (BL-327)

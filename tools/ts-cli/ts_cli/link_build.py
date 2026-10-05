@@ -17,6 +17,10 @@ the aggregation mode:
   …), taken from the column's ``aggregation`` field or inferred from its ``expr``
   (Honeydew-style platforms that expect a standard aggregate over the metric).
 
+A Snowflake Semantic View **fact** (``kind: fact``) is outside the mode: it is never
+AGGREGATE, because the platform rejects ``AGG()`` on a fact. It gets its declared
+aggregation, or SUM.
+
 Everything here is pure (no I/O) so it is unit-tested without a live cluster.
 """
 from __future__ import annotations
@@ -219,6 +223,29 @@ def _instructions_list(value: Any) -> List[str]:
 _SKIP_REASON = ("non-numeric measure: ThoughtSpot coerces it to ATTRIBUTE, "
                 "which queries the platform measure unwrapped and fails")
 
+# A fact (Snowflake Semantic View FACTS) is a row-level expression with no aggregation of
+# its own. Snowflake rejects AGG() on it ("Unsupported feature 'AGG'") yet runs any
+# standard aggregate, so a fact is never AGGREGATE, whatever the mode. Live-verified
+# 2026-10-05 on a Semantic View: AGGREGATE failed every search; SUM returned the right
+# totals, including alongside AGG(metric).
+_FACT_DEFAULT_AGGREGATION = "SUM"
+
+
+def _fact_aggregation(col: dict) -> Tuple[Optional[str], str]:
+    """(aggregation, source) for a numeric fact; aggregation None = error, with source
+    holding the message. A declared aggregation (the view's ``default_aggregation``)
+    wins, otherwise SUM."""
+    explicit = col.get("aggregation")
+    if not explicit:
+        return _FACT_DEFAULT_AGGREGATION, "fact-default"
+    agg = normalize_aggregation(explicit)
+    if agg is None:
+        return None, f"unrecognised aggregation {explicit!r}"
+    if agg == "AGGREGATE":
+        return None, ("a fact cannot be AGGREGATE: the platform rejects AGG() on a fact — "
+                      "give a standard aggregation, or omit it for SUM")
+    return agg, "fact-declared"
+
 
 class _Resolved:
     """One spec column after type/role/aggregation resolution."""
@@ -317,6 +344,16 @@ def _standard_aggregation(col: dict, fallback: Optional[str]) -> Tuple[Optional[
                   "or pass a default aggregation")
 
 
+def _measure_aggregation(col: dict, kind: str, aggregation_mode: str,
+                         fallback: Optional[str]) -> Tuple[Optional[str], str]:
+    """(aggregation, source) for a numeric measure or fact; None = error (source = message)."""
+    if kind == "fact":
+        return _fact_aggregation(col)
+    if aggregation_mode == "aggregate":
+        return "AGGREGATE", "aggregate"
+    return _standard_aggregation(col, fallback)
+
+
 def _resolve_columns(columns: List[dict], aggregation_mode: str, fallback: Optional[str]):
     """Resolve every column; returns (kept, skipped, agg_source) or raises with ALL errors."""
     errors: List[str] = []
@@ -331,22 +368,21 @@ def _resolve_columns(columns: List[dict], aggregation_mode: str, fallback: Optio
         if dt is None:
             errors.append(f"{n}: unsupported or missing data_type {c.get('data_type')!r}")
             continue
-        if kind not in ("measure", "attribute", "dimension"):
-            errors.append(f"{n}: kind must be 'measure', 'attribute' or 'dimension', got {c.get('kind')!r}")
+        if kind not in ("measure", "fact", "attribute", "dimension"):
+            errors.append(f"{n}: kind must be 'measure', 'fact', 'attribute' or 'dimension', "
+                          f"got {c.get('kind')!r}")
             continue
-        if kind != "measure":
+        # A non-numeric fact is a row-level value with nothing to aggregate: an attribute.
+        if kind not in ("measure", "fact") or (kind == "fact" and dt not in _NUMERIC_TS_TYPES):
             kept.append(_Resolved(c, dt, False, None))
             continue
         if dt not in _NUMERIC_TS_TYPES:
             skipped.append({"name": n, "data_type": dt, "reason": _SKIP_REASON})
             continue
-        if aggregation_mode == "aggregate":
-            agg, source = "AGGREGATE", "aggregate"
-        else:
-            agg, source = _standard_aggregation(c, fallback)
-            if agg is None:
-                errors.append(f"{n}: {source}")
-                continue
+        agg, source = _measure_aggregation(c, kind, aggregation_mode, fallback)
+        if agg is None:
+            errors.append(f"{n}: {source}")
+            continue
         agg_source[source] = agg_source.get(source, 0) + 1
         kept.append(_Resolved(c, dt, True, agg))
         if agg == "COUNT_DISTINCT":
@@ -408,6 +444,7 @@ def _report(tbl_name: str, model_name: str, aggregation_mode: str, kept: List[_R
         "columns": len(kept),
         "attributes": len(kept) - measures,
         "measures": measures,
+        "facts": sum(1 for r in kept if str(r.col.get("kind", "")).lower() == "fact"),
         "aggregation_source": agg_source,
         "with_synonyms": sum(1 for m in model_cols if "synonyms" in m["properties"]),
         "with_ai_context": sum(1 for m in model_cols if "ai_context" in m["properties"]),
@@ -443,6 +480,12 @@ def build_link_tml(
             …
           ]
         }
+
+    ``kind`` is ``measure``, ``fact``, ``attribute`` or ``dimension``. A **fact** (a
+    Snowflake Semantic View FACT: row-level, no aggregation of its own) is never
+    AGGREGATE, in either mode — the platform rejects AGG() on it. A numeric fact gets its
+    declared ``aggregation`` (the view's ``default_aggregation``) or SUM; a non-numeric
+    fact becomes an ATTRIBUTE.
 
     Non-numeric measures are SKIPPED (ThoughtSpot rejects a non-numeric MEASURE and
     coerces it to ATTRIBUTE, which queries the platform's measure unwrapped and fails —

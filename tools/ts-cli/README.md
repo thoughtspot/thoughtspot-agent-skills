@@ -4180,8 +4180,8 @@ ts link build --spec hd.json --aggregation standard --model-name "Sales (Honeyde
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--spec` | required | Normalized spec JSON: `connection`, `db`, `schema`, `db_table`, optional `description` / `instructions`, and `columns[]` of `{name, data_type, kind, description?, synonyms?, ai_context?, display_name?, aggregation?, expr?}` |
-| `--aggregation` | required | `aggregate` — every measure `AGGREGATE`. `standard` — each measure's own aggregation from `aggregation`, else inferred from the outermost function of `expr` (`SUM(x)`, `COUNT(DISTINCT x)`, `SUM(x) FILTER (WHERE …)`) |
+| `--spec` | required | Normalized spec JSON: `connection`, `db`, `schema`, `db_table`, optional `description` / `instructions`, and `columns[]` of `{name, data_type, kind, description?, synonyms?, ai_context?, display_name?, aggregation?, expr?}`. `kind` is `measure`, `fact`, `attribute` or `dimension` |
+| `--aggregation` | required | `aggregate` — every measure `AGGREGATE` (facts excepted, see below). `standard` — each measure's own aggregation from `aggregation`, else inferred from the outermost function of `expr` (`SUM(x)`, `COUNT(DISTINCT x)`, `SUM(x) FILTER (WHERE …)`) |
 | `--model-name` | required | Model display name |
 | `--table-name` | spec `db_table` | ThoughtSpot Table name |
 | `--naming` | `humanize` | Model column names: `humanize` (`revenue_gbp` → `Revenue GBP`) or `raw`; a column's `display_name` always wins |
@@ -4193,6 +4193,11 @@ ts link build --spec hd.json --aggregation standard --model-name "Sales (Honeyde
 
 Behaviour:
 
+- **Facts (`kind: fact`) are never `AGGREGATE`**, in either mode. A Snowflake Semantic View
+  FACT has no aggregation of its own and Snowflake rejects `AGG()` on it. A numeric fact gets
+  its declared `aggregation` (the view's `default_aggregation`) or `SUM`
+  (`aggregation_source`: `fact-declared` / `fact-default`); a fact declaring `AGGREGATE` fails
+  the build; a non-numeric fact becomes an ATTRIBUTE. The summary carries a `facts` count.
 - **Non-numeric measures are skipped** and listed in `skipped`: ThoughtSpot coerces a
   non-numeric MEASURE to ATTRIBUTE, which queries the platform measure without its measure
   function (Databricks: `METRIC_VIEW_MISSING_MEASURE_FUNCTION`).

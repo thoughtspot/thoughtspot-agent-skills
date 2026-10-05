@@ -64,3 +64,52 @@ Only a set on a Model with no prior instructions was tested. Irrelevant while th
 creates new Models; it matters for re-linking (BL-318), which must `get` and merge first.
 
 **Status: DEFERRED — with BL-318.**
+
+## 6 — Snowflake Semantic View facts — VERIFIED 2026-10-05
+
+A Semantic View `FACT` (`GROSS_PROFIT AS gross - costs`) has no aggregation of its own, and
+`DESCRIBE` returns only its table, expression, data type and access modifier. Verified on a
+scratch view in `AGENT_SKILLS.PUBLIC` (4 rows; truth East 90 / West 20 / total 110) with three
+Models in the SF Org of `nebula-ts-semview`, one per marking of the fact:
+
+| Fact marked | UI search | Why |
+|---|---|---|
+| `MEASURE` + `AGGREGATE` | **Every search failed** — *Unsupported feature 'AGG'* | Snowflake rejects `AGG()` on a fact; ThoughtSpot rewrites even an explicit `SUM`/`AVG` to `AGG()` |
+| `MEASURE` + `SUM` | All correct, including fact + metric in one search (90/300, 20/130) | |
+| `ATTRIBUTE` | Row-level values; `[Gross Profit]` alone returns distinct values, not a total | |
+
+`default_aggregation` on a fact is accepted in YAML (`SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`)
+and survives in `GET_DDL` / `SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW`, but only inside the Cortex
+Analyst extension (`with extension (CA='…')`). It is not in `DESCRIBE` or `SHOW SEMANTIC FACTS`,
+and it changes no SQL: with `default_aggregation: avg`, `SUM(fact)` still sums and `AGG(fact)`
+still fails. A Model marking that fact `SUM` answered 90/20 for `[Gross Profit]` and 45/10 for
+`average [Gross Profit]` — so ThoughtSpot runs what it sends, and copying the declared default
+is what keeps its default answer equal to Cortex Analyst's.
+
+`ts link build` (ts-cli 0.154.0) takes `kind: fact`: never `AGGREGATE`, declared aggregation
+else `SUM`. All scratch objects were deleted. Regression coverage: querygen
+`tests/SIMBA/snowflake/facts/` (21 cases).
+
+**Status: VERIFIED 2026-10-05.**
+
+## 7 — SpotQL cannot mix `AGG()` with a standard aggregate — DEFERRED (product)
+
+On a linked model, any SpotQL query combining `AGG(metric)` with `SUM`/`AVG`/`COUNT` of
+another column is planned as two levels: the inner query selects the `AGGREGATE` column raw
+and **groups by it**, and the outer re-aggregates. Grouping by a metric is never valid —
+Snowflake rejects it (*Requested semantic expression … in DIMENSIONS clause must be one of
+the following types: (DIMENSION, FACT)*), and the same plan appears on Databricks
+(`COUNT(attr) + AGG(measure)` groups by the raw measure column). Isolated 2026-10-06:
+
+| SpotQL | Plan |
+|---|---|
+| `AGG(metric)` alone; `SUM(fact)` alone; fact as a group key + `AGG(metric)` | single level, valid |
+| `SUM(fact) + AGG(metric)` (either order, with or without `GROUP BY`); `COUNT(attr) + AGG(metric)` | two levels, invalid |
+| `AVG(fact) + AGG(metric)` | two levels, **and the outer function is `sum`** — the requested average is lost |
+
+UI search is not affected: it plans from each column's own aggregation at one grain, and a
+fact + metric search returns the right numbers. This is a query-gen bug, not something the
+skill can work around beyond telling the user not to mix the two in one SpotQL query (Step 7).
+Pinned as `known-product-bug` in querygen `tests/SIMBA/snowflake/facts/` (PR #150).
+
+**Status: DEFERRED — fix belongs to the semantic-SQL query-gen change.**
