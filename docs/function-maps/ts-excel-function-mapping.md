@@ -2,8 +2,9 @@
 # Microsoft Excel formula functions → ThoughtSpot function mapping
 
 **Status:** research draft (2026-10-06) — written from documentation and this repo's
-live-verified references; **no row has been import-probed on a ThoughtSpot instance** (see
-[Unverified](#unverified)); the semantics of `day_number_of_week`, `diff_months`/`diff_years` and
+live-verified references; **no row has been import-probed on a ThoughtSpot instance** except the
+`NETWORKDAYS.INTL` per-weekday counting form (live-verified 2026-10-06 for weekend codes 1, 11 and
+`"1000001"`) (see [Unverified](#unverified)); the semantics of `day_number_of_week`, `diff_months`/`diff_years` and
 string comparison (`=`, `contains`, `strpos`) were settled by compiled-SQL probes on 2026-10-06
 (gaps G11, G12; BL-333) · **Coverage:** 415 functions rowed, one per function, from the
 in-scope categories of Microsoft's
@@ -570,8 +571,8 @@ workbook's fiscal or non-Monday week convention is a note pointing at the Model'
 | `ISOWEEKNUM(date)` | passthrough | `sql_int_op ( "WEEKISO({0})" , [d] )` | **Variant: `sql_int_op`.** `week_number_of_year`'s compiled SQL uses ISO-style Thursday logic (`week_number_of_year(2026-01-04)` = 1, live-verified 2026-10-06), but one date does not prove ISO year-boundary behaviour (a late-December date in ISO week 1 was not probed), and the Tableau map records it as not ISO-8601 — so the pass-through stays the honest default until a boundary probe. A native composition exists (Thursday-of-week rule over `day_number_of_week`) but the pass-through is the honest default. |
 | `MINUTE(serial_number)` | passthrough | `sql_int_op ( "MINUTE({0})" , [t] )` | **Variant: `sql_int_op`.** No native minute extractor (live-verified absent, BL-171). |
 | `MONTH(serial_number)` | direct | `month_number ( [d] )` | **Not `month ( )`**, which returns the month *name* and silently turns an integer column into text. |
-| `NETWORKDAYS(start_date, end_date, [holidays])` | direct | `5 * floor ( ( diff_days ( [e] , [s] ) + 1 ) / 7 ) + mod ( diff_days ( [e] , [s] ) + 1 , 7 ) - greatest ( 0 , least ( day_number_of_week ( [s] ) + mod ( diff_days ( [e] , [s] ) + 1 , 7 ) - 1 , 7 ) - greatest ( day_number_of_week ( [s] ) , 6 ) + 1 )` | **Native, contrary to the Qlik map's `NetworkDays` row.** Whole weeks contribute 5 days each; the remaining `r = (n + 1) mod 7` days starting at weekday `w` (1 = Monday) lose `max(0, min(w + r − 1, 7) − max(w, 6) + 1)` weekend days — a remainder window of at most 6 days can wrap only into Monday–Friday, so no second weekend term is needed. Hand-checked across all start weekdays. Covers `end ≥ start` and no `holidays` ([**E3**](#how-to-read-the-tables)); swap and negate for `end < start`. A `holidays` range is a *table* of dates, so it becomes a calendar table joined to the Model — or the [`ts-recipe-formula-business-days-snowflake`](../../agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) UDFs. `day_number_of_week` is confirmed fixed at 1 = Monday (gap [**G11**](#open-questions--gaps), closed 2026-10-06). **Verification:** hand-derived and arithmetic-checked only — **not** import-probed and **not** result-checked against Excel on a live instance. **Assumes a Monday week start** — the Model calendar's default (Gregorian, Monday first when nothing else is set; ThoughtSpot domain review, 2026-10-06) — and diverges if the Model's calendar starts the week elsewhere. |
-| `NETWORKDAYS.INTL(start_date, end_date, [weekend], [holidays])` | direct | as `NETWORKDAYS` for `weekend = 1` | Weekend code 1 (Saturday–Sunday) is `NETWORKDAYS` ([**E3**](#how-to-read-the-tables)). Other codes need a per-weekday count — `floor ( ( n + offset ) / 7 )` for each weekend day — which is still native but not given here; the seven-character string form is the same construction. **Assumes a Monday week start** — the Model calendar's default (Gregorian, Monday first when nothing else is set; ThoughtSpot domain review, 2026-10-06) — and diverges if the Model's calendar starts the week elsewhere. |
+| `NETWORKDAYS(start_date, end_date, [holidays])` | direct | `5 * floor ( ( diff_days ( [e] , [s] ) + 1 ) / 7 ) + mod ( diff_days ( [e] , [s] ) + 1 , 7 ) - greatest ( 0 , least ( day_number_of_week ( [s] ) + mod ( diff_days ( [e] , [s] ) + 1 , 7 ) - 1 , 7 ) - greatest ( day_number_of_week ( [s] ) , 6 ) + 1 )` | **Native, contrary to the Qlik map's `NetworkDays` row.** Whole weeks contribute 5 days each; the remaining `r = (n + 1) mod 7` days starting at weekday `w` (1 = Monday) lose `max(0, min(w + r − 1, 7) − max(w, 6) + 1)` weekend days — a remainder window of at most 6 days can wrap only into Monday–Friday, so no second weekend term is needed. Hand-checked across all start weekdays. Covers `end ≥ start` and no `holidays` ([**E3**](#how-to-read-the-tables)); swap and negate for `end < start`. A `holidays` range is a *table* of dates, so it becomes a calendar table joined to the Model — or the [`ts-recipe-formula-business-days-snowflake`](../../agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) UDFs. `day_number_of_week` is confirmed fixed at 1 = Monday (gap [**G11**](#open-questions--gaps), closed 2026-10-06). **Verification:** hand-derived and arithmetic-checked only — **not** import-probed and **not** result-checked against Excel on a live instance. **Assumes a Monday week start** — the Model calendar's default (Gregorian, Monday first when nothing else is set; ThoughtSpot domain review, 2026-10-06) — and diverges if the Model's calendar starts the week elsewhere. **Simpler alternative:** the per-weekday counting form on the `NETWORKDAYS.INTL` row with `k` = 6, 7 (code 1) — **live-verified** on se-thoughtspot 2026-10-06 for code 1, where the composition above is not; prefer it. |
+| `NETWORKDAYS.INTL(start_date, end_date, [weekend], [holidays])` | direct | `n - Σ ( floor ( n / 7 ) + if ( mod ( k + 7 - w , 7 ) < mod ( n , 7 ) ) then 1 else 0 )` over the non-working weekdays `k`, with `n` = `( diff_days ( [e] , [s] ) + 1 )` and `w` = `day_number_of_week ( [s] )` | **Per-weekday counting form, live-verified.** Every weekend code, numeric or string, is a set of non-working weekdays `k` (1 = Monday … 7 = Sunday) — see the [weekend-code table](#networkdaysintl-weekend-codes-not-counted--arguments). The range holds `n` days starting on weekday `w`; weekday `k` occurs `floor ( n / 7 )` times plus once more when its offset from the start, `mod ( k + 7 - w , 7 )`, falls inside the `mod ( n , 7 )`-day remainder. Workdays are `n` minus the count for each non-working weekday, so code 1 subtracts two counts (`k` = 6, 7), code 11 one (`k` = 7), and `"1000001"` two (`k` = 1, 7). **Verification:** live-verified on se-thoughtspot, 2026-10-06, for codes 1, 11 and `"1000001"` over 7 date ranges including single days and weekend-only ranges — every result matched Excel. Covers `end ≥ start` and no `holidays` ([**E3**](#how-to-read-the-tables)): for `end < start` Excel returns a **negative** count and this form does not (`n` ≤ 0), so swap the dates and negate. `holidays` as for `NETWORKDAYS`. `mod`'s dividend-sign behaviour (see `MOD`) does not arise: `k + 7 - w` ≥ 1 and `n` ≥ 1. **Assumes a Monday week start** — the Model calendar's default (Gregorian, Monday first when nothing else is set; ThoughtSpot domain review, 2026-10-06) — and diverges if the Model's calendar starts the week elsewhere. |
 | `NOW()` | direct | `now ( )` | Volatile in Excel; evaluated per query in ThoughtSpot, and in the warehouse's time zone unless `ts_user_timezone` is applied. |
 | `SECOND(serial_number)` | passthrough | `sql_int_op ( "SECOND({0})" , [t] )` | **Variant: `sql_int_op`.** As `MINUTE`. |
 | `TIME(hour, minute, second)` | passthrough | `sql_date_time_op ( "TIME_FROM_PARTS({0}, {1}, {2})" , [h] , [m] , [s] )` | **Variant: `sql_date_time_op`.** ThoughtSpot has no TIME type (Ossie map, `TIME` literal row), so a standalone time comes back as a DATETIME on a warehouse-default date. The usual Excel use — `date + TIME(h, m, s)` — is native: `add_seconds ( [d] , [h] * 3600 + [m] * 60 + [s] )` ([**E9**](#how-to-read-the-tables)) — but `add_seconds` is documented for a **DATETIME** argument; applied to a DATE column it is *unverified* (it may need `to_date`-free promotion or be rejected), so wrap the date side accordingly once probed. |
@@ -583,6 +584,41 @@ workbook's fiscal or non-Monday week convention is a note pointing at the Model'
 | `WORKDAY.INTL(start_date, days, [weekend], [holidays])` | direct | as `WORKDAY` for `weekend = 1` | As `NETWORKDAYS.INTL`. **Assumes a Monday week start** — the Model calendar's default (Gregorian, Monday first when nothing else is set; ThoughtSpot domain review, 2026-10-06) — and diverges if the Model's calendar starts the week elsewhere. |
 | `YEAR(serial_number)` | direct | `year ( [d] )` |  |
 | `YEARFRAC(start_date, end_date, [basis])` | direct | basis 2: `diff_days ( [e] , [s] ) / 360`; basis 3: `diff_days ( [e] , [s] ) / 365`; basis 4: `[formula_Days360 EU] / 360`; basis 0: `[formula_Days360 US] / 360` | Bases 2–4 are exact. The **default basis 0** (US 30/360) is the US `DAYS360` composition divided by 360 — given on the `DAYS360` row — and is **partial**: it omits the end-of-February rules (Excel's `YEARFRAC` basis 0 also moves an end date that is the last day of February when the start is too), so dates touching February end fall back to a hand-written rule or a pre-computed column ([**E3**](#how-to-read-the-tables)). Basis 1 (actual/actual) averages year lengths across the span by an Excel-specific rule and is unmappable. |
+
+### `NETWORKDAYS.INTL` weekend codes *(not counted — arguments)*
+
+Applies to `NETWORKDAYS.INTL` and `WORKDAY.INTL`. `k` is the `day_number_of_week` value (1 = Monday … 7 = Sunday) of each
+**non-working** weekday; the `NETWORKDAYS.INTL` row subtracts one per-weekday count for each.
+
+| `weekend` | Non-working days | `k` |
+|---|---|---|
+| `1` (default) | Saturday, Sunday | 6, 7 |
+| `2` | Sunday, Monday | 7, 1 |
+| `3` | Monday, Tuesday | 1, 2 |
+| `4` | Tuesday, Wednesday | 2, 3 |
+| `5` | Wednesday, Thursday | 3, 4 |
+| `6` | Thursday, Friday | 4, 5 |
+| `7` | Friday, Saturday | 5, 6 |
+| `11` | Sunday only | 7 |
+| `12` | Monday only | 1 |
+| `13` | Tuesday only | 2 |
+| `14` | Wednesday only | 3 |
+| `15` | Thursday only | 4 |
+| `16` | Friday only | 5 |
+| `17` | Saturday only | 6 |
+| 7-character string, e.g. `"0000011"` | each position holding `1`, **Monday first** | the 1-based positions of the `1`s (`"0000011"` → 6, 7; `"1000001"` → 1, 7) |
+
+Code 1 written out in full (`[s]` start, `[e]` end):
+
+```text
+( diff_days ( [e] , [s] ) + 1 )
+- ( floor ( ( diff_days ( [e] , [s] ) + 1 ) / 7 ) + if ( mod ( 6 + 7 - day_number_of_week ( [s] ) , 7 ) < mod ( diff_days ( [e] , [s] ) + 1 , 7 ) ) then 1 else 0 )
+- ( floor ( ( diff_days ( [e] , [s] ) + 1 ) / 7 ) + if ( mod ( 7 + 7 - day_number_of_week ( [s] ) , 7 ) < mod ( diff_days ( [e] , [s] ) + 1 , 7 ) ) then 1 else 0 )
+```
+
+A converter can hoist `n` and `w` into their own formulas, referenced by id ([**E14**](#how-to-read-the-tables)), to keep each
+count short. All-seven-days `"1111111"` returns 0 in this form; Excel returns `#VALUE!` for it.
+
 
 ---
 
@@ -939,7 +975,9 @@ Each line says what it costs an Excel conversion.
 
 Rows that rest on something this map could not confirm from its sources:
 
-- **No composition in this document has been import-probed.** The natively-composed rows
+- **No composition in this document has been import-probed**, with one exception: the
+  `NETWORKDAYS.INTL` per-weekday counting form, live-verified on se-thoughtspot 2026-10-06 for weekend
+  codes 1, 11 and `"1000001"` over 7 date ranges, all matching Excel. The other natively-composed rows
   (`NETWORKDAYS`, `WORKDAY`, `WEEKNUM`, `WEEKDAY`, `DATE`, `EOMONTH`, `REPLACE`, `TEXTAFTER`, the
   annuity family, the regression family) are hand-derived and spot-checked by arithmetic. A single
   `ts tml import --policy VALIDATE_ONLY` pass, as the Ossie map ran, would settle parse validity;
