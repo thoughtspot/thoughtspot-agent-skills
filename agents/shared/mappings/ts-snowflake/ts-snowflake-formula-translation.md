@@ -338,7 +338,7 @@ Snowflake SQL, they can be translated directly by substituting column references
 | `sql_date_op(template, args...)` | DATE | Dimension |
 | `sql_string_aggregate_op(template, args...)` | VARCHAR | Metric |
 | `sql_int_aggregate_op(template, args...)` | INTEGER | Metric |
-| `sql_number_aggregate_op(template, args...)` | NUMBER | Metric |
+| `sql_double_aggregate_op(template, args...)` | NUMBER | Metric |
 
 **Translation rule:**
 
@@ -382,7 +382,7 @@ functions can be wrapped in the appropriate `sql_*` pass-through:
 
 - Scalar text expression → `sql_string_op("template", col1, col2)`
 - Scalar numeric expression → `sql_int_op(...)` or `sql_double_op(...)`
-- Aggregate expression → `sql_string_aggregate_op(...)` or `sql_number_aggregate_op(...)`
+- Aggregate expression → `sql_string_aggregate_op(...)` or `sql_double_aggregate_op(...)`
 
 Replace each column reference with `{0}`, `{1}`, ... positional placeholders.
 
