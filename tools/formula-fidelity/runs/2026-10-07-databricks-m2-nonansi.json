@@ -1,0 +1,1066 @@
+{
+ "run": {
+  "date": "2026-10-06T23:26:29+00:00",
+  "profile": "se-thoughtspot",
+  "connection": "DBX_DAMIAN",
+  "sf_profile": null,
+  "warehouse": "databricks",
+  "dbx_profile": "Production",
+  "warehouse_table": "AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD",
+  "ts_table": "ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME",
+  "ts_model": "ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME",
+  "run_start_ms": 1791329189175,
+  "cases_file": "tools/formula-fidelity/cases/databricks/m2-nonansi.jsonl",
+  "cases_sha256": "a7c8967d9ef9980499db5ec998748029672161eaeaf66d5b75f8ea310b7d93ca",
+  "translator_version": "ts-cli 0.161.0",
+  "git": {
+   "sha": "6805089c3983280bb7bd920d091c671a3b434823",
+   "dirty": true
+  },
+  "phases": {
+   "load": 5.1,
+   "oracle": 3.4,
+   "translate": 0.0,
+   "ts_import": 15.8,
+   "agentql": 9.4,
+   "teardown": 3.1
+  },
+  "orphans": [],
+  "warehouse_orphans": [],
+  "session": {
+   "TIMEZONE": [
+    [
+     "timezone",
+     "UTC"
+    ]
+   ],
+   "ANSI_MODE": [
+    [
+     "ansi_mode",
+     "false"
+    ]
+   ]
+  },
+  "cleanup": {
+   "ts_confirmed_absent": true,
+   "remaining": [],
+   "not_owned": [],
+   "errors": [],
+   "delete_outcomes": {
+    "fa4e6eab-59b4-4199-9159-8dad32cd7552": "deleted",
+    "41ffb42a-d10b-424e-b3f5-d1c64712bf70": "deleted"
+   },
+   "warehouse_confirmed_absent": true
+  },
+  "runtime_s": 43.0,
+  "oracle_drift": [],
+  "fill_expected": "wrote 6 case(s)",
+  "cases_sha256_after_fill": "be78331f0f59b6e51e5554657ab00ad7bf98c4f898d6facad808e70db37f4fe3",
+  "counts": {
+   "MISMATCH": 0,
+   "RUN_FAILED": 0,
+   "IMPORT_FAILED": 0,
+   "TRANSLATE_FAILED": 1,
+   "ERROR_EQUIV": 0,
+   "ORACLE_FAILED": 0,
+   "MATCH": 5
+  },
+  "rebuild": {
+   "date": "2026-10-06T23:33:39+00:00",
+   "cases_sha256": "be78331f0f59b6e51e5554657ab00ad7bf98c4f898d6facad808e70db37f4fe3",
+   "from": "tools/formula-fidelity/runs/2026-10-07-databricks-m2-nonansi.json"
+  }
+ },
+ "cases": [
+  {
+   "id": "dbxn-001",
+   "fixture": "fixture-m2-nonansi.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, (N1 / N2) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "num",
+      "v": "5.25"
+     },
+     "2": {
+      "t": "null"
+     },
+     "3": {
+      "t": "null"
+     },
+     "4": {
+      "t": "num",
+      "v": "-0.0"
+     },
+     "5": {
+      "t": "num",
+      "v": "411.5226"
+     },
+     "6": {
+      "t": "null"
+     },
+     "7": {
+      "t": "num",
+      "v": "199.98"
+     },
+     "8": {
+      "t": "num",
+      "v": "1.0"
+     },
+     "9": {
+      "t": "num",
+      "v": "-0.07142857142857142"
+     },
+     "10": {
+      "t": "num",
+      "v": "-1000000000.0"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "classification": "direct",
+    "formula": "[ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::N1] / [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::N2]",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_dbxn_001\" AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_dbxn_001\" LIMIT 1000",
+    "sql": "SELECT \n  `ta_1`.`ROW_ID` AS `ca_1`, \n  (`ta_1`.`N1` / NULLIF(`ta_1`.`N2`,0.0)) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t232629_914dcd` AS `ta_1`\nGROUP BY \n  `ca_1`, \n  `ca_2`\nLIMIT 1000",
+    "values": {
+     "1": {
+      "t": "num",
+      "v": "5.25"
+     },
+     "2": {
+      "t": "null"
+     },
+     "3": {
+      "t": "null"
+     },
+     "4": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "5": {
+      "t": "num",
+      "v": "411.5226"
+     },
+     "6": {
+      "t": "null"
+     },
+     "7": {
+      "t": "num",
+      "v": "199.98"
+     },
+     "8": {
+      "t": "num",
+      "v": "1.0"
+     },
+     "9": {
+      "t": "num",
+      "v": "-0.07142857142857142"
+     },
+     "10": {
+      "t": "num",
+      "v": "-1000000000.0"
+     }
+    },
+    "error": null,
+    "value_type": "DOUBLE"
+   },
+   "source_formula": "N1 / N2",
+   "role": "row",
+   "group_by": null,
+   "known_divergence": null,
+   "note": "ANSI_MODE=false: division by zero is NULL, as in ThoughtSpot",
+   "result": {
+    "id": "dbxn-001",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "num",
+       "v": "5.25"
+      },
+      "actual": {
+       "t": "num",
+       "v": "5.25"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "num",
+       "v": "-0.0"
+      },
+      "actual": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "num",
+       "v": "411.5226"
+      },
+      "actual": {
+       "t": "num",
+       "v": "411.5226"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "num",
+       "v": "199.98"
+      },
+      "actual": {
+       "t": "num",
+       "v": "199.98"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "8",
+      "expected": {
+       "t": "num",
+       "v": "1.0"
+      },
+      "actual": {
+       "t": "num",
+       "v": "1.0"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "9",
+      "expected": {
+       "t": "num",
+       "v": "-0.07142857142857142"
+      },
+      "actual": {
+       "t": "num",
+       "v": "-0.07142857142857142"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "10",
+      "expected": {
+       "t": "num",
+       "v": "-1000000000.0"
+      },
+      "actual": {
+       "t": "num",
+       "v": "-1000000000.0"
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  },
+  {
+   "id": "dbxn-002",
+   "fixture": "fixture-m2-nonansi.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, (I1 % N2) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "num",
+      "v": "1.0"
+     },
+     "2": {
+      "t": "null"
+     },
+     "3": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "4": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "5": {
+      "t": "num",
+      "v": "2.0"
+     },
+     "6": {
+      "t": "null"
+     },
+     "7": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "8": {
+      "t": "num",
+      "v": "-2.0"
+     },
+     "9": {
+      "t": "num",
+      "v": "1.0"
+     },
+     "10": {
+      "t": "num",
+      "v": "0.0009999999999979184"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "NEEDS_REVIEW",
+    "classification": "unmappable",
+    "formula": null,
+    "role": null,
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [
+     "operator '%' has no documented ThoughtSpot mapping (ts-databricks-formula-translation.md)"
+    ],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": null,
+   "source_formula": "I1 % N2",
+   "role": "row",
+   "group_by": null,
+   "known_divergence": null,
+   "note": "ANSI_MODE=false: remainder by zero is NULL",
+   "result": {
+    "id": "dbxn-002",
+    "translation_status": "NEEDS_REVIEW",
+    "rows": [],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": "operator '%' has no documented ThoughtSpot mapping (ts-databricks-formula-translation.md)",
+    "verdict": "TRANSLATE_FAILED"
+   }
+  },
+  {
+   "id": "dbxn-003",
+   "fixture": "fixture-m2-nonansi.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, (CAST(S1 AS INT)) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "null"
+     },
+     "2": {
+      "t": "null"
+     },
+     "3": {
+      "t": "null"
+     },
+     "4": {
+      "t": "null"
+     },
+     "5": {
+      "t": "null"
+     },
+     "6": {
+      "t": "null"
+     },
+     "7": {
+      "t": "null"
+     },
+     "8": {
+      "t": "null"
+     },
+     "9": {
+      "t": "null"
+     },
+     "10": {
+      "t": "null"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "classification": "direct",
+    "formula": "to_integer ( [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::S1] )",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_dbxn_003\" AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_dbxn_003\" LIMIT 1000",
+    "sql": "SELECT \n  `ta_1`.`ROW_ID` AS `ca_1`, \n  CAST(`ta_1`.`S1` as int) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t232629_914dcd` AS `ta_1`\nGROUP BY \n  `ca_1`, \n  `ca_2`\nLIMIT 1000",
+    "values": {
+     "1": {
+      "t": "null"
+     },
+     "2": {
+      "t": "null"
+     },
+     "3": {
+      "t": "null"
+     },
+     "4": {
+      "t": "null"
+     },
+     "5": {
+      "t": "null"
+     },
+     "6": {
+      "t": "null"
+     },
+     "7": {
+      "t": "null"
+     },
+     "8": {
+      "t": "null"
+     },
+     "9": {
+      "t": "null"
+     },
+     "10": {
+      "t": "null"
+     }
+    },
+    "error": null,
+    "value_type": "INT64"
+   },
+   "source_formula": "CAST(S1 AS INT)",
+   "role": "row",
+   "group_by": null,
+   "known_divergence": null,
+   "note": "ANSI_MODE=false: a malformed cast is NULL",
+   "result": {
+    "id": "dbxn-003",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "8",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "9",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "10",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  },
+  {
+   "id": "dbxn-004",
+   "fixture": "fixture-m2-nonansi.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, (I1 + 9223372036854775800) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "num",
+      "v": "9223372036854775807"
+     },
+     "2": {
+      "t": "num",
+      "v": "9223372036854775796"
+     },
+     "3": {
+      "t": "num",
+      "v": "9223372036854775800"
+     },
+     "4": {
+      "t": "num",
+      "v": "-9223372036854775804"
+     },
+     "5": {
+      "t": "num",
+      "v": "9223372036854775805"
+     },
+     "6": {
+      "t": "null"
+     },
+     "7": {
+      "t": "num",
+      "v": "9223372036854775803"
+     },
+     "8": {
+      "t": "num",
+      "v": "9223372036854775793"
+     },
+     "9": {
+      "t": "num",
+      "v": "9223372036854775801"
+     },
+     "10": {
+      "t": "num",
+      "v": "-9223372036854775716"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "classification": "direct",
+    "formula": "[ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::I1] + 9223372036854775800",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_dbxn_004\" AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_dbxn_004\" LIMIT 1000",
+    "sql": "SELECT \n  `ta_1`.`ROW_ID` AS `ca_1`, \n  (`ta_1`.`I1` + 9223372036854775800) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t232629_914dcd` AS `ta_1`\nGROUP BY \n  `ca_1`, \n  `ca_2`\nLIMIT 1000",
+    "values": {
+     "1": {
+      "t": "num",
+      "v": "9223372036854775807",
+      "ts_type": "INT64"
+     },
+     "2": {
+      "t": "num",
+      "v": "9223372036854775796",
+      "ts_type": "INT64"
+     },
+     "3": {
+      "t": "num",
+      "v": "9223372036854775800",
+      "ts_type": "INT64"
+     },
+     "4": {
+      "t": "num",
+      "v": "-9223372036854775804",
+      "ts_type": "INT64"
+     },
+     "5": {
+      "t": "num",
+      "v": "9223372036854775805",
+      "ts_type": "INT64"
+     },
+     "6": {
+      "t": "null"
+     },
+     "7": {
+      "t": "num",
+      "v": "9223372036854775803",
+      "ts_type": "INT64"
+     },
+     "8": {
+      "t": "num",
+      "v": "9223372036854775793",
+      "ts_type": "INT64"
+     },
+     "9": {
+      "t": "num",
+      "v": "9223372036854775801",
+      "ts_type": "INT64"
+     },
+     "10": {
+      "t": "num",
+      "v": "-9223372036854775716",
+      "ts_type": "INT64"
+     }
+    },
+    "error": null,
+    "value_type": "INT64"
+   },
+   "source_formula": "I1 + 9223372036854775800",
+   "role": "row",
+   "group_by": null,
+   "known_divergence": null,
+   "note": "ANSI_MODE=false: BIGINT overflow wraps (12 + ... is negative)",
+   "result": {
+    "id": "dbxn-004",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "num",
+       "v": "9223372036854775807"
+      },
+      "actual": {
+       "t": "num",
+       "v": "9223372036854775807",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "num",
+       "v": "9223372036854775796"
+      },
+      "actual": {
+       "t": "num",
+       "v": "9223372036854775796",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "num",
+       "v": "9223372036854775800"
+      },
+      "actual": {
+       "t": "num",
+       "v": "9223372036854775800",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "num",
+       "v": "-9223372036854775804"
+      },
+      "actual": {
+       "t": "num",
+       "v": "-9223372036854775804",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "num",
+       "v": "9223372036854775805"
+      },
+      "actual": {
+       "t": "num",
+       "v": "9223372036854775805",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "num",
+       "v": "9223372036854775803"
+      },
+      "actual": {
+       "t": "num",
+       "v": "9223372036854775803",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "8",
+      "expected": {
+       "t": "num",
+       "v": "9223372036854775793"
+      },
+      "actual": {
+       "t": "num",
+       "v": "9223372036854775793",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "9",
+      "expected": {
+       "t": "num",
+       "v": "9223372036854775801"
+      },
+      "actual": {
+       "t": "num",
+       "v": "9223372036854775801",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "10",
+      "expected": {
+       "t": "num",
+       "v": "-9223372036854775716"
+      },
+      "actual": {
+       "t": "num",
+       "v": "-9223372036854775716",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  },
+  {
+   "id": "dbxn-005",
+   "fixture": "fixture-m2-nonansi.json",
+   "oracle": {
+    "sql": "SELECT GRP AS K, (SUM(N1 / N2)) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD GROUP BY GRP ORDER BY GRP",
+    "values": {
+     "A": {
+      "t": "num",
+      "v": "5.25"
+     },
+     "B": {
+      "t": "num",
+      "v": "411.5226"
+     },
+     "C": {
+      "t": "num",
+      "v": "-999999799.0914285"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "classification": "direct",
+    "formula": "sum ( [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::N1] / [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::N2] )",
+    "role": "MEASURE",
+    "agentql_wrapper": "AGG",
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"GRP\" AS \"k\", AGG(\"t1\".\"f_dbxn_005\") AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"GRP\" LIMIT 1000",
+    "sql": "SELECT \n  `ta_1`.`GRP` AS `ca_1`, \n  IFNULL(sum((`ta_1`.`N1` / NULLIF(`ta_1`.`N2`,0.0))), 0) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t232629_914dcd` AS `ta_1`\nGROUP BY `ca_1`\nLIMIT 1000",
+    "values": {
+     "A": {
+      "t": "num",
+      "v": "5.25"
+     },
+     "B": {
+      "t": "num",
+      "v": "411.5226"
+     },
+     "C": {
+      "t": "num",
+      "v": "-999999799.0914285"
+     }
+    },
+    "error": null,
+    "value_type": "DOUBLE"
+   },
+   "source_formula": "SUM(N1 / N2)",
+   "role": "aggregate",
+   "group_by": "GRP",
+   "known_divergence": null,
+   "note": "ANSI_MODE=false: the zero-divisor row drops out of the sum",
+   "result": {
+    "id": "dbxn-005",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "A",
+      "expected": {
+       "t": "num",
+       "v": "5.25"
+      },
+      "actual": {
+       "t": "num",
+       "v": "5.25"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "B",
+      "expected": {
+       "t": "num",
+       "v": "411.5226"
+      },
+      "actual": {
+       "t": "num",
+       "v": "411.5226"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "C",
+      "expected": {
+       "t": "num",
+       "v": "-999999799.0914285"
+      },
+      "actual": {
+       "t": "num",
+       "v": "-999999799.0914285"
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  },
+  {
+   "id": "dbxn-006",
+   "fixture": "fixture-m2-nonansi.json",
+   "oracle": {
+    "sql": "SELECT GRP AS K, (AVG(I1 / N2)) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD GROUP BY GRP ORDER BY GRP",
+    "values": {
+     "A": {
+      "t": "num",
+      "v": "1.75"
+     },
+     "B": {
+      "t": "num",
+      "v": "-0.6666666666666666"
+     },
+     "C": {
+      "t": "num",
+      "v": "-24999.164285714287"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "classification": "direct",
+    "formula": "average ( [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::I1] / [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::N2] )",
+    "role": "MEASURE",
+    "agentql_wrapper": "AGG",
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"GRP\" AS \"k\", AGG(\"t1\".\"f_dbxn_006\") AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"GRP\" LIMIT 1000",
+    "sql": "SELECT \n  `ta_1`.`GRP` AS `ca_1`, \n  avg((`ta_1`.`I1` / NULLIF(`ta_1`.`N2`,0.0))) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t232629_914dcd` AS `ta_1`\nGROUP BY `ca_1`\nLIMIT 1000",
+    "values": {
+     "A": {
+      "t": "num",
+      "v": "1.75"
+     },
+     "B": {
+      "t": "num",
+      "v": "-0.6666666666666666"
+     },
+     "C": {
+      "t": "num",
+      "v": "-24999.164285714287"
+     }
+    },
+    "error": null,
+    "value_type": "DOUBLE"
+   },
+   "source_formula": "AVG(I1 / N2)",
+   "role": "aggregate",
+   "group_by": "GRP",
+   "known_divergence": null,
+   "note": "ANSI_MODE=false: the zero-divisor row drops out of the average",
+   "result": {
+    "id": "dbxn-006",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "A",
+      "expected": {
+       "t": "num",
+       "v": "1.75"
+      },
+      "actual": {
+       "t": "num",
+       "v": "1.75"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "B",
+      "expected": {
+       "t": "num",
+       "v": "-0.6666666666666666"
+      },
+      "actual": {
+       "t": "num",
+       "v": "-0.6666666666666666"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "C",
+      "expected": {
+       "t": "num",
+       "v": "-24999.164285714287"
+      },
+      "actual": {
+       "t": "num",
+       "v": "-24999.164285714287"
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  }
+ ]
+}
