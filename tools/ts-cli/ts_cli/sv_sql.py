@@ -20,14 +20,14 @@ from typing import Callable
 from ts_cli.formula_common import (
     CAST_MAP_FULL,
     UntranslatableError,
-    expr_is_aggregated,
     sql_digits_to_ts_increment,
     sql_int_digits,
-    sql_passthrough_call,
-    sql_substr_to_ts,
     ts_round_from_sql_digits,
     ts_weekday_number,
 )
+from ts_cli.sv_sql_exact import EXACT_FORM_CALLS as _EXACT_FORM_CALLS
+from ts_cli.sv_sql_exact import datediff_to_ts
+from ts_cli.sv_sql_exact import is_aggregated as _is_aggregated
 
 
 _TOKEN_RE = re.compile(
@@ -329,22 +329,10 @@ _EXTRACT_WEEKDAY = {
 def _weekday_number(name: str, date_expr: str) -> str:
     first_day, base = _WEEKDAY[name]
     return ts_weekday_number(date_expr, first_day=first_day, base=base)
-# DATEDIFF(unit, start, end) -> diff_<unit> ( end , start ). Snowflake counts unit
-# BOUNDARIES crossed, and so does each function here — read from its compiled SQL
-# (formula fidelity M0, se-thoughtspot 2026-10-06; the rows of
-# ts-snowflake-formula-translation.md quote it). YEAR was diff_days / 365 (BL-341).
-# diff_weeks fixes a Monday week start, so it equals DATEDIFF(week) only under
-# WEEK_START 0/1 — a trap says so (formula_translate/traps.py).
-_DATEDIFF_UNIT = {"DAY": "diff_days", "WEEK": "diff_weeks", "MONTH": "diff_months",
-                  "QUARTER": "diff_quarters", "YEAR": "diff_years",
-                  "HOUR": "diff_hours", "MINUTE": "diff_minutes", "SECOND": "diff_time"}
-# Snowflake's documented date/time part aliases (docs: "Supported date and time parts").
-_DATE_PART_ALIASES = {a: u for u, al in {
-    "DAY": "D DD DAYS DAYOFMONTH", "WEEK": "W WK WEEKOFYEAR WOY WY",
-    "MONTH": "MM MON MONS MONTHS", "QUARTER": "Q QTR QTRS QUARTERS",
-    "YEAR": "Y YY YYY YYYY YR YEARS YRS", "HOUR": "H HH HR HOURS HRS",
-    "MINUTE": "M MI MIN MINUTES MINS", "SECOND": "S SEC SECONDS SECS",
-}.items() for a in al.split()}
+
+
+# DATEDIFF units and the non-rename forms (SUBSTR, MONTHS_BETWEEN, TO_CHAR) live in
+# sv_sql_exact.py (BL-340..343).
 _DATEADD_UNIT = {"DAY": "add_days", "WEEK": "add_days",
                  "MONTH": "add_months", "YEAR": "add_months"}
 # Canonical map now lives in formula_common so both engines share one copy
@@ -442,13 +430,6 @@ def _round_args(args: list[str], name: str) -> tuple[str, str | None]:
         raise UntranslatableError(
             f"{name} expects 1 or 2 arguments, got {len(args)}")
     return args[0], (args[1] if len(args) == 2 else None)
-
-
-def _is_aggregated(x: str, resolver) -> bool:
-    """True if translated ``x`` is aggregated — by its text, or because it holds a
-    metric reference the resolver handed out (``[formula_X]`` hides it)."""
-    refs = getattr(resolver, "metric_refs", ()) or ()
-    return expr_is_aggregated(x) or any(r in x for r in refs)
 
 
 def _call_round(args: list[str], resolver=None) -> str:
@@ -690,53 +671,7 @@ def _call_datediff(cur: _Cursor, resolver) -> str:
     cur.expect_op(",")
     args = _call_args(cur, resolver)
     _need(args, 2, "DATEDIFF(unit, ...)")
-    unit = _DATE_PART_ALIASES.get(unit, unit)
-    fn = _DATEDIFF_UNIT.get(unit)
-    if fn is None:
-        raise UntranslatableError(
-            f"DATEDIFF unit '{unit}' not mapped "
-            f"(DAY|WEEK|MONTH|QUARTER|YEAR|HOUR|MINUTE|SECOND)")
-    return _emit(fn, [args[1], args[0]])
-
-
-def _row_level_args(name: str, args: list[str], resolver) -> None:
-    """A row-level sql_*_op pass-through cannot wrap an aggregate."""
-    if any(_is_aggregated(a, resolver) for a in args):
-        raise UntranslatableError(
-            f"{name} over an aggregate has no exact ThoughtSpot form (its exact form is a "
-            "row-level pass-through)")
-
-
-def _call_months_between(name: str, args: list[str], resolver) -> str:
-    """MONTHS_BETWEEN(d1, d2) -> exact pass-through, source order kept (BL-342). Snowflake's
-    value is fractional (31-day months, integral only on the same day or both month ends,
-    6 places); diff_months counts boundaries crossed (Jan 20 -> Mar 15: 2, not 1.838710)."""
-    _need(args, 2, name)
-    _row_level_args(name, args, resolver)
-    return sql_passthrough_call("sql_double_op", name, args)
-
-
-def _call_to_char(name: str, args: list[str], resolver) -> str:
-    """TO_CHAR / TO_VARCHAR(x[, fmt]) -> exact pass-through (BL-343). The format used to be
-    dropped for one-argument to_string, rejected on a DATE and on Text (probe record §7); no
-    ThoughtSpot function is documented as equivalent to a format model."""
-    if len(args) not in (1, 2):
-        raise UntranslatableError(f"{name} expects 1 or 2 arguments, got {len(args)}")
-    _row_level_args(name, args, resolver)
-    return sql_passthrough_call("sql_string_op", name, args)
-
-
-def _call_substr(name: str, args: list[str], resolver) -> str:
-    """1-based SUBSTR -> zero-based substr, or an exact pass-through (BL-340)."""
-    out = sql_substr_to_ts(name, args)
-    if out.startswith("sql_"):
-        _row_level_args(name, args, resolver)
-    return out
-
-
-_EXACT_FORM_CALLS = {"TO_CHAR": _call_to_char, "TO_VARCHAR": _call_to_char,
-                     "SUBSTR": _call_substr, "SUBSTRING": _call_substr,
-                     "MONTHS_BETWEEN": _call_months_between}
+    return datediff_to_ts(unit, args, resolver)
 
 
 def _call_dateadd(cur: _Cursor, resolver) -> str:

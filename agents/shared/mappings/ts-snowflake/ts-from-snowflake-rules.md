@@ -420,7 +420,8 @@ ThoughtSpot:    [TABLE_ID::col_name]
 | `DATEDIFF('day', a, b)` | `diff_days ( [b] , [a] )` | **Args reversed** — ThoughtSpot (end, start) |
 | `DATEDIFF('month', a, b)` | `diff_months ( [b] , [a] )` | Args reversed |
 | `DATEDIFF('year', a, b)` | `diff_years ( [b] , [a] )` | Args reversed |
-| `DATEDIFF('quarter' / 'week' / 'hour' / 'minute', a, b)` | `diff_quarters` / `diff_weeks` / `diff_hours` / `diff_minutes ( [b] , [a] )` | Boundary counts, as Snowflake's (compiled SQL, 2026-10-06). `diff_weeks` fixes a Monday week start: exact only under `WEEK_START` 0/1 (BL-341) |
+| `DATEDIFF('quarter' / 'hour' / 'minute', a, b)` | `diff_quarters` / `diff_hours` / `diff_minutes ( [b] , [a] )` | Boundary counts, as Snowflake's (compiled SQL and TIMESTAMP values, 2026-10-06; BL-341) |
+| `DATEDIFF('week', a, b)` | `sql_int_op ( "DATEDIFF(week, {0}, {1})" , [a] , [b] )` | **Not `diff_weeks`**, which fixes a Monday week start; Snowflake follows `WEEK_START` |
 | `MONTHS_BETWEEN(a, b)` | `sql_double_op ( "MONTHS_BETWEEN({0}, {1})" , [a] , [b] )` | **Never `diff_months`** — fractional months, month-end rule (BL-342) |
 | `TO_CHAR(x, 'fmt')` / `TO_VARCHAR(x, 'fmt')` | `sql_string_op ( "TO_CHAR({0}, 'fmt')" , [x] )` | Format kept; one-argument `to_string` is rejected on DATE and Text (BL-343) |
 | `YEAR(col)` | `year ( [col] )` | |

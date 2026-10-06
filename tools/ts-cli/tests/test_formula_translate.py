@@ -1008,10 +1008,16 @@ class TestFidelityM0SnowflakeFixes:
         assert r["formula"] == "diff_years ( [TABLE::b] , [TABLE::a] )"
         assert r["status"] == TRANSLATED
 
-    def test_datediff_week_carries_week_start_trap(self):
+    def test_datediff_week_is_a_pass_through(self):
         r = translate("DATEDIFF(week, a, b)", "snowflake")
-        assert r["formula"] == "diff_weeks ( [TABLE::b] , [TABLE::a] )"
-        assert any(t.startswith("diff_weeks counts week boundaries") for t in r["traps"])
+        assert r["formula"] == 'sql_int_op ( "DATEDIFF(week, {0}, {1})" , [TABLE::a] , [TABLE::b] )'
+        assert r["classification"] == "passthrough"
+
+    def test_diff_weeks_output_still_carries_the_week_start_trap(self):
+        from ts_cli.formula_translate.traps import detect_traps
+        traps = detect_traps("tableau", "DATEDIFF('week', [a], [b])",
+                             "diff_weeks ( [T::b] , [T::a] )")
+        assert any(t.startswith("diff_weeks counts week boundaries") for t in traps)
 
     @pytest.mark.parametrize("src", ["MONTHS_BETWEEN(b, a)", "TO_CHAR(d, 'YYYY-MM')",
                                      "SUBSTR(s, -2, 1)"])

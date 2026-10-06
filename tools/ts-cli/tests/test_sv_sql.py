@@ -634,16 +634,28 @@ class TestFidelityM0Fixes:
 
     # BL-341 — every DATEDIFF unit is a boundary count; end date first.
     @pytest.mark.parametrize("unit,fn", [
-        ("day", "diff_days"), ("week", "diff_weeks"), ("month", "diff_months"),
+        ("day", "diff_days"), ("month", "diff_months"),
         ("quarter", "diff_quarters"), ("year", "diff_years"), ("hour", "diff_hours"),
         ("minute", "diff_minutes"), ("second", "diff_time"),
         # documented part aliases
-        ("'yyyy'", "diff_years"), ("qtr", "diff_quarters"), ("wk", "diff_weeks"),
-        ("hh", "diff_hours"), ("mi", "diff_minutes"), ("sec", "diff_time"),
+        ("'yyyy'", "diff_years"), ("qtr", "diff_quarters"),
+        ("hh", "diff_hours"), ("hh24", "diff_hours"), ("mi", "diff_minutes"),
+        ("sec", "diff_time"),
     ])
     def test_datediff_units(self, unit, fn):
         assert translate_sql_expr(f"DATEDIFF({unit}, a.S, a.E)", _resolve) == \
             f"{fn} ( [A::E] , [A::S] )"
+
+    @pytest.mark.parametrize("unit", ["week", "wk", "'w'"])
+    def test_datediff_week_is_an_exact_pass_through(self, unit):
+        # #572 review: diff_weeks fixes a Monday start while DATEDIFF(week) follows
+        # WEEK_START, and the converter cannot show a trap — so never diff_weeks.
+        assert translate_sql_expr(f"DATEDIFF({unit}, a.S, a.E)", _resolve) == \
+            'sql_int_op ( "DATEDIFF(week, {0}, {1})" , [A::S] , [A::E] )'
+
+    def test_datediff_week_over_aggregate_refused(self):
+        with pytest.raises(UntranslatableError):
+            translate_sql_expr("DATEDIFF(week, MIN(a.S), MAX(a.E))", _resolve)
 
     def test_datediff_year_never_days_over_365(self):
         assert "365" not in translate_sql_expr("DATEDIFF(year, a.S, a.E)", _resolve)
