@@ -173,7 +173,7 @@ EXIT_OK, EXIT_LEFTOVERS, EXIT_USAGE, EXIT_ABORTED = 0, 1, 2, 3
 class Deps:
     """The live seams, injectable so tests can drive ``live_run`` with fakes."""
 
-    def __init__(self, validator=None, warehouse=None, translate=None, now_ms=None):
+    def __init__(self, validator=None, warehouse=None, translate=None, now_ms=None, oracle=None):
         from fidelity import live
 
         self.live = live
@@ -181,6 +181,9 @@ class Deps:
         self.warehouse = warehouse or (lambda sf_profile: live.Warehouse(sf_profile))
         self.translate = translate or translate_case
         self.now_ms = now_ms or (lambda: int(time.time() * 1000))
+        # (wh, case, fixture, fq_table) -> {"values": …}. Default: the warehouse runs the
+        # source formula (M0). M1's literal oracle reads the value stored in the corpus.
+        self.oracle = oracle or live.run_oracle
 
 
 def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" = None) -> int:
@@ -243,7 +246,7 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
         t = lap("load", t)
 
         for c in cases:
-            by_id[c["id"]]["oracle"] = live.run_oracle(wh, c, fixture, fq_table)
+            by_id[c["id"]]["oracle"] = deps.oracle(wh, c, fixture, fq_table)
         t = lap("oracle", t)
 
         for c in cases:

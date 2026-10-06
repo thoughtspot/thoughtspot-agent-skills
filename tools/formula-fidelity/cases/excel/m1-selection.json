@@ -1,0 +1,53 @@
+{
+ "candidates": {
+  "libreoffice:APPROXIMATED": 4,
+  "libreoffice:NEEDS_REVIEW": 1375,
+  "libreoffice:TRANSLATED": 344,
+  "libreoffice:eligible": 1723,
+  "libreoffice:formula_cells": 3008,
+  "poi:APPROXIMATED": 2,
+  "poi:NEEDS_REVIEW": 334,
+  "poi:TRANSLATED": 404,
+  "poi:eligible": 740,
+  "poi:formula_cells": 1189
+ },
+ "crosscheck": {
+  "libreoffice:agree": 182,
+  "libreoffice:disputed": 18,
+  "poi:agree": 48,
+  "poi:disputed": 2
+ },
+ "date": "2026-10-06",
+ "flags": {
+  "blank-input": 3,
+  "error-expected": 7
+ },
+ "selected": {
+  "libreoffice": 200,
+  "poi": 50
+ },
+ "skipped": {
+  "libreoffice:LibreOffice-only function": 146,
+  "libreoffice:LibreOffice-specific error code (not a valid Excel formula)": 79,
+  "libreoffice:OpenFormula CEILING/FLOOR (ODF semantics, not Excel's)": 91,
+  "libreoffice:an input cell holds an error value": 22,
+  "libreoffice:error result against a non-error expected": 8,
+  "libreoffice:expected value is computed in-sheet, not literal": 381,
+  "libreoffice:expected value not representable": 4,
+  "libreoffice:function not in the Excel map": 259,
+  "libreoffice:inline array": 51,
+  "libreoffice:input cell kind time": 10,
+  "libreoffice:input cell kind unknown": 2,
+  "libreoffice:input date not representable": 24,
+  "libreoffice:more than 6 input cells": 1,
+  "libreoffice:named expression (a defined name, not a cell)": 26,
+  "libreoffice:range or other-sheet reference": 169,
+  "libreoffice:time-of-day value": 9,
+  "libreoffice:volatile or sheet-positional function": 3,
+  "poi:an input cell holds an error value": 8,
+  "poi:expected value not representable": 5,
+  "poi:function not in the Excel map": 19,
+  "poi:range or other-sheet reference": 389,
+  "poi:volatile or sheet-positional function": 28
+ }
+}
