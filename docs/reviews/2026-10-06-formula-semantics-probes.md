@@ -1,0 +1,141 @@
+# ThoughtSpot formula semantics: live probe record, 2026-10-06
+
+**Cluster:** se-thoughtspot (`se-thoughtspot-cloud.thoughtspot.cloud`), connection `APJ_TAB` (Snowflake),
+table `AGENT_SKILLS.IDENTIFIER_RESOLUTION_TEST.SALARY_RATES` (guid `503a5cdf-b11d-4834-b313-97ad3518dc4b`).
+
+**Method:**
+1. Import a scratch Model (`ZZ_*_PROBE_DELETE_ME`, `--create-new`) whose formulas apply the construct under test to constant dates or numbers, or to table columns.
+2. Read the compiled SQL with `ts agentql generate-sql`.
+3. Read the values with `ts agentql fetch-data`.
+4. Delete the Model with `ts metadata delete`, and confirm it is gone with `ts metadata search`.
+
+Parser-only checks used `ts tml import --policy VALIDATE_ONLY`, which creates nothing.
+
+**AgentQL traps hit while probing:**
+- Select an aggregate formula as `AGG("name")`.
+- Probe one aggregate formula per query. Selecting a plain `SUM(col)` alongside several formula measures made AgentQL put the formulas into GROUP BY: `[ca_3] is not a valid group by expression`.
+
+Every scratch Model was deleted and confirmed absent.
+
+This file is the evidence that the maps and mapping docs cite as "live-verified 2026-10-06".
+
+---
+
+## 1. `round ( x , n )`: `n` is an increment (BL-331)
+
+Compiled SQL: `n * round(x / NULLIF(n, 0))`.
+
+| Formula on 1234.5678 | Result |
+|---|---|
+| `round ( x )` | 1235 |
+| `round ( x , 0 )` | NULL |
+| `round ( x , 1 )` | 1235 |
+| `round ( x , 2 )` | 1234 |
+| `round ( x , 0.01 )` | 1234.57 |
+| `round ( x , 10 )` | 1230 |
+| `round ( x , 0.5 )` | 1234.5 |
+| `round ( x , -2 )` | 1234 |
+
+The result type is INT64 for an integer increment and DOUBLE for a fractional one.
+
+Emitted forms after the fix:
+- **Row level, ±1234.5678:**
+  - `round ( x , 0.01 )` → ±1234.57
+  - `round ( x , 100 )` → 1200
+  - `sql_double_op ( "TRUNC({0}, 2)" , x )` → ±1234.56
+  - `TRUNC(…, -1)` → 1230
+  - Sign-split floor/ceil at 0.1 → ±1234.5
+- **Over aggregates:**
+  - `round ( sum ( x ) / 7 , 0.01 )` → 34285.71
+  - Sign-split truncation of `sum ( x ) / -7` → -34285.7
+
+## 2. Weekday, week and calendar (BL-334)
+
+- **`day_number_of_week ( d )`** compiles to `(MOD((DATEDIFF(day, DATE '1970-01-01', d) + 3), 7) + 1)`, so 1 = Monday … 7 = Sunday, fixed. Observed values: 2026-10-04 (Sun) = 7, 2026-10-05 (Mon) = 1, 2026-10-10 (Sat) = 6, 2020-01-01 (Wed) = 3.
+- **`start_of_week ( d )`** compiles to `DATE_TRUNC(week, d)`, and returned Monday 2026-09-28 for 2026-10-04.
+- **`week_number_of_year ( 2026-01-04 )`** = 1.
+- **Weekday-number forms**, all 7 days 2026-10-04 … 2026-10-10:
+
+| Form | Sun | Mon | Tue | Wed | Thu | Fri | Sat |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `mod ( day_number_of_week ( d ) , 7 )` | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+| `( mod ( day_number_of_week ( d ) , 7 ) + 1 )` | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+| `( day_number_of_week ( d ) - 1 )` | 6 | 0 | 1 | 2 | 3 | 4 | 5 |
+
+## 3. Date differences (BL-336)
+
+- `diff_months ( end , start )` = `DATEDIFF(month, epoch, end) - DATEDIFF(month, epoch, start)`, i.e. month boundaries crossed:
+
+| Start → end | Result |
+|---|--:|
+| Jan 31 → Feb 1 | 1 |
+| Jan 31 → Feb 28 | 1 |
+| Jan 20 → Mar 15 | 2 |
+| Feb 1 → Jan 31 (reversed) | -1 |
+
+- `diff_years` = `EXTRACT(YEAR end) - EXTRACT(YEAR start)`: Dec 31 → Jan 1 = 1, and 2025-07-01 → 2026-06-30 = 1.
+- **Argument order:** `diff_days ( 2026-10-10 , 2026-10-04 )` = 6 and `diff_months ( 2026-12-01 , 2026-10-04 )` = 2, so the later date goes first.
+
+## 4. String comparison is case-insensitive (BL-333)
+
+- `contains ( [DEPARTMENT] , 'eng' )` compiles to `LOWER(col) LIKE '%eng%' ESCAPE '!'`.
+- `strpos` compiles to `POSITION('eng' IN LOWER(col))`.
+- Plain `=` compiles to `LOWER(col) = 'engineering'`, which matched 'Engineering'.
+- String literals are lowercased at compile time: `contains ( 'Hello World' , 'WORLD' )` is true.
+- **Not probed:** `!=`, `in { }`, `starts_with`, and a column (rather than a literal) as the needle.
+
+## 5. Parser acceptance (VALIDATE_ONLY)
+
+**Aggregate pass-through family (BL-335), each over `MAX({0})`:**
+
+| Name | Parser |
+|---|---|
+| `sql_double_aggregate_op`, `sql_int_aggregate_op`, `sql_string_aggregate_op`, `sql_date_aggregate_op`, `sql_date_time_aggregate_op`, `sql_bool_aggregate_op` | accepted |
+| `sql_number_aggregate_op`, `sql_number_op` | rejected ("Formula addition failed") |
+
+**References in TML `expr`:**
+
+| Reference | Parser |
+|---|---|
+| `[formula_Total_Days] * 2` | accepted |
+| `[Total_Days] * 2` (display name) | rejected |
+| `Total_Days * 2` (bare) | rejected |
+| `day_number_of_week ( [EFFECTIVE_DATE] )` | accepted |
+| `day_number_of_week ( [SALARY_RATES::EFFECTIVE_DATE] )` | accepted |
+| `day_number_of_week ( EFFECTIVE_DATE )` (bare) | rejected |
+
+Bare names in the interactive formula editor are a separate parser. Their use there rests on ThoughtSpot domain guidance and is not probed.
+
+## 6. Excel NETWORKDAYS family: per-weekday counting form
+
+**Definitions:**
+- n = `( diff_days ( e , s ) + 1 )`
+- w = `day_number_of_week ( s )`
+- count of weekday k (1 = Mon … 7 = Sun) = `( floor ( n / 7 ) + if ( mod ( k + 7 - w , 7 ) < mod ( n , 7 ) ) then 1 else 0 )`
+- workdays = n − the sum of the counts over the non-working weekdays
+
+**Run 1: no holidays.** 7 ranges against an independent Python implementation of Excel's semantics, 35 values, 0 mismatches:
+- 2026-10-04 → 10-10
+- 10-05 → 10-05
+- 10-01 → 10-31
+- 10-10 → 10-11
+- 09-27 → 12-25
+- 10-11 → 10-11
+- 10-06 → 10-19
+
+Five quantities were checked per range:
+- `B2 - A2`
+- `(B2 - A2) + 1`
+- `NETWORKDAYS`
+- `NETWORKDAYS.INTL` code 11 (Sunday off)
+- `NETWORKDAYS.INTL` string `"1000001"` (Monday and Sunday off)
+
+**Run 2: inline holiday array** `{2026-12-25 (Fri), 2026-12-26 (Sat)}` with weekend code 1. Each holiday subtracts `if ( h >= s and h <= e and day_number_of_week ( h ) <= 5 ) then 1 else 0`. 6 ranges, 0 mismatches:
+- 2026-12-21 → 12-31 = 8
+- 12-26 → 12-27 = 0
+- 12-25 → 12-25 = 0
+- 12-01 → 12-24 = 18
+- 2026-11-15 → 2027-01-10 = 39
+- 2026-12-26 → 2027-01-04 = 6
+
+The `<= 5` test fits weekend code 1 only. Other codes need "h's weekday is not a weekend day". Duplicate holidays were not probed. `WORKDAY` / `WORKDAY.INTL` with holidays was not probed and does not follow this form: the end date shifts rather than a count being reduced.

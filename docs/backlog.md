@@ -216,6 +216,7 @@ are roughly ordered by value÷effort.
 | BL-333 | ThoughtSpot string comparison (`=`, `contains`, `strpos`) is case-insensitive — Snowflake SV / Databricks MV / Tableau / Qlik / Looker translations of case-sensitive comparisons change semantics silently | 2026-11-30 |
 | BL-334 | ~~`DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`~~ (item 1 FIXED, ts-cli 0.156.2 — also Tableau and Qlik weekday numbering); week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
 | BL-335 | `sql_number_aggregate_op` does not exist (parser rejects it; `sql_double_aggregate_op` is the numeric aggregate) — repo docs fixed; upstream apache/ossie converter still emits it, fix held with the Ossie upstream work | 2026-11-30 |
+| BL-338 | `ts-object-formula-translate` routes the `google_sheets` dialect to the Excel function map (`formula_translate/detect.py:25`), so Sheets formulas skip the Sheets delta map (REGEXEXTRACT groups, SPLIT defaults, CODE, IFERROR default, QUERY) | next ts-object-formula-translate change |
 
 ### Tier 3 — Opportunistic
 
@@ -12575,3 +12576,24 @@ form with the trade-offs stated. Also consider recommending a precomputed wareho
 view for heavy compositions.
 
 **Target:** revisit after v1 testing feedback.
+
+## BL-338 — ts-object-formula-translate routes Google Sheets to the Excel map, not the Sheets delta map `Tier 2`
+
+**Filed:** 2026-10-06. **Status:** OPEN.
+**Source:** PR #566 (Google Sheets delta function map), gap G8 there.
+
+**The problem.** `tools/ts-cli/ts_cli/formula_translate/detect.py:25` maps the `google_sheets`
+dialect to `docs/function-maps/ts-excel-function-mapping.md`, and
+`agents/cli/ts-object-formula-translate/SKILL.md` lists the Excel map as the source for Sheets.
+The Sheets map (`docs/function-maps/ts-sheets-function-mapping.md`) is a delta on the Excel map: it
+rows the Sheets-only functions and the shared names whose Sheets behaviour changes the translation,
+and sends everything else to the Excel row. Translating a Sheets formula from the Excel map alone
+gives wrong answers on those rows: for example `REGEXEXTRACT` with a capture group (Sheets returns
+the group), the default `SPLIT` (each delimiter character, empties dropped), `CODE` (Unicode), the
+one-argument `IFERROR` (blank, not 0), and `QUERY`, which the Excel map has no row for.
+
+**Fix.** Route `google_sheets` to the Sheets map first, falling back to the Excel map for any name
+the Sheets map does not row (its rule E1). Update the SKILL.md source table and its Step 4b. Bump
+the skill and ts-cli versions as the change needs.
+
+**Target:** the next `ts-object-formula-translate` change.
