@@ -1272,3 +1272,54 @@ class TestBareColumnName:
         assert e["table"] == "DM_DATE_DIM"
         assert e["column"] == "DATE"          # the physical column, unquoted
         assert e["ts_expr"] is None
+
+
+class TestFactDefaultAggregation:
+    """A fact's Cortex Analyst ``default_aggregation`` lives only in the
+    ``with extension (CA='…')`` JSON. Cortex Analyst answers a bare fact with it, so
+    the Model column takes it too; without one, ThoughtSpot's SUM stands."""
+
+    DDL = """create or replace semantic view SV
+\ttables ( S as DB.SCH.SALES primary key (ID) )
+\tfacts ( S.GROSS_PROFIT as gross - costs, S.COST_PER_ROW as costs, S.LABEL as UPPER(region),
+\t        S.SPREAD as gross - costs )
+\tdimensions ( S.REGION as region )
+\tmetrics ( S.TOTAL_GROSS as SUM(s.gross) )
+\twith extension (CA='{"tables":[{"name":"S","dimensions":[{"name":"REGION"}],"facts":[{"name":"COST_PER_ROW","default_aggregation":"avg"},{"name":"LABEL","default_aggregation":"max"},{"name":"SPREAD","default_aggregation":"median"}],"metrics":[{"name":"TOTAL_GROSS"}]}]}');"""
+
+    def _facts(self, ddl=None):
+        out = translate_sv_formulas(parse_sv_ddl(ddl or self.DDL))["translated"]
+        return {e["name"]: e for e in out if e["role"] == "fact"}
+
+    def test_declared_default_is_carried(self):
+        f = self._facts()["COST_PER_ROW"]
+        assert f["column_type"] == "MEASURE" and f["aggregation"] == "AVERAGE"
+        assert any("default_aggregation 'avg'" in a for a in f["annotations"])
+
+    def test_no_declared_default_keeps_sum(self):
+        f = self._facts()["GROSS_PROFIT"]
+        assert f["aggregation"] is None   # build-model writes SUM for a MEASURE
+
+    def test_attribute_fact_ignores_a_declared_default(self):
+        f = self._facts()["LABEL"]
+        assert f["column_type"] == "ATTRIBUTE" and f["aggregation"] is None
+
+    def test_unmappable_default_flagged_and_sum_kept(self):
+        f = self._facts()["SPREAD"]
+        assert f["aggregation"] is None
+        assert any("'median'" in a and "kept SUM" in a for a in f["annotations"])
+
+    def test_names_match_case_insensitively(self):
+        ddl = self.DDL.replace('"name":"S"', '"name":"s"').replace('"COST_PER_ROW"', '"cost_per_row"')
+        assert self._facts(ddl)["COST_PER_ROW"]["aggregation"] == "AVERAGE"
+
+    def test_no_extension_changes_nothing(self):
+        ddl = self.DDL.split("\twith extension")[0] + ";"
+        assert all(f["aggregation"] is None for f in self._facts(ddl).values())
+
+    def test_model_column_gets_the_aggregation(self):
+        from ts_cli.sv_build_model import _column_props
+        f = self._facts()["COST_PER_ROW"]
+        assert _column_props(f, is_formula=True)["aggregation"] == "AVERAGE"
+        g = self._facts()["GROSS_PROFIT"]
+        assert _column_props(g, is_formula=True)["aggregation"] == "SUM"

@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-06
+- chore: bump ts-cli to v0.155.0 — three fixes. **No duplicate objects from a retried create:** a dropped connection, read timeout or 502/503/504 on any `…/create` or TML import is no longer retried unless the request provably never reached the server (a retried `tml import --create-new` had left four identical Tables); the command stops and says to check what was created. **`ts snowflake translate-formulas` carries a fact's Cortex Analyst `default_aggregation`** onto its Model column (`avg` → `AVERAGE`, …), so ThoughtSpot and Cortex Analyst answer a bare fact the same way (`ts-convert-from-snowflake-sv` 1.23.0). **`ts link build` display names** from an all-upper-case source read `Gross Profit`, not `GROSS PROFIT` (`ts-link-semantic-layer` 1.1.1)
 - chore: bump ts-cli to v0.154.0 — `ts link build` accepts `kind: fact` (Snowflake Semantic View FACTS). A fact is never `AGGREGATE`, whatever the mode: Snowflake rejects `AGG()` on a fact, and a fact marked `AGGREGATE` failed every search in a live test (ThoughtSpot rewrites even an explicit `SUM`/`AVG` to `AGG()`). A numeric fact takes its declared `default_aggregation`, else `SUM`; a non-numeric fact becomes an attribute. `ts-link-semantic-layer` 1.1.0 reads facts and their defaults, and records the SpotQL mixed-aggregate planner bug (open item #7)
 
 ## 2026-10-02

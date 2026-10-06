@@ -236,6 +236,7 @@ Structure:
       "name": "trans",
       "dimensions": [{"name": "trans_id"}, {"name": "trans_account_id"}, ...],
       "metrics": [{"name": "trans_amount", "default_aggregation": "sum"}, ...],
+      "facts": [{"name": "line_cost", "default_aggregation": "avg"}, ...],
       "time_dimensions": [{"name": "trans_date"}]
     },
     ...
@@ -249,8 +250,27 @@ Use this for column type classification:
 - `time_dimensions` → `ATTRIBUTE` (ThoughtSpot infers date type from the Snowflake column)
 - `metrics` → `MEASURE` (use `default_aggregation` as the aggregation type)
 
-The CA extension `name` values are **lowercase aliases** of the semantic view dimension names.
-They confirm which columns are metrics vs attributes, but do NOT give you the authoritative `column_id` names.
+The CA extension `name` values are aliases of the semantic view construct names — seen in
+**both** lower and upper case (a view created from YAML stores `"S"` / `"GROSS_PROFIT"`), so
+match them case-insensitively. They confirm which columns are metrics vs attributes, but do
+NOT give you the authoritative `column_id` names.
+
+**A fact's `default_aggregation` lives only here.** It is not in the `facts()` block, in
+`DESCRIBE SEMANTIC VIEW` or in `SHOW SEMANTIC FACTS`, and Snowflake's SQL ignores it — it is
+what Cortex Analyst uses to answer a bare fact. Carry it onto the fact's Model column so
+ThoughtSpot's default answer matches (verified 2026-10-05):
+
+| `default_aggregation` | Model column `aggregation` |
+|---|---|
+| `sum` | `SUM` |
+| `avg` / `average` | `AVERAGE` |
+| `min` / `max` | `MIN` / `MAX` |
+| `count` / `count_distinct` | `COUNT` / `COUNT_DISTINCT` |
+| `stddev` / `variance` | `STD_DEVIATION` / `VARIANCE` |
+| anything else (e.g. `median`) | keep `SUM` and **flag it** — ThoughtSpot has no column aggregation for it, so Cortex Analyst will answer that fact differently |
+| *(absent)* | `SUM` |
+
+Only a MEASURE fact takes it; an ATTRIBUTE fact (non-numeric expression) ignores it.
 
 ---
 

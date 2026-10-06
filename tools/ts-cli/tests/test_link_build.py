@@ -72,6 +72,18 @@ def test_humanize():
     assert humanize("order_id") == "Order ID"
 
 
+@pytest.mark.parametrize("raw,expected", [
+    ("GROSS_PROFIT", "Gross Profit"),          # Snowflake's default upper case
+    ("S.COST_PER_ROW", "Cost Per Row"),
+    ("ORDER_ID", "Order ID"),                  # acronyms still apply
+    ("REVENUE_GBP_YTD", "Revenue GBP YTD"),
+    ("revenueGBP", "RevenueGBP"),              # mixed case is deliberate — left alone
+    ("Net_SKU_Count", "Net SKU Count"),
+])
+def test_humanize_upper_case_names(raw, expected):
+    assert humanize(raw) == expected
+
+
 class TestBuildAggregateMode:
     def test_roles_and_aggregation(self):
         t, m, r = build_link_tml(_spec([DIM, REV]), aggregation_mode="aggregate", model_name="Sales")

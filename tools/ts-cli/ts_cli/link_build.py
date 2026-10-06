@@ -169,8 +169,15 @@ def normalize_aggregation(value: Optional[str]) -> Optional[str]:
 
 
 def humanize(name: str) -> str:
-    """``dm_order.employee_count`` → ``Employee Count``; ``revenue_gbp`` → ``Revenue GBP``."""
+    """``dm_order.employee_count`` → ``Employee Count``; ``revenue_gbp`` → ``Revenue GBP``.
+
+    An all-upper-case name (Snowflake's default identifier case: ``GROSS_PROFIT``) is
+    lower-cased first, so it reads ``Gross Profit`` rather than ``GROSS PROFIT``. A
+    mixed-case name keeps its casing — it was chosen deliberately.
+    """
     leaf = name.split(".")[-1]
+    if leaf.isupper():
+        leaf = leaf.lower()
     words = [w for w in re.split(r"[_\s]+", leaf) if w]
     return " ".join(_ACRONYMS.get(w.lower(), w[:1].upper() + w[1:]) for w in words) or name
 

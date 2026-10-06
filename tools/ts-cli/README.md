@@ -32,6 +32,14 @@ credential store (macOS Keychain, Windows Credential Manager, Linux Secret Servi
 Tokens are cached in `/tmp/ts_token_<slug>.txt` (permissions: `0600`) and reused
 until they expire or `ts auth logout` is called.
 
+**Network retries.** A dropped connection, read timeout or 502/503/504 is retried up to 3
+times with backoff — except on a call that **creates** something (any `…/create`, and
+`metadata/tml/import` / `tml/async/import`). Those are retried only when the request
+provably never reached the server (connect timeout, refused connection). After an
+ambiguous failure the server may already have done the work, so the command stops with
+*"not retried … Check for what it created before re-running"* instead of risking a
+duplicate (a retried `tml import --create-new` once left four identical Tables).
+
 ---
 
 ## Commands
@@ -511,7 +519,9 @@ was skipped, `0` otherwise — stdout always carries the successfully parsed ite
 
 ### `ts tml import`
 
-Import TML objects. Two input modes — mutually exclusive:
+Import TML objects. An import that times out is **not** retried (it may have
+succeeded server-side — see "Network retries" above); check for the objects before
+re-running. Two input modes — mutually exclusive:
 
 1. **`--file`/`--dir`** — reads raw TML text directly from one or more files.
    `--file` is repeatable; `--dir` imports every `.tml`/`.yaml`/`.yml`/`.json`

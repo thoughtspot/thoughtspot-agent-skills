@@ -15,6 +15,7 @@ from ts_cli.sv_naming import (  # noqa: F401  (re-exported for callers/tests)
     build_node_id_map,
     construct_formula_id,
     display_title,
+    fact_aggregation,
     fact_column_type,
 )
 from typing import Any, Callable
@@ -735,19 +736,20 @@ def _translate_fact(
     ``facts()`` block, classified MEASURE or ATTRIBUTE by
     :func:`fact_column_type` (BL-181)."""
     col_type = fact_column_type(fact)
+    agg, annotations = fact_aggregation(fact, col_type, parsed)
     if fact["expr"] is None:
         table = alias_map.get(fact["alias_table"].lower(), fact["source_table"])
         return _entry(
             fact["source_column"], "fact", "column", col_type, fact,
-            table=table, column=fact["alias_name"])
-    annotations: list[str] = []
+            table=table, column=fact["alias_name"], aggregation=agg,
+            annotations=annotations)
     resolver = make_resolver(
         parsed, fact["alias_table"], annotations=annotations,
         promote_synonym=promote_synonym)
     ts_expr = translate_sql_expr(fact["expr"], resolver)
     return _entry(
         fact["source_column"], "fact", "formula", col_type, fact,
-        ts_expr=ts_expr, annotations=annotations)
+        ts_expr=ts_expr, aggregation=agg, annotations=annotations)
 
 
 def _try_simple_agg_column(

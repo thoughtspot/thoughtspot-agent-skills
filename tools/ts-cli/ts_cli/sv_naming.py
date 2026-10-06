@@ -122,3 +122,49 @@ def fact_column_type(fact: dict) -> str:
     if _COMPARISON_RE.search(expr) and not expr.upper().startswith("CASE"):
         return "ATTRIBUTE"        # a predicate, not a quantity
     return "MEASURE"
+
+
+# A fact's Cortex Analyst `default_aggregation` → ThoughtSpot column aggregation.
+# Cortex Analyst answers a bare fact with it; carrying it over keeps ThoughtSpot's
+# default answer the same. Snowflake's SQL ignores it (verified 2026-10-05).
+CA_FACT_AGGREGATION = {
+    "sum": "SUM", "avg": "AVERAGE", "average": "AVERAGE", "min": "MIN", "max": "MAX",
+    "count": "COUNT", "count_distinct": "COUNT_DISTINCT",
+    "stddev": "STD_DEVIATION", "variance": "VARIANCE",
+}
+
+
+def fact_default_aggregations(parsed: dict) -> dict[tuple[str, str], str]:
+    """``{(TABLE, FACT): default_aggregation}`` from the ``with extension (CA='…')``
+    JSON. It is stored only there — not in the ``facts()`` block, ``DESCRIBE`` or
+    ``SHOW SEMANTIC FACTS`` — and its names are matched case-insensitively (the CA
+    JSON has been seen in both cases)."""
+    ext = parsed.get("extension")
+    out: dict[tuple[str, str], str] = {}
+    if not isinstance(ext, dict):
+        return out
+    for t in ext.get("tables") or []:
+        if not isinstance(t, dict):
+            continue
+        for f in t.get("facts") or []:
+            if isinstance(f, dict) and f.get("default_aggregation"):
+                out[(str(t.get("name", "")).upper(), str(f.get("name", "")).upper())] = \
+                    str(f["default_aggregation"])
+    return out
+
+
+def fact_aggregation(
+    fact: dict, col_type: str, parsed: dict,
+) -> tuple[str | None, list[str]]:
+    """(aggregation, annotations) for a fact from its declared ``default_aggregation``
+    in the parsed SV's CA extension. None keeps ThoughtSpot's SUM. Only a MEASURE fact
+    takes one — an ATTRIBUTE is not aggregated."""
+    declared = fact_default_aggregations(parsed).get((str(fact.get("alias_table", "")).upper(),
+                             str(fact.get("alias_name", "")).upper()))
+    if not declared or col_type != "MEASURE":
+        return None, []
+    agg = CA_FACT_AGGREGATION.get(declared.strip().lower())
+    if agg is None:
+        return None, [f"⚑ default_aggregation '{declared}' has no ThoughtSpot column "
+                      f"aggregation — kept SUM; Cortex Analyst answers this fact differently"]
+    return agg, [f"default_aggregation '{declared}' (CA extension) → {agg}"]

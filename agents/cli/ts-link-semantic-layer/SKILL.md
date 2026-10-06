@@ -240,5 +240,6 @@ columns and why, the instructions outcome, any `coerced` entries, and the query 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-10-06 | Model column names from an all-upper-case source name (Snowflake's default) read `Gross Profit`, not `GROSS PROFIT`; mixed-case names keep their casing. ts-cli 0.155.0 |
 | 1.1.0 | 2026-10-06 | Snowflake Semantic View **facts**: new spec `kind: fact`, never `AGGREGATE` (Snowflake rejects `AGG()` on a fact); takes the view's `default_aggregation` from the YAML export, else `SUM`; non-numeric facts become attributes. Documents the SpotQL mixed-aggregate planner bug (open item #7). Requires ts-cli 0.154.0 |
 | 1.0.0 | 2026-09-28 | Initial release: `ts link build` creates a Table over a semantic object plus a thin, formula-free Model; one aggregation switch (`aggregate` / `standard`) instead of per-platform adapters; skips non-numeric measures; writes Spotter instructions via the API; re-exports to catch silent role coercion |

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import requests
+from urllib3.exceptions import NewConnectionError
 
 PROFILES_PATH = Path.home() / ".claude" / "thoughtspot-profiles.json"
 
@@ -28,6 +30,49 @@ _AUTH_TOKEN_PATH = "/api/rest/2.0/auth/token/full"
 _RETRY_STATUSES = frozenset({502, 503, 504})
 _RETRY_MAX = 3          # retries after the initial attempt (4 attempts total)
 _RETRY_BACKOFF_S = 0.5  # base backoff, doubled each retry: 0.5s, 1s, 2s
+
+# Calls that create something: repeating one after the server already processed it
+# makes a second object. Observed 2026-09-29 — a read timeout on `tml import
+# --create-new` was retried and left four identical Tables. Updates, sets, shares,
+# deletes and parameterizations converge on the same state, so they stay retryable.
+_NON_IDEMPOTENT_PATH_RE = re.compile(r"(/create|/tml/import|/tml/async/import)$")
+
+
+def _is_idempotent(method: str, path: str) -> bool:
+    return method.upper() == "GET" or not _NON_IDEMPOTENT_PATH_RE.search(path.split("?")[0])
+
+
+def _never_sent(exc: Exception) -> bool:
+    """True only when the request provably never reached the server — a connect
+    timeout, or a connection that was never established. A read timeout or a
+    mid-response disconnect is ambiguous: the server may have done the work."""
+    if isinstance(exc, requests.exceptions.ConnectTimeout):
+        return True
+    if not isinstance(exc, requests.exceptions.ConnectionError) or \
+            isinstance(exc, requests.exceptions.ChunkedEncodingError):
+        return False
+    reason = getattr(exc.args[0], "reason", None) if exc.args else None
+    return isinstance(reason, NewConnectionError)   # incl. NameResolutionError (urllib3 2)
+
+
+def _refuse_ambiguous_retry(
+    idempotent: bool, method: str, url: str, *,
+    exc: Optional[Exception] = None, status: Optional[int] = None,
+) -> None:
+    """Exit instead of retrying a create/import whose outcome is unknown. A no-op for an
+    idempotent call, a failure that provably never reached the server, or a status that
+    is not a retryable gateway fault."""
+    if idempotent or (exc is not None and _never_sent(exc)) or \
+            (status is not None and status not in _RETRY_STATUSES):
+        return
+    what = f"network error ({type(exc).__name__})" if exc is not None else str(status)
+    print(
+        f"ThoughtSpot API {what} on {method} {url} — not retried: this call creates "
+        "objects and the server may already have processed it. Check for what it "
+        "created before re-running.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 
 
 def format_http_error(method: str, url: str, resp: "requests.Response") -> str:
@@ -342,6 +387,9 @@ class ThoughtSpotClient:
     ) -> requests.Response:
         extra_headers = kwargs.pop("headers", {})
         timeout = kwargs.pop("timeout", 60)
+        # `idempotent=` overrides the path-based default for a caller that knows better.
+        idempotent = kwargs.pop("idempotent", None)
+        idempotent = _is_idempotent(method, path) if idempotent is None else idempotent
         url = f"{self._base_url}{path}"
         allow_401_retry = path != _AUTH_TOKEN_PATH
 
@@ -356,7 +404,9 @@ class ThoughtSpotClient:
                     requests.exceptions.Timeout,
                     requests.exceptions.ChunkedEncodingError) as exc:
                 # Dropped connection / read timeout — transient. Retry with
-                # backoff, then fail cleanly (no traceback) if it persists.
+                # backoff, then fail cleanly (no traceback) if it persists. A
+                # create/import is retried only if it provably never arrived.
+                _refuse_ambiguous_retry(idempotent, method, url, exc=exc)
                 if transient_attempts < _RETRY_MAX:
                     transient_attempts += 1
                     print(
@@ -373,6 +423,9 @@ class ThoughtSpotClient:
                 )
                 raise SystemExit(1)
 
+            # A gateway fault on a create/import is ambiguous (a 504 means the
+            # upstream was still working) — report it, never repeat it.
+            _refuse_ambiguous_retry(idempotent, method, url, status=resp.status_code)
             if resp.status_code in _RETRY_STATUSES and transient_attempts < _RETRY_MAX:
                 # Transient gateway fault (502/503/504) — retry with backoff.
                 # Prevents a flaky instance from hard-failing the call (and a

@@ -97,3 +97,68 @@ class TestTransientRetry:
         with pytest.raises(SystemExit):
             client.request("GET", "/api/rest/2.0/metadata/tml/export")
         assert client._session.request.call_count == 1
+
+
+class TestNonIdempotentNotRetried:
+    """A create/import must never be repeated after the server may have processed it.
+    2026-09-29: a read timeout on `tml import --create-new` was retried and left four
+    identical Tables. Only a failure that provably never reached the server retries."""
+
+    IMPORT = "/api/rest/2.0/metadata/tml/import"
+
+    @staticmethod
+    def _client(tmp_path, side_effect):
+        client = _make_client(tmp_path)
+        client._session = MagicMock()
+        client._session.request.side_effect = side_effect
+        return client
+
+    @pytest.mark.parametrize("path", [
+        "/api/rest/2.0/metadata/tml/import", "/api/rest/2.0/metadata/tml/async/import",
+        "/api/rest/2.0/users/create", "/api/rest/2.0/template/variables/create",
+    ])
+    def test_read_timeout_on_create_is_not_retried(self, tmp_path, capsys, path):
+        client = self._client(tmp_path, [requests.exceptions.ReadTimeout("slow"), _resp(200)])
+        with pytest.raises(SystemExit):
+            client.request("POST", path)
+        assert client._session.request.call_count == 1
+        assert "not retried" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("status", [502, 503, 504])
+    def test_gateway_fault_on_import_is_not_retried(self, tmp_path, status):
+        client = self._client(tmp_path, [_resp(status), _resp(200)])
+        with pytest.raises(SystemExit):
+            client.request("POST", self.IMPORT)
+        assert client._session.request.call_count == 1
+
+    def test_mid_response_disconnect_on_import_is_not_retried(self, tmp_path):
+        client = self._client(tmp_path, [requests.exceptions.ChunkedEncodingError("cut"), _resp(200)])
+        with pytest.raises(SystemExit):
+            client.request("POST", self.IMPORT)
+        assert client._session.request.call_count == 1
+
+    def test_connect_timeout_on_import_is_retried(self, tmp_path):
+        # Never reached the server — repeating it cannot duplicate anything.
+        client = self._client(tmp_path, [requests.exceptions.ConnectTimeout("no route"), _resp(200)])
+        assert client.request("POST", self.IMPORT).status_code == 200
+        assert client._session.request.call_count == 2
+
+    def test_refused_connection_on_import_is_retried(self, tmp_path):
+        from urllib3.exceptions import MaxRetryError, NewConnectionError
+        refused = requests.exceptions.ConnectionError(
+            MaxRetryError(None, "/x", reason=NewConnectionError(None, "refused")))
+        client = self._client(tmp_path, [refused, _resp(200)])
+        assert client.request("POST", self.IMPORT).status_code == 200
+
+    def test_idempotent_calls_still_retry(self, tmp_path):
+        for path in ("/api/rest/2.0/metadata/search", "/api/rest/2.0/metadata/delete",
+                     "/api/rest/2.0/groups/g1/update", "/api/rest/2.0/ai/instructions/set"):
+            client = self._client(tmp_path, [requests.exceptions.ReadTimeout("slow"), _resp(200)])
+            assert client.request("POST", path).status_code == 200, path
+
+    def test_explicit_override_wins(self, tmp_path):
+        client = self._client(tmp_path, [requests.exceptions.ReadTimeout("slow"), _resp(200)])
+        assert client.request("POST", self.IMPORT, idempotent=True).status_code == 200
+        client = self._client(tmp_path, [requests.exceptions.ReadTimeout("slow"), _resp(200)])
+        with pytest.raises(SystemExit):
+            client.request("POST", "/api/rest/2.0/metadata/search", idempotent=False)
