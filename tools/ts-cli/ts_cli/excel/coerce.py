@@ -249,10 +249,36 @@ def as_text(tr, node: dict, quiet: bool = False) -> dict:
         tr.review("a date-time where Excel expects text is its serial number with a time "
                   "fraction; ThoughtSpot's to_string needs a format for a date-time and has no "
                   "serial form — use TEXT() semantics deliberately (Excel map, TEXT row)")
-    if t in ("double", "number") and node.get("node") != "lit":
-        tr.trap("to_string of a DOUBLE may render a decimal ('12.0') where Excel shows 12 — "
-                "exact for an integer column")
+    value = T.number_value(node)
+    if value is not None:
+        return T.lit_string(excel_number_text(tr, value))
+    if t in ("double", "number"):
+        tr.trap(DOUBLE_TEXT_TRAP, downgrade=True)
     return T.call("to_string", node)
+
+
+DOUBLE_TEXT_TRAP = (
+    "a DOUBLE or DECIMAL as text: Excel writes the number in General format (up to 15 "
+    "significant digits, no trailing zeros, E+ notation from 1E+15); ThoughtSpot's to_string "
+    "follows the warehouse type — the column's scale ('95000.00' for a NUMBER(10,2), probe "
+    "record §7), Snowflake's float form ('1e+20') or binary noise in the last digits — so "
+    "LEN / LEFT / & of it can differ. Exact for an integer column")
+
+
+def excel_number_text(tr, value: Decimal) -> str:
+    """A number literal as Excel's text (General format), for the range where that is plain
+    digits: integers below 1E+15 and decimals of at most 15 significant digits from 1E-4.
+    Anything else — Excel switches to E+ notation or rounds to 15 digits — is NEEDS_REVIEW."""
+    v = Decimal(value)
+    digits = len(v.normalize().as_tuple().digits)
+    if v == 0:
+        return "0"
+    if abs(v) >= Decimal("1E15") or digits > 15 or abs(v) < Decimal("1E-4"):
+        tr.review(f"the number {v} as text: Excel writes it in General format, with E+ "
+                  "notation or rounded to 15 significant digits, which the translator does not "
+                  "reproduce — write it as text in the sheet")
+    text = format(v.normalize(), "f")
+    return text
 
 
 # ---------------------------------------------------------------------------

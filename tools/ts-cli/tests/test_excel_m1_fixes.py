@@ -142,7 +142,7 @@ def test_text_column_in_a_date_function_is_needs_review():
     # a number into a text function: its digits
     ("=LEN([@qty])", "strlen ( to_string ( [T::qty] ) )"),
     ("=LEFT([@amt],2)", "left ( to_string ( [T::amt] ) , 2 )"),
-    ("=SEARCH(7,1234567)", "strpos ( to_string ( 1234567 ) , to_string ( 7 ) )"),
+    ("=SEARCH(7,1234567)", "strpos ( '1234567' , '7' )"),  # literals folded to their text
     # numeric text literal in arithmetic: folded to the number
     ('="4"*[@qty]', "4 * [T::qty]"),
     ('=ABS("-2.5")', "abs ( - 2.5 )"),
@@ -439,3 +439,30 @@ def test_exact_inputs_are_not_snapped():
                                  "=ROUNDUP([@amt],-16)"])
 def test_more_than_15_digits_is_needs_review(src):
     assert "15 significant digits" in review(src)
+
+
+# ---------------------------------------------------------------------------
+# Review fix 3: a number as text — literals in Excel's General format, DOUBLEs downgraded
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("src,expected", [
+    ('="n"&2.50', "concat ( 'n' , '2.5' )"), ('="n"&-3', "concat ( 'n' , '-3' )"),
+    ('="n"&0.0005', "concat ( 'n' , '0.0005' )"), ("=LEN(12345)", "strlen ( '12345' )"),
+])
+def test_number_literal_as_excel_text(src, expected):
+    r = ok(src)
+    assert r.expr == expected and r.status == "TRANSLATED"
+
+
+@pytest.mark.parametrize("src", ['="n"&1E+20', '="n"&0.00001', '="n"&1.23456789012345678'])
+def test_number_literal_outside_plain_general_format_is_needs_review(src):
+    assert "General format" in review(src)
+
+
+def test_double_column_as_text_is_approximated():
+    r = ok('=[@name]&[@amt]')
+    assert r.expr == "concat ( [T::name] , to_string ( [T::amt] ) )"
+    assert r.status == "APPROXIMATED"
+    assert any("General format" in t and "95000.00" in t for t in r.traps)
+    assert ok("=LEN([@amt])").status == "APPROXIMATED"
+    assert ok("=LEN([@qty])").status == "TRANSLATED"      # integers render exactly

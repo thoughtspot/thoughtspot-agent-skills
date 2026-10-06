@@ -133,7 +133,7 @@ def test_unknown_columns_bare_and_approximated(src, expected):
 
 
 @pytest.mark.parametrize("src,expected", [
-    ('="FY"&2026', "concat ( 'FY' , to_string ( 2026 ) )"),
+    ('="FY"&2026', "concat ( 'FY' , '2026' )"),
     ('="Q"&MONTH([@d])', "concat ( 'Q' , to_string ( month_number ( [TABLE::d] ) ) )"),
     ('="n="&LEN([@s])', "concat ( 'n=' , to_string ( strlen ( [TABLE::s] ) ) )"),
 ])
