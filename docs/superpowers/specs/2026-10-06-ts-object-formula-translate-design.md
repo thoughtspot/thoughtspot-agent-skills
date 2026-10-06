@@ -351,6 +351,18 @@ Code: `tools/ts-cli/ts_cli/formula_translate/` (pure: `context`, `refs`, `adapte
 | 12 | The function maps carry no per-row verification field, so the skill derives a row's status from its text: *verified live (date)* / *verified via <row>* / *unprobed* / *documentation only* | §6 item 5 "the map row's status" |
 | 13 | Not implemented: the window-partition golden case of §8 | No translator-backed dialect emits a partitioned window from one formula; the trap belongs to the map-backed Sigma/Omni rows, which the skill handles from the map |
 
+**Review round 2 (2026-10-06).** An independent review ran ~145 corpus formulas and found
+TRANSLATED results that were wrong or unparseable. Added, without touching any translator:
+
+| # | Change | Why |
+|---|---|---|
+| 14 | `defects.py`: a known-defect list. Databricks `DATEDIFF` (argument order; fix/databricks-datediff-order), Snowflake `DAYOFWEEK` / Databricks `dayofweek` / Tableau `DATEPART('weekday')` (numbering, BL-334) → `NEEDS_REVIEW`; `ZEROIFNULL` (BL-226, unverified) and a dropped Tableau `ZN()` → `APPROXIMATED` with a trap. Each entry is removed with its translator fix | the fixes belong in the translators (BL-217) and are in their own PRs; until then a tester must not see these as TRANSLATED |
+| 15 | Output guard: a function outside the formula catalog (`catalog.py`, vendored from what `check_formula_catalog.py` parses, drift-tested; `sql_number_aggregate_op` rejected per OI-5), a SQL operator read as a column, bare `TOTAL`, `==`, `+` on a string → `NEEDS_REVIEW`. Comments are stripped first | translators emitted `[TABLE::ILIKE]`, `RUNNING_SUM(`, `sum(TOTAL x)`, `==`, `'…' + '…'` as TRANSLATED |
+| 16 | Qlik `"Field"` is a field (rewritten `[Field]`); Tableau IF/CASE without ELSE gets `ELSE NULL` (Tableau's semantics; `else null` is live-verified) instead of the translator's text-guessed `else 0` / `else ''` | both produced wrong output |
+| 17 | Detection: Snowflake/Databricks is a must-ask pair unless a dialect-unique signal fires — Databricks also has `IFF`, `::`, `QUALIFY` and `DATEDIFF(unit, …)` (docs.databricks.com, checked 2026-10-06); weak-only evidence (score < 2, e.g. `[A/B]` alone) is asked; Tableau gets upper-case double-quoted date parts | the previous rules confirmed on shared syntax |
+| 18 | A string comparison from a case-sensitive dialect is `APPROXIMATED` (OI-4); the round trap needs a 2-argument round; column = column comparisons get a conditional case trap | no output more certain than its evidence |
+| 19 | `execute` reports an unexpected error as `verification.result: ERROR` in the JSON after cleanup, cleanup logs every remaining GUID itself, and a Ctrl-C during cleanup is logged and re-raised | the exit-1 "prints the GUID" contract must hold on every path |
+
 **Skill test.** SKILL.md was exercised by a fresh subagent on a three-formula batch (an Excel
 `EXACT`/`ROUND` formula, a five-way tie, a Tableau week difference) and revised from its
 findings: the map-row status rule now ranks "passthrough / composition with no live date for

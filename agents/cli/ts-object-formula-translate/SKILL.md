@@ -29,7 +29,7 @@ rests on an unprobed composition says so *on the same line*.
 
 | Source | Backing | How this skill translates it |
 |---|---|---|
-| Tableau, DAX, Qlik, Sisense, Snowflake SQL, Databricks SQL | **translator** — the converter skills' own code | `ts formula translate --from <dialect>`. Never re-translate these by hand; if the CLI is wrong, the fix belongs in the translator (it also fixes the converter) |
+| Tableau, DAX, Qlik, Sisense, Snowflake SQL, Databricks SQL | **translator** — the converter skills' own code | `ts formula translate --from <dialect>`. The CLI result is the answer; do not quietly rewrite it. If it returns `NEEDS_REVIEW` (a translator gap, a known defect, or an output guard), explain the reason and you **may** offer a hand-composed alternative from the maps or `thoughtspot-formula-patterns.md`, labelled *hand-composed, not translator output* and validated if possible. A wrong translation is fixed in the translator, which also fixes the converter |
 | Excel, Google Sheets, Omni table calc, Sigma, Omni modelling layer | **map** — `docs/function-maps/` | You translate from the map rows (Step 4b), citing each row. No code stands behind it, so validation is **recommended** |
 | LookML | none | Point to `/ts-convert-from-looker`; out of scope here |
 
@@ -110,7 +110,19 @@ the shell would mangle. Sisense: if the user has the JAQL context object, pass i
 `--context`; without it each `[key]` reads as a column named `key` (the CLI notes this).
 
 Read: `formula`, `status`, `classification`, `role`, `references`, `unresolved`, `traps`,
-`notes`, `verification.translator`, `verification.tests`, `tml`. Present per Step 5.
+`notes`, `verification.translator`, `tml`. Present per Step 5.
+
+**`NEEDS_REVIEW` is a result, not a failure to hide.** `notes[]` says which of three things
+happened, and the answer says it in plain words:
+
+| `notes[]` starts with | Meaning | What you may offer |
+|---|---|---|
+| `known defect …` | the translator gets this construct wrong today; the fix is tracked (BL / branch named) | a hand-composed form from the maps, labelled as such |
+| `the output calls …` / `the SQL operator …` / `'+' next to …` / `'=='` / `a bare TOTAL …` | the output guard caught something ThoughtSpot cannot parse | the same |
+| anything else | the translator could not translate it | the map row's workaround (Step 5 item 8) |
+
+Show `partial` (what the translator emitted) only labelled *rejected output*, never as an
+answer.
 
 ## Step 4b — Map-backed dialects (Excel, Sheets, Omni, Sigma)
 
@@ -209,10 +221,12 @@ silently change the role.
    |---|---|---|
    | `[Sales]` | `[TABLE::Sales]` | placeholder |
 
-5. **Verification status** — translator-backed: "`<verification.translator>`, covered by
-   `<verification.tests>`"; map-backed: each row's status from Step 4b; either: the
-   `compile`/`execute` result when run. **An unprobed composition says "unprobed" on its own
-   line, never "verified".**
+5. **Verification status** — translator-backed: "**deterministic translator output**
+   (`<verification.translator>`) — not verified against ThoughtSpot". The translator's tests
+   show the construct is handled, not that this output is right, so never call it
+   "verified" or "covered". Map-backed: each row's status from Step 4b. Either: the
+   `compile`/`execute` result when run — the only thing that makes it **verified**. **An
+   unprobed composition says "unprobed" on its own line, never "verified".**
 6. **TML snippet** — `tml` from the CLI, or for map-backed formulas the same shape:
    ```yaml
    formulas:
@@ -236,8 +250,10 @@ silently change the role.
 
 ## Step 6 — Validate (level 2 only)
 
-Offer when the user gave a Model and validation has not run; **recommend** it for map-backed
-answers. It needs every reference resolved (no placeholders, no `unresolved[]`).
+**Always offer `--validate compile` when a Model is available** and validation has not run —
+for translator-backed answers too (it creates nothing); **recommend** it for map-backed
+answers. Without a Model, say the answer is unvalidated and that pointing at a Model would
+let you check it. It needs every reference resolved (no placeholders, no `unresolved[]`).
 
     ts formula translate '<formula>' --from <dialect> --model <guid> --profile <p> \
       --name "<display name>" --validate compile     # parse check; creates NOTHING
@@ -272,7 +288,17 @@ stderr names every remaining GUID. Repeat each GUID to the user with the command
   Sigma (spec §3.3).
 - **Translator gaps surface as `NEEDS_REVIEW`, by design.** Example: Qlik's translator only
   converts `Count(DISTINCT x)` as a whole expression; inside a larger one the CLI's guard
-  catches the leftover `DISTINCT` and refuses rather than emit an invalid formula.
+  catches the leftover `DISTINCT` and refuses rather than emit an invalid formula. The output
+  guard also rejects any function outside the ThoughtSpot formula catalog, a SQL operator
+  read as a column (`ILIKE`, `RLIKE`), `==`, a bare `TOTAL`, and `+` on strings.
+- **Known translator defects are downgraded until their fixes land:** Databricks `DATEDIFF`
+  argument order (fix/databricks-datediff-order) and the day-of-week numbering of Snowflake
+  `DAYOFWEEK`, Databricks `dayofweek` and Tableau `DATEPART('weekday')` (BL-334) come back
+  `NEEDS_REVIEW`; `ZEROIFNULL` (BL-226, unverified) and a dropped Tableau `ZN()` come back
+  `APPROXIMATED` with a trap.
+- **A string comparison translated from a case-sensitive dialect** (Tableau, Snowflake,
+  Databricks) comes back `APPROXIMATED`: ThoughtSpot compares case-insensitively (OI-4,
+  BL-333), so values differing only in case answer differently.
 - **Tableau `DATEDIFF('week', …)`** comes back as `diff_days ( … ) / 7` — fractional 7-day
   spans, not week boundaries — so the CLI reports it `APPROXIMATED` / `direct (downgrade)`
   with a trap line.

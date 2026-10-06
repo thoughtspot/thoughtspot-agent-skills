@@ -4268,6 +4268,23 @@ ts formula detect "{FIXED [Region] : SUM([Sales])}"
 (`translator`, `tests`, and the validation result when run), `tml`. A `NEEDS_REVIEW`
 result carries `original_kept` and, when the translator emitted something, `partial`.
 
+**Never more certain than the evidence.** Comments (`--`, `//`, `/* */`) are stripped first.
+After translation three layers can lower the status:
+- *known defects* (`ts_cli/formula_translate/defects.py`) — constructs a wrapped translator
+  gets wrong today, each citing its fix (Databricks `DATEDIFF` order; Snowflake `DAYOFWEEK`,
+  Databricks `dayofweek`, Tableau `DATEPART('weekday')`, BL-334) → `NEEDS_REVIEW`;
+  `ZEROIFNULL` (BL-226) and a dropped Tableau `ZN()` → `APPROXIMATED` with a trap;
+- the *output guard* — a function outside the ThoughtSpot formula catalog (the set
+  `check_formula_catalog.py` parses from `thoughtspot-formula-patterns.md`, vendored in
+  `formula_translate/catalog.py` with a drift test), a SQL operator read as a column
+  (`[TABLE::ILIKE]`), a bare `TOTAL`, `==`, `+` on a string, or a leftover SQL keyword →
+  `NEEDS_REVIEW`, with the rejected text in `partial`;
+- *downgrade traps* — a trap meaning the output computes something else (Tableau
+  `DATEDIFF('week')` → `diff_days / 7`) → `APPROXIMATED`.
+
+A `TRANSLATED` result is deterministic translator output, not verified against ThoughtSpot:
+only `--validate` verifies.
+
 **Validation.** Both tiers work on a scratch copy of the Model's TML — guid dropped,
 renamed `ZZ_FORMULA_PROBE_<UTC timestamp>_DELETE_ME`, the formula and its `columns[]` entry
 appended — and refuse to run while any reference is a placeholder or unresolved.
@@ -4284,7 +4301,10 @@ appended — and refuse to run while any reference is a placeholder or unresolve
 
 **Exit codes:** 0 = ran (read `status` / `verification.result`); 1 = the scratch Model could
 not be confirmed deleted — every remaining GUID is printed to stderr with the
-`ts metadata delete` command; 2 = bad input, or validation preconditions not met.
+`ts metadata delete` command (also on Ctrl-C during cleanup) — or `execute` hit an
+unexpected error after cleanup ran (`verification.result: ERROR`); 2 = bad input,
+validation preconditions not met, or an error before any object was created. The JSON is
+always printed.
 
 ### `ts formula detect [EXPR]`
 
