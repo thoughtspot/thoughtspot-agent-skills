@@ -354,3 +354,15 @@ def test_date_in_text_is_the_serial(src, expected):
 
 def test_datetime_in_text_is_needs_review():
     assert "time fraction" in review("=LEFT([@stamp],4)")
+
+
+# ---------------------------------------------------------------------------
+# BL-351: constant decimal arithmetic — a documented platform divergence
+# ---------------------------------------------------------------------------
+
+def test_constant_decimal_arithmetic_carries_the_divergence_trap():
+    r = ok("=-1234+1233.7")
+    assert r.status == "TRANSLATED"            # documented, not a translation error
+    assert any(t.startswith("constant decimal arithmetic (BL-351)") for t in r.traps)
+    assert not any("BL-351" in t for t in ok("=[@amt]+0.5").traps)
+    assert not any("BL-351" in t for t in ok("=2+3").traps)

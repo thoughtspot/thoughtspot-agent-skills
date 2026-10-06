@@ -34,6 +34,14 @@ TYPE_UNKNOWN_NOTE = ("column types unknown: {name} was left bare inside concat; 
                      "--columns, or --model, to decide")
 
 
+DECIMAL_CONSTANT_TRAP = (
+    "constant decimal arithmetic (BL-351): the warehouse computes literals as exact decimals, "
+    "Excel as binary doubles, so a result can differ from Excel's in the 13th significant "
+    "digit or beyond (Excel's 0.1 + 0.2 carries the double's error, 0.30000000000000004; "
+    "the warehouse returns 0.3). Over a DOUBLE column both compute in double. A documented "
+    "platform divergence, not a translation error")
+
+
 class NeedsReview(Exception):
     """The construct has no rule; the message is the user-facing reason."""
 
@@ -184,6 +192,9 @@ class Translator:
         if node.op in ("=", "<>", "<", "<=", ">", ">="):
             return self.compare(node.op, left, right)
         left, right = self.as_number(left), self.as_number(right)
+        if _constant_decimal(left) and _constant_decimal(right) and (
+                _has_decimal(left) or _has_decimal(right)):
+            self.trap(DECIMAL_CONSTANT_TRAP)
         if node.op == "^":
             return T.call("pow", left, right)
         if node.op in ("+", "-"):
@@ -383,6 +394,17 @@ def check_a1(tree) -> None:
 _NUMERIC_ARGS = frozenset({"greatest", "least", "abs", "round", "floor", "ceil", "pow", "sqrt",
                            "ln", "exp", "log10", "sum", "average", "max", "min", "median",
                            "stddev", "variance"})
+
+
+def _constant_decimal(node: dict) -> bool:
+    """Only number literals and arithmetic on them."""
+    return all(n.get("node") in ("lit", "binop", "unop") and (
+        n.get("node") != "lit" or n["kind"] == "number") and (
+        n.get("node") != "binop" or n["op"] in "+-*/") for n in T.walk(node))
+
+
+def _has_decimal(node: dict) -> bool:
+    return any(T.is_lit(n, "number") and "." in n["value"] for n in T.walk(node))
 
 
 def _flatten_concat(node) -> list:
