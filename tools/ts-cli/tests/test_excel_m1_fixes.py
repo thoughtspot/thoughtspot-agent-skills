@@ -319,3 +319,38 @@ def test_rounding_multiplies_by_the_increment(src, expected):
 ])
 def test_roundup_by_value(x, digits, expected):
     assert ts_eval(f(f"=ROUNDUP({x},{digits})")) == pytest.approx(expected, rel=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# BL-349: a boolean joined into text reads TRUE / FALSE
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("src,expected", [
+    ('="is "&([@qty]>2)', "concat ( 'is ' , if ( [T::qty] > 2 ) then 'TRUE' else 'FALSE' )"),
+    ('=CONCAT([@flag],"!")', "concat ( if ( [T::flag] ) then 'TRUE' else 'FALSE' , '!' )"),
+    ('="x"&TRUE', "concat ( 'x' , 'TRUE' )"),
+    ("=LEN([@flag])", "strlen ( if ( [T::flag] ) then 'TRUE' else 'FALSE' )"),
+])
+def test_boolean_in_text(src, expected):
+    r = ok(src)
+    assert r.expr == expected and r.status == "TRANSLATED"
+
+
+# ---------------------------------------------------------------------------
+# BL-350: a date where text is expected is its serial number
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("src,expected", [
+    ("=UPPER([@day])", f'sql_string_op ( "UPPER({{0}})" , to_string ( diff_days ( [T::day] , '
+                       f'{EPOCH} ) ) )'),
+    ("=LEN([@day])", f"strlen ( to_string ( diff_days ( [T::day] , {EPOCH} ) ) )"),
+    ('="on "&[@day]', f"concat ( 'on ' , to_string ( diff_days ( [T::day] , {EPOCH} ) ) )"),
+])
+def test_date_in_text_is_the_serial(src, expected):
+    r = ok(src)
+    assert r.expr == expected
+    assert any("serial" in n for n in r.notes) and any("1899-12-30" in t for t in r.traps)
+
+
+def test_datetime_in_text_is_needs_review():
+    assert "time fraction" in review("=LEFT([@stamp],4)")

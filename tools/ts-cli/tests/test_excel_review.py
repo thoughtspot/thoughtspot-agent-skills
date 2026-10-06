@@ -211,10 +211,11 @@ def test_untyped_column_arithmetic_is_approximated_with_a_type_note():
     assert tx("=TODAY()-[@D]", columns=cols).expr == "diff_days ( today ( ) , [T::D] )"
 
 
-def test_boolean_to_string_note():
+def test_boolean_in_concat_reads_excel_capitals():
+    # BL-349 (fidelity M1): to_string gives 'true' / 'false'; Excel's & shows TRUE / FALSE,
+    # so the translation writes the capitals out instead of noting the difference
     r = tx('="x"&([@a]>1)')
-    assert "to_string ( [TABLE::a] > 1 )" in r.expr
-    assert any("'true' / 'false'" in n for n in r.notes)
+    assert "if ( [TABLE::a] > 1 ) then 'TRUE' else 'FALSE'" in r.expr
 
 
 # ---------------------------------------------------------------------------

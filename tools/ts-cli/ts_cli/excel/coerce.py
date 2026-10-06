@@ -238,11 +238,17 @@ def as_text(tr, node: dict, quiet: bool = False) -> dict:
             tr.unknown_text(node)
         return node
     if t == "bool":
-        tr.note("to_string of a boolean gives 'true' / 'false'; Excel's & shows TRUE / FALSE")
-    if t in ("date", "datetime"):
-        tr.trap("a date joined with & is its serial number in Excel; ThoughtSpot's "
-                "to_string gives the date text — use TEXT() semantics deliberately",
-                downgrade=True)
+        return bool_text(node)                 # BL-349: Excel's TRUE / FALSE
+    if t == "date":
+        # BL-350: Excel's text functions and & read a date as its serial number
+        tr.note("Excel reads a date as its serial number where text is expected (UPPER, LEN, "
+                "LEFT, &…), so the translation does too; for the date's text write TEXT() in "
+                "the sheet")
+        return T.call("to_string", serial(tr, node))
+    if t == "datetime":
+        tr.review("a date-time where Excel expects text is its serial number with a time "
+                  "fraction; ThoughtSpot's to_string needs a format for a date-time and has no "
+                  "serial form — use TEXT() semantics deliberately (Excel map, TEXT row)")
     if t in ("double", "number") and node.get("node") != "lit":
         tr.trap("to_string of a DOUBLE may render a decimal ('12.0') where Excel shows 12 — "
                 "exact for an integer column")
