@@ -57,6 +57,8 @@ def _args(argv=None):
     ap.add_argument("--cases", required=True, type=pathlib.Path)
     ap.add_argument("--profile", help="ThoughtSpot profile (ts profiles)")
     ap.add_argument("--sf-profile", help="Snowflake profile (python method)")
+    ap.add_argument("--dbx-profile", help="Databricks profile with a SQL warehouse "
+                    "(/ts-profile-databricks); needed when the fixture's warehouse is databricks")
     ap.add_argument("--connection", default="APJ_TAB", help="ThoughtSpot connection name")
     ap.add_argument("--database", default="AGENT_SKILLS")
     ap.add_argument("--schema", default="PUBLIC")
@@ -158,11 +160,15 @@ def main(argv=None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    if not (args.profile and args.sf_profile):
-        print("error: a live run needs --profile and --sf-profile", file=sys.stderr)
-        return 2
     if len(fixtures) != 1:
         print("error: one fixture per run in this version", file=sys.stderr)
+        return 2
+    wh_kind = builders.warehouse_of(next(iter(fixtures.values())))
+    wh_profile = args.dbx_profile if wh_kind == "databricks" else args.sf_profile
+    if not (args.profile and wh_profile):
+        flag = "--dbx-profile" if wh_kind == "databricks" else "--sf-profile"
+        print(f"error: a live run over a {wh_kind} fixture needs --profile and {flag}",
+              file=sys.stderr)
         return 2
     return live_run(args, cases, fixtures, title)
 
@@ -178,7 +184,10 @@ class Deps:
 
         self.live = live
         self.validator = validator or (lambda profile: live.ts_validator(profile))
-        self.warehouse = warehouse or (lambda sf_profile: live.Warehouse(sf_profile))
+        # (warehouse kind, profile) -> a session object. Default: Snowflake (M0, M1) or the
+        # Databricks SQL warehouse (M2), chosen by the fixture's ``warehouse``.
+        self.warehouse = warehouse or (lambda kind, profile: live.DatabricksWarehouse(profile)
+                                       if kind == "databricks" else live.Warehouse(profile))
         self.translate = translate or translate_case
         self.now_ms = now_ms or (lambda: int(time.time() * 1000))
         # (wh, case, fixture, fq_table) -> {"values": …}. Default: the warehouse runs the
@@ -218,6 +227,8 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
         ts_cli_version = "unknown"
 
     fixture = next(iter(fixtures.values()))
+    wh_kind = builders.warehouse_of(fixture)
+    wh_profile = getattr(args, "dbx_profile", None) if wh_kind == "databricks" else args.sf_profile
     stamp = builders.run_stamp()
     names = builders.object_names(fixture["name"], stamp)
     fq_table = builders.fq(args.database, args.schema, names["warehouse_table"])
@@ -226,6 +237,7 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
     phases: dict[str, float] = {}
     meta = {"date": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
             "profile": args.profile, "connection": args.connection, "sf_profile": args.sf_profile,
+            "warehouse": wh_kind, "dbx_profile": getattr(args, "dbx_profile", None),
             "warehouse_table": fq_table, "ts_table": names["ts_table"],
             "ts_model": names["ts_model"], "run_start_ms": run_start_ms,
             "cases_file": _rel(args.cases), "cases_sha256": caselib.file_sha256(args.cases),
@@ -248,7 +260,7 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
     try:
         validator = deps.validator(args.profile)
         meta["orphans"] = live.find_orphans(validator)
-        wh = deps.warehouse(args.sf_profile)
+        wh = deps.warehouse(wh_kind, wh_profile)
         meta["warehouse_orphans"] = live.find_warehouse_orphans(wh, args.database, args.schema)
         n_orph = len(meta["orphans"]) + len(meta["warehouse_orphans"])
         if n_orph:
@@ -257,6 +269,13 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
         t = time.monotonic()
         for s in builders.session_sql(fixture):
             wh.execute(s)
+        # What the session actually runs under, read back after setting it (run header).
+        meta["session"] = {}
+        for k, q in builders.session_readback_sql(fixture):
+            try:
+                meta["session"][k] = [list(map(str, r)) for r in wh.execute(q)]
+            except Exception as exc:  # noqa: BLE001 — a readback failure is recorded, not fatal
+                meta["session"][k] = f"readback failed: {type(exc).__name__}: {exc}"
         live.log(f"warehouse: creating {fq_table}")
         wh.execute(builders.create_table_sql(fixture, fq_table))
         table_created = True

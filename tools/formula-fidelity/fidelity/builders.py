@@ -23,6 +23,23 @@ ORPHAN_PATTERN = f"{PREFIX}%{SUFFIX}"
 
 IDENT = re.compile(r"^[A-Z_][A-Z0-9_$]*$")
 
+# Warehouses a fixture can be loaded into. ``snowflake`` is the default (M0, M1);
+# ``databricks`` is M2. The dialect decides literal syntax, session statements and how a
+# table's existence is checked — nothing else in a run depends on it.
+WAREHOUSES = ("snowflake", "databricks")
+
+
+def warehouse_of(fixture: dict) -> str:
+    wh = fixture.get("warehouse", "snowflake")
+    if wh not in WAREHOUSES:
+        raise ValueError(f"fixture warehouse must be one of {WAREHOUSES}, got {wh!r}")
+    return wh
+
+
+def wh_type(col: dict) -> str:
+    """A column's warehouse type: ``wh_type``, or the M0/M1 spelling ``sf_type``."""
+    return col.get("wh_type") or col["sf_type"]
+
 
 def run_stamp(now: Optional[float] = None, suffix: Optional[str] = None) -> str:
     """UTC timestamp plus a random suffix, so two runs started in the same second (or a
@@ -51,12 +68,15 @@ def formula_name(case_id: str) -> str:
 
 # -- warehouse SQL --------------------------------------------------------------------
 
-def sql_literal(value: Any, sf_type: str) -> str:
+def sql_literal(value: Any, sf_type: str, dialect: str = "snowflake") -> str:
     if value is None:
         return "NULL"
     t = sf_type.upper()
     if t.startswith(("VARCHAR", "STRING", "TEXT", "CHAR")):
-        return "'" + str(value).replace("\\", "\\\\").replace("'", "''") + "'"
+        body = str(value).replace("\\", "\\\\")
+        # Databricks reads a backslash escape inside '...'; Snowflake doubles the quote.
+        body = body.replace("'", "\\'") if dialect == "databricks" else body.replace("'", "''")
+        return "'" + body + "'"
     if t == "DATE":
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(value)):
             raise ValueError(f"DATE value must be YYYY-MM-DD, got {value!r}")
@@ -83,24 +103,48 @@ def fq(database: str, schema: str, table: str) -> str:
 
 def create_table_sql(fixture: dict, fq_table: str) -> str:
     """CREATE TABLE (never OR REPLACE: a name clash must fail, not clobber)."""
-    cols = ",\n  ".join(f"{c['name']} {c['sf_type']}" for c in fixture["columns"])
+    cols = ",\n  ".join(f"{c['name']} {wh_type(c)}" for c in fixture["columns"])
     return f"CREATE TABLE {fq_table} (\n  {cols}\n)"
 
 
 def insert_rows_sql(fixture: dict, fq_table: str) -> str:
     cols = fixture["columns"]
+    dialect = warehouse_of(fixture)
     names = ", ".join(c["name"] for c in cols)
     rows = ",\n  ".join(
-        "(" + ", ".join(sql_literal(r.get(c["name"]), c["sf_type"]) for c in cols) + ")"
+        "(" + ", ".join(sql_literal(r.get(c["name"]), wh_type(c), dialect) for c in cols) + ")"
         for r in fixture["rows"])
     return f"INSERT INTO {fq_table} ({names}) VALUES\n  {rows}"
 
 
+# Databricks SQL-warehouse session parameters the harness may set. A SQL warehouse accepts
+# only a short allowlist (ANSI_MODE, TIMEZONE, …); anything else is an authoring error.
+DATABRICKS_SESSION = {"ANSI_MODE": "ansi_mode", "TIMEZONE": "timezone",
+                      "LEGACY_TIME_PARSER_POLICY": "legacy_time_parser_policy"}
+
+
 def session_sql(fixture: dict) -> list[str]:
+    dialect = warehouse_of(fixture)
     out = []
     for k, v in (fixture.get("session") or {}).items():
         if not re.fullmatch(r"[A-Z_]+", k):
             raise ValueError(f"bad session parameter name {k!r}")
+        if dialect == "databricks":
+            if k not in DATABRICKS_SESSION:
+                raise ValueError(f"Databricks session parameter {k!r} is not one of "
+                                 f"{sorted(DATABRICKS_SESSION)}")
+            if isinstance(v, bool):
+                val = "true" if v else "false"
+            elif isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_/+:-]+", v):
+                val = "'" + v + "'"
+            else:
+                raise ValueError(f"session parameter {k} must be a boolean or a plain "
+                                 f"string, got {v!r}")
+            # The time zone has its own statement: `SET timezone = 'UTC'` is rejected by a SQL
+            # warehouse ("Unsupported configuration", observed 2026-10-07).
+            out.append(f"SET TIME ZONE {val}" if k == "TIMEZONE"
+                       else f"SET {DATABRICKS_SESSION[k]} = {val}")
+            continue
         if isinstance(v, str):
             val = "'" + v.replace("\\", "\\\\").replace("'", "''") + "'"
         elif isinstance(v, bool) or not isinstance(v, int):
@@ -111,22 +155,30 @@ def session_sql(fixture: dict) -> list[str]:
     return out
 
 
+def session_readback_sql(fixture: dict) -> list[tuple[str, str]]:
+    """(parameter, statement) pairs that read back each pinned session value, so the run
+    header records what the warehouse actually ran under, not what was asked for."""
+    if warehouse_of(fixture) == "databricks":
+        return [(k, f"SET {DATABRICKS_SESSION[k]}") for k in (fixture.get("session") or {})]
+    return [(k, f"SHOW PARAMETERS LIKE '{k}' IN SESSION") for k in (fixture.get("session") or {})]
+
+
 def oracle_sql(case: dict, fixture: dict, fq_table: str, only_key: Any = None) -> str:
     """The source formula evaluated in the warehouse, keyed like the ThoughtSpot query."""
     expr = case["source_formula"]
     if case["role"] == "aggregate":
         k = case["group_by"]
-        where = f" WHERE {k} = {sql_literal(only_key, _sf_type(fixture, k))}" \
+        where = f" WHERE {k} = {sql_literal(only_key, _sf_type(fixture, k), warehouse_of(fixture))}" \
             if only_key is not None else ""
         return f"SELECT {k} AS K, ({expr}) AS V FROM {fq_table}{where} GROUP BY {k} ORDER BY {k}"
     k = fixture["key"]
-    where = f" WHERE {k} = {sql_literal(only_key, _sf_type(fixture, k))}" \
+    where = f" WHERE {k} = {sql_literal(only_key, _sf_type(fixture, k), warehouse_of(fixture))}" \
         if only_key is not None else ""
     return f"SELECT {k} AS K, ({expr}) AS V FROM {fq_table}{where} ORDER BY {k}"
 
 
 def _sf_type(fixture: dict, col: str) -> str:
-    return next(c["sf_type"] for c in fixture["columns"] if c["name"] == col)
+    return next(wh_type(c) for c in fixture["columns"] if c["name"] == col)
 
 
 def key_values(case: dict, fixture: dict) -> list[Any]:
@@ -146,8 +198,13 @@ def table_tml(fixture: dict, names: dict, connection: str, database: str, schema
             props["aggregation"] = "SUM"
         cols.append({"name": c["name"], "db_column_name": c["name"], "properties": props,
                      "db_column_properties": {"data_type": c["ts_type"]}})
+    db_table = names["warehouse_table"]
+    if warehouse_of(fixture) == "databricks":
+        # Unity Catalog stores catalog, schema and table names in lower case; register them
+        # as the catalog spells them (the connection's existing tables do the same).
+        database, schema, db_table = database.lower(), schema.lower(), db_table.lower()
     return {"table": {"name": names["ts_table"], "db": database, "schema": schema,
-                      "db_table": names["warehouse_table"],
+                      "db_table": db_table,
                       "connection": {"name": connection}, "columns": cols}}
 
 

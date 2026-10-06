@@ -140,7 +140,7 @@ def _go(tmp_path, boom, ts=None):
     ts = ts or FakeTS(boom)
     wh = FakeWH(boom)
     deps = runmod.Deps(validator=lambda p: (boom.step("validator"), ts)[1],
-                       warehouse=lambda s: (boom.step("warehouse"), wh)[1],
+                       warehouse=lambda kind, s: (boom.step("warehouse"), wh)[1],
                        now_ms=lambda: START_MS)
     return cases, ts, wh, deps, fixtures
 

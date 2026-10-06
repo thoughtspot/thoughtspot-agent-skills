@@ -1,4 +1,4 @@
-"""Live I/O: the Snowflake oracle and the ThoughtSpot scratch Table/Model/AgentQL run.
+"""Live I/O: the Snowflake and Databricks oracles and the ThoughtSpot scratch Table/Model/AgentQL run.
 
 Everything here talks to a real system, so it is kept thin: the strings it sends come
 from ``builders`` and the decisions about results from ``compare`` — both unit-tested.
@@ -63,22 +63,106 @@ class Warehouse:
             pass
 
 
+# =====================================================================================
+# Databricks (M2)
+# =====================================================================================
+
+class DatabricksWarehouse:
+    """One Databricks SQL-warehouse session for the whole run, same interface as
+    ``Warehouse``.
+
+    Connects with ``databricks-sql-connector`` to the profile's ``sql_warehouse_http_path``.
+    Credentials come only from the Databricks profile: the ``dbx_profile`` it names in
+    ``~/.databrickscfg`` (the ``databricks`` CLI's own store), read by ``databricks-sdk``'s
+    ``Config``. Nothing here reads, prints or stores the secret. Both packages are
+    run-time only (``uv run --with databricks-sql-connector --with databricks-sdk``).
+    """
+
+    dialect = "databricks"
+
+    def __init__(self, dbx_profile: str):
+        from ts_cli.commands.load import _load_dbx_profile
+
+        profile = _load_dbx_profile(dbx_profile)
+        http_path = profile.get("sql_warehouse_http_path")
+        if not http_path:
+            raise SystemExit(f"Databricks profile {dbx_profile!r} has no "
+                             "sql_warehouse_http_path; the oracle needs a SQL warehouse")
+        cli_profile = profile.get("dbx_profile") or profile.get("dbx_cli_profile")
+        if not cli_profile:
+            raise SystemExit(f"Databricks profile {dbx_profile!r} names no dbx_profile "
+                             "(~/.databrickscfg) to authenticate with")
+        from databricks import sql as dbsql
+        from databricks.sdk.core import Config
+
+        cfg = Config(profile=cli_profile)
+        host = (cfg.host or profile.get("host") or "").replace("https://", "").rstrip("/")
+        self.host, self.http_path = host, http_path
+        self.conn = dbsql.connect(server_hostname=host, http_path=http_path,
+                                  credentials_provider=lambda: cfg.authenticate)
+
+    def execute(self, sql: str) -> list[tuple]:
+        cur = self.conn.cursor()
+        try:
+            cur.execute(sql)
+            return [tuple(r) for r in cur.fetchall()] if cur.description else []
+        finally:
+            cur.close()
+
+    def keyed(self, sql: str) -> dict[str, dict]:
+        return {str(k): canon(v) for k, v in self.execute(sql)}
+
+    def table_exists(self, database: str, schema: str, table: str) -> bool:
+        rows = self.execute(f"SHOW TABLES IN {database}.{schema} LIKE '{table.lower()}'")
+        return any(str(r[1]).lower() == table.lower() for r in rows)
+
+    def orphans(self, database: str, schema: str) -> list[dict]:
+        rows = self.execute(f"SHOW TABLES IN {database}.{schema} "
+                            f"LIKE '{builders.PREFIX.lower()}*'")
+        return [{"name": str(r[1]), "created_on": None} for r in rows
+                if str(r[1]).upper().startswith(builders.PREFIX)]
+
+    @staticmethod
+    def error_text(exc: Any) -> str:
+        return dbx_error(exc)
+
+    def close(self) -> None:
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+
+def dbx_error(exc: Any) -> str:
+    """'[DIVIDE_BY_ZERO] Division by zero. Use `try_divide` … SQLSTATE: 22012 == SQL …'
+    -> '[DIVIDE_BY_ZERO] Division by zero.' — the error class and its first sentence."""
+    import re
+
+    s = str(exc).strip()
+    m = re.search(r"\[([A-Z][A-Z0-9_.]*)\]\s*([^\n]*)", s)
+    if not m:
+        return s.splitlines()[0].strip() if s else "error"
+    msg = re.split(r"(?<=\.)\s", m.group(2).strip(), maxsplit=1)[0]
+    return f"[{m.group(1)}] {msg}".strip()
+
+
 def run_oracle(wh: Warehouse, case: dict, fixture: dict, fq_table: str) -> dict:
     """Expected values per key. A query error falls back to one query per key, so one bad
     row (a zero divisor) yields an ``error`` value for that key instead of losing the case."""
     sql = builders.oracle_sql(case, fixture, fq_table)
+    err_text = getattr(wh, "error_text", _sf_error)
     try:
         return {"sql": sql, "values": wh.keyed(sql), "error": None}
     except Exception as exc:
-        whole = str(exc)
+        whole = exc
     values: dict[str, dict] = {}
     for k in builders.key_values(case, fixture):
         try:
             got = wh.keyed(builders.oracle_sql(case, fixture, fq_table, only_key=k))
             values.update(got)
         except Exception as exc:
-            values[str(k)] = error(_sf_error(exc))
-    return {"sql": sql, "values": values, "error": _sf_error(whole), "per_key": True}
+            values[str(k)] = error(err_text(exc))
+    return {"sql": sql, "values": values, "error": err_text(whole), "per_key": True}
 
 
 def _sf_error(exc: Any) -> str:
@@ -123,6 +207,8 @@ def find_orphans(validator) -> list[dict]:
 
 def find_warehouse_orphans(wh: "Warehouse", database: str, schema: str) -> list[dict]:
     """Warehouse tables from earlier runs. Reported, never dropped."""
+    if hasattr(wh, "orphans"):
+        return wh.orphans(database, schema)
     rows = wh.execute(f"SHOW TABLES LIKE '{builders.PREFIX}%' IN SCHEMA {database}.{schema}")
     return [{"name": str(r[1]), "created_on": str(r[0])} for r in rows
             if str(r[1]).upper().startswith(builders.PREFIX)]
