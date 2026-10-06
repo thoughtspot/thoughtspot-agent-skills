@@ -55,7 +55,8 @@ Use this as the canonical limitations reference.
 | 28 | `DATENAME('month', d)` | `month ( [date] )` | Returns name, not number. Only `month` supported — other units rejected with reason at translate time (v0.26.0) |
 | 29 | `DATEPARSE(format, s)` | `to_date ( s , format )` | CLI-translated (v0.26.0); args flipped vs Tableau |
 | 30 | `TODAY`/`NOW`/`DATE`/`YEAR`/`MONTH`/`DAY` | `today`/`now`/`date`/`year`/`month_number`/`day` | |
-| 31 | `ABS`/`ROUND`/`CEILING`/`FLOOR`/`SQRT`/`POWER`/`LOG`/`LN`/`EXP` | `abs`/`round`/`ceil`/`floor`/`sqrt`/`pow`/`log10`/`ln`/`exp` | |
+| 31 | `ABS`/`CEILING`/`FLOOR`/`SQRT`/`POWER`/`LOG`/`LN`/`EXP` | `abs`/`ceil`/`floor`/`sqrt`/`pow`/`log10`/`ln`/`exp` | |
+| 31a | `ROUND(x, n)` | `round ( x , 10^-n )` — `2` → `0.01`, `0` → `1`, `-2` → `100`; non-literal `n` → `sql_double_op ( "ROUND({0}, {1})" , x , n )` | ThoughtSpot's 2nd arg is a rounding increment, not a digit count (BL-331, live-probed 2026-10-06) |
 | 32 | `SIN/COS/TAN` | Radians-to-degrees conversion applied | CLI-translated (v0.26.0) |
 | 132 | `ACOS(x)/ASIN(x)/ATAN(x)` | `( acos ( x ) * 3.14159265358979 / 180 )` (same shape for `asin`/`atan`) | CLI-translated (v0.88.0, BL-072). ThoughtSpot's inverse trig functions return degrees where Tableau's return radians (by symmetry with the shipped SIN/COS/TAN handling above) — the composite converts TS degrees back to radians. Formerly rejected loudly at translate time (former U8, ts-cli v0.26.5-v0.87.0) |
 | 133 | `COT(x)` | `( 1 / tan ( x * 180 / 3.14159265358979 ) )` | CLI-translated (v0.88.0, BL-072). No direct ThoughtSpot function — composites off `tan`, matching Tableau's own `COT(x) = 1/tan(x)` definition (inner `tan` argument converted to degrees, same as the shipped TAN handling). Formerly rejected loudly (former U8) |

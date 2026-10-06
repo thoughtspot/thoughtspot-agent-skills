@@ -210,7 +210,7 @@ se-thoughtspot (2026-07-30) or replaced it with a form that was probed.
 | # | Qlik Sense | ThoughtSpot | Status | Notes |
 |---|---|---|---|---|
 | N01 | `Abs(x)` | `abs(col)` | ok | Direct equivalent. Returns the absolute (non-negative) value. |
-| N02 | `Round(x, n)` | `round(col, n)` | ok | Qlik second arg is rounding interval (0.01 = 2 decimals). ThoughtSpot uses the number of decimal places directly. |
+| N02 | `Round(x, n)` | `round(col, n)` | ok | Direct equivalent. Both second args are a rounding **increment** (`0.01` = 2 decimals, `10` = nearest ten), so `n` is copied verbatim. ThoughtSpot `round(x, 0)` is NULL (BL-331, live-probed 2026-10-06). |
 | N03 | `Floor(x)` | `floor(col)` | ok | Direct equivalent. Rounds down to the nearest integer. |
 | N04 | `Ceil(x)` | `ceil(col)` | ok | Direct equivalent. Rounds up to the nearest integer. |
 | N05 | `Pow(base, exp)` | `pow(base, exp)` | ok | Direct equivalent. Raises base to the power of exponent. |

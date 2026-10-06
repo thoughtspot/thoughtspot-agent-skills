@@ -13,7 +13,7 @@ import re
 
 from ts_cli.sv_naming import (  # noqa: F401  (re-exported for callers/tests)
     build_node_id_map,
-    construct_formula_id,
+    construct_formula_id, metric_ref,
     display_title,
     fact_aggregation,
     fact_column_type,
@@ -391,7 +391,7 @@ def make_resolver(
                         promote_synonym=promote_synonym)
                     if grouped is not None:
                         return grouped
-                return f"[{construct_formula_id(metric, promote_synonym=promote_synonym)}]"
+                return metric_ref(resolve, construct_formula_id(metric, promote_synonym=promote_synonym))
 
             # Step 1 (continued) — a declared dimension, whose shape decides
             # which column or formula it resolves to.
@@ -410,6 +410,7 @@ def make_resolver(
         raise UntranslatableError(
             f"cannot resolve multi-part identifier '{ident}'")
 
+    resolve.metric_refs = set()  # metric refs handed out (sv_naming.metric_ref)
     return resolve
 
 
@@ -846,10 +847,10 @@ def _derived_resolver(
                 inner = make_resolver(parsed, m.get("alias_table") or "",
                     annotations=annotations, promote_synonym=promote_synonym)
                 return translate_sql_expr(m["expr"], inner)
-            return "[" + construct_formula_id(
-                m, promote_synonym=promote_synonym) + "]"
+            return metric_ref(resolve, construct_formula_id(m, promote_synonym=promote_synonym))
         return generic(ident)
 
+    resolve.metric_refs = generic.metric_refs  # one shared set (BL-331)
     return resolve
 
 

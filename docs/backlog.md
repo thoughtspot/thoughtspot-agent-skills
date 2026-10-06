@@ -12248,3 +12248,88 @@ mapped source Model is not in the scan's covered set or the scan's Org differs f
 `--source-org`. Tests for both, plus a test that a covering scan is accepted.
 
 **Target:** next ts-migrate pass.
+
+---
+
+## ~~BL-331~~ — round() 2nd arg is an increment — 5 translators emit digit counts (silent wrong numbers) `Tier 1` — DONE (2026-10-06)
+
+**Filed:** 2026-10-06.
+**Source:** live probe on se-thoughtspot, 2026-10-06 (`ts agentql generate-sql`), corroborating
+`agents/cli/ts-object-model-agentql-query/references/limitations.md:104`.
+
+**The fact.** ThoughtSpot `round(x, n)` takes a rounding **increment**, not a decimal-place
+count. It compiles to `n * round(x / NULLIF(n, 0))`. On `1234.5678`:
+
+| Formula | Result |
+|---|---|
+| `round(x)` | 1235 |
+| `round(x, 0)` | **NULL** |
+| `round(x, 1)` | 1235 |
+| `round(x, 2)` | **1234** |
+| `round(x, 0.01)` | 1234.57 |
+| `round(x, 10)` | 1230 |
+| `round(x, 0.5)` | 1234.5 |
+| `round(x, -2)` | 1234 |
+
+An integer increment yields INT64, a fractional one DOUBLE. SQL, Tableau and DAX `ROUND(x, d)`
+take a digit count, so copying `d` across imports, lints clean and returns a wrong number.
+
+**Affected (all fixed here):**
+
+| Site | Defect |
+|---|---|
+| `ts_cli/sv_sql.py` (Snowflake → TS) | `ROUND` renamed with `d` copied; `TRUNC(x, d)` → `round(x, d)` — rounds instead of truncating, and `TRUNC(x, 0)` → `round(x, 0)` = NULL |
+| `ts_cli/databricks/mv_sql.py` (Databricks → TS) | `ROUND` renamed with `d` copied |
+| `ts_cli/tableau/functions.py` (Tableau → TS) | regex rename left the digit argument |
+| `ts_cli/databricks/mv_emit_sql.py` (TS → Databricks) | `round(x, 0.01)` → `ROUND(x, 0.01)` |
+| `ts-snowflake-formula-translation.md` (TS → Snowflake, executed by the LLM) | `round ( [x] , [n] )` → `ROUND(x, n)` |
+| `ts_cli/sisense/functions.py` (Sisense → TS) | `round(x, n)` emitted verbatim as `Approximated` |
+
+Prose also wrong: `thoughtspot-formula-patterns.md` (no semantics stated),
+`ts-from-snowflake-rules.md`, `tableau-formula-translation.md`,
+`ts-databricks-formula-translation.md`, `docs/ossie/ts-ossie-function-mapping.md`, and the Qlik
+doc/JSON (N02 — the Qlik mapping itself was right, since Qlik's `Round` also takes a step).
+Power BI already converted correctly. **Sisense** knew the semantics but did not convert:
+it emitted `round(x, n)` verbatim, marked `Approximated` — and `Approximated` still imports, so
+`round(x, 0)` was NULL on every row and `round(x, 2)` nearest-2. That is silent too.
+
+**Resolution (2026-10-06, ts-cli v0.156.0).** One conversion in `ts_cli/formula_common.py`
+(`sql_digits_to_ts_increment`, `ts_round_from_sql_digits`, `ts_increment_to_sql_digits`),
+imported by every translator including Power BI and Sisense. Into ThoughtSpot: literal `d`
+(incl. `2.0`, |d| ≤ 37) → `round ( x , 10^-d )`. Non-literal `d`: Snowflake/Databricks →
+`sql_double_op ( "ROUND({0}, {1})" , x , d )`, refused over an aggregate (a `[formula_X]` metric
+reference counts as one — the resolver records the refs it hands out); Tableau re-emits
+upper-case `ROUND(` and a case-sensitive survivor pattern in `validate.py` rejects it; Sisense
+and Power BI → NEEDS REVIEW. Snowflake `TRUNC` → `sql_double_op` TRUNC pass-through; over an
+aggregate, sign-split `floor`/`ceil` with a `round ( … , 0.000001 )` snap (unguarded,
+`floor(0.29 / 0.01)` = 28); `TRUNC(date, 'unit')` → the `DATE_TRUNC` mapping. A numeric literal
+running into a letter (`1e1`) now fails the Snowflake/Databricks tokenizers loudly. Out of
+ThoughtSpot: power-of-ten increment → `ROUND(x, d)`, other literal → `(inc * ROUND(x / inc))`,
+non-literal → `(inc * ROUND(x / NULLIF(inc, 0)))`, `round(x, 0)` refused. Regression guard:
+`tests/test_round_increment.py` (incl. "SQL `ROUND(x, 2)` never yields `round(x, 2)`").
+
+**Not covered:** the upstream apache/ossie converter's `ROUND` emission — BL-332.
+
+---
+
+## BL-332 — upstream apache/ossie converter: check `ROUND` emits an increment, not a digit count `Tier 2`
+
+**Filed:** 2026-10-06. **Source:** BL-331 review.
+
+**Finding (unverified).** The ThoughtSpot converter donated to apache/ossie
+(`converters/thoughtspot/`, `expressions/catalog.py`) probably emits `ROUND(x, d)` as
+`round ( [x] , d )` — the form this repo's own `docs/ossie/ts-ossie-function-mapping.md`
+documented until BL-331 corrected it. If so it has the same silent wrong number: ThoughtSpot
+`round(x, n)` takes an increment, so `round(x, 2)` is nearest-2 and `round(x, 0)` is NULL
+(live-probed 2026-10-06). Not checked; the converter lives upstream and is never vendored here.
+
+**Why no gate catches it.** `tools/validate/check_ossie_mapping_sync.py` compares only each
+construct's *class* (`direct` / `passthrough` / …) between the two accounts. `ROUND` is `direct`
+on both sides before and after the fix, so the emitted form can disagree without the sync check
+firing.
+
+**Fix.** Read the upstream catalog's `ROUND` entry; if it copies `d`, emit `round ( x , 10^-d )`
+for a literal `d` and a `sql_double_op` fallback otherwise, add a test, run
+`tools/ossie-roundtrip` against the converter working tree, and contribute it upstream.
+
+**Target:** next apache/ossie PR (after #364 lands), or by 2026-11-30.

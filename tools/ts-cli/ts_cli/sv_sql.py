@@ -17,7 +17,14 @@ from __future__ import annotations
 import re
 from typing import Callable
 
-from ts_cli.formula_common import CAST_MAP_FULL, UntranslatableError
+from ts_cli.formula_common import (
+    CAST_MAP_FULL,
+    UntranslatableError,
+    expr_is_aggregated,
+    sql_digits_to_ts_increment,
+    sql_int_digits,
+    ts_round_from_sql_digits,
+)
 
 
 _TOKEN_RE = re.compile(
@@ -53,6 +60,12 @@ def tokenize(sql: str) -> list[tuple[str, str]]:
         if not m:
             raise UntranslatableError(
                 f"unrecognized character {sql[i]!r} at position {i}")
+        if m.lastgroup == "number" and re.match(r"[A-Za-z_]", sql[m.end():m.end() + 1]):
+            # `1e1` would otherwise split into the number 1 and an identifier
+            # `e1` resolved as a column — garbage, silently (BL-331).
+            raise UntranslatableError(
+                f"numeric literal at position {i} runs into "
+                f"{sql[m.end()]!r} — scientific notation is not supported")
         i = m.end()
         kind = m.lastgroup
         if kind == "ws":
@@ -249,7 +262,10 @@ _RENAME = {
     "LEFT": "left", "RIGHT": "right", "LPAD": "lpad", "RPAD": "rpad",
     "REVERSE": "reverse", "REPEAT": "repeat",
     "ABS": "abs", "CEIL": "ceil", "CEILING": "ceil",
-    "FLOOR": "floor", "ROUND": "round",
+    "FLOOR": "floor",
+    # ROUND / TRUNC deliberately do NOT live here (BL-331): ThoughtSpot round()'s
+    # 2nd arg is a rounding INCREMENT, not a digit count — see _call_round /
+    # _call_trunc and formula_common.ts_round_from_sql_digits.
     "MOD": "mod", "POWER": "pow", "SQRT": "sqrt", "LN": "ln",
     "LOG2": "log2", "LOG10": "log10",
     "GREATEST": "greatest", "LEAST": "least",
@@ -351,9 +367,10 @@ def _call_with_args(name: str, cur: _Cursor, resolver) -> str:
         return f"if ( {args[0]} != null ) then {args[1]} else {args[2]}"
     if name == "LOG":
         return _call_log(args)
-    if name == "TRUNC":
-        _need(args, 2, name)
-        return _emit("round", args)
+    if name == "ROUND":
+        return _call_round(args, resolver)
+    if name in ("TRUNC", "TRUNCATE"):
+        return _call_trunc(args, resolver)
     if name == "DATE_TRUNC":
         return _call_date_trunc(args)
     if name in _ARG_SWAP:
@@ -368,6 +385,77 @@ def _call_with_args(name: str, cur: _Cursor, resolver) -> str:
         f"function '{name}' is not in "
         f"ts-snowflake-formula-translation.md — extend the mapping doc and "
         f"sv_sql._RENAME together")
+
+
+def _round_args(args: list[str], name: str) -> tuple[str, str | None]:
+    if len(args) not in (1, 2):
+        raise UntranslatableError(
+            f"{name} expects 1 or 2 arguments, got {len(args)}")
+    return args[0], (args[1] if len(args) == 2 else None)
+
+
+def _is_aggregated(x: str, resolver) -> bool:
+    """True if translated ``x`` is aggregated — by its text, or because it holds a
+    metric reference the resolver handed out (``[formula_X]`` hides it)."""
+    refs = getattr(resolver, "metric_refs", ()) or ()
+    return expr_is_aggregated(x) or any(r in x for r in refs)
+
+
+def _call_round(args: list[str], resolver=None) -> str:
+    """ROUND(x[, d]) — d is a digit count, ThoughtSpot round()'s 2nd arg an
+    increment (BL-331); the conversion lives in formula_common."""
+    x, d = _round_args(args, "ROUND")
+    return ts_round_from_sql_digits(x, d, aggregated=_is_aggregated(x, resolver))
+
+
+# Snap x/inc to the nearest 1e-6 before floor/ceil: 0.29 / 0.01 is
+# 28.999999999999996 in floating point, so a bare floor() truncates 0.29 to 0.28.
+_TRUNC_GUARD = "0.000001"
+
+
+def _call_trunc(args: list[str], resolver=None) -> str:
+    """TRUNC(x[, d]) — numeric truncation toward zero, or TRUNC(date, 'unit').
+
+    It was emitted as round(x, d) — wrong twice: round() rounds rather than
+    truncates, and its 2nd arg is an increment, not a digit count (BL-331).
+
+    Numeric form: ThoughtSpot has no truncate function, so a row-level x passes
+    through to Snowflake's own TRUNC, which runs in the warehouse's own numeric
+    type. An aggregated x (including a metric reference) cannot go through the
+    row-level pass-through, so it uses the sign-split floor/ceil identity, which
+    ThoughtSpot evaluates natively over aggregates — in DOUBLE. The scaled value
+    is first snapped to the nearest 1e-6 (_TRUNC_GUARD) so float error cannot
+    drop an exact boundary (0.29 -> 0.28). Residual: a value within 5e-7 of an
+    increment *below* a boundary is snapped up to it (TRUNC(0.28999999, 2) ->
+    0.29, not 0.28) — an accepted trade for exact boundaries.
+    """
+    if len(args) == 2 and args[1].startswith("'"):
+        return _call_date_trunc([args[1], args[0]])  # TRUNC(date, 'month')
+    x, d = _round_args(args, "TRUNC")
+    d = d if d is not None else "0"
+    inc = sql_digits_to_ts_increment(d)
+    if inc is None and sql_int_digits(d) is not None:
+        raise UntranslatableError(f"TRUNC digit count {d.strip()} is out of range — BL-331")
+    if not _is_aggregated(x, resolver):
+        if inc is not None:  # literal digit count: inline it in the template
+            digits = str(sql_int_digits(d))
+            return f'sql_double_op ( "TRUNC({{0}}, {digits})" , {x} )'
+        return f'sql_double_op ( "TRUNC({{0}}, {{1}})" , {x} , {d} )'
+    if inc is None:
+        raise UntranslatableError(
+            "TRUNC with a non-literal digit count over an aggregate has no "
+            "ThoughtSpot form — BL-331")
+    if inc == "1":
+        return f"( if ( {x} >= 0 ) then floor ( {x} ) else ceil ( {x} ) )"
+    n = sql_int_digits(d)
+    if n > 0:  # scale up by 10^d, divide back: 115 / 100 is 1.15, 115 * 0.01 is not
+        factor = sql_digits_to_ts_increment(str(-n))
+        scaled, back = f"{x} * {factor}", f"/ {factor}"
+    else:
+        scaled, back = f"{x} / {inc}", f"* {inc}"
+    g = _TRUNC_GUARD
+    return (f"( if ( {x} >= 0 ) then floor ( round ( {scaled} , {g} ) ) {back} "
+            f"else ceil ( round ( {scaled} , {g} ) ) {back} )")
 
 
 def _need(args: list[str], n: int, name: str) -> None:

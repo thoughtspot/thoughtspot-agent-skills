@@ -443,7 +443,8 @@ ThoughtSpot:    [TABLE_ID::col_name]
 | `CAST(x AS INTEGER)` | `to_integer ( [x] )` |
 | `CAST(x AS DOUBLE)` | `to_double ( [x] )` |
 | `CAST(x AS VARCHAR)` | `to_string ( [x] )` |
-| `ROUND(x, n)` | `round ( [x] , n )` |
+| `ROUND(x, d)` | `round ( [x] , 10^-d )` — `d` digits become an increment: `2` → `0.01`, `0` → `1`, `-2` → `100`. Non-literal `d` → `sql_double_op ( "ROUND({0}, {1})" , [x] , d )`. **Never `round ( [x] , d )`** — that rounds to the nearest multiple of `d` (BL-331) |
+| `TRUNC(x[, d])` | `sql_double_op ( "TRUNC({0}, d)" , [x] )`; over an aggregate, sign-split `floor`/`ceil` — see ts-snowflake-formula-translation.md. Never `round` (BL-331) |
 | `FLOOR(x)` | `floor ( [x] )` |
 | `CEIL(x)` | `ceil ( [x] )` |
 | `ABS(x)` | `abs ( [x] )` |
