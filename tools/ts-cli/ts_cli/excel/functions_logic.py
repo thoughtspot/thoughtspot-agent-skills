@@ -171,6 +171,24 @@ def _isnumber(tr, n):
     return T.lit_bool(t == "number")
 
 
+def _is_type(want: str, negate: bool = False):
+    """``ISTEXT`` / ``ISLOGICAL`` (``want`` = text / bool) and ``ISNONTEXT`` (negated): type
+    tests resolve from the value's type (E15). A blank cell is neither text nor a boolean, so a
+    column of the wanted type is ``not ( isnull ( x ) )`` (ISNONTEXT: ``isnull ( x )``)."""
+    def handler(tr, n):
+        need(tr, n, 1, 1)
+        value = tr.expr(n.args[0])
+        t = tr.type_of(value)
+        if t is None:
+            tr.review(f"{n.name} on a value of unknown type: a type test resolves from the "
+                      "column's type (Excel map E15) — pass data_type in --columns")
+        if t == want and value.get("node") in ("col", "ref"):
+            test = T.call("isnull", value)
+            return test if negate else T.unop("not", test)
+        return T.lit_bool((t == want) != negate)
+    return handler
+
+
 # ---------------------------------------------------------------------------
 # IFERROR
 # ---------------------------------------------------------------------------
@@ -248,5 +266,6 @@ def _iferror(tr, n):
 LOGIC_HANDLERS = {
     "IF": _if, "IFS": _ifs, "SWITCH": _switch, "AND": _logical("and"), "OR": _logical("or"),
     "NOT": _not, "TRUE": _const(True), "FALSE": _const(False), "IFERROR": _iferror,
-    "ISBLANK": _isblank, "ISNUMBER": _isnumber,
+    "ISBLANK": _isblank, "ISNUMBER": _isnumber, "ISTEXT": _is_type("text"),
+    "ISNONTEXT": _is_type("text", negate=True), "ISLOGICAL": _is_type("bool"),
 }

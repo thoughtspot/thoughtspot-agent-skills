@@ -102,6 +102,8 @@ SIGNATURES: dict[str, tuple[list, Optional[str], object]] = {
     "exp": (["num"], None, "double"),
     "log10": (["num"], None, "double"),
     "log2": (["num"], None, "double"),
+    # radians in and out (probe record §7, 2026-10-07)
+    **{fn: (["num"], None, "double") for fn in ("sin", "cos", "tan", "asin", "acos", "atan")},
     "pow": (["num", "num"], None, "double"),
     "mod": (["int", "int"], None, "int"),
     "safe_divide": (["num", "num"], None, "double"),

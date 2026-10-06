@@ -280,7 +280,7 @@ class TestStatusesAndTraps:
 class TestNeedsReview:
     @pytest.mark.parametrize("src", [
         "=VLOOKUP([@a],Lookup[[k]],2,FALSE)", "=XLOOKUP([@a],L[k],L[v])", "=OFFSET(A1,1,0)",
-        "=NORM.DIST([@x],0,1,TRUE)", '=TEXT([@d],"yyyy")', "=#N/A", "={1,2}",
+        "=NORM.DIST([@x],0,1,TRUE)", '=TEXT([@d],"m/d")', "=#N/A", "={1,2}",
         '=DATEDIF([@s],[@e],"MD")', "=NETWORKDAYS([@s],[@e],Holidays[d])",
         "=SUM(Sales[a],[@b])", "=WEEKDAY([@d],21)", '=SEARCH("a*",[@s])',
     ])

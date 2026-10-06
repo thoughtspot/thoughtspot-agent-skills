@@ -413,7 +413,8 @@ def check_a1(tree) -> None:
 
 # ThoughtSpot functions whose arguments are all numbers (a boolean there is coerced).
 _NUMERIC_ARGS = frozenset({"greatest", "least", "abs", "round", "floor", "ceil", "pow", "sqrt",
-                           "ln", "exp", "log10", "sum", "average", "max", "min", "median",
+                           "ln", "exp", "log10", "log2", "sin", "cos", "tan", "asin",
+                           "acos", "atan", "sum", "average", "max", "min", "median",
                            "stddev", "variance"})
 
 

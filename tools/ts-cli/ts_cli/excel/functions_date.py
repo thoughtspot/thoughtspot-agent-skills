@@ -129,9 +129,80 @@ def _networkdays(intl: bool):
     return handler
 
 
+def _part_arg(tr, node, signed: bool = True) -> dict:
+    """A DATE year / month / day: an omitted one is 0; Excel truncates toward zero (a year is
+    never negative in a valid DATE, so ``floor`` is its truncation)."""
+    if isinstance(node, X.Missing):
+        return T.lit_number("0")
+    return tr.int_arg(node, signed=signed)
+
+
+def _fold_date(tr, y: int, m: int, d: int) -> dict:
+    """Literal parts: Excel's own arithmetic, done here (a year below 1900 gains 1900;
+    months and days overflow into the next unit)."""
+    import datetime as _dt
+    from ts_cli.excel.coerce import ISO
+
+    if 0 <= y < 1900:
+        y += 1900
+    if not 1900 <= y <= 9999:
+        tr.review(f"DATE with year {y} is #NUM! in Excel")
+    months = y * 12 + (m - 1)
+    try:
+        when = _dt.date(months // 12, months % 12 + 1, 1) + _dt.timedelta(days=d - 1)
+    except (ValueError, OverflowError):
+        tr.review("DATE outside 1900–9999 is #NUM! in Excel")
+    if when < _dt.date(1900, 3, 1):
+        tr.review("a DATE before 1900-03-01 is a date in Excel's own 1900 calendar, which "
+                  "counts a fictitious 29 February 1900 — no real date to translate it to")
+    if when.year > 9999:
+        tr.review("DATE after 9999-12-31 is #NUM! in Excel")
+    return T.call("to_date", T.lit_string(when.isoformat()), T.lit_string(ISO))
+
+
+def _plus(node: dict, k: int) -> dict:
+    value = T.number_value(node)
+    if value is not None:
+        from ts_cli.excel.coerce import number_literal
+        return number_literal(int(value) + k)
+    return T.binop("+" if k > 0 else "-", node, T.lit_number(str(abs(k))))
+
+
+def _date(tr, n):
+    """``DATE(y, m, d)``: built from 1 January with ``add_months`` / ``add_days``, so
+    out-of-range months and days overflow as Excel's do (map row). Literal parts fold."""
+    from ts_cli.excel.coerce import ISO
+
+    need(tr, n, 3, 3)
+    y, m, d = _part_arg(tr, n.args[0], signed=False), *(_part_arg(tr, a) for a in n.args[1:])
+    vals = [T.number_value(p) for p in (y, m, d)]
+    if None not in vals:
+        return _fold_date(tr, *(int(v) for v in vals))
+    if vals[0] is not None:
+        year = int(vals[0]) + (1900 if 0 <= vals[0] < 1900 else 0)
+        if not 1900 <= year <= 9999:
+            tr.review(f"DATE with year {year} is #NUM! in Excel")
+        start = T.call("to_date", T.lit_string(f"{year:04d}-01-01"), T.lit_string(ISO))
+    else:
+        tr.trap("DATE with a year from a column: a year below 0 or above 9999 is #NUM! in "
+                "Excel; here it does not parse as a date")
+        year = T.ifelse(T.binop("<", y, T.lit_number("1900")), T.binop("+", y, T.lit_number(
+            "1900")), y)
+        start = T.call("to_date", T.call("concat", T.call("to_string", year),
+                                         T.lit_string("-01-01")), T.lit_string(ISO))
+    months, days = _plus(m, -1), _plus(d, -1)
+    out = start
+    if not T.is_lit(months, "number", "0"):
+        out = T.call("add_months", out, months)
+    if not T.is_lit(days, "number", "0"):
+        out = T.call("add_days", out, days)
+    return out
+
+
 DATE_HANDLERS = {
     "TODAY": _nullary("today"), "NOW": _nullary("now"), "YEAR": _part("year"),
     "MONTH": _part("month_number"), "DAY": _part("day"), "DATEDIF": _datedif,
     "EOMONTH": _eomonth, "EDATE": _edate, "DAYS": _days, "WEEKDAY": _weekday,
     "NETWORKDAYS": _networkdays(False), "NETWORKDAYS.INTL": _networkdays(True),
+    "DATE": _date,
 }

@@ -14,6 +14,8 @@ from ts_cli.excel.helpers import fold, from_text, is_range, literal_int, need, t
 from ts_cli.excel.functions_text import TEXT_HANDLERS
 from ts_cli.excel.functions_date import DATE_HANDLERS
 from ts_cli.excel.functions_logic import LOGIC_HANDLERS
+from ts_cli.excel.functions_math import MATH_HANDLERS
+from ts_cli.excel.functions_format import FORMAT_HANDLERS
 from ts_cli.excel.functions_sheets import SHEETS_HANDLERS  # noqa: F401  (re-exported)
 from ts_cli.formula_common import (
     UntranslatableError, sql_digits_to_ts_increment, ts_round_from_sql_digits,
@@ -266,32 +268,72 @@ def _ceiling_floor(fn: str):
     return handler
 
 
-def _ceiling_math(tr, n):
-    """``CEILING.MATH(x, [s], [mode])`` (BL-346). Excel ignores the significance's sign: a
-    positive number rounds up to a multiple of ``|s|``; a negative one rounds toward zero
-    (``ceil``) by default and away from zero (``floor``) with a non-zero ``mode``. A zero
-    significance returns 0 (BL-347). The default significance is 1."""
-    need(tr, n, 1, 3)
-    x = tr.num(n.args[0])
-    given = len(n.args) > 1 and not isinstance(n.args[1], X.Missing)
-    sig = tr.num(n.args[1]) if given else T.lit_number("1")
-    value = T.number_value(sig)
-    step = T.lit_number(str(abs(value))) if value is not None else T.call("abs", sig)
-    mode = n.args[2] if len(n.args) == 3 and not isinstance(n.args[2], X.Missing) else None
-    away = False
-    if mode is not None:
-        m = T.number_value(tr.num(mode))
-        if m is None:
-            tr.review("CEILING.MATH with a non-literal mode has no rule: the mode decides the "
-                      "rounding direction of negative numbers")
-        away = m != 0
-    up = (T.call("ceil", _snap(tr, x, x)) if T.is_lit(step, "number", "1")
-          else _multiple(tr, "ceil", x, step))
-    if away:
-        down = (T.call("floor", _snap(tr, x, x)) if T.is_lit(step, "number", "1")
-                else _multiple(tr, "floor", x, step))
-        up = T.ifelse(T.binop("<", x, T.lit_number("0")), down, up)
-    return _zero_guard(sig, up) if given else up
+def _math_family(primary: str, negative: str = "", modes: bool = False):
+    """``CEILING.MATH`` / ``FLOOR.MATH(x, [s], [mode])`` and ``CEILING.PRECISE`` /
+    ``FLOOR.PRECISE`` / ``ISO.CEILING(x, [s])`` (BL-346). Excel ignores the significance's
+    sign: ``fn ( x / |s| ) * |s|``, ``fn`` = ``primary``. With a non-zero ``mode`` a negative
+    number rounds the other way (``negative``): CEILING.MATH away from zero, FLOOR.MATH toward
+    it. A zero significance returns 0 (BL-347). The default significance is 1."""
+    def handler(tr, n):
+        need(tr, n, 1, 3 if modes else 2)
+        x = tr.num(n.args[0])
+        given = len(n.args) > 1 and not isinstance(n.args[1], X.Missing)
+        sig = tr.num(n.args[1]) if given else T.lit_number("1")
+        value = T.number_value(sig)
+        step = T.lit_number(str(abs(value))) if value is not None else T.call("abs", sig)
+        mode = n.args[2] if len(n.args) == 3 and not isinstance(n.args[2], X.Missing) else None
+        other = False
+        if mode is not None:
+            m = T.number_value(tr.num(mode))
+            if m is None:
+                tr.review(f"{n.name} with a non-literal mode has no rule: the mode decides the "
+                          "rounding direction of negative numbers")
+            other = m != 0
+
+        def form(fn):
+            return (T.call(fn, _snap(tr, x, x)) if T.is_lit(step, "number", "1")
+                    else _multiple(tr, fn, x, step))
+        out = form(primary)
+        if other:
+            out = T.ifelse(T.binop("<", x, T.lit_number("0")), form(negative), out)
+        return _zero_guard(sig, out) if given else out
+    return handler
+
+
+def _trunc(tr, n):
+    """``TRUNC(x, [digits])`` is ``ROUNDDOWN`` with digits defaulting to 0 (toward zero)."""
+    need(tr, n, 1, 2)
+    digits = n.args[1] if len(n.args) == 2 and not isinstance(n.args[1], X.Missing) \
+        else X.Num("0")
+    return _round_dir(False)(tr, X.Call(n.name, [n.args[0], digits]))
+
+
+def _even_odd(odd: bool):
+    """``EVEN`` / ``ODD``: away from zero to the next even / odd integer (map rows)."""
+    def handler(tr, n):
+        need(tr, n, 1, 1)
+        x = tr.num(n.args[0])
+        two, one, zero = T.lit_number("2"), T.lit_number("1"), T.lit_number("0")
+        if not odd:
+            pos = T.binop("*", T.call("ceil", T.binop("/", x, two)), two)
+            neg = T.binop("*", T.call("floor", T.binop("/", x, two)), two)
+        else:
+            pos = T.binop("-", T.binop("*", T.call("ceil", T.binop(
+                "/", T.binop("+", x, one), two)), two), one)
+            neg = T.binop("+", T.binop("*", T.call("floor", T.binop(
+                "/", T.binop("-", x, one), two)), two), one)
+        return T.ifelse(T.binop(">=", x, zero), pos, neg)
+    return handler
+
+
+def _quotient(tr, n):
+    """``QUOTIENT(x, y)``: the quotient truncated toward zero. A zero divisor is ``#DIV/0!``
+    in Excel; ThoughtSpot's ``/`` returns NULL (probe record §7)."""
+    need(tr, n, 2, 2)
+    x, y = tr.num(n.args[0]), tr.num(n.args[1])
+    q = T.binop("/", x, y)
+    tr.note("QUOTIENT with a zero divisor: Excel shows #DIV/0!, ThoughtSpot's / returns NULL")
+    return T.ifelse(T.binop(">=", q, T.lit_number("0")), T.call("floor", q), T.call("ceil", q))
 
 
 def _mod(tr, n):
@@ -323,7 +365,12 @@ def _power(tr, n):
 HANDLERS = {
     "ABS": _unary_fn("abs"), "SQRT": _unary_fn("sqrt"), "EXP": _unary_fn("exp"),
     "LN": _unary_fn("ln"), "LOG10": _unary_fn("log10"), "INT": _int,
-    "CEILING": _ceiling_floor("ceil"), "CEILING.MATH": _ceiling_math, "FLOOR": _ceiling_floor("floor"), "MOD": _mod,
+    "CEILING": _ceiling_floor("ceil"), "FLOOR": _ceiling_floor("floor"), "MOD": _mod,
+    "CEILING.MATH": _math_family("ceil", "floor", modes=True),
+    "FLOOR.MATH": _math_family("floor", "ceil", modes=True),
+    "CEILING.PRECISE": _math_family("ceil"), "ISO.CEILING": _math_family("ceil"),
+    "FLOOR.PRECISE": _math_family("floor"), "TRUNC": _trunc,
+    "EVEN": _even_odd(False), "ODD": _even_odd(True), "QUOTIENT": _quotient,
     "MROUND": _mround, "POWER": _power, "ROUND": _round,
     "ROUNDUP": _round_dir(True), "ROUNDDOWN": _round_dir(False), "SIGN": _sign,
     "SUM": _sum, "SUMIF": _if_agg("sum_if"), "SUMIFS": _ifs_agg("sum_if"),
@@ -334,6 +381,7 @@ HANDLERS = {
     "MAX": _max, "MIN": _min, "MAXIFS": _ifs_agg("max_if"), "MINIFS": _ifs_agg("min_if"),
     "MEDIAN": _simple_agg("median"), "STDEV.S": _simple_agg("stddev"),
     "VAR.S": _simple_agg("variance"),
-    **TEXT_HANDLERS, **DATE_HANDLERS, **LOGIC_HANDLERS,
+    **TEXT_HANDLERS, **DATE_HANDLERS, **LOGIC_HANDLERS, **MATH_HANDLERS,
+    **FORMAT_HANDLERS,
 }
 
