@@ -43,6 +43,18 @@ BL-171 generalised from the two hand-written tests to every converter.
 ``LOCATE -> strpos`` and no Snowflake mapping doc mentions ``LOCATE``, so the CoCo
 runtime — which has only the doc — cannot translate it.
 
+**D — handler-dispatched constructs declare what they emit, and the doc rows say it.** (gate)
+A dispatch map whose values are *functions* — ``EXACT_FORM_CALLS`` in ``sv_sql_exact.py``,
+``_EXACT_FORM_CALLS`` in ``databricks/mv_sql.py`` — is invisible to A and B, which read
+string-valued dicts only (the #572 review's "sync gate blind spot": ``SUBSTR`` →
+``substr``/``sql_string_op`` reached no gate). So any module defining such a map must also
+define ``EXACT_FORM_EMITS`` with the same keys, each listing every ThoughtSpot name its
+handler can emit. For every key: some platform-doc line names the construct as a call
+(``KEY(``), the union of those lines mentions every declared name, and every declared name is
+a catalogued function (or a ``sql_*_op`` pass-through) — never a disproved one. The doc
+check is mention-level: a row that names a function only to say it is wrong (``MONTHS_BETWEEN``
+rows mention ``diff_months``) still satisfies it.
+
 **C — the Excel / Google Sheets translator agrees with its function maps.** (gate)
 ``ts_cli/excel/`` has no ``ts-convert-*`` skill, so discovery never finds it; it is checked
 here directly, more strictly than the converters, because its rule table is data
@@ -266,7 +278,75 @@ def check_platform(platform: str, code_files: list[Path], doc_text: str,
                     f"translate this construct. Add a row."
                 )
 
+        errors.extend(exact_form_errors(path, rel, doc_text, valid, nonexistent))
+
     return errors, warnings
+
+
+# ---------------------------------------------------------------------------
+# D — handler-dispatched constructs (function-valued dispatch maps)
+# ---------------------------------------------------------------------------
+
+_CALLS_NAMES = ("EXACT_FORM_CALLS", "_EXACT_FORM_CALLS")
+_EMITS_NAME = "EXACT_FORM_EMITS"
+
+
+def _module_dicts(tree: ast.Module) -> dict[str, ast.Dict]:
+    """Module-level ``NAME = {...}`` assignments, by name."""
+    out: dict[str, ast.Dict] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    out[target.id] = node.value
+    return out
+
+
+def _dict_keys(d: ast.Dict) -> list[str]:
+    return [k.value for k in d.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+
+
+def exact_form_errors(path: Path, rel, doc_text: str, valid: set[str],
+                      nonexistent: set[str]) -> list[str]:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return []
+    dicts = _module_dicts(tree)
+    calls = next((dicts[n] for n in _CALLS_NAMES if n in dicts), None)
+    emits = dicts.get(_EMITS_NAME)
+    if calls is None and emits is None:
+        return []
+    if emits is None:
+        return [f"{rel}: defines a function-valued dispatch map ({'/'.join(_CALLS_NAMES)}) "
+                f"but no {_EMITS_NAME} — declare every ThoughtSpot name each handler emits, "
+                f"so requirement D can check it against the catalog and the mapping doc."]
+    errors: list[str] = []
+    declared = {k.value: [c.value for c in _strings_in(v)]
+                for k, v in zip(emits.keys, emits.values)
+                if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+    if calls is not None and set(_dict_keys(calls)) != set(declared):
+        differ = sorted(set(_dict_keys(calls)) ^ set(declared))
+        errors.append(f"{rel}: {_EMITS_NAME} keys differ from the dispatch map's: {differ}")
+    lines = doc_text.lower().splitlines()
+    for key, names in declared.items():
+        rows = [ln for ln in lines if f"{key.lower()}(" in ln]
+        if not rows:
+            errors.append(f"{rel}: `{key}` is handled by a dispatched handler but no mapping "
+                          f"doc line names `{key}(` — the CoCo runtime cannot translate it.")
+            continue
+        text = "\n".join(rows)
+        for name in names:
+            if name in nonexistent:
+                errors.append(f"{rel}: `{key}` declares `{name}`, which the catalog marks "
+                              f"as NOT a ThoughtSpot function.")
+            elif not _NOT_A_FUNCTION_RE.match(name) and name not in valid:
+                errors.append(f"{rel}: `{key}` declares `{name}`, which is not in the "
+                              f"ThoughtSpot formula catalog.")
+            if name.lower() not in text:
+                errors.append(f"{rel}: `{key}` can emit `{name}`, but no mapping doc line "
+                              f"naming `{key}(` mentions it — the doc and the code disagree.")
+    return errors
 
 
 # ---------------------------------------------------------------------------

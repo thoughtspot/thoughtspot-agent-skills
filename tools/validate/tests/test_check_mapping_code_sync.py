@@ -161,6 +161,83 @@ def test_ts_prefixed_doc_dir_resolves(tmp_path):
     assert r.returncode == 0, r.stderr
 
 
+# --- requirement D: function-valued dispatch maps declare their emissions (#572) -----
+
+_D_CODE = ('def _f(name, args, resolver):\n    return ""\n\n'
+           'EXACT_FORM_CALLS = {"LOCATE": _f}\n')
+_D_DOC = "| `LOCATE(sub, s)` | `strpos ( s , sub )`, or `sql_string_op` when … |\n"
+
+
+def test_dispatch_map_without_emits_fails(tmp_path):
+    """The blind spot itself: handlers are function references, so A and B see nothing."""
+    r = _run(_repo(tmp_path, "fake", _D_CODE, _D_DOC))
+    assert r.returncode == 1 and "EXACT_FORM_EMITS" in r.stderr, r.stderr
+
+
+def test_declared_emits_matching_the_doc_pass(tmp_path):
+    src = _D_CODE + 'EXACT_FORM_EMITS = {"LOCATE": ("strpos", "sql_string_op")}\n'
+    r = _run(_repo(tmp_path, "fake", src, _D_DOC))
+    assert r.returncode == 0, r.stderr
+
+
+def test_emits_keys_must_equal_the_dispatch_keys(tmp_path):
+    src = (_D_CODE.replace('{"LOCATE": _f}', '{"LOCATE": _f, "INSTR": _f}')
+           + 'EXACT_FORM_EMITS = {"LOCATE": ("strpos",)}\n')
+    r = _run(_repo(tmp_path, "fake", src, _D_DOC + "| `INSTR(s, sub)` | `strpos` |\n"))
+    assert r.returncode == 1 and "keys differ" in r.stderr and "INSTR" in r.stderr
+
+
+def test_construct_without_a_doc_row_fails(tmp_path):
+    src = _D_CODE + 'EXACT_FORM_EMITS = {"LOCATE": ("strpos",)}\n'
+    r = _run(_repo(tmp_path, "fake", src, "# rules\nnothing here\n"))
+    assert r.returncode == 1 and "no mapping doc line names `LOCATE(`" in r.stderr
+
+
+def test_emitted_name_the_doc_row_omits_fails(tmp_path):
+    """Code and doc disagree: the handler can pass through, the row never says so."""
+    src = _D_CODE + 'EXACT_FORM_EMITS = {"LOCATE": ("strpos", "sql_double_op")}\n'
+    r = _run(_repo(tmp_path, "fake", src, _D_DOC))
+    assert r.returncode == 1 and "can emit `sql_double_op`" in r.stderr
+
+
+def test_declared_disproved_name_fails(tmp_path):
+    src = _D_CODE + 'EXACT_FORM_EMITS = {"LOCATE": ("upper",)}\n'
+    r = _run(_repo(tmp_path, "fake", src, "| `LOCATE(x)` | `upper` |\n"))
+    assert r.returncode == 1 and "NOT a ThoughtSpot function" in r.stderr
+
+
+def test_real_exact_form_module_mutations_fail(tmp_path):
+    """Mutation test on the real sv_sql_exact.py and the real Snowflake docs and catalog:
+    unmutated it passes; adding an undocumented handler, or a name the doc row does not
+    carry, fails."""
+    repo_root = Path(__file__).resolve().parents[3]
+    real_src = (repo_root / "tools/ts-cli/ts_cli/sv_sql_exact.py").read_text()
+    docs = repo_root / "agents/shared/mappings/ts-snowflake"
+    doc = "\n".join(p.read_text() for p in sorted(docs.glob("*.md")))
+    catalog = (repo_root / "agents/shared/schemas/thoughtspot-formula-patterns.md").read_text()
+
+    def run(src, name):
+        root = _repo(tmp_path / name, "fake", src, doc)
+        (root / "agents/shared/schemas/thoughtspot-formula-patterns.md").write_text(catalog)
+        return _run(root)
+
+    assert run(real_src, "clean").returncode == 0
+    added = real_src.replace('"MONTHS_BETWEEN": call_months_between}',
+                             '"MONTHS_BETWEEN": call_months_between, "NO_SUCH_FN": call_substr}')
+    added = added.replace('"MONTHS_BETWEEN": ("sql_double_op",)}',
+                          '"MONTHS_BETWEEN": ("sql_double_op",), "NO_SUCH_FN": ("substr",)}')
+    assert added != real_src
+    r = run(added, "added")
+    assert r.returncode == 1 and "`NO_SUCH_FN(`" in r.stderr, r.stderr
+    # (Not diff_months: the MONTHS_BETWEEN rows mention it to say it is wrong — D checks
+    # mention, not endorsement, which is the limit of a text check.)
+    widened = real_src.replace('"MONTHS_BETWEEN": ("sql_double_op",)}',
+                               '"MONTHS_BETWEEN": ("sql_double_op", "add_days")}')
+    assert widened != real_src
+    r = run(widened, "widened")
+    assert r.returncode == 1 and "can emit `add_days`" in r.stderr, r.stderr
+
+
 def test_real_repo_passes(tmp_path):
     """The live tree must be clean, so a genuine regression is the only red."""
     repo_root = Path(__file__).resolve().parents[3]

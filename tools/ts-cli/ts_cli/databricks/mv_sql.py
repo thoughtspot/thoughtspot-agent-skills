@@ -432,6 +432,11 @@ def _call_months_between(name: str, args: list[str]) -> str:
 
 _EXACT_FORM_CALLS = {"MONTHS_BETWEEN": _call_months_between,
                      "SUBSTRING": _call_dbx_substr, "SUBSTR": _call_dbx_substr}
+# Every ThoughtSpot name each handler above can emit — read by check_mapping_code_sync.py
+# (requirement D), which cannot see through function-valued dispatch maps.
+EXACT_FORM_EMITS = {"MONTHS_BETWEEN": ("sql_double_op",),
+                    "SUBSTRING": ("substr", "strlen", "sql_string_op"),
+                    "SUBSTR": ("substr", "strlen", "sql_string_op")}
 
 
 def _call_round(args: list[str]) -> str:
