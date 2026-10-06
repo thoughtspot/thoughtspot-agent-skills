@@ -280,7 +280,7 @@ decimal literal is rejected in the integer slots (`substr`, `left`, `right`, `ad
 Source: the *Math and trigonometry functions* list of Microsoft's category page. `LET`,
 `SEQUENCE` and `RANDARRAY` are rowed under [Dynamic arrays](#dynamic-arrays-let-and-lambda).
 
-- **E16 — ThoughtSpot trigonometry is in radians, as Excel's is.** `sin ( 30 )` compiles to `SIN(30)` and returns −0.988, and `asin ( 0.5 )` returns 0.5236 (probe record §7, live 2026-10-07). This rule used to say the opposite — degrees, with a `180 / π` conversion on every call, copied from the Ossie and Tableau maps — and every forward and inverse row was wrong for every non-zero input (BL-357). The hyperbolic family has no native functions: the translator passes them through to Snowflake (`SINH`, …), whose double arithmetic matches Excel's where the `exp` / `ln` compositions lose precision.
+- **E16 — ThoughtSpot trigonometry is in radians, as Excel's is.** `sin ( 30 )` compiles to `SIN(30)` and returns −0.988, and `asin ( 0.5 )` returns 0.5236 (probe record §7, live 2026-10-07). This rule used to say the opposite — degrees, with a `180 / π` conversion on every call, copied from the Ossie and Tableau maps — and every forward and inverse row was wrong for every non-zero input (BL-364). The hyperbolic family has no native functions: the translator passes them through to Snowflake (`SINH`, …), whose double arithmetic matches Excel's where the `exp` / `ln` compositions lose precision.
 
 | Excel | Class | ThoughtSpot | Notes |
 |---|---|---|---|

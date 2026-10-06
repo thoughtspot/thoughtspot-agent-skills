@@ -64,7 +64,8 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
-| BL-357 | ThoughtSpot trigonometry is in **radians** (live 2026-10-07), but the Tableau translator and the Tableau, Ossie, Omni and Sigma maps convert by `180 / π` as if it were degrees — a silent wrong answer for every non-zero input. Excel map and translator fixed | 2026-10-31 |
+| BL-364 | ThoughtSpot trigonometry is in **radians** (live 2026-10-07), but the Tableau translator and the Tableau, Ossie, Omni and Sigma maps convert by `180 / π` as if it were degrees — a silent wrong answer for every non-zero input. Excel map and translator fixed | 2026-10-31 |
+| BL-365 | ThoughtSpot reads `a * b / c` as `a * ( b / c )` (fixed-point scale 6 over literals) and a doubled quote in a string literal as two quotes (live 2026-10-07). Fixed in the Excel printer; the other translators' printers are unaudited | 2026-10-31 |
 | ~~BL-232~~ | ~~`description` under `properties` silently dropped on import; five sites + `ts tml lint` I15~~ | DONE (2026-09-02) |
 | ~~BL-200~~ | ~~SV entry splitter not quote aware -- a comma in `comment=` shatters the entry~~ | DONE (2026-07-31) |
 | ~~BL-201~~ | ~~live `sample_values` unmatched, read as part of the expression~~ | DONE (2026-07-31) |
@@ -101,6 +102,8 @@ are roughly ordered by value÷effort.
 | ~~BL-348~~ | ~~`ROUNDUP`/`ROUNDDOWN` beyond 6 digits lose precision — integer division keeps scale 6 in Snowflake (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
 | ~~BL-349~~ | ~~a boolean joined into text renders `true`/`false`, Excel `TRUE`/`FALSE`; only a note, status TRANSLATED (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
 | ~~BL-350~~ | ~~a text function over a date input returns ISO text; Excel returns the serial; no trap (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
+| BL-357 | `x / NULLIF(y, 0)` and `COALESCE(x / NULLIF(y, 0), 0)` both collapsed to `safe_divide` — 0 where the source is NULL and NULL where it is 0 (silent, fidelity M2; Snowflake `sv_sql` shares the code) | next translator PR |
+| BL-359 | Databricks `CAST(x AS BIGINT)` → `to_integer`, which compiles to a 32-bit `CAST(… as int)`: 1e12 comes back 2147483647 (silent, fidelity M2) | next translator PR |
 
 ### Tier 2 — Schedule soon
 
@@ -222,7 +225,6 @@ are roughly ordered by value÷effort.
 | BL-329 | Audit H angle runs Set discovery through `fetch_consumers`, which exports every Liveboard that uses a Set — Liveboard detail H5 never reads; slow on large estates. Add a lightweight consumers mode | next ts-audit pass |
 | BL-330 | `ts migrate apply --sets-scan FILE` trusts any post-BL-325 scan for any Model — nothing checks the scan covered the mapped Model or the source Org; a scan of another Org (or `scanned.models: 0`) lets `apply` pass an uninspected Model | next ts-migrate pass |
 | BL-332 | Upstream apache/ossie converter maps `ROUND(x, d)` to `round ( x , d )` (copies the digit count; `d = 0` → NULL) — unreachable today, live once multi-arg matching lands; fix PR held for legal review | 2026-11-30 |
-| BL-333 | ThoughtSpot string comparison (`=`, `contains`, `strpos`) is case-insensitive — Snowflake SV / Databricks MV / Tableau / Qlik / Looker translations of case-sensitive comparisons change semantics silently | 2026-11-30 |
 | BL-334 | ~~`DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`~~ (item 1 FIXED, ts-cli 0.156.2 — also Tableau and Qlik weekday numbering); week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
 | BL-335 | `sql_number_aggregate_op` does not exist (parser rejects it; `sql_double_aggregate_op` is the numeric aggregate) — repo docs fixed; upstream apache/ossie converter still emits it, fix held with the Ossie upstream work | 2026-11-30 |
 | ~~BL-338~~ | ~~`ts-object-formula-translate` routes the `google_sheets` dialect to the Excel function map (`formula_translate/detect.py:25`), so Sheets formulas skip the Sheets delta map (REGEXEXTRACT groups, SPLIT defaults, CODE, IFERROR default, QUERY)~~ | DONE (2026-10-06 — ts-cli v0.157.1, skill 1.1.0) |
@@ -232,12 +234,17 @@ are roughly ordered by value÷effort.
 | ~~BL-353~~ | ~~Excel implicit type coercion not inserted — ThoughtSpot's type check rejects the formula (19 fidelity-M1 cases)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
 | ~~BL-354~~ | ~~`IFERROR` with a fallback of another type — branch types must agree, rejected at import~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
 | ~~BL-355~~ | ~~a DOUBLE column in an integer slot (`substr` start/length, `right` count) is rejected at import~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
+| BL-358 | ThoughtSpot's queries over a Databricks connection run with non-ANSI semantics: BIGINT overflow wraps and a bad cast is NULL where an ANSI Databricks source raises (fidelity M2) — document; decide whether the translator warns | 2026-11-30 |
+| BL-360 | Databricks / Snowflake `a DIV b` — `DIV` read as a column (`[TABLE::DIV]`) and reported TRANSLATED; rejected at import (fidelity M2) | next translator PR |
+| BL-361 | `FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor`/`ceil`; TRANSLATED, rejected at import (fidelity M2; Snowflake too) | next translator PR |
 
 ### Tier 3 — Opportunistic
 
 | Item | Summary | Target |
 |---|---|---|
 | BL-193 | Worktree `git commit` runs the MAIN checkout's pre-commit script — local gates are the wrong branch's | opportunistic |
+| BL-363 | the M2 Databricks oracle runs case SQL as a service principal that owns the `agent_skills` catalog — confine it to a scratch-schema-only principal before any third-party SQL corpus runs on Databricks | 2026-11-15, and before any third-party Databricks corpus |
+| BL-362 | from-Databricks coverage: 17 common forms declined (NVL, NVL2, 3-arg COALESCE, try_divide, nullifzero, zeroifnull, concat_ws, `\|\|`, `%`, LIKE / ILIKE / RLIKE, INSTR, trunc, last_day, bround, to_date(column)) — loud, never wrong (fidelity M2) | opportunistic |
 | BL-356 | the M1 cross-check agrees at 1e-9 while cases score at 1e-12 — a last-digit oracle disagreement is run and scored, not quarantined | next M1 / M2 harness change |
 | BL-351 | decimal literals are exact in the warehouse, IEEE doubles in Excel — literal-only arithmetic differs in the 13th digit (fidelity M1): document or emit doubles | documented 2026-10-07 (divergence, no fix planned); revisit only if a sheet needs Excel's double errors |
 | BL-177 | Reverse legs synthesise names that were already available | opportunistic |
@@ -12372,7 +12379,7 @@ construct's *class*. `ROUND` is `direct` on both sides, so the emitted form can 
 
 ## BL-333 — ThoughtSpot string comparison is case-insensitive — converters translating case-sensitive source comparisons change semantics silently `Tier 2`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-07). **Decision:** option 1, accept and document (user decision).
 **Source:** live probe on se-thoughtspot, 2026-10-06 (scratch Models, `ts agentql generate-sql` /
 `fetch-data`; Models deleted). Recorded in
 `agents/shared/schemas/thoughtspot-formula-patterns.md` ("String comparison is case-insensitive").
@@ -12420,6 +12427,12 @@ deliberately diverging from upstream.
 
 **Target:** 2026-11-30 (decision + probes); converter changes in the next pass of each affected
 converter.
+
+**Resolution (2026-10-07).**
+- **Decision:** option 1, accept and document.
+- **Probes:** `!=`, `in { }`, the composed `strpos ( … ) = 1` prefix form and ordering `<` are all lowercased, so ordering comparisons change as well. String join keys remain unprobed. Recorded in the formula reference and the probe record.
+- **Documented** in ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, ts-convert-from-tableau, ts-convert-from-qlik, ts-convert-from-looker, and the CoCo ts-convert-from-snowflake-sv mirror.
+- **Unchanged:** the translators still emit native comparisons. `ts-object-formula-translate` still marks them APPROXIMATED. A per-converter opt-in to exact `sql_bool_op` (option 3) is not planned; reopen as a new item if a migration needs it.
 
 ---
 
@@ -13052,7 +13065,7 @@ widen any tolerance.
 
 **Target:** the next M1 / M2 harness change.
 
-## BL-357 — ThoughtSpot trigonometry is in radians; the Tableau translator and four maps convert as if it were degrees `Tier 1`
+## BL-364 — ThoughtSpot trigonometry is in radians; the Tableau translator and four maps convert as if it were degrees `Tier 1`
 
 **Filed:** 2026-10-07. **Status:** OPEN (Excel fixed; Tableau translator and the other maps not).
 **Source:** the Excel coverage pass (fidelity M1), probe record §7 ("Trigonometry").
@@ -13088,3 +13101,204 @@ value, bump `ts-convert-from-tableau` (PATCH), and re-run a Tableau trigonometry
 
 **Target:** 2026-10-31.
 
+
+## BL-357 — `x / NULLIF(y, 0)` and `COALESCE(x / NULLIF(y, 0), 0)` are both collapsed to `safe_divide`, which is neither `Tier 1`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** formula fidelity M2 (Databricks SQL), cases `dbx-arith-005`, `dbx-arith-012`,
+`dbx-agg-013`; report `docs/reviews/2026-10-07-fidelity-m2-databricks.md`. **Silent**: status
+TRANSLATED, no trap, imports cleanly.
+
+**The facts.**
+- `mv_sql._collapse_nullif_markers` rewrites `x / NULLIF(y, 0)` to `safe_divide ( x , y )`, and
+  `mv_sql._call_coalesce` passes `COALESCE(safe_divide(…), 0)` through as the same `safe_divide`.
+  `sv_sql.py` has the same two rewrites (`_collapse_nullif_markers`, `_call_coalesce`); the Snowflake
+  translator emits the identical formula for both shapes (offline translation, 2026-10-07 — M0 had
+  no case for either, so it was never run).
+- On Databricks `safe_divide ( x , y )` compiles to
+  `CASE WHEN y = 0 THEN 0 ELSE (x / NULLIF(y, 0.0)) END` (M2 compiled SQL). So it is **0** on a zero
+  divisor and **NULL** on a NULL operand.
+- `x / NULLIF(y, 0)` is **NULL** on a zero divisor. `COALESCE(x / NULLIF(y, 0), 0)` is **0** on a NULL
+  operand. Each idiom is wrong on the side `safe_divide` does not share.
+- Both mapping docs (`ts-databricks-formula-translation.md`, reverse table; and the Snowflake one)
+  list these rows as equivalences.
+
+**Minimal repros** (M2 fixture, Databricks + se-thoughtspot `DBX_DAMIAN`):
+- `N1 / NULLIF(N2, 0)` with `N1 = -3.25, N2 = 0`: Databricks NULL, ThoughtSpot 0.
+- `COALESCE(N1 / NULLIF(N2, 0), 0)` with `N1 = NULL, N2 = 5`: Databricks 0, ThoughtSpot NULL (also
+  `N2 = NULL`).
+- `SUM(N1) / NULLIF(MIN(N2), 0)` over group A (`MIN(N2) = 0`): Databricks NULL, ThoughtSpot 0.
+
+**Fix.** `x / NULLIF(y, 0)` → `x / y` (ThoughtSpot's `/` already compiles to `x / NULLIF(y, 0.0)`, M2
+compiled SQL). `COALESCE(x / NULLIF(y, 0), 0)` → `if ( isnull ( x / y ) ) then 0 else x / y` (or the
+two-argument COALESCE form the translator already emits). Keep `safe_divide` only for sources
+that mean it (Snowflake `DIV0`). Correct both mapping docs, unit-test both translators, re-run M2
+and add a Snowflake M0 case for each shape.
+
+**Target:** next translator PR.
+
+## BL-358 — ThoughtSpot's queries over a Databricks connection run with non-ANSI semantics `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** formula fidelity M2, cases `dbx-arith-013` (silent) and `dbx-arith-014`, plus the
+`m2-nonansi` run; report `docs/reviews/2026-10-07-fidelity-m2-databricks.md`.
+
+**The facts.**
+- The oracle session on the same SQL warehouse (`/sql/1.0/warehouses/c6ed539a60038b93`) reads back
+  `ansi_mode = true` by default (and the run pins it). Under it, `I1 + 9223372036854775800` with
+  `I1 = 12` raises `ARITHMETIC_OVERFLOW`, and `CAST('pie' AS INT)` raises `CAST_INVALID_INPUT`.
+- ThoughtSpot sent the same expressions (`(I1 + 9223372036854775800)`, `CAST(S2 as int)`, compiled
+  SQL in the run JSON) over `DBX_DAMIAN` and got **-9223372036854775804** (wrapped) and **NULL**.
+  `CAST(1e12 as int)` came back **2147483647** (clamped, BL-359). These are the non-ANSI results.
+- The `m2-nonansi` oracle run has **3 discriminating cases**, and ThoughtSpot matches the non-ANSI
+  oracle on all three:
+  - `dbxn-003`, a malformed cast
+  - `dbxn-004`, the overflow
+  - `dbxn-007`, an out-of-range `CAST(… AS INT)`, added after the #576 review
+
+  Its three division cases agree in either mode and prove nothing about the session.
+- So a formula that raises in an ANSI Databricks source returns a value in ThoughtSpot. Overflow is
+  the dangerous case: a wrong number, not a NULL. Division by zero is unaffected (ThoughtSpot's
+  `/` is NULL-safe either way).
+- Not established: *why* — a connection property, the JDBC driver's default, or a ThoughtSpot
+  session setting. Only the observable behaviour on this connection was measured.
+
+**Minimal repro.** Databricks SQL warehouse, default session: `SELECT 12 + 9223372036854775800`
+raises. The same expression as a ThoughtSpot formula over a Databricks Table returns
+`-9223372036854775804`.
+
+**Fix.** Find the mechanism (connection TML / JDBC properties). Document the divergence in
+`ts-databricks-formula-translation.md` and the formula patterns reference. Decide whether the
+translator should warn (a trap on BIGINT arithmetic near the limits and on casts from text) or
+treat it as accepted platform semantics, like BL-333.
+
+**Target:** 2026-11-30.
+
+## BL-359 — Databricks `CAST(x AS BIGINT)` is emitted as `to_integer`, which compiles to a 32-bit `CAST(… as int)` `Tier 1`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** formula fidelity M2, case `dbx-round-009` (`dbx-round-008` matches only because its
+values fit in 32 bits). **Silent**: TRANSLATED, no trap.
+
+**The facts.**
+- `mv_sql` maps `CAST(x AS BIGINT)` and `CAST(x AS INT)` alike to `to_integer ( x )`.
+- On Databricks, `to_integer` compiles to `CAST(x as int)` (M2 compiled SQL), and Databricks `INT` is
+  32-bit. Under the connection's non-ANSI session (BL-358) an out-of-range value is clamped, not
+  raised.
+- On Snowflake `INT` is `NUMBER(38,0)`, so the same `to_integer` is safe there.
+
+**Minimal repro.** `CAST(N1 * 1000000 AS BIGINT)` with `N1 = 1000000`: Databricks 1000000000000,
+ThoughtSpot 2147483647.
+
+**Fix.** From Databricks, `CAST(x AS BIGINT)` / `CAST(x AS LONG)` → `sql_int_op ( "CAST({0} AS BIGINT)" , x )`
+(or a native form proven 64-bit live); keep `to_integer` for `INT`. Check the to-direction
+emitter for the inverse assumption. Re-run `dbx-round-009`.
+
+**Target:** next translator PR.
+
+## BL-360 — `a DIV b`: `DIV` is read as a column and the formula is reported TRANSLATED `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** formula fidelity M2, case `dbx-arith-007`. **Loud**: IMPORT_FAILED (*Search did not find
+"TABLE::DIV 2"*, error_code 14516), but the translator's status is TRANSLATED.
+
+**The facts.** `I1 DIV 2` → `[T::I1] [TABLE::DIV] 2`: the tokenizer resolves the keyword operator `DIV`
+as a column reference. Both `mv_sql` and `sv_sql` do it (offline translation, 2026-10-07).
+
+**Fix.** Recognise `DIV` as an operator. Databricks `a DIV b` truncates toward zero
+(`-7 DIV 2 = -3`, probed 2026-10-07), so `to_integer ( a / b )` is exact only inside 32 bits (BL-359);
+a `sql_int_op ( "({0} DIV {1})" , a , b )` pass-through is exact. At minimum, an unresolved bare
+identifier between two operands must be NEEDS_REVIEW, never TRANSLATED.
+
+**Target:** next translator PR.
+
+## BL-361 — `FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor` / `ceil` `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** formula fidelity M2, cases `dbx-round-006` (`FLOOR(N1, -1)`) and `dbx-round-007`
+(`CEIL(N1, 1)`). **Loud**: IMPORT_FAILED (*Function floor expects only 1 arguments*), reported
+TRANSLATED.
+
+**The facts.** Databricks (and Snowflake) `floor` / `ceil` take an optional target scale
+(`FLOOR(1234.5678, -1) = 1230`, probed 2026-10-07). The rename keeps both arguments; ThoughtSpot's
+`floor` and `ceil` take one. The Snowflake translator emits the same (offline, 2026-10-07).
+
+**Fix.** A literal scale → `floor ( x * 10^d ) / 10^d` (mind BL-348's precision lesson: multiply by
+the increment) or a `sql_double_op` pass-through; a non-literal scale → pass-through or NEEDS_REVIEW.
+Arity-check renames generally.
+
+**Target:** next translator PR.
+
+## BL-362 — from-Databricks coverage: common forms the translator declines `Tier 3`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** formula fidelity M2: 19 TRANSLATE_FAILED cases (18 ANSI, 1 non-ANSI), 17 distinct forms. All loud — none
+returned a wrong value.
+
+**Declined:** `try_divide` (row and aggregate), `NVL`, `NVL2`, `COALESCE` with three or more
+arguments (`sv_sql` handles it; `mv_sql` does not), `nullifzero`, `zeroifnull`, `concat_ws`, `||`,
+`%`, `LIKE`, `ILIKE`, `RLIKE`, `INSTR`, `trunc(date, fmt)`, `last_day`, `bround`, `to_date(column)`.
+`ILIKE` and `RLIKE` are declined because the operator is read as a column (`[TABLE::ILIKE]`); the
+decline is correct, the message is not.
+
+**Fix.** Map the ones with exact ThoughtSpot forms (`NVL` = two-argument COALESCE, n-ary COALESCE as
+in `sv_sql`, `try_divide(x, y)` = `x / y`, `zeroifnull`, `nullifzero`, `%` = `mod`, `last_day`,
+`trunc` → `start_of_*`) and keep the case-sensitive string operators declined or trapped per BL-333.
+Each new mapping gets a doc row and a fidelity case, not only a unit test.
+
+**Target:** opportunistic.
+
+## BL-363 — The Databricks fidelity oracle runs case SQL as a principal that owns the catalog `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** review of PR #576 (formula fidelity M2).
+
+**The facts** (read-only, 2026-10-07: `DESCRIBE CATALOG` / `DESCRIBE SCHEMA`,
+`system.information_schema.schema_privileges`). The `Production` Databricks profile's service
+principal runs every M2 `source_formula` verbatim, and it is also the principal behind the
+ThoughtSpot connection `DBX_DAMIAN`.
+- It **owns the catalog** `agent_skills`, and with it the right to grant itself anything there.
+- It owns the schemas `audit_probe`, `default`, `dunder_mifflin` and `business_forecast`.
+- It has `SELECT` / `USE SCHEMA` on `analytics`, `ossie` and `plan`.
+- Catalogs outside `agent_skills` were not checked.
+
+M2's cases are authored in-repo, so this was accepted for M2. A third-party Spark/Databricks SQL
+corpus would be executable input running with that reach.
+
+**Fix.**
+- Create a dedicated principal with `USE CATALOG agent_skills`, `USE SCHEMA` + `CREATE TABLE` on one
+  scratch schema, and `CAN USE` on the SQL warehouse, and nothing else.
+- Give it its own Databricks profile, and point `--dbx-profile` at that profile for corpus runs.
+- The ThoughtSpot Table must still be readable through a connection; either a second connection on
+  the confined principal, or a grant on the scratch schema to `DBX_DAMIAN`'s principal.
+- Optionally, have `DatabricksWarehouse` refuse to run a non-in-repo case file unless
+  `current_user()` is the confined principal.
+
+**Target:** 2026-11-15, and in any case before any third-party SQL corpus is run on Databricks.
+
+## BL-365 — `a * b / c` is read as `a * ( b / c )`, and a doubled quote in a string literal is two quotes: audit every formula emitter `Tier 1`
+
+**Filed:** 2026-10-07. **Status:** OPEN (the Excel printer is fixed in ts-cli 0.162.0).
+**Source:** the Excel coverage pass's fresh M1 run (16 silent wrong answers, every one a
+`… * 180 / PI()` shape) and the follow-up probes in probe record §7.
+
+**The facts (live, se-thoughtspot, 2026-10-07, scratch Models deleted and confirmed absent).**
+- `[n] * 4 / 3` compiles to `n * (4 / NULLIF(3, 0))` and returns 3.999999 for n = 3:
+  ThoughtSpot groups a division under a preceding product, and a literal-over-literal division
+  is fixed-point at scale 6 in Snowflake (BL-348's mechanism). `( [n] * 4 ) / 3` returns 4;
+  `12 / [n] * 2` stays left to right.
+- `'it''s'` is read as `it''s` (it compiles to four quotes). A backslash escape works in
+  `'o\'neil'` but fails to parse when the literal follows an earlier string literal in the
+  same formula (*Search did not find "''s ' ,"*). `sql_string_op ( "'it''s'" )` is reliable,
+  and `'a\\b'` is `a\b`.
+
+**Where it may still be.** Every printer that emits `x * y / z` without brackets or doubles a
+quote: `ts_cli/tableau/literals.py` and `ts_cli/powerbi/functions.py` double quotes; the
+Tableau, Qlik, Sisense, Snowflake and Databricks formula printers have not been checked for
+the product-over-division shape.
+
+**Fix.** Share the Excel printer's two rules (`tsast._binop_text`, `tsast._string_text`)
+through `formula_common` (BL-217), re-pin the tests, and add a fidelity case for each shape per
+dialect.
+
+**Target:** 2026-10-31.

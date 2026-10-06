@@ -82,7 +82,8 @@ Emitted forms after the fix:
 - `strpos` compiles to `POSITION('eng' IN LOWER(col))`.
 - Plain `=` compiles to `LOWER(col) = 'engineering'`, which matched 'Engineering'.
 - String literals are lowercased at compile time: `contains ( 'Hello World' , 'WORLD' )` is true.
-- **Not probed:** `!=`, `in { }`, `starts_with`, and a column (rather than a literal) as the needle.
+- **Probed 2026-10-07** (one more scratch Model, deleted and confirmed): `!=` → `LOWER(col) <> …`, `in { }` → `LOWER(col) IN (…)`, `strpos(…) = 1` → `POSITION(… IN LOWER(col)) = 1`, and `<` → `LOWER(col) < …`, all case-insensitive. Ordering changes as well: `'HR' < 'f'` is FALSE once both sides are lowercased.
+- **Still not probed:** string join keys, and a column (rather than a literal) as the needle.
 
 ## 5. Parser acceptance (VALIDATE_ONLY)
 
@@ -324,7 +325,7 @@ DOUBLE column and a decimal literal alike:
 
 | Formula | Result |
 |---|---|
-| `sin ( 30 )`, `cos ( 60 )`, `tan ( 45 )` | −0.988, −0.952, 1.620 — compiled `SIN(30)`: **ThoughtSpot trigonometry is in radians** (BL-357). The repo's "degrees" rule was never probed and was wrong |
+| `sin ( 30 )`, `cos ( 60 )`, `tan ( 45 )` | −0.988, −0.952, 1.620 — compiled `SIN(30)`: **ThoughtSpot trigonometry is in radians** (BL-364). The repo's "degrees" rule was never probed and was wrong |
 | `asin ( 0.5 )`, `acos ( [x] )` (0.5), `atan ( 1 )` | 0.5236, 1.0472, 0.7854 — radians out too |
 | `sin ( 3.141592653589793 )` | 1.2246467991473532E-16, as a double `SIN(π)` |
 | `sql_double_op ( "SINH({0})" , … )`, `COSH`, `TANH` (of 1000), `ASINH`, `ACOSH`, `ATANH`, `DEGREES`, `RADIANS`, `ATAN2` | Python `math` to the last digit; `TANH(1000)` = 1.0, `SINH(1e-10)` = 1e-10 (the `exp` compositions cancel / overflow there); `ATAN2(0, 0)` = 0 (Excel `#DIV/0!`) |
@@ -342,5 +343,10 @@ DOUBLE column and a decimal literal alike:
 | `sql_string_op ( "INITCAP({0})" , … )` | `Abc1def X-Y O'neil` — Snowflake's default delimiters skip digits and the apostrophe, where Excel `PROPER` gives `Abc1Def X-Y O'Neil`. A delimiter list built with `\|\|` is rejected (*argument 1 to function INITCAP needs to be constant*), and **backslash escapes in a `sql_*_op` template do not survive** (`'\t\x22…'` became the letters `t`, `x`, `2`…): `PROPER` was left out of the coverage pass |
 | `add_days ( add_months ( to_date ( concat ( to_string ( y ) , '-01-01' ) , '%Y-%m-%d' ) , 13 ) , -1 )` (y = 2024) | 2025-01-31 — the `DATE` composition, overflow-safe |
 | `sql_int_op ( "POSITION({0}, {1}, {2})" , 'r' , s , 7 )`, `"POSITION(LOWER({0}), LOWER({1}), {2})"` | the 1-based position at or after the start — `FIND` / `SEARCH` with `start_num` |
+| `[n] * 4 / 3` (n = 3); `( [n] * 4 ) / 3`; `12 / [n] * 2` | **3.999999** — compiled `n * (4 / NULLIF(3,0))`: ThoughtSpot groups a division under a preceding product, and the literal division is fixed-point at scale 6; bracketed, 4.0; left to right, 8.0 (BL-365). `[x] * 180 / 3.141592653589793` likewise lost seven digits — the 16 silent wrong answers of the coverage run's first fresh pass |
+| `sql_double_op ( "PI()" )`; `[x] * 180 / sql_double_op ( "PI()" )` | 3.141592653589793; exact — a zero-argument template is accepted |
+| `concat ( 'Bob' , 'x\'s ' , … )`, `concat ( 'x' , '\'s ' )` | **rejected at import** (*Search did not find "''s ' ,"*); `'o\'neil'` and `'\'s'` alone are accepted — the backslash escape fails after an earlier string literal |
+| `if ( … ) then 'it''s' else 'no'` | **`it''s`** — a doubled quote is two quotes (BL-365) |
+| `concat ( 'Bob' , sql_string_op ( "'''s '" ) , … )`; `'a\\b'` | `Bob's …`; `a\b` — the forms the Excel printer now emits |
 
 The same run checked 39 translator outputs end to end against hand-computed Excel values (the new rounding family, `LOG`, trigonometry, `ATAN2`, `FACT`, `CHAR` / `CODE` / `UNICODE`, `REPLACE`, the `B` variants, `TEXT` number / percent / date formats, `DATE` overflow, `ISTEXT` / `ISLOGICAL`, `FIND` / `SEARCH` with a start): 39 of 39 equal after `dddd` moved to `INITCAP`.

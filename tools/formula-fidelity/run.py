@@ -57,6 +57,11 @@ def _args(argv=None):
     ap.add_argument("--cases", required=True, type=pathlib.Path)
     ap.add_argument("--profile", help="ThoughtSpot profile (ts profiles)")
     ap.add_argument("--sf-profile", help="Snowflake profile (python method)")
+    ap.add_argument("--dbx-profile", help="Databricks profile with a SQL warehouse "
+                    "(/ts-profile-databricks); needed when the fixture's warehouse is databricks")
+    ap.add_argument("--dbx-cli-profile", help="opt-in: authenticate with this named "
+                    "~/.databrickscfg profile instead of the Databricks profile's env var / OS "
+                    "credential store (that file holds a plaintext secret; discouraged)")
     ap.add_argument("--connection", default="APJ_TAB", help="ThoughtSpot connection name")
     ap.add_argument("--database", default="AGENT_SKILLS")
     ap.add_argument("--schema", default="PUBLIC")
@@ -158,11 +163,15 @@ def main(argv=None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    if not (args.profile and args.sf_profile):
-        print("error: a live run needs --profile and --sf-profile", file=sys.stderr)
-        return 2
     if len(fixtures) != 1:
         print("error: one fixture per run in this version", file=sys.stderr)
+        return 2
+    wh_kind = builders.warehouse_of(next(iter(fixtures.values())))
+    wh_profile = args.dbx_profile if wh_kind == "databricks" else args.sf_profile
+    if not (args.profile and wh_profile):
+        flag = "--dbx-profile" if wh_kind == "databricks" else "--sf-profile"
+        print(f"error: a live run over a {wh_kind} fixture needs --profile and {flag}",
+              file=sys.stderr)
         return 2
     return live_run(args, cases, fixtures, title)
 
@@ -178,7 +187,11 @@ class Deps:
 
         self.live = live
         self.validator = validator or (lambda profile: live.ts_validator(profile))
-        self.warehouse = warehouse or (lambda sf_profile: live.Warehouse(sf_profile))
+        # (warehouse kind, profile) -> a session object. Default: Snowflake (M0, M1) or the
+        # Databricks SQL warehouse (M2), chosen by the fixture's ``warehouse``.
+        self.warehouse = warehouse or (
+            lambda kind, profile, cli_profile=None: live.DatabricksWarehouse(profile, cli_profile)
+            if kind == "databricks" else live.Warehouse(profile))
         self.translate = translate or translate_case
         self.now_ms = now_ms or (lambda: int(time.time() * 1000))
         # (wh, case, fixture, fq_table) -> {"values": …}. Default: the warehouse runs the
@@ -218,14 +231,17 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
         ts_cli_version = "unknown"
 
     fixture = next(iter(fixtures.values()))
+    wh_kind = builders.warehouse_of(fixture)
+    wh_profile = getattr(args, "dbx_profile", None) if wh_kind == "databricks" else args.sf_profile
     stamp = builders.run_stamp()
     names = builders.object_names(fixture["name"], stamp)
-    fq_table = builders.fq(args.database, args.schema, names["warehouse_table"])
+    fq_table = builders.fq(args.database, args.schema, names["warehouse_table"], wh_kind)
     run_start_ms = deps.now_ms()
     t0 = time.monotonic()
     phases: dict[str, float] = {}
     meta = {"date": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
             "profile": args.profile, "connection": args.connection, "sf_profile": args.sf_profile,
+            "warehouse": wh_kind, "dbx_profile": getattr(args, "dbx_profile", None),
             "warehouse_table": fq_table, "ts_table": names["ts_table"],
             "ts_model": names["ts_model"], "run_start_ms": run_start_ms,
             "cases_file": _rel(args.cases), "cases_sha256": caselib.file_sha256(args.cases),
@@ -244,11 +260,17 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
     validator = wh = None
     created_ts: list[tuple[str, Optional[str]]] = []
     table_created = False
+    # A CREATE that raised (a timeout, a dropped connection) may still have created the table.
+    # It is reported, never dropped: the run cannot prove it made it.
+    create_unconfirmed: list[dict] = []
     reraise: Optional[BaseException] = None
     try:
         validator = deps.validator(args.profile)
         meta["orphans"] = live.find_orphans(validator)
-        wh = deps.warehouse(args.sf_profile)
+        cli_profile = getattr(args, "dbx_cli_profile", None)
+        wh = deps.warehouse(wh_kind, wh_profile, cli_profile) if cli_profile \
+            else deps.warehouse(wh_kind, wh_profile)
+        meta["warehouse_auth"] = getattr(wh, "auth_source", None)
         meta["warehouse_orphans"] = live.find_warehouse_orphans(wh, args.database, args.schema)
         n_orph = len(meta["orphans"]) + len(meta["warehouse_orphans"])
         if n_orph:
@@ -257,8 +279,20 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
         t = time.monotonic()
         for s in builders.session_sql(fixture):
             wh.execute(s)
+        # What the session actually runs under, read back after setting it (run header).
+        meta["session"] = {}
+        for k, q in builders.session_readback_sql(fixture):
+            try:
+                meta["session"][k] = [list(map(str, r)) for r in wh.execute(q)]
+            except Exception as exc:  # noqa: BLE001 — a readback failure is recorded, not fatal
+                meta["session"][k] = f"readback failed: {type(exc).__name__}: {exc}"
         live.log(f"warehouse: creating {fq_table}")
-        wh.execute(builders.create_table_sql(fixture, fq_table))
+        try:
+            wh.execute(builders.create_table_sql(fixture, fq_table))
+        except BaseException:
+            create_unconfirmed.extend(_check_after_failed_create(
+                wh, args.database, args.schema, names["warehouse_table"], fq_table, live))
+            raise
         table_created = True
         wh.execute(builders.insert_rows_sql(fixture, fq_table))
         t = lap("load", t)
@@ -355,6 +389,9 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
             if not gone:
                 cleanup["remaining"].append({"name": fq_table, "guid": None, "warehouse": True})
                 live.log(f"CLEANUP NOT CONFIRMED — warehouse table may remain: {fq_table}")
+        if create_unconfirmed:
+            gone = False
+            cleanup["remaining"].extend(create_unconfirmed)
         cleanup["warehouse_confirmed_absent"] = gone
         if wh is not None:
             try:
@@ -376,6 +413,24 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
     if meta.get("aborted"):
         return EXIT_ABORTED
     return EXIT_LEFTOVERS if meta["cleanup"]["remaining"] else EXIT_OK
+
+
+def _check_after_failed_create(wh, database: str, schema: str, table: str, fq_table: str,
+                               live) -> list[dict]:
+    """After CREATE TABLE raised: is the table there anyway? If so (or if the check itself
+    fails), report it as possibly this run's — never drop it. Applies to every warehouse."""
+    try:
+        present = wh.table_exists(database, schema, table)
+    except BaseException as exc:  # noqa: BLE001 — unknown is reported, not assumed absent
+        live.log(f"CREATE failed and the existence check failed too ({type(exc).__name__}); "
+                 f"check for {fq_table} by hand")
+        return [{"name": fq_table, "guid": None, "warehouse": True,
+                 "note": "CREATE raised; existence unknown — possibly ours, not dropped"}]
+    if not present:
+        return []
+    live.log(f"CREATE raised but {fq_table} exists — possibly this run's, NOT dropped")
+    return [{"name": fq_table, "guid": None, "warehouse": True,
+             "note": "CREATE raised but the table exists — possibly ours, not dropped"}]
 
 
 def _finish_outputs(args, run, cases, fixtures, fixture, by_id, title):

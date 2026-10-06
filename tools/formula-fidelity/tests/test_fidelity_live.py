@@ -140,7 +140,7 @@ def _go(tmp_path, boom, ts=None):
     ts = ts or FakeTS(boom)
     wh = FakeWH(boom)
     deps = runmod.Deps(validator=lambda p: (boom.step("validator"), ts)[1],
-                       warehouse=lambda s: (boom.step("warehouse"), wh)[1],
+                       warehouse=lambda kind, s: (boom.step("warehouse"), wh)[1],
                        now_ms=lambda: START_MS)
     return cases, ts, wh, deps, fixtures
 
@@ -204,6 +204,50 @@ def test_interrupt_in_teardown_still_runs_the_other_blocks(tmp_path, step, nth, 
         assert not cl["ts_confirmed_absent"]
         assert all(r.get("name") for r in cl["remaining"])   # recorded by name (and GUID)
     assert cl["errors"]
+
+
+class _CreateTimesOut(FakeWH):
+    """CREATE reaches the warehouse, makes the table, then the client times out."""
+
+    def execute(self, sql):
+        if sql.startswith("CREATE TABLE"):
+            self.tables.add(sql.split()[2])
+            raise TimeoutError("read timed out")
+        return super().execute(sql)
+
+
+@pytest.mark.parametrize("made", [True, False])
+def test_failed_create_reports_a_table_that_exists_and_never_drops_it(tmp_path, made):
+    boom = Boom()
+    cases, ts, _, deps, fx = _go(tmp_path, boom)
+    wh = _CreateTimesOut(boom) if made else FakeWH(Boom("wh_create", TimeoutError("t")))
+    deps.warehouse = lambda kind, s: wh
+    assert runmod.live_run(_args(tmp_path), cases, fx, "T", deps) == runmod.EXIT_ABORTED
+    cl = json.loads((tmp_path / "run.json").read_text())["run"]["cleanup"]
+    if made:
+        assert len(wh.tables) == 1, "a table the run cannot prove it made must not be dropped"
+        (left,) = cl["remaining"]
+        assert left["warehouse"] and "possibly ours, not dropped" in left["note"]
+        assert left["name"] == next(iter(wh.tables))
+        assert cl["warehouse_confirmed_absent"] is False
+    else:
+        assert wh.tables == set() and cl["remaining"] == []
+        assert cl["warehouse_confirmed_absent"] is True
+
+
+def test_failed_create_with_failed_existence_check_is_reported(tmp_path):
+    boom = Boom()
+    cases, ts, _, deps, fx = _go(tmp_path, boom)
+    wh = _CreateTimesOut(boom)
+
+    def boom_exists(*a):
+        raise ConnectionError("gone")
+    wh.table_exists = boom_exists
+    deps.warehouse = lambda kind, s: wh
+    assert runmod.live_run(_args(tmp_path), cases, fx, "T", deps) == runmod.EXIT_ABORTED
+    cl = json.loads((tmp_path / "run.json").read_text())["run"]["cleanup"]
+    assert any("existence unknown" in (r.get("note") or "") for r in cl["remaining"])
+    assert len(wh.tables) == 1
 
 
 def test_leftover_exits_1(tmp_path):

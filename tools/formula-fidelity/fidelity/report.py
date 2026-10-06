@@ -113,7 +113,7 @@ def _silent_section(title: str, items: list[dict], fixtures: dict, lines: list[s
         fx = fixtures[it["fixture"]]
         lines.append(f"**{it['id']}** — minimal repro (key {w['key']}):")
         lines.append("")
-        lines.append(f"- source (Snowflake): `{it['source_formula']}`")
+        lines.append(f"- source ({warehouse_label(fx)}): `{it['source_formula']}`")
         lines.append(f"- emitted (ThoughtSpot): `{_short((it.get('translation') or {}).get('formula'))}`")
         sql = (it.get("actual") or {}).get("sql")
         if sql:
@@ -128,9 +128,17 @@ def _silent_section(title: str, items: list[dict], fixtures: dict, lines: list[s
         lines.append("")
 
 
+_WAREHOUSE_LABELS = {"snowflake": "Snowflake", "databricks": "Databricks"}
+
+
+def warehouse_label(fixture: dict) -> str:
+    return _WAREHOUSE_LABELS.get(fixture.get("warehouse", "snowflake"), "warehouse")
+
+
 def _value_sql(sql: str) -> str:
-    """The SELECT's second expression (the formula), from AgentQL's generated SQL."""
-    m = re.search(r'"ca_1",\s*(.*?)\s+"ca_2"', sql, re.S)
+    """The SELECT's second expression (the formula), from AgentQL's generated SQL.
+    Snowflake quotes aliases with ``"``; Databricks with backticks and an ``AS``."""
+    m = re.search(r'["`]ca_1["`],\s*(.*?)\s+(?:AS\s+)?["`]ca_2["`]', sql, re.S)
     return re.sub(r"\s+", " ", m.group(1)) if m else re.sub(r"\s+", " ", sql)[:200]
 
 
@@ -151,6 +159,7 @@ def build_report(run: dict, fixtures: dict[str, dict], title: str) -> str:
     meta = run["run"]
 
     lines = [f"# {title}", ""]
+    label = warehouse_label(next(iter(fixtures.values()))) if fixtures else "Snowflake"
     lines.append(
         f"**{len(silent)} silent wrong answer(s)** ({len(bugs)} with an open BL item, "
         f"{len(unexplained)} unexplained) and **{len(warned)} warned wrong answer(s)** "
@@ -162,7 +171,7 @@ def build_report(run: dict, fixtures: dict[str, dict], title: str) -> str:
         "user. A *warned* wrong answer is one the translator marked APPROXIMATED and named a "
         "trap for. A known-divergence tag explains only the keys it lists; any other wrong "
         "key stays unexplained. The oracle is the warehouse itself: each source formula is "
-        "run as a Snowflake SELECT over the same fixture rows ThoughtSpot queries.")
+        f"run as a {label} SELECT over the same fixture rows ThoughtSpot queries.")
     lines.append("")
     if meta.get("aborted"):
         lines.append(f"**This run ABORTED** (`{meta['aborted']}`); cases it did not reach are "
@@ -240,10 +249,11 @@ def build_report(run: dict, fixtures: dict[str, dict], title: str) -> str:
     lines.append("")
     if meta.get("aborted"):
         lines.append(f"- **ABORTED:** `{meta['aborted']}` — cases not reached are RUN_FAILED")
-    for k in ("date", "profile", "connection", "warehouse_table", "sf_profile",
+    for k in ("date", "profile", "connection", "warehouse", "warehouse_table", "sf_profile",
+              "dbx_profile", "warehouse_auth", "session",
               "cases_file", "cases_sha256", "cases_sha256_after_fill", "fill_expected",
               "translator_version", "runtime_s"):
-        if k in meta:
+        if meta.get(k) is not None:
             lines.append(f"- {k}: `{meta[k]}`")
     git = meta.get("git") or {}
     if git.get("sha"):

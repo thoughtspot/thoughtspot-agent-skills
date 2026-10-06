@@ -7,6 +7,7 @@ ThoughtSpot translation over the same rows and compares the answers key by key.
 Design: [`docs/research/formula-test-cases/harness-design.md`](../../docs/research/formula-test-cases/harness-design.md).
 First run (M0, 50 Snowflake SQL cases): [`docs/reviews/2026-10-06-fidelity-m0-snowflake.md`](../../docs/reviews/2026-10-06-fidelity-m0-snowflake.md).
 M1 (250 Excel cases, literal oracle): [`docs/reviews/2026-10-06-fidelity-m1-excel.md`](../../docs/reviews/2026-10-06-fidelity-m1-excel.md) — see [M1](#m1-excel-cases-from-a-corpus-outside-the-repo) below.
+M2 (98 Databricks SQL cases, Databricks as the oracle): [`docs/reviews/2026-10-07-fidelity-m2-databricks.md`](../../docs/reviews/2026-10-07-fidelity-m2-databricks.md) — see [M2](#m2-databricks-sql) below.
 It is the formula-level fixture for repo-audit angle 15 (`.claude/rules/repo-audit.md`). It is
 operator-run, not workflow-run.
 
@@ -19,7 +20,7 @@ operator-run, not workflow-run.
 | `fidelity/builders.py` | Pure builders for everything a run sends: warehouse SQL, Table/Model TML, AgentQL |
 | `fidelity/compare.py` | Canonical values, comparison rules, and the case verdicts |
 | `fidelity/report.py` | Markdown report. Leads with silent wrong answers |
-| `fidelity/live.py` | The only I/O: Snowflake oracle session, ThoughtSpot import/query/teardown |
+| `fidelity/live.py` | The only I/O: Snowflake and Databricks oracle sessions, ThoughtSpot import/query/teardown |
 | `run_literal.py` | M1 entry point: `candidates`, `select`, `run`, `rebuild` over a corpus in a data dir outside the repo |
 | `crosscheck_formulas.py` | M1 bronze cross-check with the `formulas` library (run in a throwaway uv env) |
 | `fidelity/sources.py` | Stdlib readers for LibreOffice `.fods` and Excel `.xlsx`: one formula cell → a scalar case, or a named refusal |
@@ -27,6 +28,7 @@ operator-run, not workflow-run.
 | `fidelity/redact.py` | What M1 may commit (redacted results, generated report tables) and the leak scanner |
 | `cases/excel/` | `m1-manifest.jsonl` (ids + file + sha256 + locator, no formulas or values) and `m1-selection.json` (counts); `m1-coverage-manifest.jsonl` / `m1-coverage-selection.json`, the 2026-10-07 coverage pass's fresh selection (the cases it newly translates, at most 15 per leading function) |
 | `cases/snowflake/` | `m0.jsonl` (50 cases) and `fixture-m0.json` (10 edge rows) |
+| `cases/databricks/` | `m2.jsonl` (91 cases, `ANSI_MODE=true`), `m2-nonansi.jsonl` (7 cases, `ANSI_MODE=false`), and their fixtures: M0's rows as Databricks types |
 | `runs/` | Run JSON evidence (raw oracle and ThoughtSpot values, compiled SQL, verdicts) |
 | `tests/` | Pure-function tests. No live calls |
 
@@ -99,11 +101,24 @@ two calls per case, sequential.
    Startup sweeps report, but never touch, earlier `ZZ_FIDELITY_%_DELETE_ME` ThoughtSpot objects
    and `ZZ_FIDELITY_%` warehouse tables.
 
-**Warehouse role.** The oracle runs each case's `source_formula` verbatim as SQL under the
-Snowflake profile's role. M0's cases are authored in-repo. **Before any third-party SQL corpus
-arrives** (Spark examples, M2), run with a role confined to the scratch schema: usage on it,
-create-table in it, and nothing else. A case file is then executable input, and the role is the
-only thing bounding it.
+**Warehouse principal.** The oracle runs each case's `source_formula` verbatim as SQL. A case file
+is executable input, and the principal running it is the only thing bounding it.
+- **Snowflake (M0, M1):** it runs under the Snowflake profile's role.
+- **Databricks (M2):** it runs under the `Production` profile's service principal, which is also
+  the principal the `DBX_DAMIAN` ThoughtSpot connection uses. Its reach, read-only on 2026-10-07
+  (`DESCRIBE CATALOG` / `DESCRIBE SCHEMA` and `system.information_schema.schema_privileges`), is
+  far wider than the scratch schema:
+  - it **owns the catalog** `agent_skills`
+  - it owns the schemas `audit_probe`, `default`, `dunder_mifflin` and `business_forecast`
+  - it has `SELECT` / `USE SCHEMA` on `analytics`, `ossie` and `plan`
+
+  An owner can grant itself anything in the catalog, and catalogs outside `agent_skills` were not
+  checked.
+
+M0, M1 and M2's cases are all authored in-repo, so this was acceptable for them. **Before any
+third-party SQL corpus runs on either warehouse**, the oracle must run as a principal confined to
+the scratch schema: usage on it, create-table in it, and nothing else. For Databricks this is
+**BL-363**.
 
 ## Case format
 
@@ -232,10 +247,54 @@ $UV --with snowflake-connector-python python -I tools/formula-fidelity/run_liter
   `ERROR_EQUIV`, `MATCH`, and `ORACLE_DISPUTED`. Divergences and error-equivalents are never
   counted as matches.
 
-## Extending (M2 and later)
+## M2: Databricks SQL
 
-- **A new SQL dialect** (Databricks) needs a warehouse oracle class beside `Warehouse` in
-  `live.py`, plus its case directory. Everything else is dialect-independent.
+The same pipeline with Databricks as the oracle. A fixture with `"warehouse": "databricks"` names
+its column types as `wh_type` (`BIGINT`, `DOUBLE`, `STRING`, `DATE`, `TIMESTAMP_NTZ`, `TIMESTAMP`),
+and `run.py` then needs `--dbx-profile` instead of `--sf-profile`:
+
+```bash
+PYTHONPATH= uv run --no-project --python 3.12 --with pyyaml --with typer --with requests \
+    --with keyring --with databricks-sql-connector --with databricks-sdk \
+  python -I tools/formula-fidelity/run.py \
+    --cases tools/formula-fidelity/cases/databricks/m2.jsonl \
+    --profile se-thoughtspot --dbx-profile Production --connection DBX_DAMIAN \
+    --database AGENT_SKILLS --schema AUDIT_PROBE \
+    --out tools/formula-fidelity/runs/<date>-databricks-m2.json --report <path>.md
+```
+
+- **Topology.** The Table is registered on a ThoughtSpot connection to the **same** Databricks
+  workspace and SQL warehouse, so both sides read one Delta table and `sql_*_op` pass-throughs run
+  their Databricks SQL. If no such connection exists, M2 cannot score pass-throughs; do not create a
+  connection for it without the user's approval.
+- **`DatabricksWarehouse`** (`live.py`) connects with `databricks-sql-connector` to the profile's
+  `sql_warehouse_http_path`. By default it follows the repo's credential model
+  (`.claude/rules/security.md`, `/ts-profile-databricks`). It **does read the secret**: from the
+  profile's `secret_env` environment variable, else the OS credential store (service
+  `databricks-<slug>`, account = the client id for OAuth M2M, `token` for a PAT). It hands the
+  secret in memory to `databricks-sdk`'s `Config(host=…, client_id=…, client_secret=…)`, and never
+  logs, prints or writes it. `~/.databrickscfg` is used only when you pass
+  `--dbx-cli-profile <name>`, an explicit opt-in: that file holds the secret in plaintext, which
+  the profile skill advises against. The run header records which source was used
+  (`warehouse_auth`).
+- **Session.** The fixture's `session` takes `TIMEZONE` (sent as `SET TIME ZONE '…'`: a SQL
+  warehouse rejects `SET timezone = …`), `ANSI_MODE` (boolean) and `LEGACY_TIME_PARSER_POLICY`, and
+  nothing else. The run header records each value as **read back** from the session.
+- **Names.** Unity Catalog stores names in lower case. Warehouse SQL uses the upper-case run names
+  unquoted, and the Table TML spells `db` / `schema` / `db_table` in lower case.
+- **Teardown** is M0's: the warehouse table is confirmed gone with
+  `SHOW TABLES IN <catalog>.<schema> LIKE '<name>'`, and the startup sweep reports earlier
+  `zz_fidelity_*` tables without touching them.
+- **ANSI.** ThoughtSpot's own queries over the Databricks connection behaved as **non-ANSI** in
+  M2 (BL-358). So an ANSI oracle and ThoughtSpot can disagree on overflow and bad casts, and
+  `m2-nonansi.jsonl` measures the legacy semantics separately.
+
+## Extending
+
+- **A new SQL dialect** needs a warehouse oracle class beside `Warehouse` and
+  `DatabricksWarehouse` in `live.py` (`execute`, `keyed`, `table_exists`, optional `orphans` and
+  `error_text`), a `warehouse` value in `builders.WAREHOUSES` with its literal and session syntax,
+  and its case directory. Everything else is dialect-independent.
 - **Third-party cases** follow M1: a manifest in the repo, the corpus in the data dir (the
   design's §1 "one LICENSE file per source directory" was superseded by the user's 2026-10-06
   rule). M0's cases are all authored in-repo, under the repository licence (the ThoughtSpot EULA

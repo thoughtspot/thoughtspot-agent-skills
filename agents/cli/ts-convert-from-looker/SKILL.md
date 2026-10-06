@@ -886,10 +886,16 @@ to the user and ask them to provide the resolved database/schema string.
 
 ---
 
+
+### String comparisons become case-insensitive (BL-333)
+
+ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }`, `<`/`>`, `contains`, `strpos`; live-probed 2026-10-06/07). A source comparison that is case-sensitive (Looker `case_sensitive: yes`, the default on dialects that support it) therefore matches more rows after conversion: `'abc'` now equals `'ABC'`, and ordering comparisons can change. This is an accepted, documented trade-off. Where exact case matters for a specific formula, hand-edit it to `sql_bool_op ( "{0} = {1}" , [col] , 'x' )` (or `CONTAINS({0}, {1})`). See `agents/shared/schemas/thoughtspot-formula-patterns.md` → "String comparison is case-insensitive".
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.7 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.0.6 | 2026-10-06 | **`SUBSTR(col, pos, len)` mapping row corrected** (BL-340 class): SQL `SUBSTR` is 1-based and ThoughtSpot `substr` zero-based, so the identity row shifted every substring one character; it is now `substr ( [T::COL] , pos - 1 , len )` for a literal `pos` ≥ 1 (and `strlen` for the 2-argument form), with a `sql_string_op` pass-through for a `pos` ≤ 0 or a non-literal `pos` — the Snowflake / Databricks translators' rule |
 | 1.0.5 | 2026-09-22 | **I7 marker added at the classification step.** The skill already stated the rule in prose at §4a and checklisted it at step 6e — what it lacked was the machine-checkable marker, so no gate could tell it apart from a skill that said nothing, and the prose sat *after* the dimension and measure verdicts it needed to govern. The gate now heads Step 4, ahead of all three untranslatable verdicts; the §4a prose and the 6e checklist are unchanged. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |
 | 1.0.4 | 2026-07-29 | **BL-170 — `REPLACE` corrected and `TRIM` added as a pass-through.** Live verification on se-thoughtspot 2026-07-29 proved neither `replace` nor `trim` is a native ThoughtSpot formula function. `lookml-to-ts-formula-translation.md`'s String functions table now maps `REPLACE(col, old, new)` to `sql_string_op ( "REPLACE({0}, {1}, {2})" , ... )` instead of the invalid bare `replace ( )` call, and gained a `TRIM(col)` row using the same pass-through shape — matching how `UPPER`/`LOWER` were already handled in that table. |

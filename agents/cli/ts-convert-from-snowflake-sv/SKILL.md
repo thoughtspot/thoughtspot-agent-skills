@@ -1019,10 +1019,16 @@ Model in one pass through Steps 4–13.
 
 ---
 
+
+### String comparisons become case-insensitive (BL-333)
+
+ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }`, `<`/`>`, `contains`, `strpos`; live-probed 2026-10-06/07). A source comparison that is case-sensitive (Snowflake's default collation) therefore matches more rows after conversion: `'abc'` now equals `'ABC'`, and ordering comparisons can change. This is an accepted, documented trade-off. Where exact case matters for a specific formula, hand-edit it to `sql_bool_op ( "{0} = {1}" , [col] , 'x' )` (or `CONTAINS({0}, {1})`). See `agents/shared/schemas/thoughtspot-formula-patterns.md` → "String comparison is case-insensitive".
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.25.1 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.25.0 | 2026-10-06 | **Four silent or loud wrong translations fixed, found by the formula fidelity harness** (BL-340..343, ts-cli v0.160.0). `SUBSTR`/`SUBSTRING` copied the 1-based start into ThoughtSpot's zero-based `substr` (every substring shifted one character); it is now `substr ( s , start - 1 , len )` with a literal start folded, and a `sql_string_op` pass-through for a start ≤ 0 or a non-literal start. `DATEDIFF(year, …)` was `diff_days / 365`; it is `diff_years`, and quarter / minute now translate to `diff_quarters` / `diff_minutes` (boundary counts, checked by value on DATE, TIMESTAMP_NTZ and TIMESTAMP_TZ rows). `DATEDIFF(week)` and `DATEDIFF(hour)` are new too, as exact `sql_int_op` pass-throughs: `diff_weeks` fixes a Monday week start, and `diff_hours` counts UTC hours, which is wrong on a TIMESTAMP_TZ at +05:30. Snowflake's part aliases (`hh24`, `qtr`, …) are accepted. `MONTHS_BETWEEN` was `diff_months` (a boundary count) marked TRANSLATED; it is an exact `sql_double_op ( "MONTHS_BETWEEN({0}, {1})" , … )` pass-through. `TO_CHAR`/`TO_VARCHAR(x, fmt)` dropped the format and failed import; they pass through with the format kept (a format with `"`-quoted literal text is refused — no template escape exists). Live M0 re-run on se-thoughtspot: 64/71 MATCH, 0 silent wrong answers |
 | 1.24.3 | 2026-10-06 | **`NULLIF` no longer translates to a function ThoughtSpot lacks** (BL-339, BL-344, ts-cli v0.158.0). `NULLIF(a, b)` emitted `nullif ( a , b )` and a standalone `NULLIF(x, 0)` emitted `null_if_zero ( x )`; both are rejected at import (VALIDATE_ONLY, se-thoughtspot 2026-10-06). They now emit `( if ( a = b ) then null else a )` and `( if ( x = 0 ) then null else x )`, parenthesised so they compose (`NULLIF(x, 1) > 2 OR y > 0`). `x / NULLIF(y, 0)` → `safe_divide` is unchanged; the mapping doc's `IS NOT NULL` row now says `not ( isnull ( … ) )` (there is no `isnotnull`) |
 | 1.24.2 | 2026-10-06 | **`MONTHS_BETWEEN(a, b)` no longer translates with the opposite sign** (BL-336, ts-cli v0.156.3). Snowflake `MONTHS_BETWEEN` is positive when its first argument is later, which is already the later-first order `diff_months` takes, but `sv_sql` swapped the arguments. It now maps in order to `diff_months ( a , b )`. `DATEDIFF` was already correct |

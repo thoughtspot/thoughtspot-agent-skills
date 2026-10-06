@@ -101,9 +101,22 @@ def check_fixture(fx: dict, source: str = "<fixture>") -> dict:
         raise CaseError(f"{source}: key {fx['key']!r} is not a column")
     if fx.get("group") and fx["group"] not in names:
         raise CaseError(f"{source}: group {fx['group']!r} is not a column")
+    wh = fx.get("warehouse", "snowflake")
+    if wh not in ("snowflake", "databricks"):
+        raise CaseError(f"{source}: warehouse must be snowflake or databricks, got {wh!r}")
     for c in fx["columns"]:
-        if not {"name", "sf_type", "ts_type", "column_type"} <= set(c):
-            raise CaseError(f"{source}: column {c.get('name')!r} needs name/sf_type/ts_type/column_type")
+        if not {"name", "ts_type", "column_type"} <= set(c) or not (c.get("wh_type") or
+                                                                     c.get("sf_type")):
+            raise CaseError(f"{source}: column {c.get('name')!r} needs name/wh_type (or "
+                            "sf_type)/ts_type/column_type")
+        try:
+            from fidelity.builders import check_column
+            check_column(c)
+        except ValueError as exc:
+            raise CaseError(f"{source}: {exc}") from exc
+        if wh == "databricks" and "sf_type" in c:
+            raise CaseError(f"{source}: a databricks fixture names column types as wh_type, "
+                            f"not sf_type ({c['name']!r})")
     keys = [r.get(fx["key"]) for r in fx["rows"]]
     if None in keys or len(set(keys)) != len(keys):
         raise CaseError(f"{source}: key values must be present and unique")
