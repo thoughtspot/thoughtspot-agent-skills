@@ -216,12 +216,55 @@ def test_live_run_needs_dbx_profile_for_a_databricks_fixture(capsys):
 
 def test_default_warehouse_factory_dispatches_on_the_fixture(monkeypatch):
     made = []
-    monkeypatch.setattr(live, "DatabricksWarehouse", lambda p: made.append(("dbx", p)) or "D")
+    monkeypatch.setattr(live, "DatabricksWarehouse",
+                        lambda p, cli=None: made.append(("dbx", p, cli)) or "D")
     monkeypatch.setattr(live, "Warehouse", lambda p: made.append(("sf", p)) or "S")
     deps = runmod.Deps(validator=object)
     assert deps.warehouse("databricks", "Production") == "D"
+    assert deps.warehouse("databricks", "Production", "named") == "D"
     assert deps.warehouse("snowflake", "SF") == "S"
-    assert made == [("dbx", "Production"), ("sf", "SF")]
+    assert made == [("dbx", "Production", None), ("dbx", "Production", "named"), ("sf", "SF")]
+
+
+# -- credentials: env var, then the OS credential store; never ~/.databrickscfg -----------
+
+SP = {"name": "Production", "host": "https://dbc-x.cloud.databricks.com/", "auth_type": "oauth-m2m",
+      "client_id": "cid", "secret_env": "DATABRICKS_SP_SECRET_PRODUCTION",
+      "dbx_profile": "ts-production"}
+
+
+def test_credentials_prefer_the_env_var():
+    asked = []
+    kw = live.dbx_credentials(SP, getenv=lambda k: "s3" if k == SP["secret_env"] else None,
+                              get_password=lambda *a: asked.append(a))
+    assert kw == {"host": "https://dbc-x.cloud.databricks.com", "auth_type": "oauth-m2m",
+                  "client_id": "cid", "client_secret": "s3"}
+    assert asked == []
+
+
+def test_credentials_fall_back_to_the_keychain_under_the_skill_service_and_account():
+    asked = []
+    kw = live.dbx_credentials(SP, getenv=lambda k: None,
+                              get_password=lambda svc, acct: asked.append((svc, acct)) or "kc")
+    assert asked == [("databricks-production", "cid")] and kw["client_secret"] == "kc"
+    pat = dict(SP, auth_type="pat", secret_env=None, token_env="DATABRICKS_TOKEN_PRODUCTION")
+    asked.clear()
+    kw = live.dbx_credentials(pat, getenv=lambda k: None,
+                              get_password=lambda svc, acct: asked.append((svc, acct)) or "t")
+    assert asked == [("databricks-production", "token")] and kw["token"] == "t"
+
+
+def test_credentials_missing_secret_fails_without_echoing_anything(capsys):
+    with pytest.raises(SystemExit) as exc:
+        live.dbx_credentials(SP, getenv=lambda k: None, get_password=lambda *a: None)
+    assert "no credential" in str(exc.value)
+    assert capsys.readouterr() == ("", "")
+
+
+def test_credentials_reject_cli_only_auth():
+    with pytest.raises(SystemExit, match="--dbx-cli-profile"):
+        live.dbx_credentials(dict(SP, auth_type="databricks-cli"), getenv=lambda k: None,
+                             get_password=lambda *a: None)
 
 
 def test_report_reads_databricks_sql_and_labels_the_source():

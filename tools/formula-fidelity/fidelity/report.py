@@ -250,7 +250,7 @@ def build_report(run: dict, fixtures: dict[str, dict], title: str) -> str:
     if meta.get("aborted"):
         lines.append(f"- **ABORTED:** `{meta['aborted']}` — cases not reached are RUN_FAILED")
     for k in ("date", "profile", "connection", "warehouse", "warehouse_table", "sf_profile",
-              "dbx_profile", "session",
+              "dbx_profile", "warehouse_auth", "session",
               "cases_file", "cases_sha256", "cases_sha256_after_fill", "fill_expected",
               "translator_version", "runtime_s"):
         if meta.get(k) is not None:

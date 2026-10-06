@@ -67,20 +67,71 @@ class Warehouse:
 # Databricks (M2)
 # =====================================================================================
 
+def dbx_credentials(profile: dict, getenv: Callable[[str], Optional[str]] = None,
+                    get_password: Callable[[str, str], Optional[str]] = None) -> dict:
+    """``Config`` keyword arguments for a ts-profile-databricks profile, from the repo's
+    credential model (``.claude/rules/security.md``): the secret comes from the profile's
+    ``secret_env`` environment variable, else the OS credential store (service
+    ``databricks-<slug>``, account = the client id for OAuth M2M, ``token`` for a PAT).
+
+    Never logs, prints or stores the secret; the returned dict goes straight to ``Config``.
+    ``~/.databrickscfg`` is not read (``dbx_profile`` is an explicit opt-in, see
+    ``DatabricksWarehouse``).
+    """
+    import os
+
+    from ts_cli.profile_ops import derive_keychain_service, slugify
+
+    getenv = getenv or os.environ.get
+    if get_password is None:
+        def get_password(service: str, account: str) -> Optional[str]:
+            import keyring
+            return keyring.get_password(service, account)
+
+    host = (profile.get("host") or "").rstrip("/")
+    if not host:
+        raise SystemExit(f"Databricks profile {profile.get('name')!r} has no host")
+    auth = profile.get("auth_type")
+    if auth == "oauth-m2m":
+        client_id = profile.get("client_id")
+        if not client_id:
+            raise SystemExit(f"Databricks profile {profile.get('name')!r} has no client_id")
+        account, kw = client_id, {"auth_type": "oauth-m2m", "client_id": client_id}
+        key = "client_secret"
+    elif auth == "pat":
+        account, kw, key = "token", {"auth_type": "pat"}, "token"
+    else:
+        raise SystemExit(f"Databricks profile {profile.get('name')!r} uses auth_type {auth!r}; "
+                         "the harness supports oauth-m2m and pat, or pass --dbx-cli-profile")
+    env = profile.get("secret_env") or profile.get("token_env")
+    secret = getenv(env) if env else None
+    if not secret:
+        secret = get_password(derive_keychain_service("databricks", slugify(profile["name"])),
+                              account)
+    if not secret:
+        raise SystemExit(f"no credential for Databricks profile {profile.get('name')!r}: "
+                         f"{env or 'its env var'} is unset and the OS credential store has no "
+                         "entry (run /ts-profile-databricks)")
+    return {"host": host, **kw, key: secret}
+
+
 class DatabricksWarehouse:
     """One Databricks SQL-warehouse session for the whole run, same interface as
     ``Warehouse``.
 
     Connects with ``databricks-sql-connector`` to the profile's ``sql_warehouse_http_path``.
-    Credentials come only from the Databricks profile: the ``dbx_profile`` it names in
-    ``~/.databrickscfg`` (the ``databricks`` CLI's own store), read by ``databricks-sdk``'s
-    ``Config``. Nothing here reads, prints or stores the secret. Both packages are
-    run-time only (``uv run --with databricks-sql-connector --with databricks-sdk``).
+    Credentials follow the repo's model by default (``dbx_credentials``: the profile's env
+    var, else the OS credential store), and are handed to ``databricks-sdk``'s ``Config``
+    in memory — they are never logged, printed or written. ``cli_profile`` (run.py
+    ``--dbx-cli-profile``) is an explicit opt-in to a named ``~/.databrickscfg`` profile
+    instead, which keeps a plaintext secret on disk and is discouraged by
+    ts-profile-databricks. Both packages are run-time only
+    (``uv run --with databricks-sql-connector --with databricks-sdk``).
     """
 
     dialect = "databricks"
 
-    def __init__(self, dbx_profile: str):
+    def __init__(self, dbx_profile: str, cli_profile: Optional[str] = None):
         from ts_cli.commands.load import _load_dbx_profile
 
         profile = _load_dbx_profile(dbx_profile)
@@ -88,14 +139,12 @@ class DatabricksWarehouse:
         if not http_path:
             raise SystemExit(f"Databricks profile {dbx_profile!r} has no "
                              "sql_warehouse_http_path; the oracle needs a SQL warehouse")
-        cli_profile = profile.get("dbx_profile") or profile.get("dbx_cli_profile")
-        if not cli_profile:
-            raise SystemExit(f"Databricks profile {dbx_profile!r} names no dbx_profile "
-                             "(~/.databrickscfg) to authenticate with")
         from databricks import sql as dbsql
         from databricks.sdk.core import Config
 
-        cfg = Config(profile=cli_profile)
+        cfg = Config(profile=cli_profile) if cli_profile else Config(**dbx_credentials(profile))
+        self.auth_source = (f"~/.databrickscfg profile {cli_profile!r} (opt-in)" if cli_profile
+                            else "profile env var / OS credential store")
         host = (cfg.host or profile.get("host") or "").replace("https://", "").rstrip("/")
         self.host, self.http_path = host, http_path
         self.conn = dbsql.connect(server_hostname=host, http_path=http_path,
