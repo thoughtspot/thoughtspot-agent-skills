@@ -4253,16 +4253,26 @@ names (`STDEV.S`), array constants, structured references (`[@Col]`, `[@[Col Nam
 Sheets map rows under *Translator coverage* is applied as code. Highlights: `IFERROR(a/b, 0)` →
 `safe_divide` (`""` fallback → `safe_divide`, APPROXIMATED with a trap; one-argument Sheets
 `IFERROR(a/b)` → plain `/`, NULL on zero); `&` / `CONCAT` / `TEXTJOIN` → one N-argument `concat`
-with `to_string` around the non-text operands only (ThoughtSpot rejects a number in `concat` and
-Text in `to_string`); `ISNUMBER(SEARCH(x, s))` → `contains`; `FIND` / `EXACT` → passthroughs
+with `to_string` around operands known to be numeric, date or boolean only (ThoughtSpot rejects a
+number in `concat` and Text in `to_string`) — a column of unknown type stays bare and the result
+is APPROXIMATED with a note (pass `data_type`, or `--model`, which types columns from the Model);
+`x = ""` is a blank test (`isnull ( x ) or x = ''` for text, `isnull ( x )` for a number or date);
+a boolean in arithmetic is coerced (`if ( c ) then 1 else 0`) and a number used as a condition
+becomes `x != 0`; an A1 formula that depends on a cell's position (another row, a fixed cell, an
+expanding or bounded range, another sheet) is NEEDS_REVIEW, pointing at `cumulative_*` /
+`moving_*` / a parameter; `ISNUMBER(SEARCH(x, s))` → `contains`; `FIND` / `EXACT` → passthroughs
 (case-sensitive); row-wise `MAX` / `MIN` → `greatest` / `least`; `ROUND` via the shared
 digit→increment helper; `WEEKDAY` via `formula_common.ts_weekday_number`; `NETWORKDAYS` as the
 live-verified per-weekday counting form; `*IF` / `*IFS` criteria per the map's criteria table.
 Anything else is `NEEDS_REVIEW` citing its map row — never guessed. `--role measure` builds a
 formula over row-level `[@Col]` references at the right grain: additive → `sum ( a ) - sum ( b )`;
-a ratio → a ratio of totals, `safe_divide ( sum ( n ) , sum ( d ) )`, never a sum of per-row
-ratios; a numeric `IF(…,1,0)` flag stays row-level (its column aggregation totals it); text stays
-an ATTRIBUTE with a `group_aggregate` trap.
+a constant term is summed per row (`sum ( a + 5 )`, never `sum ( a ) + 5`); a ratio → a ratio of
+totals, `safe_divide ( sum ( n ) , sum ( d ) )`, never a sum of per-row ratios; a numeric
+`IF(…,1,0)` flag stays row-level (its column aggregation totals it); text stays an ATTRIBUTE with
+a `group_aggregate` trap. A constant numerator (`1/x`), a ratio inside a non-linear call
+(`ROUND(r/q, 2)`, `IF(c, r/q, 0)`), a ratio of ratios, and a mix of an aggregate with a per-row
+column (`SUM(T[x])/[@y]`, `A2/SUM(A:A)` — use `group_aggregate ( sum ( x ) , { } ,
+query_filters ( ) )` for a share of total) are NEEDS_REVIEW.
 
 ### `ts formula translate [EXPR]`
 
@@ -4345,7 +4355,11 @@ aggregate `Table1[Col]`; `[formula_X]` becomes the calculated column `X`. `safe_
 `AVERAGEIFS` / `MAXIFS` / `MINIFS`; `group_aggregate` at a fixed `{ … }` grain → a self-keyed
 `SUMIFS(Table1[m],Table1[g],[@g])` (APPROXIMATED: `*IFS` ignores sheet filters);
 `round ( x , inc )` → `ROUND(x, d)` for a power-of-ten increment (`formula_common.ts_increment_to_sql_digits`),
-else `MROUND`; `concat` / `to_string` → `&`; `contains` → `ISNUMBER(SEARCH())`;
+else `ROUND(x/inc,0)*inc` (ThoughtSpot's own compilation; `MROUND` fails on negatives);
+`mod ( a , b )` → `a-b*TRUNC(a/b)` (ThoughtSpot's `mod` takes the dividend's sign, Excel's `MOD`
+the divisor's — probe record §7); `concat` / `to_string` → `&`; `contains` → `ISNUMBER(SEARCH())`,
+with `* ? ~` in a literal escaped as `~* ~? ~~` (also in `*IFS` criteria, where an equality keeps
+its leading `=`); a `'yyyy-mm-dd'` literal compared with a value → `DATEVALUE("…")`;
 `diff_days ( e , s )` → `e-s`; `diff_months` → the boundary count
 `(YEAR(e)-YEAR(s))*12+MONTH(e)-MONTH(s)` (with a trap: not `DATEDIF "M"`);
 `day_number_of_week` → `WEEKDAY(d,2)`; `start_of_month` → `EOMONTH(d,-1)+1`; `if` → nested `IF`;
