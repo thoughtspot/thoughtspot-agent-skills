@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from ts_cli.formula_common import wrap_passthrough_calls
+from ts_cli.formula_common import sql_digits_to_ts_increment, wrap_passthrough_calls
 
 # Presence of any of these makes the whole measure NEEDS REVIEW: they manipulate
 # filter context / iterate / do time intelligence and have no 1:1 TS formula.
@@ -457,11 +457,9 @@ def _round_repl(args):
     # increment. So ROUND(x, 0) -> round(x, 1); ROUND(x, 2) -> round(x, 0.01).
     if len(args) == 1:
         return f"{_RND}({args[0]})"
-    if len(args) == 2 and re.fullmatch(r"-?\d+", args[1].strip()):
-        n = int(args[1].strip())
-        inc = 10.0 ** (-n)
-        inc_s = str(int(inc)) if inc >= 1 else ("%.10f" % inc).rstrip("0")
-        return f"{_RND}({args[0]}, {inc_s})"
+    inc = sql_digits_to_ts_increment(args[1]) if len(args) == 2 else None
+    if inc is not None:  # shared conversion (BL-331) — never re-implement it
+        return f"{_RND}({args[0]}, {inc})"
     return None      # non-literal precision -> can't convert reliably; NEEDS REVIEW
 
 

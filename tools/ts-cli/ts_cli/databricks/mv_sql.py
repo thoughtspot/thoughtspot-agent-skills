@@ -39,7 +39,10 @@ from ts_cli.databricks.mv_sql_constructs import (
 # would otherwise define the class twice under one name. Re-exported here so
 # existing `from ts_cli.databricks.mv_sql import UntranslatableError` call
 # sites are unaffected.
-from ts_cli.formula_common import UntranslatableError
+from ts_cli.formula_common import (
+    UntranslatableError,
+    ts_round_from_sql_digits,
+)
 
 
 _TOKEN_RE = re.compile(
@@ -267,7 +270,9 @@ _RENAME = {
     "CONTAINS": "contains", "LEFT": "left",
     "RIGHT": "right", "LPAD": "lpad", "RPAD": "rpad", "REVERSE": "reverse",
     "REPEAT": "repeat",
-    "ABS": "abs", "CEIL": "ceil", "FLOOR": "floor", "ROUND": "round",
+    "ABS": "abs", "CEIL": "ceil", "FLOOR": "floor",
+    # ROUND deliberately not here (BL-331): ThoughtSpot round()'s 2nd arg is a
+    # rounding INCREMENT, not a digit count — see _call_round.
     "MOD": "mod", "POWER": "pow", "SQRT": "sqrt", "LN": "ln",
     "LOG2": "log2", "LOG10": "log10",
     "GREATEST": "greatest", "LEAST": "least",
@@ -335,14 +340,23 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
         return _call_nullif(args)
     if name == "COALESCE":
         return _call_coalesce(args)
-    if name in _STRING_COMPOSED:
-        return _STRING_COMPOSED[name](args)
+    if name in _ARG_COMPOSED:
+        return _ARG_COMPOSED[name](args)
     if name in _RENAME:
         return _emit(_RENAME[name], args)
     raise UntranslatableError(
         f"function '{name}' is not in "
         f"ts-databricks-formula-translation.md — extend the mapping doc and "
         f"mv_sql._RENAME together")
+
+
+def _call_round(args: list[str]) -> str:
+    """ROUND(x[, d]) — d is a digit count, ThoughtSpot round()'s 2nd arg an
+    increment (BL-331); the conversion lives in formula_common."""
+    if len(args) not in (1, 2):
+        raise UntranslatableError(
+            f"ROUND expects 1 or 2 arguments, got {len(args)}")
+    return ts_round_from_sql_digits(args[0], args[1] if len(args) == 2 else None)
 
 
 def _need(args: list[str], n: int, name: str) -> None:
@@ -383,6 +397,10 @@ _STRING_COMPOSED = {
     "STARTSWITH": _call_starts_with,
     "ENDSWITH": _call_ends_with,
 }
+
+# Functions whose translation is built from already-translated args, dispatched
+# by name (keeps _call under the module-health complexity CAP).
+_ARG_COMPOSED: dict = {**_STRING_COMPOSED, "ROUND": _call_round}
 
 
 def _call_args(cur: _Cursor, resolver, agg: str | None = None) -> list[str]:

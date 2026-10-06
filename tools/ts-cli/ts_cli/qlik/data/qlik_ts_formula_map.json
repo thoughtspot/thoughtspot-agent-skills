@@ -1355,8 +1355,8 @@
     "Qlik Sense Formula": "Round(x, n)",
     "Qlik Example": "Round(Revenue, 0.01)",
     "ThoughtSpot Equivalent": "round(col, n)",
-    "ThoughtSpot Example": "round(revenue, 2)",
-    "Comments / Context": "Qlik second arg is rounding interval (0.01 = 2 decimals). ThoughtSpot uses the number of decimal places directly.",
+    "ThoughtSpot Example": "round(revenue, 0.01)",
+    "Comments / Context": "Direct equivalent. Both second args are a rounding increment (0.01 = 2 decimals), so the argument is copied verbatim. ThoughtSpot round(x, 0) is NULL (BL-331).",
     "status": "ok"
   },
   {

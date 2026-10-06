@@ -12248,3 +12248,57 @@ mapped source Model is not in the scan's covered set or the scan's Org differs f
 `--source-org`. Tests for both, plus a test that a covering scan is accepted.
 
 **Target:** next ts-migrate pass.
+
+---
+
+## ~~BL-331~~ — round() 2nd arg is an increment — 5 translators emit digit counts (silent wrong numbers) `Tier 1` — DONE (2026-10-06)
+
+**Filed:** 2026-10-06.
+**Source:** live probe on se-thoughtspot, 2026-10-06 (`ts agentql generate-sql`), corroborating
+`agents/cli/ts-object-model-agentql-query/references/limitations.md:104`.
+
+**The fact.** ThoughtSpot `round(x, n)` takes a rounding **increment**, not a decimal-place
+count. It compiles to `n * round(x / NULLIF(n, 0))`. On `1234.5678`:
+
+| Formula | Result |
+|---|---|
+| `round(x)` | 1235 |
+| `round(x, 0)` | **NULL** |
+| `round(x, 1)` | 1235 |
+| `round(x, 2)` | **1234** |
+| `round(x, 0.01)` | 1234.57 |
+| `round(x, 10)` | 1230 |
+| `round(x, 0.5)` | 1234.5 |
+| `round(x, -2)` | 1234 |
+
+An integer increment yields INT64, a fractional one DOUBLE. SQL, Tableau and DAX `ROUND(x, d)`
+take a digit count, so copying `d` across imports, lints clean and returns a wrong number.
+
+**Affected (all fixed here):**
+
+| Site | Defect |
+|---|---|
+| `ts_cli/sv_sql.py` (Snowflake → TS) | `ROUND` renamed with `d` copied; `TRUNC(x, d)` → `round(x, d)` — rounds instead of truncating, and `TRUNC(x, 0)` → `round(x, 0)` = NULL |
+| `ts_cli/databricks/mv_sql.py` (Databricks → TS) | `ROUND` renamed with `d` copied |
+| `ts_cli/tableau/functions.py` (Tableau → TS) | regex rename left the digit argument |
+| `ts_cli/databricks/mv_emit_sql.py` (TS → Databricks) | `round(x, 0.01)` → `ROUND(x, 0.01)` |
+| `ts-snowflake-formula-translation.md` (TS → Snowflake, executed by the LLM) | `round ( [x] , [n] )` → `ROUND(x, n)` |
+
+Prose also wrong: `thoughtspot-formula-patterns.md` (no semantics stated),
+`ts-from-snowflake-rules.md`, `tableau-formula-translation.md`,
+`ts-databricks-formula-translation.md`, `docs/ossie/ts-ossie-function-mapping.md`, and the Qlik
+doc/JSON (N02 — the Qlik mapping itself was right, since Qlik's `Round` also takes a step).
+Power BI and Sisense already knew the semantics.
+
+**Resolution (2026-10-06, ts-cli v0.156.0).** One conversion in `ts_cli/formula_common.py`
+(`sql_digits_to_ts_increment`, `ts_round_from_sql_digits`, `ts_increment_to_sql_digits`),
+imported by every translator including Power BI. Into ThoughtSpot: literal `d` →
+`round ( x , 10^-d )`; non-literal `d` → `sql_double_op ( "ROUND({0}, {1})" , x , d )`, refused
+over an aggregate. Snowflake `TRUNC` → `sql_double_op` TRUNC pass-through (sign-split
+`floor`/`ceil` over an aggregate); `TRUNC(date, 'unit')` → the `DATE_TRUNC` mapping. Out of
+ThoughtSpot: power-of-ten increment → `ROUND(x, d)`, other literal → `(inc * ROUND(x / inc))`,
+non-literal → `(inc * ROUND(x / NULLIF(inc, 0)))`, `round(x, 0)` refused. Regression guard:
+`tests/test_round_increment.py` (incl. "SQL `ROUND(x, 2)` never yields `round(x, 2)`").
+
+**Not covered:** Sisense still emits `round(x, n)` verbatim, flagged `Approximated` (loud, not
+silent); the upstream apache/ossie converter's `ROUND` emission is not checked from here.

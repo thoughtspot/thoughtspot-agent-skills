@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Callable
 
 from ts_cli.databricks.mv_emit_expr import UntranslatableError
+from ts_cli.formula_common import ts_increment_to_sql_digits
 
 # TS aggregate fn -> Databricks aggregate fn
 AGG_MAP = {
@@ -18,7 +19,7 @@ AGG_MAP = {
 # TS scalar fn -> Databricks scalar fn (direct rename, same arg order)
 SCALAR_FN_MAP = {
     "concat": "CONCAT", "greatest": "GREATEST", "least": "LEAST",
-    "upper": "UPPER", "lower": "LOWER", "abs": "ABS", "round": "ROUND",
+    "upper": "UPPER", "lower": "LOWER", "abs": "ABS",
     "length": "LENGTH", "trim": "TRIM", "strlen": "LENGTH",
 }
 # TS sql_*_op pass-through wrappers -> unwrap, emit inner as raw SQL string literal arg
@@ -214,6 +215,36 @@ def _emit_between(args: list, resolver) -> str:
     return f"{emit_sql(args[0], resolver)} BETWEEN {emit_sql(args[1], resolver)} AND {emit_sql(args[2], resolver)}"
 
 
+def _emit_round(args: list, resolver) -> str:
+    """TS round(x[, inc]) -> Databricks SQL (BL-331).
+
+    ThoughtSpot's 2nd arg is a rounding INCREMENT (compiled as
+    `inc * round(x / NULLIF(inc, 0))`), SQL ROUND's is a digit count. A literal
+    power-of-ten increment maps to ROUND(x, d); any other literal to the exact
+    `inc * ROUND(x / inc)`; a non-literal keeps ThoughtSpot's NULLIF guard. A
+    literal 0 evaluates to NULL in ThoughtSpot — almost certainly an authoring
+    mistake — so it is refused rather than silently emitted as ROUND(x, 0).
+    """
+    if len(args) not in (1, 2):
+        raise UntranslatableError(f"round expects 1 or 2 arguments, got {len(args)}")
+    x = emit_sql(args[0], resolver)
+    if len(args) == 1:
+        return f"ROUND({x})"
+    inc_node = args[1]
+    xw = f"({x})" if args[0]["node"] == "binop" else x
+    if inc_node.get("node") == "lit" and inc_node.get("kind") == "number":
+        try:
+            digits = ts_increment_to_sql_digits(inc_node["value"])
+        except ValueError as exc:
+            raise UntranslatableError(f"{exc} — refusing to emit ROUND(x, 0)") from exc
+        if digits is not None:
+            return f"ROUND({x}, {digits})"
+        inc = inc_node["value"]
+        return f"({inc} * ROUND({xw} / {inc}))"
+    inc = emit_sql(inc_node, resolver)
+    return f"({inc} * ROUND({xw} / NULLIF({inc}, 0)))"
+
+
 # fns with a single fixed-shape translation, dispatched by name (keeps
 # _emit_call's cyclomatic complexity under the repo's module-health CAP)
 _SIMPLE_FN: dict = {
@@ -226,6 +257,7 @@ _SIMPLE_FN: dict = {
     "if": _emit_if_fn,
     "in": _emit_in,
     "between": _emit_between,
+    "round": _emit_round,
 }
 
 

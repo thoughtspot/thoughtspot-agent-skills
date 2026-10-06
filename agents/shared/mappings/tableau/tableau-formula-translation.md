@@ -196,9 +196,9 @@ command detects pass-through conflicts automatically and skips them.
 | `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Tableau INT truncates toward zero; `to_integer`/`round` round to nearest (live-verified 2026-06-13: to_integer(8.6)=9, to_integer(-9.7)=-10) so a composite is required. ⚠ floor/ceil names pending live verification (P11/P12) — flag on first use. |
 | `FLOAT(x)` | `to_double ( x )` | See formula-patterns.md (to_double). `x * 1.0` breaks for string inputs Tableau accepts. |
 | `STR(x)` | `to_string ( x )` | |
-| `[a] + [b]` (string concat) | `concat ( [a] , [b] )` | ThoughtSpot uses `concat()` for strings — the `+` operator is numeric-only and **fails on strings** (*"Search did not find '+ ...'"*). Tableau overloads `+` for both; rewrite every string `+` as `concat()`. E.g. `STR(ROUND(x,2)) + '%'` → `concat ( to_string ( round ( x , 2 ) ) , '%' )`. |
+| `[a] + [b]` (string concat) | `concat ( [a] , [b] )` | ThoughtSpot uses `concat()` for strings — the `+` operator is numeric-only and **fails on strings** (*"Search did not find '+ ...'"*). Tableau overloads `+` for both; rewrite every string `+` as `concat()`. E.g. `STR(ROUND(x,2)) + '%'` → `concat ( to_string ( round ( x , 0.01 ) ) , '%' )`. |
 | `ABS(x)` | `abs ( x )` | |
-| `ROUND(x, n)` | `round ( x , n )` | |
+| `ROUND(x, n)` | `round ( x , 10^-n )` | Tableau's `n` is decimal places; ThoughtSpot's 2nd arg is a rounding **increment** — `ROUND(x, 2)` → `round ( x , 0.01 )`, `ROUND(x, 0)` → `round ( x , 1 )`, `ROUND(x, -2)` → `round ( x , 100 )`. A non-literal `n` → `sql_double_op ( "ROUND({0}, {1})" , x , n )`. Copying `n` across rounds to the nearest multiple of `n` (`round(1234.5678, 2)` = 1234); `round(x, 0)` is NULL (BL-331, live-probed 2026-10-06) |
 | `CEILING(x)` | `ceil ( x )` | |
 | `FLOOR(x)` | `floor ( x )` | |
 | `LOG(x)` | `log10 ( x )` | |

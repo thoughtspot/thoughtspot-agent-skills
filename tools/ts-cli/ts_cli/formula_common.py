@@ -68,6 +68,92 @@ CAST_MAP = CAST_MAP_FULL
 
 
 # ---------------------------------------------------------------------------
+# round(): SQL digit count <-> ThoughtSpot rounding increment (BL-331)
+# ---------------------------------------------------------------------------
+#
+# ThoughtSpot `round(x, n)` takes a rounding INCREMENT, not a decimal-place count.
+# It compiles to `n * round(x / NULLIF(n, 0))` (seen via `ts agentql generate-sql`,
+# live-probed on se-thoughtspot 2026-10-06). On 1234.5678:
+#     round(x) = 1235     round(x, 1) = 1235      round(x, 0.01) = 1234.57
+#     round(x, 2) = 1234  round(x, 10) = 1230     round(x, 0.5)  = 1234.5
+#     round(x, 0) = NULL  round(x, -2) = 1234
+# SQL `ROUND(x, d)` (Snowflake, Databricks, Tableau, DAX) takes a digit count, so
+# every translator must convert: d -> 10^-d one way, a power-of-ten increment -> d
+# the other. Copying the argument verbatim is a silent wrong-numbers bug (it shipped
+# in four translators). One copy of the conversion, here; never re-implement it.
+
+_SQL_INT_LITERAL_RE = re.compile(r"^\(?\s*([+-])?\s*(\d+)\s*\)?$")
+
+
+def sql_digits_to_ts_increment(digits: str) -> str | None:
+    """SQL ROUND digit count -> ThoughtSpot round() increment, as literal text.
+
+    ``"2"`` -> ``"0.01"``, ``"0"`` -> ``"1"``, ``"-2"`` / ``"- 2"`` -> ``"100"``.
+    Returns None when ``digits`` is not an integer literal (a column, an
+    expression, a fraction) — the caller must pass it through or flag it.
+    """
+    from decimal import Decimal
+    m = _SQL_INT_LITERAL_RE.match((digits or "").strip())
+    if not m:
+        return None
+    d = int(m.group(2)) * (-1 if m.group(1) == "-" else 1)
+    return format(Decimal(1).scaleb(-d), "f")
+
+
+def ts_round_from_sql_digits(x: str, digits: str | None = None, *,
+                             strict: bool = True) -> str:
+    """SQL ``ROUND(x[, d])`` -> ThoughtSpot formula text (spaced token style).
+
+    Literal d -> ``round ( x , 10^-d )``; absent d -> ``round ( x )``; a
+    non-literal d has no native increment form, so it passes through to the
+    warehouse unchanged: ``sql_double_op ( "ROUND({0}, {1})" , x , d )``.
+
+    That pass-through is row-level, so with ``strict`` (the default) a
+    non-literal d over an aggregated x raises UntranslatableError rather than
+    emit it. ``strict=False`` is for engines with no fail-loud path (Tableau's
+    regex mapper), where the pass-through is still closer than a verbatim copy.
+    """
+    if digits is None:
+        return f"round ( {x} )"
+    inc = sql_digits_to_ts_increment(digits)
+    if inc is not None:
+        return f"round ( {x} , {inc} )"
+    if strict and expr_is_aggregated(x):
+        raise UntranslatableError(
+            "ROUND with a non-literal digit count over an aggregate has no "
+            "ThoughtSpot form (round() takes an increment; the sql_double_op "
+            "pass-through is row-level) — BL-331")
+    return f'sql_double_op ( "ROUND({{0}}, {{1}})" , {x} , {digits} )'
+
+
+def ts_increment_to_sql_digits(increment: str) -> int | None:
+    """ThoughtSpot round() increment literal -> SQL ROUND digit count.
+
+    ``"0.01"`` -> 2, ``"1"`` -> 0, ``"100"`` -> -2. Returns None when the
+    increment is not a positive power of ten (``"0.5"``, ``"25"``, a non-number)
+    — the caller emits ``inc * ROUND(x / inc)`` instead, which is exact for any
+    increment. Raises ValueError for a zero increment: ThoughtSpot evaluates
+    ``round(x, 0)`` to NULL, so there is no faithful ``ROUND(x, d)`` for it.
+    """
+    from decimal import Decimal, InvalidOperation
+    try:
+        value = Decimal((increment or "").strip())
+    except InvalidOperation:
+        return None
+    if not value.is_finite():
+        return None
+    if value == 0:
+        raise ValueError("round(x, 0) evaluates to NULL in ThoughtSpot "
+                         "(the increment divides by NULLIF(0, 0))")
+    if value < 0:
+        return None
+    _sign, digit_tuple, exponent = value.normalize().as_tuple()
+    if digit_tuple != (1,):
+        return None
+    return -exponent
+
+
+# ---------------------------------------------------------------------------
 # Shared translation-failure exception
 # ---------------------------------------------------------------------------
 

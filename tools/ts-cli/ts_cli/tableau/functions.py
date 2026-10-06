@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ts_cli.formula_common import ts_round_from_sql_digits
 from ts_cli.tableau.literals import literal_value
 from ts_cli.tableau.parsing import _extract_function_args
 
@@ -63,7 +64,9 @@ def _build_function_map() -> list[tuple[re.Pattern, Any]]:
 
         # Math
         (r"\bABS\s*\(", "abs ( "),
-        (r"\bROUND\s*\(", "round ( "),
+        # ROUND is handled in _ARG_HANDLERS (BL-331): Tableau's 2nd arg is a
+        # digit count, ThoughtSpot round()'s is an increment — a bare rename
+        # turned ROUND(x, 2) into round(x, 2), which rounds to the nearest 2.
         (r"\bCEILING\s*\(", "ceil ( "),
         (r"\bFLOOR\s*\(", "floor ( "),
         (r"\bLOG\s*\(", "log10 ( "),
@@ -166,6 +169,12 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("ENDSWITH", lambda a: (
         f"( substr ( {a[0]} , strlen ( {a[0]} ) - strlen ( {a[1]} ) , strlen ( {a[1]} ) ) = {a[1]} )"
         if len(a) == 2 else None)),
+    # BL-331 — ROUND(x, d): d decimal places -> ThoughtSpot increment 10^-d.
+    # Non-strict: this regex mapper has no fail-loud path, and the row-level
+    # sql_double_op pass-through is still closer than a verbatim digit count.
+    ("ROUND", lambda a: (ts_round_from_sql_digits(a[0], a[1] if len(a) == 2 else None,
+                                                  strict=False)
+                         if len(a) in (1, 2) else None)),
     ("SQUARE", lambda a: f"pow ( {a[0]} , 2 )" if len(a) == 1 else None),
     ("SIGN", lambda a: (
         f"( if ( {a[0]} > 0 ) then 1 else if ( {a[0]} < 0 ) then -1 else 0 )"

@@ -171,7 +171,7 @@ Verified 2026-07-10, SE cluster.
 | ThoughtSpot → Snowflake | Snowflake → ThoughtSpot |
 |---|---|
 | `safe_divide ( [a] , [b] )` → `DIV0(a, b)` | `DIV0(a, b)` → `safe_divide ( [a] , [b] )` |
-| `round ( [x] , [n] )` → `ROUND(x, n)` | `ROUND(x, n)` → `round ( [x] , [n] )` |
+| `round ( [x] , inc )` → `ROUND(x, d)` when `inc` is a literal power of ten (`0.01` → `2`, `1` → `0`, `100` → `-2`); any other literal → `(inc * ROUND(x / inc))`; non-literal → `(inc * ROUND(x / NULLIF(inc, 0)))`; `round ( [x] , 0 )` is NULL in ThoughtSpot — flag it, never emit `ROUND(x, 0)` | `ROUND(x, d)` → `round ( [x] , 10^-d )` for a literal `d` (`2` → `0.01`, `0` → `1`, `-2` → `100`); non-literal `d` → `sql_double_op ( "ROUND({0}, {1})" , [x] , d )` (row-level only). **The 2nd arg is an increment in ThoughtSpot and a digit count in SQL — never copy it across** (BL-331; see thoughtspot-formula-patterns.md Math Functions) |
 | `floor ( [x] )` → `FLOOR(x)` | `FLOOR(x)` → `floor ( [x] )` |
 | `ceil ( [x] )` → `CEIL(x)` | `CEIL(x)` → `ceil ( [x] )` |
 | `ceil ( [x] )` → `CEIL(x)` | `CEILING(x)` → `ceil ( [x] )` — Snowflake `CEILING` is a synonym of `CEIL`; both map to `ceil` |
@@ -245,7 +245,7 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | *(no direct equivalent)* | `CAST(x AS TEXT)` → `to_string ( [x] )` — TEXT is an alias for VARCHAR in Snowflake |
 | *(no direct equivalent)* | `TO_CHAR(x)` → `to_string ( [x] )` — Snowflake formatting alias |
 | *(no direct equivalent)* | `TRY_CAST(x AS INTEGER)` → `to_integer ( [x] )` — TRY_ variants produce NULL on failure; ThoughtSpot `to_integer` also produces NULL on failure |
-| *(no direct equivalent)* | `TRUNC(x, 0)` → `round ( [x] , 0 )` — ThoughtSpot has no direct truncate; `floor` for negatives |
+| *(no direct equivalent)* | `TRUNC(x[, d])` → `sql_double_op ( "TRUNC({0}, d)" , [x] )` (row-level `x`); over an aggregate, the sign-split `( if ( x >= 0 ) then floor ( x / inc ) * inc else ceil ( x / inc ) * inc )` with `inc = 10^-d` (plain `floor`/`ceil` when `d = 0`). ThoughtSpot has no truncate. **Revised 2026-10-06 (BL-331):** this row said `round ( [x] , 0 )`, which is wrong twice — `round` rounds rather than truncates, and `round(x, 0)` evaluates to NULL. `TRUNC(date, 'unit')` is date truncation: same as `DATE_TRUNC('unit', date)` |
 
 ### Date Functions
 
