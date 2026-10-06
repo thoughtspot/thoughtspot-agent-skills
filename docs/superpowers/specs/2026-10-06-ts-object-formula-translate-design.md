@@ -361,6 +361,7 @@ TRANSLATED results that were wrong or unparseable. Added, without touching any t
 | 16 | Qlik `"Field"` is a field (rewritten `[Field]`); Tableau IF/CASE without ELSE gets `ELSE NULL` (Tableau's semantics; `else null` is live-verified) instead of the translator's text-guessed `else 0` / `else ''` | both produced wrong output |
 | 17 | Detection: Snowflake/Databricks is a must-ask pair unless a dialect-unique signal fires — Databricks also has `IFF`, `::`, `QUALIFY` and `DATEDIFF(unit, …)` (docs.databricks.com, checked 2026-10-06); weak-only evidence (score < 2, e.g. `[A/B]` alone) is asked; Tableau gets upper-case double-quoted date parts | the previous rules confirmed on shared syntax |
 | 18 | A string comparison from a case-sensitive dialect is `APPROXIMATED` (OI-4); the round trap needs a 2-argument round; column = column comparisons get a conditional case trap | no output more certain than its evidence |
+| 20 | **Two forms of every formula** (user requirement): `formula_editor` — names without brackets for the formula editor (a name with spaces stays bracketed, with a note that renaming with underscores allows bare references) — and `formula` / `tml`, bracketed as TML requires (VALIDATE_ONLY 2026-10-06: `[formula_Total_Days] * 2` accepted; `[Total_Days] * 2` and bare `Total_Days * 2` rejected). Coined names use `_` (default `Translated_Formula`). §6 shows the editor form first | the editor's double-click selection; the editor parser is not API-reachable, so its bare-name rule rests on the user's domain guidance and `--validate` covers only the TML form |
 | 19 | `execute` reports an unexpected error as `verification.result: ERROR` in the JSON after cleanup, cleanup logs every remaining GUID itself, and a Ctrl-C during cleanup is logged and re-raised | the exit-1 "prints the GUID" contract must hold on every path |
 
 **Skill test.** SKILL.md was exercised by a fresh subagent on a three-formula batch (an Excel
@@ -373,5 +374,5 @@ settled the one risk it raised: a literal passed as a `sql_bool_op` argument kee
 
 **OI-5 finding with wider reach:** `sql_number_aggregate_op` is rejected by the formula parser on
 se-thoughtspot; `sql_double_aggregate_op` is accepted. `thoughtspot-formula-patterns.md`, the
-Snowflake mapping, the Ossie map and all three function maps name the former. The skill
-substitutes the latter; the shared references need their own correction.
+Snowflake mapping, the Ossie map and all three function maps named the former; corrected on
+main in #563 (BL-335).

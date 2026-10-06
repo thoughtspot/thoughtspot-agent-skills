@@ -189,11 +189,12 @@ an older row says (see open-items OI-2…OI-5):
 - **`diff_months` / `diff_years` count boundaries crossed** (OI-3): Jan 31 → Feb 1 = 1. Excel
   `DATEDIF` `"M"`/`"Y"` (complete periods) needs the map's day-of-month correction; plain
   `diff_months` is not equivalent.
-- **Aggregate passthrough name** (OI-5): ThoughtSpot has **no `sql_number_aggregate_op`** —
-  the parser rejects it. Where a map row says `sql_number_aggregate_op`, emit
-  **`sql_double_aggregate_op`** (live-accepted) with the same template, and say so in the
-  traps line. `sql_double_op` *can* wrap an aggregate, but ThoughtSpot coalesces a NULL
-  aggregate to 0 inside it.
+- **Aggregate passthrough name** (OI-5, BL-335): ThoughtSpot has **no
+  `sql_number_aggregate_op`** (nor `sql_number_op`) — the parser rejects them. Use
+  `sql_double_aggregate_op` (or the int/string/date/date_time/bool family); the shared maps
+  were corrected in BL-335, so an older copy naming `sql_number_aggregate_op` is wrong.
+  `sql_double_op` *can* wrap an aggregate, but ThoughtSpot coalesces a NULL aggregate to 0
+  inside it.
 
 Then, for anything map-backed, **offer `--validate compile` strongly** (Step 6): it is the
 only thing that turns "unprobed" into evidence. The composed formula goes through the CLI as
@@ -202,15 +203,32 @@ only thing that turns "unprobed" into evidence. The composed formula goes throug
 ## Step 5 — Present (this order, every time)
 
 Before presenting, **ask for a display name** unless the user gave one ("Name for this
-formula? (default: *Translated Formula*)"), and pass it as `--name`: it becomes the TML id
+formula? (default: *Translated_Formula*)"), and pass it as `--name`: it becomes the TML id
 `formula_<name>`, and two answers pasted into one Model with the default name collide.
+**Any name you coin** — the default, a helper formula a map composition needs — uses `_`
+for spaces (`Total_Days`, `Start_Weekday`), so the editor form can reference it bare and
+both forms share one name. A user-supplied name keeps its spaces.
+
+**Two forms of every formula.** The CLI returns both: `formula_editor` (paste into the
+ThoughtSpot **formula editor** — references by name, no brackets: `Total_Days - floor (
+Total_Days / 7 )`) and `formula` / `tml` (paste into a Model's **TML** `formulas[]` —
+bracketed references, which TML requires: `[formula_Total_Days] * 2` and `[TABLE::col]` are
+accepted, bare `Total_Days` and display-name `[Total_Days]` are rejected; verified
+VALIDATE_ONLY on se-thoughtspot 2026-10-06). A name with spaces cannot be referenced bare, so
+it stays in brackets in the editor form; say that renaming it with underscores in the Model
+would allow bare references. The bare-reference editor syntax is the user's ThoughtSpot
+domain guidance — the editor is not reachable through the API — so `--validate` checks only
+the TML form; say so if asked. For a map-backed answer, write both forms yourself by the
+same rules (or get them from `--from thoughtspot`).
 
 **Role.** `MEASURE` when the formula aggregates, else `ATTRIBUTE` — a row-level amount such
 as `[T::Qty] * [T::Price]` is an ATTRIBUTE formula. If the user wants it summed in searches,
 say so and offer the aggregated form (`sum ( [T::Qty] * [T::Price] )`, a MEASURE); never
 silently change the role.
 
-1. **The formula**, in a code block.
+1. **Formula-editor form** (`formula_editor`), in a code block, headed *"Paste into the
+   formula editor"* — plus the rename note from `formula_editor_notes[]` if any name stayed
+   bracketed.
 2. **Classification + one-line why** — e.g. ``direct (downgrade)`: matches Sigma only when the
    Answer's columns are exactly the parent groupings plus the sort column``.
 3. **Traps applied** — only those that fired (`traps[]`, plus any of Step 4b's settled
@@ -227,7 +245,8 @@ silently change the role.
    "verified" or "covered". Map-backed: each row's status from Step 4b. Either: the
    `compile`/`execute` result when run — the only thing that makes it **verified**. **An
    unprobed composition says "unprobed" on its own line, never "verified".**
-6. **TML snippet** — `tml` from the CLI, or for map-backed formulas the same shape:
+6. **TML form** — headed *"For TML (`formulas[]` of the Model) — brackets required"*: `tml`
+   from the CLI, or for map-backed formulas the same shape:
    ```yaml
    formulas:
    - id: formula_<Display Name>
@@ -240,7 +259,9 @@ silently change the role.
        column_type: MEASURE        # ATTRIBUTE when the formula does not aggregate
        aggregation: SUM            # columns[] only, never formulas[]; omit for ATTRIBUTE
    ```
-   Spaces stay in the id. Paste both entries into the Model's `formulas:` and `columns:`.
+   A user-supplied name keeps its spaces in the id; a coined one has underscores. Paste both
+   entries into the Model's `formulas:` and `columns:`. A helper formula is referenced by id
+   here (`[formula_Total_Days]`) and by bare name in the editor form (`Total_Days`).
 7. **`passthrough`** — the warning: the SQL runs in the warehouse, **Snowflake syntax is
    assumed** (name it; other warehouses may differ), ThoughtSpot cannot plan around it, and
    the `sql_*_op` variant fixes the column's type and role (Ossie map E7).

@@ -106,7 +106,5 @@ Two findings beyond the question:
    not NULL. Non-literal `ROUND(SUM(x), d)` *can* pass through, but not NULL-faithfully, so
    BL-331's choice to refuse it stands for converters that must be exact.
 2. **`sql_number_aggregate_op` does not exist on this build**; `sql_double_aggregate_op` does
-   (as the Tableau mapping already says). `thoughtspot-formula-patterns.md`, the Snowflake
-   mapping, the Ossie map and all three function maps name `sql_number_aggregate_op`.
-   SKILL.md Step 4b substitutes `sql_double_aggregate_op`; correcting the shared references is
-   reported for a separate change.
+   (as the Tableau mapping already said). The shared references named the former; they were
+   corrected on main in #563 (BL-335), and the CLI's output guard rejects the bad name.
