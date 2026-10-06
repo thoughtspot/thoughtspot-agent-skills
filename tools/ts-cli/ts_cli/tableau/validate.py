@@ -310,6 +310,9 @@ def validate_pre_import(
         if name.upper() in col_upper:
             warnings.append(f"Formula name '{name}' clashes with column name")
 
+        # Translation-time assumptions (e.g. BL-334's assumed Sunday week start)
+        # ride on the formula as review_notes and reach the report here.
+        warnings.extend(entry.get("review_notes") or [])
         if warnings:
             issues.append({"name": name, "warnings": warnings})
 

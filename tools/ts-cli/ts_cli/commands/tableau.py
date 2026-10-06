@@ -404,7 +404,7 @@ def _translate_and_validate(
         scoped_columns=scoped_columns,
         param_map=parsed["param_map"],
         parameters=parsed["parameters"],
-        calc_id_map=ds["calc_map"],
+        calc_id_map=ds["calc_map"], week_start=ds.get("week_start"),
     )
 
     translated = translate_result["translated"]

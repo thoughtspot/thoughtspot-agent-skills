@@ -262,6 +262,12 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
         "ts_username" if len(a) == 0 or (len(a) == 1 and not a[0].strip()) else None)),
     ("ISUSERNAME", lambda a: f"( ts_username = {a[0]} )" if len(a) == 1 else None),
     ("ISMEMBEROF", lambda a: f"( ts_groups = {a[0]} )" if len(a) == 1 else None),
+
+    # ISOWEEKDAY(date): "1-7, start of week is always Monday" (help.tableau.com
+    # date functions) — exactly ThoughtSpot's fixed day_number_of_week (BL-334).
+    ("ISOWEEKDAY", lambda a: (
+        ts_weekday_number(a[0].strip(), first_day="monday", base=1)
+        if len(a) == 1 else None)),
 ]
 
 
@@ -350,12 +356,16 @@ def _resolve_unit(arg: str, registry: dict | None) -> str:
     return arg.strip("'\"").lower()
 
 
-def map_date_functions(expr: str, registry: dict | None = None) -> str:
+def map_date_functions(expr: str, registry: dict | None = None,
+                       week_start: str | None = None,
+                       notes: dict | None = None) -> str:
     """Convert Tableau date functions to ThoughtSpot equivalents.
 
     `registry` is the literal-masking registry from literals.mask_literals
     (see translate_single) — needed to resolve a masked unit argument
     ('month', 'day', ...) back to its text for the unit-name lookups below.
+    `week_start` is the datasource's Week start (lower-case day name) when the
+    TWB records one; `notes` collects assumption counters (WEEK_START_ASSUMED).
     """
     result = expr
 
@@ -369,7 +379,7 @@ def map_date_functions(expr: str, registry: dict | None = None) -> str:
     result = _convert_dateadd(result, registry)
 
     # DATEPART('unit', date) → unit_func ( date )
-    result = _convert_datepart(result, registry)
+    result = _convert_datepart(result, registry, week_start, notes)
 
     # DATENAME('month', date) → month ( date )
     result = _convert_datename(result, registry)
@@ -496,24 +506,51 @@ def _convert_dateadd(expr: str, registry: dict | None = None) -> str:
 # mapping to day_of_week returned the day NAME — a string compared to numbers.
 # ThoughtSpot day_number_of_week is fixed 1 = Monday ... 7 = Sunday (live-probed
 # 2026-10-06), so the numbering is rebuilt via formula_common.ts_weekday_number.
-# Omitted start_of_week assumes SUNDAY — the en-US data-source default and the
-# one Tableau's own examples use. A data source with a different locale week
-# start numbers from that day instead; the TWB does not reliably carry it, so
-# this is an assumption the conversion cannot check (BL-334).
+# Origin, in order: a literal start_of_week argument; else the datasource's
+# Week start (`week_start`, read by twb.parse_twb from <date-options
+# start-of-week=...>, written only when the author changed it); else SUNDAY —
+# the en-US default ("Sunday is the first day of the week in the US, while
+# Monday is the first day in the EU", help.tableau.com Date Properties). That
+# last case is an assumption the TWB cannot confirm (the locale fallback is the
+# author's machine), so it is counted in `notes` under WEEK_START_ASSUMED and
+# surfaced to the conversion report as a validation warning (BL-334).
 _TABLEAU_DEFAULT_WEEK_START = "sunday"
+WEEK_START_ASSUMED = "weekday_week_start_assumed"
 
 
-def _datepart_weekday(args: list[str], registry: dict | None) -> str | None:
+def _datepart_weekday(args: list[str], registry: dict | None,
+                      week_start: str | None = None,
+                      notes: dict | None = None) -> str | None:
     date_expr = args[1].strip()
-    start = _TABLEAU_DEFAULT_WEEK_START
     if len(args) >= 3:
         start = _resolve_unit(args[2], registry)
         if start not in WEEKDAY_FIRST_DAY_INDEX:
             return None  # a field/parameter start day — leave it flagged
+    elif week_start and week_start.lower() in WEEKDAY_FIRST_DAY_INDEX:
+        start = week_start.lower()
+    else:
+        start = _TABLEAU_DEFAULT_WEEK_START
+        if notes is not None:
+            notes[WEEK_START_ASSUMED] = notes.get(WEEK_START_ASSUMED, 0) + 1
     return ts_weekday_number(date_expr, first_day=start, base=1)
 
 
-def _convert_datepart(expr: str, registry: dict | None = None) -> str:
+def _datepart_replacement(unit: str, args: list[str], registry: dict | None,
+                          week_start: str | None,
+                          notes: dict | None) -> str | None:
+    """ThoughtSpot form of DATEPART(unit, date, ...), or None if unmappable."""
+    date_expr = args[1].strip()
+    if unit == "iso-weekday":  # always Monday = 1 — a clean rename
+        return ts_weekday_number(date_expr, first_day="monday", base=1)
+    if unit == "weekday":
+        return _datepart_weekday(args, registry, week_start, notes)
+    ts_func = _DATEPART_UNIT_MAP.get(unit)
+    return f"{ts_func} ( {date_expr} )" if ts_func else None
+
+
+def _convert_datepart(expr: str, registry: dict | None = None,
+                      week_start: str | None = None,
+                      notes: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATEPART\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -530,24 +567,15 @@ def _convert_datepart(expr: str, registry: dict | None = None) -> str:
         args, end_pos = extracted
         if len(args) >= 2:
             unit = _resolve_unit(args[0], registry)
-            date_expr = args[1].strip()
-            if unit == "weekday":
-                replacement = _datepart_weekday(args, registry)
-                if replacement is None:
-                    search_start = end_pos
-                    continue
-                result = result[:m.start()] + replacement + result[end_pos:]
-                search_start = m.start() + len(replacement)
-                continue
-            ts_func = _DATEPART_UNIT_MAP.get(unit)
-            if ts_func is None:
+            replacement = _datepart_replacement(unit, args, registry,
+                                                week_start, notes)
+            if replacement is None:
                 # Unknown unit — no ThoughtSpot extractor exists. Leave the
                 # original DATEPART(...) text in place rather than fabricate
                 # a nonexistent function name; validate_output flags any
                 # surviving DATEPART call as an unmapped function.
                 search_start = end_pos
                 continue
-            replacement = f"{ts_func} ( {date_expr} )"
             result = result[:m.start()] + replacement + result[end_pos:]
             search_start = m.start() + len(replacement)
         else:

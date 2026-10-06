@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import Any, Optional
 
 from ts_cli.formula_common import (
@@ -86,30 +86,50 @@ def _index(args: list[str]) -> Optional[str]:
     return f"strpos({args[0]}, {args[1]})"
 
 
-def _weekday(args: list[str]) -> Optional[str]:
+def _weekday(args: list[str], first_week_day: Optional[int] = None) -> Optional[str]:
     """Qlik Weekday(date[, first_week_day]) -> ThoughtSpot day_number_of_week,
     origin shifted.
 
     Qlik `Weekday()` returns "an integer between 0-6" counted from the week's
-    first day; `first_week_day` is 0 = Monday ... 6 = Sunday and defaults to the
-    `FirstWeekDay` variable (help.qlik.com, WeekDay — script and chart function:
-    `weekday('10/12/1971')` = 1 for a Tuesday, `weekday('10/12/1971', 6)` = 2).
-    ThoughtSpot `day_of_week()` returns the day NAME and `day_number_of_week()`
-    is fixed 1 = Monday (live-probed 2026-10-06), so a rename is off by one on
-    every day. The shift is formula_common.ts_weekday_number (BL-217/BL-334);
-    Qlik's `first_week_day` encoding is that helper's Monday-based index.
+    first day; `first_week_day` is 0 = Monday ... 6 = Sunday and, when omitted,
+    comes from the app's `FirstWeekDay` variable (help.qlik.com, WeekDay — script
+    and chart function: `weekday('10/12/1971')` = 1 for a Tuesday under
+    FirstWeekDay 0, `weekday('10/12/1971', 6)` = 2). `FirstWeekDay` is set by the
+    app's regional settings in the load script — US apps typically carry
+    `SET FirstWeekDay=6;` (Sunday), European ones `0` — so there is NO safe
+    default. ThoughtSpot `day_number_of_week()` is fixed 1 = Monday (live-probed
+    2026-10-06); the shift is formula_common.ts_weekday_number (BL-217/BL-334),
+    whose Monday-based index is exactly Qlik's encoding.
 
-    Caveat: with no second argument the app's `FirstWeekDay` decides the origin.
-    That is app configuration the converter cannot see; the shift assumes 0
-    (Monday). Documented on row D06. A non-literal second argument is flagged.
+    Origin, in order: a literal second argument; else ``first_week_day`` (from
+    `SET FirstWeekDay=n;` in the recovered load script — see
+    ``parse_first_week_day``); else None, which flags the call for review rather
+    than guessing (BL-334). A non-literal second argument is also flagged.
     """
-    if len(args) == 1:
-        first = 0
-    elif len(args) == 2 and args[1].strip() in {str(i) for i in range(7)}:
-        first = int(args[1].strip())
+    if len(args) == 2 and args[1].strip() in {str(i) for i in range(7)}:
+        first: Optional[int] = int(args[1].strip())
+    elif len(args) == 1:
+        first = first_week_day
     else:
         return None
+    if first is None:
+        return None
     return ts_weekday_number(args[0], first_day=first, base=0, compact=True)
+
+
+_FIRST_WEEK_DAY_RE = re.compile(
+    r"(?im)^\s*(?:SET|LET)\s+FirstWeekDay\s*=\s*'?\s*([0-6])\s*'?\s*;")
+
+
+def parse_first_week_day(load_script: Optional[str]) -> Optional[int]:
+    """`SET FirstWeekDay=n;` from a Qlik load script -> n (0 = Mon ... 6 = Sun).
+
+    The last assignment wins, as it would when the script runs. None when there
+    is no script or no assignment — callers must then flag, not assume."""
+    if not load_script:
+        return None
+    found = _FIRST_WEEK_DAY_RE.findall(load_script)
+    return int(found[-1]) if found else None
 
 
 # Functions needing an ARGUMENT-AWARE rewrite rather than a rename: marker
@@ -166,13 +186,17 @@ FUNCTION_MAP: dict[str, Optional[str]] = {
 }
 
 
-def translate(expr: str) -> tuple[str, bool, str]:
+def translate(expr: str, first_week_day: Optional[int] = None
+              ) -> tuple[str, bool, str]:
     """Translate a Qlik expression to a ThoughtSpot formula.
 
     Returns ``(ts_formula, review_required, reason)``. When review_required is
     True the original intent could not be faithfully translated — ``ts_formula``
     carries a ``/* TODO review ... */`` marker (never a plausible-but-wrong
     substitute) and ``reason`` explains why.
+
+    ``first_week_day`` is the app's `FirstWeekDay` (0 = Mon ... 6 = Sun, from
+    ``parse_first_week_day``); without it a one-argument `Weekday()` is flagged.
     """
     expr = (expr or "").strip()
     if not expr:
@@ -192,23 +216,38 @@ def translate(expr: str) -> tuple[str, bool, str]:
 
     # If(cond, t, f) -> if (cond) then t else f
     if re.match(r"(?i)^if\s*\(", expr):
-        rewritten = _translate_if(expr)
+        if_unknown: set[str] = set()
+        rewritten = _translate_if(expr, first_week_day, if_unknown)
         if rewritten is not None:
+            if if_unknown:
+                return (rewritten, True,
+                        _unmapped_reason(if_unknown, first_week_day))
             return rewritten, False, ""
         return (f"/* TODO review: {expr} */", True,
                 f"Could not parse If() structure: {expr}")
 
     # Generic function-name remap on the whole expression.
-    out, unknown = _remap_functions(expr)
+    out, unknown = _remap_functions(expr, first_week_day)
     if unknown:
-        return out, True, f"Unmapped Qlik function(s): {', '.join(sorted(unknown))}"
+        return out, True, _unmapped_reason(unknown, first_week_day)
     return out, False, ""
+
+
+def _unmapped_reason(unknown: set[str], first_week_day: Optional[int]) -> str:
+    reason = f"Unmapped Qlik function(s): {', '.join(sorted(unknown))}"
+    if first_week_day is None and any(u.lower() == "weekday" for u in unknown):
+        reason += (" — Weekday() numbers from the app's FirstWeekDay, and no "
+                   "`SET FirstWeekDay=n;` was found in the load script; pass "
+                   "the week start explicitly (Weekday(d, n)) or review "
+                   "(BL-334)")
+    return reason
 
 
 _FUNC_CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 
-def _remap_functions(expr: str) -> tuple[str, set[str]]:
+def _remap_functions(expr: str, first_week_day: Optional[int] = None
+                     ) -> tuple[str, set[str]]:
     unknown: set[str] = set()
     # marker name -> the spelling the source expression actually used, so a
     # flag reads "LTrim" (what the author wrote) rather than a reconstructed
@@ -243,32 +282,47 @@ def _remap_functions(expr: str) -> tuple[str, set[str]]:
     # single-quoted form is unverified against the parser, and BL-171 existed to stop
     # emitting forms ThoughtSpot rejects (audit finding 17.2).
     out, unresolved = wrap_passthrough_calls(out, PASSTHROUGH_MAP, quote='"')
-    out, unresolved_comp = rewrite_marker_calls(out, COMPOSITION_MAP)
+    handlers = COMPOSITION_MAP
+    if first_week_day is not None:
+        handlers = {**COMPOSITION_MAP,
+                    "weekday": partial(_weekday, first_week_day=first_week_day)}
+    out, unresolved_comp = rewrite_marker_calls(out, handlers)
     unknown |= {origin.get(name, name)
                 for name in (unresolved | unresolved_comp)}
     return out, unknown
 
 
-def _translate_if(expr: str) -> Optional[str]:
-    """If(cond, true[, false]) -> if (cond) then true else false, recursively."""
+def _translate_if(expr: str, first_week_day: Optional[int] = None,
+                  unknown: Optional[set[str]] = None) -> Optional[str]:
+    """If(cond, true[, false]) -> if (cond) then true else false, recursively.
+
+    Unresolved names inside the branches are collected into ``unknown`` so the
+    caller can flag them (previously they were discarded)."""
+    if unknown is None:
+        unknown = set()
     args = _split_call(expr, "if")
     if args is None or len(args) < 2:
         return None
-    cond, _ = _remap_functions(args[0])
-    true_val = _translate_arg(args[1])
+    cond, u = _remap_functions(args[0], first_week_day)
+    unknown |= u
+    true_val = _translate_arg(args[1], first_week_day, unknown)
     if len(args) >= 3:
-        false_val = _translate_arg(args[2])
+        false_val = _translate_arg(args[2], first_week_day, unknown)
         return f"if ({cond}) then {true_val} else {false_val}"
     return f"if ({cond}) then {true_val}"
 
 
-def _translate_arg(arg: str) -> str:
+def _translate_arg(arg: str, first_week_day: Optional[int] = None,
+                   unknown: Optional[set[str]] = None) -> str:
+    if unknown is None:
+        unknown = set()
     arg = arg.strip()
     if re.match(r"(?i)^if\s*\(", arg):
-        inner = _translate_if(arg)
+        inner = _translate_if(arg, first_week_day, unknown)
         if inner is not None:
             return inner
-    out, _ = _remap_functions(arg)
+    out, u = _remap_functions(arg, first_week_day)
+    unknown |= u
     return out
 
 

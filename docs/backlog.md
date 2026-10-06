@@ -214,7 +214,7 @@ are roughly ordered by value÷effort.
 | BL-330 | `ts migrate apply --sets-scan FILE` trusts any post-BL-325 scan for any Model — nothing checks the scan covered the mapped Model or the source Org; a scan of another Org (or `scanned.models: 0`) lets `apply` pass an uninspected Model | next ts-migrate pass |
 | BL-332 | Upstream apache/ossie converter maps `ROUND(x, d)` to `round ( x , d )` (copies the digit count; `d = 0` → NULL) — unreachable today, live once multi-arg matching lands; fix PR held for legal review | 2026-11-30 |
 | BL-333 | ThoughtSpot string comparison (`=`, `contains`, `strpos`) is case-insensitive — Snowflake SV / Databricks MV / Tableau / Qlik / Looker translations of case-sensitive comparisons change semantics silently | 2026-11-30 |
-| BL-334 | `DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`; week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
+| BL-334 | ~~`DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`~~ (item 1 FIXED, ts-cli 0.156.2 — also Tableau and Qlik weekday numbering); week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
 
 ### Tier 3 — Opportunistic
 
@@ -12436,14 +12436,28 @@ converter.
      `WEEKDAY` (0 = Mon) → `( day_number_of_week ( d ) - 1 )`; `EXTRACT(DAYOFWEEK_ISO)` → rename.
    - Extra site found by the sweep: `tableau/functions.py` mapped `DATEPART('weekday', d)` to
      `day_of_week` (the day NAME, not Tableau's 1–7 integer). Now `( mod ( day_number_of_week ( d ) , 7 ) + 1 )`
-     (Sunday = 1 assumed when `start_of_week` is omitted), honouring a literal start day.
-   - `qlik/functions.py` `Weekday()` was already correct (0 = Mon); moved onto the shared helper and now
-     honours a literal `first_week_day` argument.
+     for a Sunday start. Week start: a literal `start_of_week`, else the datasource's
+     `<date-options start-of-week>` (read by `parse_twb`; attribute name from field workbooks — no repo
+     fixture carries it and Tableau does not document the XML), else Sunday **assumed** and surfaced as
+     `review_notes` / a pre-import validation warning in the build-model report.
+     `ISOWEEKDAY` / `DATEPART('iso-weekday')` → `day_number_of_week` (clean rename).
+   - `qlik/functions.py` `Weekday()` was **not** correct, contrary to the first pass of this fix: it
+     assumed `FirstWeekDay` 0 (Monday), but the app's regional settings decide it and US apps typically
+     carry `SET FirstWeekDay=6;` — wrong by one on every day there. It now reads `SET FirstWeekDay=n;`
+     from the recovered load script, flags the measure when there is no script or no `SET`, and honours a
+     literal second argument (independent review, 2026-10-06).
    - Reverse direction: the TS → Snowflake / TS → Databricks doc rows said `DAYOFWEEK`; corrected to
      `DAYOFWEEKISO` / `EXTRACT(DAYOFWEEK_ISO …)`. `mv_emit_sql.py` has no `day_number_of_week` entry and
      refuses it, so no code change there.
    Tests: `tools/ts-cli/tests/test_weekday_numbering.py` (all seven weekdays, evaluated against a model
-   of the compiled SQL). Still to do: a live probe of the three emitted forms. Items 2–4 remain open.
+   of the compiled SQL).
+   **Live-verified 2026-10-06, se-thoughtspot:** `mod ( day_number_of_week ( d ) , 7 )` gave Sun..Sat =
+   0..6, `( mod ( day_number_of_week ( d ) , 7 ) + 1 )` gave 1..7, and `( day_number_of_week ( d ) - 1 )`
+   gave Mon = 0 .. Sun = 6 — all seven days match the documented source numbering.
+   **Follow-up (not implemented):** the Snowflake translator assumes the default `WEEK_START = 0`. A
+   runtime check — `SHOW PARAMETERS LIKE 'WEEK_START'` on the source connection, warning when it is 1–7,
+   where `DAYOFWEEK` numbers 1–7 from that day — would turn the assumption into a verified fact.
+   Items 2–4 remain open.
 2. **Monday-start assumption everywhere.** Every translation built on `day_number_of_week` or
    `start_of_week` diverges on a Model whose calendar starts the week elsewhere: weekday numbering,
    week-number/ISO-week compositions, NETWORKDAYS/WORKDAY arithmetic, Qlik `WeekStart`, and

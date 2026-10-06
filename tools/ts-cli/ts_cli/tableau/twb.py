@@ -197,6 +197,27 @@ from ts_cli.tableau.set_extract import count_native_sets, extract_sets  # noqa: 
 # TWB XML parser
 # ---------------------------------------------------------------------------
 
+_TABLEAU_WEEKDAYS = frozenset({"sunday", "monday", "tuesday", "wednesday",
+                               "thursday", "friday", "saturday"})
+
+
+def _datasource_week_start(ds: ET.Element) -> Optional[str]:
+    """The datasource's Date Properties Week start, lower-case, or None.
+
+    Tableau writes it as ``<date-options start-of-week='monday' .../>`` under
+    the ``<datasource>`` element only when the author changed it from the
+    default. No TWB fixture in this repo carries the element, and Tableau's
+    docs do not document the XML, so the attribute name is taken from
+    workbooks seen in the field and is UNVERIFIED here — an absent or
+    unrecognised value returns None and the caller flags its Sunday
+    assumption rather than trusting this read (BL-334)."""
+    for opts in ds.iter("date-options"):
+        value = (opts.get("start-of-week") or "").strip().lower()
+        if value in _TABLEAU_WEEKDAYS:
+            return value
+    return None
+
+
 def parse_twb(twb_path: str | Path) -> dict:
     """Parse a TWB or TWBX file and extract all model-relevant data.
 
@@ -250,6 +271,7 @@ def parse_twb(twb_path: str | Path) -> dict:
         calcs, calc_map = _extract_calculated_fields(ds)
         col_table_map = _build_column_table_map(ds, tables)
         sets = extract_sets(ds)
+        week_start = _datasource_week_start(ds)
 
         datasources.append({
             "name": ds_name,
@@ -269,6 +291,9 @@ def parse_twb(twb_path: str | Path) -> dict:
             # structural extraction half of set->cohort conversion; TML emission
             # (build_cohort_tml) is a separate build-model-time step.
             "sets": sets,
+            # BL-334: Date Properties > Week start, when the author set it;
+            # None means Tableau falls back to the locale (not in the file).
+            "week_start": week_start,
         })
 
     return {

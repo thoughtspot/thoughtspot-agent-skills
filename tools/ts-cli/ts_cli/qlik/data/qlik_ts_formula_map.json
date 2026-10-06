@@ -766,7 +766,7 @@
     "Qlik Example": "Weekday(OrderDate)",
     "ThoughtSpot Equivalent": "(day_number_of_week(date_col) - 1)",
     "ThoughtSpot Example": "(day_number_of_week(order_date) - 1)",
-    "Comments / Context": "Not a rename. Qlik Weekday() returns a number with 0=Mon; ThoughtSpot day_of_week() returns the day NAME (the previous mapping compared a name to a number) and day_number_of_week() numbers from 1=Mon, so the origin is shifted to keep literal comparisons correct — Weekday(d) = 5 means Saturday, and an unshifted day_number_of_week(d) = 5 would mean Friday (BL-171). Caveat: an app with a non-default FirstWeekDay numbers from a different origin; that is Qlik app configuration the converter cannot see, and the shift assumes Qlik's default. Use day_of_week(date_col) if the day NAME is what you want.",
+    "Comments / Context": "Not a rename, and no safe default. Qlik Weekday() returns a number 0-6 counted from the week's first day (first_week_day 0=Mon ... 6=Sun), defaulting to the app's FirstWeekDay — set by the load script's regional settings, typically SET FirstWeekDay=6; (Sunday) in US apps and 0 in European ones. ThoughtSpot day_number_of_week() is fixed 1=Mon (live-verified 2026-10-06); day_of_week() returns the day NAME. The converter reads SET FirstWeekDay=n; from the load script and shifts to that origin (the equivalent shown is FirstWeekDay=0; 6 gives mod(day_number_of_week(date_col), 7)); with no script or no SET it flags the formula for review (BL-334). A literal second argument wins. Use day_of_week(date_col) if the day NAME is what you want.",
     "status": "corrected"
   },
   {

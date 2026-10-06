@@ -23,7 +23,7 @@ from ts_cli.formula_common import ts_weekday_number
 from ts_cli.sv_sql import translate_sql_expr as sf_translate
 from ts_cli.databricks.mv_sql import translate_sql_expr as dbx_translate
 from ts_cli.tableau.functions import map_date_functions
-from ts_cli.qlik.functions import translate as qlik_translate
+from ts_cli.qlik.functions import parse_first_week_day, translate as qlik_translate
 
 WEEK = [date(2026, 10, 4) + timedelta(days=i) for i in range(7)]  # Sun .. Sat
 DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
@@ -194,22 +194,133 @@ class TestTableau:
         expr = "DATEPART('weekday', [Date], [Week Start])"
         assert map_date_functions(expr) == expr
 
+    def test_datasource_week_start_is_used_and_not_flagged(self):
+        notes: dict = {}
+        out = map_date_functions("DATEPART('weekday', [Date])", None,
+                                 week_start="monday", notes=notes)
+        assert _numbering(out) == ISO
+        assert notes == {}
+
+    def test_sunday_assumption_is_counted(self):
+        notes: dict = {}
+        map_date_functions("DATEPART('weekday', [Date])", None, notes=notes)
+        assert notes == {"weekday_week_start_assumed": 1}
+
+    def test_explicit_start_beats_datasource_and_is_not_flagged(self):
+        notes: dict = {}
+        out = map_date_functions("DATEPART('weekday', [Date], 'sunday')", None,
+                                 week_start="monday", notes=notes)
+        assert _numbering(out) == SUN1 and notes == {}
+
+    @pytest.mark.parametrize("expr", ["ISOWEEKDAY([Date])",
+                                      "DATEPART('iso-weekday', [Date])"])
+    def test_iso_weekday_is_a_rename(self, expr):
+        from ts_cli.tableau_translate import translate_single
+        out, errors, notes = translate_single(expr, role="attribute")
+        assert out == "day_number_of_week ( [Date] )" and not errors
+        assert _numbering(out) == ISO and notes == {}
+
+    def test_assumption_reaches_the_translated_record(self):
+        from ts_cli.tableau_translate import translate_formulas
+        calcs = [{"caption": "Wd", "name": "[Calculation_1]", "role": "dimension",
+                  "datatype": "integer",
+                  "formula": "DATEPART('weekday', [Order Date])"}]
+        res = translate_formulas(calcs)
+        rec = res["translated"][0]
+        assert "Sunday" in rec["review_notes"][0]
+        assert res["stats"]["weekday_week_start_assumed"] == 1
+        from ts_cli.tableau.validate import validate_pre_import
+        issues = validate_pre_import(res["translated"])
+        assert any("Sunday" in w for i in issues for w in i["warnings"])
+        res = translate_formulas(calcs, week_start="monday")
+        assert validate_pre_import(res["translated"]) == []
+        assert "review_notes" not in res["translated"][0]
+        assert _numbering(res["translated"][0]["expr"]) == ISO
+
+
+class TestTableauWeekStartParse:
+    def _ds(self, inner: str):
+        import xml.etree.ElementTree as ET
+        return ET.fromstring(f"<datasource name='ds'>{inner}</datasource>")
+
+    def test_reads_date_options_start_of_week(self):
+        from ts_cli.tableau.twb import _datasource_week_start
+        ds = self._ds("<date-options fiscal-year-start='april' start-of-week='monday' />")
+        assert _datasource_week_start(ds) == "monday"
+
+    @pytest.mark.parametrize("inner", ["", "<date-options fiscal-year-start='april' />",
+                                       "<date-options start-of-week='lundi' />"])
+    def test_absent_or_unrecognised_is_none(self, inner):
+        from ts_cli.tableau.twb import _datasource_week_start
+        assert _datasource_week_start(self._ds(inner)) is None
+
 
 # ---------------------------------------------------------------- Qlik
 
 class TestQlik:
-    def test_weekday_default_is_monday_zero(self):
-        out, review, _ = qlik_translate("Weekday(OrderDate)")
+    """Qlik Weekday() numbers 0-6 from the app's FirstWeekDay (0 = Mon ...
+    6 = Sun), set by `SET FirstWeekDay=n;` in the load script — US apps
+    typically 6, so there is no safe default (BL-334 review)."""
+
+    def test_first_week_day_0_is_monday_zero(self):
+        out, review, _ = qlik_translate("Weekday(OrderDate)", first_week_day=0)
         assert out == "(day_number_of_week(OrderDate) - 1)"
         assert not review
         assert _numbering(out) == MON0
 
-    def test_weekday_first_week_day_sunday(self):
-        # help.qlik.com: weekday('10/12/1971', 6) returns 2 for a Tuesday.
-        out, _, _ = qlik_translate("Weekday(OrderDate, 6)")
+    def test_first_week_day_6_is_sunday_zero(self):
+        out, review, _ = qlik_translate("Weekday(OrderDate)", first_week_day=6)
+        assert out == "mod(day_number_of_week(OrderDate), 7)"
+        assert not review
+        assert _numbering(out) == SUN0
+        # help.qlik.com: with SET FirstWeekDay=6, weekday('10/12/1971') = 2 (Tue).
+        assert _evaluate(out, date(1971, 10, 12)) == 2
+
+    def test_first_week_day_absent_is_flagged_not_assumed(self):
+        out, review, reason = qlik_translate("Weekday(OrderDate)")
+        assert review
+        assert "FirstWeekDay" in reason
+        assert "day_number_of_week" not in out  # never a guessed origin
+
+    def test_absent_first_week_day_flagged_inside_if(self):
+        _, review, reason = qlik_translate(
+            "If(Weekday(OrderDate) = 5, Sum(Sales), 0)")
+        assert review and "FirstWeekDay" in reason
+
+    def test_explicit_second_argument_wins(self):
+        # weekday('10/12/1971', 6) returns 2 for a Tuesday, whatever the app says.
+        out, review, _ = qlik_translate("Weekday(OrderDate, 6)", first_week_day=0)
+        assert not review
         assert _numbering(out) == SUN0
         assert _evaluate(out, date(1971, 10, 12)) == 2
 
     def test_weekday_non_literal_first_day_flagged(self):
-        _, review, _ = qlik_translate("Weekday(OrderDate, x)")
+        _, review, _ = qlik_translate("Weekday(OrderDate, x)", first_week_day=0)
         assert review
+
+
+class TestQlikFirstWeekDayParse:
+    @pytest.mark.parametrize("script,expected", [
+        ("SET ThousandSep=',';\nSET FirstWeekDay=6;\nSET BrokenWeeks=1;", 6),
+        ("SET FirstWeekDay=0;", 0),
+        ("  set firstweekday = 6 ;", 6),
+        ("SET FirstWeekDay=6;\nLOAD * INLINE [a];\nSET FirstWeekDay=0;", 0),
+        ("SET DateFormat='M/D/YYYY';", None),
+        ("", None),
+        (None, None),
+    ])
+    def test_parse(self, script, expected):
+        assert parse_first_week_day(script) == expected
+
+    def test_build_model_threads_the_script_setting(self):
+        from ts_cli.qlik.build_model import _translate_measures
+        from ts_cli.qlik.ir import QlikApp
+        app = QlikApp(app_name="t", source_file="t")
+        assert hasattr(app, "load_script")
+        m = type("M", (), {"label": "Wd", "id": "m1",
+                           "expression": "Weekday(OrderDate)"})()
+        formulas, mapping = _translate_measures(
+            [m], parse_first_week_day("SET FirstWeekDay=6;"))
+        assert _numbering(formulas[0]["expr"]) == SUN0
+        _, mapping = _translate_measures([m], None)
+        assert mapping[0]["status"] != "OK" and "FirstWeekDay" in mapping[0]["reason"]
