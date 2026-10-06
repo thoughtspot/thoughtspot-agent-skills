@@ -4260,7 +4260,9 @@ is APPROXIMATED with a note (pass `data_type`, or `--model`, which types columns
 a boolean in arithmetic is coerced (`if ( c ) then 1 else 0`) and a number used as a condition
 becomes `x != 0`; an A1 formula that depends on a cell's position (another row, a fixed cell, an
 expanding or bounded range, another sheet) is NEEDS_REVIEW, pointing at `cumulative_*` /
-`moving_*` / a parameter; `ISNUMBER(SEARCH(x, s))` → `contains`; `FIND` / `EXACT` → passthroughs
+`moving_*` / a parameter; a per-row criterion inside a conditional aggregate (`COUNTIF(T[r],[@r])`)
+is NEEDS_REVIEW (mixed grain — `group_aggregate` is the form); a DATETIME difference is
+`diff_time ( t , u ) / 86400` and a fractional day added to a date is NEEDS_REVIEW; `ISNUMBER(SEARCH(x, s))` → `contains`; `FIND` / `EXACT` → passthroughs
 (case-sensitive); row-wise `MAX` / `MIN` → `greatest` / `least`; `ROUND` via the shared
 digit→increment helper; `WEEKDAY` via `formula_common.ts_weekday_number`; `NETWORKDAYS` as the
 live-verified per-weekday counting form; `*IF` / `*IFS` criteria per the map's criteria table.

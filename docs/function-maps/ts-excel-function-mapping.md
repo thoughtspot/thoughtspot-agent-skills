@@ -140,7 +140,7 @@ operand — a column, a literal or a runtime parameter — in the position the E
   1-2-3), and lets date arithmetic be number arithmetic. A Model column is typed DATE or
   DATETIME, and ThoughtSpot does **not** support arithmetic on dates (the Tableau map's
   pipeline step P4). So `A2 + 30` is `add_days ( [T::d] , 30 )`, `B2 - A2` is
-  `diff_days ( [T::b] , [T::a] )` (**end first** — the reverse of SQL `DATEDIFF`), and a date
+  `diff_days ( [T::b] , [T::a] )` (**end first** — the reverse of SQL `DATEDIFF`) — for DATETIME operands `diff_time ( [T::b] , [T::a] ) / 86400`, which keeps the time fraction Excel's subtraction has (`diff_time` is seconds, end first — probe record §7); `add_days` takes whole days, so `d + 0.5` has no `add_days` form — and a date
   literal is `to_date ( '2024-01-15' , 'yyyy-MM-dd' )` — a bare `'2024-01-15'` parses as
   subtraction. Where a source column really holds serial numbers (a CSV export of a sheet), the
   conversion is `add_days ( to_date ( '1899-12-30' , 'yyyy-MM-dd' ) , [T::serial] )`, exact for

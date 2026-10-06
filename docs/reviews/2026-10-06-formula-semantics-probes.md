@@ -212,6 +212,12 @@ confirmed absent): `mod ( -3 , 2 )` = −1 and `mod ( 3 , -2 )` = 1, as Snowflak
 takes the divisor's sign (`MOD(-3, 2)` = 1). So Excel `MOD(a, b)` is `a - b * floor ( a / b )`
 in ThoughtSpot, and ThoughtSpot `mod ( a , b )` is `a-b*TRUNC(a/b)` in Excel.
 
+**`diff_time ( end , start )` is in seconds, end first** (scratch-Model execute, compiled to
+`TIMESTAMPDIFF(second, start, end)`, deleted and confirmed absent):
+`diff_time ( add_days ( d , 1 ) , d )` = 86400, on DATE columns too. So an Excel DATETIME
+difference (a day count with a time fraction) is `diff_time ( t , u ) / 86400`; `diff_days` would
+drop the hours.
+
 **Other parser checks in the same pass (all accepted):** `least ( [SALARY_RATES::BASE_RATE] , 10 )`
 (the formula reference listed only `greatest`), `!=` between a column and a string literal,
 `ifnull ( x , 0 )`, `quarter_number ( today ( ) )`, `ceil ( month_number ( today ( ) ) / 3 )` inside
