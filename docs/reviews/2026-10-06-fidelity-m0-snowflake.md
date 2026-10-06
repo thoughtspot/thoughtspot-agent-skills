@@ -1,10 +1,10 @@
 # Formula fidelity M0: 50 Snowflake SQL cases, 2026-10-06
 
-**7 silent wrong answer(s)** in 50 cases: 3 translator bug(s) with an open BL item, 0 unexplained, 4 documented platform semantics the translator already warns about. 39 of 50 matched.
+**3 silent wrong answer(s)** (3 with an open BL item, 0 unexplained) and **4 warned wrong answer(s)** in 50 cases. 39 of 50 matched.
 
-A silent wrong answer is a case the translator marked TRANSLATED or APPROXIMATED, that imported cleanly, and that returned a different value from the oracle. The oracle is the warehouse itself: each source formula is run as a Snowflake SELECT over the same fixture rows ThoughtSpot queries.
+A *silent* wrong answer is a case the translator marked TRANSLATED, that imported cleanly, and that returned a different value from the oracle — nothing warned the user. A *warned* wrong answer is one the translator marked APPROXIMATED and named a trap for. A known-divergence tag explains only the keys it lists; any other wrong key stays unexplained. The oracle is the warehouse itself: each source formula is run as a Snowflake SELECT over the same fixture rows ThoughtSpot queries.
 
-In emitted formulas `[T::col]` is the run's scratch Table, `ZZ_FIDELITY_M0_20261006T061359_TABLE_DELETE_ME`.
+In emitted formulas `[T::col]` is the run's scratch Table, `ZZ_FIDELITY_M0_20261006T063525_DE20CC_TABLE_DELETE_ME`.
 
 ## What this run shows
 
@@ -14,7 +14,7 @@ In emitted formulas `[T::col]` is the run's scratch Table, `ZZ_FIDELITY_M0_20261
 M0 had one job: prove the pipeline on a dialect that already has a translator, before any
 third-party corpus is involved. The pipeline is: load, oracle, translate, batch import with
 VALIDATE_ONLY bisection, one AgentQL query per formula, teardown, compare. It did that, and it
-found **three translator bugs that return wrong values with no warning**. All three are in
+found **three silent wrong answers**: translator bugs that return wrong values with no warning (status TRANSLATED, no trap). All three are in
 `sv_sql.py`, and none is visible to any existing validator:
 
 | BL | Case | Defect | Wrong keys |
@@ -28,10 +28,13 @@ rejects the one-argument `to_string` on import. That case is IMPORT_FAILED, so i
 but the translator still calls it TRANSLATED. Databricks `mv_sql.py` has the same `SUBSTRING` and
 `months_between` shapes (read from the code, not run live).
 
-**The other mismatches are classified, not hidden.**
+**Four more mismatches are warned, not silent.**
 - The four BL-333 cases (`=`, `CONTAINS`, `STARTSWITH`, and a conditional count on `= 'apple'`)
-  are case-insensitive in ThoughtSpot. The translator already reports them APPROXIMATED with a
-  trap, and each is wrong on exactly the mixed-case row.
+  are case-insensitive in ThoughtSpot. The translator reports each one APPROXIMATED with a
+  trap, so the user is told. Each is wrong on exactly the mixed-case key its tag lists (tags now
+  name their keys, so a wrong value on any other key would show as unexplained).
+
+**Not scored as wrong values:**
 - `N1 / N2` with a zero divisor is ERROR_EQUIV. Snowflake raises *Division by zero*, and
   ThoughtSpot compiles `/` to `x / NULLIF(y, 0.0)`, so it returns NULL.
 - `NULLIF` and `ILIKE` are translator declines (TRANSLATE_FAILED). BL-339, in flight on
@@ -48,13 +51,15 @@ but the translator still calls it TRANSLATED. Databricks `mv_sql.py` has the sam
 - every aggregate, ratio-of-aggregates and conditional aggregate
 
 **Reading the numbers.**
-- The silent-wrong count is a floor, not a total. These are 10 hand-picked rows and 50 cases,
+- The silent-wrong count (3) is a floor, not a total. These are 10 hand-picked rows and 50 cases,
   and three of the four bugs (BL-341, BL-342, BL-343) were suspected from an offline translation pass before the run. Only `SUBSTR` was found by the run alone.
-- The harness found the same 7 / 1 / 2 / 1 / 39 split on two consecutive live runs (99 s and 212 s;
-  the second hit one AgentQL read timeout and a token refresh).
+- The harness found the same 7 / 1 / 2 / 1 / 39 split (3 silent + 4 warned / import / declines /
+  error-equivalent / match) on three live runs: 99 s, 212 s (one AgentQL read timeout and a token
+  refresh) and 88 s. This report is the third run, made after the #569 review fixes, against the
+  committed case file (hashes match: see Run).
 - One harness-side finding: AgentQL returns DATE formula results as INT64 epoch seconds, with the
-  column typed INT64. The comparator reads an integer as epoch seconds (UTC) when the oracle's
-  value is a date. Without that rule, five date cases scored as false mismatches on the first run.
+  column typed INT64. The comparator reads an INT64-typed integer as epoch seconds (UTC) when the
+  oracle's value is a date, and nothing else. Without that rule, five date cases scored as false mismatches on the first run.
 
 ## Silent wrong answers
 
@@ -97,7 +102,9 @@ None.
 - expected 0.032258, ThoughtSpot returned 1 (NUMERIC_DIFF)
 - other wrong keys: 2: 1.838710 vs 2; 3: 0.032258 vs 1; 4: 0.193548 vs 0; 7: 11.935484 vs 11
 
-### Documented platform semantics (translator warns) (4)
+## Warned wrong answers (APPROXIMATED, with a trap)
+
+### Warned (4)
 
 | Case | Source | Emitted | Status | Wrong keys | Cause |
 |---|---|---|---|--:|---|
@@ -142,7 +149,7 @@ None.
 
 | Class | Cases | Meaning |
 |---|--:|---|
-| MISMATCH | 7 | ran, returned a different value (silent wrong) |
+| MISMATCH | 7 | ran, returned a different value (silent or warned — see above) |
 | RUN_FAILED | 0 | imported, but the AgentQL query failed where the source returned a value |
 | IMPORT_FAILED | 1 | translated, but ThoughtSpot rejected the formula (VALIDATE_ONLY) |
 | TRANSLATE_FAILED | 2 | the translator declined (NEEDS_REVIEW) |
@@ -217,14 +224,16 @@ None.
 
 ## Run
 
-- date: `2026-10-06T06:13:59+00:00`
+- date: `2026-10-06T06:35:25+00:00`
 - profile: `se-thoughtspot`
 - connection: `APJ_TAB`
-- warehouse_table: `AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_M0_20261006T061359`
+- warehouse_table: `AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_M0_20261006T063525_DE20CC`
 - sf_profile: `ThoughtSpot Partner (AP)`
 - cases_file: `tools/formula-fidelity/cases/snowflake/m0.jsonl`
-- cases_sha256: `00d857e5bdf25719b908c8477741bd796f403a7c3c9448d9e09288b440a8a2e8`
+- cases_sha256: `e970cfc2c9072cebbbb63187647d76fb9934f7665398d3a35b13c2762e5c236b`
+- cases_sha256_after_fill: `e970cfc2c9072cebbbb63187647d76fb9934f7665398d3a35b13c2762e5c236b`
+- fill_expected: `wrote 50 case(s)`
 - translator_version: `ts-cli 0.157.1`
-- runtime_s: `211.7`
-- phases (s): load 2.1, oracle 11.8, translate 0.0, ts_import 11.4, agentql 149.0, teardown 32.0
+- runtime_s: `88.1`
+- phases (s): load 1.5, oracle 8.9, translate 0.0, ts_import 10.3, agentql 60.9, teardown 2.5
 - cleanup: ThoughtSpot objects confirmed absent = `True`, warehouse table dropped and confirmed = `True`

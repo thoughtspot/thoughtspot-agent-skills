@@ -57,7 +57,7 @@ Exit codes:
   one on auth failure) or Ctrl-C is re-raised instead, after teardown and after the run JSON and
   report are written
 
-Runtime for M0 (50 cases, 10 rows) was 99 s and 212 s on two runs. About 70% of that is AgentQL:
+Runtime for M0 (50 cases, 10 rows) was 99 s, 212 s and 88 s on three runs. About 70% of that is AgentQL:
 two calls per case, sequential.
 
 ## What a run does
