@@ -41,8 +41,9 @@ def _pop_operand(units: list[str], construct: str) -> str:
     unit = units.pop()
     if unit.startswith(_NULLIF0):
         # NULLIF marker popped mid-expression (before the end-of-expr
-        # collapse) — resolve it to null_if_zero here, never leak raw bytes.
-        return f"null_if_zero ( {unit[len(_NULLIF0):]} )"
+        # collapse) — resolve it to the CASE form here (no null_if_zero in ThoughtSpot, BL-344),
+        # never leak raw bytes.
+        return f"( if ( {unit[len(_NULLIF0):]} = 0 ) then null else {unit[len(_NULLIF0):]} )"
     return unit
 
 

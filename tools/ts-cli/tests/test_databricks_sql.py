@@ -346,7 +346,7 @@ class TestPostfixConstructs:
 
     def test_nullif_marker_never_leaks_through_is(self):
         assert t("NULLIF(x, 0) IS NULL") == \
-            "isnull ( null_if_zero ( [TRANSACTIONS::x] ) )"
+            "isnull ( ( if ( [TRANSACTIONS::x] = 0 ) then null else [TRANSACTIONS::x] ) )"  # BL-344
 
     def test_not_ident_in_translates_via_expr(self):
         # NOT x IN (…) with the ident before IN routes through _expr:
@@ -402,7 +402,7 @@ class TestSafeDivide:
             "safe_divide ( sum ( [TRANSACTIONS::a] ) , sum ( [TRANSACTIONS::b] ) )"
 
     def test_standalone_nullif_zero(self):
-        assert t("NULLIF(x, 0)") == "null_if_zero ( [TRANSACTIONS::x] )"
+        assert t("NULLIF(x, 0)") == "( if ( [TRANSACTIONS::x] = 0 ) then null else [TRANSACTIONS::x] )"  # BL-344
 
     def test_nullif_nonzero_raises(self):
         with pytest.raises(UntranslatableError, match="NULLIF"):

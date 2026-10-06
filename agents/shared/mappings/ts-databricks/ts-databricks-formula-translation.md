@@ -110,7 +110,7 @@ Resolution:
 | `safe_divide(a, b)` | `COALESCE(a / NULLIF(b, 0), 0)` | No `DIV0` in Databricks |
 | `if_null(x, default)` | `COALESCE(x, default)` | |
 | `zero_if_null(x)` | `COALESCE(x, 0)` | No `ZEROIFNULL` in Databricks |
-| `null_if_zero(x)` | `NULLIF(x, 0)` | |
+| ~~`null_if_zero(x)`~~ | `NULLIF(x, 0)` | **Not a ThoughtSpot function** — rejected at import (VALIDATE_ONLY, se-thoughtspot, 2026-10-06; BL-344). The ThoughtSpot form is `if ( x = 0 ) then null else x`, which is what `mv_sql` now emits for a standalone `NULLIF(x, 0)`; the reverse emitter still reads `null_if_zero` from older TML |
 
 ### Date / Time Functions
 

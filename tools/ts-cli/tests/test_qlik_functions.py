@@ -65,7 +65,8 @@ _VERIFIED_CATALOG = {
     "group_sum", "group_average", "group_count", "group_max", "group_min",
     "group_unique_count", "group_aggregate", "query_groups", "query_filters",
     # null / logic
-    "isnull", "isnotnull", "ifnull", "nullif", "not", "and", "in", "between",
+    # (isnotnull and nullif are NOT ThoughtSpot functions — rejected at import, BL-339)
+    "isnull", "ifnull", "not", "and", "in", "between",
     "safe_divide",
     # math
     "round", "floor", "ceil", "abs", "pow", "mod", "sqrt", "ln", "log2",

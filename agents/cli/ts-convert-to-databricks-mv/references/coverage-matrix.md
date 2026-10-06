@@ -73,7 +73,7 @@ for the full bidirectional translation reference.
 | 32 | `safe_divide(a, b)` | `COALESCE(a / NULLIF(b, 0), 0)` | Numerator re-parenthesized when it is itself a binop |
 | 33 | `if_null(x, d)` / `ifnull(x, d)` | `COALESCE(x, d)` | |
 | 34 | `zero_if_null(x)` | `COALESCE(x, 0)` | |
-| 35 | `null_if_zero(x)` | `NULLIF(x, 0)` | |
+| 35 | `null_if_zero(x)` | `NULLIF(x, 0)` | not a ThoughtSpot function (rejected at import 2026-10-06, BL-344) — only reachable from hand-written TML; the from-Databricks direction now emits `if ( x = 0 ) then null else x` |
 | 36 | `isnull(x)` | `x IS NULL` | |
 | 37 | `[x] = null` / `[x] != null` | `x IS NULL` / `x IS NOT NULL` | Binop null-comparison special case, not the `isnull()` call form |
 | 38 | `if (cond) then a else b` | `CASE WHEN cond THEN a ELSE b END` | |

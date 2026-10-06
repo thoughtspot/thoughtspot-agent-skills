@@ -12746,3 +12746,29 @@ DATE, number and boolean inputs and correct the formula reference. Add a harness
 type.
 
 **Target:** with BL-340.
+
+## BL-344 — `null_if_zero` is not a ThoughtSpot formula function; the Snowflake and Databricks translators emitted it `Tier 1`
+
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.158.0).
+**Source:** PR #570 review (M5): `databricks/mv_sql.py` and `sv_sql.py` translated a standalone
+SQL `NULLIF(x, 0)` (one not used as a divisor) to `null_if_zero ( x )`, and
+`ts-databricks-formula-translation.md` rowed it, but it had never been probed.
+
+**Finding.** VALIDATE_ONLY on se-thoughtspot (2026-10-06) rejects `null_if_zero ( x )`, alone and
+as a divisor (probe record §7) — the same class as `nullif` / `isnotnull` (BL-339): every such
+translation failed import.
+
+**Resolution.** `sv_sql.py`, `databricks/mv_sql.py` and `mv_sql_constructs.py` emit
+`( if ( x = 0 ) then null else x )` (accepted live, inside arithmetic and as an argument). The
+formula reference strikes `null_if_zero` through (so the catalog gates refuse it), the vendored
+output-guard catalog lists it in NONEXISTENT, and the Databricks mapping row and the
+to-Databricks coverage matrix say it is not a function (the reverse emitter still reads it from
+older TML).
+
+**Follow-up, not done here.** `x / NULLIF(y, 0)` still becomes `safe_divide ( x , y )` in both
+SQL translators, which returns 0 on a zero divisor where SQL returns NULL. ThoughtSpot's plain
+`/` already returns NULL on zero (probe record §7), so `x / y` is the exact translation — a
+behaviour change for both converters and their mapping docs, to make in its own PR.
+
+**Target:** this PR (the follow-up: the next Snowflake / Databricks converter change).
+

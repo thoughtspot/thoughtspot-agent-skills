@@ -712,7 +712,8 @@ def _keyword_construct(text: str, cur: _Cursor, resolver,
 
 
 def _collapse_nullif_markers(units: list[str]) -> None:
-    """x / NULLIF(y, 0) -> safe_divide ( x , y ); stray marker -> null_if_zero."""
+    """x / NULLIF(y, 0) -> safe_divide ( x , y ); stray marker -> ( if ( y = 0 ) then null else y ) —
+    ThoughtSpot has no null_if_zero (rejected at import, probe record §7, BL-344)."""
     i = 0
     while i < len(units):
         if units[i].startswith(_NULLIF0):
@@ -722,5 +723,5 @@ def _collapse_nullif_markers(units: list[str]) -> None:
                 units[i - 2:i + 1] = [f"safe_divide ( {x} , {y} )"]
                 i -= 2
             else:
-                units[i] = f"null_if_zero ( {y} )"
+                units[i] = f"( if ( {y} = 0 ) then null else {y} )"
         i += 1

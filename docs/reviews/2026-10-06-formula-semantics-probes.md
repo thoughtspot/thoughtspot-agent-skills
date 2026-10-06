@@ -192,6 +192,26 @@ documents were wrong (BL-339).
 `if ( c ) then [SALARY_RATES::BASE_RATE] else ''` is rejected (*Expecting a Numeric token*):
 the branches must share a type.
 
+**`null_if_zero` is not a ThoughtSpot function** (BL-344). `null_if_zero ( [SALARY_RATES::BASE_RATE] )`
+is rejected (*Search did not find "null_if_zero ("*), alone and as a divisor. `sv_sql` and `mv_sql`
+emitted it for a standalone SQL `NULLIF(x, 0)`; they now emit
+`( if ( x = 0 ) then null else x )` — the parenthesised `if` is accepted inside arithmetic
+(`1 + ( if … )`) and as a function argument (`isnull ( if … )`).
+
+**Booleans in arithmetic.** `true + 1` and `( [SALARY_RATES::BASE_RATE] > 0 ) + 1` are rejected
+(*Search did not find "+ 1"*); `( if ( c ) then 1 else 0 ) + 1` and the sum of two such terms are
+accepted. Excel's TRUE-is-1 coercion has to be written out. A number is not a condition either:
+`if ( [x] != 0 )` is the form for Excel's `IF(x, …)`.
+
+**Blank tests.** `[SALARY_RATES::BASE_RATE] = ''` (a number against an empty string) is rejected
+(*Expecting a List token*); `isnull ( [n] )` is the numeric blank test, and
+`isnull ( [s] ) or [s] = ''` the text one (accepted).
+
+**`mod` takes the dividend's sign** (scratch-Model execute, compiled SQL `MOD(…)`, deleted and
+confirmed absent): `mod ( -3 , 2 )` = −1 and `mod ( 3 , -2 )` = 1, as Snowflake `MOD`. Excel `MOD`
+takes the divisor's sign (`MOD(-3, 2)` = 1). So Excel `MOD(a, b)` is `a - b * floor ( a / b )`
+in ThoughtSpot, and ThoughtSpot `mod ( a , b )` is `a-b*TRUNC(a/b)` in Excel.
+
 **Other parser checks in the same pass (all accepted):** `least ( [SALARY_RATES::BASE_RATE] , 10 )`
 (the formula reference listed only `greatest`), `!=` between a column and a string literal,
 `ifnull ( x , 0 )`, `quarter_number ( today ( ) )`, `ceil ( month_number ( today ( ) ) / 3 )` inside

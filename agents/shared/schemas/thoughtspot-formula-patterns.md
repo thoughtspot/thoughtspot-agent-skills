@@ -126,6 +126,7 @@ count_if ( [TABLE::region] = 'west' , [TABLE::region] )
 |---|---|
 | `if / then / else` | `if ( [cond] ) then [a] else [b]` |
 | Multi-branch | `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` |
+| ~~`null_if_zero`~~ | — **Does not exist** (VALIDATE_ONLY, se-thoughtspot, 2026-10-06 — *Search did not find "null_if_zero ("*; BL-344). Write `if ( [x] = 0 ) then null else [x]` |
 | NULL branch | `if ( [c] ) then null else [x]` — `null` is accepted as a branch value (VALIDATE_ONLY 2026-10-06, probe record §7); it is the native replacement for SQL `NULLIF` |
 | `isnull` | `isnull ( [TABLE::col] )` |
 | ~~`isnotnull`~~ | — **Does not exist** (VALIDATE_ONLY, se-thoughtspot, 2026-10-06 — `isnotnull ( [x] )` is rejected: *Search did not find "isnotnull ("*; [probe record §7](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)). Write `not ( isnull ( [x] ) )`, which the repo's translators already emit. BL-339 |

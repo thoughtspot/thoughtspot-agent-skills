@@ -1239,7 +1239,7 @@ downstream: 0 participates in `AVG`, `MIN`, and ranking; NULL does not.
 | `nullif ( [a] , [b] )` → `NULLIF(a, b)` | `NULLIF(a, b)` → `nullif ( [a] , [b] )` |
 ```
 
-so `sum ( [...] ) / nullif ( sum ( [...] ) , 0 )` was expressible throughout.
+so `sum ( [...] ) / nullif ( sum ( [...] ) , 0 )` was expressible throughout. *(Correction 2026-10-06: ThoughtSpot has no `nullif` — it is rejected at import (BL-339). The expressible form is the plain `sum ( [...] ) / sum ( [...] )`, which already returns NULL on a zero divisor.)*
 
 **Silent.** The translated entry carries `"annotations": []` — no flag, no note, nothing in
 the `build-model` summary. Notably the **Tableau** mapping already warns about this exact

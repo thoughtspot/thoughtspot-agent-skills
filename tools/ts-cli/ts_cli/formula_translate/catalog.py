@@ -34,7 +34,7 @@ CATALOG = frozenset({
 
 NONEXISTENT = frozenset({
     "date_trunc", "day_number_of_month", "ends_with", "isnotnull", "lower", "ltrim", "nullif",
-    "replace",
+    "null_if_zero", "replace",
     "rtrim", "starts_with", "trim", "upper",
 })
 

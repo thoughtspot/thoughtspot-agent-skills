@@ -381,13 +381,13 @@ boolean literals and operators from `:534-537` are rowed under Operators and con
 |---|---|---|---|
 | `IF(condition, true_result, false_result)` | direct | `if ( cond ) then a else b` | **The parentheses around the condition are mandatory** for TML import — without them the parser reports `Expecting keyword '('`. This applies to every condition shape, including a bare BOOL column reference. |
 | `IFF(condition, true_result, false_result)` | direct | `if ( cond ) then a else b` | Specification alias for `IF` (`:521`). |
-| `NULLIF(expr1, expr2)` | direct | `nullif ( [a] , [b] )` | |
+| `NULLIF(expr1, expr2)` | direct | `if ( [a] = [b] ) then null else [a]` | **Corrected 2026-10-06:** this row gave `nullif ( [a] , [b] )`, but ThoughtSpot has no `nullif` — VALIDATE_ONLY rejects it, and `null` is accepted as an `if` branch value (probe record §7, BL-339). Still `direct`. As a divisor, `x / NULLIF(y, 0)` is plain `[x] / [y]`: ThoughtSpot's `/` already returns NULL on a zero divisor. |
 | `COALESCE(expr1, expr2, ...)` | direct | `ifnull ( [a] , ifnull ( [b] , [c] ) )` | ThoughtSpot's `ifnull` is strictly two-argument, so an N-ary `COALESCE` becomes a right-nested chain. Two arguments is the common case and needs no nesting. |
 | `IFNULL(expr, default)` | direct | `ifnull ( [x] , [default] )` | |
 | `NVL(expr, default)` | direct | `ifnull ( [x] , [default] )` | Specification alias for two-argument `COALESCE` (`:525`). |
 | `NVL2(expr, not_null_result, null_result)` | direct | `if ( not ( isnull ( [x] ) ) ) then [a] else [b]` | No native three-way null function; the composition is exact. |
 | `ZEROIFNULL(expr)` | direct | `ifnull ( [x] , 0 )` | |
-| `NULLIFZERO(expr)` | direct | `nullif ( [x] , 0 )` | |
+| `NULLIFZERO(expr)` | direct | `if ( [x] = 0 ) then null else [x]` | **Corrected 2026-10-06:** was `nullif ( [x] , 0 )`, rejected at import (no `nullif`; `null_if_zero` is rejected too — probe record §7, BL-339, BL-344). Still `direct`, so no count changes. |
 
 ---
 
