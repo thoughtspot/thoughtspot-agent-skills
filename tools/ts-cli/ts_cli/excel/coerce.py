@@ -155,10 +155,12 @@ def serial(tr, node: dict) -> dict:
 # Numbers (BL-353: text and booleans in arithmetic)
 # ---------------------------------------------------------------------------
 
-TEXT_NUMBER_TRAP = ("numeric text in arithmetic: Excel converts it, and so does to_double — "
-                    "but text that is not a number gives NULL where Excel shows #VALUE!, and "
-                    "Excel also reads currency, percentages and dates in text, which to_double "
-                    "does not")
+TEXT_NUMBER_TRAP = ("numeric text as a number: Excel converts it, and so does to_double — but "
+                    "a value that is not a number FAILS THE WHOLE QUERY (Snowflake: Numeric "
+                    "value '…' is not recognized; live 2026-10-07, probe record §7) where Excel "
+                    "shows #VALUE! in one cell, and Excel also reads currency, percentages and "
+                    "dates in text, which to_double does not")
+TRY_DOUBLE = "TRY_TO_DOUBLE({0})"   # NULL for text that is not a number (live 2026-10-07)
 
 
 def as_number(tr, node: dict) -> dict:

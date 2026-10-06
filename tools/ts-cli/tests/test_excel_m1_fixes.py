@@ -220,7 +220,8 @@ def test_integer_slot(src, expected):
     ('=IFERROR([@qty]/[@amt],"n/a")',
      "if ( [T::amt] = 0 ) then 'n/a' else to_string ( [T::qty] / [T::amt] )"),
     ('=IFERROR(1/0,"none")', "if ( 0 = 0 ) then 'none' else to_string ( 1 / 0 )"),
-    ('=IFERROR(VALUE([@name]),"bad")', "ifnull ( to_string ( to_double ( [T::name] ) ) , 'bad' )"),
+    ('=IFERROR(VALUE([@name]),"bad")',
+     'ifnull ( to_string ( sql_double_op ( "TRY_TO_DOUBLE({0})" , [T::name] ) ) , \'bad\' )'),
     ('=IF([@qty]>1,[@qty],"small")',
      "if ( [T::qty] > 1 ) then to_string ( [T::qty] ) else 'small'"),
     ('=IF([@qty]>1,[@flag],"none")',
@@ -466,3 +467,26 @@ def test_double_column_as_text_is_approximated():
     assert any("General format" in t and "95000.00" in t for t in r.traps)
     assert ok("=LEN([@amt])").status == "APPROXIMATED"
     assert ok("=LEN([@qty])").status == "TRANSLATED"      # integers render exactly
+
+
+# ---------------------------------------------------------------------------
+# Review fix 4: to_double FAILS THE QUERY on non-numeric text (live 2026-10-07)
+# ---------------------------------------------------------------------------
+
+def test_value_of_text():
+    r = ok("=VALUE([@name])")
+    assert r.expr == "to_double ( [T::name] )" and r.status == "APPROXIMATED"
+    assert any("FAILS THE WHOLE QUERY" in t for t in r.traps)
+    assert f('=VALUE("2.5")') == "2.5"
+
+
+@pytest.mark.parametrize("src", ['=VALUE("abc")', '="abc"*2'])
+def test_non_numeric_text_literal_is_needs_review_on_both_paths(src):
+    assert "#VALUE!" in review(src)
+
+
+def test_isnumber_and_iferror_of_value_use_try_to_double():
+    assert f("=ISNUMBER(VALUE([@name]))") == (
+        'sql_bool_op ( "TRY_TO_DOUBLE({0}) IS NOT NULL" , [T::name] )')
+    assert f("=IFERROR(VALUE([@name]),0)") == (
+        'ifnull ( sql_double_op ( "TRY_TO_DOUBLE({0})" , [T::name] ) , 0 )')

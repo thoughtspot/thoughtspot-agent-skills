@@ -129,7 +129,15 @@ def _value(tr, n):
     if t in ("bool", "datetime"):
         tr.review(f"VALUE of a {'boolean' if t == 'bool' else 'date-time'}: Excel returns "
                   "#VALUE! for a boolean and a fractional serial for a date-time — no rule")
-    tr.note("VALUE → to_double: numeric strings only; a failed parse is NULL (Excel #VALUE!)")
+    from ts_cli.excel.coerce import TEXT_NUMBER_TRAP, TRY_DOUBLE, as_number, string_value
+    if string_value(x) is not None:
+        return as_number(tr, x)          # a literal: folded, or NEEDS_REVIEW (#VALUE!)
+    if tr.try_conversion:
+        # inside IFERROR: TRY_TO_DOUBLE gives NULL for non-numeric text, so the fallback
+        # applies; to_double would fail the whole query (probe record §7)
+        tr.note("VALUE inside IFERROR → TRY_TO_DOUBLE (NULL for text that is not a number)")
+        return T.call("sql_double_op", template(TRY_DOUBLE), x)
+    tr.trap(TEXT_NUMBER_TRAP, downgrade=True)
     return T.call("to_double", x)
 
 

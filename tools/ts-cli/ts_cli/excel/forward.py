@@ -64,6 +64,7 @@ class Translator:
         self.division_mode: Optional[str] = None   # None | "safe" (IFERROR …, 0)
         self.divisions = 0
         self.elementwise = False                   # inside Sheets ARRAYFORMULA
+        self.try_conversion = False                # inside IFERROR: VALUE → TRY_TO_DOUBLE
         # (target, reason, note) for each column whose unknown type changed the output —
         # formula_translate.prompts turns these into the result's needs_types[]
         self.type_needs: list[tuple[str, str, str]] = []

@@ -67,7 +67,7 @@ FUNCTION_RULES = {
     "TEXTJOIN": {"map": "excel", "emits": ("concat",)},
     "TRIM": {"map": "excel", "emits": ("sql_string_op",)},
     "UPPER": {"map": "excel", "emits": ("sql_string_op",)},
-    "VALUE": {"map": "excel", "emits": ("to_double",)},
+    "VALUE": {"map": "excel", "emits": ("to_double", "sql_double_op")},
     # --- Date and time
     "DATEDIF": {"map": "excel", "emits": ("diff_days", "diff_months", "day", "floor")},
     "DAY": {"map": "excel", "emits": ("day",)},
@@ -86,7 +86,7 @@ FUNCTION_RULES = {
     "AND": {"map": "excel", "emits": ()},
     "FALSE": {"map": "excel", "emits": ()},
     "IF": {"map": "excel", "emits": ("safe_divide",)},
-    "IFERROR": {"map": "excel", "emits": ("safe_divide", "ifnull")},
+    "IFERROR": {"map": "excel", "emits": ("safe_divide", "ifnull", "sql_double_op")},
     "IFS": {"map": "excel", "emits": ()},
     "NOT": {"map": "excel", "emits": ("not",)},
     "OR": {"map": "excel", "emits": ()},
@@ -94,7 +94,7 @@ FUNCTION_RULES = {
     "TRUE": {"map": "excel", "emits": ()},
     # --- Information
     "ISBLANK": {"map": "excel", "emits": ("isnull",)},
-    "ISNUMBER": {"map": "excel", "emits": ("contains", "not", "isnull", "to_double")},
+    "ISNUMBER": {"map": "excel", "emits": ("contains", "not", "isnull", "sql_bool_op")},
 }
 
 # The criteria-string table (Excel map E11, "Criteria strings") that every *IF / *IFS rule
@@ -119,7 +119,7 @@ SHEETS_RULES = {
     "EQ": {"map": "sheets", "emits": ()},
     "GT": {"map": "sheets", "emits": ()},
     "GTE": {"map": "sheets", "emits": ()},
-    "IFERROR": {"map": "sheets", "emits": ("safe_divide", "ifnull")},  # 2 args: the Excel rule
+    "IFERROR": {"map": "sheets", "emits": ("safe_divide", "ifnull", "sql_double_op")},  # 2 args: the Excel rule
     "LT": {"map": "sheets", "emits": ()},
     "LTE": {"map": "sheets", "emits": ()},
     "MINUS": {"map": "sheets", "emits": ()},

@@ -168,10 +168,11 @@ FORWARD = [
     ("=IF([@a]<>1,1,0)", "if ( [TABLE::a] != 1 ) then 1 else 0"),
     ("=ISBLANK([@a])", "isnull ( [TABLE::a] )"),
     ('=ISNUMBER(SEARCH("x",[@s]))', "contains ( [TABLE::s] , 'x' )"),
-    ("=ISNUMBER(VALUE([@s]))", "not ( isnull ( to_double ( [TABLE::s] ) ) )"),
+    # TRY_TO_DOUBLE: to_double fails the query on non-numeric text (live 2026-10-07)
+    ("=ISNUMBER(VALUE([@s]))", 'sql_bool_op ( "TRY_TO_DOUBLE({0}) IS NOT NULL" , [TABLE::s] )'),
     ("=IFERROR([@a]/[@b],0)", "safe_divide ( [TABLE::a] , [TABLE::b] )"),
     ("=IFERROR([@a]/[@b],-1)", "if ( [TABLE::b] = 0 ) then -1 else [TABLE::a] / [TABLE::b]"),
-    ("=IFERROR(VALUE([@s]),0)", "ifnull ( to_double ( [TABLE::s] ) , 0 )"),
+    ("=IFERROR(VALUE([@s]),0)", 'ifnull ( sql_double_op ( "TRY_TO_DOUBLE({0})" , [TABLE::s] ) , 0 )'),
     ("=IF([@b]=0,0,[@a]/[@b])", "safe_divide ( [TABLE::a] , [TABLE::b] )"),
     # text
     ('=[@a]&" "&[@b]', "concat ( [TABLE::a] , ' ' , [TABLE::b] )"),  # types unknown: bare

@@ -304,3 +304,18 @@ DOUBLE column and a decimal literal alike:
 | `to_string ( [BASE_RATE] )` (95000.0) | `95000.00` | the column's NUMBER(…, 2) scale shows — a DOUBLE column's text follows the warehouse type |
 | `ceil ( 8.234567890134 * 100000000000 ) / 100000000000` | 8.234568 | **an integer quotient keeps scale 6 in Snowflake** (BL-348); `/ to_double ( 100000000000 )` and `to_double ( ceil ( … ) ) / 100000000000` give 8.234568 too |
 | `ceil ( 8.234567890134 * 100000000000 ) * 0.00000000001` | 8.23456789014 | multiplying by the increment keeps all 11 digits — the form the Excel translator now emits |
+
+*Review of #574 (2026-10-07, two more scratch Models, each deleted and confirmed absent).*
+
+| Formula | Result |
+|---|---|
+| `ceil ( to_double ( '1.1' ) * 100 ) * 0.01` | **1.11** — `1.1 * 100` is `110.00000000000001` in a double |
+| `ceil ( round ( to_double ( '1.1' ) * 100 , 0.000000001 ) ) * 0.01` | 1.1 — the snapped form the Excel translator now emits for a DOUBLE |
+| `floor ( to_double ( '0.29' ) * 100 ) * 0.01` / snapped | 0.28 / 0.29 |
+| `ceil ( to_double ( '1.1' ) / 0.1 ) * 0.1` / snapped | 1.1 / 1.1 here (the raw form gives 1.2 in IEEE arithmetic in general — `1.1 / 0.1` is `11.000000000000002`; the warehouse's rounding happened to absorb it) |
+| `floor ( round ( to_double ( '-0.57' ) * 100 , 0.000000001 ) ) * 0.01` | −0.5700000000000001 (within any 1e-12 tolerance) |
+| `ceil ( round ( [BASE_RATE] * 100 , 0.000000001 ) ) * 0.01` | 95000.0 — accepted over a column |
+| `to_double ( 'abc' )`, `to_double ( [DEPARTMENT] )` | **the query fails**: *Numeric value 'abc' is not recognized* (QUERY_EXECUTION_FAILED) — not NULL. Corrects the Excel map's E8, `VALUE` and `NUMBERVALUE` rows |
+| `sql_double_op ( "TRY_TO_DOUBLE({0})" , [DEPARTMENT] )`, `ifnull ( … , 0 )` | NULL, 0.0 — the null-on-failure form |
+| `sql_bool_op ( "TRY_TO_DOUBLE({0}) IS NOT NULL" , [DEPARTMENT] )` | false — the `ISNUMBER(VALUE(…))` form the translator now emits |
+| `to_string ( 100000000000000000000 )`, `to_string ( to_double ( '1E+20' ) )` | `'100000000000000000000'`, `'1e+20'` (Excel writes `1E+20`) |
