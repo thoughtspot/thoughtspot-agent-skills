@@ -82,7 +82,8 @@ Emitted forms after the fix:
 - `strpos` compiles to `POSITION('eng' IN LOWER(col))`.
 - Plain `=` compiles to `LOWER(col) = 'engineering'`, which matched 'Engineering'.
 - String literals are lowercased at compile time: `contains ( 'Hello World' , 'WORLD' )` is true.
-- **Not probed:** `!=`, `in { }`, `starts_with`, and a column (rather than a literal) as the needle.
+- **Probed 2026-10-07** (one more scratch Model, deleted and confirmed): `!=` → `LOWER(col) <> …`, `in { }` → `LOWER(col) IN (…)`, `strpos(…) = 1` → `POSITION(… IN LOWER(col)) = 1`, and `<` → `LOWER(col) < …`, all case-insensitive. Ordering changes as well: `'HR' < 'f'` is FALSE once both sides are lowercased.
+- **Still not probed:** string join keys, and a column (rather than a literal) as the needle.
 
 ## 5. Parser acceptance (VALIDATE_ONLY)
 

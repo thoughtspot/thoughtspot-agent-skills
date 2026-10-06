@@ -1109,10 +1109,16 @@ After completing one conversion, offer to convert additional views.
 
 ---
 
+
+### String comparisons become case-insensitive (BL-333)
+
+ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }`, `<`/`>`, `contains`, `strpos`; live-probed 2026-10-06/07). Snowflake compares case-sensitively under its default collation, so a converted comparison can match more rows than it did in the Semantic View. This is an accepted, documented trade-off. Where exact case matters for a specific formula, use `sql_bool_op ( "{0} = {1}" , [col] , 'x' )`.
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.6.1 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.6.0 | 2026-07-30 | **Pre-import checklist row 12 — every `[formula_*]` reference must match a declared `formulas[].id` (invariant I13).** CoCo cannot run `ts tml lint`, so this checklist is its only gate for the class of defect that shipped on the CLI side for five weeks: a metric-on-fact reference minted from the SQL identifier while the formula id is minted from the display name, which ThoughtSpot parses as search tokens and rejects with `error_code 14516` (live-verified on se-thoughtspot 2026-07-30 — BL-178/BL-183). The row also covers the passthrough case: a metric aggregating a fact whose right-hand side is a bare physical column must reference `[TABLE::col]`, because that fact is emitted as a `columns[]` entry and no formula exists to point at. |
 | 1.5.0 | 2026-06-13 | Identifier resolution engine: facts parsing (BL-003b), metric→fact resolution (BL-003c), double aggregation via group_aggregate (BL-003), window metrics referencing metrics (GAP-13), joinless SV handling (GAP-03/BL-004). Mirrors CLI v1.9.0. |
 | 1.4.0 | 2026-06-13 | Add PT1 pass-through policy; fix `count_distinct` example → `unique count` (I5); sync to CLI v1.7.0. |

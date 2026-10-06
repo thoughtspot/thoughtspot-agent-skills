@@ -854,10 +854,16 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 ---
 
+
+### String comparisons become case-insensitive (BL-333)
+
+ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }`, `<`/`>`, `contains`, `strpos`; live-probed 2026-10-06/07). A source comparison that is case-sensitive (Databricks' default `UTF8_BINARY` collation) therefore matches more rows after conversion: `'abc'` now equals `'ABC'`, and ordering comparisons can change. This is an accepted, documented trade-off. Where exact case matters for a specific formula, hand-edit it to `sql_bool_op ( "{0} = {1}" , [col] , 'x' )` (or `CONTAINS({0}, {1})`). See `agents/shared/schemas/thoughtspot-formula-patterns.md` → "String comparison is case-insensitive".
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.16.1 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.16.0 | 2026-10-06 | **`SUBSTRING`/`SUBSTR`, `months_between` and 3-argument `DATEDIFF` fixed** (BL-340, BL-342, BL-345, ts-cli v0.160.0). `DATEDIFF(unit, s, e)` counts **complete** units elapsed, which no `diff_*` does: every 3-argument unit (`MONTH` was `diff_months`) is now an exact `sql_int_op ( "DATEDIFF(MONTH, {0}, {1})" , s , e )` pass-through, and `DAY` stays `diff_days` only between two columns known to be DATE — never in this converter, which has no column types; the newly accepted units (`WEEK`, `QUARTER`, `YEAR`, `HOUR`, …) used to be refused. `SUBSTRING(s, pos, len)` was a bare rename to the zero-based `substr`, shifting every substring one character; it is now `substr ( s , pos - 1 , len )` with a literal `pos` folded, and a `sql_string_op` pass-through for a `pos` ≤ 0 (negative counts from the end) or a non-literal one. `SUBSTR` is accepted too. `months_between(a, b[, roundOff])` was `diff_months`, a boundary count; it is an exact `sql_double_op` pass-through keeping a literal `roundOff`. Read from the Databricks docs and the shared Snowflake evidence, not run on a cluster |
 | 1.15.4 | 2026-10-06 | **A standalone `NULLIF(x, 0)` no longer translates to `null_if_zero ( x )`**, which ThoughtSpot rejects at import (VALIDATE_ONLY, se-thoughtspot 2026-10-06, BL-344); it now emits `( if ( x = 0 ) then null else x )`. `x / NULLIF(y, 0)` → `safe_divide` is unchanged (ts-cli v0.158.0) |
 | 1.15.3 | 2026-10-06 | **`DATEDIFF` and `MONTHS_BETWEEN` no longer translate with the opposite sign** (BL-336, ts-cli v0.156.3). ThoughtSpot `diff_*(end, start)` takes the later date first, but 2-arg `DATEDIFF(e, s)` became `diff_days(s, e)`, 3-arg `DATEDIFF(unit, s, e)` became `diff_<unit>(s, e)` and `MONTHS_BETWEEN(a, b)` became `diff_months(b, a)`, so every value had the wrong sign. All now emit the end date first. The mapping doc, rules and coverage matrix rows are corrected. `DATEDIFF(MONTH, …)` and `MONTHS_BETWEEN` are still flagged as approximate: complete or fractional months against month boundaries |

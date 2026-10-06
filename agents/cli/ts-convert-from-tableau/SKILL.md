@@ -2484,12 +2484,17 @@ suggested-but-unverified with its tokens for manual follow-up.
 
 ---
 
+
+### String comparisons become case-insensitive (BL-333)
+
+ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }`, `<`/`>`, `contains`, `strpos`; live-probed 2026-10-06/07). A source comparison that is case-sensitive (Tableau follows its data source; on a live Snowflake or Databricks connection comparisons are case-sensitive) therefore matches more rows after conversion: `'abc'` now equals `'ABC'`, and ordering comparisons can change. This is an accepted, documented trade-off. Where exact case matters for a specific formula, hand-edit it to `sql_bool_op ( "{0} = {1}" , [col] , 'x' )` (or `CONTAINS({0}, {1})`). See `agents/shared/schemas/thoughtspot-formula-patterns.md` → "String comparison is case-insensitive".
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.44.3 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.44.2 | 2026-10-06 | **`DATEPART('weekday', d)` returns a number, not the day name (ts-cli v0.156.2, BL-334).** Now `( mod ( day_number_of_week ( d ) , 7 ) + 1 )` for a Sunday start. Week start: literal `start_of_week`, else the datasource's `<date-options start-of-week>`, else Sunday assumed and reported as a validation warning. `ISOWEEKDAY` / `'iso-weekday'` → `day_number_of_week` |
 | 1.44.1 | 2026-10-06 | **`ROUND(x, n)` → `round ( x , 10^-n )` (ts-cli v0.156.0, BL-331).** ThoughtSpot's 2nd arg is an increment, so the old rename returned wrong numbers. Coverage-matrix row 31a |
-| 1.44.0 | 2026-09-25 | **SCAL-338494 — Tableau's `:Measure Names` pivot pseudo-field was emitted as a real column (prereq ts-cli v0.148.0).** It arrives as an ordinary `<column>` but names no warehouse column, so it reached Model and Table TML with a `column_id` resolving to nothing — and no gate saw it: on a single-table model the id is table-qualified and the same phantom is written into that table's TML, so the cross-reference check resolves it; on a multi-table model the id is bare and I12 is scoped out. Now excluded during column cleanup, kept out of Liveboard/Answer fields, and any formula referencing it is dropped — cascading to dependants, since a survivor would emit a reference to a column the model no longer has. `ts tableau verify` replays that decision so a deliberate removal is not reported as a silent drop. `Multiple Values`, the shelf sibling, is **not** excluded as a column: it has never been observed as a `<column>` and a warehouse column could legitimately carry that name. Step 5c and the blend hand-assembly procedure carry the rule for hand-authored models. |
 
-**Older entries (v1.0.0–v1.43.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.44.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
