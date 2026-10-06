@@ -953,8 +953,9 @@ class TestMapDateFunctions:
         assert "month_number ( [Date] )" in result
 
     def test_datepart_weekday(self):
+        # BL-334: an integer 1 = Sunday (Tableau default), never the day NAME.
         result = map_date_functions("DATEPART('weekday', [Date])")
-        assert "day_of_week ( [Date] )" in result
+        assert result == "( mod ( day_number_of_week ( [Date] ) , 7 ) + 1 )"
 
     def test_datediff_hour(self):
         result = map_date_functions("DATEDIFF('hour', [A], [B])")

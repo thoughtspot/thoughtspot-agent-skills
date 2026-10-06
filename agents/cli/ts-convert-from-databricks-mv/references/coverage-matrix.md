@@ -122,7 +122,8 @@ Use this as the canonical limitations reference.
 | 45 | `LN`, `LOG2`, `LOG10` | `ln`, `log2`, `log10` | |
 | 46 | `GREATEST`, `LEAST` | `greatest`, `least` | |
 | 47 | `YEAR`, `MONTH`, `DAY`, `HOUR`, `QUARTER` | `year`, `month_number`, `day`, `hour_of_day`, `quarter_number` | |
-| 48 | `WEEKOFYEAR`, `DAYOFWEEK`, `DAYOFYEAR` | `week_number_of_year`, `day_number_of_week`, `day_number_of_year` | |
+| 48 | `WEEKOFYEAR`, `DAYOFYEAR` | `week_number_of_year`, `day_number_of_year` | |
+| 48a | `DAYOFWEEK` / `EXTRACT(DOW)`, `WEEKDAY`, `EXTRACT(DAYOFWEEK_ISO)` | `( mod ( day_number_of_week ( d ) , 7 ) + 1 )`, `( day_number_of_week ( d ) - 1 )`, `day_number_of_week ( d )` | Databricks 1 = Sunday / 0 = Monday / 1 = Monday; ThoughtSpot fixed 1 = Monday (live-probed 2026-10-06). Was a plain rename to `day_number_of_week` — wrong on every day (BL-334, fixed v0.156.2) |
 | 49 | `MINUTE(ts)` / `SECOND(ts)` | `sql_int_op("MINUTE({0})", [col])` / `sql_int_op("SECOND({0})", [col])` | Auto-translated pass-through (v0.50.0) |
 | 50 | `DATE_FORMAT(d, 'fmt')` | `sql_string_op("DATE_FORMAT({0}, 'fmt')", [col])` | Format literal baked into SQL template (v0.50.0) |
 | 51 | `DATE_ADD(d, n)` / `ADD_MONTHS(d, n)` | `add_days`, `add_months` | |

@@ -108,7 +108,7 @@ def _assert_clean(out: str) -> None:
 # cannot be added without a probe.
 _COMPOSITION_SAMPLE_ARGS = {
     "mid": ("Field", "2", "3"),
-    "weekday": ("OrderDate",),
+    "weekday": ("OrderDate", "0"),  # 1-arg form needs the app's FirstWeekDay
     "index": ("Email", "'@'"),
 }
 
@@ -427,9 +427,10 @@ class TestDateFunctions:
         """Qlik Weekday() is a NUMBER from 0=Mon; `day_of_week` returns the day
         NAME and `day_number_of_week` numbers from 1=Mon. Renaming alone leaves
         every literal comparison off by one."""
-        assert tr("Weekday(OrderDate)") == \
+        # BL-334: the 1-arg origin is the app's FirstWeekDay — here 0 (Monday).
+        assert translate("Weekday(OrderDate)", first_week_day=0)[0] == \
             "(day_number_of_week(OrderDate) - 1)"
-        assert tr("Weekday(OrderDate) = 5") == \
+        assert translate("Weekday(OrderDate) = 5", first_week_day=0)[0] == \
             "(day_number_of_week(OrderDate) - 1) = 5"
 
     def test_month_number(self):

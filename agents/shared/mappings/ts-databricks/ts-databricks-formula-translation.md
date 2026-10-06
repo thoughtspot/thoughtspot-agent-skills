@@ -122,7 +122,7 @@ Resolution:
 | `year(d)` | `YEAR(d)` | |
 | `month_number(d)` | `MONTH(d)` | `month()` also exists but returns the name (e.g. "January"), not the number |
 | `day(d)` | `DAY(d)` | Extracts day of month (1–31). `day_of_month` does not exist in TS. |
-| `day_number_of_week(d)` | `DAYOFWEEK(d)` | TS `day_number_of_week` returns number (1=Mon, 7=Sun); Databricks `DAYOFWEEK` returns number (1=Sun). `day_of_week(d)` also exists but returns the name (e.g. "Friday"). Confirmed 2026-10-06: TS is fixed 1 = Monday (compiles to day-count arithmetic). So the exact pair is `day_number_of_week(d)` ↔ `mod(DAYOFWEEK(d) + 5, 7) + 1`; **`mv_sql.py` still renames `DAYOFWEEK` → `day_number_of_week`** (wrong on every day) — BL-334 |
+| `day_number_of_week(d)` | `EXTRACT(DAYOFWEEK_ISO FROM d)` — **never `DAYOFWEEK(d)`** | TS `day_number_of_week` is fixed 1 = Monday … 7 = Sunday (live-verified 2026-10-06; compiles to day-count arithmetic). Databricks `DAYOFWEEK` is "1 = Sunday, and 7 = Saturday" ([dayofweek](https://docs.databricks.com/aws/en/sql/language-manual/functions/dayofweek)); `EXTRACT(DAYOFWEEK_ISO …)` is "Monday(1) to Sunday(7)" ([extract](https://docs.databricks.com/aws/en/sql/language-manual/functions/extract)), the exact pair. `mod(DAYOFWEEK(d) + 5, 7) + 1` is equivalent. `day_of_week(d)` returns the name (e.g. "Friday"). The code emitter (`mv_emit_sql.py`) has no `day_number_of_week` entry and refuses it rather than mis-emitting |
 | `day_number_of_year(d)` | `DAYOFYEAR(d)` | TS function is `day_number_of_year`, not `day_of_year` |
 | `hour_of_day(ts)` | `HOUR(ts)` | TS function is `hour_of_day`, not `hour` |
 | `sql_int_op("MINUTE({0})", ts)` | `MINUTE(ts)` | Auto-translated pass-through (ts-cli v0.50.0) |
@@ -838,7 +838,9 @@ formula equivalents:
 | `EXTRACT(HOUR FROM ts)` | `hour_of_day(ts)` |
 | `YEAR(d)` | `year(d)` |
 | `MONTH(d)` | `month_number(d)` |
-| `DAYOFWEEK(d)` | `day_number_of_week(d)` — Databricks 1=Sun, TS 1=Mon; `day_of_week(d)` also exists but returns the name — **a rename is wrong on every day** (BL-334): the exact form is `mod ( day_number_of_week ( d ) , 7 ) + 1` (TS fixed 1 = Monday, live-verified 2026-10-06) |
+| `DAYOFWEEK(d)` / `EXTRACT(DAYOFWEEK FROM d)` / `EXTRACT(DOW FROM d)` | `( mod ( day_number_of_week ( d ) , 7 ) + 1 )` — Databricks "1 = Sunday, and 7 = Saturday"; TS fixed 1 = Monday (live-verified 2026-10-06). **Not a rename** (BL-334, fixed ts-cli 0.156.2); `day_of_week(d)` returns the name |
+| `WEEKDAY(d)` | `( day_number_of_week ( d ) - 1 )` — Databricks "0 = Monday and 6 = Sunday" ([weekday](https://docs.databricks.com/aws/en/sql/language-manual/functions/weekday)) |
+| `EXTRACT(DAYOFWEEK_ISO FROM d)` / `EXTRACT(DOW_ISO FROM d)` | `day_number_of_week ( d )` — "Monday(1) to Sunday(7)", a clean rename. Offset math for all three rows: `formula_common.ts_weekday_number` |
 | `ROUND(x, d)` | `round(x, 10^-d)` — `2` → `0.01`, `0` → `1`, `-2` → `100`; non-literal `d` → `sql_double_op ( "ROUND({0}, {1})" , x , d )` (row-level only). Never `round(x, d)` (BL-331) |
 | `CAST(x AS type)` | Depends on target type; often implicit in TS |
 | `x / NULLIF(y, 0)` | `safe_divide(x, y)` |
