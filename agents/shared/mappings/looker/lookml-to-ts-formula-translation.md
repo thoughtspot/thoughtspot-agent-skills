@@ -105,7 +105,7 @@ safe_divide ( sum ( [ORDER_FACT::NET_REVENUE] ) , unique count ( [ORDER_FACT::OR
 | `UPPER(col)` | `sql_string_op ( "UPPER({0})" , [T::COL] )` — no native `upper` in ThoughtSpot |
 | `LOWER(col)` | `sql_string_op ( "LOWER({0})" , [T::COL] )` — no native `lower` in ThoughtSpot |
 | `CONCAT(a, b)` | `concat ( [T::A] , [T::B] )` |
-| `SUBSTR(col, pos, len)` | `substr ( [T::COL] , pos - 1 , len )` — **not a rename**: SQL `SUBSTR` is 1-based, ThoughtSpot `substr` zero-based (compiles to `SUBSTRING(s, (start + 1), len)`, live 2026-10-06, BL-340). Fold a literal `pos`; a negative `pos` (counted from the end) → `sql_string_op ( "SUBSTR({0}, …)" , [T::COL] )` |
+| `SUBSTR(col, pos, len)` / `SUBSTR(col, pos)` | **Not a rename** — SQL `SUBSTR` is 1-based, ThoughtSpot `substr` zero-based (compiles to `SUBSTRING(s, (start + 1), len)`, live 2026-10-06, BL-340). Same rule as the Snowflake and Databricks translators (`formula_common.sql_substr_to_ts`): a **literal `pos` ≥ 1** → `substr ( [T::COL] , pos - 1 , len )`, folded (`SUBSTR(col, 2, 3)` → `substr ( [T::COL] , 1 , 3 )`); the **2-argument** form → `substr ( [T::COL] , pos - 1 , strlen ( [T::COL] ) )`. A **literal `pos` ≤ 0 or a non-literal `pos`** → `sql_string_op ( "SUBSTR({0}, -3, 2)" , [T::COL] )` (a column `pos` as `{1}`): a negative start counts from the end, which `substr` does not define |
 | `LENGTH(col)` | `strlen ( [T::COL] )` |
 | `REPLACE(col, old, new)` | `sql_string_op ( "REPLACE({0}, {1}, {2})" , [T::COL] , 'old' , 'new' )` — no native `replace` in ThoughtSpot (live-verified 2026-07-29, se-thoughtspot — BL-170) |
 | `TRIM(col)` | `sql_string_op ( "TRIM({0})" , [T::COL] )` — no native `trim` in ThoughtSpot (live-verified 2026-07-29, se-thoughtspot — BL-170) |
