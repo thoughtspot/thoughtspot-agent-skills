@@ -212,6 +212,9 @@ are roughly ordered by value÷effort.
 | BL-328 | ts-object-set-manager connection scope (connection → tables → Models) — **parked** | parked |
 | BL-329 | Audit H angle runs Set discovery through `fetch_consumers`, which exports every Liveboard that uses a Set — Liveboard detail H5 never reads; slow on large estates. Add a lightweight consumers mode | next ts-audit pass |
 | BL-330 | `ts migrate apply --sets-scan FILE` trusts any post-BL-325 scan for any Model — nothing checks the scan covered the mapped Model or the source Org; a scan of another Org (or `scanned.models: 0`) lets `apply` pass an uninspected Model | next ts-migrate pass |
+| BL-332 | Upstream apache/ossie converter maps `ROUND(x, d)` to `round ( x , d )` (copies the digit count; `d = 0` → NULL) — unreachable today, live once multi-arg matching lands; fix PR held for legal review | 2026-11-30 |
+| BL-333 | ThoughtSpot string comparison (`=`, `contains`, `strpos`) is case-insensitive — Snowflake SV / Databricks MV / Tableau / Qlik / Looker translations of case-sensitive comparisons change semantics silently | 2026-11-30 |
+| BL-334 | `DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`; week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
 
 ### Tier 3 — Opportunistic
 
@@ -12312,24 +12315,130 @@ non-literal → `(inc * ROUND(x / NULLIF(inc, 0)))`, `round(x, 0)` refused. Regr
 
 ---
 
-## BL-332 — upstream apache/ossie converter: check `ROUND` emits an increment, not a digit count `Tier 2`
+## BL-332 — upstream apache/ossie converter: `ROUND` copies the digit count instead of emitting an increment `Tier 2`
 
-**Filed:** 2026-10-06. **Source:** BL-331 review.
+**Filed:** 2026-10-06. **Source:** BL-331 review. **Status:** OPEN — confirmed; the fix is a PR to
+apache/ossie that has not been raised, and publication there is on hold pending legal review.
 
-**Finding (unverified).** The ThoughtSpot converter donated to apache/ossie
-(`converters/thoughtspot/`, `expressions/catalog.py`) probably emits `ROUND(x, d)` as
-`round ( [x] , d )` — the form this repo's own `docs/ossie/ts-ossie-function-mapping.md`
-documented until BL-331 corrected it. If so it has the same silent wrong number: ThoughtSpot
-`round(x, n)` takes an increment, so `round(x, 2)` is nearest-2 and `round(x, 0)` is NULL
-(live-probed 2026-10-06). Not checked; the converter lives upstream and is never vendored here.
+**Finding (confirmed against apache/ossie main @ 24915336, 2026-10-05).** Our converter PR #364
+merged upstream on 2026-09-24 (d628f68), so the code is on upstream main.
+- Ossie → ThoughtSpot: `converters/thoughtspot/src/ossie_thoughtspot/expressions/catalog.py:696-698`
+  maps `ROUND(x, d)` to `round ( {0} , {1} )`, copying `d` verbatim. ThoughtSpot `round(x, n)` takes
+  an **increment** (live-probed 2026-10-06), so this is wrong for every `d` except 1, and `d = 0`
+  yields NULL. The generated `converters/thoughtspot/docs/expression-mapping.md:139` (upstream) matches the catalog, and the tests
+  check only the class (`tests/expressions/test_catalog_math_conditional.py:53`).
+- **Unreachable today:** `_match_ansi_call` (`ossie_to_thoughtspot.py:1059-1084`) matches only
+  one-argument aggregates, so `ROUND(x, 2)` raises `TS-EXPR-ANSI-UNMATCHED`. The defect goes live the
+  moment multi-argument matching lands.
+- ThoughtSpot → Ossie is unaffected (`tml_to_ossie.py:240-257` keeps calls in the THOUGHTSPOT
+  dialect). `TRUNC` is correct (`catalog.py:706-715`, a `sql_double_op` pass-through).
 
-**Why no gate catches it.** `tools/validate/check_ossie_mapping_sync.py` compares only each
-construct's *class* (`direct` / `passthrough` / …) between the two accounts. `ROUND` is `direct`
-on both sides before and after the fix, so the emitted form can disagree without the sync check
-firing.
+**Why no gate caught it.** `tools/validate/check_ossie_mapping_sync.py` compares only each
+construct's *class*. `ROUND` is `direct` on both sides, so the emitted form can disagree silently.
 
-**Fix.** Read the upstream catalog's `ROUND` entry; if it copies `d`, emit `round ( x , 10^-d )`
-for a literal `d` and a `sql_double_op` fallback otherwise, add a test, run
-`tools/ossie-roundtrip` against the converter working tree, and contribute it upstream.
+**Fix.**
+1. A new PR against apache/ossie main adding an `arg_rewrite` hook on `Construct` that converts a
+   literal `d` to `10^-d`, mirroring `formula_common.sql_digits_to_ts_increment`, with a test that
+   `ROUND(x, 2)` never emits `round ( x , 2 )`. A draft patch exists but has not been run. Run
+   `tools/ossie-roundtrip` against the converter working tree before raising it.
+2. Follow-up for `check_ossie_mapping_sync.py`: for constructs both sides class `direct`, compare
+   the ThoughtSpot form (function name plus argument transforms, placeholders normalised). Start
+   report-only with an allowlist. A cheaper first gate: fail only when this repo transforms an
+   argument and upstream copies it verbatim.
 
-**Target:** next apache/ossie PR (after #364 lands), or by 2026-11-30.
+**Target:** 2026-11-30, or the next apache/ossie PR once legal review clears publication.
+
+---
+
+## BL-333 — ThoughtSpot string comparison is case-insensitive — converters translating case-sensitive source comparisons change semantics silently `Tier 2`
+
+**Filed:** 2026-10-06. **Status:** OPEN.
+**Source:** live probe on se-thoughtspot, 2026-10-06 (scratch Models, `ts agentql generate-sql` /
+`fetch-data`; Models deleted). Recorded in
+`agents/shared/schemas/thoughtspot-formula-patterns.md` ("String comparison is case-insensitive").
+
+**The fact.** ThoughtSpot lowercases both sides of a string comparison at compile time:
+
+| Formula | Compiled Snowflake SQL | Observed |
+|---|---|---|
+| `contains ( [DEPARTMENT] , 'eng' )` | `LOWER(DEPARTMENT) LIKE '%eng%' ESCAPE '!'` | matches `Engineering` |
+| `contains ( 'Hello World' , 'WORLD' )` | `'hello world' LIKE '%world%'` | `true`: literals are lowercased |
+| `strpos ( [DEPARTMENT] , 'eng' )` | `POSITION('eng' IN LOWER(DEPARTMENT))` | 1 |
+| `[DEPARTMENT] = 'engineering'` | `LOWER(DEPARTMENT) = 'engineering'` | matches `Engineering` |
+
+Not tested: `!=`, `in { }`, the composed `strpos ( … ) = 1` / `substr ( … ) = 'x'` forms, and string
+join keys.
+
+**Why it matters.** A source comparison that is case-sensitive imports, lints clean and returns
+more rows than the source did. Snowflake's and Databricks' default collations are case-sensitive.
+
+**Affected converters** (translator code inspected 2026-10-06, not changed):
+
+| Converter | What it emits | Source semantics | Impact |
+|---|---|---|---|
+| Snowflake SV (`sv_sql.py`) | `CONTAINS`→`contains`, `POSITION`/`LOCATE`→`strpos`, `STARTSWITH`/`ENDSWITH` compositions, `=` kept | case-sensitive (default collation) | **semantic change** |
+| Databricks MV (`databricks/mv_sql.py`) | `CONTAINS`→`contains`, `LOCATE`/`POSITION`→`strpos`, `STARTSWITH` composition, `=` kept | case-sensitive (`UTF8_BINARY`) | **semantic change** |
+| Tableau (`tableau/functions.py`) | `CONTAINS`→`contains`, `FIND`→`strpos`, `STARTSWITH` composition, `=` kept | follows the data source; case-sensitive on a live Snowflake connection | semantic change on case-sensitive sources |
+| Qlik (`qlik/functions.py`, JSON map) | `Match`→`in { }`, `Index`→`strpos`, `WildMatch`→`contains`, `=` kept | `Match`/`Index` case-sensitive; `WildMatch`, `Mixmatch`, `=` case-insensitive | `Index` changes; `Match` depends on the untested `in`; `WildMatch` and `=` now confirmed exact |
+| Looker (`ts-convert-from-looker`) | `sql:` comparisons kept as `=` | Looker's `case_sensitive` defaults to yes on dialects that support it | semantic change where on |
+| Power BI | DAX `=` kept | DAX comparison is case-insensitive | **exact, no change** |
+| Sisense | no string-comparison translation in the formula subset | — | not affected |
+
+**Options.**
+1. **Accept and document**: record per converter that string comparisons become case-insensitive.
+   Cheapest; right for most BI data, where a case-only difference is noise.
+2. **`sql_bool_op` for exact semantics**: emit `sql_bool_op ( "CONTAINS({0}, {1})" , [s] , 'x' )`,
+   `sql_bool_op ( "{0} = {1}" , [s] , 'x' )`, `sql_int_op ( "POSITION({0} IN {1})" , … )`. Exact, but
+   every comparison becomes a pass-through ThoughtSpot cannot plan around.
+3. **Converter flag** (`--case-sensitive-compare`): default to option 1 and opt into option 2.
+   Report each affected formula in the conversion report either way.
+
+Before deciding, probe `!=`, `in { }`, the composed prefix/suffix forms and join keys. Doc
+statements were corrected in this PR. The function maps reclassified case-sensitive source
+comparisons to `passthrough`. The Ossie map moved `LIKE`→`passthrough` and `ILIKE`→`direct`,
+deliberately diverging from upstream.
+
+**Target:** 2026-11-30 (decision + probes); converter changes in the next pass of each affected
+converter.
+
+---
+
+## BL-334 — Week-start assumptions: `DAYOFWEEK` renamed to `day_number_of_week`, and `start_of_week` compiles to `WEEK_START`-dependent SQL `Tier 2`
+
+**Filed:** 2026-10-06. **Status:** OPEN.
+**Source:** live probe on se-thoughtspot, 2026-10-06, plus ThoughtSpot domain review, 2026-10-06.
+
+**The facts.**
+- `day_number_of_week ( d )` compiles to `(MOD((DATEDIFF(day, DATE '1970-01-01', d) + 3), 7) + 1)`:
+  1 = Monday … 7 = Sunday, independent of the warehouse's `WEEK_START` (2026-10-04 Sun = 7,
+  2026-10-05 Mon = 1, 2026-10-10 Sat = 6, 2020-01-01 Wed = 3).
+- ThoughtSpot's week comes from the **Model's calendar**, Gregorian with a Monday week start when
+  nothing else is set. `start_of_*` accept a calendar-name string literal
+  (`start_of_week ( [d] , 'Calendar Name' )`), but formula translations must not emit it (domain
+  review).
+- The default `start_of_week ( d )` compiled to `DATE_TRUNC(week, d)`, which follows Snowflake's
+  `WEEK_START` session parameter. It returned Monday 2026-09-28 for 2026-10-04 here, but returns
+  Monday only while `WEEK_START` is 0 or 1. Whether ThoughtSpot sets `WEEK_START` on its session is
+  unverified.
+- `week_number_of_year(2026-01-04)` = 1, from ISO-style Thursday logic. The ISO year boundary was not probed.
+
+**Defects and gaps.**
+1. **`DAYOFWEEK` → `day_number_of_week` is a plain rename in two translators**, and it is wrong:
+   - `sv_sql.py`: Snowflake `DAYOFWEEK` under the default `WEEK_START = 0` is 0 = Sunday … 6 = Saturday. Exact form: `mod ( day_number_of_week ( d ) , 7 )`. `DAYOFWEEKISO` is the clean rename.
+   - `databricks/mv_sql.py`: Databricks `DAYOFWEEK` is 1 = Sunday. Exact form: `mod ( day_number_of_week ( d ) , 7 ) + 1`.
+   Both are silent wrong numbers. The mapping docs now say so; the code is unchanged.
+2. **Monday-start assumption everywhere.** Every translation built on `day_number_of_week` or
+   `start_of_week` diverges on a Model whose calendar starts the week elsewhere: weekday numbering,
+   week-number/ISO-week compositions, NETWORKDAYS/WORKDAY arithmetic, Qlik `WeekStart`, and
+   Tableau/Sigma `DATETRUNC('week')`. The function maps now say so per row. A source with an explicit
+   week setting is a note pointing at the Model's calendar.
+3. **Residual SQL caveat.** On a warehouse with `WEEK_START` ≠ 0/1, the default `start_of_week` and
+   `day_number_of_week` can disagree.
+4. **Unverified.** Whether a non-default Model calendar changes `day_number_of_week`'s `+3` constant
+   and `start_of_week`'s compiled SQL. Only one cluster with the default calendar was probed.
+
+**Fix.** (1) Correct both translators, using `formula_common` for the shared offset, with tests for each
+weekday. (2) Have converters flag week-dependent output in the conversion report. (3) Probe a session
+with `WEEK_START = 7` and a Model with a non-Monday calendar.
+
+**Target:** 2026-11-30.

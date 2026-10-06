@@ -2,7 +2,7 @@
 # Omni Analytics → ThoughtSpot function mapping
 
 **Status:** research draft (2026-10-06) — not yet reviewed, not live-verified on a ThoughtSpot
-cluster in this pass (except `round`, settled by a 2026-10-06 probe on se-thoughtspot); revised
+cluster in this pass (except `round`, and the `day_number_of_week` / `diff_months` / `diff_years` / string-case semantics, settled by 2026-10-06 probes on se-thoughtspot); revised
 2026-10-06 after an independent review; every ThoughtSpot target is taken from the repo's
 verified references, not invented · **Coverage:** 216/216 functions, operators and constructs across Omni's three
 expression surfaces — **workbook table calculations** (135), the **modelling layer** (50) and
@@ -156,27 +156,30 @@ part, `[B]` stands for **the ThoughtSpot formula of grid column B** — a measur
 | Logic functions | 13 | 9 | 4 | 0 | — |
 | Math and number functions | 50 | 23 | 27 | 0 | — |
 | Position functions | 10 | 2 | 4 | 4 | — |
-| Text functions | 19 | 10 | 9 | 0 | — |
+| Text functions | 19 | 9 | 10 | 0 | — |
 | Operators, literals and references | 23 | 22 | 0 | 1 | — |
-| *Part 1 subtotal* | *135* | *79* | *51* | *5* | — |
+| *Part 1 subtotal* | *135* | *78* | *52* | *5* | — |
 | **Part 2 — modelling layer** | | | | | |
 | Measure `aggregate_type` | 13 | 10 | 2 | 1 | 0 |
 | Measure constructs | 8 | 8 | 0 | 0 | 0 |
 | Dimension constructs | 19 | 10 | 1 | 4 | 4 |
 | View, relationship and topic constructs | 10 | 0 | 0 | 2 | 8 |
 | *Part 2 subtotal* | *50* | *28* | *3* | *7* | *12* |
-| **Part 3 — filter syntax** | 31 | 27 | 1 | 3 | — |
-| **Total** | **216** | **134** | **55** | **15** | **12** |
+| **Part 3 — filter syntax** | 31 | 24 | 4 | 3 | — |
+| **Total** | **216** | **130** | **59** | **15** | **12** |
 
-62% of the 216 constructs (66% of the 204 that are expressions rather than model structure) are
-expressible in ThoughtSpot's native formula language. The split is very uneven by surface. The
-**modelling layer and filter syntax are close to fully native** (55 of 69 expression rows,
-80%) because Omni's model is LookML-shaped and ThoughtSpot's `*_if` and `group_aggregate`
+60% of the 216 constructs (64% of the 204 that are expressions rather than model structure) are
+expressible in ThoughtSpot's native formula language. *(Recounted 2026-10-06 after the
+case-sensitivity probe: EXACT, FIND and the `contains` / `starts_with` / `ends_with` /
+`sql_like` filters moved to `passthrough`; SEARCH and the `case_insensitive` modifier moved to
+`direct` — BL-333.)* The split is very uneven by surface. The
+**modelling layer and filter syntax are mostly native** (52 of 69 expression rows,
+75%) because Omni's model is LookML-shaped and ThoughtSpot's `*_if` and `group_aggregate`
 families cover filtered measures and Omni's `level_of_detail` almost one-to-one. **Table
-calculations are the weak surface** (59%): the `passthrough` set concentrates in **grid
+calculations are the weak surface** (58%): the `passthrough` set concentrates in **grid
 aggregates that are not distributive** (AVERAGE/MEDIAN/STDEV/COUNT over a column of sums —
-E5), **case-insensitive and whitespace text handling** (no native `lower`/`upper`/`trim`/
-`replace`), the **warehouse AI functions**, and **bitwise** arithmetic. The 15 `unmappable` rows are: **five** table-calc
+E5), **case-sensitive comparison and whitespace text handling** (native string comparison
+lowercases both sides; no native `upper`/`lower`/`trim`/`replace`), the **warehouse AI functions**, and **bitwise** arithmetic. The 15 `unmappable` rows are: **five** table-calc
 constructs — positional and cross-query lookup (`MATCH`, `PIVOT`, `VLOOKUP`, `XLOOKUP`,
 cross-tab references); **seven** modelling constructs — `percentile_distinct_on`,
 `dynamic_top_n`, three templated-filter forms (the `.filter` block, `range_start`/`range_end`,
@@ -218,19 +221,19 @@ Source: [date & time functions](https://docs.omni.co/analyze-explore/calculation
 | Omni | Class | ThoughtSpot | Notes |
 |---|---|---|---|
 | `DATE(year, month, day)` | direct | `add_days ( add_months ( to_date ( concat ( to_string ( [y] ) , '-01-01' ) , 'yyyy-MM-dd' ) , [m] - 1 ) , [d] - 1 )` | No native date constructor. The composition builds 1 January of the year and offsets it, which also reproduces the spreadsheet behaviour for out-of-range parts (`DATE(2022, 13, 1)` = 2023-01-01). An all-literal call folds to `to_date ( '2022-12-22' , 'yyyy-MM-dd' )`. |
-| `DATEDIF(start_date, end_date, "unit")` | direct | per-unit — see the unit table below | **Argument order is reversed:** `diff_*` take `( [end] , [start] )`. Unit compositions are the [Excel map](ts-excel-function-mapping.md)'s `DATEDIF` row (Omni follows Sheets semantics): `D`, `M`, `Y` and `YM` are native; `MD`/`YD` fall back to `sql_int_op` ([E3](#how-to-read-the-tables)). |
+| `DATEDIF(start_date, end_date, "unit")` | direct | per-unit — see the unit table below | **Argument order is reversed:** `diff_*` take `( [end] , [start] )`. Unit compositions are the [Excel map](ts-excel-function-mapping.md)'s `DATEDIF` row (Omni follows Sheets semantics): `D`, `M`, `Y` and `YM` are native; `MD`/`YD` fall back to `sql_int_op` ([E3](#how-to-read-the-tables)). The `"M"`/`"Y"` day-of-month correction is **confirmed necessary** by the 2026-10-06 probe: `diff_months` counts month boundaries crossed and `diff_years` is a calendar-year difference (formula reference). |
 | `DAY(date)` | direct | `day ( [d] )` | |
 | `DAYS(end_date, start_date)` | direct | `diff_days ( [end] , [start] )` | Omni's `DAYS` is already end-first, so — unlike `DATEDIF` — no reordering. |
 | `EOMONTH(date_value, offset_months)` | direct | `add_days ( add_months ( start_of_month ( [d] ) , [n] + 1 ) , -1 )` | No native end-of-month; first of month *n+1* minus one day is exact. |
 | `HOUR(time)` | direct | `hour_of_day ( [t] )` | Not `hour` — a bare `hour` does not exist (Power BI map, BL-171). A time-only *string* argument (`HOUR("15:30")`) has no native parse; such literals are folded at conversion time. |
 | `MINUTE(time)` | passthrough | `sql_int_op ( "MINUTE({0})" , [t] )` | **Variant: `sql_int_op`.** No native minute extractor (live-verified 2026-07-30, Power BI map). |
 | `MONTH(date)` | direct | `month_number ( [d] )` | **Not `month`**, which returns the month *name*. |
-| `NETWORKDAYS(start_date, end_date)` | direct | `5 * floor ( ( diff_days ( [e] , [s] ) + 1 ) / 7 ) + mod ( diff_days ( [e] , [s] ) + 1 , 7 ) - greatest ( 0 , least ( day_number_of_week ( [s] ) + mod ( diff_days ( [e] , [s] ) + 1 , 7 ) - 1 , 7 ) - greatest ( day_number_of_week ( [s] ) , 6 ) + 1 )` | The [Excel map](ts-excel-function-mapping.md)'s `NETWORKDAYS` composition, reused with its status (hand-checked across all start weekdays, **not** import-probed; covers `end ≥ start`; assumes `day_number_of_week` is fixed at 1 = Monday, Excel gap G11). Omni has no `holidays` argument, so the Excel map's holiday caveat does not arise. The repo's [business-days recipe](../../agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) UDF, `sql_int_op ( "<db>.<schema>.get_business_days_clamped({0},{1}, TRUE)" , [s] , [e] )`, is the pass-through fallback ([E3](#how-to-read-the-tables)). |
+| `NETWORKDAYS(start_date, end_date)` | direct | `5 * floor ( ( diff_days ( [e] , [s] ) + 1 ) / 7 ) + mod ( diff_days ( [e] , [s] ) + 1 , 7 ) - greatest ( 0 , least ( day_number_of_week ( [s] ) + mod ( diff_days ( [e] , [s] ) + 1 , 7 ) - 1 , 7 ) - greatest ( day_number_of_week ( [s] ) , 6 ) + 1 )` | The [Excel map](ts-excel-function-mapping.md)'s `NETWORKDAYS` composition, reused with its status (hand-checked across all start weekdays, **not** import-probed; covers `end ≥ start`; rests on `day_number_of_week` being fixed at 1 = Monday, which is now live-verified — se-thoughtspot 2026-10-06, Excel gap G11 settled; the weekend arithmetic assumes the Model calendar's Monday week start (the default — Gregorian, Monday — when the Model sets no other calendar; ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere). Omni has no `holidays` argument, so the Excel map's holiday caveat does not arise. The repo's [business-days recipe](../../agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) UDF, `sql_int_op ( "<db>.<schema>.get_business_days_clamped({0},{1}, TRUE)" , [s] , [e] )`, is the pass-through fallback ([E3](#how-to-read-the-tables)). |
 | `NOW()` | direct | `now ( )` | |
 | `SECOND(time)` | passthrough | `sql_int_op ( "SECOND({0})" , [t] )` | **Variant: `sql_int_op`.** As `MINUTE`. |
 | `TODAY()` | direct | `today ( )` | |
-| `WEEKDAY(date, [return_type])` | direct | `mod ( day_number_of_week ( [d] ) , 7 ) + 1` | **Base shift is mandatory.** Omni's default numbers 1 = Sunday; ThoughtSpot's `day_number_of_week` numbers 1 = Monday … 7 = Sunday. `mod ( … , 7 ) + 1` maps Sunday 7 → 1 and Monday 1 → 2. `return_type` 2 (Monday = 1) is `day_number_of_week ( [d] )` unchanged; 3 (Monday = 0) is `day_number_of_week ( [d] ) - 1`. |
-| `WEEKNUM(date, [type])` | direct | `floor ( ( day_number_of_year ( [d] ) - 1 + mod ( day_number_of_week ( start_of_year ( [d] ) ) , 7 ) ) / 7 ) + 1` | The [Excel map](ts-excel-function-mapping.md)'s `WEEKNUM` composition for type 1 (Sunday start, the week containing 1 January is week 1 — Omni's default). Type 2 (Monday start) replaces the offset with `day_number_of_week ( start_of_year ( [d] ) ) - 1`. `week_number_of_year` is deliberately not used: its week start is an instance setting. Status carried over: *not* import-probed, and assumes a fixed Monday base for `day_number_of_week` (Excel gap G11). |
+| `WEEKDAY(date, [return_type])` | direct | `mod ( day_number_of_week ( [d] ) , 7 ) + 1` | **Base shift is mandatory.** Omni's default numbers 1 = Sunday; ThoughtSpot's `day_number_of_week` numbers 1 = Monday … 7 = Sunday — **fixed, live-verified** (se-thoughtspot, 2026-10-06: compiles to `(MOD((DATEDIFF(day, DATE '1970-01-01', d) + 3), 7) + 1)`, independent of the warehouse's `WEEK_START`; formula reference — settles Excel gap G11). `mod ( … , 7 ) + 1` maps Sunday 7 → 1 and Monday 1 → 2. `return_type` 2 (Monday = 1) is `day_number_of_week ( [d] )` unchanged; 3 (Monday = 0) is `day_number_of_week ( [d] ) - 1`. The mapping assumes the Model calendar's Monday week start (the default — Gregorian, Monday — when the Model sets no other calendar; ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere. |
+| `WEEKNUM(date, [type])` | direct | `floor ( ( day_number_of_year ( [d] ) - 1 + mod ( day_number_of_week ( start_of_year ( [d] ) ) , 7 ) ) / 7 ) + 1` | The [Excel map](ts-excel-function-mapping.md)'s `WEEKNUM` composition for type 1 (Sunday start, the week containing 1 January is week 1 — Omni's default). Type 2 (Monday start) replaces the offset with `day_number_of_week ( start_of_year ( [d] ) ) - 1`. `week_number_of_year` is deliberately not used: its compiled SQL uses ISO-style Thursday logic (`week_number_of_year(2026-01-04)` = 1, live probe 2026-10-06), which is neither type 1 nor type 2. The `day_number_of_week` fixed Monday base the composition rests on is now **live-verified** (2026-10-06, Excel gap G11 settled); the composition itself is still *not* import-probed. The composition assumes the Model calendar's Monday week start (the default — Gregorian, Monday — when the Model sets no other calendar; ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere; an Omni `week_start_day` / fiscal setting corresponds to the Model's calendar, not to a formula change — see the `week_start_day` row. |
 | `YEAR(date)` | direct | `year ( [d] )` | |
 
 ### `DATEDIF` units *(not counted — arguments)*
@@ -238,8 +241,8 @@ Source: [date & time functions](https://docs.omni.co/analyze-explore/calculation
 | Unit | ThoughtSpot | Class |
 |---|---|---|
 | `"D"` | `diff_days ( [end] , [start] )` | direct |
-| `"M"` | `diff_months ( [end] , [start] ) - if ( day ( [end] ) < day ( [start] ) ) then 1 else 0` | direct — complete months, per the Excel map; assumes `diff_months` counts month *boundaries* (as Snowflake `DATEDIFF('month')` does). *Unverified* (Excel gap G12). |
-| `"Y"` | `floor ( [formula_Months] / 12 )` (`[formula_Months]` = the `"M"` formula) | direct — as the Excel map; same G12 assumption. `"YM"` is `mod ( [formula_Months] , 12 )`. |
+| `"M"` | `diff_months ( [end] , [start] ) - if ( day ( [end] ) < day ( [start] ) ) then 1 else 0` | direct — complete months, per the Excel map. The correction is **confirmed necessary**: `diff_months` compiles to `DATEDIFF(month, epoch, end) - DATEDIFF(month, epoch, start)`, i.e. month *boundaries* (live probe, se-thoughtspot, 2026-10-06: Jan31→Feb1 = 1, Jan31→Feb28 = 1, Jan20→Mar15 = 2; Excel gap G12 settled). The composition itself is not import-probed. |
+| `"Y"` | `floor ( [formula_Months] / 12 )` (`[formula_Months]` = the `"M"` formula) | direct — as the Excel map. Native `diff_years` is **not** a substitute: it is `EXTRACT(YEAR FROM end) - EXTRACT(YEAR FROM start)` (live probe 2026-10-06: Dec31→Jan1 = 1, 2025-07-01→2026-06-30 = 1). `"YM"` is `mod ( [formula_Months] , 12 )`. |
 | `"YM"` | `mod ( [formula_Months] , 12 )` | direct — as the Excel map. |
 | `"MD"` / `"YD"` | `sql_int_op ( "<dialect expression>" , [start] , [end] )` | passthrough — remainder units with no clean native form (Microsoft itself documents `"MD"` as unreliable — Excel map). |
 
@@ -355,8 +358,8 @@ and `contains` (formula reference, BL-170).
 | `CONCAT(string1, string2, ...)` | direct | `concat ( [a] , [b] , ... )` | N-ary. |
 | `CONCATENATE(string1, ...)` | direct | `concat ( [a] , [b] , ... )` | Alias. |
 | `CLEAN(text)` | passthrough | `sql_string_op ( "REGEXP_REPLACE({0}, '[[:cntrl:]]', '')" , [s] )` | **Variant: `sql_string_op`.** Aligned with the [Excel map](ts-excel-function-mapping.md)'s `CLEAN` row. Omni says "non-printable ASCII characters removed", which `[:cntrl:]` (0–31 *and* 127) matches more closely than Excel's 0–31; the Excel map's *unverified* status (POSIX classes in Snowflake's regex dialect) carries over. |
-| `EXACT(string1, string2)` | direct | `[a] = [b]` | Case-sensitive equality. ThoughtSpot pushes the comparison to the warehouse, which is case-sensitive on Snowflake by default; a case-insensitive collation would break parity. Flagged. |
-| `FIND(find_text, within_text)` | direct | `strpos ( [within] , [find] )` | **Operand order reversed** (haystack first). 1-based. **No-match differs:** `strpos` returns **0** (live behaviour, formula reference) where a spreadsheet `FIND` errors; Omni surfaces errors as null, so Omni most likely yields null — `nullif ( strpos ( [within] , [find] ) , 0 )` restores that, flagged pending an Omni probe. Omni's FIND has no start-index argument, so nothing is dropped. |
+| `EXACT(string1, string2)` | passthrough | `sql_bool_op ( "{0} = {1}" , [a] , [b] )` | **Variant: `sql_bool_op`.** Case-sensitive equality. **Reclassified from `direct` (2026-10-06):** native `[a] = [b]` is **case-insensitive** — ThoughtSpot compiles it to `LOWER(a) = …` with literals lowercased at compile time (live probe, se-thoughtspot, 2026-10-06; [formula reference](../../agents/shared/schemas/thoughtspot-formula-patterns.md), "String comparison is case-insensitive"), so `'Abc' = 'abc'` is true natively. The pass-through keeps Snowflake's `=`, which is case-sensitive under the default collation. BL-333. |
+| `FIND(find_text, within_text)` | passthrough | `sql_int_op ( "POSITION({0} IN {1})" , [find] , [within] )` | **Variant: `sql_int_op`.** Case-sensitive. **Reclassified from `direct` (2026-10-06):** native `strpos ( [within] , [find] )` compiles to `POSITION('x' IN LOWER(within))` — case-insensitive (live probe, se-thoughtspot, 2026-10-06; [formula reference](../../agents/shared/schemas/thoughtspot-formula-patterns.md)) — so it is `SEARCH`, not `FIND`. Snowflake `POSITION` is case-sensitive under the default collation and keeps the 1-based / 0-when-absent contract. **No-match differs:** 0 where Omni most likely yields null (Omni surfaces errors as null) — wrap the template in `NULLIF(…, 0)` if null is wanted, flagged pending an Omni probe. Omni's FIND has no start-index argument. BL-333. |
 | `LEFT(text, [num_chars])` | direct | `left ( [s] , n )` | `num_chars` defaults to 1. |
 | `LEN(text)` | direct | `strlen ( [s] )` | |
 | `LOWER(text)` | passthrough | `sql_string_op ( "LOWER({0})" , [s] )` | **Variant: `sql_string_op`.** No native `lower`. |
@@ -364,7 +367,7 @@ and `contains` (formula reference, BL-170).
 | `PROPER(text)` | passthrough | `sql_string_op ( "INITCAP({0})" , [s] )` | **Variant: `sql_string_op`.** |
 | `REPLACE(old_text, start_num, num_chars, new_text)` | direct | `concat ( left ( [s] , [start] - 1 ) , [new] , substr ( [s] , [start] - 1 + [n] , strlen ( [s] ) ) )` | **Positional** replace (not substring substitution — that is `SUBSTITUTE`). Native by composition. |
 | `RIGHT(text, [num_chars])` | direct | `right ( [s] , n )` | |
-| `SEARCH(find_text, within_text)` | passthrough | `sql_int_op ( "POSITION(LOWER({0}) IN LOWER({1}))" , [find] , [within] )` | **Variant: `sql_int_op`.** Case-insensitive, which needs `LOWER`, which is a pass-through. **No-match:** SQL `POSITION` returns 0, where Omni most likely returns null (as `FIND`); wrap the template in `NULLIF(…, 0)` if null is wanted — flagged. |
+| `SEARCH(find_text, within_text)` | direct | `strpos ( [within] , [find] )` | **Reclassified from `passthrough` (2026-10-06):** Omni's `SEARCH` is case-insensitive, and so is native `strpos` — it compiles to `POSITION('x' IN LOWER(within))` with the literal lowercased at compile time (live probe, se-thoughtspot, 2026-10-06; [formula reference](../../agents/shared/schemas/thoughtspot-formula-patterns.md)). **Operand order reversed** (haystack first). **No-match:** `strpos` returns 0, where Omni most likely returns null (as `FIND`); `nullif ( strpos ( [within] , [find] ) , 0 )` if null is wanted — flagged. Only a literal needle was probed (it was lowercased at compile time); a **column** `find_text` is *untested* — the haystack is wrapped in `LOWER`, the needle may not be. |
 | `SUBSTITUTE(text, old_text, new_text)` | passthrough | `sql_string_op ( "REPLACE({0}, {1}, {2})" , [s] , [old] , [new] )` | **Variant: `sql_string_op`.** No native `replace` (BL-170). Omni has no `instance_num` argument. |
 | `TRIM(text)` | passthrough | `sql_string_op ( "REGEXP_REPLACE(TRIM({0}), ' +', ' ')" , [s] )` | **Variant: `sql_string_op`.** Omni's TRIM also collapses *repeated interior* spaces ("leaving only single spaces between words"), which SQL `TRIM` does not — so the template is not just `TRIM({0})`. No native `trim` (BL-170). |
 | `T(value)` | direct | `[x]` for a text column; `''` otherwise | Type-dispatched at conversion time, as `ISNUMBER`. |
@@ -388,7 +391,7 @@ when it meets one.
 | `a ^ b` | direct | `pow ( [a] , [b] )` | `pow`, not `power`. |
 | `a > b` | direct | `[a] > [b]` | |
 | `a >= b` | direct | `[a] >= [b]` | |
-| `a = b` | direct | `[a] = [b]` | |
+| `a = b` | direct | `[a] = [b]` | On text, both sides are case-insensitive: Sheets-style `=` ignores case, and ThoughtSpot compiles `=` to `LOWER(a) = …` with literals lowercased (live probe, se-thoughtspot, 2026-10-06; BL-333) — so the native form is exact. For a case-sensitive test use `EXACT`. |
 | `a < b` | direct | `[a] < [b]` | |
 | `a <= b` | direct | `[a] <= [b]` | |
 | `-x` (unary) | direct | `- [x]` | Omni ignores unary `+`. |
@@ -483,8 +486,8 @@ new Omni aggregate type breaks the Ossie import rather than degrading.
 | `level_of_detail` on a dimension | structural | a SQL View (or warehouse table) computing the per-key aggregate, joined on the `fixed` key | **Silent:** expression is the row-level operand (`users.age`), not the aggregate | Omni's LoD *dimension* is categorical — it can be grouped by. A ThoughtSpot `group_aggregate` formula is measure-typed and cannot be a grouping attribute, so the formula form covers only measure use (`group_aggregate ( max ( [USERS::Age] ) , { [USERS::Country] } , query_filters ( ) )`). Grouping by it needs model structure. |
 | `dynamic_top_n: {n, by, desc, else}` | unmappable | — issue | **Silent:** plain dimension, setting stashed | A dimension whose *values* depend on a ranking query. `rank` is aggregate-only, so `if ( rank ( … ) <= 10 ) …` is a measure, not a groupable attribute. ThoughtSpot's search-time `top 10 [d] by [m]` covers the query use; a model-level equivalent does not exist. |
 | `convert_tz` | structural | connection / user timezone | **Silent:** stashed generically | Timezone conversion is runtime configuration in ThoughtSpot (see the repo's [`ts-variable-timezone`](../../agents/cli/ts-variable-timezone/SKILL.md) skill), not a formula. `convert_tz: false` → leave the column unconverted. |
-| `custom_calendar` / model `fiscal_month_offset` | structural | ThoughtSpot custom calendar; `fiscal` argument on date functions | `custom_calendar` (a dimension parameter): stashed generically, silently (`omni_to_ossie.py:428-437`). `fiscal_month_offset` is a **model-file** setting: the model file is stashed verbatim (`README.md:126`) | Fiscal *offsets* are native (`year ( [d] , fiscal )`); week-based retail calendars need a calendar table — see [`ts-object-calendar-builder`](../../agents/cli/ts-object-calendar-builder/SKILL.md). |
-| `week_start_day` | structural | instance / calendar week-start setting | As a dimension parameter ([docs](https://docs.omni.co/modeling/dimensions/parameters/week-start-day.md)): stashed generically, silently. As a model-level setting it rides in the verbatim model-file stash (`README.md:126`) | Affects `week` timeframes and `start_of_week`. |
+| `custom_calendar` / model `fiscal_month_offset` | structural | ThoughtSpot custom calendar; `fiscal` argument on date functions | `custom_calendar` (a dimension parameter): stashed generically, silently (`omni_to_ossie.py:428-437`). `fiscal_month_offset` is a **model-file** setting: the model file is stashed verbatim (`README.md:126`) | Fiscal *offsets* are native (`year ( [d] , fiscal )`); week-based retail calendars need a calendar table — see [`ts-object-calendar-builder`](../../agents/cli/ts-object-calendar-builder/SKILL.md). Omni's `custom_calendar` / `fiscal_month_offset` corresponds to the ThoughtSpot **Model's calendar** (no formula change): translated formulas do not name a calendar, and the Model supplies it — Gregorian with a Monday week start when nothing else is set (ThoughtSpot domain review, 2026-10-06). Stays `structural`. |
+| `week_start_day` | structural | instance / calendar week-start setting | As a dimension parameter ([docs](https://docs.omni.co/modeling/dimensions/parameters/week-start-day.md)): stashed generically, silently. As a model-level setting it rides in the verbatim model-file stash (`README.md:126`) | Affects `week` timeframes and `start_of_week`. ThoughtSpot's default is Gregorian with a **Monday** week start (ThoughtSpot domain review, 2026-10-06) — `monday` needs nothing. Another start day corresponds to the ThoughtSpot Model's calendar (no formula change); every Monday-based row in this map (`WEEKDAY`, `WEEKNUM`, `NETWORKDAYS`, `day_of_week_num`, the `day_of_week` filter, the `week` timeframe) diverges if the Model's calendar starts the week elsewhere. `day_number_of_week` stays 1 = Monday under the default calendar (live probe 2026-10-06). The default `start_of_week` compiled to `DATE_TRUNC(week, d)`, Monday only under warehouse `WEEK_START` 0/1 — BL-334. |
 | `-- DO NOT PARSE` raw SQL | passthrough | `sql_double_op ( "SNOWFLAKE.CORTEX.SENTIMENT({0})" , [T::State] )` (Omni's own example) | Emitted as an `ANSI_SQL` expression — a **documented limitation**, not a bug: Ossie has no `OMNI` dialect, and `--dialect` can prepend a warehouse dialect on export (`_common.py:39-43`, `README.md:139-143`) | **Variant per return type.** By definition dialect SQL Omni will not parse; it can only be a pass-through. |
 | Templated value `{{filters.view.field.value}}` | direct | a ThoughtSpot runtime parameter, e.g. `if ( [Timeframe Selector] = 'Daily' ) then date ( [T::d] ) else …` | **Dropped from the Ossie model**, stashed, warned (`omni_to_ossie.py:319-334`) | A filter-only field used as a parameter maps to a ThoughtSpot parameter (formula reference, Runtime Parameters). `direct` only when the SQL around the template is itself translatable; a parameter inside a pass-through is not portable (Ossie map E9). |
 | Templated filter block `{{# view.field.filter }} … {{/ … }}` (+ `{{^ }}` default) | unmappable | — issue | Dropped, stashed, warned (`omni_to_ossie.py:319-334`) | Injects the user's *filter predicate* as SQL text. ThoughtSpot formulas cannot read a filter predicate except through `query_filters ( )` inside `group_aggregate`. The common "selector" idiom (`WHEN {{# x.timeframe_selector.filter }} 'Daily' {{/ }}`) is rebuilt by hand as a list parameter. |
@@ -500,7 +503,7 @@ set `raw, date, week, month, quarter, year`.
 |---|---|---|
 | `raw` | `[T::d]` | direct |
 | `date` | `date ( [T::d] )` | direct |
-| `week` | `start_of_week ( [T::d] )` | direct — week start is an instance setting; align with `week_start_day`. |
+| `week` | `start_of_week ( [T::d] )` | direct — assumes the Model calendar's Monday week start (the default — Gregorian, Monday — when the Model sets no other calendar; ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere. Omni's default week also starts on Monday; a non-Monday `week_start_day` corresponds to the ThoughtSpot Model's calendar (no formula change). *Residual caveat:* the default form compiled to Snowflake `DATE_TRUNC(week, d)` (live probe 2026-10-06), which is Monday only while the warehouse's `WEEK_START` is 0 or 1 — BL-334. |
 | `month` | `start_of_month ( [T::d] )` | direct |
 | `quarter` | `start_of_quarter ( [T::d] )` | direct |
 | `year` | `start_of_year ( [T::d] )` | direct — assumes Omni's `year` is a truncated date, not an integer (displayed as `2024`); if an integer, `year ( [T::d] )`. |
@@ -511,13 +514,13 @@ set `raw, date, week, month, quarter, year`.
 | `day_of_month` | `day ( [T::d] )` | direct |
 | `day_of_quarter` | `day_number_of_quarter ( [T::d] )` | direct — Omni: fiscal day of quarter when a fiscal offset is set → add `fiscal`. |
 | `day_of_week_name` | `day_of_week ( [T::d] )` | direct |
-| `day_of_week_num` | `day_number_of_week ( [T::d] )` | direct — **base unverified**: ThoughtSpot is 1 = Monday; Omni's base is undocumented. |
+| `day_of_week_num` | `day_number_of_week ( [T::d] )` | direct — ThoughtSpot's base is **1 = Monday … 7 = Sunday** (live-verified, se-thoughtspot, 2026-10-06); Omni's base is still undocumented. Assumes the Model calendar's Monday week start (the default — Gregorian, Monday — when the Model sets no other calendar; ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere. |
 | `day_of_year` | `day_number_of_year ( [T::d] )` | direct |
 | `hour_of_day` | `hour_of_day ( [T::d] )` | direct |
 | `month_name` | `month ( [T::d] )` | direct — `month` returns the name. |
 | `month_num` | `month_number ( [T::d] )` | direct |
 | `quarter_of_year` | `quarter_number ( [T::d] )` | direct |
-| `fiscal_quarter` | `quarter_number ( [T::d] , fiscal )` | direct — assumes a number; if Omni returns a truncated fiscal-quarter date, `start_of_quarter ( [T::d] , fiscal )`. |
+| `fiscal_quarter` | `quarter_number ( [T::d] , fiscal )` | direct — assumes a number; if Omni returns a truncated fiscal-quarter date, `start_of_quarter ( [T::d] , fiscal )`. Omni's fiscal setting corresponds to the ThoughtSpot Model's calendar (no formula change). |
 | `fiscal_year` | `year ( [T::d] , fiscal )` | direct |
 
 ### `duration` intervals *(not counted — arguments)*
@@ -533,8 +536,11 @@ set `raw, date, week, month, quarter, year`.
 | `quarters` | `diff_quarters ( [T::End] , [T::Start] )` |
 | `years` | `diff_years ( [T::End] , [T::Start] )` |
 
-Whether Omni counts complete intervals or boundaries crossed is undocumented, as is the
-ThoughtSpot side for months and years (see `DATEDIF`).
+Whether Omni counts complete intervals or boundaries crossed is undocumented. The
+ThoughtSpot side is now known (live probe, se-thoughtspot, 2026-10-06; formula reference):
+`diff_months` counts month **boundaries** crossed and `diff_years` is a **calendar-year**
+difference (`EXTRACT(YEAR …)` subtraction). If Omni turns out to count complete intervals, use
+the `DATEDIF` `"M"`/`"Y"` compositions instead.
 
 ## View, relationship and topic constructs
 
@@ -602,8 +608,8 @@ on any fetched page.
 |---|---|---|---|
 | `and` | direct | `( c1 ) and ( c2 )` | Sibling fields in one `filters:` block are also AND-ed. |
 | `or` | direct | `( c1 ) or ( c2 )` | |
-| `is` | direct | `[x] = 'v'`; array → `[x] in { 'a' , 'b' }`; `true` → `[x] = true`; `null` → `isnull ( [x] )` | `is: falsey` (false *or* null) → `( [x] = false ) or isnull ( [x] )`. Legacy `is: ""` outside an `and`/`or` means *no filter* — emit nothing. |
-| `not` | direct | `[x] != 'v'`; array → `not ( [x] in { 'a' , 'b' } )` | Omni defines `not` as inequality, the negation of `is` ([not](https://docs.omni.co/modeling/filters/operators/not.md)). No `not in` keyword. *Unsourced:* the operator page does not say whether null rows are kept; SQL `<>` / `NOT IN` drop them — flagged. |
+| `is` | direct | `[x] = 'v'`; array → `[x] in { 'a' , 'b' }`; `true` → `[x] = true`; `null` → `isnull ( [x] )` | `is: falsey` (false *or* null) → `( [x] = false ) or isnull ( [x] )`. Legacy `is: ""` outside an `and`/`or` means *no filter* — emit nothing. **Case:** native string `=` is case-insensitive (live probe, se-thoughtspot, 2026-10-06; BL-333). Whether Omni's `is` on a string is case-sensitive by default is unsourced here (the `case_insensitive` modifier suggests it is); if it is, exact parity is `sql_bool_op ( "{0} = {1}" , [x] , 'v' )`. `in { }` was *not* probed. |
+| `not` | direct | `[x] != 'v'`; array → `not ( [x] in { 'a' , 'b' } )` | Omni defines `not` as inequality, the negation of `is` ([not](https://docs.omni.co/modeling/filters/operators/not.md)). No `not in` keyword. *Unsourced:* the operator page does not say whether null rows are kept; SQL `<>` / `NOT IN` drop them — flagged. **Case:** whether ThoughtSpot `!=` lowercases like `=` was *not* probed (2026-10-06); see the `is` row. |
 | `not_` prefix (`not_contains`, `not_day_of_week`, …) | direct | `not ( <condition> )` | Not valid on `is`, `and`, `or` ([filter syntax](https://docs.omni.co/modeling/filters/index.md), Negation). *Unsourced:* null handling, as `not`. |
 | `cancel_query_filter: true` | direct | filter argument `query_filters ( ) - { [T::x] }` inside `group_aggregate` | See the LoD row above and its derived-formula caveat. |
 | `field_name_in_query` + `query_structure` | unmappable | — issue | Filters by another query's results (e.g. top-10 users). No formula form; the ThoughtSpot analogue is a reusable **Set** (cohort) — see [`ts-object-set-manager`](../../agents/cli/ts-object-set-manager/SKILL.md). |
@@ -615,7 +621,7 @@ on any fetched page.
 | `date_offset_from_query` (+ `cancel_query_filter`) | unmappable | — issue | Shifts the **query's own date filter** (period-over-period). ThoughtSpot formulas cannot read a filter's value; the manual rebuild is the parameter pattern in [`sply-parameter.md`](../../agents/shared/worked-examples/powerbi/sply-parameter.md). |
 | `day_of_month` | direct | `day ( [d] ) = 15` | |
 | `day_of_quarter` | direct | `day_number_of_quarter ( [d] ) = 1` | |
-| `day_of_week` | direct | `day_of_week ( [d] ) = 'Monday'`; numeric `n` → `mod ( day_number_of_week ( [d] ) , 7 ) = n` | Omni accepts the full day name **or a number 0 = Sunday … 6 = Saturday** ([day_of_week](https://docs.omni.co/modeling/filters/operators/day-of-week.md)). `mod ( … , 7 )` maps ThoughtSpot's 1 = Monday … 7 = Sunday onto that base (assumes the fixed Monday base, Excel gap G11). |
+| `day_of_week` | direct | `day_of_week ( [d] ) = 'Monday'`; numeric `n` → `mod ( day_number_of_week ( [d] ) , 7 ) = n` | Omni accepts the full day name **or a number 0 = Sunday … 6 = Saturday** ([day_of_week](https://docs.omni.co/modeling/filters/operators/day-of-week.md)). `mod ( … , 7 )` maps ThoughtSpot's 1 = Monday … 7 = Sunday onto that base (the fixed Monday base is live-verified, se-thoughtspot 2026-10-06 — Excel gap G11 settled). The numeric form assumes the Model calendar's Monday week start (the default — Gregorian, Monday — when the Model sets no other calendar; ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere. |
 | `day_of_year` | direct | `day_number_of_year ( [d] ) = 1` | |
 | `hour_of_day` | direct | `hour_of_day ( [d] ) = 9` | |
 | `month_of_year` | direct | `month_number ( [d] ) = 1`; a name → `month ( [d] ) = 'January'` | Omni accepts the full month name or 1–12 ([month_of_year](https://docs.omni.co/modeling/filters/operators/month-of-year.md)). |
@@ -625,12 +631,12 @@ on any fetched page.
 | `greater_than_or_equal_to` | direct | `[x] >= 10` | |
 | `less_than` | direct | `[x] < 10` | |
 | `less_than_or_equal_to` | direct | `[x] <= 10` | |
-| `contains` | direct | `contains ( [s] , 'Blob' )` | Omni's `contains` is **case-sensitive by default** ([contains](https://docs.omni.co/modeling/filters/operators/contains.md)). *Case-sensitivity of ThoughtSpot `contains` is not recorded in the formula reference — verify before calling this exact.* |
-| `starts_with` | direct | `strpos ( [s] , 'Blob' ) = 1` | No native `starts_with` (BL-170). Omni: case-sensitive by default ([starts_with](https://docs.omni.co/modeling/filters/operators/starts-with.md)); `left ( [s] , 4 ) = 'Blob'` is the equivalent form when the prefix is a literal. |
-| `ends_with` | direct | `right ( [s] , 4 ) = 'Blob'` (`n` = the suffix length, folded at conversion time) | No native `ends_with` (BL-170); `right` is native, so the literal-suffix case needs no `substr` arithmetic. Source: [ends_with](https://docs.omni.co/modeling/filters/operators/ends-with.md) (case-sensitive by default). |
+| `contains` | passthrough | `sql_bool_op ( "CONTAINS({0}, {1})" , [s] , 'Blob' )` | **Variant: `sql_bool_op`.** Omni's `contains` is **case-sensitive by default** ([contains](https://docs.omni.co/modeling/filters/operators/contains.md)). **Reclassified from `direct` (2026-10-06):** native `contains ( [s] , 'Blob' )` compiles to `LOWER(s) LIKE '%blob%' ESCAPE '!'` — case-insensitive (live probe, se-thoughtspot, 2026-10-06; [formula reference](../../agents/shared/schemas/thoughtspot-formula-patterns.md)). Snowflake `CONTAINS` is case-sensitive under the default collation. With `case_insensitive: true`, native `contains` is exact (see that row). BL-333. |
+| `starts_with` | passthrough | `sql_bool_op ( "STARTSWITH({0}, {1})" , [s] , 'Blob' )` | **Variant: `sql_bool_op`.** Omni: case-sensitive by default ([starts_with](https://docs.omni.co/modeling/filters/operators/starts-with.md)). **Reclassified from `direct` (2026-10-06):** the native composition `strpos ( [s] , 'Blob' ) = 1` rests on `strpos`, which lowercases (live probe, se-thoughtspot, 2026-10-06; [formula reference](../../agents/shared/schemas/thoughtspot-formula-patterns.md)); the composed form itself was *not* probed. `left ( [s] , 4 ) = 'Blob'` uses native `=`, which also lowercases. No native `starts_with` (BL-170). BL-333. |
+| `ends_with` | passthrough | `sql_bool_op ( "ENDSWITH({0}, {1})" , [s] , 'Blob' )` | **Variant: `sql_bool_op`.** Omni: case-sensitive by default ([ends_with](https://docs.omni.co/modeling/filters/operators/ends-with.md)). **Reclassified from `direct` (2026-10-06):** the native form `right ( [s] , 4 ) = 'Blob'` ends in a native `=`, which compiles to `LOWER(…) = 'blob'` (live probe, se-thoughtspot, 2026-10-06; [formula reference](../../agents/shared/schemas/thoughtspot-formula-patterns.md)). No native `ends_with` (BL-170). BL-333. |
 | `is_empty` | direct | `[s] = ''` (`false` → `[s] != ''`) | Omni's [is_empty](https://docs.omni.co/modeling/filters/operators/is-empty.md) page says "empty string values" and its `or` example lists "is empty" (`is: ""`) and "is null" (`is: null`) as separate conditions, so null is **not** included. Legacy `is: ""` reads as `is_empty: true` inside `and`/`or` and as *no filter* outside them (same page). |
-| `sql_like` | direct | prefix / suffix / `contains` composition by pattern shape (source: [sql_like](https://docs.omni.co/modeling/filters/operators/sql-like.md); `%` and `_` wildcards, case-sensitive by default) | Interior wildcards and `_` fall back to `sql_bool_op ( "{0} LIKE {1}" , [s] , 'a%b' )` ([E3](#how-to-read-the-tables)). |
-| `case_insensitive: true` (modifier) | passthrough | `sql_bool_op ( "LOWER({0}) = LOWER('admin')" , [s] )` (per wrapped operator) | **Variant: `sql_bool_op`.** Needs `LOWER`, which is not native. |
+| `sql_like` | passthrough | `sql_bool_op ( "{0} LIKE {1}" , [s] , 'a%b' )` | **Variant: `sql_bool_op`.** Source: [sql_like](https://docs.omni.co/modeling/filters/operators/sql-like.md) — `%` and `_` wildcards, **case-sensitive by default**. **Reclassified from `direct` (2026-10-06):** the native prefix / suffix / `contains` compositions this row used all lowercase both sides (live probe, se-thoughtspot, 2026-10-06; [formula reference](../../agents/shared/schemas/thoughtspot-formula-patterns.md)), so only Snowflake `LIKE` (case-sensitive) keeps the semantics for every pattern shape. BL-333. |
+| `case_insensitive: true` (modifier) | direct | the wrapped operator's **native** form: `[s] = 'admin'`, `contains ( [s] , 'admin' )`, `strpos ( [s] , 'admin' ) = 1` | **Reclassified from `passthrough` (2026-10-06):** ThoughtSpot's native string comparison is already case-insensitive — `[s] = 'admin'` compiles to `LOWER(s) = 'admin'` and `contains` to `LOWER(s) LIKE '%admin%'`, with literals lowercased at compile time (live probe, se-thoughtspot, 2026-10-06; [formula reference](../../agents/shared/schemas/thoughtspot-formula-patterns.md), "String comparison is case-insensitive"). So the modifier needs no `LOWER` pass-through. *Not tested:* `!=` and `in { }` (the `not` / array forms of `is`), and the composed `strpos … = 1` form. |
 
 ### Relative date values *(not counted — arguments)*
 
@@ -701,8 +707,16 @@ measure as raw SQL, losing the structured Omni form even where Omni has one.
 **ThoughtSpot gaps that drive the `passthrough` set** (verified absences, from the formula
 reference and the Ossie/Power BI maps):
 
-1. No `lower` / `upper` / `trim` / `replace` — 8 Omni rows (LOWER, UPPER, TRIM, SUBSTITUTE,
-   SEARCH, PROPER, CLEAN, `case_insensitive`) cannot be native.
+1. No `lower` / `upper` / `trim` / `replace` — 6 Omni rows (LOWER, UPPER, TRIM, SUBSTITUTE,
+   PROPER, CLEAN) cannot be native. (SEARCH and `case_insensitive` left this list on
+   2026-10-06: native comparison is already case-insensitive.)
+1a. **No case-sensitive native string comparison** (live probe, se-thoughtspot, 2026-10-06;
+   formula reference, "String comparison is case-insensitive"; BL-333). `=`, `contains` and
+   `strpos` compile to `LOWER(col) …` with literals lowercased at compile time, so 6 rows whose
+   Omni semantics are case-sensitive — `EXACT`, `FIND`, and the `contains` / `starts_with` /
+   `ends_with` / `sql_like` filters — are `sql_bool_op` / `sql_int_op` pass-throughs over
+   Snowflake's case-sensitive default collation. *Not tested:* `!=`, `in { }`, the composed
+   `strpos … = 1` form, and string join keys.
 2. No grid-row aggregation other than the distributive cases — 26 of the 27 math
    pass-throughs are aggregates *over a column of aggregates* (E5). A native
    "aggregate over the query result" (`AGG2` over `query_groups ( )` rows) would make most of
@@ -737,6 +751,14 @@ upstream, most severe first:
 
 **Contradictions inside the repo's own references** (to settle before a converter is built):
 
+- **Week base, month/year differences and string case — SETTLED, live probe on
+  se-thoughtspot, 2026-10-06** (formula reference rows `day_number_of_week`, `start_of_week`,
+  `diff_months`, `diff_years`, `contains`, `strpos`): `day_number_of_week` is fixed 1 = Monday
+  (Excel gap G11 — `WEEKDAY`, `WEEKNUM`, `NETWORKDAYS` and the `day_of_week` filter rest on it);
+  `diff_months` counts month boundaries and `diff_years` is a calendar-year difference (Excel
+  gap G12 — the `DATEDIF` `"M"`/`"Y"` correction is needed); string comparison is
+  case-insensitive (BL-333 — six rows reclassified above). **Calendars** (ThoughtSpot domain review, 2026-10-06): the `start_of_*` functions accept an optional custom-calendar string argument, but translations do not use it — the Model supplies the calendar, Gregorian with a Monday week start by default, so every Monday-based row here assumes that and diverges under a Model calendar that starts elsewhere. The default `start_of_week` compiled to `DATE_TRUNC(week, d)`, which is Monday only under warehouse `WEEK_START` 0/1 (BL-334).
+
 - **`round` second argument — SETTLED, live probe on se-thoughtspot, 2026-10-06:** the second
   argument is an **increment**. ThoughtSpot compiles `round ( x , n )` to
   `n * ROUND(x / NULLIF(n, 0))`; on 1234.5678 it returned `round ( x , 0 )` = NULL,
@@ -759,8 +781,9 @@ topic filters; null handling of `not` / `not_*`; FIND/SEARCH no-match result (nu
 
 **Not live-verified in this pass:** every composition marked as such above —
 `sum`/`average`/`median` over `group_aggregate ( … , query_groups ( ) + { key } , … )`, the
-`WEEKDAY` base shift, the `WEEKNUM` and `NETWORKDAYS` compositions (reused from the Excel map
-with its status), the `DATE` composition, `diff_months`/`diff_years` semantics (Excel gap G12),
+`WEEKNUM` and `NETWORKDAYS` compositions (reused from the Excel map with its status — their
+`day_number_of_week` base is now live-verified, but the compositions are not import-probed),
+the `DATE` composition, the `start_of_week` `WEEK_START` dependence (BL-334),
 the FP:432-441 MAX/MIN/COUNT fast paths, and the `TEXT` format-model translation. The
 `… OVER ()` grid templates are **contradicted** by the formula reference (lines 702-722), not
 merely unverified.
