@@ -316,13 +316,13 @@ formula change.
 | `start_of_hour` | `start_of_hour ( [time] )` | Time truncated to the hour |
 | `start_of_min` | `start_of_min ( [time] )` | Time truncated to the minute |
 | `diff_days` | `diff_days ( [end] , [start] )` | Days between — note arg order (end first) |
-| `diff_weeks` | `diff_weeks ( [end] , [start] )` | Weeks between. Optional `fiscal` third param. |
+| `diff_weeks` | `diff_weeks ( [end] , [start] )` | **Week boundaries crossed, with a FIXED Monday week start** — compiles to epoch day arithmetic, `(CEIL((days(end) + 1 + 7 - 4) / 7) - 1) - (… start …)` (live-verified 2026-10-06, se-thoughtspot: Sun 2026-10-04 → Sat 2026-10-10 = 1). A SQL `DATEDIFF(week)` follows the warehouse's week start (Snowflake `WEEK_START`), so the two agree only under a Monday start; the SQL translators emit a `sql_int_op` pass-through instead (#572 review). Optional `fiscal` third param. |
 | `diff_months` | `diff_months ( [end] , [start] )` | **Month boundaries crossed, not complete months** — compiles to `DATEDIFF(month, epoch, end) - DATEDIFF(month, epoch, start)` (live-verified 2026-10-06, se-thoughtspot: Jan31→Feb1 = 1, Jan31→Feb28 = 1, Jan20→Mar15 = 2, reversed = −1). A complete-months source (Excel `DATEDIF "M"`) needs a day-of-month correction. Optional `fiscal` third param. |
-| `diff_quarters` | `diff_quarters ( [end] , [start] )` | Quarters between. Optional `fiscal` third param. |
+| `diff_quarters` | `diff_quarters ( [end] , [start] )` | **Quarter boundaries crossed** — compiles to `CEIL((((YEAR(end) - 1970) * 12) + MONTH(end)) / 3) - CEIL(… start …)` (live-verified 2026-10-06, se-thoughtspot, formula fidelity M0 `sf-date-012`: equal to Snowflake `DATEDIFF(quarter)` on all 10 rows). Optional `fiscal` third param. |
 | `diff_years` | `diff_years ( [end] , [start] )` | **Calendar-year difference, not complete years** — compiles to `EXTRACT(YEAR FROM end) - EXTRACT(YEAR FROM start)` (live-verified 2026-10-06, se-thoughtspot: Dec31→Jan1 = 1, 2025-07-01→2026-06-30 = 1). A complete-years source (Excel `DATEDIF "Y"`) needs a month/day correction. Optional `fiscal` third param. |
-| `diff_time` | `diff_time ( [end] , [start] )` | Difference in seconds |
-| `diff_hours` | `diff_hours ( [end] , [start] )` | Difference in hours |
-| `diff_minutes` | `diff_minutes ( [end] , [start] )` | Difference in minutes |
+| `diff_time` | `diff_time ( [end] , [start] )` | Difference in seconds — compiles to `TIMESTAMPDIFF(second, start, end)`, i.e. second **boundaries** on Snowflake (17:59:59.900 → 18:00:00.100 = 1; live-verified 2026-10-06, M0 `sf-ts-003`, and on TIMESTAMP_TZ) |
+| `diff_hours` | `diff_hours ( [end] , [start] )` | **Hour boundaries, counted in UTC** — compiles to `DATEDIFF('HOUR', DATE '1970-01-01', end) - DATEDIFF('HOUR', DATE '1970-01-01', start)`. On DATE and TIMESTAMP_NTZ it equals Snowflake `DATEDIFF(hour)` (10:59 → 11:01 = 1, 10:00:30 → 10:59:59 = 0; M0 `sf-ts-001`, 2026-10-06). On a **TIMESTAMP_TZ with a non-whole-hour offset it does not**: at +05:30, 10:59 → 11:01 local is 1 in Snowflake and 0 here (4 of 10 rows wrong, M0 `sf-ts-005`), so the SQL translators emit a `sql_int_op` pass-through for `DATEDIFF(hour)` |
+| `diff_minutes` | `diff_minutes ( [end] , [start] )` | **Minute boundaries** — compiles to the same epoch-anchored `DATEDIFF('MINUTE', …)` difference as `diff_hours`. Equal to Snowflake `DATEDIFF(minute)` on DATE, TIMESTAMP_NTZ (23:59:59 → 00:00:01 = 1) and TIMESTAMP_TZ at +05:30 (M0 `sf-date-015`, `sf-ts-002`, `sf-ts-006`, 2026-10-06) — every real UTC offset is whole minutes |
 | `add_days` | `add_days ( [date] , [n] )` | Add N days |
 | `add_weeks` | `add_weeks ( [date] , [n] )` | Add N weeks |
 | `add_months` | `add_months ( [date] , [n] )` | Add N months |

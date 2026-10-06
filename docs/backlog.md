@@ -92,9 +92,9 @@ are roughly ordered by value÷effort.
 | ~~BL-315~~ | ~~from-Databricks: a `range: current` + `offset:` window ordered by a raw date drops the offset silently — prior-year measures return this year's number~~ | DONE (2026-09-28) |
 | BL-322 | from-Databricks period comparisons (`range: current` + `offset:`) were translated to a row-lag that is right only at one grain and silently wrong elsewhere — now skipped by default; the correct date-shifted-join translation is not built | next DBX pass |
 | BL-323 | from-Snowflake window metrics: every framed window except the unbounded running total is mistranslated silently (frame size ignored; RANGE / FOLLOWING / default frames become grand totals), and no translated window can enforce the grain Snowflake requires | next SF formula pass, with BL-242 |
-| ~~BL-340~~ | ~~`SUBSTR`/`SUBSTRING` copied the 1-based start into zero-based `substr` — every substring shifted one character (Snowflake; Databricks same shape)~~ | DONE (2026-10-06 — ts-cli v0.159.1) |
-| ~~BL-341~~ | ~~Snowflake `DATEDIFF(year, …)` emitted as `diff_days / 365`, not `diff_years` (the mapping doc already says `diff_years`)~~ | DONE (2026-10-06 — ts-cli v0.159.1) |
-| ~~BL-342~~ | ~~`MONTHS_BETWEEN` → `diff_months` marked TRANSLATED with no trap, though fractional vs boundary count (mapping doc: "Not equivalent")~~ | DONE (2026-10-06 — ts-cli v0.159.1) |
+| ~~BL-340~~ | ~~`SUBSTR`/`SUBSTRING` copied the 1-based start into zero-based `substr` — every substring shifted one character (Snowflake; Databricks same shape)~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
+| ~~BL-341~~ | ~~Snowflake `DATEDIFF(year, …)` emitted as `diff_days / 365`, not `diff_years` (the mapping doc already says `diff_years`)~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
+| ~~BL-342~~ | ~~`MONTHS_BETWEEN` → `diff_months` marked TRANSLATED with no trap, though fractional vs boundary count (mapping doc: "Not equivalent")~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
 | BL-346 | Excel `CEILING.MATH` translated with `CEILING`'s rule — a negative significance flips the rounding direction (silent, fidelity M1) | next `ts_cli/excel` change |
 | BL-347 | Excel `CEILING(x, 0)` is 0; the translation divides by the significance and returns NULL (silent, fidelity M1) | with BL-346 |
 | BL-348 | `ROUNDUP`/`ROUNDDOWN` beyond 6 digits lose precision — integer division keeps scale 6 in Snowflake (silent, fidelity M1) | next `ts_cli/excel` change |
@@ -12663,7 +12663,7 @@ emits `nullif`, and its tests assert every output is inside the catalog.
 
 ## BL-340 — `SUBSTR` / `SUBSTRING` copied the 1-based start into ThoughtSpot's zero-based `substr` — every substring is shifted one character `Tier 1`
 
-**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.159.1).
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.160.0).
 **Source:** formula fidelity harness M0 (`tools/formula-fidelity/`, case `sf-str-004`; report
 `docs/reviews/2026-10-06-fidelity-m0-snowflake.md`). A **silent wrong answer**: TRANSLATED, imports
 cleanly, returns a different string.
@@ -12693,7 +12693,7 @@ offset.
 
 ## BL-341 — Snowflake `DATEDIFF(year, …)` is translated to `diff_days / 365`, not `diff_years` — the mapping doc already says `diff_years` `Tier 1`
 
-**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.159.1).
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.160.0).
 **Source:** formula fidelity harness M0 (case `sf-date-003`). A **silent wrong answer**.
 
 **The facts.**
@@ -12709,13 +12709,13 @@ offset.
 **Fix.** Map `YEAR` to `diff_years` in `_DATEDIFF_UNIT` and drop the special case. Re-run the harness
 (`sf-date-003` → MATCH). Databricks `datediff(year, …)` is NEEDS_REVIEW today, so it is not affected.
 
-**Resolution.** `_DATEDIFF_UNIT` maps `YEAR` → `diff_years` and the `/ 365` special case is gone. Every other unit was checked from its compiled SQL in the same run: `QUARTER` → `diff_quarters`, `HOUR` → `diff_hours`, `MINUTE` → `diff_minutes` (epoch-anchored boundary differences — exact), `SECOND` → `diff_time` (`TIMESTAMPDIFF(second)`), and `WEEK` → `diff_weeks`, exact under `WEEK_START` 0/1 only (fixed Monday arithmetic), carried as a trap. Snowflake's documented part aliases are accepted. Live: `sf-date-003` 3/10 → 10/10, new `sf-date-012`…`-015` all MATCH — formula fidelity M0 after-fixes run, 2026-10-06 (`tools/formula-fidelity/runs/2026-10-06-snowflake-m0-after-fixes.json`).
+**Resolution.** `DATEDIFF_UNIT` (now in `sv_sql_exact.py`) maps `YEAR` → `diff_years` and the `/ 365` special case is gone. Every other unit was checked from its compiled SQL and by value on DATE, TIMESTAMP_NTZ and TIMESTAMP_TZ (+05:30) rows: `QUARTER` → `diff_quarters`, `MINUTE` → `diff_minutes`, `SECOND` → `diff_time` (`TIMESTAMPDIFF(second)`), all exact. Two units are exact `sql_int_op` pass-throughs instead, because the converter cannot show a trap (#572 review): `WEEK` — `diff_weeks` fixes a Monday week start; and `HOUR` — `diff_hours` counts UTC hours, wrong on 4 of 10 TIMESTAMP_TZ rows at +05:30 (`sf-ts-005`). Snowflake's documented part aliases (incl. `HH24`) are accepted. Live: `sf-date-003` 3/10 → 10/10, and `sf-date-012`…`-015`, `sf-ts-001`…`-010` all MATCH — formula fidelity M0 after-fixes run, 2026-10-06 (`tools/formula-fidelity/runs/2026-10-06-snowflake-m0-after-fixes.json`; the native-`diff_hours` evidence is `…-m0-timestamp-probe.json`).
 
 **Target:** the next `sv_sql` change.
 
 ## BL-342 — `MONTHS_BETWEEN` is emitted as `diff_months` and marked TRANSLATED, though the mapping doc says the two are not equivalent `Tier 1`
 
-**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.159.1).
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.160.0).
 **Source:** formula fidelity harness M0 (case `sf-date-010`). A **silent wrong answer**: the status stays
 TRANSLATED, so nothing marks it as approximate.
 
@@ -12745,7 +12745,7 @@ Prove (b) with the harness before shipping it; `sf-date-010` is the regression c
 
 ## BL-343 — `TO_CHAR(x, format)` / `TO_VARCHAR(x, format)` drop the format and emit one-argument `to_string`, which ThoughtSpot rejects `Tier 2`
 
-**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.159.1).
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.160.0).
 **Source:** formula fidelity harness M0 (case `sf-date-011`). A **loud** failure (import), not a
 silent one, but the translator reports TRANSLATED.
 
@@ -12762,7 +12762,7 @@ Databricks translator does for `date_format`), flagged as passthrough. Probe `to
 DATE, number and boolean inputs and correct the formula reference. Add a harness case per input
 type.
 
-**Resolution.** `TO_CHAR` / `TO_VARCHAR(x[, fmt])` → `sql_string_op ( "TO_CHAR({0}, 'fmt')" , x )`; the one-argument form passes through too (identity on text). No ThoughtSpot function is documented as an exact equivalent of a format model. A format literal holding `"` or a brace is refused. Live: `sf-date-011` IMPORT_FAILED → MATCH, plus `sf-date-017` (`'DD-MON-YYYY'`), `sf-str-012` (`TO_VARCHAR(text)`) and `sf-str-013` (`TO_CHAR(int)`) MATCH — M0 after-fixes run, 2026-10-06 (`tools/formula-fidelity/runs/2026-10-06-snowflake-m0-after-fixes.json`). **Not done:** the `to_string` arity probe per input type; the translator no longer emits `to_string` for these, and the formula reference row now records the one-argument DATE rejection.
+**Resolution.** `TO_CHAR` / `TO_VARCHAR(x[, fmt])` → `sql_string_op ( "TO_CHAR({0}, 'fmt')" , x )`; the one-argument form passes through too (identity on text). No ThoughtSpot function is documented as an exact equivalent of a format model. A format literal holding `"` (double-quoted literal text), a brace or a backslash is refused: the `sql_*_op` template has no escape — `\"` was live-probed and rejected at import (`sf-date-018`, now a TRANSLATE_FAILED guard). Without a format, a date renders by the ThoughtSpot connection session's `DATE_OUTPUT_FORMAT`. Live: `sf-date-011` IMPORT_FAILED → MATCH, plus `sf-date-017` (`'DD-MON-YYYY'`), `sf-str-012` (`TO_VARCHAR(text)`) and `sf-str-013` (`TO_CHAR(int)`) MATCH — M0 after-fixes run, 2026-10-06 (`tools/formula-fidelity/runs/2026-10-06-snowflake-m0-after-fixes.json`). **Not done:** the `to_string` arity probe per input type; the translator no longer emits `to_string` for these, and the formula reference row now records the one-argument DATE rejection.
 
 **Target:** with BL-340.
 

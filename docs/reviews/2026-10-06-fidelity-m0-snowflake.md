@@ -61,29 +61,38 @@ but the translator still calls it TRANSLATED. Databricks `mv_sql.py` has the sam
   column typed INT64. The comparator reads an INT64-typed integer as epoch seconds (UTC) when the
   oracle's value is a date, and nothing else. Without that rule, five date cases scored as false mismatches on the first run.
 
-## After fixes (2026-10-06, ts-cli 0.159.1)
+## After fixes (2026-10-06, ts-cli 0.160.0)
 
-*Hand-written, added after BL-340..343 were fixed. Everything below this section — from
-"Silent wrong answers" down — is the ORIGINAL run (ts-cli 0.157.1), kept unchanged so the
-findings stay on record. The after-fixes evidence is
+*Hand-written, added after BL-340..343 were fixed and the PR #572 review was applied. Everything
+below this section — from "Silent wrong answers" down — is the ORIGINAL run (ts-cli 0.157.1),
+kept unchanged so the findings stay on record. The after-fixes evidence is
 `tools/formula-fidelity/runs/2026-10-06-snowflake-m0-after-fixes.json`; regenerate its full
 report with `run.py --cases … --rebuild runs/2026-10-06-snowflake-m0-after-fixes.json --report …`.*
 
 Re-run live on se-thoughtspot / Snowflake (`APJ_TAB`, `ThoughtSpot Partner (AP)`), 2026-10-06
-09:19 UTC, 176 s, ts-cli 0.159.1, against the case file with ten new guard cases (60 cases,
-`cases_sha256 5bf48471…`; the four fixed cases' `known_divergence` tags removed). The new cases'
-`expected` blocks were filled by an earlier oracle pass over the same fixture; this run found no
-oracle drift.
+09:58 UTC, 159 s, ts-cli 0.160.0, against 71 cases (`cases_sha256 00b758d4…`; the four fixed
+cases' `known_divergence` tags removed). The fixture gained TIMESTAMP_NTZ (`T1`, `T2`) and
+TIMESTAMP_TZ at +05:30 (`Z1`, `Z2`) columns for the review's by-value check of `DATEDIFF` hour
+and minute. New cases' `expected` blocks were filled by earlier oracle passes over the same
+fixture; this run found no oracle drift.
 
-| | Original (0.157.1) | After fixes (0.159.1) |
+| | Original (0.157.1) | After fixes (0.160.0) |
 |---|--:|--:|
-| Cases | 50 | 60 |
-| MATCH | 39 | **54** |
+| Cases | 50 | 71 |
+| MATCH | 39 | **64** |
 | Silent wrong answers | **3** | **0** |
 | Warned wrong answers (BL-333, APPROXIMATED with a trap) | 4 | 4 |
 | IMPORT_FAILED | 1 | 0 |
-| TRANSLATE_FAILED | 2 | 1 (`ILIKE`; `NULLIF` now MATCHes after BL-339) |
+| TRANSLATE_FAILED | 2 | 2 (`ILIKE`; `sf-date-018`, a format with `"`-quoted text, refused on purpose — see below. `NULLIF` now MATCHes after BL-339) |
 | ERROR_EQUIV (zero divisor) | 1 | 1 |
+
+**One more silent wrong answer was found on the way, and fixed.** With `DATEDIFF(hour)` still
+translated to native `diff_hours`, the TIMESTAMP_TZ case `sf-ts-005` came back wrong on 4 of 10
+rows: `diff_hours` compiles to `DATEDIFF('HOUR', DATE '1970-01-01', x)` differences and counts
+hours in UTC, while Snowflake counts them in the value's own +05:30 offset (10:59 → 11:01 local is
+1 in Snowflake, 0 in ThoughtSpot). `DATEDIFF(hour)` is now an exact `sql_int_op` pass-through.
+That run is kept as `runs/2026-10-06-snowflake-m0-timestamp-probe.json`; the table above is the
+run after the fix. It is the review's point exactly: DATE rows could not tell these apart.
 
 **The four fixed cases**, all 10/10:
 
@@ -104,22 +113,37 @@ oracle drift.
 | `sf-str-012` | `TO_VARCHAR(S1)` | `sql_string_op ( "TO_VARCHAR({0})" , … )` | identity on text (`to_string` rejects Text) |
 | `sf-str-013` | `TO_CHAR(I1)` | `sql_string_op ( "TO_CHAR({0})" , … )` | one-argument number |
 | `sf-date-012` | `DATEDIFF(quarter, D1, D2)` | `diff_quarters ( … )` | compiles to `CEIL(month-index / 3)` differences |
-| `sf-date-013` | `DATEDIFF(week, D1, D2)` | `diff_weeks ( … )` | Sun → Sat = 1; fixed Monday arithmetic, so trapped for `WEEK_START` 2–7 |
-| `sf-date-014` | `DATEDIFF(hour, D1, D2)` | `diff_hours ( … )` | compiles to `DATEDIFF('HOUR', epoch, end) - DATEDIFF('HOUR', epoch, start)`: a boundary count |
-| `sf-date-015` | `DATEDIFF(minute, D1, D2)` | `diff_minutes ( … )` | same epoch-anchored boundary form |
+| `sf-date-013` | `DATEDIFF(week, D1, D2)` | `sql_int_op ( "DATEDIFF(week, {0}, {1})" , … )` | Sun → Sat = 1; a pass-through because `diff_weeks` fixes a Monday week start (#572 review) |
+| `sf-date-014` | `DATEDIFF(hour, D1, D2)` | `sql_int_op ( "DATEDIFF(hour, {0}, {1})" , … )` | hours between DATEs (pass-through since the TIMESTAMP_TZ finding) |
+| `sf-date-015` | `DATEDIFF(minute, D1, D2)` | `diff_minutes ( … )` | epoch-anchored minute-boundary difference |
 | `sf-date-017` | `TO_CHAR(D1, 'DD-MON-YYYY')` | `sql_string_op ( "TO_CHAR({0}, 'DD-MON-YYYY')" , … )` | format with a month abbreviation |
 
-**How far the evidence reaches.** The fixture's date columns are DATEs, so `sf-date-014` and
-`-015` cannot tell a boundary count from elapsed time by value. Their exactness rests on the
-compiled SQL recorded in the run JSON, which is a boundary difference; a TIMESTAMP fixture would
-pin it by value. `diff_weeks` matches only because the fixture session is `WEEK_START = 0`. The
-Databricks halves of BL-340 / BL-342 share the Snowflake helper and were read from the Databricks
-docs; there is no Databricks oracle yet.
+**Eleven cases from the #572 review**, ten MATCH 10/10:
 
-**Cleanup.** The run deleted its Model and Table (by GUID, confirmed absent) and dropped and
-confirmed its warehouse table (`ZZ_FIDELITY_M0_20261006T091950_62C947`). Its startup sweep found
-no earlier orphans, and a search after the run found no `ZZ_FIDELITY_%` object in ThoughtSpot or
-in `AGENT_SKILLS.PUBLIC`.
+| Case | Source | Emitted | What it pins |
+|---|---|---|---|
+| `sf-ts-001` | `DATEDIFF(hour, T1, T2)` | `sql_int_op ( "DATEDIFF(hour, …)" … )` | 10:59 → 11:01 = 1, 10:00:30 → 10:59:59 = 0, 23:59:59 → 00:00:01 = 1 |
+| `sf-ts-002` | `DATEDIFF(minute, T1, T2)` | `diff_minutes ( … )` | minute boundaries on TIMESTAMP_NTZ |
+| `sf-ts-003` | `DATEDIFF(second, T1, T2)` | `diff_time ( … )` | 17:59:59.900 → 18:00:00.100 = 1 |
+| `sf-ts-004` | `DATEDIFF(day, T1, T2)` | `diff_days ( … )` | 23:00 → 01:00 next day = 1 |
+| `sf-ts-005` | `DATEDIFF(hour, Z1, Z2)` | `sql_int_op ( "DATEDIFF(hour, …)" … )` | +05:30 local hour boundaries — 4/10 wrong as `diff_hours` |
+| `sf-ts-006` | `DATEDIFF(minute, Z1, Z2)` | `diff_minutes ( … )` | equal on TIMESTAMP_TZ — offsets are whole minutes |
+| `sf-ts-007` | `DATEDIFF(day, Z1, Z2)` | `diff_days ( … )` | local day boundary with no UTC one |
+| `sf-ts-008` | `DATEDIFF(month, Z1, Z2)` | `diff_months ( … )` | local month and year boundary (Dec 31 23:00 → Jan 1 01:00 at +05:30) |
+| `sf-ts-009` | `DATEDIFF(year, Z1, Z2)` | `diff_years ( … )` | `EXTRACT(YEAR)` reads the local year |
+| `sf-ts-010` | `DATEDIFF(month, T1, T2)` | `diff_months ( … )` | month boundaries on TIMESTAMP_NTZ |
+| `sf-date-018` | `TO_CHAR(D1, 'YYYY"m"MM')` | — (NEEDS_REVIEW) | a `\"` escape in the template was probed and rejected at import, so a format with double-quoted text is refused; the case guards the refusal |
+
+**How far the evidence reaches.** `diff_weeks` would match only under `WEEK_START` 0 or 1, which is
+why the translator no longer emits it. The TIMESTAMP_TZ rows use one offset (+05:30); a
+whole-hour offset would not have shown the `diff_hours` defect, and offsets mixed within one
+column were not tried. The Databricks halves of BL-340 / BL-342 / BL-345 share the code paths
+the unit tests cover and were read from the Databricks docs; there is no Databricks oracle yet.
+
+**Cleanup.** Every live run in this section deleted its Model and Table (by GUID, confirmed
+absent) and dropped and confirmed its warehouse table (last: `ZZ_FIDELITY_M0_20261006T095836_2AB4F9`).
+Each startup sweep found no earlier orphans, and a search after the last run found no
+`ZZ_FIDELITY_%` object in ThoughtSpot or in `AGENT_SKILLS.PUBLIC`.
 
 ## Silent wrong answers
 

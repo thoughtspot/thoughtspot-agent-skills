@@ -218,6 +218,33 @@ in ThoughtSpot, and ThoughtSpot `mod ( a , b )` is `a-b*TRUNC(a/b)` in Excel.
 difference (a day count with a time fraction) is `diff_time ( t , u ) / 86400`; `diff_days` would
 drop the hours.
 
+**`diff_*` on TIMESTAMPs, by value** (added after the #572 review; formula fidelity M0,
+se-thoughtspot + Snowflake `APJ_TAB`, 2026-10-06, warehouse session `TIMEZONE = UTC`, scratch
+objects deleted and confirmed absent; evidence in
+`tools/formula-fidelity/runs/2026-10-06-snowflake-m0-timestamp-probe.json`, the run made with
+`DATEDIFF(hour)` still native, so its `sf-ts-005` row carries the wrong values and the compiled SQL). Ten fixture rows each of
+TIMESTAMP_NTZ `T1 → T2` and TIMESTAMP_TZ `Z1 → Z2` at `+05:30`, compared with the Snowflake source
+`DATEDIFF(<unit>, a, b)`:
+
+| ThoughtSpot | Compiled SQL | TIMESTAMP_NTZ | TIMESTAMP_TZ (+05:30) |
+|---|---|---|---|
+| `diff_hours` | `DATEDIFF('HOUR', DATE '1970-01-01', b) - DATEDIFF('HOUR', DATE '1970-01-01', a)` | 10/10 equal (10:59 → 11:01 = 1; 10:00:30 → 10:59:59 = 0; 23:59:59 → 00:00:01 = 1) | **4/10 wrong**: counts UTC hours, Snowflake counts local ones (10:59 → 11:01 local: 1 vs 0; 17:29:59 → 17:30:01 local, which crosses 12:00 UTC: 0 vs 1) |
+| `diff_minutes` | `DATEDIFF('MINUTE', DATE '1970-01-01', …)` differences | 10/10 | 10/10 |
+| `diff_time` | `TIMESTAMPDIFF(second, a, b)` | 10/10 (17:59:59.900 → 18:00:00.100 = 1) | — |
+| `diff_days` | `DATEDIFF(day, a, b)` | 10/10 (23:00 → 01:00 next day = 1) | 10/10 |
+| `diff_months` | `DATEDIFF(month, epoch, b) - DATEDIFF(month, epoch, a)` | 10/10 | 10/10 (incl. Dec 31 23:00 → Jan 1 01:00 local) |
+| `diff_years` | `EXTRACT(YEAR FROM b) - EXTRACT(YEAR FROM a)` | — | 10/10 |
+
+So `diff_hours` is a boundary count only where the value's offset is a whole number of hours (or
+there is none); the SQL translators now emit `DATEDIFF(hour)` as a `sql_int_op` pass-through.
+
+**No escape for `"` in a `sql_*_op` template.** `sql_string_op ( "TO_CHAR({0}, 'YYYY\"m\"MM')" , d )`
+is rejected at import: *Search did not find ""TO_CHAR ( { 0 } , 'YYYY"m"MM' ) " ," … (error_code
+14516)* — the backslash does not escape, the quote ends the template (M0 `sf-date-018`,
+09:50 UTC run; its JSON is `tools/formula-fidelity/runs/2026-10-06-snowflake-m0-after-fixes.json`
+as committed in `a6c0ec4`, since superseded). A Snowflake format model
+with double-quoted literal text therefore has no pass-through form, and the translators refuse it.
+
 **Other parser checks in the same pass (all accepted):** `least ( [SALARY_RATES::BASE_RATE] , 10 )`
 (the formula reference listed only `greatest`), `!=` between a column and a string literal,
 `ifnull ( x , 0 )`, `quarter_number ( today ( ) )`, `ceil ( month_number ( today ( ) ) / 3 )` inside
