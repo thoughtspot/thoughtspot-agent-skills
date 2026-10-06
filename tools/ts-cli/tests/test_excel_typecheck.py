@@ -149,7 +149,7 @@ def test_unknown_type_in_an_integer_slot_uses_needs_types():
 LOOKALIKES = [
     '=YEAR("2015-02-11")', '=MONTH(45000)', '=DAY([@amt])', '=EDATE("1999-06-30",2)',
     '=EOMONTH("2010-01-15",0)', '=WEEKDAY("2012-12-12",2)', '=DAYS("2000-01-10","1999-12-25")',
-    '=EOMONTH("not a date",1)', '=MONTH(0)', '=LEN([@amt])', '=MID([@amt],2,1)',
+    '=EOMONTH("not a date",1)', '=DAY(-0)', '=LEN([@amt])', '=MID([@amt],2,1)',
     '=SEARCH(7,1234567)', '=VALUE([@amt])', '=VALUE([@day])', '=ABS([@name])',
     '=[@name]/[@qty]', '=ROUNDUP([@name],1)', '=POWER([@name],2)', '=MOD([@name],3)',
     '=MID([@name],[@amt],[@amt])', '=RIGHT("abcdef",[@amt])', '=LEFT([@name],[@amt])',

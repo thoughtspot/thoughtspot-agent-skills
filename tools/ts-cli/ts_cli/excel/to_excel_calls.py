@@ -340,7 +340,7 @@ def _between(em: Emitter, args: list):
 def _mod(em: Emitter, args: list):
     """ThoughtSpot mod compiles to Snowflake MOD — the result takes the DIVIDEND's sign
     (live 2026-10-06: mod(-3, 2) = -1, mod(3, -2) = 1, probe record §7). Excel MOD takes the
-    divisor's sign (MOD(-3, 2) = 1), so the exact form is a - b * TRUNC(a / b)."""
+    divisor's sign (Excel's MOD of -3 by 2 is 1), so the exact form is a - b * TRUNC(a / b)."""
     a, b = em.text(args[0], P_ADD), em.text(args[1], P_MUL)
     return f"{a}-{b}*TRUNC({em.text(args[0], P_MUL)}/{em.text(args[1], P_MUL + 1)})", P_ADD
 

@@ -183,8 +183,11 @@ Three leak guards, weakest first:
   as a two-argument power) would pass it.
 - **With the data dir:** the same test file's exact scan (it runs when `$FORMULA_FIDELITY_DATA`
   is set, and is skipped otherwise) matches every corpus formula, string value and string input,
-  as raw text, against the M1 files plus `docs/backlog.md`, `CHANGELOG.md`, this README and the
-  test file. **Run it before pushing M1 changes.**
+  as raw text, against **every tracked text file in the repo** (`git ls-files`; widened from the
+  M1 files and four prose files by the review of #574, 2026-10-07, which found short corpus
+  formulas in tests, docstrings and map rows). Independent matches — a generic constant the repo
+  had before the corpus — are listed, each with a reason, in `INDEPENDENT_MATCHES`.
+  **Run it before pushing any change.**
 - **At write time:** `run_literal.py` refuses to write redacted results or a report (the
   hand-written head included) that contain corpus text.
 

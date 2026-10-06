@@ -589,7 +589,7 @@ filters:
   - "Order Date"
   oper: between
   values:
-  - "01/01/2000"
+  - "01/06/2000"
   - "03/01/2025"
 
 # Formula-backed boolean filter

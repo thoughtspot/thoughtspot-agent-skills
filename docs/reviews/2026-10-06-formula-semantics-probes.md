@@ -209,7 +209,7 @@ accepted. Excel's TRUE-is-1 coercion has to be written out. A number is not a co
 
 **`mod` takes the dividend's sign** (scratch-Model execute, compiled SQL `MOD(…)`, deleted and
 confirmed absent): `mod ( -3 , 2 )` = −1 and `mod ( 3 , -2 )` = 1, as Snowflake `MOD`. Excel `MOD`
-takes the divisor's sign (`MOD(-3, 2)` = 1). So Excel `MOD(a, b)` is `a - b * floor ( a / b )`
+takes the divisor's sign (Excel's MOD of −3 by 2 is 1). So Excel `MOD(a, b)` is `a - b * floor ( a / b )`
 in ThoughtSpot, and ThoughtSpot `mod ( a , b )` is `a-b*TRUNC(a/b)` in Excel.
 
 **`diff_time ( end , start )` is in seconds, end first** (scratch-Model execute, compiled to

@@ -6,7 +6,7 @@ Stdlib only, and nothing here executes anything from the files: they are parsed 
 
 A *raw case* is one formula cell plus everything needed to re-evaluate it elsewhere:
 
-    {"formula": "=ROUND(A1,B1)",            # Excel syntax, inputs rewritten to row 1
+    {"formula": "=ROUND(A1,C1)",            # Excel syntax, inputs rewritten to row 1
      "inputs": [{"letter": "A", "cell": "K2", "kind": "num", "value": 2.5}, ...],
      "expected": {"t": "num", "v": "3"},    # canonical (compare.py) form
      "tolerance": {"rel": 1e-12},

@@ -115,7 +115,7 @@ def test_serial_literal_is_its_date():
     assert f("=MONTH(3)") == "month_number ( to_date ( '1900-01-03' , '%Y-%m-%d' ) )"
 
 
-@pytest.mark.parametrize("src", ["=MONTH(0)", "=DAY(60)", "=YEAR(-5)"])
+@pytest.mark.parametrize("src", ["=DAY(-0)", "=DAY(60)", "=YEAR(-5)"])
 def test_serial_with_no_real_date_is_needs_review(src):
     assert "1900" in review(src)
 

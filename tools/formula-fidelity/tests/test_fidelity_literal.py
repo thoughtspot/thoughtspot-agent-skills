@@ -346,9 +346,38 @@ PROSE = [REPO / "docs" / "backlog.md", REPO / "CHANGELOG.md", HERE / "README.md"
          pathlib.Path(__file__)]
 
 
+# Corpus strings that occur in the repo independently of the corpus: generic constants a
+# formula library and this repo both use. Each entry is (path, string, why); nothing else may
+# match. Review of #574 (2026-10-07) widened the scan from the M1 files to every tracked file.
+INDEPENDENT_MATCHES = {
+    # (the strings are built by concatenation so this file does not match itself)
+    ("tools/ts-cli/ts_cli/sv_sql.py", '"0.00000' + '1"'):
+        "the TRUNC guard increment (BL-331), a code constant older than the corpus",
+    ("tools/ts-cli/tests/test_round_increment.py", '"0.00000' + '1"'):
+        "the same constant, asserted by the TRUNC tests",
+    ("tools/ts-cli/ts_cli/qlik/data/qlik_ts_formula_map.json", "01234" + "56789"):
+        "the digit alphabet of a Qlik PurgeChar mapping",
+}
+
+
+def _tracked_text_files():
+    r = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True,
+                       text=True)
+    if r.returncode != 0:
+        pytest.skip("not a git checkout")
+    for rel in r.stdout.split("\0"):
+        path = REPO / rel
+        if rel and path.is_file():
+            try:
+                yield rel, path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue  # binary
+
+
 def test_exact_corpus_scan_when_the_data_dir_is_available():
     """Opt-in (needs $FORMULA_FIDELITY_DATA): every corpus formula, string value and string
-    input, matched as raw text against every committed M1 file and the prose files."""
+    input, matched as raw text against EVERY tracked text file in the repo (not just the M1
+    files and prose): a test, a docstring or a map row is a leak as much as a report is."""
     import os
 
     root = os.environ.get(L.DATA_DIR_ENV)
@@ -356,12 +385,19 @@ def test_exact_corpus_scan_when_the_data_dir_is_available():
     if not cand.is_file():
         pytest.skip(f"${L.DATA_DIR_ENV} not set or has no extracted/candidates.jsonl")
     rows = [json.loads(line) for line in cand.read_text(encoding="utf-8").splitlines() if line]
-    hits = {}
-    for path in [*COMMITTED, *PROSE]:
-        found = RD.leaks_against_corpus(path.read_text(encoding="utf-8"), rows)
+    strings = {t: who for t, who in RD.corpus_strings(rows).items()
+               if not RD._GENERIC.fullmatch(t)}
+    assert len(strings) > 1000                      # the scan really has the corpus
+    hits, scanned = {}, 0
+    for rel, text in _tracked_text_files():
+        scanned += 1
+        found = sorted(t for t in strings if t in text and (rel, t) not in INDEPENDENT_MATCHES)
         if found:
-            hits[path.name] = found[:5]
+            hits[rel] = found[:5]
+    assert scanned > 500                            # it really walked the repo
     assert hits == {}
+    for path in [*COMMITTED, *PROSE]:               # the original scope, by the scanner itself
+        assert RD.leaks_against_corpus(path.read_text(encoding="utf-8"), rows) == [], path.name
 
 
 def test_committed_files_exist():
