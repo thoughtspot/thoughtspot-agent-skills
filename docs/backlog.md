@@ -64,6 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
+| BL-357 | ThoughtSpot trigonometry is in **radians** (live 2026-10-07), but the Tableau translator and the Tableau, Ossie, Omni and Sigma maps convert by `180 / π` as if it were degrees — a silent wrong answer for every non-zero input. Excel map and translator fixed | 2026-10-31 |
 | ~~BL-232~~ | ~~`description` under `properties` silently dropped on import; five sites + `ts tml lint` I15~~ | DONE (2026-09-02) |
 | ~~BL-200~~ | ~~SV entry splitter not quote aware -- a comma in `comment=` shatters the entry~~ | DONE (2026-07-31) |
 | ~~BL-201~~ | ~~live `sample_values` unmatched, read as part of the expression~~ | DONE (2026-07-31) |
@@ -13050,3 +13051,40 @@ report `docs/reviews/2026-10-06-fidelity-m1-excel.md`, "After fixes").
 widen any tolerance.
 
 **Target:** the next M1 / M2 harness change.
+
+## BL-357 — ThoughtSpot trigonometry is in radians; the Tableau translator and four maps convert as if it were degrees `Tier 1`
+
+**Filed:** 2026-10-07. **Status:** OPEN (Excel fixed; Tableau translator and the other maps not).
+**Source:** the Excel coverage pass (fidelity M1), probe record §7 ("Trigonometry").
+
+**The facts (live, se-thoughtspot, 2026-10-07, scratch Model deleted and confirmed absent).**
+`sin ( 30 )` compiles to `SIN(30)` and returns −0.988 (sin of 30 *radians*); `cos ( 60 )`
+returns −0.952; `asin ( 0.5 )` returns 0.5236 and `atan ( 1 )` 0.7854 (radians, not 30 and
+45). So ThoughtSpot's trigonometry takes and returns radians, exactly as SQL, Excel, Tableau
+and Ossie do, and the identity form is right: Excel `SIN(x)` is `sin ( x )`.
+
+The repo's rule said the opposite. It started as an assumption in the Tableau map ("Tableau
+trig is in radians; ThoughtSpot trig is in degrees — convert"; the inverse functions "by
+symmetry"), was never probed, and was copied into the Ossie, Excel, Omni and Sigma maps. Every
+row built on it imports cleanly and is wrong for every non-zero input.
+
+**Where it still is.**
+- **Code (silent wrong answers today):** `tools/ts-cli/ts_cli/tableau/functions.py`
+  (`SIN`, `COS`, `TAN`, `COT`, `ACOS`, `ASIN`, `ATAN`; `RADIANS` / `DEGREES` are correct
+  arithmetic but fixed-point over literals, see BL-351), its tests in
+  `tests/test_tableau_translate.py`, and
+  `agents/cli/ts-convert-from-tableau/references/coverage-matrix.md` rows 132–133.
+- **Maps:** `agents/shared/mappings/tableau/tableau-formula-translation.md` (the trig rows),
+  `docs/ossie/ts-ossie-function-mapping.md` (`SIN` … `ATAN`), `docs/function-maps/ts-omni-function-mapping.md`
+  and `ts-sigma-function-mapping.md` (trig rows and `DistanceGlobe`).
+- **Upstream:** check whether the apache/ossie ThoughtSpot converter's `expressions/catalog.py`
+  carries the same conversion (`check_ossie_mapping_sync.py` compares the two).
+
+**Fix.** Drop the conversion everywhere (`sin ( x )`, `acos ( x )`), re-pin the Tableau tests by
+value, bump `ts-convert-from-tableau` (PATCH), and re-run a Tableau trigonometry case live.
+
+**Fixed for Excel** in the coverage pass (ts-cli 0.162.0): the Excel map's E16 rule and its
+`SIN` … `ATAN` rows, and the translator's new rules, use the identity form.
+
+**Target:** 2026-10-31.
+

@@ -319,3 +319,28 @@ DOUBLE column and a decimal literal alike:
 | `sql_double_op ( "TRY_TO_DOUBLE({0})" , [DEPARTMENT] )`, `ifnull ( … , 0 )` | NULL, 0.0 — the null-on-failure form |
 | `sql_bool_op ( "TRY_TO_DOUBLE({0}) IS NOT NULL" , [DEPARTMENT] )` | false — the `ISNUMBER(VALUE(…))` form the translator now emits |
 | `to_string ( 100000000000000000000 )`, `to_string ( to_double ( '1E+20' ) )` | `'100000000000000000000'`, `'1e+20'` (Excel writes `1E+20`) |
+
+*Excel coverage pass (2026-10-07, five scratch Models over a one-row fidelity fixture — `ZZ_FIDELITY_PROBECOV_*_DELETE_ME` — each deleted and confirmed absent by the harness's teardown, warehouse tables dropped and confirmed with `SHOW TABLES`).* Values by `ts agentql fetch-data`; every formula also passed the VALIDATE_ONLY import first.
+
+| Formula | Result |
+|---|---|
+| `sin ( 30 )`, `cos ( 60 )`, `tan ( 45 )` | −0.988, −0.952, 1.620 — compiled `SIN(30)`: **ThoughtSpot trigonometry is in radians** (BL-357). The repo's "degrees" rule was never probed and was wrong |
+| `asin ( 0.5 )`, `acos ( [x] )` (0.5), `atan ( 1 )` | 0.5236, 1.0472, 0.7854 — radians out too |
+| `sin ( 3.141592653589793 )` | 1.2246467991473532E-16, as a double `SIN(π)` |
+| `sql_double_op ( "SINH({0})" , … )`, `COSH`, `TANH` (of 1000), `ASINH`, `ACOSH`, `ATANH`, `DEGREES`, `RADIANS`, `ATAN2` | Python `math` to the last digit; `TANH(1000)` = 1.0, `SINH(1e-10)` = 1e-10 (the `exp` compositions cancel / overflow there); `ATAN2(0, 0)` = 0 (Excel `#DIV/0!`) |
+| `log2 ( 8 )`, `ln ( 27 ) / ln ( 3 )`, `log10 ( 1000 )` | 3.0, 3.0, **2.9999999999999996** (within 1e-12; Excel gives 3) |
+| `sql_double_op ( "FACTORIAL(FLOOR({0}))" , 5.5 )`, `… , 25 )` | 120.0, 1.5511210043330986E+25 — the `sql_int_op` variant would overflow INT64 from 21! |
+| `sql_string_op ( "CHR({0})" , … )` of 65, 233, 150, 0 | `A`, `é`, **U+0096** (Windows-1252 150 is an en dash), U+0000 (Excel `CHAR(0)` is `#VALUE!`) |
+| `sql_int_op ( "ASCII({0})" , 'é…' )` / `"UNICODE({0})"` | **195** (the first UTF-8 *byte*) / 233. Excel `CODE` is 233, so the map's `ASCII` row was wrong for every non-ASCII character |
+| `TO_CHAR({0}, 'FM…0.00')` of 2.675, 0.125 (FLOAT), 2.675 (literal); `'FM…0'` of −2.5 | `2.68`, `0.13`, `2.68`; `-3` — half away from zero, as Excel |
+| `TO_CHAR({0}, 'FM…0.00')` of −0.001 | **`-0.00`** (Excel's output for a negative that rounds to zero was not verified: the translator refuses a literal and traps a column) |
+| `TO_CHAR({0}, 'FM999,…,990')`, `'…0.0'`, 14-digit integer part | `1,234,568`, `12.3`, `12345679012654.31` |
+| `TO_CHAR` of a DATE with `YYYY-MM-DD`, `DD MON YYYY`, `MMMM`, `DY`, `YY/MM/DD HH24:MI:SS`, `DD.MM.YYYY`, `HH24:MI:SS` | `2024-03-15`, `15 Mar 2024`, `March`, `Fri`, `24/03/15 00:00:00`, `15.03.2024`, `00:00:00` |
+| `day_of_week ( [d] )` | **`friday`** — lower case (Excel `TEXT(d, "dddd")` is `Friday`; the translator wraps it in `INITCAP`) |
+| `month ( [d] )`, `left ( month ( [d] ) , 3 )` | **`march`**, `mar` — lower case too (Excel `March`, `Mar`; the translator uses `TO_CHAR` `MMMM` / `MON`) |
+| `sql_string_op ( "INITCAP({0})" , day_of_week ( [d] ) )` | `Friday` |
+| `sql_string_op ( "INITCAP({0})" , … )` | `Abc1def X-Y O'neil` — Snowflake's default delimiters skip digits and the apostrophe, where Excel `PROPER` gives `Abc1Def X-Y O'Neil`. A delimiter list built with `\|\|` is rejected (*argument 1 to function INITCAP needs to be constant*), and **backslash escapes in a `sql_*_op` template do not survive** (`'\t\x22…'` became the letters `t`, `x`, `2`…): `PROPER` was left out of the coverage pass |
+| `add_days ( add_months ( to_date ( concat ( to_string ( y ) , '-01-01' ) , '%Y-%m-%d' ) , 13 ) , -1 )` (y = 2024) | 2025-01-31 — the `DATE` composition, overflow-safe |
+| `sql_int_op ( "POSITION({0}, {1}, {2})" , 'r' , s , 7 )`, `"POSITION(LOWER({0}), LOWER({1}), {2})"` | the 1-based position at or after the start — `FIND` / `SEARCH` with `start_num` |
+
+The same run checked 39 translator outputs end to end against hand-computed Excel values (the new rounding family, `LOG`, trigonometry, `ATAN2`, `FACT`, `CHAR` / `CODE` / `UNICODE`, `REPLACE`, the `B` variants, `TEXT` number / percent / date formats, `DATE` overflow, `ISTEXT` / `ISLOGICAL`, `FIND` / `SEARCH` with a start): 39 of 39 equal after `dddd` moved to `INITCAP`.
