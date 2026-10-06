@@ -117,7 +117,8 @@ Use this as the canonical limitations reference.
 | 76 | `STARTSWITH`, `ENDSWITH` | `strpos(s, prefix) = 1` / `substr(s, strlen(s) - strlen(sfx), strlen(sfx)) = sfx` | No native `starts_with`/`ends_with` — live-verified 2026-07-29, se-thoughtspot (BL-170); compose from native functions. Both CLI-translated in v0.126.1 (BL-171; emitted forms live-verified on se-thoughtspot 2026-07-30) — before that `mv_sql.py` emitted a bare `starts_with` and `ENDSWITH` was unmapped entirely. |
 | 42 | `LPAD`, `RPAD`, `REVERSE`, `REPEAT` | `lpad`, `rpad`, `reverse`, `repeat` | |
 | 43 | `LOWER(s)` / `UPPER(s)` | `sql_string_op("LOWER({0})", [col])` / `sql_string_op("UPPER({0})", [col])` | Auto-translated pass-through (v0.50.0) |
-| 44 | `ABS`, `CEIL`, `FLOOR`, `ROUND`, `MOD`, `POWER`, `SQRT` | `abs`, `ceil`, `floor`, `round`, `mod`, `pow`, `sqrt` | |
+| 44 | `ABS`, `CEIL`, `FLOOR`, `MOD`, `POWER`, `SQRT` | `abs`, `ceil`, `floor`, `mod`, `pow`, `sqrt` | |
+| 44a | `ROUND(x, d)` | `round(x, 10^-d)` — `2` → `0.01`, `0` → `1`, `-2` → `100`; non-literal `d` → `sql_double_op("ROUND({0}, {1})", x, d)` | ThoughtSpot's 2nd arg is a rounding increment, not a digit count (BL-331, live-probed 2026-10-06). Non-literal `d` over an aggregate is refused (the pass-through is row-level) |
 | 45 | `LN`, `LOG2`, `LOG10` | `ln`, `log2`, `log10` | |
 | 46 | `GREATEST`, `LEAST` | `greatest`, `least` | |
 | 47 | `YEAR`, `MONTH`, `DAY`, `HOUR`, `QUARTER` | `year`, `month_number`, `day`, `hour_of_day`, `quarter_number` | |

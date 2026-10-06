@@ -94,8 +94,9 @@ class TestSimpleRenames:
         assert result == "( strpos ( [A::NAME] , 'A' ) = 1 )"
 
     def test_round(self):
+        # BL-331: TS round()'s 2nd arg is an increment — 2 digits -> 0.01.
         result = translate_sql_expr("ROUND(a.VAL, 2)", _resolve)
-        assert result == "round ( [A::VAL] , 2 )"
+        assert result == "round ( [A::VAL] , 0.01 )"
 
     def test_abs(self):
         assert translate_sql_expr("ABS(a.X)", _resolve) == "abs ( [A::X] )"
@@ -294,8 +295,9 @@ class TestSpecialFunctions:
             "if ( [A::X] != null ) then [A::Y] else [A::Z]"
 
     def test_trunc(self):
+        # BL-331: was round(x, 0) — which rounds, and is NULL in ThoughtSpot.
         result = translate_sql_expr("TRUNC(a.X, 0)", _resolve)
-        assert result == "round ( [A::X] , 0 )"
+        assert result == 'sql_double_op ( "TRUNC({0}, 0)" , [A::X] )'
 
     def test_date_trunc_month(self):
         result = translate_sql_expr(

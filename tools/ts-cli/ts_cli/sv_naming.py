@@ -168,3 +168,12 @@ def fact_aggregation(
         return None, [f"⚑ default_aggregation '{declared}' has no ThoughtSpot column "
                       f"aggregation — kept SUM; Cortex Analyst answers this fact differently"]
     return agg, [f"default_aggregation '{declared}' (CA extension) → {agg}"]
+
+
+def metric_ref(resolve, formula_id: str) -> str:
+    """`[formula_X]` for a METRIC looks row-level but is aggregated; record it on
+    the resolver's ``metric_refs`` so sv_sql never wraps a row-level pass-through
+    around it (BL-331)."""
+    ref = f"[{formula_id}]"
+    resolve.metric_refs.add(ref)
+    return ref

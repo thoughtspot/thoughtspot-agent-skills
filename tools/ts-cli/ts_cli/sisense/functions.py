@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.formula_common import sql_digits_to_ts_increment
+
 # Sisense JAQL `agg` -> TML aggregation property (for SIMPLE measures, no formula).
 # NOTE on count semantics (verified against Sisense docs): Sisense `count` returns the
 # number of *unique* values (distinct), while `dupCount`/`countduplicates` returns the
@@ -323,6 +325,40 @@ def _rewrite_conditionals(expr: str) -> tuple:
     return f"{expr[:m.start()]}if ({cond}) then {then_v} else {else_v}{tail_rw}", None
 
 
+_ROUND_CALL = re.compile(r"(?<![A-Za-z0-9_])round\s*\(", re.IGNORECASE)
+
+
+def _rewrite_round(expr: str, start: int = 0) -> tuple:
+    """Convert every ``round(x, n)``'s digit count to ThoughtSpot's increment (BL-331).
+
+    Returns ``(new_expr, error_note|None)``. A non-literal or out-of-range ``n``, or a
+    call with more than two arguments, has no faithful ThoughtSpot form.
+    """
+    m = _ROUND_CALL.search(expr, start)
+    if not m:
+        return expr, None
+    open_idx = expr.index("(", m.start())
+    close_idx = _match_paren(expr, open_idx)
+    if close_idx == -1:
+        return expr, "malformed round(): unbalanced parentheses"
+    args = _split_top_level_args(expr[open_idx + 1:close_idx])
+    if len(args) > 2:
+        return expr, f"round() has {len(args)} arguments; at most 2 are translatable"
+    if len(args) == 2:
+        inc = sql_digits_to_ts_increment(args[1])
+        if inc is None:
+            return expr, (f"round() digit count '{args[1]}' is not an integer literal — "
+                          "TS round() takes an increment (BL-331), so it cannot be "
+                          "converted")
+        inner, err = _rewrite_round(args[0])
+        if err:
+            return expr, err
+        call = f"{expr[m.start():open_idx]}({inner}, {inc})"
+        expr = expr[:m.start()] + call + expr[close_idx + 1:]
+        return _rewrite_round(expr, m.start() + len(call))
+    return _rewrite_round(expr, open_idx + 1)
+
+
 def translate_jaql(expr, context: dict | None = None) -> tuple:
     """Translate a Sisense JAQL formula + context into a TML formula expression.
 
@@ -334,7 +370,7 @@ def translate_jaql(expr, context: dict | None = None) -> tuple:
       2. Map function names via FUNCTION_MAP.
       3. Any function in UNSUPPORTED (or unknown), `case`, a non-3-arg `if`, or an
          unresolvable placeholder makes the whole formula NEEDS REVIEW (expr None).
-      4. Functional `if(c,a,b)` -> `if (c) then a else b`; 2-arg `round` -> Approximated.
+      4. Functional `if(c,a,b)` -> `if (c) then a else b`; `round(x, n)` -> `round(x, 10^-n)` for a literal n, else NEEDS REVIEW (BL-331).
 
     Returns (expr_out, status, note); expr_out is None when status == "NEEDS REVIEW".
     """
@@ -348,17 +384,19 @@ def translate_jaql(expr, context: dict | None = None) -> tuple:
     if terminal is not None:
         return terminal
 
-    # 2. round() arg semantics diverge: TS's 2nd arg is a rounding INCREMENT
-    # (round(x, .01) for 2 decimals), not Sisense's decimal-place COUNT (Round(x, 2)).
-    if re.search(r"\bround\s*\([^()]*,", source, re.IGNORECASE):
-        coverage = _apply_downgrade(coverage, notes, _PARTIAL,
-                                    "TS round() 2nd arg is a rounding increment, "
-                                    "not a decimal-place count")
+    # 2. round() arg semantics diverge (BL-331): TS's 2nd arg is a rounding INCREMENT
+    # (round(x, 0.01) for 2 decimals), Sisense's a decimal-place COUNT (Round(x, 2)).
+    # A literal count converts to 10^-n; anything else cannot be converted -> NEEDS REVIEW.
+    # (Copying it across was silent: round(x, 0) is NULL on every row, round(x, 2) is
+    # nearest-2, and both import cleanly.)
+    rounded, round_err = _rewrite_round(source)
+    if round_err:
+        return None, "NEEDS REVIEW", round_err
 
     # 3. Rename source function names to TS (ceiling->ceil, count->unique count) BEFORE
     #    interpolating resolved content — so TS aggregation names and real column display
     #    names (e.g. "[Profit (Adjusted)]") introduced in step 4 are never re-scanned/mangled.
-    out = _FUNC_CALL.sub(_rename_func, source)
+    out = _FUNC_CALL.sub(_rename_func, rounded)
 
     # 4. Resolve context placeholders into the renamed skeleton. A `{dim, agg}` fragment
     #    becomes a bare column ref when already wrapped, or `agg([Column])` (agg already TS)

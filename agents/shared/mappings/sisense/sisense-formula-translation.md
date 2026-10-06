@@ -63,12 +63,18 @@ A JAQL formula references fields through `[key]` placeholders resolved against a
 - A nested `{formula, context}` fragment recurses; an unsupported nested formula makes the whole
   formula NEEDS REVIEW.
 
+## `round` (BL-331)
+
+| Sisense | ThoughtSpot | Notes |
+|---|---|---|
+| `round(x, n)`, literal `n` | `round(x, 10^-n)` | Exact mapping (AUTO). TS's 2nd arg is a rounding **increment** (`round(x, 0.01)` for 2 decimals), not Sisense's decimal-place **count**: `round(x, 2)` in TS is nearest-2 and `round(x, 0)` is NULL (live-probed 2026-10-06) |
+| `round(x, n)`, non-literal `n` / 3+ args | — | NEEDS REVIEW |
+
 ## Approximated (mapped with a caveat → PARTIAL)
 
 | Sisense | ThoughtSpot | Why review |
 |---|---|---|
 | `case(...)` | nested `if(...)` | mapped mechanically; verify the branch semantics |
-| `round(x, n)` (2-arg) | `round(x, n)` | TS's 2nd arg is a rounding **increment** (e.g. `round(x, 0.01)` for 2 decimals), not Sisense's decimal-place **count** |
 | ~~`countduplicates` (as a formula wrapper)~~ | — | **Removed 2026-08-26 (finding 14.3): this is not approximated.** `countduplicates` → `count(...)` preserves duplicate-count semantics exactly, because Sisense `dupCount` *is* a total count and ThoughtSpot `count` *is* a total count. Listing it here labelled two exact translations as lossy in the conversion report. |
 
 ## Flagged — NEEDS REVIEW (`UNSUPPORTED`, never faked)

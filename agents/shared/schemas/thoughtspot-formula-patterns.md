@@ -169,7 +169,7 @@ else 0
 | Function | Syntax |
 |---|---|
 | `safe_divide` | `safe_divide ( [a] , [b] )` — returns 0 (not NULL) when `b` is 0 |
-| `round` | `round ( [x] , [n] )` |
+| `round` | `round ( [x] , [inc] )` — **`inc` is a rounding INCREMENT, not a decimal-place count** (BL-331, live-probed se-thoughtspot 2026-10-06). Compiles to `inc * round(x / NULLIF(inc, 0))`. On `1234.5678`: `round(x)` = 1235, `round(x, 1)` = 1235, `round(x, 0.01)` = 1234.57, `round(x, 0.5)` = 1234.5, `round(x, 10)` = 1230, `round(x, 2)` = **1234** (nearest multiple of 2), `round(x, -2)` = 1234, `round(x, 0)` = **NULL**. Result type: an integer `inc` (`1`, `10`) returns **INT64**, a fractional one (`0.01`, `0.5`) **DOUBLE** — and the `sql_double_op` pass-throughs the translators fall back to (non-literal SQL digit count; Snowflake `TRUNC`) always return **DOUBLE**, whatever the warehouse's own ROUND/TRUNC type. So SQL `ROUND(x, d)` ↔ `round ( x , 10^-d )` — never copy `d` across (`formula_common.ts_round_from_sql_digits` / `ts_increment_to_sql_digits`) |
 | `floor` | `floor ( [x] )` |
 | `ceil` | `ceil ( [x] )` |
 | `abs` | `abs ( [x] )` |

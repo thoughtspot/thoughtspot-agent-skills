@@ -95,6 +95,14 @@ not define it (see ask [**A9**](#open-questions-and-upstream-asks)).
 > the frame clause stay `direct` with their boundaries now proven by rejection rather than
 > asserted. See [Window rows live-confirmed — 2026-07-30](#window-rows-live-confirmed--2026-07-30).
 
+> **Revised 2026-10-06 (BL-331).** The `ROUND` row's ThoughtSpot form was `round ( [x] , d )`
+> — wrong. ThoughtSpot `round(x, n)` takes a rounding **increment** and compiles to
+> `n * round(x / NULLIF(n, 0))` (live-probed on se-thoughtspot 2026-10-06: on `1234.5678`,
+> `round(x, 2)` = `1234`, `round(x, 0.01)` = `1234.57`, `round(x, 0)` = NULL). The class stays
+> `direct` — a literal digit count converts to the increment `10^-d` with native functions
+> only — so the split is unchanged. The upstream converter's `ROUND` emission should be
+> checked against this row.
+
 > **Revised 2026-07-29 (BL-170).** `TRIM` and `REPLACE` moved `direct` → `passthrough`
 > after live verification on se-thoughtspot showed that ThoughtSpot has no native `trim`
 > or `replace` function; the split was `114`/`31` before. `STARTSWITH`/`ENDSWITH` stay
@@ -304,7 +312,7 @@ Source tables: `core-spec/expression_language.md:453-459` (basic), `:465-470` (a
 | Ossie | Class | ThoughtSpot | Notes |
 |---|---|---|---|
 | `ABS(x)` | direct | `abs ( [x] )` | |
-| `ROUND(x, d)` | direct | `round ( [x] , d )` | |
+| `ROUND(x, d)` | direct | `round ( [x] , 10^-d )` | **Not `round ( [x] , d )`.** ThoughtSpot's 2nd argument is a rounding *increment*, the specification's a digit count, so a literal `d` converts: `2` → `0.01`, `0` → `1`, `-2` → `100`. A non-literal `d` has no native increment form and falls back to `sql_double_op ( "ROUND({0}, {1})" , [x] , d )` ([**E3**](#how-to-read-the-tables)) — the row stays `direct` for the literal case. See the 2026-10-06 revision note above. |
 | `FLOOR(x)` | direct | `floor ( [x] )` | |
 | `CEIL(x)` / `CEILING(x)` | direct | `ceil ( [x] )` | Both specification spellings map to `ceil`. |
 | `TRUNC(x, d)` / `TRUNCATE(x, d)` | passthrough | `sql_double_op ( "TRUNC({0}, {1})" , [x] , d )` | **Variant: `sql_double_op`.** ThoughtSpot has no truncation. `floor` agrees with `TRUNC` only for `x ≥ 0` and `d = 0`, and `round` disagrees at every half-value, so neither is a safe substitute. |

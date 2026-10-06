@@ -21,6 +21,12 @@ _FORBIDDEN_PATTERNS = [
     (re.compile(r"\bdate_trunc\b", re.IGNORECASE), "'date_trunc' (should be 'start_of_*')"),
     (re.compile(r"\bELSEIF\b", re.IGNORECASE), "'ELSEIF' (should be 'else if')"),
     (re.compile(r"\bNOT\s+IN\s*\(", re.IGNORECASE), "'NOT IN (...)' (unsupported in ThoughtSpot — rewrite as negated conditions)"),
+    # BL-331 survivors: map_functions lower-cases every ROUND it converts, and
+    # re-emits upper-case ROUND( for one it cannot (non-literal digit count, 3+
+    # args). Case-SENSITIVE on purpose, and outside double quotes (a sql_*_op
+    # template may legitimately say ROUND). Same "survivors" idea as DATEPART.
+    (re.compile(r'\bROUND\s*\((?=(?:[^"]*"[^"]*")*[^"]*$)'),
+     "untranslated 'ROUND(' (digit count is not an integer literal — ThoughtSpot round() takes an increment, BL-331)"),
 ]
 
 # Tableau functions with no ThoughtSpot equivalent (or not yet implemented).

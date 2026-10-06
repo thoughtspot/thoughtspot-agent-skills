@@ -100,7 +100,7 @@ Resolution:
 | `abs(x)` | `ABS(x)` | |
 | `ceil(x)` | `CEIL(x)` | |
 | `floor(x)` | `FLOOR(x)` | |
-| `round(x, n)` | `ROUND(x, n)` | |
+| `round(x, inc)` | `ROUND(x, d)` / `(inc * ROUND(x / inc))` | ThoughtSpot's 2nd arg is a rounding **increment** (BL-331, live-probed 2026-10-06). A literal power-of-ten `inc` → `ROUND(x, d)` with `d = -log10(inc)` (`0.01` → `2`, `1` → `0`, `100` → `-2`); any other literal → `(inc * ROUND(x / inc))`; non-literal → `(inc * ROUND(x / NULLIF(inc, 0)))`. `round(x, 0)` is NULL in ThoughtSpot — refused as untranslatable |
 | `mod(x, y)` | `MOD(x, y)` | |
 | `pow(x, y)` | `POWER(x, y)` | TS function is `pow`, not `power` (verified 2026-06-13) |
 | `sqrt(x)` | `SQRT(x)` | |
@@ -839,7 +839,7 @@ formula equivalents:
 | `YEAR(d)` | `year(d)` |
 | `MONTH(d)` | `month_number(d)` |
 | `DAYOFWEEK(d)` | `day_number_of_week(d)` — Databricks 1=Sun, TS 1=Mon; `day_of_week(d)` also exists but returns the name |
-| `ROUND(x, n)` | `round(x, n)` |
+| `ROUND(x, d)` | `round(x, 10^-d)` — `2` → `0.01`, `0` → `1`, `-2` → `100`; non-literal `d` → `sql_double_op ( "ROUND({0}, {1})" , x , d )` (row-level only). Never `round(x, d)` (BL-331) |
 | `CAST(x AS type)` | Depends on target type; often implicit in TS |
 | `x / NULLIF(y, 0)` | `safe_divide(x, y)` |
 | `COALESCE(x / NULLIF(y, 0), 0)` | `safe_divide(x, y)` |
