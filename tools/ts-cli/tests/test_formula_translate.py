@@ -319,6 +319,8 @@ class TestGoldenTraps:
     def test_week_diff_over_seven(self):
         r = translate("DATEDIFF('week', [a], [b])", "tableau")
         assert any("week boundaries" in t for t in r["traps"])
+        # the output does not compute what the source does: never a clean "direct"
+        assert r["status"] == APPROXIMATED and r["classification"] == "direct (downgrade)"
 
     def test_case_insensitive_compare_flagged_for_case_sensitive_dialects(self):
         r = translate("CASE WHEN status = 'Open' THEN 1 ELSE 0 END", "snowflake")

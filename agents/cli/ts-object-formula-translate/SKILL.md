@@ -119,8 +119,12 @@ supplies the classification and the verification status.
 
 1. Open the map for the confirmed dialect (References). Read its *How to read the tables*
    rules (Excel E1–E18, Sigma and Omni their own) and its gaps / *Unverified* section.
-2. For **every function and operator** in the formula, find its row. Record: section, the
-   row's **Class**, its ThoughtSpot cell, and anything its Notes say about arguments.
+2. For **every function** in the formula, find its row. Record: section, the row's
+   **Class**, its ThoughtSpot cell, and anything its Notes say about arguments. Operators,
+   literals and references have rows in Sigma and Omni (*Operators and constructs*,
+   *Operators, literals and references*); in Excel they are covered by the framing rules
+   instead (E5: a cell is that row's value of its column, so `C2*D2` is `[T::C] * [T::D]`) —
+   cite the rule, status **documentation only**.
 3. Compose the formula from those cells only. Spell functions as the map does; check any
    function you are unsure of against `thoughtspot-formula-patterns.md`. Never use a
    function that appears in neither.
@@ -129,25 +133,38 @@ supplies the classification and the verification status.
 5. A function with **no row**, or a row that is `unmappable`/`structural`: do not
    substitute something plausible. Give the row's workaround (a Model join for a lookup, a
    warehouse view, a UDF recipe) — Step 5 item 8.
+6. Spelling: string literals are **single-quoted** in ThoughtSpot (`"Open"` → `'Open'`);
+   double quotes are only for `sql_*_op` templates. A cell or range reference names a
+   **column**: `B2` / `B:B` → ask the user for column B's header (or use `[TABLE::B]` as the
+   placeholder), never `[TABLE::B2]`.
+7. Run the composed formula through `ts formula translate '<formula>' --from thoughtspot`
+   (any level): it resolves the references, adds the CLI's traps and role, and returns the TML
+   — it translates nothing.
 
-**Verification status of a map row** — pick the first that applies, and write it beside the
-row in the answer:
+**Verification status of a map row** — pick the **first** that applies, and write it beside
+the row in the answer. A live date counts only when it is about **the row's own ThoughtSpot
+cell** — not about the native function the row was moved away from (Excel `EXACT` cites the
+2026-10-06 probe of `=`, but its `sql_bool_op` cell was never probed), and a row-level
+statement beats the map's header ("no row has been import-probed" predates the probes):
 
-| The row or its section says | Write |
+| Evidence for the row's ThoughtSpot cell | Write |
 |---|---|
-| "live-probed" / "live-verified" with a date (e.g. `ROUND`, E12) | **verified live (date)** |
-| it inherits a live-confirmed row of another map (Ossie, Tableau) | **verified via \<map row\>** |
-| it is listed under *Unverified*, or is a composition / passthrough template | **unprobed** |
+| a passthrough template, a multi-function composition, or listed under *Unverified* — with no live date for that exact cell | **unprobed** |
+| "live-probed" / "live-verified" with a date for that cell (e.g. `ROUND`, E12) | **verified live (date)** |
+| the row cites a named row of another map that itself carries a live date | **verified via \<map, row\>** |
 | anything else | **documentation only** |
 
-**Settled 2026-10-06** — apply these whatever an older row says (see open-items OI-2…OI-5):
+**Settled 2026-10-06** — apply these to **every** answer, translator- or map-backed, whatever
+an older row says (see open-items OI-2…OI-5):
 
 - **Case-sensitive comparison has no native form** (OI-4, BL-333): ThoughtSpot `=`,
   `contains` and `strpos` lowercase both sides. Excel `EXACT`/`FIND`, Sigma
   `Contains`/`StartsWith`/`EndsWith`/`Find`/`Like`, Omni `EXACT`/`FIND` and the
   contains-family filters are **passthrough** rows (`sql_bool_op ( "{0} = {1}" , … )`,
   `sql_bool_op ( "CONTAINS({0}, {1})" , … )`). Native `contains` is right only for a
-  case-insensitive source (Sigma `ILike`, Excel `SEARCH`).
+  case-insensitive source (Sigma `ILike`, Excel `SEARCH`). A string literal passed as a
+  `sql_bool_op` argument keeps its case (`sql_bool_op ( "{0} = {1}" , [d] , 'Engineering' )`
+  compiled to `d = 'Engineering'` — verified live 2026-10-06, OI-4), so either form works.
 - **Week start** (OI-2, BL-334): ThoughtSpot's week comes from the **Model's calendar**,
   Gregorian with a Monday start by default; `day_number_of_week` is fixed 1 = Monday. Never
   emit the `start_of_*` calendar-name argument and never ask for a calendar name. Any
@@ -172,10 +189,20 @@ only thing that turns "unprobed" into evidence. The composed formula goes throug
 
 ## Step 5 — Present (this order, every time)
 
+Before presenting, **ask for a display name** unless the user gave one ("Name for this
+formula? (default: *Translated Formula*)"), and pass it as `--name`: it becomes the TML id
+`formula_<name>`, and two answers pasted into one Model with the default name collide.
+
+**Role.** `MEASURE` when the formula aggregates, else `ATTRIBUTE` — a row-level amount such
+as `[T::Qty] * [T::Price]` is an ATTRIBUTE formula. If the user wants it summed in searches,
+say so and offer the aggregated form (`sum ( [T::Qty] * [T::Price] )`, a MEASURE); never
+silently change the role.
+
 1. **The formula**, in a code block.
 2. **Classification + one-line why** — e.g. ``direct (downgrade)`: matches Sigma only when the
    Answer's columns are exactly the parent groupings plus the sort column``.
-3. **Traps applied** — only those that fired (`traps[]`, plus Step 4b's settled facts).
+3. **Traps applied** — only those that fired (`traps[]`, plus any of Step 4b's settled
+   facts the formula touches).
 4. **References table** — source → ThoughtSpot, placeholders flagged:
 
    | Source | ThoughtSpot | |
@@ -247,7 +274,8 @@ stderr names every remaining GUID. Repeat each GUID to the user with the command
   converts `Count(DISTINCT x)` as a whole expression; inside a larger one the CLI's guard
   catches the leftover `DISTINCT` and refuses rather than emit an invalid formula.
 - **Tableau `DATEDIFF('week', …)`** comes back as `diff_days ( … ) / 7` — fractional 7-day
-  spans, not week boundaries; the traps line says so.
+  spans, not week boundaries — so the CLI reports it `APPROXIMATED` / `direct (downgrade)`
+  with a trap line.
 - **Level 2 data types** come from the Model's Table TMLs, best effort; a column whose type
   could not be read is treated as non-date.
 - `compile` returns no SQL — only `execute` compiles a query.

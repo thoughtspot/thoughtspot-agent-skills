@@ -81,6 +81,13 @@ Databricks); SKILL.md Step 4b applies the reclassified passthrough map rows (Exc
 Sigma `Contains`/`StartsWith`/`EndsWith`/`Find`/`Like`, Omni `EXACT`/`FIND` and the
 contains-family filters).
 
+**Follow-up probe (this session, 2026-10-06, `--validate execute` machinery, scratch Models
+deleted):** a string literal passed as a `sql_bool_op` *argument* is **not** lowercased.
+`if ( sql_bool_op ( "{0} = {1}" , [EMPLOYEES::DEPARTMENT] , 'Engineering' ) ) then 1 else 0`
+and the literal-in-template form `sql_bool_op ( "{0} = 'Engineering'" , … )` both compiled to
+`"DEPARTMENT" = 'Engineering'` and returned both 1 and 0 rows. So the map's
+`sql_bool_op ( "{0} = {1}" , [a] , 'Literal' )` templates are case-faithful.
+
 ## #5 — Can `sql_double_op` wrap an aggregate? — VERIFIED 2026-10-06
 
 **Yes**, with one semantic change. Probed with `--validate execute`'s own machinery on the

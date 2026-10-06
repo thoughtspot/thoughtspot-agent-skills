@@ -45,6 +45,15 @@ _COUNT_STAR = re.compile(r"\bcount\s*\(\s*(?:\*|1)\s*\)", re.I)
 _SQL_LEFTOVER = re.compile(r"\b(DISTINCT|OVER|PARTITION\s+BY|QUALIFY|WITHIN\s+GROUP)\b", re.I)
 
 
+# Trap lines that mean the output does NOT compute what the source computes: a translation
+# carrying one is downgraded to APPROXIMATED, never reported as a clean TRANSLATED.
+DOWNGRADE_TRAP_PREFIXES = ("week difference emitted as diff_days / 7",)
+
+
+def is_downgrade(trap: str) -> bool:
+    return trap.startswith(DOWNGRADE_TRAP_PREFIXES)
+
+
 def _code(expr: str) -> str:
     """``expr`` with every string literal blanked, so keyword checks skip literals."""
     return "".join("''" if lit else seg for lit, seg in split_literals(expr))

@@ -12,7 +12,9 @@ from ts_cli.formula_translate.adapters import (
     ADAPTERS, APPROXIMATED, NEEDS_REVIEW, TRANSLATED, TRANSLATOR_INFO, normalise_dialect,
 )
 from ts_cli.formula_translate.context import ColumnContext
-from ts_cli.formula_translate.traps import detect_traps, leftover_sql, repair_count_star
+from ts_cli.formula_translate.traps import (
+    detect_traps, is_downgrade, leftover_sql, repair_count_star,
+)
 
 DEFAULT_NAME = "Translated Formula"
 
@@ -86,6 +88,8 @@ def _post_process(raw, dialect: str, source: str, ctx: ColumnContext):
         raw.partial = out
         return None, NEEDS_REVIEW, notes, traps
     traps.extend(detect_traps(dialect, source, out))
+    if status == TRANSLATED and any(is_downgrade(t) for t in traps):
+        status = APPROXIMATED
     return out, status, notes, traps
 
 
