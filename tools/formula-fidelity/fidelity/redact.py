@@ -84,7 +84,7 @@ def redact_run(full: dict, entries: list[dict], disputed: Iterable[dict]) -> dic
     by_entry = {e["id"]: e for e in entries}
     meta = full["run"]
     keep = ("date", "profile", "connection", "warehouse_table", "ts_table", "ts_model",
-            "translator_version", "runtime_s", "phases", "aborted")
+            "translator_version", "git", "runtime_s", "phases", "aborted")
     run = {k: meta.get(k) for k in keep if meta.get(k) is not None}
     if run.get("aborted"):
         run["aborted"] = sanitize(run["aborted"])
@@ -180,7 +180,10 @@ def build_report(red: dict, title: str = "") -> str:
     cl = run["cleanup"]
     out += ["", "## Run", "",
             f"- date {run.get('date')}, profile `{run.get('profile')}`, connection "
-            f"`{run.get('connection')}`, {run.get('translator_version')}",
+            f"`{run.get('connection')}`, {run.get('translator_version')}"
+            + (f", commit `{(run.get('git') or {}).get('sha')}`"
+               + (" (with local changes)" if (run.get('git') or {}).get('dirty') else "")
+               if (run.get('git') or {}).get('sha') else ""),
             f"- scratch objects: warehouse `{run.get('warehouse_table')}`, Table "
             f"`{run.get('ts_table')}`, Model `{run.get('ts_model')}`",
             f"- cleanup: ThoughtSpot confirmed absent **{cl.get('ts_confirmed_absent')}**, "

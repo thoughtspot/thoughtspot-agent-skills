@@ -311,6 +311,15 @@ def unify_branches(tr, a: dict, b: dict, fn: str = "IF") -> tuple[dict, dict]:
     'TRUE' / 'FALSE'; boolean beside number: 1 / 0 — each APPROXIMATED with a trap. A date
     beside anything else is left for the type checker (NEEDS_REVIEW)."""
     ta, tb = tr.fine_type(a), tr.fine_type(b)
+    for x, tx, other, to in ((a, ta, b, tb), (b, tb, a, ta)):
+        if tx is None and x.get("node") in ("col", "ref") and to is not None and \
+                not T.is_lit(other, "string", "''"):
+            # review of #574: an unknown column beside a typed branch decides the import
+            note = (f"column type unknown: {T.to_text(x)} is an {fn} branch beside "
+                    f"{T.to_text(other)} ({to}); ThoughtSpot branches must share a type — "
+                    "pass data_type in --columns (or --model) to decide")
+            tr.note(note)
+            tr.need_type(x, "mixed branches", note)
     fam = {"int": "number", "double": "number", "number": "number", "text": "text",
            "bool": "bool"}
     fa, fb = fam.get(ta), fam.get(tb)

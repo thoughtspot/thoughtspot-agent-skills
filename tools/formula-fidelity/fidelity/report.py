@@ -245,6 +245,10 @@ def build_report(run: dict, fixtures: dict[str, dict], title: str) -> str:
               "translator_version", "runtime_s"):
         if k in meta:
             lines.append(f"- {k}: `{meta[k]}`")
+    git = meta.get("git") or {}
+    if git.get("sha"):
+        lines.append(f"- commit: `{git['sha']}`" + (" (with local changes)" if git.get("dirty")
+                                                     else ""))
     phases = meta.get("phases") or {}
     if phases:
         lines.append("- phases (s): " + ", ".join(f"{k} {v}" for k, v in phases.items()))

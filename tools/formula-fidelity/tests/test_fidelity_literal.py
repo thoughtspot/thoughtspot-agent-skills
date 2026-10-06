@@ -422,3 +422,29 @@ def test_default_oracle_is_still_the_warehouse():
     from fidelity import live
 
     assert m0.Deps(validator=object, warehouse=object).oracle is live.run_oracle
+
+
+@pytest.mark.parametrize("case_id", sorted(L.CASE_DIVERGENCES))
+def test_case_divergences_are_valid_and_cite_a_bl_item(case_id):
+    """Review of #574: a case whose wrong value has a known cause carries it (BL-351
+    platform, BL-356 oracle dispute) instead of reading as unexplained."""
+    from fidelity.cases import _check_case
+
+    kd = L.CASE_DIVERGENCES[case_id]
+    case = {"id": case_id, "dialect": "excel", "source_formula": "=1", "role": "row",
+            "fixture": "m1", "tolerance": {"rel": 1e-12}, "known_divergence": dict(kd),
+            "provenance": {"source": "x", "licence": "y"}}
+    _check_case(case, case_id)
+    assert kd["backlog"].startswith("BL-")
+    with pytest.raises(Exception):
+        _check_case({**case, "known_divergence": {**kd, "backlog": None,
+                                                  "kind": "oracle-dispute"}}, case_id)
+
+
+def test_run_header_records_the_commit():
+    import run as m0
+
+    head = m0._git_head()
+    assert set(head) == {"sha", "dirty"}
+    if head["sha"] is not None:
+        assert len(head["sha"]) == 40

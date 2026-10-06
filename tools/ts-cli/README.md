@@ -4329,7 +4329,7 @@ nothing to ask — so existing consumers are unaffected):
   arithmetic` (listed only when the name suggests a date — the bare `a - b` is already
   right for numbers), `typed argument` (ts-cli 0.161.0: the type checker found the column
   in an integer slot — `substr`, `left`, `right`, `add_days`, `add_months`, `mod`, where a
-  DOUBLE is rejected — or in `to_double` / `to_string`, and cannot tell whether it fits);
+  DOUBLE is rejected — or in `to_double` / `to_string`, and cannot tell whether it fits); `mixed branches` (an `IF` / `IFERROR` branch is a column of unknown type beside a typed branch, and the branches must share a type);
   `note` is the trap / note text that rule already emits. Several
   reasons for one column join with ` and `. Re-run with `--columns` carrying `data_type`
   (or `--model`) and the list empties. Excel / Google Sheets only today — the other

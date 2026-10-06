@@ -186,6 +186,23 @@ class Deps:
         self.oracle = oracle or live.run_oracle
 
 
+def _git_head() -> dict:
+    """The commit the run's code came from, and whether the tree had local changes — so a
+    run is attributable to code, not to a version string (review of #574)."""
+    import subprocess
+
+    here = pathlib.Path(__file__).resolve().parent
+    try:
+        sha = subprocess.run(["git", "-C", str(here), "rev-parse", "HEAD"], capture_output=True,
+                             text=True, timeout=10).stdout.strip() or None
+        dirty = bool(subprocess.run(["git", "-C", str(here), "status", "--porcelain",
+                                     "--untracked-files=no"], capture_output=True, text=True,
+                                    timeout=10).stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return {"sha": None, "dirty": None}
+    return {"sha": sha, "dirty": dirty}
+
+
 def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" = None) -> int:
     """One live run. Outputs (run JSON, report) are ALWAYS written, in ``finally``.
 
@@ -212,7 +229,8 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
             "warehouse_table": fq_table, "ts_table": names["ts_table"],
             "ts_model": names["ts_model"], "run_start_ms": run_start_ms,
             "cases_file": _rel(args.cases), "cases_sha256": caselib.file_sha256(args.cases),
-            "translator_version": f"ts-cli {ts_cli_version}", "phases": phases}
+            "translator_version": f"ts-cli {ts_cli_version}", "git": _git_head(),
+            "phases": phases}
     items = [{"id": c["id"], "fixture": c["fixture"], "oracle": {}, "translation": None,
               "import_error": None, "actual": None} for c in cases]
     by_id = {it["id"]: it for it in items}

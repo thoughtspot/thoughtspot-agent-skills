@@ -514,3 +514,20 @@ def test_pre_1900_check_reads_the_date_not_the_string():
     r = ok('=DAY("1900-02-15")')                                 # real, but Excel's serial bug
     assert any("1899-12-30" in t for t in r.traps)
     assert not any("1899-12-30" in t for t in ok('=DAY("1900-03-01")').traps)
+
+
+# ---------------------------------------------------------------------------
+# Review fix 8 (low)
+# ---------------------------------------------------------------------------
+
+def test_untyped_column_beside_a_text_branch_asks_its_type():
+    r = translate_excel('=IF([@c]>1,[@odate],"none")', ColumnContext())
+    assert [t[1] for t in r.type_needs] == ["mixed branches"]
+    assert r.type_needs[0][0].endswith("odate]")
+
+
+def test_date_plus_a_double_column_floors_the_days():
+    r = ok("=[@day]+[@amt]")
+    assert r.expr == "add_days ( [T::day] , floor ( [T::amt] ) )"
+    assert r.status == "APPROXIMATED" and any("whole days" in t for t in r.traps)
+    assert f("=[@day]+[@qty]") == "add_days ( [T::day] , [T::qty] )"

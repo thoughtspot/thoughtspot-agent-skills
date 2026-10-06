@@ -51,7 +51,9 @@ def test_other_type_sensitive_rules_are_listed():
     cond = translate('=IF([@IS_ACTIVE],"Y","N")', "excel")["needs_types"]
     assert [(n["column"], n["reason"]) for n in cond] == [("IS_ACTIVE", "condition")]
     blank = translate('=IF([@REGION]="","none",[@REGION])', "excel")["needs_types"]
-    assert [(n["column"], n["reason"]) for n in blank] == [("REGION", "blank test")]
+    # REGION is also an IF branch beside text (review of #574): both reasons join
+    assert [(n["column"], n["reason"]) for n in blank] == [
+        ("REGION", "blank test and mixed branches")]
     branch = translate('=IF([@A]>0,"",[@SCORE])', "excel")["needs_types"]
     assert ("SCORE", "blank IF branch") in [(n["column"], n["reason"]) for n in branch]
 

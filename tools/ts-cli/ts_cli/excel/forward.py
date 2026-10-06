@@ -327,7 +327,8 @@ class Translator:
         return T.binop(op, left, right)
 
     def _whole_days(self, amount: dict) -> dict:
-        """add_days takes whole days; Excel's date + 0.5 (or + 1/24) adds a time of day."""
+        """add_days takes whole days (an INT64 — a DOUBLE is rejected at import); Excel's
+        date + 0.5 (or + 1/24) adds a time of day."""
         value = T.number_value(amount)
         if value is not None and value != value.to_integral_value():
             self.review("adding a fraction of a day to a date or datetime (+0.5, +1/24) has no "
@@ -337,7 +338,14 @@ class Translator:
                                             for n in T.walk(amount)):
             self.review("a computed number of days (e.g. 1/24) added to a date may be "
                         "fractional — add_days takes whole days")
+        if value is None and self.fine_type(amount) in ("double", "number"):
+            # review of #574: a DOUBLE day count is floored (add_days needs an integer)
+            self.trap("a DOUBLE number of days added to a date: add_days takes whole days, so "
+                      "it is floor ( n ); Excel would add the fraction as a time of day",
+                      downgrade=True)
+            return T.call("floor", amount)
         return amount
+
 
     def concat(self, operands: list) -> dict:
         """Excel ``&`` / CONCAT: one N-argument ``concat`` of Text arguments (probe §7)."""

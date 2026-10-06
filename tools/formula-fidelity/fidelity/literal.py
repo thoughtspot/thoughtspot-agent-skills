@@ -44,6 +44,23 @@ BLANK_DIVERGENCE = {
               "warehouse column is NULL, which propagates through ThoughtSpot formulas"}
 
 
+# Per-case divergences, by case id (ids are ours to commit; no corpus text). A tag explains a
+# wrong value, it never hides one: the case still runs and is still classified by its values.
+CASE_DIVERGENCES = {
+    "poi-formulaevaltestdata_copy-everythingtests-f23": {
+        "tag": "decimal-literal-exact", "kind": "platform-semantics", "backlog": "BL-351",
+        "keys": ["1"],
+        "reason": "literal-only arithmetic: the warehouse computes exact decimals, Excel IEEE "
+                  "doubles; documented divergence, tolerance not widened"},
+    "lo-mathematical-roundup-sheet2-r17": {
+        "tag": "silver-vs-bronze-last-digit", "kind": "oracle-dispute", "backlog": "BL-356",
+        "keys": ["1"],
+        "reason": "the translation returns Microsoft's documented round-up and the bronze "
+                  "value; the LibreOffice silver value is one unit lower in the last place, "
+                  "and the cross-check's 1e-9 bound did not quarantine it"},
+}
+
+
 class DataError(ValueError):
     """The data dir, a manifest entry, or a source file is unusable."""
 
@@ -199,6 +216,8 @@ def materialise(entries: list[dict], cache: SourceCache, licence_note: str = "")
         }
         if "blank-input" in raw["flags"]:
             case["known_divergence"] = dict(BLANK_DIVERGENCE)
+        elif e["id"] in CASE_DIVERGENCES:
+            case["known_divergence"] = dict(CASE_DIVERGENCES[e["id"]])
         cases.append(case)
     fixture = {"name": FIXTURE_NAME, "key": KEY, "columns": col_specs, "rows": [row],
                "session": {"TIMEZONE": "UTC"}}

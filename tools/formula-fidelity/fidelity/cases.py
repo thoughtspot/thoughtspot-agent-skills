@@ -18,7 +18,7 @@ from typing import Any, Optional
 DIALECTS = {"snowflake", "databricks", "excel", "sheets", "tableau", "dax", "qlik",
             "sisense", "thoughtspot"}
 ROLES = {"row", "aggregate"}
-DIVERGENCE_KINDS = {"platform-semantics", "translator-bug"}
+DIVERGENCE_KINDS = {"platform-semantics", "translator-bug", "oracle-dispute"}
 REQUIRED = ("id", "dialect", "source_formula", "role", "fixture", "tolerance", "provenance")
 
 
@@ -52,8 +52,8 @@ def _check_case(case: dict, where: str) -> None:
         if kd.get("kind") not in DIVERGENCE_KINDS:
             raise CaseError(f"{where}: known_divergence.kind must be one of "
                             f"{sorted(DIVERGENCE_KINDS)}")
-        if kd["kind"] == "translator-bug" and not kd.get("backlog"):
-            raise CaseError(f"{where}: a translator-bug divergence must cite a BL id")
+        if kd["kind"] in ("translator-bug", "oracle-dispute") and not kd.get("backlog"):
+            raise CaseError(f"{where}: a {kd['kind']} divergence must cite a BL id")
         keys = kd.get("keys")
         if not isinstance(keys, list) or not keys or \
                 not all(isinstance(k, str) and k for k in keys):
