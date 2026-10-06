@@ -78,7 +78,8 @@ def build_model_artifacts(
         )
 
     # -- Measures -> formulas (flag-don't-downgrade) -----------------------
-    formulas, measure_map = _translate_measures(app.measures)
+    formulas, measure_map = _translate_measures(
+        app.measures, functions.parse_first_week_day(app.load_script))
 
     # Drop a physical column whose display name collides with a formula name
     # (the measure wins), so the model never has two columns with one name.
@@ -262,7 +263,8 @@ def _model_physical_columns(tables: list[Table]) -> tuple[list[dict], list[dict]
     return columns, renames
 
 
-def _translate_measures(measures) -> tuple[list[dict], list[dict]]:
+def _translate_measures(measures, first_week_day=None
+                        ) -> tuple[list[dict], list[dict]]:
     """Translate master measures to formulas + a mapping-report entry each.
 
     Returns (formulas, measure_map). ``formulas`` are ``{name, expr,
@@ -282,7 +284,8 @@ def _translate_measures(measures) -> tuple[list[dict], list[dict]]:
             i += 1
         seen.add(name)
 
-        ts_expr, review, reason = functions.translate(m.expression)
+        ts_expr, review, reason = functions.translate(
+            m.expression, first_week_day=first_week_day)
         status = _STATUS_REVIEW if review else _STATUS_OK
         formulas.append({"name": name, "expr": ts_expr, "column_type": "MEASURE"})
         measure_map.append({

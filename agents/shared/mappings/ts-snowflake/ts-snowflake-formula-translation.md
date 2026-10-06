@@ -258,7 +258,7 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | `month ( [date] )` → `MONTH(date)` | `MONTH(date)` → `month ( [date] )` |
 | `day ( [date] )` → `DAY(date)` | `DAY(date)` → `day ( [date] )` |
 | `hour_of_day ( [date] )` → `HOUR(date)` | `HOUR(date)` → `hour_of_day ( [date] )` |
-| `day_number_of_week ( [date] )` → `DAYOFWEEK(date)` | `DAYOFWEEK(date)` → `day_number_of_week ( [date] )` — **Not equivalent (BL-334).** `day_number_of_week` is 1 = Monday … 7 = Sunday (live-verified 2026-10-06; it compiles to fixed arithmetic, not `DAYOFWEEK`), while Snowflake `DAYOFWEEK` depends on `WEEK_START` — under the default (0) it is 0 = Sunday … 6 = Saturday. The exact TS → Snowflake form is `DAYOFWEEKISO(date)`; Snowflake → TS, `DAYOFWEEK(d)` under `WEEK_START` 0 is `mod ( day_number_of_week ( [d] ) , 7 )`. `sv_sql.py` still renames `DAYOFWEEK` → `day_number_of_week` (off by one Monday–Saturday, 7 vs 0 on Sunday); not changed in this doc-only pass |
+| `day_number_of_week ( [date] )` → `DAYOFWEEKISO(date)` — **never `DAYOFWEEK`** | `DAYOFWEEK(date)` → `mod ( day_number_of_week ( [date] ) , 7 )`; `DAYOFWEEKISO(date)` → `day_number_of_week ( [date] )`. **Not a rename (BL-334, fixed ts-cli 0.156.2).** `day_number_of_week` is fixed 1 = Monday … 7 = Sunday (live-verified 2026-10-06; it compiles to `(MOD((DATEDIFF(day, DATE '1970-01-01', d) + 3), 7) + 1)`, not `DAYOFWEEK`). Snowflake `DAYOFWEEK` under the default `WEEK_START = 0` "Returns 0 (Sunday) to 6 (Saturday)" ([date & time functions](https://docs.snowflake.com/en/sql-reference/functions-date-time), [WEEK_START](https://docs.snowflake.com/en/sql-reference/parameters) — default "0 (legacy Snowflake behavior)"); `DAYOFWEEKISO` is 1 (Monday) … 7 (Sunday) regardless of `WEEK_START`. `EXTRACT(<part> FROM d)` takes the same path for the documented part aliases `dayofweek`/`weekday`/`dow`/`dw` and `dayofweekiso`/`weekday_iso`/`dow_iso`/`dw_iso`. **A non-default `WEEK_START` (1–7) changes what `DAYOFWEEK` means** (1–7 from that day); the translator cannot see session parameters and assumes the default. Offset math: `formula_common.ts_weekday_number` |
 | `day_number_of_year ( [date] )` → `DAYOFYEAR(date)` | `DAYOFYEAR(date)` → `day_number_of_year ( [date] )` |
 | `week_number_of_year ( [date] )` → `WEEKOFYEAR(date)` | `WEEKOFYEAR(date)` → `week_number_of_year ( [date] )` — `week_number_of_year`'s compiled SQL uses ISO-style Thursday logic (2026-01-04 → 1, live 2026-10-06); Snowflake `WEEKOFYEAR` follows `WEEK_OF_YEAR_POLICY` / `WEEK_START`, so the two agree only under ISO settings (BL-334) |
 | `diff_months ( [later] , [earlier] )` → `MONTHS_BETWEEN(later, earlier)` | `MONTHS_BETWEEN(a, b)` → `diff_months ( [a] , [b] )` — **same order, no swap** (corrected 2026-10-06, BL-336; `sv_sql` used to swap it, inverting the sign). Snowflake `MONTHS_BETWEEN(d1, d2)` is positive when d1 is later ([docs](https://docs.snowflake.com/en/sql-reference/functions/months_between)), and `diff_months` takes (later, earlier). **Not equivalent:** `MONTHS_BETWEEN` returns a *fractional* month count, while `diff_months` counts month boundaries crossed (`DATEDIFF(month, epoch, end) - DATEDIFF(month, epoch, start)`, live-verified 2026-10-06). The `DATEDIFF('month', …)` row below is the exact pair |
@@ -338,7 +338,7 @@ Snowflake SQL, they can be translated directly by substituting column references
 | `sql_date_op(template, args...)` | DATE | Dimension |
 | `sql_string_aggregate_op(template, args...)` | VARCHAR | Metric |
 | `sql_int_aggregate_op(template, args...)` | INTEGER | Metric |
-| `sql_number_aggregate_op(template, args...)` | NUMBER | Metric |
+| `sql_double_aggregate_op(template, args...)` | NUMBER | Metric |
 
 **Translation rule:**
 
@@ -382,7 +382,7 @@ functions can be wrapped in the appropriate `sql_*` pass-through:
 
 - Scalar text expression → `sql_string_op("template", col1, col2)`
 - Scalar numeric expression → `sql_int_op(...)` or `sql_double_op(...)`
-- Aggregate expression → `sql_string_aggregate_op(...)` or `sql_number_aggregate_op(...)`
+- Aggregate expression → `sql_string_aggregate_op(...)` or `sql_double_aggregate_op(...)`
 
 Replace each column reference with `{0}`, `{1}`, ... positional placeholders.
 

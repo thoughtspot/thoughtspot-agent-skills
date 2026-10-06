@@ -42,6 +42,7 @@ from ts_cli.databricks.mv_sql_constructs import (
 from ts_cli.formula_common import (
     UntranslatableError,
     ts_round_from_sql_digits,
+    ts_weekday_number,
 )
 
 
@@ -284,7 +285,9 @@ _RENAME = {
     "GREATEST": "greatest", "LEAST": "least",
     "YEAR": "year", "MONTH": "month_number", "DAY": "day",
     "HOUR": "hour_of_day", "QUARTER": "quarter_number",
-    "WEEKOFYEAR": "week_number_of_year", "DAYOFWEEK": "day_number_of_week",
+    # DAYOFWEEK / WEEKDAY deliberately do NOT live here (BL-334): a rename to
+    # day_number_of_week is a silent wrong number — see _DBX_WEEKDAY below.
+    "WEEKOFYEAR": "week_number_of_year",
     "DAYOFYEAR": "day_number_of_year", "DATE": "date",
     "DATE_ADD": "add_days", "ADD_MONTHS": "add_months",
     "SUM": "sum", "AVG": "average", "MIN": "min", "MAX": "max",
@@ -304,6 +307,35 @@ _DATE_TRUNC = {"day": "date", "week": "start_of_week",
                "year": "start_of_year"}
 _EXTRACT = {"YEAR": "year", "MONTH": "month_number", "DAY": "day",
             "HOUR": "hour_of_day"}
+# Weekday NUMBER sources -> (first day numbered `base`, base), rendered through
+# formula_common.ts_weekday_number (BL-334). ThoughtSpot day_number_of_week is
+# fixed 1 = Monday ... 7 = Sunday (live-probed 2026-10-06). Databricks docs:
+#   dayofweek(expr)  — "1 = Sunday, and 7 = Saturday"
+#                      (docs.databricks.com/aws/en/sql/language-manual/functions/dayofweek)
+#   weekday(expr)    — "0 = Monday and 6 = Sunday" (.../functions/weekday)
+#   EXTRACT(DAYOFWEEK | DOW ...)         — "Sunday(1) to Saturday(7)"
+#   EXTRACT(DAYOFWEEK_ISO | DOW_ISO ...) — "Monday(1) to Sunday(7)" (.../functions/extract)
+# No session parameter changes these.
+_DBX_WEEKDAY = {"DAYOFWEEK": ("sunday", 1), "WEEKDAY": ("monday", 0),
+                "DAYOFWEEK_ISO": ("monday", 1)}
+_DBX_EXTRACT_WEEKDAY = {"DAYOFWEEK": "DAYOFWEEK", "DOW": "DAYOFWEEK",
+                        "DAYOFWEEK_ISO": "DAYOFWEEK_ISO",
+                        "DOW_ISO": "DAYOFWEEK_ISO"}
+
+
+def _dbx_weekday_number(name: str, date_expr: str) -> str:
+    first_day, base = _DBX_WEEKDAY[name]
+    return ts_weekday_number(date_expr, first_day=first_day, base=base)
+
+
+def _call_dbx_dayofweek(args: list[str]) -> str:
+    _need(args, 1, "DAYOFWEEK")
+    return _dbx_weekday_number("DAYOFWEEK", args[0])
+
+
+def _call_dbx_weekday(args: list[str]) -> str:
+    _need(args, 1, "WEEKDAY")
+    return _dbx_weekday_number("WEEKDAY", args[0])
 _DATEDIFF_UNIT = {"DAY": "diff_days", "MONTH": "diff_months"}
 _NULLIF0 = "\x00NULLIF0\x00"  # marker prefix; collapsed before joining
 
@@ -408,7 +440,10 @@ _STRING_COMPOSED = {
 
 # Functions whose translation is built from already-translated args, dispatched
 # by name (keeps _call under the module-health complexity CAP).
-_ARG_COMPOSED: dict = {**_STRING_COMPOSED, "ROUND": _call_round}
+# DAYOFWEEK_ISO is an EXTRACT field only, not a Databricks function.
+_ARG_COMPOSED: dict = {**_STRING_COMPOSED, "ROUND": _call_round,
+                       "DAYOFWEEK": _call_dbx_dayofweek,
+                       "WEEKDAY": _call_dbx_weekday}
 
 
 def _call_args(cur: _Cursor, resolver, agg: str | None = None) -> list[str]:
@@ -540,16 +575,19 @@ def _over_empty(label: str, inner: str, cur: _Cursor) -> str:
 
 def _call_extract(cur: _Cursor, resolver) -> str:
     kind, unit = cur.advance()
-    if kind != "ident" or unit.upper() not in _EXTRACT:
+    unit_u = unit.upper() if kind == "ident" else ""
+    if unit_u not in _EXTRACT and unit_u not in _DBX_EXTRACT_WEEKDAY:
         raise UntranslatableError(
-            f"EXTRACT unit {unit!r} not mapped (YEAR|MONTH|DAY|HOUR — "
-            f"ts-databricks-formula-translation.md)")
+            f"EXTRACT unit {unit!r} not mapped (YEAR|MONTH|DAY|HOUR|"
+            f"DAYOFWEEK|DAYOFWEEK_ISO — ts-databricks-formula-translation.md)")
     kw_kind, kw = cur.advance()
     if kw_kind != "kw" or kw != "FROM":
         raise UntranslatableError("EXTRACT expects '<unit> FROM <expr>'")
     inner = _expr(cur, resolver)
     cur.expect_op(")")
-    return _emit(_EXTRACT[unit.upper()], [inner])
+    if unit_u in _DBX_EXTRACT_WEEKDAY:
+        return _dbx_weekday_number(_DBX_EXTRACT_WEEKDAY[unit_u], inner)
+    return _emit(_EXTRACT[unit_u], [inner])
 
 
 def _call_if(cur: _Cursor, resolver) -> str:

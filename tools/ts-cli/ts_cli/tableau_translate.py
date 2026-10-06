@@ -63,6 +63,7 @@ from ts_cli.tableau.functions import (  # noqa: F401
     _DATEPART_UNIT_MAP,
     _DATETRUNC_UNIT_MAP,
     _FUNCTION_MAP,
+    WEEK_START_ASSUMED,
     _build_function_map,
     _convert_dateadd,
     _convert_datediff,
@@ -73,6 +74,16 @@ from ts_cli.tableau.functions import (  # noqa: F401
     map_date_functions,
     map_functions,
 )
+
+# Surfaced on a translated formula (``review_notes``) and, by build-model, as a
+# validation warning — the assumption must reach the conversion report, not just
+# a code comment (BL-334).
+WEEK_START_ASSUMED_NOTE = (
+    "DATEPART('weekday', …) numbered from Sunday = 1: the datasource records no "
+    "Week start and the formula passes no start_of_week, so Tableau would use the "
+    "author's locale (Sunday in the US, Monday in the EU). Confirm the week start "
+    "or add start_of_week to the source formula (BL-334)")
+
 from ts_cli.tableau.strings_types import (  # noqa: F401
     _CONCAT_OPERAND,
     _CONCAT_PAIR,
@@ -142,6 +153,7 @@ def translate_single(
     parameter_names: set[str] | None = None,
     csq_to_table: dict[str, str] | None = None,
     date_columns: set[str] | None = None,
+    week_start: str | None = None,
 ) -> tuple[str, list[str], dict[str, int]]:
     """Apply the full translation pipeline to a single formula expression.
 
@@ -201,7 +213,7 @@ def translate_single(
     expr = map_functions(expr)
 
     # 10. Date function mapping
-    expr = map_date_functions(expr, literal_registry)
+    expr = map_date_functions(expr, literal_registry, week_start, notes)
 
     # 10d. Boolean aggregation: MAX/MIN/SUM(<comparison>) → agg(if <cmp> then 1 else 0)
     expr = convert_boolean_aggregate(expr)
@@ -261,6 +273,15 @@ def translate_single(
     return expr, errors, notes
 
 
+def _translated_record(name: str, expr: str, column_type: str, level: int,
+                       notes: dict[str, int]) -> dict:
+    record = {"name": name, "expr": expr, "column_type": column_type,
+              "level": level}
+    if notes.get(WEEK_START_ASSUMED):
+        record["review_notes"] = [WEEK_START_ASSUMED_NOTE]
+    return record
+
+
 def translate_formulas(
     formulas: list[dict],
     scoped_columns: dict[str, str] | None = None,
@@ -269,8 +290,13 @@ def translate_formulas(
     calc_id_map: dict[str, str] | None = None,
     csq_to_table: dict[str, str] | None = None,
     date_columns: set[str] | None = None,
+    week_start: str | None = None,
 ) -> dict:
     """Translate a batch of Tableau formulas to ThoughtSpot syntax.
+
+    ``week_start`` is the datasource's Week start (``parse_twb`` →
+    ``datasources[].week_start``). A translated formula whose weekday number
+    had to ASSUME Sunday carries ``review_notes`` (BL-334).
 
     Input: list of formula dicts with keys: caption, formula, datatype, role, name
     Output: {
@@ -366,6 +392,7 @@ def translate_formulas(
                 parameter_names=parameter_names,
                 csq_to_table=csq_to_table,
                 date_columns=date_columns,
+                week_start=week_start,
             )
 
             for note_key, note_count in notes.items():
@@ -385,12 +412,8 @@ def translate_formulas(
                 # Update cross-references to renamed formulas
                 if name_clashes:
                     expr = apply_name_clash_renames(expr, name_clashes)
-                translated.append({
-                    "name": output_name,
-                    "expr": expr,
-                    "column_type": column_type,
-                    "level": level,
-                })
+                translated.append(_translated_record(
+                    output_name, expr, column_type, level, notes))
 
     # Handle circular / unresolvable (level -1)
     for caption, entry in dag.items():
@@ -422,5 +445,6 @@ def translate_formulas(
             "name_clashes": len(name_clashes),
             "ifnull_stripped": transform_counts.get("ifnull_stripped", 0),
             "agg_if_conversions": transform_counts.get("agg_if_converted", 0),
+            WEEK_START_ASSUMED: transform_counts.get(WEEK_START_ASSUMED, 0),
         },
     }

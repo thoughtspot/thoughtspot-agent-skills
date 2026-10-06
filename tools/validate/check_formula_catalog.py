@@ -57,7 +57,8 @@ COMPLEX_PATTERN_PREFIXES = (
     "sql_string_op", "sql_int_op", "sql_double_op", "sql_bool_op",
     "sql_date_op", "sql_date_time_op",
     "sql_string_aggregate_op", "sql_int_aggregate_op",
-    "sql_number_aggregate_op", "sql_date_time_aggregate_op",
+    "sql_double_aggregate_op", "sql_date_aggregate_op",
+    "sql_date_time_aggregate_op", "sql_bool_aggregate_op",
 )
 
 

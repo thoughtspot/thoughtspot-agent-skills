@@ -171,6 +171,84 @@ def ts_increment_to_sql_digits(increment: str) -> int | None:
 
 
 # ---------------------------------------------------------------------------
+# Weekday numbering -> ThoughtSpot day_number_of_week (BL-334)
+# ---------------------------------------------------------------------------
+#
+# ThoughtSpot `day_number_of_week ( d )` is FIXED at 1 = Monday ... 7 = Sunday:
+# it compiles to `(MOD((DATEDIFF(day, DATE '1970-01-01', d) + 3), 7) + 1)`,
+# independent of the warehouse's WEEK_START (live-probed, se-thoughtspot,
+# 2026-10-06). Every source numbers its weekdays from some FIRST DAY with some
+# BASE (0 or 1), and a bare rename to `day_number_of_week` is right only for
+# (Monday, 1). Anything else imports cleanly and returns a silently wrong number
+# — Snowflake DAYOFWEEK and Databricks DAYOFWEEK both shipped that way.
+#
+# One helper so the offset arithmetic lives once (BL-217): a source day number
+# is  mod(dnw - 1 - first_idx, 7) + base  ==  mod(dnw + (6 - first_idx), 7) + base,
+# where first_idx is the source's first day, Monday-based (Monday = 0 ... Sunday
+# = 6). Exact under the Model's default calendar; a Model calendar with a
+# non-Monday week start is unverified territory (BL-334 item 4).
+
+WEEKDAY_FIRST_DAY_INDEX = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+}
+
+
+def ts_weekday_number(date_expr: str, *, first_day: int | str, base: int,
+                      compact: bool = False) -> str:
+    """ThoughtSpot formula giving a source's weekday NUMBER for ``date_expr``.
+
+    ``first_day`` is the day the source numbers ``base`` — a name
+    (``"sunday"``) or a Monday-based index (Monday = 0 ... Sunday = 6, which is
+    also Qlik's ``first_week_day`` encoding). ``base`` is 0 or 1. ``compact``
+    selects the caller's spacing style (``fn(x)`` vs ``fn ( x )``); the value is
+    identical. Any additive result is parenthesised so it composes safely inside
+    a larger expression.
+
+    >>> ts_weekday_number("[d]", first_day="sunday", base=0)
+    'mod ( day_number_of_week ( [d] ) , 7 )'
+    >>> ts_weekday_number("[d]", first_day="sunday", base=1)
+    '( mod ( day_number_of_week ( [d] ) , 7 ) + 1 )'
+    >>> ts_weekday_number("[d]", first_day="monday", base=1)
+    'day_number_of_week ( [d] )'
+    """
+    if isinstance(first_day, str):
+        try:
+            idx = WEEKDAY_FIRST_DAY_INDEX[first_day.strip().lower()]
+        except KeyError:
+            raise ValueError(f"unknown weekday name {first_day!r}") from None
+    else:
+        idx = int(first_day)
+    if not 0 <= idx <= 6:
+        raise ValueError(f"first_day index must be 0-6 (Monday-based), got {idx}")
+    if base not in (0, 1):
+        raise ValueError(f"weekday base must be 0 or 1, got {base}")
+
+    if compact:
+        dnw = f"day_number_of_week({date_expr})"
+
+        def _mod(x: str) -> str:
+            return f"mod({x}, 7)"
+
+        def _paren(x: str) -> str:
+            return f"({x})"
+    else:
+        dnw = f"day_number_of_week ( {date_expr} )"
+
+        def _mod(x: str) -> str:
+            return f"mod ( {x} , 7 )"
+
+        def _paren(x: str) -> str:
+            return f"( {x} )"
+
+    if idx == 0:  # Monday-first: a plain offset, no wrap-around
+        return dnw if base == 1 else _paren(f"{dnw} - 1")
+    shift = 6 - idx
+    core = _mod(dnw if shift == 0 else f"{dnw} + {shift}")
+    return core if base == 0 else _paren(f"{core} + {base}")
+
+
+# ---------------------------------------------------------------------------
 # Shared translation-failure exception
 # ---------------------------------------------------------------------------
 
