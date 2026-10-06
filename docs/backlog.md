@@ -215,6 +215,7 @@ are roughly ordered by value÷effort.
 | BL-332 | Upstream apache/ossie converter maps `ROUND(x, d)` to `round ( x , d )` (copies the digit count; `d = 0` → NULL) — unreachable today, live once multi-arg matching lands; fix PR held for legal review | 2026-11-30 |
 | BL-333 | ThoughtSpot string comparison (`=`, `contains`, `strpos`) is case-insensitive — Snowflake SV / Databricks MV / Tableau / Qlik / Looker translations of case-sensitive comparisons change semantics silently | 2026-11-30 |
 | BL-334 | `DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`; week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
+| BL-335 | `sql_number_aggregate_op` does not exist (parser rejects it; `sql_double_aggregate_op` is the numeric aggregate) — repo docs fixed; upstream apache/ossie converter still emits it, fix held with the Ossie upstream work | 2026-11-30 |
 
 ### Tier 3 — Opportunistic
 
@@ -12442,3 +12443,35 @@ weekday. (2) Have converters flag week-dependent output in the conversion report
 with `WEEK_START = 7` and a Model with a non-Monday calendar.
 
 **Target:** 2026-11-30.
+
+---
+
+## BL-335 — `sql_number_aggregate_op` does not exist; the numeric aggregate pass-through is `sql_double_aggregate_op` `Tier 2`
+
+**Filed:** 2026-10-06. **Status:** OPEN (repo side DONE; upstream side held).
+**Source:** found while building `ts-object-formula-translate` (PR #560), and confirmed on se-thoughtspot on 2026-10-06 by a `VALIDATE_ONLY` import of each name over `MAX({0})`. Nothing was created.
+
+**The facts.**
+
+| Name | Parser |
+|---|---|
+| `sql_double_aggregate_op`, `sql_int_aggregate_op`, `sql_string_aggregate_op`, `sql_date_aggregate_op`, `sql_date_time_aggregate_op`, `sql_bool_aggregate_op` | accepted |
+| `sql_number_aggregate_op`, `sql_number_op` | **rejected** ("Formula addition failed") |
+
+`thoughtspot-formula-patterns.md` listed `sql_number_aggregate_op` as the numeric aggregate. That was never probed. It was copied into the Snowflake formula mapping, the Ossie function map (17 sites) and the Excel, Sigma and Omni function maps (about 76 sites). Any converter or user following those docs got a formula that fails at import. No translator code in `ts_cli` emits it, so no shipped converter was affected.
+
+**Done in this repo:**
+- Every doc site renamed to `sql_double_aggregate_op`.
+- The formula reference now lists the full verified aggregate family and records the rejection.
+- `check_formula_catalog.py`'s pattern list now matches the family.
+- The Ossie map has a dated revision note. Its classifications are unchanged.
+
+**Still open (held with the Ossie upstream work):** the apache/ossie ThoughtSpot converter emits `sql_number_aggregate_op` in:
+- `converters/thoughtspot/src/ossie_thoughtspot/expressions/catalog.py`, `_types.py` and `reverse.py`
+- `tml_to_ossie.py`
+- the generated upstream reference pages (expression-mapping, reverse-inventory)
+- tests
+
+Every aggregate pass-through it produces therefore fails at ThoughtSpot import. Fix it alongside BL-332.
+
+**Target:** 2026-11-30, the same as BL-332.
