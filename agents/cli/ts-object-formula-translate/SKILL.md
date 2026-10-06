@@ -30,13 +30,13 @@ rests on an unprobed composition says so *on the same line*.
 
 | Source | Backing | How this skill translates it |
 |---|---|---|
-| Tableau, DAX, Qlik, Sisense, Snowflake SQL, Databricks SQL | **translator** — the converter skills' own code | `ts formula translate --from <dialect>`. The CLI result is the answer; do not quietly rewrite it. If it returns `NEEDS_REVIEW` (a translator gap, a known defect, or an output guard), explain the reason and you **may** offer a hand-composed alternative from the maps or `thoughtspot-formula-patterns.md`, labelled *hand-composed, not translator output* and validated if possible. A wrong translation is fixed in the translator, which also fixes the converter |
-| Excel, Google Sheets, Omni table calc, Sigma, Omni modelling layer | **map** — `docs/function-maps/` | You translate from the map rows (Step 4b), citing each row. No code stands behind it, so validation is **recommended** |
+| Tableau, DAX, Qlik, Sisense, Snowflake SQL, Databricks SQL, **Excel, Google Sheets** | **translator** — the converter skills' own code; for Excel / Sheets `ts_cli/excel/`, whose rules are the maps' *Translator coverage* rows | `ts formula translate --from <dialect>`. The CLI result is the answer; do not quietly rewrite it. If it returns `NEEDS_REVIEW` (a translator gap, a known defect, or an output guard), explain the reason and you **may** offer a hand-composed alternative from the maps or `thoughtspot-formula-patterns.md`, labelled *hand-composed, not translator output* and validated if possible. A wrong translation is fixed in the translator, which also fixes the converter |
+| Omni table calc, Sigma, Omni modelling layer — and an Excel / Sheets construct the translator returned `NEEDS_REVIEW` | **map** — `docs/function-maps/` | You translate from the map rows (Step 4b), citing each row. No code stands behind it, so validation is **recommended**. For Excel / Sheets this is only the fallback, labelled *hand-composed from the map — not translator output* |
 | LookML | none | Point to `/ts-convert-from-looker`; out of scope here |
 
 The CLI wraps the existing translators (`translate_single`, `translate_dax`, Qlik
-`translate`, `translate_jaql`, `sv_sql` and `mv_sql` `translate_sql_expr`) and adds what
-they do not: one recording resolver for every column reference, the dialect-independent
+`translate`, `translate_jaql`, `sv_sql` and `mv_sql` `translate_sql_expr`, and the Excel /
+Sheets `translate_excel`) and adds what they do not: one recording resolver for every column reference, the dialect-independent
 trap lines, a `COUNT(*)` repair, role inference, a TML snippet, and validation.
 
 ## Step 0 — Overview
@@ -93,7 +93,12 @@ Default to placeholders.
 | 2 | `--model <guid or exact name> --profile <p>` | the Model's real columns (by display name or physical name; formulas by `[formula_id]`) | `compile`, `execute` |
 
 Level 1: turn whatever the user pasted (`Sales=ORDERS.SALES_AMT`, a list) into the JSON
-`{"Sales": "ORDERS.SALES_AMT"}`. Add `"data_type": "DATE"` for date columns when known (DAX
+`{"Sales": "ORDERS.SALES_AMT"}` — or pass the shorthand as-is: `--columns 'A=ORDERS.ORDER_DATE,
+B=ORDERS.AMOUNT'` (the natural form for spreadsheet column letters; an unmapped A1 cell comes
+back as a `[TABLE::B]` placeholder with a *NEEDS_REVIEW: A1 reference* note — ask for column
+B's header). For Excel / Sheets add `"data_type"` whenever it is known: it decides whether `&`
+wraps an operand in `to_string` (ThoughtSpot rejects a number in `concat` **and** Text in
+`to_string`) and whether `-` / `+` on a column is date arithmetic. Add `"data_type": "DATE"` for date columns when known (DAX
 date subtraction and Tableau date arithmetic depend on it), and `"key": true` for a primary
 key.
 
@@ -107,8 +112,18 @@ re-run with a `--columns` entry for the confirmed mapping. A `COUNT(*)` with no 
 
 ## Step 4a — Translator-backed dialects
 
-    ts formula translate '<formula>' --from <tableau|dax|qlik|sisense|snowflake|databricks> \
-      [--columns '<json>'] [--model <guid> --profile <p>] [--name "<display name>"]
+    ts formula translate '<formula>' --from <tableau|dax|qlik|sisense|snowflake|databricks|excel|google_sheets> \
+      [--columns '<json>'] [--model <guid> --profile <p>] [--name "<display name>"] [--role measure|attribute]
+
+**Excel / Google Sheets: ask the intended role** unless the user said it ("Should this be a
+**measure** (totalled in searches) or an **attribute** (a per-row value)?"), and pass it as
+`--role`. It changes the formula, not just the label: a sheet formula over `[@Col]` is a
+per-row value, and with `--role measure` the CLI rebuilds it at the right grain — additive
+expressions as the sum of each column (`sum ( a ) - sum ( b )`), a ratio as a **ratio of
+totals** (`safe_divide ( sum ( num ) , sum ( den ) )`, never the sum of per-row ratios), a
+numeric `IF(…,1,0)` flag left row-level (its column aggregation totals it). A text result
+stays an ATTRIBUTE with a `group_aggregate` trap. Without `--role` the row-level translation's
+own role is inferred. Present the CLI's result — do not re-compose it from the map.
 
 Pass the formula on stdin (`echo … | ts formula translate --from …`) when it contains quotes
 the shell would mangle. **Qlik `Weekday(d)` with one argument** depends on the app's
@@ -132,10 +147,13 @@ happened, and the answer says it in plain words:
 Show `partial` (what the translator emitted) only labelled *rejected output*, never as an
 answer.
 
-## Step 4b — Map-backed dialects (Excel, Sheets, Omni, Sigma)
+## Step 4b — Map-backed dialects (Omni, Sigma) and the Excel / Sheets fallback
 
-There is no translator; **you** compose the formula from the map, and the map — not you —
-supplies the classification and the verification status.
+For Omni and Sigma there is no translator; **you** compose the formula from the map, and the map
+— not you — supplies the classification and the verification status. **Excel and Google Sheets
+come here only when `ts formula translate --from excel|google_sheets` returned `NEEDS_REVIEW`**
+(its `notes[]` cite the map row): compose that construct from the cited row, label the answer
+*hand-composed from the map — not translator output*, and validate it.
 
 1. Open the map for the confirmed dialect (References; `detect`'s candidate names it as
    `map`). Read its *How to read the tables* rules (Excel E1–E18, Sheets E1–E9, Sigma and
@@ -199,7 +217,15 @@ statement beats the map's header ("no row has been import-probed" predates the p
 | anything else | **documentation only** |
 
 **Settled 2026-10-06** — apply these to **every** answer, translator- or map-backed, whatever
-an older row says (see open-items OI-2…OI-5):
+an older row says (see open-items OI-2…OI-5, and probe record §7):
+
+- **`nullif` and `isnotnull` do not exist** (VALIDATE_ONLY rejects them; BL-339). Never write
+  them: `safe_divide ( a , b )` is 0 on a zero divisor, plain `a / b` is NULL on a zero
+  divisor, `if ( b = 0 ) then null else a / b` is an explicit NULL (`null` is accepted in
+  either branch), and "is not null" is `not ( isnull ( x ) )`. The CLI's output guard refuses
+  both names.
+- **`concat` takes N arguments, all Text**: wrap numbers (and dates) in `to_string`, and only
+  them — `to_string` rejects a Text argument.
 
 - **Case-sensitive comparison has no native form** (OI-4, BL-333): ThoughtSpot `=`,
   `contains` and `strpos` lowercase both sides. Excel `EXACT`/`FIND`, Sigma
@@ -330,6 +356,18 @@ stderr names every remaining GUID. Repeat each GUID to the user with the command
 
     ts metadata delete <guid> --profile <p>
 
+## Step 6b — ThoughtSpot → Excel (on request)
+
+If the user wants a ThoughtSpot formula written as an Excel formula ("how would I do this in
+Excel?"), run the reverse direction — it is deterministic code, not a map composition:
+
+    ts formula translate '<ThoughtSpot formula>' --from thoughtspot --to excel [--table <Excel Table name>]
+
+Show `formula` (starts with `=`; row-level references are `[@Col]`, references inside an
+aggregate `Table1[Col]`), then `traps[]` (always the blank-vs-NULL caveat: Excel treats a blank
+as 0) and `notes[]`. `NEEDS_REVIEW` (windows, `rank`, `sql_*_op`, a `query_groups ( )` grain)
+is a result: give the reason. Ask for the Excel Table's name if `Table1` is not it.
+
 ## Step 7 — Loop
 
 "Another formula?" Reuse the confirmed dialect and context unless the input changes shape.
@@ -337,8 +375,13 @@ stderr names every remaining GUID. Repeat each GUID to the user with the command
 ## Known limitations
 
 - **Map-backed dialects have no code behind them**: the composition is yours, from the map
-  rows; only `--from thoughtspot --validate` puts evidence behind it. v2 codifies Excel, then
-  Sigma (spec §3.3).
+  rows; only `--from thoughtspot --validate` puts evidence behind it. Excel and Google Sheets
+  are translator-backed since 1.2.0; Sigma is next (spec §3.3).
+- **Excel / Sheets cover the maps' *Translator coverage* rows** (71 Excel functions, 22 Sheets
+  delta rows, the criteria table); any other function is `NEEDS_REVIEW` citing its row. The
+  60-formula acceptance workbook (`tools/ts-cli/tests/fixtures/excel_regression/`) translates
+  VALIDATE_ONLY-clean; two of its reviewed answers differ by rule — the translator keeps the
+  source's own test (`= 0`) and never introduces a column the formula does not reference.
 - **Translator gaps surface as `NEEDS_REVIEW`, by design.** Example: Qlik's translator only
   converts `Count(DISTINCT x)` as a whole expression; inside a larger one the CLI's guard
   catches the leftover `DISTINCT` and refuses rather than emit an invalid formula. The output
@@ -364,5 +407,6 @@ stderr names every remaining GUID. Repeat each GUID to the user with the command
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-10-06 | Excel and Google Sheets are translator-backed (`ts formula translate --from excel` or `--from google_sheets`, ts-cli 0.158.0): ask the intended role and pass `--role` (MEASURE builds additive sums and ratios of totals); the map is only the labelled fallback for `NEEDS_REVIEW`; new Step 6b, ThoughtSpot → Excel via `--to excel`; `nullif` / `isnotnull` do not exist and `concat` needs Text arguments (BL-339) |
 | 1.1.0 | 2026-10-06 | Google Sheets reads the Sheets delta map first, then the Excel map for names it does not row (‡ aliases → their successor); `ts formula detect` (ts-cli 0.157.1) settles Sheets on a Sheets-only function and reports `fallback_map`; Sheets traps for `QUERY`, `ARRAYFORMULA`, one-argument `IFERROR` and holiday arrays (BL-338) |
 | 1.0.0 | 2026-10-06 | Initial release — one formula from Tableau, DAX, Qlik, Sisense, Snowflake or Databricks via `ts formula translate` (ts-cli 0.157.0), and Excel / Sheets / Omni / Sigma from the function maps; scored dialect detection with must-ask ties; three column-context levels; traps, references and TML snippet; `compile` (VALIDATE_ONLY, no objects) and `execute` (scratch Model, deleted) validation |

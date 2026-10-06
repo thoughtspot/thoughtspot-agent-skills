@@ -4239,8 +4239,30 @@ ts formula translate "ROUND(SUM([Sales]) / COUNTD([Customer]), 2)" --from tablea
 echo "DIVIDE(SUM(Sales[Amount]), DISTINCTCOUNT(Sales[Customer]))" | ts formula translate --from dax
 ts formula translate "SUM(amount)" --from snowflake --columns '{"amount": "ORDERS.AMOUNT"}'
 ts formula translate "ROUND(AVG(salary), 0)" --from snowflake -m <model-guid> -p se --validate execute
+ts formula translate '=IFERROR([@Revenue]/[@Seats],0)' --from excel --role measure
+ts formula translate '=B2*C2' --from excel --columns 'B=ORDERS.QTY, C=ORDERS.PRICE'
+ts formula translate "safe_divide ( sum ( [T::a] ) , sum ( [T::b] ) )" --from thoughtspot --to excel
 ts formula detect "{FIXED [Region] : SUM([Sales])}"
 ```
+
+Excel and Google Sheets are translator-backed since v0.158.0 (`ts_cli/excel/`, BL-339): the
+formula is parsed — a leading `=`, strings with doubled quotes, error literals, `& ^ %`, dotted
+names (`STDEV.S`), array constants, structured references (`[@Col]`, `[@[Col Name]]`,
+`Table[@Col]`, `Table[Col]`, `[Col]`, `Table[[#This Row],[Col]]`), A1 cells and ranges
+(`B2`, `$B$2`, `B:B`, `B2:B100`, Sheets' `B2:B`, `Sheet1!A1`) — and each function the Excel /
+Sheets map rows under *Translator coverage* is applied as code. Highlights: `IFERROR(a/b, 0)` →
+`safe_divide` (`""` fallback → `safe_divide`, APPROXIMATED with a trap; one-argument Sheets
+`IFERROR(a/b)` → plain `/`, NULL on zero); `&` / `CONCAT` / `TEXTJOIN` → one N-argument `concat`
+with `to_string` around the non-text operands only (ThoughtSpot rejects a number in `concat` and
+Text in `to_string`); `ISNUMBER(SEARCH(x, s))` → `contains`; `FIND` / `EXACT` → passthroughs
+(case-sensitive); row-wise `MAX` / `MIN` → `greatest` / `least`; `ROUND` via the shared
+digit→increment helper; `WEEKDAY` via `formula_common.ts_weekday_number`; `NETWORKDAYS` as the
+live-verified per-weekday counting form; `*IF` / `*IFS` criteria per the map's criteria table.
+Anything else is `NEEDS_REVIEW` citing its map row — never guessed. `--role measure` builds a
+formula over row-level `[@Col]` references at the right grain: additive → `sum ( a ) - sum ( b )`;
+a ratio → a ratio of totals, `safe_divide ( sum ( n ) , sum ( d ) )`, never a sum of per-row
+ratios; a numeric `IF(…,1,0)` flag stays row-level (its column aggregation totals it); text stays
+an ATTRIBUTE with a `group_aggregate` trap.
 
 ### `ts formula translate [EXPR]`
 
@@ -4248,15 +4270,17 @@ ts formula detect "{FIXED [Region] : SUM([Sales])}"
 
 | Option | Meaning |
 |---|---|
-| `--from`, `-f` | **Required.** `tableau` · `dax` (alias `powerbi`) · `qlik` · `sisense` · `snowflake` · `databricks` · `thoughtspot` (input is already ThoughtSpot syntax — references are resolved, nothing is translated; the way to `--validate` a hand-composed formula) |
-| `--columns`, `-c` | Level 1 context, JSON or `@file`: `{"Sales": "ORDERS.SALES_AMT"}`, `["ORDERS.SALES_AMT"]`, or `[{source, table, column, data_type, column_type, key}]` |
+| `--from`, `-f` | **Required.** `tableau` · `dax` (alias `powerbi`) · `qlik` · `sisense` · `snowflake` · `databricks` · `excel` (alias `xlsx`) · `google_sheets` (alias `sheets`) · `thoughtspot` (input is already ThoughtSpot syntax — references are resolved, nothing is translated; the way to `--validate` a hand-composed formula, and the source of `--to excel`) |
+| `--to` | `thoughtspot` (default) · `excel` — the reverse direction: a ThoughtSpot formula (`--from thoughtspot`) becomes an Excel formula; see below |
+| `--table` | `--to excel`: the Excel Table the references are written against (default `Table1`) |
+| `--columns`, `-c` | Level 1 context, JSON or `@file`: `{"Sales": "ORDERS.SALES_AMT"}`, `["ORDERS.SALES_AMT"]`, or `[{source, table, column, data_type, column_type, key}]`; or the shorthand `A=ORDERS.ORDER_DATE, B=ORDERS.AMOUNT` (spreadsheet column letters). `data_type` decides Excel's `to_string` wrapping and date arithmetic |
 | `--model`, `-m` | Level 2 context: a Model GUID or exact name. Its TML (and its Tables', for data types) is exported and source names are matched to its columns — exact, then case/space/underscore-insensitive. **A miss is never fuzzy-matched**: it stays a placeholder in `unresolved[]` with close-match `candidates` |
 | `--validate` | `none` (default) · `compile` · `execute` — needs `--model`, see below |
 | `--name`, `-n` | Formula display name (default `Translated_Formula`); TML id is `formula_<name>`. Prefer underscores: the editor form can then reference it bare |
 | `--key-column` | Column to count rows by when the source has `COUNT(*)` (ThoughtSpot has no row count) |
 | `--group-by` | `execute`: the attribute a measure is probed by (default: the Model's first physical attribute) |
 | `--context` | `sisense`: the JAQL context object (`{"[rev]": {"dim": "[Orders.Revenue]", "agg": "sum"}}`), JSON or `@file`. Without it each `[key]` reads as a column named `key` |
-| `--role` | `tableau`: `measure` / `attribute` (default inferred) |
+| `--role` | `measure` / `attribute`. `tableau`: a role hint (default inferred). `excel` / `google_sheets`: the **intended** role — the grain the formula is built at (see above); `role` in the output is the role applied |
 | `--first-week-day` | `qlik`: the app's `FirstWeekDay`, 0 = Monday … 6 = Sunday (US apps usually 6). Without it a one-argument `Weekday()` is `NEEDS_REVIEW` — a pasted formula has no load script |
 | `--profile`, `-p` | Profile (or `TS_PROFILE`); only needed with `--model` |
 
@@ -4311,6 +4335,25 @@ unexpected error after cleanup ran (`verification.result: ERROR`); 2 = bad input
 validation preconditions not met, or an error before any object was created. The JSON is
 always printed.
 
+**`--to excel`** (stdout JSON): `{dialect: "thoughtspot", to: "excel", table, input, formula,
+status, references[{source, target}], traps[], notes[], translator}`. The formula starts with
+`=`. Row-level references become `[@Col]` (`[@[Col Name]]` with spaces), references inside an
+aggregate `Table1[Col]`; `[formula_X]` becomes the calculated column `X`. `safe_divide ( a , b )`
+→ `IF(b=0,0,a/b)` (exact — `IFERROR` would also swallow other errors); aggregates →
+`SUM` / `AVERAGE` / `COUNTA` / `MIN` / `MAX` / `MEDIAN` / `STDEV.S` / `VAR.S`, `unique count` →
+`COUNTA(UNIQUE(…))`; `*_if` with column-vs-literal conditions → `SUMIFS` / `COUNTIFS` /
+`AVERAGEIFS` / `MAXIFS` / `MINIFS`; `group_aggregate` at a fixed `{ … }` grain → a self-keyed
+`SUMIFS(Table1[m],Table1[g],[@g])` (APPROXIMATED: `*IFS` ignores sheet filters);
+`round ( x , inc )` → `ROUND(x, d)` for a power-of-ten increment (`formula_common.ts_increment_to_sql_digits`),
+else `MROUND`; `concat` / `to_string` → `&`; `contains` → `ISNUMBER(SEARCH())`;
+`diff_days ( e , s )` → `e-s`; `diff_months` → the boundary count
+`(YEAR(e)-YEAR(s))*12+MONTH(e)-MONTH(s)` (with a trap: not `DATEDIF "M"`);
+`day_number_of_week` → `WEEKDAY(d,2)`; `start_of_month` → `EOMONTH(d,-1)+1`; `if` → nested `IF`;
+`greatest` / `least` → `MAX` / `MIN` (inside an aggregate, an element-wise `IF`, since `MAX`
+collapses an array); `isnull` → `ISBLANK`; `ifnull` → `IF(ISBLANK(x),y,x)`. Window functions,
+`rank`, `sql_*_op`, `query_groups ( )` grains and anything unlisted → `NEEDS_REVIEW` with the
+reason. Every result with a column carries the blank-vs-NULL trap (Excel treats a blank as 0).
+
 ### `ts formula detect [EXPR]`
 
 Scores which language a formula is written in. Output: `{best, guess, ambiguous, ask[],
@@ -4322,6 +4365,7 @@ The one exception: a function only Google Sheets has (the Sheets map's Sheets-on
 `google_sheets`. Names another dialect also has (`TO_DATE`, `SPLIT`, `FLATTEN`, `POW`, `JOIN`,
 `MINUS`, `ISDATE`, DAX `DIVIDE`) count only beside spreadsheet context (a leading `=`, an A1
 or whole-column reference). `backing` is `translator` (this command), `map`
-(`docs/function-maps/`, translated by the skill) or `none`. `google_sheets` names the Sheets
-map as `map` and the Excel map as `fallback_map`: the Sheets map is a delta, so a name it does
-not row takes its Excel row.
+(`docs/function-maps/`, translated by the skill) or `none`. `excel` and `google_sheets` are
+`translator` since v0.158.0 and still name their `map` — the fallback for a `NEEDS_REVIEW`
+construct; `google_sheets` names the Sheets map as `map` and the Excel map as `fallback_map`:
+the Sheets map is a delta, so a name it does not row takes its Excel row.

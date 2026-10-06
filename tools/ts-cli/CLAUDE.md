@@ -106,6 +106,16 @@ ts_cli/
     build_model.py      — Table + Model TML assembly + mapping.json behind `ts qlik build-model`; reuses model_builder + formula_common (add_formula_prefix id-refs) + tml_common.dump_tml_yaml (pure functions, no I/O)
     answers.py          — Answer + tabbed-Liveboard emission behind `ts qlik build-liveboard` (one tab per Qlik sheet; each chart → embedded Answer) (pure functions, no I/O)
     data/               — qlik_ts_formula_map.{json,csv} (packaged via package-data)
+  excel/
+    (Excel / Google Sheets ⇄ ThoughtSpot, one formula at a time, behind `ts formula translate --from excel|google_sheets` and `--from thoughtspot --to excel` — BL-339; pure functions, no I/O)
+    parser.py           — Excel formula tokenizer + recursive-descent parser → nodes.py AST (structured refs, A1 cells/ranges, Sheets' open ranges, arrays, dotted names)
+    forward.py          — Translator: Excel AST → ThoughtSpot AST at row level; operators, references (through formula_translate.context's recording resolver), concat/to_string typing
+    functions*.py       — one handler per rules.py entry (math/aggregates/criteria in functions.py; text, date, logic and the Sheets delta in their own modules); ROUND and WEEKDAY go through formula_common — never re-implemented
+    rules.py            — the rule table as plain literals: map row + every ThoughtSpot name each rule emits; check_mapping_code_sync.py (requirement C) reads it with ast and checks it against the Excel / Sheets maps and their translator-coverage lists
+    measure.py          — the intended-role pass (--role measure: additive sums, ratio of totals with safe_divide, flags row-level)
+    tsast.py            — ThoughtSpot AST constructors + canonical printer; the AST is databricks/mv_emit_expr.parse_formula's, the repo's one ThoughtSpot parser
+    to_excel.py / to_excel_calls.py — ThoughtSpot → Excel emitter (`--to excel`)
+    map_index.py        — vendored inventory of the two maps' rows (name → section, class) so NEEDS_REVIEW cites its row; a test pins it to the maps
   commands/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles list
