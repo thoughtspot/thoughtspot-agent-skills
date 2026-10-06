@@ -1,31 +1,32 @@
 {
  "run": {
-  "date": "2026-10-06T23:26:29+00:00",
+  "date": "2026-10-06T23:47:17+00:00",
   "profile": "se-thoughtspot",
   "connection": "DBX_DAMIAN",
   "sf_profile": null,
   "warehouse": "databricks",
   "dbx_profile": "Production",
-  "warehouse_table": "AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD",
-  "ts_table": "ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME",
-  "ts_model": "ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME",
-  "run_start_ms": 1791329189175,
+  "warehouse_table": "`AGENT_SKILLS`.`AUDIT_PROBE`.`ZZ_FIDELITY_M2N_20261006T234717_69D328`",
+  "ts_table": "ZZ_FIDELITY_M2N_20261006T234717_69D328_TABLE_DELETE_ME",
+  "ts_model": "ZZ_FIDELITY_M2N_20261006T234717_69D328_DELETE_ME",
+  "run_start_ms": 1791330437486,
   "cases_file": "tools/formula-fidelity/cases/databricks/m2-nonansi.jsonl",
-  "cases_sha256": "a7c8967d9ef9980499db5ec998748029672161eaeaf66d5b75f8ea310b7d93ca",
+  "cases_sha256": "40ad2fac2773cc45fbb17100a4d4dc69d43d4867795c744599138693686208ee",
   "translator_version": "ts-cli 0.161.0",
   "git": {
-   "sha": "6805089c3983280bb7bd920d091c671a3b434823",
+   "sha": "49e08af5008888b7b2ae82a4ada7ed343c008154",
    "dirty": true
   },
   "phases": {
    "load": 5.1,
-   "oracle": 3.4,
+   "oracle": 3.9,
    "translate": 0.0,
-   "ts_import": 15.8,
-   "agentql": 9.4,
-   "teardown": 3.1
+   "ts_import": 17.0,
+   "agentql": 11.9,
+   "teardown": 3.3
   },
   "orphans": [],
+  "warehouse_auth": "profile env var / OS credential store",
   "warehouse_orphans": [],
   "session": {
    "TIMEZONE": [
@@ -47,15 +48,15 @@
    "not_owned": [],
    "errors": [],
    "delete_outcomes": {
-    "fa4e6eab-59b4-4199-9159-8dad32cd7552": "deleted",
-    "41ffb42a-d10b-424e-b3f5-d1c64712bf70": "deleted"
+    "229cf203-e0c5-4e85-8ea3-d7fa9e79c9ca": "deleted",
+    "e512ab3a-e9a8-4f9e-b7d4-9d79b738c363": "deleted"
    },
    "warehouse_confirmed_absent": true
   },
-  "runtime_s": 43.0,
+  "runtime_s": 48.0,
   "oracle_drift": [],
-  "fill_expected": "wrote 6 case(s)",
-  "cases_sha256_after_fill": "be78331f0f59b6e51e5554657ab00ad7bf98c4f898d6facad808e70db37f4fe3",
+  "fill_expected": "wrote 7 case(s)",
+  "cases_sha256_after_fill": "483acb381c53ec384bd5796d238d1f6184a75cb22935d3dda9bf7f9ed516f9ba",
   "counts": {
    "MISMATCH": 0,
    "RUN_FAILED": 0,
@@ -63,12 +64,7 @@
    "TRANSLATE_FAILED": 1,
    "ERROR_EQUIV": 0,
    "ORACLE_FAILED": 0,
-   "MATCH": 5
-  },
-  "rebuild": {
-   "date": "2026-10-06T23:33:39+00:00",
-   "cases_sha256": "be78331f0f59b6e51e5554657ab00ad7bf98c4f898d6facad808e70db37f4fe3",
-   "from": "tools/formula-fidelity/runs/2026-10-07-databricks-m2-nonansi.json"
+   "MATCH": 6
   }
  },
  "cases": [
@@ -76,7 +72,7 @@
    "id": "dbxn-001",
    "fixture": "fixture-m2-nonansi.json",
    "oracle": {
-    "sql": "SELECT ROW_ID AS K, (N1 / N2) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD ORDER BY ROW_ID",
+    "sql": "SELECT ROW_ID AS K, (N1 / N2) AS V FROM `AGENT_SKILLS`.`AUDIT_PROBE`.`ZZ_FIDELITY_M2N_20261006T234717_69D328` ORDER BY ROW_ID",
     "values": {
      "1": {
       "t": "num",
@@ -121,7 +117,7 @@
    "translation": {
     "status": "TRANSLATED",
     "classification": "direct",
-    "formula": "[ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::N1] / [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::N2]",
+    "formula": "[ZZ_FIDELITY_M2N_20261006T234717_69D328_TABLE_DELETE_ME::N1] / [ZZ_FIDELITY_M2N_20261006T234717_69D328_TABLE_DELETE_ME::N2]",
     "role": "ATTRIBUTE",
     "agentql_wrapper": null,
     "traps": [],
@@ -130,8 +126,8 @@
    },
    "import_error": null,
    "actual": {
-    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_dbxn_001\" AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_dbxn_001\" LIMIT 1000",
-    "sql": "SELECT \n  `ta_1`.`ROW_ID` AS `ca_1`, \n  (`ta_1`.`N1` / NULLIF(`ta_1`.`N2`,0.0)) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t232629_914dcd` AS `ta_1`\nGROUP BY \n  `ca_1`, \n  `ca_2`\nLIMIT 1000",
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_dbxn_001\" AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T234717_69D328_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_dbxn_001\" LIMIT 1000",
+    "sql": "SELECT \n  `ta_1`.`ROW_ID` AS `ca_1`, \n  (`ta_1`.`N1` / NULLIF(`ta_1`.`N2`,0.0)) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t234717_69d328` AS `ta_1`\nGROUP BY \n  `ca_1`, \n  `ca_2`\nLIMIT 1000",
     "values": {
      "1": {
       "t": "num",
@@ -310,7 +306,7 @@
    "id": "dbxn-002",
    "fixture": "fixture-m2-nonansi.json",
    "oracle": {
-    "sql": "SELECT ROW_ID AS K, (I1 % N2) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD ORDER BY ROW_ID",
+    "sql": "SELECT ROW_ID AS K, (I1 % N2) AS V FROM `AGENT_SKILLS`.`AUDIT_PROBE`.`ZZ_FIDELITY_M2N_20261006T234717_69D328` ORDER BY ROW_ID",
     "values": {
      "1": {
       "t": "num",
@@ -388,7 +384,7 @@
    "id": "dbxn-003",
    "fixture": "fixture-m2-nonansi.json",
    "oracle": {
-    "sql": "SELECT ROW_ID AS K, (CAST(S1 AS INT)) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD ORDER BY ROW_ID",
+    "sql": "SELECT ROW_ID AS K, (CAST(S1 AS INT)) AS V FROM `AGENT_SKILLS`.`AUDIT_PROBE`.`ZZ_FIDELITY_M2N_20261006T234717_69D328` ORDER BY ROW_ID",
     "values": {
      "1": {
       "t": "null"
@@ -426,7 +422,7 @@
    "translation": {
     "status": "TRANSLATED",
     "classification": "direct",
-    "formula": "to_integer ( [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::S1] )",
+    "formula": "to_integer ( [ZZ_FIDELITY_M2N_20261006T234717_69D328_TABLE_DELETE_ME::S1] )",
     "role": "ATTRIBUTE",
     "agentql_wrapper": null,
     "traps": [],
@@ -435,8 +431,8 @@
    },
    "import_error": null,
    "actual": {
-    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_dbxn_003\" AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_dbxn_003\" LIMIT 1000",
-    "sql": "SELECT \n  `ta_1`.`ROW_ID` AS `ca_1`, \n  CAST(`ta_1`.`S1` as int) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t232629_914dcd` AS `ta_1`\nGROUP BY \n  `ca_1`, \n  `ca_2`\nLIMIT 1000",
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_dbxn_003\" AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T234717_69D328_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_dbxn_003\" LIMIT 1000",
+    "sql": "SELECT \n  `ta_1`.`ROW_ID` AS `ca_1`, \n  CAST(`ta_1`.`S1` as int) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t234717_69d328` AS `ta_1`\nGROUP BY \n  `ca_1`, \n  `ca_2`\nLIMIT 1000",
     "values": {
      "1": {
       "t": "null"
@@ -594,7 +590,7 @@
    "id": "dbxn-004",
    "fixture": "fixture-m2-nonansi.json",
    "oracle": {
-    "sql": "SELECT ROW_ID AS K, (I1 + 9223372036854775800) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD ORDER BY ROW_ID",
+    "sql": "SELECT ROW_ID AS K, (I1 + 9223372036854775800) AS V FROM `AGENT_SKILLS`.`AUDIT_PROBE`.`ZZ_FIDELITY_M2N_20261006T234717_69D328` ORDER BY ROW_ID",
     "values": {
      "1": {
       "t": "num",
@@ -641,7 +637,7 @@
    "translation": {
     "status": "TRANSLATED",
     "classification": "direct",
-    "formula": "[ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::I1] + 9223372036854775800",
+    "formula": "[ZZ_FIDELITY_M2N_20261006T234717_69D328_TABLE_DELETE_ME::I1] + 9223372036854775800",
     "role": "ATTRIBUTE",
     "agentql_wrapper": null,
     "traps": [],
@@ -650,8 +646,8 @@
    },
    "import_error": null,
    "actual": {
-    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_dbxn_004\" AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_dbxn_004\" LIMIT 1000",
-    "sql": "SELECT \n  `ta_1`.`ROW_ID` AS `ca_1`, \n  (`ta_1`.`I1` + 9223372036854775800) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t232629_914dcd` AS `ta_1`\nGROUP BY \n  `ca_1`, \n  `ca_2`\nLIMIT 1000",
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_dbxn_004\" AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T234717_69D328_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_dbxn_004\" LIMIT 1000",
+    "sql": "SELECT \n  `ta_1`.`ROW_ID` AS `ca_1`, \n  (`ta_1`.`I1` + 9223372036854775800) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t234717_69d328` AS `ta_1`\nGROUP BY \n  `ca_1`, \n  `ca_2`\nLIMIT 1000",
     "values": {
      "1": {
       "t": "num",
@@ -854,7 +850,7 @@
    "id": "dbxn-005",
    "fixture": "fixture-m2-nonansi.json",
    "oracle": {
-    "sql": "SELECT GRP AS K, (SUM(N1 / N2)) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD GROUP BY GRP ORDER BY GRP",
+    "sql": "SELECT GRP AS K, (SUM(N1 / N2)) AS V FROM `AGENT_SKILLS`.`AUDIT_PROBE`.`ZZ_FIDELITY_M2N_20261006T234717_69D328` GROUP BY GRP ORDER BY GRP",
     "values": {
      "A": {
       "t": "num",
@@ -874,7 +870,7 @@
    "translation": {
     "status": "TRANSLATED",
     "classification": "direct",
-    "formula": "sum ( [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::N1] / [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::N2] )",
+    "formula": "sum ( [ZZ_FIDELITY_M2N_20261006T234717_69D328_TABLE_DELETE_ME::N1] / [ZZ_FIDELITY_M2N_20261006T234717_69D328_TABLE_DELETE_ME::N2] )",
     "role": "MEASURE",
     "agentql_wrapper": "AGG",
     "traps": [],
@@ -883,8 +879,8 @@
    },
    "import_error": null,
    "actual": {
-    "agentql": "SELECT \"t1\".\"GRP\" AS \"k\", AGG(\"t1\".\"f_dbxn_005\") AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"GRP\" LIMIT 1000",
-    "sql": "SELECT \n  `ta_1`.`GRP` AS `ca_1`, \n  IFNULL(sum((`ta_1`.`N1` / NULLIF(`ta_1`.`N2`,0.0))), 0) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t232629_914dcd` AS `ta_1`\nGROUP BY `ca_1`\nLIMIT 1000",
+    "agentql": "SELECT \"t1\".\"GRP\" AS \"k\", AGG(\"t1\".\"f_dbxn_005\") AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T234717_69D328_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"GRP\" LIMIT 1000",
+    "sql": "SELECT \n  `ta_1`.`GRP` AS `ca_1`, \n  IFNULL(sum((`ta_1`.`N1` / NULLIF(`ta_1`.`N2`,0.0))), 0) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t234717_69d328` AS `ta_1`\nGROUP BY `ca_1`\nLIMIT 1000",
     "values": {
      "A": {
       "t": "num",
@@ -960,7 +956,7 @@
    "id": "dbxn-006",
    "fixture": "fixture-m2-nonansi.json",
    "oracle": {
-    "sql": "SELECT GRP AS K, (AVG(I1 / N2)) AS V FROM AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD GROUP BY GRP ORDER BY GRP",
+    "sql": "SELECT GRP AS K, (AVG(I1 / N2)) AS V FROM `AGENT_SKILLS`.`AUDIT_PROBE`.`ZZ_FIDELITY_M2N_20261006T234717_69D328` GROUP BY GRP ORDER BY GRP",
     "values": {
      "A": {
       "t": "num",
@@ -980,7 +976,7 @@
    "translation": {
     "status": "TRANSLATED",
     "classification": "direct",
-    "formula": "average ( [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::I1] / [ZZ_FIDELITY_M2N_20261006T232629_914DCD_TABLE_DELETE_ME::N2] )",
+    "formula": "average ( [ZZ_FIDELITY_M2N_20261006T234717_69D328_TABLE_DELETE_ME::I1] / [ZZ_FIDELITY_M2N_20261006T234717_69D328_TABLE_DELETE_ME::N2] )",
     "role": "MEASURE",
     "agentql_wrapper": "AGG",
     "traps": [],
@@ -989,8 +985,8 @@
    },
    "import_error": null,
    "actual": {
-    "agentql": "SELECT \"t1\".\"GRP\" AS \"k\", AGG(\"t1\".\"f_dbxn_006\") AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T232629_914DCD_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"GRP\" LIMIT 1000",
-    "sql": "SELECT \n  `ta_1`.`GRP` AS `ca_1`, \n  avg((`ta_1`.`I1` / NULLIF(`ta_1`.`N2`,0.0))) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t232629_914dcd` AS `ta_1`\nGROUP BY `ca_1`\nLIMIT 1000",
+    "agentql": "SELECT \"t1\".\"GRP\" AS \"k\", AGG(\"t1\".\"f_dbxn_006\") AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T234717_69D328_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"GRP\" LIMIT 1000",
+    "sql": "SELECT \n  `ta_1`.`GRP` AS `ca_1`, \n  avg((`ta_1`.`I1` / NULLIF(`ta_1`.`N2`,0.0))) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t234717_69d328` AS `ta_1`\nGROUP BY `ca_1`\nLIMIT 1000",
     "values": {
      "A": {
       "t": "num",
@@ -1050,6 +1046,266 @@
       "actual": {
        "t": "num",
        "v": "-24999.164285714287"
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  },
+  {
+   "id": "dbxn-007",
+   "fixture": "fixture-m2-nonansi.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, (CAST(N1 * 1000000 AS INT)) AS V FROM `AGENT_SKILLS`.`AUDIT_PROBE`.`ZZ_FIDELITY_M2N_20261006T234717_69D328` ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "num",
+      "v": "10500000"
+     },
+     "2": {
+      "t": "num",
+      "v": "-3250000"
+     },
+     "3": {
+      "t": "null"
+     },
+     "4": {
+      "t": "num",
+      "v": "0"
+     },
+     "5": {
+      "t": "num",
+      "v": "1234567800"
+     },
+     "6": {
+      "t": "num",
+      "v": "-1234567800"
+     },
+     "7": {
+      "t": "num",
+      "v": "99990000"
+     },
+     "8": {
+      "t": "num",
+      "v": "2500000"
+     },
+     "9": {
+      "t": "num",
+      "v": "-500000"
+     },
+     "10": {
+      "t": "num",
+      "v": "2147483647"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "classification": "direct",
+    "formula": "to_integer ( ( [ZZ_FIDELITY_M2N_20261006T234717_69D328_TABLE_DELETE_ME::N1] * 1000000 ) )",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_dbxn_007\" AS \"v\" FROM \"ZZ_FIDELITY_M2N_20261006T234717_69D328_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_dbxn_007\" LIMIT 1000",
+    "sql": "SELECT \n  `ta_1`.`ROW_ID` AS `ca_1`, \n  CAST((`ta_1`.`N1` * 1000000) as int) AS `ca_2`\nFROM `agent_skills`.`audit_probe`.`zz_fidelity_m2n_20261006t234717_69d328` AS `ta_1`\nGROUP BY \n  `ca_1`, \n  `ca_2`\nLIMIT 1000",
+    "values": {
+     "1": {
+      "t": "num",
+      "v": "10500000",
+      "ts_type": "INT64"
+     },
+     "2": {
+      "t": "num",
+      "v": "-3250000",
+      "ts_type": "INT64"
+     },
+     "3": {
+      "t": "null"
+     },
+     "4": {
+      "t": "num",
+      "v": "0",
+      "ts_type": "INT64"
+     },
+     "5": {
+      "t": "num",
+      "v": "1234567800",
+      "ts_type": "INT64"
+     },
+     "6": {
+      "t": "num",
+      "v": "-1234567800",
+      "ts_type": "INT64"
+     },
+     "7": {
+      "t": "num",
+      "v": "99990000",
+      "ts_type": "INT64"
+     },
+     "8": {
+      "t": "num",
+      "v": "2500000",
+      "ts_type": "INT64"
+     },
+     "9": {
+      "t": "num",
+      "v": "-500000",
+      "ts_type": "INT64"
+     },
+     "10": {
+      "t": "num",
+      "v": "2147483647",
+      "ts_type": "INT64"
+     }
+    },
+    "error": null,
+    "value_type": "INT64"
+   },
+   "source_formula": "CAST(N1 * 1000000 AS INT)",
+   "role": "row",
+   "group_by": null,
+   "known_divergence": null,
+   "note": "ANSI_MODE=false: an out-of-range cast to INT clamps (row 10: 1e12 -> 2147483647) where ANSI raises CAST_OVERFLOW",
+   "result": {
+    "id": "dbxn-007",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "num",
+       "v": "10500000"
+      },
+      "actual": {
+       "t": "num",
+       "v": "10500000",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "num",
+       "v": "-3250000"
+      },
+      "actual": {
+       "t": "num",
+       "v": "-3250000",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "num",
+       "v": "0"
+      },
+      "actual": {
+       "t": "num",
+       "v": "0",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "num",
+       "v": "1234567800"
+      },
+      "actual": {
+       "t": "num",
+       "v": "1234567800",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "num",
+       "v": "-1234567800"
+      },
+      "actual": {
+       "t": "num",
+       "v": "-1234567800",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "num",
+       "v": "99990000"
+      },
+      "actual": {
+       "t": "num",
+       "v": "99990000",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "8",
+      "expected": {
+       "t": "num",
+       "v": "2500000"
+      },
+      "actual": {
+       "t": "num",
+       "v": "2500000",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "9",
+      "expected": {
+       "t": "num",
+       "v": "-500000"
+      },
+      "actual": {
+       "t": "num",
+       "v": "-500000",
+       "ts_type": "INT64"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "10",
+      "expected": {
+       "t": "num",
+       "v": "2147483647"
+      },
+      "actual": {
+       "t": "num",
+       "v": "2147483647",
+       "ts_type": "INT64"
       },
       "outcome": "EQUAL"
      }

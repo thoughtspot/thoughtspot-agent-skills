@@ -13110,8 +13110,14 @@ and add a Snowflake M0 case for each shape.
   `I1 = 12` raises `ARITHMETIC_OVERFLOW`, and `CAST('pie' AS INT)` raises `CAST_INVALID_INPUT`.
 - ThoughtSpot sent the same expressions (`(I1 + 9223372036854775800)`, `CAST(S2 as int)`, compiled
   SQL in the run JSON) over `DBX_DAMIAN` and got **-9223372036854775804** (wrapped) and **NULL**.
-  `CAST(1e12 as int)` came back **2147483647** (clamped, BL-359). These are the non-ANSI results,
-  which the `m2-nonansi` oracle run reproduces exactly (5/5 scored cases MATCH).
+  `CAST(1e12 as int)` came back **2147483647** (clamped, BL-359). These are the non-ANSI results.
+- The `m2-nonansi` oracle run has **3 discriminating cases**, and ThoughtSpot matches the non-ANSI
+  oracle on all three:
+  - `dbxn-003`, a malformed cast
+  - `dbxn-004`, the overflow
+  - `dbxn-007`, an out-of-range `CAST(… AS INT)`, added after the #576 review
+
+  Its three division cases agree in either mode and prove nothing about the session.
 - So a formula that raises in an ANSI Databricks source returns a value in ThoughtSpot. Overflow is
   the dangerous case: a wrong number, not a NULL. Division by zero is unaffected (ThoughtSpot's
   `/` is NULL-safe either way).

@@ -7,7 +7,7 @@ ThoughtSpot translation over the same rows and compares the answers key by key.
 Design: [`docs/research/formula-test-cases/harness-design.md`](../../docs/research/formula-test-cases/harness-design.md).
 First run (M0, 50 Snowflake SQL cases): [`docs/reviews/2026-10-06-fidelity-m0-snowflake.md`](../../docs/reviews/2026-10-06-fidelity-m0-snowflake.md).
 M1 (250 Excel cases, literal oracle): [`docs/reviews/2026-10-06-fidelity-m1-excel.md`](../../docs/reviews/2026-10-06-fidelity-m1-excel.md) — see [M1](#m1-excel-cases-from-a-corpus-outside-the-repo) below.
-M2 (97 Databricks SQL cases, Databricks as the oracle): [`docs/reviews/2026-10-07-fidelity-m2-databricks.md`](../../docs/reviews/2026-10-07-fidelity-m2-databricks.md) — see [M2](#m2-databricks-sql) below.
+M2 (98 Databricks SQL cases, Databricks as the oracle): [`docs/reviews/2026-10-07-fidelity-m2-databricks.md`](../../docs/reviews/2026-10-07-fidelity-m2-databricks.md) — see [M2](#m2-databricks-sql) below.
 It is the formula-level fixture for repo-audit angle 15 (`.claude/rules/repo-audit.md`). It is
 operator-run, not workflow-run.
 
@@ -28,7 +28,7 @@ operator-run, not workflow-run.
 | `fidelity/redact.py` | What M1 may commit (redacted results, generated report tables) and the leak scanner |
 | `cases/excel/` | `m1-manifest.jsonl` (ids + file + sha256 + locator, no formulas or values) and `m1-selection.json` (counts) |
 | `cases/snowflake/` | `m0.jsonl` (50 cases) and `fixture-m0.json` (10 edge rows) |
-| `cases/databricks/` | `m2.jsonl` (91 cases, `ANSI_MODE=true`), `m2-nonansi.jsonl` (6 cases, `ANSI_MODE=false`), and their fixtures: M0's rows as Databricks types |
+| `cases/databricks/` | `m2.jsonl` (91 cases, `ANSI_MODE=true`), `m2-nonansi.jsonl` (7 cases, `ANSI_MODE=false`), and their fixtures: M0's rows as Databricks types |
 | `runs/` | Run JSON evidence (raw oracle and ThoughtSpot values, compiled SQL, verdicts) |
 | `tests/` | Pure-function tests. No live calls |
 

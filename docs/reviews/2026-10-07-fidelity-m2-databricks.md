@@ -1,4 +1,4 @@
-# Formula fidelity M2: 97 Databricks SQL cases, 2026-10-07
+# Formula fidelity M2: 98 Databricks SQL cases, 2026-10-07
 
 **5 silent wrong answer(s)** (5 with an open BL item, 0 unexplained) and **3 warned wrong answer(s)** in 91 cases. 60 of 91 matched.
 
@@ -40,8 +40,15 @@ excluded: the not-testable count is **0**. No ThoughtSpot connection was created
   `ansi_mode = true`. ThoughtSpot's query over `DBX_DAMIAN` behaved as non-ANSI three ways: the
   overflow wrapped, `CAST(S2 as int)` returned NULL for `'pie'` (`dbx-arith-014`, ERROR_EQUIV, where
   the source raises `CAST_INVALID_INPUT`), and BL-359's out-of-range cast clamped instead of raising.
-  The `m2-nonansi` run (same rows, `ANSI_MODE=false`) reproduces ThoughtSpot exactly on all five
-  scored cases, overflow included. *Why* ThoughtSpot's session is non-ANSI (connection property,
+  The `m2-nonansi` run (same rows, `ANSI_MODE=false`) matches ThoughtSpot on all six scored cases,
+  but only **3 of them discriminate** between the two modes:
+  - `dbxn-003`, a malformed cast
+  - `dbxn-004`, the overflow
+  - `dbxn-007`, `CAST(N1 * 1000000 AS INT)`, which clamps to 2147483647 non-ANSI and raises
+    `CAST_OVERFLOW` under ANSI
+
+  The other three (`dbxn-001`, `-005` and `-006`, all divisions) agree in either mode, because
+  ThoughtSpot's `/` is NULL-safe. *Why* ThoughtSpot's session is non-ANSI (connection property,
   JDBC default, or a session setting) was not established.
 - The BL-358 and BL-359 cases expose each other: in an ANSI session the 32-bit cast would have
   raised, which is loud; non-ANSI turns it into a clamped number.
@@ -91,19 +98,27 @@ every hour and day boundary. That is the Snowflake TIMESTAMP_TZ lesson again, in
 here the zone lives in the session, not in the value.
 
 **Reading the numbers.**
-- The silent count (5) is a floor. 10 rows, 97 hand-written cases. Only `dbx-arith-005` was found by
+- The silent count (5) is a floor. 10 rows, 98 hand-written cases. Only `dbx-arith-005` was found by
   the run alone. The other four cases were added after it, from reading `mv_sql` and the compiled SQL
   of the first runs.
 - `m2.jsonl` ran live four times (85, 88, 90 and 91 cases, as cases were added). The first run's
   JSON was kept, and it gives the same verdict as this one on all 85 cases they share. The report
-  below is the fourth run; the non-ANSI file ran twice.
+  below is the fourth run. The non-ANSI file ran three times, the last after `dbxn-007` was added.
 - One harness-side fix came out of the first attempt. A SQL warehouse rejects `SET timezone = 'UTC'`
   (*Unsupported configuration*), so the time zone is set with `SET TIME ZONE 'UTC'`. The run header
   records the session as read back, not as requested.
-- **Warehouse role.** The oracle ran as the profile's service principal. It is the same principal
-  `DBX_DAMIAN` uses, and it is not confined to the scratch schema. That is acceptable for in-repo
-  cases only, as the harness README says. A third-party SQL corpus needs a principal limited to
-  `agent_skills.audit_probe`.
+- **Warehouse principal.** The oracle ran as the profile's service principal, the same principal
+  `DBX_DAMIAN` uses. A read-only check (2026-10-07) showed its reach is wide:
+  - it **owns the `agent_skills` catalog**
+  - it owns four of its schemas
+  - it can read three more
+
+  That is acceptable for in-repo cases only. **BL-363** confines it before any third-party SQL
+  corpus runs on Databricks.
+- **Credentials.** The `m2.jsonl` runs authenticated through the `~/.databrickscfg` profile, which
+  holds the secret in plaintext. After the #576 review the default became the profile's env var /
+  OS credential store, and the CLI profile is now an explicit opt-in (`--dbx-cli-profile`). The
+  last `m2-nonansi` run used the new default; its header records `warehouse_auth`.
 
 **Cleanup.** Each live run deleted its Model and Table by GUID and confirmed both absent. Each
 dropped its Delta table and confirmed it with `SHOW TABLES`. Every startup sweep found no earlier
@@ -364,7 +379,7 @@ None.
 
 ## Non-ANSI run (`m2-nonansi.jsonl`)
 
-*Generated tables from `runs/2026-10-07-databricks-m2-nonansi.json`. The same rows with `ANSI_MODE=false`: 5 MATCH, 1 TRANSLATE_FAILED (`%`), no wrong value. Under legacy semantics the source returns NULL or wraps where ANSI raises, and ThoughtSpot agrees with it on every case. That agreement is the BL-358 evidence.*
+*Generated tables from `runs/2026-10-07-databricks-m2-nonansi.json` (re-run after the #576 review, which added `dbxn-007`). The same rows with `ANSI_MODE=false`: 6 MATCH, 1 TRANSLATE_FAILED (`%`), no wrong value. **3 cases discriminate between the modes**: `dbxn-003` (malformed cast → NULL), `dbxn-004` (overflow wraps) and `dbxn-007` (out-of-range INT cast clamps). ThoughtSpot gives the non-ANSI answer on all three; under ANSI each raises. That is the BL-358 evidence. The three division cases agree in either mode and are not evidence.*
 
 ### Per-case results (non-ANSI)
 
@@ -376,23 +391,24 @@ None.
 | dbxn-004 | row | `I1 + 9223372036854775800` | `[T::I1] + 9223372036854775800` | TRANSLATED | MATCH | 10/10 |
 | dbxn-005 | aggregate | `SUM(N1 / N2)` | `sum ( [T::N1] / [T::N2] )` | TRANSLATED | MATCH | 3/3 |
 | dbxn-006 | aggregate | `AVG(I1 / N2)` | `average ( [T::I1] / [T::N2] )` | TRANSLATED | MATCH | 3/3 |
+| dbxn-007 | row | `CAST(N1 * 1000000 AS INT)` | `to_integer ( ( [T::N1] * 1000000 ) )` | TRANSLATED | MATCH | 10/10 |
 
 ### Run (non-ANSI)
 
-- date: `2026-10-06T23:26:29+00:00`
+- date: `2026-10-06T23:47:17+00:00`
 - profile: `se-thoughtspot`
 - connection: `DBX_DAMIAN`
 - warehouse: `databricks`
-- warehouse_table: `AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2N_20261006T232629_914DCD`
+- warehouse_table: ``AGENT_SKILLS`.`AUDIT_PROBE`.`ZZ_FIDELITY_M2N_20261006T234717_69D328``
 - dbx_profile: `Production`
+- warehouse_auth: `profile env var / OS credential store`
 - session: `{'TIMEZONE': [['timezone', 'UTC']], 'ANSI_MODE': [['ansi_mode', 'false']]}`
 - cases_file: `tools/formula-fidelity/cases/databricks/m2-nonansi.jsonl`
-- cases_sha256: `a7c8967d9ef9980499db5ec998748029672161eaeaf66d5b75f8ea310b7d93ca`
-- cases_sha256_after_fill: `be78331f0f59b6e51e5554657ab00ad7bf98c4f898d6facad808e70db37f4fe3`
-- fill_expected: `wrote 6 case(s)`
+- cases_sha256: `40ad2fac2773cc45fbb17100a4d4dc69d43d4867795c744599138693686208ee`
+- cases_sha256_after_fill: `483acb381c53ec384bd5796d238d1f6184a75cb22935d3dda9bf7f9ed516f9ba`
+- fill_expected: `wrote 7 case(s)`
 - translator_version: `ts-cli 0.161.0`
-- runtime_s: `43.0`
-- commit: `6805089c3983280bb7bd920d091c671a3b434823` (with local changes)
-- phases (s): load 5.1, oracle 3.4, translate 0.0, ts_import 15.8, agentql 9.4, teardown 3.1
+- runtime_s: `48.0`
+- commit: `49e08af5008888b7b2ae82a4ada7ed343c008154` (with local changes)
+- phases (s): load 5.1, oracle 3.9, translate 0.0, ts_import 17.0, agentql 11.9, teardown 3.3
 - cleanup: ThoughtSpot objects confirmed absent = `True`, warehouse table dropped and confirmed = `True`
-- re-classified by `--rebuild` on `2026-10-06T23:33:39+00:00` against case file `be78331f0f59b6e51e5554657ab00ad7bf98c4f898d6facad808e70db37f4fe3`. The live run used `a7c8967d9ef9980499db5ec998748029672161eaeaf66d5b75f8ea310b7d93ca`
