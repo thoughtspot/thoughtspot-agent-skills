@@ -49,6 +49,8 @@ def _word_tokens(word: str) -> list[tuple[str, str]]:
         return out
     if word.lower() in _KW:
         return [("kw", word.lower())]
+    if word.isdigit():  # `then 1 else if (` — the run swept up a number
+        return [("number", word)]
     return [("ident", " ".join(word.split()))]
 
 

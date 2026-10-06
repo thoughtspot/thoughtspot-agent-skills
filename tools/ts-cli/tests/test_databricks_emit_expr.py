@@ -93,3 +93,12 @@ class TestKeywordBeforeCall:
     def test_curly_in_list(self):
         node = parse_formula("[T::a] in { 'x' , 'y' }")
         assert node["fn"] == "in" and len(node["args"]) == 3
+
+    def test_number_inside_a_keyword_run(self):
+        """PR #570 review M4: `then 1 else if (` / `then 0 else sum (` swept the number into
+        the identifier run."""
+        node = parse_formula("if ( [T::a] > 1 ) then 1 else if ( [T::a] > 0 ) then 2 else 3")
+        assert node["branches"][0][1] == {"node": "lit", "kind": "number", "value": "1"}
+        assert node["else"]["node"] == "ifelse"
+        node = parse_formula("if ( [T::a] > 1 ) then 0 else sum ( [T::b] )")
+        assert node["else"]["fn"] == "sum"
