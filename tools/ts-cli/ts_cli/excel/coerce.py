@@ -216,7 +216,15 @@ def as_int(tr, node: dict, signed: bool = False) -> dict:
 
 def bool_text(node: dict) -> dict:
     """Excel's TRUE / FALSE as text (``to_string`` gives lower case)."""
+    if T.is_lit(node, "bool"):
+        return T.lit_string(node["value"].upper())
     return T.ifelse(node, T.lit_string("TRUE"), T.lit_string("FALSE"))
+
+
+def bool_number(node: dict) -> dict:
+    if T.is_lit(node, "bool"):
+        return T.lit_number("1" if node["value"] == "true" else "0")
+    return T.ifelse(node, T.lit_number("1"), T.lit_number("0"))
 
 
 def as_text(tr, node: dict, quiet: bool = False) -> dict:
@@ -239,3 +247,34 @@ def as_text(tr, node: dict, quiet: bool = False) -> dict:
         tr.trap("to_string of a DOUBLE may render a decimal ('12.0') where Excel shows 12 — "
                 "exact for an integer column")
     return T.call("to_string", node)
+
+
+# ---------------------------------------------------------------------------
+# Branches of one IF / IFERROR (BL-354)
+# ---------------------------------------------------------------------------
+
+BRANCH_TRAP = ("{fn} branches of different types: an Excel cell holds either, a ThoughtSpot "
+               "formula one type, so the {what} became {to} — compare or aggregate it as {to}")
+
+
+def unify_branches(tr, a: dict, b: dict, fn: str = "IF") -> tuple[dict, dict]:
+    """``(a, b)`` in one type. Number beside text: the number as text; boolean beside text:
+    'TRUE' / 'FALSE'; boolean beside number: 1 / 0 — each APPROXIMATED with a trap. A date
+    beside anything else is left for the type checker (NEEDS_REVIEW)."""
+    ta, tb = tr.fine_type(a), tr.fine_type(b)
+    fam = {"int": "number", "double": "number", "number": "number", "text": "text",
+           "bool": "bool"}
+    fa, fb = fam.get(ta), fam.get(tb)
+    if fa is None or fb is None or fa == fb:
+        return a, b
+    pair = {fa, fb}
+    if pair == {"number", "text"}:
+        what, to, conv = "number", "text", lambda x: as_text(tr, x, quiet=True)
+        target = "number"
+    elif pair == {"bool", "text"}:
+        what, to, conv, target = "boolean", "text ('TRUE' / 'FALSE')", bool_text, "bool"
+    else:
+        what, to, target = "boolean", "a number (1 / 0)", "bool"
+        conv = bool_number
+    tr.trap(BRANCH_TRAP.format(fn=fn, what=what, to=to), downgrade=True)
+    return (conv(a) if fa == target else a), (conv(b) if fb == target else b)

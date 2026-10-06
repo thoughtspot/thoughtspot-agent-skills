@@ -84,7 +84,8 @@ def _branches(tr, a: dict, b: dict) -> tuple:
                     "share a type, so the blank became null", downgrade=True)
             blank = T.lit_null()
             return (blank, other) if blank_first else (other, blank)
-    return a, b
+    from ts_cli.excel.coerce import unify_branches
+    return unify_branches(tr, a, b)
 
 
 def _ifs(tr, n):
@@ -211,9 +212,10 @@ def iferror_divisions(tr, value, fallback, divisions: int) -> dict:
         return out
     if divisions == 1 and isinstance(value, X.Binary) and value.op == "/":
         num, den = _with_mode(tr, value.left, "plain"), _with_mode(tr, value.right, "plain")
-        fb = tr.expr(fallback)
+        from ts_cli.excel.coerce import unify_branches
+        fb, ratio = unify_branches(tr, tr.expr(fallback), T.binop("/", num, den), "IFERROR")
         tr.trap(NULL_DIVISOR_TRAP)
-        return T.ifelse(T.binop("=", den, T.lit_number("0")), fb, T.binop("/", num, den))
+        return T.ifelse(T.binop("=", den, T.lit_number("0")), fb, ratio)
     tr.review("IFERROR with a non-zero fallback around more than one division (or a division "
               "inside a larger expression) has no map rule — Excel map IFERROR row")
 
@@ -228,7 +230,9 @@ def _iferror(tr, n):
     if divisions:
         return iferror_divisions(tr, value, fallback, divisions)
     if any(isinstance(x, X.Call) and x.name in _CONVERSIONS for x in X.walk(value)):
-        return T.call("ifnull", tr.expr(value), tr.expr(fallback))
+        from ts_cli.excel.coerce import unify_branches
+        return T.call("ifnull", *unify_branches(tr, tr.expr(value), tr.expr(fallback),
+                                                "IFERROR"))
     tr.review("IFERROR around an expression with no division or conversion: no error cause the "
               "map translates (E8)")
 

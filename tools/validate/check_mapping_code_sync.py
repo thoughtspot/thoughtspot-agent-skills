@@ -502,7 +502,7 @@ def emitted_by_handlers(root: Path) -> dict:
             for src, args in _synthetic_calls(name):
                 # what the arguments emit on their own is not this handler's emission
                 seen.update(names(src, dialect) - set().union(*(own[a] for a in args)))
-            out[(table, name)] = seen - {"if", "and", "or", "not", "in"} | (
+            out[(table, name)] = seen - {"if", "then", "else", "and", "or", "not", "in"} | (
                 {"not"} & seen)
     return out
 

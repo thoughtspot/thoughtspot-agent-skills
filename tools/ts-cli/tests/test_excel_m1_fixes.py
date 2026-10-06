@@ -178,3 +178,35 @@ def test_date_compared_with_text_stays_needs_review():
 ])
 def test_integer_slot(src, expected):
     assert f(src) == expected
+
+
+# ---------------------------------------------------------------------------
+# BL-354: IF / IFERROR branches of different types
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("src,expected", [
+    ('=IFERROR([@qty]/[@amt],"n/a")',
+     "if ( [T::amt] = 0 ) then 'n/a' else to_string ( [T::qty] / [T::amt] )"),
+    ('=IFERROR(1/0,"none")', "if ( 0 = 0 ) then 'none' else to_string ( 1 / 0 )"),
+    ('=IFERROR(VALUE([@name]),"bad")', "ifnull ( to_string ( to_double ( [T::name] ) ) , 'bad' )"),
+    ('=IF([@qty]>1,[@qty],"small")',
+     "if ( [T::qty] > 1 ) then to_string ( [T::qty] ) else 'small'"),
+    ('=IF([@qty]>1,[@flag],"none")',
+     "if ( [T::qty] > 1 ) then ( if ( [T::flag] ) then 'TRUE' else 'FALSE' ) else 'none'"),
+    ('=IF([@qty]>1,TRUE,0)', "if ( [T::qty] > 1 ) then 1 else 0"),
+    ('=IF([@qty]>1,"many",FALSE)', "if ( [T::qty] > 1 ) then 'many' else 'FALSE'"),
+])
+def test_branches_share_one_type(src, expected):
+    r = ok(src)
+    assert r.expr == expected and r.status == "APPROXIMATED"
+    assert any("branches of different types" in t for t in r.traps)
+
+
+def test_date_beside_text_branch_is_needs_review():
+    assert review('=IF([@qty]>1,[@day],"none")').startswith("type check:")
+
+
+def test_same_type_branches_are_untouched():
+    r = ok('=IFERROR([@qty]/[@amt],-1)')
+    assert r.expr == "if ( [T::amt] = 0 ) then - 1 else [T::qty] / [T::amt]"
+    assert not any("branches of different types" in t for t in r.traps)
