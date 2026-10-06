@@ -106,7 +106,7 @@ def test_databricks_literals_and_load_sql():
     assert B.sql_literal("O'R", "STRING", "databricks") == "'O\\'R'"
     assert B.sql_literal("O'R", "VARCHAR(8)") == "'O''R'"
     assert B.create_table_sql(FX, "C.S.T") == (
-        "CREATE TABLE C.S.T (\n  ROW_ID BIGINT,\n  S1 STRING,\n  T1 TIMESTAMP_NTZ\n)")
+        "CREATE TABLE C.S.T (\n  `ROW_ID` BIGINT,\n  `S1` STRING,\n  `T1` TIMESTAMP_NTZ\n)")
     ins = B.insert_rows_sql(FX, "C.S.T")
     assert "(1, 'O\\'Reilly', '2026-01-31 10:59:00'::TIMESTAMP_NTZ)" in ins
     case = {"role": "row", "source_formula": "S1", "group_by": None}
@@ -178,7 +178,9 @@ def test_databricks_table_exists_and_orphans():
     assert "LIKE 'zz_fidelity_m2_a'" in wh.conn.sent[0]
     assert live.find_warehouse_orphans(wh, "AGENT_SKILLS", "AUDIT_PROBE") == [
         {"name": "zz_fidelity_m2_a", "created_on": None}]
-    assert wh.conn.sent[-1] == "SHOW TABLES IN AGENT_SKILLS.AUDIT_PROBE LIKE 'zz_fidelity_*'"
+    assert wh.conn.sent[-1] == "SHOW TABLES IN `AGENT_SKILLS`.`AUDIT_PROBE` LIKE 'zz_fidelity_*'"
+    with pytest.raises(ValueError):
+        wh.table_exists("AGENT_SKILLS", "AUDIT_PROBE", "X' OR '1")
 
 
 def test_databricks_oracle_falls_back_per_key_with_its_error_text():
@@ -274,3 +276,45 @@ def test_report_reads_databricks_sql_and_labels_the_source():
     assert report._value_sql('SELECT "ta_1"."K" "ca_1", (a + b) "ca_2" FROM t') == "(a + b)"
     assert report.warehouse_label({"warehouse": "databricks"}) == "Databricks"
     assert report.warehouse_label({}) == "Snowflake"
+
+
+# -- identifiers ------------------------------------------------------------------------
+
+def test_databricks_names_are_validated_and_backtick_quoted():
+    assert B.fq("AGENT_SKILLS", "AUDIT_PROBE", "ZZ_T", "databricks") == \
+        "`AGENT_SKILLS`.`AUDIT_PROBE`.`ZZ_T`"
+    assert B.fq("AGENT_SKILLS", "PUBLIC", "ZZ_T") == "AGENT_SKILLS.PUBLIC.ZZ_T"
+    for bad in ("A`B", "a.b", "X; DROP"):
+        with pytest.raises(ValueError):
+            B.fq("AGENT_SKILLS", bad, "T", "databricks")
+
+
+@pytest.mark.parametrize("col", [
+    {"name": "N1; DROP TABLE x", "wh_type": "DOUBLE"},
+    {"name": "N`1", "wh_type": "DOUBLE"},
+    {"name": "N1", "wh_type": "DOUBLE) ; DROP TABLE x --"},
+    {"name": "N1", "sf_type": "VARCHAR(8) NOT NULL"},
+    {"name": "N1", "wh_type": "decimal(10,2)"},
+])
+def test_column_names_and_types_are_allowlisted(col):
+    with pytest.raises(ValueError):
+        B.check_column(col)
+    fx = dict(FX, columns=[dict(col, ts_type="X", column_type="ATTRIBUTE")])
+    with pytest.raises(ValueError):
+        B.create_table_sql(fx, "C.S.T")
+
+
+@pytest.mark.parametrize("t", ["NUMBER(38,0)", "VARCHAR(64)", "FLOAT", "TIMESTAMP_NTZ",
+                               "BIGINT", "DECIMAL(10, 2)", "BOOLEAN", "STRING"])
+def test_known_types_pass_the_allowlist(t):
+    B.check_column({"name": "C_1", "wh_type": t})
+
+
+def test_fixture_loader_rejects_a_bad_column_name():
+    fx = {"name": "X", "key": "K", "warehouse": "databricks", "rows": [{"K": 1}],
+          "columns": [{"name": "K", "wh_type": "BIGINT", "ts_type": "INT64",
+                       "column_type": "ATTRIBUTE"},
+                      {"name": "bad name", "wh_type": "STRING", "ts_type": "VARCHAR",
+                       "column_type": "ATTRIBUTE"}]}
+    with pytest.raises(caselib.CaseError, match="column name"):
+        caselib.check_fixture(fx)

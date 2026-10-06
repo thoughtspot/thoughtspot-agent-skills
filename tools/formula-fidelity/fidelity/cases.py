@@ -109,6 +109,11 @@ def check_fixture(fx: dict, source: str = "<fixture>") -> dict:
                                                                      c.get("sf_type")):
             raise CaseError(f"{source}: column {c.get('name')!r} needs name/wh_type (or "
                             "sf_type)/ts_type/column_type")
+        try:
+            from fidelity.builders import check_column
+            check_column(c)
+        except ValueError as exc:
+            raise CaseError(f"{source}: {exc}") from exc
         if wh == "databricks" and "sf_type" in c:
             raise CaseError(f"{source}: a databricks fixture names column types as wh_type, "
                             f"not sf_type ({c['name']!r})")

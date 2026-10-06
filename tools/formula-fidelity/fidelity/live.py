@@ -162,11 +162,13 @@ class DatabricksWarehouse:
         return {str(k): canon(v) for k, v in self.execute(sql)}
 
     def table_exists(self, database: str, schema: str, table: str) -> bool:
-        rows = self.execute(f"SHOW TABLES IN {database}.{schema} LIKE '{table.lower()}'")
+        builders.check_identifier(table, "table")
+        rows = self.execute(f"SHOW TABLES IN {builders.fq_schema(database, schema, 'databricks')} "
+                            f"LIKE '{table.lower()}'")
         return any(str(r[1]).lower() == table.lower() for r in rows)
 
     def orphans(self, database: str, schema: str) -> list[dict]:
-        rows = self.execute(f"SHOW TABLES IN {database}.{schema} "
+        rows = self.execute(f"SHOW TABLES IN {builders.fq_schema(database, schema, 'databricks')} "
                             f"LIKE '{builders.PREFIX.lower()}*'")
         return [{"name": str(r[1]), "created_on": None} for r in rows
                 if str(r[1]).upper().startswith(builders.PREFIX)]

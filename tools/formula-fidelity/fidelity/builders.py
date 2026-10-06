@@ -41,6 +41,24 @@ def wh_type(col: dict) -> str:
     return col.get("wh_type") or col["sf_type"]
 
 
+# Column names and types are interpolated into DDL, so both are allowlisted: a plain
+# identifier, and a type keyword with an optional (precision[, scale]).
+COLUMN_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+COLUMN_TYPE = re.compile(r"^[A-Z][A-Z0-9_]*(?:\(\d{1,4}(?:,\s?\d{1,4})?\))?$")
+
+
+def check_column(col: dict) -> dict:
+    """Raise ValueError unless the column's name and warehouse type are allowlisted."""
+    name = col.get("name")
+    if not isinstance(name, str) or not COLUMN_NAME.fullmatch(name):
+        raise ValueError(f"column name {name!r} must match {COLUMN_NAME.pattern}")
+    for key in ("wh_type", "sf_type"):
+        t = col.get(key)
+        if t is not None and (not isinstance(t, str) or not COLUMN_TYPE.fullmatch(t)):
+            raise ValueError(f"column {name!r} {key} {t!r} must match {COLUMN_TYPE.pattern}")
+    return col
+
+
 def run_stamp(now: Optional[float] = None, suffix: Optional[str] = None) -> str:
     """UTC timestamp plus a random suffix, so two runs started in the same second (or a
     stale object from an earlier run) can never share a name with this run's objects."""
@@ -95,15 +113,28 @@ def sql_literal(value: Any, sf_type: str, dialect: str = "snowflake") -> str:
     return repr(value)
 
 
-def fq(database: str, schema: str, table: str) -> str:
+def fq(database: str, schema: str, table: str, dialect: str = "snowflake") -> str:
+    """Validated, and for Databricks backtick-quoted (validation alone already rules out
+    any character a quote would need to escape)."""
     for v, what in ((database, "database"), (schema, "schema"), (table, "table")):
         check_identifier(v, what)
+    if dialect == "databricks":
+        return f"`{database}`.`{schema}`.`{table}`"
     return f"{database}.{schema}.{table}"
+
+
+def fq_schema(database: str, schema: str, dialect: str = "snowflake") -> str:
+    for v, what in ((database, "database"), (schema, "schema")):
+        check_identifier(v, what)
+    return f"`{database}`.`{schema}`" if dialect == "databricks" else f"{database}.{schema}"
 
 
 def create_table_sql(fixture: dict, fq_table: str) -> str:
     """CREATE TABLE (never OR REPLACE: a name clash must fail, not clobber)."""
-    cols = ",\n  ".join(f"{c['name']} {wh_type(c)}" for c in fixture["columns"])
+    for c in fixture["columns"]:
+        check_column(c)
+    q = "`" if warehouse_of(fixture) == "databricks" else ""
+    cols = ",\n  ".join(f"{q}{c['name']}{q} {wh_type(c)}" for c in fixture["columns"])
     return f"CREATE TABLE {fq_table} (\n  {cols}\n)"
 
 

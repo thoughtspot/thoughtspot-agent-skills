@@ -235,7 +235,7 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" =
     wh_profile = getattr(args, "dbx_profile", None) if wh_kind == "databricks" else args.sf_profile
     stamp = builders.run_stamp()
     names = builders.object_names(fixture["name"], stamp)
-    fq_table = builders.fq(args.database, args.schema, names["warehouse_table"])
+    fq_table = builders.fq(args.database, args.schema, names["warehouse_table"], wh_kind)
     run_start_ms = deps.now_ms()
     t0 = time.monotonic()
     phases: dict[str, float] = {}
