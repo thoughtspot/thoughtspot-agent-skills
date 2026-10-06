@@ -241,6 +241,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-193 | Worktree `git commit` runs the MAIN checkout's pre-commit script — local gates are the wrong branch's | opportunistic |
+| BL-363 | the M2 Databricks oracle runs case SQL as a service principal that owns the `agent_skills` catalog — confine it to a scratch-schema-only principal before any third-party SQL corpus runs on Databricks | 2026-11-15, and before any third-party Databricks corpus |
 | BL-362 | from-Databricks coverage: 17 common forms declined (NVL, NVL2, 3-arg COALESCE, try_divide, nullifzero, zeroifnull, concat_ws, `\|\|`, `%`, LIKE / ILIKE / RLIKE, INSTR, trunc, last_day, bround, to_date(column)) — loud, never wrong (fidelity M2) | opportunistic |
 | BL-356 | the M1 cross-check agrees at 1e-9 while cases score at 1e-12 — a last-digit oracle disagreement is run and scored, not quarantined | next M1 / M2 harness change |
 | BL-351 | decimal literals are exact in the warehouse, IEEE doubles in Excel — literal-only arithmetic differs in the 13th digit (fidelity M1): document or emit doubles | documented 2026-10-07 (divergence, no fix planned); revisit only if a sheet needs Excel's double errors |
@@ -13201,3 +13202,31 @@ in `sv_sql`, `try_divide(x, y)` = `x / y`, `zeroifnull`, `nullifzero`, `%` = `mo
 Each new mapping gets a doc row and a fidelity case, not only a unit test.
 
 **Target:** opportunistic.
+
+## BL-363 — The Databricks fidelity oracle runs case SQL as a principal that owns the catalog `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** review of PR #576 (formula fidelity M2).
+
+**The facts** (read-only, 2026-10-07: `DESCRIBE CATALOG` / `DESCRIBE SCHEMA`,
+`system.information_schema.schema_privileges`). The `Production` Databricks profile's service
+principal runs every M2 `source_formula` verbatim, and it is also the principal behind the
+ThoughtSpot connection `DBX_DAMIAN`.
+- It **owns the catalog** `agent_skills`, and with it the right to grant itself anything there.
+- It owns the schemas `audit_probe`, `default`, `dunder_mifflin` and `business_forecast`.
+- It has `SELECT` / `USE SCHEMA` on `analytics`, `ossie` and `plan`.
+- Catalogs outside `agent_skills` were not checked.
+
+M2's cases are authored in-repo, so this was accepted for M2. A third-party Spark/Databricks SQL
+corpus would be executable input running with that reach.
+
+**Fix.**
+- Create a dedicated principal with `USE CATALOG agent_skills`, `USE SCHEMA` + `CREATE TABLE` on one
+  scratch schema, and `CAN USE` on the SQL warehouse, and nothing else.
+- Give it its own Databricks profile, and point `--dbx-profile` at that profile for corpus runs.
+- The ThoughtSpot Table must still be readable through a connection; either a second connection on
+  the confined principal, or a grant on the scratch schema to `DBX_DAMIAN`'s principal.
+- Optionally, have `DatabricksWarehouse` refuse to run a non-in-repo case file unless
+  `current_user()` is the confined principal.
+
+**Target:** 2026-11-15, and in any case before any third-party SQL corpus is run on Databricks.

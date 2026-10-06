@@ -101,11 +101,24 @@ two calls per case, sequential.
    Startup sweeps report, but never touch, earlier `ZZ_FIDELITY_%_DELETE_ME` ThoughtSpot objects
    and `ZZ_FIDELITY_%` warehouse tables.
 
-**Warehouse role.** The oracle runs each case's `source_formula` verbatim as SQL under the
-Snowflake profile's role. M0's cases are authored in-repo. **Before any third-party SQL corpus
-arrives** (Spark examples, M2), run with a role confined to the scratch schema: usage on it,
-create-table in it, and nothing else. A case file is then executable input, and the role is the
-only thing bounding it.
+**Warehouse principal.** The oracle runs each case's `source_formula` verbatim as SQL. A case file
+is executable input, and the principal running it is the only thing bounding it.
+- **Snowflake (M0, M1):** it runs under the Snowflake profile's role.
+- **Databricks (M2):** it runs under the `Production` profile's service principal, which is also
+  the principal the `DBX_DAMIAN` ThoughtSpot connection uses. Its reach, read-only on 2026-10-07
+  (`DESCRIBE CATALOG` / `DESCRIBE SCHEMA` and `system.information_schema.schema_privileges`), is
+  far wider than the scratch schema:
+  - it **owns the catalog** `agent_skills`
+  - it owns the schemas `audit_probe`, `default`, `dunder_mifflin` and `business_forecast`
+  - it has `SELECT` / `USE SCHEMA` on `analytics`, `ossie` and `plan`
+
+  An owner can grant itself anything in the catalog, and catalogs outside `agent_skills` were not
+  checked.
+
+M0, M1 and M2's cases are all authored in-repo, so this was acceptable for them. **Before any
+third-party SQL corpus runs on either warehouse**, the oracle must run as a principal confined to
+the scratch schema: usage on it, create-table in it, and nothing else. For Databricks this is
+**BL-363**.
 
 ## Case format
 
@@ -255,8 +268,15 @@ PYTHONPATH= uv run --no-project --python 3.12 --with pyyaml --with typer --with 
   their Databricks SQL. If no such connection exists, M2 cannot score pass-throughs; do not create a
   connection for it without the user's approval.
 - **`DatabricksWarehouse`** (`live.py`) connects with `databricks-sql-connector` to the profile's
-  `sql_warehouse_http_path`. It authenticates through `databricks-sdk`'s `Config` with the profile's
-  `dbx_profile` (`~/.databrickscfg`, the `databricks` CLI's own store). It never reads the secret.
+  `sql_warehouse_http_path`. By default it follows the repo's credential model
+  (`.claude/rules/security.md`, `/ts-profile-databricks`). It **does read the secret**: from the
+  profile's `secret_env` environment variable, else the OS credential store (service
+  `databricks-<slug>`, account = the client id for OAuth M2M, `token` for a PAT). It hands the
+  secret in memory to `databricks-sdk`'s `Config(host=…, client_id=…, client_secret=…)`, and never
+  logs, prints or writes it. `~/.databrickscfg` is used only when you pass
+  `--dbx-cli-profile <name>`, an explicit opt-in: that file holds the secret in plaintext, which
+  the profile skill advises against. The run header records which source was used
+  (`warehouse_auth`).
 - **Session.** The fixture's `session` takes `TIMEZONE` (sent as `SET TIME ZONE '…'`: a SQL
   warehouse rejects `SET timezone = …`), `ANSI_MODE` (boolean) and `LEGACY_TIME_PARSER_POLICY`, and
   nothing else. The run header records each value as **read back** from the session.
