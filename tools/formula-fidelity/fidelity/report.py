@@ -18,7 +18,7 @@ from fidelity.compare import (
 )
 
 _VERDICT_GLOSS = {
-    MISMATCH: "ran, returned a different value (silent wrong)",
+    MISMATCH: "ran, returned a different value (silent or warned — see above)",
     RUN_FAILED: "imported, but the AgentQL query failed where the source returned a value",
     IMPORT_FAILED: "translated, but ThoughtSpot rejected the formula (VALIDATE_ONLY)",
     TRANSLATE_FAILED: "the translator declined (NEEDS_REVIEW)",
@@ -96,6 +96,8 @@ def _silent_section(title: str, items: list[dict], fixtures: dict, lines: list[s
         c = cause.get("tag", "unexplained")
         if cause.get("backlog"):
             c += f" ({cause['backlog']})"
+        if cause.get("unexplained_keys") and cause.get("tag") != "unexplained":
+            c += f"; UNEXPLAINED keys {', '.join(cause['unexplained_keys'])}"
         lines.append(f"| {it['id']} | {_code(it['source_formula'])} | {_code(tr.get('formula'))} "
                      f"| {tr.get('status')} | {len(_wrong_rows(res))}/{len(res.get('rows', []))} "
                      f"| {_md(c)} |")
@@ -138,27 +140,34 @@ def build_report(run: dict, fixtures: dict[str, dict], title: str) -> str:
     results = [it["result"] for it in items]
     cnt = counts(results)
     silent = [it for it in items if it["result"].get("silent_wrong")]
-    def kind(it):
-        return (it["result"].get("cause") or {}).get("kind")
+    warned = [it for it in items if it["result"].get("warned")]
 
-    unexplained = [it for it in silent if kind(it) is None]
-    bugs = [it for it in silent if kind(it) == "translator-bug"]
-    semantics = [it for it in silent if kind(it) == "platform-semantics"]
+    def explained(it):
+        return (it["result"].get("cause") or {}).get("explained")
+
+    unexplained = [it for it in silent if not explained(it)]
+    bugs = [it for it in silent if explained(it)]
+    stale = [it for it in items if it["result"].get("stale_divergence")]
     meta = run["run"]
 
     lines = [f"# {title}", ""]
     lines.append(
-        f"**{len(silent)} silent wrong answer(s)** in {len(items)} cases: "
-        f"{len(bugs)} translator bug(s) with an open BL item, {len(unexplained)} unexplained, "
-        f"{len(semantics)} documented platform semantics the translator already warns about. "
-        f"{cnt[MATCH]} of {len(items)} matched.")
+        f"**{len(silent)} silent wrong answer(s)** ({len(bugs)} with an open BL item, "
+        f"{len(unexplained)} unexplained) and **{len(warned)} warned wrong answer(s)** "
+        f"in {len(items)} cases. {cnt[MATCH]} of {len(items)} matched.")
     lines.append("")
     lines.append(
-        "A silent wrong answer is a case the translator marked TRANSLATED or APPROXIMATED, "
-        "that imported cleanly, and that returned a different value from the oracle. "
-        "The oracle is the warehouse itself: each source formula is run as a Snowflake "
-        "SELECT over the same fixture rows ThoughtSpot queries.")
+        "A *silent* wrong answer is a case the translator marked TRANSLATED, that imported "
+        "cleanly, and that returned a different value from the oracle — nothing warned the "
+        "user. A *warned* wrong answer is one the translator marked APPROXIMATED and named a "
+        "trap for. A known-divergence tag explains only the keys it lists; any other wrong "
+        "key stays unexplained. The oracle is the warehouse itself: each source formula is "
+        "run as a Snowflake SELECT over the same fixture rows ThoughtSpot queries.")
     lines.append("")
+    if meta.get("aborted"):
+        lines.append(f"**This run ABORTED** (`{meta['aborted']}`); cases it did not reach are "
+                     "RUN_FAILED. See Run below for cleanup.")
+        lines.append("")
     if meta.get("ts_table"):
         lines.append(f"In emitted formulas `[T::col]` is the run's scratch Table, "
                      f"`{meta['ts_table']}`.")
@@ -167,8 +176,20 @@ def build_report(run: dict, fixtures: dict[str, dict], title: str) -> str:
     lines.append("")
     _silent_section("Unexplained", unexplained, fixtures, lines, with_repro=True)
     _silent_section("Translator bugs (open BL item)", bugs, fixtures, lines, with_repro=True)
-    _silent_section("Documented platform semantics (translator warns)", semantics, fixtures,
-                    lines, with_repro=True)
+    lines.append("## Warned wrong answers (APPROXIMATED, with a trap)")
+    lines.append("")
+    _silent_section("Warned", warned, fixtures, lines, with_repro=True)
+    if stale:
+        lines.append("## Stale known-divergence tags")
+        lines.append("")
+        lines.append("A tag listed these keys as diverging, but they came back equal. Narrow "
+                     "or remove the tag (a fixed bug, or a wrong tag).")
+        lines.append("")
+        for it in stale:
+            c = it["result"].get("cause") or {}
+            lines.append(f"- {it['id']} ({c.get('tag')}, {c.get('backlog')}): equal keys "
+                         f"{', '.join(c.get('stale_keys') or []) or 'all (MATCH)'}")
+        lines.append("")
 
     lines.append("## Counts by class")
     lines.append("")
@@ -217,8 +238,11 @@ def build_report(run: dict, fixtures: dict[str, dict], title: str) -> str:
 
     lines.append("## Run")
     lines.append("")
+    if meta.get("aborted"):
+        lines.append(f"- **ABORTED:** `{meta['aborted']}` — cases not reached are RUN_FAILED")
     for k in ("date", "profile", "connection", "warehouse_table", "sf_profile",
-              "cases_file", "cases_sha256", "translator_version", "runtime_s"):
+              "cases_file", "cases_sha256", "cases_sha256_after_fill", "fill_expected",
+              "translator_version", "runtime_s"):
         if k in meta:
             lines.append(f"- {k}: `{meta[k]}`")
     phases = meta.get("phases") or {}
@@ -229,9 +253,22 @@ def build_report(run: dict, fixtures: dict[str, dict], title: str) -> str:
                  f"`{cl.get('ts_confirmed_absent')}`, warehouse table dropped and confirmed = "
                  f"`{cl.get('warehouse_confirmed_absent')}`")
     if cl.get("remaining"):
-        lines.append(f"- **objects left behind:** `{cl['remaining']}`")
-    if meta.get("orphans"):
+        left = ", ".join(f"{r.get('name')} ({r.get('guid') or 'no GUID'})" for r in cl["remaining"])
+        lines.append(f"- **objects left behind (by name and GUID):** `{left}`")
+    if cl.get("not_owned"):
+        lines.append(f"- name matches NOT deleted (not provably this run's): `{cl['not_owned']}`")
+    if cl.get("errors"):
+        lines.append(f"- teardown errors: `{cl['errors']}`")
+    if meta.get("orphans") or meta.get("warehouse_orphans"):
         lines.append(f"- pre-existing orphans found by the startup sweep (not touched): "
-                     f"`{meta['orphans']}`")
+                     f"ThoughtSpot `{meta.get('orphans')}`, warehouse "
+                     f"`{meta.get('warehouse_orphans')}`")
+    if meta.get("oracle_drift"):
+        lines.append(f"- **oracle drift** (warehouse disagrees with stored `expected`): "
+                     f"`{meta['oracle_drift']}`")
+    rb = meta.get("rebuild")
+    if rb:
+        lines.append(f"- re-classified by `--rebuild` on `{rb['date']}` against case file "
+                     f"`{rb['cases_sha256']}`. The live run used `{meta.get('cases_sha256')}`")
     lines.append("")
     return "\n".join(lines)

@@ -26,8 +26,10 @@ Usage (see README.md):
     # re-classify a stored run against the current case file (e.g. new known_divergence tags)
     python -I tools/formula-fidelity/run.py --cases … --rebuild runs/<file>.json --report …
 
-Exit codes: 0 run completed (whatever the verdicts), 1 a scratch object could not be
-confirmed deleted, 2 bad arguments or case files.
+Exit codes: 0 run completed and cleaned up (whatever the verdicts), 1 completed but a
+scratch object could not be confirmed deleted, 2 bad arguments or case files, 3 the run
+aborted (even if cleanup succeeded). An interrupt or a client SystemExit is re-raised after
+teardown and after the run JSON and report are written.
 """
 from __future__ import annotations
 
@@ -37,6 +39,7 @@ import json
 import pathlib
 import sys
 import time
+from typing import Optional
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -83,9 +86,21 @@ def translate_case(case: dict, fixture: dict, ts_table: str) -> dict:
     return {k: r.get(k) for k in keep}
 
 
-def classify_all(items: list[dict], cases: list[dict]) -> None:
+def classify_all(items: list[dict], cases: list[dict], aborted: Optional[str] = None) -> None:
+    from fidelity.compare import RUN_FAILED
+
     by_id = {c["id"]: c for c in cases}
     for it in items:
+        if aborted and not (it.get("oracle") or {}).get("sql"):
+            case = by_id.get(it["id"], it)
+            it.update({k: case[k] for k in ("source_formula", "role", "group_by",
+                                            "known_divergence", "note") if k in case})
+            it["result"] = {"id": it["id"], "verdict": RUN_FAILED, "rows": [],
+                            "mismatch_kinds": [], "silent_wrong": False, "warned": False,
+                            "stale_divergence": False,
+                            "translation_status": (it.get("translation") or {}).get("status"),
+                            "detail": f"not run — the run aborted ({aborted})"}
+            continue
         case = by_id.get(it["id"], it)
         it.update({k: case[k] for k in ("source_formula", "role", "group_by", "known_divergence", "note")
                    if k in case})
@@ -99,7 +114,7 @@ def _rel(p: pathlib.Path) -> str:
 
 
 def _write(run: dict, cases: list[dict], fixtures: dict, args, title: str) -> None:
-    classify_all(run["cases"], cases)
+    classify_all(run["cases"], cases, run["run"].get("aborted"))
     run["run"]["counts"] = counts([it["result"] for it in run["cases"]])
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(run, indent=1, ensure_ascii=False, default=str) + "\n")
@@ -124,6 +139,9 @@ def main(argv=None) -> int:
 
     if args.rebuild:
         run = json.loads(args.rebuild.read_text())
+        run["run"]["rebuild"] = {
+            "date": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+            "cases_sha256": caselib.file_sha256(args.cases), "from": _rel(args.rebuild)}
         _write(run, cases, fixtures, args, title)
         return 0
 
@@ -134,6 +152,12 @@ def main(argv=None) -> int:
             print(f"{c['id']:16} {t['status']:13} {c['source_formula']}  ->  {t.get('formula')}")
         return 0
 
+    try:
+        builders.check_identifier(args.database, "--database")
+        builders.check_identifier(args.schema, "--schema")
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     if not (args.profile and args.sf_profile):
         print("error: a live run needs --profile and --sf-profile", file=sys.stderr)
         return 2
@@ -143,21 +167,48 @@ def main(argv=None) -> int:
     return live_run(args, cases, fixtures, title)
 
 
-def live_run(args, cases: list[dict], fixtures: dict, title: str) -> int:
-    from fidelity import live
-    from ts_cli import __version__ as ts_cli_version
+EXIT_OK, EXIT_LEFTOVERS, EXIT_USAGE, EXIT_ABORTED = 0, 1, 2, 3
+
+
+class Deps:
+    """The live seams, injectable so tests can drive ``live_run`` with fakes."""
+
+    def __init__(self, validator=None, warehouse=None, translate=None, now_ms=None):
+        from fidelity import live
+
+        self.live = live
+        self.validator = validator or (lambda profile: live.ts_validator(profile))
+        self.warehouse = warehouse or (lambda sf_profile: live.Warehouse(sf_profile))
+        self.translate = translate or translate_case
+        self.now_ms = now_ms or (lambda: int(time.time() * 1000))
+
+
+def live_run(args, cases: list[dict], fixtures: dict, title: str, deps: "Deps" = None) -> int:
+    """One live run. Outputs (run JSON, report) are ALWAYS written, in ``finally``.
+
+    Exit: 0 completed and clean; 1 completed but a scratch object could not be confirmed
+    gone; 3 aborted (whatever the cleanup did). SystemExit / KeyboardInterrupt are
+    re-raised after teardown and writing — the client raises SystemExit on auth failure.
+    """
+    deps = deps or Deps()
+    live = deps.live
+    try:
+        from ts_cli import __version__ as ts_cli_version
+    except ImportError:  # pragma: no cover
+        ts_cli_version = "unknown"
 
     fixture = next(iter(fixtures.values()))
     stamp = builders.run_stamp()
     names = builders.object_names(fixture["name"], stamp)
     fq_table = builders.fq(args.database, args.schema, names["warehouse_table"])
+    run_start_ms = deps.now_ms()
     t0 = time.monotonic()
     phases: dict[str, float] = {}
     meta = {"date": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
             "profile": args.profile, "connection": args.connection, "sf_profile": args.sf_profile,
             "warehouse_table": fq_table, "ts_table": names["ts_table"],
-            "ts_model": names["ts_model"], "cases_file": _rel(args.cases),
-            "cases_sha256": caselib.file_sha256(args.cases),
+            "ts_model": names["ts_model"], "run_start_ms": run_start_ms,
+            "cases_file": _rel(args.cases), "cases_sha256": caselib.file_sha256(args.cases),
             "translator_version": f"ts-cli {ts_cli_version}", "phases": phases}
     items = [{"id": c["id"], "fixture": c["fixture"], "oracle": {}, "translation": None,
               "import_error": None, "actual": None} for c in cases]
@@ -169,16 +220,19 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str) -> int:
         phases[name] = round(now - since, 1)
         return now
 
-    validator = live.ts_validator(args.profile)
-    meta["orphans"] = live.find_orphans(validator)
-    if meta["orphans"]:
-        live.log(f"startup sweep: {len(meta['orphans'])} pre-existing ZZ_FIDELITY_* object(s) "
-                 "(reported, not touched)")
-    wh = live.Warehouse(args.sf_profile)
-    created_ts: list[tuple[str, str]] = []
+    validator = wh = None
+    created_ts: list[tuple[str, Optional[str]]] = []
     table_created = False
-    cleanup: dict = {}
+    reraise: Optional[BaseException] = None
     try:
+        validator = deps.validator(args.profile)
+        meta["orphans"] = live.find_orphans(validator)
+        wh = deps.warehouse(args.sf_profile)
+        meta["warehouse_orphans"] = live.find_warehouse_orphans(wh, args.database, args.schema)
+        n_orph = len(meta["orphans"]) + len(meta["warehouse_orphans"])
+        if n_orph:
+            live.log(f"startup sweep: {n_orph} pre-existing ZZ_FIDELITY_* object(s) "
+                     "(reported, not touched)")
         t = time.monotonic()
         for s in builders.session_sql(fixture):
             wh.execute(s)
@@ -193,16 +247,17 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str) -> int:
         t = lap("oracle", t)
 
         for c in cases:
-            by_id[c["id"]]["translation"] = translate_case(c, fixture, names["ts_table"])
+            by_id[c["id"]]["translation"] = deps.translate(c, fixture, names["ts_table"])
         t = lap("translate", t)
 
         live.log(f"ThoughtSpot: importing Table {names['ts_table']}")
         tdoc = builders.table_tml(fixture, names, args.connection, args.database, args.schema)
         created_ts.append((names["ts_table"], None))
         tguid, err = live.import_object(validator, tdoc, names["ts_table"])
+        if tguid:
+            created_ts[-1] = (names["ts_table"], tguid)
         if err:
             raise RuntimeError(f"Table import failed: {err}")
-        created_ts[-1] = (names["ts_table"], tguid)
 
         ok = [c for c in cases if by_id[c["id"]]["translation"]["status"] in
               ("TRANSLATED", "APPROXIMATED")]
@@ -225,9 +280,10 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str) -> int:
                  f"({len(good)} formulas, {len(failures)} rejected)")
         created_ts.insert(0, (names["ts_model"], None))
         mguid, err = live.import_object(validator, mdoc, names["ts_model"])
+        if mguid:
+            created_ts[0] = (names["ts_model"], mguid)
         if err:
             raise RuntimeError(f"Model import failed: {err}")
-        created_ts[0] = (names["ts_model"], mguid)
         t = lap("ts_import", t)
 
         for n, c in enumerate([c for c in cases if c["id"] in good], 1):
@@ -238,44 +294,95 @@ def live_run(args, cases: list[dict], fixtures: dict, title: str) -> int:
                 validator, names["ts_model"], mguid, builders.formula_name(c["id"]), key_col,
                 c["role"], tr.get("agentql_wrapper"), builders.key_values(c, fixture))
         lap("agentql", t)
-    except Exception as exc:
+    except BaseException as exc:  # noqa: BLE001 — recorded, cleaned up, written, re-raised
         meta["aborted"] = f"{type(exc).__name__}: {exc}"
         live.log(f"RUN ABORTED: {meta['aborted']}")
+        if not isinstance(exc, Exception):
+            reraise = exc
     finally:
         t = time.monotonic()
-        cleanup = live.teardown_ts(validator, created_ts) if created_ts else \
-            {"ts_confirmed_absent": True, "remaining": []}
+        cleanup: dict = {"ts_confirmed_absent": True, "remaining": [], "not_owned": [],
+                         "errors": []}
+        # 1. ThoughtSpot — its own block, so a failure here never skips the warehouse.
+        if created_ts:
+            try:
+                if validator is None:
+                    raise RuntimeError("no ThoughtSpot client")
+                res = live.teardown_ts(validator, created_ts, run_start_ms)
+                intr = res.pop("interrupted", None)
+                cleanup.update(res)
+                if intr is not None and reraise is None:
+                    reraise = intr
+            except BaseException as exc:  # noqa: BLE001
+                cleanup["ts_confirmed_absent"] = False
+                cleanup["errors"].append(f"ThoughtSpot teardown: {type(exc).__name__}: {exc}")
+                cleanup["remaining"].extend({"name": n, "guid": g, "unconfirmed": True}
+                                            for n, g in created_ts)
+                if not isinstance(exc, Exception) and reraise is None:
+                    reraise = exc
+        # 2. Warehouse — separately guarded.
+        gone = True
         if table_created:
             try:
                 wh.execute(f"DROP TABLE IF EXISTS {fq_table}")
-            except Exception as exc:
-                live.log(f"warehouse DROP failed: {exc}")
-        try:
-            gone = not wh.table_exists(args.database, args.schema, names["warehouse_table"])
-        except Exception as exc:
-            gone = False
-            live.log(f"warehouse absence check failed: {exc}")
-        if not gone:
-            cleanup.setdefault("remaining", []).append(fq_table)
-            live.log(f"CLEANUP FAILED — warehouse table still present: {fq_table}")
+                gone = not wh.table_exists(args.database, args.schema, names["warehouse_table"])
+            except BaseException as exc:  # noqa: BLE001
+                gone = False
+                cleanup["errors"].append(f"warehouse teardown: {type(exc).__name__}: {exc}")
+                if not isinstance(exc, Exception) and reraise is None:
+                    reraise = exc
+            if not gone:
+                cleanup["remaining"].append({"name": fq_table, "guid": None, "warehouse": True})
+                live.log(f"CLEANUP NOT CONFIRMED — warehouse table may remain: {fq_table}")
         cleanup["warehouse_confirmed_absent"] = gone
-        wh.close()
+        if wh is not None:
+            try:
+                wh.close()
+            except BaseException:  # noqa: BLE001
+                pass
         lap("teardown", t)
         meta["cleanup"] = cleanup
         meta["runtime_s"] = round(time.monotonic() - t0, 1)
+        # 3. Outputs — always written, even on an abort.
+        try:
+            cases = _finish_outputs(args, run, cases, fixtures, fixture, by_id, title)
+        except BaseException as exc:  # noqa: BLE001
+            live.log(f"writing outputs failed: {type(exc).__name__}: {exc}")
+            if reraise is None:
+                reraise = exc
+    if reraise is not None:
+        raise reraise
+    if meta.get("aborted"):
+        return EXIT_ABORTED
+    return EXIT_LEFTOVERS if meta["cleanup"]["remaining"] else EXIT_OK
 
+
+def _finish_outputs(args, run, cases, fixtures, fixture, by_id, title):
+    meta = run["run"]
+    # drift is computed against the case file AS IT WAS, before any write-back
+    meta["oracle_drift"] = [c["id"] for c in cases if c.get("expected")
+                            and (by_id[c["id"]]["oracle"] or {}).get("values")
+                            and c["expected"].get("values") != by_id[c["id"]]["oracle"]["values"]]
     if args.fill_expected:
-        exp = {it["id"]: {"key_column": caselib.key_column(c, fixture),
-                          "values": it["oracle"].get("values")}
-               for c, it in zip(cases, items)}
-        args.cases.write_text(caselib.write_expected(cases, exp))
-        cases = caselib.load_cases(args.cases)
-    drift = [c["id"] for c in cases if c.get("expected") and
-             c["expected"].get("values") != by_id[c["id"]]["oracle"].get("values")]
-    meta["oracle_drift"] = drift
+        if meta.get("aborted"):
+            live_log("--fill-expected skipped: the run aborted")
+            meta["fill_expected"] = "skipped (aborted)"
+        else:
+            exp = {c["id"]: {"key_column": caselib.key_column(c, fixture),
+                             "values": by_id[c["id"]]["oracle"]["values"]}
+                   for c in cases if (by_id[c["id"]]["oracle"] or {}).get("values")}
+            args.cases.write_text(caselib.write_expected(cases, exp))
+            meta["fill_expected"] = f"wrote {len(exp)} case(s)"
+            meta["cases_sha256_after_fill"] = caselib.file_sha256(args.cases)
+            cases = caselib.load_cases(args.cases)
     _write(run, cases, fixtures, args, title)
-    print(json.dumps(meta["counts"]), file=sys.stderr)
-    return 0 if not cleanup.get("remaining") else 1
+    if "counts" in meta:
+        print(json.dumps(meta["counts"]), file=sys.stderr)
+    return cases
+
+
+def live_log(msg: str) -> None:
+    print(f"  {msg}", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":

@@ -198,8 +198,8 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 |---|---|
 | `concat ( [a] , [b] )` → `CONCAT(a, b)` | `CONCAT(a, b)` → `concat ( [a] , [b] )` |
 | `concat ( [a] , ' ' , [b] )` → `CONCAT(a, ' ', b)` *(supports N args)* | `CONCAT(a, ' ', b)` → `concat ( [a] , ' ' , [b] )` |
-| `substr ( [x] , [start] , [len] )` → `SUBSTR(x, start, len)` | `SUBSTR(x, start, len)` → `substr ( [x] , [start] , [len] )` |
-| `substr ( [x] , [start] , [len] )` → `SUBSTR(x, start, len)` | `SUBSTRING(x, start, len)` → `substr ( [x] , [start] , [len] )` — Snowflake `SUBSTRING` is a synonym of `SUBSTR` |
+| `substr ( [x] , [start] , [len] )` → `SUBSTR(x, start, len)` | `SUBSTR(x, start, len)` → `substr ( [x] , [start] , [len] )` — **Known wrong, BL-340, fix pending:** ThoughtSpot `substr` is **zero**-based and Snowflake's start is 1-based, so this identity row returns every substring shifted one character (`SUBSTR('Apple', 2, 3)` = `'ppl'`; the row's translation returns `'ple'` — formula fidelity M0, live 2026-10-06). Until the fix lands, use `substr ( [x] , [start] - 1 , [len] )` (and `SUBSTR(x, start + 1, len)` in the other direction) |
+| `substr ( [x] , [start] , [len] )` → `SUBSTR(x, start, len)` | `SUBSTRING(x, start, len)` → `substr ( [x] , [start] , [len] )` — Snowflake `SUBSTRING` is a synonym of `SUBSTR` — **Known wrong, BL-340, fix pending:** ThoughtSpot `substr` is **zero**-based and Snowflake's start is 1-based, so this identity row returns every substring shifted one character (`SUBSTR('Apple', 2, 3)` = `'ppl'`; the row's translation returns `'ple'` — formula fidelity M0, live 2026-10-06). Until the fix lands, use `substr ( [x] , [start] - 1 , [len] )` (and `SUBSTR(x, start + 1, len)` in the other direction) |
 | `strlen ( [x] )` → `LENGTH(x)` | `LENGTH(x)` → `strlen ( [x] )` |
 | `left ( [x] , [n] )` → `LEFT(x, n)` | `LEFT(x, n)` → `left ( [x] , [n] )` |
 | `right ( [x] , [n] )` → `RIGHT(x, n)` | `RIGHT(x, n)` → `right ( [x] , [n] )` |
@@ -243,7 +243,7 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | `to_double ( [x] )` → `CAST(x AS DOUBLE)` | `CAST(x AS DOUBLE)` → `to_double ( [x] )` |
 | `to_string ( [x] )` → `CAST(x AS VARCHAR)` | `CAST(x AS VARCHAR)` → `to_string ( [x] )` |
 | *(no direct equivalent)* | `CAST(x AS TEXT)` → `to_string ( [x] )` — TEXT is an alias for VARCHAR in Snowflake |
-| *(no direct equivalent)* | `TO_CHAR(x)` → `to_string ( [x] )` — Snowflake formatting alias |
+| *(no direct equivalent)* | `TO_CHAR(x)` → `to_string ( [x] )` — Snowflake formatting alias — **Known wrong, BL-343, fix pending:** live VALIDATE_ONLY on a DATE column rejects one-argument `to_string` (*Function to_string expects 2 arguments, found 1*, 2026-10-06), and `TO_CHAR(x, format)` must not drop its format. Until the fix lands, use `sql_string_op ( "TO_CHAR({0}, 'fmt')" , [x] )` |
 | *(no direct equivalent)* | `TRY_CAST(x AS INTEGER)` → `to_integer ( [x] )` — TRY_ variants produce NULL on failure; ThoughtSpot `to_integer` also produces NULL on failure |
 | *(no direct equivalent)* | `TRUNC(x[, d])` → `sql_double_op ( "TRUNC({0}, d)" , [x] )` (row-level `x`); over an aggregate (including a metric reference), the sign-split `( if ( x >= 0 ) then floor ( round ( x * 10^d , 0.000001 ) ) / 10^d else ceil ( round ( x * 10^d , 0.000001 ) ) / 10^d )` (`x / inc … * inc` when `d < 0`; plain `floor`/`ceil` when `d = 0`). The `round ( … , 0.000001 )` guard is required: `0.29 / 0.01` is `28.999999999999996` in DOUBLE, so an unguarded `floor` truncates 0.29 to 0.28. Residual: a value within 5e-7 of an increment below a boundary snaps up to it. A non-literal `d` over an aggregate is refused. ThoughtSpot has no truncate. **Revised 2026-10-06 (BL-331):** this row said `round ( [x] , 0 )`, which is wrong twice — `round` rounds rather than truncates, and `round(x, 0)` evaluates to NULL. `TRUNC(date, 'unit')` is date truncation: same as `DATE_TRUNC('unit', date)` |
 

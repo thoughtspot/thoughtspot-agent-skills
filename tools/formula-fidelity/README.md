@@ -39,15 +39,23 @@ PYTHONPATH= uv run --no-project --python 3.12 --with pyyaml --with typer --with 
 ```
 
 - **`--fill-expected`** writes the oracle's values into the case file's `expected` blocks, so
-  later runs report oracle drift (`run.oracle_drift`).
+  later runs report oracle drift (`run.oracle_drift`). See the rules below.
 - **`--translate-only`** needs no cluster and no warehouse. It prints each case's translation.
 - **`--rebuild runs/<file>.json`** re-classifies a stored run against the current case file, for
-  example after a new `known_divergence` tag. It does not re-query anything.
+  example after a new `known_divergence` tag. It does not re-query anything, and it records the
+  rebuild date and the case file's hash beside the live run's hash, so the report shows both.
+- **`--fill-expected`** writes only after a run that did not abort, and only for cases whose oracle
+  returned values. Drift is computed against the case file as it was before the write.
 
 Exit codes:
-- `0`: the run completed, whatever the verdicts
-- `1`: a scratch object could not be confirmed deleted (the GUIDs are logged)
-- `2`: bad arguments or case files
+- `0`: the run completed and cleaned up, whatever the verdicts
+- `1`: the run completed, but a scratch object could not be confirmed deleted (it is logged and
+  recorded by name and GUID)
+- `2`: bad arguments or case files (including a `--database` / `--schema` that is not a plain
+  `^[A-Z_][A-Z0-9_$]*$` identifier)
+- `3`: the run aborted, even when cleanup succeeded. A `SystemExit` (the ThoughtSpot client raises
+  one on auth failure) or Ctrl-C is re-raised instead, after teardown and after the run JSON and
+  report are written
 
 Runtime for M0 (50 cases, 10 rows) was 99 s and 212 s on two runs. About 70% of that is AgentQL:
 two calls per case, sequential.
@@ -71,11 +79,24 @@ two calls per case, sequential.
 5. **Query.** It sends one AgentQL statement per formula: the key column plus that one formula
    (`AGG("f")` for a measure), and nothing else. It also stores `generate-sql` output as the
    attribution evidence.
-6. **Teardown** (in `finally`):
-   - deletes the Model, then the Table, and confirms both are absent by GUID **and** by name
+6. **Teardown** (in `finally`, ThoughtSpot and warehouse in **separate** guarded blocks, so a
+   failure or an interrupt in one never skips the other; the run JSON and report are then written
+   whatever happened):
+   - deletes the Model, then the Table, and confirms each is gone
+   - **ownership check:** a GUID the import returned is deleted. A GUID found only by name is
+     deleted only when no GUID was recorded for that name *and* it was created at or after the run
+     started; any other name match is reported, never deleted. Run names also carry a random
+     suffix (`ZZ_FIDELITY_M0_<UTC stamp>_<6 hex>`)
    - drops the warehouse table and confirms it with `SHOW TABLES`
 
-   A startup sweep reports, but never touches, any earlier `ZZ_FIDELITY_%_DELETE_ME` objects.
+   Startup sweeps report, but never touch, earlier `ZZ_FIDELITY_%_DELETE_ME` ThoughtSpot objects
+   and `ZZ_FIDELITY_%` warehouse tables.
+
+**Warehouse role.** The oracle runs each case's `source_formula` verbatim as SQL under the
+Snowflake profile's role. M0's cases are authored in-repo. **Before any third-party SQL corpus
+arrives** (Spark examples, M2), run with a role confined to the scratch schema: usage on it,
+create-table in it, and nothing else. A case file is then executable input, and the role is the
+only thing bounding it.
 
 ## Case format
 
@@ -86,16 +107,21 @@ One JSON object per line:
  "role": "row", "fixture": "fixture-m0.json", "group_by": null,
  "expected": {"key_column": "ROW_ID", "values": {"1": {"t": "num", "v": "0.032258"}, "…": {}}},
  "tolerance": {"rel": 1e-12, "abs": 1e-12},
- "provenance": {"source": "authored in-repo", "licence": "Apache-2.0", "date": "2026-10-06"},
+ "provenance": {"source": "authored in-repo, under the repository licence",
+                "licence": "LicenseRef-ThoughtSpot-EULA (repo LICENSE)", "date": "2026-10-06"},
  "known_divergence": {"tag": "months-between-fractional", "kind": "translator-bug",
-                      "backlog": "BL-342", "reason": "…"},
+                      "backlog": "BL-342", "reason": "…", "keys": ["1", "2", "3", "4", "7"]},
  "note": "fractional months between two dates (BL-336)"}
 ```
 
 - **`role`**: `row` (one value per fixture row) or `aggregate` (one value per `group_by` group).
 - **`tolerance`**: declared when the case is written. **Never widen it after a failure.**
 - **`known_divergence`**: optional, and it never hides anything. The case still runs, a wrong
-  value is still MISMATCH, and the report attributes it.
+  value is still MISMATCH, and the report attributes it. **`keys`** lists the keys expected to
+  diverge. Derive them from the fixture and the documented behaviour, not by copying a run's
+  output. A tag explains only those keys: any other wrong key is reported *unexplained*, and a
+  listed key that comes back equal (or a tag on a MATCH) is reported as a **stale** tag.
+  `keys: ["*"]` is a case-level tag, e.g. for an import failure, and explains no per-key value.
   - `kind: platform-semantics`: a documented ThoughtSpot behaviour the translator warns about, e.g. BL-333 case-insensitive `=`.
   - `kind: translator-bug`: an open BL item. The BL id is required.
 - **Values** use canonical types: `null`, `num` (decimal string), `str`, `bool`, `date`,
@@ -105,8 +131,8 @@ One JSON object per line:
 
 | Verdict | Meaning |
 |---|---|
-| `MISMATCH` | It imported, ran, and returned a different value. Combined with a TRANSLATED or APPROXIMATED status, this is a **silent wrong answer** |
-| `RUN_FAILED` | It imported, but the query failed where the source returned a value |
+| `MISMATCH` | It imported, ran, and returned a different value. With a TRANSLATED status (or APPROXIMATED with no trap) it is a **silent wrong answer**; with APPROXIMATED and a named trap it is a **warned** wrong answer |
+| `RUN_FAILED` | It imported, but the query failed where the source returned a value, returned SUCCESS with 0 rows, or was never reached because the run aborted |
 | `IMPORT_FAILED` | ThoughtSpot rejected the translated formula (VALIDATE_ONLY) |
 | `TRANSLATE_FAILED` | The translator declined (NEEDS_REVIEW). The case still counts in the denominator |
 | `ERROR_EQUIV` | The source errored, and ThoughtSpot returned NULL or an error |
@@ -114,12 +140,16 @@ One JSON object per line:
 | `MATCH` | Every key is equal |
 
 Rules, all in `compare.py` and pinned by tests:
-- **Numbers** compare as `Decimal` within the declared tolerance, so `3 == 3.0`.
+- **Numbers** compare as `Decimal` within the declared tolerance, so `3 == 3.0`. Cross-type
+  equality applies only when the oracle is numeric: a numeric string from ThoughtSpot may equal
+  it, but nothing is stripped (`' 7'` is not 7), and a string oracle must match exactly
+  (`'007'` ≠ 7).
 - **NULL** equals only NULL. NULL against a value is a mismatch.
 - **Booleans** never equal numbers.
 - **Strings** are exact and case-sensitive.
-- **Dates and datetimes:** an integer where a date is expected is read as epoch seconds (UTC),
-  because AgentQL returns DATE formula results as INT64 epoch seconds.
+- **Dates and datetimes:** an integer is read as epoch seconds (UTC) only when its AgentQL
+  column is typed INT64 and the oracle's value is a date, because AgentQL returns DATE formula
+  results that way. A value that cannot be an epoch (fractional, out of range) is VALUE_DIFF.
 - **Keys:** a key missing on either side is a mismatch.
 
 ## Extending (M1 and later)
@@ -131,4 +161,5 @@ Rules, all in `compare.py` and pinned by tests:
   skips step 2. The fixture, translate, import, query, compare and report steps are reused
   unchanged.
 - **Third-party cases** need a licence file in their case directory (design §1). M0's cases are
-  all authored in-repo.
+  all authored in-repo, under the repository licence (the ThoughtSpot EULA in `LICENSE`, recorded
+  as `LicenseRef-ThoughtSpot-EULA (repo LICENSE)`), not under Apache-2.0.

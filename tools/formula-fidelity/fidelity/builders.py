@@ -12,6 +12,7 @@ with — or clean up — an object it did not create:
 from __future__ import annotations
 
 import re
+import secrets
 import time
 from typing import Any, Optional
 
@@ -20,8 +21,22 @@ SUFFIX = "_DELETE_ME"
 ORPHAN_PATTERN = f"{PREFIX}%{SUFFIX}"
 
 
-def run_stamp(now: Optional[float] = None) -> str:
-    return time.strftime("%Y%m%dT%H%M%S", time.gmtime(now if now is not None else time.time()))
+IDENT = re.compile(r"^[A-Z_][A-Z0-9_$]*$")
+
+
+def run_stamp(now: Optional[float] = None, suffix: Optional[str] = None) -> str:
+    """UTC timestamp plus a random suffix, so two runs started in the same second (or a
+    stale object from an earlier run) can never share a name with this run's objects."""
+    ts = time.strftime("%Y%m%dT%H%M%S", time.gmtime(now if now is not None else time.time()))
+    return f"{ts}_{suffix if suffix is not None else secrets.token_hex(3).upper()}"
+
+
+def check_identifier(value: str, what: str) -> str:
+    """Database / schema names are interpolated into SQL, so only plain unquoted
+    Snowflake identifiers are accepted."""
+    if not IDENT.fullmatch(value or ""):
+        raise ValueError(f"{what} {value!r} must match {IDENT.pattern} (plain upper-case identifier)")
+    return value
 
 
 def object_names(fixture_name: str, stamp: str) -> dict[str, str]:
@@ -54,6 +69,8 @@ def sql_literal(value: Any, sf_type: str) -> str:
 
 
 def fq(database: str, schema: str, table: str) -> str:
+    for v, what in ((database, "database"), (schema, "schema"), (table, "table")):
+        check_identifier(v, what)
     return f"{database}.{schema}.{table}"
 
 
@@ -77,7 +94,13 @@ def session_sql(fixture: dict) -> list[str]:
     for k, v in (fixture.get("session") or {}).items():
         if not re.fullmatch(r"[A-Z_]+", k):
             raise ValueError(f"bad session parameter name {k!r}")
-        out.append(f"ALTER SESSION SET {k} = " + (f"'{v}'" if isinstance(v, str) else str(int(v))))
+        if isinstance(v, str):
+            val = "'" + v.replace("\\", "\\\\").replace("'", "''") + "'"
+        elif isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(f"session parameter {k} must be a string or an integer, got {v!r}")
+        else:
+            val = str(v)
+        out.append(f"ALTER SESSION SET {k} = {val}")
     return out
 
 

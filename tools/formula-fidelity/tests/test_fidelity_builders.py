@@ -15,13 +15,13 @@ from fidelity.cases import load_fixture  # noqa: E402
 from fidelity.live import bisect_failures  # noqa: E402
 
 FX = load_fixture(HERE / "cases" / "snowflake" / "fixture-m0.json")
-NAMES = B.object_names("M0", "20261006T000000")
+NAMES = B.object_names("M0", "20261006T000000_A1B2C3")
 
 
 def test_object_names_are_run_stamped_scratch_names():
-    assert NAMES == {"warehouse_table": "ZZ_FIDELITY_M0_20261006T000000",
-                     "ts_table": "ZZ_FIDELITY_M0_20261006T000000_TABLE_DELETE_ME",
-                     "ts_model": "ZZ_FIDELITY_M0_20261006T000000_DELETE_ME"}
+    assert NAMES == {"warehouse_table": "ZZ_FIDELITY_M0_20261006T000000_A1B2C3",
+                     "ts_table": "ZZ_FIDELITY_M0_20261006T000000_A1B2C3_TABLE_DELETE_ME",
+                     "ts_model": "ZZ_FIDELITY_M0_20261006T000000_A1B2C3_DELETE_ME"}
     for n in ("ts_table", "ts_model"):
         assert NAMES[n].startswith(B.PREFIX) and NAMES[n].endswith(B.SUFFIX)
     assert B.formula_name("sf-date-010") == "f_sf_date_010"
@@ -40,6 +40,34 @@ def test_sql_literal(v, t, out):
 def test_sql_literal_refuses_bad_values(v, t):
     with pytest.raises(ValueError):
         B.sql_literal(v, t)
+
+
+def test_run_stamp_has_a_random_suffix():
+    a, b = B.run_stamp(0), B.run_stamp(0)
+    assert a.startswith("19700101T000000_") and a != b
+    assert B.IDENT.fullmatch(B.object_names("M0", a)["warehouse_table"])
+
+
+@pytest.mark.parametrize("v", ["PUBLIC", "AGENT_SKILLS", "_X1$"])
+def test_identifier_ok(v):
+    assert B.check_identifier(v, "schema") == v
+
+
+@pytest.mark.parametrize("v", ["public", "A.B", "X; DROP TABLE Y", "", "1A", '"Q"'])
+def test_identifier_refused(v):
+    with pytest.raises(ValueError):
+        B.check_identifier(v, "schema")
+    with pytest.raises(ValueError):
+        B.fq("AGENT_SKILLS", v, "T")
+
+
+def test_session_values_escaped_and_typed():
+    fx = {"session": {"TIMEZONE": "O'Reilly\\x", "WEEK_START": 1}}
+    assert B.session_sql(fx) == ["ALTER SESSION SET TIMEZONE = 'O''Reilly\\\\x'",
+                                 "ALTER SESSION SET WEEK_START = 1"]
+    for bad in ({"WEEK_START": 1.5}, {"WEEK_START": True}, {"bad-name": 1}):
+        with pytest.raises(ValueError):
+            B.session_sql({"session": bad})
 
 
 def test_create_and_insert_sql():

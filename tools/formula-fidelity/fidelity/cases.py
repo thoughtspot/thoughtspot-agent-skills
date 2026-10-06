@@ -54,6 +54,11 @@ def _check_case(case: dict, where: str) -> None:
                             f"{sorted(DIVERGENCE_KINDS)}")
         if kd["kind"] == "translator-bug" and not kd.get("backlog"):
             raise CaseError(f"{where}: a translator-bug divergence must cite a BL id")
+        keys = kd.get("keys")
+        if not isinstance(keys, list) or not keys or \
+                not all(isinstance(k, str) and k for k in keys):
+            raise CaseError(f"{where}: known_divergence.keys must list the keys expected to "
+                            'diverge (strings), or ["*"] for a case-level tag')
 
 
 def parse_cases(text: str, source: str = "<cases>") -> list[dict]:

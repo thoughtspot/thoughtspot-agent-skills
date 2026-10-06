@@ -121,6 +121,30 @@ def find_orphans(validator) -> list[dict]:
     return out
 
 
+def find_warehouse_orphans(wh: "Warehouse", database: str, schema: str) -> list[dict]:
+    """Warehouse tables from earlier runs. Reported, never dropped."""
+    rows = wh.execute(f"SHOW TABLES LIKE '{builders.PREFIX}%' IN SCHEMA {database}.{schema}")
+    return [{"name": str(r[1]), "created_on": str(r[0])} for r in rows
+            if str(r[1]).upper().startswith(builders.PREFIX)]
+
+
+def search_by_name(validator, name: str) -> list[dict]:
+    """Exact-name matches with their creation time (ms), for the ownership check."""
+    resp = validator.client.post(_SEARCH, json={
+        "metadata": [{"type": "LOGICAL_TABLE", "name_pattern": name}],
+        "record_size": -1, "record_offset": 0})
+    try:
+        rows = resp.json() or []
+    except ValueError:
+        rows = []
+    out = []
+    for r in rows if isinstance(rows, list) else []:
+        if r.get("metadata_name") == name:
+            hdr = r.get("metadata_header") or {}
+            out.append({"guid": r.get("metadata_id"), "created_ms": hdr.get("created")})
+    return out
+
+
 def import_object(validator, doc: dict, name: str) -> tuple[Optional[str], Optional[str]]:
     guid, err = validator._import(doc, "ALL_OR_NONE", True)
     if err:
@@ -165,6 +189,9 @@ def fetch_case(validator, model_name: str, model_guid: str, fname: str, key_col:
     if not err:
         out["values"] = _keyed(res)
         out["value_type"] = (res.get("columns") or [{}, {}])[-1].get("type")
+        if not out["values"]:  # SUCCESS with 0 rows is a failed run, never "all missing"
+            out["zero_rows"] = True
+            out["error"] = "AgentQL returned SUCCESS with 0 rows"
         return out
     out["error"] = err
     for k in keys:
@@ -196,26 +223,50 @@ def _keyed(res: dict) -> dict[str, dict]:
     return {str(r[0]): canon_ts(r[1], vtype) for r in res.get("rows") or [] if len(r) >= 2}
 
 
-def teardown_ts(validator, created: list[tuple[str, Optional[str]]]) -> dict:
-    """Delete (model first, then table) and confirm absence by GUID *and* by name — the
-    name search also catches an object an import created without reporting its GUID."""
-    remaining: list[str] = []
+def teardown_ts(validator, created: list[tuple[str, Optional[str]]], run_start_ms: int) -> dict:
+    """Delete this run's objects (Model first, then Table) and confirm each is gone.
+
+    Ownership rules — the harness must never delete what it did not create:
+    - a GUID the import returned is deleted;
+    - a GUID found only by name is deleted only when NO GUID was recorded for that name
+      (the import created something without reporting it) AND it was created at or after
+      this run started; any other name match is reported, never deleted.
+
+    Each object is handled in its own ``try`` so one failure (including SystemExit from
+    the client or a Ctrl-C) cannot skip the rest; the first BaseException that is not an
+    ordinary Exception is re-raised by the caller after the run is written.
+    """
+    remaining: list[dict] = []
+    not_owned: list[dict] = []
     outcomes: dict[str, str] = {}
+    errors: list[str] = []
+    interrupted: Optional[BaseException] = None
     for name, guid in created:
-        guids = list(dict.fromkeys(([guid] if guid else []) + validator.find_by_name(name)))
-        for g in guids:
-            try:
+        try:
+            found = search_by_name(validator, name)
+            targets = [guid] if guid else [
+                f["guid"] for f in found
+                if f.get("guid") and isinstance(f.get("created_ms"), (int, float))
+                and f["created_ms"] >= run_start_ms]
+            not_owned.extend({"name": name, "guid": f["guid"]} for f in found
+                             if f.get("guid") and f["guid"] not in targets)
+            for g in targets:
                 outcomes[g] = validator.delete(g)
-            except Exception as exc:
-                outcomes[g] = f"error: {exc}"
-        left = [g for g in guids if validator.exists(g)] + \
-            [g for g in validator.find_by_name(name) if g not in guids]
-        for g in left:
-            log(f"CLEANUP FAILED — still present: {name} {g}. Delete it with: "
-                f"ts metadata delete {g}")
-        remaining.extend(left)
+            still = [g for g in targets if validator.exists(g)]
+            remaining.extend({"name": name, "guid": g} for g in still)
+        except BaseException as exc:  # noqa: BLE001 — record, keep tearing down
+            errors.append(f"{name}: {type(exc).__name__}: {exc}")
+            remaining.append({"name": name, "guid": guid, "unconfirmed": True})
+            if not isinstance(exc, Exception) and interrupted is None:
+                interrupted = exc
+    for r in remaining:
+        log(f"CLEANUP NOT CONFIRMED — {r['name']} {r.get('guid') or '(no GUID)'}. Check with: "
+            f'ts metadata search --name "{r["name"]}"')
+    for r in not_owned:
+        log(f"NOT DELETED (not provably this run's) — {r['name']} {r['guid']}")
     return {"ts_confirmed_absent": not remaining, "remaining": remaining,
-            "delete_outcomes": outcomes}
+            "not_owned": not_owned, "delete_outcomes": outcomes, "errors": errors,
+            "interrupted": interrupted}
 
 
 def dumps(obj: Any) -> str:

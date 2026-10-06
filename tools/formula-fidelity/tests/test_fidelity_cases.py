@@ -19,7 +19,8 @@ CASE_DIR = HERE / "cases" / "snowflake"
 def _case(**over):
     base = {"id": "x-1", "dialect": "snowflake", "source_formula": "N1 + 1", "role": "row",
             "fixture": "fixture-m0.json", "tolerance": {"rel": 1e-12, "abs": 1e-12},
-            "provenance": {"source": "authored in-repo", "licence": "Apache-2.0"}}
+            "provenance": {"source": "authored in-repo, under the repository licence",
+                           "licence": "LicenseRef-ThoughtSpot-EULA (repo LICENSE)"}}
     base.update(over)
     return base
 
@@ -47,6 +48,12 @@ def test_shipped_cases_reference_only_fixture_columns():
         assert referenced_columns(c["source_formula"], fx) or c["source_formula"] == "COUNT(*)", c["id"]
 
 
+def test_shipped_cases_carry_the_repository_licence():
+    for c in C.load_cases(CASE_DIR / "m0.jsonl"):
+        assert c["provenance"]["licence"] == "LicenseRef-ThoughtSpot-EULA (repo LICENSE)", c["id"]
+        assert "Apache" not in c["provenance"]["licence"]
+
+
 def test_fixture_has_the_promised_edge_rows():
     import datetime as dt
 
@@ -67,8 +74,11 @@ def test_fixture_has_the_promised_edge_rows():
     ({"tolerance": {"rel": -1}}, "tolerance"),
     ({"tolerance": {"ulp": 1}}, "tolerance"),
     ({"provenance": {"source": "x"}}, "licence"),
-    ({"known_divergence": {"tag": "t", "reason": "r", "kind": "vibes"}}, "kind must be"),
-    ({"known_divergence": {"tag": "t", "reason": "r", "kind": "translator-bug"}}, "BL id"),
+    ({"known_divergence": {"tag": "t", "reason": "r", "kind": "vibes", "keys": ["1"]}}, "kind must be"),
+    ({"known_divergence": {"tag": "t", "reason": "r", "kind": "translator-bug", "keys": ["1"]}}, "BL id"),
+    ({"known_divergence": {"tag": "t", "reason": "r", "kind": "platform-semantics"}}, "keys must list"),
+    ({"known_divergence": {"tag": "t", "reason": "r", "kind": "platform-semantics", "keys": []}}, "keys must list"),
+    ({"known_divergence": {"tag": "t", "reason": "r", "kind": "platform-semantics", "keys": [2]}}, "keys must list"),
 ])
 def test_bad_cases_are_rejected(over, msg):
     with pytest.raises(C.CaseError, match=msg):

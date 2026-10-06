@@ -19,12 +19,12 @@ N = lambda v: {"t": "num", "v": str(v)}  # noqa: E731
 S = lambda v: {"t": "str", "v": v}  # noqa: E731
 
 
-def _item(cid, formula, verdict_inputs, kd=None, role="row", status="TRANSLATED"):
+def _item(cid, formula, verdict_inputs, kd=None, role="row", status="TRANSLATED", traps=None):
     oracle, actual = verdict_inputs
     case = {"id": cid, "source_formula": formula, "role": role, "fixture": "fx",
             "group_by": "GRP" if role == "aggregate" else None,
             "tolerance": {"rel": 1e-12}, "known_divergence": kd}
-    tr = {"status": status, "formula": f"emit [ZZ_T::S1] {cid}"}
+    tr = {"status": status, "formula": f"emit [ZZ_T::S1] {cid}", "traps": traps or []}
     it = dict(case, translation=tr, oracle=oracle, actual=actual, import_error=None)
     it["result"] = K.classify_case(case, oracle, tr, None, actual)
     return it
@@ -37,25 +37,30 @@ def _run(items):
 
 
 def test_report_leads_with_silent_wrong_and_groups_by_cause():
-    bug = {"tag": "substr", "kind": "translator-bug", "backlog": "BL-340", "reason": "r"}
-    sem = {"tag": "ci", "kind": "platform-semantics", "backlog": "BL-333", "reason": "r"}
+    bug = {"tag": "substr", "kind": "translator-bug", "backlog": "BL-340", "reason": "r",
+           "keys": ["1"]}
+    sem = {"tag": "ci", "kind": "platform-semantics", "backlog": "BL-333", "reason": "r",
+           "keys": ["2"]}
     items = [
         _item("ok", "N1", ({"values": {"1": N(1)}}, {"values": {"1": N(1)}})),
         _item("new", "S1", ({"values": {"1": S("a")}}, {"values": {"1": S("b")}})),
         _item("bug", "SUBSTR(S1, 2, 3)", ({"values": {"1": S("ppl")}}, {"values": {"1": S("ple")}}), bug),
         _item("sem", "S1 = 'Apple'", ({"values": {"2": N(0)}}, {"values": {"2": N(1)}}), sem,
-              status="APPROXIMATED"),
+              status="APPROXIMATED", traps=["case-insensitive"]),
+        _item("stale", "S1", ({"values": {"1": S("a")}}, {"values": {"1": S("a")}}), bug),
     ]
     md = build_report(_run(items), {"fx": FX}, "T")
     head, _, rest = md.partition("## Counts by class")
     assert head.index("## Silent wrong answers") < head.index("### Unexplained (1)") \
         < head.index("### Translator bugs (open BL item) (1)") \
-        < head.index("### Documented platform semantics (translator warns) (1)")
-    assert "**3 silent wrong answer(s)**" in md and "1 of 4 matched" in md
+        < head.index("## Warned wrong answers") < head.index("### Warned (1)")
+    assert "**2 silent wrong answer(s)** (1 with an open BL item, 1 unexplained) and " \
+           "**1 warned wrong answer(s)** in 5 cases. 2 of 5 matched." in md
+    assert "## Stale known-divergence tags" in head and "- stale (substr, BL-340)" in head
     assert "substr (BL-340)" in head and "ci (BL-333)" in head
     assert "expected 'ppl', ThoughtSpot returned 'ple' (VALUE_DIFF)" in head
     assert "[T::S1]" in md and "[ZZ_T::" not in md       # long scratch name shortened
-    assert "| MISMATCH | 3 |" in rest and "| MATCH | 1 |" in rest and "**4**" in rest
+    assert "| MISMATCH | 3 |" in rest and "| MATCH | 2 |" in rest and "**5**" in rest
     assert md.index("## Counts by class") < md.index("## Per-case results")
 
 
@@ -63,18 +68,24 @@ def test_loud_failures_listed_with_bl_and_cleanup_flagged():
     case = {"id": "imp", "source_formula": "TO_CHAR(S1)", "role": "row", "fixture": "fx",
             "group_by": None, "tolerance": {"rel": 0},
             "known_divergence": {"tag": "t", "kind": "translator-bug", "backlog": "BL-343",
-                                 "reason": "r"}}
+                                 "reason": "r", "keys": ["*"]}}
     tr = {"status": "TRANSLATED", "formula": "to_string ( x )"}
     oracle = {"values": {"1": S("x")}}
     it = dict(case, translation=tr, oracle=oracle, actual=None,
               import_error="expects 2 arguments")
     it["result"] = K.classify_case(case, oracle, tr, "expects 2 arguments", None)
     run = _run([it])
-    run["run"]["cleanup"] = {"ts_confirmed_absent": False, "remaining": ["g-1"]}
+    run["run"]["cleanup"] = {"ts_confirmed_absent": False,
+                             "remaining": [{"name": "ZZ_X_DELETE_ME", "guid": "g-1"}]}
+    run["run"]["aborted"] = "SystemExit: 1"
+    run["run"]["rebuild"] = {"date": "2026-10-07", "cases_sha256": "new", "from": "r.json"}
+    run["run"]["cases_sha256"] = "old"
     md = build_report(run, {"fx": FX}, "T")
     assert "| imp | IMPORT_FAILED |" in md and "BL-343: expects 2 arguments" in md
     assert "**0 silent wrong answer(s)**" in md
-    assert "**objects left behind:** `['g-1']`" in md
+    assert "**objects left behind (by name and GUID):** `ZZ_X_DELETE_ME (g-1)`" in md
+    assert "**This run ABORTED** (`SystemExit: 1`)" in md
+    assert "`--rebuild` on `2026-10-07` against case file `new`. The live run used `old`" in md
 
 
 def test_repro_rows_keep_only_referenced_columns():
