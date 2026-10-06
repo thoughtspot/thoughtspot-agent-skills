@@ -395,6 +395,12 @@ def test_unmutated_copy_passes(tmp_path):
     # 2. a handler emits a catalogued name its rule never declared
     ("functions_text.py", 'T.call("strlen", tr.text(n.args[0]))',
      'T.call("strpos", tr.expr(n.args[0]))', "does not declare"),
+    # 2b. (review of #574) a rule whose own names are all COERCION_EMITS names: emptying its
+    # emits must still fail — the coercion exemption covers only via=coerce nodes
+    ("rules.py", '"CEILING": {"map": "excel", "emits": ("ceil", "round")}',
+     '"CEILING": {"map": "excel", "emits": ()}', "does not declare"),
+    ("rules.py", '"FLOOR": {"map": "excel", "emits": ("floor", "round")}',
+     '"FLOOR": {"map": "excel", "emits": ("round",)}', "does not declare"),
     # 3. a rule's emits emptied while the handler still emits
     ("rules.py", '"SUM": {"map": "excel", "emits": ("sum",)}',
      '"SUM": {"map": "excel", "emits": ()}', "does not declare"),

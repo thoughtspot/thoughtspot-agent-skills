@@ -63,3 +63,25 @@ def fold(op: str, args: list) -> dict:
 def template(sql: str) -> dict:
     """A ``sql_*_op`` template literal: printed verbatim, double-quoted."""
     return {"node": "lit", "kind": "template", "value": '"' + sql + '"'}
+
+
+def graft(tree: dict, *parts: dict) -> dict:
+    """``tree`` (re-parsed from text that embeds ``parts``) with each subtree that prints as a
+    part replaced by the part itself, so tags on the part's nodes (``via: coerce``) survive a
+    ``formula_common`` text helper."""
+    texts = {T.to_text(p): p for p in parts}
+
+    def sub(node):
+        if not isinstance(node, dict):
+            return node
+        hit = texts.get(T.to_text(node)) if node.get("node") else None
+        if hit is not None:
+            return hit
+        for key, value in list(node.items()):
+            if isinstance(value, dict):
+                node[key] = sub(value)
+            elif isinstance(value, list):
+                node[key] = [sub(v) if isinstance(v, dict) else
+                             [sub(x) for x in v] if isinstance(v, list) else v for v in value]
+        return node
+    return sub(tree)

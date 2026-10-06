@@ -35,12 +35,20 @@ LOCALE_TRAP = ("'{text}' was read {order}, the only order that makes it a real d
                "returns #VALUE! — an ISO date (yyyy-mm-dd) has no such dependence")
 
 
+def _call(fn: str, *args: dict) -> dict:
+    """A call node this module adds, tagged ``via: coerce`` so ``check_mapping_code_sync``
+    can tell a coercion's names (``rules.COERCION_EMITS``) from the handler's own ``emits``."""
+    node = T.call(fn, *args)
+    node["via"] = "coerce"
+    return node
+
+
 def epoch() -> dict:
-    return T.call("to_date", T.lit_string(EPOCH_TEXT), T.lit_string(ISO))
+    return _call("to_date", T.lit_string(EPOCH_TEXT), T.lit_string(ISO))
 
 
 def to_date_literal(text: str, pattern: str = ISO) -> dict:
-    return T.call("to_date", T.lit_string(text), T.lit_string(pattern))
+    return _call("to_date", T.lit_string(text), T.lit_string(pattern))
 
 
 def string_value(node: dict) -> Optional[str]:
@@ -143,8 +151,8 @@ def as_date(tr, node: dict) -> dict:
                           "serial is #NUM!) — no real date to translate it to")
             return to_date_literal(iso)
         tr.trap(SERIAL_NOTE)
-        whole = node if t == "int" else T.call("floor", node)
-        return T.call("add_days", epoch(), whole)
+        whole = node if t == "int" else _call("floor", node)
+        return _call("add_days", epoch(), whole)
     if t == "text":
         tr.review("a text column in a date function: Excel parses it with the workbook's "
                   "locale, which the formula does not say — convert it with to_date ( x , "
@@ -155,7 +163,7 @@ def as_date(tr, node: dict) -> dict:
 def serial(tr, node: dict) -> dict:
     """A date's Excel serial number (exact from 1900-03-01 on)."""
     tr.trap(SERIAL_NOTE)
-    return T.call("diff_days", node, epoch())
+    return _call("diff_days", node, epoch())
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +194,7 @@ def as_number(tr, node: dict) -> dict:
             tr.review(f"the text '{text}' in arithmetic is not a number")
         return number_literal(value)
     tr.trap(TEXT_NUMBER_TRAP, downgrade=True)
-    return T.call("to_double", node)
+    return _call("to_double", node)
 
 
 def number_literal(value) -> dict:
@@ -214,9 +222,9 @@ def as_int(tr, node: dict, signed: bool = False) -> dict:
     if t not in ("double", "number"):
         return node                            # the type checker reports it
     if signed:
-        return T.ifelse(T.binop("<", node, T.lit_number("0")), T.call("ceil", node),
-                        T.call("floor", node))
-    return T.call("floor", node)
+        return T.ifelse(T.binop("<", node, T.lit_number("0")), _call("ceil", node),
+                        _call("floor", node))
+    return _call("floor", node)
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +261,7 @@ def as_text(tr, node: dict, quiet: bool = False) -> dict:
         tr.note("Excel reads a date as its serial number where text is expected (UPPER, LEN, "
                 "LEFT, &…), so the translation does too; for the date's text write TEXT() in "
                 "the sheet")
-        return T.call("to_string", serial(tr, node))
+        return _call("to_string", serial(tr, node))
     if t == "datetime":
         tr.review("a date-time where Excel expects text is its serial number with a time "
                   "fraction; ThoughtSpot's to_string needs a format for a date-time and has no "
@@ -263,7 +271,7 @@ def as_text(tr, node: dict, quiet: bool = False) -> dict:
         return T.lit_string(excel_number_text(tr, value))
     if t in ("double", "number"):
         tr.trap(DOUBLE_TEXT_TRAP, downgrade=True)
-    return T.call("to_string", node)
+    return _call("to_string", node)
 
 
 DOUBLE_TEXT_TRAP = (

@@ -28,6 +28,7 @@ class ExcelResult:
     traps: list = field(default_factory=list)
     role: Optional[str] = None    # MEASURE | ATTRIBUTE when an intended role was applied
     type_needs: list = field(default_factory=list)  # (target, reason, note) — see prompts.py
+    tree: Optional[dict] = None   # the emitted AST (coercion nodes tagged via=coerce)
 
 
 def translate_excel(source: str, ctx, dialect: str = "excel",
@@ -56,7 +57,8 @@ def translate_excel(source: str, ctx, dialect: str = "excel",
             f"type check: {e} — ThoughtSpot rejects this at import (error_code 14516)"
             for e in errors], tr.traps, type_needs=tr.type_needs)
     _record_unknown(tr, unknown)
-    return ExcelResult(to_text(node), tr.status, tr.notes, tr.traps, out_role, tr.type_needs)
+    return ExcelResult(to_text(node), tr.status, tr.notes, tr.traps, out_role, tr.type_needs,
+                       tree=node)
 
 
 TYPED_ARGUMENT = "typed argument"
