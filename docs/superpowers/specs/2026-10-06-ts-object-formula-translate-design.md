@@ -1,7 +1,7 @@
 # ts-object-formula-translate — design
 
 **Date:** 2026-10-06
-**Status:** draft for review (not approved; not implemented)
+**Status:** approved; v1 implemented (2026-10-06 — see §12 for deviations)
 **Branch:** `feat/formula-translate-spec`
 **Depends on:** `fix/round-increment` (BL-331) merged first. The translators this skill
 routes to emit wrong `round` output until then.
@@ -327,3 +327,39 @@ v1 ships moves a large share of map-backed date and text rows from "unprobed" to
 | **v1** | `ts formula translate` over the six existing translators; levels 0–2; `compile`/`execute` validation; Excel/Sigma/Omni map-backed in the skill |
 | **v1.1** | Run OI-1 to OI-4 and update the maps' verification status |
 | **v2** | Codified Excel translator, then Sigma; reverse direction (ThoughtSpot → SQL) via the existing to-Snowflake/to-Databricks emitters |
+
+## 12. Implementation notes (v1, 2026-10-06)
+
+Code: `tools/ts-cli/ts_cli/formula_translate/` (pure: `context`, `refs`, `adapters`, `traps`,
+`engine`, `detect`, `validate`), command `ts_cli/commands/formula.py`, tests
+`tools/ts-cli/tests/test_formula_translate.py`, skill
+`agents/cli/ts-object-formula-translate/`. Deviations from §1–§10, each with its reason:
+
+| # | Deviation | Why |
+|---|---|---|
+| 1 | **`compile` uses `VALIDATE_ONLY` and creates nothing; `execute` alone builds the scratch Model** (and runs the VALIDATE_ONLY check first) | OI-1 verified live: VALIDATE_ONLY parses formulas (truncated expression, unknown function, unknown column, wrong arity all rejected, error_code 14516). §5.1 made this conditional on OI-1. Consequence: `compile` returns no SQL — `verification.sql` comes only from `execute` |
+| 2 | **New dialect `--from thoughtspot`** (identity: resolves references, translates nothing) | §3.3 asks for `--validate compile` on map-backed answers, but every other `--from` would re-translate a hand-composed ThoughtSpot formula. This is the path for Excel / Sigma / Omni validation |
+| 3 | Extra options: `--name`, `--key-column`, `--group-by`, `--context` (Sisense JAQL context), `--role` (Tableau); `--model` accepts an exact name as well as a GUID | Needed by the formula's TML id, the `COUNT(*)` rule, §5.1's one grouping column, Sisense's `context` input, and §5's "GUID or name" |
+| 4 | Output adds `classification`, `traps[]` (separate from `notes[]`), `unresolved[]`, `context_level`, `agentql_wrapper`, `original_kept` / `partial`; `verification` carries `translator` and `tests` | §6 needs each of these as a separate field; `traps` vs `notes` keeps "what changed meaning" apart from translator chatter |
+| 5 | Role inference uses `spotql_ops.classify_expr` (the `classify-columns` logic) plus references to aggregate Model formulas; `formula_common.expr_is_aggregated` is not used for role | §3.2 names both; `classify_expr` is the one that also yields the semi-additive `SUM` wrapper AgentQL needs |
+| 6 | Two dialect-independent repairs: `COUNT(*)` / `count(1)` → `count ( <key> )` (placeholder `[TABLE::<primary key>]`, unresolved at level ≥1 until `--key-column`), and a guard that turns a translator's leftover SQL keyword (`DISTINCT`, `OVER`, …) into `NEEDS_REVIEW` | §6 item 3's `COUNT(*)` trap; the guard caught a real translator gap — `qlik.translate` converts `Count(DISTINCT x)` only as the whole expression, and emitted `count(DISTINCT Customer)` inside a larger one |
+| 7 | Level 0 keeps a source table qualifier (`Sales[Amount]` → `[Sales::Amount]`, still `placeholder: true`); bare names use `TABLE` | The user wrote that table name; discarding it loses information |
+| 8 | Level 2 data types come from the Model's Table TMLs (`export_associated`), best effort | The Model TML carries no data types; DAX date subtraction and Tableau date arithmetic need them |
+| 9 | Exit codes: 0 ran, 1 scratch Model not confirmed deleted (GUIDs on stderr), 2 bad input / preconditions (placeholders or unresolved references block validation) | §5.1 requires non-zero on a failed delete; the rest makes scripting deterministic |
+| 10 | Detection returns `ask[]` (only the tied candidates) and treats Google Sheets and Omni table calc as Excel's twins; weak generic signals (`[Field]`, bare identifier arguments) are scored so that `SUM([Sales])` is a five-way tie, not a pick | §4 "the question lists only the tied candidates" and §8 "assert that the detector returns a tie" |
+| 11 | Trap lines beyond §6's examples: Monday week start (OI-2, BL-334), case-insensitive comparison for Tableau / Snowflake / Databricks sources (OI-4, BL-333), `diff_months` boundaries (OI-3), Tableau `DATEDIFF('week')` → `diff_days / 7` | Probe findings and one translator approximation found while testing; a trap that means the output computes something else (the `/ 7`) downgrades `TRANSLATED` to `APPROXIMATED` so the classification never reads cleaner than the traps |
+| 12 | The function maps carry no per-row verification field, so the skill derives a row's status from its text: *verified live (date)* / *verified via <row>* / *unprobed* / *documentation only* | §6 item 5 "the map row's status" |
+| 13 | Not implemented: the window-partition golden case of §8 | No translator-backed dialect emits a partitioned window from one formula; the trap belongs to the map-backed Sigma/Omni rows, which the skill handles from the map |
+
+**Skill test.** SKILL.md was exercised by a fresh subagent on a three-formula batch (an Excel
+`EXACT`/`ROUND` formula, a five-way tie, a Tableau week difference) and revised from its
+findings: the map-row status rule now ranks "passthrough / composition with no live date for
+that cell" first (it had let `EXACT` read as *verified live* from the probe of `=`), operators
+and Excel cell references are covered by the framing rules, a display name is asked for, role
+guidance for row-level amounts was added, and the `/ 7` downgrade above. A follow-up probe
+settled the one risk it raised: a literal passed as a `sql_bool_op` argument keeps its case.
+
+**OI-5 finding with wider reach:** `sql_number_aggregate_op` is rejected by the formula parser on
+se-thoughtspot; `sql_double_aggregate_op` is accepted. `thoughtspot-formula-patterns.md`, the
+Snowflake mapping, the Ossie map and all three function maps name the former. The skill
+substitutes the latter; the shared references need their own correction.
