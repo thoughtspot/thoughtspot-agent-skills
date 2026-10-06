@@ -688,8 +688,12 @@ Used when ThoughtSpot's native functions don't cover the required expression.
 | `sql_date_time_op(template, args...)` | DATETIME | Datetime dimension (verified 2026-06-15) |
 | `sql_string_aggregate_op(template, args...)` | VARCHAR | String aggregate/metric |
 | `sql_int_aggregate_op(template, args...)` | INTEGER | Integer aggregate/metric |
-| `sql_number_aggregate_op(template, args...)` | NUMBER | Numeric aggregate/metric |
+| `sql_double_aggregate_op(template, args...)` | DOUBLE | Numeric (non-integer) aggregate/metric |
+| `sql_date_aggregate_op(template, args...)` | DATE | Date aggregate/metric |
 | `sql_date_time_aggregate_op(template, args...)` | DATETIME | Datetime aggregate/metric |
+| `sql_bool_aggregate_op(template, args...)` | BOOLEAN | Boolean aggregate/metric |
+
+**There is no `sql_number_aggregate_op`** (nor `sql_number_op`) — the formula parser rejects both ("Formula addition failed"). Verified 2026-10-06 on se-thoughtspot by `VALIDATE_ONLY` import of each name over `MAX({0})`: `sql_double_aggregate_op`, `sql_int_aggregate_op`, `sql_string_aggregate_op`, `sql_date_aggregate_op`, `sql_date_time_aggregate_op` and `sql_bool_aggregate_op` were accepted. Earlier revisions of this file and the mapping docs named `sql_number_aggregate_op`; it was never probed (BL-335).
 
 ```
 # Initcap with replace
