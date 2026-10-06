@@ -221,7 +221,6 @@ are roughly ordered by value÷effort.
 | BL-329 | Audit H angle runs Set discovery through `fetch_consumers`, which exports every Liveboard that uses a Set — Liveboard detail H5 never reads; slow on large estates. Add a lightweight consumers mode | next ts-audit pass |
 | BL-330 | `ts migrate apply --sets-scan FILE` trusts any post-BL-325 scan for any Model — nothing checks the scan covered the mapped Model or the source Org; a scan of another Org (or `scanned.models: 0`) lets `apply` pass an uninspected Model | next ts-migrate pass |
 | BL-332 | Upstream apache/ossie converter maps `ROUND(x, d)` to `round ( x , d )` (copies the digit count; `d = 0` → NULL) — unreachable today, live once multi-arg matching lands; fix PR held for legal review | 2026-11-30 |
-| BL-333 | ThoughtSpot string comparison (`=`, `contains`, `strpos`) is case-insensitive — Snowflake SV / Databricks MV / Tableau / Qlik / Looker translations of case-sensitive comparisons change semantics silently | 2026-11-30 |
 | BL-334 | ~~`DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`~~ (item 1 FIXED, ts-cli 0.156.2 — also Tableau and Qlik weekday numbering); week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
 | BL-335 | `sql_number_aggregate_op` does not exist (parser rejects it; `sql_double_aggregate_op` is the numeric aggregate) — repo docs fixed; upstream apache/ossie converter still emits it, fix held with the Ossie upstream work | 2026-11-30 |
 | ~~BL-338~~ | ~~`ts-object-formula-translate` routes the `google_sheets` dialect to the Excel function map (`formula_translate/detect.py:25`), so Sheets formulas skip the Sheets delta map (REGEXEXTRACT groups, SPLIT defaults, CODE, IFERROR default, QUERY)~~ | DONE (2026-10-06 — ts-cli v0.157.1, skill 1.1.0) |
@@ -12371,7 +12370,7 @@ construct's *class*. `ROUND` is `direct` on both sides, so the emitted form can 
 
 ## BL-333 — ThoughtSpot string comparison is case-insensitive — converters translating case-sensitive source comparisons change semantics silently `Tier 2`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-07). **Decision:** option 1, accept and document (user decision).
 **Source:** live probe on se-thoughtspot, 2026-10-06 (scratch Models, `ts agentql generate-sql` /
 `fetch-data`; Models deleted). Recorded in
 `agents/shared/schemas/thoughtspot-formula-patterns.md` ("String comparison is case-insensitive").
@@ -12419,6 +12418,12 @@ deliberately diverging from upstream.
 
 **Target:** 2026-11-30 (decision + probes); converter changes in the next pass of each affected
 converter.
+
+**Resolution (2026-10-07).**
+- **Decision:** option 1, accept and document.
+- **Probes:** `!=`, `in { }`, the composed `strpos ( … ) = 1` prefix form and ordering `<` are all lowercased, so ordering comparisons change as well. String join keys remain unprobed. Recorded in the formula reference and the probe record.
+- **Documented** in ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, ts-convert-from-tableau, ts-convert-from-qlik, ts-convert-from-looker, and the CoCo ts-convert-from-snowflake-sv mirror.
+- **Unchanged:** the translators still emit native comparisons. `ts-object-formula-translate` still marks them APPROXIMATED. A per-converter opt-in to exact `sql_bool_op` (option 3) is not planned; reopen as a new item if a migration needs it.
 
 ---
 

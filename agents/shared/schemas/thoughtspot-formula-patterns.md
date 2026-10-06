@@ -232,9 +232,18 @@ Excel `FIND`/`EXACT`, Sigma `Contains`) is **not** reproduced by native `=` / `c
 (Snowflake compares case-sensitively under its default collation). Converter impact is
 tracked as BL-333.
 
-**Not tested** (do not assume either way): `!=`, `in { }`, `starts_with`-style compositions
-built on `strpos` (they inherit `strpos`'s lowercasing, but the composed form was not
-probed), and whether join conditions on string keys are lowercased.
+Probed again 2026-10-07 (same method). These are lowercased the same way:
+
+| Formula | Compiled Snowflake SQL | Observed |
+|---|---|---|
+| `[DEPARTMENT] != 'engineering'` | `LOWER(DEPARTMENT) <> 'engineering'` | FALSE for `Engineering` |
+| `[DEPARTMENT] in { 'engineering' , 'sales' }` | `LOWER(DEPARTMENT) IN ( 'engineering', 'sales' )` | TRUE for `Engineering`, `Sales` |
+| `strpos ( [DEPARTMENT] , 'eng' ) = 1` | `POSITION('eng' IN LOWER(DEPARTMENT)) = 1` | TRUE for `Engineering` (prefix test) |
+| `[DEPARTMENT] < 'f'` | `LOWER(DEPARTMENT) < 'f'` | FALSE for `HR`: **ordering changes too**. Case-sensitively `'HR' < 'f'` is TRUE, because uppercase sorts first |
+
+**Still not tested:** whether join conditions on string keys are lowercased.
+
+**Decision (2026-10-07, BL-333): accepted and documented.** Converters keep emitting native `=` / `!=` / `in` / `contains` / `strpos` / ordering comparisons. They do not pass every comparison through, because in typical BI data a case-only difference is noise, and pass-throughs are opaque to ThoughtSpot. Each affected converter documents the change. Where exact case semantics matter for a specific formula, hand-edit it to the `sql_bool_op` form above. `ts-object-formula-translate` still flags these comparisons as APPROXIMATED.
 
 ### Hyperlink Markup
 
