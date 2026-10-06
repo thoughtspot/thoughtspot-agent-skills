@@ -25,7 +25,7 @@ operator-run, not workflow-run.
 | `fidelity/sources.py` | Stdlib readers for LibreOffice `.fods` and Excel `.xlsx`: one formula cell → a scalar case, or a named refusal |
 | `fidelity/literal.py` | Data dir, manifest, materialising cases and the input fixture in memory, the `literal` oracle |
 | `fidelity/redact.py` | What M1 may commit (redacted results, generated report tables) and the leak scanner |
-| `cases/excel/` | `m1-manifest.jsonl` (ids + file + sha256 + locator, no formulas or values) and `m1-selection.json` (counts) |
+| `cases/excel/` | `m1-manifest.jsonl` (ids + file + sha256 + locator, no formulas or values) and `m1-selection.json` (counts); `m1-coverage-manifest.jsonl` / `m1-coverage-selection.json`, the 2026-10-07 coverage pass's fresh selection (the cases it newly translates, at most 15 per leading function) |
 | `cases/snowflake/` | `m0.jsonl` (50 cases) and `fixture-m0.json` (10 edge rows) |
 | `runs/` | Run JSON evidence (raw oracle and ThoughtSpot values, compiled SQL, verdicts) |
 | `tests/` | Pure-function tests. No live calls |
