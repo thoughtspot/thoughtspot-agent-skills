@@ -92,6 +92,9 @@ are roughly ordered by value÷effort.
 | ~~BL-315~~ | ~~from-Databricks: a `range: current` + `offset:` window ordered by a raw date drops the offset silently — prior-year measures return this year's number~~ | DONE (2026-09-28) |
 | BL-322 | from-Databricks period comparisons (`range: current` + `offset:`) were translated to a row-lag that is right only at one grain and silently wrong elsewhere — now skipped by default; the correct date-shifted-join translation is not built | next DBX pass |
 | BL-323 | from-Snowflake window metrics: every framed window except the unbounded running total is mistranslated silently (frame size ignored; RANGE / FOLLOWING / default frames become grand totals), and no translated window can enforce the grain Snowflake requires | next SF formula pass, with BL-242 |
+| BL-340 | `SUBSTR`/`SUBSTRING` copied the 1-based start into zero-based `substr` — every substring shifted one character (Snowflake; Databricks same shape) | next `sv_sql`/`mv_sql` change |
+| BL-341 | Snowflake `DATEDIFF(year, …)` emitted as `diff_days / 365`, not `diff_years` (the mapping doc already says `diff_years`) | next `sv_sql` change |
+| BL-342 | `MONTHS_BETWEEN` → `diff_months` marked TRANSLATED with no trap, though fractional vs boundary count (mapping doc: "Not equivalent") | next `sv_sql`/`mv_sql` change |
 
 ### Tier 2 — Schedule soon
 
@@ -217,6 +220,7 @@ are roughly ordered by value÷effort.
 | BL-334 | ~~`DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`~~ (item 1 FIXED, ts-cli 0.156.2 — also Tableau and Qlik weekday numbering); week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
 | BL-335 | `sql_number_aggregate_op` does not exist (parser rejects it; `sql_double_aggregate_op` is the numeric aggregate) — repo docs fixed; upstream apache/ossie converter still emits it, fix held with the Ossie upstream work | 2026-11-30 |
 | ~~BL-338~~ | ~~`ts-object-formula-translate` routes the `google_sheets` dialect to the Excel function map (`formula_translate/detect.py:25`), so Sheets formulas skip the Sheets delta map (REGEXEXTRACT groups, SPLIT defaults, CODE, IFERROR default, QUERY)~~ | DONE (2026-10-06 — ts-cli v0.157.1, skill 1.1.0) |
+| BL-343 | `TO_CHAR`/`TO_VARCHAR(x, format)` drop the format and emit one-argument `to_string`, rejected on import | with BL-340 |
 
 ### Tier 3 — Opportunistic
 
@@ -12645,3 +12649,100 @@ and adds `null_if` to `REJECTED_LIVE`, so the output guard refuses both. Map row
 emits `nullif`, and its tests assert every output is inside the catalog.
 
 **Target:** this PR.
+
+## BL-340 — `SUBSTR` / `SUBSTRING` copied the 1-based start into ThoughtSpot's zero-based `substr` — every substring is shifted one character `Tier 1`
+
+**Filed:** 2026-10-06. **Status:** OPEN.
+**Source:** formula fidelity harness M0 (`tools/formula-fidelity/`, case `sf-str-004`; report
+`docs/reviews/2026-10-06-fidelity-m0-snowflake.md`). A **silent wrong answer**: TRANSLATED, imports
+cleanly, returns a different string.
+
+**The facts.**
+- Snowflake `SUBSTR(s, start, len)` is 1-based. ThoughtSpot `substr ( s , start , len )` is
+  **zero**-based (`thoughtspot-formula-patterns.md` String Functions, "Zero-indexed start"); the
+  compiled SQL shows it: `substr ( [S1] , 2 , 3 )` → `SUBSTRING(S1, (2 + 1), 3)`.
+- `sv_sql.py` `_RENAME` maps `SUBSTR` and `SUBSTRING` to `substr` as a bare rename, and the Snowflake
+  mapping doc (`ts-snowflake-formula-translation.md` lines 201–202) asserts the identity in both
+  directions.
+- Live, se-thoughtspot 2026-10-06, 8 of 10 fixture rows wrong. Minimal repro: `S1 = 'Apple'`,
+  `SUBSTR(S1, 2, 3)` = `'ppl'` in Snowflake, the translation returns `'ple'`.
+- Same shape, not run live: `databricks/mv_sql.py` maps `SUBSTRING` → `substr` the same way, and
+  `ts-databricks-formula-translation.md:79` has the same identity row. The Qlik `Mid()` instance of
+  this class was fixed earlier with `substr ( s , start - 1 , n )` (BL-171, item 1);
+  Tableau's `MID` already emits `start - 1`.
+
+**Fix.** Emit `substr ( s , start - 1 , len )` from both SQL translators (arithmetic is accepted in
+the start slot), and `SUBSTR(s, start + 1, len)` on the reverse path. Correct both mapping docs'
+rows. Re-run the harness: `sf-str-004` must move to MATCH. Add a translator unit test pinning the
+offset.
+
+**Target:** the next `sv_sql` / `mv_sql` change.
+
+## BL-341 — Snowflake `DATEDIFF(year, …)` is translated to `diff_days / 365`, not `diff_years` — the mapping doc already says `diff_years` `Tier 1`
+
+**Filed:** 2026-10-06. **Status:** OPEN.
+**Source:** formula fidelity harness M0 (case `sf-date-003`). A **silent wrong answer**.
+
+**The facts.**
+- Snowflake `DATEDIFF(year, d1, d2)` counts calendar-year boundaries crossed (Dec 31 → Jan 1 = 1).
+  ThoughtSpot `diff_years ( end , start )` compiles to `EXTRACT(YEAR end) - EXTRACT(YEAR start)`, the
+  same thing, and `ts-snowflake-formula-translation.md:269` already rows it as **Exact**.
+- `sv_sql.py` `_call_datediff` special-cases `YEAR` to `( diff_days ( end , start ) / 365 )`, which is
+  a fractional day count, not a boundary count. `check_mapping_code_sync` cannot see this: both
+  functions exist, so nothing is "disproved".
+- Live, se-thoughtspot 2026-10-06, 7 of 10 rows wrong. Minimal repro: `D1 = 2025-12-31`,
+  `D2 = 2026-01-01`; Snowflake 1, the translation 0.00274. Also 2026-01-31 → 2026-02-01: 0 vs 0.00274.
+
+**Fix.** Map `YEAR` to `diff_years` in `_DATEDIFF_UNIT` and drop the special case. Re-run the harness
+(`sf-date-003` → MATCH). Databricks `datediff(year, …)` is NEEDS_REVIEW today, so it is not affected.
+
+**Target:** the next `sv_sql` change.
+
+## BL-342 — `MONTHS_BETWEEN` is emitted as `diff_months` and marked TRANSLATED, though the mapping doc says the two are not equivalent `Tier 1`
+
+**Filed:** 2026-10-06. **Status:** OPEN.
+**Source:** formula fidelity harness M0 (case `sf-date-010`). A **silent wrong answer**: the status stays
+TRANSLATED, so nothing marks it as approximate.
+
+**The facts.**
+- Snowflake `MONTHS_BETWEEN(d1, d2)` returns a **fractional** month count (31-day months), integral
+  only when both dates are the same day of the month or both month ends
+  ([docs](https://docs.snowflake.com/en/sql-reference/functions/months_between)). `diff_months`
+  counts month boundaries crossed (live-verified 2026-10-06). BL-336 fixed the argument order; the
+  semantic gap stayed, and `ts-snowflake-formula-translation.md:264` documents it as "Not equivalent".
+- `sv_sql.py` renames `MONTHS_BETWEEN` → `diff_months` and the engine reports `TRANSLATED`. Its only
+  notes are the generic `diff_*` traps ("later date first", "diff_months counts boundaries crossed"),
+  the same ones it attaches to `DATEDIFF(month)`, where the translation is exact. The status never
+  drops to APPROXIMATED.
+- Live, se-thoughtspot 2026-10-06, 5 of 10 rows wrong. Minimal repro: `D1 = 2026-01-20`,
+  `D2 = 2026-03-15`; Snowflake `MONTHS_BETWEEN(D2, D1)` = 1.838710, the translation 2. Also
+  2026-10-04 → 2026-10-10: 0.193548 vs 0.
+- Same shape, not run live: Databricks `months_between` → `diff_months` in `mv_sql.py`.
+
+**Fix.** Either (a) mark the translation APPROXIMATED with a specific trap (the minimum), or (b) emit
+a composition that reproduces the fractional value: `diff_months ( d1 , d2 )` plus
+`( day ( d1 ) - day ( d2 ) ) / 31`, with the integral cases (same day, both month ends) left whole.
+Prove (b) with the harness before shipping it; `sf-date-010` is the regression case.
+
+**Target:** the next `sv_sql` / `mv_sql` change.
+
+## BL-343 — `TO_CHAR(x, format)` / `TO_VARCHAR(x, format)` drop the format and emit one-argument `to_string`, which ThoughtSpot rejects `Tier 2`
+
+**Filed:** 2026-10-06. **Status:** OPEN.
+**Source:** formula fidelity harness M0 (case `sf-date-011`). A **loud** failure (import), not a
+silent one, but the translator reports TRANSLATED.
+
+**The facts.**
+- `sv_sql.py` `_TO_STRING_NAMES` sends `TO_CHAR` / `TO_VARCHAR` to `to_string ( x )` and discards any
+  format argument: `TO_CHAR(D1, 'YYYY-MM')` → `to_string ( [D1] )`.
+- Live VALIDATE_ONLY, se-thoughtspot 2026-10-06, on a DATE column: *Function to_string expects 2
+  arguments, found 1* (error_code 14516). `thoughtspot-formula-patterns.md:256` rows `to_string ( [x] )`
+  with one argument; BL-339 separately found `to_string` rejects Text. Its arity per input type is
+  unverified.
+
+**Fix.** A format argument → passthrough `sql_string_op ( "TO_CHAR({0}, 'fmt')" , x )` (what the
+Databricks translator does for `date_format`), flagged as passthrough. Probe `to_string`'s arity on
+DATE, number and boolean inputs and correct the formula reference. Add a harness case per input
+type.
+
+**Target:** with BL-340.

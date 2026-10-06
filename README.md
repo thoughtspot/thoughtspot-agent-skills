@@ -206,7 +206,8 @@ thoughtspot-agent-skills/
     ├── validate/   — Static validators (runtime coverage, consistency)
     ├── fixtures/   — Captured cluster topologies for `ts tenancy` (reference multi-tenancy environment)
     ├── smoke-tests/ — End-to-end smoke tests requiring live credentials
-    └── ossie-roundtrip/ — Round-trips real Models through the Apache Ossie converter (lives upstream)
+    ├── ossie-roundtrip/ — Round-trips real Models through the Apache Ossie converter (lives upstream)
+    └── formula-fidelity/ — Checks translated formulas return the source's values (oracle vs ThoughtSpot, live)
 ```
 
 ---

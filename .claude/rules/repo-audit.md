@@ -181,7 +181,7 @@ those is visible to any validator in this repo, which is the case for the angle 
 | | |
 |---|---|
 | **Cadence** | **Operator-run, not workflow-run.** `.claude/workflows/repo-audit.js` contains no angle-15 finder, so a run invoked as `scope: "full"` does not measure fidelity and cannot say so — the 2026-09-22 sweep reported `scope=full` with angle 15 never executed (finding 18.1). Run it from `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md` by hand. Full-sweep cadence, never the weekly one. It needs a live warehouse, a live cluster and ~100 disposable objects; that cost only earns out at the deliberate on-demand cadence. |
-| **Fixture** | The upstream pattern corpus, staged one schema per pattern (they collide on shared table names — see the study's own amended spec). |
+| **Fixture** | Model level: the upstream pattern corpus, staged one schema per pattern (they collide on shared table names — see the study's own amended spec). Formula level: `tools/formula-fidelity/` (M0 2026-10-06 — 50 Snowflake SQL cases, warehouse as oracle, every case carries an expected value; runbook in its README). |
 | **Method** | Three-stage numeric comparison plus construct-level structural survival. The study's harness was throwaway by design; a rerunnable one is BL-247's neighbourhood, not a prerequisite. |
 
 **Why "qualified".** Three gaps keep this from being an unconditional angle, and closing any of
