@@ -14,6 +14,7 @@ from ts_cli.excel.forward import NEEDS_REVIEW, NeedsReview, Translator, check_a1
 from ts_cli.excel.measure import apply_role
 from ts_cli.excel.parser import ExcelSyntaxError, parse
 from ts_cli.excel.tsast import to_text
+from ts_cli.excel.typecheck import check
 from ts_cli.formula_common import UntranslatableError
 
 ROLES = ("measure", "attribute")
@@ -47,4 +48,30 @@ def translate_excel(source: str, ctx, dialect: str = "excel",
     except (NeedsReview, UntranslatableError) as exc:
         return ExcelResult(None, NEEDS_REVIEW, tr.notes + [str(exc)], tr.traps,
                            type_needs=tr.type_needs)
+    errors, unknown = check(node, tr.column_fine_type)
+    if errors:
+        # The safety net (BL-352..355): ThoughtSpot would reject this at import, so it is
+        # never reported TRANSLATED.
+        return ExcelResult(None, NEEDS_REVIEW, tr.notes + [
+            f"type check: {e} — ThoughtSpot rejects this at import (error_code 14516)"
+            for e in errors], tr.traps, type_needs=tr.type_needs)
+    _record_unknown(tr, unknown)
     return ExcelResult(to_text(node), tr.status, tr.notes, tr.traps, out_role, tr.type_needs)
+
+
+TYPED_ARGUMENT = "typed argument"
+
+
+def _record_unknown(tr: Translator, unknown: list) -> None:
+    """A column of unknown type in a typed slot: the type checker cannot decide, so it asks
+    (``needs_types``) — once per column, and not where a rule already asked."""
+    asked = {target for target, _reason, _note in tr.type_needs}
+    for col, need in unknown:
+        target = to_text(col)
+        if target in asked:
+            continue
+        asked.add(target)
+        note = (f"column type unknown: {target} — the {need}; ThoughtSpot rejects any other "
+                "type at import. Pass data_type in --columns (or --model) to check it")
+        tr.note(note)
+        tr.need_type(col, TYPED_ARGUMENT, note)

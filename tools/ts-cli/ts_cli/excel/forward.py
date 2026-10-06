@@ -93,6 +93,19 @@ class Translator:
     def type_of(self, node: dict) -> Optional[str]:
         return T.type_of(node, self.column_type)
 
+    def column_fine_type(self, node: dict) -> Optional[str]:
+        """A reference's type with int and double kept apart (``typecheck``)."""
+        from ts_cli.excel.typecheck import type_of_data_type
+
+        spec = self.ctx.spec_for_target(T.to_text(node))
+        return type_of_data_type(spec.data_type) if spec else None
+
+    def fine_type(self, node: dict) -> Optional[str]:
+        """``int`` / ``double`` / ``number`` / ``text`` / ``date`` / … of an emitted node."""
+        from ts_cli.excel.typecheck import infer
+
+        return infer(node, self.column_fine_type)
+
     # -- dispatch ----------------------------------------------------------------------
     def expr(self, node) -> dict:
         handler = _NODE_HANDLERS.get(type(node))

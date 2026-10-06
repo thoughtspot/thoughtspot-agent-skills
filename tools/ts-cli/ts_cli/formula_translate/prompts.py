@@ -25,6 +25,7 @@ CONDITION = "condition"
 BLANK_TEST = "blank test"
 BLANK_BRANCH = "blank IF branch"
 DATE_ARITHMETIC = "date arithmetic"
+TYPED_ARGUMENT = "typed argument"   # excel.typecheck: an unknown column in a typed slot
 
 # The name heuristic: (name token, suggested_type, suggested data_type, confidence).
 # Matched against the LAST token of the column name (split on _ / space / -), so
