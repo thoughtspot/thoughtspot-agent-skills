@@ -144,8 +144,8 @@ FORWARD = [
     ("=ROUND([@x],0)", "round ( [TABLE::x] , 1 )"),
     ("=ROUND([@x],-2)", "round ( [TABLE::x] , 100 )"),
     ("=ROUNDUP([@x],2)",
-     "if ( [TABLE::x] >= 0 ) then ceil ( [TABLE::x] * 100 ) / 100 "
-     "else floor ( [TABLE::x] * 100 ) / 100"),
+     "if ( [TABLE::x] >= 0 ) then ceil ( [TABLE::x] * 100 ) * 0.01 "
+     "else floor ( [TABLE::x] * 100 ) * 0.01"),
     ("=ROUNDDOWN([@x],0)", "if ( [TABLE::x] >= 0 ) then floor ( [TABLE::x] ) else ceil ( [TABLE::x] )"),
     ("=ROUNDUP(MONTH([@d])/3,0)", "quarter_number ( [TABLE::d] )"),
     ("=MROUND([@x],5)", "round ( [TABLE::x] , 5 )"),

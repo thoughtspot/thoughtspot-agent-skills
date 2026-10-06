@@ -294,3 +294,28 @@ def test_zero_significance():
     assert f("=CEILING([@amt],2)") == "ceil ( [T::amt] / 2 ) * 2"
     # FLOOR with 0 is #DIV/0! in Excel: no guard, the NULL stands for the error
     assert f("=FLOOR([@amt],[@qty])") == "floor ( [T::amt] / [T::qty] ) * [T::qty]"
+
+
+# ---------------------------------------------------------------------------
+# BL-348: ROUNDUP / ROUNDDOWN beyond 6 digits
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("src,expected", [
+    ("=ROUNDUP([@amt],9)", "if ( [T::amt] >= 0 ) then ceil ( [T::amt] * 1000000000 ) * "
+                           "0.000000001 else floor ( [T::amt] * 1000000000 ) * 0.000000001"),
+    ("=ROUNDDOWN([@amt],1)", "if ( [T::amt] >= 0 ) then floor ( [T::amt] * 10 ) * 0.1 else "
+                             "ceil ( [T::amt] * 10 ) * 0.1"),
+    ("=ROUNDDOWN([@amt],-2)", "if ( [T::amt] >= 0 ) then floor ( [T::amt] / 100 ) * 100 else "
+                              "ceil ( [T::amt] / 100 ) * 100"),
+])
+def test_rounding_multiplies_by_the_increment(src, expected):
+    """No integer division (Snowflake keeps a quotient at scale 6)."""
+    assert f(src) == expected
+
+
+@pytest.mark.parametrize("x,digits,expected", [
+    (3.14159265358979, 10, 3.1415926536), (-3.14159265358979, 10, -3.1415926536),
+    (2.5, 0, 3), (1234.5, -2, 1300),
+])
+def test_roundup_by_value(x, digits, expected):
+    assert ts_eval(f(f"=ROUNDUP({x},{digits})")) == pytest.approx(expected, rel=1e-12)

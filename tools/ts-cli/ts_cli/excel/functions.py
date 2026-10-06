@@ -163,12 +163,19 @@ def _quarter_idiom(node):
 
 
 def _scaled(x: dict, digits: int, inner_fn: str) -> dict:
-    """``fn ( x * F ) / F`` (digits > 0), ``fn ( x )`` (0), ``fn ( x / F ) * F`` (< 0)."""
+    """``fn ( x * F ) * I`` (digits > 0, ``I`` = 1 / ``F``), ``fn ( x )`` (0),
+    ``fn ( x / F ) * F`` (< 0).
+
+    Multiplying by the increment, not dividing by the factor (BL-348): ``ceil ( … ) / F``
+    divides two integers, and Snowflake keeps a division's result at scale 6, so more than
+    6 digits came back cut to 6 (live, se-thoughtspot 2026-10-07: ``/ to_double ( F )`` and
+    ``to_double ( ceil ( … ) ) / F`` are cut the same way; ``* 0.00000000001`` keeps 11)."""
     if digits == 0:
         return T.call(inner_fn, x)
     factor = T.lit_number(sql_digits_to_ts_increment(str(-abs(digits))))
     if digits > 0:
-        return T.binop("/", T.call(inner_fn, T.binop("*", x, factor)), factor)
+        increment = T.lit_number(sql_digits_to_ts_increment(str(digits)))
+        return T.binop("*", T.call(inner_fn, T.binop("*", x, factor)), increment)
     return T.binop("*", T.call(inner_fn, T.binop("/", x, factor)), factor)
 
 
