@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import typer
 
-from ts_cli.commands import aggregate, alias, audit, auth, calendars, connections, databricks, dependency, dependency_apply, groups, link, load, metadata, migrate, model, orgs, parameterize, powerbi, profiles, publish, publish_planning, qlik, security, security_planning, sets, share, share_planning, sisense, snowflake, spotql, spotter, tables, tableau, tenancy, tenancy_export, tml, users, variables  # noqa: F401 -- dependency_apply registers `apply-change` on dependency.app, parameterize registers `parameterize`/`unparameterize` on metadata.app, publish_planning registers `export`/`resolve` on publish.app, share_planning registers `export`/`resolve`/`apply` on share.app, security_planning registers `resolve`/`build`/`apply`/`import` on security.column_rules_app, tenancy_export registers `export` on tenancy.app, migrate registers the `migrate` group, all at import
+from ts_cli.commands import aggregate, alias, audit, auth, calendars, connections, databricks, dependency, dependency_apply, formula, groups, link, load, metadata, migrate, model, orgs, parameterize, powerbi, profiles, publish, publish_planning, qlik, security, security_planning, sets, share, share_planning, sisense, snowflake, spotql, spotter, tables, tableau, tenancy, tenancy_export, tml, users, variables  # noqa: F401 -- dependency_apply registers `apply-change` on dependency.app, parameterize registers `parameterize`/`unparameterize` on metadata.app, publish_planning registers `export`/`resolve` on publish.app, share_planning registers `export`/`resolve`/`apply` on share.app, security_planning registers `resolve`/`build`/`apply`/`import` on security.column_rules_app, tenancy_export registers `export` on tenancy.app, migrate registers the `migrate` group, all at import
 
 app = typer.Typer(
     name="ts",
@@ -18,6 +18,7 @@ app.add_typer(auth.app, name="auth")
 app.add_typer(connections.app, name="connections")
 app.add_typer(databricks.app, name="databricks")
 app.add_typer(dependency.app, name="dependency")
+app.add_typer(formula.app, name="formula")
 app.add_typer(metadata.app, name="metadata")
 app.add_typer(model.app, name="model")
 app.add_typer(orgs.app, name="orgs")

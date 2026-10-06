@@ -4223,3 +4223,74 @@ Behaviour:
 `warnings`, `table_guid`, `model_guid`, `instructions_result`, `coerced`, and `error` on
 failure. Once the Table exists, every later failure (HTTP error, client exit, non-JSON body)
 is reported with `table_guid` on stdout — never an exit that loses it.
+
+---
+
+## `ts formula` — translate one formula from another tool
+
+Used by the `ts-object-formula-translate` skill. Runs the **existing converter
+translators** (wrapped, never forked — BL-217) over a single formula and returns the
+ThoughtSpot formula, its classification, the traps that applied, every column reference,
+and a ready-to-paste TML snippet. Optionally proves ThoughtSpot accepts it. The user's
+Model is never modified.
+
+```bash
+ts formula translate "ROUND(SUM([Sales]) / COUNTD([Customer]), 2)" --from tableau
+echo "DIVIDE(SUM(Sales[Amount]), DISTINCTCOUNT(Sales[Customer]))" | ts formula translate --from dax
+ts formula translate "SUM(amount)" --from snowflake --columns '{"amount": "ORDERS.AMOUNT"}'
+ts formula translate "ROUND(AVG(salary), 0)" --from snowflake -m <model-guid> -p se --validate execute
+ts formula detect "{FIXED [Region] : SUM([Sales])}"
+```
+
+### `ts formula translate [EXPR]`
+
+`EXPR` is the source formula; omit it (or pass `-`) to read stdin.
+
+| Option | Meaning |
+|---|---|
+| `--from`, `-f` | **Required.** `tableau` · `dax` (alias `powerbi`) · `qlik` · `sisense` · `snowflake` · `databricks` · `thoughtspot` (input is already ThoughtSpot syntax — references are resolved, nothing is translated; the way to `--validate` a hand-composed formula) |
+| `--columns`, `-c` | Level 1 context, JSON or `@file`: `{"Sales": "ORDERS.SALES_AMT"}`, `["ORDERS.SALES_AMT"]`, or `[{source, table, column, data_type, column_type, key}]` |
+| `--model`, `-m` | Level 2 context: a Model GUID or exact name. Its TML (and its Tables', for data types) is exported and source names are matched to its columns — exact, then case/space/underscore-insensitive. **A miss is never fuzzy-matched**: it stays a placeholder in `unresolved[]` with close-match `candidates` |
+| `--validate` | `none` (default) · `compile` · `execute` — needs `--model`, see below |
+| `--name`, `-n` | Formula display name (default `Translated Formula`); TML id is `formula_<name>` |
+| `--key-column` | Column to count rows by when the source has `COUNT(*)` (ThoughtSpot has no row count) |
+| `--group-by` | `execute`: the attribute a measure is probed by (default: the Model's first physical attribute) |
+| `--context` | `sisense`: the JAQL context object (`{"[rev]": {"dim": "[Orders.Revenue]", "agg": "sum"}}`), JSON or `@file`. Without it each `[key]` reads as a column named `key` |
+| `--role` | `tableau`: `measure` / `attribute` (default inferred) |
+| `--profile`, `-p` | Profile (or `TS_PROFILE`); only needed with `--model` |
+
+**Output** (stdout JSON): `dialect`, `input`, `formula` (null unless translated), `status`
+(`TRANSLATED` · `APPROXIMATED` · `NEEDS_REVIEW`), `classification` (`direct` ·
+`direct (downgrade)` · `passthrough` · `unmappable`), `role` (`MEASURE`/`ATTRIBUTE`),
+`agentql_wrapper` (`AGG`, or `SUM` for a semi-additive formula), `references[]`
+(`source`, `target`, `placeholder`, plus `kind`/`unresolved`/`candidates` when relevant),
+`unresolved[]`, `context_level`, `traps[]`, `notes[]`, `verification`
+(`translator`, `tests`, and the validation result when run), `tml`. A `NEEDS_REVIEW`
+result carries `original_kept` and, when the translator emitted something, `partial`.
+
+**Validation.** Both tiers work on a scratch copy of the Model's TML — guid dropped,
+renamed `ZZ_FORMULA_PROBE_<UTC timestamp>_DELETE_ME`, the formula and its `columns[]` entry
+appended — and refuse to run while any reference is a placeholder or unresolved.
+
+- `compile` imports the copy with `import_policy: VALIDATE_ONLY`, which parses formula
+  expressions (a truncated expression, unknown function, unknown column and wrong arity
+  are each rejected with error_code 14516) and **creates nothing** (live-verified
+  2026-10-06, open item OI-1). It returns no SQL.
+- `execute` runs the same VALIDATE_ONLY check, then imports the copy as a new Model, runs
+  `ts agentql generate-sql` (→ `verification.sql`) and `fetch-data … LIMIT 5`
+  (→ `verification.rows`), and deletes it in `finally`. Absence is confirmed by GUID and by
+  name. One formula per query: a measure is selected as `AGG("name")` (`SUM` if
+  semi-additive) with one grouping attribute and nothing else.
+
+**Exit codes:** 0 = ran (read `status` / `verification.result`); 1 = the scratch Model could
+not be confirmed deleted — every remaining GUID is printed to stderr with the
+`ts metadata delete` command; 2 = bad input, or validation preconditions not met.
+
+### `ts formula detect [EXPR]`
+
+Scores which language a formula is written in. Output: `{best, guess, ambiguous, ask[],
+candidates[{dialect, score, signals, backing, map?}]}`. `ambiguous` is true when the top two
+are within one point, when nothing matched, and **always** for Excel / Google Sheets / Omni
+table calc and for LookML / Omni (same grammar) — then ask the user to choose among `ask[]`.
+`backing` is `translator` (this command), `map` (`docs/function-maps/`, translated by the
+skill) or `none`.
