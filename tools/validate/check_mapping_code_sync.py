@@ -43,6 +43,17 @@ BL-171 generalised from the two hand-written tests to every converter.
 ``LOCATE -> strpos`` and no Snowflake mapping doc mentions ``LOCATE``, so the CoCo
 runtime — which has only the doc — cannot translate it.
 
+**C — the Excel / Google Sheets translator agrees with its function maps.** (gate)
+``ts_cli/excel/`` has no ``ts-convert-*`` skill, so discovery never finds it; it is checked
+here directly, more strictly than the converters, because its rule table is data
+(``ts_cli/excel/rules.py``, read with ``ast``). For every rule: the map
+(``docs/function-maps/ts-excel-function-mapping.md`` or the Sheets delta map) rows the function;
+every ThoughtSpot name the rule emits appears in that row's text (``CRITERIA_EMITS`` in the
+criteria-string table) and is a catalogued function (the formula reference's table, or the
+vendored ``EXTRAS`` in ``formula_translate/catalog.py``), never a disproved one; and each map's
+*Translator coverage* list names exactly the rule table's keys for that map. Requirement A
+also runs over ``ts_cli/excel/*.py``.
+
 A third requirement was drafted and **cut**: "an emitted name absent from the
 catalog entirely is *unverified*, report it". Measured against the real tree it
 produced **190 findings and no unique true positives** — a translator is full of
@@ -250,6 +261,125 @@ def check_platform(platform: str, code_files: list[Path], doc_text: str,
     return errors, warnings
 
 
+# ---------------------------------------------------------------------------
+# C — the Excel / Sheets translator (no ts-convert-* skill, so not discovered)
+# ---------------------------------------------------------------------------
+
+EXCEL_CODE_REL = "tools/ts-cli/ts_cli/excel"
+EXCEL_RULES_REL = "tools/ts-cli/ts_cli/excel/rules.py"
+VENDORED_CATALOG_REL = "tools/ts-cli/ts_cli/formula_translate/catalog.py"
+EXCEL_MAPS = {"excel": "docs/function-maps/ts-excel-function-mapping.md",
+              "sheets": "docs/function-maps/ts-sheets-function-mapping.md"}
+COVERAGE_START = "<!-- translator-coverage:start -->"
+COVERAGE_END = "<!-- translator-coverage:end -->"
+
+
+def literal_assignments(source: str) -> dict:
+    """Top-level ``NAME = <literal>`` assignments of a module, evaluated with ``ast``."""
+    out = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name):
+            try:
+                out[node.targets[0].id] = ast.literal_eval(node.value)
+            except ValueError:
+                continue
+    return out
+
+
+def map_rows(text: str) -> dict[str, str]:
+    """``NAME`` -> that function row's full line, for every ``| `NAME(…)` |`` row."""
+    rows = {}
+    for line in text.splitlines():
+        m = re.match(r"^\| `([A-Z][A-Z0-9_.]*)\(", line)
+        if m:
+            rows[m.group(1)] = line
+    return rows
+
+
+def coverage_list(text: str):
+    """Backticked names between the coverage markers, or None when the markers are absent."""
+    if COVERAGE_START not in text or COVERAGE_END not in text:
+        return None
+    block = text.split(COVERAGE_START, 1)[1].split(COVERAGE_END, 1)[0]
+    return set(re.findall(r"`([A-Z][A-Z0-9_.]*)`", block))
+
+
+def _mentions(text: str, name: str) -> bool:
+    return re.search(r"(?<![\w])" + re.escape(name) + r"(?![\w])", text) is not None
+
+
+def excel_rule_errors(rules_src: str, maps: dict[str, str], valid: set[str],
+                      nonexistent: set[str], extras: set[str]) -> list[str]:
+    """Requirement C over a rules module's source and the two maps' texts."""
+    data = literal_assignments(rules_src)
+    errors: list[str] = []
+    tables = {"FUNCTION_RULES": data.get("FUNCTION_RULES", {}),
+              "SHEETS_RULES": data.get("SHEETS_RULES", {})}
+    known = valid | extras
+    for table, rules in tables.items():
+        for name, rule in rules.items():
+            key = rule.get("map", "excel")
+            text = maps.get(key, "")
+            row = map_rows(text).get(rule.get("row", name))
+            if row is None:
+                errors.append(f"{table}[{name!r}]: the {key} map has no `{name}(` row — the "
+                              "translator implements a function its map does not row")
+                continue
+            for emitted in rule.get("emits", ()):
+                errors.extend(_emitted_errors(table, name, emitted, row, key, known, nonexistent))
+    criteria = text_between(maps.get("excel", ""), "### Criteria strings", "\n## ")
+    for emitted in data.get("CRITERIA_EMITS", ()):
+        if not _mentions(criteria, emitted):
+            errors.append(f"CRITERIA_EMITS: `{emitted}` does not appear in the Excel map's "
+                          "criteria-string table")
+    for key, keys in (("excel", set(tables["FUNCTION_RULES"])), ("sheets", set(tables["SHEETS_RULES"]))):
+        listed = coverage_list(maps.get(key, ""))
+        if listed is None:
+            errors.append(f"the {key} map has no translator-coverage list ({COVERAGE_START} … "
+                          f"{COVERAGE_END}) naming the rows the translator backs")
+        elif listed != keys:
+            errors.append(f"the {key} map's translator-coverage list disagrees with rules.py: "
+                          f"listed but not translated {sorted(listed - keys)}, translated but "
+                          f"not listed {sorted(keys - listed)}")
+    return errors
+
+
+def _emitted_errors(table, name, emitted, row, key, known, nonexistent) -> list[str]:
+    out = []
+    if emitted in nonexistent:
+        out.append(f"{table}[{name!r}] emits `{emitted}`, which the catalog marks as NOT a "
+                   "ThoughtSpot function")
+    elif emitted not in known and not emitted.startswith("sql_"):
+        out.append(f"{table}[{name!r}] emits `{emitted}`, which is not in the formula catalog")
+    if not _mentions(row, emitted):
+        out.append(f"{table}[{name!r}] emits `{emitted}`, but the {key} map's `{name}` row never "
+                   "mentions it — the code does something its row does not say")
+    return out
+
+
+def text_between(text: str, start: str, end: str) -> str:
+    if start not in text:
+        return ""
+    rest = text.split(start, 1)[1]
+    return rest.split(end, 1)[0] if end in rest else rest
+
+
+def check_excel(root: Path, valid: set[str], nonexistent: set[str]) -> tuple[list, list]:
+    code_dir = root / EXCEL_CODE_REL
+    if not code_dir.is_dir():
+        return [], []
+    maps = {k: (root / v).read_text(encoding="utf-8") if (root / v).exists() else ""
+            for k, v in EXCEL_MAPS.items()}
+    extras = set(literal_assignments(
+        (root / VENDORED_CATALOG_REL).read_text(encoding="utf-8")).get("EXTRAS", {}))
+    errors = excel_rule_errors((root / EXCEL_RULES_REL).read_text(encoding="utf-8"), maps,
+                               valid, nonexistent, extras)
+    e, w = check_platform("excel", sorted(code_dir.glob("*.py")), "\n".join(maps.values()),
+                          valid, nonexistent, root)
+    return errors + e, w
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="Repository root (default: cwd)")
@@ -299,6 +429,10 @@ def main() -> int:
         errors.extend(e)
         warnings.extend(w)
 
+    e, w = check_excel(root, valid, nonexistent)
+    errors.extend(e)
+    warnings.extend(w)
+
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     if args.warnings:
@@ -312,8 +446,9 @@ def main() -> int:
 
     suffix = (f" ({len(warnings)} soft finding(s); re-run with --warnings)"
               if warnings and not args.warnings else "")
-    print(f"PASS  mapping/code sync: {len(platforms)} platform(s) checked, "
-          f"no translator emits a disproved ThoughtSpot function{suffix}.")
+    print(f"PASS  mapping/code sync: {len(platforms)} platform(s) + the Excel/Sheets "
+          f"translator checked, no translator emits a disproved ThoughtSpot function, and "
+          f"every Excel/Sheets rule agrees with its map row{suffix}.")
     return 0
 
 

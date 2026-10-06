@@ -7,7 +7,9 @@ live-verified references; **no row has been import-probed on a ThoughtSpot insta
 holidays, and the inline-holiday term with code 1 (live-verified 2026-10-06 — [probe record §6](../reviews/2026-10-06-formula-semantics-probes.md#6-excel-networkdays-family-per-weekday-counting-form); see
 [Unverified](#unverified)); the semantics of `day_number_of_week`, `diff_months`/`diff_years` and
 string comparison (`=`, `contains`, `strpos`) were settled by compiled-SQL probes on 2026-10-06
-(gaps G11, G12; BL-333) · **Coverage:** 415 functions rowed, one per function, from the
+(gaps G11, G12; BL-333) · **Translator-backed since ts-cli 0.158.0:** the rows listed under
+[Translator coverage](#translator-coverage-ts-formula-translate---from-excel) are applied as code by
+`ts formula translate --from excel` (BL-339) · **Coverage:** 415 functions rowed, one per function, from the
 in-scope categories of Microsoft's
 [Excel functions (by category)](https://support.microsoft.com/en-us/office/excel-functions-by-category-5f91f4e9-7b42-46d2-9bd1-63f26a86c0eb)
 page as rendered on 2026-10-06, plus 109 out-of-scope functions counted but not rowed ·
@@ -87,7 +89,7 @@ operand — a column, a literal or a runtime parameter — in the position the E
     by row in a Model — the same pairing for columns of one table, and only through a
     row-for-row join otherwise. Excel skips a pair if either value is non-numeric; for nullable
     columns, wrap each aggregate in its `*_if` form under
-    `isnotnull ( [x] ) and isnotnull ( [y] )`.
+    `not ( isnull ( [x] ) ) and not ( isnull ( [y] ) )`.
 
   A **two-dimensional** range (`B2:D100` as one argument) has no single-column reading; it is
   either a list of columns (as in `BYROW`) or it is unmappable.
@@ -210,7 +212,7 @@ Applies to every `*IF` / `*IFS` / `D*` row ([**E11**](#how-to-read-the-tables)).
 | `"*es*"` | `contains ( [T::x] , 'es' )` | Case-insensitive, matching Excel (`LOWER(x) LIKE '%es%'`, live-verified 2026-10-06). |
 | `"?est"`, `"W*t"` | `sql_bool_op ( "{0} ILIKE '_est'" , [T::x] )` | **Variant: `sql_bool_op`.** Interior wildcards and `?` have no native form. `~*` / `~?` escape a literal wildcard. |
 | `"="` or `""` (blank) | `isnull ( [T::x] )` | With `COUNTIF`, count a non-null key: `count_if ( isnull ( [T::x] ) , [T::key] )` — counting `[T::x]` itself returns 0. |
-| `"<>"` (non-blank) | `isnotnull ( [T::x] )` | |
+| `"<>"` (non-blank) | `not ( isnull ( [T::x] ) )` | |
 | `">"&C1` (cell reference) | `[T::x] > [Threshold]` | The referenced cell is an input — a runtime **parameter** — or another column. A parameter keeps the formula native but makes it untranslatable onward to static SQL. |
 | `">="&DATE(2024,1,1)` | `[T::x] >= to_date ( '2024-01-01' , 'yyyy-MM-dd' )` | Date criteria per [**E9**](#how-to-read-the-tables). |
 | `{"a","b"}` (array constant, summed) | `[T::x] in { 'a' , 'b' }` | The `SUM(SUMIFS(…, {"a","b"}))` OR-idiom. **Curly braces** (BL-170), and `>-` block-scalar YAML. |
@@ -310,7 +312,7 @@ Source: the *Math and trigonometry functions* list of Microsoft's category page.
 | `ROMAN(number, [form])` | **unmappable** | — | As `ARABIC`. |
 | `ROUND(number, num_digits)` | direct | `round ( [x] , 0.01 )` for `num_digits = 2`; `round ( [x] , 1 )` for 0; `round ( [x] , 100 )` for −2 | **The second argument is an increment, not a digit count** ([**E12**](#how-to-read-the-tables), live-probed on se-thoughtspot 2026-10-06) — `num_digits = n` becomes the literal `10^-n`. **`round ( [x] , 0 )` returns NULL**, not the integer rounding (the increment 0 hits `NULLIF(n, 0)`), so zero digits must be emitted as `1`. An integer increment yields INT64, a fractional one DOUBLE. Excel rounds halves **away from zero** (`ROUND(-2.5, 0) = -3`); ThoughtSpot's compiled `n * ROUND(x / n)` inherits Snowflake `ROUND`, which is half-away-from-zero for exact `NUMBER` but can land either side of a half on a `FLOAT` column. A **non-literal** `num_digits` cannot be folded to an increment and falls back to `sql_double_op ( "ROUND({0}, {1})" , [x] , [d] )` ([**E3**](#how-to-read-the-tables)). |
 | `ROUNDDOWN(number, num_digits)` | direct | `if ( [x] >= 0 ) then floor ( [x] * 100 ) / 100 else ceil ( [x] * 100 ) / 100` | Toward zero; `100` is `10^num_digits` folded (here 2 digits). Exact up to floating-point representation of the scaled value. |
-| `ROUNDUP(number, num_digits)` | direct | `if ( [x] >= 0 ) then ceil ( [x] * 100 ) / 100 else floor ( [x] * 100 ) / 100` | Away from zero; mirror of `ROUNDDOWN`. |
+| `ROUNDUP(number, num_digits)` | direct | `if ( [x] >= 0 ) then ceil ( [x] * 100 ) / 100 else floor ( [x] * 100 ) / 100` | Away from zero; mirror of `ROUNDDOWN`. **Idiom:** `ROUNDUP(MONTH(d)/3, 0)` is the calendar quarter number, `quarter_number ( [d] )` — which follows the Model's calendar, so a fiscal calendar shifts it (a trap, not a downgrade). |
 | `SEC(x)` | direct | `1 / cos ( [x] * 180 / 3.14159265358979 )` |  |
 | `SECH(x)` | direct | `2 / ( exp ( [x] ) + exp ( -1 * [x] ) )` |  |
 | `SERIESSUM(x, n, m, coefficients)` | **unmappable** | — | The coefficients argument is a positional cell array whose *order* is the exponent ([**E6**](#how-to-read-the-tables)). With literal coefficients the series expands to native `pow` arithmetic, which a converter can emit, but the function as written in a sheet references a range. |
@@ -325,7 +327,7 @@ Source: the *Math and trigonometry functions* list of Microsoft's category page.
 | `SUMIFS(sum_range, criteria_range1, criteria1, ...)` | direct | `sum_if ( [T::region] = 'West' and [T::d] >= to_date ( '2024-01-01' , 'yyyy-MM-dd' ) , [T::amount] )` | Criteria pairs are ANDed. Note the argument order differs from `SUMIF` (`sum_range` first). OR-logic idioms (`SUM(SUMIFS(..., {"a","b"}))`) become `in { 'a' , 'b' }`. |
 | `SUMPRODUCT(array1, [array2], ...)` | direct | `sum ( [T::x] * [T::y] )` | Excel pairs arrays by **position**; the Model pairs columns by **row**, which is the same thing for columns of one table ([**E5**](#how-to-read-the-tables)). The boolean-coercion idiom `SUMPRODUCT(--(A=x), B)` is a conditional sum: `sum_if ( [T::a] = 'x' , [T::b] )` ([**E10**](#how-to-read-the-tables)). Columns from two *different* tables pair only if a join relates them row-for-row. |
 | `SUMSQ(number1, ...)` | direct | `sum ( [x] * [x] )` |  |
-| `SUMX2MY2(array_x, array_y)` | direct | `sum ( [x] * [x] - [y] * [y] )` | Same-row pairing as `SUMPRODUCT`; Excel skips pairs where either value is non-numeric, so wrap in `sum_if ( isnotnull ( [x] ) and isnotnull ( [y] ) , … )` for nullable columns ([**E5**](#how-to-read-the-tables)). |
+| `SUMX2MY2(array_x, array_y)` | direct | `sum ( [x] * [x] - [y] * [y] )` | Same-row pairing as `SUMPRODUCT`; Excel skips pairs where either value is non-numeric, so wrap in `sum_if ( not ( isnull ( [x] ) ) and not ( isnull ( [y] ) ) , … )` for nullable columns ([**E5**](#how-to-read-the-tables)). |
 | `SUMX2PY2(array_x, array_y)` | direct | `sum ( [x] * [x] + [y] * [y] )` | As `SUMX2MY2`. |
 | `SUMXMY2(array_x, array_y)` | direct | `sum ( pow ( [x] - [y] , 2 ) )` | As `SUMX2MY2`. |
 | `TAN(x)` | direct | `tan ( [x] * 180 / 3.14159265358979 )` | Degrees, as `COS`. |
@@ -352,7 +354,7 @@ rowed here.
 |---|---|---|---|
 | `AVEDEV(number1, ...)` | direct | `average ( abs ( [x] - group_aggregate ( average ( [x] ) , query_groups ( ) , query_filters ( ) ) ) )` | Mean absolute deviation needs the mean at the query grain *inside* the row-level expression, which is what `group_aggregate ( … , query_groups ( ) , … )` supplies. *Unverified* composition — a `group_aggregate` inside a row-level expression inside an aggregate is the shape of the formula reference's weighted-average pattern, but this exact formula has not been import-probed. |
 | `AVERAGE(number1, ...)` | direct | range: `average ( [x] )`; arguments: `( [a] + [b] ) / 2` | Both sides ignore blanks/NULLs in a range. Row-wise, Excel's `AVERAGE(B2, C2)` skips a blank argument (dividing by 1); the arithmetic form does not — guard with `ifnull` and a count of non-null arguments when that matters ([**E7**](#how-to-read-the-tables)). |
-| `AVERAGEA(value1, ...)` | direct | numeric column: `average ( [x] )`; boolean column: `average_if ( isnotnull ( [b] ) , if ( [b] ) then 1 else 0 )` | **`AVERAGEA` counts text as 0 and `TRUE` as 1**; `AVERAGE` skips both. In a Model a column has one type ([**E15**](#how-to-read-the-tables)), so the difference collapses to the column's type: identical to `AVERAGE` on a numeric column, a 0/1 average on a boolean column, and **0** on a text column (every non-blank value counts as 0). Blanks are skipped by both. |
+| `AVERAGEA(value1, ...)` | direct | numeric column: `average ( [x] )`; boolean column: `average_if ( not ( isnull ( [b] ) ) , if ( [b] ) then 1 else 0 )` | **`AVERAGEA` counts text as 0 and `TRUE` as 1**; `AVERAGE` skips both. In a Model a column has one type ([**E15**](#how-to-read-the-tables)), so the difference collapses to the column's type: identical to `AVERAGE` on a numeric column, a 0/1 average on a boolean column, and **0** on a text column (every non-blank value counts as 0). Blanks are skipped by both. |
 | `AVERAGEIF(range, criteria, [average_range])` | direct | `average_if ( [T::range] > 5 , [T::avg_range] )` | Criteria per [**E11**](#how-to-read-the-tables). |
 | `AVERAGEIFS(average_range, criteria_range1, criteria1, ...)` | direct | `average_if ( c1 and c2 , [T::avg_range] )` | Criteria pairs ANDed, as `SUMIFS`. |
 | `BETA.DIST(x, alpha, beta, cumulative, [A], [B])` | **unmappable** | — | Classified on the CDF form ([**E17**](#statistical)). No incomplete beta function natively or in Snowflake. |
@@ -367,7 +369,7 @@ rowed here.
 | `CHISQ.TEST(actual_range, expected_range)` | **unmappable** | — | The statistic itself is native (`sum ( pow ( [obs] - [exp] , 2 ) / [exp] )`), but the function returns the *p-value*, which needs the chi-square CDF. |
 | `CONFIDENCE.NORM(alpha, standard_dev, size)` | direct | `1.95996398454005 * stddev ( [x] ) / sqrt ( count ( [x] ) )` | For a **literal** `alpha` the normal quantile is a constant the converter computes at conversion time (shown for `alpha = 0.05`) ([**E3**](#how-to-read-the-tables)). A column- or parameter-driven `alpha` needs `NORM.S.INV` and is unmappable. |
 | `CONFIDENCE.T(alpha, standard_dev, size)` | **unmappable** | — | The t quantile depends on `size − 1` degrees of freedom, which is data-dependent, so it cannot be folded to a constant as `CONFIDENCE.NORM` can. |
-| `CORREL(array1, array2)` | direct | `( sum ( [x] * [y] ) - sum ( [x] ) * sum ( [y] ) / count ( [x] ) ) / ( ( count ( [x] ) - 1 ) * stddev ( [x] ) * stddev ( [y] ) )` | Sample covariance over the product of sample standard deviations — an algebraic identity in native aggregates (the *n − 1* factors cancel to Pearson's *r*). Exact when `x` and `y` are non-null on the same rows; otherwise every aggregate must be the `*_if` form under `isnotnull ( [x] ) and isnotnull ( [y] )`, which is how Excel pairs ([**E5**](#how-to-read-the-tables)). Fallback when the pairing guard is unwieldy: `sql_double_aggregate_op ( "CORR({0}, {1})" , [x] , [y] )`. **Verification:** hand-derived and arithmetic-checked only — **not** import-probed and **not** result-checked against Excel on a live instance. |
+| `CORREL(array1, array2)` | direct | `( sum ( [x] * [y] ) - sum ( [x] ) * sum ( [y] ) / count ( [x] ) ) / ( ( count ( [x] ) - 1 ) * stddev ( [x] ) * stddev ( [y] ) )` | Sample covariance over the product of sample standard deviations — an algebraic identity in native aggregates (the *n − 1* factors cancel to Pearson's *r*). Exact when `x` and `y` are non-null on the same rows; otherwise every aggregate must be the `*_if` form under `not ( isnull ( [x] ) ) and not ( isnull ( [y] ) )`, which is how Excel pairs ([**E5**](#how-to-read-the-tables)). Fallback when the pairing guard is unwieldy: `sql_double_aggregate_op ( "CORR({0}, {1})" , [x] , [y] )`. **Verification:** hand-derived and arithmetic-checked only — **not** import-probed and **not** result-checked against Excel on a live instance. |
 | `COUNT(value1, ...)` | direct | `count ( [x] )` | Excel `COUNT` counts **numbers only**; on a numeric Model column that is `count` of non-null values. On a text column Excel returns 0 — the converter should emit the literal `0` and an issue rather than `count` ([**E15**](#how-to-read-the-tables)). |
 | `COUNTA(value1, ...)` | direct | `count ( [x] )` | Counts non-empty cells of any type. **A formula returning `""` is non-empty to `COUNTA`**; the warehouse equivalent of `""` is an empty string, which `count` also counts, so the two agree — but a column that stores blanks as `''` rather than NULL is counted in full by both, which is usually not what the sheet author meant. |
 | `COUNTBLANK(range)` | direct | `count_if ( isnull ( [x] ) or [x] = '' , [T::key] )` | Counts empty cells **and** cells holding `""`. On a non-text column drop the `= ''` branch. `count_if` counts the non-null values of its **second** argument where the condition holds, so pointing it at a non-null key counts the rows where `[x]` is NULL; `sum ( if ( isnull ( [x] ) ) then 1 else 0 )` is equivalent. |
@@ -480,7 +482,7 @@ here. ThoughtSpot's native string functions are `concat`, `substr` (0-based), `l
 | `CHAR(number)` | passthrough | `sql_string_op ( "CHR({0})" , [n] )` | **Variant: `sql_string_op`.** As the Tableau map's `CHAR` row. Excel `CHAR` uses the platform code page (Windows-1252 on Windows) while `CHR` takes a Unicode code point, so codes 128–159 differ; 1–127 agree. |
 | `CLEAN(text)` | passthrough | `sql_string_op ( "REGEXP_REPLACE({0}, '[[:cntrl:]]', '')" , [s] )` | **Variant: `sql_string_op`.** Excel removes code points 0–31 only; the POSIX `[:cntrl:]` class also removes 127. *Unverified:* POSIX bracket classes in Snowflake's regex dialect. |
 | `CODE(text)` | passthrough | `sql_int_op ( "ASCII({0})" , [s] )` | **Variant: `sql_int_op`.** First character's code, as the Tableau map's `ASCII` row; code-page caveat as `CHAR`. |
-| `CONCAT(text1, ...)` | direct | `concat ( [a] , [b] , ... )` | **`+` does not concatenate in ThoughtSpot**, so `&` lands here too. Classified on the dominant use — joining cells of one row ([**E7**](#how-to-read-the-tables)). `CONCAT(A2:A100)` over a column is string aggregation and falls back to the `TEXTJOIN` pass-through with an empty delimiter ([**E3**](#how-to-read-the-tables)). **NULL trap:** Excel treats a blank as `""`; warehouse `CONCAT` returns NULL if any argument is NULL, so wrap nullable operands in `ifnull ( [a] , '' )` ([**E10**](#how-to-read-the-tables)). |
+| `CONCAT(text1, ...)` | direct | `concat ( [a] , [b] , ... )` | **`+` does not concatenate in ThoughtSpot**, so `&` lands here too. Classified on the dominant use — joining cells of one row ([**E7**](#how-to-read-the-tables)). `CONCAT(A2:A100)` over a column is string aggregation and falls back to the `TEXTJOIN` pass-through with an empty delimiter ([**E3**](#how-to-read-the-tables)). **NULL trap:** Excel treats a blank as `""`; warehouse `CONCAT` returns NULL if any argument is NULL, so wrap nullable operands in `ifnull ( [a] , '' )` ([**E10**](#how-to-read-the-tables)). **Every `concat` argument must be Text** (live-verified 2026-10-06, [probe record §7](../reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)): a number is rejected (*"concat expects 2nd argument to be Text"*), so wrap it in `to_string ( [n] )` — and only it: `to_string` rejects a Text argument. `concat` takes N arguments, so a `&` chain is one flat `concat`. |
 | `CONCATENATE(text1, ...)` | direct | `concat ( [a] , [b] , ... )` | As `CONCAT`, without range support. Also in Compatibility; rowed here. |
 | `DBCS(text)` | **unmappable** | — | Half-width → full-width; as `ASC`. |
 | `DETECTLANGUAGE(text)` | **unmappable** | — | AI language detection. No native function and no single Snowflake function returns a language code. |
@@ -634,7 +636,7 @@ Source: the *Logical functions* list. `LET`, `LAMBDA`, `BYCOL`, `BYROW`, `MAKEAR
 |---|---|---|---|
 | `AND(logical1, ...)` | direct | `[a] and [b]` | Lower-case infix. `AND` over a **range** ("every row is true") is an aggregate: `count_if ( not ( [c] ) , [T::key] ) = 0` ([**E5**](#how-to-read-the-tables)). |
 | `FALSE()` | direct | `false` |  |
-| `IF(logical_test, [value_if_true], [value_if_false])` | direct | `if ( cond ) then a else b` | **Parentheses around the condition are mandatory** for TML import. Excel's omitted `value_if_false` returns `FALSE`; ThoughtSpot requires a **type-matched** `else` (`else 0`, `else ''`) — formula reference and the Ossie map's `CASE` row. |
+| `IF(logical_test, [value_if_true], [value_if_false])` | direct | `if ( cond ) then a else b` | **Parentheses around the condition are mandatory** for TML import. Excel's omitted `value_if_false` returns `FALSE`; ThoughtSpot requires a **type-matched** `else` (`else 0`, `else ''`) — formula reference and the Ossie map's `CASE` row. **`IF(b = 0, 0, a / b)` is exactly `safe_divide ( [a] , [b] )`** (it compiles to `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` — [probe record §7](../reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)); the translator maps it so, and `--to excel` writes `safe_divide` that way. A `""` branch beside a numeric one must become `null` — ThoughtSpot rejects mixed branch types (*Expecting a Numeric token*), and `null` is accepted in either branch (§7). |
 | `IFERROR(value, value_if_error)` | direct | divide: `if ( [b] = 0 ) then [fallback] else [a] / [b]`; otherwise `ifnull ( expr , [fallback] )` | **ThoughtSpot has no error values** ([**E8**](#how-to-read-the-tables)). Each Excel error has a different fate: `#DIV/0!` becomes NULL under a plain `/` ([probe record §7](../reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)) — `IFERROR(a/b, 0)` is `safe_divide ( [a] , [b] )`, which returns 0 — **except when `b` is NULL**: Excel reads a blank divisor as 0, raises `#DIV/0!` and returns the fallback, while `safe_divide` with a NULL divisor returns NULL (live-probed 2026-10-06, [probe record §7](../reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)), so use `safe_divide ( [a] , ifnull ( [b] , 0 ) )` where the column is nullable; a lookup miss (`#N/A`) is a NULL from an outer join; a failed conversion is a NULL from `to_double` / `to_integer` / `to_date`. All NULL-shaped failures are caught by `ifnull`. An error class that the warehouse raises (an invalid regex in a pass-through) cannot be caught at all. **Fallback `""`** (`IFERROR(a/b, "")`, the usual "leave the cell blank"): there is no blank text in a numeric formula, so the `ts formula translate --from excel` translator emits `safe_divide ( [a] , [b] )` and reports it **APPROXIMATED** — a zero divisor shows 0 where Excel showed a blank; write `IFERROR(…, 0)` in the sheet for exact parity, or `if ( [b] = 0 ) then null else [a] / [b]` for a NULL. Translator-backed (BL-339). |
 | `IFNA(value, value_if_na)` | direct | `ifnull ( [LOOKUP::col] , [fallback] )` | `#N/A` is a lookup miss; the lookup becomes a join ([**E13**](#how-to-read-the-tables)) and a miss is NULL on the joined side. |
 | `IFS(logical_test1, value_if_true1, ...)` | direct | `if ( c1 ) then v1 else if ( c2 ) then v2 else d` | Excel returns `#N/A` when no test is true; ThoughtSpot needs a synthesised, type-matched final `else`. The idiom `IFS(…, TRUE, d)` is that `else`. |
@@ -666,7 +668,7 @@ category inspects *cells* — their type, formula, sheet or error state — and 
 | `ISLOGICAL(value)` | direct | `true` / `false` by the column's type | Type tests resolve statically ([**E15**](#how-to-read-the-tables)). |
 | `ISNA(value)` | direct | `isnull ( [LOOKUP::col] )` | As `IFNA`: the lookup is a join and `#N/A` is a NULL on the joined side. |
 | `ISNONTEXT(value)` | direct | `true` / `false` by the column's type | Also TRUE for a blank cell, so on a text column the row-level form is `isnull ( [s] )` rather than the constant `false`. |
-| `ISNUMBER(value)` | direct | `true` / `false` by type; `ISNUMBER(VALUE(s))` → `isnotnull ( to_double ( [s] ) )` | Statically resolved on a typed column ([**E15**](#how-to-read-the-tables)). Its two common *idioms* are not type tests at all: `ISNUMBER(FIND(x, s))` / `ISNUMBER(SEARCH(x, s))` is a containment test (`strpos ( [s] , 'x' ) > 0`, or `contains ( [s] , 'x' )`), and `ISNUMBER(VALUE(s))` is a parse test, which `to_double`'s null-on-failure makes native ([**E8**](#how-to-read-the-tables)). |
+| `ISNUMBER(value)` | direct | `true` / `false` by type; `ISNUMBER(VALUE(s))` → `not ( isnull ( to_double ( [s] ) ) )` | Statically resolved on a typed column ([**E15**](#how-to-read-the-tables)). Its two common *idioms* are not type tests at all: `ISNUMBER(FIND(x, s))` / `ISNUMBER(SEARCH(x, s))` is a containment test (`strpos ( [s] , 'x' ) > 0`, or `contains ( [s] , 'x' )`), and `ISNUMBER(VALUE(s))` is a parse test, which `to_double`'s null-on-failure makes native ([**E8**](#how-to-read-the-tables)). |
 | `ISODD(number)` | direct | `mod ( floor ( abs ( [x] ) ) , 2 ) = 1` | As `ISEVEN`. |
 | `ISREF(value)` | **unmappable** | — | Tests whether an argument is a reference; nothing is a reference in a Model. |
 | `ISTEXT(value)` | direct | `true` / `false` by the column's type | As `ISLOGICAL`. |
@@ -861,6 +863,29 @@ discount arithmetic, which is native, and coupon-schedule or root-finding algori
 
 ---
 
+## Translator coverage (`ts formula translate --from excel`)
+
+Since ts-cli 0.158.0 (BL-339) the rows below are **translator-backed**: `ts_cli/excel/` parses the
+formula (structured references, A1 cells and ranges, array constants, dotted names) and applies
+each row's rule as code — `ts_cli/excel/rules.py` names the row and every ThoughtSpot function the
+rule emits, and `tools/validate/check_mapping_code_sync.py` fails if a rule emits a name its row
+does not mention, a disproved or uncatalogued name, or if this list and the rule table disagree.
+The criteria-string table is translator-backed for the `*IF` / `*IFS` rows. With `--role measure`,
+a formula over row-level `[@Col]` references is built at the right grain: additive expressions as
+the sum of each column, ratios as a ratio of totals `safe_divide ( sum ( n ) , sum ( d ) )`, a
+numeric flag row-level (its column aggregation totals it). Acceptance: a 60-formula workbook,
+every output VALIDATE_ONLY-clean on se-thoughtspot (2026-10-06,
+`tools/ts-cli/tests/fixtures/excel_regression/`).
+
+Every other row is **map-backed**: the translator returns NEEDS_REVIEW citing the row, and the
+`ts-object-formula-translate` skill composes the answer from it, labelled hand-composed.
+
+<!-- translator-coverage:start -->
+`ABS` `AND` `AVERAGE` `AVERAGEIF` `AVERAGEIFS` `CEILING` `CEILING.MATH` `CONCAT` `CONCATENATE` `COUNT` `COUNTA` `COUNTIF` `COUNTIFS` `DATEDIF` `DAY` `DAYS` `EDATE` `EOMONTH` `EXACT` `EXP` `FALSE` `FIND` `FLOOR` `IF` `IFERROR` `IFS` `INT` `ISBLANK` `ISNUMBER` `LEFT` `LEN` `LN` `LOG10` `LOWER` `MAX` `MAXIFS` `MEDIAN` `MID` `MIN` `MINIFS` `MOD` `MONTH` `MROUND` `NETWORKDAYS` `NETWORKDAYS.INTL` `NOT` `NOW` `OR` `POWER` `RIGHT` `ROUND` `ROUNDDOWN` `ROUNDUP` `SEARCH` `SIGN` `SQRT` `STDEV.S` `SUBSTITUTE` `SUM` `SUMIF` `SUMIFS` `SWITCH` `TEXTJOIN` `TODAY` `TRIM` `TRUE` `UPPER` `VALUE` `VAR.S` `WEEKDAY` `YEAR`
+<!-- translator-coverage:end -->
+
+---
+
 ## Out of scope (counted, not rowed)
 
 | Category | Functions | Why out of scope |
@@ -923,7 +948,11 @@ input cell needs the literal baked in, or a native form.
 
 ## Reverse direction (ThoughtSpot → Excel)
 
-Brief, because nothing converts Models *into* workbooks; this is what an Excel user rebuilding a
+`ts formula translate '<formula>' --from thoughtspot --to excel [--table Table1]` (ts-cli 0.158.0,
+`ts_cli/excel/to_excel.py`) does this deterministically for one formula: row-level references
+become `[@Col]`, references inside an aggregate `Table1[Col]`, and a construct with no Excel form
+(window functions, `rank`, `sql_*_op`, a `query_groups ( )` grain) comes back NEEDS_REVIEW with
+the reason. The table below is the design reference it follows, and what an Excel user rebuilding a
 ThoughtSpot Model's logic in a sheet would reach for, and where they could not.
 
 | ThoughtSpot | Nearest Excel | Disposition |
@@ -936,7 +965,7 @@ ThoughtSpot Model's logic in a sheet would reach for, and where they could not.
 | `rank_percentile ( agg , 'asc' )` | `(1 - PERCENTRANK.INC(range, x)) * 100` | composable |
 | `last_value` / `first_value` (semi-additive) | `LOOKUP(2, 1/(A:A=key), B:B)` "last match" idiom | partial — a sheet has no roll-up rule, so a snapshot measure summed in a pivot is silently wrong there too |
 | `unique count ( [x] )` / `unique_count_if` | `COUNTA(UNIQUE(range))` / `COUNTA(UNIQUE(FILTER(…)))` | composable |
-| `safe_divide ( [a] , [b] )` | `IFERROR(a/b, 0)` | composable — note the zero |
+| `safe_divide ( [a] , [b] )` | `IF(b=0, 0, a/b)` | exact — `IFERROR(a/b, 0)` also swallows every other error; `ts formula translate --from thoughtspot --to excel` writes the `IF` form |
 | `start_of_week` / `start_of_quarter` / `start_of_year` | `A2 - WEEKDAY(A2, 2) + 1`, `DATE(YEAR(A2), …)` | composable — the `WEEKDAY(A2, 2)` form assumes the Model calendar's default Monday week start |
 | `is_weekend ( [d] )` | `WEEKDAY(A2, 2) > 5` | composable |
 | `year ( [d] , fiscal )` and the `fiscal` family | `YEAR(EDATE(A2, 12 - start_month + 1))` style shifts | partial — a sheet has no fiscal-calendar object; each formula hand-encodes the offset |

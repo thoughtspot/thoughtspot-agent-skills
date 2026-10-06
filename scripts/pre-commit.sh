@@ -263,7 +263,7 @@ fi
 # Triggered by the UNION of both sides' patterns, because either side can drift alone:
 # the translator Python, the mapping docs, the catalog itself, a converter skill (scope
 # is discovered from agents/cli/ts-convert-*), or this validator.
-if echo "$STAGED" | grep -qE '(tools/ts-cli/ts_cli/|agents/shared/(mappings/|schemas/thoughtspot-formula-patterns\.md)|agents/cli/ts-convert-|tools/validate/check_mapping_code_sync\.py)'; then
+if echo "$STAGED" | grep -qE '(tools/ts-cli/ts_cli/|agents/shared/(mappings/|schemas/thoughtspot-formula-patterns\.md)|agents/cli/ts-convert-|docs/function-maps/ts-(excel|sheets)-function-mapping\.md|tools/validate/check_mapping_code_sync\.py)'; then
   run_check "mapping/code sync"   "tools/validate/check_mapping_code_sync.py --root $REPO_ROOT"
 fi
 

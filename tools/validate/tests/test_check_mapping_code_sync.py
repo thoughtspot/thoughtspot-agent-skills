@@ -166,3 +166,92 @@ def test_real_repo_passes(tmp_path):
     repo_root = Path(__file__).resolve().parents[3]
     r = _run(repo_root)
     assert r.returncode == 0, r.stderr
+
+
+# ---------------------------------------------------------------------------
+# Requirement C — the Excel / Sheets translator's rule table vs its maps (BL-339)
+# ---------------------------------------------------------------------------
+
+_EXCEL_MAP = """# Excel map
+
+### Criteria strings
+
+| `"*es*"` | `contains ( [T::x] , 'es' )` | |
+
+## Math
+
+| `SUM(number1, ...)` | direct | range: `sum ( [x] )` | |
+| `ABS(x)` | direct | `abs ( [x] )` | |
+
+<!-- translator-coverage:start -->
+`ABS` `SUM`
+<!-- translator-coverage:end -->
+"""
+_SHEETS_MAP = """# Sheets map
+
+| `QUERY(data, query)` | structural | an Answer | |
+
+<!-- translator-coverage:start -->
+`QUERY`
+<!-- translator-coverage:end -->
+"""
+
+
+def _rules(function_rules: str, sheets_rules: str = '{"QUERY": {"map": "sheets", "emits": ()}}',
+           criteria: str = '("contains",)') -> str:
+    return (f"FUNCTION_RULES = {function_rules}\nSHEETS_RULES = {sheets_rules}\n"
+            f"CRITERIA_EMITS = {criteria}\n")
+
+
+def _c_errors(rules_src, excel_map=_EXCEL_MAP, sheets_map=_SHEETS_MAP):
+    import check_mapping_code_sync as m
+    return m.excel_rule_errors(rules_src, {"excel": excel_map, "sheets": sheets_map},
+                               valid={"sum", "abs", "contains"}, nonexistent={"nullif"},
+                               extras=set())
+
+
+_OK_RULES = ('{"SUM": {"map": "excel", "emits": ("sum",)}, '
+             '"ABS": {"map": "excel", "emits": ("abs",)}}')
+
+
+def test_excel_rules_agreeing_with_their_rows_pass():
+    assert _c_errors(_rules(_OK_RULES)) == []
+
+
+def test_excel_rule_emitting_a_name_its_row_does_not_say_fails():
+    errs = _c_errors(_rules('{"SUM": {"map": "excel", "emits": ("sum", "abs")}, '
+                            '"ABS": {"map": "excel", "emits": ("abs",)}}'))
+    assert any("`SUM` row never mentions it" in e for e in errs)
+
+
+def test_excel_rule_emitting_a_disproved_name_fails():
+    errs = _c_errors(_rules('{"SUM": {"map": "excel", "emits": ("nullif",)}, '
+                            '"ABS": {"map": "excel", "emits": ("abs",)}}'))
+    assert any("NOT a ThoughtSpot function" in e for e in errs)
+
+
+def test_excel_rule_for_an_unrowed_function_fails():
+    errs = _c_errors(_rules(_OK_RULES[:-1] + ', "VLOOKUP": {"map": "excel", "emits": ()}}'))
+    assert any("no `VLOOKUP(` row" in e for e in errs)
+
+
+def test_coverage_list_must_equal_the_rule_keys():
+    errs = _c_errors(_rules('{"SUM": {"map": "excel", "emits": ("sum",)}}'))
+    assert any("listed but not translated ['ABS']" in e for e in errs)
+    no_list = _EXCEL_MAP.split("<!-- translator-coverage:start -->")[0]
+    assert any("no translator-coverage list" in e for e in _c_errors(_rules(_OK_RULES), no_list))
+
+
+def test_criteria_emits_checked_against_the_criteria_table():
+    errs = _c_errors(_rules(_OK_RULES, criteria='("contains", "strpos")'))
+    assert any("CRITERIA_EMITS: `strpos`" in e for e in errs)
+
+
+def test_real_repo_passes_requirement_c():
+    """The shipped rule table and the shipped maps agree (the gate the CI runs)."""
+    import check_mapping_code_sync as m
+    from check_formula_catalog import parse_catalog
+    root = Path(__file__).resolve().parents[3]
+    valid, nonexistent = parse_catalog((root / m.CATALOG_REL).read_text(encoding="utf-8"))
+    errors, _warnings = m.check_excel(root, valid, nonexistent)
+    assert errors == []
