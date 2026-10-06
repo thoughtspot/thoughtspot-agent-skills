@@ -30,6 +30,11 @@ SERIAL_NOTE = ("Excel's serial numbers: the translation counts days from 1899-12
                "1900 and differ by one day")
 
 
+LOCALE_TRAP = ("'{text}' was read {order}, the only order that makes it a real date; Excel "
+               "reads a slashed date in the workbook's locale, and in the other locale it "
+               "returns #VALUE! — an ISO date (yyyy-mm-dd) has no such dependence")
+
+
 def epoch() -> dict:
     return T.call("to_date", T.lit_string(EPOCH_TEXT), T.lit_string(ISO))
 
@@ -116,12 +121,14 @@ def as_date(tr, node: dict) -> dict:
         pattern, why = date_pattern(text)
         if pattern is None:
             tr.review(f"a text date in a date function: {why}")
-        year = int(re.match(r"\D*(\d+)\D+(\d+)\D+(\d+)", text.strip()).group(
-            1 if pattern.startswith("%Y") else 3))
-        if year < 1900:
+        when = _dt.datetime.strptime(text.strip(), pattern).date()
+        if when.year < 1900:
             tr.review(f"'{text}' is before 1900: Excel does not read it as a date (#VALUE!)")
-        if text.strip()[:10] < "1900-03-01" and pattern.startswith("%Y"):
+        if when < _dt.date(1900, 3, 1):
             tr.trap(SERIAL_NOTE)
+        if pattern.startswith(("%d", "%m")):
+            tr.trap(LOCALE_TRAP.format(text=text, order="day first" if pattern.startswith("%d")
+                                       else "month first"), downgrade=True)
         if "%H" in pattern:
             tr.note(f"'{text}' has a time of day; to_date keeps the date, which is all this "
                     "date function reads")

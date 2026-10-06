@@ -80,9 +80,6 @@ def review(src):
     ('=YEAR("2015-02-11")', "year ( to_date ( '2015-02-11' , '%Y-%m-%d' ) )"),
     ('=EDATE("1999-06-30",2)', "add_months ( to_date ( '1999-06-30' , '%Y-%m-%d' ) , 2 )"),
     ('=DAY("2004/02/29")', "day ( to_date ( '2004/02/29' , '%Y/%m/%d' ) )"),
-    ('=MONTH("25/12/2020")', "month_number ( to_date ( '25/12/2020' , '%d/%m/%Y' ) )"),
-    ('=MONTH("12/25/2020")', "month_number ( to_date ( '12/25/2020' , '%m/%d/%Y' ) )"),
-    ('=MONTH("07/07/2020")', "month_number ( to_date ( '07/07/2020' , '%m/%d/%Y' ) )"),
     ('=DAY("2010-05-06T07:08:09")',
      "day ( to_date ( '2010-05-06T07:08:09' , '%Y-%m-%dT%H:%M:%S' ) )"),
     ('=DAYS("2000-01-10",[@day])',
@@ -490,3 +487,30 @@ def test_isnumber_and_iferror_of_value_use_try_to_double():
         'sql_bool_op ( "TRY_TO_DOUBLE({0}) IS NOT NULL" , [T::name] )')
     assert f("=IFERROR(VALUE([@name]),0)") == (
         'ifnull ( sql_double_op ( "TRY_TO_DOUBLE({0})" , [T::name] ) , 0 )')
+
+
+# ---------------------------------------------------------------------------
+# Review fix 5: a slashed text date depends on the workbook's locale
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("src,expected", [
+    ('=MONTH("25/12/2020")', "month_number ( to_date ( '25/12/2020' , '%d/%m/%Y' ) )"),
+    ('=MONTH("12/25/2020")', "month_number ( to_date ( '12/25/2020' , '%m/%d/%Y' ) )"),
+    ('=MONTH("07/07/2020")', "month_number ( to_date ( '07/07/2020' , '%m/%d/%Y' ) )"),
+])
+def test_slashed_date_is_approximated_with_a_locale_trap(src, expected):
+    r = ok(src)
+    assert r.expr == expected and r.status == "APPROXIMATED"
+    assert any("locale" in t and "#VALUE!" in t for t in r.traps)
+
+
+def test_iso_date_stays_translated():
+    r = ok('=YEAR("2015-02-11")')
+    assert r.status == "TRANSLATED" and not any("locale" in t for t in r.traps)
+
+
+def test_pre_1900_check_reads_the_date_not_the_string():
+    assert "before 1900" in review('=DAY("31/12/1899")')       # day-first, year last
+    r = ok('=DAY("1900-02-15")')                                 # real, but Excel's serial bug
+    assert any("1899-12-30" in t for t in r.traps)
+    assert not any("1899-12-30" in t for t in ok('=DAY("1900-03-01")').traps)
