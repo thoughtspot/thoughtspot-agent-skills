@@ -145,20 +145,20 @@ spaces around parentheses and commas are the canonical form. Sigma's own referen
 | Math functions | 39 | 36 | 3 | 0 | 0 |
 | Passthrough functions | 12 | 0 | 7 | 5 | 0 |
 | System functions | 6 | 2 | 0 | 3 | 1 |
-| Text functions | 32 | 12 | 20 | 0 | 0 |
+| Text functions | 32 | 8 | 24 | 0 | 0 |
 | Type functions | 6 | 3 | 1 | 2 | 0 |
 | Window functions | 31 | 14 (12 downgrade) | 16 | 0 | 1 |
-| **Function index subtotal** | **234** | **130** (12 downgrade) | **71** | **29** | **4** |
+| **Function index subtotal** | **234** | **126** (12 downgrade) | **75** | **29** | **4** |
 | Operators and constructs | 24 | 22 | 1 | 0 | 1 |
-| **Total** | **258** | **152** (12 downgrade) | **72** | **29** | **5** |
+| **Total** | **258** | **148** (12 downgrade) | **76** | **29** | **5** |
 
-59% of the inventory (152/258; 56% of the function index alone) is expressible in
+57% of the inventory (148/258; 54% of the function index alone) is expressible in
 ThoughtSpot's native formula language — **of which 12 are `direct (downgrade)`** window rows
 (Cumulative/Moving Sum/Avg/Min/Max, `Lag`, `Lead`, `First`, `Last`), native in shape but
 faithful only under [**E6**](#how-to-read-the-tables)'s precondition. Without them the
-strictly faithful native share is 54% (140/258). The `passthrough` set concentrates in four places —
-**case and whitespace string editing plus regular expressions** (20 of 32 Text rows: no native
-`upper`/`lower`/`trim`/`replace`/regex in ThoughtSpot), **windowed statistics with no native
+strictly faithful native share is 53% (136/258). The `passthrough` set concentrates in four places —
+**case and whitespace string editing, regular expressions and case-sensitive matching** (24 of 32 Text rows: no native
+`upper`/`lower`/`trim`/`replace`/regex in ThoughtSpot, and — since the 2026-10-06 probe — native `contains`/`strpos`/`=` are case-insensitive, so Sigma's case-sensitive `Contains`/`StartsWith`/`EndsWith`/`Find`/`Like` pass through; BL-333), **windowed statistics with no native
 ordered form** (`Cumulative`/`Moving` `Count`/`StdDev`/`Variance`/`Corr`, dense rank, row
 number, `Nth`, `FillDown`), **percentiles and string aggregation**, and **sub-day date
 parts and timezone conversion**. 24 of the 29 `unmappable` rows are one cause, not
@@ -261,7 +261,7 @@ per-unit rewrite is always static.
 | `BusinessDays(start, end)` | passthrough | `sql_int_op ( "{db}.{schema}.get_business_days_clamped({0}, {1}, TRUE)" , [start] , [end] )` | not translated | **Variant: `sql_int_op`.** No native weekday-only difference. The repo's `ts-recipe-formula-business-days-snowflake` skill deploys the UDF; its weekend-clamping and endpoint-inclusion rules must be checked against Sigma's ("excluding Saturdays and Sundays") before relying on equality. |
 | `ConvertTimezone(d, to, from)` | passthrough | `sql_date_time_op ( "CONVERT_TIMEZONE('UTC', 'America/New_York', {0})" , [d] )` | not translated | **Variant: `sql_date_time_op`.** Zones baked in ([**E11**](#how-to-read-the-tables)). |
 | `DateAdd(unit, n, d)` | direct | per-unit `add_*` — see the arithmetic table | **not translated** — upstream reads the unit from the *third* argument (`:581-587`); Sigma puts it first, so `_date_part_unit` rejects every documented call | **Argument order:** Sigma `(unit, n, d)` → ThoughtSpot `add_days ( [d] , n )`. Sigma truncates a fractional `n`; wrap a non-literal `n` in `floor ( )` for positive values (sign rule as `Trunc`). Month overflow clamps to month-end in Sigma; ThoughtSpot `add_months` clamping is not verified — flagged. |
-| `DateDiff(unit, start, end)` | direct | per-unit `diff_*` — see the arithmetic table | **not translated** — same leading-unit defect (`:583-587`) | **Argument order reverses:** ThoughtSpot is `diff_days ( [end] , [start] )`. Sigma documents the result as "rounded to the nearest integer"; whether that means boundary-crossing (as Snowflake `DATEDIFF`) or rounded elapsed time is not stated, and ThoughtSpot's `diff_months`/`diff_years` counting rule is not recorded in the formula reference either — **flagged for a live comparison**. `"millisecond"` → `sql_int_op ( "DATEDIFF('millisecond', {0}, {1})" , [start] , [end] )`. |
+| `DateDiff(unit, start, end)` | direct | per-unit `diff_*` — see the arithmetic table | **not translated** — same leading-unit defect (`:583-587`) | **Argument order reverses:** ThoughtSpot is `diff_days ( [end] , [start] )`. Sigma documents the result as "rounded to the nearest integer"; whether that means boundary-crossing (as Snowflake `DATEDIFF`) or rounded elapsed time is not stated on the reference page (re-read 2026-10-06). **ThoughtSpot's side is now settled** (V3): `diff_months` counts month boundaries crossed (`DATEDIFF(month, epoch, end) - DATEDIFF(month, epoch, start)`: Jan 31 → Feb 1 = 1) and `diff_years` is `EXTRACT(YEAR FROM end) - EXTRACT(YEAR FROM start)` (Dec 31 → Jan 1 = 1) — formula reference, live-verified 2026-10-06. If Sigma pushes down warehouse `DATEDIFF` (boundary-counting on Snowflake), these are exact; if it rounds elapsed time, month/year differences need a correction — still flagged on the Sigma side only. `"millisecond"` → `sql_int_op ( "DATEDIFF('millisecond', {0}, {1})" , [start] , [end] )`. |
 | `DateFormat(d, fmt)` | passthrough | `sql_string_op ( "TO_CHAR({0}, 'YYYY-MM')" , [d] )` | not translated | **Variant: `sql_string_op`.** Sigma uses `strftime` `%`-codes; Snowflake's `TO_CHAR` uses its own model, so tokens are translated into the template (`%Y`→`YYYY`, `%m`→`MM`, `%d`→`DD`, `%B`→`MMMM`, `%a`→`DY` (abbreviated name; Snowflake's `TO_CHAR` has no full-weekday token, so `%A` uses the native below), `%H`→`HH24`, `%M`→`MI`, `%S`→`SS`, `%p`→`AM`). Single-token formats have natives and are preferred: `"%Y"` → `year_name ( [d] )`, `"%B"` → `month ( [d] )`, `"%A"` → `day_of_week ( [d] )` (Ossie map, `TO_CHAR`). |
 | `DateFromUnix(n)` | passthrough | `sql_date_time_op ( "TO_TIMESTAMP({0})" , [n] )` | not translated | **Variant: `sql_date_time_op`.** A native composition `add_seconds ( to_date ( '1970-01-01' , 'yyyy-MM-dd' ) , [n] )` is plausible but `add_seconds` on a DATE operand is unverified. |
 | `DateFromUnixMs(n)` | passthrough | `sql_date_time_op ( "TO_TIMESTAMP({0}, 3)" , [n] )` | not translated | **Variant: `sql_date_time_op`.** |
@@ -276,7 +276,7 @@ per-unit rewrite is always static.
 | `Hour(d)` | direct | `hour_of_day ( [d] )` | `EXTRACT(HOUR FROM d)` (`:357`) | Not `hour`, which does not exist (Power BI map, BL-171). |
 | `InDateRange(d, dir, unit, n, offset, today)` | direct | `"current"`: `start_of_month ( [d] ) = start_of_month ( today ( ) )`; `"last"`, `n`: `[d] >= add_months ( start_of_month ( today ( ) ) , - n ) and [d] < start_of_month ( today ( ) )` | not translated | Per `unit` the `start_of_*` / `add_*` pair changes; `"to_date"` is `[d] >= start_of_year ( today ( ) ) and [d] <= today ( )`. Whether Sigma's `"last"` excludes the current period is not stated on the reference page — the composition assumes it does (flagged). Sub-day units fall back to `sql_bool_op` ([**E3**](#how-to-read-the-tables)). |
 | `InPriorDateRange(d, range, prior, n, today)` | direct | `("month", "year")`: `start_of_month ( [d] ) = start_of_month ( add_years ( today ( ) , - 1 ) )` | not translated | The current `range` bucket shifted back `n` `prior` periods. Sub-day `range` units fall back to `sql_bool_op` ([**E3**](#how-to-read-the-tables)). |
-| `LastDay(d, precision)` | direct | `"month"`: `add_days ( start_of_month ( add_months ( [d] , 1 ) ) , -1 )`; `"quarter"`/`"year"`/`"week"` analogously from `start_of_quarter`/`start_of_year`/`start_of_week` | not translated | Sigma returns the **last instant** (23:59:59) of the period as a timestamp; the composition returns the last *date*. Equal for date-grain comparisons; for a timestamp result use `sql_date_time_op ( "DATEADD('second', -1, DATEADD('month', 1, DATE_TRUNC('month', {0})))" , [d] )`. `"week"` depends on the week-start setting (truncation table). |
+| `LastDay(d, precision)` | direct | `"month"`: `add_days ( start_of_month ( add_months ( [d] , 1 ) ) , -1 )`; `"quarter"`/`"year"`/`"week"` analogously from `start_of_quarter`/`start_of_year`/`start_of_week` | not translated | Sigma returns the **last instant** (23:59:59) of the period as a timestamp; the composition returns the last *date*. Equal for date-grain comparisons; for a timestamp result use `sql_date_time_op ( "DATEADD('second', -1, DATEADD('month', 1, DATE_TRUNC('month', {0})))" , [d] )`. `"week"` uses the Sunday-start composition from the truncation table. The `"week"` form assumes the Model calendar's Monday week start (Gregorian, Monday-first when nothing else is set — ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere. |
 | `MakeDate(y, m, d)` | passthrough | `sql_date_op ( "DATE_FROM_PARTS({0}, {1}, {2})" , [y] , [m] , [d] )` | not translated | **Variant: `sql_date_op`.** A native `to_date ( concat ( to_string ( [y] ) , '-' , to_string ( [m] ) , '-' , to_string ( [d] ) ) , '%Y-%m-%d' )` depends on `to_date` accepting un-padded month/day — unverified. |
 | `Minute(d)` | passthrough | `sql_int_op ( "MINUTE({0})" , [d] )` | `EXTRACT(MINUTE FROM d)` (`:358`) | **Variant: `sql_int_op`.** No native minute extractor (Ossie map; Power BI map). |
 | `Month(d)` | direct | `month_number ( [d] )` | `EXTRACT(MONTH FROM d)` (`:355`) | **Not `month ( )`**, which returns the name. |
@@ -285,7 +285,7 @@ per-unit rewrite is always static.
 | `Quarter(d)` | direct | `quarter_number ( [d] )` | `EXTRACT(QUARTER FROM d)` (`:360`) | |
 | `Second(d)` | passthrough | `sql_int_op ( "SECOND({0})" , [d] )` | `EXTRACT(SECOND FROM d)` (`:359`) | **Variant: `sql_int_op`.** |
 | `Today()` | direct | `today ( )` | `CURRENT_DATE` (`:572-573`) | Timezone caveat as `Now`. |
-| `Weekday(d, tz)` | direct | `mod ( day_number_of_week ( [d] ) , 7 ) + 1` | not translated; upstream's `dayofweek` key (`:362`) is not a Sigma function and would emit `EXTRACT(DOW …)`, which is 0-based | **Base shift.** Sigma numbers 1 = Sunday … 7 = Saturday; ThoughtSpot `day_number_of_week` is 1 = Monday … 7 = Sunday. `mod ( 7 , 7 ) + 1 = 1` maps Sunday correctly. |
+| `Weekday(d, tz)` | direct | `mod ( day_number_of_week ( [d] ) , 7 ) + 1` | not translated; upstream's `dayofweek` key (`:362`) is not a Sigma function and would emit `EXTRACT(DOW …)`, which is 0-based | **Base shift.** Sigma numbers 1 = Sunday … 7 = Saturday; ThoughtSpot `day_number_of_week` is **fixed** 1 = Monday … 7 = Sunday — it compiles to `(MOD((DATEDIFF(day, DATE '1970-01-01', d) + 3), 7) + 1)`, independent of the warehouse's `WEEK_START` (formula reference, live-verified 2026-10-06). `mod ( 7 , 7 ) + 1 = 1` maps Sunday correctly. A `tz` argument forces a pass-through ([**E11**](#how-to-read-the-tables)). The composition assumes the Model calendar's Monday week start (Gregorian, Monday-first when nothing else is set — ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere. |
 | `WeekdayName(d)` | direct | `day_of_week ( [d] )` | not translated | Full day name; locale-dependent. |
 | `Year(d)` | direct | `year ( [d] )` | `EXTRACT(YEAR FROM d)` (`:354`) | |
 
@@ -296,9 +296,9 @@ per-unit rewrite is always static.
 | `"year"` | `year ( [d] )` | direct |
 | `"quarter"` | `quarter_number ( [d] )` | direct |
 | `"month"` | `month_number ( [d] )` | direct |
-| `"week"` | `week_number_of_year ( [d] )` | direct — week-numbering rule (ISO vs first-Sunday) not stated by either side; flagged |
+| `"week"` | `week_number_of_year ( [d] )` | direct — ThoughtSpot's compiled SQL uses ISO-style Thursday logic (`week_number_of_year(2026-01-04)` = 1, live-verified 2026-10-06); Sigma's rule is not stated — flagged |
 | `"day"` | `day ( [d] )` | direct |
-| `"weekday"` | `mod ( day_number_of_week ( [d] ) , 7 ) + 1` | direct — Sunday-based, as `Weekday` |
+| `"weekday"` | `mod ( day_number_of_week ( [d] ) , 7 ) + 1` | direct — Sunday-based, as `Weekday` (fixed Monday base live-verified 2026-10-06); assumes the Model calendar's Monday week start (Gregorian, Monday-first when nothing else is set — ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere |
 | `"day_of_year"` | `day_number_of_year ( [d] )` | direct |
 | `"hour"` | `hour_of_day ( [d] )` | direct |
 | `"minute"` | `sql_int_op ( "MINUTE({0})" , [d] )` | passthrough |
@@ -313,8 +313,8 @@ per-unit rewrite is always static.
 | `"year"` | `start_of_year ( [d] )` | direct |
 | `"quarter"` | `start_of_quarter ( [d] )` | direct |
 | `"month"` | `start_of_month ( [d] )` | direct |
-| `"week"` | `start_of_week ( [d] )` | direct — **Sigma defaults to Sunday-start**; ThoughtSpot's week start is an instance setting, so the converter verifies alignment and raises an issue when it cannot |
-| `"week_starting_sunday"` / `"week_starting_monday"` | `start_of_week ( [d] )` | direct — same verification; the explicit variant tells the converter which start to check for |
+| `"week"` | `add_days ( start_of_week ( add_days ( [d] , 1 ) ) , -1 )` | direct — **Sigma defaults to Sunday-start.** The one-day shift turns the Model calendar's Monday-start truncation into a Sunday-start one; it assumes the Model calendar's Monday week start (Gregorian, Monday-first when nothing else is set — ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere. Formula translations do not pass a calendar argument — the Model supplies the calendar. Residual caveat: the default form compiled to Snowflake `DATE_TRUNC(week, d)`, which is Monday only while `WEEK_START` is 0 or 1 (BL-334) |
+| `"week_starting_sunday"` / `"week_starting_monday"` | Sunday: as `"week"`; Monday: `start_of_week ( [d] )` | direct — both assumes the Model calendar's Monday week start (Gregorian, Monday-first when nothing else is set — ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere (BL-334 residual caveat applies). An explicit week-start setting in the source is a note for the Model's calendar, not a formula change |
 | `"day"` | `date ( [d] )` | direct |
 | `"hour"` | `start_of_hour ( [d] )` | direct |
 | `"minute"` | `start_of_min ( [d] )` | direct — `start_of_min`, not `start_of_minute` |
@@ -514,18 +514,23 @@ time — ThoughtSpot's system variables are the analogue (formula reference, *Sy
 
 Source: Sigma function index, "Text Functions". Only `concat`, `substr`, `left`, `right`,
 `strlen`, `strpos` and `contains` are native ThoughtSpot string functions (formula
-reference, BL-170) — which is why this is the densest pass-through section.
+reference, BL-170) — which is why this is the densest pass-through section. **And the
+native ones compare case-insensitively** (`contains`, `strpos` and `=` compile to `LOWER(…)`,
+literals lowercased; live-verified 2026-10-06 on se-thoughtspot, BL-333), so every Sigma text
+test documented as case-sensitive is a `passthrough` to the warehouse function, which is
+case-sensitive under Snowflake's default collation. The native forms remain correct on
+case-consistent data.
 
 | Sigma | Class | ThoughtSpot | Via Ossie | Notes |
 |---|---|---|---|---|
 | `Concat(a, b, …)` | direct | `concat ( [a] , [b] , … )` | `a \|\| b` (`:559-560`) | `+` never concatenates in ThoughtSpot. |
-| `Contains(s, sub)` | direct | `contains ( [s] , [sub] )` | `s LIKE '%' \|\| sub \|\| '%'` (`:562-564`) | **Second-hop loss:** the generated pattern is a concatenation, not a literal, so the Ossie map's `LIKE` row (which recognises `'%foo%'` literals) falls back to `sql_bool_op`, and a `%` or `_` inside `sub` becomes a wildcard. Case-sensitivity: Sigma's `Contains` is case-sensitive by implication (`Find` and `Like` pages say so); ThoughtSpot `contains` case behaviour is not recorded in the formula reference — flagged. |
-| `EndsWith(s, suf)` | direct | `( substr ( [s] , strlen ( [s] ) - strlen ( [suf] ) , strlen ( [suf] ) ) = [suf] )` | `s LIKE '%' \|\| suf` (`:567-568`) | No native `ends_with` (BL-170). Outer parens load-bearing (Snowflake formula mapping). Same second-hop loss as `Contains`. |
-| `Find(s, sub)` | direct | `strpos ( [s] , [sub] )` | not translated | 1-based, 0 when absent, haystack first — identical contract (Tableau map `FIND`). |
-| `ILike(s, pattern)` | passthrough | `sql_bool_op ( "{0} ILIKE {1}" , [s] , [pattern] )` | not translated | **Variant: `sql_bool_op`.** No case-insensitive matching natively (Ossie map). |
+| `Contains(s, sub)` | passthrough | `sql_bool_op ( "CONTAINS({0}, {1})" , [s] , [sub] )` | `s LIKE '%' \|\| sub \|\| '%'` (`:562-564`) | **Variant: `sql_bool_op`. Reclassified from `direct` 2026-10-06.** Sigma documents Contains as case-sensitive ("Arguments are case sensitive", reference page); ThoughtSpot string comparison is case-insensitive — `contains`, `strpos` and `=` compile to `LOWER(…)` with literals lowercased at compile time (formula reference, *String comparison is case-insensitive*, live-verified 2026-10-06 on se-thoughtspot; BL-333), so native `contains ( [s] , [sub] )` matches `Engineering` for `'eng'`. Snowflake `CONTAINS` is case-sensitive under the default collation, so the pass-through is exact. The native form is acceptable only where the data's case is consistent. **Second-hop loss:** the generated pattern is a concatenation, not a literal, so the Ossie map's `LIKE` row (which recognises `'%foo%'` literals) falls back to `sql_bool_op`, and a `%` or `_` inside `sub` becomes a wildcard. |
+| `EndsWith(s, suf)` | passthrough | `sql_bool_op ( "ENDSWITH({0}, {1})" , [s] , [suf] )` | `s LIKE '%' \|\| suf` (`:567-568`) | **Variant: `sql_bool_op`. Reclassified from `direct` 2026-10-06.** Sigma: "EndsWith is case-sensitive" (reference page). The native composition `( substr ( [s] , strlen ( [s] ) - strlen ( [suf] ) , strlen ( [suf] ) ) = [suf] )` ends in `=`, which ThoughtSpot lowercases (BL-333) — the composed form itself was not probed. Snowflake `ENDSWITH` is case-sensitive under the default collation. Native composition acceptable only on case-consistent data (no native `ends_with`, BL-170). Same second-hop loss as `Contains`. |
+| `Find(s, sub)` | passthrough | `sql_int_op ( "POSITION({1} IN {0})" , [s] , [sub] )` | not translated | **Variant: `sql_int_op`. Reclassified from `direct` 2026-10-06.** Sigma's `Find` is case-sensitive (reference page); ThoughtSpot `strpos` compiles to `POSITION('sub' IN LOWER(s))` (BL-333, live-verified 2026-10-06), so the native `strpos ( [s] , [sub] )` — otherwise the identical contract: 1-based, 0 when absent, haystack first (Tableau map `FIND`) — is exact only on case-consistent data. Snowflake `POSITION` without `LOWER` is case-sensitive under the default collation. |
+| `ILike(s, pattern)` | direct | `'%foo%'` → `contains ( [s] , 'foo' )`; `'foo%'` → `( strpos ( [s] , 'foo' ) = 1 )` | not translated | **Reclassified from `passthrough` 2026-10-06.** ThoughtSpot's native string comparison *is* case-insensitive (BL-333, live-verified 2026-10-06), so the `Like` shape analysis gives `ILike` its native form. The `'%foo'` shape relies on `=` over a `substr` expression lowercasing (observed for column = literal only, so flagged) and interior `%`/`_` fall back to `sql_bool_op ( "{0} ILIKE {1}" , [s] , [pattern] )` ([**E3**](#how-to-read-the-tables)). |
 | `Left(s, n)` | direct | `left ( [s] , n )` | `SUBSTRING(s, 1, n)` (`:488-489`) | |
 | `Len(s)` | direct | `strlen ( [s] )` | **not translated** — upstream maps `length` (`:347`), Sigma's function is `Len` | |
-| `Like(s, pattern)` | direct | `'foo%'` → `( strpos ( [s] , 'foo' ) = 1 )`; `'%foo'` → the `EndsWith` composition; `'%foo%'` → `contains ( [s] , 'foo' )` | not translated | Same shape analysis as the Ossie map's `LIKE`. Interior `%` and any `_` fall back to `sql_bool_op ( "{0} LIKE {1}" , [s] , [pattern] )` ([**E3**](#how-to-read-the-tables)). Case-sensitive on the Sigma side. |
+| `Like(s, pattern)` | passthrough | `sql_bool_op ( "{0} LIKE {1}" , [s] , [pattern] )` | not translated | **Variant: `sql_bool_op`. Reclassified from `direct` 2026-10-06.** Case-sensitive on the Sigma side; the native shape analysis (`'foo%'` → `strpos … = 1`, `'%foo%'` → `contains`) now lands on case-insensitive functions (BL-333), so it is exact only on case-consistent data — the same condition `ILike` now meets natively. Snowflake `LIKE` is case-sensitive under the default collation. |
 | `LPad(s, n, pad)` | passthrough | `sql_string_op ( "LPAD({0}, 10, '0')" , [s] )` | not translated | **Variant: `sql_string_op`.** `lpad` is an **unverified** ThoughtSpot name (Snowflake formula mapping, BL-226) — never emit it bare. |
 | `Lower(s)` | passthrough | `sql_string_op ( "LOWER({0})" , [s] )` | `LOWER(s)` (`:340`) | **Variant: `sql_string_op`.** Second hop lands on the same pass-through. |
 | `LTrim(s)` | passthrough | `sql_string_op ( "LTRIM({0})" , [s] )` | not translated | **Variant: `sql_string_op`.** |
@@ -544,7 +549,7 @@ reference, BL-170) — which is why this is the densest pass-through section.
 | `RTrim(s)` | passthrough | `sql_string_op ( "RTRIM({0})" , [s] )` | not translated | **Variant: `sql_string_op`.** |
 | `SHA256(s)` | passthrough | `sql_string_op ( "SHA2({0}, 256)" , [s] )` | not translated | **Variant: `sql_string_op`.** |
 | `SplitPart(s, delim, n)` | passthrough | `sql_string_op ( "SPLIT_PART({0}, {1}, {2})" , [s] , [delim] , [n] )` | not translated | **Variant: `sql_string_op`.** No tokenising function in ThoughtSpot (Ossie map). |
-| `StartsWith(s, pre)` | direct | `( strpos ( [s] , [pre] ) = 1 )` | `s LIKE pre \|\| '%'` (`:565-566`) | No native `starts_with` (BL-170). Same second-hop loss as `Contains`. |
+| `StartsWith(s, pre)` | passthrough | `sql_bool_op ( "STARTSWITH({0}, {1})" , [s] , [pre] )` | `s LIKE pre \|\| '%'` (`:565-566`) | **Variant: `sql_bool_op`. Reclassified from `direct` 2026-10-06.** Sigma: "StartsWith is case-sensitive" (reference page). The native `( strpos ( [s] , [pre] ) = 1 )` inherits `strpos`'s lowercasing (BL-333; the composed form was not probed), so it is exact only on case-consistent data (no native `starts_with`, BL-170). Same second-hop loss as `Contains`. |
 | `Substring(s, start, len)` | direct | as `Mid` | `SUBSTRING(s, start, len)` (`:497-504`) | Documented with the same signature as `Mid`. |
 | `TextJoin(delim, a, b, …)` | direct | `concat ( ifnull ( [a] , '' ) , '-' , ifnull ( [b] , '' ) )` | not translated | Delimiter between values only; Sigma treats Null as `''` and still emits the delimiter (reference page) — the `ifnull` wrappers reproduce that exactly. |
 | `Trim(s)` | passthrough | `sql_string_op ( "TRIM({0})" , [s] )` | `TRIM(s)` (`:341`) | **Variant: `sql_string_op`.** No native `trim` (BL-170). |
@@ -667,8 +672,8 @@ Sigma's reference and literal syntax. Upstream tokenizer: `sigma_formula.py:108-
 | `a % b` | direct | `mod ( [a] , [b] )` | **parse error** — `%` is not in the tokenizer's operator class (`:116`), so the whole formula is not translated | ThoughtSpot has no `%` operator. |
 | `-x` (unary) | direct | `-[x]` | `-x` (`:458-459`) | |
 | `a & b` | direct | `concat ( [a] , [b] )` | `a \|\| b` (`:371`) | |
-| `a = b` | direct | `[a] = [b]` | `a = b` | |
-| `a != b` | direct | `[a] != [b]` | **parse error** — the tokenizer has no `!` (`:108-120`); upstream accepts `<>` instead, which Sigma's operator table does not list | The one comparison operator Sigma documents for inequality. |
+| `a = b` | direct | `[a] = [b]` | `a = b` | Exact for numeric, date and boolean operands. **Text operands:** ThoughtSpot `=` compiles to `LOWER(col) = 'literal'` (live-verified 2026-10-06, BL-333), whereas Sigma's `=` is evaluated by the warehouse — case-sensitive under Snowflake's default collation (inferred; Sigma's operator page does not state it). Where case matters use `sql_bool_op ( "{0} = {1}" , [a] , [b] )`. |
+| `a != b` | direct | `[a] != [b]` | **parse error** — the tokenizer has no `!` (`:108-120`); upstream accepts `<>` instead, which Sigma's operator table does not list | The one comparison operator Sigma documents for inequality.  Text `!=` was **not** probed for lowercasing (BL-333); assume it mirrors `=` only after a test. |
 | `a < b` | direct | `[a] < [b]` | `a < b` | |
 | `a <= b` | direct | `[a] <= [b]` | `a <= b` | |
 | `a > b` | direct | `[a] > [b]` | `a > b` | |
@@ -743,7 +748,8 @@ functions with **no Sigma counterpart**, and what a converter would do:
 | `stddev_if ( c , [x] )` / `variance_if ( c , [x] )` | `StdDev(If(c, [x]))` / `Variance(If(c, [x]))` | Composition. |
 | `last_value_in_period` / `first_value_in_period` | — | **Issue.** No period-completeness concept. |
 | `is_weekend ( [d] )` | `In(Weekday([d]), 1, 7)` | Composition (Sunday = 1, Saturday = 7). |
-| `week_number_of_month` / `week_number_of_quarter` / `month_number_of_quarter` / `day_number_of_quarter` | `DateDiff("week", DateTrunc("month", [d]), [d]) + 1` etc. | Composition; week-start caveat. |
+| `contains ( [s] , 'x' )` / `strpos` / text `=` | `ILike([s], "%x%")` / `Find(Lower([s]), "x")` / `Lower([a]) = Lower([b])` | ThoughtSpot compares case-insensitively (BL-333, live-verified 2026-10-06); Sigma's `Contains`/`Find`/`=` are case-sensitive, so the reverse leg must lower both sides. |
+| `week_number_of_month` / `week_number_of_quarter` / `month_number_of_quarter` / `day_number_of_quarter` | `DateDiff("week", DateTrunc("month", [d]), [d]) + 1` etc. | Composition; the `week_number_*` forms assumes the Model calendar's Monday week start (Gregorian, Monday-first when nothing else is set — ThoughtSpot domain review, 2026-10-06) and diverges if the Model's calendar starts the week elsewhere. |
 | Fiscal-calendar variants (`year ( [d] , fiscal )` …) | — | **Issue.** Sigma has no fiscal-calendar argument. |
 | `ts_groups` / `ts_username` / `ts_org` | `CurrentUserInTeam` / `CurrentUserEmail` / — | Partial; `ts_org` and `ts_groups_int` have no Sigma counterpart. |
 | `rank` | `Rank` in an ungrouped table | Direct — both are unpartitioned ranks over the result rows. |
@@ -759,7 +765,7 @@ functions with **no Sigma counterpart**, and what a converter would do:
 | # | Gap | Rows affected | Note |
 |---|---|---|---|
 | **G1** | No array, variant or geography type in formulas | 24 `unmappable` rows (Array 12, `ArrayAgg`/`ArrayAggDistinct` 2, Geography 4, Type 2, `Agg`/`Call` 4) | The single largest cause of `unmappable`. Scalar-returning consumers survive as pass-throughs over warehouse columns. |
-| **G2** | No native case, trim, replace, pad, regex | 20 Text rows | Already tracked (BL-170, BL-226). `lpad`/`rpad`/`repeat` remain unverified names — probing them is cheap and could move three rows. |
+| **G2** | No native case, trim, replace, pad, regex; native comparison is case-insensitive (BL-333) | 24 Text rows (20 + `Contains`, `StartsWith`, `EndsWith`, `Find`, `Like`, less `ILike` now native) | Already tracked (BL-170, BL-226). `lpad`/`rpad`/`repeat` remain unverified names — probing them is cheap and could move three rows. |
 | **G3** | No ordered `count` / `stddev` / `variance` / `corr` window; no `dense_rank`, `row_number`, `ntile`, `cume_dist`, `nth_value`, ignore-nulls `first/last_value`, fill-down | All 16 Window `passthrough` rows (incl. `CumeDist`, `Ntile`) — and, because `moving_*`/`cumulative_*` cannot declare a partition, the faithful alternative for the 12 `direct (downgrade)` rows too | Each forces a pass-through that must *invent* a partition ([E12](#passthrough-caveat-applies-to-every-passthrough-row)) — a correctness risk, not just a portability one. `CumulativeCount` via `cumulative_sum` over an indicator formula is the cheapest live probe. |
 | **G4** | `rank` / `rank_percentile` cannot partition | `Rank`, `RankPercentile`, `RankDense` in grouped tables | Known (Ossie map A10 neighbourhood). Sigma ranks reset per parent group by default, so this bites more often than for SQL sources. |
 | **G5** | No minute/second extractor, no `date_trunc('second')`, no timezone argument | `Minute`, `Second`, four `DatePart` parts, `ConvertTimezone`, every `tz` argument | |
@@ -773,8 +779,8 @@ functions with **no Sigma counterpart**, and what a converter would do:
 |---|---|---|
 | **V1** | **RESOLVED 2026-10-06 — `round`'s second argument is an increment.** Live probe on se-thoughtspot: ThoughtSpot compiles `round ( x , n )` to `n * ROUND(x / NULLIF(n, 0))`; on 1234.5678, `round ( x , 0 )` = NULL, `round ( x , 2 )` = 1234, `round ( x , 0.01 )` = 1234.57, `round ( x , 10 )` = 1230, `round ( x , -2 )` = 1234. This confirms the Power BI and Sisense maps and this map's `Round`/`MRound` rows. | BL-331 (PR #558) corrects every translator and mapping doc in the repo that read it as a digit count — Snowflake SV, Tableau, Databricks (both directions), Sisense, the formula reference and the Ossie map; BL-332 tracks the upstream apache/ossie converter. |
 | **V2** | Is `Trunc` / `RoundDown` by sign-branched `floor`/`ceil` acceptable as `direct`? | The Ossie map rows `TRUNC` `passthrough`; the Tableau map uses the identical composite for `INT`. Pick one rule repo-wide. |
-| **V3** | `DateDiff` counting: does ThoughtSpot `diff_months`/`diff_years` count boundaries (Snowflake) or elapsed periods, and which does Sigma's "rounded to the nearest integer" mean? | Silent off-by-one on month/year differences. |
-| **V4** | `contains` case sensitivity in ThoughtSpot | Decides whether `Contains` stays `direct` for Sigma's case-sensitive semantics. |
+| **V3** | **RESOLVED (ThoughtSpot side) 2026-10-06 — `diff_months` counts month boundaries; `diff_years` subtracts calendar years.** Live probe on se-thoughtspot: `diff_months` = `DATEDIFF(month, epoch, end) - DATEDIFF(month, epoch, start)` (Jan 31 → Feb 1 = 1, Jan 31 → Feb 28 = 1, Jan 20 → Mar 15 = 2, reversed = −1); `diff_years` = `EXTRACT(YEAR FROM end) - EXTRACT(YEAR FROM start)` (Dec 31 → Jan 1 = 1; 2025-07-01 → 2026-06-30 = 1). Recorded in the formula reference. **Still open on the Sigma side:** what "rounded to the nearest integer" means for months/years. | Exact if Sigma pushes down boundary-counting `DATEDIFF`; a silent off-by-one otherwise. |
+| **V4** | **RESOLVED 2026-10-06 — ThoughtSpot string comparison is case-insensitive.** Live probe on se-thoughtspot: `contains ( [c] , 'eng' )` → `LOWER(c) LIKE '%eng%' ESCAPE '!'`; literals are lowercased at compile time (`contains ( 'Hello World' , 'WORLD' )` = true); `strpos` → `POSITION('eng' IN LOWER(c))`; `[c] = 'engineering'` → `LOWER(c) = 'engineering'`. Not tested: `!=`, `in { }`, `strpos`-based compositions, join keys. Formula reference *String comparison is case-insensitive*; converter impact BL-333. | `Contains`, `StartsWith`, `EndsWith`, `Find` and `Like` (all documented case-sensitive in Sigma) move to `passthrough`; `ILike` moves to `direct`. |
 | **V5** | `group_aggregate` inside a `sum` argument (`XNPV`), and `cumulative_sum` over a row-level formula (`CumulativeCount`) | Both are plausible native compositions that are not in the formula reference. |
 | **V6** | `first_value ( … , query_groups ( ) , { [sort] } )` vs Sigma `First` when the sort column is in the search | The Tableau decision this row reuses has the same open edge. |
 | **V7** | `add_months` month-end clamping; `add_seconds` on a DATE | `DateAdd` fidelity; `DateFromUnix` native composition. |
@@ -831,7 +837,7 @@ formulas:
 
 - id: formula_Closed Revenue
   name: Closed Revenue
-  expr: "sum_if ( [ORDERS::Status] = 'closed' , [ORDERS::Amount] )"   # condition first; single quotes
+  expr: "sum_if ( [ORDERS::Status] = 'closed' , [ORDERS::Amount] )"   # condition first; single quotes; text = is case-insensitive in TS (BL-333)
 
 - id: formula_Ship Days
   name: Ship Days
@@ -855,7 +861,7 @@ formulas:
 
 - id: formula_Order Week
   name: Order Week
-  expr: "start_of_week ( [ORDERS::Order Date] )"                      # verify instance week start = Sunday
+  expr: "add_days ( start_of_week ( add_days ( [ORDERS::Order Date] , 1 ) ) , -1 )"  # Sunday-start from the Model calendar's Monday default (BL-334 caveat)
 
 - id: formula_Region Share
   name: Region Share

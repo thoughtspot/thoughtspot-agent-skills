@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — function composition rules, if() parens mandatory; string-function nativeness re-verified on se-thoughtspot 2026-07-29 per BL-170 — trim/ltrim/rtrim/replace/starts_with/ends_with confirmed ABSENT, `in` confirmed curly-brace-only; window/semi-additive signatures verified on se-thoughtspot 2026-07-30 — no PARTITION BY slot on moving_*/cumulative_*, rank/rank_percentile arity fixed at 2, first_value/last_value partition + axis explicit, lag/dense_rank/row_number/nth_value/moving_count/moving_stddev/cumulative_count confirmed ABSENT); 2026-08-26 finding 13.8: first_value(..., query_groups(), {date}) reclassified TRANSLATABLE via NON ADDITIVE BY desc / sort_direction: descending -- the old "last-value only" reason contradicted a sibling file and the row two lines below it -->
+<!-- currency: thoughtspot — 2026-10 (2026-10-06 compiled-SQL probes on se-thoughtspot: day_number_of_week fixed Mon=1, start_of_week compiled to DATE_TRUNC(week) (Monday only under WEEK_START 0/1); domain review: Model calendar defaults to Gregorian/Monday, start_of_* take an optional 'Calendar Name' arg that translations must not emit, diff_months/diff_years count boundaries, contains/strpos/= case-insensitive; variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — function composition rules, if() parens mandatory; string-function nativeness re-verified on se-thoughtspot 2026-07-29 per BL-170 — trim/ltrim/rtrim/replace/starts_with/ends_with confirmed ABSENT, `in` confirmed curly-brace-only; window/semi-additive signatures verified on se-thoughtspot 2026-07-30 — no PARTITION BY slot on moving_*/cumulative_*, rank/rank_percentile arity fixed at 2, first_value/last_value partition + axis explicit, lag/dense_rank/row_number/nth_value/moving_count/moving_stddev/cumulative_count confirmed ABSENT); 2026-08-26 finding 13.8: first_value(..., query_groups(), {date}) reclassified TRANSLATABLE via NON ADDITIVE BY desc / sort_direction: descending -- the old "last-value only" reason contradicted a sibling file and the row two lines below it -->
 
 # ThoughtSpot Formula Patterns — Reference
 
@@ -191,14 +191,14 @@ else 0
 | `left` | `left ( [x] , [n] )` | First N characters |
 | `right` | `right ( [x] , [n] )` | Last N characters |
 | `strlen` | `strlen ( [x] )` | String length |
-| `strpos` | `strpos ( [x] , 'val' )` | Position of first occurrence — 1-indexed, returns 0 when not found (live-verified 2026-06-13, se-thoughtspot; official docs claim 0-based/−1 — live behavior wins). |
+| `strpos` | `strpos ( [x] , 'val' )` | Position of first occurrence — 1-indexed, returns 0 when not found (live-verified 2026-06-13, se-thoughtspot; official docs claim 0-based/−1 — live behavior wins). **Case-insensitive**: compiles to `POSITION('val' IN LOWER(x))` with the literal lowercased at compile time (live-verified 2026-10-06, se-thoughtspot — see "String comparison is case-insensitive" below). |
 | ~~`upper`~~ | — | **Does not exist** in ThoughtSpot (verified 2026-06-13). Use `sql_string_op ( "UPPER({0})" , [x] )` pass-through. |
 | ~~`lower`~~ | — | **Does not exist** in ThoughtSpot (verified 2026-06-13). Use `sql_string_op ( "LOWER({0})" , [x] )` pass-through. |
 | ~~`trim`~~ | — | **Does not exist** in ThoughtSpot (live-verified 2026-07-29, se-thoughtspot — BL-170). Use `sql_string_op ( "TRIM({0})" , [x] )` pass-through. |
 | ~~`ltrim`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170). Use `sql_string_op ( "LTRIM({0})" , [x] )` pass-through. |
 | ~~`rtrim`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170). Use `sql_string_op ( "RTRIM({0})" , [x] )` pass-through. |
 | ~~`replace`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170). Use `sql_string_op ( "REPLACE({0}, {1}, {2})" , [x] , [old] , [new] )` pass-through. |
-| `contains` | `contains ( [x] , 'val' )` | Returns boolean |
+| `contains` | `contains ( [x] , 'val' )` | Returns boolean. **Case-insensitive**: compiles to `LOWER(x) LIKE '%val%' ESCAPE '!'`, literal lowercased at compile time (live-verified 2026-10-06, se-thoughtspot — see below). For case-sensitive semantics use `sql_bool_op ( "CONTAINS({0}, {1})" , [x] , 'val' )`. |
 | ~~`starts_with`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170; also 2026-06-13). Compose from `strpos`: `strpos ( [x] , 'val' ) = 1`. |
 | ~~`ends_with`~~ | — | **Does not exist** (live-verified 2026-07-29, se-thoughtspot — BL-170). Compose from `substr`/`strlen`: `substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val'`. |
 
@@ -208,6 +208,30 @@ the formula parser — each is rejected with `Search did not find "<fn> (" in yo
 metadata`, the same signature `upper`/`lower` produce. The pass-throughs and compositions
 above were verified to import in the same pass. Only `concat`, `substr`, `left`, `right`,
 `strlen`, `strpos` and `contains` are native string functions.
+
+### String comparison is case-insensitive
+
+*Live-verified 2026-10-06 on se-thoughtspot (Snowflake), via scratch Models and
+`ts agentql generate-sql` / `fetch-data`; the Models were deleted afterwards.* ThoughtSpot
+lowercases both sides of a string comparison when it compiles a formula:
+
+| Formula | Compiled Snowflake SQL | Observed |
+|---|---|---|
+| `contains ( [DEPARTMENT] , 'eng' )` | `LOWER(DEPARTMENT) LIKE '%eng%' ESCAPE '!'` | matches `Engineering` |
+| `contains ( 'Hello World' , 'WORLD' )` | `'hello world' LIKE '%world%'` | `true` — **literals are lowercased at compile time** |
+| `strpos ( [DEPARTMENT] , 'eng' )` | `POSITION('eng' IN LOWER(DEPARTMENT))` | 1 for `Engineering` |
+| `[DEPARTMENT] = 'engineering'` | `LOWER(DEPARTMENT) = 'engineering'` | matches `Engineering` |
+
+Consequence: a source comparison that is case-sensitive (Snowflake's default collation,
+Excel `FIND`/`EXACT`, Sigma `Contains`) is **not** reproduced by native `=` / `contains` /
+`strpos`. Where exact case semantics matter, pass the comparison through:
+`sql_bool_op ( "CONTAINS({0}, {1})" , [s] , 'x' )` or `sql_bool_op ( "{0} = {1}" , [s] , 'x' )`
+(Snowflake compares case-sensitively under its default collation). Converter impact is
+tracked as BL-333.
+
+**Not tested** (do not assume either way): `!=`, `in { }`, `starts_with`-style compositions
+built on `strpos` (they inherit `strpos`'s lowercasing, but the composed form was not
+probed), and whether join conditions on string keys are lowercased.
 
 ### Hyperlink Markup
 
@@ -236,7 +260,29 @@ results. They are ThoughtSpot-only — **not translatable** to any warehouse SQL
 ## Date Functions
 
 *Source: ThoughtSpot official formula reference (verified 2026-06-13). Most date-part
-functions accept an optional `fiscal` second parameter for fiscal calendar support.*
+functions accept an optional second parameter for non-Gregorian calendars. Rows below call
+it the "`fiscal` param" — the bare keyword `fiscal` (e.g. `year ( [d] , fiscal )`, see the
+fiscal-year example above) selects the cluster's fiscal calendar. The domain review below
+describes the `start_of_*` argument as a **custom calendar** name; whether `fiscal` is one
+accepted value of that same slot is unverified.*
+
+**Calendar argument and the Model's default calendar (ThoughtSpot domain review, 2026-10-06).**
+`start_of_week`, `start_of_month`, `start_of_quarter` and `start_of_year` accept an optional
+**custom calendar** argument, a string literal naming the calendar:
+`start_of_week ( [date] , 'Calendar Name' )`. **Formula translations must not emit it.** The
+Model supplies the default calendar, and that calendar is **Gregorian with a Monday week start
+when nothing else is set**. (For the Model/column side, `properties.calendar` takes the name of
+a Connection-scoped custom calendar — see [thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md);
+`ts-object-calendar-builder` builds those calendars.)
+
+**What to flag instead: any translated formula that assumes Monday is the first day of the
+week** — weekday numbering (`day_number_of_week`), week-start alignment (`start_of_week`),
+week-number and ISO-week compositions, and NETWORKDAYS/WORKDAY-style arithmetic built on
+`day_number_of_week`. Each such translation is exact under the default calendar and
+**diverges if the Model's calendar starts the week elsewhere**; say so on the row. A source
+with an explicit fiscal or custom week setting (Excel `WEEKNUM` return types, Sigma/Omni
+fiscal settings, `fiscal_month_offset`) is a note pointing at the Model's calendar, not a
+formula change.
 
 | Function | Syntax | Notes |
 |---|---|---|
@@ -252,25 +298,25 @@ functions accept an optional `fiscal` second parameter for fiscal calendar suppo
 | `month_number_of_quarter` | `month_number_of_quarter ( [date] )` | Month within quarter (1–3). Optional `fiscal` param. |
 | `day` | `day ( [date] )` | Day of month (1–31). Verified 2026-06-13. Optional `fiscal` param. |
 | `day_of_week` | `day_of_week ( [date] )` | Day name (e.g. "Friday"). Optional `fiscal` param. |
-| `day_number_of_week` | `day_number_of_week ( [date] )` | Day number (1=Mon, 7=Sun). Optional `fiscal` param. |
+| `day_number_of_week` | `day_number_of_week ( [date] )` | Day number, **1=Monday … 7=Sunday** — agrees with the Model's default calendar (Gregorian, Monday week start). **Translations built on it assume a Monday week start** and diverge on a Model whose calendar starts elsewhere. Compiles to `(MOD((DATEDIFF(day, DATE '1970-01-01', d) + 3), 7) + 1)`, a fixed arithmetic independent of the warehouse's `WEEK_START` (live-verified 2026-10-06, se-thoughtspot: 2026-10-04 Sun=7, 2026-10-05 Mon=1, 2026-10-10 Sat=6, 2020-01-01 Wed=3). Whether a non-default Model calendar changes the `+3` constant is **unverified** (one cluster, default calendar only). Optional `fiscal` param. |
 | `day_number_of_quarter` | `day_number_of_quarter ( [date] )` | Day within quarter. Optional `fiscal` param. |
 | `day_number_of_year` | `day_number_of_year ( [date] )` | Day within year (1–366). Optional `fiscal` param. |
 | `hour_of_day` | `hour_of_day ( [date] )` | Hour of the day |
 | `week_number_of_month` | `week_number_of_month ( [date] )` | Week within month. Optional `fiscal` param. |
 | `week_number_of_quarter` | `week_number_of_quarter ( [date] )` | Week within quarter. Optional `fiscal` param. |
-| `week_number_of_year` | `week_number_of_year ( [date] )` | Week within year. Optional `fiscal` param. |
+| `week_number_of_year` | `week_number_of_year ( [date] )` | Week within year. The compiled SQL uses ISO-style Thursday logic: `week_number_of_year(2026-01-04)` = 1 (live-verified 2026-10-06, se-thoughtspot). Optional `fiscal` param. |
 | `is_weekend` | `is_weekend ( [date] )` | Returns true for Saturday/Sunday. Optional `fiscal` param. |
-| `start_of_month` | `start_of_month ( [date] )` | First day of the month. Optional `fiscal` param. |
-| `start_of_quarter` | `start_of_quarter ( [date] )` | First day of the quarter. Optional `fiscal` param. |
-| `start_of_week` | `start_of_week ( [date] )` | First day of the week. Optional `fiscal` param. |
-| `start_of_year` | `start_of_year ( [date] )` | First day of the year. Optional `fiscal` param. |
+| `start_of_month` | `start_of_month ( [date] )` / `start_of_month ( [date] , 'Calendar Name' )` | First day of the month. Default: the Model's calendar, Gregorian when nothing else is set (ThoughtSpot domain review, 2026-10-06). Translations omit the calendar argument — see "Calendar argument" above. |
+| `start_of_quarter` | `start_of_quarter ( [date] )` / `start_of_quarter ( [date] , 'Calendar Name' )` | First day of the quarter. Default: the Model's calendar, Gregorian when nothing else is set (ThoughtSpot domain review, 2026-10-06). Translations omit the calendar argument — see "Calendar argument" above. |
+| `start_of_week` | `start_of_week ( [date] )` / `start_of_week ( [date] , 'Calendar Name' )` | First day of the week. **Default: the Model's calendar — Gregorian, Monday week start when nothing else is set** (ThoughtSpot domain review, 2026-10-06) — consistent with `day_number_of_week`'s 1=Monday. **Assumes a Monday week start**: a translation using it diverges if the Model's calendar starts the week elsewhere. Translations omit the calendar argument — see "Calendar argument" above. *Residual SQL caveat:* the default form compiled to Snowflake `DATE_TRUNC(week, d)` (returned Monday 2026-09-28 for 2026-10-04 on se-thoughtspot, live-verified 2026-10-06), which yields Monday only while the warehouse's `WEEK_START` is 0 or 1; whether ThoughtSpot sets `WEEK_START` on its session is unverified — BL-334. |
+| `start_of_year` | `start_of_year ( [date] )` / `start_of_year ( [date] , 'Calendar Name' )` | First day of the year. Default: the Model's calendar, Gregorian when nothing else is set (ThoughtSpot domain review, 2026-10-06). Translations omit the calendar argument — see "Calendar argument" above. |
 | `start_of_hour` | `start_of_hour ( [time] )` | Time truncated to the hour |
 | `start_of_min` | `start_of_min ( [time] )` | Time truncated to the minute |
 | `diff_days` | `diff_days ( [end] , [start] )` | Days between — note arg order (end first) |
 | `diff_weeks` | `diff_weeks ( [end] , [start] )` | Weeks between. Optional `fiscal` third param. |
-| `diff_months` | `diff_months ( [end] , [start] )` | Months between. Optional `fiscal` third param. |
+| `diff_months` | `diff_months ( [end] , [start] )` | **Month boundaries crossed, not complete months** — compiles to `DATEDIFF(month, epoch, end) - DATEDIFF(month, epoch, start)` (live-verified 2026-10-06, se-thoughtspot: Jan31→Feb1 = 1, Jan31→Feb28 = 1, Jan20→Mar15 = 2, reversed = −1). A complete-months source (Excel `DATEDIF "M"`) needs a day-of-month correction. Optional `fiscal` third param. |
 | `diff_quarters` | `diff_quarters ( [end] , [start] )` | Quarters between. Optional `fiscal` third param. |
-| `diff_years` | `diff_years ( [end] , [start] )` | Years between. Optional `fiscal` third param. |
+| `diff_years` | `diff_years ( [end] , [start] )` | **Calendar-year difference, not complete years** — compiles to `EXTRACT(YEAR FROM end) - EXTRACT(YEAR FROM start)` (live-verified 2026-10-06, se-thoughtspot: Dec31→Jan1 = 1, 2025-07-01→2026-06-30 = 1). A complete-years source (Excel `DATEDIF "Y"`) needs a month/day correction. Optional `fiscal` third param. |
 | `diff_time` | `diff_time ( [end] , [start] )` | Difference in seconds |
 | `diff_hours` | `diff_hours ( [end] , [start] )` | Difference in hours |
 | `diff_minutes` | `diff_minutes ( [end] , [start] )` | Difference in minutes |

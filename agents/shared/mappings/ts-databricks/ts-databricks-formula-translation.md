@@ -75,7 +75,7 @@ Resolution:
 |---|---|---|
 | `concat(a, b)` | `CONCAT(a, b)` | |
 | `strlen(s)` | `LENGTH(s)` | |
-| `strpos(s, sub)` | `LOCATE(sub, s)` | Argument order reversed |
+| `strpos(s, sub)` | `LOCATE(sub, s)` | Argument order reversed. **Case semantics differ (BL-333):** ThoughtSpot's native form is case-insensitive — it lowercases both sides at compile time (live-verified 2026-10-06, se-thoughtspot; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-comparison-is-case-insensitive)) — while Databricks' default `UTF8_BINARY` collation is case-sensitive. Exact only on data of consistent case; the translator is unchanged. |
 | `substr(s, start, len)` | `SUBSTRING(s, start, len)` | |
 | `sql_string_op("LOWER({0})", s)` | `LOWER(s)` | Auto-translated pass-through (ts-cli v0.50.0) |
 | `sql_string_op("UPPER({0})", s)` | `UPPER(s)` | Auto-translated pass-through (ts-cli v0.50.0) |
@@ -83,8 +83,8 @@ Resolution:
 | `sql_string_op("LTRIM({0})", s)` | `LTRIM(s)` | **No native `ltrim`** — pass-through (live-verified 2026-07-29, se-thoughtspot — BL-170) |
 | `sql_string_op("RTRIM({0})", s)` | `RTRIM(s)` | **No native `rtrim`** — pass-through (live-verified 2026-07-29, se-thoughtspot — BL-170) |
 | `sql_string_op("REPLACE({0}, {1}, {2})", s, old, new)` | `REPLACE(s, old, new)` | **No native `replace`** — pass-through (live-verified 2026-07-29, se-thoughtspot — BL-170) |
-| `contains(s, sub)` | `CONTAINS(s, sub)` | |
-| `strpos(s, prefix) = 1` | `STARTSWITH(s, prefix)` | **No native `starts_with`** — compose from `strpos`, which is 1-based (live-verified 2026-07-29, se-thoughtspot — BL-170) |
+| `contains(s, sub)` | `CONTAINS(s, sub)` | **Case semantics differ (BL-333):** ThoughtSpot's native form is case-insensitive — it lowercases both sides at compile time (live-verified 2026-10-06, se-thoughtspot; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-comparison-is-case-insensitive)) — while Databricks' default `UTF8_BINARY` collation is case-sensitive. Exact only on data of consistent case; the translator is unchanged. |
+| `strpos(s, prefix) = 1` | `STARTSWITH(s, prefix)` | **No native `starts_with`** — compose from `strpos`, which is 1-based (live-verified 2026-07-29, se-thoughtspot — BL-170). **Case semantics differ (BL-333):** ThoughtSpot's native form is case-insensitive — it lowercases both sides at compile time (live-verified 2026-10-06, se-thoughtspot; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-comparison-is-case-insensitive)) — while Databricks' default `UTF8_BINARY` collation is case-sensitive. Exact only on data of consistent case; the translator is unchanged. |
 | `substr(s, strlen(s) - strlen(sfx), strlen(sfx)) = sfx` | `ENDSWITH(s, sfx)` | **No native `ends_with`** — compose from `substr`/`strlen` (live-verified 2026-07-29, se-thoughtspot — BL-170) |
 | `left(s, n)` | `LEFT(s, n)` | |
 | `right(s, n)` | `RIGHT(s, n)` | |
@@ -122,7 +122,7 @@ Resolution:
 | `year(d)` | `YEAR(d)` | |
 | `month_number(d)` | `MONTH(d)` | `month()` also exists but returns the name (e.g. "January"), not the number |
 | `day(d)` | `DAY(d)` | Extracts day of month (1–31). `day_of_month` does not exist in TS. |
-| `day_number_of_week(d)` | `DAYOFWEEK(d)` | TS `day_number_of_week` returns number (1=Mon, 7=Sun); Databricks `DAYOFWEEK` returns number (1=Sun). `day_of_week(d)` also exists but returns the name (e.g. "Friday"). |
+| `day_number_of_week(d)` | `DAYOFWEEK(d)` | TS `day_number_of_week` returns number (1=Mon, 7=Sun); Databricks `DAYOFWEEK` returns number (1=Sun). `day_of_week(d)` also exists but returns the name (e.g. "Friday"). Confirmed 2026-10-06: TS is fixed 1 = Monday (compiles to day-count arithmetic). So the exact pair is `day_number_of_week(d)` ↔ `mod(DAYOFWEEK(d) + 5, 7) + 1`; **`mv_sql.py` still renames `DAYOFWEEK` → `day_number_of_week`** (wrong on every day) — BL-334 |
 | `day_number_of_year(d)` | `DAYOFYEAR(d)` | TS function is `day_number_of_year`, not `day_of_year` |
 | `hour_of_day(ts)` | `HOUR(ts)` | TS function is `hour_of_day`, not `hour` |
 | `sql_int_op("MINUTE({0})", ts)` | `MINUTE(ts)` | Auto-translated pass-through (ts-cli v0.50.0) |
@@ -132,10 +132,10 @@ Resolution:
 | `start_of_month(d)` | `date_trunc('month', d)` | |
 | `start_of_quarter(d)` | `date_trunc('quarter', d)` | |
 | `start_of_year(d)` | `date_trunc('year', d)` | |
-| `start_of_week(d)` | `date_trunc('week', d)` | Week start day may differ |
+| `start_of_week(d)` | `date_trunc('week', d)` | Week start day may differ. TS week start comes from the Model's calendar, Monday when nothing else is set (ThoughtSpot domain review, 2026-10-06); Databricks `date_trunc('week')` is Monday-start, so they agree under the default calendar (BL-334) |
 | `diff_days(start, end)` | `DATEDIFF(end, start)` | Arg order reversed; Databricks `DATEDIFF` returns days only |
 | `diff_days(start, end)` | `DATEDIFF(DAY, start, end)` | 3-arg form: unit first; reverse args for TS |
-| `diff_months(start, end)` | `DATEDIFF(MONTH, start, end)` | 3-arg form: unit first; reverse args for TS |
+| `diff_months(start, end)` | `DATEDIFF(MONTH, start, end)` | 3-arg form: unit first; reverse args for TS. TS `diff_months` counts month boundaries (live-verified 2026-10-06); Databricks `DATEDIFF(MONTH, …)` / `timestampdiff` counts **complete** months (Databricks docs — `timestampdiff` semantics; not probed here), so the two differ by one when the end's day-of-month is before the start's |
 | `diff_months(start, end)` | `MONTHS_BETWEEN(end, start)` | Returns fractional months |
 | `year(d)` | `EXTRACT(YEAR FROM d)` | `EXTRACT` form — same as `YEAR(d)` |
 | `month_number(d)` | `EXTRACT(MONTH FROM d)` | `EXTRACT` form — same as `MONTH(d)` |
@@ -829,7 +829,7 @@ formula equivalents:
 | `COALESCE(a, b)` | `if (a != null) then a else b` |
 | `CONCAT(a, ' ', b)` | `concat(a, ' ', b)` |
 | `DATEDIFF(end, start)` | `diff_days(start, end)` — arg order reversed |
-| `DATEDIFF(MONTH, start, end)` | `diff_months(start, end)` — 3-arg form; swap start/end for TS |
+| `DATEDIFF(MONTH, start, end)` | `diff_months(start, end)` — 3-arg form; swap start/end for TS — **semantic gap:** Databricks counts complete months, `diff_months` counts month boundaries (live-verified 2026-10-06), so Jan 31 → Feb 1 is 0 in Databricks and 1 in ThoughtSpot |
 | `DATEDIFF(DAY, start, end)` | `diff_days(start, end)` — 3-arg form; swap start/end for TS |
 | `MONTHS_BETWEEN(end, start)` | `diff_months(start, end)` — arg order reversed |
 | `EXTRACT(YEAR FROM d)` | `year(d)` |
@@ -838,7 +838,7 @@ formula equivalents:
 | `EXTRACT(HOUR FROM ts)` | `hour_of_day(ts)` |
 | `YEAR(d)` | `year(d)` |
 | `MONTH(d)` | `month_number(d)` |
-| `DAYOFWEEK(d)` | `day_number_of_week(d)` — Databricks 1=Sun, TS 1=Mon; `day_of_week(d)` also exists but returns the name |
+| `DAYOFWEEK(d)` | `day_number_of_week(d)` — Databricks 1=Sun, TS 1=Mon; `day_of_week(d)` also exists but returns the name — **a rename is wrong on every day** (BL-334): the exact form is `mod ( day_number_of_week ( d ) , 7 ) + 1` (TS fixed 1 = Monday, live-verified 2026-10-06) |
 | `ROUND(x, d)` | `round(x, 10^-d)` — `2` → `0.01`, `0` → `1`, `-2` → `100`; non-literal `d` → `sql_double_op ( "ROUND({0}, {1})" , x , d )` (row-level only). Never `round(x, d)` (BL-331) |
 | `CAST(x AS type)` | Depends on target type; often implicit in TS |
 | `x / NULLIF(y, 0)` | `safe_divide(x, y)` |
