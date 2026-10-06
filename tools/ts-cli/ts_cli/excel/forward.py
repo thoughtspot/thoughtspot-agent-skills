@@ -49,6 +49,9 @@ class Translator:
         self.division_mode: Optional[str] = None   # None | "safe" (IFERROR …, 0)
         self.divisions = 0
         self.elementwise = False                   # inside Sheets ARRAYFORMULA
+        # (target, reason, note) for each column whose unknown type changed the output —
+        # formula_translate.prompts turns these into the result's needs_types[]
+        self.type_needs: list[tuple[str, str, str]] = []
 
     # -- reporting -----------------------------------------------------------------
     def note(self, text: str) -> None:
@@ -60,6 +63,11 @@ class Translator:
             self.traps.append(text)
         if downgrade and self.status == TRANSLATED:
             self.status = APPROXIMATED
+
+    def need_type(self, node: dict, reason: str, note: str) -> None:
+        """Record that ``node`` (a column reference of unknown type) decided the output."""
+        if node.get("node") in ("col", "ref"):
+            self.type_needs.append((T.to_text(node), reason, note))
 
     def review(self, reason: str) -> None:
         raise NeedsReview(reason)
@@ -161,9 +169,11 @@ class Translator:
         if t == "number":
             return T.binop("!=", node, T.lit_number("0"))
         if t is None and node.get("node") in ("col", "ref"):
-            self.trap(f"column type unknown: {T.to_text(node)} is used as a condition as-is; if "
-                      f"it is numeric, write {T.to_text(node)} != 0 (Excel reads 0 as FALSE) — "
-                      "pass data_type in --columns (or --model) to decide", downgrade=True)
+            note = (f"column type unknown: {T.to_text(node)} is used as a condition as-is; if "
+                    f"it is numeric, write {T.to_text(node)} != 0 (Excel reads 0 as FALSE) — "
+                    "pass data_type in --columns (or --model) to decide")
+            self.trap(note, downgrade=True)
+            self.need_type(node, "condition", note)
         return node
 
     def compare(self, op: str, left: dict, right: dict) -> dict:
@@ -184,10 +194,12 @@ class Translator:
         else:
             test = T.binop("or", T.call("isnull", x), T.binop("=", x, T.lit_string("")))
             if t is None:
-                self.trap(f"column type unknown: the blank test on {T.to_text(x)} includes "
-                          f"{T.to_text(x)} = '', which ThoughtSpot rejects for a numeric or "
-                          "date column — there it is isnull alone; pass data_type in --columns "
-                          "(or --model) to decide", downgrade=True)
+                note = (f"column type unknown: the blank test on {T.to_text(x)} includes "
+                        f"{T.to_text(x)} = '', which ThoughtSpot rejects for a numeric or "
+                        "date column — there it is isnull alone; pass data_type in --columns "
+                        "(or --model) to decide")
+                self.trap(note, downgrade=True)
+                self.need_type(x, "blank test", note)
         return test if op == "=" else T.unop("not", test)
 
     def divide(self, left: dict, right: dict) -> dict:
@@ -226,10 +238,14 @@ class Translator:
         unknown = [T.to_text(x) for x, t in ((left, lt), (right, rt))
                    if t is None and x.get("node") in ("col", "ref")]
         if unknown:
-            self.trap(f"column type unknown ({', '.join(unknown)}): if these are dates, "
-                      "ThoughtSpot has no date arithmetic — a date difference is diff_days "
-                      "( end , start ) and date + n is add_days ( d , n ); pass data_type in "
-                      "--columns (or --model) to decide", downgrade=True)
+            note = (f"column type unknown ({', '.join(unknown)}): if these are dates, "
+                    "ThoughtSpot has no date arithmetic — a date difference is diff_days "
+                    "( end , start ) and date + n is add_days ( d , n ); pass data_type in "
+                    "--columns (or --model) to decide")
+            self.trap(note, downgrade=True)
+            for x, t in ((left, lt), (right, rt)):
+                if t is None:
+                    self.need_type(x, "date arithmetic", note)
         return T.binop(op, left, right)
 
     def _whole_days(self, amount: dict) -> dict:
@@ -262,7 +278,9 @@ class Translator:
         if t is None:
             # Left bare: to_string rejects a Text argument at import, so wrapping a column
             # that turns out to be text would break the formula (PR #570 review H4).
-            self.trap(TYPE_UNKNOWN_NOTE.format(name=T.to_text(node)), downgrade=True)
+            note = TYPE_UNKNOWN_NOTE.format(name=T.to_text(node))
+            self.trap(note, downgrade=True)
+            self.need_type(node, "text join", note)
             return node
         if t == "bool":
             self.note("to_string of a boolean gives 'true' / 'false'; Excel's & shows TRUE / "

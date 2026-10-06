@@ -4292,7 +4292,7 @@ query_filters ( ) )` for a share of total) are NEEDS_REVIEW.
 | `--key-column` | Column to count rows by when the source has `COUNT(*)` (ThoughtSpot has no row count) |
 | `--group-by` | `execute`: the attribute a measure is probed by (default: the Model's first physical attribute) |
 | `--context` | `sisense`: the JAQL context object (`{"[rev]": {"dim": "[Orders.Revenue]", "agg": "sum"}}`), JSON or `@file`. Without it each `[key]` reads as a column named `key` |
-| `--role` | `measure` / `attribute`. `tableau`: a role hint (default inferred). `excel` / `google_sheets`: the **intended** role — the grain the formula is built at (see above); `role` in the output is the role applied |
+| `--role` | `measure` / `attribute`. `tableau`: a role hint (default inferred). `excel` / `google_sheets`: the **intended** role — the grain the formula is built at (see above); `role` in the output is the role applied. Without it a ratio reports `role_ambiguous` and both `role_options` |
 | `--first-week-day` | `qlik`: the app's `FirstWeekDay`, 0 = Monday … 6 = Sunday (US apps usually 6). Without it a one-argument `Weekday()` is `NEEDS_REVIEW` — a pasted formula has no load script |
 | `--profile`, `-p` | Profile (or `TS_PROFILE`); only needed with `--model` |
 
@@ -4308,6 +4308,40 @@ form** — references by display name without brackets, a name with spaces kept 
 `unresolved[]`, `context_level`, `traps[]`, `notes[]`, `verification`
 (`translator`, `tests`, and the validation result when run), `tml`. A `NEEDS_REVIEW`
 result carries `original_kept` and, when the translator emitted something, `partial`.
+
+**The skill's questions** (ts-cli 0.159.0; always present, empty / `false` when there is
+nothing to ask — so existing consumers are unaffected):
+
+- `needs_types[]` — one entry per column whose **unknown** type changed the output:
+  `{column, target, reason, note, suggested_type, suggested_data_type, confidence}`.
+  `reason` is the rule that needed it — `text join` (`&` / `CONCAT` / `CONCATENATE` /
+  `TEXTJOIN`: a number needs `to_string`, and `to_string` rejects Text), `condition`
+  (`IF([@x])`: a number needs `!= 0`), `blank test` (`x = ""`: `isnull` alone for a
+  number or date), `blank IF branch` (`""` beside a number must be `null`), `date
+  arithmetic` (listed only when the name suggests a date — the bare `a - b` is already
+  right for numbers); `note` is the trap / note text that rule already emits. Several
+  reasons for one column join with ` and `. Re-run with `--columns` carrying `data_type`
+  (or `--model`) and the list empties. Excel / Google Sheets only today — the other
+  translators do not flag unknown types.
+- `suggested_type` (`number` · `date` · `text` · null), `suggested_data_type` (the
+  `--columns` `data_type` to pass) and `confidence` come from a name heuristic on the
+  column's **last** name token (`prompts.NAME_HEURISTIC`): `MONTHS` `DAYS` `WEEKS` `YEARS`
+  `COUNT` `QTY` `QUANTITY` `YEAR` → number/INT64; `AMOUNT` `COST` `REVENUE` `PRICE` →
+  number/DOUBLE; `ID` → number/INT64 (medium); `DATE` → date; `AT` → DATE_TIME (medium);
+  `NAME` `LABEL` `BAND` → text; `CODE` → text (medium). Anything else: no suggestion,
+  `confidence: low`. A suggestion is never applied — it is a default for the user to
+  confirm.
+- `role_ambiguous` — `true` when the formula has a ratio (a division by a column, or
+  `safe_divide`, including inside `IFERROR`), no `--role` was given, and the two roles
+  translate to different formulas. Only `excel` / `google_sheets` can be ambiguous: theirs is
+  the only `--role` that changes the grain. Every other source states its aggregation
+  (a DAX measure, a SQL metric, Tableau `SUM()/SUM()`), and Tableau's `--role` is a
+  clean-up hint. A ratio whose MEASURE form is `NEEDS_REVIEW` (`1 / [x]`) is not ambiguous.
+- `role_options[]` — when ambiguous, both translations:
+  `{role, flag, label, meaning, formula, formula_editor, status, column_type}` for
+  `attribute` (*per row* — the Excel cell, faithful row by row) and `measure` (*KPI that
+  rolls up* — a ratio of totals, right at any grouping). The top-level result is still the
+  default (row-level) translation.
 
 **Never more certain than the evidence.** Comments (`--`, `//`, `/* */`) are stripped first.
 After translation three layers can lower the status:

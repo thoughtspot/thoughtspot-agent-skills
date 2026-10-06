@@ -1,7 +1,8 @@
 """``translate()`` — the dialect-independent pipeline around one adapter call.
 
 Steps, in order: adapter → COUNT(*) repair → leftover-keyword guard → traps → role
-inference → classification → TML snippet. Output is the spec §3.1 shape.
+inference → classification → TML snippet → the skill's questions (``needs_types``,
+``role_ambiguous`` / ``role_options``; ``prompts.py``). Output is the spec §3.1 shape.
 """
 from __future__ import annotations
 
@@ -14,6 +15,9 @@ from ts_cli.formula_translate.adapters import (
 from ts_cli.formula_translate.context import ColumnContext
 from ts_cli.formula_translate.defects import find_defects
 from ts_cli.formula_translate.editor import editor_form
+from ts_cli.formula_translate.prompts import (
+    ROLE_GRAIN_DIALECTS, build_needs_types, has_ratio, role_option,
+)
 from ts_cli.formula_translate.refs import split_literals
 from ts_cli.formula_translate.traps import (
     detect_traps, is_downgrade, output_guard, repair_count_star,
@@ -188,6 +192,9 @@ def translate(expr: str, dialect: str, ctx: Optional[ColumnContext] = None, *,
         "notes": [n for n in notes if n],
         "verification": {"level": "none", "translator": translator, "tests": tests},
         "tml": None,
+        "needs_types": build_needs_types(raw.type_needs, ctx),
+        "role_ambiguous": False,
+        "role_options": [],
     }
     if out is None:
         result["original_kept"] = source
@@ -201,4 +208,27 @@ def translate(expr: str, dialect: str, ctx: Optional[ColumnContext] = None, *,
     result.update(role=role["role"], agentql_wrapper=role["agentql_wrapper"], name=name,
                   formula_editor=editor, formula_editor_notes=editor_notes,
                   tml=tml_snippet(name, out, role["role"]))
+    options = _role_options(expr, dialect, ctx, name, tableau_role)
+    result.update(role_ambiguous=bool(options), role_options=options)
     return result
+
+
+def _role_options(expr: str, dialect: str, ctx: ColumnContext, name: str,
+                  given_role: Optional[str]) -> list[dict]:
+    """Both translations of a ratio when the role decides the grain, else ``[]``.
+
+    Ambiguous only when the formula has a ratio, both roles translate, and they differ: an
+    already-aggregated ratio, or one whose MEASURE form is NEEDS_REVIEW, has one answer."""
+    if given_role is not None or dialect not in ROLE_GRAIN_DIALECTS:
+        return []
+
+    def run(role: str) -> dict:
+        fresh = ColumnContext(ctx.specs, ctx.level, ctx.model_name)
+        return translate(expr, dialect, fresh, name=name, role=role)
+
+    attribute, measure = run("attribute"), run("measure")
+    if not (attribute["formula"] and measure["formula"] and has_ratio(attribute["formula"])):
+        return []
+    if attribute["formula"] == measure["formula"]:
+        return []
+    return [role_option("attribute", attribute), role_option("measure", measure)]

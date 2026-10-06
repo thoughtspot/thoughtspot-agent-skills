@@ -194,3 +194,27 @@ def test_excel_ts_excel_is_semantically_equivalent(case):
     for row in rows:
         original = evaluate(case[3], row, rows, TODAY)
         assert evaluate(back, row, rows, TODAY) == original, (back, row)
+
+
+# ---------------------------------------------------------------------------
+# The skill's questions over the workbook (needs_types / role_ambiguous)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("role_of", [lambda c: c[2].lower(), lambda c: None],
+                         ids=["intended-role", "no-role"])
+def test_untyped_needs_types_exactly_the_text_joins(role_of):
+    """Run with no column context, only the three `&` joins over a column ask for a type;
+    typed (columns.json), none does."""
+    asking = {c[0] for c in CASES if translate(c[3], "excel", role=role_of(c))["needs_types"]}
+    assert asking == {"2.32", "2.47", "2.51"}
+    assert not [c[0] for c in CASES
+                if translate(c[3], "excel", _ctx(), role=role_of(c))["needs_types"]]
+
+
+def test_role_ambiguous_only_for_row_level_ratios():
+    """No role given: every MEASURE ratio of the workbook (a ratio of totals with --role
+    measure) is ambiguous; nothing else is."""
+    for case in CASES:
+        r = translate(case[3], "excel", _ctx())
+        ratio = case[2] == "MEASURE" and "safe_divide ( sum (" in _run(case).expr
+        assert r["role_ambiguous"] is ratio, case[0]

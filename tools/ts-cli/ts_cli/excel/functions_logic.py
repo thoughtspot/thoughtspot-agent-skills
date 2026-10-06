@@ -74,9 +74,11 @@ def _branches(tr, a: dict, b: dict) -> tuple:
     for blank_first in (True, False):
         blank, other, t_other = (a, b, tb) if blank_first else (b, a, ta)
         if T.is_lit(blank, "string", "''") and t_other is None:
-            tr.note(f"an IF branch returns \"\" beside {T.to_text(other)} (type unknown): if that "
-                    "is a number, ThoughtSpot rejects the mixed branches — use null instead "
+            note = (f"an IF branch returns \"\" beside {T.to_text(other)} (type unknown): if "
+                    "that is a number, ThoughtSpot rejects the mixed branches — use null instead "
                     "(pass data_type in --columns to decide)")
+            tr.note(note)
+            tr.need_type(other, "blank IF branch", note)
         if T.is_lit(blank, "string", "''") and t_other == "number":
             tr.trap("an IF branch returning \"\" beside a number: ThoughtSpot branches must "
                     "share a type, so the blank became null", downgrade=True)

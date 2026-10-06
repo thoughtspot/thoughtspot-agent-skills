@@ -72,6 +72,7 @@ class RawResult:
     partial: Optional[str] = None  # what a review-flagged translator emitted, if anything
     traps: list[str] = field(default_factory=list)  # translator-specific trap lines
     role: Optional[str] = None     # MEASURE | ATTRIBUTE when the translator applied an intent
+    type_needs: list = field(default_factory=list)  # (target, reason, note) — prompts.py
 
 
 def normalise_dialect(name: str) -> str:
@@ -299,7 +300,8 @@ def adapt_excel(expr: str, ctx: ColumnContext, role_hint: Optional[str] = None,
     from ts_cli.excel.translate import translate_excel
 
     r = translate_excel(expr, ctx, dialect=dialect, role=role_hint)
-    return RawResult(r.expr, r.status, list(r.notes), traps=list(r.traps), role=r.role)
+    return RawResult(r.expr, r.status, list(r.notes), traps=list(r.traps), role=r.role,
+                     type_needs=list(r.type_needs))
 
 
 def adapt_google_sheets(expr: str, ctx: ColumnContext,

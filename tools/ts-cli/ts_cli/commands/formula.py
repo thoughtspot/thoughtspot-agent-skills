@@ -105,7 +105,8 @@ def translate_cmd(
         None, "--role",
         help="measure | attribute. tableau: a role hint. excel / google_sheets: the intended "
              "role — MEASURE over row-level [@Col] references is built at the right grain "
-             "(sum of each column; ratio of totals with safe_divide); default: inferred"),
+             "(sum of each column; ratio of totals with safe_divide); default: inferred "
+             "(a ratio then reports role_ambiguous + role_options)"),
     first_week_day: Optional[int] = typer.Option(
         None, "--first-week-day", min=0, max=6,
         help="qlik: the app's FirstWeekDay (0 = Monday … 6 = Sunday; US apps are usually 6). "
@@ -115,8 +116,11 @@ def translate_cmd(
 
     Output: JSON to stdout — {dialect, input, formula (TML form, bracketed refs),
     formula_editor (formula-editor form, bare names), status, classification, role,
-    references[], unresolved[], traps[], notes[], verification, tml}. status is
-    TRANSLATED | APPROXIMATED | NEEDS_REVIEW (formula null, original kept).
+    references[], unresolved[], traps[], notes[], verification, tml, needs_types[],
+    role_ambiguous, role_options[]}. status is TRANSLATED | APPROXIMATED | NEEDS_REVIEW
+    (formula null, original kept). needs_types lists columns whose unknown type changed the
+    output (with a name-based suggested_type); role_ambiguous is true for an Excel / Sheets
+    ratio given no --role, with both translations in role_options.
 
     Context levels: none (placeholders [TABLE::Col]), --columns (names), --model (real
     columns; enables --validate). The user's Model is never modified.

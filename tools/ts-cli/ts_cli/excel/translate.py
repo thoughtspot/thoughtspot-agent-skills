@@ -26,6 +26,7 @@ class ExcelResult:
     notes: list = field(default_factory=list)
     traps: list = field(default_factory=list)
     role: Optional[str] = None    # MEASURE | ATTRIBUTE when an intended role was applied
+    type_needs: list = field(default_factory=list)  # (target, reason, note) — see prompts.py
 
 
 def translate_excel(source: str, ctx, dialect: str = "excel",
@@ -44,5 +45,6 @@ def translate_excel(source: str, ctx, dialect: str = "excel",
     except ExcelSyntaxError as exc:
         return ExcelResult(None, NEEDS_REVIEW, [f"cannot parse the formula: {exc}"])
     except (NeedsReview, UntranslatableError) as exc:
-        return ExcelResult(None, NEEDS_REVIEW, tr.notes + [str(exc)], tr.traps)
-    return ExcelResult(to_text(node), tr.status, tr.notes, tr.traps, out_role)
+        return ExcelResult(None, NEEDS_REVIEW, tr.notes + [str(exc)], tr.traps,
+                           type_needs=tr.type_needs)
+    return ExcelResult(to_text(node), tr.status, tr.notes, tr.traps, out_role, tr.type_needs)
