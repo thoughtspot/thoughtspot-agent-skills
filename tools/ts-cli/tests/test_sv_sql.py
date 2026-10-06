@@ -635,23 +635,25 @@ class TestFidelityM0Fixes:
     # BL-341 — every DATEDIFF unit is a boundary count; end date first.
     @pytest.mark.parametrize("unit,fn", [
         ("day", "diff_days"), ("month", "diff_months"),
-        ("quarter", "diff_quarters"), ("year", "diff_years"), ("hour", "diff_hours"),
+        ("quarter", "diff_quarters"), ("year", "diff_years"),
         ("minute", "diff_minutes"), ("second", "diff_time"),
         # documented part aliases
-        ("'yyyy'", "diff_years"), ("qtr", "diff_quarters"),
-        ("hh", "diff_hours"), ("hh24", "diff_hours"), ("mi", "diff_minutes"),
+        ("'yyyy'", "diff_years"), ("qtr", "diff_quarters"), ("mi", "diff_minutes"),
         ("sec", "diff_time"),
     ])
     def test_datediff_units(self, unit, fn):
         assert translate_sql_expr(f"DATEDIFF({unit}, a.S, a.E)", _resolve) == \
             f"{fn} ( [A::E] , [A::S] )"
 
-    @pytest.mark.parametrize("unit", ["week", "wk", "'w'"])
-    def test_datediff_week_is_an_exact_pass_through(self, unit):
-        # #572 review: diff_weeks fixes a Monday start while DATEDIFF(week) follows
-        # WEEK_START, and the converter cannot show a trap — so never diff_weeks.
+    @pytest.mark.parametrize("unit,part", [
+        ("week", "week"), ("wk", "week"), ("'w'", "week"),
+        # diff_hours counts UTC hours on TIMESTAMP_TZ (M0 sf-ts-005)
+        ("hour", "hour"), ("hh", "hour"), ("hh24", "hour"), ("'HH24'", "hour"),
+    ])
+    def test_datediff_week_and_hour_are_exact_pass_throughs(self, unit, part):
+        # #572 review: the converter cannot show a trap, so no native-with-a-caveat.
         assert translate_sql_expr(f"DATEDIFF({unit}, a.S, a.E)", _resolve) == \
-            'sql_int_op ( "DATEDIFF(week, {0}, {1})" , [A::S] , [A::E] )'
+            f'sql_int_op ( "DATEDIFF({part}, {{0}}, {{1}})" , [A::S] , [A::E] )'
 
     def test_datediff_week_over_aggregate_refused(self):
         with pytest.raises(UntranslatableError):
@@ -699,6 +701,9 @@ class TestFidelityM0Fixes:
         assert result == out
         assert "to_string" not in result
 
-    def test_to_char_format_with_double_quote_refused(self):
+    # #572 review item 6: a `\"` escape was live-probed and rejected at import
+    # (fidelity M0 sf-date-018, 2026-10-06), so a double quote stays refused.
+    @pytest.mark.parametrize("fmt", ["'YYYY\"m\"MM'", "'{0}'", "'a\\\\b'"])
+    def test_to_char_format_with_quote_brace_or_backslash_refused(self, fmt):
         with pytest.raises(UntranslatableError):
-            translate_sql_expr("TO_CHAR(a.D, 'YYYY\"Q\"Q')", _resolve)
+            translate_sql_expr(f"TO_CHAR(a.D, {fmt})", _resolve)

@@ -82,13 +82,19 @@ EXACT_FORM_EMITS = {"TO_CHAR": ("sql_string_op",), "TO_VARCHAR": ("sql_string_op
 # BOUNDARIES crossed, and so does each native function here — read from its compiled
 # SQL and checked by value (formula fidelity M0, se-thoughtspot 2026-10-06; the rows
 # of ts-snowflake-formula-translation.md quote it). YEAR was diff_days / 365 (BL-341).
-# WEEK is NOT native: diff_weeks fixes a Monday week start, while Snowflake's
-# DATEDIFF(week) follows WEEK_START, and the converter has no channel to show a trap
-# (#572 review) — so it is an exact pass-through.
+# Two units are NOT native — each is an exact pass-through, because the converter
+# has no channel to show a trap (#572 review):
+#   WEEK — diff_weeks fixes a Monday week start; Snowflake's DATEDIFF(week) follows
+#          WEEK_START.
+#   HOUR — diff_hours compiles to DATEDIFF('HOUR', DATE '1970-01-01', x) differences,
+#          which on a TIMESTAMP_TZ count hours in UTC while Snowflake counts them in
+#          the value's own offset: at +05:30, 10:59 -> 11:01 is 1 in Snowflake and 0
+#          in ThoughtSpot (M0 sf-ts-005, 4 of 10 rows wrong, 2026-10-06). TIMESTAMP_NTZ
+#          and DATE matched (sf-ts-001, sf-date-014), and diff_minutes matched on the
+#          same TIMESTAMP_TZ rows (sf-ts-006) — every real offset is whole minutes.
 DATEDIFF_UNIT = {"DAY": "diff_days", "MONTH": "diff_months", "QUARTER": "diff_quarters",
-                 "YEAR": "diff_years", "HOUR": "diff_hours", "MINUTE": "diff_minutes",
-                 "SECOND": "diff_time"}
-DATEDIFF_PASSTHROUGH_UNITS = frozenset({"WEEK"})
+                 "YEAR": "diff_years", "MINUTE": "diff_minutes", "SECOND": "diff_time"}
+DATEDIFF_PASSTHROUGH_UNITS = frozenset({"WEEK", "HOUR"})
 # Snowflake's documented date/time part aliases (docs: "Supported date and time parts").
 DATE_PART_ALIASES = {a: u for u, al in {
     "DAY": "D DD DAYS DAYOFMONTH", "WEEK": "W WK WEEKOFYEAR WOY WY",

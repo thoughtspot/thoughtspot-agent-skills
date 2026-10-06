@@ -291,9 +291,13 @@ def sql_passthrough_call(op: str, fn: str, args: list[str]) -> str:
 
     Numeric, string and boolean literals are inlined into the template
     (``TO_CHAR({0}, 'YYYY-MM')``); every other argument becomes a ``{n}``
-    placeholder. Refused when no argument is a column (a pass-through needs one),
-    or when a string literal holds a double quote or a brace, which would break
-    the template.
+    placeholder. Refused when no argument is a column (a pass-through needs one), or
+    when a string literal holds a brace (the template would read it as a
+    placeholder), a backslash, or a double quote. The double quote is a real loss — a
+    Snowflake format model's literal text, ``'YYYY"m"MM'`` — but the template has no
+    escape for it: ``\\"`` was live-probed and rejected at import (*Search did not find
+    "TO_CHAR ( { 0 } , 'YYYY"m"MM' ) "*, error_code 14516; formula fidelity M0
+    ``sf-date-018``, se-thoughtspot 2026-10-06).
     """
     parts: list[str] = []
     bound: list[str] = []
@@ -304,10 +308,11 @@ def sql_passthrough_call(op: str, fn: str, args: list[str]) -> str:
         elif a.lower() in _SQL_BOOL_LITERALS:
             parts.append(a.upper())
         elif _SQL_STR_LITERAL_RE.match(a):
-            if any(ch in a for ch in '"{}'):
+            if any(ch in a for ch in '"{}\\'):
                 raise UntranslatableError(
-                    f"{fn}: literal {a} holds a double quote or a brace, which cannot "
-                    "be inlined into a sql_*_op template")
+                    f"{fn}: literal {a} holds a double quote, a brace or a backslash, "
+                    "which a sql_*_op template cannot carry (no escape exists — "
+                    "live-probed 2026-10-06)")
             parts.append(a)
         else:
             parts.append("{%d}" % len(bound))

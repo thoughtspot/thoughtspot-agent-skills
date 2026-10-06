@@ -61,6 +61,13 @@ def sql_literal(value: Any, sf_type: str) -> str:
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(value)):
             raise ValueError(f"DATE value must be YYYY-MM-DD, got {value!r}")
         return f"'{value}'::DATE"
+    if t.startswith("TIMESTAMP"):
+        # 'YYYY-MM-DD HH:MM:SS[.fff]' plus, for TIMESTAMP_TZ, an offset (' +05:30').
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?(?: [+-]\d{2}:\d{2})?",
+                            str(value)):
+            raise ValueError(f"{sf_type} value must be 'YYYY-MM-DD HH:MM:SS[ +HH:MM]', "
+                             f"got {value!r}")
+        return f"'{value}'::{t}"
     if t.startswith("BOOLEAN"):
         return "TRUE" if value else "FALSE"
     if isinstance(value, bool) or not isinstance(value, (int, float)):

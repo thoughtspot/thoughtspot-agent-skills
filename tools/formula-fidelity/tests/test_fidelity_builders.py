@@ -31,12 +31,17 @@ def test_object_names_are_run_stamped_scratch_names():
     (None, "FLOAT", "NULL"), ("O'Brien", "VARCHAR(8)", "'O''Brien'"),
     ("2026-02-28", "DATE", "'2026-02-28'::DATE"), (-0.5, "FLOAT", "-0.5"),
     (1000000, "NUMBER(38,0)", "1000000"), (True, "BOOLEAN", "TRUE"),
+    ("2026-01-31 10:59:00", "TIMESTAMP_NTZ", "'2026-01-31 10:59:00'::TIMESTAMP_NTZ"),
+    ("2026-01-31 10:59:00 +05:30", "TIMESTAMP_TZ",
+     "'2026-01-31 10:59:00 +05:30'::TIMESTAMP_TZ"),
 ])
 def test_sql_literal(v, t, out):
     assert B.sql_literal(v, t) == out
 
 
-@pytest.mark.parametrize("v,t", [("2026-2-1", "DATE"), ("1; DROP", "FLOAT"), (True, "FLOAT")])
+@pytest.mark.parametrize("v,t", [("2026-2-1", "DATE"), ("1; DROP", "FLOAT"), (True, "FLOAT"),
+                                 ("2026-01-31", "TIMESTAMP_NTZ"),
+                                 ("2026-01-31 10:59:00'; DROP", "TIMESTAMP_TZ")])
 def test_sql_literal_refuses_bad_values(v, t):
     with pytest.raises(ValueError):
         B.sql_literal(v, t)
