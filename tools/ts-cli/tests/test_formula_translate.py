@@ -728,20 +728,27 @@ class TestThoughtSpotIdentity:
 # ---------------------------------------------------------------------------
 
 class TestKnownDefects:
-    @pytest.mark.parametrize("dialect,src,cite", [
-        ("databricks", "datediff(ship_date, order_date)", "fix/databricks-datediff-order"),
-        ("snowflake", "DAYOFWEEK(order_date)", "BL-334"),
-        ("databricks", "dayofweek(order_date)", "BL-334"),
-        ("tableau", "DATEPART('weekday', [Order Date])", "BL-334"),
-    ])
-    def test_wrong_answers_are_needs_review(self, dialect, src, cite):
-        r = translate(src, dialect)
-        assert r["status"] == NEEDS_REVIEW and r["formula"] is None
-        assert any(cite in n for n in r["notes"])
+    def test_databricks_datediff_fixed_by_bl336(self):
+        r = translate("datediff(ship_date, order_date)", "databricks")
+        assert r["status"] == TRANSLATED
+        assert r["formula"] == "diff_days ( [TABLE::ship_date] , [TABLE::order_date] )"
 
-    def test_dayofweekiso_not_caught_by_dayofweek(self):
-        from ts_cli.formula_translate.defects import find_defects
-        assert not find_defects("snowflake", "DAYOFWEEKISO(d)", "x")
+    def test_qlik_weekday_needs_first_week_day(self):
+        assert translate("WeekDay(OrderDate)", "qlik")["status"] == NEEDS_REVIEW
+        r = translate("WeekDay(OrderDate)", "qlik", first_week_day=6)
+        assert r["status"] == TRANSLATED and "day_number_of_week" in r["formula"]
+
+    @pytest.mark.parametrize("dialect,src", [
+        ("snowflake", "DAYOFWEEK(order_date)"),
+        ("databricks", "dayofweek(order_date)"),
+        ("tableau", "DATEPART('weekday', [Order Date])"),
+    ])
+    def test_weekday_fixed_by_bl334_now_translates_with_week_trap(self, dialect, src):
+        # #565 fixed the translators, so the defect entries are gone; the Monday-week
+        # assumption still shows as a trap.
+        r = translate(src, dialect)
+        assert r["status"] == TRANSLATED and "mod" in r["formula"]
+        assert any("Monday week start" in t for t in r["traps"])
 
     def test_zeroifnull_approximated(self):
         r = translate("ZEROIFNULL(SUM(amount))", "snowflake")

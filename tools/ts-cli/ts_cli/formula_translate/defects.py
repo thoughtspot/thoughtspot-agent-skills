@@ -7,7 +7,8 @@ answer) or ``APPROXIMATED`` with a trap (unverified or lossy), so a tester never
 a clean translation.
 
 Remove an entry in the same PR that fixes its translator; the test for the entry then fails
-and says so.
+and says so. Removed so far: the three BL-334 weekday entries (#565) and Databricks
+DATEDIFF argument order (BL-336, #564).
 """
 from __future__ import annotations
 
@@ -31,25 +32,6 @@ class Defect:
 
 
 KNOWN_DEFECTS: tuple[Defect, ...] = (
-    Defect(frozenset({"databricks"}), re.compile(r"\bdatediff\s*\(", re.I), NEEDS_REVIEW,
-           "fix/databricks-datediff-order",
-           "known defect: the Databricks translator reverses DATEDIFF's argument order "
-           "(datediff(end, start) came back as diff_days(start, end)); fix in progress on "
-           "fix/databricks-datediff-order"),
-    Defect(frozenset({"snowflake"}), re.compile(r"\bDAYOFWEEK\s*\(", re.I), NEEDS_REVIEW,
-           "BL-334",
-           "known defect (BL-334): DAYOFWEEK is renamed to day_number_of_week, which is "
-           "1 = Monday … 7 = Sunday; Snowflake DAYOFWEEK is 0 = Sunday by default "
-           "(WEEK_START-dependent). Fix in progress on fix/dayofweek-numbering"),
-    Defect(frozenset({"databricks"}), re.compile(r"\bdayofweek\s*\(", re.I), NEEDS_REVIEW,
-           "BL-334",
-           "known defect (BL-334): dayofweek is renamed to day_number_of_week (1 = Monday); "
-           "Databricks dayofweek is 1 = Sunday. Fix in progress on fix/dayofweek-numbering"),
-    Defect(frozenset({"tableau"}),
-           re.compile(r"\bDATEPART\s*\(\s*['\"]weekday['\"]", re.I), NEEDS_REVIEW, "BL-334",
-           "known defect (BL-334): DATEPART('weekday') becomes day_of_week, which returns the "
-           "day NAME; Tableau returns a number (1 = Sunday by default). Fix in progress on "
-           "fix/dayofweek-numbering"),
     Defect(frozenset({"snowflake", "databricks"}), re.compile(r"\bZEROIFNULL\s*\(", re.I),
            APPROXIMATED, "BL-226",
            "ZEROIFNULL → zeroifnull: the translator emits it, but it is not in the ThoughtSpot "

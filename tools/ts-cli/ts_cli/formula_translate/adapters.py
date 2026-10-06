@@ -186,10 +186,12 @@ def qlik_field_quotes(expr: str) -> str:
     return "".join(parts)
 
 
-def adapt_qlik(expr: str, ctx: ColumnContext) -> RawResult:
+def adapt_qlik(expr: str, ctx: ColumnContext, first_week_day: Optional[int] = None) -> RawResult:
+    """``first_week_day``: the app's ``FirstWeekDay`` (0 = Mon … 6 = Sun). A pasted formula
+    has no load script, so without it a one-argument ``Weekday()`` is NEEDS_REVIEW (#565)."""
     from ts_cli.qlik.functions import translate
 
-    out, review, reason = translate(qlik_field_quotes(expr))
+    out, review, reason = translate(qlik_field_quotes(expr), first_week_day=first_week_day)
     if review or not out:
         return RawResult(None, NEEDS_REVIEW, [reason or "Qlik translator: needs review"],
                          partial=out or None)

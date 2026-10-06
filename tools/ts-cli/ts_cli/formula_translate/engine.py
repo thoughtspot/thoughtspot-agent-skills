@@ -92,8 +92,11 @@ def tml_snippet(name: str, expr: str, role: str) -> str:
 
 
 def _run_adapter(source: str, dialect: str, ctx: ColumnContext,
-                 sisense_context: Optional[dict], tableau_role: Optional[str]):
+                 sisense_context: Optional[dict], tableau_role: Optional[str],
+                 first_week_day: Optional[int] = None):
     adapter = ADAPTERS[dialect]
+    if dialect == "qlik":
+        return adapter(source, ctx, first_week_day=first_week_day)
     if dialect == "sisense":
         return adapter(source, ctx, context=sisense_context)
     if dialect == "tableau":
@@ -134,7 +137,8 @@ def _post_process(raw, dialect: str, source: str, ctx: ColumnContext):
 
 def translate(expr: str, dialect: str, ctx: Optional[ColumnContext] = None, *,
               name: str = DEFAULT_NAME, sisense_context: Optional[dict] = None,
-              tableau_role: Optional[str] = None) -> dict[str, Any]:
+              tableau_role: Optional[str] = None,
+              first_week_day: Optional[int] = None) -> dict[str, Any]:
     """Translate one source formula. Never raises for an untranslatable input — that is
     ``status: NEEDS_REVIEW`` with the reason in ``notes``."""
     dialect = normalise_dialect(dialect)
@@ -146,7 +150,7 @@ def translate(expr: str, dialect: str, ctx: Optional[ColumnContext] = None, *,
     source, had_comments = strip_comments(source, dialect)
     if not source:
         raise ValueError("the formula is only a comment")
-    raw = _run_adapter(source, dialect, ctx, sisense_context, tableau_role)
+    raw = _run_adapter(source, dialect, ctx, sisense_context, tableau_role, first_week_day)
     if had_comments:
         raw.notes.append("comments were removed before translating")
     out, status, notes, traps = _post_process(raw, dialect, source, ctx)

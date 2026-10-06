@@ -96,6 +96,10 @@ def translate_cmd(
         None, "--context", help="sisense: the JAQL context object, JSON or @file"),
     role: Optional[str] = typer.Option(
         None, "--role", help="tableau: measure | attribute (default: inferred from aggregates)"),
+    first_week_day: Optional[int] = typer.Option(
+        None, "--first-week-day", min=0, max=6,
+        help="qlik: the app's FirstWeekDay (0 = Monday … 6 = Sunday; US apps are usually 6). "
+             "Without it a one-argument Weekday() is NEEDS_REVIEW"),
 ) -> None:
     """Translate ONE formula into ThoughtSpot formula syntax.
 
@@ -136,7 +140,7 @@ def translate_cmd(
     ctx, validator, model_doc = _build_context(columns, model, profile, key_column)
     result = translate(text, dialect, ctx, name=name,
                        sisense_context=_json_option(jaql_context, "--context"),
-                       tableau_role=role)
+                       tableau_role=role, first_week_day=first_week_day)
     exit_code = 0
     if validate != "none":
         exit_code = _validate(result, validate, validator, model_doc, name, group_by)

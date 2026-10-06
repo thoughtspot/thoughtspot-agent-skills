@@ -4257,6 +4257,7 @@ ts formula detect "{FIXED [Region] : SUM([Sales])}"
 | `--group-by` | `execute`: the attribute a measure is probed by (default: the Model's first physical attribute) |
 | `--context` | `sisense`: the JAQL context object (`{"[rev]": {"dim": "[Orders.Revenue]", "agg": "sum"}}`), JSON or `@file`. Without it each `[key]` reads as a column named `key` |
 | `--role` | `tableau`: `measure` / `attribute` (default inferred) |
+| `--first-week-day` | `qlik`: the app's `FirstWeekDay`, 0 = Monday … 6 = Sunday (US apps usually 6). Without it a one-argument `Weekday()` is `NEEDS_REVIEW` — a pasted formula has no load script |
 | `--profile`, `-p` | Profile (or `TS_PROFILE`); only needed with `--model` |
 
 **Output** (stdout JSON): `dialect`, `input`, `formula` (the **TML form** — bracketed
@@ -4275,9 +4276,9 @@ result carries `original_kept` and, when the translator emitted something, `part
 **Never more certain than the evidence.** Comments (`--`, `//`, `/* */`) are stripped first.
 After translation three layers can lower the status:
 - *known defects* (`ts_cli/formula_translate/defects.py`) — constructs a wrapped translator
-  gets wrong today, each citing its fix (Databricks `DATEDIFF` order; Snowflake `DAYOFWEEK`,
-  Databricks `dayofweek`, Tableau `DATEPART('weekday')`, BL-334) → `NEEDS_REVIEW`;
-  `ZEROIFNULL` (BL-226) and a dropped Tableau `ZN()` → `APPROXIMATED` with a trap;
+  gets wrong or cannot vouch for today, each citing its fix: `ZEROIFNULL` (BL-226) and a
+  dropped Tableau `ZN()` → `APPROXIMATED` with a trap (the BL-334 weekday and BL-336
+  `DATEDIFF` entries were removed when #565 / #564 fixed those translators);
 - the *output guard* — a function outside the ThoughtSpot formula catalog (the set
   `check_formula_catalog.py` parses from `thoughtspot-formula-patterns.md`, vendored in
   `formula_translate/catalog.py` with a drift test), a SQL operator read as a column
