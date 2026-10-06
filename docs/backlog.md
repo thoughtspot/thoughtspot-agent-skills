@@ -95,11 +95,11 @@ are roughly ordered by value÷effort.
 | ~~BL-340~~ | ~~`SUBSTR`/`SUBSTRING` copied the 1-based start into zero-based `substr` — every substring shifted one character (Snowflake; Databricks same shape)~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
 | ~~BL-341~~ | ~~Snowflake `DATEDIFF(year, …)` emitted as `diff_days / 365`, not `diff_years` (the mapping doc already says `diff_years`)~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
 | ~~BL-342~~ | ~~`MONTHS_BETWEEN` → `diff_months` marked TRANSLATED with no trap, though fractional vs boundary count (mapping doc: "Not equivalent")~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
-| BL-346 | Excel `CEILING.MATH` translated with `CEILING`'s rule — a negative significance flips the rounding direction (silent, fidelity M1) | next `ts_cli/excel` change |
-| BL-347 | Excel `CEILING(x, 0)` is 0; the translation divides by the significance and returns NULL (silent, fidelity M1) | with BL-346 |
-| BL-348 | `ROUNDUP`/`ROUNDDOWN` beyond 6 digits lose precision — integer division keeps scale 6 in Snowflake (silent, fidelity M1) | next `ts_cli/excel` change |
-| BL-349 | a boolean joined into text renders `true`/`false`, Excel `TRUE`/`FALSE`; only a note, status TRANSLATED (silent, fidelity M1) | with BL-346 |
-| BL-350 | a text function over a date input returns ISO text; Excel returns the serial; no trap (silent, fidelity M1) | with BL-349 |
+| ~~BL-346~~ | ~~Excel `CEILING.MATH` translated with `CEILING`'s rule — a negative significance flips the rounding direction (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
+| ~~BL-347~~ | ~~Excel `CEILING(x, 0)` is 0; the translation divides by the significance and returns NULL (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
+| ~~BL-348~~ | ~~`ROUNDUP`/`ROUNDDOWN` beyond 6 digits lose precision — integer division keeps scale 6 in Snowflake (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
+| ~~BL-349~~ | ~~a boolean joined into text renders `true`/`false`, Excel `TRUE`/`FALSE`; only a note, status TRANSLATED (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
+| ~~BL-350~~ | ~~a text function over a date input returns ISO text; Excel returns the serial; no trap (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
 
 ### Tier 2 — Schedule soon
 
@@ -227,17 +227,18 @@ are roughly ordered by value÷effort.
 | ~~BL-338~~ | ~~`ts-object-formula-translate` routes the `google_sheets` dialect to the Excel function map (`formula_translate/detect.py:25`), so Sheets formulas skip the Sheets delta map (REGEXEXTRACT groups, SPLIT defaults, CODE, IFERROR default, QUERY)~~ | DONE (2026-10-06 — ts-cli v0.157.1, skill 1.1.0) |
 | ~~BL-343~~ | ~~`TO_CHAR`/`TO_VARCHAR(x, format)` drop the format and emit one-argument `to_string`, rejected on import~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
 | ~~BL-345~~ | ~~from-Databricks `DATEDIFF(MONTH, s, e)` → `diff_months`: Databricks counts **complete** months, `diff_months` boundaries (Jan 31 → Feb 1: 0 vs 1). Documented as a gap, reported TRANSLATED~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
-| BL-352 | Excel date text literals passed straight to date functions — rejected at import (12 fidelity-M1 cases, all reported TRANSLATED) | next `ts_cli/excel` change |
-| BL-353 | Excel implicit type coercion not inserted — ThoughtSpot's type check rejects the formula (19 fidelity-M1 cases) | with BL-352 |
-| BL-354 | `IFERROR` with a fallback of another type — branch types must agree, rejected at import | with BL-352 |
-| BL-355 | a DOUBLE column in an integer slot (`substr` start/length, `right` count) is rejected at import | with BL-352 |
+| ~~BL-352~~ | ~~Excel date text literals passed straight to date functions — rejected at import (12 fidelity-M1 cases, all reported TRANSLATED)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
+| ~~BL-353~~ | ~~Excel implicit type coercion not inserted — ThoughtSpot's type check rejects the formula (19 fidelity-M1 cases)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
+| ~~BL-354~~ | ~~`IFERROR` with a fallback of another type — branch types must agree, rejected at import~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
+| ~~BL-355~~ | ~~a DOUBLE column in an integer slot (`substr` start/length, `right` count) is rejected at import~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
 
 ### Tier 3 — Opportunistic
 
 | Item | Summary | Target |
 |---|---|---|
 | BL-193 | Worktree `git commit` runs the MAIN checkout's pre-commit script — local gates are the wrong branch's | opportunistic |
-| BL-351 | decimal literals are exact in the warehouse, IEEE doubles in Excel — literal-only arithmetic differs in the 13th digit (fidelity M1): document or emit doubles | 2026-11-30 |
+| BL-356 | the M1 cross-check agrees at 1e-9 while cases score at 1e-12 — a last-digit oracle disagreement is run and scored, not quarantined | next M1 / M2 harness change |
+| BL-351 | decimal literals are exact in the warehouse, IEEE doubles in Excel — literal-only arithmetic differs in the 13th digit (fidelity M1): document or emit doubles | documented 2026-10-07 (divergence, no fix planned); revisit only if a sheet needs Excel's double errors |
 | BL-177 | Reverse legs synthesise names that were already available | opportunistic |
 | BL-190 | Re-run the TML census: `--fqn --include-obj-id` (evidence NM1/X8) + a second cluster (T3) | next census session |
 | BL-173 | Bound `ts tml verify-render` per-tile probing on large liveboards | opportunistic |
@@ -12822,7 +12823,7 @@ only — the fidelity harness has no Databricks oracle yet.
 
 ## BL-346 — Excel `CEILING.MATH` is translated with `CEILING`'s rule, so a negative significance flips the rounding direction `Tier 1`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-07, ts-cli v0.161.0).
 **Source:** formula fidelity harness M1 (`tools/formula-fidelity/`, cases
 `lo-mathematical-ceiling.math-sheet2-r6` and `-r19`; report `docs/reviews/2026-10-06-fidelity-m1-excel.md`).
 A **silent wrong answer**: TRANSLATED, no trap, imports, returns a different number.
@@ -12840,11 +12841,13 @@ A **silent wrong answer**: TRANSLATED, no trap, imports, returns a different num
 mode argument (round negatives away from zero) needs `if ( x < 0 ) then floor … else ceil …`. Add a
 translator unit test per sign combination. Re-run M1: both cases must move to MATCH.
 
+**Resolution (2026-10-07, ts-cli v0.161.0).** `CEILING.MATH` has its own handler (`functions._ceiling_math`): `ceil ( x / abs ( s ) ) * abs ( s )` (a literal significance folded), a non-zero literal `mode` → `if ( x < 0 ) then floor ( x / abs ( s ) ) * abs ( s ) else ceil ( … )`, a non-literal mode NEEDS_REVIEW, a zero significance 0 (BL-347). Unit-tested by value over every sign × mode combination and Microsoft's worked examples (`tests/test_excel_m1_fixes.py`). Live: both M1 cases MATCH (after-fixes run 2026-10-07, `tools/formula-fidelity/runs/2026-10-07-excel-m1.json`).
+
 **Target:** the next `ts_cli/excel` change.
 
 ## BL-347 — Excel `CEILING(x, 0)` returns 0; the translation divides by the significance and returns NULL `Tier 1`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-07, ts-cli v0.161.0).
 **Source:** formula fidelity harness M1 (case `lo-mathematical-ceiling.xcl-sheet2-r10`). A **silent
 wrong answer** (TRANSLATED, no trap): Excel's 0 comes back as NULL.
 
@@ -12857,11 +12860,13 @@ wrong answer** (TRANSLATED, no trap): Excel's 0 comes back as NULL.
 **Fix.** For `CEILING` (and `CEILING.MATH`), `if ( s = 0 ) then 0 else …` when the significance is
 not a non-zero literal; leave `FLOOR` as is. Unit-test both.
 
+**Resolution (2026-10-07, ts-cli v0.161.0).** `CEILING` and `CEILING.MATH` with a non-literal significance emit `if ( s = 0 ) then 0 else …`; a literal 0 folds to `0`, a non-zero literal needs no guard; `FLOOR` is unchanged (NULL for Excel's `#DIV/0!`). Live: the M1 case MATCHes (2026-10-07).
+
 **Target:** with BL-346.
 
 ## BL-348 — `ROUNDUP` / `ROUNDDOWN` to more than 6 digits lose precision: `ceil ( x * 10^n ) / 10^n` divides two integers in Snowflake `Tier 1`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-07, ts-cli v0.161.0).
 **Source:** formula fidelity harness M1 (case `lo-mathematical-roundup-sheet2-r17`). A **silent wrong
 answer**: TRANSLATED, no trap.
 
@@ -12876,11 +12881,13 @@ answer**: TRANSLATED, no trap.
 dividing by the integer factor (`ceil ( x * F ) * I`, with `I` the fractional increment), or use the `round`-increment form
 for the scale. Probe the compiled SQL for both. Add cases above 6 digits.
 
+**Resolution (2026-10-07, ts-cli v0.161.0).** `_scaled` multiplies by the increment: `ceil ( x * 10^n ) * 10^-n`. Probed live 2026-10-07 (probe record §7): the old `/ 10^n`, `/ to_double ( 10^n )` and `to_double ( ceil ( … ) ) / 10^n` all returned 6 decimals; the increment form keeps 11. Live M1: the case now returns all 11 digits — Microsoft's rule and the bronze cross-check's value — but stays scored a mismatch against LibreOffice's silver value, one unit lower in the last place (≈1.2e-12 relative, above the 1e-12 tolerance): an oracle question, filed as BL-356.
+
 **Target:** the next `ts_cli/excel` change.
 
 ## BL-349 — A boolean joined into text renders `true` / `false`; Excel renders `TRUE` / `FALSE`, and the translator only notes it `Tier 1`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-07, ts-cli v0.161.0).
 **Source:** formula fidelity harness M1 (POI Excel-cached case `poi-formulaevaltestdata_copy-everythingtests-f27`).
 A **silent wrong answer**: TRANSLATED, no trap, a different string.
 
@@ -12894,11 +12901,13 @@ A **silent wrong answer**: TRANSLATED, no trap, a different string.
 **Fix.** Emit `if ( b ) then 'TRUE' else 'FALSE'` for a boolean operand of `&` / `CONCAT` (exact,
 no trap needed), or at least raise the note to a downgrading trap. Unit-test the emitted form.
 
+**Resolution (2026-10-07, ts-cli v0.161.0).** `coerce.as_text`: a boolean where text is expected is `if ( b ) then 'TRUE' else 'FALSE'` (a literal folds to `'TRUE'`), in `&` / `CONCAT` and every text function. Live: the POI case MATCHes (2026-10-07).
+
 **Target:** with BL-346.
 
 ## BL-350 — A text function over a date input returns the ISO date text; Excel returns the date serial, and the status stays TRANSLATED `Tier 1`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-07, ts-cli v0.161.0).
 **Source:** formula fidelity harness M1 (case `lo-text-upper-sheet2-r6`). A **silent wrong answer**:
 TRANSLATED; the one trap is the generic passthrough note, not this.
 
@@ -12913,11 +12922,13 @@ TRANSLATED; the one trap is the generic passthrough note, not this.
 argument downgrades with the serial-vs-text trap (or converts with `diff_days ( d , 1899-12-30 )`
 when the serial is what is wanted). Unit-test UPPER / LOWER / LEN / LEFT over a DATE column.
 
+**Resolution (2026-10-07, ts-cli v0.161.0).** Excel does read a date as its serial number here (dates are stored as serials; the LibreOffice expected value for upper-casing a date cell is the serial's digits), so the translation emits it: `to_string ( diff_days ( d , to_date ( '1899-12-30' , '%Y-%m-%d' ) ) )` — `to_string` of a DATE has no one-argument form (probe record §7). Trap: exact from 1900-03-01. A DATE_TIME there is NEEDS_REVIEW. Live: the M1 case MATCHes (2026-10-07).
+
 **Target:** with BL-349.
 
 ## BL-351 — Decimal literals are exact in the warehouse and IEEE doubles in Excel: constant arithmetic can differ in the 13th digit `Tier 3`
 
-**Filed:** 2026-10-06. **Status:** OPEN (decide: document or emit as double).
+**Filed:** 2026-10-06. **Status:** OPEN — decided 2026-10-07: **document, do not engineer away** (see Resolution).
 **Source:** formula fidelity harness M1 (POI Excel-cached case `poi-formulaevaltestdata_copy-everythingtests-f23`).
 Scored a **silent wrong answer** under the declared tolerance (relative 1e-12), but the root cause is
 platform arithmetic, not a `ts_cli/excel` rule: the translation is the identity.
@@ -12933,11 +12944,13 @@ platform arithmetic, not a `ts_cli/excel` rule: the translation is the identity.
 general notes and tag the case `platform-semantics`) or worth emitting literals as doubles. The
 tolerance is not widened (harness rule).
 
-**Target:** 2026-11-30.
+**Resolution (2026-10-07): document only.** Kept open as a recorded platform divergence, not a translator bug: the warehouse's exact decimal is the more accurate answer, and emitting literals as doubles would change every constant to reproduce Excel's rounding error. Documented in the Excel map (Translator coverage notes) and the `ts-object-formula-translate` skill's Known limitations; the translator adds a non-downgrading trap (`constant decimal arithmetic (BL-351)`) to literal-only arithmetic with a decimal, so the status stays TRANSLATED and the harness keeps scoring the M1 case as silent (the tolerance is not widened).
+
+**Target:** revisit only if a workbook needs Excel's double rounding errors reproduced.
 
 ## BL-352 — Excel date text literals (an ISO date in quotes) are passed straight to ThoughtSpot date functions, which reject a Text argument `Tier 2`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-07, ts-cli v0.161.0).
 **Source:** formula fidelity harness M1: **12 IMPORT_FAILED cases** (EDATE ×3, EOMONTH, WEEKDAY ×6,
 DAY, DAYS; ids in the report). Loud, but each one is reported TRANSLATED.
 
@@ -12951,11 +12964,13 @@ DAY, DAYS; ids in the report). Loud, but each one is reported TRANSLATED.
 ISO date (probe the accepted format string first), otherwise NEEDS_REVIEW. A date-time text literal
 needs the DATE_TIME form. Unit-test each date handler with a text literal.
 
+**Resolution (2026-10-07, ts-cli v0.161.0).** `coerce.as_date` in every date slot: a text literal → `to_date ( '…' , '<pattern>' )`, the pattern inferred (`%Y-%m-%d`, `%Y-%m-%dT%H:%M:%S`, `%Y/%m/%d`, `%d/%m/%Y`, `%m/%d/%Y`; ThoughtSpot compiles `%Y-%m-%d` to `'YYYY-MM-DD'`, live 2026-10-07). Ambiguous day/month order, impossible dates, text that is not a date and text before 1900 are NEEDS_REVIEW. Live: 11 of the 12 M1 cases MATCH; the twelfth (a date-time text before 1900, which Excel does not read as a date) is NEEDS_REVIEW, as is the separate non-date-text case (Excel `#VALUE!`).
+
 **Target:** the next `ts_cli/excel` change.
 
 ## BL-353 — Excel's implicit type coercion (number ↔ text, serial → date, boolean → number) is not inserted, so ThoughtSpot's type check rejects the formula `Tier 2`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-07, ts-cli v0.161.0).
 **Source:** formula fidelity harness M1: **19 IMPORT_FAILED cases** (YEAR, MONTH, SEARCH, MID, VALUE,
 LEN, ABS, EOMONTH, CEILING, POWER, MOD, ROUNDUP, a division and a text-vs-boolean comparison; ids in
 the report). Loud, all reported TRANSLATED.
@@ -12973,11 +12988,13 @@ the report). Loud, all reported TRANSLATED.
 `to_string`, `to_double` / `to_integer`, or a serial-to-date form, and a downgrading trap where the
 coercion can fail at run time; NEEDS_REVIEW where no type is known. Unit-test per function family.
 
+**Resolution (2026-10-07, ts-cli v0.161.0).** `coerce.py` writes Excel's coercions out: a serial number → its date (literal folded; a column `add_days ( to_date ( '1899-12-30' , '%Y-%m-%d' ) , floor ( x ) )`), a number into a text function → `to_string`, numeric text in arithmetic → folded or `to_double ( x )` (APPROXIMATED, trap), `VALUE` by type, text compared with a number or boolean → Excel's type-order constant. Backstop: a type checker over the emitted AST (`typecheck.py`) makes any remaining provable type error NEEDS_REVIEW. Live M1 (2026-10-07): 0 import failures in the whole run.
+
 **Target:** with BL-352.
 
 ## BL-354 — `IFERROR(x, fallback)` with a fallback of a different type than `x` is rejected (branch types must agree) `Tier 2`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-07, ts-cli v0.161.0).
 **Source:** formula fidelity harness M1 (case `lo-logical-iferror-sheet2-r14`): IMPORT_FAILED,
 reported TRANSLATED.
 
@@ -12990,11 +13007,13 @@ reported TRANSLATED.
 **Fix.** When the fallback's type differs from the expression's, wrap the numeric branch in
 `to_string` with a trap, or return NEEDS_REVIEW. Unit-test.
 
+**Resolution (2026-10-07, ts-cli v0.161.0).** `coerce.unify_branches` in `IF` and `IFERROR`: a number beside text → `to_string ( … )`, a boolean beside text → `'TRUE'` / `'FALSE'`, a boolean beside a number → 1 / 0, each APPROXIMATED with a trap; a date beside text is left to the type checker (NEEDS_REVIEW). Live: the M1 case MATCHes (2026-10-07).
+
 **Target:** with BL-352.
 
 ## BL-355 — A DOUBLE column in an integer argument (`substr` start / length, `right` / `left` count) is rejected at import `Tier 2`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-07, ts-cli v0.161.0).
 **Source:** formula fidelity harness M1: **4 IMPORT_FAILED cases** (MID ×3, RIGHT ×1; ids in the
 report). Loud, reported TRANSLATED.
 
@@ -13008,4 +13027,26 @@ report). Loud, reported TRANSLATED.
 **Fix.** Probe which integer forms the slots accept (`to_integer ( x )`, `floor ( x )`), then wrap a
 non-INT64 argument in that form. Unit-test with a DOUBLE column.
 
+**Resolution (2026-10-07, ts-cli v0.161.0).** `coerce.as_int` in every integer slot: a DOUBLE → `floor ( x )` (exact for x ≥ 0; a negative count or position is `#VALUE!` in Excel), a literal truncated, a month offset `if ( x < 0 ) then ceil ( x ) else floor ( x )`. `to_integer` was probed and rounds (2.7 → 3), so it is not used. Live: all 4 M1 cases MATCH (2026-10-07).
+
 **Target:** with BL-352.
+
+## BL-356 — The M1 cross-check agrees at 1e-9, looser than the 1e-12 a case is scored at, so a last-digit oracle disagreement is never quarantined `Tier 3`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** formula fidelity M1 after-fixes run (case `lo-mathematical-roundup-sheet2-r17`;
+report `docs/reviews/2026-10-06-fidelity-m1-excel.md`, "After fixes").
+
+**The facts.**
+- `crosscheck_formulas.agree` accepts a bronze value within `1e-9` relative; the case is then
+  scored against its own declared tolerance (`rel 1e-12`).
+- After BL-348 the case returns the value Microsoft's rule and the bronze `formulas` value give;
+  the LibreOffice silver value is one unit lower in the 11th decimal (≈1.2e-12 relative). The
+  cross-check said "agree", so the case was run and scores as a silent wrong answer, where by
+  `oracles.md` a silver-vs-bronze disagreement is quarantined, not decided.
+
+**Fix.** Cross-check at the case's own tolerance (or record both), re-run
+`crosscheck_formulas.py` and `select`, and confirm the case moves to ORACLE_DISPUTED. Do not
+widen any tolerance.
+
+**Target:** the next M1 / M2 harness change.

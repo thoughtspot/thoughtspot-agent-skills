@@ -1,0 +1,4602 @@
+{
+ "run": {
+  "date": "2026-10-06T20:34:52+00:00",
+  "profile": "se-thoughtspot",
+  "connection": "APJ_TAB",
+  "warehouse_table": "AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_M1_20261006T203452_7B80C2",
+  "ts_table": "ZZ_FIDELITY_M1_20261006T203452_7B80C2_TABLE_DELETE_ME",
+  "ts_model": "ZZ_FIDELITY_M1_20261006T203452_7B80C2_DELETE_ME",
+  "translator_version": "ts-cli 0.160.0",
+  "runtime_s": 674.2,
+  "phases": {
+   "load": 1.8,
+   "oracle": 0.0,
+   "translate": 0.2,
+   "ts_import": 13.3,
+   "agentql": 650.5,
+   "teardown": 4.6
+  },
+  "cleanup": {
+   "ts_confirmed_absent": true,
+   "warehouse_confirmed_absent": true,
+   "remaining": [],
+   "not_owned": [],
+   "errors": []
+  },
+  "startup_orphans": {
+   "thoughtspot": 0,
+   "warehouse": 0
+  },
+  "summary": {
+   "cases": 250,
+   "scored": 230,
+   "silent_wrong": 2,
+   "oracle_disputed": 20,
+   "by_class": {
+    "SILENT_WRONG": 2,
+    "WARNED_WRONG": 2,
+    "DIVERGENCE_BLANK": 3,
+    "DIVERGENCE_ERROR": 2,
+    "RUN_FAILED": 0,
+    "IMPORT_FAILED": 0,
+    "TRANSLATE_FAILED": 3,
+    "ERROR_EQUIV": 3,
+    "ORACLE_FAILED": 0,
+    "MATCH": 215,
+    "ORACLE_DISPUTED": 20
+   },
+   "by_source": {
+    "libreoffice": {
+     "SILENT_WRONG": 1,
+     "WARNED_WRONG": 2,
+     "DIVERGENCE_BLANK": 2,
+     "DIVERGENCE_ERROR": 2,
+     "RUN_FAILED": 0,
+     "IMPORT_FAILED": 0,
+     "TRANSLATE_FAILED": 2,
+     "ERROR_EQUIV": 2,
+     "ORACLE_FAILED": 0,
+     "MATCH": 171,
+     "ORACLE_DISPUTED": 18
+    },
+    "poi": {
+     "SILENT_WRONG": 1,
+     "WARNED_WRONG": 0,
+     "DIVERGENCE_BLANK": 1,
+     "DIVERGENCE_ERROR": 0,
+     "RUN_FAILED": 0,
+     "IMPORT_FAILED": 0,
+     "TRANSLATE_FAILED": 1,
+     "ERROR_EQUIV": 1,
+     "ORACLE_FAILED": 0,
+     "MATCH": 44,
+     "ORACLE_DISPUTED": 2
+    }
+   }
+  }
+ },
+ "cases": [
+  {
+   "id": "lo-text-mid-sheet2-r3",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "MID"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-roundup-sheet2-r8",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDUP"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-power-sheet2-r5",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "POWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-roundup-sheet2-r9",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDUP"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-len-sheet2-r13",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LEN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-floor.xcl-sheet2-r4",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "FLOOR"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-floor.xcl-sheet2-r27",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "FLOOR"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mod-sheet2-r2",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MOD"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-round-sheet2-r16",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-year-sheet2-r3",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "YEAR"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-upper-sheet2-r5",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "UPPER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-find-sheet2-r4",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "FIND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-days-sheet2-r5",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "DAYS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-rounddown-sheet2-r11",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDDOWN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-mid-sheet2-r11",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "MID"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.math-sheet2-r6",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING.MATH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-ifs-sheet2-r5",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IFS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-rounddown-sheet2-r16",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDDOWN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ln-sheet2-r3",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "LN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-log10-sheet2-r3",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "LOG10"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-if-sheet2-r8",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IF"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "APPROXIMATED",
+   "trap_count": 1,
+   "verdict": "MISMATCH",
+   "class": "WARNED_WRONG",
+   "mismatch_kinds": [
+    "NULL_DIFF"
+   ],
+   "cause_tag": "unexplained",
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-round-sheet2-r12",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-ifs-sheet2-r12",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IFS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-mid-sheet2-r5",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "MID"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-search-sheet2-r2",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "SEARCH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-roundup-sheet2-r13",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDUP"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-rounddown-sheet2-r7",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDDOWN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-year-sheet2-r4",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "YEAR"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-rounddown-sheet2-r3",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDDOWN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-eomonth-sheet2-r2",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "EOMONTH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.xcl-sheet2-r22",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-roundup-sheet2-r11",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDUP"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-add-sheet2-r7",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-find-sheet2-r17",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "FIND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-substitute-sheet2-r2",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "SUBSTITUTE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-floor.xcl-sheet2-r19",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "FLOOR"
+   ],
+   "flags": [
+    "error-expected"
+   ],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MISMATCH",
+   "class": "DIVERGENCE_ERROR",
+   "mismatch_kinds": [
+    "ERROR_VS_VALUE"
+   ],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-ifs-sheet2-r2",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IFS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mod-sheet2-r33",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MOD"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-value-sheet2-r12",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "VALUE"
+   ],
+   "flags": [
+    "blank-input"
+   ],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MISMATCH",
+   "class": "DIVERGENCE_BLANK",
+   "mismatch_kinds": [
+    "NULL_DIFF"
+   ],
+   "cause_tag": "excel-blank-vs-null",
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-if-sheet2-r6",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IF"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-abs-sheet2-r4",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ABS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-weekday-sheet2-r6",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "WEEKDAY"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-month-sheet2-r3",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "MONTH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.math-sheet2-r8",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING.MATH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-if-sheet2-r11",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IF",
+    "TRUE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "APPROXIMATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.xcl-sheet2-r5",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-roundup-sheet2-r17",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDUP"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MISMATCH",
+   "class": "SILENT_WRONG",
+   "mismatch_kinds": [
+    "NUMERIC_DIFF"
+   ],
+   "cause_tag": "unexplained",
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-concat-sheet2-r6",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "CONCAT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-search-sheet2-r25",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "SEARCH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-sign-sheet2-r2",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "SIGN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-round-sheet2-r6",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-edate-sheet2-r3",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "EDATE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-power-sheet2-r6",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "POWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ln-sheet2-r8",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "LN"
+   ],
+   "flags": [
+    "error-expected"
+   ],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "ERROR_EQUIV",
+   "class": "ERROR_EQUIV",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-textjoin-sheet2-r2",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "TEXTJOIN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-search-sheet2-r10",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "SEARCH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-concatenate-sheet2-r6",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "CONCATENATE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-trim-sheet2-r4",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "TRIM"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-weekday-sheet2-r2",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "WEEKDAY"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-ifs-sheet2-r4",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IFS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-concat-sheet2-r2",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "CONCAT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-right-sheet2-r15",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "RIGHT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-roundup-sheet2-r5",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDUP"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-if-sheet2-r4",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "EXACT",
+    "IF"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-concatenate-sheet2-r2",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "CONCATENATE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-mid-sheet2-r9",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "MID"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-floor.xcl-sheet2-r22",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "FLOOR"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-floor.xcl-sheet2-r7",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "FLOOR"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-right-sheet2-r11",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "RIGHT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-trim-sheet2-r3",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "TRIM"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-eomonth-sheet2-r15",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "EOMONTH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ln-sheet2-r2",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "LN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-switch-sheet2-r10",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "SWITCH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-upper-sheet2-r2",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "UPPER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-day-sheet2-r5",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "DAY"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "NEEDS_REVIEW",
+   "trap_count": 0,
+   "verdict": "TRANSLATE_FAILED",
+   "class": "TRANSLATE_FAILED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-weekday-sheet2-r18",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "WEEKDAY"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-value-sheet2-r4",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "VALUE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-log10-sheet2-r2",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "LOG10"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-iferror-sheet2-r14",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IFERROR"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "APPROXIMATED",
+   "trap_count": 3,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mod-sheet2-r4",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MOD"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-search-sheet2-r26",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "SEARCH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-switch-sheet2-r2",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "SWITCH",
+    "WEEKDAY"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-floor.xcl-sheet2-r28",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "FLOOR"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-mid-sheet2-r10",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "MID"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-left-sheet2-r11",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LEFT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-ifs-sheet2-r9",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IFS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.math-sheet2-r19",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING.MATH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-substitute-sheet2-r4",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "SUBSTITUTE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-left-sheet2-r7",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LEFT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-right-sheet2-r13",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "RIGHT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-int-sheet2-r2",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "INT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-if-sheet2-r18",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IF"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-rounddown-sheet2-r8",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDDOWN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-abs-sheet2-r8",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ABS"
+   ],
+   "flags": [
+    "error-expected"
+   ],
+   "crosscheck": "agree",
+   "translation_status": "APPROXIMATED",
+   "trap_count": 1,
+   "verdict": "ERROR_EQUIV",
+   "class": "ERROR_EQUIV",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ln-sheet2-r6",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "LN"
+   ],
+   "flags": [
+    "error-expected"
+   ],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MISMATCH",
+   "class": "DIVERGENCE_ERROR",
+   "mismatch_kinds": [
+    "ERROR_VS_VALUE"
+   ],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-add-sheet2-r4",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-networkdays-sheet2-r5",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "NETWORKDAYS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 3,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-find-sheet2-r2",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "FIND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mround-sheet2-r2",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MROUND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mod-sheet2-r35",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MOD"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-textjoin-sheet2-r9",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "TEXTJOIN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.math-sheet2-r31",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING.MATH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-sign-sheet2-r5",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "SIGN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mod-sheet2-r6",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MOD"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.math-sheet2-r30",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING.MATH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-power-sheet2-r8",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "POWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-upper-sheet2-r4",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "UPPER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-round-sheet2-r8",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-weekday-sheet2-r14",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "WEEKDAY"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-lower-sheet2-r4",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LOWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-left-sheet2-r13",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LEFT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-networkdays_excel2003-sheet2-r5",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "NETWORKDAYS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 3,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-find-sheet2-r19",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "FIND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-search-sheet2-r6",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "SEARCH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-weekday-sheet2-r15",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "WEEKDAY"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-weekday-sheet2-r16",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "WEEKDAY"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-right-sheet2-r2",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "RIGHT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-left-sheet2-r5",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LEFT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mround-sheet2-r3",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MROUND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-right-sheet2-r14",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "RIGHT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-sign-sheet2-r7",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "SIGN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mod-sheet2-r31",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MOD"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-mid-sheet2-r4",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "MID"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.xcl-sheet2-r7",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-eomonth-sheet2-r14",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "EOMONTH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.xcl-sheet2-r27",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.xcl-sheet2-r10",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-log10-sheet2-r4",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "LOG10"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-round-sheet2-r7",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mround-sheet2-r5",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MROUND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-eomonth-sheet2-r7",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "EOMONTH"
+   ],
+   "flags": [
+    "error-expected"
+   ],
+   "crosscheck": "agree",
+   "translation_status": "NEEDS_REVIEW",
+   "trap_count": 0,
+   "verdict": "TRANSLATE_FAILED",
+   "class": "TRANSLATE_FAILED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-concat-sheet2-r3",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "CONCAT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ln-sheet2-r5",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "LN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.xcl-sheet2-r18",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-int-sheet2-r4",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "INT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-eomonth-sheet2-r12",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "EOMONTH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-ifs-sheet2-r11",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IFS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-abs-sheet2-r6",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ABS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-if-sheet2-r19",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IF"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-eomonth-sheet2-r6",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "EOMONTH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-search-sheet2-r23",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "SEARCH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-round-sheet2-r2",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-right-sheet2-r3",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "RIGHT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-upper-sheet2-r6",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "UPPER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 3,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-networkdays_excel2003-sheet2-r6",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "NETWORKDAYS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 3,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-sign-sheet2-r6",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "SIGN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-if-sheet2-r12",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "IF",
+    "TRUE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "APPROXIMATED",
+   "trap_count": 1,
+   "verdict": "MISMATCH",
+   "class": "WARNED_WRONG",
+   "mismatch_kinds": [
+    "NULL_DIFF"
+   ],
+   "cause_tag": "unexplained",
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-edate-sheet2-r4",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "EDATE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-sub-sheet2-r4",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-log10-sheet2-r5",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "LOG10"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-switch-sheet2-r3",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "SWITCH",
+    "WEEKDAY"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-textjoin-sheet2-r8",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "TEXTJOIN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-len-sheet2-r12",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LEN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-lower-sheet2-r10",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "EXACT",
+    "LOWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-switch-sheet2-r7",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "SWITCH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-exp-sheet2-r2",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "EXP"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-abs-sheet2-r7",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ABS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-edate-sheet2-r5",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "EDATE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-int-sheet2-r5",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "INT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-switch-sheet2-r4",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "SWITCH",
+    "WEEKDAY"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-power-sheet2-r9",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "POWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-concat-sheet2-r5",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "CONCAT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ln-sheet2-r4",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "EXP",
+    "LN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-value-sheet2-r5",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "VALUE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-len-sheet2-r10",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LEN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-upper-sheet2-r3",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "UPPER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-left-sheet2-r12",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LEFT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-find-sheet2-r21",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "FIND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-left-sheet2-r14",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LEFT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-trim-sheet2-r2",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "TRIM"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-log10-sheet2-r7",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "LOG10"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-lower-sheet2-r2",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LOWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-concatenate-sheet2-r3",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "CONCATENATE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-concat-sheet2-r4",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "CONCAT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-concatenate-sheet2-r4",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "CONCATENATE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-days-sheet2-r2",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "DAYS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-power-sheet2-r7",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "POWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-abs-sheet2-r2",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ABS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-concatenate-sheet2-r5",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "CONCATENATE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-exp-sheet2-r3",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "EXP"
+   ],
+   "flags": [
+    "blank-input"
+   ],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MISMATCH",
+   "class": "DIVERGENCE_BLANK",
+   "mismatch_kinds": [
+    "NULL_DIFF"
+   ],
+   "cause_tag": "excel-blank-vs-null",
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-len-sheet2-r2",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "LEN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-sum-sheet2-r3",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "SUM"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-m31",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "APPROXIMATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-f7",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-f23",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MISMATCH",
+   "class": "SILENT_WRONG",
+   "mismatch_kinds": [
+    "NUMERIC_DIFF"
+   ],
+   "cause_tag": "unexplained",
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-d504",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "FALSE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-f27",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-l756",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "INT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-e900",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "MID"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-h796",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "ISNUMBER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-i51",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-g1184",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "ROUNDDOWN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-e63",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-g1168",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "RIGHT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-k1188",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "ROUNDUP"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "APPROXIMATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-f96",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "ABS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-h544",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "FLOOR"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-d1408",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "TRIM"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-e732",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "IF"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-j544",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "FLOOR"
+   ],
+   "flags": [
+    "error-expected"
+   ],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "ERROR_EQUIV",
+   "class": "ERROR_EQUIV",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-g264",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "CONCATENATE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-i212",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "CEILING"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "APPROXIMATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-d832",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "LEN"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-e136",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "AND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-g876",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "LOWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-e476",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "EXACT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-g520",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "FIND"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 2,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-l1068",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "POWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "APPROXIMATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-d932",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "MOD"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-g1068",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "POWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-f796",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "ISNUMBER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-i1436",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "UPPER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-j932",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "MOD"
+   ],
+   "flags": [
+    "blank-input"
+   ],
+   "crosscheck": "agree",
+   "translation_status": "APPROXIMATED",
+   "trap_count": 1,
+   "verdict": "MISMATCH",
+   "class": "DIVERGENCE_BLANK",
+   "mismatch_kinds": [
+    "NULL_DIFF"
+   ],
+   "cause_tag": "excel-blank-vs-null",
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-i756",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "INT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-h1020",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "OR"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-r96",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "ABS"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-d1280",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "SQRT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-e772",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "ISBLANK"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-p1408",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "TRIM"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-l1408",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "TRIM"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-f1216",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "SEARCH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-f900",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "MID"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-e876",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "LOWER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-i1188",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "ROUNDUP"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-d796",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "ISNUMBER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-d1312",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "SUBSTITUTE"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-e1436",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "UPPER"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 1,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-e1188",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "ROUNDUP"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-g980",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "NOT"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "TRANSLATED",
+   "trap_count": 0,
+   "verdict": "MATCH",
+   "class": "MATCH",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-f940",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "MONTH"
+   ],
+   "flags": [],
+   "crosscheck": "agree",
+   "translation_status": "NEEDS_REVIEW",
+   "trap_count": 0,
+   "verdict": "TRANSLATE_FAILED",
+   "class": "TRANSLATE_FAILED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mround-sheet2-r22",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MROUND"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-rounddown-sheet2-r14",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDDOWN"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-month-sheet2-r5",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "MONTH"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-sub-sheet2-r3",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-add-sheet2-r3",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-add-sheet2-r2",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mround-sheet2-r7",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MROUND"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-mround-sheet2-r6",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "MROUND"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-ceiling.math-sheet2-r17",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "CEILING.MATH"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-networkdays.intl-sheet2-r5",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "NETWORKDAYS.INTL"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-networkdays.intl-sheet2-r6",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "NETWORKDAYS.INTL"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-logical-switch-sheet2-r9",
+   "source": "libreoffice",
+   "category": "logical",
+   "functions": [
+    "SWITCH"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-month-sheet2-r6",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "MONTH"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-year-sheet2-r2",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "YEAR"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-year-sheet2-r8",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "YEAR"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-date_time-year-sheet2-r6",
+   "source": "libreoffice",
+   "category": "date_time",
+   "functions": [
+    "YEAR"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-power-sheet2-r3",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "POWER"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-text-value-sheet2-r10",
+   "source": "libreoffice",
+   "category": "text",
+   "functions": [
+    "VALUE"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-h1216",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "SEARCH"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "poi-formulaevaltestdata_copy-everythingtests-j1068",
+   "source": "poi",
+   "category": "excel-cached",
+   "functions": [
+    "POWER"
+   ],
+   "flags": [
+    "error-expected"
+   ],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  }
+ ]
+}

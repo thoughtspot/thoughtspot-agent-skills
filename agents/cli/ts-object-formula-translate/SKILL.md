@@ -449,6 +449,25 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 - **Tableau `DATEDIFF('week', …)`** comes back as `diff_days ( … ) / 7` — fractional 7-day
   spans, not week boundaries — so the CLI reports it `APPROXIMATED` / `direct (downgrade)`
   with a trap line.
+- **Excel / Sheets: a translation ThoughtSpot would reject on type is never TRANSLATED**
+  (ts-cli 0.161.0, fidelity M1). A type checker over the emitted formula
+  (`ts_cli/excel/typecheck.py`) knows each function's argument types — ThoughtSpot's
+  *Numeric* slots take an **integer** (a DOUBLE is rejected by `substr`, `left`, `right`,
+  `add_days`, `add_months`, `mod` and `to_double`), `to_string` has no one-argument form for a
+  date, `if` branches share one type. A provable error comes back `NEEDS_REVIEW` with a
+  `type check: …` note; a column of unknown type in an integer or conversion slot is asked in
+  `needs_types` (reason `typed argument`) — so pass `data_type` in `--columns`. Excel's own
+  coercions are written out: a text date → `to_date ( '…' , '%Y-%m-%d' )` (ambiguous
+  day/month order is `NEEDS_REVIEW`), a serial number → its date, a number or boolean in a text
+  function → its text (`'TRUE'` / `'FALSE'`, not `to_string`'s `true`), a date there → its
+  serial number, numeric text in arithmetic → `to_double` (APPROXIMATED), a DOUBLE count →
+  `floor`, mixed `IF` / `IFERROR` branches → one type (APPROXIMATED). The table is the Excel
+  map's *Implicit type coercion* section.
+- **Known divergence, not a defect: constant decimal arithmetic** (Excel only, BL-351). The
+  warehouse computes literals as exact decimals, Excel as binary doubles, so an all-literal
+  sum like `=0.1+0.2` can differ from Excel's in the 13th significant digit or beyond. The
+  translation carries a trap saying so and stays TRANSLATED; over a DOUBLE column both
+  compute in double.
 - **Level 2 data types** come from the Model's Table TMLs, best effort; a column whose type
   could not be read is treated as non-date.
 - `compile` returns no SQL — only `execute` compiles a query.
@@ -459,6 +478,7 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.0 | 2026-10-07 | Excel / Google Sheets (ts-cli v0.161.0, formula fidelity M1, BL-346..355): a type checker over the emitted formula turns every provable type error into `NEEDS_REVIEW` (a `type check:` note) instead of an import failure reported TRANSLATED, and asks a column's type (`needs_types`, reason `typed argument`) when an integer or conversion slot depends on it. Excel's implicit coercion is written out (text dates → `to_date`, serial numbers, numbers / booleans / dates into text, numeric text into arithmetic, DOUBLE counts → `floor`, one type across `IF` / `IFERROR` branches). Fixed silent wrong answers: `CEILING.MATH` sign and mode, a zero `CEILING` significance (0, not NULL), `ROUNDUP` / `ROUNDDOWN` beyond 6 digits, a boolean joined into text (`TRUE`), a text function over a date (its serial). Constant decimal arithmetic is a documented divergence (BL-351) |
 | 1.4.0 | 2026-10-06 | The Snowflake and Databricks translators it wraps fix `SUBSTR` (zero-based start), `DATEDIFF(year)` and the other units, `MONTHS_BETWEEN` (pass-through) and `TO_CHAR(x, fmt)` (pass-through) — BL-340..343, BL-345, ts-cli v0.160.0. New: Snowflake `DATEDIFF(week)` / `DATEDIFF(hour)` and every Databricks 3-argument `DATEDIFF` come back as exact `sql_int_op` pass-throughs; Databricks `DATEDIFF(DAY, …)` is native `diff_days` when `--columns` types both arguments DATE. A `diff_weeks` in any translation carries a Monday-week-start trap |
 | 1.3.0 | 2026-10-06 | New Step 4c: before presenting, ask *per row or a KPI that rolls up?* when `role_ambiguous` (showing both `role_options`), and the column types listed in `needs_types` with their name-based suggestions ("yes to all suggestions" accepted); re-run with `--role` and typed `--columns`; skipped with a Model or a stated role; grouped per column / per formula in a batch (ts-cli 0.159.0). Excel / Sheets no longer ask the role up front for every formula |
 | 1.2.0 | 2026-10-06 | Excel and Google Sheets are translator-backed (`ts formula translate --from excel` or `--from google_sheets`, ts-cli 0.158.0): ask the intended role and pass `--role` (MEASURE builds additive sums and ratios of totals); the map is only the labelled fallback for `NEEDS_REVIEW`; new Step 6b, ThoughtSpot → Excel via `--to excel`; `nullif` / `isnotnull` do not exist and `concat` needs Text arguments (BL-339) |

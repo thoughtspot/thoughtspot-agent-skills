@@ -4309,6 +4309,14 @@ form** — references by display name without brackets, a name with spaces kept 
 (`translator`, `tests`, and the validation result when run), `tml`. A `NEEDS_REVIEW`
 result carries `original_kept` and, when the translator emitted something, `partial`.
 
+**Excel / Google Sheets type check** (ts-cli 0.161.0, formula fidelity M1, BL-352..355): the
+translation is type-checked against a signature table (`ts_cli/excel/typecheck.py`, from the
+formula reference and live VALIDATE_ONLY probes). A provable type error — a DOUBLE in an
+integer slot, Text in `to_string`, a date in `to_string`'s one-argument form, `if` branches of
+different types, a comparison across types — makes the result `NEEDS_REVIEW` with a
+`type check: …` note, never TRANSLATED. Excel's implicit coercions are written out first
+(`ts_cli/excel/coerce.py`; the Excel map's *Implicit type coercion* table).
+
 **The skill's questions** (ts-cli 0.159.0; always present, empty / `false` when there is
 nothing to ask — so existing consumers are unaffected):
 
@@ -4319,7 +4327,10 @@ nothing to ask — so existing consumers are unaffected):
   (`IF([@x])`: a number needs `!= 0`), `blank test` (`x = ""`: `isnull` alone for a
   number or date), `blank IF branch` (`""` beside a number must be `null`), `date
   arithmetic` (listed only when the name suggests a date — the bare `a - b` is already
-  right for numbers); `note` is the trap / note text that rule already emits. Several
+  right for numbers), `typed argument` (ts-cli 0.161.0: the type checker found the column
+  in an integer slot — `substr`, `left`, `right`, `add_days`, `add_months`, `mod`, where a
+  DOUBLE is rejected — or in `to_double` / `to_string`, and cannot tell whether it fits);
+  `note` is the trap / note text that rule already emits. Several
   reasons for one column join with ` and `. Re-run with `--columns` carrying `data_type`
   (or `--model`) and the list empties. Excel / Google Sheets only today — the other
   translators do not flag unknown types.

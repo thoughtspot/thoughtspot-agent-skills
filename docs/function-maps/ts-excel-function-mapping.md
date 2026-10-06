@@ -907,6 +907,14 @@ numeric flag row-level (its column aggregation totals it). Acceptance: a 60-form
 every output VALIDATE_ONLY-clean on se-thoughtspot (2026-10-06,
 `tools/ts-cli/tests/fixtures/excel_regression/`).
 
+**Type check and implicit coercion (ts-cli 0.161.0).** Every translation is type-checked
+against ThoughtSpot's argument types before it is reported (`ts_cli/excel/typecheck.py`): a
+provable type error is NEEDS_REVIEW with a `type check:` note, never TRANSLATED, and Excel's own
+coercions are written out first — see [Implicit type coercion](#implicit-type-coercion-not-counted--arguments).
+Formula fidelity M1 (250 LibreOffice and Apache POI cases, 2026-10-06) found 36 translations
+rejected at import and 7 silent wrong answers; the after-fixes run is in its
+[report](../reviews/2026-10-06-fidelity-m1-excel.md#after-fixes-2026-10-07).
+
 Every other row is **map-backed**: the translator returns NEEDS_REVIEW citing the row, and the
 `ts-object-formula-translate` skill composes the answer from it, labelled hand-composed.
 
