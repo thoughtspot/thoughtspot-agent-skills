@@ -35,6 +35,7 @@ _UNIQUE_OUT = re.compile(r"\bunique count\s*\(")
 _DIFF_OUT = re.compile(r"\bdiff_(days|months|years|weeks|quarters|hours|minutes|seconds|time)\s*\(")
 _DAYS_OVER_7 = re.compile(r"\bdiff_days\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*/\s*7\b")
 _DIFF_MY_OUT = re.compile(r"\bdiff_(months|years|quarters)\s*\(")
+_DIFF_WEEKS_OUT = re.compile(r"\bdiff_weeks\s*\(")
 _WEEK_OUT = re.compile(
     r"\b(start_of_week|day_number_of_week|week_number_of_year|day_of_week|"
     r"week_number_of_month|week_number_of_quarter)\s*\(")
@@ -160,7 +161,12 @@ _OUTPUT_TRAPS = (
                    "DATEDIFF('week') source returns; wrap in floor() or rewrite if it matters"),
     (_DIFF_MY_OUT, "diff_months / diff_years count calendar boundaries crossed "
                    "(Jan 31 → Feb 1 = 1 month), not complete periods (OI-3)"),
-    (_WEEK_OUT, "assumes a Monday week start; diverges if the Model's calendar "
+    (_DIFF_WEEKS_OUT, "diff_weeks counts week boundaries with a FIXED Monday week start "
+                      "(epoch day arithmetic in its compiled SQL, 2026-10-06); a SQL "
+                      "DATEDIFF(week) follows the warehouse's week start (Snowflake "
+                      "WEEK_START), so they agree only under a Monday start (WEEK_START 0 "
+                      "or 1)"),
+    (_WEEK_OUT,"assumes a Monday week start; diverges if the Model's calendar "
                 "starts on another day (day_number_of_week is fixed 1 = Monday; "
                 "start_of_week follows the warehouse's DATE_TRUNC(week)) — OI-2, BL-334"),
 )

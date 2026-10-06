@@ -41,6 +41,9 @@ from ts_cli.databricks.mv_sql_constructs import (
 # sites are unaffected.
 from ts_cli.formula_common import (
     UntranslatableError,
+    expr_is_aggregated,
+    sql_passthrough_call,
+    sql_substr_to_ts,
     ts_round_from_sql_digits,
     ts_weekday_number,
 )
@@ -269,7 +272,10 @@ def _keyword_unit(text: str, cur: _Cursor, resolver,
 # --- function map: ts-databricks-formula-translation.md as data ------------
 
 _RENAME = {
-    "CONCAT": "concat", "LENGTH": "strlen", "SUBSTRING": "substr",
+    "CONCAT": "concat", "LENGTH": "strlen",
+    # SUBSTRING / SUBSTR deliberately do NOT live here (BL-340): Databricks' pos
+    # is 1-based (negative counts from the end), ThoughtSpot substr's zero-based
+    # — see formula_common.sql_substr_to_ts.
     # BL-171: TRIM/LTRIM/RTRIM/REPLACE/STARTSWITH/ENDSWITH deliberately do NOT
     # live here — none of those ThoughtSpot names exists (live-verified
     # 2026-07-29/30, se-thoughtspot; error_code 14516). They are handled by
@@ -368,11 +374,8 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
         return _finish_aggregate(name, args[0], cur, resolver)
     if name == "DATE_TRUNC":
         return _call_date_trunc(args)
-    if name == "MONTHS_BETWEEN":
-        # months_between(expr1, expr2) is positive when expr1 is later — the
-        # same later-first order as diff_months, so no swap (BL-336).
-        _need(args, 2, name)
-        return _emit("diff_months", [args[0], args[1]])
+    if name in _EXACT_FORM_CALLS:  # BL-340 / BL-342
+        return _EXACT_FORM_CALLS[name](name, args)
     if name == "LOCATE":
         _need(args, 2, name)
         return _emit("strpos", [args[1], args[0]])
@@ -388,6 +391,44 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
         f"function '{name}' is not in "
         f"ts-databricks-formula-translation.md — extend the mapping doc and "
         f"mv_sql._RENAME together")
+
+
+def _row_level_only(name: str, args: list[str]) -> None:
+    """A row-level sql_*_op pass-through cannot wrap an aggregate."""
+    if any(expr_is_aggregated(a) for a in args):
+        raise UntranslatableError(
+            f"{name} over an aggregate has no exact ThoughtSpot form (its exact form is a "
+            "row-level pass-through)")
+
+
+def _call_dbx_substr(name: str, args: list[str]) -> str:
+    """1-based SUBSTRING -> zero-based substr, or an exact pass-through (BL-340)."""
+    out = sql_substr_to_ts(name, args)
+    if out.startswith("sql_"):
+        _row_level_only(name, args)
+    return out
+
+
+def _call_months_between(name: str, args: list[str]) -> str:
+    """months_between(expr1, expr2[, roundOff]) -> exact pass-through (BL-342).
+
+    Databricks returns FRACTIONAL months — 31-day months; integral (time of day
+    ignored) when both are the same day of the month or both month ends; "rounded to
+    8 digits unless roundOff = false" (docs.databricks.com/aws/en/sql/language-manual/
+    functions/months_between). ``diff_months`` counts boundaries crossed, so the old
+    rename was a silent wrong number. The source's own argument order is kept.
+    """
+    if len(args) not in (2, 3):
+        raise UntranslatableError(
+            f"MONTHS_BETWEEN expects 2 or 3 arguments, got {len(args)}")
+    if len(args) == 3 and args[2].strip().lower() not in ("true", "false"):
+        raise UntranslatableError("MONTHS_BETWEEN roundOff must be a literal true/false")
+    _row_level_only("MONTHS_BETWEEN", args)
+    return sql_passthrough_call("sql_double_op", "months_between", args)
+
+
+_EXACT_FORM_CALLS = {"MONTHS_BETWEEN": _call_months_between,
+                     "SUBSTRING": _call_dbx_substr, "SUBSTR": _call_dbx_substr}
 
 
 def _call_round(args: list[str]) -> str:

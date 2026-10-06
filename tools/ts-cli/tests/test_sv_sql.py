@@ -212,7 +212,8 @@ class TestSpecialFunctions:
     def test_datediff_year(self):
         result = translate_sql_expr(
             "DATEDIFF(year, a.START, a.END)", _resolve)
-        assert result == "( diff_days ( [A::END] , [A::START] ) / 365 )"
+        # BL-341: was ( diff_days ( … ) / 365 ), a fractional day count.
+        assert result == "diff_years ( [A::END] , [A::START] )"
 
     def test_datediff_second(self):
         result = translate_sql_expr(
@@ -269,8 +270,9 @@ class TestSpecialFunctions:
         assert result == "strpos ( [A::NAME] , 'x' )"
 
     def test_to_char(self):
+        # BL-343: one-argument to_string is rejected on a DATE and on Text.
         result = translate_sql_expr("TO_CHAR(a.X)", _resolve)
-        assert result == "to_string ( [A::X] )"
+        assert result == 'sql_string_op ( "TO_CHAR({0})" , [A::X] )'
 
     def test_to_number(self):
         result = translate_sql_expr("TO_NUMBER(a.X)", _resolve)
@@ -312,9 +314,10 @@ class TestSpecialFunctions:
     def test_months_between(self):
         result = translate_sql_expr(
             "MONTHS_BETWEEN(a.END, a.START)", _resolve)
-        # BL-336: MONTHS_BETWEEN(d1, d2) is positive when d1 is later, the
-        # same later-first order as diff_months — no swap.
-        assert result == "diff_months ( [A::END] , [A::START] )"
+        # BL-336: positive when d1 is later — source order kept. BL-342: fractional,
+        # so an exact pass-through, never diff_months (a boundary count).
+        assert result == \
+            'sql_double_op ( "MONTHS_BETWEEN({0}, {1})" , [A::END] , [A::START] )'
 
     def test_current_date(self):
         assert translate_sql_expr("CURRENT_DATE()", _resolve) == "today ( )"
@@ -591,3 +594,99 @@ class TestDoubleQuotedIdentifiers:
     def test_tokenizer_keeps_quoted_segment_whole(self):
         kinds = [k for k, _ in tokenize('d."DATE"') if k != "ws"]
         assert kinds == ["ident"]
+
+
+# ---------------------------------------------------------------------------
+# BL-340..343 — formula fidelity M0 silent wrong answers (2026-10-06)
+# ---------------------------------------------------------------------------
+
+class TestFidelityM0Fixes:
+    # BL-340 — SUBSTR is 1-based, ThoughtSpot substr zero-based.
+    @pytest.mark.parametrize("src,out", [
+        ("SUBSTR(a.S, 2, 3)", "substr ( [A::S] , 1 , 3 )"),
+        ("SUBSTRING(a.S, 2, 3)", "substr ( [A::S] , 1 , 3 )"),
+        ("SUBSTR(a.S, 1, 1)", "substr ( [A::S] , 0 , 1 )"),
+        ("SUBSTR(a.S, 3)", "substr ( [A::S] , 2 , strlen ( [A::S] ) )"),
+        ("SUBSTR(a.S, 2, a.N)", "substr ( [A::S] , 1 , [A::N] )"),
+    ])
+    def test_substr_literal_start_folds(self, src, out):
+        assert translate_sql_expr(src, _resolve) == out
+
+    @pytest.mark.parametrize("src,out", [
+        # negative start counts from the end; 0 is treated as 1 — never substr
+        ("SUBSTR(a.S, -3, 2)", 'sql_string_op ( "SUBSTR({0}, -3, 2)" , [A::S] )'),
+        ("SUBSTR(a.S, -2)", 'sql_string_op ( "SUBSTR({0}, -2)" , [A::S] )'),
+        ("SUBSTRING(a.S, 0, 2)", 'sql_string_op ( "SUBSTRING({0}, 0, 2)" , [A::S] )'),
+        # a non-literal start could be negative at run time
+        ("SUBSTR(a.S, a.I, 2)",
+         'sql_string_op ( "SUBSTR({0}, {1}, 2)" , [A::S] , [A::I] )'),
+    ])
+    def test_substr_non_positive_or_dynamic_start_passes_through(self, src, out):
+        assert translate_sql_expr(src, _resolve) == out
+
+    def test_substr_pass_through_over_aggregate_refused(self):
+        with pytest.raises(UntranslatableError):
+            translate_sql_expr("SUBSTR(MAX(a.S), -2)", _resolve)
+
+    def test_substr_arity(self):
+        with pytest.raises(UntranslatableError):
+            translate_sql_expr("SUBSTR(a.S)", _resolve)
+
+    # BL-341 — every DATEDIFF unit is a boundary count; end date first.
+    @pytest.mark.parametrize("unit,fn", [
+        ("day", "diff_days"), ("week", "diff_weeks"), ("month", "diff_months"),
+        ("quarter", "diff_quarters"), ("year", "diff_years"), ("hour", "diff_hours"),
+        ("minute", "diff_minutes"), ("second", "diff_time"),
+        # documented part aliases
+        ("'yyyy'", "diff_years"), ("qtr", "diff_quarters"), ("wk", "diff_weeks"),
+        ("hh", "diff_hours"), ("mi", "diff_minutes"), ("sec", "diff_time"),
+    ])
+    def test_datediff_units(self, unit, fn):
+        assert translate_sql_expr(f"DATEDIFF({unit}, a.S, a.E)", _resolve) == \
+            f"{fn} ( [A::E] , [A::S] )"
+
+    def test_datediff_year_never_days_over_365(self):
+        assert "365" not in translate_sql_expr("DATEDIFF(year, a.S, a.E)", _resolve)
+
+    def test_datediff_unknown_unit(self):
+        with pytest.raises(UntranslatableError):
+            translate_sql_expr("DATEDIFF(nanosecond, a.S, a.E)", _resolve)
+
+    # BL-342 — MONTHS_BETWEEN is fractional with a month-end rule: pass-through.
+    @pytest.mark.parametrize("src,out", [
+        ("MONTHS_BETWEEN(a.E, a.S)",
+         'sql_double_op ( "MONTHS_BETWEEN({0}, {1})" , [A::E] , [A::S] )'),
+        ("MONTHS_BETWEEN(a.S, a.E)",
+         'sql_double_op ( "MONTHS_BETWEEN({0}, {1})" , [A::S] , [A::E] )'),
+        # a date literal is already to_date ( … ) — bound as an argument, not inlined
+        ("MONTHS_BETWEEN('2026-03-31', a.S)",
+         'sql_double_op ( "MONTHS_BETWEEN({0}, {1})" , '
+         "to_date ( '2026-03-31' , 'yyyy-MM-dd' ) , [A::S] )"),
+    ])
+    def test_months_between_pass_through(self, src, out):
+        result = translate_sql_expr(src, _resolve)
+        assert result == out
+        assert "diff_months" not in result
+
+    def test_months_between_over_aggregate_refused(self):
+        with pytest.raises(UntranslatableError):
+            translate_sql_expr("MONTHS_BETWEEN(MAX(a.E), MIN(a.S))", _resolve)
+
+    # BL-343 — TO_CHAR / TO_VARCHAR keep their format.
+    @pytest.mark.parametrize("src,out", [
+        ("TO_CHAR(a.D, 'YYYY-MM')", 'sql_string_op ( "TO_CHAR({0}, \'YYYY-MM\')" , [A::D] )'),
+        ("TO_VARCHAR(a.D, 'DD-MON-YYYY')",
+         'sql_string_op ( "TO_VARCHAR({0}, \'DD-MON-YYYY\')" , [A::D] )'),
+        ("TO_CHAR(a.N, '999,999.00')",
+         'sql_string_op ( "TO_CHAR({0}, \'999,999.00\')" , [A::N] )'),
+        ("TO_CHAR(a.D, a.F)", 'sql_string_op ( "TO_CHAR({0}, {1})" , [A::D] , [A::F] )'),
+        ("TO_VARCHAR(a.S)", 'sql_string_op ( "TO_VARCHAR({0})" , [A::S] )'),
+    ])
+    def test_to_char_keeps_format(self, src, out):
+        result = translate_sql_expr(src, _resolve)
+        assert result == out
+        assert "to_string" not in result
+
+    def test_to_char_format_with_double_quote_refused(self):
+        with pytest.raises(UntranslatableError):
+            translate_sql_expr("TO_CHAR(a.D, 'YYYY\"Q\"Q')", _resolve)

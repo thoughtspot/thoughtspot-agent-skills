@@ -274,6 +274,74 @@ class UntranslatableError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# SQL pass-through and 1-based SUBSTR (BL-340 / BL-342 / BL-343)
+# ---------------------------------------------------------------------------
+#
+# Shared by sv_sql (Snowflake) and databricks/mv_sql so the two SQL engines
+# cannot drift apart again (BL-217): both copied SUBSTR's 1-based start into
+# ThoughtSpot's zero-based substr (BL-340).
+
+_SQL_NUM_LITERAL_RE = re.compile(r"^-?\s*\d+(?:\.\d+)?$")
+_SQL_STR_LITERAL_RE = re.compile(r"^'(?:[^']|'')*'$")
+_SQL_BOOL_LITERALS = frozenset({"true", "false"})
+
+
+def sql_passthrough_call(op: str, fn: str, args: list[str]) -> str:
+    """``op ( "FN(<args>)" , … )`` — a warehouse pass-through, exact by construction.
+
+    Numeric, string and boolean literals are inlined into the template
+    (``TO_CHAR({0}, 'YYYY-MM')``); every other argument becomes a ``{n}``
+    placeholder. Refused when no argument is a column (a pass-through needs one),
+    or when a string literal holds a double quote or a brace, which would break
+    the template.
+    """
+    parts: list[str] = []
+    bound: list[str] = []
+    for a in args:
+        a = a.strip()
+        if _SQL_NUM_LITERAL_RE.match(a):
+            parts.append(a.replace(" ", ""))
+        elif a.lower() in _SQL_BOOL_LITERALS:
+            parts.append(a.upper())
+        elif _SQL_STR_LITERAL_RE.match(a):
+            if any(ch in a for ch in '"{}'):
+                raise UntranslatableError(
+                    f"{fn}: literal {a} holds a double quote or a brace, which cannot "
+                    "be inlined into a sql_*_op template")
+            parts.append(a)
+        else:
+            parts.append("{%d}" % len(bound))
+            bound.append(a)
+    if not bound:
+        raise UntranslatableError(f"{fn} with only literal arguments has no pass-through form")
+    template = f"{fn}({', '.join(parts)})"
+    return f'{op} ( "{template}" , ' + " , ".join(bound) + " )"
+
+
+def sql_substr_to_ts(fn: str, args: list[str]) -> str:
+    """1-based SQL ``SUBSTR(s, start[, len])`` → ThoughtSpot (BL-340).
+
+    ThoughtSpot ``substr`` is ZERO-based — ``substr ( s , 2 , 3 )`` compiles to
+    ``SUBSTRING(s, (2 + 1), 3)`` — and takes exactly three arguments.
+
+    * literal ``start >= 1``: native, folded — ``SUBSTR(s, 2, 3)`` → ``substr ( s , 1 , 3 )``;
+      the 2-argument form takes the rest of the string, ``strlen ( s )`` long.
+    * literal ``start <= 0``, or a non-literal ``start``: a ``sql_string_op`` pass-through.
+      Snowflake and Databricks both count a negative start from the END of the string
+      (and Snowflake treats 0 as 1), which ``substr`` does not define; a non-literal
+      start could be either at run time. The pass-through is exact by construction.
+    """
+    if len(args) not in (2, 3):
+        raise UntranslatableError(f"{fn} expects 2 or 3 arguments, got {len(args)}")
+    s, start = args[0], args[1]
+    n = sql_int_digits(start)
+    if n is None or n <= 0 or "." in start:
+        return sql_passthrough_call("sql_string_op", fn, args)
+    length = args[2] if len(args) == 3 else f"strlen ( {s} )"
+    return f"substr ( {s} , {n - 1} , {length} )"
+
+
+# ---------------------------------------------------------------------------
 # Name collision resolution
 # ---------------------------------------------------------------------------
 

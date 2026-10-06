@@ -993,3 +993,29 @@ class TestNullifRefused:
     def test_snowflake_nullif_non_zero_is_case_form(self):
         r = translate("NULLIF(a, b)", "snowflake")
         assert r["formula"] == "( if ( [TABLE::a] = [TABLE::b] ) then null else [TABLE::a] )"
+
+
+class TestFidelityM0SnowflakeFixes:
+    """BL-340..343 through the engine: status, classification and traps."""
+
+    def test_substr_folded_is_translated(self):
+        r = translate("SUBSTR(s, 2, 3)", "snowflake")
+        assert r["formula"] == "substr ( [TABLE::s] , 1 , 3 )"
+        assert r["status"] == TRANSLATED
+
+    def test_datediff_year_is_diff_years(self):
+        r = translate("DATEDIFF(year, a, b)", "snowflake")
+        assert r["formula"] == "diff_years ( [TABLE::b] , [TABLE::a] )"
+        assert r["status"] == TRANSLATED
+
+    def test_datediff_week_carries_week_start_trap(self):
+        r = translate("DATEDIFF(week, a, b)", "snowflake")
+        assert r["formula"] == "diff_weeks ( [TABLE::b] , [TABLE::a] )"
+        assert any(t.startswith("diff_weeks counts week boundaries") for t in r["traps"])
+
+    @pytest.mark.parametrize("src", ["MONTHS_BETWEEN(b, a)", "TO_CHAR(d, 'YYYY-MM')",
+                                     "SUBSTR(s, -2, 1)"])
+    def test_pass_throughs_are_classified_passthrough(self, src):
+        r = translate(src, "snowflake")
+        assert r["status"] == TRANSLATED and r["classification"] == "passthrough"
+        assert r["formula"].startswith("sql_") and "diff_months" not in r["formula"]

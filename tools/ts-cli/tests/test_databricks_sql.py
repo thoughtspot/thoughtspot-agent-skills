@@ -165,9 +165,37 @@ class TestFunctions:
         assert "diff_days ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] ) > 30" in out
 
     def test_months_between_keeps_order(self):
-        # months_between(expr1, expr2) is positive when expr1 is later.
-        assert t("MONTHS_BETWEEN(end_d, start_d)") == \
-            "diff_months ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] )"
+        # months_between(expr1, expr2) is positive when expr1 is later. BL-342: it is
+        # fractional (8-digit rounding, month-end rule), so an exact pass-through.
+        assert t("MONTHS_BETWEEN(end_d, start_d)") == (
+            'sql_double_op ( "months_between({0}, {1})" , '
+            "[TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] )")
+
+    def test_months_between_round_off_kept(self):
+        assert t("months_between(end_d, start_d, false)") == (
+            'sql_double_op ( "months_between({0}, {1}, FALSE)" , '
+            "[TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] )")
+
+    def test_months_between_non_literal_round_off_refused(self):
+        with pytest.raises(UntranslatableError):
+            t("months_between(end_d, start_d, flag)")
+
+    def test_months_between_over_aggregate_refused(self):
+        with pytest.raises(UntranslatableError):
+            t("months_between(MAX(end_d), MIN(start_d))")
+
+    @pytest.mark.parametrize("src,out", [
+        # BL-340: Databricks pos is 1-based; ThoughtSpot substr zero-based.
+        ("SUBSTRING(s, 2, 3)", "substr ( [TRANSACTIONS::s] , 1 , 3 )"),
+        ("SUBSTR(s, 2, 3)", "substr ( [TRANSACTIONS::s] , 1 , 3 )"),
+        ("SUBSTRING(s, 4)", "substr ( [TRANSACTIONS::s] , 3 , strlen ( [TRANSACTIONS::s] ) )"),
+        # a negative pos counts from the end — pass-through, never substr
+        ("SUBSTRING(s, -3, 2)", 'sql_string_op ( "SUBSTRING({0}, -3, 2)" , [TRANSACTIONS::s] )'),
+        ("SUBSTR(s, sub, 2)",
+         'sql_string_op ( "SUBSTR({0}, {1}, 2)" , [TRANSACTIONS::s] , [TRANSACTIONS::sub] )'),
+    ])
+    def test_substring_one_based(self, src, out):
+        assert t(src) == out
 
     def test_locate_swaps(self):
         assert t("LOCATE(sub, s)") == \
