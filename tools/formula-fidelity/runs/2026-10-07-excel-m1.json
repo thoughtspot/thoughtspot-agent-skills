@@ -1,20 +1,24 @@
 {
  "run": {
-  "date": "2026-10-06T20:34:52+00:00",
+  "date": "2026-10-06T21:46:21+00:00",
   "profile": "se-thoughtspot",
   "connection": "APJ_TAB",
-  "warehouse_table": "AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_M1_20261006T203452_7B80C2",
-  "ts_table": "ZZ_FIDELITY_M1_20261006T203452_7B80C2_TABLE_DELETE_ME",
-  "ts_model": "ZZ_FIDELITY_M1_20261006T203452_7B80C2_DELETE_ME",
-  "translator_version": "ts-cli 0.160.0",
-  "runtime_s": 674.2,
+  "warehouse_table": "AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_M1_20261006T214621_E703B0",
+  "ts_table": "ZZ_FIDELITY_M1_20261006T214621_E703B0_TABLE_DELETE_ME",
+  "ts_model": "ZZ_FIDELITY_M1_20261006T214621_E703B0_DELETE_ME",
+  "translator_version": "ts-cli 0.161.0",
+  "git": {
+   "sha": "323d282b1b6d64cb0f5683c7aeaf65792c4dc0d8",
+   "dirty": false
+  },
+  "runtime_s": 390.6,
   "phases": {
-   "load": 1.8,
+   "load": 1.5,
    "oracle": 0.0,
    "translate": 0.2,
-   "ts_import": 13.3,
-   "agentql": 650.5,
-   "teardown": 4.6
+   "ts_import": 13.6,
+   "agentql": 366.4,
+   "teardown": 4.5
   },
   "cleanup": {
    "ts_confirmed_absent": true,
@@ -265,7 +269,7 @@
    ],
    "flags": [],
    "crosscheck": "agree",
-   "translation_status": "TRANSLATED",
+   "translation_status": "APPROXIMATED",
    "trap_count": 2,
    "verdict": "MATCH",
    "class": "MATCH",
@@ -501,7 +505,7 @@
    ],
    "flags": [],
    "crosscheck": "agree",
-   "translation_status": "TRANSLATED",
+   "translation_status": "APPROXIMATED",
    "trap_count": 1,
    "verdict": "MATCH",
    "class": "MATCH",
@@ -929,8 +933,8 @@
    "mismatch_kinds": [
     "NUMERIC_DIFF"
    ],
-   "cause_tag": "unexplained",
-   "backlog": null,
+   "cause_tag": "silver-vs-bronze-last-digit",
+   "backlog": "BL-356",
    "detail": null
   },
   {
@@ -1124,7 +1128,7 @@
    ],
    "flags": [],
    "crosscheck": "agree",
-   "translation_status": "TRANSLATED",
+   "translation_status": "APPROXIMATED",
    "trap_count": 2,
    "verdict": "MATCH",
    "class": "MATCH",
@@ -2464,7 +2468,7 @@
    ],
    "flags": [],
    "crosscheck": "agree",
-   "translation_status": "TRANSLATED",
+   "translation_status": "APPROXIMATED",
    "trap_count": 2,
    "verdict": "MATCH",
    "class": "MATCH",
@@ -3207,7 +3211,7 @@
    ],
    "flags": [],
    "crosscheck": "agree",
-   "translation_status": "TRANSLATED",
+   "translation_status": "APPROXIMATED",
    "trap_count": 2,
    "verdict": "MATCH",
    "class": "MATCH",
@@ -3428,8 +3432,8 @@
    "mismatch_kinds": [
     "NUMERIC_DIFF"
    ],
-   "cause_tag": "unexplained",
-   "backlog": null,
+   "cause_tag": "decimal-literal-exact",
+   "backlog": "BL-351",
    "detail": null
   },
   {
@@ -3561,8 +3565,8 @@
    "functions": [],
    "flags": [],
    "crosscheck": "agree",
-   "translation_status": "TRANSLATED",
-   "trap_count": 1,
+   "translation_status": "APPROXIMATED",
+   "trap_count": 2,
    "verdict": "MATCH",
    "class": "MATCH",
    "mismatch_kinds": [],
@@ -3743,7 +3747,7 @@
    ],
    "flags": [],
    "crosscheck": "agree",
-   "translation_status": "TRANSLATED",
+   "translation_status": "APPROXIMATED",
    "trap_count": 1,
    "verdict": "MATCH",
    "class": "MATCH",
