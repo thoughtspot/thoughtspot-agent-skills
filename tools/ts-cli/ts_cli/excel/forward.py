@@ -113,6 +113,22 @@ class Translator:
 
         return as_date(self, self.expr(node))
 
+    def num(self, node) -> dict:
+        """An Excel argument in a number slot (a boolean or numeric text converted)."""
+        return self.as_number(self.expr(node))
+
+    def text(self, node) -> dict:
+        """An Excel argument in a text function: a number / boolean / date as Excel's text."""
+        from ts_cli.excel.coerce import as_text
+
+        return as_text(self, self.expr(node), quiet=True)
+
+    def int_arg(self, node, signed: bool = False) -> dict:
+        """An Excel count or position: ThoughtSpot's integer slots reject a DOUBLE (BL-355)."""
+        from ts_cli.excel.coerce import as_int
+
+        return as_int(self, self.expr(node), signed)
+
     # -- dispatch ----------------------------------------------------------------------
     def expr(self, node) -> dict:
         handler = _NODE_HANDLERS.get(type(node))
@@ -177,11 +193,12 @@ class Translator:
         return T.binop(node.op, left, right)
 
     def as_number(self, node: dict) -> dict:
-        """Excel coerces TRUE to 1 in arithmetic; ThoughtSpot rejects a boolean operand
-        (``true + 1`` fails import — probe record §7), so coerce it explicitly."""
-        if self.type_of(node) == "bool":
-            return T.ifelse(node, T.lit_number("1"), T.lit_number("0"))
-        return node
+        """Excel coerces TRUE to 1 and numeric text to its number in arithmetic; ThoughtSpot
+        rejects both (``true + 1`` fails import — probe record §7), so the conversion is
+        written out (``coerce.as_number``)."""
+        from ts_cli.excel.coerce import as_number
+
+        return as_number(self, node)
 
     def as_condition(self, node: dict) -> dict:
         """Excel reads a number as a condition (0 is FALSE); ThoughtSpot needs a boolean."""
@@ -202,7 +219,24 @@ class Translator:
         for value, other in ((left, right), (right, left)):
             if T.is_lit(value, "string", "''") and op in ("=", "<>"):
                 return self._blank_test(op, other)
+        ranked = self._compare_across_types(op, left, right)
+        if ranked is not None:
+            return ranked
         return T.binop("!=" if op == "<>" else op, left, right)
+
+    def _compare_across_types(self, op: str, left: dict, right: dict) -> Optional[dict]:
+        """Excel never finds values of different types equal and orders them by type
+        (numbers < text < booleans), so ``"TRUE"<>A1`` over a boolean is TRUE whatever A1
+        holds; ThoughtSpot rejects the comparison (*Expecting a List token*). A date beside
+        text is left to the type checker (NEEDS_REVIEW): a date there is usually a mistake."""
+        lt, rt = (_RANK_FAMILY.get(self.fine_type(x)) for x in (left, right))
+        if lt is None or rt is None or lt == rt:
+            return None
+        a, b = _RANK[lt], _RANK[rt]
+        result = {"=": False, "<>": True, "<": a < b, "<=": a < b, ">": a > b, ">=": a > b}[op]
+        self.note(f"Excel compares {lt} with {rt} by type (numbers < text < booleans; never "
+                  f"equal), so this comparison is always {str(result).upper()}")
+        return T.lit_bool(result)
 
     def _blank_test(self, op: str, x: dict) -> dict:
         """``x = ""`` is TRUE for a blank cell in Excel: ``isnull ( x )`` (number / date — a
@@ -292,27 +326,21 @@ class Translator:
         return texts[0] if len(texts) == 1 else T.call("concat", *texts)
 
     def as_text(self, node: dict) -> dict:
-        t = self.type_of(node)
-        if t == "text":
-            return node
-        if t is None:
-            # Left bare: to_string rejects a Text argument at import, so wrapping a column
-            # that turns out to be text would break the formula (PR #570 review H4).
-            note = TYPE_UNKNOWN_NOTE.format(name=T.to_text(node))
-            self.trap(note, downgrade=True)
-            self.need_type(node, "text join", note)
-            return node
-        if t == "bool":
-            self.note("to_string of a boolean gives 'true' / 'false'; Excel's & shows TRUE / "
-                      "FALSE")
-        if t in T.TEMPORAL:
-            self.trap("a date joined with & is its serial number in Excel; ThoughtSpot's "
-                      "to_string gives the date text — use TEXT() semantics deliberately",
-                      downgrade=True)
-        elif t == "number" and node.get("node") != "lit":
-            self.trap("to_string of a DOUBLE may render a decimal ('12.0') where Excel shows "
-                      "12 — exact for an integer column")
-        return T.call("to_string", node)
+        from ts_cli.excel.coerce import as_text
+
+        return as_text(self, node)
+
+    def unknown_text(self, node: dict) -> None:
+        # Left bare: to_string rejects a Text argument at import, so wrapping a column
+        # that turns out to be text would break the formula (PR #570 review H4).
+        note = TYPE_UNKNOWN_NOTE.format(name=T.to_text(node))
+        self.trap(note, downgrade=True)
+        self.need_type(node, "text join", note)
+
+
+_RANK_FAMILY = {"int": "number", "double": "number", "number": "number", "text": "text",
+                "bool": "bool"}
+_RANK = {"number": 0, "text": 1, "bool": 2}
 
 
 _CELL = re.compile(r"(\$?)([A-Za-z]{1,3})(\$?)(\d+)")

@@ -103,3 +103,78 @@ def test_numeric_column_in_a_date_function_counts_days_from_the_excel_epoch():
 
 def test_text_column_in_a_date_function_is_needs_review():
     assert "locale" in review("=YEAR([@name])")
+
+
+# ---------------------------------------------------------------------------
+# BL-353: Excel's implicit coercion between number, text and boolean
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("src,expected", [
+    # a number into a text function: its digits
+    ("=LEN([@qty])", "strlen ( to_string ( [T::qty] ) )"),
+    ("=LEFT([@amt],2)", "left ( to_string ( [T::amt] ) , 2 )"),
+    ("=SEARCH(7,1234567)", "strpos ( to_string ( 1234567 ) , to_string ( 7 ) )"),
+    # numeric text literal in arithmetic: folded to the number
+    ('="4"*[@qty]', "4 * [T::qty]"),
+    ('=ABS("-2.5")', "abs ( - 2.5 )"),
+    # VALUE of a number is the number (to_double rejects a DOUBLE); of a date, its serial
+    ("=VALUE([@amt])", "[T::amt]"),
+    ("=VALUE([@day])", "diff_days ( [T::day] , to_date ( '1899-12-30' , '%Y-%m-%d' ) )"),
+    ("=VALUE([@name])", "to_double ( [T::name] )"),
+    # a boolean in arithmetic: if … then 1 else 0 (unchanged)
+    ("=[@flag]+1", "( if ( [T::flag] ) then 1 else 0 ) + 1"),
+])
+def test_coercion_emitted_form(src, expected):
+    assert f(src) == expected
+
+
+@pytest.mark.parametrize("src,expected", [
+    ("=ABS([@name])", "abs ( to_double ( [T::name] ) )"),
+    ("=[@name]/[@qty]", "to_double ( [T::name] ) / [T::qty]"),
+    ("=POWER([@name],2)", "pow ( to_double ( [T::name] ) , 2 )"),
+    ("=CEILING([@name],1)", "ceil ( to_double ( [T::name] ) / 1 ) * 1"),
+])
+def test_text_column_in_arithmetic_is_to_double_with_a_trap(src, expected):
+    r = ok(src)
+    assert r.expr == expected and r.status == "APPROXIMATED"
+    assert any("#VALUE!" in t for t in r.traps)
+
+
+def test_non_numeric_text_literal_in_arithmetic_is_needs_review():
+    assert "#VALUE!" in review('="abc"+1')
+
+
+@pytest.mark.parametrize("src,expected", [
+    ('="yes"<>[@flag]', "true"), ('="yes"=[@flag]', "false"),
+    ('=[@qty]="5"', "false"),          # a number never equals text in Excel
+    ('=[@qty]<"a"', "true"),           # numbers sort before text
+    ('=[@flag]>"zzz"', "true"),        # booleans sort after text
+])
+def test_comparison_across_types_follows_excel_type_order(src, expected):
+    r = ok(src)
+    assert r.expr == expected and any("by type" in n for n in r.notes)
+
+
+def test_date_compared_with_text_stays_needs_review():
+    assert review('=[@day]="soon"').startswith("type check:")
+
+
+# ---------------------------------------------------------------------------
+# BL-355: a DOUBLE in an integer slot
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("src,expected", [
+    ("=MID([@name],[@amt],[@amt])",
+     "substr ( [T::name] , floor ( [T::amt] ) - 1 , floor ( [T::amt] ) )"),
+    ("=MID([@name],[@qty],2)", "substr ( [T::name] , [T::qty] - 1 , 2 )"),
+    ("=MID([@name],2.9,1.5)", "substr ( [T::name] , 1 , 1 )"),   # Excel truncates
+    ("=RIGHT([@name],[@amt])", "right ( [T::name] , floor ( [T::amt] ) )"),
+    ("=LEFT([@name],[@qty])", "left ( [T::name] , [T::qty] )"),
+    ("=LEFT([@name],2.7)", "left ( [T::name] , 2 )"),
+    # a month offset can be negative: truncate toward zero both ways
+    ("=EDATE([@day],[@amt])", "add_months ( [T::day] , if ( [T::amt] < 0 ) then ceil ( "
+                              "[T::amt] ) else floor ( [T::amt] ) )"),
+    ("=EDATE([@day],-1.5)", "add_months ( [T::day] , - 1 )"),
+])
+def test_integer_slot(src, expected):
+    assert f(src) == expected

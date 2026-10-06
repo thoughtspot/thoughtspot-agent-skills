@@ -393,7 +393,7 @@ def test_unmutated_copy_passes(tmp_path):
     # 1. a handler emits a disproved name
     ("functions.py", '"ABS": _unary_fn("abs")', '"ABS": _unary_fn("nullif")', "NOT a ThoughtSpot"),
     # 2. a handler emits a catalogued name its rule never declared
-    ("functions_text.py", 'T.call("strlen", tr.expr(n.args[0]))',
+    ("functions_text.py", 'T.call("strlen", tr.text(n.args[0]))',
      'T.call("strpos", tr.expr(n.args[0]))', "does not declare"),
     # 3. a rule's emits emptied while the handler still emits
     ("rules.py", '"SUM": {"map": "excel", "emits": ("sum",)}',

@@ -7,7 +7,7 @@ import re
 
 from ts_cli.excel import nodes as X
 from ts_cli.excel import tsast as T
-from ts_cli.excel.helpers import is_range, literal_int, need, template
+from ts_cli.excel.helpers import is_range, need, template
 
 CASE_NOTE = ("{name} is case-sensitive and ThoughtSpot's = / strpos are not (probe record §4, "
              "BL-333), so it passes through to the warehouse")
@@ -47,22 +47,25 @@ def _textjoin(tr, n):
 def _left_right(fn: str):
     def handler(tr, n):
         need(tr, n, 1, 2)
-        count = tr.expr(n.args[1]) if len(n.args) == 2 else T.lit_number("1")
-        return T.call(fn, tr.expr(n.args[0]), count)
+        count = tr.int_arg(n.args[1]) if len(n.args) == 2 else T.lit_number("1")
+        return T.call(fn, tr.text(n.args[0]), count)
     return handler
 
 
 def _mid(tr, n):
+    """``MID(s, start, n)`` → ``substr ( s , start - 1 , n )`` (zero-based start). A DOUBLE
+    start or count is truncated with ``floor`` (BL-355: the slots take an integer)."""
     need(tr, n, 3, 3)
-    start = literal_int(n.args[1])
-    begin = (T.lit_number(str(start - 1)) if start is not None
-             else T.binop("-", tr.expr(n.args[1]), T.lit_number("1")))
-    return T.call("substr", tr.expr(n.args[0]), begin, tr.expr(n.args[2]))
+    start = tr.int_arg(n.args[1])
+    value = T.number_value(start)
+    begin = (T.lit_number(str(int(value) - 1)) if value is not None
+             else T.binop("-", start, T.lit_number("1")))
+    return T.call("substr", tr.text(n.args[0]), begin, tr.int_arg(n.args[2]))
 
 
 def _len(tr, n):
     need(tr, n, 1, 1)
-    return T.call("strlen", tr.expr(n.args[0]))
+    return T.call("strlen", tr.text(n.args[0]))
 
 
 def search_call(tr, n) -> dict:
@@ -71,7 +74,7 @@ def search_call(tr, n) -> dict:
     find = n.args[0]
     if isinstance(find, X.Str) and re.search(r"[*?~]", find.value):
         tr.review("SEARCH with wildcards (* ? ~) has no native form — Excel map SEARCH row")
-    return T.call("strpos", tr.expr(n.args[1]), tr.expr(find))
+    return T.call("strpos", tr.text(n.args[1]), tr.text(find))
 
 
 def _search(tr, n):
@@ -83,7 +86,7 @@ def find_call(tr, n) -> dict:
     need(tr, n, 2, 2)
     tr.note(CASE_NOTE.format(name="FIND"))
     return T.call("sql_int_op", template("POSITION({0} IN {1})"),
-                  tr.expr(n.args[0]), tr.expr(n.args[1]))
+                  tr.text(n.args[0]), tr.text(n.args[1]))
 
 
 def _find(tr, n):
@@ -94,7 +97,7 @@ def _find(tr, n):
 def _exact(tr, n):
     need(tr, n, 2, 2)
     tr.note(CASE_NOTE.format(name="EXACT"))
-    return T.call("sql_bool_op", template("{0} = {1}"), tr.expr(n.args[0]), tr.expr(n.args[1]))
+    return T.call("sql_bool_op", template("{0} = {1}"), tr.text(n.args[0]), tr.text(n.args[1]))
 
 
 def _string_op(sql: str, why: str = ""):
@@ -102,20 +105,32 @@ def _string_op(sql: str, why: str = ""):
         need(tr, n, 1, 1)
         if why:
             tr.note(why)
-        return T.call("sql_string_op", template(sql), tr.expr(n.args[0]))
+        return T.call("sql_string_op", template(sql), tr.text(n.args[0]))
     return handler
 
 
 def _substitute(tr, n):
     need(tr, n, 3, 3)
     return T.call("sql_string_op", template("REPLACE({0}, {1}, {2})"),
-                  *[tr.expr(a) for a in n.args])
+                  *[tr.text(a) for a in n.args])
 
 
 def _value(tr, n):
+    """VALUE of text → ``to_double``; of a number → the number (``to_double`` rejects a
+    DOUBLE); of a date → its serial (BL-353)."""
     need(tr, n, 1, 1)
+    x = tr.expr(n.args[0])
+    t = tr.fine_type(x)
+    if t in ("int", "double", "number"):
+        return x
+    if t == "date":
+        from ts_cli.excel.coerce import serial
+        return serial(tr, x)
+    if t in ("bool", "datetime"):
+        tr.review(f"VALUE of a {'boolean' if t == 'bool' else 'date-time'}: Excel returns "
+                  "#VALUE! for a boolean and a fractional serial for a date-time — no rule")
     tr.note("VALUE → to_double: numeric strings only; a failed parse is NULL (Excel #VALUE!)")
-    return T.call("to_double", tr.expr(n.args[0]))
+    return T.call("to_double", x)
 
 
 TEXT_HANDLERS = {

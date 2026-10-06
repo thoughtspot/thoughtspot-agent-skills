@@ -139,7 +139,7 @@ def _countifs(tr, n):
 
 def _round(tr, n):
     need(tr, n, 2, 2)
-    x = tr.expr(n.args[0])
+    x = tr.num(n.args[0])
     digits = tr.expr(n.args[1])
     try:
         text = ts_round_from_sql_digits(T.to_text(x), T.to_text(digits),
@@ -184,7 +184,7 @@ def _round_dir(away: bool):
         digits = literal_int(n.args[1])
         if digits is None:
             tr.review(f"{n.name} with a non-literal digit count has no native form")
-        x = tr.expr(n.args[0])
+        x = tr.num(n.args[0])
         pos, neg = ("ceil", "floor") if away else ("floor", "ceil")
         cond = T.binop(">=", x, T.lit_number("0"))
         return T.ifelse(cond, _scaled(x, digits, pos), _scaled(x, digits, neg))
@@ -193,7 +193,7 @@ def _round_dir(away: bool):
 
 def _mround(tr, n):
     need(tr, n, 2, 2)
-    x, m = tr.expr(n.args[0]), tr.expr(n.args[1])
+    x, m = tr.num(n.args[0]), tr.num(n.args[1])
     v = T.number_value(m)
     tr.trap("MROUND: Excel returns #NUM! when the number and multiple differ in sign; "
             "round ( x , abs ( m ) ) returns a value")
@@ -202,29 +202,29 @@ def _mround(tr, n):
 
 def _int(tr, n):
     need(tr, n, 1, 1)
-    return T.call("floor", tr.expr(n.args[0]))
+    return T.call("floor", tr.num(n.args[0]))
 
 
 def _ceiling_floor(fn: str):
     def handler(tr, n):
         need(tr, n, 1, 2)
-        x = tr.expr(n.args[0])
+        x = tr.num(n.args[0])
         if len(n.args) == 1:
             return T.call(fn, x)
-        sig = tr.expr(n.args[1])
+        sig = tr.num(n.args[1])
         return T.binop("*", T.call(fn, T.binop("/", x, sig)), sig)
     return handler
 
 
 def _mod(tr, n):
     need(tr, n, 2, 2)
-    x, y = tr.expr(n.args[0]), tr.expr(n.args[1])
+    x, y = tr.num(n.args[0]), tr.num(n.args[1])
     return T.binop("-", x, T.binop("*", y, T.call("floor", T.binop("/", x, y))))
 
 
 def _sign(tr, n):
     need(tr, n, 1, 1)
-    x = tr.expr(n.args[0])
+    x = tr.num(n.args[0])
     zero = T.lit_number("0")
     return T.ifelse(T.binop(">", x, zero), T.lit_number("1"),
                     T.ifelse(T.binop("<", x, zero), T.unop("-", T.lit_number("1")), zero))
@@ -233,13 +233,13 @@ def _sign(tr, n):
 def _unary_fn(fn: str):
     def handler(tr, n):
         need(tr, n, 1, 1)
-        return T.call(fn, tr.expr(n.args[0]))
+        return T.call(fn, tr.num(n.args[0]))
     return handler
 
 
 def _power(tr, n):
     need(tr, n, 2, 2)
-    return T.call("pow", tr.expr(n.args[0]), tr.expr(n.args[1]))
+    return T.call("pow", tr.num(n.args[0]), tr.num(n.args[1]))
 
 
 HANDLERS = {

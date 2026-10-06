@@ -175,9 +175,15 @@ def as_number(tr, node: dict) -> dict:
             tr.review(f"the text '{text}' in arithmetic is not a number: Excel returns #VALUE!")
         if not value.is_finite():
             tr.review(f"the text '{text}' in arithmetic is not a number")
-        return T.lit_number(format(value, "f"))
+        return number_literal(value)
     tr.trap(TEXT_NUMBER_TRAP, downgrade=True)
     return T.call("to_double", node)
+
+
+def number_literal(value) -> dict:
+    """A literal for ``value``; a negative one is ``- n``, as the printer writes it."""
+    text = format(abs(Decimal(value)), "f")
+    return T.unop("-", T.lit_number(text)) if value < 0 else T.lit_number(text)
 
 
 # ---------------------------------------------------------------------------
@@ -195,9 +201,7 @@ def as_int(tr, node: dict, signed: bool = False) -> dict:
         return node
     value = T.number_value(node)
     if value is not None:
-        whole = int(value)                     # int() truncates toward zero, like Excel
-        return T.lit_number(str(whole)) if whole >= 0 else T.unop("-", T.lit_number(
-            str(-whole)))
+        return number_literal(int(value))      # int() truncates toward zero, like Excel
     if t not in ("double", "number"):
         return node                            # the type checker reports it
     if signed:
@@ -226,13 +230,11 @@ def as_text(tr, node: dict, quiet: bool = False) -> dict:
             tr.unknown_text(node)
         return node
     if t == "bool":
-        return bool_text(node)
-    if t == "date":
-        return T.call("to_string", serial(tr, node))
-    if t == "datetime":
-        tr.review("a date-time where Excel expects text is its serial number with a time "
-                  "fraction; ThoughtSpot's to_string needs a format for a date-time and has "
-                  "no serial form — use TEXT() semantics deliberately (Excel map, TEXT row)")
+        tr.note("to_string of a boolean gives 'true' / 'false'; Excel's & shows TRUE / FALSE")
+    if t in ("date", "datetime"):
+        tr.trap("a date joined with & is its serial number in Excel; ThoughtSpot's "
+                "to_string gives the date text — use TEXT() semantics deliberately",
+                downgrade=True)
     if t in ("double", "number") and node.get("node") != "lit":
         tr.trap("to_string of a DOUBLE may render a decimal ('12.0') where Excel shows 12 — "
                 "exact for an integer column")

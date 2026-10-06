@@ -49,16 +49,17 @@ def _datedif(tr, n):
 
 def _eomonth(tr, n):
     need(tr, n, 2, 2)
-    months = literal_int(n.args[1])
-    ahead = (T.lit_number(str(months + 1)) if months is not None
-             else T.binop("+", tr.expr(n.args[1]), T.lit_number("1")))
+    offset = tr.int_arg(n.args[1], signed=True)
+    months = T.number_value(offset)
+    ahead = (T.lit_number(str(int(months) + 1)) if months is not None
+             else T.binop("+", offset, T.lit_number("1")))
     som = T.call("start_of_month", tr.date(n.args[0]))
     return T.call("add_days", T.call("add_months", som, ahead), T.unop("-", T.lit_number("1")))
 
 
 def _edate(tr, n):
     need(tr, n, 2, 2)
-    return T.call("add_months", tr.date(n.args[0]), tr.expr(n.args[1]))
+    return T.call("add_months", tr.date(n.args[0]), tr.int_arg(n.args[1], signed=True))
 
 
 def _days(tr, n):
