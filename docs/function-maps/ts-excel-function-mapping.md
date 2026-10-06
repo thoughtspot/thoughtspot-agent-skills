@@ -141,9 +141,9 @@ operand — a column, a literal or a runtime parameter — in the position the E
   DATETIME, and ThoughtSpot does **not** support arithmetic on dates (the Tableau map's
   pipeline step P4). So `A2 + 30` is `add_days ( [T::d] , 30 )`, `B2 - A2` is
   `diff_days ( [T::b] , [T::a] )` (**end first** — the reverse of SQL `DATEDIFF`) — for DATETIME operands `diff_time ( [T::b] , [T::a] ) / 86400`, which keeps the time fraction Excel's subtraction has (`diff_time` is seconds, end first — probe record §7); `add_days` takes whole days, so `d + 0.5` has no `add_days` form — and a date
-  literal is `to_date ( '2024-01-15' , 'yyyy-MM-dd' )` — a bare `'2024-01-15'` parses as
-  subtraction. Where a source column really holds serial numbers (a CSV export of a sheet), the
-  conversion is `add_days ( to_date ( '1899-12-30' , 'yyyy-MM-dd' ) , [T::serial] )`, exact for
+  literal is `to_date ( '2024-01-15' , '%Y-%m-%d' )` — a bare `'2024-01-15'` parses as
+  subtraction (`'%Y-%m-%d'` compiles to Snowflake `'YYYY-MM-DD'`; a Java-style `'yyyy-MM-dd'` is passed through verbatim — live 2026-10-07). Where a source column really holds serial numbers (a CSV export of a sheet), the
+  conversion is `add_days ( to_date ( '1899-12-30' , '%Y-%m-%d' ) , [T::serial] )`, exact for
   serials from 61 (1900-03-01) onward because the 1899-12-30 base absorbs the phantom leap day.
   Times of day are fractions of a serial day in Excel and have no ThoughtSpot type at all.
 - **E10 — booleans are not numbers, and blank is not zero.** Excel coerces `TRUE` to 1 in
@@ -217,6 +217,36 @@ Applies to every `*IF` / `*IFS` / `D*` row ([**E11**](#how-to-read-the-tables)).
 | `">="&DATE(2024,1,1)` | `[T::x] >= to_date ( '2024-01-01' , 'yyyy-MM-dd' )` | Date criteria per [**E9**](#how-to-read-the-tables). |
 | `{"a","b"}` (array constant, summed) | `[T::x] in { 'a' , 'b' }` | The `SUM(SUMIFS(…, {"a","b"}))` OR-idiom. **Curly braces** (BL-170), and `>-` block-scalar YAML. |
 | Database criteria block (two rows) | `( c11 and c12 ) or ( c21 )` | Same row = AND, different rows = OR. |
+
+
+### Implicit type coercion *(not counted — arguments)*
+
+Excel converts an argument to the type its slot expects; ThoughtSpot type-checks the formula at
+import and rejects it instead (*Function X expects 1st argument to be …*, error_code 14516).
+Formula fidelity M1 found 36 translations rejected this way, all reported TRANSLATED (BL-352..355,
+[report](../reviews/2026-10-06-fidelity-m1-excel.md)). The translator writes each conversion out
+(`ts_cli/excel/coerce.py`), and a type checker over the emitted formula
+(`ts_cli/excel/typecheck.py`) turns any remaining provable type error into NEEDS_REVIEW, so this
+class cannot come back TRANSLATED. **ThoughtSpot's "Numeric" is an integer:** a DOUBLE or a
+decimal literal is rejected in the integer slots (`substr`, `left`, `right`, `add_days`,
+`add_months`, `mod`) and by `to_double` itself (VALIDATE_ONLY, se-thoughtspot, 2026-10-07 —
+[probe record §7](../reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)).
+
+| Excel argument | Slot | ThoughtSpot form | Notes |
+|---|---|---|---|
+| `"2001-03-31"`, `"2001-03-31T10:20:30"`, `"2001/03/31"`, `"31/03/2001"` | date | `to_date ( '2001-03-31' , '%Y-%m-%d' )` | The pattern is inferred from the literal (`%Y-%m-%d`, `%Y-%m-%dT%H:%M:%S`, `%Y/%m/%d`, `%d/%m/%Y`, `%m/%d/%Y`); ThoughtSpot compiles it to `TO_DATE('…','YYYY-MM-DD')` (live 2026-10-07). **Ambiguous day/month order** (`"03/04/2026"`: Excel takes it from the locale), an impossible date, text that is not a date (Excel `#VALUE!`) and text before 1900 (not a date to Excel) are NEEDS_REVIEW |
+| a number (literal) | date | `to_date ( '<its date>' , '%Y-%m-%d' )` | Excel's serial number, converted at translation time. Serial 0 (Excel's "1900-01-00"), 60 (the fictitious 29 Feb 1900) and negatives are NEEDS_REVIEW |
+| a number column | date | `add_days ( to_date ( '1899-12-30' , '%Y-%m-%d' ) , floor ( [T::n] ) )` | Exact for serials from 61 (1900-03-01); `floor` drops the time fraction, which a date function ignores. Trap names the serial-60 caveat. A **text column** in a date slot is NEEDS_REVIEW (its format is the workbook's locale) |
+| a date | number (`VALUE`) or text | `diff_days ( [T::d] , to_date ( '1899-12-30' , '%Y-%m-%d' ) )`; in text `to_string ( diff_days ( … ) )` | Excel's serial: `UPPER(d)` / `LEN(d)` / `"x"&d` read the serial's digits (2000-01-01 → `36526`). `to_string` of a DATE has no one-argument form (rejected). A **DATE_TIME** where text is expected is NEEDS_REVIEW (a serial with a time fraction has no exact text) |
+| `"2.5"` (numeric text literal) | number | `2.5` | Folded. Non-numeric text in arithmetic is NEEDS_REVIEW (Excel `#VALUE!`) |
+| a text column | number | `to_double ( [T::s] )` | APPROXIMATED, with a trap: text that is not a number is NULL (Excel `#VALUE!`), and Excel also reads currency, percent and date text |
+| a boolean | number | `if ( b ) then 1 else 0` | E10 |
+| a number | text | `to_string ( [T::n] )` | `to_string` rejects Text, so only non-text operands are wrapped. A DOUBLE may render `12.0` |
+| a boolean | text | `if ( b ) then 'TRUE' else 'FALSE'` | Excel's capitals; `to_string` gives `true` / `false` (BL-349) |
+| a number | condition | `[T::n] != 0` | |
+| a DOUBLE or decimal | integer (count, position) | `floor ( [T::n] )`; a literal is truncated (`2.7` → `2`) | Excel truncates toward zero: `floor` is exact for x ≥ 0, and a negative count or position is `#VALUE!` in Excel. A month offset (`EDATE`, `EOMONTH`), which may be negative, is `if ( x < 0 ) then ceil ( x ) else floor ( x )`. **`to_integer` rounds** (2.7 → 3, −2.7 → −3; live 2026-10-07), so it is never used for truncation |
+| `IF` / `IFERROR` branches of different types | one type | number and text: the number becomes `to_string ( … )`; boolean and text: `'TRUE'` / `'FALSE'` | APPROXIMATED, with a trap: an Excel cell holds either type, a ThoughtSpot column one. A date beside text is NEEDS_REVIEW (BL-354) |
+| text compared with a number or a boolean (`"TRUE"<>A1`) | comparison | `true` / `false` | Excel orders values of different types by type (numbers < text < booleans) and never finds them equal, so the comparison is a constant. A date compared with text is NEEDS_REVIEW |
 
 ---
 

@@ -324,6 +324,20 @@ def test_criteria_emits_checked_against_the_criteria_table():
     assert any("CRITERIA_EMITS: `strpos`" in e for e in errs)
 
 
+def test_coercion_emits_checked_against_the_coercion_table():
+    """COERCION_EMITS (BL-352..355): each name must appear in the Excel map's implicit-type-
+    coercion table and be a catalogued function."""
+    table = "\n### Implicit type coercion\n\n| a text date | `abs` |\n\n## Next\n"
+    with_table = _EXCEL_MAP.replace("<!-- translator-coverage:start -->",
+                                    table + "<!-- translator-coverage:start -->")
+    ok = _rules(_OK_RULES) + 'COERCION_EMITS = ("abs",)\n'
+    assert _c_errors(ok, with_table) == []
+    errs = _c_errors(_rules(_OK_RULES) + 'COERCION_EMITS = ("abs", "sum")\n', with_table)
+    assert any("COERCION_EMITS: `sum` does not appear" in e for e in errs)
+    errs = _c_errors(_rules(_OK_RULES) + 'COERCION_EMITS = ("nullif",)\n', with_table)
+    assert any("COERCION_EMITS: `nullif` is not a catalogued" in e for e in errs)
+
+
 def test_real_repo_passes_requirement_c():
     """The shipped rule table and the shipped maps agree (the gate the CI runs)."""
     import check_mapping_code_sync as m

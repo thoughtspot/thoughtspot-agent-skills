@@ -101,6 +101,13 @@ FUNCTION_RULES = {
 # translates its criteria through (``criteria.py``) — checked against that table's text.
 CRITERIA_EMITS = ("isnull", "not", "contains", "strpos", "sql_bool_op")
 
+# Excel's implicit type coercion (``coerce.py``), applied per argument slot whatever the rule:
+# a text date or a serial in a date slot, numeric text in arithmetic, a DOUBLE in an integer
+# slot, a number / boolean / date where text is expected. Checked against the Excel map's
+# "Implicit type coercion" table, and allowed in every handler's emissions (BL-352..355).
+COERCION_EMITS = ("to_date", "add_days", "floor", "ceil", "diff_days", "to_double",
+                  "to_string")
+
 # Google Sheets delta rules (the Sheets map). A Sheets formula is handled by these first, then
 # by FUNCTION_RULES for every name the Sheets map does not row (its rule E1).
 SHEETS_RULES = {

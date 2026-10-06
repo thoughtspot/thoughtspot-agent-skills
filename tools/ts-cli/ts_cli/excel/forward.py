@@ -106,6 +106,13 @@ class Translator:
 
         return infer(node, self.column_fine_type)
 
+    # -- Excel's implicit coercion, per slot (coerce.py) ---------------------------------
+    def date(self, node) -> dict:
+        """An Excel argument in a date slot: a date, date text or a serial (BL-352/353)."""
+        from ts_cli.excel.coerce import as_date
+
+        return as_date(self, self.expr(node))
+
     # -- dispatch ----------------------------------------------------------------------
     def expr(self, node) -> dict:
         handler = _NODE_HANDLERS.get(type(node))

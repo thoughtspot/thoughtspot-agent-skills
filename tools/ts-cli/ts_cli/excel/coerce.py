@@ -1,0 +1,239 @@
+"""Excel's implicit type coercion, written out (BL-352, BL-353, BL-355; fidelity M1).
+
+Excel converts an argument to the type its slot expects; ThoughtSpot type-checks at import and
+rejects the formula instead (error_code 14516). Each helper takes an EMITTED ThoughtSpot node and
+returns it in the slot's type, or raises NEEDS_REVIEW where no exact form exists. Types come
+from ``typecheck`` (``int`` and ``double`` kept apart — ThoughtSpot's "Numeric" slots take an
+integer only).
+
+Live facts these rely on (probe record §7, se-thoughtspot, 2026-10-07):
+- ``to_date ( 'text' , '%Y-%m-%d' )`` compiles to ``TO_DATE('text','YYYY-MM-DD')`` (the
+  strftime pattern is translated; a Java-style ``'yyyy-MM-dd'`` is passed through verbatim).
+- ``diff_days ( d , to_date ( '1899-12-30' , '%Y-%m-%d' ) )`` is Excel's serial number for any
+  date from 1900-03-01 on (2000-01-01 → 36526).
+- ``floor`` / ``ceil`` return INT64, so they fit an integer slot; ``to_integer`` ROUNDS
+  (2.7 → 3, −2.7 → −3), so it is never Excel's truncation.
+"""
+from __future__ import annotations
+
+import datetime as _dt
+import re
+from decimal import Decimal, InvalidOperation
+from typing import Optional
+
+from ts_cli.excel import tsast as T
+
+EPOCH_TEXT = "1899-12-30"   # Excel serial 0 for dates from 1900-03-01 on
+ISO = "%Y-%m-%d"
+SERIAL_NOTE = ("Excel's serial numbers: the translation counts days from 1899-12-30, exact for "
+               "dates from 1900-03-01 on; Excel's serials 1–60 follow its fictitious 29 Feb "
+               "1900 and differ by one day")
+
+
+def epoch() -> dict:
+    return T.call("to_date", T.lit_string(EPOCH_TEXT), T.lit_string(ISO))
+
+
+def to_date_literal(text: str, pattern: str = ISO) -> dict:
+    return T.call("to_date", T.lit_string(text), T.lit_string(pattern))
+
+
+def string_value(node: dict) -> Optional[str]:
+    """The text of a string literal node, unquoted, else None."""
+    if T.is_lit(node, "string"):
+        return node["value"][1:-1].replace("''", "'")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Text that is a date (BL-352)
+# ---------------------------------------------------------------------------
+
+_ISO_DATE = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
+_ISO_TIME = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})([T ])(\d{1,2}):(\d{2})(?::(\d{2}))?")
+_SLASHED = re.compile(r"(\d{1,2})([/.-])(\d{1,2})\2(\d{4})")
+_YMD_SLASH = re.compile(r"(\d{4})/(\d{1,2})/(\d{1,2})")
+
+
+def date_pattern(text: str) -> tuple[Optional[str], str]:
+    """``(pattern, why)``: the ``to_date`` pattern a date text literal is written in, or
+    ``(None, reason)`` when it is not a date, or its day / month order is ambiguous."""
+    s = text.strip()
+    m = _ISO_TIME.fullmatch(s)
+    if m:
+        pat = "%Y-%m-%d" + m.group(4) + "%H:%M" + (":%S" if m.group(7) else "")
+        return (pat, "") if _valid(s, pat) else (None, f"'{text}' is not a real date-time")
+    if _ISO_DATE.fullmatch(s):
+        return (ISO, "") if _valid(s, ISO) else (None, f"'{text}' is not a real date")
+    if _YMD_SLASH.fullmatch(s):
+        return ("%Y/%m/%d", "") if _valid(s, "%Y/%m/%d") else (None, f"'{text}' is not a real "
+                                                                     "date")
+    m = _SLASHED.fullmatch(s)
+    if m:
+        a, sep, b = int(m.group(1)), m.group(2), int(m.group(3))
+        md, dm = f"%m{sep}%d{sep}%Y", f"%d{sep}%m{sep}%Y"
+        if a <= 12 and b <= 12 and a != b:
+            return None, (f"'{text}' reads as day/month or month/day — Excel takes the order "
+                          "from the workbook's locale, which the formula does not say")
+        pat = md if a <= 12 else dm
+        return (pat, "") if _valid(s, pat) else (None, f"'{text}' is not a real date")
+    return None, (f"'{text}' is not a date Excel would read in every locale (Excel returns "
+                  "#VALUE! for text that is not a date)")
+
+
+def _valid(text: str, pattern: str) -> bool:
+    try:
+        _dt.datetime.strptime(text, pattern)
+        return True
+    except ValueError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Serial numbers (BL-353: a number in a date slot)
+# ---------------------------------------------------------------------------
+
+def serial_to_iso(value: Decimal) -> Optional[str]:
+    """Excel serial → ISO date, for serials whose Excel date is a real one. Serial 60 is
+    Excel's fictitious 29 Feb 1900 and 0 is "1900-01-00": None for both and below 0."""
+    whole = int(value.to_integral_value(rounding="ROUND_FLOOR"))
+    if whole < 1 or whole == 60:
+        return None
+    base = _dt.date(1899, 12, 31) if whole < 60 else _dt.date(1899, 12, 30)
+    try:
+        return (base + _dt.timedelta(days=whole)).isoformat()
+    except OverflowError:
+        return None
+
+
+def as_date(tr, node: dict) -> dict:
+    """``node`` in a date slot, the way Excel reads it (a date, date text, or a serial)."""
+    t = tr.fine_type(node)
+    if t in ("date", "datetime") or t is None:
+        return node
+    text = string_value(node)
+    if text is not None:
+        pattern, why = date_pattern(text)
+        if pattern is None:
+            tr.review(f"a text date in a date function: {why}")
+        year = int(re.match(r"\D*(\d+)\D+(\d+)\D+(\d+)", text.strip()).group(
+            1 if pattern.startswith("%Y") else 3))
+        if year < 1900:
+            tr.review(f"'{text}' is before 1900: Excel does not read it as a date (#VALUE!)")
+        if text.strip()[:10] < "1900-03-01" and pattern.startswith("%Y"):
+            tr.trap(SERIAL_NOTE)
+        if "%H" in pattern:
+            tr.note(f"'{text}' has a time of day; to_date keeps the date, which is all this "
+                    "date function reads")
+        return to_date_literal(text, pattern)
+    if t in ("int", "double", "number"):
+        value = T.number_value(node)
+        if value is not None:
+            iso = serial_to_iso(value)
+            if iso is None:
+                tr.review(f"the serial number {value} is a date only in Excel's own 1900 "
+                          "calendar (serial 0 is \"1900-01-00\", 60 is 29 Feb 1900, a negative "
+                          "serial is #NUM!) — no real date to translate it to")
+            return to_date_literal(iso)
+        tr.trap(SERIAL_NOTE)
+        whole = node if t == "int" else T.call("floor", node)
+        return T.call("add_days", epoch(), whole)
+    if t == "text":
+        tr.review("a text column in a date function: Excel parses it with the workbook's "
+                  "locale, which the formula does not say — convert it with to_date ( x , "
+                  "'<pattern>' ) for the column's format")
+    tr.review(f"a {t} in a date function has no Excel reading ThoughtSpot can express")
+
+
+def serial(tr, node: dict) -> dict:
+    """A date's Excel serial number (exact from 1900-03-01 on)."""
+    tr.trap(SERIAL_NOTE)
+    return T.call("diff_days", node, epoch())
+
+
+# ---------------------------------------------------------------------------
+# Numbers (BL-353: text and booleans in arithmetic)
+# ---------------------------------------------------------------------------
+
+TEXT_NUMBER_TRAP = ("numeric text in arithmetic: Excel converts it, and so does to_double — "
+                    "but text that is not a number gives NULL where Excel shows #VALUE!, and "
+                    "Excel also reads currency, percentages and dates in text, which to_double "
+                    "does not")
+
+
+def as_number(tr, node: dict) -> dict:
+    t = tr.fine_type(node)
+    if t == "bool":
+        return T.ifelse(node, T.lit_number("1"), T.lit_number("0"))
+    if t != "text":
+        return node
+    text = string_value(node)
+    if text is not None:
+        try:
+            value = Decimal(text.strip())
+        except InvalidOperation:
+            tr.review(f"the text '{text}' in arithmetic is not a number: Excel returns #VALUE!")
+        if not value.is_finite():
+            tr.review(f"the text '{text}' in arithmetic is not a number")
+        return T.lit_number(format(value, "f"))
+    tr.trap(TEXT_NUMBER_TRAP, downgrade=True)
+    return T.call("to_double", node)
+
+
+# ---------------------------------------------------------------------------
+# Integer slots (BL-355)
+# ---------------------------------------------------------------------------
+
+def as_int(tr, node: dict, signed: bool = False) -> dict:
+    """A count or position: Excel truncates a fractional one toward zero. ThoughtSpot's
+    integer slots reject a DOUBLE, so it is written out — ``floor ( x )`` (equal to the
+    truncation for x ≥ 0; a negative count or position is #VALUE! in Excel), or, for a slot
+    that takes negatives (a month offset), ``if ( x < 0 ) then ceil ( x ) else floor ( x )``."""
+    node = as_number(tr, node)
+    t = tr.fine_type(node)
+    if t in ("int", None):
+        return node
+    value = T.number_value(node)
+    if value is not None:
+        whole = int(value)                     # int() truncates toward zero, like Excel
+        return T.lit_number(str(whole)) if whole >= 0 else T.unop("-", T.lit_number(
+            str(-whole)))
+    if t not in ("double", "number"):
+        return node                            # the type checker reports it
+    if signed:
+        return T.ifelse(T.binop("<", node, T.lit_number("0")), T.call("ceil", node),
+                        T.call("floor", node))
+    return T.call("floor", node)
+
+
+# ---------------------------------------------------------------------------
+# Text (BL-349, BL-350, BL-353: numbers, booleans and dates in text functions)
+# ---------------------------------------------------------------------------
+
+def bool_text(node: dict) -> dict:
+    """Excel's TRUE / FALSE as text (``to_string`` gives lower case)."""
+    return T.ifelse(node, T.lit_string("TRUE"), T.lit_string("FALSE"))
+
+
+def as_text(tr, node: dict, quiet: bool = False) -> dict:
+    """``node`` where Excel expects text. ``quiet``: an unknown type is left bare without a
+    question (a text function's argument is text in the common case)."""
+    t = tr.fine_type(node)
+    if t == "text":
+        return node
+    if t is None:
+        if not quiet:
+            tr.unknown_text(node)
+        return node
+    if t == "bool":
+        return bool_text(node)
+    if t == "date":
+        return T.call("to_string", serial(tr, node))
+    if t == "datetime":
+        tr.review("a date-time where Excel expects text is its serial number with a time "
+                  "fraction; ThoughtSpot's to_string needs a format for a date-time and has "
+                  "no serial form — use TEXT() semantics deliberately (Excel map, TEXT row)")
+    if t in ("double", "number") and node.get("node") != "lit":
+        tr.trap("to_string of a DOUBLE may render a decimal ('12.0') where Excel shows 12 — "
+                "exact for an integer column")
+    return T.call("to_string", node)
