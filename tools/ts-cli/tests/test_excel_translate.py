@@ -137,7 +137,7 @@ FORWARD = [
      "count_if ( [Sales::r] != 'West' or isnull ( [Sales::r] ) , [Sales::r] )"),
     ('=COUNTIF(Sales[r],"*es*")', "count_if ( contains ( [Sales::r] , 'es' ) , [Sales::r] )"),
     ('=COUNTIF(Sales[r],"We*")', "count_if ( strpos ( [Sales::r] , 'We' ) = 1 , [Sales::r] )"),
-    ('=AVERAGEIFS(T[v],T[a],">="&[@b])', "average_if ( [T::a] >= [TABLE::b] , [T::v] )"),
+    ('=AVERAGEIFS(T[v],T[a],">="&10)', "average_if ( [T::a] >= 10 , [T::v] )"),
     ('=MAXIFS(T[v],T[a],5)', "max_if ( [T::a] = 5 , [T::v] )"),
     # rounding (E12)
     ("=ROUND([@x],2)", "round ( [TABLE::x] , 0.01 )"),

@@ -43,8 +43,9 @@ ZERO_TOTAL_TRAP = ("a zero total: safe_divide returns 0 where Excel's per-row di
 
 
 def _has_ratio(node: dict) -> bool:
-    """A division (or safe_divide) with a column on either side, anywhere in ``node``."""
-    return any((n.get("node") == "binop" and n["op"] == "/" and T.has_column(n))
+    """A true ratio anywhere in ``node``: a division whose DENOMINATOR has a column, or a
+    safe_divide. ``a / 100`` is scaling by a constant, not a ratio."""
+    return any((n.get("node") == "binop" and n["op"] == "/" and T.has_column(n["right"]))
                or (n.get("node") == "call" and n["fn"] == "safe_divide")
                for n in T.walk(node))
 
@@ -82,10 +83,32 @@ class _Lifter:
 
     def _additive(self, node: dict) -> dict:
         left, right = node["left"], node["right"]
-        if not (T.has_column(left) and T.has_column(right)):
+        constant = None if T.has_column(left) and T.has_column(right) else (
+            right if T.has_column(left) else left)
+        if constant is not None:
+            other = left if constant is right else right
+            if _has_ratio(other):
+                # a ratio shifted by a constant: the ratio of totals, shifted — as a/b*100 is
+                # scaled (PR #570 review round 2, item 9)
+                lifted = self.lift(other)
+                return T.binop(node["op"], *((lifted, constant) if other is left
+                                             else (constant, lifted)))
             # a constant term is added once per ROW in Excel: sum ( a + 5 ), not sum ( a ) + 5
             return self._row_sum(node, "a column plus a constant")
-        self.tr.note(ADDITIVE_NOTE)
+        if _has_ratio(left) != _has_ratio(right):
+            self.tr.review("a ratio added to or subtracted from a non-ratio column term "
+                           "(a/b + c) has no ratio-of-totals form: Σ(a/b + c) is neither "
+                           "Σa/Σb + Σc nor a ratio — write the ratio as its own MEASURE and "
+                           "combine the measures deliberately")
+        if _has_ratio(left):
+            # a/b - c/d (margin minus plan margin): each term becomes its own ratio of totals;
+            # the difference of two metrics, not Σ of the per-row difference
+            self.tr.trap("each ratio term became its own ratio of totals (a/b - c/d → "
+                         "safe_divide ( Σa , Σb ) - safe_divide ( Σc , Σd )): the difference "
+                         "of two metrics at the search's grain, not the total of Excel's "
+                         "per-row difference")
+        else:
+            self.tr.note(ADDITIVE_NOTE)
         return T.binop(node["op"], self.lift(left), self.lift(right))
 
     def _product(self, node: dict) -> dict:
@@ -150,7 +173,7 @@ def apply_role(tr, node: dict, role: Optional[str]) -> tuple[dict, Optional[str]
         return node, "ATTRIBUTE"
     if aggregated:
         return node, "MEASURE"
-    if tr.type_of(node) in ("text", "bool", "date"):
+    if tr.type_of(node) in ("text", "bool", "date", "datetime"):
         tr.trap(TEXT_TRAP if tr.type_of(node) == "text" else
                 TEXT_TRAP.replace("returns text", f"returns a {tr.type_of(node)}"))
         return node, "ATTRIBUTE"

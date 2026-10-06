@@ -116,7 +116,7 @@ def _countif(tr, n):
     rng = _range_col(tr, n.args[0])
     cond = criteria_condition(tr, rng, n.args[1])
     counted = rng
-    if cond.get("node") == "call" and cond["fn"] == "isnull":
+    if isinstance(n.args[1], X.Str) and n.args[1].value in ("", "="):
         counted = T.ref_node(tr.ctx.key_reference())
         tr.note("a blank criterion counts a non-null key column, not the range itself "
                 "(count_if counts non-null values of its 2nd argument)")

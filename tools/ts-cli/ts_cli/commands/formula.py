@@ -147,7 +147,7 @@ def translate_cmd(
         raise typer.BadParameter(str(exc)) from exc
     text = _read_expr(expr)
     if target.strip().lower() == "excel":
-        _to_excel(text, dialect, table, validate)
+        _to_excel(text, dialect, table, validate, columns)
         return
     if target.strip().lower() not in ("thoughtspot", "ts"):
         raise typer.BadParameter("--to must be thoughtspot or excel")
@@ -171,9 +171,20 @@ def translate_cmd(
         raise typer.Exit(exit_code)
 
 
-def _to_excel(text: str, dialect: str, table: str, validate: str) -> None:
-    """``--to excel``: a ThoughtSpot formula → an Excel formula (JSON to stdout)."""
+def _to_excel(text: str, dialect: str, table: str, validate: str,
+              columns: Optional[str] = None) -> None:
+    """``--to excel``: a ThoughtSpot formula → an Excel formula (JSON to stdout).
+    ``--columns`` (with ``data_type``) tells it which columns are dates or numbers."""
     from ts_cli.excel.to_excel import to_excel
+    from ts_cli.formula_translate.context import parse_columns_json
+
+    specs = []
+    if columns:
+        try:
+            specs = parse_columns_json(_read_json_arg(columns) or "")
+        except ValueError as exc:
+            _err(str(exc))
+            raise typer.Exit(2)
 
     if dialect != "thoughtspot":
         _err("--to excel translates a ThoughtSpot formula: pass --from thoughtspot")
@@ -181,7 +192,7 @@ def _to_excel(text: str, dialect: str, table: str, validate: str) -> None:
     if validate != "none":
         _err("--validate checks ThoughtSpot formulas; it does not apply to --to excel")
         raise typer.Exit(2)
-    out = to_excel(text, table=table)
+    out = to_excel(text, table=table, specs=specs)
     print(json.dumps({
         "dialect": "thoughtspot", "to": "excel", "table": table, "input": text,
         "formula": out.formula, "status": out.status, "references": out.references,

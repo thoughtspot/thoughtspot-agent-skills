@@ -47,8 +47,9 @@ class ExcelOut:
 
 
 class Emitter:
-    def __init__(self, table: str = "Table1"):
+    def __init__(self, table: str = "Table1", column_types: Optional[dict] = None):
         self.table = table
+        self.column_types = column_types or {}  # "[T::c]" -> "date" | "datetime" | …
         self.agg = 0
         self.notes: list[str] = []
         self.traps: list[str] = []
@@ -140,7 +141,8 @@ class Emitter:
         left = self.text(node["left"], prec)
         right = self.text(node["right"], prec + 1)
         if prec == P_CMP:
-            left, right = _date_literal(node["left"], left), _date_literal(node["right"], right)
+            left = self.typed_literal(node["left"], left, node["right"])
+            right = self.typed_literal(node["right"], right, node["left"])
         if op == "/":
             self.trap("a zero divisor: ThoughtSpot's / returns NULL, Excel shows #DIV/0! "
                       "(safe_divide is the guarded form)")
@@ -182,17 +184,45 @@ class Emitter:
         self.review("a { … } list outside in / group_aggregate has no Excel form")
 
 
-_ISO_DATE = re.compile(r"'(\d{4}-\d{2}-\d{2})'")
+    def column_type(self, node: dict) -> Optional[str]:
+        if node.get("node") == "col":
+            return self.column_types.get(f"[{node['table']}::{node['column']}]")
+        if node.get("node") == "ref":
+            return self.column_types.get(f"[{node['name']}]")
+        return None
 
-
-def _date_literal(node: dict, text: str) -> str:
-    """A 'yyyy-mm-dd' string compared with a value is a date in ThoughtSpot; in Excel it
-    would compare as text, so it becomes DATEVALUE("…")."""
-    if node.get("node") == "lit" and node["kind"] == "string":
-        m = _ISO_DATE.fullmatch(node["value"])
+    def typed_literal(self, lit: dict, text: str, other: dict) -> str:
+        """A string literal set against a column: a 'yyyy-mm-dd[ hh:mm[:ss]]' value is a date
+        or datetime to ThoughtSpot, a numeric string a number — Excel would compare text, so
+        it becomes DATEVALUE(…)[+TIMEVALUE(…)] / VALUE(…). Exact when the column is known to
+        be a date (or a number); otherwise APPROXIMATED with a note."""
+        if not (lit.get("node") == "lit" and lit["kind"] == "string"):
+            return text
+        value = lit["value"][1:-1]
+        m = _ISO_DATETIME.fullmatch(value)
         if m:
-            return f'DATEVALUE("{m.group(1)}")'
-    return text
+            out = f'DATEVALUE("{m.group(1)}")' + (f'+TIMEVALUE("{m.group(2)}")' if m.group(2) else "")
+            self._typed_note(other, ("date", "datetime"), out)
+            return out
+        if _NUMERIC.fullmatch(value) and other.get("node") in ("col", "ref"):
+            self._typed_note(other, ("number",), f'VALUE("{value}")')
+            return f'VALUE("{value}")'
+        return text
+
+    def _typed_note(self, other: dict, wanted: tuple, out: str) -> None:
+        if self.column_type(other) not in wanted:
+            self.trap(f"column type unknown: {out} assumes {to_ts_text(other)} is a "
+                      f"{' / '.join(wanted)}; if it is text, compare with the string as written "
+                      "(pass --columns with data_type to decide)", downgrade=True)
+
+
+_ISO_DATETIME = re.compile(r"(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?))?")
+_NUMERIC = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def to_ts_text(node: dict) -> str:
+    from ts_cli.excel.tsast import to_text
+    return to_text(node)
 
 
 def _flatten(node: dict, op: str) -> list:
@@ -206,12 +236,14 @@ def _has_string(node: dict) -> bool:
     return any(n.get("node") == "lit" and n["kind"] == "string" for n in walk(node))
 
 
-def to_excel(ts_formula: str, table: str = "Table1") -> ExcelOut:
-    """Translate one ThoughtSpot formula into an Excel formula (leading ``=``)."""
+def to_excel(ts_formula: str, table: str = "Table1", specs: Optional[list] = None) -> ExcelOut:
+    """Translate one ThoughtSpot formula into an Excel formula (leading ``=``). ``specs``
+    (``formula_translate.context.ColumnSpec`` list, from ``--columns``) give column types."""
     from ts_cli.excel.helpers import from_text
-    from ts_cli.excel.tsast import has_column
+    from ts_cli.excel.tsast import has_column, type_of_data_type
 
-    em = Emitter(table)
+    types = {s.target: type_of_data_type(s.data_type) for s in (specs or []) if s.data_type}
+    em = Emitter(table, types)
     try:
         node = from_text(ts_formula)
         text = em.text(node)

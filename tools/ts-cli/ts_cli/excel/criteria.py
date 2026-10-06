@@ -53,10 +53,10 @@ def _from_string(tr, col: dict, raw: str) -> dict:
     op, rest = _PREFIX.match(raw).groups()
     op = op or "="
     if rest == "":
-        if op == "=":
-            return T.call("isnull", col)
-        if op == "<>":  # no isnotnull in ThoughtSpot (probe record §7, BL-339)
-            return T.unop("not", T.call("isnull", col))
+        if op in ("=", "<>"):
+            # a blank cell: isnull, plus = '' for text (or unknown type) — tr._blank_test
+            # (there is no isnotnull in ThoughtSpot: probe record §7, BL-339)
+            return tr._blank_test(op, col)
         tr.review(f"criterion {raw!r} has no condition")
     if op in ("=", "<>") and re.search(r"(?<!~)[*?]", rest):
         cond = _wildcard(tr, col, rest)
@@ -68,8 +68,22 @@ def _from_string(tr, col: dict, raw: str) -> dict:
     return T.binop(op, col, value)
 
 
+def _per_row(crit) -> bool:
+    return any(isinstance(n, X.Ref) and n.grain == "row" for n in X.walk(crit))
+
+
 def criteria_condition(tr, col: dict, crit) -> dict:
     """The condition ``crit`` (an Excel AST node) applies to column ``col``."""
+    if _per_row(crit):
+        # COUNTIF(T[r], [@r]) counts the rows that share THIS row's value: a per-row
+        # criterion inside an aggregate is mixed grain, and translated literally it is the
+        # tautology count_if ( r = r , r ) (PR #570 review, round 2).
+        tr.review("a criterion that reads the current row ([@col] or a cell) inside a "
+                  "conditional aggregate is mixed grain: it counts or sums the rows that match "
+                  "THIS row. The ThoughtSpot form is a fixed-grain group_aggregate, e.g. "
+                  "group_aggregate ( count ( [r] ) , { [r] } , query_filters ( ) ) — not exact "
+                  "(query_filters keeps the search's filters, Excel's *IFS ignores sheet "
+                  "filters), so it is not emitted")
     if isinstance(crit, X.Str):
         return _from_string(tr, col, crit.value)
     if isinstance(crit, X.Num):

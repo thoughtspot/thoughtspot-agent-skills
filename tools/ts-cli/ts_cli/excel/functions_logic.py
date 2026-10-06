@@ -153,7 +153,11 @@ def _isnumber(tr, n):
     if isinstance(arg, X.Call) and arg.name == "VALUE" and len(arg.args) == 1:
         # not ( isnull ( … ) ): ThoughtSpot has no isnotnull (probe record §7, BL-339)
         return T.unop("not", T.call("isnull", T.call("to_double", tr.expr(arg.args[0]))))
-    t = tr.type_of(tr.expr(arg))
+    value = tr.expr(arg)
+    t = tr.type_of(value)
+    if t == "number" and value.get("node") in ("col", "ref"):
+        # a blank cell is not a number to Excel
+        return T.unop("not", T.call("isnull", value))
     if t is None:
         tr.review("ISNUMBER on a value of unknown type: a type test resolves from the column's "
                   "type (Excel map E15) — pass data_type in --columns")

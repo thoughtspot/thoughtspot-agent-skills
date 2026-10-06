@@ -188,7 +188,8 @@ def to_text(node: dict) -> str:
     kind = node.get("node")
     if kind == "binop":
         p = _PREC[node["op"]]
-        return f"{_wrap(node['left'], p)} {node['op']} {_wrap(node['right'], p + 1)}"
+        left_min = p + 1 if p == 4 else p  # a comparison inside a comparison is bracketed
+        return f"{_wrap(node['left'], left_min)} {node['op']} {_wrap(node['right'], p + 1)}"
     if kind == "unop":
         if node["op"] == "not":
             return f"not ( {to_text(node['operand'])} )"
@@ -213,15 +214,20 @@ def to_text(node: dict) -> str:
 # ---------------------------------------------------------------------------
 
 _TEXT_TYPES = {"VARCHAR", "CHAR", "TEXT", "STRING"}
-_DATE_TYPES = {"DATE", "DATE_TIME", "DATETIME", "TIMESTAMP", "TIME"}
+_DATE_TYPES = {"DATE"}
+_DATETIME_TYPES = {"DATE_TIME", "DATETIME", "TIMESTAMP", "TIMESTAMP_NTZ", "TIMESTAMP_TZ",
+                   "TIMESTAMP_LTZ", "TIME"}
+# Types that are a point in time: "date" (whole days) or "datetime" (with a time of day).
+TEMPORAL = ("date", "datetime")
 _NUM_TYPES = {"INT32", "INT64", "INTEGER", "INT", "BIGINT", "DOUBLE", "FLOAT", "DECIMAL",
               "NUMBER", "NUMERIC", "REAL"}
 _FN_TYPES = {
     "text": {"concat", "to_string", "left", "right", "substr", "month", "day_of_week",
              "sql_string_op", "year_name"},
-    "date": {"today", "now", "add_days", "add_months", "add_years", "add_weeks", "to_date",
+    "datetime": {"now", "sql_date_time_op"},
+    "date": {"today", "add_days", "add_months", "add_years", "add_weeks", "to_date",
              "start_of_month", "start_of_year", "start_of_quarter", "start_of_week", "date",
-             "sql_date_op", "sql_date_time_op"},
+             "sql_date_op"},
     "bool": {"contains", "isnull", "in", "between", "sql_bool_op", "is_weekend"},
 }
 
@@ -232,6 +238,8 @@ def type_of_data_type(data_type: Optional[str]) -> Optional[str]:
         return "text"
     if dt in _DATE_TYPES:
         return "date"
+    if dt in _DATETIME_TYPES:
+        return "datetime"
     if dt in _NUM_TYPES:
         return "number"
     if dt in ("BOOL", "BOOLEAN"):
@@ -248,6 +256,9 @@ def _ifelse_type(node: dict, column_type) -> Optional[str]:
 
 
 def _call_type(node: dict, column_type) -> Optional[str]:
+    if node["fn"] in ("add_days", "add_months", "add_years", "add_weeks") and node["args"]:
+        first = type_of(node["args"][0], column_type)
+        return first if first in TEMPORAL else "date"
     for t, fns in _FN_TYPES.items():
         if node["fn"] in fns:
             return t

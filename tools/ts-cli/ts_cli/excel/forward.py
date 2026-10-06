@@ -126,7 +126,11 @@ class Translator:
         handler = handler or HANDLERS.get(node.name)
         if handler is None:
             self.no_rule(node.name)
-        return handler(self, node)
+        out = handler(self, node)
+        if out.get("node") == "call" and out["fn"] in _NUMERIC_ARGS:
+            # Excel coerces TRUE to 1 inside MAX(…), ROUND(…); ThoughtSpot does not
+            out["args"] = [self.as_number(a) for a in out["args"]]
+        return out
 
     # -- operators ---------------------------------------------------------------------
     def binary(self, node: X.Binary) -> dict:
@@ -153,8 +157,13 @@ class Translator:
 
     def as_condition(self, node: dict) -> dict:
         """Excel reads a number as a condition (0 is FALSE); ThoughtSpot needs a boolean."""
-        if self.type_of(node) == "number":
+        t = self.type_of(node)
+        if t == "number":
             return T.binop("!=", node, T.lit_number("0"))
+        if t is None and node.get("node") in ("col", "ref"):
+            self.trap(f"column type unknown: {T.to_text(node)} is used as a condition as-is; if "
+                      f"it is numeric, write {T.to_text(node)} != 0 (Excel reads 0 as FALSE) — "
+                      "pass data_type in --columns (or --model) to decide", downgrade=True)
         return node
 
     def compare(self, op: str, left: dict, right: dict) -> dict:
@@ -169,10 +178,16 @@ class Translator:
         """``x = ""`` is TRUE for a blank cell in Excel: ``isnull ( x )`` (number / date — a
         numeric column compared with '' is rejected at import), ``isnull ( x ) or x = ''``
         (text or unknown type)."""
-        if self.type_of(x) in ("number", "date", "bool"):
+        t = self.type_of(x)
+        if t in ("number", "date", "datetime", "bool"):
             test = T.call("isnull", x)
         else:
             test = T.binop("or", T.call("isnull", x), T.binop("=", x, T.lit_string("")))
+            if t is None:
+                self.trap(f"column type unknown: the blank test on {T.to_text(x)} includes "
+                          f"{T.to_text(x)} = '', which ThoughtSpot rejects for a numeric or "
+                          "date column — there it is isnull alone; pass data_type in --columns "
+                          "(or --model) to decide", downgrade=True)
         return test if op == "=" else T.unop("not", test)
 
     def divide(self, left: dict, right: dict) -> dict:
@@ -183,16 +198,28 @@ class Translator:
             self.trap(DIV_TRAP)
         return T.binop("/", left, right)
 
+    def _temporal(self, op: str, left: dict, right: dict, lt, rt):
+        """Date / datetime arithmetic, or None when neither side is temporal."""
+        if op == "-" and lt in T.TEMPORAL and rt in T.TEMPORAL:
+            if "datetime" in (lt, rt):
+                # Excel's difference is in days WITH the time fraction; diff_days drops the
+                # hours. diff_time ( end , start ) is seconds (live 2026-10-06: one day =
+                # 86400, end first), so / 86400 is the Excel serial difference.
+                return T.binop("/", T.call("diff_time", left, right), T.lit_number("86400"))
+            return T.call("diff_days", left, right)
+        if lt in T.TEMPORAL and rt == "number":
+            amount = self._whole_days(right)
+            return T.call("add_days", left, amount if op == "+" else T.unop("-", amount))
+        if op == "+" and rt in T.TEMPORAL and lt == "number":
+            return T.call("add_days", right, self._whole_days(left))
+        return None
+
     def _additive(self, op: str, left: dict, right: dict) -> dict:
         lt, rt = self.type_of(left), self.type_of(right)
-        if op == "-" and lt == "date" and rt == "date":
-            return T.call("diff_days", left, right)
-        if lt == "date" and rt == "number":
-            amount = right if op == "+" else T.unop("-", right)
-            return T.call("add_days", left, amount)
-        if op == "+" and rt == "date" and lt == "number":
-            return T.call("add_days", right, left)
-        if "date" in (lt, rt):
+        temporal = self._temporal(op, left, right, lt, rt)
+        if temporal is not None:
+            return temporal
+        if lt in T.TEMPORAL or rt in T.TEMPORAL:
             self.review("date arithmetic with an operand whose type is not known to be a date "
                         "or a number of days has no ThoughtSpot form (Excel map E9) — pass "
                         "data_type in --columns (or --model) for its columns")
@@ -204,6 +231,19 @@ class Translator:
                       "( end , start ) and date + n is add_days ( d , n ); pass data_type in "
                       "--columns (or --model) to decide", downgrade=True)
         return T.binop(op, left, right)
+
+    def _whole_days(self, amount: dict) -> dict:
+        """add_days takes whole days; Excel's date + 0.5 (or + 1/24) adds a time of day."""
+        value = T.number_value(amount)
+        if value is not None and value != value.to_integral_value():
+            self.review("adding a fraction of a day to a date or datetime (+0.5, +1/24) has no "
+                        "add_days form — add_days takes whole days; for hours use add_minutes "
+                        "( d , n * 60 ) or add_seconds on a DATETIME")
+        if value is None and any(n.get("node") == "binop" and n["op"] == "/"
+                                            for n in T.walk(amount)):
+            self.review("a computed number of days (e.g. 1/24) added to a date may be "
+                        "fractional — add_days takes whole days")
+        return amount
 
     def concat(self, operands: list) -> dict:
         """Excel ``&`` / CONCAT: one N-argument ``concat`` of Text arguments (probe §7)."""
@@ -227,7 +267,7 @@ class Translator:
         if t == "bool":
             self.note("to_string of a boolean gives 'true' / 'false'; Excel's & shows TRUE / "
                       "FALSE")
-        if t == "date":
+        if t in T.TEMPORAL:
             self.trap("a date joined with & is its serial number in Excel; ThoughtSpot's "
                       "to_string gives the date text — use TEXT() semantics deliberately",
                       downgrade=True)
@@ -271,6 +311,12 @@ def check_a1(tree) -> None:
     if len(rows) > 1:
         raise NeedsReview(f"the formula reads rows {', '.join(sorted(rows, key=int))} — a "
                           "reference to another row is " + A1_WINDOW_HINT)
+
+
+# ThoughtSpot functions whose arguments are all numbers (a boolean there is coerced).
+_NUMERIC_ARGS = frozenset({"greatest", "least", "abs", "round", "floor", "ceil", "pow", "sqrt",
+                           "ln", "exp", "log10", "sum", "average", "max", "min", "median",
+                           "stddev", "variance"})
 
 
 def _flatten_concat(node) -> list:

@@ -213,6 +213,10 @@ def _round(em: Emitter, args: list):
     if len(args) == 1:
         return f"ROUND({em.text(args[0])},0)", P_PRIMARY
     inc = args[1]
+    if inc.get("node") == "unop" and inc["op"] == "-" and _is_lit(inc["operand"], "number"):
+        em.review("round with a negative increment: ThoughtSpot does not round to tens with it "
+                  "(live 2026-10-06: round(1234.5678, -2) = 1234, not 1200 — Excel map E12), "
+                  "so there is no faithful Excel form; check what the formula intends")
     if not _is_lit(inc, "number"):
         em.review("round with a non-literal increment has no Excel ROUND / MROUND form")
     try:
@@ -313,19 +317,24 @@ def _isnull(em: Emitter, args: list):
     return f"ISBLANK({em.text(args[0])})", P_PRIMARY
 
 
+def _typed(em: Emitter, value: dict, column: dict) -> str:
+    return em.typed_literal(value, em.text(value), column)
+
+
 def _ifnull(em: Emitter, args: list):
     x = em.text(args[0])
-    return f"IF(ISBLANK({x}),{em.text(args[1])},{x})", P_PRIMARY
+    return f"IF(ISBLANK({x}),{_typed(em, args[1], args[0])},{x})", P_PRIMARY
 
 
 def _in(em: Emitter, args: list):
     x = em.text(args[0])
-    return "OR(" + ",".join(f"{x}={em.text(v)}" for v in args[1:]) + ")", P_PRIMARY
+    return "OR(" + ",".join(f"{x}={_typed(em, v, args[0])}" for v in args[1:]) + ")", P_PRIMARY
 
 
 def _between(em: Emitter, args: list):
     x = em.text(args[0])
-    return f"AND({x}>={em.text(args[1])},{x}<={em.text(args[2])})", P_PRIMARY
+    return (f"AND({x}>={_typed(em, args[1], args[0])},{x}<={_typed(em, args[2], args[0])})",
+            P_PRIMARY)
 
 
 def _mod(em: Emitter, args: list):
