@@ -61,6 +61,66 @@ but the translator still calls it TRANSLATED. Databricks `mv_sql.py` has the sam
   column typed INT64. The comparator reads an INT64-typed integer as epoch seconds (UTC) when the
   oracle's value is a date, and nothing else. Without that rule, five date cases scored as false mismatches on the first run.
 
+## After fixes (2026-10-06, ts-cli 0.159.1)
+
+*Hand-written, added after BL-340..343 were fixed. Everything below this section — from
+"Silent wrong answers" down — is the ORIGINAL run (ts-cli 0.157.1), kept unchanged so the
+findings stay on record. The after-fixes evidence is
+`tools/formula-fidelity/runs/2026-10-06-snowflake-m0-after-fixes.json`; regenerate its full
+report with `run.py --cases … --rebuild runs/2026-10-06-snowflake-m0-after-fixes.json --report …`.*
+
+Re-run live on se-thoughtspot / Snowflake (`APJ_TAB`, `ThoughtSpot Partner (AP)`), 2026-10-06
+09:19 UTC, 176 s, ts-cli 0.159.1, against the case file with ten new guard cases (60 cases,
+`cases_sha256 5bf48471…`; the four fixed cases' `known_divergence` tags removed). The new cases'
+`expected` blocks were filled by an earlier oracle pass over the same fixture; this run found no
+oracle drift.
+
+| | Original (0.157.1) | After fixes (0.159.1) |
+|---|--:|--:|
+| Cases | 50 | 60 |
+| MATCH | 39 | **54** |
+| Silent wrong answers | **3** | **0** |
+| Warned wrong answers (BL-333, APPROXIMATED with a trap) | 4 | 4 |
+| IMPORT_FAILED | 1 | 0 |
+| TRANSLATE_FAILED | 2 | 1 (`ILIKE`; `NULLIF` now MATCHes after BL-339) |
+| ERROR_EQUIV (zero divisor) | 1 | 1 |
+
+**The four fixed cases**, all 10/10:
+
+| BL | Case | Emitted now | Before |
+|---|---|---|---|
+| BL-340 | `sf-str-004` `SUBSTR(S1, 2, 3)` | `substr ( [T::S1] , 1 , 3 )` — compiles to `SUBSTRING(S1, (1 + 1), 3)` | 2/10 |
+| BL-341 | `sf-date-003` `DATEDIFF(year, D1, D2)` | `diff_years ( [T::D2] , [T::D1] )` | 3/10 |
+| BL-342 | `sf-date-010` `MONTHS_BETWEEN(D2, D1)` | `sql_double_op ( "MONTHS_BETWEEN({0}, {1})" , [T::D2] , [T::D1] )` | 5/10 |
+| BL-343 | `sf-date-011` `TO_CHAR(D1, 'YYYY-MM')` | `sql_string_op ( "TO_CHAR({0}, 'YYYY-MM')" , [T::D1] )` | IMPORT_FAILED |
+
+**Ten new guard cases**, all MATCH 10/10:
+
+| Case | Source | Emitted | What it pins |
+|---|---|---|---|
+| `sf-str-009` | `SUBSTR(S1, -3, 2)` | `sql_string_op ( "SUBSTR({0}, -3, 2)" , … )` | negative start counts from the end |
+| `sf-str-010` | `SUBSTRING(S1, 3)` | `substr ( [T::S1] , 2 , strlen ( [T::S1] ) )` | 2-argument form |
+| `sf-str-011` | `SUBSTR(S1, I1, 2)` | `sql_string_op ( "SUBSTR({0}, {1}, 2)" , … )` | column start: 0, negatives, NULL |
+| `sf-str-012` | `TO_VARCHAR(S1)` | `sql_string_op ( "TO_VARCHAR({0})" , … )` | identity on text (`to_string` rejects Text) |
+| `sf-str-013` | `TO_CHAR(I1)` | `sql_string_op ( "TO_CHAR({0})" , … )` | one-argument number |
+| `sf-date-012` | `DATEDIFF(quarter, D1, D2)` | `diff_quarters ( … )` | compiles to `CEIL(month-index / 3)` differences |
+| `sf-date-013` | `DATEDIFF(week, D1, D2)` | `diff_weeks ( … )` | Sun → Sat = 1; fixed Monday arithmetic, so trapped for `WEEK_START` 2–7 |
+| `sf-date-014` | `DATEDIFF(hour, D1, D2)` | `diff_hours ( … )` | compiles to `DATEDIFF('HOUR', epoch, end) - DATEDIFF('HOUR', epoch, start)`: a boundary count |
+| `sf-date-015` | `DATEDIFF(minute, D1, D2)` | `diff_minutes ( … )` | same epoch-anchored boundary form |
+| `sf-date-017` | `TO_CHAR(D1, 'DD-MON-YYYY')` | `sql_string_op ( "TO_CHAR({0}, 'DD-MON-YYYY')" , … )` | format with a month abbreviation |
+
+**How far the evidence reaches.** The fixture's date columns are DATEs, so `sf-date-014` and
+`-015` cannot tell a boundary count from elapsed time by value. Their exactness rests on the
+compiled SQL recorded in the run JSON, which is a boundary difference; a TIMESTAMP fixture would
+pin it by value. `diff_weeks` matches only because the fixture session is `WEEK_START = 0`. The
+Databricks halves of BL-340 / BL-342 share the Snowflake helper and were read from the Databricks
+docs; there is no Databricks oracle yet.
+
+**Cleanup.** The run deleted its Model and Table (by GUID, confirmed absent) and dropped and
+confirmed its warehouse table (`ZZ_FIDELITY_M0_20261006T091950_62C947`). Its startup sweep found
+no earlier orphans, and a search after the run found no `ZZ_FIDELITY_%` object in ThoughtSpot or
+in `AGENT_SKILLS.PUBLIC`.
+
 ## Silent wrong answers
 
 ### Unexplained (0)
