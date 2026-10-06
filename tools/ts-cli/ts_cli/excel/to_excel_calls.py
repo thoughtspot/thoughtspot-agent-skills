@@ -13,6 +13,7 @@ from decimal import Decimal
 from ts_cli.excel.to_excel import (
     P_ADD, P_CONCAT, P_MUL, P_PRIMARY, Emitter,
 )
+from ts_cli.excel import tsast as T
 from ts_cli.formula_common import ts_increment_to_sql_digits
 
 # ThoughtSpot functions with no Excel formula equivalent, with the reason (prefix_ = family).
@@ -52,7 +53,7 @@ def wildcard_escape(text: str) -> str:
 
 
 def _string_inner(node: dict) -> str:
-    return node["value"][1:-1].replace("''", "'")
+    return T.string_text(node["value"])
 
 
 def _xl_string(text: str) -> str:

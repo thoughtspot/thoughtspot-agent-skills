@@ -54,7 +54,7 @@ def to_date_literal(text: str, pattern: str = ISO) -> dict:
 def string_value(node: dict) -> Optional[str]:
     """The text of a string literal node, unquoted, else None."""
     if T.is_lit(node, "string"):
-        return node["value"][1:-1].replace("''", "'")
+        return T.string_text(node["value"])
     return None
 
 

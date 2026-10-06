@@ -36,7 +36,7 @@ FUNCTION_RULES = {
     "MOD": {"map": "excel", "emits": ("floor",)},
     "MROUND": {"map": "excel", "emits": ("round", "abs")},
     "ODD": {"map": "excel", "emits": ("ceil", "floor")},
-    "PI": {"map": "excel", "emits": ()},
+    "PI": {"map": "excel", "emits": ("sql_double_op",)},
     "POWER": {"map": "excel", "emits": ("pow",)},
     "QUOTIENT": {"map": "excel", "emits": ("floor", "ceil")},
     "ROUND": {"map": "excel", "emits": ("round", "sql_double_op")},
@@ -184,4 +184,4 @@ SHEETS_RULES = {
 # Names the shared machinery emits whatever the rule (checked against the catalog by the
 # gate): `to_string` around a non-text `&` operand, `isnull` / `not` in a blank test
 # (`x = ""`) and in `not ( isnull ( … ) )`.
-SHARED_EMITS = ("to_string", "isnull", "not")
+SHARED_EMITS = ("to_string", "isnull", "not", "sql_string_op")

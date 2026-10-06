@@ -49,6 +49,14 @@ def translate_excel(source: str, ctx, dialect: str = "excel",
     except (NeedsReview, UntranslatableError) as exc:
         return ExcelResult(None, NEEDS_REVIEW, tr.notes + [str(exc)], tr.traps,
                            type_needs=tr.type_needs)
+    from ts_cli.excel.tsast import unprintable_string, walk
+    if any(n.get("node") == "lit" and n["kind"] == "string" and unprintable_string(n["value"])
+           for n in walk(node)):
+        return ExcelResult(None, NEEDS_REVIEW, tr.notes + [
+            "a text literal with both a quote and a double quote (or a brace): ThoughtSpot "
+            "cannot carry it — '' reads as two quotes, a backslash escape fails to parse, "
+            "and the sql_string_op form cannot hold a double quote (probe record §7)"],
+            tr.traps, type_needs=tr.type_needs)
     errors, unknown = check(node, tr.column_fine_type)
     if errors:
         # The safety net (BL-352..355): ThoughtSpot would reject this at import, so it is

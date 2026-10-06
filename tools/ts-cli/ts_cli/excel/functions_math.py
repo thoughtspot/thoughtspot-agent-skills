@@ -21,7 +21,6 @@ from ts_cli.excel import nodes as X
 from ts_cli.excel import tsast as T
 from ts_cli.excel.helpers import need, template
 
-PI = "3.141592653589793"
 DOMAIN_NOTE = ("{name} outside its domain: Excel returns #NUM!; the warehouse returns NaN or "
                "fails the query")
 FACT_TRAP = ("FACT of a column: Snowflake FACTORIAL accepts 0 to 33 and FAILS THE WHOLE QUERY "
@@ -75,8 +74,11 @@ def _atan2(tr, n):
 
 
 def _pi(tr, n):
+    """``PI()`` as the warehouse's double ``PI()``, never a literal: a decimal literal under
+    ``/`` is fixed-point at scale 6 (``-1 / 3.141592653589793`` lost seven digits, and
+    ``x * 180 / 3.14…`` is read as ``x * ( 180 / 3.14… )`` — live 2026-10-07, probe record §7)."""
     need(tr, n, 0, 0)
-    return T.lit_number(PI)
+    return T.call("sql_double_op", template("PI()"))
 
 
 def _fact(tr, n):

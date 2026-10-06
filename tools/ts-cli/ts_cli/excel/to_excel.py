@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Optional
 
+from ts_cli.excel import tsast as T
 from ts_cli.formula_common import UntranslatableError
 
 TRANSLATED = "TRANSLATED"
@@ -118,7 +119,7 @@ class Emitter:
     def _e_lit(self, node: dict) -> tuple[str, int]:
         kind, value = node["kind"], node["value"]
         if kind == "string":
-            inner = value[1:-1].replace("''", "'")
+            inner = T.string_text(value)
             return '"' + inner.replace('"', '""') + '"', P_PRIMARY
         if kind == "bool":
             return value.upper(), P_PRIMARY

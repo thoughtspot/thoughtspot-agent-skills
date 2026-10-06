@@ -429,8 +429,8 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 - **Map-backed dialects have no code behind them**: the composition is yours, from the map
   rows; only `--from thoughtspot --validate` puts evidence behind it. Excel and Google Sheets
   are translator-backed since 1.2.0; Sigma is next (spec §3.3).
-- **Excel / Sheets cover the maps' *Translator coverage* rows** (71 Excel functions, 22 Sheets
-  delta rows, the criteria table); any other function is `NEEDS_REVIEW` citing its row. The
+- **Excel / Sheets cover the maps' *Translator coverage* rows** (114 Excel functions since
+  1.6.0, 22 Sheets delta rows, the criteria table); any other function is `NEEDS_REVIEW` citing its row. The
   60-formula acceptance workbook (`tools/ts-cli/tests/fixtures/excel_regression/`) translates
   VALIDATE_ONLY-clean; two of its reviewed answers differ by rule — the translator keeps the
   source's own test (`= 0`) and never introduces a column the formula does not reference.
@@ -463,6 +463,19 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
   serial number, numeric text in arithmetic → `to_double` (APPROXIMATED — non-numeric text **fails the whole query**, so `IFERROR(VALUE())` / `ISNUMBER(VALUE())` use `TRY_TO_DOUBLE`), a DOUBLE count →
   `floor`, mixed `IF` / `IFERROR` branches → one type (APPROXIMATED). The table is the Excel
   map's *Implicit type coercion* section.
+- **Excel trigonometry is the identity form** (1.6.0): ThoughtSpot `sin` … `atan` take and
+  return **radians**, as Excel does (live 2026-10-07, BL-357), so `SIN(x)` is `sin ( x )`. A
+  map-backed answer from another dialect's map that multiplies by `180 / 3.14159…` is wrong
+  for every non-zero input — the Tableau, Ossie, Omni and Sigma maps (and the Tableau
+  translator) still do, until BL-357 lands; drop the conversion when composing from them.
+- **Excel `TEXT` translates a subset of format codes** (1.6.0): plain numbers (`0`, `0.00`,
+  `#,##0.00`, zero-padded), percentages, and date / time codes (`yyyy yy mmmm mmm mm dd ddd
+  dddd hh ss` with `- / : . ,` and space). Everything else — `$`, fractions, scientific,
+  conditional sections, single `m` / `d`, `AM/PM` — is `NEEDS_REVIEW`; a ThoughtSpot column
+  number format is often the better home. A number-format `TEXT` over a column is
+  APPROXIMATED: a negative value that rounds to zero prints `-0.00`.
+- **The Excel `B` byte functions** (`LEFTB`, `FINDB`, …) come back APPROXIMATED as their plain
+  function: Excel counts a double-byte character as 2 only with a DBCS default language.
 - **Known divergence, not a defect: constant decimal arithmetic** (Excel only, BL-351). The
   warehouse computes literals as exact decimals, Excel as binary doubles, so an all-literal
   sum like `=0.1+0.2` can differ from Excel's in the 13th significant digit or beyond. The
@@ -478,6 +491,7 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.6.0 | 2026-10-07 | Excel coverage pass (ts-cli v0.162.0, fidelity M1): 43 more Excel functions are translator-backed, chosen by how many corpus cases they blocked — `CHAR` / `UNICHAR` / `CODE` / `UNICODE`, `SIN` … `ATAN` (radians, the identity form; the map's degrees rule was wrong, BL-357), `ATAN2`, the hyperbolic family, `DEGREES`, `RADIANS`, `PI`, `FLOOR.MATH`, `CEILING.PRECISE`, `FLOOR.PRECISE`, `ISO.CEILING`, `TRUNC`, `EVEN`, `ODD`, `QUOTIENT`, `LOG`, `FACT`, `REPLACE`, the `B` byte variants, `FIND` / `SEARCH` with `start_num`, `TEXT` (a format-code subset), `DATE`, `ISTEXT` / `ISNONTEXT` / `ISLOGICAL`. NEEDS_REVIEW over the 2,463 eligible M1 cases fell from 70% to 32% |
 | 1.5.0 | 2026-10-07 | Excel / Google Sheets (ts-cli v0.161.0, formula fidelity M1, BL-346..355): a type checker over the emitted formula turns every provable type error into `NEEDS_REVIEW` (a `type check:` note) instead of an import failure reported TRANSLATED, and asks a column's type (`needs_types`, reason `typed argument`) when an integer or conversion slot depends on it. Excel's implicit coercion is written out (text dates → `to_date`, serial numbers, numbers / booleans / dates into text, numeric text into arithmetic, DOUBLE counts → `floor`, one type across `IF` / `IFERROR` branches). Fixed silent wrong answers: `CEILING.MATH` sign and mode, a zero `CEILING` significance (0, not NULL), `ROUNDUP` / `ROUNDDOWN` beyond 6 digits, a boolean joined into text (`TRUE`), a text function over a date (its serial). Constant decimal arithmetic is a documented divergence (BL-351). A DOUBLE is snapped before `ceil` / `floor`; `VALUE` of non-numeric text fails the query, so `IFERROR(VALUE())` / `ISNUMBER(VALUE())` use `TRY_TO_DOUBLE`; cross-type comparison folds, DOUBLE-to-text and slashed day/month dates are APPROXIMATED with a trap |
 | 1.4.0 | 2026-10-06 | The Snowflake and Databricks translators it wraps fix `SUBSTR` (zero-based start), `DATEDIFF(year)` and the other units, `MONTHS_BETWEEN` (pass-through) and `TO_CHAR(x, fmt)` (pass-through) — BL-340..343, BL-345, ts-cli v0.160.0. New: Snowflake `DATEDIFF(week)` / `DATEDIFF(hour)` and every Databricks 3-argument `DATEDIFF` come back as exact `sql_int_op` pass-throughs; Databricks `DATEDIFF(DAY, …)` is native `diff_days` when `--columns` types both arguments DATE. A `diff_weeks` in any translation carries a Monday-week-start trap |
 | 1.3.0 | 2026-10-06 | New Step 4c: before presenting, ask *per row or a KPI that rolls up?* when `role_ambiguous` (showing both `role_options`), and the column types listed in `needs_types` with their name-based suggestions ("yes to all suggestions" accepted); re-run with `--role` and typed `--columns`; skipped with a Model or a stated role; grouped per column / per formula in a batch (ts-cli 0.159.0). Excel / Sheets no longer ask the role up front for every formula |

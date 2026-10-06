@@ -167,7 +167,9 @@ class TestMath:
             f'sql_double_op ( "{name}({{0}})" , [T::amt] )'
 
     def test_pi(self):
-        assert f("=PI()") == "3.141592653589793"
+        assert f("=PI()") == 'sql_double_op ( "PI()" )'
+        # ThoughtSpot reads a * b / c as a * ( b / c ) — the product is bracketed
+        assert f("=[@amt]*180/PI()") == '( [T::amt] * 180 ) / sql_double_op ( "PI()" )'
         assert f("=DEGREES(PI()/4)").startswith('sql_double_op ( "DEGREES({0})"')
 
     def test_fact(self):
@@ -344,3 +346,26 @@ class TestTypeTests:
 
     def test_unknown_type_is_refused(self):
         assert "unknown type" in review("=ISTEXT(K7)")
+
+
+# ---------------------------------------------------------------------------
+# Two printer facts found by the coverage run (probe record §7, live 2026-10-07)
+# ---------------------------------------------------------------------------
+
+class TestPrinter:
+    def test_quote_is_printed_as_a_warehouse_literal(self):
+        # 'it''s' is read as it''s, and 'it\'s' fails to parse after another string literal
+        e = f('=CONCAT("Bob","\'s ",[@name])')
+        assert e == "concat ( 'Bob' , sql_string_op ( \"'''s '\" ) , [T::name] )"
+        assert f('=CONCAT("a\\b","!")') == "concat ( 'a\\\\b' , '!' )"
+        assert "cannot carry" in review('=CONCAT("say ""hi"", it\'s",[@name])')
+        from ts_cli.excel.tsast import lit_string, string_text
+        for text in ("it's", "a\\b", "''", "plain"):
+            assert string_text(lit_string(text)["value"]) == text
+        assert string_text("'it\\'s'") == "it's"
+
+    def test_product_is_bracketed_under_a_division(self):
+        # ThoughtSpot compiled [n] * 4 / 3 as n * (4 / 3) = 3.999999 for n = 3
+        assert f("=[@qty]*4/3") == "( [T::qty] * 4 ) / 3"
+        assert f("=[@qty]/4*3") == "[T::qty] / 4 * 3"
+        assert f("=[@qty]*(4/3)") == "[T::qty] * ( 4 / 3 )"
