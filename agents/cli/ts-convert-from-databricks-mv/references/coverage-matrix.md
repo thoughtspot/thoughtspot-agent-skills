@@ -132,8 +132,8 @@ Use this as the canonical limitations reference.
 | 52 | `DATE_TRUNC('day'/'week'/'month'/'quarter'/'year', d)` | `date`, `start_of_week`, `start_of_month`, `start_of_quarter`, `start_of_year` | |
 | 53 | `DATE_TRUNC('hour'/'minute'/'second', ts)` | `sql_date_time_op("DATE_TRUNC('UNIT', {0})", [col])` | Sub-day pass-through (v0.49.0) |
 | 54 | `EXTRACT(YEAR/MONTH/DAY/HOUR FROM d)` | `year`, `month_number`, `day`, `hour_of_day` | |
-| 55 | `DATEDIFF(end, start)` / `DATEDIFF(DAY, s, e)` | `diff_days(end, start)` | TS takes the later date first: 2-arg form keeps its order, 3-arg form swaps the dates (BL-336) |
-| 56 | `DATEDIFF(MONTH, s, e)` | `diff_months(e, s)` | Dates swapped (BL-336). Approximate: Databricks counts complete months, `diff_months` counts month boundaries (differ by one when end's day-of-month < start's) |
+| 55 | `DATEDIFF(end, start)` | `diff_days(end, start)` | 2-arg form is a date-only day count and keeps its order — TS takes the later date first (BL-336) |
+| 56 | `DATEDIFF(unit, s, e)` — any 3-arg unit, `DAY` included | `sql_int_op ( "DATEDIFF(MONTH, {0}, {1})" , s , e )` | Exact pass-through since ts-cli 0.160.0 (BL-345): the 3-arg form counts **complete** units (Jan 31 → Feb 1 = 0 months; on TIMESTAMPs, whole 86400 s days), every `diff_*` counts boundaries. `DAY` between two columns known to be DATE stays `diff_days(e, s)`; the converter has no column types, so in practice it always passes through. Over an aggregate: NEEDS_REVIEW. Unit-tested only — no Databricks oracle yet |
 | 57 | `MONTHS_BETWEEN(a, b[, roundOff])` | `sql_double_op ( "months_between({0}, {1})" , a , b )` | Same order (BL-336). Exact pass-through since ts-cli 0.159.1 (BL-342) — it was `diff_months`, a boundary count, while `months_between` is fractional with 8-digit rounding and a month-end rule. Over an aggregate: NEEDS_REVIEW |
 | 58 | `LOCATE(sub, s)` | `strpos(s, sub)` | Arg order reversed |
 | 59 | `TO_DATE('literal', 'format')` | `to_date('literal', 'format')` | Raw string args — no date-literal wrapping |

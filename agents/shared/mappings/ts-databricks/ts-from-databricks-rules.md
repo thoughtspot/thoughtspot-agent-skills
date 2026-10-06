@@ -973,8 +973,8 @@ Common patterns:
 | `EXTRACT(MONTH FROM d)` | `month_number(d)` |
 | `EXTRACT(YEAR FROM d)` | `year(d)` |
 | `DATEDIFF(end, start)` | `diff_days(end, start)` — 2-arg form, same order (BL-336) |
-| `DATEDIFF(MONTH, start, end)` | `diff_months(end, start)` — 3-arg form; dates swapped, TS takes end first (BL-336). Databricks counts complete months, `diff_months` counts boundaries |
-| `DATEDIFF(DAY, start, end)` | `diff_days(end, start)` — 3-arg form; dates swapped (BL-336) |
+| `DATEDIFF(MONTH, start, end)` (any 3-arg unit) | `sql_int_op("DATEDIFF(MONTH, {0}, {1})", start, end)` — exact pass-through, source order. The 3-arg form counts complete units; `diff_months` counts boundaries (BL-345) |
+| `DATEDIFF(DAY, start, end)` | `diff_days(end, start)` only between two known DATE columns (dates swapped, BL-336); otherwise the `sql_int_op` pass-through — whole elapsed days on TIMESTAMPs (BL-345) |
 | `COUNT(DISTINCT col)` | `unique count ( [col] )` — space, not underscore |
 
 **Implementation notes:**

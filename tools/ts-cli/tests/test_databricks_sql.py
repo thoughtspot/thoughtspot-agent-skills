@@ -146,14 +146,47 @@ class TestFunctions:
         assert t("datediff(end_d, start_d)") == \
             "diff_days ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] )"
 
-    def test_datediff_3arg_day_swaps_to_end_first(self):
-        # datediff(unit, start, end) = end - start.
-        assert t("DATEDIFF(DAY, start_d, end_d)") == \
+    def test_datediff_3arg_day_over_known_dates_is_native_end_first(self):
+        # datediff(unit, start, end) = end - start; whole days == date boundaries
+        # only when both are DATE (BL-345).
+        def resolver(path):
+            return _resolver(path)
+        resolver.date_only_refs = {"[TRANSACTIONS::start_d]", "[TRANSACTIONS::end_d]"}
+        assert translate_sql_expr("DATEDIFF(DAY, start_d, end_d)", resolver) == \
             "diff_days ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] )"
 
-    def test_datediff_3arg_month_swaps_to_end_first(self):
-        assert t("DATEDIFF(MONTH, start_d, end_d)") == \
-            "diff_months ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] )"
+    def test_datediff_3arg_day_of_unknown_type_passes_through(self):
+        # A TIMESTAMP pair counts whole elapsed 86400 s days; diff_days counts date
+        # boundaries (23:00 -> 01:00 next day: 0 vs 1). Without types, pass through.
+        assert t("DATEDIFF(DAY, start_d, end_d)") == (
+            'sql_int_op ( "DATEDIFF(DAY, {0}, {1})" , '
+            "[TRANSACTIONS::start_d] , [TRANSACTIONS::end_d] )")
+
+    def test_datediff_3arg_day_with_one_date_one_unknown_passes_through(self):
+        def resolver(path):
+            return _resolver(path)
+        resolver.date_only_refs = {"[TRANSACTIONS::start_d]"}
+        assert translate_sql_expr("DATEDIFF(DAY, start_d, end_d)", resolver).startswith(
+            'sql_int_op ( "DATEDIFF(DAY, {0}, {1})"')
+
+    @pytest.mark.parametrize("unit", ["MONTH", "YEAR", "QUARTER", "WEEK", "HOUR",
+                                      "MINUTE", "SECOND", "MILLISECOND", "MICROSECOND"])
+    def test_datediff_3arg_other_units_pass_through(self, unit):
+        # BL-345: complete months (Jan 31 -> Feb 1 = 0) vs diff_months boundaries (1).
+        assert t(f"DATEDIFF({unit}, start_d, end_d)") == (
+            f'sql_int_op ( "DATEDIFF({unit}, {{0}}, {{1}})" , '
+            "[TRANSACTIONS::start_d] , [TRANSACTIONS::end_d] )")
+
+    def test_datediff_3arg_month_even_over_dates_is_not_diff_months(self):
+        def resolver(path):
+            return _resolver(path)
+        resolver.date_only_refs = {"[TRANSACTIONS::start_d]", "[TRANSACTIONS::end_d]"}
+        assert "diff_months" not in translate_sql_expr(
+            "DATEDIFF(MONTH, start_d, end_d)", resolver)
+
+    def test_datediff_3arg_over_aggregate_refused(self):
+        with pytest.raises(UntranslatableError):
+            t("DATEDIFF(MONTH, MIN(start_d), MAX(end_d))")
 
     def test_datediff_2arg_nested_in_comparison(self):
         assert t("DATEDIFF(end_d, start_d) > 30") == \
@@ -162,7 +195,8 @@ class TestFunctions:
     def test_datediff_3arg_nested_in_case(self):
         out = t("CASE WHEN DATEDIFF(DAY, start_d, end_d) > 30 "
                 "THEN 'late' ELSE 'ok' END")
-        assert "diff_days ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] ) > 30" in out
+        assert ('sql_int_op ( "DATEDIFF(DAY, {0}, {1})" , [TRANSACTIONS::start_d] , '
+                "[TRANSACTIONS::end_d] ) > 30") in out
 
     def test_months_between_keeps_order(self):
         # months_between(expr1, expr2) is positive when expr1 is later. BL-342: it is

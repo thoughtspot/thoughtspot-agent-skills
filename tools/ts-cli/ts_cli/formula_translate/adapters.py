@@ -260,6 +260,10 @@ def make_recording_resolver(ctx: ColumnContext) -> Callable[[str], str]:
         return ctx.resolve(col, table_hint=hint)
 
     resolve.metric_refs = ctx.aggregate_formula_targets()  # type: ignore[attr-defined]
+    # References known to be DATE (not DATE_TIME): Databricks datediff(DAY, …) is native
+    # diff_days only between two of these (BL-345); anything else passes through.
+    resolve.date_only_refs = {  # type: ignore[attr-defined]
+        s.target for s in ctx.specs if (s.data_type or "").upper() == "DATE"}
     return resolve
 
 
