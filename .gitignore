@@ -84,3 +84,15 @@ wt-*/
 
 # Round-trip fidelity study workspace (evidence + throwaway harness)
 .svrt/
+
+# Third-party formula-fidelity corpora (LibreOffice .fods, Apache POI .xls/.xlsx) and
+# anything extracted from them. The user's rule (2026-10-06): they live OUTSIDE the repo
+# (tools/formula-fidelity README "M1"); only manifests and redacted results are committed.
+# These lines make a misplaced copy un-addable. Pinned by tools/formula-fidelity/tests.
+formula-fidelity-data/
+*.fods
+tools/formula-fidelity/**/*.xls
+tools/formula-fidelity/**/*.xlsx
+tools/formula-fidelity/**/*-full.json
+tools/formula-fidelity/**/candidates.jsonl
+tools/formula-fidelity/**/crosscheck.json

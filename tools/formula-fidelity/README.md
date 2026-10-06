@@ -6,6 +6,7 @@ ThoughtSpot translation over the same rows and compares the answers key by key.
 
 Design: [`docs/research/formula-test-cases/harness-design.md`](../../docs/research/formula-test-cases/harness-design.md).
 First run (M0, 50 Snowflake SQL cases): [`docs/reviews/2026-10-06-fidelity-m0-snowflake.md`](../../docs/reviews/2026-10-06-fidelity-m0-snowflake.md).
+M1 (250 Excel cases, literal oracle): [`docs/reviews/2026-10-06-fidelity-m1-excel.md`](../../docs/reviews/2026-10-06-fidelity-m1-excel.md) — see [M1](#m1-excel-cases-from-a-corpus-outside-the-repo) below.
 It is the formula-level fixture for repo-audit angle 15 (`.claude/rules/repo-audit.md`). It is
 operator-run, not workflow-run.
 
@@ -19,6 +20,12 @@ operator-run, not workflow-run.
 | `fidelity/compare.py` | Canonical values, comparison rules, and the case verdicts |
 | `fidelity/report.py` | Markdown report. Leads with silent wrong answers |
 | `fidelity/live.py` | The only I/O: Snowflake oracle session, ThoughtSpot import/query/teardown |
+| `run_literal.py` | M1 entry point: `candidates`, `select`, `run`, `rebuild` over a corpus in a data dir outside the repo |
+| `crosscheck_formulas.py` | M1 bronze cross-check with the `formulas` library (run in a throwaway uv env) |
+| `fidelity/sources.py` | Stdlib readers for LibreOffice `.fods` and Excel `.xlsx`: one formula cell → a scalar case, or a named refusal |
+| `fidelity/literal.py` | Data dir, manifest, materialising cases and the input fixture in memory, the `literal` oracle |
+| `fidelity/redact.py` | What M1 may commit (redacted results, generated report tables) and the leak scanner |
+| `cases/excel/` | `m1-manifest.jsonl` (ids + file + sha256 + locator, no formulas or values) and `m1-selection.json` (counts) |
 | `cases/snowflake/` | `m0.jsonl` (50 cases) and `fixture-m0.json` (10 edge rows) |
 | `runs/` | Run JSON evidence (raw oracle and ThoughtSpot values, compiled SQL, verdicts) |
 | `tests/` | Pure-function tests. No live calls |
@@ -152,14 +159,73 @@ Rules, all in `compare.py` and pinned by tests:
   results that way. A value that cannot be an epoch (fractional, out of range) is VALUE_DIFF.
 - **Keys:** a key missing on either side is a mismatch.
 
-## Extending (M1 and later)
+## M1: Excel cases from a corpus outside the repo
+
+**Third-party test data is never committed** (the user's rule, 2026-10-06). The LibreOffice
+`.fods` and Apache POI `.xls`/`.xlsx` files, and everything extracted from them, live in a data
+dir outside the repo, by convention `~/Dev/ts/formula-fidelity-data/`, with a `PROVENANCE.md`
+(URL, pinned commit, licence, sha256 per file). Pass it as `--data-dir` or
+`$FORMULA_FIDELITY_DATA`. The harness refuses a data dir inside the repo, and `.gitignore`
+makes a misplaced copy un-addable.
+
+| Committed | Not committed (data dir) |
+|---|---|
+| `run_literal.py`, `crosscheck_formulas.py`, `fidelity/{sources,literal,redact}.py` | the corpus files |
+| `cases/excel/m1-manifest.jsonl`: id, source, path relative to the data dir, sha256, locator (sheet + row or cell), function names, cross-check status, flags. **No formula, no value** | `extracted/candidates.jsonl` (formulas, inputs, values), `extracted/crosscheck.json` |
+| `cases/excel/m1-selection.json`: aggregate candidate and skip counts | `runs/<date>-excel-m1-full.json` (the full run evidence) |
+| `runs/<date>-excel-m1.json`: per case id, status, verdict class, cause. **Redacted** | |
+| the review: generated tables plus hand-written repros **in our own words** | |
+
+`tests/test_fidelity_literal.py` scans every committed M1 file for formula-shaped text and for
+forbidden keys (`formula`, `expected`, `values`, …), and fails. `run_literal.py` also checks the
+redacted output against the corpus itself (exact substrings) before writing it.
+
+```bash
+D=~/Dev/ts/formula-fidelity-data
+UV="PYTHONPATH= uv run -q --no-project --python 3.12 --with pyyaml --with typer --with requests --with keyring"
+# 1. every formula cell -> eligible or skipped (reason counted), translated offline
+$UV python -I tools/formula-fidelity/run_literal.py --data-dir $D candidates
+# 2. bronze cross-check with the `formulas` library (EUPL: a tool in a throwaway env, never imported)
+PYTHONPATH= uv run --no-project --python 3.12 --with formulas --with openpyxl \
+  python -I tools/formula-fidelity/crosscheck_formulas.py --data-dir $D
+# 3. deterministic selection -> manifest
+$UV python -I tools/formula-fidelity/run_literal.py --data-dir $D select \
+  --manifest tools/formula-fidelity/cases/excel/m1-manifest.jsonl \
+  --selection tools/formula-fidelity/cases/excel/m1-selection.json
+# 4. live run (adds --with snowflake-connector-python)
+$UV --with snowflake-connector-python python -I tools/formula-fidelity/run_literal.py --data-dir $D run \
+  --manifest tools/formula-fidelity/cases/excel/m1-manifest.jsonl \
+  --results tools/formula-fidelity/runs/<date>-excel-m1.json \
+  --report docs/reviews/<date>-fidelity-m1-excel.md \
+  --profile se-thoughtspot --sf-profile "ThoughtSpot Partner (AP)" --connection APJ_TAB
+# re-classify a stored run without querying: `rebuild --full-run $D/runs/<date>-excel-m1-full.json`
+```
+
+**What differs from M0.**
+- **Oracle `literal`.** The expected value is the one stored in the corpus: LibreOffice's
+  certified `Expected` column (silver) or the value Excel itself cached in a POI workbook (gold).
+  `Deps(oracle=…)` in `run.py` is the seam; its default is still M0's warehouse oracle.
+- **Cross-check.** Every case is re-evaluated by `formulas` (bronze) on a workbook holding only
+  its inputs. A disagreement makes the case **oracle-disputed**: listed, not run, not scored.
+- **Inputs.** A formula over constants runs as a constant formula. A formula over cells gets its
+  cells renamed to row 1 (`K2`, `K3` → `A1`, `B1`), and each distinct source cell becomes a typed
+  column (`X<n>`) of one single-row fixture table, loaded by M0's run-stamped loader. A blank cell
+  is `X_BLANK` (NULL).
+- **Extraction refuses, and counts, what is not an Excel scalar case:** ranges, other sheets,
+  named expressions, inline arrays, volatile or positional functions, LibreOffice-only functions,
+  **OpenFormula's own `CEILING`/`FLOOR`** (LibreOffice stores Excel's as `COM.MICROSOFT.*`; the
+  bare names have ODF sign rules), LibreOffice-only error codes (`Err:511`), time-of-day values,
+  and dates before 1900-03-01 (Excel's fictitious 29 Feb 1900).
+- **Classes.** `SILENT_WRONG`, `WARNED_WRONG`, `DIVERGENCE_BLANK` (Excel blank vs NULL),
+  `DIVERGENCE_ERROR` (Excel errors, ThoughtSpot returns a value), then M0's loud verdicts,
+  `ERROR_EQUIV`, `MATCH`, and `ORACLE_DISPUTED`. Divergences and error-equivalents are never
+  counted as matches.
+
+## Extending (M2 and later)
 
 - **A new SQL dialect** (Databricks) needs a warehouse oracle class beside `Warehouse` in
   `live.py`, plus its case directory. Everything else is dialect-independent.
-- **Excel / Sheets (M1)** cases cannot use the warehouse as their oracle. They will carry
-  `expected` from their corpus (LibreOffice, POI), and `run.py` needs a stored-oracle path that
-  skips step 2. The fixture, translate, import, query, compare and report steps are reused
-  unchanged.
-- **Third-party cases** need a licence file in their case directory (design §1). M0's cases are
-  all authored in-repo, under the repository licence (the ThoughtSpot EULA in `LICENSE`, recorded
-  as `LicenseRef-ThoughtSpot-EULA (repo LICENSE)`), not under Apache-2.0.
+- **Third-party cases** follow M1: a manifest in the repo, the corpus in the data dir (the
+  design's §1 "one LICENSE file per source directory" was superseded by the user's 2026-10-06
+  rule). M0's cases are all authored in-repo, under the repository licence (the ThoughtSpot EULA
+  in `LICENSE`, recorded as `LicenseRef-ThoughtSpot-EULA (repo LICENSE)`), not under Apache-2.0.
