@@ -162,21 +162,44 @@ def _quarter_idiom(node):
     return None
 
 
-def _scaled(x: dict, digits: int, inner_fn: str) -> dict:
+SNAP = "0.000000001"
+SNAP_NOTE = ("a DOUBLE scaled for rounding is snapped to 1e-9 first — round ( x * F , "
+             "0.000000001 ) — because binary representation error would otherwise push an "
+             "exact step over the edge (1.1 * 100 is 110.00000000000001, so ceil gave 1.11 "
+             "where Excel, which works to 15 significant digits, gives 1.1). A value with a "
+             "genuine difference beyond the 9th decimal of the scaled number is snapped too")
+
+
+def _snap(tr, x: dict, scaled: dict) -> dict:
+    """``round ( scaled , 1e-9 )`` when ``x`` may be a DOUBLE (a DOUBLE or an unknown column
+    type); exact literals and integer or DECIMAL columns are left alone. Live 2026-10-07:
+    the snapped forms return Excel's 1.1, 0.29 and CEILING's 1.1 where the raw ones gave 1.11,
+    0.28 and 1.2 (probe record §7)."""
+    if not T.has_column(x) or tr.fine_type(x) not in ("double", None):
+        return scaled
+    tr.note(SNAP_NOTE)
+    return T.call("round", scaled, T.lit_number(SNAP))
+
+
+def _scaled(tr, x: dict, digits: int, inner_fn: str) -> dict:
     """``fn ( x * F ) * I`` (digits > 0, ``I`` = 1 / ``F``), ``fn ( x )`` (0),
-    ``fn ( x / F ) * F`` (< 0).
+    ``fn ( x / F ) * F`` (< 0), the scaled value snapped for a DOUBLE (``_snap``).
 
     Multiplying by the increment, not dividing by the factor (BL-348): ``ceil ( … ) / F``
     divides two integers, and Snowflake keeps a division's result at scale 6, so more than
     6 digits came back cut to 6 (live, se-thoughtspot 2026-10-07: ``/ to_double ( F )`` and
     ``to_double ( ceil ( … ) ) / F`` are cut the same way; ``* 0.00000000001`` keeps 11)."""
+    if abs(digits) > 15:
+        tr.review(f"rounding to {digits} digits: beyond a double's 15 significant digits, and "
+                  "the 10^n factor overflows ceil / floor's INT64 result")
     if digits == 0:
-        return T.call(inner_fn, x)
+        return T.call(inner_fn, _snap(tr, x, x))
     factor = T.lit_number(sql_digits_to_ts_increment(str(-abs(digits))))
     if digits > 0:
         increment = T.lit_number(sql_digits_to_ts_increment(str(digits)))
-        return T.binop("*", T.call(inner_fn, T.binop("*", x, factor)), increment)
-    return T.binop("*", T.call(inner_fn, T.binop("/", x, factor)), factor)
+        scaled = _snap(tr, x, T.binop("*", x, factor))
+        return T.binop("*", T.call(inner_fn, scaled), increment)
+    return T.binop("*", T.call(inner_fn, _snap(tr, x, T.binop("/", x, factor))), factor)
 
 
 def _round_dir(away: bool):
@@ -194,7 +217,7 @@ def _round_dir(away: bool):
         x = tr.num(n.args[0])
         pos, neg = ("ceil", "floor") if away else ("floor", "ceil")
         cond = T.binop(">=", x, T.lit_number("0"))
-        return T.ifelse(cond, _scaled(x, digits, pos), _scaled(x, digits, neg))
+        return T.ifelse(cond, _scaled(tr, x, digits, pos), _scaled(tr, x, digits, neg))
     return handler
 
 
@@ -212,9 +235,9 @@ def _int(tr, n):
     return T.call("floor", tr.num(n.args[0]))
 
 
-def _multiple(fn: str, x: dict, sig: dict) -> dict:
-    """``fn ( x / s ) * s``."""
-    return T.binop("*", T.call(fn, T.binop("/", x, sig)), sig)
+def _multiple(tr, fn: str, x: dict, sig: dict) -> dict:
+    """``fn ( x / s ) * s``, the quotient snapped for a DOUBLE (``_snap``)."""
+    return T.binop("*", T.call(fn, _snap(tr, x, T.binop("/", x, sig))), sig)
 
 
 def _zero_guard(sig: dict, form: dict) -> dict:
@@ -236,9 +259,9 @@ def _ceiling_floor(fn: str):
         need(tr, n, 1, 2)
         x = tr.num(n.args[0])
         if len(n.args) == 1:
-            return T.call(fn, x)
+            return T.call(fn, _snap(tr, x, x))
         sig = tr.num(n.args[1])
-        form = _multiple(fn, x, sig)
+        form = _multiple(tr, fn, x, sig)
         return _zero_guard(sig, form) if fn == "ceil" else form
     return handler
 
@@ -262,10 +285,11 @@ def _ceiling_math(tr, n):
             tr.review("CEILING.MATH with a non-literal mode has no rule: the mode decides the "
                       "rounding direction of negative numbers")
         away = m != 0
-    up = T.call("ceil", x) if T.is_lit(step, "number", "1") else _multiple("ceil", x, step)
+    up = (T.call("ceil", _snap(tr, x, x)) if T.is_lit(step, "number", "1")
+          else _multiple(tr, "ceil", x, step))
     if away:
-        down = (T.call("floor", x) if T.is_lit(step, "number", "1")
-                else _multiple("floor", x, step))
+        down = (T.call("floor", _snap(tr, x, x)) if T.is_lit(step, "number", "1")
+                else _multiple(tr, "floor", x, step))
         up = T.ifelse(T.binop("<", x, T.lit_number("0")), down, up)
     return _zero_guard(sig, up) if given else up
 
