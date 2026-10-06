@@ -35,6 +35,23 @@ _FORMULA_TOKEN_RE = re.compile(r"""
 """, re.VERBOSE)
 
 
+# Function names that are two words. The `ident` pattern above lets a name run up to the
+# `(`, so a keyword before a call (`else if (`, `or contains (`, `then sum (`) would otherwise
+# be read as one two-word name; anything not listed here is split back into its words.
+_MULTIWORD_FUNCTIONS = {"unique count"}
+
+
+def _word_tokens(word: str) -> list[tuple[str, str]]:
+    if " " in word and " ".join(word.lower().split()) not in _MULTIWORD_FUNCTIONS:
+        out: list[tuple[str, str]] = []
+        for part in word.split():
+            out.extend(_word_tokens(part))
+        return out
+    if word.lower() in _KW:
+        return [("kw", word.lower())]
+    return [("ident", " ".join(word.split()))]
+
+
 def tokenize_formula(expr: str) -> list[tuple[str, str]]:
     """Tokenize ThoughtSpot formula text. Named `tokenize_formula` (not
     `tokenize`) to avoid an accidental top-level name clash with mv_sql.py's
@@ -53,11 +70,7 @@ def tokenize_formula(expr: str) -> list[tuple[str, str]]:
         if kind == "ws":
             continue
         if kind in ("ident", "bareident"):
-            word = text.strip()
-            if word.lower() in _KW:
-                toks.append(("kw", word.lower()))
-            else:
-                toks.append(("ident", word))
+            toks.extend(_word_tokens(text.strip()))
         else:
             toks.append((kind, text))
     return toks
@@ -123,12 +136,15 @@ def _parse_cmp(p):
 
 
 def _parse_in(p, left):
+    # ThoughtSpot's list literal is `{ … }` (formula reference, BL-170); `( … )` is also
+    # accepted here for the forms older callers emitted.
     p.eat("kw", "in")
-    p.eat("op", "(")
+    close = "}" if p.peek() == ("op", "{") else ")"
+    p.next()
     args = [left, _parse_or(p)]
     while p.peek() == ("op", ","):
         p.next(); args.append(_parse_or(p))
-    p.eat("op", ")")
+    p.eat("op", close)
     return {"node": "call", "fn": "in", "args": args}
 
 

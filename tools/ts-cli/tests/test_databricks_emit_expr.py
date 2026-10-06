@@ -67,3 +67,29 @@ class TestParse:
         assert ast["fn"] == "group_aggregate"
         assert ast["args"][1] == {"node": "lodset",
                                   "cols": [{"node": "col", "table": "C", "column": "name"}]}
+
+
+class TestKeywordBeforeCall:
+    """A keyword directly before a call (`else if (`, `or contains (`, `then sum (`) was read
+    as one two-word function name, so `else if` chains and `a or f ( x )` failed to parse
+    (found by the Excel translator's round trips, BL-339 PR). Only `unique count` is a
+    two-word function."""
+
+    def test_else_if_chain(self):
+        node = parse_formula("if ( [T::a] < 1 ) then 'x' else if ( [T::a] < 2 ) then 'y' else 'z'")
+        assert node["node"] == "ifelse" and node["else"]["node"] == "ifelse"
+
+    def test_or_before_call(self):
+        node = parse_formula("contains ( [T::a] , 'x' ) or contains ( [T::a] , 'y' )")
+        assert node["op"] == "or" and node["right"]["fn"] == "contains"
+
+    def test_then_before_aggregate(self):
+        node = parse_formula("if ( [T::a] > 0 ) then sum ( [T::b] ) else 0")
+        assert node["branches"][0][1]["fn"] == "sum"
+
+    def test_unique_count_stays_one_function(self):
+        assert parse_formula("unique count ( [T::a] )")["fn"] == "unique count"
+
+    def test_curly_in_list(self):
+        node = parse_formula("[T::a] in { 'x' , 'y' }")
+        assert node["fn"] == "in" and len(node["args"]) == 3
