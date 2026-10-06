@@ -1,0 +1,242 @@
+{
+ "1.1": {
+  "formula": "safe_divide ( ( sum ( [TOTAL_REVENUE] ) - sum ( [TOTAL_COGS] ) ) , sum ( [TOTAL_REVENUE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "1.2": {
+  "formula": "safe_divide ( sum ( [INFERENCE_COST] ) , sum ( [TOTAL_REVENUE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "1.3": {
+  "formula": "safe_divide ( sum ( [TOTAL_COGS] ) , sum ( [TOTAL_REVENUE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "1.4": {
+  "formula": "safe_divide ( sum ( [INFERENCE_COST] ) , sum ( [AI_TOKENS_TOTAL_M] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.2": {
+  "formula": "safe_divide ( sum ( [TOTAL_REVENUE] ) , sum ( [SEATS_ACTIVE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.3": {
+  "formula": "safe_divide ( sum ( [TOTAL_REVENUE] ) , sum ( [MAU] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.9": {
+  "formula": "safe_divide ( sum ( [TOTAL_REVENUE] ) , sum ( [PY_TOTAL_REVENUE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.10": {
+  "formula": "safe_divide ( sum ( [INFERENCE_COST] ) , sum ( [TOTAL_COGS] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.11": {
+  "formula": "safe_divide ( sum ( [INFRA_COST] ) , sum ( [SEATS_ACTIVE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.12": {
+  "formula": "safe_divide ( sum ( [SUPPORT_COST] ) , sum ( [MAU] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.13": {
+  "formula": "safe_divide ( sum ( [PAYMENT_FEES] ) , sum ( [TOTAL_REVENUE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.18": {
+  "formula": "safe_divide ( sum ( [TOTAL_COGS] ) , sum ( [SEATS_ACTIVE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.19": {
+  "formula": "safe_divide ( sum ( [AI_TOKENS_INPUT_M] ) , sum ( [AI_TOKENS_OUTPUT_M] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.20": {
+  "formula": "safe_divide ( sum ( [TOTAL_REVENUE] ) , sum ( [AI_TOKENS_TOTAL_M] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.21": {
+  "formula": "safe_divide ( sum ( [INFERENCE_COST] ) , sum ( [MAU] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.22": {
+  "formula": "safe_divide ( sum ( [AI_TOKENS_TOTAL_M] ) , sum ( [SEATS_ACTIVE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.23": {
+  "formula": "safe_divide ( sum ( [AI_TOKENS_OUTPUT_M] ) , sum ( [AI_TOKENS_TOTAL_M] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.24": {
+  "formula": "safe_divide ( sum ( [INFERENCE_COST] ) , sum ( [INCLUDED_AI_CREDITS_USD] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.25": {
+  "formula": "safe_divide ( sum ( [AI_TOKENS_TOTAL_M] ) , sum ( [MAU] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.26": {
+  "formula": "safe_divide ( sum ( [SEATS_ACTIVE] ) , sum ( [SEATS_LICENSED] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.28": {
+  "formula": "safe_divide ( sum ( [TOTAL_REVENUE] ) , sum ( [SEATS_LICENSED] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.41": {
+  "formula": "safe_divide ( sum ( [TOTAL_REVENUE] ) , sum ( [PLAN_TOTAL_REVENUE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.42": {
+  "formula": "safe_divide ( sum ( [TOTAL_COGS] ) , sum ( [PLAN_TOTAL_COGS] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.44": {
+  "formula": "safe_divide ( sum ( [INFERENCE_COST] ) , sum ( [PLAN_INFERENCE_COST] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "1.6": {
+  "formula": "safe_divide ( ( sum ( [GROSS_PROFIT] ) - sum ( [SUPPORT_COST] ) - sum ( [DATA_PIPELINE_COST] ) ) , sum ( [TOTAL_REVENUE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.1": {
+  "formula": "safe_divide ( ( sum ( [TOTAL_REVENUE] ) - sum ( [PY_TOTAL_REVENUE] ) ) , sum ( [PY_TOTAL_REVENUE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.4": {
+  "formula": "safe_divide ( sum ( [SUBSCRIPTION_REVENUE] ) , ( sum ( [SUBSCRIPTION_REVENUE] ) + sum ( [USAGE_REVENUE] ) ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.7": {
+  "formula": "safe_divide ( sum ( [TOTAL_REVENUE] ) , ( sum ( [AI_TOKENS_TOTAL_M] ) * 1000000 ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.15": {
+  "formula": "safe_divide ( sum ( [TOTAL_COGS] ) , ( sum ( [AI_TOKENS_TOTAL_M] ) * 1000000 ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.16": {
+  "formula": "safe_divide ( ( sum ( [TOTAL_COGS] ) - sum ( [PY_TOTAL_COGS] ) ) , sum ( [PY_TOTAL_COGS] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "2.31": {
+  "formula": "safe_divide ( ( sum ( [SEATS_LICENSED] ) - sum ( [SEATS_LICENSED_BASE] ) ) , sum ( [SEATS_LICENSED_BASE] ) )",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). safe_divide returns 0 on a zero divisor and passes NULLs through (probed: CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END). For an exact Excel match, change IFERROR(…,\"\") to IFERROR(…,0)."
+ },
+ "1.7": {
+  "formula": "( safe_divide ( sum ( [TOTAL_REVENUE] ) - sum ( [TOTAL_COGS] ) , sum ( [TOTAL_REVENUE] ) ) - safe_divide ( sum ( [PLAN_TOTAL_REVENUE] ) - sum ( [PLAN_TOTAL_COGS] ) , sum ( [PLAN_TOTAL_REVENUE] ) ) ) * 100",
+  "note": "Ratio of totals: matches Excel only where one row = the reporting grain. The Excel aggregate equivalent is SUM(Table[..])/SUM(Table[..]). Review: when plan revenue is 0, the plan margin becomes 0 and the result silently becomes actual margin x 100. Excel's IFERROR blanks the whole row instead. If that matters, wrap it: if ( sum ( [PLAN_TOTAL_REVENUE] ) = 0 ) then null else …."
+ },
+ "1.5": {
+  "formula": "sum ( [GROSS_PROFIT] ) - sum ( [SUPPORT_COST] ) - sum ( [DATA_PIPELINE_COST] )",
+  "note": "Additive: per-row Excel and sum-then-subtract agree once totalled. Exact."
+ },
+ "2.6": {
+  "formula": "sum ( [TOTAL_REVENUE] ) - sum ( [PLAN_TOTAL_REVENUE] )",
+  "note": "Additive: per-row Excel and sum-then-subtract agree once totalled. Exact."
+ },
+ "2.14": {
+  "formula": "sum ( [INFRA_COST] ) + sum ( [DATA_PIPELINE_COST] ) + sum ( [SUPPORT_COST] )",
+  "note": "Additive: per-row Excel and sum-then-subtract agree once totalled. Exact."
+ },
+ "2.17": {
+  "formula": "sum ( [TOTAL_COGS] ) - sum ( [PLAN_TOTAL_COGS] )",
+  "note": "Additive: per-row Excel and sum-then-subtract agree once totalled. Exact."
+ },
+ "2.27": {
+  "formula": "sum ( [SEATS_LICENSED] ) - sum ( [SEATS_ACTIVE] )",
+  "note": "Additive: per-row Excel and sum-then-subtract agree once totalled. Exact. Consider renaming to 'Unused Licensed Seats'."
+ },
+ "2.43": {
+  "formula": "sum ( [INFERENCE_COST] ) - sum ( [PLAN_INFERENCE_COST] )",
+  "note": "Additive: per-row Excel and sum-then-subtract agree once totalled. Exact."
+ },
+ "2.46": {
+  "formula": "( sum ( [TOTAL_REVENUE] ) - sum ( [TOTAL_COGS] ) ) - ( sum ( [PLAN_TOTAL_REVENUE] ) - sum ( [PLAN_TOTAL_COGS] ) )",
+  "note": "Additive: per-row Excel and sum-then-subtract agree once totalled. Exact."
+ },
+ "2.5": {
+  "formula": "sum ( greatest ( 0 , [USAGE_REVENUE] - [INCLUDED_AI_CREDITS_USD] ) )",
+  "note": "Row-level floor, then sum: matches Excel's per-row MAX totalled. greatest is the row-wise max (max is aggregate-only). Exact."
+ },
+ "2.8": {
+  "formula": "sum ( [TOTAL_REVENUE] ) * 12",
+  "note": "Valid only at single-month grain; across months it multiplies the period total by 12."
+ },
+ "1.8": {
+  "formula": "if ( [GROSS_PROFIT] < 0 ) then 'Loss-making' else if ( safe_divide ( [GROSS_PROFIT] , [TOTAL_REVENUE] ) < 0.5 ) then 'Below Floor' else 'Healthy'",
+  "note": "Row-level, like the Excel formula, so it is a true attribute you can group by. safe_divide gives 0 on zero revenue, so 'Below Floor', exactly as Excel's IFERROR(…,0). For per-account bucketing, wrap the sums in group_aggregate ( … , { [ACCOUNT] } , query_filters ( ) ). A bare sum() makes it a measure."
+ },
+ "2.29": {
+  "formula": "if ( [HEALTH_SCORE] < 50 ) then 'At Risk' else if ( [HEALTH_SCORE] < 75 ) then 'Neutral' else 'Healthy'",
+  "note": "Row-level, matching Excel. The original average() made it a measure; for an account-level band use group_aggregate ( average ( [HEALTH_SCORE] ) , { [ACCOUNT] } , query_filters ( ) ). A NULL score gives 'Healthy' in ThoughtSpot; Excel treats a blank as 0, giving 'At Risk'."
+ },
+ "2.35": {
+  "formula": "if ( [AI_ADOPTION_TIER] = 'Power' and [GROSS_PROFIT] < 0 ) then 'At Risk' else 'OK'",
+  "note": "Row-level, matching Excel. The original mixed a row test with sum(), so its result depended on whether the tier was in the search. Case-insensitive on both sides."
+ },
+ "2.45": {
+  "formula": "if ( safe_divide ( [TOTAL_COGS] , [PLAN_TOTAL_COGS] ) > 1.05 ) then 'Over' else 'On Track'",
+  "note": "Row-level, matching Excel. safe_divide gives 0 on a zero plan, so 'On Track', exactly as Excel's IFERROR(…,0). For a period-level status use the summed ratio, which makes it a measure."
+ },
+ "2.30": {
+  "formula": "if ( [IS_STRATEGIC_LOGO] = 1 ) then 'Strategic' else 'Standard'",
+  "note": "Exact; NULL gives 'Standard' on both sides."
+ },
+ "2.36": {
+  "formula": "if ( [IS_QUARTER_END] = 1 ) then 'QE' else ''",
+  "note": "Exact."
+ },
+ "2.52": {
+  "formula": "if ( [IS_YEAR_END] = 1 ) then 'YE' else ''",
+  "note": "Exact."
+ },
+ "2.33": {
+  "formula": "if ( [IS_ACTIVE] = 1 ) then 'Active' else 'Churned'",
+  "note": "Tests against 1 instead of 0, so a NULL gives 'Churned' on both sides. With the original `= 0` test, NULL gives 'Active' in ThoughtSpot but 'Churned' in Excel (blank = 0). Confirm what NULL should mean."
+ },
+ "2.32": {
+  "formula": "concat ( to_string ( [CONTRACT_TERM_MONTHS] ) , ' months' )",
+  "note": "Exact if the column is an integer; a DOUBLE column may render '12.0'."
+ },
+ "2.34": {
+  "formula": "if ( contains ( [ACV_BAND] , '150K' ) or contains ( [ACV_BAND] , '500K+' ) ) then 'Enterprise' else 'Commercial'",
+  "note": "Exact: ThoughtSpot contains and Excel SEARCH are both case-insensitive (probed 2026-10-06). Note that '150K' also matches e.g. '1150K'."
+ },
+ "2.37": {
+  "formula": "if ( contains ( [PRICING_MODEL] , 'usage' ) ) then 'Usage-based' else 'Other'",
+  "note": "Exact; both case-insensitive."
+ },
+ "2.38": {
+  "formula": "if ( [REGION] = 'EMEA' ) then 1 else 0",
+  "note": "Row-level. Set the columns[] entry to MEASURE with aggregation: SUM to count EMEA rows. `=` is case-insensitive on both sides."
+ },
+ "2.39": {
+  "formula": "if ( contains ( [BILLING_FREQUENCY] , 'month' ) ) then 'Monthly' else if ( contains ( [BILLING_FREQUENCY] , 'quarter' ) ) then 'Quarterly' else if ( contains ( [BILLING_FREQUENCY] , 'ann' ) or contains ( [BILLING_FREQUENCY] , 'year' ) ) then 'Annual' else 'Other'",
+  "note": "Exact; both case-insensitive. Order matters: 'Semi-annual' gives 'Annual'."
+ },
+ "2.40": {
+  "formula": "if ( [CURRENCY] != 'USD' ) then 'Non-USD' else 'USD'",
+  "note": "Excel <> is case-insensitive, and ThoughtSpot != is likely the same (= is probed, != is not). A NULL currency gives 'USD' in ThoughtSpot and 'Non-USD' in Excel."
+ },
+ "2.47": {
+  "formula": "concat ( concat ( [MONTH_NAME] , ' ' ) , to_string ( [YEAR] ) )",
+  "note": "Nested two-argument concat: the formula reference documents two arguments only."
+ },
+ "2.48": {
+  "formula": "if ( [HALF] = 'H2' ) then 1 else 0",
+  "note": "As 2.38: MEASURE with aggregation: SUM."
+ },
+ "2.49": {
+  "formula": "if ( quarter_number ( [MONTH_END_DATE] ) = quarter_number ( today ( ) ) and year ( [MONTH_END_DATE] ) = year ( today ( ) ) ) then 1 else 0",
+  "note": "Compares dates instead of building a label string, so it doesn't depend on the label format. Calendar quarter. quarter_number follows a fiscal calendar if the Model has one; Excel's ROUNDUP(MONTH/3) does not. Assumes the MONTH_END_DATE column used in 2.50."
+ },
+ "2.50": {
+  "formula": "day ( [MONTH_END_DATE] )",
+  "note": "Exact if the date is a true month end. A safer Excel equivalent is DAY(EOMONTH(d,0))."
+ },
+ "2.51": {
+  "formula": "concat ( 'FY' , to_string ( [FISCAL_YEAR] ) )",
+  "note": "Exact."
+ }
+}

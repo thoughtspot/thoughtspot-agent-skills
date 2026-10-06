@@ -21,9 +21,12 @@ from typing import Any
 
 MARGIN = 1
 
-TRANSLATOR_BACKED = {"tableau", "dax", "qlik", "sisense", "snowflake", "databricks"}
+TRANSLATOR_BACKED = {"tableau", "dax", "qlik", "sisense", "snowflake", "databricks", "excel",
+                     "google_sheets"}
 EXCEL_MAP = "docs/function-maps/ts-excel-function-mapping.md"
 SHEETS_MAP = "docs/function-maps/ts-sheets-function-mapping.md"
+# Excel and Google Sheets are translator-backed (ts_cli/excel/); their maps stay listed as
+# the fallback for a construct the translator returns NEEDS_REVIEW.
 MAP_BACKED = {
     "excel": EXCEL_MAP,
     # The Sheets map is a DELTA on the Excel map (BL-338): read it first; a name it does
@@ -197,7 +200,12 @@ def _score(text: str) -> tuple[dict[str, int], dict[str, list[str]]]:
 
 def _backing(d: str) -> dict[str, Any]:
     if d in TRANSLATOR_BACKED:
-        return {"backing": "translator"}
+        out: dict[str, Any] = {"backing": "translator"}
+        if d in MAP_BACKED:  # Excel / Sheets: the map is the NEEDS_REVIEW fallback
+            out["map"] = MAP_BACKED[d]
+            if d in MAP_FALLBACK:
+                out["fallback_map"] = MAP_FALLBACK[d]
+        return out
     if d in MAP_BACKED:
         out = {"backing": "map", "map": MAP_BACKED[d]}
         if d in MAP_FALLBACK:

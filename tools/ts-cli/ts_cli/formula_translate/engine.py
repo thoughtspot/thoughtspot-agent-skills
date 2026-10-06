@@ -51,14 +51,24 @@ _CLASSIFICATION = {TRANSLATED: "direct", APPROXIMATED: "direct (downgrade)",
 _PASSTHROUGH = re.compile(r"\bsql_\w+?_op\s*\(")
 
 
-def infer_role(expr: str, ctx: ColumnContext) -> dict[str, Any]:
+def infer_role(expr: str, ctx: ColumnContext, intended: Optional[str] = None) -> dict[str, Any]:
     """MEASURE iff the formula aggregates — by its own text, or because it references an
-    aggregate Model formula (``[formula_X]`` hides the aggregate; BL-331 review)."""
+    aggregate Model formula (``[formula_X]`` hides the aggregate; BL-331 review).
+
+    ``intended`` is a role the translator already applied (Excel ``--role``): a row-level
+    numeric flag kept as a MEASURE is totalled by its column aggregation, so AgentQL wraps it
+    in ``SUM``."""
     from ts_cli.spotql_ops import SEMIADDITIVE_OUTER_FUNCS, classify_expr, outermost_func
 
     cls = classify_expr(expr)
-    is_measure = cls["column_type"] == "MEASURE" or any(
+    aggregates = cls["column_type"] == "MEASURE" or any(
         t in expr for t in ctx.aggregate_formula_targets())
+    if intended in ("MEASURE", "ATTRIBUTE"):
+        if intended == "ATTRIBUTE":
+            return {"role": "ATTRIBUTE", "agentql_wrapper": None}
+        if not aggregates:
+            return {"role": "MEASURE", "agentql_wrapper": "SUM"}
+    is_measure = aggregates
     outer = outermost_func(expr)
     return {
         "role": "MEASURE" if is_measure else "ATTRIBUTE",
@@ -95,6 +105,8 @@ def _run_adapter(source: str, dialect: str, ctx: ColumnContext,
                  sisense_context: Optional[dict], tableau_role: Optional[str],
                  first_week_day: Optional[int] = None):
     adapter = ADAPTERS[dialect]
+    if dialect in ("excel", "google_sheets"):
+        return adapter(source, ctx, role_hint=tableau_role)
     if dialect == "qlik":
         return adapter(source, ctx, first_week_day=first_week_day)
     if dialect == "sisense":
@@ -107,7 +119,7 @@ def _run_adapter(source: str, dialect: str, ctx: ColumnContext,
 def _post_process(raw, dialect: str, source: str, ctx: ColumnContext):
     """COUNT(*) repair, leftover-keyword guard, traps. Returns (expr, status, notes, traps)."""
     out, status, notes = raw.expr, raw.status, list(raw.notes)
-    traps: list[str] = []
+    traps: list[str] = list(raw.traps)
     if out is None:
         return out, status, notes, traps
     defects = find_defects(dialect, source, out)
@@ -129,7 +141,7 @@ def _post_process(raw, dialect: str, source: str, ctx: ColumnContext):
         traps.append(d.message)
         if status == TRANSLATED:
             status = APPROXIMATED
-    traps.extend(detect_traps(dialect, source, out))
+    traps.extend(t for t in detect_traps(dialect, source, out) if t not in traps)
     if status == TRANSLATED and any(is_downgrade(t) for t in traps):
         status = APPROXIMATED
     return out, status, notes, traps
@@ -138,10 +150,16 @@ def _post_process(raw, dialect: str, source: str, ctx: ColumnContext):
 def translate(expr: str, dialect: str, ctx: Optional[ColumnContext] = None, *,
               name: str = DEFAULT_NAME, sisense_context: Optional[dict] = None,
               tableau_role: Optional[str] = None,
-              first_week_day: Optional[int] = None) -> dict[str, Any]:
+              first_week_day: Optional[int] = None,
+              role: Optional[str] = None) -> dict[str, Any]:
     """Translate one source formula. Never raises for an untranslatable input — that is
-    ``status: NEEDS_REVIEW`` with the reason in ``notes``."""
+    ``status: NEEDS_REVIEW`` with the reason in ``notes``.
+
+    ``role`` (``measure`` / ``attribute``) is the intended role: a role hint for Tableau, and
+    for Excel / Google Sheets the grain the formula is built at (``excel.measure``).
+    ``tableau_role`` is its older spelling."""
     dialect = normalise_dialect(dialect)
+    tableau_role = role or tableau_role
     ctx = ctx or ColumnContext()
     source = (expr or "").strip()
     if not source:
@@ -178,7 +196,7 @@ def translate(expr: str, dialect: str, ctx: Optional[ColumnContext] = None, *,
         return result
     if _PASSTHROUGH.search(out) and status == TRANSLATED:
         result["classification"] = "passthrough"
-    role = infer_role(out, ctx)
+    role = infer_role(out, ctx, raw.role)
     editor, editor_notes = editor_form(out, ctx)
     result.update(role=role["role"], agentql_wrapper=role["agentql_wrapper"], name=name,
                   formula_editor=editor, formula_editor_notes=editor_notes,

@@ -1,0 +1,207 @@
+{
+ "ACV_BAND": {
+  "table": "TABLE",
+  "column": "ACV_BAND",
+  "data_type": "VARCHAR"
+ },
+ "AI_ADOPTION_TIER": {
+  "table": "TABLE",
+  "column": "AI_ADOPTION_TIER",
+  "data_type": "VARCHAR"
+ },
+ "AI_TOKENS_INPUT_M": {
+  "table": "TABLE",
+  "column": "AI_TOKENS_INPUT_M",
+  "data_type": "DOUBLE"
+ },
+ "AI_TOKENS_OUTPUT_M": {
+  "table": "TABLE",
+  "column": "AI_TOKENS_OUTPUT_M",
+  "data_type": "DOUBLE"
+ },
+ "AI_TOKENS_TOTAL_M": {
+  "table": "TABLE",
+  "column": "AI_TOKENS_TOTAL_M",
+  "data_type": "DOUBLE"
+ },
+ "BILLING_FREQUENCY": {
+  "table": "TABLE",
+  "column": "BILLING_FREQUENCY",
+  "data_type": "VARCHAR"
+ },
+ "CONTRACT_TERM_MONTHS": {
+  "table": "TABLE",
+  "column": "CONTRACT_TERM_MONTHS",
+  "data_type": "INT64"
+ },
+ "CURRENCY": {
+  "table": "TABLE",
+  "column": "CURRENCY",
+  "data_type": "VARCHAR"
+ },
+ "DATA_PIPELINE_COST": {
+  "table": "TABLE",
+  "column": "DATA_PIPELINE_COST",
+  "data_type": "DOUBLE"
+ },
+ "FISCAL_YEAR": {
+  "table": "TABLE",
+  "column": "FISCAL_YEAR",
+  "data_type": "INT64"
+ },
+ "GROSS_PROFIT": {
+  "table": "TABLE",
+  "column": "GROSS_PROFIT",
+  "data_type": "DOUBLE"
+ },
+ "HALF": {
+  "table": "TABLE",
+  "column": "HALF",
+  "data_type": "VARCHAR"
+ },
+ "HEALTH_SCORE": {
+  "table": "TABLE",
+  "column": "HEALTH_SCORE",
+  "data_type": "INT64"
+ },
+ "INCLUDED_AI_CREDITS_USD": {
+  "table": "TABLE",
+  "column": "INCLUDED_AI_CREDITS_USD",
+  "data_type": "DOUBLE"
+ },
+ "INFERENCE_COST": {
+  "table": "TABLE",
+  "column": "INFERENCE_COST",
+  "data_type": "DOUBLE"
+ },
+ "INFRA_COST": {
+  "table": "TABLE",
+  "column": "INFRA_COST",
+  "data_type": "DOUBLE"
+ },
+ "IS_ACTIVE": {
+  "table": "TABLE",
+  "column": "IS_ACTIVE",
+  "data_type": "INT64"
+ },
+ "IS_QUARTER_END": {
+  "table": "TABLE",
+  "column": "IS_QUARTER_END",
+  "data_type": "INT64"
+ },
+ "IS_STRATEGIC_LOGO": {
+  "table": "TABLE",
+  "column": "IS_STRATEGIC_LOGO",
+  "data_type": "INT64"
+ },
+ "IS_YEAR_END": {
+  "table": "TABLE",
+  "column": "IS_YEAR_END",
+  "data_type": "INT64"
+ },
+ "MAU": {
+  "table": "TABLE",
+  "column": "MAU",
+  "data_type": "INT64"
+ },
+ "MONTH_END_DATE": {
+  "table": "TABLE",
+  "column": "MONTH_END_DATE",
+  "data_type": "DATE"
+ },
+ "MONTH_NAME": {
+  "table": "TABLE",
+  "column": "MONTH_NAME",
+  "data_type": "VARCHAR"
+ },
+ "PAYMENT_FEES": {
+  "table": "TABLE",
+  "column": "PAYMENT_FEES",
+  "data_type": "DOUBLE"
+ },
+ "PLAN_INFERENCE_COST": {
+  "table": "TABLE",
+  "column": "PLAN_INFERENCE_COST",
+  "data_type": "DOUBLE"
+ },
+ "PLAN_TOTAL_COGS": {
+  "table": "TABLE",
+  "column": "PLAN_TOTAL_COGS",
+  "data_type": "DOUBLE"
+ },
+ "PLAN_TOTAL_REVENUE": {
+  "table": "TABLE",
+  "column": "PLAN_TOTAL_REVENUE",
+  "data_type": "DOUBLE"
+ },
+ "PRICING_MODEL": {
+  "table": "TABLE",
+  "column": "PRICING_MODEL",
+  "data_type": "VARCHAR"
+ },
+ "PY_TOTAL_COGS": {
+  "table": "TABLE",
+  "column": "PY_TOTAL_COGS",
+  "data_type": "DOUBLE"
+ },
+ "PY_TOTAL_REVENUE": {
+  "table": "TABLE",
+  "column": "PY_TOTAL_REVENUE",
+  "data_type": "DOUBLE"
+ },
+ "QUARTER_LABEL": {
+  "table": "TABLE",
+  "column": "QUARTER_LABEL",
+  "data_type": "VARCHAR"
+ },
+ "REGION": {
+  "table": "TABLE",
+  "column": "REGION",
+  "data_type": "VARCHAR"
+ },
+ "SEATS_ACTIVE": {
+  "table": "TABLE",
+  "column": "SEATS_ACTIVE",
+  "data_type": "INT64"
+ },
+ "SEATS_LICENSED": {
+  "table": "TABLE",
+  "column": "SEATS_LICENSED",
+  "data_type": "INT64"
+ },
+ "SEATS_LICENSED_BASE": {
+  "table": "TABLE",
+  "column": "SEATS_LICENSED_BASE",
+  "data_type": "INT64"
+ },
+ "SUBSCRIPTION_REVENUE": {
+  "table": "TABLE",
+  "column": "SUBSCRIPTION_REVENUE",
+  "data_type": "DOUBLE"
+ },
+ "SUPPORT_COST": {
+  "table": "TABLE",
+  "column": "SUPPORT_COST",
+  "data_type": "DOUBLE"
+ },
+ "TOTAL_COGS": {
+  "table": "TABLE",
+  "column": "TOTAL_COGS",
+  "data_type": "DOUBLE"
+ },
+ "TOTAL_REVENUE": {
+  "table": "TABLE",
+  "column": "TOTAL_REVENUE",
+  "data_type": "DOUBLE"
+ },
+ "USAGE_REVENUE": {
+  "table": "TABLE",
+  "column": "USAGE_REVENUE",
+  "data_type": "DOUBLE"
+ },
+ "YEAR": {
+  "table": "TABLE",
+  "column": "YEAR",
+  "data_type": "INT64"
+ }
+}

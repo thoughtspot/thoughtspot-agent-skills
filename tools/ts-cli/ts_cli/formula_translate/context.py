@@ -217,6 +217,18 @@ def _spec_from_entry(source: Optional[str], target: str, meta: dict) -> ColumnSp
         key=bool(meta.get("key")), display_name=source or column)
 
 
+def _parse_shorthand(text: str) -> Optional[list[ColumnSpec]]:
+    """``A=ORDERS.ORDER_DATE, B=ORDERS.AMOUNT`` → specs; None when ``text`` is JSON-shaped."""
+    stripped = text.strip()
+    if not stripped or stripped[0] in "[{\"" or "=" not in stripped:
+        return None
+    pairs = [p.strip() for p in re.split(r"[,\n]", stripped) if p.strip()]
+    if not all("=" in p for p in pairs):
+        raise ValueError("--columns shorthand must be source=TABLE.COLUMN pairs")
+    return [_spec_from_entry(k.strip(), v.strip(), {})
+            for k, v in (p.split("=", 1) for p in pairs)]
+
+
 def parse_columns_json(text: str) -> list[ColumnSpec]:
     """Parse ``--columns``. Accepted shapes (all JSON):
 
@@ -226,8 +238,13 @@ def parse_columns_json(text: str) -> list[ColumnSpec]:
           "data_type": "DOUBLE", "column_type": "MEASURE", "key": false}]``
 
     A mapping value may also be an object with the same keys as the list-of-objects form.
-    Raises ValueError on any other shape.
+    A non-JSON ``A=ORDERS.ORDER_DATE, B=ORDERS.AMOUNT`` (``source=target`` pairs, comma- or
+    newline-separated) is read as the mapping form — the shorthand for spreadsheet column
+    letters. Raises ValueError on any other shape.
     """
+    shorthand = _parse_shorthand(text)
+    if shorthand is not None:
+        return shorthand
     try:
         data = json.loads(text)
     except ValueError as exc:

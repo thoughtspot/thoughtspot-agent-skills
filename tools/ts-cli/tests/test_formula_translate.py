@@ -169,8 +169,10 @@ class TestRefs:
 class TestAdapters:
     def test_dialect_names(self):
         assert normalise_dialect("PowerBI") == "dax"
+        assert normalise_dialect("excel") == "excel"  # translator-backed since v0.158.0
+        assert normalise_dialect("Sheets") == "google_sheets"
         with pytest.raises(ValueError):
-            normalise_dialect("excel")  # map-backed in v1: the skill, not the CLI
+            normalise_dialect("sigma")  # still map-backed: the skill, not the CLI
 
     def test_tableau(self):
         r = translate("ROUND(SUM([Sales]) / COUNTD([Customer]), 2)", "tableau")
@@ -529,6 +531,7 @@ class TestSheets:
         assert "fallback_map" not in c["excel"]
         for x in ("google_sheets", "excel"):
             assert (_REPO / c[x]["map"]).is_file()
+            assert c[x]["backing"] == "translator"  # the map is the NEEDS_REVIEW fallback
 
     def test_fallback_map_rows_a_name_the_delta_does_not(self):
         """E1: VLOOKUP has no Sheets row, so it is read from the Excel row."""

@@ -4,6 +4,8 @@
               formula, record every column reference, list the traps that applied, and
               emit a ready-to-paste TML snippet. Optional proof that ThoughtSpot accepts it
               (--validate compile | execute) against a scratch copy of a Model.
+              With --to excel (and --from thoughtspot) it runs the other way: a ThoughtSpot
+              formula becomes an Excel formula over an Excel Table (--table).
   detect    — score which language a formula is written in; flags ties that must be asked.
 
 The logic is in ts_cli/formula_translate/ (pure, unit-tested); this module is I/O only.
@@ -71,7 +73,12 @@ def translate_cmd(
     expr: Optional[str] = typer.Argument(None, help="The source formula (or '-' / omit to read stdin)"),
     source: str = typer.Option(..., "--from", "-f",
                                help="Source dialect: tableau | dax | qlik | sisense | snowflake | databricks | "
-                                    "thoughtspot (already TS syntax: resolve refs + validate only)"),
+                                    "excel | google_sheets | thoughtspot (already TS syntax: resolve refs + "
+                                    "validate only; or the source of --to excel)"),
+    target: str = typer.Option("thoughtspot", "--to",
+                               help="thoughtspot (default) | excel — excel needs --from thoughtspot"),
+    table: str = typer.Option("Table1", "--table",
+                              help="--to excel: the Excel Table name references are written against"),
     columns: Optional[str] = typer.Option(
         None, "--columns", "-c",
         help="Level 1 column map, JSON (or @file): {\"Sales\": \"ORDERS.SALES_AMT\"}, "
@@ -95,7 +102,10 @@ def translate_cmd(
     jaql_context: Optional[str] = typer.Option(
         None, "--context", help="sisense: the JAQL context object, JSON or @file"),
     role: Optional[str] = typer.Option(
-        None, "--role", help="tableau: measure | attribute (default: inferred from aggregates)"),
+        None, "--role",
+        help="measure | attribute. tableau: a role hint. excel / google_sheets: the intended "
+             "role — MEASURE over row-level [@Col] references is built at the right grain "
+             "(sum of each column; ratio of totals with safe_divide); default: inferred"),
     first_week_day: Optional[int] = typer.Option(
         None, "--first-week-day", min=0, max=6,
         help="qlik: the app's FirstWeekDay (0 = Monday … 6 = Sunday; US apps are usually 6). "
@@ -122,6 +132,9 @@ def translate_cmd(
       echo "DIVIDE(SUM(Sales[Amount]), DISTINCTCOUNT(Sales[Customer]))" | ts formula translate --from dax
       ts formula translate "SUM(amount)" --from snowflake --columns '{"amount": "ORDERS.AMOUNT"}'
       ts formula translate "ROUND(AVG(salary), 0)" --from snowflake -m <model-guid> -p prod --validate execute
+      ts formula translate '=IFERROR([@Revenue]/[@Seats],0)' --from excel --role measure
+      ts formula translate '=B2*C2' --from excel --columns 'B=ORDERS.QTY, C=ORDERS.PRICE'
+      ts formula translate "safe_divide ( sum ( [T::a] ) , sum ( [T::b] ) )" --from thoughtspot --to excel
     """
     from ts_cli.formula_translate.adapters import normalise_dialect
     from ts_cli.formula_translate.engine import translate
@@ -133,20 +146,48 @@ def translate_cmd(
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     text = _read_expr(expr)
+    if target.strip().lower() == "excel":
+        _to_excel(text, dialect, table, validate)
+        return
+    if target.strip().lower() not in ("thoughtspot", "ts"):
+        raise typer.BadParameter("--to must be thoughtspot or excel")
     if validate != "none" and not model:
         _err("--validate needs --model (context level 2)")
         raise typer.Exit(2)
 
     ctx, validator, model_doc = _build_context(columns, model, profile, key_column)
-    result = translate(text, dialect, ctx, name=name,
-                       sisense_context=_json_option(jaql_context, "--context"),
-                       tableau_role=role, first_week_day=first_week_day)
+    try:
+        result = translate(text, dialect, ctx, name=name,
+                           sisense_context=_json_option(jaql_context, "--context"),
+                           role=role, first_week_day=first_week_day)
+    except ValueError as exc:
+        _err(str(exc))
+        raise typer.Exit(2)
     exit_code = 0
     if validate != "none":
         exit_code = _validate(result, validate, validator, model_doc, name, group_by)
     print(json.dumps(result, indent=2))
     if exit_code:
         raise typer.Exit(exit_code)
+
+
+def _to_excel(text: str, dialect: str, table: str, validate: str) -> None:
+    """``--to excel``: a ThoughtSpot formula → an Excel formula (JSON to stdout)."""
+    from ts_cli.excel.to_excel import to_excel
+
+    if dialect != "thoughtspot":
+        _err("--to excel translates a ThoughtSpot formula: pass --from thoughtspot")
+        raise typer.Exit(2)
+    if validate != "none":
+        _err("--validate checks ThoughtSpot formulas; it does not apply to --to excel")
+        raise typer.Exit(2)
+    out = to_excel(text, table=table)
+    print(json.dumps({
+        "dialect": "thoughtspot", "to": "excel", "table": table, "input": text,
+        "formula": out.formula, "status": out.status, "references": out.references,
+        "traps": out.traps, "notes": out.notes,
+        "translator": "ts_cli.excel.to_excel.to_excel",
+    }, indent=2))
 
 
 def _json_option(value: Optional[str], flag: str):

@@ -19,6 +19,7 @@ Verified signatures (read from the code, 2026-10-06):
 | sisense | ``sisense.functions.translate_jaql(expr, context)`` | ``(expr or None, status, note)`` — same statuses as DAX |
 | snowflake | ``sv_sql.translate_sql_expr(sql, resolver)`` | ``str``; raises ``UntranslatableError`` |
 | databricks | ``databricks.mv_sql.translate_sql_expr(sql, resolver, agg_hook=None)`` | ``str``; raises ``UntranslatableError`` |
+| excel, google_sheets | ``excel.translate.translate_excel(src, ctx, dialect, role)`` | ``ExcelResult(expr, status, notes, traps, role)`` |
 """
 from __future__ import annotations
 
@@ -33,9 +34,11 @@ TRANSLATED = "TRANSLATED"
 APPROXIMATED = "APPROXIMATED"
 NEEDS_REVIEW = "NEEDS_REVIEW"
 
-DIALECTS = ("tableau", "dax", "qlik", "sisense", "snowflake", "databricks", "thoughtspot")
+DIALECTS = ("tableau", "dax", "qlik", "sisense", "snowflake", "databricks", "excel",
+            "google_sheets", "thoughtspot")
 ALIASES = {"powerbi": "dax", "power_bi": "dax", "sf": "snowflake", "dbx": "databricks",
-           "ts": "thoughtspot"}
+           "ts": "thoughtspot", "xlsx": "excel", "sheets": "google_sheets",
+           "gsheets": "google_sheets", "google-sheets": "google_sheets"}
 
 # Where each translator lives and which tests cover it (spec §6 item 5).
 TRANSLATOR_INFO = {
@@ -47,6 +50,10 @@ TRANSLATOR_INFO = {
     "snowflake": ("ts_cli.sv_sql.translate_sql_expr", ["tests/test_sv_sql.py"]),
     "databricks": ("ts_cli.databricks.mv_sql.translate_sql_expr",
                    ["tests/test_databricks_sql.py"]),
+    "excel": ("ts_cli.excel.translate.translate_excel",
+              ["tests/test_excel_translate.py", "tests/test_excel_regression.py"]),
+    "google_sheets": ("ts_cli.excel.translate.translate_excel (Sheets delta rules)",
+                      ["tests/test_excel_translate.py"]),
     "thoughtspot": (None, []),
 }
 
@@ -63,6 +70,8 @@ class RawResult:
     status: str
     notes: list[str] = field(default_factory=list)
     partial: Optional[str] = None  # what a review-flagged translator emitted, if anything
+    traps: list[str] = field(default_factory=list)  # translator-specific trap lines
+    role: Optional[str] = None     # MEASURE | ATTRIBUTE when the translator applied an intent
 
 
 def normalise_dialect(name: str) -> str:
@@ -279,6 +288,26 @@ def adapt_databricks(expr: str, ctx: ColumnContext) -> RawResult:
 
 
 # ---------------------------------------------------------------------------
+# Excel / Google Sheets
+# ---------------------------------------------------------------------------
+
+def adapt_excel(expr: str, ctx: ColumnContext, role_hint: Optional[str] = None,
+                dialect: str = "excel") -> RawResult:
+    """``role_hint``: the intended role (``measure`` / ``attribute``). A MEASURE over row-level
+    ``[@Col]`` references is built at the right grain — additive sums, a ratio of totals —
+    by ``excel.measure``; without it the row-level translation's own role is inferred."""
+    from ts_cli.excel.translate import translate_excel
+
+    r = translate_excel(expr, ctx, dialect=dialect, role=role_hint)
+    return RawResult(r.expr, r.status, list(r.notes), traps=list(r.traps), role=r.role)
+
+
+def adapt_google_sheets(expr: str, ctx: ColumnContext,
+                        role_hint: Optional[str] = None) -> RawResult:
+    return adapt_excel(expr, ctx, role_hint=role_hint, dialect="google_sheets")
+
+
+# ---------------------------------------------------------------------------
 # ThoughtSpot (identity) — for a formula already in ThoughtSpot syntax
 # ---------------------------------------------------------------------------
 
@@ -296,5 +325,6 @@ def adapt_thoughtspot(expr: str, ctx: ColumnContext) -> RawResult:
 ADAPTERS: dict[str, Any] = {
     "tableau": adapt_tableau, "dax": adapt_dax, "qlik": adapt_qlik,
     "sisense": adapt_sisense, "snowflake": adapt_snowflake, "databricks": adapt_databricks,
+    "excel": adapt_excel, "google_sheets": adapt_google_sheets,
     "thoughtspot": adapt_thoughtspot,
 }
