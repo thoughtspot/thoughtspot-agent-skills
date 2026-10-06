@@ -224,7 +224,7 @@ def _outputs(args, data_dir, entries, cases, fixture, full_run: dict) -> None:
     full_run["run"]["counts"] = counts([it["result"] for it in full_run["cases"]])
     disputed = [e for e in entries if e.get("crosscheck") == "disputed"]
     red = redact.redact_run(full_run, entries, disputed)
-    leaks = redact.leaks_against_corpus(json.dumps(red), cases)
+    leaks = redact.leaks_against_corpus(json.dumps(red, ensure_ascii=False), cases)
     if leaks:
         raise SystemExit(f"refusing to write: redacted results contain corpus text {leaks[:3]}")
     args.results.parent.mkdir(parents=True, exist_ok=True)
@@ -232,11 +232,12 @@ def _outputs(args, data_dir, entries, cases, fixture, full_run: dict) -> None:
     _log(f"redacted results: {args.results}")
     if args.report:
         text = redact.build_report(red, args.title)
-        leaks = redact.leaks_against_corpus(text, cases)
+        prior = args.report.read_text() if args.report.exists() else ""
+        merged = redact.merge_report(prior, text)  # the hand-written head is checked too
+        leaks = redact.leaks_against_corpus(merged, cases)
         if leaks:
             raise SystemExit(f"refusing to write report: corpus text {leaks[:3]}")
-        prior = args.report.read_text() if args.report.exists() else ""
-        args.report.write_text(redact.merge_report(prior, text))
+        args.report.write_text(merged)
         _log(f"report: {args.report}")
     print(json.dumps(red["run"]["summary"], indent=1), file=sys.stderr)
 

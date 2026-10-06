@@ -79,8 +79,8 @@ def corpus(tmp_path):
             # r7: blank input cell M7
             [_c("of:=[.M7]+1", "float", "1"), _c(vt="float", value="1")],
             # r8: ODF CEILING (not Excel's) -> skipped; r9 the Excel one is kept
-            [_c("of:=CEILING(2.5;1)", "float", "3"), _c(vt="float", value="3")],
-            [_c("of:=COM.MICROSOFT.CEILING(2.5;1)", "float", "3"), _c(vt="float", value="3")],
+            [_c("of:=CEILING(7.25;3)", "float", "9"), _c(vt="float", value="9")],
+            [_c("of:=COM.MICROSOFT.CEILING(7.25;3)", "float", "9"), _c(vt="float", value="9")],
             # r10: a named expression -> skipped
             [_c("of:=YEAR(datum)", "float", "1"), _c(vt="float", value="1")],
             # r11: LibreOffice-only error code -> skipped
@@ -156,7 +156,7 @@ class TestOpenFormula:
 
     def test_excel_ceiling_kept_under_its_excel_name(self, corpus):
         c = _lo(corpus, 9)
-        assert c["formula"] == "=CEILING(2.5,1)" and c["functions"] == ["CEILING"]
+        assert c["formula"] == "=CEILING(7.25,3)" and c["functions"] == ["CEILING"]
 
     def test_case_rows(self, corpus):
         sheets = S.read_fods(corpus / "libreoffice/mathematical/synthetic.fods")
@@ -321,6 +321,10 @@ class TestLeakScanner:
         cases = [{"id": "a", "source_formula": "=LEFT(A1,25)+1234",
                   "expected": {"values": {"1": {"t": "str", "v": "Purple Walrus Inc"}}}}]
         assert len(RD.leaks_against_corpus("x LEFT(A1,25)+1234 Purple Walrus Inc", cases)) == 2
+        raw = [{"id": "b", "formula": '=CONCAT("Zebra café",A1)', "expected": {"t": "num", "v": "1"},
+                "inputs": [{"kind": "str", "value": "Mauve Otter 77"}]}]
+        assert RD.leaks_against_corpus('see CONCAT("Zebra café",A1) and Mauve Otter 77', raw) == [
+            "b: formula", "b: input string"]
 
 
 # -- what is committed ---------------------------------------------------------------------
@@ -335,6 +339,29 @@ def test_committed_m1_files_carry_no_corpus_text(path):
     text = path.read_text(encoding="utf-8")
     findings = RD.scan_committed(text, is_json=path.suffix in (".json", ".jsonl"))
     assert findings == [], f"{path.name}: {findings[:5]}"
+
+
+# Files that carry hand-written M1 prose besides the M1 files themselves.
+PROSE = [REPO / "docs" / "backlog.md", REPO / "CHANGELOG.md", HERE / "README.md",
+         pathlib.Path(__file__)]
+
+
+def test_exact_corpus_scan_when_the_data_dir_is_available():
+    """Opt-in (needs $FORMULA_FIDELITY_DATA): every corpus formula, string value and string
+    input, matched as raw text against every committed M1 file and the prose files."""
+    import os
+
+    root = os.environ.get(L.DATA_DIR_ENV)
+    cand = pathlib.Path(root or "/nonexistent") / "extracted" / "candidates.jsonl"
+    if not cand.is_file():
+        pytest.skip(f"${L.DATA_DIR_ENV} not set or has no extracted/candidates.jsonl")
+    rows = [json.loads(line) for line in cand.read_text(encoding="utf-8").splitlines() if line]
+    hits = {}
+    for path in [*COMMITTED, *PROSE]:
+        found = RD.leaks_against_corpus(path.read_text(encoding="utf-8"), rows)
+        if found:
+            hits[path.name] = found[:5]
+    assert hits == {}
 
 
 def test_committed_files_exist():

@@ -12831,12 +12831,12 @@ answer**: TRANSLATED, no trap.
 - `_scaled` in `ts_cli/excel/functions.py` emits `ceil ( x * F ) / F` (and `floor`), with `F` an
   integer literal power of ten.
 - The compiled SQL divides an integer `CEIL(…)` by an integer literal. Snowflake's `NUMBER` division
-  keeps a result scale of 6, so a round-up to 11 decimals came back with 6 decimals.
+  keeps a result scale of 6, so a round-up to more than 6 decimals came back with 6.
 - Any `ROUNDUP` / `ROUNDDOWN` with more than 6 digits is affected; 6 or fewer is exact.
 
 **Fix.** Make the division floating-point, e.g. multiply by the fractional increment instead of
-dividing by the integer factor (`ceil ( x * F ) * 0.00000000001`), or use the `round`-increment form
-for the scale. Probe the compiled SQL for both. Add a case at 7, 11 and 14 digits.
+dividing by the integer factor (`ceil ( x * F ) * I`, with `I` the fractional increment), or use the `round`-increment form
+for the scale. Probe the compiled SQL for both. Add cases above 6 digits.
 
 **Target:** the next `ts_cli/excel` change.
 
@@ -12887,7 +12887,7 @@ platform arithmetic, not a `ts_cli/excel` rule: the translation is the identity.
 **The facts.**
 - A sum of a negative integer and a one-decimal literal returned the exact decimal from ThoughtSpot
   (Snowflake treats the literals as fixed-point `NUMBER`), while Excel's cached value carries the
-  binary floating-point error, about 4e-13 away.
+  binary floating-point error, in the 13th significant digit.
 - Only literal-only arithmetic is affected: over a `FLOAT` column the warehouse computes in double
   like Excel.
 
@@ -12897,7 +12897,7 @@ tolerance is not widened (harness rule).
 
 **Target:** 2026-11-30.
 
-## BL-352 — Excel date text literals (`"2001-03-31"`) are passed straight to ThoughtSpot date functions, which reject a Text argument `Tier 2`
+## BL-352 — Excel date text literals (an ISO date in quotes) are passed straight to ThoughtSpot date functions, which reject a Text argument `Tier 2`
 
 **Filed:** 2026-10-06. **Status:** OPEN.
 **Source:** formula fidelity harness M1: **12 IMPORT_FAILED cases** (EDATE ×3, EOMONTH, WEEKDAY ×6,

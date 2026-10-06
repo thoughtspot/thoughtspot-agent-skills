@@ -256,14 +256,35 @@ def scan_committed(text: str, is_json: bool = False) -> list[str]:
     return findings
 
 
-def leaks_against_corpus(text: str, cases: list[dict], min_len: int = 10) -> list[str]:
-    """Exact substrings of the corpus (formulas, string values) found in ``text``."""
-    hits = []
+# Corpus strings too generic to mean anything when found in our prose: short plain words
+# ("Function", "a string"), a lone short number, a run of one character, the Excel epoch.
+_GENERIC = re.compile(r"[A-Za-z][A-Za-z \-]{0,13}|-?[0-9.]{1,9}|(.)\1*|1899-12-30")
+
+
+def corpus_strings(cases: list[dict], min_len: int = 8) -> dict[str, str]:
+    """Distinctive corpus text per case: the formula (with and without ``=``), string
+    expected values and string inputs. ``cases`` are materialised cases, or raw candidate rows
+    (which carry ``formula`` / ``expected`` / ``inputs`` lists)."""
+    out: dict[str, str] = {}
     for c in cases:
-        f = (c.get("source_formula") or "").lstrip("=")
-        if len(f) >= min_len and f in text:
-            hits.append(f"{c['id']}: formula")
-        for v in (c.get("expected") or {}).get("values", {}).values():
-            if v.get("t") == "str" and len(v.get("v") or "") >= min_len and v["v"] in text:
-                hits.append(f"{c['id']}: expected string")
-    return hits
+        f = c.get("source_formula") or c.get("formula") or ""
+        for t in (f, f.lstrip("=")):
+            if len(t) >= min_len:
+                out[t] = f"{c['id']}: formula"
+        exp = c.get("expected") or {}
+        vals = list((exp.get("values") or {}).values()) if "values" in exp else [exp]
+        for v in vals:
+            if v.get("t") == "str" and len(v.get("v") or "") >= min_len:
+                out[v["v"]] = f"{c['id']}: expected string"
+        inputs = c.get("inputs")
+        for i in inputs if isinstance(inputs, list) else []:
+            if i.get("kind") == "str" and len(str(i.get("value") or "")) >= min_len:
+                out[str(i["value"])] = f"{c['id']}: input string"
+    return out
+
+
+def leaks_against_corpus(text: str, cases: list[dict], min_len: int = 8) -> list[str]:
+    """Exact substrings of the corpus (formulas, string values, string inputs) in ``text``.
+    Compare RAW text: scanning ``json.dumps`` output would miss escaped quotes and non-ASCII."""
+    return sorted({who for s, who in corpus_strings(cases, min_len).items()
+                   if not _GENERIC.fullmatch(s) and s in text})

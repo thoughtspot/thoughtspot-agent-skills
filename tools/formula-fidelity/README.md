@@ -176,9 +176,17 @@ makes a misplaced copy un-addable.
 | `runs/<date>-excel-m1.json`: per case id, status, verdict class, cause. **Redacted** | |
 | the review: generated tables plus hand-written repros **in our own words** | |
 
-`tests/test_fidelity_literal.py` scans every committed M1 file for formula-shaped text and for
-forbidden keys (`formula`, `expected`, `values`, …), and fails. `run_literal.py` also checks the
-redacted output against the corpus itself (exact substrings) before writing it.
+Three leak guards, weakest first:
+- **CI, no data dir:** `tests/test_fidelity_literal.py` scans every committed M1 file for
+  formula-shaped text and forbidden keys (`formula`, `expected`, `values`, …). It is a heuristic:
+  the 2026-10-06 review measured that about 19% of corpus formulas (short all-numeric calls such
+  as a two-argument power) would pass it.
+- **With the data dir:** the same test file's exact scan (it runs when `$FORMULA_FIDELITY_DATA`
+  is set, and is skipped otherwise) matches every corpus formula, string value and string input,
+  as raw text, against the M1 files plus `docs/backlog.md`, `CHANGELOG.md`, this README and the
+  test file. **Run it before pushing M1 changes.**
+- **At write time:** `run_literal.py` refuses to write redacted results or a report (the
+  hand-written head included) that contain corpus text.
 
 ```bash
 D=~/Dev/ts/formula-fidelity-data
