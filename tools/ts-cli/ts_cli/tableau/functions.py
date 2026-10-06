@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ts_cli.formula_common import ts_round_from_sql_digits
+from ts_cli.formula_common import sql_digits_to_ts_increment, ts_round_from_sql_digits
 from ts_cli.tableau.literals import literal_value
 from ts_cli.tableau.parsing import _extract_function_args
 
@@ -152,6 +152,21 @@ def _apply_arg_handler(expr: str, fn: str, render) -> str:
     return result
 
 
+def _round_handler(a: list[str]) -> str:
+    """Tableau ROUND(x[, d]) -> ThoughtSpot round(x[, 10^-d]) (BL-331).
+
+    Only a literal digit count converts. Anything else — a field-driven d, a
+    third argument — is re-emitted as upper-case ``ROUND(...)``, which
+    validate.py's survivor pattern rejects, so the formula is skipped with a
+    reason instead of importing as round-to-nearest-d.
+    """
+    if len(a) == 1 and a[0]:
+        return ts_round_from_sql_digits(a[0])
+    if len(a) == 2 and sql_digits_to_ts_increment(a[1]) is not None:
+        return ts_round_from_sql_digits(a[0], a[1])
+    return f"ROUND({', '.join(a)})"
+
+
 _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("LEFT", lambda a: f"substr ( {a[0]} , 0 , {a[1]} )" if len(a) == 2 else None),
     ("RIGHT", lambda a: f"substr ( {a[0]} , strlen ( {a[0]} ) - {a[1]} , {a[1]} )" if len(a) == 2 else None),
@@ -170,11 +185,7 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
         f"( substr ( {a[0]} , strlen ( {a[0]} ) - strlen ( {a[1]} ) , strlen ( {a[1]} ) ) = {a[1]} )"
         if len(a) == 2 else None)),
     # BL-331 — ROUND(x, d): d decimal places -> ThoughtSpot increment 10^-d.
-    # Non-strict: this regex mapper has no fail-loud path, and the row-level
-    # sql_double_op pass-through is still closer than a verbatim digit count.
-    ("ROUND", lambda a: (ts_round_from_sql_digits(a[0], a[1] if len(a) == 2 else None,
-                                                  strict=False)
-                         if len(a) in (1, 2) else None)),
+    ("ROUND", _round_handler),
     ("SQUARE", lambda a: f"pow ( {a[0]} , 2 )" if len(a) == 1 else None),
     ("SIGN", lambda a: (
         f"( if ( {a[0]} > 0 ) then 1 else if ( {a[0]} < 0 ) then -1 else 0 )"

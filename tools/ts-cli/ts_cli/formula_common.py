@@ -82,43 +82,60 @@ CAST_MAP = CAST_MAP_FULL
 # the other. Copying the argument verbatim is a silent wrong-numbers bug (it shipped
 # in four translators). One copy of the conversion, here; never re-implement it.
 
-_SQL_INT_LITERAL_RE = re.compile(r"^\(?\s*([+-])?\s*(\d+)\s*\)?$")
+# An integer literal, optionally signed/parenthesised, optionally written `2.0`.
+_SQL_INT_LITERAL_RE = re.compile(r"^\(?\s*([+-])?\s*(\d+)(?:\.0*)?\s*\)?$")
+
+#: Largest |digit count| accepted. Snowflake NUMBER scale tops out at 37 and its
+#: ROUND scale range is about +-38; past that a "digit count" is an authoring error.
+MAX_ROUND_DIGITS = 37
+
+
+def sql_int_digits(digits: str) -> int | None:
+    """An integer-literal digit count (``"2"``, ``"- 2"``, ``"2.0"``) as int, else None."""
+    m = _SQL_INT_LITERAL_RE.match((digits or "").strip())
+    if not m:
+        return None
+    return int(m.group(2)) * (-1 if m.group(1) == "-" else 1)
 
 
 def sql_digits_to_ts_increment(digits: str) -> str | None:
     """SQL ROUND digit count -> ThoughtSpot round() increment, as literal text.
 
-    ``"2"`` -> ``"0.01"``, ``"0"`` -> ``"1"``, ``"-2"`` / ``"- 2"`` -> ``"100"``.
-    Returns None when ``digits`` is not an integer literal (a column, an
-    expression, a fraction) — the caller must pass it through or flag it.
+    ``"2"`` / ``"2.0"`` -> ``"0.01"``, ``"0"`` -> ``"1"``, ``"-2"`` / ``"- 2"`` ->
+    ``"100"``. Returns None when ``digits`` is not an integer literal (a column,
+    an expression, a fraction) or exceeds MAX_ROUND_DIGITS in magnitude — the
+    caller must pass it through, refuse it, or flag it.
     """
     from decimal import Decimal
-    m = _SQL_INT_LITERAL_RE.match((digits or "").strip())
-    if not m:
+    d = sql_int_digits(digits)
+    if d is None or abs(d) > MAX_ROUND_DIGITS:
         return None
-    d = int(m.group(2)) * (-1 if m.group(1) == "-" else 1)
     return format(Decimal(1).scaleb(-d), "f")
 
 
 def ts_round_from_sql_digits(x: str, digits: str | None = None, *,
-                             strict: bool = True) -> str:
+                             aggregated: bool = False) -> str:
     """SQL ``ROUND(x[, d])`` -> ThoughtSpot formula text (spaced token style).
 
     Literal d -> ``round ( x , 10^-d )``; absent d -> ``round ( x )``; a
     non-literal d has no native increment form, so it passes through to the
     warehouse unchanged: ``sql_double_op ( "ROUND({0}, {1})" , x , d )``.
 
-    That pass-through is row-level, so with ``strict`` (the default) a
-    non-literal d over an aggregated x raises UntranslatableError rather than
-    emit it. ``strict=False`` is for engines with no fail-loud path (Tableau's
-    regex mapper), where the pass-through is still closer than a verbatim copy.
+    That pass-through is row-level, so a non-literal d over an aggregated x
+    raises UntranslatableError rather than emit it. ``aggregated=True`` tells it x is aggregated when the text cannot
+    show it (a ``[formula_X]`` reference to a metric). A literal d beyond
+    +-MAX_ROUND_DIGITS always raises.
     """
     if digits is None:
         return f"round ( {x} )"
     inc = sql_digits_to_ts_increment(digits)
     if inc is not None:
         return f"round ( {x} , {inc} )"
-    if strict and expr_is_aggregated(x):
+    if sql_int_digits(digits) is not None:
+        raise UntranslatableError(
+            f"ROUND digit count {digits.strip()} is outside "
+            f"+-{MAX_ROUND_DIGITS} — BL-331")
+    if aggregated or expr_is_aggregated(x):
         raise UntranslatableError(
             "ROUND with a non-literal digit count over an aggregate has no "
             "ThoughtSpot form (round() takes an increment; the sql_double_op "
@@ -131,8 +148,8 @@ def ts_increment_to_sql_digits(increment: str) -> int | None:
 
     ``"0.01"`` -> 2, ``"1"`` -> 0, ``"100"`` -> -2. Returns None when the
     increment is not a positive power of ten (``"0.5"``, ``"25"``, a non-number)
-    — the caller emits ``inc * ROUND(x / inc)`` instead, which is exact for any
-    increment. Raises ValueError for a zero increment: ThoughtSpot evaluates
+    — the caller emits ``inc * ROUND(x / inc)`` instead, which is the form
+    ThoughtSpot itself compiles round() to, so it agrees for any increment. Raises ValueError for a zero increment: ThoughtSpot evaluates
     ``round(x, 0)`` to NULL, so there is no faithful ``ROUND(x, d)`` for it.
     """
     from decimal import Decimal, InvalidOperation

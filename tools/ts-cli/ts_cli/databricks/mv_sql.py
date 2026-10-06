@@ -70,6 +70,12 @@ def tokenize(sql: str) -> list[tuple[str, str]]:
         if not m:
             raise UntranslatableError(
                 f"unrecognized character {sql[i]!r} at position {i}")
+        if m.lastgroup == "number" and re.match(r"[A-Za-z_]", sql[m.end():m.end() + 1]):
+            # `1e1` would otherwise split into the number 1 and an identifier
+            # `e1` resolved as a column — garbage, silently (BL-331).
+            raise UntranslatableError(
+                f"numeric literal at position {i} runs into "
+                f"{sql[m.end()]!r} — scientific notation is not supported")
         i = m.end()
         kind = m.lastgroup
         if kind == "ws":

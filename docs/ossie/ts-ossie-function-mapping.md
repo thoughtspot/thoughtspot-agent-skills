@@ -312,7 +312,7 @@ Source tables: `core-spec/expression_language.md:453-459` (basic), `:465-470` (a
 | Ossie | Class | ThoughtSpot | Notes |
 |---|---|---|---|
 | `ABS(x)` | direct | `abs ( [x] )` | |
-| `ROUND(x, d)` | direct | `round ( [x] , 10^-d )` | **Not `round ( [x] , d )`.** ThoughtSpot's 2nd argument is a rounding *increment*, the specification's a digit count, so a literal `d` converts: `2` → `0.01`, `0` → `1`, `-2` → `100`. A non-literal `d` has no native increment form and needs the `sql_double_op ( "ROUND({0}, {1})" , [x] , d )` pass-through. See the 2026-10-06 revision note above. |
+| `ROUND(x, d)` | direct | `round ( [x] , 10^-d )` | **Not `round ( [x] , d )`.** ThoughtSpot's 2nd argument is a rounding *increment*, the specification's a digit count, so a literal `d` converts: `2` → `0.01`, `0` → `1`, `-2` → `100`. A non-literal `d` has no native increment form and falls back to `sql_double_op ( "ROUND({0}, {1})" , [x] , d )` ([**E3**](#how-to-read-the-tables)) — the row stays `direct` for the literal case. See the 2026-10-06 revision note above. |
 | `FLOOR(x)` | direct | `floor ( [x] )` | |
 | `CEIL(x)` / `CEILING(x)` | direct | `ceil ( [x] )` | Both specification spellings map to `ceil`. |
 | `TRUNC(x, d)` / `TRUNCATE(x, d)` | passthrough | `sql_double_op ( "TRUNC({0}, {1})" , [x] , d )` | **Variant: `sql_double_op`.** ThoughtSpot has no truncation. `floor` agrees with `TRUNC` only for `x ≥ 0` and `d = 0`, and `round` disagrees at every half-value, so neither is a safe substitute. |

@@ -99,11 +99,11 @@ def test_paren_strip_only_date_levels():
     assert e2 == "sum([Profit (Adjusted)])"
 
 
-def test_round_two_arg_partial():
-    expr, status, note = translate_jaql("round([x], 2)", {"x": {"dim": "[T.Cost]"}})
-    assert status == "Approximated"
-    assert expr.startswith("round([Cost]")
-    assert "increment" in note
+def test_round_two_arg_converts_digits_to_increment():
+    # BL-331: was emitted verbatim as Approximated — round(x, 2) is nearest-2 in TS.
+    expr, status, _ = translate_jaql("round([x], 2)", {"x": {"dim": "[T.Cost]"}})
+    assert status == "Migrated"
+    assert expr == "round([Cost], 0.01)"
 
 
 def test_unsupported_function_needs_review():

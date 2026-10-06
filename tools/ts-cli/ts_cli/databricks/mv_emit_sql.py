@@ -220,8 +220,8 @@ def _emit_round(args: list, resolver) -> str:
 
     ThoughtSpot's 2nd arg is a rounding INCREMENT (compiled as
     `inc * round(x / NULLIF(inc, 0))`), SQL ROUND's is a digit count. A literal
-    power-of-ten increment maps to ROUND(x, d); any other literal to the exact
-    `inc * ROUND(x / inc)`; a non-literal keeps ThoughtSpot's NULLIF guard. A
+    power-of-ten increment maps to ROUND(x, d); any other literal to
+    `inc * ROUND(x / inc)` (ThoughtSpot's own compilation); a non-literal keeps ThoughtSpot's NULLIF guard. A
     literal 0 evaluates to NULL in ThoughtSpot — almost certainly an authoring
     mistake — so it is refused rather than silently emitted as ROUND(x, 0).
     """

@@ -29,7 +29,7 @@ truth for the formula rows is `tools/ts-cli/ts_cli/sisense/functions.py`
 | `stdev` / `var` / `median` | Mapped | → `stddev` / `variance` / `median` (sample variants) |
 | `if(cond, a, b)` | Mapped | → ThoughtSpot `if (cond) then a else b` (nested for chained `if`) |
 | `isnull` / `ifnull` | Mapped | `isnull` (not `is_null`) |
-| `round(x, n)` (2-arg) | Approximated | TS 2nd arg is a rounding **increment**, not a decimal-place count |
+| `round(x, n)` (2-arg) | Mapped | → `round(x, 10^-n)` for a literal `n` (`2` → `0.01`, `0` → `1`, `-2` → `100`): TS's 2nd arg is a rounding **increment**, not a decimal-place count (BL-331, live-probed 2026-10-06). A non-literal `n` or a 3rd argument → NEEDS REVIEW |
 | Context placeholders (`[key]` → `{dim, agg}` / nested `formula`) | Mapped | resolved to `[Column]` or `agg([Column])`; nested calcs recurse |
 
 ### Data model
@@ -82,7 +82,7 @@ the original Sisense expression preserved.
 | Unknown function / unresolvable `[key]` placeholder | Flagged | NEEDS REVIEW, original expression kept |
 | `case(...)` | Flagged | multi-branch conditional has no safe 1:1 — NEEDS REVIEW, rebuild as nested `if` manually (never emitted as invalid syntax) |
 | `if(...)` with ≠ 3 args | Flagged | ThoughtSpot `if/then/else` needs exactly `(cond, then, else)` |
-| `round(x, n)` 2-arg | Partial | increment-vs-decimal-place semantics diverge |
+| `round(x, n)` 2-arg, non-literal `n` | Flagged | NEEDS REVIEW — a field-driven digit count has no ThoughtSpot increment form (BL-331). Until 2026-10-06 every 2-arg `round` was emitted verbatim as Approximated, which imported cleanly and returned nearest-`n` (`round(x, 0)` = NULL) |
 | Two-sided range with mixed inclusive/exclusive bounds | Partial | both bounds retained via `BW_INC`/`BW`; exact boundary inclusivity is approximate (verify live — open-item #5) |
 | Measure-range dashboard filter (filter on a formula/measure not exposed as a column) | Dropped | dropped when the column is not on the model |
 | Cyclic date parts (day-of-week, month-of-year as a `level`) | Dropped | no clean date-bucket equivalent |

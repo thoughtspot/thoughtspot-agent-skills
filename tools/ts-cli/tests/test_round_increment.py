@@ -78,11 +78,21 @@ class TestSharedHelpers:
         for d in range(-4, 8):
             assert ts_increment_to_sql_digits(sql_digits_to_ts_increment(str(d))) == d
 
-    def test_non_literal_over_aggregate_is_refused_when_strict(self):
+    def test_non_literal_over_aggregate_is_refused(self):
         with pytest.raises(UntranslatableError, match="BL-331"):
             ts_round_from_sql_digits("sum ( [T::a] )", "[T::p]")
-        assert ts_round_from_sql_digits("sum ( [T::a] )", "[T::p]", strict=False) \
-            .startswith("sql_double_op")
+        with pytest.raises(UntranslatableError, match="BL-331"):  # hidden aggregate
+            ts_round_from_sql_digits("[formula_M]", "[T::p]", aggregated=True)
+
+    @pytest.mark.parametrize("d", ["2.0", "2.", "-2.00"])
+    def test_integral_decimal_literal(self, d):
+        assert sql_digits_to_ts_increment(d) == ("100" if d.startswith("-") else "0.01")
+
+    @pytest.mark.parametrize("d", ["38", "-38", "100"])
+    def test_out_of_range_refused(self, d):
+        assert sql_digits_to_ts_increment(d) is None
+        with pytest.raises(UntranslatableError, match="outside"):
+            ts_round_from_sql_digits("[T::a]", d)
 
 
 # --- Snowflake -> ThoughtSpot (sv_sql) --------------------------------------
@@ -124,10 +134,62 @@ class TestSnowflakeTrunc:
     def test_row_level_passes_through(self, sql, ts):
         assert sf_to_ts(sql, _sf_res) == ts
 
-    def test_aggregate_uses_sign_split(self):
+    def test_aggregate_uses_guarded_sign_split(self):
         assert sf_to_ts("TRUNC(SUM(a), 2)", _sf_res) == (
-            "( if ( sum ( [T::a] ) >= 0 ) then floor ( sum ( [T::a] ) / 0.01 ) * 0.01 "
-            "else ceil ( sum ( [T::a] ) / 0.01 ) * 0.01 )")
+            "( if ( sum ( [T::a] ) >= 0 ) then "
+            "floor ( round ( sum ( [T::a] ) * 100 , 0.000001 ) ) / 100 "
+            "else ceil ( round ( sum ( [T::a] ) * 100 , 0.000001 ) ) / 100 )")
+
+    @pytest.mark.parametrize("x, d, want", [
+        (0.29, 2, 0.29), (1.15, 2, 1.15), (0.57, 2, 0.57),
+        (-0.29, 2, -0.29), (-1.15, 2, -1.15), (-0.57, 2, -0.57),
+        (1234.5678, 2, 1234.56), (-1234.5678, 2, -1234.56),
+        (1234.5678, -2, 1200), (-1234.5678, -2, -1200), (1234.5678, 0, 1234),
+    ])
+    def test_guarded_sign_split_is_exact_at_float_boundaries(self, x, d, want):
+        """Evaluate the emitted formula with ThoughtSpot's own round() semantics
+        (inc * round(x / inc)). An unguarded floor(0.29 / 0.01) gives 0.28."""
+        expr = sf_to_ts(f"TRUNC(SUM(a), {d})", _sf_res)
+        py = (expr.replace("sum ( [T::a] )", repr(x))
+                  .replace("( if (", "(").replace(") then", ") and (")
+                  .replace(" else ", ") or (")
+                  .replace("floor (", "math.floor(").replace("ceil (", "math.ceil(")
+                  .replace("round (", "_ts_round("))
+        import math
+        _ts_round = lambda v, n: n * math.floor(v / n + 0.5)  # noqa: E731
+        got = eval(py, {"math": math, "_ts_round": _ts_round})  # noqa: S307
+        assert got == pytest.approx(want, abs=1e-12), (expr, got)
+        assert math.floor(0.29 / 0.01) == 28  # the error the guard exists for
+
+    def test_metric_reference_counts_as_aggregated(self):
+        """`[formula_X]` hides an aggregate: a derived or metric-on-metric TRUNC must
+        take the aggregate branch, and a non-literal d must be refused."""
+        from ts_cli.sv_parse import parse_sv_ddl
+        from ts_cli.sv_translate import translate_sv_formulas
+        ddl = """
+create or replace semantic view SV_T
+  tables ( F )
+  relationships ( )
+  dimensions ( F.PID as F.PRODUCT_ID )
+  metrics (
+    F.AOV as DIV0(SUM(F.LINE_TOTAL), COUNT(DISTINCT F.OID)),
+    F.AOV_T as TRUNC(F.AOV, 2),
+    AOV_TD as TRUNC(F.AOV, 2),
+    F.AOV_RN as ROUND(F.AOV, F.PID),
+    AOV_TN as TRUNC(F.AOV, F.PID)
+  );
+"""
+        out = translate_sv_formulas(parse_sv_ddl(ddl))
+        got = {e["name"]: e["ts_expr"] for e in out["translated"]}
+        for name in ("AOV_T", "AOV_TD"):
+            assert "sql_double_op" not in got[name] and "floor" in got[name], got[name]
+        assert {s["name"] for s in out["skipped"]} == {"AOV_RN", "AOV_TN"}
+
+    def test_scientific_notation_fails_loudly(self):
+        with pytest.raises(UntranslatableError, match="scientific"):
+            sf_to_ts("ROUND(a, 1e1)", _sf_res)
+        with pytest.raises(UntranslatableError, match="scientific"):
+            dbx_to_ts("ROUND(a, 1e1)", _dbx_res)
         assert sf_to_ts("TRUNC(SUM(a), 0)", _sf_res) == (
             "( if ( sum ( [T::a] ) >= 0 ) then floor ( sum ( [T::a] ) ) "
             "else ceil ( sum ( [T::a] ) ) )")
@@ -139,9 +201,13 @@ class TestSnowflakeTrunc:
     def test_date_trunc_form(self):
         assert sf_to_ts("TRUNC(d, 'MONTH')", _sf_res) == "start_of_month ( [T::d] )"
 
-    def test_never_emits_round(self):
-        for sql in ("TRUNC(a, 0)", "TRUNC(a, 2)", "TRUNC(SUM(a), 2)"):
+    def test_never_rounds_the_value(self):
+        # round() may appear only as the 1e-6 guard inside floor/ceil.
+        for sql in ("TRUNC(a, 0)", "TRUNC(a, 2)"):
             assert "round" not in sf_to_ts(sql, _sf_res)
+        out = sf_to_ts("TRUNC(SUM(a), 2)", _sf_res)
+        assert re.findall(r"round \( [^()]*(?:\([^()]*\))?[^()]* , ([\d.]+) \)", out) \
+            == ["0.000001", "0.000001"], out
 
 
 # --- Databricks -> ThoughtSpot (mv_sql) -------------------------------------
@@ -176,10 +242,24 @@ class TestTableauRound:
         ("ROUND([a], 2)", "round ( [a] , 0.01 )"),
         ("ROUND([a], -2)", "round ( [a] , 100 )"),
         ("ROUND([a])", "round ( [a] )"),
-        ("ROUND([a], [p])", 'sql_double_op ( "ROUND({0}, {1})" , [a] , [p] )'),
+        ("ROUND([a], 2.0)", "round ( [a] , 0.01 )"),
     ])
     def test_map_functions(self, tab, ts):
         assert map_functions(tab) == ts
+
+    @pytest.mark.parametrize("tab", [
+        "ROUND(SUM([a]), [p])", "ROUND([a], [p])", "round([a], [p])", "ROUND([a], 2, 3)",
+    ])
+    def test_unconvertible_is_rejected_not_passed_through(self, tab):
+        out, errs, _ = translate_single(tab)
+        assert "sql_double_op" not in out
+        assert not re.search(r"\bround\s*\(", out)  # never a lower-case TS round()
+        assert any("ROUND(" in e and "BL-331" in e for e in errs), errs
+
+    def test_survivor_pattern_ignores_quoted_template(self):
+        from ts_cli.tableau.validate import validate_output
+        assert not any("BL-331" in e for e in validate_output(
+            'sql_double_op ( "ROUND({0}, 2)" , [a] )'))
 
     def test_nested(self):
         assert map_functions("ROUND(ROUND([a], 2) * 3, 1)") == \
@@ -207,6 +287,30 @@ class TestPowerBIRound:
     def test_non_literal_needs_review(self):
         expr, status, _ = translate_dax("ROUND(T[x], T[p])")
         assert expr is None and status == "NEEDS REVIEW"
+
+
+# --- Sisense -> ThoughtSpot ---------------------------------------------------
+
+class TestSisenseRound:
+    _CTX = {"a": {"dim": "[T.Cost]"}, "p": {"dim": "[T.P]"}}
+
+    @pytest.mark.parametrize("jaql, ts", [
+        ("round([a], 0)", "round([Cost], 1)"),
+        ("ROUND([a], 2)", "round([Cost], 0.01)"),
+        ("round([a], -2)", "round([Cost], 100)"),
+        ("round([a])", "round([Cost])"),
+        ("round(round([a], 2), 1)", "round(round([Cost], 0.01), 0.1)"),
+    ])
+    def test_literal_digits(self, jaql, ts):
+        from ts_cli.sisense.functions import translate_jaql
+        expr, status, _ = translate_jaql(jaql, self._CTX)
+        assert (expr, status) == (ts, "Migrated")
+
+    @pytest.mark.parametrize("jaql", ["round([a], [p])", "round([a], 2, 1)"])
+    def test_unconvertible_needs_review(self, jaql):
+        from ts_cli.sisense.functions import translate_jaql
+        expr, status, note = translate_jaql(jaql, self._CTX)
+        assert expr is None and status == "NEEDS REVIEW" and "round()" in note
 
 
 # --- ThoughtSpot -> Databricks (mv_emit_sql) ---------------------------------
