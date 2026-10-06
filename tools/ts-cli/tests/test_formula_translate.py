@@ -992,4 +992,4 @@ class TestNullifRefused:
 
     def test_snowflake_nullif_non_zero_is_case_form(self):
         r = translate("NULLIF(a, b)", "snowflake")
-        assert r["formula"] == "if ( [TABLE::a] = [TABLE::b] ) then null else [TABLE::a]"
+        assert r["formula"] == "( if ( [TABLE::a] = [TABLE::b] ) then null else [TABLE::a] )"

@@ -434,7 +434,7 @@ class TestNullif:
     def test_nullif_non_zero(self):
         result = translate_sql_expr("NULLIF(a.X, a.Y)", _resolve)
         # ThoughtSpot has no nullif (BL-339): the CASE form instead.
-        assert result == "if ( [A::X] = [A::Y] ) then null else [A::X]"
+        assert result == "( if ( [A::X] = [A::Y] ) then null else [A::X] )"
 
 
 # ---------------------------------------------------------------------------

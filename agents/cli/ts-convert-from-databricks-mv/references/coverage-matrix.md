@@ -61,7 +61,9 @@ Use this as the canonical limitations reference.
 
 | # | Metric View Construct | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
-| 23 | Ratio expressions (`SUM(x) / NULLIF(SUM(y), 0)`) | `safe_divide ( sum([x]) , sum([y]) )` formula | NULLIF(x,0) collapsed to safe_divide. **Changes semantics silently: `x / NULLIF(y,0)` returns NULL when `y = 0`; `safe_divide` returns 0**, and 0 participates in `AVG`/`MIN`/ranking where NULL does not. Emitted with no annotation; `nullif` is available in both directions. See BL-180. |
+| 23 | Ratio expressions (`SUM(x) / NULLIF(SUM(y), 0)`) | `safe_divide ( sum([x]) , sum([y]) )` formula | NULLIF(x,0) collapsed to safe_divide. **Changes semantics silently: `x / NULLIF(y,0)` returns NULL when `y = 0`; `safe_divide` returns 0**, and 0 participates in `AVG`/`MIN`/ranking where NULL does not. Emitted with no annotation; A NULL-preserving translation exists: ThoughtSpot's plain `/` returns NULL on a zero divisor (probe record §7); `nullif` does not exist (BL-339). See BL-180. |
+| 88 | Standalone `NULLIF(x, 0)` (not a divisor) | `( if ( x = 0 ) then null else x )` | ThoughtSpot has no `nullif` or `null_if_zero` (rejected at import 2026-10-06, BL-339 / BL-344); parenthesised so it composes |
+| 89 | `NULLIF(a, b)`, `b` not 0 | — raises `UntranslatableError` | No mapping rowed for Databricks yet; the Snowflake translator's `( if ( a = b ) then null else a )` would apply |
 | 24 | Nested NULLIF in ratios (e.g. eCPC vs budget) | Nested `safe_divide` calls | |
 | 25 | `COALESCE(x, 0)` | `ifnull ( [x] , 0 )` | 2-arg only; 3+ args raises |
 | 26 | Cross-measure references (`MEASURE(name)` / `ANY_VALUE(dim)`) | **Inlined** — full expression substituted via dependency DAG | Cross-formula refs fail during TML import |
