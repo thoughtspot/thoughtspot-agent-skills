@@ -48,8 +48,9 @@ Display, then go straight to Step 1 (no Y/N gate — nothing is written anywhere
       1. Paste the formula (several? they're answered in order)
       2. I guess the language and confirm in one line
       3. Columns: placeholders, your names, or a Model
-      4. Translate — and say exactly how sure that is
-      5. Optional: prove ThoughtSpot compiles / runs it (needs a Model)
+      4. Translate — and ask what it depends on (a column's type; per row or KPI)
+      5. Say exactly how sure that is
+      6. Optional: prove ThoughtSpot compiles / runs it (needs a Model)
 
     Nothing in ThoughtSpot is changed.
 
@@ -115,15 +116,16 @@ re-run with a `--columns` entry for the confirmed mapping. A `COUNT(*)` with no 
     ts formula translate '<formula>' --from <tableau|dax|qlik|sisense|snowflake|databricks|excel|google_sheets> \
       [--columns '<json>'] [--model <guid> --profile <p>] [--name "<display name>"] [--role measure|attribute]
 
-**Excel / Google Sheets: ask the intended role** unless the user said it ("Should this be a
-**measure** (totalled in searches) or an **attribute** (a per-row value)?"), and pass it as
-`--role`. It changes the formula, not just the label: a sheet formula over `[@Col]` is a
-per-row value, and with `--role measure` the CLI rebuilds it at the right grain — additive
-expressions as the sum of each column (`sum ( a ) - sum ( b )`), a ratio as a **ratio of
-totals** (`safe_divide ( sum ( num ) , sum ( den ) )`, never the sum of per-row ratios), a
-numeric `IF(…,1,0)` flag left row-level (its column aggregation totals it). A text result
-stays an ATTRIBUTE with a `group_aggregate` trap. Without `--role` the row-level translation's
-own role is inferred. Present the CLI's result — do not re-compose it from the map.
+**Excel / Google Sheets: `--role`.** Pass it when the user already said it ("as a KPI", "per
+row", "a measure"); otherwise run without it and let Step 4c ask, only when it matters. It
+changes the formula, not just the label: a sheet formula over `[@Col]` is a per-row value, and
+with `--role measure` the CLI rebuilds it at the right grain — additive expressions as the sum
+of each column (`sum ( a ) - sum ( b )`), a ratio as a **ratio of totals** (`safe_divide (
+sum ( num ) , sum ( den ) )`, never the sum of per-row ratios), a numeric `IF(…,1,0)` flag
+left row-level (its column aggregation totals it). A text result stays an ATTRIBUTE with a
+`group_aggregate` trap. Without `--role` the row-level translation's own role is inferred; for
+a non-ratio that is safe (a per-row amount summed in a search gives the same total). Present
+the CLI's result — do not re-compose it from the map.
 
 Pass the formula on stdin (`echo … | ts formula translate --from …`) when it contains quotes
 the shell would mangle. **Qlik `Weekday(d)` with one argument** depends on the app's
@@ -133,7 +135,8 @@ as `--first-week-day`. Without it the CLI returns `NEEDS_REVIEW`. Sisense: if th
 `--context`; without it each `[key]` reads as a column named `key` (the CLI notes this).
 
 Read: `formula`, `status`, `classification`, `role`, `references`, `unresolved`, `traps`,
-`notes`, `verification.translator`, `tml`. Present per Step 5.
+`notes`, `verification.translator`, `tml`, and the two question fields `needs_types`,
+`role_ambiguous` / `role_options`. Ask per Step 4c, then present per Step 5.
 
 **`NEEDS_REVIEW` is a result, not a failure to hide.** `notes[]` says which of three things
 happened, and the answer says it in plain words:
@@ -257,6 +260,55 @@ an older row says (see open-items OI-2…OI-5, and probe record §7):
 Then, for anything map-backed, **offer `--validate compile` strongly** (Step 6): it is the
 only thing that turns "unprobed" into evidence. The composed formula goes through the CLI as
 `--from thoughtspot`, which resolves its references and translates nothing.
+
+## Step 4c — Ask what the translation depends on
+
+After detection and translation, **before presenting**, the CLI may report two things it could
+not decide. Each changes the formula, so ask; never pick silently.
+
+**Skip** the type question when a Model was given (`--model`: the types come from the Model),
+and the role question when the user already stated the role. Both fields are empty / `false`
+for dialects where they do not apply — today only Excel and Google Sheets set them.
+
+**1. Per row, or a KPI that rolls up?** — when `role_ambiguous` is `true` (a ratio, including
+inside `IFERROR` or `safe_divide`, and no `--role`). Show both `role_options[]` with their
+formula-editor form and the one-line meaning:
+
+    Formula 1 has a ratio — per row, or as a KPI that rolls up?
+      a) Per row     safe_divide ( TOTAL_REVENUE - TOTAL_COGS , TOTAL_REVENUE )
+                     the Excel cell, row by row; summed in a search it adds per-row ratios
+      b) KPI         safe_divide ( sum ( TOTAL_REVENUE ) - sum ( TOTAL_COGS ) , sum ( TOTAL_REVENUE ) )
+                     a ratio of totals — right for any grouping (region, month, total)
+
+Take the meanings from `role_options[].meaning` (shortened is fine); the formulas verbatim.
+Using the per-row form as a measure makes ThoughtSpot sum or average per-row ratios — say so
+if the user picks (a) but describes a KPI.
+
+**2. Column types** — when `needs_types[]` is non-empty. Ask **once per formula**, listing
+every column, with its `reason` and the `suggested_type` as a default to confirm:
+
+    A few columns change the formula depending on their type:
+      - CONTRACT_TERM_MONTHS (text join) — a number? (likely yes, from the name)
+      - REGION (blank test) — no guess from the name: number, text or date?
+    Reply "yes to all suggestions", or correct any.
+
+`confidence: high` reads "likely yes, from the name", `medium` "probably", `low` (no
+suggestion) asks the type outright. Accept **"yes to all suggestions"**; a column with no
+suggestion still needs an answer.
+
+**Then re-run** with `--role <answer>` and `--columns` carrying each confirmed `data_type`
+(`suggested_data_type`, or the user's correction: `INT64` / `DOUBLE` for numbers, `VARCHAR`,
+`DATE`, `DATE_TIME`), keeping any mapping from Step 3:
+
+    ts formula translate '<formula>' --from excel --role measure \
+      --columns '{"CONTRACT_TERM_MONTHS": {"table": "TABLE", "column": "CONTRACT_TERM_MONTHS", "data_type": "INT64"}}'
+
+The re-run's `needs_types` is empty and `role_ambiguous` false; present that result.
+
+**Batch mode** (several formulas): translate them all first, then group the questions —
+**types once per column across the whole batch** (one list, each column named once, with the
+formulas it appears in), and **the role per formula** with a *"same for all ratios"* option
+("a / b for each, or one answer for all"). Re-run each formula with its answers.
 
 ## Step 5 — Present (this order, every time)
 
@@ -407,6 +459,7 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-10-06 | New Step 4c: before presenting, ask *per row or a KPI that rolls up?* when `role_ambiguous` (showing both `role_options`), and the column types listed in `needs_types` with their name-based suggestions ("yes to all suggestions" accepted); re-run with `--role` and typed `--columns`; skipped with a Model or a stated role; grouped per column / per formula in a batch (ts-cli 0.159.0). Excel / Sheets no longer ask the role up front for every formula |
 | 1.2.0 | 2026-10-06 | Excel and Google Sheets are translator-backed (`ts formula translate --from excel` or `--from google_sheets`, ts-cli 0.158.0): ask the intended role and pass `--role` (MEASURE builds additive sums and ratios of totals); the map is only the labelled fallback for `NEEDS_REVIEW`; new Step 6b, ThoughtSpot → Excel via `--to excel`; `nullif` / `isnotnull` do not exist and `concat` needs Text arguments (BL-339) |
 | 1.1.0 | 2026-10-06 | Google Sheets reads the Sheets delta map first, then the Excel map for names it does not row (‡ aliases → their successor); `ts formula detect` (ts-cli 0.157.1) settles Sheets on a Sheets-only function and reports `fallback_map`; Sheets traps for `QUERY`, `ARRAYFORMULA`, one-argument `IFERROR` and holiday arrays (BL-338) |
 | 1.0.0 | 2026-10-06 | Initial release — one formula from Tableau, DAX, Qlik, Sisense, Snowflake or Databricks via `ts formula translate` (ts-cli 0.157.0), and Excel / Sheets / Omni / Sigma from the function maps; scored dialect detection with must-ask ties; three column-context levels; traps, references and TML snippet; `compile` (VALIDATE_ONLY, no objects) and `execute` (scratch Model, deleted) validation |
