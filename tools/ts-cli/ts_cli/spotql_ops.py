@@ -14,7 +14,10 @@ DIFFERENT, drifted keyword lists (BL-087, 2026-07-03 codification review row 24)
 `AGGREGATE_FUNCS` here is the answer-promote regex verbatim (the fuller of the two
 lists) — every function the spotql-query prose named ("sum, count, group_aggregate,
 last_value, first_value, ...") is already covered by it, so nothing needed folding in
-beyond it. This module is now the single canonical source; both skills call through
+beyond it. The remaining conditional aggregates (`count_if`, `average_if`, `min_if`,
+`max_if`, `stddev_if`, `variance_if`) were added in PR #570 — only `sum_if` and
+`unique_count_if` had been listed, so a COUNTIF translation came out as an ATTRIBUTE.
+This module is now the single canonical source; both skills call through
 `ts agentql classify-columns` instead of carrying their own copy.
 
 **Semi-additive sub-case (live-verified 2026-07-13, nebula-aggregate-aware).** Most
@@ -43,7 +46,8 @@ from typing import Any, Optional
 # "Count" doesn't false-positive.
 AGGREGATE_FUNCS = re.compile(
     r'\b(sum|count|count_distinct|unique\s+count|average|min|max|median|stddev|'
-    r'variance|sum_if|unique_count_if|cumulative_\w+|moving_\w+|group_aggregate|'
+    r'variance|sum_if|count_if|average_if|min_if|max_if|stddev_if|variance_if|'
+    r'unique_count_if|cumulative_\w+|moving_\w+|group_aggregate|'
     r'group_\w+|rank|rank_percentile|last_value|first_value)\s*\(',
     re.IGNORECASE,
 )

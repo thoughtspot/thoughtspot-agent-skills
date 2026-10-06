@@ -340,3 +340,11 @@ def test_classify_group_sum_lod_is_normal_aggregate_measure():
     r = _by_name(classify_model_columns(SEMIADDITIVE_TML), "Category LOD")
     assert r["kind"] == "aggregate_measure"
     assert r["wrapper"] == "AGG"
+
+
+def test_every_conditional_aggregate_is_an_aggregate():
+    """PR #570 review H3: only sum_if / unique_count_if were listed, so COUNTIF /
+    AVERAGEIF(S) translations were classified ATTRIBUTE."""
+    for fn in ("sum_if", "count_if", "average_if", "min_if", "max_if", "stddev_if",
+               "variance_if", "unique_count_if"):
+        assert is_aggregate_expr(f"{fn} ( [T::a] > 1 , [T::b] )"), fn
