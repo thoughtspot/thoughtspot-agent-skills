@@ -30,7 +30,7 @@ never faked.
 | `CALCULATE(<agg>, <filter/cond>)` | `sum_if(<cond>, <agg-arg>)` | |
 | `CALCULATE(m, ALL(t[c]))` / `REMOVEFILTERS(t[c])` / `ALLSELECTED(t[c])` | `group_aggregate(m, query_groups()-{[t::c]}, query_filters()-{[t::c]})` | [worked-examples/powerbi/calculate-all-to-group-aggregate.md](../../worked-examples/powerbi/calculate-all-to-group-aggregate.md) |
 | measure / calc-column reference | `[formula_<name>]` id-reference (topo-sorted) | resolves on first import; name-refs do not |
-| `a - b` (two DATE columns) | `diff_days(b, a)` | day grain only |
+| `a - b` (two DATE columns) | `diff_days(a, b)` | day grain only; TS `diff_days(end, start)` = end − start, so the order is kept (BL-336) |
 
 ## Rebuilt via a parameter (no 1:1 formula path)
 
