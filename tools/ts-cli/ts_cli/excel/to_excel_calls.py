@@ -46,6 +46,29 @@ _SIMPLE = {"abs": "ABS", "sqrt": "SQRT", "exp": "EXP", "ln": "LN", "log10": "LOG
            "add_months": "EDATE", "floor": "INT"}
 
 
+def wildcard_escape(text: str) -> str:
+    """Excel's SEARCH and *IFS criteria read ``* ? ~`` as wildcards; ``~`` escapes them."""
+    return text.replace("~", "~~").replace("*", "~*").replace("?", "~?")
+
+
+def _string_inner(node: dict) -> str:
+    return node["value"][1:-1].replace("''", "'")
+
+
+def _xl_string(text: str) -> str:
+    return '"' + text.replace('"', '""') + '"'
+
+
+def _search_arg(em: Emitter, node: dict) -> str:
+    """The find_text of SEARCH: a literal is wildcard-escaped (ThoughtSpot contains/strpos
+    match it literally); a column cannot be escaped, so the trap says so."""
+    if _is_lit(node, "string"):
+        return _xl_string(wildcard_escape(_string_inner(node)))
+    em.trap("SEARCH treats * ? ~ in the searched-for value as wildcards; ThoughtSpot matches "
+            "them literally — equal unless the column holds those characters")
+    return em.text(node)
+
+
 def _fn(name: str, em: Emitter, args: list) -> tuple[str, int]:
     return f"{name}(" + ",".join(em.text(a) for a in args) + ")", P_PRIMARY
 
@@ -99,19 +122,22 @@ def _compare_criterion(em: Emitter, part: dict):
     if not (part.get("node") == "binop" and part["op"] in ("=", "!=", "<", "<=", ">", ">=")
             and _is_column(part["left"]) and part["right"].get("node") == "lit"):
         return None
-    op = {"=": "", "!=": "<>"}.get(part["op"], part["op"])
-    value = part["right"]["value"]
-    value = value[1:-1].replace("''", "'") if part["right"]["kind"] == "string" else value
+    # An equality keeps its "=" so a value such as ">5" is not read as a comparison, and a
+    # text value is wildcard-escaped so "a*" matches only "a*" (PR #570 review M3).
+    op = {"!=": "<>"}.get(part["op"], part["op"])
+    is_text = part["right"]["kind"] == "string"
+    value = wildcard_escape(_string_inner(part["right"])) if is_text else part["right"]["value"]
     if op == "<>":
         em.trap("criterion \"<>x\" also matches blanks in Excel; ThoughtSpot's != skips NULLs",
                 downgrade=True)
-    return [em.text(part["left"]), '"' + op + value.replace('"', '""') + '"']
+    return [em.text(part["left"]), _xl_string(op + value)]
 
 
 def _criterion(em: Emitter, part: dict):
     if _is_call(part, "contains") and _is_column(part["args"][0]) \
             and _is_lit(part["args"][1], "string"):
-        return [em.text(part["args"][0]), '"*' + part["args"][1]["value"][1:-1] + '*"']
+        inner = wildcard_escape(_string_inner(part["args"][1]))
+        return [em.text(part["args"][0]), _xl_string("*" + inner + "*")]
     return _null_criterion(em, part) or _compare_criterion(em, part)
 
 
@@ -195,8 +221,10 @@ def _round(em: Emitter, args: list):
         em.review(str(exc))
     if digits is not None:
         return f"ROUND({em.text(args[0])},{digits})", P_PRIMARY
-    em.trap("MROUND returns #NUM! when the number and the multiple differ in sign")
-    return f"MROUND({em.text(args[0])},{inc['value']})", P_PRIMARY
+    # ThoughtSpot compiles round ( x , inc ) to inc * ROUND(x / inc); MROUND would return
+    # #NUM! for a negative x, so write ThoughtSpot's own form.
+    x = em.text(args[0], P_MUL)
+    return f"ROUND({x}/{inc['value']},0)*{inc['value']}", P_MUL
 
 
 def _concat(em: Emitter, args: list):
@@ -215,11 +243,11 @@ def _to_string(em: Emitter, args: list):
 
 
 def _contains(em: Emitter, args: list):
-    return f"ISNUMBER(SEARCH({em.text(args[1])},{em.text(args[0])}))", P_PRIMARY
+    return f"ISNUMBER(SEARCH({_search_arg(em, args[1])},{em.text(args[0])}))", P_PRIMARY
 
 
 def _strpos(em: Emitter, args: list):
-    return f"IFERROR(SEARCH({em.text(args[1])},{em.text(args[0])}),0)", P_PRIMARY
+    return f"IFERROR(SEARCH({_search_arg(em, args[1])},{em.text(args[0])}),0)", P_PRIMARY
 
 
 def _substr(em: Emitter, args: list):
@@ -301,9 +329,11 @@ def _between(em: Emitter, args: list):
 
 
 def _mod(em: Emitter, args: list):
-    em.trap("MOD takes the divisor's sign in Excel; ThoughtSpot's mod follows the warehouse "
-            "(the dividend's sign) — equal for non-negative operands")
-    return _fn("MOD", em, args)
+    """ThoughtSpot mod compiles to Snowflake MOD — the result takes the DIVIDEND's sign
+    (live 2026-10-06: mod(-3, 2) = -1, mod(3, -2) = 1, probe record §7). Excel MOD takes the
+    divisor's sign (MOD(-3, 2) = 1), so the exact form is a - b * TRUNC(a / b)."""
+    a, b = em.text(args[0], P_ADD), em.text(args[1], P_MUL)
+    return f"{a}-{b}*TRUNC({em.text(args[0], P_MUL)}/{em.text(args[1], P_MUL + 1)})", P_ADD
 
 
 def _simple(name: str):

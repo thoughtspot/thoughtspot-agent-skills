@@ -10,6 +10,7 @@ The intended role (MEASURE: additive sums, ratio of totals) is a separate pass
 """
 from __future__ import annotations
 
+import re
 from contextlib import contextmanager
 from typing import Optional
 
@@ -27,9 +28,10 @@ BLANK_TRAP = ("E10: a blank cell is 0 / \"\" to Excel; a NULL in ThoughtSpot pro
               "the sheet relied on blanks")
 DIV_TRAP = ("a zero divisor: Excel shows #DIV/0!; ThoughtSpot's plain / returns NULL "
             "(probe record §7)")
-TYPE_UNKNOWN_NOTE = ("concat needs Text arguments, so {name} (type unknown) was wrapped in "
-                     "to_string; if it is a text column remove to_string — ThoughtSpot rejects "
-                     "to_string on Text (probe record §7). Pass data_type in --columns to decide")
+TYPE_UNKNOWN_NOTE = ("column types unknown: {name} was left bare inside concat; if it is "
+                     "numeric (or a date / boolean) wrap it in to_string — concat accepts only "
+                     "Text, and to_string rejects Text (probe record §7). Pass data_type in "
+                     "--columns, or --model, to decide")
 
 
 class NeedsReview(Exception):
@@ -111,12 +113,6 @@ class Translator:
             self.note(f"NEEDS_REVIEW: A1 reference `{node.raw}` is a placeholder {target} — "
                       f"column {node.column} has no name; map it with --columns "
                       f"'{{\"{node.column}\": \"TABLE.COLUMN\"}}'")
-        if node.sheet:
-            self.note(f"`{node.raw}` reads sheet '{node.sheet}' — usually another table, "
-                      "joined in the Model")
-        if node.absolute:
-            self.note(f"`{node.raw}` is a fixed cell — usually an input; a runtime parameter "
-                      "is the ThoughtSpot form")
         if node.grain == "column" and not self.agg_depth and not self.elementwise:
             self.note(f"range `{node.raw}` outside an aggregate read as the row's value")
         return T.ref_node(target)
@@ -137,17 +133,47 @@ class Translator:
         if node.op == "&":
             return self.concat(_flatten_concat(node))
         left, right = self.expr(node.left), self.expr(node.right)
+        if node.op in ("=", "<>", "<", "<=", ">", ">="):
+            return self.compare(node.op, left, right)
+        left, right = self.as_number(left), self.as_number(right)
         if node.op == "^":
             return T.call("pow", left, right)
         if node.op in ("+", "-"):
             return self._additive(node.op, left, right)
         if node.op == "/":
             return self.divide(left, right)
-        if node.op in ("=", "<>", "<", "<=", ">", ">="):
-            if T.has_column(left) or T.has_column(right):
-                self.trap(BLANK_TRAP)
-            return T.binop("!=" if node.op == "<>" else node.op, left, right)
         return T.binop(node.op, left, right)
+
+    def as_number(self, node: dict) -> dict:
+        """Excel coerces TRUE to 1 in arithmetic; ThoughtSpot rejects a boolean operand
+        (``true + 1`` fails import — probe record §7), so coerce it explicitly."""
+        if self.type_of(node) == "bool":
+            return T.ifelse(node, T.lit_number("1"), T.lit_number("0"))
+        return node
+
+    def as_condition(self, node: dict) -> dict:
+        """Excel reads a number as a condition (0 is FALSE); ThoughtSpot needs a boolean."""
+        if self.type_of(node) == "number":
+            return T.binop("!=", node, T.lit_number("0"))
+        return node
+
+    def compare(self, op: str, left: dict, right: dict) -> dict:
+        if T.has_column(left) or T.has_column(right):
+            self.trap(BLANK_TRAP)
+        for value, other in ((left, right), (right, left)):
+            if T.is_lit(value, "string", "''") and op in ("=", "<>"):
+                return self._blank_test(op, other)
+        return T.binop("!=" if op == "<>" else op, left, right)
+
+    def _blank_test(self, op: str, x: dict) -> dict:
+        """``x = ""`` is TRUE for a blank cell in Excel: ``isnull ( x )`` (number / date — a
+        numeric column compared with '' is rejected at import), ``isnull ( x ) or x = ''``
+        (text or unknown type)."""
+        if self.type_of(x) in ("number", "date", "bool"):
+            test = T.call("isnull", x)
+        else:
+            test = T.binop("or", T.call("isnull", x), T.binop("=", x, T.lit_string("")))
+        return test if op == "=" else T.unop("not", test)
 
     def divide(self, left: dict, right: dict) -> dict:
         self.divisions += 1
@@ -167,8 +193,16 @@ class Translator:
         if op == "+" and rt == "date" and lt == "number":
             return T.call("add_days", right, left)
         if "date" in (lt, rt):
-            self.review("date arithmetic with an operand that is not a number of days has no "
-                        "ThoughtSpot form (Excel map E9)")
+            self.review("date arithmetic with an operand whose type is not known to be a date "
+                        "or a number of days has no ThoughtSpot form (Excel map E9) — pass "
+                        "data_type in --columns (or --model) for its columns")
+        unknown = [T.to_text(x) for x, t in ((left, lt), (right, rt))
+                   if t is None and x.get("node") in ("col", "ref")]
+        if unknown:
+            self.trap(f"column type unknown ({', '.join(unknown)}): if these are dates, "
+                      "ThoughtSpot has no date arithmetic — a date difference is diff_days "
+                      "( end , start ) and date + n is add_days ( d , n ); pass data_type in "
+                      "--columns (or --model) to decide", downgrade=True)
         return T.binop(op, left, right)
 
     def concat(self, operands: list) -> dict:
@@ -185,16 +219,58 @@ class Translator:
         t = self.type_of(node)
         if t == "text":
             return node
+        if t is None:
+            # Left bare: to_string rejects a Text argument at import, so wrapping a column
+            # that turns out to be text would break the formula (PR #570 review H4).
+            self.trap(TYPE_UNKNOWN_NOTE.format(name=T.to_text(node)), downgrade=True)
+            return node
+        if t == "bool":
+            self.note("to_string of a boolean gives 'true' / 'false'; Excel's & shows TRUE / "
+                      "FALSE")
         if t == "date":
             self.trap("a date joined with & is its serial number in Excel; ThoughtSpot's "
                       "to_string gives the date text — use TEXT() semantics deliberately",
                       downgrade=True)
-        elif t is None:
-            self.note(TYPE_UNKNOWN_NOTE.format(name=T.to_text(node)))
         elif t == "number" and node.get("node") != "lit":
             self.trap("to_string of a DOUBLE may render a decimal ('12.0') where Excel shows "
                       "12 — exact for an integer column")
         return T.call("to_string", node)
+
+
+_CELL = re.compile(r"(\$?)([A-Za-z]{1,3})(\$?)(\d+)")
+A1_WINDOW_HINT = ("a position-dependent formula needs an order column the Model has: a running "
+                  "total is cumulative_sum ( x , [order] ), the previous row is "
+                  "moving_sum ( x , 1 , -1 , [order] ) (Excel map E6)")
+
+
+def check_a1(tree) -> None:
+    """Refuse A1 shapes that depend on a cell's POSITION, not just its column (PR #570 review
+    H1): a formula over a Model column is evaluated per row, so a row number is meaningless —
+    except the one shared row of a fill-down formula (``=A2*B2``)."""
+    rows = set()
+    for node in X.walk(tree):
+        if not (isinstance(node, X.Ref) and node.kind == "a1") or node.grain == "block":
+            continue  # a multi-column block is refused (or reported structural) when translated
+        if node.sheet:
+            raise NeedsReview(f"`{node.raw}` reads another sheet ('{node.sheet}'), which is not "
+                              "this table — model it as a joined table and reference its column")
+        cells = _CELL.findall(node.raw.split("!")[-1])
+        if len(cells) == 2:
+            anchored = {c[2] for c in cells}
+            if len(anchored) == 2:
+                raise NeedsReview(f"`{node.raw}` is an expanding range (one end anchored) — "
+                                  + A1_WINDOW_HINT)
+            raise NeedsReview(f"`{node.raw}` is a bounded range, not a column: write the whole "
+                              "column (A:A) or a Table column (Table[Col]) for a column "
+                              "aggregate, or filter with sum_if for a subset")
+        if len(cells) == 1:
+            if cells[0][2]:
+                raise NeedsReview(f"`{node.raw}` is a fixed cell (an anchored row) — an input, "
+                                  "not a row value: use a runtime parameter")
+            rows.add(cells[0][3])
+    if len(rows) > 1:
+        raise NeedsReview(f"the formula reads rows {', '.join(sorted(rows, key=int))} — a "
+                          "reference to another row is " + A1_WINDOW_HINT)
 
 
 def _flatten_concat(node) -> list:
@@ -225,11 +301,11 @@ def _missing(tr: Translator, n: X.Missing) -> dict:
 
 def _unary(tr: Translator, n: X.Unary) -> dict:
     inner = tr.expr(n.operand)
-    return inner if n.op == "+" else T.unop("-", inner)
+    return inner if n.op == "+" else T.unop("-", tr.as_number(inner))
 
 
 def _percent(tr: Translator, n: X.Percent) -> dict:
-    return T.binop("/", tr.expr(n.operand), T.lit_number("100"))
+    return T.binop("/", tr.as_number(tr.expr(n.operand)), T.lit_number("100"))
 
 
 def _array(tr: Translator, n: X.Array) -> dict:

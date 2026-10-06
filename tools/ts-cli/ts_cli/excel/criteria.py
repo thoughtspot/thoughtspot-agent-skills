@@ -58,9 +58,10 @@ def _from_string(tr, col: dict, raw: str) -> dict:
         if op == "<>":  # no isnotnull in ThoughtSpot (probe record §7, BL-339)
             return T.unop("not", T.call("isnull", col))
         tr.review(f"criterion {raw!r} has no condition")
-    if op in ("=", "<>") and re.search(r"[*?]", rest):
+    if op in ("=", "<>") and re.search(r"(?<!~)[*?]", rest):
         cond = _wildcard(tr, col, rest)
         return T.unop("not", cond) if op == "<>" else cond
+    rest = re.sub(r"~([~*?])", r"\1", rest)  # ~* ~? ~~ are literal characters
     value = _value(rest)
     if op == "<>":
         return _not_equal(col, value)

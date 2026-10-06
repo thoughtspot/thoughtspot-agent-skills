@@ -172,8 +172,8 @@ FORWARD = [
     ("=IFERROR(VALUE([@s]),0)", "ifnull ( to_double ( [TABLE::s] ) , 0 )"),
     ("=IF([@b]=0,0,[@a]/[@b])", "safe_divide ( [TABLE::a] , [TABLE::b] )"),
     # text
-    ('=[@a]&" "&[@b]', "concat ( to_string ( [TABLE::a] ) , ' ' , to_string ( [TABLE::b] ) )"),
-    ('=CONCAT("a",[@b])', "concat ( 'a' , to_string ( [TABLE::b] ) )"),
+    ('=[@a]&" "&[@b]', "concat ( [TABLE::a] , ' ' , [TABLE::b] )"),  # types unknown: bare
+    ('=CONCAT("a",[@b])', "concat ( 'a' , [TABLE::b] )"),
     ('=TEXTJOIN("-",FALSE,"a","b")', "concat ( 'a' , '-' , 'b' )"),
     ('="FY"&2026', "concat ( 'FY' , to_string ( 2026 ) )"),
     ("=LEFT([@s],3)", "left ( [TABLE::s] , 3 )"),
@@ -235,7 +235,8 @@ def test_concat_wraps_only_non_text():
                        "n": {"table": "T", "column": "n", "data_type": "DOUBLE"}})
     assert f('=[@s]&"-"&[@n]', columns=cols) == "concat ( [T::s] , '-' , to_string ( [T::n] ) )"
     r = tx('=[@x]&"!"')
-    assert any("type unknown" in n for n in r.notes)
+    assert r.expr == "concat ( [TABLE::x] , '!' )" and r.status == "APPROXIMATED"
+    assert any("column types unknown" in t for t in r.traps)
 
 
 class TestStatusesAndTraps:
@@ -404,7 +405,7 @@ REVERSE = [
     ("[T::Order Value] * 2", "=[@[Order Value]]*2"),
     ("round ( [T::x] , 0.01 )", "=ROUND([@x],2)"),
     ("round ( [T::x] , 1 )", "=ROUND([@x],0)"),
-    ("round ( [T::x] , 0.5 )", "=MROUND([@x],0.5)"),
+    ("round ( [T::x] , 0.5 )", "=ROUND([@x]/0.5,0)*0.5"),
     ("concat ( [T::s] , ' ' , to_string ( [T::n] ) )", '=[@s]&" "&[@n]'),
     ("to_string ( [T::n] )", '=[@n]&""'),
     ("contains ( [T::s] , 'x' )", '=ISNUMBER(SEARCH("x",[@s]))'),
@@ -423,7 +424,7 @@ REVERSE = [
     ("ifnull ( [T::a] , 0 )", "=IF(ISBLANK([@a]),0,[@a])"),
     ("[T::a] != 'x' and not ( [T::b] )", '=AND([@a]<>"x",NOT([@b]))'),
     ("sum_if ( [T::r] = 'West' and [T::q] > 5 , [T::a] )",
-     '=SUMIFS(Table1[a],Table1[r],"West",Table1[q],">5")'),
+     '=SUMIFS(Table1[a],Table1[r],"=West",Table1[q],">5")'),
     ("group_aggregate ( sum ( [T::a] ) , { [T::acct] } , query_filters ( ) )",
      "=SUMIFS(Table1[a],Table1[acct],[@acct])"),
     ("substr ( [T::s] , 0 , 3 )", "=MID([@s],1,3)"),

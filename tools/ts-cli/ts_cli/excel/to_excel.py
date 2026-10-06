@@ -139,6 +139,8 @@ class Emitter:
         prec = _TS_PREC[op]
         left = self.text(node["left"], prec)
         right = self.text(node["right"], prec + 1)
+        if prec == P_CMP:
+            left, right = _date_literal(node["left"], left), _date_literal(node["right"], right)
         if op == "/":
             self.trap("a zero divisor: ThoughtSpot's / returns NULL, Excel shows #DIV/0! "
                       "(safe_divide is the guarded form)")
@@ -178,6 +180,19 @@ class Emitter:
 
     def _e_lodset(self, node: dict) -> tuple[str, int]:
         self.review("a { … } list outside in / group_aggregate has no Excel form")
+
+
+_ISO_DATE = re.compile(r"'(\d{4}-\d{2}-\d{2})'")
+
+
+def _date_literal(node: dict, text: str) -> str:
+    """A 'yyyy-mm-dd' string compared with a value is a date in ThoughtSpot; in Excel it
+    would compare as text, so it becomes DATEVALUE("…")."""
+    if node.get("node") == "lit" and node["kind"] == "string":
+        m = _ISO_DATE.fullmatch(node["value"])
+        if m:
+            return f'DATEVALUE("{m.group(1)}")'
+    return text
 
 
 def _flatten(node: dict, op: str) -> list:

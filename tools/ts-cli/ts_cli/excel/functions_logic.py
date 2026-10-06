@@ -55,7 +55,7 @@ def _if(tr, n):
             return T.call("safe_divide", tr.expr(idiom[0]), tr.expr(idiom[1]))
         finally:
             tr.division_mode = saved
-    cond = tr.expr(n.args[0])
+    cond = tr.as_condition(tr.expr(n.args[0]))
     then_node = n.args[1]
     else_node = n.args[2] if len(n.args) == 3 else None
     if isinstance(then_node, X.Missing):
@@ -97,7 +97,7 @@ def _ifs(tr, n):
                 "returns NULL (else null)")
         other = T.lit_null()
     for cond, val in reversed(pairs):
-        other = T.ifelse(tr.expr(cond), tr.expr(val), other)
+        other = T.ifelse(tr.as_condition(tr.expr(cond)), tr.expr(val), other)
     return other
 
 
@@ -119,13 +119,13 @@ def _logical(op: str):
         if any(is_range(a) for a in n.args):
             tr.review(f"{n.name} over a range is an aggregate test (Excel map {n.name} row: "
                       "count_if over a key) — not covered")
-        return fold(op, [tr.expr(a) for a in n.args])
+        return fold(op, [tr.as_condition(tr.expr(a)) for a in n.args])
     return handler
 
 
 def _not(tr, n):
     need(tr, n, 1, 1)
-    return T.unop("not", tr.expr(n.args[0]))
+    return T.unop("not", tr.as_condition(tr.expr(n.args[0])))
 
 
 def _const(value: bool):

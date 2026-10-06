@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ts_cli.excel.forward import NEEDS_REVIEW, NeedsReview, Translator
+from ts_cli.excel.forward import NEEDS_REVIEW, NeedsReview, Translator, check_a1
 from ts_cli.excel.measure import apply_role
 from ts_cli.excel.parser import ExcelSyntaxError, parse
 from ts_cli.excel.tsast import to_text
@@ -37,7 +37,9 @@ def translate_excel(source: str, ctx, dialect: str = "excel",
         raise ValueError(f"role must be one of {', '.join(ROLES)}, not {role!r}")
     tr = Translator(ctx, dialect)
     try:
-        row_level = tr.expr(parse(source))
+        tree = parse(source)
+        check_a1(tree)
+        row_level = tr.expr(tree)
         node, out_role = apply_role(tr, row_level, role)
     except ExcelSyntaxError as exc:
         return ExcelResult(None, NEEDS_REVIEW, [f"cannot parse the formula: {exc}"])
