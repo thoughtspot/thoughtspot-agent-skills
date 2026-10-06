@@ -54,6 +54,14 @@ vendored ``EXTRAS`` in ``formula_translate/catalog.py``), never a disproved one;
 *Translator coverage* list names exactly the rule table's keys for that map. Requirement A
 also runs over ``ts_cli/excel/*.py``.
 
+The declared ``emits`` are only half of it (PR #570 review L1): a handler could emit a name it
+never declared. So C also **runs every handler** — ``translate_excel`` over synthetic calls of
+arity 0–4 drawn from a small argument pool (a row reference, a range, numbers, strings) — and
+fails when an emitted function is outside that rule's ``emits`` plus ``SHARED_EMITS`` (the
+names the shared machinery adds whatever the rule: ``to_string`` in ``&``, ``isnull`` / ``not``
+in blank tests), or is disproved or uncatalogued. And a disproved name written as a call
+(``"nullif ("``) in any string literal of ``ts_cli/excel/`` fails, whatever path builds it.
+
 A third requirement was drafted and **cut**: "an emitted name absent from the
 catalog entirely is *unverified*, report it". Measured against the real tree it
 produced **190 findings and no unique true positives** — a translator is full of
@@ -365,6 +373,89 @@ def text_between(text: str, start: str, end: str) -> str:
     return rest.split(end, 1)[0] if end in rest else rest
 
 
+_ARG_POOL = ("[@a]", "T[b]", "2", "0", '"M"', '""')
+_WIDE_POOL = ("T[b]", '"x"', "[@a]>1", "[@a]")
+# Nested shapes the idiom rules key on: IFERROR(a/b, 0), ISNUMBER(SEARCH(…)), IF(b=0,0,a/b).
+_NESTED_POOL = ("[@a]/[@b]", 'SEARCH("x",[@a])', "VALUE([@a])", "[@b]=0", "0", "[@a]")
+_CALL_NAME = re.compile(r"(?<![\w])([a-z_][a-z0-9_]*(?: count)?)\s*\(")
+_QUOTED = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"\\]|\\.)*\"")
+
+
+def _synthetic_calls(name: str):
+    """(formula, its arguments) for the call shapes the gate runs."""
+    from itertools import product
+    shapes = [(_ARG_POOL, a) for a in range(0, 4)] + [(_WIDE_POOL, 4)] + \
+        [(_NESTED_POOL, a) for a in range(1, 4)]
+    for pool, arity in shapes:
+        for args in product(pool, repeat=arity):
+            yield f"={name}({','.join(args)})", args
+
+
+def emitted_by_handlers(root: Path) -> dict:
+    """{(table, rule): set of function names its handler actually emitted}, by running it."""
+    code_root = str(root / "tools" / "ts-cli")
+    sys.path.insert(0, code_root)
+    try:
+        from ts_cli.excel import rules
+        from ts_cli.excel.translate import translate_excel
+        from ts_cli.formula_translate.context import ColumnContext
+    finally:
+        sys.path.remove(code_root)
+    def names(src: str, dialect: str) -> set:
+        expr = translate_excel(src, ColumnContext(), dialect=dialect).expr
+        return set(_CALL_NAME.findall(_QUOTED.sub("''", expr))) if expr else set()
+
+    out: dict = {}
+    for table, dialect, rule_table in (("FUNCTION_RULES", "excel", rules.FUNCTION_RULES),
+                                       ("SHEETS_RULES", "google_sheets", rules.SHEETS_RULES)):
+        own = {a: names("=" + a, dialect) for a in set(_ARG_POOL + _WIDE_POOL + _NESTED_POOL)}
+        for name in rule_table:
+            seen: set = set()
+            for src, args in _synthetic_calls(name):
+                # what the arguments emit on their own is not this handler's emission
+                seen.update(names(src, dialect) - set().union(*(own[a] for a in args)))
+            out[(table, name)] = seen - {"if", "and", "or", "not", "in"} | (
+                {"not"} & seen)
+    return out
+
+
+def emission_errors(emitted: dict, rules_src: str, valid: set[str], nonexistent: set[str],
+                    extras: set[str]) -> list[str]:
+    data = literal_assignments(rules_src)
+    shared = set(data.get("SHARED_EMITS", ()))
+    errors = []
+    for (table, name), names in sorted(emitted.items()):
+        declared = set(data.get(table, {}).get(name, {}).get("emits", ())) | shared
+        for fn in sorted(names):
+            if fn in nonexistent:
+                errors.append(f"{table}[{name!r}]'s handler emitted `{fn}`, which the catalog "
+                              "marks as NOT a ThoughtSpot function")
+            elif fn not in valid | extras and not fn.startswith("sql_"):
+                errors.append(f"{table}[{name!r}]'s handler emitted `{fn}`, which is not in "
+                              "the formula catalog")
+            elif fn not in declared:
+                errors.append(f"{table}[{name!r}]'s handler emitted `{fn}`, which its rule does "
+                              "not declare in `emits` (so its map row is never checked for it)")
+    return errors
+
+
+def disproved_literal_errors(code_files: list, nonexistent: set[str], root: Path) -> list[str]:
+    """A disproved name written as a call inside any string literal (not a docstring)."""
+    errors = []
+    pattern = re.compile(r"(?<![\w`])(" + "|".join(sorted(map(re.escape, nonexistent))) +
+                         r")\s*\(") if nonexistent else None
+    for path in code_files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        skip = _docstring_nodes(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                    and id(node) not in skip and pattern and pattern.search(node.value):
+                errors.append(f"{path.relative_to(root)}:{node.lineno}: a string literal "
+                              f"builds `{pattern.search(node.value).group(1)} (`, which the "
+                              "catalog marks as NOT a ThoughtSpot function")
+    return errors
+
+
 def check_excel(root: Path, valid: set[str], nonexistent: set[str]) -> tuple[list, list]:
     code_dir = root / EXCEL_CODE_REL
     if not code_dir.is_dir():
@@ -373,9 +464,18 @@ def check_excel(root: Path, valid: set[str], nonexistent: set[str]) -> tuple[lis
             for k, v in EXCEL_MAPS.items()}
     extras = set(literal_assignments(
         (root / VENDORED_CATALOG_REL).read_text(encoding="utf-8")).get("EXTRAS", {}))
-    errors = excel_rule_errors((root / EXCEL_RULES_REL).read_text(encoding="utf-8"), maps,
-                               valid, nonexistent, extras)
-    e, w = check_platform("excel", sorted(code_dir.glob("*.py")), "\n".join(maps.values()),
+    rules_src = (root / EXCEL_RULES_REL).read_text(encoding="utf-8")
+    code_files = sorted(code_dir.glob("*.py"))
+    errors = excel_rule_errors(rules_src, maps, valid, nonexistent, extras)
+    errors += disproved_literal_errors(code_files, nonexistent, root)
+    try:
+        emitted = emitted_by_handlers(root)
+    except Exception as exc:  # the gate must not pass because the code failed to import
+        errors.append(f"could not run the Excel handlers to check what they emit: "
+                      f"{type(exc).__name__}: {exc}")
+        emitted = {}
+    errors += emission_errors(emitted, rules_src, valid, nonexistent, extras)
+    e, w = check_platform("excel", code_files, "\n".join(maps.values()),
                           valid, nonexistent, root)
     return errors + e, w
 
@@ -395,7 +495,7 @@ def main() -> int:
     valid, nonexistent = parse_catalog(catalog.read_text(encoding="utf-8"))
 
     platforms = discover_platforms(root)
-    if not platforms:
+    if not platforms and not (root / EXCEL_CODE_REL).is_dir():
         print(f"No ts-convert-* skills found under {root}/agents/cli/. Nothing to check.")
         return 0
 

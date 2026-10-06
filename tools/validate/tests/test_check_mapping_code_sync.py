@@ -255,3 +255,64 @@ def test_real_repo_passes_requirement_c():
     valid, nonexistent = parse_catalog((root / m.CATALOG_REL).read_text(encoding="utf-8"))
     errors, _warnings = m.check_excel(root, valid, nonexistent)
     assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# Requirement C runs the handlers (PR #570 review L1): the four reviewer mutations
+# ---------------------------------------------------------------------------
+
+import shutil
+
+import pytest
+
+_REAL_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _excel_repo(tmp_path):
+    """A copy of the shipped Excel translator, its maps and the catalog — nothing else."""
+    shutil.copytree(_REAL_ROOT / "tools" / "ts-cli" / "ts_cli", tmp_path / "tools" / "ts-cli" / "ts_cli",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    for rel in ("agents/shared/schemas/thoughtspot-formula-patterns.md",
+                "docs/function-maps/ts-excel-function-mapping.md",
+                "docs/function-maps/ts-sheets-function-mapping.md"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(_REAL_ROOT / rel, tmp_path / rel)
+    (tmp_path / "agents" / "cli").mkdir(parents=True, exist_ok=True)
+    return tmp_path / "tools" / "ts-cli" / "ts_cli" / "excel"
+
+
+def _gate(root):
+    return subprocess.run([sys.executable, str(VALIDATOR), "--root", str(root)],
+                          capture_output=True, text=True)
+
+
+def _mutate(path, old, new):
+    text = path.read_text()
+    assert old in text, old
+    path.write_text(text.replace(old, new, 1))
+
+
+def test_unmutated_copy_passes(tmp_path):
+    _excel_repo(tmp_path)
+    res = _gate(tmp_path)
+    assert res.returncode == 0, res.stderr
+
+
+@pytest.mark.parametrize("file,old,new,expect", [
+    # 1. a handler emits a disproved name
+    ("functions.py", '"ABS": _unary_fn("abs")', '"ABS": _unary_fn("nullif")', "NOT a ThoughtSpot"),
+    # 2. a handler emits a catalogued name its rule never declared
+    ("functions_text.py", 'T.call("strlen", tr.expr(n.args[0]))',
+     'T.call("strpos", tr.expr(n.args[0]))', "does not declare"),
+    # 3. a rule's emits emptied while the handler still emits
+    ("rules.py", '"SUM": {"map": "excel", "emits": ("sum",)}',
+     '"SUM": {"map": "excel", "emits": ()}', "does not declare"),
+    # 4. a disproved call spelled inside a string literal
+    ("forward.py", 'BLANK_TRAP = (', '_BAD = "[a] / nullif ( [b] , 0 )"\nBLANK_TRAP = (',
+     "string literal"),
+])
+def test_reviewer_mutations_fail(tmp_path, file, old, new, expect):
+    excel = _excel_repo(tmp_path)
+    _mutate(excel / file, old, new)
+    res = _gate(tmp_path)
+    assert res.returncode == 1 and expect in res.stderr, res.stderr[-2000:]

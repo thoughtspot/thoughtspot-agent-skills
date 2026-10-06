@@ -112,7 +112,7 @@ SHEETS_RULES = {
     "EQ": {"map": "sheets", "emits": ()},
     "GT": {"map": "sheets", "emits": ()},
     "GTE": {"map": "sheets", "emits": ()},
-    "IFERROR": {"map": "sheets", "emits": ()},
+    "IFERROR": {"map": "sheets", "emits": ("safe_divide", "ifnull")},  # 2 args: the Excel rule
     "LT": {"map": "sheets", "emits": ()},
     "LTE": {"map": "sheets", "emits": ()},
     "MINUS": {"map": "sheets", "emits": ()},
@@ -127,3 +127,8 @@ SHEETS_RULES = {
     "UNARY_PERCENT": {"map": "sheets", "emits": ()},
     "UPLUS": {"map": "sheets", "emits": ()},
 }
+
+# Names the shared machinery emits whatever the rule (checked against the catalog by the
+# gate): `to_string` around a non-text `&` operand, `isnull` / `not` in a blank test
+# (`x = ""`) and in `not ( isnull ( … ) )`.
+SHARED_EMITS = ("to_string", "isnull", "not")
