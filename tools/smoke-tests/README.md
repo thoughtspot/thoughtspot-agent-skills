@@ -41,6 +41,7 @@ imports `run_ts` yet needs no credentials; it just needs the CLI installed).
 | `smoke_ts_audit.py` | ts-audit | Live (TS) |
 | `smoke_ts_object_model_coach.py` | ts-object-model-coach | Live (TS) |
 | `smoke_ts_object_set_manager.py` | ts-object-set-manager | Live (TS) |
+| `smoke_ts_object_formula_translate.py` | ts-object-formula-translate | Live (TS) |
 | `smoke_ts_object_model_aggregates.py` | ts-object-model-aggregates | Live (TS + SF) |
 | `smoke_ts_object_model_agentql_query.py` | ts-object-model-agentql-query | Live (TS) |
 | `smoke_ts_variable_timezone.py` | ts-variable-timezone | Live (TS) |

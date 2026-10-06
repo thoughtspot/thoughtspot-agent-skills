@@ -29,6 +29,10 @@
       "ts_profile": "YOUR_PROFILE_IF_DIFFERENT",
       "extra_args": ["--model-guid", "YOUR_MODEL_GUID_HERE"]
     },
+    "ts-object-formula-translate": {
+      "_comment": "A small Model with at least one physical MEASURE and one physical ATTRIBUTE column. Read only; the scratch copy the smoke creates is deleted and its absence asserted.",
+      "extra_args": ["--model-guid", "YOUR_MODEL_GUID_HERE"]
+    },
     "ts-object-model-agentql-query": {
       "_comment": "Model must be backed by an external cloud data warehouse (Snowflake/Databricks/etc.); --agentql is a known-good statement against it.",
       "extra_args": [
