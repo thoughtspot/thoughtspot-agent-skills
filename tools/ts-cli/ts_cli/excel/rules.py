@@ -20,7 +20,7 @@ FUNCTION_RULES = {
     # --- Math and trigonometry
     "ABS": {"map": "excel", "emits": ("abs",)},
     "CEILING": {"map": "excel", "emits": ("ceil",)},
-    "CEILING.MATH": {"map": "excel", "emits": ("ceil",)},
+    "CEILING.MATH": {"map": "excel", "emits": ("ceil", "floor", "abs")},
     "EXP": {"map": "excel", "emits": ("exp",)},
     "FLOOR": {"map": "excel", "emits": ("floor",)},
     "INT": {"map": "excel", "emits": ("floor",)},

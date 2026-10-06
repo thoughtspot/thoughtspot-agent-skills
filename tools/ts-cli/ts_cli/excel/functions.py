@@ -205,15 +205,62 @@ def _int(tr, n):
     return T.call("floor", tr.num(n.args[0]))
 
 
+def _multiple(fn: str, x: dict, sig: dict) -> dict:
+    """``fn ( x / s ) * s``."""
+    return T.binop("*", T.call(fn, T.binop("/", x, sig)), sig)
+
+
+def _zero_guard(sig: dict, form: dict) -> dict:
+    """Excel ``CEILING`` / ``CEILING.MATH`` with a zero significance return 0; ``x / 0`` is
+    NULL in ThoughtSpot (BL-347). A non-zero literal needs no guard."""
+    value = T.number_value(sig)
+    if value is not None:
+        return T.lit_number("0") if value == 0 else form
+    return T.ifelse(T.binop("=", sig, T.lit_number("0")), T.lit_number("0"), form)
+
+
 def _ceiling_floor(fn: str):
+    """``CEILING`` / ``FLOOR (x, s)`` → ``fn ( x / s ) * s``. The signed division gives
+    Excel's rounding for every sign pair Excel accepts (a negative number with a negative
+    significance rounds away from zero, with a positive one toward zero); a positive number
+    with a negative significance is ``#NUM!`` in Excel and a number here. ``CEILING`` of a zero
+    significance is 0 (guarded); ``FLOOR``'s is ``#DIV/0!``, and NULL here."""
     def handler(tr, n):
         need(tr, n, 1, 2)
         x = tr.num(n.args[0])
         if len(n.args) == 1:
             return T.call(fn, x)
         sig = tr.num(n.args[1])
-        return T.binop("*", T.call(fn, T.binop("/", x, sig)), sig)
+        form = _multiple(fn, x, sig)
+        return _zero_guard(sig, form) if fn == "ceil" else form
     return handler
+
+
+def _ceiling_math(tr, n):
+    """``CEILING.MATH(x, [s], [mode])`` (BL-346). Excel ignores the significance's sign: a
+    positive number rounds up to a multiple of ``|s|``; a negative one rounds toward zero
+    (``ceil``) by default and away from zero (``floor``) with a non-zero ``mode``. A zero
+    significance returns 0 (BL-347). The default significance is 1."""
+    need(tr, n, 1, 3)
+    x = tr.num(n.args[0])
+    given = len(n.args) > 1 and not isinstance(n.args[1], X.Missing)
+    sig = tr.num(n.args[1]) if given else T.lit_number("1")
+    value = T.number_value(sig)
+    step = T.lit_number(str(abs(value))) if value is not None else T.call("abs", sig)
+    mode = n.args[2] if len(n.args) == 3 and not isinstance(n.args[2], X.Missing) else None
+    away = False
+    if mode is not None:
+        m = T.number_value(tr.num(mode))
+        if m is None:
+            tr.review("CEILING.MATH with a non-literal mode has no rule: the mode decides the "
+                      "rounding direction of negative numbers")
+        away = m != 0
+    up = T.call("ceil", x) if T.is_lit(step, "number", "1") else _multiple("ceil", x, step)
+    if away:
+        down = (T.call("floor", x) if T.is_lit(step, "number", "1")
+                else _multiple("floor", x, step))
+        up = T.ifelse(T.binop("<", x, T.lit_number("0")), down, up)
+    return _zero_guard(sig, up) if given else up
 
 
 def _mod(tr, n):
@@ -245,7 +292,7 @@ def _power(tr, n):
 HANDLERS = {
     "ABS": _unary_fn("abs"), "SQRT": _unary_fn("sqrt"), "EXP": _unary_fn("exp"),
     "LN": _unary_fn("ln"), "LOG10": _unary_fn("log10"), "INT": _int,
-    "CEILING": _ceiling_floor("ceil"), "CEILING.MATH": _ceiling_floor("ceil"), "FLOOR": _ceiling_floor("floor"), "MOD": _mod,
+    "CEILING": _ceiling_floor("ceil"), "CEILING.MATH": _ceiling_math, "FLOOR": _ceiling_floor("floor"), "MOD": _mod,
     "MROUND": _mround, "POWER": _power, "ROUND": _round,
     "ROUNDUP": _round_dir(True), "ROUNDDOWN": _round_dir(False), "SIGN": _sign,
     "SUM": _sum, "SUMIF": _if_agg("sum_if"), "SUMIFS": _ifs_agg("sum_if"),

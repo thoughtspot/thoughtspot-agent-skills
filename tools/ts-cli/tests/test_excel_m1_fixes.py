@@ -37,6 +37,35 @@ def f(src):
     return ok(src).expr
 
 
+def ts_eval(text: str):
+    """A tiny evaluator for the emitted arithmetic (literals only): enough to check a
+    composition by value, as the warehouse would compute it."""
+    import math
+
+    fns = {"ceil": math.ceil, "floor": math.floor, "abs": abs}
+    ops = {"+": lambda a, b: a + b, "-": lambda a, b: a - b, "*": lambda a, b: a * b,
+           "/": lambda a, b: None if b == 0 else a / b, "<": lambda a, b: a < b,
+           ">=": lambda a, b: a >= b, "=": lambda a, b: a == b, ">": lambda a, b: a > b}
+
+    def ev(n):
+        k = n["node"]
+        if k == "lit":
+            return float(n["value"])
+        if k == "unop":
+            return -ev(n["operand"])
+        if k == "binop":
+            return ops[n["op"]](ev(n["left"]), ev(n["right"]))
+        if k == "call":
+            return fns[n["fn"]](*[ev(a) for a in n["args"]])
+        if k == "ifelse":
+            for cond, value in n["branches"]:
+                if ev(cond):
+                    return ev(value)
+            return ev(n["else"])
+        raise ValueError(k)
+    return ev(from_text(text))
+
+
 def review(src):
     r = tx(src)
     assert r.status == "NEEDS_REVIEW" and r.expr is None, r.expr
@@ -210,3 +239,58 @@ def test_same_type_branches_are_untouched():
     r = ok('=IFERROR([@qty]/[@amt],-1)')
     assert r.expr == "if ( [T::amt] = 0 ) then - 1 else [T::qty] / [T::amt]"
     assert not any("branches of different types" in t for t in r.traps)
+
+
+# ---------------------------------------------------------------------------
+# BL-346 / BL-347: CEILING, CEILING.MATH and a zero significance
+# ---------------------------------------------------------------------------
+# Excel's documented behaviour, restated: CEILING.MATH ignores the significance's sign; a
+# positive number rounds up to the next multiple; a negative number rounds toward zero by
+# default and away from zero when mode is non-zero; significance 0 gives 0.
+
+def _ceiling_math(x, s=1, mode=0):
+    import math
+    step = abs(s)
+    if step == 0:
+        return 0
+    if x < 0 and mode:
+        return math.floor(x / step) * step
+    return math.ceil(x / step) * step
+
+
+@pytest.mark.parametrize("x", [7.3, -7.3, 6, -6, 0.5, -0.5])
+@pytest.mark.parametrize("s", [2, -2, 0.5, -0.5])
+@pytest.mark.parametrize("mode", [None, 0, 1, -1])
+def test_ceiling_math_every_sign_and_mode(x, s, mode):
+    """Evaluate the emitted form on literals and compare with the documented rule."""
+    args = f"{x},{s}" + ("" if mode is None else f",{mode}")
+    expr = f(f"=CEILING.MATH({args})")
+    assert ts_eval(expr) == pytest.approx(_ceiling_math(x, s, mode or 0))
+
+
+@pytest.mark.parametrize("args,expected", [
+    # the worked examples on Microsoft's CEILING.MATH page
+    ("24.3,5", 25), ("6.7", 7), ("-8.1,2", -8), ("-5.5,2,-1", -6),
+])
+def test_ceiling_math_documented_examples(args, expected):
+    assert ts_eval(f(f"=CEILING.MATH({args})")) == expected
+
+
+def test_ceiling_math_emitted_forms():
+    assert f("=CEILING.MATH([@amt],[@amt])") == (
+        "if ( [T::amt] = 0 ) then 0 else ceil ( [T::amt] / abs ( [T::amt] ) ) * abs ( [T::amt] )")
+    assert f("=CEILING.MATH([@amt],-2,1)") == (
+        "if ( [T::amt] < 0 ) then floor ( [T::amt] / 2 ) * 2 else ceil ( [T::amt] / 2 ) * 2")
+    assert f("=CEILING.MATH([@amt])") == "ceil ( [T::amt] )"
+    assert f("=CEILING.MATH([@amt],,1)") == (
+        "if ( [T::amt] < 0 ) then floor ( [T::amt] ) else ceil ( [T::amt] )")
+    assert "non-literal mode" in review("=CEILING.MATH([@amt],2,[@qty])")
+
+
+def test_zero_significance():
+    assert f("=CEILING([@amt],[@qty])") == (
+        "if ( [T::qty] = 0 ) then 0 else ceil ( [T::amt] / [T::qty] ) * [T::qty]")
+    assert f("=CEILING([@amt],0)") == "0"
+    assert f("=CEILING([@amt],2)") == "ceil ( [T::amt] / 2 ) * 2"
+    # FLOOR with 0 is #DIV/0! in Excel: no guard, the NULL stands for the error
+    assert f("=FLOOR([@amt],[@qty])") == "floor ( [T::amt] / [T::qty] ) * [T::qty]"
