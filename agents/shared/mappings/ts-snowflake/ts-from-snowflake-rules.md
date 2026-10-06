@@ -411,7 +411,7 @@ ThoughtSpot:    [TABLE_ID::col_name]
 | `a / b` | `[a] / [b]` *(warn: no divide-by-zero guard)* |
 | `CASE WHEN c THEN a ELSE b END` | `if ( [c] ) then [a] else [b]` |
 | `x IS NULL` | `isnull ( [x] )` |
-| `x IS NOT NULL` | `isnotnull ( [x] )` |
+| `x IS NOT NULL` | `not ( isnull ( [x] ) )` — no `isnotnull` in ThoughtSpot (BL-339) |
 
 **Date functions:**
 

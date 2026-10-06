@@ -20,7 +20,7 @@ CATALOG = frozenset({
     "date", "day", "day_number_of_quarter", "day_number_of_week", "day_number_of_year",
     "day_of_week", "diff_days", "diff_hours", "diff_minutes", "diff_months",
     "diff_quarters", "diff_time", "diff_weeks", "diff_years", "floor", "greatest",
-    "hour_of_day", "ifnull", "in", "is_weekend", "isnotnull", "isnull", "least", "left", "ln",
+    "hour_of_day", "ifnull", "in", "is_weekend", "isnull", "least", "left", "ln",
     "log10", "log2", "max", "max_if", "median", "min", "min_if", "mod", "month",
     "month_number", "month_number_of_quarter", "moving_average", "moving_max",
     "moving_min", "moving_sum", "not", "now", "pow", "quarter_number", "right",
@@ -33,7 +33,8 @@ CATALOG = frozenset({
 })
 
 NONEXISTENT = frozenset({
-    "date_trunc", "day_number_of_month", "ends_with", "lower", "ltrim", "nullif", "replace",
+    "date_trunc", "day_number_of_month", "ends_with", "isnotnull", "lower", "ltrim", "nullif",
+    "replace",
     "rtrim", "starts_with", "trim", "upper",
 })
 

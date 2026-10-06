@@ -149,7 +149,7 @@ Verified 2026-07-10, SE cluster.
 | `if ( [cond] ) then [a] else [b]` → `CASE WHEN cond THEN a ELSE b END` | `CASE WHEN cond THEN a ELSE b END` → `if ( [cond] ) then [a] else [b]` |
 | `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` → `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` | `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` → `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` |
 | `isnull ( [x] )` → `x IS NULL` | `x IS NULL` → `isnull ( [x] )` |
-| `isnotnull ( [x] )` → `x IS NOT NULL` | `x IS NOT NULL` → `isnotnull ( [x] )` |
+| `not ( isnull ( [x] ) )` → `NOT (x IS NULL)` | `x IS NOT NULL` → `not ( isnull ( [x] ) )` — **there is no `isnotnull`** (rejected at import, 2026-10-06, BL-339); `sv_sql` already emits this form |
 | `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `COALESCE(x, default)` → `ifnull ( [x] , [default] )` |
 | `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `NVL(x, default)` → `ifnull ( [x] , [default] )` — Snowflake's two-argument `NVL` is `COALESCE` with a fixed arity |
 | `if ( [a] = [b] ) then null else [a]` → `CASE WHEN a = b THEN NULL ELSE a END` | `NULLIF(a, b)` → `if ( [a] = [b] ) then null else [a]` — **ThoughtSpot has no `nullif`** (rejected at import, 2026-10-06, BL-339; `then null` is accepted). `x / NULLIF(y, 0)` is the divisor idiom and translates to `safe_divide ( [x] , [y] )` |

@@ -128,7 +128,7 @@ count_if ( [TABLE::region] = 'west' , [TABLE::region] )
 | Multi-branch | `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` |
 | NULL branch | `if ( [c] ) then null else [x]` — `null` is accepted as a branch value (VALIDATE_ONLY 2026-10-06, probe record §7); it is the native replacement for SQL `NULLIF` |
 | `isnull` | `isnull ( [TABLE::col] )` |
-| `isnotnull` | `isnotnull ( [TABLE::col] )` |
+| ~~`isnotnull`~~ | — **Does not exist** (VALIDATE_ONLY, se-thoughtspot, 2026-10-06 — `isnotnull ( [x] )` is rejected: *Search did not find "isnotnull ("*; [probe record §7](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)). Write `not ( isnull ( [x] ) )`, which the repo's translators already emit. BL-339 |
 | `ifnull` | `ifnull ( [TABLE::col] , [default] )` |
 | ~~`nullif`~~ | — **Does not exist** (VALIDATE_ONLY, se-thoughtspot, 2026-10-06 — both `nullif ( x , 0 )` and `null_if` are rejected: *Search did not find "nullif ("*; [probe record §7](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)). For a guarded ratio use `safe_divide ( [a] , [b] )` (0 on a zero divisor) or plain `[a] / [b]` (NULL on a zero divisor); for an explicit NULL use `if ( [b] = 0 ) then null else [a] / [b]` — `then null` is accepted. BL-339 |
 | `not` | `not ( [expr] )` |

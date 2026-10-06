@@ -180,6 +180,18 @@ Replacements: `safe_divide ( a , b )` (0 on zero), plain `a / b` (NULL on zero),
 
 So every `concat` argument must be Text, and `to_string` must wrap **only** the non-text ones.
 
+**`isnotnull` is not a ThoughtSpot formula function either.** `isnotnull ( [SALARY_RATES::DEPARTMENT] )`
+and `isnotnull ( [SALARY_RATES::BASE_RATE] * 2 )` are rejected (*Search did not find "isnotnull ("*);
+`not ( isnull ( to_double ( [SALARY_RATES::DEPARTMENT] ) ) )` is accepted. The formula reference listed
+`isnotnull` as native; the repo's translators already emitted `not ( isnull ( … ) )`, so only
+documents were wrong (BL-339).
+
+**`null` as a branch value.** Accepted in either position and in a chain:
+`if ( c ) then [x] else null`, `if ( c ) then null else [x]`, `if ( c ) then 'a' else null`,
+`if ( c1 ) then 'a' else if ( c2 ) then 'b' else null`. By contrast
+`if ( c ) then [SALARY_RATES::BASE_RATE] else ''` is rejected (*Expecting a Numeric token*):
+the branches must share a type.
+
 **Other parser checks in the same pass (all accepted):** `least ( [SALARY_RATES::BASE_RATE] , 10 )`
 (the formula reference listed only `greatest`), `!=` between a column and a string literal,
 `ifnull ( x , 0 )`, `quarter_number ( today ( ) )`, `ceil ( month_number ( today ( ) ) / 3 )` inside

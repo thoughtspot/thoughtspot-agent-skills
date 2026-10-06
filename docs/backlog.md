@@ -12625,7 +12625,9 @@ SQL `NULLIF` to it, and `sv_sql.py` emitted `nullif ( a , b )` for a Snowflake `
 non-zero second argument. Live (VALIDATE_ONLY, 2026-10-06): `nullif ( x , 0 )`, `nullif ( 0 , 0 )`
 and `null_if ( x , 0 )` are all rejected; `if ( c ) then null else x` is accepted. The same pass
 found `concat` arguments must be Text (`to_string` the numbers — and `to_string` rejects Text),
-`least` exists (only `greatest` was catalogued), and the review's scratch-Model probe found
+`least` exists (only `greatest` was catalogued), `isnotnull` does **not** exist either (the
+translators already wrote `not ( isnull ( … ) )`; only the documents said `isnotnull`), and the
+review's scratch-Model probe found
 `safe_divide` compiles to `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` while a plain `/`
 returns NULL on a zero divisor — so the Excel map's E8/G15 claim that a raw `/` fails the whole
 Snowflake query was also wrong.
@@ -12633,7 +12635,9 @@ Snowflake query was also wrong.
 **Resolution.** Probe record §7 (`docs/reviews/2026-10-06-formula-semantics-probes.md`). The
 formula reference strikes `nullif` through (so `check_formula_catalog` and
 `check_mapping_code_sync` treat it as disproved), adds `least`, the NULL branch, the `concat` /
-`to_string` type rules and `safe_divide`'s compiled form. The vendored catalog drops `nullif`
+`to_string` type rules and `safe_divide`'s compiled form, and strikes `isnotnull` too (rows that used it in the Snowflake
+mapping and from-Snowflake rules, and the Excel, Sheets, Sigma, Omni and Ossie maps, now read
+`not ( isnull ( … ) )`). The vendored catalog drops `nullif` and `isnotnull`
 and adds `null_if` to `REJECTED_LIVE`, so the output guard refuses both. Map rows fixed: Excel
 `NA`, `DGET`, `IFERROR`, E8, G9, G15, worked shape; Sheets `DIVIDE`, `IFERROR`, QUERY `/`,
 `AVERAGE.WEIGHTED`; Omni `NULLIF`, `SEARCH`; Snowflake mapping `NULLIF`. `sv_sql.py` now emits
