@@ -1,0 +1,180 @@
+"""Pure builders: warehouse SQL, ThoughtSpot TML and AgentQL statements for one run.
+
+No I/O here, so every string a run sends anywhere is unit-tested.
+
+Naming. Every object a run creates carries the run stamp, so a run can never collide
+with — or clean up — an object it did not create:
+
+- warehouse table   ``ZZ_FIDELITY_<FIXTURE>_<stamp>``
+- ThoughtSpot Table ``ZZ_FIDELITY_<FIXTURE>_<stamp>_TABLE_DELETE_ME``
+- ThoughtSpot Model ``ZZ_FIDELITY_<FIXTURE>_<stamp>_DELETE_ME``
+"""
+from __future__ import annotations
+
+import re
+import time
+from typing import Any, Optional
+
+PREFIX = "ZZ_FIDELITY_"
+SUFFIX = "_DELETE_ME"
+ORPHAN_PATTERN = f"{PREFIX}%{SUFFIX}"
+
+
+def run_stamp(now: Optional[float] = None) -> str:
+    return time.strftime("%Y%m%dT%H%M%S", time.gmtime(now if now is not None else time.time()))
+
+
+def object_names(fixture_name: str, stamp: str) -> dict[str, str]:
+    base = f"{PREFIX}{re.sub(r'[^A-Za-z0-9]', '_', fixture_name).upper()}_{stamp}"
+    return {"warehouse_table": base, "ts_table": f"{base}_TABLE{SUFFIX}",
+            "ts_model": f"{base}{SUFFIX}"}
+
+
+def formula_name(case_id: str) -> str:
+    return "f_" + re.sub(r"[^A-Za-z0-9]", "_", case_id)
+
+
+# -- warehouse SQL --------------------------------------------------------------------
+
+def sql_literal(value: Any, sf_type: str) -> str:
+    if value is None:
+        return "NULL"
+    t = sf_type.upper()
+    if t.startswith(("VARCHAR", "STRING", "TEXT", "CHAR")):
+        return "'" + str(value).replace("\\", "\\\\").replace("'", "''") + "'"
+    if t == "DATE":
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(value)):
+            raise ValueError(f"DATE value must be YYYY-MM-DD, got {value!r}")
+        return f"'{value}'::DATE"
+    if t.startswith("BOOLEAN"):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{sf_type} value must be a number, got {value!r}")
+    return repr(value)
+
+
+def fq(database: str, schema: str, table: str) -> str:
+    return f"{database}.{schema}.{table}"
+
+
+def create_table_sql(fixture: dict, fq_table: str) -> str:
+    """CREATE TABLE (never OR REPLACE: a name clash must fail, not clobber)."""
+    cols = ",\n  ".join(f"{c['name']} {c['sf_type']}" for c in fixture["columns"])
+    return f"CREATE TABLE {fq_table} (\n  {cols}\n)"
+
+
+def insert_rows_sql(fixture: dict, fq_table: str) -> str:
+    cols = fixture["columns"]
+    names = ", ".join(c["name"] for c in cols)
+    rows = ",\n  ".join(
+        "(" + ", ".join(sql_literal(r.get(c["name"]), c["sf_type"]) for c in cols) + ")"
+        for r in fixture["rows"])
+    return f"INSERT INTO {fq_table} ({names}) VALUES\n  {rows}"
+
+
+def session_sql(fixture: dict) -> list[str]:
+    out = []
+    for k, v in (fixture.get("session") or {}).items():
+        if not re.fullmatch(r"[A-Z_]+", k):
+            raise ValueError(f"bad session parameter name {k!r}")
+        out.append(f"ALTER SESSION SET {k} = " + (f"'{v}'" if isinstance(v, str) else str(int(v))))
+    return out
+
+
+def oracle_sql(case: dict, fixture: dict, fq_table: str, only_key: Any = None) -> str:
+    """The source formula evaluated in the warehouse, keyed like the ThoughtSpot query."""
+    expr = case["source_formula"]
+    if case["role"] == "aggregate":
+        k = case["group_by"]
+        where = f" WHERE {k} = {sql_literal(only_key, _sf_type(fixture, k))}" \
+            if only_key is not None else ""
+        return f"SELECT {k} AS K, ({expr}) AS V FROM {fq_table}{where} GROUP BY {k} ORDER BY {k}"
+    k = fixture["key"]
+    where = f" WHERE {k} = {sql_literal(only_key, _sf_type(fixture, k))}" \
+        if only_key is not None else ""
+    return f"SELECT {k} AS K, ({expr}) AS V FROM {fq_table}{where} ORDER BY {k}"
+
+
+def _sf_type(fixture: dict, col: str) -> str:
+    return next(c["sf_type"] for c in fixture["columns"] if c["name"] == col)
+
+
+def key_values(case: dict, fixture: dict) -> list[Any]:
+    k = case["group_by"] if case["role"] == "aggregate" else fixture["key"]
+    vals = {r.get(k) for r in fixture["rows"]}
+    return sorted(vals, key=lambda v: (v is None, not isinstance(v, (int, float)),
+                                       v if isinstance(v, (int, float)) else 0, str(v)))
+
+
+# -- ThoughtSpot TML ---------------------------------------------------------------
+
+def table_tml(fixture: dict, names: dict, connection: str, database: str, schema: str) -> dict:
+    cols = []
+    for c in fixture["columns"]:
+        props: dict[str, Any] = {"column_type": c["column_type"]}
+        if c["column_type"] == "MEASURE":
+            props["aggregation"] = "SUM"
+        cols.append({"name": c["name"], "db_column_name": c["name"], "properties": props,
+                     "db_column_properties": {"data_type": c["ts_type"]}})
+    return {"table": {"name": names["ts_table"], "db": database, "schema": schema,
+                      "db_table": names["warehouse_table"],
+                      "connection": {"name": connection}, "columns": cols}}
+
+
+def column_context(fixture: dict, ts_table: str) -> list[dict]:
+    """``--columns`` for the translator: the fixture's columns on the run's Table."""
+    return [{"source": c["name"], "table": ts_table, "column": c["name"],
+             "data_type": c["ts_type"], "column_type": c["column_type"],
+             "key": c["name"] == fixture["key"]} for c in fixture["columns"]]
+
+
+def model_tml(fixture: dict, names: dict, formulas: list[tuple[str, str, str]]) -> dict:
+    """A Model over the one Table: every physical column plus ``formulas`` (name, expr, role).
+
+    ``formulas[]`` and ``columns[]`` entries come from the translator's own
+    ``formula_tml_entries`` so the harness emits exactly what ``ts formula translate`` does.
+    """
+    from ts_cli.formula_translate.engine import formula_tml_entries
+
+    t = names["ts_table"]
+    cols: list[dict] = []
+    for c in fixture["columns"]:
+        props: dict[str, Any] = {"column_type": c["column_type"]}
+        if c["column_type"] == "MEASURE":
+            props["aggregation"] = "SUM"
+        cols.append({"name": c["name"], "column_id": f"{t}::{c['name']}", "properties": props})
+    fdefs = []
+    for name, expr, role in formulas:
+        f, col = formula_tml_entries(name, expr, role)
+        fdefs.append(f)
+        cols.append(col)
+    model: dict[str, Any] = {"name": names["ts_model"],
+                             "description": "Scratch Model made by tools/formula-fidelity. "
+                                            "Safe to delete.",
+                             "model_tables": [{"name": t}], "columns": cols}
+    if fdefs:
+        model["formulas"] = fdefs
+    return {"model": model}
+
+
+# -- AgentQL -----------------------------------------------------------------------
+
+def _q(ident: str) -> str:
+    return '"' + ident.replace('"', '""') + '"'
+
+
+def agentql_statement(model: str, fname: str, key_col: str, role: str,
+                      wrapper: Optional[str], only_key: Any = None, limit: int = 1000) -> str:
+    """One formula and one key column, nothing else (the 2026-10-06 GROUP BY trap)."""
+    k = f'"t1".{_q(key_col)}'
+    f = f'"t1".{_q(fname)}'
+    where = ""
+    if only_key is not None:
+        lit = str(only_key) if isinstance(only_key, (int, float)) and not isinstance(only_key, bool) \
+            else "'" + str(only_key).replace("'", "''") + "'"
+        where = f" WHERE {k} = {lit}"
+    if role == "aggregate":
+        sel = f'SELECT {k} AS "k", {wrapper or "AGG"}({f}) AS "v" FROM {_q(model)} AS "t1"'
+        return f"{sel}{where} GROUP BY {k} LIMIT {int(limit)}"
+    sel = f'SELECT {k} AS "k", {f} AS "v" FROM {_q(model)} AS "t1"'
+    return f"{sel}{where} GROUP BY {k}, {f} LIMIT {int(limit)}"

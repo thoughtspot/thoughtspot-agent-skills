@@ -424,7 +424,7 @@ run_pytest() {
 }
 
 if echo "$STAGED" | grep -q '\.py$'; then
-  run_pytest "unit tests (ts-cli)"      tools/ts-cli/tests/ tools/validate/tests/
+  run_pytest "unit tests (ts-cli)"      tools/ts-cli/tests/ tools/validate/tests/ tools/formula-fidelity/tests/
   run_pytest "unit tests (erd)"         agents/cli/ts-object-model-erd/tests/
   run_pytest "unit tests (databricks)"  agents/databricks/tests/
 fi
