@@ -12608,3 +12608,36 @@ the Sheets map does not row (its rule E1). Update the SKILL.md source table and 
 the skill and ts-cli versions as the change needs.
 
 **Target:** the next `ts-object-formula-translate` change.
+
+## BL-339 — `nullif` is not a ThoughtSpot formula function, but the formula reference listed it `Tier 1`
+
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.158.0, ts-object-formula-translate 1.2.0).
+**Source:** a 60-formula Excel batch translated with `ts-object-formula-translate` 1.1.0 (map-backed):
+36 of the 60 outputs failed `VALIDATE_ONLY` import on se-thoughtspot with
+*Search did not find "nullif (" in your data or metadata*.
+
+**The problem.** `agents/shared/schemas/thoughtspot-formula-patterns.md` listed
+`nullif ( [a] , [b] )` in its Conditional Functions table. Everything downstream trusted it: the
+vendored output-guard catalog (`formula_translate/catalog.py`) accepted it, the Excel map used
+`nullif ( 0 , 0 )` as a NULL literal (`NA`, `DGET`, gap G9), the Sheets map and the skill used
+`[a] / nullif ( [b] , 0 )` for one-argument `IFERROR`, `DIVIDE` and QUERY `/`, the Omni map rowed
+SQL `NULLIF` to it, and `sv_sql.py` emitted `nullif ( a , b )` for a Snowflake `NULLIF` with a
+non-zero second argument. Live (VALIDATE_ONLY, 2026-10-06): `nullif ( x , 0 )`, `nullif ( 0 , 0 )`
+and `null_if ( x , 0 )` are all rejected; `if ( c ) then null else x` is accepted. The same pass
+found `concat` arguments must be Text (`to_string` the numbers — and `to_string` rejects Text),
+`least` exists (only `greatest` was catalogued), and the review's scratch-Model probe found
+`safe_divide` compiles to `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` while a plain `/`
+returns NULL on a zero divisor — so the Excel map's E8/G15 claim that a raw `/` fails the whole
+Snowflake query was also wrong.
+
+**Resolution.** Probe record §7 (`docs/reviews/2026-10-06-formula-semantics-probes.md`). The
+formula reference strikes `nullif` through (so `check_formula_catalog` and
+`check_mapping_code_sync` treat it as disproved), adds `least`, the NULL branch, the `concat` /
+`to_string` type rules and `safe_divide`'s compiled form. The vendored catalog drops `nullif`
+and adds `null_if` to `REJECTED_LIVE`, so the output guard refuses both. Map rows fixed: Excel
+`NA`, `DGET`, `IFERROR`, E8, G9, G15, worked shape; Sheets `DIVIDE`, `IFERROR`, QUERY `/`,
+`AVERAGE.WEIGHTED`; Omni `NULLIF`, `SEARCH`; Snowflake mapping `NULLIF`. `sv_sql.py` now emits
+`if ( a = b ) then null else a`. The Excel / Sheets translator (`ts_cli/excel/`, same PR) never
+emits `nullif`, and its tests assert every output is inside the catalog.
+
+**Target:** this PR.

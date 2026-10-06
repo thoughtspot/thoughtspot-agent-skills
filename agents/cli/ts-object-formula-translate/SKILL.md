@@ -156,8 +156,10 @@ supplies the classification and the verification status.
      (arithmetic, `IF`, per-cell text and date functions — drop it and translate the inside).
      Around `COUNTIF`/`SUMIF` over the same range it is a fixed-grain `group_aggregate`, and
      around `AND`/`OR` it collapses to one value (E6).
-   - **One-argument `IFERROR` means NULL, not 0**: `IFERROR(A2 / B2)` is
-     `[a] / nullif ( [b] , 0 )`, never `safe_divide` (which returns 0).
+   - **One-argument `IFERROR` means NULL, not 0**: `IFERROR(A2 / B2)` is plain
+     `[a] / [b]` (NULL on a zero divisor), never `safe_divide` (which returns 0).
+     **There is no `nullif`** in ThoughtSpot — it is rejected at import (probe record §7,
+     BL-339); the CLI's output guard refuses it.
    - **`NETWORKDAYS` / `NETWORKDAYS.INTL` holiday arrays hold serials or `DATE()`
      values, never text dates**: convert each by its form (a serial via E3, `DATE(y, m, d)`
      folded to one `to_date` literal), then apply the Excel row's holiday term.

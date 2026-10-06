@@ -92,6 +92,7 @@ double-quoted strings. If a formula contains both single quotes and curly braces
 | `stddev` | `stddev ( [TABLE::col] )` | Standard deviation |
 | `variance` | `variance ( [TABLE::col] )` | Variance |
 | `greatest` | `greatest ( [a] , [b] , ... )` | Returns the largest value across N arguments |
+| `least` | `least ( [a] , [b] , ... )` | Returns the smallest value across N arguments — row-wise, like `greatest` (`min` / `max` are aggregate-only). Accepted VALIDATE_ONLY on se-thoughtspot 2026-10-06 ([probe record §7](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)) |
 
 ### Conditional Aggregates
 
@@ -125,10 +126,11 @@ count_if ( [TABLE::region] = 'west' , [TABLE::region] )
 |---|---|
 | `if / then / else` | `if ( [cond] ) then [a] else [b]` |
 | Multi-branch | `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` |
+| NULL branch | `if ( [c] ) then null else [x]` — `null` is accepted as a branch value (VALIDATE_ONLY 2026-10-06, probe record §7); it is the native replacement for SQL `NULLIF` |
 | `isnull` | `isnull ( [TABLE::col] )` |
 | `isnotnull` | `isnotnull ( [TABLE::col] )` |
 | `ifnull` | `ifnull ( [TABLE::col] , [default] )` |
-| `nullif` | `nullif ( [a] , [b] )` |
+| ~~`nullif`~~ | — **Does not exist** (VALIDATE_ONLY, se-thoughtspot, 2026-10-06 — both `nullif ( x , 0 )` and `null_if` are rejected: *Search did not find "nullif ("*; [probe record §7](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)). For a guarded ratio use `safe_divide ( [a] , [b] )` (0 on a zero divisor) or plain `[a] / [b]` (NULL on a zero divisor); for an explicit NULL use `if ( [b] = 0 ) then null else [a] / [b]` — `then null` is accepted. BL-339 |
 | `not` | `not ( [expr] )` |
 | `and` / `or` | `[a] and [b]` / `[a] or [b]` |
 | `in` | `[col] in { 'a' , 'b' }` — **curly braces, not parentheses** (see below) |
@@ -168,7 +170,7 @@ else 0
 
 | Function | Syntax |
 |---|---|
-| `safe_divide` | `safe_divide ( [a] , [b] )` — returns 0 (not NULL) when `b` is 0 |
+| `safe_divide` | `safe_divide ( [a] , [b] )` — compiles to `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` (live-probed se-thoughtspot 2026-10-06, [probe record §7](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)): a **zero** divisor returns **0**; a **NULL** divisor or numerator returns NULL. Plain `[a] / [b]` returns **NULL** on a zero divisor (no query error) |
 | `round` | `round ( [x] , [inc] )` — **`inc` is a rounding INCREMENT, not a decimal-place count** (BL-331, live-probed se-thoughtspot 2026-10-06). Compiles to `inc * round(x / NULLIF(inc, 0))`. On `1234.5678`: `round(x)` = 1235, `round(x, 1)` = 1235, `round(x, 0.01)` = 1234.57, `round(x, 0.5)` = 1234.5, `round(x, 10)` = 1230, `round(x, 2)` = **1234** (nearest multiple of 2), `round(x, -2)` = 1234, `round(x, 0)` = **NULL**. Result type: an integer `inc` (`1`, `10`) returns **INT64**, a fractional one (`0.01`, `0.5`) **DOUBLE** — and the `sql_double_op` pass-throughs the translators fall back to (non-literal SQL digit count; Snowflake `TRUNC`) always return **DOUBLE**, whatever the warehouse's own ROUND/TRUNC type. So SQL `ROUND(x, d)` ↔ `round ( x , 10^-d )` — never copy `d` across (`formula_common.ts_round_from_sql_digits` / `ts_increment_to_sql_digits`) |
 | `floor` | `floor ( [x] )` |
 | `ceil` | `ceil ( [x] )` |
@@ -186,7 +188,7 @@ else 0
 
 | Function | Syntax | Notes |
 |---|---|---|
-| `concat` | `concat ( [a] , [b] , ... )` | N arguments supported. **`+` does NOT concatenate strings** in TS formulas — it is numeric-only. The TS parser rejects `[a] + ', ' + [b]` with "Search did not find + ', ' +". Always use `concat()` for string joining, including for SQL `CONCAT(a, ', ', b)` translations. |
+| `concat` | `concat ( [a] , [b] , ... )` | N arguments supported — `concat ( 'a' , 'b' , 'c' , 'd' )` imports (VALIDATE_ONLY 2026-10-06). **Every argument must be Text**: a number is rejected with *"Function concat expects 2nd argument to be Text"* — wrap it in `to_string ( … )`; and `to_string` itself **rejects a Text argument** (*"expects 1st argument to be Boolean or Date or DateTime or Numeric or Time"*), so wrap only the non-text operands ([probe record §7](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)). **`+` does NOT concatenate strings** in TS formulas — it is numeric-only. The TS parser rejects `[a] + ', ' + [b]` with "Search did not find + ', ' +". Always use `concat()` for string joining, including for SQL `CONCAT(a, ', ', b)` translations. |
 | `substr` | `substr ( [x] , [start] , [len] )` | Zero-indexed start |
 | `left` | `left ( [x] , [n] )` | First N characters |
 | `right` | `right ( [x] , [n] )` | Last N characters |
@@ -253,7 +255,7 @@ results. They are ThoughtSpot-only — **not translatable** to any warehouse SQL
 |---|---|
 | `to_integer` | `to_integer ( [x] )` |
 | `to_double` | `to_double ( [x] )` |
-| `to_string` | `to_string ( [x] )` |
+| `to_string` | `to_string ( [x] )` — Boolean, Date, DateTime, Numeric or Time only; a **Text** argument is rejected (VALIDATE_ONLY 2026-10-06, probe record §7) |
 
 ---
 

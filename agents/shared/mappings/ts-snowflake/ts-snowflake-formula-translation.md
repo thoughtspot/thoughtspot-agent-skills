@@ -152,7 +152,7 @@ Verified 2026-07-10, SE cluster.
 | `isnotnull ( [x] )` → `x IS NOT NULL` | `x IS NOT NULL` → `isnotnull ( [x] )` |
 | `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `COALESCE(x, default)` → `ifnull ( [x] , [default] )` |
 | `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `NVL(x, default)` → `ifnull ( [x] , [default] )` — Snowflake's two-argument `NVL` is `COALESCE` with a fixed arity |
-| `nullif ( [a] , [b] )` → `NULLIF(a, b)` | `NULLIF(a, b)` → `nullif ( [a] , [b] )` |
+| `if ( [a] = [b] ) then null else [a]` → `CASE WHEN a = b THEN NULL ELSE a END` | `NULLIF(a, b)` → `if ( [a] = [b] ) then null else [a]` — **ThoughtSpot has no `nullif`** (rejected at import, 2026-10-06, BL-339; `then null` is accepted). `x / NULLIF(y, 0)` is the divisor idiom and translates to `safe_divide ( [x] , [y] )` |
 | `not ( [x] )` → `NOT x` | `NOT x` → `not ( [x] )` |
 
 ### Logical and Comparison Operators

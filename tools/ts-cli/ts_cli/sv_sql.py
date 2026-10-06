@@ -704,9 +704,12 @@ def _call_dateadd(cur: _Cursor, resolver) -> str:
 
 
 def _call_nullif(args: list[str]) -> str:
+    """``NULLIF(a, b)``. ThoughtSpot has no ``nullif`` (rejected at import, probe record
+    §7, BL-339), so a non-zero ``b`` becomes ``if ( a = b ) then null else a`` — ``then
+    null`` is accepted. ``NULLIF(x, 0)`` keeps its marker (the divisor idiom)."""
     _need(args, 2, "NULLIF")
     if args[1] != "0":
-        return _emit("nullif", args)
+        return f"if ( {args[0]} = {args[1]} ) then null else {args[0]}"
     return _NULLIF0 + args[0]
 
 

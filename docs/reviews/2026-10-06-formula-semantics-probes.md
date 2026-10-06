@@ -139,3 +139,49 @@ Five quantities were checked per range:
 - 2026-12-26 → 2027-01-04 = 6
 
 The `<= 5` test fits weekend code 1 only. Other codes need "h's weekday is not a weekend day". Duplicate holidays were not probed. `WORKDAY` / `WORKDAY.INTL` with holidays was not probed and does not follow this form: the end date shifts rather than a count being reduced.
+
+## 7. Division, NULL and concat: `safe_divide`, `nullif`, `concat`
+
+Probed 2026-10-06 while reviewing a 60-formula Excel batch (BL-339). The division rows come from
+that review's scratch-Model probe (`ts agentql generate-sql` / `fetch-data`; the Model was deleted).
+Every parser row below was re-run for this record with `ts tml import --policy VALIDATE_ONLY`
+against a one-formula Model over `SALARY_RATES`, which creates nothing.
+
+**Division.**
+
+| Formula | Compiled SQL / result |
+|---|---|
+| `safe_divide ( a , b )` | `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` — a zero divisor gives **0**; a NULL divisor or NULL numerator gives **NULL** |
+| `a / b` | a zero divisor gives **NULL** (ThoughtSpot guards the divisor); the query does not fail |
+
+**`nullif` is not a ThoughtSpot formula function.**
+
+| Formula | Parser |
+|---|---|
+| `nullif ( [SALARY_RATES::BASE_RATE] , 0 )` | rejected: *Search did not find "nullif (" in your data or metadata* |
+| `null_if ( [SALARY_RATES::BASE_RATE] , 0 )` | rejected: *Search did not find "null_if ("* |
+| `nullif ( 0 , 0 )` (the Excel map's former NULL-literal idiom) | rejected |
+| `if ( [SALARY_RATES::BASE_RATE] = 0 ) then null else [SALARY_RATES::BASE_RATE]` | accepted |
+
+The formula reference listed `nullif ( [a] , [b] )` in its Conditional Functions table until
+this probe, and the Excel, Sheets and Omni maps and the `ts-object-formula-translate` skill
+used it; a 60-formula batch composed from them failed import 36 times on it (BL-339).
+Replacements: `safe_divide ( a , b )` (0 on zero), plain `a / b` (NULL on zero), or
+`if ( b = 0 ) then null else a / b`.
+
+**`concat` and `to_string`.**
+
+| Formula | Parser |
+|---|---|
+| `concat ( 'a' , 'b' , 'c' , 'd' )` | accepted — `concat` takes 2 or more arguments |
+| `concat ( [SALARY_RATES::DEPARTMENT] , ' ' , to_string ( [SALARY_RATES::BASE_RATE] ) )` | accepted |
+| `concat ( 'a' , [SALARY_RATES::BASE_RATE] )` | rejected: *Function concat expects 2nd argument to be Text* |
+| `concat ( to_string ( [SALARY_RATES::DEPARTMENT] ) , 'x' )` | rejected: *Function to_string expects 1st argument to be Boolean or Date or DateTime or Numeric or Time* |
+
+So every `concat` argument must be Text, and `to_string` must wrap **only** the non-text ones.
+
+**Other parser checks in the same pass (all accepted):** `least ( [SALARY_RATES::BASE_RATE] , 10 )`
+(the formula reference listed only `greatest`), `!=` between a column and a string literal,
+`ifnull ( x , 0 )`, `quarter_number ( today ( ) )`, `ceil ( month_number ( today ( ) ) / 3 )` inside
+`to_string`, `add_days ( add_months ( start_of_month ( d ) , 1 ) , -1 )`, `pow ( x , 2 )`, unary
+`- x`. Case behaviour of `!=` was not probed (only its parse).

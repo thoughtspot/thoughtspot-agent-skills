@@ -20,10 +20,10 @@ CATALOG = frozenset({
     "date", "day", "day_number_of_quarter", "day_number_of_week", "day_number_of_year",
     "day_of_week", "diff_days", "diff_hours", "diff_minutes", "diff_months",
     "diff_quarters", "diff_time", "diff_weeks", "diff_years", "floor", "greatest",
-    "hour_of_day", "ifnull", "in", "is_weekend", "isnotnull", "isnull", "left", "ln",
+    "hour_of_day", "ifnull", "in", "is_weekend", "isnotnull", "isnull", "least", "left", "ln",
     "log10", "log2", "max", "max_if", "median", "min", "min_if", "mod", "month",
     "month_number", "month_number_of_quarter", "moving_average", "moving_max",
-    "moving_min", "moving_sum", "not", "now", "nullif", "pow", "quarter_number", "right",
+    "moving_min", "moving_sum", "not", "now", "pow", "quarter_number", "right",
     "round", "safe_divide", "sqrt", "start_of_hour", "start_of_min", "start_of_month",
     "start_of_quarter", "start_of_week", "start_of_year", "stddev", "stddev_if", "strlen",
     "strpos", "substr", "sum", "sum_if", "time", "to_double", "to_integer", "to_string",
@@ -33,8 +33,8 @@ CATALOG = frozenset({
 })
 
 NONEXISTENT = frozenset({
-    "date_trunc", "day_number_of_month", "ends_with", "lower", "ltrim", "replace", "rtrim",
-    "starts_with", "trim", "upper",
+    "date_trunc", "day_number_of_month", "ends_with", "lower", "ltrim", "nullif", "replace",
+    "rtrim", "starts_with", "trim", "upper",
 })
 
 EXTRAS = {
@@ -70,7 +70,10 @@ EXTRAS = {
     "sql_bool_aggregate_op": "formula-patterns; live-accepted 2026-10-06 (BL-335)",
 }
 # NOT accepted although the shared references list it: rejected live 2026-10-06 (OI-5).
-REJECTED_LIVE = frozenset({"sql_number_aggregate_op", "sql_number_op"})  # BL-335
+REJECTED_LIVE = frozenset({"sql_number_aggregate_op", "sql_number_op",  # BL-335
+                           # nullif is struck through in the reference (NONEXISTENT); its
+                           # underscore spelling was rejected in the same probe (§7, BL-339).
+                           "null_if"})
 
 # Prefixes of documented function families (cumulative_*, moving_*, group_*).
 FAMILY_PREFIXES = ("cumulative_", "moving_", "group_")

@@ -968,3 +968,25 @@ class TestEditorForm:
         r = translate("COUNT(*)", "snowflake")
         assert r["formula_editor"] == "count ( [<primary key>] )"
         assert len(r["formula_editor_notes"]) == 1
+
+
+class TestNullifRefused:
+    """BL-339: `nullif` is not a ThoughtSpot function (VALIDATE_ONLY 2026-10-06, probe §7)."""
+
+    def test_catalog_does_not_know_nullif(self):
+        from ts_cli.formula_translate.catalog import is_known
+        assert not is_known("nullif")
+        assert not is_known("null_if")
+        assert is_known("least") and is_known("safe_divide")
+
+    def test_output_guard_rejects_nullif(self):
+        from ts_cli.formula_translate.traps import output_guard
+        assert "nullif" in output_guard("[T::a] / nullif ( [T::b] , 0 )")
+
+    def test_thoughtspot_input_using_nullif_is_needs_review(self):
+        r = translate("[a] / nullif ( [b] , 0 )", "thoughtspot")
+        assert r["status"] == "NEEDS_REVIEW" and r["formula"] is None
+
+    def test_snowflake_nullif_non_zero_is_case_form(self):
+        r = translate("NULLIF(a, b)", "snowflake")
+        assert r["formula"] == "if ( [TABLE::a] = [TABLE::b] ) then null else [TABLE::a]"
