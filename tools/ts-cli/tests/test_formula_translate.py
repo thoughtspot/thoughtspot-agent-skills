@@ -368,6 +368,7 @@ class TestRoleAndTml:
     def test_tml_entries(self):
         f, c = formula_tml_entries("My Calc", "sum ( [T::a] )", "MEASURE")
         assert f == {"id": "formula_My Calc", "name": "My Calc", "expr": "sum ( [T::a] )"}
+        # user-supplied names keep their spaces in the id (repo convention)
         assert "aggregation" not in f
         assert c["formula_id"] == "formula_My Calc" and c["properties"]["aggregation"] == "SUM"
         _, ca = formula_tml_entries("Flag", "[T::a] > 1", "ATTRIBUTE")
@@ -687,6 +688,7 @@ class TestCli:
         r = runner.invoke(app, ["formula", "translate", "COUNTD([c])", "--from", "tableau"])
         assert r.exit_code == 0, r.output
         assert json.loads(r.stdout)["formula"] == "unique count ( [TABLE::c])"
+        assert json.loads(r.stdout)["formula_editor"] == "unique count ( c)"
         r = runner.invoke(app, ["formula", "translate", "--from", "snowflake"], input="SUM(x)\n")
         assert json.loads(r.stdout)["formula"] == "sum ( [TABLE::x] )"
         r = runner.invoke(app, ["formula", "detect", "{FIXED [a] : SUM([b])}"])
@@ -832,3 +834,37 @@ class TestCatalog:
         valid, nonexistent = parse_catalog(text)
         assert CATALOG == frozenset(valid), "regenerate formula_translate/catalog.py CATALOG"
         assert NONEXISTENT == frozenset(nonexistent)
+
+
+class TestEditorForm:
+    """Two forms per formula: TML (bracketed, required in formulas[]) and editor (bare)."""
+
+    def test_bare_names_in_editor_brackets_in_tml(self):
+        r = translate("ROUND(SUM(amount), 2)", "snowflake")
+        assert r["formula"] == "round ( sum ( [TABLE::amount] ) , 0.01 )"
+        assert r["formula_editor"] == "round ( sum ( amount ) , 0.01 )"
+        assert any("domain guidance" in n for n in r["formula_editor_notes"])
+
+    def test_name_with_spaces_stays_bracketed_with_rename_note(self):
+        r = translate("DATEDIFF('day', [Order Date], [Ship Date])", "tableau")
+        assert r["formula_editor"] == "diff_days ( [Ship Date] , [Order Date] )"
+        assert any("underscores" in n and "'Ship Date'" in n for n in r["formula_editor_notes"])
+
+    def test_level2_uses_model_display_names_and_formula_names(self):
+        r = translate('ROUND("Total Sales", 2) + amount', "snowflake", model_ctx())
+        assert r["formula"] == "round ( [formula_Total Sales] , 0.01 ) + [ORDERS::AMOUNT]"
+        assert r["formula_editor"] == "round ( [Total Sales] , 0.01 ) + Amount"
+
+    def test_coined_default_name_uses_underscores(self):
+        r = translate("SUM(x)", "snowflake")
+        assert r["name"] == "Translated_Formula"
+        assert "id: formula_Translated_Formula" in r["tml"]
+
+    def test_literals_untouched(self):
+        r = translate("CASE WHEN a = '[x]' THEN 1 ELSE 0 END", "snowflake")
+        assert "'[x]'" in r["formula_editor"] and "'[x]'" in r["formula"]
+
+    def test_placeholder_key_not_listed_as_a_rename(self):
+        r = translate("COUNT(*)", "snowflake")
+        assert r["formula_editor"] == "count ( [<primary key>] )"
+        assert len(r["formula_editor_notes"]) == 1

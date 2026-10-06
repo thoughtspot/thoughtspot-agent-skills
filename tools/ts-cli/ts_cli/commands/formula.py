@@ -83,8 +83,10 @@ def translate_cmd(
     validate: str = typer.Option("none", "--validate",
                                  help="none | compile (VALIDATE_ONLY, creates nothing) | "
                                       "execute (scratch Model + AgentQL, deleted after)"),
-    name: str = typer.Option("Translated Formula", "--name", "-n",
-                             help="Display name for the formula (TML id is formula_<name>)"),
+    name: str = typer.Option("Translated_Formula", "--name", "-n",
+                             help="Display name for the formula (TML id is formula_<name>). "
+                                  "Prefer underscores to spaces: the editor form can then "
+                                  "reference it bare"),
     key_column: Optional[str] = typer.Option(
         None, "--key-column", help="Column to count rows by when the source has COUNT(*)"),
     group_by: Optional[str] = typer.Option(
@@ -97,7 +99,8 @@ def translate_cmd(
 ) -> None:
     """Translate ONE formula into ThoughtSpot formula syntax.
 
-    Output: JSON to stdout — {dialect, input, formula, status, classification, role,
+    Output: JSON to stdout — {dialect, input, formula (TML form, bracketed refs),
+    formula_editor (formula-editor form, bare names), status, classification, role,
     references[], unresolved[], traps[], notes[], verification, tml}. status is
     TRANSLATED | APPROXIMATED | NEEDS_REVIEW (formula null, original kept).
 

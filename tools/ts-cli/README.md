@@ -4252,14 +4252,18 @@ ts formula detect "{FIXED [Region] : SUM([Sales])}"
 | `--columns`, `-c` | Level 1 context, JSON or `@file`: `{"Sales": "ORDERS.SALES_AMT"}`, `["ORDERS.SALES_AMT"]`, or `[{source, table, column, data_type, column_type, key}]` |
 | `--model`, `-m` | Level 2 context: a Model GUID or exact name. Its TML (and its Tables', for data types) is exported and source names are matched to its columns — exact, then case/space/underscore-insensitive. **A miss is never fuzzy-matched**: it stays a placeholder in `unresolved[]` with close-match `candidates` |
 | `--validate` | `none` (default) · `compile` · `execute` — needs `--model`, see below |
-| `--name`, `-n` | Formula display name (default `Translated Formula`); TML id is `formula_<name>` |
+| `--name`, `-n` | Formula display name (default `Translated_Formula`); TML id is `formula_<name>`. Prefer underscores: the editor form can then reference it bare |
 | `--key-column` | Column to count rows by when the source has `COUNT(*)` (ThoughtSpot has no row count) |
 | `--group-by` | `execute`: the attribute a measure is probed by (default: the Model's first physical attribute) |
 | `--context` | `sisense`: the JAQL context object (`{"[rev]": {"dim": "[Orders.Revenue]", "agg": "sum"}}`), JSON or `@file`. Without it each `[key]` reads as a column named `key` |
 | `--role` | `tableau`: `measure` / `attribute` (default inferred) |
 | `--profile`, `-p` | Profile (or `TS_PROFILE`); only needed with `--model` |
 
-**Output** (stdout JSON): `dialect`, `input`, `formula` (null unless translated), `status`
+**Output** (stdout JSON): `dialect`, `input`, `formula` (the **TML form** — bracketed
+references, required in TML; null unless translated), `formula_editor` (the **formula-editor
+form** — references by display name without brackets, a name with spaces kept in brackets;
+`formula_editor_notes[]` says which and why — per ThoughtSpot domain guidance, not covered by
+`--validate`), `status`
 (`TRANSLATED` · `APPROXIMATED` · `NEEDS_REVIEW`), `classification` (`direct` ·
 `direct (downgrade)` · `passthrough` · `unmappable`), `role` (`MEASURE`/`ATTRIBUTE`),
 `agentql_wrapper` (`AGG`, or `SUM` for a semi-additive formula), `references[]`

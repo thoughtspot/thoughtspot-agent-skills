@@ -65,10 +65,12 @@ EXTRAS = {
     "sql_string_aggregate_op": "formula-patterns: SQL pass-through",
     "sql_int_aggregate_op": "formula-patterns; live-accepted 2026-10-06 (OI-5)",
     "sql_double_aggregate_op": "tableau mapping; live-accepted 2026-10-06 (OI-5)",
-    "sql_date_time_aggregate_op": "formula-patterns: SQL pass-through",
+    "sql_date_time_aggregate_op": "formula-patterns; live-accepted 2026-10-06 (BL-335)",
+    "sql_date_aggregate_op": "formula-patterns; live-accepted 2026-10-06 (BL-335)",
+    "sql_bool_aggregate_op": "formula-patterns; live-accepted 2026-10-06 (BL-335)",
 }
 # NOT accepted although the shared references list it: rejected live 2026-10-06 (OI-5).
-REJECTED_LIVE = frozenset({"sql_number_aggregate_op"})
+REJECTED_LIVE = frozenset({"sql_number_aggregate_op", "sql_number_op"})  # BL-335
 
 # Prefixes of documented function families (cumulative_*, moving_*, group_*).
 FAMILY_PREFIXES = ("cumulative_", "moving_", "group_")

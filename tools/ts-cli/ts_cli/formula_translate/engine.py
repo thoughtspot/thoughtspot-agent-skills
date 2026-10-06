@@ -13,6 +13,7 @@ from ts_cli.formula_translate.adapters import (
 )
 from ts_cli.formula_translate.context import ColumnContext
 from ts_cli.formula_translate.defects import find_defects
+from ts_cli.formula_translate.editor import editor_form
 from ts_cli.formula_translate.refs import split_literals
 from ts_cli.formula_translate.traps import (
     detect_traps, is_downgrade, output_guard, repair_count_star,
@@ -43,7 +44,7 @@ def strip_comments(source: str, dialect: str) -> tuple[str, bool]:
     cleaned = re.sub(r"[ \t]+", " ", "".join(out)).strip()
     return cleaned, cleaned != source.strip()
 
-DEFAULT_NAME = "Translated Formula"
+DEFAULT_NAME = "Translated_Formula"  # coined: underscores, so editor + TML share it
 
 _CLASSIFICATION = {TRANSLATED: "direct", APPROXIMATED: "direct (downgrade)",
                    NEEDS_REVIEW: "unmappable"}
@@ -174,6 +175,8 @@ def translate(expr: str, dialect: str, ctx: Optional[ColumnContext] = None, *,
     if _PASSTHROUGH.search(out) and status == TRANSLATED:
         result["classification"] = "passthrough"
     role = infer_role(out, ctx)
+    editor, editor_notes = editor_form(out, ctx)
     result.update(role=role["role"], agentql_wrapper=role["agentql_wrapper"], name=name,
+                  formula_editor=editor, formula_editor_notes=editor_notes,
                   tml=tml_snippet(name, out, role["role"]))
     return result
