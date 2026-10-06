@@ -24,6 +24,7 @@ from ts_cli.formula_common import (
     sql_digits_to_ts_increment,
     sql_int_digits,
     ts_round_from_sql_digits,
+    ts_weekday_number,
 )
 
 
@@ -271,7 +272,9 @@ _RENAME = {
     "GREATEST": "greatest", "LEAST": "least",
     "YEAR": "year", "MONTH": "month_number", "DAY": "day",
     "QUARTER": "quarter_number", "HOUR": "hour_of_day",
-    "DAYOFWEEK": "day_number_of_week", "DAYOFYEAR": "day_number_of_year",
+    # DAYOFWEEK / DAYOFWEEKISO deliberately do NOT live here (BL-334): a rename
+    # to day_number_of_week is a silent wrong number — see _WEEKDAY below.
+    "DAYOFYEAR": "day_number_of_year",
     "WEEKOFYEAR": "week_number_of_year",
     "DATE": "date",
     "SUM": "sum", "AVG": "average", "MIN": "min", "MAX": "max",
@@ -294,6 +297,32 @@ _DATE_TRUNC = {"day": "date", "week": "start_of_week",
                "year": "start_of_year"}
 _EXTRACT = {"YEAR": "year", "MONTH": "month_number", "DAY": "day",
             "HOUR": "hour_of_day", "QUARTER": "quarter_number"}
+# Weekday NUMBER sources -> (first day numbered `base`, base), rendered through
+# formula_common.ts_weekday_number (BL-334). ThoughtSpot day_number_of_week is
+# fixed 1 = Monday ... 7 = Sunday (live-probed 2026-10-06).
+#   DAYOFWEEK    — "Returns 0 (Sunday) to 6 (Saturday)" under WEEK_START = 0,
+#                  which is the documented default ("0 (legacy Snowflake
+#                  behavior)") — docs.snowflake.com/en/sql-reference/parameters
+#                  (WEEK_START) and .../functions-date-time (week-related parts).
+#                  A session/account with a NON-default WEEK_START (1-7) changes
+#                  the source meaning to 1-7 from that day; the translator cannot
+#                  see session parameters and assumes the default.
+#   DAYOFWEEKISO — 1 (Monday) to 7 (Sunday) regardless of WEEK_START — a clean
+#                  rename.
+# The EXTRACT/DATE_PART spellings are Snowflake's documented part aliases
+# (functions-date-time: "weekday, dow, dw" / "weekday_iso, dow_iso, dw_iso").
+_WEEKDAY = {"DAYOFWEEK": ("sunday", 0), "DAYOFWEEKISO": ("monday", 1)}
+_EXTRACT_WEEKDAY = {
+    "DAYOFWEEK": "DAYOFWEEK", "WEEKDAY": "DAYOFWEEK", "DOW": "DAYOFWEEK",
+    "DW": "DAYOFWEEK",
+    "DAYOFWEEKISO": "DAYOFWEEKISO", "WEEKDAY_ISO": "DAYOFWEEKISO",
+    "DOW_ISO": "DAYOFWEEKISO", "DW_ISO": "DAYOFWEEKISO",
+}
+
+
+def _weekday_number(name: str, date_expr: str) -> str:
+    first_day, base = _WEEKDAY[name]
+    return ts_weekday_number(date_expr, first_day=first_day, base=base)
 _DATEDIFF_UNIT = {"DAY": "diff_days", "MONTH": "diff_months",
                   "YEAR": "diff_days", "SECOND": "diff_time"}
 _DATEADD_UNIT = {"DAY": "add_days", "WEEK": "add_days",
@@ -379,6 +408,9 @@ def _call_with_args(name: str, cur: _Cursor, resolver) -> str:
         return _emit(fn, [args[1], args[0]])
     if name in _STRING_COMPOSED:
         return _STRING_COMPOSED[name](args)
+    if name in _WEEKDAY:
+        _need(args, 1, name)
+        return _weekday_number(name, args[0])
     if name in _RENAME:
         return _emit(_RENAME[name], args)
     raise UntranslatableError(
@@ -542,15 +574,19 @@ def _call_count_if(cur: _Cursor, resolver) -> str:
 
 def _call_extract(cur: _Cursor, resolver) -> str:
     kind, unit = cur.advance()
-    if kind != "ident" or unit.upper() not in _EXTRACT:
+    unit_u = unit.upper() if kind == "ident" else ""
+    if unit_u not in _EXTRACT and unit_u not in _EXTRACT_WEEKDAY:
         raise UntranslatableError(
-            f"EXTRACT unit {unit!r} not mapped (YEAR|MONTH|DAY|HOUR|QUARTER)")
+            f"EXTRACT unit {unit!r} not mapped "
+            f"(YEAR|MONTH|DAY|HOUR|QUARTER|DAYOFWEEK|DAYOFWEEKISO)")
     kw_kind, kw = cur.advance()
     if kw_kind != "kw" or kw != "FROM":
         raise UntranslatableError("EXTRACT expects '<unit> FROM <expr>'")
     inner = _expr(cur, resolver)
     cur.expect_op(")")
-    return _emit(_EXTRACT[unit.upper()], [inner])
+    if unit_u in _EXTRACT_WEEKDAY:
+        return _weekday_number(_EXTRACT_WEEKDAY[unit_u], inner)
+    return _emit(_EXTRACT[unit_u], [inner])
 
 
 def _call_iff(cur: _Cursor, resolver) -> str:

@@ -11,7 +11,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ts_cli.formula_common import sql_digits_to_ts_increment, ts_round_from_sql_digits
+from ts_cli.formula_common import (
+    WEEKDAY_FIRST_DAY_INDEX,
+    sql_digits_to_ts_increment,
+    ts_round_from_sql_digits,
+    ts_weekday_number,
+)
 from ts_cli.tableau.literals import literal_value
 from ts_cli.tableau.parsing import _extract_function_args
 
@@ -310,7 +315,7 @@ _DATEPART_UNIT_MAP = {
     "day": "day",
     "quarter": "quarter_number",
     "dayofyear": "day_number_of_year",
-    "weekday": "day_of_week",
+    # "weekday" is NOT a rename (BL-334) — see _datepart_weekday below.
     "hour": "hour_of_day",
     "week": "week_number_of_year",
 }
@@ -485,6 +490,29 @@ def _convert_dateadd(expr: str, registry: dict | None = None) -> str:
     return result
 
 
+# Tableau DATEPART('weekday', date, [start_of_week]) returns an INTEGER 1-7,
+# 1 = start_of_week; "If it is omitted, the start of week is determined by the
+# data source" (help.tableau.com .../functions_functions_date.htm). The old
+# mapping to day_of_week returned the day NAME — a string compared to numbers.
+# ThoughtSpot day_number_of_week is fixed 1 = Monday ... 7 = Sunday (live-probed
+# 2026-10-06), so the numbering is rebuilt via formula_common.ts_weekday_number.
+# Omitted start_of_week assumes SUNDAY — the en-US data-source default and the
+# one Tableau's own examples use. A data source with a different locale week
+# start numbers from that day instead; the TWB does not reliably carry it, so
+# this is an assumption the conversion cannot check (BL-334).
+_TABLEAU_DEFAULT_WEEK_START = "sunday"
+
+
+def _datepart_weekday(args: list[str], registry: dict | None) -> str | None:
+    date_expr = args[1].strip()
+    start = _TABLEAU_DEFAULT_WEEK_START
+    if len(args) >= 3:
+        start = _resolve_unit(args[2], registry)
+        if start not in WEEKDAY_FIRST_DAY_INDEX:
+            return None  # a field/parameter start day — leave it flagged
+    return ts_weekday_number(date_expr, first_day=start, base=1)
+
+
 def _convert_datepart(expr: str, registry: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATEPART\s*\(", re.IGNORECASE)
     result = expr
@@ -503,6 +531,14 @@ def _convert_datepart(expr: str, registry: dict | None = None) -> str:
         if len(args) >= 2:
             unit = _resolve_unit(args[0], registry)
             date_expr = args[1].strip()
+            if unit == "weekday":
+                replacement = _datepart_weekday(args, registry)
+                if replacement is None:
+                    search_start = end_pos
+                    continue
+                result = result[:m.start()] + replacement + result[end_pos:]
+                search_start = m.start() + len(replacement)
+                continue
             ts_func = _DATEPART_UNIT_MAP.get(unit)
             if ts_func is None:
                 # Unknown unit — no ThoughtSpot extractor exists. Leave the

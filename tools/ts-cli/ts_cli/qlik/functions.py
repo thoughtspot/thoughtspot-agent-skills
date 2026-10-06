@@ -25,7 +25,11 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Optional
 
-from ts_cli.formula_common import rewrite_marker_calls, wrap_passthrough_calls
+from ts_cli.formula_common import (
+    rewrite_marker_calls,
+    ts_weekday_number,
+    wrap_passthrough_calls,
+)
 
 # ---------------------------------------------------------------------------
 # Function-name map + translator
@@ -83,21 +87,29 @@ def _index(args: list[str]) -> Optional[str]:
 
 
 def _weekday(args: list[str]) -> Optional[str]:
-    """Qlik Weekday(date) -> ThoughtSpot day_number_of_week, origin shifted.
+    """Qlik Weekday(date[, first_week_day]) -> ThoughtSpot day_number_of_week,
+    origin shifted.
 
-    Qlik `Weekday()` returns a **number** with **0 = Monday**; ThoughtSpot
-    `day_of_week()` returns the day NAME (so the old mapping compared a name to
-    a number) and `day_number_of_week()` returns **1 = Monday**. Renaming alone
-    leaves every literal comparison off by one — `Weekday(d) = 5` would mean
-    Friday instead of Saturday — so the origin is shifted here.
+    Qlik `Weekday()` returns "an integer between 0-6" counted from the week's
+    first day; `first_week_day` is 0 = Monday ... 6 = Sunday and defaults to the
+    `FirstWeekDay` variable (help.qlik.com, WeekDay — script and chart function:
+    `weekday('10/12/1971')` = 1 for a Tuesday, `weekday('10/12/1971', 6)` = 2).
+    ThoughtSpot `day_of_week()` returns the day NAME and `day_number_of_week()`
+    is fixed 1 = Monday (live-probed 2026-10-06), so a rename is off by one on
+    every day. The shift is formula_common.ts_weekday_number (BL-217/BL-334);
+    Qlik's `first_week_day` encoding is that helper's Monday-based index.
 
-    Caveat: a Qlik app with a non-default `FirstWeekDay` numbers the days from a
-    different origin. That is app configuration the converter cannot see; the
-    shift above assumes Qlik's default. Documented on row D06.
+    Caveat: with no second argument the app's `FirstWeekDay` decides the origin.
+    That is app configuration the converter cannot see; the shift assumes 0
+    (Monday). Documented on row D06. A non-literal second argument is flagged.
     """
-    if len(args) != 1:
+    if len(args) == 1:
+        first = 0
+    elif len(args) == 2 and args[1].strip() in {str(i) for i in range(7)}:
+        first = int(args[1].strip())
+    else:
         return None
-    return f"(day_number_of_week({args[0]}) - 1)"
+    return ts_weekday_number(args[0], first_day=first, base=0, compact=True)
 
 
 # Functions needing an ARGUMENT-AWARE rewrite rather than a rename: marker

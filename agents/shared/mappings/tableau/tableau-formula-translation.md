@@ -217,7 +217,7 @@ command detects pass-through conflicts automatically and skips them.
 | `STDEV(x)` | `stddev ( x )` | Aggregate only |
 | `MEDIAN(x)` | `median ( x )` | Aggregate only |
 | `DATEPART('dayofyear', d)` | `day_number_of_year ( d )` | |
-| `DATEPART('weekday', d)` | `day_of_week ( d )` | |
+| `DATEPART('weekday', d [, start_of_week])` | `( mod ( day_number_of_week ( d ) , 7 ) + 1 )`; with `'monday'` → `day_number_of_week ( d )` | **Not `day_of_week`** — that returns the day NAME, and Tableau returns an integer "1-7" from `start_of_week` ([date functions](https://help.tableau.com/current/pro/desktop/en-us/functions_functions_date.htm)). ThoughtSpot `day_number_of_week` is fixed 1 = Monday (live-verified 2026-10-06). Omitted `start_of_week` "is determined by the data source": the converter **assumes Sunday** (the en-US default); a data source with another locale week start numbers from that day. A literal start day is honoured; a field/parameter start day is left untranslated and flagged. BL-334, fixed ts-cli 0.156.2 (`formula_common.ts_weekday_number`) |
 | `DATEPART('hour', d)` | `hour_of_day ( d )` | |
 | `DATEPART('quarter', d)` | `quarter_number ( d )` | |
 | `DATEPART('week', d)` | `week_number_of_year ( d )` | |

@@ -12426,7 +12426,24 @@ converter.
 1. **`DAYOFWEEK` → `day_number_of_week` is a plain rename in two translators**, and it is wrong:
    - `sv_sql.py`: Snowflake `DAYOFWEEK` under the default `WEEK_START = 0` is 0 = Sunday … 6 = Saturday. Exact form: `mod ( day_number_of_week ( d ) , 7 )`. `DAYOFWEEKISO` is the clean rename.
    - `databricks/mv_sql.py`: Databricks `DAYOFWEEK` is 1 = Sunday. Exact form: `mod ( day_number_of_week ( d ) , 7 ) + 1`.
-   Both are silent wrong numbers. The mapping docs now say so; the code is unchanged.
+   Both are silent wrong numbers.
+   **RESOLVED 2026-10-06 (ts-cli 0.156.2, branch `fix/dayofweek-numbering`).** Offset math now lives
+   once, in `formula_common.ts_weekday_number`, and every site imports it:
+   - `sv_sql.py`: `DAYOFWEEK` (+ `EXTRACT` parts `dayofweek`/`weekday`/`dow`/`dw`) →
+     `mod ( day_number_of_week ( d ) , 7 )`; `DAYOFWEEKISO` (+ `_iso` parts) → `day_number_of_week ( d )`.
+     Assumes the default `WEEK_START = 0`.
+   - `databricks/mv_sql.py`: `DAYOFWEEK` / `EXTRACT(DOW)` → `( mod ( day_number_of_week ( d ) , 7 ) + 1 )`;
+     `WEEKDAY` (0 = Mon) → `( day_number_of_week ( d ) - 1 )`; `EXTRACT(DAYOFWEEK_ISO)` → rename.
+   - Extra site found by the sweep: `tableau/functions.py` mapped `DATEPART('weekday', d)` to
+     `day_of_week` (the day NAME, not Tableau's 1–7 integer). Now `( mod ( day_number_of_week ( d ) , 7 ) + 1 )`
+     (Sunday = 1 assumed when `start_of_week` is omitted), honouring a literal start day.
+   - `qlik/functions.py` `Weekday()` was already correct (0 = Mon); moved onto the shared helper and now
+     honours a literal `first_week_day` argument.
+   - Reverse direction: the TS → Snowflake / TS → Databricks doc rows said `DAYOFWEEK`; corrected to
+     `DAYOFWEEKISO` / `EXTRACT(DAYOFWEEK_ISO …)`. `mv_emit_sql.py` has no `day_number_of_week` entry and
+     refuses it, so no code change there.
+   Tests: `tools/ts-cli/tests/test_weekday_numbering.py` (all seven weekdays, evaluated against a model
+   of the compiled SQL). Still to do: a live probe of the three emitted forms. Items 2–4 remain open.
 2. **Monday-start assumption everywhere.** Every translation built on `day_number_of_week` or
    `start_of_week` diverges on a Model whose calendar starts the week elsewhere: weekday numbering,
    week-number/ISO-week compositions, NETWORKDAYS/WORKDAY arithmetic, Qlik `WeekStart`, and
