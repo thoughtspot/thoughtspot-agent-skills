@@ -76,7 +76,7 @@ Resolution:
 | `concat(a, b)` | `CONCAT(a, b)` | |
 | `strlen(s)` | `LENGTH(s)` | |
 | `strpos(s, sub)` | `LOCATE(sub, s)` | Argument order reversed. **Case semantics differ (BL-333):** ThoughtSpot's native form is case-insensitive — it lowercases both sides at compile time (live-verified 2026-10-06, se-thoughtspot; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-comparison-is-case-insensitive)) — while Databricks' default `UTF8_BINARY` collation is case-sensitive. Exact only on data of consistent case; the translator is unchanged. |
-| `substr(s, start, len)` | `SUBSTRING(s, start, len)` | |
+| `substr(s, start, len)` | `SUBSTRING(s, start + 1, len)` | **Not a rename (BL-340):** TS `substr` is zero-based (compiles to `SUBSTRING(s, (start + 1), len)`), Databricks `pos` is 1-based ([substring](https://docs.databricks.com/aws/en/sql/language-manual/functions/substring)). The code emitter (`mv_emit_sql.py`) has no `substr` entry and refuses it rather than mis-emitting. Reverse direction: see the Databricks → ThoughtSpot table |
 | `sql_string_op("LOWER({0})", s)` | `LOWER(s)` | Auto-translated pass-through (ts-cli v0.50.0) |
 | `sql_string_op("UPPER({0})", s)` | `UPPER(s)` | Auto-translated pass-through (ts-cli v0.50.0) |
 | `sql_string_op("TRIM({0})", s)` | `TRIM(s)` | **No native `trim` in ThoughtSpot** — pass-through (live-verified 2026-07-29, se-thoughtspot — BL-170) |
@@ -136,7 +136,7 @@ Resolution:
 | `diff_days(end, start)` | `DATEDIFF(end, start)` | **Same order** — both take the later date first (Databricks `datediff(endDate, startDate)` = days from start to end; TS `diff_days(end, start)`, live-verified 2026-10-06). The 2-arg form returns days only (BL-336) |
 | `diff_days(end, start)` | `DATEDIFF(DAY, start, end)` | 3-arg form (`datediff(unit, start, end)` = end − start): unit first, then start, end; TS takes end first, so swap the dates (BL-336) |
 | `diff_months(end, start)` | `DATEDIFF(MONTH, start, end)` | 3-arg form: unit first, then start, end; TS takes end first, so swap the dates (BL-336). TS `diff_months` counts month boundaries (live-verified 2026-10-06); Databricks `DATEDIFF(MONTH, …)` / `timestampdiff` counts **complete** months (Databricks docs — `timestampdiff` semantics; not probed here), so the two differ by one when the end's day-of-month is before the start's |
-| `diff_months(end, start)` | `MONTHS_BETWEEN(end, start)` | **Same order** — `months_between(expr1, expr2)` is positive when expr1 is later. Not exact: `MONTHS_BETWEEN` returns fractional months, `diff_months` counts month boundaries (BL-336) |
+| *(no direct equivalent)* | `MONTHS_BETWEEN(end, start)` | **Not `diff_months` (BL-342):** `months_between` is fractional — 31-day months, integral when both are the same day of the month or both month ends, "rounded to 8 digits unless `roundOff = false`" ([months_between](https://docs.databricks.com/aws/en/sql/language-manual/functions/months_between)) — while `diff_months` counts month boundaries |
 | `year(d)` | `EXTRACT(YEAR FROM d)` | `EXTRACT` form — same as `YEAR(d)` |
 | `month_number(d)` | `EXTRACT(MONTH FROM d)` | `EXTRACT` form — same as `MONTH(d)` |
 | `day(d)` | `EXTRACT(DAY FROM d)` | `EXTRACT` form — same as `DAY(d)` |
@@ -831,7 +831,8 @@ formula equivalents:
 | `DATEDIFF(end, start)` | `diff_days(end, start)` — same order; both take the later date first (BL-336) |
 | `DATEDIFF(MONTH, start, end)` | `diff_months(end, start)` — 3-arg form; swap start/end for TS (BL-336) — **semantic gap:** Databricks counts complete months, `diff_months` counts month boundaries (live-verified 2026-10-06), so Jan 31 → Feb 1 is 0 in Databricks and 1 in ThoughtSpot |
 | `DATEDIFF(DAY, start, end)` | `diff_days(end, start)` — 3-arg form; swap start/end for TS (BL-336) |
-| `MONTHS_BETWEEN(end, start)` | `diff_months(end, start)` — same order; fractional vs month boundaries, so approximate (BL-336) |
+| `MONTHS_BETWEEN(end, start[, roundOff])` | `sql_double_op("months_between({0}, {1})", end, start)` — same order (BL-336); a literal `roundOff` is kept (`months_between({0}, {1}, FALSE)`), a non-literal one or an aggregate argument is refused. **Fixed ts-cli 0.158.1 (BL-342):** it was `diff_months(end, start)` marked as a translation, a boundary count rather than fractional months (Jan 20 → Mar 15: 2 vs 1.83870968). Exact by construction; read from the docs and the shared Snowflake M0 evidence, not run on a Databricks cluster |
+| `SUBSTRING(s, pos, len)` / `SUBSTR(s, pos, len)` | `substr(s, pos - 1, len)`, folded for a literal `pos` (`SUBSTRING(s, 2, 3)` → `substr(s, 1, 3)`); `SUBSTRING(s, pos)` → `substr(s, pos - 1, strlen(s))`. A literal `pos` ≤ 0 or a non-literal `pos` → `sql_string_op("SUBSTRING({0}, -3, 2)", s)`: a negative `pos` counts from the end. **Fixed ts-cli 0.158.1 (BL-340):** it was a bare rename to the zero-based `substr`, shifting every substring one character. Same shared helper as Snowflake (`formula_common.sql_substr_to_ts`) |
 | `EXTRACT(YEAR FROM d)` | `year(d)` |
 | `EXTRACT(MONTH FROM d)` | `month_number(d)` |
 | `EXTRACT(DAY FROM d)` | `day(d)` |
