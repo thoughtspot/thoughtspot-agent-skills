@@ -4314,8 +4314,14 @@ always printed.
 ### `ts formula detect [EXPR]`
 
 Scores which language a formula is written in. Output: `{best, guess, ambiguous, ask[],
-candidates[{dialect, score, signals, backing, map?}]}`. `ambiguous` is true when the top two
-are within one point, when nothing matched, and **always** for Excel / Google Sheets / Omni
+candidates[{dialect, score, signals, backing, map?, fallback_map?}]}`. `ambiguous` is true when
+the top two are within one point, when nothing matched, and for Excel / Google Sheets / Omni
 table calc and for LookML / Omni (same grammar) — then ask the user to choose among `ask[]`.
-`backing` is `translator` (this command), `map` (`docs/function-maps/`, translated by the
-skill) or `none`.
+The one exception: a function only Google Sheets has (the Sheets map's Sheets-only rows —
+`QUERY`, `ARRAYFORMULA`, `IMPORTRANGE`, `REGEXMATCH`, the operator functions, …) settles
+`google_sheets`. Names another dialect also has (`TO_DATE`, `SPLIT`, `FLATTEN`, `POW`, `JOIN`,
+`MINUS`, `ISDATE`, DAX `DIVIDE`) count only beside spreadsheet context (a leading `=`, an A1
+or whole-column reference). `backing` is `translator` (this command), `map`
+(`docs/function-maps/`, translated by the skill) or `none`. `google_sheets` names the Sheets
+map as `map` and the Excel map as `fallback_map`: the Sheets map is a delta, so a name it does
+not row takes its Excel row.

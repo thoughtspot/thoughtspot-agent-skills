@@ -446,6 +446,99 @@ class TestDetect:
 
 
 # ---------------------------------------------------------------------------
+# Google Sheets — signals, collisions and the delta-map routing (BL-338)
+# ---------------------------------------------------------------------------
+
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
+
+SHEETS_STRONG = [
+    '=QUERY(A1:D100, "select A, sum(D) group by A")',
+    "=ARRAYFORMULA(A2:A * B2:B)",
+    'IMPORTRANGE("https://docs.google.com/x", "Sheet1!A1:C10")',
+    'IMPORTDATA("https://example.com/x.csv")',
+    'IMPORTHTML("https://example.com", "table", 1)',
+    'IMPORTXML("https://example.com", "//a")',
+    'GOOGLEFINANCE("NASDAQ:GOOG")',
+    'GOOGLETRANSLATE(name, "en", "fr")',
+    "SPARKLINE(B2:B20)",
+    'REGEXMATCH(name, "^A")',
+    "COUNTUNIQUE(customer)",
+    'COUNTUNIQUEIFS(customer, region, "East")',
+    "EPOCHTODATE(ts, 2)",
+    "TO_PERCENT(ratio)", "TO_DOLLARS(amount)", "TO_TEXT(amount)", "TO_PURE_NUMBER(amount)",
+    "ISEMAIL(contact)", "ISURL(site)",
+    "SORTN(data, 5)",
+    *[f"{op}(a, b)" for op in ("ADD", "MULTIPLY", "EQ", "NE", "GT", "GTE", "LT", "LTE")],
+    "UMINUS(a)", "UPLUS(a)",
+    # colliding names, settled by spreadsheet context
+    "=TO_DATE(A2)", '=SPLIT(A2, ",")', '=JOIN(",", A2:A10)', "=FLATTEN(A2:B10)",
+    "=DIVIDE(A2, B2)", "=MINUS(A2, B2)",
+]
+
+# Must NOT route to Sheets: these names belong to another supported dialect too.
+SHEETS_COLLISIONS = [
+    ("TO_DATE(order_date)", {"snowflake", "databricks", "qlik"}),
+    ("SPLIT(s, ',')", {"snowflake", "databricks", "qlik"}),
+    ("split(tags, ',')", {"snowflake", "databricks", "qlik"}),
+    ("FLATTEN(input => arr)", None),
+    ("DIVIDE(SUM(Sales[Amount]), SUM(Sales[Qty]))", "dax"),
+    ("DIVIDE([Profit], [Revenue])", None),
+    ("ISDATE([Order Date])", None),
+]
+
+
+class TestSheets:
+    def test_sheets_only_matches_the_map(self):
+        """SHEETS_ONLY is the map's rowed names minus the shared names it reconciles."""
+        import re as _re
+        from ts_cli.formula_translate.detect import SHEETS_ONLY
+        text = (_REPO / "docs/function-maps/ts-sheets-function-mapping.md").read_text()
+        rowed = set(_re.findall(r"^\| `([A-Z][A-Z0-9_.]*)\(", text, _re.M))
+        recon = text.split("## Same as the Excel map (reconciliation)", 1)[1]
+        shared_line = next(ln for ln in recon.splitlines() if ln.startswith("(`"))
+        shared = set(_re.findall(r"`([A-Z][A-Z0-9_.]*)`", shared_line))
+        assert len(shared) == 17, shared
+        assert rowed - shared == SHEETS_ONLY
+        assert len(SHEETS_ONLY) == 46
+
+    @pytest.mark.parametrize("expr", SHEETS_STRONG)
+    def test_strong_signal_routes_to_sheets(self, expr):
+        r = detect(expr)
+        assert r["best"] == "google_sheets" and r["ambiguous"] is False, r
+
+    @pytest.mark.parametrize("expr,expected", SHEETS_COLLISIONS)
+    def test_collisions_do_not_route_to_sheets(self, expr, expected):
+        r = detect(expr)
+        assert r["best"] != "google_sheets" and r["guess"] != "google_sheets", r
+        assert "google_sheets" not in r["ask"], r
+        if isinstance(expected, str):
+            assert r["best"] == expected
+        elif expected:
+            assert r["ambiguous"] and set(r["ask"]) == expected
+
+    def test_shared_names_are_not_sheets_evidence(self):
+        # REGEXEXTRACT / REGEXREPLACE are Excel 365 functions too: still the must-ask family
+        r = detect('=REGEXEXTRACT(A2, "[0-9]+")')
+        assert r["ambiguous"] and set(r["ask"]) == {"excel", "google_sheets", "omni_table_calc"}
+
+    def test_routing_reads_sheets_map_first_then_excel(self):
+        c = {x["dialect"]: x for x in detect('=QUERY(A1:D9, "select A")')["candidates"]}
+        assert c["google_sheets"]["map"] == "docs/function-maps/ts-sheets-function-mapping.md"
+        assert c["google_sheets"]["fallback_map"] == "docs/function-maps/ts-excel-function-mapping.md"
+        assert c["excel"]["map"] == "docs/function-maps/ts-excel-function-mapping.md"
+        assert "fallback_map" not in c["excel"]
+        for x in ("google_sheets", "excel"):
+            assert (_REPO / c[x]["map"]).is_file()
+
+    def test_fallback_map_rows_a_name_the_delta_does_not(self):
+        """E1: VLOOKUP has no Sheets row, so it is read from the Excel row."""
+        sheets = (_REPO / "docs/function-maps/ts-sheets-function-mapping.md").read_text()
+        excel = (_REPO / "docs/function-maps/ts-excel-function-mapping.md").read_text()
+        assert "| `VLOOKUP(" not in sheets and "`VLOOKUP`" in sheets
+        assert "| `VLOOKUP(" in excel
+
+
+# ---------------------------------------------------------------------------
 # Validation — scratch TML + cleanup under simulated failures
 # ---------------------------------------------------------------------------
 

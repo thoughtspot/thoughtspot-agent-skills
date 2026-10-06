@@ -19,7 +19,8 @@ rests on an unprobed composition says so *on the same line*.
 | [../../../docs/superpowers/specs/2026-10-06-ts-object-formula-translate-design.md](../../../docs/superpowers/specs/2026-10-06-ts-object-formula-translate-design.md) | Design (§1–§10) and implementation notes (§12) |
 | [../../../tools/ts-cli/README.md](../../../tools/ts-cli/README.md) | `ts formula translate` / `ts formula detect` — every flag and output key |
 | [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | ThoughtSpot formula ground truth — read before writing any map-backed formula |
-| [../../../docs/function-maps/ts-excel-function-mapping.md](../../../docs/function-maps/ts-excel-function-mapping.md) | Excel, Google Sheets and Omni table calcs (map-backed) |
+| [../../../docs/function-maps/ts-excel-function-mapping.md](../../../docs/function-maps/ts-excel-function-mapping.md) | Excel and Omni table calcs (map-backed); Google Sheets' fallback for every name the Sheets map does not row |
+| [../../../docs/function-maps/ts-sheets-function-mapping.md](../../../docs/function-maps/ts-sheets-function-mapping.md) | Google Sheets (map-backed) — a **delta** on the Excel map; read it first |
 | [../../../docs/function-maps/ts-sigma-function-mapping.md](../../../docs/function-maps/ts-sigma-function-mapping.md) | Sigma (map-backed) |
 | [../../../docs/function-maps/ts-omni-function-mapping.md](../../../docs/function-maps/ts-omni-function-mapping.md) | Omni modelling layer, table calcs, filters (map-backed) |
 | [references/open-items.md](references/open-items.md) | OI-1…OI-5 — the live probes the traps rest on |
@@ -68,10 +69,14 @@ unless a formula's shape clearly differs.
 | `ambiguous: true`, `ask: [A, B, …]` | **Ask**, listing only `ask[]`: "Is this A or B?" Do not guess. |
 | `ambiguous: true`, `ask: []` | Nothing matched: "Which tool is this from?" |
 
-Always ask (the CLI marks these ambiguous every time): **Excel vs Google Sheets vs Omni table
-calc** — one grammar, and an Omni `OFFSET` read as an Excel cell reference is wrong; and
-**LookML vs Omni** for `${view.field}`. If the user already said which tool, skip the
-question and use their answer.
+Always ask (the CLI marks these ambiguous): **Excel vs Google Sheets vs Omni table calc** —
+one grammar, and an Omni `OFFSET` read as an Excel cell reference is wrong — unless a
+**Sheets-only function** fired (`QUERY`, `ARRAYFORMULA`, `IMPORTRANGE`, `REGEXMATCH`,
+`COUNTUNIQUE`, the operator functions `ADD`/`EQ`/`GT`…; the Sheets map's Sheets-only rows):
+that settles Google Sheets. `TO_DATE`, `SPLIT`, `FLATTEN`, `POW`, `JOIN`, `MINUS`, `ISDATE`
+and `DIVIDE` are also Snowflake/Databricks/Tableau/Qlik/DAX spellings, so they count for
+Sheets only beside a leading `=` or a cell reference. And always ask **LookML vs Omni** for
+`${view.field}`. If the user already said which tool, skip the question and use their answer.
 
 Detection is sticky for the session: reuse the confirmed dialect for the next formula unless
 its shape changes.
@@ -132,8 +137,30 @@ answer.
 There is no translator; **you** compose the formula from the map, and the map — not you —
 supplies the classification and the verification status.
 
-1. Open the map for the confirmed dialect (References). Read its *How to read the tables*
-   rules (Excel E1–E18, Sigma and Omni their own) and its gaps / *Unverified* section.
+1. Open the map for the confirmed dialect (References; `detect`'s candidate names it as
+   `map`). Read its *How to read the tables* rules (Excel E1–E18, Sheets E1–E9, Sigma and
+   Omni their own) and its gaps / *Unverified* section.
+   **Google Sheets reads two maps, in order** (the Sheets map's E1; `detect` names the
+   second as `fallback_map`): a name **rowed in the Sheets map** takes that row — it either
+   has no Excel namesake or behaves differently from it (`REGEXEXTRACT` capture groups,
+   default `SPLIT`, Unicode `CODE`, one-argument `IFERROR`, `QUERY`); a name marked **‡** in
+   its reconciliation list is an Excel compatibility alias and takes its **successor's**
+   Excel row (`STDEV` → `STDEV.S`); **any other name takes its Excel map row** unchanged. For
+   each row, cite the map it came from (*Sheets map, Text, `SPLIT`* / *Excel map via Sheets E1,
+   Lookup, `VLOOKUP`*). Sheets traps that apply whatever a row says:
+   - **`QUERY` is structural** — its `select` / `where` / `group by` / `order by` become the
+     Model and Answer's columns, filters, attributes and sort, not a formula (map E9 and its
+     clause table). Its string matching is **case-sensitive** where ThoughtSpot's `=` is
+     not (E4), so a QUERY string filter needs the passthrough the clause table gives.
+   - **`ARRAYFORMULA` is a no-op only when the inner expression is element-wise**
+     (arithmetic, `IF`, per-cell text and date functions — drop it and translate the inside).
+     Around `COUNTIF`/`SUMIF` over the same range it is a fixed-grain `group_aggregate`, and
+     around `AND`/`OR` it collapses to one value (E6).
+   - **One-argument `IFERROR` means NULL, not 0**: `IFERROR(A2 / B2)` is
+     `[a] / nullif ( [b] , 0 )`, never `safe_divide` (which returns 0).
+   - **`NETWORKDAYS` / `NETWORKDAYS.INTL` holiday arrays hold serials or `DATE()`
+     values, never text dates**: convert each by its form (a serial via E3, `DATE(y, m, d)`
+     folded to one `to_date` literal), then apply the Excel row's holiday term.
 2. For **every function** in the formula, find its row. Record: section, the row's
    **Class**, its ThoughtSpot cell, and anything its Notes say about arguments. Operators,
    literals and references have rows in Sigma and Omni (*Operators and constructs*,
@@ -335,4 +362,5 @@ stderr names every remaining GUID. Repeat each GUID to the user with the command
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-10-06 | Google Sheets reads the Sheets delta map first, then the Excel map for names it does not row (‡ aliases → their successor); `ts formula detect` (ts-cli 0.157.1) settles Sheets on a Sheets-only function and reports `fallback_map`; Sheets traps for `QUERY`, `ARRAYFORMULA`, one-argument `IFERROR` and holiday arrays (BL-338) |
 | 1.0.0 | 2026-10-06 | Initial release — one formula from Tableau, DAX, Qlik, Sisense, Snowflake or Databricks via `ts formula translate` (ts-cli 0.157.0), and Excel / Sheets / Omni / Sigma from the function maps; scored dialect detection with must-ask ties; three column-context levels; traps, references and TML snippet; `compile` (VALIDATE_ONLY, no objects) and `execute` (scratch Model, deleted) validation |

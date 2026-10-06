@@ -7,7 +7,9 @@ ranked, with ``ambiguous`` set when the caller MUST ask rather than confirm:
 - the best candidate rests only on weak signals (score below ``MIN_CONFIDENT_SCORE``);
 - the best is Snowflake or Databricks and no signal unique to one of them fired;
 - the best candidate is in a must-ask family — Excel / Google Sheets / Omni table calc
-  share one grammar, and LookML / Omni share ``${view.field}``.
+  share one grammar, and LookML / Omni share ``${view.field}`` — unless a signal unique
+  to the best candidate fired (today: a Google Sheets-only function, which settles
+  Sheets; see ``SHEETS_ONLY``).
 
 ``ask`` lists only the tied candidates (spec §4: "the question lists only the tied
 candidates"). Weights: 3 = a construct only one language has, 2 = strong, 1 = weak.
@@ -20,13 +22,55 @@ from typing import Any
 MARGIN = 1
 
 TRANSLATOR_BACKED = {"tableau", "dax", "qlik", "sisense", "snowflake", "databricks"}
+EXCEL_MAP = "docs/function-maps/ts-excel-function-mapping.md"
+SHEETS_MAP = "docs/function-maps/ts-sheets-function-mapping.md"
 MAP_BACKED = {
-    "excel": "docs/function-maps/ts-excel-function-mapping.md",
-    "google_sheets": "docs/function-maps/ts-excel-function-mapping.md",
+    "excel": EXCEL_MAP,
+    # The Sheets map is a DELTA on the Excel map (BL-338): read it first; a name it does
+    # not row takes its Excel row (a ‡ compatibility alias takes its successor's) — its E1.
+    "google_sheets": SHEETS_MAP,
     "omni_table_calc": "docs/function-maps/ts-omni-function-mapping.md",
     "omni": "docs/function-maps/ts-omni-function-mapping.md",
     "sigma": "docs/function-maps/ts-sigma-function-mapping.md",
 }
+# A map-backed dialect whose map is a delta: names it does not row fall back to this map.
+MAP_FALLBACK = {"google_sheets": EXCEL_MAP}
+
+# The functions Google Sheets has and Excel does not — the Sheets map's rowed names minus
+# the 17 shared names its reconciliation lists (test_formula_translate checks this set
+# against the map, so the two cannot drift). Shared names such as REGEXEXTRACT and
+# REGEXREPLACE (Excel 365 has both) are deliberately absent: they are not Sheets evidence.
+SHEETS_ONLY = frozenset({
+    "ADD", "MINUS", "MULTIPLY", "DIVIDE", "POW", "UMINUS", "UPLUS", "UNARY_PERCENT",
+    "EQ", "NE", "GT", "GTE", "LT", "LTE", "ISBETWEEN",
+    "AVERAGE.WEIGHTED", "COUNTUNIQUE", "COUNTUNIQUEIFS", "MARGINOFERROR",
+    "JOIN", "REGEXMATCH", "SPLIT",
+    "EPOCHTODATE", "ISDATE", "ISEMAIL", "ISURL",
+    "TO_DATE", "TO_DOLLARS", "TO_PERCENT", "TO_PURE_NUMBER", "TO_TEXT",
+    "ARRAY_CONSTRAIN", "ARRAYFORMULA", "CONTINUE", "FLATTEN", "SORTN", "QUERY",
+    "AI", "GOOGLEFINANCE", "GOOGLETRANSLATE",
+    "IMPORTDATA", "IMPORTFEED", "IMPORTHTML", "IMPORTRANGE", "IMPORTXML", "SPARKLINE",
+})
+# Sheets-only names that another supported dialect also spells as a function or keyword:
+# TO_DATE / SPLIT / FLATTEN / POW (Snowflake, Databricks; SPLIT also Tableau, POW also
+# Qlik), DIVIDE (DAX), JOIN / MINUS (SQL keywords before a subquery), ISDATE (Tableau).
+# These count for Sheets ONLY beside spreadsheet context (a leading ``=``, an A1 or
+# whole-column reference, ``Sheet!ref``); alone they are no evidence at all.
+SHEETS_COLLIDING = frozenset({"TO_DATE", "SPLIT", "FLATTEN", "POW", "DIVIDE", "JOIN",
+                              "MINUS", "ISDATE"})
+SHEETS_STRONG_LABEL = "Sheets-only fn"
+SHEETS_CONTEXT_LABEL = "Sheets-only fn (spreadsheet context)"
+_SPREADSHEET_CONTEXT = {"leading =", "A1 cell / range reference", "whole-column range",
+                        "Sheet!ref"}
+
+
+def _fn_pattern(names: frozenset[str]) -> "re.Pattern[str]":
+    alts = "|".join(re.escape(n) for n in sorted(names, key=lambda n: (-len(n), n)))
+    return re.compile(rf"(?<![\w.])(?:{alts})\s*\(", re.I)
+
+
+_SHEETS_STRONG_RE = _fn_pattern(SHEETS_ONLY - SHEETS_COLLIDING)
+_SHEETS_COLLIDING_RE = _fn_pattern(SHEETS_COLLIDING)
 # Families whose members cannot be told apart from the text alone.
 MUST_ASK_FAMILIES = [
     {"excel", "google_sheets", "omni_table_calc"},
@@ -141,6 +185,13 @@ def _score(text: str) -> tuple[dict[str, int], dict[str, list[str]]]:
     for twin in ("google_sheets", "omni_table_calc"):
         scores[twin] = scores["excel"]
         signals[twin] = list(signals["excel"])
+    # ...plus what only Sheets has. A colliding name counts only in spreadsheet context.
+    if _SHEETS_STRONG_RE.search(text):
+        scores["google_sheets"] += 3
+        signals["google_sheets"].append(SHEETS_STRONG_LABEL)
+    if _SPREADSHEET_CONTEXT & set(signals["excel"]) and _SHEETS_COLLIDING_RE.search(text):
+        scores["google_sheets"] += 3
+        signals["google_sheets"].append(SHEETS_CONTEXT_LABEL)
     return scores, signals
 
 
@@ -148,7 +199,10 @@ def _backing(d: str) -> dict[str, Any]:
     if d in TRANSLATOR_BACKED:
         return {"backing": "translator"}
     if d in MAP_BACKED:
-        return {"backing": "map", "map": MAP_BACKED[d]}
+        out = {"backing": "map", "map": MAP_BACKED[d]}
+        if d in MAP_FALLBACK:
+            out["fallback_map"] = MAP_FALLBACK[d]
+        return out
     return {"backing": "none"}
 
 
@@ -162,8 +216,10 @@ def _tie(ranked: list[str], scores: dict[str, int],
     if best in SQL_PAIR and not (SQL_UNIQUE & set(signals[best])):
         ambiguous = True
         tied = sorted(set(tied) | SQL_PAIR, key=lambda d: (-scores[d], d))
+    sheets_settled = best == "google_sheets" and bool(
+        {SHEETS_STRONG_LABEL, SHEETS_CONTEXT_LABEL} & set(signals[best]))
     for fam in MUST_ASK_FAMILIES:
-        if best in fam:
+        if best in fam and not sheets_settled:
             ambiguous = True
             tied = sorted(set(tied) | fam, key=lambda d: (-scores[d], d))
     return ambiguous, tied, best

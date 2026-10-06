@@ -216,7 +216,7 @@ are roughly ordered by value÷effort.
 | BL-333 | ThoughtSpot string comparison (`=`, `contains`, `strpos`) is case-insensitive — Snowflake SV / Databricks MV / Tableau / Qlik / Looker translations of case-sensitive comparisons change semantics silently | 2026-11-30 |
 | BL-334 | ~~`DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`~~ (item 1 FIXED, ts-cli 0.156.2 — also Tableau and Qlik weekday numbering); week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
 | BL-335 | `sql_number_aggregate_op` does not exist (parser rejects it; `sql_double_aggregate_op` is the numeric aggregate) — repo docs fixed; upstream apache/ossie converter still emits it, fix held with the Ossie upstream work | 2026-11-30 |
-| BL-338 | `ts-object-formula-translate` routes the `google_sheets` dialect to the Excel function map (`formula_translate/detect.py:25`), so Sheets formulas skip the Sheets delta map (REGEXEXTRACT groups, SPLIT defaults, CODE, IFERROR default, QUERY) | next ts-object-formula-translate change |
+| ~~BL-338~~ | ~~`ts-object-formula-translate` routes the `google_sheets` dialect to the Excel function map (`formula_translate/detect.py:25`), so Sheets formulas skip the Sheets delta map (REGEXEXTRACT groups, SPLIT defaults, CODE, IFERROR default, QUERY)~~ | DONE (2026-10-06 — ts-cli v0.157.1, skill 1.1.0) |
 
 ### Tier 3 — Opportunistic
 
@@ -12579,8 +12579,19 @@ view for heavy compositions.
 
 ## BL-338 — ts-object-formula-translate routes Google Sheets to the Excel map, not the Sheets delta map `Tier 2`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.157.1, ts-object-formula-translate 1.1.0).
 **Source:** PR #566 (Google Sheets delta function map), gap G8 there.
+
+**Resolution.** `detect.py` now names the Sheets map as `google_sheets`' `map` and the Excel
+map as its `fallback_map`; SKILL.md Step 4b reads the Sheets map first and falls back per its E1
+(‡ aliases to their successor's Excel row), with the Sheets traps (`QUERY` structural and
+case-sensitive, `ARRAYFORMULA` element-wise only, one-argument `IFERROR` → `nullif`, holiday
+arrays as serials or `DATE()`). Detection also gained Sheets evidence: a function from the
+map's 46 Sheets-only rows (`SHEETS_ONLY`, checked against the map by a test) settles Sheets
+out of the Excel / Sheets / Omni must-ask family; the names other dialects share (`TO_DATE`,
+`SPLIT`, `FLATTEN`, `POW`, `JOIN`, `MINUS`, `ISDATE`, DAX `DIVIDE`) count only beside
+spreadsheet context. `REGEXEXTRACT` / `REGEXREPLACE` are shared with Excel 365, so they are
+not Sheets evidence.
 
 **The problem.** `tools/ts-cli/ts_cli/formula_translate/detect.py:25` maps the `google_sheets`
 dialect to `docs/function-maps/ts-excel-function-mapping.md`, and
