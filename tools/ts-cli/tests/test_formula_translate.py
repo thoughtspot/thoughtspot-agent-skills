@@ -325,8 +325,10 @@ class TestGoldenTraps:
     def test_case_insensitive_compare_flagged_for_case_sensitive_dialects(self):
         r = translate("CASE WHEN status = 'Open' THEN 1 ELSE 0 END", "snowflake")
         assert any("case-INSENSITIVE" in t for t in r["traps"])
+        assert r["status"] == APPROXIMATED  # differs for values differing only in case
         r2 = translate("IF(Sales[Status] = \"Open\", 1, 0)", "dax")  # DAX is case-insensitive
         assert not any("case-INSENSITIVE" in t for t in (r2["traps"] or []))
+        assert r2["status"] == TRANSLATED
 
     def test_monday_week_start_flag(self):
         traps = detect_traps("snowflake", "DATE_TRUNC('week', d)", "start_of_week ( [T::d] )")
@@ -396,9 +398,10 @@ DETECT_CORPUS = [
     ("RangeSum(Above(Sum(Sales), 0, 3))", "qlik"),
     ("YTDSUM([rev])", "sisense"),
     ("DateDiff(\"day\", [Orders/Order Date], [Orders/Ship Date])", "sigma"),
-    ("IFF(status = 'X', amount, 0)", "snowflake"),
-    ("DATEADD(day, 7, order_date)", "snowflake"),
-    ("amount::FLOAT / qty", "snowflake"),
+    ("DIV0(SUM(amount), COUNT(*))", "snowflake"),
+    ("TO_VARCHAR(order_date)", "snowflake"),
+    ("DATEDIFF(\"day\", [Order Date], [Ship Date])", "tableau"),
+    ("datediff(ship_date, order_date)", "databricks"),
     ("SUM(`amount`)", "databricks"),
     ("date_add(order_date, 7)", "databricks"),
 ]
@@ -408,6 +411,12 @@ DETECT_TIES = [
     ("SUM(B2:B10)", {"excel", "google_sheets", "omni_table_calc"}),
     ("${orders.amount} * 2", {"lookml", "omni"}),
     ("CASE WHEN a > 1 THEN 1 ELSE 0 END", {"snowflake", "databricks"}),
+    # Databricks has IFF, :: and DATEDIFF(unit, …) too: shared signals never settle the pair
+    ("IFF(status = 'X', amount, 0)", {"snowflake", "databricks"}),
+    ("DATEADD(day, 7, order_date)", {"snowflake", "databricks"}),
+    ("amount::FLOAT / qty", {"snowflake", "databricks"}),
+    # [A/B] alone is weak evidence: asked, not confirmed
+    ("[Orders/Revenue] * 2", {"sigma"}),
     ("SUM([Sales])", {"tableau", "dax", "qlik", "sisense", "sigma"}),
     ("sum(amount)", {"snowflake", "databricks", "qlik"}),
 ]
@@ -619,10 +628,50 @@ class TestValidator:
                 raise RuntimeError("network")
             return orig(path, json=json, raise_for_status=raise_for_status)
         c.post = boom
-        v = Validator(c)
-        with pytest.raises(RuntimeError):
-            v.run("execute", MODEL, "Probe", "sum ( [ORDERS::AMOUNT] )", "MEASURE", "AGG", name="ZZ_T")
-        assert not c.objects
+        out = Validator(c).run("execute", MODEL, "Probe", "sum ( [ORDERS::AMOUNT] )",
+                               "MEASURE", "AGG", name="ZZ_T")
+        assert out["result"] == "ERROR" and "network" in out["error"]
+        assert not c.objects and out["scratch"]["confirmed_absent"]
+
+    def test_delete_failure_logs_guid(self):
+        logged = []
+        c = FakeClient(delete_fails=True)
+        Validator(c, log=logged.append).run("execute", MODEL, "Probe", "sum ( [ORDERS::AMOUNT] )",
+                                            "MEASURE", "AGG", name="ZZ_T")
+        assert any("scratch-1" in m and "ts metadata delete" in m for m in logged)
+
+    def test_search_failure_during_cleanup_is_not_absent(self):
+        logged = []
+        c = FakeClient()
+        orig = c.post
+        state = {"imported": False}
+
+        def flaky(path, json=None, raise_for_status=True):
+            if path.endswith("/tml/import") and json["import_policy"] == "ALL_OR_NONE":
+                state["imported"] = True
+            if path.endswith("/metadata/search") and state["imported"]:
+                raise RuntimeError("search down")
+            return orig(path, json=json, raise_for_status=raise_for_status)
+        c.post = flaky
+        out = Validator(c, log=logged.append).run("execute", MODEL, "Probe", "1", "ATTRIBUTE",
+                                                  None, name="ZZ_T")
+        assert out["scratch"]["confirmed_absent"] is False
+        assert out["scratch"]["remaining"] == ["scratch-1"] and logged
+
+    def test_ctrl_c_during_cleanup_logs_and_reraises(self):
+        logged = []
+        c = FakeClient()
+        orig = c.post
+
+        def interrupt(path, json=None, raise_for_status=True):
+            if path.endswith("/metadata/delete"):
+                raise KeyboardInterrupt
+            return orig(path, json=json, raise_for_status=raise_for_status)
+        c.post = interrupt
+        with pytest.raises(KeyboardInterrupt):
+            Validator(c, log=logged.append).run("execute", MODEL, "Probe", "1", "ATTRIBUTE",
+                                                None, name="ZZ_T")
+        assert any("scratch-1" in m for m in logged)
 
 
 # ---------------------------------------------------------------------------
@@ -670,3 +719,116 @@ class TestThoughtSpotIdentity:
     def test_placeholder_table_resolves_at_level2(self):
         r = translate("sum ( [TABLE::Amount] )", "thoughtspot", model_ctx())
         assert r["formula"] == "sum ( [ORDERS::AMOUNT] )" and not r["unresolved"]
+
+
+# ---------------------------------------------------------------------------
+# Review round 2 (2026-10-06): known defects, output guard, dialect fixes
+# ---------------------------------------------------------------------------
+
+class TestKnownDefects:
+    @pytest.mark.parametrize("dialect,src,cite", [
+        ("databricks", "datediff(ship_date, order_date)", "fix/databricks-datediff-order"),
+        ("snowflake", "DAYOFWEEK(order_date)", "BL-334"),
+        ("databricks", "dayofweek(order_date)", "BL-334"),
+        ("tableau", "DATEPART('weekday', [Order Date])", "BL-334"),
+    ])
+    def test_wrong_answers_are_needs_review(self, dialect, src, cite):
+        r = translate(src, dialect)
+        assert r["status"] == NEEDS_REVIEW and r["formula"] is None
+        assert any(cite in n for n in r["notes"])
+
+    def test_dayofweekiso_not_caught_by_dayofweek(self):
+        from ts_cli.formula_translate.defects import find_defects
+        assert not find_defects("snowflake", "DAYOFWEEKISO(d)", "x")
+
+    def test_zeroifnull_approximated(self):
+        r = translate("ZEROIFNULL(SUM(amount))", "snowflake")
+        assert r["status"] == APPROXIMATED and any("BL-226" in t for t in r["traps"])
+
+    def test_zn_stripped_is_approximated(self):
+        r = translate("ZN(SUM([Profit])) / SUM([Sales])", "tableau")
+        assert r["status"] == APPROXIMATED and any("ZN()" in t for t in r["traps"])
+
+
+class TestOutputGuard:
+    @pytest.mark.parametrize("dialect,src,why", [
+        ("snowflake", "name ILIKE '%abc%'", "ILIKE"),
+        ("snowflake", "name NOT ILIKE 'a%'", "ILIKE"),
+        ("snowflake", "name RLIKE 'a.*'", "RLIKE"),
+        ("databricks", "name ilike 'a%'", "ILIKE"),
+        ("qlik", "Sum(Sales)/Sum(TOTAL Sales)", "TOTAL"),
+        ("dax", 'IF(Sales[Name] == "Bob", 1, 0)', "=="),
+        ("tableau", "LEFT([Customer Name], 3) + '...'", "concat"),
+        ("tableau", "RUNNING_SUM(SUM([Sales]))", "RUNNING_SUM"),
+    ])
+    def test_invalid_output_is_needs_review(self, dialect, src, why):
+        r = translate(src, dialect)
+        assert r["status"] == NEEDS_REVIEW and r["formula"] is None
+        assert any(why in n for n in r["notes"]), r["notes"]
+
+    def test_unknown_and_rejected_functions(self):
+        from ts_cli.formula_translate.traps import output_guard
+        assert output_guard("zeroifnull ( [T::a] )")
+        assert output_guard("Sum ( [T::a] )")  # case matters: untranslated source
+        assert output_guard('sql_number_aggregate_op ( "SUM({0})" , [T::a] )')  # OI-5
+        assert output_guard("zeroifnull ( [T::a] )", allow=frozenset({"zeroifnull"})) is None
+        assert output_guard("unique count ( [T::a] ) / count ( [T::b] )") is None
+        assert output_guard('if ( sql_bool_op ( "{0} = {1}" , [T::a] , \'x\' ) ) then 1 else 0') is None
+
+    def test_keyword_named_column_is_fine(self):
+        # a bracketed column called End / Over Budget is a column, not an operator
+        assert translate("DATEDIFF('day', [start], [end])", "tableau")["status"] == TRANSLATED
+        for src in ("SUM([Over Budget])", "SUM([Distinct Users])", "[Partition By Region]"):
+            assert translate(src, "tableau")["status"] == TRANSLATED, src
+
+    @pytest.mark.parametrize("dialect,src", [
+        ("snowflake", "-- total\nSUM(amount)"),
+        ("snowflake", "SUM(amount) /* x */"),
+        ("tableau", "// c\nSUM([Sales])"),
+        ("dax", "SUM(Sales[Amount]) // c"),
+    ])
+    def test_comments_stripped(self, dialect, src):
+        r = translate(src, dialect)
+        assert r["status"] == TRANSLATED and "--" not in r["formula"]
+        assert any("comments were removed" in n for n in r["notes"])
+
+    def test_comment_marker_inside_literal_kept(self):
+        r = translate("CASE WHEN a = '--x' THEN 1 ELSE 0 END", "snowflake")
+        assert "'--x'" in r["formula"]
+
+
+class TestDialectFixes:
+    def test_qlik_double_quoted_field(self):
+        r = translate('Sum("Sales Amount")', "qlik")
+        assert r["formula"] == "sum([TABLE::Sales Amount])"
+        assert translate("If(Region = 'East', 1, 0)", "qlik")["formula"].count("'East'") == 1
+
+    def test_tableau_if_without_else_is_null(self):
+        r = translate("IF [City] = 'Zürich' THEN 1 END", "tableau")
+        assert r["formula"] == "if ( [TABLE::City] = 'Zürich' ) then 1 else null"
+        r2 = translate("IF [a] > 1 THEN 'x' ELSEIF [a] > 0 THEN 'y' END", "tableau")
+        assert r2["formula"].endswith("else null")
+        r3 = translate("IF [a] > 1 THEN 1 ELSE 0 END", "tableau")
+        assert "null" not in r3["formula"]
+
+    def test_round_trap_needs_two_args(self):
+        assert not any("increment" in t for t in translate("ROUND([Sales])", "tableau")["traps"])
+        assert not any("increment" in t for t in translate("ROUND(amount)", "snowflake")["traps"])
+
+    def test_case_trap_on_column_comparison(self):
+        r = translate("[First Name] = [Nick Name]", "tableau")
+        assert any("text columns" in t for t in r["traps"])
+
+
+class TestCatalog:
+    def test_vendored_catalog_matches_formula_patterns(self):
+        import sys
+        from pathlib import Path
+        from ts_cli.formula_translate.catalog import CATALOG, NONEXISTENT
+        root = Path(__file__).resolve().parents[3]
+        sys.path.insert(0, str(root / "tools" / "validate"))
+        from check_formula_catalog import parse_catalog
+        text = (root / "agents/shared/schemas/thoughtspot-formula-patterns.md").read_text()
+        valid, nonexistent = parse_catalog(text)
+        assert CATALOG == frozenset(valid), "regenerate formula_translate/catalog.py CATALOG"
+        assert NONEXISTENT == frozenset(nonexistent)

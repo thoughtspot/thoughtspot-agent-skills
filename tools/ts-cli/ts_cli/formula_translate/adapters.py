@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from ts_cli.formula_translate.context import PLACEHOLDER_TABLE, ColumnContext
-from ts_cli.formula_translate.refs import bracket_refs, qualify_refs
+from ts_cli.formula_translate.refs import bracket_refs, qualify_refs, split_literals
 
 TRANSLATED = "TRANSLATED"
 APPROXIMATED = "APPROXIMATED"
@@ -80,8 +80,37 @@ def normalise_dialect(name: str) -> str:
 _TABLEAU_PARAM = re.compile(r"\[Parameters\]\.\[([^\]]+)\]", re.I)
 
 
+_TABLEAU_BLOCK_TOK = re.compile(
+    r"'(?:[^']|'')*'|\"[^\"]*\"|\[[^\]]*\]|\b(IF|ELSEIF|ELSE|END|CASE)\b", re.I)
+
+
+def add_missing_else(expr: str) -> tuple[str, bool]:
+    """Give every Tableau IF/CASE block without an ELSE an explicit ``ELSE NULL``.
+
+    Tableau returns NULL when no branch matches, and ``else null`` is live-verified in
+    ThoughtSpot (tableau-formula-translation.md). Without this, translate_single guesses a
+    default from the formula's text (``else 0`` / ``else ''``), which can be the wrong type
+    and is never the source's NULL.
+    """
+    stack: list[bool] = []
+    inserts: list[int] = []
+    for m in _TABLEAU_BLOCK_TOK.finditer(expr):
+        kw = (m.group(1) or "").upper()
+        if kw in ("IF", "CASE"):
+            stack.append(False)
+        elif kw == "ELSE" and stack:
+            stack[-1] = True
+        elif kw == "END" and stack and not stack.pop():
+            inserts.append(m.start())
+    for pos in reversed(inserts):
+        expr = expr[:pos] + "ELSE NULL " + expr[pos:]
+    return expr, bool(inserts)
+
+
 def adapt_tableau(expr: str, ctx: ColumnContext, role_hint: Optional[str] = None) -> RawResult:
     from ts_cli.tableau_translate import translate_single
+
+    expr, added_else = add_missing_else(expr)
 
     params = {m.group(1) for m in _TABLEAU_PARAM.finditer(expr)}
     stripped = _TABLEAU_PARAM.sub("", expr)
@@ -97,8 +126,13 @@ def adapt_tableau(expr: str, ctx: ColumnContext, role_hint: Optional[str] = None
         expr, role=role, scoped_columns=scoped, parameter_names=params,
         date_columns=date_cols)
     note_list = [f"tableau: {k} applied" for k in sorted(notes)]
+    if added_else:
+        note_list.append("IF/CASE without ELSE: Tableau returns NULL, so the translation "
+                         "ends `else null`")
     if errors:
         return RawResult(None, NEEDS_REVIEW, note_list + errors, partial=out)
+    out = "".join(seg if lit else re.sub(r"\belse NULL\b", "else null", seg)
+                  for lit, seg in split_literals(out))
     out = qualify_refs(out, ctx, parameters=params, placeholder_tables={_SENTINEL})
     return RawResult(out, TRANSLATED, note_list)
 
@@ -142,10 +176,20 @@ def adapt_dax(expr: str, ctx: ColumnContext) -> RawResult:
 # Qlik
 # ---------------------------------------------------------------------------
 
+def qlik_field_quotes(expr: str) -> str:
+    """Qlik ``"Sales Amount"`` is a FIELD name, not a string: rewrite it ``[Sales Amount]``
+    (Qlik's other field-quoting form) so neither the translator nor the reference pass
+    treats it as a literal. Single-quoted strings are left alone."""
+    parts = re.split(r"('(?:[^']|'')*')", expr)
+    for i in range(0, len(parts), 2):
+        parts[i] = re.sub(r'"([^"]+)"', r"[\1]", parts[i])
+    return "".join(parts)
+
+
 def adapt_qlik(expr: str, ctx: ColumnContext) -> RawResult:
     from ts_cli.qlik.functions import translate
 
-    out, review, reason = translate(expr)
+    out, review, reason = translate(qlik_field_quotes(expr))
     if review or not out:
         return RawResult(None, NEEDS_REVIEW, [reason or "Qlik translator: needs review"],
                          partial=out or None)

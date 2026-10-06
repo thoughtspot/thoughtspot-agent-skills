@@ -229,9 +229,11 @@ class Validator:
             guid = self._create_scratch(doc, name, out)
             if guid:
                 self._query(statement, guid, out)
-            return out
+        except Exception as exc:  # reported as JSON by the caller, after cleanup ran
+            out.update(result="ERROR", error=f"{type(exc).__name__}: {exc}")
         finally:
             self._cleanup(out, name, guid)
+        return out
 
     def _create_scratch(self, doc: dict, name: str, out: dict) -> Optional[str]:
         self.log(f"validate: importing scratch Model {name}")
@@ -271,32 +273,43 @@ class Validator:
         """Delete every object carrying the scratch name, then confirm none is left.
 
         Records the outcome in ``out["scratch"]`` — ``confirmed_absent`` False plus
-        ``remaining`` GUIDs on any failure, so the caller exits non-zero and prints them.
-        Never raises (it runs in ``finally``), and never lets a lookup failure pass as
-        "deleted".
+        ``remaining`` GUIDs on any failure — and LOGS every remaining GUID itself (stderr),
+        so the "exit 1 prints the GUID" contract holds even if the caller never gets to
+        print. Never lets a lookup failure pass as "deleted". A Ctrl-C during cleanup is
+        recorded and logged, then re-raised.
         """
         scratch = out.setdefault("scratch", {"name": name, "guid": guid})
+        guids: list[str] = [guid] if guid else []
+        outcomes: dict = {}
         try:
-            guids = list(dict.fromkeys(([guid] if guid else []) + self.find_by_name(name)))
-        except Exception as exc:  # cannot even look — treat as not confirmed
-            scratch.update(deleted=False, confirmed_absent=False,
-                           remaining=[guid] if guid else [],
-                           cleanup_error=f"could not search for {name}: {exc}")
-            return
-        outcomes = {}
-        for g in guids:
-            try:
-                outcomes[g] = self.delete(g)
-            except Exception as exc:
-                outcomes[g] = f"error: {exc}"
-        try:
+            guids = list(dict.fromkeys(guids + self.find_by_name(name)))
+            for g in guids:
+                try:
+                    outcomes[g] = self.delete(g)
+                except Exception as exc:
+                    outcomes[g] = f"error: {exc}"
             remaining = [g for g in guids if self.exists(g)] + \
                 [g for g in self.find_by_name(name) if g not in guids]
-        except Exception as exc:
-            remaining = guids
-            outcomes["confirm"] = f"error: {exc}"
+        except KeyboardInterrupt:
+            self._record_left(scratch, name, guids, outcomes, "interrupted during cleanup")
+            raise
+        except Exception as exc:  # cannot look or confirm — never read as "deleted"
+            self._record_left(scratch, name, guids, outcomes, f"cleanup failed: {exc}")
+            return
         scratch.update(deleted=not remaining, confirmed_absent=not remaining,
                        delete_outcomes=outcomes, guids=guids)
         if remaining:
-            scratch["remaining"] = remaining
-            scratch["cleanup_error"] = f"scratch Model(s) still present: {remaining}"
+            self._record_left(scratch, name, remaining, outcomes,
+                              "scratch Model(s) still present after delete")
+
+    def _record_left(self, scratch: dict, name: str, guids: list[str], outcomes: dict,
+                     why: str) -> None:
+        scratch.update(deleted=False, confirmed_absent=False, delete_outcomes=outcomes,
+                       remaining=guids, cleanup_error=why)
+        if guids:
+            for g in guids:
+                self.log(f"CLEANUP FAILED ({why}) — scratch Model still present: {g}. "
+                         f"Delete it with: ts metadata delete {g}")
+        else:
+            self.log(f"CLEANUP NOT CONFIRMED ({why}) — search for {name!r} and delete it: "
+                     f'ts metadata search --subtype WORKSHEET --name "{name}"')

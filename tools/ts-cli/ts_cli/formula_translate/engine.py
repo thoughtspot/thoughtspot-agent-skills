@@ -12,9 +12,36 @@ from ts_cli.formula_translate.adapters import (
     ADAPTERS, APPROXIMATED, NEEDS_REVIEW, TRANSLATED, TRANSLATOR_INFO, normalise_dialect,
 )
 from ts_cli.formula_translate.context import ColumnContext
+from ts_cli.formula_translate.defects import find_defects
+from ts_cli.formula_translate.refs import split_literals
 from ts_cli.formula_translate.traps import (
-    detect_traps, is_downgrade, leftover_sql, repair_count_star,
+    detect_traps, is_downgrade, output_guard, repair_count_star,
 )
+
+# Comment syntaxes per source dialect (stripped before translating; never inside literals).
+_LINE_COMMENTS = {"snowflake": ("--",), "databricks": ("--",), "dax": ("--", "//"),
+                  "tableau": ("//",), "qlik": ("//",)}
+_BLOCK_COMMENT_DIALECTS = {"snowflake", "databricks", "dax", "qlik", "tableau"}
+
+
+def strip_comments(source: str, dialect: str) -> tuple[str, bool]:
+    """Remove ``--`` / ``//`` line comments and ``/* */`` blocks outside string literals."""
+    markers = _LINE_COMMENTS.get(dialect, ())
+    block = dialect in _BLOCK_COMMENT_DIALECTS
+    if not markers and not block:
+        return source, False
+    out: list[str] = []
+    for lit, seg in split_literals(source):
+        if lit:
+            out.append(seg)
+            continue
+        if block:
+            seg = re.sub(r"/\*.*?\*/", " ", seg, flags=re.S)
+        for mk in markers:
+            seg = re.sub(re.escape(mk) + r"[^\n]*", " ", seg)
+        out.append(seg)
+    cleaned = re.sub(r"[ \t]+", " ", "".join(out)).strip()
+    return cleaned, cleaned != source.strip()
 
 DEFAULT_NAME = "Translated Formula"
 
@@ -79,14 +106,25 @@ def _post_process(raw, dialect: str, source: str, ctx: ColumnContext):
     traps: list[str] = []
     if out is None:
         return out, status, notes, traps
+    defects = find_defects(dialect, source, out)
+    for d in defects:
+        if d.action == NEEDS_REVIEW:
+            notes.append(d.message)
+            raw.partial = out
+            return None, NEEDS_REVIEW, notes, traps
+    allow = frozenset().union(*(d.allow_functions for d in defects))
     out, count_trap = repair_count_star(out, ctx)
     if count_trap:
         traps.append(count_trap)
-    guard = leftover_sql(out)
+    guard = output_guard(out, allow=allow, source=source)
     if guard:
         notes.append(guard)
         raw.partial = out
         return None, NEEDS_REVIEW, notes, traps
+    for d in defects:  # the APPROXIMATED ones
+        traps.append(d.message)
+        if status == TRANSLATED:
+            status = APPROXIMATED
     traps.extend(detect_traps(dialect, source, out))
     if status == TRANSLATED and any(is_downgrade(t) for t in traps):
         status = APPROXIMATED
@@ -104,7 +142,12 @@ def translate(expr: str, dialect: str, ctx: Optional[ColumnContext] = None, *,
     if not source:
         raise ValueError("empty formula")
 
+    source, had_comments = strip_comments(source, dialect)
+    if not source:
+        raise ValueError("the formula is only a comment")
     raw = _run_adapter(source, dialect, ctx, sisense_context, tableau_role)
+    if had_comments:
+        raw.notes.append("comments were removed before translating")
     out, status, notes, traps = _post_process(raw, dialect, source, ctx)
 
     translator, tests = TRANSLATOR_INFO[dialect]

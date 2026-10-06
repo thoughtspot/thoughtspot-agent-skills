@@ -220,14 +220,16 @@ def _validate(result: dict, level: str, validator, model_doc: dict, name: str,
         result["verification"].update(level=level, result="NOT_RUN", error=str(exc))
         _err(f"validation not run: {exc}")
         return 2
+    except Exception as exc:  # e.g. the VALIDATE_ONLY call failing before any object exists
+        result["verification"].update(level=level, result="ERROR",
+                                      error=f"{type(exc).__name__}: {exc}")
+        _err(f"validation error: {exc}")
+        return 2
     result["verification"].update(ver)
     scratch = ver.get("scratch")
     if scratch and not scratch.get("confirmed_absent"):
-        for g in scratch.get("remaining") or [scratch.get("guid")]:
-            _err(f"CLEANUP FAILED — scratch Model still present: {g}. "
-                 f"Delete it with: ts metadata delete {g} --profile <profile>")
-        return 1
-    return 0
+        return 1  # Validator._cleanup has already logged every remaining GUID
+    return 1 if ver.get("result") == "ERROR" else 0
 
 
 @app.command("detect")

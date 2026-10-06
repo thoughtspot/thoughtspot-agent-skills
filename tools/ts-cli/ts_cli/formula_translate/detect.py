@@ -4,6 +4,8 @@
 ranked, with ``ambiguous`` set when the caller MUST ask rather than confirm:
 
 - the top two candidates are within ``MARGIN`` points (includes a 0-0 tie: no signal);
+- the best candidate rests only on weak signals (score below ``MIN_CONFIDENT_SCORE``);
+- the best is Snowflake or Databricks and no signal unique to one of them fired;
 - the best candidate is in a must-ask family — Excel / Google Sheets / Omni table calc
   share one grammar, and LookML / Omni share ``${view.field}``.
 
@@ -30,6 +32,12 @@ MUST_ASK_FAMILIES = [
     {"excel", "google_sheets", "omni_table_calc"},
     {"lookml", "omni"},
 ]
+# Snowflake vs Databricks is a must-ask pair UNLESS a signal only one of them has fired.
+SQL_PAIR = {"snowflake", "databricks"}
+SQL_UNIQUE = {"Snowflake-only fn", "date_add(", "2-arg datediff(",
+              "backtick identifier", "MEASURE(", "Spark SQL fn"}
+# A pick resting only on weak (1-point) signals is asked, never confirmed.
+MIN_CONFIDENT_SCORE = 2
 
 _I = re.I
 SIGNALS: list[tuple[str, int, str, "re.Pattern[str]"]] = [
@@ -45,6 +53,10 @@ SIGNALS: list[tuple[str, int, str, "re.Pattern[str]"]] = [
     ("tableau", 3, "[Parameters].", re.compile(r"\[Parameters\]\.", _I)),
     ("tableau", 3, "table calc", re.compile(r"\b(WINDOW_\w+|RUNNING_\w+)\s*\(|\bINDEX\s*\(\s*\)|\bSIZE\s*\(\s*\)", _I)),
     ("tableau", 1, "IIF(", re.compile(r"\bIIF\s*\(", _I)),
+    # Tableau accepts double-quoted date parts too; its functions are upper case, Sigma's
+    # are CamelCase, so the case-sensitive spelling separates the two.
+    ("tableau", 3, "double-quoted date part (upper-case fn)", re.compile(
+        r"\bDATE(DIFF|TRUNC|PART|ADD|NAME)\s*\(\s*\"(year|quarter|month|week|day|hour|minute|second|weekday)\"")),
     # --- DAX
     ("dax", 3, "CALCULATE(", re.compile(r"\bCALCULATE(TABLE)?\s*\(", _I)),
     ("dax", 3, "'Table'[Column]", re.compile(r"'[^']+'\s*\[[^\]]+\]")),
@@ -70,16 +82,16 @@ SIGNALS: list[tuple[str, int, str, "re.Pattern[str]"]] = [
     ("sisense", 1, "lowercase [key] placeholder", re.compile(r"\[[a-z][a-z0-9_]{0,15}\]")),
     # --- Excel / Sheets / Omni table calc (one grammar)
     ("excel", 3, "leading =", re.compile(r"^\s*=")),
-    ("excel", 3, "A1 cell / range reference", re.compile(r"(?<![\w\[])\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?(?![\w\]])")),
+    ("excel", 3, "A1 cell / range reference", re.compile(r"(?<![\w\[])\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?(?![\w\]])(?!\s*\()")),
     ("excel", 3, "whole-column range", re.compile(r"(?<![\w\[])[A-Z]{1,3}:[A-Z]{1,3}(?![\w\]])")),
     ("excel", 3, "Sheet!ref", re.compile(r"\w+!\$?[A-Z]{1,3}\$?\d+")),
     ("excel", 3, "[@Column] structured ref", re.compile(r"\[@[^\]]+\]")),
     ("excel", 2, "Excel-named fn", re.compile(
         r"\b(SUMIFS?|COUNTIFS?|AVERAGEIFS?|XLOOKUP|VLOOKUP|HLOOKUP|IFERROR|TEXTJOIN|DATEDIF|EOMONTH|NETWORKDAYS|SUMPRODUCT)\s*\(", _I)),
     # --- Sigma
-    ("sigma", 3, "double-quoted date unit", re.compile(
-        r"\bDate(Diff|Trunc|Add|Part)\s*\(\s*\"(year|quarter|month|week|day|hour|minute|second)\"", _I)),
-    ("sigma", 3, "[Table/Column]", re.compile(r"\[[^\]/\[]+/[^\]\[]+\]")),
+    ("sigma", 3, "double-quoted date unit (CamelCase fn)", re.compile(
+        r"\bDate(Diff|Trunc|Add|Part)\s*\(\s*\"(year|quarter|month|week|day|hour|minute|second)\"")),
+    ("sigma", 1, "[Table/Column]", re.compile(r"\[[^\]/\[]+/[^\]\[]+\]")),
     ("sigma", 1, "Sigma CamelCase fn", re.compile(
         r"\b(CountDistinct|CumulativeSum|MovingAvg|RowNumber|SumIf|CountIf|DateFormat|IsNull)\s*\(")),
     # --- generic shapes several languages share (weak; they produce ties, by design)
@@ -91,24 +103,28 @@ SIGNALS: list[tuple[str, int, str, "re.Pattern[str]"]] = [
     # --- LookML / Omni modelling layer
     ("lookml", 3, "${view.field}", re.compile(r"\$\{[\w.]+\}")),
     ("omni", 3, "${view.field}", re.compile(r"\$\{[\w.]+\}")),
-    # --- Snowflake SQL
-    ("snowflake", 2, "CASE WHEN", re.compile(r"\bCASE\s+WHEN\b", _I)),
-    ("databricks", 2, "CASE WHEN", re.compile(r"\bCASE\s+WHEN\b", _I)),
-    ("snowflake", 3, "IFF(", re.compile(r"\bIFF\s*\(", _I)),
-    ("snowflake", 3, ":: cast", re.compile(r"(?<!:)::\s*[A-Za-z]\w*")),
-    ("snowflake", 3, "QUALIFY", re.compile(r"\bQUALIFY\b", _I)),
-    ("snowflake", 3, "unquoted date part", re.compile(
-        r"\bDATE(ADD|DIFF)\s*\(\s*(day|month|year|week|quarter|hour|minute|second)s?\s*,", _I)),
-    ("snowflake", 2, "Snowflake fn", re.compile(
-        r"\b(ZEROIFNULL|NVL2?|DIV0|TO_VARCHAR|SPLIT_PART|COUNT_IF|TRY_TO_\w+)\s*\(", _I)),
-    ("snowflake", 1, "COUNT(DISTINCT", re.compile(r"\bCOUNT\s*\(\s*DISTINCT\b", _I)),
-    ("databricks", 1, "COUNT(DISTINCT", re.compile(r"\bCOUNT\s*\(\s*DISTINCT\b", _I)),
-    # --- Databricks SQL
+    # --- Snowflake / Databricks SQL. Databricks also has IFF, ::, QUALIFY and
+    # DATEDIFF(unit, …) (docs.databricks.com, checked 2026-10-06), so those are SHARED
+    # signals; only the dialect-unique ones below settle the pair (see SQL_UNIQUE).
+    *[(d, 2, label, pat) for d in ("snowflake", "databricks") for label, pat in (
+        ("CASE WHEN", re.compile(r"\bCASE\s+WHEN\b", _I)),
+        ("IFF(", re.compile(r"\bIFF\s*\(", _I)),
+        (":: cast", re.compile(r"(?<!:)::\s*[A-Za-z]\w*")),
+        ("QUALIFY", re.compile(r"\bQUALIFY\b", _I)),
+        ("unquoted date part", re.compile(
+            r"\bDATE(ADD|DIFF)\s*\(\s*(day|month|year|week|quarter|hour|minute|second)s?\s*,", _I)),
+        ("COUNT(DISTINCT", re.compile(r"\bCOUNT\s*\(\s*DISTINCT\b", _I)),
+    )],
+    ("snowflake", 3, "Snowflake-only fn", re.compile(
+        r"\b(DIV0|DIV0NULL|TO_VARCHAR|TRY_TO_\w+|ZEROIFNULL|DAYOFWEEKISO|IFNULL2)\s*\(", _I)),
     ("databricks", 3, "date_add(", re.compile(r"\bdate_add\s*\(")),
+    # Two-argument datediff(end, start): Snowflake's DATEDIFF always takes a unit first.
+    ("databricks", 3, "2-arg datediff(", re.compile(
+        r"\bdatediff\s*\(\s*[A-Za-z_`][\w`]*\s*,\s*[A-Za-z_`][\w`]*\s*\)", _I)),
     ("databricks", 3, "backtick identifier", re.compile(r"`[^`]+`")),
     ("databricks", 3, "MEASURE(", re.compile(r"\bMEASURE\s*\(", _I)),
-    ("databricks", 2, "Spark SQL fn", re.compile(
-        r"\b(date_format|try_divide|collect_list|array_contains|get_json_object|nvl)\s*\(")),
+    ("databricks", 3, "Spark SQL fn", re.compile(
+        r"\b(date_format|try_divide|collect_list|array_contains|get_json_object)\s*\(")),
 ]
 
 ALL_DIALECTS = sorted({s[0] for s in SIGNALS} | {"google_sheets", "omni_table_calc"})
@@ -136,12 +152,16 @@ def _backing(d: str) -> dict[str, Any]:
     return {"backing": "none"}
 
 
-def _tie(ranked: list[str], scores: dict[str, int]) -> tuple[bool, list[str], Any]:
+def _tie(ranked: list[str], scores: dict[str, int],
+         signals: dict[str, list[str]]) -> tuple[bool, list[str], Any]:
     """(ambiguous, the candidates to ask about, the top guess or None)."""
     top = scores[ranked[0]]
     tied = [d for d in ranked if scores[d] > 0 and scores[d] >= top - MARGIN]
     best = ranked[0] if top > 0 else None
-    ambiguous = best is None or len(tied) > 1
+    ambiguous = best is None or len(tied) > 1 or top < MIN_CONFIDENT_SCORE
+    if best in SQL_PAIR and not (SQL_UNIQUE & set(signals[best])):
+        ambiguous = True
+        tied = sorted(set(tied) | SQL_PAIR, key=lambda d: (-scores[d], d))
     for fam in MUST_ASK_FAMILIES:
         if best in fam:
             ambiguous = True
@@ -154,7 +174,7 @@ def detect(expr: str) -> dict[str, Any]:
     text = expr or ""
     scores, signals = _score(text)
     ranked = sorted(ALL_DIALECTS, key=lambda d: (-scores[d], d))
-    ambiguous, tied, best = _tie(ranked, scores)
+    ambiguous, tied, best = _tie(ranked, scores, signals)
     candidates = [{"dialect": d, "score": scores[d], "signals": signals[d], **_backing(d)}
                   for d in ranked if scores[d] > 0]
     return {
