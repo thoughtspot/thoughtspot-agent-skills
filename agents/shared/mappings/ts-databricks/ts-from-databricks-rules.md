@@ -972,8 +972,9 @@ Common patterns:
 | `CONCAT(a, b)` | `concat(a, b)` |
 | `EXTRACT(MONTH FROM d)` | `month_number(d)` |
 | `EXTRACT(YEAR FROM d)` | `year(d)` |
-| `DATEDIFF(MONTH, start, end)` | `diff_months(start, end)` — 3-arg form |
-| `DATEDIFF(DAY, start, end)` | `diff_days(start, end)` — 3-arg form |
+| `DATEDIFF(end, start)` | `diff_days(end, start)` — 2-arg form, same order (BL-336) |
+| `DATEDIFF(MONTH, start, end)` | `diff_months(end, start)` — 3-arg form; dates swapped, TS takes end first (BL-336). Databricks counts complete months, `diff_months` counts boundaries |
+| `DATEDIFF(DAY, start, end)` | `diff_days(end, start)` — 3-arg form; dates swapped (BL-336) |
 | `COUNT(DISTINCT col)` | `unique count ( [col] )` — space, not underscore |
 
 **Implementation notes:**

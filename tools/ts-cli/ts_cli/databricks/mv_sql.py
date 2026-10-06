@@ -337,8 +337,10 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
     if name == "DATE_TRUNC":
         return _call_date_trunc(args)
     if name == "MONTHS_BETWEEN":
+        # months_between(expr1, expr2) is positive when expr1 is later — the
+        # same later-first order as diff_months, so no swap (BL-336).
         _need(args, 2, name)
-        return _emit("diff_months", [args[1], args[0]])
+        return _emit("diff_months", [args[0], args[1]])
     if name == "LOCATE":
         _need(args, 2, name)
         return _emit("strpos", [args[1], args[0]])
@@ -586,7 +588,16 @@ def _call_date_trunc(args: list[str]) -> str:
 
 
 def _call_datediff(cur: _Cursor, resolver) -> str:
-    """DATEDIFF(end, start) -> diff_days(start, end); DATEDIFF(unit, s, e).
+    """DATEDIFF(end, start) -> diff_days(end, start); DATEDIFF(unit, s, e)
+    -> diff_<unit>(e, s).
+
+    ThoughtSpot diff_* takes the LATER date first (diff_days(end, start) =
+    end - start; live on se-thoughtspot 2026-10-06). Databricks 2-arg
+    datediff(endDate, startDate) already has that order, so it passes
+    through; the 3-arg datediff(unit, start, end) is end - start, so its
+    date args are swapped. Emitting earlier-first flips every sign (BL-336).
+    DATEDIFF(MONTH, ...) counts complete months; diff_months counts month
+    boundaries — they differ by one when end's day-of-month < start's.
 
     The 3-arg unit arrives as a bare ident (e.g. MONTH) that must NOT be
     resolved as a column — peek for '<unit-ident> ,' before parsing args.
@@ -599,10 +610,10 @@ def _call_datediff(cur: _Cursor, resolver) -> str:
         cur.advance()
         rest = _call_args(cur, resolver)
         _need(rest, 2, "DATEDIFF(unit, …)")
-        return _emit(_DATEDIFF_UNIT[text.upper()], [rest[0], rest[1]])
+        return _emit(_DATEDIFF_UNIT[text.upper()], [rest[1], rest[0]])
     rest = _call_args(cur, resolver)
     _need(rest, 2, "DATEDIFF")
-    return _emit("diff_days", [rest[1], rest[0]])
+    return _emit("diff_days", [rest[0], rest[1]])
 
 
 def _call_nullif(args: list[str]) -> str:

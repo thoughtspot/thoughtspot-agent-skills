@@ -312,7 +312,9 @@ class TestSpecialFunctions:
     def test_months_between(self):
         result = translate_sql_expr(
             "MONTHS_BETWEEN(a.END, a.START)", _resolve)
-        assert result == "diff_months ( [A::START] , [A::END] )"
+        # BL-336: MONTHS_BETWEEN(d1, d2) is positive when d1 is later, the
+        # same later-first order as diff_months — no swap.
+        assert result == "diff_months ( [A::END] , [A::START] )"
 
     def test_current_date(self):
         assert translate_sql_expr("CURRENT_DATE()", _resolve) == "today ( )"

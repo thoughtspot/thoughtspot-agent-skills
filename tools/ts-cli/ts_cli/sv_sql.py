@@ -273,6 +273,10 @@ _RENAME = {
     "QUARTER": "quarter_number", "HOUR": "hour_of_day",
     "DAYOFWEEK": "day_number_of_week", "DAYOFYEAR": "day_number_of_year",
     "WEEKOFYEAR": "week_number_of_year",
+    # MONTHS_BETWEEN(d1, d2) is positive when d1 is later — already the
+    # later-first order diff_months takes, so it maps in order, NOT swapped
+    # (BL-336). Not exact: fractional vs month boundaries crossed.
+    "MONTHS_BETWEEN": "diff_months",
     "DATE": "date",
     "SUM": "sum", "AVG": "average", "MIN": "min", "MAX": "max",
     "MEDIAN": "median", "STDDEV": "stddev", "VARIANCE": "variance",
@@ -319,8 +323,7 @@ _DIV0_NAMES = frozenset({"DIV0", "DIV0NULL"})
 _TO_STRING_NAMES = frozenset({"TO_CHAR", "TO_VARCHAR"})
 _TO_DOUBLE_NAMES = frozenset({"TO_NUMBER", "TO_DECIMAL", "TO_NUMERIC"})
 _CAST_NAMES = frozenset({"CAST", "TRY_CAST"})
-_ARG_SWAP = {"MONTHS_BETWEEN": ("diff_months", 2),
-             "LOCATE": ("strpos", 2)}
+_ARG_SWAP = {"LOCATE": ("strpos", 2)}
 
 
 def _call(name: str, cur: _Cursor, resolver) -> str:

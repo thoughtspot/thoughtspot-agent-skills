@@ -133,10 +133,10 @@ Resolution:
 | `start_of_quarter(d)` | `date_trunc('quarter', d)` | |
 | `start_of_year(d)` | `date_trunc('year', d)` | |
 | `start_of_week(d)` | `date_trunc('week', d)` | Week start day may differ. TS week start comes from the Model's calendar, Monday when nothing else is set (ThoughtSpot domain review, 2026-10-06); Databricks `date_trunc('week')` is Monday-start, so they agree under the default calendar (BL-334) |
-| `diff_days(start, end)` | `DATEDIFF(end, start)` | Arg order reversed; Databricks `DATEDIFF` returns days only |
-| `diff_days(start, end)` | `DATEDIFF(DAY, start, end)` | 3-arg form: unit first; reverse args for TS |
-| `diff_months(start, end)` | `DATEDIFF(MONTH, start, end)` | 3-arg form: unit first; reverse args for TS. TS `diff_months` counts month boundaries (live-verified 2026-10-06); Databricks `DATEDIFF(MONTH, …)` / `timestampdiff` counts **complete** months (Databricks docs — `timestampdiff` semantics; not probed here), so the two differ by one when the end's day-of-month is before the start's |
-| `diff_months(start, end)` | `MONTHS_BETWEEN(end, start)` | Returns fractional months |
+| `diff_days(end, start)` | `DATEDIFF(end, start)` | **Same order** — both take the later date first (Databricks `datediff(endDate, startDate)` = days from start to end; TS `diff_days(end, start)`, live-verified 2026-10-06). The 2-arg form returns days only (BL-336) |
+| `diff_days(end, start)` | `DATEDIFF(DAY, start, end)` | 3-arg form (`datediff(unit, start, end)` = end − start): unit first, then start, end; TS takes end first, so swap the dates (BL-336) |
+| `diff_months(end, start)` | `DATEDIFF(MONTH, start, end)` | 3-arg form: unit first, then start, end; TS takes end first, so swap the dates (BL-336). TS `diff_months` counts month boundaries (live-verified 2026-10-06); Databricks `DATEDIFF(MONTH, …)` / `timestampdiff` counts **complete** months (Databricks docs — `timestampdiff` semantics; not probed here), so the two differ by one when the end's day-of-month is before the start's |
+| `diff_months(end, start)` | `MONTHS_BETWEEN(end, start)` | **Same order** — `months_between(expr1, expr2)` is positive when expr1 is later. Not exact: `MONTHS_BETWEEN` returns fractional months, `diff_months` counts month boundaries (BL-336) |
 | `year(d)` | `EXTRACT(YEAR FROM d)` | `EXTRACT` form — same as `YEAR(d)` |
 | `month_number(d)` | `EXTRACT(MONTH FROM d)` | `EXTRACT` form — same as `MONTH(d)` |
 | `day(d)` | `EXTRACT(DAY FROM d)` | `EXTRACT` form — same as `DAY(d)` |
@@ -828,10 +828,10 @@ formula equivalents:
 | `CASE WHEN x THEN y WHEN z THEN w ELSE v END` | `if (x) then y else if (z) then w else v` |
 | `COALESCE(a, b)` | `if (a != null) then a else b` |
 | `CONCAT(a, ' ', b)` | `concat(a, ' ', b)` |
-| `DATEDIFF(end, start)` | `diff_days(start, end)` — arg order reversed |
-| `DATEDIFF(MONTH, start, end)` | `diff_months(start, end)` — 3-arg form; swap start/end for TS — **semantic gap:** Databricks counts complete months, `diff_months` counts month boundaries (live-verified 2026-10-06), so Jan 31 → Feb 1 is 0 in Databricks and 1 in ThoughtSpot |
-| `DATEDIFF(DAY, start, end)` | `diff_days(start, end)` — 3-arg form; swap start/end for TS |
-| `MONTHS_BETWEEN(end, start)` | `diff_months(start, end)` — arg order reversed |
+| `DATEDIFF(end, start)` | `diff_days(end, start)` — same order; both take the later date first (BL-336) |
+| `DATEDIFF(MONTH, start, end)` | `diff_months(end, start)` — 3-arg form; swap start/end for TS (BL-336) — **semantic gap:** Databricks counts complete months, `diff_months` counts month boundaries (live-verified 2026-10-06), so Jan 31 → Feb 1 is 0 in Databricks and 1 in ThoughtSpot |
+| `DATEDIFF(DAY, start, end)` | `diff_days(end, start)` — 3-arg form; swap start/end for TS (BL-336) |
+| `MONTHS_BETWEEN(end, start)` | `diff_months(end, start)` — same order; fractional vs month boundaries, so approximate (BL-336) |
 | `EXTRACT(YEAR FROM d)` | `year(d)` |
 | `EXTRACT(MONTH FROM d)` | `month_number(d)` |
 | `EXTRACT(DAY FROM d)` | `day(d)` |

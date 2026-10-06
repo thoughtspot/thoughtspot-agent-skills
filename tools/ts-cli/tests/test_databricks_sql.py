@@ -133,17 +133,41 @@ class TestFunctions:
     def test_extract_month(self):
         assert t("EXTRACT(MONTH FROM d)") == "month_number ( [TRANSACTIONS::d] )"
 
-    def test_datediff_2arg_swaps(self):
+    # BL-336: ThoughtSpot diff_*(end, start) takes the LATER date first
+    # (diff_days(2026-10-10, 2026-10-04) = 6, live 2026-10-06). Emitting the
+    # earlier date first flips the sign of every value.
+
+    def test_datediff_2arg_keeps_end_first(self):
+        # Databricks datediff(endDate, startDate) = days from start to end.
         assert t("DATEDIFF(end_d, start_d)") == \
-            "diff_days ( [TRANSACTIONS::start_d] , [TRANSACTIONS::end_d] )"
+            "diff_days ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] )"
 
-    def test_datediff_3arg_month(self):
+    def test_datediff_2arg_lowercase(self):
+        assert t("datediff(end_d, start_d)") == \
+            "diff_days ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] )"
+
+    def test_datediff_3arg_day_swaps_to_end_first(self):
+        # datediff(unit, start, end) = end - start.
+        assert t("DATEDIFF(DAY, start_d, end_d)") == \
+            "diff_days ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] )"
+
+    def test_datediff_3arg_month_swaps_to_end_first(self):
         assert t("DATEDIFF(MONTH, start_d, end_d)") == \
-            "diff_months ( [TRANSACTIONS::start_d] , [TRANSACTIONS::end_d] )"
+            "diff_months ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] )"
 
-    def test_months_between_swaps(self):
+    def test_datediff_2arg_nested_in_comparison(self):
+        assert t("DATEDIFF(end_d, start_d) > 30") == \
+            "diff_days ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] ) > 30"
+
+    def test_datediff_3arg_nested_in_case(self):
+        out = t("CASE WHEN DATEDIFF(DAY, start_d, end_d) > 30 "
+                "THEN 'late' ELSE 'ok' END")
+        assert "diff_days ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] ) > 30" in out
+
+    def test_months_between_keeps_order(self):
+        # months_between(expr1, expr2) is positive when expr1 is later.
         assert t("MONTHS_BETWEEN(end_d, start_d)") == \
-            "diff_months ( [TRANSACTIONS::start_d] , [TRANSACTIONS::end_d] )"
+            "diff_months ( [TRANSACTIONS::end_d] , [TRANSACTIONS::start_d] )"
 
     def test_locate_swaps(self):
         assert t("LOCATE(sub, s)") == \

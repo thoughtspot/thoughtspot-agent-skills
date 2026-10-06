@@ -12442,3 +12442,38 @@ weekday. (2) Have converters flag week-dependent output in the conversion report
 with `WEEK_START = 7` and a Model with a non-Monday calendar.
 
 **Target:** 2026-11-30.
+
+## BL-336 — Databricks `DATEDIFF` / `MONTHS_BETWEEN` and Snowflake `MONTHS_BETWEEN` translated earlier-date-first — every value had the opposite sign `Tier 1`
+
+**Filed:** 2026-10-06. **Status:** DONE (2026-10-06, ts-cli v0.156.3).
+**Source:** found by the PR #560 review; fixed by `fix/databricks-datediff-order`.
+
+**The facts.**
+- ThoughtSpot `diff_* ( end , start )` takes the **later** date first: live on se-thoughtspot
+  2026-10-06, `diff_days(2026-10-10, 2026-10-04)` = 6 and `diff_months(2026-12-01, 2026-10-04)` = 2
+  (`thoughtspot-formula-patterns.md` "Argument order").
+- Databricks 2-arg `datediff(endDate, startDate)` returns days from start to end
+  ([docs](https://docs.databricks.com/aws/en/sql/language-manual/functions/datediff)) — already
+  later-first. 3-arg `datediff(unit, start, end)` and `timestampdiff(unit, start, end)` return
+  end − start ([datediff (timestamp)](https://docs.databricks.com/aws/en/sql/language-manual/functions/datediff3),
+  [timestampdiff](https://docs.databricks.com/aws/en/sql/language-manual/functions/timestampdiff)).
+  `months_between(expr1, expr2)` is positive when expr1 is later
+  ([docs](https://docs.databricks.com/aws/en/sql/language-manual/functions/months_between)).
+- Snowflake `MONTHS_BETWEEN(d1, d2)` is negative when d1 is earlier than d2
+  ([docs](https://docs.snowflake.com/en/sql-reference/functions/months_between)).
+
+**Defects (all fixed).**
+1. `databricks/mv_sql.py` emitted 2-arg `DATEDIFF(e, s)` as `diff_days(s, e)`, 3-arg
+   `DATEDIFF(unit, s, e)` as `diff_<unit>(s, e)` and `MONTHS_BETWEEN(a, b)` as `diff_months(b, a)`.
+2. `sv_sql.py` swapped `MONTHS_BETWEEN(a, b)` to `diff_months(b, a)` via `_ARG_SWAP`, while its
+   `DATEDIFF` handling was already correct.
+3. The Databricks mapping doc (both directions), `ts-from-databricks-rules.md`, the from-databricks
+   coverage matrix, the Snowflake `MONTHS_BETWEEN` row and the Power BI date-subtraction row encoded
+   the same reversed order. The tests pinned it.
+
+Each one was a silent wrong number: the import and the lint were clean, and the sign was inverted.
+
+**Remaining semantic gaps (documented, not changed).** Databricks `DATEDIFF(MONTH, …)` counts
+complete months, while `diff_months` counts month boundaries. `MONTHS_BETWEEN` is fractional. Both
+differ from `diff_months` by up to one month. `timestampdiff` and the `YEAR`/`QUARTER`/`WEEK` units of
+3-arg `DATEDIFF` are still unmapped in `mv_sql.py`, so they raise rather than translate.
