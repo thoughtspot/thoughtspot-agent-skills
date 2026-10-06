@@ -190,7 +190,7 @@ else 0
 | Function | Syntax | Notes |
 |---|---|---|
 | `concat` | `concat ( [a] , [b] , ... )` | N arguments supported — `concat ( 'a' , 'b' , 'c' , 'd' )` imports (VALIDATE_ONLY 2026-10-06). **Every argument must be Text**: a number is rejected with *"Function concat expects 2nd argument to be Text"* — wrap it in `to_string ( … )`; and `to_string` itself **rejects a Text argument** (*"expects 1st argument to be Boolean or Date or DateTime or Numeric or Time"*), so wrap only the non-text operands ([probe record §7](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)). **`+` does NOT concatenate strings** in TS formulas — it is numeric-only. The TS parser rejects `[a] + ', ' + [b]` with "Search did not find + ', ' +". Always use `concat()` for string joining, including for SQL `CONCAT(a, ', ', b)` translations. |
-| `substr` | `substr ( [x] , [start] , [len] )` | Zero-indexed start |
+| `substr` | `substr ( [x] , [start] , [len] )` | **Zero-indexed start**, three arguments — compiles to `SUBSTRING(x, (start + 1), len)` (Snowflake, live 2026-10-06). A 1-based SQL `SUBSTR(x, s, n)` is `substr ( x , s - 1 , n )`; a negative SQL start (counted from the end) has no `substr` form — `sql_string_op` (BL-340) |
 | `left` | `left ( [x] , [n] )` | First N characters |
 | `right` | `right ( [x] , [n] )` | Last N characters |
 | `strlen` | `strlen ( [x] )` | String length |
@@ -256,7 +256,7 @@ results. They are ThoughtSpot-only — **not translatable** to any warehouse SQL
 |---|---|
 | `to_integer` | `to_integer ( [x] )` |
 | `to_double` | `to_double ( [x] )` |
-| `to_string` | `to_string ( [x] )` — Boolean, Date, DateTime, Numeric or Time only; a **Text** argument is rejected (VALIDATE_ONLY 2026-10-06, probe record §7) |
+| `to_string` | `to_string ( [x] )` — Boolean, Date, DateTime, Numeric or Time only; a **Text** argument is rejected (VALIDATE_ONLY 2026-10-06, probe record §7). **On a DATE column the one-argument form is rejected too** (*Function to_string expects 2 arguments, found 1*, error_code 14516, VALIDATE_ONLY 2026-10-06, formula fidelity M0 `sf-date-011`); the second argument's meaning is unverified, so a SQL `TO_CHAR(d, fmt)` translates to a `sql_string_op` pass-through (BL-343) |
 
 ---
 

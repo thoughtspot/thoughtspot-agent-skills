@@ -113,7 +113,7 @@ Use this as the canonical limitations reference.
 
 | # | Databricks SQL | ThoughtSpot Formula | Notes |
 |---|---|---|---|
-| 40 | `CONCAT`, `LENGTH`, `SUBSTRING` / `SUBSTR` | `concat`, `strlen`, `substr ( s , pos - 1 , len )` | `CONCAT`/`LENGTH` direct renames. `SUBSTRING` is **not** a rename (BL-340, ts-cli 0.158.1): 1-based `pos` folded to the zero-based `substr`; a `pos` ≤ 0 or non-literal → `sql_string_op` pass-through (negative counts from the end). `TRIM`/`LTRIM`/`RTRIM` moved to #75 — not native TS functions (BL-170) |
+| 40 | `CONCAT`, `LENGTH`, `SUBSTRING` / `SUBSTR` | `concat`, `strlen`, `substr ( s , pos - 1 , len )` | `CONCAT`/`LENGTH` direct renames. `SUBSTRING` is **not** a rename (BL-340, ts-cli 0.159.1): 1-based `pos` folded to the zero-based `substr`; a `pos` ≤ 0 or non-literal → `sql_string_op` pass-through (negative counts from the end). `TRIM`/`LTRIM`/`RTRIM` moved to #75 — not native TS functions (BL-170) |
 | 41 | `CONTAINS`, `LEFT`, `RIGHT` | `contains`, `left`, `right` | `REPLACE` moved to #75 and `STARTSWITH` to #76 — not native TS functions (BL-170) |
 | 75 | `TRIM`, `LTRIM`, `RTRIM`, `REPLACE` | `sql_string_op ( "TRIM({0})" / "LTRIM({0})" / "RTRIM({0})" / "REPLACE({0}, {1}, {2})" , ... )` | **None of these is a native ThoughtSpot function** — live-verified 2026-07-29, se-thoughtspot (BL-170). Scalar pass-through, CLI-translated (v0.126.1 — BL-171; all four emitted forms live-verified on se-thoughtspot 2026-07-30). **The 2-arg `TRIM(x, chars)` / `LTRIM` / `RTRIM` raise `UntranslatableError`** — the 1-slot template cannot carry the character set — so they are flagged, not silently narrowed to a 1-arg trim. |
 | 76 | `STARTSWITH`, `ENDSWITH` | `strpos(s, prefix) = 1` / `substr(s, strlen(s) - strlen(sfx), strlen(sfx)) = sfx` | No native `starts_with`/`ends_with` — live-verified 2026-07-29, se-thoughtspot (BL-170); compose from native functions. Both CLI-translated in v0.126.1 (BL-171; emitted forms live-verified on se-thoughtspot 2026-07-30) — before that `mv_sql.py` emitted a bare `starts_with` and `ENDSWITH` was unmapped entirely. |
@@ -134,7 +134,7 @@ Use this as the canonical limitations reference.
 | 54 | `EXTRACT(YEAR/MONTH/DAY/HOUR FROM d)` | `year`, `month_number`, `day`, `hour_of_day` | |
 | 55 | `DATEDIFF(end, start)` / `DATEDIFF(DAY, s, e)` | `diff_days(end, start)` | TS takes the later date first: 2-arg form keeps its order, 3-arg form swaps the dates (BL-336) |
 | 56 | `DATEDIFF(MONTH, s, e)` | `diff_months(e, s)` | Dates swapped (BL-336). Approximate: Databricks counts complete months, `diff_months` counts month boundaries (differ by one when end's day-of-month < start's) |
-| 57 | `MONTHS_BETWEEN(a, b[, roundOff])` | `sql_double_op ( "months_between({0}, {1})" , a , b )` | Same order (BL-336). Exact pass-through since ts-cli 0.158.1 (BL-342) — it was `diff_months`, a boundary count, while `months_between` is fractional with 8-digit rounding and a month-end rule. Over an aggregate: NEEDS_REVIEW |
+| 57 | `MONTHS_BETWEEN(a, b[, roundOff])` | `sql_double_op ( "months_between({0}, {1})" , a , b )` | Same order (BL-336). Exact pass-through since ts-cli 0.159.1 (BL-342) — it was `diff_months`, a boundary count, while `months_between` is fractional with 8-digit rounding and a month-end rule. Over an aggregate: NEEDS_REVIEW |
 | 58 | `LOCATE(sub, s)` | `strpos(s, sub)` | Arg order reversed |
 | 59 | `TO_DATE('literal', 'format')` | `to_date('literal', 'format')` | Raw string args — no date-literal wrapping |
 
