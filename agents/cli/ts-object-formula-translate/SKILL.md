@@ -106,7 +106,10 @@ re-run with a `--columns` entry for the confirmed mapping. A `COUNT(*)` with no 
       [--columns '<json>'] [--model <guid> --profile <p>] [--name "<display name>"]
 
 Pass the formula on stdin (`echo … | ts formula translate --from …`) when it contains quotes
-the shell would mangle. Sisense: if the user has the JAQL context object, pass it with
+the shell would mangle. **Qlik `Weekday(d)` with one argument** depends on the app's
+`FirstWeekDay`, which lives in the load script a pasted formula does not have: ask *"What is
+the app's FirstWeekDay? (6 = Sunday, usual for US apps; 0 = Monday otherwise)"* and pass it
+as `--first-week-day`. Without it the CLI returns `NEEDS_REVIEW`. Sisense: if the user has the JAQL context object, pass it with
 `--context`; without it each `[key]` reads as a column named `key` (the CLI notes this).
 
 Read: `formula`, `status`, `classification`, `role`, `references`, `unresolved`, `traps`,
@@ -312,11 +315,10 @@ stderr names every remaining GUID. Repeat each GUID to the user with the command
   catches the leftover `DISTINCT` and refuses rather than emit an invalid formula. The output
   guard also rejects any function outside the ThoughtSpot formula catalog, a SQL operator
   read as a column (`ILIKE`, `RLIKE`), `==`, a bare `TOTAL`, and `+` on strings.
-- **Known translator defects are downgraded until their fixes land:** Databricks `DATEDIFF`
-  argument order (fix/databricks-datediff-order) and the day-of-week numbering of Snowflake
-  `DAYOFWEEK`, Databricks `dayofweek` and Tableau `DATEPART('weekday')` (BL-334) come back
-  `NEEDS_REVIEW`; `ZEROIFNULL` (BL-226, unverified) and a dropped Tableau `ZN()` come back
-  `APPROXIMATED` with a trap.
+- **Known translator defects are downgraded until their fixes land:** `ZEROIFNULL` (BL-226,
+  unverified) and a dropped Tableau `ZN()` come back `APPROXIMATED` with a trap. (The BL-334
+  weekday numbering and BL-336 `DATEDIFF` order defects were fixed in the translators by
+  #565 and #564; their entries are gone.)
 - **A string comparison translated from a case-sensitive dialect** (Tableau, Snowflake,
   Databricks) comes back `APPROXIMATED`: ThoughtSpot compares case-insensitively (OI-4,
   BL-333), so values differing only in case answer differently.

@@ -214,7 +214,7 @@ are roughly ordered by value÷effort.
 | BL-330 | `ts migrate apply --sets-scan FILE` trusts any post-BL-325 scan for any Model — nothing checks the scan covered the mapped Model or the source Org; a scan of another Org (or `scanned.models: 0`) lets `apply` pass an uninspected Model | next ts-migrate pass |
 | BL-332 | Upstream apache/ossie converter maps `ROUND(x, d)` to `round ( x , d )` (copies the digit count; `d = 0` → NULL) — unreachable today, live once multi-arg matching lands; fix PR held for legal review | 2026-11-30 |
 | BL-333 | ThoughtSpot string comparison (`=`, `contains`, `strpos`) is case-insensitive — Snowflake SV / Databricks MV / Tableau / Qlik / Looker translations of case-sensitive comparisons change semantics silently | 2026-11-30 |
-| BL-334 | `DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`; week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
+| BL-334 | ~~`DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`~~ (item 1 FIXED, ts-cli 0.156.2 — also Tableau and Qlik weekday numbering); week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
 | BL-335 | `sql_number_aggregate_op` does not exist (parser rejects it; `sql_double_aggregate_op` is the numeric aggregate) — repo docs fixed; upstream apache/ossie converter still emits it, fix held with the Ossie upstream work | 2026-11-30 |
 
 ### Tier 3 — Opportunistic
@@ -268,6 +268,7 @@ are roughly ordered by value÷effort.
 | BL-284 | a physical table and a SQL View sharing one relation name in one datasource are not fully separable from the parsed representation — `_sql_view_owns_column` is a conservative heuristic, undecidable when both declare the same column name; not present in the corpus | next Tableau converter pass |
 | BL-313 | MERGE mode skips SQL View disambiguation, so merging into a model that GENERATE built with this CLI emits the bare name where the target expects the qualified one | next Tableau converter pass |
 | BL-314 | nothing tells an author that a deliberate parse→TML transformation must also be declared to `tableau/verify.py`; three PRs have broken the fidelity gate the same way and the rule is prose in CLAUDE.md, not a check | next validator pass |
+| BL-337 | ts-object-formula-translate: offer a warehouse SQL pass-through for scalar functions (`--prefer-passthrough`) — evaluate performance and trade-offs | revisit after v1 testing feedback |
 
 ### Tier 4 — Deferred
 
@@ -12427,7 +12428,38 @@ converter.
 1. **`DAYOFWEEK` → `day_number_of_week` is a plain rename in two translators**, and it is wrong:
    - `sv_sql.py`: Snowflake `DAYOFWEEK` under the default `WEEK_START = 0` is 0 = Sunday … 6 = Saturday. Exact form: `mod ( day_number_of_week ( d ) , 7 )`. `DAYOFWEEKISO` is the clean rename.
    - `databricks/mv_sql.py`: Databricks `DAYOFWEEK` is 1 = Sunday. Exact form: `mod ( day_number_of_week ( d ) , 7 ) + 1`.
-   Both are silent wrong numbers. The mapping docs now say so; the code is unchanged.
+   Both are silent wrong numbers.
+   **RESOLVED 2026-10-06 (ts-cli 0.156.2, branch `fix/dayofweek-numbering`).** Offset math now lives
+   once, in `formula_common.ts_weekday_number`, and every site imports it:
+   - `sv_sql.py`: `DAYOFWEEK` (+ `EXTRACT` parts `dayofweek`/`weekday`/`dow`/`dw`) →
+     `mod ( day_number_of_week ( d ) , 7 )`; `DAYOFWEEKISO` (+ `_iso` parts) → `day_number_of_week ( d )`.
+     Assumes the default `WEEK_START = 0`.
+   - `databricks/mv_sql.py`: `DAYOFWEEK` / `EXTRACT(DOW)` → `( mod ( day_number_of_week ( d ) , 7 ) + 1 )`;
+     `WEEKDAY` (0 = Mon) → `( day_number_of_week ( d ) - 1 )`; `EXTRACT(DAYOFWEEK_ISO)` → rename.
+   - Extra site found by the sweep: `tableau/functions.py` mapped `DATEPART('weekday', d)` to
+     `day_of_week` (the day NAME, not Tableau's 1–7 integer). Now `( mod ( day_number_of_week ( d ) , 7 ) + 1 )`
+     for a Sunday start. Week start: a literal `start_of_week`, else the datasource's
+     `<date-options start-of-week>` (read by `parse_twb`; attribute name from field workbooks — no repo
+     fixture carries it and Tableau does not document the XML), else Sunday **assumed** and surfaced as
+     `review_notes` / a pre-import validation warning in the build-model report.
+     `ISOWEEKDAY` / `DATEPART('iso-weekday')` → `day_number_of_week` (clean rename).
+   - `qlik/functions.py` `Weekday()` was **not** correct, contrary to the first pass of this fix: it
+     assumed `FirstWeekDay` 0 (Monday), but the app's regional settings decide it and US apps typically
+     carry `SET FirstWeekDay=6;` — wrong by one on every day there. It now reads `SET FirstWeekDay=n;`
+     from the recovered load script, flags the measure when there is no script or no `SET`, and honours a
+     literal second argument (independent review, 2026-10-06).
+   - Reverse direction: the TS → Snowflake / TS → Databricks doc rows said `DAYOFWEEK`; corrected to
+     `DAYOFWEEKISO` / `EXTRACT(DAYOFWEEK_ISO …)`. `mv_emit_sql.py` has no `day_number_of_week` entry and
+     refuses it, so no code change there.
+   Tests: `tools/ts-cli/tests/test_weekday_numbering.py` (all seven weekdays, evaluated against a model
+   of the compiled SQL).
+   **Live-verified 2026-10-06, se-thoughtspot:** `mod ( day_number_of_week ( d ) , 7 )` gave Sun..Sat =
+   0..6, `( mod ( day_number_of_week ( d ) , 7 ) + 1 )` gave 1..7, and `( day_number_of_week ( d ) - 1 )`
+   gave Mon = 0 .. Sun = 6 — all seven days match the documented source numbering.
+   **Follow-up (not implemented):** the Snowflake translator assumes the default `WEEK_START = 0`. A
+   runtime check — `SHOW PARAMETERS LIKE 'WEEK_START'` on the source connection, warning when it is 1–7,
+   where `DAYOFWEEK` numbers 1–7 from that day — would turn the assumption into a verified fact.
+   Items 2–4 remain open.
 2. **Monday-start assumption everywhere.** Every translation built on `day_number_of_week` or
    `start_of_week` diverges on a Model whose calendar starts the week elsewhere: weekday numbering,
    week-number/ISO-week compositions, NETWORKDAYS/WORKDAY arithmetic, Qlik `WeekStart`, and
@@ -12512,3 +12544,34 @@ Each one was a silent wrong number: the import and the lint were clean, and the 
 complete months, while `diff_months` counts month boundaries. `MONTHS_BETWEEN` is fractional. Both
 differ from `diff_months` by up to one month. `timestampdiff` and the `YEAR`/`QUARTER`/`WEEK` units of
 3-arg `DATEDIFF` are still unmapped in `mv_sql.py`, so they raise rather than translate.
+
+## BL-337 — ts-object-formula-translate: offer a warehouse SQL pass-through for scalar functions (`--prefer-passthrough`) — evaluate performance and trade-offs `Tier 3`
+
+**Filed:** 2026-10-06. **Status:** OPEN (future review).
+**Source:** user question during `ts-object-formula-translate` v1 (PR #560).
+
+**The question (user, 2026-10-06).** When the warehouse is known and has a single native scalar
+function equivalent, is a `sql_*_op` pass-through better than the native ThoughtSpot
+composition? The worry is that the native form expands into verbose SQL. The NETWORKDAYS
+example on Databricks repeated `DATEDIFF(...)` about 10 times per column, because ThoughtSpot
+inlines helper formulas.
+
+**Current reasoning (unmeasured):**
+- Both Spark/Databricks and Snowflake eliminate common subexpressions within a projection, and
+  per-row arithmetic is cheap next to scan and GROUP BY, so a runtime difference is expected to
+  be negligible.
+- Neither warehouse has a native NETWORKDAYS, so the pass-through would need a UDF, which is
+  often slower.
+- Pass-through costs: dialect lock-in; it is opaque to ThoughtSpot's planner (aggregate-aware
+  routing, type handling); the risk of picking the wrong `sql_*_op` variant (Ossie map E7).
+- Pass-through is already chosen for correctness where ThoughtSpot has no native equivalent
+  (regex, trim/replace/case, percentiles, LISTAGG, case-sensitive comparison per BL-333).
+
+**To do when revisited:** benchmark the native vs pass-through forms on a real table (e.g.
+`AGENT_SKILLS.DUNDER_MIFFLIN.DM_ORDER` on Databricks, and on Snowflake), comparing warehouse
+query-profile times. Then, if justified, add `--prefer-passthrough`, with the warehouse
+auto-detected from the Model's table connection, offering the pass-through alongside the native
+form with the trade-offs stated. Also consider recommending a precomputed warehouse column or
+view for heavy compositions.
+
+**Target:** revisit after v1 testing feedback.
