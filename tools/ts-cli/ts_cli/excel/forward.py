@@ -42,6 +42,13 @@ DECIMAL_CONSTANT_TRAP = (
     "platform divergence, not a translation error")
 
 
+CROSS_TYPE_TRAP = (
+    "a comparison across types was folded to the constant {result}: that assumes every Excel "
+    "cell of the column holds the warehouse column's type. A blank cell is 0 or '' to Excel "
+    "(and NULL here), and a sheet column can mix numbers, text and booleans, which Excel "
+    "would compare by value — check the column before relying on the constant")
+
+
 class NeedsReview(Exception):
     """The construct has no rule; the message is the user-facing reason."""
 
@@ -237,9 +244,12 @@ class Translator:
 
     def _compare_across_types(self, op: str, left: dict, right: dict) -> Optional[dict]:
         """Excel never finds values of different types equal and orders them by type
-        (numbers < text < booleans), so ``"TRUE"<>A1`` over a boolean is TRUE whatever A1
-        holds; ThoughtSpot rejects the comparison (*Expecting a List token*). A date beside
-        text is left to the type checker (NEEDS_REVIEW): a date there is usually a mistake."""
+        (numbers < text < booleans), so a text literal compared with a boolean cell is a
+        constant; ThoughtSpot rejects the comparison (*Expecting a List token*). The fold
+        assumes each Excel cell holds the warehouse column's type — a blank cell is 0 / ''
+        to Excel, and a text-typed sheet column may hold numbers — so it is APPROXIMATED with
+        a trap saying so (review of #574). A date beside text is left to the type checker
+        (NEEDS_REVIEW): a date there is usually a mistake."""
         lt, rt = (_RANK_FAMILY.get(self.fine_type(x)) for x in (left, right))
         if lt is None or rt is None or lt == rt:
             return None
@@ -247,6 +257,8 @@ class Translator:
         result = {"=": False, "<>": True, "<": a < b, "<=": a < b, ">": a > b, ">=": a > b}[op]
         self.note(f"Excel compares {lt} with {rt} by type (numbers < text < booleans; never "
                   f"equal), so this comparison is always {str(result).upper()}")
+        if T.has_column(left) or T.has_column(right):
+            self.trap(CROSS_TYPE_TRAP.format(result=str(result).upper()), downgrade=True)
         return T.lit_bool(result)
 
     def _blank_test(self, op: str, x: dict) -> dict:

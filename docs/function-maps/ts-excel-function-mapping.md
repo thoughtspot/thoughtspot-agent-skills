@@ -246,7 +246,7 @@ decimal literal is rejected in the integer slots (`substr`, `left`, `right`, `ad
 | a number | condition | `[T::n] != 0` | |
 | a DOUBLE or decimal | integer (count, position) | `floor ( [T::n] )`; a literal is truncated (`2.7` → `2`) | Excel truncates toward zero: `floor` is exact for x ≥ 0, and a negative count or position is `#VALUE!` in Excel. A month offset (`EDATE`, `EOMONTH`), which may be negative, is `if ( x < 0 ) then ceil ( x ) else floor ( x )`. **`to_integer` rounds** (2.7 → 3, −2.7 → −3; live 2026-10-07), so it is never used for truncation |
 | `IF` / `IFERROR` branches of different types | one type | number and text: the number becomes `to_string ( … )`; boolean and text: `'TRUE'` / `'FALSE'` | APPROXIMATED, with a trap: an Excel cell holds either type, a ThoughtSpot column one. A date beside text is NEEDS_REVIEW (BL-354) |
-| text compared with a number or a boolean (`"TRUE"<>A1`) | comparison | `true` / `false` | Excel orders values of different types by type (numbers < text < booleans) and never finds them equal, so the comparison is a constant. A date compared with text is NEEDS_REVIEW |
+| text compared with a number or a boolean (`"yes"=[@Flag]`) | comparison | `true` / `false` | Excel orders values of different types by type (numbers < text < booleans) and never finds them equal, so the comparison is a constant. **APPROXIMATED**, with a trap: the fold assumes every cell holds the warehouse column's type, and a blank cell is 0 / `''` to Excel. A date compared with text is NEEDS_REVIEW |
 
 ---
 

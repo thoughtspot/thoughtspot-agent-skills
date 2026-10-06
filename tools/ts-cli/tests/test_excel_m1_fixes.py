@@ -182,6 +182,9 @@ def test_non_numeric_text_literal_in_arithmetic_is_needs_review():
 def test_comparison_across_types_follows_excel_type_order(src, expected):
     r = ok(src)
     assert r.expr == expected and any("by type" in n for n in r.notes)
+    # the fold assumes the cell type: APPROXIMATED, with the assumption named (review #574)
+    assert r.status == "APPROXIMATED"
+    assert any("folded to the constant" in t and "blank cell" in t for t in r.traps)
 
 
 def test_date_compared_with_text_stays_needs_review():
