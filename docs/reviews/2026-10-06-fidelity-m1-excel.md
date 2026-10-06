@@ -232,7 +232,7 @@ An independent review of PR #574 found more defects, and they are fixed in the s
   name the assumption.
 - **Number literals are written as text in Excel's General format.**
 - **`to_double` of non-numeric text fails the whole query** (probed live; it does not return
-  NULL). `IFERROR(VALUE(…))` and `ISNUMBER(VALUE(…))` therefore use `TRY_TO_DOUBLE`.
+  NULL). `IFERROR` around `VALUE`, and `ISNUMBER` of `VALUE`, therefore use `TRY_TO_DOUBLE`.
 - **A slashed day/month date is APPROXIMATED**, with a locale trap.
 - **The `COERCION_EMITS` validator exemption is limited to the nodes the coercions add.**
 - **The exact leak scan now covers every tracked file.**
