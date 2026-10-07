@@ -896,7 +896,7 @@
     "Qlik Example": "WeekStart(OrderDate)",
     "ThoughtSpot Equivalent": "start_of_week(date_col)",
     "ThoughtSpot Example": "start_of_week(order_date)",
-    "Comments / Context": "Both return the start of the week. Naming differs; behavior is equivalent.",
+    "Comments / Context": "Both return the start of the week. Monday first week day (or unknown): start_of_week. A known non-Monday first week day (3rd argument or SET FirstWeekDay) is rebuilt from day_number_of_week, e.g. Sunday: add_days(date(d), 0 - mod(day_number_of_week(d), 7)); a literal period offset n adds 7*n days (BL-373, live-verified 2026-10-07).",
     "status": "ok"
   },
   {

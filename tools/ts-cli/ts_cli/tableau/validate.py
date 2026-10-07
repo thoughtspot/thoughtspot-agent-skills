@@ -68,12 +68,12 @@ _UNMAPPED_FUNCTIONS = [
     # (same JWT user-attribute mechanism as the ISMEMBEROF→ts_groups reclassification
     # of 2026-06-28) but needs live verification before wiring in. Tracked in BL-071.
     "USERATTRIBUTE", "USERATTRIBUTEINCLUDES",
-    # ISO-8601 week-based parts: week_number_of_year is NOT ISO (different year
-    # boundary), so substituting it is valid-but-wrong — tableau-formula-translation.md
-    # (finding 13.28). WEEK(date) numbers weeks from the datasource's week start with
-    # Tableau's own year boundary; no verified ThoughtSpot function matches it.
-    # Previously all four passed through verbatim into translated[] (BL-334 review).
-    "ISOWEEK", "ISOYEAR", "ISOQUARTER", "WEEK",
+    # ISO-8601 year / quarter: no ThoughtSpot function returns the ISO YEAR (year()
+    # is the calendar year, so Dec 29 2025 is ISO 2026 but year() 2025). ISOWEEK and
+    # WEEK are no longer here: ISOWEEK is exactly week_number_of_year (the ISO week,
+    # live-verified on 120 dates 2026-10-07) and WEEK(d) is DATEPART('week', d), now
+    # an exact Jan-1-based composition (BL-380; functions.map_date_functions).
+    "ISOYEAR", "ISOQUARTER",
 ]
 _UNMAPPED_RE = [
     (re.compile(rf"\b{fn}\s*\(", re.IGNORECASE), fn) for fn in _UNMAPPED_FUNCTIONS

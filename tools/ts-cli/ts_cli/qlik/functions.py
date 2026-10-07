@@ -31,7 +31,7 @@ from ts_cli.formula_common import (
     wrap_passthrough_calls,
 )
 from ts_cli.formula_text import ts_finalize_formula
-from ts_cli.formula_week import week_start_mismatch_note
+from ts_cli.formula_week import ts_week_start
 
 # ---------------------------------------------------------------------------
 # Function-name map + translator
@@ -120,50 +120,31 @@ def _weekday(args: list[str], first_week_day: Optional[int] = None) -> Optional[
 
 
 def _weekstart(args: list[str], first_week_day: Optional[int] = None) -> Optional[str]:
-    """Qlik WeekStart(date[, period_no[, first_week_day]]) -> ThoughtSpot start_of_week.
+    """Qlik WeekStart(date[, period_no[, first_week_day]]) -> the first day of the week.
 
-    ThoughtSpot `start_of_week` is Monday-based and takes no offset (a bare rename let
-    `WeekStart(D, 0, 6)` through as `start_of_week(D,0,6)`, an invalid arity reported
-    OK). Emitted only when the period offset is absent or a literal 0 AND the week start
-    is not known to be another day: a literal third argument, else the app's
-    `FirstWeekDay`. A known non-Monday start (0 = Mon ... 6 = Sun) is a known wrong
-    answer, so it is flagged NEEDS REVIEW, as is any other offset — the exact shifted
-    form is a filed follow-up (BL-334). An unknown start is emitted with the advisory
-    week note (formula_week.week_start_note), not flagged.
+    The week start comes from a literal third argument, else the app's `FirstWeekDay`
+    (0 = Mon ... 6 = Sun). A known start gets the exact form, formula_week.ts_week_start:
+    Monday is `start_of_week`; any other day is rebuilt from the fixed
+    `day_number_of_week` (BL-373, live-verified 2026-10-07). An unknown start is
+    emitted as `start_of_week` with the advisory week note. A literal integer
+    period_no shifts by 7 * n days. A non-literal offset or first week day returns
+    None and is flagged NEEDS REVIEW (a bare rename once emitted the invalid
+    `start_of_week(D,0,6)` and reported OK).
     """
     if not 1 <= len(args) <= 3:
         return None
-    if len(args) >= 2 and args[1].strip() != "0":
-        return None
+    offset = 0
+    if len(args) >= 2:
+        if not re.fullmatch(r"\s*-?\d+\s*", args[1]):
+            return None
+        offset = int(args[1])
     first = first_week_day
     if len(args) == 3:
         if args[2].strip() not in {str(i) for i in range(7)}:
             return None
         first = int(args[2].strip())
-    if first not in (None, 0):
-        return None
-    return f"start_of_week({args[0]})"
-
-
-def _weekstart_mismatch(expr: str, first_week_day: Optional[int]) -> Optional[int]:
-    """The known non-Monday first week day that made a WeekStart() unresolvable, else None."""
-    for m in re.finditer(r"(?i)\bweekstart\s*\(", expr):
-        depth, i = 0, m.end() - 1
-        for i in range(m.end() - 1, len(expr)):
-            depth += {"(": 1, ")": -1}.get(expr[i], 0)
-            if depth == 0:
-                break
-        args = _split_top_level(expr[m.end():i])
-        if len(args) >= 2 and args[1].strip() != "0":
-            continue  # an offset: reported as such, not as a week-start mismatch
-        first = first_week_day
-        if len(args) == 3:
-            if args[2].strip() not in {str(n) for n in range(7)}:
-                continue  # a non-literal first week day: same
-            first = int(args[2].strip())
-        if first not in (None, 0):
-            return first
-    return None
+    out = ts_week_start(args[0], first or 0, compact=True)
+    return f"add_days({out}, {7 * offset})" if offset else out
 
 
 _FIRST_WEEK_DAY_RE = re.compile(
@@ -397,13 +378,8 @@ def _unmapped_reason(unknown: set[str], first_week_day: Optional[int],
                      expr: str = "") -> str:
     reason = f"Unmapped Qlik function(s): {', '.join(sorted(unknown))}"
     if any(u.lower() == "weekstart" for u in unknown):
-        first = _weekstart_mismatch(expr, first_week_day)
-        reason += (" — " + week_start_mismatch_note(
-            "the Qlik week (WeekStart's 3rd argument or the app's FirstWeekDay)", first)
-            if first is not None else
-            " — WeekStart() with a non-zero or non-literal period offset (or a "
-            "non-literal first week day) has no exact ThoughtSpot form; rewrite it "
-            "by hand (BL-334)")
+        reason += (" — WeekStart() with a non-literal period offset or first week "
+                   "day has no exact ThoughtSpot form; rewrite it by hand (BL-334)")
     if first_week_day is None and any(u.lower() == "weekday" for u in unknown):
         reason += (" — Weekday() numbers from the app's FirstWeekDay, and no "
                    "`SET FirstWeekDay=n;` was found in the load script; pass "

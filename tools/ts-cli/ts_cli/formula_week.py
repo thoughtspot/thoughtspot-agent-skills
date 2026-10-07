@@ -9,7 +9,68 @@ from __future__ import annotations
 
 import re
 
-from ts_cli.formula_common import WEEKDAY_FIRST_DAY_INDEX
+from ts_cli.formula_common import WEEKDAY_FIRST_DAY_INDEX, ts_weekday_number
+
+
+# ---------------------------------------------------------------------------
+# Exact week forms for a KNOWN source week start (BL-373, BL-380)
+# ---------------------------------------------------------------------------
+#
+# Live-probed 2026-10-07 on se-thoughtspot (120 dates, Dec 25 - Jan 13 around six
+# year boundaries, every weekday; docs/reviews/2026-10-06-formula-semantics-probes.md
+# section 8):
+#   * The week start is rebuilt from day_number_of_week, NOT by shifting
+#     start_of_week. `add_days ( start_of_week ( add_days ( d , k ) ) , -k )` was
+#     exact on the cluster, but start_of_week compiles to DATE_TRUNC(week, d) and the
+#     shift breaks under a Snowflake WEEK_START of 7 (Saturday for every Sunday-start
+#     week, reproduced in a Snowflake session). day_number_of_week is fixed
+#     arithmetic, so `add_days ( date ( d ) , 0 - <days since the week start> )` is
+#     exact under any WEEK_START.
+#   * week_number_of_year is the ISO-8601 week (Thursday rule), so it disagrees with
+#     a "week 1 contains January 1" numbering (Tableau DATEPART('week')) for WHOLE
+#     years, not only boundary days: every date of 2021, 2022, 2023 and 2027 was one
+#     lower under a Monday start. The Jan-1 form is rebuilt from day_number_of_year
+#     and the weekday of start_of_year.
+
+
+def _first_day_index(first_day: int | str) -> int:
+    if isinstance(first_day, str):
+        return WEEKDAY_FIRST_DAY_INDEX[first_day.strip().lower()]
+    return int(first_day)
+
+
+def ts_week_start(date_expr: str, first_day: int | str, *, compact: bool = False) -> str:
+    """ThoughtSpot formula for the first day of ``date_expr``'s week, the week starting
+    on ``first_day`` (a name, or a Monday-based index as in ``ts_weekday_number``).
+
+    Monday stays ``start_of_week``. Any other day is rebuilt from the fixed
+    ``day_number_of_week`` so it does not depend on the warehouse's WEEK_START.
+
+    >>> ts_week_start("[d]", "sunday")
+    'add_days ( date ( [d] ) , 0 - mod ( day_number_of_week ( [d] ) , 7 ) )'
+    >>> ts_week_start("[d]", 0)
+    'start_of_week ( [d] )'
+    """
+    idx = _first_day_index(first_day)
+    if idx == 0:
+        return f"start_of_week({date_expr})" if compact else f"start_of_week ( {date_expr} )"
+    since = ts_weekday_number(date_expr, first_day=idx, base=0, compact=compact)
+    if compact:
+        return f"add_days(date({date_expr}), 0 - {since})"
+    return f"add_days ( date ( {date_expr} ) , 0 - {since} )"
+
+
+def ts_week_of_year_jan1(date_expr: str, first_day: int | str) -> str:
+    """ThoughtSpot formula numbering weeks within the calendar year so that week 1
+    is the week containing January 1 and weeks start on ``first_day`` — Tableau's
+    DATEPART('week') (1-54). Not ISO: see ``week_number_of_year``.
+
+    >>> ts_week_of_year_jan1("[d]", "monday")
+    '( floor ( ( day_number_of_year ( [d] ) - 1 + ( day_number_of_week ( start_of_year ( [d] ) ) - 1 ) ) / 7 ) + 1 )'
+    """
+    jan1 = f"start_of_year ( {date_expr} )"
+    offset = ts_weekday_number(jan1, first_day=_first_day_index(first_day), base=0)
+    return (f"( floor ( ( day_number_of_year ( {date_expr} ) - 1 + {offset} ) / 7 ) + 1 )")
 
 
 # ---------------------------------------------------------------------------
@@ -18,18 +79,21 @@ from ts_cli.formula_common import WEEKDAY_FIRST_DAY_INDEX
 #
 # ThoughtSpot's week functions are built around a Monday week start. What each one
 # rests on differs, and the note says exactly that, per function found:
-#   * `start_of_week` compiles to DATE_TRUNC(week, d), which follows the warehouse's
-#     week-start setting (Snowflake WEEK_START) — Monday only while that is 0 or 1;
-#     whether ThoughtSpot sets it on its session is unverified (BL-334 item 3).
-#   * `day_number_of_week` compiles to a fixed 1 = Monday expression, independent of
-#     WEEK_START (live-probed 2026-10-06); whether a non-default Model calendar
-#     changes it is unverified (BL-334 item 4).
-#   * `week_number_of_*` assume the default calendar's Monday week; same item 4 caveat.
+#   * `start_of_week` compiles to DATE_TRUNC(week, d), which follows the Snowflake
+#     WEEK_START of ThoughtSpot's connection session. That was 0 (Monday weeks) on
+#     se-thoughtspot / APJ_TAB, read from a ThoughtSpot-issued DAYOFWEEK, 2026-10-07;
+#     a connection whose user or account sets 2-7 gets that day (BL-334 item 3).
+#   * `day_number_of_week` compiles to fixed arithmetic, 1 = Monday ... 7 = Sunday,
+#     independent of WEEK_START (2026-10-06) and of a custom calendar bound to the
+#     column (2026-10-07, BL-334 item 4).
+#   * `week_number_of_year` is the ISO-8601 week (Thursday rule, 2026-10-07, BL-380);
+#     a column calendar does not change it either.
 #   * `diff_weeks` counts week boundaries from a FIXED Monday (epoch-day arithmetic in
 #     its compiled SQL, 2026-10-06).
+# Only an explicit calendar argument (`start_of_week ( d , CalName )`, a bare
+# calendar keyword) makes them read a custom calendar.
 #
-# Decision (2026-10-07): translators do NOT emit a calendar argument
-# (`start_of_week ( d , 'Calendar' )`); the Model's calendar is the default. Three
+# Decision (2026-10-07): translators do NOT emit a calendar argument. Three
 # notes, one home (BL-217 — re-implementing them per converter is an angle-9 finding):
 #   * week_start_note — ADVISORY. The status is unchanged.
 #   * week_start_mismatch_note — the converter KNOWS the source week starts on another
@@ -91,12 +155,13 @@ def _start_of_week_clause(dialect: str | None) -> str:
     if dialect == "databricks":
         # Databricks date_trunc('WEEK', d) is always Monday — no session setting.
         return ("start_of_week compiles to date_trunc('WEEK', d), which Databricks fixes to "
-                "Monday, so it is exact under a Monday-start Model calendar; whether a "
-                "non-default Model calendar changes it is unverified (BL-334 item 4)")
-    return ("start_of_week truncates to Monday under the default calendar, but it "
-            "compiles to DATE_TRUNC(week, d), which follows the warehouse's week-start "
-            "setting (Snowflake WEEK_START) — Monday only while that is 0 or 1, and "
-            "whether ThoughtSpot sets it on its session is unverified (BL-334 item 3)")
+                "Monday; a custom Model calendar bound to the column does not change it "
+                "(probed 2026-10-07) — only an explicit calendar argument does "
+                "(BL-334 item 4)")
+    return ("start_of_week compiles to DATE_TRUNC(week, d), which follows the Snowflake "
+            "WEEK_START of ThoughtSpot's connection session — 0 (Monday weeks) on "
+            "se-thoughtspot, probed 2026-10-07; a connection whose user or account sets "
+            "WEEK_START to 2-7 truncates to that day instead (BL-334 item 3)")
 
 
 def _week_clauses(fns: list[str], dialect: str | None = None) -> list[str]:
@@ -104,14 +169,18 @@ def _week_clauses(fns: list[str], dialect: str | None = None) -> list[str]:
     if "start_of_week" in fns:
         out.append(_start_of_week_clause(dialect))
     if "day_number_of_week" in fns:
-        out.append("day_number_of_week compiles to a fixed 1 = Monday … 7 = Sunday "
-                   "expression, independent of WEEK_START (live-probed 2026-10-06); whether "
-                   "a non-default Model calendar changes it is unverified (BL-334 item 4)")
+        out.append("day_number_of_week compiles to fixed arithmetic, 1 = Monday … 7 = Sunday, "
+                   "independent of WEEK_START and of a custom calendar bound to the column "
+                   "(live-probed 2026-10-06 / 2026-10-07, BL-334 item 4)")
     numbers = [f for f in _WEEK_NUMBER_FUNCTIONS if f in fns]
     if numbers:
-        out.append(f"{' / '.join(numbers)} number weeks under the default calendar's Monday "
-                   "week; whether a non-default Model calendar changes them is unverified "
-                   "(BL-334 item 4)")
+        clause = (f"{' / '.join(numbers)} number Monday-based Gregorian weeks, and a custom "
+                  "calendar bound to the column does not change them (BL-334 item 4)")
+        if "week_number_of_year" in numbers:
+            clause += ("; week_number_of_year is the ISO-8601 week (Thursday rule), so "
+                       "early-January days can be week 52 / 53 and late-December days "
+                       "week 1 (live-probed 2026-10-07, BL-380)")
+        out.append(clause)
     if "diff_weeks" in fns:
         out.append("diff_weeks counts week boundaries crossed from a FIXED Monday (epoch-day "
                    "arithmetic in its compiled SQL, 2026-10-06); a source counting from another "
@@ -135,8 +204,8 @@ def week_start_note(ts_expr: str | None, dialect: str | None = None) -> str | No
         return None
     return (f"{WEEK_START_NOTE_PREFIX} ({', '.join(fns)}): "
             + "; ".join(_week_clauses(fns, dialect))
-            + ". No calendar argument is emitted, so the Model's calendar applies — "
-              "check it (BL-334)")
+            + ". No calendar argument is emitted, so the result is Gregorian with a "
+              "Monday week even on a column bound to another calendar (BL-334)")
 
 
 def week_start_mismatch_note(source: str, first_day: int | str) -> str:
@@ -148,7 +217,8 @@ def week_start_mismatch_note(source: str, first_day: int | str) -> str:
     return (f"{WEEK_START_MISMATCH_PREFIX}: {source} starts the week on "
             f"{first_day.capitalize()}, but ThoughtSpot's start_of_week / week numbering "
             "is Monday-based, so the translation returns a different week for every date. "
-            "Rewrite it by hand; no shifted form is emitted yet (BL-334)")
+            "Rewrite it by hand from day_number_of_week, which is fixed arithmetic "
+            "(BL-334, BL-373)")
 
 
 WEEK_DIFF_DAYS_NOTE = (

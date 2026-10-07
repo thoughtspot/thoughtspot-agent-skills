@@ -59,7 +59,10 @@ class TestHelper:
 
     def test_note_says_no_calendar_argument_and_cites_bl334(self):
         note = week_start_note("start_of_week ( [T::d] )")
-        assert "Model's calendar" in note and "No calendar argument" in note
+        # BL-334 item 4 (live 2026-10-07): a column calendar does NOT reach these
+        # functions, so the note must not claim "the Model's calendar applies".
+        assert "Model's calendar applies" not in note and "No calendar argument" in note
+        assert "bound to another calendar" in note
         assert "BL-334" in note
 
 
@@ -204,9 +207,10 @@ class TestNoteWording:
         assert "DATE_TRUNC(week, d)" in note and "WEEK_START" in note
         assert "item 3" in note
 
-    def test_day_number_of_week_is_hedged_not_asserted(self):
+    def test_day_number_of_week_states_the_probed_facts(self):
         note = week_start_note("day_number_of_week ( [d] )")
-        assert "independent of WEEK_START" in note and "unverified" in note
+        assert "independent of WEEK_START" in note and "custom calendar" in note
+        assert "unverified" not in note  # item 4 was probed 2026-10-07
         assert "item 4" in note
         assert "values differ" not in note
         assert "DATE_TRUNC" not in note  # tailored: only the clause for what was found
@@ -232,12 +236,15 @@ class TestFormulaTranslateDedupe:
         traps = detect_traps("tableau", "x", "diff_weeks ( [T::b] , [T::a] )")
         assert sum("diff_weeks" in t and "Monday" in t for t in traps) == 1
 
-    def test_tableau_known_mismatch_downgrades(self):
+    def test_tableau_known_start_is_exact_not_downgraded(self):
+        # BL-373: a known non-Monday start now gets the exact shifted form.
         from ts_cli.formula_translate.engine import translate
-        from ts_cli.formula_translate.adapters import APPROXIMATED, TRANSLATED
+        from ts_cli.formula_translate.adapters import TRANSLATED
         r = translate("DATETRUNC('week', [d], 'sunday')", "tableau")
-        assert r["status"] == APPROXIMATED
-        assert any(t.startswith(WEEK_START_MISMATCH_PREFIX) for t in r["traps"])
+        assert r["status"] == TRANSLATED
+        assert "mod ( day_number_of_week" in r["formula"]
+        assert "start_of_week" not in r["formula"]
+        assert not any(t.startswith(WEEK_START_MISMATCH_PREFIX) for t in r["traps"])
         r = translate("DATETRUNC('week', [d], 'monday')", "tableau")
         assert r["status"] == TRANSLATED
 
@@ -266,18 +273,35 @@ class TestTableauReview:
         assert any(w.startswith(WEEK_DIFF_DAYS_PREFIX)
                    for i in validate_pre_import(res["translated"]) for w in i["warnings"])
 
-    @pytest.mark.parametrize("formula, kw", [
-        ("DATETRUNC('week', [d], 'sunday')", {}),
-        ("DATETRUNC('week', [d])", {"week_start": "sunday"}),
-        ("DATEPART('week', [d])", {"week_start": "sunday"}),
+    SUN_TRUNC = "add_days ( date ( [d] ) , 0 - mod ( day_number_of_week ( [d] ) , 7 ) )"
+    SUN_WEEK = ("( floor ( ( day_number_of_year ( [d] ) - 1 + mod ( day_number_of_week "
+                "( start_of_year ( [d] ) ) , 7 ) ) / 7 ) + 1 )")
+    MON_WEEK = ("( floor ( ( day_number_of_year ( [d] ) - 1 + ( day_number_of_week "
+                "( start_of_year ( [d] ) ) - 1 ) ) / 7 ) + 1 )")
+
+    @pytest.mark.parametrize("formula, kw, expected", [
+        ("DATETRUNC('week', [d], 'sunday')", {}, SUN_TRUNC),
+        ("DATETRUNC('week', [d])", {"week_start": "sunday"}, SUN_TRUNC),
+        ("DATEPART('week', [d])", {"week_start": "sunday"}, SUN_WEEK),
+        ("DATEPART('week', [d], 'sunday')", {"week_start": "monday"}, SUN_WEEK),
+        ("WEEK([d])", {"week_start": "sunday"}, SUN_WEEK),
+        ("DATEPART('week', [d])", {}, MON_WEEK),  # unknown start: Monday, as DATETRUNC
     ])
-    def test_known_non_monday_start_is_a_mismatch(self, formula, kw):
+    def test_known_start_is_exact_not_review(self, formula, kw, expected):
+        # BL-373 / BL-380: exact forms, live-verified 2026-10-07 — no mismatch note.
         res = self._one(formula, **kw)
         rec = res["translated"][0]
-        assert rec["review_required"] is True
-        assert any(n.startswith(WEEK_START_MISMATCH_PREFIX) and "Sunday" in n
-                   for n in rec["review_notes"])
-        assert res["stats"]["week_start_mismatch"] == 1
+        assert rec["expr"] == expected
+        assert "review_required" not in rec
+        assert not any(n.startswith(WEEK_START_MISMATCH_PREFIX)
+                       for n in rec.get("review_notes", []))
+        assert res["stats"]["week_start_mismatch"] == 0
+
+    @pytest.mark.parametrize("formula", ["DATETRUNC('week', [d], [p])",
+                                         "DATEPART('week', [d], [p])"])
+    def test_non_literal_week_start_is_left_unmapped(self, formula):
+        res = self._one(formula)
+        assert res["translated"] == [] and res["skipped"]
 
     @pytest.mark.parametrize("formula, kw", [
         ("DATETRUNC('week', [d])", {}),                       # unknown start: advisory
@@ -289,11 +313,18 @@ class TestTableauReview:
         assert "review_required" not in rec
         assert any(n.startswith(WEEK_START_NOTE_PREFIX) for n in rec["review_notes"])
 
-    @pytest.mark.parametrize("fn", ["ISOWEEK", "ISOYEAR", "ISOQUARTER", "WEEK"])
-    def test_iso_and_week_functions_are_skipped_not_passed_through(self, fn):
+    @pytest.mark.parametrize("fn", ["ISOYEAR", "ISOQUARTER"])
+    def test_iso_year_and_quarter_are_skipped_not_passed_through(self, fn):
         res = self._one(f"{fn}([Order Date])")
         assert res["translated"] == []
         assert fn in res["skipped"][0]["reason"]
+
+    @pytest.mark.parametrize("formula", ["ISOWEEK([Order Date])",
+                                         "DATEPART('iso-week', [Order Date])"])
+    def test_iso_week_is_week_number_of_year(self, formula):
+        # week_number_of_year is the ISO-8601 week (120 dates, live 2026-10-07).
+        res = self._one(formula)
+        assert res["translated"][0]["expr"] == "week_number_of_year ( [Order Date] )"
 
     def test_isoweekday_still_translates(self):
         res = self._one("ISOWEEKDAY([Order Date])")
@@ -310,28 +341,33 @@ class TestQlikWeekStart:
         out, review, _ = translate(expr, first_week_day=fwd)
         assert out == "start_of_week(D)" and not review
 
-    @pytest.mark.parametrize("expr, fwd", [
-        ("WeekStart(D, 0, 6)", None), ("WeekStart(D)", 6), ("Max(WeekStart(D))", 6),
+    SUN = "add_days(date(D), 0 - mod(day_number_of_week(D), 7))"
+
+    @pytest.mark.parametrize("expr, fwd, expected", [
+        ("WeekStart(D, 0, 6)", None, SUN), ("WeekStart(D)", 6, SUN),
+        ("Max(WeekStart(D))", 6, f"max({SUN})"),
+        ("WeekStart(D)", 5, "add_days(date(D), 0 - mod(day_number_of_week(D) + 1, 7))"),
+        ("WeekStart(D, -1)", None, "add_days(start_of_week(D), -7)"),
+        ("WeekStart(D, 2, 6)", None, f"add_days({SUN}, 14)"),
     ])
-    def test_known_non_monday_start_needs_review(self, expr, fwd):
+    def test_known_start_or_literal_offset_is_exact(self, expr, fwd, expected):
+        # BL-373 (live-verified 2026-10-07): exact, never the invalid start_of_week(D,0,6).
         from ts_cli.qlik.functions import translate
         out, review, reason = translate(expr, first_week_day=fwd)
-        assert review and WEEK_START_MISMATCH_PREFIX in reason and "Sunday" in reason
-        assert "start_of_week" not in out  # never the invalid start_of_week(D,0,6)
+        assert out == expected and not review
 
-    @pytest.mark.parametrize("expr", ["WeekStart(D, -1)", "WeekStart(D, n)",
-                                      "WeekStart(D, 0, x)"])
-    def test_offset_or_non_literal_needs_review(self, expr):
+    @pytest.mark.parametrize("expr", ["WeekStart(D, n)", "WeekStart(D, 0, x)"])
+    def test_non_literal_offset_or_start_needs_review(self, expr):
         from ts_cli.qlik.functions import translate
         out, review, reason = translate(expr)
         assert review and "start_of_week" not in out
 
-    def test_build_model_status_is_needs_review(self):
+    def test_build_model_status_is_ok_for_a_known_start(self):
         from ts_cli.qlik.build_model import _translate_measures
         m = type("M", (), {"label": "W", "id": "m1",
                            "expression": "Max(WeekStart(OrderDate, 0, 6))"})()
         _, mapping = _translate_measures([m])
-        assert mapping[0]["status"] == "NEEDS REVIEW"
+        assert mapping[0]["status"] != "NEEDS REVIEW"
 
 
 class TestDatabricksInliningAndFilter:
@@ -405,7 +441,7 @@ class TestReReview:
         res = self._one("DATETRUNC('week', [d])")  # advisory only
         assert all("review_required" not in i for i in validate_pre_import(res["translated"]))
 
-    @pytest.mark.parametrize("expr", ["WeekStart(D, -1)", "WeekStart(D, 0, vFWD)"])
+    @pytest.mark.parametrize("expr", ["WeekStart(D, vN)", "WeekStart(D, 0, vFWD)"])
     def test_qlik_offset_reason_wins_over_mismatch(self, expr):
         from ts_cli.qlik.functions import translate
         out, review, reason = translate(expr, first_week_day=6)

@@ -17,6 +17,7 @@ from ts_cli.formula_common import (
     ts_round_from_sql_digits,
     ts_weekday_number,
 )
+from ts_cli.formula_week import ts_week_of_year_jan1, ts_week_start
 from ts_cli.tableau.literals import literal_value
 from ts_cli.tableau.parsing import _extract_function_args
 
@@ -328,7 +329,8 @@ _DATEPART_UNIT_MAP = {
     "dayofyear": "day_number_of_year",
     # "weekday" is NOT a rename (BL-334) — see _datepart_weekday below.
     "hour": "hour_of_day",
-    "week": "week_number_of_year",
+    # "week" is NOT week_number_of_year (ISO-8601, BL-380) — see _datepart_replacement.
+    "iso-week": "week_number_of_year",
 }
 
 _DATEDIFF_UNIT_MAP = {
@@ -372,7 +374,11 @@ def map_date_functions(expr: str, registry: dict | None = None,
     `week_start` is the datasource's Week start (lower-case day name) when the
     TWB records one; `notes` collects assumption counters (WEEK_START_ASSUMED).
     """
-    result = expr
+    # WEEK(d) is DATEPART('week', d); ISOWEEK(d) is the ISO-8601 week, which is exactly
+    # ThoughtSpot week_number_of_year (120 dates around six year boundaries, live
+    # 2026-10-07, BL-380).
+    result = _WEEK_FN.sub("DATEPART('week', ", expr)
+    result = _ISOWEEK_FN.sub("DATEPART('iso-week', ", result)
 
     # DATETRUNC('unit', date) → start_of_unit ( date )
     result = _convert_datetrunc(result, registry, week_start, notes)
@@ -392,26 +398,31 @@ def map_date_functions(expr: str, registry: dict | None = None,
     return result
 
 
+_WEEK_FN = re.compile(r"\bWEEK\s*\(", re.IGNORECASE)
+_ISOWEEK_FN = re.compile(r"\bISOWEEK\s*\(", re.IGNORECASE)
+
 # Tableau DATETRUNC('week', d, [start_of_week]) and DATEPART('week', d,
-# [start_of_week]) honour the week start; ThoughtSpot start_of_week and
-# week_number_of_year are Monday-based. When the converter KNOWS the source week
-# starts elsewhere (a literal argument, else the datasource's Week start) the plain
-# Monday form is a known wrong answer: it is still emitted, but counted under
-# `WEEK_START_MISMATCH:<day>` so the record is flagged for review (BL-334). An
-# unknown start stays an advisory (formula_week.week_start_note).
+# [start_of_week]) honour the week start; ThoughtSpot start_of_week is Monday-based
+# and week_number_of_year is the ISO week. Where the converter KNOWS the start (a
+# literal argument, else the datasource's Week start) it emits the exact form from
+# formula_week (BL-373 / BL-380, live-verified 2026-10-07). An unknown start keeps the
+# Monday form with the advisory note; a non-literal start (a field or parameter) is
+# left unmapped for validate_output to flag. The counter is kept for the stats shape
+# and stays 0 — no Monday-based fallback is emitted for a known start any more.
 WEEK_START_MISMATCH = "week_start_mismatch"
+_UNRESOLVED = object()
 
 
-def _note_week_mismatch(args: list[str], registry: dict | None,
-                        week_start: str | None, notes: dict | None) -> None:
-    start = None
+def _tableau_week_start(args: list[str], registry: dict | None,
+                        week_start: str | None):
+    """The known week start (lower-case day name), None when unknown, or
+    ``_UNRESOLVED`` for a non-literal start_of_week argument."""
     if len(args) >= 3:
         start = _resolve_unit(args[2], registry)
-    elif week_start:
-        start = week_start.lower()
-    if notes is not None and start in WEEKDAY_FIRST_DAY_INDEX and start != "monday":
-        key = f"{WEEK_START_MISMATCH}:{start}"
-        notes[key] = notes.get(key, 0) + 1
+        return start if start in WEEKDAY_FIRST_DAY_INDEX else _UNRESOLVED
+    if week_start and week_start.lower() in WEEKDAY_FIRST_DAY_INDEX:
+        return week_start.lower()
+    return None
 
 
 def _convert_datetrunc(expr: str, registry: dict | None = None,
@@ -442,9 +453,14 @@ def _convert_datetrunc(expr: str, registry: dict | None = None,
                 # flags any surviving DATETRUNC call as unmapped.
                 search_start = end_pos
                 continue
-            if unit == "week":
-                _note_week_mismatch(args, registry, week_start, notes)
             replacement = f"{ts_func} ( {date_expr} )"
+            if unit == "week":
+                start = _tableau_week_start(args, registry, week_start)
+                if start is _UNRESOLVED:
+                    search_start = end_pos
+                    continue
+                if start is not None:
+                    replacement = ts_week_start(date_expr, start)
             result = result[:m.start()] + replacement + result[end_pos:]
             search_start = m.start() + len(replacement)
         else:
@@ -585,7 +601,13 @@ def _datepart_replacement(unit: str, args: list[str], registry: dict | None,
     if unit == "weekday":
         return _datepart_weekday(args, registry, week_start, notes)
     if unit == "week":
-        _note_week_mismatch(args, registry, week_start, notes)
+        # Week 1 contains January 1 (Tableau's ww is 1-54) — NOT week_number_of_year,
+        # the ISO week, which was one lower for every date of 2021 / 2022 / 2023 / 2027
+        # under a Monday start (BL-380). An unknown start uses Monday, as DATETRUNC.
+        start = _tableau_week_start(args, registry, week_start)
+        if start is _UNRESOLVED:
+            return None
+        return ts_week_of_year_jan1(date_expr, start or "monday")
     ts_func = _DATEPART_UNIT_MAP.get(unit)
     return f"{ts_func} ( {date_expr} )" if ts_func else None
 

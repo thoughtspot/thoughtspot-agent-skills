@@ -105,7 +105,7 @@ from ts_cli.tableau.lod import (  # noqa: F401
 )
 from ts_cli.formula_text import ts_finalize_formula
 from ts_cli.formula_week import (
-    WEEK_DIFF_DAYS_NOTE, is_week_review_note, week_start_mismatch_note, week_start_note)
+    WEEK_DIFF_DAYS_NOTE, is_week_review_note, week_start_note)
 from ts_cli.tableau.literals import (  # noqa: F401
     PLACEHOLDER_RE,
     is_string_placeholder,
@@ -306,10 +306,6 @@ def week_review(expr: str, notes: dict[str, int]) -> dict:
     the formula is migrated but belongs under "Formulas needing review", the
     converter's equivalent of ``ts formula translate``'s APPROXIMATED."""
     review = [WEEK_START_ASSUMED_NOTE] if notes.get(WEEK_START_ASSUMED) else []
-    review += [week_start_mismatch_note(
-                   "the Tableau week start (a literal start_of_week argument or the "
-                   "datasource's Week start)", key.split(":", 1)[1])
-               for key in sorted(notes) if key.startswith(WEEK_START_MISMATCH + ":")]
     if notes.get(WEEK_DIFF_DAYS):
         review.append(WEEK_DIFF_DAYS_NOTE)
     week = week_start_note(expr)
