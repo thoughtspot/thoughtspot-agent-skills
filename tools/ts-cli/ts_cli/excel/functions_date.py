@@ -149,9 +149,15 @@ def _fold_date(tr, y: int, m: int, d: int) -> dict:
         tr.review(f"DATE with year {y} is #NUM! in Excel")
     months = y * 12 + (m - 1)
     try:
-        when = _dt.date(months // 12, months % 12 + 1, 1) + _dt.timedelta(days=d - 1)
+        first = _dt.date(months // 12, months % 12 + 1, 1)
+        when = first + _dt.timedelta(days=d - 1)
     except (ValueError, OverflowError):
         tr.review("DATE outside 1900–9999 is #NUM! in Excel")
+    if first < _dt.date(1900, 3, 1):
+        # Excel counts days from a month before March 1900 through its fictitious 29 February
+        # 1900 (serial 60): DATE(1900, 2, 29) is that day, DATE(1900, 1, 60) too
+        tr.review("a DATE counted from a month before March 1900 runs through Excel's "
+                  "fictitious 29 February 1900 (serial 60) — no real date to translate it to")
     if when < _dt.date(1900, 3, 1):
         tr.review("a DATE before 1900-03-01 is a date in Excel's own 1900 calendar, which "
                   "counts a fictitious 29 February 1900 — no real date to translate it to")
@@ -185,9 +191,12 @@ def _date(tr, n):
         start = T.call("to_date", T.lit_string(f"{year:04d}-01-01"), T.lit_string(ISO))
     else:
         tr.trap("DATE with a year from a column: a year below 0 or above 9999 is #NUM! in "
-                "Excel; here it does not parse as a date")
-        year = T.ifelse(T.binop("<", y, T.lit_number("1900")), T.binop("+", y, T.lit_number(
-            "1900")), y)
+                "Excel, and NULL here (guarded); a year from 0 to 1899 gains 1900, as in Excel; "
+                "a year of 1900 counts through Excel's fictitious 29 February 1900")
+        bad = T.binop("or", T.binop("<", y, T.lit_number("0")),
+                      T.binop(">", y, T.lit_number("9999")))
+        year = T.ifelse(bad, T.lit_null(), T.ifelse(
+            T.binop("<", y, T.lit_number("1900")), T.binop("+", y, T.lit_number("1900")), y))
         start = T.call("to_date", T.call("concat", T.call("to_string", year),
                                          T.lit_string("-01-01")), T.lit_string(ISO))
     months, days = _plus(m, -1), _plus(d, -1)

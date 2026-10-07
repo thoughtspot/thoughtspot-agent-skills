@@ -319,15 +319,17 @@ class TestDate:
         assert f(src, "TRANSLATED") == f"to_date ( '{iso}' , '%Y-%m-%d' )"
 
     @pytest.mark.parametrize("src", ["=DATE(-3,1,1)", "=DATE(10000,1,1)", "=DATE(1900,1,5)",
-                                     "=DATE(0,1,1)", "=DATE(9999,12,32)"])
+                                     "=DATE(0,1,1)", "=DATE(9999,12,32)", "=DATE(1900,2,29)",
+                                     "=DATE(1900,1,60)", "=DATE(1900,2,40)"])
     def test_outside_excels_calendar_is_refused(self, src):
         review(src)
 
     def test_column_parts(self):
         e = f("=DATE([@qty],[@qty],1)")
-        assert e == ("add_months ( to_date ( concat ( to_string ( if ( [T::qty] < 1900 ) then "
-                     "[T::qty] + 1900 else [T::qty] ) , '-01-01' ) , '%Y-%m-%d' ) , "
-                     "[T::qty] - 1 )")
+        assert e == ("add_months ( to_date ( concat ( to_string ( if ( [T::qty] < 0 or "
+                     "[T::qty] > 9999 ) then null else if ( [T::qty] < 1900 ) then [T::qty] + "
+                     "1900 else [T::qty] ) , '-01-01' ) , '%Y-%m-%d' ) , [T::qty] - 1 )")
+        assert f("=DATE(1900,3,1)") == "to_date ( '1900-03-01' , '%Y-%m-%d' )"
         assert f("=DATE(2031,[@qty],[@qty])") == (
             "add_days ( add_months ( to_date ( '2031-01-01' , '%Y-%m-%d' ) , [T::qty] - 1 ) , "
             "[T::qty] - 1 )")
