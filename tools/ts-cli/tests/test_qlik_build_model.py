@@ -209,3 +209,37 @@ class TestDoubleQuotedFieldMeasure:
         exprs = [f["expr"] for f in res["model"]["tml"]["model"]["formulas"]]
         assert any("[Sales Amount]" in e for e in exprs), exprs
         assert not any('"Sales Amount"' in e for e in exprs), exprs
+
+
+
+class TestSetAnalysisReviewNotes:
+    """#586 re-review: advisory notes ride on review_notes (the week-advisory channel),
+    and the column type decides whether a bare value is quoted."""
+
+    def _entry(self, expr, col_type):
+        app = make_app(
+            tables=[Table(name="Sales", columns=[Column(name="Code", data_type=col_type),
+                                                 Column(name="Amt")])],
+            measures=[MasterMeasure(id="m1", label="M", expression=expr)],
+        )
+        return build(app)["mapping"]["measures"][0]
+
+    def test_notes_go_to_review_notes_not_reason(self):
+        e = self._entry("Sum({<Code={'A'}>} Amt)", "text")
+        assert e["status"] == "OK" and e["reason"] == ""
+        assert any("BL-333" in n for n in e["review_notes"])
+        assert any("REPLACES" in n for n in e["review_notes"])
+
+    def test_text_column_quotes_a_bare_number(self):
+        assert self._entry("Sum({<Code={007}>} Amt)", "text")["ts_expr"] == \
+            "sum(if (Code = '007') then Amt else 0)"
+
+    def test_numeric_column_keeps_it_a_number(self):
+        e = self._entry("Sum({<Code={7}>} Amt)", "integer")
+        assert e["ts_expr"] == "sum(if (Code = 7) then Amt else 0)"
+        assert not any("text-coded" in n for n in e["review_notes"])
+
+    def test_unknown_qlik_type_is_not_read_as_text(self):
+        e = self._entry("Sum({<Code={7}>} Amt)", "UNKNOWN")
+        assert e["ts_expr"] == "sum(if (Code = 7) then Amt else 0)"
+        assert any("text-coded" in n for n in e["review_notes"])

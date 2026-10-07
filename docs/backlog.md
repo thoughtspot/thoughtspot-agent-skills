@@ -13769,10 +13769,26 @@ silent wrong answers in the same rewrite, all now loud (NEEDS_REVIEW, named reas
 - `Count({<…>} DISTINCT Id)` is now `unique count(if (…) then Id else null)` (the `unique count`
   spelling from thoughtspot-formula-patterns.md); DISTINCT with another aggregation is flagged;
 - a bare number `{2023}` is emitted unquoted (`Year = 2023`); a quoted value stays a string.
+The re-review of #586 found four more:
+- `{1}` was translated as a grand total, `group_aggregate(agg, {}, {})`. Qlik's `{1}` only
+  ignores selections; the chart's dimensions still group it (dropping them is `TOTAL`). It is now
+  `group_aggregate ( agg , query_groups ( ) , {} )`. `query_groups ( )` and the `{}` filter
+  argument are both in thoughtspot-formula-patterns.md; SA01 is corrected.
+- the aggregated expression was emitted untranslated (`Log(x)`, `Len(s)`, `If(…)`, `Weekday(D)`).
+  It now goes through the normal translation, and `TOTAL`, `Aggr()` and any unmapped function
+  inside it are NEEDS_REVIEW.
+- a bare number takes the field's known type: quoted for a text column, unquoted for a numeric
+  one. The converter reads the type from the Qlik column or `--type-overrides`, and
+  `ts formula translate` reads it from `--columns` / `--model`. Where the type is unknown it stays
+  unquoted, with a note that a text-coded field (`{007}`) needs quotes.
+- an `=` modifier carries a note: Qlik replaces the user's selection on the field, while the
+  ThoughtSpot `if` intersects with a filter on it (`-=` does not get the note).
 A single-quoted value is a case-sensitive literal in Qlik while ThoughtSpot's `=` is case-insensitive
-(BL-333): the translation carries a non-downgrading note saying so (the converter's mapping report
-`reason`, `ts formula translate` `notes`), which also says pre-June-2017 apps read single quotes as a
-search.
+(BL-333): the translation carries a non-downgrading note saying so, which also says pre-June-2017
+apps read single quotes as a search. That note, the `=`-modifier note and the bare-number note do
+not change the status. In the converter they go to the measure's `review_notes`, the same channel
+as the week advisory; the migration report puts them in the measure's Note column. In
+`ts formula translate` they go to `notes`.
 
 ## BL-377 — Qlik Set Analysis search strings translated as equality `Tier 2`
 

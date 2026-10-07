@@ -324,9 +324,9 @@
     "Category": "Set Analysis",
     "Qlik Sense Formula": "Sum({1} expr)",
     "Qlik Example": "Sum({1} Revenue)",
-    "ThoughtSpot Equivalent": "group_aggregate(sum(col), {}, {})",
-    "ThoughtSpot Example": "group_aggregate(sum(revenue), {}, {})",
-    "Comments / Context": "Qlik {1} ignores ALL user selections (grand total). ThoughtSpot group_aggregate with empty groupings/filters achieves the same result.",
+    "ThoughtSpot Equivalent": "group_aggregate ( sum ( col ) , query_groups ( ) , {} )",
+    "ThoughtSpot Example": "group_aggregate ( sum ( revenue ) , query_groups ( ) , {} )",
+    "Comments / Context": "Qlik {1} ignores ALL user selections but is still grouped by the chart's dimensions — not a grand total (that is TOTAL). The grouping stays query_groups ( ); only the filters are emptied ({}). Corrected 2026-10-07 (#586 review).",
     "status": "ok"
   },
   {

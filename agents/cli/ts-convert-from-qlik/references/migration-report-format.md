@@ -62,6 +62,14 @@ silently drop a source object — every one appears in a table with a status.
 |---|---|---|---|---|---|---|
 | <name> | <Simple/Moderate/Complex> | <Qlik expr or "(not recoverable from PDF)"> | <TS formula / output column> | <0–100> | <status> | <note> |
 
+`<note>` is the measure's `reason` when it is NEEDS REVIEW. For a Migrated measure it lists every
+`review_notes` entry from `mapping.json`. These are advisories that never change the status. They
+come in two kinds:
+- the Monday-week-start note;
+- the Set Analysis notes: Qlik's case-sensitive single-quoted values against ThoughtSpot's
+  case-insensitive `=` (BL-333), an `=` modifier replacing the user's selection where ThoughtSpot
+  intersects with it, and a bare number whose field type is unknown.
+
 ## Report / visuals → answers & liveboards
 
 ### Sheet → liveboard

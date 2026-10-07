@@ -316,23 +316,38 @@ def _brace_depth(c: str, depth: int) -> int:
     return depth
 
 
-def translate(expr: str, first_week_day: Optional[int] = None
-              ) -> tuple[str, bool, str]:
+def translate(expr: str, first_week_day: Optional[int] = None,
+              field_types: Optional[dict[str, str]] = None) -> tuple[str, bool, str]:
     """Translate a Qlik expression to a ThoughtSpot formula (see ``_translate``). Qlik
     string literals are SQL-standard (``'it''s'``); the output's literals are printed in
     the form ThoughtSpot reads back exactly, and a product under a division is bracketed
     (BL-365). Double-quoted field names are read as fields first (BL-368), so the
-    converter and ``ts formula translate --from qlik`` share one reading."""
+    converter and ``ts formula translate --from qlik`` share one reading. The advisory
+    notes of ``translate_with_notes`` are dropped here."""
+    out, review, reason, _notes = translate_with_notes(expr, first_week_day, field_types)
+    return out, review, reason
+
+
+def translate_with_notes(expr: str, first_week_day: Optional[int] = None,
+                         field_types: Optional[dict[str, str]] = None
+                         ) -> tuple[str, bool, str, list[str]]:
+    """``translate`` plus advisory notes that never change the status (Set Analysis
+    semantics ThoughtSpot cannot match exactly — the converter's ``review_notes``).
+
+    ``field_types``: lower-cased field name -> ThoughtSpot data type (``VARCHAR``,
+    ``INT64`` …), when known; it decides whether a bare Set Analysis value is quoted."""
     fixed, problem = _field_quotes(expr or "")
     if problem:
         return (f"/* TODO review: {(expr or '').strip()} */", True,
-                f"Cannot read {problem} (BL-368)")
-    out, review, reason = _translate(fixed, first_week_day)
-    return ts_finalize_formula(out), review, reason
+                f"Cannot read {problem} (BL-368)", [])
+    ctx = {"notes": [], "field_types": {k.lower(): v for k, v in (field_types or {}).items()}}
+    out, review, reason = _translate(fixed, first_week_day, ctx)
+    notes = [] if review else list(dict.fromkeys(ctx["notes"]))
+    return ts_finalize_formula(out), review, reason, notes
 
 
-def _translate(expr: str, first_week_day: Optional[int] = None
-               ) -> tuple[str, bool, str]:
+def _translate(expr: str, first_week_day: Optional[int] = None,
+               ctx: Optional[dict] = None) -> tuple[str, bool, str]:
     """Translate a Qlik expression to a ThoughtSpot formula.
 
     Returns ``(ts_formula, review_required, reason)``. When review_required is
@@ -349,7 +364,7 @@ def _translate(expr: str, first_week_day: Optional[int] = None
 
     # Set Analysis first — recognizable by {<...>} / {1} / {$}.
     if "{" in expr:
-        return _set_analysis(expr)
+        return _set_analysis(expr, first_week_day, ctx)
 
     # Count(DISTINCT X) -> `unique count(X)`. BL-171: the function name has a
     # SPACE — `unique_count` (underscore) does not exist and is rejected with
@@ -682,13 +697,20 @@ def _set_field(raw: str) -> str:
 
 _SEARCH_CHARS = re.compile(r"[*?]|^\s*[<>=^~]")
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+SELECTION_NOTE = ("Set Analysis: an = modifier REPLACES the user's selection on that field in "
+                  "Qlik, while the ThoughtSpot if ( … ) intersects with a filter on it — the "
+                  "two differ only when the user filters on that field.")
+NUMBER_NOTE = ("Set Analysis: a bare value ({0}) is emitted as a number because the field's "
+               "type is not known; if the field is text-coded (e.g. {{007}}), quote the value.")
+_NUMERIC_TYPES = ("INT", "DOUBLE", "FLOAT", "DECIMAL", "NUMBER", "NUMERIC", "BIGINT")
 CASE_NOTE = ("Set Analysis: a single-quoted element value is a case-SENSITIVE literal in "
              "Qlik, but ThoughtSpot's = is case-insensitive (BL-333), so a value differing "
              "only in case now matches too. Apps built before June 2017 read single quotes "
              "as a search instead.")
 
 
-def _set_values(raw_vals: str) -> tuple[list[str], Optional[str], bool]:
+def _set_values(raw_vals: str, field_type: Optional[str] = None,
+                notes: Optional[list] = None) -> tuple[list[str], Optional[str], bool]:
     """(ThoughtSpot literals, review reason, whether a single-quoted value was read).
 
     Values split on commas OUTSIDE quotes (BL-376: ``{'A, B'}`` is one value). A single-
@@ -709,7 +731,7 @@ def _set_values(raw_vals: str) -> tuple[list[str], Optional[str], bool]:
         for v in _split_top_level(g[1:-1]):
             if not v:
                 continue
-            lit, why = _element_literal(v)
+            lit, why = _element_literal(v, field_type, notes)
             if why:
                 return [], why, False
             single = single or v[0] == "'"
@@ -735,7 +757,8 @@ def _element_set_problem(raw_vals: str, groups: list[str]) -> Optional[str]:
     return None
 
 
-def _element_literal(v: str) -> tuple[str, Optional[str]]:
+def _element_literal(v: str, field_type: Optional[str] = None,
+                     notes: Optional[list] = None) -> tuple[str, Optional[str]]:
     if len(v) >= 2 and v[0] == v[-1] == '"':
         text = v[1:-1].replace('""', '"')
         if _SEARCH_CHARS.search(text):
@@ -744,6 +767,13 @@ def _element_literal(v: str) -> tuple[str, Optional[str]]:
     elif len(v) >= 2 and v[0] == v[-1] == "'":
         text = v[1:-1].replace("''", "'")
     elif _NUMBER.fullmatch(v):
+        kind = (field_type or "").upper()
+        if kind.startswith(_NUMERIC_TYPES):
+            return v, None
+        if kind:                      # a known non-numeric field: the value is text
+            return "'" + v + "'", None
+        if notes is not None:
+            notes.append(NUMBER_NOTE.format(v))
         return v, None
     else:
         text = v
@@ -764,7 +794,9 @@ def _brace_groups(raw: str) -> list[str]:
     return out
 
 
-def _set_analysis(expr: str) -> tuple[str, bool, str]:
+def _set_analysis(expr: str, first_week_day: Optional[int] = None,
+                  ctx: Optional[dict] = None) -> tuple[str, bool, str]:
+    ctx = ctx if ctx is not None else {"notes": [], "field_types": {}}
     problem = _set_analysis_shape_problem(expr)
     # Selection state ({$}, {$<…>}) and $(…) dollar expansion first: a value like
     # {$(vYear)} must never reach the literal patterns below (#586 review).
@@ -772,41 +804,70 @@ def _set_analysis(expr: str) -> tuple[str, bool, str]:
         problem = ("uses current-selection context ($) or $-expansion; approximate "
                    "manually — selection state is not preserved in ThoughtSpot")
     if not problem:
-        out, problem, note = _set_analysis_patterns(expr)
+        out, problem = _set_analysis_patterns(expr, first_week_day, ctx)
         if out:
-            return out, False, note
+            return out, False, ""
     return (f"/* TODO review set analysis: {expr} */", True,
             f"Set Analysis: {problem or 'unrecognized pattern'}")
 
 
-def _set_analysis_patterns(expr: str) -> tuple[Optional[str], Optional[str], str]:
-    """(formula, None, note) for a shape translated exactly, else (None, reason, "")."""
-    # Pattern 1: {1} -> ignore all selections (total).
+def _set_measure(measure: str, first_week_day: Optional[int], ctx: dict
+                 ) -> tuple[Optional[str], Optional[str]]:
+    """The aggregated expression, translated like any other (functions remapped, If()
+    rewritten), or a review reason. TOTAL and Aggr() change the aggregation's grain and
+    are not translated inside Set Analysis (#586 review)."""
+    if re.search(r"(?i)\btotal\b", measure) or re.search(r"(?i)\baggr\s*\(", measure):
+        return None, "TOTAL / Aggr() inside a Set Analysis aggregation is not translated"
+    out, review, reason = _translate(measure, first_week_day, ctx)
+    if review or not out:
+        return None, f"the aggregated expression {measure!r}: {reason or 'needs review'}"
+    return out, None
+
+
+def _set_analysis_patterns(expr: str, first_week_day: Optional[int], ctx: dict
+                           ) -> tuple[Optional[str], Optional[str]]:
+    """(formula, None) for a shape translated exactly (notes go to ``ctx``), else
+    (None, reason)."""
+    # Pattern 1: {1} ignores the user's selections; the chart's dimensions still group
+    # it (dropping them is TOTAL), so the grouping is query_groups ( ) and only the
+    # filters are emptied (#586 review — it was a grand total).
     m = re.match(r"(?i)^(\w+)\(\s*\{1\}\s*(.+?)\)$", expr)
     if m:
         agg, why = _set_agg(m.group(1), m.group(2))
+        measure, why = (None, why) if why else _set_measure(agg[1], first_week_day, ctx)
         if why:
-            return None, why, ""
-        return f"group_aggregate({agg[0]}({agg[1]}), {{}}, {{}})", None, ""
+            return None, why
+        return f"group_aggregate ( {agg[0]} ( {measure} ) , query_groups ( ) , {{}} )", None
 
     # Pattern 2/3/4: {<Field={...}>} (equals / exclude / union).
     m = re.match(r"(?i)^(\w+)\(\s*\{<\s*([\w \[\]]+?)\s*(-?=)\s*(.+?)\s*>\}\s*(.+?)\)$", expr)
     if not m:
-        return None, None, ""
+        return None, None
+    return _modifier_formula(m, first_week_day, ctx)
+
+
+def _modifier_formula(m: re.Match, first_week_day: Optional[int], ctx: dict
+                      ) -> tuple[Optional[str], Optional[str]]:
     agg, why = _set_agg(m.group(1), m.group(5))
-    values, why2, single = _set_values(m.group(4)) if not why else ([], None, False)
-    if why or why2:
-        return None, why or why2, ""
-    fn, measure, other = agg
+    if why:
+        return None, why
     field = _set_field(m.group(2))
+    notes: list[str] = []
+    ftype = ctx["field_types"].get(field.strip("[]").lower())
+    values, why, single = _set_values(m.group(4), ftype, notes)
+    measure, why = (None, why) if why else _set_measure(agg[1], first_week_day, ctx)
+    if why:
+        return None, why
+    fn, _m, other = agg
     if m.group(3) == "-=":
         cond = " and ".join(f"{field} != {v}" for v in values)
     else:
         cond = " or ".join(f"{field} = {v}" for v in values)
+        notes.append(SELECTION_NOTE)
     if len(values) > 1:
         cond = f"({cond})"
-    return (f"{fn}(if ({cond}) then {measure} else {other})", None,
-            CASE_NOTE if single else "")
+    ctx["notes"].extend(notes + ([CASE_NOTE] if single else []))
+    return f"{fn}(if ({cond}) then {measure} else {other})", None
 
 
 # ---------------------------------------------------------------------------

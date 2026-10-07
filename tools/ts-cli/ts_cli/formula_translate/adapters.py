@@ -206,17 +206,19 @@ def adapt_dax(expr: str, ctx: ColumnContext) -> RawResult:
 def adapt_qlik(expr: str, ctx: ColumnContext, first_week_day: Optional[int] = None) -> RawResult:
     """``first_week_day``: the app's ``FirstWeekDay`` (0 = Mon … 6 = Sun). A pasted formula
     has no load script, so without it a one-argument ``Weekday()`` is NEEDS_REVIEW (#565)."""
-    from ts_cli.qlik.functions import translate
+    from ts_cli.qlik.functions import translate_with_notes
 
     # Qlik "Field Name" -> [Field Name] happens inside ``translate`` (BL-368), so the
-    # converter and this adapter share it; do not re-apply it here.
-    out, review, reason = translate(expr, first_week_day=first_week_day)
+    # converter and this adapter share it; do not re-apply it here. Column types from
+    # --columns / --model decide whether a bare Set Analysis value is quoted.
+    types = {n.lower(): s.data_type for s in ctx.specs if s.data_type for n in s.names}
+    out, review, reason, notes = translate_with_notes(
+        expr, first_week_day=first_week_day, field_types=types)
     if review or not out:
         return RawResult(None, NEEDS_REVIEW, [reason or "Qlik translator: needs review"],
                          partial=out or None)
-    # A non-review reason is an informational note (the Set Analysis BL-333 note).
-    return RawResult(qualify_refs(out, ctx, bare_idents=True), TRANSLATED,
-                     [reason] if reason else [])
+    # The translator's advisory notes (Set Analysis semantics) do not downgrade.
+    return RawResult(qualify_refs(out, ctx, bare_idents=True), TRANSLATED, notes)
 
 
 # ---------------------------------------------------------------------------

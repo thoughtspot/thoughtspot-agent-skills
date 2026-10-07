@@ -80,7 +80,8 @@ def build_model_artifacts(
 
     # -- Measures -> formulas (flag-don't-downgrade) -----------------------
     formulas, measure_map = _translate_measures(
-        app.measures, functions.parse_first_week_day(app.load_script))
+        app.measures, functions.parse_first_week_day(app.load_script),
+        _field_types(app.tables, type_overrides))
 
     # Drop a physical column whose display name collides with a formula name
     # (the measure wins), so the model never has two columns with one name.
@@ -264,7 +265,27 @@ def _model_physical_columns(tables: list[Table]) -> tuple[list[dict], list[dict]
     return columns, renames
 
 
-def _translate_measures(measures, first_week_day=None
+def _field_types(tables, type_overrides: Optional[dict]) -> dict[str, str]:
+    """Lower-cased field name -> ThoughtSpot data type, where it is KNOWN: an override or
+    a Qlik type the map recognises. The Table TML's VARCHAR default for an unknown type
+    is not knowledge, so such a field is left out, as is a name on two tables with two
+    types."""
+    out: dict[str, str] = {}
+    clash: set[str] = set()
+    for tbl in tables:
+        for col in tbl.columns:
+            t = (_lookup_type(type_overrides, tbl.name, col.name)
+                 or _TYPE_MAP.get((col.data_type or "").lower()))
+            if not t:
+                continue
+            key = col.name.lower()
+            if key in out and out[key] != t:
+                clash.add(key)
+            out.setdefault(key, t)
+    return {k: v for k, v in out.items() if k not in clash}
+
+
+def _translate_measures(measures, first_week_day=None, field_types=None
                         ) -> tuple[list[dict], list[dict]]:
     """Translate master measures to formulas + a mapping-report entry each.
 
@@ -285,8 +306,8 @@ def _translate_measures(measures, first_week_day=None
             i += 1
         seen.add(name)
 
-        ts_expr, review, reason = functions.translate(
-            m.expression, first_week_day=first_week_day)
+        ts_expr, review, reason, notes = functions.translate_with_notes(
+            m.expression, first_week_day=first_week_day, field_types=field_types)
         status = _STATUS_REVIEW if review else _STATUS_OK
         formulas.append({"name": name, "expr": ts_expr, "column_type": "MEASURE"})
         entry = {
@@ -296,11 +317,13 @@ def _translate_measures(measures, first_week_day=None
             "status": status,
             "reason": reason,
         }
-        # Monday-week-start advisory (BL-334 item 2): a review note, never a
-        # status change — the measure stays Migrated.
+        # Advisory review notes, never a status change — the measure stays Migrated:
+        # the translator's Set Analysis notes (#586 review) and the Monday-week-start
+        # advisory (BL-334 item 2).
         week = week_start_note(ts_expr)
-        if week:
-            entry["review_notes"] = [week]
+        review_notes = list(notes) + ([week] if week else [])
+        if review_notes:
+            entry["review_notes"] = review_notes
         measure_map.append(entry)
     return formulas, measure_map
 
