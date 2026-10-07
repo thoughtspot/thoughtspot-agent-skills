@@ -172,6 +172,9 @@ Review category reference:
 | Category | When flagged | What to verify |
 |---|---|---|
 | No-keyword LOD | `{AGG([col])}` → `group_aggregate(..., {}, query_filters())` | Tableau computes after dimension filters, before table-calc filters — no exact TS match. Test with/without search filters. If the formula should be an absolute total, change `query_filters()` to `{}`. |
+| Week start mismatch | `review_required`: a known non-Monday week start (literal `start_of_week` argument or the datasource's Week start) on `DATETRUNC('week')` / `DATEPART('week')` | ThoughtSpot `start_of_week` / `week_number_of_year` are Monday-based — every week differs; rewrite by hand (BL-334) |
+| Week difference | `review_required`: `DATEDIFF('week')` → `diff_days ( … ) / 7` | Fractional 7-day spans, not week boundaries crossed — wrap in `floor()` or rewrite if it matters |
+| Week start (advisory) | `review_notes` starting "assumes a Monday week start" | Check the Model's calendar; `start_of_week` follows the warehouse's `WEEK_START` (BL-334) |
 | Blend-context | Formula references columns from a blended secondary datasource | Row-level join may aggregate differently than Tableau's post-agg blend — compare totals |
 | Pass-through SQL | `sql_*_aggregate_op` or `sql_*_op` functions | Requires SQL Passthrough Functions enabled; verify SQL dialect matches your warehouse |
 | `ifnull` stripped | `ifnull(measure, 0)` wrapper removed (default) | NULL handling deferred to ThoughtSpot query engine — verify nulls display correctly in charts/tables |

@@ -2,7 +2,7 @@
 
 Every translation built on a week-dependent ThoughtSpot function silently assumes a
 Monday week start. Translators do not emit a calendar argument (the Model's calendar
-is the default); they flag the assumption with ``formula_common.week_start_note``.
+is the default); they flag the assumption with ``formula_week.week_start_note``.
 Each reporting path is tested for: the note appears for a week-dependent formula,
 does NOT appear for a month truncation, and never changes the status.
 """

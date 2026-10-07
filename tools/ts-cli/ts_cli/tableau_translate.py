@@ -333,7 +333,7 @@ def translate_formulas(
     ``week_start`` is the datasource's Week start (``parse_twb`` →
     ``datasources[].week_start``). A translated formula whose weekday number
     had to ASSUME Sunday carries ``review_notes`` (BL-334), and so does every
-    formula calling a week-dependent function (``formula_common.week_start_note``
+    formula calling a week-dependent function (``formula_week.week_start_note``
     — the Monday-week-start advisory, BL-334 item 2).
 
     Input: list of formula dicts with keys: caption, formula, datatype, role, name

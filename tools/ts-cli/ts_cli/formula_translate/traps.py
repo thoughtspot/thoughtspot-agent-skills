@@ -7,7 +7,7 @@ trap rests on it:
 - BL-331 (2026-10-06): ``round``'s 2nd argument is an increment, not a digit count.
 - OI-2 (2026-10-06): ``day_number_of_week`` is fixed 1 = Monday; ``start_of_week`` compiles
   to ``DATE_TRUNC(week, d)``. Both assume a Monday week start (the Gregorian default). The
-  trap line is ``formula_common.week_start_note`` — the same note every converter reports
+  trap line is ``formula_week.week_start_note`` — the same note every converter reports
   (BL-334 item 2).
 - OI-3 (2026-10-06): ``diff_months`` / ``diff_years`` count calendar boundaries crossed.
 - OI-4 (2026-10-06): ``=``, ``contains`` and ``strpos`` on strings are case-insensitive

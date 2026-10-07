@@ -173,7 +173,7 @@ def _entry(name: str, role: str, output_kind: str, column_type: str,
             "annotations": _with_week_note(annotations, ts_expr)}
 
 
-#: Annotation kind carrying ``formula_common.week_start_note`` (BL-334 item 2).
+#: Annotation kind carrying ``formula_week.week_start_note`` (BL-334 item 2).
 WEEK_START_KIND = "week_start_assumption"
 
 
