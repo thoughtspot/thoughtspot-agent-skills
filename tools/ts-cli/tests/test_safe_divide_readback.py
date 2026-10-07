@@ -23,18 +23,18 @@ from ts_cli.sv_translate import translate_sv_formulas
 
 
 def r(c: str) -> str:
-    return f"[T::{c.split('.')[-1].upper()}]"
+    return f"[T::{c.split('.')[-1]}]"
 
 
 BOTH = pytest.mark.parametrize("t", [dbx, sf], ids=["databricks", "snowflake"])
-SD = "safe_divide ( [T::A] , [T::B] )"
+SD = "safe_divide ( [T::a] , [T::b] )"
 
 
 class TestRecognised:
     @BOTH
     @pytest.mark.parametrize("src", [
         "CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END",
-        "case   when B=0 then 0 else A/nullif(b,0) end",
+        "case   when b=0 then 0 else a/nullif(b,0) end",
         "CASE WHEN (b) = 0 THEN 0 ELSE (a) / NULLIF((b), 0) END",
         "CASE WHEN (b = 0) THEN (0) ELSE (a / NULLIF(b, 0)) END",
         "CASE WHEN t.b = 0 THEN 0 ELSE t.a / NULLIF(b, 0) END",  # same column, other spelling
@@ -49,19 +49,19 @@ class TestRecognised:
     @BOTH
     @pytest.mark.parametrize("src,want", [
         ("CASE WHEN (b - c) = 0 THEN 0 ELSE a / NULLIF((b - c), 0) END",
-         "safe_divide ( [T::A] , [T::B] - [T::C] )"),
+         "safe_divide ( [T::a] , [T::b] - [T::c] )"),
         ("CASE WHEN b - c = 0 THEN 0 ELSE a / NULLIF(b - c, 0) END",
-         "safe_divide ( [T::A] , [T::B] - [T::C] )"),
+         "safe_divide ( [T::a] , [T::b] - [T::c] )"),
         ("CASE WHEN (N2 * 0) = 0 THEN 0 ELSE N1 / NULLIF((N2 * 0), 0) END",
          "safe_divide ( [T::N1] , [T::N2] * 0 )"),
         ("CASE WHEN SUM(b) = 0 THEN 0 ELSE SUM(a) / NULLIF(SUM(b), 0) END",
-         "safe_divide ( sum ( [T::A] ) , sum ( [T::B] ) )"),
+         "safe_divide ( sum ( [T::a] ) , sum ( [T::b] ) )"),
         ("CASE WHEN b = 0 THEN 0 ELSE (a + c) / NULLIF(b, 0) END",
-         "safe_divide ( [T::A] + [T::C] , [T::B] )"),
+         "safe_divide ( [T::a] + [T::c] , [T::b] )"),
         ("CASE WHEN b = 0 THEN 0 ELSE a * c / NULLIF(b, 0) END",
-         "safe_divide ( [T::A] * [T::C] , [T::B] )"),
+         "safe_divide ( [T::a] * [T::c] , [T::b] )"),
         ("CASE WHEN b = 0 THEN 0 ELSE -a / NULLIF(b, 0) END",
-         "safe_divide ( - [T::A] , [T::B] )"),
+         "safe_divide ( - [T::a] , [T::b] )"),
         ("(CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END) * 2",
          f"( {SD} ) * 2"),
     ])
@@ -96,9 +96,20 @@ class TestNotRecognised:
 
     def test_near_miss_is_the_literal_translation(self):
         assert sf("CASE WHEN b <> 0 THEN a / NULLIF(b, 0) ELSE 0 END", r) == \
-            "if ( [T::B] != 0 ) then [T::A] / [T::B] else 0"
+            "if ( [T::b] != 0 ) then [T::a] / [T::b] else 0"
         assert dbx("CASE WHEN c = 0 THEN 0 ELSE a / NULLIF(b, 0) END", r) == \
-            "if ( [T::C] = 0 ) then 0 else [T::A] / [T::B]"
+            "if ( [T::c] = 0 ) then 0 else [T::a] / [T::b]"
+
+    @BOTH
+    def test_reference_case_is_significant(self, t):
+        # the resolver decides what an identifier names; differently-cased references are
+        # not assumed equal (Snowflake quoted "b" and "B" are distinct columns)
+        assert "safe_divide" not in t("CASE WHEN B = 0 THEN 0 ELSE a / NULLIF(b, 0) END", r)
+
+    @pytest.mark.parametrize("dialect", ["snowflake", "databricks"])
+    def test_reference_case_is_significant_with_the_real_resolver(self, dialect):
+        res = translate("CASE WHEN n2 = 0 THEN 0 ELSE N1 / NULLIF(N2, 0) END", dialect)
+        assert res["formula"] == "if ( [TABLE::n2] = 0 ) then 0 else [TABLE::N1] / [TABLE::N2]"
 
     def test_helper_ignores_brackets_and_strings(self):
         # an operator or parenthesis inside a [ref] or a string is not structure
@@ -191,10 +202,10 @@ class TestRoundTrip:
     """TS → Databricks SQL (the BL-366 emitter) → TS keeps the idiom."""
 
     @pytest.mark.parametrize("formula", [
-        "safe_divide ( [T::A] , [T::B] )",
-        "safe_divide ( [T::A] , [T::B] - [T::C] )",
-        "safe_divide ( sum ( [T::A] ) , sum ( [T::B] ) )",
-        "safe_divide ( [T::A] + [T::C] , [T::B] * [T::C] )",
+        "safe_divide ( [T::a] , [T::b] )",
+        "safe_divide ( [T::a] , [T::b] - [T::c] )",
+        "safe_divide ( sum ( [T::a] ) , sum ( [T::b] ) )",
+        "safe_divide ( [T::a] + [T::c] , [T::b] * [T::c] )",
     ])
     def test_databricks(self, formula):
         sql = emit_sql(parse_formula(formula), lambda n: n["column"])

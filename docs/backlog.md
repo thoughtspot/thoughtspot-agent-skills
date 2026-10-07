@@ -252,6 +252,7 @@ are roughly ordered by value÷effort.
 | ~~BL-378~~ | ~~Qlik `{<[Field Name]={"x"}>}`: the bracketed field is emitted bare and read as two references~~ | DONE (2026-10-07 — ts-cli v0.171.0) |
 | ~~BL-379~~ | ~~Tableau `IF [Bob's] = 'a' THEN 1 END` emits a second `else` (an apostrophe in a field name opened a literal)~~ | DONE (2026-10-07 — fixed in #583, regression test ts-cli v0.171.0) |
 | ~~BL-381~~ | ~~`check_skill_versions` accepts a changelog whose top row is lower than the row below it (a version going backwards after an accept-both merge)~~ | DONE (2026-10-07) |
+| ~~BL-382~~ | ~~The Snowflake from-direction translator (`sv_sql`) does not strip SQL comments: `/* x */` and `-- y` became `/ * [T::X] * /` and `- - [T::Y]`~~ | DONE (2026-10-07 — ts-cli v0.173.0) |
 
 ### Tier 3 — Opportunistic
 
@@ -13735,9 +13736,12 @@ and emit `safe_divide ( a , b )`. Any other shape stays as today.
 `sql_forms.sqlf_safe_divide_form(cond, then, else)`, called from both translators' single-WHEN
 `CASE` handler and their `IFF` / `IF` calls (Databricks now also reads `IFF`, its documented synonym
 for `IF`). It runs on the translated pieces, where `/ NULLIF(b, 0)` has already collapsed to `/`, so
-`b` is compared as a normalised token sequence — keyword and identifier case, whitespace and
-redundant outer parentheses gone, `[…]` references and string literals kept whole — not as source
-text. Matched: THEN exactly `0`; a condition whose only comparison is a top-level `b = 0`; an ELSE
+`b` is compared as a normalised token sequence — keyword case, whitespace and redundant outer
+parentheses gone, `[…]` references and string literals kept whole — not as source text. Reference
+case **is** significant, deliberately: the resolver has already decided what each identifier names,
+and Snowflake's quoted `"b"` and `"B"` are distinct columns. Where an unquoted `n2` / `N2` reach the
+recogniser as different references (`ts formula translate` with no column context), it does not
+match — the literal `if` reading, still the same value. Matched: THEN exactly `0`; a condition whose only comparison is a top-level `b = 0`; an ELSE
 that is one multiplicative term ending `/ b` with the same `b` (`(a + c) / b`, `a * c / b`, `-a / b`
 and aggregates all read as `safe_divide ( numerator , b )`). **Decision, with the grid proof:** the
 ELSE written plain `a / b` is recognised too. Over a ∈ {NULL, 0, 2} × b ∈ {NULL, 0, 4}, `b = 0` takes
@@ -13879,3 +13883,23 @@ first; a duplicate fails too), compared numerically (`1.10.0` above `1.9.0` pass
 `tools/validate/tests/test_check_skill_versions_order.py`. Every shipped skill passed when it landed.
 
 **Target:** 2026-11-30.
+
+## BL-382 — The Snowflake from-direction translator does not strip SQL comments `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (fix/bl-374-safe-divide-readback, ts-cli 0.173.0).
+**Source:** independent review of #587 (BL-374).
+
+**The facts.** `sv_sql.translate_sql_expr` tokenised comments as operators and identifiers:
+`CASE WHEN b = 0 /* x */ THEN 0 -- y` + newline + `ELSE a / b END` became
+`if ( [T::B] = 0 / * [T::X] * / ) then 0 - - [T::Y] else …` — garbage, not a loud error. The Databricks
+translator already stripped comments (`mv_expr.strip_sql_comments`).
+
+**Resolution (2026-10-07).** The quote-aware stripper moved to `sql_forms.strip_sql_comments`, the
+module both SQL translators already share (`mv_expr` re-exports it, so existing callers are unchanged).
+`sv_sql` calls it with Snowflake's options: `--` and `//` line comments, `/* */` blocks, `'…'` literals
+with `''` and `\'` escapes copied verbatim, and `"…"` quoted identifiers copied verbatim. Databricks
+calls it with its defaults, as before. Tests: `tools/ts-cli/tests/test_sql_comments.py` — both
+dialects, `--` and `/* */` inside string literals left alone, `//` inside `'http://x'`, a marker inside
+a quoted identifier, a backslash-escaped quote, and the `ts formula translate` path.
+Not changed: the Databricks scan still treats `\'` as ending a literal, so `'a\' -- b'` is mis-stripped
+there (pre-existing, not in scope here).

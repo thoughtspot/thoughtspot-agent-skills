@@ -51,6 +51,56 @@ SQLF_SCALE_SNAP = "0.000000001"
 SQLF_MAX_SCALE = 15
 
 
+# --- comments (BL-382) -------------------------------------------------------------------
+
+def sqlf_scan_string_literal(s: str, i: int, backslash: bool = False) -> int:
+    """Given ``s[i]`` is a quote character, the index just past the quoted run that it opens.
+    A doubled quote is the escape; with ``backslash``, ``\\x`` is also an escape (Snowflake
+    ``'it\\'s'``). An unterminated run continues to the end of the string."""
+    quote, j, n = s[i], i + 1, len(s)
+    while j < n:
+        if backslash and s[j] == "\\":
+            j += 2
+            continue
+        if s[j] == quote:
+            if j + 1 < n and s[j + 1] == quote:
+                j += 2
+                continue
+            return j + 1
+        j += 1
+    return n
+
+
+def strip_sql_comments(expr: str, *, line_markers: tuple = ("--",), ident_quote: str = "",
+                       backslash: bool = False) -> str:
+    """Strip line and ``/* */`` block comments in a single quote-aware pass.
+
+    String-literal contents are copied verbatim (comment markers inside literals are data, not
+    comments), as is a quoted identifier when ``ident_quote`` is given (Snowflake ``"a--b"``);
+    a line marker inside a ``/* */`` block is part of that block. Block comments become one
+    space, line comments nothing. The defaults are Databricks' (``--``, backtick identifiers
+    carry no comment risk); Snowflake passes ``("--", "//")``, ``'"'`` and ``backslash=True``."""
+    out: list[str] = []
+    i, n = 0, len(expr)
+    while i < n:
+        ch = expr[i]
+        if ch == "'" or (ident_quote and ch == ident_quote):
+            end = sqlf_scan_string_literal(expr, i, backslash=backslash and ch == "'")
+            out.append(expr[i:end])
+            i = end
+        elif any(expr.startswith(m, i) for m in line_markers):
+            while i < n and expr[i] != "\n":
+                i += 1
+        elif expr.startswith("/*", i):
+            close = expr.find("*/", i + 2)
+            out.append(" ")
+            i = n if close == -1 else close + 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out).strip()
+
+
 # --- grouping ----------------------------------------------------------------------------
 
 def _sqlf_close(text: str, i: int) -> int:
@@ -239,8 +289,10 @@ def sqlf_safe_divide_form(cond: str, then: str, else_: str):
     with the same three arguments, or the ELSE written ``a / b``. By the time this runs the
     pieces are translated ThoughtSpot text (``[B] = 0``, ``0``, ``[A] / [B]``: the
     ``/ NULLIF(b, 0)`` divisor idiom has already collapsed to ``/``), so the comparison is over
-    normalised token sequences — whitespace, keyword case and identifier case are gone, and
-    redundant outer parentheses are stripped — not over source strings.
+    normalised token sequences — whitespace and keyword case are gone and redundant outer
+    parentheses are stripped — not over source strings. A ``[…]`` reference is compared
+    exactly, case included: deliberately, since the resolver has already decided what each
+    identifier names, and Snowflake's quoted ``"b"`` and ``"B"`` are distinct columns.
 
     Exact on every NULL / zero input: the ELSE branch is reached only when ``b`` is non-zero
     or NULL, where ``NULLIF(b, 0)`` is ``b`` and ThoughtSpot's ``/`` (``a / NULLIF(b, 0.0)``)

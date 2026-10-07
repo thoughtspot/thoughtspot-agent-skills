@@ -42,6 +42,7 @@ from ts_cli.sql_forms import (
     sqlf_like,
     sqlf_null_default_call,
     sqlf_safe_divide_form,
+    strip_sql_comments,
 )
 
 
@@ -129,7 +130,10 @@ class _Cursor:
 
 def translate_sql_expr(sql: str, resolver: Callable[[str], str]) -> str:
     """Translate one Snowflake SQL expression to ThoughtSpot formula text."""
-    cur = _Cursor(tokenize(sql.strip()))
+    # Snowflake comments: --, // and /* */, outside '…' literals and "…" identifiers (BL-382)
+    cleaned = strip_sql_comments(sql, line_markers=("--", "//"), ident_quote='"',
+                                 backslash=True)
+    cur = _Cursor(tokenize(cleaned))
     out = _expr(cur, resolver)
     kind, text = cur.peek()
     if kind is not None:
