@@ -188,13 +188,24 @@ def _emit_passthrough(fn: str, args: list) -> str:
 
 
 def _emit_safe_divide(args: list, resolver) -> str:
+    """TS ``safe_divide ( a , b )`` -> ``CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END``.
+
+    That is what ThoughtSpot itself compiles ``safe_divide`` to (probe record §7, M2
+    compiled SQL): 0 on a zero divisor even when ``a`` is NULL, NULL on a NULL divisor,
+    NULL on a NULL dividend over a non-zero divisor. The former
+    ``COALESCE(a / NULLIF(b, 0), 0)`` was 0 on any NULL operand (BL-366).
+
+    ``b`` appears twice, so it is emitted once and the same text reused; a binop ``b``
+    is bracketed (``b = 0`` would otherwise bind to its last operand), and so is a
+    binop ``a`` (it sits left of ``/``).
+    """
     numerator = emit_sql(args[0], resolver)
-    # numerator sits left of the implicit `/` -> wrap if it's a binop
-    # (precedence <= 5, i.e. any binop); the denominator is inside
-    # NULLIF(x, 0), a function-arg context that needs no extra wrapping.
     if args[0]["node"] == "binop":
         numerator = f"({numerator})"
-    return f"COALESCE({numerator} / NULLIF({emit_sql(args[1], resolver)}, 0), 0)"
+    divisor = emit_sql(args[1], resolver)
+    if args[1]["node"] == "binop":
+        divisor = f"({divisor})"
+    return f"CASE WHEN {divisor} = 0 THEN 0 ELSE {numerator} / NULLIF({divisor}, 0) END"
 
 
 def _emit_if_null(args: list, resolver) -> str:
@@ -295,9 +306,10 @@ def is_aggregate_present(sql: str) -> bool:
     """True if an aggregate function call or window `OVER` clause appears
     ANYWHERE in `sql` -- presence-based, not "the outermost AST node is an
     aggregate call". A cross-measure ref like
-    `COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)`
-    already aggregates via its resolved MEASURE()/ANY_VALUE() refs even
-    though its own outermost call is `safe_divide`/`COALESCE`, neither of
+    `CASE WHEN ANY_VALUE(category_quantity) = 0 THEN 0 ELSE MEASURE(quantity) /
+    NULLIF(ANY_VALUE(category_quantity), 0) END` already aggregates via its
+    resolved MEASURE()/ANY_VALUE() refs even
+    though its own outermost node is `safe_divide`/`CASE`, neither of
     which is itself an aggregate function -- this distinguishes that case
     (already aggregated, leave as-is) from a bare `safe_divide` over two
     RAW physical-column refs (no aggregate anywhere, must be wrapped).

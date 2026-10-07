@@ -313,7 +313,8 @@ class TestSalesMetricView:
         doc = _build("DM_ORDER_DETAIL")["yaml_doc"]
         measures = _by_name(doc["measures"])
         assert measures["category_contribution_ratio"]["expr"] == (
-            "COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)")
+            "CASE WHEN ANY_VALUE(category_quantity) = 0 THEN 0 "
+            "ELSE MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0) END")
 
     def test_employee_dimension_formula(self):
         # Formula 1: concat([LAST_NAME], ', ', [FIRST_NAME]) through the

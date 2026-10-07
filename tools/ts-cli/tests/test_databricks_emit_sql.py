@@ -28,7 +28,7 @@ class TestScalarEmit:
 
     def test_safe_divide(self):
         assert e("safe_divide ( sum ( [T::a] ) , sum ( [T::b] ) )") == \
-            "COALESCE(SUM(source.a) / NULLIF(SUM(source.b), 0), 0)"
+            "CASE WHEN SUM(source.b) = 0 THEN 0 ELSE SUM(source.a) / NULLIF(SUM(source.b), 0) END"
 
     def test_ifelse_to_case(self):
         assert e("if ( [T::x] > 0 ) then [T::a] else 0") == \
@@ -155,7 +155,7 @@ class TestPrecedenceParens:
 
     def test_safe_divide_numerator_binop(self):
         assert e("safe_divide ( [T::a] + [T::b] , [T::c] )") == \
-            "COALESCE((source.a + source.b) / NULLIF(source.c, 0), 0)"
+            "CASE WHEN source.c = 0 THEN 0 ELSE (source.a + source.b) / NULLIF(source.c, 0) END"
 
     def test_or_group_and_cmp(self):
         assert e("( [T::x] = 1 or [T::y] = 2 ) and [T::z] = 3") == \
@@ -168,7 +168,48 @@ class TestPrecedenceParens:
     def test_safe_divide_unchanged(self):
         # re-confirm existing safe_divide output (non-binop numerator) is unaffected
         assert e("safe_divide ( sum ( [T::a] ) , sum ( [T::b] ) )") == \
-            "COALESCE(SUM(source.a) / NULLIF(SUM(source.b), 0), 0)"
+            "CASE WHEN SUM(source.b) = 0 THEN 0 ELSE SUM(source.a) / NULLIF(SUM(source.b), 0) END"
+
+
+class TestSafeDivideExact:
+    """BL-366: ``safe_divide`` compiles to ``CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END``
+    (probe record §7). The emitted SQL must be that form, with a compound divisor bracketed
+    identically in both of its occurrences."""
+
+    def test_compound_divisor_bracketed_in_both_places(self):
+        assert e("safe_divide ( [T::a] , [T::b] - [T::c] )") == (
+            "CASE WHEN (source.b - source.c) = 0 THEN 0 "
+            "ELSE source.a / NULLIF((source.b - source.c), 0) END")
+
+    def test_compound_both_sides(self):
+        assert e("safe_divide ( [T::a] * [T::d] , [T::b] + [T::c] )") == (
+            "CASE WHEN (source.b + source.c) = 0 THEN 0 "
+            "ELSE (source.a * source.d) / NULLIF((source.b + source.c), 0) END")
+
+    def test_call_divisor_not_bracketed(self):
+        assert e("safe_divide ( [T::a] , abs ( [T::b] ) )") == (
+            "CASE WHEN ABS(source.b) = 0 THEN 0 ELSE source.a / NULLIF(ABS(source.b), 0) END")
+
+    @staticmethod
+    def _safe_divide_semantics(a, b):
+        # ThoughtSpot safe_divide, stated from the live probe — not from the emitted SQL
+        if b == 0:
+            return 0
+        if a is None or b is None:
+            return None
+        return a / b
+
+    @pytest.mark.parametrize("a", [None, 0.0, 2.0])
+    @pytest.mark.parametrize("b", [None, 0.0, 4.0])
+    def test_null_zero_grid_matches_safe_divide(self, a, b):
+        # Evaluate the emitted SQL (SQLite reads CASE / NULLIF / = the same way) on
+        # every NULL / zero combination; the former COALESCE form was 0 on (NULL, 4)
+        # and (2, NULL), where safe_divide is NULL.
+        import sqlite3
+        sql = e("safe_divide ( [T::a] , [T::b] )").replace("source.", "")
+        row = sqlite3.connect(":memory:").execute(f"SELECT {sql} FROM (SELECT ? AS a, ? AS b)",
+                                                  (a, b)).fetchone()
+        assert row[0] == self._safe_divide_semantics(a, b)
 
 
 class TestPassthroughArity:
