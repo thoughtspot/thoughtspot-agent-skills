@@ -26,7 +26,7 @@ from ts_cli.databricks.mv_expr import (
     strip_sql_comments,
 )
 from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
-from ts_cli.formula_common import week_start_note
+from ts_cli.formula_week import week_start_note
 from ts_cli.databricks.mv_window_translate import translate_window_measure
 
 
@@ -223,7 +223,10 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
 def translate_filter(filter_sql: str, tables: dict) -> dict:
     """Translate the MV global filter: to the MV Filter boolean formula."""
     ts = translate_sql_expr(filter_sql, make_resolver(tables))
-    return {"name": "MV Filter", "column_type": "ATTRIBUTE", "ts_expr": ts}
+    # Same annotations[] channel as translated[] entries, so the skill's review
+    # step surfaces a week-dependent filter too (BL-334 review).
+    return {"name": "MV Filter", "column_type": "ATTRIBUTE", "ts_expr": ts,
+            "annotations": _with_week_note([], ts)}
 
 
 _COLUMN_AGG = {"SUM": "SUM", "AVG": "AVERAGE", "MIN": "MIN", "MAX": "MAX",
@@ -542,6 +545,9 @@ def _inline_and_translate(m, parsed, tables, by_name, skip_names,
         return f"( {_inline_text(by_name[ref])} )"
 
     entry["ts_expr"] = _PLACEHOLDER_RE.sub(substitute, entry["ts_expr"])
+    # The week note must see the INLINED text: MEASURE(mon_rev) / 2 carries the
+    # referenced measure's start_of_week only after substitution (BL-334 review).
+    entry["annotations"] = _with_week_note(entry["annotations"], entry["ts_expr"])
     return entry
 
 

@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ts_cli.formula_common import (
-    UntranslatableError, bare_column_name, week_start_note)
+from ts_cli.formula_common import UntranslatableError, bare_column_name
+from ts_cli.formula_week import week_start_note
 from ts_cli.sv_naming import (  # noqa: F401  (re-exported for callers/tests)
     build_node_id_map,
     construct_formula_id,

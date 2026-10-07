@@ -375,7 +375,7 @@ def map_date_functions(expr: str, registry: dict | None = None,
     result = expr
 
     # DATETRUNC('unit', date) → start_of_unit ( date )
-    result = _convert_datetrunc(result, registry)
+    result = _convert_datetrunc(result, registry, week_start, notes)
 
     # DATEDIFF('unit', start, end) → diff_unit ( end , start )  [reversed args]
     result = _convert_datediff(result, registry)
@@ -392,7 +392,31 @@ def map_date_functions(expr: str, registry: dict | None = None,
     return result
 
 
-def _convert_datetrunc(expr: str, registry: dict | None = None) -> str:
+# Tableau DATETRUNC('week', d, [start_of_week]) and DATEPART('week', d,
+# [start_of_week]) honour the week start; ThoughtSpot start_of_week and
+# week_number_of_year are Monday-based. When the converter KNOWS the source week
+# starts elsewhere (a literal argument, else the datasource's Week start) the plain
+# Monday form is a known wrong answer: it is still emitted, but counted under
+# `WEEK_START_MISMATCH:<day>` so the record is flagged for review (BL-334). An
+# unknown start stays an advisory (formula_week.week_start_note).
+WEEK_START_MISMATCH = "week_start_mismatch"
+
+
+def _note_week_mismatch(args: list[str], registry: dict | None,
+                        week_start: str | None, notes: dict | None) -> None:
+    start = None
+    if len(args) >= 3:
+        start = _resolve_unit(args[2], registry)
+    elif week_start:
+        start = week_start.lower()
+    if notes is not None and start in WEEKDAY_FIRST_DAY_INDEX and start != "monday":
+        key = f"{WEEK_START_MISMATCH}:{start}"
+        notes[key] = notes.get(key, 0) + 1
+
+
+def _convert_datetrunc(expr: str, registry: dict | None = None,
+                       week_start: str | None = None,
+                       notes: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATETRUNC\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -418,6 +442,8 @@ def _convert_datetrunc(expr: str, registry: dict | None = None) -> str:
                 # flags any surviving DATETRUNC call as unmapped.
                 search_start = end_pos
                 continue
+            if unit == "week":
+                _note_week_mismatch(args, registry, week_start, notes)
             replacement = f"{ts_func} ( {date_expr} )"
             result = result[:m.start()] + replacement + result[end_pos:]
             search_start = m.start() + len(replacement)
@@ -549,6 +575,8 @@ def _datepart_replacement(unit: str, args: list[str], registry: dict | None,
         return ts_weekday_number(date_expr, first_day="monday", base=1)
     if unit == "weekday":
         return _datepart_weekday(args, registry, week_start, notes)
+    if unit == "week":
+        _note_week_mismatch(args, registry, week_start, notes)
     ts_func = _DATEPART_UNIT_MAP.get(unit)
     return f"{ts_func} ( {date_expr} )" if ts_func else None
 

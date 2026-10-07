@@ -31,6 +31,7 @@ from ts_cli.formula_common import (
     wrap_passthrough_calls,
 )
 from ts_cli.formula_text import ts_finalize_formula
+from ts_cli.formula_week import week_start_mismatch_note
 
 # ---------------------------------------------------------------------------
 # Function-name map + translator
@@ -118,6 +119,49 @@ def _weekday(args: list[str], first_week_day: Optional[int] = None) -> Optional[
     return ts_weekday_number(args[0], first_day=first, base=0, compact=True)
 
 
+def _weekstart(args: list[str], first_week_day: Optional[int] = None) -> Optional[str]:
+    """Qlik WeekStart(date[, period_no[, first_week_day]]) -> ThoughtSpot start_of_week.
+
+    ThoughtSpot `start_of_week` is Monday-based and takes no offset (a bare rename let
+    `WeekStart(D, 0, 6)` through as `start_of_week(D,0,6)`, an invalid arity reported
+    OK). Emitted only when the period offset is absent or a literal 0 AND the week start
+    is not known to be another day: a literal third argument, else the app's
+    `FirstWeekDay`. A known non-Monday start (0 = Mon ... 6 = Sun) is a known wrong
+    answer, so it is flagged NEEDS REVIEW, as is any other offset — the exact shifted
+    form is a filed follow-up (BL-334). An unknown start is emitted with the advisory
+    week note (formula_week.week_start_note), not flagged.
+    """
+    if not 1 <= len(args) <= 3:
+        return None
+    if len(args) >= 2 and args[1].strip() != "0":
+        return None
+    first = first_week_day
+    if len(args) == 3:
+        if args[2].strip() not in {str(i) for i in range(7)}:
+            return None
+        first = int(args[2].strip())
+    if first not in (None, 0):
+        return None
+    return f"start_of_week({args[0]})"
+
+
+def _weekstart_mismatch(expr: str, first_week_day: Optional[int]) -> Optional[int]:
+    """The known non-Monday first week day that made a WeekStart() unresolvable, else None."""
+    for m in re.finditer(r"(?i)\bweekstart\s*\(", expr):
+        depth, i = 0, m.end() - 1
+        for i in range(m.end() - 1, len(expr)):
+            depth += {"(": 1, ")": -1}.get(expr[i], 0)
+            if depth == 0:
+                break
+        args = _split_top_level(expr[m.end():i])
+        first = first_week_day
+        if len(args) == 3 and args[2].strip() in {str(i) for i in range(7)}:
+            first = int(args[2].strip())
+        if first not in (None, 0):
+            return first
+    return None
+
+
 _FIRST_WEEK_DAY_RE = re.compile(
     r"(?im)^\s*(?:SET|LET)\s+FirstWeekDay\s*=\s*'?\s*([0-6])\s*'?\s*;")
 
@@ -146,7 +190,7 @@ def parse_first_week_day(load_script: Optional[str]) -> Optional[int]:
 # with the wrong arity, which reads as a successful translation and fails at
 # import — unflagged, so nobody sees it until then.
 COMPOSITION_MAP: dict[str, Any] = {
-    "mid": _mid, "weekday": _weekday, "index": _index,
+    "mid": _mid, "weekday": _weekday, "index": _index, "weekstart": _weekstart,
 }
 
 # Qlik function name (lowercase) -> ThoughtSpot formula function.
@@ -178,7 +222,7 @@ FUNCTION_MAP: dict[str, Optional[str]] = {
     "weekday": "weekday", "quarter": "quarter_number", "today": "today",
     "now": "now", "addmonths": "add_months", "addyears": "add_years",
     "monthstart": "start_of_month", "yearstart": "start_of_year",
-    "quarterstart": "start_of_quarter", "weekstart": "start_of_week",
+    "quarterstart": "start_of_quarter", "weekstart": "weekstart",
     "date": "to_date", "networkdays": None,
     # math
     "round": "round", "floor": "floor", "ceil": "ceil", "abs": "abs",
@@ -232,7 +276,7 @@ def _translate(expr: str, first_week_day: Optional[int] = None
         if rewritten is not None:
             if if_unknown:
                 return (rewritten, True,
-                        _unmapped_reason(if_unknown, first_week_day))
+                        _unmapped_reason(if_unknown, first_week_day, expr))
             return rewritten, False, ""
         return (f"/* TODO review: {expr} */", True,
                 f"Could not parse If() structure: {expr}")
@@ -240,12 +284,21 @@ def _translate(expr: str, first_week_day: Optional[int] = None
     # Generic function-name remap on the whole expression.
     out, unknown = _remap_functions(expr, first_week_day)
     if unknown:
-        return out, True, _unmapped_reason(unknown, first_week_day)
+        return out, True, _unmapped_reason(unknown, first_week_day, expr)
     return out, False, ""
 
 
-def _unmapped_reason(unknown: set[str], first_week_day: Optional[int]) -> str:
+def _unmapped_reason(unknown: set[str], first_week_day: Optional[int],
+                     expr: str = "") -> str:
     reason = f"Unmapped Qlik function(s): {', '.join(sorted(unknown))}"
+    if any(u.lower() == "weekstart" for u in unknown):
+        first = _weekstart_mismatch(expr, first_week_day)
+        reason += (" — " + week_start_mismatch_note(
+            "the Qlik week (WeekStart's 3rd argument or the app's FirstWeekDay)", first)
+            if first is not None else
+            " — WeekStart() with a non-zero or non-literal period offset (or a "
+            "non-literal first week day) has no exact ThoughtSpot form; rewrite it "
+            "by hand (BL-334)")
     if first_week_day is None and any(u.lower() == "weekday" for u in unknown):
         reason += (" — Weekday() numbers from the app's FirstWeekDay, and no "
                    "`SET FirstWeekDay=n;` was found in the load script; pass "
@@ -303,7 +356,8 @@ def _remap_functions(expr: str, first_week_day: Optional[int] = None
     handlers = COMPOSITION_MAP
     if first_week_day is not None:
         handlers = {**COMPOSITION_MAP,
-                    "weekday": partial(_weekday, first_week_day=first_week_day)}
+                    "weekday": partial(_weekday, first_week_day=first_week_day),
+                    "weekstart": partial(_weekstart, first_week_day=first_week_day)}
     out, unresolved_comp = rewrite_marker_calls(out, handlers)
     unknown |= {origin.get(name, name)
                 for name in (unresolved | unresolved_comp)}

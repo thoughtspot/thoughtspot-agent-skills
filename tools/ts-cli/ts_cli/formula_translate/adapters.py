@@ -144,7 +144,17 @@ def adapt_tableau(expr: str, ctx: ColumnContext, role_hint: Optional[str] = None
     out = "".join(seg if lit else re.sub(r"\belse NULL\b", "else null", seg)
                   for lit, seg in split_literals(out))
     out = qualify_refs(out, ctx, parameters=params, placeholder_tables={_SENTINEL})
-    return RawResult(out, TRANSLATED, note_list)
+    return RawResult(out, TRANSLATED, note_list, traps=_tableau_week_traps(out, notes))
+
+
+def _tableau_week_traps(out: str, notes: dict) -> list[str]:
+    """A known week-start mismatch is the converter's review_required — here a trap
+    whose prefix downgrades to APPROXIMATED (BL-334). The other week notes come from
+    traps.detect_traps, so only the mismatch is taken from the converter."""
+    from ts_cli.formula_week import WEEK_START_MISMATCH_PREFIX
+    from ts_cli.tableau_translate import week_review
+    return [n for n in week_review(out, notes).get("review_notes", [])
+            if n.startswith(WEEK_START_MISMATCH_PREFIX)]
 
 
 # ---------------------------------------------------------------------------

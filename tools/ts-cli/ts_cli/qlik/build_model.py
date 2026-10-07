@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from ts_cli.formula_common import week_start_note
+from ts_cli.formula_week import week_start_note
 from ts_cli.model_builder import build_model_tml
 
 from . import functions

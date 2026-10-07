@@ -121,7 +121,8 @@ class TestTranslateFilter:
     def test_filter_golden_ecommerce(self):
         out = translate_filter("status != 'cancelled'", TABLES)
         assert out == {"name": "MV Filter", "column_type": "ATTRIBUTE",
-                       "ts_expr": "[TRANSACTIONS::status] != 'cancelled'"}
+                       "ts_expr": "[TRANSACTIONS::status] != 'cancelled'",
+                       "annotations": []}
 
     def test_filter_not_and_in(self):
         out = translate_filter(
