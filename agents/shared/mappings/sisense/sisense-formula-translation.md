@@ -8,6 +8,17 @@ deterministically translate the common subset; emit everything else as **NEEDS R
 the original Sisense formula preserved — never faked. Coverage → status:
 `AUTO → Migrated`, `PARTIAL → Approximated`, `MANUAL → NEEDS REVIEW`.
 
+## String literals and `a * b / c` (BL-365, ts-cli 0.165.0)
+
+ThoughtSpot reads a doubled quote in a single-quoted literal as **two** quotes (`'it''s'` is
+`it''s`), its backslash escape fails before a space, and it reads `a * b / c` as
+`a * ( b / c )` — with a division of two integers fixed-point at scale 6 (live, se-thoughtspot
+2026-10-07; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-literals)).
+So a Sisense literal is read SQL-standard (`''` is one quote), a literal holding a quote is emitted **double-quoted** (`"O'Brien"`), a
+backslash doubled, and every product under a division bracketed (`( a * b ) / c`) — the
+translator's last step, `formula_text.ts_finalize_formula`. Copying `'O''Brien'` across was a silent
+wrong answer.
+
 ## Aggregations (`AGG_MAP`) — plain JAQL `agg`, no formula
 
 A simple measure's JAQL `agg` becomes a TML column `aggregation:` keyword.

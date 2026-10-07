@@ -5,6 +5,17 @@ The translation map behind `ts powerbi build-model`. Verified against a live clu
 just docs. Anything outside this subset is returned untranslated and flagged NEEDS REVIEW —
 never faked.
 
+## String literals and `a * b / c` (BL-365, ts-cli 0.165.0)
+
+ThoughtSpot reads a doubled quote in a single-quoted literal as **two** quotes (`'it''s'` is
+`it''s`), its backslash escape fails before a space, and it reads `a * b / c` as
+`a * ( b / c )` — with a division of two integers fixed-point at scale 6 (live, se-thoughtspot
+2026-10-07; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-literals)).
+So a DAX literal is decoded (`""` is one double quote), a literal holding a quote is emitted **double-quoted** (`"O'Brien"`), a
+backslash doubled, and every product under a division bracketed (`( a * b ) / c`) — the
+translator's last step, `formula_text.ts_finalize_formula`. Copying a quote-bearing literal across was a silent
+wrong answer.
+
 ## Direct
 
 | DAX | ThoughtSpot | Notes |

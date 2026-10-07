@@ -64,8 +64,8 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
-| BL-364 | ThoughtSpot trigonometry is in **radians** (live 2026-10-07), but the Tableau translator and the Tableau, Ossie, Omni and Sigma maps convert by `180 / π` as if it were degrees — a silent wrong answer for every non-zero input. Excel map and translator fixed | 2026-10-31 |
-| BL-365 | ThoughtSpot reads `a * b / c` as `a * ( b / c )` (fixed-point scale 6 over literals) and a doubled quote in a string literal as two quotes (live 2026-10-07). Fixed in the Excel printer; the other translators' printers are unaudited | 2026-10-31 |
+| ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
+| ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
 | ~~BL-232~~ | ~~`description` under `properties` silently dropped on import; five sites + `ts tml lint` I15~~ | DONE (2026-09-02) |
 | ~~BL-200~~ | ~~SV entry splitter not quote aware -- a comma in `comment=` shatters the entry~~ | DONE (2026-07-31) |
 | ~~BL-201~~ | ~~live `sample_values` unmatched, read as part of the expression~~ | DONE (2026-07-31) |
@@ -238,6 +238,7 @@ are roughly ordered by value÷effort.
 | ~~BL-360~~ | ~~Databricks / Snowflake `a DIV b` — `DIV` read as a column (`[TABLE::DIV]`) and reported TRANSLATED; rejected at import (fidelity M2)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
 | ~~BL-361~~ | ~~`FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor`/`ceil`; TRANSLATED, rejected at import (fidelity M2; Snowflake too)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
 | BL-366 | to-direction `safe_divide` is inexact on NULL — Databricks `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, Snowflake `DIV0(NULL, 0)` is NULL (the inverse of BL-357) | 2026-11-30 |
+| BL-367 | The upstream apache/ossie ThoughtSpot converter (`expressions/catalog.py`) still converts trigonometry by `180 / π` as if ThoughtSpot were in degrees — the BL-364 bug, upstream | 2026-11-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -13076,7 +13077,7 @@ widen any tolerance.
 
 ## BL-364 — ThoughtSpot trigonometry is in radians; the Tableau translator and four maps convert as if it were degrees `Tier 1`
 
-**Filed:** 2026-10-07. **Status:** OPEN (Excel fixed; Tableau translator and the other maps not).
+**Filed:** 2026-10-07. **Status:** DONE (2026-10-07, fix/trig-quotes-precedence, ts-cli 0.165.0).
 **Source:** the Excel coverage pass (fidelity M1), probe record §7 ("Trigonometry").
 
 **The facts (live, se-thoughtspot, 2026-10-07, scratch Model deleted and confirmed absent).**
@@ -13112,6 +13113,19 @@ value, bump `ts-convert-from-tableau` (PATCH), and re-run a Tableau trigonometry
 `SIN` … `ATAN` rows, and the translator's new rules, use the identity form.
 
 **Target:** 2026-10-31.
+
+**Resolution (2026-10-07, fix/trig-quotes-precedence, ts-cli 0.165.0).** Tableau `SIN` … `ATAN` are the
+identity, `COT` is `( 1 / tan ( x ) )`, `PI()` is `sql_double_op ( "PI()" )` and `DEGREES` / `RADIANS`
+are `( ( x * 180 ) / PI )` / `( ( x * PI ) / 180 )`, native so they work over an aggregate. The other
+translators had no degree-based trigonometry — Power BI, Qlik and Sisense decline trig functions
+(loud), and Snowflake / Databricks declined them too; both SQL translators now map them through the
+shared `formula_text.sql_trig_to_ts` (ATAN2 a row-level pass-through). No Looker translator exists in
+`ts_cli`. Maps corrected: Tableau, Ossie, Omni, Sigma (incl. `DistanceGlobe`, now converting its
+degree inputs) and the Excel map's leftover `ACOT` / `COT` / `CSC` / `SEC` / `DEGREES` / `RADIANS` rows.
+Proof: M0 `sf-trig-001..007` and M2 `dbx-trig-001..007` MATCH (before the fix all 14 were
+TRANSLATE_FAILED); the Tableau forms matched Snowflake live on every row (probe record §7, "Quotes and
+grouping"); `tests/test_ts_semantics_values.py` pins them by value. The upstream converter's catalog
+still converts (BL-367).
 
 
 ## BL-357 — `x / NULLIF(y, 0)` and `COALESCE(x / NULLIF(y, 0), 0)` are both collapsed to `safe_divide`, which is neither `Tier 1`
@@ -13353,7 +13367,7 @@ corpus would be executable input running with that reach.
 
 ## BL-365 — `a * b / c` is read as `a * ( b / c )`, and a doubled quote in a string literal is two quotes: audit every formula emitter `Tier 1`
 
-**Filed:** 2026-10-07. **Status:** OPEN (the Excel printer is fixed in ts-cli 0.164.0).
+**Filed:** 2026-10-07. **Status:** DONE (2026-10-07, fix/trig-quotes-precedence, ts-cli 0.165.0).
 **Source:** the Excel coverage pass's fresh M1 run (16 silent wrong answers, every one a
 `… * 180 / PI()` shape) and the follow-up probes in probe record §7.
 
@@ -13387,6 +13401,26 @@ dialect.
 
 **Target:** 2026-10-31.
 
+**Resolution (2026-10-07, fix/trig-quotes-precedence, ts-cli 0.165.0).** Probed first (probe record §7,
+"Quotes and grouping"): of five ways to write `O'Brien`, the native **double-quoted literal** `"O'Brien"`
+is exact everywhere (47 of 47 cases); `'O\'Brien'` fails whenever a space follows the escape. One shared
+module, `ts_cli/formula_text.py` (split from `formula_common` for its size gate; vendored into the Genie
+notebook): `ts_string_literal` prints a literal (plain `'x'`; a quote or backslash → `"…"` with each
+backslash doubled; both quote kinds → `concat`), and `ts_finalize_formula` — the last step of the
+Tableau, Power BI, Qlik, Sisense, Snowflake and Databricks translators — rewrites every misread literal
+and brackets every product that is the left operand of a division. The Excel printer uses the same
+helper (its `sql_string_op` form and its quote-plus-backslash refusal are gone). Source literals are now
+decoded per dialect (`sql_literal_text`): DAX `""`; Snowflake `''` and `\'`; Databricks `\'` and
+adjacent-literal concatenation (`'it''s'` is `its` there, live); an unproven backslash escape is refused.
+A quote-bearing literal in a `sql_*_op` or `LIKE` template is bound as `{n}`, not inlined (Databricks
+would read the inlined `''` as two literals). The reverse direction (ThoughtSpot → Excel, → Databricks)
+reads `'it''s'` as ThoughtSpot does, two quotes, and the shared tokenizer reads double-quoted literals.
+`a / b * c`, `a / b / c` and `a - b + c` were probed and are left to right, so only `*` under `/` is
+bracketed. Before/after output over every expression the test suite, the M0 / M2 case files and the
+2,463-formula M1 corpus feed the translators: 18 changed outputs, each judged (PR body). Proof: M0 and
+M2 cases for each shape MATCH (before: 1 of 17 on Snowflake); the 250 and the fresh M1 selection keep
+every class; the 60-case Excel set is byte-identical.
+
 ## BL-366 — To-direction `safe_divide` is not exact on NULL: Databricks `COALESCE(a / NULLIF(b, 0), 0)`, Snowflake `DIV0` `Tier 2`
 
 **Filed:** 2026-10-07. **Status:** OPEN.
@@ -13410,3 +13444,21 @@ add a round-trip fidelity case. Not done in the M2 fix PR: it changes converter 
 golden tests pin, and the PR's scope is the from-direction.
 
 **Target:** 2026-11-30.
+
+## BL-367 — The upstream ThoughtSpot converter (apache/ossie) still converts trigonometry as if ThoughtSpot were in degrees `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** BL-364's fix (fix/trig-quotes-precedence) — checking upstream, as BL-364 asked.
+
+**The facts.** `converters/thoughtspot/src/ossie_thoughtspot/expressions/catalog.py` (apache/ossie
+`main` @ `9e87fa3`, read 2026-10-07) emits `sin ( {0} * 180 / 3.14159265358979 )` and
+`( asin ( {0} ) * 3.14159265358979 / 180 )`, with notes saying ThoughtSpot trigonometry is in degrees,
+and `RADIANS` / `DEGREES` as `x * 3.14159… / 180` (also hit by BL-365's grouping). ThoughtSpot is in
+radians (live 2026-10-07, probe record §7), so every trig translation it makes is wrong for every
+non-zero input. This repo's Ossie map (`docs/ossie/ts-ossie-function-mapping.md`) is corrected; the two
+now disagree on forms, not on classes, so `check_ossie_mapping_sync.py` (class-level) does not flag it.
+
+**Fix.** Upstream PR: identity forms, `sql_double_op ( "PI()" )`, bracketed `DEGREES` / `RADIANS`, and the
+reverse rows (`SIN(RADIANS(x))` → `SIN(x)`); re-run `tools/ossie-roundtrip`. Never vendor the converter here.
+
+**Target:** 2026-11-15.

@@ -128,6 +128,7 @@ widgets, unresolved fields) for manual rebuild.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.3 | 2026-10-07 | **Quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-365).** A literal with a quote is emitted double-quoted (read SQL-standard: `''` is one quote), a backslash doubled, and every product under a division bracketed |
 | 1.0.2 | 2026-10-06 | **2-arg `round` no longer imports as a wrong number (ts-cli v0.156.0, BL-331).** It was emitted verbatim and marked Approximated, but Approximated still imports: `round(x, 0)` was NULL on every row and `round(x, 2)` rounded to the nearest 2. A literal decimal count now converts to ThoughtSpot's increment (`2` → `0.01`) and is Migrated; a non-literal one is NEEDS REVIEW. Coverage matrix updated |
 | 1.0.1 | 2026-09-22 | **I7 untranslatable gate added.** Step 1 flagged JAQL formulas NEEDS REVIEW with no instruction to open [sisense-formula-translation.md](../../shared/mappings/sisense/sisense-formula-translation.md) first. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |
 | 1.0.0 | 2026-07-17 | Initial release — `ts sisense` parse / build-model / build-liveboard |

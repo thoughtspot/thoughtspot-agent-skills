@@ -2493,8 +2493,8 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.44.4 | 2026-10-07 | **Trigonometry is radians; quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-364, BL-365).** `SIN` … `ATAN` / `COT` no longer convert by `180 / π` (ThoughtSpot trig is radians, live — the old forms were wrong for every non-zero input); `PI()` is the warehouse's `PI()`; `DEGREES` / `RADIANS` are bracketed. A literal holding a quote is double-quoted (`'it''s'` read as two quotes), a backslash doubled, and every product under a division bracketed. Coverage-matrix rows 32, 33, 132, 133, 138, 139 |
 | 1.44.3 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.44.2 | 2026-10-06 | **`DATEPART('weekday', d)` returns a number, not the day name (ts-cli v0.156.2, BL-334).** Now `( mod ( day_number_of_week ( d ) , 7 ) + 1 )` for a Sunday start. Week start: literal `start_of_week`, else the datasource's `<date-options start-of-week>`, else Sunday assumed and reported as a validation warning. `ISOWEEKDAY` / `'iso-weekday'` → `day_number_of_week` |
-| 1.44.1 | 2026-10-06 | **`ROUND(x, n)` → `round ( x , 10^-n )` (ts-cli v0.156.0, BL-331).** ThoughtSpot's 2nd arg is an increment, so the old rename returned wrong numbers. Coverage-matrix row 31a |
 
-**Older entries (v1.0.0–v1.44.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.44.1):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

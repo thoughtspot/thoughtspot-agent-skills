@@ -223,15 +223,15 @@ command detects pass-through conflicts automatically and skips them.
 | `DATEPART('quarter', d)` | `quarter_number ( d )` | |
 | `DATEPART('week', d)` | `week_number_of_year ( d )` | |
 | `EXP(n)` | `exp ( n )` | |
-| `SIN(n)` / `COS(n)` / `TAN(n)` | `sin ( n * 180 / 3.14159265358979 )` / `cos ( n * 180 / 3.14159265358979 )` / `tan ( n * 180 / 3.14159265358979 )` | Tableau trig is in radians; ThoughtSpot trig is in degrees — convert. (Inverse trig `acos/asin/atan` also return degrees in ThoughtSpot vs radians in Tableau.) |
-| `ACOS(n)` / `ASIN(n)` / `ATAN(n)` | `( acos ( n ) * 3.14159265358979 / 180 )` / `( asin ( n ) * 3.14159265358979 / 180 )` / `( atan ( n ) * 3.14159265358979 / 180 )` | Tableau inverse trig returns radians; ThoughtSpot's returns degrees (by symmetry with the `SIN`/`COS`/`TAN` row above) — convert TS degrees back to radians. CLI-translated (v0.88.0, BL-072) |
-| `COT(n)` | `( 1 / tan ( n * 180 / 3.14159265358979 ) )` | No native `cot()` — composites off `tan`, matching Tableau's own `COT(n) = 1/tan(n)` definition (inner `tan` argument converted to degrees, same as the `TAN` row above). CLI-translated (v0.88.0, BL-072) |
+| `SIN(n)` / `COS(n)` / `TAN(n)` | `sin ( n )` / `cos ( n )` / `tan ( n )` | **Radians on both sides** — ThoughtSpot trigonometry is in radians, like Tableau's (`sin ( 30 )` compiles to `SIN(30)` = −0.988, live se-thoughtspot 2026-10-07, [probe record §7](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat)). **Corrected ts-cli 0.165.0 (BL-364):** this row said ThoughtSpot trig was in degrees and converted by `* 180 / π` — an unprobed assumption, wrong for every non-zero input |
+| `ACOS(n)` / `ASIN(n)` / `ATAN(n)` | `acos ( n )` / `asin ( n )` / `atan ( n )` | Return radians on both sides (`asin ( 0.5 )` = 0.5236, live 2026-10-07). Was `* π / 180` until ts-cli 0.165.0 (BL-364). CLI-translated (v0.88.0, BL-072) |
+| `COT(n)` | `( 1 / tan ( n ) )` | No native `cot()` — composites off `tan`, matching Tableau's own `COT(n) = 1/tan(n)`. Radians (BL-364). CLI-translated (v0.88.0, BL-072) |
 | `DATEPARSE(format, s)` | `to_date ( s , format )` | **Args flipped.** ThoughtSpot `to_date` accepts both `yyyy-MM-dd`-style and strptime `%Y-%m-%d` tokens (both validate live; `%`-codes are the documented canonical form). For common date patterns pass the Tableau format string through unchanged; for time components use strptime. Date-only (drops time). |
 | `STARTSWITH(s, sub)` | `strpos ( s , sub ) = 1` | No native `starts_with`. strpos is 1-based so a true prefix is position 1 (live-verified 2026-06-13, **re-confirmed 2026-07-29 — BL-170**, se-thoughtspot; the composition itself also imports clean). **Case semantics differ (BL-333):** ThoughtSpot's native form is case-insensitive — it lowercases both sides at compile time (live-verified 2026-10-06, se-thoughtspot; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-comparison-is-case-insensitive)) — while Tableau's own string functions are case-sensitive when the source is (e.g. a live Snowflake connection under its default collation). Exact only on data of consistent case; the translator is unchanged. |
 | `ENDSWITH(s, sub)` | `substr ( s , strlen ( s ) - strlen ( sub ) , strlen ( sub ) ) = sub` | No native `ends_with` (**re-confirmed 2026-07-29, se-thoughtspot — BL-170**; the composition itself also imports clean); mirrors the `RIGHT(s, n)` idiom above |
-| `PI()` | `3.14159265358979` | No native `pi()` — use the literal (dialect-free). (alternatively `sql_double_op ( "pi()" )` — documented pass-through) |
-| `RADIANS(n)` | `n * 3.14159265358979 / 180` | No native `radians()` — use the literal composite. (alternatively `sql_double_op ( "radians({0})" , n )` — documented pass-through) |
-| `DEGREES(n)` | `n * 180 / 3.14159265358979` | No native `degrees()` — use the literal composite. (alternatively `sql_double_op ( "degrees({0})" , n )` — documented pass-through) |
+| `PI()` | `sql_double_op ( "PI()" )` | No native `pi()` — the warehouse's own double (a zero-argument template is accepted, live 2026-10-07). **Changed ts-cli 0.165.0 (BL-364):** the 15-digit literal lost precision, and a literal-over-literal division of it is fixed-point at scale 6 (BL-365) |
+| `RADIANS(n)` | `( ( n * sql_double_op ( "PI()" ) ) / 180 )` | No native `radians()`. Native arithmetic, so it works over an aggregate. **The product is bracketed:** ThoughtSpot reads `a * b / c` as `a * ( b / c )` (BL-365, live 2026-10-07) |
+| `DEGREES(n)` | `( ( n * 180 ) / sql_double_op ( "PI()" ) )` | No native `degrees()`; bracketed, as `RADIANS`. `n * 180 / 3.14159…` was read as `n * ( 180 / 3.14159… )` and lost seven digits (BL-364, BL-365) |
 
 ### Scalar MAX/MIN detection
 
@@ -324,7 +324,8 @@ answer (Snowflake: "Division by zero"). Every translated division gets one of:
 ## ThoughtSpot Formula Syntax Rules
 
 1. **Spaces around operators and parentheses** — `if ( a = b ) then c else d` (not `if(a=b)`)
-2. **Single quotes for string literals** — `'value'` (not `"value"`)
+2. **String literals** — `'value'`; a value holding a quote is **double-quoted**, `"it's"`. ThoughtSpot reads `'it''s'` as two quotes, and `'it\'s'` fails to parse before a space (BL-365, live 2026-10-07; [formula reference, String Literals](../../schemas/thoughtspot-formula-patterns.md#string-literals)). A backslash is doubled. The translator prints every literal this way (`formula_text.ts_string_literal`)
+8. **Bracket a product under a division** — `( [a] * [b] ) / [c]`: ThoughtSpot reads `[a] * [b] / [c]` as `[a] * ( [b] / [c] )`, and a division of two integers is fixed-point at scale 6 (BL-365). The translator does it in its last step
 3. **Square brackets for column references** — `[table::column]` or `[formula_id]`
 4. **Boolean literals** — lowercase `true` / `false`
 5. **Boolean operators** — `and`, `or`, `not` (lowercase)

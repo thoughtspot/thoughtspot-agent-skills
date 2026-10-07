@@ -363,6 +363,10 @@ INDEPENDENT_MATCHES = {
         "the same value in the M2 run evidence",
     ("tools/formula-fidelity/runs/2026-10-07-databricks-m2-after-fixes.json", '"0.00000' + '1"'):
         "the same value in the M2 after-fixes run evidence",
+    ("tools/formula-fidelity/runs/2026-10-07-databricks-m2-bl364-365.json", '"0.00000' + '1"'):
+        "the same value in the BL-364 / BL-365 M2 run evidence",
+    ("tools/ts-cli/tests/test_ts_semantics_values.py", '"0.00000' + '1"'):
+        "the scale-6 quantum of the ThoughtSpot-semantics model (BL-365), a code constant",
     ("tools/ts-cli/ts_cli/qlik/data/qlik_ts_formula_map.json", "01234" + "56789"):
         "the digit alphabet of a Qlik PurgeChar mapping",
 }

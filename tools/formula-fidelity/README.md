@@ -27,8 +27,9 @@ operator-run, not workflow-run.
 | `fidelity/literal.py` | Data dir, manifest, materialising cases and the input fixture in memory, the `literal` oracle |
 | `fidelity/redact.py` | What M1 may commit (redacted results, generated report tables) and the leak scanner |
 | `cases/excel/` | `m1-manifest.jsonl` (ids + file + sha256 + locator, no formulas or values) and `m1-selection.json` (counts); `m1-coverage-manifest.jsonl` / `m1-coverage-selection.json`, the 2026-10-07 coverage pass's fresh selection (the cases it newly translates, at most 15 per leading function) |
-| `cases/snowflake/` | `m0.jsonl` (95 cases: 50 original, 21 BL-340..343 / #572 guards, 24 `sf-fix-*` for the M2 fixes and their review) and `fixture-m0.json` (10 edge rows) |
-| `cases/databricks/` | `m2.jsonl` (122 cases, `ANSI_MODE=true`; 31 `dbx-fix-*` added with the BL-357..362 fixes), `m2-nonansi.jsonl` (7 cases, `ANSI_MODE=false`), and their fixtures: M0's rows as Databricks types |
+| `cases/snowflake/` | `m0.jsonl` (112 cases: 50 original, 21 BL-340..343 / #572 guards, 24 `sf-fix-*` for the M2 fixes and their review, 17 `sf-trig-*` / `sf-quote-*` / `sf-prec-*` for BL-364 / BL-365) and `fixture-m0.json` (10 edge rows; `S3` holds apostrophes, `I2` large integers) |
+| `cases/databricks/` | `m2.jsonl` (139 cases, `ANSI_MODE=true`; 31 `dbx-fix-*` added with the BL-357..362 fixes, 17 `dbx-trig-*` / `dbx-quote-*` / `dbx-prec-*` for BL-364 / BL-365), `m2-nonansi.jsonl` (7 cases, `ANSI_MODE=false`), and their fixtures: M0's rows as Databricks types |
+| `run_raw.py` + `cases/probes/` | A RAW ThoughtSpot formula against a SQL oracle (the translator bypassed through `run.py`'s `Deps.translate` seam), for probing how ThoughtSpot reads a formula — probe record §7 "Quotes and grouping" |
 | `runs/` | Run JSON evidence (raw oracle and ThoughtSpot values, compiled SQL, verdicts) |
 | `tests/` | Pure-function tests. No live calls |
 

@@ -357,16 +357,16 @@ Source tables: `core-spec/expression_language.md:453-459` (basic), `:465-470` (a
 | `LN(x)` | direct | `ln ( [x] )` | |
 | `LOG(base, x)` | direct | `log2 ( [x] )` / `log10 ( [x] )` / `safe_divide ( ln ( [x] ) , ln ( base ) )` | ThoughtSpot has fixed-base `log2` and `log10` only. Arbitrary bases go through change-of-base, which is exact. `safe_divide` rather than `/` guards `base = 1`. |
 | `LOG10(x)` | direct | `log10 ( [x] )` | |
-| `SIN(x)` | direct | `sin ( [x] * 180 / 3.14159265358979 )` | **ThoughtSpot trigonometry is in degrees; the specification is in radians (`:476`).** The conversion is mandatory — a bare `sin ( [x] )` returns the sine of *x degrees* and is wrong for every non-zero input. |
-| `COS(x)` | direct | `cos ( [x] * 180 / 3.14159265358979 )` | Degrees, as `SIN`. |
-| `TAN(x)` | direct | `tan ( [x] * 180 / 3.14159265358979 )` | Degrees, as `SIN`. |
-| `ASIN(x)` | direct | `( asin ( [x] ) * 3.14159265358979 / 180 )` | Inverse functions convert the other way: ThoughtSpot returns degrees, the specification expects radians. |
-| `ACOS(x)` | direct | `( acos ( [x] ) * 3.14159265358979 / 180 )` | Degrees → radians, as `ASIN`. |
-| `ATAN(x)` | direct | `( atan ( [x] ) * 3.14159265358979 / 180 )` | Degrees → radians, as `ASIN`. |
+| `SIN(x)` | direct | `sin ( [x] )` | **Radians on both sides.** ThoughtSpot trigonometry is in radians, like the specification (`:476`): `sin ( 30 )` compiles to `SIN(30)` = −0.988 (live se-thoughtspot 2026-10-07, probe record §7). **Corrected 2026-10-07 (BL-364):** this row converted by `* 180 / π` on an unprobed "ThoughtSpot is degrees" assumption — wrong for every non-zero input. The upstream converter's catalog carries the same conversion (BL-367). |
+| `COS(x)` | direct | `cos ( [x] )` | Radians, as `SIN`. |
+| `TAN(x)` | direct | `tan ( [x] )` | Radians, as `SIN`. |
+| `ASIN(x)` | direct | `asin ( [x] )` | Returns radians (`asin ( 0.5 )` = 0.5236, live 2026-10-07). |
+| `ACOS(x)` | direct | `acos ( [x] )` | Radians, as `ASIN`. |
+| `ATAN(x)` | direct | `atan ( [x] )` | Radians, as `ASIN`. |
 | `ATAN2(y, x)` | passthrough | `sql_double_op ( "ATAN2({0}, {1})" , [y] , [x] )` | **Variant: `sql_double_op`.** `atan2` is not a two-argument `atan` — it is quadrant-aware and defined where `x = 0`. Composing it from `atan` plus sign tests is possible but the branch table is easy to get wrong at the axes, so the pass-through is the honest mapping. |
-| `RADIANS(degrees)` | direct | `[x] * 3.14159265358979 / 180` | No native `radians`; the arithmetic is exact and dialect-free. |
-| `DEGREES(radians)` | direct | `[x] * 180 / 3.14159265358979` | No native `degrees`; as above. |
-| `PI()` | direct | `3.14159265358979` | No native `pi`. The literal is emitted at the precision ThoughtSpot's own documented composites use; `sql_double_op ( "pi()" )` is available where full warehouse precision matters. |
+| `RADIANS(degrees)` | direct | `( ( [x] * sql_double_op ( "PI()" ) ) / 180 )` | No native `radians`. **Bracketed, with the warehouse's PI:** ThoughtSpot reads `a * b / c` as `a * ( b / c )` and divides literals at scale 6, so `[x] * 3.14159… / 180` was not exact (BL-365, live 2026-10-07). |
+| `DEGREES(radians)` | direct | `( ( [x] * 180 ) / sql_double_op ( "PI()" ) )` | No native `degrees`; as above (`[x] * 180 / 3.14159…` lost seven digits live). |
+| `PI()` | direct | `sql_double_op ( "PI()" )` | The warehouse's own double (a zero-argument template, accepted live 2026-10-07); the class stays `direct`, as the upstream converter classifies it, until BL-367. The literal `3.14159265358979` was 15 digits and, under a division, fixed-point (BL-364, BL-365). |
 | `GREATEST(x, y, ...)` | direct | `greatest ( [x] , [y] , ... )` | **Not `max`.** ThoughtSpot's `max` is an aggregate; `greatest` is the row-wise N-ary function. Mapping `GREATEST` to `max` collapses the column to one value and also flips it from attribute to measure. |
 | `LEAST(x, y, ...)` | direct | `least ( [x] , [y] , ... )` | **Not `min`**, for the same reason. |
 
@@ -584,7 +584,7 @@ declared untranslatable without checking the composition first.
 | `unique count ( [x] )` | `COUNT(DISTINCT x)` | via Ossie composition |
 | `safe_divide ( [a] , [b] )` | `COALESCE(a / NULLIF(b, 0), 0)` | via Ossie composition — the zero-not-null result is preserved by the explicit `COALESCE`. |
 | `pow` / `log2` / `strlen` / `strpos` / `substr` / `left` / `right` | `POWER` / `LOG(2, x)` / `LENGTH` / `POSITION(sub IN s)` / `SUBSTRING(s, start + 1, len)` | via Ossie composition — note `substr`'s 0-based start needs `+ 1` going this way. |
-| `sin` / `cos` / `tan` / `asin` / `acos` / `atan` | `SIN(RADIANS(x))` … / `DEGREES(ASIN(x))` … | via Ossie composition — the degree/radian conversion reverses. |
+| `sin` / `cos` / `tan` / `asin` / `acos` / `atan` | `SIN(x)` … / `ASIN(x)` … | identity — both sides are in radians (BL-364; corrected 2026-10-07 from a degree/radian conversion). |
 | `to_integer` / `to_double` / `to_string` / `to_date ( s , fmt )` | `CAST(x AS INTEGER)` / `CAST(x AS DOUBLE)` / `CAST(x AS VARCHAR)` / `TO_DATE(s, format)` | via Ossie composition — the format model is translated back through the token table; `TO_DATE(s, format)` is EXPERIMENTAL on the Ossie side (`:353`). |
 | `if ( c ) then a else b` | `CASE WHEN c THEN a ELSE b END` or `IF(c, a, b)` | via Ossie composition |
 

@@ -367,3 +367,60 @@ The same run checked 39 translator outputs end to end against hand-computed Exce
 | equal to Excel | **164 of 169**, including every exact grid value the snap broke (3.0, 0.15, 2.5, −200 → unchanged) and the genuine near-step 3.00000001 (`ROUNDUP` to 1 place → 3.1) |
 | different | 5: x = 3.000000000001 rounded up (to 0, 1, 2 places and `CEILING.MATH` 0.1 and 1) returns 3 where Excel gives 4, 3.1, 3.01 — **the documented trade-off**: a value within 1e-9 of a step (scaled) is read as on the step |
 
+
+*Quotes and grouping (2026-10-07, BL-364 / BL-365).* Raw ThoughtSpot formulas compared by value with
+a Snowflake SQL oracle over a 7-row fixture (`S1` holds `O'Brien`, `OBrien`, `O''Brien`, `it's`,
+`O\Brien`, NULL, `x`), through `tools/formula-fidelity/run_raw.py`: four runs, each a scratch Table
+and Model deleted and confirmed absent, warehouse table dropped and confirmed with `SHOW TABLES`.
+Cases: `tools/formula-fidelity/cases/probes/`; evidence: `runs/2026-10-07-probe-quotes-grouping-{1,2,3}.json`
+and `runs/2026-10-07-probe-tableau-powerbi-forms.json`.
+
+How to write `O'Brien` — each candidate as a filter value (`[S1] = …`), inside `contains`, after
+another argument in `concat`, inside `in { 'x' , … }`, and alone:
+
+| Candidate | `=` | `contains` | `concat` | `in { }` | alone | Compiled |
+|---|---|---|---|---|---|---|
+| `'O\'Brien'` | ✓ | ✓ | ✓ | ✓ | ✓ | `'o''brien'` — but see below |
+| `'O\\'Brien'` | ✗ | ✗ | ✗ | ✗ | ✗ | `'o\\''brien'` — reads `O\'Brien` |
+| `"O'Brien"` (double-quoted) | ✓ | ✓ | ✓ | ✓ | ✓ | `'o''brien'` |
+| `concat ( 'O' , "'" , 'Brien' )` | ✓ | ✓ | ✓ | ✓ | ✓ | `(('O' \|\| '''') \|\| 'Brien')` |
+| `sql_string_op ( "'O''Brien'" )` | ✓ | ✓ | ✓ | ✓ | ✓ | `LOWER('O''Brien')` |
+| `'O''Brien'` (control) | ✗ | ✗ | ✗ | ✗ | ✗ | `'o''''brien'` — reads `O''Brien` |
+
+The backslash escape fails whenever a space follows it: `'it\'s here'`, `'x\'s '` and
+`concat ( 'x' , '\'s ' )` are **rejected at import** (*Search did not find "'it's here'"*), in a
+literal alone, in `concat`, in an `if` branch and as a `sql_string_op` argument — 9 of 75 cases in
+the second run, every one with a space. The double-quoted literal (backslashes doubled) matched in all 47 of its cases across the three runs:
+`it's`, `it's here`, `'s`, `a'b'c`, `'`, `''`, `x's `, `Brien'`, alone, after `'Bob'` in `concat`,
+in an `if` branch, as a `sql_string_op` argument, in `in { "x" , "O'Brien" }`, in `contains`, in
+`!=` and in an `if` condition. In it `\\` is one backslash (`"a\\'b"` is `a\'b`, `"a\\b"` is `a\b`)
+and a lone `\` is dropped (`"a\'b"` is `a'b`, `"a\b"` is `ab`), as in a single-quoted literal. Text
+with both quote kinds: `concat ( "it's" , '"' , 'q' )` is exact. As a bound argument `"'"` is passed
+as the warehouse's literal: `sql_string_op ( "REPLACE({0}, {1}, {2})" , [S1] , "'" , '-' )` gave
+`O-Brien`. **Chosen: the native double-quoted literal**, `formula_text.ts_string_literal`.
+
+Grouping, `[N1]` FLOAT over 3, 10.5, −2, 1,000,000, 0.5, NULL, 1.25:
+
+| Formula | Compiled | Result |
+|---|---|---|
+| `[N1] * 4 / 3` | `N1 * (4 / NULLIF(3,0))` | 3.999999 for 3 (scale 6) — **wrong** |
+| `[N1] * 2 * 5 / 3` | `N1 * 2 * (5 / NULLIF(3,0))` | 10.000002 for 1 — the division takes only the operand before it |
+| `- [N1] * 3 / 7` | `(-(N1) * (3 / NULLIF(7,0)))` | wrong at scale 6 |
+| `( [N1] * 4 ) / 3` | | exact |
+| `[N1] / 3 / 7`, `[N1] / [N2] / 7`, `[N1] / 3 * 7`, `[N1] - 3 + 7`, `[N1] - 3 - 7`, `[N1] - [N2] + 7`, `[N1] - [N2] / 3` | | exact — left to right |
+| `sum ( [N1] ) * 100 / sum ( [N2] )` over FLOAT | | exact: the inner division is DOUBLE. The loss needs an integer (or literal) divisor — M0 `sf-prec-001` (`SUM(I1) * 100 / SUM(I2)`, NUMBER(38,0)) |
+
+Trigonometry: `sin`, `cos`, `atan` of `[N1]` equal Snowflake `SIN`, `COS`, `ATAN` (radians);
+`sql_double_op ( "PI()" )` equals `PI()`; `( [N1] * 180 ) / sql_double_op ( "PI()" )` and
+`( [N1] * sql_double_op ( "PI()" ) ) / 180` equal `DEGREES` / `RADIANS` within 1e-12.
+
+Databricks SQL reads string literals differently from Snowflake (SQL warehouse, 2026-10-07):
+`'it''s'` is `its` (two adjacent literals, concatenated — `'ab' 'cd'` is `abcd`), `'it\'s'` is
+`it's`, `'a\\b'` is `a\b`, `'a\qb'` is `aqb`, `"dq'x"` is a string. The from-Databricks translator
+now reads them so.
+
+**The translators' own output, live.** 23 Tableau and Power BI translations (trigonometry, `PI`,
+`DEGREES` / `RADIANS`, `ATAN2`, `COT`, `a * b / c`, percent of total, quote-bearing filter values
+and concatenations, a both-quote literal, a backslash) imported and matched the Snowflake value
+on every row (`runs/2026-10-07-probe-tableau-powerbi-forms.json`). There is no Tableau or Power BI
+oracle, so the SQL is the hand-written equivalent of each source formula.

@@ -15,6 +15,17 @@ ThoughtSpot models.
 
 ---
 
+## String literals and `a * b / c` (BL-365, ts-cli 0.165.0)
+
+ThoughtSpot reads a doubled quote in a single-quoted literal as **two** quotes (`'it''s'` is
+`it''s`), its backslash escape fails before a space, and it reads `a * b / c` as
+`a * ( b / c )` — with a division of two integers fixed-point at scale 6 (live, se-thoughtspot
+2026-10-07; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-literals)).
+So in the from-direction a Databricks literal is decoded (`\'` is a quote, `\\` a backslash; any other escape is refused; `'O''Brien'` is two **adjacent** literals, `OBrien`, as Databricks reads it — live 2026-10-07), a quote-bearing literal in a `sql_*_op` or `LIKE` template is bound as `{1}` rather than inlined; in the to-direction a ThoughtSpot literal is read as ThoughtSpot reads it and written with `\'`, a literal holding a quote is emitted **double-quoted** (`"O'Brien"`), a
+backslash doubled, and every product under a division bracketed (`( a * b ) / c`) — the
+translator's last step, `formula_text.ts_finalize_formula`. Copying `'O''Brien'` across was a silent
+wrong answer.
+
 ## Translation Decision Flowchart
 
 ```
@@ -880,7 +891,7 @@ formula equivalents:
 | `a \|\| b \|\| c` | `concat ( a , b , c )` — NULL-propagating in both; a chain mixed with another operator is refused. `concat` takes Text only, so a numeric operand fails at import (BL-362) |
 | `FLOOR(x)` / `CEIL(x)` / `CEILING(x)` | `floor ( x )` / `ceil ( x )` |
 | `FLOOR(x, s)` / `CEIL(x, s)` / `CEILING(x, s)`, literal `s` | `s > 0`: `( floor ( x * 10^s + 0.000000001 ) / 10^s )` and `( ceil ( x * 10^s - 0.000000001 ) / 10^s )`; `s < 0`: `( floor ( x / 10^-s + 0.000000001 ) * 10^-s )` (`ceil` with `-`); `s = 0`: `floor ( x )`. Databricks floors a DOUBLE in DECIMAL (`floor(0.29D, 2)` = 0.29, `ceil(1.1D, 2)` = 1.10, live 2026-10-07) while ThoughtSpot's `0.29 * 100` is 28.999999999999996, so the scaled value is **nudged** 1e-9 toward the step it may have just missed, then divided back by the integer factor. **Corrected after the #578 review:** the first form snapped with `round ( … , 0.000000001 )`, which compiles to `1.0E-9 * ROUND(v / 1.0E-9)` and lands one ulp above the integer, so `CEIL(3.0, 1)` gave 3.1 (about 10% of on-step values); and `* 10^-s` added noise (0.30000000000000004). Residual: a value within 1e-9 (scaled) of a step is moved onto it. A non-literal or \|s\| > 15 scale is refused. **Fixed ts-cli 0.163.0 (BL-361)** — the scale was kept on the one-argument `floor` / `ceil` and rejected at import. BL-217: the Excel translator is moving to the same algorithm (#577) |
-| `x LIKE 'p'` / `ILIKE` / `RLIKE`, and `NOT LIKE …` | `sql_bool_op ( "{0} LIKE 'p'" , x )` — the warehouse's own operator, so `LIKE` stays **case-sensitive** (no BL-333 divergence) and `RLIKE` keeps Java regex. A non-literal pattern, `ESCAPE`, or a pattern holding a double quote, a brace or a backslash is refused. A bare column named `ILIKE` or `RLIKE` (not followed by a pattern) still resolves as a column (BL-362) |
+| `x LIKE 'p'` / `ILIKE` / `RLIKE`, and `NOT LIKE …` | `sql_bool_op ( "{0} LIKE 'p'" , x )` — the warehouse's own operator, so `LIKE` stays **case-sensitive** (no BL-333 divergence) and `RLIKE` keeps Java regex. A non-literal pattern, `ESCAPE`, or a pattern holding a double quote, a brace or a backslash is refused; a pattern holding a quote is bound, `sql_bool_op ( "{0} LIKE {1}" , x , "O'B%" )` (BL-365). A bare column named `ILIKE` or `RLIKE` (not followed by a pattern) still resolves as a column (BL-362) |
 | `INSTR(s, sub)` | `sql_int_op ( "instr({0}, 'sub')" , s )` — case-sensitive, 1-based, 0 when absent; `strpos` is case-insensitive (BL-333). Row-level only (BL-362) |
 | `concat_ws(sep, a, b, …)` | `sql_string_op ( "concat_ws('-', {0}, {1})" , a , b )` — `concat_ws` **skips** NULL arguments (`concat_ws('-', 'a', NULL, 'b')` = `a-b`), `concat` does not. Row-level only (BL-362) |
 | `BROUND(x, d)` | `sql_double_op ( "bround({0}, 0)" , x )` — HALF_EVEN, which no native function does. Row-level only (BL-362) |

@@ -75,6 +75,9 @@ Use this as the canonical limitations reference.
 | 47 | `x [NOT] LIKE / ILIKE / RLIKE / REGEXP 'p'` | `sql_bool_op ( "{0} LIKE 'p'" , x )` | Snowflake's own operator, so `LIKE` stays case-sensitive; literal pattern only (BL-362, M0 `sf-fix-018..020`) |
 | 48 | `ZEROIFNULL(x)` | `ifnull ( x , 0 )` | **Fixed ts-cli 0.163.0 (BL-226):** it was the uncatalogued `zeroifnull` |
 | 49 | `a DIV b` and any identifier after an operand | refused (NEEDS_REVIEW / `skipped[]`) | Snowflake has no `DIV` operator; an unknown keyword operator is never read as a column (BL-360) |
+| 50 | A string literal holding a quote (`O'Brien`) — `'O''Brien'` or `'O\'Brien'` | `"O'Brien"` — ThoughtSpot's double-quoted literal; a backslash is doubled; both quote kinds → `concat` of the two forms | **Fixed ts-cli 0.165.0 (BL-365):** the literal was copied as `'O''Brien'`, which ThoughtSpot reads as two quotes — a silent wrong answer (live 2026-10-07, probe record §7). `formula_text.ts_string_literal`. Snowflake's `''` and `\'`, `\\`, `\"` decode; any other backslash escape is refused. A quote-bearing literal in a `sql_*_op` or `LIKE` template is **bound** (`{1}`), not inlined (M0 `sf-quote-001..007`) |
+| 51 | `a * b / c` | `( a * b ) / c` | **Fixed ts-cli 0.165.0 (BL-365):** ThoughtSpot reads `a * b / c` as `a * ( b / c )`, and a division of two integers is fixed-point at scale 6 in Snowflake (`[n] * 4 / 3` = 3.999999). Every product under a division is bracketed (`formula_text.ts_finalize_formula`). M0 `sf-prec-001..003` |
+| 52 | `SIN` / `COS` / `TAN` / `ASIN` / `ACOS` / `ATAN` / `COT` / `ATAN2` / `PI` / `DEGREES` / `RADIANS` | `sin ( x )` …, `( 1 / tan ( x ) )`, `sql_double_op ( "ATAN2({0}, {1})" , y , x )`, `sql_double_op ( "PI()" )`, `( ( x * 180 ) / sql_double_op ( "PI()" ) )` | **New ts-cli 0.165.0 (BL-364):** radians on both sides (live 2026-10-07). Was refused. ATAN2 row-level only. M0 `sf-trig-001..007` |
 
 ### Verified Queries and Metadata
 

@@ -1,0 +1,1554 @@
+{
+ "run": {
+  "date": "2026-10-07T02:10:44+00:00",
+  "profile": "se-thoughtspot",
+  "connection": "APJ_TAB",
+  "sf_profile": "ThoughtSpot Partner (AP)",
+  "warehouse": "snowflake",
+  "dbx_profile": null,
+  "warehouse_table": "AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358",
+  "ts_table": "ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_TABLE_DELETE_ME",
+  "ts_model": "ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_DELETE_ME",
+  "run_start_ms": 1791339044447,
+  "cases_file": "/private/tmp/claude-501/-Users-damianwaldron-Dev-ts-thoughtspot-agent-skills/853faa8b-9dbf-4548-97b2-3f3c6659b76b/scratchpad/xt.SGShz5/probe/probe3.jsonl",
+  "cases_sha256": "12dff349d33d4ff3d027ccce5c29389af7c9727a5133da5470c74d477a215bc8",
+  "translator_version": "ts-cli 0.164.0",
+  "git": {
+   "sha": "665b17bbb4be4a4b411a5689180216b3b7924d76",
+   "dirty": false
+  },
+  "phases": {
+   "load": 1.2,
+   "oracle": 1.8,
+   "translate": 0.0,
+   "ts_import": 4.0,
+   "agentql": 10.2,
+   "teardown": 2.3
+  },
+  "orphans": [],
+  "warehouse_auth": null,
+  "warehouse_orphans": [],
+  "session": {
+   "TIMEZONE": [
+    [
+     "TIMEZONE",
+     "UTC",
+     "America/Los_Angeles",
+     "SESSION",
+     "time zone",
+     "STRING"
+    ]
+   ]
+  },
+  "cleanup": {
+   "ts_confirmed_absent": true,
+   "remaining": [],
+   "not_owned": [],
+   "errors": [],
+   "delete_outcomes": {
+    "f0b1ce76-1e64-4869-b1c6-0968814c2d60": "deleted",
+    "16ae3d15-eafb-46c0-be36-87029b64a510": "deleted"
+   },
+   "warehouse_confirmed_absent": true
+  },
+  "runtime_s": 23.5,
+  "oracle_drift": [],
+  "counts": {
+   "MISMATCH": 2,
+   "RUN_FAILED": 0,
+   "IMPORT_FAILED": 0,
+   "TRANSLATE_FAILED": 0,
+   "ERROR_EQUIV": 0,
+   "ORACLE_FAILED": 0,
+   "MATCH": 6
+  }
+ },
+ "cases": [
+  {
+   "id": "d-bs2",
+   "fixture": "fixture-probeq.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, ('a\\\\''b') AS V FROM AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358 ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "2": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "3": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "4": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "5": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "6": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "7": {
+      "t": "str",
+      "v": "a\\'b"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "formula": "\"a\\\\'b\"",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_d_bs2\" AS \"v\" FROM \"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_d_bs2\" LIMIT 1000",
+    "sql": "SELECT \n  \"ta_1\".\"ROW_ID\" \"ca_1\", \n  min('a\\\\''b') \"ca_2\"\nFROM \"AGENT_SKILLS\".\"PUBLIC\".\"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358\" \"ta_1\"\nGROUP BY \"ca_1\"\nLIMIT 1000",
+    "values": {
+     "1": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "5": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "4": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "6": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "7": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "2": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "3": {
+      "t": "str",
+      "v": "a\\'b"
+     }
+    },
+    "error": null,
+    "value_type": "CHAR"
+   },
+   "source_formula": "'a\\\\''b'",
+   "role": "row",
+   "result": {
+    "id": "d-bs2",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  },
+  {
+   "id": "d-bs1",
+   "fixture": "fixture-probeq.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, ('a\\\\''b') AS V FROM AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358 ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "2": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "3": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "4": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "5": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "6": {
+      "t": "str",
+      "v": "a\\'b"
+     },
+     "7": {
+      "t": "str",
+      "v": "a\\'b"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "formula": "\"a\\'b\"",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_d_bs1\" AS \"v\" FROM \"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_d_bs1\" LIMIT 1000",
+    "sql": "SELECT \n  \"ta_1\".\"ROW_ID\" \"ca_1\", \n  min('a''b') \"ca_2\"\nFROM \"AGENT_SKILLS\".\"PUBLIC\".\"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358\" \"ta_1\"\nGROUP BY \"ca_1\"\nLIMIT 1000",
+    "values": {
+     "2": {
+      "t": "str",
+      "v": "a'b"
+     },
+     "1": {
+      "t": "str",
+      "v": "a'b"
+     },
+     "5": {
+      "t": "str",
+      "v": "a'b"
+     },
+     "7": {
+      "t": "str",
+      "v": "a'b"
+     },
+     "3": {
+      "t": "str",
+      "v": "a'b"
+     },
+     "4": {
+      "t": "str",
+      "v": "a'b"
+     },
+     "6": {
+      "t": "str",
+      "v": "a'b"
+     }
+    },
+    "error": null,
+    "value_type": "CHAR"
+   },
+   "source_formula": "'a\\\\''b'",
+   "role": "row",
+   "result": {
+    "id": "d-bs1",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a'b"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a'b"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a'b"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a'b"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a'b"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a'b"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "str",
+       "v": "a\\'b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a'b"
+      },
+      "outcome": "VALUE_DIFF"
+     }
+    ],
+    "mismatch_kinds": [
+     "VALUE_DIFF"
+    ],
+    "silent_wrong": true,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MISMATCH",
+    "cause": {
+     "explained": false,
+     "tag": "unexplained",
+     "kind": null,
+     "backlog": null,
+     "reason": null,
+     "unexplained_keys": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7"
+     ],
+     "stale_keys": []
+    }
+   }
+  },
+  {
+   "id": "d-bsplain2",
+   "fixture": "fixture-probeq.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, ('a\\\\b') AS V FROM AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358 ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "2": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "3": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "4": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "5": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "6": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "7": {
+      "t": "str",
+      "v": "a\\b"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "formula": "\"a\\\\b\"",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_d_bsplain2\" AS \"v\" FROM \"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_d_bsplain2\" LIMIT 1000",
+    "sql": "SELECT \n  \"ta_1\".\"ROW_ID\" \"ca_1\", \n  min('a\\\\b') \"ca_2\"\nFROM \"AGENT_SKILLS\".\"PUBLIC\".\"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358\" \"ta_1\"\nGROUP BY \"ca_1\"\nLIMIT 1000",
+    "values": {
+     "4": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "6": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "2": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "3": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "7": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "1": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "5": {
+      "t": "str",
+      "v": "a\\b"
+     }
+    },
+    "error": null,
+    "value_type": "CHAR"
+   },
+   "source_formula": "'a\\\\b'",
+   "role": "row",
+   "result": {
+    "id": "d-bsplain2",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  },
+  {
+   "id": "d-bsplain1",
+   "fixture": "fixture-probeq.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, ('a\\\\b') AS V FROM AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358 ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "2": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "3": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "4": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "5": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "6": {
+      "t": "str",
+      "v": "a\\b"
+     },
+     "7": {
+      "t": "str",
+      "v": "a\\b"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "formula": "\"a\\b\"",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_d_bsplain1\" AS \"v\" FROM \"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_d_bsplain1\" LIMIT 1000",
+    "sql": "SELECT \n  \"ta_1\".\"ROW_ID\" \"ca_1\", \n  min('ab') \"ca_2\"\nFROM \"AGENT_SKILLS\".\"PUBLIC\".\"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358\" \"ta_1\"\nGROUP BY \"ca_1\"\nLIMIT 1000",
+    "values": {
+     "3": {
+      "t": "str",
+      "v": "ab"
+     },
+     "4": {
+      "t": "str",
+      "v": "ab"
+     },
+     "2": {
+      "t": "str",
+      "v": "ab"
+     },
+     "5": {
+      "t": "str",
+      "v": "ab"
+     },
+     "6": {
+      "t": "str",
+      "v": "ab"
+     },
+     "7": {
+      "t": "str",
+      "v": "ab"
+     },
+     "1": {
+      "t": "str",
+      "v": "ab"
+     }
+    },
+    "error": null,
+    "value_type": "CHAR"
+   },
+   "source_formula": "'a\\\\b'",
+   "role": "row",
+   "result": {
+    "id": "d-bsplain1",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "ab"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "ab"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "ab"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "ab"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "ab"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "ab"
+      },
+      "outcome": "VALUE_DIFF"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "str",
+       "v": "a\\b"
+      },
+      "actual": {
+       "t": "str",
+       "v": "ab"
+      },
+      "outcome": "VALUE_DIFF"
+     }
+    ],
+    "mismatch_kinds": [
+     "VALUE_DIFF"
+    ],
+    "silent_wrong": true,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MISMATCH",
+    "cause": {
+     "explained": false,
+     "tag": "unexplained",
+     "kind": null,
+     "backlog": null,
+     "reason": null,
+     "unexplained_keys": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7"
+     ],
+     "stale_keys": []
+    }
+   }
+  },
+  {
+   "id": "d-mixed",
+   "fixture": "fixture-probeq.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, (CONCAT('it''s', '\"', 'q')) AS V FROM AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358 ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "2": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "3": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "4": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "5": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "6": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "7": {
+      "t": "str",
+      "v": "it's\"q"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "formula": "concat ( \"it's\" , '\"' , 'q' )",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_d_mixed\" AS \"v\" FROM \"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_d_mixed\" LIMIT 1000",
+    "sql": "SELECT \n  \"ta_1\".\"ROW_ID\" \"ca_1\", \n  min((('it''s' || '\"') || 'q')) \"ca_2\"\nFROM \"AGENT_SKILLS\".\"PUBLIC\".\"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358\" \"ta_1\"\nGROUP BY \"ca_1\"\nLIMIT 1000",
+    "values": {
+     "4": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "3": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "6": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "7": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "2": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "5": {
+      "t": "str",
+      "v": "it's\"q"
+     },
+     "1": {
+      "t": "str",
+      "v": "it's\"q"
+     }
+    },
+    "error": null,
+    "value_type": "CHAR"
+   },
+   "source_formula": "CONCAT('it''s', '\"', 'q')",
+   "role": "row",
+   "result": {
+    "id": "d-mixed",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "actual": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "actual": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "actual": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "actual": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "actual": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "actual": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "actual": {
+       "t": "str",
+       "v": "it's\"q"
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  },
+  {
+   "id": "d-sumif",
+   "fixture": "fixture-probeq.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, (IFF(S1 = 'O''Brien', N2, 0)) AS V FROM AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358 ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "num",
+      "v": "7.0"
+     },
+     "2": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "3": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "4": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "5": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "6": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "7": {
+      "t": "num",
+      "v": "0.0"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "formula": "if ( [ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_TABLE_DELETE_ME::S1] = \"O'Brien\" ) then [ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_TABLE_DELETE_ME::N2] else 0",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_d_sumif\" AS \"v\" FROM \"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_d_sumif\" LIMIT 1000",
+    "sql": "SELECT \n  \"ta_1\".\"ROW_ID\" \"ca_1\", \n  CASE\n    WHEN LOWER(\"ta_1\".\"S1\") = 'o''brien' THEN \"ta_1\".\"N2\"\n    ELSE 0\n  END \"ca_2\"\nFROM \"AGENT_SKILLS\".\"PUBLIC\".\"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358\" \"ta_1\"\nGROUP BY \n  \"ca_1\", \n  \"ca_2\"\nLIMIT 1000",
+    "values": {
+     "1": {
+      "t": "num",
+      "v": "7.0"
+     },
+     "2": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "3": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "4": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "5": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "6": {
+      "t": "num",
+      "v": "0.0"
+     },
+     "7": {
+      "t": "num",
+      "v": "0.0"
+     }
+    },
+    "error": null,
+    "value_type": "DOUBLE"
+   },
+   "source_formula": "IFF(S1 = 'O''Brien', N2, 0)",
+   "role": "row",
+   "result": {
+    "id": "d-sumif",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "num",
+       "v": "7.0"
+      },
+      "actual": {
+       "t": "num",
+       "v": "7.0"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "actual": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "actual": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "actual": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "actual": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "actual": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "actual": {
+       "t": "num",
+       "v": "0.0"
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  },
+  {
+   "id": "d-ne",
+   "fixture": "fixture-probeq.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, (S1 != 'O''Brien') AS V FROM AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358 ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "bool",
+      "v": false
+     },
+     "2": {
+      "t": "bool",
+      "v": true
+     },
+     "3": {
+      "t": "bool",
+      "v": true
+     },
+     "4": {
+      "t": "bool",
+      "v": true
+     },
+     "5": {
+      "t": "bool",
+      "v": true
+     },
+     "6": {
+      "t": "null"
+     },
+     "7": {
+      "t": "bool",
+      "v": true
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "formula": "[ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_TABLE_DELETE_ME::S1] != \"O'Brien\"",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_d_ne\" AS \"v\" FROM \"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_d_ne\" LIMIT 1000",
+    "sql": "SELECT \n  \"ta_1\".\"ROW_ID\" \"ca_1\", \n  (LOWER(\"ta_1\".\"S1\") <> 'o''brien') \"ca_2\"\nFROM \"AGENT_SKILLS\".\"PUBLIC\".\"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358\" \"ta_1\"\nGROUP BY \n  \"ca_1\", \n  \"ca_2\"\nLIMIT 1000",
+    "values": {
+     "1": {
+      "t": "bool",
+      "v": false
+     },
+     "2": {
+      "t": "bool",
+      "v": true
+     },
+     "3": {
+      "t": "bool",
+      "v": true
+     },
+     "4": {
+      "t": "bool",
+      "v": true
+     },
+     "5": {
+      "t": "bool",
+      "v": true
+     },
+     "6": {
+      "t": "null"
+     },
+     "7": {
+      "t": "bool",
+      "v": true
+     }
+    },
+    "error": null,
+    "value_type": "BOOL"
+   },
+   "source_formula": "S1 != 'O''Brien'",
+   "role": "row",
+   "result": {
+    "id": "d-ne",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "bool",
+       "v": false
+      },
+      "actual": {
+       "t": "bool",
+       "v": false
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "bool",
+       "v": true
+      },
+      "actual": {
+       "t": "bool",
+       "v": true
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "bool",
+       "v": true
+      },
+      "actual": {
+       "t": "bool",
+       "v": true
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "bool",
+       "v": true
+      },
+      "actual": {
+       "t": "bool",
+       "v": true
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "bool",
+       "v": true
+      },
+      "actual": {
+       "t": "bool",
+       "v": true
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "bool",
+       "v": true
+      },
+      "actual": {
+       "t": "bool",
+       "v": true
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  },
+  {
+   "id": "d-sop-tmpl-arg",
+   "fixture": "fixture-probeq.json",
+   "oracle": {
+    "sql": "SELECT ROW_ID AS K, (REPLACE(S1, '''', '-')) AS V FROM AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358 ORDER BY ROW_ID",
+    "values": {
+     "1": {
+      "t": "str",
+      "v": "O-Brien"
+     },
+     "2": {
+      "t": "str",
+      "v": "OBrien"
+     },
+     "3": {
+      "t": "str",
+      "v": "O--Brien"
+     },
+     "4": {
+      "t": "str",
+      "v": "it-s"
+     },
+     "5": {
+      "t": "str",
+      "v": "O\\Brien"
+     },
+     "6": {
+      "t": "null"
+     },
+     "7": {
+      "t": "str",
+      "v": "x"
+     }
+    },
+    "error": null
+   },
+   "translation": {
+    "status": "TRANSLATED",
+    "formula": "sql_string_op ( \"REPLACE({0}, {1}, {2})\" , [ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_TABLE_DELETE_ME::S1] , \"'\" , '-' )",
+    "role": "ATTRIBUTE",
+    "agentql_wrapper": null,
+    "traps": [],
+    "notes": [],
+    "unresolved": []
+   },
+   "import_error": null,
+   "actual": {
+    "agentql": "SELECT \"t1\".\"ROW_ID\" AS \"k\", \"t1\".\"f_d_sop_tmpl_arg\" AS \"v\" FROM \"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358_DELETE_ME\" AS \"t1\" GROUP BY \"t1\".\"ROW_ID\", \"t1\".\"f_d_sop_tmpl_arg\" LIMIT 1000",
+    "sql": "SELECT \n  \"ta_1\".\"ROW_ID\" \"ca_1\", \n  REPLACE(\"ta_1\".\"S1\", '''', '-') \"ca_2\"\nFROM \"AGENT_SKILLS\".\"PUBLIC\".\"ZZ_FIDELITY_PROBEQ_20261007T021044_E7E358\" \"ta_1\"\nGROUP BY \n  \"ca_1\", \n  \"ca_2\"\nLIMIT 1000",
+    "values": {
+     "1": {
+      "t": "str",
+      "v": "O-Brien"
+     },
+     "2": {
+      "t": "str",
+      "v": "OBrien"
+     },
+     "3": {
+      "t": "str",
+      "v": "O--Brien"
+     },
+     "4": {
+      "t": "str",
+      "v": "it-s"
+     },
+     "5": {
+      "t": "str",
+      "v": "O\\Brien"
+     },
+     "6": {
+      "t": "null"
+     },
+     "7": {
+      "t": "str",
+      "v": "x"
+     }
+    },
+    "error": null,
+    "value_type": "CHAR"
+   },
+   "source_formula": "REPLACE(S1, '''', '-')",
+   "role": "row",
+   "result": {
+    "id": "d-sop-tmpl-arg",
+    "translation_status": "TRANSLATED",
+    "rows": [
+     {
+      "key": "1",
+      "expected": {
+       "t": "str",
+       "v": "O-Brien"
+      },
+      "actual": {
+       "t": "str",
+       "v": "O-Brien"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "2",
+      "expected": {
+       "t": "str",
+       "v": "OBrien"
+      },
+      "actual": {
+       "t": "str",
+       "v": "OBrien"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "3",
+      "expected": {
+       "t": "str",
+       "v": "O--Brien"
+      },
+      "actual": {
+       "t": "str",
+       "v": "O--Brien"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "4",
+      "expected": {
+       "t": "str",
+       "v": "it-s"
+      },
+      "actual": {
+       "t": "str",
+       "v": "it-s"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "5",
+      "expected": {
+       "t": "str",
+       "v": "O\\Brien"
+      },
+      "actual": {
+       "t": "str",
+       "v": "O\\Brien"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "6",
+      "expected": {
+       "t": "null"
+      },
+      "actual": {
+       "t": "null"
+      },
+      "outcome": "EQUAL"
+     },
+     {
+      "key": "7",
+      "expected": {
+       "t": "str",
+       "v": "x"
+      },
+      "actual": {
+       "t": "str",
+       "v": "x"
+      },
+      "outcome": "EQUAL"
+     }
+    ],
+    "mismatch_kinds": [],
+    "silent_wrong": false,
+    "warned": false,
+    "stale_divergence": false,
+    "detail": null,
+    "verdict": "MATCH"
+   }
+  }
+ ]
+}

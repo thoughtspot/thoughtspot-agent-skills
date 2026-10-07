@@ -1,0 +1,92 @@
+{
+ "name": "PROBEQ",
+ "description": "probe",
+ "key": "ROW_ID",
+ "group": "GRP",
+ "session": {
+  "TIMEZONE": "UTC"
+ },
+ "columns": [
+  {
+   "name": "ROW_ID",
+   "sf_type": "NUMBER(38,0)",
+   "ts_type": "INT64",
+   "column_type": "ATTRIBUTE"
+  },
+  {
+   "name": "GRP",
+   "sf_type": "VARCHAR(8)",
+   "ts_type": "VARCHAR",
+   "column_type": "ATTRIBUTE"
+  },
+  {
+   "name": "S1",
+   "sf_type": "VARCHAR(64)",
+   "ts_type": "VARCHAR",
+   "column_type": "ATTRIBUTE"
+  },
+  {
+   "name": "N1",
+   "sf_type": "FLOAT",
+   "ts_type": "DOUBLE",
+   "column_type": "MEASURE"
+  },
+  {
+   "name": "N2",
+   "sf_type": "FLOAT",
+   "ts_type": "DOUBLE",
+   "column_type": "MEASURE"
+  }
+ ],
+ "rows": [
+  {
+   "ROW_ID": 1,
+   "GRP": "A",
+   "S1": "O'Brien",
+   "N1": 3,
+   "N2": 7
+  },
+  {
+   "ROW_ID": 2,
+   "GRP": "A",
+   "S1": "OBrien",
+   "N1": 10.5,
+   "N2": 3
+  },
+  {
+   "ROW_ID": 3,
+   "GRP": "B",
+   "S1": "O''Brien",
+   "N1": -2,
+   "N2": 0.3
+  },
+  {
+   "ROW_ID": 4,
+   "GRP": "B",
+   "S1": "it's",
+   "N1": 1000000,
+   "N2": 3000000
+  },
+  {
+   "ROW_ID": 5,
+   "GRP": "B",
+   "S1": "O\\Brien",
+   "N1": 0.5,
+   "N2": 9
+  },
+  {
+   "ROW_ID": 6,
+   "GRP": "C",
+   "S1": null,
+   "N1": null,
+   "N2": 1
+  },
+  {
+   "ROW_ID": 7,
+   "GRP": "C",
+   "S1": "x",
+   "N1": 1.25,
+   "N2": -4
+  }
+ ]
+}

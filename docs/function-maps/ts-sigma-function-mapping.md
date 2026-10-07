@@ -420,25 +420,26 @@ Source: Sigma function index, "Logical Functions".
 ## Math functions
 
 Source: Sigma function index, "Math Functions". **Sigma trigonometry is in radians** (Sin
-reference page); ThoughtSpot's is in degrees (Ossie map, `SIN`), so every trig row carries
-the conversion.
+reference page), and so is ThoughtSpot's (`sin ( 30 )` compiles to `SIN(30)`, live 2026-10-07,
+probe record §7), so the trig rows are the identity. **Corrected 2026-10-07 (BL-364):** they
+converted by `180 / π` on an unprobed "ThoughtSpot is degrees" assumption.
 
 | Sigma | Class | ThoughtSpot | Via Ossie | Notes |
 |---|---|---|---|---|
 | `Abs(x)` | direct | `abs ( [x] )` | `ABS(x)` (`:342`) | |
-| `Acos(x)` | direct | `( acos ( [x] ) * 3.14159265358979 / 180 )` | not translated | ThoughtSpot returns degrees. |
-| `Asin(x)` | direct | `( asin ( [x] ) * 3.14159265358979 / 180 )` | not translated | |
-| `Atan(x)` | direct | `( atan ( [x] ) * 3.14159265358979 / 180 )` | not translated | |
+| `Acos(x)` | direct | `acos ( [x] )` | not translated | Radians on both sides (BL-364). |
+| `Asin(x)` | direct | `asin ( [x] )` | not translated | |
+| `Atan(x)` | direct | `atan ( [x] )` | not translated | |
 | `Atan2(y, x)` | passthrough | `sql_double_op ( "ATAN2({0}, {1})" , [y] , [x] )` | not translated | **Variant: `sql_double_op`.** Quadrant-aware; same reasoning as the Ossie map and Tableau map. Sigma's argument order (y, x) assumed from convention — the page was not read. |
 | `BinFixed(v, min, max, n)` | direct | `if ( [v] < [min] ) then 0 else if ( [v] >= [max] ) then [n] + 1 else floor ( ( [v] - [min] ) / ( ( [max] - [min] ) / [n] ) ) + 1` | not translated | Bins `1…n`, with `0` below and `n + 1` at or above `max`, exactly as documented. Tableau-bin precedent (Tableau map, "Tableau Bins"). |
 | `BinRange(v, b1, b2, …)` | direct | `if ( [v] < b1 ) then 0 else if ( [v] < b2 ) then 1 else … else k` | not translated | Lower-bound bins as an `if` chain. Bin numbering at the boundaries assumed lower-inclusive — flagged. |
 | `BitAnd(a, b)` | passthrough | `sql_int_op ( "BITAND({0}, {1})" , [a] , [b] )` | not translated | **Variant: `sql_int_op`.** No bitwise operators in ThoughtSpot. |
 | `BitOr(a, b)` | passthrough | `sql_int_op ( "BITOR({0}, {1})" , [a] , [b] )` | not translated | **Variant: `sql_int_op`.** |
 | `Ceiling(x, f)` | direct | `ceil ( [x] )`; with a factor, `ceil ( [x] / [f] ) * [f]` | `CEIL(x)` (`:344`); **two-argument form is wrong** — `CEIL(x, f)` means *scale* (decimal places) in Snowflake, not Sigma's multiple | Power BI map's two-argument `CEILING` decision. Sigma's sign-of-factor direction rule is matched for a positive factor; a negative factor is flagged. |
-| `Cos(x)` | direct | `cos ( [x] * 180 / 3.14159265358979 )` | not translated | Radians → degrees. |
-| `Cot(x)` | direct | `( 1 / tan ( [x] * 180 / 3.14159265358979 ) )` | not translated | Tableau map `COT`. |
-| `Degrees(x)` | direct | `[x] * 180 / 3.14159265358979` | not translated | |
-| `DistanceGlobe(lat1, lon1, lat2, lon2)` | direct | `2 * 6371 * ( asin ( sqrt ( pow ( sin ( ( [lat2] - [lat1] ) / 2 ) , 2 ) + cos ( [lat1] ) * cos ( [lat2] ) * pow ( sin ( ( [lon2] - [lon1] ) / 2 ) , 2 ) ) ) * 3.14159265358979 / 180 )` | not translated | Haversine. Coordinates are in degrees, which is what ThoughtSpot's degree trigonometry wants, so only the `asin` result converts. **Uncertain:** Sigma's earth radius and formula (haversine vs spheroidal) are not documented on the index; the result agrees to <0.5% either way. |
+| `Cos(x)` | direct | `cos ( [x] )` | not translated | Radians on both sides. |
+| `Cot(x)` | direct | `( 1 / tan ( [x] ) )` | not translated | Tableau map `COT`. |
+| `Degrees(x)` | direct | `( ( [x] * 180 ) / sql_double_op ( "PI()" ) )` | not translated | Bracketed: ThoughtSpot reads `a * b / c` as `a * ( b / c )` (BL-365). |
+| `DistanceGlobe(lat1, lon1, lat2, lon2)` | direct | `2 * 6371 * asin ( sqrt ( pow ( sin ( ( ( [lat2] - [lat1] ) * sql_double_op ( "PI()" ) ) / 360 ) , 2 ) + cos ( ( [lat1] * sql_double_op ( "PI()" ) ) / 180 ) * cos ( ( [lat2] * sql_double_op ( "PI()" ) ) / 180 ) * pow ( sin ( ( ( [lon2] - [lon1] ) * sql_double_op ( "PI()" ) ) / 360 ) , 2 ) ) )` | not translated | Haversine. Coordinates are in degrees and ThoughtSpot's trigonometry in radians, so each angle converts on the way in (`/ 2` folded into `/ 360`); `asin` returns radians, which the arc length wants. **Corrected 2026-10-07 (BL-364)** from a degrees-native form. **Uncertain:** Sigma's earth radius and formula (haversine vs spheroidal) are not documented on the index; the result agrees to <0.5% either way. |
 | `DistancePlane(x1, y1, x2, y2)` | direct | `sqrt ( pow ( [x2] - [x1] , 2 ) + pow ( [y2] - [y1] , 2 ) )` | not translated | |
 | `Div(a, b)` | direct | `if ( [a] / [b] >= 0 ) then floor ( [a] / [b] ) else ceil ( [a] / [b] )` | not translated | "Integer component of a division." **Uncertain:** Sigma does not say whether negative quotients truncate or floor; truncation (shown) is the "integer component" reading. The Tableau map's `DIV` uses `floor ( safe_divide ( ) )`, whose zero-divisor result is 0 not Null. |
 | `Exp(x)` | direct | `exp ( [x] )` | not translated | |
@@ -452,17 +453,17 @@ the conversion.
 | `Log(x, base)` | direct | `log10 ( [x] )`; base 2 → `log2 ( [x] )`; other → `safe_divide ( ln ( [x] ) , ln ( [base] ) )` | not translated | **Sigma's argument order is (value, base)** with base defaulting to 10 — the reverse of SQL `LOG(base, x)`. |
 | `Mod(a, b)` | direct | `mod ( [a] , [b] )` | `MOD(a, b)` (`:349`) | |
 | `MRound(x, f)` | direct | `round ( [x] , abs ( [f] ) )` | not translated | ThoughtSpot `round`'s second argument **is a rounding increment** (live probe, se-thoughtspot 2026-10-06 — see `Round`), which is exactly `MRound`. **The `abs ( )` is load-bearing:** the probe gave `round ( x , -2 )` = 1234 on 1234.5678 (`-2 * ROUND(x / -2)`, i.e. nearest multiple of 2), not 1200. Sigma ignores the factor's sign; its own example (`MRound(-456, 100)` → `500`) is not explained by "nearest multiple" — flagged. |
-| `Pi()` | direct | `3.14159265358979` | not translated | |
+| `Pi()` | direct | `sql_double_op ( "PI()" )` | not translated | The warehouse's double; a literal under `/` is fixed-point (BL-365). |
 | `Power(x, y)` | direct | `pow ( [x] , [y] )` | `POWER(x, y)` (`:348`) | `power` is rejected by ThoughtSpot's parser. |
-| `Radians(x)` | direct | `[x] * 3.14159265358979 / 180` | not translated | |
+| `Radians(x)` | direct | `( ( [x] * sql_double_op ( "PI()" ) ) / 180 )` | not translated | |
 | `Round(x, d)` | direct | `round ( [x] , 1 )` for `d` omitted/0; `round ( [x] , 0.01 )` for `d = 2`; `round ( [x] , 100 )` for `d = -2` | `ROUND(x, d)` (`:343`) | **The increment is `10^-d`, not `d` — settled by live probe on se-thoughtspot, 2026-10-06:** ThoughtSpot compiles `round ( x , n )` to `n * ROUND(x / NULLIF(n, 0))`; on 1234.5678, `round ( x , 0 )` = NULL, `round ( x , 2 )` = 1234, `round ( x , 0.01 )` = 1234.57, `round ( x , 10 )` = 1230, `round ( x , -2 )` = 1234. (Agrees with the Power BI map and `ts_cli/powerbi/functions.py:455-464`.) A non-literal `d` falls back to `sql_double_op ( "ROUND({0}, {1})" , [x] , [d] )` ([**E3**](#how-to-read-the-tables)). The Ossie and Tableau maps' digit-count rows are corrected by BL-331 (PR #558) — see V1. Second hop: an Ossie consumer following the Ossie map would emit `round ( [x] , 2 )` and round to the nearest 2. |
 | `RoundDown(x, d)` | direct | `floor ( [x] * 100 ) / 100` for `d = 2` | not translated | **Toward negative infinity** — the reference page's `RoundDown(-6.25417, 3) = -6.255`. `10^d` baked in for a literal `d`. Float-representation edge values (`x * 10^d` landing a hair below an integer) are a known hazard of the composition. |
 | `RoundUp(x, d)` | direct | `ceil ( [x] * 100 ) / 100` for `d = 2` | not translated | Mirror of `RoundDown`, **assumed** toward positive infinity — the page was not read; flagged. |
 | `RowAvg(a, b, …)` | direct | `( ifnull ( [a] , 0 ) + ifnull ( [b] , 0 ) ) / ( ( if ( not ( isnull ( [a] ) ) ) then 1 else 0 ) + ( if ( not ( isnull ( [b] ) ) ) then 1 else 0 ) )` | not translated | Row-wise mean ignoring nulls (assumed, by analogy with aggregate `Avg`); all-null yields a divide-by-zero → Null on Snowflake. |
 | `Sign(x)` | direct | `if ( [x] > 0 ) then 1 else if ( [x] < 0 ) then -1 else 0` | not translated | |
-| `Sin(x)` | direct | `sin ( [x] * 180 / 3.14159265358979 )` | not translated | Radians → degrees, mandatory. |
+| `Sin(x)` | direct | `sin ( [x] )` | not translated | Radians on both sides (BL-364). |
 | `Sqrt(x)` | direct | `sqrt ( [x] )` | `SQRT(x)` (`:346`) | |
-| `Tan(x)` | direct | `tan ( [x] * 180 / 3.14159265358979 )` | not translated | |
+| `Tan(x)` | direct | `tan ( [x] )` | not translated | |
 | `Trunc(x, d)` | direct | `if ( [x] >= 0 ) then floor ( [x] * 100 ) / 100 else ceil ( [x] * 100 ) / 100` for `d = 2` | not translated | Toward zero, by sign branch — the same exact composite the Tableau map uses for `INT`. **This is a deliberate departure from the Ossie map**, which rows `TRUNC` as `passthrough` because neither `floor` nor `round` alone is a substitute; the sign-branched pair is. Negative `d` zeroes integer digits: `floor ( [x] / 100 ) * 100` on the positive branch. Float caveat as `RoundDown`. |
 
 ---

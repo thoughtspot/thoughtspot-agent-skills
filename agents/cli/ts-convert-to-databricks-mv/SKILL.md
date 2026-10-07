@@ -971,6 +971,7 @@ If no (or no more models remain): the session is complete. No token cleanup need
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.7 | 2026-10-07 | **String literals are written as Databricks reads them (ts-cli v0.165.0, BL-365).** A ThoughtSpot `'it''s'` (two quotes in ThoughtSpot) was copied as `'it''s'`, which Databricks reads as `its`; a quote is now `\'`, and a double-quoted ThoughtSpot literal parses |
 | 1.4.6 | 2026-10-06 | **Shared mapping rows corrected** (BL-340, BL-342): `substr(s, start, len)` is `SUBSTRING(s, start + 1, len)` (ThoughtSpot's start is zero-based), and `diff_months` is no longer rowed as `MONTHS_BETWEEN`. The code emitter is unchanged — it already refuses `substr` |
 | 1.4.5 | 2026-10-06 | **`day_number_of_week` → `EXTRACT(DAYOFWEEK_ISO FROM d)`, never `DAYOFWEEK` (BL-334).** The shared mapping doc's TS → Databricks cell said `DAYOFWEEK(d)`, which is 1 = Sunday; ThoughtSpot is fixed 1 = Monday (live-probed 2026-10-06). The code emitter has no `day_number_of_week` entry and refuses it, so this is doc-only |
 | 1.4.4 | 2026-10-06 | **`round(x, inc)` no longer emits a silently wrong `ROUND` (ts-cli v0.156.0, BL-331).** It was a bare rename, so `round(x, 0.01)` became `ROUND(x, 0.01)`. Now a literal power-of-ten increment → `ROUND(x, d)`; any other literal → `(inc * ROUND(x / inc))`; non-literal → `(inc * ROUND(x / NULLIF(inc, 0)))`; `round(x, 0)` (NULL in ThoughtSpot) is refused as untranslatable. Coverage-matrix row 42b |

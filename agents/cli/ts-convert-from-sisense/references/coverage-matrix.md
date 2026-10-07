@@ -30,6 +30,8 @@ truth for the formula rows is `tools/ts-cli/ts_cli/sisense/functions.py`
 | `if(cond, a, b)` | Mapped | → ThoughtSpot `if (cond) then a else b` (nested for chained `if`) |
 | `isnull` / `ifnull` | Mapped | `isnull` (not `is_null`) |
 | `round(x, n)` (2-arg) | Mapped | → `round(x, 10^-n)` for a literal `n` (`2` → `0.01`, `0` → `1`, `-2` → `100`): TS's 2nd arg is a rounding **increment**, not a decimal-place count (BL-331, live-probed 2026-10-06). A non-literal `n` or a 3rd argument → NEEDS REVIEW |
+| A string literal holding a quote (`O'Brien`) | Mapped | `"O'Brien"` — ThoughtSpot's double-quoted literal; a backslash is doubled; both quote kinds → `concat` of the two forms. **Fixed ts-cli 0.165.0 (BL-365):** the literal was copied as `'O''Brien'`, which ThoughtSpot reads as two quotes — a silent wrong answer (live 2026-10-07, probe record §7). `formula_text.ts_string_literal`; a Sisense literal is read SQL-standard (`''` is one quote) |
+| `a * b / c` | Mapped | → `( a * b ) / c`. **Fixed ts-cli 0.165.0 (BL-365):** ThoughtSpot reads `a * b / c` as `a * ( b / c )`, and a division of two integers is fixed-point at scale 6 in Snowflake (`[n] * 4 / 3` = 3.999999). Every product under a division is bracketed (`formula_text.ts_finalize_formula`) |
 | Context placeholders (`[key]` → `{dim, agg}` / nested `formula`) | Mapped | resolved to `[Column]` or `agg([Column])`; nested calcs recurse |
 
 ### Data model
