@@ -235,7 +235,7 @@ are roughly ordered by value÷effort.
 | ~~BL-358~~ | ~~ThoughtSpot's queries over a Databricks connection run with non-ANSI semantics: BIGINT overflow wraps and a bad cast is NULL where an ANSI Databricks source raises (fidelity M2) — document; decide whether the translator warns~~ | DONE (2026-10-07 — documented; accepted platform semantics, translator traps) |
 | ~~BL-360~~ | ~~Databricks / Snowflake `a DIV b` — `DIV` read as a column (`[TABLE::DIV]`) and reported TRANSLATED; rejected at import (fidelity M2)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
 | ~~BL-361~~ | ~~`FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor`/`ceil`; TRANSLATED, rejected at import (fidelity M2; Snowflake too)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
-| BL-364 | to-direction `safe_divide` is inexact on NULL — Databricks `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, Snowflake `DIV0(NULL, 0)` is NULL (the inverse of BL-357) | 2026-11-30 |
+| BL-366 | to-direction `safe_divide` is inexact on NULL — Databricks `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, Snowflake `DIV0(NULL, 0)` is NULL (the inverse of BL-357) | 2026-11-30 |
 
 ### Tier 3 — Opportunistic
 
@@ -6386,7 +6386,7 @@ numbers, both on common shapes.
 
 **Resolution (2026-10-07, fix/m2-findings, ts-cli v0.163.0; live M2 + M0 re-runs, `docs/reviews/2026-10-07-fidelity-m2-databricks.md` → "After fixes").** Both items: `||` folds to `concat` in both SQL translators,
 and `x / NULLIF(y, 0)` is plain `x / y` (BL-357 — ThoughtSpot `/` is NULL-preserving; `nullif` itself
-does not exist, BL-339). The regenerated `DIV0` in the reverse leg is BL-364.
+does not exist, BL-339). The regenerated `DIV0` in the reverse leg is BL-366.
 
 ## BL-181 -- from-Snowflake classifies every fact `ATTRIBUTE`, so `facts()` returns as `dimensions()` `Tier 2`
 
@@ -13116,7 +13116,7 @@ with `ifnull ( y , 0 )`: live, `DIV0(NULL, 0)` and `DIV0NULL(NULL, 0)` are NULL 
 0, so the "keep `safe_divide` for DIV0" suggestion above was not exact. Both translators, both
 mapping docs (Snowflake "Division and zero", Databricks "safe_divide Pattern"). M2
 `dbx-arith-005`/`-012`, `dbx-agg-013`, `dbx-fix-001..004/020/021` and M0 `sf-fix-001..008` MATCH. The
-to-direction inverse is BL-364.
+to-direction inverse is BL-366.
 
 ## BL-358 — ThoughtSpot's queries over a Databricks connection run with non-ANSI semantics `Tier 2`
 
@@ -13307,7 +13307,7 @@ corpus would be executable input running with that reach.
 
 **Target:** 2026-11-15, and in any case before any third-party SQL corpus is run on Databricks.
 
-## BL-364 — To-direction `safe_divide` is not exact on NULL: Databricks `COALESCE(a / NULLIF(b, 0), 0)`, Snowflake `DIV0` `Tier 2`
+## BL-366 — To-direction `safe_divide` is not exact on NULL: Databricks `COALESCE(a / NULLIF(b, 0), 0)`, Snowflake `DIV0` `Tier 2`
 
 **Filed:** 2026-10-07. **Status:** OPEN.
 **Source:** the inverse of BL-357, found while fixing it (fix/m2-findings). Offline reading of

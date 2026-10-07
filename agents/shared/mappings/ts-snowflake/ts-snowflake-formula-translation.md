@@ -172,7 +172,7 @@ Verified 2026-07-10, SE cluster.
 
 | ThoughtSpot → Snowflake | Snowflake → ThoughtSpot |
 |---|---|
-| `safe_divide ( [a] , [b] )` → `DIV0(a, b)` — inexact only for a NULL `a` over a zero `b` (`safe_divide` 0, `DIV0` NULL; BL-364) | `DIV0(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , [b] ) )` — `DIV0(NULL, 0)` is NULL in Snowflake and `safe_divide` returns 0 there (live 2026-10-07), hence the guard (BL-357) |
+| `safe_divide ( [a] , [b] )` → `DIV0(a, b)` — inexact only for a NULL `a` over a zero `b` (`safe_divide` 0, `DIV0` NULL; BL-366) | `DIV0(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , [b] ) )` — `DIV0(NULL, 0)` is NULL in Snowflake and `safe_divide` returns 0 there (live 2026-10-07), hence the guard (BL-357) |
 | — | `DIV0NULL(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , ifnull ( [b] , 0 ) ) )` — 0 on a zero **or NULL** divisor, NULL on a NULL dividend (`DIV0NULL(1, NULL)` = 0, `DIV0NULL(NULL, 0)` = NULL, live 2026-10-07). It was `safe_divide`, NULL on a NULL divisor (BL-357) |
 | — | `a % b` → the `MOD(` row above, folded at `*` / `/` precedence (`a * b % c` is `(a * b) % c`). It was passed through as a bare `%` (BL-362) |
 | — | `a DIV b` — **Snowflake has no `DIV` operator** (it is a syntax error there); refused, never read as a column. Any identifier that follows an operand with no operator is refused (BL-360) |

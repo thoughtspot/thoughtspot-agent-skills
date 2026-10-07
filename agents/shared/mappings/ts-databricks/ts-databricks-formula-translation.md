@@ -107,7 +107,7 @@ Resolution:
 | `ln(x)` | `LN(x)` | |
 | `log2(x)` | `LOG2(x)` | |
 | `log10(x)` | `LOG10(x)` | |
-| `safe_divide(a, b)` | `COALESCE(a / NULLIF(b, 0), 0)` | No `DIV0` in Databricks. **Not exact on a NULL operand:** `safe_divide` is NULL there, the COALESCE form 0 — the inverse of BL-357, tracked as BL-364. The exact form is `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`, which is what `safe_divide` compiles to |
+| `safe_divide(a, b)` | `COALESCE(a / NULLIF(b, 0), 0)` | No `DIV0` in Databricks. **Not exact on a NULL operand:** `safe_divide` is NULL there, the COALESCE form 0 — the inverse of BL-357, tracked as BL-366. The exact form is `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`, which is what `safe_divide` compiles to |
 | `if_null(x, default)` | `COALESCE(x, default)` | |
 | `zero_if_null(x)` | `COALESCE(x, 0)` | Databricks also has `zeroifnull(x)` (live 2026-10-07) |
 | ~~`null_if_zero(x)`~~ | `NULLIF(x, 0)` | **Not a ThoughtSpot function** — rejected at import (VALIDATE_ONLY, se-thoughtspot, 2026-10-06; BL-344). The ThoughtSpot form is `if ( x = 0 ) then null else x`, which is what `mv_sql` now emits for a standalone `NULLIF(x, 0)`; the reverse emitter still reads `null_if_zero` from older TML |
@@ -776,7 +776,7 @@ division behaviours, from compiled SQL and values in formula fidelity M2 (se-tho
 
 | Direction | From | To |
 |---|---|---|
-| TS → Databricks | `safe_divide(sum(a), sum(b))` | `COALESCE(SUM(a) / NULLIF(SUM(b), 0), 0)` — inexact on a NULL operand (BL-364) |
+| TS → Databricks | `safe_divide(sum(a), sum(b))` | `COALESCE(SUM(a) / NULLIF(SUM(b), 0), 0)` — inexact on a NULL operand (BL-366) |
 | Databricks → TS | `x / NULLIF(y, 0)` (also `x / nullifzero(y)`) | `x / y` — **not `safe_divide`**, which is 0 on a zero divisor where the source is NULL (BL-357, M2 `dbx-arith-012`, `dbx-agg-013`) |
 | Databricks → TS | `COALESCE(x / NULLIF(y, 0), 0)`, `IFNULL(…, 0)`, `NVL(…, 0)`, `zeroifnull(x / NULLIF(y, 0))` | `ifnull ( safe_divide ( x , y ) , 0 )` — 0 on a zero divisor **and** on a NULL operand. `safe_divide` alone was NULL on a NULL operand (M2 `dbx-arith-005`) |
 | Databricks → TS | `COALESCE(x / NULLIF(y, 0), d)` with any other `d` | `ifnull ( x / y , d )` |
