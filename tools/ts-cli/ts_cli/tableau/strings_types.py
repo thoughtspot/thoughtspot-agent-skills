@@ -141,7 +141,9 @@ def convert_int(expr: str) -> str:
         args, end_pos = extracted
         if args:
             inner = args[0].strip()
-            replacement = f"if ( {inner} >= 0 ) then floor ( {inner} ) else ceil ( {inner} )"
+            # Parenthesised: bare, `INT(x) * 2` read as `if … else ceil ( x ) * 2` and
+            # doubled only the negative branch — a silent wrong answer (#579 review)
+            replacement = f"( if ( {inner} >= 0 ) then floor ( {inner} ) else ceil ( {inner} ) )"
             result = result[:m.start()] + replacement + result[end_pos:]
 
     return result

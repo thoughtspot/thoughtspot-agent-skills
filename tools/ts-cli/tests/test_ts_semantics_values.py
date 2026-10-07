@@ -81,6 +81,10 @@ class TSModel:
             eq = left is not None and right is not None and \
                 str(_num(left)).lower() == str(_num(right)).lower()
             return eq if t == "=" else not eq
+        if t in ("<", "<=", ">", ">="):
+            self.take()
+            a, b = _num(left), _num(self.add())
+            return {"<": a < b, "<=": a <= b, ">": a > b, ">=": a >= b}[t]
         return left
 
     def add(self):
@@ -146,6 +150,8 @@ class TSModel:
     def call(fn, args):
         if fn in ("sin", "cos", "tan", "asin", "acos", "atan"):
             return getattr(math, fn)(_num(args[0]))
+        if fn in ("floor", "ceil"):
+            return float(getattr(math, fn)(_num(args[0])))
         if fn == "concat":
             return "".join(args)
         if fn.startswith("sql_") and args[0] == "PI()":
@@ -199,6 +205,9 @@ CASES = [
     ("[x] * [y] / 3", "[x] * [y] / 3", lambda r: r["X"] * r["Y"] / 3),
     ("[n] / 3 * 7", "[n] / 3 * 7", lambda r: r["N"] / 3 * 7),
     ("[n] - 3 + 7", "[n] - 3 + 7", lambda r: r["N"] - 3 + 7),
+    # INT truncates toward zero; its if/else form must be parenthesised (#579 review)
+    ("INT([x]) * 2", None, lambda r: math.trunc(r["X"]) * 2),
+    ("2 * INT([x]) + 1", None, lambda r: 2 * math.trunc(r["X"]) + 1),
     ("IF [s] = 'O''Brien' THEN 1 ELSE 0 END", 'IF([s] = "O\'Brien", 1, 0)',
      lambda r: 1 if r["S"].lower() == "o'brien" else 0),
     ("IF [s] = \"it's\" THEN 1 ELSE 0 END", 'IF([s] = "it\'s", 1, 0)',
