@@ -229,6 +229,18 @@ an older row says (see open-items OI-2…OI-5, and probe record §7):
   both names.
 - **`concat` takes N arguments, all Text**: wrap numbers (and dates) in `to_string`, and only
   them — `to_string` rejects a Text argument.
+- **Zero only when the source asks for zero** (user decision 2026-10-07, BL-357). A SQL
+  `x / NULLIF(y, 0)` is plain `x / y`, never `safe_divide`; `COALESCE(x / NULLIF(y, 0), 0)` (and
+  `IFNULL`/`NVL`/`ZEROIFNULL`) is `ifnull ( safe_divide ( x , y ) , 0 )` — `safe_divide` alone is NULL
+  on a NULL operand; any other default is `ifnull ( x / y , d )`; Snowflake `DIV0` keeps NULL for a
+  NULL dividend. The "`safe_divide` for ratios" convention still holds for Excel ratios and for a
+  plain-division ratio whose source states no NULL intent. Mapping docs: the Snowflake "Division
+  and zero" section, the Databricks "safe_divide Pattern".
+- **Databricks sources run non-ANSI in ThoughtSpot** (BL-358): an overflow wraps, an
+  out-of-range cast clamps and a bad cast or zero divisor is NULL, where an ANSI source raises.
+  The CLI adds a note to any Databricks `CAST`, and downgrades arithmetic with a 10-digit or
+  longer integer literal to APPROXIMATED (an overflow there is a wrong number). Say so in the
+  answer.
 
 - **Case-sensitive comparison has no native form** (OI-4, BL-333): ThoughtSpot `=`,
   `contains` and `strpos` lowercase both sides. Excel `EXACT`/`FIND`, Sigma
@@ -478,6 +490,7 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.7.0 | 2026-10-07 | The Snowflake and Databricks translators it wraps (ts-cli v0.163.0, formula fidelity M2, BL-357..362): NULLIF divisions are plain `/` and zero-default ratios `ifnull ( safe_divide ( … ) , 0 )` (zero only when the source asks for zero); `DIV0` / `DIV0NULL` NULL-guarded; Databricks `BIGINT` casts 64-bit, `DECIMAL` / Snowflake `NUMBER(p,s)` / `TO_NUMBER` rounding to scale; `DIV`, `FLOOR`/`CEIL` with a scale, `%`, `\|\|`, `LIKE`/`ILIKE`/`RLIKE`, n-ary `COALESCE`, `NVL2`, `try_divide` and more translate; `ZEROIFNULL` is `ifnull`. New BL-358 traps for Databricks casts (note) and overflow-prone literals (APPROXIMATED). Takes 1.7.0 because the concurrent Excel coverage branch claims 1.6.0 |
 | 1.5.0 | 2026-10-07 | Excel / Google Sheets (ts-cli v0.161.0, formula fidelity M1, BL-346..355): a type checker over the emitted formula turns every provable type error into `NEEDS_REVIEW` (a `type check:` note) instead of an import failure reported TRANSLATED, and asks a column's type (`needs_types`, reason `typed argument`) when an integer or conversion slot depends on it. Excel's implicit coercion is written out (text dates → `to_date`, serial numbers, numbers / booleans / dates into text, numeric text into arithmetic, DOUBLE counts → `floor`, one type across `IF` / `IFERROR` branches). Fixed silent wrong answers: `CEILING.MATH` sign and mode, a zero `CEILING` significance (0, not NULL), `ROUNDUP` / `ROUNDDOWN` beyond 6 digits, a boolean joined into text (`TRUE`), a text function over a date (its serial). Constant decimal arithmetic is a documented divergence (BL-351). A DOUBLE is snapped before `ceil` / `floor`; `VALUE` of non-numeric text fails the query, so `IFERROR(VALUE())` / `ISNUMBER(VALUE())` use `TRY_TO_DOUBLE`; cross-type comparison folds, DOUBLE-to-text and slashed day/month dates are APPROXIMATED with a trap |
 | 1.4.0 | 2026-10-06 | The Snowflake and Databricks translators it wraps fix `SUBSTR` (zero-based start), `DATEDIFF(year)` and the other units, `MONTHS_BETWEEN` (pass-through) and `TO_CHAR(x, fmt)` (pass-through) — BL-340..343, BL-345, ts-cli v0.160.0. New: Snowflake `DATEDIFF(week)` / `DATEDIFF(hour)` and every Databricks 3-argument `DATEDIFF` come back as exact `sql_int_op` pass-throughs; Databricks `DATEDIFF(DAY, …)` is native `diff_days` when `--columns` types both arguments DATE. A `diff_weeks` in any translation carries a Monday-week-start trap |
 | 1.3.0 | 2026-10-06 | New Step 4c: before presenting, ask *per row or a KPI that rolls up?* when `role_ambiguous` (showing both `role_options`), and the column types listed in `needs_types` with their name-based suggestions ("yes to all suggestions" accepted); re-run with `--role` and typed `--columns`; skipped with a Model or a stated role; grouped per column / per formula in a batch (ts-cli 0.159.0). Excel / Sheets no longer ask the role up front for every formula |
