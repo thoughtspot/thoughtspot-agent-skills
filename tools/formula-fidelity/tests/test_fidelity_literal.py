@@ -355,6 +355,14 @@ INDEPENDENT_MATCHES = {
         "the TRUNC guard increment (BL-331), a code constant older than the corpus",
     ("tools/ts-cli/tests/test_round_increment.py", '"0.00000' + '1"'):
         "the same constant, asserted by the TRUNC tests",
+    # POWER(N2, 2) over the M2 fixture's N2 = -0.001: the Databricks oracle's own value, in the
+    # case file and the run evidence (M2 dbx-arith-010) — authored in-repo, not from the corpus
+    ("tools/formula-fidelity/cases/databricks/m2.jsonl", '"0.00000' + '1"'):
+        "M2 dbx-arith-010's oracle value, (-0.001)^2",
+    ("tools/formula-fidelity/runs/2026-10-07-databricks-m2.json", '"0.00000' + '1"'):
+        "the same value in the M2 run evidence",
+    ("tools/formula-fidelity/runs/2026-10-07-databricks-m2-after-fixes.json", '"0.00000' + '1"'):
+        "the same value in the M2 after-fixes run evidence",
     ("tools/ts-cli/ts_cli/qlik/data/qlik_ts_formula_map.json", "01234" + "56789"):
         "the digit alphabet of a Qlik PurgeChar mapping",
 }

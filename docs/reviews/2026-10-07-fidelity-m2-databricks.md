@@ -412,3 +412,93 @@ None.
 - commit: `49e08af5008888b7b2ae82a4ada7ed343c008154` (with local changes)
 - phases (s): load 5.1, oracle 3.9, translate 0.0, ts_import 17.0, agentql 11.9, teardown 3.3
 - cleanup: ThoughtSpot objects confirmed absent = `True`, warehouse table dropped and confirmed = `True`
+
+## After fixes (2026-10-07)
+
+*Hand-written summary; the tables are copied from the generated report of
+`tools/formula-fidelity/runs/2026-10-07-databricks-m2-after-fixes.json` (rebuildable with
+`--rebuild`). Translator: branch `fix/m2-findings` at `72b8496` (released as ts-cli 0.163.0; the
+run header still reads the pre-bump 0.161.0).*
+
+| | Before (this report) | After |
+|---|--:|--:|
+| Cases | 91 | 114 (23 new `dbx-fix-*`) |
+| Silent wrong answers | 5 | **0** |
+| — of them translator bugs | 4 (BL-357 ×3, BL-359) | **0** |
+| — of them platform (BL-358) | 1 (`dbx-arith-013`) | 0 — now **warned**: the overflow trap downgrades it to APPROXIMATED |
+| Warned wrong answers | 3 (BL-333) | 4 (the 3 BL-333 cases + `dbx-arith-013`) |
+| IMPORT_FAILED | 3 (BL-360, BL-361 ×2) | **0** |
+| TRANSLATE_FAILED (declined) | 18 | **0** |
+| ERROR_EQUIV | 2 | 3 (`dbx-fix-006` `100 DIV I1` at `I1 = 0`, tagged zero-divisor) |
+| MATCH | 60 | 107 |
+
+Non-ANSI file (`m2-nonansi.jsonl`, `runs/2026-10-07-databricks-m2-nonansi-after-fixes.json`):
+**7 of 7 MATCH** (was 6 MATCH + 1 declined). Its first after-fix run caught a defect this PR then
+fixed: `I1 % N2` became `mod ( I1 , N2 )`, which ThoughtSpot rejected at import because `mod`
+accepts INT64 only and `N2` is DOUBLE. `%` and `MOD` over a row-level column are now the
+warehouse's own `MOD` (`sql_double_op ( "MOD({0}, {1})" , … )`); over an aggregate they stay
+native (`dbx-fix-023`).
+
+**What the forms showed live.**
+- **BL-357.** `N1 / NULLIF(N2, 0)` → `N1 / N2` and `SUM(N1) / NULLIF(MIN(N2), 0)` → `sum / min` are
+  NULL on the zero divisor, as the source; `COALESCE(…, 0)`, `IFNULL(…, 0)`, `zeroifnull(…)` →
+  `ifnull ( safe_divide ( x , y ) , 0 )` are 0 on the zero divisor and on the NULL operand rows;
+  `COALESCE(…, -1)` → `ifnull ( x / y , -1 )`. All MATCH, row and aggregate.
+- **BL-359.** `CAST(N1 * 1000000 AS BIGINT)` and `AS LONG` → `sql_int_op ( "CAST({0} AS BIGINT)" , … )`
+  return 1000000000000 — `sql_int_op` is 64-bit. Over an aggregate (`dbx-fix-010`) the native
+  sign-split compiles to `FLOOR(…)` / `CEIL(…)` and returns 1000101990000 — `floor` is 64-bit too.
+  `CAST(N1 AS DECIMAL)` and `DECIMAL(10,2)` round half up, as the source.
+- **BL-360.** `I1 DIV 2`, `(I1 - 10) DIV 3` (−14 DIV 3 = −4, toward zero) and `100 DIV I1` MATCH;
+  the zero divisor is an error-equivalent (ANSI raises, ThoughtSpot NULL).
+- **BL-361.** `FLOOR(N1, -1)`, `CEIL(N1, 1)`, `FLOOR(N1, 2)` and `CEIL(N1, -2)` MATCH with the 1e-9
+  snap. `FLOOR(N1, 2)` on 99.99 is the discriminating row: Databricks' DECIMAL floor gives 99.99,
+  an unsnapped double floor 99.98.
+- **BL-362.** Every formerly declined form now translates and MATCHes: `try_divide` (row and
+  aggregate), `NVL`, `NVL2`, three-argument `COALESCE`, `nullifzero`, `zeroifnull`, `concat_ws`
+  (skips NULL), `||`, `%`, `LIKE` / `NOT LIKE` / `ILIKE` / `RLIKE` (pass-throughs, so case-sensitive —
+  the two BL-333 tags on `LIKE` and `INSTR` were dropped), `INSTR`, `trunc` (MM, YEAR, WEEK),
+  `last_day`, `bround`, `to_date(column)`.
+- **BL-358.** `dbx-arith-013` still returns the wrapped overflow — platform behaviour, documented
+  — but it is now APPROXIMATED with the overflow trap, so it counts as warned, not silent.
+  `CAST(S2 AS INT)` carries the non-ANSI cast note and stays an error-equivalent.
+
+**Cleanup.** Each run deleted its Model and Table by GUID and confirmed both absent, and dropped
+its Delta table and confirmed it. After the runs, `SHOW TABLES IN agent_skills.audit_probe LIKE
+'zz_fidelity*'` is empty and no `ZZ_FIDELITY_M2*` object exists in ThoughtSpot. A
+`ZZ_FIDELITY_M1_20261007T005551_*` Table and Model in ThoughtSpot and its Snowflake table belong to
+a concurrent M1 run (created 00:55 UTC, between this PR's runs) and were not touched.
+
+### Per-case results, changed and new cases (after fixes)
+
+| Case | Role | Source | Emitted | Status | Verdict | Keys equal |
+|---|---|---|---|---|---|--:|
+| dbx-arith-004 | row | `try_divide(N1, N2)` | `( [T::N1] / [T::N2] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-arith-005 | row | `COALESCE(N1 / NULLIF(N2, 0), 0)` | `ifnull ( safe_divide ( [T::N1] , [T::N2] ) , 0 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-arith-007 | row | `I1 DIV 2` | `( if ( [T::I1] / 2 >= 0 ) then floor ( [T::I1] / 2 ) else ceil ( [T::I1] / 2 ) )` | TRANSLATED | MATCH | 10/10 |
+| dbx-arith-008 | row | `MOD(I1, 3)` | `sql_double_op ( "MOD({0}, 3)" , [T::I1] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-arith-009 | row | `I1 % 3` | `sql_double_op ( "MOD({0}, 3)" , [T::I1] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-arith-012 | row | `N1 / NULLIF(N2, 0)` | `[T::N1] / [T::N2]` | TRANSLATED | MATCH | 10/10 |
+| dbx-arith-013 | row | `I1 + 9223372036854775800` | `[T::I1] + 9223372036854775800` | APPROXIMATED | MISMATCH | 8/10 |
+| dbx-arith-014 | row | `CAST(S2 AS INT)` | `to_integer ( [T::S2] )` | TRANSLATED | ERROR_EQUIV | 1/10 |
+| dbx-round-005 | row | `BROUND(N2, 0)` | `sql_double_op ( "bround({0}, 0)" , [T::N2] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-round-006 | row | `FLOOR(N1, -1)` | `( floor ( round ( [T::N1] / 10 , 0.000000001 ) ) * 10 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-round-007 | row | `CEIL(N1, 1)` | `( ceil ( round ( [T::N1] * 10 , 0.000000001 ) ) * 0.1 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-round-008 | row | `CAST(N1 AS BIGINT)` | `sql_int_op ( "CAST({0} AS BIGINT)" , [T::N1] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-round-009 | row | `CAST(N1 * 1000000 AS BIGINT)` | `sql_int_op ( "CAST({0} AS BIGINT)" , ( [T::N1] * 1000000 ) )` | TRANSLATED | MATCH | 10/10 |
+| dbx-cond-003 | row | `COALESCE(N1, N2, 0)` | `if ( [T::N1] != null ) then [T::N1] else if ( [T::N2] != null ) then [T::N2] else 0` | TRANSLATED | MATCH | 10/10 |
+| dbx-cond-004 | row | `NVL(N1, -1)` | `ifnull ( [T::N1] , - 1 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-cond-005 | row | `NULLIF(I1, 0)` | `( if ( [T::I1] = 0 ) then null else [T::I1] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-cond-006 | row | `nullifzero(I1)` | `( if ( [T::I1] = 0 ) then null else [T::I1] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-cond-007 | row | `zeroifnull(N1)` | `ifnull ( [T::N1] , 0 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-cond-008 | row | `NVL2(N1, 1, 0)` | `( if ( [T::N1] != null ) then 1 else 0 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-str-006 | row | `IF(S1 ILIKE 'a%', 1, 0)` | `if ( sql_bool_op ( "{0} ILIKE 'a%'" , [T::S1] ) ) then 1 else 0` | TRANSLATED | MATCH | 10/10 |
+| dbx-str-007 | row | `IF(S1 LIKE 'a%', 1, 0)` | `if ( sql_bool_op ( "{0} LIKE 'a%'" , [T::S1] ) ) then 1 else 0` | TRANSLATED | MATCH | 10/10 |
+| dbx-str-008 | row | `IF(S1 RLIKE '^[A-Z]', 1, 0)` | `if ( sql_bool_op ( "{0} RLIKE '^[A-Z]'" , [T::S1] ) ) then 1 else 0` | TRANSLATED | MATCH | 10/10 |
+| dbx-str-010 | row | `INSTR(S1, 'a')` | `sql_int_op ( "instr({0}, 'a')" , [T::S1] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-str-012 | row | `concat_ws('-', S1, S2)` | `sql_string_op ( "concat_ws('-', {0}, {1})" , [T::S1] , [T::S2] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-str-013 | row | `S1 \|\| S2` | `concat ( [T::S1] , [T::S2] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-date-009 | row | `trunc(D1, 'MM')` | `start_of_month ( [T::D1] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-date-015 | row | `last_day(D1)` | `add_days ( add_months ( start_of_month ( [T::D1] ) , 1 ) , -1 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-ts-010 | row | `to_date(Z1)` | `sql_date_op ( "to_date({0})" , [T::Z1] )` | TRANSLATED | MATCH | 10/10 |
+| dbx-agg-011 | aggregate | `try_divide(SUM(N1), SUM(I1))` | `( sum ( [T::N1] ) / sum ( [T::I1] ) )` | TRANSLATED | MATCH | 3/3 |
+| dbx-agg-013 | aggregate | `SUM(N1) / NULLIF(MIN(N2), 0)` | `sum ( [T::N1] ) / min ( [T::N2] )` | TRANSLATED | MATCH | 3/3 |
