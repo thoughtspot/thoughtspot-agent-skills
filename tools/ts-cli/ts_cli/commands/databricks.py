@@ -128,6 +128,8 @@ def translate_formulas_cmd(
         for ann in entry["annotations"]:
             if ann["kind"] == "sparse_data_risk":
                 typer.echo(f"WARNING: {entry['name']}: {ann['detail']}", err=True)
+    for ann in (result.get("filter") or {}).get("annotations") or []:
+        typer.echo(f"NOTE: MV Filter: {ann['detail']}", err=True)
     for skip in result["skipped"]:
         typer.echo(f"SKIPPED {skip['role']} '{skip['name']}': {skip['reason']}",
                    err=True)

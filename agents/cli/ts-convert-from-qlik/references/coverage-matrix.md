@@ -68,6 +68,8 @@ wrong-but-valid substitute. The original Qlik expression is retained for the rev
 
 ### Notes on limitations
 
+**Week start (BL-334 item 2, ts-cli 0.170.0).** Every mapped row whose output calls `start_of_week`, `day_number_of_week`, `week_number_of_*` or `diff_weeks` (`WeekStart()`, `Weekday()`) is built on a Monday week; whether a non-default Model calendar changes these functions is unverified, and `start_of_week` follows the warehouse's `WEEK_START`. The converter emits no calendar argument (the Model's calendar is the default) and flags the assumption in the measure's `mapping.json` `review_notes` with the shared `formula_week.week_start_note`. Advisory only — the row stays mapped, the status unchanged. `WeekStart()` with a **known** non-Monday first week day (its 3rd argument or `SET FirstWeekDay`) or a non-zero period offset is NEEDS REVIEW, with `week_start_mismatch_note` in the reason — `WeekStart(D, 0, 6)` was emitted as the invalid `start_of_week(D,0,6)` and reported OK. Whether a non-Monday Model calendar changes these functions' compiled SQL is still unprobed (BL-334 items 3–4).
+
 **U1–U2** are the two structural gaps most likely in a real app — Qlik's selection-state model
 (Set Analysis) and variables have no static equivalent in a ThoughtSpot model. Both are surfaced
 in the migration report rather than approximated.

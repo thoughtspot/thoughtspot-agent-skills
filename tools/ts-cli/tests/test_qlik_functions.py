@@ -113,6 +113,7 @@ _COMPOSITION_SAMPLE_ARGS = {
     "mid": ("Field", "2", "3"),
     "weekday": ("OrderDate", "0"),  # 1-arg form needs the app's FirstWeekDay
     "index": ("Email", "'@'"),
+    "weekstart": ("OrderDate",),  # unknown FirstWeekDay -> plain start_of_week + advisory
 }
 
 

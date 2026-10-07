@@ -64,6 +64,8 @@ from ts_cli.tableau.functions import (  # noqa: F401
     _DATETRUNC_UNIT_MAP,
     _FUNCTION_MAP,
     WEEK_START_ASSUMED,
+    WEEK_START_MISMATCH,
+    WEEK_DIFF_DAYS,
     _build_function_map,
     _convert_dateadd,
     _convert_datediff,
@@ -102,6 +104,8 @@ from ts_cli.tableau.lod import (  # noqa: F401
     convert_total,
 )
 from ts_cli.formula_text import ts_finalize_formula
+from ts_cli.formula_week import (
+    WEEK_DIFF_DAYS_NOTE, is_week_review_note, week_start_mismatch_note, week_start_note)
 from ts_cli.tableau.literals import (  # noqa: F401
     PLACEHOLDER_RE,
     is_string_placeholder,
@@ -282,9 +286,41 @@ def _translated_record(name: str, expr: str, column_type: str, level: int,
                        notes: dict[str, int]) -> dict:
     record = {"name": name, "expr": expr, "column_type": column_type,
               "level": level}
-    if notes.get(WEEK_START_ASSUMED):
-        record["review_notes"] = [WEEK_START_ASSUMED_NOTE]
+    record.update(week_review(expr, notes))
     return record
+
+
+def _week_stats(transform_counts: dict[str, int], translated: list[dict]) -> dict:
+    """The BL-334 week counters for ``translate_formulas``' stats."""
+    return {
+        WEEK_START_MISMATCH: sum(n for k, n in transform_counts.items()
+                                 if k.startswith(WEEK_START_MISMATCH + ":")),
+        "review_required": sum(1 for t in translated if t.get("review_required")),
+    }
+
+
+def week_review(expr: str, notes: dict[str, int]) -> dict:
+    """``review_notes`` (and ``review_required``) for a translated formula — the
+    assumed-Sunday weekday note plus the shared week notes (BL-334). A review-class
+    note (a known week-start mismatch, ``diff_days / 7``) sets ``review_required``:
+    the formula is migrated but belongs under "Formulas needing review", the
+    converter's equivalent of ``ts formula translate``'s APPROXIMATED."""
+    review = [WEEK_START_ASSUMED_NOTE] if notes.get(WEEK_START_ASSUMED) else []
+    review += [week_start_mismatch_note(
+                   "the Tableau week start (a literal start_of_week argument or the "
+                   "datasource's Week start)", key.split(":", 1)[1])
+               for key in sorted(notes) if key.startswith(WEEK_START_MISMATCH + ":")]
+    if notes.get(WEEK_DIFF_DAYS):
+        review.append(WEEK_DIFF_DAYS_NOTE)
+    week = week_start_note(expr)
+    if week:
+        review.append(week)
+    out: dict = {}
+    if review:
+        out["review_notes"] = review
+    if any(is_week_review_note(n) for n in review):
+        out["review_required"] = True
+    return out
 
 
 def translate_formulas(
@@ -301,7 +337,9 @@ def translate_formulas(
 
     ``week_start`` is the datasource's Week start (``parse_twb`` →
     ``datasources[].week_start``). A translated formula whose weekday number
-    had to ASSUME Sunday carries ``review_notes`` (BL-334).
+    had to ASSUME Sunday carries ``review_notes`` (BL-334), and so does every
+    formula calling a week-dependent function (``formula_week.week_start_note``
+    — the Monday-week-start advisory, BL-334 item 2).
 
     Input: list of formula dicts with keys: caption, formula, datatype, role, name
     Output: {
@@ -451,5 +489,6 @@ def translate_formulas(
             "ifnull_stripped": transform_counts.get("ifnull_stripped", 0),
             "agg_if_conversions": transform_counts.get("agg_if_converted", 0),
             WEEK_START_ASSUMED: transform_counts.get(WEEK_START_ASSUMED, 0),
+            **_week_stats(transform_counts, translated),
         },
     }

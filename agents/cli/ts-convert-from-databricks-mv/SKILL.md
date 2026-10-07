@@ -432,8 +432,11 @@ review both.
   date-interval windows vs ThoughtSpot row-positional `moving_sum`; numbers
   match only on data dense at the window grain), `pending_verification` (C8
   grain/offset extrapolations), `one_row_per_period`, and
-  `lod_filter_asymmetry` note. These feed the Step 10 `⚠ WINDOW` markers.
-- The `filter` entry (when present) becomes the model-level filter in Step 9.
+  `lod_filter_asymmetry` note. These feed the Step 10 `⚠ WINDOW` markers. Also surface
+  every `week_start_assumption` — the Monday-week-start advisory (`formula_week.week_start_note`, BL-334 item 2): a formula calling `start_of_week`, `day_number_of_week`, `week_number_of_*` or `diff_weeks` is built on a Monday week, and the note says what each function rests on (on Databricks `start_of_week` compiles to `date_trunc('WEEK')`, fixed to Monday, so it is exact under a Monday-start Model calendar; whether a non-default Model calendar changes any of them is unverified). No calendar argument is emitted — the Model's calendar applies. It is advisory: the formula's status does not change.
+- The `filter` entry (when present) becomes the model-level filter in Step 9. Surface its
+  `annotations[]` too (a week-dependent filter carries `week_start_assumption`; the CLI
+  also prints it as `NOTE: MV Filter:`).
 
 **Semantic caveats (live-verified):**
 
@@ -874,6 +877,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.19.0 | 2026-10-07 | **Week-dependent formulas are flagged (ts-cli v0.170.0, BL-334 item 2).** A translated entry whose formula calls `start_of_week`, `day_number_of_week`, `week_number_of_*` or `diff_weeks` (from `DATE_TRUNC('WEEK')`, `WEEKOFYEAR`, `DAYOFWEEK` …) carries a `week_start_assumption` annotation with the shared Monday-week-start advisory — computed after `MEASURE()` inlining, so a measure over a week-dependent measure is flagged — and so does the MV `filter` entry (new `annotations[]` field). No calendar argument is emitted and no formula text changes; nothing is skipped |
 | 1.18.0 | 2026-10-07 | **Quote-bearing literals, `a * b / c`, and trigonometry (ts-cli v0.165.0, BL-364, BL-365).** A `\'` literal is decoded (it was refused) and emitted double-quoted; `'it''s'` is read as Databricks does, two adjacent literals (`its`); a quote-bearing literal in a template is bound; a product under a division is bracketed; trigonometry is mapped (radians; was refused). M2 `dbx-trig-*`, `dbx-quote-*`, `dbx-prec-*` MATCH |
 | 1.17.0 | 2026-10-07 | **Formula fidelity M2 findings fixed** (BL-357, BL-359..362, ts-cli v0.163.0; live M2 re-run 0 silent wrong answers, 0 import failures, 0 declines in 114 cases). `x / NULLIF(y, 0)` is plain `x / y` (it was `safe_divide`, 0 on a zero divisor); `COALESCE(… / NULLIF(…, 0), 0)` is `ifnull ( safe_divide ( … ) , 0 )` — zero only where the source asks for zero. `CAST(… AS BIGINT/LONG)` is a 64-bit pass-through (`to_integer` is 32-bit on Databricks); `CAST(… AS DECIMAL(p,s))` rounds as the source does. `a DIV b`, `FLOOR`/`CEIL` with a scale, `%`, `\|\|`, `LIKE`/`ILIKE`/`RLIKE`, n-ary `COALESCE`, `NVL`, `NVL2`, `zeroifnull`, `nullifzero`, `try_divide`, `concat_ws`, `instr`, `bround`, `trunc`, `last_day` and `to_date(column)` now translate; an unknown keyword operator is refused instead of read as a column. Documents the non-ANSI behaviour of ThoughtSpot's Databricks queries (BL-358) |
 | 1.16.1 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |

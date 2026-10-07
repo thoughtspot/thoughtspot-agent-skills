@@ -26,6 +26,7 @@ from ts_cli.databricks.mv_expr import (
     strip_sql_comments,
 )
 from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
+from ts_cli.formula_week import week_start_note
 from ts_cli.databricks.mv_window_translate import translate_window_measure
 
 
@@ -169,7 +170,21 @@ def _entry(name: str, role: str, output_kind: str, column_type: str,
             "comment": meta.get("comment"),
             "synonyms": list(meta.get("synonyms") or []),
             "format": meta.get("format"),
-            "annotations": list(annotations or [])}
+            "annotations": _with_week_note(annotations, ts_expr)}
+
+
+#: Annotation kind carrying ``formula_week.week_start_note`` (BL-334 item 2).
+WEEK_START_KIND = "week_start_assumption"
+
+
+def _with_week_note(annotations: list[dict] | None, ts_expr: str | None) -> list[dict]:
+    """``annotations`` plus the shared Monday-week-start advisory when ``ts_expr``
+    calls a week-dependent function — a review flag, never a skip."""
+    out = list(annotations or [])
+    note = week_start_note(ts_expr, "databricks")
+    if note and not any(a.get("kind") == WEEK_START_KIND for a in out):
+        out.append({"kind": WEEK_START_KIND, "detail": note})
+    return out
 
 
 def translate_dimension(dim: dict, tables: dict) -> dict:
@@ -208,7 +223,10 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
 def translate_filter(filter_sql: str, tables: dict) -> dict:
     """Translate the MV global filter: to the MV Filter boolean formula."""
     ts = translate_sql_expr(filter_sql, make_resolver(tables))
-    return {"name": "MV Filter", "column_type": "ATTRIBUTE", "ts_expr": ts}
+    # Same annotations[] channel as translated[] entries, so the skill's review
+    # step surfaces a week-dependent filter too (BL-334 review).
+    return {"name": "MV Filter", "column_type": "ATTRIBUTE", "ts_expr": ts,
+            "annotations": _with_week_note([], ts)}
 
 
 _COLUMN_AGG = {"SUM": "SUM", "AVG": "AVERAGE", "MIN": "MIN", "MAX": "MAX",
@@ -527,6 +545,9 @@ def _inline_and_translate(m, parsed, tables, by_name, skip_names,
         return f"( {_inline_text(by_name[ref])} )"
 
     entry["ts_expr"] = _PLACEHOLDER_RE.sub(substitute, entry["ts_expr"])
+    # The week note must see the INLINED text: MEASURE(mon_rev) / 2 carries the
+    # referenced measure's start_of_week only after substitution (BL-334 review).
+    entry["annotations"] = _with_week_note(entry["annotations"], entry["ts_expr"])
     return entry
 
 

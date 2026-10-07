@@ -785,7 +785,8 @@ All translation rules come from
 ```
 
 **Surface `annotations[]` too** — each translated entry may carry review markers (🔄
-double aggregation, ⚑ ambiguous reference or skipped double aggregation). Carry them into
+double aggregation, ⚑ ambiguous reference or skipped double aggregation, and
+the Monday-week-start advisory (`formula_week.week_start_note`, BL-334 item 2): a formula calling `start_of_week`, `day_number_of_week`, `week_number_of_*` or `diff_weeks` is built on a Monday week, and the note says what each function rests on (`start_of_week` follows the warehouse's `WEEK_START`; whether a non-default Model calendar changes the others is unverified). No calendar argument is emitted — the Model's calendar applies. It is advisory: the formula's status does not change — e.g. `DATE_TRUNC('week', …)`, `WEEKOFYEAR`, `DAYOFWEEK`). Carry them into
 the Step 12 Review Flags section; they are the only signal for translations that succeeded
 but need a human check.
 
@@ -1028,6 +1029,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.28.0 | 2026-10-07 | **Week-dependent formulas are flagged (ts-cli v0.170.0, BL-334 item 2).** A translated entry whose formula calls `start_of_week`, `day_number_of_week`, `week_number_of_*` or `diff_weeks` (from `DATE_TRUNC('week')`, `WEEKOFYEAR`, `DAYOFWEEK` …) carries the shared Monday-week-start advisory in `annotations[]`. No calendar argument is emitted and no formula text changes; nothing is skipped |
 | 1.27.0 | 2026-10-07 | **Quote-bearing literals, `a * b / c`, and trigonometry (ts-cli v0.165.0, BL-364, BL-365).** A literal with a quote (`''` or `\'`) is emitted double-quoted, not copied as `'it''s'` (two quotes in ThoughtSpot); a quote-bearing literal in a pass-through or `LIKE` template is bound; a product under a division is bracketed (`SUM(I1) * 100 / SUM(I2)` lost the value at scale 6); `SIN` … `ATAN`, `COT`, `ATAN2`, `PI`, `DEGREES`, `RADIANS` are mapped (radians; were refused). M0 `sf-trig-*`, `sf-quote-*`, `sf-prec-*` MATCH |
 | 1.26.0 | 2026-10-07 | **Division, casts and operators fixed** (BL-357, BL-359..362, BL-180, BL-226, ts-cli v0.163.0; live M0 re-run 86/92 MATCH, 0 silent wrong answers, no regression). `x / NULLIF(y, 0)` is plain `x / y` (it was `safe_divide`, 0 on a zero divisor); `COALESCE`/`NVL`/`ZEROIFNULL` of a NULLIF division is `ifnull ( safe_divide ( … ) , 0 )`; `DIV0` / `DIV0NULL` keep NULL for a NULL dividend. `CAST(… AS NUMBER[(p,s)])` and `TO_NUMBER` round to their scale (they were `to_double`). `FLOOR`/`CEIL` with a scale, `\|\|` (was dropped), `%`, `LIKE`/`ILIKE`/`RLIKE` now translate; `ZEROIFNULL` is `ifnull ( x , 0 )`; `DIV` and any unknown keyword operator are refused instead of read as a column |
 | 1.25.1 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |

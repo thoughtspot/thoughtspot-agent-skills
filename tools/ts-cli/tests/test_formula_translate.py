@@ -1028,7 +1028,10 @@ class TestFidelityM0SnowflakeFixes:
         from ts_cli.formula_translate.traps import detect_traps
         traps = detect_traps("tableau", "DATEDIFF('week', [a], [b])",
                              "diff_weeks ( [T::b] , [T::a] )")
-        assert any(t.startswith("diff_weeks counts week boundaries") for t in traps)
+        # One coherent trap: the shared week note's diff_weeks clause (BL-334 review),
+        # not a second, separately worded diff_weeks line.
+        week = [t for t in traps if "diff_weeks" in t and "Monday" in t]
+        assert len(week) == 1 and "FIXED Monday" in week[0]
 
     @pytest.mark.parametrize("src", ["MONTHS_BETWEEN(b, a)", "TO_CHAR(d, 'YYYY-MM')",
                                      "SUBSTR(s, -2, 1)"])

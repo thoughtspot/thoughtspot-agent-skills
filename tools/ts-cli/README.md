@@ -3160,6 +3160,8 @@ ts snowflake translate-formulas --input parsed.json --output translated.json
 "skipped": [...], "stats": {"total", "translated", "skipped"}}`.
 Each translated entry: `{name, role, output_kind, column_type, table,
 column, ts_expr, aggregation, comment, synonyms, is_private, annotations}`.
+A formula calling a week-dependent function carries the shared Monday-week-start
+advisory (`formula_week.week_start_note`, BL-334 item 2) in `annotations`.
 Stats JSON to stdout; skipped entries and diagnostics to stderr.
 
 ---
@@ -3339,6 +3341,9 @@ n, "translated": n, "skipped": n}}`. Every dimension/measure lands in
 `translated[]` (with `ts_expr`/`table`+`column`, `aggregation`, and any
 `annotations`) or `skipped[]` (with a `reason` string) — nothing is silently
 dropped.
+A formula calling a week-dependent function carries an annotation of kind
+`week_start_assumption` (the shared Monday-week-start advisory, BL-334 item 2), computed
+after cross-measure inlining; the `filter` entry has the same `annotations` field.
 
 Exit codes: `0` — every dimension/measure was processed, whether translated
 or skipped (skips are a reported outcome via `skipped[]`, not a failure);
@@ -4368,6 +4373,15 @@ After translation three layers can lower the status:
   `NEEDS_REVIEW`, with the rejected text in `partial`;
 - *downgrade traps* — a trap meaning the output computes something else (Tableau
   `DATEDIFF('week')` → `diff_days / 7`) → `APPROXIMATED`.
+
+Advisory traps never lower the status. One of them is shared with every converter: any output
+calling `start_of_week`, `day_number_of_week`, `week_number_of_*` or `diff_weeks` carries
+`formula_week.week_start_note` — *"assumes a Monday week start (…)"* — because those follow
+the Model's calendar (Monday-start by default) and no calendar argument is emitted (BL-334
+item 2). The converters report the same string: Tableau / Qlik `review_notes`, Snowflake SV
+`annotations[]`, Databricks MV `annotations[]` kind `week_start_assumption`. Two week notes
+DO downgrade (`formula_week.WEEK_REVIEW_PREFIXES`): `diff_days ( … ) / 7` and a known
+non-Monday source week start under a Monday-based function (`week start mismatch`).
 
 A `TRANSLATED` result is deterministic translator output, not verified against ThoughtSpot:
 only `--validate` verifies.

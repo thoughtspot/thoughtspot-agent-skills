@@ -255,8 +255,14 @@ an older row says (see open-items OI-2…OI-5, and probe record §7):
   emit the `start_of_*` calendar-name argument and never ask for a calendar name. Any
   formula that assumes Monday is day one — weekday numbering, week alignment, `WEEKNUM` /
   ISO-week compositions, `NETWORKDAYS`-style arithmetic, `start_of_week` — gets the trap
-  line *"assumes a Monday week start; diverges if the Model's calendar starts on another
-  day"*. A source with an explicit fiscal or custom week/year setting (Excel `WEEKNUM`
+  line *"assumes a Monday week start (…): …"*, worded per function found (`start_of_week`
+  follows the warehouse's `WEEK_START`; `day_number_of_week` is fixed 1 = Monday, and whether a
+  non-default Model calendar changes it is unverified). The CLI emits it for any output calling
+  `start_of_week`, `day_number_of_week`, `week_number_of_year` / `_month` / `_quarter` or
+  `diff_weeks` (not `day_of_week`, `is_weekend` or `add_weeks`, which do not move with the
+  week start). It is `formula_week.week_start_note` — the **same** note the
+  `ts-convert-from-*` converters put in their reports — and it is advisory: the status stays
+  `TRANSLATED` (BL-334 item 2). For a map-only dialect (Omni, Sigma), write that same line. A source with an explicit fiscal or custom week/year setting (Excel `WEEKNUM`
   return types, Sigma/Omni fiscal settings, a DAX/Tableau fiscal year start) gets the note
   *"the week/fiscal definition comes from the Model's calendar, not from the formula"*.
 - **`diff_months` / `diff_years` count boundaries crossed** (OI-3): Jan 31 → Feb 1 = 1. Excel
@@ -513,7 +519,8 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.8.3 | 2026-10-07 | The DAX and Qlik translators it wraps (ts-cli v0.171.0, BL-375..379): DAX `NOT [x]` keeps its `NOT` and no longer reads `NOT` as a table (`[not::x]`); Qlik Set Analysis reads quoted commas, flags search strings, keeps a bracketed modifier field whole, and uses `else null` for non-sum aggregations; set operators other than `+`, `P()` / `E()`, `$(…)`, empty sets and unmapped aggregations are NEEDS_REVIEW, and a single-quoted set value adds a case-sensitivity note |
+| 1.9.1 | 2026-10-07 | The DAX and Qlik translators it wraps (ts-cli v0.171.0, BL-375..379): DAX `NOT [x]` keeps its `NOT` and no longer reads `NOT` as a table (`[not::x]`); Qlik Set Analysis reads quoted commas, flags search strings, keeps a bracketed modifier field whole, and uses `else null` for non-sum aggregations; set operators other than `+`, `P()` / `E()`, `$(…)`, empty sets and unmapped aggregations are NEEDS_REVIEW, and a single-quoted set value adds a case-sensitivity note |
+| 1.9.0 | 2026-10-07 | **One Monday-week-start trap, shared with the converters (ts-cli v0.170.0, BL-334 item 2).** The week trap is now `formula_week.week_start_note`, the note every `ts-convert-from-*` report carries, worded per function found. `diff_weeks` gets one trap instead of two; `day_of_week` (a day name) no longer fires it. Advisory — status unchanged — except a Tableau `DATETRUNC('week', d, 'sunday')` (a known non-Monday start), which is APPROXIMATED with a `week start mismatch` trap |
 | 1.8.2 | 2026-10-07 | Translator follow-ups from the #579 review (ts-cli v0.169.0): Qlik double-quoted field names are rewritten inside `qlik.functions.translate`, so the converter no longer emits them as string literals (BL-368); DAX quoted table names read a doubled apostrophe (BL-369) and an apostrophe inside a `[…]` reference no longer drops it from `references`; `COT` carries a non-downgrading NULL-at-zero trap (BL-370). After review: DAX `'Bob''s Sales'[Ship] - 'Bob''s Sales'[Order]` over DATE columns is `diff_days`; Qlik and Tableau scanners treat `[…]` as opaque (`[Bob's Sales] + [Tax]` stays numeric `+`); SQL comment stripping reads `v['a--b']` as before; unreadable Qlik double-quoted names and multi-field / multi-aggregation Set Analysis are NEEDS_REVIEW |
 | 1.8.1 | 2026-10-07 | **Every dialect: trigonometry in radians, quote-bearing literals double-quoted, `a * b / c` bracketed (ts-cli v0.165.0, BL-364, BL-365).** The Excel printer's `sql_string_op` literal form is replaced by the native `"it's"` (so a quote with a backslash, brace or double quote now translates); Snowflake / Databricks map trigonometry; ThoughtSpot → Excel reads `'it''s'` as ThoughtSpot does (two quotes) |
 | 1.8.0 | 2026-10-07 | Excel coverage pass (ts-cli v0.164.0, fidelity M1): 43 more Excel functions are translator-backed, chosen by how many corpus cases they blocked — `CHAR` / `UNICHAR` / `CODE` / `UNICODE`, `SIN` … `ATAN` (radians, the identity form; the map's degrees rule was wrong, BL-364), `ATAN2`, the hyperbolic family, `DEGREES`, `RADIANS`, `PI`, `FLOOR.MATH`, `CEILING.PRECISE`, `FLOOR.PRECISE`, `ISO.CEILING`, `TRUNC`, `EVEN`, `ODD`, `QUOTIENT`, `LOG`, `FACT`, `REPLACE`, the `B` byte variants, `FIND` / `SEARCH` with `start_num`, `TEXT` (a format-code subset), `DATE`, `ISTEXT` / `ISNONTEXT` / `ISLOGICAL`. NEEDS_REVIEW over the 2,463 eligible M1 cases fell from 70% to 33%. Fixes 1.5.0's DOUBLE precision snap, which made `ROUNDUP` / `CEILING` jump a step on exact values (3.0 → 3.1): now a 1e-9 nudge |
