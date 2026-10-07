@@ -971,6 +971,7 @@ If no (or no more models remain): the session is complete. No token cleanup need
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.8 | 2026-10-07 | **`safe_divide` is exact on NULL (ts-cli v0.167.0, BL-366).** It was emitted as `COALESCE(a / NULLIF(b, 0), 0)`, which is 0 on a NULL operand where `safe_divide` is NULL; it is now `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`, what ThoughtSpot itself compiles `safe_divide` to (0 on a zero divisor even over a NULL dividend). A compound divisor is bracketed identically in both places. The Dunder worked example's `category_contribution_ratio` changes accordingly |
 | 1.4.7 | 2026-10-07 | **String literals are written as Databricks reads them (ts-cli v0.165.0, BL-365).** A ThoughtSpot `'it''s'` (two quotes in ThoughtSpot) was copied as `'it''s'`, which Databricks reads as `its`; a quote is now `\'`, and a double-quoted ThoughtSpot literal parses |
 | 1.4.6 | 2026-10-06 | **Shared mapping rows corrected** (BL-340, BL-342): `substr(s, start, len)` is `SUBSTRING(s, start + 1, len)` (ThoughtSpot's start is zero-based), and `diff_months` is no longer rowed as `MONTHS_BETWEEN`. The code emitter is unchanged — it already refuses `substr` |
 | 1.4.5 | 2026-10-06 | **`day_number_of_week` → `EXTRACT(DAYOFWEEK_ISO FROM d)`, never `DAYOFWEEK` (BL-334).** The shared mapping doc's TS → Databricks cell said `DAYOFWEEK(d)`, which is 1 = Sunday; ThoughtSpot is fixed 1 = Monday (live-probed 2026-10-06). The code emitter has no `day_number_of_week` entry and refuses it, so this is doc-only |

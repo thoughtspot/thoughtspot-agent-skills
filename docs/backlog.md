@@ -237,7 +237,7 @@ are roughly ordered by value÷effort.
 | ~~BL-358~~ | ~~ThoughtSpot's queries over a Databricks connection run with non-ANSI semantics: BIGINT overflow wraps and a bad cast is NULL where an ANSI Databricks source raises (fidelity M2) — document; decide whether the translator warns~~ | DONE (2026-10-07 — documented; accepted platform semantics, translator traps) |
 | ~~BL-360~~ | ~~Databricks / Snowflake `a DIV b` — `DIV` read as a column (`[TABLE::DIV]`) and reported TRANSLATED; rejected at import (fidelity M2)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
 | ~~BL-361~~ | ~~`FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor`/`ceil`; TRANSLATED, rejected at import (fidelity M2; Snowflake too)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
-| BL-366 | to-direction `safe_divide` is inexact on NULL — Databricks `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, Snowflake `DIV0(NULL, 0)` is NULL (the inverse of BL-357) | 2026-11-30 |
+| ~~BL-366~~ | ~~to-direction `safe_divide` is inexact on NULL — Databricks `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, Snowflake `DIV0(NULL, 0)` is NULL (the inverse of BL-357)~~ | DONE (2026-10-07 — ts-cli v0.167.0) |
 | BL-367 | The upstream apache/ossie ThoughtSpot converter (`expressions/catalog.py`) still converts trigonometry by `180 / π` as if ThoughtSpot were in degrees — the BL-364 bug, upstream | 2026-11-15 |
 | BL-368 | Qlik converter path (`qlik.functions.translate`, no adapter): a double-quoted field name `Sum("Sales Amount")` is emitted as `sum("Sales Amount")` — now a ThoughtSpot string literal, not a column | 2026-11-15 |
 | BL-369 | Power BI: a quoted table name with an apostrophe, `'Bob''s Sales'[x]`, is mangled to `'Bob'[T::X]` | 2026-11-30 |
@@ -13426,7 +13426,7 @@ every class; the 60-case Excel set is byte-identical.
 
 ## BL-366 — To-direction `safe_divide` is not exact on NULL: Databricks `COALESCE(a / NULLIF(b, 0), 0)`, Snowflake `DIV0` `Tier 2`
 
-**Filed:** 2026-10-07. **Status:** OPEN.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (fix/bl-366-safe-divide-inverse, ts-cli 0.167.0).
 **Source:** the inverse of BL-357, found while fixing it (fix/m2-findings). Offline reading of
 `mv_emit_sql._emit_safe_divide` and both mapping docs' to-direction rows; the Snowflake
 behaviour is live (2026-10-07, `ThoughtSpot Partner (AP)`).
@@ -13447,6 +13447,27 @@ add a round-trip fidelity case. Not done in the M2 fix PR: it changes converter 
 golden tests pin, and the PR's scope is the from-direction.
 
 **Target:** 2026-11-30.
+
+**Resolution (2026-10-07, fix/bl-366-safe-divide-inverse, ts-cli 0.167.0).** Both converters emit
+the compiled form verbatim. Databricks: `mv_emit_sql._emit_safe_divide` returns
+`CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`, the divisor emitted once and its text reused, a
+binop divisor (like a binop numerator) bracketed — `safe_divide ( a , b - c )` →
+`CASE WHEN (b - c) = 0 THEN 0 ELSE a / NULLIF((b - c), 0) END`. Snowflake has no code emitter for
+formulas (the skill's Step 9 executes the map), so the fix is the map row, the skill's DDL template,
+rules and checklist, the contribution-ratio row (CLI and CoCo), the coverage matrix and the worked
+examples. Proof: a unit test evaluates the emitted SQL on SQLite over {NULL, 0, 2} × {NULL, 0, 4}
+against `safe_divide`'s probed semantics (the COALESCE form failed 4 of the 9 cells); the same grid
+run live on Snowflake (`ThoughtSpot Partner (AP)`, read-only `SELECT … FROM VALUES`) matches on every
+cell, `DIV0` differing only at (NULL, 0); and `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(…, TRUE)`
+(verify-only, nothing created; a deliberately bad identifier is rejected, so the check is real)
+accepts the form over metric aliases and inside `OVER (PARTITION BY …)` and `PARTITION BY EXCLUDING`
+windows. Round-trip fidelity cases `sf-fix-025`/`026` (M0) and `dbx-fix-032`/`033` (M2): the emitted
+SQL read back through the from-direction (`if ( [N2] = 0 ) then 0 else [N1] / [N2]`), with
+`026` dividing by `N2 * 0` so fixture row 3 is a NULL dividend over a zero divisor — 0, where `DIV0`
+is NULL. Expected values from the live Snowflake SELECT; the ThoughtSpot leg of those four cases is
+not yet run. From-direction behaviour is unchanged. Not changed: the upstream Ossie converter's
+`safe_divide` row (`docs/ossie/ts-ossie-function-mapping.md`, the converter's own composition), and the
+dated history in the to-Databricks `references/open-items.md`.
 
 ## BL-367 — The upstream ThoughtSpot converter (apache/ossie) still converts trigonometry as if ThoughtSpot were in degrees `Tier 2`
 
