@@ -14,6 +14,15 @@ Live facts these rest on (probe record §7, se-thoughtspot, 2026-10-07):
   arithmetic in the warehouse (BL-351).
 - ``FACTORIAL(FLOOR(x))`` as ``sql_double_op`` returns 25! as 1.5511210043330986E+25; as
   ``sql_int_op`` it would overflow INT64 from 21!.
+
+The reciprocal family (BL-372): ``COT`` / ``SEC`` / ``CSC`` are ``1 /`` the native function, the
+form every other translator emits for ``COT`` (BL-364); ``COTH`` / ``SECH`` / ``CSCH`` are ``1 /``
+the Snowflake hyperbolic pass-through, for the precision reason above; ``ACOT`` is the map's
+``π / 2 − atan ( x )``; ``ACOTH`` is ``ATANH(1 / x)`` in Snowflake, the argument cast to a
+double so an integer column is not divided at scale 6 (BL-365). ThoughtSpot's ``/`` is
+NULL-safe, so at a zero divisor (``COT(0)``, ``CSC(0)``, ``COTH(0)``, ``CSCH(0)``) the result is
+NULL where Excel returns ``#DIV/0!`` (BL-370): a literal zero is NEEDS_REVIEW, a column carries
+a non-downgrading trap (BL-370's posture; for ``COT`` the engine's own BL-370 trap fires).
 """
 from __future__ import annotations
 
@@ -116,6 +125,44 @@ def _fact(tr, n):
     return T.call("sql_double_op", template("FACTORIAL(FLOOR({0}))"), x)
 
 
+RECIPROCAL_ZERO_TRAP = ("{name}(0): Excel returns #DIV/0!; the translation divides by "
+                        "{inner} ( 0 ) = 0 and ThoughtSpot's division is NULL-safe, so the "
+                        "result is NULL there — BL-370")
+
+
+def _reciprocal(inner: str, sql: str = "", zero: bool = False):
+    """``1 / inner ( x )`` — native ``inner``, or ``1 / sql_double_op ( sql , x )`` when ``sql``
+    is given. ``zero``: the divisor is 0 at ``x = 0`` (cot, csc, coth, csch)."""
+    def handler(tr, n):
+        need(tr, n, 1, 1)
+        x = tr.num(n.args[0])
+        if zero:
+            if T.number_value(x) == 0:
+                tr.review(f"{n.name}(0) is #DIV/0! in Excel; ThoughtSpot's NULL-safe division "
+                          "would return NULL (BL-370)")
+            if n.name != "COT":  # COT: the engine's own BL-370 trap (formula_translate.traps)
+                tr.trap(RECIPROCAL_ZERO_TRAP.format(name=n.name, inner=inner.lower()))
+        divisor = T.call("sql_double_op", template(sql), x) if sql else T.call(inner.lower(), x)
+        return T.binop("/", T.lit_number("1"), divisor)
+    return handler
+
+
+def _acot(tr, n):
+    """``ACOT(x)`` = π/2 − atan(x): Excel's principal range (0, π) for every sign of x."""
+    need(tr, n, 1, 1)
+    x = tr.num(n.args[0])
+    half_pi = T.binop("/", T.call("sql_double_op", template("PI()")), T.lit_number("2"))
+    return T.binop("-", half_pi, T.call("atan", x))
+
+
+def _acoth(tr, n):
+    """``ACOTH(x)`` = atanh(1 / x), domain |x| > 1; the cast keeps an integer x off scale 6."""
+    need(tr, n, 1, 1)
+    x = tr.num(n.args[0])
+    _domain(tr, "ACOTH", x, lambda v: abs(v) > 1, "|x| > 1")
+    return T.call("sql_double_op", template("ATANH(1 / TO_DOUBLE({0}))"), x)
+
+
 MATH_HANDLERS = {
     "LOG": _log, "PI": _pi, "FACT": _fact, "ATAN2": _atan2,
     "SIN": _native("sin"), "COS": _native("cos"), "TAN": _native("tan"),
@@ -124,4 +171,10 @@ MATH_HANDLERS = {
     "TANH": _double_op("TANH({0})"), "ASINH": _double_op("ASINH({0})"),
     "ACOSH": _double_op("ACOSH({0})"), "ATANH": _double_op("ATANH({0})"),
     "DEGREES": _double_op("DEGREES({0})"), "RADIANS": _double_op("RADIANS({0})"),
+    "COT": _reciprocal("TAN", zero=True), "SEC": _reciprocal("COS"),
+    "CSC": _reciprocal("SIN", zero=True),
+    "COTH": _reciprocal("TANH", "TANH({0})", zero=True),
+    "SECH": _reciprocal("COSH", "COSH({0})"),
+    "CSCH": _reciprocal("SINH", "SINH({0})", zero=True),
+    "ACOT": _acot, "ACOTH": _acoth,
 }

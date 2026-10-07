@@ -338,6 +338,58 @@ def test_coercion_emits_checked_against_the_coercion_table():
     assert any("COERCION_EMITS: `nullif` is not a catalogued" in e for e in errs)
 
 
+def _with_row(excel_map: str, row: str, declines: str = "") -> str:
+    out = excel_map.replace("<!-- translator-coverage:start -->",
+                            row + "\n\n<!-- translator-coverage:start -->")
+    if declines:
+        out += f"\n<!-- translator-declines:start -->\n{declines}\n<!-- translator-declines:end -->\n"
+    return out
+
+
+_COT_ROW = "| `COT(x)` | direct | `1 / tan ( [x] )` | |"
+
+
+def test_a_translatable_row_without_a_rule_must_be_listed_as_declined():
+    """BL-372: COT was a direct row, the translator declined it, and nothing said so."""
+    errs = _c_errors(_rules(_OK_RULES), _with_row(_EXCEL_MAP, _COT_ROW))
+    assert any("translator-declines" in e and "omits ['COT']" in e for e in errs), errs
+    assert _c_errors(_rules(_OK_RULES), _with_row(_EXCEL_MAP, _COT_ROW, "`COT`")) == []
+
+
+def test_bold_and_qualified_classes_are_read():
+    passthrough = "| `RAND()` | **passthrough** | `sql_double_op ( \"RANDOM()\" )` | |"
+    downgrade = "| `RANK(x)` | direct (downgrade) | `rank ( [x] )` | |"
+    for row in (passthrough, downgrade):
+        errs = _c_errors(_rules(_OK_RULES), _with_row(_EXCEL_MAP, row))
+        assert any("translator-declines" in e for e in errs), (row, errs)
+
+
+def test_unmappable_and_structural_rows_need_no_listing():
+    for row in ("| `ROMAN(n)` | **unmappable** | — | |", "| `VLOOKUP(k, r, c)` | structural | a join | |"):
+        assert _c_errors(_rules(_OK_RULES), _with_row(_EXCEL_MAP, row)) == []
+        # … and listing one is itself an error: the list is exactly the translatable declines
+        name = row.split("`")[1].split("(")[0]
+        errs = _c_errors(_rules(_OK_RULES), _with_row(_EXCEL_MAP, row, f"`{name}`"))
+        assert any(f"not a direct/passthrough row ['{name}']" in e for e in errs), errs
+
+
+def test_a_translated_row_listed_as_declined_fails():
+    errs = _c_errors(_rules(_OK_RULES), _with_row(_EXCEL_MAP, "", "`ABS`"))
+    assert any("listed but translated or not a direct/passthrough row ['ABS']" in e for e in errs)
+
+
+def test_a_sheets_row_with_an_excel_rule_is_not_a_decline():
+    """Sheets E1: a shared name rowed in the Sheets map is translated by the Excel rule."""
+    sheets = _SHEETS_MAP.replace("<!-- translator-coverage:start -->",
+                                 "| `ABS(x)` | direct | `abs ( [x] )` | |\n"
+                                 "| `TO_TEXT(v)` | direct | `to_string ( [v] )` | |\n\n"
+                                 "<!-- translator-coverage:start -->")
+    errs = _c_errors(_rules(_OK_RULES), sheets_map=sheets)
+    assert any("sheets map" in e and "omits ['TO_TEXT']" in e for e in errs), errs
+    sheets += "\n<!-- translator-declines:start -->\n`TO_TEXT`\n<!-- translator-declines:end -->\n"
+    assert _c_errors(_rules(_OK_RULES), sheets_map=sheets) == []
+
+
 def test_real_repo_passes_requirement_c():
     """The shipped rule table and the shipped maps agree (the gate the CI runs)."""
     import check_mapping_code_sync as m
@@ -404,6 +456,8 @@ def test_unmutated_copy_passes(tmp_path):
     # 3. a rule's emits emptied while the handler still emits
     ("rules.py", '"SUM": {"map": "excel", "emits": ("sum",)}',
      '"SUM": {"map": "excel", "emits": ()}', "does not declare"),
+    # 5. (BL-372) a rule dropped while its direct row stays: a silent decline
+    ("rules.py", '    "COT": {"map": "excel", "emits": ("tan",)},\n', "", "omits ['COT']"),
     # 4. a disproved call spelled inside a string literal
     ("forward.py", 'BLANK_TRAP = (', '_BAD = "[a] / nullif ( [b] , 0 )"\nBLANK_TRAP = (',
      "string literal"),

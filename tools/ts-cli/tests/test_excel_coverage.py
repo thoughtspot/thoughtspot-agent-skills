@@ -185,6 +185,70 @@ class TestMath:
         assert "above 33" in review("=FACT(40)")
 
 
+class TestReciprocalTrig:
+    """BL-372: the map rowed COT … ACOTH as direct while the translator declined them."""
+
+    @pytest.mark.parametrize("name,expected", [
+        ("COT", "1 / tan ( [T::amt] )"),
+        ("SEC", "1 / cos ( [T::amt] )"),
+        ("CSC", "1 / sin ( [T::amt] )"),
+        ("COTH", '1 / sql_double_op ( "TANH({0})" , [T::amt] )'),
+        ("SECH", '1 / sql_double_op ( "COSH({0})" , [T::amt] )'),
+        ("CSCH", '1 / sql_double_op ( "SINH({0})" , [T::amt] )'),
+        ("ACOT", 'sql_double_op ( "PI()" ) / 2 - atan ( [T::amt] )'),
+    ])
+    def test_form(self, name, expected):
+        # radians on both sides (probe record §7, BL-364): no 180 / π anywhere
+        assert f(f"={name}([@amt])", "TRANSLATED") == expected
+
+    def test_acoth_casts_and_checks_its_domain(self):
+        assert f("=ACOTH(6)", "TRANSLATED") == \
+            'sql_double_op ( "ATANH(1 / TO_DOUBLE({0}))" , 6 )'
+        r = ok("=ACOTH([@qty])", "APPROXIMATED")      # an INT column: the cast avoids scale 6
+        assert any("#NUM!" in t for t in r.traps)
+        assert "outside" in review("=ACOTH(0.5)")
+        assert "outside" in review("=ACOTH(-1)")
+
+    @pytest.mark.parametrize("excel,value,python", [
+        # Microsoft's documented examples for each function (support.microsoft.com)
+        ("COT(30)", -0.156, lambda: 1 / math.tan(30)),
+        ("SEC(45)", 1.90359, lambda: 1 / math.cos(45)),
+        ("CSC(15)", 1.538, lambda: 1 / math.sin(15)),
+        ("COTH(2)", 1.037, lambda: 1 / math.tanh(2)),
+        ("SECH(45)", 5.73e-20, lambda: 1 / math.cosh(45)),
+        ("CSCH(1.5)", 0.4696, lambda: 1 / math.sinh(1.5)),
+        ("ACOT(2)", 0.4636, lambda: math.pi / 2 - math.atan(2)),
+        ("ACOTH(6)", 0.168, lambda: math.atanh(1 / 6)),
+    ])
+    def test_the_emitted_arithmetic_matches_excel(self, excel, value, python):
+        assert python() == pytest.approx(value, rel=2e-3), excel
+
+    def test_acot_keeps_excel_range_for_negatives(self):
+        assert math.pi / 2 - math.atan(-1) == pytest.approx(3 * math.pi / 4)  # (0, π), not atan(1/x)
+
+    @pytest.mark.parametrize("name", ["COT", "CSC", "COTH", "CSCH"])
+    def test_zero_divisor(self, name):
+        # Excel #DIV/0!; ThoughtSpot's NULL-safe division gives NULL (BL-370)
+        assert "#DIV/0!" in review(f"={name}(0)")
+        r = ok(f"={name}([@amt])", "TRANSLATED")      # informational, never a downgrade
+        if name != "COT":
+            assert any(t.startswith(f"{name}(0): Excel returns #DIV/0!") for t in r.traps)
+
+    def test_cot_zero_trap_fires_through_the_engine(self):
+        from ts_cli.formula_translate.engine import translate
+        for dialect in ("excel", "google_sheets"):
+            out = translate("=COT([@a])", dialect)
+            assert out["status"] == "TRANSLATED"
+            assert any("BL-370" in t and "Excel gives #DIV/0!" in t for t in out["traps"])
+
+    def test_no_zero_trap_where_the_divisor_cannot_be_zero(self):
+        assert ok("=SEC([@amt])").traps == [] and ok("=SECH([@amt])").traps == []
+
+    def test_precedence(self):
+        assert f("=2/COT([@amt])") == "2 / ( 1 / tan ( [T::amt] ) )"
+        assert f("=2*ACOT([@amt])") == '2 * ( sql_double_op ( "PI()" ) / 2 - atan ( [T::amt] ) )'
+
+
 # ---------------------------------------------------------------------------
 # Character codes, REPLACE, the byte variants, FIND / SEARCH start_num
 # ---------------------------------------------------------------------------

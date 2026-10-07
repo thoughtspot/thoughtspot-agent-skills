@@ -27,12 +27,22 @@ document's own; the Excel map's rules are cited as **Excel E*n***.
 **Translator-backed since ts-cli 0.158.0 (BL-339):** `ts formula translate --from google_sheets` runs
 the Excel translator (`ts_cli/excel/`) with this map's delta rules first, then the Excel map's rows
 for every name not rowed here (E1). The delta rows it applies as code are listed below and checked
-against `ts_cli/excel/rules.py` by `check_mapping_code_sync.py`; every other row of this map is
-map-backed (NEEDS_REVIEW citing the row). `QUERY` is reported as structural, never translated.
+against `ts_cli/excel/rules.py` by `check_mapping_code_sync.py`. A shared name rowed here
+without a delta rule (`ROUND`, `FLOOR`, `SEARCH`, `TEXT`, …) is translated by the Excel rule of
+that name. `QUERY` is reported as structural, never translated.
 
 <!-- translator-coverage:start -->
 `ADD` `ARRAYFORMULA` `CONCAT` `COUNTUNIQUE` `DIVIDE` `EQ` `GT` `GTE` `IFERROR` `LT` `LTE` `MINUS` `MULTIPLY` `NE` `POW` `QUERY` `REGEXEXTRACT` `REGEXMATCH` `REGEXREPLACE` `UMINUS` `UNARY_PERCENT` `UPLUS`
 <!-- translator-coverage:end -->
+
+**Translatable rows the translator declines** (BL-372): `direct` / `passthrough` rows with no
+delta rule and no Excel rule of the same name. The translator returns NEEDS_REVIEW citing the
+row, and the skill composes the answer from it by hand. `check_mapping_code_sync.py` fails if a
+translatable row is in neither place, as for the Excel map.
+
+<!-- translator-declines:start -->
+`AVERAGE.WEIGHTED` `COUNTUNIQUEIFS` `EPOCHTODATE` `ISBETWEEN` `ISDATE` `ISEMAIL` `JOIN` `SPLIT` `TO_DATE` `TO_DOLLARS` `TO_PERCENT` `TO_PURE_NUMBER` `TO_TEXT`
+<!-- translator-declines:end -->
 
 ---
 
