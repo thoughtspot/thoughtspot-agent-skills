@@ -125,7 +125,7 @@ Use this as the canonical limitations reference.
 
 ### Notes on limitations
 
-**Week start (BL-334 item 2, ts-cli 0.169.0).** Every mapped row whose output calls `start_of_week`, `day_number_of_week`, `week_number_of_*` or `diff_weeks` (`DATE_TRUNC('week')`, `WEEKOFYEAR`, `DAYOFWEEK`) is built on a Monday week; whether a non-default Model calendar changes these functions is unverified, and `start_of_week` follows the warehouse's `WEEK_START`. The converter emits no calendar argument (the Model's calendar is the default) and flags the assumption in `annotations[]` with the shared `formula_week.week_start_note`. Advisory only — the row stays mapped, the status unchanged. Whether a non-Monday Model calendar changes these functions' compiled SQL is still unprobed (BL-334 items 3–4).
+**Week start (BL-334 item 2, ts-cli 0.170.0).** Every mapped row whose output calls `start_of_week`, `day_number_of_week`, `week_number_of_*` or `diff_weeks` (`DATE_TRUNC('week')`, `WEEKOFYEAR`, `DAYOFWEEK`) is built on a Monday week; whether a non-default Model calendar changes these functions is unverified, and `start_of_week` follows the warehouse's `WEEK_START`. The converter emits no calendar argument (the Model's calendar is the default) and flags the assumption in `annotations[]` with the shared `formula_week.week_start_note`. Advisory only — the row stays mapped, the status unchanged. Whether a non-Monday Model calendar changes these functions' compiled SQL is still unprobed (BL-334 items 3–4).
 
 **L10** (`||` dropped) moved to Mapped row #46 when BL-180 closed (ts-cli 0.163.0).
 
