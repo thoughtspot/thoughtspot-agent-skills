@@ -7,10 +7,12 @@ flips a measure to an attribute, breaks a join at query time). A couple (I8, I12
 caught by the server (including under VALIDATE_ONLY) but are cheap, purely-structural
 checks worth failing on locally, without a live call, especially across a batch of
 generated TML. I15 is the misplaced-column-root-key check (BL-232): a `description` under
-`properties:` imports with status OK and is then silently discarded. Rules mirror
+`properties:` imports with status OK and is then silently discarded. I16 is cross-file
+(it needs the Table TML linted alongside the Model): a Model column `AGGREGATE` over a
+Table column that is not breaks every AgentQL/SpotQL query on it. Rules mirror
 the invariants in `agents/shared/schemas/ts-model-conversion-invariants.md`.
 
-CANONICAL-RULE-SET: I1/I2/I4/I5/I8/I12/I13/I14/I15
+CANONICAL-RULE-SET: I1/I2/I4/I5/I8/I12/I13/I14/I15/I16
     The one authoritative enumeration of what this module checks, gated by
     tools/validate/check_lint_invariant_list.py against the findings the code
     actually emits. Do not restate this set anywhere else — name the concept
@@ -590,3 +592,87 @@ def lint_cross_references(model_tml: dict, tables: dict[str, set[str]]) -> list[
     findings.extend(_check_join_targets(model_tables, ref_to_table, columns_ci))
     findings.extend(_check_column_ids(model.get("columns") or [], ref_to_table, columns_ci))
     return findings
+
+
+# --- I16: semantic-layer measure aggregation, Model vs Table ------------------
+
+def table_aggregations(table: dict) -> dict[str, tuple]:
+    """``{column name or db_column_name, lower-case: (column_type, aggregation)}`` for one
+    parsed ``table:`` body. Both names are indexed, as a Model ``column_id`` may use either."""
+    out: dict[str, tuple] = {}
+    for c in table.get("columns") or []:
+        if not isinstance(c, dict):
+            continue
+        p = c.get("properties") or {}
+        role = (p.get("column_type"), p.get("aggregation"))
+        for key in (c.get("name"), c.get("db_column_name")):
+            if key:
+                out.setdefault(str(key).lower(), role)
+    return out
+
+
+def lint_model_table_aggregation(model_tml: dict, tables: dict[str, dict]) -> list[str]:
+    """I16 — a Model column marked ``MEASURE``/``AGGREGATE`` must sit on a Table column
+    that is ``AGGREGATE`` too.
+
+    ``AGGREGATE`` is how a semantic-layer measure (Metric View, Semantic View) is
+    passed through to the platform's own measure function. UI search reads the Model's
+    aggregation, but AgentQL / SpotQL reads the **Table's**: with the Table at ``SUM`` an
+    ``AGG()`` query is refused at generation and a ``SUM()`` query is sent as plain
+    ``SUM(col)``, which the platform rejects (Databricks:
+    ``METRIC_VIEW_MISSING_MEASURE_FUNCTION``). Verified 2026-10-07 on two DBX Models
+    whose search worked while every AgentQL aggregate failed; setting the Tables to
+    ``AGGREGATE`` fixed both.
+
+    The reverse — Table ``AGGREGATE``, Model not — is deliberately NOT flagged: the same
+    day a Model ATTRIBUTE over an ``AGGREGATE`` Table column searched correctly, so there
+    is no observed failure to gate on. A Model column with no explicit ``aggregation`` is
+    not flagged either (it may be inheriting).
+
+    ``tables`` maps each Table name in the batch to :func:`table_aggregations` output.
+    Tables not in the batch are skipped — there is nothing to compare against. Pure.
+    """
+    model = model_tml.get("model") if isinstance(model_tml, dict) else None
+    if not isinstance(model, dict):
+        return []
+    tables_ci = {name.lower(): cols for name, cols in tables.items()}
+    ref_to_table = _model_table_refs(model)
+    findings: list[str] = []
+    for c in model.get("columns") or []:
+        finding = _i16_finding(c, ref_to_table, tables_ci)
+        if finding:
+            findings.append(finding)
+    return findings
+
+
+def _model_table_refs(model: dict) -> dict[str, str]:
+    """Every name a model_tables entry is addressed by (name, alias) -> its name, lower-case."""
+    refs: dict[str, str] = {}
+    for t in model.get("model_tables") or []:
+        if isinstance(t, dict) and t.get("name"):
+            refs.setdefault(t["name"].lower(), t["name"].lower())
+            if t.get("alias"):
+                refs.setdefault(t["alias"].lower(), t["name"].lower())
+    return refs
+
+
+def _i16_finding(col: Any, ref_to_table: dict[str, str], tables_ci: dict[str, dict]) -> str | None:
+    """The I16 finding for one Model column, or None."""
+    if not isinstance(col, dict):
+        return None
+    cid = col.get("column_id")
+    if (col.get("properties") or {}).get("aggregation") != "AGGREGATE" \
+            or not isinstance(cid, str) or "::" not in cid:
+        return None
+    tpart, cpart = cid.split("::", 1)
+    tcols = tables_ci.get(ref_to_table.get(tpart.lower(), tpart.lower()))
+    role = tcols.get(cpart.lower()) if tcols is not None else None
+    if role is None or role[1] == "AGGREGATE":
+        return None
+    table_role = "/".join(x for x in role if x) or "no role"
+    return (
+        f"I16: Model column '{col.get('name', cid)}' is MEASURE/AGGREGATE but Table column "
+        f"'{cid}' is {table_role} — AgentQL/SpotQL uses the Table's aggregation, so every "
+        f"aggregate query on it fails while UI search works. Set the Table column to "
+        f"MEASURE/AGGREGATE as well."
+    )

@@ -113,3 +113,31 @@ skill can work around beyond telling the user not to mix the two in one SpotQL q
 Pinned as `known-product-bug` in querygen `tests/SIMBA/snowflake/facts/` (PR #150).
 
 **Status: DEFERRED — fix belongs to the semantic-SQL query-gen change.**
+
+## 8 — AgentQL reads a measure's aggregation from the Table, search from the Model — VERIFIED 2026-10-07
+
+Two hand-built Models in the DBX Org of `nebula-ts-semview` — "Semantic SQL - Sale (Metric
+Views)" (one Table over a composed Metric View) and "DM Sales & Inventory (Metric Views
+Joined)" (six Metric Views and two tables joined in ThoughtSpot) — had every Metric View
+measure `MEASURE`/`SUM` on the **Table** and `MEASURE`/`AGGREGATE` on the **Model**.
+
+| Path | Result before the fix |
+|---|---|
+| UI search (`searchdata`) | Correct — total revenue 594,188,083.19, matching the native star-schema Model |
+| AgentQL `AGG("Total Revenue")` | `QUERY_GEN_ERROR` — `AGG()` on a column the query spec carried as non-`AGGREGATE` |
+| AgentQL `SUM("Total Revenue")` | Sent as plain `SUM(total_revenue)`; Databricks `METRIC_VIEW_MISSING_MEASURE_FUNCTION` |
+
+A third Model, "Semantic SQL - Sales " (built by `ts link build`, `AGGREGATE` at both levels),
+worked on every path. Fix applied: the seven Metric View Tables' measures — exactly the
+columns `DESCRIBE TABLE EXTENDED … AS JSON` flags `is_measure` — set to `AGGREGATE` in place
+(GUIDs kept). Afterwards all AgentQL baseline queries matched across the four Models, and the
+60-case AgentQL corpus matched the native Model on every comparable case. The reverse (Table
+`AGGREGATE`, Model `ATTRIBUTE`, on "Line Count") searched correctly, so only the
+Model-`AGGREGATE`-over-non-`AGGREGATE`-Table direction is a defect.
+
+`ts link build` is unaffected (it writes both levels). Enforced for hand-built/edited Models
+by `ts tml lint` I16 when the Tables are linted with the Model (ts-cli 0.166.0). The product
+inconsistency itself — AgentQL and search reading different levels — belongs to the
+semantic-SQL query-gen change, like #7.
+
+**Status: VERIFIED 2026-10-07.**
