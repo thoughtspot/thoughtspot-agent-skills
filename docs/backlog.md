@@ -242,6 +242,10 @@ are roughly ordered by value÷effort.
 | BL-368 | Qlik converter path (`qlik.functions.translate`, no adapter): a double-quoted field name `Sum("Sales Amount")` is emitted as `sum("Sales Amount")` — now a ThoughtSpot string literal, not a column | 2026-11-15 |
 | BL-369 | Power BI: a quoted table name with an apostrophe, `'Bob''s Sales'[x]`, is mangled to `'Bob'[T::X]` | 2026-11-30 |
 | BL-370 | `COT(0)` (Tableau, Snowflake, Databricks) is `1 / tan ( 0 )` = NULL in ThoughtSpot, where the source errors or returns infinity — an undocumented divergence | 2026-11-30 |
+| BL-371 | Upstream apache/ossie `reverse.py:273` renders `safe_divide` as `COALESCE(a / NULLIF(b, 0), 0)`, 0 on a NULL operand — the upstream copy of BL-366. HELD (all upstream Ossie work is on hold) | when upstream work resumes |
+| BL-372 | Excel / Sheets translator returns `COT` as NEEDS_REVIEW while the Excel map row says direct | 2026-11-30 |
+| BL-373 | Exact non-Monday week truncation: where the source week start is known, emit `add_days ( start_of_week ( add_days ( d , k ) ) , -k )` instead of downgrading (BL-334 item 2 follow-up; needs a live probe) | 2026-11-30 |
+| BL-374 | From-direction recognition of `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` back to `safe_divide ( a , b )`, so TS → SQL → TS round trips keep the idiom (the value is already exact) | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -13527,3 +13531,65 @@ error-equivalent, not a wrong number, but undocumented in the maps.
 **Fix.** Document in the three mapping rows (and the Excel / Sigma / Omni `COT` rows), or add a trap.
 
 **Target:** 2026-11-30.
+
+## BL-371 — Upstream apache/ossie converter renders `safe_divide` as `COALESCE(a / NULLIF(b, 0), 0)`, 0 on a NULL operand `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN — HELD (the user holds all upstream Ossie work).
+**Source:** independent review of #581 (BL-366).
+
+**The facts.** The upstream ThoughtSpot converter's reverse direction (`reverse.py:273`, apache/ossie)
+renders `safe_divide ( a , b )` as `COALESCE(a / NULLIF(b, 0), 0)`. ThoughtSpot compiles `safe_divide`
+to `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` (probe record §7), so the upstream form is **0** on
+a NULL operand where `safe_divide` is NULL — the same bug BL-366 fixed in this repo's converters.
+`docs/ossie/ts-ossie-function-mapping.md` now says so (it claimed the COALESCE preserved the result).
+`check_ossie_mapping_sync.py` compares classes, not forms, so it does not flag this.
+
+**Fix.** Upstream PR: emit the compiled `CASE` form (bracket a compound divisor, reused verbatim in both
+places), with a NULL / zero grid test; re-run `tools/ossie-roundtrip`. Never vendor the converter here.
+
+**Target:** when upstream Ossie work resumes.
+
+## BL-372 — Excel / Sheets translator returns `COT` as NEEDS_REVIEW while the Excel map row says direct `Tier 3`
+
+**Filed:** 2026-10-07. **Status:** OPEN. **Source:** found during the #583 work.
+
+**The facts.** The Excel function map rows `COT` as a direct translation, but the Excel / Google Sheets
+translator (`ts_cli/excel/`) returns it as NEEDS_REVIEW. The map and the translator disagree, so the
+CLI path is more conservative than the documented rule. Check why requirement C of
+`check_mapping_code_sync.py` (rule-table keys vs the maps' rows) did not flag the disagreement.
+
+**Fix.** Either add a `COT` rule (`( 1 / tan ( x ) )`, radians, with the BL-370 `COT(0)` note) or
+correct the map row to say the translator declines it.
+
+**Target:** 2026-11-30.
+
+## BL-373 — Exact non-Monday week truncation where the source week start is known `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN — needs a live probe. **Source:** BL-334 item 2 follow-up.
+
+**The facts.** Week truncations from sources whose week start is not Monday are downgraded today
+(BL-334). Where the source states its week start — Tableau's `week_start` / an explicit argument,
+Qlik's `FirstWeekDay` — an exact form is available:
+`add_days ( start_of_week ( add_days ( d , k ) ) , -k )`, shifting by the offset `k` from Monday.
+
+**Fix.** Probe live first: `start_of_week` compiles to `WEEK_START`-dependent SQL (BL-334), so confirm
+the shift is exact under the cluster's setting. Then emit the form in the Tableau and Qlik translators
+(through `formula_common`, BL-217) instead of downgrading; keep the downgrade where the week start is
+unknown.
+
+**Target:** 2026-11-30.
+
+## BL-374 — From-direction recognition of the compiled `safe_divide` form `Tier 3`
+
+**Filed:** 2026-10-07. **Status:** OPEN. **Source:** BL-366 (PR #581).
+
+**The facts.** Since BL-366 both to-direction converters emit `safe_divide ( a , b )` as
+`CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`. The from-direction translators read that back as
+`if ( [b] = 0 ) then 0 else [a] / [b]` — exact in value (round-trip cases `sf-fix-025`/`026`,
+`dbx-fix-032`/`033`), but the `safe_divide` idiom is lost on a TS → SQL → TS round trip.
+
+**Fix.** In `sv_sql.py` and `databricks/mv_sql.py` (shared form in `sql_forms.py`), recognise a `CASE`
+whose condition is `b = 0`, whose THEN is `0` and whose ELSE is `a / NULLIF(b, 0)` with the same `b`,
+and emit `safe_divide ( a , b )`. Any other shape stays as today.
+
+**Target:** 2026-12-15.
