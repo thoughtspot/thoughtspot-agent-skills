@@ -194,3 +194,18 @@ class TestEmptyInput:
         res = build(app)
         assert res["tables"] == {}
         assert any("No tables" in w for w in res["mapping"]["warnings"])
+
+
+class TestDoubleQuotedFieldMeasure:
+    def test_converter_reads_double_quoted_field_as_field(self):
+        """BL-368: the converter calls ``functions.translate`` directly; a Qlik
+        ``"Sales Amount"`` must reach the Model as a field ref, not a string literal."""
+        app = make_app(
+            tables=[Table(name="Sales", columns=[Column(name="Sales Amount")])],
+            measures=[MasterMeasure(id="m1", label="Total",
+                                    expression='Sum("Sales Amount")')],
+        )
+        res = build(app)
+        exprs = [f["expr"] for f in res["model"]["tml"]["model"]["formulas"]]
+        assert any("[Sales Amount]" in e for e in exprs), exprs
+        assert not any('"Sales Amount"' in e for e in exprs), exprs

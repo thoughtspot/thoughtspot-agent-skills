@@ -1036,3 +1036,23 @@ class TestFidelityM0SnowflakeFixes:
         r = translate(src, "snowflake")
         assert r["status"] == TRANSLATED and r["classification"] == "passthrough"
         assert r["formula"].startswith("sql_") and "diff_months" not in r["formula"]
+
+
+class TestQlikFieldQuotesShared:
+    """BL-368: the field-quote rewrite moved into ``qlik.functions.translate``; the adapter
+    must not re-apply it (a second pass would be a no-op, but one owner keeps the two paths
+    from drifting)."""
+
+    def test_adapter_and_translator_agree(self):
+        from ts_cli.qlik.functions import translate as qlik_translate
+        assert qlik_translate('Sum("Sales Amount")')[0] == "sum([Sales Amount])"
+        assert translate('Sum("Sales Amount")', "qlik")["formula"] == \
+            "sum([TABLE::Sales Amount])"
+
+    def test_adapter_no_longer_carries_its_own_rewrite(self):
+        from ts_cli.formula_translate import adapters
+        assert not hasattr(adapters, "qlik_field_quotes")
+
+    def test_double_quote_in_single_quoted_literal_untouched(self):
+        r = translate("If(Region = 'say \"hi\"', 1, 0)", "qlik")
+        assert "'say \"hi\"'" in r["formula"]

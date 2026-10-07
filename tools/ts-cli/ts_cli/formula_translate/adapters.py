@@ -186,22 +186,14 @@ def adapt_dax(expr: str, ctx: ColumnContext) -> RawResult:
 # Qlik
 # ---------------------------------------------------------------------------
 
-def qlik_field_quotes(expr: str) -> str:
-    """Qlik ``"Sales Amount"`` is a FIELD name, not a string: rewrite it ``[Sales Amount]``
-    (Qlik's other field-quoting form) so neither the translator nor the reference pass
-    treats it as a literal. Single-quoted strings are left alone."""
-    parts = re.split(r"('(?:[^']|'')*')", expr)
-    for i in range(0, len(parts), 2):
-        parts[i] = re.sub(r'"([^"]+)"', r"[\1]", parts[i])
-    return "".join(parts)
-
-
 def adapt_qlik(expr: str, ctx: ColumnContext, first_week_day: Optional[int] = None) -> RawResult:
     """``first_week_day``: the app's ``FirstWeekDay`` (0 = Mon … 6 = Sun). A pasted formula
     has no load script, so without it a one-argument ``Weekday()`` is NEEDS_REVIEW (#565)."""
     from ts_cli.qlik.functions import translate
 
-    out, review, reason = translate(qlik_field_quotes(expr), first_week_day=first_week_day)
+    # Qlik "Field Name" -> [Field Name] happens inside ``translate`` (BL-368), so the
+    # converter and this adapter share it; do not re-apply it here.
+    out, review, reason = translate(expr, first_week_day=first_week_day)
     if review or not out:
         return RawResult(None, NEEDS_REVIEW, [reason or "Qlik translator: needs review"],
                          partial=out or None)

@@ -187,13 +187,75 @@ FUNCTION_MAP: dict[str, Optional[str]] = {
 }
 
 
+def field_quotes_to_brackets(expr: str) -> str:
+    """Rewrite Qlik's double-quoted FIELD names to its other field-quoting form:
+    ``"Sales Amount"`` -> ``[Sales Amount]`` (BL-368).
+
+    In Qlik a double-quoted token is a field name and a single-quoted one is a string
+    literal; in ThoughtSpot (since BL-365) a double-quoted token is a string literal, so a
+    field name left double-quoted would be summed as a constant string. Untouched:
+
+    * single-quoted literals (``'say "hi"'``) — SQL-standard, ``''`` escapes a quote;
+    * ``[...]`` field names, which may legitimately hold a double quote;
+    * Set Analysis ``{...}`` regions, where ``{"2023"}`` is an element-set *value* (a
+      search string), not a field — ``_set_analysis`` strips those quotes itself.
+
+    A doubled ``""`` inside a double-quoted name is Qlik's escape and is unescaped.
+    Idempotent: a second pass finds no double-quoted field to rewrite.
+    """
+    out: list[str] = []
+    i, n, depth = 0, len(expr), 0
+    while i < n:
+        c = expr[i]
+        if c == "'":
+            j, _ = _scan_quoted(expr, i, "'")
+            out.append(expr[i:j + 1])
+        elif c == "[":
+            j = expr.find("]", i + 1)
+            j = n - 1 if j < 0 else j
+            out.append(expr[i:j + 1])
+        elif c == '"' and depth == 0:
+            j, name = _scan_quoted(expr, i, '"')
+            # unterminated or empty: leave it as written
+            out.append(expr[i:j + 1] if j >= n or not name else f"[{name}]")
+        else:
+            depth = _brace_depth(c, depth)
+            out.append(c)
+            j = i
+        i = j + 1
+    return "".join(out)
+
+
+def _scan_quoted(expr: str, i: int, q: str) -> tuple[int, str]:
+    """From the opening quote ``q`` at ``i``: (index of the closing quote — ``len(expr)``
+    when unterminated — and the content with doubled ``qq`` escapes unescaped)."""
+    j, n, body = i + 1, len(expr), []
+    while j < n:
+        if expr[j] == q:
+            if expr[j + 1:j + 2] != q:
+                break
+            j += 1
+        body.append(expr[j])
+        j += 1
+    return j, "".join(body)
+
+
+def _brace_depth(c: str, depth: int) -> int:
+    if c == "{":
+        return depth + 1
+    if c == "}":
+        return max(depth - 1, 0)
+    return depth
+
+
 def translate(expr: str, first_week_day: Optional[int] = None
               ) -> tuple[str, bool, str]:
     """Translate a Qlik expression to a ThoughtSpot formula (see ``_translate``). Qlik
     string literals are SQL-standard (``'it''s'``); the output's literals are printed in
     the form ThoughtSpot reads back exactly, and a product under a division is bracketed
-    (BL-365)."""
-    out, review, reason = _translate(expr, first_week_day)
+    (BL-365). Double-quoted field names are read as fields first (BL-368), so the
+    converter and ``ts formula translate --from qlik`` share one reading."""
+    out, review, reason = _translate(field_quotes_to_brackets(expr or ""), first_week_day)
     return ts_finalize_formula(out), review, reason
 
 

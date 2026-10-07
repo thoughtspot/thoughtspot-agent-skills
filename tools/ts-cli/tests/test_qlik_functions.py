@@ -23,6 +23,7 @@ from ts_cli.qlik.functions import (
     COMPOSITION_MAP,
     FUNCTION_MAP,
     PASSTHROUGH_MAP,
+    field_quotes_to_brackets,
     translate,
 )
 
@@ -540,3 +541,39 @@ class TestUnchangedBehaviour:
     def test_set_analysis_dollar_flagged(self):
         _out, review, _reason = translate("Sum({$<Region={'EMEA'}>} Revenue)")
         assert review is True
+
+
+class TestDoubleQuotedFieldNames:
+    """BL-368: in Qlik ``"Sales Amount"`` is a FIELD; in ThoughtSpot (since BL-365) a
+    double-quoted token is a string literal. The rewrite lives in ``translate`` itself so
+    the converter (``qlik.build_model``) and ``ts formula translate --from qlik`` share it."""
+
+    def test_double_quoted_field_becomes_bracketed(self):
+        assert tr('Sum("Sales Amount")') == "sum([Sales Amount])"
+
+    def test_double_quote_inside_single_quoted_literal_untouched(self):
+        assert tr("If(Region = 'say \"hi\"', 1, 0)") == \
+            "if (Region = 'say \"hi\"') then 1 else 0"
+
+    def test_bracketed_field_untouched(self):
+        assert tr("Sum([Sales Amount])") == "sum([Sales Amount])"
+        assert field_quotes_to_brackets('[x "y"]') == '[x "y"]'
+
+    def test_doubled_quote_in_field_name_is_unescaped(self):
+        assert field_quotes_to_brackets('Sum("a""b")') == 'Sum([a"b])'
+
+    def test_set_analysis_element_values_are_not_fields(self):
+        """``{"2023"}`` is an element-set search value, not a field name."""
+        assert tr('Sum({<Year={"2023"}>} Sales)') == \
+            "sum(if (Year = '2023') then Sales else 0)"
+        assert tr("Sum({<Region={'East'}>} \"Sales Amount\")") == \
+            "sum(if (Region = 'East') then [Sales Amount] else 0)"
+
+    def test_count_distinct_and_if(self):
+        assert tr('Count(DISTINCT "Cust ID")') == "unique count([Cust ID])"
+        assert tr("If(\"Region\"='East', \"Sales Amount\", 0)") == \
+            "if ([Region]='East') then [Sales Amount] else 0"
+
+    def test_idempotent(self):
+        once = field_quotes_to_brackets('Sum("Sales Amount") & \'"x"\'')
+        assert field_quotes_to_brackets(once) == once
