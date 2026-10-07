@@ -348,6 +348,19 @@ by the tolerance and nothing else: `lo-mathematical-roundup-sheet2-r17`, from ag
 **disputed**. The silver and bronze values are about 1.2e-12 apart. No case moved from
 disputed to agree.
 
+The disputed total stays at 134 for a second reason. Eight ids the previous cross-check
+evaluated were left out of this one, because their candidates are now NEEDS_REVIEW and the
+cross-check evaluates only translatable candidates:
+- five `ACOSH` cases
+- two `ATANH` cases (`lo-mathematical-atanh-sheet2-r3` and `-r4`)
+- `poi-…-i320`, which was disputed
+
+So the count gains the roundup case and loses `i320`.
+
+**Not re-decided.** Some manifest ids were not evaluated by the new cross-check: 7 in
+`m1-manifest.jsonl` and 6 in `m1-coverage-manifest.jsonl`. They keep their earlier status,
+and `recheck` now marks them `crosscheck_stale: true`.
+
 **Manifests.** `run_literal.py recheck`, a new subcommand, refreshes the statuses in an
 existing manifest and keeps its case set. Re-running `select` on the regenerated candidates
 would have picked a different set. `m1-manifest.jsonl` changes on that one line. The 630-case
@@ -369,7 +382,16 @@ No other case changed class. The remaining silent wrong answer is `poi-…-f23` 
 documented decimal-literal divergence). The coverage-fresh runs use the coverage manifest, so
 they do not change. `runs/2026-10-07-excel-m1-bl365-250.json` was not regenerated: its full
 run JSON was overwritten by the fresh-selection run on the same day. Read its roundup row as
-ORACLE_DISPUTED.
+ORACLE_DISPUTED. `run` now writes a time-suffixed file instead of overwriting.
+
+**The 2026-10-06 run is deliberately not rebuilt.** `runs/2026-10-06-excel-m1.json` and the
+generated tables below still show `lo-mathematical-roundup-sheet2-r17` as SILENT_WRONG
+(7 silent). Under today's cross-check that row would read ORACLE_DISPUTED, and the run would
+show 6 silent and 21 disputed. A trial rebuild confirmed those numbers, and it also re-tagged
+`poi-…-f23` with its later BL-351 cause. It was not committed, because it would erase a
+real finding. On 2026-10-06, ThoughtSpot cut the value to 6 decimals, which is wrong against
+the silver and the bronze value alike: that is BL-348, since fixed. The last-digit dispute
+appeared only after BL-348 was fixed.
 
 The generated tables below are still the 2026-10-06 run's, as stated above.
 

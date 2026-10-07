@@ -13095,6 +13095,18 @@ run. Tests: `tools/formula-fidelity/tests/test_fidelity_crosscheck.py`. Report:
 silver value against Microsoft's rule and `formulas`) stays quarantined, following oracles.md,
 and is not decided by picking a side.
 
+The independent review of PR #580 led to these changes in the same PR:
+- `rebuild` refuses when a non-disputed manifest id is missing from the full run.
+- `recheck` marks ids the new cross-check did not evaluate `crosscheck_stale` (13 across the
+  two manifests).
+- `select` and `recheck` refuse a `crosscheck.json` produced by the pre-BL-356 rule.
+- A NaN on either side is disputed.
+- `run` no longer overwrites the same day's full run JSON. That overwrite is how the
+  `bl365-250` full evidence was lost.
+
+The 2026-10-06 run is deliberately not rebuilt. Its roundup failure (6 decimals) was the real
+BL-348 bug, wrong against both oracles.
+
 ## BL-364 — ThoughtSpot trigonometry is in radians; the Tableau translator and four maps convert as if it were degrees `Tier 1`
 
 **Filed:** 2026-10-07. **Status:** DONE (2026-10-07, fix/trig-quotes-precedence, ts-cli 0.165.0).
