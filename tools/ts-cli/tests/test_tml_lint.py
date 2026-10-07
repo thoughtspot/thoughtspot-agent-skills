@@ -454,3 +454,94 @@ class TestI15MisplacedColumnRootKeys:
             {"column_id": "T::C",
              "properties": {"column_type": "ATTRIBUTE", "description": "d"}}]))
         assert "'T::C'" in f[0]
+
+
+# --- I16: Model AGGREGATE over a Table column that is not -----------------------
+
+from ts_cli.tml_lint import lint_model_table_aggregation, table_aggregations  # noqa: E402
+
+
+def _mv_table(name="order_detail_mv", agg="SUM"):
+    return {"name": name, "columns": [
+        {"name": "total_revenue", "db_column_name": "total_revenue",
+         "properties": {"column_type": "MEASURE", "aggregation": agg}},
+        {"name": "Region", "db_column_name": "region", "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "line_count", "db_column_name": "line_count",
+         "properties": {"column_type": "MEASURE", "aggregation": "AGGREGATE"}},
+    ]}
+
+
+def _model(rev_props, tname="order_detail_mv", alias=None, line_props=None):
+    mt = {"name": tname, **({"alias": alias} if alias else {})}
+    ref = alias or tname
+    cols = [{"name": "Total Revenue", "column_id": f"{ref}::total_revenue", "properties": rev_props},
+            {"name": "Region", "column_id": f"{ref}::region", "properties": {"column_type": "ATTRIBUTE"}}]
+    if line_props is not None:
+        cols.append({"name": "Line Count", "column_id": f"{ref}::line_count", "properties": line_props})
+    return {"model": {"name": "M", "model_tables": [mt], "columns": cols}}
+
+
+AGG = {"column_type": "MEASURE", "aggregation": "AGGREGATE"}
+
+
+class TestI16ModelTableAggregation:
+    def _tables(self, *tables):
+        return {t["name"]: table_aggregations(t) for t in tables}
+
+    def test_model_aggregate_over_table_sum_is_flagged(self):
+        f = lint_model_table_aggregation(_model(AGG), self._tables(_mv_table(agg="SUM")))
+        assert len(f) == 1 and f[0].startswith("I16:")
+        for part in ("'Total Revenue'", "'order_detail_mv::total_revenue'", "MEASURE/SUM",
+                     "AgentQL/SpotQL uses the Table's aggregation"):
+            assert part in f[0]
+
+    def test_model_aggregate_over_table_attribute_is_flagged(self):
+        t = _mv_table(); t["columns"][0]["properties"] = {"column_type": "ATTRIBUTE"}
+        f = lint_model_table_aggregation(_model(AGG), self._tables(t))
+        assert len(f) == 1 and "is ATTRIBUTE" in f[0]
+
+    def test_aggregate_at_both_levels_is_clean(self):
+        assert lint_model_table_aggregation(_model(AGG), self._tables(_mv_table(agg="AGGREGATE"))) == []
+
+    def test_reverse_direction_not_flagged(self):
+        # Table AGGREGATE, Model ATTRIBUTE: searched correctly live 2026-10-07.
+        m = _model({"column_type": "MEASURE", "aggregation": "SUM"},
+                   line_props={"column_type": "ATTRIBUTE"})
+        assert lint_model_table_aggregation(m, self._tables(_mv_table(agg="AGGREGATE"))) == []
+
+    def test_table_not_in_batch_is_skipped(self):
+        assert lint_model_table_aggregation(_model(AGG), {}) == []
+
+    def test_alias_and_case_resolve(self):
+        m = _model(AGG, alias="od")
+        m["model"]["columns"][0]["column_id"] = "OD::TOTAL_REVENUE"
+        f = lint_model_table_aggregation(m, self._tables(_mv_table(agg="SUM")))
+        assert len(f) == 1
+
+    def test_db_column_name_resolves(self):
+        t = _mv_table(agg="SUM"); t["columns"][0]["name"] = "Total Revenue (raw)"
+        assert len(lint_model_table_aggregation(_model(AGG), self._tables(t))) == 1
+
+    def test_formula_columns_and_non_models_ignored(self):
+        m = _model(AGG); m["model"]["columns"][0].pop("column_id")
+        m["model"]["columns"][0]["formula_id"] = "formula_x"
+        assert lint_model_table_aggregation(m, self._tables(_mv_table())) == []
+        assert lint_model_table_aggregation({"table": {}}, {}) == []
+
+
+def test_ts_tml_lint_runs_i16_when_tables_are_in_the_batch(tmp_path):
+    import json as _json
+    import yaml as _yaml
+    from typer.testing import CliRunner
+    from ts_cli.cli import app
+    (tmp_path / "order_detail_mv.table.tml").write_text(_yaml.safe_dump({"table": {
+        **_mv_table(agg="SUM"), "db": "c", "schema": "s", "db_table": "order_detail_mv",
+        "connection": {"name": "X"}}}))
+    (tmp_path / "m.model.tml").write_text(_yaml.safe_dump(_model(AGG)))
+    res = CliRunner().invoke(app, ["tml", "lint", "--dir", str(tmp_path)])
+    out = _json.loads(res.stdout)
+    assert res.exit_code == 1
+    assert any(f.startswith("I16:") for r in out["results"] for f in r["findings"])
+    # The same Model linted alone has nothing to compare against.
+    alone = CliRunner().invoke(app, ["tml", "lint", "--file", str(tmp_path / "m.model.tml")])
+    assert not any(f.startswith("I16:") for r in _json.loads(alone.stdout)["results"] for f in r["findings"])
