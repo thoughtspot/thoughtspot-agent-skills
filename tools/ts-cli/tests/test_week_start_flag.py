@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from ts_cli.formula_week import (
+    WEEK_START_EXACT_PREFIX,
     WEEK_START_NOTE_PREFIX,
     week_dependent_functions,
     week_start_note,
@@ -102,13 +103,33 @@ class TestTableau:
         return translate_formulas(calcs)
 
     def test_datetrunc_week_carries_review_note_and_warning(self):
-        res = self._translate("DATETRUNC('week', [Order Date])")
+        # Monday start recorded on the datasource: start_of_week + the Monday advisory.
+        from ts_cli.tableau_translate import translate_formulas
+        res = translate_formulas([{"caption": "F", "name": "[Calculation_1]",
+                                   "role": "dimension", "datatype": "date",
+                                   "formula": "DATETRUNC('week', [Order Date])"}],
+                                 week_start="monday")
         rec = res["translated"][0]
         assert "start_of_week" in rec["expr"]
         assert any(_is_week_note(n) for n in rec["review_notes"])
         from ts_cli.tableau.validate import validate_pre_import
         issues = validate_pre_import(res["translated"])
         assert any(_is_week_note(w) for i in issues for w in i["warnings"])
+
+    def test_datetrunc_week_unknown_start_assumes_sunday(self):
+        # #589 review: an unknown Tableau week start is Sunday (en-US default), as
+        # DATEPART('weekday') already assumed — exact Sunday form + the assumption note.
+        res = self._translate("DATETRUNC('week', [Order Date])")
+        rec = res["translated"][0]
+        assert rec["expr"] == ("add_days ( date ( [Order Date] ) , 0 - mod ( "
+                               "day_number_of_week ( [Order Date] ) , 7 ) )")
+        assert any("Sunday week start" in n and "author's locale" in n
+                   for n in rec["review_notes"])
+        assert any(n.startswith(WEEK_START_EXACT_PREFIX) and "Sunday" in n
+                   for n in rec["review_notes"])
+        assert not any(_is_week_note(n) for n in rec["review_notes"])
+        assert "review_required" not in rec
+        assert res["stats"]["weekday_week_start_assumed"] == 1
 
     def test_datetrunc_month_has_no_note(self):
         rec = self._translate("DATETRUNC('month', [Order Date])")["translated"][0]
@@ -285,7 +306,9 @@ class TestTableauReview:
         ("DATEPART('week', [d])", {"week_start": "sunday"}, SUN_WEEK),
         ("DATEPART('week', [d], 'sunday')", {"week_start": "monday"}, SUN_WEEK),
         ("WEEK([d])", {"week_start": "sunday"}, SUN_WEEK),
-        ("DATEPART('week', [d])", {}, MON_WEEK),  # unknown start: Monday, as DATETRUNC
+        ("DATEPART('week', [d])", {}, SUN_WEEK),  # unknown start: Sunday, assumed (#589)
+        ("DATEPART('week', [d])", {"week_start": "monday"}, MON_WEEK),
+        ("WEEK([d])", {}, SUN_WEEK),
     ])
     def test_known_start_is_exact_not_review(self, formula, kw, expected):
         # BL-373 / BL-380: exact forms, live-verified 2026-10-07 — no mismatch note.
@@ -304,14 +327,44 @@ class TestTableauReview:
         assert res["translated"] == [] and res["skipped"]
 
     @pytest.mark.parametrize("formula, kw", [
-        ("DATETRUNC('week', [d])", {}),                       # unknown start: advisory
         ("DATETRUNC('week', [d])", {"week_start": "monday"}),
         ("DATETRUNC('week', [d], 'monday')", {"week_start": "sunday"}),  # literal wins
     ])
-    def test_unknown_or_monday_start_is_advisory_only(self, formula, kw):
+    def test_monday_start_is_advisory_only(self, formula, kw):
         rec = self._one(formula, **kw)["translated"][0]
         assert "review_required" not in rec
         assert any(n.startswith(WEEK_START_NOTE_PREFIX) for n in rec["review_notes"])
+
+    @pytest.mark.parametrize("formula, kw, day", [
+        ("DATETRUNC('week', [d], 'sunday')", {}, "Sunday"),
+        ("DATETRUNC('week', [d])", {"week_start": "saturday"}, "Saturday"),
+        ("DATEPART('week', [d], 'sunday')", {}, "Sunday"),
+        ("DATEPART('week', [d])", {"week_start": "monday"}, "Monday"),
+        ("DATEPART('weekday', [d], 'friday')", {}, "Friday"),
+    ])
+    def test_known_start_note_says_exact_not_monday(self, formula, kw, day):
+        # #589 review item 1: the note reflects what was emitted, from what the
+        # converter KNEW — not "assumes a Monday week start".
+        notes = self._one(formula, **kw)["translated"][0]["review_notes"]
+        week = [n for n in notes if n.startswith(WEEK_START_EXACT_PREFIX)]
+        assert len(week) == 1 and f"exact for a {day} week start" in week[0]
+        assert "WEEK_START" in week[0] and "calendar bound to the column" in week[0]
+        assert not any(n.startswith(WEEK_START_NOTE_PREFIX) for n in notes)
+
+    def test_mixed_formula_keeps_monday_wording_for_the_monday_part(self):
+        # A known-start exact form beside a genuinely Monday-based function.
+        notes = self._one("DATETRUNC('week', [d], 'sunday') = DATETRUNC('week', [e], "
+                          "'monday')")["translated"][0]["review_notes"]
+        week = [n for n in notes if n.startswith(WEEK_START_NOTE_PREFIX)]
+        assert len(week) == 1 and "(start_of_week)" in week[0]
+        assert "day_number_of_week is exact for a Sunday week start" in week[0]
+
+    def test_text_alone_does_not_make_a_note_exact(self):
+        # A day_number_of_week the converter did not build stays Monday-worded.
+        assert week_start_note("day_number_of_week ( [d] )").startswith(
+            WEEK_START_NOTE_PREFIX)
+        assert week_start_note("day_number_of_week ( [d] )", exact_starts=[6]).startswith(
+            WEEK_START_EXACT_PREFIX)
 
     @pytest.mark.parametrize("fn", ["ISOYEAR", "ISOQUARTER"])
     def test_iso_year_and_quarter_are_skipped_not_passed_through(self, fn):
@@ -441,12 +494,44 @@ class TestReReview:
         res = self._one("DATETRUNC('week', [d])")  # advisory only
         assert all("review_required" not in i for i in validate_pre_import(res["translated"]))
 
-    @pytest.mark.parametrize("expr", ["WeekStart(D, vN)", "WeekStart(D, 0, vFWD)"])
-    def test_qlik_offset_reason_wins_over_mismatch(self, expr):
+    @pytest.mark.parametrize("expr, says", [
+        ("WeekStart(D, vN)", "non-literal period offset 'vN'"),
+        ("WeekStart(D, 0, vFWD)", "non-literal first week day 'vFWD'"),
+        # #589 review: a literal the translator cannot use is not "non-literal".
+        ("WeekStart(D, 1.5)", "unsupported literal period offset '1.5'"),
+        ("WeekStart(D, +1)", "unsupported literal period offset '+1'"),
+        ("WeekStart(D, 0, 7)", "unsupported literal first week day '7'"),
+    ])
+    def test_qlik_offset_reason_wins_over_mismatch(self, expr, says):
         from ts_cli.qlik.functions import translate
         out, review, reason = translate(expr, first_week_day=6)
         assert review and WEEK_START_MISMATCH_PREFIX not in reason
-        assert "period offset" in reason
+        assert says in reason
+
+    @pytest.mark.parametrize("expr, fwd, day", [
+        ("WeekStart(D)", 6, 6), ("WeekStart(D, 0, 5)", None, 5), ("Weekday(D)", 0, 0),
+        ("Weekday(D, 6)", None, 6),
+    ])
+    def test_qlik_known_start_note_is_exact(self, expr, fwd, day):
+        from ts_cli.formula_translate.engine import translate
+        from ts_cli.qlik.functions import known_week_starts
+        assert known_week_starts(expr, fwd) == [day]
+        r = translate(expr, "qlik", first_week_day=fwd)
+        assert any(t.startswith(WEEK_START_EXACT_PREFIX) for t in r["traps"])
+        assert not any(t.startswith(WEEK_START_NOTE_PREFIX) for t in r["traps"])
+
+    def test_qlik_monday_or_unknown_weekstart_keeps_monday_note(self):
+        from ts_cli.qlik.functions import known_week_starts
+        assert known_week_starts("WeekStart(D)", 0) == []
+        assert known_week_starts("WeekStart(D)", None) == []
+
+    def test_qlik_build_model_note_is_exact_for_known_start(self):
+        from ts_cli.qlik.build_model import _translate_measures
+        m = type("M", (), {"label": "W", "id": "m1",
+                           "expression": "Max(WeekStart(OrderDate, 0, 6))"})()
+        _, mapping = _translate_measures([m])
+        assert any(n.startswith(WEEK_START_EXACT_PREFIX) and "Sunday" in n
+                   for n in mapping[0]["review_notes"])
 
     def test_databricks_start_of_week_clause_is_dialect_aware(self):
         dbx = week_start_note("start_of_week ( [d] )", "databricks")

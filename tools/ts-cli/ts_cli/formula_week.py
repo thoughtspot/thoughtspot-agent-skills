@@ -111,6 +111,10 @@ WEEK_DEPENDENT_FUNCTIONS = (
 
 #: Every advisory week-start note begins with this — a stable prefix to test on.
 WEEK_START_NOTE_PREFIX = "assumes a Monday week start"
+#: Advisory, for a formula whose only week logic is an exact form the converter built
+#: for a week start it KNEW (BL-373). Not review-class.
+WEEK_START_EXACT_PREFIX = "exact week start"
+WEEK_ADVISORY_PREFIXES = (WEEK_START_NOTE_PREFIX, WEEK_START_EXACT_PREFIX)
 #: Review-class notes: a converter carrying one must not report a clean translation.
 WEEK_START_MISMATCH_PREFIX = "week start mismatch"
 WEEK_DIFF_DAYS_PREFIX = "week difference emitted as diff_days / 7"
@@ -189,19 +193,56 @@ def _week_clauses(fns: list[str], dialect: str | None = None) -> list[str]:
     return out
 
 
-def week_start_note(ts_expr: str | None, dialect: str | None = None) -> str | None:
-    """The standard Monday-week-start advisory for an emitted ThoughtSpot formula,
-    tailored to the week-dependent functions it calls, or None when it calls none.
+def _day_names(starts) -> str:
+    names: list[str] = []
+    for s in starts:
+        if isinstance(s, int):
+            s = next(k for k, v in WEEKDAY_FIRST_DAY_INDEX.items() if v == s)
+        s = s.strip().lower().capitalize()
+        if s not in names:
+            names.append(s)
+    return " / ".join(names)
+
+
+def _exact_clause(starts) -> str:
+    return (f"exact for a {_day_names(starts)} week start — built on day_number_of_week, "
+            "fixed arithmetic that does not depend on the warehouse's WEEK_START or on a "
+            "calendar bound to the column (live-verified 2026-10-07, BL-373)")
+
+
+def week_start_note(ts_expr: str | None, dialect: str | None = None,
+                    exact_starts=None) -> str | None:
+    """The week-start advisory for an emitted ThoughtSpot formula, tailored to the
+    week-dependent functions it calls, or None when it calls none.
 
     Every translator surfaces this same string (Tableau / Qlik ``review_notes``,
     Snowflake SV ``annotations``, Databricks MV ``annotations`` kind
     ``week_start_assumption``, ``ts formula translate`` traps). Advisory — never
     a status downgrade. ``dialect`` ("databricks") selects the warehouse-specific
     ``start_of_week`` clause; anything else gets the WEEK_START-dependent wording.
+
+    ``exact_starts``: the week start day(s) the CONVERTER knew and built an exact
+    ``day_number_of_week`` form for (``ts_week_start`` / ``ts_week_of_year_jan1`` /
+    ``ts_weekday_number``) — passed by the converter, never inferred from the text.
+    Its ``day_number_of_week`` is then reported as exact for that day, under
+    ``WEEK_START_EXACT_PREFIX`` when nothing Monday-based remains; any remaining
+    Monday-based function keeps the Monday wording.
     """
     fns = week_dependent_functions(ts_expr)
     if not fns:
         return None
+    if exact_starts:
+        monday = [f for f in fns if f != "day_number_of_week"]
+        if not monday:
+            return (f"{WEEK_START_EXACT_PREFIX} ({_day_names(exact_starts)}): "
+                    + _exact_clause(exact_starts)
+                    + ". No calendar argument is emitted (BL-334)")
+        return (f"{WEEK_START_NOTE_PREFIX} ({', '.join(monday)}): "
+                + "; ".join(_week_clauses(monday, dialect) + [
+                    "day_number_of_week is " + _exact_clause(exact_starts)])
+                + ". No calendar argument is emitted, so the Monday-based part is "
+                  "Gregorian with a Monday week even on a column bound to another "
+                  "calendar (BL-334)")
     return (f"{WEEK_START_NOTE_PREFIX} ({', '.join(fns)}): "
             + "; ".join(_week_clauses(fns, dialect))
             + ". No calendar argument is emitted, so the result is Gregorian with a "

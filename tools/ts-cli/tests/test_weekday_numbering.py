@@ -199,18 +199,19 @@ class TestTableau:
         out = map_date_functions("DATEPART('weekday', [Date])", None,
                                  week_start="monday", notes=notes)
         assert _numbering(out) == ISO
-        assert notes == {}
+        # Not flagged as assumed; recorded as an exact Monday form (#589 review).
+        assert notes == {"week_start_exact:monday": 1}
 
     def test_sunday_assumption_is_counted(self):
         notes: dict = {}
         map_date_functions("DATEPART('weekday', [Date])", None, notes=notes)
-        assert notes == {"weekday_week_start_assumed": 1}
+        assert notes == {"weekday_week_start_assumed": 1, "week_start_exact:sunday": 1}
 
     def test_explicit_start_beats_datasource_and_is_not_flagged(self):
         notes: dict = {}
         out = map_date_functions("DATEPART('weekday', [Date], 'sunday')", None,
                                  week_start="monday", notes=notes)
-        assert _numbering(out) == SUN1 and notes == {}
+        assert _numbering(out) == SUN1 and notes == {"week_start_exact:sunday": 1}
 
     @pytest.mark.parametrize("expr", ["ISOWEEKDAY([Date])",
                                       "DATEPART('iso-weekday', [Date])"])
@@ -218,7 +219,7 @@ class TestTableau:
         from ts_cli.tableau_translate import translate_single
         out, errors, notes = translate_single(expr, role="attribute")
         assert out == "day_number_of_week ( [Date] )" and not errors
-        assert _numbering(out) == ISO and notes == {}
+        assert _numbering(out) == ISO and notes == {"week_start_exact:monday": 1}
 
     def test_assumption_reaches_the_translated_record(self):
         from ts_cli.tableau_translate import translate_formulas
@@ -233,11 +234,11 @@ class TestTableau:
         issues = validate_pre_import(res["translated"])
         assert any("Sunday" in w for i in issues for w in i["warnings"])
         res = translate_formulas(calcs, week_start="monday")
-        # A recorded week start removes the Sunday assumption, but the Monday-week
-        # advisory stays: day_number_of_week still follows the Model's calendar
-        # (BL-334 item 2).
+        # A recorded week start removes the Sunday assumption; the week note says the
+        # numbering is exact for that start (#589 review: a column calendar does not
+        # reach day_number_of_week, live 2026-10-07).
         notes = res["translated"][0]["review_notes"]
-        assert len(notes) == 1 and notes[0].startswith("assumes a Monday week start")
+        assert len(notes) == 1 and notes[0].startswith("exact week start (Monday)")
         assert not any("Sunday = 1" in w for i in validate_pre_import(res["translated"])
                        for w in i["warnings"])
         assert _numbering(res["translated"][0]["expr"]) == ISO

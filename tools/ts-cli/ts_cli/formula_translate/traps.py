@@ -259,8 +259,11 @@ def _databricks_traps(dialect: str, source: str) -> list[str]:
     return out + ([_DBX_CAST] if _DBX_CAST_SRC.search(src) else [])
 
 
-def detect_traps(dialect: str, source: str, output: str) -> list[str]:
-    """Trap lines that apply to this (source → output) pair."""
+def detect_traps(dialect: str, source: str, output: str,
+                 exact_starts=None) -> list[str]:
+    """Trap lines that apply to this (source → output) pair. ``exact_starts``: the
+    week start days the adapter's translator built exact forms for (BL-373), passed
+    through to the week note."""
     code = _code(output)
     traps = _round_trap(dialect, source, code)
     if _DISTINCT_SRC.search(source) and _UNIQUE_OUT.search(code):
@@ -275,7 +278,7 @@ def detect_traps(dialect: str, source: str, output: str) -> list[str]:
     # Tableau's diff_days / 7 note is source-driven (its adapter, from the converter's
     # DATEDIFF('week') counter); other dialects keep the text-driven check.
     days = None if dialect == "tableau" else week_diff_days_note(output)
-    for week in (days, week_start_note(output, dialect)):
+    for week in (days, week_start_note(output, dialect, exact_starts=exact_starts)):
         if week:
             traps.append(week)
     traps.extend(_case_traps(dialect, output))

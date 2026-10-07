@@ -13768,9 +13768,17 @@ unknown.
     the exact form. A field or parameter start is left unmapped.
   - Qlik `WeekStart` with a known first week day (3rd argument or `SET FirstWeekDay`) emits it too.
     A literal period offset `n` adds `7*n` days. A non-literal offset or start stays NEEDS REVIEW.
-  - Monday, or an unknown start, stays `start_of_week` with the advisory. That keeps the BL-334
-    advisory, which is not a downgrade.
-- Known-start records are no longer `review_required` / NEEDS REVIEW.
+  - A Monday start stays `start_of_week` with the BL-334 Monday advisory, which is not a
+    downgrade. So does a Qlik unknown `FirstWeekDay`.
+  - A Tableau start recorded nowhere is Sunday, assumed (#589 review). That matches
+    `DATEPART('weekday')`: the TWB writes the Week start only when the author changed it,
+    and the en-US default is Sunday. The existing assumption note is advisory.
+- Known-start records are no longer `review_required` / NEEDS REVIEW. Their week note reads
+  "exact week start (<day>)", from the start days the converter passes to `week_start_note`
+  (`exact_starts`), not from the formula text (#589 review).
+- `[field]` references are masked before Tableau's function-name regexes (`literals.mask_refs`),
+  so `[WEEK (prior)]` or `[Profit LEN(x)]` is not read as a call (#589 review; tests
+  `tests/test_tableau_ref_masking.py`).
 - Tests: `tests/test_week_exact_forms.py` (all seven starts × 270 dates against `datetime`) and
   the updated `tests/test_week_start_flag.py`.
 
@@ -13939,8 +13947,9 @@ compose an exact form. Until then, consider flagging the mapping.
 - **Fix.** `DATEPART('week', d [, start])` and `WEEK(d)` now emit the exact Jan-1 composition
   `( floor ( ( day_number_of_year ( d ) - 1 + <weekday of start_of_year ( d ) from the start> ) / 7 ) + 1 )`
   from `formula_week.ts_week_of_year_jan1`. It was live-verified for all seven start days.
-- **Week start**, in order: a literal argument, then the datasource Week start, then Monday (as
-  `DATETRUNC`, with the advisory). A field or parameter start is left unmapped.
+- **Week start**, in order: a literal argument, then the datasource Week start, then Sunday,
+  assumed (as `DATEPART('weekday')` and `DATETRUNC('week')`, with the assumption note). A field
+  or parameter start is left unmapped.
 - **Riders:**
   - `ISOWEEK(d)` / `DATEPART('iso-week', d)` now map to `week_number_of_year`. The mapping doc's
     13.28 row had it backwards ("week_number_of_year is not ISO") and is corrected.

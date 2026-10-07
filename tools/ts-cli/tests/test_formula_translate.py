@@ -844,7 +844,10 @@ class TestKnownDefects:
         # assumption still shows as a trap.
         r = translate(src, dialect)
         assert r["status"] == TRANSLATED and "mod" in r["formula"]
-        assert any("Monday week start" in t for t in r["traps"])
+        # Tableau knows (assumes) its Sunday start and built the form for it, so its
+        # note says exact (#589 review); the SQL dialects keep the Monday wording.
+        want = "exact week start (Sunday)" if dialect == "tableau" else "Monday week start"
+        assert any(want in t for t in r["traps"])
 
     def test_zeroifnull_is_ifnull(self):
         # BL-226: ZEROIFNULL was a rename to the uncatalogued `zeroifnull`

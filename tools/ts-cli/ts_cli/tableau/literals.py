@@ -135,3 +135,33 @@ def unmask_literals(expr: str, registry: dict[str, dict[str, str]]) -> str:
         return _string_literal_to_ts(entry["raw"])
 
     return _PLACEHOLDER_MATCH.sub(_unmask, expr)
+
+
+# ---------------------------------------------------------------------------
+# [field] references, masked around the function-name passes
+# ---------------------------------------------------------------------------
+#
+# A field name is free text: `[WEEK (prior)]`, `[Sales WEEK(1)]`, `[Profit LEN(x)]`. The
+# function-mapping regexes (`\bWEEK\s*\(`, `\bLEN\s*\(`, ...) must never see inside one,
+# or they rewrite the column's name. Same reference grammar as _LITERAL_RE's `ref`
+# branch (a `]` inside a name is doubled). STX delimiters, distinct from the literal
+# placeholders' SOH, so neither registry can capture the other's tokens.
+_REF_RE = re.compile(r"\[(?:[^\]]|\]\])*\]")
+_REF_PLACEHOLDER_RE = re.compile(r"\x02R\d+\x02")
+
+
+def mask_refs(expr: str) -> tuple[str, list[str]]:
+    """Replace every ``[field]`` reference with an opaque token; returns
+    ``(masked, refs)`` for ``unmask_refs``."""
+    refs: list[str] = []
+
+    def _mask(m: re.Match) -> str:
+        refs.append(m.group(0))
+        return f"\x02R{len(refs) - 1}\x02"
+
+    return _REF_RE.sub(_mask, expr), refs
+
+
+def unmask_refs(expr: str, refs: list[str]) -> str:
+    """Restore the references ``mask_refs`` replaced."""
+    return _REF_PLACEHOLDER_RE.sub(lambda m: refs[int(m.group(0)[2:-1])], expr)

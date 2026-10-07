@@ -148,7 +148,8 @@ def _post_process(raw, dialect: str, source: str, ctx: ColumnContext):
         traps.append(d.message)
         if status == TRANSLATED:
             status = APPROXIMATED
-    traps.extend(t for t in detect_traps(dialect, source, out) if t not in traps)
+    traps.extend(t for t in detect_traps(dialect, source, out, exact_starts=getattr(raw, "week_exact", None))
+                 if t not in traps)
     if status == TRANSLATED and any(is_downgrade(t) for t in traps):
         status = APPROXIMATED
     return out, status, notes, traps

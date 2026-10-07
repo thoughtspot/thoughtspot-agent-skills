@@ -73,6 +73,9 @@ class RawResult:
     traps: list[str] = field(default_factory=list)  # translator-specific trap lines
     role: Optional[str] = None     # MEASURE | ATTRIBUTE when the translator applied an intent
     type_needs: list = field(default_factory=list)  # (target, reason, note) — prompts.py
+    # Week start days the translator built an exact form for (BL-373) — the week note
+    # then says "exact for that day" instead of assuming Monday (#589 review).
+    week_exact: list = field(default_factory=list)
 
 
 def normalise_dialect(name: str) -> str:
@@ -144,7 +147,9 @@ def adapt_tableau(expr: str, ctx: ColumnContext, role_hint: Optional[str] = None
     out = "".join(seg if lit else re.sub(r"\belse NULL\b", "else null", seg)
                   for lit, seg in split_literals(out))
     out = qualify_refs(out, ctx, parameters=params, placeholder_tables={_SENTINEL})
-    return RawResult(out, TRANSLATED, note_list, traps=_tableau_week_traps(out, notes))
+    from ts_cli.tableau.functions import exact_week_starts
+    return RawResult(out, TRANSLATED, note_list, traps=_tableau_week_traps(out, notes),
+                     week_exact=exact_week_starts(notes))
 
 
 def _tableau_week_traps(out: str, notes: dict) -> list[str]:
@@ -206,7 +211,7 @@ def adapt_dax(expr: str, ctx: ColumnContext) -> RawResult:
 def adapt_qlik(expr: str, ctx: ColumnContext, first_week_day: Optional[int] = None) -> RawResult:
     """``first_week_day``: the app's ``FirstWeekDay`` (0 = Mon … 6 = Sun). A pasted formula
     has no load script, so without it a one-argument ``Weekday()`` is NEEDS_REVIEW (#565)."""
-    from ts_cli.qlik.functions import translate_with_notes
+    from ts_cli.qlik.functions import known_week_starts, translate_with_notes
 
     # Qlik "Field Name" -> [Field Name] happens inside ``translate`` (BL-368), so the
     # converter and this adapter share it; do not re-apply it here. Column types from
@@ -218,7 +223,8 @@ def adapt_qlik(expr: str, ctx: ColumnContext, first_week_day: Optional[int] = No
         return RawResult(None, NEEDS_REVIEW, [reason or "Qlik translator: needs review"],
                          partial=out or None)
     # The translator's advisory notes (Set Analysis semantics) do not downgrade.
-    return RawResult(qualify_refs(out, ctx, bare_idents=True), TRANSLATED, notes)
+    return RawResult(qualify_refs(out, ctx, bare_idents=True), TRANSLATED, notes,
+                     week_exact=known_week_starts(expr, first_week_day))
 
 
 # ---------------------------------------------------------------------------

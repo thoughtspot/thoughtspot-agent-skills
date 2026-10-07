@@ -320,7 +320,8 @@ def _translate_measures(measures, first_week_day=None, field_types=None
         # Advisory review notes, never a status change — the measure stays Migrated:
         # the translator's Set Analysis notes (#586 review) and the Monday-week-start
         # advisory (BL-334 item 2).
-        week = week_start_note(ts_expr)
+        week = week_start_note(ts_expr, exact_starts=None if review else
+                               functions.known_week_starts(m.expression, first_week_day))
         review_notes = list(notes) + ([week] if week else [])
         if review_notes:
             entry["review_notes"] = review_notes
