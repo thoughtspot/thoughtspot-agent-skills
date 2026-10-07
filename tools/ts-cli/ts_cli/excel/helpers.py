@@ -7,7 +7,10 @@ from ts_cli.excel import nodes as X
 from ts_cli.excel import tsast as T
 from ts_cli.formula_common import sql_int_digits
 
-_TEMPLATE = re.compile(r'"(?:[^"\\]|\\.)*"')
+# A sql_*_op template: the double-quoted FIRST argument of a pass-through. Any other
+# double-quoted string is a ThoughtSpot text literal (BL-365), which the parser reads; a
+# single-quoted literal is skipped whole so a '"' inside it is never taken for a template.
+_TEMPLATE = re.compile(r"""('(?:[^'\\]|\\.|'')*')|(\bsql_\w+_op\s*\(\s*)("[^"]*")""")
 
 
 def need(tr, node: X.Call, lo: int, hi: int) -> None:
@@ -23,16 +26,18 @@ def is_range(node) -> bool:
 
 def from_text(text: str) -> dict:
     """ThoughtSpot text (e.g. a ``formula_common`` helper's output) → AST, with the ONE
-    ThoughtSpot parser (``mv_emit_expr.parse_formula``, BL-217). That parser has no
-    double-quoted strings, so a ``sql_*_op`` template is swapped out and restored as a
-    ``template`` literal."""
+    ThoughtSpot parser (``mv_emit_expr.parse_formula``, BL-217). A ``sql_*_op`` template
+    is swapped out first and restored as a ``template`` literal; the parser would read it
+    as a text literal."""
     from ts_cli.databricks.mv_emit_expr import parse_formula
 
     templates: list[str] = []
 
     def stash(m: "re.Match") -> str:
-        templates.append(m.group(0))
-        return f"'__TPL{len(templates) - 1}__'"
+        if m.group(1) is not None:
+            return m.group(1)
+        templates.append(m.group(3))
+        return f"{m.group(2)}'__TPL{len(templates) - 1}__'"
 
     node = parse_formula(_TEMPLATE.sub(stash, text))
     for n in T.walk(node):

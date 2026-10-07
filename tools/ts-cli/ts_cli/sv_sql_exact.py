@@ -17,6 +17,7 @@ from ts_cli.formula_common import (
     sql_passthrough_call,
     sql_substr_to_ts,
 )
+from ts_cli.formula_text import sql_trig_to_ts
 from ts_cli.sql_forms import (sqlf_div0, sqlf_div0null, sqlf_mod, sqlf_rounded_cast,
                                sqlf_scaled_floor_ceil)
 
@@ -115,6 +116,14 @@ def call_to_number(name: str, args: list[str], resolver) -> str:
     return sql_passthrough_call("sql_double_op", name, args)
 
 
+def call_trig(name: str, args: list[str], resolver) -> str:
+    """SIN … ATAN, COT, DEGREES, RADIANS, PI, ATAN2 (BL-364) — radians on both sides;
+    ATAN2 is a row-level pass-through."""
+    if name == "ATAN2":
+        row_level_args(name, args, resolver)
+    return sql_trig_to_ts(name, args)
+
+
 EXACT_FORM_CALLS = {"TO_CHAR": call_to_char, "TO_VARCHAR": call_to_char,
                     "SUBSTR": call_substr, "SUBSTRING": call_substr,
                     "MONTHS_BETWEEN": call_months_between,
@@ -122,7 +131,12 @@ EXACT_FORM_CALLS = {"TO_CHAR": call_to_char, "TO_VARCHAR": call_to_char,
                     "FLOOR": call_floor_ceil, "CEIL": call_floor_ceil,
                     "CEILING": call_floor_ceil, "TO_NUMBER": call_to_number,
                     "TO_DECIMAL": call_to_number, "TO_NUMERIC": call_to_number,
-                    "MOD": call_mod}
+                    "MOD": call_mod,
+                    # BL-364 — radians on both sides (formula_text.sql_trig_to_ts)
+                    "SIN": call_trig, "COS": call_trig, "TAN": call_trig, "ASIN": call_trig,
+                    "ACOS": call_trig, "ATAN": call_trig, "COT": call_trig,
+                    "ATAN2": call_trig, "DEGREES": call_trig, "RADIANS": call_trig,
+                    "PI": call_trig}
 EXACT_FORM_EMITS = {"TO_CHAR": ("sql_string_op",), "TO_VARCHAR": ("sql_string_op",),
                     "SUBSTR": ("substr", "strlen", "sql_string_op"),
                     "SUBSTRING": ("substr", "strlen", "sql_string_op"),
@@ -133,7 +147,11 @@ EXACT_FORM_EMITS = {"TO_CHAR": ("sql_string_op",), "TO_VARCHAR": ("sql_string_op
                     "TO_NUMBER": ("to_integer", "round", "sql_double_op"),
                     "TO_DECIMAL": ("to_integer", "round", "sql_double_op"),
                     "TO_NUMERIC": ("to_integer", "round", "sql_double_op"),
-                    "MOD": ("mod", "sql_double_op")}
+                    "MOD": ("mod", "sql_double_op"),
+                    "SIN": ("sin",), "COS": ("cos",), "TAN": ("tan",), "ASIN": ("asin",),
+                    "ACOS": ("acos",), "ATAN": ("atan",), "COT": ("tan",),
+                    "ATAN2": ("sql_double_op",), "DEGREES": ("sql_double_op",),
+                    "RADIANS": ("sql_double_op",), "PI": ("sql_double_op",)}
 
 
 # DATEDIFF(unit, start, end) -> diff_<unit> ( end , start ). Snowflake counts unit

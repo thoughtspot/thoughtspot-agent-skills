@@ -48,6 +48,13 @@ from ts_cli.formula_common import (
     ts_round_from_sql_digits,
     ts_weekday_number,
 )
+from ts_cli.formula_text import (
+    SQL_STRING_TOKEN_DATABRICKS,
+    sql_literal_text,
+    sql_std_literal,
+    ts_finalize_formula,
+    sql_trig_to_ts,
+)
 from ts_cli.databricks.mv_sql_calls import (
     mvc_bround,
     mvc_concat_ws,
@@ -73,7 +80,7 @@ from ts_cli.sql_forms import (
 
 
 _TOKEN_RE = re.compile(
-    r"(?P<string>'(?:[^']|'')*')"
+    r"(?P<string>" + SQL_STRING_TOKEN_DATABRICKS + ")"
     r"|(?P<number>\d+(?:\.\d+)?)"
     r"|(?P<ident>(?:`[^`]+`|[A-Za-z_][\w$]*)(?:\.(?:`[^`]+`|[A-Za-z_][\w$]*))*)"
     r"|(?P<op><=|>=|!=|<>|\|\||[+\-*/%(),<>=])"
@@ -114,6 +121,13 @@ def tokenize(sql: str) -> list[tuple[str, str]]:
         if kind == "ws":
             continue
         text = m.group()
+        if kind == "string":
+            # decoded (\' is a quote) and carried SQL-standard (BL-365); adjacent
+            # literals are one literal, as Databricks reads them ('it''s' = its, live)
+            text = sql_std_literal(sql_literal_text(text, "databricks"))
+            if toks and toks[-1][0] == "string":
+                text = sql_std_literal(toks.pop()[1][1:-1].replace("''", "'")
+                                       + text[1:-1].replace("''", "'"))
         if kind == "ident" and text.upper() in _KEYWORDS:
             toks.append(("kw", text.upper()))
         else:
@@ -202,7 +216,8 @@ def translate_sql_expr(sql: str, resolver: Callable[[str], str],
     kind, text = cur.peek()
     if kind is not None:
         raise UntranslatableError(f"unexpected trailing token {text!r}")
-    return out
+    # string literals into their exact ThoughtSpot form; `a * b / c` bracketed (BL-365)
+    return ts_finalize_formula(out)
 
 
 _STOP_OPS = {")", ","}
@@ -463,6 +478,13 @@ def _call_months_between(name: str, args: list[str], resolver=None) -> str:
     return sql_passthrough_call("sql_double_op", "months_between", args)
 
 
+def _call_trig(name: str, args: list[str], resolver=None) -> str:
+    """SIN … ATAN, COT, DEGREES, RADIANS, PI, ATAN2 (BL-364); ATAN2 is row-level."""
+    if name == "ATAN2":
+        _row_level_only(name, args)
+    return sql_trig_to_ts(name, args)
+
+
 _EXACT_FORM_CALLS = {"MONTHS_BETWEEN": _call_months_between,
                      "SUBSTRING": _call_dbx_substr, "SUBSTR": _call_dbx_substr,
                      # BL-361 / BL-362 — mv_sql_calls.py
@@ -470,7 +492,12 @@ _EXACT_FORM_CALLS = {"MONTHS_BETWEEN": _call_months_between,
                      "CEILING": mvc_floor_ceil, "TRY_DIVIDE": mvc_try_divide,
                      "NVL2": mvc_nvl2, "TRUNC": mvc_trunc, "LAST_DAY": mvc_last_day,
                      "BROUND": mvc_bround, "INSTR": mvc_instr, "CONCAT_WS": mvc_concat_ws,
-                     "TO_DATE": mvc_to_date_expr, "MOD": mvc_mod}
+                     "TO_DATE": mvc_to_date_expr, "MOD": mvc_mod,
+                     # BL-364 — radians on both sides (formula_text.sql_trig_to_ts)
+                     "SIN": _call_trig, "COS": _call_trig, "TAN": _call_trig,
+                     "ASIN": _call_trig, "ACOS": _call_trig, "ATAN": _call_trig,
+                     "COT": _call_trig, "ATAN2": _call_trig, "DEGREES": _call_trig,
+                     "RADIANS": _call_trig, "PI": _call_trig}
 # Every ThoughtSpot name each handler above can emit — read by check_mapping_code_sync.py
 # (requirement D), which cannot see through function-valued dispatch maps.
 EXACT_FORM_EMITS = {"MONTHS_BETWEEN": ("sql_double_op",),
@@ -483,7 +510,11 @@ EXACT_FORM_EMITS = {"MONTHS_BETWEEN": ("sql_double_op",),
                     "LAST_DAY": ("add_days", "add_months", "start_of_month"),
                     "BROUND": ("sql_double_op",), "INSTR": ("sql_int_op",),
                     "CONCAT_WS": ("sql_string_op",), "TO_DATE": ("sql_date_op",),
-                    "MOD": ("mod", "sql_double_op")}
+                    "MOD": ("mod", "sql_double_op"),
+                    "SIN": ("sin",), "COS": ("cos",), "TAN": ("tan",), "ASIN": ("asin",),
+                    "ACOS": ("acos",), "ATAN": ("atan",), "COT": ("tan",),
+                    "ATAN2": ("sql_double_op",), "DEGREES": ("sql_double_op",),
+                    "RADIANS": ("sql_double_op",), "PI": ("sql_double_op",)}
 
 
 def _call_round(args: list[str]) -> str:

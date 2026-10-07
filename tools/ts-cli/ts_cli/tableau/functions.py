@@ -80,7 +80,9 @@ def _build_function_map() -> list[tuple[re.Pattern, Any]]:
         (r"\bSQRT\s*\(", "sqrt ( "),
         (r"\bEXP\s*\(", "exp ( "),
         (r"\bSQUARE\s*\(", "_SQUARE_HANDLER"),
-        (r"\bPI\s*\(\s*\)", "3.14159265358979"),
+        # BL-364: the warehouse's own PI(), a full double — the 15-digit literal lost
+        # precision, and a literal-over-literal division of it was fixed-point (BL-365).
+        (r"\bPI\s*\(\s*\)", 'sql_double_op ( "PI()" )'),
 
         # Row-offset table calc — SIZE() is the one member of that family
         # (see tableau/validate.py's _TABLE_CALC_NO_EQUIVALENT for the rest)
@@ -195,13 +197,20 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("SIGN", lambda a: (
         f"( if ( {a[0]} > 0 ) then 1 else if ( {a[0]} < 0 ) then -1 else 0 )"
         if len(a) == 1 else None)),
-    ("SIN", lambda a: f"sin ( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
-    ("COS", lambda a: f"cos ( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
-    ("TAN", lambda a: f"tan ( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
-    ("RADIANS", lambda a: f"( {a[0]} * 3.14159265358979 / 180 )" if len(a) == 1 else None),
-    ("DEGREES", lambda a: f"( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
+    # BL-364: ThoughtSpot trigonometry is in RADIANS (live 2026-10-07, probe record §7:
+    # `sin ( 30 )` compiles to SIN(30) = -0.988), as Tableau's is, so it maps 1:1. The
+    # former `* 180 / 3.14159…` conversion assumed degrees and was wrong for every input.
+    ("SIN", lambda a: f"sin ( {a[0]} )" if len(a) == 1 else None),
+    ("COS", lambda a: f"cos ( {a[0]} )" if len(a) == 1 else None),
+    ("TAN", lambda a: f"tan ( {a[0]} )" if len(a) == 1 else None),
+    # Exact: the warehouse PI() (a double), and the product bracketed before the
+    # division (BL-365 — `x * 180 / π` is read as `x * ( 180 / π )`).
+    ("RADIANS", lambda a: (f'( ( {a[0]} * sql_double_op ( "PI()" ) ) / 180 )'
+                           if len(a) == 1 else None)),
+    ("DEGREES", lambda a: (f'( ( {a[0]} * 180 ) / sql_double_op ( "PI()" ) )'
+                           if len(a) == 1 else None)),
     # ATAN2 has no native ThoughtSpot function; pass it to the warehouse, the same
-    # treatment PI/RADIANS/DEGREES get above. Argument order is Tableau's (y, x)
+    # warehouse treatment PI gets above. Argument order is Tableau's (y, x)
     # and SQL ATAN2 takes (y, x) too, so no swap. Audit finding 13.27 -- it was in
     # no mapped, unmapped or pass-through table, so it passed through untranslated
     # against this file's own fail-loud policy. That the trig block handled the
@@ -217,16 +226,12 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("DIV", lambda a: (f"floor ( safe_divide ( {a[0]} , {a[1]} ) )"
                        if len(a) == 2 else None)),
 
-    # Inverse trig + COT (BL-072 sub-item). Tableau ACOS/ASIN/ATAN return
-    # radians; ThoughtSpot acos/asin/atan return degrees (by symmetry with
-    # the shipped SIN/COS/TAN radians-to-degrees conversion above) — convert
-    # TS degrees back to radians with * pi/180. COT(x) = 1/tan(x) with x in
-    # radians (Tableau); tan ( ) here needs its argument in degrees, same as
-    # the shipped TAN conversion.
-    ("ACOS", lambda a: f"( acos ( {a[0]} ) * 3.14159265358979 / 180 )" if len(a) == 1 else None),
-    ("ASIN", lambda a: f"( asin ( {a[0]} ) * 3.14159265358979 / 180 )" if len(a) == 1 else None),
-    ("ATAN", lambda a: f"( atan ( {a[0]} ) * 3.14159265358979 / 180 )" if len(a) == 1 else None),
-    ("COT", lambda a: f"( 1 / tan ( {a[0]} * 180 / 3.14159265358979 ) )" if len(a) == 1 else None),
+    # Inverse trig + COT (BL-072 sub-item). Radians in and out on both sides (BL-364);
+    # COT(x) = 1 / tan(x).
+    ("ACOS", lambda a: f"acos ( {a[0]} )" if len(a) == 1 else None),
+    ("ASIN", lambda a: f"asin ( {a[0]} )" if len(a) == 1 else None),
+    ("ATAN", lambda a: f"atan ( {a[0]} )" if len(a) == 1 else None),
+    ("COT", lambda a: f"( 1 / tan ( {a[0]} ) )" if len(a) == 1 else None),
 
     ("DATEPARSE", lambda a: f"to_date ( {a[1]} , {a[0]} )" if len(a) == 2 else None),
 

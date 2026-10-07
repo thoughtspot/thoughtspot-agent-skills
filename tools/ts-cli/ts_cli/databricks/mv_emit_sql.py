@@ -4,6 +4,8 @@ Authoritative mapping source:
   agents/shared/mappings/ts-databricks/ts-databricks-formula-translation.md
 """
 from __future__ import annotations
+
+import re
 from typing import Callable
 
 from ts_cli.databricks.mv_emit_expr import UntranslatableError
@@ -86,6 +88,12 @@ def _emit_unop(node: dict, resolver) -> str:
     return f"-{inner}"
 
 
+def _ast_string_text(value: str) -> str:
+    """The text of an AST string literal (quote spelled '', backslash doubled)."""
+    return re.sub(r"\\(.)|''", lambda m: m.group(1) if m.group(1) is not None else "'",
+                  value[1:-1])
+
+
 def _emit_lit(node: dict) -> str:
     if node["kind"] == "null":
         return "NULL"
@@ -93,7 +101,13 @@ def _emit_lit(node: dict) -> str:
         return node["value"].upper()
     if node["kind"] == "raw":
         return node["value"]
-    return node["value"]  # string keeps single quotes; number verbatim
+    if node["kind"] == "string":
+        # the AST spells a quote '' and a backslash \\ (mv_emit_expr._canonical_string);
+        # Databricks reads '' as two adjacent literals ('it''s' = its, live 2026-10-07),
+        # so a quote is backslash-escaped instead (BL-365)
+        text = _ast_string_text(node["value"])
+        return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
+    return node["value"]  # number verbatim
 
 
 def _emit_binop(node: dict, resolver) -> str:
@@ -170,7 +184,7 @@ def _emit_passthrough(fn: str, args: list) -> str:
     raw = args[0]
     if raw.get("node") != "lit" or raw["kind"] != "string":
         raise UntranslatableError(f"{fn} pass-through expects a string literal")
-    return raw["value"][1:-1].replace("''", "'")  # unwrap the SQL string
+    return _ast_string_text(raw["value"])  # unwrap the SQL string
 
 
 def _emit_safe_divide(args: list, resolver) -> str:

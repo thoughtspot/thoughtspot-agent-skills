@@ -25,6 +25,12 @@ from ts_cli.formula_common import (
     ts_round_from_sql_digits,
     ts_weekday_number,
 )
+from ts_cli.formula_text import (
+    SQL_STRING_TOKEN_SNOWFLAKE,
+    sql_literal_text,
+    sql_std_literal,
+    ts_finalize_formula,
+)
 from ts_cli.sv_sql_exact import EXACT_FORM_CALLS as _EXACT_FORM_CALLS
 from ts_cli.sv_sql_exact import CAST_NUMBER, cast_number, cast_params, datediff_to_ts
 from ts_cli.sv_sql_exact import is_aggregated as _is_aggregated
@@ -39,7 +45,7 @@ from ts_cli.sql_forms import (
 
 
 _TOKEN_RE = re.compile(
-    r"(?P<string>'(?:[^']|'')*')"
+    r"(?P<string>" + SQL_STRING_TOKEN_SNOWFLAKE + ")"
     r"|(?P<number>\d+(?:\.\d+)?)"
     # A segment is a bare identifier OR a double-quoted one. Snowflake requires
     # the quoted form for reserved words and for names needing exact case
@@ -87,6 +93,9 @@ def tokenize(sql: str) -> list[tuple[str, str]]:
         if kind == "ws":
             continue
         text = m.group()
+        if kind == "string":
+            # decoded ('' and \' are one quote) and carried SQL-standard (BL-365)
+            text = sql_std_literal(sql_literal_text(text, "snowflake"))
         if kind == "ident" and text.upper() in _KEYWORDS:
             toks.append(("kw", text.upper()))
         else:
@@ -124,7 +133,8 @@ def translate_sql_expr(sql: str, resolver: Callable[[str], str]) -> str:
     kind, text = cur.peek()
     if kind is not None:
         raise UntranslatableError(f"unexpected trailing token {text!r}")
-    return out
+    # string literals into their exact ThoughtSpot form; `a * b / c` bracketed (BL-365)
+    return ts_finalize_formula(out)
 
 
 _STOP_OPS = {")", ","}

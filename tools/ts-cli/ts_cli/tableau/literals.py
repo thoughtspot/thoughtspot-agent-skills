@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.formula_text import ts_string_literal
+
 # Placeholder uses SOH (\x01) delimiters: a control character that (a) never
 # appears in real Tableau formulas, (b) is not a \w character so it can't be
 # absorbed into an identifier/keyword regex elsewhere in the pipeline, and
@@ -89,18 +91,19 @@ def literal_value(token: str, registry: dict[str, dict[str, str]]) -> str | None
 
 def _string_literal_to_ts(raw: str) -> str:
     """Convert a raw Tableau string literal (single- or double-quoted, with
-    surrounding quote characters) to ThoughtSpot's single-quoted form.
+    surrounding quote characters) to the ThoughtSpot literal that reads back as
+    the same text.
 
-    Un-escapes the source's doubled-quote escape back to a single character,
-    then re-escapes any interior single quote for single-quoted TS output
-    (a no-op round-trip when the source was already single-quoted, since both
-    dialects double-escape the same way).
+    Un-escapes the source's doubled-quote escape back to a single character, then
+    prints it with ``formula_text.ts_string_literal``: ThoughtSpot reads a
+    doubled quote as TWO quotes and drops a lone backslash, so ``'it''s'`` was a
+    silent wrong answer (BL-365, live 2026-10-07). Tableau has no backslash
+    escape, so a backslash is literal text.
     """
     quote = raw[0]
     interior = raw[1:-1]
     interior = interior.replace(quote + quote, quote)
-    interior = interior.replace("'", "''")
-    return f"'{interior}'"
+    return ts_string_literal(interior)
 
 
 def _date_literal_to_ts(raw: str) -> str:

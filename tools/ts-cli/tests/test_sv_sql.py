@@ -537,8 +537,9 @@ class TestComplex:
         assert "if ( [A::STATUS] = 'Active' )" in result
 
     def test_string_with_escaped_quotes(self):
+        # ThoughtSpot reads 'it''s' as two quotes; the double-quoted literal is exact (BL-365)
         result = translate_sql_expr("a.X = 'it''s'", _resolve)
-        assert "'it''s'" in result
+        assert '"it\'s"' in result and "''" not in result
 
 
 # ---------------------------------------------------------------------------

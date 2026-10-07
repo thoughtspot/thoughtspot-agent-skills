@@ -24,6 +24,8 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
+from ts_cli.formula_text import ts_string_literal
+
 _PREC = {"or": 1, "and": 2, "=": 4, "!=": 4, "<": 4, "<=": 4, ">": 4, ">=": 4,
          "+": 5, "-": 5, "*": 6, "/": 6}
 _PRIMARY = 9
@@ -38,24 +40,11 @@ def lit_string(value: str) -> dict:
 
 
 def _string_text(literal: str) -> str:
-    """How a string literal is PRINTED (live 2026-10-07, probe record §7). ThoughtSpot reads
-    ``'it''s'`` as two quotes (``it''s``), and its backslash escape ``'it\'s'`` fails to parse
-    after an earlier string literal in the same formula. So text with a quote is printed as the
-    warehouse's own literal, ``sql_string_op ( "'it''s'" )``; a backslash is doubled
-    (``'a\\b'`` is ``a\b``, live)."""
-    text = string_text(literal)
-    if "'" in text:
-        return 'sql_string_op ( "\'' + text.replace("\\", "\\\\").replace("'", "''") + '\'" )'
-    return "'" + text.replace("\\", "\\\\") + "'"
-
-
-def unprintable_string(literal: str) -> bool:
-    """A quote-bearing text the ``sql_string_op`` form cannot carry: a ``"`` ends the template
-    (it has no escape, probe record §7), ``{`` / ``}`` read as placeholders, and a backslash
-    inside a template does not survive (``INITCAP`` delimiters with ``\\t`` / ``\\x22``
-    became letters, §7), so ``it\\'s`` has no form that is known to work."""
-    text = string_text(literal)
-    return "'" in text and any(c in text for c in '"{}\\')
+    """How a string literal is PRINTED: ``formula_text.ts_string_literal``, the one form
+    shared by every translator (BL-365). ThoughtSpot reads ``'it''s'`` as two quotes and its
+    backslash escape fails before a space, so a quote-bearing text is a double-quoted
+    literal, ``"it's"`` (live 2026-10-07, probe record §7)."""
+    return ts_string_literal(string_text(literal))
 
 
 def string_text(literal: str) -> str:

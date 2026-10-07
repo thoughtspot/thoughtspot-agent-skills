@@ -13,6 +13,7 @@ import re
 # existing `from ts_cli.databricks.mv_emit_expr import UntranslatableError`
 # call sites are unaffected.
 from ts_cli.formula_common import UntranslatableError
+from ts_cli.formula_text import ts_literal_token_text
 
 
 _KW = {"if", "then", "else", "and", "or", "not", "in", "between",
@@ -27,7 +28,7 @@ _KW = {"if", "then", "else", "and", "or", "not", "in", "between",
 _FORMULA_TOKEN_RE = re.compile(r"""
     (?P<ws>\s+)
   | (?P<bracket>\[[^\]]*\])
-  | (?P<string>'(?:[^']|'')*')
+  | (?P<string>'(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.)*")
   | (?P<number>\d+\.\d+|\d+)
   | (?P<op>!=|<=|>=|[(),+\-*/=<>{}])
   | (?P<ident>[A-Za-z_][A-Za-z0-9_ ]*?(?=\s*\())
@@ -73,9 +74,20 @@ def tokenize_formula(expr: str) -> list[tuple[str, str]]:
             continue
         if kind in ("ident", "bareident"):
             toks.extend(_word_tokens(text.strip()))
+        elif kind == "string":
+            toks.append((kind, _canonical_string(text)))
         else:
             toks.append((kind, text))
     return toks
+
+
+def _canonical_string(token: str) -> str:
+    """A ThoughtSpot literal token (single- or double-quoted) as the text ThoughtSpot reads
+    from it — in a single-quoted literal ``''`` is TWO quotes, and ``\\x`` is ``x`` in
+    either (live 2026-10-07, probe record §7; BL-365) — re-spelled in the AST's one
+    convention: quote doubled, backslash doubled (``excel.tsast.lit_string``)."""
+    text = ts_literal_token_text(token)
+    return "'" + text.replace("\\", "\\\\").replace("'", "''") + "'"
 
 
 class _P:

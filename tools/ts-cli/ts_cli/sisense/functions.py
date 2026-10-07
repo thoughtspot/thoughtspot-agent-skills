@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 
 from ts_cli.formula_common import sql_digits_to_ts_increment
+from ts_cli.formula_text import ts_finalize_formula
 
 # Sisense JAQL `agg` -> TML aggregation property (for SIMPLE measures, no formula).
 # NOTE on count semantics (verified against Sisense docs): Sisense `count` returns the
@@ -412,6 +413,9 @@ def translate_jaql(expr, context: dict | None = None) -> tuple:
     if cond_err:
         return None, "NEEDS REVIEW", cond_err
     out = re.sub(r"\s+", " ", out).strip()
+    # Literals into ThoughtSpot's exact form (read SQL-standard: '' is one quote, a
+    # backslash is literal); `a * b / c` bracketed (BL-365)
+    out = ts_finalize_formula(out)
 
     return out, _STATUS[coverage], "; ".join(notes)
 

@@ -361,14 +361,16 @@ class TestTypeTests:
 # ---------------------------------------------------------------------------
 
 class TestPrinter:
-    def test_quote_is_printed_as_a_warehouse_literal(self):
-        # 'it''s' is read as it''s, and 'it\'s' fails to parse after another string literal
+    def test_quote_is_printed_as_a_double_quoted_literal(self):
+        # 'it''s' is read as it''s, and 'it\'s' fails to parse before a space; the
+        # double-quoted literal is exact everywhere (BL-365, live 2026-10-07)
         e = f('=CONCAT("Bob","\'s ",[@name])')
-        assert e == "concat ( 'Bob' , sql_string_op ( \"'''s '\" ) , [T::name] )"
-        assert f('=CONCAT("a\\b","!")') == "concat ( 'a\\\\b' , '!' )"
-        assert "cannot carry" in review('=CONCAT("say ""hi"", it\'s",[@name])')
-        assert "cannot carry" in review('=CONCAT("it\\\'s",[@name])')     # backslash + quote
-        assert "cannot carry" in review('=CONCAT("{it\'s}",[@name])')
+        assert e == "concat ( 'Bob' , \"'s \" , [T::name] )"
+        assert f('=CONCAT("a\\b","!")') == "concat ( \"a\\\\b\" , '!' )"
+        # both quote kinds: a concat of the two forms, split at the double quote
+        assert f('=CONCAT("say ""hi"", it\'s",[@name])') == (
+            "concat ( concat ( 'say ' , '\"' , 'hi' , '\"' , \", it's\" ) , [T::name] )")
+        assert f('=CONCAT("{it\'s}",[@name])') == "concat ( \"{it's}\" , [T::name] )"
         from ts_cli.excel.tsast import lit_string, string_text
         for text in ("it's", "a\\b", "''", "plain"):
             assert string_text(lit_string(text)["value"]) == text

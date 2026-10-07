@@ -14,8 +14,8 @@ function.
 from __future__ import annotations
 
 CATALOG = frozenset({
-    "abs", "add_days", "add_minutes", "add_months", "add_seconds", "add_weeks",
-    "add_years", "average", "average_if", "between", "ceil", "concat", "contains", "count",
+    "abs", "acos", "add_days", "add_minutes", "add_months", "add_seconds", "add_weeks",
+    "add_years", "asin", "atan", "average", "average_if", "between", "ceil", "concat", "contains", "cos", "count",
     "count_if", "cumulative_average", "cumulative_max", "cumulative_min", "cumulative_sum",
     "date", "day", "day_number_of_quarter", "day_number_of_week", "day_number_of_year",
     "day_of_week", "diff_days", "diff_hours", "diff_minutes", "diff_months",
@@ -24,10 +24,10 @@ CATALOG = frozenset({
     "log10", "log2", "max", "max_if", "median", "min", "min_if", "mod", "month",
     "month_number", "month_number_of_quarter", "moving_average", "moving_max",
     "moving_min", "moving_sum", "not", "now", "pow", "quarter_number", "right",
-    "round", "safe_divide", "sqrt", "start_of_hour", "start_of_min", "start_of_month",
+    "round", "safe_divide", "sin", "sqrt", "start_of_hour", "start_of_min", "start_of_month",
     "start_of_quarter", "start_of_week", "start_of_year", "stddev", "stddev_if", "strlen",
     "strpos", "substr", "sum", "sum_if", "time", "to_double", "to_integer", "to_string",
-    "today", "ts_email_domain", "ts_groups", "ts_groups_int", "ts_org", "ts_username",
+    "tan", "today", "ts_email_domain", "ts_groups", "ts_groups_int", "ts_org", "ts_username",
     "unique count", "unique_count_if", "variance", "variance_if", "week_number_of_month",
     "week_number_of_quarter", "week_number_of_year", "year", "year_name",
 })
@@ -50,12 +50,6 @@ EXTRAS = {
     "last_value": "formula-patterns: semi-additive last_value",
     "first_value": "formula-patterns: first_value",
     "exp": "qlik mapping N09: exp() live-confirmed",
-    "sin": "radians, live 2026-10-07 (probe record §7; BL-364)",
-    "cos": "radians, live 2026-10-07 (probe record §7; BL-364)",
-    "tan": "radians, live 2026-10-07 (probe record §7; BL-364)",
-    "asin": "radians, live 2026-10-07 (probe record §7; BL-364)",
-    "acos": "radians, live 2026-10-07 (probe record §7; BL-364)",
-    "atan": "radians, live 2026-10-07 (probe record §7; BL-364)",
     "atan2": "radians, live 2026-10-07 (probe record §7; BL-364)",
     "sql_string_op": "formula-patterns: SQL pass-through",
     "sql_int_op": "formula-patterns: SQL pass-through",

@@ -755,39 +755,42 @@ class TestMapFunctions:
         assert map_functions("SIGN([X])") == \
             "( if ( [X] > 0 ) then 1 else if ( [X] < 0 ) then -1 else 0 )"
 
-    def test_trig_converts_radians_to_degrees(self):
-        assert map_functions("SIN([X])") == "sin ( [X] * 180 / 3.14159265358979 )"
+    # BL-364: ThoughtSpot trigonometry is in RADIANS (live 2026-10-07, probe record §7:
+    # `sin ( 30 )` = -0.988), like Tableau's — the former `* 180 / π` conversion was a
+    # silent wrong answer for every non-zero input. Pinned by value in
+    # test_ts_semantics_values.py as well.
+    def test_trig_is_identity(self):
+        assert map_functions("SIN([X])") == "sin ( [X] )"
+        assert map_functions("COS([X])") == "cos ( [X] )"
+        assert map_functions("TAN([X])") == "tan ( [X] )"
 
     def test_pi(self):
-        assert map_functions("PI()") == "3.14159265358979"
+        # the warehouse's own double, not a 15-digit literal
+        assert map_functions("PI()") == 'sql_double_op ( "PI()" )'
 
     def test_radians(self):
-        assert map_functions("RADIANS([D])") == "( [D] * 3.14159265358979 / 180 )"
+        assert map_functions("RADIANS([D])") == '( ( [D] * sql_double_op ( "PI()" ) ) / 180 )'
 
     def test_degrees(self):
-        assert map_functions("DEGREES([R])") == "( [R] * 180 / 3.14159265358979 )"
+        # the product is bracketed: `x * 180 / π` is read as `x * ( 180 / π )` (BL-365)
+        assert map_functions("DEGREES([R])") == '( ( [R] * 180 ) / sql_double_op ( "PI()" ) )'
 
     # -----------------------------------------------------------------------
-    # Inverse trig + COT (BL-072 sub-item) — ThoughtSpot's inverse trig
-    # functions return degrees where Tableau's return radians (by symmetry
-    # with the shipped SIN/COS/TAN radians-to-degrees conversion above), so
-    # the composite converts TS degrees back to radians with * pi/180. COT
-    # has no native ThoughtSpot function; it composites off `tan` the same
-    # way Tableau defines COT(x) = 1/tan(x), with x converted to degrees
-    # for the inner `tan` call.
+    # Inverse trig + COT (BL-072 sub-item) — radians in and out on both sides
+    # (BL-364). COT has no native ThoughtSpot function: 1 / tan ( x ).
     # -----------------------------------------------------------------------
 
-    def test_acos_converts_degrees_to_radians(self):
-        assert map_functions("ACOS([x])") == "( acos ( [x] ) * 3.14159265358979 / 180 )"
+    def test_acos_is_identity(self):
+        assert map_functions("ACOS([x])") == "acos ( [x] )"
 
-    def test_asin_converts_degrees_to_radians(self):
-        assert map_functions("ASIN([x])") == "( asin ( [x] ) * 3.14159265358979 / 180 )"
+    def test_asin_is_identity(self):
+        assert map_functions("ASIN([x])") == "asin ( [x] )"
 
-    def test_atan_converts_degrees_to_radians(self):
-        assert map_functions("ATAN([x])") == "( atan ( [x] ) * 3.14159265358979 / 180 )"
+    def test_atan_is_identity(self):
+        assert map_functions("ATAN([x])") == "atan ( [x] )"
 
-    def test_cot_converts_via_tan_composite(self):
-        assert map_functions("COT([x])") == "( 1 / tan ( [x] * 180 / 3.14159265358979 ) )"
+    def test_cot_is_one_over_tan(self):
+        assert map_functions("COT([x])") == "( 1 / tan ( [x] ) )"
 
     def test_acos_wrong_arity_left_untranslated(self):
         expr = "ACOS([a],[b])"

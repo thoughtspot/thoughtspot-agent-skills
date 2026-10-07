@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 
 from ts_cli.formula_common import sql_digits_to_ts_increment, wrap_passthrough_calls
+from ts_cli.formula_text import sql_std_literal, ts_finalize_formula
 
 # Presence of any of these makes the whole measure NEEDS REVIEW: they manipulate
 # filter context / iterate / do time intelligence and have no 1:1 TS formula.
@@ -270,8 +271,10 @@ def _expand_functions(expr):
 
 def _normalize_operators(expr):
     """DAX string literals + operators -> ThoughtSpot. Returns (expr, concat_note|None)."""
-    # DAX "double" string quotes -> ThoughtSpot 'single'.
-    expr = re.sub(r'"([^"]*)"', lambda m: "'" + m.group(1).replace("'", "''") + "'", expr)
+    # DAX "double" string literals ("" is an embedded quote) -> SQL-standard 'single',
+    # printed in ThoughtSpot's exact form at the end by ts_finalize_formula (BL-365).
+    expr = re.sub(r'"((?:[^"]|"")*)"', lambda m: sql_std_literal(m.group(1).replace('""', '"')),
+                  expr)
     expr = expr.replace("<>", "!=")
     expr = expr.replace("&&", " and ").replace("||", " or ")
     expr = re.sub(r"\bNOT\b", "not", expr)
@@ -387,6 +390,8 @@ def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_
 
     expr = _qualify_home_and_dates(expr, home_table, home_cols, date_cols)
     expr = re.sub(r"\s+", " ", expr).strip()
+    # string literals into ThoughtSpot's exact form; `a * b / c` bracketed (BL-365)
+    expr = ts_finalize_formula(expr)
     status = "Approximated" if note_bits else status_floor
     return expr, status, "; ".join(note_bits)
 

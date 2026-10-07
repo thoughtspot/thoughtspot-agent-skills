@@ -523,9 +523,11 @@ class TestEmptyOverWindow:
     """BL-316 item 5 — SUM(SUM(x)) OVER () share-of-total denominator."""
 
     def test_sum_of_sum(self):
-        # x / NULLIF(y, 0) is plain division (BL-357), left-associative as in SQL
+        # x / NULLIF(y, 0) is plain division (BL-357), left-associative as in SQL: the
+        # product is bracketed, since ThoughtSpot reads `a * b / c` as `a * ( b / c )`
+        # (BL-365)
         assert t("SUM(x) * 100.0 / NULLIF(SUM(SUM(x)) OVER (), 0)") == (
-            "sum ( [TRANSACTIONS::x] ) * 100.0 / group_aggregate "
+            "( sum ( [TRANSACTIONS::x] ) * 100.0 ) / group_aggregate "
             "( sum ( [TRANSACTIONS::x] ) , { } , query_filters ( ) )")
 
     def test_sum_of_count(self):

@@ -44,7 +44,8 @@ _WEEK_OUT = re.compile(
     r"week_number_of_month|week_number_of_quarter)\s*\(")
 _STRCMP_OUT = re.compile(
     r"(\bcontains\s*\(|\bstrpos\s*\(|\bbegins_with\s*\(|\bends_with\s*\(|"
-    r"(?:=|!=|<>)\s*'|'\s*(?:=|!=|<>))")
+    # a literal is single- or (holding a quote or backslash, BL-365) double-quoted
+    r"(?:=|!=|<>)\s*['\"]|['\"]\s*(?:=|!=|<>))")
 _PASSTHROUGH_OUT = re.compile(r"\bsql_(\w+?)_op\s*\(")
 _COUNT_STAR = re.compile(r"\bcount\s*\(\s*(?:\*|1)\s*\)", re.I)
 _SQL_LEFTOVER = re.compile(r"\b(DISTINCT|OVER|PARTITION\s+BY|QUALIFY|WITHIN\s+GROUP)\b", re.I)

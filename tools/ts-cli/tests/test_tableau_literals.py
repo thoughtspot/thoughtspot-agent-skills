@@ -65,9 +65,10 @@ class TestUnmaskLiterals:
         assert unmask_literals(masked, registry) == "[Status] = 'END'"
 
     def test_escaped_single_quote_round_trips(self):
-        # Tableau escapes an embedded quote by doubling it: 'it''s'
+        # Tableau escapes an embedded quote by doubling it: 'it''s'. ThoughtSpot reads a
+        # doubled quote as two, so it is re-emitted double-quoted (BL-365, live)
         masked, registry = mask_literals("[Name] = 'it''s'")
-        assert unmask_literals(masked, registry) == "[Name] = 'it''s'"
+        assert unmask_literals(masked, registry) == "[Name] = \"it's\""
 
     def test_escaped_double_quote_converts_cleanly(self):
         # "she said ""hi""" -> unescape to `she said "hi"`, no need to escape
@@ -76,10 +77,11 @@ class TestUnmaskLiterals:
         assert unmask_literals(masked, registry) == "[X] = 'she said \"hi\"'"
 
     def test_double_quoted_containing_apostrophe_gets_escaped(self):
-        # A double-quoted source literal containing a bare apostrophe must be
-        # escaped (doubled) when re-emitted as a single-quoted TS string.
+        # A double-quoted source literal containing a bare apostrophe is re-emitted as
+        # ThoughtSpot's double-quoted literal; 'it\'s fine' fails to parse (a space after
+        # the escape) and 'it''s fine' reads as two quotes (BL-365, live 2026-10-07)
         masked, registry = mask_literals('[X] = "it\'s fine"')
-        assert unmask_literals(masked, registry) == "[X] = 'it''s fine'"
+        assert unmask_literals(masked, registry) == '[X] = "it\'s fine"'
 
     def test_hash_inside_string_not_treated_as_date(self):
         masked, registry = mask_literals("[ID] = 'ID#123'")

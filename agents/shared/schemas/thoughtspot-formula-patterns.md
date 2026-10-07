@@ -182,6 +182,41 @@ else 0
 | `ln` | `ln ( [x] )` |
 | `log2` | `log2 ( [x] )` |
 | `log10` | `log10 ( [x] )` |
+| `sin` | `sin ( [x] )` — **radians**, like SQL, Excel and Tableau: `sin ( 30 )` compiles to `SIN(30)` = −0.988 ([probe record §7](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat), live 2026-10-07; BL-364). Never convert by `180 / π` |
+| `cos` | `cos ( [x] )` — radians (`cos ( 60 )` = −0.952, live 2026-10-07; BL-364) |
+| `tan` | `tan ( [x] )` — radians (`tan ( 45 )` = 1.620, live 2026-10-07). No native `cot`: `1 / tan ( [x] )` |
+| `asin` | `asin ( [x] )` — returns radians (`asin ( 0.5 )` = 0.5236, live 2026-10-07; BL-364) |
+| `acos` | `acos ( [x] )` — returns radians (`acos ( 0.5 )` = 1.0472, live 2026-10-07) |
+| `atan` | `atan ( [x] )` — returns radians (`atan ( 1 )` = 0.7854, live 2026-10-07). No catalogued `atan2`: `sql_double_op ( "ATAN2({0}, {1})" , [y] , [x] )` |
+| π | `sql_double_op ( "PI()" )` — the warehouse's own double (a zero-argument template is accepted, live 2026-10-07). A 15-digit literal loses precision, and a literal-over-literal division of it is fixed-point (below) |
+
+**Operator grouping — `a * b / c` is `a * ( b / c )`** (live, se-thoughtspot 2026-10-07; probe
+record §7; BL-365). `[n] * 4 / 3` compiles to `n * (4 / NULLIF(3, 0))`, and Snowflake divides two
+integers (or literals) at **scale 6**, so it returns 3.999999 for n = 3; `[n] * 2 * 5 / 3` is
+`n * 2 * (5 / 3)`. `a / b / c`, `a / b * c`, `a - b + c` and `a - b - c` stay left to right.
+**Bracket a product that is the left operand of a division**: `( [n] * 4 ) / 3` returns 4.
+Every translator does it in its last step (`formula_text.ts_finalize_formula`).
+
+---
+
+## String Literals
+
+How ThoughtSpot reads a literal (live, se-thoughtspot 2026-10-07, each compared with the Snowflake
+value over the same rows; [probe record §7](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#7-division-null-and-concat-safe_divide-nullif-concat); BL-365):
+
+| Literal | Reads as | Use it? |
+|---|---|---|
+| `'plain'` | `plain` | yes, for text with no quote and no backslash |
+| `'it''s'` | **`it''s`** — a doubled quote is TWO quotes | **never** for a quote |
+| `'it\'s'` | `it's` — but rejected at import when a space follows the escape (`'it\'s here'`, `'x\'s '`) | no |
+| `"it's"` (double-quoted) | `it's` — exact as a filter value (`=`, `!=`), in `in { }`, `contains`, `concat` after another literal, an `if` branch and a `sql_*_op` argument | **yes**, for text with a quote |
+| `'a\\b'`, `"a\\b"` | `a\b`; a lone `\` is dropped (`'a\b'` is `ab`) | double every backslash |
+| `sql_string_op ( "'it''s'" )` | `it's` | works; the double-quoted literal is shorter |
+
+Text holding both `'` and `"` is a `concat` of the two forms split at each `"`:
+`concat ( 'say ' , '"' , 'hi' , '"' , " it's" )`. `formula_text.ts_string_literal` prints these
+forms for every translator. A `sql_*_op` template is a different thing: double-quoted, no escape at
+all, and its inner literals are the warehouse's own (`'it''s'` is right inside a Snowflake template).
 
 ---
 

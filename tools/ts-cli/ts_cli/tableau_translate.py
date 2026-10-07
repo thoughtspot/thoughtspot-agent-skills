@@ -101,6 +101,7 @@ from ts_cli.tableau.lod import (  # noqa: F401
     convert_lod,
     convert_total,
 )
+from ts_cli.formula_text import ts_finalize_formula
 from ts_cli.tableau.literals import (  # noqa: F401
     PLACEHOLDER_RE,
     is_string_placeholder,
@@ -269,6 +270,10 @@ def translate_single(
     # 16. Unmask literals into their final ThoughtSpot form (single-quoted
     # string, or to_date(...) for a date literal).
     expr = unmask_literals(expr, literal_registry)
+
+    # 17. Bracket a product under a division (`a * b / c` is read as `a * ( b / c )`)
+    # and settle every string literal's ThoughtSpot form (BL-365).
+    expr = ts_finalize_formula(expr)
 
     return expr, errors, notes
 

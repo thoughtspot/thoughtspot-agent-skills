@@ -351,12 +351,20 @@ def sql_passthrough_call(op: str, fn: str, args: list[str]) -> str:
     """
     parts: list[str] = []
     bound: list[str] = []
+    literal_bound = 0
     for a in args:
         a = a.strip()
         if _SQL_NUM_LITERAL_RE.match(a):
             parts.append(a.replace(" ", ""))
         elif a.lower() in _SQL_BOOL_LITERALS:
             parts.append(a.upper())
+        elif _SQL_STR_LITERAL_RE.match(a) and "''" in a[1:-1]:
+            # A quote inside the literal: bound, not inlined. The warehouses disagree on
+            # `''` (Databricks reads 'it''s' as `its`), and a bound literal is passed as
+            # the warehouse's own literal (BL-365; REPLACE with a bound "'" matched, live)
+            parts.append("{%d}" % len(bound))
+            bound.append(a)
+            literal_bound += 1
         elif _SQL_STR_LITERAL_RE.match(a):
             if any(ch in a for ch in '"{}\\'):
                 raise UntranslatableError(
@@ -367,7 +375,7 @@ def sql_passthrough_call(op: str, fn: str, args: list[str]) -> str:
         else:
             parts.append("{%d}" % len(bound))
             bound.append(a)
-    if not bound:
+    if len(bound) == literal_bound:
         raise UntranslatableError(f"{fn} with only literal arguments has no pass-through form")
     template = f"{fn}({', '.join(parts)})"
     return f'{op} ( "{template}" , ' + " , ".join(bound) + " )"
@@ -832,3 +840,4 @@ def bare_column_name(expr: str | None, alias_table: str | None = None) -> str | 
         if tbl.strip('"').lower() != alias_table.strip('"').lower():
             return None
     return m.group("col").strip('"')
+

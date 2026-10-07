@@ -30,6 +30,7 @@ from ts_cli.formula_common import (
     ts_weekday_number,
     wrap_passthrough_calls,
 )
+from ts_cli.formula_text import ts_finalize_formula
 
 # ---------------------------------------------------------------------------
 # Function-name map + translator
@@ -188,6 +189,16 @@ FUNCTION_MAP: dict[str, Optional[str]] = {
 
 def translate(expr: str, first_week_day: Optional[int] = None
               ) -> tuple[str, bool, str]:
+    """Translate a Qlik expression to a ThoughtSpot formula (see ``_translate``). Qlik
+    string literals are SQL-standard (``'it''s'``); the output's literals are printed in
+    the form ThoughtSpot reads back exactly, and a product under a division is bracketed
+    (BL-365)."""
+    out, review, reason = _translate(expr, first_week_day)
+    return ts_finalize_formula(out), review, reason
+
+
+def _translate(expr: str, first_week_day: Optional[int] = None
+               ) -> tuple[str, bool, str]:
     """Translate a Qlik expression to a ThoughtSpot formula.
 
     Returns ``(ts_formula, review_required, reason)``. When review_required is
