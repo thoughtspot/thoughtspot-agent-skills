@@ -33,11 +33,11 @@
   },
   "summary": {
    "cases": 250,
-   "scored": 230,
-   "silent_wrong": 2,
-   "oracle_disputed": 20,
+   "scored": 229,
+   "silent_wrong": 1,
+   "oracle_disputed": 21,
    "by_class": {
-    "SILENT_WRONG": 2,
+    "SILENT_WRONG": 1,
     "WARNED_WRONG": 2,
     "DIVERGENCE_BLANK": 3,
     "DIVERGENCE_ERROR": 2,
@@ -47,11 +47,11 @@
     "ERROR_EQUIV": 3,
     "ORACLE_FAILED": 0,
     "MATCH": 215,
-    "ORACLE_DISPUTED": 20
+    "ORACLE_DISPUTED": 21
    },
    "by_source": {
     "libreoffice": {
-     "SILENT_WRONG": 1,
+     "SILENT_WRONG": 0,
      "WARNED_WRONG": 2,
      "DIVERGENCE_BLANK": 2,
      "DIVERGENCE_ERROR": 2,
@@ -61,7 +61,7 @@
      "ERROR_EQUIV": 2,
      "ORACLE_FAILED": 0,
      "MATCH": 171,
-     "ORACLE_DISPUTED": 18
+     "ORACLE_DISPUTED": 19
     },
     "poi": {
      "SILENT_WRONG": 1,
@@ -915,26 +915,6 @@
    "mismatch_kinds": [],
    "cause_tag": null,
    "backlog": null,
-   "detail": null
-  },
-  {
-   "id": "lo-mathematical-roundup-sheet2-r17",
-   "source": "libreoffice",
-   "category": "mathematical",
-   "functions": [
-    "ROUNDUP"
-   ],
-   "flags": [],
-   "crosscheck": "agree",
-   "translation_status": "TRANSLATED",
-   "trap_count": 0,
-   "verdict": "MISMATCH",
-   "class": "SILENT_WRONG",
-   "mismatch_kinds": [
-    "NUMERIC_DIFF"
-   ],
-   "cause_tag": "silver-vs-bronze-last-digit",
-   "backlog": "BL-356",
    "detail": null
   },
   {
@@ -4288,6 +4268,24 @@
    "category": "date_time",
    "functions": [
     "MONTH"
+   ],
+   "flags": [],
+   "crosscheck": "disputed",
+   "translation_status": null,
+   "trap_count": 0,
+   "verdict": null,
+   "class": "ORACLE_DISPUTED",
+   "mismatch_kinds": [],
+   "cause_tag": null,
+   "backlog": null,
+   "detail": null
+  },
+  {
+   "id": "lo-mathematical-roundup-sheet2-r17",
+   "source": "libreoffice",
+   "category": "mathematical",
+   "functions": [
+    "ROUNDUP"
    ],
    "flags": [],
    "crosscheck": "disputed",

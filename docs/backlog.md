@@ -254,7 +254,7 @@ are roughly ordered by value÷effort.
 | BL-193 | Worktree `git commit` runs the MAIN checkout's pre-commit script — local gates are the wrong branch's | opportunistic |
 | BL-363 | the M2 Databricks oracle runs case SQL as a service principal that owns the `agent_skills` catalog — confine it to a scratch-schema-only principal before any third-party SQL corpus runs on Databricks | 2026-11-15, and before any third-party Databricks corpus |
 | ~~BL-362~~ | ~~from-Databricks coverage: 17 common forms declined (NVL, NVL2, 3-arg COALESCE, try_divide, nullifzero, zeroifnull, concat_ws, `\|\|`, `%`, LIKE / ILIKE / RLIKE, INSTR, trunc, last_day, bround, to_date(column)) — loud, never wrong (fidelity M2)~~ | DONE (2026-10-07 — all 17 forms, ts-cli v0.163.0) |
-| BL-356 | the M1 cross-check agrees at 1e-9 while cases score at 1e-12 — a last-digit oracle disagreement is run and scored, not quarantined | next M1 / M2 harness change |
+| ~~BL-356~~ | ~~the M1 cross-check agrees at 1e-9 while cases score at 1e-12 — a last-digit oracle disagreement is run and scored, not quarantined~~ | RESOLVED (2026-10-07 — cross-check at the case's own tolerance; the case is ORACLE_DISPUTED) |
 | BL-351 | decimal literals are exact in the warehouse, IEEE doubles in Excel — literal-only arithmetic differs in the 13th digit (fidelity M1): document or emit doubles | documented 2026-10-07 (divergence, no fix planned); revisit only if a sheet needs Excel's double errors |
 | BL-177 | Reverse legs synthesise names that were already available | opportunistic |
 | BL-190 | Re-run the TML census: `--fqn --include-obj-id` (evidence NM1/X8) + a second cluster (T3) | next census session |
@@ -13064,7 +13064,7 @@ non-INT64 argument in that form. Unit-test with a DOUBLE column.
 
 ## BL-356 — The M1 cross-check agrees at 1e-9, looser than the 1e-12 a case is scored at, so a last-digit oracle disagreement is never quarantined `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** OPEN.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (fix/bl-356-crosscheck-tolerance).
 **Source:** formula fidelity M1 after-fixes run (case `lo-mathematical-roundup-sheet2-r17`;
 report `docs/reviews/2026-10-06-fidelity-m1-excel.md`, "After fixes").
 
@@ -13081,6 +13081,35 @@ report `docs/reviews/2026-10-06-fidelity-m1-excel.md`, "After fixes").
 widen any tolerance.
 
 **Target:** the next M1 / M2 harness change.
+
+**Resolution (2026-10-07).** `crosscheck_formulas.agree` now compares a numeric bronze value
+with the scorer's own rule, `compare.numbers_close`, at the case's declared tolerance. No
+tolerance was widened. The cross-check was re-run over the current candidates: 1,659
+evaluated, with 1,518 agree, 134 disputed and 7 unavailable. Against the previous cross-check,
+the tolerance changes exactly one status: `lo-mathematical-roundup-sheet2-r17` goes from agree
+to **disputed** (about 1.2e-12 relative). No case went the other way. A new `run_literal.py
+recheck` refreshes an existing manifest's statuses and keeps its case set; `select` on the
+regenerated candidates would have picked a different set. `rebuild` now drops the stored
+verdict of a case that has since become disputed, so it is not counted twice. The two 250-case
+runs whose full evidence exists were rebuilt without querying. In both, SILENT_WRONG goes from
+2 to 1 and ORACLE_DISPUTED from 20 to 21; no other case changed class. The case's
+`oracle-dispute` tag in `literal.CASE_DIVERGENCES` was removed, because the case is no longer
+run. Tests: `tools/formula-fidelity/tests/test_fidelity_crosscheck.py`. Report:
+`docs/reviews/2026-10-06-fidelity-m1-excel.md`, "After BL-356". The dispute itself (LibreOffice's
+silver value against Microsoft's rule and `formulas`) stays quarantined, following oracles.md,
+and is not decided by picking a side.
+
+The independent review of PR #580 led to these changes in the same PR:
+- `rebuild` refuses when a non-disputed manifest id is missing from the full run.
+- `recheck` marks ids the new cross-check did not evaluate `crosscheck_stale` (13 across the
+  two manifests).
+- `select` and `recheck` refuse a `crosscheck.json` produced by the pre-BL-356 rule.
+- A NaN on either side is disputed.
+- `run` no longer overwrites the same day's full run JSON. That overwrite is how the
+  `bl365-250` full evidence was lost.
+
+The 2026-10-06 run is deliberately not rebuilt. Its roundup failure (6 decimals) was the real
+BL-348 bug, wrong against both oracles.
 
 ## BL-364 — ThoughtSpot trigonometry is in radians; the Tableau translator and four maps convert as if it were degrees `Tier 1`
 
