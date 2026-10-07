@@ -32,6 +32,14 @@ backslash doubled, and every product under a division bracketed (`( a * b ) / c`
 translator's last step, `formula_text.ts_finalize_formula`. Copying `'O''Brien'` across was a silent
 wrong answer.
 
+## String concatenation — `a & b` (#579 review, ts-cli 0.165.0)
+
+Qlik `a & b & c` → `concat ( a , b , c )`. It was rewritten to `+`, which ThoughtSpot uses for
+numbers only — even inside a literal (`'A&B'` became `'A+B'`). The rewrite is quote-aware and
+recursive (`Upper(s & 'x')`); `&` binds looser than arithmetic and tighter than comparison, so a
+segment with both (`s & 'a' = 'xa'`) is left for review. `concat` takes Text only: wrap a numeric
+operand in `to_string` (an unwrapped one fails at import, loudly).
+
 ## Aggregation
 
 | # | Qlik Sense | ThoughtSpot | Status | Notes |

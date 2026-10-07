@@ -56,7 +56,9 @@ _SQL_KEYWORD_REF = re.compile(
     r"AND|OR|IN|BETWEEN|CASE|WHEN|THEN|ELSE|END|EXISTS|ANY|ALL)\s*\]", re.I)
 _BARE_TOTAL = re.compile(r"\bTOTAL\b", re.I)
 _DOUBLE_EQ = re.compile(r"==")
-_PLUS_STRING = re.compile(r"''\s*\+|\+\s*''")
+# a string literal (blanked to '' in the code text) or a concat ( … ) beside a `+`: the
+# double-quoted and concat literal forms (BL-365) must not slip past the guard (#579 review)
+_PLUS_STRING = re.compile(r"''\s*\+|\+\s*''|\+\s*concat\s*\(|\bconcat\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*\+")
 _COLUMN_CMP = re.compile(r"\]\s*(?:=|!=|<>)\s*\[")
 _CALENDAR_OUT = re.compile(r"\bstart_of_(month|quarter|year)\s*\(")
 _SCALED_CAST_SRC = re.compile(

@@ -249,3 +249,27 @@ def test_bound_passthrough_keeps_the_refusal():
         sql_passthrough_call("sql_string_op", "TO_CHAR", ["[T::D]", "'it''s\\'"])
     assert sql_passthrough_call("sql_string_op", "TO_CHAR", ["[T::D]", "'it''s'"]) == \
         'sql_string_op ( "TO_CHAR({0}, {1})" , [T::D] , \'it\'\'s\' )'
+
+
+class TestQlikAmpersand:
+    """Qlik `&` is string concatenation; it was rewritten to ThoughtSpot `+` (numeric only),
+    including inside literals (#579 review)."""
+
+    @pytest.mark.parametrize("src,out", [
+        ("s & ' - ' & s", "concat ( [T::S] , ' - ' , [T::S] )"),
+        ("s & 'it''s \"x\"'", "concat ( [T::S] , concat ( \"it's \" , '\"' , 'x' , '\"' ) )"),
+        ("If(x > 1, s & 'a', 'b')", "if ([T::X] > 1) then concat ( [T::S] , 'a' ) else 'b'"),
+        ("'A&B'", "'A&B'"),
+    ])
+    def test_concat(self, src, out):
+        assert _tr(src, "qlik") == out
+
+    def test_concat_beside_a_comparison_is_reviewed(self):
+        r = translate("s & 'a' = 'xa'", "qlik", ColumnContext(parse_columns_json(_COLS), level=1))
+        assert r["status"] == "NEEDS_REVIEW"
+
+    def test_plus_next_to_concat_is_guarded(self):
+        from ts_cli.formula_translate.traps import _PLUS_STRING, _code
+        assert _PLUS_STRING.search(_code("[T::S] + concat ( 'a' , 'b' )"))
+        assert _PLUS_STRING.search(_code("concat ( 'a' , [T::B] ) + [T::S]"))
+        assert not _PLUS_STRING.search(_code("[T::A] + [T::B]"))

@@ -280,7 +280,14 @@ def _remap_functions(expr: str, first_week_day: Optional[int] = None
         return f"{name}("
 
     out = _FUNC_CALL.sub(repl, expr)
-    out = out.replace("<>", "!=").replace("&", "+")
+    out = out.replace("<>", "!=")
+    if "&" in out:
+        # Qlik `&` is string concatenation; ThoughtSpot `+` is numeric only (#579 review)
+        joined = _concat_ampersands(out)
+        if joined is None:
+            unknown.add("&")
+        else:
+            out = joined
     # BL-171: rewrite the no-equivalent markers into sql_*_op pass-throughs,
     # then the argument-aware compositions. An unresolved marker (wrong arity,
     # unbalanced parens) is flagged rather than emitted — a bare trim/replace
@@ -301,6 +308,96 @@ def _remap_functions(expr: str, first_week_day: Optional[int] = None
     unknown |= {origin.get(name, name)
                 for name in (unresolved | unresolved_comp)}
     return out, unknown
+
+
+_RELATIONAL = re.compile(r"!=|<=|>=|[=<>]|\b(?:and|or|not)\b", re.IGNORECASE)
+
+
+def _top_level_spans(expr: str):
+    """Yield (char, depth, in_quote) for each character, tracking (), [] and quotes."""
+    depth, quote = 0, None
+    for ch in expr:
+        if quote:
+            yield ch, depth, True
+            if ch == quote:
+                quote = None
+            continue
+        if ch in "'\"":
+            quote = ch
+            yield ch, depth, True
+            continue
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        yield ch, depth, False
+
+
+def _split_ampersands(expr: str) -> tuple[list[str], str]:
+    """Split at top-level ``&``; also return the top-level text (quoted and nested blanked)."""
+    parts, cur, top = [], [], []
+    for ch, depth, quoted in _top_level_spans(expr):
+        if ch == "&" and depth == 0 and not quoted:
+            parts.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+        top.append(" " if (quoted or depth > 0) else ch)
+    parts.append("".join(cur))
+    return parts, "".join(top)
+
+
+def _group_end(expr: str, i: int) -> int:
+    """Index of the ``)`` closing the ``(`` at ``i``."""
+    depth = 0
+    for j in range(i, len(expr)):
+        if expr[j] == "(":
+            depth += 1
+        elif expr[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return j
+    return len(expr) - 1
+
+
+def _concat_in_groups(expr: str) -> Optional[str]:
+    """Rewrite ``&`` inside each parenthesised group (function arguments) of ``expr``."""
+    out, i = [], 0
+    while i < len(expr):
+        ch = expr[i]
+        if ch in "'\"[":
+            j = expr.find("]" if ch == "[" else ch, i + 1)
+            j = len(expr) - 1 if j < 0 else j
+        elif ch == "(":
+            j = _group_end(expr, i)
+            if "&" in expr[i:j + 1]:
+                done = [_concat_ampersands(a) for a in _split_top_level(expr[i + 1:j])]
+                if any(d is None for d in done):
+                    return None
+                out.append("(" + ", ".join(done) + ")")
+                i = j + 1
+                continue
+        else:
+            j = i
+        out.append(expr[i:j + 1])
+        i = j + 1
+    return "".join(out)
+
+
+def _concat_ampersands(expr: str) -> Optional[str]:
+    """Qlik ``a & b & c`` -> ``concat ( a , b , c )``, recursively and quote-aware. Qlik's
+    ``&`` binds looser than arithmetic and tighter than comparison, so a segment that also
+    has a top-level comparison or logical operator returns None (left for review)."""
+    expr = expr.strip()
+    parts, top = _split_ampersands(expr)
+    if len(parts) == 1:
+        return _concat_in_groups(expr)
+    if _RELATIONAL.search(top):
+        return None
+    inner = [_concat_ampersands(x) for x in parts]
+    if any(not x for x in inner):
+        return None
+    return "concat ( " + " , ".join(inner) + " )"
 
 
 def _translate_if(expr: str, first_week_day: Optional[int] = None,
