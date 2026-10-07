@@ -222,17 +222,17 @@ def test_real_exact_form_module_mutations_fail(tmp_path):
         return _run(root)
 
     assert run(real_src, "clean").returncode == 0
-    added = real_src.replace('"MONTHS_BETWEEN": call_months_between}',
-                             '"MONTHS_BETWEEN": call_months_between, "NO_SUCH_FN": call_substr}')
-    added = added.replace('"MONTHS_BETWEEN": ("sql_double_op",)}',
-                          '"MONTHS_BETWEEN": ("sql_double_op",), "NO_SUCH_FN": ("substr",)}')
+    added = real_src.replace('"MONTHS_BETWEEN": call_months_between,',
+                             '"MONTHS_BETWEEN": call_months_between, "NO_SUCH_FN": call_substr,')
+    added = added.replace('"MONTHS_BETWEEN": ("sql_double_op",),',
+                          '"MONTHS_BETWEEN": ("sql_double_op",), "NO_SUCH_FN": ("substr",),')
     assert added != real_src
     r = run(added, "added")
     assert r.returncode == 1 and "`NO_SUCH_FN(`" in r.stderr, r.stderr
     # (Not diff_months: the MONTHS_BETWEEN rows mention it to say it is wrong — D checks
     # mention, not endorsement, which is the limit of a text check.)
-    widened = real_src.replace('"MONTHS_BETWEEN": ("sql_double_op",)}',
-                               '"MONTHS_BETWEEN": ("sql_double_op", "add_days")}')
+    widened = real_src.replace('"MONTHS_BETWEEN": ("sql_double_op",),',
+                               '"MONTHS_BETWEEN": ("sql_double_op", "add_days"),')
     assert widened != real_src
     r = run(widened, "widened")
     assert r.returncode == 1 and "can emit `add_days`" in r.stderr, r.stderr

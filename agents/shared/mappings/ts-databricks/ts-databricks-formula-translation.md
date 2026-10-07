@@ -107,9 +107,9 @@ Resolution:
 | `ln(x)` | `LN(x)` | |
 | `log2(x)` | `LOG2(x)` | |
 | `log10(x)` | `LOG10(x)` | |
-| `safe_divide(a, b)` | `COALESCE(a / NULLIF(b, 0), 0)` | No `DIV0` in Databricks |
+| `safe_divide(a, b)` | `COALESCE(a / NULLIF(b, 0), 0)` | No `DIV0` in Databricks. **Not exact on a NULL operand:** `safe_divide` is NULL there, the COALESCE form 0 — the inverse of BL-357, tracked as BL-366. The exact form is `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`, which is what `safe_divide` compiles to |
 | `if_null(x, default)` | `COALESCE(x, default)` | |
-| `zero_if_null(x)` | `COALESCE(x, 0)` | No `ZEROIFNULL` in Databricks |
+| `zero_if_null(x)` | `COALESCE(x, 0)` | Databricks also has `zeroifnull(x)` (live 2026-10-07) |
 | ~~`null_if_zero(x)`~~ | `NULLIF(x, 0)` | **Not a ThoughtSpot function** — rejected at import (VALIDATE_ONLY, se-thoughtspot, 2026-10-06; BL-344). The ThoughtSpot form is `if ( x = 0 ) then null else x`, which is what `mv_sql` now emits for a standalone `NULLIF(x, 0)`; the reverse emitter still reads `null_if_zero` from older TML |
 
 ### Date / Time Functions
@@ -762,15 +762,30 @@ total at every row of the fixture.
 
 ---
 
-## safe_divide Pattern (verified 2026-05-25)
+## safe_divide Pattern (corrected 2026-10-07, BL-357)
 
-ThoughtSpot `safe_divide` has no direct Databricks equivalent. Use `COALESCE/NULLIF`:
+**Decision (user, 2026-10-07): return zero only when the source asks for zero.** The three
+division behaviours, from compiled SQL and values in formula fidelity M2 (se-thoughtspot
+`DBX_DAMIAN`, the same SQL warehouse as the oracle):
+
+| ThoughtSpot | Compiles to | Zero divisor | NULL divisor | NULL dividend |
+|---|---|---|---|---|
+| `x / y` | `x / NULLIF(y, 0.0)` | NULL | NULL | NULL |
+| `safe_divide ( x , y )` | `CASE WHEN y = 0 THEN 0 ELSE x / NULLIF(y, 0) END` | **0** (even when `x` is NULL) | NULL | NULL (0 if `y = 0`) |
+| `ifnull ( safe_divide ( x , y ) , 0 )` | — | 0 | 0 | 0 |
 
 | Direction | From | To |
 |---|---|---|
-| TS → Databricks | `safe_divide(sum(a), sum(b))` | `COALESCE(SUM(a) / NULLIF(SUM(b), 0), 0)` |
-| Databricks → TS | `COALESCE(x / NULLIF(y, 0), 0)` | `safe_divide(x, y)` |
-| Databricks → TS | `x / NULLIF(y, 0)` | `safe_divide(x, y)` |
+| TS → Databricks | `safe_divide(sum(a), sum(b))` | `COALESCE(SUM(a) / NULLIF(SUM(b), 0), 0)` — inexact on a NULL operand (BL-366) |
+| Databricks → TS | `x / NULLIF(y, 0)` (also `x / nullifzero(y)`) | `x / y` — **not `safe_divide`**, which is 0 on a zero divisor where the source is NULL (BL-357, M2 `dbx-arith-012`, `dbx-agg-013`) |
+| Databricks → TS | `COALESCE(x / NULLIF(y, 0), 0)`, `IFNULL(…, 0)`, `NVL(…, 0)`, `zeroifnull(x / NULLIF(y, 0))` | `ifnull ( safe_divide ( x , y ) , 0 )` — 0 on a zero divisor **and** on a NULL operand. `safe_divide` alone was NULL on a NULL operand (M2 `dbx-arith-005`) |
+| Databricks → TS | `COALESCE(x / NULLIF(y, 0), d)` with any other `d` | `ifnull ( x / y , d )` |
+| Databricks → TS | `try_divide(x, y)` | `( x / y )` — NULL on a zero divisor, as ThoughtSpot's `/` |
+
+Any other wrapper of `x / NULLIF(y, 0)` translates generically and stays exact, because the
+plain `x / y` already matches the source on every input. The standing "`safe_divide` for
+ratios" rule (Excel ratios, and plain-division ratios whose source gives no NULL intent)
+does **not** apply to a SQL source that wrote `NULLIF`: the `NULLIF` is the NULL intent.
 
 ---
 
@@ -843,9 +858,31 @@ formula equivalents:
 | `WEEKDAY(d)` | `( day_number_of_week ( d ) - 1 )` — Databricks "0 = Monday and 6 = Sunday" ([weekday](https://docs.databricks.com/aws/en/sql/language-manual/functions/weekday)) |
 | `EXTRACT(DAYOFWEEK_ISO FROM d)` / `EXTRACT(DOW_ISO FROM d)` | `day_number_of_week ( d )` — "Monday(1) to Sunday(7)", a clean rename. Offset math for all three rows: `formula_common.ts_weekday_number` |
 | `ROUND(x, d)` | `round(x, 10^-d)` — `2` → `0.01`, `0` → `1`, `-2` → `100`; non-literal `d` → `sql_double_op ( "ROUND({0}, {1})" , x , d )` (row-level only). Never `round(x, d)` (BL-331) |
-| `CAST(x AS type)` | Depends on target type; often implicit in TS |
-| `x / NULLIF(y, 0)` | `safe_divide(x, y)` |
-| `COALESCE(x / NULLIF(y, 0), 0)` | `safe_divide(x, y)` |
+| `CAST(x AS INT)` / `INTEGER` / `SMALLINT` / `TINYINT` | `to_integer ( x )` — compiles to `CAST(x as int)`, 32-bit, truncating toward zero like the source |
+| `CAST(x AS BIGINT)` / `CAST(x AS LONG)` | `sql_int_op ( "CAST({0} AS BIGINT)" , x )` row-level; over an aggregate `( if ( x >= 0 ) then floor ( x ) else ceil ( x ) )` (`floor` / `ceil` return INT64). **Fixed ts-cli 0.163.0 (BL-359):** it was `to_integer`, 32-bit on Databricks, so `CAST(1e12 AS BIGINT)` returned 2147483647 (M2 `dbx-round-009`) |
+| `CAST(x AS DECIMAL(p, s))` / `NUMERIC` / `DEC` | `s > 0`: `sql_double_op ( "CAST({0} AS DECIMAL(p,s))" , x )` row-level, `round ( x , 10^-s )` over an aggregate — exact on a DECIMAL total, **not** on a DOUBLE one at a half (40.955 → 40.95 vs the source's 40.96), so `ts formula translate` marks it APPROXIMATED; `s = 0` (and a bare `DECIMAL`, which is `DECIMAL(10,0)`): `sql_int_op ( "CAST({0} AS DECIMAL(p,0))" , x )`, refused over an aggregate. The cast **rounds half up** (`CAST(2.5 AS DECIMAL)` = 3, `CAST(2.567 AS DECIMAL(10,2))` = 2.57, live 2026-10-07); it was unwrapped as a widening no-op (BL-359) |
+| `CAST(x AS DOUBLE)` / `STRING` / … | unwrapped — widening, ThoughtSpot promotes on its own |
+| `x / NULLIF(y, 0)` | `x / y` (BL-357 — see "safe_divide Pattern") |
+| `COALESCE(x / NULLIF(y, 0), 0)` | `ifnull ( safe_divide ( x , y ) , 0 )` (BL-357) |
+| `COALESCE(x / NULLIF(y, 0), d)` | `ifnull ( x / y , d )` |
+| `COALESCE(a, b, c, …)` | `if ( a != null ) then a else if ( b != null ) then b else c` — n-ary, as `sv_sql` (BL-362) |
+| `NVL(a, b)` / `IFNULL(a, b)` | `ifnull ( a , b )` (BL-362) |
+| `NVL2(a, b, c)` | `( if ( a != null ) then b else c )` (BL-362) |
+| `zeroifnull(x)` | `ifnull ( x , 0 )` (BL-362) |
+| `nullifzero(x)` | `( if ( x = 0 ) then null else x )`; as a divisor, `x / nullifzero(y)` → `x / y` (BL-362) |
+| `try_divide(x, y)` | `( x / y )` — NULL on a zero divisor (BL-362) |
+| `x DIV y` | `( if ( x / y >= 0 ) then floor ( x / y ) else ceil ( x / y ) )` — truncation toward zero (`-7 DIV 2` = -3), INT64; exact while `abs(x)` < 2^53. A zero divisor gives NULL, the non-ANSI answer (ANSI raises `DIVIDE_BY_ZERO`; `DIV` rejects a DOUBLE operand). **Fixed ts-cli 0.163.0 (BL-360):** `DIV` was read as a column. An identifier that follows an operand with no operator is now refused, never resolved as a column |
+| `x % y` / `MOD(x, y)` | `sql_double_op ( "MOD({0}, {1})" , x , y )` when an operand is a row-level column that is not known to be an integer; `mod ( x , y )` when both operands are integral by construction (integer literals, `--columns` INT64 columns, INT64-returning functions such as `diff_days` / `day_number_of_week`, and `+ - *` over them), over an aggregate or a metric reference, or between literals. Native `mod` accepts INT64 only and rejects a DOUBLE at import (M2 `dbxn-002` `I1 % N2`, 2026-10-07), and the translator cannot see column types. The remainder takes the dividend's sign in both (`-5 % 3` = -2); `%` folds at `*` / `/` precedence (`a * b % c` is `(a * b) % c`). A zero divisor is NULL non-ANSI (BL-362, ts-cli 0.163.0) |
+| `a \|\| b \|\| c` | `concat ( a , b , c )` — NULL-propagating in both; a chain mixed with another operator is refused. `concat` takes Text only, so a numeric operand fails at import (BL-362) |
+| `FLOOR(x)` / `CEIL(x)` / `CEILING(x)` | `floor ( x )` / `ceil ( x )` |
+| `FLOOR(x, s)` / `CEIL(x, s)` / `CEILING(x, s)`, literal `s` | `s > 0`: `( floor ( x * 10^s + 0.000000001 ) / 10^s )` and `( ceil ( x * 10^s - 0.000000001 ) / 10^s )`; `s < 0`: `( floor ( x / 10^-s + 0.000000001 ) * 10^-s )` (`ceil` with `-`); `s = 0`: `floor ( x )`. Databricks floors a DOUBLE in DECIMAL (`floor(0.29D, 2)` = 0.29, `ceil(1.1D, 2)` = 1.10, live 2026-10-07) while ThoughtSpot's `0.29 * 100` is 28.999999999999996, so the scaled value is **nudged** 1e-9 toward the step it may have just missed, then divided back by the integer factor. **Corrected after the #578 review:** the first form snapped with `round ( … , 0.000000001 )`, which compiles to `1.0E-9 * ROUND(v / 1.0E-9)` and lands one ulp above the integer, so `CEIL(3.0, 1)` gave 3.1 (about 10% of on-step values); and `* 10^-s` added noise (0.30000000000000004). Residual: a value within 1e-9 (scaled) of a step is moved onto it. A non-literal or \|s\| > 15 scale is refused. **Fixed ts-cli 0.163.0 (BL-361)** — the scale was kept on the one-argument `floor` / `ceil` and rejected at import. BL-217: the Excel translator is moving to the same algorithm (#577) |
+| `x LIKE 'p'` / `ILIKE` / `RLIKE`, and `NOT LIKE …` | `sql_bool_op ( "{0} LIKE 'p'" , x )` — the warehouse's own operator, so `LIKE` stays **case-sensitive** (no BL-333 divergence) and `RLIKE` keeps Java regex. A non-literal pattern, `ESCAPE`, or a pattern holding a double quote, a brace or a backslash is refused. A bare column named `ILIKE` or `RLIKE` (not followed by a pattern) still resolves as a column (BL-362) |
+| `INSTR(s, sub)` | `sql_int_op ( "instr({0}, 'sub')" , s )` — case-sensitive, 1-based, 0 when absent; `strpos` is case-insensitive (BL-333). Row-level only (BL-362) |
+| `concat_ws(sep, a, b, …)` | `sql_string_op ( "concat_ws('-', {0}, {1})" , a , b )` — `concat_ws` **skips** NULL arguments (`concat_ws('-', 'a', NULL, 'b')` = `a-b`), `concat` does not. Row-level only (BL-362) |
+| `BROUND(x, d)` | `sql_double_op ( "bround({0}, 0)" , x )` — HALF_EVEN, which no native function does. Row-level only (BL-362) |
+| `TRUNC(d, fmt)` | `YEAR` / `YYYY` / `YY` → `start_of_year ( d )`, `QUARTER` → `start_of_quarter ( d )`, `MONTH` / `MM` / `MON` → `start_of_month ( d )`; `WEEK` → `sql_date_op ( "trunc({0}, 'WEEK')" , d )` (Databricks truncates to Monday; `start_of_week` follows the Model's calendar, BL-334). A non-literal or other format is refused (BL-362). **Calendar:** `start_of_*` follow the Model's calendar, so `ts formula translate` notes that the native forms assume the default Gregorian calendar (chosen over a pass-through: the Gregorian default is the common case and stays native and plannable; #578 review) |
+| `LAST_DAY(d)` | `add_days ( add_months ( start_of_month ( d ) , 1 ) , -1 )` — a DATE, as in Databricks; same Gregorian-calendar note as `TRUNC` (BL-362) |
+| `TO_DATE(x)` / `TO_DATE(x, fmt)` over a column | `sql_date_op ( "to_date({0})" , x )` — the session's zone applies to a TIMESTAMP, and ThoughtSpot's Databricks session ran in UTC (M2). String literals keep `to_date ( 'lit' , … )`. Row-level only (BL-362) |
 | `x IS NULL` | `isnull(x)` |
 | `NOT expr` | `not(expr)` |
 | `x IN (a, b, c)` | `( [x] = a or [x] = b or [x] = c )` — the form the translator emits; `in(x, a, b, c)` is rejected at import (`thoughtspot-formula-patterns.md`). The to-direction row near the top of this file still shows `in(…)` — BL-317 |
@@ -866,6 +903,26 @@ live-verified 2026-07-09 caveat/citation (`docs/audit/2026-07-09-dbx-semantic-cl
 the LOD row's filter-awareness holds for a Databricks MV's own global `filter:`
 only, not for a consumer's ad hoc query-time `WHERE`; the cross-measure/ratio rows
 are CONFIRMED cross-platform at every grain, no caveat needed.
+
+### Non-ANSI semantics on a ThoughtSpot Databricks connection (BL-358, documented 2026-10-07)
+
+ThoughtSpot's queries over `DBX_DAMIAN` behaved as **non-ANSI** in formula fidelity M2,
+where a default session on the same SQL warehouse reads back `ansi_mode = true`
+(`docs/reviews/2026-10-07-fidelity-m2-databricks.md`):
+
+| Source (ANSI Databricks) | ThoughtSpot over Databricks |
+|---|---|
+| `I1 + 9223372036854775800` raises `ARITHMETIC_OVERFLOW` | **wraps**: -9223372036854775804 — a wrong number |
+| `CAST(1e12 AS INT)` raises `CAST_OVERFLOW` | clamps to 2147483647 |
+| `CAST('pie' AS INT)` raises `CAST_INVALID_INPUT` | NULL |
+| `x / 0`, `x DIV 0`, `x % 0` raise `DIVIDE_BY_ZERO` | NULL |
+
+This is platform behaviour, not a translator defect, and no formula form avoids it (a
+pass-through runs in the same session). The mechanism (connection property, JDBC default,
+or session setting) was not established. `ts formula translate --from databricks` carries a
+trap for it: a CAST gets a note, and arithmetic with a 10-digit-or-longer integer literal is
+downgraded to APPROXIMATED, because an overflow there returns a wrong number rather than a
+NULL. Status: **documented, accepted platform semantics** (the BL-333 convention).
 
 ### Implementation Notes
 

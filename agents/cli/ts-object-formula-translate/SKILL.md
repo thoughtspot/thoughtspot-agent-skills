@@ -229,6 +229,18 @@ an older row says (see open-items OI-2…OI-5, and probe record §7):
   both names.
 - **`concat` takes N arguments, all Text**: wrap numbers (and dates) in `to_string`, and only
   them — `to_string` rejects a Text argument.
+- **Zero only when the source asks for zero** (user decision 2026-10-07, BL-357). A SQL
+  `x / NULLIF(y, 0)` is plain `x / y`, never `safe_divide`; `COALESCE(x / NULLIF(y, 0), 0)` (and
+  `IFNULL`/`NVL`/`ZEROIFNULL`) is `ifnull ( safe_divide ( x , y ) , 0 )` — `safe_divide` alone is NULL
+  on a NULL operand; any other default is `ifnull ( x / y , d )`; Snowflake `DIV0` keeps NULL for a
+  NULL dividend. The "`safe_divide` for ratios" convention still holds for Excel ratios and for a
+  plain-division ratio whose source states no NULL intent. Mapping docs: the Snowflake "Division
+  and zero" section, the Databricks "safe_divide Pattern".
+- **Databricks sources run non-ANSI in ThoughtSpot** (BL-358): an overflow wraps, an
+  out-of-range cast clamps and a bad cast or zero divisor is NULL, where an ANSI source raises.
+  The CLI adds a note to any Databricks `CAST`, and downgrades arithmetic with a 10-digit or
+  longer integer literal to APPROXIMATED (an overflow there is a wrong number). Say so in the
+  answer.
 
 - **Case-sensitive comparison has no native form** (OI-4, BL-333): ThoughtSpot `=`,
   `contains` and `strpos` lowercase both sides. Excel `EXACT`/`FIND`, Sigma
@@ -430,7 +442,7 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
   rows; only `--from thoughtspot --validate` puts evidence behind it. Excel and Google Sheets
   are translator-backed since 1.2.0; Sigma is next (spec §3.3).
 - **Excel / Sheets cover the maps' *Translator coverage* rows** (114 Excel functions since
-  1.6.0, 22 Sheets delta rows, the criteria table); any other function is `NEEDS_REVIEW` citing its row. The
+  1.8.0, 22 Sheets delta rows, the criteria table); any other function is `NEEDS_REVIEW` citing its row. The
   60-formula acceptance workbook (`tools/ts-cli/tests/fixtures/excel_regression/`) translates
   VALIDATE_ONLY-clean; two of its reviewed answers differ by rule — the translator keeps the
   source's own test (`= 0`) and never introduces a column the formula does not reference.
@@ -463,12 +475,12 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
   serial number, numeric text in arithmetic → `to_double` (APPROXIMATED — non-numeric text **fails the whole query**, so `IFERROR(VALUE())` / `ISNUMBER(VALUE())` use `TRY_TO_DOUBLE`), a DOUBLE count →
   `floor`, mixed `IF` / `IFERROR` branches → one type (APPROXIMATED). The table is the Excel
   map's *Implicit type coercion* section.
-- **Excel trigonometry is the identity form** (1.6.0): ThoughtSpot `sin` … `atan` take and
+- **Excel trigonometry is the identity form** (1.8.0): ThoughtSpot `sin` … `atan` take and
   return **radians**, as Excel does (live 2026-10-07, BL-364), so `SIN(x)` is `sin ( x )`. A
   map-backed answer from another dialect's map that multiplies by `180 / 3.14159…` is wrong
   for every non-zero input — the Tableau, Ossie, Omni and Sigma maps (and the Tableau
   translator) still do, until BL-364 lands; drop the conversion when composing from them.
-- **Excel `TEXT` translates a subset of format codes** (1.6.0): plain numbers (`0`, `0.00`,
+- **Excel `TEXT` translates a subset of format codes** (1.8.0): plain numbers (`0`, `0.00`,
   `#,##0.00`, zero-padded), percentages, and date / time codes (`yyyy yy mmmm mmm mm dd ddd
   dddd hh ss` with `- / : . ,` and space). Everything else — `$`, fractions, scientific,
   conditional sections, single `m` / `d`, `AM/PM` — is `NEEDS_REVIEW`; a ThoughtSpot column
@@ -491,7 +503,8 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.6.0 | 2026-10-07 | Excel coverage pass (ts-cli v0.162.0, fidelity M1): 43 more Excel functions are translator-backed, chosen by how many corpus cases they blocked — `CHAR` / `UNICHAR` / `CODE` / `UNICODE`, `SIN` … `ATAN` (radians, the identity form; the map's degrees rule was wrong, BL-364), `ATAN2`, the hyperbolic family, `DEGREES`, `RADIANS`, `PI`, `FLOOR.MATH`, `CEILING.PRECISE`, `FLOOR.PRECISE`, `ISO.CEILING`, `TRUNC`, `EVEN`, `ODD`, `QUOTIENT`, `LOG`, `FACT`, `REPLACE`, the `B` byte variants, `FIND` / `SEARCH` with `start_num`, `TEXT` (a format-code subset), `DATE`, `ISTEXT` / `ISNONTEXT` / `ISLOGICAL`. NEEDS_REVIEW over the 2,463 eligible M1 cases fell from 70% to 33%. Fixes 1.5.0's DOUBLE precision snap, which made `ROUNDUP` / `CEILING` jump a step on exact values (3.0 → 3.1): now a 1e-9 nudge |
+| 1.8.0 | 2026-10-07 | Excel coverage pass (ts-cli v0.164.0, fidelity M1): 43 more Excel functions are translator-backed, chosen by how many corpus cases they blocked — `CHAR` / `UNICHAR` / `CODE` / `UNICODE`, `SIN` … `ATAN` (radians, the identity form; the map's degrees rule was wrong, BL-364), `ATAN2`, the hyperbolic family, `DEGREES`, `RADIANS`, `PI`, `FLOOR.MATH`, `CEILING.PRECISE`, `FLOOR.PRECISE`, `ISO.CEILING`, `TRUNC`, `EVEN`, `ODD`, `QUOTIENT`, `LOG`, `FACT`, `REPLACE`, the `B` byte variants, `FIND` / `SEARCH` with `start_num`, `TEXT` (a format-code subset), `DATE`, `ISTEXT` / `ISNONTEXT` / `ISLOGICAL`. NEEDS_REVIEW over the 2,463 eligible M1 cases fell from 70% to 33%. Fixes 1.5.0's DOUBLE precision snap, which made `ROUNDUP` / `CEILING` jump a step on exact values (3.0 → 3.1): now a 1e-9 nudge |
+| 1.7.0 | 2026-10-07 | The Snowflake and Databricks translators it wraps (ts-cli v0.163.0, formula fidelity M2, BL-357..362): NULLIF divisions are plain `/` and zero-default ratios `ifnull ( safe_divide ( … ) , 0 )` (zero only when the source asks for zero); `DIV0` / `DIV0NULL` NULL-guarded; Databricks `BIGINT` casts 64-bit, `DECIMAL` / Snowflake `NUMBER(p,s)` / `TO_NUMBER` rounding to scale; `DIV`, `FLOOR`/`CEIL` with a scale, `%`, `\|\|`, `LIKE`/`ILIKE`/`RLIKE`, n-ary `COALESCE`, `NVL2`, `try_divide` and more translate; `ZEROIFNULL` is `ifnull`. New BL-358 traps for Databricks casts (note) and overflow-prone literals (APPROXIMATED). Takes 1.7.0 because the concurrent Excel coverage branch claims 1.6.0 |
 | 1.5.0 | 2026-10-07 | Excel / Google Sheets (ts-cli v0.161.0, formula fidelity M1, BL-346..355): a type checker over the emitted formula turns every provable type error into `NEEDS_REVIEW` (a `type check:` note) instead of an import failure reported TRANSLATED, and asks a column's type (`needs_types`, reason `typed argument`) when an integer or conversion slot depends on it. Excel's implicit coercion is written out (text dates → `to_date`, serial numbers, numbers / booleans / dates into text, numeric text into arithmetic, DOUBLE counts → `floor`, one type across `IF` / `IFERROR` branches). Fixed silent wrong answers: `CEILING.MATH` sign and mode, a zero `CEILING` significance (0, not NULL), `ROUNDUP` / `ROUNDDOWN` beyond 6 digits, a boolean joined into text (`TRUE`), a text function over a date (its serial). Constant decimal arithmetic is a documented divergence (BL-351). A DOUBLE is snapped before `ceil` / `floor`; `VALUE` of non-numeric text fails the query, so `IFERROR(VALUE())` / `ISNUMBER(VALUE())` use `TRY_TO_DOUBLE`; cross-type comparison folds, DOUBLE-to-text and slashed day/month dates are APPROXIMATED with a trap |
 | 1.4.0 | 2026-10-06 | The Snowflake and Databricks translators it wraps fix `SUBSTR` (zero-based start), `DATEDIFF(year)` and the other units, `MONTHS_BETWEEN` (pass-through) and `TO_CHAR(x, fmt)` (pass-through) — BL-340..343, BL-345, ts-cli v0.160.0. New: Snowflake `DATEDIFF(week)` / `DATEDIFF(hour)` and every Databricks 3-argument `DATEDIFF` come back as exact `sql_int_op` pass-throughs; Databricks `DATEDIFF(DAY, …)` is native `diff_days` when `--columns` types both arguments DATE. A `diff_weeks` in any translation carries a Monday-week-start trap |
 | 1.3.0 | 2026-10-06 | New Step 4c: before presenting, ask *per row or a KPI that rolls up?* when `role_ambiguous` (showing both `role_options`), and the column types listed in `needs_types` with their name-based suggestions ("yes to all suggestions" accepted); re-run with `--role` and typed `--columns`; skipped with a Model or a stated role; grouped per column / per formula in a batch (ts-cli 0.159.0). Excel / Sheets no longer ask the role up front for every formula |

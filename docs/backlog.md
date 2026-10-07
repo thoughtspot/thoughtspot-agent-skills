@@ -78,7 +78,7 @@ are roughly ordered by value÷effort.
 | BL-275 | `_extract_joins` drops joins with a nested equality expression or a Custom-SQL join side — extraction fixed; a Custom-SQL-to-physical-table join is still dropped by both `model_tables` builders, so no join reaches the TML | PARTIAL — see BL-277 |
 | BL-183 | Validator: dangling `[formula_X]` refs in `ts tml lint` + CA-JSON table refs | with BL-178 |
 | BL-174 | from-Databricks forward leg: `INNER` join type, dropped `format:`, stamped `cardinality:` | next DBX pass |
-| BL-180 | from-Snowflake translator ignores `\|\|`→`concat` and NULL-preserving division | next formula pass |
+| ~~BL-180~~ | ~~from-Snowflake translator ignores `\|\|`→`concat` and NULL-preserving division~~ | DONE (2026-10-07 — the `\|\|` fold and NULL-preserving division, ts-cli v0.163.0) |
 | BL-172 | `check_formula_catalog.py` skips most data rows | next validator pass |
 | ~~BL-171~~ | ~~Five ts-cli emitters still emit the six non-existent string functions~~ | DONE (2026-07-30) |
 | BL-100 | Bring remaining converters to DBX-from standard (Snowflake pipeline first) | post-audit |
@@ -102,8 +102,8 @@ are roughly ordered by value÷effort.
 | ~~BL-348~~ | ~~`ROUNDUP`/`ROUNDDOWN` beyond 6 digits lose precision — integer division keeps scale 6 in Snowflake (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
 | ~~BL-349~~ | ~~a boolean joined into text renders `true`/`false`, Excel `TRUE`/`FALSE`; only a note, status TRANSLATED (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
 | ~~BL-350~~ | ~~a text function over a date input returns ISO text; Excel returns the serial; no trap (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
-| BL-357 | `x / NULLIF(y, 0)` and `COALESCE(x / NULLIF(y, 0), 0)` both collapsed to `safe_divide` — 0 where the source is NULL and NULL where it is 0 (silent, fidelity M2; Snowflake `sv_sql` shares the code) | next translator PR |
-| BL-359 | Databricks `CAST(x AS BIGINT)` → `to_integer`, which compiles to a 32-bit `CAST(… as int)`: 1e12 comes back 2147483647 (silent, fidelity M2) | next translator PR |
+| ~~BL-357~~ | ~~`x / NULLIF(y, 0)` and `COALESCE(x / NULLIF(y, 0), 0)` both collapsed to `safe_divide` — 0 where the source is NULL and NULL where it is 0 (silent, fidelity M2; Snowflake `sv_sql` shares the code)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
+| ~~BL-359~~ | ~~Databricks `CAST(x AS BIGINT)` → `to_integer`, which compiles to a 32-bit `CAST(… as int)`: 1e12 comes back 2147483647 (silent, fidelity M2)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
 
 ### Tier 2 — Schedule soon
 
@@ -234,9 +234,10 @@ are roughly ordered by value÷effort.
 | ~~BL-353~~ | ~~Excel implicit type coercion not inserted — ThoughtSpot's type check rejects the formula (19 fidelity-M1 cases)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
 | ~~BL-354~~ | ~~`IFERROR` with a fallback of another type — branch types must agree, rejected at import~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
 | ~~BL-355~~ | ~~a DOUBLE column in an integer slot (`substr` start/length, `right` count) is rejected at import~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
-| BL-358 | ThoughtSpot's queries over a Databricks connection run with non-ANSI semantics: BIGINT overflow wraps and a bad cast is NULL where an ANSI Databricks source raises (fidelity M2) — document; decide whether the translator warns | 2026-11-30 |
-| BL-360 | Databricks / Snowflake `a DIV b` — `DIV` read as a column (`[TABLE::DIV]`) and reported TRANSLATED; rejected at import (fidelity M2) | next translator PR |
-| BL-361 | `FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor`/`ceil`; TRANSLATED, rejected at import (fidelity M2; Snowflake too) | next translator PR |
+| ~~BL-358~~ | ~~ThoughtSpot's queries over a Databricks connection run with non-ANSI semantics: BIGINT overflow wraps and a bad cast is NULL where an ANSI Databricks source raises (fidelity M2) — document; decide whether the translator warns~~ | DONE (2026-10-07 — documented; accepted platform semantics, translator traps) |
+| ~~BL-360~~ | ~~Databricks / Snowflake `a DIV b` — `DIV` read as a column (`[TABLE::DIV]`) and reported TRANSLATED; rejected at import (fidelity M2)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
+| ~~BL-361~~ | ~~`FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor`/`ceil`; TRANSLATED, rejected at import (fidelity M2; Snowflake too)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
+| BL-366 | to-direction `safe_divide` is inexact on NULL — Databricks `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, Snowflake `DIV0(NULL, 0)` is NULL (the inverse of BL-357) | 2026-11-30 |
 
 ### Tier 3 — Opportunistic
 
@@ -244,7 +245,7 @@ are roughly ordered by value÷effort.
 |---|---|---|
 | BL-193 | Worktree `git commit` runs the MAIN checkout's pre-commit script — local gates are the wrong branch's | opportunistic |
 | BL-363 | the M2 Databricks oracle runs case SQL as a service principal that owns the `agent_skills` catalog — confine it to a scratch-schema-only principal before any third-party SQL corpus runs on Databricks | 2026-11-15, and before any third-party Databricks corpus |
-| BL-362 | from-Databricks coverage: 17 common forms declined (NVL, NVL2, 3-arg COALESCE, try_divide, nullifzero, zeroifnull, concat_ws, `\|\|`, `%`, LIKE / ILIKE / RLIKE, INSTR, trunc, last_day, bround, to_date(column)) — loud, never wrong (fidelity M2) | opportunistic |
+| ~~BL-362~~ | ~~from-Databricks coverage: 17 common forms declined (NVL, NVL2, 3-arg COALESCE, try_divide, nullifzero, zeroifnull, concat_ws, `\|\|`, `%`, LIKE / ILIKE / RLIKE, INSTR, trunc, last_day, bround, to_date(column)) — loud, never wrong (fidelity M2)~~ | DONE (2026-10-07 — all 17 forms, ts-cli v0.163.0) |
 | BL-356 | the M1 cross-check agrees at 1e-9 while cases score at 1e-12 — a last-digit oracle disagreement is run and scored, not quarantined | next M1 / M2 harness change |
 | BL-351 | decimal literals are exact in the warehouse, IEEE doubles in Excel — literal-only arithmetic differs in the 13th digit (fidelity M1): document or emit doubles | documented 2026-10-07 (divergence, no fix planned); revisit only if a sheet needs Excel's double errors |
 | BL-177 | Reverse legs synthesise names that were already available | opportunistic |
@@ -6318,7 +6319,7 @@ resolver mints.
 `agents/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md` (a missing hazard
 warning), `agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` (L10, #39 --
 added in the fidelity PR), plus `tools/ts-cli/ts_cli/databricks/mv_sql.py` for the second item.
-**Status:** OPEN -- **ready to fix**; both are mechanical rewrites with no judgment involved.
+**Status:** DONE (2026-10-07).
 
 Two independent findings, one root cause: the translator has the correct mapping documented in
 the reference it cites and does not apply it.
@@ -6384,6 +6385,10 @@ rows have a zero divisor, which needs live data on both sides.
 numbers, both on common shapes.
 
 ---
+
+**Resolution (2026-10-07, fix/m2-findings, ts-cli v0.163.0; live M2 + M0 re-runs, `docs/reviews/2026-10-07-fidelity-m2-databricks.md` → "After fixes").** Both items: `||` folds to `concat` in both SQL translators,
+and `x / NULLIF(y, 0)` is plain `x / y` (BL-357 — ThoughtSpot `/` is NULL-preserving; `nullif` itself
+does not exist, BL-339). The regenerated `DIV0` in the reverse leg is BL-366.
 
 ## BL-181 -- from-Snowflake classifies every fact `ATTRIBUTE`, so `facts()` returns as `dimensions()` `Tier 2`
 
@@ -8757,6 +8762,10 @@ Remaining exit: probe the four on a live instance, then either add a catalog row
 plus a table row, or route them through a `sql_string_op` pass-through as the six
 BL-170 names are. `check_mapping_code_sync` reports 0 soft findings now, so a
 regression here becomes visible again rather than hiding in a count of 12.
+
+**Update 2026-10-07 — `ZEROIFNULL` closed** (fix/m2-findings, ts-cli v0.163.0): `sv_sql` and
+`mv_sql` emit `ifnull ( x , 0 )` (catalogued, probed — probe record §7) and the `ts formula translate`
+known-defect entry is removed. `LPAD`, `RPAD` and `REPEAT` remain.
 
 ## BL-227 -- the complexity gate fails OPEN when radon is missing, and the pre-commit hook is not installed at all `Tier 2`
 
@@ -13099,7 +13108,7 @@ row built on it imports cleanly and is wrong for every non-zero input.
 **Fix.** Drop the conversion everywhere (`sin ( x )`, `acos ( x )`), re-pin the Tableau tests by
 value, bump `ts-convert-from-tableau` (PATCH), and re-run a Tableau trigonometry case live.
 
-**Fixed for Excel** in the coverage pass (ts-cli 0.162.0): the Excel map's E16 rule and its
+**Fixed for Excel** in the coverage pass (ts-cli 0.164.0): the Excel map's E16 rule and its
 `SIN` … `ATAN` rows, and the translator's new rules, use the identity form.
 
 **Target:** 2026-10-31.
@@ -13107,7 +13116,7 @@ value, bump `ts-convert-from-tableau` (PATCH), and re-run a Tableau trigonometry
 
 ## BL-357 — `x / NULLIF(y, 0)` and `COALESCE(x / NULLIF(y, 0), 0)` are both collapsed to `safe_divide`, which is neither `Tier 1`
 
-**Filed:** 2026-10-07. **Status:** OPEN.
+**Filed:** 2026-10-07. **Filed:** 2026-10-07. **Status:** DONE (2026-10-07).
 **Source:** formula fidelity M2 (Databricks SQL), cases `dbx-arith-005`, `dbx-arith-012`,
 `dbx-agg-013`; report `docs/reviews/2026-10-07-fidelity-m2-databricks.md`. **Silent**: status
 TRANSLATED, no trap, imports cleanly.
@@ -13140,9 +13149,20 @@ and add a Snowflake M0 case for each shape.
 
 **Target:** next translator PR.
 
+**Resolution (2026-10-07, fix/m2-findings, ts-cli v0.163.0; live M2 + M0 re-runs, `docs/reviews/2026-10-07-fidelity-m2-databricks.md` → "After fixes").** User decision: return zero only when the source asks for
+zero. `x / NULLIF(y, 0)` → `x / y`; `COALESCE`/`IFNULL`/`NVL`/`ZEROIFNULL(x / NULLIF(y, 0)[, 0])` →
+`ifnull ( safe_divide ( x , y ) , 0 )` (exact: 0 on a zero divisor and on a NULL operand — the Fix
+section's `if ( isnull ( x / y ) )` form is equivalent); another default → `ifnull ( x / y , d )`.
+Snowflake `DIV0(x, y)` → `( if ( isnull ( x ) ) then null else safe_divide ( x , y ) )` and `DIV0NULL`
+with `ifnull ( y , 0 )`: live, `DIV0(NULL, 0)` and `DIV0NULL(NULL, 0)` are NULL where `safe_divide` is
+0, so the "keep `safe_divide` for DIV0" suggestion above was not exact. Both translators, both
+mapping docs (Snowflake "Division and zero", Databricks "safe_divide Pattern"). M2
+`dbx-arith-005`/`-012`, `dbx-agg-013`, `dbx-fix-001..004/020/021` and M0 `sf-fix-001..008` MATCH. The
+to-direction inverse is BL-366.
+
 ## BL-358 — ThoughtSpot's queries over a Databricks connection run with non-ANSI semantics `Tier 2`
 
-**Filed:** 2026-10-07. **Status:** OPEN.
+**Filed:** 2026-10-07. **Filed:** 2026-10-07. **Status:** DONE (2026-10-07) — **document only**: accepted platform semantics, the BL-333 convention.
 **Source:** formula fidelity M2, cases `dbx-arith-013` (silent) and `dbx-arith-014`, plus the
 `m2-nonansi` run; report `docs/reviews/2026-10-07-fidelity-m2-databricks.md`.
 
@@ -13177,9 +13197,17 @@ treat it as accepted platform semantics, like BL-333.
 
 **Target:** 2026-11-30.
 
+**Resolution (2026-10-07, fix/m2-findings, ts-cli v0.163.0; live M2 + M0 re-runs, `docs/reviews/2026-10-07-fidelity-m2-databricks.md` → "After fixes").** Documented in `ts-databricks-formula-translation.md` ("Non-ANSI
+semantics on a ThoughtSpot Databricks connection") and `ts-convert-from-databricks-mv` ("ThoughtSpot's
+Databricks queries run non-ANSI"). `ts formula translate --from databricks` adds a note to every
+`CAST` and downgrades arithmetic with a 10-digit-or-longer integer literal to APPROXIMATED (an
+overflow there is a wrong number). M2 `dbx-arith-013` is now a warned, not a silent, wrong answer;
+the M2 non-ANSI run matches 7/7. The mechanism (connection property / JDBC default / session) is
+still not established; reopen as a new item if a connection setting is found that restores ANSI.
+
 ## BL-359 — Databricks `CAST(x AS BIGINT)` is emitted as `to_integer`, which compiles to a 32-bit `CAST(… as int)` `Tier 1`
 
-**Filed:** 2026-10-07. **Status:** OPEN.
+**Filed:** 2026-10-07. **Filed:** 2026-10-07. **Status:** DONE (2026-10-07).
 **Source:** formula fidelity M2, case `dbx-round-009` (`dbx-round-008` matches only because its
 values fit in 32 bits). **Silent**: TRANSLATED, no trap.
 
@@ -13199,9 +13227,23 @@ emitter for the inverse assumption. Re-run `dbx-round-009`.
 
 **Target:** next translator PR.
 
+**Resolution (2026-10-07, fix/m2-findings, ts-cli v0.163.0; live M2 + M0 re-runs, `docs/reviews/2026-10-07-fidelity-m2-databricks.md` → "After fixes").** No native 64-bit cast exists, but both candidates were probed live:
+`sql_int_op ( "CAST({0} AS BIGINT)" , x )` returns 1000000000000 (M2 `dbx-round-009`, `dbx-fix-013`
+`LONG`), and native `floor` / `ceil` compile to `FLOOR` / `CEIL` and return 1000101990000 over an
+aggregate (`dbx-fix-010`) — so row-level `BIGINT` is the pass-through and an aggregated one the
+sign-split `( if ( x >= 0 ) then floor ( x ) else ceil ( x ) )`. `CAST(x AS INT)` stays `to_integer`
+(32-bit; clamps non-ANSI, BL-358). The shared `CAST_MAP_LOAD_BEARING` in `formula_common.py` is
+unchanged (the Excel translator shares it); the override lives in `mv_sql_constructs`. Found and
+fixed in the same path: Databricks `DECIMAL(p,s)` was unwrapped and Snowflake `NUMBER(p,s)` /
+`TO_NUMBER` / `TO_DECIMAL` were `to_double`, but both round to their scale (`CAST(2.5 AS DECIMAL)` =
+3, `TO_NUMBER('2.5')` = 3, live) — now `sql_double_op` / `sql_int_op` pass-throughs row-level,
+`round ( x , 10^-s )` or `to_integer` otherwise (`dbx-fix-011/012`, `sf-fix-013..015/021`). The
+to-direction emitter's `to_integer` → `CAST(… AS INT)` is consistent with ThoughtSpot's own
+compile, so needs no change.
+
 ## BL-360 — `a DIV b`: `DIV` is read as a column and the formula is reported TRANSLATED `Tier 2`
 
-**Filed:** 2026-10-07. **Status:** OPEN.
+**Filed:** 2026-10-07. **Filed:** 2026-10-07. **Status:** DONE (2026-10-07).
 **Source:** formula fidelity M2, case `dbx-arith-007`. **Loud**: IMPORT_FAILED (*Search did not find
 "TABLE::DIV 2"*, error_code 14516), but the translator's status is TRANSLATED.
 
@@ -13215,9 +13257,17 @@ identifier between two operands must be NEEDS_REVIEW, never TRANSLATED.
 
 **Target:** next translator PR.
 
+**Resolution (2026-10-07, fix/m2-findings, ts-cli v0.163.0; live M2 + M0 re-runs, `docs/reviews/2026-10-07-fidelity-m2-databricks.md` → "After fixes").** Databricks `x DIV y` →
+`( if ( x / y >= 0 ) then floor ( x / y ) else ceil ( x / y ) )` — truncation toward zero, INT64 from
+`floor`/`ceil`, exact while |x| < 2^53, NULL on a zero divisor. Databricks docs and a live probe:
+under ANSI `DIV` by zero raises `DIVIDE_BY_ZERO`, non-ANSI it is NULL; `DIV` rejects a DOUBLE operand
+(`DATATYPE_MISMATCH`). Snowflake has no `DIV`: refused. Both translators now refuse any identifier
+that follows an operand with no operator, so an unknown keyword operator can no longer be read as a
+column. M2 `dbx-arith-007`, `dbx-fix-005`, `dbx-fix-006` (zero divisor: error-equivalent).
+
 ## BL-361 — `FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor` / `ceil` `Tier 2`
 
-**Filed:** 2026-10-07. **Status:** OPEN.
+**Filed:** 2026-10-07. **Filed:** 2026-10-07. **Status:** DONE (2026-10-07).
 **Source:** formula fidelity M2, cases `dbx-round-006` (`FLOOR(N1, -1)`) and `dbx-round-007`
 (`CEIL(N1, 1)`). **Loud**: IMPORT_FAILED (*Function floor expects only 1 arguments*), reported
 TRANSLATED.
@@ -13232,9 +13282,18 @@ Arity-check renames generally.
 
 **Target:** next translator PR.
 
+**Resolution (2026-10-07, fix/m2-findings, ts-cli v0.163.0; live M2 + M0 re-runs, `docs/reviews/2026-10-07-fidelity-m2-databricks.md` → "After fixes").** A literal scale `s` → `( floor ( x * 10^s ) * 10^-s )` /
+`( floor ( x / 10^-s ) * 10^-s )` (multiplied back by the increment, BL-348); a non-literal or
+|s| > 15 scale is refused. Live, the two warehouses differ on a DOUBLE: Databricks floors in DECIMAL
+(`floor(0.29D, 2)` = 0.29), Snowflake in double (`FLOOR(0.29::DOUBLE, 2)` = 0.28, `CEIL(1.1::DOUBLE, 2)` =
+1.11). So the Databricks form is nudged (`ceil ( v - 1e-9 )` / `floor ( v + 1e-9 )`, divided back by the
+factor) and the Snowflake form is not. The first fix used the Excel translator's `round ( … , 1e-9 )` snap;
+the #578 review found it overshoots on-step values by one ulp (`CEIL(3.0, 1)` → 3.1) — corrected, and
+DOUBLE grid values added to the M2 fixture (`dbx-fix-024..030`). M2 `dbx-round-006/007`, `dbx-fix-008/009`; M0 `sf-fix-009..012` MATCH.
+
 ## BL-362 — from-Databricks coverage: common forms the translator declines `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** OPEN.
+**Filed:** 2026-10-07. **Filed:** 2026-10-07. **Status:** DONE (2026-10-07) — all 17 forms implemented, none left declined.
 **Source:** formula fidelity M2: 19 TRANSLATE_FAILED cases (18 ANSI, 1 non-ANSI), 17 distinct forms. All loud — none
 returned a wrong value.
 
@@ -13250,6 +13309,19 @@ in `sv_sql`, `try_divide(x, y)` = `x / y`, `zeroifnull`, `nullifzero`, `%` = `mo
 Each new mapping gets a doc row and a fidelity case, not only a unit test.
 
 **Target:** opportunistic.
+
+**Resolution (2026-10-07, fix/m2-findings, ts-cli v0.163.0; live M2 + M0 re-runs, `docs/reviews/2026-10-07-fidelity-m2-databricks.md` → "After fixes").** Implemented, each exact and each with a fidelity case:
+`try_divide` → `( x / y )`; `NVL` → `ifnull`; `NVL2` → `( if ( a != null ) then b else c )`; n-ary
+`COALESCE` (shared chain); `nullifzero` → the NULLIF marker; `zeroifnull` → `ifnull ( x , 0 )`;
+`concat_ws`, `INSTR`, `bround`, `to_date(column)` → row-level pass-throughs (no native form skips
+NULLs, compares case-sensitively, rounds HALF_EVEN or converts with the session zone); `||` →
+`concat`; `%` → the warehouse `MOD` row-level (native `mod` rejects a DOUBLE — found by the M2
+non-ANSI re-run, `dbxn-002`) and `mod` over an aggregate; `LIKE` / `NOT LIKE` / `ILIKE` / `RLIKE` →
+`sql_bool_op` pass-throughs, which keep the source's case-sensitivity, so BL-333 does not apply;
+`trunc(d, fmt)` → `start_of_*` (WEEK a pass-through); `last_day` →
+`add_days ( add_months ( start_of_month ( d ) , 1 ) , -1 )`. Still refused, by design: a `LIKE` with
+`ESCAPE` or a non-literal pattern, `trunc` with a non-literal or unsupported format, and the
+pass-throughs over an aggregate. M2: 18 TRANSLATE_FAILED → 0.
 
 ## BL-363 — The Databricks fidelity oracle runs case SQL as a principal that owns the catalog `Tier 2`
 
@@ -13281,7 +13353,7 @@ corpus would be executable input running with that reach.
 
 ## BL-365 — `a * b / c` is read as `a * ( b / c )`, and a doubled quote in a string literal is two quotes: audit every formula emitter `Tier 1`
 
-**Filed:** 2026-10-07. **Status:** OPEN (the Excel printer is fixed in ts-cli 0.162.0).
+**Filed:** 2026-10-07. **Status:** OPEN (the Excel printer is fixed in ts-cli 0.164.0).
 **Source:** the Excel coverage pass's fresh M1 run (16 silent wrong answers, every one a
 `… * 180 / PI()` shape) and the follow-up probes in probe record §7.
 
@@ -13314,3 +13386,27 @@ through `formula_common` (BL-217), re-pin the tests, and add a fidelity case for
 dialect.
 
 **Target:** 2026-10-31.
+
+## BL-366 — To-direction `safe_divide` is not exact on NULL: Databricks `COALESCE(a / NULLIF(b, 0), 0)`, Snowflake `DIV0` `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** the inverse of BL-357, found while fixing it (fix/m2-findings). Offline reading of
+`mv_emit_sql._emit_safe_divide` and both mapping docs' to-direction rows; the Snowflake
+behaviour is live (2026-10-07, `ThoughtSpot Partner (AP)`).
+
+**The facts.**
+- ThoughtSpot `safe_divide ( a , b )` compiles to `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`
+  (probe record §7; M2 compiled SQL): 0 on a zero divisor even when `a` is NULL, NULL on a NULL
+  divisor or a NULL dividend over a non-zero divisor.
+- `ts-convert-to-databricks-mv` emits `COALESCE(a / NULLIF(b, 0), 0)`, which is **0** on any NULL
+  operand where `safe_divide` is NULL.
+- The Snowflake to-direction row maps `safe_divide` to `DIV0(a, b)`: `DIV0(NULL, 0)` is NULL where
+  `safe_divide` gives 0. Narrow, but a different answer.
+
+**Fix.** Emit the compiled form, `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`, in both
+to-direction converters (wrap a compound `b` once). Update `test_databricks_emit_sql.py`, the
+golden worked examples that carry the COALESCE form, both mapping docs' to-direction rows, and
+add a round-trip fidelity case. Not done in the M2 fix PR: it changes converter output that
+golden tests pin, and the PR's scope is the from-direction.
+
+**Target:** 2026-11-30.

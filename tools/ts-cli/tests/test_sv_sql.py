@@ -257,8 +257,13 @@ class TestSpecialFunctions:
             "if ( [A::X] > 0 ) then 'positive' else 'non-positive'"
 
     def test_div0(self):
+        # BL-357: DIV0(NULL, 0) is NULL in Snowflake, safe_divide's 0 — so the NULL guard
         result = translate_sql_expr("DIV0(a.X, a.Y)", _resolve)
-        assert result == "safe_divide ( [A::X] , [A::Y] )"
+        assert result == ("( if ( isnull ( [A::X] ) ) then null else "
+                          "safe_divide ( [A::X] , [A::Y] ) )")
+        assert translate_sql_expr("DIV0NULL(a.X, a.Y)", _resolve) == (
+            "( if ( isnull ( [A::X] ) ) then null else "
+            "safe_divide ( [A::X] , ifnull ( [A::Y] , 0 ) ) )")
 
     def test_count_if(self):
         result = translate_sql_expr("COUNT_IF(a.FLAG)", _resolve)
@@ -275,8 +280,14 @@ class TestSpecialFunctions:
         assert result == 'sql_string_op ( "TO_CHAR({0})" , [A::X] )'
 
     def test_to_number(self):
+        # BL-359: Snowflake's default scale is 0 and TO_NUMBER rounds (TO_NUMBER('2.5') = 3)
         result = translate_sql_expr("TO_NUMBER(a.X)", _resolve)
-        assert result == "to_double ( [A::X] )"
+        assert result == "to_integer ( [A::X] )"
+        assert translate_sql_expr("TO_DECIMAL(a.X, 10, 2)", _resolve) == \
+            'sql_double_op ( "TO_DECIMAL({0}, 10, 2)" , [A::X] )'
+        assert translate_sql_expr("TO_NUMBER(a.X, 38, 0)", _resolve) == "to_integer ( [A::X] )"
+        assert translate_sql_expr("TO_NUMBER(a.X, '999.99')", _resolve) == \
+            'sql_double_op ( "TO_NUMBER({0}, \'999.99\')" , [A::X] )'
 
     def test_log_base2(self):
         result = translate_sql_expr("LOG(2, a.X)", _resolve)
@@ -350,8 +361,13 @@ class TestCast:
         assert result == "to_integer ( [A::X] )"
 
     def test_cast_decimal_precision(self):
+        # BL-359: a NUMBER/DECIMAL cast ROUNDS to its scale in Snowflake (2.567 -> 2.57);
+        # to_double kept every digit
         result = translate_sql_expr("CAST(a.X AS DECIMAL(10,2))", _resolve)
-        assert result == "to_double ( [A::X] )"
+        assert result == 'sql_double_op ( "CAST({0} AS DECIMAL(10,2))" , [A::X] )'
+        assert translate_sql_expr("CAST(a.X AS NUMBER)", _resolve) == "to_integer ( [A::X] )"
+        assert translate_sql_expr("CAST(SUM(a.X) AS NUMBER(18,2))", _resolve) == \
+            "round ( sum ( [A::X] ) , 0.01 )"
 
 
 # ---------------------------------------------------------------------------
@@ -431,8 +447,11 @@ class TestPassThrough:
 
 class TestNullif:
     def test_nullif_zero_division(self):
+        # BL-357: NULL on a zero divisor, like ThoughtSpot's own `/`
         result = translate_sql_expr("a.X / NULLIF(a.Y, 0)", _resolve)
-        assert result == "safe_divide ( [A::X] , [A::Y] )"
+        assert result == "[A::X] / [A::Y]"
+        assert translate_sql_expr("COALESCE(a.X / NULLIF(a.Y, 0), 0)", _resolve) == \
+            "ifnull ( safe_divide ( [A::X] , [A::Y] ) , 0 )"
 
     def test_nullif_non_zero(self):
         result = translate_sql_expr("NULLIF(a.X, a.Y)", _resolve)
@@ -484,8 +503,10 @@ class TestErrors:
             translate_sql_expr("UNKNOWN_FN(a.X)", _resolve)
 
     def test_concat_operator(self):
-        with pytest.raises(UntranslatableError, match="\\|\\|"):
-            translate_sql_expr("a.X || a.Y", _resolve)
+        # BL-362: `||` is NULL-propagating concat, like concat
+        assert translate_sql_expr("a.X || a.Y", _resolve) == "concat ( [A::X] , [A::Y] )"
+        with pytest.raises(UntranslatableError, match="mixed"):
+            translate_sql_expr("a.X || a.Y + 1", _resolve)
 
     def test_empty_expression(self):
         with pytest.raises(UntranslatableError, match="empty"):

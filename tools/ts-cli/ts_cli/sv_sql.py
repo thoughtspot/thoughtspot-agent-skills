@@ -26,8 +26,16 @@ from ts_cli.formula_common import (
     ts_weekday_number,
 )
 from ts_cli.sv_sql_exact import EXACT_FORM_CALLS as _EXACT_FORM_CALLS
-from ts_cli.sv_sql_exact import datediff_to_ts
+from ts_cli.sv_sql_exact import CAST_NUMBER, cast_number, cast_params, datediff_to_ts
 from ts_cli.sv_sql_exact import is_aggregated as _is_aggregated
+from ts_cli.sql_forms import (
+    sqlf_fold_concat,
+    sqlf_fold_multiplicative,
+    sqlf_group,
+    sqlf_guard_adjacent,
+    sqlf_like,
+    sqlf_null_default_call,
+)
 
 
 _TOKEN_RE = re.compile(
@@ -48,7 +56,12 @@ _KEYWORDS = {"AND", "OR", "NOT", "CASE", "WHEN", "THEN", "ELSE", "END",
              "AS", "CAST", "FROM", "LIKE", "OVER", "FILTER", "WHERE",
              "PARTITION", "BY", "ORDER", "ASC", "DESC", "ROWS", "RANGE",
              "UNBOUNDED", "PRECEDING", "FOLLOWING", "CURRENT", "ROW",
-             "EXCLUDING"}
+             "EXCLUDING", "ILIKE", "RLIKE", "REGEXP"}
+#: Keyword operators translated as a sql_bool_op pass-through (BL-362).
+_LIKE_OPS = frozenset({"LIKE", "ILIKE", "RLIKE", "REGEXP"})
+#: Of those, the ones Snowflake does not reserve: a bare column of that name (not followed by a
+#: pattern) is still a column. The tokenizer has upper-cased it; resolution is case-insensitive.
+_COLUMN_OK_OPS = frozenset({"ILIKE", "RLIKE", "REGEXP"})
 
 _DATE_LITERAL_RE = re.compile(r"^'\d{4}-\d{2}-\d{2}'$")
 _BARE_NOW_FNS = {"CURRENT_DATE": "today", "CURRENT_TIMESTAMP": "now"}
@@ -122,7 +135,8 @@ def _expr(cur: _Cursor, resolver, stop_kws: frozenset = frozenset()) -> str:
 
 
 def _expr_units(cur: _Cursor, resolver,
-                stop_kws: frozenset = frozenset()) -> list[str]:
+                stop_kws: frozenset = frozenset(), finish: bool = True) -> list[str]:
+    """``finish=False`` returns the units before ``_finish_units`` (BL-357)."""
     units: list[str] = []
     while True:
         kind, text = cur.peek()
@@ -143,9 +157,16 @@ def _expr_units(cur: _Cursor, resolver,
             _ident_unit(text, cur, resolver, units)
         else:  # kw
             _keyword_unit(text, cur, resolver, units)
-    _collapse_nullif_markers(units)
     if not units:
         raise UntranslatableError("empty expression")
+    return _finish_units(units, resolver) if finish else units
+
+
+def _finish_units(units: list[str], resolver=None) -> list[str]:
+    """Collapse NULLIF markers, then fold ``%`` and ``||`` at their precedence."""
+    _collapse_nullif_markers(units)
+    sqlf_fold_multiplicative(units, resolver)
+    sqlf_fold_concat(units)
     return units
 
 
@@ -162,11 +183,7 @@ def _op_unit(text: str, cur: _Cursor, resolver, units: list[str]) -> None:
         units.append(f"( {inner} )")
     elif text == "<>":
         units.append("!=")
-    elif text == "||":
-        raise UntranslatableError(
-            "operator '||' — use CONCAT() instead "
-            "(ts-snowflake-formula-translation.md)")
-    else:
+    else:  # `%` and `||` are folded by _finish_units (BL-362)
         units.append(text)
 
 
@@ -215,6 +232,10 @@ def _ident_unit(text: str, cur: _Cursor, resolver, units: list[str]) -> None:
         cur.advance()
         units.append(_call(upper, cur, resolver))
         return
+    if upper == "DIV" and units:
+        raise UntranslatableError(
+            "Snowflake has no DIV operator — integer division is TRUNC(a / b) (BL-360)")
+    sqlf_guard_adjacent(units, text)
     units.append(resolver(text))
 
 
@@ -242,6 +263,8 @@ def _keyword_unit(text: str, cur: _Cursor, resolver,
         _construct_in(cur, resolver, units)
     elif text == "BETWEEN":
         _construct_between(cur, resolver, units)
+    elif text in _LIKE_OPS:
+        _like_or_column(text, cur, resolver, units)
     elif text == "OVER":
         raise UntranslatableError(
             "OVER clause in expression — pre-split window expressions "
@@ -265,12 +288,13 @@ _RENAME = {
     "CONTAINS": "contains",
     "LEFT": "left", "RIGHT": "right", "LPAD": "lpad", "RPAD": "rpad",
     "REVERSE": "reverse", "REPEAT": "repeat",
-    "ABS": "abs", "CEIL": "ceil", "CEILING": "ceil",
-    "FLOOR": "floor",
+    # CEIL / CEILING / FLOOR deliberately not here (BL-361): the optional scale argument
+    # needs the scaled form — see sv_sql_exact.call_floor_ceil.
+    "ABS": "abs",
     # ROUND / TRUNC deliberately do NOT live here (BL-331): ThoughtSpot round()'s
     # 2nd arg is a rounding INCREMENT, not a digit count — see _call_round /
     # _call_trunc and formula_common.ts_round_from_sql_digits.
-    "MOD": "mod", "POWER": "pow", "SQRT": "sqrt", "LN": "ln",
+    "POWER": "pow", "SQRT": "sqrt", "LN": "ln",
     "LOG2": "log2", "LOG10": "log10",
     "GREATEST": "greatest", "LEAST": "least",
     "YEAR": "year", "MONTH": "month_number", "DAY": "day",
@@ -285,8 +309,8 @@ _RENAME = {
     "DATE": "date",
     "SUM": "sum", "AVG": "average", "MIN": "min", "MAX": "max",
     "MEDIAN": "median", "STDDEV": "stddev", "VARIANCE": "variance",
-    "IFNULL": "ifnull", "NVL": "ifnull",
-    "ZEROIFNULL": "zeroifnull",
+    # IFNULL / NVL / ZEROIFNULL / COALESCE: _call_null_default (BL-357). ZEROIFNULL was a
+    # rename to `zeroifnull`, which is not a ThoughtSpot function in the catalog (BL-226).
 }
 _PASS_THROUGH_HINT = {
     "LOWER": "sql_string_op", "UPPER": "sql_string_op",
@@ -352,8 +376,7 @@ _SPECIAL_DISPATCH: dict[str, str] = {
     "TO_DATE": "_to_date",
 }
 _IFF_NAMES = frozenset({"IFF", "IF"})
-_DIV0_NAMES = frozenset({"DIV0", "DIV0NULL"})
-_TO_DOUBLE_NAMES = frozenset({"TO_NUMBER", "TO_DECIMAL", "TO_NUMERIC"})
+_NULL_DEFAULT_NAMES = frozenset({"COALESCE", "IFNULL", "NVL", "ZEROIFNULL"})
 _CAST_NAMES = frozenset({"CAST", "TRY_CAST"})
 _ARG_SWAP = {"LOCATE": ("strpos", 2)}
 
@@ -379,10 +402,10 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
         return _call_pass_through(name, cur, resolver)
     if name in _IFF_NAMES:
         return _call_iff(cur, resolver)
-    if name in _DIV0_NAMES:
-        return _call_div0(cur, resolver)
+    if name in _NULL_DEFAULT_NAMES:
+        return _call_null_default(name, cur, resolver)
     if name in _CAST_NAMES:
-        return _construct_cast(cur, resolver)
+        return _construct_cast(cur, resolver, try_cast=name == "TRY_CAST")
     return _call_with_args(name, cur, resolver)
 
 
@@ -391,12 +414,8 @@ def _call_with_args(name: str, cur: _Cursor, resolver) -> str:
     args = _call_args(cur, resolver, agg=name)
     if name in _EXACT_FORM_CALLS:  # BL-340 / BL-342 / BL-343
         return _EXACT_FORM_CALLS[name](name, args, resolver)
-    if name in _TO_DOUBLE_NAMES:
-        return _emit("to_double", args[:1])
     if name == "NULLIF":
         return _call_nullif(args)
-    if name == "COALESCE":
-        return _call_coalesce(args)
     if name == "NVL2":
         _need(args, 3, name)
         return f"if ( {args[0]} != null ) then {args[1]} else {args[2]}"
@@ -594,10 +613,21 @@ def _call_iff(cur: _Cursor, resolver) -> str:
     return f"if ( {args[0]} ) then {args[1]} else {args[2]}"
 
 
-def _call_div0(cur: _Cursor, resolver) -> str:
-    args = _call_args(cur, resolver)
-    _need(args, 2, "DIV0")
-    return f"safe_divide ( {args[0]} , {args[1]} )"
+def _call_null_default(name: str, cur: _Cursor, resolver) -> str:
+    """COALESCE / IFNULL / NVL / ZEROIFNULL over raw argument units, so an
+    ``x / NULLIF(y, 0)`` first argument is visible (BL-357, ``sql_forms``)."""
+    raw: list[list[str]] = []
+    if cur.peek() == ("op", ")"):
+        cur.advance()
+    else:
+        while True:
+            raw.append(_expr_units(cur, resolver, finish=False))
+            if cur.peek() == ("op", ","):
+                cur.advance()
+                continue
+            cur.expect_op(")")
+            break
+    return sqlf_null_default_call(name, raw, lambda u: _finish_units(u, resolver), _NULLIF0)
 
 
 def _call_position(cur: _Cursor, resolver) -> str:
@@ -703,17 +733,6 @@ def _call_nullif(args: list[str]) -> str:
     return _NULLIF0 + args[0]
 
 
-def _call_coalesce(args: list[str]) -> str:
-    if len(args) == 2 and args[0].startswith("safe_divide (") and args[1] == "0":
-        return args[0]
-    if len(args) == 2:
-        return f"if ( {args[0]} != null ) then {args[0]} else {args[1]}"
-    if len(args) >= 2:
-        inner = _call_coalesce(args[1:])
-        return f"if ( {args[0]} != null ) then {args[0]} else {inner}"
-    return args[0]
-
-
 def _call_log(args: list[str]) -> str:
     if len(args) == 2:
         if args[0] == "2":
@@ -746,7 +765,7 @@ def _call_raw_string_args(cur: _Cursor) -> list[str]:
 
 _NOT_OPERAND_STOP_KWS = frozenset(
     {"AND", "OR", "THEN", "WHEN", "ELSE", "END"})
-_COMPOUND_GUARD_OPS = {"+", "-", "*", "/", "=", "!=", "<", ">", "<=", ">="}
+_COMPOUND_GUARD_OPS = {"+", "-", "*", "/", "%", "||", "=", "!=", "<", ">", "<=", ">="}
 
 
 def _pop_operand(units: list[str], construct: str) -> str:
@@ -796,7 +815,11 @@ def _one_operand(cur, resolver) -> list[str]:
 
 def _construct_not(cur, resolver, units: list[str]) -> None:
     kind, text = cur.peek()
-    if kind == "kw" and text in ("IN", "BETWEEN", "LIKE"):
+    if kind == "kw" and text in _LIKE_OPS:
+        cur.advance()
+        _construct_like(text, cur, units, negate=True)  # BL-362
+        return
+    if kind == "kw" and text in ("IN", "BETWEEN"):
         raise UntranslatableError(
             f"NOT {text} has no documented ThoughtSpot mapping")
     if kind == "ident":
@@ -842,7 +865,7 @@ def _construct_case(cur, resolver) -> str:
     return out
 
 
-def _construct_cast(cur, resolver) -> str:
+def _construct_cast(cur, resolver, try_cast: bool = False) -> str:
     """CAST(expr AS type) or TRY_CAST(expr AS type).
 
     Called both as a keyword construct (CAST ...) and as a function
@@ -860,18 +883,11 @@ def _construct_cast(cur, resolver) -> str:
     if tk != "ident":
         raise UntranslatableError("CAST with a non-identifier target type")
     type_name = ttext.upper()
-    nk, nt = cur.peek()
-    if nk == "op" and nt == "(":
-        cur.advance()
-        depth = 1
-        while depth:
-            k2, t2 = cur.advance()
-            if k2 == "op" and t2 == "(":
-                depth += 1
-            elif k2 == "op" and t2 == ")":
-                depth -= 1
+    params = cast_params(cur)
     cur.expect_op(")")
     inner = " ".join(inner_units) if len(inner_units) > 1 else inner_units[0]
+    if type_name in CAST_NUMBER:
+        return cast_number(type_name, params, inner, resolver, try_cast)
     fn = _CAST_MAP.get(type_name)
     if fn:
         return _emit(fn, [inner])
@@ -919,17 +935,35 @@ def _construct_between(cur, resolver, units: list[str]) -> None:
     units.append(f"{operand} >= {lo} and {operand} <= {hi}")
 
 
+def _like_or_column(text: str, cur, resolver, units: list[str]) -> None:
+    """A LIKE-family operator, or — for an unreserved name not followed by a pattern — a
+    column of that name."""
+    if text in _COLUMN_OK_OPS and cur.peek()[0] != "string":
+        _ident_unit(text, cur, resolver, units)
+    else:
+        _construct_like(text, cur, units)
+
+
+def _construct_like(op: str, cur, units: list[str], negate: bool = False) -> None:
+    """``x [NOT] LIKE | ILIKE | RLIKE | REGEXP 'p'`` -> sql_bool_op pass-through (BL-362)."""
+    operand = _pop_operand(units, op)
+    kind, pattern = cur.advance()
+    if kind != "string":
+        raise UntranslatableError(f"{op} expects a string-literal pattern")
+    nk, nt = cur.peek()
+    if nk == "ident" and nt.upper() == "ESCAPE":
+        raise UntranslatableError(f"{op} … ESCAPE has no documented mapping")
+    units.append(sqlf_like(f"NOT {op}" if negate else op, operand, pattern))
+
+
 def _collapse_nullif_markers(units: list[str]) -> None:
-    """x / NULLIF(y, 0) -> safe_divide ( x , y ); stray marker -> ( if ( y = 0 ) then null else y ) —
+    """x / NULLIF(y, 0) -> x / y — ThoughtSpot's `/` is already NULL on a zero divisor;
+    `safe_divide` was 0 there (BL-357). Stray marker -> ( if ( y = 0 ) then null else y ) —
     ThoughtSpot has no null_if_zero (rejected at import, probe record §7, BL-344)."""
-    i = 0
-    while i < len(units):
-        if units[i].startswith(_NULLIF0):
-            y = units[i][len(_NULLIF0):]
+    for i, unit in enumerate(units):
+        if unit.startswith(_NULLIF0):
+            y = unit[len(_NULLIF0):]
             if i >= 2 and units[i - 1] == "/":
-                x = units[i - 2]
-                units[i - 2:i + 1] = [f"safe_divide ( {x} , {y} )"]
-                i -= 2
+                units[i] = sqlf_group(y)
             else:
                 units[i] = f"( if ( {y} = 0 ) then null else {y} )"
-        i += 1

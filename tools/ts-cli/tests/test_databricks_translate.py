@@ -723,8 +723,8 @@ class TestRatioWindow:
                          _window("month", "current", offset=_offset(-12, "month"))),
             BF_DIMS, TABLES, allow_row_lag=True)
         assert out["ts_expr"] == (
-            "safe_divide ( moving_sum ( [TRANSACTIONS::r] , 12 , -12 , [TRANSACTIONS::dt] ) , "
-            "moving_sum ( [TRANSACTIONS::c] , 12 , -12 , [TRANSACTIONS::dt] ) )")
+            "moving_sum ( [TRANSACTIONS::r] , 12 , -12 , [TRANSACTIONS::dt] ) / "
+            "moving_sum ( [TRANSACTIONS::c] , 12 , -12 , [TRANSACTIONS::dt] )")
         # month/month is verified at N=12: no C8 annotation
         assert [a["kind"] for a in out["annotations"]] == ["row_lag_approximation",
                                                            "one_row_per_period"]
@@ -845,8 +845,8 @@ class TestConditionalFallback:
             "rps", "SUM(r) FILTER (WHERE o = 'current') / NULLIF(SUM(s), 0)",
             "conditional"), TABLES)
         assert out["ts_expr"] == (
-            "safe_divide ( sum_if ( [TRANSACTIONS::o] = 'current' , "
-            "[TRANSACTIONS::r] ) , sum ( [TRANSACTIONS::s] ) )")
+            "sum_if ( [TRANSACTIONS::o] = 'current' , "
+            "[TRANSACTIONS::r] ) / sum ( [TRANSACTIONS::s] )")
 
     def test_whole_expression_filter_unchanged(self):
         out = translate_measure(_measure(
@@ -934,7 +934,7 @@ class TestOrchestrator:
 
     def test_untranslatable_filter_is_skipped_role_filter(self):
         out = translate_metric_view(
-            _parsed((), (), filter_sql="s LIKE 'a%'"), TABLES)
+            _parsed((), (), filter_sql="s LIKE 'a!%' ESCAPE '!'"), TABLES)
         assert out["filter"] is None
         assert out["skipped"][0]["role"] == "filter"
 

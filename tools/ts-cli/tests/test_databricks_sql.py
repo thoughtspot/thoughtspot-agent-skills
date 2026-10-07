@@ -60,8 +60,10 @@ class TestCore:
         assert t("x * 0.5") == "[TRANSACTIONS::x] * 0.5"
 
     def test_unknown_operator_raises(self):
-        with pytest.raises(UntranslatableError, match=r"\|\|"):
-            t("a || b")
+        # `||` is concat since BL-362; an unknown keyword operator between two operands
+        # must be refused, never read as a column (BL-360)
+        with pytest.raises(UntranslatableError, match="no operator between"):
+            t("a REGEXP b")
 
     def test_unresolvable_column_raises(self):
         def bad(_path):
@@ -377,9 +379,14 @@ class TestPostfixConstructs:
         assert t("CAST(SUM(x) AS DOUBLE) / COUNT(*)") == \
             "sum ( [TRANSACTIONS::x] ) / count ( 1 )"
 
-    def test_like_raises(self):
-        with pytest.raises(UntranslatableError, match="LIKE"):
-            t("s LIKE 'a%'")
+    def test_like_is_a_bool_passthrough(self):
+        # BL-362: the warehouse's own case-sensitive LIKE, exact by construction
+        assert t("s LIKE 'a%'") == \
+            'sql_bool_op ( "{0} LIKE \'a%\'" , [TRANSACTIONS::s] )'
+
+    def test_like_escape_raises(self):
+        with pytest.raises(UntranslatableError, match="ESCAPE"):
+            t("s LIKE 'a!%' ESCAPE '!'")
 
     def test_not_in_becomes_and_chain(self):
         # BL-316 item 3 (was a documented gap until 2026-09-28)
@@ -456,12 +463,16 @@ class TestTruncatedInput:
 
 class TestSafeDivide:
     def test_divide_by_nullif(self):
+        # BL-357: ThoughtSpot `/` is already NULL on a zero divisor; safe_divide was 0
         assert t("SUM(a) / NULLIF(SUM(b), 0)") == \
-            "safe_divide ( sum ( [TRANSACTIONS::a] ) , sum ( [TRANSACTIONS::b] ) )"
+            "sum ( [TRANSACTIONS::a] ) / sum ( [TRANSACTIONS::b] )"
 
     def test_coalesce_safe_divide_zero(self):
-        assert t("COALESCE(SUM(a) / NULLIF(SUM(b), 0), 0)") == \
-            "safe_divide ( sum ( [TRANSACTIONS::a] ) , sum ( [TRANSACTIONS::b] ) )"
+        # BL-357: 0 on a zero divisor AND on a NULL operand — safe_divide alone is NULL there
+        assert t("COALESCE(SUM(a) / NULLIF(SUM(b), 0), 0)") == (
+            "ifnull ( safe_divide ( sum ( [TRANSACTIONS::a] ) , sum ( [TRANSACTIONS::b] ) ) , 0 )")
+        assert t("COALESCE(a / NULLIF(b, 0), -1)") == \
+            "ifnull ( [TRANSACTIONS::a] / [TRANSACTIONS::b] , - 1 )"
 
     def test_standalone_nullif_zero(self):
         assert t("NULLIF(x, 0)") == "( if ( [TRANSACTIONS::x] = 0 ) then null else [TRANSACTIONS::x] )"  # BL-344
@@ -474,9 +485,11 @@ class TestSafeDivide:
         assert t("COALESCE(a, b)") == \
             "if ( [TRANSACTIONS::a] != null ) then [TRANSACTIONS::a] else [TRANSACTIONS::b]"
 
-    def test_coalesce_three_args_raises(self):
-        with pytest.raises(UntranslatableError, match="COALESCE"):
-            t("COALESCE(a, b, c)")
+    def test_coalesce_three_args(self):
+        # BL-362: n-ary COALESCE, as sv_sql
+        assert t("COALESCE(a, b, c)") == (
+            "if ( [TRANSACTIONS::a] != null ) then [TRANSACTIONS::a] else "
+            "if ( [TRANSACTIONS::b] != null ) then [TRANSACTIONS::b] else [TRANSACTIONS::c]")
 
 
 class TestAggregateFilterClause:
@@ -485,8 +498,8 @@ class TestAggregateFilterClause:
 
     def test_filter_then_divide(self):
         assert t("SUM(r) FILTER (WHERE o = 'current') / NULLIF(SUM(s), 0)") == (
-            "safe_divide ( sum_if ( [TRANSACTIONS::o] = 'current' , "
-            "[TRANSACTIONS::r] ) , sum ( [TRANSACTIONS::s] ) )")
+            "sum_if ( [TRANSACTIONS::o] = 'current' , "
+            "[TRANSACTIONS::r] ) / sum ( [TRANSACTIONS::s] )")
 
     def test_filter_both_sides_of_minus(self):
         assert t("SUM(r) FILTER (WHERE o = 'a') - SUM(r) FILTER (WHERE o = 'b')") == (
@@ -510,11 +523,10 @@ class TestEmptyOverWindow:
     """BL-316 item 5 — SUM(SUM(x)) OVER () share-of-total denominator."""
 
     def test_sum_of_sum(self):
-        # safe_divide binds the unit left of '/' (pre-existing NULLIF collapse):
-        # a * (100 / b) == (a * 100) / b, zero divisor included
+        # x / NULLIF(y, 0) is plain division (BL-357), left-associative as in SQL
         assert t("SUM(x) * 100.0 / NULLIF(SUM(SUM(x)) OVER (), 0)") == (
-            "sum ( [TRANSACTIONS::x] ) * safe_divide ( 100.0 , group_aggregate "
-            "( sum ( [TRANSACTIONS::x] ) , { } , query_filters ( ) ) )")
+            "sum ( [TRANSACTIONS::x] ) * 100.0 / group_aggregate "
+            "( sum ( [TRANSACTIONS::x] ) , { } , query_filters ( ) )")
 
     def test_sum_of_count(self):
         assert t("SUM(COUNT(x)) OVER ()") == \
@@ -547,7 +559,7 @@ class TestAggregateHook:
     def test_each_side_of_ratio_wrapped(self):
         assert translate_sql_expr("SUM(a) / NULLIF(SUM(b), 0)", _resolver,
                                   agg_hook=self.hook) == (
-            "safe_divide ( WSUM ( [TRANSACTIONS::a] ) , WSUM ( [TRANSACTIONS::b] ) )")
+            "WSUM ( [TRANSACTIONS::a] ) / WSUM ( [TRANSACTIONS::b] )")
 
     def test_filter_becomes_null_else_under_hook(self):
         assert translate_sql_expr("SUM(a) FILTER (WHERE o = 'x')", _resolver,

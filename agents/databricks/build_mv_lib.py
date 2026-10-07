@@ -22,6 +22,10 @@ CLOSURE = [
     "ts_cli/tml_lint.py",
     "ts_cli/tml_common.py",
     "ts_cli/formula_common.py",
+    # Shared SQL forms (BL-357..362): mv_sql_constructs reads SQLF_DIV_MARK at module
+    # execution, so these two precede it.
+    "ts_cli/sql_forms.py",
+    "ts_cli/databricks/mv_sql_calls.py",
     "ts_cli/databricks/mv_expr.py",
     "ts_cli/databricks/mv_window.py",
     "ts_cli/databricks/mv_sql_constructs.py",

@@ -10,6 +10,9 @@ trap rests on it:
 - OI-3 (2026-10-06): ``diff_months`` / ``diff_years`` count calendar boundaries crossed.
 - OI-4 (2026-10-06): ``=``, ``contains`` and ``strpos`` on strings are case-insensitive
   (BL-333). OI-2's week-start consequences are BL-334.
+- BL-358 (formula fidelity M2, 2026-10-07): ThoughtSpot's queries over a Databricks
+  connection run non-ANSI — BIGINT overflow wraps, an out-of-range cast clamps, a bad
+  string cast is NULL — where an ANSI Databricks source raises.
 
 Also hosts the two output repairs that are about ThoughtSpot, not about any one source
 language: ``COUNT(*)`` → count of a key column, and a guard against SQL keywords a
@@ -54,6 +57,15 @@ _BARE_TOTAL = re.compile(r"\bTOTAL\b", re.I)
 _DOUBLE_EQ = re.compile(r"==")
 _PLUS_STRING = re.compile(r"''\s*\+|\+\s*''")
 _COLUMN_CMP = re.compile(r"\]\s*(?:=|!=|<>)\s*\[")
+_CALENDAR_OUT = re.compile(r"\bstart_of_(month|quarter|year)\s*\(")
+_SCALED_CAST_SRC = re.compile(
+    r"\b(?:CAST|TRY_CAST)\s*\(.*\bAS\s+(?:DECIMAL|NUMBER|NUMERIC|DEC)\s*\(\s*\d+\s*,\s*[1-9]"
+    r"|\bTO_(?:NUMBER|DECIMAL|NUMERIC)\s*\(.*,\s*\d+\s*,\s*[1-9]", re.I | re.S)
+_ROUND_AGG_OUT = re.compile(r"\bround\s*\(\s*(?:sum|average|min|max|median|stddev|variance)\s*\(")
+_DBX_CAST_SRC = re.compile(r"\bCAST\s*\(|::", re.I)
+# An integer literal of 10+ digits beside an arithmetic operator: past INT range, and the
+# realistic way a formula reaches BIGINT's limit (M2 dbx-arith-013).
+_DBX_BIG_LITERAL = re.compile(r"[-+*]\s*\d{10,}\b|\b\d{10,}\s*[-+*]")
 
 
 # Trap lines that mean the output does NOT compute what the source computes: a translation
@@ -63,6 +75,10 @@ DOWNGRADE_TRAP_PREFIXES = (
     # A case-sensitive source comparison against a literal answers differently for any
     # value that differs only in case (OI-4, BL-333).
     "string comparison is case-INSENSITIVE",
+    # An overflow wraps to a wrong number where the ANSI source raises (BL-358).
+    "integer overflow wraps",
+    # round() on a DOUBLE aggregate is not the warehouse's half-up DECIMAL rounding (#578).
+    "rounded cast over an aggregate",
 )
 
 
@@ -196,6 +212,42 @@ def _case_traps(dialect: str, output: str) -> list[str]:
     return [_CASE_COLUMNS] if _COLUMN_CMP.search(output) else []
 
 
+_DBX_OVERFLOW = ("integer overflow wraps in ThoughtSpot over Databricks: its queries run "
+                 "non-ANSI (BL-358), so BIGINT arithmetic past ±9.22e18 returns a wrapped, "
+                 "wrong number where an ANSI Databricks source raises ARITHMETIC_OVERFLOW")
+_DBX_CAST = ("CAST over Databricks runs non-ANSI in ThoughtSpot (BL-358): a value that does "
+             "not convert gives NULL, and an out-of-range integer cast clamps "
+             "(2147483647), where an ANSI Databricks source raises")
+
+
+_CALENDAR = ("start_of_month / start_of_quarter / start_of_year follow the Model's calendar: "
+             "this assumes the Model's default Gregorian calendar — a fiscal calendar shifts "
+             "them, where the SQL source's truncation is always Gregorian")
+_ROUNDED_CAST = ("rounded cast over an aggregate: a DECIMAL/NUMBER(p, s) cast of a total became "
+                 "round ( total , 10^-s ), which is exact on a DECIMAL total but not on a DOUBLE "
+                 "one at a half (40.955 rounds to 40.95 in DOUBLE, 40.96 as the warehouse's "
+                 "DECIMAL) — cast inside the aggregate, or validate the values")
+
+
+def _sql_traps(dialect: str, source: str, code: str) -> list[str]:
+    """Snowflake / Databricks only: the calendar note (#578 review) and the rounded-cast
+    downgrade."""
+    if dialect not in ("snowflake", "databricks"):
+        return []
+    out = [_CALENDAR] if _CALENDAR_OUT.search(code) else []
+    if _ROUND_AGG_OUT.search(code) and _SCALED_CAST_SRC.search(_code(source)):
+        out.append(_ROUNDED_CAST)
+    return out
+
+
+def _databricks_traps(dialect: str, source: str) -> list[str]:
+    if dialect != "databricks":
+        return []
+    src = _code(source)
+    out = [_DBX_OVERFLOW] if _DBX_BIG_LITERAL.search(src) else []
+    return out + ([_DBX_CAST] if _DBX_CAST_SRC.search(src) else [])
+
+
 def detect_traps(dialect: str, source: str, output: str) -> list[str]:
     """Trap lines that apply to this (source → output) pair."""
     code = _code(output)
@@ -205,9 +257,12 @@ def detect_traps(dialect: str, source: str, output: str) -> list[str]:
                      "`unique_count` and `count_distinct` are rejected)")
     traps.extend(line for pat, line in _OUTPUT_TRAPS if pat.search(code))
     traps.extend(_case_traps(dialect, output))
+    traps.extend(_databricks_traps(dialect, source))
+    traps.extend(_sql_traps(dialect, source, code))
     m = _PASSTHROUGH_OUT.search(code)
     if m:
+        syntax = "Databricks" if dialect == "databricks" else "Snowflake"
         traps.append(f"passthrough (sql_{m.group(1)}_op): the SQL runs in the warehouse "
-                     "(Snowflake syntax assumed), ThoughtSpot cannot plan around it, and the "
+                     f"({syntax} syntax assumed), ThoughtSpot cannot plan around it, and the "
                      "variant fixes the column's type and role (Ossie map E7)")
     return traps

@@ -253,7 +253,7 @@ empty).
 
 ## Coverage pass (2026-10-07)
 
-ts-cli 0.162.0 adds translator rules for the functions that blocked the most NEEDS_REVIEW cases.
+ts-cli 0.164.0 adds translator rules for the functions that blocked the most NEEDS_REVIEW cases.
 The ranking counted all 2,463 eligible cases, not just the 250. It counted cases where the
 function was a blocker, and cases where it was the **only** blocker, which predicts the gain
 best. That ranking was then weighed against how common each function is in BI sheets.
@@ -263,8 +263,8 @@ best. That ranking was then weighed against how common each function is in BI sh
 | | NEEDS_REVIEW | TRANSLATED | APPROXIMATED |
 |---|--:|--:|--:|
 | ts-cli 0.161.0 (main before the pass) | 1,719 (69.8%) | 653 | 91 |
-| ts-cli 0.162.0, first cut | 796 (32.3%) | 1,228 | 439 |
-| ts-cli 0.162.0, after the #577 review | **804 (32.6%)** | 1,115 | 544 |
+| ts-cli 0.164.0, first cut | 796 (32.3%) | 1,228 | 439 |
+| ts-cli 0.164.0, after the #577 review | **804 (32.6%)** | 1,115 | 544 |
 
 923 cases became translatable at first; after the review's domain, serial-60 and code-page rules, 915 (more of them APPROXIMATED, with a trap). The largest gains are the character codes (CHAR, CODE, UNICHAR:
 230 cases), trigonometry, the hyperbolic family and the angle functions (about 320), the CEILING / FLOOR `.MATH` /

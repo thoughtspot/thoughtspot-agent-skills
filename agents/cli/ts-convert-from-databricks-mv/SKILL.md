@@ -855,6 +855,17 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 ---
 
 
+### ThoughtSpot's Databricks queries run non-ANSI (BL-358)
+
+A known divergence, documented 2026-10-07 (formula fidelity M2): ThoughtSpot's queries over a
+Databricks connection behave as **non-ANSI**, while a Databricks SQL warehouse session defaults to
+`ansi_mode = true`. Where the source raises, the converted measure returns a value: BIGINT
+overflow **wraps** (`I1 + 9223372036854775800` → −9223372036854775804 — a wrong number), an
+out-of-range integer cast clamps (2147483647), and a malformed cast or a zero divisor gives NULL.
+No formula form avoids it — a pass-through runs in the same session. Review any measure with
+BIGINT arithmetic near the limits. See `agents/shared/mappings/ts-databricks/ts-databricks-formula-translation.md`
+→ "Non-ANSI semantics on a ThoughtSpot Databricks connection".
+
 ### String comparisons become case-insensitive (BL-333)
 
 ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }`, `<`/`>`, `contains`, `strpos`; live-probed 2026-10-06/07). A source comparison that is case-sensitive (Databricks' default `UTF8_BINARY` collation) therefore matches more rows after conversion: `'abc'` now equals `'ABC'`, and ordering comparisons can change. This is an accepted, documented trade-off. Where exact case matters for a specific formula, hand-edit it to `sql_bool_op ( "{0} = {1}" , [col] , 'x' )` (or `CONTAINS({0}, {1})`). See `agents/shared/schemas/thoughtspot-formula-patterns.md` → "String comparison is case-insensitive".
@@ -863,6 +874,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.17.0 | 2026-10-07 | **Formula fidelity M2 findings fixed** (BL-357, BL-359..362, ts-cli v0.163.0; live M2 re-run 0 silent wrong answers, 0 import failures, 0 declines in 114 cases). `x / NULLIF(y, 0)` is plain `x / y` (it was `safe_divide`, 0 on a zero divisor); `COALESCE(… / NULLIF(…, 0), 0)` is `ifnull ( safe_divide ( … ) , 0 )` — zero only where the source asks for zero. `CAST(… AS BIGINT/LONG)` is a 64-bit pass-through (`to_integer` is 32-bit on Databricks); `CAST(… AS DECIMAL(p,s))` rounds as the source does. `a DIV b`, `FLOOR`/`CEIL` with a scale, `%`, `\|\|`, `LIKE`/`ILIKE`/`RLIKE`, n-ary `COALESCE`, `NVL`, `NVL2`, `zeroifnull`, `nullifzero`, `try_divide`, `concat_ws`, `instr`, `bround`, `trunc`, `last_day` and `to_date(column)` now translate; an unknown keyword operator is refused instead of read as a column. Documents the non-ANSI behaviour of ThoughtSpot's Databricks queries (BL-358) |
 | 1.16.1 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.16.0 | 2026-10-06 | **`SUBSTRING`/`SUBSTR`, `months_between` and 3-argument `DATEDIFF` fixed** (BL-340, BL-342, BL-345, ts-cli v0.160.0). `DATEDIFF(unit, s, e)` counts **complete** units elapsed, which no `diff_*` does: every 3-argument unit (`MONTH` was `diff_months`) is now an exact `sql_int_op ( "DATEDIFF(MONTH, {0}, {1})" , s , e )` pass-through, and `DAY` stays `diff_days` only between two columns known to be DATE — never in this converter, which has no column types; the newly accepted units (`WEEK`, `QUARTER`, `YEAR`, `HOUR`, …) used to be refused. `SUBSTRING(s, pos, len)` was a bare rename to the zero-based `substr`, shifting every substring one character; it is now `substr ( s , pos - 1 , len )` with a literal `pos` folded, and a `sql_string_op` pass-through for a `pos` ≤ 0 (negative counts from the end) or a non-literal one. `SUBSTR` is accepted too. `months_between(a, b[, roundOff])` was `diff_months`, a boundary count; it is an exact `sql_double_op` pass-through keeping a literal `roundOff`. Read from the Databricks docs and the shared Snowflake evidence, not run on a cluster |
 | 1.15.4 | 2026-10-06 | **A standalone `NULLIF(x, 0)` no longer translates to `null_if_zero ( x )`**, which ThoughtSpot rejects at import (VALIDATE_ONLY, se-thoughtspot 2026-10-06, BL-344); it now emits `( if ( x = 0 ) then null else x )`. `x / NULLIF(y, 0)` → `safe_divide` is unchanged (ts-cli v0.158.0) |

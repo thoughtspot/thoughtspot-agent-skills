@@ -321,3 +321,57 @@ None.
 - runtime_s: `88.1`
 - phases (s): load 1.5, oracle 8.9, translate 0.0, ts_import 10.3, agentql 60.9, teardown 2.5
 - cleanup: ThoughtSpot objects confirmed absent = `True`, warehouse table dropped and confirmed = `True`
+
+## After fixes: M2 findings (2026-10-07)
+
+*Branch `fix/m2-findings` at `72b8496` (ts-cli 0.163.0). Run JSON:
+`tools/formula-fidelity/runs/2026-10-07-snowflake-m0-after-m2-fixes.json`.*
+
+**No regression.** 92 cases (71 + 21 new `sf-fix-*`): **86 MATCH**, 0 silent, 4 warned (BL-333), 1
+NEEDS_REVIEW (`sf-date-018`, the double-quoted format, unchanged), 1 error-equivalent
+(`sf-arith-003`). The 71 earlier cases: 65 MATCH (64 before), the same 4 warned and 1
+error-equivalent, and one fewer NEEDS_REVIEW. `MOD(I1, 3)` (`sf-arith-006`) changed form — the
+warehouse's `MOD`, because native `mod` rejects a DOUBLE (found by M2) — and still MATCHes.
+
+**The new forms, all MATCH:** `x / NULLIF(y, 0)` → `x / y`; `COALESCE` / `NVL` / `ZEROIFNULL` of a
+NULLIF division → `ifnull ( safe_divide ( … ) , 0 )` or `ifnull ( x / y , d )`; `DIV0` and
+`DIV0NULL` with their NULL-dividend guard (`DIV0(NULL, 0)` is NULL in Snowflake, `safe_divide` 0;
+`DIV0NULL(1, NULL)` is 0); `FLOOR` / `CEIL` with a positive and a negative scale, **unsnapped**
+(Snowflake's `FLOOR(99.99::DOUBLE, 2)` is 99.98, double arithmetic); `CAST(… AS NUMBER)`,
+`NUMBER(10,2)`, `TO_NUMBER`, and `CAST(SUM(N1) AS NUMBER(18,1))` → `round` (each rounds, which
+`to_double` did not); `%`, `||`, `LIKE`, `ILIKE`, `RLIKE`.
+
+**Cleanup.** Model and Table deleted and confirmed absent; the warehouse table dropped and
+confirmed. The one `ZZ_FIDELITY_M1_*` table left in `AGENT_SKILLS.PUBLIC` belongs to a concurrent M1
+run and was not touched.
+
+| Case | Role | Source | Emitted | Status | Verdict | Keys equal |
+|---|---|---|---|---|---|--:|
+| sf-fix-001 | row | `N1 / NULLIF(N2, 0)` | `[T::N1] / [T::N2]` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-002 | row | `COALESCE(N1 / NULLIF(N2, 0), 0)` | `ifnull ( safe_divide ( [T::N1] , [T::N2] ) , 0 )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-003 | row | `NVL(N1 / NULLIF(N2, 0), -1)` | `ifnull ( [T::N1] / [T::N2] , - 1 )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-004 | row | `ZEROIFNULL(N1 / NULLIF(N2, 0))` | `ifnull ( safe_divide ( [T::N1] , [T::N2] ) , 0 )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-005 | row | `DIV0(N1, N2)` | `( if ( isnull ( [T::N1] ) ) then null else safe_divide ( [T::N1] , [T::N2] ) )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-006 | row | `DIV0NULL(N1, N2)` | `( if ( isnull ( [T::N1] ) ) then null else safe_divide ( [T::N1] , ifnull ( [T::N2] , 0 ) ) )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-007 | row | `DIV0(N2, N1)` | `( if ( isnull ( [T::N2] ) ) then null else safe_divide ( [T::N2] , [T::N1] ) )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-008 | aggregate | `SUM(N1) / NULLIF(MIN(N2), 0)` | `sum ( [T::N1] ) / min ( [T::N2] )` | TRANSLATED | MATCH | 3/3 |
+| sf-fix-009 | row | `FLOOR(N1, 2)` | `( floor ( [T::N1] * 100 ) * 0.01 )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-010 | row | `CEIL(N1, -1)` | `( ceil ( [T::N1] / 10 ) * 10 )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-011 | row | `FLOOR(N1, -2)` | `( floor ( [T::N1] / 100 ) * 100 )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-012 | row | `CEIL(N1, 1)` | `( ceil ( [T::N1] * 10 ) * 0.1 )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-013 | row | `CAST(N1 AS NUMBER(10,2))` | `sql_double_op ( "CAST({0} AS NUMBER(10,2))" , [T::N1] )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-014 | row | `CAST(N1 AS NUMBER)` | `to_integer ( [T::N1] )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-015 | row | `TO_NUMBER(N1)` | `to_integer ( [T::N1] )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-016 | row | `I1 % 3` | `sql_double_op ( "MOD({0}, 3)" , [T::I1] )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-017 | row | `S1 \|\| '-' \|\| S2` | `concat ( [T::S1] , '-' , [T::S2] )` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-018 | row | `IFF(S1 LIKE 'a%', 1, 0)` | `if ( sql_bool_op ( "{0} LIKE 'a%'" , [T::S1] ) ) then 1 else 0` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-019 | row | `IFF(S1 ILIKE 'a%', 1, 0)` | `if ( sql_bool_op ( "{0} ILIKE 'a%'" , [T::S1] ) ) then 1 else 0` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-020 | row | `IFF(S1 RLIKE '[A-Z].*', 1, 0)` | `if ( sql_bool_op ( "{0} RLIKE '[A-Z].*'" , [T::S1] ) ) then 1 else 0` | TRANSLATED | MATCH | 10/10 |
+| sf-fix-021 | aggregate | `CAST(SUM(N1) AS NUMBER(18,1))` | `round ( sum ( [T::N1] ) , 0.1 )` | TRANSLATED | MATCH | 3/3 |
+
+### Review round (2026-10-07, after the #578 review)
+
+95 cases: the grid column `G1` was added, with `sf-fix-022..024`. **89 MATCH**, with 0 silent, the
+same 4 warned and 1 NEEDS_REVIEW, and 1 error-equivalent. Snowflake's scaled `FLOOR`/`CEIL` stays
+unsnapped. On the grid, Snowflake's own double floor and ceil match the unsnapped form on every
+row. `MOD(I1, 3)` is native `mod` again, because `--columns` types `I1` INT64.

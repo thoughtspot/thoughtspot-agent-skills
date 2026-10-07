@@ -311,7 +311,7 @@ DOUBLE column and a decimal literal alike:
 | Formula | Result |
 |---|---|
 | `ceil ( to_double ( '1.1' ) * 100 ) * 0.01` | **1.11** — `1.1 * 100` is `110.00000000000001` in a double |
-| `ceil ( round ( to_double ( '1.1' ) * 100 , 0.000000001 ) ) * 0.01` | 1.1 — **but the snap is wrong on other values**: `round ( v , 0.000000001 )` compiles to `1.0E-9 * round ( v / 1.0E-9 )`, which lands one ulp above the integer, so `ceil` jumps a step on exact grid values (3.0 → 3.1, 0.15 → 0.16, 2.5 → 2.51; `floor` −200 → −200.1). Superseded by the nudge, ts-cli 0.162.0 — see the grid below |
+| `ceil ( round ( to_double ( '1.1' ) * 100 , 0.000000001 ) ) * 0.01` | 1.1 — **but the snap is wrong on other values**: `round ( v , 0.000000001 )` compiles to `1.0E-9 * round ( v / 1.0E-9 )`, which lands one ulp above the integer, so `ceil` jumps a step on exact grid values (3.0 → 3.1, 0.15 → 0.16, 2.5 → 2.51; `floor` −200 → −200.1). Superseded by the nudge, ts-cli 0.164.0 — see the grid below |
 | `floor ( to_double ( '0.29' ) * 100 ) * 0.01` / snapped | 0.28 / 0.29 |
 | `ceil ( to_double ( '1.1' ) / 0.1 ) * 0.1` / snapped | 1.1 / 1.1 here (the raw form gives 1.2 in IEEE arithmetic in general — `1.1 / 0.1` is `11.000000000000002`; the warehouse's rounding happened to absorb it) |
 | `floor ( round ( to_double ( '-0.57' ) * 100 , 0.000000001 ) ) * 0.01` | −0.5700000000000001 (within any 1e-12 tolerance) |

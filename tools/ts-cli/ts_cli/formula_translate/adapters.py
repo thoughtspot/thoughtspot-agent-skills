@@ -264,6 +264,11 @@ def make_recording_resolver(ctx: ColumnContext) -> Callable[[str], str]:
     # diff_days only between two of these (BL-345); anything else passes through.
     resolve.date_only_refs = {  # type: ignore[attr-defined]
         s.target for s in ctx.specs if (s.data_type or "").upper() == "DATE"}
+    # References known to be integers: `x % y` / MOD stay native `mod` over them (native
+    # `mod` rejects a DOUBLE, so an untyped operand is the warehouse MOD — sql_forms.sqlf_mod).
+    resolve.int_refs = {  # type: ignore[attr-defined]
+        s.target for s in ctx.specs
+        if (s.data_type or "").upper() in {"INT64", "INT32", "INT", "INTEGER", "BIGINT"}}
     return resolve
 
 
