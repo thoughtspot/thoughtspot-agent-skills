@@ -1172,3 +1172,25 @@ class TestStripCommentsPerDialect:
         assert r["status"] != NEEDS_REVIEW and "concat" in r["formula"]
         r = translate("Sum([Bob's]) // it's", "qlik")
         assert r["formula"] == "sum([TABLE::Bob's])"
+
+
+class TestBl375To379:
+    def test_dax_not_is_an_operator_not_a_table(self):  # BL-375
+        r = translate("NOT [Flag]", "dax")
+        assert r["formula"] == "not [TABLE::Flag]"
+        assert "[not::" not in translate("x && NOT [Flag]", "dax")["formula"]
+
+    def test_dax_var_return_needs_review(self):
+        assert translate("VAR a = 1 RETURN [M]", "dax")["status"] == NEEDS_REVIEW
+
+    def test_qlik_search_string_needs_review(self):  # BL-377
+        assert translate('Sum({<Year={">=2020<=2023"}>} Sales)', "qlik")["status"] == NEEDS_REVIEW
+
+    def test_qlik_bracketed_modifier_field(self):  # BL-378
+        r = translate('Sum({<[Field Name]={"x"}>} Sales)', "qlik")
+        assert r["formula"] == "sum(if ([TABLE::Field Name] = 'x') then [TABLE::Sales] else 0)"
+
+    def test_tableau_if_without_else_on_an_apostrophe_field(self):  # BL-379
+        r = translate("IF [Bob's] = 'a' THEN 1 END", "tableau")
+        assert r["formula"] == "if ( [TABLE::Bob's] = 'a' ) then 1 else null"
+        assert r["formula"].count("else") == 1

@@ -226,3 +226,24 @@ def test_dax_col_refs_shapes():
 def test_string_literal_apostrophe_does_not_steal_a_table():
     expr, _, _ = translate_dax("IF(x, \"it's\", 'T'[c])")
     assert expr.endswith("else [T::c])")
+
+
+# BL-375: DAX keywords are never table names.
+def test_not_before_a_measure_keeps_the_not():
+    expr, _, _ = translate_dax("NOT [Flag]", measure_dax={"Flag": "MAX(T[f])"})
+    assert expr == "not [formula_Flag]"
+
+
+def test_and_not_before_a_measure():
+    expr, _, _ = translate_dax("x && NOT [Flag]", measure_dax={"Flag": "MAX(T[f])"})
+    assert expr == "x and not [formula_Flag]"
+
+
+def test_var_return_stays_needs_review():
+    expr, status, _ = translate_dax("VAR a = 1 RETURN [M]", measure_dax={"M": "SUM(T[x])"})
+    assert expr is None and status == "NEEDS REVIEW"
+
+
+def test_keywords_are_not_table_refs():
+    from ts_cli.powerbi.functions import dax_col_refs
+    assert [(t, c) for _s, _e, t, c in dax_col_refs("NOT [c] && TRUE [d] || T[e]")] == [("T", "e")]

@@ -73,6 +73,10 @@ _FUNC_CALL = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)\s*\(")  # incl. dotted names
 # read by a linear scanner (dax_col_refs), not a regex: a regex quoted branch is either
 # blind to '' (BL-369) or quadratic on a long run of apostrophes (#583 review).
 _IDENT = re.compile(r"[A-Za-z_]\w*")
+# DAX keywords and operator words: `NOT [Flag]` is NOT applied to a measure, never a table
+# named NOT (BL-375 -- read as one, it dropped the NOT and flipped the boolean).
+_DAX_KEYWORDS = frozenset({"not", "and", "or", "in", "var", "return", "true", "false",
+                           "then", "else"})
 _COL_AFTER = re.compile(r"\s*\[([^\]]+)\]")
 # A bare measure reference: [Measure Name] not preceded by a table token.
 _MEASURE_REF = re.compile(r"(?<![\w'\]])\[([^\]]+)\]")
@@ -137,6 +141,8 @@ def _bare_table_ref(src: str, i: int):
     ident = _IDENT.match(src, i)
     if ident is None:              # a non-ASCII letter: not a DAX table name start
         return None, i + 1
+    if ident.group(0).lower() in _DAX_KEYWORDS:
+        return None, ident.end()
     m = _COL_AFTER.match(src, ident.end())
     if m:
         return (i, m.end(), ident.group(0), m.group(1)), m.end()

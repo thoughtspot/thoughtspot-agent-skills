@@ -615,3 +615,42 @@ class TestPr583ScannerEdges:
     def test_two_set_analysis_aggregations_flagged(self):
         _out, review, reason = translate('Sum({<Year={2023}>}"Sales") / Sum({1} "Sales")')
         assert review and "more than one aggregation" in reason
+
+
+class TestSetModifierValues:
+    """BL-376..378 and the count/average neutral element."""
+
+    def test_comma_inside_a_quoted_value_is_one_value(self):  # BL-376
+        assert tr("Sum({<Region={'A, B'}>} Sales)") == \
+            "sum(if (Region = 'A, B') then Sales else 0)"
+
+    def test_several_values_still_split(self):
+        assert tr("Sum({<Region={'A','B'}>} Sales)") == \
+            "sum(if ((Region = 'A' or Region = 'B')) then Sales else 0)"
+
+    @pytest.mark.parametrize("vals", ['">=2020<=2023"', '"*"', '"A*"', '"A?"', '"=Sum(x)>1"'])
+    def test_search_strings_need_review(self, vals):  # BL-377
+        out, review, reason = translate("Sum({<Year={" + vals + "}>} Sales)")
+        assert review and "search" in reason and out.startswith("/* TODO review")
+
+    def test_plain_double_quoted_value_is_exact(self):
+        assert tr('Sum({<Region={"East"}>} Sales)') == \
+            "sum(if (Region = 'East') then Sales else 0)"
+
+    def test_single_quoted_value_with_a_star_is_a_literal(self):
+        assert tr("Sum({<Code={'A*'}>} Sales)") == \
+            "sum(if (Code = 'A*') then Sales else 0)"
+
+    def test_bracketed_field_is_one_reference(self):  # BL-378
+        assert tr('Sum({<[Field Name]={"x"}>} Sales)') == \
+            "sum(if ([Field Name] = 'x') then Sales else 0)"
+
+    def test_apostrophe_in_a_value(self):
+        assert tr('Sum({<Name={"O\'Brien"}>} Sales)') == \
+            "sum(if (Name = \"O'Brien\") then Sales else 0)"
+
+    def test_count_and_average_use_null_outside_the_set(self):
+        assert tr("Count({<Region={'A'}>} Id)") == \
+            "count(if (Region = 'A') then Id else null)"
+        assert tr("Avg({<Region={'A'}>} Price)") == \
+            "average(if (Region = 'A') then Price else null)"

@@ -596,6 +596,59 @@ def _set_analysis_shape_problem(expr: str) -> Optional[str]:
     return None
 
 
+def _set_field(raw: str) -> str:
+    """The modifier's field as a reference: ``[Field Name]`` stays ONE bracketed field
+    (BL-378 -- stripped to ``Field Name`` it was read as two bare names)."""
+    name = raw.strip()
+    if name.startswith("[") and name.endswith("]"):
+        name = name[1:-1]
+    return f"[{name}]" if not re.fullmatch(r"[A-Za-z_]\w*", name) else name
+
+
+_SEARCH_CHARS = re.compile(r"[*?]|^\s*[<>=]")
+
+
+def _set_values(raw_vals: str) -> tuple[list[str], Optional[str]]:
+    """The element-set values of a modifier as ThoughtSpot literals, or a review reason.
+
+    Values split on commas OUTSIDE quotes (BL-376: ``{'A, B'}`` is one value). A single-
+    quoted value is a literal, and so is a bare one; a double-quoted value is a
+    Qlik SEARCH string -- exact (case-insensitively, as ThoughtSpot's ``=`` is) only
+    without wildcards (``*``, ``?``) or a leading ``<``/``>``/``=`` (a range or
+    expression search), which are flagged (BL-377)."""
+    groups = [g[1:-1] for g in _brace_groups(raw_vals)] or [raw_vals]
+    values: list[str] = []
+    for g in groups:
+        for v in _split_top_level(g):
+            if not v:
+                continue
+            if v[0] == v[-1] == '"' and len(v) >= 2:
+                text = v[1:-1].replace('""', '"')
+                if _SEARCH_CHARS.search(text):
+                    return [], (f"the element value {v} is a search (wildcard, range or "
+                                "expression), not a single value; it is not translated")
+            elif v[0] == v[-1] == "'" and len(v) >= 2:
+                text = v[1:-1].replace("''", "'")
+            else:
+                text = v              # a bare value ({2023}): quoted, as before
+            values.append("'" + text.replace("'", "''") + "'")
+    return values, None
+
+
+def _brace_groups(raw: str) -> list[str]:
+    """Each top-level ``{…}`` in ``raw`` (quotes respected), braces included."""
+    out, start = [], None
+    for k, (ch, depth, opaque) in enumerate(_scan(raw, "{", "}")):
+        if opaque:
+            continue
+        if ch == "{" and depth == 1:
+            start = k
+        elif ch == "}" and depth == 0 and start is not None:
+            out.append(raw[start:k + 1])
+            start = None
+    return out
+
+
 def _set_analysis(expr: str) -> tuple[str, bool, str]:
     problem = _set_analysis_shape_problem(expr)
     if problem:
@@ -611,21 +664,23 @@ def _set_analysis(expr: str) -> tuple[str, bool, str]:
     m = re.match(r"(?i)^(\w+)\(\s*\{<\s*([\w \[\]]+?)\s*(-?=)\s*(.+?)\s*>\}\s*(.+?)\)$", expr)
     if m:
         agg_fn = _agg_fn(m.group(1))
-        field = m.group(2).strip().strip("[]")
+        field = _set_field(m.group(2))
         op = m.group(3)
-        raw_vals = m.group(4)
         measure = m.group(5).strip()
-        groups = re.findall(r"\{([^}]*)\}", raw_vals) or [raw_vals]
-        values = []
-        for g in groups:
-            values += [v.strip().strip("'\"") for v in g.split(",") if v.strip()]
+        values, problem = _set_values(m.group(4))
+        if problem:
+            return (f"/* TODO review set analysis: {expr} */", True,
+                    f"Set Analysis: {problem}")
         if op == "-=":
-            cond = " and ".join(f"{field} != '{v}'" for v in values) or "true"
+            cond = " and ".join(f"{field} != {v}" for v in values) or "true"
         else:
-            cond = " or ".join(f"{field} = '{v}'" for v in values) or "true"
+            cond = " or ".join(f"{field} = {v}" for v in values) or "true"
         if len(values) > 1:
             cond = f"({cond})"
-        return f"{agg_fn}(if ({cond}) then {measure} else 0)", False, ""
+        # Rows outside the set contribute nothing: 0 is neutral only for a sum -- a
+        # count, average, min or max over `else 0` counts / averages the zeros.
+        other = "0" if agg_fn == "sum" else "null"
+        return f"{agg_fn}(if ({cond}) then {measure} else {other})", False, ""
 
     # Pattern 5/6: intersection with selection ($*<...>) or $-expansion.
     if "$" in expr:

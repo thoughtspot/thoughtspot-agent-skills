@@ -145,6 +145,7 @@ user as the deliverable.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.7 | 2026-10-07 | **DAX keywords are never table names (ts-cli v0.171.0, BL-375).** `NOT [Measure]` kept its `NOT` — it had become the bare measure, flipping the boolean — and `VAR … RETURN` is NEEDS REVIEW again |
 | 1.1.6 | 2026-10-07 | **A quoted table name with an apostrophe is read whole (ts-cli v0.169.0, BL-369).** DAX `SUM('Bob''s Sales'[x])` translated to `sum('Bob'[s Sales::x])`; it is now `sum([Bob's Sales::x])`. Table qualifiers are read by a linear scanner that skips `"…"` literals |
 | 1.1.5 | 2026-10-07 | **Quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-365).** A DAX literal with a quote is emitted double-quoted (it was `'it''s'`, read as two quotes), a DAX `""` is one double quote, and every product under a division is bracketed (`a * b / c` is read as `a * ( b / c )`) |
 | 1.1.4 | 2026-10-06 | **`ROUND` uses the shared increment conversion (ts-cli v0.156.0, BL-331).** Behaviour is unchanged except that 11+ decimal places no longer emit a malformed increment (`0.`) |

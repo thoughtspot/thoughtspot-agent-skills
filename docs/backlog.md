@@ -246,6 +246,11 @@ are roughly ordered by value÷effort.
 | BL-372 | Excel / Sheets translator returns `COT` as NEEDS_REVIEW while the Excel map row says direct | 2026-11-30 |
 | BL-373 | Exact non-Monday week truncation: where the source week start is known, emit `add_days ( start_of_week ( add_days ( d , k ) ) , -k )` instead of downgrading (BL-334 item 2 follow-up; needs a live probe) | 2026-11-30 |
 | BL-374 | From-direction recognition of `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` back to `safe_divide ( a , b )`, so TS → SQL → TS round trips keep the idiom (the value is already exact) | 2026-12-15 |
+| ~~BL-375~~ | ~~DAX keywords (`NOT`, `RETURN`, …) read as table names: `NOT [Flag]` → `[formula_Flag]`, the boolean flipped~~ | DONE (2026-10-07 — ts-cli v0.171.0) |
+| ~~BL-376~~ | ~~Qlik Set Analysis splits element values on commas inside quotes: `{'A, B'}` read as two values~~ | DONE (2026-10-07 — ts-cli v0.171.0) |
+| ~~BL-377~~ | ~~Qlik Set Analysis search strings (`{">=2020<=2023"}`, `{"A*"}`) translated as equality~~ | DONE (2026-10-07 — NEEDS_REVIEW, ts-cli v0.171.0) |
+| ~~BL-378~~ | ~~Qlik `{<[Field Name]={"x"}>}`: the bracketed field is emitted bare and read as two references~~ | DONE (2026-10-07 — ts-cli v0.171.0) |
+| ~~BL-379~~ | ~~Tableau `IF [Bob's] = 'a' THEN 1 END` emits a second `else` (an apostrophe in a field name opened a literal)~~ | DONE (2026-10-07 — fixed in #583, regression test ts-cli v0.171.0) |
 
 ### Tier 3 — Opportunistic
 
@@ -13677,3 +13682,65 @@ whose condition is `b = 0`, whose THEN is `0` and whose ELSE is `a / NULLIF(b, 0
 and emit `safe_divide ( a , b )`. Any other shape stays as today.
 
 **Target:** 2026-12-15.
+
+## BL-375 — DAX keywords read as table names: `NOT [Flag]` loses its `NOT` `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.171.0). **Source:** independent review of #583.
+
+**The facts.** `powerbi.functions.dax_col_refs` (#583) read any identifier before `[…]` as a table, so a
+keyword was one: with a measure `Flag`, `NOT [Flag]` became `[formula_Flag]` and `x && NOT [Flag]`
+`x and [formula_Flag]` — the boolean silently flipped. `ts formula translate` gave `[not::Flag]`, and
+`VAR a = 1 RETURN [M]` lost its `RETURN` to the measure rewrite before the VAR/RETURN review gate ran, so
+it came back Migrated.
+
+**Resolution (2026-10-07).** `_bare_table_ref` skips the DAX keywords and operator words (`NOT`, `AND`,
+`OR`, `IN`, `VAR`, `RETURN`, `TRUE`, `FALSE`, plus the `THEN` / `ELSE` the expansion pass introduces).
+`NOT [Flag]` is `not [formula_Flag]`; `VAR … RETURN` is NEEDS REVIEW again. Not changed: `TRUE` / `FALSE`
+keep their DAX spelling and `IN {…}` passes through as before.
+
+## BL-376 — Qlik Set Analysis splits element values on commas inside quotes `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.171.0). **Source:** independent review of #583.
+
+**The facts.** `{<Region={'A, B'}>}` became `Region = 'A' or Region = 'B'`: values were split with
+`str.split(",")`. A silent wrong answer — it sums two other regions.
+
+**Resolution (2026-10-07).** `_set_values` splits each `{…}` group with the quote- and bracket-aware
+`_split_top_level`, so `'A, B'` is one value; a value holding an apostrophe (`{"O'Brien"}`) is now written
+as a valid literal. Found alongside, also a silent wrong answer: the rewrite was `agg(if (cond) then m
+else 0)` for every aggregation, so `Count({<…>} Id)` counted every row and `Avg` averaged in the zeros.
+Only `Sum` keeps `else 0`; the other aggregations use `else null`.
+
+## BL-377 — Qlik Set Analysis search strings translated as equality `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (NEEDS_REVIEW, ts-cli v0.171.0). **Source:** independent review of #583.
+
+**The facts.** A double-quoted element value is a Qlik SEARCH string: `{">=2020<=2023"}` is a range,
+`{"A*"}` / `{"A?"}` wildcards, `{"*"}` everything, `{"=expr"}` an expression search. All were emitted as
+`Field = '<the search text>'`, which matches nothing.
+
+**Resolution (2026-10-07).** A double-quoted value with `*` or `?`, or starting `<`, `>` or `=`, is
+NEEDS_REVIEW with the value named. A plain double-quoted value is still an equality (exact, because
+ThoughtSpot's `=` is case-insensitive like Qlik's search); a single-quoted value is a literal even with a
+`*`. Range searches are not translated: whether a bound is numeric or a date depends on the field.
+
+## BL-378 — Qlik bracketed field in a Set Analysis modifier is split in two `Tier 3`
+
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.171.0). **Source:** independent review of #583.
+
+**The facts.** `{<[Field Name]={"x"}>}` stripped the brackets and emitted `Field Name = 'x'`, which the
+reference pass reads as two bare names.
+
+**Resolution (2026-10-07).** `_set_field` keeps a name that is not a plain identifier bracketed:
+`[Field Name] = 'x'`.
+
+## BL-379 — Tableau `IF [Bob's] = 'a' THEN 1 END` emits a second `else` `Tier 3`
+
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (fixed in #583; regression test ts-cli v0.171.0). **Source:** independent review of #583.
+
+**The facts.** The apostrophe in `[Bob's]` opened a string literal in the default-else guess, giving
+`… else null else ''`, APPROXIMATED.
+
+**Resolution (2026-10-07).** Fixed by #583's change to `tableau/literals.mask_literals`, which now leaves
+`[…]` as written; this PR adds the regression test (`if ( [TABLE::Bob's] = 'a' ) then 1 else null`, one
+`else`).
