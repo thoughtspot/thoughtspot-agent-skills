@@ -69,9 +69,17 @@ _FUNC_CALL = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)\s*\(")  # incl. dotted names
 # Table[Column] or 'Table Name'[Column] -> capture (table, column). Unquoted
 # DAX table names have no spaces (only the quoted form may), so the bare branch
 # is \w-only: this stops it from swallowing a preceding keyword (e.g. "then x[c]").
-_COL_REF = re.compile(r"(?:'([^']+)'|([A-Za-z_]\w*))\s*\[([^\]]+)\]")
+# A quoted table name escapes an apostrophe by doubling it ('Bob''s Sales'[x]), so the
+# quoted branch reads '' as part of the name (BL-369) -- _table_name unescapes it.
+_QUOTED_TABLE = r"'(?:[^']|'')+'"
+_COL_REF = re.compile(r"(?:'((?:[^']|'')+)'|([A-Za-z_]\w*))\s*\[([^\]]+)\]")
 # A bare measure reference: [Measure Name] not preceded by a table token.
 _MEASURE_REF = re.compile(r"(?<![\w'\]])\[([^\]]+)\]")
+
+
+def _table_name(m) -> str:
+    """The table of a _COL_REF match: the quoted form unescaped ('' -> ') or the bare one."""
+    return m.group(1).replace("''", "'") if m.group(1) is not None else m.group(2)
 
 
 def _split_args(s):
@@ -158,7 +166,8 @@ def _refs_to_ids(dax, names, physical_cols=None):
             pat = re.compile(r"(?<![\w'])\[" + re.escape(name) + r"\]")
         else:
             # optional table qualifier ('T'[name] / T[name]) or a bare [name]
-            pat = re.compile(r"(?:'[^']*'|[A-Za-z_]\w*)?\s*\[" + re.escape(name) + r"\]")
+            pat = re.compile(r"(?:" + _QUOTED_TABLE + r"|[A-Za-z_]\w*)?\s*\["
+                             + re.escape(name) + r"\]")
         out = pat.sub("[formula_" + name + "]", out)
     return out
 
@@ -360,7 +369,7 @@ def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_
     # Qualify Table[Col] -> [Table::Col] BEFORE expanding IF/DIVIDE/... so the "then"/
     # "else" keywords those introduce are never mistaken for a table name.
     expr = _COL_REF.sub(
-        lambda m: f"[{(m.group(1) or m.group(2)).strip()}::{m.group(3).strip()}]", src)
+        lambda m: f"[{_table_name(m).strip()}::{m.group(3).strip()}]", src)
 
     expr = _expand_functions(expr)
     if expr is None:

@@ -1056,3 +1056,24 @@ class TestQlikFieldQuotesShared:
     def test_double_quote_in_single_quoted_literal_untouched(self):
         r = translate("If(Region = 'say \"hi\"', 1, 0)", "qlik")
         assert "'say \"hi\"'" in r["formula"]
+
+
+class TestQuoteInsideBracketRef:
+    """BL-369: a bracketed reference whose name holds an apostrophe is code, not the
+    start of a string literal, so its reference is still recorded."""
+
+    def test_dax_doubled_apostrophe_table(self):
+        r = translate("SUM('Bob''s Sales'[x])", "dax")
+        assert r["formula"] == "sum([Bob's Sales::x])"
+        assert [x["source"] for x in r["references"]] == ["Bob's Sales.x"]
+
+    def test_apostrophe_ref_before_a_literal(self):
+        r = translate("IF('Bob''s Sales'[x] > 1, \"a\", \"b\")", "dax")
+        assert [x["source"] for x in r["references"]] == ["Bob's Sales.x"]
+        assert "'a'" in r["formula"] and "'b'" in r["formula"]
+
+    def test_split_literals_keeps_bracket_in_code(self):
+        from ts_cli.formula_translate.refs import split_literals
+        assert split_literals("[Bob's x] = 'it''s'") == [
+            (False, "[Bob's x] = "), (True, "'it''s'")]
+        assert split_literals("'a[b' + [c]") == [(True, "'a[b'"), (False, " + [c]")]

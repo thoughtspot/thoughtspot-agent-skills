@@ -15,6 +15,9 @@ from typing import Optional
 from ts_cli.formula_translate.context import ColumnContext
 
 _QUOTED = re.compile(r"('(?:[^'\\]|\\.|'')*'|\"(?:[^\"\\]|\\.)*\")")
+# A bracketed reference is code even when its name holds a quote ([Bob's Sales::x],
+# BL-369): matched first at its own position so its apostrophe never opens a literal.
+_QUOTED_OR_BRACKET = re.compile(r"(\[[^\[\]]*\])|" + _QUOTED.pattern)
 _BRACKET = re.compile(r"\[([^\[\]]+)\]")
 
 # Words that are never a field when they appear bare (Qlik output).
@@ -28,10 +31,13 @@ _BARE_IDENT = re.compile(
 
 
 def split_literals(expr: str) -> list[tuple[bool, str]]:
-    """Split into (is_literal, text) segments."""
+    """Split into (is_literal, text) segments. A ``[...]`` reference is never a literal,
+    even when the name inside it holds a quote."""
     out: list[tuple[bool, str]] = []
     pos = 0
-    for m in _QUOTED.finditer(expr):
+    for m in _QUOTED_OR_BRACKET.finditer(expr):
+        if m.group(1) is not None:
+            continue                      # a bracketed ref: stays in the code segment
         if m.start() > pos:
             out.append((False, expr[pos:m.start()]))
         out.append((True, m.group(0)))

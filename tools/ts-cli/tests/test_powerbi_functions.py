@@ -185,3 +185,20 @@ def test_no_disproved_name_ever_emitted():
         expr, _status, _note = translate_dax(dax)
         if expr is not None:
             _assert_clean(expr)
+
+
+# BL-369: DAX escapes an apostrophe in a quoted table name by doubling it.
+def test_quoted_table_name_with_doubled_apostrophe():
+    expr, status, _ = translate_dax("SUM('Bob''s Sales'[x])")
+    assert expr == "sum([Bob's Sales::x])"
+    assert status == "Migrated"
+
+
+def test_doubled_apostrophe_table_beside_a_plain_one():
+    expr, _, _ = translate_dax("SUM('Sales'[x]) + SUM('Bob''s Sales'[y])")
+    assert expr == "sum([Sales::x]) + sum([Bob's Sales::y])"
+
+
+def test_doubled_apostrophe_table_qualifying_a_measure_ref():
+    expr, _, _ = translate_dax("'Bob''s Sales'[M] * 2", measure_dax={"M": "SUM(T[x])"})
+    assert expr == "[formula_M] * 2"
