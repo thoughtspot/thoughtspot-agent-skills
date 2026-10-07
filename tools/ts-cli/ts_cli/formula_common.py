@@ -569,7 +569,8 @@ def add_formula_prefix(
 # ---------------------------------------------------------------------------
 
 def _split_top_level_args(inner: str) -> list[str]:
-    """Split a call's argument text on top-level commas (quote/paren aware)."""
+    """Split a call's argument text on top-level commas (quote/paren aware; a ``[…]``
+    reference is opaque, so ``[Bob's]`` opens no literal — #583 review)."""
     args: list[str] = []
     depth, quote, cur = 0, None, []
     for ch in inner:
@@ -578,13 +579,13 @@ def _split_top_level_args(inner: str) -> list[str]:
             if ch == quote:
                 quote = None
             continue
-        if ch in "'\"":
-            quote = ch
+        if ch in "'\"[":
+            quote = "]" if ch == "[" else ch
             cur.append(ch)
-        elif ch in "([{":
+        elif ch in "({":
             depth += 1
             cur.append(ch)
-        elif ch in ")]}":
+        elif ch in ")}":
             depth -= 1
             cur.append(ch)
         elif ch == "," and depth == 0:
@@ -598,7 +599,7 @@ def _split_top_level_args(inner: str) -> list[str]:
 
 
 def _close_paren(text: str, open_idx: int) -> int:
-    """Index of the ')' matching the '(' at open_idx, or -1 (quote aware)."""
+    """Index of the ')' matching the '(' at open_idx, or -1 (quote aware; ``[…]`` opaque)."""
     depth, quote = 0, None
     for i in range(open_idx, len(text)):
         ch = text[i]
@@ -606,8 +607,8 @@ def _close_paren(text: str, open_idx: int) -> int:
             if ch == quote:
                 quote = None
             continue
-        if ch in "'\"":
-            quote = ch
+        if ch in "'\"[":
+            quote = "]" if ch == "[" else ch
         elif ch == "(":
             depth += 1
         elif ch == ")":
@@ -624,7 +625,8 @@ def _quoted_spans(text: str) -> list[tuple[int, int]]:
     `sql_*_op` template is `"..."`, and a marker name can legitimately appear
     inside either as *data* (`Replace(Name, 'upper(x)', 'y')`). Doubled quotes
     (`'it''s'`, the escape ThoughtSpot uses) read as adjacent literals, which
-    keeps the inner text quoted — conservative in the safe direction.
+    keeps the inner text quoted — conservative in the safe direction. A ``[…]``
+    reference is a span too: its name is data, and an apostrophe in it opens nothing.
     """
     spans: list[tuple[int, int]] = []
     quote: str | None = None
@@ -634,8 +636,8 @@ def _quoted_spans(text: str) -> list[tuple[int, int]]:
             if ch == quote:
                 spans.append((start, i + 1))
                 quote = None
-        elif ch in "'\"":
-            quote = ch
+        elif ch in "'\"[":
+            quote = "]" if ch == "[" else ch
             start = i
     if quote:                      # unterminated literal — treat to end of text
         spans.append((start, len(text)))

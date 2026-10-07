@@ -1039,3 +1039,139 @@ class TestFidelityM0SnowflakeFixes:
         r = translate(src, "snowflake")
         assert r["status"] == TRANSLATED and r["classification"] == "passthrough"
         assert r["formula"].startswith("sql_") and "diff_months" not in r["formula"]
+
+
+class TestQlikFieldQuotesShared:
+    """BL-368: the field-quote rewrite moved into ``qlik.functions.translate``; the adapter
+    must not re-apply it (a second pass would be a no-op, but one owner keeps the two paths
+    from drifting)."""
+
+    def test_adapter_and_translator_agree(self):
+        from ts_cli.qlik.functions import translate as qlik_translate
+        assert qlik_translate('Sum("Sales Amount")')[0] == "sum([Sales Amount])"
+        assert translate('Sum("Sales Amount")', "qlik")["formula"] == \
+            "sum([TABLE::Sales Amount])"
+
+    def test_adapter_no_longer_carries_its_own_rewrite(self):
+        from ts_cli.formula_translate import adapters
+        assert not hasattr(adapters, "qlik_field_quotes")
+
+    def test_double_quote_in_single_quoted_literal_untouched(self):
+        r = translate("If(Region = 'say \"hi\"', 1, 0)", "qlik")
+        assert "'say \"hi\"'" in r["formula"]
+
+
+class TestQuoteInsideBracketRef:
+    """BL-369: a bracketed reference whose name holds an apostrophe is code, not the
+    start of a string literal, so its reference is still recorded."""
+
+    def test_dax_doubled_apostrophe_table(self):
+        r = translate("SUM('Bob''s Sales'[x])", "dax")
+        assert r["formula"] == "sum([Bob's Sales::x])"
+        assert [x["source"] for x in r["references"]] == ["Bob's Sales.x"]
+
+    def test_apostrophe_ref_before_a_literal(self):
+        r = translate("IF('Bob''s Sales'[x] > 1, \"a\", \"b\")", "dax")
+        assert [x["source"] for x in r["references"]] == ["Bob's Sales.x"]
+        assert "'a'" in r["formula"] and "'b'" in r["formula"]
+
+    def test_split_literals_keeps_bracket_in_code(self):
+        from ts_cli.formula_translate.refs import split_literals
+        assert split_literals("[Bob's x] = 'it''s'") == [
+            (False, "[Bob's x] = "), (True, "'it''s'")]
+        assert split_literals("'a[b' + [c]") == [(True, "'a[b'"), (False, " + [c]")]
+
+
+class TestCotZeroTrap:
+    """BL-370: COT(x) -> 1 / tan ( x ) is NULL at x = 0 in ThoughtSpot (NULL-safe
+    division) where the source errors or returns infinity. Informational, not a
+    downgrade: the status stays TRANSLATED."""
+
+    @pytest.mark.parametrize("dialect,src", [
+        ("tableau", "COT([x])"), ("snowflake", "COT(x)"), ("databricks", "COT(x)"),
+    ])
+    def test_cot_carries_zero_trap_without_downgrade(self, dialect, src):
+        r = translate(src, dialect)
+        assert r["status"] == TRANSLATED
+        assert "tan" in r["formula"]
+        assert any("BL-370" in t for t in r["traps"])
+
+    def test_no_trap_without_cot_in_source(self):
+        assert not any("BL-370" in t for t in translate("TAN([x])", "tableau")["traps"])
+        assert not any("BL-370" in t for t in translate("ACOS([x])", "tableau")["traps"])
+
+    def test_cot_inside_a_literal_does_not_fire(self):
+        r = translate("IF [s] = 'cot(' THEN TAN([x]) END", "tableau")
+        assert not any("BL-370" in t for t in r["traps"])
+
+
+class TestPr583ReviewFixes:
+    """Independent review of #583: the adapter-side and scanner-side halves of BL-368/369,
+    plus the pre-existing silent wrong answers it found next to them."""
+
+    def test_dax_adapter_reads_doubled_apostrophe_dates(self):
+        ctx = ColumnContext(parse_columns_json(
+            '[{"source": "Ship", "table": "T", "column": "SHIP", "data_type": "DATE"},'
+            ' {"source": "Order", "table": "T", "column": "ORD", "data_type": "DATE"}]'), level=1)
+        r = translate("'Bob''s Sales'[Ship] - 'Bob''s Sales'[Order]", "dax", ctx)
+        assert r["formula"] == "diff_days([T::SHIP], [T::ORD])"
+        assert r["status"] == TRANSLATED
+
+    def test_qlik_apostrophe_field_concat(self):
+        r = translate('"Bob\'s" & \' - \' & "Region"', "qlik")
+        assert r["formula"] == "concat ( [TABLE::Bob's] , ' - ' , [TABLE::Region] )"
+        assert r["status"] == TRANSLATED
+
+    def test_sql_comment_stripping_reads_literals_inside_brackets(self):
+        from ts_cli.formula_translate.engine import strip_comments
+        assert strip_comments("v['a--b'] + 1", "snowflake") == ("v['a--b'] + 1", False)
+        assert strip_comments("v['a--b'] + 1 -- c", "databricks")[0].rstrip() == "v['a--b'] + 1"
+
+    @pytest.mark.parametrize("src", ['Sum("a]b")', 'Sum("")', 'Sum("x'])
+    def test_qlik_unreadable_double_quoted_name_needs_review(self, src):
+        assert translate(src, "qlik")["status"] == NEEDS_REVIEW
+
+    @pytest.mark.parametrize("src", [
+        'Sum({<Year={2023}, Region={"A"}>} Sales)',
+        'Sum({<Year={2023}>}"Sales") / Sum({1} "Sales")',
+        "Sum({1} Sales) / Sum(Sales)",
+    ])
+    def test_qlik_set_analysis_shapes_it_cannot_read_need_review(self, src):
+        assert translate(src, "qlik")["status"] == NEEDS_REVIEW
+
+    def test_qlik_one_field_several_values_still_translates(self):
+        r = translate('Sum({<Region={"A","B"}>} Sales)', "qlik")
+        assert r["status"] == TRANSLATED
+        assert "'A'" in r["formula"] and "'B'" in r["formula"]
+
+    def test_tableau_apostrophe_in_field_name_is_not_a_string(self):
+        r = translate("[Bob's Sales] + [Tax]", "tableau")
+        assert r["formula"] == "[TABLE::Bob's Sales] + [TABLE::Tax]"
+        assert "concat" not in translate("[Bob's Sales] + [Tax]", "tableau")["formula"]
+        assert translate("[Name] + 'x'", "tableau")["formula"].startswith("concat")
+
+
+class TestStripCommentsPerDialect:
+    """#583 re-review: only SQL reads ``[…]`` as a subscript holding a real literal; in
+    Tableau, Qlik and DAX a ``[…]`` is a field whose name may hold a quote."""
+
+    @pytest.mark.parametrize("dialect,src,kept", [
+        ("tableau", "[Bob's] + 'x' // note", "[Bob's] + 'x'"),
+        ("qlik", "Sum([Bob's]) // it's", "Sum([Bob's])"),
+        ("dax", "SUM([Bob's]) // it's", "SUM([Bob's])"),
+    ])
+    def test_bracket_names_with_quotes(self, dialect, src, kept):
+        from ts_cli.formula_translate.engine import strip_comments
+        out, removed = strip_comments(src, dialect)
+        assert removed and out.rstrip() == kept
+
+    @pytest.mark.parametrize("dialect", ["snowflake", "databricks"])
+    def test_sql_subscript_literal(self, dialect):
+        from ts_cli.formula_translate.engine import strip_comments
+        assert strip_comments("v['a--b'] + 1", dialect) == ("v['a--b'] + 1", False)
+
+    def test_end_to_end(self):
+        r = translate("[Bob's] + 'x' // note", "tableau")
+        assert r["status"] != NEEDS_REVIEW and "concat" in r["formula"]
+        r = translate("Sum([Bob's]) // it's", "qlik")
+        assert r["formula"] == "sum([TABLE::Bob's])"

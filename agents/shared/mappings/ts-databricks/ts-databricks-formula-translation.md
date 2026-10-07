@@ -119,7 +119,7 @@ Resolution:
 | `log2(x)` | `LOG2(x)` | |
 | `log10(x)` | `LOG10(x)` | |
 | `sin(x)`, `cos(x)`, `tan(x)`, `asin(x)`, `acos(x)`, `atan(x)` | `SIN(x)`, `COS(x)`, `TAN(x)`, `ASIN(x)`, `ACOS(x)`, `ATAN(x)` | **Radians on both sides** — `sin ( 30 )` compiles to `SIN(30)` (live 2026-10-07, probe record §7; BL-364), so the from-direction maps 1:1 |
-| `( 1 / tan(x) )` | `COT(x)` | From-direction: `COT(x)` → `( 1 / tan ( x ) )` (BL-364) |
+| `( 1 / tan(x) )` | `COT(x)` | From-direction: `COT(x)` → `( 1 / tan ( x ) )` (BL-364). **`COT(0)` differs:** ThoughtSpot's `/` is NULL-safe, so `1 / tan ( 0 )` is NULL where a Databricks `COT(0)` does not return NULL (an error or infinity, by ANSI mode) — `ts formula translate` attaches a non-downgrading trap (BL-370) |
 | `sql_double_op ( "ATAN2({0}, {1})" , y , x )` | `ATAN2(y, x)` | No catalogued native form; row-level only (BL-364) |
 | `sql_double_op ( "PI()" )` | `PI()`, `DEGREES(x)`, `RADIANS(x)` | `PI()` → the warehouse's own double; `DEGREES(x)` → `( ( x * 180 ) / sql_double_op ( "PI()" ) )`, `RADIANS(x)` → `( ( x * sql_double_op ( "PI()" ) ) / 180 )` — native, so they work over an aggregate; the product is bracketed because ThoughtSpot reads `a * b / c` as `a * ( b / c )` (BL-365) |
 | `safe_divide(a, b)` | `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` | What `safe_divide` compiles to: 0 on a zero divisor (even when `a` is NULL), NULL on a NULL divisor or a NULL dividend over a non-zero divisor. A compound `b` is bracketed, identically in both places. No `DIV0` in Databricks. **Fixed ts-cli 0.167.0 (BL-366):** it was `COALESCE(a / NULLIF(b, 0), 0)`, 0 on a NULL operand — the inverse of BL-357. See "safe_divide Pattern" |

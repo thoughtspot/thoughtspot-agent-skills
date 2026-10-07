@@ -203,6 +203,8 @@ column's role and aggregation with what it sent. JSON summary on stdout:
 | `warnings` | Pre-import advisories (e.g. COUNT_DISTINCT measures) |
 | `error` | Present on failure. If `table_guid` is also present, the Table was created and remains |
 
+**Editing a linked Model later:** change a measure's aggregation on the **Table** too. AgentQL/SpotQL reads the Table's aggregation (UI search reads the Model's), so a Model-only change to `AGGREGATE` leaves every AgentQL query on it failing. `ts tml lint --file table.tml --file model.tml` flags it (I16; [open item #8](references/open-items.md)).
+
 If the Model import fails, the Table has already been created: the summary still carries
 `table_guid` alongside `error`. Fix the cause and delete the Table
 (`TS_ORG={org} ts metadata delete {table_guid} --profile {profile}`) before retrying.
@@ -240,6 +242,7 @@ columns and why, the instructions outcome, any `coerced` entries, and the query 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.2 | 2026-10-07 | Notes that AgentQL/SpotQL reads a measure's aggregation from the **Table**, not the Model, so a hand-edit must change both; `ts tml lint` I16 flags the mismatch (ts-cli 0.168.0). Open item #8 |
 | 1.1.1 | 2026-10-06 | Model column names from an all-upper-case source name (Snowflake's default) read `Gross Profit`, not `GROSS PROFIT`; mixed-case names keep their casing. ts-cli 0.155.0 |
 | 1.1.0 | 2026-10-06 | Snowflake Semantic View **facts**: new spec `kind: fact`, never `AGGREGATE` (Snowflake rejects `AGG()` on a fact); takes the view's `default_aggregation` from the YAML export, else `SUM`; non-numeric facts become attributes. Documents the SpotQL mixed-aggregate planner bug (open item #7). Requires ts-cli 0.154.0 |
 | 1.0.0 | 2026-09-28 | Initial release: `ts link build` creates a Table over a semantic object plus a thin, formula-free Model; one aggregation switch (`aggregate` / `standard`) instead of per-platform adapters; skips non-numeric measures; writes Spotter instructions via the API; re-exports to catch silent role coercion |

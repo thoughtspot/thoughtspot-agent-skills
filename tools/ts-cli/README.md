@@ -600,6 +600,7 @@ Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
 | I13 | a `[formula_*]` reference (in `formulas[].expr`) or a `columns[].formula_id` matching no declared `formulas[].id` — hard import rejection (`error_code 14516`, `Search did not find "formula_X"`). Distinct from I9: I9 says use the id form, I13 says the id must exist |
 | I14 | an ordered table pair joined more than once — the join path is ambiguous and the Model will not load; a role-played dimension needs its own aliased `model_tables` entry |
 | I15 | a column-root key (`description`, `name`, `column_id`, `formula_id`, `data_panel_column_groups`) inside a `columns[]` entry's `properties:` — a Model import SILENTLY ignores unknown keys there, so the TML imports with status OK and the value is lost (BL-232). Contrast `synonyms`, which must stay under `properties:` |
+| I16 | *(only when the Table TMLs are linted in the same batch)* a Model column `MEASURE`/`AGGREGATE` over a Table column that is not `AGGREGATE` — UI search works but AgentQL/SpotQL reads the Table's aggregation, so every aggregate query on a Metric View / Semantic View measure fails |
 | XREF | a model `model_tables`/`column_id`/join reference to a table or column that no batch TML generates — surfaces only when a table/sql_view TML is linted **alongside** the model (e.g. `--dir`); a lone model file skips it (no ground truth for what tables exist) |
 
 ```bash

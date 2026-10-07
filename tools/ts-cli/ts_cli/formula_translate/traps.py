@@ -15,6 +15,8 @@ trap rests on it:
 - BL-358 (formula fidelity M2, 2026-10-07): ThoughtSpot's queries over a Databricks
   connection run non-ANSI — BIGINT overflow wraps, an out-of-range cast clamps, a bad
   string cast is NULL — where an ANSI Databricks source raises.
+- BL-370 (2026-10-07): ``COT(x)`` → ``1 / tan ( x )`` is NULL at ``x = 0`` (ThoughtSpot's
+  ``/`` is NULL-safe); a SQL source raises there. Informational, not a downgrade.
 
 Also hosts the two output repairs that are about ThoughtSpot, not about any one source
 language: ``COUNT(*)`` → count of a key column, and a guard against SQL keywords a
@@ -37,6 +39,8 @@ CASE_SENSITIVE_DIALECTS = {"tableau", "snowflake", "databricks"}
 
 _ROUND_SRC = re.compile(r"\bround\s*\(", re.I)
 _ROUND_OUT = re.compile(r"\bround\s*\(")
+_COT_SRC = re.compile(r"\bcot\s*\(", re.I)
+_TAN_OUT = re.compile(r"\btan\s*\(")
 _DISTINCT_SRC = re.compile(r"\b(countd|distinctcount|count\s*\(\s*distinct|countdistinct)\b", re.I)
 _UNIQUE_OUT = re.compile(r"\bunique count\s*\(")
 _DIFF_OUT = re.compile(r"\bdiff_(days|months|years|weeks|quarters|hours|minutes|seconds|time)\s*\(")
@@ -194,6 +198,13 @@ _CASE_COLUMNS = ("if these are text columns: string comparison is case-INSENSITI
                  "sql_bool_op ( \"{0} = {1}\" , … )")
 
 
+# Not a downgrade: an error-equivalent at one input, not a wrong number (BL-370).
+_COT_ZERO = ("cot → 1 / tan ( x ): at x = 0 ThoughtSpot's division is NULL-safe, so the "
+             "result is NULL where the source errors or returns infinity (Snowflake "
+             "COT(0) raises division by zero, Excel gives #DIV/0!, Tableau NULL or "
+             "infinity by data source) — BL-370")
+
+
 def _round_trap(dialect: str, source: str, code: str) -> list[str]:
     if dialect == "thoughtspot" or not _ROUND_SRC.search(source) or not _round_has_increment(code):
         return []
@@ -255,6 +266,8 @@ def detect_traps(dialect: str, source: str, output: str) -> list[str]:
     if _DISTINCT_SRC.search(source) and _UNIQUE_OUT.search(code):
         traps.append("distinct count → `unique count` (a space, not an underscore; "
                      "`unique_count` and `count_distinct` are rejected)")
+    if dialect != "thoughtspot" and _COT_SRC.search(_code(source)) and _TAN_OUT.search(code):
+        traps.append(_COT_ZERO)
     traps.extend(line for pat, line in _OUTPUT_TRAPS if pat.search(code))
     # The Monday-week-start advisory is the converters' own note, imported — never
     # restated here (BL-334 item 2, BL-217). Advisory only: not in DOWNGRADE_TRAP_PREFIXES.

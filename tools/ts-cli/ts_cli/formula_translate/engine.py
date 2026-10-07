@@ -26,6 +26,7 @@ from ts_cli.formula_translate.traps import (
 # Comment syntaxes per source dialect (stripped before translating; never inside literals).
 _LINE_COMMENTS = {"snowflake": ("--",), "databricks": ("--",), "dax": ("--", "//"),
                   "tableau": ("//",), "qlik": ("//",)}
+_SQL_DIALECTS = {"snowflake", "databricks"}
 _BLOCK_COMMENT_DIALECTS = {"snowflake", "databricks", "dax", "qlik", "tableau"}
 
 
@@ -36,7 +37,9 @@ def strip_comments(source: str, dialect: str) -> tuple[str, bool]:
     if not markers and not block:
         return source, False
     out: list[str] = []
-    for lit, seg in split_literals(source):
+    # In SQL `[` is a subscript (v['a--b']) whose literal is real; elsewhere it is a
+    # field reference whose name may hold a quote ([Bob's]).
+    for lit, seg in split_literals(source, brackets_are_code=dialect not in _SQL_DIALECTS):
         if lit:
             out.append(seg)
             continue

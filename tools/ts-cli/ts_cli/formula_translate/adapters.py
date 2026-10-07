@@ -163,14 +163,19 @@ def _tableau_week_traps(out: str, notes: dict) -> list[str]:
 # DAX
 # ---------------------------------------------------------------------------
 
-_DAX_TABLE_REF = re.compile(r"(?:'[^']+'|[A-Za-z_]\w*)\s*\[[^\]]+\]")
 _DAX_BARE_REF = re.compile(r"(?<![\w'\]])\[([^\]]+)\]")
 
 
 def adapt_dax(expr: str, ctx: ColumnContext) -> RawResult:
-    from ts_cli.powerbi.functions import translate_dax
+    from ts_cli.powerbi.functions import dax_col_refs, translate_dax
 
-    without_qualified = _DAX_TABLE_REF.sub("", expr)
+    # One reader of DAX table qualifiers, the translator's own ('Bob''s Sales'[x], BL-369).
+    qualified = dax_col_refs(expr)
+    without_qualified, pos = [], 0
+    for start, end, _t, _c in qualified:
+        without_qualified.append(expr[pos:start])
+        pos = end
+    without_qualified = "".join(without_qualified) + expr[pos:]
     home_cols = {m.group(1).strip() for m in _DAX_BARE_REF.finditer(without_qualified)}
     date_cols = set()
     for n in home_cols:
@@ -180,8 +185,8 @@ def adapt_dax(expr: str, ctx: ColumnContext) -> RawResult:
         date_cols.add(t)
     # translate_dax qualifies Table[Col] → [Table::Col] and bare [Col] → [home::Col]
     # BEFORE its DATE-subtraction rewrite, which therefore looks for "Table::Col".
-    for m in re.finditer(r"(?:'([^']+)'|([A-Za-z_]\w*))\s*\[([^\]]+)\]", expr):
-        t, c = (m.group(1) or m.group(2)).strip(), m.group(3).strip()
+    for _s, _e, t, c in qualified:
+        t, c = t.strip(), c.strip()
         if c in ctx.date_names():
             date_cols.add(f"{t}::{c}")
     out, status, note = translate_dax(expr, home_table=_SENTINEL, home_cols=home_cols,
@@ -198,22 +203,14 @@ def adapt_dax(expr: str, ctx: ColumnContext) -> RawResult:
 # Qlik
 # ---------------------------------------------------------------------------
 
-def qlik_field_quotes(expr: str) -> str:
-    """Qlik ``"Sales Amount"`` is a FIELD name, not a string: rewrite it ``[Sales Amount]``
-    (Qlik's other field-quoting form) so neither the translator nor the reference pass
-    treats it as a literal. Single-quoted strings are left alone."""
-    parts = re.split(r"('(?:[^']|'')*')", expr)
-    for i in range(0, len(parts), 2):
-        parts[i] = re.sub(r'"([^"]+)"', r"[\1]", parts[i])
-    return "".join(parts)
-
-
 def adapt_qlik(expr: str, ctx: ColumnContext, first_week_day: Optional[int] = None) -> RawResult:
     """``first_week_day``: the app's ``FirstWeekDay`` (0 = Mon … 6 = Sun). A pasted formula
     has no load script, so without it a one-argument ``Weekday()`` is NEEDS_REVIEW (#565)."""
     from ts_cli.qlik.functions import translate
 
-    out, review, reason = translate(qlik_field_quotes(expr), first_week_day=first_week_day)
+    # Qlik "Field Name" -> [Field Name] happens inside ``translate`` (BL-368), so the
+    # converter and this adapter share it; do not re-apply it here.
+    out, review, reason = translate(expr, first_week_day=first_week_day)
     if review or not out:
         return RawResult(None, NEEDS_REVIEW, [reason or "Qlik translator: needs review"],
                          partial=out or None)

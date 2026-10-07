@@ -40,8 +40,12 @@ _PLACEHOLDER_MATCH = re.compile(PLACEHOLDER_RE)
 # Doubled-quote escaping: a source literal escapes an embedded quote by
 # doubling it ('it''s', "she said ""hi"""), matched via the [^']|'' / [^"]|""
 # alternation below.
+# A [field name] is matched first and left as written: its name may hold a quote
+# ([Bob's Sales]), which must not open a literal (#583 re-review). Tableau escapes a
+# ] inside a name by doubling it.
 _LITERAL_RE = re.compile(
-    r"(?P<sq>'(?:[^']|'')*')"
+    r"(?P<ref>\[(?:[^\]]|\]\])*\])"
+    r"|(?P<sq>'(?:[^']|'')*')"
     r"|(?P<dq>\"(?:[^\"]|\"\")*\")"
     r"|(?P<date>#[^#]*#)"
 )
@@ -56,6 +60,8 @@ def mask_literals(expr: str) -> tuple[str, dict[str, dict[str, str]]]:
     registry: dict[str, dict[str, str]] = {}
 
     def _mask(m: re.Match) -> str:
+        if m.group("ref") is not None:
+            return m.group(0)
         token = _PLACEHOLDER_TMPL.format(n=len(registry))
         kind = "date" if m.group("date") is not None else "str"
         registry[token] = {"kind": kind, "raw": m.group(0)}
