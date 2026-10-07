@@ -30,13 +30,17 @@ _BARE_IDENT = re.compile(
     r"(?<![\w\[.$#:'\"])([A-Za-z_][A-Za-z0-9_]*)(?![\w\]#])(?!\s*\()(?!\s+count\s*\()")
 
 
-def split_literals(expr: str) -> list[tuple[bool, str]]:
-    """Split into (is_literal, text) segments. A ``[...]`` reference is never a literal,
-    even when the name inside it holds a quote."""
+def split_literals(expr: str, brackets_are_code: bool = True) -> list[tuple[bool, str]]:
+    """Split into (is_literal, text) segments.
+
+    ``brackets_are_code`` (the default, for ThoughtSpot formula text): a ``[...]``
+    reference is never a literal, even when the name inside it holds a quote (BL-369).
+    Pass False for SOURCE text in a dialect where ``[`` is not a reference — SQL's
+    ``v['a--b']`` holds a real literal inside the brackets (#583 review)."""
     out: list[tuple[bool, str]] = []
     pos = 0
-    for m in _QUOTED_OR_BRACKET.finditer(expr):
-        if m.group(1) is not None:
+    for m in (_QUOTED_OR_BRACKET if brackets_are_code else _QUOTED).finditer(expr):
+        if brackets_are_code and m.group(1) is not None:
             continue                      # a bracketed ref: stays in the code segment
         if m.start() > pos:
             out.append((False, expr[pos:m.start()]))

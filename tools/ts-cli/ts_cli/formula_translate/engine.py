@@ -36,7 +36,7 @@ def strip_comments(source: str, dialect: str) -> tuple[str, bool]:
     if not markers and not block:
         return source, False
     out: list[str] = []
-    for lit, seg in split_literals(source):
+    for lit, seg in split_literals(source, brackets_are_code=False):
         if lit:
             out.append(seg)
             continue

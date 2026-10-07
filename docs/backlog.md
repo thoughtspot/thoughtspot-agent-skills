@@ -13490,7 +13490,16 @@ field names and Set Analysis `{…}` regions are copied untouched — `{"2023"}`
 value there, which the adapter's old regex had wrongly bracketed — and Qlik's `""` escape is
 unescaped. Tests: `Sum("Sales Amount")` → `sum([Sales Amount])` through the translator, the
 converter's Model formula and the adapter; a double quote inside a single-quoted literal is
-untouched.
+untouched. A name the rewrite cannot express — one holding `]`, an empty `""`, an unterminated
+quote — is NEEDS_REVIEW, not passed through. The #583 review found the neighbouring scanners
+(`_top_level_spans`/`_split_ampersands`, `_concat_in_groups`, `_split_top_level`, the function-
+call remap, and `formula_common`'s pass-through argument splitter) opened a string at an
+apostrophe inside `[Bob's]`, so `"Bob's" & ' - ' & "Region"` came out as an invalid `&`; all
+of them now read quotes and `[…]` through one opaque scanner (`_scan`), giving
+`concat ( [Bob's] , ' - ' , [Region] )`. It also found two **pre-existing silent wrong
+answers** in `_set_analysis`, now NEEDS_REVIEW: a modifier restricting two fields
+(`{<Year={2023}, Region={"A"}>}` was read as two values of `Year`), and a second aggregation
+stitched into the first's measure (`Sum({<Year={2023}>}"Sales") / Sum({1} "Sales")`).
 
 ## BL-369 — Power BI: a quoted table name holding an apostrophe is mangled `Tier 3`
 
@@ -13509,8 +13518,18 @@ unescaped (`''` → `'`), giving `sum([Bob's Sales::x])`; the measure-reference 
 (`'T'[measure]` → `[formula_…]`) used the same `'[^']*'` and was fixed alongside. A second defect
 surfaced in `ts formula translate`: `refs.split_literals` read the apostrophe inside
 `[Bob's Sales::x]` as an opening string literal, so the reference vanished from `references`;
-it now treats a `[…]` reference as code. TMDL's `'Table'.'Column'` split in
-`powerbi/parsing._split_ref` was not touched (not a DAX expression path).
+it now treats a `[…]` reference as code — for ThoughtSpot formula text only
+(`brackets_are_code`, default True); SQL comment stripping of the SOURCE keeps the old reading,
+so `v['a--b']` is not cut at `--`. TMDL's `'Table'.'Column'` split in
+`powerbi/parsing._split_ref` was not touched (not a DAX expression path). After the #583
+review the regex is gone altogether: a quoted branch is either blind to `''` or quadratic on a
+long apostrophe run, so `powerbi.functions.dax_col_refs` is a linear scanner (it also skips
+DAX `"…"` literals), and the `ts formula translate` DAX adapter uses it for its own qualified-
+ref and DATE-column collection — before that, `'Bob''s Sales'[Ship] - 'Bob''s Sales'[Order]`
+over two DATE columns lost its `diff_days`. The same review found a **pre-existing silent wrong
+answer** in the Tableau string-concat heuristic: an apostrophe inside a field name
+(`[Bob's Sales] + [Tax]`) counted as a string literal and turned numeric `+` into `concat`;
+bracketed names are now ignored when looking for a literal.
 
 ## BL-370 — `COT(0)` is NULL in ThoughtSpot `Tier 3`
 

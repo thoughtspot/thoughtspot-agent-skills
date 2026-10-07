@@ -202,3 +202,27 @@ def test_doubled_apostrophe_table_beside_a_plain_one():
 def test_doubled_apostrophe_table_qualifying_a_measure_ref():
     expr, _, _ = translate_dax("'Bob''s Sales'[M] * 2", measure_dax={"M": "SUM(T[x])"})
     assert expr == "[formula_M] * 2"
+
+
+def test_long_apostrophe_run_is_linear():
+    """#583 review: a regex quoted-name branch was quadratic on a run of apostrophes.
+    Generous bound: a quadratic scan of 20k characters takes far longer than this."""
+    import time
+    from ts_cli.powerbi.functions import dax_col_refs
+    for src in ("SUM(" + "'" * 20001 + "[x])", "SUM(" + "'" * 20000 + ")"):
+        t0 = time.monotonic()
+        dax_col_refs(src)
+        translate_dax(src)
+        assert time.monotonic() - t0 < 5
+
+
+def test_dax_col_refs_shapes():
+    from ts_cli.powerbi.functions import dax_col_refs
+    refs = [(t, c) for _s, _e, t, c in dax_col_refs(
+        "SUM(T[x]) + 'A B'[y] + 'Bob''s'[z] + [m] + IF(1, \"T[no]\", 0)")]
+    assert refs == [("T", "x"), ("A B", "y"), ("Bob's", "z")]
+
+
+def test_string_literal_apostrophe_does_not_steal_a_table():
+    expr, _, _ = translate_dax("IF(x, \"it's\", 'T'[c])")
+    assert expr.endswith("else [T::c])")

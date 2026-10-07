@@ -151,14 +151,19 @@ def adapt_tableau(expr: str, ctx: ColumnContext, role_hint: Optional[str] = None
 # DAX
 # ---------------------------------------------------------------------------
 
-_DAX_TABLE_REF = re.compile(r"(?:'[^']+'|[A-Za-z_]\w*)\s*\[[^\]]+\]")
 _DAX_BARE_REF = re.compile(r"(?<![\w'\]])\[([^\]]+)\]")
 
 
 def adapt_dax(expr: str, ctx: ColumnContext) -> RawResult:
-    from ts_cli.powerbi.functions import translate_dax
+    from ts_cli.powerbi.functions import dax_col_refs, translate_dax
 
-    without_qualified = _DAX_TABLE_REF.sub("", expr)
+    # One reader of DAX table qualifiers, the translator's own ('Bob''s Sales'[x], BL-369).
+    qualified = dax_col_refs(expr)
+    without_qualified, pos = [], 0
+    for start, end, _t, _c in qualified:
+        without_qualified.append(expr[pos:start])
+        pos = end
+    without_qualified = "".join(without_qualified) + expr[pos:]
     home_cols = {m.group(1).strip() for m in _DAX_BARE_REF.finditer(without_qualified)}
     date_cols = set()
     for n in home_cols:
@@ -168,8 +173,8 @@ def adapt_dax(expr: str, ctx: ColumnContext) -> RawResult:
         date_cols.add(t)
     # translate_dax qualifies Table[Col] → [Table::Col] and bare [Col] → [home::Col]
     # BEFORE its DATE-subtraction rewrite, which therefore looks for "Table::Col".
-    for m in re.finditer(r"(?:'([^']+)'|([A-Za-z_]\w*))\s*\[([^\]]+)\]", expr):
-        t, c = (m.group(1) or m.group(2)).strip(), m.group(3).strip()
+    for _s, _e, t, c in qualified:
+        t, c = t.strip(), c.strip()
         if c in ctx.date_names():
             date_cols.add(f"{t}::{c}")
     out, status, note = translate_dax(expr, home_table=_SENTINEL, home_cols=home_cols,

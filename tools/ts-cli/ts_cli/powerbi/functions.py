@@ -69,17 +69,91 @@ _FUNC_CALL = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)\s*\(")  # incl. dotted names
 # Table[Column] or 'Table Name'[Column] -> capture (table, column). Unquoted
 # DAX table names have no spaces (only the quoted form may), so the bare branch
 # is \w-only: this stops it from swallowing a preceding keyword (e.g. "then x[c]").
-# A quoted table name escapes an apostrophe by doubling it ('Bob''s Sales'[x]), so the
-# quoted branch reads '' as part of the name (BL-369) -- _table_name unescapes it.
-_QUOTED_TABLE = r"'(?:[^']|'')+'"
-_COL_REF = re.compile(r"(?:'((?:[^']|'')+)'|([A-Za-z_]\w*))\s*\[([^\]]+)\]")
+# A quoted table name escapes an apostrophe by doubling it ('Bob''s Sales'[x]), so it is
+# read by a linear scanner (dax_col_refs), not a regex: a regex quoted branch is either
+# blind to '' (BL-369) or quadratic on a long run of apostrophes (#583 review).
+_IDENT = re.compile(r"[A-Za-z_]\w*")
+_COL_AFTER = re.compile(r"\s*\[([^\]]+)\]")
 # A bare measure reference: [Measure Name] not preceded by a table token.
 _MEASURE_REF = re.compile(r"(?<![\w'\]])\[([^\]]+)\]")
 
 
-def _table_name(m) -> str:
-    """The table of a _COL_REF match: the quoted form unescaped ('' -> ') or the bare one."""
-    return m.group(1).replace("''", "'") if m.group(1) is not None else m.group(2)
+def _quote_end(src: str, i: int) -> int:
+    """Index of the quote closing the one at ``i`` (a doubled quote is an escape), or
+    ``len(src)`` when unterminated."""
+    q, j, n = src[i], i + 1, len(src)
+    while j < n:
+        if src[j] == q:
+            if j + 1 < n and src[j + 1] == q:
+                j += 2
+                continue
+            return j
+        j += 1
+    return n
+
+
+def dax_col_refs(src: str) -> list[tuple[int, int, str, str]]:
+    """Every qualified column reference in DAX ``src``: ``(start, end, table, column)``
+    for ``Table[Col]`` and ``'Table Name'[Col]`` (``''`` unescaped to ``'``). Linear:
+    one pass, skipping "string" literals and bare ``[Col]`` brackets. The single reader of
+    DAX table qualifiers, shared with the ``ts formula translate`` adapter (BL-369)."""
+    refs: list[tuple[int, int, str, str]] = []
+    i, n = 0, len(src)
+    while i < n:
+        c = src[i]
+        if c == '"':
+            ref, i = None, _quote_end(src, i) + 1
+        elif c == "'":
+            ref, i = _quoted_table_ref(src, i)
+        elif c == "[":
+            k = src.find("]", i)
+            ref, i = None, (n if k < 0 else k + 1)
+        elif _ident_start(src, i):
+            ref, i = _bare_table_ref(src, i)
+        else:
+            ref, i = None, i + 1
+        if ref:
+            refs.append(ref)
+    return refs
+
+
+def _ident_start(src: str, i: int) -> bool:
+    c = src[i]
+    return (c.isalpha() or c == "_") and not (i and (src[i - 1].isalnum() or src[i - 1] == "_"))
+
+
+def _quoted_table_ref(src: str, i: int):
+    """(ref or None, next index) for the ``'…'`` at ``i``."""
+    j = _quote_end(src, i)
+    name = src[i + 1:j].replace("''", "'")
+    m = _COL_AFTER.match(src, j + 1) if j < len(src) and name else None
+    if m:
+        return (i, m.end(), name, m.group(1)), m.end()
+    return None, j + 1
+
+
+def _bare_table_ref(src: str, i: int):
+    """(ref or None, next index) for the identifier starting at ``i``."""
+    ident = _IDENT.match(src, i)
+    if ident is None:              # a non-ASCII letter: not a DAX table name start
+        return None, i + 1
+    m = _COL_AFTER.match(src, ident.end())
+    if m:
+        return (i, m.end(), ident.group(0), m.group(1)), m.end()
+    return None, ident.end()
+
+
+def _sub_col_refs(src: str, repl) -> str:
+    """Replace each ``dax_col_refs`` span with ``repl(table, column)`` (None keeps it)."""
+    out, pos = [], 0
+    for start, end, table, col in dax_col_refs(src):
+        new = repl(table, col)
+        if new is not None:
+            out.append(src[pos:start])
+            out.append(new)
+            pos = end
+    out.append(src[pos:])
+    return "".join(out)
 
 
 def _split_args(s):
@@ -150,7 +224,7 @@ def _refs_to_ids(dax, names, physical_cols=None):
     Using the id keeps the measure dependency graph intact instead of inlining every
     definition: DIVIDE([Seps],[Actives]) -> [formula_Seps] / [formula_Actives], and
     SUM(Employee[isNewHire]) -> sum([formula_isNewHire]). Physical column refs
-    ('Table'[Col] / Table[Col]) are NOT in `names`, so they fall through to _COL_REF
+    ('Table'[Col] / Table[Col]) are NOT in `names`, so they fall through to dax_col_refs
     which qualifies them to [Table::Col]. Verified on-cluster 2026-06-29.
 
     A reference to a measure that itself fails to translate would dangle; build_model_tml
@@ -161,13 +235,14 @@ def _refs_to_ids(dax, names, physical_cols=None):
         if name in physical_cols:
             # `name` collides with a physical column: only an UNqualified `[name]` is the
             # formula (a measure ref). A qualified `Table[name]` is the physical column and
-            # is left for the _COL_REF pass to qualify to [Table::name] -- so a physical
+            # is left for the dax_col_refs pass to qualify to [Table::name] -- so a physical
             # `Fact[Sales]` is not hijacked into `[formula_Sales]` when a measure `Sales` exists.
             pat = re.compile(r"(?<![\w'])\[" + re.escape(name) + r"\]")
         else:
-            # optional table qualifier ('T'[name] / T[name]) or a bare [name]
-            pat = re.compile(r"(?:" + _QUOTED_TABLE + r"|[A-Za-z_]\w*)?\s*\["
-                             + re.escape(name) + r"\]")
+            # a table-qualified 'T'[name] / T[name], then any bare [name]
+            out = _sub_col_refs(out, lambda _t, c, name=name:
+                                f"[formula_{name}]" if c == name else None)
+            pat = re.compile(r"\[" + re.escape(name) + r"\]")
         out = pat.sub("[formula_" + name + "]", out)
     return out
 
@@ -179,7 +254,7 @@ def _calc_all_to_group_agg(s):
     a "normalized" measure like TO % Norm = CALCULATE([TO %], ALL(Gender), ALL(Ethnicity))
     ports). Only fires when EVERY filter arg is ALL/REMOVEFILTERS/ALLSELECTED of a single
     column; otherwise returns s unchanged so other CALCULATE shapes are handled/flagged.
-    The raw column refs (Table[Col]) are left for the later _COL_REF pass to qualify."""
+    The raw column refs (Table[Col]) are left for the later dax_col_refs pass to qualify."""
     out, guard = s, 0
     while guard < 50:
         guard += 1
@@ -368,8 +443,7 @@ def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_
 
     # Qualify Table[Col] -> [Table::Col] BEFORE expanding IF/DIVIDE/... so the "then"/
     # "else" keywords those introduce are never mistaken for a table name.
-    expr = _COL_REF.sub(
-        lambda m: f"[{_table_name(m).strip()}::{m.group(3).strip()}]", src)
+    expr = _sub_col_refs(src, lambda t, c: f"[{t.strip()}::{c.strip()}]")
 
     expr = _expand_functions(expr)
     if expr is None:

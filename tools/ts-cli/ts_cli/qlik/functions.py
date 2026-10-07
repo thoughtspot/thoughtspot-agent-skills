@@ -203,7 +203,15 @@ def field_quotes_to_brackets(expr: str) -> str:
     A doubled ``""`` inside a double-quoted name is Qlik's escape and is unescaped.
     Idempotent: a second pass finds no double-quoted field to rewrite.
     """
+    return _field_quotes(expr)[0]
+
+
+def _field_quotes(expr: str) -> tuple[str, Optional[str]]:
+    """``field_quotes_to_brackets`` plus why a double-quoted name could not become a
+    field reference (None when every one could): an empty ``""``, an unterminated
+    quote, or a name holding ``]`` — which cannot sit inside ``[…]`` (#583 review)."""
     out: list[str] = []
+    problem: Optional[str] = None
     i, n, depth = 0, len(expr), 0
     while i < n:
         c = expr[i]
@@ -216,14 +224,26 @@ def field_quotes_to_brackets(expr: str) -> str:
             out.append(expr[i:j + 1])
         elif c == '"' and depth == 0:
             j, name = _scan_quoted(expr, i, '"')
-            # unterminated or empty: leave it as written
-            out.append(expr[i:j + 1] if j >= n or not name else f"[{name}]")
+            why = _field_name_problem(name, j >= n)
+            problem = problem or why
+            out.append(expr[i:j + 1] if why else f"[{name}]")
         else:
             depth = _brace_depth(c, depth)
             out.append(c)
             j = i
         i = j + 1
-    return "".join(out)
+    return "".join(out), problem
+
+
+def _field_name_problem(name: str, unterminated: bool) -> Optional[str]:
+    if unterminated:
+        return "an unterminated double-quoted field name"
+    if not name:
+        return 'an empty double-quoted field name ("")'
+    if "]" in name:
+        return (f'the field name "{name}" holds "]", which cannot be written as a '
+                "ThoughtSpot [reference]")
+    return None
 
 
 def _scan_quoted(expr: str, i: int, q: str) -> tuple[int, str]:
@@ -255,7 +275,11 @@ def translate(expr: str, first_week_day: Optional[int] = None
     the form ThoughtSpot reads back exactly, and a product under a division is bracketed
     (BL-365). Double-quoted field names are read as fields first (BL-368), so the
     converter and ``ts formula translate --from qlik`` share one reading."""
-    out, review, reason = _translate(field_quotes_to_brackets(expr or ""), first_week_day)
+    fixed, problem = _field_quotes(expr or "")
+    if problem:
+        return (f"/* TODO review: {(expr or '').strip()} */", True,
+                f"Cannot read {problem} (BL-368)")
+    out, review, reason = _translate(fixed, first_week_day)
     return ts_finalize_formula(out), review, reason
 
 
@@ -341,7 +365,9 @@ def _remap_functions(expr: str, first_week_day: Optional[int] = None
         unknown.add(name)
         return f"{name}("
 
-    out = _FUNC_CALL.sub(repl, expr)
+    # Function calls are read outside quotes and [field names] only: a field named
+    # [Re(gion] or [It's (x)] is data, not a call (#583 review).
+    out = _map_code(expr, lambda seg: _FUNC_CALL.sub(repl, seg))
     out = out.replace("<>", "!=")
     if "&" in out:
         # Qlik `&` is string concatenation; ThoughtSpot `+` is numeric only (#579 review)
@@ -375,24 +401,46 @@ def _remap_functions(expr: str, first_week_day: Optional[int] = None
 _RELATIONAL = re.compile(r"!=|<=|>=|[=<>]|\b(?:and|or|not)\b", re.IGNORECASE)
 
 
-def _top_level_spans(expr: str):
-    """Yield (char, depth, in_quote) for each character, tracking (), [] and quotes."""
-    depth, quote = 0, None
+def _scan(expr: str, opens: str = "(", closes: str = ")"):
+    """Yield (char, depth, opaque) for each character. Quoted text ('…' / "…", a doubled
+    quote re-opening it) and a ``[…]`` field name are OPAQUE — nothing inside them nests,
+    splits or quotes, so ``[Bob's]`` does not open a string (#583 review). ``depth``
+    counts the ``opens`` / ``closes`` characters outside opaque text."""
+    depth, close = 0, None
     for ch in expr:
-        if quote:
+        if close:
             yield ch, depth, True
-            if ch == quote:
-                quote = None
+            if ch == close:
+                close = None
             continue
-        if ch in "'\"":
-            quote = ch
+        if ch in "'\"[":
+            close = "]" if ch == "[" else ch
             yield ch, depth, True
             continue
-        if ch in "([":
+        if ch in opens:
             depth += 1
-        elif ch in ")]":
+        elif ch in closes:
             depth -= 1
         yield ch, depth, False
+
+
+def _map_code(expr: str, fn) -> str:
+    """Apply ``fn`` to each run of ``expr`` outside quotes and ``[…]`` (see ``_scan``)."""
+    out, run, opaque_run = [], [], False
+    for ch, _depth, opaque in _scan(expr):
+        if opaque != opaque_run and run:
+            out.append("".join(run) if opaque_run else fn("".join(run)))
+            run = []
+        opaque_run = opaque
+        run.append(ch)
+    if run:
+        out.append("".join(run) if opaque_run else fn("".join(run)))
+    return "".join(out)
+
+
+def _top_level_spans(expr: str):
+    """Yield (char, depth, opaque) for each character, tracking () depth (see ``_scan``)."""
+    return _scan(expr)
 
 
 def _split_ampersands(expr: str) -> tuple[list[str], str]:
@@ -410,15 +458,18 @@ def _split_ampersands(expr: str) -> tuple[list[str], str]:
 
 
 def _group_end(expr: str, i: int) -> int:
-    """Index of the ``)`` closing the ``(`` at ``i``."""
-    depth = 0
-    for j in range(i, len(expr)):
-        if expr[j] == "(":
-            depth += 1
-        elif expr[j] == ")":
-            depth -= 1
-            if depth == 0:
-                return j
+    """Index of the ``)`` closing the ``(`` at ``i`` (quotes and ``[…]`` skipped)."""
+    for k, (_ch, depth, opaque) in enumerate(_scan(expr[i:])):
+        if not opaque and depth == 0:
+            return i + k
+    return len(expr) - 1
+
+
+def _opaque_end(expr: str, i: int) -> int:
+    """Index of the character closing the quote or ``[`` at ``i``."""
+    for k, (_ch, _depth, opaque) in enumerate(_scan(expr[i:])):
+        if k and not opaque:
+            return i + k - 1
     return len(expr) - 1
 
 
@@ -428,8 +479,7 @@ def _concat_in_groups(expr: str) -> Optional[str]:
     while i < len(expr):
         ch = expr[i]
         if ch in "'\"[":
-            j = expr.find("]" if ch == "[" else ch, i + 1)
-            j = len(expr) - 1 if j < 0 else j
+            j = _opaque_end(expr, i)
         elif ch == "(":
             j = _group_end(expr, i)
             if "&" in expr[i:j + 1]:
@@ -504,23 +554,9 @@ def _split_call(expr: str, fname: str) -> Optional[list[str]]:
 
 
 def _split_top_level(s: str) -> list[str]:
-    parts, depth, cur, in_str = [], 0, [], None
-    for ch in s:
-        if in_str:
-            cur.append(ch)
-            if ch == in_str:
-                in_str = None
-            continue
-        if ch in "'\"":
-            in_str = ch
-            cur.append(ch)
-        elif ch in "([{":
-            depth += 1
-            cur.append(ch)
-        elif ch in ")]}":
-            depth -= 1
-            cur.append(ch)
-        elif ch == "," and depth == 0:
+    parts, cur = [], []
+    for ch, depth, opaque in _scan(s, "([{", ")]}"):
+        if ch == "," and depth == 0 and not opaque:
             parts.append("".join(cur))
             cur = []
         else:
@@ -539,7 +575,32 @@ def _agg_fn(name: str) -> str:
     return FUNCTION_MAP.get(name.lower()) or "sum"
 
 
+_SET_MODIFIER = re.compile(r"\{\s*\$?\s*<(.*?)>\s*\}", re.S)
+
+
+def _set_analysis_shape_problem(expr: str) -> Optional[str]:
+    """Why ``expr`` is outside the shapes ``_set_analysis`` translates exactly, or None.
+
+    The patterns below read ONE aggregation over ONE field: a second aggregation was
+    stitched into the first's measure, and a second field in the modifier was read as
+    more values of the first (``{<Year={2023}, Region={"A"}>}`` became ``Year = '2023'
+    or Year = 'A'``) — both silent wrong answers (#583 review)."""
+    m = re.match(r"^\w+\s*\(", expr)
+    if not m or _group_end(expr, m.end() - 1) != len(expr) - 1:
+        return ("more than one aggregation (or text outside the Set Analysis call); "
+                "translate each Set Analysis aggregation on its own")
+    for mod in _SET_MODIFIER.finditer(expr):
+        if len([f for f in _split_top_level(mod.group(1)) if f]) > 1:
+            return ("the Set Analysis modifier restricts more than one field; each "
+                    "field needs its own condition (AND), which is not translated")
+    return None
+
+
 def _set_analysis(expr: str) -> tuple[str, bool, str]:
+    problem = _set_analysis_shape_problem(expr)
+    if problem:
+        return (f"/* TODO review set analysis: {expr} */", True,
+                f"Set Analysis: {problem}")
     # Pattern 1: {1} -> ignore all selections (total).
     m = re.match(r"(?i)^(\w+)\(\s*\{1\}\s*(.+?)\)$", expr)
     if m:

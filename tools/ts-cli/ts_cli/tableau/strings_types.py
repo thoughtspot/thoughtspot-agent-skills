@@ -79,7 +79,8 @@ def _replace_string_plus_chains(
         left, right = m.group(1).strip(), m.group(2).strip()
         has_string = (
             role == "dimension"
-            or "'" in left or "'" in right
+            # a quote in a [field name] is not a string literal (#583 review)
+            or "'" in _without_refs(left) or "'" in _without_refs(right)
             or (registry is not None and (
                 is_string_placeholder(left, registry)
                 or is_string_placeholder(right, registry)
@@ -101,6 +102,10 @@ def _replace_string_plus_chains(
         inner = " , ".join(chain)
         result = result[:m.start()] + f"concat ( {inner} )" + result[end:]
     return result
+
+
+def _without_refs(operand: str) -> str:
+    return re.sub(r"\[[^\]]*\]", "", operand)
 
 
 def _looks_like_string_concat(parts: list[str], role: str) -> bool:

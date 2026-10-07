@@ -16,6 +16,7 @@ class recurring.
 from __future__ import annotations
 
 import json
+import pytest
 import re
 from pathlib import Path
 
@@ -577,3 +578,40 @@ class TestDoubleQuotedFieldNames:
     def test_idempotent(self):
         once = field_quotes_to_brackets('Sum("Sales Amount") & \'"x"\'')
         assert field_quotes_to_brackets(once) == once
+
+
+class TestPr583ScannerEdges:
+    """#583 review: quotes and [field names] are opaque to every Qlik scanner."""
+
+    def test_apostrophe_field_in_ampersand_chain(self):
+        assert tr('"Bob\'s" & \' - \' & "Region"') == \
+            "concat ( [Bob's] , ' - ' , [Region] )"
+
+    def test_apostrophe_field_inside_a_call(self):
+        out, review, _ = translate("If(x > 1, [Bob's] & 'a', 'b')")
+        assert not review
+        assert out == "if (x > 1) then concat ( [Bob's] , 'a' ) else 'b'"
+
+    def test_parenthesis_in_a_field_name_is_not_a_call(self):
+        out, review, _ = translate("Mid([It's (x)], 2, 3)")
+        assert not review
+        assert "[It's (x)]" in out
+
+    def test_passthrough_over_an_apostrophe_field(self):
+        out, review, _ = translate('Upper("Bob\'s")')
+        assert not review
+        assert out == 'sql_string_op("UPPER({0})", [Bob\'s])'
+
+    @pytest.mark.parametrize("src,why", [
+        ('Sum("a]b")', "]"), ('Sum("")', "empty"), ('Sum("x', "unterminated")])
+    def test_unreadable_double_quoted_name_is_flagged(self, src, why):
+        out, review, reason = translate(src)
+        assert review and why in reason and out.startswith("/* TODO review")
+
+    def test_two_fields_in_a_modifier_flagged(self):
+        _out, review, reason = translate('Sum({<Year={2023}, Region={"A"}>} Sales)')
+        assert review and "more than one field" in reason
+
+    def test_two_set_analysis_aggregations_flagged(self):
+        _out, review, reason = translate('Sum({<Year={2023}>}"Sales") / Sum({1} "Sales")')
+        assert review and "more than one aggregation" in reason

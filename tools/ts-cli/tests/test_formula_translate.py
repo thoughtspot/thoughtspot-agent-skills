@@ -1100,3 +1100,49 @@ class TestCotZeroTrap:
     def test_cot_inside_a_literal_does_not_fire(self):
         r = translate("IF [s] = 'cot(' THEN TAN([x]) END", "tableau")
         assert not any("BL-370" in t for t in r["traps"])
+
+
+class TestPr583ReviewFixes:
+    """Independent review of #583: the adapter-side and scanner-side halves of BL-368/369,
+    plus the pre-existing silent wrong answers it found next to them."""
+
+    def test_dax_adapter_reads_doubled_apostrophe_dates(self):
+        ctx = ColumnContext(parse_columns_json(
+            '[{"source": "Ship", "table": "T", "column": "SHIP", "data_type": "DATE"},'
+            ' {"source": "Order", "table": "T", "column": "ORD", "data_type": "DATE"}]'), level=1)
+        r = translate("'Bob''s Sales'[Ship] - 'Bob''s Sales'[Order]", "dax", ctx)
+        assert r["formula"] == "diff_days([T::SHIP], [T::ORD])"
+        assert r["status"] == TRANSLATED
+
+    def test_qlik_apostrophe_field_concat(self):
+        r = translate('"Bob\'s" & \' - \' & "Region"', "qlik")
+        assert r["formula"] == "concat ( [TABLE::Bob's] , ' - ' , [TABLE::Region] )"
+        assert r["status"] == TRANSLATED
+
+    def test_sql_comment_stripping_reads_literals_inside_brackets(self):
+        from ts_cli.formula_translate.engine import strip_comments
+        assert strip_comments("v['a--b'] + 1", "snowflake") == ("v['a--b'] + 1", False)
+        assert strip_comments("v['a--b'] + 1 -- c", "databricks")[0].rstrip() == "v['a--b'] + 1"
+
+    @pytest.mark.parametrize("src", ['Sum("a]b")', 'Sum("")', 'Sum("x'])
+    def test_qlik_unreadable_double_quoted_name_needs_review(self, src):
+        assert translate(src, "qlik")["status"] == NEEDS_REVIEW
+
+    @pytest.mark.parametrize("src", [
+        'Sum({<Year={2023}, Region={"A"}>} Sales)',
+        'Sum({<Year={2023}>}"Sales") / Sum({1} "Sales")',
+        "Sum({1} Sales) / Sum(Sales)",
+    ])
+    def test_qlik_set_analysis_shapes_it_cannot_read_need_review(self, src):
+        assert translate(src, "qlik")["status"] == NEEDS_REVIEW
+
+    def test_qlik_one_field_several_values_still_translates(self):
+        r = translate('Sum({<Region={"A","B"}>} Sales)', "qlik")
+        assert r["status"] == TRANSLATED
+        assert "'A'" in r["formula"] and "'B'" in r["formula"]
+
+    def test_tableau_apostrophe_in_field_name_is_not_a_string(self):
+        r = translate("[Bob's Sales] + [Tax]", "tableau")
+        assert r["formula"] == "[TABLE::Bob's Sales] + [TABLE::Tax]"
+        assert "concat" not in translate("[Bob's Sales] + [Tax]", "tableau")["formula"]
+        assert translate("[Name] + 'x'", "tableau")["formula"].startswith("concat")
