@@ -355,6 +355,11 @@ INDEPENDENT_MATCHES = {
         "the TRUNC guard increment (BL-331), a code constant older than the corpus",
     ("tools/ts-cli/tests/test_round_increment.py", '"0.00000' + '1"'):
         "the same constant, asserted by the TRUNC tests",
+    ("tools/formula-fidelity/cases/databricks/m2.jsonl", '"0.00000' + '1"'):
+        "M2's in-repo Databricks cases (#576, authored under the repo licence): the same "
+        "generic constant as the TRUNC increment, independent of the Excel corpus",
+    ("tools/formula-fidelity/runs/2026-10-07-databricks-m2.json", '"0.00000' + '1"'):
+        "the M2 run evidence for those cases",
     ("tools/ts-cli/ts_cli/qlik/data/qlik_ts_formula_map.json", "01234" + "56789"):
         "the digit alphabet of a Qlik PurgeChar mapping",
 }
