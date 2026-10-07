@@ -155,7 +155,8 @@ class TestMath:
     @pytest.mark.parametrize("name", ["SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN"])
     def test_trig_is_radians_on_both_sides(self, name):
         # probe record §7: sin ( 30 ) compiles to SIN(30); no degree conversion
-        assert f(f"={name}([@amt])", "TRANSLATED") == f"{name.lower()} ( [T::amt] )"
+        status = "APPROXIMATED" if name in ("ASIN", "ACOS") else "TRANSLATED"  # domain trap
+        assert f(f"={name}([@amt])", status) == f"{name.lower()} ( [T::amt] )"
 
     def test_atan2_swaps_operands(self):
         r = ok("=ATAN2([@amt],[@qty])")
@@ -165,7 +166,8 @@ class TestMath:
     @pytest.mark.parametrize("name", ["SINH", "COSH", "TANH", "ASINH", "ACOSH", "ATANH",
                                       "DEGREES", "RADIANS"])
     def test_hyperbolic_and_angles_pass_through(self, name):
-        assert f(f"={name}([@amt])", "TRANSLATED") == \
+        status = "APPROXIMATED" if name in ("ACOSH", "ATANH") else "TRANSLATED"
+        assert f(f"={name}([@amt])", status) == \
             f'sql_double_op ( "{name}({{0}})" , [T::amt] )'
 
     def test_pi(self):
@@ -413,3 +415,22 @@ class TestIntegerDivision:
         r = translate_excel("=QUOTIENT([@dec],3)",
                             ColumnContext(parse_columns_json(cols), level=1))
         assert r.status == "APPROXIMATED" and any("scale 6" in t for t in r.traps)
+
+
+class TestDomains:
+    @pytest.mark.parametrize("src", ["=LOG(8,1)", "=LOG(8,0)", "=LOG(8,-2)", "=LOG(0)", "=LOG(-3,2)",
+                                     "=ACOSH(0.5)", "=ATANH(1)", "=ATANH(-1.5)", "=ASIN(2)",
+                                     "=ACOS(-1.01)"])
+    def test_literal_outside_the_domain_is_refused(self, src):
+        assert "outside" in review(src)
+
+    @pytest.mark.parametrize("src", ["=LOG([@amt])", "=LOG(8,[@amt])", "=ACOSH([@amt])",
+                                     "=ATANH([@amt])", "=ASIN([@amt])"])
+    def test_column_is_approximated(self, src):
+        r = ok(src, "APPROXIMATED")
+        assert any("#NUM!" in t for t in r.traps)
+
+    def test_inside_the_domain_is_translated(self):
+        for src in ("=LOG(8,2)", "=LOG(100)", "=ACOSH(1)", "=ATANH(0.5)", "=ASIN(-1)",
+                    "=SINH([@amt])"):
+            ok(src, "TRANSLATED")

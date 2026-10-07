@@ -21,47 +21,66 @@ from ts_cli.excel import nodes as X
 from ts_cli.excel import tsast as T
 from ts_cli.excel.helpers import need, template
 
-DOMAIN_NOTE = ("{name} outside its domain: Excel returns #NUM!; the warehouse returns NaN or "
-               "fails the query")
 FACT_TRAP = ("FACT of a column: Snowflake FACTORIAL accepts 0 to 33 and FAILS THE WHOLE QUERY "
              "for a negative number or one above 33, where Excel returns #NUM! in one cell "
              "(negative) or computes up to 170!")
+
+
+DOMAIN_TRAP = ("{name} of a value outside {what}: Excel returns #NUM! (or #DIV/0!) in that "
+               "cell; the warehouse returns NaN, the text 'Infinity', NULL or fails the query "
+               "(fidelity M1 coverage run)")
+
+
+def _domain(tr, name: str, node: dict, ok, what: str) -> None:
+    """A literal outside the function's domain is NEEDS_REVIEW (Excel's error has no value);
+    a non-literal gets a downgrading trap."""
+    value = T.number_value(node)
+    if value is None:
+        tr.trap(DOMAIN_TRAP.format(name=name, what=what), downgrade=True)
+    elif not ok(value):
+        tr.review(f"{name} of {value}: outside {what}, an error in Excel")
 
 
 def _log(tr, n):
     """``LOG(x, [base])``: Excel's default base is 10."""
     need(tr, n, 1, 2)
     x = tr.num(n.args[0])
+    _domain(tr, "LOG", x, lambda v: v > 0, "x > 0")
     if len(n.args) == 1 or isinstance(n.args[1], X.Missing):
         return T.call("log10", x)
     base = tr.num(n.args[1])
+    _domain(tr, "LOG", base, lambda v: v > 0 and v != 1, "a base > 0 and not 1")
     value = T.number_value(base)
     if value == 10:
         return T.call("log10", x)
     if value == 2:
         return T.call("log2", x)
-    if value is None or value == 1:
-        tr.note("LOG with base 1: Excel returns #DIV/0!, ln ( 1 ) is 0 and ThoughtSpot's / "
-                "returns NULL")
     return T.binop("/", T.call("ln", x), T.call("ln", base))
+
+
+# name -> (accepts, the domain in words) for the functions with a restricted domain
+_DOMAINS = {"ASIN": (lambda v: -1 <= v <= 1, "-1 to 1"), "ACOS": (lambda v: -1 <= v <= 1, "-1 to 1"),
+            "ACOSH": (lambda v: v >= 1, "x >= 1"), "ATANH": (lambda v: -1 < v < 1, "-1 < x < 1")}
 
 
 def _native(fn: str):
     """Excel and ThoughtSpot trigonometry are both in radians (probe record §7)."""
     def handler(tr, n):
         need(tr, n, 1, 1)
-        if fn in ("asin", "acos"):
-            tr.note(DOMAIN_NOTE.format(name=n.name))
-        return T.call(fn, tr.num(n.args[0]))
+        x = tr.num(n.args[0])
+        if n.name in _DOMAINS:
+            _domain(tr, n.name, x, *_DOMAINS[n.name])
+        return T.call(fn, x)
     return handler
 
 
-def _double_op(sql: str, domain: bool = False):
+def _double_op(sql: str):
     def handler(tr, n):
         need(tr, n, 1, 1)
-        if domain:
-            tr.note(DOMAIN_NOTE.format(name=n.name))
-        return T.call("sql_double_op", template(sql), tr.num(n.args[0]))
+        x = tr.num(n.args[0])
+        if n.name in _DOMAINS:
+            _domain(tr, n.name, x, *_DOMAINS[n.name])
+        return T.call("sql_double_op", template(sql), x)
     return handler
 
 
@@ -103,6 +122,6 @@ MATH_HANDLERS = {
     "ASIN": _native("asin"), "ACOS": _native("acos"), "ATAN": _native("atan"),
     "SINH": _double_op("SINH({0})"), "COSH": _double_op("COSH({0})"),
     "TANH": _double_op("TANH({0})"), "ASINH": _double_op("ASINH({0})"),
-    "ACOSH": _double_op("ACOSH({0})", domain=True), "ATANH": _double_op("ATANH({0})", domain=True),
+    "ACOSH": _double_op("ACOSH({0})"), "ATANH": _double_op("ATANH({0})"),
     "DEGREES": _double_op("DEGREES({0})"), "RADIANS": _double_op("RADIANS({0})"),
 }
