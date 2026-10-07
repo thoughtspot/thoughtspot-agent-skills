@@ -1671,7 +1671,8 @@ Report validation warnings regardless of pace:
   formulas — an entry marked `kind: "join"` reports a join `_extract_joins` skipped
   (its `name` is the datasource, not a formula), and belongs in the report's Join
   warnings section. An entry without that marker is a formula that may have syntax
-  issues but was still attempted.
+  issues but was still attempted, or carries a `review_notes` assumption (assumed-Sunday
+  weekday; Monday week start, BL-334) — surface those in the review section.
 
 Do **not** manually assemble TML, write Python scripts to add formulas, or call
 `ts tml import` directly for Phase 2. The `build-model --existing-guid` command
@@ -2493,6 +2494,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.45.0 | 2026-10-07 | Week-dependent formulas carry the shared Monday-week-start advisory in `review_notes` → `validation_warnings` (ts-cli v0.168.0, BL-334 item 2); no formula or status change |
 | 1.44.4 | 2026-10-07 | **Trigonometry is radians; quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-364, BL-365).** `SIN` … `ATAN` / `COT` no longer convert by `180 / π` (ThoughtSpot trig is radians, live — the old forms were wrong for every non-zero input); `PI()` is the warehouse's `PI()`; `DEGREES` / `RADIANS` are bracketed. A literal holding a quote is double-quoted (`'it''s'` read as two quotes), a backslash doubled, and every product under a division bracketed. `INT(x)` is now parenthesised: `INT([x]) * 2` multiplied only the negative branch (#579 review). Coverage-matrix rows 32, 33, 132, 133, 138, 139 |
 | 1.44.3 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.44.2 | 2026-10-06 | **`DATEPART('weekday', d)` returns a number, not the day name (ts-cli v0.156.2, BL-334).** Now `( mod ( day_number_of_week ( d ) , 7 ) + 1 )` for a Sunday start. Week start: literal `start_of_week`, else the datasource's `<date-options start-of-week>`, else Sunday assumed and reported as a validation warning. `ISOWEEKDAY` / `'iso-weekday'` → `day_number_of_week` |

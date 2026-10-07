@@ -260,6 +260,8 @@ through untranslated.
 
 ### Notes on limitations
 
+**Week start (BL-334 item 2, ts-cli 0.168.0).** Every mapped row whose output calls `start_of_week`, `day_number_of_week`, `week_number_of_*` or `diff_weeks` (`DATETRUNC('week')`, `DATEPART('week' / 'weekday')`) assumes a Monday week start and differs on a Model whose calendar starts the week elsewhere. The converter emits no calendar argument (the Model's calendar is the default) and flags the assumption in `review_notes` → `validation_warnings` with the shared `formula_common.week_start_note`. Advisory only — the row stays mapped, the status unchanged. Whether a non-Monday Model calendar changes these functions' compiled SQL is still unprobed (BL-334 items 3–4).
+
 **L1–L3** are truly untranslatable — the functions have no SQL or ThoughtSpot equivalent.
 The skill detects them, omits them cleanly, and logs them in the audit report.
 

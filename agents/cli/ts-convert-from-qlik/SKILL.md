@@ -130,6 +130,8 @@ Approximated / NEEDS REVIEW / Skipped). Render it into a `migration_report.md` f
 [references/migration-report-format.md](references/migration-report-format.md) — keep the
 section order and the exact status vocabulary — and hand that to the user as the deliverable.
 Never silently drop a source object: every one appears in a table with a status.
+A measure entry may also carry `review_notes` — the Monday-week-start advisory (`formula_common.week_start_note`, BL-334 item 2): a formula calling `start_of_week`, `day_number_of_week`, `week_number_of_*` or `diff_weeks` assumes a Monday week start, and differs on a Model whose calendar starts the week elsewhere. No calendar argument is emitted — the Model's calendar applies — so the note asks the user to check that calendar. It is advisory: the formula's status does not change (e.g. `WeekStart()`,
+`Weekday()`). List them in the report's review notes; the measure stays Migrated.
 
 ---
 
@@ -142,6 +144,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-10-07 | **Week-dependent measures are flagged (ts-cli v0.168.0, BL-334 item 2).** A measure whose formula calls `start_of_week`, `day_number_of_week`, `week_number_of_*` or `diff_weeks` (`WeekStart()`, `Weekday()` …) carries the shared Monday-week-start advisory in its `mapping.json` `review_notes`. No calendar argument is emitted and no formula text changes; status stays Migrated |
 | 1.0.6 | 2026-10-07 | **Quote-bearing literals, `&` and `a * b / c` are exact (ts-cli v0.165.0, BL-365).** Qlik `a & b` is `concat ( a , b )` — it was rewritten to numeric `+`, even inside a literal (#579 review). A Qlik `'it''s'` was copied verbatim, which ThoughtSpot reads as two quotes; it is now `"it's"`, a backslash doubled, and every product under a division bracketed |
 | 1.0.5 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.0.4 | 2026-10-06 | **`Weekday()` no longer assumes Monday (ts-cli v0.156.2, BL-334).** Its origin is the app's `FirstWeekDay`, which the regional settings put in the load script — US apps typically `SET FirstWeekDay=6;`, so the old fixed `(day_number_of_week(d) - 1)` was wrong by one on every day there. The converter now reads `SET FirstWeekDay=n;` from the recovered script and shifts through `formula_common.ts_weekday_number`; with no script or no `SET`, the measure is flagged NEEDS REVIEW. A literal second argument `Weekday(d, n)` wins; a non-literal one is flagged. Unresolved names inside `If()` branches are now flagged too (they were discarded) |

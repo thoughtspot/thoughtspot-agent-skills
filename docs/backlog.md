@@ -225,7 +225,7 @@ are roughly ordered by value÷effort.
 | BL-329 | Audit H angle runs Set discovery through `fetch_consumers`, which exports every Liveboard that uses a Set — Liveboard detail H5 never reads; slow on large estates. Add a lightweight consumers mode | next ts-audit pass |
 | BL-330 | `ts migrate apply --sets-scan FILE` trusts any post-BL-325 scan for any Model — nothing checks the scan covered the mapped Model or the source Org; a scan of another Org (or `scanned.models: 0`) lets `apply` pass an uninspected Model | next ts-migrate pass |
 | BL-332 | Upstream apache/ossie converter maps `ROUND(x, d)` to `round ( x , d )` (copies the digit count; `d = 0` → NULL) — unreachable today, live once multi-arg matching lands; fix PR held for legal review | 2026-11-30 |
-| BL-334 | ~~`DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`~~ (item 1 FIXED, ts-cli 0.156.2 — also Tableau and Qlik weekday numbering); week translations assume the Model calendar's Monday start; `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
+| BL-334 | ~~`DAYOFWEEK` → `day_number_of_week` rename wrong in `sv_sql.py` + `mv_sql.py`~~ (item 1 FIXED, ts-cli 0.156.2 — also Tableau and Qlik weekday numbering); ~~week translations assume the Model calendar's Monday start~~ (item 2 FLAGGED, ts-cli 0.168.0); `start_of_week` compiles to `WEEK_START`-dependent SQL | 2026-11-30 |
 | BL-335 | `sql_number_aggregate_op` does not exist (parser rejects it; `sql_double_aggregate_op` is the numeric aggregate) — repo docs fixed; upstream apache/ossie converter still emits it, fix held with the Ossie upstream work | 2026-11-30 |
 | ~~BL-338~~ | ~~`ts-object-formula-translate` routes the `google_sheets` dialect to the Excel function map (`formula_translate/detect.py:25`), so Sheets formulas skip the Sheets delta map (REGEXEXTRACT groups, SPLIT defaults, CODE, IFERROR default, QUERY)~~ | DONE (2026-10-06 — ts-cli v0.157.1, skill 1.1.0) |
 | ~~BL-343~~ | ~~`TO_CHAR`/`TO_VARCHAR(x, format)` drop the format and emit one-argument `to_string`, rejected on import~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
@@ -12451,7 +12451,7 @@ converter.
 
 ## BL-334 — Week-start assumptions: `DAYOFWEEK` renamed to `day_number_of_week`, and `start_of_week` compiles to `WEEK_START`-dependent SQL `Tier 2`
 
-**Filed:** 2026-10-06. **Status:** OPEN.
+**Filed:** 2026-10-06. **Status:** OPEN (items 1–2 resolved; items 3–4 open).
 **Source:** live probe on se-thoughtspot, 2026-10-06, plus ThoughtSpot domain review, 2026-10-06.
 
 **The facts.**
@@ -12503,12 +12503,23 @@ converter.
    **Follow-up (not implemented):** the Snowflake translator assumes the default `WEEK_START = 0`. A
    runtime check — `SHOW PARAMETERS LIKE 'WEEK_START'` on the source connection, warning when it is 1–7,
    where `DAYOFWEEK` numbers 1–7 from that day — would turn the assumption into a verified fact.
-   Items 2–4 remain open.
+   Items 3–4 remain open (item 2 resolved 2026-10-07, below).
 2. **Monday-start assumption everywhere.** Every translation built on `day_number_of_week` or
    `start_of_week` diverges on a Model whose calendar starts the week elsewhere: weekday numbering,
    week-number/ISO-week compositions, NETWORKDAYS/WORKDAY arithmetic, Qlik `WeekStart`, and
    Tableau/Sigma `DATETRUNC('week')`. The function maps now say so per row. A source with an explicit
    week setting is a note pointing at the Model's calendar.
+   **RESOLVED 2026-10-07 (ts-cli 0.168.0, branch `feat/bl-334-week-start-flags`).** User decision: emit
+   no calendar argument — the Model's calendar is the default — and flag the assumption. One detector
+   and one wording, `formula_common.week_start_note` (functions: `start_of_week`, `day_number_of_week`,
+   `week_number_of_year` / `_month` / `_quarter`, `diff_weeks`; not `day_of_week`, `is_weekend`,
+   `add_weeks`), reported by every translator that emits ThoughtSpot formulas: Tableau
+   `review_notes` → build-model `validation_warnings`; Snowflake SV `annotations[]`; Databricks MV
+   `annotations[]` kind `week_start_assumption`; Qlik `mapping.json` `review_notes`; and the
+   `ts formula translate` trap (Excel / Sheets `WEEKDAY` / `NETWORKDAYS` reach it there). Advisory,
+   never a downgrade; no emitted formula changed. Power BI and Sisense translators emit no week
+   function today, so they have nothing to flag; Looker, Sigma and Omni are doc-driven (their map rows
+   already carry the note). Tests: `tools/ts-cli/tests/test_week_start_flag.py`.
 3. **Residual SQL caveat.** On a warehouse with `WEEK_START` ≠ 0/1, the default `start_of_week` and
    `day_number_of_week` can disagree.
 4. **Unverified.** Whether a non-default Model calendar changes `day_number_of_week`'s `+3` constant

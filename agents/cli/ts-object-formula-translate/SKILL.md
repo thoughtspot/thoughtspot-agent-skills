@@ -255,8 +255,12 @@ an older row says (see open-items OI-2…OI-5, and probe record §7):
   emit the `start_of_*` calendar-name argument and never ask for a calendar name. Any
   formula that assumes Monday is day one — weekday numbering, week alignment, `WEEKNUM` /
   ISO-week compositions, `NETWORKDAYS`-style arithmetic, `start_of_week` — gets the trap
-  line *"assumes a Monday week start; diverges if the Model's calendar starts on another
-  day"*. A source with an explicit fiscal or custom week/year setting (Excel `WEEKNUM`
+  line *"assumes a Monday week start (…): …"*. The CLI emits it for any output calling
+  `start_of_week`, `day_number_of_week`, `week_number_of_year` / `_month` / `_quarter` or
+  `diff_weeks` (not `day_of_week`, `is_weekend` or `add_weeks`, which do not move with the
+  week start). It is `formula_common.week_start_note` — the **same** note the
+  `ts-convert-from-*` converters put in their reports — and it is advisory: the status stays
+  `TRANSLATED` (BL-334 item 2). For a map-only dialect (Omni, Sigma), write that same line. A source with an explicit fiscal or custom week/year setting (Excel `WEEKNUM`
   return types, Sigma/Omni fiscal settings, a DAX/Tableau fiscal year start) gets the note
   *"the week/fiscal definition comes from the Model's calendar, not from the formula"*.
 - **`diff_months` / `diff_years` count boundaries crossed** (OI-3): Jan 31 → Feb 1 = 1. Excel
@@ -506,6 +510,7 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.9.0 | 2026-10-07 | **One Monday-week-start trap, shared with the converters (ts-cli v0.168.0, BL-334 item 2).** The week trap is now `formula_common.week_start_note`, the note every `ts-convert-from-*` report carries, and names the functions that fired. `diff_weeks` joins the set; `day_of_week` (a day name, independent of the week start) leaves it. Advisory only — status unchanged |
 | 1.8.1 | 2026-10-07 | **Every dialect: trigonometry in radians, quote-bearing literals double-quoted, `a * b / c` bracketed (ts-cli v0.165.0, BL-364, BL-365).** The Excel printer's `sql_string_op` literal form is replaced by the native `"it's"` (so a quote with a backslash, brace or double quote now translates); Snowflake / Databricks map trigonometry; ThoughtSpot → Excel reads `'it''s'` as ThoughtSpot does (two quotes) |
 | 1.8.0 | 2026-10-07 | Excel coverage pass (ts-cli v0.164.0, fidelity M1): 43 more Excel functions are translator-backed, chosen by how many corpus cases they blocked — `CHAR` / `UNICHAR` / `CODE` / `UNICODE`, `SIN` … `ATAN` (radians, the identity form; the map's degrees rule was wrong, BL-364), `ATAN2`, the hyperbolic family, `DEGREES`, `RADIANS`, `PI`, `FLOOR.MATH`, `CEILING.PRECISE`, `FLOOR.PRECISE`, `ISO.CEILING`, `TRUNC`, `EVEN`, `ODD`, `QUOTIENT`, `LOG`, `FACT`, `REPLACE`, the `B` byte variants, `FIND` / `SEARCH` with `start_num`, `TEXT` (a format-code subset), `DATE`, `ISTEXT` / `ISNONTEXT` / `ISLOGICAL`. NEEDS_REVIEW over the 2,463 eligible M1 cases fell from 70% to 33%. Fixes 1.5.0's DOUBLE precision snap, which made `ROUNDUP` / `CEILING` jump a step on exact values (3.0 → 3.1): now a 1e-9 nudge |
 | 1.7.0 | 2026-10-07 | The Snowflake and Databricks translators it wraps (ts-cli v0.163.0, formula fidelity M2, BL-357..362): NULLIF divisions are plain `/` and zero-default ratios `ifnull ( safe_divide ( … ) , 0 )` (zero only when the source asks for zero); `DIV0` / `DIV0NULL` NULL-guarded; Databricks `BIGINT` casts 64-bit, `DECIMAL` / Snowflake `NUMBER(p,s)` / `TO_NUMBER` rounding to scale; `DIV`, `FLOOR`/`CEIL` with a scale, `%`, `\|\|`, `LIKE`/`ILIKE`/`RLIKE`, n-ary `COALESCE`, `NVL2`, `try_divide` and more translate; `ZEROIFNULL` is `ifnull`. New BL-358 traps for Databricks casts (note) and overflow-prone literals (APPROXIMATED). Takes 1.7.0 because the concurrent Excel coverage branch claims 1.6.0 |
