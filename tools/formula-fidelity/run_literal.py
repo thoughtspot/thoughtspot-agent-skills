@@ -270,9 +270,24 @@ def cmd_run(args) -> int:
 def cmd_rebuild(args) -> int:
     data_dir, entries, cases, fixture = _load(args)
     full = json.loads(args.full_run.read_text())
+    full["cases"], quarantined = drop_disputed(full["cases"], entries)
+    if quarantined:
+        _log(f"{len(quarantined)} case(s) run earlier are now oracle-disputed and are not "
+             f"scored: {', '.join(quarantined)}")
     ids = {it["id"] for it in full["cases"]}
     _outputs(args, data_dir, entries, [c for c in cases if c["id"] in ids], fixture, full)
     return 0
+
+
+def drop_disputed(run_cases: list[dict], entries: list[dict]) -> tuple[list[dict], list[str]]:
+    """A stored run's cases minus those the manifest now marks oracle-disputed.
+
+    A case can be run and later quarantined when the cross-check tightens (BL-356). Its
+    stored verdict must then leave the scored set; ``redact_run`` lists it once, as
+    ORACLE_DISPUTED, from the manifest. Keeping both would count it twice."""
+    disputed = {e["id"] for e in entries if e.get("crosscheck") == "disputed"}
+    kept = [it for it in run_cases if it["id"] not in disputed]
+    return kept, [it["id"] for it in run_cases if it["id"] in disputed]
 
 
 def _args(argv=None):

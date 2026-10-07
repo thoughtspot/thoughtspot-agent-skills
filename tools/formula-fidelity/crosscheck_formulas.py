@@ -11,7 +11,8 @@ For each translatable candidate in ``<data-dir>/extracted/candidates.jsonl`` it 
 workbook holding ONLY that case's input cells (row r, the case's letters) and the formula —
 no cached values, so ``formulas`` must compute — and compares with the corpus value:
 
-- ``agree``        the bronze value equals the oracle of record
+- ``agree``        the bronze value equals the oracle of record, at the case's own declared
+                   tolerance and by the scorer's rule (``compare.numbers_close``, BL-356)
 - ``disputed``     it differs: the case is quarantined, never scored (oracles.md principle)
 - ``unavailable``  ``formulas`` cannot evaluate it (``#NAME?`` / load failure): still scored,
                    counted separately
@@ -23,14 +24,15 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
-import math
 import pathlib
 import re
 import sys
 import tempfile
+from decimal import Decimal
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+from fidelity.compare import numbers_close  # noqa: E402  (stdlib-only; the scorer's own rule)
 from fidelity.sources import render  # noqa: E402  (stdlib-only module)
 
 EPOCH = _dt.date(1899, 12, 30)
@@ -73,12 +75,16 @@ def agree(expected: dict, got: dict, tol: dict) -> bool:
     if et == "num":
         if gt == "bool":
             return False
+        # At the case's OWN declared tolerance, with the scorer's rule (BL-356). A looser
+        # cross-check bound lets a last-digit silver-vs-bronze disagreement through as
+        # "agree", and the case is then run and scored as a silent wrong answer instead of
+        # being quarantined as oracle-disputed.
         try:
-            a, b = float(expected["v"]), float(got["v"])
-        except (TypeError, ValueError):
+            a = Decimal(str(expected["v"]).strip())
+            b = Decimal(repr(float(got["v"])))
+        except (TypeError, ValueError, ArithmeticError):
             return False
-        bound = max(tol.get("abs", 0), 1e-9 * max(abs(a), abs(b), 1e-300))
-        return a == b or (math.isfinite(a) and math.isfinite(b) and abs(a - b) <= bound)
+        return numbers_close(a, b, tol)
     if et == "bool":
         return gt == "bool" and bool(got["v"]) == expected["v"]
     if et == "str":
@@ -155,7 +161,8 @@ def main(argv=None) -> int:
                 continue
             got = _canon(raw)
             ok = agree(c["expected"], got, c["tolerance"])
-            out[c["id"]] = {"status": "agree" if ok else "disputed", "bronze": got}
+            out[c["id"]] = {"status": "agree" if ok else "disputed", "bronze": got,
+                             "tolerance": c["tolerance"]}
         print(f"  {min(i + a.chunk, len(rows))}/{len(rows)}", file=sys.stderr, flush=True)
     (a.data_dir / "extracted" / "crosscheck.json").write_text(json.dumps(out, indent=0, default=str))
     tally: dict[str, int] = {}
