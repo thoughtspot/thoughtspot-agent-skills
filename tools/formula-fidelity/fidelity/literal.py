@@ -122,7 +122,7 @@ def parse_manifest(text: str, source: str = "<manifest>") -> list[dict]:
 
 def manifest_line(e: dict) -> str:
     keep = ("id", "source", "path", "sha256", "locator", "category", "functions",
-            "crosscheck", "flags")
+            "crosscheck", "crosscheck_stale", "flags")
     return json.dumps({k: e[k] for k in keep if k in e}, sort_keys=False)
 
 

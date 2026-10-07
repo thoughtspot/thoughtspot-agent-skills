@@ -17,7 +17,11 @@
   "poi:agree": 48,
   "poi:disputed": 2
  },
- "crosscheck_rechecked": "2026-10-07",
+ "crosscheck_rechecked": {
+  "date": "2026-10-07",
+  "evaluated": 243,
+  "stale": 7
+ },
  "date": "2026-10-06",
  "flags": {
   "blank-input": 3,

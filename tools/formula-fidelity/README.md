@@ -241,8 +241,17 @@ $UV --with snowflake-connector-python python -I tools/formula-fidelity/run_liter
   its inputs. A disagreement makes the case **oracle-disputed**: listed, not run, not scored.
   Agreement is decided at the case's **own declared tolerance**, by the scorer's rule
   (`compare.numbers_close`): a looser cross-check bound would let a last-digit oracle
-  disagreement through to be scored as a silent wrong answer (BL-356). `rebuild` drops the
-  stored verdict of a case that has since become disputed, so it is counted once.
+  disagreement through to be scored as a silent wrong answer (BL-356). A NaN on either side is
+  disputed: an oracle that says NaN is not evidence. Every decided entry in
+  `crosscheck.json` records that tolerance, and `select` / `recheck` refuse a file whose
+  decided entries lack it (the pre-BL-356 rule).
+- **`recheck`** marks a manifest id the new cross-check did not evaluate (its candidate is no
+  longer translatable) `crosscheck_stale: true`, keeps its earlier status, and lists it.
+- **`rebuild`** drops the stored verdict of a case that has since become disputed, so it is
+  counted once. It refuses (exit 2) when a non-disputed manifest id is missing from the full
+  run, since that case would vanish from the results; `--allow-partial` overrides, loudly.
+- **`run`** never overwrites a full run JSON from the same day: a second run gets a UTC-time
+  suffix (`<date>-excel-m1-full-<HHMMSS>Z.json`).
 - **Inputs.** A formula over constants runs as a constant formula. A formula over cells gets its
   cells renamed to row 1 (`K2`, `K3` → `A1`, `B1`), and each distinct source cell becomes a typed
   column (`X<n>`) of one single-row fixture table, loaded by M0's run-stamped loader. A blank cell

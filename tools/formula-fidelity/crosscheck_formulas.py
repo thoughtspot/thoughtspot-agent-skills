@@ -79,12 +79,16 @@ def agree(expected: dict, got: dict, tol: dict) -> bool:
         # cross-check bound lets a last-digit silver-vs-bronze disagreement through as
         # "agree", and the case is then run and scored as a silent wrong answer instead of
         # being quarantined as oracle-disputed.
+        # A NaN on either side is not evidence of agreement: an oracle that says NaN is
+        # disputed, never confirmed. Any Decimal signal (e.g. sNaN) is a dispute, not a crash.
         try:
             a = Decimal(str(expected["v"]).strip())
             b = Decimal(repr(float(got["v"])))
+            if a.is_nan() or b.is_nan():
+                return False
+            return numbers_close(a, b, tol)
         except (TypeError, ValueError, ArithmeticError):
             return False
-        return numbers_close(a, b, tol)
     if et == "bool":
         return gt == "bool" and bool(got["v"]) == expected["v"]
     if et == "str":
@@ -157,7 +161,8 @@ def main(argv=None) -> int:
         for c in batch:
             raw = vals.get(c["id"], "#MISSING")
             if isinstance(raw, str) and raw.startswith(("#NAME", "#LOADFAIL", "#MISSING")):
-                out[c["id"]] = {"status": "unavailable", "bronze": str(raw)}
+                out[c["id"]] = {"status": "unavailable", "bronze": str(raw),
+                                "tolerance": c["tolerance"]}
                 continue
             got = _canon(raw)
             ok = agree(c["expected"], got, c["tolerance"])

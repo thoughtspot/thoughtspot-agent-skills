@@ -183,6 +183,7 @@ def cmd_select(args) -> int:
             (data_dir / "extracted" / "candidates.jsonl").read_text().splitlines() if line]
     cc_path = data_dir / "extracted" / "crosscheck.json"
     cc = json.loads(cc_path.read_text()) if cc_path.exists() else {}
+    check_crosscheck_rule(cc)
     status = {k: v["status"] for k, v in cc.items()}
     picked = choose(rows, status, args.n_lo, args.n_poi, args.per_function)
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
@@ -198,38 +199,61 @@ def cmd_select(args) -> int:
     return 0
 
 
-def recheck(entries: list[dict], status: dict[str, str]) -> tuple[list[dict], list[tuple]]:
+def check_crosscheck_rule(cc: dict) -> None:
+    """Refuse a crosscheck.json decided by the pre-BL-356 rule (a 1e-9 bound, not the case's
+    own tolerance). Since BL-356 every decided entry records the tolerance it was decided at;
+    an agree/disputed entry without one was produced by the old rule."""
+    old = [k for k, v in cc.items()
+           if v.get("status") in ("agree", "disputed") and "tolerance" not in v]
+    if old:
+        raise literal.DataError(
+            f"crosscheck.json has {len(old)} decided entr(ies) without a 'tolerance' (e.g. "
+            f"{old[0]}): it predates BL-356; re-run crosscheck_formulas.py first")
+
+
+def recheck(entries: list[dict], status: dict[str, str]
+            ) -> tuple[list[dict], list[tuple], list[str]]:
     """An existing manifest's entries with ``crosscheck`` refreshed from a new cross-check.
 
     The case SET is kept: re-running ``select`` on regenerated candidates picks a different
     set, which would silently replace a scored baseline. An id the new cross-check did not
-    evaluate (its candidate is no longer translatable) keeps its recorded status.
-    Returns the entries and the ``(id, old, new)`` changes."""
-    out, changes = [], []
+    evaluate (its candidate is no longer translatable) keeps its recorded status but is
+    marked ``crosscheck_stale: true``: that status was NOT re-decided by this cross-check.
+    Returns the entries, the ``(id, old, new)`` changes and the stale ids."""
+    out, changes, stale = [], [], []
     for e in entries:
         new = status.get(e["id"])
-        if new is not None and new != e.get("crosscheck"):
+        e = {k: v for k, v in e.items() if k != "crosscheck_stale"}
+        if new is None:
+            stale.append(e["id"])
+            e["crosscheck_stale"] = True
+        elif new != e.get("crosscheck"):
             changes.append((e["id"], e.get("crosscheck"), new))
-            e = {**e, "crosscheck": new}
+            e["crosscheck"] = new
         out.append(e)
-    return out, changes
+    return out, changes, stale
 
 
 def cmd_recheck(args) -> int:
     data_dir = literal.resolve_data_dir(args.data_dir, REPO)
     cc = json.loads((data_dir / "extracted" / "crosscheck.json").read_text())
+    check_crosscheck_rule(cc)
     entries = literal.parse_manifest(args.manifest.read_text(), str(args.manifest))
-    out, changes = recheck(entries, {k: v["status"] for k, v in cc.items()})
-    missing = sum(1 for e in entries if e["id"] not in cc)
+    out, changes, stale = recheck(entries, {k: v["status"] for k, v in cc.items()})
+    if stale:
+        _log(f"WARNING: {len(stale)} manifest id(s) were not evaluated by this cross-check and "
+             f"keep their earlier status, marked crosscheck_stale: {', '.join(stale)}")
     args.manifest.write_text("".join(literal.manifest_line(e) + "\n" for e in out))
     if args.selection:
         sel = json.loads(args.selection.read_text())
         sel["crosscheck"] = dict(collections.Counter(
             f"{e['source']}:{e['crosscheck']}" for e in out))
-        sel["crosscheck_rechecked"] = _dt.date.today().isoformat()
+        sel["crosscheck_rechecked"] = {"date": _dt.date.today().isoformat(),
+                                       "evaluated": len(entries) - len(stale),
+                                       "stale": len(stale)}
         args.selection.write_text(json.dumps(sel, indent=1, sort_keys=True) + "\n")
     print(json.dumps({"entries": len(entries), "changed": [list(c) for c in changes],
-                      "not_in_crosscheck": missing}, indent=1))
+                      "stale": stale}, indent=1))
     return 0
 
 
@@ -291,7 +315,12 @@ def cmd_run(args) -> int:
     if args.limit:
         scored = scored[: args.limit]
     stamp = _dt.date.today().isoformat()
-    full_out = data_dir / "runs" / f"{stamp}-excel-m1-full.json"
+    try:
+        full_out = fresh_path(data_dir / "runs" / f"{stamp}-excel-m1-full.json")
+    except literal.DataError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    _log(f"full run evidence: {full_out}")
     ns = argparse.Namespace(profile=args.profile, sf_profile=args.sf_profile,
                             connection=args.connection, database=args.database,
                             schema=args.schema, out=full_out, report=None,
@@ -307,6 +336,16 @@ def cmd_run(args) -> int:
 def cmd_rebuild(args) -> int:
     data_dir, entries, cases, fixture = _load(args)
     full = json.loads(args.full_run.read_text())
+    absent = missing_from_run(full["cases"], entries)
+    if absent and not args.allow_partial:
+        print(f"error: {len(absent)} non-disputed manifest id(s) are not in the full run and "
+              f"would silently vanish from the results: {', '.join(absent[:10])}"
+              f"{' …' if len(absent) > 10 else ''}. Is this the right full run for this "
+              f"manifest? Pass --allow-partial to rebuild anyway.", file=sys.stderr)
+        return 2
+    if absent:
+        _log(f"WARNING: --allow-partial: {len(absent)} non-disputed manifest id(s) are not in "
+             f"the full run and are NOT in the results: {', '.join(absent)}")
     full["cases"], quarantined = drop_disputed(full["cases"], entries)
     if quarantined:
         _log(f"{len(quarantined)} case(s) run earlier are now oracle-disputed and are not "
@@ -325,6 +364,26 @@ def drop_disputed(run_cases: list[dict], entries: list[dict]) -> tuple[list[dict
     disputed = {e["id"] for e in entries if e.get("crosscheck") == "disputed"}
     kept = [it for it in run_cases if it["id"] not in disputed]
     return kept, [it["id"] for it in run_cases if it["id"] in disputed]
+
+
+def missing_from_run(run_cases: list[dict], entries: list[dict]) -> list[str]:
+    """Non-disputed manifest ids with no case in the stored run. ``redact_run`` lists only the
+    run's cases plus the disputed entries, so these would drop out of the results unseen."""
+    ran = {it["id"] for it in run_cases}
+    return [e["id"] for e in entries if e.get("crosscheck") != "disputed" and e["id"] not in ran]
+
+
+def fresh_path(path: pathlib.Path, now: Optional[_dt.datetime] = None) -> pathlib.Path:
+    """``path``, or a UTC-time-suffixed sibling if it already exists: a second run on the
+    same day must never overwrite the first run's full evidence (a 2026-10-07 full run was
+    lost that way). Refuses if even the suffixed name exists."""
+    if not path.exists():
+        return path
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    alt = path.with_name(f"{path.stem}-{now.strftime('%H%M%SZ')}{path.suffix}")
+    if alt.exists():
+        raise literal.DataError(f"refusing to overwrite {alt}")
+    return alt
 
 
 def _args(argv=None):
@@ -356,6 +415,8 @@ def _args(argv=None):
             r.add_argument("--limit", type=int, default=0)
         else:
             r.add_argument("--full-run", type=pathlib.Path, required=True)
+            r.add_argument("--allow-partial", action="store_true",
+                           help="rebuild even if non-disputed manifest ids are not in the run")
     return ap.parse_args(argv)
 
 
