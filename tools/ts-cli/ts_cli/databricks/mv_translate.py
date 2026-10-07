@@ -181,7 +181,7 @@ def _with_week_note(annotations: list[dict] | None, ts_expr: str | None) -> list
     """``annotations`` plus the shared Monday-week-start advisory when ``ts_expr``
     calls a week-dependent function — a review flag, never a skip."""
     out = list(annotations or [])
-    note = week_start_note(ts_expr)
+    note = week_start_note(ts_expr, "databricks")
     if note and not any(a.get("kind") == WEEK_START_KIND for a in out):
         out.append({"kind": WEEK_START_KIND, "detail": note})
     return out

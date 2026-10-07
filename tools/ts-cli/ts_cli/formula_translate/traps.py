@@ -259,7 +259,10 @@ def detect_traps(dialect: str, source: str, output: str) -> list[str]:
     # The Monday-week-start advisory is the converters' own note, imported — never
     # restated here (BL-334 item 2, BL-217). Advisory only: not in DOWNGRADE_TRAP_PREFIXES.
     # diff_weeks is covered by the week note's own diff_weeks clause — one trap, not two.
-    for week in (week_diff_days_note(output), week_start_note(output)):
+    # Tableau's diff_days / 7 note is source-driven (its adapter, from the converter's
+    # DATEDIFF('week') counter); other dialects keep the text-driven check.
+    days = None if dialect == "tableau" else week_diff_days_note(output)
+    for week in (days, week_start_note(output, dialect)):
         if week:
             traps.append(week)
     traps.extend(_case_traps(dialect, output))

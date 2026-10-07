@@ -87,13 +87,22 @@ def week_dependent_functions(ts_expr: str | None) -> list[str]:
     return seen
 
 
-def _week_clauses(fns: list[str]) -> list[str]:
+def _start_of_week_clause(dialect: str | None) -> str:
+    if dialect == "databricks":
+        # Databricks date_trunc('WEEK', d) is always Monday — no session setting.
+        return ("start_of_week compiles to date_trunc('WEEK', d), which Databricks fixes to "
+                "Monday, so it is exact under a Monday-start Model calendar; whether a "
+                "non-default Model calendar changes it is unverified (BL-334 item 4)")
+    return ("start_of_week truncates to Monday under the default calendar, but it "
+            "compiles to DATE_TRUNC(week, d), which follows the warehouse's week-start "
+            "setting (Snowflake WEEK_START) — Monday only while that is 0 or 1, and "
+            "whether ThoughtSpot sets it on its session is unverified (BL-334 item 3)")
+
+
+def _week_clauses(fns: list[str], dialect: str | None = None) -> list[str]:
     out: list[str] = []
     if "start_of_week" in fns:
-        out.append("start_of_week truncates to Monday under the default calendar, but it "
-                   "compiles to DATE_TRUNC(week, d), which follows the warehouse's week-start "
-                   "setting (Snowflake WEEK_START) — Monday only while that is 0 or 1, and "
-                   "whether ThoughtSpot sets it on its session is unverified (BL-334 item 3)")
+        out.append(_start_of_week_clause(dialect))
     if "day_number_of_week" in fns:
         out.append("day_number_of_week compiles to a fixed 1 = Monday … 7 = Sunday "
                    "expression, independent of WEEK_START (live-probed 2026-10-06); whether "
@@ -111,20 +120,21 @@ def _week_clauses(fns: list[str]) -> list[str]:
     return out
 
 
-def week_start_note(ts_expr: str | None) -> str | None:
+def week_start_note(ts_expr: str | None, dialect: str | None = None) -> str | None:
     """The standard Monday-week-start advisory for an emitted ThoughtSpot formula,
     tailored to the week-dependent functions it calls, or None when it calls none.
 
     Every translator surfaces this same string (Tableau / Qlik ``review_notes``,
     Snowflake SV ``annotations``, Databricks MV ``annotations`` kind
     ``week_start_assumption``, ``ts formula translate`` traps). Advisory — never
-    a status downgrade.
+    a status downgrade. ``dialect`` ("databricks") selects the warehouse-specific
+    ``start_of_week`` clause; anything else gets the WEEK_START-dependent wording.
     """
     fns = week_dependent_functions(ts_expr)
     if not fns:
         return None
     return (f"{WEEK_START_NOTE_PREFIX} ({', '.join(fns)}): "
-            + "; ".join(_week_clauses(fns))
+            + "; ".join(_week_clauses(fns, dialect))
             + ". No calendar argument is emitted, so the Model's calendar applies — "
               "check it (BL-334)")
 
@@ -141,13 +151,22 @@ def week_start_mismatch_note(source: str, first_day: int | str) -> str:
             "Rewrite it by hand; no shifted form is emitted yet (BL-334)")
 
 
+WEEK_DIFF_DAYS_NOTE = (
+    f"{WEEK_DIFF_DAYS_PREFIX} — a fractional count of 7-day spans, not the "
+    "number of week boundaries crossed that a DATEDIFF('week') source returns; "
+    "wrap in floor() or rewrite if it matters")
+
+
 def week_diff_days_note(ts_expr: str | None) -> str | None:
-    """REVIEW-class note for ``diff_days ( … ) / 7`` in ``ts_expr``, or None."""
+    """REVIEW-class note for ``diff_days ( … ) / 7`` in ``ts_expr``, or None.
+
+    Text-driven, for ``ts formula translate``'s traps. A converter that KNOWS it
+    converted a DATEDIFF('week') reports ``WEEK_DIFF_DAYS_NOTE`` from its own
+    counter instead — an exact ``DATEDIFF('day', a, b) / 7`` source must not be
+    flagged (Tableau, PR #582 re-review)."""
     if not ts_expr or not _WEEK_DIFF_DAYS_RE.search(_week_code(ts_expr)):
         return None
-    return (f"{WEEK_DIFF_DAYS_PREFIX} — a fractional count of 7-day spans, not the "
-            "number of week boundaries crossed that a DATEDIFF('week') source returns; "
-            "wrap in floor() or rewrite if it matters")
+    return WEEK_DIFF_DAYS_NOTE
 
 
 def is_week_review_note(note: str) -> bool:

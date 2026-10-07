@@ -367,3 +367,62 @@ class TestDatabricksInliningAndFilter:
         f = translate_filter("DATE_TRUNC('WEEK', dt) = DATE '2026-01-05'", {"source": "T"})
         assert [a["kind"] for a in f["annotations"]] == [WEEK_START_KIND]
         assert translate_filter("status = 'x'", {"source": "T"})["annotations"] == []
+
+
+# ================================================== re-review fixes (PR #582)
+
+class TestReReview:
+    def _one(self, formula, **kw):
+        from ts_cli.tableau_translate import translate_formulas
+        calcs = [{"caption": "F", "name": "[Calculation_1]", "role": "measure",
+                  "datatype": "real", "formula": formula}]
+        return translate_formulas(calcs, **kw)
+
+    @pytest.mark.parametrize("formula", [
+        "DATEDIFF('day', [a], [b]) / 7",
+        "DATEDIFF('day', [a], [b]) / 7.0",
+        "FLOOR(DATEDIFF('day', [a], [b]) / 7)",
+    ])
+    def test_exact_day_division_is_not_review_required(self, formula):
+        res = self._one(formula)
+        rec = res["translated"][0]
+        assert "review_required" not in rec
+        assert not any(n.startswith(WEEK_DIFF_DAYS_PREFIX) for n in rec.get("review_notes", []))
+        assert res["stats"]["review_required"] == 0
+
+    def test_exact_day_division_is_not_downgraded_in_formula_translate(self):
+        from ts_cli.formula_translate.engine import translate
+        from ts_cli.formula_translate.adapters import TRANSLATED
+        r = translate("DATEDIFF('day', [a], [b]) / 7", "tableau")
+        assert r["status"] == TRANSLATED
+        assert not any(t.startswith(WEEK_DIFF_DAYS_PREFIX) for t in r["traps"])
+
+    def test_review_required_reaches_validation_warnings(self):
+        from ts_cli.tableau.validate import validate_pre_import
+        res = self._one("DATEDIFF('week', [a], [b])")
+        issues = validate_pre_import(res["translated"])
+        assert issues and issues[0]["review_required"] is True
+        res = self._one("DATETRUNC('week', [d])")  # advisory only
+        assert all("review_required" not in i for i in validate_pre_import(res["translated"]))
+
+    @pytest.mark.parametrize("expr", ["WeekStart(D, -1)", "WeekStart(D, 0, vFWD)"])
+    def test_qlik_offset_reason_wins_over_mismatch(self, expr):
+        from ts_cli.qlik.functions import translate
+        out, review, reason = translate(expr, first_week_day=6)
+        assert review and WEEK_START_MISMATCH_PREFIX not in reason
+        assert "period offset" in reason
+
+    def test_databricks_start_of_week_clause_is_dialect_aware(self):
+        dbx = week_start_note("start_of_week ( [d] )", "databricks")
+        assert "WEEK_START" not in dbx and "Snowflake" not in dbx
+        assert "fixes to Monday" in dbx and "Model calendar" in dbx
+        assert "WEEK_START" in week_start_note("start_of_week ( [d] )")
+
+    def test_databricks_paths_use_the_databricks_clause(self):
+        from ts_cli.databricks.mv_translate import translate_filter
+        f = translate_filter("DATE_TRUNC('WEEK', dt) = DATE '2026-01-05'", {"source": "T"})
+        assert "WEEK_START" not in f["annotations"][0]["detail"]
+        from ts_cli.formula_translate.engine import translate
+        r = translate("DATE_TRUNC('WEEK', order_date)", "databricks")
+        week = [t for t in r["traps"] if t.startswith(WEEK_START_NOTE_PREFIX)]
+        assert week and "fixes to Monday" in week[0]

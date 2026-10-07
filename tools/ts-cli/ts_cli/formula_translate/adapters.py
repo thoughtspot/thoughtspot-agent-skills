@@ -148,13 +148,15 @@ def adapt_tableau(expr: str, ctx: ColumnContext, role_hint: Optional[str] = None
 
 
 def _tableau_week_traps(out: str, notes: dict) -> list[str]:
-    """A known week-start mismatch is the converter's review_required — here a trap
-    whose prefix downgrades to APPROXIMATED (BL-334). The other week notes come from
-    traps.detect_traps, so only the mismatch is taken from the converter."""
-    from ts_cli.formula_week import WEEK_START_MISMATCH_PREFIX
+    """The converter's review-class week notes — a known week-start mismatch, and a
+    DATEDIFF('week') it converted to diff_days / 7 — as traps whose prefixes downgrade
+    to APPROXIMATED (BL-334). Source-driven, so an exact DATEDIFF('day', a, b) / 7 is
+    not flagged; traps.detect_traps skips its text-driven diff_days / 7 check for
+    Tableau. The advisory week note comes from detect_traps."""
+    from ts_cli.formula_week import is_week_review_note
     from ts_cli.tableau_translate import week_review
     return [n for n in week_review(out, notes).get("review_notes", [])
-            if n.startswith(WEEK_START_MISMATCH_PREFIX)]
+            if is_week_review_note(n)]
 
 
 # ---------------------------------------------------------------------------

@@ -65,6 +65,7 @@ from ts_cli.tableau.functions import (  # noqa: F401
     _FUNCTION_MAP,
     WEEK_START_ASSUMED,
     WEEK_START_MISMATCH,
+    WEEK_DIFF_DAYS,
     _build_function_map,
     _convert_dateadd,
     _convert_datediff,
@@ -104,7 +105,7 @@ from ts_cli.tableau.lod import (  # noqa: F401
 )
 from ts_cli.formula_text import ts_finalize_formula
 from ts_cli.formula_week import (
-    is_week_review_note, week_diff_days_note, week_start_mismatch_note, week_start_note)
+    WEEK_DIFF_DAYS_NOTE, is_week_review_note, week_start_mismatch_note, week_start_note)
 from ts_cli.tableau.literals import (  # noqa: F401
     PLACEHOLDER_RE,
     is_string_placeholder,
@@ -309,7 +310,11 @@ def week_review(expr: str, notes: dict[str, int]) -> dict:
                    "the Tableau week start (a literal start_of_week argument or the "
                    "datasource's Week start)", key.split(":", 1)[1])
                for key in sorted(notes) if key.startswith(WEEK_START_MISMATCH + ":")]
-    review += [n for n in (week_diff_days_note(expr), week_start_note(expr)) if n]
+    if notes.get(WEEK_DIFF_DAYS):
+        review.append(WEEK_DIFF_DAYS_NOTE)
+    week = week_start_note(expr)
+    if week:
+        review.append(week)
     out: dict = {}
     if review:
         out["review_notes"] = review

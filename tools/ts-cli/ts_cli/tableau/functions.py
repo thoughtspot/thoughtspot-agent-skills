@@ -378,7 +378,7 @@ def map_date_functions(expr: str, registry: dict | None = None,
     result = _convert_datetrunc(result, registry, week_start, notes)
 
     # DATEDIFF('unit', start, end) → diff_unit ( end , start )  [reversed args]
-    result = _convert_datediff(result, registry)
+    result = _convert_datediff(result, registry, notes)
 
     # DATEADD('unit', n, date) → add_unit ( date , n )  [reordered]
     result = _convert_dateadd(result, registry)
@@ -452,7 +452,14 @@ def _convert_datetrunc(expr: str, registry: dict | None = None,
     return result
 
 
-def _convert_datediff(expr: str, registry: dict | None = None) -> str:
+#: Counted per DATEDIFF('week') converted to diff_days / 7 (BL-334): the record is
+#: flagged from this counter, never from the output text, so an exact
+#: DATEDIFF('day', a, b) / 7 source is not.
+WEEK_DIFF_DAYS = "week_diff_days"
+
+
+def _convert_datediff(expr: str, registry: dict | None = None,
+                      notes: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATEDIFF\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -481,6 +488,8 @@ def _convert_datediff(expr: str, registry: dict | None = None) -> str:
                 replacement = f"diff_time ( {end_date} , {start_date} ) / 60"
             elif unit == "week":
                 replacement = f"diff_days ( {end_date} , {start_date} ) / 7"
+                if notes is not None:
+                    notes[WEEK_DIFF_DAYS] = notes.get(WEEK_DIFF_DAYS, 0) + 1
             else:
                 # Unknown unit — no ThoughtSpot diff function exists. Leave
                 # the original DATEDIFF(...) text in place rather than

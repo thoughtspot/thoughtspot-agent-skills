@@ -154,8 +154,12 @@ def _weekstart_mismatch(expr: str, first_week_day: Optional[int]) -> Optional[in
             if depth == 0:
                 break
         args = _split_top_level(expr[m.end():i])
+        if len(args) >= 2 and args[1].strip() != "0":
+            continue  # an offset: reported as such, not as a week-start mismatch
         first = first_week_day
-        if len(args) == 3 and args[2].strip() in {str(i) for i in range(7)}:
+        if len(args) == 3:
+            if args[2].strip() not in {str(n) for n in range(7)}:
+                continue  # a non-literal first week day: same
             first = int(args[2].strip())
         if first not in (None, 0):
             return first

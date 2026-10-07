@@ -320,6 +320,10 @@ def validate_pre_import(
         # ride on the formula as review_notes and reach the report here.
         warnings.extend(entry.get("review_notes") or [])
         if warnings:
-            issues.append({"name": name, "warnings": warnings})
+            issue = {"name": name, "warnings": warnings}
+            if entry.get("review_required"):
+                # migrated, but under "Formulas needing review" (BL-334)
+                issue["review_required"] = True
+            issues.append(issue)
 
     return issues
