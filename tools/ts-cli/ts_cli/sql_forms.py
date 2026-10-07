@@ -20,6 +20,8 @@ Division (BL-357, user decision 2026-10-07: *return zero only when the source as
 """
 from __future__ import annotations
 
+import re
+
 from ts_cli.formula_common import (
     UntranslatableError,
     expr_is_aggregated,
@@ -180,22 +182,71 @@ def sqlf_int_div(x: str, y: str) -> str:
     return f"( if ( {q} >= 0 ) then floor ( {q} ) else ceil ( {q} ) )"
 
 
-def sqlf_mod(x: str, y: str) -> str:
+#: ThoughtSpot functions that return INT64 (probe record §7 and the formula reference).
+_SQLF_INT_FUNCS = frozenset({
+    "floor", "ceil", "to_integer", "sql_int_op", "strlen", "strpos", "count", "unique count",
+    "year", "month_number", "day", "hour_of_day", "quarter_number", "day_number_of_week",
+    "day_number_of_year", "week_number_of_year", "diff_days", "diff_months", "diff_years",
+    "diff_quarters", "diff_weeks", "diff_hours", "diff_minutes", "diff_time"})
+_SQLF_INT_LITERAL = re.compile(r"^-?\s*\d+$")
+
+
+def sqlf_split_top(expr: str, ops: frozenset) -> list[str]:
+    """``expr`` split on top-level binary operators in ``ops`` (spaced token style)."""
+    parts, depth, cur = [], 0, []
+    for tok in expr.split(" "):
+        depth += tok.count("(") - tok.count(")")
+        if depth == 0 and tok in ops and cur:
+            parts.append(" ".join(cur))
+            cur = []
+        else:
+            cur.append(tok)
+    parts.append(" ".join(cur))
+    return parts
+
+
+def sqlf_is_integral(expr: str, int_refs=()) -> bool:
+    """True when ``expr`` is an integer by construction: an integer literal, a column known to
+    be integer-typed, an INT64-returning call, or ``+`` / ``-`` / ``*`` over those."""
+    e = expr.strip()
+    if _SQLF_INT_LITERAL.match(e) or e in int_refs:
+        return True
+    if e.startswith("( ") and sqlf_is_atomic(e):
+        return sqlf_is_integral(e[2:-2], int_refs)
+    head = e.split(" (", 1)[0]
+    if sqlf_is_atomic(e) and head in _SQLF_INT_FUNCS:
+        return True
+    parts = sqlf_split_top(e, frozenset({"+", "-", "*"}))
+    return len(parts) > 1 and all(p and sqlf_is_integral(p, int_refs) for p in parts)
+
+
+def sqlf_resolver_is_aggregated(resolver):
+    """An ``is_aggregated(text)`` for ``resolver``: aggregated by its text, or because it holds a
+    metric reference the resolver handed out (``[formula_X]``; Databricks ``__MVREF_n__``)."""
+    refs = tuple(getattr(resolver, "metric_refs", ()) or ())
+    return lambda t: expr_is_aggregated(t) or "__MVREF_" in t or any(r in t for r in refs)
+
+
+def sqlf_mod(x: str, y: str, resolver=None) -> str:
     """SQL ``x % y`` / ``MOD(x, y)``: the remainder takes the dividend's sign in Snowflake and
     Databricks, as ThoughtSpot ``mod`` does (probe record §7). But ``mod`` accepts INT64 only
-    and rejects a DOUBLE at import (probe record §7; M2 ``dbxn-002`` ``I1 % N2``, 2026-10-07),
-    and the translator cannot see column types. So a row-level operand with a column is the
-    warehouse's own ``MOD`` (exact for any numeric type); an aggregate, which a row-level
-    pass-through cannot wrap, and a literal-only remainder stay native ``mod``."""
-    if expr_is_aggregated(x) or expr_is_aggregated(y) or "[" not in f"{x} {y}":
+    and rejects a DOUBLE at import (probe record §7; M2 ``dbxn-002`` ``I1 % N2``, 2026-10-07).
+    Native ``mod`` when both operands are integral by construction (``sqlf_is_integral``, with
+    the resolver's ``int_refs`` from ``--columns`` types), over an aggregate or a metric
+    reference (which a row-level pass-through cannot wrap), or between literals; otherwise the
+    warehouse's own ``MOD``, exact for any numeric type."""
+    is_agg = sqlf_resolver_is_aggregated(resolver)
+    int_refs = getattr(resolver, "int_refs", ()) or ()
+    if (is_agg(x) or is_agg(y) or "[" not in f"{x} {y}"
+            or (sqlf_is_integral(x, int_refs) and sqlf_is_integral(y, int_refs))):
         return f"mod ( {x} , {y} )"
     return sql_passthrough_call("sql_double_op", "MOD", [x, y])
 
 
-_SQLF_FOLDS = {"%": sqlf_mod, SQLF_DIV_MARK: sqlf_int_div}
+_SQLF_FOLDS = {"%": sqlf_mod, SQLF_DIV_MARK: lambda x, y, resolver=None: sqlf_int_div(x, y)}
 
 
-def sqlf_fold_multiplicative(units: list[str]) -> None:
+def sqlf_fold_multiplicative(units: list[str], resolver=None) -> None:
     """Fold ``%`` and ``DIV`` units into calls, in place, at their precedence: the left
     operand is the whole multiplicative run before the operator (``a * b % c`` is
     ``(a * b) % c``), the right operand the one unit after it."""
@@ -209,7 +260,7 @@ def sqlf_fold_multiplicative(units: list[str]) -> None:
             left = " ".join(units[start:i])
             if i - start > 1:
                 left = f"( {left} )"
-            units[start:i + 2] = [_SQLF_FOLDS[u](left, units[i + 1])]
+            units[start:i + 2] = [_SQLF_FOLDS[u](left, units[i + 1], resolver)]
             i = start
         elif u in SQLF_BINARY_OPS and u not in _SQLF_MULT:
             start = i + 1
@@ -267,12 +318,13 @@ def sqlf_scaled_floor_ceil(fn: str, x: str, scale: str, *, snap: bool) -> str:
     by the factor (BL-348: Snowflake keeps an integer quotient at scale 6). ``s = 0``:
     ``fn ( x )``. ``s < 0``: ``fn ( x / 10^-s ) * 10^-s``.
 
-    ``snap`` wraps the scaled value in ``round ( … , 0.000000001 )``. Databricks needs it: its
+    ``snap`` nudges the scaled value by 1e-9 toward the step it may have just missed
+    (``ceil ( v - 1e-9 )``, ``floor ( v + 1e-9 )``) and divides back by the factor. Databricks needs it: its
     ``floor(DOUBLE, s)`` works in DECIMAL (``floor(0.29D, 2)`` = 0.29, ``ceil(1.1D, 2)`` =
     1.10), while ThoughtSpot's ``0.29 * 100`` is 28.999999999999996. Snowflake must NOT have
     it: its ``FLOOR(DOUBLE, s)`` is plain double arithmetic (``FLOOR(0.29::DOUBLE, 2)`` = 0.28,
     ``CEIL(1.1::DOUBLE, 2)`` = 1.11), which the unsnapped form reproduces (both live
-    2026-10-07). Residual with the snap: a value within 5e-10 of a step below the scale is
+    2026-10-07). Residual with the nudge: a value within 1e-9 (in scaled units) of a step is
     moved onto it.
     """
     s = sql_int_digits(scale)
@@ -286,12 +338,23 @@ def sqlf_scaled_floor_ceil(fn: str, x: str, scale: str, *, snap: bool) -> str:
     g = sqlf_group(x)
     if s > 0:
         factor = sql_digits_to_ts_increment(str(-s))
-        scaled, back = f"{g} * {factor}", f"* {sql_digits_to_ts_increment(str(s))}"
+        scaled = f"{g} * {factor}"
+        # Snapped: divide back by the integer factor. Databricks' INT / INT is a DOUBLE
+        # division with no scale cap; multiplying by 10^-s added noise live (0.30000000000000004).
+        # Unsnapped (Snowflake): multiply by the increment, because Snowflake keeps an integer
+        # quotient at scale 6 (BL-348).
+        back = f"/ {factor}" if snap else f"* {sql_digits_to_ts_increment(str(s))}"
     else:
         factor = sql_digits_to_ts_increment(str(s))
         scaled, back = f"{g} / {factor}", f"* {factor}"
     if snap:
-        scaled = f"round ( {scaled} , {SQLF_SCALE_SNAP} )"
+        # The nudge, not round ( v , 1e-9 ): ThoughtSpot compiles that round to
+        # 1.0E-9 * ROUND(v / 1.0E-9), and the DOUBLE multiply-back lands ~1 ulp above an
+        # integer, so ceil moved on-step values a whole step (CEIL(3.0, 1) -> 3.1; review of
+        # #578, live 2026-10-07). BL-217: the Excel translator is getting the same algorithm as
+        # formula_common.scaled_ceil_floor (#577); unify on it when that lands.
+        nudge = "-" if fn == "ceil" else "+"
+        scaled = f"{scaled} {nudge} {SQLF_SCALE_SNAP}"
     return f"( {fn} ( {scaled} ) {back} )"
 
 

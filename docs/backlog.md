@@ -13244,8 +13244,10 @@ Arity-check renames generally.
 `( floor ( x / 10^-s ) * 10^-s )` (multiplied back by the increment, BL-348); a non-literal or
 |s| > 15 scale is refused. Live, the two warehouses differ on a DOUBLE: Databricks floors in DECIMAL
 (`floor(0.29D, 2)` = 0.29), Snowflake in double (`FLOOR(0.29::DOUBLE, 2)` = 0.28, `CEIL(1.1::DOUBLE, 2)` =
-1.11). So the Databricks form takes the Excel translator's `round ( … , 0.000000001 )` snap and the
-Snowflake form does not. M2 `dbx-round-006/007`, `dbx-fix-008/009`; M0 `sf-fix-009..012` MATCH.
+1.11). So the Databricks form is nudged (`ceil ( v - 1e-9 )` / `floor ( v + 1e-9 )`, divided back by the
+factor) and the Snowflake form is not. The first fix used the Excel translator's `round ( … , 1e-9 )` snap;
+the #578 review found it overshoots on-step values by one ulp (`CEIL(3.0, 1)` → 3.1) — corrected, and
+DOUBLE grid values added to the M2 fixture (`dbx-fix-024..030`). M2 `dbx-round-006/007`, `dbx-fix-008/009`; M0 `sf-fix-009..012` MATCH.
 
 ## BL-362 — from-Databricks coverage: common forms the translator declines `Tier 3`
 

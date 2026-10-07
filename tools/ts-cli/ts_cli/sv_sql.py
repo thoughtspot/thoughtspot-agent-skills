@@ -59,6 +59,9 @@ _KEYWORDS = {"AND", "OR", "NOT", "CASE", "WHEN", "THEN", "ELSE", "END",
              "EXCLUDING", "ILIKE", "RLIKE", "REGEXP"}
 #: Keyword operators translated as a sql_bool_op pass-through (BL-362).
 _LIKE_OPS = frozenset({"LIKE", "ILIKE", "RLIKE", "REGEXP"})
+#: Of those, the ones Snowflake does not reserve: a bare column of that name (not followed by a
+#: pattern) is still a column. The tokenizer has upper-cased it; resolution is case-insensitive.
+_COLUMN_OK_OPS = frozenset({"ILIKE", "RLIKE", "REGEXP"})
 
 _DATE_LITERAL_RE = re.compile(r"^'\d{4}-\d{2}-\d{2}'$")
 _BARE_NOW_FNS = {"CURRENT_DATE": "today", "CURRENT_TIMESTAMP": "now"}
@@ -156,13 +159,13 @@ def _expr_units(cur: _Cursor, resolver,
             _keyword_unit(text, cur, resolver, units)
     if not units:
         raise UntranslatableError("empty expression")
-    return _finish_units(units) if finish else units
+    return _finish_units(units, resolver) if finish else units
 
 
-def _finish_units(units: list[str]) -> list[str]:
+def _finish_units(units: list[str], resolver=None) -> list[str]:
     """Collapse NULLIF markers, then fold ``%`` and ``||`` at their precedence."""
     _collapse_nullif_markers(units)
-    sqlf_fold_multiplicative(units)
+    sqlf_fold_multiplicative(units, resolver)
     sqlf_fold_concat(units)
     return units
 
@@ -261,7 +264,7 @@ def _keyword_unit(text: str, cur: _Cursor, resolver,
     elif text == "BETWEEN":
         _construct_between(cur, resolver, units)
     elif text in _LIKE_OPS:
-        _construct_like(text, cur, units)
+        _like_or_column(text, cur, resolver, units)
     elif text == "OVER":
         raise UntranslatableError(
             "OVER clause in expression — pre-split window expressions "
@@ -402,7 +405,7 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
     if name in _NULL_DEFAULT_NAMES:
         return _call_null_default(name, cur, resolver)
     if name in _CAST_NAMES:
-        return _construct_cast(cur, resolver)
+        return _construct_cast(cur, resolver, try_cast=name == "TRY_CAST")
     return _call_with_args(name, cur, resolver)
 
 
@@ -624,7 +627,7 @@ def _call_null_default(name: str, cur: _Cursor, resolver) -> str:
                 continue
             cur.expect_op(")")
             break
-    return sqlf_null_default_call(name, raw, _finish_units, _NULLIF0)
+    return sqlf_null_default_call(name, raw, lambda u: _finish_units(u, resolver), _NULLIF0)
 
 
 def _call_position(cur: _Cursor, resolver) -> str:
@@ -862,7 +865,7 @@ def _construct_case(cur, resolver) -> str:
     return out
 
 
-def _construct_cast(cur, resolver) -> str:
+def _construct_cast(cur, resolver, try_cast: bool = False) -> str:
     """CAST(expr AS type) or TRY_CAST(expr AS type).
 
     Called both as a keyword construct (CAST ...) and as a function
@@ -884,7 +887,7 @@ def _construct_cast(cur, resolver) -> str:
     cur.expect_op(")")
     inner = " ".join(inner_units) if len(inner_units) > 1 else inner_units[0]
     if type_name in CAST_NUMBER:
-        return cast_number(type_name, params, inner, resolver)
+        return cast_number(type_name, params, inner, resolver, try_cast)
     fn = _CAST_MAP.get(type_name)
     if fn:
         return _emit(fn, [inner])
@@ -930,6 +933,15 @@ def _construct_between(cur, resolver, units: list[str]) -> None:
         raise UntranslatableError("BETWEEN without AND")
     hi = " ".join(_one_operand(cur, resolver))
     units.append(f"{operand} >= {lo} and {operand} <= {hi}")
+
+
+def _like_or_column(text: str, cur, resolver, units: list[str]) -> None:
+    """A LIKE-family operator, or — for an unreserved name not followed by a pattern — a
+    column of that name."""
+    if text in _COLUMN_OK_OPS and cur.peek()[0] != "string":
+        _ident_unit(text, cur, resolver, units)
+    else:
+        _construct_like(text, cur, units)
 
 
 def _construct_like(op: str, cur, units: list[str], negate: bool = False) -> None:

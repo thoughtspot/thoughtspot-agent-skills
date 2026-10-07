@@ -57,6 +57,11 @@ _BARE_TOTAL = re.compile(r"\bTOTAL\b", re.I)
 _DOUBLE_EQ = re.compile(r"==")
 _PLUS_STRING = re.compile(r"''\s*\+|\+\s*''")
 _COLUMN_CMP = re.compile(r"\]\s*(?:=|!=|<>)\s*\[")
+_CALENDAR_OUT = re.compile(r"\bstart_of_(month|quarter|year)\s*\(")
+_SCALED_CAST_SRC = re.compile(
+    r"\b(?:CAST|TRY_CAST)\s*\(.*\bAS\s+(?:DECIMAL|NUMBER|NUMERIC|DEC)\s*\(\s*\d+\s*,\s*[1-9]"
+    r"|\bTO_(?:NUMBER|DECIMAL|NUMERIC)\s*\(.*,\s*\d+\s*,\s*[1-9]", re.I | re.S)
+_ROUND_AGG_OUT = re.compile(r"\bround\s*\(\s*(?:sum|average|min|max|median|stddev|variance)\s*\(")
 _DBX_CAST_SRC = re.compile(r"\bCAST\s*\(|::", re.I)
 # An integer literal of 10+ digits beside an arithmetic operator: past INT range, and the
 # realistic way a formula reaches BIGINT's limit (M2 dbx-arith-013).
@@ -72,6 +77,8 @@ DOWNGRADE_TRAP_PREFIXES = (
     "string comparison is case-INSENSITIVE",
     # An overflow wraps to a wrong number where the ANSI source raises (BL-358).
     "integer overflow wraps",
+    # round() on a DOUBLE aggregate is not the warehouse's half-up DECIMAL rounding (#578).
+    "rounded cast over an aggregate",
 )
 
 
@@ -213,6 +220,26 @@ _DBX_CAST = ("CAST over Databricks runs non-ANSI in ThoughtSpot (BL-358): a valu
              "(2147483647), where an ANSI Databricks source raises")
 
 
+_CALENDAR = ("start_of_month / start_of_quarter / start_of_year follow the Model's calendar: "
+             "this assumes the Model's default Gregorian calendar — a fiscal calendar shifts "
+             "them, where the SQL source's truncation is always Gregorian")
+_ROUNDED_CAST = ("rounded cast over an aggregate: a DECIMAL/NUMBER(p, s) cast of a total became "
+                 "round ( total , 10^-s ), which is exact on a DECIMAL total but not on a DOUBLE "
+                 "one at a half (40.955 rounds to 40.95 in DOUBLE, 40.96 as the warehouse's "
+                 "DECIMAL) — cast inside the aggregate, or validate the values")
+
+
+def _sql_traps(dialect: str, source: str, code: str) -> list[str]:
+    """Snowflake / Databricks only: the calendar note (#578 review) and the rounded-cast
+    downgrade."""
+    if dialect not in ("snowflake", "databricks"):
+        return []
+    out = [_CALENDAR] if _CALENDAR_OUT.search(code) else []
+    if _ROUND_AGG_OUT.search(code) and _SCALED_CAST_SRC.search(_code(source)):
+        out.append(_ROUNDED_CAST)
+    return out
+
+
 def _databricks_traps(dialect: str, source: str) -> list[str]:
     if dialect != "databricks":
         return []
@@ -231,6 +258,7 @@ def detect_traps(dialect: str, source: str, output: str) -> list[str]:
     traps.extend(line for pat, line in _OUTPUT_TRAPS if pat.search(code))
     traps.extend(_case_traps(dialect, output))
     traps.extend(_databricks_traps(dialect, source))
+    traps.extend(_sql_traps(dialect, source, code))
     m = _PASSTHROUGH_OUT.search(code)
     if m:
         syntax = "Databricks" if dialect == "databricks" else "Snowflake"

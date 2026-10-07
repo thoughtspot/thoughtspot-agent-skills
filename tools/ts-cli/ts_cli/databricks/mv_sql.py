@@ -85,6 +85,9 @@ _KEYWORDS = {"AND", "OR", "NOT", "CASE", "WHEN", "THEN", "ELSE", "END",
              "WHERE"}
 #: Keyword operators translated as a sql_bool_op pass-through (BL-362).
 _LIKE_OPS = frozenset({"LIKE", "ILIKE", "RLIKE"})
+#: ILIKE / RLIKE are not reserved in Databricks: a bare column of that name (not followed by a
+#: pattern) is still a column (upper-cased by the tokenizer; resolution is case-insensitive).
+_COLUMN_OK_OPS = frozenset({"ILIKE", "RLIKE"})
 
 _REF_PLACEHOLDER_RE = re.compile(r"^__MVREF_\d+__$")
 _DATE_LITERAL_RE = re.compile(r"^'\d{4}-\d{2}-\d{2}'$")
@@ -236,13 +239,13 @@ def _expr_units(cur: _Cursor, resolver,
             _keyword_unit(text, cur, resolver, units)
     if not units:
         raise UntranslatableError("empty expression")
-    return _finish_units(units) if finish else units
+    return _finish_units(units, resolver) if finish else units
 
 
-def _finish_units(units: list[str]) -> list[str]:
+def _finish_units(units: list[str], resolver=None) -> list[str]:
     """Collapse NULLIF markers, then fold ``%`` / ``DIV`` and ``||`` at their precedence."""
     _collapse_nullif_markers(units)
-    sqlf_fold_multiplicative(units)
+    sqlf_fold_multiplicative(units, resolver)
     sqlf_fold_concat(units)
     return units
 
@@ -410,7 +413,7 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
     if name == "DATE_TRUNC":
         return _call_date_trunc(args)
     if name in _EXACT_FORM_CALLS:  # BL-340 / BL-342
-        return _EXACT_FORM_CALLS[name](name, args)
+        return _EXACT_FORM_CALLS[name](name, args, resolver)
     if name == "LOCATE":
         _need(args, 2, name)
         return _emit("strpos", [args[1], args[0]])
@@ -434,7 +437,7 @@ def _row_level_only(name: str, args: list[str]) -> None:
             "row-level pass-through)")
 
 
-def _call_dbx_substr(name: str, args: list[str]) -> str:
+def _call_dbx_substr(name: str, args: list[str], resolver=None) -> str:
     """1-based SUBSTRING -> zero-based substr, or an exact pass-through (BL-340)."""
     out = sql_substr_to_ts(name, args)
     if out.startswith("sql_"):
@@ -442,7 +445,7 @@ def _call_dbx_substr(name: str, args: list[str]) -> str:
     return out
 
 
-def _call_months_between(name: str, args: list[str]) -> str:
+def _call_months_between(name: str, args: list[str], resolver=None) -> str:
     """months_between(expr1, expr2[, roundOff]) -> exact pass-through (BL-342).
 
     Databricks returns FRACTIONAL months — 31-day months; integral (time of day
@@ -793,7 +796,7 @@ def _call_null_default(name: str, cur: _Cursor, resolver) -> str:
             break
     else:
         cur.advance()
-    return sqlf_null_default_call(name, raw, _finish_units, _NULLIF0)
+    return sqlf_null_default_call(name, raw, lambda u: _finish_units(u, resolver), _NULLIF0)
 
 
 def _call_raw_string_args(cur: _Cursor) -> list[str]:
@@ -828,6 +831,8 @@ def _keyword_construct(text: str, cur: _Cursor, resolver,
         _construct_in(cur, resolver, units)
     elif text == "BETWEEN":
         _construct_between(cur, resolver, units)
+    elif text in _COLUMN_OK_OPS and cur.peek()[0] != "string":
+        _ident_unit(text, cur, resolver, units)
     elif text in _LIKE_OPS:
         _construct_like(text, cur, units)
     else:

@@ -167,8 +167,10 @@ class TestScaledFloorCeil:
     """BL-361: Databricks snaps (DECIMAL semantics), Snowflake does not (double semantics)."""
 
     def test_databricks(self):
-        assert dbx("FLOOR(N1, -1)", r) == "( floor ( round ( [T::N1] / 10 , 0.000000001 ) ) * 10 )"
-        assert dbx("CEIL(N1, 2)", r) == "( ceil ( round ( [T::N1] * 100 , 0.000000001 ) ) * 0.01 )"
+        # the nudge, divided back (review of #578: the round(…, 1e-9) snap overshot on-step
+        # values by one ulp, so CEIL(3.0, 1) gave 3.1)
+        assert dbx("FLOOR(N1, -1)", r) == "( floor ( [T::N1] / 10 + 0.000000001 ) * 10 )"
+        assert dbx("CEIL(N1, 2)", r) == "( ceil ( [T::N1] * 100 - 0.000000001 ) / 100 )"
         assert dbx("CEILING(N1)", r) == "ceil ( [T::N1] )"
         assert dbx("FLOOR(N1, 0)", r) == "floor ( [T::N1] )"
 
@@ -252,3 +254,55 @@ class TestNonAnsiTraps:
     def test_passthrough_trap_names_the_dialect(self):
         res = translate("INSTR(S1, 'a')", "databricks")
         assert any("Databricks syntax assumed" in t for t in res["traps"])
+
+
+class TestReviewOf578:
+    """Items 2, 4, 5, 6, 7 and 3 of the independent review of #578."""
+
+    class _R:
+        int_refs = {"[T::I1]"}
+        metric_refs = {"[formula_M]"}
+
+        def __call__(self, c):
+            return "[formula_M]" if c == "M" else f"[T::{c}]"
+
+    @BOTH
+    def test_mod_over_a_metric_reference_is_native(self, t):
+        assert t("M % 2", self._R()) == t("MOD(M, 2)", self._R()) == "mod ( [formula_M] , 2 )"
+
+    @BOTH
+    def test_mod_over_integral_operands_is_native(self, t):
+        assert t("I1 % 3", self._R()) == "mod ( [T::I1] , 3 )"
+        assert t("(I1 + 2) % 3", self._R()) == "mod ( ( [T::I1] + 2 ) , 3 )"
+        assert t("N1 % 2", self._R()) == 'sql_double_op ( "MOD({0}, 2)" , [T::N1] )'
+
+    def test_mod_over_an_int_function_is_native(self):
+        assert dbx("datediff(D2, D1) % 7", r) == "mod ( diff_days ( [T::D2] , [T::D1] ) , 7 )"
+
+    def test_snowflake_try_cast_keeps_try_cast(self):
+        assert sf("TRY_CAST(N1 AS NUMBER(10,2))", r) == \
+            'sql_double_op ( "TRY_CAST({0} AS NUMBER(10,2))" , [T::N1] )'
+
+    @BOTH
+    def test_ilike_rlike_as_column_names(self, t):
+        assert t("RLIKE + 1", r) == "[T::RLIKE] + 1"
+        assert t("ILIKE", r) == "[T::ILIKE]"
+        assert t("S1 ILIKE 'a%'", r).startswith("sql_bool_op")
+
+    @pytest.mark.parametrize("src,dialect", [("trunc(D1, 'MM')", "databricks"),
+                                             ("last_day(D1)", "databricks"),
+                                             ("DATE_TRUNC('year', D1)", "snowflake")])
+    def test_calendar_trap(self, src, dialect):
+        res = translate(src, dialect)
+        assert res["status"] == "TRANSLATED"
+        assert any("default Gregorian calendar" in t for t in res["traps"])
+
+    @pytest.mark.parametrize("src,dialect", [("CAST(SUM(N1) AS DECIMAL(10,2))", "databricks"),
+                                             ("CAST(SUM(N1) AS NUMBER(18,1))", "snowflake")])
+    def test_rounded_cast_over_an_aggregate_is_approximated(self, src, dialect):
+        res = translate(src, dialect)
+        assert res["status"] == "APPROXIMATED"
+        assert any(t.startswith("rounded cast over an aggregate") for t in res["traps"])
+
+    def test_row_level_rounded_cast_stays_translated(self):
+        assert translate("CAST(N1 AS NUMBER(10,2))", "snowflake")["status"] == "TRANSLATED"

@@ -30,9 +30,9 @@ def _mvc_row_level(name: str, args: list[str]) -> None:
             "row-level pass-through)")
 
 
-def mvc_floor_ceil(name: str, args: list[str]) -> str:
+def mvc_floor_ceil(name: str, args: list[str], resolver=None) -> str:
     """``FLOOR(x[, s])`` / ``CEIL(x[, s])`` / ``CEILING`` — the scale form scaled by a power of
-    ten, snapped for a DOUBLE (``sql_forms.sqlf_scaled_floor_ceil``, BL-361)."""
+    ten, nudged for a DOUBLE (``sql_forms.sqlf_scaled_floor_ceil``, BL-361)."""
     _mvc_arity(name, args, (1, 2))
     fn = "floor" if name == "FLOOR" else "ceil"
     if len(args) == 1:
@@ -40,19 +40,19 @@ def mvc_floor_ceil(name: str, args: list[str]) -> str:
     return sqlf_scaled_floor_ceil(fn, args[0], args[1], snap=True)
 
 
-def mvc_mod(name: str, args: list[str]) -> str:
+def mvc_mod(name: str, args: list[str], resolver=None) -> str:
     """``MOD(x, y)`` — the same form as ``x % y`` (``sql_forms.sqlf_mod``)."""
     _mvc_arity(name, args, (2,))
-    return sqlf_mod(args[0], args[1])
+    return sqlf_mod(args[0], args[1], resolver)
 
 
-def mvc_try_divide(name: str, args: list[str]) -> str:
+def mvc_try_divide(name: str, args: list[str], resolver=None) -> str:
     """``try_divide(x, y)``: NULL on a zero divisor — ThoughtSpot's own ``/`` (BL-362)."""
     _mvc_arity(name, args, (2,))
     return sqlf_plain_division(args[0], args[1])
 
 
-def mvc_nvl2(name: str, args: list[str]) -> str:
+def mvc_nvl2(name: str, args: list[str], resolver=None) -> str:
     """``nvl2(a, b, c)``: ``b`` when ``a`` is not NULL, else ``c``."""
     _mvc_arity(name, args, (3,))
     return f"( if ( {args[0]} != null ) then {args[1]} else {args[2]} )"
@@ -65,7 +65,7 @@ _MVC_TRUNC = {"YEAR": "start_of_year", "YYYY": "start_of_year", "YY": "start_of_
               "MONTH": "start_of_month", "MM": "start_of_month", "MON": "start_of_month"}
 
 
-def mvc_trunc(name: str, args: list[str]) -> str:
+def mvc_trunc(name: str, args: list[str], resolver=None) -> str:
     """``trunc(date, fmt)`` -> ``start_of_*`` (a DATE in both), or a pass-through for WEEK."""
     _mvc_arity(name, args, (2,))
     fmt = args[1].strip()
@@ -80,7 +80,7 @@ def mvc_trunc(name: str, args: list[str]) -> str:
     raise UntranslatableError(f"TRUNC format {fmt} is not mapped (YEAR|QUARTER|MONTH|WEEK)")
 
 
-def mvc_last_day(name: str, args: list[str]) -> str:
+def mvc_last_day(name: str, args: list[str], resolver=None) -> str:
     """``last_day(d)`` -> the day before the next month's first (a DATE, as in Databricks)."""
     _mvc_arity(name, args, (1,))
     return f"add_days ( add_months ( start_of_month ( {args[0]} ) , 1 ) , -1 )"
@@ -88,7 +88,7 @@ def mvc_last_day(name: str, args: list[str]) -> str:
 
 def mvc_passthrough(op: str):
     """A row-level pass-through of the call itself: the warehouse runs its own function."""
-    def handler(name: str, args: list[str]) -> str:
+    def handler(name: str, args: list[str], resolver=None) -> str:
         _mvc_row_level(name, args)
         return sql_passthrough_call(op, name.lower(), args)
     return handler

@@ -93,9 +93,7 @@ def call_mod(name: str, args: list[str], resolver) -> str:
     """MOD(x, y) — the same form as ``x % y`` (``sql_forms.sqlf_mod``); a metric reference
     counts as aggregated."""
     _arity(name, args, (2,))
-    if any(is_aggregated(a, resolver) for a in args):
-        return f"mod ( {args[0]} , {args[1]} )"
-    return sqlf_mod(args[0], args[1])
+    return sqlf_mod(args[0], args[1], resolver)
 
 
 def call_to_number(name: str, args: list[str], resolver) -> str:
@@ -201,7 +199,8 @@ def cast_params(cur) -> list[str]:
 CAST_NUMBER = frozenset({"NUMBER", "DECIMAL", "NUMERIC"})
 
 
-def cast_number(type_name: str, params: list[str], inner: str, resolver) -> str:
+def cast_number(type_name: str, params: list[str], inner: str, resolver,
+                try_cast: bool = False) -> str:
     """``CAST(x AS NUMBER[(p[, s])])``: Snowflake's default scale is 0, and the cast ROUNDS
     half away from zero (``CAST(2.5 AS NUMBER)`` = 3, ``CAST(2.567 AS NUMBER(10,2))`` = 2.57,
     live 2026-10-07). It was ``to_double``, which keeps every digit — a silent wrong
@@ -211,5 +210,6 @@ def cast_number(type_name: str, params: list[str], inner: str, resolver) -> str:
     if s == 0:
         return f"to_integer ( {inner} )"
     p = params[0]
-    return sqlf_rounded_cast(inner, s, f"CAST({{0}} AS {type_name}({p},{s}))",
+    fn = "TRY_CAST" if try_cast else "CAST"  # TRY_CAST: NULL on a bad value, not an error
+    return sqlf_rounded_cast(inner, s, f"{fn}({{0}} AS {type_name}({p},{s}))",
                              is_aggregated(inner, resolver))
