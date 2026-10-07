@@ -64,19 +64,48 @@ def emit_sql(node: dict, resolver: Callable[[dict], str]) -> str:
     raise UntranslatableError(f"cannot emit node {kind!r}")
 
 
+# calls whose emitted SQL is NOT itself a self-delimiting call: a pass-through
+# unwraps to arbitrary raw SQL (`sql_number_op ( 'x + y' )` -> `x + y`), and these
+# render as predicates (`x IS NULL`, `x IN (...)`, `x BETWEEN a AND b`)
+_UNDELIMITED_CALLS = PASSTHROUGH_FN | {"isnull", "in", "between"}
+_OPAQUE_PREC = 0  # always bracketed as an operand
+
+
 def _precedence(node: dict) -> int:
     kind = node["node"]
     if kind == "binop":
         return _PREC[node["op"]]
     if kind == "unop":
         return _UNARY_PREC
-    return _ATOMIC_PREC  # col, ref, lit, call, ifelse are atomic
+    if kind == "call" and node["fn"] in _UNDELIMITED_CALLS:
+        return _OPAQUE_PREC
+    return _ATOMIC_PREC  # col, ref, lit, other calls, ifelse are atomic
+
+
+def _needs_parens(node: dict) -> bool:
+    """True when `node`'s SQL must be bracketed to be used as an operand of an
+    arithmetic or comparison operator: a binop, a pass-through or a predicate call.
+    Columns, MEASURE()/ANY_VALUE() refs, literals, ordinary calls and CASE are
+    self-delimiting; a unary minus binds tighter than any binary operator."""
+    return _precedence(node) < _UNARY_PREC
+
+
+def _wrap(node: dict, resolver) -> str:
+    """`node`'s SQL, bracketed when `_needs_parens`."""
+    sql = emit_sql(node, resolver)
+    return f"({sql})" if _needs_parens(node) else sql
+
+
+def _wrap_pred(node: dict, resolver) -> str:
+    """`node`'s SQL as an operand of IS NULL / IN / BETWEEN. Arithmetic binds tighter
+    than those, so only a comparison or logical binop, a pass-through or a predicate
+    call is bracketed (`(a OR b) IS NULL`, not `a OR b IS NULL`)."""
+    sql = emit_sql(node, resolver)
+    return f"({sql})" if _precedence(node) <= _PREC["="] else sql
 
 
 def _emit_unop(node: dict, resolver) -> str:
-    inner = emit_sql(node["operand"], resolver)
-    if node["operand"]["node"] == "binop":
-        inner = f"({inner})"
+    inner = _wrap(node["operand"], resolver)
     if node["op"] == "not":
         return f"NOT {inner}"
     # Nested unary minus (double negation, e.g. `-(-[T::x])` or `- -[T::x]`)
@@ -114,7 +143,7 @@ def _emit_binop(node: dict, resolver) -> str:
     op = node["op"]
     # null comparison -> IS [NOT] NULL
     if op in ("=", "!=") and node["right"].get("node") == "lit" and node["right"]["kind"] == "null":
-        left = emit_sql(node["left"], resolver)
+        left = _wrap_pred(node["left"], resolver)
         return f"{left} IS NULL" if op == "=" else f"{left} IS NOT NULL"
     parent_prec = _PREC[op]
     left = _emit_child(node["left"], resolver, parent_prec, is_right=False)
@@ -197,14 +226,11 @@ def _emit_safe_divide(args: list, resolver) -> str:
 
     ``b`` appears twice, so it is emitted once and the same text reused; a binop ``b``
     is bracketed (``b = 0`` would otherwise bind to its last operand), and so is a
-    binop ``a`` (it sits left of ``/``).
+    binop ``a`` (it sits left of ``/``) — as is a pass-through or predicate operand,
+    whose SQL is not self-delimiting (``_needs_parens``).
     """
-    numerator = emit_sql(args[0], resolver)
-    if args[0]["node"] == "binop":
-        numerator = f"({numerator})"
-    divisor = emit_sql(args[1], resolver)
-    if args[1]["node"] == "binop":
-        divisor = f"({divisor})"
+    numerator = _wrap(args[0], resolver)
+    divisor = _wrap(args[1], resolver)
     return f"CASE WHEN {divisor} = 0 THEN 0 ELSE {numerator} / NULLIF({divisor}, 0) END"
 
 
@@ -221,7 +247,7 @@ def _emit_null_if_zero(args: list, resolver) -> str:
 
 
 def _emit_isnull(args: list, resolver) -> str:
-    return f"{emit_sql(args[0], resolver)} IS NULL"
+    return f"{_wrap_pred(args[0], resolver)} IS NULL"
 
 
 def _emit_if_fn(args: list, resolver) -> str:
@@ -231,13 +257,14 @@ def _emit_if_fn(args: list, resolver) -> str:
 
 
 def _emit_in(args: list, resolver) -> str:
-    head = emit_sql(args[0], resolver)
+    head = _wrap_pred(args[0], resolver)
     vals = ", ".join(emit_sql(a, resolver) for a in args[1:])
     return f"{head} IN ({vals})"
 
 
 def _emit_between(args: list, resolver) -> str:
-    return f"{emit_sql(args[0], resolver)} BETWEEN {emit_sql(args[1], resolver)} AND {emit_sql(args[2], resolver)}"
+    x, lo, hi = (_wrap_pred(a, resolver) for a in args[:3])
+    return f"{x} BETWEEN {lo} AND {hi}"
 
 
 def _emit_round(args: list, resolver) -> str:
@@ -256,7 +283,7 @@ def _emit_round(args: list, resolver) -> str:
     if len(args) == 1:
         return f"ROUND({x})"
     inc_node = args[1]
-    xw = f"({x})" if args[0]["node"] == "binop" else x
+    xw = _wrap(args[0], resolver)
     if inc_node.get("node") == "lit" and inc_node.get("kind") == "number":
         try:
             digits = ts_increment_to_sql_digits(inc_node["value"])
@@ -266,7 +293,7 @@ def _emit_round(args: list, resolver) -> str:
             return f"ROUND({x}, {digits})"
         inc = inc_node["value"]
         return f"({inc} * ROUND({xw} / {inc}))"
-    inc = emit_sql(inc_node, resolver)
+    inc = _wrap(inc_node, resolver)  # used left of `*`: a binop must be bracketed
     return f"({inc} * ROUND({xw} / NULLIF({inc}, 0)))"
 
 

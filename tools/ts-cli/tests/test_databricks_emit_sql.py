@@ -190,6 +190,15 @@ class TestSafeDivideExact:
         assert e("safe_divide ( [T::a] , abs ( [T::b] ) )") == (
             "CASE WHEN ABS(source.b) = 0 THEN 0 ELSE source.a / NULLIF(ABS(source.b), 0) END")
 
+    def test_passthrough_numerator_bracketed(self):
+        # a pass-through unwraps to raw SQL; unbracketed, `x + y / NULLIF(...)` divided y only
+        assert e("safe_divide ( sql_number_op ( 'x + y' ) , [T::b] )") == (
+            "CASE WHEN source.b = 0 THEN 0 ELSE (x + y) / NULLIF(source.b, 0) END")
+
+    def test_passthrough_divisor_bracketed_in_both_places(self):
+        assert e("safe_divide ( [T::a] , sql_number_op ( 'x - y' ) )") == (
+            "CASE WHEN (x - y) = 0 THEN 0 ELSE source.a / NULLIF((x - y), 0) END")
+
     @staticmethod
     def _safe_divide_semantics(a, b):
         # ThoughtSpot safe_divide, stated from the live probe — not from the emitted SQL
@@ -218,6 +227,35 @@ class TestPassthroughArity:
     def test_two_arg_passthrough_raises(self):
         with pytest.raises(UntranslatableError, match=r"exactly one argument"):
             e("sql_str_op ( 'LOWER({0})' , [T::s] )")
+
+
+class TestOpaqueOperandBracketing:
+    """A pass-through unwraps to raw SQL and an isnull/in/between call renders as a
+    predicate, so neither is self-delimiting: every emitter that places an operand
+    beside an operator brackets it (review of #581)."""
+
+    def test_passthrough_in_binop(self):
+        assert e("sql_number_op ( 'x + y' ) * [T::c]") == "(x + y) * source.c"
+        assert e("[T::c] - sql_number_op ( 'x - y' )") == "source.c - (x - y)"
+
+    def test_passthrough_under_unary_minus(self):
+        assert e("- sql_number_op ( 'x + y' )") == "-(x + y)"
+
+    def test_round_passthrough_value_and_nonliteral_increment(self):
+        assert e("round ( sql_number_op ( 'x + y' ) , 5 )") == "(5 * ROUND((x + y) / 5))"
+        assert e("round ( [T::a] , [T::b] + [T::c] )") == (
+            "((source.b + source.c) * ROUND(source.a / NULLIF((source.b + source.c), 0)))")
+
+    def test_isnull_of_passthrough_bracketed(self):
+        assert e("isnull ( sql_number_op ( 'x + y' ) )") == "(x + y) IS NULL"
+
+    def test_isnull_of_arithmetic_left_bare(self):
+        # arithmetic binds tighter than IS NULL / IN / BETWEEN — output unchanged
+        assert e("isnull ( [T::a] + [T::b] )") == "source.a + source.b IS NULL"
+
+    def test_between_bounds_passthrough_bracketed(self):
+        assert e("[T::a] between sql_number_op ( 'x + 1' ) and [T::b]") == (
+            "source.a BETWEEN (x + 1) AND source.b")
 
 
 class TestInBetweenParse:
