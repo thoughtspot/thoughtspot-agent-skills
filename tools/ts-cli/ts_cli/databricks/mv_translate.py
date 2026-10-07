@@ -26,6 +26,7 @@ from ts_cli.databricks.mv_expr import (
     strip_sql_comments,
 )
 from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
+from ts_cli.formula_common import week_start_note
 from ts_cli.databricks.mv_window_translate import translate_window_measure
 
 
@@ -169,7 +170,21 @@ def _entry(name: str, role: str, output_kind: str, column_type: str,
             "comment": meta.get("comment"),
             "synonyms": list(meta.get("synonyms") or []),
             "format": meta.get("format"),
-            "annotations": list(annotations or [])}
+            "annotations": _with_week_note(annotations, ts_expr)}
+
+
+#: Annotation kind carrying ``formula_common.week_start_note`` (BL-334 item 2).
+WEEK_START_KIND = "week_start_assumption"
+
+
+def _with_week_note(annotations: list[dict] | None, ts_expr: str | None) -> list[dict]:
+    """``annotations`` plus the shared Monday-week-start advisory when ``ts_expr``
+    calls a week-dependent function — a review flag, never a skip."""
+    out = list(annotations or [])
+    note = week_start_note(ts_expr)
+    if note and not any(a.get("kind") == WEEK_START_KIND for a in out):
+        out.append({"kind": WEEK_START_KIND, "detail": note})
+    return out
 
 
 def translate_dimension(dim: dict, tables: dict) -> dict:

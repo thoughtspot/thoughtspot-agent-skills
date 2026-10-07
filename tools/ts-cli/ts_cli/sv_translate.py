@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ts_cli.formula_common import UntranslatableError, bare_column_name
+from ts_cli.formula_common import (
+    UntranslatableError, bare_column_name, week_start_note)
 from ts_cli.sv_naming import (  # noqa: F401  (re-exported for callers/tests)
     build_node_id_map,
     construct_formula_id,
@@ -66,8 +67,17 @@ def _entry(
         "comment": source.get("comment"),
         "synonyms": source.get("synonyms") or [],
         "is_private": source.get("is_private", False),
-        "annotations": annotations or [],
+        "annotations": _with_week_note(annotations or [], ts_expr),
     }
+
+
+def _with_week_note(annotations: list[str], ts_expr: str | None) -> list[str]:
+    """``annotations`` plus the shared Monday-week-start advisory when ``ts_expr``
+    calls a week-dependent function (BL-334 item 2) — a review flag, not a skip."""
+    note = week_start_note(ts_expr)
+    if note and note not in annotations:
+        annotations = [*annotations, note]
+    return annotations
 
 
 # --- per-block translators ---------------------------------------------------

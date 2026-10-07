@@ -102,6 +102,7 @@ from ts_cli.tableau.lod import (  # noqa: F401
     convert_total,
 )
 from ts_cli.formula_text import ts_finalize_formula
+from ts_cli.formula_common import week_start_note
 from ts_cli.tableau.literals import (  # noqa: F401
     PLACEHOLDER_RE,
     is_string_placeholder,
@@ -282,8 +283,12 @@ def _translated_record(name: str, expr: str, column_type: str, level: int,
                        notes: dict[str, int]) -> dict:
     record = {"name": name, "expr": expr, "column_type": column_type,
               "level": level}
-    if notes.get(WEEK_START_ASSUMED):
-        record["review_notes"] = [WEEK_START_ASSUMED_NOTE]
+    review = [WEEK_START_ASSUMED_NOTE] if notes.get(WEEK_START_ASSUMED) else []
+    week = week_start_note(expr)  # Monday-week advisory, never a downgrade (BL-334 item 2)
+    if week:
+        review.append(week)
+    if review:
+        record["review_notes"] = review
     return record
 
 
@@ -301,7 +306,9 @@ def translate_formulas(
 
     ``week_start`` is the datasource's Week start (``parse_twb`` →
     ``datasources[].week_start``). A translated formula whose weekday number
-    had to ASSUME Sunday carries ``review_notes`` (BL-334).
+    had to ASSUME Sunday carries ``review_notes`` (BL-334), and so does every
+    formula calling a week-dependent function (``formula_common.week_start_note``
+    — the Monday-week-start advisory, BL-334 item 2).
 
     Input: list of formula dicts with keys: caption, formula, datatype, role, name
     Output: {

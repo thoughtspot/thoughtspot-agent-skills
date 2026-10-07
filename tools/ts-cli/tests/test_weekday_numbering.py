@@ -233,8 +233,13 @@ class TestTableau:
         issues = validate_pre_import(res["translated"])
         assert any("Sunday" in w for i in issues for w in i["warnings"])
         res = translate_formulas(calcs, week_start="monday")
-        assert validate_pre_import(res["translated"]) == []
-        assert "review_notes" not in res["translated"][0]
+        # A recorded week start removes the Sunday assumption, but the Monday-week
+        # advisory stays: day_number_of_week still follows the Model's calendar
+        # (BL-334 item 2).
+        notes = res["translated"][0]["review_notes"]
+        assert len(notes) == 1 and notes[0].startswith("assumes a Monday week start")
+        assert not any("Sunday = 1" in w for i in validate_pre_import(res["translated"])
+                       for w in i["warnings"])
         assert _numbering(res["translated"][0]["expr"]) == ISO
 
 

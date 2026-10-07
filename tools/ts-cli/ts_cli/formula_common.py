@@ -299,6 +299,82 @@ def ts_weekday_number(date_expr: str, *, first_day: int | str, base: int,
 
 
 # ---------------------------------------------------------------------------
+# Monday-week-start advisory for emitted ThoughtSpot formulas (BL-334 item 2)
+# ---------------------------------------------------------------------------
+#
+# Every translation built on ThoughtSpot's week functions silently assumes a
+# Monday week start: `day_number_of_week` is fixed 1 = Monday, `start_of_week`
+# and the `week_number_of_*` family follow the Model's calendar (Gregorian,
+# Monday-start, when nothing else is set), and `diff_weeks` counts boundaries
+# from a fixed Monday. A Model whose calendar starts the week elsewhere — or a
+# source whose week did — gives different values.
+#
+# Decision (2026-10-07): translators do NOT emit a calendar argument
+# (`start_of_week ( d , 'Calendar' )`); the Model's calendar is the default.
+# They flag the assumption instead. The flag is ADVISORY: it never downgrades
+# a translation's status (Migrated / TRANSLATED stay as they are).
+#
+# One detector and one wording, imported by every translator's reporting path
+# and by `ts formula translate`'s traps — re-implementing it per converter is
+# an angle-9 finding (BL-217). Deliberately NOT listed: `day_of_week` (the day
+# NAME does not move with the week start), `is_weekend` (Saturday/Sunday
+# either way) and `add_weeks` (seven days).
+
+WEEK_DEPENDENT_FUNCTIONS = (
+    "start_of_week", "day_number_of_week", "week_number_of_year",
+    "week_number_of_month", "week_number_of_quarter", "diff_weeks",
+)
+
+#: Every week-start note begins with this — a stable prefix to test and filter on.
+WEEK_START_NOTE_PREFIX = "assumes a Monday week start"
+
+_WEEK_DEPENDENT_RE = re.compile(
+    r"\b(" + "|".join(WEEK_DEPENDENT_FUNCTIONS) + r")\s*\(")
+# String literals ('…' with '' doubling, "…") and [column] references, blanked
+# before matching so a literal or a column name never reads as a call.
+_LITERAL_OR_REF_RE = re.compile(r"'(?:[^'\\]|\\.|'')*'|\"(?:[^\"\\]|\\.)*\"|\[[^\[\]]*\]")
+
+
+def week_dependent_functions(ts_expr: str | None) -> list[str]:
+    """The week-start-dependent ThoughtSpot functions ``ts_expr`` calls, in
+    first-seen order (empty when none, or when ``ts_expr`` is empty).
+
+    >>> week_dependent_functions("start_of_week ( [T::d] )")
+    ['start_of_week']
+    >>> week_dependent_functions("start_of_month ( [T::d] )")
+    []
+    """
+    if not ts_expr:
+        return []
+    code = _LITERAL_OR_REF_RE.sub("''", ts_expr)
+    seen: list[str] = []
+    for m in _WEEK_DEPENDENT_RE.finditer(code):
+        if m.group(1) not in seen:
+            seen.append(m.group(1))
+    return seen
+
+
+def week_start_note(ts_expr: str | None) -> str | None:
+    """The standard Monday-week-start advisory for an emitted ThoughtSpot
+    formula, or None when it calls no week-dependent function.
+
+    Every translator surfaces this same string (Tableau / Qlik ``review_notes``,
+    Snowflake SV ``annotations``, Databricks MV ``annotations`` kind
+    ``week_start_assumption``, ``ts formula translate`` traps). It is an
+    advisory — never a status downgrade.
+    """
+    fns = week_dependent_functions(ts_expr)
+    if not fns:
+        return None
+    return (f"{WEEK_START_NOTE_PREFIX} ({', '.join(fns)}): ThoughtSpot numbers and "
+            "truncates weeks from Monday under the Model's default Gregorian calendar "
+            "(day_number_of_week is fixed 1 = Monday). On a Model whose calendar starts "
+            "the week on another day, or against a source whose week did, the values "
+            "differ. No calendar argument is emitted, so the Model's calendar applies — "
+            "check it (BL-334)")
+
+
+# ---------------------------------------------------------------------------
 # Shared translation-failure exception
 # ---------------------------------------------------------------------------
 

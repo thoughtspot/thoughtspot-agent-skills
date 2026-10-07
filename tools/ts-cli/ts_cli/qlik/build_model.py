@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
+from ts_cli.formula_common import week_start_note
 from ts_cli.model_builder import build_model_tml
 
 from . import functions
@@ -288,13 +289,19 @@ def _translate_measures(measures, first_week_day=None
             m.expression, first_week_day=first_week_day)
         status = _STATUS_REVIEW if review else _STATUS_OK
         formulas.append({"name": name, "expr": ts_expr, "column_type": "MEASURE"})
-        measure_map.append({
+        entry = {
             "name": name,
             "qlik_expr": m.expression,
             "ts_expr": ts_expr,
             "status": status,
             "reason": reason,
-        })
+        }
+        # Monday-week-start advisory (BL-334 item 2): a review note, never a
+        # status change — the measure stays Migrated.
+        week = week_start_note(ts_expr)
+        if week:
+            entry["review_notes"] = [week]
+        measure_map.append(entry)
     return formulas, measure_map
 
 

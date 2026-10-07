@@ -6,7 +6,9 @@ trap rests on it:
 
 - BL-331 (2026-10-06): ``round``'s 2nd argument is an increment, not a digit count.
 - OI-2 (2026-10-06): ``day_number_of_week`` is fixed 1 = Monday; ``start_of_week`` compiles
-  to ``DATE_TRUNC(week, d)``. Both assume a Monday week start (the Gregorian default).
+  to ``DATE_TRUNC(week, d)``. Both assume a Monday week start (the Gregorian default). The
+  trap line is ``formula_common.week_start_note`` — the same note every converter reports
+  (BL-334 item 2).
 - OI-3 (2026-10-06): ``diff_months`` / ``diff_years`` count calendar boundaries crossed.
 - OI-4 (2026-10-06): ``=``, ``contains`` and ``strpos`` on strings are case-insensitive
   (BL-333). OI-2's week-start consequences are BL-334.
@@ -24,6 +26,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from ts_cli.formula_common import week_start_note
 from ts_cli.formula_translate.context import ColumnContext
 from ts_cli.formula_translate.catalog import is_known
 from ts_cli.formula_translate.refs import split_literals
@@ -39,9 +42,6 @@ _DIFF_OUT = re.compile(r"\bdiff_(days|months|years|weeks|quarters|hours|minutes|
 _DAYS_OVER_7 = re.compile(r"\bdiff_days\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*/\s*7\b")
 _DIFF_MY_OUT = re.compile(r"\bdiff_(months|years|quarters)\s*\(")
 _DIFF_WEEKS_OUT = re.compile(r"\bdiff_weeks\s*\(")
-_WEEK_OUT = re.compile(
-    r"\b(start_of_week|day_number_of_week|week_number_of_year|day_of_week|"
-    r"week_number_of_month|week_number_of_quarter)\s*\(")
 _STRCMP_OUT = re.compile(
     r"(\bcontains\s*\(|\bstrpos\s*\(|\bbegins_with\s*\(|\bends_with\s*\(|"
     # a literal is single- or (holding a quote or backslash, BL-365) double-quoted
@@ -190,9 +190,6 @@ _OUTPUT_TRAPS = (
                       "DATEDIFF(week) follows the warehouse's week start (Snowflake "
                       "WEEK_START), so they agree only under a Monday start (WEEK_START 0 "
                       "or 1)"),
-    (_WEEK_OUT,"assumes a Monday week start; diverges if the Model's calendar "
-                "starts on another day (day_number_of_week is fixed 1 = Monday; "
-                "start_of_week follows the warehouse's DATE_TRUNC(week)) — OI-2, BL-334"),
 )
 _CASE_LITERAL = ("string comparison is case-INSENSITIVE in ThoughtSpot (=, contains, "
                  "strpos — OI-4, BL-333); if the source compared case-sensitively, use "
@@ -264,6 +261,11 @@ def detect_traps(dialect: str, source: str, output: str) -> list[str]:
         traps.append("distinct count → `unique count` (a space, not an underscore; "
                      "`unique_count` and `count_distinct` are rejected)")
     traps.extend(line for pat, line in _OUTPUT_TRAPS if pat.search(code))
+    # The Monday-week-start advisory is the converters' own note, imported — never
+    # restated here (BL-334 item 2, BL-217). Advisory only: not in DOWNGRADE_TRAP_PREFIXES.
+    week = week_start_note(output)
+    if week:
+        traps.append(week)
     traps.extend(_case_traps(dialect, output))
     traps.extend(_databricks_traps(dialect, source))
     traps.extend(_sql_traps(dialect, source, code))
