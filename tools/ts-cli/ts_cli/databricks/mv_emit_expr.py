@@ -27,7 +27,7 @@ _KW = {"if", "then", "else", "and", "or", "not", "in", "between",
 _FORMULA_TOKEN_RE = re.compile(r"""
     (?P<ws>\s+)
   | (?P<bracket>\[[^\]]*\])
-  | (?P<string>'(?:[^'\\]|\\.|'')*')
+  | (?P<string>'(?:[^']|'')*')
   | (?P<number>\d+\.\d+|\d+)
   | (?P<op>!=|<=|>=|[(),+\-*/=<>{}])
   | (?P<ident>[A-Za-z_][A-Za-z0-9_ ]*?(?=\s*\())
