@@ -174,7 +174,7 @@ Verified 2026-07-10, SE cluster.
 |---|---|
 | `safe_divide ( [a] , [b] )` → `DIV0(a, b)` — inexact only for a NULL `a` over a zero `b` (`safe_divide` 0, `DIV0` NULL; BL-364) | `DIV0(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , [b] ) )` — `DIV0(NULL, 0)` is NULL in Snowflake and `safe_divide` returns 0 there (live 2026-10-07), hence the guard (BL-357) |
 | — | `DIV0NULL(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , ifnull ( [b] , 0 ) ) )` — 0 on a zero **or NULL** divisor, NULL on a NULL dividend (`DIV0NULL(1, NULL)` = 0, `DIV0NULL(NULL, 0)` = NULL, live 2026-10-07). It was `safe_divide`, NULL on a NULL divisor (BL-357) |
-| — | `a % b` → `mod ( [a] , [b] )` — the remainder takes the dividend's sign in both; folded at `*` / `/` precedence (`a * b % c` → `mod ( ( a * b ) , c )`). It was passed through as a bare `%` (BL-362) |
+| — | `a % b` → the `MOD(` row above, folded at `*` / `/` precedence (`a * b % c` is `(a * b) % c`). It was passed through as a bare `%` (BL-362) |
 | — | `a DIV b` — **Snowflake has no `DIV` operator** (it is a syntax error there); refused, never read as a column. Any identifier that follows an operand with no operator is refused (BL-360) |
 | `round ( [x] , inc )` → `ROUND(x, d)` when `inc` is a literal power of ten (`0.01` → `2`, `1` → `0`, `100` → `-2`); any other literal → `(inc * ROUND(x / inc))`; non-literal → `(inc * ROUND(x / NULLIF(inc, 0)))`; `round ( [x] , 0 )` is NULL in ThoughtSpot — flag it, never emit `ROUND(x, 0)` | `ROUND(x, d)` → `round ( [x] , 10^-d )` for a literal `d` (`2` → `0.01`, `0` → `1`, `-2` → `100`); non-literal `d` → `sql_double_op ( "ROUND({0}, {1})" , [x] , d )` (row-level only). **The 2nd arg is an increment in ThoughtSpot and a digit count in SQL — never copy it across** (BL-331; see thoughtspot-formula-patterns.md Math Functions) |
 | `floor ( [x] )` → `FLOOR(x)` | `FLOOR(x)` → `floor ( [x] )` |
@@ -183,7 +183,7 @@ Verified 2026-07-10, SE cluster.
 | — | `FLOOR(x, s)` / `CEIL(x, s)` / `CEILING(x, s)`, a literal scale → `( floor ( [x] * 10^s ) * 10^-s )` (`s > 0`), `( floor ( [x] / 10^-s ) * 10^-s )` (`s < 0`), `floor ( [x] )` (`s = 0`); `ceil` alike. **Not snapped**, unlike the Databricks row and the Excel translator: Snowflake's own `FLOOR` of a DOUBLE is plain double arithmetic (`FLOOR(0.29::DOUBLE, 2)` = 0.28, `CEIL(1.1::DOUBLE, 2)` = 1.11, `CEIL(1230::DOUBLE, -1)` = 1230, live 2026-10-07), which the unsnapped form reproduces; a NUMBER scales exactly. Multiplied back by the increment (BL-348). A non-literal or \|s\| > 15 scale is refused. **Fixed ts-cli 0.163.0 (BL-361):** the scale was kept on the one-argument `floor` / `ceil` and rejected at import |
 | `abs ( [x] )` → `ABS(x)` | `ABS(x)` → `abs ( [x] )` |
 | `pow ( [x] , [n] )` → `POWER(x, n)` | `POWER(x, n)` → `pow ( [x] , [n] )` |
-| `mod ( [x] , [n] )` → `MOD(x, n)` | `MOD(x, n)` → `mod ( [x] , [n] )` |
+| `mod ( [x] , [n] )` → `MOD(x, n)` | `MOD(x, n)` and `x % n` → `sql_double_op ( "MOD({0}, {1})" , [x] , [n] )` when an operand is a row-level column — native `mod` accepts INT64 only and rejects a DOUBLE at import (probe record §7; M2 `dbxn-002`), and the translator cannot see column types; over an aggregate or between literals, `mod ( [x] , [n] )`. Both take the dividend's sign (BL-362, ts-cli 0.163.0) |
 | `sqrt ( [x] )` → `SQRT(x)` | `SQRT(x)` → `sqrt ( [x] )` |
 | `ln ( [x] )` → `LN(x)` | `LN(x)` → `ln ( [x] )` |
 | `log2 ( [x] )` → `LOG(2, x)` | `LOG(2, x)` → `log2 ( [x] )` |

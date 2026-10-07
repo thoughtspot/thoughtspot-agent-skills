@@ -54,6 +54,7 @@ from ts_cli.databricks.mv_sql_calls import (
     mvc_floor_ceil,
     mvc_instr,
     mvc_last_day,
+    mvc_mod,
     mvc_nvl2,
     mvc_to_date_expr,
     mvc_trunc,
@@ -323,7 +324,7 @@ _RENAME = {
     "ABS": "abs",
     # ROUND deliberately not here (BL-331): ThoughtSpot round()'s 2nd arg is a
     # rounding INCREMENT, not a digit count — see _call_round.
-    "MOD": "mod", "POWER": "pow", "SQRT": "sqrt", "LN": "ln",
+    "POWER": "pow", "SQRT": "sqrt", "LN": "ln",
     "LOG2": "log2", "LOG10": "log10",
     "GREATEST": "greatest", "LEAST": "least",
     "YEAR": "year", "MONTH": "month_number", "DAY": "day",
@@ -466,7 +467,7 @@ _EXACT_FORM_CALLS = {"MONTHS_BETWEEN": _call_months_between,
                      "CEILING": mvc_floor_ceil, "TRY_DIVIDE": mvc_try_divide,
                      "NVL2": mvc_nvl2, "TRUNC": mvc_trunc, "LAST_DAY": mvc_last_day,
                      "BROUND": mvc_bround, "INSTR": mvc_instr, "CONCAT_WS": mvc_concat_ws,
-                     "TO_DATE": mvc_to_date_expr}
+                     "TO_DATE": mvc_to_date_expr, "MOD": mvc_mod}
 # Every ThoughtSpot name each handler above can emit — read by check_mapping_code_sync.py
 # (requirement D), which cannot see through function-valued dispatch maps.
 EXACT_FORM_EMITS = {"MONTHS_BETWEEN": ("sql_double_op",),
@@ -478,7 +479,8 @@ EXACT_FORM_EMITS = {"MONTHS_BETWEEN": ("sql_double_op",),
                               "sql_date_op"),
                     "LAST_DAY": ("add_days", "add_months", "start_of_month"),
                     "BROUND": ("sql_double_op",), "INSTR": ("sql_int_op",),
-                    "CONCAT_WS": ("sql_string_op",), "TO_DATE": ("sql_date_op",)}
+                    "CONCAT_WS": ("sql_string_op",), "TO_DATE": ("sql_date_op",),
+                    "MOD": ("mod", "sql_double_op")}
 
 
 def _call_round(args: list[str]) -> str:

@@ -291,7 +291,7 @@ _RENAME = {
     # ROUND / TRUNC deliberately do NOT live here (BL-331): ThoughtSpot round()'s
     # 2nd arg is a rounding INCREMENT, not a digit count — see _call_round /
     # _call_trunc and formula_common.ts_round_from_sql_digits.
-    "MOD": "mod", "POWER": "pow", "SQRT": "sqrt", "LN": "ln",
+    "POWER": "pow", "SQRT": "sqrt", "LN": "ln",
     "LOG2": "log2", "LOG10": "log10",
     "GREATEST": "greatest", "LEAST": "least",
     "YEAR": "year", "MONTH": "month_number", "DAY": "day",

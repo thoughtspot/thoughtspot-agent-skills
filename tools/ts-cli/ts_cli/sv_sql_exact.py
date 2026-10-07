@@ -17,7 +17,8 @@ from ts_cli.formula_common import (
     sql_passthrough_call,
     sql_substr_to_ts,
 )
-from ts_cli.sql_forms import sqlf_div0, sqlf_div0null, sqlf_rounded_cast, sqlf_scaled_floor_ceil
+from ts_cli.sql_forms import (sqlf_div0, sqlf_div0null, sqlf_mod, sqlf_rounded_cast,
+                               sqlf_scaled_floor_ceil)
 
 
 def is_aggregated(x: str, resolver) -> bool:
@@ -88,6 +89,15 @@ def call_floor_ceil(name: str, args: list[str], resolver) -> str:
     return sqlf_scaled_floor_ceil(fn, args[0], args[1], snap=False)
 
 
+def call_mod(name: str, args: list[str], resolver) -> str:
+    """MOD(x, y) — the same form as ``x % y`` (``sql_forms.sqlf_mod``); a metric reference
+    counts as aggregated."""
+    _arity(name, args, (2,))
+    if any(is_aggregated(a, resolver) for a in args):
+        return f"mod ( {args[0]} , {args[1]} )"
+    return sqlf_mod(args[0], args[1])
+
+
 def call_to_number(name: str, args: list[str], resolver) -> str:
     """TO_NUMBER / TO_DECIMAL / TO_NUMERIC(x[, fmt][, p, s]) (BL-359). Snowflake's default
     scale is 0 and the conversion ROUNDS (``TO_NUMBER('2.5')`` = 3, ``TO_NUMBER(2.567)`` = 3,
@@ -113,7 +123,8 @@ EXACT_FORM_CALLS = {"TO_CHAR": call_to_char, "TO_VARCHAR": call_to_char,
                     "DIV0": call_div0, "DIV0NULL": call_div0,
                     "FLOOR": call_floor_ceil, "CEIL": call_floor_ceil,
                     "CEILING": call_floor_ceil, "TO_NUMBER": call_to_number,
-                    "TO_DECIMAL": call_to_number, "TO_NUMERIC": call_to_number}
+                    "TO_DECIMAL": call_to_number, "TO_NUMERIC": call_to_number,
+                    "MOD": call_mod}
 EXACT_FORM_EMITS = {"TO_CHAR": ("sql_string_op",), "TO_VARCHAR": ("sql_string_op",),
                     "SUBSTR": ("substr", "strlen", "sql_string_op"),
                     "SUBSTRING": ("substr", "strlen", "sql_string_op"),
@@ -123,7 +134,8 @@ EXACT_FORM_EMITS = {"TO_CHAR": ("sql_string_op",), "TO_VARCHAR": ("sql_string_op
                     "FLOOR": ("floor",), "CEIL": ("ceil",), "CEILING": ("ceil",),
                     "TO_NUMBER": ("to_integer", "round", "sql_double_op"),
                     "TO_DECIMAL": ("to_integer", "round", "sql_double_op"),
-                    "TO_NUMERIC": ("to_integer", "round", "sql_double_op")}
+                    "TO_NUMERIC": ("to_integer", "round", "sql_double_op"),
+                    "MOD": ("mod", "sql_double_op")}
 
 
 # DATEDIFF(unit, start, end) -> diff_<unit> ( end , start ). Snowflake counts unit

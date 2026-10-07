@@ -14,7 +14,7 @@ from ts_cli.formula_common import (
     expr_is_aggregated,
     sql_passthrough_call,
 )
-from ts_cli.sql_forms import sqlf_plain_division, sqlf_scaled_floor_ceil
+from ts_cli.sql_forms import sqlf_mod, sqlf_plain_division, sqlf_scaled_floor_ceil
 
 
 def _mvc_arity(name: str, args: list[str], allowed: tuple[int, ...]) -> None:
@@ -38,6 +38,12 @@ def mvc_floor_ceil(name: str, args: list[str]) -> str:
     if len(args) == 1:
         return f"{fn} ( {args[0]} )"
     return sqlf_scaled_floor_ceil(fn, args[0], args[1], snap=True)
+
+
+def mvc_mod(name: str, args: list[str]) -> str:
+    """``MOD(x, y)`` — the same form as ``x % y`` (``sql_forms.sqlf_mod``)."""
+    _mvc_arity(name, args, (2,))
+    return sqlf_mod(args[0], args[1])
 
 
 def mvc_try_divide(name: str, args: list[str]) -> str:

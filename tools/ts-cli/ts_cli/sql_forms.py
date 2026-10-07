@@ -22,7 +22,9 @@ from __future__ import annotations
 
 from ts_cli.formula_common import (
     UntranslatableError,
+    expr_is_aggregated,
     sql_digits_to_ts_increment,
+    sql_passthrough_call,
     sql_int_digits,
 )
 
@@ -178,13 +180,19 @@ def sqlf_int_div(x: str, y: str) -> str:
     return f"( if ( {q} >= 0 ) then floor ( {q} ) else ceil ( {q} ) )"
 
 
-def _sqlf_mod(x: str, y: str) -> str:
-    """SQL ``x % y``: the remainder takes the dividend's sign in Snowflake and Databricks,
-    as ThoughtSpot ``mod`` does (probe record §7)."""
-    return f"mod ( {x} , {y} )"
+def sqlf_mod(x: str, y: str) -> str:
+    """SQL ``x % y`` / ``MOD(x, y)``: the remainder takes the dividend's sign in Snowflake and
+    Databricks, as ThoughtSpot ``mod`` does (probe record §7). But ``mod`` accepts INT64 only
+    and rejects a DOUBLE at import (probe record §7; M2 ``dbxn-002`` ``I1 % N2``, 2026-10-07),
+    and the translator cannot see column types. So a row-level operand with a column is the
+    warehouse's own ``MOD`` (exact for any numeric type); an aggregate, which a row-level
+    pass-through cannot wrap, and a literal-only remainder stay native ``mod``."""
+    if expr_is_aggregated(x) or expr_is_aggregated(y) or "[" not in f"{x} {y}":
+        return f"mod ( {x} , {y} )"
+    return sql_passthrough_call("sql_double_op", "MOD", [x, y])
 
 
-_SQLF_FOLDS = {"%": _sqlf_mod, SQLF_DIV_MARK: sqlf_int_div}
+_SQLF_FOLDS = {"%": sqlf_mod, SQLF_DIV_MARK: sqlf_int_div}
 
 
 def sqlf_fold_multiplicative(units: list[str]) -> None:

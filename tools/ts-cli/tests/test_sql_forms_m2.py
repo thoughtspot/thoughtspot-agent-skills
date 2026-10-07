@@ -128,9 +128,15 @@ class TestIntegerDivisionAndOperators:
 
     @BOTH
     def test_modulo(self, t):
-        assert t("I1 % 3", r) == "mod ( [T::I1] , 3 )"
-        assert t("a * b % c + 1", r) == "mod ( ( [T::a] * [T::b] ) , [T::c] ) + 1"
-        assert t("x - a % b", r) == "[T::x] - mod ( [T::a] , [T::b] )"
+        # native `mod` rejects a DOUBLE at import (M2 dbxn-002), and no column type is known:
+        # a row-level remainder is the warehouse's own MOD; an aggregate stays native
+        assert t("I1 % 3", r) == 'sql_double_op ( "MOD({0}, 3)" , [T::I1] )'
+        assert t("MOD(I1, N2)", r) == 'sql_double_op ( "MOD({0}, {1})" , [T::I1] , [T::N2] )'
+        assert t("a * b % c + 1", r) == \
+            'sql_double_op ( "MOD({0}, {1})" , ( [T::a] * [T::b] ) , [T::c] ) + 1'
+        assert t("x - a % b", r) == '[T::x] - sql_double_op ( "MOD({0}, {1})" , [T::a] , [T::b] )'
+        assert t("SUM(a) % 7", r) == "mod ( sum ( [T::a] ) , 7 )"
+        assert t("7 % 3", r) == "mod ( 7 , 3 )"
 
     @BOTH
     def test_modulo_left_operand_guard(self, t):
