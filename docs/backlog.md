@@ -243,7 +243,7 @@ are roughly ordered by value÷effort.
 | ~~BL-369~~ | ~~Power BI: a quoted table name with an apostrophe, `'Bob''s Sales'[x]`, is mangled to `'Bob'[T::X]`~~ | DONE (2026-10-07 — ts-cli v0.169.0) |
 | ~~BL-370~~ | ~~`COT(0)` (Tableau, Snowflake, Databricks) is `1 / tan ( 0 )` = NULL in ThoughtSpot, where the source errors or returns infinity — an undocumented divergence~~ | DONE (2026-10-07 — documented + non-downgrading trap, ts-cli v0.169.0) |
 | BL-371 | Upstream apache/ossie `reverse.py:273` renders `safe_divide` as `COALESCE(a / NULLIF(b, 0), 0)`, 0 on a NULL operand — the upstream copy of BL-366. HELD (all upstream Ossie work is on hold) | when upstream work resumes |
-| BL-372 | Excel / Sheets translator returns `COT` as NEEDS_REVIEW while the Excel map row says direct | 2026-11-30 |
+| ~~BL-372~~ | ~~Excel / Sheets translator returns `COT` as NEEDS_REVIEW while the Excel map row says direct~~ | RESOLVED (2026-10-07 — reciprocal trig translated + translator-declines gate, ts-cli v0.172.0) |
 | BL-373 | Exact non-Monday week truncation: where the source week start is known, emit `add_days ( start_of_week ( add_days ( d , k ) ) , -k )` instead of downgrading (BL-334 item 2 follow-up; needs a live probe) | 2026-11-30 |
 | ~~BL-374~~ | ~~From-direction recognition of `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` back to `safe_divide ( a , b )`, so TS → SQL → TS round trips keep the idiom (the value is already exact)~~ | DONE (2026-10-07 — ts-cli v0.173.0) |
 | ~~BL-375~~ | ~~DAX keywords (`NOT`, `RETURN`, …) read as table names: `NOT [Flag]` → `[formula_Flag]`, the boolean flipped~~ | DONE (2026-10-07 — ts-cli v0.171.0) |
@@ -13689,7 +13689,21 @@ places), with a NULL / zero grid test; re-run `tools/ossie-roundtrip`. Never ven
 
 ## BL-372 — Excel / Sheets translator returns `COT` as NEEDS_REVIEW while the Excel map row says direct `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** OPEN. **Source:** found during the #583 work.
+**Filed:** 2026-10-07. **Status:** RESOLVED (2026-10-07, ts-cli v0.172.0). **Source:** found during the #583 work.
+
+**Resolution.** The translator now handles the whole reciprocal family the map rows as direct:
+`COT` / `SEC` / `CSC` (`1 /` the native function, radians), `COTH` / `SECH` / `CSCH` (`1 /` the
+Snowflake hyperbolic pass-through), `ACOT` (the map's form) and `ACOTH`
+(`ATANH(1 / TO_DOUBLE(x))`, domain-checked). A literal zero divisor is NEEDS_REVIEW; a column
+carries the BL-370 trap (the engine's for `COT`, an Excel-local one for `CSC` / `COTH` / `CSCH`).
+No map row was wrong: every reciprocal row's form is exact. **Why requirement C was silent:** all
+its checks start from the rule table (rule → row, rule's emits → row text, coverage list = rule
+keys), so a translatable row with no rule was out of its sight by construction; the map said so
+only globally ("every other row is map-backed"). A hard "translatable ⇒ translated" gate would
+fail on 159 Excel rows that are map-backed by design, so the decline is made explicit instead:
+each map carries a *translator-declines* list that must name exactly its `direct` /
+`passthrough` rows with no rule (Sheets: no delta rule and no Excel rule, per Sheets E1). The
+survey of those 159 + 13 rows is the list itself; none is a trig-family row.
 
 **The facts.** The Excel function map rows `COT` as a direct translation, but the Excel / Google Sheets
 translator (`ts_cli/excel/`) returns it as NEEDS_REVIEW. The map and the translator disagree, so the
