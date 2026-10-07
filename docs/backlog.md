@@ -13083,8 +13083,11 @@ row built on it imports cleanly and is wrong for every non-zero input.
 
 **Where it still is.**
 - **Code (silent wrong answers today):** `tools/ts-cli/ts_cli/tableau/functions.py`
-  (`SIN`, `COS`, `TAN`, `COT`, `ACOS`, `ASIN`, `ATAN`; `RADIANS` / `DEGREES` are correct
-  arithmetic but fixed-point over literals, see BL-351), its tests in
+  (`SIN`, `COS`, `TAN`, `COT`, `ACOS`, `ASIN`, `ATAN`), and its `DEGREES` / `RADIANS`
+  (`:201-202`) and `PI()` literal (`:83`): correct algebra, but `x * 180 / 3.14159…` is read as
+  `x * ( 180 / 3.14159… )` and that literal division is fixed-point at scale 6 (BL-365), which
+  lost seven digits live — the Excel translator now passes `DEGREES` / `RADIANS` through and
+  emits `PI()` as `sql_double_op ( "PI()" )`, its tests in
   `tests/test_tableau_translate.py`, and
   `agents/cli/ts-convert-from-tableau/references/coverage-matrix.md` rows 132–133.
 - **Maps:** `agents/shared/mappings/tableau/tableau-formula-translation.md` (the trig rows),
@@ -13292,10 +13295,19 @@ corpus would be executable input running with that reach.
   same formula (*Search did not find "''s ' ,"*). `sql_string_op ( "'it''s'" )` is reliable,
   and `'a\\b'` is `a\b`.
 
-**Where it may still be.** Every printer that emits `x * y / z` without brackets or doubles a
-quote: `ts_cli/tableau/literals.py` and `ts_cli/powerbi/functions.py` double quotes; the
-Tableau, Qlik, Sisense, Snowflake and Databricks formula printers have not been checked for
-the product-over-division shape.
+**Where it still is** (sites from the #577 review):
+- **Doubled quotes in emitted ThoughtSpot string literals:** `ts_cli/tableau/literals.py:102`,
+  `ts_cli/powerbi/functions.py:274`, `ts_cli/sv_sql.py:34`, `:137`, `:152-155`,
+  `ts_cli/databricks/mv_sql.py:53`, `:199`, `:214-219`, `ts_cli/qlik/functions.py:189`,
+  `ts_cli/sisense/functions.py:362`.
+- **`a * b / c` printed without brackets:** the formula emitters of all six translators
+  (Tableau, Power BI, Qlik, Sisense, Snowflake `sv_sql`, Databricks `mv_sql`).
+- **The Excel reverse direction** (`ts_cli/excel/to_excel*.py`, `--from thoughtspot --to
+  excel`) reads `'it''s'` as `it's` and writes `"it's"`, the SQL reading, where ThoughtSpot
+  itself reads two quotes. Left for the cross-translator quoting PR, which should settle one
+  reading for both directions.
+- The shared tokenizer `ts_cli/databricks/mv_emit_expr.py` accepts only `''` inside a string;
+  the quoting PR decides whether it should also read a backslash escape.
 
 **Fix.** Share the Excel printer's two rules (`tsast._binop_text`, `tsast._string_text`)
 through `formula_common` (BL-217), re-pin the tests, and add a fidelity case for each shape per
