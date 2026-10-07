@@ -250,21 +250,27 @@ an older row says (see open-items OI-2…OI-5, and probe record §7):
   case-insensitive source (Sigma `ILike`, Excel `SEARCH`). A string literal passed as a
   `sql_bool_op` argument keeps its case (`sql_bool_op ( "{0} = {1}" , [d] , 'Engineering' )`
   compiled to `d = 'Engineering'` — verified live 2026-10-06, OI-4), so either form works.
-- **Week start** (OI-2, BL-334): ThoughtSpot's week comes from the **Model's calendar**,
-  Gregorian with a Monday start by default; `day_number_of_week` is fixed 1 = Monday. Never
-  emit the `start_of_*` calendar-name argument and never ask for a calendar name. Any
+- **Week start** (OI-2, BL-334): without the calendar argument, ThoughtSpot's week functions
+  are Gregorian with a Monday start **even on a column bound to a custom calendar**
+  (live-probed 2026-10-07); `day_number_of_week` is fixed 1 = Monday. Never emit the
+  calendar argument and never ask for a calendar name. When the source **states** a
+  non-Monday week start (Tableau `DATETRUNC('week', d, 'sunday')`, Qlik `WeekStart(d, 0, 6)`),
+  the CLI emits the exact form built on `day_number_of_week` (BL-373), and Tableau
+  `DATEPART('week')` / `WEEK()` get the "week 1 contains January 1" composition. Do not
+  emit `week_number_of_year` for those: it is the ISO week (BL-380). Any
   formula that assumes Monday is day one — weekday numbering, week alignment, `WEEKNUM` /
   ISO-week compositions, `NETWORKDAYS`-style arithmetic, `start_of_week` — gets the trap
   line *"assumes a Monday week start (…): …"*, worded per function found (`start_of_week`
-  follows the warehouse's `WEEK_START`; `day_number_of_week` is fixed 1 = Monday, and whether a
-  non-default Model calendar changes it is unverified). The CLI emits it for any output calling
+  follows the connection session's `WEEK_START`, 0 on se-thoughtspot; `day_number_of_week` is
+  fixed arithmetic; `week_number_of_year` is the ISO week). The CLI emits it for any output calling
   `start_of_week`, `day_number_of_week`, `week_number_of_year` / `_month` / `_quarter` or
   `diff_weeks` (not `day_of_week`, `is_weekend` or `add_weeks`, which do not move with the
   week start). It is `formula_week.week_start_note` — the **same** note the
   `ts-convert-from-*` converters put in their reports — and it is advisory: the status stays
   `TRANSLATED` (BL-334 item 2). For a map-only dialect (Omni, Sigma), write that same line. A source with an explicit fiscal or custom week/year setting (Excel `WEEKNUM`
   return types, Sigma/Omni fiscal settings, a DAX/Tableau fiscal year start) gets the note
-  *"the week/fiscal definition comes from the Model's calendar, not from the formula"*.
+  *"the formula's weeks are Gregorian and Monday-based; the source's fiscal/custom week
+  definition is not carried over"*.
 - **`diff_months` / `diff_years` count boundaries crossed** (OI-3): Jan 31 → Feb 1 = 1. Excel
   `DATEDIF` `"M"`/`"Y"` (complete periods) needs the map's day-of-month correction; plain
   `diff_months` is not equivalent.
@@ -525,6 +531,7 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.10.0 | 2026-10-07 | **Exact week forms for a stated week start** (ts-cli v0.174.0, BL-373 / BL-380, live-verified 2026-10-07). Tableau `DATETRUNC('week', d, 'sunday')` and Qlik `WeekStart(d, 0, 6)` are now TRANSLATED with a `day_number_of_week`-based week start (they were APPROXIMATED with a mismatch trap). Tableau `DATEPART('week')` / `WEEK()` use the "week 1 contains January 1" composition instead of the ISO `week_number_of_year`, which was one lower for whole years. `ISOWEEK` maps to `week_number_of_year`. The week note now states the probed facts: a column-bound custom calendar does not reach these functions, and the connection's `WEEK_START` is 0 on se-thoughtspot |
 | 1.9.2 | 2026-10-07 | Excel / Sheets reciprocal trigonometry is translator-backed (ts-cli v0.172.0, BL-372): `COT`, `SEC`, `CSC` as `1 /` the native function, `COTH` / `SECH` / `CSCH` as `1 /` the Snowflake hyperbolic pass-through, `ACOT` as `π / 2 − atan`, `ACOTH` as `ATANH(1 / x)`; a literal zero divisor is NEEDS_REVIEW and a column carries the BL-370 NULL-at-zero trap. The Excel and Sheets maps now list the `direct` / `passthrough` rows the translator still declines |
 | 1.9.1 | 2026-10-07 | The DAX and Qlik translators it wraps (ts-cli v0.171.0, BL-375..379): DAX `NOT [x]` keeps its `NOT` and no longer reads `NOT` as a table (`[not::x]`); Qlik Set Analysis reads quoted commas, flags search strings, keeps a bracketed modifier field whole, and uses `else null` for non-sum aggregations; set operators other than `+`, `P()` / `E()`, `$(…)`, empty sets and unmapped aggregations are NEEDS_REVIEW, and a single-quoted set value adds a case-sensitivity note; `{1}` keeps the query's grouping (`query_groups ( )`); the aggregated expression is translated; `=` modifiers and bare numbers without a `--columns` type add notes |
 | 1.9.0 | 2026-10-07 | **One Monday-week-start trap, shared with the converters (ts-cli v0.170.0, BL-334 item 2).** The week trap is now `formula_week.week_start_note`, the note every `ts-convert-from-*` report carries, worded per function found. `diff_weeks` gets one trap instead of two; `day_of_week` (a day name) no longer fires it. Advisory — status unchanged — except a Tableau `DATETRUNC('week', d, 'sunday')` (a known non-Monday start), which is APPROXIMATED with a `week start mismatch` trap |
