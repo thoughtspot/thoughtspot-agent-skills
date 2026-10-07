@@ -747,6 +747,11 @@ For each formula column (`formula_id` is set in `model.columns[]`):
    translate using the rules in that file
 4. Handle nested references up to 3 levels deep
 
+**String literals (BL-365):** a ThoughtSpot `"…"` is a string literal — emit Snowflake `'…'`
+with each `'` doubled (`"O'Brien"` → `'O''Brien'`); a ThoughtSpot `'it''s'` reads as two quotes,
+so it becomes `'it''''s'`. Never emit a ThoughtSpot `"…"` literal as a Snowflake `"…"`, which is
+an identifier. See the mapping's "String literals, ThoughtSpot → Snowflake" table.
+
 Write the translated formulas to a JSON file for `ts snowflake build-sv`:
 
 ```json
@@ -1303,6 +1308,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.6.6 | 2026-10-07 | **String literals (BL-365).** Step 8 states the to-direction rule: a ThoughtSpot `"…"` is a string literal, emitted as Snowflake `'…'` with `'` doubled (never a `"…"` identifier); a ThoughtSpot `'it''s'` reads as two quotes, so `'it''''s'`. The mapping doc gains a to-direction literal table; `ts-to-snowflake-rules.md` separates double-quoted names from double-quoted text |
 | 1.6.5 | 2026-10-06 | **Shared mapping rows corrected in the ThoughtSpot → Snowflake direction** (BL-340, BL-342). `substr ( x , start , len )` is `SUBSTR(x, start + 1, len)` — ThoughtSpot's start is zero-based — not the identity the row gave, and `diff_months` is no longer rowed as `MONTHS_BETWEEN` (a fractional count; `DATEDIFF('month', …)` is the exact pair). `diff_quarters`, `diff_weeks`, `diff_hours` and `diff_minutes` gained `DATEDIFF` rows |
 | 1.6.4 | 2026-10-06 | **`day_number_of_week` → `DAYOFWEEKISO`, never `DAYOFWEEK` (BL-334).** The shared mapping doc's TS → Snowflake cell said `DAYOFWEEK`, which under the default `WEEK_START = 0` numbers 0 = Sunday … 6 = Saturday; ThoughtSpot is fixed 1 = Monday … 7 = Sunday (live-probed 2026-10-06). Doc-only — this direction is executed from the mapping table |
 | 1.6.3 | 2026-10-06 | **`round` mapping corrected (BL-331).** ThoughtSpot `round(x, inc)` takes a rounding *increment*, so the Step 8 translation reads `round ( x , 0.01 )` as `ROUND(x, 2)` (a literal power of ten → digit count; any other increment → `(inc * ROUND(x / inc))`) and flags `round(x, 0)`, which is NULL in ThoughtSpot. The mapping doc previously copied the argument across. Coverage-matrix row 21a |

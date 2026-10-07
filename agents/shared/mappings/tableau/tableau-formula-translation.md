@@ -28,7 +28,7 @@ CLI command implements this pipeline automatically.
 | 6 | **CASE/WHEN conversion**: `CASE [f] WHEN 'a' THEN x ... END` → `if ([f] = 'a') then x else if ...` | "Search did not find case" — ThoughtSpot has NO native CASE |
 | 7 | **IIF conversion**: `IIF(test,a,b)` → `if (test) then a else b` | "Search did not find 'IIF'" |
 | 8 | **IF/END conversion**: strip `END` keyword; `ELSEIF` → `else if`; wrap conditions in parens | "Search did not find end" — ThoughtSpot has NO `end` keyword |
-| 9 | **INT() conversion**: `INT(x)` → `if (x >= 0) then floor(x) else ceil(x)` | INT truncates toward zero; TS `to_integer` rounds to nearest |
+| 9 | **INT() conversion**: `INT(x)` → `( if (x >= 0) then floor(x) else ceil(x) )` — **parenthesised** (`INT([x]) * 2` bare doubled only the negative branch) | INT truncates toward zero; TS `to_integer` rounds to nearest |
 | 10 | **Function mapping**: apply the full function table below (ZN→ifnull, COUNTD→unique count, etc.) | Wrong function names fail |
 | 11 | **Date function mapping**: DATETRUNC→start_of_*, DATEDIFF→diff_* (reversed args), DATEADD→add_*, DATEPART→unit functions | Wrong function names + incorrect argument order |
 | 12 | **String concatenation**: `[a] + [b]` (string context) → `concat([a], [b])` | TS `+` is numeric-only — "Search did not find '+ ...'" |
@@ -193,7 +193,7 @@ command detects pass-through conflicts automatically and skips them.
 | `YEAR(d)` | `year ( d )` | |
 | `MONTH(d)` | `month_number ( d )` | |
 | `DAY(d)` | `day ( d )` | **`day_number_of_month` does not exist** (verified 2026-06-13). `day()` extracts day-of-month. Related: `day_number_of_week`, `day_number_of_quarter`, `day_number_of_year` do exist. |
-| `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Tableau INT truncates toward zero; `to_integer`/`round` round to nearest (live-verified 2026-06-13: to_integer(8.6)=9, to_integer(-9.7)=-10) so a composite is required. ⚠ floor/ceil names pending live verification (P11/P12) — flag on first use. |
+| `INT(x)` | `( if ( x >= 0 ) then floor ( x ) else ceil ( x ) )` — parenthesised: an `if` runs to the end of the formula, so a bare one swallows a following `* 2` (fixed ts-cli 0.165.0, #579 review) | Tableau INT truncates toward zero; `to_integer`/`round` round to nearest (live-verified 2026-06-13: to_integer(8.6)=9, to_integer(-9.7)=-10) so a composite is required. ⚠ floor/ceil names pending live verification (P11/P12) — flag on first use. |
 | `FLOAT(x)` | `to_double ( x )` | See formula-patterns.md (to_double). `x * 1.0` breaks for string inputs Tableau accepts. |
 | `STR(x)` | `to_string ( x )` | |
 | `[a] + [b]` (string concat) | `concat ( [a] , [b] )` | ThoughtSpot uses `concat()` for strings — the `+` operator is numeric-only and **fails on strings** (*"Search did not find '+ ...'"*). Tableau overloads `+` for both; rewrite every string `+` as `concat()`. E.g. `STR(ROUND(x,2)) + '%'` → `concat ( to_string ( round ( x , 0.01 ) ) , '%' )`. |

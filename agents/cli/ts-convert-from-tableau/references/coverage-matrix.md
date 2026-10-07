@@ -63,7 +63,7 @@ Use this as the canonical limitations reference.
 | 132 | `ACOS(x)/ASIN(x)/ATAN(x)` | `acos ( x )` (same for `asin`/`atan`) | CLI-translated (v0.88.0, BL-072). Radians out on both sides; the `* π / 180` conversion was removed ts-cli 0.165.0 (BL-364) |
 | 133 | `COT(x)` | `( 1 / tan ( x ) )` | CLI-translated (v0.88.0, BL-072). No direct ThoughtSpot function — composites off `tan`. Radians (BL-364, ts-cli 0.165.0) |
 | 33 | `PI()/RADIANS()/DEGREES()` | `sql_double_op ( "PI()" )`; `( ( x * sql_double_op ( "PI()" ) ) / 180 )`; `( ( x * 180 ) / sql_double_op ( "PI()" ) )` | CLI-translated (v0.26.0); no native equivalent. The warehouse's PI and the bracketed product are exact; the 15-digit literal under a division lost seven digits (BL-364, BL-365, ts-cli 0.165.0) |
-| 34 | `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Partial; truncate-toward-zero |
+| 34 | `INT(x)` | `( if ( x >= 0 ) then floor ( x ) else ceil ( x ) )` | Partial; truncate-toward-zero. Parenthesised since ts-cli 0.165.0: bare, `INT([x]) * 2` multiplied only the negative branch (#579 review) |
 | 35 | `FLOAT(x)/STR(x)` | `to_double(x)/to_string(x)` | |
 | 36 | `DATETIME(expr)` cast | `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` | Pass-through |
 | 37 | String concat (`+` on strings) | `concat ( a , b )` | TS `+` is numeric-only |

@@ -1069,6 +1069,11 @@ tables:
 | `last_value(sum(m), query_groups(), {date})` | `ascending` | `non additive by (DATE.col asc nulls last) as SUM(...)` |
 | `first_value(sum(m), query_groups(), {date})` | `descending` | `non additive by (DATE.col desc nulls last) as SUM(...)` |
 
+**String literals (BL-365):** a ThoughtSpot `"…"` is a string literal — emit Snowflake `'…'`
+with each `'` doubled (`"O'Brien"` → `'O''Brien'`); a ThoughtSpot `'it''s'` reads as two quotes,
+so it becomes `'it''''s'`. Never emit a ThoughtSpot `"…"` literal as a Snowflake `"…"`, which is
+an identifier. See the mapping's "String literals, ThoughtSpot → Snowflake" table.
+
 Confirmed untranslatable patterns (after checking the reference):
 - `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
 - `ts_first_day_of_week(...)`, `last_n_days(...)` — period-scoped time intelligence with no Snowflake equivalent
@@ -1482,6 +1487,7 @@ Apply Steps 11b–12b (checkpoint + verify) from the standard workflow unchanged
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.2 | 2026-10-07 | **String literals (BL-365).** Step 9 states the to-direction rule: a ThoughtSpot `"…"` is a string literal, emitted as Snowflake `'…'` with `'` doubled (never a `"…"` identifier); a ThoughtSpot `'it''s'` reads as two quotes. Mirrors CLI 1.6.6 |
 | 1.3.1 | 2026-09-22 | **I7 marker added to the existing Step 9 gate; no second gate added.** Mirrors the CLI change exactly — the existing "read the reference before assessing any formula" block, with its "Looks untranslatable / Actually translatable as" table, now carries `MANDATORY (I7)`, names the forward `ThoughtSpot → Snowflake` column, and references the invariants doc. Includes the same unprefixed-table-row fix. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |
 | 1.3.0 | 2026-08-26 | **Finding 13.9 — an additive hardcoded filter is translatable.** `group_aggregate(..., query_filters() + {attr='v'})` now maps to `SUM(CASE WHEN ... THEN ... END)`; live-verified on Snowflake 10.30.101 that a semantic-view metric expression CAN carry a filter, which the shared mapping had denied while its own `sum_if` row asserted the opposite. Filters that *suppress* query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable, now for the correct reason. |
 | 1.2.2 | 2026-07-03 | Snowflake currency corrections: soften the "metrics are never top-level" rule to note the root-level derived-metrics exception (Key Structural Rule #1 in snowflake-schema.md). |

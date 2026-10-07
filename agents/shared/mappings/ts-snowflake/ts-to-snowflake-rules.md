@@ -185,6 +185,13 @@ case-insensitively, so `id` and `ID` both match a physical `"id"` column.
   expr: '{table_alias}."column_name"'    # inline in the expression string (no YAML outer quotes needed)
 ```
 
+**Names versus text — two different double quotes.** A double-quoted **name** here is a
+Snowflake identifier. A double-quoted token in a ThoughtSpot **formula** (`"O'Brien"`) is a
+ThoughtSpot *string literal* (BL-365): translate it to Snowflake's `'O''Brien'`, never to
+`"O'Brien"`, which Snowflake would read as a column. A ThoughtSpot `'it''s'` reads as two quotes
+(`it''s`), so it becomes `'it''''s'`. Full table: `ts-snowflake-formula-translation.md`,
+"String literals, ThoughtSpot → Snowflake".
+
 **Metric — physical column (nested under its table):**
 ```yaml
 - name: "{snake_case_name}"

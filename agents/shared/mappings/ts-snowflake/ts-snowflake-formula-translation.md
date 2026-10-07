@@ -53,6 +53,24 @@ backslash doubled, and every product under a division bracketed (`( a * b ) / c`
 translator's last step, `formula_text.ts_finalize_formula`. Copying `'O''Brien'` across was a silent
 wrong answer.
 
+### String literals, ThoughtSpot → Snowflake (BL-365, #579 review)
+
+**To-direction (ThoughtSpot → Snowflake)** — read each ThoughtSpot literal as ThoughtSpot does,
+then write Snowflake's own `'…'` literal with every `'` doubled:
+
+| ThoughtSpot literal | ThoughtSpot reads | Snowflake |
+|---|---|---|
+| `'Active'` | `Active` | `'Active'` |
+| `"O'Brien"` (double-quoted — **a string literal**, never an identifier) | `O'Brien` | `'O''Brien'` |
+| `'it''s'` | `it''s` (two quotes) | `'it''''s'` |
+| `'a\\b'` or `"a\\b"` | `a\b` | `'a\\b'` (Snowflake reads `\\` as one backslash) |
+| `concat ( 'say ' , '"' , 'hi' , '"' )` | `say "hi"` | `CONCAT('say ', '"', 'hi', '"')` |
+
+A double-quoted token as the **first argument of a `sql_*_op` call** is its template, not a
+literal — the only other place `"…"` appears in a ThoughtSpot formula. A double-quoted **name**
+in the Snowflake `expr` (`t."date"`, `ts-to-snowflake-rules.md`) is a Snowflake identifier and has
+nothing to do with a ThoughtSpot `"…"` literal.
+
 ## Translation Decision Flowchart
 
 Use this to quickly determine which section to consult for a given formula:
