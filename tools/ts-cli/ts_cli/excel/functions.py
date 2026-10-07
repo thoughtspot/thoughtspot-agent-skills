@@ -10,7 +10,7 @@ from ts_cli.excel import nodes as X
 from ts_cli.excel import tsast as T
 from ts_cli.excel.criteria import criteria_condition
 from ts_cli.excel.forward import Translator
-from ts_cli.excel.helpers import fold, from_text, is_range, literal_int, need, template
+from ts_cli.excel.helpers import fold, from_text, graft, is_range, literal_int, need, template
 from ts_cli.excel.functions_text import TEXT_HANDLERS
 from ts_cli.excel.functions_date import DATE_HANDLERS
 from ts_cli.excel.functions_logic import LOGIC_HANDLERS
@@ -18,7 +18,7 @@ from ts_cli.excel.functions_math import MATH_HANDLERS
 from ts_cli.excel.functions_format import FORMAT_HANDLERS
 from ts_cli.excel.functions_sheets import SHEETS_HANDLERS  # noqa: F401  (re-exported)
 from ts_cli.formula_common import (
-    UntranslatableError, sql_digits_to_ts_increment, ts_round_from_sql_digits,
+    UntranslatableError, nudged, scaled_ceil_floor, ts_round_from_sql_digits,
 )
 
 
@@ -164,44 +164,39 @@ def _quarter_idiom(node):
     return None
 
 
-SNAP = "0.000000001"
-SNAP_NOTE = ("a DOUBLE scaled for rounding is snapped to 1e-9 first — round ( x * F , "
-             "0.000000001 ) — because binary representation error would otherwise push an "
-             "exact step over the edge (1.1 * 100 is 110.00000000000001, so ceil gave 1.11 "
-             "where Excel, which works to 15 significant digits, gives 1.1). A value with a "
-             "genuine difference beyond the 9th decimal of the scaled number is snapped too")
+NUDGE_NOTE = ("a DOUBLE is nudged by 1e-9 before ceil / floor — ceil ( v - 0.000000001 ), "
+              "floor ( v + 0.000000001 ) — because binary representation error would otherwise "
+              "cross a step (1.1 * 100 is 110.00000000000001, so ceil gave 1.11 where Excel, "
+              "working to 15 significant digits, gives 1.1). A genuine value within 1e-9 of a "
+              "step is read as on the step (formula_common.nudged)")
 
 
-def _snap(tr, x: dict, scaled: dict) -> dict:
-    """``round ( scaled , 1e-9 )`` when ``x`` may be a DOUBLE (a DOUBLE or an unknown column
-    type); exact literals and integer or DECIMAL columns are left alone. Live 2026-10-07:
-    the snapped forms return Excel's 1.1, 0.29 and CEILING's 1.1 where the raw ones gave 1.11,
-    0.28 and 1.2 (probe record §7)."""
-    if not T.has_column(x) or tr.fine_type(x) not in ("double", None):
-        return scaled
-    tr.note(SNAP_NOTE)
-    return T.call("round", scaled, T.lit_number(SNAP))
+def _is_double(tr, x: dict) -> bool:
+    """A DOUBLE (or a column of unknown type): exact literals and integer or DECIMAL columns
+    carry no representation error and are not nudged."""
+    return T.has_column(x) and tr.fine_type(x) in ("double", None)
+
+
+def _directed(tr, fn: str, x: dict, n: int) -> dict:
+    """``fn`` of ``x`` at ``n`` decimals, by the shared helper (BL-217)."""
+    double = _is_double(tr, x)
+    if double:
+        tr.note(NUDGE_NOTE)
+    text = scaled_ceil_floor(T.wrapped(x), n, fn, double)
+    return graft(from_text(text), x)
 
 
 def _scaled(tr, x: dict, digits: int, inner_fn: str) -> dict:
-    """``fn ( x * F ) * I`` (digits > 0, ``I`` = 1 / ``F``), ``fn ( x )`` (0),
-    ``fn ( x / F ) * F`` (< 0), the scaled value snapped for a DOUBLE (``_snap``).
+    """``fn ( x * F ) / F`` (digits > 0), ``fn ( x )`` (0), ``fn ( x / F ) * F`` (< 0), a DOUBLE
+    nudged by 1e-9 (``formula_common.scaled_ceil_floor``).
 
-    Multiplying by the increment, not dividing by the factor (BL-348): ``ceil ( … ) / F``
-    divides two integers, and Snowflake keeps a division's result at scale 6, so more than
-    6 digits came back cut to 6 (live, se-thoughtspot 2026-10-07: ``/ to_double ( F )`` and
-    ``to_double ( ceil ( … ) ) / F`` are cut the same way; ``* 0.00000000001`` keeps 11)."""
+    Scaled back by dividing by ``F`` — exact, where ``* 0.1`` gave 0.30000000000000004 — for up
+    to 6 digits; beyond, by multiplying by the increment, because Snowflake keeps an integer
+    division's result at scale 6 (BL-348: more than 6 digits came back cut to 6)."""
     if abs(digits) > 15:
         tr.review(f"rounding to {digits} digits: beyond a double's 15 significant digits, and "
                   "the 10^n factor overflows ceil / floor's INT64 result")
-    if digits == 0:
-        return T.call(inner_fn, _snap(tr, x, x))
-    factor = T.lit_number(sql_digits_to_ts_increment(str(-abs(digits))))
-    if digits > 0:
-        increment = T.lit_number(sql_digits_to_ts_increment(str(digits)))
-        scaled = _snap(tr, x, T.binop("*", x, factor))
-        return T.binop("*", T.call(inner_fn, scaled), increment)
-    return T.binop("*", T.call(inner_fn, _snap(tr, x, T.binop("/", x, factor))), factor)
+    return _directed(tr, inner_fn, x, digits)
 
 
 def _round_dir(away: bool):
@@ -294,8 +289,23 @@ def _fold_multiple(fn: str, xv, sv) -> dict:
         return number_literal((q * sv).normalize())
 
 
+def _float_multiple(tr, fn: str, x: dict, sig: dict, sv) -> dict:
+    """``fn ( x / s ) * s`` outside the exact cases: a DOUBLE quotient nudged, and ``s = 1 / k``
+    scaled back by dividing by the integer ``k`` (exact; ``* s`` adds float noise)."""
+    quotient = T.binop("/", x, sig)
+    if _is_double(tr, x):
+        tr.note(NUDGE_NOTE)
+        quotient = from_text(nudged(T.to_text(quotient), fn, True))
+        quotient = graft(quotient, x, sig)
+    inverse = None if sv is None or sv == 0 else 1 / sv
+    if inverse is not None and inverse == inverse.to_integral_value() and 1 < inverse <= 10 ** 6:
+        # s = 1 / k: dividing by the integer k is exact; * s adds float noise (3 * 0.1)
+        return T.binop("/", T.call(fn, quotient), T.lit_number(str(int(inverse))))
+    return T.binop("*", T.call(fn, quotient), sig)
+
+
 def _multiple(tr, fn: str, x: dict, sig: dict, guarded: bool = False) -> dict:
-    """``fn ( x / s ) * s``, the quotient snapped for a DOUBLE (``_snap``). Two literals fold
+    """``fn ( x / s ) * s``, the quotient nudged for a DOUBLE (``NUDGE_NOTE``). Two literals fold
     exactly; two integers use ``_exact_multiple``; a DECIMAL operand is trapped."""
     xv, sv = T.number_value(x), T.number_value(sig)
     if xv is not None and sv is not None and sv != 0:
@@ -306,7 +316,7 @@ def _multiple(tr, fn: str, x: dict, sig: dict, guarded: bool = False) -> dict:
         return form if guarded else _mod_guard(sig, form)
     if "number" in (tr.fine_type(x), tr.fine_type(sig)):
         tr.trap(DECIMAL_DIVISION_TRAP.format(fn=fn), downgrade=True)
-    return T.binop("*", T.call(fn, _snap(tr, x, T.binop("/", x, sig))), sig)
+    return _float_multiple(tr, fn, x, sig, sv)
 
 
 def _zero_guard(sig: dict, form: dict) -> dict:
@@ -328,7 +338,7 @@ def _ceiling_floor(fn: str):
         need(tr, n, 1, 2)
         x = tr.num(n.args[0])
         if len(n.args) == 1:
-            return T.call(fn, _snap(tr, x, x))
+            return _directed(tr, fn, x, 0)
         sig = tr.num(n.args[1])
         form = _multiple(tr, fn, x, sig, guarded=fn == "ceil")
         return _zero_guard(sig, form) if fn == "ceil" else form
@@ -358,7 +368,7 @@ def _math_family(primary: str, negative: str = "", modes: bool = False):
             other = m != 0
 
         def form(fn):
-            return (T.call(fn, _snap(tr, x, x)) if T.is_lit(step, "number", "1")
+            return (_directed(tr, fn, x, 0) if T.is_lit(step, "number", "1")
                     else _multiple(tr, fn, x, step, guarded=True))
         out = form(primary)
         if other:

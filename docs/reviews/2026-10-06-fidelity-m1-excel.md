@@ -321,6 +321,8 @@ as BL-364. Further probe findings:
 - out-of-domain literals are NEEDS_REVIEW and columns APPROXIMATED;
 - `DATE` serial 60 and the column-year guard; Mac Roman `CHAR` / `CODE`, surrogate `UNICHAR`, column start and needle traps.
 
+**The precision snap was replaced** (a regression from #574, found by review): rounding the scaled value to a 1e-9 increment compiles to a multiply-back that lands one ulp above the integer, so the ceiling jumped a step on exact DOUBLE grid values (3.0 rounded up to 1 place gave 3.1). The translator now nudges the scaled value by 1e-9 toward the step (down before a ceiling, up before a floor) and scales back by division, through `formula_common.scaled_ceil_floor`. A live grid of 13 DOUBLE values × 13 rounding forms matches Excel on 164 of 169; the other 5 are the documented trade-off (a value within 1e-9 of a step). M1 did not catch it because its scored values seldom sit on a step in a DOUBLE (README, "What M1 does not exercise").
+
 **No regression elsewhere:**
 - **M0** re-run at `952620f` and at `ec19ce3`: 64 of 71 MATCH, 0 silent, 4 warned, the same per-case verdicts
   (`runs/2026-10-07-snowflake-m0-coverage-regression.json`).

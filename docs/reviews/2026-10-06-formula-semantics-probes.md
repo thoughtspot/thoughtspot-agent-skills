@@ -311,7 +311,7 @@ DOUBLE column and a decimal literal alike:
 | Formula | Result |
 |---|---|
 | `ceil ( to_double ( '1.1' ) * 100 ) * 0.01` | **1.11** — `1.1 * 100` is `110.00000000000001` in a double |
-| `ceil ( round ( to_double ( '1.1' ) * 100 , 0.000000001 ) ) * 0.01` | 1.1 — the snapped form the Excel translator now emits for a DOUBLE |
+| `ceil ( round ( to_double ( '1.1' ) * 100 , 0.000000001 ) ) * 0.01` | 1.1 — **but the snap is wrong on other values**: `round ( v , 0.000000001 )` compiles to `1.0E-9 * round ( v / 1.0E-9 )`, which lands one ulp above the integer, so `ceil` jumps a step on exact grid values (3.0 → 3.1, 0.15 → 0.16, 2.5 → 2.51; `floor` −200 → −200.1). Superseded by the nudge, ts-cli 0.162.0 — see the grid below |
 | `floor ( to_double ( '0.29' ) * 100 ) * 0.01` / snapped | 0.28 / 0.29 |
 | `ceil ( to_double ( '1.1' ) / 0.1 ) * 0.1` / snapped | 1.1 / 1.1 here (the raw form gives 1.2 in IEEE arithmetic in general — `1.1 / 0.1` is `11.000000000000002`; the warehouse's rounding happened to absorb it) |
 | `floor ( round ( to_double ( '-0.57' ) * 100 , 0.000000001 ) ) * 0.01` | −0.5700000000000001 (within any 1e-12 tolerance) |
@@ -359,4 +359,11 @@ The same run checked 39 translator outputs end to end against hand-computed Exce
 | `( [a] - mod ( [a] , [b] ) ) / [b]`; the remainder forms of `FLOOR`, `CEILING`, `FLOOR.MATH` (with and without mode), `CEILING.PRECISE` over a = ±1999999, b = 2000000 | 0, 0, 0, −2000000, 0, 2000000 — Excel's values; no division feeds `floor` / `ceil` |
 | `mod ( [a] , [z] )` with z = 0 | **the query fails** (*Division by zero*), where `/` returns NULL — so the translator guards it, `if ( [z] = 0 ) then null else …` (NULL for `FLOOR` / `QUOTIENT`, 0 for `CEILING`); all three guarded forms returned NULL / 0 |
 | a quote-bearing literal as `sql_string_op ( "'it''s here'" )` in `=` and `!=`, the `count_if` and `sum_if` conditions, `contains`, `left`, `substr`, `strlen`, and as an argument to `sql_string_op` (`UPPER`, `REPLACE`) and `sql_bool_op` templates | all imported and all returned Excel's values (`count_if` 1, `sum_if` 3, `IT'S`, `it-s here`, `true`); compiled e.g. `LOWER("S2") = LOWER('it''s here')` |
+
+*The nudge replaces the snap (2026-10-07, a scratch Model over a 13-row DOUBLE fixture, deleted and confirmed absent).* `ceil ( v - 0.000000001 )` / `floor ( v + 0.000000001 )`, scaled back by `/ 10^n` (exact) up to 6 digits — the forms `formula_common.scaled_ceil_floor` now emits for every Excel `ROUNDUP` / `ROUNDDOWN` / `TRUNC` / `CEILING*` / `FLOOR*` over a DOUBLE. The grid: x = 3.0, 0.15, 0.29, 2.5, 1.1, −200, 0.57, 40.955, 3.00000001, −0.57, 1.101, −1.1 and 3.000000000001, through `ROUNDUP` and `ROUNDDOWN` at 0, 1, 2 and −1 decimals (both `ceil` and `floor`, both signs), `CEILING.MATH` at 0.1 and 1, `FLOOR.MATH` at 0.01 and 10, and `TRUNC` at 2 — 169 values, compared with Excel's result on the 15-significant-digit reading of x.
+
+| Result | Values |
+|---|---|
+| equal to Excel | **164 of 169**, including every exact grid value the snap broke (3.0, 0.15, 2.5, −200 → unchanged) and the genuine near-step 3.00000001 (`ROUNDUP` to 1 place → 3.1) |
+| different | 5: x = 3.000000000001 rounded up (to 0, 1, 2 places and `CEILING.MATH` 0.1 and 1) returns 3 where Excel gives 4, 3.1, 3.01 — **the documented trade-off**: a value within 1e-9 of a step (scaled) is read as on the step |
 

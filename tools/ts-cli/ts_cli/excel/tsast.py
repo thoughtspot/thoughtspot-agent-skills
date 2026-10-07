@@ -194,6 +194,11 @@ def _wrap(node: dict, minimum: int) -> str:
     return f"( {text} )" if _prec(node) < minimum else text
 
 
+def wrapped(node: dict) -> str:
+    """``node``'s text, bracketed unless it binds tighter than ``*`` and ``/``."""
+    return _wrap(node, 7)
+
+
 def _call_text(node: dict) -> str:
     fn, args = node["fn"], node["args"]
     if fn == "in":

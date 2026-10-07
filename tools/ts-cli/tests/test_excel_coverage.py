@@ -107,7 +107,7 @@ class TestRoundingFamily:
         e = f("=FLOOR.MATH([@amt],[@qty],1)")
         assert "abs ( [T::qty] )" in e and e.startswith("if ( [T::qty] = 0 ) then 0 else")
         assert ev(e, {"amt": -8.6, "qty": -4}) == -8 and ev(e, {"amt": 8.6, "qty": -4}) == 8
-        assert "round ( [T::amt] / abs ( [T::qty] ) , 0.000000001 )" in e   # DOUBLE snap
+        assert "[T::amt] / abs ( [T::qty] ) - 0.000000001" in e   # DOUBLE nudge
 
     def test_non_literal_mode_is_refused(self):
         assert "non-literal mode" in review("=FLOOR.MATH([@amt],2,[@qty])")

@@ -143,6 +143,56 @@ def ts_round_from_sql_digits(x: str, digits: str | None = None, *,
     return f'sql_double_op ( "ROUND({{0}}, {{1}})" , {x} , {digits} )'
 
 
+# ---------------------------------------------------------------------------
+# Directed rounding at a decimal scale: ceil / floor of x * 10^n (BL-348, #577 review)
+# ---------------------------------------------------------------------------
+
+#: The nudge that absorbs binary representation error before ``ceil`` / ``floor``.
+NUDGE = "0.000000001"
+#: The largest power of ten a ThoughtSpot ``/`` can scale back by exactly: an integer divided
+#: by an integer keeps scale 6 in Snowflake (live 2026-10-07), so ``ceil ( … ) / 10^n`` is exact
+#: for n <= 6 and cut beyond; past it the increment ``* 10^-n`` keeps the digits (with float
+#: noise in the last place).
+MAX_EXACT_DIVISOR_DIGITS = 6
+
+
+def nudged(inner: str, mode: str, is_double: bool) -> str:
+    """``inner`` ready for ``mode`` (``ceil`` / ``floor``): a DOUBLE is nudged toward the step
+    below (``ceil ( v - 1e-9 )``) or above (``floor ( v + 1e-9 )``), so representation error —
+    ``1.1 * 100`` is ``110.00000000000001`` — does not cross a step, as Excel (15 significant
+    digits) does not. The trade-off: a genuine value within 1e-9 of a step is read as on it.
+    ``round ( v , 1e-9 )`` is NOT this: it compiles to ``1.0E-9 * round ( v / 1.0E-9 )``, whose
+    double multiply-back lands about one ulp above the integer, so ``ceil`` jumped a whole step
+    (3.0 scaled by 10 gave 3.1; live 2026-10-07, probe record §7). Exact inputs (a literal, an
+    integer or DECIMAL column) are not nudged."""
+    if mode not in ("ceil", "floor"):
+        raise ValueError(f"mode must be ceil or floor, not {mode!r}")
+    if not is_double:
+        return inner
+    return f"{inner} {'-' if mode == 'ceil' else '+'} {NUDGE}"
+
+
+def scaled_ceil_floor(x: str, n: int, mode: str, is_double: bool) -> str:
+    """ThoughtSpot text for ``mode ( x * 10^n ) / 10^n`` — ``x`` rounded up (``ceil``) or down
+    (``floor``) at ``n`` decimal places (``n < 0``: to tens, hundreds, …). ``x`` is ThoughtSpot
+    text, bracketed by the caller if it is not a primary.
+
+    Scaled back by DIVISION by the power of ten, which is exact (``* 0.1`` gives
+    0.30000000000000004): ``/ 10^n`` for 1 <= n <= 6, the increment beyond (scale 6, see
+    ``MAX_EXACT_DIVISOR_DIGITS``). A negative ``n`` divides first and multiplies back by the
+    integer ``10^-n``, both exact."""
+    from decimal import Decimal
+    if n == 0:
+        return f"{mode} ( {nudged(x, mode, is_double)} )"
+    factor = format(Decimal(10) ** abs(n), "f")
+    if n < 0:
+        return f"{mode} ( {nudged(f'{x} / {factor}', mode, is_double)} ) * {factor}"
+    core = f"{mode} ( {nudged(f'{x} * {factor}', mode, is_double)} )"
+    if n <= MAX_EXACT_DIVISOR_DIGITS:
+        return f"{core} / {factor}"
+    return f"{core} * {format(Decimal(1).scaleb(-n), 'f')}"
+
+
 def ts_increment_to_sql_digits(increment: str) -> int | None:
     """ThoughtSpot round() increment literal -> SQL ROUND digit count.
 

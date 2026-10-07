@@ -289,6 +289,18 @@ PYTHONPATH= uv run --no-project --python 3.12 --with pyyaml --with typer --with 
   M2 (BL-358). So an ANSI oracle and ThoughtSpot can disagree on overflow and bad casts, and
   `m2-nonansi.jsonl` measures the legacy semantics separately.
 
+### What M1 does not exercise: DOUBLE grid values
+
+Half the M1 cases are formulas over constants, which the warehouse computes as exact NUMBER
+decimals, and the input cells it does read seldom sit exactly on a rounding step. So binary
+representation error at a step (`3.0 * 10`, `0.15 * 100`) was never scored, and the 0.161.0
+precision snap shipped with a step-jump on exactly those values (found by review,
+2026-10-07). The grid is now pinned by a live probe (probe record §7, 13 DOUBLE values × 13
+rounding forms) and by `tools/ts-cli/tests/test_scaled_ceil_floor.py`. A future case set
+should add a typed fixture of DOUBLE grid values (3.0, 0.15, 0.29, 2.5, 1.1, -200, 0.57,
+40.955 and near-steps) for every directed-rounding function, with Excel's 15-digit result as
+the oracle.
+
 ## Extending
 
 - **A new SQL dialect** needs a warehouse oracle class beside `Warehouse` and

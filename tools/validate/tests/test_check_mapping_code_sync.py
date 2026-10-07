@@ -397,10 +397,10 @@ def test_unmutated_copy_passes(tmp_path):
      'T.call("strpos", tr.expr(n.args[0]))', "does not declare"),
     # 2b. (review of #574) a rule whose own names are all COERCION_EMITS names: emptying its
     # emits must still fail — the coercion exemption covers only via=coerce nodes
-    ("rules.py", '"CEILING": {"map": "excel", "emits": ("ceil", "round", "mod")}',
+    ("rules.py", '"CEILING": {"map": "excel", "emits": ("ceil", "mod")}',
      '"CEILING": {"map": "excel", "emits": ()}', "does not declare"),
-    ("rules.py", '"FLOOR": {"map": "excel", "emits": ("floor", "round", "mod")}',
-     '"FLOOR": {"map": "excel", "emits": ("round",)}', "does not declare"),
+    ("rules.py", '"FLOOR": {"map": "excel", "emits": ("floor", "mod")}',
+     '"FLOOR": {"map": "excel", "emits": ("mod",)}', "does not declare"),
     # 3. a rule's emits emptied while the handler still emits
     ("rules.py", '"SUM": {"map": "excel", "emits": ("sum",)}',
      '"SUM": {"map": "excel", "emits": ()}', "does not declare"),

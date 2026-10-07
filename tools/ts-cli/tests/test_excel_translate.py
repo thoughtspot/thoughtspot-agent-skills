@@ -144,17 +144,17 @@ FORWARD = [
     ("=ROUND([@x],0)", "round ( [TABLE::x] , 1 )"),
     ("=ROUND([@x],-2)", "round ( [TABLE::x] , 100 )"),
     ("=ROUNDUP([@x],2)",
-     # an untyped column may be a DOUBLE: the scaled value is snapped (review fix 1)
-     "if ( [TABLE::x] >= 0 ) then ceil ( round ( [TABLE::x] * 100 , 0.000000001 ) ) * 0.01 "
-     "else floor ( round ( [TABLE::x] * 100 , 0.000000001 ) ) * 0.01"),
-    ("=ROUNDDOWN([@x],0)", "if ( [TABLE::x] >= 0 ) then floor ( round ( [TABLE::x] , 0.000000001 ) ) "
-     "else ceil ( round ( [TABLE::x] , 0.000000001 ) )"),
+     # an untyped column may be a DOUBLE: nudged by 1e-9, scaled back by division (#577)
+     "if ( [TABLE::x] >= 0 ) then ceil ( [TABLE::x] * 100 - 0.000000001 ) / 100 "
+     "else floor ( [TABLE::x] * 100 + 0.000000001 ) / 100"),
+    ("=ROUNDDOWN([@x],0)", "if ( [TABLE::x] >= 0 ) then floor ( [TABLE::x] + 0.000000001 ) "
+     "else ceil ( [TABLE::x] - 0.000000001 )"),
     ("=ROUNDUP(MONTH([@d])/3,0)", "quarter_number ( [TABLE::d] )"),
     ("=MROUND([@x],5)", "round ( [TABLE::x] , 5 )"),
     ("=INT([@x])", "floor ( [TABLE::x] )"),
     ("=MOD([@x],3)", "[TABLE::x] - 3 * floor ( [TABLE::x] / 3 )"),
-    ("=CEILING([@x],5)", "ceil ( round ( [TABLE::x] / 5 , 0.000000001 ) ) * 5"),
-    ("=CEILING.MATH([@x])", "ceil ( round ( [TABLE::x] , 0.000000001 ) )"),
+    ("=CEILING([@x],5)", "ceil ( [TABLE::x] / 5 - 0.000000001 ) * 5"),
+    ("=CEILING.MATH([@x])", "ceil ( [TABLE::x] - 0.000000001 )"),
     ("=POWER([@x],2)", "pow ( [TABLE::x] , 2 )"),
     # logic
     ('=IF([@a]>1,"x","y")', "if ( [TABLE::a] > 1 ) then 'x' else 'y'"),
