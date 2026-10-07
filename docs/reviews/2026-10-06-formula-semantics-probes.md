@@ -53,7 +53,8 @@ Emitted forms after the fix:
 
 - **`day_number_of_week ( d )`** compiles to `(MOD((DATEDIFF(day, DATE '1970-01-01', d) + 3), 7) + 1)`, so 1 = Monday … 7 = Sunday, fixed. Observed values: 2026-10-04 (Sun) = 7, 2026-10-05 (Mon) = 1, 2026-10-10 (Sat) = 6, 2020-01-01 (Wed) = 3.
 - **`start_of_week ( d )`** compiles to `DATE_TRUNC(week, d)`, and returned Monday 2026-09-28 for 2026-10-04.
-- **`week_number_of_year ( 2026-01-04 )`** = 1.
+- **`week_number_of_year ( 2026-01-04 )`** = 1. It is the ISO-8601 week; year boundaries,
+  `WEEK_START`, exact non-Monday forms and custom calendars were probed on 2026-10-07 — see §8.
 - **Weekday-number forms**, all 7 days 2026-10-04 … 2026-10-10:
 
 | Form | Sun | Mon | Tue | Wed | Thu | Fri | Sat |
@@ -424,3 +425,114 @@ now reads them so.
 and concatenations, a both-quote literal, a backslash) imported and matched the Snowflake value
 on every row (`runs/2026-10-07-probe-tableau-powerbi-forms.json`). There is no Tableau or Power BI
 oracle, so the SQL is the hand-written equivalent of each source formula.
+
+## 8. Week truncation, week numbering, WEEK_START and custom calendars (BL-373, BL-380, BL-334 items 3–4)
+
+Probed 2026-10-07 on se-thoughtspot / `APJ_TAB`. Scratch objects: Model `ZZ_WEEKPROBE_DELETE_ME`
+over `SALARY_RATES` (three imports into one Model); Model `ZZ_WEEKPROBE_CAL_DELETE_ME_MODEL`;
+custom calendar `ZZ_WEEKPROBE_CAL_DELETE_ME` (id `ecb58b50…`, deleted, HTTP 204) over the
+Snowflake table `AGENT_SKILLS.PUBLIC.ZZ_WEEKPROBE_CAL` (dropped). Both Models were deleted;
+`ts metadata search --name "ZZ_WEEKPROBE%"` and `ts calendar search --connection APJ_TAB` both
+return `[]`, and `SHOW TABLES LIKE 'ZZ_WEEKPROBE%'` returns nothing.
+
+**Dates.** Each formula took `d = add_days ( to_date ( '<base>' , 'yyyy-MM-dd' ) , RATE_ID )`
+(`RATE_ID` 1–10) over twelve bases, giving Dec 25 – Jan 13 around the 2020, 2021, 2022, 2023,
+2026 and 2027 boundaries: 120 dates, every weekday, Jan 1 on a Wednesday, Friday, Saturday,
+Sunday, Thursday and Friday. Each value was checked against Python `datetime`.
+
+**Compiled SQL** (one block; `D` stands for the date expression):
+
+| Formula | Compiled SQL |
+|---|---|
+| `start_of_week ( d )` | `DATE_TRUNC(week, D)` |
+| `day_number_of_week ( d )` | `(MOD((DATEDIFF(day, DATE '1970-01-01', D) + 3), 7) + 1)` |
+| `week_number_of_year ( d )` | `FLOOR((DATEDIFF(day, <Jan 1 of T's year>, T) + 1 + 6) / 7)` with `T = DATEADD(day, 4 - dnw(D), D)`, the Thursday of D's week: the ISO-8601 rule |
+| `add_days ( start_of_week ( add_days ( d , 1 ) ) , -1 )` | `DATEADD(day, -(1), DATE_TRUNC(week, DATEADD(day, 1, D)))` |
+| `add_days ( d , 0 - mod ( day_number_of_week ( d ) , 7 ) )` | `DATEADD(day, (0 - MOD(<dnw>, 7)), D)` |
+| `day_number_of_year ( d )` | `DATEDIFF(day, <Jan 1>, D) + 1` |
+| `sql_int_op ( "DAYOFWEEK({0})" , d )` | `DAYOFWEEK(D)` |
+| `date ( now ( ) )` | `CAST(CURRENT_TIMESTAMP() AS date)` |
+
+**Values, 120 dates × 10 formulas, 0 mismatches:**
+- `start_of_week` returned Monday on every date.
+- Both shifted forms returned the Sunday on or before each date: the `start_of_week` shift and
+  the `day_number_of_week` form. A Saturday shift (`k = 2`) returned the Saturday.
+- `week_number_of_year` equalled Python `isocalendar()` week on all 120 dates. Examples:
+  2019-12-30 = 1, 2021-01-01 = 53, 2021-01-03 = 53, 2022-01-02 = 52, 2023-01-01 = 52,
+  2027-01-03 = 53.
+- `sql_int_op ( "DAYOFWEEK({0})" , d )` gave **0 for every Sunday** and 1–6 for Monday–Saturday.
+  A ThoughtSpot-issued query on this connection therefore runs with Snowflake `WEEK_START = 0`
+  (with 1, Sunday would be 7; with 7, it would be 1). The account and the probe user also show
+  `WEEK_START = 0` (`SHOW PARAMETERS … IN ACCOUNT`, default). The probe cannot tell whether
+  ThoughtSpot sets the value or inherits it.
+
+**Tableau `DATEPART('week')` vs `week_number_of_year` (BL-380).** Tableau numbers week 1 as the
+week containing January 1 (its `ww` runs 1–54). The Jan-1 composition
+`floor ( ( day_number_of_year ( d ) - 1 + <weekday of start_of_year ( d ) from the week start> ) / 7 ) + 1`
+matched the definition on all 120 dates for both Monday and Sunday starts. Against it, the
+ISO `week_number_of_year` under a Monday start:
+
+| Date | Tableau (Mon) | `week_number_of_year` |
+|---|--:|--:|
+| 2019-12-30 Mon | 53 | 1 |
+| 2021-01-01 Fri | 1 | 53 |
+| 2021-01-04 Mon | 2 | 1 |
+| 2022-01-10 Mon | 3 | 2 |
+| 2023-01-02 Mon | 2 | 1 |
+| 2026-01-05 Mon | 2 | 2 |
+| 2027-01-04 Mon | 2 | 1 |
+
+When Jan 1 falls on a Friday, Saturday or Sunday (2021, 2022, 2023, 2027), the two differ by one
+for the **whole year**, not only at the boundary. When Jan 1 falls Monday–Thursday they differ
+only on the late-December days the ISO rule hands to week 1 of the next year.
+
+**The emitted strings, live (second import, 228 formulas, 0 parse errors).** The exact strings
+from `formula_week.ts_week_start` and `ts_week_of_year_jan1` for all seven start days were checked
+on the same 120 dates, plus one Tableau converter output (`DATEPART('week', d, 'sunday')`), one
+Tableau `DATETRUNC('week', d)` with the datasource Week start Saturday, and one Qlik output
+(`WeekStart(d, -1, 6)`, compact form). All 2,040 checks matched. One probe was invalid:
+`date ( add_seconds ( d , 37800 ) )` on a DATE `d` compiled to no cast at all, because ThoughtSpot
+types `add_seconds` of a DATE as a DATE, so the 10:30 survived. On a genuine DATETIME,
+`date ( now ( ) )` compiled to `CAST(… AS date)` and the Sunday form returned 2026-10-04 for
+Wednesday 2026-10-07 at date precision.
+
+**Snowflake session comparison (read-only, probe user `APJPOC`, 2026-10-07).** Run under
+`ALTER SESSION SET WEEK_START = 7` over Oct 3–10 2026:
+- `DATE_TRUNC(week, d)` returned **Sunday**.
+- The `start_of_week` shift for a Sunday week returned **Saturday** (e.g. 2026-10-03 for Mon
+  10-05), wrong on six days of seven.
+- The `day_number_of_week` form still returned Sunday 10-04.
+
+Under `WEEK_START = 1`, `DATE_TRUNC(week)` returned Monday, as on the cluster. So the shifted
+`start_of_week` is exact only while the connection session's `WEEK_START` is 0 or 1. The
+`day_number_of_week` form is exact under any setting, and it is the form the translators emit
+(BL-373).
+
+**Custom calendar on the column (BL-334 item 4).** A 4-4-5 calendar starting the week on Sunday
+(`ts calendar generate --start-month January --start-day Sunday --anchor first`, 2019–2028) was
+loaded and registered. `SALARY_RATES::EFFECTIVE_DATE` was then bound to it with
+`properties.calendar` in a scratch Model.
+
+| Formula on the calendar-bound column | Compiled SQL | 2023-01-01 (Sun) |
+|---|---|---|
+| `start_of_week ( [EFFECTIVE_DATE] )` | `DATE_TRUNC(week, EFFECTIVE_DATE)`, unchanged | 2022-12-26 (Mon) |
+| `day_number_of_week ( [EFFECTIVE_DATE] )` | the fixed `MOD(… + 3, 7) + 1`, unchanged | 7 |
+| `week_number_of_year ( [EFFECTIVE_DATE] )` | the ISO expression, unchanged | 52 |
+| `start_of_week ( [EFFECTIVE_DATE] , ZZ_WEEKPROBE_CAL_DELETE_ME )` | `"ta_2"."start_of_week_epoch"`, over an **inner** `JOIN` of the calendar table on `EFFECTIVE_DATE = "date"` | 2023-01-01 (Sun) |
+
+So a custom calendar bound to the column does **not** change what these functions compile to.
+Only the explicit calendar argument does. That argument has its own pitfalls:
+- It reads the calendar table.
+- It joins INNER, so a date outside the calendar's range drops the row.
+- It is accepted on `day_number_of_week`, `week_number_of_year` and `diff_weeks` as well
+  (VALIDATE_ONLY).
+- **It is a bare keyword, not a string literal.** `start_of_week ( d , ZZ_WEEKPROBE_CAL_DELETE_ME )`
+  is accepted. `'ZZ_WEEKPROBE_CAL_DELETE_ME'`, `"…"`, `fiscal` and `'fiscal'` are rejected
+  (*Search did not find …*, error 14516).
+- It is resolved per connection: `CAM_CUSTOM_CALENDAR`, a calendar on another connection, was
+  rejected bare.
+
+**Not probed:** a cluster-wide default or fiscal calendar (an admin setting), and a connection
+whose user or account carries `WEEK_START` 2–7 (needs `ALTER USER` / `ALTER ACCOUNT` on the
+connection's Snowflake user). Either would settle whether ThoughtSpot overrides the session's
+`WEEK_START`.

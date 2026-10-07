@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-10 (2026-10-06 compiled-SQL probes on se-thoughtspot: day_number_of_week fixed Mon=1, start_of_week compiled to DATE_TRUNC(week) (Monday only under WEEK_START 0/1); domain review: Model calendar defaults to Gregorian/Monday, start_of_* take an optional 'Calendar Name' arg that translations must not emit, diff_months/diff_years count boundaries, contains/strpos/= case-insensitive; variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — function composition rules, if() parens mandatory; string-function nativeness re-verified on se-thoughtspot 2026-07-29 per BL-170 — trim/ltrim/rtrim/replace/starts_with/ends_with confirmed ABSENT, `in` confirmed curly-brace-only; window/semi-additive signatures verified on se-thoughtspot 2026-07-30 — no PARTITION BY slot on moving_*/cumulative_*, rank/rank_percentile arity fixed at 2, first_value/last_value partition + axis explicit, lag/dense_rank/row_number/nth_value/moving_count/moving_stddev/cumulative_count confirmed ABSENT); 2026-08-26 finding 13.8: first_value(..., query_groups(), {date}) reclassified TRANSLATABLE via NON ADDITIVE BY desc / sort_direction: descending -- the old "last-value only" reason contradicted a sibling file and the row two lines below it -->
+<!-- currency: thoughtspot — 2026-10 (2026-10-07 week probes on se-thoughtspot: week_number_of_year is the ISO week, ThoughtSpot's APJ_TAB session runs WEEK_START 0, a column-bound custom calendar does not change start_of_week/day_number_of_week/week_number_of_year, the calendar argument is a bare keyword, exact non-Monday week forms built on day_number_of_week — BL-373/BL-380/BL-334; 2026-10-06 compiled-SQL probes on se-thoughtspot: day_number_of_week fixed Mon=1, start_of_week compiled to DATE_TRUNC(week) (Monday only under WEEK_START 0/1); domain review: Model calendar defaults to Gregorian/Monday, start_of_* take an optional 'Calendar Name' arg that translations must not emit, diff_months/diff_years count boundaries, contains/strpos/= case-insensitive; variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — function composition rules, if() parens mandatory; string-function nativeness re-verified on se-thoughtspot 2026-07-29 per BL-170 — trim/ltrim/rtrim/replace/starts_with/ends_with confirmed ABSENT, `in` confirmed curly-brace-only; window/semi-additive signatures verified on se-thoughtspot 2026-07-30 — no PARTITION BY slot on moving_*/cumulative_*, rank/rank_percentile arity fixed at 2, first_value/last_value partition + axis explicit, lag/dense_rank/row_number/nth_value/moving_count/moving_stddev/cumulative_count confirmed ABSENT); 2026-08-26 finding 13.8: first_value(..., query_groups(), {date}) reclassified TRANSLATABLE via NON ADDITIVE BY desc / sort_direction: descending -- the old "last-value only" reason contradicted a sibling file and the row two lines below it -->
 
 # ThoughtSpot Formula Patterns — Reference
 
@@ -310,32 +310,54 @@ results. They are ThoughtSpot-only — **not translatable** to any warehouse SQL
 functions accept an optional second parameter for non-Gregorian calendars. Rows below call
 it the "`fiscal` param" — the bare keyword `fiscal` (e.g. `year ( [d] , fiscal )`, see the
 fiscal-year example above) selects the cluster's fiscal calendar. The domain review below
-describes the `start_of_*` argument as a **custom calendar** name; whether `fiscal` is one
-accepted value of that same slot is unverified.*
+describes the `start_of_*` argument as a **custom calendar** name. `fiscal` and `'fiscal'` were
+both **rejected** in the `start_of_week` slot on se-thoughtspot (VALIDATE_ONLY, 2026-10-07).*
 
-**Calendar argument and the Model's default calendar (ThoughtSpot domain review, 2026-10-06).**
-`start_of_week`, `start_of_month`, `start_of_quarter` and `start_of_year` accept an optional
-**custom calendar** argument, a string literal naming the calendar:
-`start_of_week ( [date] , 'Calendar Name' )`. **Formula translations must not emit it.** The
-Model supplies the default calendar, and that calendar is **Gregorian with a Monday week start
-when nothing else is set**. (For the Model/column side, `properties.calendar` takes the name of
+**Calendar argument and the Model's default calendar (ThoughtSpot domain review 2026-10-06;
+corrected by live probe 2026-10-07, [probe record §8](../../../docs/reviews/2026-10-06-formula-semantics-probes.md#8-week-truncation-week-numbering-week_start-and-custom-calendars-bl-373-bl-380-bl-334-items-34)).**
+`start_of_week`, `start_of_month`, `start_of_quarter` and `start_of_year` take an optional
+**custom calendar** argument. So do `day_number_of_week`, `week_number_of_year` and
+`diff_weeks` (all accepted). The argument is the calendar name as a **bare keyword**, not a
+string literal: `start_of_week ( [date] , RetailCal )` is accepted, while `'RetailCal'` and
+`"RetailCal"` are rejected (error 14516). It resolves per connection; a calendar registered
+on another connection is rejected. With it, the function reads the calendar table:
+`start_of_week` became `"cal"."start_of_week_epoch"` over an **INNER** join on the date, so a
+date outside the calendar's range drops the row. **Formula translations must not emit it.**
+
+**A custom calendar bound to the column does NOT reach these functions.** With
+`properties.calendar` set to a Sunday-start custom calendar, `start_of_week`,
+`day_number_of_week` and `week_number_of_year` compiled to exactly the same SQL as on a
+plain column: Gregorian, Monday weeks. So the effective calendar for a formula without the
+argument is **Gregorian with a Monday week start**, whatever the column says. (For the Model/column side, `properties.calendar` takes the name of
 a Connection-scoped custom calendar — see [thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md);
 `ts-object-calendar-builder` builds those calendars.)
 
 **What to flag instead: any translated formula that assumes Monday is the first day of the
 week** — weekday numbering (`day_number_of_week`), week-start alignment (`start_of_week`),
 week-number and ISO-week compositions, and NETWORKDAYS/WORKDAY-style arithmetic built on
-`day_number_of_week`. Each such translation is exact under the default calendar and
-**diverges if the Model's calendar starts the week elsewhere**; say so on the row. A source
-with an explicit fiscal or custom week setting (Excel `WEEKNUM` return types, Sigma/Omni
-fiscal settings, `fiscal_month_offset`) is a note pointing at the Model's calendar, not a
-formula change.
+`day_number_of_week`. Each such translation is Gregorian with Monday weeks even on a column
+bound to another calendar (probed 2026-10-07, above); say so on the row. A source with an
+explicit fiscal or custom week setting (Excel `WEEKNUM` return types, Sigma/Omni fiscal
+settings, `fiscal_month_offset`) is a note, not a formula change.
+
+**Where the source's week start is KNOWN and is not Monday, emit the exact form (BL-373,
+live-verified for all seven start days on 120 dates, 2026-10-07).** Rebuild it from
+`day_number_of_week`, which is fixed arithmetic. **Do not shift `start_of_week`.**
+- Week start: `add_days ( date ( d ) , 0 - mod ( day_number_of_week ( d ) + (6 - i) , 7 ) )`,
+  where `i` is the start day Monday-based (Monday = 0 … Sunday = 6). Sunday is
+  `add_days ( date ( d ) , 0 - mod ( day_number_of_week ( d ) , 7 ) )`.
+- Why not the shift: `add_days ( start_of_week ( add_days ( d , k ) ) , -k )` was exact on
+  se-thoughtspot, but `start_of_week` compiles to `DATE_TRUNC(week, d)`. Under Snowflake
+  `WEEK_START = 7` the shift returns Saturday for a Sunday week.
+- "Week 1 contains January 1" numbering (Tableau `DATEPART('week')`):
+  `( floor ( ( day_number_of_year ( d ) - 1 + mod ( day_number_of_week ( start_of_year ( d ) ) + (6 - i) , 7 ) ) / 7 ) + 1 )`.
+- Code: `ts_cli/formula_week.py` (`ts_week_start`, `ts_week_of_year_jan1`).
 
 | Function | Syntax | Notes |
 |---|---|---|
 | `today` | `today ()` | Current date |
 | `now` | `now ()` | Current date and time |
-| `date` | `date ( [datetime] )` | Date portion of a datetime |
+| `date` | `date ( [datetime] )` | Date portion of a datetime. On a genuine DATETIME it compiles to `CAST(… AS date)` (`date ( now ( ) )`, live 2026-10-07). On an expression ThoughtSpot already types as DATE it compiles to nothing. That includes `add_seconds ( [a DATE] , n )`, whose warehouse value keeps its time of day (probe record §8) |
 | `time` | `time ( [datetime] )` | Time portion of a datetime |
 | `year` | `year ( [date] )` | Calendar year (integer). Optional `fiscal` param. |
 | `year_name` | `year_name ( [date] )` | Year as string. With fiscal: `"FY_2014"` |
@@ -345,18 +367,18 @@ formula change.
 | `month_number_of_quarter` | `month_number_of_quarter ( [date] )` | Month within quarter (1–3). Optional `fiscal` param. |
 | `day` | `day ( [date] )` | Day of month (1–31). Verified 2026-06-13. Optional `fiscal` param. |
 | `day_of_week` | `day_of_week ( [date] )` | Day name (e.g. "Friday"). Optional `fiscal` param. |
-| `day_number_of_week` | `day_number_of_week ( [date] )` | Day number, **1=Monday … 7=Sunday** — agrees with the Model's default calendar (Gregorian, Monday week start). **Translations built on it assume a Monday week start** and diverge on a Model whose calendar starts elsewhere. Compiles to `(MOD((DATEDIFF(day, DATE '1970-01-01', d) + 3), 7) + 1)`, a fixed arithmetic independent of the warehouse's `WEEK_START` (live-verified 2026-10-06, se-thoughtspot: 2026-10-04 Sun=7, 2026-10-05 Mon=1, 2026-10-10 Sat=6, 2020-01-01 Wed=3). Whether a non-default Model calendar changes the `+3` constant is **unverified** (one cluster, default calendar only). Optional `fiscal` param. |
+| `day_number_of_week` | `day_number_of_week ( [date] )` | Day number, **1=Monday … 7=Sunday** — agrees with the Model's default calendar (Gregorian, Monday week start). **Translations built on it assume a Monday week start** and diverge on a Model whose calendar starts elsewhere. Compiles to `(MOD((DATEDIFF(day, DATE '1970-01-01', d) + 3), 7) + 1)`, a fixed arithmetic independent of the warehouse's `WEEK_START` (live-verified 2026-10-06, se-thoughtspot: 2026-10-04 Sun=7, 2026-10-05 Mon=1, 2026-10-10 Sat=6, 2020-01-01 Wed=3). A custom calendar bound to the column does **not** change it (same SQL with a Sunday-start calendar on the column, live 2026-10-07, BL-334 item 4); only an explicit calendar argument does. Because it is fixed arithmetic, it is the building block for exact non-Monday week starts (see "Where the source's week start is KNOWN" above). |
 | `day_number_of_quarter` | `day_number_of_quarter ( [date] )` | Day within quarter. Optional `fiscal` param. |
 | `day_number_of_year` | `day_number_of_year ( [date] )` | Day within year (1–366). Optional `fiscal` param. |
 | `hour_of_day` | `hour_of_day ( [date] )` | Hour of the day |
 | `week_number_of_month` | `week_number_of_month ( [date] )` | Week within month. Optional `fiscal` param. |
 | `week_number_of_quarter` | `week_number_of_quarter ( [date] )` | Week within quarter. Optional `fiscal` param. |
-| `week_number_of_year` | `week_number_of_year ( [date] )` | Week within year. The compiled SQL uses ISO-style Thursday logic: `week_number_of_year(2026-01-04)` = 1 (live-verified 2026-10-06, se-thoughtspot). Optional `fiscal` param. |
+| `week_number_of_year` | `week_number_of_year ( [date] )` | **The ISO-8601 week** (Thursday rule): it equalled Python `isocalendar()` on all 120 dates probed around six year boundaries (live 2026-10-07, BL-380). So early-January days can be week 52/53 (2021-01-01 = 53) and late-December days week 1 (2019-12-30 = 1). It is **not** a "week 1 contains January 1" numbering. Under a Monday start it was one lower than Tableau `DATEPART('week')` for the whole of 2021, 2022, 2023 and 2027; use the Jan-1 composition above for those sources. A column-bound custom calendar does not change it. |
 | `is_weekend` | `is_weekend ( [date] )` | Returns true for Saturday/Sunday. Optional `fiscal` param. |
-| `start_of_month` | `start_of_month ( [date] )` / `start_of_month ( [date] , 'Calendar Name' )` | First day of the month. Default: the Model's calendar, Gregorian when nothing else is set (ThoughtSpot domain review, 2026-10-06). Translations omit the calendar argument — see "Calendar argument" above. |
-| `start_of_quarter` | `start_of_quarter ( [date] )` / `start_of_quarter ( [date] , 'Calendar Name' )` | First day of the quarter. Default: the Model's calendar, Gregorian when nothing else is set (ThoughtSpot domain review, 2026-10-06). Translations omit the calendar argument — see "Calendar argument" above. |
-| `start_of_week` | `start_of_week ( [date] )` / `start_of_week ( [date] , 'Calendar Name' )` | First day of the week. **Default: the Model's calendar — Gregorian, Monday week start when nothing else is set** (ThoughtSpot domain review, 2026-10-06) — consistent with `day_number_of_week`'s 1=Monday. **Assumes a Monday week start**: a translation using it diverges if the Model's calendar starts the week elsewhere. Translations omit the calendar argument — see "Calendar argument" above. *Residual SQL caveat:* the default form compiled to Snowflake `DATE_TRUNC(week, d)` (returned Monday 2026-09-28 for 2026-10-04 on se-thoughtspot, live-verified 2026-10-06), which yields Monday only while the warehouse's `WEEK_START` is 0 or 1; whether ThoughtSpot sets `WEEK_START` on its session is unverified — BL-334. |
-| `start_of_year` | `start_of_year ( [date] )` / `start_of_year ( [date] , 'Calendar Name' )` | First day of the year. Default: the Model's calendar, Gregorian when nothing else is set (ThoughtSpot domain review, 2026-10-06). Translations omit the calendar argument — see "Calendar argument" above. |
+| `start_of_month` | `start_of_month ( [date] )` / `start_of_month ( [date] , CalendarName )` | First day of the month. Default: the Model's calendar, Gregorian when nothing else is set (ThoughtSpot domain review, 2026-10-06). Translations omit the calendar argument — see "Calendar argument" above. |
+| `start_of_quarter` | `start_of_quarter ( [date] )` / `start_of_quarter ( [date] , CalendarName )` | First day of the quarter. Default: the Model's calendar, Gregorian when nothing else is set (ThoughtSpot domain review, 2026-10-06). Translations omit the calendar argument — see "Calendar argument" above. |
+| `start_of_week` | `start_of_week ( [date] )` / `start_of_week ( [date] , CalendarName )` | First day of the week, **Monday**. A custom calendar bound to the column does not change it (live 2026-10-07); only the explicit calendar argument does. Translations omit the argument — see "Calendar argument" above. **SQL caveat:** it compiles to Snowflake `DATE_TRUNC(week, d)`, which follows the `WEEK_START` of ThoughtSpot's connection session. That was **0** on se-thoughtspot / `APJ_TAB`: a ThoughtSpot-issued `DAYOFWEEK` returned 0 for every Sunday (2026-10-07, BL-334 item 3). A connection whose Snowflake user or account sets 2–7 truncates to that day instead; whether ThoughtSpot would override it is unprobed (needs `ALTER USER` on the connection user). For a known non-Monday source start, do **not** shift this function — see "Where the source's week start is KNOWN" above (BL-373). |
+| `start_of_year` | `start_of_year ( [date] )` / `start_of_year ( [date] , CalendarName )` | First day of the year. Default: the Model's calendar, Gregorian when nothing else is set (ThoughtSpot domain review, 2026-10-06). Translations omit the calendar argument — see "Calendar argument" above. |
 | `start_of_hour` | `start_of_hour ( [time] )` | Time truncated to the hour |
 | `start_of_min` | `start_of_min ( [time] )` | Time truncated to the minute |
 | `diff_days` | `diff_days ( [end] , [start] )` | Days between — note arg order (end first) |

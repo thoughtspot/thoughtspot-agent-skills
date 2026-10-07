@@ -12462,7 +12462,7 @@ converter.
 
 ## BL-334 — Week-start assumptions: `DAYOFWEEK` renamed to `day_number_of_week`, and `start_of_week` compiles to `WEEK_START`-dependent SQL `Tier 2`
 
-**Filed:** 2026-10-06. **Status:** OPEN (items 1–2 resolved; items 3–4 open).
+**Filed:** 2026-10-06. **Status:** OPEN — items 1, 2 and 4 resolved. Item 3 is resolved for se-thoughtspot (updated 2026-10-07). Its residual, whether ThoughtSpot overrides a non-default `WEEK_START` on the connection user, needs an admin `ALTER USER`.
 **Source:** live probe on se-thoughtspot, 2026-10-06, plus ThoughtSpot domain review, 2026-10-06.
 
 **The facts.**
@@ -12547,7 +12547,8 @@ converter.
      - `ts formula translate`: APPROXIMATED.
 
      No shifted form is emitted. The exact `add_days ( start_of_week ( add_days ( d , k ) ) , -k )`
-     composition is BL-373.
+     composition is BL-373. (Superseded 2026-10-07: BL-373 emits a `day_number_of_week` form
+     instead, and the Tableau and Qlik known-start cases are exact, not review.)
    - **Channels:**
      - Tableau: `review_notes` → `validation_warnings`.
      - Snowflake SV: `annotations[]`.
@@ -12568,8 +12569,31 @@ converter.
    Tests: `tools/ts-cli/tests/test_week_start_flag.py`.
 3. **Residual SQL caveat.** On a warehouse with `WEEK_START` ≠ 0/1, the default `start_of_week` and
    `day_number_of_week` can disagree.
+   **UPDATED 2026-10-07 (live probe, [probe record §8](reviews/2026-10-06-formula-semantics-probes.md#8-week-truncation-week-numbering-week_start-and-custom-calendars-bl-373-bl-380-bl-334-items-34)).**
+   - A ThoughtSpot-issued `sql_int_op ( "DAYOFWEEK({0})" , d )` on `APJ_TAB` returned 0 for every
+     Sunday, so ThoughtSpot's session runs with `WEEK_START = 0`. The account default is also 0.
+     `start_of_week` is therefore Monday on this cluster.
+   - In a Snowflake session with `WEEK_START = 7`, `DATE_TRUNC(week)` returns Sunday. The shifted
+     `start_of_week` form returns Saturday for a Sunday week. The `day_number_of_week` form stays
+     exact, which is why BL-373 emits that form.
+   - **Not probed (needs an admin):** whether ThoughtSpot overrides a `WEEK_START` of 2–7 set on
+     the connection's Snowflake user or account. Settling it means `ALTER USER <connection user>
+     SET WEEK_START = 7` (or a scratch connection with such a user), plus one `DAYOFWEEK` query.
+   - The note wording in `formula_week.py` now states the probed value instead of "unverified".
 4. **Unverified.** Whether a non-default Model calendar changes `day_number_of_week`'s `+3` constant
    and `start_of_week`'s compiled SQL. Only one cluster with the default calendar was probed.
+   **RESOLVED 2026-10-07 (live probe with scratch objects, all deleted).** A Sunday-start 4-4-5
+   custom calendar was registered on `APJ_TAB` and bound to a column with `properties.calendar`.
+   - On that column, `start_of_week`, `day_number_of_week` and `week_number_of_year` compiled to
+     **the same SQL as on a plain column**: Gregorian, Monday weeks.
+   - Only the explicit calendar argument changes them. It joins the calendar table INNER and reads
+     `start_of_week_epoch`.
+   - The argument is a **bare keyword** (`start_of_week ( d , CalName )`); a quoted
+     `'CalName'` is rejected. The formula reference documented the quoted form, now corrected.
+   - Consequence: the advisory's old closing line "the Model's calendar applies — check it" was
+     wrong. It now says the result is Gregorian with a Monday week even on a column bound to
+     another calendar.
+   - Not probed: a cluster-wide default or fiscal calendar (admin setting).
 
 **Fix.** (1) Correct both translators, using `formula_common` for the shared offset, with tests for each
 weekday. (2) Have converters flag week-dependent output in the conversion report. (3) Probe a session
@@ -13702,7 +13726,7 @@ correct the map row to say the translator declines it.
 
 ## BL-373 — Exact non-Monday week truncation where the source week start is known `Tier 2`
 
-**Filed:** 2026-10-07. **Status:** OPEN — needs a live probe. **Source:** BL-334 item 2 follow-up.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.174.0). **Source:** BL-334 item 2 follow-up.
 
 **The facts.** Week truncations from sources whose week start is not Monday are downgraded today
 (BL-334). Where the source states its week start — Tableau's `week_start` / an explicit argument,
@@ -13713,6 +13737,27 @@ Qlik's `FirstWeekDay` — an exact form is available:
 the shift is exact under the cluster's setting. Then emit the form in the Tableau and Qlik translators
 (through `formula_common`, BL-217) instead of downgrading; keep the downgrade where the week start is
 unknown.
+
+**Resolution (2026-10-07).** See the [probe record §8](reviews/2026-10-06-formula-semantics-probes.md#8-week-truncation-week-numbering-week_start-and-custom-calendars-bl-373-bl-380-bl-334-items-34).
+- **Probe result for the proposed shift.** It was exact on se-thoughtspot: 120 dates, every
+  weekday, six year boundaries. But it is **not** what ships. `start_of_week` compiles to
+  `DATE_TRUNC(week, d)`, and under a Snowflake `WEEK_START` of 7 the shift returns Saturday for a
+  Sunday week (reproduced in a Snowflake session).
+- **What ships.** The week start is rebuilt from the fixed `day_number_of_week`:
+  `add_days ( date ( d ) , 0 - mod ( day_number_of_week ( d ) + (6 - i) , 7 ) )`. It is exact under
+  any `WEEK_START`. Its home is `formula_week.ts_week_start` (BL-217).
+- **Live verification.** The emitted strings were checked for all seven start days on the same 120
+  dates, along with one Tableau output and one Qlik output. 2,040 checks, 0 mismatches.
+- **Converters:**
+  - Tableau `DATETRUNC('week')` with a literal `start_of_week` or the datasource Week start emits
+    the exact form. A field or parameter start is left unmapped.
+  - Qlik `WeekStart` with a known first week day (3rd argument or `SET FirstWeekDay`) emits it too.
+    A literal period offset `n` adds `7*n` days. A non-literal offset or start stays NEEDS REVIEW.
+  - Monday, or an unknown start, stays `start_of_week` with the advisory. That keeps the BL-334
+    advisory, which is not a downgrade.
+- Known-start records are no longer `review_required` / NEEDS REVIEW.
+- Tests: `tests/test_week_exact_forms.py` (all seven starts × 270 dates against `datetime`) and
+  the updated `tests/test_week_start_flag.py`.
 
 **Target:** 2026-11-30.
 
@@ -13828,7 +13873,7 @@ reference pass reads as two bare names.
 
 ## BL-380 — Tableau `DATEPART('week')` → `week_number_of_year` year-boundary difference `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** OPEN. **Source:** BL-334 item 2 (PR #582 review).
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.174.0). **Source:** BL-334 item 2 (PR #582 review).
 
 **The facts.** The Tableau translator maps `DATEPART('week', d)` to `week_number_of_year ( d )`.
 Tableau numbers week 1 as the week containing January 1, counted from the datasource's week start.
@@ -13840,6 +13885,28 @@ and last days of a year even under a Monday week start. A known non-Monday start
 **Fix.** Probe `week_number_of_year` live across several year boundaries (one where Jan 1 is a
 Friday, Saturday or Sunday), compare with Tableau's numbering, then either document the rule or
 compose an exact form. Until then, consider flagging the mapping.
+
+**Resolution (2026-10-07).** See the [probe record §8](reviews/2026-10-06-formula-semantics-probes.md#8-week-truncation-week-numbering-week_start-and-custom-calendars-bl-373-bl-380-bl-334-items-34).
+- **The rule.** `week_number_of_year` **is the ISO-8601 week**. Its compiled SQL takes the Thursday
+  of the date's week, and it equalled `isocalendar()` on 120 dates around the 2020, 2021, 2022,
+  2023, 2026 and 2027 boundaries.
+- **The difference is worse than a boundary effect.** Under a Monday start, Tableau's numbering is
+  one higher for **every date** of a year whose Jan 1 falls on a Friday, Saturday or Sunday. That
+  was 2021, 2022, 2023 and 2027 here (e.g. 2021-01-04: Tableau 2, ThoughtSpot 1). It was a silent
+  wrong number on every such row.
+- **Fix.** `DATEPART('week', d [, start])` and `WEEK(d)` now emit the exact Jan-1 composition
+  `( floor ( ( day_number_of_year ( d ) - 1 + <weekday of start_of_year ( d ) from the start> ) / 7 ) + 1 )`
+  from `formula_week.ts_week_of_year_jan1`. It was live-verified for all seven start days.
+- **Week start**, in order: a literal argument, then the datasource Week start, then Monday (as
+  `DATETRUNC`, with the advisory). A field or parameter start is left unmapped.
+- **Riders:**
+  - `ISOWEEK(d)` / `DATEPART('iso-week', d)` now map to `week_number_of_year`. The mapping doc's
+    13.28 row had it backwards ("week_number_of_year is not ISO") and is corrected.
+  - `ISOYEAR` / `ISOQUARTER` stay unmapped.
+  - Found while probing: `date ( x )` compiles to nothing when ThoughtSpot already types `x` as a
+    DATE. `add_seconds ( <DATE> , n )` is typed DATE, so the time survives `date()`. On a genuine
+    DATETIME it is `CAST(… AS date)`. Recorded in the formula reference; not a converter defect
+    today.
 
 ## BL-381 — `check_skill_versions` accepts a changelog whose versions go backwards `Tier 3`
 
