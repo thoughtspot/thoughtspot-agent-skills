@@ -65,6 +65,25 @@ def test_snowflake_backslash_escaped_quote_does_not_end_the_literal():
     assert out == r"s = 'it\'s -- fine'"
 
 
+@BOTH
+def test_backslash_escaped_quote_keeps_the_literal_whole(t):
+    # Databricks (and Snowflake) read 'a\' -- b' as ONE literal, a\' -- b: ignoring the
+    # escape would close the literal early and strip "-- b'" as a comment
+    assert strip_sql_comments(r"s = 'a\' -- b' -- gone") == r"s = 'a\' -- b'"
+    assert strip_sql_comments(r"s = 'it\'s' -- c") == r"s = 'it\'s'"
+    assert t(r"s = 'a\' -- b' -- gone", r) == t(r"s = 'a\' -- b'", r)
+    assert t(r"s = 'it\'s' -- c", r) == t(r"s = 'it\'s'", r)
+    assert "it's" in t(r"s = 'it\'s'", r)
+
+
+def test_databricks_stripper_and_tokenizer_agree_on_literal_spans():
+    # every span the stripper keeps as a literal is one string token to mv_sql
+    from ts_cli.databricks.mv_sql import tokenize
+    for src in [r"'a\' -- b'", r"'it\'s'", r"'x\\'", "'a -- b'", "'/* c */'"]:
+        assert strip_sql_comments(src) == src
+        assert [k for k, _ in tokenize(src)] == ["string"]
+
+
 def test_doubled_quote_escape():
     assert strip_sql_comments("col = 'it''s -- fine'") == "col = 'it''s -- fine'"
 

@@ -13915,5 +13915,10 @@ with `''` and `\'` escapes copied verbatim, and `"…"` quoted identifiers copie
 calls it with its defaults, as before. Tests: `tools/ts-cli/tests/test_sql_comments.py` — both
 dialects, `--` and `/* */` inside string literals left alone, `//` inside `'http://x'`, a marker inside
 a quoted identifier, a backslash-escaped quote, and the `ts formula translate` path.
-Not changed: the Databricks scan still treats `\'` as ending a literal, so `'a\' -- b'` is mis-stripped
-there (pre-existing, not in scope here).
+Also fixed, after the #587 review: the Databricks scan ignored backslash escapes, which Databricks
+SQL honours by default, so `'a\' -- b'` closed at `\'` and `-- b'` was stripped as a comment — real
+formula text silently dropped. Backslash escapes are now on by default (`strip_sql_comments` and
+`sqlf_scan_string_literal`, so `mv_expr`'s literal masking and splitting too), matching the `mv_sql`
+tokenizer (`SQL_STRING_TOKEN_DATABRICKS` already reads `\.`); a test asserts every span the stripper
+keeps as a literal is one string token, so the two cannot disagree. Tests for `'a\' -- b'` and
+`'it\'s'` on both dialects.

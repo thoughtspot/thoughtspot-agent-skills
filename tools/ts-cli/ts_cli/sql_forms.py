@@ -53,10 +53,11 @@ SQLF_MAX_SCALE = 15
 
 # --- comments (BL-382) -------------------------------------------------------------------
 
-def sqlf_scan_string_literal(s: str, i: int, backslash: bool = False) -> int:
+def sqlf_scan_string_literal(s: str, i: int, backslash: bool = True) -> int:
     """Given ``s[i]`` is a quote character, the index just past the quoted run that it opens.
-    A doubled quote is the escape; with ``backslash``, ``\\x`` is also an escape (Snowflake
-    ``'it\\'s'``). An unterminated run continues to the end of the string."""
+    A doubled quote is the escape; with ``backslash`` (the default), ``\\x`` is too — both
+    Databricks and Snowflake read ``'it\\'s'`` as one literal, and so do their tokenizers
+    (``SQL_STRING_TOKEN_*``). An unterminated run continues to the end of the string."""
     quote, j, n = s[i], i + 1, len(s)
     while j < n:
         if backslash and s[j] == "\\":
@@ -72,14 +73,15 @@ def sqlf_scan_string_literal(s: str, i: int, backslash: bool = False) -> int:
 
 
 def strip_sql_comments(expr: str, *, line_markers: tuple = ("--",), ident_quote: str = "",
-                       backslash: bool = False) -> str:
+                       backslash: bool = True) -> str:
     """Strip line and ``/* */`` block comments in a single quote-aware pass.
 
     String-literal contents are copied verbatim (comment markers inside literals are data, not
     comments), as is a quoted identifier when ``ident_quote`` is given (Snowflake ``"a--b"``);
     a line marker inside a ``/* */`` block is part of that block. Block comments become one
     space, line comments nothing. The defaults are Databricks' (``--``, backtick identifiers
-    carry no comment risk); Snowflake passes ``("--", "//")``, ``'"'`` and ``backslash=True``."""
+    carry no comment risk; backslash escapes on, as Databricks honours them — BL-382); Snowflake
+    also passes ``("--", "//")`` and ``'"'``."""
     out: list[str] = []
     i, n = 0, len(expr)
     while i < n:
