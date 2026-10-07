@@ -11,6 +11,8 @@ Subcommands, in order:
                 (writes <data-dir>/extracted/candidates.jsonl — full content, outside the repo)
     select      choose the M1 set from the candidates + the `formulas` cross-check
                 (writes the committed manifest and aggregate selection counts)
+    recheck     refresh an existing manifest's ``crosscheck`` statuses from a new cross-check,
+                keeping its case set (``select`` on regenerated candidates picks a new one)
     run         live: materialise the manifest, load the input fixture, import, query, compare
                 (full run JSON -> <data-dir>/runs/; redacted results + report -> the repo)
     rebuild     re-classify a stored full run JSON (no queries)
@@ -196,6 +198,41 @@ def cmd_select(args) -> int:
     return 0
 
 
+def recheck(entries: list[dict], status: dict[str, str]) -> tuple[list[dict], list[tuple]]:
+    """An existing manifest's entries with ``crosscheck`` refreshed from a new cross-check.
+
+    The case SET is kept: re-running ``select`` on regenerated candidates picks a different
+    set, which would silently replace a scored baseline. An id the new cross-check did not
+    evaluate (its candidate is no longer translatable) keeps its recorded status.
+    Returns the entries and the ``(id, old, new)`` changes."""
+    out, changes = [], []
+    for e in entries:
+        new = status.get(e["id"])
+        if new is not None and new != e.get("crosscheck"):
+            changes.append((e["id"], e.get("crosscheck"), new))
+            e = {**e, "crosscheck": new}
+        out.append(e)
+    return out, changes
+
+
+def cmd_recheck(args) -> int:
+    data_dir = literal.resolve_data_dir(args.data_dir, REPO)
+    cc = json.loads((data_dir / "extracted" / "crosscheck.json").read_text())
+    entries = literal.parse_manifest(args.manifest.read_text(), str(args.manifest))
+    out, changes = recheck(entries, {k: v["status"] for k, v in cc.items()})
+    missing = sum(1 for e in entries if e["id"] not in cc)
+    args.manifest.write_text("".join(literal.manifest_line(e) + "\n" for e in out))
+    if args.selection:
+        sel = json.loads(args.selection.read_text())
+        sel["crosscheck"] = dict(collections.Counter(
+            f"{e['source']}:{e['crosscheck']}" for e in out))
+        sel["crosscheck_rechecked"] = _dt.date.today().isoformat()
+        args.selection.write_text(json.dumps(sel, indent=1, sort_keys=True) + "\n")
+    print(json.dumps({"entries": len(entries), "changed": [list(c) for c in changes],
+                      "not_in_crosscheck": missing}, indent=1))
+    return 0
+
+
 # =====================================================================================
 # run / rebuild
 # =====================================================================================
@@ -301,6 +338,9 @@ def _args(argv=None):
     s.add_argument("--n-lo", type=int, default=200)
     s.add_argument("--n-poi", type=int, default=50)
     s.add_argument("--per-function", type=int, default=6)
+    rc = sub.add_parser("recheck", help="refresh an existing manifest's crosscheck statuses")
+    rc.add_argument("--manifest", type=pathlib.Path, required=True)
+    rc.add_argument("--selection", type=pathlib.Path)
     for name in ("run", "rebuild"):
         r = sub.add_parser(name)
         r.add_argument("--manifest", type=pathlib.Path, required=True)
@@ -322,7 +362,8 @@ def _args(argv=None):
 def main(argv=None) -> int:
     args = _args(argv)
     try:
-        return {"candidates": cmd_candidates, "select": cmd_select, "run": cmd_run,
+        return {"candidates": cmd_candidates, "select": cmd_select, "recheck": cmd_recheck,
+                "run": cmd_run,
                 "rebuild": cmd_rebuild}[args.cmd](args)
     except literal.DataError as exc:
         print(f"error: {exc}", file=sys.stderr)

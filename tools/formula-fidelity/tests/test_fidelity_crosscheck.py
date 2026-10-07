@@ -55,6 +55,16 @@ def test_non_numeric_and_non_finite():
     assert not CC.agree(_num("inf"), _num(1e308), TIGHT)
 
 
+def test_recheck_keeps_the_case_set_and_unevaluated_statuses():
+    entries = [{"id": "a", "crosscheck": "agree"}, {"id": "b", "crosscheck": "agree"},
+               {"id": "c", "crosscheck": "disputed"}]
+    out, changes = run_literal.recheck(entries, {"a": "agree", "b": "disputed", "x": "agree"})
+    assert [e["id"] for e in out] == ["a", "b", "c"]  # no id added, none dropped
+    assert [e["crosscheck"] for e in out] == ["agree", "disputed", "disputed"]
+    assert changes == [("b", "agree", "disputed")]
+    assert entries[1]["crosscheck"] == "agree"  # input not mutated
+
+
 def test_rebuild_drops_cases_now_disputed():
     run_cases = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
     entries = [{"id": "a", "crosscheck": "agree"}, {"id": "b", "crosscheck": "disputed"},

@@ -219,6 +219,11 @@ PYTHONPATH= uv run --no-project --python 3.12 --with formulas --with openpyxl \
 $UV python -I tools/formula-fidelity/run_literal.py --data-dir $D select \
   --manifest tools/formula-fidelity/cases/excel/m1-manifest.jsonl \
   --selection tools/formula-fidelity/cases/excel/m1-selection.json
+# 3b. after a new cross-check, refresh an EXISTING manifest's statuses without re-selecting
+#     (select on regenerated candidates picks a different set; recheck keeps the set)
+$UV python -I tools/formula-fidelity/run_literal.py --data-dir $D recheck \
+  --manifest tools/formula-fidelity/cases/excel/m1-manifest.jsonl \
+  --selection tools/formula-fidelity/cases/excel/m1-selection.json
 # 4. live run (adds --with snowflake-connector-python)
 $UV --with snowflake-connector-python python -I tools/formula-fidelity/run_literal.py --data-dir $D run \
   --manifest tools/formula-fidelity/cases/excel/m1-manifest.jsonl \
@@ -234,6 +239,10 @@ $UV --with snowflake-connector-python python -I tools/formula-fidelity/run_liter
   `Deps(oracle=…)` in `run.py` is the seam; its default is still M0's warehouse oracle.
 - **Cross-check.** Every case is re-evaluated by `formulas` (bronze) on a workbook holding only
   its inputs. A disagreement makes the case **oracle-disputed**: listed, not run, not scored.
+  Agreement is decided at the case's **own declared tolerance**, by the scorer's rule
+  (`compare.numbers_close`): a looser cross-check bound would let a last-digit oracle
+  disagreement through to be scored as a silent wrong answer (BL-356). `rebuild` drops the
+  stored verdict of a case that has since become disputed, so it is counted once.
 - **Inputs.** A formula over constants runs as a constant formula. A formula over cells gets its
   cells renamed to row 1 (`K2`, `K3` → `A1`, `B1`), and each distinct source cell becomes a typed
   column (`X<n>`) of one single-row fixture table, loaded by M0's run-stamped loader. A blank cell
