@@ -361,6 +361,8 @@ class TestPrinter:
         assert e == "concat ( 'Bob' , sql_string_op ( \"'''s '\" ) , [T::name] )"
         assert f('=CONCAT("a\\b","!")') == "concat ( 'a\\\\b' , '!' )"
         assert "cannot carry" in review('=CONCAT("say ""hi"", it\'s",[@name])')
+        assert "cannot carry" in review('=CONCAT("it\\\'s",[@name])')     # backslash + quote
+        assert "cannot carry" in review('=CONCAT("{it\'s}",[@name])')
         from ts_cli.excel.tsast import lit_string, string_text
         for text in ("it's", "a\\b", "''", "plain"):
             assert string_text(lit_string(text)["value"]) == text

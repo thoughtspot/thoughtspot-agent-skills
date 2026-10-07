@@ -51,9 +51,11 @@ def _string_text(literal: str) -> str:
 
 def unprintable_string(literal: str) -> bool:
     """A quote-bearing text the ``sql_string_op`` form cannot carry: a ``"`` ends the template
-    (it has no escape, probe record §7) and ``{`` / ``}`` read as placeholders."""
+    (it has no escape, probe record §7), ``{`` / ``}`` read as placeholders, and a backslash
+    inside a template does not survive (``INITCAP`` delimiters with ``\\t`` / ``\\x22``
+    became letters, §7), so ``it\\'s`` has no form that is known to work."""
     text = string_text(literal)
-    return "'" in text and any(c in text for c in '"{}')
+    return "'" in text and any(c in text for c in '"{}\\')
 
 
 def string_text(literal: str) -> str:
