@@ -569,7 +569,7 @@ declared untranslatable without checking the composition first.
 
 - **E10 — prefer composition over the stash.** Most of ThoughtSpot's apparently-proprietary
   functions are sugar. `sum_if` is `SUM(CASE WHEN ...)`, which the specification blesses
-  explicitly (`:227-229`); `safe_divide` is `COALESCE(a / NULLIF(b, 0), 0)`; `group_sum`
+  explicitly (`:227-229`); `safe_divide` is `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` (what ThoughtSpot compiles it to — the upstream converter's `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, BL-371); `group_sum`
   over a fixed grain is `SUM(x) OVER (PARTITION BY attr)`. The stash is for what genuinely
   has no expression, which turns out to be a short list dominated by *runtime* concepts.
 
@@ -582,7 +582,7 @@ declared untranslatable without checking the composition first.
 | `unique_count_if ( cond , [x] )` | `COUNT(DISTINCT CASE WHEN cond THEN x END)` | via Ossie composition |
 | `average_if` / `min_if` / `max_if` / `stddev_if` / `variance_if` | `AVG` / `MIN` / `MAX` / `STDDEV` / `VARIANCE` `(CASE WHEN cond THEN x END)` | via Ossie composition |
 | `unique count ( [x] )` | `COUNT(DISTINCT x)` | via Ossie composition |
-| `safe_divide ( [a] , [b] )` | `COALESCE(a / NULLIF(b, 0), 0)` | via Ossie composition — the zero-not-null result is preserved by the explicit `COALESCE`. |
+| `safe_divide ( [a] , [b] )` | `COALESCE(a / NULLIF(b, 0), 0)` | via Ossie composition — **inexact on NULL** (BL-371): the upstream converter (`reverse.py:273`) emits this form, which is 0 on a NULL operand where `safe_divide` is NULL. The exact form is ThoughtSpot's own compilation, `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` — 0 on a zero divisor even over a NULL dividend, NULL on a NULL divisor (this repo's converters, BL-366). Upstream fix held. |
 | `pow` / `log2` / `strlen` / `strpos` / `substr` / `left` / `right` | `POWER` / `LOG(2, x)` / `LENGTH` / `POSITION(sub IN s)` / `SUBSTRING(s, start + 1, len)` | via Ossie composition — note `substr`'s 0-based start needs `+ 1` going this way. |
 | `sin` / `cos` / `tan` / `asin` / `acos` / `atan` | `SIN(x)` … / `ASIN(x)` … | identity — both sides are in radians (BL-364; corrected 2026-10-07 from a degree/radian conversion). |
 | `to_integer` / `to_double` / `to_string` / `to_date ( s , fmt )` | `CAST(x AS INTEGER)` / `CAST(x AS DOUBLE)` / `CAST(x AS VARCHAR)` / `TO_DATE(s, format)` | via Ossie composition — the format model is translated back through the token table; `TO_DATE(s, format)` is EXPERIMENTAL on the Ossie side (`:353`). |
