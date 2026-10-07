@@ -77,12 +77,20 @@ def search_call(tr, n) -> dict:
     return T.call("strpos", tr.text(n.args[1]), tr.text(find))
 
 
+NEEDLE_TRAP = ("SEARCH with find_text from a column: Excel reads * ? and ~ in it as "
+               "wildcards; the translation matches them literally")
+START_TRAP = ("{name} with a start from a column: a start below 1 is #VALUE! in Excel; here "
+              "it returns a value")
+
+
 def _start(tr, n) -> dict:
     """A FIND / SEARCH ``start_num``: below 1 is #VALUE! in Excel."""
     start = tr.int_arg(n.args[2])
     value = T.number_value(start)
     if value is not None and value < 1:
         tr.review(f"{n.name} with start_num below 1 is #VALUE! in Excel")
+    if value is None:
+        tr.trap(START_TRAP.format(name=n.name))
     tr.note(f"{n.name} with start_num past the end of the text: Excel returns #VALUE!, "
             "POSITION returns 0")
     return start
@@ -90,12 +98,16 @@ def _start(tr, n) -> dict:
 
 def _search(tr, n):
     tr.trap("SEARCH not found: Excel returns #VALUE!, strpos returns 0")
+    if n.args and not isinstance(n.args[0], X.Str):
+        tr.trap(NEEDLE_TRAP)
     if len(n.args) == 3:
         # strpos has no start position; Snowflake's three-argument POSITION over LOWER is
         # strpos's own compiled form (POSITION(lower(find) IN LOWER(within)), probe record §4)
         find = n.args[0]
         if isinstance(find, X.Str) and re.search(r"[*?~]", find.value):
             tr.review("SEARCH with wildcards (* ? ~) has no native form — Excel map SEARCH row")
+        if not isinstance(find, X.Str):
+            tr.trap(NEEDLE_TRAP)
         return T.call("sql_int_op", template("POSITION(LOWER({0}), LOWER({1}), {2})"),
                       tr.text(find), tr.text(n.args[1]), _start(tr, n))
     return search_call(tr, n)
@@ -167,14 +179,15 @@ def _value(tr, n):
 # Windows-1252 and Unicode agree on 1–127 and 160–255; 128–159 differ (live: CHR(150) is
 # U+0096, Windows-1252 150 is an en dash). Snowflake ASCII returns the first UTF-8 BYTE
 # (ASCII('é') = 195, live 2026-10-07), so CODE uses UNICODE, which returns 233.
-CODE_PAGE_TRAP = ("{name}: Excel uses the platform code page (Windows-1252 on Windows) and "
-                  "the warehouse Unicode; they agree for codes 1–127 and 160–255 and differ "
-                  "for 128–159 (and Excel's CODE is 63, '?', for a character outside the "
-                  "code page)")
+CODE_PAGE_TRAP = ("{name}: Excel uses the platform code page — Windows-1252 on Windows, Mac "
+                  "Roman on a Mac — and the warehouse Unicode. All three agree for codes 1–127; "
+                  "Windows-1252 matches Unicode for 160–255 but not 128–159, and Mac Roman "
+                  "differs from both above 127 (and Excel's CODE is 63, '?', for a character "
+                  "outside the code page)")
 
 
 def _same_page(code) -> bool:
-    return 1 <= code <= 127 or 160 <= code <= 255
+    return 1 <= code <= 127
 
 
 def _char(unicode: bool):
@@ -185,6 +198,8 @@ def _char(unicode: bool):
         top = 1114111 if unicode else 255
         if value is not None and not 1 <= value <= top:
             tr.review(f"{n.name}({value}) is #VALUE! in Excel")
+        if unicode and value is not None and 55296 <= value <= 57343:
+            tr.review(f"UNICHAR({value}) is a UTF-16 surrogate, #N/A in Excel")
         if unicode:
             if value is None:
                 tr.trap("UNICHAR of 0 (or of a surrogate code point) is an error in Excel; "
@@ -231,6 +246,8 @@ def _replace(tr, n):
         if value is not None and value < low:
             tr.review(f"REPLACE with a {'start below 1' if low else 'negative count'} is "
                       "#VALUE! in Excel")
+    if T.number_value(start) is None:
+        tr.trap(START_TRAP.format(name="REPLACE"))
     head = _minus_one(start)
     sv, cv = T.number_value(start), T.number_value(count)
     tail_at = (T.lit_number(str(int(sv) - 1 + int(cv))) if sv is not None and cv is not None

@@ -192,7 +192,8 @@ class TestMath:
 class TestText:
     def test_char(self):
         assert f("=CHAR(72)", "TRANSLATED") == 'sql_string_op ( "CHR({0})" , 72 )'
-        assert ok("=CHAR(201)", "TRANSLATED")
+        assert ok("=CHAR(201)", "APPROXIMATED").traps    # Mac Roman differs above 127
+        assert "Mac Roman" in ok("=CHAR(201)").traps[0]
         assert ok("=CHAR(140)", "APPROXIMATED").traps      # Windows-1252 differs at 128–159
         assert ok("=CHAR([@qty])", "APPROXIMATED")
         assert f("=CHAR([@amt])") == 'sql_string_op ( "CHR({0})" , floor ( [T::amt] ) )'
@@ -201,6 +202,7 @@ class TestText:
     def test_unichar(self):
         assert f("=UNICHAR(9731)", "TRANSLATED") == 'sql_string_op ( "CHR({0})" , 9731 )'
         assert "#VALUE!" in review("=UNICHAR(0)")
+        assert "surrogate" in review("=UNICHAR(55300)")
 
     def test_code_uses_unicode_not_ascii(self):
         # Snowflake ASCII returns the first UTF-8 byte (195 for é); UNICODE the code point
@@ -436,3 +438,12 @@ class TestDomains:
         for src in ("=LOG(8,2)", "=LOG(100)", "=ACOSH(1)", "=ATANH(0.5)", "=ASIN(-1)",
                     "=SINH([@amt])"):
             ok(src, "TRANSLATED")
+
+
+class TestReviewTraps:
+    def test_column_start_and_needle(self):
+        assert any("start from a column" in t for t in tx('=REPLACE([@name],[@qty],1,"x")').traps)
+        assert any("start from a column" in t for t in tx('=FIND("q",[@name],[@qty])').traps)
+        assert any("wildcards" in t for t in tx("=SEARCH([@name],[@name])").traps)
+        assert any("wildcards" in t for t in tx("=SEARCH([@name],[@name],2)").traps)
+        assert not any("wildcards" in t for t in tx('=SEARCH("q",[@name])').traps)
