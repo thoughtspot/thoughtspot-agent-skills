@@ -13577,8 +13577,12 @@ unescaped (`''` → `'`), giving `sum([Bob's Sales::x])`; the measure-reference 
 surfaced in `ts formula translate`: `refs.split_literals` read the apostrophe inside
 `[Bob's Sales::x]` as an opening string literal, so the reference vanished from `references`;
 it now treats a `[…]` reference as code — for ThoughtSpot formula text only
-(`brackets_are_code`, default True); SQL comment stripping of the SOURCE keeps the old reading,
-so `v['a--b']` is not cut at `--`. TMDL's `'Table'.'Column'` split in
+(`brackets_are_code`, default True). Comment stripping of the SOURCE chooses by dialect: in
+Snowflake / Databricks SQL `[` is a subscript whose literal is real, so `v['a--b']` keeps the old
+reading and is not cut at `--`; in Tableau, Qlik and DAX a `[…]` is a field, so
+`[Bob's] + 'x' // note` keeps its comment marker outside the name. Tableau's own literal masking
+(`tableau/literals.mask_literals`) likewise skips `[…]`, which had made `[Bob's] + 'x'`
+NEEDS_REVIEW. TMDL's `'Table'.'Column'` split in
 `powerbi/parsing._split_ref` was not touched (not a DAX expression path). After the #583
 review the regex is gone altogether: a quoted branch is either blind to `''` or quadratic on a
 long apostrophe run, so `powerbi.functions.dax_col_refs` is a linear scanner (it also skips

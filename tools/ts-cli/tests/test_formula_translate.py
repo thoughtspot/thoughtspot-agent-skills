@@ -1146,3 +1146,29 @@ class TestPr583ReviewFixes:
         assert r["formula"] == "[TABLE::Bob's Sales] + [TABLE::Tax]"
         assert "concat" not in translate("[Bob's Sales] + [Tax]", "tableau")["formula"]
         assert translate("[Name] + 'x'", "tableau")["formula"].startswith("concat")
+
+
+class TestStripCommentsPerDialect:
+    """#583 re-review: only SQL reads ``[…]`` as a subscript holding a real literal; in
+    Tableau, Qlik and DAX a ``[…]`` is a field whose name may hold a quote."""
+
+    @pytest.mark.parametrize("dialect,src,kept", [
+        ("tableau", "[Bob's] + 'x' // note", "[Bob's] + 'x'"),
+        ("qlik", "Sum([Bob's]) // it's", "Sum([Bob's])"),
+        ("dax", "SUM([Bob's]) // it's", "SUM([Bob's])"),
+    ])
+    def test_bracket_names_with_quotes(self, dialect, src, kept):
+        from ts_cli.formula_translate.engine import strip_comments
+        out, removed = strip_comments(src, dialect)
+        assert removed and out.rstrip() == kept
+
+    @pytest.mark.parametrize("dialect", ["snowflake", "databricks"])
+    def test_sql_subscript_literal(self, dialect):
+        from ts_cli.formula_translate.engine import strip_comments
+        assert strip_comments("v['a--b'] + 1", dialect) == ("v['a--b'] + 1", False)
+
+    def test_end_to_end(self):
+        r = translate("[Bob's] + 'x' // note", "tableau")
+        assert r["status"] != NEEDS_REVIEW and "concat" in r["formula"]
+        r = translate("Sum([Bob's]) // it's", "qlik")
+        assert r["formula"] == "sum([TABLE::Bob's])"
