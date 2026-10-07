@@ -405,7 +405,7 @@ class TestEmitMeasureRawMeasureWrap:
         model, resolver, col = self._amount_qty_model(
             "safe_divide ( [FACT::amount] , [FACT::qty] )")
         result = emit_measure(col, resolver, model=model)
-        assert result["expr"] == "SUM(COALESCE(source.amount / NULLIF(source.qty, 0), 0))"
+        assert result["expr"] == "SUM(CASE WHEN source.qty = 0 THEN 0 ELSE source.amount / NULLIF(source.qty, 0) END)"
 
     def test_arithmetic_over_raw_physical_measure_gets_wrapped(self):
         # [Amount] * 1.1 -- arithmetic over a single raw physical measure,
@@ -447,7 +447,8 @@ class TestEmitMeasureRawMeasureWrap:
 
         result = emit_measure(col, resolver, ref_resolver, model=model)
         assert result["expr"] == (
-            "COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)")
+            "CASE WHEN ANY_VALUE(category_quantity) = 0 THEN 0 "
+            "ELSE MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0) END")
 
     def test_already_aggregated_formula_measure_not_double_wrapped(self):
         # sum([Amount]) already contains SUM(...) -- must stay exactly as
@@ -467,7 +468,8 @@ class TestIsAggregatePresent:
     @pytest.mark.parametrize("sql", [
         "SUM(source.amount)",
         "COUNT(DISTINCT source.id)",
-        "COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)",
+        "CASE WHEN ANY_VALUE(category_quantity) = 0 THEN 0 "
+            "ELSE MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0) END",
         "SUM(source.amount) OVER (PARTITION BY source.category)",
         "AVG(x) OVER(PARTITION BY y)",
     ])
@@ -476,7 +478,7 @@ class TestIsAggregatePresent:
 
     def test_false_for_a_bare_arithmetic_expression(self):
         assert is_aggregate_present(
-            "COALESCE(source.amount / NULLIF(source.qty, 0), 0)") is False
+            "CASE WHEN source.qty = 0 THEN 0 ELSE source.amount / NULLIF(source.qty, 0) END") is False
 
 
 class TestEmitDimension:

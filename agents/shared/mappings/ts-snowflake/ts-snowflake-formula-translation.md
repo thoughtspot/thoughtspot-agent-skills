@@ -201,7 +201,7 @@ Verified 2026-07-10, SE cluster.
 
 | ThoughtSpot → Snowflake | Snowflake → ThoughtSpot |
 |---|---|
-| `safe_divide ( [a] , [b] )` → `DIV0(a, b)` — inexact only for a NULL `a` over a zero `b` (`safe_divide` 0, `DIV0` NULL; BL-366) | `DIV0(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , [b] ) )` — `DIV0(NULL, 0)` is NULL in Snowflake and `safe_divide` returns 0 there (live 2026-10-07), hence the guard (BL-357) |
+| `safe_divide ( [a] , [b] )` → `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` — what `safe_divide` compiles to, exact on every NULL / zero input; a compound `b` is bracketed, identically in both places (`CASE WHEN (b - c) = 0 THEN 0 ELSE a / NULLIF((b - c), 0) END`). **Fixed 2026-10-07 (BL-366):** it was `DIV0(a, b)`, NULL for a NULL `a` over a zero `b` where `safe_divide` is 0 | `DIV0(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , [b] ) )` — `DIV0(NULL, 0)` is NULL in Snowflake and `safe_divide` returns 0 there (live 2026-10-07), hence the guard (BL-357) |
 | — | `DIV0NULL(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , ifnull ( [b] , 0 ) ) )` — 0 on a zero **or NULL** divisor, NULL on a NULL dividend (`DIV0NULL(1, NULL)` = 0, `DIV0NULL(NULL, 0)` = NULL, live 2026-10-07). It was `safe_divide`, NULL on a NULL divisor (BL-357) |
 | — | `a % b` → the `MOD(` row above, folded at `*` / `/` precedence (`a * b % c` is `(a * b) % c`). It was passed through as a bare `%` (BL-362) |
 | — | `a DIV b` — **Snowflake has no `DIV` operator** (it is a syntax error there); refused, never read as a column. Any identifier that follows an operand with no operator is refused (BL-360) |
@@ -230,6 +230,11 @@ Verified 2026-07-10, SE cluster.
 ThoughtSpot `[a] / [b]` compiles to `a / NULLIF(b, 0)` — NULL on a zero divisor, never a
 query error. `safe_divide ( a , b )` compiles to `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0)
 END` — **0** on a zero divisor even when `a` is NULL, NULL on a NULL divisor (probe record §7).
+
+**ThoughtSpot → Snowflake** emits that compiled form verbatim: `safe_divide ( [a] , [b] )` →
+`CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` (BL-366). Not `DIV0(a, b)`, which is NULL
+for a NULL `a` over a zero `b`, and not `COALESCE(a / NULLIF(b, 0), 0)`, which is 0 on any
+NULL operand. The table below is the **Snowflake → ThoughtSpot** direction.
 
 | Snowflake | ThoughtSpot | Zero divisor | NULL divisor | NULL dividend |
 |---|---|---|---|---|
@@ -880,7 +885,7 @@ metrics:
   - name: category_total_quantity
     expr: "SUM(order_detail.total_quantity) OVER (PARTITION BY categories.category_name)"
   - name: pct_of_category
-    expr: "DIV0(order_detail.total_quantity, SUM(order_detail.total_quantity) OVER (PARTITION BY categories.category_name))"
+    expr: "CASE WHEN SUM(order_detail.total_quantity) OVER (PARTITION BY categories.category_name) = 0 THEN 0 ELSE order_detail.total_quantity / NULLIF(SUM(order_detail.total_quantity) OVER (PARTITION BY categories.category_name), 0) END"
 ```
 
 **For dynamic exclusion (% of total excluding the current dimension):**
@@ -890,7 +895,7 @@ ThoughtSpot: `safe_divide(sum(Quantity), group_aggregate(sum(Quantity), query_gr
 ```yaml
 metrics:
   - name: pct_contribution
-    expr: "DIV0(order_detail.total_quantity, SUM(order_detail.total_quantity) OVER (PARTITION BY EXCLUDING products.product_name))"
+    expr: "CASE WHEN SUM(order_detail.total_quantity) OVER (PARTITION BY EXCLUDING products.product_name) = 0 THEN 0 ELSE order_detail.total_quantity / NULLIF(SUM(order_detail.total_quantity) OVER (PARTITION BY EXCLUDING products.product_name), 0) END"
 ```
 
 ### `group_aggregate` and `group_sum` — Fixed vs Dynamic Grain
@@ -959,7 +964,7 @@ The denominator is a fixed-grain LOD — translate it as a window function in th
 ```yaml
 metrics:
   - name: sales_per_category_quantity
-    expr: "DIV0(SUM(dm_order_detail.AMOUNT), SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY dm_category.product_category))"
+    expr: "CASE WHEN SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY dm_category.product_category) = 0 THEN 0 ELSE SUM(dm_order_detail.AMOUNT) / NULLIF(SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY dm_category.product_category), 0) END"
 ```
 
 If `category_quantity` is also needed as a standalone metric, define it separately
@@ -976,7 +981,7 @@ Use the **Percentage Contribution** pattern — inline the window function direc
 ```yaml
 metrics:
   - name: product_to_category_ratio
-    expr: "DIV0(SUM(dm_order_detail.QUANTITY), SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY categories.CATEGORY_NAME))"
+    expr: "CASE WHEN SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY categories.CATEGORY_NAME) = 0 THEN 0 ELSE SUM(dm_order_detail.QUANTITY) / NULLIF(SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY categories.CATEGORY_NAME), 0) END"
 ```
 
 **How to identify Case B:** The formula references `[NamedMetric]` where that metric

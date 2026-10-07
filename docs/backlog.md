@@ -237,11 +237,15 @@ are roughly ordered by value÷effort.
 | ~~BL-358~~ | ~~ThoughtSpot's queries over a Databricks connection run with non-ANSI semantics: BIGINT overflow wraps and a bad cast is NULL where an ANSI Databricks source raises (fidelity M2) — document; decide whether the translator warns~~ | DONE (2026-10-07 — documented; accepted platform semantics, translator traps) |
 | ~~BL-360~~ | ~~Databricks / Snowflake `a DIV b` — `DIV` read as a column (`[TABLE::DIV]`) and reported TRANSLATED; rejected at import (fidelity M2)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
 | ~~BL-361~~ | ~~`FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor`/`ceil`; TRANSLATED, rejected at import (fidelity M2; Snowflake too)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
-| BL-366 | to-direction `safe_divide` is inexact on NULL — Databricks `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, Snowflake `DIV0(NULL, 0)` is NULL (the inverse of BL-357) | 2026-11-30 |
+| ~~BL-366~~ | ~~to-direction `safe_divide` is inexact on NULL — Databricks `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, Snowflake `DIV0(NULL, 0)` is NULL (the inverse of BL-357)~~ | DONE (2026-10-07 — ts-cli v0.167.0) |
 | BL-367 | The upstream apache/ossie ThoughtSpot converter (`expressions/catalog.py`) still converts trigonometry by `180 / π` as if ThoughtSpot were in degrees — the BL-364 bug, upstream | 2026-11-15 |
-| ~~BL-368~~ | ~~Qlik converter path (`qlik.functions.translate`, no adapter): a double-quoted field name `Sum("Sales Amount")` is emitted as `sum("Sales Amount")` — now a ThoughtSpot string literal, not a column~~ | DONE (2026-10-07 — ts-cli v0.166.0) |
-| ~~BL-369~~ | ~~Power BI: a quoted table name with an apostrophe, `'Bob''s Sales'[x]`, is mangled to `'Bob'[T::X]`~~ | DONE (2026-10-07 — ts-cli v0.166.0) |
-| ~~BL-370~~ | ~~`COT(0)` (Tableau, Snowflake, Databricks) is `1 / tan ( 0 )` = NULL in ThoughtSpot, where the source errors or returns infinity — an undocumented divergence~~ | DONE (2026-10-07 — documented + non-downgrading trap, ts-cli v0.166.0) |
+| ~~BL-368~~ | ~~Qlik converter path (`qlik.functions.translate`, no adapter): a double-quoted field name `Sum("Sales Amount")` is emitted as `sum("Sales Amount")` — now a ThoughtSpot string literal, not a column~~ | DONE (2026-10-07 — ts-cli v0.168.0) |
+| ~~BL-369~~ | ~~Power BI: a quoted table name with an apostrophe, `'Bob''s Sales'[x]`, is mangled to `'Bob'[T::X]`~~ | DONE (2026-10-07 — ts-cli v0.168.0) |
+| ~~BL-370~~ | ~~`COT(0)` (Tableau, Snowflake, Databricks) is `1 / tan ( 0 )` = NULL in ThoughtSpot, where the source errors or returns infinity — an undocumented divergence~~ | DONE (2026-10-07 — documented + non-downgrading trap, ts-cli v0.168.0) |
+| BL-371 | Upstream apache/ossie `reverse.py:273` renders `safe_divide` as `COALESCE(a / NULLIF(b, 0), 0)`, 0 on a NULL operand — the upstream copy of BL-366. HELD (all upstream Ossie work is on hold) | when upstream work resumes |
+| BL-372 | Excel / Sheets translator returns `COT` as NEEDS_REVIEW while the Excel map row says direct | 2026-11-30 |
+| BL-373 | Exact non-Monday week truncation: where the source week start is known, emit `add_days ( start_of_week ( add_days ( d , k ) ) , -k )` instead of downgrading (BL-334 item 2 follow-up; needs a live probe) | 2026-11-30 |
+| BL-374 | From-direction recognition of `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` back to `safe_divide ( a , b )`, so TS → SQL → TS round trips keep the idiom (the value is already exact) | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -250,7 +254,7 @@ are roughly ordered by value÷effort.
 | BL-193 | Worktree `git commit` runs the MAIN checkout's pre-commit script — local gates are the wrong branch's | opportunistic |
 | BL-363 | the M2 Databricks oracle runs case SQL as a service principal that owns the `agent_skills` catalog — confine it to a scratch-schema-only principal before any third-party SQL corpus runs on Databricks | 2026-11-15, and before any third-party Databricks corpus |
 | ~~BL-362~~ | ~~from-Databricks coverage: 17 common forms declined (NVL, NVL2, 3-arg COALESCE, try_divide, nullifzero, zeroifnull, concat_ws, `\|\|`, `%`, LIKE / ILIKE / RLIKE, INSTR, trunc, last_day, bround, to_date(column)) — loud, never wrong (fidelity M2)~~ | DONE (2026-10-07 — all 17 forms, ts-cli v0.163.0) |
-| BL-356 | the M1 cross-check agrees at 1e-9 while cases score at 1e-12 — a last-digit oracle disagreement is run and scored, not quarantined | next M1 / M2 harness change |
+| ~~BL-356~~ | ~~the M1 cross-check agrees at 1e-9 while cases score at 1e-12 — a last-digit oracle disagreement is run and scored, not quarantined~~ | RESOLVED (2026-10-07 — cross-check at the case's own tolerance; the case is ORACLE_DISPUTED) |
 | BL-351 | decimal literals are exact in the warehouse, IEEE doubles in Excel — literal-only arithmetic differs in the 13th digit (fidelity M1): document or emit doubles | documented 2026-10-07 (divergence, no fix planned); revisit only if a sheet needs Excel's double errors |
 | BL-177 | Reverse legs synthesise names that were already available | opportunistic |
 | BL-190 | Re-run the TML census: `--fqn --include-obj-id` (evidence NM1/X8) + a second cluster (T3) | next census session |
@@ -13060,7 +13064,7 @@ non-INT64 argument in that form. Unit-test with a DOUBLE column.
 
 ## BL-356 — The M1 cross-check agrees at 1e-9, looser than the 1e-12 a case is scored at, so a last-digit oracle disagreement is never quarantined `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** OPEN.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (fix/bl-356-crosscheck-tolerance).
 **Source:** formula fidelity M1 after-fixes run (case `lo-mathematical-roundup-sheet2-r17`;
 report `docs/reviews/2026-10-06-fidelity-m1-excel.md`, "After fixes").
 
@@ -13077,6 +13081,35 @@ report `docs/reviews/2026-10-06-fidelity-m1-excel.md`, "After fixes").
 widen any tolerance.
 
 **Target:** the next M1 / M2 harness change.
+
+**Resolution (2026-10-07).** `crosscheck_formulas.agree` now compares a numeric bronze value
+with the scorer's own rule, `compare.numbers_close`, at the case's declared tolerance. No
+tolerance was widened. The cross-check was re-run over the current candidates: 1,659
+evaluated, with 1,518 agree, 134 disputed and 7 unavailable. Against the previous cross-check,
+the tolerance changes exactly one status: `lo-mathematical-roundup-sheet2-r17` goes from agree
+to **disputed** (about 1.2e-12 relative). No case went the other way. A new `run_literal.py
+recheck` refreshes an existing manifest's statuses and keeps its case set; `select` on the
+regenerated candidates would have picked a different set. `rebuild` now drops the stored
+verdict of a case that has since become disputed, so it is not counted twice. The two 250-case
+runs whose full evidence exists were rebuilt without querying. In both, SILENT_WRONG goes from
+2 to 1 and ORACLE_DISPUTED from 20 to 21; no other case changed class. The case's
+`oracle-dispute` tag in `literal.CASE_DIVERGENCES` was removed, because the case is no longer
+run. Tests: `tools/formula-fidelity/tests/test_fidelity_crosscheck.py`. Report:
+`docs/reviews/2026-10-06-fidelity-m1-excel.md`, "After BL-356". The dispute itself (LibreOffice's
+silver value against Microsoft's rule and `formulas`) stays quarantined, following oracles.md,
+and is not decided by picking a side.
+
+The independent review of PR #580 led to these changes in the same PR:
+- `rebuild` refuses when a non-disputed manifest id is missing from the full run.
+- `recheck` marks ids the new cross-check did not evaluate `crosscheck_stale` (13 across the
+  two manifests).
+- `select` and `recheck` refuse a `crosscheck.json` produced by the pre-BL-356 rule.
+- A NaN on either side is disputed.
+- `run` no longer overwrites the same day's full run JSON. That overwrite is how the
+  `bl365-250` full evidence was lost.
+
+The 2026-10-06 run is deliberately not rebuilt. Its roundup failure (6 decimals) was the real
+BL-348 bug, wrong against both oracles.
 
 ## BL-364 — ThoughtSpot trigonometry is in radians; the Tableau translator and four maps convert as if it were degrees `Tier 1`
 
@@ -13426,7 +13459,7 @@ every class; the 60-case Excel set is byte-identical.
 
 ## BL-366 — To-direction `safe_divide` is not exact on NULL: Databricks `COALESCE(a / NULLIF(b, 0), 0)`, Snowflake `DIV0` `Tier 2`
 
-**Filed:** 2026-10-07. **Status:** OPEN.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (fix/bl-366-safe-divide-inverse, ts-cli 0.167.0).
 **Source:** the inverse of BL-357, found while fixing it (fix/m2-findings). Offline reading of
 `mv_emit_sql._emit_safe_divide` and both mapping docs' to-direction rows; the Snowflake
 behaviour is live (2026-10-07, `ThoughtSpot Partner (AP)`).
@@ -13448,6 +13481,31 @@ golden tests pin, and the PR's scope is the from-direction.
 
 **Target:** 2026-11-30.
 
+**Resolution (2026-10-07, fix/bl-366-safe-divide-inverse, ts-cli 0.167.0).** Both converters emit
+the compiled form verbatim. Databricks: `mv_emit_sql._emit_safe_divide` returns
+`CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`, the divisor emitted once and its text reused, a
+binop divisor (like a binop numerator) bracketed — `safe_divide ( a , b - c )` →
+`CASE WHEN (b - c) = 0 THEN 0 ELSE a / NULLIF((b - c), 0) END`. Snowflake has no code emitter for
+formulas (the skill's Step 9 executes the map), so the fix is the map row, the skill's DDL template,
+rules and checklist, the contribution-ratio row (CLI and CoCo), the coverage matrix and the worked
+examples. Proof: a unit test evaluates the emitted SQL on SQLite over {NULL, 0, 2} × {NULL, 0, 4}
+against `safe_divide`'s probed semantics (the COALESCE form failed 4 of the 9 cells); the same grid
+run live on Snowflake (`ThoughtSpot Partner (AP)`, read-only `SELECT … FROM VALUES`) matches on every
+cell, `DIV0` differing only at (NULL, 0); and `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(…, TRUE)`
+(verify-only, nothing created; a deliberately bad identifier is rejected, so the check is real)
+accepts the form over metric aliases and inside `OVER (PARTITION BY …)` and `PARTITION BY EXCLUDING`
+windows. Round-trip fidelity cases `sf-fix-025`/`026` (M0) and `dbx-fix-032`/`033` (M2): the emitted
+SQL read back through the from-direction (`if ( [N2] = 0 ) then 0 else [N1] / [N2]`), with
+`026` dividing by `N2 * 0` so fixture row 3 is a NULL dividend over a zero divisor — 0, where `DIV0`
+is NULL. Expected values from the live Snowflake SELECT; the ThoughtSpot leg of those four cases is
+not yet run. From-direction behaviour is unchanged (recognising the form back as `safe_divide` is BL-374).
+After the #581 review, the Databricks emitter also brackets a pass-through (`sql_*_op`) or predicate
+operand wherever it places one beside an operator — `safe_divide ( sql_number_op ( 'x + y' ) , b )`
+had emitted `x + y / NULLIF(b, 0)` — through one `_needs_parens` / `_wrap` helper, which also fixed
+`round`'s unbracketed non-literal increment. The Ossie map's `safe_divide` row now records that the
+upstream converter's COALESCE form is inexact (fix held: BL-371). The dated history in the
+to-Databricks `references/open-items.md` is left as written.
+
 ## BL-367 — The upstream ThoughtSpot converter (apache/ossie) still converts trigonometry as if ThoughtSpot were in degrees `Tier 2`
 
 **Filed:** 2026-10-07. **Status:** OPEN.
@@ -13468,7 +13526,7 @@ reverse rows (`SIN(RADIANS(x))` → `SIN(x)`); re-run `tools/ossie-roundtrip`. N
 
 ## BL-368 — Qlik converter: a double-quoted field name becomes a ThoughtSpot string literal `Tier 2`
 
-**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.166.0). **Source:** independent review of #579.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.168.0). **Source:** independent review of #579.
 
 **The facts.** `ts formula translate --from qlik` rewrites Qlik's `"Field Name"` to `[Field Name]`
 first (`formula_translate/adapters.qlik_field_quotes`), but the converter calls
@@ -13503,7 +13561,7 @@ stitched into the first's measure (`Sum({<Year={2023}>}"Sales") / Sum({1} "Sales
 
 ## BL-369 — Power BI: a quoted table name holding an apostrophe is mangled `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.166.0). **Source:** independent review of #579.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.168.0). **Source:** independent review of #579.
 
 **The facts.** DAX `SUM('Bob''s Sales'[x])` translates to `sum('Bob'[T::X])` (offline, 2026-10-07):
 `_COL_REF` does not read DAX's doubled quote inside a quoted table name. Silent only if the
@@ -13533,7 +13591,7 @@ bracketed names are now ignored when looking for a literal.
 
 ## BL-370 — `COT(0)` is NULL in ThoughtSpot `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (documented + trap, ts-cli v0.166.0). **Source:** independent review of #579.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (documented + trap, ts-cli v0.168.0). **Source:** independent review of #579.
 
 **The facts.** `COT(x)` → `( 1 / tan ( x ) )` in the Tableau, Snowflake and Databricks translators
 (BL-364). At `x = 0` ThoughtSpot's `/` is NULL-safe (`1 / NULLIF(0, 0)`), so the result is NULL;
@@ -13551,4 +13609,67 @@ attaches a trap when the source calls `COT` and the output uses `tan` — inform
 `DOWNGRADE_TRAP_PREFIXES`, so the status stays TRANSLATED. The converters carry no trap
 mechanism, so their users get the documentation only. The NULL-at-zero claim rests on this
 item's own statement of ThoughtSpot's NULL-safe `/`; Databricks' own `COT(0)` result (error or
-infinity by ANSI mode) was not probed and the docs say so.
+infinity by ANSI mode) was not probed and the docs say so. The Excel / Sheets translator declining
+`COT` despite the map row is BL-372.
+
+## BL-371 — Upstream apache/ossie converter renders `safe_divide` as `COALESCE(a / NULLIF(b, 0), 0)`, 0 on a NULL operand `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN — HELD (the user holds all upstream Ossie work).
+**Source:** independent review of #581 (BL-366).
+
+**The facts.** The upstream ThoughtSpot converter's reverse direction (`reverse.py:273`, apache/ossie)
+renders `safe_divide ( a , b )` as `COALESCE(a / NULLIF(b, 0), 0)`. ThoughtSpot compiles `safe_divide`
+to `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` (probe record §7), so the upstream form is **0** on
+a NULL operand where `safe_divide` is NULL — the same bug BL-366 fixed in this repo's converters.
+`docs/ossie/ts-ossie-function-mapping.md` now says so (it claimed the COALESCE preserved the result).
+`check_ossie_mapping_sync.py` compares classes, not forms, so it does not flag this.
+
+**Fix.** Upstream PR: emit the compiled `CASE` form (bracket a compound divisor, reused verbatim in both
+places), with a NULL / zero grid test; re-run `tools/ossie-roundtrip`. Never vendor the converter here.
+
+**Target:** when upstream Ossie work resumes.
+
+## BL-372 — Excel / Sheets translator returns `COT` as NEEDS_REVIEW while the Excel map row says direct `Tier 3`
+
+**Filed:** 2026-10-07. **Status:** OPEN. **Source:** found during the #583 work.
+
+**The facts.** The Excel function map rows `COT` as a direct translation, but the Excel / Google Sheets
+translator (`ts_cli/excel/`) returns it as NEEDS_REVIEW. The map and the translator disagree, so the
+CLI path is more conservative than the documented rule. Check why requirement C of
+`check_mapping_code_sync.py` (rule-table keys vs the maps' rows) did not flag the disagreement.
+
+**Fix.** Either add a `COT` rule (`( 1 / tan ( x ) )`, radians, with the BL-370 `COT(0)` note) or
+correct the map row to say the translator declines it.
+
+**Target:** 2026-11-30.
+
+## BL-373 — Exact non-Monday week truncation where the source week start is known `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN — needs a live probe. **Source:** BL-334 item 2 follow-up.
+
+**The facts.** Week truncations from sources whose week start is not Monday are downgraded today
+(BL-334). Where the source states its week start — Tableau's `week_start` / an explicit argument,
+Qlik's `FirstWeekDay` — an exact form is available:
+`add_days ( start_of_week ( add_days ( d , k ) ) , -k )`, shifting by the offset `k` from Monday.
+
+**Fix.** Probe live first: `start_of_week` compiles to `WEEK_START`-dependent SQL (BL-334), so confirm
+the shift is exact under the cluster's setting. Then emit the form in the Tableau and Qlik translators
+(through `formula_common`, BL-217) instead of downgrading; keep the downgrade where the week start is
+unknown.
+
+**Target:** 2026-11-30.
+
+## BL-374 — From-direction recognition of the compiled `safe_divide` form `Tier 3`
+
+**Filed:** 2026-10-07. **Status:** OPEN. **Source:** BL-366 (PR #581).
+
+**The facts.** Since BL-366 both to-direction converters emit `safe_divide ( a , b )` as
+`CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`. The from-direction translators read that back as
+`if ( [b] = 0 ) then 0 else [a] / [b]` — exact in value (round-trip cases `sf-fix-025`/`026`,
+`dbx-fix-032`/`033`), but the `safe_divide` idiom is lost on a TS → SQL → TS round trip.
+
+**Fix.** In `sv_sql.py` and `databricks/mv_sql.py` (shared form in `sql_forms.py`), recognise a `CASE`
+whose condition is `b = 0`, whose THEN is `0` and whose ELSE is `a / NULLIF(b, 0)` with the same `b`,
+and emit `safe_divide ( a , b )`. Any other shape stays as today.
+
+**Target:** 2026-12-15.

@@ -145,7 +145,7 @@ user as the deliverable.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1.6 | 2026-10-07 | **A quoted table name with an apostrophe is read whole (ts-cli v0.166.0, BL-369).** DAX `SUM('Bob''s Sales'[x])` translated to `sum('Bob'[s Sales::x])`; it is now `sum([Bob's Sales::x])` |
+| 1.1.6 | 2026-10-07 | **A quoted table name with an apostrophe is read whole (ts-cli v0.168.0, BL-369).** DAX `SUM('Bob''s Sales'[x])` translated to `sum('Bob'[s Sales::x])`; it is now `sum([Bob's Sales::x])`. Table qualifiers are read by a linear scanner that skips `"…"` literals |
 | 1.1.5 | 2026-10-07 | **Quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-365).** A DAX literal with a quote is emitted double-quoted (it was `'it''s'`, read as two quotes), a DAX `""` is one double quote, and every product under a division is bracketed (`a * b / c` is read as `a * ( b / c )`) |
 | 1.1.4 | 2026-10-06 | **`ROUND` uses the shared increment conversion (ts-cli v0.156.0, BL-331).** Behaviour is unchanged except that 11+ decimal places no longer emit a malformed increment (`0.`) |
 | 1.1.3 | 2026-09-22 | **I7 untranslatable gate added.** Step 1 flagged DAX measures NEEDS REVIEW / Skipped with no instruction to open [powerbi-formula-translation.md](../../shared/mappings/powerbi/powerbi-formula-translation.md) first. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |

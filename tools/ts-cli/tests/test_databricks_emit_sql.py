@@ -28,7 +28,7 @@ class TestScalarEmit:
 
     def test_safe_divide(self):
         assert e("safe_divide ( sum ( [T::a] ) , sum ( [T::b] ) )") == \
-            "COALESCE(SUM(source.a) / NULLIF(SUM(source.b), 0), 0)"
+            "CASE WHEN SUM(source.b) = 0 THEN 0 ELSE SUM(source.a) / NULLIF(SUM(source.b), 0) END"
 
     def test_ifelse_to_case(self):
         assert e("if ( [T::x] > 0 ) then [T::a] else 0") == \
@@ -155,7 +155,7 @@ class TestPrecedenceParens:
 
     def test_safe_divide_numerator_binop(self):
         assert e("safe_divide ( [T::a] + [T::b] , [T::c] )") == \
-            "COALESCE((source.a + source.b) / NULLIF(source.c, 0), 0)"
+            "CASE WHEN source.c = 0 THEN 0 ELSE (source.a + source.b) / NULLIF(source.c, 0) END"
 
     def test_or_group_and_cmp(self):
         assert e("( [T::x] = 1 or [T::y] = 2 ) and [T::z] = 3") == \
@@ -168,7 +168,57 @@ class TestPrecedenceParens:
     def test_safe_divide_unchanged(self):
         # re-confirm existing safe_divide output (non-binop numerator) is unaffected
         assert e("safe_divide ( sum ( [T::a] ) , sum ( [T::b] ) )") == \
-            "COALESCE(SUM(source.a) / NULLIF(SUM(source.b), 0), 0)"
+            "CASE WHEN SUM(source.b) = 0 THEN 0 ELSE SUM(source.a) / NULLIF(SUM(source.b), 0) END"
+
+
+class TestSafeDivideExact:
+    """BL-366: ``safe_divide`` compiles to ``CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END``
+    (probe record §7). The emitted SQL must be that form, with a compound divisor bracketed
+    identically in both of its occurrences."""
+
+    def test_compound_divisor_bracketed_in_both_places(self):
+        assert e("safe_divide ( [T::a] , [T::b] - [T::c] )") == (
+            "CASE WHEN (source.b - source.c) = 0 THEN 0 "
+            "ELSE source.a / NULLIF((source.b - source.c), 0) END")
+
+    def test_compound_both_sides(self):
+        assert e("safe_divide ( [T::a] * [T::d] , [T::b] + [T::c] )") == (
+            "CASE WHEN (source.b + source.c) = 0 THEN 0 "
+            "ELSE (source.a * source.d) / NULLIF((source.b + source.c), 0) END")
+
+    def test_call_divisor_not_bracketed(self):
+        assert e("safe_divide ( [T::a] , abs ( [T::b] ) )") == (
+            "CASE WHEN ABS(source.b) = 0 THEN 0 ELSE source.a / NULLIF(ABS(source.b), 0) END")
+
+    def test_passthrough_numerator_bracketed(self):
+        # a pass-through unwraps to raw SQL; unbracketed, `x + y / NULLIF(...)` divided y only
+        assert e("safe_divide ( sql_number_op ( 'x + y' ) , [T::b] )") == (
+            "CASE WHEN source.b = 0 THEN 0 ELSE (x + y) / NULLIF(source.b, 0) END")
+
+    def test_passthrough_divisor_bracketed_in_both_places(self):
+        assert e("safe_divide ( [T::a] , sql_number_op ( 'x - y' ) )") == (
+            "CASE WHEN (x - y) = 0 THEN 0 ELSE source.a / NULLIF((x - y), 0) END")
+
+    @staticmethod
+    def _safe_divide_semantics(a, b):
+        # ThoughtSpot safe_divide, stated from the live probe — not from the emitted SQL
+        if b == 0:
+            return 0
+        if a is None or b is None:
+            return None
+        return a / b
+
+    @pytest.mark.parametrize("a", [None, 0.0, 2.0])
+    @pytest.mark.parametrize("b", [None, 0.0, 4.0])
+    def test_null_zero_grid_matches_safe_divide(self, a, b):
+        # Evaluate the emitted SQL (SQLite reads CASE / NULLIF / = the same way) on
+        # every NULL / zero combination; the former COALESCE form was 0 on (NULL, 4)
+        # and (2, NULL), where safe_divide is NULL.
+        import sqlite3
+        sql = e("safe_divide ( [T::a] , [T::b] )").replace("source.", "")
+        row = sqlite3.connect(":memory:").execute(f"SELECT {sql} FROM (SELECT ? AS a, ? AS b)",
+                                                  (a, b)).fetchone()
+        assert row[0] == self._safe_divide_semantics(a, b)
 
 
 class TestPassthroughArity:
@@ -177,6 +227,35 @@ class TestPassthroughArity:
     def test_two_arg_passthrough_raises(self):
         with pytest.raises(UntranslatableError, match=r"exactly one argument"):
             e("sql_str_op ( 'LOWER({0})' , [T::s] )")
+
+
+class TestOpaqueOperandBracketing:
+    """A pass-through unwraps to raw SQL and an isnull/in/between call renders as a
+    predicate, so neither is self-delimiting: every emitter that places an operand
+    beside an operator brackets it (review of #581)."""
+
+    def test_passthrough_in_binop(self):
+        assert e("sql_number_op ( 'x + y' ) * [T::c]") == "(x + y) * source.c"
+        assert e("[T::c] - sql_number_op ( 'x - y' )") == "source.c - (x - y)"
+
+    def test_passthrough_under_unary_minus(self):
+        assert e("- sql_number_op ( 'x + y' )") == "-(x + y)"
+
+    def test_round_passthrough_value_and_nonliteral_increment(self):
+        assert e("round ( sql_number_op ( 'x + y' ) , 5 )") == "(5 * ROUND((x + y) / 5))"
+        assert e("round ( [T::a] , [T::b] + [T::c] )") == (
+            "((source.b + source.c) * ROUND(source.a / NULLIF((source.b + source.c), 0)))")
+
+    def test_isnull_of_passthrough_bracketed(self):
+        assert e("isnull ( sql_number_op ( 'x + y' ) )") == "(x + y) IS NULL"
+
+    def test_isnull_of_arithmetic_left_bare(self):
+        # arithmetic binds tighter than IS NULL / IN / BETWEEN — output unchanged
+        assert e("isnull ( [T::a] + [T::b] )") == "source.a + source.b IS NULL"
+
+    def test_between_bounds_passthrough_bracketed(self):
+        assert e("[T::a] between sql_number_op ( 'x + 1' ) and [T::b]") == (
+            "source.a BETWEEN (x + 1) AND source.b")
 
 
 class TestInBetweenParse:

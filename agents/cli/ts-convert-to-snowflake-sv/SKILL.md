@@ -77,7 +77,7 @@ CREATE OR REPLACE SEMANTIC VIEW {sv_name}
   metrics (
     {TABLE}.{ALIAS} as {AGG}({table_lower}.{COL}) [with synonyms=('{display_name}')],
     {TABLE}.{ALIAS} non additive by ({TIME_TABLE}.{TIME_COL} {asc|desc} nulls last) as SUM({table_lower}.{COL}) [with synonyms=(...)],
-    {TABLE}.{ALIAS} as DIV0({table_lower}.{metric_alias}, {table_lower}.{other_metric_alias}) [...],  -- ratio: reference metric aliases not raw aggregates
+    {TABLE}.{ALIAS} as CASE WHEN {table_lower}.{other_metric_alias} = 0 THEN 0 ELSE {table_lower}.{metric_alias} / NULLIF({table_lower}.{other_metric_alias}, 0) END [...],  -- ratio: reference metric aliases not raw aggregates
     ...
   )
   comment='{description}'
@@ -86,7 +86,7 @@ CREATE OR REPLACE SEMANTIC VIEW {sv_name}
 
 **DDL rules:**
 - All non-metric columns (including dates, FK columns) go in `dimensions()`. There is no `time_dimensions` clause in the DDL — date classification lives only in the CA extension JSON.
-- Metric expressions reference **column aliases** (lowercase, as defined in `dimensions()` or earlier `metrics()` entries), not raw physical column names. For ratio metrics, reference the previously-defined aggregated metric alias: `DIV0(tbl.amount, tbl.quantity)` — do not nest `SUM()` calls directly.
+- Metric expressions reference **column aliases** (lowercase, as defined in `dimensions()` or earlier `metrics()` entries), not raw physical column names. For ratio metrics, reference the previously-defined aggregated metric alias: `CASE WHEN tbl.quantity = 0 THEN 0 ELSE tbl.amount / NULLIF(tbl.quantity, 0) END` — do not nest `SUM()` calls directly. `safe_divide ( a , b )` is always emitted as `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` — ThoughtSpot's own compiled form; never `DIV0(a, b)`, which is NULL for a NULL `a` over a zero `b` where `safe_divide` is 0 (BL-366).
 - Relationship names: `{left_table}_to_{right_table}` (lowercase). Disambiguate duplicates by appending the FK column: `{left_table}_{fk_col}_to_{right_table}`.
 - Column alias format: `TABLE_NAME.DESCRIPTIVE_ALIAS` (uppercase, e.g. `DM_ORDER.ORDER_ID`). Reference the alias with lowercase table and alias: `dm_order.ORDER_ID` or `dm_order.order_id`.
 - `with extension (CA='...')` is a JSON string that maps each table's columns into `dimensions[]`, `time_dimensions[]`, and `metrics[]` by alias name (lowercase). Required for Cortex Analyst to understand the semantic structure. Relationship names are also listed here.
@@ -726,7 +726,7 @@ tables. Log it in the Unmapped Properties Report under a new section:
 > | `last_value(agg, query_groups(), {date_col})` | `SUM(col)` + `non_additive_dimensions` on the date table |
 > | `sum(group_aggregate(sum(m), {attr}, query_filters()))` | Plain `SUM(m)` — outer sum + query_filters() simplifies |
 > | `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | Plain `SUM(m)` |
-> | `safe_divide(sum(m), [NamedMetric])` where NamedMetric is same measure at coarser grain | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` — contribution ratio pattern |
+> | `safe_divide(sum(m), [NamedMetric])` where NamedMetric is same measure at coarser grain | `CASE WHEN SUM(tbl.metric) OVER (PARTITION BY dim.COL) = 0 THEN 0 ELSE tbl.metric / NULLIF(SUM(tbl.metric) OVER (PARTITION BY dim.COL), 0) END` — contribution ratio pattern |
 > | `group_aggregate(sum(m), {attr}, query_filters() + {region='east'})` | `SUM(CASE WHEN t.REGION = 'east' THEN t.M END)` — an *additive* hardcoded filter is translatable (corrected 2026-08-26, finding 13.9, live-verified). Only filters that **suppress** query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable |
 >
 > Consult the reference. Never reason from first principles about ThoughtSpot functions.
@@ -1067,7 +1067,7 @@ failures together before retrying:
 
 - [ ] Every table that is a relationship right-side has `primary key (COL)` in its `tables()` entry
 - [ ] Every FK column used in a relationship left-side appears as a dimension alias in its table
-- [ ] Metric expressions reference **metric aliases** for derived/ratio metrics — not nested `SUM()` calls: `DIV0(tbl.amount, tbl.quantity)` not `DIV0(SUM(tbl.LINE_TOTAL), SUM(tbl.QUANTITY))`
+- [ ] Metric expressions reference **metric aliases** for derived/ratio metrics — not nested `SUM()` calls: `CASE WHEN tbl.quantity = 0 THEN 0 ELSE tbl.amount / NULLIF(tbl.quantity, 0) END` not `CASE WHEN SUM(tbl.QUANTITY) = 0 THEN 0 ELSE SUM(tbl.LINE_TOTAL) / NULLIF(SUM(tbl.QUANTITY), 0) END`
 - [ ] LOD/window metrics (`group_sum` → `SUM(...) OVER (PARTITION BY ...)`): the windowed aggregate references a **defined base metric alias**, not a raw column — `SUM(tbl.total_quantity) OVER (...)` not `SUM(tbl.QUANTITY) OVER (...)` (the raw-column form is rejected with error 010256). PARTITION BY may use a dimension on a joined coarser entity; no denormalization needed
 - [ ] `non additive by` metrics: modifier is `{TABLE}.{COL} {asc|desc} nulls last`, expression is `SUM(...)`, the TABLE is a joined date dimension
 - [ ] Formula dimension expressions use `table_lower.ALIAS` references, not physical column names if those differ
@@ -1308,6 +1308,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.6.7 | 2026-10-07 | **`safe_divide` is exact on NULL (BL-366).** Ratio metrics are emitted as `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` — what ThoughtSpot compiles `safe_divide` to — not `DIV0(a, b)`, which is NULL for a NULL `a` over a zero `b` where `safe_divide` is 0 (live Snowflake 2026-10-07). Accepted by `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` (verify-only) over metric aliases and over `OVER (PARTITION BY …)` / `PARTITION BY EXCLUDING` windows. DDL template, rules, checklist and the contribution-ratio row updated |
 | 1.6.6 | 2026-10-07 | **String literals (BL-365).** Step 8 states the to-direction rule: a ThoughtSpot `"…"` is a string literal, emitted as Snowflake `'…'` with `'` doubled (never a `"…"` identifier); a ThoughtSpot `'it''s'` reads as two quotes, so `'it''''s'`. The mapping doc gains a to-direction literal table; `ts-to-snowflake-rules.md` separates double-quoted names from double-quoted text |
 | 1.6.5 | 2026-10-06 | **Shared mapping rows corrected in the ThoughtSpot → Snowflake direction** (BL-340, BL-342). `substr ( x , start , len )` is `SUBSTR(x, start + 1, len)` — ThoughtSpot's start is zero-based — not the identity the row gave, and `diff_months` is no longer rowed as `MONTHS_BETWEEN` (a fractional count; `DATEDIFF('month', …)` is the exact pair). `diff_quarters`, `diff_weeks`, `diff_hours` and `diff_minutes` gained `DATEDIFF` rows |
 | 1.6.4 | 2026-10-06 | **`day_number_of_week` → `DAYOFWEEKISO`, never `DAYOFWEEK` (BL-334).** The shared mapping doc's TS → Snowflake cell said `DAYOFWEEK`, which under the default `WEEK_START = 0` numbers 0 = Sunday … 6 = Saturday; ThoughtSpot is fixed 1 = Monday … 7 = Sunday (live-probed 2026-10-06). Doc-only — this direction is executed from the mapping table |

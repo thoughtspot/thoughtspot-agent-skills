@@ -714,8 +714,9 @@ Translation:
   `SUM(dm_order_detail.quantity) OVER (PARTITION BY ...)` — but at the product level,
   this is the row-level quantity in the context of the query
 - Denominator: `[formula_Category Quantity]` → the `category_quantity` metric above
-- Combined: `DIV0(dm_order_detail.quantity, SUM(dm_order_detail.quantity) OVER (PARTITION BY dm_category.product_category))`
-- Uses `DIV0` to avoid division-by-zero errors
+- Combined: `CASE WHEN SUM(dm_order_detail.quantity) OVER (PARTITION BY dm_category.product_category) = 0 THEN 0 ELSE dm_order_detail.quantity / NULLIF(SUM(dm_order_detail.quantity) OVER (PARTITION BY dm_category.product_category), 0) END`
+- Uses ThoughtSpot's own compiled form of `safe_divide` (0 on a zero divisor, NULL on a NULL
+  operand) — not `DIV0`, which is NULL for a NULL numerator over a zero divisor (BL-366)
 
 ✓ Translatable — add as `metrics` entry on `dm_order_detail`.
 
@@ -878,7 +879,7 @@ tables:
     expr: "SUM(dm_order_detail.quantity) OVER (PARTITION BY dm_category.product_category)"
   - name: product_to_category_contribution_ratio
     synonyms: ["Product to Category Contribution Ratio"]
-    expr: "DIV0(dm_order_detail.quantity, SUM(dm_order_detail.quantity) OVER (PARTITION BY dm_category.product_category))"
+    expr: "CASE WHEN SUM(dm_order_detail.quantity) OVER (PARTITION BY dm_category.product_category) = 0 THEN 0 ELSE dm_order_detail.quantity / NULLIF(SUM(dm_order_detail.quantity) OVER (PARTITION BY dm_category.product_category), 0) END"
 
 - name: dm_customer
   base_table:
@@ -1111,8 +1112,11 @@ relationships:
    `SUM(x) OVER (PARTITION BY dim)`. Cross-table references are supported — the
    PARTITION BY dimension can be on a joined table.
 
-9. **Percentage contribution uses `DIV0`.** When translating ratio formulas that divide
-   by a `group_aggregate` result, use `DIV0` to handle division-by-zero safely.
+9. **Percentage contribution uses `safe_divide`'s compiled form.** When translating ratio
+   formulas that divide by a `group_aggregate` result, emit
+   `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` — what ThoughtSpot compiles
+   `safe_divide` to. (`DIV0` until 2026-10-07; it is NULL for a NULL `a` over a zero `b`
+   where `safe_divide` is 0 — BL-366.)
 
 10. **Physical column typos pass through when no PK collision exists.** `RRDER_ID` (typo
     for `ORDER_ID`) does not collide with `DM_ORDER.ORDER_ID` since the names differ,

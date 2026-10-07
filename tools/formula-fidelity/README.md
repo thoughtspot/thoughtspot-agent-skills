@@ -27,8 +27,8 @@ operator-run, not workflow-run.
 | `fidelity/literal.py` | Data dir, manifest, materialising cases and the input fixture in memory, the `literal` oracle |
 | `fidelity/redact.py` | What M1 may commit (redacted results, generated report tables) and the leak scanner |
 | `cases/excel/` | `m1-manifest.jsonl` (ids + file + sha256 + locator, no formulas or values) and `m1-selection.json` (counts); `m1-coverage-manifest.jsonl` / `m1-coverage-selection.json`, the 2026-10-07 coverage pass's fresh selection (the cases it newly translates, at most 15 per leading function) |
-| `cases/snowflake/` | `m0.jsonl` (112 cases: 50 original, 21 BL-340..343 / #572 guards, 24 `sf-fix-*` for the M2 fixes and their review, 17 `sf-trig-*` / `sf-quote-*` / `sf-prec-*` for BL-364 / BL-365) and `fixture-m0.json` (10 edge rows; `S3` holds apostrophes, `I2` large integers) |
-| `cases/databricks/` | `m2.jsonl` (139 cases, `ANSI_MODE=true`; 31 `dbx-fix-*` added with the BL-357..362 fixes, 17 `dbx-trig-*` / `dbx-quote-*` / `dbx-prec-*` for BL-364 / BL-365), `m2-nonansi.jsonl` (7 cases, `ANSI_MODE=false`), and their fixtures: M0's rows as Databricks types |
+| `cases/snowflake/` | `m0.jsonl` (114 cases: 50 original, 21 BL-340..343 / #572 guards, 26 `sf-fix-*` — 24 for the M2 fixes and their review, 2 round-trip cases for the to-direction `safe_divide` form (BL-366) — and 17 `sf-trig-*` / `sf-quote-*` / `sf-prec-*` for BL-364 / BL-365) and `fixture-m0.json` (10 edge rows; `S3` holds apostrophes, `I2` large integers) |
+| `cases/databricks/` | `m2.jsonl` (141 cases, `ANSI_MODE=true`; 33 `dbx-fix-*` — 31 added with the BL-357..362 fixes, 2 round-trip cases for the to-direction `safe_divide` form (BL-366) — 17 `dbx-trig-*` / `dbx-quote-*` / `dbx-prec-*` for BL-364 / BL-365), `m2-nonansi.jsonl` (7 cases, `ANSI_MODE=false`), and their fixtures: M0's rows as Databricks types |
 | `run_raw.py` + `cases/probes/` | A RAW ThoughtSpot formula against a SQL oracle (the translator bypassed through `run.py`'s `Deps.translate` seam), for probing how ThoughtSpot reads a formula — probe record §7 "Quotes and grouping" |
 | `runs/` | Run JSON evidence (raw oracle and ThoughtSpot values, compiled SQL, verdicts) |
 | `tests/` | Pure-function tests. No live calls |
@@ -219,6 +219,11 @@ PYTHONPATH= uv run --no-project --python 3.12 --with formulas --with openpyxl \
 $UV python -I tools/formula-fidelity/run_literal.py --data-dir $D select \
   --manifest tools/formula-fidelity/cases/excel/m1-manifest.jsonl \
   --selection tools/formula-fidelity/cases/excel/m1-selection.json
+# 3b. after a new cross-check, refresh an EXISTING manifest's statuses without re-selecting
+#     (select on regenerated candidates picks a different set; recheck keeps the set)
+$UV python -I tools/formula-fidelity/run_literal.py --data-dir $D recheck \
+  --manifest tools/formula-fidelity/cases/excel/m1-manifest.jsonl \
+  --selection tools/formula-fidelity/cases/excel/m1-selection.json
 # 4. live run (adds --with snowflake-connector-python)
 $UV --with snowflake-connector-python python -I tools/formula-fidelity/run_literal.py --data-dir $D run \
   --manifest tools/formula-fidelity/cases/excel/m1-manifest.jsonl \
@@ -234,6 +239,19 @@ $UV --with snowflake-connector-python python -I tools/formula-fidelity/run_liter
   `Deps(oracle=…)` in `run.py` is the seam; its default is still M0's warehouse oracle.
 - **Cross-check.** Every case is re-evaluated by `formulas` (bronze) on a workbook holding only
   its inputs. A disagreement makes the case **oracle-disputed**: listed, not run, not scored.
+  Agreement is decided at the case's **own declared tolerance**, by the scorer's rule
+  (`compare.numbers_close`): a looser cross-check bound would let a last-digit oracle
+  disagreement through to be scored as a silent wrong answer (BL-356). A NaN on either side is
+  disputed: an oracle that says NaN is not evidence. Every decided entry in
+  `crosscheck.json` records that tolerance, and `select` / `recheck` refuse a file whose
+  decided entries lack it (the pre-BL-356 rule).
+- **`recheck`** marks a manifest id the new cross-check did not evaluate (its candidate is no
+  longer translatable) `crosscheck_stale: true`, keeps its earlier status, and lists it.
+- **`rebuild`** drops the stored verdict of a case that has since become disputed, so it is
+  counted once. It refuses (exit 2) when a non-disputed manifest id is missing from the full
+  run, since that case would vanish from the results; `--allow-partial` overrides, loudly.
+- **`run`** never overwrites a full run JSON from the same day: a second run gets a UTC-time
+  suffix (`<date>-excel-m1-full-<HHMMSS>Z.json`).
 - **Inputs.** A formula over constants runs as a constant formula. A formula over cells gets its
   cells renamed to row 1 (`K2`, `K3` → `A1`, `B1`), and each distinct source cell becomes a typed
   column (`X<n>`) of one single-row fixture table, loaded by M0's run-stamped loader. A blank cell

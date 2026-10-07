@@ -52,12 +52,9 @@ CASE_DIVERGENCES = {
         "keys": ["1"],
         "reason": "literal-only arithmetic: the warehouse computes exact decimals, Excel IEEE "
                   "doubles; documented divergence, tolerance not widened"},
-    "lo-mathematical-roundup-sheet2-r17": {
-        "tag": "silver-vs-bronze-last-digit", "kind": "oracle-dispute", "backlog": "BL-356",
-        "keys": ["1"],
-        "reason": "the translation returns Microsoft's documented round-up and the bronze "
-                  "value; the LibreOffice silver value is one unit lower in the last place, "
-                  "and the cross-check's 1e-9 bound did not quarantine it"},
+    # lo-mathematical-roundup-sheet2-r17 carried an "oracle-dispute" tag here until BL-356:
+    # the cross-check now compares at the case's own tolerance, so the case is quarantined
+    # as ORACLE_DISPUTED and never run, and a tag explaining its value would be dead.
 }
 
 
@@ -125,7 +122,7 @@ def parse_manifest(text: str, source: str = "<manifest>") -> list[dict]:
 
 def manifest_line(e: dict) -> str:
     keep = ("id", "source", "path", "sha256", "locator", "category", "functions",
-            "crosscheck", "flags")
+            "crosscheck", "crosscheck_stale", "flags")
     return json.dumps({k: e[k] for k in keep if k in e}, sort_keys=False)
 
 

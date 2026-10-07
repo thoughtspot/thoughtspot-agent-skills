@@ -122,7 +122,7 @@ Resolution:
 | `( 1 / tan(x) )` | `COT(x)` | From-direction: `COT(x)` → `( 1 / tan ( x ) )` (BL-364). **`COT(0)` differs:** ThoughtSpot's `/` is NULL-safe, so `1 / tan ( 0 )` is NULL where a Databricks `COT(0)` does not return NULL (an error or infinity, by ANSI mode) — `ts formula translate` attaches a non-downgrading trap (BL-370) |
 | `sql_double_op ( "ATAN2({0}, {1})" , y , x )` | `ATAN2(y, x)` | No catalogued native form; row-level only (BL-364) |
 | `sql_double_op ( "PI()" )` | `PI()`, `DEGREES(x)`, `RADIANS(x)` | `PI()` → the warehouse's own double; `DEGREES(x)` → `( ( x * 180 ) / sql_double_op ( "PI()" ) )`, `RADIANS(x)` → `( ( x * sql_double_op ( "PI()" ) ) / 180 )` — native, so they work over an aggregate; the product is bracketed because ThoughtSpot reads `a * b / c` as `a * ( b / c )` (BL-365) |
-| `safe_divide(a, b)` | `COALESCE(a / NULLIF(b, 0), 0)` | No `DIV0` in Databricks. **Not exact on a NULL operand:** `safe_divide` is NULL there, the COALESCE form 0 — the inverse of BL-357, tracked as BL-366. The exact form is `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`, which is what `safe_divide` compiles to |
+| `safe_divide(a, b)` | `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` | What `safe_divide` compiles to: 0 on a zero divisor (even when `a` is NULL), NULL on a NULL divisor or a NULL dividend over a non-zero divisor. A compound `b` is bracketed, identically in both places. No `DIV0` in Databricks. **Fixed ts-cli 0.167.0 (BL-366):** it was `COALESCE(a / NULLIF(b, 0), 0)`, 0 on a NULL operand — the inverse of BL-357. See "safe_divide Pattern" |
 | `if_null(x, default)` | `COALESCE(x, default)` | |
 | `zero_if_null(x)` | `COALESCE(x, 0)` | Databricks also has `zeroifnull(x)` (live 2026-10-07) |
 | ~~`null_if_zero(x)`~~ | `NULLIF(x, 0)` | **Not a ThoughtSpot function** — rejected at import (VALIDATE_ONLY, se-thoughtspot, 2026-10-06; BL-344). The ThoughtSpot form is `if ( x = 0 ) then null else x`, which is what `mv_sql` now emits for a standalone `NULLIF(x, 0)`; the reverse emitter still reads `null_if_zero` from older TML |
@@ -576,7 +576,7 @@ expressions using `MEASURE()` and `ANY_VALUE()`.
 |---|---|
 | `[measure_name]` (ref to another measure) | `MEASURE(measure_name)` |
 | `[lod_dimension]` (ref to LOD dim from a measure) | `ANY_VALUE(lod_dimension)` |
-| `safe_divide([quantity], [category_quantity])` | `MEASURE(quantity) / ANY_VALUE(category_quantity)` |
+| `safe_divide([quantity], [category_quantity])` | `CASE WHEN ANY_VALUE(category_quantity) = 0 THEN 0 ELSE MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0) END` (BL-366) |
 
 ### Databricks → TS (from-direction)
 
@@ -791,7 +791,7 @@ division behaviours, from compiled SQL and values in formula fidelity M2 (se-tho
 
 | Direction | From | To |
 |---|---|---|
-| TS → Databricks | `safe_divide(sum(a), sum(b))` | `COALESCE(SUM(a) / NULLIF(SUM(b), 0), 0)` — inexact on a NULL operand (BL-366) |
+| TS → Databricks | `safe_divide(sum(a), sum(b))` | `CASE WHEN SUM(b) = 0 THEN 0 ELSE SUM(a) / NULLIF(SUM(b), 0) END` — ThoughtSpot's own compiled form, exact on every NULL / zero input. A compound divisor is bracketed, identically in both places: `safe_divide ( a , b - c )` → `CASE WHEN (b - c) = 0 THEN 0 ELSE a / NULLIF((b - c), 0) END`. **Fixed ts-cli 0.167.0 (BL-366):** it was `COALESCE(a / NULLIF(b, 0), 0)`, which is 0 on a NULL operand where `safe_divide` is NULL |
 | Databricks → TS | `x / NULLIF(y, 0)` (also `x / nullifzero(y)`) | `x / y` — **not `safe_divide`**, which is 0 on a zero divisor where the source is NULL (BL-357, M2 `dbx-arith-012`, `dbx-agg-013`) |
 | Databricks → TS | `COALESCE(x / NULLIF(y, 0), 0)`, `IFNULL(…, 0)`, `NVL(…, 0)`, `zeroifnull(x / NULLIF(y, 0))` | `ifnull ( safe_divide ( x , y ) , 0 )` — 0 on a zero divisor **and** on a NULL operand. `safe_divide` alone was NULL on a NULL operand (M2 `dbx-arith-005`) |
 | Databricks → TS | `COALESCE(x / NULLIF(y, 0), d)` with any other `d` | `ifnull ( x / y , d )` |
