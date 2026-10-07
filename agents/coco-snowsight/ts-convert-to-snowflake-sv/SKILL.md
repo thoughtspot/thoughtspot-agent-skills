@@ -991,7 +991,7 @@ rm -f /tmp/ts_tml_*.json
 > | `last_value(agg, query_groups(), {date_col})` | `SUM(col)` + `non_additive_dimensions` on the date table (see below) |
 > | `sum(group_aggregate(sum(m), {attr}, query_filters()))` | Plain `SUM(m)` — outer sum + query_filters() simplifies |
 > | `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | Plain `SUM(m)` |
-> | `safe_divide(sum(m), [NamedMetric])` where NamedMetric is same measure at coarser grain | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` — contribution ratio pattern |
+> | `safe_divide(sum(m), [NamedMetric])` where NamedMetric is same measure at coarser grain | `CASE WHEN SUM(tbl.metric) OVER (PARTITION BY dim.COL) = 0 THEN 0 ELSE tbl.metric / NULLIF(SUM(tbl.metric) OVER (PARTITION BY dim.COL), 0) END` — contribution ratio pattern |
 > | `group_aggregate(sum(m), {attr}, query_filters() + {region='east'})` | `SUM(CASE WHEN t.REGION = 'east' THEN t.M END)` — an *additive* hardcoded filter is translatable (corrected 2026-08-26, finding 13.9, live-verified). Only filters that **suppress** query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable |
 >
 > Consult the reference. Never reason from first principles about ThoughtSpot functions.
@@ -1487,6 +1487,7 @@ Apply Steps 11b–12b (checkpoint + verify) from the standard workflow unchanged
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.3 | 2026-10-07 | **`safe_divide` is exact on NULL (BL-366).** The contribution-ratio row emits `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` (ThoughtSpot's compiled `safe_divide`), not `DIV0`, which is NULL for a NULL numerator over a zero divisor. Mirrors CLI 1.6.7 |
 | 1.3.2 | 2026-10-07 | **String literals (BL-365).** Step 9 states the to-direction rule: a ThoughtSpot `"…"` is a string literal, emitted as Snowflake `'…'` with `'` doubled (never a `"…"` identifier); a ThoughtSpot `'it''s'` reads as two quotes. Mirrors CLI 1.6.6 |
 | 1.3.1 | 2026-09-22 | **I7 marker added to the existing Step 9 gate; no second gate added.** Mirrors the CLI change exactly — the existing "read the reference before assessing any formula" block, with its "Looks untranslatable / Actually translatable as" table, now carries `MANDATORY (I7)`, names the forward `ThoughtSpot → Snowflake` column, and references the invariants doc. Includes the same unprefixed-table-row fix. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |
 | 1.3.0 | 2026-08-26 | **Finding 13.9 — an additive hardcoded filter is translatable.** `group_aggregate(..., query_filters() + {attr='v'})` now maps to `SUM(CASE WHEN ... THEN ... END)`; live-verified on Snowflake 10.30.101 that a semantic-view metric expression CAN carry a filter, which the shared mapping had denied while its own `sum_if` row asserted the opposite. Filters that *suppress* query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable, now for the correct reason. |

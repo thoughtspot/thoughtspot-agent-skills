@@ -12,10 +12,15 @@
   "poi:formula_cells": 1189
  },
  "crosscheck": {
-  "libreoffice:agree": 182,
-  "libreoffice:disputed": 18,
+  "libreoffice:agree": 181,
+  "libreoffice:disputed": 19,
   "poi:agree": 48,
   "poi:disputed": 2
+ },
+ "crosscheck_rechecked": {
+  "date": "2026-10-07",
+  "evaluated": 243,
+  "stale": 7
  },
  "date": "2026-10-06",
  "flags": {

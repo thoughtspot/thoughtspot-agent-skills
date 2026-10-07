@@ -415,8 +415,8 @@ safe_divide ( [Quantity] , [Category Quantity] )
 Translation:
 - `[Quantity]` is a measure → `MEASURE(quantity)`
 - `[Category Quantity]` is an LOD dimension → `ANY_VALUE(category_quantity)`
-- `safe_divide(a, b)` → `COALESCE(a / NULLIF(b, 0), 0)` (no `DIV0` in Databricks)
-- Result: `COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)`
+- `safe_divide(a, b)` → `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` — ThoughtSpot's own compiled form, exact on NULL (no `DIV0` in Databricks; BL-366, was `COALESCE(a / NULLIF(b, 0), 0)`)
+- Result: `CASE WHEN ANY_VALUE(category_quantity) = 0 THEN 0 ELSE MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0) END`
 
 Translatable — add as `measures[]` entry. Uses `MEASURE()` for measure-to-measure
 references and `ANY_VALUE()` for dimension-from-measure references.
@@ -568,7 +568,7 @@ Translatable — add as `measures[]` using Databricks `FILTER (WHERE ...)` synta
 | `quantity` | DM_ORDER_DETAIL::QUANTITY | `SUM(source.QUANTITY)` | Quantity | |
 | `unit_price` | DM_ORDER_DETAIL::UNIT_PRICE | `AVG(source.UNIT_PRICE)` | Unit Price | AVERAGE → AVG |
 | `employee_count` | formula_# Employees | `COUNT(orders.EMPLOYEE_ID)` | # Employees | |
-| `category_contribution_ratio` | formula | `COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)` | Category Contribution Ratio | Cross-refs via MEASURE() and ANY_VALUE() |
+| `category_contribution_ratio` | formula | `CASE WHEN ANY_VALUE(category_quantity) = 0 THEN 0 ELSE MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0) END` | Category Contribution Ratio | Cross-refs via MEASURE() and ANY_VALUE() |
 | `monthly_revenue` | formula_Monthly Revenue | `SUM(source.LINE_TOTAL)` | Monthly Revenue | Window: `range: current`, `order: order_month` |
 | `prior_month_revenue` | formula_Prior Month Revenue | `SUM(source.LINE_TOTAL)` | Prior Month Revenue | Window: `range: current`, `offset: -1 month` |
 | `mom_growth_pct` | (derived) | `(MEASURE(monthly_revenue) - MEASURE(prior_month_revenue)) / MEASURE(prior_month_revenue) * 100` | MoM Growth % | Derived from two period-filter measures. `MEASURE()` cross-references in this ratio are **CONFIRMED** grain-safe (B1, live-verified 2026-07-09, `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`); the underlying `monthly_revenue`/`prior_month_revenue` measures still carry the row-relative-vs-wall-clock caveat from C6/C6a (see Formula 5/6 above) |
@@ -708,7 +708,7 @@ measures:
     synonyms: ['employee count', 'rep count']
 
   - name: category_contribution_ratio
-    expr: COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)
+    expr: CASE WHEN ANY_VALUE(category_quantity) = 0 THEN 0 ELSE MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0) END
     display_name: 'Category Contribution Ratio'
     comment: 'Product share of category total units.'
 
@@ -954,7 +954,7 @@ measures:
     synonyms: ['employee count', 'rep count']
 
   - name: category_contribution_ratio
-    expr: COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)
+    expr: CASE WHEN ANY_VALUE(category_quantity) = 0 THEN 0 ELSE MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0) END
     display_name: 'Category Contribution Ratio'
     comment: 'Product share of category total units.'
 
@@ -1194,7 +1194,8 @@ flattened view is created.
    [Category Quantity])` references a measure and an LOD dimension. In the MV,
    the measure reference becomes `MEASURE(quantity)` and the LOD dimension reference
    becomes `ANY_VALUE(category_quantity)`. The ratio uses
-   `COALESCE(... / NULLIF(..., 0), 0)` because Databricks has no `DIV0`.
+   `CASE WHEN ... = 0 THEN 0 ELSE ... / NULLIF(..., 0) END` — ThoughtSpot's own compiled
+   form of `safe_divide`, exact on NULL (BL-366) — because Databricks has no `DIV0`.
 
 6. **v1.1 metadata: `display_name`, `comment`, `synonyms`.** Every column carries
    its ThoughtSpot display name in `display_name:`, description in `comment:`, and

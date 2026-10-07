@@ -31,7 +31,7 @@ fields, what is partially migrated, and what cannot be migrated at all.
 | Column `name` (display name) | `display_name:` | Human-readable label |
 | Column `description` | `comment:` | Per-column description |
 | `properties.synonyms[]` | `synonyms:` | YAML list: `['alias1', 'alias2']`. Read from `properties.synonyms` in TML, NOT column root. Hard limit (finding 13.9): max 10 per column, 255 chars each — see [databricks-metric-view.md](../../schemas/databricks-metric-view.md#synonyms-limit-finding-139) and the clamp rule in [ts-to-databricks-rules.md](ts-to-databricks-rules.md#synonyms-clamp) |
-| `safe_divide(a, b)` | `COALESCE(a / NULLIF(b, 0), 0)` | No `DIV0` in Databricks |
+| `safe_divide(a, b)` | `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` | ThoughtSpot's own compiled form, exact on NULL (BL-366; was `COALESCE(a / NULLIF(b, 0), 0)`). No `DIV0` in Databricks |
 | Rolling window, default/exclusive (`moving_sum(m, N, -1, d)`) | `measures[].window` | `range: trailing N day` (default) / `trailing N day exclusive`, `order:` date dim, `semiadditive: last` — **Live-verified 2026-07-09**, matrix C1/C2 |
 | Rolling window, inclusive (`moving_sum(m, N-1, 0, d)`) | `measures[].window` | `range: trailing N day inclusive`, `order:` date dim, `semiadditive: last` — **Live-verified 2026-07-09**, matrix C1 |
 | Rolling look-ahead, default/exclusive (`moving_sum(m, -1, N, d)`) | `measures[].window` | `range: leading N day` (default) / `leading N day exclusive`, `order:` date dim, `semiadditive: last` — **Live-verified 2026-07-09**, matrix C3 |
