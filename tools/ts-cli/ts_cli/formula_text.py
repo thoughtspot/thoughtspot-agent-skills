@@ -77,18 +77,35 @@ def _ts_scan(text: str) -> list[tuple[str, str, int, int]]:
     return [(m.lastgroup, m.group(), m.start(), m.end()) for m in _TS_SCAN_RE.finditer(text)]
 
 
+def ts_literals_unbalanced(text: str) -> bool:
+    """True when ``text``'s single-quoted literals do not scan as SQL-standard literals: a quote
+    is left unterminated. ThoughtSpot's own backslash escape does this (``[a] = 'it\\'s'``
+    scans as ``'it\\'`` then a stray ``s'``)."""
+    return any(kind == "other" and tok == "'" for kind, tok, _s, _e in _ts_scan(text))
+
+
 def ts_finalize_string_literals(text: str) -> str:
     """Rewrite every SQL-standard single-quoted literal in ThoughtSpot formula text that
     ThoughtSpot would misread — one holding a doubled quote or a backslash — into
     ``ts_string_literal`` form. References, ``sql_*_op`` templates (double-quoted),
-    comments and plain literals are untouched; idempotent."""
+    comments and plain literals are untouched; idempotent.
+
+    **Precondition:** the text's single-quoted literals are SQL-standard (quote doubled,
+    backslash literal), as every translator carries them. Text that uses ThoughtSpot's own
+    backslash escape (``'it\\'s'``) violates it — the scanner would end the literal at the
+    escaped quote — and any text whose quotes do not balance is returned unchanged
+    (``ts_literals_unbalanced``); ``output_guard`` reports it."""
+    if ts_literals_unbalanced(text):
+        return text
     out: list[str] = []
     for kind, tok, _s, _e in _ts_scan(text):
         if kind == "sq" and ("''" in tok[1:-1] or "\\" in tok):
             out.append(ts_string_literal(tok[1:-1].replace("''", "'")))
         else:
             out.append(tok)
-    return "".join(out)
+    result = "".join(out)
+    assert not ts_literals_unbalanced(result), result  # the precondition holds on the output
+    return result
 
 
 _TS_OPERANDS = ("ref", "dq", "sq", "num")

@@ -273,3 +273,17 @@ class TestQlikAmpersand:
         assert _PLUS_STRING.search(_code("[T::S] + concat ( 'a' , 'b' )"))
         assert _PLUS_STRING.search(_code("concat ( 'a' , [T::B] ) + [T::S]"))
         assert not _PLUS_STRING.search(_code("[T::A] + [T::B]"))
+
+
+def test_finalize_leaves_a_backslash_escaped_quote_whole_and_the_guard_reports_it():
+    """#579 review: `[a] = 'it\\'s'` was rewritten to an unbalanced `"it\\\\"s'`. The scanner's
+    precondition is SQL-standard literals; text that breaks it is returned unchanged."""
+    from ts_cli.formula_text import ts_literals_unbalanced
+    from ts_cli.formula_translate.traps import output_guard
+    src = "[T::A] = 'it\\'s'"
+    assert ts_literals_unbalanced(src)
+    assert ts_finalize_formula(src) == src
+    assert "double-quoted literal" in output_guard(src)
+    # a SQL-standard literal that ends in a backslash still converts
+    assert ts_finalize_formula("concat ( 'a\\' , 'b' )") == "concat ( \"a\\\\\" , 'b' )"
+    assert output_guard("[T::A] = \"it's\"") is None

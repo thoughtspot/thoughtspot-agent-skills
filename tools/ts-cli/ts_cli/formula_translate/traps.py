@@ -143,6 +143,11 @@ def output_guard(expr: str, allow: frozenset = frozenset(), source: str = "") ->
     bare ``TOTAL``, ``==``, ``+`` beside a string literal (ThoughtSpot concatenates with
     ``concat``), and the leftover SQL keywords of ``leftover_sql``.
     """
+    from ts_cli.formula_text import ts_literals_unbalanced
+    if ts_literals_unbalanced(expr):
+        return ("a string literal does not close where ThoughtSpot would read it (a "
+                "backslash-escaped quote, 'it\\'s', or an unbalanced quote): write a quote "
+                "inside text as a double-quoted literal, \"it's\" (BL-365)")
     code = _code(expr)
     for m in _CALL.finditer(code):
         name = m.group(1)
