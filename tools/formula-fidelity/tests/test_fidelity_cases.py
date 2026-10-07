@@ -32,8 +32,8 @@ def _parse(*cases):
 def test_shipped_m0_cases_load_and_count():
     cases = C.load_cases(CASE_DIR / "m0.jsonl")
     # 50 original + 10 BL-340..343 guards + 11 from the #572 review (2026-10-06)
-    # + 21 sf-fix cases for the M2 fixes (BL-357..362, 2026-10-07)
-    assert len(cases) == 92
+    # + 24 sf-fix cases for the M2 fixes and their review (BL-357..362, 2026-10-07)
+    assert len(cases) == 95
     assert {c["dialect"] for c in cases} == {"snowflake"}
     fx = C.fixtures_for(cases, CASE_DIR)
     assert set(fx) == {"fixture-m0.json"}

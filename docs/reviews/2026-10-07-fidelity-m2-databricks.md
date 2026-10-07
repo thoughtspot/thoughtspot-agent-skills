@@ -502,3 +502,37 @@ a concurrent M1 run (created 00:55 UTC, between this PR's runs) and were not tou
 | dbx-ts-010 | row | `to_date(Z1)` | `sql_date_op ( "to_date({0})" , [T::Z1] )` | TRANSLATED | MATCH | 10/10 |
 | dbx-agg-011 | aggregate | `try_divide(SUM(N1), SUM(I1))` | `( sum ( [T::N1] ) / sum ( [T::I1] ) )` | TRANSLATED | MATCH | 3/3 |
 | dbx-agg-013 | aggregate | `SUM(N1) / NULLIF(MIN(N2), 0)` | `sum ( [T::N1] ) / min ( [T::N2] )` | TRANSLATED | MATCH | 3/3 |
+
+### Review round (2026-10-07, after the #578 review)
+
+The independent review found the Databricks scaled `FLOOR`/`CEIL` snap broken: `round ( v , 1e-9 )`
+compiles to `1.0E-9 * ROUND(v / 1.0E-9)`, which lands one ulp above the integer, so `CEIL(3.0, 1)`
+came back 3.1 on about 10% of on-step values. The fixture had no on-step DOUBLE, so the first
+after-fix run could not see it. Now:
+- **The form is the nudge.** `ceil ( x * 10^s - 1e-9 ) / 10^s` and `floor ( … + 1e-9 ) / 10^s`,
+  divided back by the integer factor.
+- **The fixture covers it.** A DOUBLE grid column `G1` (3.0, 0.15, 0.29, 2.5, −200, 40.955, …) is
+  in the M2 and M0 fixtures, with 8 new M2 and 3 new M0 cases.
+
+Re-run, same files: **M2 115/122 MATCH**, with 0 silent, 0 import failures and 0 declines; the 4
+warned are the 3 BL-333 cases and `dbx-arith-013`. **Non-ANSI 7/7.** The rounded-cast trap now
+marks `CAST(SUM(G1) AS DECIMAL(10,2))` APPROXIMATED, although its three group totals happen to
+match. With `--columns` typing `I1` INT64, `MOD(I1, 3)` and `I1 % 3` are native `mod` again.
+
+| Case | Role | Source | Emitted | Status | Verdict | Keys equal |
+|---|---|---|---|---|---|--:|
+| dbx-arith-008 | row | `MOD(I1, 3)` | `mod ( [T::I1] , 3 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-arith-009 | row | `I1 % 3` | `mod ( [T::I1] , 3 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-fix-007 | row | `(I1 - 10) % 3` | `mod ( ( [T::I1] - 10 ) , 3 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-fix-008 | row | `FLOOR(N1, 2)` | `( floor ( [T::N1] * 100 + 0.000000001 ) / 100 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-fix-024 | row | `CEIL(G1, 1)` | `( ceil ( [T::G1] * 10 - 0.000000001 ) / 10 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-fix-025 | row | `FLOOR(G1, 1)` | `( floor ( [T::G1] * 10 + 0.000000001 ) / 10 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-fix-026 | row | `CEIL(G1, 2)` | `( ceil ( [T::G1] * 100 - 0.000000001 ) / 100 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-fix-027 | row | `FLOOR(G1, 2)` | `( floor ( [T::G1] * 100 + 0.000000001 ) / 100 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-fix-028 | row | `CEIL(G1, -1)` | `( ceil ( [T::G1] / 10 - 0.000000001 ) * 10 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-fix-029 | row | `FLOOR(G1, 3)` | `( floor ( [T::G1] * 1000 + 0.000000001 ) / 1000 )` | TRANSLATED | MATCH | 10/10 |
+| dbx-fix-030 | aggregate | `CAST(SUM(G1) AS DECIMAL(10,2))` | `round ( sum ( [T::G1] ) , 0.01 )` | APPROXIMATED | MATCH | 3/3 |
+| dbx-fix-031 | row | `CAST(G1 AS DECIMAL(10,2))` | `sql_double_op ( "CAST({0} AS DECIMAL(10,2))" , [T::G1] )` | TRANSLATED | MATCH | 10/10 |
+
+**Cleanup.** No `zz_fidelity*` table in `agent_skills.audit_probe`, and no M2 object in
+ThoughtSpot. The `ZZ_FIDELITY_M1_20261007T013718_*` objects belong to a concurrent M1 run.

@@ -368,3 +368,10 @@ run and was not touched.
 | sf-fix-019 | row | `IFF(S1 ILIKE 'a%', 1, 0)` | `if ( sql_bool_op ( "{0} ILIKE 'a%'" , [T::S1] ) ) then 1 else 0` | TRANSLATED | MATCH | 10/10 |
 | sf-fix-020 | row | `IFF(S1 RLIKE '[A-Z].*', 1, 0)` | `if ( sql_bool_op ( "{0} RLIKE '[A-Z].*'" , [T::S1] ) ) then 1 else 0` | TRANSLATED | MATCH | 10/10 |
 | sf-fix-021 | aggregate | `CAST(SUM(N1) AS NUMBER(18,1))` | `round ( sum ( [T::N1] ) , 0.1 )` | TRANSLATED | MATCH | 3/3 |
+
+### Review round (2026-10-07, after the #578 review)
+
+95 cases: the grid column `G1` was added, with `sf-fix-022..024`. **89 MATCH**, with 0 silent, the
+same 4 warned and 1 NEEDS_REVIEW, and 1 error-equivalent. Snowflake's scaled `FLOOR`/`CEIL` stays
+unsnapped. On the grid, Snowflake's own double floor and ceil match the unsnapped form on every
+row. `MOD(I1, 3)` is native `mod` again, because `--columns` types `I1` INT64.

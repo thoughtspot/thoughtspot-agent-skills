@@ -3,32 +3,257 @@
   "description": "Ten hand-written rows for the M0 Snowflake SQL cases. Edge rows: NULLs, zeros, a zero divisor, negatives, month ends (incl. 29 Feb), a Sunday, a year boundary, reversed date order, an empty string, mixed case. T1/T2 (TIMESTAMP_NTZ) cross hour, minute and day boundaries by less than the unit (10:59 -> 11:01), stay inside one (10:00:30 -> 10:59:59), run backwards, and carry fractional seconds; Z1/Z2 (TIMESTAMP_TZ, +05:30) put a local hour boundary where UTC has none (#572 review).",
   "key": "ROW_ID",
   "group": "GRP",
-  "session": {"WEEK_START": 0, "WEEK_OF_YEAR_POLICY": 0, "TIMEZONE": "UTC"},
+  "session": {
+    "WEEK_START": 0,
+    "WEEK_OF_YEAR_POLICY": 0,
+    "TIMEZONE": "UTC"
+  },
   "columns": [
-    {"name": "ROW_ID", "sf_type": "NUMBER(38,0)", "ts_type": "INT64",   "column_type": "ATTRIBUTE"},
-    {"name": "GRP",    "sf_type": "VARCHAR(8)",   "ts_type": "VARCHAR", "column_type": "ATTRIBUTE"},
-    {"name": "N1",     "sf_type": "FLOAT",        "ts_type": "DOUBLE",  "column_type": "MEASURE"},
-    {"name": "N2",     "sf_type": "FLOAT",        "ts_type": "DOUBLE",  "column_type": "MEASURE"},
-    {"name": "I1",     "sf_type": "NUMBER(38,0)", "ts_type": "INT64",   "column_type": "MEASURE"},
-    {"name": "S1",     "sf_type": "VARCHAR(64)",  "ts_type": "VARCHAR", "column_type": "ATTRIBUTE"},
-    {"name": "S2",     "sf_type": "VARCHAR(64)",  "ts_type": "VARCHAR", "column_type": "ATTRIBUTE"},
-    {"name": "D1",     "sf_type": "DATE",         "ts_type": "DATE",    "column_type": "ATTRIBUTE"},
-    {"name": "D2",     "sf_type": "DATE",         "ts_type": "DATE",    "column_type": "ATTRIBUTE"},
-    {"name": "T1",     "sf_type": "TIMESTAMP_NTZ", "ts_type": "DATE_TIME", "column_type": "ATTRIBUTE"},
-    {"name": "T2",     "sf_type": "TIMESTAMP_NTZ", "ts_type": "DATE_TIME", "column_type": "ATTRIBUTE"},
-    {"name": "Z1",     "sf_type": "TIMESTAMP_TZ",  "ts_type": "DATE_TIME", "column_type": "ATTRIBUTE"},
-    {"name": "Z2",     "sf_type": "TIMESTAMP_TZ",  "ts_type": "DATE_TIME", "column_type": "ATTRIBUTE"}
+    {
+      "name": "ROW_ID",
+      "sf_type": "NUMBER(38,0)",
+      "ts_type": "INT64",
+      "column_type": "ATTRIBUTE"
+    },
+    {
+      "name": "GRP",
+      "sf_type": "VARCHAR(8)",
+      "ts_type": "VARCHAR",
+      "column_type": "ATTRIBUTE"
+    },
+    {
+      "name": "N1",
+      "sf_type": "FLOAT",
+      "ts_type": "DOUBLE",
+      "column_type": "MEASURE"
+    },
+    {
+      "name": "N2",
+      "sf_type": "FLOAT",
+      "ts_type": "DOUBLE",
+      "column_type": "MEASURE"
+    },
+    {
+      "name": "I1",
+      "sf_type": "NUMBER(38,0)",
+      "ts_type": "INT64",
+      "column_type": "MEASURE"
+    },
+    {
+      "name": "S1",
+      "sf_type": "VARCHAR(64)",
+      "ts_type": "VARCHAR",
+      "column_type": "ATTRIBUTE"
+    },
+    {
+      "name": "S2",
+      "sf_type": "VARCHAR(64)",
+      "ts_type": "VARCHAR",
+      "column_type": "ATTRIBUTE"
+    },
+    {
+      "name": "D1",
+      "sf_type": "DATE",
+      "ts_type": "DATE",
+      "column_type": "ATTRIBUTE"
+    },
+    {
+      "name": "D2",
+      "sf_type": "DATE",
+      "ts_type": "DATE",
+      "column_type": "ATTRIBUTE"
+    },
+    {
+      "name": "T1",
+      "sf_type": "TIMESTAMP_NTZ",
+      "ts_type": "DATE_TIME",
+      "column_type": "ATTRIBUTE"
+    },
+    {
+      "name": "T2",
+      "sf_type": "TIMESTAMP_NTZ",
+      "ts_type": "DATE_TIME",
+      "column_type": "ATTRIBUTE"
+    },
+    {
+      "name": "Z1",
+      "sf_type": "TIMESTAMP_TZ",
+      "ts_type": "DATE_TIME",
+      "column_type": "ATTRIBUTE"
+    },
+    {
+      "name": "Z2",
+      "sf_type": "TIMESTAMP_TZ",
+      "ts_type": "DATE_TIME",
+      "column_type": "ATTRIBUTE"
+    },
+    {
+      "name": "G1",
+      "sf_type": "FLOAT",
+      "ts_type": "DOUBLE",
+      "column_type": "MEASURE"
+    }
   ],
   "rows": [
-    {"ROW_ID": 1,  "GRP": "A", "N1": 10.5,       "N2": 2,      "I1": 7,    "S1": "Apple",   "S2": "pie",   "D1": "2026-01-31", "D2": "2026-02-01", "T1": "2026-01-31 10:59:00",     "T2": "2026-01-31 11:01:00",     "Z1": "2026-01-31 10:59:00 +05:30", "Z2": "2026-01-31 11:01:00 +05:30"},
-    {"ROW_ID": 2,  "GRP": "A", "N1": -3.25,      "N2": 0,      "I1": -4,   "S1": "apple",   "S2": null,    "D1": "2026-01-20", "D2": "2026-03-15", "T1": "2026-01-20 10:00:30",     "T2": "2026-01-20 10:59:59",     "Z1": "2026-01-20 10:20:00 +05:30", "Z2": "2026-01-20 10:40:00 +05:30"},
-    {"ROW_ID": 3,  "GRP": "A", "N1": null,       "N2": 5,      "I1": 0,    "S1": null,      "S2": "x",     "D1": "2025-12-31", "D2": "2026-01-01", "T1": null,                      "T2": "2026-01-01 00:00:00",     "Z1": null,                         "Z2": "2026-01-01 00:00:00 +05:30"},
-    {"ROW_ID": 4,  "GRP": "B", "N1": 0,          "N2": -4,     "I1": 12,   "S1": "Banana",  "S2": "split", "D1": "2026-10-04", "D2": "2026-10-10", "T1": "2026-10-04 23:59:59",     "T2": "2026-10-05 00:00:01",     "Z1": "2026-10-04 23:59:00 +05:30", "Z2": "2026-10-05 00:01:00 +05:30"},
-    {"ROW_ID": 5,  "GRP": "B", "N1": 1234.5678,  "N2": 3,      "I1": 5,    "S1": "bAnAnA ", "S2": "",      "D1": "2024-02-29", "D2": "2025-02-28", "T1": "2026-03-01 12:30:00",     "T2": "2026-03-01 09:45:00",     "Z1": "2026-03-01 12:30:00 +05:30", "Z2": "2026-03-01 09:45:00 +05:30"},
-    {"ROW_ID": 6,  "GRP": "B", "N1": -1234.5678, "N2": null,   "I1": null, "S1": "Cherry",  "S2": "tart",  "D1": "2026-03-31", "D2": "2026-02-28", "T1": "2025-12-31 23:00:00",     "T2": "2026-01-01 01:00:00",     "Z1": "2025-12-31 23:00:00 +05:30", "Z2": "2026-01-01 01:00:00 +05:30"},
-    {"ROW_ID": 7,  "GRP": "C", "N1": 99.99,      "N2": 0.5,    "I1": 3,    "S1": "cherry",  "S2": "jam",   "D1": "2025-07-01", "D2": "2026-06-30", "T1": "2026-06-15 08:00:00",     "T2": "2026-06-15 08:00:00",     "Z1": "2026-06-15 08:00:00 +05:30", "Z2": "2026-06-15 08:00:00 +05:30"},
-    {"ROW_ID": 8,  "GRP": "C", "N1": 2.5,        "N2": 2.5,    "I1": -7,   "S1": "",        "S2": "pie",   "D1": null,         "D2": "2026-01-31", "T1": "2024-02-29 00:00:00",     "T2": "2024-03-01 00:00:00",     "Z1": "2024-02-29 00:00:00 +05:30", "Z2": "2024-03-01 00:00:00 +05:30"},
-    {"ROW_ID": 9,  "GRP": "C", "N1": -0.5,       "N2": 7,      "I1": 1,    "S1": "Date",    "S2": "loaf",  "D1": "2026-10-05", "D2": null,         "T1": "2026-07-01 10:15:30",     "T2": null,                      "Z1": "2026-07-01 10:15:30 +05:30", "Z2": null},
-    {"ROW_ID": 10, "GRP": "C", "N1": 1000000,    "N2": -0.001, "I1": 100,  "S1": "date",    "S2": "x",     "D1": "2026-02-28", "D2": "2026-03-31", "T1": "2026-02-28 17:59:59.900", "T2": "2026-02-28 18:00:00.100", "Z1": "2026-02-28 17:29:59 +05:30", "Z2": "2026-02-28 17:30:01 +05:30"}
+    {
+      "ROW_ID": 1,
+      "GRP": "A",
+      "N1": 10.5,
+      "N2": 2,
+      "I1": 7,
+      "S1": "Apple",
+      "S2": "pie",
+      "D1": "2026-01-31",
+      "D2": "2026-02-01",
+      "T1": "2026-01-31 10:59:00",
+      "T2": "2026-01-31 11:01:00",
+      "Z1": "2026-01-31 10:59:00 +05:30",
+      "Z2": "2026-01-31 11:01:00 +05:30",
+      "G1": 3.0
+    },
+    {
+      "ROW_ID": 2,
+      "GRP": "A",
+      "N1": -3.25,
+      "N2": 0,
+      "I1": -4,
+      "S1": "apple",
+      "S2": null,
+      "D1": "2026-01-20",
+      "D2": "2026-03-15",
+      "T1": "2026-01-20 10:00:30",
+      "T2": "2026-01-20 10:59:59",
+      "Z1": "2026-01-20 10:20:00 +05:30",
+      "Z2": "2026-01-20 10:40:00 +05:30",
+      "G1": 0.15
+    },
+    {
+      "ROW_ID": 3,
+      "GRP": "A",
+      "N1": null,
+      "N2": 5,
+      "I1": 0,
+      "S1": null,
+      "S2": "x",
+      "D1": "2025-12-31",
+      "D2": "2026-01-01",
+      "T1": null,
+      "T2": "2026-01-01 00:00:00",
+      "Z1": null,
+      "Z2": "2026-01-01 00:00:00 +05:30",
+      "G1": 0.29
+    },
+    {
+      "ROW_ID": 4,
+      "GRP": "B",
+      "N1": 0,
+      "N2": -4,
+      "I1": 12,
+      "S1": "Banana",
+      "S2": "split",
+      "D1": "2026-10-04",
+      "D2": "2026-10-10",
+      "T1": "2026-10-04 23:59:59",
+      "T2": "2026-10-05 00:00:01",
+      "Z1": "2026-10-04 23:59:00 +05:30",
+      "Z2": "2026-10-05 00:01:00 +05:30",
+      "G1": 2.5
+    },
+    {
+      "ROW_ID": 5,
+      "GRP": "B",
+      "N1": 1234.5678,
+      "N2": 3,
+      "I1": 5,
+      "S1": "bAnAnA ",
+      "S2": "",
+      "D1": "2024-02-29",
+      "D2": "2025-02-28",
+      "T1": "2026-03-01 12:30:00",
+      "T2": "2026-03-01 09:45:00",
+      "Z1": "2026-03-01 12:30:00 +05:30",
+      "Z2": "2026-03-01 09:45:00 +05:30",
+      "G1": -200
+    },
+    {
+      "ROW_ID": 6,
+      "GRP": "B",
+      "N1": -1234.5678,
+      "N2": null,
+      "I1": null,
+      "S1": "Cherry",
+      "S2": "tart",
+      "D1": "2026-03-31",
+      "D2": "2026-02-28",
+      "T1": "2025-12-31 23:00:00",
+      "T2": "2026-01-01 01:00:00",
+      "Z1": "2025-12-31 23:00:00 +05:30",
+      "Z2": "2026-01-01 01:00:00 +05:30",
+      "G1": 40.955
+    },
+    {
+      "ROW_ID": 7,
+      "GRP": "C",
+      "N1": 99.99,
+      "N2": 0.5,
+      "I1": 3,
+      "S1": "cherry",
+      "S2": "jam",
+      "D1": "2025-07-01",
+      "D2": "2026-06-30",
+      "T1": "2026-06-15 08:00:00",
+      "T2": "2026-06-15 08:00:00",
+      "Z1": "2026-06-15 08:00:00 +05:30",
+      "Z2": "2026-06-15 08:00:00 +05:30",
+      "G1": -0.15
+    },
+    {
+      "ROW_ID": 8,
+      "GRP": "C",
+      "N1": 2.5,
+      "N2": 2.5,
+      "I1": -7,
+      "S1": "",
+      "S2": "pie",
+      "D1": null,
+      "D2": "2026-01-31",
+      "T1": "2024-02-29 00:00:00",
+      "T2": "2024-03-01 00:00:00",
+      "Z1": "2024-02-29 00:00:00 +05:30",
+      "Z2": "2024-03-01 00:00:00 +05:30",
+      "G1": 1.1
+    },
+    {
+      "ROW_ID": 9,
+      "GRP": "C",
+      "N1": -0.5,
+      "N2": 7,
+      "I1": 1,
+      "S1": "Date",
+      "S2": "loaf",
+      "D1": "2026-10-05",
+      "D2": null,
+      "T1": "2026-07-01 10:15:30",
+      "T2": null,
+      "Z1": "2026-07-01 10:15:30 +05:30",
+      "Z2": null,
+      "G1": 99.99
+    },
+    {
+      "ROW_ID": 10,
+      "GRP": "C",
+      "N1": 1000000,
+      "N2": -0.001,
+      "I1": 100,
+      "S1": "date",
+      "S2": "x",
+      "D1": "2026-02-28",
+      "D2": "2026-03-31",
+      "T1": "2026-02-28 17:59:59.900",
+      "T2": "2026-02-28 18:00:00.100",
+      "Z1": "2026-02-28 17:29:59 +05:30",
+      "Z2": "2026-02-28 17:30:01 +05:30",
+      "G1": null
+    }
   ]
 }
