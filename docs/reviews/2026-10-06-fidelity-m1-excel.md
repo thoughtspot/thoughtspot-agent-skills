@@ -263,15 +263,16 @@ best. That ranking was then weighed against how common each function is in BI sh
 | | NEEDS_REVIEW | TRANSLATED | APPROXIMATED |
 |---|--:|--:|--:|
 | ts-cli 0.161.0 (main before the pass) | 1,719 (69.8%) | 653 | 91 |
-| ts-cli 0.162.0 | **796 (32.3%)** | 1,228 | 439 |
+| ts-cli 0.162.0, first cut | 796 (32.3%) | 1,228 | 439 |
+| ts-cli 0.162.0, after the #577 review | **804 (32.6%)** | 1,115 | 544 |
 
-923 cases became translatable. The largest gains are the character codes (CHAR, CODE, UNICHAR:
+923 cases became translatable at first; after the review's domain, serial-60 and code-page rules, 915 (more of them APPROXIMATED, with a trap). The largest gains are the character codes (CHAR, CODE, UNICHAR:
 230 cases), trigonometry, the hyperbolic family and the angle functions (about 320), the CEILING / FLOOR `.MATH` /
 `.PRECISE` family (101), REPLACE and the `B` byte variants (about 110), LOG, DATE, FACT, TRUNC,
 EVEN / ODD and TEXT. What is left is led by functions that have no exact form: ASC (79 cases,
 unmappable), GCD / LCM (35 each), WORKDAY.INTL (33), and a DATEDIF unit read from a cell (110).
 
-**Live, the same 250 cases** (230 scored, run at `952620f`): every case keeps its class. That
+**Live, the same 250 cases** (230 scored, run at `952620f` and again at `ec19ce3` after the review): every case keeps its class. That
 is 215 MATCH, 0 import failures, and the same 2 silent wrong answers (BL-351, BL-356).
 Redacted results: `tools/formula-fidelity/runs/2026-10-07-excel-m1-coverage-250.json`.
 
@@ -279,15 +280,16 @@ Redacted results: `tools/formula-fidelity/runs/2026-10-07-excel-m1-coverage-250.
 `cases/excel/m1-coverage-manifest.jsonl`: 630 of the 923 cases, at most 15 per leading
 function, drawn in the harness's own hash order. 65 were oracle-disputed, so 565 were scored.
 
-| Class | First pass (`74dcfbd`) | Final (`952620f`) |
-|---|--:|--:|
-| SILENT_WRONG | 16 | **0** |
-| WARNED_WRONG | 1 | 0 |
-| IMPORT_FAILED | 0 | **0** |
-| DIVERGENCE_BLANK (an input cell is blank: Excel reads 0, the column is NULL) | 28 | 28 |
-| DIVERGENCE_ERROR (Excel errors, ThoughtSpot returns a value) | 6 | 6 |
-| ERROR_EQUIV | 44 | 44 |
-| MATCH | 470 | **487** |
+| Class | First pass (`74dcfbd`) | `952620f` | After the review (`ec19ce3`) |
+|---|--:|--:|--:|
+| SILENT_WRONG | 16 | **0** | **0** |
+| WARNED_WRONG | 1 | 0 | 0 |
+| IMPORT_FAILED | 0 | **0** | **0** |
+| DIVERGENCE_BLANK (an input cell is blank: Excel reads 0, the column is NULL) | 28 | 28 | 28 |
+| DIVERGENCE_ERROR (Excel errors, ThoughtSpot returns a value) | 6 | 6 | 6 |
+| TRANSLATE_FAILED (now NEEDS_REVIEW: an `ACOSH` literal outside its domain) | 0 | 0 | 5 |
+| ERROR_EQUIV | 44 | 44 | 39 |
+| MATCH | 470 | **487** | **487** |
 
 The first pass found three printer facts. Each was probed live and fixed for Excel:
 - **All 16 silent wrong answers had the same cause.** ThoughtSpot reads `a * b / c` as
@@ -312,8 +314,15 @@ as BL-364. Further probe findings:
 - `TO_CHAR` rounds half away from zero, as Excel does. It prints `-0.00` for a negative value
   that rounds to zero.
 
+**The #577 review** (independent) found no meaning change in the bracketing and confirmed the 16 PI cases fixed; its fixes landed as separate commits:
+- integer `QUOTIENT` and the `CEILING` / `FLOOR` family without fixed-point division (the truncated quotient of 1,999,999 by 2,000,000 had come back as 1);
+- `mod` by zero fails the query, so the new remainder forms guard it;
+- quote-bearing literals probed in every context (all pass), and a quote plus a backslash is NEEDS_REVIEW;
+- out-of-domain literals are NEEDS_REVIEW and columns APPROXIMATED;
+- `DATE` serial 60 and the column-year guard; Mac Roman `CHAR` / `CODE`, surrogate `UNICHAR`, column start and needle traps.
+
 **No regression elsewhere:**
-- **M0** re-run at `952620f`: 64 of 71 MATCH, 0 silent, 4 warned, the same per-case verdicts
+- **M0** re-run at `952620f` and at `ec19ce3`: 64 of 71 MATCH, 0 silent, 4 warned, the same per-case verdicts
   (`runs/2026-10-07-snowflake-m0-coverage-regression.json`).
 - **The 60-case Excel regression set**: identical output to main, 58 matching their reviewed
   answers and 2 differing by documented rule.

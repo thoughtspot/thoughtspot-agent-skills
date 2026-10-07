@@ -422,9 +422,9 @@ class TestIntegerDivision:
 
 
 class TestDomains:
-    @pytest.mark.parametrize("src", ["=LOG(8,1)", "=LOG(8,0)", "=LOG(8,-2)", "=LOG(0)", "=LOG(-3,2)",
-                                     "=ACOSH(0.5)", "=ATANH(1)", "=ATANH(-1.5)", "=ASIN(2)",
-                                     "=ACOS(-1.01)"])
+    @pytest.mark.parametrize("src", ["=LOG(37,1)", "=LOG(37,0)", "=LOG(37,-3)", "=LOG(-0.37)",
+                                     "=LOG(-37,3)", "=ACOSH(0.37)", "=ATANH(-1)", "=ATANH(-1.37)",
+                                     "=ASIN(2.37)", "=ACOS(-1.37)"])
     def test_literal_outside_the_domain_is_refused(self, src):
         assert "outside" in review(src)
 
@@ -435,7 +435,7 @@ class TestDomains:
         assert any("#NUM!" in t for t in r.traps)
 
     def test_inside_the_domain_is_translated(self):
-        for src in ("=LOG(8,2)", "=LOG(100)", "=ACOSH(1)", "=ATANH(0.5)", "=ASIN(-1)",
+        for src in ("=LOG(37,2)", "=LOG(370)", "=ACOSH(1.37)", "=ATANH(0.37)", "=ASIN(-0.37)",
                     "=SINH([@amt])"):
             ok(src, "TRANSLATED")
 
