@@ -76,6 +76,7 @@ from ts_cli.sql_forms import (
     sqlf_guard_adjacent,
     sqlf_like,
     sqlf_null_default_call,
+    sqlf_safe_divide_form,
 )
 
 
@@ -718,10 +719,12 @@ def _call_extract(cur: _Cursor, resolver) -> str:
 
 
 def _call_if(cur: _Cursor, resolver) -> str:
-    """IF(cond, then_val, else_val) → if ( cond ) then val else val."""
+    """IF / IFF (cond, then_val, else_val) → if ( cond ) then val else val."""
     args = _call_args(cur, resolver)
     _need(args, 3, "IF")
-    return f"if ( {args[0]} ) then {args[1]} else {args[2]}"
+    # the compiled safe_divide form, read back as the idiom (BL-374)
+    return (sqlf_safe_divide_form(*args)
+            or f"if ( {args[0]} ) then {args[1]} else {args[2]}")
 
 
 def _call_pass_through(name: str, cur: _Cursor, resolver) -> str:
@@ -913,6 +916,8 @@ _PRE_ARGS = {
     "EXTRACT": _call_extract_pre, "COUNT": _call_count_pre,
     "DATEDIFF": lambda name, cur, resolver: _call_datediff(cur, resolver),
     "IF": lambda name, cur, resolver: _call_if(cur, resolver),
+    # `iff` is Databricks' documented synonym for `if` (BL-374)
+    "IFF": lambda name, cur, resolver: _call_if(cur, resolver),
     "COALESCE": _call_null_default, "IFNULL": _call_null_default,
     "NVL": _call_null_default, "ZEROIFNULL": _call_null_default,
 }

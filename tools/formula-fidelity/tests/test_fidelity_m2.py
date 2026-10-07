@@ -318,3 +318,20 @@ def test_fixture_loader_rejects_a_bad_column_name():
                        "column_type": "ATTRIBUTE"}]}
     with pytest.raises(caselib.CaseError, match="column name"):
         caselib.check_fixture(fx)
+
+
+# -- BL-374: the BL-366 round-trip cases read back as safe_divide --------------------------
+
+@pytest.mark.parametrize("path,case_id,divisor", [
+    (HERE / "cases" / "snowflake" / "m0.jsonl", "sf-fix-025", "[T::N2]"),
+    (HERE / "cases" / "snowflake" / "m0.jsonl", "sf-fix-026", "[T::N2] * 0"),
+    (DBX / "m2.jsonl", "dbx-fix-032", "[T::N2]"),
+    (DBX / "m2.jsonl", "dbx-fix-033", "[T::N2] * 0"),
+])
+def test_bl366_round_trip_cases_read_back_as_safe_divide(path, case_id, divisor):
+    cases = caselib.load_cases(path)
+    case = next(c for c in cases if c["id"] == case_id)
+    fx = caselib.fixtures_for([case], path.parent)[case["fixture"]]
+    tr = runmod.translate_case(case, fx, "T")
+    assert tr["status"] == "TRANSLATED"
+    assert tr["formula"] == f"safe_divide ( [T::N1] , {divisor} )"

@@ -165,6 +165,109 @@ def sqlf_div0null(x: str, y: str) -> str:
     return f"( if ( isnull ( {x} ) ) then null else safe_divide ( {x} , ifnull ( {y} , 0 ) ) )"
 
 
+def _sqlf_tokens(expr: str) -> list[str]:
+    """``expr``'s space-joined tokens, a quoted string or ``[…]`` reference kept whole."""
+    toks, cur, quote, bracket = [], [], None, 0
+    for ch in expr.strip():
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+            cur.append(ch)
+        elif ch == "[":
+            bracket += 1
+            cur.append(ch)
+        elif ch == "]":
+            bracket -= 1
+            cur.append(ch)
+        elif ch == " " and not bracket:
+            if cur:
+                toks.append("".join(cur))
+                cur = []
+        else:
+            cur.append(ch)
+    if cur:
+        toks.append("".join(cur))
+    return toks
+
+
+def _sqlf_strip_parens(toks: list[str]) -> list[str]:
+    """``toks`` without redundant outer ``( … )`` pairs."""
+    while len(toks) >= 2 and toks[0] == "(" and toks[-1] == ")":
+        depth = 0
+        for i, t in enumerate(toks):
+            depth += (t == "(") - (t == ")")
+            if depth == 0:
+                break
+        if i != len(toks) - 1:
+            break
+        toks = toks[1:-1]
+    return toks
+
+
+def _sqlf_top_split(toks: list[str]) -> tuple[list[list[str]], list[str]]:
+    """Operands and the top-level binary operators between them. An operator token with no
+    operand before it (``- x``, ``a * - b``) is unary and stays in its operand."""
+    parts, ops, cur, depth = [], [], [], 0
+    for t in toks:
+        if depth == 0 and t in SQLF_BINARY_OPS and cur:
+            parts.append(cur)
+            ops.append(t)
+            cur = []
+            continue
+        depth += (t == "(") - (t == ")")
+        cur.append(t)
+    parts.append(cur)
+    return parts, ops
+
+
+def _sqlf_join(parts: list[list[str]], ops: list[str]) -> list[str]:
+    """The tokens of ``parts`` interleaved with ``ops`` (inverse of ``_sqlf_top_split``)."""
+    out = list(parts[0])
+    for op, part in zip(ops, parts[1:]):
+        out += [op, *part]
+    return out
+
+
+def sqlf_safe_divide_form(cond: str, then: str, else_: str):
+    """``safe_divide ( a , b )`` when a translated two-way conditional is exactly the form
+    ``safe_divide`` compiles to, else None (BL-374).
+
+    The source is ``CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`` — or ``IFF`` / ``IF``
+    with the same three arguments, or the ELSE written ``a / b``. By the time this runs the
+    pieces are translated ThoughtSpot text (``[B] = 0``, ``0``, ``[A] / [B]``: the
+    ``/ NULLIF(b, 0)`` divisor idiom has already collapsed to ``/``), so the comparison is over
+    normalised token sequences — whitespace, keyword case and identifier case are gone, and
+    redundant outer parentheses are stripped — not over source strings.
+
+    Exact on every NULL / zero input: the ELSE branch is reached only when ``b`` is non-zero
+    or NULL, where ``NULLIF(b, 0)`` is ``b`` and ThoughtSpot's ``/`` (``a / NULLIF(b, 0.0)``)
+    is plain division, so ``if ( b = 0 ) then 0 else a / b`` and ``safe_divide ( a , b )`` agree
+    cell for cell (grid in the mapping docs). Refused: any THEN but ``0``, a condition other
+    than ``b = 0`` (``0 = b``, ``b != 0`` with the arms swapped — NULL ``b`` then takes the 0
+    arm), an ELSE whose top level is not one multiplicative term ending ``/ b``, and a divisor
+    that differs from the condition's ``b``. The caller passes only a single-WHEN CASE.
+    """
+    if _sqlf_strip_parens(_sqlf_tokens(then)) != ["0"]:
+        return None
+    c_parts, c_ops = _sqlf_top_split(_sqlf_strip_parens(_sqlf_tokens(cond)))
+    if [op for op in c_ops if op in _SQLF_CONCAT_BOUNDARY] != ["="] or c_ops[-1] != "=":
+        return None
+    if _sqlf_strip_parens(c_parts[-1]) != ["0"]:
+        return None
+    b = _sqlf_strip_parens(_sqlf_join(c_parts[:-1], c_ops[:-1]))
+    e_parts, e_ops = _sqlf_top_split(_sqlf_strip_parens(_sqlf_tokens(else_)))
+    if not e_ops or e_ops[-1] != "/" or any(op not in _SQLF_MULT for op in e_ops):
+        return None
+    if not b or _sqlf_strip_parens(e_parts[-1]) != b:
+        return None
+    numerator = _sqlf_join(e_parts[:-1], e_ops[:-1])
+    a = " ".join(_sqlf_strip_parens(numerator) if len(e_parts) == 2 else numerator)
+    return f"safe_divide ( {a} , {' '.join(b)} )"
+
+
 def sqlf_plain_division(x: str, y: str) -> str:
     """``x / y`` as one operand (Databricks ``try_divide``: NULL on a zero divisor)."""
     return f"( {sqlf_group(x)} / {sqlf_group(y)} )"

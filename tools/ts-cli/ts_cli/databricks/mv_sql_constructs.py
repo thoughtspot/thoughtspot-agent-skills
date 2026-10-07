@@ -16,7 +16,8 @@ it — this module has no top-level dependency on mv_sql.
 from __future__ import annotations
 
 from ts_cli.formula_common import CAST_MAP_LOAD_BEARING, CAST_TYPES_WIDENING
-from ts_cli.sql_forms import SQLF_DIV_MARK, sqlf_rounded_cast, sqlf_trunc_toward_zero
+from ts_cli.sql_forms import (SQLF_DIV_MARK, sqlf_rounded_cast, sqlf_safe_divide_form,
+                               sqlf_trunc_toward_zero)
 
 
 # Keywords that can never continue a NOT operand: boolean connectors plus
@@ -150,6 +151,10 @@ def _construct_case(cur, resolver) -> str:
             raise UntranslatableError(f"unexpected {text!r} inside CASE")
     if not branches:
         raise UntranslatableError("CASE with no WHEN branch")
+    if len(branches) == 1:  # the compiled safe_divide form, read back as the idiom (BL-374)
+        sd = sqlf_safe_divide_form(branches[0][0], branches[0][1], else_val)
+        if sd:
+            return sd
     out = else_val
     for cond, val in reversed(branches):
         out = f"if ( {cond} ) then {val} else {out}"

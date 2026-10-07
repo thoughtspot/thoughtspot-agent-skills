@@ -41,6 +41,7 @@ from ts_cli.sql_forms import (
     sqlf_guard_adjacent,
     sqlf_like,
     sqlf_null_default_call,
+    sqlf_safe_divide_form,
 )
 
 
@@ -620,7 +621,9 @@ def _call_extract(cur: _Cursor, resolver) -> str:
 def _call_iff(cur: _Cursor, resolver) -> str:
     args = _call_args(cur, resolver)
     _need(args, 3, "IFF")
-    return f"if ( {args[0]} ) then {args[1]} else {args[2]}"
+    # the compiled safe_divide form, read back as the idiom (BL-374)
+    return (sqlf_safe_divide_form(*args)
+            or f"if ( {args[0]} ) then {args[1]} else {args[2]}")
 
 
 def _call_null_default(name: str, cur: _Cursor, resolver) -> str:
@@ -869,6 +872,10 @@ def _construct_case(cur, resolver) -> str:
             raise UntranslatableError(f"unexpected {text!r} inside CASE")
     if not branches:
         raise UntranslatableError("CASE with no WHEN branch")
+    if len(branches) == 1:  # the compiled safe_divide form, read back as the idiom (BL-374)
+        sd = sqlf_safe_divide_form(branches[0][0], branches[0][1], else_val)
+        if sd:
+            return sd
     out = else_val
     for cond, val in reversed(branches):
         out = f"if ( {cond} ) then {val} else {out}"
