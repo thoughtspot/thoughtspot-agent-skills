@@ -13469,9 +13469,13 @@ windows. Round-trip fidelity cases `sf-fix-025`/`026` (M0) and `dbx-fix-032`/`03
 SQL read back through the from-direction (`if ( [N2] = 0 ) then 0 else [N1] / [N2]`), with
 `026` dividing by `N2 * 0` so fixture row 3 is a NULL dividend over a zero divisor — 0, where `DIV0`
 is NULL. Expected values from the live Snowflake SELECT; the ThoughtSpot leg of those four cases is
-not yet run. From-direction behaviour is unchanged. Not changed: the upstream Ossie converter's
-`safe_divide` row (`docs/ossie/ts-ossie-function-mapping.md`, the converter's own composition), and the
-dated history in the to-Databricks `references/open-items.md`.
+not yet run. From-direction behaviour is unchanged (recognising the form back as `safe_divide` is BL-374).
+After the #581 review, the Databricks emitter also brackets a pass-through (`sql_*_op`) or predicate
+operand wherever it places one beside an operator — `safe_divide ( sql_number_op ( 'x + y' ) , b )`
+had emitted `x + y / NULLIF(b, 0)` — through one `_needs_parens` / `_wrap` helper, which also fixed
+`round`'s unbracketed non-literal increment. The Ossie map's `safe_divide` row now records that the
+upstream converter's COALESCE form is inexact (fix held: BL-371). The dated history in the
+to-Databricks `references/open-items.md` is left as written.
 
 ## BL-367 — The upstream ThoughtSpot converter (apache/ossie) still converts trigonometry as if ThoughtSpot were in degrees `Tier 2`
 
