@@ -570,15 +570,21 @@ measures:
 
 ---
 
-## safe_divide → COALESCE/NULLIF
+## safe_divide → CASE / NULLIF
 
-ThoughtSpot `safe_divide(a, b)` maps to `COALESCE(a / NULLIF(b, 0), 0)`:
+ThoughtSpot `safe_divide(a, b)` maps to `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` —
+what ThoughtSpot itself compiles it to, so it is exact on every input: 0 on a zero divisor
+(even when `a` is NULL), NULL on a NULL divisor, NULL on a NULL dividend over a non-zero
+divisor. A compound `b` is bracketed, identically in both places.
 
 ```yaml
 measures:
   - name: answer_formula
-    expr: COALESCE(SUM(LINE_TOTAL) / NULLIF(SUM(QUANTITY), 0), 0)
+    expr: CASE WHEN SUM(QUANTITY) = 0 THEN 0 ELSE SUM(LINE_TOTAL) / NULLIF(SUM(QUANTITY), 0) END
 ```
+
+**Fixed ts-cli 0.167.0 (BL-366):** the mapping was `COALESCE(a / NULLIF(b, 0), 0)`, which
+is 0 on a NULL operand where `safe_divide` is NULL.
 
 ---
 

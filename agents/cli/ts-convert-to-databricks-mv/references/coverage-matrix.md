@@ -70,7 +70,7 @@ for the full bidirectional translation reference.
 
 | # | ThoughtSpot Construct | Databricks Metric View Equivalent | Notes |
 |---|---|---|---|
-| 32 | `safe_divide(a, b)` | `COALESCE(a / NULLIF(b, 0), 0)` | Numerator re-parenthesized when it is itself a binop |
+| 32 | `safe_divide(a, b)` | `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` | ThoughtSpot's own compiled form, exact on every NULL / zero input (BL-366, ts-cli 0.167.0; was `COALESCE(a / NULLIF(b, 0), 0)`, 0 on a NULL operand). Numerator and divisor each re-parenthesized when a binop; the divisor's text is reused verbatim in both places |
 | 33 | `if_null(x, d)` / `ifnull(x, d)` | `COALESCE(x, d)` | |
 | 34 | `zero_if_null(x)` | `COALESCE(x, 0)` | |
 | 35 | `null_if_zero(x)` | `NULLIF(x, 0)` | not a ThoughtSpot function (rejected at import 2026-10-06, BL-344) — only reachable from hand-written TML; the from-Databricks direction now emits `if ( x = 0 ) then null else x` |

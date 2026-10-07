@@ -991,7 +991,7 @@ rm -f /tmp/ts_tml_*.json
 > | `last_value(agg, query_groups(), {date_col})` | `SUM(col)` + `non_additive_dimensions` on the date table (see below) |
 > | `sum(group_aggregate(sum(m), {attr}, query_filters()))` | Plain `SUM(m)` — outer sum + query_filters() simplifies |
 > | `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | Plain `SUM(m)` |
-> | `safe_divide(sum(m), [NamedMetric])` where NamedMetric is same measure at coarser grain | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` — contribution ratio pattern |
+> | `safe_divide(sum(m), [NamedMetric])` where NamedMetric is same measure at coarser grain | `CASE WHEN SUM(tbl.metric) OVER (PARTITION BY dim.COL) = 0 THEN 0 ELSE tbl.metric / NULLIF(SUM(tbl.metric) OVER (PARTITION BY dim.COL), 0) END` — contribution ratio pattern |
 > | `group_aggregate(sum(m), {attr}, query_filters() + {region='east'})` | `SUM(CASE WHEN t.REGION = 'east' THEN t.M END)` — an *additive* hardcoded filter is translatable (corrected 2026-08-26, finding 13.9, live-verified). Only filters that **suppress** query filters (`{}`, `{attr='v'}` alone, `{attr}`, `query_filters() - {...}`) remain untranslatable |
 >
 > Consult the reference. Never reason from first principles about ThoughtSpot functions.

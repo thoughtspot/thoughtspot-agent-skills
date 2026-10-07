@@ -34,7 +34,8 @@ def test_shipped_m0_cases_load_and_count():
     # 50 original + 10 BL-340..343 guards + 11 from the #572 review (2026-10-06)
     # + 24 sf-fix cases for the M2 fixes and their review (BL-357..362, 2026-10-07)
     # + 17 sf-trig / sf-quote / sf-prec cases (BL-364, BL-365, 2026-10-07)
-    assert len(cases) == 112
+    # + 2 sf-fix round-trip cases for the to-direction safe_divide form (BL-366, 2026-10-07)
+    assert len(cases) == 114
     assert {c["dialect"] for c in cases} == {"snowflake"}
     fx = C.fixtures_for(cases, CASE_DIR)
     assert set(fx) == {"fixture-m0.json"}

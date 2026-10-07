@@ -67,7 +67,7 @@ output and the generated `.sql`, not a checklist the model works through by hand
 | Conditional aggregate (`sum_if(cond, x)`) | `measures[]` — `expr: SUM(x) FILTER (WHERE cond)` |
 | Conditional aggregate (`unique_count_if(cond, x)`) | `measures[]` — `expr: COUNT(DISTINCT x) FILTER (WHERE cond)` |
 | Conditional aggregate (all `*_if` variants) | `measures[]` — `expr: AGG(x) FILTER (WHERE cond)` |
-| `safe_divide(a, b)` | `COALESCE(a / NULLIF(b, 0), 0)` |
+| `safe_divide(a, b)` | `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` (ThoughtSpot's own compiled form — exact on NULL; BL-366) |
 | Cross-formula ref to measure | `MEASURE(measure_name)` in measure `expr`. **Live-verified 2026-07-09 across query grain** (`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, B1) — CONFIRMED true ratio-of-sums, cross-platform, at every grain; no grain caveat needed |
 | Cross-formula ref to LOD dimension | `ANY_VALUE(dimension_name)` in measure `expr` |
 | Formula column — untranslatable | **Omitted** — logged in Unmapped Report |
