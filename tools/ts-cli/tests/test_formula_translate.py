@@ -846,9 +846,20 @@ class TestKnownDefects:
         assert r["status"] == TRANSLATED and "mod" in r["formula"]
         assert any("Monday week start" in t for t in r["traps"])
 
-    def test_zeroifnull_approximated(self):
+    def test_zeroifnull_is_ifnull(self):
+        # BL-226: ZEROIFNULL was a rename to the uncatalogued `zeroifnull`
         r = translate("ZEROIFNULL(SUM(amount))", "snowflake")
-        assert r["status"] == APPROXIMATED and any("BL-226" in t for t in r["traps"])
+        assert r["status"] == TRANSLATED and "ifnull ( sum (" in r["formula"]
+
+    @pytest.mark.parametrize("dialect,src", [
+        ("snowflake", "name ILIKE '%abc%'"), ("snowflake", "name NOT ILIKE 'a%'"),
+        ("snowflake", "name RLIKE 'a.*'"), ("databricks", "name ilike 'a%'"),
+        ("databricks", "name LIKE 'a%'"),
+    ])
+    def test_like_family_is_a_passthrough(self, dialect, src):
+        # BL-362: the warehouse's own operator, exact (case-sensitive LIKE stays so)
+        r = translate(src, dialect)
+        assert r["status"] == TRANSLATED and r["formula"].startswith("sql_bool_op ("), r
 
     def test_zn_stripped_is_approximated(self):
         r = translate("ZN(SUM([Profit])) / SUM([Sales])", "tableau")
@@ -857,10 +868,10 @@ class TestKnownDefects:
 
 class TestOutputGuard:
     @pytest.mark.parametrize("dialect,src,why", [
-        ("snowflake", "name ILIKE '%abc%'", "ILIKE"),
-        ("snowflake", "name NOT ILIKE 'a%'", "ILIKE"),
-        ("snowflake", "name RLIKE 'a.*'", "RLIKE"),
-        ("databricks", "name ilike 'a%'", "ILIKE"),
+        # an unknown keyword operator is refused, never read as a column (BL-360)
+        ("snowflake", "name SIMILAR TO 'a%'", "SIMILAR"),
+        ("databricks", "name REGEXP 'a.*'", "REGEXP"),
+        ("databricks", "I1 DIV2 3", "DIV2"),
         ("qlik", "Sum(Sales)/Sum(TOTAL Sales)", "TOTAL"),
         ("dax", 'IF(Sales[Name] == "Bob", 1, 0)', "=="),
         ("tableau", "LEFT([Customer Name], 3) + '...'", "concat"),

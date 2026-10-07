@@ -150,9 +150,11 @@ Verified 2026-07-10, SE cluster.
 | `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` → `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` | `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` → `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` |
 | `isnull ( [x] )` → `x IS NULL` | `x IS NULL` → `isnull ( [x] )` |
 | `not ( isnull ( [x] ) )` → `NOT (x IS NULL)` | `x IS NOT NULL` → `not ( isnull ( [x] ) )` — **there is no `isnotnull`** (rejected at import, 2026-10-06, BL-339); `sv_sql` already emits this form |
-| `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `COALESCE(x, default)` → `ifnull ( [x] , [default] )` |
+| `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `COALESCE(x, default)` → `if ( [x] != null ) then [x] else [default]` (n-ary: a chain); `IFNULL(x, default)` → `ifnull ( [x] , [default] )` |
 | `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `NVL(x, default)` → `ifnull ( [x] , [default] )` — Snowflake's two-argument `NVL` is `COALESCE` with a fixed arity |
-| `if ( [a] = [b] ) then null else [a]` → `CASE WHEN a = b THEN NULL ELSE a END` | `NULLIF(a, b)` → `( if ( [a] = [b] ) then null else [a] )` (parenthesised, so it composes) — **ThoughtSpot has no `nullif`** (rejected at import, 2026-10-06, BL-339; `then null` is accepted). `x / NULLIF(y, 0)` is the divisor idiom and translates to `safe_divide ( [x] , [y] )` |
+| `ifnull ( [x] , 0 )` → `COALESCE(x, 0)` | `ZEROIFNULL(x)` → `ifnull ( [x] , 0 )`. **Fixed ts-cli 0.163.0 (BL-226):** it was a rename to `zeroifnull`, which is not in the ThoughtSpot catalog; `ifnull ( x , 0 )` is accepted (probe record §7) |
+| — | `COALESCE(x / NULLIF(y, 0), 0)`, `IFNULL(…, 0)`, `NVL(…, 0)`, `ZEROIFNULL(x / NULLIF(y, 0))` → `ifnull ( safe_divide ( [x] , [y] ) , 0 )` — 0 on a zero divisor **and** on a NULL operand; `COALESCE(x / NULLIF(y, 0), d)` with another `d` → `ifnull ( [x] / [y] , d )`. **Fixed ts-cli 0.163.0 (BL-357):** both were `safe_divide ( [x] , [y] )`, which is NULL on a NULL operand. See "Division and zero" below |
+| `if ( [a] = [b] ) then null else [a]` → `CASE WHEN a = b THEN NULL ELSE a END` | `NULLIF(a, b)` → `( if ( [a] = [b] ) then null else [a] )` (parenthesised, so it composes) — **ThoughtSpot has no `nullif`** (rejected at import, 2026-10-06, BL-339; `then null` is accepted). `x / NULLIF(y, 0)` is the divisor idiom and translates to plain `[x] / [y]` — NULL on a zero divisor, as ThoughtSpot's own `/` (**fixed ts-cli 0.163.0, BL-357:** it was `safe_divide`, which returns 0) |
 | `not ( [x] )` → `NOT x` | `NOT x` → `not ( [x] )` |
 
 ### Logical and Comparison Operators
@@ -170,11 +172,15 @@ Verified 2026-07-10, SE cluster.
 
 | ThoughtSpot → Snowflake | Snowflake → ThoughtSpot |
 |---|---|
-| `safe_divide ( [a] , [b] )` → `DIV0(a, b)` | `DIV0(a, b)` → `safe_divide ( [a] , [b] )` |
+| `safe_divide ( [a] , [b] )` → `DIV0(a, b)` — inexact only for a NULL `a` over a zero `b` (`safe_divide` 0, `DIV0` NULL; BL-364) | `DIV0(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , [b] ) )` — `DIV0(NULL, 0)` is NULL in Snowflake and `safe_divide` returns 0 there (live 2026-10-07), hence the guard (BL-357) |
+| — | `DIV0NULL(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , ifnull ( [b] , 0 ) ) )` — 0 on a zero **or NULL** divisor, NULL on a NULL dividend (`DIV0NULL(1, NULL)` = 0, `DIV0NULL(NULL, 0)` = NULL, live 2026-10-07). It was `safe_divide`, NULL on a NULL divisor (BL-357) |
+| — | `a % b` → `mod ( [a] , [b] )` — the remainder takes the dividend's sign in both; folded at `*` / `/` precedence (`a * b % c` → `mod ( ( a * b ) , c )`). It was passed through as a bare `%` (BL-362) |
+| — | `a DIV b` — **Snowflake has no `DIV` operator** (it is a syntax error there); refused, never read as a column. Any identifier that follows an operand with no operator is refused (BL-360) |
 | `round ( [x] , inc )` → `ROUND(x, d)` when `inc` is a literal power of ten (`0.01` → `2`, `1` → `0`, `100` → `-2`); any other literal → `(inc * ROUND(x / inc))`; non-literal → `(inc * ROUND(x / NULLIF(inc, 0)))`; `round ( [x] , 0 )` is NULL in ThoughtSpot — flag it, never emit `ROUND(x, 0)` | `ROUND(x, d)` → `round ( [x] , 10^-d )` for a literal `d` (`2` → `0.01`, `0` → `1`, `-2` → `100`); non-literal `d` → `sql_double_op ( "ROUND({0}, {1})" , [x] , d )` (row-level only). **The 2nd arg is an increment in ThoughtSpot and a digit count in SQL — never copy it across** (BL-331; see thoughtspot-formula-patterns.md Math Functions) |
 | `floor ( [x] )` → `FLOOR(x)` | `FLOOR(x)` → `floor ( [x] )` |
 | `ceil ( [x] )` → `CEIL(x)` | `CEIL(x)` → `ceil ( [x] )` |
 | `ceil ( [x] )` → `CEIL(x)` | `CEILING(x)` → `ceil ( [x] )` — Snowflake `CEILING` is a synonym of `CEIL`; both map to `ceil` |
+| — | `FLOOR(x, s)` / `CEIL(x, s)` / `CEILING(x, s)`, a literal scale → `( floor ( [x] * 10^s ) * 10^-s )` (`s > 0`), `( floor ( [x] / 10^-s ) * 10^-s )` (`s < 0`), `floor ( [x] )` (`s = 0`); `ceil` alike. **Not snapped**, unlike the Databricks row and the Excel translator: Snowflake's own `FLOOR` of a DOUBLE is plain double arithmetic (`FLOOR(0.29::DOUBLE, 2)` = 0.28, `CEIL(1.1::DOUBLE, 2)` = 1.11, `CEIL(1230::DOUBLE, -1)` = 1230, live 2026-10-07), which the unsnapped form reproduces; a NUMBER scales exactly. Multiplied back by the increment (BL-348). A non-literal or \|s\| > 15 scale is refused. **Fixed ts-cli 0.163.0 (BL-361):** the scale was kept on the one-argument `floor` / `ceil` and rejected at import |
 | `abs ( [x] )` → `ABS(x)` | `ABS(x)` → `abs ( [x] )` |
 | `pow ( [x] , [n] )` → `POWER(x, n)` | `POWER(x, n)` → `pow ( [x] , [n] )` |
 | `mod ( [x] , [n] )` → `MOD(x, n)` | `MOD(x, n)` → `mod ( [x] , [n] )` |
@@ -184,6 +190,27 @@ Verified 2026-07-10, SE cluster.
 | `log10 ( [x] )` → `LOG(10, x)` | `LOG(10, x)` → `log10 ( [x] )` |
 | `least ( [a] , [b] , ... )` → `LEAST(a, b, ...)` | `LEAST(a, b, ...)` → `least ( [a] , [b] , ... )` |
 | `greatest ( [a] , [b] , ... )` → `GREATEST(a, b, ...)` | `GREATEST(a, b, ...)` → `greatest ( [a] , [b] , ... )` |
+
+### Division and zero (BL-357, corrected 2026-10-07)
+
+**Decision (user, 2026-10-07): return zero only when the source asks for zero.**
+ThoughtSpot `[a] / [b]` compiles to `a / NULLIF(b, 0)` — NULL on a zero divisor, never a
+query error. `safe_divide ( a , b )` compiles to `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0)
+END` — **0** on a zero divisor even when `a` is NULL, NULL on a NULL divisor (probe record §7).
+
+| Snowflake | ThoughtSpot | Zero divisor | NULL divisor | NULL dividend |
+|---|---|---|---|---|
+| `x / NULLIF(y, 0)` | `[x] / [y]` | NULL | NULL | NULL |
+| `DIV0(x, y)` | `( if ( isnull ( [x] ) ) then null else safe_divide ( [x] , [y] ) )` | 0 | NULL | NULL |
+| `DIV0NULL(x, y)` | `( if ( isnull ( [x] ) ) then null else safe_divide ( [x] , ifnull ( [y] , 0 ) ) )` | 0 | 0 | NULL |
+| `COALESCE(x / NULLIF(y, 0), 0)` (also `IFNULL`, `NVL`, `ZEROIFNULL`) | `ifnull ( safe_divide ( [x] , [y] ) , 0 )` | 0 | 0 | 0 |
+| `COALESCE(x / NULLIF(y, 0), d)` | `ifnull ( [x] / [y] , d )` | d | d | d |
+
+Every row is Snowflake's own behaviour, probed 2026-10-07 and scored in formula fidelity
+M0 (the "After fixes" section of `docs/reviews/2026-10-06-fidelity-m0-snowflake.md`). The
+standing "`safe_divide` for ratios" rule — Excel ratios, and plain-division ratios whose
+source gives no NULL intent — does **not** override a source that wrote `NULLIF`, `DIV0` or
+`DIV0NULL`: each says exactly what it wants on a zero divisor.
 
 **Scalar MIN/MAX trap:** ThoughtSpot `min`/`max` are **aggregate-only** — they reduce a
 column to a single value, not compare two columns row-by-row. Snowflake's scalar
@@ -198,6 +225,8 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 |---|---|
 | `concat ( [a] , [b] )` → `CONCAT(a, b)` | `CONCAT(a, b)` → `concat ( [a] , [b] )` |
 | `concat ( [a] , ' ' , [b] )` → `CONCAT(a, ' ', b)` *(supports N args)* | `CONCAT(a, ' ', b)` → `concat ( [a] , ' ' , [b] )` |
+| — | `a \|\| b \|\| c` → `concat ( [a] , [b] , [c] )` — NULL-propagating in both; a chain mixed with another operator is refused; `concat` takes Text only, so a numeric operand fails at import (BL-362; it was refused outright) |
+| — | `x LIKE 'p'` / `ILIKE` / `RLIKE` / `REGEXP`, and `NOT LIKE …` → `sql_bool_op ( "{0} LIKE 'p'" , [x] )` — Snowflake's own operator, so `LIKE` stays case-sensitive (no BL-333 divergence) and `RLIKE` keeps its whole-string regex match. A non-literal pattern, `ESCAPE`, or a pattern holding a double quote, a brace or a backslash is refused (BL-362) |
 | `substr ( [x] , [start] , [len] )` → `SUBSTR(x, start + 1, len)` — fold a literal start (`substr ( x , 1 , 3 )` → `SUBSTR(x, 2, 3)`) | `SUBSTR(x, start, len)` → `substr ( [x] , start - 1 , [len] )`, folded for a literal start: `SUBSTR(x, 2, 3)` → `substr ( [x] , 1 , 3 )`; `SUBSTR(x, start)` → `substr ( [x] , start - 1 , strlen ( [x] ) )`. **Not a rename (BL-340, fixed ts-cli 0.160.0):** ThoughtSpot `substr` is **zero**-based (`substr ( s , 2 , 3 )` compiles to `SUBSTRING(s, (2 + 1), 3)`) and Snowflake's start is 1-based, so the old identity row returned every substring shifted one character (`'Apple'` → `'ple'`, not `'ppl'`). A literal start **≤ 0**, or a non-literal start, becomes `sql_string_op ( "SUBSTR({0}, -3, 2)" , [x] )` (start as `{1}` when it is a column): Snowflake counts a negative start from the end and treats 0 as 1 ([SUBSTR](https://docs.snowflake.com/en/sql-reference/functions/substr)), which `substr` does not define. Live: formula fidelity M0 after-fixes run, 2026-10-06 (`sf-str-004`, `-009`, `-010`, `-011` MATCH) |
 | `substr ( [x] , [start] , [len] )` → `SUBSTRING(x, start + 1, len)` | `SUBSTRING(x, start, len)` → same as `SUBSTR` above (Snowflake `SUBSTRING` is a synonym) — `substr ( [x] , start - 1 , [len] )`, pass-through for a start ≤ 0 or a non-literal start (BL-340) |
 | `strlen ( [x] )` → `LENGTH(x)` | `LENGTH(x)` → `strlen ( [x] )` |
@@ -215,17 +244,15 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | `( strpos ( [x] , 'val' ) = 1 )` → `STARTSWITH(x, 'val')` | `STARTSWITH(x, 'val')` → `( strpos ( [x] , 'val' ) = 1 )` — no native `starts_with` in TS; `strpos` is 1-based. **The outer parens are what the CLI emits** and are load-bearing under composition: a bare `a = 1` inside a larger expression (`NOT STARTSWITH(...)`, `... AND ...`) can re-associate **Case semantics differ (BL-333):** ThoughtSpot's native form is case-insensitive — it lowercases both sides at compile time (live-verified 2026-10-06, se-thoughtspot; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-comparison-is-case-insensitive)) — while Snowflake's default collation is case-sensitive. Exact only on data of consistent case; the translator is unchanged. |
 | `( substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val' )` → `ENDSWITH(x, 'val')` | `ENDSWITH(x, 'val')` → `( substr ( [x] , strlen ( [x] ) - strlen ( 'val' ) , strlen ( 'val' ) ) = 'val' )` — no native `ends_with` in TS. Outer parens as for `STARTSWITH` above: the CLI emits them and they are load-bearing under composition **Case semantics differ (BL-333):** ThoughtSpot's native form is case-insensitive — it lowercases both sides at compile time (live-verified 2026-10-06, se-thoughtspot; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-comparison-is-case-insensitive)) — while Snowflake's default collation is case-sensitive. Exact only on data of consistent case; the translator is unchanged. |
 
-> **Four translations the CLI performs are UNVERIFIED — do not rely on them yet**
-> (BL-226, 2026-08-28). `sv_sql.py` translates `LPAD`→`lpad`, `RPAD`→`rpad`,
-> `REPEAT`→`repeat` and `ZEROIFNULL`→`zeroifnull`, and none of those four TS names
-> appears in
+> **Three translations the CLI performs are UNVERIFIED — do not rely on them yet**
+> (BL-226, 2026-08-28). `sv_sql.py` translates `LPAD`→`lpad`, `RPAD`→`rpad` and
+> `REPEAT`→`repeat`, and none of those three TS names appears in
 > [../../schemas/thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md)
 > — neither as valid nor as struck-through. That is *unverified*, which is a weaker
 > claim than wrong: they may work. They are named here rather than given rows,
-> because a row asserts a mapping holds. `ZEROIFNULL` needs particular care — the
-> Databricks reference spells the same concept `zero_if_null`
-> ([../ts-databricks/ts-databricks-formula-translation.md](../ts-databricks/ts-databricks-formula-translation.md)),
-> so at most one of the two spellings can be right. Probe each on a live instance,
+> because a row asserts a mapping holds. (`ZEROIFNULL` was the fourth; since ts-cli
+> 0.163.0 it is `ifnull ( x , 0 )`, a catalogued, probed form — Conditional Functions
+> above.) Probe each on a live instance,
 > then add a catalog row and a table row here — or route it through a `sql_string_op`
 > pass-through as the six BL-170 names below are.
 
@@ -239,11 +266,13 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 
 | ThoughtSpot → Snowflake | Snowflake → ThoughtSpot |
 |---|---|
-| `to_integer ( [x] )` → `CAST(x AS INTEGER)` | `CAST(x AS INTEGER)` → `to_integer ( [x] )` |
+| `to_integer ( [x] )` → `CAST(x AS INTEGER)` | `CAST(x AS INTEGER)` → `to_integer ( [x] )` — also `BIGINT`: Snowflake's integer types are all `NUMBER(38,0)`, and `to_integer` compiles to Snowflake's own INT cast, which rounds half away from zero like the source (`to_integer ( 2.7 )` = 3, probe record §7). Unlike Databricks, where `to_integer` is 32-bit (BL-359) |
+| `to_integer ( [x] )` → `CAST(x AS NUMBER)` | `CAST(x AS NUMBER)` / `NUMBER(p)` / `NUMBER(38,0)` / `DECIMAL` / `NUMERIC` with scale 0 → `to_integer ( [x] )`; `NUMBER(p, s)` with `s > 0` → `sql_double_op ( "CAST({0} AS NUMBER(p,s))" , [x] )` row-level, `round ( [x] , 10^-s )` over an aggregate. **Fixed ts-cli 0.163.0 (BL-359):** these were `to_double`, but Snowflake's default scale is 0 and the cast **rounds** (`CAST(2.5 AS NUMBER)` = 3, `CAST(2.567 AS NUMBER(10,2))` = 2.57, live 2026-10-07) |
 | `to_double ( [x] )` → `CAST(x AS DOUBLE)` | `CAST(x AS DOUBLE)` → `to_double ( [x] )` |
 | `to_string ( [x] )` → `CAST(x AS VARCHAR)` | `CAST(x AS VARCHAR)` → `to_string ( [x] )` |
 | *(no direct equivalent)* | `CAST(x AS TEXT)` → `to_string ( [x] )` — TEXT is an alias for VARCHAR in Snowflake |
 | *(no direct equivalent)* | `TO_CHAR(x, fmt)` / `TO_VARCHAR(x, fmt)` → `sql_string_op ( "TO_CHAR({0}, 'fmt')" , [x] )`; one-argument `TO_CHAR(x)` → `sql_string_op ( "TO_CHAR({0})" , [x] )` (the identity on text; Snowflake's own rendering otherwise). **Fixed ts-cli 0.160.0 (BL-343):** the format used to be dropped and one-argument `to_string ( [x] )` emitted, which ThoughtSpot rejects on a DATE (*Function to_string expects 2 arguments, found 1*, VALIDATE_ONLY 2026-10-06) and on Text (probe record §7). No ThoughtSpot function is documented as an exact equivalent of a Snowflake format model, so the format stays in the warehouse. **Exact with a format; without one, a date or timestamp renders by `DATE_OUTPUT_FORMAT` / `TIMESTAMP_OUTPUT_FORMAT` of ThoughtSpot's connection session**, which may differ from the session the source ran in. **A format with double-quoted literal text (`'YYYY"m"MM'`) is refused:** a `sql_*_op` template has no escape for `"` — `\"` was live-probed and rejected at import (M0 `sf-date-018`, 2026-10-06). A brace or backslash is refused too. Live: M0 after-fixes run, 2026-10-06 (`sf-date-011`, `-017`, `sf-str-012`, `-013` MATCH) |
+| *(no direct equivalent)* | `TO_NUMBER(x)` / `TO_DECIMAL(x)` / `TO_NUMERIC(x)` → `to_integer ( [x] )`; `TO_NUMBER(x, p, s)` with `s = 0` → `to_integer ( [x] )`, with `s > 0` → `sql_double_op ( "TO_NUMBER({0}, p, s)" , [x] )` row-level, `round ( [x] , 10^-s )` over an aggregate; with a format model → `sql_double_op ( "TO_NUMBER({0}, 'fmt')" , [x] )`. **Fixed ts-cli 0.163.0 (BL-359):** all were `to_double ( [x] )`, but the default scale is 0 and the conversion rounds (`TO_NUMBER('2.5')` = 3, `TO_DECIMAL(2.567, 10, 2)` = 2.57, live 2026-10-07) |
 | *(no direct equivalent)* | `TRY_CAST(x AS INTEGER)` → `to_integer ( [x] )` — TRY_ variants produce NULL on failure; ThoughtSpot `to_integer` also produces NULL on failure |
 | *(no direct equivalent)* | `TRUNC(x[, d])` → `sql_double_op ( "TRUNC({0}, d)" , [x] )` (row-level `x`); over an aggregate (including a metric reference), the sign-split `( if ( x >= 0 ) then floor ( round ( x * 10^d , 0.000001 ) ) / 10^d else ceil ( round ( x * 10^d , 0.000001 ) ) / 10^d )` (`x / inc … * inc` when `d < 0`; plain `floor`/`ceil` when `d = 0`). The `round ( … , 0.000001 )` guard is required: `0.29 / 0.01` is `28.999999999999996` in DOUBLE, so an unguarded `floor` truncates 0.29 to 0.28. Residual: a value within 5e-7 of an increment below a boundary snaps up to it. A non-literal `d` over an aggregate is refused. ThoughtSpot has no truncate. **Revised 2026-10-06 (BL-331):** this row said `round ( [x] , 0 )`, which is wrong twice — `round` rounds rather than truncates, and `round(x, 0)` evaluates to NULL. `TRUNC(date, 'unit')` is date truncation: same as `DATE_TRUNC('unit', date)` |
 

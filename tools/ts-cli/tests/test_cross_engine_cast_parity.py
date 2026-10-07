@@ -43,13 +43,30 @@ def _resolver(ident: str) -> str:
     return f"[T::{ident}]"
 
 
-@pytest.mark.parametrize("sql_type", sorted(CAST_MAP_LOAD_BEARING))
+#: Load-bearing types whose exact form differs by engine, each with its reason.
+ENGINE_SPECIFIC = {
+    # Databricks INT is 32-bit and `to_integer` compiles to `CAST(x as int)` there, so a
+    # BIGINT cast is a 64-bit pass-through (BL-359, M2 dbx-round-009); Snowflake's INT is
+    # NUMBER(38,0), so `to_integer` stays exact.
+    "BIGINT": ('sql_int_op ( "CAST({0} AS BIGINT)" , [T::x] )', "to_integer ( [T::x] )"),
+}
+
+
+@pytest.mark.parametrize("sql_type", sorted(ENGINE_SPECIFIC))
+def test_engine_specific_casts(sql_type):
+    dbx, sf = ENGINE_SPECIFIC[sql_type]
+    expr = f"CAST(x AS {sql_type})"
+    assert dbx_translate(expr, _resolver) == dbx
+    assert sf_translate(expr, _resolver) == sf
+
+
+@pytest.mark.parametrize("sql_type", sorted(set(CAST_MAP_LOAD_BEARING) - set(ENGINE_SPECIFIC)))
 def test_load_bearing_casts_agree_across_engines(sql_type):
     expr = f"CAST(x AS {sql_type})"
     assert sf_translate(expr, _resolver) == dbx_translate(expr, _resolver)
 
 
-@pytest.mark.parametrize("sql_type", sorted(CAST_MAP_LOAD_BEARING))
+@pytest.mark.parametrize("sql_type", sorted(set(CAST_MAP_LOAD_BEARING) - set(ENGINE_SPECIFIC)))
 def test_load_bearing_cast_is_never_dropped(sql_type):
     """The specific 4.1 regression: a bare `[T::x]` means the type was discarded."""
     expr = f"CAST(x AS {sql_type})"

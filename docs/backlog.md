@@ -235,6 +235,7 @@ are roughly ordered by value÷effort.
 | BL-358 | ThoughtSpot's queries over a Databricks connection run with non-ANSI semantics: BIGINT overflow wraps and a bad cast is NULL where an ANSI Databricks source raises (fidelity M2) — document; decide whether the translator warns | 2026-11-30 |
 | BL-360 | Databricks / Snowflake `a DIV b` — `DIV` read as a column (`[TABLE::DIV]`) and reported TRANSLATED; rejected at import (fidelity M2) | next translator PR |
 | BL-361 | `FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor`/`ceil`; TRANSLATED, rejected at import (fidelity M2; Snowflake too) | next translator PR |
+| BL-364 | to-direction `safe_divide` is inexact on NULL — Databricks `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, Snowflake `DIV0(NULL, 0)` is NULL (the inverse of BL-357) | 2026-11-30 |
 
 ### Tier 3 — Opportunistic
 
@@ -13236,3 +13237,27 @@ corpus would be executable input running with that reach.
   `current_user()` is the confined principal.
 
 **Target:** 2026-11-15, and in any case before any third-party SQL corpus is run on Databricks.
+
+## BL-364 — To-direction `safe_divide` is not exact on NULL: Databricks `COALESCE(a / NULLIF(b, 0), 0)`, Snowflake `DIV0` `Tier 2`
+
+**Filed:** 2026-10-07. **Status:** OPEN.
+**Source:** the inverse of BL-357, found while fixing it (fix/m2-findings). Offline reading of
+`mv_emit_sql._emit_safe_divide` and both mapping docs' to-direction rows; the Snowflake
+behaviour is live (2026-10-07, `ThoughtSpot Partner (AP)`).
+
+**The facts.**
+- ThoughtSpot `safe_divide ( a , b )` compiles to `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`
+  (probe record §7; M2 compiled SQL): 0 on a zero divisor even when `a` is NULL, NULL on a NULL
+  divisor or a NULL dividend over a non-zero divisor.
+- `ts-convert-to-databricks-mv` emits `COALESCE(a / NULLIF(b, 0), 0)`, which is **0** on any NULL
+  operand where `safe_divide` is NULL.
+- The Snowflake to-direction row maps `safe_divide` to `DIV0(a, b)`: `DIV0(NULL, 0)` is NULL where
+  `safe_divide` gives 0. Narrow, but a different answer.
+
+**Fix.** Emit the compiled form, `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`, in both
+to-direction converters (wrap a compound `b` once). Update `test_databricks_emit_sql.py`, the
+golden worked examples that carry the COALESCE form, both mapping docs' to-direction rows, and
+add a round-trip fidelity case. Not done in the M2 fix PR: it changes converter output that
+golden tests pin, and the PR's scope is the from-direction.
+
+**Target:** 2026-11-30.

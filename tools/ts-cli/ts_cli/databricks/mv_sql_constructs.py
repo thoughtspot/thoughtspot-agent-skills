@@ -16,6 +16,7 @@ it — this module has no top-level dependency on mv_sql.
 from __future__ import annotations
 
 from ts_cli.formula_common import CAST_MAP_LOAD_BEARING, CAST_TYPES_WIDENING
+from ts_cli.sql_forms import SQLF_DIV_MARK, sqlf_rounded_cast, sqlf_trunc_toward_zero
 
 
 # Keywords that can never continue a NOT operand: boolean connectors plus
@@ -27,7 +28,8 @@ _NOT_OPERAND_STOP_KWS = frozenset({"AND", "OR", "THEN", "WHEN", "ELSE", "END"})
 # left operand. 'and'/'or' are deliberately excluded — a boolean connector
 # two positions back (e.g. `a = 1 AND b IN (...)`) must still pop `b`, not
 # be treated as a compound operand.
-_COMPOUND_GUARD_OPS = {"+", "-", "*", "/", "=", "!=", "<", ">", "<=", ">="}
+_COMPOUND_GUARD_OPS = {"+", "-", "*", "/", "%", "||", SQLF_DIV_MARK,
+                       "=", "!=", "<", ">", "<=", ">="}
 
 
 def _pop_operand(units: list[str], construct: str) -> str:
@@ -71,7 +73,12 @@ def _construct_not(cur, resolver, units: list[str]) -> None:
         ands = " and ".join(f"{operand} != {v}" for v in values)
         units.append(f"( {ands} )")
         return
-    if kind == "kw" and text in ("BETWEEN", "LIKE"):
+    if kind == "kw" and text in ("LIKE", "ILIKE", "RLIKE"):
+        from ts_cli.databricks.mv_sql import _construct_like
+        cur.advance()
+        _construct_like(text, cur, units, negate=True)  # BL-362
+        return
+    if kind == "kw" and text == "BETWEEN":
         raise UntranslatableError(
             f"NOT {text} has no documented ThoughtSpot mapping")
     if kind == "ident":
@@ -165,18 +172,12 @@ def _construct_cast(cur, resolver) -> str:
     # silently (audit 4.1). The Snowflake engine already mapped it; the map now
     # lives in formula_common and both emit through it.
     type_name = ttext.upper()
-    nk, nt = cur.peek()
-    if nk == "op" and nt == "(":  # DECIMAL(10,2)-style precision — skip it
-        cur.advance()
-        depth = 1
-        while depth:
-            k2, t2 = cur.advance()
-            if k2 == "op" and t2 == "(":
-                depth += 1
-            elif k2 == "op" and t2 == ")":
-                depth -= 1
+    params = _cast_params(cur)
     cur.expect_op(")")
     inner = inner_units[0] if len(inner_units) == 1 else f"( {' '.join(inner_units)} )"
+    special = _cast_64bit_or_decimal(type_name, params, inner)
+    if special is not None:
+        return special
     fn = CAST_MAP_LOAD_BEARING.get(type_name)
     if fn is not None:
         # Narrowing cast: the target changes the value, so it must be emitted.
@@ -188,6 +189,64 @@ def _construct_cast(cur, resolver) -> str:
     raise UntranslatableError(
         f"CAST target type '{type_name}' not recognised — add it to "
         "CAST_MAP_LOAD_BEARING or CAST_TYPES_WIDENING in ts_cli/formula_common.py")
+
+
+def _cast_params(cur) -> list[str]:
+    """The ``(p, s)`` after a CAST target type, as raw token texts (empty when absent)."""
+    nk, nt = cur.peek()
+    if not (nk == "op" and nt == "("):
+        return []
+    cur.advance()
+    params: list[str] = []
+    depth = 1
+    while depth:
+        k2, t2 = cur.advance()
+        if k2 == "op" and t2 == "(":
+            depth += 1
+        elif k2 == "op" and t2 == ")":
+            depth -= 1
+        elif k2 == "number" and depth == 1:
+            params.append(t2)
+    return params
+
+
+#: Databricks' 64-bit integer types. ``to_integer`` compiles to ``CAST(x as int)``, which is
+#: 32-bit on Databricks: ``CAST(1e12 AS BIGINT)`` came back 2147483647 (M2 ``dbx-round-009``).
+_CAST_64BIT = frozenset({"BIGINT", "LONG"})
+_CAST_DECIMAL = frozenset({"DECIMAL", "DEC", "NUMERIC"})
+
+
+def _cast_64bit_or_decimal(type_name: str, params: list[str], inner: str):
+    """The casts whose exact form is not in the shared CAST map, or None.
+
+    * ``BIGINT`` / ``LONG`` (BL-359): row-level, the warehouse's own 64-bit cast
+      (``sql_int_op``); over an aggregate, native truncation toward zero (``floor`` /
+      ``ceil`` return INT64). Databricks' cast truncates toward zero.
+    * ``DECIMAL(p, s)``: it ROUNDS half up to ``s`` places, and a bare ``DECIMAL`` is
+      ``DECIMAL(10, 0)`` (``CAST(2.5 AS DECIMAL)`` = 3, live 2026-10-07) — so it is not the
+      widening no-op the shared map lists it as. ``s = 0`` is an integral cast like BIGINT;
+      ``s > 0`` is ``sql_forms.sqlf_rounded_cast``.
+    """
+    from ts_cli.databricks.mv_sql import UntranslatableError
+    from ts_cli.formula_common import expr_is_aggregated
+    if type_name in _CAST_DECIMAL:
+        p = params[0] if params else "10"
+        s = int(params[1]) if len(params) > 1 else 0
+        if s > 0:
+            return sqlf_rounded_cast(inner, s, f"CAST({{0}} AS DECIMAL({p},{s}))",
+                                     expr_is_aggregated(inner))
+        sql = f"CAST({{0}} AS DECIMAL({p},0))"
+    elif type_name in _CAST_64BIT:
+        sql = "CAST({0} AS BIGINT)"
+    else:
+        return None
+    if expr_is_aggregated(inner):
+        if type_name in _CAST_DECIMAL:
+            raise UntranslatableError(
+                f"CAST(… AS DECIMAL({params[0] if params else 10},0)) over an aggregate rounds "
+                "half up — no exact native form")
+        return sqlf_trunc_toward_zero(inner)
+    return f'sql_int_op ( "{sql}" , {inner} )'
 
 
 def _construct_is(cur, units: list[str]) -> None:

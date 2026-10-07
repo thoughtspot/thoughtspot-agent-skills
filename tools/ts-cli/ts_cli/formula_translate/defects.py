@@ -7,8 +7,9 @@ answer) or ``APPROXIMATED`` with a trap (unverified or lossy), so a tester never
 a clean translation.
 
 Remove an entry in the same PR that fixes its translator; the test for the entry then fails
-and says so. Removed so far: the three BL-334 weekday entries (#565) and Databricks
-DATEDIFF argument order (BL-336, #564).
+and says so. Removed so far: the three BL-334 weekday entries (#565), Databricks
+DATEDIFF argument order (BL-336, #564), and ZEROIFNULL → zeroifnull (BL-226; the SQL
+translators now emit ifnull ( x , 0 )).
 """
 from __future__ import annotations
 
@@ -32,12 +33,6 @@ class Defect:
 
 
 KNOWN_DEFECTS: tuple[Defect, ...] = (
-    Defect(frozenset({"snowflake", "databricks"}), re.compile(r"\bZEROIFNULL\s*\(", re.I),
-           APPROXIMATED, "BL-226",
-           "ZEROIFNULL → zeroifnull: the translator emits it, but it is not in the ThoughtSpot "
-           "formula catalog and has never been probed (BL-226) — validate before use, or "
-           "write ifnull ( x , 0 )",
-           allow_functions=frozenset({"zeroifnull"})),
     Defect(frozenset({"tableau"}), re.compile(r"\bZN\s*\(", re.I), APPROXIMATED, "tableau",
            "ZN() was dropped: a NULL now stays NULL where Tableau returned 0 — inside "
            "arithmetic (ZN(SUM([a])) / SUM([b])) the whole result becomes NULL for that row; "

@@ -32,6 +32,7 @@ from ts_cli.databricks.mv_sql_constructs import (
     _construct_in,
     _construct_is,
     _construct_not,
+    _pop_operand,
 )
 # UntranslatableError's canonical home is ts_cli/formula_common.py (BL-063
 # PR 14) — mv_emit_expr.py (the reverse direction) raises the same exception
@@ -47,6 +48,27 @@ from ts_cli.formula_common import (
     ts_round_from_sql_digits,
     ts_weekday_number,
 )
+from ts_cli.databricks.mv_sql_calls import (
+    mvc_bround,
+    mvc_concat_ws,
+    mvc_floor_ceil,
+    mvc_instr,
+    mvc_last_day,
+    mvc_nvl2,
+    mvc_to_date_expr,
+    mvc_trunc,
+    mvc_try_divide,
+)
+from ts_cli.sql_forms import (
+    SQLF_BINARY_OPS,
+    SQLF_DIV_MARK,
+    sqlf_fold_concat,
+    sqlf_fold_multiplicative,
+    sqlf_group,
+    sqlf_guard_adjacent,
+    sqlf_like,
+    sqlf_null_default_call,
+)
 
 
 _TOKEN_RE = re.compile(
@@ -58,7 +80,10 @@ _TOKEN_RE = re.compile(
 
 _KEYWORDS = {"AND", "OR", "NOT", "CASE", "WHEN", "THEN", "ELSE", "END",
              "IS", "NULL", "IN", "BETWEEN", "TRUE", "FALSE", "DISTINCT",
-             "AS", "CAST", "FROM", "LIKE", "OVER", "FILTER", "WHERE"}
+             "AS", "CAST", "FROM", "LIKE", "ILIKE", "RLIKE", "OVER", "FILTER",
+             "WHERE"}
+#: Keyword operators translated as a sql_bool_op pass-through (BL-362).
+_LIKE_OPS = frozenset({"LIKE", "ILIKE", "RLIKE"})
 
 _REF_PLACEHOLDER_RE = re.compile(r"^__MVREF_\d+__$")
 _DATE_LITERAL_RE = re.compile(r"^'\d{4}-\d{2}-\d{2}'$")
@@ -184,7 +209,10 @@ def _expr(cur: _Cursor, resolver, stop_kws: frozenset = frozenset()) -> str:
 
 
 def _expr_units(cur: _Cursor, resolver,
-                stop_kws: frozenset = frozenset()) -> list[str]:
+                stop_kws: frozenset = frozenset(), finish: bool = True) -> list[str]:
+    """Translate up to a stop token into units. ``finish=False`` returns them before the
+    NULLIF markers are collapsed and the operators folded (``_finish_units``), so a caller
+    can see an ``x / NULLIF(y, 0)`` argument (BL-357)."""
     units: list[str] = []
     while True:
         kind, text = cur.peek()
@@ -205,9 +233,16 @@ def _expr_units(cur: _Cursor, resolver,
             _ident_unit(text, cur, resolver, units)
         else:  # kw
             _keyword_unit(text, cur, resolver, units)
-    _collapse_nullif_markers(units)
     if not units:
         raise UntranslatableError("empty expression")
+    return _finish_units(units) if finish else units
+
+
+def _finish_units(units: list[str]) -> list[str]:
+    """Collapse NULLIF markers, then fold ``%`` / ``DIV`` and ``||`` at their precedence."""
+    _collapse_nullif_markers(units)
+    sqlf_fold_multiplicative(units)
+    sqlf_fold_concat(units)
     return units
 
 
@@ -226,11 +261,7 @@ def _op_unit(text: str, cur: _Cursor, resolver, units: list[str]) -> None:
         units.append(f"( {inner} )")
     elif text == "<>":
         units.append("!=")
-    elif text in ("||", "%"):
-        raise UntranslatableError(
-            f"operator '{text}' has no documented ThoughtSpot mapping "
-            f"(ts-databricks-formula-translation.md)")
-    else:
+    else:  # `%` and `||` are folded by _finish_units (BL-362)
         units.append(text)
 
 
@@ -250,6 +281,10 @@ def _ident_unit(text: str, cur: _Cursor, resolver, units: list[str]) -> None:
         cur.advance()  # consume '('
         units.append(_call(upper, cur, resolver))
         return
+    if upper == "DIV" and units and units[-1] not in SQLF_BINARY_OPS:
+        units.append(SQLF_DIV_MARK)  # `a DIV b`, folded by _finish_units (BL-360)
+        return
+    sqlf_guard_adjacent(units, text)
     units.append(resolver(text))
 
 
@@ -283,7 +318,9 @@ _RENAME = {
     "CONTAINS": "contains", "LEFT": "left",
     "RIGHT": "right", "LPAD": "lpad", "RPAD": "rpad", "REVERSE": "reverse",
     "REPEAT": "repeat",
-    "ABS": "abs", "CEIL": "ceil", "FLOOR": "floor",
+    # CEIL / FLOOR deliberately not here (BL-361): their optional scale argument needs
+    # the scaled form — see mv_sql_calls.mvc_floor_ceil.
+    "ABS": "abs",
     # ROUND deliberately not here (BL-331): ThoughtSpot round()'s 2nd arg is a
     # rounding INCREMENT, not a digit count — see _call_round.
     "MOD": "mod", "POWER": "pow", "SQRT": "sqrt", "LN": "ln",
@@ -356,21 +393,15 @@ def _emit(name: str, args: list[str]) -> str:
 
 def _call(name: str, cur: _Cursor, resolver) -> str:
     """Translate NAME ( … ) — '(' already consumed."""
-    if name == "EXTRACT":
-        return _call_extract(cur, resolver)
-    if name == "COUNT":
-        label, inner = _call_count(cur, resolver)
-        return _finish_aggregate(label, inner, cur, resolver)
+    pre = _PRE_ARGS.get(name)
+    if pre is not None:
+        return pre(name, cur, resolver)
     if name in _PASS_THROUGH_HINT:
         return _call_pass_through(name, cur, resolver)
-    if name == "TO_DATE":
+    if name == "TO_DATE" and cur.peek()[0] == "string":
         # TO_DATE's arguments are raw strings — the date-literal wrap must
         # not fire inside it (would double-wrap 'yyyy-MM-dd'-style args).
         return _emit("to_date", _call_raw_string_args(cur))
-    if name == "DATEDIFF":
-        return _call_datediff(cur, resolver)
-    if name == "IF":
-        return _call_if(cur, resolver)
     args = _call_args(cur, resolver, agg=name)
     if name in _AGGREGATES:
         _need(args, 1, name)
@@ -382,10 +413,8 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
     if name == "LOCATE":
         _need(args, 2, name)
         return _emit("strpos", [args[1], args[0]])
-    if name == "NULLIF":
-        return _call_nullif(args)
-    if name == "COALESCE":
-        return _call_coalesce(args)
+    if name in ("NULLIF", "NULLIFZERO"):
+        return _call_nullif(name, args)
     if name in _ARG_COMPOSED:
         return _ARG_COMPOSED[name](args)
     if name in _RENAME:
@@ -431,12 +460,25 @@ def _call_months_between(name: str, args: list[str]) -> str:
 
 
 _EXACT_FORM_CALLS = {"MONTHS_BETWEEN": _call_months_between,
-                     "SUBSTRING": _call_dbx_substr, "SUBSTR": _call_dbx_substr}
+                     "SUBSTRING": _call_dbx_substr, "SUBSTR": _call_dbx_substr,
+                     # BL-361 / BL-362 — mv_sql_calls.py
+                     "FLOOR": mvc_floor_ceil, "CEIL": mvc_floor_ceil,
+                     "CEILING": mvc_floor_ceil, "TRY_DIVIDE": mvc_try_divide,
+                     "NVL2": mvc_nvl2, "TRUNC": mvc_trunc, "LAST_DAY": mvc_last_day,
+                     "BROUND": mvc_bround, "INSTR": mvc_instr, "CONCAT_WS": mvc_concat_ws,
+                     "TO_DATE": mvc_to_date_expr}
 # Every ThoughtSpot name each handler above can emit — read by check_mapping_code_sync.py
 # (requirement D), which cannot see through function-valued dispatch maps.
 EXACT_FORM_EMITS = {"MONTHS_BETWEEN": ("sql_double_op",),
                     "SUBSTRING": ("substr", "strlen", "sql_string_op"),
-                    "SUBSTR": ("substr", "strlen", "sql_string_op")}
+                    "SUBSTR": ("substr", "strlen", "sql_string_op"),
+                    "FLOOR": ("floor", "round"), "CEIL": ("ceil", "round"),
+                    "CEILING": ("ceil", "round"), "TRY_DIVIDE": (), "NVL2": (),
+                    "TRUNC": ("start_of_year", "start_of_quarter", "start_of_month",
+                              "sql_date_op"),
+                    "LAST_DAY": ("add_days", "add_months", "start_of_month"),
+                    "BROUND": ("sql_double_op",), "INSTR": ("sql_int_op",),
+                    "CONCAT_WS": ("sql_string_op",), "TO_DATE": ("sql_date_op",)}
 
 
 def _call_round(args: list[str]) -> str:
@@ -721,7 +763,12 @@ def _datediff3(unit: str, args: list[str], resolver) -> str:
     return f'sql_int_op ( "DATEDIFF({unit}, {{0}}, {{1}})" , {args[0]} , {args[1]} )'
 
 
-def _call_nullif(args: list[str]) -> str:
+def _call_nullif(name: str, args: list[str]) -> str:
+    """``NULLIF(x, 0)`` / ``nullifzero(x)`` -> the divisor marker, collapsed by
+    ``_collapse_nullif_markers``."""
+    if name == "NULLIFZERO":
+        _need(args, 1, name)
+        return _NULLIF0 + args[0]
     _need(args, 2, "NULLIF")
     if args[1] != "0":
         raise UntranslatableError(
@@ -730,13 +777,21 @@ def _call_nullif(args: list[str]) -> str:
     return _NULLIF0 + args[0]
 
 
-def _call_coalesce(args: list[str]) -> str:
-    if len(args) == 2 and args[0].startswith("safe_divide (") and args[1] == "0":
-        return args[0]  # COALESCE(x / NULLIF(y,0), 0) -> safe_divide(x, y)
-    if len(args) == 2:
-        return f"if ( {args[0]} != null ) then {args[0]} else {args[1]}"
-    raise UntranslatableError(
-        "COALESCE with more than two arguments has no documented mapping")
+def _call_null_default(name: str, cur: _Cursor, resolver) -> str:
+    """COALESCE / IFNULL / NVL / ZEROIFNULL, over raw argument units so that an
+    ``x / NULLIF(y, 0)`` first argument is visible (BL-357, ``sql_forms``)."""
+    raw: list[list[str]] = []
+    if cur.peek() != ("op", ")"):
+        while True:
+            raw.append(_expr_units(cur, resolver, finish=False))
+            if cur.peek() == ("op", ","):
+                cur.advance()
+                continue
+            cur.expect_op(")")
+            break
+    else:
+        cur.advance()
+    return sqlf_null_default_call(name, raw, _finish_units, _NULLIF0)
 
 
 def _call_raw_string_args(cur: _Cursor) -> list[str]:
@@ -771,24 +826,55 @@ def _keyword_construct(text: str, cur: _Cursor, resolver,
         _construct_in(cur, resolver, units)
     elif text == "BETWEEN":
         _construct_between(cur, resolver, units)
+    elif text in _LIKE_OPS:
+        _construct_like(text, cur, units)
     else:
-        # LIKE / OVER / FILTER / WHERE / stray THEN/ELSE/END/FROM/AS/WHEN
+        # OVER / FILTER / WHERE / stray THEN/ELSE/END/FROM/AS/WHEN
         raise UntranslatableError(
             f"'{text}' has no documented ThoughtSpot mapping in this "
             f"position (ts-databricks-formula-translation.md)")
 
 
+def _construct_like(op: str, cur: _Cursor, units: list[str], negate: bool = False) -> None:
+    """``x [NOT] LIKE | ILIKE | RLIKE 'p'`` -> sql_bool_op pass-through (BL-362)."""
+    operand = _pop_operand(units, op)
+    kind, pattern = cur.advance()
+    if kind != "string":
+        raise UntranslatableError(f"{op} expects a string-literal pattern")
+    nk, nt = cur.peek()
+    if nk == "ident" and nt.upper() == "ESCAPE":
+        raise UntranslatableError(f"{op} … ESCAPE has no documented mapping")
+    units.append(sqlf_like(f"NOT {op}" if negate else op, operand, pattern))
+
+
 def _collapse_nullif_markers(units: list[str]) -> None:
-    """x / NULLIF(y, 0) -> safe_divide ( x , y ); stray marker -> ( if ( y = 0 ) then null else y ) —
-    ThoughtSpot has no null_if_zero (rejected at import, probe record §7, BL-344)."""
-    i = 0
-    while i < len(units):
-        if units[i].startswith(_NULLIF0):
-            y = units[i][len(_NULLIF0):]
+    """x / NULLIF(y, 0) -> x / y — ThoughtSpot's `/` is already NULL on a zero divisor
+    (it compiles to x / NULLIF(y, 0.0)); `safe_divide` was 0 there (BL-357). A stray marker
+    -> ( if ( y = 0 ) then null else y ) — ThoughtSpot has no null_if_zero (rejected at
+    import, probe record §7, BL-344)."""
+    for i, unit in enumerate(units):
+        if unit.startswith(_NULLIF0):
+            y = unit[len(_NULLIF0):]
             if i >= 2 and units[i - 1] == "/":
-                x = units[i - 2]
-                units[i - 2:i + 1] = [f"safe_divide ( {x} , {y} )"]
-                i -= 2
+                units[i] = sqlf_group(y)
             else:
                 units[i] = f"( if ( {y} = 0 ) then null else {y} )"
-        i += 1
+
+
+def _call_extract_pre(name: str, cur: _Cursor, resolver) -> str:
+    return _call_extract(cur, resolver)
+
+
+def _call_count_pre(name: str, cur: _Cursor, resolver) -> str:
+    label, inner = _call_count(cur, resolver)
+    return _finish_aggregate(label, inner, cur, resolver)
+
+
+# Calls handled from the cursor, before their argument list is parsed.
+_PRE_ARGS = {
+    "EXTRACT": _call_extract_pre, "COUNT": _call_count_pre,
+    "DATEDIFF": lambda name, cur, resolver: _call_datediff(cur, resolver),
+    "IF": lambda name, cur, resolver: _call_if(cur, resolver),
+    "COALESCE": _call_null_default, "IFNULL": _call_null_default,
+    "NVL": _call_null_default, "ZEROIFNULL": _call_null_default,
+}

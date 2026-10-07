@@ -17,6 +17,7 @@ from ts_cli.formula_common import (
     sql_passthrough_call,
     sql_substr_to_ts,
 )
+from ts_cli.sql_forms import sqlf_div0, sqlf_div0null, sqlf_rounded_cast, sqlf_scaled_floor_ceil
 
 
 def is_aggregated(x: str, resolver) -> bool:
@@ -69,13 +70,60 @@ def call_substr(name: str, args: list[str], resolver) -> str:
     return out
 
 
+def call_div0(name: str, args: list[str], resolver) -> str:
+    """DIV0 / DIV0NULL -> the NULL-guarded ``safe_divide`` forms (BL-357, ``sql_forms``).
+    ``safe_divide`` alone is 0 for ``DIV0(NULL, 0)``, which Snowflake returns as NULL."""
+    _arity(name, args, (2,))
+    return (sqlf_div0 if name == "DIV0" else sqlf_div0null)(args[0], args[1])
+
+
+def call_floor_ceil(name: str, args: list[str], resolver) -> str:
+    """FLOOR / CEIL / CEILING(x[, scale]) (BL-361). Not snapped: Snowflake's own FLOOR of a
+    DOUBLE is plain double arithmetic (``FLOOR(0.29::DOUBLE, 2)`` = 0.28, live 2026-10-07),
+    which ``floor ( x * 100 ) * 0.01`` reproduces; a NUMBER scales exactly either way."""
+    _arity(name, args, (1, 2))
+    fn = "floor" if name == "FLOOR" else "ceil"
+    if len(args) == 1:
+        return f"{fn} ( {args[0]} )"
+    return sqlf_scaled_floor_ceil(fn, args[0], args[1], snap=False)
+
+
+def call_to_number(name: str, args: list[str], resolver) -> str:
+    """TO_NUMBER / TO_DECIMAL / TO_NUMERIC(x[, fmt][, p, s]) (BL-359). Snowflake's default
+    scale is 0 and the conversion ROUNDS (``TO_NUMBER('2.5')`` = 3, ``TO_NUMBER(2.567)`` = 3,
+    ``TO_DECIMAL(2.567, 10, 2)`` = 2.57, live 2026-10-07); it was ``to_double``, which keeps
+    every digit. Scale 0 -> ``to_integer`` (rounds the same way, probe record §7); a positive
+    scale -> ``sqlf_rounded_cast``; a format model -> an exact pass-through."""
+    _arity(name, args, (1, 2, 3, 4))
+    if len(args) == 1:
+        return f"to_integer ( {args[0]} )"
+    tail = [a.strip() for a in args[1:]]
+    if len(tail) == 2 and all(a.isdigit() for a in tail):
+        if int(tail[1]) == 0:
+            return f"to_integer ( {args[0]} )"
+        return sqlf_rounded_cast(args[0], int(tail[1]), f"{name}({{0}}, {tail[0]}, {tail[1]})",
+                                 is_aggregated(args[0], resolver))
+    row_level_args(name, args, resolver)
+    return sql_passthrough_call("sql_double_op", name, args)
+
+
 EXACT_FORM_CALLS = {"TO_CHAR": call_to_char, "TO_VARCHAR": call_to_char,
                     "SUBSTR": call_substr, "SUBSTRING": call_substr,
-                    "MONTHS_BETWEEN": call_months_between}
+                    "MONTHS_BETWEEN": call_months_between,
+                    "DIV0": call_div0, "DIV0NULL": call_div0,
+                    "FLOOR": call_floor_ceil, "CEIL": call_floor_ceil,
+                    "CEILING": call_floor_ceil, "TO_NUMBER": call_to_number,
+                    "TO_DECIMAL": call_to_number, "TO_NUMERIC": call_to_number}
 EXACT_FORM_EMITS = {"TO_CHAR": ("sql_string_op",), "TO_VARCHAR": ("sql_string_op",),
                     "SUBSTR": ("substr", "strlen", "sql_string_op"),
                     "SUBSTRING": ("substr", "strlen", "sql_string_op"),
-                    "MONTHS_BETWEEN": ("sql_double_op",)}
+                    "MONTHS_BETWEEN": ("sql_double_op",),
+                    "DIV0": ("isnull", "safe_divide"),
+                    "DIV0NULL": ("isnull", "safe_divide", "ifnull"),
+                    "FLOOR": ("floor",), "CEIL": ("ceil",), "CEILING": ("ceil",),
+                    "TO_NUMBER": ("to_integer", "round", "sql_double_op"),
+                    "TO_DECIMAL": ("to_integer", "round", "sql_double_op"),
+                    "TO_NUMERIC": ("to_integer", "round", "sql_double_op")}
 
 
 # DATEDIFF(unit, start, end) -> diff_<unit> ( end , start ). Snowflake counts unit
@@ -117,3 +165,39 @@ def datediff_to_ts(unit: str, args: list[str], resolver) -> str:
             f"DATEDIFF unit '{unit}' not mapped "
             f"(DAY|WEEK|MONTH|QUARTER|YEAR|HOUR|MINUTE|SECOND)")
     return f"{fn} ( {args[1]} , {args[0]} )"
+
+
+# --- CAST to NUMBER / DECIMAL (BL-359) ------------------------------------------------
+
+def cast_params(cur) -> list[str]:
+    """The ``(p, s)`` after a CAST target type, as raw token texts (empty when absent)."""
+    nk, nt = cur.peek()
+    if not (nk == "op" and nt == "("):
+        return []
+    cur.advance()
+    params: list[str] = []
+    depth = 1
+    while depth:
+        k2, t2 = cur.advance()
+        if k2 == "op":
+            depth += {"(": 1, ")": -1}.get(t2, 0)
+        elif k2 == "number" and depth == 1:
+            params.append(t2)
+    return params
+
+
+CAST_NUMBER = frozenset({"NUMBER", "DECIMAL", "NUMERIC"})
+
+
+def cast_number(type_name: str, params: list[str], inner: str, resolver) -> str:
+    """``CAST(x AS NUMBER[(p[, s])])``: Snowflake's default scale is 0, and the cast ROUNDS
+    half away from zero (``CAST(2.5 AS NUMBER)`` = 3, ``CAST(2.567 AS NUMBER(10,2))`` = 2.57,
+    live 2026-10-07). It was ``to_double``, which keeps every digit — a silent wrong
+    number (BL-359). Scale 0 -> ``to_integer``, which compiles to Snowflake's own INT cast
+    (``NUMBER(38,0)``, rounding the same way); a positive scale -> ``sqlf_rounded_cast``."""
+    s = int(params[1]) if len(params) > 1 else 0
+    if s == 0:
+        return f"to_integer ( {inner} )"
+    p = params[0]
+    return sqlf_rounded_cast(inner, s, f"CAST({{0}} AS {type_name}({p},{s}))",
+                             is_aggregated(inner, resolver))
