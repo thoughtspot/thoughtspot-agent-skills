@@ -308,7 +308,7 @@ def _unmapped_reason(unknown: set[str], first_week_day: Optional[int],
                      expr: str = "") -> str:
     reason = f"Unmapped Qlik function(s): {', '.join(sorted(unknown))}"
     if any(u.lower() == "weekstart" for u in unknown):
-        reason += (f" — WeekStart() with a {_weekstart_arg_problem(expr)} has no exact "
+        reason += (f" — WeekStart() with {_weekstart_arg_problem(expr)} has no exact "
                    "ThoughtSpot form (the offset must be an integer, the first week day "
                    "0-6); rewrite it by hand (BL-334)")
     if first_week_day is None and any(u.lower() == "weekday" for u in unknown):

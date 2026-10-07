@@ -1,8 +1,7 @@
 """Qlik week handlers: Weekday(), WeekStart(), FirstWeekDay (BL-334, BL-373).
 
 Split out of ``qlik/functions.py`` under the file-size gate and re-exported from it,
-so callers keep importing from ``functions``. ``_split_top_level`` is imported late
-from ``functions`` (it is that module's scanner) to avoid a circular import.
+so callers keep importing from ``functions``. It imports nothing from ``functions``.
 Pure functions, no I/O.
 """
 from __future__ import annotations
@@ -12,11 +11,6 @@ from typing import Optional
 
 from ts_cli.formula_common import ts_weekday_number
 from ts_cli.formula_week import ts_week_start
-
-
-def _split_top_level(s: str) -> list[str]:
-    from ts_cli.qlik.functions import _split_top_level as split
-    return split(s)
 
 
 def _weekday(args: list[str], first_week_day: Optional[int] = None) -> Optional[str]:
@@ -82,15 +76,41 @@ _WEEK_CALL = re.compile(r"(?i)\b(weekday|weekstart)\s*\(")
 _DAY_ARG = {str(i) for i in range(7)}
 
 
+# Qlik string literals ('…', '' doubling), double-quoted and [bracketed] field names.
+_OPAQUE = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|\[(?:[^\]]|\]\])*\]")
+
+
+def _blank_opaque(expr: str) -> str:
+    """``expr`` with the inside of every literal / field name blanked, length kept, so
+    ``[Weekday(x)]`` or ``'weekday(z)'`` never reads as a call (#589 re-review)."""
+    return _OPAQUE.sub(lambda m: m.group(0)[0] + "_" * (len(m.group(0)) - 2)
+                       + m.group(0)[-1], expr)
+
+
 def _week_calls(expr: str):
-    """(lower-cased name, top-level args) of each Weekday() / WeekStart() call."""
-    for m in _WEEK_CALL.finditer(expr or ""):
+    """(lower-cased name, top-level args) of each Weekday() / WeekStart() call, found
+    outside literals and field names. The structure is read from the blanked text
+    (same length), and each arg is sliced from the original at the same span."""
+    original = expr or ""
+    blanked = _blank_opaque(original)
+    for m in _WEEK_CALL.finditer(blanked):
         depth, i = 0, m.end() - 1
-        for i in range(m.end() - 1, len(expr)):
-            depth += {"(": 1, ")": -1}.get(expr[i], 0)
+        for i in range(m.end() - 1, len(blanked)):
+            depth += {"(": 1, ")": -1}.get(blanked[i], 0)
             if depth == 0:
                 break
-        yield m.group(1).lower(), _split_top_level(expr[m.end():i])
+        # Top-level commas of the blanked inner text — a comma inside a literal or a
+        # field name was blanked away — then the same spans of the original.
+        args, start, level = [], m.end(), 0
+        for j in range(m.end(), i):
+            c = blanked[j]
+            level += 1 if c in "([{" else -1 if c in ")]}" else 0
+            if c == "," and level == 0:
+                args.append(original[start:j])
+                start = j + 1
+        if original[start:i].strip() or args:
+            args.append(original[start:i])
+        yield m.group(1).lower(), args
 
 
 def known_week_starts(expr: str, first_week_day: Optional[int] = None) -> list[int]:
@@ -122,11 +142,11 @@ def _weekstart_arg_problem(expr: str) -> str:
         for k, a in enumerate(args[1:3], start=1):
             ok = (re.fullmatch(r"\s*-?\d+\s*", a) if k == 1 else a.strip() in _DAY_ARG)
             if not ok:
-                kind = ("unsupported literal" if re.fullmatch(r"\s*[-+]?[\d.]+\s*", a)
-                        else "non-literal")
+                kind = ("an unsupported literal" if re.fullmatch(r"\s*[-+]?[\d.]+\s*", a)
+                        else "a non-literal")
                 what = "period offset" if k == 1 else "first week day"
                 return f"{kind} {what} {a.strip()!r}"
-    return "non-literal period offset or first week day"
+    return "a non-literal period offset or first week day"
 
 
 _FIRST_WEEK_DAY_RE = re.compile(

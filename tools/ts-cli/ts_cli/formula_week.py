@@ -237,9 +237,13 @@ def week_start_note(ts_expr: str | None, dialect: str | None = None,
             return (f"{WEEK_START_EXACT_PREFIX} ({_day_names(exact_starts)}): "
                     + _exact_clause(exact_starts)
                     + ". No calendar argument is emitted (BL-334)")
+        # The exact clause only where the output actually calls day_number_of_week
+        # (#589 re-review): exact_starts can come from a source call that emitted
+        # something else, e.g. a Monday WeekStart → start_of_week.
+        exact = (["day_number_of_week is " + _exact_clause(exact_starts)]
+                 if "day_number_of_week" in fns else [])
         return (f"{WEEK_START_NOTE_PREFIX} ({', '.join(monday)}): "
-                + "; ".join(_week_clauses(monday, dialect) + [
-                    "day_number_of_week is " + _exact_clause(exact_starts)])
+                + "; ".join(_week_clauses(monday, dialect) + exact)
                 + ". No calendar argument is emitted, so the Monday-based part is "
                   "Gregorian with a Monday week even on a column bound to another "
                   "calendar (BL-334)")

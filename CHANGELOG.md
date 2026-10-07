@@ -5,6 +5,13 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-10-08
+- fix: bump ts-cli to v0.174.1 — **week-note follow-ups from the #589 re-review.**
+  - The mixed Monday + exact week note adds its "day_number_of_week is exact" clause only when the output calls `day_number_of_week`.
+  - `qlik.weeks` finds `Weekday()` / `WeekStart()` calls only outside string literals and field names. So `If([Weekday(x)]>1, WeekStart([d],0,0))` or `WeekStart([d],0,0) & 'weekday(z)'` under `FirstWeekDay=6` no longer yields a false "exact week start".
+  - The Qlik reason reads "an unsupported literal …".
+  - Skills: `ts-convert-from-qlik` 1.2.1, `ts-object-formula-translate` 1.10.1.
+
 ## 2026-10-07
 - feat: bump ts-cli to v0.174.0 — **exact week forms where the source states its week start, and the Tableau week number fixed** (BL-373, BL-380, BL-334 items 3–4), all live-probed on se-thoughtspot.
   - **Probe findings.**
