@@ -203,6 +203,7 @@ Verified 2026-07-10, SE cluster.
 |---|---|
 | `safe_divide ( [a] , [b] )` → `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` — what `safe_divide` compiles to, exact on every NULL / zero input; a compound `b` is bracketed, identically in both places (`CASE WHEN (b - c) = 0 THEN 0 ELSE a / NULLIF((b - c), 0) END`). **Fixed 2026-10-07 (BL-366):** it was `DIV0(a, b)`, NULL for a NULL `a` over a zero `b` where `safe_divide` is 0 | `DIV0(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , [b] ) )` — `DIV0(NULL, 0)` is NULL in Snowflake and `safe_divide` returns 0 there (live 2026-10-07), hence the guard (BL-357) |
 | — | `DIV0NULL(a, b)` → `( if ( isnull ( [a] ) ) then null else safe_divide ( [a] , ifnull ( [b] , 0 ) ) )` — 0 on a zero **or NULL** divisor, NULL on a NULL dividend (`DIV0NULL(1, NULL)` = 0, `DIV0NULL(NULL, 0)` = NULL, live 2026-10-07). It was `safe_divide`, NULL on a NULL divisor (BL-357) |
+| — | `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` → `safe_divide ( [a] , [b] )` — the form `safe_divide` compiles to (and the to-direction emits), read back as the idiom so a TS → SQL → TS round trip keeps it (**BL-374, ts-cli 0.173.0**; it was `if ( [b] = 0 ) then 0 else [a] / [b]`, the same value). Also `IFF(b = 0, 0, a / NULLIF(b, 0))` / `IF(…)`, and the ELSE written `a / b`. Case, whitespace and redundant parentheses do not matter; `b` must be the same expression in both places. Any other shape — a `NULL` or non-zero THEN, `b <> 0` with the arms swapped, `0 = b`, an extra WHEN, a different divisor — keeps the literal `if … then … else` reading. See "Division and zero" |
 | — | `a % b` → the `MOD(` row above, folded at `*` / `/` precedence (`a * b % c` is `(a * b) % c`). It was passed through as a bare `%` (BL-362) |
 | — | `a DIV b` — **Snowflake has no `DIV` operator** (it is a syntax error there); refused, never read as a column. Any identifier that follows an operand with no operator is refused (BL-360) |
 | `round ( [x] , inc )` → `ROUND(x, d)` when `inc` is a literal power of ten (`0.01` → `2`, `1` → `0`, `100` → `-2`); any other literal → `(inc * ROUND(x / inc))`; non-literal → `(inc * ROUND(x / NULLIF(inc, 0)))`; `round ( [x] , 0 )` is NULL in ThoughtSpot — flag it, never emit `ROUND(x, 0)` | `ROUND(x, d)` → `round ( [x] , 10^-d )` for a literal `d` (`2` → `0.01`, `0` → `1`, `-2` → `100`); non-literal `d` → `sql_double_op ( "ROUND({0}, {1})" , [x] , d )` (row-level only). **The 2nd arg is an increment in ThoughtSpot and a digit count in SQL — never copy it across** (BL-331; see thoughtspot-formula-patterns.md Math Functions) |
@@ -243,6 +244,18 @@ NULL operand. The table below is the **Snowflake → ThoughtSpot** direction.
 | `DIV0NULL(x, y)` | `( if ( isnull ( [x] ) ) then null else safe_divide ( [x] , ifnull ( [y] , 0 ) ) )` | 0 | 0 | NULL |
 | `COALESCE(x / NULLIF(y, 0), 0)` (also `IFNULL`, `NVL`, `ZEROIFNULL`) | `ifnull ( safe_divide ( [x] , [y] ) , 0 )` | 0 | 0 | 0 |
 | `COALESCE(x / NULLIF(y, 0), d)` | `ifnull ( [x] / [y] , d )` | d | d | d |
+| `CASE WHEN y = 0 THEN 0 ELSE x / NULLIF(y, 0) END` (also `IFF` / `IF`, or ELSE `x / y`) | `safe_divide ( [x] , [y] )` | 0 | NULL | NULL (0 if `y = 0`) |
+
+**Reading the compiled form back (BL-374).** The last row is recognised only in exactly that
+shape. The grid proof, over x ∈ {NULL, 0, 2} × y ∈ {NULL, 0, 4}: `y = 0` takes the THEN arm (0)
+in both the source and `safe_divide`; `y` NULL makes `y = 0` NULL, so the ELSE arm runs and
+`x / NULLIF(NULL, 0)` is NULL, as `safe_divide`; any other `y` gives `x / y` in both. The ELSE arm
+is never reached with `y = 0`, so `NULLIF(y, 0)` there is always `y` — which is why the ELSE
+written as plain `x / y` is the same value and is recognised too (Snowflake cannot raise its
+division-by-zero error on a branch it does not take). The swapped form
+`CASE WHEN y <> 0 THEN x / y ELSE 0 END` is **not** equivalent — a NULL `y` takes the 0 arm,
+where `safe_divide` is NULL — and stays a literal `if`. The grid is a unit test
+(`tests/test_safe_divide_readback.py`).
 
 Every row is Snowflake's own behaviour, probed 2026-10-07 and scored in formula fidelity
 M0 (the "After fixes" section of `docs/reviews/2026-10-06-fidelity-m0-snowflake.md`). The

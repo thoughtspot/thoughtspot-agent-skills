@@ -233,7 +233,8 @@ an older row says (see open-items OI-2…OI-5, and probe record §7):
   `x / NULLIF(y, 0)` is plain `x / y`, never `safe_divide`; `COALESCE(x / NULLIF(y, 0), 0)` (and
   `IFNULL`/`NVL`/`ZEROIFNULL`) is `ifnull ( safe_divide ( x , y ) , 0 )` — `safe_divide` alone is NULL
   on a NULL operand; any other default is `ifnull ( x / y , d )`; Snowflake `DIV0` keeps NULL for a
-  NULL dividend. The "`safe_divide` for ratios" convention still holds for Excel ratios and for a
+  NULL dividend. `CASE WHEN y = 0 THEN 0 ELSE x / NULLIF(y, 0) END` — what `safe_divide` itself
+  compiles to — reads back as `safe_divide ( x , y )` (BL-374). The "`safe_divide` for ratios" convention still holds for Excel ratios and for a
   plain-division ratio whose source states no NULL intent. Mapping docs: the Snowflake "Division
   and zero" section, the Databricks "safe_divide Pattern".
 - **Databricks sources run non-ANSI in ThoughtSpot** (BL-358): an overflow wraps, an
@@ -519,6 +520,7 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.9.2 | 2026-10-07 | The Snowflake and Databricks translators it wraps (ts-cli v0.173.0, BL-374): `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` (also `IFF` / `IF`) — what `safe_divide` compiles to — is `safe_divide ( a , b )`, not `if ( b = 0 ) then 0 else a / b` (same value). Databricks `IFF` is read as `IF` |
 | 1.9.1 | 2026-10-07 | The DAX and Qlik translators it wraps (ts-cli v0.171.0, BL-375..379): DAX `NOT [x]` keeps its `NOT` and no longer reads `NOT` as a table (`[not::x]`); Qlik Set Analysis reads quoted commas, flags search strings, keeps a bracketed modifier field whole, and uses `else null` for non-sum aggregations; set operators other than `+`, `P()` / `E()`, `$(…)`, empty sets and unmapped aggregations are NEEDS_REVIEW, and a single-quoted set value adds a case-sensitivity note; `{1}` keeps the query's grouping (`query_groups ( )`); the aggregated expression is translated; `=` modifiers and bare numbers without a `--columns` type add notes |
 | 1.9.0 | 2026-10-07 | **One Monday-week-start trap, shared with the converters (ts-cli v0.170.0, BL-334 item 2).** The week trap is now `formula_week.week_start_note`, the note every `ts-convert-from-*` report carries, worded per function found. `diff_weeks` gets one trap instead of two; `day_of_week` (a day name) no longer fires it. Advisory — status unchanged — except a Tableau `DATETRUNC('week', d, 'sunday')` (a known non-Monday start), which is APPROXIMATED with a `week start mismatch` trap |
 | 1.8.2 | 2026-10-07 | Translator follow-ups from the #579 review (ts-cli v0.169.0): Qlik double-quoted field names are rewritten inside `qlik.functions.translate`, so the converter no longer emits them as string literals (BL-368); DAX quoted table names read a doubled apostrophe (BL-369) and an apostrophe inside a `[…]` reference no longer drops it from `references`; `COT` carries a non-downgrading NULL-at-zero trap (BL-370). After review: DAX `'Bob''s Sales'[Ship] - 'Bob''s Sales'[Order]` over DATE columns is `diff_days`; Qlik and Tableau scanners treat `[…]` as opaque (`[Bob's Sales] + [Tax]` stays numeric `+`); SQL comment stripping reads `v['a--b']` as before; unreadable Qlik double-quoted names and multi-field / multi-aggregation Set Analysis are NEEDS_REVIEW |

@@ -245,7 +245,7 @@ are roughly ordered by value÷effort.
 | BL-371 | Upstream apache/ossie `reverse.py:273` renders `safe_divide` as `COALESCE(a / NULLIF(b, 0), 0)`, 0 on a NULL operand — the upstream copy of BL-366. HELD (all upstream Ossie work is on hold) | when upstream work resumes |
 | BL-372 | Excel / Sheets translator returns `COT` as NEEDS_REVIEW while the Excel map row says direct | 2026-11-30 |
 | BL-373 | Exact non-Monday week truncation: where the source week start is known, emit `add_days ( start_of_week ( add_days ( d , k ) ) , -k )` instead of downgrading (BL-334 item 2 follow-up; needs a live probe) | 2026-11-30 |
-| BL-374 | From-direction recognition of `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` back to `safe_divide ( a , b )`, so TS → SQL → TS round trips keep the idiom (the value is already exact) | 2026-12-15 |
+| ~~BL-374~~ | ~~From-direction recognition of `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` back to `safe_divide ( a , b )`, so TS → SQL → TS round trips keep the idiom (the value is already exact)~~ | DONE (2026-10-07 — ts-cli v0.173.0) |
 | ~~BL-375~~ | ~~DAX keywords (`NOT`, `RETURN`, …) read as table names: `NOT [Flag]` → `[formula_Flag]`, the boolean flipped~~ | DONE (2026-10-07 — ts-cli v0.171.0) |
 | ~~BL-376~~ | ~~Qlik Set Analysis splits element values on commas inside quotes: `{'A, B'}` read as two values~~ | DONE (2026-10-07 — ts-cli v0.171.0) |
 | ~~BL-377~~ | ~~Qlik Set Analysis search strings (`{">=2020<=2023"}`, `{"A*"}`) translated as equality~~ | DONE (2026-10-07 — NEEDS_REVIEW, ts-cli v0.171.0) |
@@ -13718,7 +13718,7 @@ unknown.
 
 ## BL-374 — From-direction recognition of the compiled `safe_divide` form `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** OPEN. **Source:** BL-366 (PR #581).
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (fix/bl-374-safe-divide-readback, ts-cli 0.173.0). **Source:** BL-366 (PR #581).
 
 **The facts.** Since BL-366 both to-direction converters emit `safe_divide ( a , b )` as
 `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END`. The from-direction translators read that back as
@@ -13730,6 +13730,30 @@ whose condition is `b = 0`, whose THEN is `0` and whose ELSE is `a / NULLIF(b, 0
 and emit `safe_divide ( a , b )`. Any other shape stays as today.
 
 **Target:** 2026-12-15.
+
+**Resolution (2026-10-07, fix/bl-374-safe-divide-readback, ts-cli 0.173.0).** One recogniser,
+`sql_forms.sqlf_safe_divide_form(cond, then, else)`, called from both translators' single-WHEN
+`CASE` handler and their `IFF` / `IF` calls (Databricks now also reads `IFF`, its documented synonym
+for `IF`). It runs on the translated pieces, where `/ NULLIF(b, 0)` has already collapsed to `/`, so
+`b` is compared as a normalised token sequence — keyword and identifier case, whitespace and
+redundant outer parentheses gone, `[…]` references and string literals kept whole — not as source
+text. Matched: THEN exactly `0`; a condition whose only comparison is a top-level `b = 0`; an ELSE
+that is one multiplicative term ending `/ b` with the same `b` (`(a + c) / b`, `a * c / b`, `-a / b`
+and aggregates all read as `safe_divide ( numerator , b )`). **Decision, with the grid proof:** the
+ELSE written plain `a / b` is recognised too. Over a ∈ {NULL, 0, 2} × b ∈ {NULL, 0, 4}, `b = 0` takes
+the THEN arm (0) in the source and in `safe_divide`; a NULL `b` makes `b = 0` NULL, so the ELSE runs
+and is NULL in both; any other `b` is `a / b` in both. The ELSE is never reached at `b = 0`, so
+`NULLIF(b, 0)` there is always `b`. Not matched (they keep the literal `if` reading): a NULL or
+non-zero THEN; `CASE WHEN b <> 0 THEN a / b ELSE 0 END` (**not** equivalent — a NULL `b` takes the 0
+arm where `safe_divide` is NULL; a grid test pins that); `0 = b`; an extra WHEN; a compound condition;
+an ELSE with a lower-precedence operator (`a / b + 1`, `c + a / b`) or a further division after `b`;
+a different divisor. Proof: `tests/test_safe_divide_readback.py` (both dialects, near misses, the
+SQLite grid for both recognised shapes, both CLI paths — `translate_sv_formulas` /
+`translate_measure` and `ts formula translate` — and a TS → Databricks → TS round trip through the
+BL-366 emitter); the formula-fidelity cases `sf-fix-025`/`026`, `dbx-fix-032`/`033` now translate
+to `safe_divide ( [N1] , [N2] )` / `safe_divide ( [N1] , [N2] * 0 )` (pinned in
+`test_fidelity_m2.py`; the case format records no TS text, so only their notes changed). Their
+expected values are unchanged, since the value never changed; the ThoughtSpot leg is still unrun.
 
 ## BL-375 — DAX keywords read as table names: `NOT [Flag]` loses its `NOT` `Tier 2`
 
