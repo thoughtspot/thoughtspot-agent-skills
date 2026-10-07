@@ -278,24 +278,29 @@ def test_ceiling_math_documented_examples(args, expected):
 
 
 def test_ceiling_math_emitted_forms():
-    # integer columns: no snapping, so the composition shows plainly
-    assert f("=CEILING.MATH([@qty],[@qty])") == (
-        "if ( [T::qty] = 0 ) then 0 else ceil ( [T::qty] / abs ( [T::qty] ) ) * abs ( [T::qty] )")
-    assert f("=CEILING.MATH([@qty],-2,1)") == (
-        "if ( [T::qty] < 0 ) then floor ( [T::qty] / 2 ) * 2 else ceil ( [T::qty] / 2 ) * 2")
+    # integer columns: no division (Snowflake divides integers at scale 6) — the remainder
+    # form, checked by value in test_excel_coverage.py::TestIntegerDivision
+    e = f("=CEILING.MATH([@qty],[@qty])")
+    assert e.startswith("if ( [T::qty] = 0 ) then 0 else [T::qty] - mod ( [T::qty] , "
+                        "abs ( [T::qty] ) )") and "/" not in e
+    e = f("=CEILING.MATH([@qty],-2,1)")
+    assert e.startswith("if ( [T::qty] < 0 ) then [T::qty] - ( if ( mod ( [T::qty] , 2 ) < 0 )")
     assert f("=CEILING.MATH([@qty])") == "ceil ( [T::qty] )"
     assert f("=CEILING.MATH([@qty],,1)") == (
         "if ( [T::qty] < 0 ) then floor ( [T::qty] ) else ceil ( [T::qty] )")
+    assert f("=CEILING.MATH([@amt],-2,1)") == (
+        "if ( [T::amt] < 0 ) then floor ( round ( [T::amt] / 2 , 0.000000001 ) ) * 2 else "
+        "ceil ( round ( [T::amt] / 2 , 0.000000001 ) ) * 2")
     assert "non-literal mode" in review("=CEILING.MATH([@amt],2,[@qty])")
 
 
 def test_zero_significance():
-    assert f("=CEILING([@qty],[@qty])") == (
-        "if ( [T::qty] = 0 ) then 0 else ceil ( [T::qty] / [T::qty] ) * [T::qty]")
+    assert f("=CEILING([@qty],[@qty])").startswith("if ( [T::qty] = 0 ) then 0 else ")
     assert f("=CEILING([@amt],0)") == "0"
-    assert f("=CEILING([@qty],2)") == "ceil ( [T::qty] / 2 ) * 2"
-    # FLOOR with 0 is #DIV/0! in Excel: no guard, the NULL stands for the error
-    assert f("=FLOOR([@qty],[@qty])") == "floor ( [T::qty] / [T::qty] ) * [T::qty]"
+    assert "/" not in f("=CEILING([@qty],2)")
+    # FLOOR with 0 is #DIV/0! in Excel: NULL stands for the error — guarded, because mod by
+    # zero fails the whole query in Snowflake (live 2026-10-07)
+    assert f("=FLOOR([@qty],[@qty])").startswith("if ( [T::qty] = 0 ) then null else ")
 
 
 # ---------------------------------------------------------------------------

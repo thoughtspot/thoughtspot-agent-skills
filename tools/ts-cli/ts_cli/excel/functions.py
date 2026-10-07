@@ -237,8 +237,75 @@ def _int(tr, n):
     return T.call("floor", tr.num(n.args[0]))
 
 
-def _multiple(tr, fn: str, x: dict, sig: dict) -> dict:
-    """``fn ( x / s ) * s``, the quotient snapped for a DOUBLE (``_snap``)."""
+DECIMAL_DIVISION_TRAP = ("a division of DECIMAL (fixed-point) values keeps scale 6 in "
+                         "Snowflake, so a quotient within 1e-6 of a whole number can round to it "
+                         "before {fn} (1999999 / 2000000 gives 1.000000)")
+
+
+def _int_lit(node: dict):
+    """An integer literal's value, else None."""
+    v = T.number_value(node)
+    return v if v is not None and v == v.to_integral_value() else None
+
+
+def _exact_multiple(fn: str, x: dict, s: dict) -> dict:
+    """``fn ( x / s ) * s`` for INTEGER ``x`` and ``s`` with no division: Snowflake divides two
+    NUMBER(38,0) values at scale 6, so ``floor ( 1999999 / 2000000 )`` gave 1 (live
+    2026-10-07, probe record §7). ``mod`` takes the dividend's sign (§7), so the remainder is
+    corrected toward the divisor's sign: floor is ``x - r``, ceil ``x - m + s`` when
+    ``m`` and ``s`` share a sign, where ``r`` is ``m`` or ``m + s``."""
+    m = T.call("mod", x, s)
+    zero = T.lit_number("0")
+    sv = T.number_value(s)
+
+    def lt(a, b):
+        return T.binop("<", a, b)
+
+    def gt(a, b):
+        return T.binop(">", a, b)
+    positive = (sv is not None and sv > 0) or (s.get("node") == "call" and s["fn"] == "abs")
+    if positive:  # abs ( s ): a zero s is guarded by the caller
+        differ, same = lt(m, zero), gt(m, zero)
+    else:
+        differ = T.binop("or", T.binop("and", lt(m, zero), gt(s, zero)),
+                         T.binop("and", gt(m, zero), lt(s, zero)))
+        same = T.binop("or", T.binop("and", gt(m, zero), gt(s, zero)),
+                       T.binop("and", lt(m, zero), lt(s, zero)))
+    if fn == "floor":
+        return T.binop("-", x, T.ifelse(differ, T.binop("+", m, s), m))
+    return T.binop("+", T.binop("-", x, m), T.ifelse(same, s, zero))
+
+
+def _mod_guard(divisor: dict, form: dict) -> dict:
+    """``mod`` by zero FAILS THE QUERY in Snowflake (*Division by zero*, live 2026-10-07),
+    where ``/`` returns NULL: a non-literal divisor is guarded to NULL (Excel ``#DIV/0!``).
+    A caller's own zero guard (CEILING's 0) sits outside this one."""
+    if T.number_value(divisor) is not None:
+        return form
+    return T.ifelse(T.binop("=", divisor, T.lit_number("0")), T.lit_null(), form)
+
+
+def _fold_multiple(fn: str, xv, sv) -> dict:
+    from decimal import ROUND_CEILING, ROUND_FLOOR, localcontext
+    from ts_cli.excel.coerce import number_literal
+    with localcontext() as ctx:
+        ctx.prec = 60
+        q = (xv / sv).to_integral_value(rounding=ROUND_FLOOR if fn == "floor" else ROUND_CEILING)
+        return number_literal((q * sv).normalize())
+
+
+def _multiple(tr, fn: str, x: dict, sig: dict, guarded: bool = False) -> dict:
+    """``fn ( x / s ) * s``, the quotient snapped for a DOUBLE (``_snap``). Two literals fold
+    exactly; two integers use ``_exact_multiple``; a DECIMAL operand is trapped."""
+    xv, sv = T.number_value(x), T.number_value(sig)
+    if xv is not None and sv is not None and sv != 0:
+        return _fold_multiple(fn, xv, sv)
+    ints = all(tr.fine_type(v) == "int" or _int_lit(v) is not None for v in (x, sig))
+    if ints and sv != 0:
+        form = _exact_multiple(fn, x, sig)
+        return form if guarded else _mod_guard(sig, form)
+    if "number" in (tr.fine_type(x), tr.fine_type(sig)):
+        tr.trap(DECIMAL_DIVISION_TRAP.format(fn=fn), downgrade=True)
     return T.binop("*", T.call(fn, _snap(tr, x, T.binop("/", x, sig))), sig)
 
 
@@ -263,7 +330,7 @@ def _ceiling_floor(fn: str):
         if len(n.args) == 1:
             return T.call(fn, _snap(tr, x, x))
         sig = tr.num(n.args[1])
-        form = _multiple(tr, fn, x, sig)
+        form = _multiple(tr, fn, x, sig, guarded=fn == "ceil")
         return _zero_guard(sig, form) if fn == "ceil" else form
     return handler
 
@@ -292,7 +359,7 @@ def _math_family(primary: str, negative: str = "", modes: bool = False):
 
         def form(fn):
             return (T.call(fn, _snap(tr, x, x)) if T.is_lit(step, "number", "1")
-                    else _multiple(tr, fn, x, step))
+                    else _multiple(tr, fn, x, step, guarded=True))
         out = form(primary)
         if other:
             out = T.ifelse(T.binop("<", x, T.lit_number("0")), form(negative), out)
@@ -331,8 +398,23 @@ def _quotient(tr, n):
     in Excel; ThoughtSpot's ``/`` returns NULL (probe record §7)."""
     need(tr, n, 2, 2)
     x, y = tr.num(n.args[0]), tr.num(n.args[1])
+    xv, yv = T.number_value(x), T.number_value(y)
+    if yv == 0:
+        tr.review("QUOTIENT with a zero divisor is #DIV/0! in Excel")
+    if xv is not None and yv is not None:
+        from decimal import ROUND_DOWN, localcontext
+        from ts_cli.excel.coerce import number_literal
+        with localcontext() as ctx:
+            ctx.prec = 60
+            return number_literal((xv / yv).to_integral_value(rounding=ROUND_DOWN))
+    tr.note("QUOTIENT with a zero divisor: Excel shows #DIV/0!, ThoughtSpot returns NULL")
+    if all(tr.fine_type(v) == "int" or _int_lit(v) is not None for v in (x, y)):
+        # integer operands: no fixed-point division (scale 6, see _exact_multiple); x - mod
+        # is an exact multiple of y, and mod truncates toward zero as QUOTIENT does
+        return _mod_guard(y, T.binop("/", T.binop("-", x, T.call("mod", x, y)), y))
+    if "number" in (tr.fine_type(x), tr.fine_type(y)):
+        tr.trap(DECIMAL_DIVISION_TRAP.format(fn="the truncation"), downgrade=True)
     q = T.binop("/", x, y)
-    tr.note("QUOTIENT with a zero divisor: Excel shows #DIV/0!, ThoughtSpot's / returns NULL")
     return T.ifelse(T.binop(">=", q, T.lit_number("0")), T.call("floor", q), T.call("ceil", q))
 
 

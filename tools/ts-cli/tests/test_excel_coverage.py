@@ -56,10 +56,12 @@ def ev(text: str, row: dict = None):
            "log10": math.log10, "log2": math.log2, "round": lambda x, inc: inc * round(x / inc),
            "concat": lambda *a: "".join(a), "left": lambda s, k: s[:max(int(k), 0)],
            "right": lambda s, k: s[len(s) - int(k):] if k else "", "strlen": len,
-           "substr": lambda s, b, k: s[int(b):int(b) + int(k)]}
+           "substr": lambda s, b, k: s[int(b):int(b) + int(k)],
+           "mod": lambda a, b: None if b == 0 else math.fmod(a, b)}
     ops = {"+": lambda a, b: a + b, "-": lambda a, b: a - b, "*": lambda a, b: a * b,
            "/": lambda a, b: None if b == 0 else a / b, "<": lambda a, b: a < b,
-           ">=": lambda a, b: a >= b, "=": lambda a, b: a == b, ">": lambda a, b: a > b}
+           ">=": lambda a, b: a >= b, "=": lambda a, b: a == b, ">": lambda a, b: a > b,
+           "and": lambda a, b: a and b, "or": lambda a, b: a or b}
 
     def go(n):
         k = n["node"]
@@ -369,3 +371,43 @@ class TestPrinter:
         assert f("=[@qty]*4/3") == "( [T::qty] * 4 ) / 3"
         assert f("=[@qty]/4*3") == "[T::qty] / 4 * 3"
         assert f("=[@qty]*(4/3)") == "[T::qty] * ( 4 / 3 )"
+
+
+# ---------------------------------------------------------------------------
+# Integer operands: no fixed-point division (review of #577)
+# ---------------------------------------------------------------------------
+
+class TestIntegerDivision:
+    """Snowflake divides two NUMBER(38,0) values at scale 6: QUOTIENT(1999999, 2000000) gave 1.
+    Integer operands use the remainder form; two literals fold."""
+
+    @pytest.mark.parametrize("a,b", [(1999999, 2000000), (-1999999, 2000000), (1999999, -2000000),
+                                     (23, 4), (-23, 4), (23, -4), (-23, -4), (0, 7), (28, 7),
+                                     (-28, 7)])
+    def test_by_value(self, a, b):
+        cols = {"qty": a}
+        trunc = (abs(a) // abs(b)) * (1 if (a < 0) == (b < 0) else -1)
+        sb = abs(b)
+        assert ev(f(f"=QUOTIENT([@qty],{b})"), cols) == trunc
+        assert ev(f(f"=QUOTIENT({a},{b})")) == trunc            # folded
+        assert ev(f(f"=FLOOR([@qty],{b})"), cols) == (a // b) * b
+        assert ev(f(f"=CEILING([@qty],{b})"), cols) == -((-a) // b) * b
+        assert ev(f(f"=FLOOR.MATH([@qty],{b})"), cols) == (a // sb) * sb
+        assert ev(f(f"=CEILING.PRECISE([@qty],{b})"), cols) == -((-a) // sb) * sb
+        assert ev(f(f"=FLOOR.MATH([@qty],{b},1)"), cols) == (
+            -((-a) // sb) * sb if a < 0 else (a // sb) * sb)
+        for src in ("FLOOR.MATH([@qty],{b})", "CEILING([@qty],{b})", "QUOTIENT([@qty],{b})"):
+            e = f("=" + src.format(b=b))
+            assert "/" not in e or e.endswith(f"/ {b}") or e.endswith(f"/ - {abs(b)}"), e
+
+    def test_literals_fold(self):
+        assert f("=QUOTIENT(1999999,2000000)") == "0"
+        assert f("=FLOOR.PRECISE(-1999999,2000000)") == "- 2000000"
+        assert "#DIV/0!" in review("=QUOTIENT([@qty],0)")
+
+    def test_decimal_column_is_trapped(self):
+        import json as _json
+        cols = _json.dumps({"dec": {"table": "T", "column": "dec", "data_type": "DECIMAL"}})
+        r = translate_excel("=QUOTIENT([@dec],3)",
+                            ColumnContext(parse_columns_json(cols), level=1))
+        assert r.status == "APPROXIMATED" and any("scale 6" in t for t in r.traps)

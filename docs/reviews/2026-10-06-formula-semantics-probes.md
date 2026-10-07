@@ -350,3 +350,13 @@ DOUBLE column and a decimal literal alike:
 | `concat ( 'Bob' , sql_string_op ( "'''s '" ) , … )`; `'a\\b'` | `Bob's …`; `a\b` — the forms the Excel printer now emits |
 
 The same run checked 39 translator outputs end to end against hand-computed Excel values (the new rounding family, `LOG`, trigonometry, `ATAN2`, `FACT`, `CHAR` / `CODE` / `UNICODE`, `REPLACE`, the `B` variants, `TEXT` number / percent / date formats, `DATE` overflow, `ISTEXT` / `ISLOGICAL`, `FIND` / `SEARCH` with a start): 39 of 39 equal after `dddd` moved to `INITCAP`.
+
+*Review of #577 (2026-10-07, two more scratch Models, each deleted and confirmed absent).*
+
+| Formula | Result |
+|---|---|
+| `floor ( 1999999 / 2000000 )` over two INT64 columns (the old `QUOTIENT` / `FLOOR` forms) | **1** — two NUMBER(38,0) values divide at scale 6 (0.9999995 → 1.000000) |
+| `( [a] - mod ( [a] , [b] ) ) / [b]`; the remainder forms of `FLOOR`, `CEILING`, `FLOOR.MATH` (with and without mode), `CEILING.PRECISE` over a = ±1999999, b = 2000000 | 0, 0, 0, −2000000, 0, 2000000 — Excel's values; no division feeds `floor` / `ceil` |
+| `mod ( [a] , [z] )` with z = 0 | **the query fails** (*Division by zero*), where `/` returns NULL — so the translator guards it, `if ( [z] = 0 ) then null else …` (NULL for `FLOOR` / `QUOTIENT`, 0 for `CEILING`); all three guarded forms returned NULL / 0 |
+| a quote-bearing literal as `sql_string_op ( "'it''s here'" )` in `=` and `!=`, the `count_if` and `sum_if` conditions, `contains`, `left`, `substr`, `strlen`, and as an argument to `sql_string_op` (`UPPER`, `REPLACE`) and `sql_bool_op` templates | all imported and all returned Excel's values (`count_if` 1, `sum_if` 3, `IT'S`, `it-s here`, `true`); compiled e.g. `LOWER("S2") = LOWER('it''s here')` |
+
