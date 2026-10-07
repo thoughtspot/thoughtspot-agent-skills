@@ -358,7 +358,8 @@ def sql_passthrough_call(op: str, fn: str, args: list[str]) -> str:
             parts.append(a.replace(" ", ""))
         elif a.lower() in _SQL_BOOL_LITERALS:
             parts.append(a.upper())
-        elif _SQL_STR_LITERAL_RE.match(a) and "''" in a[1:-1]:
+        elif _SQL_STR_LITERAL_RE.match(a) and "''" in a[1:-1] \
+                and not any(ch in a for ch in '"{}\\'):
             # A quote inside the literal: bound, not inlined. The warehouses disagree on
             # `''` (Databricks reads 'it''s' as `its`), and a bound literal is passed as
             # the warehouse's own literal (BL-365; REPLACE with a bound "'" matched, live)

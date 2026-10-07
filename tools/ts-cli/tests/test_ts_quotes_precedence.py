@@ -231,3 +231,21 @@ class TestReverseDirection:
         from ts_cli.databricks.mv_emit_sql import emit_sql
         out = emit_sql(parse_formula(f"[T::s] = {ts}"), lambda n: "source." + n["column"])
         assert out == f"source.s = {sql}"
+
+
+@pytest.mark.parametrize("dialect", ["snowflake", "databricks"])
+def test_bound_literal_keeps_the_unprobed_character_refusal(dialect):
+    """#579 review: binding a quote-bearing literal must not skip the refusal of a double
+    quote, brace or backslash, which no bound-literal probe covers (main refused it too)."""
+    r = translate("s LIKE 'it\\'s\\\\_%'", dialect,
+                  ColumnContext(parse_columns_json(_COLS), level=1))
+    assert r["status"] == "NEEDS_REVIEW"
+    assert "backslash" in " ".join(r["notes"])
+
+
+def test_bound_passthrough_keeps_the_refusal():
+    from ts_cli.formula_common import sql_passthrough_call
+    with pytest.raises(UntranslatableError, match="backslash"):
+        sql_passthrough_call("sql_string_op", "TO_CHAR", ["[T::D]", "'it''s\\'"])
+    assert sql_passthrough_call("sql_string_op", "TO_CHAR", ["[T::D]", "'it''s'"]) == \
+        'sql_string_op ( "TO_CHAR({0}, {1})" , [T::D] , \'it\'\'s\' )'

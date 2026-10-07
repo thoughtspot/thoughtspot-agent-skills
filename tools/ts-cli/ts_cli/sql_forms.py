@@ -388,9 +388,10 @@ def sqlf_like(op: str, operand: str, pattern: str) -> str:
     p = pattern.strip()
     if not (p.startswith("'") and p.endswith("'") and len(p) >= 2):
         raise UntranslatableError(f"{op} with a non-literal pattern has no pass-through form")
-    if "''" in p[1:-1]:
+    if "''" in p[1:-1] and not any(ch in p for ch in '"{}\\'):
         # a quote inside the pattern: bound, not inlined — Databricks reads 'it''s' as
-        # `its` (BL-365); a bound literal is passed as the warehouse's own literal
+        # `its` (BL-365); a bound literal is passed as the warehouse's own literal. A
+        # double quote, brace or backslash is still refused below: unprobed as a bound value
         return f'sql_bool_op ( "{{0}} {op} {{1}}" , {operand} , {p} )'
     if any(ch in p for ch in '"{}\\'):
         raise UntranslatableError(

@@ -21,7 +21,7 @@ ThoughtSpot reads a doubled quote in a single-quoted literal as **two** quotes (
 `it''s`), its backslash escape fails before a space, and it reads `a * b / c` as
 `a * ( b / c )` — with a division of two integers fixed-point at scale 6 (live, se-thoughtspot
 2026-10-07; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-literals)).
-So in the from-direction a Databricks literal is decoded (`\'` is a quote, `\\` a backslash; any other escape is refused; `'O''Brien'` is two **adjacent** literals, `OBrien`, as Databricks reads it — live 2026-10-07), a quote-bearing literal in a `sql_*_op` or `LIKE` template is bound as `{1}` rather than inlined; in the to-direction a ThoughtSpot literal is read as ThoughtSpot reads it and written with `\'`, a literal holding a quote is emitted **double-quoted** (`"O'Brien"`), a
+So in the from-direction a Databricks literal is decoded (`\'` is a quote, `\\` a backslash; any other escape is refused; `'O''Brien'` is two **adjacent** literals, `OBrien`, as Databricks reads it — live 2026-10-07), a quote-bearing literal in a `sql_*_op` or `LIKE` template is bound as `{1}` rather than inlined (one that also holds a double quote, a brace or a backslash is still refused — unprobed as a bound value); in the to-direction a ThoughtSpot literal is read as ThoughtSpot reads it and written with `\'`, a literal holding a quote is emitted **double-quoted** (`"O'Brien"`), a
 backslash doubled, and every product under a division bracketed (`( a * b ) / c`) — the
 translator's last step, `formula_text.ts_finalize_formula`. Copying `'O''Brien'` across was a silent
 wrong answer.
