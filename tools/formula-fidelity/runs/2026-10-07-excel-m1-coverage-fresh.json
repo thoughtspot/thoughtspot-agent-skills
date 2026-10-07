@@ -1,24 +1,24 @@
 {
  "run": {
-  "date": "2026-10-07T00:55:51+00:00",
+  "date": "2026-10-07T01:37:18+00:00",
   "profile": "se-thoughtspot",
   "connection": "APJ_TAB",
-  "warehouse_table": "AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_M1_20261007T005551_3BDEDC",
-  "ts_table": "ZZ_FIDELITY_M1_20261007T005551_3BDEDC_TABLE_DELETE_ME",
-  "ts_model": "ZZ_FIDELITY_M1_20261007T005551_3BDEDC_DELETE_ME",
+  "warehouse_table": "AGENT_SKILLS.PUBLIC.ZZ_FIDELITY_M1_20261007T013718_684559",
+  "ts_table": "ZZ_FIDELITY_M1_20261007T013718_684559_TABLE_DELETE_ME",
+  "ts_model": "ZZ_FIDELITY_M1_20261007T013718_684559_DELETE_ME",
   "translator_version": "ts-cli 0.162.0",
   "git": {
-   "sha": "ec19ce3d4b3e9fec04ef8fe7de77d227ecf89ecd",
+   "sha": "6408fa43a05e5fae59812f27f5da4a02876cef26",
    "dirty": false
   },
-  "runtime_s": 841.3,
+  "runtime_s": 811.0,
   "phases": {
-   "load": 2.5,
+   "load": 1.9,
    "oracle": 0.0,
-   "translate": 0.5,
-   "ts_import": 21.1,
-   "agentql": 809.6,
-   "teardown": 4.0
+   "translate": 0.4,
+   "ts_import": 17.9,
+   "agentql": 782.2,
+   "teardown": 4.6
   },
   "cleanup": {
    "ts_confirmed_absent": true,
