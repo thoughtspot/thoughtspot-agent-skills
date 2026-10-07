@@ -239,9 +239,9 @@ are roughly ordered by value÷effort.
 | ~~BL-361~~ | ~~`FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor`/`ceil`; TRANSLATED, rejected at import (fidelity M2; Snowflake too)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
 | BL-366 | to-direction `safe_divide` is inexact on NULL — Databricks `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, Snowflake `DIV0(NULL, 0)` is NULL (the inverse of BL-357) | 2026-11-30 |
 | BL-367 | The upstream apache/ossie ThoughtSpot converter (`expressions/catalog.py`) still converts trigonometry by `180 / π` as if ThoughtSpot were in degrees — the BL-364 bug, upstream | 2026-11-15 |
-| BL-368 | Qlik converter path (`qlik.functions.translate`, no adapter): a double-quoted field name `Sum("Sales Amount")` is emitted as `sum("Sales Amount")` — now a ThoughtSpot string literal, not a column | 2026-11-15 |
-| BL-369 | Power BI: a quoted table name with an apostrophe, `'Bob''s Sales'[x]`, is mangled to `'Bob'[T::X]` | 2026-11-30 |
-| BL-370 | `COT(0)` (Tableau, Snowflake, Databricks) is `1 / tan ( 0 )` = NULL in ThoughtSpot, where the source errors or returns infinity — an undocumented divergence | 2026-11-30 |
+| ~~BL-368~~ | ~~Qlik converter path (`qlik.functions.translate`, no adapter): a double-quoted field name `Sum("Sales Amount")` is emitted as `sum("Sales Amount")` — now a ThoughtSpot string literal, not a column~~ | DONE (2026-10-07 — ts-cli v0.166.0) |
+| ~~BL-369~~ | ~~Power BI: a quoted table name with an apostrophe, `'Bob''s Sales'[x]`, is mangled to `'Bob'[T::X]`~~ | DONE (2026-10-07 — ts-cli v0.166.0) |
+| ~~BL-370~~ | ~~`COT(0)` (Tableau, Snowflake, Databricks) is `1 / tan ( 0 )` = NULL in ThoughtSpot, where the source errors or returns infinity — an undocumented divergence~~ | DONE (2026-10-07 — documented + non-downgrading trap, ts-cli v0.166.0) |
 
 ### Tier 3 — Opportunistic
 
@@ -13468,7 +13468,7 @@ reverse rows (`SIN(RADIANS(x))` → `SIN(x)`); re-run `tools/ossie-roundtrip`. N
 
 ## BL-368 — Qlik converter: a double-quoted field name becomes a ThoughtSpot string literal `Tier 2`
 
-**Filed:** 2026-10-07. **Status:** OPEN. **Source:** independent review of #579.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.166.0). **Source:** independent review of #579.
 
 **The facts.** `ts formula translate --from qlik` rewrites Qlik's `"Field Name"` to `[Field Name]`
 first (`formula_translate/adapters.qlik_field_quotes`), but the converter calls
@@ -13482,9 +13482,19 @@ paths share it; test `Sum("Sales Amount")` → `sum([Sales Amount])`.
 
 **Target:** 2026-11-15.
 
+**Resolution (2026-10-07).** `qlik.functions.field_quotes_to_brackets` now runs at the top of
+`translate`, so the converter (`qlik/build_model._translate_measures`) and `ts formula translate
+--from qlik` share one reading; the adapter's own `qlik_field_quotes` is removed rather than
+left to double-apply. It is a scanner, not a regex: single-quoted literals (with `''`), `[…]`
+field names and Set Analysis `{…}` regions are copied untouched — `{"2023"}` is an element-set
+value there, which the adapter's old regex had wrongly bracketed — and Qlik's `""` escape is
+unescaped. Tests: `Sum("Sales Amount")` → `sum([Sales Amount])` through the translator, the
+converter's Model formula and the adapter; a double quote inside a single-quoted literal is
+untouched.
+
 ## BL-369 — Power BI: a quoted table name holding an apostrophe is mangled `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** OPEN. **Source:** independent review of #579.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.166.0). **Source:** independent review of #579.
 
 **The facts.** DAX `SUM('Bob''s Sales'[x])` translates to `sum('Bob'[T::X])` (offline, 2026-10-07):
 `_COL_REF` does not read DAX's doubled quote inside a quoted table name. Silent only if the
@@ -13494,9 +13504,17 @@ truncated name happens to resolve; usually an unresolved reference.
 
 **Target:** 2026-11-30.
 
+**Resolution (2026-10-07).** `_COL_REF`'s quoted branch is `'((?:[^']|'')+)'` and the table is
+unescaped (`''` → `'`), giving `sum([Bob's Sales::x])`; the measure-reference qualifier
+(`'T'[measure]` → `[formula_…]`) used the same `'[^']*'` and was fixed alongside. A second defect
+surfaced in `ts formula translate`: `refs.split_literals` read the apostrophe inside
+`[Bob's Sales::x]` as an opening string literal, so the reference vanished from `references`;
+it now treats a `[…]` reference as code. TMDL's `'Table'.'Column'` split in
+`powerbi/parsing._split_ref` was not touched (not a DAX expression path).
+
 ## BL-370 — `COT(0)` is NULL in ThoughtSpot `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** OPEN — document or trap. **Source:** independent review of #579.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (documented + trap, ts-cli v0.166.0). **Source:** independent review of #579.
 
 **The facts.** `COT(x)` → `( 1 / tan ( x ) )` in the Tableau, Snowflake and Databricks translators
 (BL-364). At `x = 0` ThoughtSpot's `/` is NULL-safe (`1 / NULLIF(0, 0)`), so the result is NULL;
@@ -13506,3 +13524,12 @@ error-equivalent, not a wrong number, but undocumented in the maps.
 **Fix.** Document in the three mapping rows (and the Excel / Sigma / Omni `COT` rows), or add a trap.
 
 **Target:** 2026-11-30.
+
+**Resolution (2026-10-07).** Both. The `COT` rows in the Tableau, Snowflake and Databricks
+formula-translation docs and the Excel, Sigma and Omni function maps now say `COT(0)` is NULL in
+ThoughtSpot (Sheets has no `COT` row of its own; it reads the Excel map). `ts formula translate`
+attaches a trap when the source calls `COT` and the output uses `tan` — informational, not in
+`DOWNGRADE_TRAP_PREFIXES`, so the status stays TRANSLATED. The converters carry no trap
+mechanism, so their users get the documentation only. The NULL-at-zero claim rests on this
+item's own statement of ThoughtSpot's NULL-safe `/`; Databricks' own `COT(0)` result (error or
+infinity by ANSI mode) was not probed and the docs say so.

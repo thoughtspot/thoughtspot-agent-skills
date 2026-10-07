@@ -220,7 +220,7 @@ Verified 2026-07-10, SE cluster.
 | `least ( [a] , [b] , ... )` → `LEAST(a, b, ...)` | `LEAST(a, b, ...)` → `least ( [a] , [b] , ... )` |
 | `greatest ( [a] , [b] , ... )` → `GREATEST(a, b, ...)` | `GREATEST(a, b, ...)` → `greatest ( [a] , [b] , ... )` |
 | `sin ( [x] )` → `SIN(x)` (and `cos`, `tan`, `asin`, `acos`, `atan` alike) | `SIN(x)`, `COS(x)`, `TAN(x)`, `ASIN(x)`, `ACOS(x)`, `ATAN(x)` → `sin ( [x] )`, `cos`, `tan`, `asin`, `acos`, `atan` — **ThoughtSpot trigonometry is in radians**, like Snowflake's (`sin ( 30 )` compiles to `SIN(30)` = −0.988, live 2026-10-07, probe record §7; BL-364) |
-| — | `COT(x)` → `( 1 / tan ( [x] ) )` (BL-364) |
+| — | `COT(x)` → `( 1 / tan ( [x] ) )` (BL-364). **`COT(0)` differs:** ThoughtSpot's `/` is NULL-safe, so `1 / tan ( 0 )` is NULL where Snowflake `COT(0)` raises division by zero — `ts formula translate` attaches a non-downgrading trap (BL-370) |
 | — | `ATAN2(y, x)` → `sql_double_op ( "ATAN2({0}, {1})" , [y] , [x] )` — no catalogued native form; row-level only (BL-364) |
 | — | `PI()` → `sql_double_op ( "PI()" )` — the warehouse's own double; `DEGREES(x)` → `( ( [x] * 180 ) / sql_double_op ( "PI()" ) )`, `RADIANS(x)` → `( ( [x] * sql_double_op ( "PI()" ) ) / 180 )` — native, so they work over an aggregate. The product is bracketed: ThoughtSpot reads `a * b / c` as `a * ( b / c )` (BL-365) |
 

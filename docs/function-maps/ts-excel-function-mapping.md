@@ -304,7 +304,7 @@ Source: the *Math and trigonometry functions* list of Microsoft's category page.
 | `COMBINA(n, k)` | passthrough | `sql_double_op ( "FACTORIAL({0} + {1} - 1) / (FACTORIAL({1}) * FACTORIAL({0} - 1))" , [n] , [k] )` | **Variant: `sql_double_op`.** `COMBIN(n + k − 1, k)`, with the same overflow caveat. |
 | `COS(x)` | direct | `cos ( [x] )` | Excel and ThoughtSpot trigonometry are both in **radians** ([**E16**](#math-and-trigonometry); probe record §7, live 2026-10-07). The former rule here, `cos ( [x] * 180 / 3.14159265358979 )`, assumed degrees and was wrong for every non-zero input (`sin ( 30 )` compiles to `SIN(30)` and returns −0.988). |
 | `COSH(x)` | direct | `( exp ( [x] ) + exp ( -1 * [x] ) ) / 2` | **Translator: `sql_double_op ( "COSH({0})" , [x] )`** — the Snowflake function, which matched Python's `math` to the last digit (probe record §7, live 2026-10-07). The composition is exact algebra but not exact arithmetic: `exp` overflows for a large `x` sooner than `COSH` does. |
-| `COT(x)` | direct | `1 / tan ( [x] )` | Radians, as **E16** (corrected 2026-10-07 from a degree conversion, BL-364). |
+| `COT(x)` | direct | `1 / tan ( [x] )` | Radians, as **E16** (corrected 2026-10-07 from a degree conversion, BL-364). `COT(0)` is `#DIV/0!` in Excel but NULL in ThoughtSpot (NULL-safe `/`, BL-370). |
 | `COTH(x)` | direct | `( exp ( 2 * [x] ) + 1 ) / ( exp ( 2 * [x] ) - 1 )` |  |
 | `CSC(x)` | direct | `1 / sin ( [x] )` | Radians (BL-364). |
 | `CSCH(x)` | direct | `2 / ( exp ( [x] ) - exp ( -1 * [x] ) )` |  |

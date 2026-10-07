@@ -1077,3 +1077,26 @@ class TestQuoteInsideBracketRef:
         assert split_literals("[Bob's x] = 'it''s'") == [
             (False, "[Bob's x] = "), (True, "'it''s'")]
         assert split_literals("'a[b' + [c]") == [(True, "'a[b'"), (False, " + [c]")]
+
+
+class TestCotZeroTrap:
+    """BL-370: COT(x) -> 1 / tan ( x ) is NULL at x = 0 in ThoughtSpot (NULL-safe
+    division) where the source errors or returns infinity. Informational, not a
+    downgrade: the status stays TRANSLATED."""
+
+    @pytest.mark.parametrize("dialect,src", [
+        ("tableau", "COT([x])"), ("snowflake", "COT(x)"), ("databricks", "COT(x)"),
+    ])
+    def test_cot_carries_zero_trap_without_downgrade(self, dialect, src):
+        r = translate(src, dialect)
+        assert r["status"] == TRANSLATED
+        assert "tan" in r["formula"]
+        assert any("BL-370" in t for t in r["traps"])
+
+    def test_no_trap_without_cot_in_source(self):
+        assert not any("BL-370" in t for t in translate("TAN([x])", "tableau")["traps"])
+        assert not any("BL-370" in t for t in translate("ACOS([x])", "tableau")["traps"])
+
+    def test_cot_inside_a_literal_does_not_fire(self):
+        r = translate("IF [s] = 'cot(' THEN TAN([x]) END", "tableau")
+        assert not any("BL-370" in t for t in r["traps"])
