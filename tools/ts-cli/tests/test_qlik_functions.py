@@ -654,3 +654,48 @@ class TestSetModifierValues:
             "count(if (Region = 'A') then Id else null)"
         assert tr("Avg({<Region={'A'}>} Price)") == \
             "average(if (Region = 'A') then Price else null)"
+
+
+class TestSetAnalysisLoudShapes:
+    """#586 review: Set Analysis shapes that were silent wrong answers are NEEDS_REVIEW
+    with a named reason, or translated exactly."""
+
+    @pytest.mark.parametrize("src,why", [
+        ("Sum({<Region={'A'}-{'B'}>} Sales)", "set operator"),
+        ("Sum({<Region={'A'}*{'B'}>} Sales)", "set operator"),
+        ("Sum({<Region={'A'}/{'B'}>} Sales)", "set operator"),
+        ("Sum({<Region=P(Region)>} Sales)", "function element set"),
+        ("Sum({<Region=E(Region)>} Sales)", "function element set"),
+        ("Sum({<Year={$(vYear)}>} Sales)", "$-expansion"),
+        ("Sum({<Region={}>} Sales)", "empty element set"),
+        ("Only({<Region={'A'}>} Sales)", "Only()"),
+        ("Mode({1} Sales)", "Mode()"),
+        ("Concat({<Region={'A'}>} Name)", "Concat()"),
+        ("FirstSortedValue({<Region={'A'}>} Name, Date)", "FirstSortedValue()"),
+        ("Sum({<Region={\"^A\"}>} Sales)", "search"),
+        ("Sum({<Region={\"~A\"}>} Sales)", "search"),
+        ("Sum({<Region={'A'}>} DISTINCT Sales)", "DISTINCT"),
+    ])
+    def test_flagged(self, src, why):
+        out, review, reason = translate(src)
+        assert review and why in reason and out.startswith("/* TODO review")
+
+    def test_union_operator_is_exact(self):
+        out, review, _ = translate("Sum({<Region={'A'}+{'B'}>} Sales)")
+        assert not review
+        assert out == "sum(if ((Region = 'A' or Region = 'B')) then Sales else 0)"
+
+    def test_count_distinct_over_a_set(self):
+        out, review, _ = translate("Count({<Region={'A'}>} DISTINCT Id)")
+        assert not review
+        assert out == "unique count(if (Region = 'A') then Id else null)"
+        assert tr("Count({1} DISTINCT Id)") == "group_aggregate(unique count(Id), {}, {})"
+
+    def test_bare_number_stays_a_number(self):
+        assert tr("Sum({<Year={2023}>} Sales)") == "sum(if (Year = 2023) then Sales else 0)"
+        assert tr("Sum({<Year={'2023'}>} Sales)") == "sum(if (Year = '2023') then Sales else 0)"
+
+    def test_single_quoted_value_carries_the_case_note(self):
+        out, review, note = translate("Sum({<Region={'A'}>} Sales)")
+        assert not review and "BL-333" in note and "June 2017" in note
+        assert translate('Sum({<Region={"East"}>} Sales)')[2] == ""

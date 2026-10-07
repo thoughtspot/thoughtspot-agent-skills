@@ -1194,3 +1194,10 @@ class TestBl375To379:
         r = translate("IF [Bob's] = 'a' THEN 1 END", "tableau")
         assert r["formula"] == "if ( [TABLE::Bob's] = 'a' ) then 1 else null"
         assert r["formula"].count("else") == 1
+
+
+class TestQlikSetAnalysisNote:
+    def test_case_note_reaches_notes_without_downgrading(self):
+        r = translate("Sum({<Region={'A'}>} Sales)", "qlik")
+        assert r["status"] == TRANSLATED
+        assert any("BL-333" in n for n in r["notes"])

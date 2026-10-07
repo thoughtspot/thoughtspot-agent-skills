@@ -111,7 +111,26 @@ def check_skill(skill_file: Path) -> list[str]:
     if not rows:
         errors.append("## Changelog has no valid version rows (expected | X.Y.Z | YYYY-MM-DD | ... |)")
 
+    errors.extend(_order_errors(rows))
     return errors
+
+
+def _semver(row: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in ROW_RE.match(row.strip()).group(1).split("."))
+
+
+def _order_errors(rows: list[str]) -> list[str]:
+    """Newest first means strictly DESCENDING versions. An accept-both merge of two
+    branches' rows can leave a lower version on top, or the same version twice, and the
+    top row is what every reader takes as the current version (BL-381)."""
+    out = []
+    for upper, lower in zip(rows, rows[1:]):
+        a, b = _semver(upper), _semver(lower)
+        if a <= b:
+            va, vb = ".".join(map(str, a)), ".".join(map(str, b))
+            out.append(f"changelog rows out of order: v{va} sits above v{vb} "
+                       "(newest first, each version higher than the row below)")
+    return out
 
 
 def get_tracked_files(repo_root: Path, path: str) -> set[str]:

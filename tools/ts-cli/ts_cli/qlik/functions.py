@@ -566,13 +566,30 @@ def _split_top_level(s: str) -> list[str]:
     return [p.strip() for p in parts]
 
 
-def _agg_fn(name: str) -> str:
-    """The ThoughtSpot aggregation for a Qlik aggregation name.
+# Aggregations Set Analysis translates, and the value rows OUTSIDE the set contribute:
+# 0 is neutral only for a sum (a count or average over `else 0` counts / averages the
+# zeros). Anything else (Only, Mode, Concat, FirstSortedValue, ...) is NEEDS_REVIEW --
+# it was silently read as `sum` (#586 review).
+_SET_AGGS: dict[str, tuple[str, str]] = {
+    "sum": ("sum", "0"), "avg": ("average", "null"), "count": ("count", "null"),
+    "min": ("min", "null"), "max": ("max", "null"),
+}
 
-    Falls back to `sum` both for an unmapped name and for one mapped to None
-    (no equivalent) — the previous `.get(name, "sum")` returned None for the
-    latter and emitted a literal `None(...)` into the formula."""
-    return FUNCTION_MAP.get(name.lower()) or "sum"
+
+def _set_agg(name: str, measure: str) -> tuple[Optional[tuple[str, str, str]], Optional[str]]:
+    """(ThoughtSpot aggregation, measure, value outside the set) or a review reason.
+    ``Count(DISTINCT x)`` becomes ``unique count``, whose ThoughtSpot name has a space
+    (thoughtspot-formula-patterns.md)."""
+    agg = _SET_AGGS.get(name.lower())
+    if agg is None:
+        return None, (f"the aggregation {name}() has no Set Analysis translation (only "
+                      "Sum, Avg, Count, Min and Max)")
+    distinct = re.match(r"(?i)^distinct\s+(.+)$", measure.strip())
+    if distinct:
+        if agg[0] != "count":
+            return None, f"{name}(DISTINCT ...) is not translated"
+        return ("unique count", distinct.group(1).strip(), "null"), None
+    return (agg[0], measure.strip(), agg[1]), None
 
 
 _SET_MODIFIER = re.compile(r"\{\s*\$?\s*<(.*?)>\s*\}", re.S)
@@ -605,34 +622,74 @@ def _set_field(raw: str) -> str:
     return f"[{name}]" if not re.fullmatch(r"[A-Za-z_]\w*", name) else name
 
 
-_SEARCH_CHARS = re.compile(r"[*?]|^\s*[<>=]")
+_SEARCH_CHARS = re.compile(r"[*?]|^\s*[<>=^~]")
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+CASE_NOTE = ("Set Analysis: a single-quoted element value is a case-SENSITIVE literal in "
+             "Qlik, but ThoughtSpot's = is case-insensitive (BL-333), so a value differing "
+             "only in case now matches too. Apps built before June 2017 read single quotes "
+             "as a search instead.")
 
 
-def _set_values(raw_vals: str) -> tuple[list[str], Optional[str]]:
-    """The element-set values of a modifier as ThoughtSpot literals, or a review reason.
+def _set_values(raw_vals: str) -> tuple[list[str], Optional[str], bool]:
+    """(ThoughtSpot literals, review reason, whether a single-quoted value was read).
 
     Values split on commas OUTSIDE quotes (BL-376: ``{'A, B'}`` is one value). A single-
-    quoted value is a literal, and so is a bare one; a double-quoted value is a
-    Qlik SEARCH string -- exact (case-insensitively, as ThoughtSpot's ``=`` is) only
-    without wildcards (``*``, ``?``) or a leading ``<``/``>``/``=`` (a range or
-    expression search), which are flagged (BL-377)."""
-    groups = [g[1:-1] for g in _brace_groups(raw_vals)] or [raw_vals]
+    quoted value is a literal; a bare number stays a number (``{2023}`` -> ``2023``),
+    another bare value is quoted. A double-quoted value is a Qlik SEARCH string --
+    exact (case-insensitively, as ThoughtSpot's ``=`` is) only without wildcards
+    (``*``, ``?``) or a leading ``<`` ``>`` ``=`` ``^`` ``~`` (range, expression or
+    fuzzy search), which are flagged (BL-377). Loud, never guessed: a set operator
+    other than ``+`` (union) between element sets, a function element set (``P()``,
+    ``E()``), and an empty set."""
+    groups = _brace_groups(raw_vals)
+    problem = _element_set_problem(raw_vals, groups)
+    if problem:
+        return [], problem, False
     values: list[str] = []
+    single = False
     for g in groups:
-        for v in _split_top_level(g):
+        for v in _split_top_level(g[1:-1]):
             if not v:
                 continue
-            if v[0] == v[-1] == '"' and len(v) >= 2:
-                text = v[1:-1].replace('""', '"')
-                if _SEARCH_CHARS.search(text):
-                    return [], (f"the element value {v} is a search (wildcard, range or "
-                                "expression), not a single value; it is not translated")
-            elif v[0] == v[-1] == "'" and len(v) >= 2:
-                text = v[1:-1].replace("''", "'")
-            else:
-                text = v              # a bare value ({2023}): quoted, as before
-            values.append("'" + text.replace("'", "''") + "'")
-    return values, None
+            lit, why = _element_literal(v)
+            if why:
+                return [], why, False
+            single = single or v[0] == "'"
+            values.append(lit)
+    if not values:
+        return [], "an empty element set ({}) selects nothing; it is not translated", False
+    return values, None, single
+
+
+def _element_set_problem(raw_vals: str, groups: list[str]) -> Optional[str]:
+    if re.match(r"(?i)^\s*[EP]\s*\(", raw_vals):
+        return ("a function element set (P() / E(), the possible or excluded values) "
+                "depends on selection state; it is not translated")
+    if not groups:
+        return f"the element set {raw_vals.strip()} is not a {{…}} list; it is not translated"
+    rest = raw_vals
+    for g in groups:
+        rest = rest.replace(g, " ", 1)
+    ops = set(rest.split())
+    if ops - {"+"}:
+        return ("a set operator between element sets ("
+                + " ".join(sorted(ops - {"+"})) + ") — only + (union) is translated")
+    return None
+
+
+def _element_literal(v: str) -> tuple[str, Optional[str]]:
+    if len(v) >= 2 and v[0] == v[-1] == '"':
+        text = v[1:-1].replace('""', '"')
+        if _SEARCH_CHARS.search(text):
+            return "", (f"the element value {v} is a search (wildcard, range, expression or "
+                        "fuzzy), not a single value; it is not translated")
+    elif len(v) >= 2 and v[0] == v[-1] == "'":
+        text = v[1:-1].replace("''", "'")
+    elif _NUMBER.fullmatch(v):
+        return v, None
+    else:
+        text = v
+    return "'" + text.replace("'", "''") + "'", None
 
 
 def _brace_groups(raw: str) -> list[str]:
@@ -651,45 +708,47 @@ def _brace_groups(raw: str) -> list[str]:
 
 def _set_analysis(expr: str) -> tuple[str, bool, str]:
     problem = _set_analysis_shape_problem(expr)
-    if problem:
-        return (f"/* TODO review set analysis: {expr} */", True,
-                f"Set Analysis: {problem}")
+    # Selection state ({$}, {$<…>}) and $(…) dollar expansion first: a value like
+    # {$(vYear)} must never reach the literal patterns below (#586 review).
+    if not problem and "$" in expr:
+        problem = ("uses current-selection context ($) or $-expansion; approximate "
+                   "manually — selection state is not preserved in ThoughtSpot")
+    if not problem:
+        out, problem, note = _set_analysis_patterns(expr)
+        if out:
+            return out, False, note
+    return (f"/* TODO review set analysis: {expr} */", True,
+            f"Set Analysis: {problem or 'unrecognized pattern'}")
+
+
+def _set_analysis_patterns(expr: str) -> tuple[Optional[str], Optional[str], str]:
+    """(formula, None, note) for a shape translated exactly, else (None, reason, "")."""
     # Pattern 1: {1} -> ignore all selections (total).
     m = re.match(r"(?i)^(\w+)\(\s*\{1\}\s*(.+?)\)$", expr)
     if m:
-        agg = _agg_fn(m.group(1))
-        return f"group_aggregate({agg}({m.group(2).strip()}), {{}}, {{}})", False, ""
+        agg, why = _set_agg(m.group(1), m.group(2))
+        if why:
+            return None, why, ""
+        return f"group_aggregate({agg[0]}({agg[1]}), {{}}, {{}})", None, ""
 
     # Pattern 2/3/4: {<Field={...}>} (equals / exclude / union).
     m = re.match(r"(?i)^(\w+)\(\s*\{<\s*([\w \[\]]+?)\s*(-?=)\s*(.+?)\s*>\}\s*(.+?)\)$", expr)
-    if m:
-        agg_fn = _agg_fn(m.group(1))
-        field = _set_field(m.group(2))
-        op = m.group(3)
-        measure = m.group(5).strip()
-        values, problem = _set_values(m.group(4))
-        if problem:
-            return (f"/* TODO review set analysis: {expr} */", True,
-                    f"Set Analysis: {problem}")
-        if op == "-=":
-            cond = " and ".join(f"{field} != {v}" for v in values) or "true"
-        else:
-            cond = " or ".join(f"{field} = {v}" for v in values) or "true"
-        if len(values) > 1:
-            cond = f"({cond})"
-        # Rows outside the set contribute nothing: 0 is neutral only for a sum -- a
-        # count, average, min or max over `else 0` counts / averages the zeros.
-        other = "0" if agg_fn == "sum" else "null"
-        return f"{agg_fn}(if ({cond}) then {measure} else {other})", False, ""
-
-    # Pattern 5/6: intersection with selection ($*<...>) or $-expansion.
-    if "$" in expr:
-        return (f"/* TODO review set analysis: {expr} */", True,
-                "Set analysis uses current-selection context ($) or $-expansion; "
-                "approximate manually — selection state is not preserved in ThoughtSpot.")
-
-    return (f"/* TODO review set analysis: {expr} */", True,
-            f"Unrecognized Set Analysis pattern: {expr}")
+    if not m:
+        return None, None, ""
+    agg, why = _set_agg(m.group(1), m.group(5))
+    values, why2, single = _set_values(m.group(4)) if not why else ([], None, False)
+    if why or why2:
+        return None, why or why2, ""
+    fn, measure, other = agg
+    field = _set_field(m.group(2))
+    if m.group(3) == "-=":
+        cond = " and ".join(f"{field} != {v}" for v in values)
+    else:
+        cond = " or ".join(f"{field} = {v}" for v in values)
+    if len(values) > 1:
+        cond = f"({cond})"
+    return (f"{fn}(if ({cond}) then {measure} else {other})", None,
+            CASE_NOTE if single else "")
 
 
 # ---------------------------------------------------------------------------

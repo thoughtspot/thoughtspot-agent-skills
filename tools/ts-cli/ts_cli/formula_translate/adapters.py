@@ -202,7 +202,9 @@ def adapt_qlik(expr: str, ctx: ColumnContext, first_week_day: Optional[int] = No
     if review or not out:
         return RawResult(None, NEEDS_REVIEW, [reason or "Qlik translator: needs review"],
                          partial=out or None)
-    return RawResult(qualify_refs(out, ctx, bare_idents=True), TRANSLATED)
+    # A non-review reason is an informational note (the Set Analysis BL-333 note).
+    return RawResult(qualify_refs(out, ctx, bare_idents=True), TRANSLATED,
+                     [reason] if reason else [])
 
 
 # ---------------------------------------------------------------------------

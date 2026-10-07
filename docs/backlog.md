@@ -251,6 +251,7 @@ are roughly ordered by value÷effort.
 | ~~BL-377~~ | ~~Qlik Set Analysis search strings (`{">=2020<=2023"}`, `{"A*"}`) translated as equality~~ | DONE (2026-10-07 — NEEDS_REVIEW, ts-cli v0.171.0) |
 | ~~BL-378~~ | ~~Qlik `{<[Field Name]={"x"}>}`: the bracketed field is emitted bare and read as two references~~ | DONE (2026-10-07 — ts-cli v0.171.0) |
 | ~~BL-379~~ | ~~Tableau `IF [Bob's] = 'a' THEN 1 END` emits a second `else` (an apostrophe in a field name opened a literal)~~ | DONE (2026-10-07 — fixed in #583, regression test ts-cli v0.171.0) |
+| ~~BL-381~~ | ~~`check_skill_versions` accepts a changelog whose top row is lower than the row below it (a version going backwards after an accept-both merge)~~ | DONE (2026-10-07) |
 
 ### Tier 3 — Opportunistic
 
@@ -13709,18 +13710,33 @@ keep their DAX spelling and `IN {…}` passes through as before.
 `_split_top_level`, so `'A, B'` is one value; a value holding an apostrophe (`{"O'Brien"}`) is now written
 as a valid literal. Found alongside, also a silent wrong answer: the rewrite was `agg(if (cond) then m
 else 0)` for every aggregation, so `Count({<…>} Id)` counted every row and `Avg` averaged in the zeros.
-Only `Sum` keeps `else 0`; the other aggregations use `else null`.
+Only `Sum` keeps `else 0`; the other aggregations use `else null`. The #586 review then found more
+silent wrong answers in the same rewrite, all now loud (NEEDS_REVIEW, named reason) or exact:
+- a set operator between element sets (`{'A'}-{'B'}`, `*`, `/`) was read as a union — only `+`
+  (union) is translated;
+- a function element set (`P()` / `E()`) and any `$(…)` dollar expansion inside a value — the `$`
+  gate now runs before pattern matching;
+- an empty element set `{<Region={}>}` became `if (true)`;
+- an aggregation with no Set Analysis mapping (`Only`, `Mode`, `Concat`, `FirstSortedValue`, …) was
+  silently read as `sum` — only Sum, Avg, Count, Min and Max translate (also under `{1}`);
+- `Count({<…>} DISTINCT Id)` is now `unique count(if (…) then Id else null)` (the `unique count`
+  spelling from thoughtspot-formula-patterns.md); DISTINCT with another aggregation is flagged;
+- a bare number `{2023}` is emitted unquoted (`Year = 2023`); a quoted value stays a string.
+A single-quoted value is a case-sensitive literal in Qlik while ThoughtSpot's `=` is case-insensitive
+(BL-333): the translation carries a non-downgrading note saying so (the converter's mapping report
+`reason`, `ts formula translate` `notes`), which also says pre-June-2017 apps read single quotes as a
+search.
 
 ## BL-377 — Qlik Set Analysis search strings translated as equality `Tier 2`
 
 **Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (NEEDS_REVIEW, ts-cli v0.171.0). **Source:** independent review of #583.
 
 **The facts.** A double-quoted element value is a Qlik SEARCH string: `{">=2020<=2023"}` is a range,
-`{"A*"}` / `{"A?"}` wildcards, `{"*"}` everything, `{"=expr"}` an expression search. All were emitted as
-`Field = '<the search text>'`, which matches nothing.
+`{"A*"}` / `{"A?"}` wildcards, `{"*"}` everything, `{"=expr"}` an expression search, `{"^A"}` /
+`{"~A"}` prefixed searches. All were emitted as `Field = '<the search text>'`, which matches nothing.
 
-**Resolution (2026-10-07).** A double-quoted value with `*` or `?`, or starting `<`, `>` or `=`, is
-NEEDS_REVIEW with the value named. A plain double-quoted value is still an equality (exact, because
+**Resolution (2026-10-07).** A double-quoted value with `*` or `?`, or starting `<`, `>`, `=`, `^` or
+`~` (the last two added after the #586 review), is NEEDS_REVIEW with the value named. A plain double-quoted value is still an equality (exact, because
 ThoughtSpot's `=` is case-insensitive like Qlik's search); a single-quoted value is a literal even with a
 `*`. Range searches are not translated: whether a bound is numeric or a date depends on the field.
 
@@ -13744,3 +13760,18 @@ reference pass reads as two bare names.
 **Resolution (2026-10-07).** Fixed by #583's change to `tableau/literals.mask_literals`, which now leaves
 `[…]` as written; this PR adds the regression test (`if ( [TABLE::Bob's] = 'a' ) then 1 else null`, one
 `else`).
+
+## BL-381 — `check_skill_versions` accepts a changelog whose versions go backwards `Tier 3`
+
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07. **Source:** the #586 merge (two branches
+both added rows to `ts-convert-from-qlik` and `ts-object-formula-translate`).
+
+**The facts.** The validator only checked that a `## Changelog` had a valid row. An accept-both merge
+of two branches' changelog rows can leave a LOWER version on top (`1.0.8` above `1.1.0`), and the top
+row is what every reader takes as the skill's current version.
+
+**Resolution (2026-10-07).** `check_skill` now requires the rows to run strictly descending (newest
+first; a duplicate fails too), compared numerically (`1.10.0` above `1.9.0` passes). Tests:
+`tools/validate/tests/test_check_skill_versions_order.py`. Every shipped skill passed when it landed.
+
+**Target:** 2026-11-30.
