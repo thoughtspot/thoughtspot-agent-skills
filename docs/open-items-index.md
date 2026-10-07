@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**171 total items** across 22 skills — **69 open**, 88 verified, 14 deferred
+**172 total items** across 22 skills — **69 open**, 89 verified, 14 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -27,7 +27,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-security-columns | 6 | **1** | 5 | 0 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
-| ts-link-semantic-layer | 7 | **0** | 2 | 5 |
+| ts-link-semantic-layer | 8 | **0** | 3 | 5 |
 | ts-object-formula-translate | 5 | **0** | 5 | 0 |
 | ts-object-model-agentql-query | 6 | **0** | 6 | 0 |
 | ts-object-set-manager | 8 | **0** | 8 | 0 |

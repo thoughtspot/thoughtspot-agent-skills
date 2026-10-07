@@ -627,6 +627,44 @@ covers Model TML in one direction only, per the gaps above.
 
 ---
 
+### I16 — A Model `AGGREGATE` column must sit on a Table column that is `AGGREGATE` too
+
+**Rule:** when a Model column is `MEASURE` / `aggregation: AGGREGATE` — a semantic-layer
+measure (Databricks Metric View, Snowflake Semantic View) passed through to the platform's
+own measure function — the Table column under it must be `MEASURE` / `AGGREGATE` as well.
+
+**Failure mode:** the two query paths read different levels. **UI search** reads the
+Model's aggregation and works. **AgentQL / SpotQL** reads the **Table's**: with the Table at
+`SUM`, an `AGG()` query is refused at generation (`QUERY_GEN_ERROR`) and a `SUM()` query is
+sent as plain `SUM(col)`, which the platform rejects (Databricks
+`METRIC_VIEW_MISSING_MEASURE_FUNCTION`). The Model imports clean and searches correctly, so
+nothing looks wrong until an agent queries it.
+
+**Evidence (2026-10-07, DBX Org on `nebula-ts-semview`).** Two hand-built Models over Metric
+Views — one over a composed MV, one joining six MVs and two tables in ThoughtSpot — had
+every MV measure `SUM` at the Table level and `AGGREGATE` on the Model. UI search on both
+returned the right totals; every AgentQL aggregate failed, in both forms above. A third
+Model, built by `ts link build`, carried `AGGREGATE` at both levels and worked. Setting the
+seven MV Tables' measures (exactly the columns Databricks flags `is_measure`) to
+`AGGREGATE` fixed both; a 60-case AgentQL corpus then matched the native star-schema Model
+on every comparable case.
+
+**Not flagged, deliberately:** the reverse (Table `AGGREGATE`, Model `ATTRIBUTE` or another
+aggregation) — the same day a Model ATTRIBUTE over an `AGGREGATE` Table column searched
+correctly, so there is no observed failure to gate on; and a Model column with no explicit
+`aggregation` (it may be inheriting).
+
+**Enforced by:** `ts tml lint` (`lint_model_table_aggregation`) when the Table TMLs are linted
+in the same batch as the Model (`--dir`, or `--file table.tml --file model.tml`). A Model
+linted alone is not checked — there is no Table to compare against. `ts link build` writes
+`AGGREGATE` at both levels, so its output satisfies this by construction; the rule exists
+for hand-built and hand-edited Models.
+
+**Applies to:** every Model over a semantic-layer object (`ts-link-semantic-layer`, and any
+hand-built equivalent).
+
+---
+
 
 ## Naming
 

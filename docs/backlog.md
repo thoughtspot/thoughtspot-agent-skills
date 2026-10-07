@@ -239,9 +239,9 @@ are roughly ordered by value÷effort.
 | ~~BL-361~~ | ~~`FLOOR(x, d)` / `CEIL(x, d)` keep the scale argument on ThoughtSpot's one-argument `floor`/`ceil`; TRANSLATED, rejected at import (fidelity M2; Snowflake too)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
 | ~~BL-366~~ | ~~to-direction `safe_divide` is inexact on NULL — Databricks `COALESCE(a / NULLIF(b, 0), 0)` is 0 on a NULL operand, Snowflake `DIV0(NULL, 0)` is NULL (the inverse of BL-357)~~ | DONE (2026-10-07 — ts-cli v0.167.0) |
 | BL-367 | The upstream apache/ossie ThoughtSpot converter (`expressions/catalog.py`) still converts trigonometry by `180 / π` as if ThoughtSpot were in degrees — the BL-364 bug, upstream | 2026-11-15 |
-| ~~BL-368~~ | ~~Qlik converter path (`qlik.functions.translate`, no adapter): a double-quoted field name `Sum("Sales Amount")` is emitted as `sum("Sales Amount")` — now a ThoughtSpot string literal, not a column~~ | DONE (2026-10-07 — ts-cli v0.168.0) |
-| ~~BL-369~~ | ~~Power BI: a quoted table name with an apostrophe, `'Bob''s Sales'[x]`, is mangled to `'Bob'[T::X]`~~ | DONE (2026-10-07 — ts-cli v0.168.0) |
-| ~~BL-370~~ | ~~`COT(0)` (Tableau, Snowflake, Databricks) is `1 / tan ( 0 )` = NULL in ThoughtSpot, where the source errors or returns infinity — an undocumented divergence~~ | DONE (2026-10-07 — documented + non-downgrading trap, ts-cli v0.168.0) |
+| ~~BL-368~~ | ~~Qlik converter path (`qlik.functions.translate`, no adapter): a double-quoted field name `Sum("Sales Amount")` is emitted as `sum("Sales Amount")` — now a ThoughtSpot string literal, not a column~~ | DONE (2026-10-07 — ts-cli v0.169.0) |
+| ~~BL-369~~ | ~~Power BI: a quoted table name with an apostrophe, `'Bob''s Sales'[x]`, is mangled to `'Bob'[T::X]`~~ | DONE (2026-10-07 — ts-cli v0.169.0) |
+| ~~BL-370~~ | ~~`COT(0)` (Tableau, Snowflake, Databricks) is `1 / tan ( 0 )` = NULL in ThoughtSpot, where the source errors or returns infinity — an undocumented divergence~~ | DONE (2026-10-07 — documented + non-downgrading trap, ts-cli v0.169.0) |
 | BL-371 | Upstream apache/ossie `reverse.py:273` renders `safe_divide` as `COALESCE(a / NULLIF(b, 0), 0)`, 0 on a NULL operand — the upstream copy of BL-366. HELD (all upstream Ossie work is on hold) | when upstream work resumes |
 | BL-372 | Excel / Sheets translator returns `COT` as NEEDS_REVIEW while the Excel map row says direct | 2026-11-30 |
 | BL-373 | Exact non-Monday week truncation: where the source week start is known, emit `add_days ( start_of_week ( add_days ( d , k ) ) , -k )` instead of downgrading (BL-334 item 2 follow-up; needs a live probe) | 2026-11-30 |
@@ -13526,7 +13526,7 @@ reverse rows (`SIN(RADIANS(x))` → `SIN(x)`); re-run `tools/ossie-roundtrip`. N
 
 ## BL-368 — Qlik converter: a double-quoted field name becomes a ThoughtSpot string literal `Tier 2`
 
-**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.168.0). **Source:** independent review of #579.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.169.0). **Source:** independent review of #579.
 
 **The facts.** `ts formula translate --from qlik` rewrites Qlik's `"Field Name"` to `[Field Name]`
 first (`formula_translate/adapters.qlik_field_quotes`), but the converter calls
@@ -13561,7 +13561,7 @@ stitched into the first's measure (`Sum({<Year={2023}>}"Sales") / Sum({1} "Sales
 
 ## BL-369 — Power BI: a quoted table name holding an apostrophe is mangled `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.168.0). **Source:** independent review of #579.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (ts-cli v0.169.0). **Source:** independent review of #579.
 
 **The facts.** DAX `SUM('Bob''s Sales'[x])` translates to `sum('Bob'[T::X])` (offline, 2026-10-07):
 `_COL_REF` does not read DAX's doubled quote inside a quoted table name. Silent only if the
@@ -13595,7 +13595,7 @@ bracketed names are now ignored when looking for a literal.
 
 ## BL-370 — `COT(0)` is NULL in ThoughtSpot `Tier 3`
 
-**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (documented + trap, ts-cli v0.168.0). **Source:** independent review of #579.
+**Filed:** 2026-10-07. **Status:** RESOLVED 2026-10-07 (documented + trap, ts-cli v0.169.0). **Source:** independent review of #579.
 
 **The facts.** `COT(x)` → `( 1 / tan ( x ) )` in the Tableau, Snowflake and Databricks translators
 (BL-364). At `x = 0` ThoughtSpot's `/` is NULL-safe (`1 / NULLIF(0, 0)`), so the result is NULL;

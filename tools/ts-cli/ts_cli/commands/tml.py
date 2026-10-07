@@ -650,18 +650,27 @@ def _build_generated_tables_map(parsed: list) -> dict[str, set]:
     return tables
 
 
-def _lint_one_doc(i: int, data, parse_errors: dict[int, str], tables: dict[str, set]) -> dict:
+def _build_table_aggregations_map(parsed: list) -> dict[str, dict]:
+    """Table name -> per-column (column_type, aggregation), for the I16 check."""
+    from ts_cli.tml_lint import table_aggregations
+    return {d["table"]["name"]: table_aggregations(d["table"]) for d in parsed
+            if isinstance(d, dict) and isinstance(d.get("table"), dict) and d["table"].get("name")}
+
+
+def _lint_one_doc(i: int, data, parse_errors: dict[int, str], tables: dict[str, set],
+                  table_aggs: Optional[dict] = None) -> dict:
     """Lint pass 2 — lint one already-parsed doc (lint_tml + optional cross-reference
     check against the batch's generated-tables map). Returns the result entry
     ``{index, type, name, findings}``.
     """
-    from ts_cli.tml_lint import lint_cross_references, lint_tml
+    from ts_cli.tml_lint import lint_cross_references, lint_model_table_aggregation, lint_tml
 
     if i in parse_errors:
         return {"index": i, "type": "?", "name": None, "findings": [parse_errors[i]]}
     findings = lint_tml(data) if isinstance(data, dict) else ["TML is not a mapping"]
     if tables and isinstance(data, dict) and isinstance(data.get("model"), dict):
         findings = findings + lint_cross_references(data, tables)
+        findings = findings + lint_model_table_aggregation(data, table_aggs or {})
     inner = data.get("model") or data.get("table") or {} if isinstance(data, dict) else {}
     return {
         "index": i,
@@ -700,7 +709,8 @@ def lint_tml_cmd(
     (e.g. linting a whole `ts tableau build-model` output directory via --dir), each model
     is ADDITIONALLY checked for dangling cross-references (XREF findings) against the
     table/sql_view TMLs generated in the same batch — a model_tables/column_id/join
-    reference to a table or column that was never generated. Linting a single model file
+    reference to a table or column that was never generated — and for a Model column
+    marked AGGREGATE whose Table column is not (I16: AgentQL reads the Table's). Linting a single model file
     on its own (the common case) skips this check — there is no ground truth for what
     tables already exist in ThoughtSpot from a model file alone.
 
@@ -720,11 +730,12 @@ def lint_tml_cmd(
     # from this batch's table/sql_view docs before linting any model.
     parsed, parse_errors = _parse_tml_docs(tmls)
     tables = _build_generated_tables_map(parsed)
+    table_aggs = _build_table_aggregations_map(parsed)
 
     results = []
     any_findings = False
     for i in range(len(tmls)):
-        entry = _lint_one_doc(i, parsed[i], parse_errors, tables)
+        entry = _lint_one_doc(i, parsed[i], parse_errors, tables, table_aggs)
         results.append(entry)
         any_findings = any_findings or bool(entry["findings"])
 
