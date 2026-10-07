@@ -496,6 +496,12 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 - **`COT(x)` is NULL at 0** (1.8.2, BL-370): `1 / tan ( x )` uses ThoughtSpot's NULL-safe
   `/`, where the source errors or returns infinity. The translation carries a trap and stays
   TRANSLATED.
+- **Excel / Sheets reciprocal trigonometry is translator-backed** (1.9.2, BL-372): `COT`,
+  `SEC`, `CSC`, `COTH`, `SECH`, `CSCH`, `ACOT`, `ACOTH` translate (radians; the hyperbolic ones
+  through the Snowflake pass-throughs). A literal zero divisor (`COT(0)`, `CSC(0)`, `COTH(0)`,
+  `CSCH(0)`) is NEEDS_REVIEW; over a column the NULL-at-zero trap applies. Excel / Sheets
+  `direct` rows the translator still declines are listed in the map's *Translator coverage*
+  section — compose those from the row, labelled hand-composed.
 - **Excel `TEXT` translates a subset of format codes** (1.8.0): plain numbers (`0`, `0.00`,
   `#,##0.00`, zero-padded), percentages, and date / time codes (`yyyy yy mmmm mmm mm dd ddd
   dddd hh ss` with `- / : . ,` and space). Everything else — `$`, fractions, scientific,
@@ -519,6 +525,7 @@ is a result: give the reason. Ask for the Excel Table's name if `Table1` is not 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.9.2 | 2026-10-07 | Excel / Sheets reciprocal trigonometry is translator-backed (ts-cli v0.172.0, BL-372): `COT`, `SEC`, `CSC` as `1 /` the native function, `COTH` / `SECH` / `CSCH` as `1 /` the Snowflake hyperbolic pass-through, `ACOT` as `π / 2 − atan`, `ACOTH` as `ATANH(1 / x)`; a literal zero divisor is NEEDS_REVIEW and a column carries the BL-370 NULL-at-zero trap. The Excel and Sheets maps now list the `direct` / `passthrough` rows the translator still declines |
 | 1.9.1 | 2026-10-07 | The DAX and Qlik translators it wraps (ts-cli v0.171.0, BL-375..379): DAX `NOT [x]` keeps its `NOT` and no longer reads `NOT` as a table (`[not::x]`); Qlik Set Analysis reads quoted commas, flags search strings, keeps a bracketed modifier field whole, and uses `else null` for non-sum aggregations; set operators other than `+`, `P()` / `E()`, `$(…)`, empty sets and unmapped aggregations are NEEDS_REVIEW, and a single-quoted set value adds a case-sensitivity note; `{1}` keeps the query's grouping (`query_groups ( )`); the aggregated expression is translated; `=` modifiers and bare numbers without a `--columns` type add notes |
 | 1.9.0 | 2026-10-07 | **One Monday-week-start trap, shared with the converters (ts-cli v0.170.0, BL-334 item 2).** The week trap is now `formula_week.week_start_note`, the note every `ts-convert-from-*` report carries, worded per function found. `diff_weeks` gets one trap instead of two; `day_of_week` (a day name) no longer fires it. Advisory — status unchanged — except a Tableau `DATETRUNC('week', d, 'sunday')` (a known non-Monday start), which is APPROXIMATED with a `week start mismatch` trap |
 | 1.8.2 | 2026-10-07 | Translator follow-ups from the #579 review (ts-cli v0.169.0): Qlik double-quoted field names are rewritten inside `qlik.functions.translate`, so the converter no longer emits them as string literals (BL-368); DAX quoted table names read a doubled apostrophe (BL-369) and an apostrophe inside a `[…]` reference no longer drops it from `references`; `COT` carries a non-downgrading NULL-at-zero trap (BL-370). After review: DAX `'Bob''s Sales'[Ship] - 'Bob''s Sales'[Order]` over DATE columns is `diff_days`; Qlik and Tableau scanners treat `[…]` as opaque (`[Bob's Sales] + [Tax]` stays numeric `+`); SQL comment stripping reads `v['a--b']` as before; unreadable Qlik double-quoted names and multi-field / multi-aggregation Set Analysis are NEEDS_REVIEW |

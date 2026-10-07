@@ -64,6 +64,15 @@ FUNCTION_RULES = {
     "ATANH": {"map": "excel", "emits": ("sql_double_op",)},
     "DEGREES": {"map": "excel", "emits": ("sql_double_op",)},
     "RADIANS": {"map": "excel", "emits": ("sql_double_op",)},
+    # the reciprocal family (BL-372): 1 / the native or pass-through function
+    "COT": {"map": "excel", "emits": ("tan",)},
+    "SEC": {"map": "excel", "emits": ("cos",)},
+    "CSC": {"map": "excel", "emits": ("sin",)},
+    "COTH": {"map": "excel", "emits": ("sql_double_op",)},
+    "SECH": {"map": "excel", "emits": ("sql_double_op",)},
+    "CSCH": {"map": "excel", "emits": ("sql_double_op",)},
+    "ACOT": {"map": "excel", "emits": ("sql_double_op", "atan")},
+    "ACOTH": {"map": "excel", "emits": ("sql_double_op",)},
     # --- Statistical
     "AVERAGE": {"map": "excel", "emits": ("average",)},
     "AVERAGEIF": {"map": "excel", "emits": ("average_if",)},

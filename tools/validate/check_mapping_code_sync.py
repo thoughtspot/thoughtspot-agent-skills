@@ -67,6 +67,20 @@ vendored ``EXTRAS`` in ``formula_translate/catalog.py``), never a disproved one;
 *Translator coverage* list names exactly the rule table's keys for that map. Requirement A
 also runs over ``ts_cli/excel/*.py``.
 
+**The other direction — a translatable row the translator declines (BL-372).** The checks above
+all start from the rule table, so a row the map classes ``direct`` or ``passthrough`` that has
+no rule was invisible: ``COT`` was a ``direct`` row with an exact form while the translator
+returned NEEDS_REVIEW, and nothing said so. A hard "translatable ⇒ translated" gate is not
+reasonable — the translator is a deliberate subset (159 of the Excel map's 281 translatable rows
+are map-backed: financial, database, statistical and array functions the skill composes by hand
+from the row). So the decline is made **explicit** instead: each map carries a
+*translator-declines* list (``<!-- translator-declines:start -->`` … ``end``) naming exactly
+its ``direct`` / ``passthrough`` rows with no rule — for the Sheets map, no Sheets rule and no
+Excel rule (Sheets rule E1 sends a shared name to the Excel rule). A new translatable row, or a
+row reclassified to ``direct``, then fails until its author either writes the rule or lists the
+decline where a reader of the coverage section sees it. A rule removed without listing its row
+fails the same way.
+
 The declared ``emits`` are only half of it (PR #570 review L1): a handler could emit a name it
 never declared. So C also **runs every handler** — ``translate_excel`` over synthetic calls of
 arity 0–4 drawn from a small argument pool (a row reference, a range, numbers, strings) — and
@@ -363,6 +377,8 @@ EXCEL_MAPS = {"excel": "docs/function-maps/ts-excel-function-mapping.md",
               "sheets": "docs/function-maps/ts-sheets-function-mapping.md"}
 COVERAGE_START = "<!-- translator-coverage:start -->"
 COVERAGE_END = "<!-- translator-coverage:end -->"
+DECLINES_START = "<!-- translator-declines:start -->"
+DECLINES_END = "<!-- translator-declines:end -->"
 
 
 def literal_assignments(source: str) -> dict:
@@ -388,12 +404,44 @@ def map_rows(text: str) -> dict[str, str]:
     return rows
 
 
-def coverage_list(text: str):
+def coverage_list(text: str, start: str = COVERAGE_START, end: str = COVERAGE_END):
     """Backticked names between the coverage markers, or None when the markers are absent."""
-    if COVERAGE_START not in text or COVERAGE_END not in text:
+    if start not in text or end not in text:
         return None
-    block = text.split(COVERAGE_START, 1)[1].split(COVERAGE_END, 1)[0]
+    block = text.split(start, 1)[1].split(end, 1)[0]
     return set(re.findall(r"`([A-Z][A-Z0-9_.]*)`", block))
+
+
+TRANSLATABLE = ("direct", "passthrough")
+
+
+def row_class(line: str) -> str:
+    """A function row's class cell, bold and qualifiers dropped: ``direct (downgrade)`` → direct."""
+    cells = line.split("|")
+    if len(cells) < 3:
+        return ""
+    words = cells[2].replace("*", "").split()
+    return words[0] if words else ""
+
+
+def declines_errors(maps: dict[str, str], backed: dict[str, set]) -> list[str]:
+    """BL-372: each map's translator-declines list names exactly its translatable rows with no
+    rule (``backed[key]``). An absent list reads as empty, so a map with no declines needs none."""
+    errors = []
+    for key, keys in backed.items():
+        text = maps.get(key, "")
+        translatable = {name for name, line in map_rows(text).items()
+                        if row_class(line) in TRANSLATABLE}
+        declined = translatable - keys
+        listed = coverage_list(text, DECLINES_START, DECLINES_END) or set()
+        if listed != declined:
+            errors.append(
+                f"the {key} map's translator-declines list ({DECLINES_START}) disagrees with "
+                f"rules.py: a direct/passthrough row the translator returns NEEDS_REVIEW for but "
+                f"the list omits {sorted(declined - listed)} (write the rule, or list the "
+                f"decline); listed but translated or not a direct/passthrough row "
+                f"{sorted(listed - declined)}")
+    return errors
 
 
 def _mentions(text: str, name: str) -> bool:
@@ -440,6 +488,9 @@ def excel_rule_errors(rules_src: str, maps: dict[str, str], valid: set[str],
             errors.append(f"the {key} map's translator-coverage list disagrees with rules.py: "
                           f"listed but not translated {sorted(listed - keys)}, translated but "
                           f"not listed {sorted(keys - listed)}")
+    excel_keys = set(tables["FUNCTION_RULES"])
+    errors += declines_errors(maps, {"excel": excel_keys,
+                                     "sheets": set(tables["SHEETS_RULES"]) | excel_keys})
     return errors
 
 
