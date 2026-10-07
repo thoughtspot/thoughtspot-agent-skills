@@ -164,7 +164,7 @@ Resolution:
 
 | ThoughtSpot | Databricks SQL | Notes |
 |---|---|---|
-| `if (cond) then val else val` | `CASE WHEN cond THEN val ELSE val END` | Or `IF(cond, val, val)` |
+| `if (cond) then val else val` | `CASE WHEN cond THEN val ELSE val END` | Or `IF(cond, val, val)`; Databricks → TS also reads `IFF(cond, val, val)`, Databricks' synonym for `IF`. The one shape read back differently is the compiled `safe_divide` form, `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` → `safe_divide ( a , b )` (BL-374, see "safe_divide Pattern") |
 | `ifnull(x, default)` | `COALESCE(x, default)` | |
 | `isnull(x)` | `x IS NULL` | |
 | `not(x)` | `NOT x` | |
@@ -796,6 +796,15 @@ division behaviours, from compiled SQL and values in formula fidelity M2 (se-tho
 | Databricks → TS | `COALESCE(x / NULLIF(y, 0), 0)`, `IFNULL(…, 0)`, `NVL(…, 0)`, `zeroifnull(x / NULLIF(y, 0))` | `ifnull ( safe_divide ( x , y ) , 0 )` — 0 on a zero divisor **and** on a NULL operand. `safe_divide` alone was NULL on a NULL operand (M2 `dbx-arith-005`) |
 | Databricks → TS | `COALESCE(x / NULLIF(y, 0), d)` with any other `d` | `ifnull ( x / y , d )` |
 | Databricks → TS | `try_divide(x, y)` | `( x / y )` — NULL on a zero divisor, as ThoughtSpot's `/` |
+| Databricks → TS | `CASE WHEN y = 0 THEN 0 ELSE x / NULLIF(y, 0) END` (also `IF(y = 0, 0, x / NULLIF(y, 0))` / `IFF(…)`, or the ELSE written `x / y`) | `safe_divide ( x , y )` — the compiled form above, read back as the idiom so a TS → Databricks → TS round trip keeps it (**BL-374, ts-cli 0.173.0**; it was `if ( y = 0 ) then 0 else x / y`, the same value). Keyword case, whitespace and redundant parentheses do not matter; `y` must be the same expression in both places, its column references matching exactly, case included (Snowflake quoted `"b"` and `"B"` are different columns). Anything else — a `NULL` or non-zero THEN, `y <> 0` with the arms swapped, `0 = y`, an extra WHEN, a different divisor — keeps the literal `if … then … else` reading |
+
+**Why the read-back is exact (BL-374 grid).** Over x ∈ {NULL, 0, 2} × y ∈ {NULL, 0, 4}: `y = 0`
+takes the THEN arm (0) in both the source and `safe_divide`; a NULL `y` makes `y = 0` NULL, so the
+ELSE arm runs and gives NULL, as `safe_divide`; any other `y` gives `x / y` in both. The ELSE arm is
+never reached with `y = 0`, so `NULLIF(y, 0)` there is always `y` — which is why the plain `x / y`
+ELSE is recognised too. The swapped `CASE WHEN y <> 0 THEN x / y ELSE 0 END` is **not**
+equivalent (a NULL `y` takes the 0 arm, where `safe_divide` is NULL) and is not recognised. The grid
+is a unit test (`tests/test_safe_divide_readback.py`).
 
 Any other wrapper of `x / NULLIF(y, 0)` translates generically and stays exact, because the
 plain `x / y` already matches the source on every input. The standing "`safe_divide` for
@@ -879,6 +888,7 @@ formula equivalents:
 | `CAST(x AS DOUBLE)` / `STRING` / … | unwrapped — widening, ThoughtSpot promotes on its own |
 | `x / NULLIF(y, 0)` | `x / y` (BL-357 — see "safe_divide Pattern") |
 | `COALESCE(x / NULLIF(y, 0), 0)` | `ifnull ( safe_divide ( x , y ) , 0 )` (BL-357) |
+| `CASE WHEN y = 0 THEN 0 ELSE x / NULLIF(y, 0) END` | `safe_divide ( x , y )` (BL-374 — see "safe_divide Pattern") |
 | `COALESCE(x / NULLIF(y, 0), d)` | `ifnull ( x / y , d )` |
 | `COALESCE(a, b, c, …)` | `if ( a != null ) then a else if ( b != null ) then b else c` — n-ary, as `sv_sql` (BL-362) |
 | `NVL(a, b)` / `IFNULL(a, b)` | `ifnull ( a , b )` (BL-362) |

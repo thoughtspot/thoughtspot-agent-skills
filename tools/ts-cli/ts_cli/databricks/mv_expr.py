@@ -12,48 +12,9 @@ from __future__ import annotations
 
 import re
 
-
-def _scan_string_literal(s: str, i: int) -> int:
-    """Given s[i] == "'", return the index just past the literal's closing
-    quote ('' is the escape; an unterminated literal runs to end-of-string)."""
-    j = i + 1
-    n = len(s)
-    while j < n:
-        if s[j] == "'":
-            if j + 1 < n and s[j + 1] == "'":
-                j += 2
-                continue
-            return j + 1
-        j += 1
-    return n
-
-
-def strip_sql_comments(expr: str) -> str:
-    """Strip -- line and /* */ block comments in a single quote-aware pass.
-
-    String-literal contents are copied verbatim (comment markers inside
-    literals are data, not comments); a `--` inside a `/* */` block is part
-    of that block. Block comments are replaced with one space, line comments
-    with nothing (both as before)."""
-    out: list[str] = []
-    i, n = 0, len(expr)
-    while i < n:
-        ch = expr[i]
-        if ch == "'":
-            end = _scan_string_literal(expr, i)
-            out.append(expr[i:end])
-            i = end
-        elif expr.startswith("--", i):
-            while i < n and expr[i] != "\n":
-                i += 1
-        elif expr.startswith("/*", i):
-            close = expr.find("*/", i + 2)
-            out.append(" ")
-            i = n if close == -1 else close + 2
-        else:
-            out.append(ch)
-            i += 1
-    return "".join(out).strip()
+# The quote-aware comment stripper and literal scanner are shared with the Snowflake
+# translator (BL-382); `strip_sql_comments` is re-exported here for existing callers.
+from ts_cli.sql_forms import sqlf_scan_string_literal, strip_sql_comments  # noqa: F401
 
 
 def mask_string_literals(s: str) -> str:
@@ -65,7 +26,7 @@ def mask_string_literals(s: str) -> str:
     i, n = 0, len(s)
     while i < n:
         if s[i] == "'":
-            end = _scan_string_literal(s, i)
+            end = sqlf_scan_string_literal(s, i)
             out.append("'" + " " * (end - i - 2) + "'" if end - i >= 2 else s[i:end])
             i = end
         else:
@@ -125,7 +86,7 @@ def _split_top_level(s: str, sep: str = ",") -> list[str]:
     while i < n:
         ch = s[i]
         if ch == "'":
-            end = _scan_string_literal(s, i)
+            end = sqlf_scan_string_literal(s, i)
             buf.append(s[i:end])
             i = end
             continue
