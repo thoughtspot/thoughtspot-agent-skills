@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**172 total items** across 22 skills — **69 open**, 89 verified, 14 deferred
+**210 total items** across 24 skills — **71 open**, 123 verified, 16 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -22,16 +22,18 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-load-source-data | 3 | **3** | 0 | 0 |
 | ts-publish-orgs | 8 | **3** | 4 | 1 |
 | ts-convert-from-sisense | 5 | **2** | 2 | 1 |
+| ts-convert-to-dbt | 18 | **2** | 16 | 0 |
 | ts-object-calendar-builder | 6 | **2** | 4 | 0 |
 | ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
 | ts-security-columns | 6 | **1** | 5 | 0 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
+| ts-convert-from-dbt | 20 | **0** | 18 | 2 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-link-semantic-layer | 8 | **0** | 3 | 5 |
 | ts-object-formula-translate | 5 | **0** | 5 | 0 |
 | ts-object-model-agentql-query | 6 | **0** | 6 | 0 |
 | ts-object-set-manager | 8 | **0** | 8 | 0 |
-### Untagged (69 items)
+### Untagged (71 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -71,6 +73,8 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-to-databricks-mv | #6 | `source.`-prefix in a single-source MV's `filter:`/exprs needs live verification | OPEN |
 | ts-convert-to-databricks-mv | #7 | 2-argument `{0}`-template SQL pass-through form is not implemented | OPEN |
 | ts-convert-to-databricks-mv | #8 | Live numeric fidelity of the codified emit path | OPEN |
+| ts-convert-to-dbt | #2 | Legacy MetricFlow spec (semantic_models.yml) | OPEN |
+| ts-convert-to-dbt | #13 | Column Security Rules (CSR) not in Table TML | OPEN |
 | ts-dependency-manager | #11 | Reusable Set (cohort) delete command | OPEN |
 | ts-dependency-manager | #13 | Chart `client_state_v2` stale column references | OPEN |
 | ts-dependency-manager | #14 | Cohort `pass_thru_filter` lost on round-trip | OPEN |

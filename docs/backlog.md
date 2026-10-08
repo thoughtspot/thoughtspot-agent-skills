@@ -186,7 +186,7 @@ are roughly ordered by value÷effort.
 | BL-286 | the Genie runtime's two converters (`agents/databricks/skills/ts-convert-*`) carry no I7 gate and are outside `_dirs`, so `check_i7_gate` cannot see them — audit 9.17 expected 9.3's fix to reach them | with the next Genie review |
 | BL-287 | CoCo `ts-convert-from-snowflake-sv` changelog claims its I7 gate "mirrors the CLI skill v1.5.0", but CLI v1.5.0 covered N1/I5 and never had the gate — the CLI got it for the first time in PR #525 (audit 9.2, second half) | next mirror pass |
 | BL-288 | `ts-object-model-coach` designs typed `model_instructions` categories (`exclusion_rules`, `aggregation_defaults`, …); one of its three candidate TML homes collides with the real free-text `data_model_instructions`. Consequence is **silent, not a type error**: `checks_ai` returns False and `tml_probes` returns `[]`, so a fully coached Model draws a HIGH-severity A3 "no coaching configured", loses A5's 25-point AI weight, and `find_ai_surface_uses` goes blind to every column named in those rules | before any v1.1 TML write path |
-| BL-289 | CSR is retrievable (`ts security column-rules export`) but **not walked** — `ts metadata report` declares `csr_hits` at `report/__init__.py:203`, passes it at `:307`, and never appends to it, so the dependency walk reports CSR as "Not Checked" by construction | next dependency pass |
+| ~~BL-289~~ | ~~CSR is retrievable (`ts security column-rules export`) but **not walked** — `ts metadata report` declares `csr_hits` at `report/__init__.py:203`, passes it at `:307`, and never appends to it, so the dependency walk reports CSR as "Not Checked" by construction~~ | DONE (2026-10-02, PR #506) — the report fetches CSR on the source's owning table, resolved from a column GUID's header `owner`; live-verified detecting a rule on embed-1 staging |
 | BL-290 | four `open-item #N` citations in `tools/ts-cli/` docstrings point at ts-dependency-manager items deleted in 2026-06 (`dependency/mutate.py:448` #12, `report/tml_probes.py:14` #7, `:44` #6, `:75` #10 — the last self-annotates "resolved 2026-05-28"); `check_open_item_citations` scans skill dirs only, so nothing sees them | next validator pass |
 | BL-291 | `ts-object-model-coach`'s Step 8e gate defers the keyword-bearing reference-question tiers as unverified, but the verification happened (2026-04-27) and `references/question-taxonomy.md` marks `t1.top_n`, `t2.this_vs_last` and `t3.year_filter` ✅ Importable — the gate and a reference file in the same directory disagree about what the generator should emit | next model-coach pass |
 | ~~BL-292~~ | ~~`audit/checks_ai.py` read `instr.get("instructions")` off the RAW `ai/instructions/get` response, which has no such key, so the API half of A3/A5 never fired~~ | DONE (2026-09-22) |
@@ -8286,6 +8286,13 @@ blocking on this.
 > fails loudly rather than being silently skipped. **Part 2 (consolidation) is still
 > open** — 7 divergences are encoded in the validator, each a target.
 >
+> **2026-10-08 — dbt adopts both helpers, no exemption.** The two dbt converters
+> (PR #506) apply `resolve_name_collisions` and `fix_double_aggregation` to every Model
+> they build (`ts_cli/dbt/formula_pass.py`), and their two `check_converter_parity`
+> exemptions are removed rather than added — `check_converter_parity` reports dbt as
+> adopted. One known limit stays in the shared helper, not in dbt: its aggregate list
+> has no `median`, so `sum ( [formula_<median metric>] )` is not collapsed.
+>
 > Three corrections to the analysis below, found while building it:
 >
 > 1. **The obvious rule does not work.** The first cut asserted "emits `sql_*_op` ->
@@ -14190,3 +14197,26 @@ never scanned.
 `.png` symlink.
 
 **Target:** 2026-12-31.
+
+---
+
+## BL-394 — `ts columns impact` (`impact_cmd`) is a cyclomatic-complexity-195 god-function `Tier 2`
+
+**Filed:** 2026-10-06. **Source:** PR #506 review (djwaldo, 2026-09-14, "should fix before
+merge"): the PR added `commands/columns.py::impact_cmd` to
+`tools/validate/module_health_baseline.json` at cc 195 against `CAP = 15` — the next
+largest baselined function is 99 — with no dated exit, in the function that decides
+whether a column is safe to delete.
+
+**Why it matters.** `check_module_health` exists to stop new god-functions creeping in
+unnoticed; a baseline entry with no plan turns that gate off for this function
+permanently. At this size no test can cover the branch combinations, which is how PR #506
+blocker 7 (failed exports read as empty documents) reached review.
+
+**Fix.** Split `impact_cmd` along the phases it already runs in sequence: resolve the
+column → collect dependents → per-type probes (formulas, sets, RLS/CSR, SQL views,
+feedback) → classify → render. Each phase a function under `CAP`, the command a thin
+orchestrator; behaviour unchanged, pinned first by a characterisation test over the
+current JSON output. Then delete the baseline entry, so the gate covers it again.
+
+**Target:** 2026-11-30, or the next change to `ts columns impact`, whichever comes first.

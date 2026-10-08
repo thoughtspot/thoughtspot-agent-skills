@@ -232,8 +232,8 @@ jobs:
           python3 tools/validate/check_audit_workflow_permissions.py --root .
 
       - name: Run credential-free smoke suites
-        # These five assert real behaviour of publish_plan / csr_plan / apply_plan /
-        # alias and need NO credentials, but ran in no CI job at all: the pytest steps
+        # These assert real behaviour of publish_plan / csr_plan / apply_plan /
+        # alias / the dbt converters and need NO credentials, but ran in no CI job at all: the pytest steps
         # never touch tools/smoke-tests, the smoke_*.py prefix isn't collected by
         # pytest by default anyway, and pre-push derives its list purely from touched
         # agents/(cli|claude)/<skill>/ paths. So a PR editing only ts_cli/publish_plan.py
@@ -243,7 +243,8 @@ jobs:
         run: |
           for s in smoke_ts_publish_orgs smoke_ts_security_columns \
                    smoke_ts_setup_tenancy smoke_ts_migrate_orgs \
-                   smoke_ts_object_model_alias; do
+                   smoke_ts_object_model_alias \
+                   smoke_ts_convert_from_dbt smoke_ts_convert_to_dbt; do
             echo "--- $s"
             python3 "tools/smoke-tests/$s.py"
           done

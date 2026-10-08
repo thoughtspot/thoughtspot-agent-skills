@@ -32,6 +32,7 @@ def test_source_descriptor_to_dict():
         "type": "LOGICAL_TABLE",
         "name": "TABLE",
         "parent": None,
+        "subtype": None,
     }
 
 

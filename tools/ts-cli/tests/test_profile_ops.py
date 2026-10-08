@@ -87,6 +87,9 @@ class TestDeriveEnvVar:
     def test_tableau_pat(self):
         assert derive_env_var("tableau", "pat", "cloud") == "TABLEAU_PAT_SECRET_CLOUD"
 
+    def test_dbt_cloud_token(self):
+        assert derive_env_var("dbt-cloud", "token", "sales") == "DBT_CLOUD_TOKEN_SALES"
+
     def test_unknown_raises(self):
         with pytest.raises(ValueError, match="Unknown platform/auth_type"):
             derive_env_var("unknown", "token", "slug")
@@ -104,6 +107,9 @@ class TestDeriveKeychainService:
 
     def test_tableau(self):
         assert derive_keychain_service("tableau", "server1") == "tableau-server1"
+
+    def test_dbt_cloud(self):
+        assert derive_keychain_service("dbt-cloud", "sales") == "dbt-cloud-sales"
 
 
 class TestKeychainStoreCommands:

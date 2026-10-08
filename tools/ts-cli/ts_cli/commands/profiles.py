@@ -158,6 +158,11 @@ def _keychain_account(platform: str, auth_type: str, fields: dict) -> str | None
         # the account it is keyed under -- matching the client_id/client_secret
         # pair the Databricks CLI reads from ~/.databrickscfg.
         return fields.get("client_id", "")
+    if platform == "dbt-cloud" and auth_type == "token":
+        # A dbt Cloud API token (Personal Access Token or Service Token) has no
+        # natural per-user account name — a Service Token in particular isn't
+        # tied to any user at all — so use a fixed account, same as Databricks' PAT.
+        return "token"
     if platform == "tableau" and auth_type == "pat":
         return fields.get("pat_name", "")
     return fields.get("username", "")
@@ -189,6 +194,13 @@ def _apply_auth_fields(profile: dict, platform: str, auth_type: str, slug: str) 
         elif auth_type == "pat":
             profile["pat_secret_env"] = derive_env_var(platform, auth_type, slug)
 
+    elif platform == "dbt-cloud":
+        profile["auth_type"] = auth_type
+        if auth_type == "token":
+            profile["token_env"] = derive_env_var(platform, auth_type, slug)
+            profile["keychain_service"] = derive_keychain_service(platform, slug)
+            profile["keychain_account"] = "token"
+
     return profile
 
 
@@ -201,6 +213,9 @@ _PLATFORM_SKILLS = {
     "snowflake": "ts-profile-snowflake",
     "databricks": "ts-profile-databricks",
     "tableau": "ts-profile-tableau",
+    # No dedicated ts-profile-dbt-cloud skill yet — profile creation is wired
+    # directly into ts-convert-from-dbt's own Step 2/4 instead.
+    "dbt-cloud": "ts-convert-from-dbt",
 }
 
 
@@ -238,6 +253,13 @@ def _list_snowflake(profiles: list) -> None:
         typer.echo(f"  {p['name']:30s}  {method:8s}  {account:40s}  {warehouse}")
 
 
+def _list_dbt_cloud(profiles: list) -> None:
+    for p in profiles:
+        auth_type = p.get("auth_type", "unknown")
+        coords = f"account={p.get('account_id', '')} project={p.get('project_id', '')}"
+        typer.echo(f"  {p['name']:30s}  {auth_type:8s}  {coords:35s}  {p.get('dbt_url', '')}")
+
+
 def _list_thoughtspot() -> None:
     profiles = load_profiles()
     if not profiles:
@@ -256,13 +278,15 @@ def _list_thoughtspot() -> None:
         typer.echo(f"  {name:20s}  {auth:12s}  {p.get('base_url', '')}")
 
 
-def _resolve_platform(snowflake: bool, tableau: bool, databricks: bool) -> str:
+def _resolve_platform(snowflake: bool, tableau: bool, databricks: bool, dbt_cloud: bool) -> str:
     if databricks:
         return "databricks"
     if snowflake:
         return "snowflake"
     if tableau:
         return "tableau"
+    if dbt_cloud:
+        return "dbt-cloud"
     return "thoughtspot"
 
 
@@ -284,6 +308,10 @@ def list_profiles(
         False, "--databricks",
         help="List Databricks profiles instead of ThoughtSpot profiles.",
     ),
+    dbt_cloud: bool = typer.Option(
+        False, "--dbt-cloud",
+        help="List dbt Cloud profiles instead of ThoughtSpot profiles.",
+    ),
     json_output: bool = typer.Option(
         False, "--json",
         help="Output profiles as JSON (credential pointers and literal secrets stripped).",
@@ -297,7 +325,7 @@ def list_profiles(
     is shown. The literal case is belt-and-braces: `--field token=…` is refused at
     parse time, so a secret should never reach the file in the first place.
     """
-    platform = _resolve_platform(snowflake, tableau, databricks)
+    platform = _resolve_platform(snowflake, tableau, databricks, dbt_cloud)
 
     if json_output:
         profiles = load_platform_profiles(platform)
@@ -317,6 +345,10 @@ def list_profiles(
         sf_profiles = load_platform_profiles("snowflake")
         _list_or_exit("snowflake", sf_profiles)
         _list_snowflake(sf_profiles)
+    elif platform == "dbt-cloud":
+        dbt_profiles = load_platform_profiles("dbt-cloud")
+        _list_or_exit("dbt-cloud", dbt_profiles)
+        _list_dbt_cloud(dbt_profiles)
     else:
         _list_thoughtspot()
 
@@ -327,7 +359,7 @@ def list_profiles(
 
 @app.command("add")
 def add_cmd(
-    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau."),
+    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau, dbt-cloud."),
     name: str = typer.Option(..., help="Profile display name."),
     auth_type: str = typer.Option(..., "--auth-type", help="Auth method (token, password, key_pair, pat, oauth-m2m, databricks-cli, cli)."),
     field: Optional[list[str]] = typer.Option(None, "--field", help="Profile field as key=value. Repeatable."),
@@ -396,7 +428,7 @@ def add_cmd(
 
 @app.command("update")
 def update_cmd(
-    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau."),
+    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau, dbt-cloud."),
     name: str = typer.Option(..., help="Profile name to update."),
     field: Optional[list[str]] = typer.Option(None, "--field", help="Field to update as key=value. Repeatable."),
 ) -> None:
@@ -435,7 +467,7 @@ def update_cmd(
 
 @app.command("remove")
 def remove_cmd(
-    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau."),
+    platform: str = typer.Option(..., help="Platform: thoughtspot, snowflake, databricks, tableau, dbt-cloud."),
     name: str = typer.Option(..., help="Profile name to remove."),
 ) -> None:
     """Remove a profile and report cleanup info."""

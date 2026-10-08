@@ -67,13 +67,42 @@ def _search(client: ThoughtSpotClient, body: dict) -> list:
 
 
 def _to_descriptor(input_str: str, hit: dict, parent: Optional[dict] = None) -> SourceDescriptor:
+    header = hit.get("metadata_header") or {}
     return SourceDescriptor(
         input=input_str,
-        guid=hit.get("metadata_id") or hit.get("metadata_header", {}).get("id"),
+        guid=hit.get("metadata_id") or header.get("id"),
         type=hit.get("metadata_type") or "LOGICAL_TABLE",
-        name=hit.get("metadata_name") or hit.get("metadata_header", {}).get("name", ""),
+        name=hit.get("metadata_name") or header.get("name", ""),
         parent=parent,
+        # A LOGICAL_TABLE header's `type` is its subtype (ONE_TO_ONE_LOGICAL for a
+        # table, WORKSHEET for a Model, ...). A column header's `type` is "".
+        subtype=header.get("type") or None,
     )
+
+
+def _parent_of(desc: SourceDescriptor) -> dict:
+    return {"guid": desc.guid, "name": desc.name, "type": desc.type, "subtype": desc.subtype}
+
+
+def _resolve_column_owner(hit: dict, client: ThoughtSpotClient) -> Optional[dict]:
+    """The object a column belongs to, from the column header's `owner` GUID.
+
+    Live-verified 2026-10-02 (embed-1 staging): a LOGICAL_COLUMN header's `owner`
+    is the GUID of the table or Model holding the column, and looking that GUID
+    up says which it is. Without this a column GUID had no parent, so RLS and
+    CSR (both defined on the owning table) could not be checked.
+    """
+    owner_guid = (hit.get("metadata_header") or {}).get("owner")
+    if not owner_guid:
+        return None
+    owners = _search(client, {
+        "metadata": [{"identifier": owner_guid}],
+        "record_size": 1,
+        "include_headers": True,
+    })
+    if not owners:
+        return None
+    return _parent_of(_to_descriptor(owner_guid, owners[0]))
 
 
 def _fetch_table_columns(client: ThoughtSpotClient, table_guid: str) -> list:
@@ -101,7 +130,10 @@ def resolve_source(input_str: str, client: ThoughtSpotClient) -> SourceDescripto
         })
         if not hits:
             raise SourceUnresolvedError(input_str)
-        return _to_descriptor(input_str, hits[0])
+        desc = _to_descriptor(input_str, hits[0])
+        if desc.type == "LOGICAL_COLUMN":
+            desc.parent = _resolve_column_owner(hits[0], client)
+        return desc
 
     if kind == InputKind.FOUR_PART_NAME:
         # DB.SCH.TBL.COL — resolve the table first, then find the column.
@@ -117,7 +149,7 @@ def resolve_source(input_str: str, client: ThoughtSpotClient) -> SourceDescripto
                     guid=h.get("id"),
                     type="LOGICAL_COLUMN",
                     name=col_name,
-                    parent={"guid": table_desc.guid, "name": table_desc.name, "type": "LOGICAL_TABLE"},
+                    parent=_parent_of(table_desc),
                 )
         raise SourceUnresolvedError(input_str)
 

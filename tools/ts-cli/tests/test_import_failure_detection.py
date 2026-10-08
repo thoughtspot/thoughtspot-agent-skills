@@ -10,7 +10,10 @@ something to copy.
 """
 from __future__ import annotations
 
-from ts_cli.tml_common import format_import_failures, tml_import_failures
+from ts_cli.tml_common import (
+    IMPORTED_STATUS_CODES, format_import_failures, format_import_warnings,
+    tml_import_failures, tml_import_warnings,
+)
 
 
 def _item(index, status, message=None, code=None):
@@ -80,3 +83,47 @@ def test_all_three_import_callers_are_wired_to_the_helper():
     for module in ("alias.py", "tml.py", "security_planning.py"):
         text = (root / module).read_text(encoding="utf-8")
         assert "tml_import_failures" in text, f"{module} still trusts resp.ok alone"
+
+
+# --- WARNING is "imported, with a notice", not a failure (live-verified 2026-09-09) ---
+
+def test_a_warning_item_is_not_a_failure():
+    """Embed-1-Prod answered WARNING ("columns with misconfigured suggestion settings")
+    for a Model update that the re-export then showed had been applied. Exiting 1 with
+    "did not import" on that was the bug."""
+    notice = "The imported worksheet has columns with misconfigured suggestion settings"
+    assert tml_import_failures([_item(0, "WARNING", notice)]) == []
+    assert "WARNING" in IMPORTED_STATUS_CODES and "OK" in IMPORTED_STATUS_CODES
+
+
+def test_warnings_are_reported_separately_with_the_notice_text():
+    notice = "columns with misconfigured suggestion settings: [Tip Amount]"
+    warnings = tml_import_warnings([_item(0, "OK"), _item(1, "WARNING", notice),
+                                    _item(2, "ERROR", "boom")])
+    assert [w["request_index"] for w in warnings] == [1]
+    assert warnings[0]["status_code"] == "WARNING"
+    lines = format_import_warnings(warnings, "Imported TML")
+    assert "imported with status WARNING" in lines[0]
+    assert "created/updated" in lines[0]          # says the object DID land
+    assert lines[1] == f"  [1] {notice}"
+
+
+def test_a_mixed_response_still_fails_on_the_error_item_only():
+    result = [_item(0, "WARNING", "notice"), _item(1, "ERROR", "boom", 14502)]
+    failures = tml_import_failures(result)
+    assert [f["request_index"] for f in failures] == [1]
+
+
+def test_warning_helper_tolerates_junk_like_the_failure_helper():
+    for junk in (None, [], {"not": "a list"}, ["x", 42], [{"response": "no"}],
+                 [{"response": {"status": "no"}}], [{"response": {}}]):
+        assert tml_import_warnings(junk) == []
+
+
+def test_all_three_import_callers_surface_warnings():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "ts_cli" / "commands"
+    for module in ("alias.py", "tml.py", "security_planning.py"):
+        text = (root / module).read_text(encoding="utf-8")
+        assert "tml_import_warnings" in text, f"{module} drops WARNING notices silently"
