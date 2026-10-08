@@ -247,3 +247,12 @@ def test_var_return_stays_needs_review():
 def test_keywords_are_not_table_refs():
     from ts_cli.powerbi.functions import dax_col_refs
     assert [(t, c) for _s, _e, t, c in dax_col_refs("NOT [c] && TRUE [d] || T[e]")] == [("T", "e")]
+
+
+def test_split_args_tracks_braces():
+    """DAX writes a value set as `T[Stage] IN {"a","b"}`. Without brace tracking the
+    commas inside the set split it into arguments that are not arguments, so every
+    CALCULATE carrying an IN-set was read wrongly."""
+    from ts_cli.powerbi.functions import _split_args
+    assert _split_args('DISTINCTCOUNT(T[k]), T[Stage] IN {"Early","On Time"}') == [
+        "DISTINCTCOUNT(T[k])", 'T[Stage] IN {"Early","On Time"}']
