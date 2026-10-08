@@ -59,7 +59,6 @@ These predate the preview loop and the shared core. Entries marked *superseded* 
 | `examples/Examples/Example 1 bubble chart/` | Bubble chart, ~490 lines | `encodingTransform` plus an SVG overlay group. Muze's point-size range clamps around 50px, so the native marks are kept invisible and the bubbles are drawn into a cleared overlay — the only way to get large bubbles without leaking nodes across re-mounts |
 | `examples/Examples/Department bubble chart/` | Same shape, smaller | The same overlay pattern with a `ResizeObserver`, and a shorter read |
 | `examples/Examples/Example 2 diverging axis/` | Diverging bar, ~300 lines | *Superseded by `library/what-premium-diverging`.* Axis domain control and `encodingTransform` for a two-sided scale |
-| `examples/invoice_muze/invoice.js` | Invoice-style layout, ~510 lines | The cleanest **mode C** in the repo: `USE_SAMPLE_DATA` flag, `DataModel.loadDataSync` for the baked rows, `getDataFromSearchQuery()` for live, one render path for both |
 | `examples/funnel-chart/result/` | Funnel | Muze canvas underneath, polygons hand-drawn in SVG on top. Also the domain-mutation workaround: Muze reverses categorical domain arrays on re-mount, so pass `.slice()` and re-config every mount |
 
 Every Muze example here is a `viz.muze` chart, not a Muze Studio script — the canvas is
