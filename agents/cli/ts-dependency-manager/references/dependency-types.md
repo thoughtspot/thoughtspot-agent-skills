@@ -179,14 +179,14 @@ Change:   Remove column "Customer Zipcode"  (DM_CUSTOMER_BIRD::ZIPCODE)
 
 | Risk | Type  | Name                  | GUID         | Owner          | Action                          |
 |------|-------|-----------------------|--------------|----------------|---------------------------------|
-| HIGH | VIEW  | TEST_DEPENDENCY_VIEW  | 91dd9901-... | damian.waldron | REMOVE_COLUMN                   |
+| HIGH | VIEW  | TEST_DEPENDENCY_VIEW  | 91dd9901-... | example.user   | REMOVE_COLUMN                   |
 
 ### Answers / Liveboards
 
 | Risk   | Type      | Name                       | GUID         | Owner          | Action                          |
 |--------|-----------|----------------------------|--------------|----------------|---------------------------------|
-| HIGH   | LIVEBOARD | TEST_DEPENDENCY_LIVEBOARD  | 2fa59781-... | damian.waldron | REMOVE_CHART (1 viz)            |
-| MEDIUM | ANSWER    | TEST_DEPENDENCY_ANSWER     | f16015e6-... | damian.waldron | REMOVE_CHART → CONVERT_TO_TABLE |
+| HIGH   | LIVEBOARD | TEST_DEPENDENCY_LIVEBOARD  | 2fa59781-... | example.user   | REMOVE_CHART (1 viz)            |
+| MEDIUM | ANSWER    | TEST_DEPENDENCY_ANSWER     | f16015e6-... | example.user   | REMOVE_CHART → CONVERT_TO_TABLE |
 
 ### Alerts (verified retrievable via Liveboard --associated)
 

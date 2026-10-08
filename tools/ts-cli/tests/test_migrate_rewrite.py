@@ -1,6 +1,6 @@
 """Unit tests for the content-rewrite transform.
 
-Shapes come from real exports on `se-thoughtspot` and `nebula-damian-alias` (2026-07-28),
+Shapes come from real exports on `se-thoughtspot` and `dev-cluster` (2026-07-28),
 not from the schema docs. Where a test looks pedantic, the docstring says what breaks in
 production without it -- and for this module the answer is usually "an object that imports
 cleanly and renders wrong", which is why the coverage gate at the bottom exists.

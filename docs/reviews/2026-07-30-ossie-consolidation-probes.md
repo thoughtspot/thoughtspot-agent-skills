@@ -1,7 +1,7 @@
 # OSSIE mapping — consolidation pass, full report
 
 **Date:** 2026-07-30 · **Branch:** `feat/ossie-consolidation` (from `main` @ `d88bdc5`)
-**Instance:** `se-thoughtspot` (`https://se-thoughtspot-cloud.thoughtspot.cloud`)
+**Instance:** `se-thoughtspot` (the SE demo cluster)
 **Probe method:** BL-170 / G7-G13 harness — `ts tml import --file X --profile se-thoughtspot
 --policy VALIDATE_ONLY`, one variable per probe, verbatim responses recorded.
 **Substrate:** Payroll Test Model `acf62370-9744-4178-a7c5-1b3ba35dc930` and its tables
@@ -243,7 +243,7 @@ Representative full response body (probe 1, `W0_control_sum` — every accepted 
 same envelope, differing only in `modified`):
 
 ```json
-[{"response": {"header": {"author_name": "damian.waldron@thoughtspot.com", "author_guid": "f7d116f1-5b6f-4113-9226-c84236bb015a", "created": 1783679059271, "metadata_type": "LOGICAL_TABLE", "owner_guid": "acf62370-9744-4178-a7c5-1b3ba35dc930", "worksheet_version": "V2", "description": "", "type": "WORKSHEET", "id_guid": "acf62370-9744-4178-a7c5-1b3ba35dc930", "is_versioning_enabled": false, "name": "Payroll Test Model", "modified_by": "f7d116f1-5b6f-4113-9226-c84236bb015a", "objId": "PayrollTestModel-acf62370", "modified": 1785383678997, "author_display_name": "Damian Waldron"}, "diff": {"columns_added": 1}, "status": {"status_code": "OK"}}, "request_index": 0}]
+[{"response": {"header": {"author_name": "user@example.com", "author_guid": "f7d116f1-5b6f-4113-9226-c84236bb015a", "created": 1783679059271, "metadata_type": "LOGICAL_TABLE", "owner_guid": "acf62370-9744-4178-a7c5-1b3ba35dc930", "worksheet_version": "V2", "description": "", "type": "WORKSHEET", "id_guid": "acf62370-9744-4178-a7c5-1b3ba35dc930", "is_versioning_enabled": false, "name": "Payroll Test Model", "modified_by": "f7d116f1-5b6f-4113-9226-c84236bb015a", "objId": "PayrollTestModel-acf62370", "modified": 1785383678997, "author_display_name": "Example User"}, "diff": {"columns_added": 1}, "status": {"status_code": "OK"}}, "request_index": 0}]
 ```
 
 Artifacts (persist, nothing deleted):

@@ -196,7 +196,7 @@ sum ( if [ORDER_FACT::ORDER_STATUS] = 'Complete' then [ORDER_FACT::NET_REVENUE] 
 LookML filtered measures sometimes check for non-null values using SQL `IS NOT NULL`.
 
 **Do NOT use `is_null()` or `isnull()` in ThoughtSpot formulas.** These functions are
-not supported on all ThoughtSpot instances (e.g. ps-internal.thoughtspot.cloud rejects
+not supported on all ThoughtSpot instances (e.g. an internal ThoughtSpot cluster rejects
 them with `Search did not find "is_null ("` errors).
 
 **Correct pattern — use `!= null` comparison:**

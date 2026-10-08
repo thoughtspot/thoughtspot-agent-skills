@@ -237,11 +237,11 @@ Cost if wrong: a small justified list to maintain if upstream restructures its t
 
 Ruling B3 - MY ERROR IN THE PLAN, blocks Tasks 3-9. The plan tells implementers to transcribe
 from ts-ossie-function-mapping.md via a relative link. That link is relative to the PLAN FILE in
-the thoughtspot-agent-skills repo; implementers work in /Users/damianwaldron/Dev/ts/ossie, where
+the thoughtspot-agent-skills repo; implementers work in ~/Dev/ts/ossie, where
 the document does not exist and never will - it is in a different repository. The implementer
 correctly reported this as blocking rather than inventing content.
 Decided: no plan change; every dispatch for Tasks 3-9 carries the ABSOLUTE path
-/Users/damianwaldron/Dev/ts/thoughtspot-agent-skills/docs/ossie/ts-ossie-function-mapping.md.
+~/Dev/ts/thoughtspot-agent-skills/docs/ossie/ts-ossie-function-mapping.md.
 Reason: the document is deliberately NOT vendored into the ossie fork - final-review finding I7
 is that it should eventually be contributed upstream, but that is a separate decision, and
 copying it in mid-plan would pre-empt it. Cost if wrong: dispatches carry one absolute path.

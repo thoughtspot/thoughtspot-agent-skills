@@ -2,7 +2,7 @@
  "run": {
   "date": "2026-10-07T01:31:03+00:00",
   "profile": "se-thoughtspot",
-  "connection": "DBX_DAMIAN",
+  "connection": "<redacted-connection>",
   "sf_profile": null,
   "warehouse": "databricks",
   "dbx_profile": "Production",

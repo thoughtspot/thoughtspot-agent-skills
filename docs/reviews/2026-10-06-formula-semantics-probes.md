@@ -1,6 +1,6 @@
 # ThoughtSpot formula semantics: live probe record, 2026-10-06
 
-**Cluster:** se-thoughtspot (`se-thoughtspot-cloud.thoughtspot.cloud`), connection `APJ_TAB` (Snowflake),
+**Cluster:** se-thoughtspot (the SE demo cluster), connection `APJ_TAB` (Snowflake),
 table `AGENT_SKILLS.IDENTIFIER_RESOLUTION_TEST.SALARY_RATES` (guid `503a5cdf-b11d-4834-b313-97ad3518dc4b`).
 
 **Method:**

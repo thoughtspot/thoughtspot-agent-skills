@@ -1,7 +1,7 @@
 # TML property census — se-thoughtspot, 2026-07-30
 
 A read-only property census of real ThoughtSpot logical-table TML on the
-`se-thoughtspot` cluster (`https://se-thoughtspot-cloud.thoughtspot.cloud`), run to
+`se-thoughtspot` cluster (the SE demo cluster), run to
 validate our schema references and OSI construct-mapping coverage against what the
 product actually emits in the wild.
 
@@ -28,7 +28,7 @@ product actually emits in the wild.
 > Everything else in §5 is new and unaddressed.
 
 Artifacts (persist for follow-up, nothing deleted):
-`/private/tmp/claude-501/-Users-damianwaldron-Dev-thoughtspot-agent-skills/83419929-bba5-40c7-8502-4d6f018c64fd/scratchpad/tml-census/`
+`<scratchpad>/tml-census/`
 — `all-logical-tables.json` (the 15,204-object search), `sample.json`, `exports/` (500
 parsed documents), `inventory.json` / `inventory.md` (raw path census), `buckets.json`
 (classification), and the five scripts (`build_sample.py`, `export_sample.py`,

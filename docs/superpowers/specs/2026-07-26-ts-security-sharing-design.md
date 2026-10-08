@@ -1,7 +1,7 @@
 # `ts share` and `ts-security-columns` — design
 
 **Date:** 2026-07-26
-**Status:** DESIGN — API surface live-verified on `nebula-damian-alias`
+**Status:** DESIGN — API surface live-verified on `<redacted-cluster>`
 **Branch:** `feat/ts-security-design`
 
 Two capabilities in the single-model multi-tenancy pattern: making objects visible to end
@@ -129,7 +129,7 @@ than surfacing a bare 403.
 
 Expected, per this section's original wording (and §1's comparison table): the platform
 refuses to define CSR on a published object. Observed instead, live-verified with real
-non-admin user sessions on `nebula-damian-alias`: a CSR rule restricting a column to a group
+non-admin user sessions on `<redacted-cluster>`: a CSR rule restricting a column to a group
 is **accepted** (`HTTP 204`) on a table published from Primary into tenant Org ORG1, and is
 **enforced in Primary**, hiding the column from an out-of-group user on both the Table and
 the Model -- but the same column stayed fully **visible** in ORG1. A CSR rule is scoped to

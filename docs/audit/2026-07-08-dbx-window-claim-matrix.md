@@ -43,9 +43,9 @@ here once created:
   2026-07-15 (i.e. "current month" = July 2026 for this run).
 - ThoughtSpot-side objects (Task 5): first attempt 2026-07-08 was **blocked** at table
   registration (see the historical BLOCKED subsections below, retained as diagnostic record);
-  resolved 2026-07-09 when the user created a dedicated scratch connection **`DBX_DAMIAN`**
+  resolved 2026-07-09 when the user created a dedicated scratch connection **`<redacted-connection>`**
   (`b9e709c6-b951-4b50-a816-b450e6aee278`, OAUTH_WITH_SERVICE_PRINCIPAL, host
-  `dbc-3472b2da-8a4e.cloud.databricks.com`, warehouse `c6ed539a60038b93` — same
+  `your-workspace.cloud.databricks.com`, warehouse `{warehouse_id}` — same
   workspace + warehouse as Tasks 3–4 — exposing catalog `agent_skills`). Objects created
   2026-07-09, recorded here **for Task 9's cleanup** (`ts metadata delete` targets):
   - Table `PR1_ROLLING_FIXTURE` — `362a3f19-65df-41ac-ad27-432e7c66df10`
@@ -53,7 +53,7 @@ here once created:
   - Model `PR1_Rolling_Window_Fixture` — `f7a0a352-40cf-4e68-ad7c-561f8664e5dc`
   - Model `PR1_Period_Window_Fixture` — `ae534e9e-6e67-41cb-9930-7a581d79cefe`
 
-  (The `DBX_DAMIAN` connection itself is user-created scratch infrastructure — Task 9 should
+  (The `<redacted-connection>` connection itself is user-created scratch infrastructure — Task 9 should
   ask the user whether to remove it after the four objects above are deleted. Databricks-side
   `rolling_fixture`/`period_fixture`/`rolling_mv`/`period_mv` from Tasks 3–4 still need Task 9
   cleanup as originally planned.)
@@ -62,7 +62,7 @@ here once created:
 
 - **Databricks:** `DROP SCHEMA IF EXISTS agent_skills.ts_dbx_substrate_pr1 CASCADE` executed via
   `databricks api post /api/2.0/sql/statements --profile ts-production` (warehouse
-  `c6ed539a60038b93`) — `status.state: SUCCEEDED`. Confirmed with
+  `{warehouse_id}`) — `status.state: SUCCEEDED`. Confirmed with
   `SHOW SCHEMAS IN agent_skills LIKE 'ts_dbx_substrate_pr1'` → `total_row_count: 0`. This
   removes `rolling_fixture`, `period_fixture`, `rolling_mv`, and `period_mv` in one statement.
 - **ThoughtSpot:** `ts metadata delete f7a0a352-40cf-4e68-ad7c-561f8664e5dc
@@ -70,9 +70,9 @@ here once created:
   34141c51-59f9-4025-93a2-fe8d1dcb8c1d --profile se-thoughtspot` (models before tables) →
   `{"deleted": [all 4 guids]}`. Confirmed with
   `ts metadata search --profile se-thoughtspot --name "PR1_%"` → `[]`.
-- **`DBX_DAMIAN` connection:** left in place, untouched, per instruction (useful for PR 4's
+- **`<redacted-connection>` connection:** left in place, untouched, per instruction (useful for PR 4's
   live e2e later) — confirmed still present via
-  `ts metadata search --profile se-thoughtspot --name "DBX_DAMIAN" --type CONNECTION`
+  `ts metadata search --profile se-thoughtspot --name "<redacted-connection>" --type CONNECTION`
   (`isDeleted: false`).
 
 ## Live results convention (Tasks 4–5 append)
@@ -308,10 +308,10 @@ the repo (previously only `last` was exercised, in `ts-to-databricks.md` Invento
 confirms `first` parses and collapses correctly at category grain, same as `last`. TS-side
 mapping confirmation (`first_value`) is Task 5's job — no Verdict recorded here.
 
-### C1, C3, C4, C5, C7 — TS-side attempt (Task 5, 2026-07-08) — BLOCKED (resolved 2026-07-09 via dedicated connection DBX_DAMIAN)
+### C1, C3, C4, C5, C7 — TS-side attempt (Task 5, 2026-07-08) — BLOCKED (resolved 2026-07-09 via dedicated connection `<redacted-connection>`)
 
 > **Historical record.** The blocker below was resolved on 2026-07-09: the user created a
-> dedicated scratch connection `DBX_DAMIAN` exposing `agent_skills`, sidestepping the
+> dedicated scratch connection `<redacted-connection>` exposing `agent_skills`, sidestepping the
 > `add-tables` 500 entirely (no connection-update call needed). The diagnostic is retained
 > because the `updateConnectionV2` 500 and the missing-`authenticationType` gap in
 > `ts_cli/commands/connections.py::add_tables()` are tracked as **BL-095** in
@@ -330,11 +330,11 @@ record. Details:
 DATABRICKS` returned 11 connections. None is named after this project; the host each points
 to had to be cross-checked via `ts tml export {id}` (the `connection.properties[].host`
 field) against the `Production` Databricks profile's host
-(`dbc-3472b2da-8a4e.cloud.databricks.com`, from `~/.claude/databricks-profiles.json`, the
+(`your-workspace.cloud.databricks.com`, from `~/.claude/databricks-profiles.json`, the
 same profile Tasks 3–4 used). Exactly one connection matches:
 **`dl-databricks`** (`5e7a6105-aaa6-42d7-88cd-21b62e496bd7`, `PERSONAL_ACCESS_TOKEN` auth,
 `http_path: /sql/1.0/warehouses/6a882f6a859e0002` — a different SQL warehouse than Task 3/4's
-`c6ed539a60038b93`, same workspace/metastore). This is **not an idle connection**: `ts
+`{warehouse_id}`, same workspace/metastore). This is **not an idle connection**: `ts
 connections get` / `connection/search` with `include_details: true` shows it is owned by
 `denise.lee`, last modified 2026-06-12, with several existing production tables registered
 (`dim_retapp_products`, `dim_retapp_stores`, `dl_fact_retapp_sales_current`, …) — i.e. a
@@ -348,7 +348,7 @@ the table's warehouse database must be registered on the connection first). The 
 fix, `ts connections add-tables {id}`, failed on every attempt with a generic 500:
 
 ```
-ThoughtSpot API 500 on POST https://se-thoughtspot-cloud.thoughtspot.cloud/api/rest/2.0/connections/5e7a6105-aaa6-42d7-88cd-21b62e496bd7/update
+ThoughtSpot API 500 on POST https://{se-demo-cluster}/api/rest/2.0/connections/5e7a6105-aaa6-42d7-88cd-21b62e496bd7/update
 {"error":{"message":{"debug":{"code":10000,"incident_id_guid":"...","trace_id_guid":"tracing-disabled","debug":"[null]"}}}}
 ```
 
@@ -465,7 +465,7 @@ under C6). This closes the ambiguity C6a flagged during plan research: Databrick
 current [+ offset]` is a per-row, period-relative shift, not a wall-clock-`today()` filter.
 TS-side comparison (Task 5) and the doc correction itself (Task 6) remain open.
 
-### C6/C6a — TS-side attempt (Task 5, 2026-07-08) — BLOCKED (resolved 2026-07-09 via dedicated connection DBX_DAMIAN)
+### C6/C6a — TS-side attempt (Task 5, 2026-07-08) — BLOCKED (resolved 2026-07-09 via dedicated connection `<redacted-connection>`)
 
 > **Historical record** — same resolution as the C1/C3/C4/C5/C7 BLOCKED section above. The
 > actual TS-side C6/C6a results are in `### C6/C6a — TS-side number-match (Task 5)` below.
@@ -495,7 +495,7 @@ number-match (Task 5)` below; the C6 verdict is now CORRECTED with the verified 
 
 ## TS-side number-match results (Task 5, live 2026-07-09)
 
-All queries below ran live on 2026-07-09 against `se-thoughtspot`, connection `DBX_DAMIAN`,
+All queries below ran live on 2026-07-09 against `se-thoughtspot`, connection `<redacted-connection>`,
 models `PR1_Rolling_Window_Fixture` (`f7a0a352-40cf-4e68-ad7c-561f8664e5dc`) and
 `PR1_Period_Window_Fixture` (`ae534e9e-6e67-41cb-9930-7a581d79cefe`), against the same
 Databricks fixture tables Tasks 3–4 used (`agent_skills.ts_dbx_substrate_pr1.*`).

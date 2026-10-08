@@ -114,8 +114,11 @@ def classify_all(items: list[dict], cases: list[dict], aborted: Optional[str] = 
 
 
 def _rel(p: pathlib.Path) -> str:
+    # A path outside the repo is recorded by NAME only: run records are committed to a
+    # public repo, and an absolute path carries the operator's home directory / user
+    # name (scratch dirs encode it). The file's identity is its sha256, recorded beside.
     rp = p.resolve()
-    return str(rp.relative_to(REPO)) if rp.is_relative_to(REPO) else str(p)
+    return str(rp.relative_to(REPO)) if rp.is_relative_to(REPO) else f"<outside repo>/{p.name}"
 
 
 def _write(run: dict, cases: list[dict], fixtures: dict, args, title: str) -> None:

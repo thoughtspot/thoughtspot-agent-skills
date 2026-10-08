@@ -332,7 +332,7 @@ def set_cmd(
 
     Only the columns named are touched: a column already secured and not mentioned here
     is left exactly as it was. Live-verified (2026-07-27, cluster
-    `nebula-damian-alias`): securing `PROD_NM` for one group, then `UNIT_PRICE_AMT` for
+    `dev-cluster`): securing `PROD_NM` for one group, then `UNIT_PRICE_AMT` for
     a different group in a SEPARATE `set` call, left both rules in place side by side --
     a per-column `REPLACE` is genuinely scoped, not a whole-table replace. Verified for
     REPLACE on a single table; `set` itself is otherwise unchanged. Use `clear --column`

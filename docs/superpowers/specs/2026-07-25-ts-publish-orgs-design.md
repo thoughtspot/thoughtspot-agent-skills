@@ -3,7 +3,7 @@
 **Status:** IN PROGRESS — API surface live-verified; CLI steps 1-7 shipped (ts-cli v0.100.0), skill not yet authored
 **Branch:** `wip/ts-publish-orgs`
 **Date:** 2026-07-25
-**Verification instance:** `nebula-damian-alias` (SW/DEV build, Orgs enabled: Primary + ORG1/ORG2/ORG3, Snowflake connections `APJ` and `SnowflakeConnection`). All endpoints below confirmed present and exercised live on 2026-07-25.
+**Verification instance:** `<redacted-cluster>` (SW/DEV build, Orgs enabled: Primary + ORG1/ORG2/ORG3, Snowflake connections `APJ` and `SnowflakeConnection`). All endpoints below confirmed present and exercised live on 2026-07-25.
 
 Publish Tables and Models from the Primary Org to target Orgs using ThoughtSpot's
 Orgs Publishing feature, automating the variable definition and metadata
@@ -130,7 +130,7 @@ string** (`"535312919"`), and `"Primary"`. An unknown value returns
 
 ### 2.5 Verified behaviour
 
-Everything in this section was exercised live on `nebula-damian-alias` against
+Everything in this section was exercised live on `<redacted-cluster>` against
 the `T1/T2/T3_PUBLISH` tables (APJ connection, `AGENT_SKILLS.ALIAS_TESTS`). All
 test artefacts were removed afterwards; the cluster is back to its prior state.
 
@@ -483,7 +483,7 @@ live verification (§2.5). One remains.
 | 11 | README.md, `agents/cli/SETUP.md`, `agents/PARITY.md`, `EXPECTED_DIVERGENCES` in `check_runtime_coverage.py` (CLI-only; no Snowsight analogue) | TODO |
 
 Steps 2 to 7 are shipped, unit-tested (82 new tests) and live-verified end to end
-on `nebula-damian-alias`: `export` → `resolve` → `apply --publish-to ORG1` →
+on `<redacted-cluster>`: `export` → `resolve` → `apply --publish-to ORG1` →
 `rollback` returns the cluster to its exact prior state. The whole workflow is
 drivable from the CLI today; what remains is the interactive skill on top.
 

@@ -1,7 +1,7 @@
 # End-to-end migration fixture — live verification
 
 **Date:** 2026-07-27, rewritten 2026-07-28 after the architecture change
-**Cluster:** `nebula-damian-alias` (test cluster, authorised by the repo owner)
+**Cluster:** `<redacted-cluster>` (test cluster, authorised by the repo owner)
 **Status:** fixture is **live and left in place**. The migration **completes successfully**.
 
 > **This is the verification record.** For instructions on running a migration, use
@@ -124,20 +124,20 @@ Org ids: Primary `0`, ORG1 `12750490`, ORG2 `535312919`, ORG3 `443705360`. Names
 ```bash
 ts migrate audit --source-org ORG1 --target-org ORG2 \
   --model 9917a017-443c-4cf7-be81-2958d83997c8 -o ./plan/ \
-  --source-profile nebula-damian-alias --target-profile nebula-damian-alias
+  --source-profile <redacted-profile> --target-profile <redacted-profile>
 
 # fill the two GAP_BLOCKER rows: Segment -> STRING_1, Order Date -> DATE_1
 
 ts migrate apply --source-org ORG1 --target-org ORG2 -d ./plan --dry-run \
-  --source-profile nebula-damian-alias --target-profile nebula-damian-alias
+  --source-profile <redacted-profile> --target-profile <redacted-profile>
 
 # the published table has no RLS, so this run is EXPECTED to refuse
 ts migrate apply --source-org ORG1 --target-org ORG2 -d ./plan \
-  --source-profile nebula-damian-alias --target-profile nebula-damian-alias
+  --source-profile <redacted-profile> --target-profile <redacted-profile>
 
 ts migrate apply --source-org ORG1 --target-org ORG2 -d ./plan --resume \
   --allow-unfiltered-target \
-  --source-profile nebula-damian-alias --target-profile nebula-damian-alias
+  --source-profile <redacted-profile> --target-profile <redacted-profile>
 ```
 
 The migrated Answer was deleted from ORG2 after verification, so the fixture reproduces
@@ -162,7 +162,7 @@ ts metadata delete 9917a017-443c-4cf7-be81-2958d83997c8 --type LOGICAL_TABLE --o
 ts metadata delete a9f276dd-5055-4b15-895b-18f080e37ccf --type LOGICAL_TABLE --org 12750490
 
 # ORG2 publication
-ts publish rollback -i t2_rollback.json -p nebula-damian-alias
+ts publish rollback -i t2_rollback.json -p <redacted-profile>
 ```
 
 Pre-existing objects (`T4/T5/T6_PER_ORG` in ORG1, ORG2's own content) were not touched.

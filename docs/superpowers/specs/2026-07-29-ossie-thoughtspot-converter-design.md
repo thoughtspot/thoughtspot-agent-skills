@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-29
 **Status:** Phases 1–2 complete (PR #411); upstream posting of mapping docs parked pending ThoughtSpot legal approval; Phase 3 plan pending upstream feedback on #285.
-**Owner:** Damian Waldron
+**Owner:** ThoughtSpot agent-skills maintainers
 
 ## Background
 
@@ -100,10 +100,10 @@ Three deliverables:
 
 #### Draft intro email (dev@ossie.apache.org)
 
-> **Subject:** Intro — Damian Waldron (ThoughtSpot), planning a ThoughtSpot
+> **Subject:** Intro — ThoughtSpot, planning a ThoughtSpot
 > converter contribution
 >
-> Hi all, I'm Damian Waldron, [role] at ThoughtSpot. ThoughtSpot has been
+> Hi all, I'm [name], [role] at ThoughtSpot. ThoughtSpot has been
 > involved in OSI since [context], and I'm planning to contribute a
 > bidirectional ThoughtSpot converter (ThoughtSpot Model TML ↔ Ossie),
 > following the pattern of the Databricks converter. I'll open a GitHub issue

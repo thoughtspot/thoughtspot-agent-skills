@@ -113,3 +113,37 @@ If a new skill adds credentials for a service other than ThoughtSpot or Snowflak
 2. Add a new `<service>-profiles.json` to `.gitignore` before writing any code
 3. Use a distinct credential service name prefix to avoid collisions (e.g. `"databricks-{slug}"`)
 4. Document the credential type, env var convention, and platform-specific commands in the skill's SKILL.md
+
+## Customer data and confidentiality — this repo is public
+
+Everything committed here is world-readable, and git history keeps it after a deletion.
+Examples, fixtures, test data, screenshots, worked examples, sample reports and pasted
+tool output must be **synthetic**:
+
+- **No customer names** — not in content, file names, paths, branch names, commit
+  messages or PR text. Use obviously fake names (`acme-corp`, `example-tenant`).
+- **No tenant URLs** — no links into anyone's Jira/Confluence, SharePoint/OneDrive,
+  Slack, Google Docs/Drive, or ThoughtSpot cluster. Use a placeholder such as
+  `{your-instance}.thoughtspot.cloud`. Internal ThoughtSpot clusters are named in prose
+  ("the SE demo cluster") or by profile name, never by hostname.
+- **No employee names or identifiers** — of the customer's staff or our own: no personal
+  OneDrive paths, email addresses, user names in URLs.
+- **No customer data** — no real table contents, schema names, model names, connection
+  names, dashboards or screenshots taken from a customer tenant. Recreate the *shape* of
+  the problem on synthetic data.
+- **AI-assistant output pasted from a customer tenant must be scrubbed.** Assistants cite
+  their sources as links into the tenant's own systems; a pasted answer carries those
+  citation links (and the names inside them) even when the prose looks clean. Remove
+  every citation link, then re-read for names.
+
+Enforcement: `tools/validate/check_customer_references.py` fails a commit on tenant links
+in the staged content (pre-commit hook) or in the commit message (commit-msg hook) — once
+`bash scripts/install-hooks.sh` has installed them — and every PR (CI: the whole tree,
+plus every commit's added lines and message). It cannot recognise a customer *name* on
+its own, so the rule above still applies to everything it cannot see; the PR template
+carries a checkbox for it. Maintainers can close part of that gap with an **opt-in
+private name list** kept outside the repo (`$TS_CUSTOMER_DENYLIST`, or
+`~/.config/thoughtspot-agent-skills/customer-denylist.txt`; one name per line). With no
+file it is skipped silently; a hit reports the entry number, never the name. The
+validator's docstring describes wiring it into CI from a repository secret. If something slips through, removing it from the tip is not
+enough to un-publish it — tell a maintainer, who decides whether history needs action.

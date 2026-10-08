@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-30
 **Status:** Approved, not yet implemented.
-**Owner:** Damian Waldron
+**Owner:** ThoughtSpot agent-skills maintainers
 
 ## Background
 

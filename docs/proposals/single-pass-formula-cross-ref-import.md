@@ -3,14 +3,14 @@
 # Proposal: retire the vestigial phased-import emission in `ts tableau build-model`
 
 **Repo:** `thoughtspot/thoughtspot-agent-skills`
-**Owner:** Anuj Seth
+**Owner:** ThoughtSpot agent-skills maintainers
 **Affects:** `ts tableau build-model` (GENERATE-mode file emission); shared invariant I9
 **Type:** codification / simplification (audit angle #11); conversion-consistency (#9)
-**Status:** proposal, re-baselined after Damian's review. Docs only; the code follow-up is scoped below.
+**Status:** proposal, re-baselined after the maintainer's review. Docs only; the code follow-up is scoped below.
 
 > **Correction (2026-07-15).** The first version of this doc claimed the Tableau
 > `build-model` path costs **N+1 import round-trips** and proposed collapsing them to a
-> single pass. That premise was wrong, and Damian caught it. The runtime is **already
+> single pass. That premise was wrong, and the maintainer caught it. The runtime is **already
 > single-pass** in the way that matters: it does **base + one merged formula import** (two
 > calls total), and the merged import relies on `[formula_<Name>]` id-references resolving
 > in one pass — which they do. There are no per-level round-trips at runtime to eliminate.
@@ -163,7 +163,7 @@ So phasing was deliberate and battle-tested — but it does **two separable jobs
 The one thing history does **not** settle: whether the failing refs in #110/#128 were
 **display-name** refs (which our evidence shows still fail) or **id** refs (which resolve
 single-pass). I9's original wording predates the id-ref convention, so it most likely
-describes name-refs. **Confirm with Damian:** were the Weighted Usage / CPG failures
+describes name-refs. **Confirm with the maintainers:** were the Weighted Usage / CPG failures
 name-refs? If so, retiring the phase1+ emission carries no risk — recovery stays, ordering
 moves into the single merged import that already runs.
 

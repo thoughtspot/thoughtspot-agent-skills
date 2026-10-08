@@ -22,7 +22,7 @@ namespace (A/B/C/D-prefixed, not C-prefixed) to avoid collision.
   - `window_nofilter_mv` — no global filter; covers A1's no-filter/query-time conditions, A2,
     and Battery D
   - `ratio_mv` — covers Battery B
-- ThoughtSpot connection: `DBX_DAMIAN` (`b9e709c6-b951-4b50-a816-b450e6aee278`) — reused, not
+- ThoughtSpot connection: `<redacted-connection>` (`b9e709c6-b951-4b50-a816-b450e6aee278`) — reused, not
   recreated (Task 4's job to use it)
 - ThoughtSpot objects (Task 4, created 2026-07-09 — all four are scratch; Task 7 cleans up):
   - Table `PR15_WINDOW_FIXTURE` — `2eea915d-5837-4ee9-b660-6c08fafe198b`
@@ -39,7 +39,7 @@ namespace (A/B/C/D-prefixed, not C-prefixed) to avoid collision.
 - **Cleanup (Task 7, 2026-07-09) — confirmed complete:**
   - Databricks: `DROP SCHEMA IF EXISTS agent_skills.ts_dbx_substrate_pr15 CASCADE` executed via
     `databricks api post /api/2.0/sql/statements` (profile `ts-production`, warehouse
-    `c6ed539a60038b93`) — `status.state: SUCCEEDED`. Confirmed via `SHOW SCHEMAS IN agent_skills
+    `{warehouse_id}`) — `status.state: SUCCEEDED`. Confirmed via `SHOW SCHEMAS IN agent_skills
     LIKE 'ts_dbx_substrate_pr15'`: pre-drop returned 1 row (`ts_dbx_substrate_pr15`), post-drop
     returned `total_row_count: 0`.
   - ThoughtSpot: `ts metadata delete 0fc5abc8-3205-40dd-b938-3215dc140aca
@@ -47,7 +47,7 @@ namespace (A/B/C/D-prefixed, not C-prefixed) to avoid collision.
     72d0759c-9952-4948-97df-032aafb12abc --profile se-thoughtspot` (both models before both
     tables) — response `{"deleted": [...all 4 GUIDs...]}`. Confirmed via `ts metadata search
     --profile se-thoughtspot --name "PR15_%"` → `[]`.
-  - `DBX_DAMIAN` connection (`b9e709c6-b951-4b50-a816-b450e6aee278`) confirmed still present
+  - `<redacted-connection>` connection (`b9e709c6-b951-4b50-a816-b450e6aee278`) confirmed still present
     (`ts connections get` returned connection metadata, not a 404) — **not** deleted, per the
     brief (shared scratch infrastructure for future PR-1-class work).
 
@@ -59,7 +59,7 @@ short-lived scratch:**
   `SUCCEEDED`. No Metric Views needed — A3 is a TS-side-only probe; the DBX actuals it
   compares against (A1/A2's no-filter/MV-filter/query-time-WHERE readings) were already
   recorded above and were not re-run.
-- ThoughtSpot connection: `DBX_DAMIAN` (reused, not recreated).
+- ThoughtSpot connection: `<redacted-connection>` (reused, not recreated).
 - ThoughtSpot objects (scratch, cleaned up after this probe — see Task 7-style cleanup note
   at the end of this file): Table `PR15A_WINDOW_FIXTURE` (`8e60c5c2-1622-4ff3-8f1f-58e22ae1bebd`),
   Model `PR15A_Window_Scoping` (`b4cc4f5e-b969-42d6-9bea-8c831934ede7`).
@@ -360,7 +360,7 @@ Verdict is now recorded (DIVERGENCE cross-platform: TS row-positional vs. DBX da
 
 ## TS-side number-match results (Task 4, live 2026-07-09)
 
-All queries below ran live on 2026-07-09 against `se-thoughtspot`, connection `DBX_DAMIAN`,
+All queries below ran live on 2026-07-09 against `se-thoughtspot`, connection `<redacted-connection>`,
 models `PR15_Window_Fixture` (`0fc5abc8-3205-40dd-b938-3215dc140aca`) and
 `PR15_Ratio_Fixture` (`a7730c30-1d9e-4c93-a762-98743eb0554b`), over the same
 `agent_skills.ts_dbx_substrate_pr15.*` fixture tables Task 3 used. Tables were registered via
@@ -573,9 +573,9 @@ both `ts-convert-*-databricks-mv/SKILL.md`, and `ts-to-databricks.md` (Formula 3
 **A3 cleanup (2026-07-09) — confirmed complete, second cleanup pass distinct from the Task 7
 pass recorded in the Fixture section above:**
 - Databricks: `DROP SCHEMA IF EXISTS agent_skills.ts_dbx_substrate_pr15 CASCADE` re-run
-  (profile `ts-production`, warehouse `c6ed539a60038b93`) — `status.state: SUCCEEDED`. Confirmed
+  (profile `ts-production`, warehouse `{warehouse_id}`) — `status.state: SUCCEEDED`. Confirmed
   via `SHOW SCHEMAS IN agent_skills LIKE 'ts_dbx_substrate_pr15'` → `total_row_count: 0`.
 - ThoughtSpot: `ts metadata delete b4cc4f5e-b969-42d6-9bea-8c831934ede7
   8e60c5c2-1622-4ff3-8f1f-58e22ae1bebd --profile se-thoughtspot` (model before table) —
   confirmed via `ts metadata search --profile se-thoughtspot --name "PR15A_%"` → `[]`.
-  `DBX_DAMIAN` connection left untouched (shared scratch infrastructure).
+  `<redacted-connection>` connection left untouched (shared scratch infrastructure).

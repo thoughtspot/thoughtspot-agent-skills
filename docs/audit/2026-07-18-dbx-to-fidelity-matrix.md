@@ -12,14 +12,14 @@ ledger, teardown section.
 
 ## Environment
 
-- Databricks: profile `ts-production` (oauth-m2m, host `dbc-3472b2da-8a4e.cloud.databricks.com`),
-  catalog `agent_skills`, warehouse `c6ed539a60038b93`. All statements via
+- Databricks: profile `ts-production` (oauth-m2m, host `your-workspace.cloud.databricks.com`),
+  catalog `agent_skills`, warehouse `{warehouse_id}`. All statements via
   `databricks api post /api/2.0/sql/statements --profile ts-production`.
-- ThoughtSpot: profile `se-thoughtspot`. Connection `DBX_DAMIAN`
+- ThoughtSpot: profile `se-thoughtspot`. Connection `<redacted-connection>`
   (`b9e709c6-b951-4b50-a816-b450e6aee278`, type `RDBMS_DATABRICKS`,
   `authentication_type: OAUTH_WITH_SERVICE_PRINCIPAL`) — confirmed live via `ts tml
-  export` of the connection object: `host: dbc-3472b2da-8a4e.cloud.databricks.com`,
-  `http_path: /sql/1.0/warehouses/c6ed539a60038b93` — exact match to the `ts-production`
+  export` of the connection object: `host: your-workspace.cloud.databricks.com`,
+  `http_path: /sql/1.0/warehouses/{warehouse_id}` — exact match to the `ts-production`
   Databricks profile above. **Note:** `ts connections list --profile se-thoughtspot` does
   **not** surface this connection (1755 Snowflake connections returned, zero Databricks) —
   a listing gap, not a missing connection; `ts connections get <guid>` and `ts tml export
@@ -74,7 +74,7 @@ ledger, teardown section.
 ## Statement ledger (13 of the ≤18 budget)
 
 All statements ran via `databricks api post /api/2.0/sql/statements --profile
-ts-production`, warehouse `c6ed539a60038b93`, polled to a terminal state.
+ts-production`, warehouse `{warehouse_id}`, polled to a terminal state.
 
 | # | Statement | Purpose | Result |
 |---|---|---|---|
@@ -252,7 +252,7 @@ month}]` mapping.
   595c6126-dd75-4d29-ad27-23117c46b1d2 --profile se-thoughtspot` (model before table) —
   `{"deleted": ["bc9d37e5-...", "595c6126-..."]}`. Verified via `ts metadata search
   --profile se-thoughtspot --name "%fidelity%"` → `[]` and `--name "%TS_FIDELITY%"` → `[]`.
-- `DBX_DAMIAN` connection (`b9e709c6-b951-4b50-a816-b450e6aee278`) left untouched — shared
+- `<redacted-connection>` connection (`b9e709c6-b951-4b50-a816-b450e6aee278`) left untouched — shared
   scratch infrastructure, per the brief and prior precedent (2026-07-09 matrix).
 - The new smoke test's own `--live` run creates and tears down an **independent** scratch
   schema (`smoke_ts_to_databricks_mv_fixture`); its cleanup was separately verified

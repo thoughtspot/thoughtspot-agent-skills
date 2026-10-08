@@ -110,7 +110,7 @@ def _resolve_org_id(profile: Optional[str], org: str) -> int:
 
     This resolution is MANDATORY, not a convenience. `auth/token/full` honours
     `org_id` (an int) and **silently ignores** `org_identifier` (a name), falling back
-    to the caller's default Org -- verified live 2026-07-26 on nebula-damian-alias:
+    to the caller's default Org -- verified live 2026-07-26 on dev-cluster:
     `TS_ORG=ORG1` minted a token whose `current_org` was `{id: 0, name: Primary}`.
     Passing a name straight through would therefore apply a tenant's grants in the
     Primary Org while reporting success. There is no louder failure to fall back on,

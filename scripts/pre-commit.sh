@@ -2,7 +2,8 @@
 # scripts/pre-commit.sh
 #
 # Pre-commit validation hook. Runs the full validation suite before any commit.
-# Install once with: ln -s ../../scripts/pre-commit.sh .git/hooks/pre-commit
+# Install once with: bash scripts/install-hooks.sh  (a dispatcher in the shared hooks dir
+# that runs the COMMITTING worktree's copy of this file; see BL-193)
 #
 # To skip in an emergency: git commit --no-verify (use sparingly)
 
@@ -76,9 +77,14 @@ run_check() {
   local label="$1"
   local cmd="$2"
   local t0
+  # Split the command into an argv ARRAY rather than relying on unquoted expansion.
+  # Commands pass `--root .` (this script cd's to the repo root above), so no element
+  # contains a space even when the repo path does.
+  local -a args
+  read -r -a args <<< "$cmd"
   printf "  %-30s " "$label"
   t0=$(_now_ms)
-  if output=$("$PYTHON_BIN" $cmd 2>&1); then
+  if output=$("$PYTHON_BIN" "${args[@]}" 2>&1); then
     printf "PASS "
     _record_duration "$label" "$t0"
   else
@@ -90,31 +96,36 @@ run_check() {
 }
 
 # Always run these — they're fast and catch the most common mistakes
-run_check "secrets"              "tools/validate/check_secrets.py --root $REPO_ROOT"
+run_check "secrets"              "tools/validate/check_secrets.py --root ."
+# Customer references — links into a tenant's internal systems (SharePoint/OneDrive,
+# Atlassian, Slack, Google Docs/Drive, ThoughtSpot cluster hosts). The repo is public,
+# and an example file can land anywhere, so this scans every staged text file rather
+# than a path pattern. CI re-runs it over the whole tree with --all.
+run_check "customer references"  "tools/validate/check_customer_references.py --root ."
 # check_references.py runs unconditionally (not gated to a staged-file pattern) — it
 # already fires on every commit, which is a superset of "fires when a SKILL.md,
 # references/*.md, or docs/**/*.md changes" (audit finding 1.4 extended its scope to
 # those file classes; the existing unconditional trigger already covers them).
-run_check "reference paths"      "tools/validate/check_references.py --root $REPO_ROOT"
-run_check "anti-patterns"        "tools/validate/check_patterns.py --root $REPO_ROOT --staged"
-run_check "version sync"         "tools/validate/check_version_sync.py --root $REPO_ROOT"
+run_check "reference paths"      "tools/validate/check_references.py --root ."
+run_check "anti-patterns"        "tools/validate/check_patterns.py --root . --staged"
+run_check "version sync"         "tools/validate/check_version_sync.py --root ."
 # Repo hygiene — tracked-but-gitignored files + unexpected top-level tracked files
 # (audit findings 1.1/1.2). Cheap (two `git ls-files` calls over the whole tree, not
 # diff-based), so it runs unconditionally like secrets/references above rather than
 # being gated to a staged-file pattern.
-run_check "repo hygiene"         "tools/validate/check_repo_hygiene.py --root $REPO_ROOT"
+run_check "repo hygiene"         "tools/validate/check_repo_hygiene.py --root ."
 
 # Backlog integrity — duplicate BL ids, dangling BL citations, conflict markers.
 # Runs unconditionally rather than gated to a staged-file pattern: rules 2 and 3
 # are whole-tree queries (`git grep` / `git ls-files`), and the failure it exists
 # to catch arrives via a MERGE, where the staged set is not a reliable signal.
-run_check "backlog integrity"    "tools/validate/check_backlog_integrity.py --root $REPO_ROOT"
+run_check "backlog integrity"    "tools/validate/check_backlog_integrity.py --root ."
 
 # The audit workflow can only run unattended if every tool it tells a finder to use is
 # pre-approved (finding 18.1 — a 14-agent sweep stopped on one prompt per agent). Gated on
 # either file, since the invariant couples the workflow to the allow-list.
 if echo "$STAGED" | grep -qE '^(\.claude/(workflows/repo-audit\.js|settings\.json)|tools/validate/check_audit_workflow_permissions\.py)$'; then
-  run_check "audit workflow perms" "tools/validate/check_audit_workflow_permissions.py --root $REPO_ROOT"
+  run_check "audit workflow perms" "tools/validate/check_audit_workflow_permissions.py --root ."
 fi
 
 # The aggregate CI gate must cover every pull-request job. Gated on the workflow being
@@ -124,36 +135,36 @@ fi
 # The checker's own path is in the trigger too: editing a gate must re-run it, or a broken
 # gate lands green locally and only CI (which runs both unconditionally) catches it.
 if echo "$STAGED" | grep -qE '^(\.github/workflows/validate\.yml|tools/validate/check_ci_gate_coverage\.py)$'; then
-  run_check "CI gate coverage"   "tools/validate/check_ci_gate_coverage.py --root $REPO_ROOT"
+  run_check "CI gate coverage"   "tools/validate/check_ci_gate_coverage.py --root ."
 fi
 
 # Complexity ratchet on staged Python (soft-skips if radon isn't installed locally;
 # enforced fully in CI). Blocks new/worsening god-functions; legacy is baselined.
 if echo "$STAGED" | grep -q '\.py$'; then
-  run_check "module health"      "tools/validate/check_module_health.py --root $REPO_ROOT --staged"
+  run_check "module health"      "tools/validate/check_module_health.py --root . --staged"
 fi
 
 # Duplicate module-level bindings on staged Python. Python keeps the LAST binding
 # silently, and two branches adding the same name in different hunks merge clean —
 # see the module docstring for the audit-check case this was built from.
 if echo "$STAGED" | grep -q '\.py$'; then
-  run_check "py redefinitions"   "tools/validate/check_python_redefinitions.py --root $REPO_ROOT --staged"
+  run_check "py redefinitions"   "tools/validate/check_python_redefinitions.py --root . --staged"
 fi
 
 # Line-count gate on staged ts_cli modules (BL-070) — warn >500, fail >1000.
 # Complements the complexity ratchet: long-but-simple files slip past radon.
 if echo "$STAGED" | grep -q '^tools/ts-cli/ts_cli/.*\.py$'; then
-  run_check "file size"          "tools/validate/check_file_size.py --root $REPO_ROOT --staged"
+  run_check "file size"          "tools/validate/check_file_size.py --root . --staged"
 fi
 
 # Only run YAML check if .md files are staged — checks staged files only, not full repo
 if echo "$STAGED" | grep -q '\.md$'; then
-  run_check "YAML blocks"        "tools/validate/check_yaml.py --root $REPO_ROOT --staged"
+  run_check "YAML blocks"        "tools/validate/check_yaml.py --root . --staged"
 fi
 
 # Snowflake SV YAML structural validator — runs when schema or worked-example .md files are staged
 if echo "$STAGED" | grep -qE '(snowflake-schema|ts-to-snowflake|\.yaml$|\.yml$)'; then
-  run_check "SV YAML structure"  "tools/validate/check_sv_yaml.py --root $REPO_ROOT --staged"
+  run_check "SV YAML structure"  "tools/validate/check_sv_yaml.py --root . --staged"
 fi
 
 # ThoughtSpot TML structural validator — fire on ANY staged .md file.
@@ -161,48 +172,48 @@ fi
 # templates, partial snippets, worksheets, and non-TML YAML. Narrow filename triggers
 # previously meant TML edits in other docs went unchecked.
 if echo "$STAGED" | grep -qE '\.md$'; then
-  run_check "TML structure"      "tools/validate/check_tml.py --root $REPO_ROOT --staged"
+  run_check "TML structure"      "tools/validate/check_tml.py --root . --staged"
 fi
 
 # Open-items tracking — warn only (don't block commits on pre-existing UNTESTED items)
 if echo "$STAGED" | grep -q 'open-items\.md'; then
-  run_check "open items"         "tools/validate/check_open_items.py --root $REPO_ROOT --warn"
-  run_check "open items index"   "tools/validate/generate_open_items_index.py --root $REPO_ROOT --check"
+  run_check "open items"         "tools/validate/check_open_items.py --root . --warn"
+  run_check "open items index"   "tools/validate/generate_open_items_index.py --root . --check"
 fi
 
 # Cross-file consistency — runs when agents/, README.md, or SETUP.md are touched
 # Ensures README skills table, SETUP.md symlink/stage steps stay in sync with repo structure
 if echo "$STAGED" | grep -qE '(^agents/|README\.md|SETUP\.md)'; then
-  run_check "consistency"        "tools/validate/check_consistency.py --root $REPO_ROOT --staged"
+  run_check "consistency"        "tools/validate/check_consistency.py --root . --staged"
 fi
 
 # Skill versioning — runs when any SKILL.md is touched
 # Step 1: interactively suggest a changelog entry if one is missing (TTY only)
 # Step 2: validate that every staged skill has a changelog entry
 if echo "$STAGED" | grep -q 'SKILL\.md'; then
-  "$PYTHON_BIN" tools/validate/suggest_skill_version.py --root $REPO_ROOT
-  run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
+  "$PYTHON_BIN" tools/validate/suggest_skill_version.py --root "$REPO_ROOT"
+  run_check "skill versions"     "tools/validate/check_skill_versions.py --root ."
 fi
 
 # Skill context cost — a SKILL.md is loaded into context on every invocation;
 # gate its estimated-token size (warn >12k, fail >25k — BL-128 extraction is
 # the remedy). Runs when a SKILL.md or the validator itself is touched.
 if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|tools/validate/check_skill_context_cost\.py)'; then
-  run_check "skill context cost" "tools/validate/check_skill_context_cost.py --root $REPO_ROOT --staged"
+  run_check "skill context cost" "tools/validate/check_skill_context_cost.py --root . --staged"
 fi
 
 # Smoke tests — every Claude skill (not on the allowlist) must have a smoke test,
 # and non-credential ALLOWLIST exemptions must cite a BL-NNN (audit 6.3).
 # Runs when a SKILL.md, a smoke test, or the validator itself is touched.
 if echo "$STAGED" | grep -qE '(agents/(cli|claude)/.*/SKILL\.md|tools/smoke-tests/|tools/validate/check_smoke_tests\.py)'; then
-  run_check "smoke tests"        "tools/validate/check_smoke_tests.py --root $REPO_ROOT --staged"
+  run_check "smoke tests"        "tools/validate/check_smoke_tests.py --root . --staged"
 fi
 
 # Skill naming — every skill across all runtimes (Claude / CoCo) must
 # match a documented family pattern (see .claude/rules/skill-naming.md).
 # Runs when a SKILL.md, the rule itself, or the validator is added/renamed.
 if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|\.claude/rules/skill-naming\.md|tools/validate/check_skill_naming\.py)'; then
-  run_check "skill naming"       "tools/validate/check_skill_naming.py --root $REPO_ROOT"
+  run_check "skill naming"       "tools/validate/check_skill_naming.py --root ."
 fi
 
 # Runtime coverage — CoCo's divergences are documented in EXPECTED_DIVERGENCES
@@ -210,7 +221,7 @@ fi
 # Runs whenever a skill file is added or renamed in any runtime, or when the
 # rule/validator itself changes.
 if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|\.claude/rules/runtime-coverage\.md|tools/validate/check_runtime_coverage\.py)'; then
-  run_check "runtime coverage"   "tools/validate/check_runtime_coverage.py --root $REPO_ROOT"
+  run_check "runtime coverage"   "tools/validate/check_runtime_coverage.py --root ."
 fi
 
 # Parity matrix — generated from the filesystem, must match committed PARITY.md
@@ -228,7 +239,7 @@ fi
 # Coverage matrix — every ts-convert-* skill must have references/coverage-matrix.md
 # Runs when a converter skill is touched or the validator itself changes
 if echo "$STAGED" | grep -qE '(agents/cli/ts-convert-|tools/validate/check_coverage_matrix\.py)'; then
-  run_check "coverage matrix"     "tools/validate/check_coverage_matrix.py --root $REPO_ROOT"
+  run_check "coverage matrix"     "tools/validate/check_coverage_matrix.py --root ."
 fi
 
 # Harness routing (18.4) — no Haiku pin on a delegated agent, and any `model:` pin
@@ -238,7 +249,7 @@ fi
 # harness config at all before this; that is how a stale `model: haiku` pin sat in
 # the tree contradicting the rule until a manual sweep found it.
 if echo "$STAGED" | grep -qE '(\.claude/agents/|\.claude/rules/model-routing\.md|tools/validate/check_harness_routing\.py)'; then
-  run_check "harness routing"      "tools/validate/check_harness_routing.py --root $REPO_ROOT"
+  run_check "harness routing"      "tools/validate/check_harness_routing.py --root ."
 fi
 
 # Converter parity (BL-217) — a converter must not emit a ThoughtSpot function that
@@ -246,13 +257,13 @@ fi
 # package, any converter skill, or the validator itself is touched. Scope is
 # discovered from agents/cli/ts-convert-*, so a NEW converter is covered with no edit.
 if echo "$STAGED" | grep -qE '(agents/cli/ts-convert-|tools/ts-cli/ts_cli/|tools/validate/check_converter_parity\.py)'; then
-  run_check "converter parity"    "tools/validate/check_converter_parity.py --root $REPO_ROOT"
+  run_check "converter parity"    "tools/validate/check_converter_parity.py --root ."
 fi
 
 # Formula catalog cross-check — mapping files must only reference valid TS functions
 # from thoughtspot-formula-patterns.md. Runs when any mapping or the catalog is touched.
 if echo "$STAGED" | grep -qE 'agents/shared/(mappings/|schemas/thoughtspot-formula-patterns\.md)'; then
-  run_check "formula catalog"     "tools/validate/check_formula_catalog.py --root $REPO_ROOT"
+  run_check "formula catalog"     "tools/validate/check_formula_catalog.py --root ."
 fi
 
 # Mapping/code sync — the mapping doc and its Python translator are two hand-kept
@@ -264,14 +275,14 @@ fi
 # the translator Python, the mapping docs, the catalog itself, a converter skill (scope
 # is discovered from agents/cli/ts-convert-*), or this validator.
 if echo "$STAGED" | grep -qE '(tools/ts-cli/ts_cli/|agents/shared/(mappings/|schemas/thoughtspot-formula-patterns\.md)|agents/cli/ts-convert-|docs/function-maps/ts-(excel|sheets)-function-mapping\.md|tools/validate/check_mapping_code_sync\.py)'; then
-  run_check "mapping/code sync"   "tools/validate/check_mapping_code_sync.py --root $REPO_ROOT"
+  run_check "mapping/code sync"   "tools/validate/check_mapping_code_sync.py --root ."
 fi
 
 # No v1 endpoints — the repo is v1-free (.claude/rules/ts-cli.md). Guard against a
 # new /tspublic/v1/ call slipping into the CLI or Databricks client. Runs when any
 # Python source under tools/ or agents/ is staged, or the validator itself changes.
 if echo "$STAGED" | grep -qE '(^(tools|agents|scripts)/.*\.py$|tools/validate/check_no_v1_endpoints\.py)'; then
-  run_check "no v1 endpoints"     "tools/validate/check_no_v1_endpoints.py --root $REPO_ROOT"
+  run_check "no v1 endpoints"     "tools/validate/check_no_v1_endpoints.py --root ."
 fi
 
 # Internal imports — every `from ts_cli.X import Y` in tools/ts-cli/ts_cli/ must
@@ -280,18 +291,18 @@ fi
 # use, invisible to import-time checks and every existing test). Runs when ts_cli
 # Python source or the validator itself changes.
 if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/.*\.py$|tools/validate/check_internal_imports\.py)'; then
-  run_check "internal imports"   "tools/validate/check_internal_imports.py --root $REPO_ROOT"
+  run_check "internal imports"   "tools/validate/check_internal_imports.py --root ."
 fi
 
 # No inline TML-invariant gate — CLI convert skills must gate imports with `ts tml lint`,
 # not a hand-rolled grep gate (.claude/rules/ts-cli.md; audit angle 11). Runs when a
 # convert skill or the validator changes.
 if echo "$STAGED" | grep -qE '\.(md|py)$'; then
-  run_check "lint invariant list" "tools/validate/check_lint_invariant_list.py --root $REPO_ROOT"
+  run_check "lint invariant list" "tools/validate/check_lint_invariant_list.py --root ."
 fi
 
 if echo "$STAGED" | grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validate/check_no_inline_tml_gate\.py)'; then
-  run_check "no inline tml gate" "tools/validate/check_no_inline_tml_gate.py --root $REPO_ROOT"
+  run_check "no inline tml gate" "tools/validate/check_no_inline_tml_gate.py --root ."
 fi
 
 # I7 untranslatable gate — every conversion skill must tell the model to open its
@@ -299,42 +310,42 @@ fi
 # BOTH runtimes (CoCo executes the doc, so the gate matters there too). Runs when any
 # convert skill or the validator changes.
 if echo "$STAGED" | grep -qE '(^agents/(cli|coco-snowsight)/ts-convert-.*/SKILL\.md|tools/validate/check_i7_gate\.py)'; then
-  run_check "i7 gate"            "tools/validate/check_i7_gate.py --root $REPO_ROOT"
+  run_check "i7 gate"            "tools/validate/check_i7_gate.py --root ."
 fi
 
 # Open-item citations must resolve. `check_open_items` grades the items; nothing
 # resolved a REFERENCE to one, so a citation could name an item that never existed
 # and stay silent (audit 5.3: five such citations in ts-dependency-manager alone).
 if echo "$STAGED" | grep -qE '(^agents/.*\.(md|py)$|tools/validate/check_open_item_citations\.py)'; then
-  run_check "open-item citations" "tools/validate/check_open_item_citations.py --root $REPO_ROOT"
+  run_check "open-item citations" "tools/validate/check_open_item_citations.py --root ."
 fi
 
 # No inline Python TML assembly — CLI convert skills must use `ts tableau build-model`,
 # not hand-rolled Python heredocs for formula import. Runs when a convert skill or the
 # validator changes.
 if echo "$STAGED" | grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validate/check_skill_cli_usage\.py)'; then
-  run_check "no inline tml assembly" "tools/validate/check_skill_cli_usage.py --root $REPO_ROOT"
+  run_check "no inline tml assembly" "tools/validate/check_skill_cli_usage.py --root ."
 fi
 
 # No inline requests/urllib — Claude skills use the `ts` CLI, never direct
 # requests/urllib calls to a ThoughtSpot endpoint (.claude/rules/ts-cli.md; audit
 # finding 5.2). Runs when a CLI/Claude SKILL.md or the validator changes.
 if echo "$STAGED" | grep -qE '(^agents/(cli|claude)/.*\.(md|py)$|tools/validate/check_no_inline_requests\.py)'; then
-  run_check "no inline requests" "tools/validate/check_no_inline_requests.py --root $REPO_ROOT"
+  run_check "no inline requests" "tools/validate/check_no_inline_requests.py --root ."
 fi
 
 # Pagination convention — ts-cli.md promises auto-pagination on every search-style
 # command; guard against a new hard-capped record_size literal slipping back in
 # (audit finding 14.2). Runs when ts_cli Python source or the validator changes.
 if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/.*\.py$|tools/validate/check_pagination_convention\.py)'; then
-  run_check "pagination convention" "tools/validate/check_pagination_convention.py --root $REPO_ROOT"
+  run_check "pagination convention" "tools/validate/check_pagination_convention.py --root ."
 fi
 
 # Slash-command references — every /ts-<skill> mention in agents/ docs must resolve
 # to a real skill directory, or be an explicitly justified planned-skill allowlist
 # entry (audit finding 1.1). Runs when any doc under agents/ or the validator changes.
 if echo "$STAGED" | grep -qE '(^agents/.*\.md$|tools/validate/check_slash_command_refs\.py)'; then
-  run_check "slash-command refs" "tools/validate/check_slash_command_refs.py --root $REPO_ROOT"
+  run_check "slash-command refs" "tools/validate/check_slash_command_refs.py --root ."
 fi
 
 # Orphan reference files — every agents/{cli,claude,coco-snowsight}/**/references/*.md
@@ -343,7 +354,7 @@ fi
 # that lingered "pending implementation" long after Mode C shipped). Runs when any
 # references/*.md file or the validator itself changes.
 if echo "$STAGED" | grep -qE '(^agents/.*references/.*\.md$|tools/validate/check_orphan_references\.py)'; then
-  run_check "orphan refs" "tools/validate/check_orphan_references.py --root $REPO_ROOT"
+  run_check "orphan refs" "tools/validate/check_orphan_references.py --root ."
 fi
 
 # SKILL.md flag cross-check — every `ts <group> <command> --<flag>` a SKILL.md
@@ -351,7 +362,7 @@ fi
 # SKILL.md, a ts_cli command module, or the validator changes — a flag rename in
 # ts_cli with no matching doc update is exactly the bug class this closes.
 if echo "$STAGED" | grep -qE '(^agents/(cli|claude)/.*/SKILL\.md|^tools/ts-cli/ts_cli/commands/.*\.py$|tools/validate/check_skill_flag_usage\.py)'; then
-  run_check "flag cross-check" "tools/validate/check_skill_flag_usage.py --root $REPO_ROOT"
+  run_check "flag cross-check" "tools/validate/check_skill_flag_usage.py --root ."
 fi
 
 # Currency anchors — SOFT nudge here (prints missing + stale anchors, never blocks the
@@ -365,7 +376,7 @@ fi
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
 if echo "$STAGED" | grep -qE '^agents/cli/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then
-  "$PYTHON_BIN" tools/validate/suggest_dependency_types.py --root $REPO_ROOT
+  "$PYTHON_BIN" tools/validate/suggest_dependency_types.py --root "$REPO_ROOT"
 fi
 
 # Repo changelog — for significant staged changes (new skills, ts-cli bumps, new shared
@@ -373,8 +384,8 @@ fi
 #   1. interactively suggest + auto-insert an entry (TTY only)
 #   2. GATE — fail the commit if no same-day CHANGELOG.md entry exists. Runs in non-TTY too
 #      (CI / agent-driven commits), so the entry can't be silently skipped.
-"$PYTHON_BIN" tools/validate/suggest_repo_changelog.py --root $REPO_ROOT
-run_check "repo changelog"     "tools/validate/suggest_repo_changelog.py --root $REPO_ROOT --check"
+"$PYTHON_BIN" tools/validate/suggest_repo_changelog.py --root "$REPO_ROOT"
+run_check "repo changelog"     "tools/validate/suggest_repo_changelog.py --root . --check"
 
 # Audit freshness — SOFT nudge (never blocks, silent unless due) when an external
 # sweep or a full audit is due by time or by accumulated work (.claude/rules/repo-audit.md).
@@ -383,7 +394,7 @@ run_check "repo changelog"     "tools/validate/suggest_repo_changelog.py --root 
 # Quality gates catalog — re-generated from pre-commit.sh + validate.yml +
 # validator docstrings. Staleness check when any source of truth changes.
 if echo "$STAGED" | grep -qE '(^scripts/pre-commit\.sh$|^\.github/workflows/validate\.yml$|^tools/validate/.*\.py$|^docs/quality-gates\.md$)'; then
-  run_check "quality gates catalog" "tools/validate/generate_quality_gates.py --root $REPO_ROOT --check"
+  run_check "quality gates catalog" "tools/validate/generate_quality_gates.py --root . --check"
 fi
 
 # Only run unit tests if Python source files are staged.

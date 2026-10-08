@@ -1,7 +1,7 @@
 # Physical binding and connection scope — resolving spike findings §1 and §3
 
 **Date:** 2026-07-27
-**Cluster:** `nebula-damian-alias` (test cluster, authorised by the repo owner)
+**Cluster:** `<redacted-cluster>` (test cluster, authorised by the repo owner)
 **Follows:** [`2026-07-27-ts-migrate-batch-import-spike.md`](2026-07-27-ts-migrate-batch-import-spike.md)
 **Baseline:** captured, restored, diff proven (§6).
 

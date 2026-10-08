@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-02
 **Status:** Approved, not yet implemented.
-**Owner:** Damian Waldron
+**Owner:** ThoughtSpot agent-skills maintainers
 
 ## Background
 
@@ -118,7 +118,7 @@ Verified live on 2026-09-02:
 | Snowflake profile | `ThoughtSpot Partner (AP)` — python connector, key pair |
 | Role / warehouse | `SE_ROLE` / `SE_DEMO_WH` |
 | Privilege | `SE_ROLE` holds **OWNERSHIP on DATABASE `AGENT_SKILLS`**; `CREATE SEMANTIC VIEW` is a live grant on the account (`SKILLS.PUBLIC`) |
-| ThoughtSpot | profile `se-thoughtspot`, `https://se-thoughtspot-cloud.thoughtspot.cloud` |
+| ThoughtSpot | profile `se-thoughtspot` (the SE demo cluster) |
 | `ts` CLI | 0.135.0, installed via `uv tool install --force -e tools/ts-cli --with snowflake-connector-python` |
 
 Note: `ts auth whoami` returns 404 (code 13003) against `/api/rest/2.0/auth/session/user`
@@ -296,7 +296,7 @@ New backlog ids start at **BL-231** (`docs/backlog.md` ends at BL-229; BL-230 is
 on branch `docs/bl-230-ascii-identifiers`). Per the CLAUDE.md resolution rule, re-check
 the highest id at PR time rather than trusting this number.
 
-Work happens in the worktree `/Users/damianwaldron/Dev/ts/wt-sv-roundtrip` on branch
+Work happens in the worktree `~/Dev/ts/wt-sv-roundtrip` on branch
 `feat/sv-patterns-roundtrip-fidelity`.
 
 ## Risks

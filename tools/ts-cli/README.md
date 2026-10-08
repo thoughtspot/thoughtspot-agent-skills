@@ -60,7 +60,7 @@ ts profiles list --snowflake --json
 **Output (table):**
 
 ```
-  champ-staging         token         https://champagne-master-aws.thoughtspotstaging.cloud
+  my-staging            token         https://{your-instance}.thoughtspot.cloud
 ```
 
 **Output (`--json`):** JSON array with credential fields stripped.
@@ -140,8 +140,8 @@ ts auth whoami --profile champ-staging
 ```json
 {
   "id": "f6336c00-1b9f-4119-a2be-79747234e19d",
-  "name": "damian.waldron@thoughtspot.com",
-  "display_name": "damian.waldron",
+  "name": "user@example.com",
+  "display_name": "example.user",
   "account_status": "ACTIVE",
   "privileges": ["ADMINISTRATION", "AUTHORING", "DEVELOPER", ...],
   ...
@@ -245,7 +245,7 @@ unless `--limit` is given.
       "name": "Retail Sales WS",
       "type": "WORKSHEET",
       "author": "64a0ea53-097d-4682-a34e-e7ad39c35506",
-      "authorName": "nicolas.rentz@thoughtspot.com",
+      "authorName": "user@example.com",
       "created": 1717202157272,
       "modified": 1717202210581,
       ...
@@ -312,7 +312,7 @@ ts metadata dependents abc-123 --raw
     "type": "LOGICAL_TABLE",
     "raw_bucket": "LOGICAL_TABLE",
     "author_id": "f6336c00-1b9f-4119-a2be-79747234e19d",
-    "author_display_name": "damian.waldron"
+    "author_display_name": "example.user"
   },
   {
     "source_guid": "32c062cb-...",
@@ -1709,7 +1709,7 @@ and reality diverge at a known point. Re-running a REPLACE plan is safe -- it co
 
 **Only the columns named are touched.** A column already secured and not mentioned in a
 manifest, or in a `set` call, is left exactly as it was. **Live-verified** (2026-07-27,
-cluster `nebula-damian-alias`): securing one column for one group, then a separate column
+cluster `dev-cluster`): securing one column for one group, then a separate column
 for a different group in a second `set` call, left both rules in place side by side -- a
 per-column `REPLACE` is genuinely scoped to that column, not a whole-table replace.
 Verified for REPLACE on a single table; `set` itself is unchanged.

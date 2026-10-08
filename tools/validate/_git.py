@@ -95,6 +95,57 @@ def git_text(args: Sequence[str], repo_root: Path) -> str:
     return result.stdout
 
 
+def git_bytes(args: Sequence[str], repo_root: Path) -> bytes:
+    """Run ``git <args>`` and return raw stdout BYTES, failing loudly.
+
+    For content that may not be UTF-8 (staged blobs, ``log -p`` over arbitrary files):
+    :func:`git_text` decodes strictly and would crash on the first non-UTF-8 byte. Same
+    fail-loud contract otherwise.
+    """
+    try:
+        result = subprocess.run(["git", *args], capture_output=True, cwd=repo_root, check=True)
+    except FileNotFoundError as exc:
+        raise GitEnumerationError(f"git not found: {exc}") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = " ".join((exc.stderr or b"").decode("utf-8", "replace").split())[:200]
+        raise GitEnumerationError(
+            f"git {' '.join(args)} failed in {repo_root} "
+            f"(exit {exc.returncode}): {detail}"
+        ) from exc
+    return result.stdout
+
+
+def git_config_get(key: str, repo_root: Path) -> "str | None":
+    """``git config --get <key>``, or None when the key is unset (git exits 1).
+
+    Any other failure (no git, not a repository, a malformed config) also returns None:
+    callers use it for optional settings with a documented default.
+    """
+    try:
+        result = subprocess.run(["git", "config", "--get", key], capture_output=True,
+                                text=True, cwd=repo_root)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    return result.stdout.rstrip("\n") if result.returncode == 0 else None
+
+
+def staged_relpaths(repo_root: Path, *, diff_filter: str = "ACMRT") -> List[str]:
+    """Repo-relative staged paths, NOT filtered by existence on disk.
+
+    For content gates that read the INDEX (:func:`staged_blob`), which is what is
+    committed: a file staged and then deleted or edited on disk still commits its
+    staged content, so the working-tree view of :func:`staged_files` would miss it.
+    Includes renames (``R``) and type changes (``T``, e.g. a symlink replaced by a
+    regular file) by default — both are otherwise invisible to an ``ACM`` filter.
+    """
+    return git_paths(["diff", "--cached", "--name-only", f"--diff-filter={diff_filter}"], repo_root)
+
+
+def staged_blob(repo_root: Path, rel_path: str) -> bytes:
+    """The STAGED content of ``rel_path`` (``git show :<path>``)."""
+    return git_bytes(["show", f":{rel_path}"], repo_root)
+
+
 def staged_files(repo_root: Path, *, diff_filter: str = "ACM") -> List[Path]:
     """Absolute paths of staged added/copied/modified files that exist on disk.
 

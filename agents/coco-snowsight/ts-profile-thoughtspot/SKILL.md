@@ -278,7 +278,7 @@ SELECT '{profile_name}', '{base_url}', '{username}', 'password', '{secret_name}'
 
 ### Step A7: Set up External Access Integration
 
-Extract the hostname from `{base_url}` (e.g. `champagne-master-aws.thoughtspotstaging.cloud`).
+Extract the hostname from `{base_url}` (e.g. `{your-instance}.thoughtspot.cloud`).
 
 **Create or update the network rule:**
 
@@ -622,4 +622,5 @@ WHERE p.name = '{profile_name}';
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-10-08 | Hostname example uses a `{your-instance}` placeholder instead of an internal cluster host |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

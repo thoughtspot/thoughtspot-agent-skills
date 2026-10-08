@@ -363,7 +363,7 @@ choice; (b) cross-measure ratio inlining × grain — ratio-of-sums divergence w
 query grain differs from the MV grain; (c) global `filter:` × window ordering — filter
 applied before or after window computation, both platforms; (d) semi-additive ×
 date-range filters — last-in-data vs last-in-filtered-range. Method and assets reuse
-PR 1's (deterministic fixtures, claim matrix, DBX_DAMIAN connection, searchdata
+PR 1's (deterministic fixtures, claim matrix, `<redacted-connection>` connection, searchdata
 workaround). *Acceptance:* each of the four constructs carries a discriminating
 live-verified verdict (or dated PENDING + blocker) in a claim matrix; corrections
 applied to mapping docs/worked examples with the same citation discipline as PR 1;

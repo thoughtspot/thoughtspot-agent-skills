@@ -204,7 +204,7 @@ def _resolve_table_guids(
     Connection-scoped: filters exact-name matches to those whose
     ``metadata_header.dataSourceName`` equals `connection` (live finding,
     BL-063 PR4, 2026-07-10, se-thoughtspot — DM_ORDER_DETAIL had 3 exact-name
-    matches across connections (Power, APJ_BIRD, DBX_DAMIAN); an unscoped
+    matches across connections (Power, APJ_BIRD, DBX_CONNECTION); an unscoped
     lookup failed "ambiguous" even though exactly one match was on the
     requested connection — same pattern as `_find_guid_by_name` in
     ts_cli/commands/tables.py; see .claude/rules/ts-cli.md). Ambiguity is

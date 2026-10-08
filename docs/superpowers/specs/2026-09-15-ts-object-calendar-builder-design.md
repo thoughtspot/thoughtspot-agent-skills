@@ -16,7 +16,7 @@ schema is registered as-is.
 
 The native `FROM_INPUT_PARAMS` path is insufficient for real retail and fiscal
 calendars. Verified live against `semantic-sql`
-(`nebula-ts-semview.thoughtspotdev.cloud`) on 2026-09-15:
+(an internal dev cluster) on 2026-09-15:
 
 1. **It never inserts a leap week.** Every generated fiscal year is exactly 364 days.
    A 4-4-5 / 4-5-4 / 5-4-4 year is 52 weeks, so the calendar drifts against the
@@ -338,7 +338,7 @@ create or replace view "rlscalendar"( …30 standard columns…, TS_CALENDAR_GRO
 
 RLS is **composition over N independent calendars**: generate each variant as its own
 table, `UNION ALL` with a literal discriminator appended as column 31, register the
-union. `damianmultitest` is the materialised-table flavour of the same idea (3
+union. `multitest` is the materialised-table flavour of the same idea (3
 variants, 52,230 rows, discriminator column `TSGROUP`).
 
 ```

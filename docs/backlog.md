@@ -45,7 +45,7 @@ Done items have moved to [`backlog-archive.md`](backlog-archive.md):
 - BL-027 — Explicit table→ThoughtSpot binding — Done (archived 2026-07-23) — `.tds` parsing + `--reconcile-table`/`--column-name-map`/`--table-name-map`, live-verified on the cited Catalog Health Workbook
 - BL-061 — Integrate `tml_lint()` into build-model — Done (archived 2026-07-23) — mandatory `ts tml lint --dir` + `ts tableau verify --dir` in skill Step 6, plus an XREF preflight inside build-model itself
 - BL-062 — Misplaced-else-in-aggregate detection — Done (archived 2026-07-23) — regex live at `validate.py:212`
-- BL-068 — Codify Tableau dashboard-to-liveboard conversion — Done (archived 2026-07-23) — `ts tableau build-liveboard` + `extract_dashboards()` shipped, live-verified against FedEx VEDR
+- BL-068 — Codify Tableau dashboard-to-liveboard conversion — Done (archived 2026-07-23) — `ts tableau build-liveboard` + `extract_dashboards()` shipped, live-verified against a fleet-safety dashboard workbook
 - BL-085 — build-model generate mode + TWB-parse codification — Done (archived 2026-07-23) — both parts shipped; the stale "Part 2 OPEN" status line was corrected
 - BL-089 — Multi-table build-model generate-mode support — Done (archived 2026-07-23) — M1–M11 confirmed, including live-verified `.tds` parsing and a clean complexity gate
 - BL-090 — Document multi-table/multi-query Tableau migration — Done (archived 2026-07-23) — M12–M16 documented in SKILL.md + `references/step-5-tml-generation.md`
@@ -1752,7 +1752,7 @@ Make `agents/databricks/deploy.sh` copy the relevant files from `agents/shared/`
 
 ## BL-041 — `ts-recipe-model-timezone-bridge-snowflake` skill `Tier 4`
 
-**Source:** 2026-06-19 — built and verified a timezone-aware model on champ-staging (model `f9ce44d9`). Pattern documented in [Google Doc](https://docs.google.com/document/d/1ouU8TW2EU18DUk1gScGHna1IAK4CzVHKj429YQjPXpo/edit).
+**Source:** 2026-06-19 — built and verified a timezone-aware model on champ-staging (model `f9ce44d9`). Pattern documented in an internal write-up, available from the maintainers.
 **Affects:** New skill under `agents/cli/ts-recipe-model-timezone-bridge-snowflake/`; family 7 (`ts-recipe-*`)
 **Status:** Open
 
@@ -2084,7 +2084,7 @@ track completes phases 2a-2c and its half of Phase 4. `ts databricks build-model
 JSON with a TML invariant/lint gate and an optional `ts tml import`; `ts-convert-from-databricks-mv`
 Steps 5/6/9/9.5/10/11 (v1.8.0) now call the deterministic 3-command pipeline instead of
 inline LLM parsing/translation/assembly. Live e2e-verified against se-thoughtspot +
-DBX_DAMIAN (Task 10), which surfaced and fixed 3 ts-cli defects along the way: the flat
+DBX_CONNECTION (Task 10), which surfaced and fixed 3 ts-cli defects along the way: the flat
 import-response GUID shape in `extract_imported_guid`, connection-scoped GUID resolution
 + `BOOLEAN`→`BOOL` normalization in `ts tables create`, and in-band `ERROR`-status import
 errors now surfaced via `build-model`'s `import_error` (previously swallowed as an empty
@@ -2948,7 +2948,7 @@ collection. That is **BL-277**, not this item.
 **Park note (2026-07-23):** deferred; needs a cardinality-inference design decision (data-probe
 vs. CTE-grain heuristic, per this item's own text) before implementation can start.
 
-**Target:** next multi-query build-model work; needed for FedEx VEDR (2 joined Custom SQL sources).
+**Target:** next multi-query build-model work; needed for a fleet-safety dashboard workbook (2 joined Custom SQL sources).
 
 ---
 
@@ -4202,7 +4202,7 @@ rather than made here.
 
 **Filed:** 2026-07-27.
 **Source:** data-plane verification for `ts-security-columns`, as real non-admin users on
-`nebula-damian-alias`. See
+`dev-cluster`. See
 `docs/superpowers/verification/2026-07-27-ts-security-columns-live-verification.md` §11.
 
 This is a **platform defect to raise with ThoughtSpot**, not a repo bug. Recorded here so
@@ -4287,7 +4287,7 @@ have been expensive to retrofit, so it was done first.
 ## BL-144 -- PLATFORM: a column-less RLS expression imports `OK` and silently WIPES existing rules `Tier 1`
 
 **Filed:** 2026-07-27.
-**Source:** RLS-on-published verification for `ts-org-migrate`, on `nebula-damian-alias`.
+**Source:** RLS-on-published verification for `ts-org-migrate`, on `dev-cluster`.
 See `docs/superpowers/verification/2026-07-27-ts-migrate-binding-resolution.md`.
 
 An RLS `expr` that references no column is accepted by TML import with `status_code: OK`,
@@ -4336,7 +4336,7 @@ user's Org -- has no system variable on this build. `ts_orgid` is rejected:
 are only `ts_username` and `ts_groups`.
 
 The documented Org-aware route is `ts_var(varName)` against an **ABAC formula variable**,
-whose values can be set per Org. On `nebula-damian-alias` that is also unavailable:
+whose values can be set per Org. On `dev-cluster` that is also unavailable:
 `ts_var(apj_schema)` is rejected at parse time, and the `VariableType` enum on
 `template/variables/create` accepts neither `FORMULA`, `RLS` nor `USER_PARAMETER`. The
 only variable observed is `TABLE_MAPPING` -- the *publishing* parameterization class, which
@@ -4357,7 +4357,7 @@ on this cluster, and whether an Org-scoped system variable is planned.
 ## BL-146 -- `ts publish apply` creates state before its cohort gate, then cannot be re-run `Tier 2` -- **DONE 2026-07-28**
 
 **Filed:** 2026-07-27.
-**Source:** staging the end-to-end migration fixture on `nebula-damian-alias`. See
+**Source:** staging the end-to-end migration fixture on `dev-cluster`. See
 `docs/superpowers/verification/2026-07-27-ts-migrate-e2e-runbook.md`.
 
 `apply` creates the template variable and parameterizes the field **before** checking the
@@ -4502,7 +4502,7 @@ each candidate needs its own live verification before being built.
 > The "rewrite deterministically" option recorded below is what was built.
 
 **Filed:** 2026-07-28.
-**Source:** live on `nebula-damian-alias`, testing the rename cascade the whole migration
+**Source:** live on `dev-cluster`, testing the rename cascade the whole migration
 architecture rests on. Raised by the repo owner from field experience, then reproduced.
 
 Renaming a Model column updates a dependent Answer's fields at **different times**:
@@ -4635,7 +4635,7 @@ source, `ts share` on the target. Two things make it more than a copy:
 
 ### RESOLVED 2026-07-28 -- it was OUR bug: the whole object stack must be granted
 
-`nebula-damian-alias` runs **Strict Object Mode**, so a user needs an explicit grant on the
+`dev-cluster` runs **Strict Object Mode**, so a user needs an explicit grant on the
 entire chain -- Table, then Model, then content. And **publication makes an object *present*,
 not *visible***, so the published Model carries no tenant grants of its own (that half is
 independent of the mode).
@@ -4750,7 +4750,7 @@ published master is owned by Primary, the tenant's copy by the tenant. The same 
 Regression tests were confirmed to fail against the old behaviour with the bug's exact
 signature (`target_guid == '9917a017'`, the source) before being taken as passing.
 
-**Verified live** on `nebula-damian-alias`: the same audit now targets the master
+**Verified live** on `dev-cluster`: the same audit now targets the master
 (`2a743be3`) and returns `NEEDS_MAPPING` with `Segment` a blocker, where it had returned
 `READY` with 6 columns matched. Full record, including the prepared plan and what was
 deliberately not run:
@@ -4773,7 +4773,7 @@ assume there is nothing to publish.
 migration's grants back -- the exact use the command exists for.
 
 ```
-$ ts share status 083fbd06-... --org ORG1 -p nebula-damian-alias
+$ ts share status 083fbd06-... --org ORG1 -p dev-cluster
 ThoughtSpot API 400 ... {"metadata":"Specify the metadata_type for identifier 083fbd06-..."}
 Error: Invalid value: Could not resolve '083fbd06-...'.
        Expected a GUID, or the exact name of one of: LOGICAL_TABLE, LIVEBOARD, ANSWER.
@@ -4835,7 +4835,7 @@ real response object.
 
 ### Verified
 
-Live on `nebula-damian-alias`: `ts share status 083fbd06-... --org ORG1` now exits 0, prints
+Live on `dev-cluster`: `ts share status 083fbd06-... --org ORG1` now exits 0, prints
 no stderr diagnostic, and returns 5 rows showing `MIGTEST_VIEWERS` with `READ_ONLY` plus
 `guest1`/`guest4` inheriting it. The three regression tests were confirmed to **fail against
 the old behaviour** (with `__pycache__` cleared, after a stale `.pyc` briefly made a restored
@@ -5531,7 +5531,7 @@ mappings too** -- `ltrim`/`rtrim` *and* `trim` are all absent.
 
 ### How it was settled
 
-22 probes on **se-thoughtspot** (`https://se-thoughtspot-cloud.thoughtspot.cloud`) on
+22 probes on **se-thoughtspot** (the SE demo cluster) on
 2026-07-29 via `ts tml import --policy VALIDATE_ONLY` -- one throwaway Model formula per
 probe, so every result is individually attributable, and nothing is persisted (the probe
 Model re-exported byte-identical afterwards; no objects were created).
@@ -5837,7 +5837,7 @@ skips 82% of its current input would inherit the same blind spot.
 
 ## BL-173 — Bound `ts tml verify-render` per-tile probing on large liveboards `Tier 3`
 
-Raised by djwaldo reviewing #356 (the Power BI render-robustness PR). When a board fails the
+Raised in review of #356 (the Power BI render-robustness PR). When a board fails the
 whole-board `metadata/liveboard/data` call, `verify-render` re-probes **each tile sequentially**
 with a 180s timeout to name the offending visualization. On a board with 20+ tiles this is
 sequential and unbounded.
@@ -7847,7 +7847,7 @@ currently cannot be converted at all.
 fired; the hook-driven run never listed it.
 **Affects:** `.git/hooks/pre-commit` (repo-local, untracked), `.claude/rules/branching.md`,
 `docs/coding-with-claude-quickstart.md` if it documents the hook.
-**Status:** OPEN -- documentation/tooling, no product impact.
+**Status:** RESOLVED 2026-10-08 -- option 3 below, a self-locating dispatcher (see Resolution).
 
 `.git/hooks/pre-commit` is a **relative symlink**, `../../scripts/pre-commit.sh`, and it lives in the
 **common** git dir. Git shares hooks across all worktrees, so that symlink resolves into the **main
@@ -7884,6 +7884,18 @@ ours:
    before adopting.
 
 **Target:** opportunistic — next time `.claude/rules/branching.md` or the hook is touched.
+
+**Resolution (2026-10-08).** `scripts/install-hooks.sh` writes a dispatcher to
+`<git-common-dir>/hooks/pre-commit` that execs
+`"$(git rev-parse --show-toplevel)/scripts/pre-commit.sh"`, so a commit runs the committing
+worktree's own copy. `scripts/pre-commit.sh` exists on every branch, so old branches work too.
+`--check` byte-compares the installed dispatcher against the template, and the SessionStart
+hook runs it. An existing hook is backed up before it is replaced. A first attempt used
+`core.hooksPath=scripts/git-hooks`, and review rejected it before merge: that config is shared,
+so any checkout whose branch lacked the directory ran **no** hook at all. The installer
+therefore never sets `core.hooksPath` and refuses if one is set. Tests:
+`tools/validate/tests/test_install_hooks.py`, including a worktree on a commit that predates
+the installer, blocked by its own `pre-commit.sh`.
 
 ---
 
@@ -8842,6 +8854,10 @@ vanish silently.
 
 **Target:** next validator pass. Note that (a) is a one-line change per gate and
 closes the class, while (b) is the durable fix; do not let (b)'s size defer (a).
+
+**Progress 2026-10-08.** Half of (b) has landed. `bash scripts/install-hooks.sh` installs the
+hook, and `--check` (run at every Claude Code session start) reports a missing or stale
+one (BL-193). The interpreter half of (b), and (a) and (c), are still open.
 
 ## BL-228 -- the Domo bypass-detection gate catches 3 of 8 realistic TLS/validation bypasses, and 2 are unreachable by any source test `Tier 3`
 
@@ -12294,7 +12310,7 @@ ts-object-set-manager branch (PR #554) — pre-existing, not introduced there.
 **Finding.** `blocked_model_guids` (`ts_cli/migrate/sets_scan.py`) returns only the GUIDs a
 scan marked blocked. `apply` refuses a mapped Model only if its GUID is in that set. Nothing
 checks that the scan inspected that Model, or ran in the source Org: a valid scan of a
-different Org, or one with `scanned.models: 0` (live on DamianTest 2026-10-02), lets `apply`
+different Org, or one with `scanned.models: 0` (live on TestOrg 2026-10-02), lets `apply`
 pass a Model that was never inspected. The pre-BL-325 marker check (both `discovery_notes`
 and `summary.models_incomplete` required) does not close this.
 
@@ -13263,7 +13279,7 @@ TRANSLATED, no trap, imports cleanly.
 - Both mapping docs (`ts-databricks-formula-translation.md`, reverse table; and the Snowflake one)
   list these rows as equivalences.
 
-**Minimal repros** (M2 fixture, Databricks + se-thoughtspot `DBX_DAMIAN`):
+**Minimal repros** (M2 fixture, Databricks + se-thoughtspot `DBX_CONNECTION`):
 - `N1 / NULLIF(N2, 0)` with `N1 = -3.25, N2 = 0`: Databricks NULL, ThoughtSpot 0.
 - `COALESCE(N1 / NULLIF(N2, 0), 0)` with `N1 = NULL, N2 = 5`: Databricks 0, ThoughtSpot NULL (also
   `N2 = NULL`).
@@ -13295,11 +13311,11 @@ to-direction inverse is BL-366.
 `m2-nonansi` run; report `docs/reviews/2026-10-07-fidelity-m2-databricks.md`.
 
 **The facts.**
-- The oracle session on the same SQL warehouse (`/sql/1.0/warehouses/c6ed539a60038b93`) reads back
+- The oracle session on the same SQL warehouse (`/sql/1.0/warehouses/{warehouse_id}`) reads back
   `ansi_mode = true` by default (and the run pins it). Under it, `I1 + 9223372036854775800` with
   `I1 = 12` raises `ARITHMETIC_OVERFLOW`, and `CAST('pie' AS INT)` raises `CAST_INVALID_INPUT`.
 - ThoughtSpot sent the same expressions (`(I1 + 9223372036854775800)`, `CAST(S2 as int)`, compiled
-  SQL in the run JSON) over `DBX_DAMIAN` and got **-9223372036854775804** (wrapped) and **NULL**.
+  SQL in the run JSON) over `DBX_CONNECTION` and got **-9223372036854775804** (wrapped) and **NULL**.
   `CAST(1e12 as int)` came back **2147483647** (clamped, BL-359). These are the non-ANSI results.
 - The `m2-nonansi` oracle run has **3 discriminating cases**, and ThoughtSpot matches the non-ANSI
   oracle on all three:
@@ -13459,7 +13475,7 @@ pass-throughs over an aggregate. M2: 18 TRANSLATE_FAILED → 0.
 **The facts** (read-only, 2026-10-07: `DESCRIBE CATALOG` / `DESCRIBE SCHEMA`,
 `system.information_schema.schema_privileges`). The `Production` Databricks profile's service
 principal runs every M2 `source_formula` verbatim, and it is also the principal behind the
-ThoughtSpot connection `DBX_DAMIAN`.
+ThoughtSpot connection `DBX_CONNECTION`.
 - It **owns the catalog** `agent_skills`, and with it the right to grant itself anything there.
 - It owns the schemas `audit_probe`, `default`, `dunder_mifflin` and `business_forecast`.
 - It has `SELECT` / `USE SCHEMA` on `analytics`, `ossie` and `plan`.
@@ -13473,7 +13489,7 @@ corpus would be executable input running with that reach.
   scratch schema, and `CAN USE` on the SQL warehouse, and nothing else.
 - Give it its own Databricks profile, and point `--dbx-profile` at that profile for corpus runs.
 - The ThoughtSpot Table must still be readable through a connection; either a second connection on
-  the confined principal, or a grant on the scratch schema to `DBX_DAMIAN`'s principal.
+  the confined principal, or a grant on the scratch schema to `DBX_CONNECTION`'s principal.
 - Optionally, have `DatabricksWarehouse` refuse to run a non-in-repo case file unless
   `current_user()` is the confined principal.
 
@@ -13998,3 +14014,179 @@ formula text silently dropped. Backslash escapes are now on by default (`strip_s
 tokenizer (`SQL_STRING_TOKEN_DATABRICKS` already reads `\.`); a test asserts every span the stripper
 keeps as a literal is one string token, so the two cannot disagree. Tests for `'a\' -- b'` and
 `'it\'s'` on both dialects.
+
+## BL-383 — GitHub push protection with custom patterns mirroring `check_customer_references` `Tier 2`
+
+**Filed:** 2026-10-08. **Status:** Open. **Owner:** GitHub org admin (repository/org security settings,
+not a repo change). **Source:** follow-up to the `check_customer_references` gate.
+
+**The facts.** `check_customer_references` runs in the pre-commit hook and in CI, and both act too late
+for a public repo. A hook that is not installed, or is skipped with `--no-verify`, lets the commit
+through. CI runs only after the push, when the content is already public on the branch and in the
+PR. GitHub secret scanning's **push protection** with **custom patterns** rejects the push itself,
+server-side, for every contributor.
+
+**The work.** An org admin enables secret scanning + push protection for this repo and adds custom
+patterns equivalent to the validator's rules: tenant SharePoint/OneDrive hosts, the consumer
+OneDrive hosts, Atlassian tenants other than ThoughtSpot's own, Slack archive/client links, Google
+Docs/Drive document links, and ThoughtSpot cluster hosts outside the allowlist. Keep `RULES` and
+`ALLOWED_*` in `tools/validate/check_customer_references.py` as the single source; the custom
+patterns are a copy, so record in that file's docstring where the copy lives once it exists. Custom
+patterns cannot express the placeholder exemptions as precisely, so expect to tune them for false
+positives before enabling push protection on them.
+
+**Target:** 2026-11-30.
+
+## BL-384 — Licence check for vendored third-party code `Tier 3`
+
+**Filed:** 2026-10-08. **Status:** Open. **Source:** follow-up to the `check_customer_references`
+gate (the same "what can a public repo publish by accident" review).
+
+**The facts.** Nothing checks that third-party code or data copied into this repo carries a licence
+compatible with publishing it here, or that its notice travels with it. The formula-fidelity harness
+already keeps its third-party corpus outside the repo and commits only a manifest; that is a
+deliberate choice, but no gate enforces it.
+
+**The work.** Inventory vendored third-party files and record each one's source and licence. Then
+add a validator that fails when a file under a vendored path has no recorded source/licence entry,
+or record a dated decision not to. Out of scope: Python dependency licences, which belong with the
+dependency (angle 16) checks.
+
+**Target:** 2026-12-31.
+
+## BL-385 — `check_customer_references` does not look inside zip containers or PDFs `Tier 2`
+
+**Filed:** 2026-10-08. **Status:** Open. **Source:** second review of the `check_customer_references` gate.
+
+**The facts.** The gate skips binary files by suffix or NUL bytes. Packaged workbooks and documents are
+zip containers (`.twbx`, `.pbix`, `.qvf`, `.docx`, `.xlsx`, `.pptx`) or PDFs. They routinely carry
+connection hosts, data-source URLs, author names and embedded data, and a converter skill's example
+directory is exactly where one would be committed.
+
+**The work.** Open zip containers with `zipfile` and scan their text members (XML, JSON, the TWB inside
+a TWBX). Extract PDF text where a pure-Python reader is available, or flag PDFs for manual review. Cap
+the decompressed size so a zip bomb cannot stall the gate, and keep it linear-time.
+
+**Target:** 2026-11-30.
+
+## BL-386 — A single NUL byte makes a text file count as binary `Tier 3`
+
+**Filed:** 2026-10-08. **Status:** Open. **Source:** second review of the `check_customer_references` gate.
+
+**The facts.** `decode_text` treats any NUL in the first 8 KiB as binary unless the NULs form a UTF-16
+pattern. One stray NUL at the top of an otherwise ordinary text file therefore hides the whole file
+from the gate.
+
+**The work.** Classify by proportion, not presence: text if NULs are rare and the rest decodes as
+UTF-8. Alternatively, scan binary files for printable ASCII runs (as `strings` does) and apply the host
+rules to those.
+
+**Target:** 2026-11-30.
+
+## BL-387 — `--range` misses UTF-16 diffs and merge-commit diffs `Tier 3`
+
+**Filed:** 2026-10-08. **Status:** Open. **Source:** second review of the `check_customer_references` gate.
+
+**The facts.** `scan_range` lists the range with `git rev-list` and reads each commit's patch with
+`git show`. Git shows a UTF-16 file as "Binary files differ", so its added lines are never scanned in
+history. The `--all` tree scan does decode UTF-16, so only content added and then removed within a PR
+escapes. A merge commit's message is scanned but its diff is skipped, so a conflict resolution that
+introduces a link is invisible to `--range`, though not to `--all`.
+
+**The work.** For a commit whose diff is reported binary, read the blob at that commit
+(`git show <sha>:<path>`) and run it through `decode_text`. Add `--diff-merges=first-parent` or
+`--cc` so merge resolutions are included.
+
+**Target:** 2026-12-31.
+
+## BL-388 — Remaining adversarial markup and Unicode bypasses in `check_customer_references` `Tier 3`
+
+**Filed:** 2026-10-08. **Status:** Open. **Source:** second review of the `check_customer_references` gate.
+
+**The facts.** The gate strips markup from label ends and decodes HTML entities and up to two rounds
+of percent-encoding. Still not handled:
+- tags or code spans between a host's labels, not just around them;
+- soft hyphens (`&shy;`, U+00AD) and zero-width characters (U+200B–U+200D, U+2060) inside a host;
+- triple percent-encoding;
+- backslash-escaped dots (`acme\.atlassian\.net`, as in regex or Markdown escapes).
+
+**The work.** Normalise each line before matching: strip zero-width characters and soft hyphens,
+unescape `\.`, and percent-decode up to a fixed depth. Add a test per bypass, plus a linear-time test
+for each new normalisation.
+
+**Target:** 2026-12-31.
+
+## BL-389 — Branch protection must require code-owner review for `.github/CODEOWNERS` to bind `Tier 2`
+
+**Filed:** 2026-10-08. **Status:** Open. **Owner:** repository admin (branch protection on `main` is
+configured outside the repo). **Source:** the `check_customer_references` gate and its CODEOWNERS.
+
+**The facts.** `.github/CODEOWNERS` names an owner for the gate, its tests, the git helper, the hooks
+and installer, CI and `.claude/settings.json`. Branch protection on `main` does not set
+`require_code_owner_reviews`, so the file is advisory: a PR can loosen the gate's allowlist and merge
+without the owner's review.
+
+**The work.** Enable "Require review from Code Owners" on `main`. Then verify it binds with a PR that
+touches an owned file, and record the verification here.
+
+**Target:** 2026-10-31.
+
+## BL-390 — Capture bounds in `check_customer_references` open evasion-only false negatives `Tier 3`
+
+**Filed:** 2026-10-08. **Status:** Open. **Source:** final review of the `check_customer_references` gate.
+
+**The facts.** To keep matching linear, every capture after a literal anchor is bounded. A deliberately
+padded link can step outside a bound:
+- a path segment over 200 characters after `docs.google.com/a/` or `app.snowflake.com/`, so the
+  segment rule never sees its closing `/`;
+- a Google document id whose first 200 characters are single-case words, so it reads as a placeholder;
+- an Atlassian ticket key padded to hundreds of digits, so the 300-character path capture ends before
+  the key does and the `/browse/<KEY>-<n>` exemption check sees a truncated path.
+
+These cases need deliberate padding, never ordinary authoring.
+
+**The work.** For each bounded capture, fail (or warn) when the bound is reached rather than treating
+the truncated text as complete. Add one test per case, plus the linear-time assertion for each.
+
+**Target:** 2026-12-31.
+
+## BL-391 — `--range` on a shallow clone scans nothing and passes `Tier 2`
+
+**Filed:** 2026-10-08. **Status:** Open. **Source:** final review of the `check_customer_references` gate.
+
+**The facts.** CI checks out with `fetch-depth: 0`, so `--range origin/<base>..HEAD` sees every PR commit.
+On a shallow clone the base may be missing, or the range may be cut at the shallow boundary. Today a
+missing base makes `git rev-list` fail and the gate fails closed. A range truncated at a shallow
+boundary, though, simply lists fewer commits and passes.
+
+**The work.** Detect a shallow repository (`git rev-parse --is-shallow-repository`) and fail closed
+with a message to fetch full history, unless an explicit `--allow-shallow` is passed.
+
+**Target:** 2026-11-30.
+
+## BL-392 — `.gitattributes -diff` hides added-then-removed lines from `--range` `Tier 3`
+
+**Filed:** 2026-10-08. **Status:** Open. **Source:** final review of the `check_customer_references` gate.
+
+**The facts.** A path marked `-diff` (or `binary`) in `.gitattributes` makes `git show -p` print "Binary
+files differ" instead of its lines. A link added and then removed within a PR in such a file is
+published in history but never scanned. The tree scan only sees the final state.
+
+**The work.** Pass `--text` (or `-a`) to the per-commit `git show` so attributes cannot suppress the
+patch, then keep relying on `decode_text` for genuinely binary content. Add a test with a `-diff`
+attribute.
+
+**Target:** 2026-12-31.
+
+## BL-393 — A tracked symlink with a binary-looking suffix is skipped by `--all` `Tier 3`
+
+**Filed:** 2026-10-08. **Status:** Open. **Source:** final review of the `check_customer_references` gate.
+
+**The facts.** `--all` now scans a tracked symlink's link text, but `decode_text` skips by file suffix
+before looking at content. A symlink named `logo.png` whose target text is a tenant URL is therefore
+never scanned.
+
+**The work.** Skip the suffix check for symlinks: their blob is always link text. Add a test with a
+`.png` symlink.
+
+**Target:** 2026-12-31.

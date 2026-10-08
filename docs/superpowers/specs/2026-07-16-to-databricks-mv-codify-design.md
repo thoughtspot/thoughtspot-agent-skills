@@ -146,7 +146,7 @@ New modules compile self-contained in the concatenated namespace
 
 Reuse the from-direction harness:
 - Databricks: catalog `agent_skills`, fixtures `window_fixture` / `ratio_fixture`,
-  profile `ts-production`, warehouse `c6ed539a60038b93`.
+  profile `ts-production`, warehouse `{warehouse_id}`.
 - ThoughtSpot: profile `se-thoughtspot`.
 
 Procedure: seed fixtures → point a TS Model at them → `ts databricks build-mv` →

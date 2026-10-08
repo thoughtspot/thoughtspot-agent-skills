@@ -1,7 +1,7 @@
 # `ts security column-rules` -- live verification
 
 **Date:** 2026-07-27
-**Cluster:** `nebula-damian-alias`, profile `nebula-damian-alias`
+**Cluster:** `<redacted-cluster>`, profile `<redacted-profile>`
 **Authenticated as:** `tsadmin` (ADMINISTRATION), same session Org (`Primary`) as the `ts share`
 verification (`docs/superpowers/verification/2026-07-26-ts-share-live-verification.md`)
 **CLI:** ts-cli 0.109.0 from branch `feat/ts-security-column-rules`
@@ -43,7 +43,7 @@ Baseline `get` across all three tables, captured before any change:
 ## 1. `fetch` / `get` -- response shape (§8 Q3)
 
 ```
-$ ts security column-rules get T2 -p nebula-damian-alias
+$ ts security column-rules get T2 -p <redacted-profile>
 ```
 
 Observed verbatim:
@@ -67,11 +67,11 @@ touches only the named column, or whether `update` is secretly a whole-table rep
 would make `set` unsafe without a read-modify-write.
 
 ```
-$ ts security column-rules set --table T2 --rule "PROD_NM=Analyst" -p nebula-damian-alias
+$ ts security column-rules set --table T2 --rule "PROD_NM=Analyst" -p <redacted-profile>
 applied T2: REPLACE PROD_NM
 
 $ ts security column-rules set --table T2 --rule "UNIT_PRICE_AMT=Consumer" \
-    -p nebula-damian-alias
+    -p <redacted-profile>
 applied T2: REPLACE UNIT_PRICE_AMT
 ```
 
@@ -102,7 +102,7 @@ parse no body" reading needed no code change -- it was already right.
 ## 4. Unsecuring a never-secured column errors, not a no-op (§8 Q4)
 
 ```
-$ ts security column-rules clear --table T2 --column PROD_CAT_L1 -p nebula-damian-alias
+$ ts security column-rules clear --table T2 --column PROD_CAT_L1 -p <redacted-profile>
 ```
 
 `PROD_CAT_L1` had no rule at the time. Observed verbatim, HTTP 400:
@@ -151,7 +151,7 @@ Both are fixed; see §8.
 ## 6. Securing a column for nobody is a reachable state (§8 Q7, added during verification)
 
 ```
-$ ts security column-rules set --table T2 --rule "COST=" -p nebula-damian-alias
+$ ts security column-rules set --table T2 --rule "COST=" -p <redacted-profile>
 applied T2: REPLACE COST
 ```
 
@@ -280,7 +280,7 @@ rather than reasoning about the refusal in the abstract.
 was the first thing attempted, to confirm the sibling command's own failure mode:
 
 ```
-$ ts publish push T2_PUBLISH --org ORG1 -p nebula-damian-alias
+$ ts publish push T2_PUBLISH --org ORG1 -p <redacted-profile>
 Object 'T2_PUBLISH' is not parameterized, so it cannot be published...
 ```
 
@@ -300,7 +300,7 @@ this matters beyond Q6.
 
 ```
 $ ts security column-rules set --table T2_PUBLISH --rule "PROD_NM=Analyst" \
-    -p nebula-damian-alias
+    -p <redacted-profile>
 ```
 
 Returned **HTTP 204**. Read-back:
@@ -320,7 +320,7 @@ for why the refusal stays.
 ### Reading CSR as the tenant Org (ORG1): a 10023 access error
 
 ```
-$ ts security column-rules get T2_PUBLISH --org ORG1 -p nebula-damian-alias
+$ ts security column-rules get T2_PUBLISH --org ORG1 -p <redacted-profile>
 ```
 
 Observed verbatim, **HTTP 500**:
@@ -337,7 +337,7 @@ F (§13) and is what shows code 10023 is overloaded.
 
 ```
 $ ts security column-rules set --table T2_PUBLISH --rule "PROD_NM=Analyst" \
-    --org ORG1 -p nebula-damian-alias
+    --org ORG1 -p <redacted-profile>
 ```
 
 Failed on `Invalid group identifiers: Analyst` -- groups are per-Org, and `Analyst` in

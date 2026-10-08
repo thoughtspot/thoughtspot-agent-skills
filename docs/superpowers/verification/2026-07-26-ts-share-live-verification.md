@@ -1,7 +1,7 @@
 # `ts share` — live verification
 
 **Date:** 2026-07-26
-**Cluster:** `nebula-damian-alias` (`https://172.32.62.254:8443`), profile `nebula-damian-alias`
+**Cluster:** `<redacted-cluster>` (an internal dev cluster), profile `<redacted-profile>`
 **Authenticated as:** `tsadmin` (ADMINISTRATION), session Org `Primary`
 **CLI:** ts-cli 0.108.0 from branch `feat/ts-share`, installed into an isolated venv so the
 operator's global `ts` was left untouched
@@ -27,7 +27,7 @@ verified against `ORG1`/`ORG2` directly; applying a grant *inside* a tenant Org 
 ## 1. `export` — object, column GUIDs, existing grants
 
 ```
-$ ts share export d2c12c11-6560-4810-96b8-4b902bbb82dc -p nebula-damian-alias
+$ ts share export d2c12c11-6560-4810-96b8-4b902bbb82dc -p <redacted-profile>
 resolved d2c12c11-... -> T2_PUBLISH (LOGICAL_TABLE, 25 column(s))
 ```
 
@@ -74,7 +74,7 @@ summary: {"orgs": ["ORG1", "Primary"], "groups": ["Analyst", "Demo Retail Group"
 zero involving `Analyst`).
 
 ```
-$ ts share apply -i grants-column.json -p nebula-damian-alias
+$ ts share apply -i grants-column.json -p <redacted-profile>
 [Primary] LOGICAL_COLUMN: T2_PUBLISH.SUPPLIER_REGION, T2_PUBLISH.PROD_NM -> Analyst=READ_ONLY
 applied 1 share call(s)
 ```
@@ -104,7 +104,7 @@ and nothing missing.
 ## 4. A table grant grants EVERY column — the exclusivity rule, measured
 
 ```
-$ ts share apply -i grants-object.json -p nebula-damian-alias
+$ ts share apply -i grants-object.json -p <redacted-profile>
 [Primary] LOGICAL_TABLE: T2_PUBLISH -> Analyst=READ_ONLY
 applied 1 share call(s)
 ```

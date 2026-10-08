@@ -1089,7 +1089,7 @@ databricks api post /api/2.0/sql/statements \
 
 The `warehouse_id` is extracted from the profile's `sql_warehouse_http_path`:
 ```
-/sql/1.0/warehouses/c6ed539a60038b93  →  c6ed539a60038b93
+/sql/1.0/warehouses/<warehouse-id>  →  <warehouse-id>
 ```
 
 Response format:

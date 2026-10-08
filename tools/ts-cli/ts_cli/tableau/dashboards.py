@@ -4,7 +4,7 @@ Turns each `<dashboard>` into the `build_from_spec` dashboard shape (visuals wit
 mark + fields tagged by shelf/role/measure + date bucket tokens + a grid tile), so
 `ts tableau parse` → `ts tableau build-liveboard` runs with no hand-assembled spec.
 This is the codification of the previously agent-driven Tableau liveboard step (the
-FedEx-harness `build_fedex_liveboard_*.py` method). Pure functions, no I/O.
+earlier one-off liveboard harness). Pure functions, no I/O.
 """
 from __future__ import annotations
 

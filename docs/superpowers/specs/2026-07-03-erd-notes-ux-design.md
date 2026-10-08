@@ -129,7 +129,7 @@ Optional nicety (only if trivial): a note **count** on the button (e.g. "Review 
 
 ## 7. Verification (headless Chrome; module-scoped state — read DOM)
 
-Build GTM (`/private/tmp/claude-501/-Users-damianwaldron-Dev/45ed40f8-ed5a-4cd3-ae51-f5f2769524fd/scratchpad/export.json`) + mini control. Assert:
+Build GTM (`<scratchpad>/export.json`) + mini control. Assert:
 
 1. **Save feedback + Delete appears same-session** — open a table, type + Save: a "Saved ✓" confirmation shows, and the Delete button is present **without** reload. Delete removes it and the textarea clears, still without reload.
 2. **Persistence unchanged** — after Save + `page.reload()`, the note text is still in the textarea and `localStorage` (regression guard on the working save path).

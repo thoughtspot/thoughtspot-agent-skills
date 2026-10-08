@@ -158,7 +158,7 @@ is exactly the class a naive find-and-replace would mangle.
 ## Views SHIELD the content built on them — PROVEN END TO END
 
 Verified 2026-07-28, first on `se-thoughtspot` (the fields are independent) and then
-**functionally** on `nebula-damian-alias` (a real repoint preserves the shield).
+**functionally** on `<redacted-cluster>` (a real repoint preserves the shield).
 
 ### The live repoint test
 

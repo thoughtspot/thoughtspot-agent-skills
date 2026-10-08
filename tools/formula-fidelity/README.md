@@ -106,7 +106,7 @@ two calls per case, sequential.
 is executable input, and the principal running it is the only thing bounding it.
 - **Snowflake (M0, M1):** it runs under the Snowflake profile's role.
 - **Databricks (M2):** it runs under the `Production` profile's service principal, which is also
-  the principal the `DBX_DAMIAN` ThoughtSpot connection uses. Its reach, read-only on 2026-10-07
+  the principal the `DBX_CONNECTION` ThoughtSpot connection uses. Its reach, read-only on 2026-10-07
   (`DESCRIBE CATALOG` / `DESCRIBE SCHEMA` and `system.information_schema.schema_privileges`), is
   far wider than the scratch schema:
   - it **owns the catalog** `agent_skills`
@@ -277,7 +277,7 @@ PYTHONPATH= uv run --no-project --python 3.12 --with pyyaml --with typer --with 
     --with keyring --with databricks-sql-connector --with databricks-sdk \
   python -I tools/formula-fidelity/run.py \
     --cases tools/formula-fidelity/cases/databricks/m2.jsonl \
-    --profile se-thoughtspot --dbx-profile Production --connection DBX_DAMIAN \
+    --profile se-thoughtspot --dbx-profile Production --connection DBX_CONNECTION \
     --database AGENT_SKILLS --schema AUDIT_PROBE \
     --out tools/formula-fidelity/runs/<date>-databricks-m2.json --report <path>.md
 ```

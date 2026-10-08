@@ -1,6 +1,6 @@
 # Same-Org topology — live verification, and the Tier 1 bug it found
 
-**Cluster:** `nebula-damian-alias` · **Date:** 2026-07-28 · **ts-cli:** v0.121.0
+**Cluster:** `<redacted-cluster>` · **Date:** 2026-07-28 · **ts-cli:** v0.121.0
 
 The third and last of the three supported topologies to be exercised: source Org ==
 target Org, content updated in place. It failed on the first run, silently.
@@ -124,11 +124,11 @@ four real bugs. Repointing its content onto the master consumes that, and the ba
 only way back. It is one command when wanted:
 
 ```bash
-ts migrate audit --source-profile nebula-damian-alias --target-profile nebula-damian-alias \
+ts migrate audit --source-profile <redacted-profile> --target-profile <redacted-profile> \
   --source-org ORG1 --target-org ORG1 \
   --model 9917a017-443c-4cf7-be81-2958d83997c8 --out-dir ./sameorg
 # then set published_column: Segment -> STRING_1, Order Date -> DATE_1
-ts migrate apply --source-profile nebula-damian-alias --target-profile nebula-damian-alias \
+ts migrate apply --source-profile <redacted-profile> --target-profile <redacted-profile> \
   --source-org ORG1 --target-org ORG1 --plan-dir ./sameorg
 ```
 
@@ -149,7 +149,7 @@ pre-test state:
 
 ```bash
 ts publish unpush 2a743be3-b26e-43b7-9abc-47aa6486dc57 --org ORG1 \
-  -t LOGICAL_TABLE -p nebula-damian-alias
+  -t LOGICAL_TABLE -p <redacted-profile>
 ```
 
 ---

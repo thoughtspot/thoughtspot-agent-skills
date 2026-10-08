@@ -665,4 +665,4 @@ explicitly carries the meta-level reinforcement for the phantom-table failure
 cluster.
 
 The full failure analysis lives in
-`/Users/damianwaldron/Dev/agent-expressibility-eval/runs/dunder-mifflin-sales-inventory__1777408743/`.
+`~/Dev/agent-expressibility-eval/runs/dunder-mifflin-sales-inventory__1777408743/`.

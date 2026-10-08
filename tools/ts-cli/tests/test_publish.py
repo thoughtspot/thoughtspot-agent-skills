@@ -5,7 +5,7 @@ Covers the pure payload builders and response interpreters behind
 `ts publish push/unpush/status`. No live connection required.
 
 Expected shapes come from the 2026-07-25 live verification on
-nebula-damian-alias, recorded in
+dev-cluster, recorded in
 docs/superpowers/specs/2026-07-25-ts-publish-orgs-design.md §2.5.
 """
 from __future__ import annotations

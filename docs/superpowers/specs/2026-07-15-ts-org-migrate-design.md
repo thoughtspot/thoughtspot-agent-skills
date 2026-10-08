@@ -600,7 +600,7 @@ agents/cli/ts-org-migrate/SKILL.md        # orchestration skill (+ references/)
    *own* rows is the *function* question. `ts_orgid` **is not a valid RLS keyword**
    (`Search did not find "ts_orgid" in your data or metadata`), and the documented
    Org-aware route — `ts_var(varName)` against an ABAC formula variable with per-Org
-   values — is unavailable on `nebula-damian-alias`: the only variable class present is
+   values — is unavailable on `<redacted-cluster>`: the only variable class present is
    `TABLE_MAPPING`, which is publishing parameterization, not ABAC. **BL-145.**
    Remaining routes: a `ts_groups` predicate against a per-Org group whose name matches a
    tenant-key column value, or enabling ABAC via RLS on the cluster.

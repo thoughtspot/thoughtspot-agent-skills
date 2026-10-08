@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-29 · **Branch:** `feat/ossie-tpcds-fidelity` · **Plan:** `docs/superpowers/plans/2026-07-29-ossie-tpcds-fidelity.md`
 
-**Upstream source:** apache/ossie @ `c26b61cafa41699106110a62620062f49a7c5482` (2026-07-29), read-only clone at `/Users/damianwaldron/Dev/ossie`, working tree clean.
+**Upstream source:** apache/ossie @ `c26b61cafa41699106110a62620062f49a7c5482` (2026-07-29), read-only clone at `~/Dev/ossie`, working tree clean.
 
 | Fixture | Path | git blob SHA |
 |---|---|---|

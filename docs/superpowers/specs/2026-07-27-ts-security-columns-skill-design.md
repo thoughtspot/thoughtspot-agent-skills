@@ -333,7 +333,7 @@ stored-procedure shape for it. An `EXPECTED_DIVERGENCES` entry in
 
 ## 9. Live verification — RESULTS (2026-07-27)
 
-Cluster: profile `nebula-damian-alias`, Orgs Primary (0) / ORG1 (12750490) / ORG2 / ORG3.
+Cluster: profile `<redacted-profile>`, Orgs Primary (0) / ORG1 (12750490) / ORG2 / ORG3.
 Strict Object Mode **ON**, CSR flag **ON**. Baseline captured, restored, diff proven on six
 dimensions. Full account:
 [`2026-07-27-ts-security-columns-live-verification.md`](../verification/2026-07-27-ts-security-columns-live-verification.md).

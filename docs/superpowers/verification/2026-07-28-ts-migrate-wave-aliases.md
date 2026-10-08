@@ -1,6 +1,6 @@
 # Per-wave aliases (spec step 7) — live verification
 
-**Cluster:** `nebula-damian-alias` · **Date:** 2026-07-28 · **ts-cli:** v0.123.0
+**Cluster:** `<redacted-cluster>` · **Date:** 2026-07-28 · **ts-cli:** v0.123.0
 
 The last unbuilt piece of Phase D. Until now step 7 was **prose telling an operator to run
 `/ts-object-model-alias` and check four things by eye**, one of which is the only genuinely
@@ -56,7 +56,7 @@ Claiming ORG3 was cut over when it holds no aliases:
 
 ```
 $ ts migrate aliases -m 2a743be3-... --target-org ORG1 -d ./plan \
-      --expect-org ORG2 --expect-org ORG3 -p nebula-damian-alias
+      --expect-org ORG2 --expect-org ORG3 -p <redacted-profile>
 exit=1
 Refused. This wave must not be imported:
   - ORG3: already cut over, but the alias export returned NO entries for it. Merging would

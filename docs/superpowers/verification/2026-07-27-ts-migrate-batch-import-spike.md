@@ -1,7 +1,7 @@
 # Phase D gating spike — batch import into a clean Org
 
 **Date:** 2026-07-27
-**Cluster:** `nebula-damian-alias` (test cluster, authorised by the repo owner)
+**Cluster:** `<redacted-cluster>` (test cluster, authorised by the repo owner)
 **Spec:** [`2026-07-15-ts-org-migrate-design.md`](../specs/2026-07-15-ts-org-migrate-design.md)
 § *Remaining spike (implementation task #1)*
 **Baseline:** captured, restored, diff proven (§6).

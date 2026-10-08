@@ -8,7 +8,7 @@ main.
 
 `POST /callosum/v1/v2/data/spotql/generate-sql` and `.../fetch-data`, body
 `{"spotql_query", "model_identifier": <Model GUID>}`. Verified live on champ-staging
-(`champagne-master-aws.thoughtspotstaging.cloud`, profile `champ-staging`) against the
+(an internal staging cluster, profile `champ-staging`) against the
 "Dunder Mifflin Sales & Inventory" Model (`4da3a07f-fe29-4d20-8758-260eb1315071`):
 
 - `generate-sql` → `{"executable_sql": "<warehouse SQL>"}` on success.
@@ -60,7 +60,7 @@ Model. Treat `connection_type` as build/connection-specific — omit for standar
 
 ## #5 — 2026-07-29 full limitation re-probe (jul.26.mt dev) — VERIFIED (live) 2026-07-29
 
-Re-probed every testable `limitations.md` row on nebula-damian-alias (jul.26.mt dev build)
+Re-probed every testable `limitations.md` row on `<redacted-cluster>` (jul.26.mt dev build)
 against the Snowflake-backed "Supplier Model" (`8777533f`) and "T1_PUBLISH_MODEL"
 (`0930baf3`) — 38 `generate-sql` probes plus `fetch-data` execution checks and value
 verification (literal arithmetic ×100/÷100 matched baseline exactly; UNION dedup verified
@@ -97,7 +97,7 @@ build 26.7.0.cl-72 against a Snowflake-backed Model, plus **five limitations not
 yet recorded**.
 
 Every item below was verified with `generate-sql` / `fetch-data` against
-`T1_PUBLISH_MODEL` on `nebula-damian-alias` (physical
+`T1_PUBLISH_MODEL` on `<redacted-cluster>` (physical
 `AGENT_SKILLS.ALIAS_TESTS.T1_PUBLISH`), per this file's own rule that the probe,
 not the ticket or the doc, is the source of truth.
 

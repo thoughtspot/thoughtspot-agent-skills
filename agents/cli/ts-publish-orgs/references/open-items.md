@@ -1,7 +1,7 @@
 # ts-publish-orgs — Open Items
 
 Behaviour that is unverified, or verified and worth recording because it contradicts the
-published documentation. Everything here was checked against `nebula-damian-alias`
+published documentation. Everything here was checked against `<redacted-cluster>`
 (Orgs enabled: Primary + ORG1/ORG2/ORG3, Snowflake connection `APJ`) unless noted.
 
 Full detail, including reproductions, lives in

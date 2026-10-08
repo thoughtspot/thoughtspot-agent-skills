@@ -208,6 +208,10 @@ def _parse_ci(path: Path) -> list[dict]:
             entries.append({
                 "validator": validator,
                 "comment": comment,
+                # Same warn-only convention as the pre-commit parser. Only consulted
+                # for a CI-ONLY validator; one that also runs in pre-commit keeps
+                # its pre-commit mode.
+                "mode": "soft" if "--warn" in stripped or "|| true" in stripped else "gate",
             })
             continue
 
@@ -342,7 +346,7 @@ def generate_catalog(repo_root: Path) -> str:
                 "ci": True,
                 "trigger": "every PR",
                 "comment": entry.get("comment", ""),
-                "mode": "gate",
+                "mode": entry.get("mode", "gate"),
             }
 
     # Enrich with docstrings and git dates
@@ -585,7 +589,9 @@ def strip_volatile(content: str) -> str:
     enforcement model, the audit checklist) which must pass through untouched, or
     a real edit to them would stop being gated.
     """
-    modes = {"gate", "nudge", "report"}
+    # "soft" is what the catalog actually emits for warn-only gates; it was missing, so
+    # every soft row's date was still gated (the BL-192 failure, latent).
+    modes = {"gate", "soft", "nudge", "report"}
     out = []
     for line in content.split("\n"):
         stripped = line.strip()

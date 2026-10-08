@@ -56,6 +56,7 @@ jobs:
           # Smoke tests are intentionally excluded — they need live ThoughtSpot /
           # Snowflake credentials and run via scripts/pre-push.sh, not in CI.
           python3 tools/validate/check_secrets.py --root . --all || rc=1
+          python3 tools/validate/check_customer_references.py --root . --all || rc=1
           python3 tools/validate/check_references.py --root . || rc=1
           python3 tools/validate/check_patterns.py --root . || rc=1
           python3 tools/validate/check_version_sync.py --root . --base origin/main || rc=1
@@ -152,6 +153,27 @@ jobs:
           git fetch --no-tags origin "${{ github.base_ref }}"
           python3 tools/validate/suggest_dependency_types.py --root . --check \
             --base "origin/${{ github.base_ref }}"
+
+      - name: Customer references in PR commits (PR only)
+        # The whole-tree --all scan above sees only the final state. A link added in one
+        # commit and removed in a later one is still published in the PR's history, and
+        # a commit message is never in the tree at all. This scans the added lines and
+        # message of every commit in the PR. One `git log -p`; needs no secrets, so it
+        # also runs on fork PRs.
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          python3 tools/validate/check_customer_references.py --root . --range "origin/${{ github.base_ref }}..HEAD"
+
+      - name: Large-PR content flag (PR only, warn-only)
+        # This repo is public. A PR adding >150 files or >2 MB of non-code assets
+        # (images, examples, fixtures) is where customer data hides, and the
+        # customer-references gate recognises links, not names or data. Never blocks:
+        # it emits a ::warning:: annotation asking for a manual content review.
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          python3 tools/validate/check_pr_size.py --root . --base "origin/${{ github.base_ref }}" --warn
 
       - name: Quality gates catalog gate (PR only, scoped hard-fail)
         # 2026-07-29 audit finding 7.1: the catalog check above is the only gate where

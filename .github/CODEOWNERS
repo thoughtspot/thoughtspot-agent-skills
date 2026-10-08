@@ -1,0 +1,25 @@
+# Code owners for files whose changes can silently weaken a confidentiality gate.
+#
+# Binding only when branch protection on `main` requires "Review from Code Owners"
+# (a repository admin setting, not something this file can turn on).
+
+# The customer-reference gate: its allowlists and grandfathered exemptions decide what
+# may be published in this public repo; its tests pin what it must catch.
+/tools/validate/check_customer_references.py                 @djwaldo
+/tools/validate/tests/test_check_customer_references.py      @djwaldo
+# The shared git helper the gate reads staged content and history through.
+/tools/validate/_git.py                                      @djwaldo
+
+# Hooks and their installer: a change here can disable every local gate.
+/scripts/install-hooks.sh                                    @djwaldo
+/scripts/pre-commit.sh                                       @djwaldo
+/scripts/commit-msg.sh                                       @djwaldo
+
+# CI, where the gate is the backstop for --no-verify and uninstalled hooks.
+/.github/workflows/validate.yml                              @djwaldo
+
+# The SessionStart hook that warns when the git hooks are missing.
+/.claude/settings.json                                       @djwaldo
+
+# This file itself, so ownership cannot be removed without review.
+/.github/CODEOWNERS                                          @djwaldo

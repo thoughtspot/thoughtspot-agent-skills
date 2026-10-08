@@ -1,7 +1,7 @@
 # RLS on a published object — does it enforce in the tenant Org?
 
 **Date:** 2026-07-27
-**Cluster:** `nebula-damian-alias` (test cluster, authorised by the repo owner)
+**Cluster:** `<redacted-cluster>` (test cluster, authorised by the repo owner)
 **Answers:** open question 4 in
 [`2026-07-15-ts-org-migrate-design.md`](../specs/2026-07-15-ts-org-migrate-design.md)
 **Baseline:** captured, restored, diff proven (§5).

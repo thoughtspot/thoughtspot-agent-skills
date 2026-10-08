@@ -105,7 +105,7 @@ No layout/position change; grouping recolors only. **Non-goal (C5):** the minima
 
 ## 7. Verification (headless Chrome; module-scoped state — read DOM)
 
-Build GTM (`/private/tmp/claude-501/-Users-damianwaldron-Dev/45ed40f8-ed5a-4cd3-ae51-f5f2769524fd/scratchpad/export.json`) + mini control. Assert:
+Build GTM (`<scratchpad>/export.json`) + mini control. Assert:
 
 1. **Selector present**, default None → node rendering byte-equivalent to today (no stripe, `LOD_FILL` unchanged), legend hidden.
 2. **Name-prefix:** switching to it groups GTM into a sane set (assert SFDC/JIRA/MIXPANEL/GAINSIGHT among labels; `W_SFDC_*` lands in SFDC, not "W"; singleton→Other); legend rows match `grp.groups`; stripe color per node matches its group; count in legend sums to 79.

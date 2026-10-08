@@ -294,4 +294,4 @@ The four failure clusters and their fixes:
 | Chasm fanout on cross-fact joins (inventory + sales on raw dates) | `time_basis` mandatory, anchored on conformed date dim |
 
 The full failure analysis lives in
-`/Users/damianwaldron/Dev/agent-expressibility-eval/runs/dunder-mifflin-sales-inventory__1777408743/`.
+`~/Dev/agent-expressibility-eval/runs/dunder-mifflin-sales-inventory__1777408743/`.

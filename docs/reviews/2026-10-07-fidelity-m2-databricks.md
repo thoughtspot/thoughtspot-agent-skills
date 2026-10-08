@@ -12,13 +12,13 @@ In emitted formulas `[T::col]` is the run's scratch Table, `ZZ_FIDELITY_M2_20261
 `tools/formula-fidelity/run.py` and can be regenerated from the run JSON with `--rebuild`. The
 non-ANSI run is summarised at the end.*
 
-**Topology: the preferred one.** se-thoughtspot already has a Databricks connection, `DBX_DAMIAN`,
-pointing at the same workspace (`dbc-3472b2da-8a4e`), the same SQL warehouse
-(`/sql/1.0/warehouses/c6ed539a60038b93`) and the same service principal as the `Production`
+**Topology: the preferred one.** se-thoughtspot already has a Databricks connection, `<redacted-connection>`,
+pointing at the same workspace (`your-workspace`), the same SQL warehouse
+(`/sql/1.0/warehouses/{warehouse_id}`) and the same service principal as the `Production`
 Databricks profile (read from the connection TML; its secret is not exported). So the fixture was
 loaded once, into `agent_skills.audit_probe` (Delta, run-stamped `ZZ_FIDELITY_M2_*`), and both sides
 read the same rows: the oracle through `databricks-sql-connector`, ThoughtSpot through a Table
-registered on `DBX_DAMIAN`. Nothing ran on Snowflake. This is the only topology in which a
+registered on `<redacted-connection>`. Nothing ran on Snowflake. This is the only topology in which a
 `sql_*_op` pass-through executes its Databricks SQL, and **14 cases do — all 14 MATCH**. No case was
 excluded: the not-testable count is **0**. No ThoughtSpot connection was created.
 
@@ -37,7 +37,7 @@ excluded: the not-testable count is **0**. No ThoughtSpot connection was created
   mapping docs list the rows as equivalences. The exact form is plain `x / y`: ThoughtSpot already
   compiles `/` to `x / NULLIF(y, 0.0)` (visible in every M2 division's compiled SQL).
 - **BL-358 is a platform finding.** Our oracle session on the same warehouse defaults to
-  `ansi_mode = true`. ThoughtSpot's query over `DBX_DAMIAN` behaved as non-ANSI three ways: the
+  `ansi_mode = true`. ThoughtSpot's query over `<redacted-connection>` behaved as non-ANSI three ways: the
   overflow wrapped, `CAST(S2 as int)` returned NULL for `'pie'` (`dbx-arith-014`, ERROR_EQUIV, where
   the source raises `CAST_INVALID_INPUT`), and BL-359's out-of-range cast clamped instead of raising.
   The `m2-nonansi` run (same rows, `ANSI_MODE=false`) matches ThoughtSpot on all six scored cases,
@@ -108,7 +108,7 @@ here the zone lives in the session, not in the value.
   (*Unsupported configuration*), so the time zone is set with `SET TIME ZONE 'UTC'`. The run header
   records the session as read back, not as requested.
 - **Warehouse principal.** The oracle ran as the profile's service principal, the same principal
-  `DBX_DAMIAN` uses. A read-only check (2026-10-07) showed its reach is wide:
+  `<redacted-connection>` uses. A read-only check (2026-10-07) showed its reach is wide:
   - it **owns the `agent_skills` catalog**
   - it owns four of its schemas
   - it can read three more
@@ -361,7 +361,7 @@ None.
 
 - date: `2026-10-06T23:27:55+00:00`
 - profile: `se-thoughtspot`
-- connection: `DBX_DAMIAN`
+- connection: `<redacted-connection>`
 - warehouse: `databricks`
 - warehouse_table: `AGENT_SKILLS.AUDIT_PROBE.ZZ_FIDELITY_M2_20261006T232755_B7FDAA`
 - dbx_profile: `Production`
@@ -397,7 +397,7 @@ None.
 
 - date: `2026-10-06T23:47:17+00:00`
 - profile: `se-thoughtspot`
-- connection: `DBX_DAMIAN`
+- connection: `<redacted-connection>`
 - warehouse: `databricks`
 - warehouse_table: ``AGENT_SKILLS`.`AUDIT_PROBE`.`ZZ_FIDELITY_M2N_20261006T234717_69D328``
 - dbx_profile: `Production`

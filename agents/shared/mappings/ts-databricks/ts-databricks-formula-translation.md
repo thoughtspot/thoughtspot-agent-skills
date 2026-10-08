@@ -781,7 +781,7 @@ total at every row of the fixture.
 
 **Decision (user, 2026-10-07): return zero only when the source asks for zero.** The three
 division behaviours, from compiled SQL and values in formula fidelity M2 (se-thoughtspot
-`DBX_DAMIAN`, the same SQL warehouse as the oracle):
+`DBX_CONNECTION`, the same SQL warehouse as the oracle):
 
 | ThoughtSpot | Compiles to | Zero divisor | NULL divisor | NULL dividend |
 |---|---|---|---|---|
@@ -931,7 +931,7 @@ are CONFIRMED cross-platform at every grain, no caveat needed.
 
 ### Non-ANSI semantics on a ThoughtSpot Databricks connection (BL-358, documented 2026-10-07)
 
-ThoughtSpot's queries over `DBX_DAMIAN` behaved as **non-ANSI** in formula fidelity M2,
+ThoughtSpot's queries over `DBX_CONNECTION` behaved as **non-ANSI** in formula fidelity M2,
 where a default session on the same SQL warehouse reads back `ansi_mode = true`
 (`docs/reviews/2026-10-07-fidelity-m2-databricks.md`):
 

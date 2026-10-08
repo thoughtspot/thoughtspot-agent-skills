@@ -1,5 +1,5 @@
 # Reference multi-tenancy topology — the cluster state the platform's verification rounds
-# were run against (profile `nebula-damian-alias`).
+# were run against (profile `dev-cluster`).
 #
 # CAPTURED, not hand-written: produced by `ts tenancy export` from a working environment,
 # so it cannot quietly disagree with the cluster it claims to describe. Re-capture with:

@@ -129,7 +129,7 @@ Keep the family coherent with the detailed view (same hues, darker/saturated). S
 
 ## 7. Verification (headless Chrome; `view`/`focusSet` are module-scoped, read the DOM)
 
-Build the GTM export (`/private/tmp/claude-501/-Users-damianwaldron-Dev/45ed40f8-ed5a-4cd3-ae51-f5f2769524fd/scratchpad/export.json`) and the mini control. Assert:
+Build the GTM export (`<scratchpad>/export.json`) and the mini control. Assert:
 
 1. **Renders** — GTM 79 `g.node`, zero `pageerror`.
 2. **Non-scaling stroke present** — node body rect and edge path carry `vector-effect="non-scaling-stroke"`.

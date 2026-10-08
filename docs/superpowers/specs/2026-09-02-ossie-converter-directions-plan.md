@@ -8,15 +8,15 @@
 
 **Tech Stack:** Python 3.10+, PyYAML>=6.0, pytest, hypothesis (test-only, final task). No new runtime dependency — upstream's PR template gates those on PMC/IPMC approval.
 
-**Spec:** `/Users/damianwaldron/Dev/ts/thoughtspot-agent-skills/docs/superpowers/specs/2026-07-29-ossie-thoughtspot-converter-design.md`
+**Spec:** `~/Dev/ts/thoughtspot-agent-skills/docs/superpowers/specs/2026-07-29-ossie-thoughtspot-converter-design.md`
 
 **Mapping documents — the binding authority for every rule cited by id below.** Read the
 section named in a task, not the whole file:
 
 - Constructs, identifiers, stash, datatypes, R-rules:
-  `/Users/damianwaldron/Dev/ts/thoughtspot-agent-skills/docs/ossie/ts-ossie-construct-mapping.md`
+  `~/Dev/ts/thoughtspot-agent-skills/docs/ossie/ts-ossie-construct-mapping.md`
 - Function/operator classification:
-  `/Users/damianwaldron/Dev/ts/thoughtspot-agent-skills/docs/ossie/ts-ossie-function-mapping.md`
+  `~/Dev/ts/thoughtspot-agent-skills/docs/ossie/ts-ossie-function-mapping.md`
 
 Paths are absolute because the code lives in a **different repository** from the mapping
 documents (`~/Dev/ts/ossie` vs `~/Dev/ts/thoughtspot-agent-skills`). A relative path will
@@ -44,8 +44,8 @@ Every task's requirements implicitly include this section.
 
 ## What already exists — do not rebuild it
 
-The package is at `/Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot/`. 289 tests pass.
-Run them with `cd /Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot && uv run --python 3.13 pytest tests/ -q`.
+The package is at `~/Dev/ts/ossie/converters/thoughtspot/`. 289 tests pass.
+Run them with `cd ~/Dev/ts/ossie/converters/thoughtspot && uv run --python 3.13 pytest tests/ -q`.
 
 | Module | Public surface a task may use |
 |---|---|
@@ -112,8 +112,8 @@ what are its name and arguments; where are its column references; and what does 
 with those references rewritten.
 
 **Files:**
-- Create: `/Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot/src/ossie_thoughtspot/formula.py`
-- Test: `/Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot/tests/test_formula.py`
+- Create: `~/Dev/ts/ossie/converters/thoughtspot/src/ossie_thoughtspot/formula.py`
+- Test: `~/Dev/ts/ossie/converters/thoughtspot/tests/test_formula.py`
 
 **Interfaces:**
 - Consumes: `identifiers.split_column_ref`, `identifiers.format_column_ref`.
@@ -257,7 +257,7 @@ class TestRewriteColumnRefs:
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot && uv run --python 3.13 pytest tests/test_formula.py -q`
+Run: `cd ~/Dev/ts/ossie/converters/thoughtspot && uv run --python 3.13 pytest tests/test_formula.py -q`
 Expected: collection error, `ModuleNotFoundError: No module named 'ossie_thoughtspot.formula'`.
 
 - [ ] **Step 3: Implement the module**
@@ -434,18 +434,18 @@ def rewrite_column_refs(
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot && uv run --python 3.13 pytest tests/test_formula.py -q`
+Run: `cd ~/Dev/ts/ossie/converters/thoughtspot && uv run --python 3.13 pytest tests/test_formula.py -q`
 Expected: all pass.
 
 - [ ] **Step 5: Confirm the whole suite still passes**
 
-Run: `cd /Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot && uv run --python 3.13 pytest tests/ -q`
+Run: `cd ~/Dev/ts/ossie/converters/thoughtspot && uv run --python 3.13 pytest tests/ -q`
 Expected: 289 prior + the new ones.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/damianwaldron/Dev/ts/ossie
+cd ~/Dev/ts/ossie
 git add converters/thoughtspot/src/ossie_thoughtspot/formula.py converters/thoughtspot/tests/test_formula.py
 git commit -m "feat(thoughtspot): shallow formula tokenizer for reference rewriting and call splitting"
 ```
@@ -455,8 +455,8 @@ git commit -m "feat(thoughtspot): shallow formula tokenizer for reference rewrit
 ### Task 2: `datatypes.py` — the bidirectional datatype map
 
 **Files:**
-- Create: `/Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot/src/ossie_thoughtspot/datatypes.py`
-- Test: `/Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot/tests/test_datatypes.py`
+- Create: `~/Dev/ts/ossie/converters/thoughtspot/src/ossie_thoughtspot/datatypes.py`
+- Test: `~/Dev/ts/ossie/converters/thoughtspot/tests/test_datatypes.py`
 
 **Read first:** the *Datatype map* section of the construct-mapping document (absolute path
 in the header). Its table is the specification for this module; transcribe it, do not
@@ -568,7 +568,7 @@ class TestDeclaredLoss:
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cd /Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot && uv run --python 3.13 pytest tests/test_datatypes.py -q`
+Run: `cd ~/Dev/ts/ossie/converters/thoughtspot && uv run --python 3.13 pytest tests/test_datatypes.py -q`
 Expected: `ModuleNotFoundError`.
 
 - [ ] **Step 3: Implement**
@@ -674,7 +674,7 @@ def declared_loss(datatype: str) -> str | None:
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/damianwaldron/Dev/ts/ossie
+cd ~/Dev/ts/ossie
 git add converters/thoughtspot/src/ossie_thoughtspot/datatypes.py converters/thoughtspot/tests/test_datatypes.py
 git commit -m "feat(thoughtspot): bidirectional datatype map with declared losses named"
 ```
@@ -687,8 +687,8 @@ TML's structural half, with no Ossie vocabulary in it at all: loading a 1+N docu
 and serialising one back under the invariants that make it importable.
 
 **Files:**
-- Create: `/Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot/src/ossie_thoughtspot/tml.py`
-- Test: `/Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot/tests/test_tml.py`
+- Create: `~/Dev/ts/ossie/converters/thoughtspot/src/ossie_thoughtspot/tml.py`
+- Test: `~/Dev/ts/ossie/converters/thoughtspot/tests/test_tml.py`
 
 **Read first:** rules **R1, R2, R5, R9, R10, R11** in the *Reverse-direction rules* section
 of the construct-mapping document.
@@ -1013,7 +1013,7 @@ def dump_document_set(document_set: DocumentSet) -> list[tuple[str, str]]:
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/damianwaldron/Dev/ts/ossie
+cd ~/Dev/ts/ossie
 git add converters/thoughtspot/src/ossie_thoughtspot/tml.py converters/thoughtspot/tests/test_tml.py
 git commit -m "feat(thoughtspot): TML document set with the R2/R9/R10/R11 serialisation invariants"
 ```
@@ -1039,8 +1039,8 @@ The forward direction's hardest half, and the one where a mistake is silent rath
 loud. Converts a Model `columns[]` entry into an Ossie field, including the dialect entries.
 
 **Files:**
-- Create: `/Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot/src/ossie_thoughtspot/tml_to_ossie.py`
-- Test: `/Users/damianwaldron/Dev/ts/ossie/converters/thoughtspot/tests/test_tml_to_ossie_fields.py`
+- Create: `~/Dev/ts/ossie/converters/thoughtspot/src/ossie_thoughtspot/tml_to_ossie.py`
+- Test: `~/Dev/ts/ossie/converters/thoughtspot/tests/test_tml_to_ossie_fields.py`
 
 **Read first:** *Field and metric level → Fields*, and *Expression handling*, in the
 construct-mapping document. Rules **ID1, ID3, X9**.
@@ -1390,7 +1390,7 @@ fragments the field and metric converters returned. Return everything plus the i
   reference is the same leak.
 - `test_an_empty_payload_writes_no_stash_entry` (X6).
 - `test_the_output_validates_against_the_upstream_schema` — load
-  `/Users/damianwaldron/Dev/ts/ossie/core-spec/ossie-schema.json` and validate. Skip with
+  `~/Dev/ts/ossie/core-spec/ossie-schema.json` and validate. Skip with
   `pytest.importorskip("jsonschema")` so the package keeps its single runtime dependency
   while still getting the check wherever `jsonschema` is available.
 
@@ -1551,7 +1551,7 @@ must work); other vendors' extensions survive; the full set reloads through
 **Files:** create `tests/fixtures/tpcds/*.table.tml`, `tests/fixtures/tpcds/*.model.tml`,
 `tests/fixtures/tpcds/expected.ossie.yaml`; and `tests/fixtures/minimal/` likewise.
 
-**Why TPC-DS specifically.** `/Users/damianwaldron/Dev/ts/ossie/examples/tpcds_semantic_model.yaml`
+**Why TPC-DS specifically.** `~/Dev/ts/ossie/examples/tpcds_semantic_model.yaml`
 is the model every other converter round-trips — 5 datasets, 31 fields, 4 relationships,
 5 metrics. Matching it makes this converter comparable to its siblings rather than tested
 against a shape only it has seen. Read that file first and mirror its dataset, field,
@@ -1670,9 +1670,9 @@ Keep `max_examples` modest (the default is fine) and set a deadline generous eno
 ### Task 14: README, packaging, CI
 
 **Files:** modify `README.md`, `pyproject.toml`, `uv.lock`,
-`/Users/damianwaldron/Dev/ts/ossie/.github/workflows/converter-thoughtspot-ci.yml`,
-`/Users/damianwaldron/Dev/ts/ossie/converters/README.md`,
-`/Users/damianwaldron/Dev/ts/ossie/core-spec/spec.md`.
+`~/Dev/ts/ossie/.github/workflows/converter-thoughtspot-ci.yml`,
+`~/Dev/ts/ossie/converters/README.md`,
+`~/Dev/ts/ossie/core-spec/spec.md`.
 
 - **README** — document both directions, the CLI, the `custom_extensions[THOUGHTSPOT]`
   payload, and, in a section of its own, **what is not translated and why**: expressions

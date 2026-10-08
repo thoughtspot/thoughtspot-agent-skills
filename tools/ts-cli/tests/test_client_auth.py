@@ -248,9 +248,9 @@ class TestOrgSupport:
             assert client._org_auth_fields() == {"org_id": 1417628299}
 
     def test_non_numeric_org_falls_back_to_identifier(self):
-        with patch.dict("os.environ", {"TS_ORG": "AnujSeth"}):
+        with patch.dict("os.environ", {"TS_ORG": "TestOrg"}):
             client = _make_client()
-            assert client._org_auth_fields() == {"org_identifier": "AnujSeth"}
+            assert client._org_auth_fields() == {"org_identifier": "TestOrg"}
 
     def test_org_makes_token_cache_key_distinct(self):
         import os

@@ -1,7 +1,7 @@
 # Choosing between CSR and CLS — the decision, and the evidence
 
 Reference for [`../SKILL.md`](../SKILL.md) Step 6. Everything here is live-verified on
-`nebula-damian-alias`; each row names the round that settled it.
+`<redacted-cluster>`; each row names the round that settled it.
 
 Design: [`2026-07-27-ts-security-columns-skill-design.md`](../../../../docs/superpowers/specs/2026-07-27-ts-security-columns-skill-design.md).
 Evidence: [`2026-07-27-ts-security-columns-live-verification.md`](../../../../docs/superpowers/verification/2026-07-27-ts-security-columns-live-verification.md).

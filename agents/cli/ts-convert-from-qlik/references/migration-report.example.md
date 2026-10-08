@@ -1,7 +1,7 @@
 # Qlik → ThoughtSpot migration report
 
 **Source:** Sales App — *Sales Performance Dashboard* &nbsp;&nbsp; **Generated:** 2026-07-17
-**Target:** ps-internal.thoughtspot.cloud / connection `QlikMig_CaseStudy_SF` / `SALES_DW.STAR_SCHEMA`
+**Target:** {your-instance}.thoughtspot.cloud / connection `QlikMig_CaseStudy_SF` / `SALES_DW.STAR_SCHEMA`
 **Provenance:** data model = **SOURCE** (read from the warehouse) · charts = **INFERRED** from the dashboard PDF (verify)
 
 ## Executive summary

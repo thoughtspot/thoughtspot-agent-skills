@@ -3,7 +3,7 @@
 Every rule in `SKILL.md` costs something to learn. This records what, so nobody
 "simplifies" the order back to a version that was already tried.
 
-All findings are live-verified on `nebula-damian-alias` unless marked otherwise. Full
+All findings are live-verified on `<redacted-cluster>` unless marked otherwise. Full
 accounts under `docs/superpowers/verification/`.
 
 ---

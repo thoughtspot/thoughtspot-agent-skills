@@ -1680,7 +1680,7 @@ expression ends with `)` after `else`, but rare enough to be acceptable as a war
 **Source:** codification sweep 2026-06-29 (angle #11b), priority #7.
 **Affects:** `agents/cli/ts-convert-from-tableau/`, `tools/ts-cli/`.
 **Status:** DONE (archived 2026-07-23).
-**Closed by:** 2026-07-23 triage: `ts tableau build-liveboard` (`ts_cli/commands/tableau.py:1365`) + `extract_dashboards()` (`ts_cli/tableau/dashboards.py`) shipped v0.59.0/v0.60.0, live-verified against FedEx VEDR (18 auto-extracted tiles, lint-clean) per CHANGELOG.
+**Closed by:** 2026-07-23 triage: `ts tableau build-liveboard` (`ts_cli/commands/tableau.py:1365`) + `extract_dashboards()` (`ts_cli/tableau/dashboards.py`) shipped v0.59.0/v0.60.0, live-verified against a fleet-safety dashboard workbook (18 auto-extracted tiles, lint-clean) per CHANGELOG.
 
 ### Problem
 

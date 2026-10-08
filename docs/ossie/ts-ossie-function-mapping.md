@@ -642,7 +642,7 @@ loses the partition, for the reason in [**E13**](#window-functions).
 ## Window rows live-confirmed — 2026-07-30
 
 Every window and semi-additive signature in this document was probed on **se-thoughtspot**
-(`https://se-thoughtspot-cloud.thoughtspot.cloud`) on **2026-07-30** with
+(the SE demo cluster) on **2026-07-30** with
 `ts tml import --policy VALIDATE_ONLY`, one throwaway model formula per probe so each result is
 individually attributable. **52 probes — 31 accepted, 21 rejected.** Nothing was persisted (verified
 after the run: zero objects matching the probe prefix, and the substrate model's export
@@ -706,7 +706,7 @@ same trap as the format-pattern acceptance in the 2026-07-29 pass:
 
 The four classifications that rested on documentation rather than a live import have been
 **settled empirically**. Verification ran on **se-thoughtspot**
-(`https://se-thoughtspot-cloud.thoughtspot.cloud`) on **2026-07-29** via
+(the SE demo cluster) on **2026-07-29** via
 `ts tml import --policy VALIDATE_ONLY`, one throwaway model formula per probe so each
 result is individually attributable. The method was validated with controls in the same
 pass: `concat`, `substr`, `contains`, `strlen` and `strpos` accepted; `upper` rejected.

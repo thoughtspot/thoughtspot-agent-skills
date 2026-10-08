@@ -3,7 +3,7 @@
 Unverified assumptions / follow-ups. Each must reach VERIFIED (live or via MCP spec) or be
 explicitly deferred before this ships live.
 
-## #1 — Live e2e faithful-numbers proof — VERIFIED 2026-07-16 (ps-internal, AnujSeth org)
+## #1 — Live e2e faithful-numbers proof — VERIFIED 2026-07-16 (ps-internal, a test Org)
 
 Full chain proven live. `build-model` → the 10 Table TMLs validate against the real Databricks
 connection ("Sisense Migration - Databricks", `workspace.sisense_demo`). `VALIDATE_ONLY` flags two
@@ -39,7 +39,7 @@ auto-resolve; a durable pin needs a captured (exported) GUID-based config. Verif
 appear as Skipped rows in the report yet (the liveboard itself is correct). A later enhancement
 records skipped decorations + measures on no visual. Not a blocker.
 
-## #5 — Spotter last-mile — VERIFIED 2026-07-21 (ps-internal, AnujSeth org)
+## #5 — Spotter last-mile — VERIFIED 2026-07-21 (ps-internal, a test Org)
 
 `ts spotter answer` (`POST ai/answer/create`) drafts a flagged time-intelligence measure from
 plain English on a Spotter-enabled model. Verified live on the Employee model (`e17c5fae`):

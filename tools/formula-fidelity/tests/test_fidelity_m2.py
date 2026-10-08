@@ -115,7 +115,7 @@ def test_databricks_literals_and_load_sql():
 
 def test_databricks_table_tml_is_lower_case():
     names = B.object_names("M2", "STAMP")
-    t = B.table_tml(FX, names, "DBX_DAMIAN", "AGENT_SKILLS", "AUDIT_PROBE")["table"]
+    t = B.table_tml(FX, names, "DBX_CONNECTION", "AGENT_SKILLS", "AUDIT_PROBE")["table"]
     assert (t["db"], t["schema"], t["db_table"]) == (
         "agent_skills", "audit_probe", "zz_fidelity_m2_stamp")
     assert t["name"] == "ZZ_FIDELITY_M2_STAMP_TABLE_DELETE_ME"
@@ -230,7 +230,7 @@ def test_default_warehouse_factory_dispatches_on_the_fixture(monkeypatch):
 
 # -- credentials: env var, then the OS credential store; never ~/.databrickscfg -----------
 
-SP = {"name": "Production", "host": "https://dbc-x.cloud.databricks.com/", "auth_type": "oauth-m2m",
+SP = {"name": "Production", "host": "https://dbc-xxxxx.cloud.databricks.com/", "auth_type": "oauth-m2m",
       "client_id": "cid", "secret_env": "DATABRICKS_SP_SECRET_PRODUCTION",
       "dbx_profile": "ts-production"}
 
@@ -239,7 +239,7 @@ def test_credentials_prefer_the_env_var():
     asked = []
     kw = live.dbx_credentials(SP, getenv=lambda k: "s3" if k == SP["secret_env"] else None,
                               get_password=lambda *a: asked.append(a))
-    assert kw == {"host": "https://dbc-x.cloud.databricks.com", "auth_type": "oauth-m2m",
+    assert kw == {"host": "https://dbc-xxxxx.cloud.databricks.com", "auth_type": "oauth-m2m",
                   "client_id": "cid", "client_secret": "s3"}
     assert asked == []
 
@@ -335,3 +335,12 @@ def test_bl366_round_trip_cases_read_back_as_safe_divide(path, case_id, divisor)
     tr = runmod.translate_case(case, fx, "T")
     assert tr["status"] == "TRANSLATED"
     assert tr["formula"] == f"safe_divide ( [T::N1] , {divisor} )"
+
+
+def test_rel_records_an_outside_repo_path_by_name_only(tmp_path):
+    # Run records are committed to a public repo; an absolute scratch path carries the
+    # operator's user name. Only the basename may be recorded.
+    outside = tmp_path / "home-dir-of-someone" / "probe.jsonl"
+    assert runmod._rel(outside) == "<outside repo>/probe.jsonl"
+    inside = runmod.REPO / "tools" / "formula-fidelity" / "run.py"
+    assert runmod._rel(inside) == "tools/formula-fidelity/run.py"

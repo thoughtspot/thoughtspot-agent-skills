@@ -1,7 +1,7 @@
 # `ts-security-columns` — live verification
 
 **Date:** 2026-07-27
-**Cluster:** profile `nebula-damian-alias`, Orgs Primary (0) / ORG1 (12750490) / ORG2 / ORG3
+**Cluster:** profile `<redacted-profile>`, Orgs Primary (0) / ORG1 (12750490) / ORG2 / ORG3
 **Branch:** `feat/ts-security-columns`
 **Baseline:** captured before any change, restored after, diff proven by a final read on
 six dimensions (§7).
@@ -50,7 +50,7 @@ With those five held, the only variable left in §3 is **publication**.
 
 ```
 $ ts security column-rules set --table d3a688f2-... \
-    --rule "UNIT_PRICE_AMT=Demo Retail Group" --org ORG1 -p nebula-damian-alias
+    --rule "UNIT_PRICE_AMT=Demo Retail Group" --org ORG1 -p <redacted-profile>
 applied d3a688f2-...: REPLACE UNIT_PRICE_AMT
 ```
 
@@ -81,7 +81,7 @@ this test (`ts publish` pipeline; `published_to: ["ORG1"]`, `is_published: true`
 
 ```
 $ ts security column-rules set --table d2c12c11-... \
-    --rule "UNIT_PRICE_AMT=Demo Retail Group" --org ORG1 -p nebula-damian-alias
+    --rule "UNIT_PRICE_AMT=Demo Retail Group" --org ORG1 -p <redacted-profile>
 Refusing to set column security on 'T2_PUBLISH': it is published to ORG1. ...
 Pass --allow-published if owning-Org-only scope is genuinely what you want here
 ```
@@ -125,7 +125,7 @@ Same table, same moment, same column, from Primary:
 
 ```
 $ ts security column-rules set --table d2c12c11-... --rule "UNIT_PRICE_AMT=Analyst" \
-    --allow-published -p nebula-damian-alias
+    --allow-published -p <redacted-profile>
 applied d2c12c11-...: REPLACE UNIT_PRICE_AMT
 ```
 
@@ -158,7 +158,7 @@ capability cannot be probed by reading; it has to be inferred from publication s
 The mechanism design §2.1 nominates for published-in rows, tested in the same state:
 
 ```
-$ ts share apply --input plan.json -p nebula-damian-alias
+$ ts share apply --input plan.json -p <redacted-profile>
 [ORG1] LOGICAL_COLUMN: T2_PUBLISH.UNIT_PRICE_AMT -> Demo Retail Group=READ_ONLY
 applied 1 share call(s)
 ```
@@ -215,7 +215,7 @@ Resolution and column listing run in the **default Org**; only `_fetch_permissio
 object native to ORG1:
 
 ```
-$ ts share export d3a688f2-... --org ORG1 -p nebula-damian-alias
+$ ts share export d3a688f2-... --org ORG1 -p <redacted-profile>
 Invalid value: Could not resolve 'd3a688f2-...'.
 ```
 

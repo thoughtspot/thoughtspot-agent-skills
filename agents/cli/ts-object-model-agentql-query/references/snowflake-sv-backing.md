@@ -1,7 +1,7 @@
 # AgentQL over a Snowflake Semantic View backing (EXPERIMENTAL)
 
 > **Status: EXPERIMENTAL / in dev.** Behaviour live-verified 2026-07-21 on the
-> `ashok-direct-query` cluster (model `8ccee1a7-6fb5-4987-bfc8-dbadca9c6cab`,
+> `<redacted-cluster>` cluster (model `8ccee1a7-6fb5-4987-bfc8-dbadca9c6cab`,
 > "Direct Query - Dunder Mifflin Sales & Inventory") and cross-checked natively
 > on Snowflake (`thoughtspot_partner.ap-southeast-2`) against the backing SV
 > `DUNDERMIFFLIN.PUBLIC_SV.TEST_SV_DUNDER_MIFFLIN_SALES_INVENTORY`. Full write-up

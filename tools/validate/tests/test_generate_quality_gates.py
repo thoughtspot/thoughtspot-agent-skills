@@ -15,6 +15,7 @@ from generate_quality_gates import (
     _extract_docstring,
     _find_trigger,
     _humanise_trigger,
+    _parse_ci,
     _parse_precommit,
 )
 
@@ -239,6 +240,19 @@ class TestParsePrecommit:
 # strip_volatile — BL-192
 # ---------------------------------------------------------------------------
 
+class TestParseCi:
+    def test_warn_flag_marks_ci_only_check_soft(self, tmp_path):
+        f = tmp_path / "validate.yml"
+        f.write_text(dedent('''\
+            steps:
+              - run: |
+                  python3 tools/validate/check_pr_size.py --root . --base origin/main --warn
+                  python3 tools/validate/check_secrets.py --root . --all || rc=1
+        '''))
+        modes = {e["validator"]: e["mode"] for e in _parse_ci(f)}
+        assert modes == {"check_pr_size.py": "soft", "check_secrets.py": "gate"}
+
+
 class TestStripVolatile:
     """The catalog embeds a git-log date per validator, so its rendered form is a
     function of repo HISTORY, not repo CONTENTS. A byte-exact --check therefore
@@ -263,6 +277,12 @@ class TestStripVolatile:
         b = "\n".join([self.HEADER, self.SEP, self._row(1, "TML structure", date="2026-07-30")])
 
         assert a != b, "fixtures must actually differ, or this test proves nothing"
+        assert strip_volatile(a) == strip_volatile(b)
+
+    def test_soft_row_date_difference_is_not_stale(self):
+        """Warn-only rows render as `soft`; their dates are just as volatile."""
+        a = "\n".join([self.HEADER, self.SEP, self._row(1, "pr size", mode="soft", date="unknown")])
+        b = "\n".join([self.HEADER, self.SEP, self._row(1, "pr size", mode="soft", date="2026-10-08")])
         assert strip_volatile(a) == strip_volatile(b)
 
     def test_structural_difference_is_still_stale(self):

@@ -42,7 +42,7 @@ Verified on two other fixtures instead, one per match path:
 
 | Path | Set (Model) | Liveboard | Result |
 |---|---|---|---|
-| `search_query` + `answer_columns` | *Promotion Id set* `223a23fc-f5af-4460-908f-e72a9257000e` (Model *Just Eat v3* `8b07b2bc-…`) | *Just Eat v3* `73df2a30-e378-44c3-a113-00f269717d19`, plus *Luke Copy of Just Eat v3* `ee7f0be1-…` and *Food Supy Liveboard* `de54cbe2-…` | All three listed, each with `Viz_7` *Promotion Impact on AOV* (`average [Order Revenue] [Promotion Id set]`), `filter: false` |
+| `search_query` + `answer_columns` | *Promotion Id set* `223a23fc-f5af-4460-908f-e72a9257000e` (Model `<redacted-model>` `8b07b2bc-…`) | `<redacted-model>` `73df2a30-e378-44c3-a113-00f269717d19`, plus `<redacted-model>` (a copy) `ee7f0be1-…` and *Food Supy Liveboard* `de54cbe2-…` | All three listed, each with `Viz_7` *Promotion Impact on AOV* (`average [Order Revenue] [Promotion Id set]`), `filter: false` |
 | `formulas[].expr` | *mytop5* `3fbe9ac6-…`, *mytop10* `8c1cbe6e-…` (Model *Paul - Snowflake Retapp* `5bb6feec-…`) | *Dynamic Set Selection* `eb3871ab-c026-4459-ad2e-aad002cc7f3b` | Both Sets list it with `Viz_1` *Total Sales by fx*, `filter: false` |
 
 **Divergence (class, not detection) — resolved by #6.** All four Sets above classified
@@ -177,10 +177,10 @@ a Model it never inspected.
 |---|---|---|
 | (a) bogus GUID `00000000-0000-0000-0000-000000000000` | Primary | **HTTP 404**, `code 13003`, "Object with Id … of type: LOGICAL_TABLE not found" |
 | (b) Answer GUID `b8b5788b-986f-4999-9408-224d88082e3f` | Primary | **HTTP 403**, `code 10003`, `debug: [null]` |
-| (c) Dunder Mifflin `829a3344-…` (Primary-owned) | DamianTest `1859868966` (session read back as DamianTest) | **HTTP 404**, `code 13003`, not found; `metadata/search` of the GUID from DamianTest: `[]` |
-| (c′) the 17 Models visible in DamianTest (all Primary-owned system/sample Models; DamianTest owns none) | DamianTest | 200 for each. 16 return `[]` from both Orgs. *TS: BI Server* `eaab6de7-…` returns `[]` from DamianTest but **4 Sets from Primary** (*Monthly User Logins*, *First Use*, *uc users set*, *Org Name セット*). `metadata/search` of each of those four Set GUIDs: 1 hit from Primary, **0 from DamianTest** — they are Primary-Org objects, so the per-Org listing is consistent with what that Org can see |
+| (c) Dunder Mifflin `829a3344-…` (Primary-owned) | `<redacted-org>` `1859868966` (session read back as `<redacted-org>`) | **HTTP 404**, `code 13003`, not found; `metadata/search` of the GUID from `<redacted-org>`: `[]` |
+| (c′) the 17 Models visible in `<redacted-org>` (all Primary-owned system/sample Models; `<redacted-org>` owns none) | `<redacted-org>` | 200 for each. 16 return `[]` from both Orgs. *TS: BI Server* `eaab6de7-…` returns `[]` from `<redacted-org>` but **4 Sets from Primary** (*Monthly User Logins*, *First Use*, *uc users set*, *Org Name セット*). `metadata/search` of each of those four Set GUIDs: 1 hit from Primary, **0 from `<redacted-org>`** — they are Primary-Org objects, so the per-Org listing is consistent with what that Org can see |
 | (d) `showhidden=true` vs `false` | Primary | Dunder Mifflin: 9 Sets either way. **Sweep of all 1,908 Primary Models**: 418 Sets across 108 Models with `false`, 418 with `true`, no Model differs, and no row carries `header.isHidden: true` |
-| (e) `ts migrate scan-sets --source-profile se-thoughtspot --source-org DamianTest --all-models` (docstring: read-only) | DamianTest | exit 0; `DamianTest: no Models in scope`; `scanned {orgs: 1, models: 0}`, `summary` all zero, `models_incomplete: 0`, no notes. `--all-models` keeps Models the Org **owns**, and DamianTest owns none |
+| (e) `ts migrate scan-sets --source-profile se-thoughtspot --source-org <redacted-org> --all-models` (docstring: read-only) | `<redacted-org>` | exit 0; `<redacted-org>: no Models in scope`; `scanned {orgs: 1, models: 0}`, `summary` all zero, `models_incomplete: 0`, no notes. `--all-models` keeps Models the Org **owns**, and `<redacted-org>` owns none |
 
 **Decision rule — not triggered.** Every unresolvable GUID (a, b, c) is an HTTP error. The client
 exits on it, `discover_sets` records `discovery_failed`, and the Model is `INCOMPLETE`, so

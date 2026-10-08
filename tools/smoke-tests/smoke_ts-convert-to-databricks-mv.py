@@ -30,13 +30,14 @@ Two parts:
 Usage:
     python tools/smoke-tests/smoke_ts-convert-to-databricks-mv.py
     python tools/smoke-tests/smoke_ts-convert-to-databricks-mv.py --live \\
-        --dbx-cli-profile ts-production --warehouse-id c6ed539a60038b93 \\
+        --dbx-cli-profile ts-production --warehouse-id <warehouse-id> \\
         --catalog agent_skills
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -227,8 +228,9 @@ def main() -> int:
                              "gracefully if credentials/warehouse aren't available)")
     parser.add_argument("--dbx-cli-profile", default="ts-production",
                         help="databricks CLI profile name (~/.databrickscfg)")
-    parser.add_argument("--warehouse-id", default="c6ed539a60038b93",
-                        help="Databricks SQL warehouse ID")
+    parser.add_argument("--warehouse-id", default=os.environ.get("DATABRICKS_WAREHOUSE_ID", ""),
+                        help="Databricks SQL warehouse ID (default: $DATABRICKS_WAREHOUSE_ID; "
+                             "the live step skips when neither is set)")
     parser.add_argument("--catalog", default="agent_skills",
                         help="Databricks catalog for the scratch schema")
     args = parser.parse_args()
@@ -248,6 +250,8 @@ def main() -> int:
 
     if args.live:
         def live_step():
+            if not args.warehouse_id:
+                raise SkipStep("no SQL warehouse: pass --warehouse-id or set DATABRICKS_WAREHOUSE_ID")
             try:
                 step_live_roundtrip(args.dbx_cli_profile, args.warehouse_id, args.catalog)
             except Exception as e:

@@ -271,7 +271,7 @@ now emits a `dashboards` key (each `<dashboard>` → visuals with mark + fields 
 shelf/role/measure, calc-id→caption resolution, date buckets, grid tiles) via
 `ts_cli/tableau/dashboards.py`. `ts tableau build-liveboard --input <parse.json> --model-name
 <model>` consumes it directly — **parse→build-liveboard now runs with no hand-assembled spec**.
-Live-verified on the FedEx VEDR workbook: parse → 18 auto-extracted visuals → build-liveboard
+Live-verified on a fleet-safety dashboard workbook: parse → 18 auto-extracted visuals → build-liveboard
 emitted a clean-linting 18-tile liveboard bound to the model (vs the prior hand-picked subset).
 
 Remaining fidelity follow-ons (not blockers): (a) caption↔model-formula-name reconciliation

@@ -1,7 +1,7 @@
 # `ts security column-rules` CLI design
 
 **Date:** 2026-07-26
-**Status:** LIVE-VERIFIED on `nebula-damian-alias`, 2026-07-27, across two API-level
+**Status:** LIVE-VERIFIED on `<redacted-cluster>`, 2026-07-27, across two API-level
 verification rounds, PLUS a third, conclusive data-plane round (2026-07-27, manual UI
 test against real non-admin users) that fully answers Q6. All seven §8 questions
 (including Q7, added during verification) are now ANSWERED; six defects found and fixed
@@ -125,14 +125,14 @@ read-modify-write of the whole table.
   while the response schema shows a bare array with snake_case keys
   (`column_security_rules`, `obj_id`, `source_table_details`). Parse both defensively, the
   way `_normalise_response` does elsewhere in the repo. **Live-verified 2026-07-27** (§8
-  Q3): the schema was the accurate one. `nebula-damian-alias` returned a bare array with
+  Q3): the schema was the accurate one. `<redacted-cluster>` returned a bare array with
   snake_case keys, e.g. `[{"table_guid":"...","obj_id":null,"column_security_rules":[]}]`.
   The camelCase `data`-envelope branch is dead on this build; kept because another build
   could differ, but it has never been exercised against a real response.
 - Required permissions: `ADMINISTRATION`, or `DATAMANAGEMENT` (RBAC disabled), or
   `CAN_MANAGE_WORKSHEET_VIEWS_TABLES` (RBAC enabled).
 - Both endpoints are Beta, 10.12.0.cl or later, and feature-flagged off by default
-  (parent spec §2.6: `403 code 10023`). The flag is **enabled** on `nebula-damian-alias`
+  (parent spec §2.6: `403 code 10023`). The flag is **enabled** on `<redacted-cluster>`
   (`fetch` returned 200, never 403/10023), so the flag-detection path itself was not
   exercised live.
 
@@ -437,7 +437,7 @@ function in `csr_plan.py`. The cases that matter most:
 
 ## 8. Live verification plan -- RESULTS (2026-07-27)
 
-Cluster: profile `nebula-damian-alias`, Orgs Primary / ORG1 / ORG2 / ORG3, tables
+Cluster: profile `<redacted-profile>`, Orgs Primary / ORG1 / ORG2 / ORG3, tables
 T1 / T2 / T3_PUBLISH. CSR is enabled there. Full account, including the baseline
 capture/restore, in
 [`docs/superpowers/verification/2026-07-26-ts-security-column-rules-live-verification.md`](../verification/2026-07-26-ts-security-column-rules-live-verification.md).

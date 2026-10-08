@@ -161,7 +161,7 @@ side does not protect you — deduping the key side is the only guard.
 > **The CTE's grouped (or `DISTINCT`) column set must be a *subset* of the columns in the
 > join's `ON` equality** — or the CTE must return exactly one row.
 
-Measured on `T1_PUBLISH_MODEL` (nebula-damian-alias, 2026-08-04), where the true
+Measured on `T1_PUBLISH_MODEL` (`<redacted-cluster>`, 2026-08-04), where the true
 `SUM(QTY_ON_HAND)` is **18,695**:
 
 | Key CTE | Result |
@@ -204,7 +204,7 @@ Two further shapes verified the same day, which together make the pattern compos
 
 For the negation ("members NOT in the set") this rewrite does not apply — use the
 LEFT-OUTER-JOIN + `IS NULL` shape in § Dimension-anchored anti-join below. (Verified live
-2026-07-29, nebula-damian-alias: the `IN (SELECT …)` original fails at fetch; this rewrite
+2026-07-29, `<redacted-cluster>`: the `IN (SELECT …)` original fails at fetch; this rewrite
 returns correct rows.)
 
 ## Dimension-anchored anti-join — members with no fact rows
@@ -221,7 +221,7 @@ one selecting a single dimension column, so step 1 below does not hold, both CTE
 the same fact-filtered member list, and the anti-join returns **zero rows** — silently, with
 no error and a plausible-looking result. Models built in the ThoughtSpot UI carry the
 property; **hand-authored model TML does not get it for free**, which is the common way to
-hit this. (Verified 2026-08-10, nebula-damian-alias: the same query on the same star
+hit this. (Verified 2026-08-10, `<redacted-cluster>`: the same query on the same star
 compiled to `FROM FACT_ORDER_LINE LEFT OUTER JOIN DIM_PRODUCT …` without the property and
 to `FROM DIM_PRODUCT` with it — 73 members vs the true 79.)
 

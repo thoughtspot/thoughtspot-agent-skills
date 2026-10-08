@@ -280,7 +280,7 @@ cohort:
       - Total Amount
       client_state: ""
     display_mode: TABLE_MODE
-  owner: damian.waldron@thoughtspot.com
+  owner: user@example.com
   worksheet:
     id: TEST_SV_DMSI_AI_CONTEXT
     name: TEST_SV_DMSI_AI_CONTEXT

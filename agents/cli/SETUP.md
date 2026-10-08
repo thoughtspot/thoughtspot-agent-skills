@@ -335,18 +335,29 @@ or any stored procedures unless you also use Snowsight Workspaces.
 
 ### Install git hooks
 
-The repo ships two git hooks. Install both after cloning:
+The repo ships three git hook scripts. **pre-commit** blocks commits that fail static
+validation (secrets, customer references, references, versions, etc.), and
+**commit-msg** blocks a commit message that links into a tenant's internal systems.
+Install both after cloning:
 
 ```bash
 cd ~/thoughtspot-agent-skills
+bash scripts/install-hooks.sh          # installs the pre-commit and commit-msg dispatchers
+```
 
-# Blocks commits that fail static validation (secrets, references, versions, etc.)
-ln -s ../../scripts/pre-commit.sh .git/hooks/pre-commit
+The dispatchers run the committing worktree's own `scripts/pre-commit.sh` and
+`scripts/commit-msg.sh`. An older branch runs its own older scripts (without newer gates)
+until it merges `main`; CI is the backstop. `bash scripts/install-hooks.sh --check` exits
+1 if either is missing or out of date; a Claude Code session runs that check at start-up.
+An existing hook (such as the older `.git/hooks/pre-commit` symlink) is backed up before
+it is replaced. The installer refuses if `core.hooksPath` is set.
 
-# Blocks pushes where smoke tests fail against a live ThoughtSpot instance
+**pre-push** (optional) runs the smoke tests for skills changed in the pushed commits,
+against a **live** ThoughtSpot instance. The installer deliberately does not enable it.
+Opt in only if you want that:
+
+```bash
 ln -s ../../scripts/pre-push.sh .git/hooks/pre-push
-
-chmod +x scripts/pre-commit.sh scripts/pre-push.sh
 ```
 
 ### Configure smoke test arguments

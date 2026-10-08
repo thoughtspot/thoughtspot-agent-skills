@@ -153,7 +153,7 @@ Smoke test: ts-convert-to-snowflake-sv
 
   Load Snowflake profile...                       [PASS]
   ThoughtSpot auth (ts auth whoami)...            [PASS]
-        Authenticated as: Damian Waldron
+        Authenticated as: Example User
   Extract SV YAML from .md file...                [PASS]
         View name: retail_sales
   Structural validation (check_sv_yaml)...        [PASS]

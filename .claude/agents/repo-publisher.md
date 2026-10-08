@@ -31,6 +31,14 @@ git diff --stat
 
 Show the user which files will be committed. Confirm before proceeding.
 
+**Customer data / confidentiality check — this repo is public.** Read the diff
+(`git diff` plus any new files) for customer names, tenant URLs, employee names or
+customer data in code, examples, fixtures, docs and screenshots, and for citation links
+left in pasted AI-assistant output (`.claude/rules/security.md`, "Customer data and
+confidentiality"). `check_customer_references` catches tenant links only — names and
+data are on you. If you find any, **stop** and report it to the user; do not commit,
+push or open the PR. The commit message, branch name and PR title/body are public too.
+
 ### Step 2: Make sure we're on a feature branch, not `main`
 
 ```bash
@@ -67,6 +75,9 @@ Examples:
 git push -u origin <branch>
 gh pr create --title "<title>" --body "<summary + test plan>"
 ```
+
+The repo's `.github/pull_request_template.md` carries a confidentiality checkbox; tick it
+only after the Step 1 check passed.
 
 Report the PR URL to the user. **Do not merge it.** Merging is a separate, explicit
 decision — by the user, or by a follow-up instruction naming this PR — made once CI

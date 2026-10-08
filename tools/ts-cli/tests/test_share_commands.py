@@ -298,7 +298,7 @@ def _patch_org_index(monkeypatch, index):
 def test_client_for_org_resolves_a_name_to_its_numeric_id(monkeypatch):
     """auth/token/full honours org_id (int) and SILENTLY IGNORES a name.
 
-    Verified live 2026-07-26 on nebula-damian-alias: TS_ORG=ORG1 minted a token whose
+    Verified live 2026-07-26 on dev-cluster: TS_ORG=ORG1 minted a token whose
     current_org was {id: 0, name: Primary}. Passing the name through would apply a
     tenant's grants in the Primary Org while reporting success, so the name must be
     resolved to its id before the client is built.

@@ -10,7 +10,7 @@
   "ts_table": "ZZ_FIDELITY_PROBEQ_20261007T020822_6B8ECA_TABLE_DELETE_ME",
   "ts_model": "ZZ_FIDELITY_PROBEQ_20261007T020822_6B8ECA_DELETE_ME",
   "run_start_ms": 1791338902424,
-  "cases_file": "/private/tmp/claude-501/-Users-damianwaldron-Dev-ts-thoughtspot-agent-skills/853faa8b-9dbf-4548-97b2-3f3c6659b76b/scratchpad/xt.SGShz5/probe/probe2.jsonl",
+  "cases_file": "<outside repo>/probe2.jsonl",
   "cases_sha256": "ad7efb24d443a161483ab34a3fce9121fb4cd11f0835a0e68c5f67aab053ae22",
   "translator_version": "ts-cli 0.164.0",
   "git": {

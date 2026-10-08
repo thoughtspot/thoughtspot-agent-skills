@@ -4,7 +4,7 @@ The skill is a DECISION layer over two mechanisms, so what has to hold is not th
 either pipeline runs -- `ts share` and `ts security column-rules` have their own
 tests -- but that the two engines stay distinguishable in the ways the decision
 depends on. Every assertion below encodes something that was live-verified on
-`nebula-damian-alias` and that, if it regressed, would make the skill recommend a
+`dev-cluster` and that, if it regressed, would make the skill recommend a
 mechanism that silently fails to protect data.
 
 No live ThoughtSpot or Snowflake connection required.

@@ -214,14 +214,26 @@ thoughtspot-agent-skills/
 
 ## Contributing
 
-**Before your first commit, install the pre-commit hook.** It runs the same gates CI
-does, so a stale registry or a failing validator surfaces in seconds locally instead of
-minutes later in CI. It is not installed by a clone — git has no way to do that — so
-this step is manual and easy to miss:
+**Before your first commit, install the git hooks.** The pre-commit hook runs the same
+gates CI does, so a stale registry, a failing validator or a leaked customer link surfaces
+in seconds locally instead of minutes later in CI; the commit-msg hook checks the commit
+message for customer references. A clone cannot install hooks — git has no way to do
+that — so it is one command, and a Claude Code session warns at start-up until it has
+been run:
 
 ```bash
-ln -s ../../scripts/pre-commit.sh .git/hooks/pre-commit
+bash scripts/install-hooks.sh          # installs the pre-commit and commit-msg dispatchers
+bash scripts/install-hooks.sh --check  # exit 1 if either is missing or out of date
 ```
+
+The dispatchers live in the clone's shared hooks directory and run the **committing
+worktree's own** `scripts/pre-commit.sh` and `scripts/commit-msg.sh`. An older branch runs
+its own older `pre-commit.sh`, which lacks gates added since, and has no `commit-msg.sh`
+(that hook then does nothing) until it merges `main`; CI's whole-tree and per-commit scans
+are the backstop. (The older `ln -s … .git/hooks/pre-commit` symlink always ran the main
+checkout's copy; the installer backs it up and replaces it.) It does not set
+`core.hooksPath` and refuses to run if you have set one, and it does not install the
+pre-push hook.
 
 | Resource | What it covers |
 |---|---|

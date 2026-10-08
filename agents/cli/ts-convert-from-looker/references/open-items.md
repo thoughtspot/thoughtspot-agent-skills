@@ -176,7 +176,7 @@ column list with uppercase aliases.
 
 ## #13 — `is_null()` / `isnull()` not supported on all ThoughtSpot instances — VERIFIED
 
-**Finding (2026-06, qwiklab_ecomm migration on ps-internal.thoughtspot.cloud):**
+**Finding (2026-06, qwiklab_ecomm migration on an internal ThoughtSpot cluster):**
 The formula functions `is_null()` and `isnull()` are rejected with:
 `Search did not find "is_null (" in your data or metadata. Expecting one of the valid keywords...`
 

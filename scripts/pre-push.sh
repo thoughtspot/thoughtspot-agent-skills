@@ -5,7 +5,8 @@
 # Blocks the push if a smoke test fails; skips skills that need local config
 # (see tools/smoke-tests/smoke-config.local.json.example) but warns loudly.
 #
-# Install once:
+# Optional, and NOT installed by scripts/install-hooks.sh (it hits a live instance).
+# Opt in with:
 #   ln -s ../../scripts/pre-push.sh .git/hooks/pre-push
 #
 # To skip in an emergency: git push --no-verify (use sparingly)

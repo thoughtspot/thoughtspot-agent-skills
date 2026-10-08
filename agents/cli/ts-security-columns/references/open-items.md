@@ -1,7 +1,7 @@
 # ts-security-columns — Open Items
 
 Behaviour that is unverified, or verified and worth recording because it contradicts the
-published documentation. Everything here was checked against `nebula-damian-alias`
+published documentation. Everything here was checked against `<redacted-cluster>`
 (Orgs Primary / ORG1 / ORG2 / ORG3, CSR feature flag ON, Strict Object Mode ON) unless
 noted.
 

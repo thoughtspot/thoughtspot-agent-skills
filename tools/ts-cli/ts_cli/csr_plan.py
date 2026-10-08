@@ -432,7 +432,7 @@ def diff_csr(before: List[Dict[str, Any]],
 # ---------------------------------------------------------------------------
 
 # Code 10023 is OVERLOADED -- live-verified 2026-07-27 reading CSR from a target Org
-# on `nebula-damian-alias`, a cluster where the feature is demonstrably ON (an
+# on `dev-cluster`, a cluster where the feature is demonstrably ON (an
 # owning-Org CSR update had just succeeded moments earlier):
 #
 #   HTTP 500 {"error":{"message":{"debug":{"code":10023, ...,

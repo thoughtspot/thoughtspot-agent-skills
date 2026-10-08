@@ -7,7 +7,7 @@ deferred before this ships live.
 ## #1 — Live end-to-end conversion on a real cluster — VERIFIED 2026-07-21
 
 Ran the full chain (`parse` → `build-model` → `ts tml lint` → `ts tml import` → `build-liveboard`
-→ import) on **ps-internal**, AnujSeth org, against the live **"Sisense Migration - Databricks"**
+→ import) on **ps-internal**, a test Org, against the live **"Sisense Migration - Databricks"**
 connection (`workspace.sisense_demo`, the captured `sample_ecommerce` bundle):
 
 - **Model TML validated + imported OK** against the real connection, binding to the live

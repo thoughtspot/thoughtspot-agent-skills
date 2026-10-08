@@ -1,6 +1,6 @@
 # ts-object-model-erd — Design
 
-**Status:** Approved (design) · **Date:** 2026-06-27 · **Author:** damian.waldron
+**Status:** Approved (design) · **Date:** 2026-06-27 · **Author:** ThoughtSpot agent-skills maintainers
 
 Render an existing ThoughtSpot Model into an interactive, self-contained HTML ERD —
 structure, joins, columns, audit findings, and row-level security — that opens in any

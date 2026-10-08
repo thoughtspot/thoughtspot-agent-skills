@@ -176,7 +176,7 @@ published Model anyway.
 Column security rules **can** be defined on a published object -- the platform accepts the
 write (`HTTP 204`) and enforces it in the Org where it was defined. The constraint is not an
 API refusal; it is about *where the rule takes effect*: it does not travel with publication.
-Live-verified with real non-admin user sessions on `nebula-damian-alias`: a rule restricting
+Live-verified with real non-admin user sessions on `dev-cluster`: a rule restricting
 a column stayed enforced in the owning Org but the same column remained fully visible in a
 tenant Org the object was published to, with no error and no warning in either Org. See
 `docs/superpowers/verification/2026-07-26-ts-security-column-rules-live-verification.md` §15.

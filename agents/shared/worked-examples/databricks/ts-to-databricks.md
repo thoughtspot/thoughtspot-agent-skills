@@ -9,7 +9,7 @@ snapshot measures, MEASURE()/ANY_VALUE() cross-references, period-over-period
 windows with offset, conditional aggregates via FILTER (WHERE), v1.1 rich
 metadata, and flattened views as a fallback.
 
-Verified against live Databricks instance (`dbc-3472b2da-8a4e.cloud.databricks.com`,
+Verified against live Databricks instance (`your-workspace.cloud.databricks.com`,
 warehouse `AGENT_SKILLS_TESTING` Preview channel) on 2026-05-25.
 
 ---
