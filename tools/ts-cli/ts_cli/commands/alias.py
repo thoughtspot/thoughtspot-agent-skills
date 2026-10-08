@@ -673,9 +673,16 @@ def _report_import(payload: object, context: str) -> None:
     output convention is structured data on stdout, diagnostics on stderr. The exit code
     is what changes.
     """
-    from ts_cli.tml_common import format_import_failures, tml_import_failures
+    from ts_cli.tml_common import (
+        format_import_failures, format_import_warnings,
+        tml_import_failures, tml_import_warnings,
+    )
 
     print(json.dumps(payload))
+    warnings = tml_import_warnings(payload)
+    if warnings:  # imported, with a platform notice -- surface it, keep going
+        for line in format_import_warnings(warnings, context):
+            print(line, file=sys.stderr)
     failures = tml_import_failures(payload)
     if not failures:
         return

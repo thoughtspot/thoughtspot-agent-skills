@@ -38,6 +38,8 @@ mappings/sisense/
   sisense-formula-translation.md      — Sisense JAQL → ThoughtSpot formula and function mapping (AGG_MAP/FUNCTION_MAP/UNSUPPORTED, mirrors ts_cli/sisense/functions.py)
 mappings/qlik/
   qlik-thoughtspot-formula-translation.md — Qlik Sense expressions → ThoughtSpot formula and function mapping (199 rows, 17 categories)
+mappings/ts-dbt/
+  ts-dbt-formula-translation.md       — dbt ↔ ThoughtSpot: MetricFlow metric types/aggregations → formulas (mirrors ts_cli/dbt_metricflow.py), ts_formula carried verbatim, aggregation → MetricFlow agg
 mappings/powerbi/
   powerbi-formula-translation.md      — Power BI DAX → ThoughtSpot formula and function mapping (aggregations, scalar/date functions, CALCULATE/time-intelligence flagged; mirrors ts_cli/powerbi/functions.py)
 

@@ -453,3 +453,119 @@ class TestProfilesListSnowflake:
             result = runner.invoke(app, ["profiles", "list"])
         assert "SE_DEMO_WH" not in result.stdout  # Snowflake detail must not appear
         assert "prod" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# ts tml export --split-dir
+#
+# Why: `ts dbt-export build|diff|sync` read `--model model.json` + `--tables-dir`,
+# so ts-convert-to-dbt Step 3 had the LLM run an inline Python loop to split the
+# --parse array into files. The whole export array passed through context purely
+# to be re-emitted verbatim; for a 40-table Model that is the single largest
+# payload in the run. This is that loop, codified.
+# ---------------------------------------------------------------------------
+
+def _table_export_item(name, guid=None):
+    guid = guid or f"guid-{name.lower()}"
+    return {
+        "edoc": f"guid: {guid}\ntable:\n  name: {name}\n",
+        "info": {"id": guid, "name": name, "type": "table"},
+    }
+
+
+class TestExportSplitDir:
+    def _invoke(self, mock_client_cls, items, tmp_path, extra=()):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = items
+        mock_client_cls.return_value = mock_client
+        return runner.invoke(app, [
+            "tml", "export", "abc-123", "--associated",
+            "--split-dir", str(tmp_path), *extra])
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_writes_the_layout_dbt_export_reads(self, _resolve, mock_client_cls, tmp_path):
+        out = tmp_path / "export"
+        result = self._invoke(
+            mock_client_cls,
+            [_good_export_item(), _table_export_item("BARBERS"),
+             _table_export_item("APPOINTMENTS")],
+            out)
+        assert result.exit_code == 0, result.output
+        assert (out / "model.json").is_file()
+        assert (out / "table_BARBERS.json").is_file()
+        assert (out / "table_APPOINTMENTS.json").is_file()
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_each_file_is_the_unwrapped_tml_dict(self, _resolve, mock_client_cls, tmp_path):
+        """`ts dbt-export build --model` expects `{"model": {...}}`, NOT the
+        `{type, guid, tml, info}` envelope `--parse` returns."""
+        out = tmp_path / "export"
+        self._invoke(mock_client_cls, [_good_export_item(), _table_export_item("BARBERS")], out)
+        model = json.loads((out / "model.json").read_text())
+        assert set(model) == {"guid", "model"}
+        assert model["model"]["name"] == "Good Model"
+        table = json.loads((out / "table_BARBERS.json").read_text())
+        assert table["table"]["name"] == "BARBERS"
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_stdout_is_a_manifest_not_the_whole_export(self, _resolve, mock_client_cls, tmp_path):
+        """The point of the flag: the payload goes to disk, and only the list of
+        filenames comes back through the caller's context."""
+        out = tmp_path / "export"
+        result = self._invoke(
+            mock_client_cls, [_good_export_item(), _table_export_item("BARBERS")], out)
+        payload = json.loads(result.stdout)
+        assert payload["split_dir"] == str(out)
+        assert sorted(payload["written"]) == ["model.json", "table_BARBERS.json"]
+        assert "Good Model" not in result.stdout
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_creates_the_directory(self, _resolve, mock_client_cls, tmp_path):
+        out = tmp_path / "does" / "not" / "exist"
+        result = self._invoke(mock_client_cls, [_good_export_item()], out)
+        assert result.exit_code == 0, result.output
+        assert (out / "model.json").is_file()
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_same_named_tables_do_not_overwrite_each_other(
+            self, _resolve, mock_client_cls, tmp_path):
+        """An Org can hold two Tables with one name (a raw source table beside
+        the dbt view). A silent overwrite drops one from the generated project
+        with no diagnostic anywhere."""
+        out = tmp_path / "export"
+        self._invoke(mock_client_cls, [
+            _table_export_item("BARBERS", guid="g-1"),
+            _table_export_item("BARBERS", guid="g-2"),
+        ], out)
+        written = sorted(p.name for p in out.iterdir())
+        assert len(written) == 2, written
+        guids = {json.loads((out / n).read_text())["guid"] for n in written}
+        assert guids == {"g-1", "g-2"}
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_implies_parse_without_the_flag(self, _resolve, mock_client_cls, tmp_path):
+        """--split-dir has to parse the edocs to know a model from a table, so
+        it must not silently no-op when --parse was not also passed."""
+        out = tmp_path / "export"
+        result = self._invoke(mock_client_cls, [_good_export_item()], out)
+        assert result.exit_code == 0, result.output
+        assert (out / "model.json").is_file()
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_inaccessible_item_is_skipped_and_exits_1(
+            self, _resolve, mock_client_cls, tmp_path):
+        """Same contract as --parse: the good items are still written, and the
+        non-zero exit is the signal that something was dropped."""
+        out = tmp_path / "export"
+        result = self._invoke(
+            mock_client_cls, [_good_export_item(), _forbidden_export_item()], out)
+        assert result.exit_code == 1
+        assert (out / "model.json").is_file()
+        assert len(list(out.iterdir())) == 1

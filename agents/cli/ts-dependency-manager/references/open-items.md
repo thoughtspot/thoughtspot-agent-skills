@@ -84,6 +84,27 @@ tenant's configuration restorable rather than reconstructible from CLS grants.
 to recall whether base tables carry column security — it reads both mechanisms
 (2026-09-22 audit findings 5.1 / 5.2).
 
+**Walked by the dependency report — 2026-10-02 (BL-289).** `ts metadata report` fetches
+CSR via `POST /api/rest/2.0/security/column/rules/fetch` on the source's owning table
+(`ts_cli/report/impact_probes.py::fetch_column_security_rules`), feeding the STOP
+verdict. Three live findings on embed-1 staging made this work for the GUID form this
+skill invokes:
+
+- A LOGICAL_COLUMN's `metadata/search` header carries `owner` — the GUID of the table or
+  Model holding it — and looking that GUID up gives its subtype (`ONE_TO_ONE_LOGICAL`
+  for a table, `WORKSHEET` for a Model). That is how a column GUID finds its table.
+- `metadata/tml/export` **rejects** `type: LOGICAL_COLUMN` (HTTP 400, "does not exist in
+  ExportMetadatatype enum"). The report used to export the column itself, so every
+  column report aborted; it now exports the owning table, which is also where
+  `rls_rules` lives.
+- A real CSR rule and a real RLS rule, added temporarily to Dev-org tables, were each
+  detected (STOP, `found: 1`) from the column GUID and from the whole table, and not
+  from a sibling column; both rules were removed afterwards and the tables re-exported
+  byte-identical to their backups.
+
+Rules on a Model's base tables cannot be read from the Model, so a Model source or a
+Model's column reports the RLS and CSR rows unchecked, and the verdict is `UNVERIFIED`.
+
 ---
 
 ## #11 — Reusable Set (cohort) delete command — OPEN

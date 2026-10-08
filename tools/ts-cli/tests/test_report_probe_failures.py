@@ -152,16 +152,29 @@ class TestBuildReportPropagatesProbeFailures:
         uuid = "baa451a6-02a0-42d1-8347-8cd4af13b505"
 
         # Call 1: resolve_source (GUID -> metadata/search, a LOGICAL_COLUMN hit)
+        # Call 1b: owner lookup (the column's table)
         # Call 2: walk_dependents_recursive (no dependents)
-        # Call 3: the primary TML probe export -> raises
+        # Call 3: the primary TML probe export of the table -> raises
+        # Call 4: CSR fetch on the table (succeeds, no rules)
+        # Call 5: SQL-views org-wide search (no dependents means no model docs,
+        #   so this and custom-actions are the only later deep_active probes
+        #   that still fire; both succeed here so they don't add extra warnings)
+        # Call 6: custom actions search
         client.post.side_effect = [
             _resp([{
                 "metadata_id": "g-1", "metadata_name": "Col",
                 "metadata_type": "LOGICAL_COLUMN",
-                "metadata_header": {"id": "g-1", "name": "Col"},
+                "metadata_header": {"id": "g-1", "name": "Col", "owner": "t-1"},
+            }]),
+            _resp([{  # owner lookup: t-1 is a table
+                "metadata_id": "t-1", "metadata_name": "T", "metadata_type": "LOGICAL_TABLE",
+                "metadata_header": {"id": "t-1", "name": "T", "type": "ONE_TO_ONE_LOGICAL"},
             }]),
             _resp([{"metadata_id": "g-1", "dependent_objects": {"dependents": {}}}]),
             RuntimeError("boom"),
+            _resp([]),
+            _resp([]),
+            _resp([]),
         ]
 
         out = build_report(uuid, profile="test", with_deep=True)
@@ -172,6 +185,11 @@ class TestBuildReportPropagatesProbeFailures:
             assert by_type[t]["found"] == 0
         assert len(out["warnings"]) == 1
         assert "boom" in out["warnings"][0]
+        # The per-Model probes need the Model docs that export would have loaded.
+        for t in ("Formula / template variables", "Business terms / AI memory"):
+            assert by_type[t]["checked"] is False, f"{t} must be checked=False"
+        # RLS did not run, so the report cannot be SAFE.
+        assert out["classification"]["aggregate"]["tag"] == "UNVERIFIED"
 
     @patch("ts_cli.report.ThoughtSpotClient")
     def test_monitor_probe_exception_sets_checked_false_and_warning(self, MockClient):
@@ -179,16 +197,26 @@ class TestBuildReportPropagatesProbeFailures:
         MockClient.return_value = client
         uuid = "baa451a6-02a0-42d1-8347-8cd4af13b505"
 
-        # Call 1: resolve_source (LOGICAL_COLUMN hit)
+        # Call 1: resolve_source (LOGICAL_COLUMN hit) + 1b: owner lookup
         # Call 2: walk_dependents_recursive -> one Liveboard dependent (depth 1,
         #   max_depth=1 so the walk stops before re-querying it)
-        # Call 3: the primary TML probe export -> succeeds
+        # Call 3: the primary TML probe export -> succeeds (model doc has no
+        #   "id" in info, so the per-model variables/business-terms/cascade
+        #   phase skips it — no extra calls from that phase)
         # Call 4: the Monitor-alerts Liveboard export -> raises
+        # Call 5: CSR fetch on the table (empty)
+        # Call 6: SQL-views org-wide search (empty)
+        # Call 7: custom actions search (empty)
+        # Call 8: scheduled reports search, scoped to lb-1 (empty)
         client.post.side_effect = [
             _resp([{
                 "metadata_id": "g-1", "metadata_name": "Col",
                 "metadata_type": "LOGICAL_COLUMN",
-                "metadata_header": {"id": "g-1", "name": "Col"},
+                "metadata_header": {"id": "g-1", "name": "Col", "owner": "t-1"},
+            }]),
+            _resp([{  # owner lookup: t-1 is a table
+                "metadata_id": "t-1", "metadata_name": "T", "metadata_type": "LOGICAL_TABLE",
+                "metadata_header": {"id": "t-1", "name": "T", "type": "ONE_TO_ONE_LOGICAL"},
             }]),
             _resp([{
                 "metadata_id": "g-1",
@@ -200,6 +228,10 @@ class TestBuildReportPropagatesProbeFailures:
             }]),
             _resp([{"info": {"type": "model"}, "edoc": "column_alias:\n  columns: []\n"}]),
             RuntimeError("monitor export exploded"),
+            _resp([]),
+            _resp([]),
+            _resp([]),
+            _resp([]),
         ]
 
         out = build_report(uuid, profile="test", with_deep=True, max_depth=1)
@@ -209,3 +241,21 @@ class TestBuildReportPropagatesProbeFailures:
         assert by_type["Monitor alerts"]["found"] == 0
         assert by_type["RLS rules"]["checked"] is True  # unaffected — different probe
         assert any("monitor export exploded" in w for w in out["warnings"])
+
+
+def test_a_failed_cascade_walk_is_warned_not_swallowed():
+    """A SQL view's (or formula column's) downstream walk used to fail with
+    `except: pass`, so the dependents list shrank with no trace (PR #506
+    review, blocker 6). It now leaves a warning naming what was not walked."""
+    from ts_cli.report import _ProbeState, _run_sql_view_probe
+
+    state = _ProbeState()
+    with patch("ts_cli.report.impact_probes.fetch_sql_view_hits",
+               return_value=[{"guid": "v-1", "name": "Orders SQL"}]), \
+         patch("ts_cli.report.impact_probes.walk_one_hop", side_effect=SystemExit(1)):
+        _run_sql_view_probe(state, MagicMock(), True, "AMOUNT")
+
+    assert state.sql_view_probe_ok is True  # the view search itself worked
+    assert len(state.walk_warnings) == 1
+    assert "'Orders SQL'" in state.walk_warnings[0]
+    assert "may be incomplete" in state.walk_warnings[0]

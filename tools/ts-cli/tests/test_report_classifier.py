@@ -101,6 +101,32 @@ class TestAggregateClassification:
         assert agg.aggregate.tag == "STOP"
         assert agg.recommendation == "BLOCKED_RESOLVE_RLS_FIRST"
 
+    def test_unverified_security_blocks_safe(self):
+        agg = aggregate_classification(AggregateInputs(
+            per_dependent_tags=[],
+            unverified_security=["Column security rules (CSR): probe failed"],
+        ))
+        assert agg.aggregate.tag == "UNVERIFIED"
+        assert agg.recommendation == "BLOCKED_VERIFY_SECURITY_FIRST"
+        assert "Column security rules (CSR)" in agg.aggregate.reason
+
+    def test_unverified_security_outranks_high(self):
+        """Every verdict below STOP lets a removal plan proceed, so none may stand
+        on a security check that did not run."""
+        agg = aggregate_classification(AggregateInputs(
+            per_dependent_tags=[RiskTag(tag="HIGH", reason="x")],
+            unverified_security=["RLS rules: probe failed"],
+        ))
+        assert agg.aggregate.tag == "UNVERIFIED"
+
+    def test_found_rules_outrank_unverified(self):
+        """A rule that WAS found is a definite STOP, whatever else went unchecked."""
+        agg = aggregate_classification(AggregateInputs(
+            rls_hits=[{"rule_name": "geo"}],
+            unverified_security=["Column security rules (CSR): probe failed"],
+        ))
+        assert agg.aggregate.tag == "STOP"
+
 
 # ---------------------------------------------------------------------------
 # build_matched_columns_map — 2026-07 audit fix for the dep-manager

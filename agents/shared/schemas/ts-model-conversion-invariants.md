@@ -238,7 +238,7 @@ omitted from the converted model.
 mapping for its own dialect — resolved by name from the skill directory
 (`ts-convert-{from,to}-X` → `agents/shared/mappings/{X,ts-X}/*-formula-translation.md`), so
 a new dialect needs no edit here. Today: tableau, ts-snowflake, ts-databricks, looker,
-powerbi, qlik, sisense.
+powerbi, qlik, sisense, ts-dbt.
 
 **Required gate — the marker is load-bearing.** `check_i7_gate.py` requires the literal
 string `MANDATORY (I7)` inside a blockquote that also cites this skill's dialect mapping

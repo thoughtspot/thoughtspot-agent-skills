@@ -146,6 +146,13 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     ("qlik", "resolve_name_collisions"):
         "Gap, not a design choice — Qlik emits formula columns; #440 copied this "
         "converter's structure and inherited the same gap. Close it (BL-217 part 2).",
+    # ("dbt", "resolve_name_collisions") and ("dbt", "fix_double_aggregation") were
+    # here — retired 2026-10 (PR #506 review, BL-217: adopt, not exempt). Both dbt
+    # Model builders now finish through ts_cli/dbt/formula_pass.py, which calls the
+    # shared helpers: resolve_name_collisions detects an inferred column clashing
+    # with a formula (dbt then renames it rather than dropping it, and leaves a
+    # declared clash for the find_display_name_collisions refusal), and
+    # fix_double_aggregation collapses sum([formula_X]) over an aggregated X.
     # ("qlik", "fix_double_aggregation") was here and was FALSE — retired 2026-08-28.
     # Qlik delegates to model_builder.build_model_tml, which applies the helper, so
     # the entry exempted a converter that was never diverging. See B1 in the module
