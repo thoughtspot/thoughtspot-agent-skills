@@ -33,6 +33,13 @@ What it FAILS on (case-insensitive, in any text file anywhere in the tree):
 Every line is HTML-entity- and percent-decoded (up to two rounds) before matching, so a
 link wrapped by a safe-links or redirect service (`?url=https%3A%2F%2F...`) still fails.
 
+A coarser COPY of five of these rules runs server-side as GitHub secret-scanning custom
+patterns with push protection (repo Settings > Advanced Security > Custom patterns;
+BL-383): personal OneDrive, SharePoint sites, Atlassian (ThoughtSpot's tickets and
+`your-`/`example-`/`my-` tenants excluded), Slack message links, and Google document
+links. They block the push before anything is public; this file stays the single source
+and the more precise check. When a rule here changes, review the matching pattern there.
+
 What it WARNS on (printed, never fails; a CI annotation under GitHub Actions):
 
   - home-directory paths that name a user (`/Users/<name>/`, `/home/<name>/`, and the

@@ -14017,8 +14017,27 @@ keeps as a literal is one string token, so the two cannot disagree. Tests for `'
 
 ## BL-383 — GitHub push protection with custom patterns mirroring `check_customer_references` `Tier 2`
 
-**Filed:** 2026-10-08. **Status:** Open. **Owner:** GitHub org admin (repository/org security settings,
-not a repo change). **Source:** follow-up to the `check_customer_references` gate.
+**Filed:** 2026-10-08. **Status:** DONE (scoped) — 2026-10-09. **Owner:** repository admin (repository
+security settings, not a repo change). **Source:** follow-up to the `check_customer_references` gate.
+
+**Resolution (2026-10-09).** Secret scanning and push protection are enabled on the repo, and five
+custom patterns are published with push protection on: personal OneDrive, SharePoint sites,
+Atlassian (with "must not match" exclusions for ThoughtSpot's own Jira ticket links and for
+`your`/`example`/`my` placeholder tenants), Slack message links, and Google document links (with a
+`YOUR_`/`EXAMPLE`/`PLACEHOLDER` id exclusion). Admin rights on this repo were enough; no org-level
+licence step was needed. The initial scan raised alerts only on (a) the incident PR's
+since-deleted branch, left open pending the commit purge, (b) the gate's own test placeholders,
+resolved as used-in-tests, and (c) one internal doc link that remains in history by decision,
+resolved as won't-fix. The validator's docstring records where the copy lives.
+
+Deliberately NOT covered by push protection, so the repo gate and CI remain the only check:
+ThoughtSpot cluster hosts and warehouse/BI tenant hosts (their placeholder and allowlist rules
+are too intricate for GitHub's pattern syntax), and the less common link shapes the patterns
+were simplified past (SharePoint `/:x:/` sharing links, Google `/a/<domain>/` and `open?id=`
+links). The pattern engine also rejects large bounded repeats, so the patterns match the host
+plus the first identifying path segment rather than the full URL.
+
+*Original entry follows.*
 
 **The facts.** `check_customer_references` runs in the pre-commit hook and in CI, and both act too late
 for a public repo. A hook that is not installed, or is skipped with `--no-verify`, lets the commit
@@ -14118,8 +14137,17 @@ for each new normalisation.
 
 ## BL-389 — Branch protection must require code-owner review for `.github/CODEOWNERS` to bind `Tier 2`
 
-**Filed:** 2026-10-08. **Status:** Open. **Owner:** repository admin (branch protection on `main` is
-configured outside the repo). **Source:** the `check_customer_references` gate and its CODEOWNERS.
+**Filed:** 2026-10-08. **Status:** DONE — 2026-10-09. **Owner:** repository admin (branch protection on
+`main` is configured outside the repo). **Source:** the `check_customer_references` gate and its CODEOWNERS.
+
+**Resolution (2026-10-09).** `require_code_owner_reviews` is now true on `main`, alongside the
+existing one-approval rule and stale-review dismissal. The PR that closed this item touches an owned
+file (`tools/validate/check_customer_references.py`) and showed code-owner review as required,
+which is the binding check this entry asked for. Known limit: the only code owner is also on the
+review-bypass list, so the rule binds contributors, not the owner; a second code owner would
+close that.
+
+*Original entry follows.*
 
 **The facts.** `.github/CODEOWNERS` names an owner for the gate, its tests, the git helper, the hooks
 and installer, CI and `.claude/settings.json`. Branch protection on `main` does not set
