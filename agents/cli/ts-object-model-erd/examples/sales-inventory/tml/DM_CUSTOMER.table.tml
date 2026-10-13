@@ -1,0 +1,40 @@
+guid: 5a5a5eeb-b8b3-5214-a250-956967a4d3a9
+table:
+  name: DM_CUSTOMER
+  description: Customer master data including company name, location, and contact information
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_CUSTOMER
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: CUSTOMER_ID
+    db_column_name: CUSTOMER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: COMPANY_NAME
+    db_column_name: COMPANY_NAME
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: CITY
+    db_column_name: CITY
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: STATE
+    db_column_name: STATE
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: ZIPCODE
+    db_column_name: ZIPCODE
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR

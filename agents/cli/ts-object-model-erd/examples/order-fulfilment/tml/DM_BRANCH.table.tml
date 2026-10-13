@@ -1,0 +1,45 @@
+guid: ed2f8fa7-5cc9-59bd-a83d-f497e3c0cbf7
+table:
+  name: DM_BRANCH
+  description: Branch offices and their warehouses (Scranton, Stamford, Nashua, Utica, …)
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_BRANCH
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: BRANCH_ID
+    db_column_name: BRANCH_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: BRANCH_NAME
+    db_column_name: BRANCH_NAME
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: CITY
+    db_column_name: CITY
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: REGION
+    db_column_name: REGION
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  rls_rules:
+    tables:
+    - name: DM_BRANCH
+    table_paths:
+    - id: DM_BRANCH_1
+      table: DM_BRANCH
+      column:
+      - REGION
+    rules:
+    - name: Branch region scope
+      expr: '[DM_BRANCH_1::REGION] = ts_groups or ts_groups = ''Corporate'''

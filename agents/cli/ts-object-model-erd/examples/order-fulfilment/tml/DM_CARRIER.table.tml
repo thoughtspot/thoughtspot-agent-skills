@@ -1,0 +1,28 @@
+guid: 7365d3f3-91f5-5acf-8c4c-1140fa716a28
+table:
+  name: DM_CARRIER
+  description: Freight carriers used for outbound shipments
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_CARRIER
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: CARRIER_ID
+    db_column_name: CARRIER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: CARRIER_NAME
+    db_column_name: CARRIER_NAME
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: SERVICE_LEVEL
+    db_column_name: SERVICE_LEVEL
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR

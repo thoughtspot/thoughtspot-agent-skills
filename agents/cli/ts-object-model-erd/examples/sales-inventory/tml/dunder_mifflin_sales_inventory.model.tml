@@ -1,0 +1,229 @@
+guid: 003e609f-ad4e-555f-a1ff-33d5ecbb125f
+model:
+  name: Dunder Mifflin Sales & Inventory
+  description: Sales orders and daily inventory snapshots for Dunder Mifflin Paper Company. Synthetic example — a clean star schema with one conformed date dimension.
+  model_tables:
+  - name: DM_ORDER_DETAIL
+    fqn: 77a8e184-3a7d-5c4d-b72f-dc5771aff3fe
+    joins:
+    - with: DM_ORDER
+      referencing_join: DM_ORDER_DETAIL_to_DM_ORDER
+    - with: DM_PRODUCT
+      referencing_join: DM_ORDER_DETAIL_to_DM_PRODUCT
+  - name: DM_ORDER
+    fqn: 474f0f33-e884-50fd-a7c0-01aa9aba3f60
+    joins:
+    - with: DM_CUSTOMER
+      referencing_join: DM_ORDER_to_DM_CUSTOMER
+    - with: DM_EMPLOYEE
+      referencing_join: DM_ORDER_to_DM_EMPLOYEE
+    - with: DM_DATE_DIM
+      referencing_join: DM_ORDER_to_DM_DATE_DIM
+  - name: DM_INVENTORY
+    fqn: c9d9cc1a-cb2e-5d96-97ff-bbfd19d0aa2a
+    joins:
+    - with: DM_PRODUCT
+      referencing_join: DM_INVENTORY_to_DM_PRODUCT
+    - with: DM_DATE_DIM
+      referencing_join: DM_INVENTORY_to_DM_DATE_DIM
+  - name: DM_PRODUCT
+    fqn: f0002f93-5ce2-5a16-9331-8a51c474983d
+    joins:
+    - with: DM_CATEGORY
+      referencing_join: DM_PRODUCT_to_DM_CATEGORY
+  - name: DM_CATEGORY
+    fqn: 609f8a17-59d8-5beb-a957-1625c5ba541a
+  - name: DM_CUSTOMER
+    fqn: 5a5a5eeb-b8b3-5214-a250-956967a4d3a9
+  - name: DM_EMPLOYEE
+    fqn: 479cb507-5314-5468-aa41-f9807b225cf1
+  - name: DM_DATE_DIM
+    fqn: 4ccd1ccf-7214-5881-968e-ff85da0e91e9
+  formulas:
+  - id: formula_Sales Rep
+    name: Sales Rep
+    expr: concat ( [DM_EMPLOYEE::LAST_NAME] , ', ' , [DM_EMPLOYEE::FIRST_NAME] )
+  - id: formula_Revenue
+    name: Revenue
+    expr: sum ( [DM_ORDER_DETAIL::QUANTITY] * [DM_ORDER_DETAIL::UNIT_PRICE] )
+  - id: formula_Number of Employees
+    name: Number of Employees
+    expr: unique count ( [DM_ORDER::EMPLOYEE_ID] )
+  - id: formula_Inventory Balance
+    name: Inventory Balance
+    expr: >-
+      last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , { [DM_INVENTORY::BALANCE_DATE] } )
+  - id: formula_Opening Inventory
+    name: Opening Inventory
+    expr: >-
+      first_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , { [DM_INVENTORY::BALANCE_DATE] } )
+  - id: formula_Category Quantity
+    name: Category Quantity
+    expr: group_sum ( [DM_ORDER_DETAIL::QUANTITY] , [DM_CATEGORY::CATEGORY_NAME] )
+  - id: formula_Product to Category Contribution Ratio
+    name: Product to Category Contribution Ratio
+    expr: safe_divide ( sum ( [DM_ORDER_DETAIL::QUANTITY] ) , group_sum ( [DM_ORDER_DETAIL::QUANTITY] , [DM_CATEGORY::CATEGORY_NAME] ) )
+  columns:
+  - name: Product Category
+    column_id: DM_CATEGORY::CATEGORY_NAME
+    description: Name of the product category (e.g. Paper, Pens, Furniture)
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - Category Name
+      - PRODUCT_CATEGORY
+      synonym_type: USER_DEFINED
+  - name: Product
+    column_id: DM_PRODUCT::PRODUCT_NAME
+    description: Product name
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - Item
+      - SKU Name
+      synonym_type: USER_DEFINED
+  - name: Customer
+    column_id: DM_CUSTOMER::COMPANY_NAME
+    description: Customer company name
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - Client
+      - Account
+      synonym_type: USER_DEFINED
+  - name: Customer City
+    column_id: DM_CUSTOMER::CITY
+    properties:
+      column_type: ATTRIBUTE
+  - name: Customer State
+    column_id: DM_CUSTOMER::STATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Customer Zipcode
+    column_id: DM_CUSTOMER::ZIPCODE
+    description: Postal zip code of the customer address
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - Zip Code
+      - Postal Code
+      synonym_type: USER_DEFINED
+  - name: Sales Rep
+    formula_id: formula_Sales Rep
+    description: Full name of the employee in Last, First format
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - Salesperson
+      - Representative
+      - Employee Name
+      synonym_type: USER_DEFINED
+  - name: Employee Title
+    column_id: DM_EMPLOYEE::TITLE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Date
+    column_id: DM_DATE_DIM::DATE
+    description: Calendar date — shared by orders and inventory snapshots
+    properties:
+      column_type: ATTRIBUTE
+  - name: Year
+    column_id: DM_DATE_DIM::YEAR
+    properties:
+      column_type: ATTRIBUTE
+  - name: Quarter
+    column_id: DM_DATE_DIM::QUARTER
+    properties:
+      column_type: ATTRIBUTE
+  - name: Month
+    column_id: DM_DATE_DIM::MONTH_NAME
+    properties:
+      column_type: ATTRIBUTE
+  - name: Day of Week
+    column_id: DM_DATE_DIM::DAY_OF_WEEK
+    properties:
+      column_type: ATTRIBUTE
+  - name: Order Date
+    column_id: DM_ORDER::ORDER_DATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Quantity
+    column_id: DM_ORDER_DETAIL::QUANTITY
+    description: Units sold
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      synonyms:
+      - Units
+      - Qty
+      synonym_type: USER_DEFINED
+  - name: Unit Price
+    column_id: DM_ORDER_DETAIL::UNIT_PRICE
+    description: Price charged per unit on the order line
+    properties:
+      column_type: MEASURE
+      aggregation: AVERAGE
+  - name: Revenue
+    formula_id: formula_Revenue
+    description: Quantity × unit price
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      synonyms:
+      - Sales
+      - Sales Amount
+      synonym_type: USER_DEFINED
+  - name: Number of Employees
+    formula_id: formula_Number of Employees
+    description: Count of distinct employees who handled orders
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      synonyms:
+      - EMPLOYEES
+      synonym_type: USER_DEFINED
+  - name: Balance Date
+    column_id: DM_INVENTORY::BALANCE_DATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Inventory Balance
+    formula_id: formula_Inventory Balance
+    description: Latest (closing) inventory quantity on hand. Semi-additive — takes most recent balance date.
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      synonyms:
+      - Stock Level
+      - On Hand
+      - Closing Stock
+      synonym_type: USER_DEFINED
+  - name: Opening Inventory
+    formula_id: formula_Opening Inventory
+    description: Earliest (opening) inventory quantity on hand. Semi-additive — takes earliest balance date.
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      synonyms:
+      - Beginning Inventory
+      - Starting Stock
+      synonym_type: USER_DEFINED
+  - name: Category Quantity
+    formula_id: formula_Category Quantity
+    description: Total units sold within each product category.
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  - name: Product to Category Contribution Ratio
+    formula_id: formula_Product to Category Contribution Ratio
+    description: Ratio of a product's quantity sold to the total quantity sold in its category.
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      synonyms:
+      - Product Share
+      synonym_type: USER_DEFINED
+  properties:
+    is_bypass_rls: false
+    join_progressive: true
+    spotter_config:
+      is_spotter_enabled: true

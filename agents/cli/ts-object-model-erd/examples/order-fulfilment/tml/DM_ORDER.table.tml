@@ -1,0 +1,64 @@
+guid: 37821a20-665e-5aab-830f-edfb03938e38
+table:
+  name: DM_ORDER
+  description: Order headers
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_ORDER
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: ORDER_ID
+    db_column_name: ORDER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: ORDER_NUMBER
+    db_column_name: ORDER_NUMBER
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: ORDER_STATUS
+    db_column_name: ORDER_STATUS
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: SALES_REP_ID
+    db_column_name: SALES_REP_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: APPROVER_ID
+    db_column_name: APPROVER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: BILL_TO_CUSTOMER_ID
+    db_column_name: BILL_TO_CUSTOMER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: SHIP_TO_CUSTOMER_ID
+    db_column_name: SHIP_TO_CUSTOMER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: BRANCH_ID
+    db_column_name: BRANCH_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: ORDER_DATE
+    db_column_name: ORDER_DATE
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: DATE

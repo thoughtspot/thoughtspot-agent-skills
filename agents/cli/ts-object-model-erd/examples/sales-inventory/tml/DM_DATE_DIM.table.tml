@@ -1,0 +1,40 @@
+guid: 4ccd1ccf-7214-5881-968e-ff85da0e91e9
+table:
+  name: DM_DATE_DIM
+  description: Date dimension table used for time-based analysis of orders and inventory
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_DATE_DIM
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: DATE
+    db_column_name: DATE
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: DATE
+  - name: YEAR
+    db_column_name: YEAR
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: QUARTER
+    db_column_name: QUARTER
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: MONTH_NAME
+    db_column_name: MONTH_NAME
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: DAY_OF_WEEK
+    db_column_name: DAY_OF_WEEK
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR

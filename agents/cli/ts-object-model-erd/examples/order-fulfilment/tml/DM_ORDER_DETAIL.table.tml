@@ -1,0 +1,53 @@
+guid: 50cf53ed-633e-5dbc-a58f-047d841ffa04
+table:
+  name: DM_ORDER_DETAIL
+  description: Order lines
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_ORDER_DETAIL
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: ORDER_DETAIL_ID
+    db_column_name: ORDER_DETAIL_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: ORDER_ID
+    db_column_name: ORDER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: PRODUCT_ID
+    db_column_name: PRODUCT_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: QUANTITY
+    db_column_name: QUANTITY
+    properties:
+      column_type: MEASURE
+    db_column_properties:
+      data_type: INT64
+  - name: UNIT_PRICE
+    db_column_name: UNIT_PRICE
+    properties:
+      column_type: MEASURE
+    db_column_properties:
+      data_type: DOUBLE
+  joins_with:
+  - name: DM_ORDER_DETAIL_to_DM_ORDER
+    destination:
+      name: DM_ORDER
+    'on': '[DM_ORDER_DETAIL::ORDER_ID] = [DM_ORDER::ORDER_ID]'
+    type: INNER
+    cardinality: MANY_TO_ONE
+  - name: DM_ORDER_DETAIL_to_DM_PRODUCT
+    destination:
+      name: DM_PRODUCT
+    'on': '[DM_ORDER_DETAIL::PRODUCT_ID] = [DM_PRODUCT::PRODUCT_ID]'
+    type: INNER
+    cardinality: MANY_TO_ONE

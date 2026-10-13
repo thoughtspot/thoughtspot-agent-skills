@@ -1,0 +1,22 @@
+guid: 609f8a17-59d8-5beb-a957-1625c5ba541a
+table:
+  name: DM_CATEGORY
+  description: Product categories used to classify products in the catalog
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_CATEGORY
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: CATEGORY_ID
+    db_column_name: CATEGORY_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: CATEGORY_NAME
+    db_column_name: CATEGORY_NAME
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR

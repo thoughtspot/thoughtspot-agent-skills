@@ -1,0 +1,41 @@
+guid: c9d9cc1a-cb2e-5d96-97ff-bbfd19d0aa2a
+table:
+  name: DM_INVENTORY
+  description: Daily inventory balance snapshots showing stock levels by product and date
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_INVENTORY
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: PRODUCT_ID
+    db_column_name: PRODUCT_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: BALANCE_DATE
+    db_column_name: BALANCE_DATE
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: DATE
+  - name: FILLED_INVENTORY
+    db_column_name: FILLED_INVENTORY
+    properties:
+      column_type: MEASURE
+    db_column_properties:
+      data_type: INT64
+  joins_with:
+  - name: DM_INVENTORY_to_DM_PRODUCT
+    destination:
+      name: DM_PRODUCT
+    'on': '[DM_INVENTORY::PRODUCT_ID] = [DM_PRODUCT::PRODUCT_ID]'
+    type: INNER
+    cardinality: MANY_TO_ONE
+  - name: DM_INVENTORY_to_DM_DATE_DIM
+    destination:
+      name: DM_DATE_DIM
+    'on': '[DM_INVENTORY::BALANCE_DATE] = [DM_DATE_DIM::DATE]'
+    type: INNER
+    cardinality: MANY_TO_ONE

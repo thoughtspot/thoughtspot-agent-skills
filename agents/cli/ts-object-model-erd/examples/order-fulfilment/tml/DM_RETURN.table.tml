@@ -1,0 +1,53 @@
+guid: c99dc4ea-6e7b-5c67-86d4-d706dd9d48e1
+table:
+  name: DM_RETURN
+  description: Customer returns, recorded against the order line
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_RETURN
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: RETURN_ID
+    db_column_name: RETURN_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: ORDER_DETAIL_ID
+    db_column_name: ORDER_DETAIL_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: HANDLED_BY_ID
+    db_column_name: HANDLED_BY_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: RETURN_DATE
+    db_column_name: RETURN_DATE
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: DATE
+  - name: RETURN_QUANTITY
+    db_column_name: RETURN_QUANTITY
+    properties:
+      column_type: MEASURE
+    db_column_properties:
+      data_type: INT64
+  - name: RETURN_REASON
+    db_column_name: RETURN_REASON
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  joins_with:
+  - name: DM_RETURN_to_DM_ORDER_DETAIL
+    destination:
+      name: DM_ORDER_DETAIL
+    'on': '[DM_RETURN::ORDER_DETAIL_ID] = [DM_ORDER_DETAIL::ORDER_DETAIL_ID]'
+    type: INNER
+    cardinality: MANY_TO_ONE

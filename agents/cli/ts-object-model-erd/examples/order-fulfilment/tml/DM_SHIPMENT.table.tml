@@ -1,0 +1,83 @@
+guid: 9032e13f-feb8-5bac-ac09-e24b59f97856
+table:
+  name: DM_SHIPMENT
+  description: Outbound shipments — picked at a branch warehouse, driven or handed to a carrier
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_SHIPMENT
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: SHIPMENT_ID
+    db_column_name: SHIPMENT_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: ORDER_ID
+    db_column_name: ORDER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: CARRIER_ID
+    db_column_name: CARRIER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: PICKER_ID
+    db_column_name: PICKER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: DRIVER_ID
+    db_column_name: DRIVER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: ORIGIN_BRANCH_ID
+    db_column_name: ORIGIN_BRANCH_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: SHIP_DATE
+    db_column_name: SHIP_DATE
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: DATE
+  - name: DELIVERY_DATE
+    db_column_name: DELIVERY_DATE
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: DATE
+  - name: FREIGHT_COST
+    db_column_name: FREIGHT_COST
+    properties:
+      column_type: MEASURE
+    db_column_properties:
+      data_type: DOUBLE
+  - name: PACKAGE_COUNT
+    db_column_name: PACKAGE_COUNT
+    properties:
+      column_type: MEASURE
+    db_column_properties:
+      data_type: INT64
+  joins_with:
+  - name: DM_SHIPMENT_to_DM_ORDER
+    destination:
+      name: DM_ORDER
+    'on': '[DM_SHIPMENT::ORDER_ID] = [DM_ORDER::ORDER_ID]'
+    type: INNER
+    cardinality: MANY_TO_ONE
+  - name: DM_SHIPMENT_to_DM_CARRIER
+    destination:
+      name: DM_CARRIER
+    'on': '[DM_SHIPMENT::CARRIER_ID] = [DM_CARRIER::CARRIER_ID]'
+    type: INNER
+    cardinality: MANY_TO_ONE

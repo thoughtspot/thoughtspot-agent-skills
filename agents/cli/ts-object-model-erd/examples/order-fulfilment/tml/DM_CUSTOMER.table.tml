@@ -1,0 +1,34 @@
+guid: afd68e77-6b4e-5b81-a833-b60aaa8a1439
+table:
+  name: DM_CUSTOMER
+  description: Customer master — used as both bill-to and ship-to party
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_CUSTOMER
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: CUSTOMER_ID
+    db_column_name: CUSTOMER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: COMPANY_NAME
+    db_column_name: COMPANY_NAME
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: CITY
+    db_column_name: CITY
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: STATE
+    db_column_name: STATE
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR

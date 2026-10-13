@@ -1,0 +1,46 @@
+guid: 40c0b5fb-6d7a-5932-abe8-7cd643fcd849
+table:
+  name: DM_EMPLOYEE
+  description: Every Dunder Mifflin employee — sales, accounting, warehouse and drivers
+  db: DUNDERMIFFLIN
+  schema: PUBLIC
+  db_table: DM_EMPLOYEE
+  connection:
+    name: DUNDER_MIFFLIN_SNOWFLAKE
+  columns:
+  - name: EMPLOYEE_ID
+    db_column_name: EMPLOYEE_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64
+  - name: FIRST_NAME
+    db_column_name: FIRST_NAME
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: LAST_NAME
+    db_column_name: LAST_NAME
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: TITLE
+    db_column_name: TITLE
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: DEPARTMENT
+    db_column_name: DEPARTMENT
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: MANAGER_ID
+    db_column_name: MANAGER_ID
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64

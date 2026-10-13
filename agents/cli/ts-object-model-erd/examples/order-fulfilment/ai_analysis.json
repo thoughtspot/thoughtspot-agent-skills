@@ -1,0 +1,26 @@
+{
+  "Dunder Mifflin Order Fulfilment": {
+    "ai_analysis": {
+      "domain": "Order-to-cash operations for a paper distributor: orders booked by a branch's sales rep, approved, picked at a branch warehouse, delivered by a driver or carrier, invoiced, paid, and occasionally returned. An audit trail records who created and changed each order. Employees, dates, customers and branches each play several roles, so each role is a separate alias of the same physical table.",
+      "objectives": [
+        "Measure delivery performance (ship-to-delivery days) by carrier, branch and driver",
+        "Track receivables: outstanding balances and late payment by bill-to customer",
+        "Attribute revenue to sales reps and their managers",
+        "Review returns by reason and by who processed them"
+      ],
+      "personas": ["Warehouse and logistics leads", "Accounts receivable", "Regional sales management", "Operations audit"],
+      "questions": [
+        "Average days to deliver by carrier for orders shipped from Scranton last month",
+        "Which bill-to customers have an outstanding balance more than 30 days past due?",
+        "Revenue by sales rep manager this year",
+        "Who updated the most cancelled orders in the audit trail?"
+      ]
+    },
+    "ai_instructions": [
+      "Each employee role is a different alias of DM_EMPLOYEE — 'Sales Rep', 'Order Approver', 'Warehouse Picker', 'Delivery Driver', 'Return Handled By', 'Audit Created By' and 'Audit Updated By' are NOT interchangeable.",
+      "Every date column belongs to one role: Order Date, Ship Date, Delivery Date, Invoice Date, Invoice Due Date, Invoice Paid Date, Return Date, Audit Event Date. Pick the date that matches the question's event.",
+      "Bill-To Customer is who pays; Ship-To Customer is where goods go. Use Bill-To for receivables questions.",
+      "Selling Branch booked the order; Shipping Branch is the warehouse it left from. Branch rows are secured by region (RLS)."
+    ]
+  }
+}

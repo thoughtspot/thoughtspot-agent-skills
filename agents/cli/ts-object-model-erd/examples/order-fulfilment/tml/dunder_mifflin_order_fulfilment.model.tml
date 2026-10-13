@@ -1,0 +1,498 @@
+guid: 9a9f1e02-5eca-54c0-bfc4-3f9b74f3bc61
+model:
+  name: Dunder Mifflin Order Fulfilment
+  description: 'Order-to-cash for Dunder Mifflin: orders, shipments, invoices, returns and the order audit trail. Synthetic example of role-playing dimensions — DM_EMPLOYEE, DM_DATE_DIM, DM_CUSTOMER and
+    DM_BRANCH are each joined several times under different aliases.'
+  model_tables:
+  - name: DM_ORDER
+    fqn: 37821a20-665e-5aab-830f-edfb03938e38
+    joins:
+    - name: DM_ORDER_to_SALES_REP
+      with: SALES_REP
+      'on': '[DM_ORDER::SALES_REP_ID] = [SALES_REP::EMPLOYEE_ID]'
+      type: INNER
+      cardinality: MANY_TO_ONE
+    - name: DM_ORDER_to_ORDER_APPROVER
+      with: ORDER_APPROVER
+      'on': '[DM_ORDER::APPROVER_ID] = [ORDER_APPROVER::EMPLOYEE_ID]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: DM_ORDER_to_BILL_TO_CUSTOMER
+      with: BILL_TO_CUSTOMER
+      'on': '[DM_ORDER::BILL_TO_CUSTOMER_ID] = [BILL_TO_CUSTOMER::CUSTOMER_ID]'
+      type: INNER
+      cardinality: MANY_TO_ONE
+    - name: DM_ORDER_to_SHIP_TO_CUSTOMER
+      with: SHIP_TO_CUSTOMER
+      'on': '[DM_ORDER::SHIP_TO_CUSTOMER_ID] = [SHIP_TO_CUSTOMER::CUSTOMER_ID]'
+      type: INNER
+      cardinality: MANY_TO_ONE
+    - name: DM_ORDER_to_ORDER_BRANCH
+      with: ORDER_BRANCH
+      'on': '[DM_ORDER::BRANCH_ID] = [ORDER_BRANCH::BRANCH_ID]'
+      type: INNER
+      cardinality: MANY_TO_ONE
+    - name: DM_ORDER_to_ORDER_DATE
+      with: ORDER_DATE
+      'on': '[DM_ORDER::ORDER_DATE] = [ORDER_DATE::DATE]'
+      type: INNER
+      cardinality: MANY_TO_ONE
+  - name: DM_EMPLOYEE
+    alias: SALES_REP
+    fqn: 40c0b5fb-6d7a-5932-abe8-7cd643fcd849
+    joins:
+    - name: SALES_REP_to_SALES_REP_MANAGER
+      with: SALES_REP_MANAGER
+      'on': '[SALES_REP::MANAGER_ID] = [SALES_REP_MANAGER::EMPLOYEE_ID]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+  - name: DM_EMPLOYEE
+    alias: SALES_REP_MANAGER
+    fqn: 40c0b5fb-6d7a-5932-abe8-7cd643fcd849
+  - name: DM_EMPLOYEE
+    alias: ORDER_APPROVER
+    fqn: 40c0b5fb-6d7a-5932-abe8-7cd643fcd849
+  - name: DM_CUSTOMER
+    alias: BILL_TO_CUSTOMER
+    fqn: afd68e77-6b4e-5b81-a833-b60aaa8a1439
+  - name: DM_CUSTOMER
+    alias: SHIP_TO_CUSTOMER
+    fqn: afd68e77-6b4e-5b81-a833-b60aaa8a1439
+  - name: DM_BRANCH
+    alias: ORDER_BRANCH
+    fqn: ed2f8fa7-5cc9-59bd-a83d-f497e3c0cbf7
+  - name: DM_DATE_DIM
+    alias: ORDER_DATE
+    fqn: b56c6aac-9ca3-5d1f-826e-91a3c97e7bb1
+  - name: DM_ORDER_DETAIL
+    fqn: 50cf53ed-633e-5dbc-a58f-047d841ffa04
+    joins:
+    - with: DM_ORDER
+      referencing_join: DM_ORDER_DETAIL_to_DM_ORDER
+    - with: DM_PRODUCT
+      referencing_join: DM_ORDER_DETAIL_to_DM_PRODUCT
+  - name: DM_PRODUCT
+    fqn: 890de009-fec5-5447-a59a-0efd72e8e541
+    joins:
+    - with: DM_CATEGORY
+      referencing_join: DM_PRODUCT_to_DM_CATEGORY
+  - name: DM_CATEGORY
+    fqn: f5f4b221-fab3-5dc5-adc9-e72f5297bd48
+  - name: DM_SHIPMENT
+    fqn: 9032e13f-feb8-5bac-ac09-e24b59f97856
+    joins:
+    - with: DM_ORDER
+      referencing_join: DM_SHIPMENT_to_DM_ORDER
+    - with: DM_CARRIER
+      referencing_join: DM_SHIPMENT_to_DM_CARRIER
+    - name: DM_SHIPMENT_to_WAREHOUSE_PICKER
+      with: WAREHOUSE_PICKER
+      'on': '[DM_SHIPMENT::PICKER_ID] = [WAREHOUSE_PICKER::EMPLOYEE_ID]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: DM_SHIPMENT_to_DELIVERY_DRIVER
+      with: DELIVERY_DRIVER
+      'on': '[DM_SHIPMENT::DRIVER_ID] = [DELIVERY_DRIVER::EMPLOYEE_ID]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: DM_SHIPMENT_to_ORIGIN_BRANCH
+      with: ORIGIN_BRANCH
+      'on': '[DM_SHIPMENT::ORIGIN_BRANCH_ID] = [ORIGIN_BRANCH::BRANCH_ID]'
+      type: INNER
+      cardinality: MANY_TO_ONE
+    - name: DM_SHIPMENT_to_SHIP_DATE
+      with: SHIP_DATE
+      'on': '[DM_SHIPMENT::SHIP_DATE] = [SHIP_DATE::DATE]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: DM_SHIPMENT_to_DELIVERY_DATE
+      with: DELIVERY_DATE
+      'on': '[DM_SHIPMENT::DELIVERY_DATE] = [DELIVERY_DATE::DATE]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+  - name: DM_CARRIER
+    fqn: 7365d3f3-91f5-5acf-8c4c-1140fa716a28
+  - name: DM_EMPLOYEE
+    alias: WAREHOUSE_PICKER
+    fqn: 40c0b5fb-6d7a-5932-abe8-7cd643fcd849
+  - name: DM_EMPLOYEE
+    alias: DELIVERY_DRIVER
+    fqn: 40c0b5fb-6d7a-5932-abe8-7cd643fcd849
+  - name: DM_BRANCH
+    alias: ORIGIN_BRANCH
+    fqn: ed2f8fa7-5cc9-59bd-a83d-f497e3c0cbf7
+  - name: DM_DATE_DIM
+    alias: SHIP_DATE
+    fqn: b56c6aac-9ca3-5d1f-826e-91a3c97e7bb1
+  - name: DM_DATE_DIM
+    alias: DELIVERY_DATE
+    fqn: b56c6aac-9ca3-5d1f-826e-91a3c97e7bb1
+  - name: DM_INVOICE
+    fqn: a0a17f2d-ccb9-5e85-80f1-15766af0dc8c
+    joins:
+    - with: DM_ORDER
+      referencing_join: DM_INVOICE_to_DM_ORDER
+    - name: DM_INVOICE_to_INVOICE_DATE
+      with: INVOICE_DATE
+      'on': '[DM_INVOICE::INVOICE_DATE] = [INVOICE_DATE::DATE]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: DM_INVOICE_to_DUE_DATE
+      with: DUE_DATE
+      'on': '[DM_INVOICE::DUE_DATE] = [DUE_DATE::DATE]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: DM_INVOICE_to_PAID_DATE
+      with: PAID_DATE
+      'on': '[DM_INVOICE::PAID_DATE] = [PAID_DATE::DATE]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+  - name: DM_DATE_DIM
+    alias: INVOICE_DATE
+    fqn: b56c6aac-9ca3-5d1f-826e-91a3c97e7bb1
+  - name: DM_DATE_DIM
+    alias: DUE_DATE
+    fqn: b56c6aac-9ca3-5d1f-826e-91a3c97e7bb1
+  - name: DM_DATE_DIM
+    alias: PAID_DATE
+    fqn: b56c6aac-9ca3-5d1f-826e-91a3c97e7bb1
+  - name: DM_RETURN
+    fqn: c99dc4ea-6e7b-5c67-86d4-d706dd9d48e1
+    joins:
+    - with: DM_ORDER_DETAIL
+      referencing_join: DM_RETURN_to_DM_ORDER_DETAIL
+    - name: DM_RETURN_to_RETURN_HANDLER
+      with: RETURN_HANDLER
+      'on': '[DM_RETURN::HANDLED_BY_ID] = [RETURN_HANDLER::EMPLOYEE_ID]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: DM_RETURN_to_RETURN_DATE
+      with: RETURN_DATE
+      'on': '[DM_RETURN::RETURN_DATE] = [RETURN_DATE::DATE]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+  - name: DM_EMPLOYEE
+    alias: RETURN_HANDLER
+    fqn: 40c0b5fb-6d7a-5932-abe8-7cd643fcd849
+  - name: DM_DATE_DIM
+    alias: RETURN_DATE
+    fqn: b56c6aac-9ca3-5d1f-826e-91a3c97e7bb1
+  - name: DM_AUDIT_EVENT
+    fqn: 05b74ebd-2e01-5149-ab4c-382f42735704
+    joins:
+    - with: DM_ORDER
+      referencing_join: DM_AUDIT_EVENT_to_DM_ORDER
+    - name: DM_AUDIT_EVENT_to_AUDIT_CREATED_BY
+      with: AUDIT_CREATED_BY
+      'on': '[DM_AUDIT_EVENT::CREATED_BY_ID] = [AUDIT_CREATED_BY::EMPLOYEE_ID]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: DM_AUDIT_EVENT_to_AUDIT_UPDATED_BY
+      with: AUDIT_UPDATED_BY
+      'on': '[DM_AUDIT_EVENT::UPDATED_BY_ID] = [AUDIT_UPDATED_BY::EMPLOYEE_ID]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: DM_AUDIT_EVENT_to_AUDIT_EVENT_DATE
+      with: AUDIT_EVENT_DATE
+      'on': '[DM_AUDIT_EVENT::EVENT_DATE] = [AUDIT_EVENT_DATE::DATE]'
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+  - name: DM_EMPLOYEE
+    alias: AUDIT_CREATED_BY
+    fqn: 40c0b5fb-6d7a-5932-abe8-7cd643fcd849
+  - name: DM_EMPLOYEE
+    alias: AUDIT_UPDATED_BY
+    fqn: 40c0b5fb-6d7a-5932-abe8-7cd643fcd849
+  - name: DM_DATE_DIM
+    alias: AUDIT_EVENT_DATE
+    fqn: b56c6aac-9ca3-5d1f-826e-91a3c97e7bb1
+  formulas:
+  - id: formula_Sales Rep
+    name: Sales Rep
+    expr: concat ( [SALES_REP::LAST_NAME] , ', ' , [SALES_REP::FIRST_NAME] )
+  - id: formula_Sales Rep Manager
+    name: Sales Rep Manager
+    expr: concat ( [SALES_REP_MANAGER::LAST_NAME] , ', ' , [SALES_REP_MANAGER::FIRST_NAME] )
+  - id: formula_Order Approver
+    name: Order Approver
+    expr: concat ( [ORDER_APPROVER::LAST_NAME] , ', ' , [ORDER_APPROVER::FIRST_NAME] )
+  - id: formula_Warehouse Picker
+    name: Warehouse Picker
+    expr: concat ( [WAREHOUSE_PICKER::LAST_NAME] , ', ' , [WAREHOUSE_PICKER::FIRST_NAME] )
+  - id: formula_Delivery Driver
+    name: Delivery Driver
+    expr: concat ( [DELIVERY_DRIVER::LAST_NAME] , ', ' , [DELIVERY_DRIVER::FIRST_NAME] )
+  - id: formula_Return Handled By
+    name: Return Handled By
+    expr: concat ( [RETURN_HANDLER::LAST_NAME] , ', ' , [RETURN_HANDLER::FIRST_NAME] )
+  - id: formula_Audit Created By
+    name: Audit Created By
+    expr: concat ( [AUDIT_CREATED_BY::LAST_NAME] , ', ' , [AUDIT_CREATED_BY::FIRST_NAME] )
+  - id: formula_Audit Updated By
+    name: Audit Updated By
+    expr: concat ( [AUDIT_UPDATED_BY::LAST_NAME] , ', ' , [AUDIT_UPDATED_BY::FIRST_NAME] )
+  - id: formula_Revenue
+    name: Revenue
+    expr: sum ( [DM_ORDER_DETAIL::QUANTITY] * [DM_ORDER_DETAIL::UNIT_PRICE] )
+  - id: formula_Order Count
+    name: Order Count
+    expr: unique count ( [DM_ORDER::ORDER_ID] )
+  - id: formula_Days to Deliver
+    name: Days to Deliver
+    expr: diff_days ( [DM_SHIPMENT::DELIVERY_DATE] , [DM_SHIPMENT::SHIP_DATE] )
+  - id: formula_Days Paid Late
+    name: Days Paid Late
+    expr: diff_days ( [DM_INVOICE::PAID_DATE] , [DM_INVOICE::DUE_DATE] )
+  - id: formula_Outstanding Balance
+    name: Outstanding Balance
+    expr: sum ( [DM_INVOICE::INVOICE_AMOUNT] ) - sum ( [DM_INVOICE::AMOUNT_PAID] )
+  - id: formula_Audit Event Count
+    name: Audit Event Count
+    expr: count ( [DM_AUDIT_EVENT::AUDIT_EVENT_ID] )
+  columns:
+  - name: Sales Rep
+    formula_id: formula_Sales Rep
+    description: Sales Rep (DM_EMPLOYEE in the SALES_REP role), Last, First
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - Salesperson
+      synonym_type: USER_DEFINED
+  - name: Sales Rep Manager
+    formula_id: formula_Sales Rep Manager
+    description: Sales Rep Manager (DM_EMPLOYEE in the SALES_REP_MANAGER role), Last, First
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - Regional Manager
+      synonym_type: USER_DEFINED
+  - name: Order Approver
+    formula_id: formula_Order Approver
+    description: Order Approver (DM_EMPLOYEE in the ORDER_APPROVER role), Last, First
+    properties:
+      column_type: ATTRIBUTE
+  - name: Warehouse Picker
+    formula_id: formula_Warehouse Picker
+    description: Warehouse Picker (DM_EMPLOYEE in the WAREHOUSE_PICKER role), Last, First
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - Picker
+      synonym_type: USER_DEFINED
+  - name: Delivery Driver
+    formula_id: formula_Delivery Driver
+    description: Delivery Driver (DM_EMPLOYEE in the DELIVERY_DRIVER role), Last, First
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - Driver
+      synonym_type: USER_DEFINED
+  - name: Return Handled By
+    formula_id: formula_Return Handled By
+    description: Return Handled By (DM_EMPLOYEE in the RETURN_HANDLER role), Last, First
+    properties:
+      column_type: ATTRIBUTE
+  - name: Audit Created By
+    formula_id: formula_Audit Created By
+    description: Audit Created By (DM_EMPLOYEE in the AUDIT_CREATED_BY role), Last, First
+    properties:
+      column_type: ATTRIBUTE
+  - name: Audit Updated By
+    formula_id: formula_Audit Updated By
+    description: Audit Updated By (DM_EMPLOYEE in the AUDIT_UPDATED_BY role), Last, First
+    properties:
+      column_type: ATTRIBUTE
+  - name: Sales Rep Title
+    column_id: SALES_REP::TITLE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Order Number
+    column_id: DM_ORDER::ORDER_NUMBER
+    properties:
+      column_type: ATTRIBUTE
+  - name: Order Status
+    column_id: DM_ORDER::ORDER_STATUS
+    properties:
+      column_type: ATTRIBUTE
+  - name: Order Count
+    formula_id: formula_Order Count
+    description: Distinct orders
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  - name: Bill-To Customer
+    column_id: BILL_TO_CUSTOMER::COMPANY_NAME
+    description: Party invoiced for the order
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - Billed Customer
+      synonym_type: USER_DEFINED
+  - name: Bill-To State
+    column_id: BILL_TO_CUSTOMER::STATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Ship-To Customer
+    column_id: SHIP_TO_CUSTOMER::COMPANY_NAME
+    description: Party the goods are delivered to
+    properties:
+      column_type: ATTRIBUTE
+  - name: Ship-To City
+    column_id: SHIP_TO_CUSTOMER::CITY
+    properties:
+      column_type: ATTRIBUTE
+  - name: Ship-To State
+    column_id: SHIP_TO_CUSTOMER::STATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Selling Branch
+    column_id: ORDER_BRANCH::BRANCH_NAME
+    description: Branch that booked the order
+    properties:
+      column_type: ATTRIBUTE
+  - name: Selling Region
+    column_id: ORDER_BRANCH::REGION
+    properties:
+      column_type: ATTRIBUTE
+  - name: Shipping Branch
+    column_id: ORIGIN_BRANCH::BRANCH_NAME
+    description: Branch warehouse the shipment left from
+    properties:
+      column_type: ATTRIBUTE
+  - name: Order Date
+    column_id: ORDER_DATE::DATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Order Year
+    column_id: ORDER_DATE::YEAR
+    properties:
+      column_type: ATTRIBUTE
+  - name: Order Quarter
+    column_id: ORDER_DATE::QUARTER
+    properties:
+      column_type: ATTRIBUTE
+  - name: Product
+    column_id: DM_PRODUCT::PRODUCT_NAME
+    properties:
+      column_type: ATTRIBUTE
+  - name: Product Category
+    column_id: DM_CATEGORY::CATEGORY_NAME
+    properties:
+      column_type: ATTRIBUTE
+  - name: Quantity
+    column_id: DM_ORDER_DETAIL::QUANTITY
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      synonyms:
+      - Units
+      synonym_type: USER_DEFINED
+  - name: Unit Price
+    column_id: DM_ORDER_DETAIL::UNIT_PRICE
+    properties:
+      column_type: MEASURE
+      aggregation: AVERAGE
+  - name: Revenue
+    formula_id: formula_Revenue
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      synonyms:
+      - Sales
+      synonym_type: USER_DEFINED
+  - name: Carrier
+    column_id: DM_CARRIER::CARRIER_NAME
+    properties:
+      column_type: ATTRIBUTE
+  - name: Service Level
+    column_id: DM_CARRIER::SERVICE_LEVEL
+    properties:
+      column_type: ATTRIBUTE
+  - name: Ship Date
+    column_id: SHIP_DATE::DATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Delivery Date
+    column_id: DELIVERY_DATE::DATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Freight Cost
+    column_id: DM_SHIPMENT::FREIGHT_COST
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  - name: Package Count
+    column_id: DM_SHIPMENT::PACKAGE_COUNT
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  - name: Days to Deliver
+    formula_id: formula_Days to Deliver
+    description: Delivery date minus ship date
+    properties:
+      column_type: MEASURE
+      aggregation: AVERAGE
+  - name: Invoice Date
+    column_id: INVOICE_DATE::DATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Invoice Due Date
+    column_id: DUE_DATE::DATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Invoice Paid Date
+    column_id: PAID_DATE::DATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Invoice Amount
+    column_id: DM_INVOICE::INVOICE_AMOUNT
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  - name: Amount Paid
+    column_id: DM_INVOICE::AMOUNT_PAID
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  - name: Outstanding Balance
+    formula_id: formula_Outstanding Balance
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  - name: Days Paid Late
+    formula_id: formula_Days Paid Late
+    description: Paid date minus due date; negative means paid early
+    properties:
+      column_type: MEASURE
+      aggregation: AVERAGE
+  - name: Return Date
+    column_id: RETURN_DATE::DATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Return Reason
+    column_id: DM_RETURN::RETURN_REASON
+    properties:
+      column_type: ATTRIBUTE
+  - name: Return Quantity
+    column_id: DM_RETURN::RETURN_QUANTITY
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  - name: Audit Event Type
+    column_id: DM_AUDIT_EVENT::EVENT_TYPE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Audit Event Date
+    column_id: AUDIT_EVENT_DATE::DATE
+    properties:
+      column_type: ATTRIBUTE
+  - name: Audit Event Count
+    formula_id: formula_Audit Event Count
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  properties:
+    is_bypass_rls: false
+    join_progressive: true
+    spotter_config:
+      is_spotter_enabled: true

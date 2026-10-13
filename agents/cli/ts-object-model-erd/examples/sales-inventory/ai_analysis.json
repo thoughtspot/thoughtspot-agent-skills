@@ -1,0 +1,25 @@
+{
+  "Dunder Mifflin Sales & Inventory": {
+    "ai_analysis": {
+      "domain": "Sales and stock management for a regional paper and office-supply distributor. Order lines (quantity, unit price) roll up to orders, customers and sales reps; a separate daily snapshot records inventory on hand per product. Both facts share one product and one date dimension.",
+      "objectives": [
+        "Track revenue and units sold by product, category, customer and sales rep",
+        "Monitor stock levels over time and compare opening vs closing inventory",
+        "Understand each product's share of its category's volume"
+      ],
+      "personas": ["Branch sales managers", "Inventory and purchasing staff", "Regional finance"],
+      "questions": [
+        "What was revenue by product category last quarter?",
+        "Which sales rep sold the most units to customers in Pennsylvania?",
+        "What is the closing inventory balance for copy paper this month?",
+        "Which products contribute more than 20% of their category's quantity?"
+      ]
+    },
+    "ai_instructions": [
+      "Revenue is the primary sales measure; it is quantity × unit price, summed.",
+      "Inventory Balance and Opening Inventory are semi-additive — never sum them across dates; they take the last and first balance date in the period.",
+      "Date is a single shared calendar: grouping by Month splits order and inventory measures by the same month.",
+      "Unit Price is averaged, not summed."
+    ]
+  }
+}
