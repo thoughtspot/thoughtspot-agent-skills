@@ -253,6 +253,7 @@ are roughly ordered by value÷effort.
 | ~~BL-379~~ | ~~Tableau `IF [Bob's] = 'a' THEN 1 END` emits a second `else` (an apostrophe in a field name opened a literal)~~ | DONE (2026-10-07 — fixed in #583, regression test ts-cli v0.171.0) |
 | ~~BL-381~~ | ~~`check_skill_versions` accepts a changelog whose top row is lower than the row below it (a version going backwards after an accept-both merge)~~ | DONE (2026-10-07) |
 | ~~BL-382~~ | ~~The Snowflake from-direction translator (`sv_sql`) does not strip SQL comments: `/* x */` and `-- y` became `/ * [T::X] * /` and `- - [T::Y]`~~ | DONE (2026-10-07 — ts-cli v0.173.0) |
+| BL-395 | Re-run the AgentQL retest suite on 26.9.0.sw and reconcile `limitations.md` (3 tickets fixed only in that release, the regex row) | 2026-11-30 |
 
 ### Tier 3 — Opportunistic
 
@@ -14248,3 +14249,30 @@ orchestrator; behaviour unchanged, pinned first by a characterisation test over 
 current JSON output. Then delete the baseline entry, so the gate covers it again.
 
 **Target:** 2026-11-30, or the next change to `ts columns impact`, whichever comes first.
+
+## BL-395 — Re-run the AgentQL retest suite on 26.9.0.sw and reconcile `limitations.md` `Tier 2`
+
+**Filed:** 2026-10-14. **Source:** the 26.9.0.cl PROD re-probe (#594, #595) and the suite
+that came out of it (#597). Nothing else prompts a re-check when the next release ships:
+`check_mapping_currency` only nudges once the `limitations.md` anchor is six months old
+(2027-04).
+
+**Why it matters.** `ts-object-model-agentql-query` tells the model which SQL forms to avoid,
+so a stale ❌ row costs answers and a stale ✅ row produces wrong ones. Three tickets are
+Resolved with fix version **26.9.0.sw**, unreleased at filing, so their rows could not be
+tested: SCAL-317405 (INT64 timestamp treated as date), SCAL-317423 (alias not remapped during
+serialization) and SCAL-320205 (`ComplexQueryTransformer`). The regex row (SCAL-338545) is
+the likeliest to move. Snowflake compiled it to a valid `regexp_like` on a dev cluster in
+September, while 26.9.0.cl PROD still emits `like_regex`.
+
+**Do.**
+1. Once 26.9.0.sw (or the next PROD build) is on the SE demo cluster, run
+   `python3 tools/agentql-retest/run.py` with the profile and Model GUIDs in its README.
+2. For every `CHANGED`: probe it, update the row in `limitations.md` and any rule it feeds,
+   then update the case in `cases.py`. Re-run until clean.
+3. Probe the three 26.9.0.sw tickets by hand. They have no case yet, because they need an
+   INT64 timestamp column or a doubly-complex query. Add a case for each one that reproduces.
+4. Refresh the epic statuses (open-items "Refreshing limitations from the Jira epics") and
+   bump the currency anchor.
+
+**Target:** 2026-11-30, or the first PROD build after 26.9.0.cl, whichever comes first.
