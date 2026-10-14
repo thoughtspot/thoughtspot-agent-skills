@@ -209,7 +209,8 @@ thoughtspot-agent-skills/
     ├── fixtures/   — Captured cluster topologies for `ts tenancy` (reference multi-tenancy environment)
     ├── smoke-tests/ — End-to-end smoke tests requiring live credentials
     ├── ossie-roundtrip/ — Round-trips real Models through the Apache Ossie converter (lives upstream)
-    └── formula-fidelity/ — Checks translated formulas return the source's values (oracle vs ThoughtSpot, live)
+    ├── formula-fidelity/ — Checks translated formulas return the source's values (oracle vs ThoughtSpot, live)
+    └── agentql-retest/ — Re-probes every documented AgentQL limitation and reports the rows whose behaviour moved (live)
 ```
 
 ---

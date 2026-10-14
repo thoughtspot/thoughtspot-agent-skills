@@ -277,6 +277,17 @@ execution. The operator form is not the variable; the build or cluster is. That 
 did not resolve from here, so which one it is remains open. Re-probe on the next PROD
 release; drop the `limitations.md` row only when PROD emits `regexp_like`.
 
+**Addendum 2026-10-14 (retest suite).** The probes above are now committed as
+`tools/agentql-retest/` (80 cases covering every row these Models can exercise, plus 7
+controls). Its first full run reported one CHANGED: the ✅ `TO_NUMBER` row said it compiles to
+`CAST(x AS double)`, a July description carried into 2.3.0 without re-checking the SQL. In
+fact `TO_NUMBER` is typed by its input. A string is cast, and fails hard on non-numeric data
+as documented. A numeric column is not cast at all: an integer column becomes `round(x)`
+and a decimal column passes through. Values are right in every form. The same pass probed
+`ACOS(1)` on its own, which works (0.0); #7 had only tried it in one query with the rejected
+`LOG(10, 100)`. It also found that one-argument `LOG(x)` is the natural log (`ln`), which a
+Postgres-trained writer would read as base 10. Both are now rows in `limitations.md`.
+
 ## Keeping `limitations.md` current
 
 `limitations.md` carries a currency anchor (`<!-- currency: spotql — YYYY-MM (...) -->`).
@@ -297,8 +308,10 @@ changing (`PERCENTILE_CONT` is Closed as MEDIAN-only yet still errors live):
      fields `summary,status`.
 2. **Diff against `limitations.md`** — flag rows whose SCAL ticket status changed
    (Open→Closed = candidate "now works" to remove; new Open child = candidate new row).
-3. **Re-probe each flagged construct live** with `ts agentql generate-sql` / `fetch-data`
-   against an external-CDW model (e.g. the Dunder Mifflin smoke model) — the probe, not the
+3. **Re-probe live** — run [`tools/agentql-retest/`](../../../../tools/agentql-retest/README.md),
+   which re-probes every documented row (not only the flagged ones) and reports each one
+   whose behaviour moved. Probe a flagged construct the suite has no case for by hand with
+   `ts agentql generate-sql` / `fetch-data`, then add the case. The probe, not the
    ticket, is the source of truth.
 4. **Update the file**: remove rows that now work (and relax the matching rule in
    `agentql-rules.md` / `udf-reference.md` / `patterns.md`); add newly-confirmed limitations

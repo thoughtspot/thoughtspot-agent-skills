@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Re-probe every documented AgentQL limitation and report what moved.
+
+    python3 tools/agentql-retest/run.py --profile <ts-profile> \\
+        --model-single <guid of "DunderMifflin Sales"> --model-multi <guid of "Dunder Mifflin">
+
+Exit codes: 0 every case AS_DOCUMENTED · 1 at least one CHANGED · 2 at least one ERROR
+(an ERROR outranks a CHANGED: a run that could not see everything must not read as clean).
+See README.md for how to act on a CHANGED.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+from agentql_retest.cases import CASES  # noqa: E402
+from agentql_retest.classify import AS_DOCUMENTED, CHANGED, CLI_ERROR, ERROR, classify, validate_cases  # noqa: E402
+
+
+def call(cmd: str, sql: str, model: str, profile: str, timeout: int) -> dict:
+    try:
+        r = subprocess.run(["ts", "agentql", cmd, "--profile", profile, "-m", model, sql],
+                           capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"status": CLI_ERROR, "errors": [{"message": f"{type(e).__name__}: {e}"}]}
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return {"status": CLI_ERROR, "errors": [{"message": (r.stderr or r.stdout)[-600:]}]}
+
+
+def run_case(case, models, profile, timeout):
+    gen = call("generate-sql", case.sql, models[case.model], profile, timeout)
+    fetch = None
+    if case.runs_fetch and gen.get("status") == "SUCCESS":
+        fetch = call("fetch-data", case.sql, models[case.model], profile, timeout)
+    return case.id, {"gen": gen, "fetch": fetch}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--profile", required=True, help="ThoughtSpot profile name (ts profiles list)")
+    ap.add_argument("--model-single", required=True, help='GUID of the "DunderMifflin Sales" Model')
+    ap.add_argument("--model-multi", required=True, help='GUID of the "Dunder Mifflin" Model')
+    ap.add_argument("--only", nargs="*", default=[], help="case ids to run (their controls are added)")
+    ap.add_argument("--out", help="write the raw per-case results and verdicts as JSON here")
+    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--timeout", type=int, default=300, help="seconds per ts call")
+    args = ap.parse_args()
+
+    problems = validate_cases(CASES)
+    if problems:
+        print("case list is malformed:\n  " + "\n  ".join(problems), file=sys.stderr)
+        return 2
+
+    todo = CASES
+    if args.only:
+        want = set(args.only)
+        unknown = want - {c.id for c in CASES}
+        if unknown:
+            print(f"unknown case ids: {sorted(unknown)}", file=sys.stderr)
+            return 2
+        want |= {c.id for c in CASES if c.control}  # bespoke checks read the controls too
+        todo = [c for c in CASES if c.id in want]
+
+    models = {"single": args.model_single, "multi": args.model_multi}
+    with ThreadPoolExecutor(args.workers) as ex:
+        results = dict(ex.map(lambda c: run_case(c, models, args.profile, args.timeout), todo))
+
+    verdicts = {}
+    for c in todo:
+        try:
+            verdicts[c.id] = classify(c, results[c.id]["gen"], results[c.id]["fetch"], results)
+        except Exception as e:  # a bespoke check tripping over an unexpected row shape
+            verdicts[c.id] = (ERROR, [f"check raised {type(e).__name__}: {e}"])
+
+    counts = {AS_DOCUMENTED: 0, CHANGED: 0, ERROR: 0}
+    for c in todo:
+        v, reasons = verdicts[c.id]
+        counts[v] += 1
+        if v != AS_DOCUMENTED or c.control:
+            tag = "control" if c.control and v == AS_DOCUMENTED else v
+            print(f"{tag:<13} {c.id:<28} {c.row}")
+            if v != AS_DOCUMENTED:
+                for r in reasons:
+                    print(f"{'':<14}- {r}")
+    print(f"\n{len(todo)} cases: {counts[AS_DOCUMENTED]} as documented, {counts[CHANGED]} changed, "
+          f"{counts[ERROR]} error")
+
+    if args.out:
+        pathlib.Path(args.out).write_text(json.dumps(
+            {c.id: {"row": c.row, "sql": c.sql, "verdict": verdicts[c.id][0], "reasons": verdicts[c.id][1],
+                    **results[c.id]} for c in todo}, indent=1))
+        print(f"results: {args.out}")
+
+    return 2 if counts[ERROR] else (1 if counts[CHANGED] else 0)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

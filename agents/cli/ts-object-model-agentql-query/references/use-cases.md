@@ -69,6 +69,10 @@ status:** the dangerous rows return `SUCCESS` with the wrong number, so a retest
 control query (e.g. `FILTER (WHERE …)` vs the equivalent `SUM(CASE …)`) to detect a fix. Re-run periodically; when one starts returning `SUCCESS`, the limitation has been
 resolved — promote it out of the known-limitations set and into the functional set.
 
+**This suite exists:** [`tools/agentql-retest/`](../../../../tools/agentql-retest/README.md) holds a
+case for every `limitations.md` row the demo Models can exercise, with the controls and value checks above, and reports only
+the rows whose behaviour moved. Run it before editing `limitations.md`.
+
 ---
 
 **Two more that fall out of the same machinery:**
