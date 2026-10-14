@@ -455,13 +455,29 @@ function setLayout(name){layoutName=name;
   tOrth.disabled=!layered;$("orth-wrap").style.opacity=layered?1:.4;
   updateSavedBadge();
   tweenTo(hasAll(savedPos[name])?savedPos[name]:getLayout(name));}
-function initialView(){return /(^|[#&])view=network($|&)/.test(location.hash)?"network":"cards";}
-function setView(v){
+const VIEW_LS_KEY="ts-erd-view";
+// A stored choice wins; the hash is only a first-visit default (screenshots, links).
+// The match is exact: the audit report and others put their own routes in the hash.
+function initialView(){
+  try{const s=localStorage.getItem(VIEW_LS_KEY);if(s==="cards"||s==="network")return s;}catch(e){}
+  return /(^|[#&])view=network($|&)/.test(location.hash)?"network":"cards";
+}
+function syncViewControls(){
+  const net=VIEW==="network";
+  document.querySelectorAll("#view-seg button").forEach(b=>b.classList.toggle("on",b.dataset.v===VIEW));
+  document.querySelectorAll("#layout-seg button,#notation-seg button").forEach(b=>b.disabled=net);
+  colSel.disabled=net;
+  if(net){tOrth.disabled=true;$("orth-wrap").style.opacity=.4;}
+  $("net-legend").hidden=!net;
+}
+function setView(v,persist){
   if(v!=="network")v="cards";
-  if(v===VIEW)return;
+  if(persist){try{localStorage.setItem(VIEW_LS_KEY,v);}catch(e){}}
+  if(v===VIEW){syncViewControls();return;}
   if(v==="network")cardLayout=layoutName;
   VIEW=v;nodes.forEach(sizeNode);
   setLayout(v==="network"?"network":cardLayout);
+  syncViewControls();
 }
 
 // ---- focus / path ----
@@ -730,6 +746,7 @@ const lodActive=()=>view.k<LOD_T;
 let lastLod=false;
 const applyView=()=>{
   vp.setAttribute("transform",`translate(${view.x},${view.y}) scale(${view.k})`);
+  vp.classList.toggle("net-far",VIEW==="network"&&view.k<NET_LABEL_K);
   updateMinimapViewport();
   if(lodActive()!==lastLod)renderNodes();
 };
@@ -1070,6 +1087,7 @@ function showNotesReview(){
 
 // ---- controls wiring ----
 document.querySelectorAll("#layout-seg button").forEach(b=>b.onclick=()=>setLayout(b.dataset.l));
+document.querySelectorAll("#view-seg button").forEach(b=>b.onclick=()=>setView(b.dataset.v,true));
 document.querySelectorAll("#notation-seg button").forEach(b=>b.onclick=()=>{notation=b.dataset.n;
   document.querySelectorAll("#notation-seg button").forEach(x=>x.classList.toggle("on",x.dataset.n===notation));renderEdges();});
 colSel.onchange=()=>{colMode=colSel.value;layoutCache={};nodes.forEach(sizeNode);
@@ -1124,12 +1142,21 @@ function renderLegend(){
 }
 
 // ---- share HTML ----
+// Baked positions seed the recipient's ORGANIC (card) layout, so they must always be
+// card positions. From network view, use the remembered card layout instead of the dots.
+function shareState(){
+  let pos;
+  if(VIEW==="network"){
+    const src=hasAll(savedPos[cardLayout])?savedPos[cardLayout]:(layoutCache[cardLayout]||layoutCache.organic);
+    pos={};Object.keys(src).forEach(id=>pos[id]={x:Math.round(src[id].x),y:Math.round(src[id].y)});
+  }else{pos={};nodes.forEach(n=>pos[n.t.id]={x:Math.round(n.x),y:Math.round(n.y)});}
+  return {positions:pos,notes:notes};
+}
 function shareHTML(){
   const doc=document.documentElement.outerHTML;
   const dataEl=document.getElementById("erd-data");
   if(!dataEl)return;
-  const posMap={};nodes.forEach(n=>posMap[n.t.id]={x:Math.round(n.x),y:Math.round(n.y)});
-  const state=JSON.stringify({positions:posMap,notes:notes});
+  const state=JSON.stringify(shareState());
   const newScript=`window.__ERD_DATA__ = ${dataEl.textContent.split("=").slice(1).join("=").trim().replace(/;$/,"")};
 window.ERD_INITIAL_STATE = ${state};`;
   const full=doc.replace(dataEl.outerHTML,`<script id="erd-data">${newScript}<\/script>`);
@@ -1241,7 +1268,7 @@ function loadModel(m){
   // B1: must run AFTER notes=loadNotes() and the ERD_INITIAL_STATE baked-notes merge
   // above — NOT folded into the generic chip-disable loop earlier in this function,
   // which runs before notes exists and would compute the chip against stale data.
-  if(wasNet)setView("network");
+  if(wasNet)setView("network");else syncViewControls();
   syncNotesChip();
 }
 

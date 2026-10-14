@@ -116,3 +116,74 @@ def test_zero_join_and_single_table_models(tmp_path):
           return {dots: document.querySelectorAll('#nodes circle.dot').length,
                   finite: nodes.every(n=>isFinite(n.x)&&isFinite(n.y)), k: view.k};""", d, hash=NET)
         assert r["dots"] == n_tables and r["finite"] and r["k"] > 0
+
+
+def test_toggle_disables_card_only_controls_and_round_trips(FULFIL, tmp_path):
+    """Spec criteria 2 and 3: switching keeps each view's positions."""
+    r = browser.probe(FULFIL, """
+      const pos=()=>Object.fromEntries(nodes.map(n=>[n.t.id,[Math.round(n.x),Math.round(n.y)]]));
+      const cards0=pos();
+      document.querySelector('#view-seg [data-v="network"]').click();
+      const dis={layout:[...document.querySelectorAll('#layout-seg button')].every(b=>b.disabled),
+                 notation:[...document.querySelectorAll('#notation-seg button')].every(b=>b.disabled),
+                 cols:document.getElementById('col-mode').disabled,
+                 legend:!document.getElementById('net-legend').hidden};
+      const n=nodes[0];n.x+=37;captureLayout();const net0=pos();
+      document.querySelector('#view-seg [data-v="cards"]').click();
+      const cards1=pos(),enabled=!document.getElementById('col-mode').disabled;
+      document.querySelector('#view-seg [data-v="network"]').click();
+      return {dis,enabled,cardsKept:JSON.stringify(cards0)===JSON.stringify(cards1),
+              netKept:JSON.stringify(net0)===JSON.stringify(pos()),
+              stored:localStorage.getItem('ts-erd-view')};""", tmp_path)
+    assert all(r["dis"].values()), r["dis"]
+    assert r["enabled"] and r["cardsKept"] and r["netKept"]
+    assert r["stored"] == "network"
+
+
+def test_stored_choice_beats_hash_and_hash_is_strict(FULFIL, tmp_path):
+    """Review Focus 5: only an exact view=network hash, and only without a stored choice."""
+    for h, expect in (("models/foo", "cards"), ("view=networkish", "cards"), ("x&view=network", "network")):
+        d = tmp_path / h.replace("/", "_").replace("&", "_"); d.mkdir()
+        assert browser.probe(FULFIL, "return VIEW;", d, hash=h) == expect, h
+    d = tmp_path / "stored"; d.mkdir()
+    r = browser.probe(FULFIL, """
+      localStorage.setItem('ts-erd-view','cards');return initialView();""", d, hash="view=network")
+    assert r == "cards"
+
+
+def test_share_state_from_network_bakes_card_positions(FULFIL, tmp_path):
+    """Review Focus 1: a file shared from network view must open with card positions."""
+    r = browser.probe(FULFIL, """
+      const cards=Object.fromEntries(nodes.map(n=>[n.t.id,{x:Math.round(n.x),y:Math.round(n.y)}]));
+      setView('network');
+      const baked=shareState().positions;
+      return {same:JSON.stringify(baked)===JSON.stringify(cards), view:VIEW};""", tmp_path)
+    assert r == {"same": True, "view": "network"}
+
+
+def test_model_switch_in_network_view_relayouts(tmp_path):
+    """Review Focus 3: a second model opens in network view with its own layout."""
+    import render
+    def model(name, ids):
+        return {"model": {"name": name, "guid": name, "description": ""},
+                "tables": [{"id": i, "kind": "dim", "cols": [], "rls": [], "is_sql_view": False,
+                            "sql_query": None, "alias_of": None, "in_rls_path": False} for i in ids],
+                "joins": [{"from": ids[0], "to": i, "name": ids[0] + i, "card": "MANY_TO_ONE",
+                           "origin": "model", "type": "INNER", "on": ""} for i in ids[1:]],
+                "formulas": {}, "findings": []}
+    bundle = {"models": [model("A", ["A1", "A2", "A3"]), model("B", ["B1", "B2", "B3", "B4"])],
+              "index": [], "dropped": []}
+    page = tmp_path / "two.html"; render.write_html(bundle, str(page))
+    r = browser.probe(str(page), """
+      const sel=document.getElementById('model-switch');sel.value='1';sel.onchange();
+      return {view:VIEW, dots:document.querySelectorAll('#nodes circle.dot').length,
+              cached:Object.keys(layoutCache.network||{}).sort()};""", tmp_path, hash=NET)
+    assert r == {"view": "network", "dots": 4, "cached": ["B1", "B2", "B3", "B4"]}
+
+
+def test_labels_hide_when_zoomed_far_out(FULFIL, tmp_path):
+    r = browser.probe(FULFIL, """
+      view.k=0.2;applyView();const far=document.getElementById('viewport').classList.contains('net-far');
+      view.k=1;applyView();const near=document.getElementById('viewport').classList.contains('net-far');
+      return {far,near};""", tmp_path, hash=NET)
+    assert r == {"far": True, "near": False}

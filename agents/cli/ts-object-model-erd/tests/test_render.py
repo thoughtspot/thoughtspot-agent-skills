@@ -38,3 +38,11 @@ def test_write_html_creates_file(tmp_path):
     render.write_html(_bundle(), out)
     assert os.path.exists(out)
     assert "<svg" in open(out, encoding="utf-8").read()
+
+
+def test_render_has_view_toggle_defaulting_to_cards():
+    html = render.render_html(_bundle())
+    assert 'id="view-seg"' in html
+    assert 'data-v="cards" class="on"' in html
+    assert 'data-v="network"' in html
+    assert 'id="net-legend"' in html

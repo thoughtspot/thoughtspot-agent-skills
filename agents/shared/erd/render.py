@@ -26,6 +26,13 @@ _BODY = """<header>
 
 <div class="controls">
   <div class="ctl-group">
+    <span class="group-label">View</span>
+    <div class="seg" id="view-seg">
+      <button data-v="cards" class="on" title="Tables as cards with columns">Cards</button>
+      <button data-v="network" title="Tables as labelled dots — the model's shape at a glance">Network</button>
+    </div>
+  </div>
+  <div class="ctl-group">
     <span class="group-label">Layout</span>
     <div class="seg" id="layout-seg">
       <button data-l="organic" class="on">Organic</button>
@@ -109,6 +116,11 @@ _BODY = """<header>
     </div>
     <div class="hint" id="hint">drag or scroll to pan \xb7 pinch / ⌘-scroll to zoom \xb7 arrows / 0 to move</div>
     <div class="grp-legend" id="grp-legend" hidden></div>
+    <div class="net-legend" id="net-legend" hidden>
+      <span><i style="background:#1E6FA8"></i>Fact</span><span><i style="background:#5B6472"></i>Dimension</span>
+      <span><i style="background:#0D9488"></i>SQL view</span><span><i style="background:#7C3AED"></i>Alias</span>
+      <span class="net-legend-note">Dot size = number of joins · red ring = RLS</span>
+    </div>
   </div>
   <aside id="inspector"></aside>
 </main>
@@ -123,6 +135,7 @@ _BODY = """<header>
     <div class="swatch" style="background:#FEF3C7;border-color:#D97706"></div><span><b>In RLS path</b> — referenced in another table’s RLS expression</span>
     <div class="swatch" style="background:#F0FDFA;border-color:#0D9488"></div><span><b>SQL View</b> — backed by a SQL query, not a physical table</span>
     <div class="swatch" style="background:#F5F3FF;border-color:#7C3AED"></div><span><b>Alias</b> — a second reference to the same physical table</span>
+    <div class="swatch" style="background:#7C3AED;border-radius:50%;border-color:#fff"></div><span><b>Network view</b> — tables as dots (sized by joins), aliases purple; switch with View → Network</span>
   </div>
   <div class="section-label">Join lines</div>
   <div class="help-legend">
