@@ -158,6 +158,44 @@ explore and visualise it, **verify it with tokens**, and pin it to Liveboards to
 monitor. AgentQL widens the question; the tokenised experience keeps a human informed and in
 control.
 
+### See it in three queries (optional — run these now)
+
+Before the deep dive, here are three short queries that show the whole story at a glance. Run
+them live if the learner wants proof; otherwise they stand as the gist. Each maps to a full
+lesson later — this is the preview, not the detail. (Every query here is live-verified on the
+sample Model and guarded by a retest case.)
+
+**1 — The governed foundation (both languages share this).**
+```sql
+SELECT SUM("t1"."sales") AS "Total Sales" FROM "(Sample) Retail - Apparel" AS "t1"
+```
+You name the *business* column `sales`; the Model supplies the physical table and joins. A
+token search answers this too — it's the common, governed base both approaches stand on.
+*(Full: Module 1–2. Guarded by `ctl_ap_total`.)*
+
+**2 — What AgentQL adds, and the business rules it inherits.**
+```sql
+WITH all_p AS (SELECT "t1"."product" AS p FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."product"),
+     west AS (SELECT "t2"."product" AS p, SUM("t2"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t2"
+              WHERE "t2"."region" = 'West' GROUP BY "t2"."product")
+SELECT a.p, COALESCE(west.s, 0) FROM all_p a LEFT OUTER JOIN west ON a.p = west.p
+```
+*Every* product, including four never sold in the West (they come back `0`, not dropped) — an
+outer join tokens can't express. Show the generated SQL: the `LEFT OUTER JOIN` is the agent's
+contribution; the inner joins, keys, null-guards and (where present) RLS are the **Model's**,
+written for you. *(Full: lesson 3.6. Guarded by `l3_all_products_left_join`.)*
+
+**3 — The honest limit.**
+```sql
+SELECT PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY "t1"."sales") FROM "(Sample) Retail - Apparel" AS "t1"
+```
+Rejected — `UNSUPPORTED_AGGREGATE`. AgentQL is far more expressive than tokens but **narrower
+than raw warehouse SQL**: when a shape has no form, it refuses rather than guessing a wrong
+answer. *(Full: [`beyond-tokens.md`](beyond-tokens.md).)*
+
+Together: a governed base (1), expressibility with the governance still applied (2), and a
+clear boundary (3) — the three claims of this module, in three queries.
+
 **Check yourself.** Who authors the query in each approach, and who validates it? Name one
 thing AgentQL can ask that tokens can't. Why does "the SQL compiled and ran" *not* settle
 whether the answer is right — and which parts of the answer are governed regardless?
