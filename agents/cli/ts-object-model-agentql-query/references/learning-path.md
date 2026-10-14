@@ -51,31 +51,42 @@ a learner to expect a specific dated number. Totals over all time are stable.
 
 ## How to run a lesson
 
-Every lesson follows the same six steps. **Show the AgentQL. Don't ask the learner to
-write it.** The lesson's query is ready to run, so nobody loses time to syntax errors, and
-the learning is in what ThoughtSpot does with it. A learner who wants practice can write
-their own instead: run theirs, then compare it with the lesson's.
+**Show the AgentQL. Don't ask the learner to write it.** The lesson's query is ready to
+run, so nobody loses time to syntax errors, and the learning is in what ThoughtSpot does
+with it. A learner who wants practice can write their own instead: run theirs, then compare
+it with the lesson's.
 
-1. **Question.** State the business question in plain English.
-2. **Show the query.** Present the lesson's AgentQL, with any placeholders filled in.
-3. **Predict, briefly.** Ask one short question in the same message as the query, such
-   as *"Before I run it: which tables will this touch?"*. Use the lesson's **Predict** line
-   if it has one. Then wait. Any answer is fine, and so is a plain "run it": run it then,
-   without pressing for a guess. The prediction is useful, but it is optional, not a quiz.
-4. **`generate-sql`.** Run it and show `executable_sql`. Walk through the lesson's
-   **Point out** items, comparing them with the prediction if there was one.
-5. **`fetch-data`.** Run it, render the rows as a table, and note the `columns[].type` values.
-6. **Break it.** Run the lesson's variant, show what changes and why, and name the rule.
+Each lesson runs in two moves — a short pause to predict, then the result in a fixed block:
+
+1. **Predict, briefly.** Show the lesson's AgentQL, then ask one short question in the same
+   message, such as *"Before I run it: which tables will this touch?"*. Use the lesson's
+   **Predict** line if it has one. Then wait. Any answer is fine, and so is a plain "run it":
+   run it then, without pressing for a guess. The prediction is useful, but it is optional,
+   not a quiz.
+2. **Run it and report in the six-section block below.** Run `generate-sql` then `fetch-data`,
+   and present the result in the **same six sections, in the same order, every time** — the
+   canonical structure from `SKILL.md` Step 6. Consistency across lessons is the point: a
+   learner should see the same shape for question 1 and question 36.
+
+| Section | In a lesson |
+|---|---|
+| **1. Question** | The lesson's business question in plain English. |
+| **2. AgentQL Sent** | The lesson's AgentQL, with any placeholders filled in. |
+| **3. DB SQL Generated** | `executable_sql` from `generate-sql`. Walk through the lesson's **Point out** items here, comparing them with the prediction if there was one. |
+| **4. Error & Explanation** | *Only when a call is rejected* (the "Break it" variants, and any lesson whose point is a failure). The `status` code + message, and the rule in [`agentql-rules.md`](agentql-rules.md) it maps to. Omit when the query succeeds. |
+| **5. Key Findings** | The one or two things this lesson teaches — the lesson's **Point out** takeaway, a `columns[].type` surprise, a join the Model added. |
+| **6. Results** | The rows rendered as a table, with headers from the SELECT list; note the `columns[].type` values. |
 
 ```bash
 ts agentql generate-sql --profile {profile} -m {model_guid} '<agentql>'
 ts agentql fetch-data  --profile {profile} -m {model_guid} '<agentql>'
 ```
 
-Show every artifact: the AgentQL, the warehouse SQL, the rows, and the raw JSON when it
-teaches something (as in Module 1). At the end of each module, ask its **Check yourself**
-questions, then offer **Try it on your Model**: one short exercise on a Model the learner
-chose, so the lesson carries over to their own data.
+Show the raw JSON too when it teaches something (as in Module 1) — it sits under section 5
+or 6, not in place of them. **The "Break it" variant is its own run of the same six-section
+block**, where section 4 carries the rejection. At the end of each module, ask its **Check
+yourself** questions, then offer **Try it on your Model**: one short exercise on a Model the
+learner chose, so the lesson carries over to their own data — reported in the same block.
 
 **If a result does not match this page,** say so plainly and move on. Don't explain it away.
 The product changes between releases. The **Guarded by** ids name the retest-suite cases that

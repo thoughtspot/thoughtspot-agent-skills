@@ -276,27 +276,34 @@ list when you present results.
 
 ### Step 6 — Review
 
-Present the result at the depth from the top of this section:
+Present **every** question in the same six-section block, in this fixed order, so repeated
+questions read consistently. This is the canonical output structure — the course
+(`references/learning-path.md`) reports the same shape:
 
-- **Answer (always):** render `rows` as a table, with headers from your SELECT list (not
-  `col0`/`col1`). This rendered table is *your* presentation of the JSON — the commands
-  emit JSON; you make it readable.
-- **🧠 Generated AgentQL** (developer): the statement you wrote.
-- **🗄️ Warehouse SQL** (developer): `executable_sql` from Step 4.
-- **📋 Request bodies** (developer): the ready-to-paste API bodies for the session's query,
-  pre-filled with the AgentQL you wrote and the Model GUID — so the user can run it from the
-  REST playground or their own code. (See `references/integration.md` for auth and response
-  parsing.)
+| Section | What goes here |
+|---|---|
+| **1. Question** | The business question in plain English. |
+| **2. AgentQL Sent** | The exact AgentQL statement you wrote (Step 3). |
+| **3. DB SQL Generated** | `executable_sql` from Step 4 — the warehouse SQL ThoughtSpot compiled. If `generate-sql` did not return `SUCCESS`, say so here and show nothing else in this section. |
+| **4. Error & Explanation** | *Only if a `status` was not `SUCCESS`.* The code + `errors[].message`, the rule it maps to, and what you changed (or why it can't be answered). Omit the section entirely when both calls succeeded. |
+| **5. Key Findings** | The one or two things this question teaches: a join the Model added, a type surprise (dates as numbers), a cap applied, a silent reparse. Keep it to what the SQL or rows actually show. |
+| **6. Results** | `rows` from Step 5 rendered as a table, headers from your SELECT list (not `col0`/`col1`). This rendered table is *your* presentation of the JSON — the commands emit JSON; you make it readable. |
 
-  ```text
-  POST /callosum/v1/v2/data/spotql/generate-sql
-  { "spotql_query": "<the AgentQL from Step 3>", "model_identifier": "<model_guid>" }
+Depth still scales to the audience (top of this section): a non-technical asker may only
+want **1**, **5** and **6**, while a developer wants all six. The order never changes — omit
+a section, don't reorder.
 
-  POST /callosum/v1/v2/data/spotql/fetch-data
-  { "spotql_query": "<the AgentQL from Step 3>", "model_identifier": "<model_guid>" }
-  ```
-- **❌ Errors:** if any `status` was not `SUCCESS`, show the code + message and what you
-  changed (or why it can't be answered).
+**Request bodies (developer, optional add-on).** When the user wants to run the query
+themselves, append the ready-to-paste API bodies after section 6, pre-filled with the
+AgentQL and Model GUID. (See `references/integration.md` for auth and response parsing.)
+
+```text
+POST /callosum/v1/v2/data/spotql/generate-sql
+{ "spotql_query": "<the AgentQL from Step 3>", "model_identifier": "<model_guid>" }
+
+POST /callosum/v1/v2/data/spotql/fetch-data
+{ "spotql_query": "<the AgentQL from Step 3>", "model_identifier": "<model_guid>" }
+```
 
 If the user wants the machine-readable form (for piping or their own code), give them the
 raw JSON from Steps 4–5 — that is the building-block interface.
@@ -318,6 +325,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.8.2 | 2026-10-14 | **Consistent per-question output.** Every question — in the main run flow (Step 6) and in every course lesson — now reports in the same fixed six-section block, in the same order: **1. Question · 2. AgentQL Sent · 3. DB SQL Generated · 4. Error & Explanation (if any) · 5. Key Findings · 6. Results**. Section 4 is omitted when the query succeeds; depth still scales to the audience, but the order never changes. |
 | 2.8.1 | 2026-10-14 | Learn AgentQL: dropped the audience **tracks** in favour of a plain module list — each module with a one-line summary and its **number of questions** (36 in all). Module headings now show the count. |
 | 2.8.0 | 2026-10-14 | **Read-only guards.** A new `guards` suite in `tools/agentql-retest` (26 cases + a positive control) covers statements AgentQL must always refuse: writes, DDL, admin (incl. `PUT`/`GET`/`UNDROP`/`EXECUTE IMMEDIATE`/`SHOW`), a second statement, and a physical table in `FROM`. It also checks that comments, `SELECT … INTO` and a `'; DROP` inside a literal compile to one regenerated `SELECT`. A guard that ever compiles to anything else is a new **BREACH** verdict (exit 3); guards never call `fetch-data`. The read-only check handles backslash and `$$` quoting. The suite's claim is scoped to *no writes or DDL*, not that a `SELECT` reads only the Model. New `limitations.md` § Read-only by design and Learn AgentQL lesson 1.5, "It can only read". |
 | 2.7.1 | 2026-10-14 | Learn AgentQL: the agent now **shows each lesson's AgentQL ready to run** rather than asking the learner to write it ("Learner writes" → "Question"). This avoids syntax errors and keeps lessons quick. The SQL prediction is one quick optional question; "run it" skips it. Writing your own query stays available as practice. |
