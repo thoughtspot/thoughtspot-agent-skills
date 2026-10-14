@@ -26,6 +26,18 @@ let colMode="keys", layoutName="organic", notation="arrow";
 let focusSet=[];
 let focusMode=null;   // "neighbourhood" | "tree" | "compare" | null
 let selected=null;
+// Network view (spec 2026-10-14): tables as labelled dots, joins as plain lines.
+// VIEW switches node geometry and drawing; cardLayout remembers the card layout to
+// restore when leaving network view (layoutName is "network" while it is on).
+let VIEW="cards", cardLayout="organic";
+const DOT_MIN=7, DOT_MAX=22, NET_EDGE=110, NET_LABEL_CH=7, NET_LABEL_K=0.35;
+const DOT_FILL={fact:"#1E6FA8",dim:"#5B6472",sql_view:"#0D9488",alias:"#7C3AED"};
+function dotR(t){return Math.min(DOT_MAX,DOT_MIN+2.2*Math.sqrt((undir[t.id]||[]).length));}
+// The one place node size is decided. Every reader of n.w/n.h (fit, minimap, edge
+// endpoints, drag) goes through sizeNode, so dot geometry never leaks card sizes.
+function nodeSize(t){if(VIEW==="network"){const r=dotR(t);return {w:2*r,h:2*r};}return {w:NODE_W,h:nodeHeight(t)};}
+function sizeNode(n){const s=nodeSize(n.t);n.w=s.w;n.h=s.h;}
+function labelW(t){return t.id.length*NET_LABEL_CH+8;}
 
 function worstSev(id){let w=null;(findingsByTable[id]||[]).forEach(f=>{if(!w||SEV_RANK[f.sev]>SEV_RANK[w])w=f.sev;});return w;}
 // Tables referenced (by name/alias) in an RLS rule's expression, excluding the rule's
@@ -354,6 +366,43 @@ function resolveOverlaps(m){
           moved=true;}}}
     if(!moved)break;}
 }
+// Force layout for network view. Spaced for LABELS, not dots: a label sits to the
+// right of its dot and is far wider than it, so computeOrganic's card spacing would
+// strand the dots and its NODE_W overlap test would be meaningless here.
+// Returns bounding-box corners, matching every other layout.
+function computeNetwork(){
+  _seed=20260627;
+  const ids=nodes.map(n=>n.t.id),nc=ids.length;if(!nc)return {};
+  const scale=Math.max(1,Math.sqrt(nc/8)),cx=480*scale,cy=360*scale,P={};
+  ids.forEach((id,i)=>{const a=i/nc*Math.PI*2;
+    P[id]={x:cx+Math.cos(a)*200*scale+(rnd()-.5)*40,y:cy+Math.sin(a)*160*scale+(rnd()-.5)*40};});
+  const avgLW=ids.reduce((s,id)=>s+labelW(tableById[id]),0)/nc,repK=avgLW*avgLW*2;
+  for(let it=0;it<500;it++){const cool=1-it/500;
+    for(let i=0;i<nc;i++)for(let k=i+1;k<nc;k++){const a=P[ids[i]],b=P[ids[k]];
+      const dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||1,d=Math.sqrt(d2),f=Math.min(repK/d2,40)*cool;
+      a.x+=dx/d*f;a.y+=dy/d*f;b.x-=dx/d*f;b.y-=dy/d*f;}
+    MODEL.joins.forEach(j=>{const a=P[j.from],b=P[j.to];if(!a||!b)return;
+      const dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,f=(d-NET_EDGE)*.05*cool;
+      a.x+=dx/d*f;a.y+=dy/d*f;b.x-=dx/d*f;b.y-=dy/d*f;});
+    ids.forEach(id=>{P[id].x+=(cx-P[id].x)*.004*cool;P[id].y+=(cy-P[id].y)*.004*cool;});}
+  const m={};ids.forEach(id=>{const r=dotR(tableById[id]);m[id]={x:P[id].x-r,y:P[id].y-r};});
+  resolveLabelOverlaps(m);
+  return m;
+}
+// Push apart dot+label boxes (dot, a 6px gap, then the label) until none overlap.
+// Separates along the axis of least overlap, as resolveOverlaps does for cards.
+function resolveLabelOverlaps(m){
+  const ids=Object.keys(m),GAP=8;
+  const box=id=>{const r=dotR(tableById[id]);return {w:2*r+6+labelW(tableById[id]),h:Math.max(2*r,16)};};
+  for(let pass=0;pass<60;pass++){let moved=false;
+    for(let i=0;i<ids.length;i++)for(let k=i+1;k<ids.length;k++){
+      const a=m[ids[i]],b=m[ids[k]],A=box(ids[i]),B=box(ids[k]);
+      const overX=Math.min(a.x+A.w,b.x+B.w)-Math.max(a.x,b.x)+GAP,overY=Math.min(a.y+A.h,b.y+B.h)-Math.max(a.y,b.y)+GAP;
+      if(overX>0&&overY>0){moved=true;
+        if(overY<=overX){const s=a.y<=b.y?-1:1,p=overY/2;a.y+=s*p;b.y-=s*p;}
+        else{const s=a.x<=b.x?-1:1,p=overX/2;a.x+=s*p;b.x-=s*p;}}}
+    if(!moved)break;}
+}
 function computeLayered(dir){
   const rank={};MODEL.tables.forEach(t=>rank[t.id]=0);
   for(let i=0;i<MODEL.tables.length;i++)MODEL.joins.forEach(j=>{if(rank[j.to]<rank[j.from]+1)rank[j.to]=rank[j.from]+1;});
@@ -385,9 +434,11 @@ function computeLayered(dir){
   resolveOverlaps(m);
   return m;
 }
+function computeFor(name){return name==="organic"?computeOrganic():name==="star"?computeStar()
+  :name==="network"?computeNetwork():computeLayered(name);}
 function getLayout(name){
   if(layoutCache[name])return layoutCache[name];
-  layoutCache[name]=name==="organic"?computeOrganic():name==="star"?computeStar():computeLayered(name);
+  layoutCache[name]=computeFor(name);
   return layoutCache[name];
 }
 
@@ -404,6 +455,14 @@ function setLayout(name){layoutName=name;
   tOrth.disabled=!layered;$("orth-wrap").style.opacity=layered?1:.4;
   updateSavedBadge();
   tweenTo(hasAll(savedPos[name])?savedPos[name]:getLayout(name));}
+function initialView(){return /(^|[#&])view=network($|&)/.test(location.hash)?"network":"cards";}
+function setView(v){
+  if(v!=="network")v="cards";
+  if(v===VIEW)return;
+  if(v==="network")cardLayout=layoutName;
+  VIEW=v;nodes.forEach(sizeNode);
+  setLayout(v==="network"?"network":cardLayout);
+}
 
 // ---- focus / path ----
 function tableMatchesFilter(t){
@@ -453,12 +512,14 @@ function pathEdges(){
 
 const NS_el=(tag,attrs,parent)=>{const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e;};
 const center=n=>({x:n.x+n.w/2,y:n.y+n.h/2});
-function border(n,toward){const c=center(n),dx=toward.x-c.x,dy=toward.y-c.y,hw=n.w/2,hh=n.h/2;
+function border(n,toward){const c=center(n),dx=toward.x-c.x,dy=toward.y-c.y;
+  if(VIEW==="network"){const d=Math.hypot(dx,dy)||1,r=n.w/2;return {x:c.x+dx/d*r,y:c.y+dy/d*r};}
+  const hw=n.w/2,hh=n.h/2;
   const s=Math.min(dx===0?1e9:hw/Math.abs(dx),dy===0?1e9:hh/Math.abs(dy));return {x:c.x+dx*s,y:c.y+dy*s};}
 
 function computeLanes(){
   const buckets={};
-  edges.forEach(e=>{e.s.h=nodeHeight(e.s.t);e.t.h=nodeHeight(e.t.t);
+  edges.forEach(e=>{sizeNode(e.s);sizeNode(e.t);
     const base=layoutName==="lr"?(e.s.x+e.s.w+e.t.x)/2:(e.s.y+e.s.h+e.t.y)/2;
     const key=Math.round(base/6);(buckets[key]=buckets[key]||[]).push(e);});
   Object.values(buckets).forEach(arr=>{
@@ -497,11 +558,11 @@ function renderEdges(){
   gEdges.innerHTML="";
   const showF=tFind.checked,keep=focusGroup(),pe=pathEdges();
   const gKeep=groupHighlightKeep(activeGroups());
-  const orth=tOrth.checked&&(layoutName==="lr"||layoutName==="tb");
-  const crow=notation==="crow";
+  const net=VIEW==="network",crow=notation==="crow"&&!net;
+  const orth=!net&&tOrth.checked&&(layoutName==="lr"||layoutName==="tb");
   if(orth)computeLanes();
   edges.forEach(e=>{
-    e.s.h=nodeHeight(e.s.t);e.t.h=nodeHeight(e.t.t);
+    sizeNode(e.s);sizeNode(e.t);
     const G=edgeGeom(e,orth);
     const hot=showF&&HOT_EDGES.has(e.j.name);
     const onPath=pe.has(e.j.name);
@@ -515,6 +576,7 @@ function renderEdges(){
     let stroke=annotated?"#D97706":"#9AA4B1",sw=annotated?2:1.6,dash="0",mk="url(#arrow)";
     if(hot){stroke="#9AA4B1";sw=2;dash="6 4";mk="url(#arrow)";}
     if(onPath||sel){stroke="#1E6FA8";sw=3;dash="0";mk="url(#arrow-sel)";}
+    if(net){mk="none";if(!(onPath||sel||hot||annotated)){stroke="#B8C0CB";sw=1.2;}}
     // Notes filter: a noted edge stays emphasized even if its endpoints fall outside
     // the highlighted subgraph (e.g. a note on a join between two otherwise-unrelated tables).
     const notesKeep=activeFilters.has("notes")&&annotated;
@@ -528,7 +590,7 @@ function renderEdges(){
     NS_el("path",{d:G.d,stroke:"transparent","stroke-width":16,fill:"none","vector-effect":"non-scaling-stroke"},g);
     if(crow){const card=e.j.card,parts=(card&&card.includes("_TO_"))?card.split("_TO_"):["MANY","ONE"];
       drawCard(g,G.sp,G.sdir,parts[0]==="MANY",stroke);drawCard(g,G.tp,G.tdir,parts[1]==="MANY",stroke);}
-    originBadge(g,G.mx,G.my,e.j.origin||"table");
+    if(!net)originBadge(g,G.mx,G.my,e.j.origin||"table");
     g.addEventListener("click",ev=>{ev.stopPropagation();selectEdge(e.j.name);});
   });
 }
@@ -553,6 +615,16 @@ function drawNodeBlock(g,n,t,stroke,sw,groupInfo){
   const label=t.id.length>maxCh?t.id.slice(0,maxCh-1)+"…":t.id;
   NS_el("text",{class:"node-block-title",x:n.w/2,y:n.h/2,"text-anchor":"middle","dominant-baseline":"central"},g).textContent=label;
 }
+// Network-view node: a dot sized by join count, filled by role (alias wins over kind,
+// a Group-by colour wins over both), ringed by state, labelled to its right.
+function dotKind(t){return t.alias_of?"alias":lodKind(t);}
+function drawNodeDot(g,n,t,ring,ringW,groupInfo){
+  const r=n.w/2,kind=dotKind(t),fill=groupInfo?groupInfo.color:DOT_FILL[kind];
+  NS_el("circle",{class:"dot","data-kind":kind,cx:r,cy:r,r,fill,stroke:ring,"stroke-width":ringW,
+    "vector-effect":"non-scaling-stroke"},g);
+  NS_el("text",{class:"dot-label",x:2*r+6,y:r,"dominant-baseline":"central"},g).textContent=t.id;
+  if(notes[t.id])NS_el("circle",{class:"dot-note",cx:2*r-2,cy:2,r:4,fill:"#D97706",stroke:"#fff","stroke-width":1},g);
+}
 // C4: group accent stripe on a detail (card) node — a thin rounded rect along the left
 // edge, inset from the body-rect border so it never overpaints the state-aware border or
 // the rx:10 corner. Called AFTER the header rects are drawn (see renderNodes) so it isn't
@@ -568,7 +640,7 @@ function renderNodes(){
   const grp=activeGroups(),gKeep=groupHighlightKeep(grp);
   const groupById=grp?Object.fromEntries(grp.groups.map(g=>[g.id,g])):null;
   nodes.forEach(n=>{
-    const t=n.t,isFact=t.kind==="fact";n.h=nodeHeight(t);
+    const t=n.t,isFact=t.kind==="fact";sizeNode(n);
     const sev=showF?worstSev(t.id):null;
     // Two inherent RLS node states, always shown (like SQL View / Alias):
     //   secured   = a rule is defined ON this table (red)
@@ -591,7 +663,12 @@ function renderNodes(){
     if(inFocus){stroke="#1E6FA8";sw=2.8;}
     const gInfo=groupById?groupById[grp.byId[t.id]]:null;
 
-    if(isLod){
+    if(VIEW==="network"){
+      // A plain dot gets a thin white ring so it reads over lines; any state
+      // (RLS, finding, focus) keeps the card's state colour, slightly heavier.
+      const ringed=secured||inRlsPath||sev==="crit"||sev==="warn"||inFocus;
+      drawNodeDot(g,n,t,ringed?stroke:"#fff",ringed?sw+0.6:1.5,gInfo);
+    }else if(isLod){
       drawNodeBlock(g,n,t,stroke,sw,gInfo);
     }else{
       let fill=secured?"#FBE9E7":inRlsPath?"#FEF3C7":t.is_sql_view?"#F0FDFA":"#fff";
@@ -660,7 +737,7 @@ function screenToWorld(cx,cy){const r=svg.getBoundingClientRect();return {x:(cx-
 function nodesBBox(list){
   if(!list||!list.length)return {x0:0,y0:0,x1:1,y1:1};
   let a=1e9,b=1e9,c=-1e9,d=-1e9;
-  list.forEach(n=>{n.h=nodeHeight(n.t);a=Math.min(a,n.x);b=Math.min(b,n.y);c=Math.max(c,n.x+n.w);d=Math.max(d,n.y+n.h);});
+  list.forEach(n=>{sizeNode(n);a=Math.min(a,n.x);b=Math.min(b,n.y);c=Math.max(c,n.x+n.w);d=Math.max(d,n.y+n.h);});
   return {x0:a,y0:b,x1:c,y1:d};
 }
 function fitNodes(subset){
@@ -995,11 +1072,10 @@ function showNotesReview(){
 document.querySelectorAll("#layout-seg button").forEach(b=>b.onclick=()=>setLayout(b.dataset.l));
 document.querySelectorAll("#notation-seg button").forEach(b=>b.onclick=()=>{notation=b.dataset.n;
   document.querySelectorAll("#notation-seg button").forEach(x=>x.classList.toggle("on",x.dataset.n===notation));renderEdges();});
-colSel.onchange=()=>{colMode=colSel.value;layoutCache={};nodes.forEach(n=>n.h=nodeHeight(n.t));
+colSel.onchange=()=>{colMode=colSel.value;layoutCache={};nodes.forEach(sizeNode);
   layoutCache.organic=computeOrganic();setLayout(layoutName);};
 $("reset-pos").onclick=()=>{delete savedPos[layoutName];persistSaved();
-  layoutCache[layoutName]=layoutName==="organic"?computeOrganic():layoutName==="star"?computeStar():computeLayered(layoutName);
-  setLayout(layoutName);};
+  layoutCache[layoutName]=computeFor(layoutName);setLayout(layoutName);};
 tFind.onchange=renderAll; tOrth.onchange=renderEdges;
 function syncChips(){document.querySelectorAll("#filter-chips .fchip").forEach(c=>c.classList.toggle("on",activeFilters.has(c.dataset.f)));}
 document.querySelectorAll("#filter-chips .fchip").forEach(c=>c.addEventListener("click",()=>{
@@ -1093,6 +1169,9 @@ function computeNodeW(){
 }
 
 function loadModel(m){
+  // A model switch while in network view: rebuild in cards (card sizes, card layout
+  // name), then re-enter network at the end so it gets this model's own layout.
+  const wasNet=VIEW==="network";if(wasNet){VIEW="cards";layoutName=cardLayout;}
   MODEL=m;
   NODE_W=computeNodeW();
   tableById={};MODEL.tables.forEach(t=>tableById[t.id]=t);
@@ -1162,6 +1241,7 @@ function loadModel(m){
   // B1: must run AFTER notes=loadNotes() and the ERD_INITIAL_STATE baked-notes merge
   // above — NOT folded into the generic chip-disable loop earlier in this function,
   // which runs before notes exists and would compute the chip against stale data.
+  if(wasNet)setView("network");
   syncNotesChip();
 }
 
@@ -1183,4 +1263,4 @@ function buildSwitcher(){
 
 // ---- entry point ----
 buildSwitcher();
-loadModel(MODEL);
+VIEW="cards";loadModel(MODEL);setView(initialView());

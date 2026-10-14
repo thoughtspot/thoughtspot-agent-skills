@@ -225,3 +225,7 @@ table.cols .c-syn .syn{font-family:-apple-system,system-ui,sans-serif;font-size:
 .index-card h3{margin:0 0 4px;font-size:14.5px}
 .index-card .meta{display:flex;gap:14px;margin-top:10px;font-size:11px;color:var(--muted)}
 .index-card .meta b{color:var(--ink);font-variant-numeric:tabular-nums}
+/* network view (dots) */
+.dot{cursor:pointer;filter:drop-shadow(0 1px 2px rgba(20,27,38,.18))}
+.dot-label{font-size:12px;fill:#2A3140;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round;cursor:pointer}
+#viewport.net-far .dot-label{display:none}
