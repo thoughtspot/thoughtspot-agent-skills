@@ -246,6 +246,8 @@ LESSON_CASES = [
     Case("l3_avg_is_row_level", f'SELECT {REGION} AS r, AVG({SALES}) AS a, SUM({SALES}) AS s, COUNT({SALES}) AS n '
          f'{F} GROUP BY {REGION}', OK, L + "3.2 AVG averages fact rows, not anything larger", model="apparel",
          check=_avg_is_sum_over_count),
+    Case("l3_agg_on_raw_measure_rejected", f'SELECT {REGION} AS r, AGG({SALES}) AS s {F} GROUP BY {REGION}',
+         GEN_ERROR, L + "3.4 formula measures: AGG, not SUM (break it)", model="apparel", code="QUERY_GEN_ERROR"),
     Case("l3_dim_only_one_table", f'SELECT {ITEM} AS it {F} GROUP BY {ITEM}', OK,
          L + "3.3 a dimension-only query reads only its own table", model="apparel",
          sql_has=("dim_retapp_products",), sql_lacks=("join", "fact_retapp_sales")),

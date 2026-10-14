@@ -384,7 +384,74 @@ GROUP BY "t1"."item type", "t1"."region"
 
 **Guarded by:** `l3_dim_only_one_table`, `l3_two_dims_via_fact`.
 
-### 3.4 Security you never write
+### 3.4 Formula measures: `AGG`, not `SUM` (on a Model the learner chooses)
+
+The sample Model's measures are all raw, so this lesson runs on **a Model the learner
+picks**: one they work with, on a cloud warehouse, that has formula measures. On the SE demo
+cluster, `Dunder Mifflin` works. Everyone else names their own.
+
+**Set it up.** Do this yourself, in front of the learner. The classification is itself part
+of the lesson.
+
+1. **Classify the Model's columns:**
+
+   ```bash
+   ts agentql classify-columns --model {guid} --profile {profile}
+   ```
+
+   Each column comes back with a `kind` and a `wrapper`. Show the learner the measures:
+   `raw_measure` (wrapper `SUM`, or the aggregation it names), `aggregate_measure`
+   (wrapper **`AGG`**), and `semiadditive_measure` (wrapper `SUM`, the exception below).
+   This is how you tell, for any Model, which wrapper a measure takes.
+2. **No `aggregate_measure`?** Say so: this Model has no formula measures. Offer another
+   Model, or skip the lesson. Do not invent one.
+3. **Pick the pieces:**
+   - **one `aggregate_measure`.** Prefer a simple one; read its formula with
+     `ts tml export {guid} --profile {profile} --parse` (`model.formulas[].expr`).
+   - **one `attribute` with a handful of values** (a country, region, category or type).
+     Check with `COUNT(DISTINCT …)` if unsure, and keep it to about 20 or fewer.
+   - **a control, if there is one.** When the formula is a plain sum of one column that the
+     Model also exposes as a `raw_measure`, that raw measure is the control.
+4. **Write the question from those names.** For example: *"What is `Sales - Actual (fx)` by
+   `Ship Country`?"*
+
+**Learner writes** the query. **Predict:** `SUM` or `AGG`, and what will the SQL contain?
+
+```sql
+SELECT "t1"."<attribute>" AS a, AGG("t1"."<formula measure>") AS m
+FROM "<Model>" AS "t1"
+GROUP BY "t1"."<attribute>"
+```
+
+**Point out.**
+- **`AGG()` means "use the Model's formula as defined."** The formula already aggregates,
+  so the compiled SQL carries the formula's own aggregation once, not one you add on top.
+- **Read the SQL to see how much the formula does.** A formula built on `group_aggregate`
+  (the Dunder Mifflin sales measures are) compiles to a CTE at the formula's own level of
+  detail, joined back to the query with a `LEFT OUTER JOIN`. That logic is defined once in
+  the Model, and nobody has to write it again in a query.
+- **If there is a control,** run `SUM` of the raw column beside it: the two agree.
+
+**Break it.** Three variants, run one at a time:
+
+| Variant | Result | Why |
+|---|---|---|
+| `SUM("t1"."<formula measure>")` | rejected: `NESTED_AGGREGATE_NOT_SUPPORTED` | the formula already aggregates, so `SUM` would aggregate it twice |
+| `AGG("t1"."<raw measure>")` | rejected: `QUERY_GEN_ERROR`, *"All non-constant columns should be grouped by or aggregated"* | a raw column has no aggregation for `AGG` to use. Try it on the sample Model: `AGG("t1"."sales")` |
+| `"t1"."<formula measure>"`, bare | **same SQL and rows as `AGG()`** | the aggregation lives in the formula. Contrast 2.8, where a bare *raw* measure returned every row. Write `AGG()` anyway, so the reader can see it |
+
+**The exception: semi-additive measures.** A formula whose outermost call is
+`last_value` / `first_value` (a balance or snapshot measure) takes **`SUM`**, and `AGG`
+fails on it. `classify-columns` reports these as `semiadditive_measure` with wrapper
+`SUM`. Mention it, and follow `wrapper` rather than memorising the rule. Details are in
+[`agentql-rules.md`](agentql-rules.md) § Aggregation.
+
+**Guarded by:** `sum_on_agg_formula`, `agg_on_agg_formula`, `agg_formula_equals_raw_sum`, `agg_formula_bare_like_agg`, `l3_agg_on_raw_measure_rejected`.
+
+All but the last are limitations-suite cases on Dunder Mifflin. On another Model, the
+lesson's own runs are the check.
+
+### 3.5 Security you never write
 
 No query here mentions security, and none needs to. If the Model has **row-level security**,
 the compiled SQL includes the user's filter automatically, so two users running the same
@@ -395,12 +462,8 @@ has no RLS to demonstrate it.
 
 **Check yourself.** Why is `SUM(sales) / SUM(quantity)` the right average price, and
 `AVG(sales / quantity)` not? A dimension-only query lists fewer products than the product
-table holds: name two reasons.
-
-> **Parked: `SUM` vs `AGG` on aggregate-formula measures.** `AGG()` is not a released
-> product feature, so the course does not teach it. Add it as a lesson here once it ships.
-> The behaviour is recorded in `agentql-rules.md` § Aggregation and checked by the
-> limitations-suite cases `sum_on_agg_formula` / `agg_on_agg_formula`.
+table holds: name two reasons. Given any Model, how do you find out whether a measure takes
+`SUM` or `AGG`, without reading its formula?
 
 ---
 
