@@ -99,6 +99,9 @@ expression.
 - **Attributes go in `GROUP BY`.** Every non-aggregate column in the SELECT must appear in
   `GROUP BY`. Every CTE that contains an aggregate must have its own `GROUP BY` (the main
   SELECT is the only exception — it may aggregate to a single global row without one).
+  A computed column can be grouped by repeating its expression or by its output alias
+  (`SELECT UPPER("t1"."region") AS u … GROUP BY u`). A position (`GROUP BY 1`) is
+  rejected (✓ live 2026-10-14).
 - Statistical aggregates: `MEDIAN` works directly — scalar and grouped. `STDDEV_SAMP`/
   `STDDEV_POP` and `VAR_SAMP`/`VAR_POP` **do not compile against a Model column in either
   context** (`UNSUPPORTED_AGGREGATE` — regression since jul.26.mt, still present on

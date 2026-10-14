@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-14
+- feat: ts-object-model-agentql-query 2.6.0 — Learn AgentQL modules 3–7 written (all eight modules, with tracks; 57 live-checked lesson cases), plus a "Learn AgentQL" section in SKILL.md and the README saying how to start it
 - feat: ts-object-model-agentql-query 2.5.0 — **Learn AgentQL** guided pathway (`references/learning-path.md`, modules 0–2 live, 3–7 outlined) on the `(Sample) Retail - Apparel` Model every cluster ships; a `lessons` suite in `tools/agentql-retest` checks every lesson claim; identifier-case, implicit-`GROUP BY` and bare-measure rules corrected
 - fix: ts-object-model-erd 1.9.2 — Share HTML records its model and card layout (opens there; no leak into other models' layouts or notes in a multi-model file; legacy shared files still open); a model switch applies the current layout
 - fix: ts-object-model-erd 1.9.1 — Network view polish: Layout highlight kept/restored (incl. files shared from Network view), real-font label widths, coloured minimap dots, legend clears the minimap on small screens

@@ -235,7 +235,7 @@ def test_lesson_guarded_by_ids_in_the_doc_all_exist():
     import re
     cited = {i for line in doc.splitlines() if line.startswith("**Guarded by:**")
              for i in re.findall(r"`([a-z0-9_]+)`", line)}
-    ids = {c.id for c in CASES if c.suite == "lessons"}
+    ids = {c.id for c in CASES}  # a lesson may cite a limitations case (3.4 needs Dunder Mifflin)
     assert cited, "learning-path.md cites no cases"
     assert cited <= ids, f"cited but not cases: {sorted(cited - ids)}"
     uncited = {c.id for c in CASES if c.suite == "lessons" and not c.control} - cited

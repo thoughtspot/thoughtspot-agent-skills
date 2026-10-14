@@ -106,7 +106,7 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 
 | Skill | What it does | CLI | Snowsight | DBX |
 |---|---|:-:|:-:|:-:|
-| [`ts-object-model-agentql-query`](agents/cli/ts-object-model-agentql-query/SKILL.md) | Query a Model with AgentQL — write Semantic SQL, validate to warehouse SQL, execute, and review results. New to AgentQL? Start with [**Why AgentQL**](agents/cli/ts-object-model-agentql-query/references/architecture.md). | [✓](agents/cli/ts-object-model-agentql-query/SKILL.md) | — | — |
+| [`ts-object-model-agentql-query`](agents/cli/ts-object-model-agentql-query/SKILL.md) | Query a Model with AgentQL — write Semantic SQL, validate to warehouse SQL, execute, and review results. New to AgentQL? Ask for the [**guided course**](agents/cli/ts-object-model-agentql-query/references/learning-path.md) ("teach me AgentQL"), or read [**Why AgentQL**](agents/cli/ts-object-model-agentql-query/references/architecture.md). | [✓](agents/cli/ts-object-model-agentql-query/SKILL.md) | — | — |
 
 </details>
 

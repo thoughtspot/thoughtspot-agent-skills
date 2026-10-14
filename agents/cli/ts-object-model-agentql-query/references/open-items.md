@@ -308,6 +308,11 @@ exists on any cluster. Probed on the SE demo cluster (26.9.0.cl PROD):
   - A dimension beside an aggregate with no `GROUP BY` is grouped implicitly.
   - A bare raw measure is **not** aggregated. It returns row-level values.
 
+**Modules 3–7 added the same day:** 57 lesson cases, all AS_DOCUMENTED on the same build.
+They confirm on this Model what `limitations.md` records on Dunder Mifflin (QUALIFY,
+`FILTER`, and the date-literal `SUM(CASE)` all go wrong silently; STDDEV and
+`IN (SELECT)` fail loudly). One new rule: `GROUP BY` accepts an output alias.
+
 **Open: is the GUID the same on every cluster?** Not testable here: the only other profile
 (`semantic-sql`) does not resolve. The design does not depend on it. Both the pathway and
 `run.py --suite lessons` find the Model by exact name **and** `authorName == "system"`,

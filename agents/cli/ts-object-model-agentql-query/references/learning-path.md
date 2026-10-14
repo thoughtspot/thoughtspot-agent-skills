@@ -9,8 +9,8 @@ answering a business question; that is the normal flow in `SKILL.md`.
 **Audience.** Built first for **SEs and other technical field staff** who need to explain and
 demo the capability. It works for anyone comfortable reading SQL.
 
-**Status.** Modules 0–2 are written and live-verified. Modules 3–7 are outlined at the end
-and not written yet.
+**Status.** All eight modules (0–7) are written and live-verified on 26.9.0.cl PROD. Every
+behavioural claim is checked by a retest case, named on the lesson's **Guarded by** line.
 
 ---
 
@@ -37,6 +37,12 @@ ts metadata search --profile {profile} --subtype WORKSHEET --name "(Sample) Reta
 On the SE demo cluster it is `cd252e5c-b552-49a8-821d-3eadaa049cca`. Other clusters may
 differ, which is why the search is the method. If there is no system-authored copy, ask
 which Model to use rather than picking a near-match.
+
+The sample's tables are on `Demo Connection`, a cloud warehouse on ThoughtSpot Cloud
+clusters. If `generate-sql` answers *"This API only supports external cloud data
+warehouses"*, this cluster's sample is not on one (AgentQL needs one). Say so, and ask the
+learner for a Model on Snowflake, Databricks or BigQuery. The lessons still apply, but the
+numbers and table names will differ.
 
 **Because `date` rolls forward, totals bucketed by date change from day to day.** Never tell
 a learner to expect a specific dated number. Totals over all time are stable.
@@ -322,18 +328,456 @@ before running `generate-sql`.
 
 ---
 
-## Modules 3–7 (outlined, not yet written)
+## Module 3 — What the semantic layer does for you (~30 min)
 
-| # | Module | Will teach | Draws on |
-|---|---|---|---|
-| 3 | What the semantic layer does for you | raw measures vs aggregate-formula measures (`SUM` vs `AGG`), `NESTED_AGGREGATE_NOT_SUPPORTED`, `join_progressive` and its absence, row-level security applied without being written | [`agentql-rules.md`](agentql-rules.md) § Aggregation, `architecture.md` |
-| 4 | Dates and functions | date literals, `TO_DATE`, `YEAR`/`MONTH_NUMBER`/`DAY_IN_YEAR_NUMBER`, and which functions compile but fail | [`udf-reference.md`](udf-reference.md), `limitations.md` |
-| 5 | Advanced shapes | CTEs, window functions (`RANK`, `LAG`, framed `SUM`), set operations, top N per group with `ROW_NUMBER` in a CTE | [`patterns.md`](patterns.md) |
-| 6 | Trust, but verify | queries that return `SUCCESS` with the wrong number (`QUALIFY`, `FILTER (WHERE …)`), and catching them with a control query | [`limitations.md`](limitations.md), the retest suite's controls |
-| 7 | Building on it | the two calls inside an agent, accuracy benchmarking, regression testing | [`use-cases.md`](use-cases.md), [`integration.md`](integration.md) |
+### 3.1 A ratio of two measures, divided safely
 
-**Tracks.** SE / field: 0–3 and 6. Developer integrating: 0–5 and 7. QA / power user: all.
+**Learner writes:** average selling price per item type (sales ÷ quantity).
 
-**Module 3 needs an aggregate-formula measure,** and the sample Model has none (its two
-measures are raw). Either add a scratch formula to a copy, or use a learner's own Model.
-Decide that before writing the module.
+```sql
+SELECT "t1"."item type" AS it, SUM("t1"."sales") / SUM("t1"."quantity purchased") AS avg_price
+FROM "(Sample) Retail - Apparel" AS "t1"
+GROUP BY "t1"."item type"
+```
+
+**Point out.** The divisor is wrapped in `NULLIF(…, 0.0)`, so a zero quantity gives NULL
+rather than a division error. Note **ratio of sums, not sum of ratios**: each ratio is
+computed from the group's totals, which is the correct average price.
+
+**Guarded by:** `l3_ratio_safe_division`.
+
+### 3.2 `AVG` averages fact rows
+
+```sql
+SELECT "t1"."region" AS r, AVG("t1"."sales") AS a, SUM("t1"."sales") AS s, COUNT("t1"."sales") AS n
+FROM "(Sample) Retail - Apparel" AS "t1"
+GROUP BY "t1"."region"
+```
+
+**Predict.** Is `a` the average sale per *store* in the region, or per *row*?
+
+**Point out.** Per row: `a = s / n`, where `n` counts fact rows. "Average sales per store"
+needs a two-step query (5.1). This is the most common reason an `AVG` looks wrong.
+
+**Guarded by:** `l3_avg_is_row_level`.
+
+### 3.3 Which tables a query reads
+
+```sql
+SELECT "t1"."item type" AS it FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."item type"
+SELECT "t1"."item type" AS it, "t1"."region" AS r FROM "(Sample) Retail - Apparel" AS "t1"
+GROUP BY "t1"."item type", "t1"."region"
+```
+
+**Predict.** Will either query touch the sales table?
+
+**Point out.**
+- **One dimension:** only `DIM_RETAPP_PRODUCTS` is read. The Model has `join_progressive`
+  on, so tables a query does not need are left out, as in 2.1.
+- **Two dimensions from different tables:** the SQL joins **through the fact table**,
+  because that is the only path between products and stores. So the result shows only the
+  combinations that have sales, not every possible pairing. Here all 75 exist. On sparser
+  data, a "list every product and region" query silently drops pairings with no sales.
+- On a Model **without** `join_progressive`, *every* query joins every table, even a
+  one-column dimension list, so results are filtered by the fact table. See
+  `limitations.md` ⚠️ "Any dimension-only query on a Model without `join_progressive`".
+
+**Guarded by:** `l3_dim_only_one_table`, `l3_two_dims_via_fact`.
+
+### 3.4 Formula measures: `SUM` vs `AGG` (on the learner's own Model)
+
+The sample Model has only raw measures, so this lesson needs a Model that has an
+**aggregate-formula measure**. Ask the learner for one, or find one:
+
+```bash
+ts tml export {guid} --profile {profile} --parse   # model.formulas[].expr containing sum( / count( / group_aggregate(
+```
+
+**Point out.**
+- A **raw measure** (a plain warehouse column, like `sales`) takes an aggregate you write:
+  `SUM`, `AVG`, `MIN`, `MAX`, `COUNT`.
+- An **aggregate-formula measure** already contains its aggregation. Wrap it in **`AGG()`**
+  so it is not aggregated twice.
+
+**Break it.** `SUM()` around the same formula fails with `NESTED_AGGREGATE_NOT_SUPPORTED`.
+The full rule, including semi-additive measures, is in [`agentql-rules.md`](agentql-rules.md)
+§ Aggregation.
+
+**Guarded by:** `sum_on_agg_formula`, `agg_on_agg_formula`. These are limitations-suite
+cases, because they need the Dunder Mifflin Model.
+
+### 3.5 Security you never write
+
+No query here mentions security, and none needs to. If the Model has **row-level security**,
+the compiled SQL includes the user's filter automatically, so two users running the same
+AgentQL can get different rows, each correct for them. Column-level security hides columns
+the same way. Read [`architecture.md`](architecture.md) § "What the semantic layer
+guarantees". This is the strongest argument for AgentQL over raw SQL, and the sample Model
+has no RLS to demonstrate it.
+
+**Check yourself.** Why is `SUM(sales) / SUM(quantity)` the right average price, and
+`AVG(sales / quantity)` not? A dimension-only query lists fewer products than the product
+table holds: name two reasons. How do you tell from the TML whether a measure takes `SUM` or
+`AGG`?
+
+---
+
+## Module 4 — Dates and functions (~30 min)
+
+### 4.1 Date parts with the extraction functions
+
+```sql
+SELECT YEAR_NUMBER("t1"."date") AS y, QUARTER_NUMBER("t1"."date") AS qn, MONTH_NUMBER("t1"."date") AS m,
+       SUM("t1"."sales") AS s
+FROM "(Sample) Retail - Apparel" AS "t1"
+GROUP BY YEAR_NUMBER("t1"."date"), QUARTER_NUMBER("t1"."date"), MONTH_NUMBER("t1"."date")
+```
+
+Also try `DAY_NAME("t1"."date")` (returns `monday` … `sunday`) and
+`DAY_IN_WEEK_NUMBER("t1"."date")` (1 = Monday … 7 = Sunday).
+
+**Point out.** AgentQL has its own date functions (catalogue in
+[`udf-reference.md`](udf-reference.md)). Use them instead of guessing the warehouse's
+spellings. The groups add up to the grand total.
+
+**Guarded by:** `l4_date_parts`, `l4_day_name`, `l4_day_in_week`.
+
+### 4.2 Relative dates: the period functions
+
+**Learner writes:** sales this year, and sales in the last 30 days.
+
+```sql
+SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
+WHERE DIFF_YEAR(START_OF_CURRENT_YEAR(), "t1"."date") = 0
+
+SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
+WHERE DIFF_DAY(START_OF_CURRENT_DAY(), "t1"."date") BETWEEN 1 AND 30
+```
+
+**Point out.** These compile to `CURRENT_DATE()` in the warehouse SQL. That is the function
+2.5 showed you may not write yourself: AgentQL allows "today" only through these named
+period functions, which are defined once and behave the same for everyone. "This year"
+matches the current-year row of a `YEAR_NUMBER` grouping. `BETWEEN 1 AND 30` means the 30
+complete days before today, excluding today.
+
+**Guarded by:** `l4_this_year_relative`, `l4_last_30_days`.
+
+### 4.3 A date literal in `WHERE`
+
+```sql
+SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
+WHERE "t1"."date" >= '<this year>-01-01'
+```
+
+**Point out.** A plain `'YYYY-MM-DD'` literal works in `WHERE`, and gives the same total as
+4.2's "this year". (Module 6 shows the same comparison going wrong inside `SUM(CASE …)`.)
+
+**Break it.** `DATE_TRUNC('month', "t1"."date")` compiles, then fails in the warehouse. Use
+`YEAR_NUMBER` / `MONTH_NUMBER` instead, as in 4.1.
+
+**Guarded by:** `l4_date_literal_filter`, `l4_date_trunc_fails`.
+
+### 4.4 String functions
+
+```sql
+SELECT UPPER("t1"."region") AS u, LENGTH("t1"."region") AS l,
+       CONCAT("t1"."region", '-', "t1"."state") AS c, SUBSTR("t1"."state", 1, 3) AS sub
+FROM "(Sample) Retail - Apparel" AS "t1"
+GROUP BY UPPER("t1"."region"), LENGTH("t1"."region"), CONCAT("t1"."region", '-', "t1"."state"),
+         SUBSTR("t1"."state", 1, 3)
+```
+
+**Point out.** Familiar SQL string functions work. A computed column in `SELECT` must also
+be grouped: repeat the expression, as above, or name its output alias (`GROUP BY u`). A
+position (`GROUP BY 1`) is rejected. Regex functions do not work (`limitations.md`).
+
+**Guarded by:** `l4_string_functions`, `l4_group_by_alias`, `l4_group_by_ordinal_rejected`.
+
+### 4.5 `CASE` to bucket values
+
+**Learner writes:** count and total of sales rows, bucketed small / medium / large.
+
+```sql
+SELECT CASE WHEN "t1"."sales" >= 1000 THEN 'large' WHEN "t1"."sales" >= 100 THEN 'medium' ELSE 'small' END AS b,
+       COUNT("t1"."sales") AS n, SUM("t1"."sales") AS s
+FROM "(Sample) Retail - Apparel" AS "t1"
+GROUP BY CASE WHEN "t1"."sales" >= 1000 THEN 'large' WHEN "t1"."sales" >= 100 THEN 'medium' ELSE 'small' END
+```
+
+**Point out.** `CASE` works both in `SELECT` and in `GROUP BY`, and the buckets add up to the
+grand total. This is bucketing per fact row. Bucketing *customers by their total* needs a
+CTE first (Module 5).
+
+**Guarded by:** `l4_case_buckets`.
+
+**Check yourself.** Write "sales in the last complete quarter" without `CURRENT_DATE`. Why
+does `DATE_TRUNC` compile but fail, and what do you use instead?
+
+---
+
+## Module 5 — Advanced shapes (~40 min)
+
+### 5.1 A CTE for two-step aggregation
+
+**Learner writes:** the average total sales per store (3.2's question, answered properly).
+
+```sql
+WITH st AS (
+  SELECT "t1"."store" AS store, SUM("t1"."sales") AS s
+  FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."store")
+SELECT AVG(st.s) AS avg_store_sales, COUNT(st.store) AS n FROM st
+```
+
+**Point out.** The CTE aggregates to the store grain, then the outer query averages over the
+CTE's columns. A CTE's columns are referenced through the CTE's name (`st.s`), not `t1`.
+Most "aggregate of an aggregate" questions take this shape.
+
+**Guarded by:** `l5_cte_two_step`.
+
+### 5.2 Window functions: rank and share of total
+
+```sql
+SELECT "t1"."region" AS r, "t1"."store" AS store, SUM("t1"."sales") AS s,
+       RANK() OVER (PARTITION BY "t1"."region" ORDER BY SUM("t1"."sales") DESC) AS rk
+FROM "(Sample) Retail - Apparel" AS "t1"
+GROUP BY "t1"."region", "t1"."store"
+
+SELECT "t1"."region" AS r, SUM("t1"."sales") AS s,
+       SUM("t1"."sales") / SUM(SUM("t1"."sales")) OVER () AS share
+FROM "(Sample) Retail - Apparel" AS "t1"
+GROUP BY "t1"."region"
+```
+
+**Point out.** A window function can run over an aggregate (`SUM(SUM(x)) OVER ()` is the
+grand total beside each group). The shares add up to 1, and the division is again made safe
+with `NULLIF`.
+
+**Guarded by:** `l5_rank`, `l5_share_of_total`.
+
+### 5.3 Top N per group
+
+**Learner writes:** the two best-selling item types in each region.
+
+```sql
+WITH x AS (
+  SELECT "t1"."region" AS r, "t1"."item type" AS it, SUM("t1"."sales") AS s,
+         ROW_NUMBER() OVER (PARTITION BY "t1"."region" ORDER BY SUM("t1"."sales") DESC) AS rn
+  FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region", "t1"."item type")
+SELECT x.r, x.it, x.s FROM x WHERE x.rn <= 2
+```
+
+**Point out.** Number the rows in a CTE, then filter in the outer query. Do **not** reach for
+`QUALIFY`: it is accepted and silently ignored (6.1).
+
+**Guarded by:** `l5_top_n_per_group`.
+
+### 5.4 Period over period and running totals
+
+```sql
+SELECT YEAR_NUMBER("t1"."date") AS y, SUM("t1"."sales") AS s,
+       LAG(SUM("t1"."sales")) OVER (ORDER BY YEAR_NUMBER("t1"."date")) AS prev
+FROM "(Sample) Retail - Apparel" AS "t1"
+GROUP BY YEAR_NUMBER("t1"."date")
+```
+
+Swap `LAG(…)` for `SUM(SUM("t1"."sales")) OVER (ORDER BY YEAR_NUMBER("t1"."date"))` to get a
+running total.
+
+**Point out.** `prev` is the previous year's total, and NULL for the first year. The running
+total for the latest year equals the grand total. The rows may not come back in year order:
+add an `ORDER BY` if order matters. More shapes (last N periods, year to date) are in
+[`patterns.md`](patterns.md).
+
+**Guarded by:** `l5_year_over_year`, `l5_running_total`.
+
+### 5.5 Combining results: set operations and CTE joins
+
+```sql
+SELECT "t1"."region" AS r, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
+WHERE "t1"."region" = 'West' GROUP BY "t1"."region"
+UNION ALL
+SELECT "t1"."region" AS r, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
+WHERE "t1"."region" = 'East' GROUP BY "t1"."region"
+```
+
+**Learner writes:** sales per store for each region, from two CTEs joined on region.
+
+```sql
+WITH a AS (SELECT "t1"."region" AS r, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region"),
+     b AS (SELECT "t1"."region" AS r, COUNT(DISTINCT "t1"."store") AS n FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region")
+SELECT a.r, a.s, b.n, a.s / b.n AS per_store FROM a JOIN b ON a.r = b.r
+```
+
+**Point out.** Both branches of a `UNION ALL` survive. Joining CTEs on an equality works. An
+inequality join, or joining a CTE to itself, does not (`limitations.md`).
+
+**Guarded by:** `l5_union_all`, `l5_join_ctes`.
+
+### 5.6 `HAVING`, and the shapes that are not allowed
+
+```sql
+SELECT "t1"."store" AS store, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
+GROUP BY "t1"."store" HAVING SUM("t1"."sales") > 40000000
+```
+
+**Break it.** A subquery in `FROM` (`SELECT x.r FROM (SELECT …) AS x`) is rejected with
+`TABLE_NOT_FOUND`. Rewrite it as a CTE: everything a derived table does, a CTE does here.
+
+**Guarded by:** `l5_having`, `l5_from_subquery_rejected`.
+
+**Check yourself.** Write "stores whose sales are above their region's average" (a CTE plus
+a window, or two CTEs). Why does 5.3 use a CTE instead of `QUALIFY`?
+
+---
+
+## Module 6 — Trust, but verify (~30 min)
+
+The hardest lesson in the course: **a `SUCCESS` with a plausible number can still be
+wrong.** Some constructs are accepted, then partly ignored.
+
+### 6.1 `QUALIFY` is silently dropped (and one more silent case)
+
+```sql
+SELECT "t1"."region" AS r, "t1"."item type" AS it, SUM("t1"."sales") AS s
+FROM "(Sample) Retail - Apparel" AS "t1"
+GROUP BY "t1"."region", "t1"."item type"
+QUALIFY ROW_NUMBER() OVER (PARTITION BY "t1"."region" ORDER BY SUM("t1"."sales") DESC) = 1
+```
+
+**Predict.** How many rows: one per region (5)?
+
+**Point out.** 75 rows, every region and item type pairing. The generated SQL has no
+`ROW_NUMBER` at all: the clause was dropped without an error. The **control** is 5.3's CTE
+form with `rn = 1`, which returns 5 rows. Comparing the two is how you catch this.
+
+**One more:** `SUM(CASE WHEN "t1"."date" >= '<this year>-01-01' THEN "t1"."sales" ELSE 0 END)`
+generates **correct** SQL, but the result comes back typed `UNKNOWN` with an empty value. 4.3
+showed the same comparison working in `WHERE`. The control is `YEAR_NUMBER(date) >= <this
+year>` inside the `CASE`, which returns the number.
+
+**Guarded by:** `l6_qualify_dropped`, `l6_sum_case_date_literal`.
+
+### 6.2 `FILTER (WHERE …)` is silently dropped
+
+```sql
+SELECT SUM("t1"."sales") FILTER (WHERE "t1"."region" = 'West') AS s FROM "(Sample) Retail - Apparel" AS "t1"
+```
+
+**Point out.** It returns the **grand total**, because the filter is not in the SQL. The
+control, `SUM(CASE WHEN "t1"."region" = 'West' THEN "t1"."sales" ELSE 0 END)`, returns
+West's share. A plausible-looking number is not a correct one.
+
+**Guarded by:** `l6_filter_dropped`.
+
+### 6.3 Lenient rewrites you should not rely on
+
+```sql
+SELECT "t1"."store" AS store, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
+WHERE SUM("t1"."sales") > 40000000 GROUP BY "t1"."store"
+```
+
+**Point out.** This is invalid SQL, but it is quietly rewritten as `HAVING` and gives 5.6's
+answer. Together with 2.7 (identifier case, a missing `GROUP BY`), that makes three lenient
+parses. They help a beginner, and they are exactly why a successful query proves less than
+it seems.
+
+**Guarded by:** `l6_where_aggregate_is_having`.
+
+### 6.4 Loud failures, and their workarounds
+
+| Try | What happens | Instead |
+|---|---|---|
+| `STDDEV_SAMP("t1"."sales")` | rejected, `UNSUPPORTED_AGGREGATE` | apply it to a CTE column, e.g. the per-store totals from 5.1 |
+| `WHERE region IN (SELECT …)` | compiles, then fails in the warehouse | join a CTE, or filter on the values directly |
+
+Loud failures are the easy kind: the error tells you. The full list, with dates and
+tickets, is [`limitations.md`](limitations.md).
+
+**Guarded by:** `l6_stddev_rejected`, `l6_stddev_over_cte`, `l6_in_subquery_fails`.
+
+### The verification habit
+
+For any answer someone will act on:
+1. **Read the generated SQL** and check that every clause you wrote is in it. A dropped
+   `QUALIFY` or `FILTER` is visible there.
+2. **For a number that matters, run a control:** the same question in a second form (a
+   `CASE` instead of `FILTER`, a CTE instead of `QUALIFY`, the parts of a ratio). If the
+   two agree, trust it.
+3. **Check the result's types.** An `UNKNOWN` column, or an empty value where you expected a
+   number, is a defect, not a zero.
+
+**Check yourself.** A colleague's AgentQL returns `SUCCESS` and a total that "looks about
+right". Name three checks you would run before putting it in front of a customer.
+
+---
+
+## Module 7 — Building on it (~30 min)
+
+For developers and anyone wiring AgentQL into an agent or a test suite.
+
+### 7.1 Consuming `fetch-data` in code
+
+`fetch-data` returns `columns[]` (index and type) and `rows[]` (one list per row, in
+`SELECT` order). Pair them by position, and convert `INT64` dates from epoch seconds:
+
+```python
+import datetime as dt, json, subprocess
+
+def agentql(sql, model, profile):
+    out = json.loads(subprocess.run(["ts", "agentql", "fetch-data", "--profile", profile, "-m", model, sql],
+                                    capture_output=True, text=True, check=True).stdout)
+    if out["status"] != "SUCCESS":
+        raise RuntimeError(f'{out["status"]}: {out["errors"]}')
+    return out["columns"], out["rows"]
+
+cols, rows = agentql('SELECT "t1"."region" AS r, "t1"."date" AS d, SUM("t1"."sales") AS s '
+                     'FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region", "t1"."date" '
+                     'ORDER BY "t1"."date" DESC LIMIT 5', model_guid, profile)
+for region, epoch, sales in rows:
+    print(region, dt.datetime.fromtimestamp(epoch, dt.timezone.utc).date(), sales)
+```
+
+**Point out.** Branch on `status`, never on the exit code (1.1). The response carries no
+column names, so keep your own `SELECT` order. Calling the REST endpoints directly from a
+product, with auth options and the raw response format, is covered in
+[`integration.md`](integration.md).
+
+**Guarded by:** `l7_columns_match_rows`.
+
+### 7.2 Testing an agent that writes AgentQL
+
+The patterns are in [`use-cases.md`](use-cases.md):
+- **Accuracy benchmarking:** a set of questions, each with an answer you know is right (from
+  a control query, as in Module 6), run through the agent and compared.
+- **Regression testing:** the same set re-run after a ThoughtSpot upgrade.
+- **Known-limitation retesting:** queries that are expected to fail, re-run to find out when
+  they start working.
+
+### 7.3 This course is a test suite too
+
+Every lesson above names the cases that check it. To see whether the course still matches
+the product on your cluster, run:
+
+```bash
+python3 tools/agentql-retest/run.py --profile {profile} --suite lessons
+```
+
+It finds the sample Model by name, runs every lesson claim, and lists only the ones whose
+behaviour has changed. Treat it as the worked example for 7.2: controls, value checks and
+statuses that are never trusted alone. See `tools/agentql-retest/README.md`.
+
+**Check yourself.** Design a five-question accuracy test for an agent on the sample Model.
+How will you know each expected answer is right?
+
+---
+
+## Tracks
+
+| Track | Modules | Time |
+|---|---|---|
+| **SE / field** (the default) | 0, 1, 2, 3, 6 | ~2.5 hours |
+| **Developer integrating** | 0, 1, 2, 4, 5, 7 | ~3 hours |
+| **QA / power user** | all | ~4 hours |
+
+Each module stands alone after Module 2, so a learner can stop and pick up later
+("teach me AgentQL, start at module 5").
