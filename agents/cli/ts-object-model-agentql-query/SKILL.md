@@ -83,7 +83,7 @@ that instead.
 | Module | What you learn |
 |---|---|
 | 0. Why AgentQL | ThoughtSpot compiles AgentQL to warehouse SQL and never runs it itself; the Model supplies joins, formulas and security |
-| 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, reading result types |
+| 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, reading result types, why it can only read (writes, DDL and injection are refused) |
 | 2. First queries | reading the SQL ThoughtSpot writes: joins written for you, null handling, the row cap, formulas inlined, the lenient parser, the bare-measure trap |
 | 3. The semantic layer | ratios and safe division, what `AVG` averages, which tables a query reads, formula measures (`AGG`, not `SUM`) on a Model you choose, security you never write |
 | 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets |
@@ -319,6 +319,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.8.0 | 2026-10-14 | **Read-only guards.** A new `guards` suite in `tools/agentql-retest` (25 cases) covers statements AgentQL must always refuse: writes, DDL and admin commands, a second statement, physical tables and `information_schema`. It also checks that comments, `SELECT … INTO` and a `'; DROP` inside a literal compile to one regenerated `SELECT`. A guard that ever compiles to anything else is reported as a new **BREACH** verdict (exit 3), and guards never call `fetch-data`. New `limitations.md` § Read-only by design, and Learn AgentQL lesson 1.5, "It can only read". `limitations.md` § Maintaining now starts from the retest suite, whose CHANGED on a ❌ case is how a shipped improvement surfaces. |
 | 2.7.1 | 2026-10-14 | Learn AgentQL: the agent now **shows each lesson's AgentQL ready to run** rather than asking the learner to write it ("Learner writes" → "Question"). This avoids syntax errors and keeps lessons quick. The SQL prediction is one quick optional question; "run it" skips it. Writing your own query stays available as practice. |
 | 2.7.0 | 2026-10-14 | Learn AgentQL lesson 3.4 restored, now generic: **formula measures, `AGG` not `SUM`, on a Model the learner chooses**. The agent runs `ts agentql classify-columns`, picks an aggregate-formula measure, an attribute and (where one exists) a raw-measure control, and writes the question from their names. If the Model has no formula measures, it says so. The Break it step shows `SUM(formula)` → `NESTED_AGGREGATE_NOT_SUPPORTED`, `AGG(raw)` → `QUERY_GEN_ERROR`, and a bare formula measure compiling exactly like `AGG()`. Security moves back to 3.5. New retest cases: `AGG()` equals the raw SUM it wraps, a bare formula measure matches `AGG()`, and `AGG()` on a raw measure is rejected. |
 | 2.6.1 | 2026-10-14 | Learn AgentQL: the `SUM` vs `AGG` lesson (3.4) is parked, because `AGG()` is not a released product feature. Former lesson 3.5 (security) is now 3.4. The skill's query rules are unchanged. |

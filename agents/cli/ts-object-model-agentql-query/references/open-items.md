@@ -319,6 +319,17 @@ They confirm on this Model what `limitations.md` records on Dunder Mifflin (QUAL
 which also skips the user copies. Close this by running `--suite lessons` on a second
 cluster: the resolved GUID is printed on the first line.
 
+## #9 — Read-only guards — VERIFIED (live) 2026-10-14
+
+Probed with `generate-sql` only, on 26.9.0.cl PROD, against the sample Model. No statement
+was sent to the warehouse. Every write, DDL and admin statement is rejected at compile with
+*"Only SELECT queries are supported for deserialization"* (`COPY INTO` and `ALTER SESSION`
+at parse). A second statement after `;` is rejected. Physical table names and
+`information_schema` give `TABLE_NOT_FOUND`. Comments, `SELECT … INTO` and a `'; DROP`
+inside a literal compile, but to one regenerated `SELECT` with none of the input text
+passed through. That property is what makes them safe, and `read_only_problem` asserts it.
+All 25 cases are now the `guards` suite; any regression reports BREACH (exit 3).
+
 ## Keeping `limitations.md` current
 
 `limitations.md` carries a currency anchor (`<!-- currency: spotql — YYYY-MM (...) -->`).

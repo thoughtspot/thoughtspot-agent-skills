@@ -264,3 +264,46 @@ def test_latest_date_check_wants_int_epoch_near_today():
     assert K.classify(c, OK_GEN, ok_fetch([[today, 1.0]]), {})[0] == K.AS_DOCUMENTED
     assert K.classify(c, OK_GEN, ok_fetch([["2026-10-14", 1.0]]), {})[0] == K.CHANGED
     assert K.classify(c, OK_GEN, ok_fetch([[today - 30 * 86400, 1.0]]), {})[0] == K.CHANGED
+
+
+# ---- the guards suite ----------------------------------------------------------------------
+
+def guard(**kw):
+    base = dict(id="g", sql="DELETE FROM t", expect=K.GEN_ERROR, row="🛡 writes", model="apparel", guard=True)
+    base.update(kw)
+    return K.Case(**base)
+
+
+def test_guards_are_their_own_suite_and_never_fetch():
+    gs = [c for c in CASES if c.guard]
+    assert gs and all(c.suite == "guards" and not c.runs_fetch for c in gs)
+    assert all(c.expect in (K.GEN_ERROR, K.SQL_OK) for c in gs)
+
+
+def test_validate_rejects_a_guard_that_would_fetch():
+    assert any("never fetched" in p for p in K.validate_cases([guard(expect=K.OK)]))
+
+
+def test_rejected_write_is_as_documented_whatever_the_status():
+    assert K.classify(guard(), err("QUERY_GEN_ERROR"), None, {})[0] == K.AS_DOCUMENTED
+    assert K.classify(guard(), err("SOME_NEW_CODE"), None, {})[0] == K.AS_DOCUMENTED
+
+
+def test_a_write_that_compiles_is_a_breach_not_a_change():
+    gen = dict(OK_GEN, executable_sql="DELETE FROM t")
+    v, reasons = K.classify(guard(), gen, None, {})
+    assert v == K.BREACH and "SELECT/WITH" in reasons[0]
+
+
+def test_neutralised_input_must_compile_to_one_read_only_select():
+    c = guard(expect=K.SQL_OK)
+    assert K.classify(c, dict(OK_GEN, executable_sql="SELECT a FROM t LIMIT 100000"), None, {})[0] == K.AS_DOCUMENTED
+    for bad in ("SELECT a FROM t; DROP TABLE t", "SELECT a FROM t -- x", "SELECT a INTO b FROM t"):
+        assert K.classify(c, dict(OK_GEN, executable_sql=bad), None, {})[0] == K.BREACH, bad
+    assert K.classify(c, err("QUERY_GEN_ERROR"), None, {})[0] == K.CHANGED  # rejected outright: safe, but news
+
+
+def test_keywords_inside_literals_and_identifiers_are_not_writes():
+    assert K.read_only_problem("SELECT \"UPDATE\" FROM t WHERE x = 'a''; drop table y; --'") is None
+    assert K.read_only_problem("SELECT a FROM t ORDER BY a OFFSET 1") is None
+    assert K.read_only_problem("WITH x AS (SELECT 1) SELECT * FROM x") is None

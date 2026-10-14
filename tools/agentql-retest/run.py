@@ -5,12 +5,15 @@
         --model-single <guid of "DunderMifflin Sales"> --model-multi <guid of "Dunder Mifflin">
     python3 tools/agentql-retest/run.py --profile <ts-profile> --suite lessons
 
-Two suites. `limitations` backs limitations.md and runs on the Dunder Mifflin demo Models.
+Three suites. `guards` holds the statements AgentQL must always refuse (writes, DDL,
+multi-statement and comment injection) and runs on the sample Model. `limitations` backs limitations.md and runs on the Dunder Mifflin demo Models.
 `lessons` backs learning-path.md and runs on "(Sample) Retail - Apparel", which ships on
 every cluster: it is found by exact name and author `system`, so it needs no GUID.
 
-Exit codes: 0 every case AS_DOCUMENTED · 1 at least one CHANGED · 2 at least one ERROR
-(an ERROR outranks a CHANGED: a run that could not see everything must not read as clean).
+Exit codes: 0 every case AS_DOCUMENTED · 1 at least one CHANGED · 2 at least one ERROR ·
+3 at least one BREACH (a guard compiled to something other than one read-only SELECT).
+Higher outranks lower: a run that could not see everything must not read as clean, and a
+safety regression outranks everything.
 See README.md for how to act on a CHANGED.
 """
 from __future__ import annotations
@@ -25,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from agentql_retest.cases import CASES, SAMPLE_MODEL  # noqa: E402
-from agentql_retest.classify import AS_DOCUMENTED, CHANGED, CLI_ERROR, ERROR, classify, validate_cases  # noqa: E402
+from agentql_retest.classify import AS_DOCUMENTED, BREACH, CHANGED, CLI_ERROR, ERROR, classify, validate_cases  # noqa: E402
 
 
 def call(cmd: str, sql: str, model: str, profile: str, timeout: int) -> dict:
@@ -71,7 +74,7 @@ def run_case(case, models, profile, timeout):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--profile", required=True, help="ThoughtSpot profile name (ts profiles list)")
-    ap.add_argument("--suite", choices=("all", "limitations", "lessons"), default="all")
+    ap.add_argument("--suite", choices=("all", "limitations", "lessons", "guards"), default="all")
     ap.add_argument("--model-single", help='GUID of the "DunderMifflin Sales" Model (limitations suite)')
     ap.add_argument("--model-multi", help='GUID of the "Dunder Mifflin" Model (limitations suite)')
     ap.add_argument("--model-apparel", help=f'GUID of "{SAMPLE_MODEL}" (lessons suite; found by name if omitted)')
@@ -120,7 +123,7 @@ def main() -> int:
         except Exception as e:  # a bespoke check tripping over an unexpected row shape
             verdicts[c.id] = (ERROR, [f"check raised {type(e).__name__}: {e}"])
 
-    counts = {AS_DOCUMENTED: 0, CHANGED: 0, ERROR: 0}
+    counts = {AS_DOCUMENTED: 0, CHANGED: 0, ERROR: 0, BREACH: 0}
     for c in todo:
         v, reasons = verdicts[c.id]
         counts[v] += 1
@@ -131,7 +134,7 @@ def main() -> int:
                 for r in reasons:
                     print(f"{'':<14}- {r}")
     print(f"\n{len(todo)} cases: {counts[AS_DOCUMENTED]} as documented, {counts[CHANGED]} changed, "
-          f"{counts[ERROR]} error")
+          f"{counts[ERROR]} error" + (f", {counts[BREACH]} BREACH" if counts[BREACH] else ""))
 
     if args.out:
         pathlib.Path(args.out).write_text(json.dumps(
@@ -139,6 +142,8 @@ def main() -> int:
                     **results[c.id]} for c in todo}, indent=1))
         print(f"results: {args.out}")
 
+    if counts[BREACH]:
+        return 3
     return 2 if counts[ERROR] else (1 if counts[CHANGED] else 0)
 
 

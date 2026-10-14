@@ -17,9 +17,10 @@ unit-tested in CI.
 | Suite | Backs | Runs on | Needs |
 |---|---|---|---|
 | `limitations` | `limitations.md` | the Dunder Mifflin demo Models (SE demo cluster) | `--model-single`, `--model-multi` |
+| `guards` | [`limitations.md`](../../agents/cli/ts-object-model-agentql-query/references/limitations.md) § Read-only by design: statements that must **always** be refused | `(Sample) Retail - Apparel` | nothing (found by name). Calls `generate-sql` only, never `fetch-data` |
 | `lessons` | [`learning-path.md`](../../agents/cli/ts-object-model-agentql-query/references/learning-path.md), the Learn AgentQL course | `(Sample) Retail - Apparel`, which ships on every cluster | nothing: found by exact name and author `system` (or pass `--model-apparel`) |
 
-`--suite all` (the default) runs both. On a cluster without the Dunder Mifflin Models, run
+`--suite all` (the default) runs all three. On a cluster without the Dunder Mifflin Models, run
 `--suite lessons`.
 
 ## Run it
@@ -54,9 +55,16 @@ keeps the raw results: generated SQL, rows and errors for every case. Write it o
 | `AS_DOCUMENTED` | the row's documented behaviour reproduced | none (not printed) |
 | `CHANGED` | the behaviour moved, in either direction | probe it, then update the row in `limitations.md` (and any rule in `agentql-rules.md` / `udf-reference.md` / `patterns.md` that the row feeds) and the case in `cases.py` |
 | `ERROR` | the run could not tell (CLI or auth failure, or a broken control) | fix the run, not the docs |
+| `BREACH` | a `guards` case compiled to something other than one read-only `SELECT` (a write, DDL, a second statement or a comment got through) | **raise it as a security issue at once**. Do not edit the case to make it pass |
 
-Exit code `0` means everything is as documented, `1` means something changed, and `2` means
-something errored. An error outranks a change, so a partial run never reads as clean.
+Exit code `0` means everything is as documented, `1` means something changed, `2` means
+something errored, and `3` means a breach. Higher outranks lower, so a partial run never
+reads as clean and a breach is never hidden behind a change.
+
+**Tracking improvements as they ship.** Each ❌ row has a case that expects it to fail. When
+an improvement lands, that case reports `CHANGED` ("now compiles"), which is the signal to
+move the row to ✅. A guard is the opposite: it must never change. That is why its verdict
+is `BREACH`, not `CHANGED`.
 
 ## Why values, not statuses
 
@@ -75,6 +83,7 @@ does not read as a behaviour change.
 |---|---|
 | `run.py` | Entry point: the only I/O (`ts agentql generate-sql` / `fetch-data`) |
 | `agentql_retest/cases.py` | The `limitations` cases. Each names the `limitations.md` row it backs |
+| `agentql_retest/guards.py` | The `guards` cases: writes, DDL, admin, multi-statement and comment injection. The read-only check is `classify.read_only_problem` |
 | `agentql_retest/lessons.py` | The `lessons` cases. Each names the lesson it backs, and each lesson's **Guarded by** line names its cases (a unit test keeps the two in step) |
 | `agentql_retest/classify.py` | The `Case` model, the verdict rules and the case-list validator. Pure |
 | `tests/` | Verdict-rule tests, including the shipped bespoke checks against real rows. No live calls |

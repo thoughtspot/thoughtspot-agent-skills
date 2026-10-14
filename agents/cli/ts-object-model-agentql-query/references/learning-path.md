@@ -169,8 +169,34 @@ The latest date is today, because the formula rolls the data forward.
 
 **Guarded by:** `l1_dates_are_epoch_seconds`.
 
+### 1.5 It can only read
+
+The question every customer asks: *"could the AI change or delete my data?"* Show the answer.
+
+```sql
+DELETE FROM "(Sample) Retail - Apparel"
+SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"; DROP TABLE "(Sample) Retail - Apparel"
+SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1" -- ; DROP TABLE x
+```
+
+**Run these with `generate-sql` only.** It compiles without touching the warehouse.
+
+**Point out.**
+- The `DELETE` is rejected: *"Only SELECT queries are supported"*. So are `UPDATE`,
+  `INSERT`, `DROP`, `CREATE`, `GRANT` and the rest.
+- The second statement after `;` is rejected too.
+- The comment compiles, but the warehouse SQL is **generated from scratch** as one `SELECT`,
+  and the comment is not in it. Nothing from the input text is passed through. That is the
+  core design from Module 0: ThoughtSpot compiles AgentQL into new SQL. It never forwards
+  what it was given.
+- The full list, and how it is checked on every run, is in
+  [`limitations.md`](limitations.md) § "Read-only by design".
+
+**Guarded by:** `g_delete_all`, `g_second_statement_drop`, `g_line_comment`.
+
 **Check yourself.** Which call would you use to check a query in a loop while drafting it,
-and why? A query returns `SUCCESS` from `generate-sql`: what can and can't you conclude?
+and why? A query returns `SUCCESS` from `generate-sql`: what can and can't you conclude? A
+customer asks whether an agent using AgentQL could drop a table: what do you show them?
 
 ---
 

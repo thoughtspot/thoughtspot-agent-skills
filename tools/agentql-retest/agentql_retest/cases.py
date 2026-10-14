@@ -17,6 +17,7 @@ import math
 import statistics
 
 from .classify import FETCH_ERROR, GEN_ERROR, OK, SQL_OK, Case
+from .guards import GUARD_CASES
 from .lessons import LESSON_CASES, SAMPLE_MODEL  # noqa: F401  (SAMPLE_MODEL re-exported for run.py)
 
 F = 'FROM "DunderMifflin Sales" AS "t1"'
@@ -332,3 +333,4 @@ CASES = [
 ]
 
 CASES += LESSON_CASES
+CASES += GUARD_CASES
