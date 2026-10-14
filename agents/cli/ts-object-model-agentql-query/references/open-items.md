@@ -77,7 +77,7 @@ ROLLUP, `SELECT *`/`COUNT(*)`, non-MEDIAN percentiles, INITCAP/REGEXP_*/TO_VARCH
 [SCAL-326936](https://thoughtspot.atlassian.net/browse/SCAL-326936) (`IN (SELECT …)`
 compiles but fails at fetch — subquery Model name emitted verbatim into warehouse SQL).
 
-**Deferred follow-up:** nebula-spotQL was unreachable that day, so the 2026-07-29 findings
+**Deferred follow-up — closed by #7 (2026-10-14).** nebula-spotQL was unreachable that day, so the 2026-07-29 findings
 are single-build. When it (or another older/newer build) is available: re-confirm the
 STDDEV/VAR regression and the set-op fixes, then drop the "jul.26.mt only" hedges from
 `limitations.md` / `agentql-rules.md` / `patterns.md`. Also untestable on this instance
@@ -230,6 +230,44 @@ has been wrong about `DAY_NUMBER`'s range, about `LENGTH()`, and about
 `DAY_IN_YEAR_NUMBER` existing at all. Three of those were caught only because a BI
 tool emitted SQL nobody would have chosen to write. `use-cases.md` #6 already
 describes the executable form of the check.
+
+## #7 — 2026-10-14 limitation re-probe (26.9.0.cl PROD) — VERIFIED (live) 2026-10-14
+
+Closes #5's deferred second-build follow-up. Jira refresh of both epics (84 children, via
+the Atlassian MCP), then ~80 `generate-sql` / `fetch-data` probes on the SE demo cluster
+(`se-thoughtspot` profile, **26.9.0.cl, PROD**) against two Snowflake-backed Models:
+"DunderMifflin Sales" (single table, **has a date column**, `join_progressive: true`) and
+"Dunder Mifflin" (multi-table, `group_aggregate` formulas). The `semantic-sql` profile's
+cluster did not resolve. Every SUCCESS on a risky construct was checked against a control
+query or the generated SQL, not taken on status.
+
+**Outcomes** (all recorded in `limitations.md` with dates):
+- **Fixed** (Jira-flagged and confirmed): framed-window-only query (SCAL-319898), `OFFSET`
+  (SCAL-318291), decimal literal arithmetic (SCAL-318288), `GREATEST`/`LEAST` varargs,
+  constant label, `NTILE`, `LAG`/`LEAD` optional args, multi-CTE / chained-CTE joins,
+  `CASE` in `GROUP BY`, mixed-quote string literals.
+- **Fixed with no ticket movement:** `CAST(<literal>)` (SCAL-326946 still New), constant-only
+  `EXP`/`CHR`/`SPACE` (SCAL-319341 still Open), `TO_DATE('<literal>')`, aggregate over a
+  column a CTE does not otherwise reference.
+- **Ticket closed, behaviour unchanged:** scalar `STDDEV`/`VAR` — SCAL-314019 closed as fixed
+  in 26.8.0.cl, still `UNSUPPORTED_AGGREGATE` on 26.9.0.cl (SCAL-326935 still New).
+- **Previously untestable date rows, now probed:** `DAY_OF_YEAR` and `TRUNC(date, part)`
+  compile then fail at fetch; `SUM(CASE WHEN date >= 'lit' …)` emits correct SQL but returns
+  an `UNKNOWN`-typed empty value; `DATE_TRUNC` fails at fetch (leaked alias) rather than
+  running silently.
+- **New:** `REGEXP_LIKE` emits `like_regex` and fails on Snowflake (SCAL-338545, filed for
+  Trino); outer aggregation over a set-op CTE fails `10000` (SCAL-330561); explicit `LIMIT`
+  > 100,000 silently lowered; string `=`/`IN` compiled to `LOWER(col) = 'lower'`, i.e.
+  case-insensitive — `agentql-rules.md` § Filters had demanded exact case; dates return as
+  INT64 epoch seconds (`integration.md`).
+- **Not probed:** semi-additive and `moving_sum` rows, SV/MV backing, `join_progressive`,
+  VARIANT/JSON (no such column), SCAL-317405 / 317423 / 320205 (Resolved for 26.9.0.sw,
+  unreleased), SCAL-330560 (needs a `count_distinct` formula column).
+
+**Possible Jira follow-ups (not done — outward-facing, needs a human):** comment on
+SCAL-326946 and SCAL-319341 that the behaviour now works on 26.9.0.cl; comment on
+SCAL-314019 / SCAL-326935 that scalar `STDDEV` still fails on 26.9.0.cl; note on
+SCAL-338545 that it reproduces on Snowflake.
 
 ## Keeping `limitations.md` current
 

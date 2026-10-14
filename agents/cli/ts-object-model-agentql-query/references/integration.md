@@ -112,7 +112,7 @@ Success is **columnar**, not row-major:
 }
 ```
 
-Four gotchas that the format forces:
+Five gotchas that the format forces:
 
 1. **Columnar, not row-major.** All values for column 0, then all for column 1, … You must
    transpose to get rows.
@@ -123,6 +123,10 @@ Four gotchas that the format forces:
 4. **Every cell carries all type fields** (`stringVal`, `int64Val`, `doubleVal`, `boolVal`,
    …) with zeros/empties for the irrelevant ones. Use the **column-level `type`** to pick
    which field to read; check `nullVal` first.
+5. **Date columns arrive as `INT64` epoch seconds** (UTC midnight for a `DATE`), not as
+   date strings — `1730073600` is 2024-10-28 (✓ live 2026-10-14, 26.9.0.cl; the same
+   values come back through `ts agentql fetch-data`). Convert with the column's known
+   Model type; the response itself says only `INT64`.
 
 ## 5. Minimal response parser
 

@@ -87,12 +87,12 @@ expression.
 - **Attributes go in `GROUP BY`.** Every non-aggregate column in the SELECT must appear in
   `GROUP BY`. Every CTE that contains an aggregate must have its own `GROUP BY` (the main
   SELECT is the only exception — it may aggregate to a single global row without one).
-- Statistical aggregates: `MEDIAN` works directly — scalar context, and grouped as of
-  jul.26.mt. `STDDEV_SAMP`/`STDDEV_POP` and `VAR_SAMP`/`VAR_POP` **no longer compile
-  against a Model column in either context** on jul.26.mt (`UNSUPPORTED_AGGREGATE` —
-  regression, [SCAL-326935](https://thoughtspot.atlassian.net/browse/SCAL-326935); scalar
-  worked on earlier builds). Use the CTE form: materialise the aggregate in a CTE, then
-  take the statistic over the CTE column in the outer SELECT — that still works
+- Statistical aggregates: `MEDIAN` works directly — scalar and grouped. `STDDEV_SAMP`/
+  `STDDEV_POP` and `VAR_SAMP`/`VAR_POP` **do not compile against a Model column in either
+  context** (`UNSUPPORTED_AGGREGATE` — regression since jul.26.mt, still present on
+  26.9.0.cl, [SCAL-326935](https://thoughtspot.atlassian.net/browse/SCAL-326935)). Two
+  forms work: materialise the aggregate in a CTE and take the statistic over the CTE
+  column in the outer SELECT, or the window form `STDDEV_SAMP(SUM(x)) OVER ()`
   (`patterns.md` § Statistics). Always write the explicit `_SAMP`/`_POP` suffix.
 
 ## Aliasing (this one bites)
@@ -118,7 +118,7 @@ expression.
 - **No `SELECT *`** — enumerate columns. Inside a CTE it is hard-rejected.
 - **No subqueries anywhere** — no `FROM (SELECT …)`, no `WHERE col IN (SELECT …)`, no
   `WHERE EXISTS (…)`, no scalar subselects. Use named CTEs and JOINs instead. **Beware:**
-  on jul.26.mt, `IN (SELECT …)` passes `generate-sql` and only fails at `fetch-data`
+  `IN (SELECT …)` passes `generate-sql` and only fails at `fetch-data`
   ([SCAL-326936](https://thoughtspot.atlassian.net/browse/SCAL-326936)) — a compile
   SUCCESS is not evidence it works. For a membership filter use the rewrite in
   `patterns.md` § Semi-join via CTE — and dedupe the key CTE with `GROUP BY <key>`,
@@ -126,23 +126,32 @@ expression.
 - **Set operations** — `UNION ALL`, `UNION`, `EXCEPT`, `EXCEPT ALL`, `INTERSECT`,
   `INTERSECT ALL` **work at the top level** of the query ([SCAL-313049](https://thoughtspot.atlassian.net/browse/SCAL-313049),
   verified 2026-07-07) and **inside a user-defined CTE** — including branches with
-  aggregate measures, fixed by jul.26.mt (verified 2026-07-29; on older builds an
-  aggregated branch errors `QUERY_GEN_ERROR`). **`ORDER BY` and `LIMIT` on the combined
-  result also work as of jul.26.mt** (verified 2026-07-29; on older builds ORDER BY was
-  silently dropped and LIMIT misplaced into the first branch — check the generated SQL if
-  the build is older). Each branch must have the same number of columns with compatible
+  aggregate measures (fixed by jul.26.mt; on older builds an aggregated branch errors
+  `QUERY_GEN_ERROR`). **`ORDER BY` and `LIMIT` on the combined result also work**
+  (verified on jul.26.mt and 26.9.0.cl; on older builds ORDER BY was silently dropped and
+  LIMIT misplaced into the first branch — check the generated SQL if the build is older).
+  **Aggregating *over* a set-operation CTE fails** (`10000 Failed to transform QuerySpec:
+  null`) — put the aggregate inside each branch instead. Each branch must have the same number of columns with compatible
   types — but type compatibility is **not checked at compile time**: a mismatch (e.g.
   VARCHAR vs DOUBLE at the same position) passes `generate-sql` and fails at `fetch-data`.
   Operator precedence follows the SQL standard (INTERSECT binds tighter than UNION/EXCEPT).
   Parentheses for explicit grouping are supported. See `limitations.md` for details.
 - **No self-join of a CTE** (`[SELF_JOIN]`) and **no non-equi `JOIN … ON`** (only `=`
-  allowed; use `CROSS JOIN` + `WHERE` for ranges).
+  allowed; use `CROSS JOIN` + `WHERE` for ranges). Between two CTEs a non-equi join
+  reports the misleading `CTE table alias not found` instead of `NON_EQUI_JOIN`.
 - **No recursive CTEs** (`WITH RECURSIVE`), **no table functions** (`FLATTEN`, `UNNEST`,
   `GENERATOR`), **no `GROUP BY 1` ordinals**, **no `col NOT IN (...)`**
-  (rewrite as `!=` chained with `AND`). `LENGTH()` works (verified 2026-07-29 — earlier
-  rules wrongly forbade it).
-- **No forbidden date functions**: `DATE_TRUNC`, `NOW()`, `CURRENT_DATE`, `AGE`, `INTERVAL`
-  arithmetic. Use the AgentQL UDFs in `udf-reference.md`.
+  (rewrite as `!=` chained with `AND` — re-verified 2026-10-14, it fails `Unsupported
+  type`). `LENGTH()` works (verified 2026-07-29 — earlier rules wrongly forbade it).
+- **No forbidden date functions**: `DATE_TRUNC`, `TRUNC(date, part)`, `NOW()`,
+  `CURRENT_DATE`, `AGE`, `INTERVAL` arithmetic. Use the AgentQL UDFs in `udf-reference.md`.
+  A date literal in a filter is fine (`d >= '2025-01-01'`, or `TO_DATE('2025-01-01')`).
+- **No regex** — `REGEXP_LIKE`, `~`, `REGEXP_SUBSTR`, `REGEXP_REPLACE` all fail (some only
+  at `fetch-data`). Use `LIKE` / `ILIKE`.
+- **Never rely on more than 100,000 rows.** Every statement is capped: `LIMIT 100000` is
+  appended, and a larger explicit `LIMIT` is silently rewritten down to 100,000. For a bulk
+  extract, page with `ORDER BY … LIMIT n OFFSET m` (works on 26.9.0.cl) or filter into
+  slices.
 - **Every CTE must reference a real column** — a CTE selecting only literals errors with
   `QueryTable has no owner tables`.
 
@@ -162,9 +171,9 @@ expression.
   `SELECT "t1"."Customer Name" … GROUP BY` returns *all* members, including those with no
   fact rows. Combined with the outer-join rule above, this expresses "members with no
   activity" without any Model change — see `patterns.md` § Dimension-anchored anti-join.
-- **Set operations inside a CTE work when the branches carry no aggregate measure**
-  (raw columns, or attribute-only `GROUP BY`) — verified 2026-07-08. A branch with
-  `SUM(col) … GROUP BY` is rejected; see the set-operations caveats above.
+- **Set operations inside a CTE work**, including branches with `SUM(col) … GROUP BY`
+  (fixed by jul.26.mt). An outer aggregation *over* that CTE does not — see the
+  set-operations caveats above.
 - `SELECT` may appear only at the start of a CTE definition or the main query.
 - Still rejected: **self-joining** a CTE (`SELF_JOIN`) and **non-equi** `JOIN … ON`
   (only `=` allowed) — see `limitations.md`.
@@ -176,8 +185,11 @@ Only `CAST` a `VARCHAR`/`TEXT` column to numeric/date. Columns already `DOUBLE`,
 
 ## Filters
 
-- String filter values must match the data exactly, case included. If the TML gives
-  `sample_values`, copy a literal verbatim; if not, use `ILIKE`.
+- **String `=`, `<>` and `IN` are case-insensitive.** ThoughtSpot compiles them to
+  `LOWER(col) = 'lowercased literal'` (✓ live 2026-10-14: `'Jim Halpert'`, `'jim halpert'`
+  and `'JIM HALPERT'` return the same rows), matching ThoughtSpot's own formula semantics.
+  Spelling still has to match; case does not. There is no case-sensitive equality. If the
+  TML gives `sample_values`, copy a literal from it; for partial matches use `LIKE`/`ILIKE`.
 - Null checks: `IS NULL` / `IS NOT NULL`, never `= NULL`.
 - Filter early — put `WHERE` inside CTEs rather than wrapping the final SELECT.
 - **Aggregate conditions go in `HAVING`, never `WHERE`.** An aggregate in `WHERE`
@@ -187,9 +199,9 @@ Only `CAST` a `VARCHAR`/`TEXT` column to numeric/date. Columns already `DOUBLE`,
 ## When you can't answer it
 
 If the question needs something AgentQL can't express (non-`MEDIAN` percentiles, direct
-`STDDEV`/`VAR` on a Model column — the CTE statistics pattern works — subqueries,
-offset->1 `LAG`/`LEAD`, true rolling N-period frames, a column the Model doesn't have, or
-a non-CDW Model), don't force a wrong query. State plainly what's not supported and why.
+`STDDEV`/`VAR` on a Model column — the CTE and window statistics forms work — subqueries,
+`QUALIFY`, `FILTER (WHERE …)`, `ROLLUP`/`CUBE`, regex, a column the Model doesn't have, or a
+non-CDW Model), don't force a wrong query. State plainly what's not supported and why.
 The full, current list (with what's been *fixed* — e.g. set operations incl. ORDER
-BY/LIMIT on the combined result, `NTILE` and literal arithmetic now work) is in
-`limitations.md`.
+BY/LIMIT on the combined result, `NTILE`, `LAG`/`LEAD` offsets, `ROWS BETWEEN` frames,
+`OFFSET`, multi-CTE joins and literal arithmetic now work) is in `limitations.md`.
