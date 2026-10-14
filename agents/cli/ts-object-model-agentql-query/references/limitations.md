@@ -144,23 +144,31 @@ aggregated-branch behaviour.
 
 ## 🛡 Read-only by design — must stay rejected
 
-Unlike the rows above, these are **not limitations waiting for a fix**. AgentQL reads
-through a Model and nothing else, and every statement below must stay refused. Each is
-checked by the retest suite's `guards` cases (`run.py --suite guards`), which only call
-`generate-sql`, so nothing is ever sent to the warehouse. **If one ever compiles to anything
-but a single read-only `SELECT`, the run reports BREACH: raise it as a security issue. Never
-"move it to ✅".**
+Unlike the rows above, these are **not limitations waiting for a fix**: AgentQL is a
+read-only query interface, and every statement below must stay refused. Each is checked by
+the retest suite's `guards` cases (`run.py --suite guards`), which only call `generate-sql`,
+so nothing is sent to the warehouse. **If one ever compiles to anything but a single
+read-only `SELECT`, the run reports BREACH: raise it as a security issue. Never "move it
+to ✅".** The guarantee covered here is **no writes and no DDL**; it is not a claim that a
+`SELECT` can only read the Model's own tables (see the note below the table).
 
 | Input | Result (✓ live 2026-10-14, 26.9.0.cl PROD) |
 |---|---|
 | `DELETE` · `UPDATE` · `INSERT` (values or select) · `MERGE` · `TRUNCATE` · `DROP` · `CREATE` (incl. `CREATE … AS SELECT`) · `ALTER TABLE` · `GRANT` · `CALL` · `USE` | rejected at compile: *"Only SELECT queries are supported for deserialization"* |
-| `COPY INTO` · `ALTER SESSION` | rejected at parse (unsupported statement) |
+| `COPY INTO` · `ALTER SESSION` · `PUT`/`GET`/`LIST` · `UNDROP` · `EXECUTE IMMEDIATE` · `SHOW`/`DESCRIBE` | rejected at parse (unsupported statement) |
 | A write inside a CTE (`WITH d AS (DELETE …)`) | rejected: `UNSUPPORTED_CONDITION`, *"CTE query must be a SELECT statement"* |
 | A second statement after `;` (`SELECT …; DELETE …`) | rejected at parse: *"Unexpected clause"* |
-| A physical table name, or `information_schema` | rejected: `TABLE_NOT_FOUND`, because only the Model is queryable |
-| `-- ; DROP …` or `/* ; DELETE … */` comments | **compiles, neutralised:** the warehouse SQL is regenerated as one `SELECT`, and comments are not carried through |
+| A physical table name **in `FROM`** | rejected: `TABLE_NOT_FOUND` — the outer `FROM` must be the Model |
+| `-- ; DROP …` or `/* ; DELETE … */` comments | **compiles, neutralised:** the warehouse SQL is regenerated as one `SELECT`; the comment is not in it |
 | `SELECT … INTO newtab` | **compiles, neutralised:** the `INTO` is dropped, leaving a plain `SELECT` |
 | `'x''; DROP TABLE y; --'` inside a string literal | **compiles, neutralised:** it stays a quoted value in the filter |
+
+**Scope of "read-only".** This covers the *statement type*: AgentQL will not write or run
+DDL. It is **not** a guarantee that a `SELECT` reads only the Model's tables — a `SELECT`
+can reference other warehouse objects, so the warehouse connection's own grants remain the
+real boundary for what data a query can reach. How far a `SELECT` can reach, and whether
+Model-level security always applies to it, is tracked separately and deliberately not
+enumerated here.
 
 Read-only here means AgentQL itself. The warehouse connection's own grants are a separate
 control, and they still matter.

@@ -307,3 +307,43 @@ def test_keywords_inside_literals_and_identifiers_are_not_writes():
     assert K.read_only_problem("SELECT \"UPDATE\" FROM t WHERE x = 'a''; drop table y; --'") is None
     assert K.read_only_problem("SELECT a FROM t ORDER BY a OFFSET 1") is None
     assert K.read_only_problem("WITH x AS (SELECT 1) SELECT * FROM x") is None
+
+
+# ---- guard hardening (reviewer findings on #606) --------------------------------------------
+
+def test_guard_control_failure_is_error_not_a_pass():
+    # a broken endpoint: the control (a valid SELECT) does not compile -> ERROR, run is untrustworthy
+    ctl = guard(id="g_ctl", expect=K.SQL_OK, control=True, sql="SELECT 1")
+    assert K.classify(ctl, err("UNKNOWN"), None, {})[0] == K.ERROR
+    assert K.classify(ctl, OK_GEN, None, {})[0] == K.AS_DOCUMENTED
+
+
+def test_rejection_that_carries_unsafe_sql_is_a_breach():
+    # a non-SUCCESS response that still hands back a write is a breach, not a pass
+    gen = {"status": "QUERY_GEN_ERROR", "executable_sql": "DELETE FROM t", "errors": []}
+    assert K.classify(guard(), gen, None, {})[0] == K.BREACH
+
+
+def test_shipped_guards_include_a_control():
+    gs = [c for c in CASES if c.guard]
+    assert any(c.control for c in gs), "guards suite has no positive control"
+
+
+def test_backslash_and_dollar_quote_cannot_smuggle_a_statement():
+    # Snowflake backslash escape: the ; DROP is inside the string, so this is one SELECT
+    assert K.read_only_problem("SELECT a FROM t WHERE x = 'y\\'; DROP TABLE z; --'") is None
+    # dollar-quoted string hides its contents
+    assert K.read_only_problem("SELECT a FROM t WHERE x = $$p; DROP TABLE z$$") is None
+    # but a real second statement outside any quote is still caught
+    assert K.read_only_problem("SELECT a FROM t $$x$$ ; DELETE FROM t")
+
+
+def test_nextval_and_system_functions_are_flagged():
+    assert K.read_only_problem("SELECT seq.NEXTVAL AS n FROM t")
+    assert K.read_only_problem("SELECT SYSTEM$ABORT_SESSION(1) FROM t")
+
+
+def test_non_string_executable_sql_is_a_problem_not_a_crash():
+    assert K.read_only_problem(["SELECT 1"])  # list, not str
+    gen = {"status": "SUCCESS", "executable_sql": ["oops"], "errors": []}
+    assert K.classify(guard(expect=K.SQL_OK), gen, None, {})[0] == K.BREACH

@@ -323,12 +323,20 @@ cluster: the resolved GUID is printed on the first line.
 
 Probed with `generate-sql` only, on 26.9.0.cl PROD, against the sample Model. No statement
 was sent to the warehouse. Every write, DDL and admin statement is rejected at compile with
-*"Only SELECT queries are supported for deserialization"* (`COPY INTO` and `ALTER SESSION`
-at parse). A second statement after `;` is rejected. Physical table names and
-`information_schema` give `TABLE_NOT_FOUND`. Comments, `SELECT … INTO` and a `'; DROP`
-inside a literal compile, but to one regenerated `SELECT` with none of the input text
-passed through. That property is what makes them safe, and `read_only_problem` asserts it.
-All 25 cases are now the `guards` suite; any regression reports BREACH (exit 3).
+*"Only SELECT queries are supported for deserialization"* (`COPY INTO`, `ALTER SESSION`,
+`PUT`/`GET`/`LIST`, `UNDROP`, `EXECUTE IMMEDIATE`, `SHOW`/`DESCRIBE` at parse). A second
+statement after `;` is rejected. A physical table name in the outer `FROM` gives
+`TABLE_NOT_FOUND`. Comments, `SELECT … INTO` and a `'; DROP` inside a literal compile, but
+to one regenerated `SELECT`; `read_only_problem` asserts the output is a single read-only
+`SELECT` (handling ANSI, backslash and `$$` quoting). The 26 cases + a positive control are
+the `guards` suite; any regression reports BREACH (exit 3).
+
+**Scope.** The guarantee is *statement type*: no writes, no DDL. It is **not** that a
+`SELECT` reads only the Model — a subquery can reference other warehouse objects, bounded by
+the connection's grants. That reach, and whether Model security always applies to it, is a
+separate security matter, tracked privately and deliberately not enumerated here. The suite
+holds a positive control (a valid `SELECT` that must compile): if it fails, the run reports
+ERROR, so a broken endpoint cannot make the rejections pass for the wrong reason.
 
 ## Keeping `limitations.md` current
 

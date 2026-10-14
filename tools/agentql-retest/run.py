@@ -74,7 +74,8 @@ def run_case(case, models, profile, timeout):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--profile", required=True, help="ThoughtSpot profile name (ts profiles list)")
-    ap.add_argument("--suite", choices=("all", "limitations", "lessons", "guards"), default="all")
+    ap.add_argument("--suite", nargs="+", choices=("all", "limitations", "lessons", "guards"),
+                    default=["all"], help="one or more suites, e.g. --suite lessons guards")
     ap.add_argument("--model-single", help='GUID of the "DunderMifflin Sales" Model (limitations suite)')
     ap.add_argument("--model-multi", help='GUID of the "Dunder Mifflin" Model (limitations suite)')
     ap.add_argument("--model-apparel", help=f'GUID of "{SAMPLE_MODEL}" (lessons suite; found by name if omitted)')
@@ -89,16 +90,17 @@ def main() -> int:
         print("case list is malformed:\n  " + "\n  ".join(problems), file=sys.stderr)
         return 2
 
-    pool = [c for c in CASES if args.suite in ("all", c.suite)]
+    suites = set(args.suite)
+    pool = [c for c in CASES if "all" in suites or c.suite in suites]
     todo = pool
     if args.only:
         want = set(args.only)
         unknown = want - {c.id for c in pool}
         if unknown:
-            print(f"unknown case ids in suite {args.suite}: {sorted(unknown)}", file=sys.stderr)
+            print(f"unknown case ids in suite {sorted(suites)}: {sorted(unknown)}", file=sys.stderr)
             return 2
-        suites = {c.suite for c in pool if c.id in want}
-        want |= {c.id for c in pool if c.control and c.suite in suites}  # checks read the controls
+        sel_suites = {c.suite for c in pool if c.id in want}
+        want |= {c.id for c in pool if c.control and c.suite in sel_suites}  # checks read the controls
         todo = [c for c in pool if c.id in want]
 
     models = {"single": args.model_single, "multi": args.model_multi, "apparel": args.model_apparel}
@@ -110,8 +112,8 @@ def main() -> int:
         print(f"{SAMPLE_MODEL}: {models['apparel']}")
     missing = sorted({c.model for c in todo if not models[c.model]})
     if missing:
-        print(f"--model-{' / --model-'.join(missing)} required for suite {args.suite} "
-              "(or pass --suite lessons)", file=sys.stderr)
+        print(f"--model-{' / --model-'.join(missing)} required for suite {sorted(suites)} "
+              "(or pass --suite lessons guards, which need no GUID)", file=sys.stderr)
         return 2
     with ThreadPoolExecutor(args.workers) as ex:
         results = dict(ex.map(lambda c: run_case(c, models, args.profile, args.timeout), todo))

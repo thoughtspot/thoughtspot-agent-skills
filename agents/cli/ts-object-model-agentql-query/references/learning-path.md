@@ -186,9 +186,12 @@ SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1" -- ; DROP
   `INSERT`, `DROP`, `CREATE`, `GRANT` and the rest.
 - The second statement after `;` is rejected too.
 - The comment compiles, but the warehouse SQL is **generated from scratch** as one `SELECT`,
-  and the comment is not in it. Nothing from the input text is passed through. That is the
-  core design from Module 0: ThoughtSpot compiles AgentQL into new SQL. It never forwards
-  what it was given.
+  and the comment is not in it. That is the core design from Module 0: ThoughtSpot compiles
+  AgentQL into new SQL rather than running what it was handed, so a trailing `; DROP` or a
+  `-- comment` cannot ride along.
+- Scope this correctly: it means AgentQL **will not write or run DDL**. It is not a promise
+  that a `SELECT` can read only the Model — the warehouse connection's grants are still what
+  bound what a query can reach.
 - The full list, and how it is checked on every run, is in
   [`limitations.md`](limitations.md) § "Read-only by design".
 

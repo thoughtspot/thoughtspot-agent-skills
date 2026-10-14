@@ -28,6 +28,11 @@ def _g(cid, sql, row, expect=GEN_ERROR, **kw):
 
 
 GUARD_CASES = [
+    # ---- positive control ------------------------------------------------------------------------
+    # A plain valid SELECT that MUST compile. If it does not, the endpoint is unusable (auth,
+    # wrong model, cluster down) and every "rejected" guard below would pass for the wrong
+    # reason — so a failed control is ERROR, and the run cannot read as clean.
+    _g("g_ctl_valid_select", S, "control: a valid query compiles", expect=SQL_OK, control=True),
     # ---- writes ----------------------------------------------------------------------------------
     _g("g_delete_all", f"DELETE FROM {T}", "Writes are rejected: DELETE"),
     _g("g_delete_where", f"DELETE FROM {T} AS \"t1\" WHERE \"t1\".\"region\" = 'West'", "Writes are rejected: DELETE"),
@@ -62,5 +67,5 @@ GUARD_CASES = [
     _g("g_select_into", f'SELECT "t1"."region" INTO newtab FROM {T} AS "t1"',
        "SELECT … INTO compiles to a plain SELECT", expect=SQL_OK),
     _g("g_literal_semicolon", f"{S} WHERE \"t1\".\"region\" = 'x''; DROP TABLE y; --'",
-       "A '; DROP inside a string literal stays a value", expect=SQL_OK, sql_has=("drop table y",)),
+       "A '; DROP inside a string literal stays a value", expect=SQL_OK),
 ]

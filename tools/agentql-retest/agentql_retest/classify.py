@@ -69,25 +69,58 @@ class Case:
         return self.expect in (OK, FETCH_ERROR) and not self.guard
 
 
-_WRITE_WORDS = re.compile(r"\b(insert|update|delete|merge|truncate|drop|create|alter|grant|revoke|call|copy|"
-                          r"into|use|put|remove|execute|exec|set)\b")
+_WRITE_WORDS = re.compile(
+    r"(?<![\w$])("
+    r"insert|update|delete|merge|truncate|drop|create|alter|grant|revoke|call|copy|put|get|list|"
+    r"remove|undrop|describe|desc|show|execute|exec|begin|commit|rollback|use|into|set|nextval"
+    r"|system\$\w*)"
+    r"(?![\w$])")
 
 
 def strip_literals(sql: str) -> str:
-    """Remove quoted strings and identifiers, so a keyword inside a value is not mistaken for one."""
-    return re.sub(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"", "''", sql)
+    """Blank out every quoted string and identifier so a keyword inside a value is never read
+    as SQL. Handles ANSI doubled quotes (''), backslash escapes (\'), `$$ dollar quoting $$`
+    and `backtick identifiers` — so neither a backslash dialect nor dollar quoting can smuggle
+    a statement terminator or keyword past the scan. An unterminated quote blanks to end."""
+    out, i, n = [], 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if c == "$" and sql.startswith("$$", i):            # $$ ... $$
+            end = sql.find("$$", i + 2)
+            i = n if end == -1 else end + 2
+            continue
+        if c in ("'", '"', "`"):                            # quoted string / identifier
+            i += 1
+            while i < n:
+                d = sql[i]
+                if d == "\\" and i + 1 < n:                 # backslash escape
+                    i += 2
+                    continue
+                if d == c:
+                    if i + 1 < n and sql[i + 1] == c:        # doubled = escaped quote
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
-def read_only_problem(sql: str) -> Optional[str]:
+def read_only_problem(sql) -> Optional[str]:
     """None when `sql` is one read-only SELECT (optionally led by WITH); else what is wrong."""
-    body = strip_literals(sql or "").strip().lower()
+    if not isinstance(sql, str):
+        return f"executable_sql is not a string: {type(sql).__name__}"
+    body = strip_literals(sql).strip().lower()
     if not body:
         return "no SQL"
     if not re.match(r"(select|with)\b", body):
         return f"does not start with SELECT/WITH: {body[:40]!r}"
     if ";" in body.rstrip(";"):
         return "contains more than one statement"
-    if "--" in body or "/*" in body:
+    if "--" in body or "/*" in body or "#" in body:
         return "carries a comment through to the warehouse"
     hit = _WRITE_WORDS.search(body)
     return f"contains {hit.group(1).upper()!r} outside a literal" if hit else None
@@ -207,16 +240,33 @@ def classify(case: Case, gen: Optional[dict], fetch: Optional[dict], results: di
 
 
 def _classify_guard(case: Case, gen: dict, g: str) -> tuple:
+    # A guard CONTROL is a plain valid SELECT: it must compile. If it does not, the endpoint
+    # is unusable (auth/wrong-model/down) and every "rejected" guard below would pass for the
+    # wrong reason — so a failed control is ERROR, which makes the whole run untrustworthy.
+    if case.control:
+        if g != "SUCCESS":
+            return ERROR, [f"guard control did not compile ({g}: {_first_error(gen)}) — "
+                           "endpoint unusable, so guard rejections prove nothing"]
+        problem = read_only_problem(gen.get("executable_sql"))
+        return (ERROR, [f"guard control is not read-only: {problem}"]) if problem else (AS_DOCUMENTED, ["control compiles"])
+
+    carried = read_only_problem(gen.get("executable_sql")) if gen.get("executable_sql") else None
+
     if case.expect == GEN_ERROR:
         if g == "SUCCESS":
-            problem = read_only_problem(gen.get("executable_sql"))
-            return BREACH, [f"now compiles: {problem or 'to a SELECT, but it must be rejected'}"]
+            return BREACH, [f"now compiles: {carried or 'to a SELECT, but it must be rejected'}"]
+        # Rejected — but a non-SUCCESS response that still carries unsafe SQL is a breach.
+        if carried:
+            return BREACH, [f"rejected ({g}) but response carries unsafe SQL: {carried}"]
         return AS_DOCUMENTED, [f"rejected: {g}"]
-    # SQL_OK guard: compiling is fine; the output must be one read-only SELECT
+
+    # SQL_OK guard: compiling is expected; the output must be one read-only SELECT.
     if g != "SUCCESS":
         return CHANGED, [f"now rejected outright ({g}) — still safe; update the note"]
-    problem = read_only_problem(gen.get("executable_sql")) or (_shape_problems(case, gen) or [None])[0]
-    return (BREACH, [problem]) if problem else (AS_DOCUMENTED, ["compiles to one read-only SELECT"])
+    if carried:
+        return BREACH, [carried]
+    shape = _shape_problems(case, gen)   # a shape change is news, not a safety breach
+    return (CHANGED, shape) if shape else (AS_DOCUMENTED, ["compiles to one read-only SELECT"])
 
 
 def validate_cases(cases) -> list:

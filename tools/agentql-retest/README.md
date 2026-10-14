@@ -12,7 +12,7 @@ the refresh procedure in its `open-items.md`.
 It is operator-run, not CI-run, because it needs a live cluster. Only its verdict rules are
 unit-tested in CI.
 
-## Two suites
+## Three suites
 
 | Suite | Backs | Runs on | Needs |
 |---|---|---|---|
@@ -20,8 +20,8 @@ unit-tested in CI.
 | `guards` | [`limitations.md`](../../agents/cli/ts-object-model-agentql-query/references/limitations.md) § Read-only by design: statements that must **always** be refused | `(Sample) Retail - Apparel` | nothing (found by name). Calls `generate-sql` only, never `fetch-data` |
 | `lessons` | [`learning-path.md`](../../agents/cli/ts-object-model-agentql-query/references/learning-path.md), the Learn AgentQL course | `(Sample) Retail - Apparel`, which ships on every cluster | nothing: found by exact name and author `system` (or pass `--model-apparel`) |
 
-`--suite all` (the default) runs all three. On a cluster without the Dunder Mifflin Models, run
-`--suite lessons`.
+`--suite all` (the default) runs all three. A cluster without the Dunder Mifflin Models can
+still run the two that need no GUID: `--suite lessons guards` (one or more suite names).
 
 ## Run it
 
@@ -31,7 +31,7 @@ python3 tools/agentql-retest/run.py --profile <ts-profile> \
     --model-multi  <guid of "Dunder Mifflin"> \
     [--only <case id> ...] [--out <file>.json]
 
-python3 tools/agentql-retest/run.py --profile <ts-profile> --suite lessons
+python3 tools/agentql-retest/run.py --profile <ts-profile> --suite lessons guards
 ```
 
 On the SE demo cluster (profile `se-thoughtspot`) the two Models are
