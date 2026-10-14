@@ -269,6 +269,14 @@ SCAL-326946 and SCAL-319341 that the behaviour now works on 26.9.0.cl; comment o
 SCAL-314019 / SCAL-326935 that scalar `STDDEV` still fails on 26.9.0.cl; note on
 SCAL-338545 that it reproduces on Snowflake.
 
+**Addendum 2026-10-14 (SCAL-338545).** The ticket's own control table shows Snowflake
+compiling `~` / `REGEXP_LIKE` to a valid `regexp_like(...)` on the `semantic-sql` profile's
+dev cluster (2026-09-15). Re-probed all three forms (`~`, `!~`, `REGEXP_LIKE`) on 26.9.0.cl
+PROD against a plain Snowflake star-schema Model: every one emits `like_regex` and fails at
+execution. The operator form is not the variable; the build or cluster is. That cluster
+did not resolve from here, so which one it is remains open. Re-probe on the next PROD
+release; drop the `limitations.md` row only when PROD emits `regexp_like`.
+
 ## Keeping `limitations.md` current
 
 `limitations.md` carries a currency anchor (`<!-- currency: spotql — YYYY-MM (...) -->`).
