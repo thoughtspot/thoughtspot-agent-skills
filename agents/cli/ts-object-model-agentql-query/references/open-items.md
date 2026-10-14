@@ -288,6 +288,9 @@ and a decimal column passes through. Values are right in every form. The same pa
 `LOG(10, 100)`. It also found that one-argument `LOG(x)` is the natural log (`ln`), which a
 Postgres-trained writer would read as base 10. Both are now rows in `limitations.md`.
 
+**Next re-probe:** BL-395. Re-run the suite on 26.9.0.sw (target 2026-11-30), and probe the
+three tickets fixed only in that release.
+
 ## Keeping `limitations.md` current
 
 `limitations.md` carries a currency anchor (`<!-- currency: spotql — YYYY-MM (...) -->`).
