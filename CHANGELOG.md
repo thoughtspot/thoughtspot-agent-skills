@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-14
+- docs: ts-object-model-agentql-query 2.7.1 — Learn AgentQL shows each lesson's query ready to run ("run it"), with an optional one-line prediction, instead of asking the learner to write it
 - feat: ts-object-model-agentql-query 2.7.0 — Learn AgentQL lesson 3.4 restored as a generic exercise on a Model the learner chooses (formula measures: `AGG`, not `SUM`), with three new live-checked retest cases
 - docs: ts-object-model-agentql-query 2.6.1 — Learn AgentQL `SUM` vs `AGG` lesson parked (`AGG()` is not a released feature)
 - feat: ts-object-model-agentql-query 2.6.0 — Learn AgentQL modules 3–7 written (all eight modules, with tracks; 57 live-checked lesson cases), plus a "Learn AgentQL" section in SKILL.md and the README saying how to start it

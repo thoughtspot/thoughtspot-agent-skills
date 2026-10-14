@@ -73,9 +73,12 @@ me AgentQL, SE track"*, *"start at module 5"*.
 Model to prepare: the course runs on **`(Sample) Retail - Apparel`**, the sample Model
 every cluster ships with, and finds it by name.
 
-**How a lesson runs.** The agent states a question, you write the AgentQL, then you
-**predict the SQL** before it runs. It runs `generate-sql` and `fetch-data` live, walks
-through what ThoughtSpot generated, then breaks the query on purpose to show a rule.
+**How a lesson runs.** The agent states a question and **shows you the AgentQL**, ready to
+run, so you never get stuck on syntax. It asks one quick prediction, such as "which tables
+will this touch?". Answer it, or just say **"run it"**. It runs `generate-sql` and
+`fetch-data` live, walks through the SQL ThoughtSpot generated, then breaks the query on
+purpose to show a rule. If you want practice, write your own version first and it will run
+that instead.
 
 | Module | What you learn |
 |---|---|
@@ -316,6 +319,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.7.1 | 2026-10-14 | Learn AgentQL: the agent now **shows each lesson's AgentQL ready to run** rather than asking the learner to write it ("Learner writes" → "Question"). This avoids syntax errors and keeps lessons quick. The SQL prediction is one quick optional question; "run it" skips it. Writing your own query stays available as practice. |
 | 2.7.0 | 2026-10-14 | Learn AgentQL lesson 3.4 restored, now generic: **formula measures, `AGG` not `SUM`, on a Model the learner chooses**. The agent runs `ts agentql classify-columns`, picks an aggregate-formula measure, an attribute and (where one exists) a raw-measure control, and writes the question from their names. If the Model has no formula measures, it says so. The Break it step shows `SUM(formula)` → `NESTED_AGGREGATE_NOT_SUPPORTED`, `AGG(raw)` → `QUERY_GEN_ERROR`, and a bare formula measure compiling exactly like `AGG()`. Security moves back to 3.5. New retest cases: `AGG()` equals the raw SUM it wraps, a bare formula measure matches `AGG()`, and `AGG()` on a raw measure is rejected. |
 | 2.6.1 | 2026-10-14 | Learn AgentQL: the `SUM` vs `AGG` lesson (3.4) is parked, because `AGG()` is not a released product feature. Former lesson 3.5 (security) is now 3.4. The skill's query rules are unchanged. |
 | 2.6.0 | 2026-10-14 | **Learn AgentQL: modules 3–7 written** (the semantic layer, dates and functions, advanced shapes, trust but verify, building on it). The course now covers all eight modules, with tracks, and every claim is checked by the `lessons` suite (57 cases, up from 18). New **Learn AgentQL** section near the top of this file: what the course is, how to start it, the modules and tracks. Rules: `GROUP BY` accepts an output alias (`GROUP BY u`), and ordinals stay rejected. |

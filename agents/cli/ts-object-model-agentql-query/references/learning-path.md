@@ -51,16 +51,19 @@ a learner to expect a specific dated number. Totals over all time are stable.
 
 ## How to run a lesson
 
-Every lesson follows the same six steps. Do not skip **Predict**: guessing the SQL before
-seeing it is what turns "ThoughtSpot generates SQL" into a model the learner can reason with.
+Every lesson follows the same six steps. **Show the AgentQL. Don't ask the learner to
+write it.** The lesson's query is ready to run, so nobody loses time to syntax errors, and
+the learning is in what ThoughtSpot does with it. A learner who wants practice can write
+their own instead: run theirs, then compare it with the lesson's.
 
 1. **Question.** State the business question in plain English.
-2. **Write.** In early lessons, show the AgentQL. From 2.3 on, ask the learner to write it
-   first, then compare it with the version below.
-3. **Predict.** Ask what the warehouse SQL will contain. Which tables? Any joins? What will
-   happen to the measure? Wait for the answer.
+2. **Show the query.** Present the lesson's AgentQL, with any placeholders filled in.
+3. **Predict, briefly.** Ask one short question in the same message as the query, such
+   as *"Before I run it: which tables will this touch?"*. Use the lesson's **Predict** line
+   if it has one. Then wait. Any answer is fine, and so is a plain "run it": run it then,
+   without pressing for a guess. The prediction is useful, but it is optional, not a quiz.
 4. **`generate-sql`.** Run it and show `executable_sql`. Walk through the lesson's
-   **Point out** items, comparing them with the prediction.
+   **Point out** items, comparing them with the prediction if there was one.
 5. **`fetch-data`.** Run it, render the rows as a table, and note the `columns[].type` values.
 6. **Break it.** Run the lesson's variant, show what changes and why, and name the rule.
 
@@ -209,7 +212,7 @@ The Model's join definitions do. The region totals add up to 2.1's total.
 
 ### 2.3 Two dimensions, two joins
 
-**Learner writes:** sales by item type and region.
+**Question:** sales by item type and region.
 
 ```sql
 SELECT "t1"."item type" AS it, "t1"."region" AS r, SUM("t1"."sales") AS s
@@ -224,7 +227,7 @@ schema the Model defines. Ask the learner to sketch it from the SQL alone.
 
 ### 2.4 Top N: `ORDER BY` and `LIMIT`
 
-**Learner writes:** the three best-selling item types.
+**Question:** the three best-selling item types.
 
 ```sql
 SELECT "t1"."item type" AS it, SUM("t1"."sales") AS s
@@ -266,7 +269,7 @@ to everyone.
 
 ### 2.6 Filters and counting
 
-**Learner writes:** sales in the West region.
+**Question:** sales in the West region.
 
 ```sql
 SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
@@ -322,7 +325,8 @@ and it fails silently.
 state" touch? What does the query in 2.8 do, and how would you spot it from the result alone?
 Why does `CURRENT_DATE` fail when the Model's own formula uses it?
 
-**Try it on your Model.** Pick a Model the learner works with. Write one grouped query, then
+**Try it on your Model.** Pick a Model the learner works with. Write one grouped query for it
+(you write it, or the learner does if they want to), then
 predict its joins from the Model's TML (`ts tml export … --parse`, `model_tables[].joins`)
 before running `generate-sql`.
 
@@ -332,7 +336,7 @@ before running `generate-sql`.
 
 ### 3.1 A ratio of two measures, divided safely
 
-**Learner writes:** average selling price per item type (sales ÷ quantity).
+**Question:** average selling price per item type (sales ÷ quantity).
 
 ```sql
 SELECT "t1"."item type" AS it, SUM("t1"."sales") / SUM("t1"."quantity purchased") AS avg_price
@@ -415,7 +419,8 @@ of the lesson.
 4. **Write the question from those names.** For example: *"What is `Sales - Actual (fx)` by
    `Ship Country`?"*
 
-**Learner writes** the query. **Predict:** `SUM` or `AGG`, and what will the SQL contain?
+**Show the query**, filled in with the picked names. **Predict:** `SUM` or `AGG`, and what
+will the SQL contain?
 
 ```sql
 SELECT "t1"."<attribute>" AS a, AGG("t1"."<formula measure>") AS m
@@ -489,7 +494,7 @@ spellings. The groups add up to the grand total.
 
 ### 4.2 Relative dates: the period functions
 
-**Learner writes:** sales this year, and sales in the last 30 days.
+**Question:** sales this year, and sales in the last 30 days.
 
 ```sql
 SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
@@ -540,7 +545,7 @@ position (`GROUP BY 1`) is rejected. Regex functions do not work (`limitations.m
 
 ### 4.5 `CASE` to bucket values
 
-**Learner writes:** count and total of sales rows, bucketed small / medium / large.
+**Question:** count and total of sales rows, bucketed small / medium / large.
 
 ```sql
 SELECT CASE WHEN "t1"."sales" >= 1000 THEN 'large' WHEN "t1"."sales" >= 100 THEN 'medium' ELSE 'small' END AS b,
@@ -564,7 +569,7 @@ does `DATE_TRUNC` compile but fail, and what do you use instead?
 
 ### 5.1 A CTE for two-step aggregation
 
-**Learner writes:** the average total sales per store (3.2's question, answered properly).
+**Question:** the average total sales per store (3.2's question, answered properly).
 
 ```sql
 WITH st AS (
@@ -601,7 +606,7 @@ with `NULLIF`.
 
 ### 5.3 Top N per group
 
-**Learner writes:** the two best-selling item types in each region.
+**Question:** the two best-selling item types in each region.
 
 ```sql
 WITH x AS (
@@ -645,7 +650,7 @@ SELECT "t1"."region" AS r, SUM("t1"."sales") AS s FROM "(Sample) Retail - Appare
 WHERE "t1"."region" = 'East' GROUP BY "t1"."region"
 ```
 
-**Learner writes:** sales per store for each region, from two CTEs joined on region.
+**Question:** sales per store for each region, from two CTEs joined on region.
 
 ```sql
 WITH a AS (SELECT "t1"."region" AS r, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region"),
