@@ -44,7 +44,8 @@ written out as ThoughtSpot TML.
 
 The same model in **Network** view (the Cards | Network toggle at the top of the diagram): dots sized by join count, with aliases in
 purple. The role-playing fan-out around each fact is easier to see here than with
-cards. Add `#view=network` to the file's URL to open it in this view.
+cards. The viewer remembers the last view you picked. Until you pick one, adding
+`#view=network` to the file's URL opens it in this view.
 
 ![Order Fulfilment, network view](order-fulfilment/screenshot-network.png)
 

@@ -242,3 +242,74 @@ def test_view_toggle_does_not_touch_the_toolbar(FULFIL, tmp_path):
       const v=document.getElementById('view-seg');
       return {inControls:!!v.closest('.controls'), onCanvas:!!v.closest('.canvas-wrap')};""", tmp_path)
     assert r == {"inControls": False, "onCanvas": True}
+
+
+def test_layout_button_stays_highlighted_in_and_after_network_view(FULFIL, tmp_path):
+    """Minor 1: network view keeps the card layout it will return to highlighted, and a
+    page whose DOM lost the highlight (a file shared from network view) restores it."""
+    r = browser.probe(FULFIL, """
+      const on=()=>[...document.querySelectorAll('#layout-seg button.on')].map(b=>b.dataset.l);
+      setLayout('lr');setView('network');const inNet=on();
+      setView('cards');
+      document.querySelectorAll('#layout-seg button').forEach(b=>b.classList.remove('on'));
+      loadModel(MODEL);
+      return {inNet, afterLoad:on(), layoutName};""", tmp_path)
+    assert r["inNet"] == ["lr"]
+    assert r["afterLoad"] == [r["layoutName"]]
+
+
+def test_label_width_estimate_covers_rendered_labels(tmp_path):
+    """Minor 5: the layout spaces for labelW, so labelW must not undercut the real text,
+    and the rendered dot+label boxes of long names must not overlap."""
+    import render
+    names = ["CUSTOMER_LIFETIME_VALUE_SEGMENT_%d" % i for i in range(6)] + ["WWWWWWWWWWWWWWWWWWWWWW", "HUB"]
+    tables = [{"id": n, "kind": "dim", "cols": [], "rls": [], "is_sql_view": False,
+               "sql_query": None, "alias_of": None, "in_rls_path": False} for n in names]
+    joins = [{"from": "HUB", "to": n, "name": "j%d" % i, "card": "MANY_TO_ONE", "origin": "model",
+              "type": "INNER", "on": ""} for i, n in enumerate(names[:-1])]
+    bundle = {"models": [{"model": {"name": "L", "guid": "", "description": ""}, "tables": tables,
+                          "joins": joins, "formulas": {}, "findings": []}], "index": [], "dropped": []}
+    page = tmp_path / "long.html"; render.write_html(bundle, str(page))
+    r = browser.probe(str(page), """
+      view.k=1;applyView();
+      const short=[],boxes=[];
+      document.querySelectorAll('#nodes g.node').forEach(g=>{
+        const lab=g.querySelector('.dot-label'),id=lab.textContent,w=lab.getBBox().width;
+        if(w>labelW(tableById[id])-8)short.push([id,w,labelW(tableById[id])]);
+        const a=g.querySelector('circle.dot').getBoundingClientRect(),b=lab.getBoundingClientRect();
+        boxes.push([id,Math.min(a.left,b.left),Math.min(a.top,b.top),Math.max(a.right,b.right),Math.max(a.bottom,b.bottom)]);});
+      const hits=[];
+      for(let i=0;i<boxes.length;i++)for(let k=i+1;k<boxes.length;k++){const A=boxes[i],B=boxes[k];
+        if(A[1]<B[3]&&B[1]<A[3]&&A[2]<B[4]&&B[2]<A[4])hits.push([A[0],B[0]]);}
+      return {short,hits};""", tmp_path, hash=NET)
+    assert r["short"] == []
+    assert r["hits"] == []
+
+
+def test_minimap_draws_dots_in_network_view(FULFIL, tmp_path):
+    """Minor 3: the minimap shows the network as coloured dots, not invisible specks."""
+    r = browser.probe(FULFIL, """
+      const c=[...document.querySelectorAll('#minimap-nodes circle')];
+      return {n:c.length, rects:document.querySelectorAll('#minimap-nodes rect').length,
+              fills:[...new Set(c.map(e=>e.getAttribute('fill').toUpperCase()))].sort(),
+              minR:Math.min(...c.map(e=>+e.getAttribute('r')))};""", tmp_path, hash=NET)
+    assert r["n"] == 29 and r["rects"] == 0
+    assert "#7C3AED" in r["fills"] and "#1E6FA8" in r["fills"]
+    assert r["minR"] >= 2
+
+
+def test_net_legend_clears_minimap_on_small_screens(FULFIL, tmp_path):
+    """Minor 4: at 1024x768 the legend must not run under the minimap."""
+    orig = browser.subprocess.run
+    def run(cmd, *a, **k):
+        return orig([c if not c.startswith("--window-size=") else "--window-size=1024,768" for c in cmd], *a, **k)
+    browser.subprocess.run = run
+    try:
+        r = browser.probe(FULFIL, """
+          const L=document.getElementById('net-legend').getBoundingClientRect(),
+                M=document.getElementById('minimap').getBoundingClientRect();
+          return {legendRight:L.right, minimapLeft:M.left, overlapY:L.bottom>M.top&&M.bottom>L.top};""",
+            tmp_path, hash=NET)
+    finally:
+        browser.subprocess.run = orig
+    assert (not r["overlapY"]) or r["legendRight"] <= r["minimapLeft"], r

@@ -233,7 +233,8 @@ table.cols .c-syn .syn{font-family:-apple-system,system-ui,sans-serif;font-size:
 .dot{cursor:pointer;filter:drop-shadow(0 1px 2px rgba(20,27,38,.18))}
 .dot-label{font-size:12px;fill:#2A3140;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round;cursor:pointer}
 #viewport.net-far .dot-label{display:none}
-.net-legend{position:absolute;left:16px;bottom:52px;display:flex;flex-wrap:wrap;gap:6px 12px;max-width:440px;
+/* max-width keeps clear of the 180px minimap at the bottom right (16+180+16 + a 32px gap) */
+.net-legend{position:absolute;left:16px;bottom:52px;display:flex;flex-wrap:wrap;gap:6px 12px;max-width:min(440px,calc(100% - 244px));
   background:rgba(255,255,255,.94);border:1px solid var(--line,#E2E6EC);border-radius:10px;padding:8px 10px;font-size:11px;color:#3C4453}
 .net-legend[hidden]{display:none}
 .net-legend span{display:inline-flex;align-items:center;gap:5px}
@@ -449,7 +450,18 @@ function dotR(t){return Math.min(DOT_MAX,DOT_MIN+2.2*Math.sqrt((undir[t.id]||[])
 // endpoints, drag) goes through sizeNode, so dot geometry never leaks card sizes.
 function nodeSize(t){if(VIEW==="network"){const r=dotR(t);return {w:2*r,h:2*r};}return {w:NODE_W,h:nodeHeight(t)};}
 function sizeNode(n){const s=nodeSize(n.t);n.w=s.w;n.h=s.h;}
-function labelW(t){return t.id.length*NET_LABEL_CH+8;}
+// Label width in px, measured with the label's real font (12px, the page's sans), so
+// the network layout spaces for the text actually drawn. The per-character estimate is
+// a floor and the fallback when canvas text metrics are unavailable. Cached per id.
+let _lblCtx=null;const _lblW={};
+function labelW(t){
+  if(_lblW[t.id]!=null)return _lblW[t.id];
+  let w=t.id.length*NET_LABEL_CH;
+  try{_lblCtx=_lblCtx||document.createElement("canvas").getContext("2d");
+    _lblCtx.font="12px "+getComputedStyle(document.body).fontFamily;
+    w=Math.max(w,_lblCtx.measureText(t.id).width);}catch(e){}
+  return _lblW[t.id]=Math.ceil(w)+8;
+}
 
 function worstSev(id){let w=null;(findingsByTable[id]||[]).forEach(f=>{if(!w||SEV_RANK[f.sev]>SEV_RANK[w])w=f.sev;});return w;}
 // Tables referenced (by name/alias) in an RLS rule's expression, excluding the rule's
@@ -861,8 +873,12 @@ function tweenTo(targets){
   nodes.forEach(n=>{const t=targets[n.t.id];if(t){n.x=t.x;n.y=t.y;}});
   renderAll();fit();
 }
+// The highlighted Layout button is the active card layout. In network view that is the
+// layout Cards will return to (cardLayout), shown dimmed with the disabled segment.
+function syncLayoutSeg(){const on=VIEW==="network"?cardLayout:layoutName;
+  document.querySelectorAll("#layout-seg button").forEach(b=>b.classList.toggle("on",b.dataset.l===on));}
 function setLayout(name){layoutName=name;
-  document.querySelectorAll("#layout-seg button").forEach(b=>b.classList.toggle("on",b.dataset.l===name));
+  syncLayoutSeg();
   const layered=name==="lr"||name==="tb";
   tOrth.disabled=!layered;$("orth-wrap").style.opacity=layered?1:.4;
   updateSavedBadge();
@@ -878,6 +894,7 @@ function syncViewControls(){
   const net=VIEW==="network";
   document.querySelectorAll("#view-seg button").forEach(b=>b.classList.toggle("on",b.dataset.v===VIEW));
   document.querySelectorAll("#layout-seg button,#notation-seg button").forEach(b=>b.disabled=net);
+  syncLayoutSeg();
   colSel.disabled=net;
   if(net){tOrth.disabled=true;$("orth-wrap").style.opacity=.4;}
   $("net-legend").hidden=!net;
@@ -1237,6 +1254,9 @@ function renderMinimap(){
   const scale=Math.min((MM_W-MM_PAD*2)/w,(MM_H-MM_PAD*2)/h);
   mmT={scale,ox:bb.x0,oy:bb.y0};
   nodes.forEach(n=>{
+    // Network view: dots in their role colour (card fills are near-white specks at this size).
+    if(VIEW==="network"){NS_el("circle",{cx:MM_PAD+(n.x+n.w/2-bb.x0)*scale,cy:MM_PAD+(n.y+n.h/2-bb.y0)*scale,
+      r:Math.max(2,n.w/2*scale),fill:DOT_FILL[dotKind(n.t)]},host);return;}
     NS_el("rect",{x:MM_PAD+(n.x-bb.x0)*scale,y:MM_PAD+(n.y-bb.y0)*scale,
       width:Math.max(1,n.w*scale),height:Math.max(1,n.h*scale),fill:mmFill(n.t)},host);
   });
