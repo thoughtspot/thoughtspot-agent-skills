@@ -436,6 +436,7 @@ const reduce=matchMedia("(prefers-reduced-motion:reduce)").matches;
 const ROW_H=20,HEAD_H=30,PAD=10;
 let NODE_W=200;
 let colMode="keys", layoutName="organic", notation="arrow";
+const LAYOUTS=["organic","star","lr","tb"];let _initDone=false;
 let focusSet=[];
 let focusMode=null;   // "neighbourhood" | "tree" | "compare" | null
 let selected=null;
@@ -1580,15 +1581,17 @@ function renderLegend(){
 }
 
 // ---- share HTML ----
-// Baked positions seed the recipient's ORGANIC (card) layout, so they must always be
-// card positions. From network view, use the remembered card layout instead of the dots.
+// The baked state names the model it belongs to and the CARD layout its positions are
+// for, so the recipient opens on that model in that layout and no other model or layout
+// is seeded with it. From network view, the positions are the remembered card layout's.
 function shareState(){
+  const layout=VIEW==="network"?cardLayout:layoutName;
   let pos;
   if(VIEW==="network"){
-    const src=hasAll(savedPos[cardLayout])?savedPos[cardLayout]:(layoutCache[cardLayout]||layoutCache.organic);
+    const src=hasAll(savedPos[layout])?savedPos[layout]:(layoutCache[layout]||getLayout(layout));
     pos={};Object.keys(src).forEach(id=>pos[id]={x:Math.round(src[id].x),y:Math.round(src[id].y)});
   }else{pos={};nodes.forEach(n=>pos[n.t.id]={x:Math.round(n.x),y:Math.round(n.y)});}
-  return {positions:pos,notes:notes};
+  return {model:MODEL.model.name,layout,positions:pos,notes:notes};
 }
 function shareHTML(){
   const doc=document.documentElement.outerHTML;
@@ -1671,11 +1674,18 @@ function loadModel(m){
   savedPos=loadSaved();
   notes=loadNotes();
 
+  // A baked state applies only to the model it was shared from. A legacy state (no
+  // model name) applies to the model the file opens on, and only on that first load.
   const initState=window.ERD_INITIAL_STATE||null;
-  if(initState){
+  const initApplies=initState&&(initState.model!=null?initState.model===MODEL.model.name:!_initDone);
+  const initLayout=initApplies&&LAYOUTS.includes(initState.layout)?initState.layout:"organic";
+  if(initApplies){
     if(initState.notes){Object.keys(initState.notes).forEach(k=>{if(!notes[k])notes[k]=initState.notes[k];});persistNotes();}
-    if(initState.positions&&!hasAll(savedPos.organic)){savedPos.organic=initState.positions;persistSaved();}
+    if(initState.positions&&!hasAll(savedPos[initLayout])){savedPos[initLayout]=initState.positions;persistSaved();}
   }
+  // The shared layout opens on the first load only; a later model switch keeps the user's.
+  if(initApplies&&!_initDone)layoutName=initLayout;
+  _initDone=true;
 
   _seed=20260627;
   nodes=MODEL.tables.map((t,i)=>{const a=i/MODEL.tables.length*Math.PI*2;
@@ -1706,6 +1716,10 @@ function loadModel(m){
   // B1: must run AFTER notes=loadNotes() and the ERD_INITIAL_STATE baked-notes merge
   // above — NOT folded into the generic chip-disable loop earlier in this function,
   // which runs before notes exists and would compute the chip against stale data.
+  // The new model is placed by its organic positions above; any other current layout
+  // (kept across a model switch, or opened from a shared file) is applied here, so what
+  // is drawn matches layoutName — the highlight, drag-saving and orthogonal routing.
+  if(layoutName!=="organic")setLayout(layoutName);
   if(wasNet)setView("network");else syncViewControls();
   syncNotesChip();
 }
@@ -1728,6 +1742,9 @@ function buildSwitcher(){
 
 // ---- entry point ----
 buildSwitcher();
+// A shared file opens on the model it was shared from.
+{const st=window.ERD_INITIAL_STATE,i=st&&st.model!=null?ERD.models.findIndex(m=>m.model.name===st.model):-1;
+  if(i>0){MODEL=ERD.models[i];const sel=$("model-switch");if(sel)sel.value=String(i);}}
 VIEW="cards";loadModel(MODEL);setView(initialView());
 </script>
 </body></html>

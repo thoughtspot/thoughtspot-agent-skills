@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-14
+- fix: ts-object-model-erd 1.9.2 — Share HTML records its model and card layout (opens there; no leak into other models' layouts or notes in a multi-model file; legacy shared files still open); a model switch applies the current layout
 - fix: ts-object-model-erd 1.9.1 — Network view polish: Layout highlight kept/restored (incl. files shared from Network view), real-font label widths, coloured minimap dots, legend clears the minimap on small screens
 - feat: tools/agentql-retest — a live retest suite for ts-object-model-agentql-query's documented limitations (80 cases plus 7 controls; reports only the rows whose behaviour moved); skill 2.4.0
 - feat: ts-object-model-erd 1.9.0 — **Network view** in the shared ERD viewer (also used by ts-audit): a Cards / Network toggle draws each table as a labelled dot sized by join count, aliases in purple, plain join lines, its own deterministic force layout; fixes a latent Share HTML position bug; behaviour tests run the viewer in headless Chrome
