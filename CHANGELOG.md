@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-14
+- docs: ts-object-model-agentql-query 2.9.0 — new `references/beyond-tokens.md`: four live-verified worked examples of questions that need AgentQL and ones it still can't answer (rank within a partition, a preceding-7-days window, a cohort semi-join, an unsupported percentile), each in the six-section output block; linked as the Learn AgentQL capstone
+- docs: ts-object-model-agentql-query 2.8.2 — consistent six-section output for every question (Question · AgentQL Sent · DB SQL Generated · Error & Explanation · Key Findings · Results), in SKILL.md Step 6 and every course lesson
 - docs: ts-object-model-agentql-query 2.8.1 — Learn AgentQL drops audience tracks for a plain module list with per-module question counts (36 total)
 - feat: ts-object-model-agentql-query 2.8.0 — read-only guards: a `guards` suite (writes, DDL, admin, multi-statement, comment injection) with a positive control and a BREACH verdict (exit 3) that outranks every other result; scoped to "no writes or DDL"; `limitations.md` § Read-only by design; Learn AgentQL lesson 1.5
 - docs: ts-object-model-agentql-query 2.7.1 — Learn AgentQL shows each lesson's query ready to run ("run it"), with an optional one-line prediction, instead of asking the learner to write it

@@ -876,3 +876,12 @@ How will you know each expected answer is right?
 
 36 questions in all. Each module stands alone after Module 2, so a learner can stop and pick
 up later ("teach me AgentQL, start at module 5").
+
+## After the course — where AgentQL earns its keep, and where it can't
+
+[`beyond-tokens.md`](beyond-tokens.md) is the capstone: four live-verified worked examples of
+questions that **search tokens can't answer**, and ones where **even AgentQL hits a wall** —
+rank within a partition, a preceding-7-days window, a cohort semi-join, and an unsupported
+percentile. Each is written in the same six-section block the lessons use, so it reads like
+four more questions. Good material for a demo, and the honest answer to "why not just use
+search?".
