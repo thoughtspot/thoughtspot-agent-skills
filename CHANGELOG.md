@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-10-14
+- feat: ts-object-model-erd 1.9.0 — **Network view** in the shared ERD viewer (also used by ts-audit): a Cards / Network toggle draws each table as a labelled dot sized by join count, aliases in purple, plain join lines, its own deterministic force layout; fixes a latent Share HTML position bug; behaviour tests run the viewer in headless Chrome
+
 ## 2026-10-08
 - chore: bump ts-cli to v0.175.0 — PR #506 (ts-convert-from-dbt / ts-convert-to-dbt, the `ts dbt` and `ts dbt-export` groups, and the review fixes below)
 - fix: PR #506 second review — MetricFlow `non_additive_dimension` (semi-additive, e.g. a balance), `fill_nulls_with` and `join_to_timespine` route the metric to *not translated* with a reason instead of being summed or dropped silently (a balance measure was summed: 25,400 against a true 5,300 in the 2026-09-08 study). The dbt Model builders adopt `formula_common`'s `resolve_name_collisions` and `fix_double_aggregation` (BL-217; both dbt exemptions removed from `check_converter_parity`) — metric output is unchanged, and a `ts_formula` that re-aggregates an aggregated formula is collapsed and always reported. References to a superseded `ts_formula` in a different case are re-pointed; `[`/`]` in a formula name are escaped. `ts metadata report`: the formula-column lookup pages through every result (was one 50-row page), an empty or failed lookup warns and marks the new "Formula column dependents" row unchecked, and an incomplete dependents list makes the verdict `UNVERIFIED` (`BLOCKED_VERIFY_DEPENDENTS_FIRST`) — never `SAFE_TO_DROP`. `tools/measure_skill_run.py` removed (unrelated to dbt)

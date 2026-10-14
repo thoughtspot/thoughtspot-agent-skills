@@ -42,6 +42,12 @@ written out as ThoughtSpot TML.
 
 ![Order Fulfilment ERD](order-fulfilment/screenshot.png)
 
+The same model in **View → Network**: dots sized by join count, with aliases in
+purple. The role-playing fan-out around each fact is easier to see here than with
+cards. Add `#view=network` to the file's URL to open it in this view.
+
+![Order Fulfilment, network view](order-fulfilment/screenshot-network.png)
+
 This one covers order-to-cash: orders, shipments, invoices, returns and an order audit
 trail. Most people, dates and places in it play more than one role, and each role is a
 separate `model_tables` entry with its own `alias`:
