@@ -634,10 +634,11 @@ function drawNodeBlock(g,n,t,stroke,sw,groupInfo){
 // Network-view node: a dot sized by join count, filled by role (alias wins over kind,
 // a Group-by colour wins over both), ringed by state, labelled to its right.
 function dotKind(t){return t.alias_of?"alias":lodKind(t);}
-function drawNodeDot(g,n,t,ring,ringW,groupInfo){
+function drawNodeDot(g,n,t,ring,ringW,groupInfo,ringDash){
   const r=n.w/2,kind=dotKind(t),fill=groupInfo?groupInfo.color:DOT_FILL[kind];
-  NS_el("circle",{class:"dot","data-kind":kind,cx:r,cy:r,r,fill,stroke:ring,"stroke-width":ringW,
+  const c=NS_el("circle",{class:"dot","data-kind":kind,cx:r,cy:r,r,fill,stroke:ring,"stroke-width":ringW,
     "vector-effect":"non-scaling-stroke"},g);
+  if(ringDash)c.setAttribute("stroke-dasharray",ringDash);
   NS_el("text",{class:"dot-label",x:2*r+6,y:r,"dominant-baseline":"central"},g).textContent=t.id;
   if(notes[t.id])NS_el("circle",{class:"dot-note",cx:2*r-2,cy:2,r:4,fill:"#D97706",stroke:"#fff","stroke-width":1},g);
 }
@@ -680,10 +681,15 @@ function renderNodes(){
     const gInfo=groupById?groupById[grp.byId[t.id]]:null;
 
     if(VIEW==="network"){
-      // A plain dot gets a thin white ring so it reads over lines; any state
-      // (RLS, finding, focus) keeps the card's state colour, slightly heavier.
-      const ringed=secured||inRlsPath||sev==="crit"||sev==="warn"||inFocus;
-      drawNodeDot(g,n,t,ringed?stroke:"#fff",ringed?sw+0.6:1.5,gInfo);
+      // The ring is a dot's only state cue (cards also have fills and icons), so RLS
+      // and findings must not share a look: RLS is a SOLID ring, a finding a DASHED one
+      // in its severity colour — a critical finding never reads as "secured". A plain
+      // dot gets a thin white ring so it reads over lines; focus turns the ring blue.
+      let ring="#fff",rw=1.5,rdash="";
+      if(secured){ring="#C2382E";rw=2.8;}else if(inRlsPath){ring="#D97706";rw=2.8;}
+      else if(sev==="crit"||sev==="warn"){ring=sev==="crit"?"#C2382E":"#B5730A";rw=2.6;rdash="3 2";}
+      if(inFocus){ring="#1E6FA8";rw=3.4;}
+      drawNodeDot(g,n,t,ring,rw,gInfo,rdash);
     }else if(isLod){
       drawNodeBlock(g,n,t,stroke,sw,gInfo);
     }else{

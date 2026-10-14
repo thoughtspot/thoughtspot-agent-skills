@@ -187,3 +187,58 @@ def test_labels_hide_when_zoomed_far_out(FULFIL, tmp_path):
       view.k=1;applyView();const near=document.getElementById('viewport').classList.contains('net-far');
       return {far,near};""", tmp_path, hash=NET)
     assert r == {"far": True, "near": False}
+
+
+def test_drawn_edges_meet_drawn_dots(FULFIL, tmp_path):
+    """Review I1: check the DRAWN geometry (path d vs circle), not the renderer's own
+    helpers, and that every node keeps dot size through a Cards/Network round trip."""
+    r = browser.probe(FULFIL, """
+      const check=()=>{
+        const dot={};document.querySelectorAll('#nodes g.node').forEach(g=>{
+          const c=g.querySelector('circle.dot'),m=/translate\\(([-\\d.e]+),([-\\d.e]+)\\)/.exec(g.getAttribute('transform'));
+          const r=+c.getAttribute('r');dot[g.querySelector('.dot-label').textContent]={x:+m[1]+r,y:+m[2]+r,r};});
+        const bad=[];
+        [...document.querySelectorAll('#edges path.edge')].forEach((p,i)=>{
+          const nums=p.getAttribute('d').match(/-?[\\d.]+(e-?\\d+)?/g).map(Number);
+          const e=edges[i],ends=[[e.j.from,nums[0],nums[1]],[e.j.to,nums[nums.length-2],nums[nums.length-1]]];
+          ends.forEach(([id,x,y])=>{const D=dot[id],d=Math.hypot(x-D.x,y-D.y);if(Math.abs(d-D.r)>0.5)bad.push([id,d,D.r]);});});
+        const size=nodes.filter(n=>!(n.w===n.h&&Math.abs(n.w-2*dotR(n.t))<1e-9)).map(n=>n.t.id);
+        return {bad,size};};
+      const first=check();
+      setView('cards');setView('network');
+      return {first,again:check()};""", tmp_path, hash=NET)
+    assert r["first"] == {"bad": [], "size": []}
+    assert r["again"] == {"bad": [], "size": []}
+
+
+def test_finding_ring_is_distinct_from_rls_ring(tmp_path):
+    """Review I2: in network view the ring is the only state cue, so a critical finding
+    on an unsecured table must not read as RLS (solid red)."""
+    import render
+    def t(i, rls=None):
+        return {"id": i, "kind": "dim", "cols": [], "rls": rls or [], "is_sql_view": False,
+                "sql_query": None, "alias_of": None, "in_rls_path": False}
+    bundle = {"models": [{"model": {"name": "R", "guid": "", "description": ""},
+                          "tables": [t("D_SECURED", [{"name": "r", "expr": "x"}]), t("D_CRIT_ONLY")],
+                          "joins": [], "formulas": {},
+                          "findings": [{"target": "D_CRIT_ONLY", "sev": "crit", "title": "x", "detail": ""}]}],
+              "index": [], "dropped": []}
+    page = tmp_path / "r.html"; render.write_html(bundle, str(page))
+    r = browser.probe(str(page), """
+      const ring=id=>{const g=[...document.querySelectorAll('#nodes g.node')].find(g=>g.querySelector('.dot-label').textContent===id);
+        const c=g.querySelector('circle.dot');return [c.getAttribute('stroke'),c.getAttribute('stroke-dasharray')||''];};
+      return {sec:ring('D_SECURED'),crit:ring('D_CRIT_ONLY'),legend:document.getElementById('net-legend').textContent};""",
+        tmp_path, hash=NET)
+    assert r["sec"] != r["crit"]
+    assert r["crit"][1] != ""          # findings are dashed
+    assert r["sec"][1] == ""           # RLS is solid
+    assert "finding" in r["legend"].lower()
+
+
+def test_view_toggle_does_not_touch_the_toolbar(FULFIL, tmp_path):
+    """Review I3: the toggle lives on the canvas, so the toolbar cannot re-wrap and
+    Cards keeps its exact canvas size at every window width."""
+    r = browser.probe(FULFIL, """
+      const v=document.getElementById('view-seg');
+      return {inControls:!!v.closest('.controls'), onCanvas:!!v.closest('.canvas-wrap')};""", tmp_path)
+    assert r == {"inControls": False, "onCanvas": True}

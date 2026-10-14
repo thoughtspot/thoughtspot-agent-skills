@@ -42,7 +42,7 @@ written out as ThoughtSpot TML.
 
 ![Order Fulfilment ERD](order-fulfilment/screenshot.png)
 
-The same model in **View → Network**: dots sized by join count, with aliases in
+The same model in **Network** view (the Cards | Network toggle at the top of the diagram): dots sized by join count, with aliases in
 purple. The role-playing fan-out around each fact is easier to see here than with
 cards. Add `#view=network` to the file's URL to open it in this view.
 
