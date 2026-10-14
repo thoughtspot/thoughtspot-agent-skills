@@ -1,6 +1,6 @@
 ---
 name: ts-object-model-agentql-query
-description: Ask a question of a ThoughtSpot Model and get the answer as data — write AgentQL (Semantic SQL), validate it to warehouse SQL, execute it, and review the results. Use this whenever someone wants to query a ThoughtSpot Model with AgentQL, turn a natural-language question into AgentQL, see the SQL ThoughtSpot generates for a question, pull rows from a Model programmatically, learn how the AgentQL APIs behave, or build a question set to accuracy-test / regression-test / feature-test AgentQL. Triggers on "query this model", "ask the model", "run AgentQL", "what SQL does ThoughtSpot generate", "get the data for…", even when AgentQL isn't named explicitly.
+description: Ask a question of a ThoughtSpot Model and get the answer as data — write AgentQL (Semantic SQL), validate it to warehouse SQL, execute it, and review the results. Use this whenever someone wants to query a ThoughtSpot Model with AgentQL, turn a natural-language question into AgentQL, see the SQL ThoughtSpot generates for a question, pull rows from a Model programmatically, learn how the AgentQL APIs behave, take a guided hands-on course in AgentQL, or build a question set to accuracy-test / regression-test / feature-test AgentQL. Triggers on "query this model", "ask the model", "run AgentQL", "what SQL does ThoughtSpot generate", "get the data for…", "teach me AgentQL", even when AgentQL isn't named explicitly.
 ---
 
 # ThoughtSpot: Query a Model with AgentQL
@@ -65,6 +65,7 @@ The one requirement is below: the Model must be backed by an external cloud data
 | [references/patterns.md](references/patterns.md) | Complex shapes: last-N-periods, year-over-year, top-N / top-N-per-group, period-over-period, anomaly detection. |
 | [references/limitations.md](references/limitations.md) | **What AgentQL can't do** — hard-unsupported constructs, silent wrong-answer traps (e.g. `QUALIFY` and `FILTER (WHERE …)` are dropped), and what's been *fixed* on current builds. Read before telling a user something can't be done, and for the known-limitation-retest use case. |
 | [references/snowflake-sv-backing.md](references/snowflake-sv-backing.md) | **Snowflake Semantic View backing** (EXPERIMENTAL) — rules R1–R7 for SV-backed Models: the `100072` NULL-key bug, window-via-CTE, no `FROM`-subqueries, the measure-statistics trap, and Databricks MV comparison. Read when the Model's warehouse object is an SV. |
+| [references/learning-path.md](references/learning-path.md) | **The user wants to *learn* AgentQL** ("teach me AgentQL", "how does this work", "I need to demo it"). A guided, live course on `(Sample) Retail - Apparel`, the sample Model on every cluster: each lesson writes AgentQL, predicts the SQL, runs both APIs and breaks the query on purpose. Run it lesson by lesson instead of the normal flow. |
 | [references/use-cases.md](references/use-cases.md) | When the user wants to *build on* this skill — tutorial, agent building-block, accuracy/regression/feature/limitation testing. |
 | [references/integration.md](references/integration.md) | When the user wants to call AgentQL directly from their own product/agent — auth options, the callosum endpoints, request bodies, the raw columnar response format and a parser. |
 | [references/open-items.md](references/open-items.md) | Verification status of the API behaviour this skill relies on. |
@@ -93,6 +94,9 @@ Pick the depth from how the user framed the request:
 - **Developer / learning** ("show me the AgentQL", "what SQL does this generate?", "I'm
   integrating this") → show every artifact: the AgentQL you wrote, the warehouse SQL, the
   rows, and the raw JSON the commands emit.
+- **Learning the capability** ("teach me AgentQL", "walk me through how it works") → follow
+  [references/learning-path.md](references/learning-path.md) instead of this flow. It sets
+  the Model, the lesson order and the predict-then-run loop.
 
 ### Step 1 — Pick the profile and the Model
 
@@ -134,8 +138,8 @@ The TML body is in the `edoc` field. It is a structured document — JSON or YAM
 build (`yaml.safe_load` parses both; `ts tml export … --parse` returns it already parsed).
 For a Model it is rooted at `model:` with these parts:
 
-- **`model.columns[]`** — each entry's `name` is the **exact** identifier you must use in
-  AgentQL (case-sensitive). The column kind is at **`properties.column_type`** (ATTRIBUTE or
+- **`model.columns[]`** — each entry's `name` is the identifier to use in AgentQL. Matching
+  is case-insensitive, but copy the spelling. The column kind is at **`properties.column_type`** (ATTRIBUTE or
   MEASURE) — note it is **nested under `properties`**, not a direct child of the column.
 - **`model.formulas[]`** — formula definitions. A formula column references one by carrying a
   **`formula_id`** that matches a `formulas[].id`; that formula's **`expr`** is where the
@@ -269,6 +273,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.5.0 | 2026-10-14 | **Learn AgentQL pathway** (`references/learning-path.md`): a guided live course on `(Sample) Retail - Apparel`, the sample Model shipped on every cluster and found by exact name plus `system` author rather than a GUID. Modules 0–2 are written (why AgentQL, the two APIs, reading the SQL ThoughtSpot writes); 3–7 are outlined. Every lesson claim is checked by a new `lessons` suite in `tools/agentql-retest` (`--suite lessons`, needs no GUID). Rules corrected from the same probes: identifiers are **case-insensitive** (both the rules file and Step 2 said case-sensitive), a missing `GROUP BY` is filled in implicitly, and a bare raw measure returns row-level values, not the Model's default aggregation. |
 | 2.4.0 | 2026-10-14 | Known-limitation retest suite (`tools/agentql-retest/`): one case per `limitations.md` row with controls and value checks, reporting only rows whose behaviour moved. `use-cases.md` #6 and the open-items refresh procedure now run it. Its first run corrected the ✅ `TO_NUMBER` row (typed by input: strings are cast, numeric columns are not). Also new: one-argument `LOG(x)` is the natural log (⚠️), and `ACOS(1)` works in isolation. |
 | 2.3.1 | 2026-10-14 | Regex limitation (SCAL-338545) marked build- or cluster-dependent: it fails on Snowflake on 26.9.0.cl PROD for `~`, `!~` and `REGEXP_LIKE`, but the ticket records Snowflake compiling it correctly on a dev cluster, so re-probe before dropping the row. |
 | 2.3.0 | 2026-10-14 | Limitation re-probe on **26.9.0.cl (PROD)** — the second build after jul.26.mt, ~80 live probes plus a Jira refresh of both epics. **Now working** (→ ✅, rules relaxed): framed-window-only queries, `LIMIT … OFFSET`, decimal literal arithmetic, `GREATEST`/`LEAST` varargs, constant labels, `NTILE`, `LAG`/`LEAD` offsets and defaults, multi-CTE and chained-CTE joins, `CASE` in `GROUP BY`, `CAST(<literal>)`, constant-only `EXP`/`CHR`/`SPACE`, `TO_DATE('<literal>')` filters, aggregates over CTE-unreferenced columns. **Still broken** on both builds: direct `STDDEV`/`VAR` (despite SCAL-314019 closed as fixed), `QUALIFY`/`FILTER` silently dropped, `IN (SELECT …)`, self/non-equi joins, `ROLLUP`, date-literal `SUM(CASE …)` (now characterised as a result-typing bug — the SQL is right). **Newly documented:** `REGEXP_LIKE`/`~` fails at fetch on Snowflake (SCAL-338545), outer aggregation over a set-op CTE fails (SCAL-330561), an explicit `LIMIT` over 100,000 is silently lowered, `DATE_TRUNC` fails at fetch rather than running silently, string `=`/`IN` are case-insensitive (the rule demanding exact case was wrong), dates return as epoch seconds. Stale claims removed from `udf-reference.md` (MEDIAN "scalar only", `LENGTH()` and literal arithmetic "forbidden", "no form for N rows back"). |

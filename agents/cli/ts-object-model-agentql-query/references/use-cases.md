@@ -18,6 +18,10 @@ The composable unit is one record per question:
 
 ## 1. Introductory tutorial
 
+**Now a full course:** [learning-path.md](learning-path.md) is the guided, live version of
+this use case, on a sample Model every cluster has. Use it when someone wants to *learn*
+AgentQL. The paragraph below is the one-question version.
+
 Walk a learner from a question to data and show how the AgentQL APIs behave. Use the
 developer depth from `SKILL.md`: for one question, show the AgentQL you wrote, the warehouse
 SQL from `generate-sql`, and the rows from `fetch-data` rendered as a table. Good first

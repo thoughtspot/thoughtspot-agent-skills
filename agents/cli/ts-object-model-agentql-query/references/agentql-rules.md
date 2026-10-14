@@ -22,8 +22,15 @@ GROUP BY "t1"."Product Category"
   schema-qualified or physical table names — the Model name is the only table reference.
 - **Every column reference is alias-prefixed and double-quoted**: `"t1"."Order Date"`,
   never bare `"Order Date"`.
-- **Column names must match the Model's TML exactly** (case-sensitive). Don't invent
-  columns. If a column the question needs isn't in the Model, say so — don't guess.
+- **Spell column names as the Model's TML does.** Matching is **case-insensitive**:
+  `"t1"."Sales"` resolves to a column named `sales`, and the Model name in `FROM` is matched
+  the same way (✓ live 2026-10-14, two Models). Still copy the TML spelling, so the
+  statement reads the way the Model does. Don't invent columns: an unknown one fails with
+  `COLUMN_NOT_FOUND`. If a column the question needs isn't in the Model, say so; don't guess.
+- **Always write the `GROUP BY`.** A dimension selected beside an aggregate with no
+  `GROUP BY` is accepted and grouped implicitly by the non-aggregated columns (✓ live
+  2026-10-14). That is the same lenient parse that reads `WHERE SUM(x) > n` as `HAVING`,
+  so don't rely on it: an explicit `GROUP BY` is what other readers and engines expect.
 
 ## Aggregation — two kinds of measure (this distinction matters)
 
@@ -35,6 +42,11 @@ expression.
   `Amount`, `Quantity`). **Apply a real aggregate yourself:** `SUM` (the default for
   additive facts), `AVG`, `MIN`, `MAX`. `COUNT` must name a column — **`COUNT(*)` /
   `COUNT(1)` are rejected**; use `COUNT("t1"."Order Id")`.
+
+  A raw measure selected **bare**, with no aggregate, is not aggregated. It returns one
+  value per fact row, not the Model's default aggregation, so `SELECT region, sales`
+  returns every sales row (up to the 100,000-row cap) rather than a total per region (✓ live
+  2026-10-14).
 
   ```sql
   SUM("t1"."Amount") AS "Total Sales"

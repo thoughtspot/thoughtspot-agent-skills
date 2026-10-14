@@ -51,6 +51,11 @@ class Case:
     control: bool = False                     # a control only: reported, but backs no row on its own
 
     @property
+    def suite(self) -> str:
+        """`lessons` cases back learning-path.md on the sample Model; the rest back limitations.md."""
+        return "lessons" if self.model == "apparel" else "limitations"
+
+    @property
     def runs_fetch(self) -> bool:
         return self.expect in (OK, FETCH_ERROR)
 

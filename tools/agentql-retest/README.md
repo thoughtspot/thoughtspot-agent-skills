@@ -12,6 +12,16 @@ the refresh procedure in its `open-items.md`.
 It is operator-run, not CI-run, because it needs a live cluster. Only its verdict rules are
 unit-tested in CI.
 
+## Two suites
+
+| Suite | Backs | Runs on | Needs |
+|---|---|---|---|
+| `limitations` | `limitations.md` | the Dunder Mifflin demo Models (SE demo cluster) | `--model-single`, `--model-multi` |
+| `lessons` | [`learning-path.md`](../../agents/cli/ts-object-model-agentql-query/references/learning-path.md), the Learn AgentQL course | `(Sample) Retail - Apparel`, which ships on every cluster | nothing: found by exact name and author `system` (or pass `--model-apparel`) |
+
+`--suite all` (the default) runs both. On a cluster without the Dunder Mifflin Models, run
+`--suite lessons`.
+
 ## Run it
 
 ```bash
@@ -19,6 +29,8 @@ python3 tools/agentql-retest/run.py --profile <ts-profile> \
     --model-single <guid of "DunderMifflin Sales"> \
     --model-multi  <guid of "Dunder Mifflin"> \
     [--only <case id> ...] [--out <file>.json]
+
+python3 tools/agentql-retest/run.py --profile <ts-profile> --suite lessons
 ```
 
 On the SE demo cluster (profile `se-thoughtspot`) the two Models are
@@ -62,7 +74,8 @@ does not read as a behaviour change.
 | Path | What |
 |---|---|
 | `run.py` | Entry point: the only I/O (`ts agentql generate-sql` / `fetch-data`) |
-| `agentql_retest/cases.py` | The cases. Each names the `limitations.md` row it backs |
+| `agentql_retest/cases.py` | The `limitations` cases. Each names the `limitations.md` row it backs |
+| `agentql_retest/lessons.py` | The `lessons` cases. Each names the lesson it backs, and each lesson's **Guarded by** line names its cases (a unit test keeps the two in step) |
 | `agentql_retest/classify.py` | The `Case` model, the verdict rules and the case-list validator. Pure |
 | `tests/` | Verdict-rule tests, including the shipped bespoke checks against real rows. No live calls |
 

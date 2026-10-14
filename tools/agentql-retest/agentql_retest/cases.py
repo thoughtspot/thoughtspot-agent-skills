@@ -17,6 +17,7 @@ import math
 import statistics
 
 from .classify import FETCH_ERROR, GEN_ERROR, OK, SQL_OK, Case
+from .lessons import LESSON_CASES, SAMPLE_MODEL  # noqa: F401  (SAMPLE_MODEL re-exported for run.py)
 
 F = 'FROM "DunderMifflin Sales" AS "t1"'
 FX = 'FROM "Dunder Mifflin" AS "t1"'
@@ -318,3 +319,5 @@ CASES = [
     Case("filter_in_upper", f"SELECT SUM({Q}) AS q {F} WHERE {SP} IN ('JIM HALPERT')", OK,
          FIXED + "String = / IN are case-insensitive", same_as="ctl_filter_eq"),
 ]
+
+CASES += LESSON_CASES

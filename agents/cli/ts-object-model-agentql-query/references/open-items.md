@@ -291,6 +291,29 @@ Postgres-trained writer would read as base 10. Both are now rows in `limitations
 **Next re-probe:** BL-395. Re-run the suite on 26.9.0.sw (target 2026-11-30), and probe the
 three tickets fixed only in that release.
 
+## #8 — Learn AgentQL pathway on the sample Model — VERIFIED (live) 2026-10-14
+
+`learning-path.md` runs on `(Sample) Retail - Apparel`, because the user wanted a Model that
+exists on any cluster. Probed on the SE demo cluster (26.9.0.cl PROD):
+
+- **The Model.** System-authored, created 2020-05-26, GUID `cd252e5c-…-3eadaa049cca`. It
+  is a star schema of three tables on `Demo Connection` (Snowflake dialect), has
+  `join_progressive` on, and has two raw SUM measures and a rolling `date` formula. The same
+  cluster carries 17 user copies with near-identical names.
+- **AgentQL works against it.** All 18 `lessons` cases are AS_DOCUMENTED.
+- **Rule corrections from the same probes:**
+  - Identifiers (columns and the Model name) are matched **case-insensitively**.
+    `agentql-rules.md` and SKILL.md Step 2 had said case-sensitive. Also confirmed on
+    the Dunder Mifflin Model.
+  - A dimension beside an aggregate with no `GROUP BY` is grouped implicitly.
+  - A bare raw measure is **not** aggregated. It returns row-level values.
+
+**Open: is the GUID the same on every cluster?** Not testable here: the only other profile
+(`semantic-sql`) does not resolve. The design does not depend on it. Both the pathway and
+`run.py --suite lessons` find the Model by exact name **and** `authorName == "system"`,
+which also skips the user copies. Close this by running `--suite lessons` on a second
+cluster: the resolved GUID is printed on the first line.
+
 ## Keeping `limitations.md` current
 
 `limitations.md` carries a currency anchor (`<!-- currency: spotql — YYYY-MM (...) -->`).

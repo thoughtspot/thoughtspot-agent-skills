@@ -193,3 +193,74 @@ def test_day_of_year_check_decodes_epoch_seconds():
     good = ok_fetch([[1730073600, 302, 28]])  # 2024-10-28
     assert K.classify(c, OK_GEN, good, {})[0] == K.AS_DOCUMENTED
     assert K.classify(c, OK_GEN, ok_fetch([[1730073600, 301, 28]]), {})[0] == K.CHANGED
+
+
+# ---- the lessons suite ---------------------------------------------------------------------
+
+import importlib.util  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("agentql_retest_run", pathlib.Path(__file__).resolve().parents[1] / "run.py")
+RUN = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(RUN)
+
+
+def _hit(name, author, guid="g"):
+    return {"metadata_header": {"id": guid, "name": name, "authorName": author}}
+
+
+def test_sample_model_is_picked_by_exact_name_and_system_author():
+    hits = [_hit("(Sample) Retail - Apparel - XY", "someone", "copy1"),
+            _hit("(Sample) Retail - Apparel", "someone", "copy2"),
+            _hit("(Sample) Retail - Apparel", "system", "real")]
+    assert RUN.pick_sample_model(hits) == ("real", None)
+
+
+def test_sample_model_missing_or_ambiguous_is_a_problem_not_a_guess():
+    assert RUN.pick_sample_model([_hit("(Sample) Retail - Apparel", "someone")])[0] is None
+    two = [_hit("(Sample) Retail - Apparel", "system", "a"), _hit("(Sample) Retail - Apparel", "system", "b")]
+    guid, problem = RUN.pick_sample_model(two)
+    assert guid is None and "found 2" in problem
+
+
+def test_lesson_cases_are_all_on_the_sample_model_and_name_a_lesson():
+    lessons = [c for c in CASES if c.suite == "lessons"]
+    assert lessons and all(c.model == "apparel" for c in lessons)
+    assert all(c.control or c.row.startswith("📘 ") for c in lessons)
+    assert all(c.suite == "limitations" for c in CASES if c.model != "apparel")
+
+
+def test_lesson_guarded_by_ids_in_the_doc_all_exist():
+    doc = (pathlib.Path(__file__).resolve().parents[3]
+           / "agents/cli/ts-object-model-agentql-query/references/learning-path.md").read_text()
+    import re
+    cited = {i for line in doc.splitlines() if line.startswith("**Guarded by:**")
+             for i in re.findall(r"`([a-z0-9_]+)`", line)}
+    ids = {c.id for c in CASES if c.suite == "lessons"}
+    assert cited, "learning-path.md cites no cases"
+    assert cited <= ids, f"cited but not cases: {sorted(cited - ids)}"
+    uncited = {c.id for c in CASES if c.suite == "lessons" and not c.control} - cited
+    assert not uncited, f"lesson cases no lesson cites: {sorted(uncited)}"
+
+
+AP = {"ctl_ap_total": {"fetch": ok_fetch([[100.0]])},
+      "ctl_ap_by_region": {"fetch": ok_fetch([["West", 60.0], ["East", 40.0]])}}
+
+
+def test_lesson_checks_against_controls():
+    assert K.classify(by_id("l2_group_by_joins_one_dim"),
+                      dict(OK_GEN, executable_sql="… join dim_retapp_stores on storeid …"),
+                      ok_fetch([["West", 60.0], ["East", 40.0]]), AP)[0] == K.AS_DOCUMENTED
+    assert K.classify(by_id("l2_filter_case_insensitive"),
+                      dict(OK_GEN, executable_sql="… join … where lower(x) = 'west'"),
+                      ok_fetch([[0.0]]), AP)[0] == K.CHANGED  # case-sensitive now: matched nothing
+    rows = [["West", 1.0]] * 3
+    assert K.classify(by_id("l2_bare_measure_row_level"), OK_GEN, ok_fetch(rows), AP)[0] == K.CHANGED
+
+
+def test_latest_date_check_wants_int_epoch_near_today():
+    import datetime as dt
+    today = int(dt.datetime.now(dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    c = by_id("l1_dates_are_epoch_seconds")
+    assert K.classify(c, OK_GEN, ok_fetch([[today, 1.0]]), {})[0] == K.AS_DOCUMENTED
+    assert K.classify(c, OK_GEN, ok_fetch([["2026-10-14", 1.0]]), {})[0] == K.CHANGED
+    assert K.classify(c, OK_GEN, ok_fetch([[today - 30 * 86400, 1.0]]), {})[0] == K.CHANGED
