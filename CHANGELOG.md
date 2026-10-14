@@ -7,6 +7,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-10-14
 - feat: ts-object-model-erd 1.9.0 — **Network view** in the shared ERD viewer (also used by ts-audit): a Cards / Network toggle draws each table as a labelled dot sized by join count, aliases in purple, plain join lines, its own deterministic force layout; fixes a latent Share HTML position bug; behaviour tests run the viewer in headless Chrome
+- docs: ts-object-model-agentql-query 2.3.1 — regex limitation (SCAL-338545) marked build- or cluster-dependent: fails on Snowflake on 26.9.0.cl PROD for all three forms, but compiled correctly on a dev cluster in September
+- docs: ts-object-model-agentql-query 2.3.0 — AgentQL limitations re-probed live on 26.9.0.cl (PROD) and reconciled against both Jira epics; 14 constructs moved to fixed, still-broken rows confirmed on a second build, and new limitations documented (regex, aggregating over a set-op CTE, the 100,000-row cap overriding an explicit `LIMIT`)
 
 ## 2026-10-08
 - chore: bump ts-cli to v0.175.0 — PR #506 (ts-convert-from-dbt / ts-convert-to-dbt, the `ts dbt` and `ts dbt-export` groups, and the review fixes below)

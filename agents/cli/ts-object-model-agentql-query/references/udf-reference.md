@@ -67,7 +67,8 @@ WHERE DIFF_MONTH(START_OF_CURRENT_MONTH(), "t1"."Order Date") BETWEEN 1 AND 12
 |---|---|
 | `SUM`, `AVG`, `MIN`, `MAX` | Work everywhere. `SUM` is the default for additive measures. |
 | `COUNT("t1"."col")` | **Must name a column** — `COUNT(*)` / `COUNT(1)` are rejected. |
-| `STDDEV_SAMP` / `STDDEV_POP`, `VAR_SAMP` / `VAR_POP`, `MEDIAN` | **Scalar context only** (no `GROUP BY` in the same query) — see `patterns.md`. Always write the explicit `_SAMP`/`_POP` suffix; bare `STDDEV` silently means `_POP`. |
+| `MEDIAN` | Works directly, scalar and grouped. |
+| `STDDEV_SAMP` / `STDDEV_POP`, `VAR_SAMP` / `VAR_POP` | ✗ **Not directly on a Model column** in any context (`UNSUPPORTED_AGGREGATE`, regression [SCAL-326935](https://thoughtspot.atlassian.net/browse/SCAL-326935), still present on 26.9.0.cl). Use the CTE form or `STDDEV_SAMP(SUM(x)) OVER ()` — see `patterns.md` § Statistics. Always write the explicit `_SAMP`/`_POP` suffix; bare `STDDEV` silently means `_POP`. |
 | `PERCENTILE_CONT` / `PERCENTILE_DISC` / `APPROX_PERCENTILE` | ✗ Not supported. Only `MEDIAN` works as a percentile. |
 
 > **`AGG(col)` — for aggregate-formula columns (verified live 2026-06-25).** A formula
@@ -81,16 +82,20 @@ WHERE DIFF_MONTH(START_OF_CURRENT_MONTH(), "t1"."Order Date") BETWEEN 1 AND 12
 ## Window functions — `OVER (PARTITION BY … ORDER BY …)`
 
 Working on current builds: `RANK()`, `DENSE_RANK()`, `ROW_NUMBER()`, `NTILE(n)`,
-`LAG(col)`/`LEAD(col)` (and explicit offsets `LAG(col, N)`), `NTH_VALUE(col, N)`,
-`SUM(col) OVER (PARTITION BY … ORDER BY …)` (cumulative and with explicit
-`ROWS BETWEEN …` frames), and `STDDEV_SAMP(SUM(col)) OVER ()` (the anomaly pattern).
+`LAG(col)`/`LEAD(col)` (and explicit offsets and defaults, `LAG(col, N, default)`),
+`NTH_VALUE(col, N)`, `SUM(col) OVER (PARTITION BY … ORDER BY …)` (cumulative and with
+explicit `ROWS BETWEEN …` frames — including a query whose only window function is
+framed), and `STDDEV_SAMP(SUM(col)) OVER ()` (the anomaly pattern). Re-verified live on
+26.9.0.cl, 2026-10-14.
 
 `NTILE`, explicit `LAG`/`LEAD` offsets > 1, `NTH_VALUE`, and `ROWS BETWEEN` frames were all
 broken on older builds and are now fixed (verified champ-staging 2026-06-25 / SCAL-306544).
 See `limitations.md` for the dated, ticket-linked list.
 
-For "compare to N rows back" (N>1) or "true rolling N-period average", there is no working
-AgentQL form — see `patterns.md` / say it can't be done.
+"Compare to N rows back" is `LAG(x, N)`; a rolling N-row window is
+`ROWS BETWEEN N-1 PRECEDING AND CURRENT ROW`. A `ROWS` frame counts **rows, not
+periods**: over data with missing periods it spans further back in time than N periods,
+so aggregate to a gap-free grain first (one row per period) before relying on it.
 
 ## CAST
 
@@ -99,8 +104,10 @@ Cast only `VARCHAR`/`TEXT` → numeric/date. Already-numeric (`DOUBLE`, `INT64`,
 
 ## Forbidden (recap)
 
-`DATE_TRUNC`, `NOW()`, `CURRENT_DATE`, `AGE`, `INTERVAL` arithmetic · `SELECT *` ·
-`COUNT(*)` / `COUNT(1)` · `WITH RECURSIVE` · subqueries (`FROM (SELECT …)`, `IN (SELECT …)`,
-`EXISTS`) · non-equi `JOIN … ON` · CTE self-join ·
-`LENGTH()` · `GROUP BY 1` · `col NOT IN (…)` · arithmetic between an aggregate and a
-numeric literal (returns zeros).
+`DATE_TRUNC`, `TRUNC(date, part)`, `NOW()`, `CURRENT_DATE`, `AGE`, `INTERVAL` arithmetic,
+`DAY_OF_YEAR`, `EXTRACT(DOW|DOY …)` · `SELECT *` · `COUNT(*)` / `COUNT(1)` ·
+`WITH RECURSIVE` · subqueries (`FROM (SELECT …)`, `IN (SELECT …)`, `EXISTS`) · non-equi
+`JOIN … ON` · CTE self-join · `GROUP BY 1` · `col NOT IN (…)` · `QUALIFY` ·
+`FILTER (WHERE …)` · `ROLLUP`/`CUBE` · regex (`REGEXP_*`, `~`) · two-argument
+`LTRIM`/`RTRIM` · direct `STDDEV`/`VAR`. (`LENGTH()` and aggregate × literal arithmetic
+were on this list once; both work.) Full detail in `limitations.md`.

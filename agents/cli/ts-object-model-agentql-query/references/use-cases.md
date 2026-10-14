@@ -62,9 +62,11 @@ return `SUCCESS` with correct data. The question set grows as features ship.
 
 ## 6. Known-limitation retesting
 
-Keep a set of questions for things AgentQL currently can't do (set operations, `NTILE`,
-`PERCENTILE_CONT`, rolling frames — see `agentql-rules.md`), each tagged with its expected
-failure. Re-run periodically; when one starts returning `SUCCESS`, the limitation has been
+Keep a set of questions for things AgentQL currently can't do (`QUALIFY`,
+`FILTER (WHERE …)`, `PERCENTILE_CONT`, direct `STDDEV`, `IN (SELECT …)` — see
+`limitations.md`), each tagged with its expected failure. **Assert on the value, not the
+status:** the dangerous rows return `SUCCESS` with the wrong number, so a retest needs a
+control query (e.g. `FILTER (WHERE …)` vs the equivalent `SUM(CASE …)`) to detect a fix. Re-run periodically; when one starts returning `SUCCESS`, the limitation has been
 resolved — promote it out of the known-limitations set and into the functional set.
 
 ---
