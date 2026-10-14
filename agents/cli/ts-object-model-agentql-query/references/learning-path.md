@@ -104,7 +104,7 @@ SQL needs, and why does leaving it out make the answer more trustworthy rather t
 
 ---
 
-## Module 1 — The two APIs (~20 min)
+## Module 1 — The two APIs (~20 min · 5 questions)
 
 ### 1.1 Same query, both calls
 
@@ -203,7 +203,7 @@ customer asks whether an agent using AgentQL could drop a table: what do you sho
 
 ---
 
-## Module 2 — First queries: reading the SQL ThoughtSpot writes (~40 min)
+## Module 2 — First queries: reading the SQL ThoughtSpot writes (~40 min · 8 questions)
 
 ### 2.1 A total: null handling, the row cap, one table
 
@@ -361,7 +361,7 @@ before running `generate-sql`.
 
 ---
 
-## Module 3 — What the semantic layer does for you (~30 min)
+## Module 3 — What the semantic layer does for you (~30 min · 5 questions)
 
 ### 3.1 A ratio of two measures, divided safely
 
@@ -501,7 +501,7 @@ table holds: name two reasons. Given any Model, how do you find out whether a me
 
 ---
 
-## Module 4 — Dates and functions (~30 min)
+## Module 4 — Dates and functions (~30 min · 5 questions)
 
 ### 4.1 Date parts with the extraction functions
 
@@ -594,7 +594,7 @@ does `DATE_TRUNC` compile but fail, and what do you use instead?
 
 ---
 
-## Module 5 — Advanced shapes (~40 min)
+## Module 5 — Advanced shapes (~40 min · 6 questions)
 
 ### 5.1 A CTE for two-step aggregation
 
@@ -709,7 +709,7 @@ a window, or two CTEs). Why does 5.3 use a CTE instead of `QUALIFY`?
 
 ---
 
-## Module 6 — Trust, but verify (~30 min)
+## Module 6 — Trust, but verify (~30 min · 4 questions)
 
 The hardest lesson in the course: **a `SUCCESS` with a plausible number can still be
 wrong.** Some constructs are accepted, then partly ignored.
@@ -790,7 +790,7 @@ right". Name three checks you would run before putting it in front of a customer
 
 ---
 
-## Module 7 — Building on it (~30 min)
+## Module 7 — Building on it (~30 min · 3 questions)
 
 For developers and anyone wiring AgentQL into an agent or a test suite.
 
@@ -850,13 +850,18 @@ How will you know each expected answer is right?
 
 ---
 
-## Tracks
+## The modules
 
-| Track | Modules | Time |
+| Module | In short | Questions |
 |---|---|---|
-| **SE / field** (the default) | 0, 1, 2, 3, 6 | ~2.5 hours |
-| **Developer integrating** | 0, 1, 2, 4, 5, 7 | ~3 hours |
-| **QA / power user** | all | ~4 hours |
+| 0. Why AgentQL | ThoughtSpot compiles AgentQL to warehouse SQL and never runs it; the Model supplies the joins, formulas and security | concept |
+| 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, result types, why it can only read | 5 |
+| 2. First queries | reading the generated SQL: joins written for you, null handling, the row cap, inlined formulas, the lenient parser, the bare-measure trap | 8 |
+| 3. The semantic layer | ratios and safe division, what `AVG` averages, which tables a query reads, formula measures (`AGG` not `SUM`), security you never write | 5 |
+| 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets | 5 |
+| 5. Advanced shapes | CTEs, ranking and share of total, top N per group, period over period, set operations | 6 |
+| 6. Trust, but verify | queries that return `SUCCESS` with the wrong number, and the control queries that catch them | 4 |
+| 7. Building on it | consuming results in code, testing an agent that writes AgentQL | 3 |
 
-Each module stands alone after Module 2, so a learner can stop and pick up later
-("teach me AgentQL, start at module 5").
+36 questions in all. Each module stands alone after Module 2, so a learner can stop and pick
+up later ("teach me AgentQL, start at module 5").

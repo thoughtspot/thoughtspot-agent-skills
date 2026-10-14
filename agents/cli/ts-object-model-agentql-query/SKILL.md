@@ -67,7 +67,7 @@ can take it.
 > teach me AgentQL
 
 You can also run `/ts-object-model-agentql-query teach me AgentQL`, or be specific: *"teach
-me AgentQL, SE track"*, *"start at module 5"*.
+me AgentQL, just modules 1 and 2"*, *"start at module 5"*.
 
 **You need** a ThoughtSpot profile (set one up with `/ts-profile-thoughtspot`). There is no
 Model to prepare: the course runs on **`(Sample) Retail - Apparel`**, the sample Model
@@ -80,19 +80,18 @@ will this touch?". Answer it, or just say **"run it"**. It runs `generate-sql` a
 purpose to show a rule. If you want practice, write your own version first and it will run
 that instead.
 
-| Module | What you learn |
-|---|---|
-| 0. Why AgentQL | ThoughtSpot compiles AgentQL to warehouse SQL and never runs it itself; the Model supplies joins, formulas and security |
-| 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, reading result types, why it can only read (writes, DDL and injection are refused) |
-| 2. First queries | reading the SQL ThoughtSpot writes: joins written for you, null handling, the row cap, formulas inlined, the lenient parser, the bare-measure trap |
-| 3. The semantic layer | ratios and safe division, what `AVG` averages, which tables a query reads, formula measures (`AGG`, not `SUM`) on a Model you choose, security you never write |
-| 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets |
-| 5. Advanced shapes | CTEs, ranking and share of total, top N per group, year over year, set operations |
-| 6. Trust, but verify | queries that return `SUCCESS` with the wrong number, and the control queries that catch them |
-| 7. Building on it | consuming results in code, testing an agent that writes AgentQL |
+| Module | What you learn | Questions |
+|---|---|---|
+| 0. Why AgentQL | ThoughtSpot compiles AgentQL to warehouse SQL and never runs it itself; the Model supplies joins, formulas and security | concept |
+| 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, reading result types, why it can only read (writes, DDL and injection are refused) | 5 |
+| 2. First queries | reading the SQL ThoughtSpot writes: joins written for you, null handling, the row cap, formulas inlined, the lenient parser, the bare-measure trap | 8 |
+| 3. The semantic layer | ratios and safe division, what `AVG` averages, which tables a query reads, formula measures (`AGG`, not `SUM`) on a Model you choose, security you never write | 5 |
+| 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets | 5 |
+| 5. Advanced shapes | CTEs, ranking and share of total, top N per group, year over year, set operations | 6 |
+| 6. Trust, but verify | queries that return `SUCCESS` with the wrong number, and the control queries that catch them | 4 |
+| 7. Building on it | consuming results in code, testing an agent that writes AgentQL | 3 |
 
-**Tracks:** SE / field 0, 1, 2, 3, 6 (~2.5 h) · developer 0, 1, 2, 4, 5, 7 (~3 h) · QA / power
-user, everything (~4 h). The course itself is
+36 questions in all; each module stands alone after Module 2. The course itself is
 [references/learning-path.md](references/learning-path.md).
 
 **Is the course still accurate on your cluster?** Every lesson claim is a retest case:
@@ -319,6 +318,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.8.1 | 2026-10-14 | Learn AgentQL: dropped the audience **tracks** in favour of a plain module list — each module with a one-line summary and its **number of questions** (36 in all). Module headings now show the count. |
 | 2.8.0 | 2026-10-14 | **Read-only guards.** A new `guards` suite in `tools/agentql-retest` (26 cases + a positive control) covers statements AgentQL must always refuse: writes, DDL, admin (incl. `PUT`/`GET`/`UNDROP`/`EXECUTE IMMEDIATE`/`SHOW`), a second statement, and a physical table in `FROM`. It also checks that comments, `SELECT … INTO` and a `'; DROP` inside a literal compile to one regenerated `SELECT`. A guard that ever compiles to anything else is a new **BREACH** verdict (exit 3); guards never call `fetch-data`. The read-only check handles backslash and `$$` quoting. The suite's claim is scoped to *no writes or DDL*, not that a `SELECT` reads only the Model. New `limitations.md` § Read-only by design and Learn AgentQL lesson 1.5, "It can only read". |
 | 2.7.1 | 2026-10-14 | Learn AgentQL: the agent now **shows each lesson's AgentQL ready to run** rather than asking the learner to write it ("Learner writes" → "Question"). This avoids syntax errors and keeps lessons quick. The SQL prediction is one quick optional question; "run it" skips it. Writing your own query stays available as practice. |
 | 2.7.0 | 2026-10-14 | Learn AgentQL lesson 3.4 restored, now generic: **formula measures, `AGG` not `SUM`, on a Model the learner chooses**. The agent runs `ts agentql classify-columns`, picks an aggregate-formula measure, an attribute and (where one exists) a raw-measure control, and writes the question from their names. If the Model has no formula measures, it says so. The Break it step shows `SUM(formula)` → `NESTED_AGGREGATE_NOT_SUPPORTED`, `AGG(raw)` → `QUERY_GEN_ERROR`, and a bare formula measure compiling exactly like `AGG()`. Security moves back to 3.5. New retest cases: `AGG()` equals the raw SUM it wraps, a bare formula measure matches `AGG()`, and `AGG()` on a raw measure is rejected. |
