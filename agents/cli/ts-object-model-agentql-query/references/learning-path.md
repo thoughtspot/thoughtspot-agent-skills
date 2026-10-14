@@ -384,29 +384,7 @@ GROUP BY "t1"."item type", "t1"."region"
 
 **Guarded by:** `l3_dim_only_one_table`, `l3_two_dims_via_fact`.
 
-### 3.4 Formula measures: `SUM` vs `AGG` (on the learner's own Model)
-
-The sample Model has only raw measures, so this lesson needs a Model that has an
-**aggregate-formula measure**. Ask the learner for one, or find one:
-
-```bash
-ts tml export {guid} --profile {profile} --parse   # model.formulas[].expr containing sum( / count( / group_aggregate(
-```
-
-**Point out.**
-- A **raw measure** (a plain warehouse column, like `sales`) takes an aggregate you write:
-  `SUM`, `AVG`, `MIN`, `MAX`, `COUNT`.
-- An **aggregate-formula measure** already contains its aggregation. Wrap it in **`AGG()`**
-  so it is not aggregated twice.
-
-**Break it.** `SUM()` around the same formula fails with `NESTED_AGGREGATE_NOT_SUPPORTED`.
-The full rule, including semi-additive measures, is in [`agentql-rules.md`](agentql-rules.md)
-§ Aggregation.
-
-**Guarded by:** `sum_on_agg_formula`, `agg_on_agg_formula`. These are limitations-suite
-cases, because they need the Dunder Mifflin Model.
-
-### 3.5 Security you never write
+### 3.4 Security you never write
 
 No query here mentions security, and none needs to. If the Model has **row-level security**,
 the compiled SQL includes the user's filter automatically, so two users running the same
@@ -417,8 +395,12 @@ has no RLS to demonstrate it.
 
 **Check yourself.** Why is `SUM(sales) / SUM(quantity)` the right average price, and
 `AVG(sales / quantity)` not? A dimension-only query lists fewer products than the product
-table holds: name two reasons. How do you tell from the TML whether a measure takes `SUM` or
-`AGG`?
+table holds: name two reasons.
+
+> **Parked: `SUM` vs `AGG` on aggregate-formula measures.** `AGG()` is not a released
+> product feature, so the course does not teach it. Add it as a lesson here once it ships.
+> The behaviour is recorded in `agentql-rules.md` § Aggregation and checked by the
+> limitations-suite cases `sum_on_agg_formula` / `agg_on_agg_formula`.
 
 ---
 

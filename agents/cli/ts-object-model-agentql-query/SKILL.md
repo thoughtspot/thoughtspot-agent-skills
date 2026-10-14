@@ -82,7 +82,7 @@ through what ThoughtSpot generated, then breaks the query on purpose to show a r
 | 0. Why AgentQL | ThoughtSpot compiles AgentQL to warehouse SQL and never runs it itself; the Model supplies joins, formulas and security |
 | 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, reading result types |
 | 2. First queries | reading the SQL ThoughtSpot writes: joins written for you, null handling, the row cap, formulas inlined, the lenient parser, the bare-measure trap |
-| 3. The semantic layer | ratios and safe division, what `AVG` averages, which tables a query reads, `SUM` vs `AGG`, security you never write |
+| 3. The semantic layer | ratios and safe division, what `AVG` averages, which tables a query reads, security you never write |
 | 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets |
 | 5. Advanced shapes | CTEs, ranking and share of total, top N per group, year over year, set operations |
 | 6. Trust, but verify | queries that return `SUCCESS` with the wrong number, and the control queries that catch them |
@@ -316,6 +316,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.6.1 | 2026-10-14 | Learn AgentQL: the `SUM` vs `AGG` lesson (3.4) is parked, because `AGG()` is not a released product feature. Former lesson 3.5 (security) is now 3.4. The skill's query rules are unchanged. |
 | 2.6.0 | 2026-10-14 | **Learn AgentQL: modules 3–7 written** (the semantic layer, dates and functions, advanced shapes, trust but verify, building on it). The course now covers all eight modules, with tracks, and every claim is checked by the `lessons` suite (57 cases, up from 18). New **Learn AgentQL** section near the top of this file: what the course is, how to start it, the modules and tracks. Rules: `GROUP BY` accepts an output alias (`GROUP BY u`), and ordinals stay rejected. |
 | 2.5.0 | 2026-10-14 | **Learn AgentQL pathway** (`references/learning-path.md`): a guided live course on `(Sample) Retail - Apparel`, the sample Model shipped on every cluster and found by exact name plus `system` author rather than a GUID. Modules 0–2 are written (why AgentQL, the two APIs, reading the SQL ThoughtSpot writes); 3–7 are outlined. Every lesson claim is checked by a new `lessons` suite in `tools/agentql-retest` (`--suite lessons`, needs no GUID). Rules corrected from the same probes: identifiers are **case-insensitive** (both the rules file and Step 2 said case-sensitive), a missing `GROUP BY` is filled in implicitly, and a bare raw measure returns row-level values, not the Model's default aggregation. |
 | 2.4.0 | 2026-10-14 | Known-limitation retest suite (`tools/agentql-retest/`): one case per `limitations.md` row with controls and value checks, reporting only rows whose behaviour moved. `use-cases.md` #6 and the open-items refresh procedure now run it. Its first run corrected the ✅ `TO_NUMBER` row (typed by input: strings are cast, numeric columns are not). Also new: one-argument `LOG(x)` is the natural log (⚠️), and `ACOS(1)` works in isolation. |
