@@ -59,6 +59,16 @@ def _west_matches_control(rows, results):
         f"region = 'west' gave {rows[0][0]}, the West row of the control is {west}"
 
 
+def _all_products_outer_join(rows, _results):
+    """Lesson 3.6: the LEFT OUTER JOIN surfaces products with no West sales as COALESCE→0.
+    If any such products exist in the Model they must appear with 0, not be dropped."""
+    zeros = [r for r in rows if r[1] == 0]
+    if not zeros:
+        return ("no product came back with 0 West sales — the outer join should keep products "
+                "never sold in the West (or the sample data changed so every product sells in the West)")
+    return None
+
+
 def _not_aggregated(rows, results):
     regions = len(_ctl(results, "ctl_ap_by_region"))
     return None if len(rows) > 10 * regions else f"{len(rows)} rows — looks aggregated, documented row-level"
@@ -254,6 +264,15 @@ LESSON_CASES = [
     Case("l3_two_dims_via_fact", f'SELECT {ITEM} AS it, {REGION} AS r {F} GROUP BY {ITEM}, {REGION}', OK,
          L + "3.3 two dimensions are joined through the fact table", model="apparel",
          sql_has=("fact_retapp_sales", "dim_retapp_products", "dim_retapp_stores")),
+    Case("l3_all_products_left_join",
+         'WITH all_p AS (SELECT "t1"."product" AS p FROM "(Sample) Retail - Apparel" AS "t1" '
+         'GROUP BY "t1"."product"), west AS (SELECT "t2"."product" AS p, SUM("t2"."sales") AS s '
+         'FROM "(Sample) Retail - Apparel" AS "t2" WHERE "t2"."region" = \'West\' GROUP BY "t2"."product") '
+         'SELECT a.p AS product, COALESCE(west.s, 0) AS west_sales FROM all_p a '
+         'LEFT OUTER JOIN west ON a.p = west.p',
+         OK, L + "3.6 every product via an outer join; business rules in the generated SQL",
+         model="apparel", sql_has=("left outer join", "is not null then", "lower("),
+         check=_all_products_outer_join),
 
     # ---- module 4: dates and functions ----------------------------------------------------------
     Case("ctl_ap_by_year", f'SELECT YEAR_NUMBER({DATE}) AS y, SUM({SALES}) AS s {F} GROUP BY YEAR_NUMBER({DATE})',

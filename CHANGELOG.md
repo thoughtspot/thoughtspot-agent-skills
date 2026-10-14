@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-14
+- feat: ts-object-model-agentql-query 2.10.0 — Learn AgentQL Module 0 rewritten as the Token-Search-vs-AgentQL positioning (tokens validate, AgentQL expresses; the expressibility↔determinism trade-off); new lesson 3.6 "every product including those with no sales" dissects the generated SQL to show the business rules the Model applies (join_progressive, Model joins/keys, null guards, case-insensitive filter, row cap, RLS); guarded by `l3_all_products_left_join`; course now 37 questions
 - docs: ts-object-model-agentql-query 2.9.0 — new `references/beyond-tokens.md`: four live-verified worked examples of questions that need AgentQL and ones it still can't answer (rank within a partition, a preceding-7-days window, a cohort semi-join, an unsupported percentile), each in the six-section output block; linked as the Learn AgentQL capstone
 - docs: ts-object-model-agentql-query 2.8.2 — consistent six-section output for every question (Question · AgentQL Sent · DB SQL Generated · Error & Explanation · Key Findings · Results), in SKILL.md Step 6 and every course lesson
 - docs: ts-object-model-agentql-query 2.8.1 — Learn AgentQL drops audience tracks for a plain module list with per-module question counts (36 total)

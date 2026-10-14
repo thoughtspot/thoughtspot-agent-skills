@@ -95,10 +95,49 @@ the lesson needs updating, not the learner.
 
 ---
 
-## Module 0 — Why AgentQL exists (concept, ~10 min)
+## Module 0 — Why AgentQL, and why tokens stay (concept, ~15 min)
 
-Read [`architecture.md`](architecture.md) § "The core principle" first. Teach three ideas
-before writing any query:
+Read [`architecture.md`](architecture.md) § "The core principle" first. This module is the
+**positioning**: where AgentQL fits next to ThoughtSpot's Token Search, and why the course
+spends as much time reading the *generated SQL* as writing AgentQL. No queries yet — these
+are the ideas every later module rests on.
+
+### Two complementary ways to create a query
+
+> **One line to remember:** *AgentQL expands what AI can ask. Tokens let humans verify what
+> AI understood.*
+
+ThoughtSpot has **two** query-creation languages over the **same** governed semantic model,
+and both keep a human able to validate intent:
+
+| | **Token Search** (the foundation) | **AgentQL** (greater expressibility) |
+|---|---|---|
+| Who writes the query | A person, in natural language → **tokens** | An **AI agent**, in AgentQL (Semantic SQL) |
+| What it can express | Filtering, pivoting, drill-down, calendars, governed metrics | All of that **plus** multi-stage analysis, complex expressions, CTEs, outer joins, and (where supported) cross-model queries |
+| How a human validates | Inspect the **tokens** — no SQL to read | **Still the tokens** — the agent's query is surfaced as tokens too, so a human confirms intent without reading SQL |
+| Execution | Governed engine compiles to warehouse SQL | **Same** governed engine, same compile step |
+
+The headline: **Token Search is not replaced — its role evolves.** With tokens, the tokens do
+both jobs, creation *and* validation. With AgentQL, the agent takes over *creation* so it can
+ask more sophisticated questions, and tokens keep doing *validation*. That split — AI-authored
+query, human-validated intent — is what separates ThoughtSpot from tools that hand back raw
+AI-generated SQL or a prose explanation and ask you to trust it.
+
+### The trade-off this course keeps returning to
+
+More expressibility means more decisions the agent can make — and some of those are
+**semantic**, not just syntactic. In Token Search the analyst predefined the joins in the
+Model. In AgentQL, especially **across models**, the agent may choose join keys, join types
+and grain. So:
+
+- **Token Search** → more *determinism* (relationships are predefined).
+- **AgentQL** → more *flexibility*, with more *responsibility to validate* the agent's logic.
+
+**Valid SQL is not proof of correct business logic.** A query can compile, run, and return a
+confident wrong number because the agent joined at the wrong grain. The governed parts —
+RLS, the Model's own joins, formulas, calendars — the Model still guarantees. The agent-chosen
+parts are what a human (via tokens) must check. Three ideas follow from this, and the rest of
+the course is them in practice:
 
 1. **ThoughtSpot never executes AgentQL.** It is a **compile** step: AgentQL in, warehouse
    SQL out, and the warehouse runs the SQL. `generate-sql` stops after compiling;
@@ -109,9 +148,19 @@ before writing any query:
 3. **That is the point.** Joins, row-level security and formula logic come from the Model,
    so two people asking the same question get the same answer. A hand-written SQL query
    gives no such guarantee. See `architecture.md` § "What the semantic layer guarantees".
+   **This is why every lesson shows the generated SQL** — it is where you *see* which
+   decisions the Model made for you (governed) and which the agent made (to be validated).
 
-**Check yourself.** Where does the query run? What does AgentQL let you leave out that raw
-SQL needs, and why does leaving it out make the answer more trustworthy rather than less?
+### One consistent experience
+
+Whichever language created the answer, the user gets the same ThoughtSpot experience:
+explore and visualise it, **verify it with tokens**, and pin it to Liveboards to share and
+monitor. AgentQL widens the question; the tokenised experience keeps a human informed and in
+control.
+
+**Check yourself.** Who authors the query in each approach, and who validates it? Name one
+thing AgentQL can ask that tokens can't. Why does "the SQL compiled and ran" *not* settle
+whether the answer is right — and which parts of the answer are governed regardless?
 
 ---
 
@@ -372,7 +421,7 @@ before running `generate-sql`.
 
 ---
 
-## Module 3 — What the semantic layer does for you (~30 min · 5 questions)
+## Module 3 — What the semantic layer does for you (~35 min · 6 questions)
 
 ### 3.1 A ratio of two measures, divided safely
 
@@ -505,10 +554,90 @@ the same way. Read [`architecture.md`](architecture.md) § "What the semantic la
 guarantees". This is the strongest argument for AgentQL over raw SQL, and the sample Model
 has no RLS to demonstrate it.
 
+### 3.6 Every product, including the ones with no sales — and the business rules in the SQL
+
+This is the module's showcase. It does two things at once: it shows a shape **tokens can't
+express** (every member, matched or not — an outer join), and it is the clearest look at
+**how much business logic the Model writes into the SQL for you**. Lesson 3.3 ended on a
+warning — a query across two dimensions silently drops the combinations with no sales. Here is
+the fix, and the anatomy of what ThoughtSpot generated.
+
+**Question:** every product, with its sales **in the West region** — products not sold in the
+West should still appear, with no number rather than being dropped.
+
+```sql
+WITH all_p AS (
+  SELECT "t1"."product" AS p
+  FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."product"
+), west AS (
+  SELECT "t2"."product" AS p, SUM("t2"."sales") AS s
+  FROM "(Sample) Retail - Apparel" AS "t2"
+  WHERE "t2"."region" = 'West' GROUP BY "t2"."product"
+)
+SELECT a.p AS product, COALESCE(west.s, 0) AS west_sales
+FROM all_p a
+LEFT OUTER JOIN west ON a.p = west.p
+```
+
+**Predict.** Two things: will products never sold in the West appear at all? And what will
+their `west_sales` be?
+
+**Read the generated SQL — this is the point of the lesson.** `generate-sql` returns (trimmed):
+
+```sql
+WITH "qt_0" AS (                                   -- the "all products" CTE
+  SELECT "ta_1"."PRODUCTNAME"
+  FROM "…"."DIM_RETAPP_PRODUCTS" "ta_1"            -- ① dimension table ALONE — no fact join
+  GROUP BY "PRODUCTNAME"
+), "qt_1" AS (                                      -- the "West sales" CTE
+  SELECT "ta_2"."PRODUCTNAME",
+    CASE WHEN sum("ta_3"."SALES") IS NOT NULL
+         THEN sum("ta_3"."SALES") ELSE 0 END       -- ③ null-guarded aggregate
+  FROM "…"."FACT_RETAPP_SALES" "ta_3"
+    JOIN "…"."DIM_RETAPP_PRODUCTS" "ta_2" ON "ta_3"."PRODUCTID" = "ta_2"."PRODUCTID"   -- ② Model's
+    JOIN "…"."DIM_RETAPP_STORES"   "ta_4" ON "ta_3"."STOREID"   = "ta_4"."STOREID"     --    inner joins + keys
+  WHERE LOWER("ta_4"."REGION") = 'west'            -- ④ case-insensitive filter
+  GROUP BY "PRODUCTNAME"
+)
+SELECT "ta_5"."PRODUCTNAME",
+  CASE WHEN "ta_6".sales IS NOT NULL THEN "ta_6".sales ELSE 0 END
+FROM "qt_0" "ta_5"
+  LEFT OUTER JOIN "qt_1" "ta_6" ON …               -- ⑤ your outer join, preserved
+LIMIT 100000                                        -- ⑥ the row cap
+```
+
+**Point out — every numbered item is a decision the agent did *not* make:**
+- **① `join_progressive`.** The "all products" CTE reads `DIM_RETAPP_PRODUCTS` **by itself** —
+  the Model knows an attribute-only query needs no fact table, so you get the *full* product
+  list, not just products that sold. This is what makes the outer join meaningful (3.3).
+- **② Join type and keys.** You never wrote `PRODUCTID` or `STOREID`, or that these are inner
+  joins. The **Model** supplied the relationships; two people asking this get the same joins.
+- **③ Null handling.** Every aggregate is wrapped `CASE WHEN … IS NOT NULL … ELSE 0`. The
+  Model decides how NULLs behave — you didn't.
+- **④ A governed business rule.** The region filter compiled to `LOWER(REGION) = 'west'` —
+  case-insensitive by the Model's definition, not your literal.
+- **⑤ Your contribution.** The `LEFT OUTER JOIN` and `COALESCE` are the *agent's* logic — the
+  expressibility AgentQL adds. The Model couldn't express "all members" through its inner
+  join; you did, with a CTE.
+- **⑥ The row cap** (100,000) is applied for you.
+- **RLS would live here too.** This sample has no row-level security, but if it did,
+  the WHERE in `qt_1` would also carry the user's RLS predicate — injected at compile, not
+  writable or removable by the agent (3.5). That is the un-bypassable part.
+
+**Results.** 349 products; **4 come back with `west_sales = 0`** (Classic t-shirt, Penguin
+t-shirt, Foothills t-shirt, Organic cotton under tee) — sold elsewhere, never in the West.
+Without the outer join they would have silently vanished.
+
+**This is the trade-off from Module 0, made concrete:** ⑤ is the agent's flexibility; ①–④ and
+RLS are the Model's guarantees. Validate ⑤; trust the rest.
+
+**Guarded by:** `l3_all_products_left_join`.
+
 **Check yourself.** Why is `SUM(sales) / SUM(quantity)` the right average price, and
 `AVG(sales / quantity)` not? A dimension-only query lists fewer products than the product
-table holds: name two reasons. Given any Model, how do you find out whether a measure takes
-`SUM` or `AGG`, without reading its formula?
+table holds: name two reasons. In 3.6, which parts of the generated SQL did the agent write,
+and which did the Model write — and which of the Model's parts could the agent *not* remove
+even if it tried?
 
 ---
 
@@ -868,13 +997,13 @@ How will you know each expected answer is right?
 | 0. Why AgentQL | ThoughtSpot compiles AgentQL to warehouse SQL and never runs it; the Model supplies the joins, formulas and security | concept |
 | 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, result types, why it can only read | 5 |
 | 2. First queries | reading the generated SQL: joins written for you, null handling, the row cap, inlined formulas, the lenient parser, the bare-measure trap | 8 |
-| 3. The semantic layer | ratios and safe division, what `AVG` averages, which tables a query reads, formula measures (`AGG` not `SUM`), security you never write | 5 |
+| 3. The semantic layer | ratios and safe division, what `AVG` averages, which tables a query reads, formula measures (`AGG` not `SUM`), security you never write, every member via an outer join and the business rules in the generated SQL | 6 |
 | 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets | 5 |
 | 5. Advanced shapes | CTEs, ranking and share of total, top N per group, period over period, set operations | 6 |
 | 6. Trust, but verify | queries that return `SUCCESS` with the wrong number, and the control queries that catch them | 4 |
 | 7. Building on it | consuming results in code, testing an agent that writes AgentQL | 3 |
 
-36 questions in all. Each module stands alone after Module 2, so a learner can stop and pick
+37 questions in all. Each module stands alone after Module 2, so a learner can stop and pick
 up later ("teach me AgentQL, start at module 5").
 
 ## After the course — where AgentQL earns its keep, and where it can't
