@@ -382,7 +382,7 @@ liveboard:
       width: 4
 ```
 
-## SpotterViz MCP — preferred build path, gotchas found live (2026-10-15/16)
+## SpotterViz MCP — preferred build path, gotchas found live (2026-10-15)
 
 Per Step 10-pre2 in SKILL.md, prefer `create_dashboard`/`modify_dashboard`
 (`mcp__claude_ai_ThoughtSpot_Spotter__*`) over hand-building TML when connected. Pass the
@@ -390,6 +390,19 @@ TWB dashboard's tab/worksheet/chart-type/field structure as `instructions` — t
 asks a clarifying question (`needs_input`) if anything is ambiguous; answer it, don't guess
 on the user's behalf. Gotchas found migrating the GE Aerospace C-FOQA workbook this way:
 
+- **Authorizing it when not connected — "restart" differs by runtime, not just VSCode.**
+  The common steps are the same everywhere (confirm `.mcp.json` has the `ThoughtSpot` entry,
+  restart so the MCP config reloads, run `/mcp`, complete the browser OAuth login), but how
+  to restart depends on where Claude Code is running:
+  - **CLI (terminal):** exit and re-run `claude`.
+  - **VSCode extension:** reload the window (Cmd/Ctrl+Shift+P → "Developer: Reload Window")
+    or fully quit/reopen VSCode — starting a new chat inside the same running extension does
+    **not** reload `.mcp.json`.
+  - **JetBrains plugin:** restart the IDE, or use the plugin's own restart action on the
+    Claude Code tool window if it has one.
+  - **Desktop or web app:** close and reopen the app/tab, or start a genuinely new session.
+  Ask the user which runtime they're in if it isn't already evident, rather than assuming
+  VSCode — the wrong restart instructions just waste their time.
 - **`is_spotter_enabled` gate.** `create_dashboard` fails outright if the target model's
   `spotter_config.is_spotter_enabled` is `false` — a different gate from general query
   access (the model answered `ts agentql fetch-data` queries fine with it off). Step 5.5

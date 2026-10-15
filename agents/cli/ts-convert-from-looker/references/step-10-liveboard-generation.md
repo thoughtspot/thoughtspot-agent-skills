@@ -316,3 +316,63 @@ This file only exists when Step 10 runs (scope 1 or 3). If the project has more 
 one dashboard, add all dashboards' tiles as additional rows in the same table rather
 than writing a separate file per dashboard — `migration_details.md` is one file per
 migration run.
+
+## SpotterViz MCP — preferred build path, gotchas found live (2026-10-15)
+
+Per Step 10-pre in SKILL.md, prefer `create_dashboard`/`modify_dashboard`
+(`mcp__claude_ai_ThoughtSpot_Spotter__*`) over hand-building TML when connected. Pass the
+LookML dashboard's element/field/chart-type structure as `instructions` — the designer asks
+a clarifying question (`needs_input`) if anything is ambiguous; answer it, don't guess on
+the user's behalf. Gotchas found migrating a Tableau workbook this way (same ThoughtSpot
+Liveboard/Answer platform, so the findings apply equally here):
+
+- **Authorizing it when not connected — "restart" differs by runtime, not just VSCode.**
+  The common steps are the same everywhere (confirm `.mcp.json` has the `ThoughtSpot` entry,
+  restart so the MCP config reloads, run `/mcp`, complete the browser OAuth login), but how
+  to restart depends on where Claude Code is running:
+  - **CLI (terminal):** exit and re-run `claude`.
+  - **VSCode extension:** reload the window (Cmd/Ctrl+Shift+P → "Developer: Reload Window")
+    or fully quit/reopen VSCode — starting a new chat inside the same running extension does
+    **not** reload `.mcp.json`.
+  - **JetBrains plugin:** restart the IDE, or use the plugin's own restart action on the
+    Claude Code tool window if it has one.
+  - **Desktop or web app:** close and reopen the app/tab, or start a genuinely new session.
+  Ask the user which runtime they're in if it isn't already evident, rather than assuming
+  VSCode — the wrong restart instructions just waste their time.
+- **`is_spotter_enabled` gate.** `create_dashboard` fails outright if the target model's
+  `spotter_config.is_spotter_enabled` is `false` — a different gate from general query
+  access. Re-check it before a scope-3 (existing model) liveboard rebuild, since nothing
+  else in this skill's flow defaults it to `true` on that path.
+- **`TABLE_MODE` chart-block omission doesn't survive reimport.** The chart-types schema's
+  general guidance ("omit `chart`, set `display_mode: TABLE_MODE`") does not hold when the
+  tile's *existing* chart type is a grouping type (`ADVANCED_SCATTER` observed) —
+  re-exporting after omitting `chart` silently re-adds the same grouping config every time.
+  If a true flat list is wanted, the fix is usually not the chart type at all — check whether
+  a column feeding the table is model-typed `MEASURE` (it'll auto-aggregate instead of
+  showing per-row values when dropped bare into a table; retype to `ATTRIBUTE` if every
+  formula using it already wraps it in an explicit aggregate). If a **pivoted/nested-row**
+  look is actually wanted, `chart.type: ADVANCED_PIVOT_TABLE` auto-resolves rows/columns from
+  `chart_columns` + `search_query` order and sticks cleanly on reimport — use that instead of
+  fighting `TABLE_MODE`.
+- **Answer-local formula reference syntax differs from Model formula syntax.** A Liveboard
+  viz's own `answer.formulas[]` (ad-hoc formulas Spotter creates per-tile) must reference a
+  shared **Model**-level formula by its **bare display name** (`[Total Revenue]`) — the
+  `[formula_<name>]` ID-ref convention that works for Model-to-Model formula references gets
+  parsed as a literal, nonexistent search token here and fails at import with a misleading
+  `Search did not find "formula_..."` error. (Local-to-local references, i.e. one tile-local
+  formula referencing a sibling in the same `formulas[]` list, *do* use `[formula_<name>]`
+  normally.) Inlining a nontrivial expression (an `if/else`, or even a bare
+  `group_aggregate(...)` call) directly as a new local formula is also fragile and can fail
+  the same way even when the identical expression works fine as a Model formula — push
+  anything nontrivial into a permanent Model formula and reference it by name instead.
+- **Verify filter casing against the actual formula output.** When instructions describe a
+  filter in plain English, the designer can silently lowercase it when writing the
+  `search_query` literal. If the underlying formula only emits a specific case (e.g. Title
+  Case from a LookML `case:` dimension), the filter matches nothing and the tile falls back
+  to an unfiltered value with no error. Spot-check at least one generated filter's exact
+  casing against the formula's branch literals before calling a tile done.
+- **Verification queries need an explicit `GROUP BY`.** `ts agentql fetch-data` with a bare
+  dimension + measure and no `GROUP BY` clause returns a misleading
+  `"All non-constant columns should be grouped by or aggregated"` error that looks like a
+  platform limitation but is just incomplete SQL — always add the `GROUP BY` when verifying a
+  tile's grouped behavior this way.

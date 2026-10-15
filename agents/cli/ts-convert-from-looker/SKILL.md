@@ -569,6 +569,20 @@ Surface the model GUID to the user for future exports or updates.
 
 Only run if the user selected scope 1 (Models + Liveboards) or scope 3 (Liveboards only).
 
+### 10-pre. Check SpotterViz MCP connectivity — preferred build path
+
+Before hand-building liveboard TML, `ToolSearch` for `mcp__claude_ai_ThoughtSpot_Spotter__*`
+(the SpotterViz MCP, `.mcp.json` key `ThoughtSpot`). **Connected:** prefer it —
+`create_dashboard`/`modify_dashboard`, passing the LookML dashboard structure as
+`instructions`; see
+[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
+"SpotterViz MCP" for the connection/gotcha detail (incl. the `is_spotter_enabled` scope-3
+gap). **Not connected:** tell the user it needs authorizing — restart so `.mcp.json`
+reloads (how varies by runtime: CLI, VSCode, JetBrains, desktop/web app — see the reference
+doc, don't assume VSCode), run `/mcp`, complete the OAuth login — and wait; don't fall back
+silently. **Backup (for now):** only if
+the user declines/can't authenticate, use the rest of Step 10 as written.
+
 ### 10a. Parse LookML dashboard file
 
 LookML dashboards are plain-text YAML (`.dashboard.lookml`). Extract the dashboard-level
@@ -890,6 +904,7 @@ to the user and ask them to provide the resolved database/schema string.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-10-15 | **SpotterViz MCP is now the preferred liveboard-build path (new Step 10-pre), `ts-cli` hand-built TML kept as backup.** Checks `mcp__claude_ai_ThoughtSpot_Spotter__*` connectivity before building; if not connected, tells the user to authorize it and waits rather than falling back silently. See `references/step-10-liveboard-generation.md` "SpotterViz MCP" for the gotcha list (the `is_spotter_enabled` scope-3 gap, chart-type reimport quirks, answer-local formula reference syntax, filter-casing) — found live on a Tableau migration using the same ThoughtSpot Liveboard/Answer platform this skill targets. |
 | 1.0.5 | 2026-09-22 | **I7 marker added at the classification step.** The skill already stated the rule in prose at §4a and checklisted it at step 6e — what it lacked was the machine-checkable marker, so no gate could tell it apart from a skill that said nothing, and the prose sat *after* the dimension and measure verdicts it needed to govern. The gate now heads Step 4, ahead of all three untranslatable verdicts; the §4a prose and the 6e checklist are unchanged. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |
 | 1.0.4 | 2026-07-29 | **BL-170 — `REPLACE` corrected and `TRIM` added as a pass-through.** Live verification on se-thoughtspot 2026-07-29 proved neither `replace` nor `trim` is a native ThoughtSpot formula function. `lookml-to-ts-formula-translation.md`'s String functions table now maps `REPLACE(col, old, new)` to `sql_string_op ( "REPLACE({0}, {1}, {2})" , ... )` instead of the invalid bare `replace ( )` call, and gained a `TRIM(col)` row using the same pass-through shape — matching how `UPPER`/`LOWER` were already handled in that table. |
 | 1.0.3 | 2026-07-28 | Extract reference-heavy detail into references/ step files (BL-128) — no logic change; SKILL.md context cost ~21k → ~11.8k est. tokens. |

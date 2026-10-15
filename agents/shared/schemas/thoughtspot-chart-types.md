@@ -92,21 +92,6 @@ not any one in isolation: (1) the geo dimension(s) geo-tagged on the model
 `axis_configs` block — each was independently verified necessary and none was sufficient
 alone.
 
-**The `TABLE` guidance above ("omit `chart`, set `display_mode: TABLE_MODE`") does not
-survive a reimport if the tile's existing chart type was a grouping type.** Live-verified,
-GE Aerospace: a tile whose `chart.type` was `ADVANCED_SCATTER` (with x/y/slice axis
-grouping) kept reverting to that exact same `ADVANCED_SCATTER` block on every reimport, even
-submitted with `chart` fully omitted each time. If a flat per-row list looks pivoted/grouped
-and this doesn't fix it, check first whether a column feeding the table is model-typed
-`MEASURE` — it auto-aggregates (per its `aggregation` property) when dropped bare into a
-table instead of showing the literal per-row value, which can look identical to a chart-type
-problem. Retype to `ATTRIBUTE` if every formula using that column already wraps it in an
-explicit aggregate function (so aggregation stays formula-specified, not column-type-driven).
-If a genuinely **pivoted/nested-row** table is wanted (Tableau's repeat-suppressed grouped
-rows), use `ADVANCED_PIVOT_TABLE` instead of fighting `TABLE_MODE` — it auto-resolves its
-row/column grouping from `chart_columns` + `search_query` (no `custom_chart_config` needed,
-same as noted below) and stuck cleanly on reimport in the same test.
-
 ## Muze charting library (`ADVANCED_*` types) — phase 1 GA
 
 ThoughtSpot has two charting libraries:

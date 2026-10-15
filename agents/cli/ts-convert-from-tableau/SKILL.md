@@ -1917,12 +1917,13 @@ the single source of its obj_id, columns, formulas, and parameter UUIDs.)
 ### 10-pre2. Check SpotterViz MCP connectivity — preferred build path
 
 Before hand-building liveboard TML, `ToolSearch` for `mcp__claude_ai_ThoughtSpot_Spotter__*`
-(the SpotterViz MCP, `.mcp.json` key `ThoughtSpot`). **Connected:** prefer it —
+(SpotterViz, `.mcp.json` key `ThoughtSpot`). **Connected:** prefer it —
 `create_dashboard`/`modify_dashboard`, passing the TWB structure as `instructions`; see
 [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
 "SpotterViz MCP" for the connection/gotcha detail (incl. the `is_spotter_enabled` scope-3
-gap). **Not connected:** tell the user it needs authorizing (restart Claude Code, run `/mcp`,
-complete the OAuth login) and wait — don't fall back silently. **Backup (for now):** only if
+gap). **Not connected:** tell the user to restart (runtime-specific, see reference doc —
+not just VSCode), run `/mcp`, complete OAuth, wait — don't fall back
+silently. **Backup:** only if
 the user declines/can't authenticate, use the rest of Step 10 as written.
 
 ### 10-charts. Choose the charting library (ask once)
@@ -2499,7 +2500,7 @@ suggested-but-unverified with its tokens for manual follow-up.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.47.0 | 2026-10-16 | **SpotterViz MCP is now the preferred liveboard-build path (Step 10-pre2), `ts-cli` build kept as backup.** Plus a round of C-FOQA answer-local-formula and chart-type gotchas. See CHANGELOG.md. |
+| 1.47.0 | 2026-10-15 | **SpotterViz MCP is now the preferred liveboard-build path (Step 10-pre2), `ts-cli` build kept as backup.** Plus a round of C-FOQA answer-local-formula and chart-type gotchas. See CHANGELOG.md. |
 | 1.46.1 | 2026-10-14 | **Correction: the nested-`group_aggregate` "reference the inner by id" workaround doesn't actually work.** It imports clean and fails at query time. See CHANGELOG.md. |
 | 1.46.0 | 2026-10-13 | **C-FOQA migration learnings.** DATETRUNC/WINDOW_AVG/WINDOW_STDEV reconstruction techniques, build-liveboard column-resolution correction pass, hand-patch safety rules — see CHANGELOG.md. |
 | 1.45.0 | 2026-10-12 | **Fuel-migration learnings.** Fixes + gotchas/chart defaults — see CHANGELOG.md. |
