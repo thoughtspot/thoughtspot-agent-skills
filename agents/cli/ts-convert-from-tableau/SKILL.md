@@ -1914,6 +1914,17 @@ From the export (and/or `ts metadata search --guid {model_guid}`) record:
 (In **scope 3 / Liveboards only**, the model already exists from Step 1.5a — this export is
 the single source of its obj_id, columns, formulas, and parameter UUIDs.)
 
+### 10-pre2. Check SpotterViz MCP connectivity — preferred build path
+
+Before hand-building liveboard TML, `ToolSearch` for `mcp__claude_ai_ThoughtSpot_Spotter__*`
+(the SpotterViz MCP, `.mcp.json` key `ThoughtSpot`). **Connected:** prefer it —
+`create_dashboard`/`modify_dashboard`, passing the TWB structure as `instructions`; see
+[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
+"SpotterViz MCP" for the connection/gotcha detail (incl. the `is_spotter_enabled` scope-3
+gap). **Not connected:** tell the user it needs authorizing (restart Claude Code, run `/mcp`,
+complete the OAuth login) and wait — don't fall back silently. **Backup (for now):** only if
+the user declines/can't authenticate, use the rest of Step 10 as written.
+
 ### 10-charts. Choose the charting library (ask once)
 
 Before resolving chart types, ask the user which charting library to target — **default
@@ -2100,8 +2111,8 @@ everything loose:
 - Vizzes that share a **subject** (e.g. top-products + a geographic map) → e.g.
   "Product & Geographic Analysis".
 - Give each group a short `name` and a one-line `description`.
-A Tableau dashboard has no native sections, so this is an inference — keep it light
-(2–4 groups), and don't force a viz into a group it doesn't fit; ungrouped tiles are fine.
+A Tableau dashboard has no native sections, so this is an inference — **expected past
+~6–8 tiles**, sized to themes present, not a 2–4 cap.
 
 **Groups work with tabs — but the nesting is specific.** When using `layout.tabs[]`:
 1. Define `groups[]` at the liveboard level with `visualizations:` listing member viz IDs
@@ -2488,8 +2499,9 @@ suggested-but-unverified with its tokens for manual follow-up.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.44.0 | 2026-09-25 | **SCAL-338494 — Tableau's `:Measure Names` pivot pseudo-field was emitted as a real column (prereq ts-cli v0.148.0).** It arrives as an ordinary `<column>` but names no warehouse column, so it reached Model and Table TML with a `column_id` resolving to nothing — and no gate saw it: on a single-table model the id is table-qualified and the same phantom is written into that table's TML, so the cross-reference check resolves it; on a multi-table model the id is bare and I12 is scoped out. Now excluded during column cleanup, kept out of Liveboard/Answer fields, and any formula referencing it is dropped — cascading to dependants, since a survivor would emit a reference to a column the model no longer has. `ts tableau verify` replays that decision so a deliberate removal is not reported as a silent drop. `Multiple Values`, the shelf sibling, is **not** excluded as a column: it has never been observed as a `<column>` and a warehouse column could legitimately carry that name. Step 5c and the blend hand-assembly procedure carry the rule for hand-authored models. |
-| 1.43.0 | 2026-09-24 | **SCAL-339750 — emitted SQL View names are disambiguated across the workbook (prereq ts-cli v0.147.0).** A relation name is unique only within its datasource, so datasources each holding an unnamed Custom SQL relation emitted several SQL Views called `Custom SQL Query` into one namespace, each model resolving against whichever imported last. GENERATE mode now qualifies **every** owner of a contested name as `Base (Datasource)`, changing the `sql_view:` name **and the filename**; uncontested names are untouched and a physical table is never renamed. A **hand**-assembled model (blend merge, no-`.tds` multi-query) must apply the rule itself — see `tableau-tml-rules.md` "Name uniqueness is workbook-wide". The guarantee is cross-datasource: adding, removing or reordering an unrelated datasource cannot rename a view; it is not absolute order-independence. `--existing-guid` (MERGE) defers to the names the target model already uses and reconciles neither direction (BL-313). |
-| 1.42.1 | 2026-09-23 | **Connection introspection understated how dead it is (audit 13.1).** The step hedged "404 on some connection types"; the 2026-08-26 probe found the hierarchy empty for **every** auth type. Now says to ask the user. |
+| 1.47.0 | 2026-10-16 | **SpotterViz MCP is now the preferred liveboard-build path (Step 10-pre2), `ts-cli` build kept as backup.** Plus a round of C-FOQA answer-local-formula and chart-type gotchas. See CHANGELOG.md. |
+| 1.46.1 | 2026-10-14 | **Correction: the nested-`group_aggregate` "reference the inner by id" workaround doesn't actually work.** It imports clean and fails at query time. See CHANGELOG.md. |
+| 1.46.0 | 2026-10-13 | **C-FOQA migration learnings.** DATETRUNC/WINDOW_AVG/WINDOW_STDEV reconstruction techniques, build-liveboard column-resolution correction pass, hand-patch safety rules — see CHANGELOG.md. |
+| 1.45.0 | 2026-10-12 | **Fuel-migration learnings.** Fixes + gotchas/chart defaults — see CHANGELOG.md. |
 
-**Older entries (v1.0.0–v1.42.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.44.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

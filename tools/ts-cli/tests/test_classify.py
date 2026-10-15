@@ -128,6 +128,36 @@ def test_tiers_assigned_by_family():
     assert out["tier_counts"]["native"] == 1
 
 
+def test_column_name_containing_a_function_name_is_not_mistiered():
+    """GE Aerospace fuel-migration finding: _GEO_RE/_WINDOW_RE/_ROWOFFSET_RE/_RANK_RE
+    scan for a bare function-call token (`NAME(`), but a column legitimately named
+    e.g. "Airborne Duration Elapsed Difference (min)" or "Total (units)" contains
+    the literal substring "Difference (" / "Total (" — false-matching the regex
+    even though no function call is present. 30 of 86 formulas in one real
+    workbook were wrongly tiered "geospatial" this way before the fix (stripping
+    bracketed refs before scanning).
+    """
+    from ts_cli.tableau.classify import _translatable_tier, _untranslatable_tier
+
+    bracket_name = "[D3M.Measures::Airborne Duration Elapsed {word} (min)]"
+    for word, checker in [
+        ("Difference", lambda e: _untranslatable_tier(e, "some reason") == "geospatial"),
+        ("Total", lambda e: _translatable_tier(e) == "pass_through"),
+        ("First", lambda e: _untranslatable_tier(e, "some reason") == "row_offset_ambiguous"),
+        ("Last", lambda e: _untranslatable_tier(e, "some reason") == "row_offset_ambiguous"),
+    ]:
+        expr = f"if ( [p Measure] = 'X' ) then {bracket_name.format(word=word)} else 0"
+        assert not checker(expr), f"column name containing '{word} (' was mistiered"
+
+
+def test_genuine_function_calls_still_tiered_correctly():
+    """The fix must not blind these checks to a REAL function call."""
+    from ts_cli.tableau.classify import _untranslatable_tier
+
+    assert _untranslatable_tier("DIFFERENCE([a],[b])", "x") == "geospatial"
+    assert _untranslatable_tier("LOOKUP(SUM([x]), -1)", "x") == "row_offset_ambiguous"
+
+
 def test_orphan_tier_overrides():
     formulas = [_mk("Ghost", "SUM([REVENUE])")]
     out = classify_formulas(formulas, orphan_calcs={"Ghost"})

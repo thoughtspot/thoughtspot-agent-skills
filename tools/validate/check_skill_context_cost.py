@@ -58,13 +58,24 @@ RATCHET: dict[str, tuple[int, str]] = {
     # templates/tables/algorithm detail to references/ — still over the 25k
     # hard-fail line. A round-3 pass on Steps 4.5/5b/6/7's remaining
     # prompt-and-command-heavy spines is the tracked remedy to clear it.
+    # 34412 as of 2026-10-16 — LOWERED, not raised, same pattern as the three notes
+    # below: the v1.47.0 changelog row (new SpotterViz MCP Step 10-pre2) was offset by
+    # archiving v1.44.0 into references/changelog-archive.md and keeping the new Step
+    # 10-pre2 section itself to a tight pointer (full gotcha detail lives in
+    # references/step-10-liveboard-generation.md, which has no ratchet), net negative.
+    # 34438 as of 2026-10-14 — LOWERED, not raised, same pattern as the two notes
+    # below: the v1.46.1 changelog row was offset by archiving v1.43.0 into
+    # references/changelog-archive.md, net negative.
+    # 34643 as of 2026-10-13 — LOWERED, not raised, same pattern as the 2026-08-26
+    # note below: the v1.46.0 changelog row was offset by archiving the oldest
+    # inline row (v1.42.1) into references/changelog-archive.md, net negative.
     # 34649 as of 2026-08-26 — LOWERED, not raised. The 11.1 edits grew it, and
     # rather than raise the ceiling the (very long) v1.39.1 changelog row was moved
     # into references/changelog-archive.md, which is this skill's own established
     # pattern (its v1.39.1 entry documents doing exactly that). A ratchet should come
     # down as the file shrinks; raising it for a mandatory changelog row would have
     # been the "licence to grow" this gate warns about.
-    "agents/cli/ts-convert-from-tableau/SKILL.md": (34_649, "BL-128"),
+    "agents/cli/ts-convert-from-tableau/SKILL.md": (34_412, "BL-128"),
 }
 
 

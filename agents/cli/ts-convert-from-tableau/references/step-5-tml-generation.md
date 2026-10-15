@@ -61,6 +61,47 @@ cycles, cascade-dropping a failing formula's dependents in the same cycle — be
 deterministic classes above are caught pre-import, the retry budget is only for genuine
 server-side rejections.
 
+### Hand-patching formulas directly via TML (bypassing `build-model`)
+
+When the CLI's own translator can't produce a formula (genuinely untranslatable per its own
+classifier, but reconstructible by hand — see `tableau-formula-translation.md`'s
+reconstruction techniques), it's sometimes faster to patch the exported model TML directly
+with `ts tml export` / `ts tml import` rather than extend the translator. Two things bite
+doing this:
+
+1. **A formula appended to `formulas[]` without a matching `columns[]` entry computes
+   correctly but is invisible to search/answers.** This repo's root `CLAUDE.md` already
+   states the rule ("every formula column needs a `columns[]` entry with `formula_id:`"),
+   but it's easy to violate when hand-splicing a formula in directly rather than going
+   through `build-model`'s own pipeline, which handles this automatically. Symptom is a
+   flat, confusing `"Column: <lowercased name> not found"` on import/search even though
+   `ts tml export` clearly shows the formula present — the lookup is for a *column*, not a
+   bare formula. After any manual `formulas[]` append, diff `{f['id'] for f in formulas}`
+   against `{c['formula_id'] for c in columns if c.get('formula_id')}` and backfill the
+   missing `columns[]` entries (same `column_type`/`aggregation` convention as an analogous
+   sibling formula).
+2. **Re-running `build-model --existing-guid` after a hand-fix can silently regress it — and
+   this applies to hand-patched `columns[]` properties, not just `formulas[]`.** For formulas:
+   its own translator may independently attempt one you already hand-fixed under a different
+   (possibly still-broken) translation, fail to import it, and the drop-on-failure logic
+   **removes the formula entirely** rather than leaving your working version alone — there is
+   no "already present, leave as-is" short-circuit for a name the translator also produces
+   output for. Live-verified, GE Aerospace C-FOQA: a hand-fixed `min(a,b)`-style formula
+   vanished after a routine re-run, because the CLI's own translator also now produced *a*
+   result for that name (using `least(...)`, which failed to import for an unrelated reason)
+   and the failed-import drop took the hand-fixed version down with it. **For column
+   properties**, same symptom via a different mechanism: `build-model`'s column-cleanup pass
+   regenerates each column's `properties` block from scratch rather than merging into it, so a
+   hand-added property with no CLI-side concept (e.g. `geo_config` for a lat/long pair tagged
+   for `GEO_BUBBLE` — see `thoughtspot-chart-types.md`'s "imports structurally but renders
+   empty" caveat) is silently dropped on the next re-run even though nothing reported an
+   error. Live-verified, same migration: two `geo_config`-tagged columns lost the tag after a
+   later re-run done for an unrelated formula fix, and the previously-working map tiles
+   rendered empty with no error anywhere — only caught by the user noticing the tiles looked
+   wrong and asking why. **After any `build-model` re-run following manual TML patches,
+   re-export and diff against what you expect** — both `formulas[]` *and* every hand-patched
+   `columns[].properties` block — don't assume a clean exit code means nothing was lost.
+
 ## Published/sqlproxy datasources bound to an existing table/view — reconcile columns (Step 5b)
 
 When the datasource binds to a pre-existing ThoughtSpot table/view (the consultant/stand-in
@@ -356,6 +397,11 @@ express the step). Plain ranges (no `granularity`) keep `range_config`.
 - After importing a model with parameters, **export the model** and read the
   `parameters[].id` field — ThoughtSpot assigns the UUID on import. You need this UUID
   for Step 10f (liveboard parameter chips).
+- **A `CHAR`-typed parameter needs an explicit cast or comparison before use — it is
+  never implicitly numeric or boolean, however it looks.** See "Using a migrated
+  parameter in a formula" in `tableau-formula-translation.md` ("Parameter References")
+  for the two failure modes (numeric comparison, boolean condition) and the exact fix
+  for each — both live-verified on a GE Aerospace workbook.
 
 ---
 
@@ -416,6 +462,14 @@ Use `tableau-formula-translation.md`.
 - **Referencing one formula from another:** use the **formula id** `[formula_<id>]`, **not**
   its display name `[<Name>]` — the name form errors *"Search did not find …"*. E.g.
   `[formula_Attrition Count] / sum([T::EMPLOYEECOUNT])`. (Column refs still use `[T::COL]`.)
+- **A casing mismatch between the TWB field caption and the real column name produces
+  the same *"Search did not find '<name>'"* error as a genuinely missing field** — e.g. a
+  live GE Aerospace model had `Preferred Weight Uom` and `Meteorological Condition For
+  Landing`, while the TWB's own text read `Preferred Weight UOM` and `Meteorological
+  Condition for Landing`. Before concluding a referenced field doesn't exist or is
+  untranslatable, diff the **exact casing** against the live model's column/formula list
+  (`ts tml export … | grep -i` to find the candidate, then compare character-for-character)
+  — a case-insensitive substring match can hide the real fix.
 - **Model-level vs answer-level formulas.** A calculated field used across many worksheets
   belongs in the **model** `formulas[]` (reusable). One used by **only a single worksheet**
   can instead be an **answer-level formula** on that liveboard viz (`answer.formulas[]`,

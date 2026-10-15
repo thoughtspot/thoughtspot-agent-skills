@@ -78,6 +78,26 @@ class TestFunctionCensusCompleteness:
         # DIV is integer division; the divisor guard is mandatory in this repo.
         assert map_functions("DIV([a],[b])") == "floor ( safe_divide ( [a] , [b] ) )"
 
+    def test_column_name_containing_a_function_name_is_not_flagged(self):
+        """GE Aerospace fuel-migration finding: a column legitimately named
+        "Airborne Duration Elapsed Difference (min)" contains the literal
+        substring "Difference (", which the DIFFERENCE() spatial-function
+        regex matched even though no function call is present — 30 of 86
+        formulas in one workbook were wrongly excluded this way. Every
+        _UNMAPPED_RE/_TABLE_CALC_RE/etc. family in validate_output has the
+        same risk (a column named e.g. "Total (units)" would false-match
+        RANK_UNKNOWN's TOTAL check), so this is checked generically.
+        """
+        for fn in ("DIFFERENCE", "FIRST", "LAST", "AREA"):
+            expr = (
+                f"if ( [p Measure] = 'X' ) then "
+                f"[D3M.Measures::Airborne Duration Elapsed {fn.title()} (min)] else 0"
+            )
+            assert self._errs(expr) == [], (
+                f"column name containing '{fn.title()} (' was wrongly flagged: "
+                f"{self._errs(expr)}"
+            )
+
     def test_wrong_arity_is_left_in_place(self):
         """Documented limit, not an oversight.
 

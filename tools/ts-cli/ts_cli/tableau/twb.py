@@ -89,7 +89,6 @@ def extract_parameters(root: ET.Element) -> list[dict]:
         ts_type = _tableau_type_to_ts_param(datatype)
         param: dict[str, Any] = {
             "name": name,
-            "default_value": alias or value or "",
             "data_type": ts_type,
         }
 
@@ -107,6 +106,26 @@ def extract_parameters(root: ET.Element) -> list[dict]:
             if choices:
                 param["data_type"] = "CHAR"
                 param["list_config"] = {"list_choice": choices}
+
+        if "list_config" in param:
+            # List-based (CHAR) parameter: `default_value` matches a choice's
+            # `display_name`, not its `value` -- the column-level `alias` IS
+            # that display name for the column's current value, so it's the
+            # right source here (live-confirmed convention: e.g. "Set History
+            # to Start as of" has list_choice value "1" / display_name
+            # "Last Month", and default_value "Last Month").
+            param["default_value"] = alias or value or ""
+        else:
+            # Free-form (no list_config) parameter: there is no display_name
+            # to match, so `default_value` must be the literal, parseable
+            # value -- `alias` here is only a cosmetic Tableau-UI label for
+            # the current value, not the value itself. GE Aerospace C-FOQA
+            # finding: "Phase of Flight Parameter (copy)" (datatype='real',
+            # value='0.0', alias='Unkown') emitted `default_value: "Unkown"`
+            # on a DOUBLE parameter -- ThoughtSpot tried to parse it as a
+            # number and failed the whole import ("For input string:
+            # \"Unkown\""). `alias` is only a fallback when `value` is empty.
+            param["default_value"] = value or alias or ""
 
         _range = col.find(".//range")
         if _range is not None:
@@ -154,13 +173,18 @@ def _reformat_tableau_date(val: str) -> str:
 
 
 def _tableau_type_to_ts_param(datatype: str) -> str:
+    # ThoughtSpot's parameter data_type enum is CHAR/INT64/DOUBLE/BOOL/DATE only --
+    # no DATE_TIME. "INT" and "DATE_TIME" both fail import ("Invalid parameter")
+    # live-verified on a GE Aerospace C-FOQA workbook's "Bins for Reference Period"
+    # (datatype='integer'), which had never hit a real import before (no test
+    # exercised this function at all). datetime has no closer native type than DATE.
     _map = {
         "string": "CHAR",
-        "integer": "INT",
+        "integer": "INT64",
         "real": "DOUBLE",
         "boolean": "BOOL",
         "date": "DATE",
-        "datetime": "DATE_TIME",
+        "datetime": "DATE",
     }
     return _map.get(datatype, "CHAR")
 

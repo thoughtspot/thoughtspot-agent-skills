@@ -511,10 +511,11 @@ def _import_with_retry(
             input=json.dumps([tml_str]),
             capture_output=True, text=True,
         )
-        if import_proc.returncode != 0:
+        try:  # exits 1 on per-item failure but still prints JSON; bad stdout is the real fatal case
+            import_result = json.loads(import_proc.stdout)
+        except json.JSONDecodeError:
             typer.echo(f"  Import failed: {import_proc.stderr[:200]}", err=True)
             raise SystemExit(1)
-        import_result = json.loads(import_proc.stdout)
         status = import_result[0]["response"]["status"]["status_code"]
         if status == "OK":
             result["import_status"] = status

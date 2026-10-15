@@ -914,6 +914,35 @@ class TestMapFunctions:
         expr = "FINDNTH([x], 'sub')"
         assert map_functions(expr) == expr
 
+    def test_column_name_containing_a_function_keyword_is_not_corrupted(self):
+        """GE Aerospace C-FOQA finding: the `_FUNCTION_MAP` substitutions
+        (`\\bDATE\\s*\\(` -> "date ( ", etc.) ran over the WHOLE expression
+        with no bracket awareness, so a column named
+        "Flight Date (Month/Year)" -- which contains the literal substring
+        "Date (" -- was corrupted into "Flight date ( Month/Year)" even
+        though it names no function call. This one bug blocked ~77 of 117
+        formulas in one real datasource (every LOD formula grouping by that
+        column, plus everything that referenced one of them).
+        """
+        expr = "group_aggregate ( COUNTD([Flight Record]) , { [Aircraft Id] , [Flight Date (Month/Year)] } , {} )"
+        result = map_functions(expr)
+        assert "[Flight Date (Month/Year)]" in result
+        assert "unique count" in result  # the real COUNTD( call still translates
+
+    def test_other_bracketed_keywords_also_protected(self):
+        for keyword, name in [("SUM", "Total Sum (USD)"), ("MAX", "Max (ft)"),
+                               ("DAY", "Day (count)"), ("COUNT", "Count (approx)")]:
+            expr = f"[{name}] + 1"
+            assert map_functions(expr) == expr, f"{keyword} corrupted a bracketed name"
+
+    def test_function_call_with_bracketed_argument_still_translates(self):
+        """The bracket-protection must not break a REAL call whose argument
+        is itself a bracketed reference -- these must stay outside the
+        split-and-skip path (handled by `_ARG_HANDLERS`, which needs the
+        real brackets to find the matching closing paren)."""
+        assert map_functions("LEFT([Some Column], 5)") == "substr ( [Some Column] , 0 , 5 )"
+        assert "sum ( [Revenue])" in map_functions("SUM([Revenue]) - MAX([Cost])")
+
 
 # ---------------------------------------------------------------------------
 # Date function mapping
@@ -1087,6 +1116,20 @@ class TestConvertStringConcat:
         expr = "to_string ( [A] ) [junk] [B] + [C]"
         result = convert_string_concat(expr, role="measure")
         assert result == expr
+
+    def test_literal_plus_wrapped_function_call(self):
+        # A function call wrapping another function call (one level of
+        # nested parens) as the right operand — `to_string\s*\([^)]*\)`
+        # alone couldn't match this shape at all, so the `+` was left
+        # untranslated and failed at import ("Search did not find '+ ...'").
+        # Reproduces the GE Aerospace fuel-migration "Flight Number Made Up"
+        # formula: 'DEM' + left(str([Flight Record | FDW]), 4).
+        expr = "'DEM' + substr ( to_string ( [Flight Record | FDW]) , 0 , 4 )"
+        result = convert_string_concat(expr, role="dimension")
+        assert "+" not in result
+        assert result == (
+            "concat ( 'DEM' , substr ( to_string ( [Flight Record | FDW]) , 0 , 4 ) )"
+        )
 
 
 class TestLooksLikeStringConcat:
@@ -1436,6 +1479,53 @@ class TestConvertLod:
         expression is left untranslated rather than mistranslated."""
         expr = "{FIXED 'abc}' : SUM([Sales])"
         assert convert_lod(expr) == expr
+
+    def test_brace_char_inside_bracketed_name_does_not_fake_a_close(self):
+        """GE Aerospace C-FOQA finding: a column/formula NAME can itself
+        contain a literal brace (a real Tableau LOD-scope naming convention,
+        e.g. "Flight Record {F} Tail, Date") -- without bracket-awareness,
+        the top-level scan in `convert_lod` picks that inner {F} pair as
+        `last_open`/its matching `}` instead of the real outer EXCLUDE
+        braces, so `content` becomes the single character "F", fails to
+        parse as LOD content, and the whole conversion gives up -- leaving
+        the real {EXCLUDE ...} completely untranslated in the output (fails
+        at import: "Search did not find '{ EXCLUDE'"). Blocked ~15 formulas
+        across two real datasources once dependents are counted.
+        """
+        expr = ("{EXCLUDE [Severity],[Event Type]: "
+                "[formula_Flight Record {F} Tail, Date]}")
+        result = convert_lod(expr)
+        assert "{EXCLUDE" not in result
+        assert result == (
+            "group_aggregate ( [formula_Flight Record {F} Tail, Date] , "
+            "query_groups () - { [Severity] , [Event Type] } , query_filters () )"
+        )
+
+    def test_sequential_sibling_lods_in_if_else_chain_all_convert(self):
+        """GE Aerospace C-FOQA finding: an if/else-if chain with one LOD per
+        branch (e.g. one {FIXED...}/{INCLUDE...} per severity level) only had
+        its FIRST branch converted. After converting branch 1, its own
+        emitted `{ [dims] }` set-literal becomes the leftmost top-level `{`
+        pair in the expression; `_parse_lod_content` correctly rejects it (no
+        keyword, no top-level colon) but the scan loop then gave up on the
+        WHOLE expression instead of skipping past it to find branch 2's real
+        {INCLUDE...}. Blocked "*GR: Event Count {I} Date, Event Type
+        (severity dependent)" -- its 'All' branch converted but 'Level 1'
+        onward stayed raw Tableau syntax and failed at import ('Search did
+        not find "{ INCLUDE"').
+        """
+        expr = (
+            "if ( [Sev] = 'All' ) then {FIXED [A], [B]: MAX([X])} "
+            "else if ( [Sev] = 'L1' ) then {INCLUDE [C]: SUM([Y])} else 0"
+        )
+        result = convert_lod(expr)
+        assert "{FIXED" not in result
+        assert "{INCLUDE" not in result
+        assert result == (
+            "if ( [Sev] = 'All' ) then group_aggregate ( MAX([X]) , { [A] , [B] } , {} ) "
+            "else if ( [Sev] = 'L1' ) then group_aggregate ( SUM([Y]) , "
+            "query_groups () + { [C] } , query_filters () ) else 0"
+        )
 
     def test_lod_to_group_aggregate_unknown_keyword_defaults_to_bare_form(self):
         # _lod_to_group_aggregate is only ever called by convert_lod with a

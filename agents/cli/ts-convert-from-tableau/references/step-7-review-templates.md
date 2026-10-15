@@ -114,6 +114,16 @@ Base model imported: {model_name}
 }
 ```
 
+**A non-zero `formulas_filtered` is not necessarily a translation failure — retry the
+exact same command once before investigating.** `filter_unresolvable_formulas` runs once
+per call against whatever is *already live* on the model, so a formula depending on
+another formula added in the **same** batch can be filtered purely because its dependency
+wasn't live yet when the filter ran. Live-verified on a GE Aerospace workbook:
+`Color for Map`, `Slicer`, `Difference % Measure` and others were reported "filtered" on
+the first `build-model --existing-guid` run, then merged cleanly on an immediate re-run of
+the identical command once their dependencies from the first run were already live. If the
+same formulas are still filtered on the second run, treat them as genuinely unresolvable.
+
 ## Fast mode — Phase 2 complete report
 
 ```

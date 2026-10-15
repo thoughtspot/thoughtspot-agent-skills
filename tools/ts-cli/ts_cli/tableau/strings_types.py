@@ -49,7 +49,15 @@ _CONCAT_OPERAND = (
     r"(?:"
     r"\[[^\]]+\]"                   # [column ref]
     r"|'[^']*'"                     # 'string literal'
-    r"|to_string\s*\([^)]*\)"       # to_string(...)
+    # Any function call, one level of nested parens deep — covers both a
+    # bare `to_string(...)` and a wrapped call like
+    # `substr(to_string([col]), 0, 4)`. The narrower `to_string\s*\([^)]*\)`
+    # this replaces couldn't match the latter shape at all (no alternative
+    # matched the `+`'s right operand), so the `+` was left untranslated and
+    # failed at import with "Search did not find '+ ...'" (finding from the
+    # GE Aerospace fuel-migration session, "Flight Number Made Up" formula:
+    # `'DEM' + substr(to_string([Flight Record | FDW]), 0, 4)`).
+    r"|[A-Za-z_][A-Za-z_0-9]*\s*\((?:[^()]|\([^()]*\))*\)"
     rf"|{PLACEHOLDER_RE}"           # masked string/date literal placeholder
     r")"
 )

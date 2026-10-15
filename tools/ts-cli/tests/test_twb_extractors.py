@@ -11,6 +11,8 @@ from ts_cli.tableau.twb import (
     _extract_tables,
     _build_column_table_map,
     _is_extract_wrapper,
+    _tableau_type_to_ts_param,
+    extract_parameters,
 )
 
 BLEND_XML = """
@@ -716,3 +718,86 @@ def test_count_native_sets_mixed_workbook_counts_only_real_sets():
     </datasources></workbook>
     """)
     assert count_native_sets(root) == 1
+
+
+class TestTableauTypeToTsParam:
+    """GE Aerospace C-FOQA finding: a Tableau `integer`-typed parameter
+    ("Bins for Reference Period", a range 1-26) was emitted with
+    `data_type: INT` and failed import -- "Invalid parameter: name: ...".
+    ThoughtSpot's parameter data_type enum is CHAR/INT64/DOUBLE/BOOL/DATE
+    only (shared/schemas/thoughtspot-model-tml.md); there is no DATE_TIME
+    either, so `datetime` maps to the closest available type, DATE.
+    """
+
+    def test_integer_maps_to_int64_not_int(self):
+        assert _tableau_type_to_ts_param("integer") == "INT64"
+
+    def test_datetime_maps_to_date_not_date_time(self):
+        assert _tableau_type_to_ts_param("datetime") == "DATE"
+
+    def test_other_types_unchanged(self):
+        assert _tableau_type_to_ts_param("string") == "CHAR"
+        assert _tableau_type_to_ts_param("real") == "DOUBLE"
+        assert _tableau_type_to_ts_param("boolean") == "BOOL"
+        assert _tableau_type_to_ts_param("date") == "DATE"
+
+    def test_unknown_type_defaults_to_char(self):
+        assert _tableau_type_to_ts_param("something_new") == "CHAR"
+
+
+class TestExtractParametersDefaultValue:
+    """GE Aerospace C-FOQA finding: a free-form (no list_config) numeric
+    parameter's `default_value` was taken from the column-level `alias`
+    attribute (a display LABEL for the current value, e.g. value='0.0'
+    aliased to 'Unkown' for Tableau's UI) instead of the real `value` --
+    ThoughtSpot tried to parse "Unkown" as a DOUBLE and failed the whole
+    import. List-based (CHAR) parameters are the opposite and must keep
+    using `alias` (== display_name of a list_choice), confirmed against a
+    live, already-working model ("Set History to Start as of": list_choice
+    value "1" / display_name "Last Month", default_value "Last Month").
+    """
+
+    @staticmethod
+    def _params_root(column_xml: str) -> ET.Element:
+        return ET.fromstring(f"""
+        <workbook><datasources>
+          <datasource name='Parameters'>
+            {column_xml}
+          </datasource>
+        </datasources></workbook>
+        """)
+
+    def test_freeform_numeric_param_uses_value_not_alias(self):
+        root = self._params_root(
+            "<column alias='Unkown' caption='Phase (copy)' datatype='real' "
+            "name='[Parameter 1]' param-domain-type='any' value='0.0' />"
+        )
+        params = extract_parameters(root)
+        assert params[0]["default_value"] == "0.0"
+        assert params[0]["data_type"] == "DOUBLE"
+
+    def test_list_param_uses_alias_as_display_name_default(self):
+        root = self._params_root("""
+        <column alias='All' caption='Phase' datatype='integer'
+                name='[Parameter 2]' param-domain-type='list' value='123456'>
+          <members>
+            <member value='0' alias='Unkown' />
+            <member value='123456' alias='All' />
+          </members>
+        </column>
+        """)
+        params = extract_parameters(root)
+        assert params[0]["data_type"] == "CHAR"
+        assert params[0]["default_value"] == "All"
+        assert params[0]["list_config"]["list_choice"] == [
+            {"value": "0", "display_name": "Unkown"},
+            {"value": "123456", "display_name": "All"},
+        ]
+
+    def test_freeform_param_falls_back_to_alias_when_value_empty(self):
+        root = self._params_root(
+            "<column alias='Fallback' caption='X' datatype='string' "
+            "name='[Parameter 3]' param-domain-type='any' value='' />"
+        )
+        params = extract_parameters(root)
+        assert params[0]["default_value"] == "Fallback"

@@ -6,6 +6,18 @@ for pass-through formulas, and the blend date-grain resolution strategy. The ste
 (run the parser, read the JSON, the per-datasource classification, and the topological
 sort/dashboard-count/blend-graph procedures) stays in `SKILL.md`.
 
+## `(copy)` / `(copy N)` field-name suffixes resolve via `calc_map`, never by string-stripping
+
+Tableau's duplicate-tracking appends `(copy)`, `(copy 2)`, etc. to a field reference when
+a calculated field is duplicated — but the suffix is **not** a promise that the alias
+means "same definition as the base name." The `calc_map` alias (keyed by both
+`"Name (copy)"` and `"[Name (copy)]"`) can point to a **completely different field**.
+Live example, a GE Aerospace workbook: `[Actual Measure (copy)]` resolved to `Plan
+Measure`, and `[Difference Measure (copy)]` resolved to `Actual Measure` — both unrelated
+to their own base name. `resolve_all_internal_refs` (Step 3c) applies this lookup for the
+main pipeline; any hand-written dependency trace (e.g. while debugging why a formula
+didn't merge) must do the same `calc_map` lookup, never guess from the name.
+
 ## Relation wrapper handling
 
 TWB XML wraps `<relation>` elements in one of three structures. Check in order:

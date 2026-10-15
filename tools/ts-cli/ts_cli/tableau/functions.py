@@ -103,13 +103,41 @@ def _build_function_map() -> list[tuple[re.Pattern, Any]]:
 _FUNCTION_MAP = _build_function_map()
 
 
+_BRACKET_SEGMENT = re.compile(r"(\[[^\[\]]*\])")
+
+
+def _map_simple_functions_outside_brackets(expr: str) -> str:
+    """Apply the plain keyword->replacement `_FUNCTION_MAP` table, skipping
+    any text inside `[...]` column/formula references.
+
+    Every entry here is a bare `pattern.sub(replacement, text)` over the
+    WHOLE string with no awareness of brackets -- so a column or formula
+    *name* containing one of these keywords followed by `(` (e.g.
+    "Flight Date (Month/Year)", which matches `\\bDATE\\s*\\(`) gets
+    corrupted into "Flight date ( Month/Year)" even though it names no
+    function call at all. Live-verified on a GE Aerospace C-FOQA workbook:
+    this one bug blocked ~77 of 117 formulas in one datasource (every LOD
+    formula grouping by that column, plus everything that referenced one of
+    them). Splitting on bracket boundaries and only substituting in the
+    non-bracket segments is safe here because none of these replacements
+    consume anything past the keyword itself (e.g. `SUM(` -> `sum ( `) --
+    unlike `_ARG_HANDLERS` below, which must see the real brackets to find
+    a call's matching closing paren and is therefore NOT run through this
+    split (splitting there would break `LEFT([col], n)`-shaped calls).
+    """
+    parts = _BRACKET_SEGMENT.split(expr)
+    for i in range(0, len(parts), 2):  # even indices = outside any bracket
+        segment = parts[i]
+        for pattern, replacement in _FUNCTION_MAP:
+            if isinstance(replacement, str) and not replacement.startswith("_"):
+                segment = pattern.sub(replacement, segment)
+        parts[i] = segment
+    return "".join(parts)
+
+
 def map_functions(expr: str) -> str:
     """Apply function name mappings from Tableau to ThoughtSpot."""
-    result = expr
-
-    for pattern, replacement in _FUNCTION_MAP:
-        if isinstance(replacement, str) and not replacement.startswith("_"):
-            result = pattern.sub(replacement, result)
+    result = _map_simple_functions_outside_brackets(expr)
 
     # ZN(x) → ifnull ( x , 0 )
     result = _convert_zn(result)

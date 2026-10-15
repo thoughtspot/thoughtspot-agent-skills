@@ -129,27 +129,38 @@ def validate_output(expr: str) -> list[str]:
     for pattern, desc in _FORBIDDEN_PATTERNS:
         if pattern.search(expr):
             errors.append(f"Contains {desc}")
+    # The unmapped/table-calc/geo/analytics-extension/rank function checks below
+    # scan for a bare function-call token (`NAME(`). A column, formula or
+    # parameter reference is always written `[...]`, and a field legitimately
+    # named e.g. "Airborne Duration Elapsed Difference (min)" contains the
+    # literal substring "Difference (" -- matching the DIFFERENCE() spatial
+    # function regex even though no function call is present. Strip bracketed
+    # references (and string literals, same risk) before running these checks
+    # -- the same technique already used for `expr_stripped` below for the
+    # if/then/else structural checks.
+    fn_scan_expr = re.sub(r"\[[^\]]*\]", "", expr)
+    fn_scan_expr = re.sub(r"'[^']*'", "", fn_scan_expr)
     for pattern, fn in _UNMAPPED_RE:
-        if pattern.search(expr):
+        if pattern.search(fn_scan_expr):
             errors.append(f"unmapped Tableau function: {fn}")
     for pattern, fn in _TABLE_CALC_RE:
-        if pattern.search(expr):
+        if pattern.search(fn_scan_expr):
             errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
-    window_fns = {m.group(1).upper() for m in _WINDOW_TABLECALC_RE.finditer(expr)}
+    window_fns = {m.group(1).upper() for m in _WINDOW_TABLECALC_RE.finditer(fn_scan_expr)}
     for fn in sorted(window_fns):
         errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
     # Analytics-extension families (MODEL_*/SCRIPT_*) — external R/Python, no
     # ThoughtSpot equivalent of any kind (finding 13.25).
-    for fn in sorted({m.group(1).upper() for m in _MODEL_EXT_RE.finditer(expr)}):
+    for fn in sorted({m.group(1).upper() for m in _MODEL_EXT_RE.finditer(fn_scan_expr)}):
         errors.append(
             f"Tableau analytics-extension function has no ThoughtSpot equivalent: {fn} "
             f"(external R/Python via an analytics extension)")
-    for fn in sorted({m.group(1).upper() for m in _RAWSQL_RE.finditer(expr)}):
+    for fn in sorted({m.group(1).upper() for m in _RAWSQL_RE.finditer(fn_scan_expr)}):
         errors.append(
             f"Tableau pass-through SQL has no ThoughtSpot equivalent: {fn} "
             f"(embeds raw warehouse SQL — not portable)")
     # A RANK_* member with no documented disposition (finding 13.26).
-    for fn in sorted({m.group(1).upper() for m in _RANK_UNKNOWN_RE.finditer(expr)}):
+    for fn in sorted({m.group(1).upper() for m in _RANK_UNKNOWN_RE.finditer(fn_scan_expr)}):
         errors.append(
             f"Tableau rank variant has no documented ThoughtSpot mapping: {fn} "
             f"(RANK/RANK_UNIQUE/RANK_DENSE/RANK_MODIFIED/RANK_PERCENTILE are mapped; "

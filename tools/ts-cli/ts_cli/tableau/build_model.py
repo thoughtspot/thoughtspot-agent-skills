@@ -247,7 +247,13 @@ def prepare_formulas_for_merge(
     return formula_dicts, bare_fixed
 
 
-_IMPORT_ERR = re.compile(r"Formula:\s*([^,]+),\s*Error:")
+# `.+?` (non-greedy over ANY char), not `[^,]+` -- a formula name can itself
+# contain a comma (e.g. "Flight record {F} Tail, Date {E} Severity, Event
+# Type", a real GE Aerospace C-FOQA formula name), and `[^,]+` stops at that
+# comma, failing the match entirely since ", Error:" never follows at that
+# position. Non-greedy `.+?` keeps extending past internal commas until it
+# finds the actual ", Error:" boundary.
+_IMPORT_ERR = re.compile(r"Formula:\s*(.+?),\s*Error:")
 
 
 def parse_import_error(msg: str) -> tuple[str, str] | None:

@@ -184,6 +184,7 @@ command detects pass-through conflicts automatically and skips them.
 | `DATETRUNC('month', d)` | `start_of_month ( d )` | Also `start_of_quarter`, `start_of_week`, `start_of_year` |
 | `DATETRUNC('day', d)` | `date ( d )` | Truncating to day is just the date part — ThoughtSpot has no separate `start_of_day` function |
 | `DATETRUNC('week', TODAY()) + 1` | `add_days ( start_of_week ( today () ) , 1 )` | Do NOT use + operator on dates |
+| `DATETRUNC([Grain Parameter], d)` (grain is a **parameter**, not a literal) | dispatch on the parameter's value | ThoughtSpot has no `date_trunc`-style function that takes a *variable* grain. The parameter driving it is almost always a small fixed list (Month/Quarter/Year) — dispatch with `if/else-if`: `if ( [Grain Parameter] = 'Month' ) then start_of_month ( d ) else if ( [Grain Parameter] = 'Quarter' ) then start_of_quarter ( d ) else if ( [Grain Parameter] = 'Year' ) then start_of_year ( d ) else null`. Same technique for the paired `DATENAME`-based label formula, using `month()`/`quarter_number()`/`year()` + `concat()`/`to_string()`. Live-verified reconstructible, GE Aerospace C-FOQA migration — don't default to omit-and-log just because the grain is dynamic. **Compare against the parameter's migrated `display_name`, not Tableau's internal value** (e.g. `'Month'`, not `'month'`) — but verify this per parameter: check an *already-working* sibling formula that references the same parameter for the actual casing/spelling convention in use, rather than assuming (one GE Aerospace parameter's sibling formulas all used the internal, even misspelled, value — `'Occurence Categories'` — not the corrected display name `'Occurrence Categories'`). `DATEADD([Grain Parameter], n, d)` with a dynamic unit needs the identical dispatch, substituting `add_months`/`add_years` (note **`add_quarters` does not exist** — use `add_months(d, n*3)`). |
 | `DATEADD('day', n, d)` | `add_days ( d , n )` | Also `add_months`, `add_years` |
 | `DATEPART('month', d)` | `month_number ( d )` | Also `day()` (day of month), `year`, `quarter_number`, `day_number_of_week`, `day_number_of_quarter`, `day_number_of_year` |
 | `DATENAME('month', d)` | `month ( d )` | Returns month name (e.g. "January"). Use `month_number()` if numeric value needed |
@@ -329,6 +330,13 @@ answer (Snowflake: "Division by zero"). Every translated division gets one of:
 5. **Boolean operators** — `and`, `or`, `not` (lowercase)
 6. **No semicolons or statement terminators**
 7. **`to_date()` requires exactly 2 arguments** — `to_date ( '2019-07-31' , 'yyyy-MM-dd' )`
+8. **Every branch of an if/else-if chain must return the same type.** Mixing a boolean
+   branch with a string `else ''` (or a numeric `else 0` tacked onto an otherwise-string
+   chain) fails with an unrelated-looking error (*"Expecting a Text token"*). When
+   Tableau's source `CASE` had no `ELSE` at all (implicit `NULL`), pick an else value
+   matching the **other branches'** type — don't default to an arbitrary placeholder.
+   Live-verified on a GE Aerospace workbook (`Map Plot`, `Summary Color`): a trailing
+   `else ''` broke a boolean chain, and a trailing `else 0` broke a string chain.
 
 ### Don't create redundant pass-through formulas
 
@@ -422,15 +430,92 @@ Tableau supports nested LOD expressions — e.g. `{FIXED [A] : SUM({FIXED [B] : 
 ThoughtSpot does **not** support nesting `group_aggregate()` inside another `group_aggregate()`.
 This is a platform limitation, not a translation gap.
 
-**Workaround:** decompose nested LODs into separate formulas:
-1. Create the inner LOD as its own formula (e.g. `inner_max = group_aggregate(max([col]), {B}, {})`)
-2. Reference it in the outer LOD (e.g. `outer_sum = group_aggregate(sum([inner_max]), {A}, {})`)
+**⚠️ Corrected 2026-10-14 — the two-formula "reference the inner by id" workaround below does
+NOT actually work, despite importing cleanly.** It was documented (and relied on) based on
+`VALIDATE_ONLY` import success alone. Live query execution — `ts agentql fetch-data 'SELECT
+"<name>" AS v FROM "<model>"' -m <guid>`, or just opening the tile in the UI — proves the
+restriction is enforced by the **query planner at execution time**, not the import validator,
+and it applies to a formula *reference* to a `group_aggregate`-valued sibling sitting in the
+1st-argument position just as much as to literal nested text. **Always confirm a new
+`group_aggregate` formula this way before treating it as done** — `VALIDATE_ONLY` is not
+sufficient evidence.
 
-This requires two-phase import (the inner formula must exist before the outer one can reference it).
+**What actually works, by the shape of the outer wrapper:**
+- **Grand-total wrapper** (`group_aggregate(inner, {}, query_filters())`, e.g. Tableau's
+  `TOTAL(SUM(...))` applied to an already-LOD value) — drop the outer `group_aggregate`
+  entirely. A bare `sum([formula_inner])`, no wrapper at all, gives the same result —
+  search-level aggregates already respect active filters without `query_filters()` needing to
+  be spelled out.
+- **`EXCLUDE`-shaped wrapper** (`group_aggregate(inner, query_groups() - {dims}, filters)`,
+  e.g. `{EXCLUDE [x]: SUM({FIXED [a,b]: MAX([col])})}`) — there is no bare-aggregate escape
+  hatch here; relative `query_groups() - {...}` dims genuinely require `group_aggregate`
+  syntax. Stop referencing the inner FIXED-LOD formula and inline the raw aggregate directly
+  in the one remaining `group_aggregate` call instead:
+  `group_aggregate(max([raw_col]), query_groups() - {dims}, query_filters())`, dropping the
+  inner FIXED's own grouping dims. **This is a simplification, not a proven exact
+  equivalent** — the only verification available is that the result is *constant across the
+  excluded dimension's groups* (the defining behavioral test for "exclude"), not that it
+  numerically matches what the true two-level Tableau computation would have produced. State
+  that plainly in the migration report rather than presenting it as faithful.
+- Referencing a `group_aggregate`-valued sibling in a **filter clause** (3rd arg) of another
+  `group_aggregate`, or combining two such siblings with plain **arithmetic** (no outer
+  `group_aggregate` at all — `[formula_A] + [formula_B]`, `[formula_avg] +
+  group_aggregate(stddev(...), ...) * 2`), both genuinely work. The restriction is
+  specifically about the 1st-argument (aggregate-expression) position.
 
 **Detection:** the translation engine flags any output containing two or more `group_aggregate(`
 occurrences as a validation warning. In audit mode, classify these as **Platform Limitation**,
-not Untranslatable — the formula IS expressible in ThoughtSpot, just not as a single expression.
+not Untranslatable — the formula may be expressible via one of the shapes above, but confirm
+with a live query, not just a clean import.
+
+### `group_aggregate(agg, {}, {})` is a permanent grand-total, not just "wrapped" — don't use it as a ratio numerator
+
+Wrapping a bare aggregate in `group_aggregate(agg, {}, {})` (literal empty dims) solves the
+"can't re-aggregate a bare branch in `average()`/`stddev()`" problem above, but the **literal
+empty `{}`** has a side effect: it forces a permanent grand-total that does not adapt to query
+context — a genuinely different thing from "no `group_aggregate` wrapper at all" (a bare
+aggregate adapts normally, like a plain SQL aggregate). If that same formula is also used as the
+numerator of a ratio (`100 * (wrapped / other_measure)`) where `other_measure` genuinely varies
+per group (RELATIVE `query_groups() ± {dims}` or ABSOLUTE non-empty `{dims}`), the ratio explodes
+to absurd magnitudes once the query groups by anything, because the frozen numerator value gets
+implicitly re-summed across every underlying row. **It can look fine at one grouping grain by
+sheer coincidence of row distribution and still be wrong** — always sanity-check both the
+bare/ungrouped value and at least one grouped value via `ts agentql fetch-data`, not just one.
+
+**Fix: use `query_groups ( )` (bare, no `{}`, no `+`/`-`) as the dims argument instead of `{ }`.**
+It still satisfies "wrapped in `group_aggregate`" for the average()/stddev()-nesting fix, but is
+context-adaptive — verified identical grand-total bare, genuinely varying values grouped, and
+`average()` of it still succeeds.
+
+### CLI translator can drop an explicit `SUM()`/`COUNTD()` the Tableau source had around a FIXED-LOD reference
+
+Tableau formulas sometimes read `(COUNTD(x) / SUM([FixedLODCalc])) * 100` — an explicit
+aggregate wrapper around a FIXED-LOD reference used as a ratio denominator. The translator can
+drop that wrapper, emitting `(unique count(x) / [formula_FixedLODCalc]) * 100` with no `sum()`
+at all. ThoughtSpot does not dedupe-then-sum a `group_aggregate(agg, {absolute dims}, {})`
+reference the way Tableau's engine does; without the wrapper, the per-row-repeated fixed value
+gets re-aggregated across every underlying row and the ratio explodes (seen: 74,203 instead of
+~170). **Always diff the ThoughtSpot formula against the original Tableau `<calculation
+formula='...'>` for any ratio whose denominator is a FIXED-LOD reference** — a missing
+`SUM()`/`COUNTD()` wrapper is easy to miss since the formula still imports and computes *a*
+number, just the wrong one.
+
+Fix: add the wrapper back — `sum([formula_FixedLODRef])`. **But if that formula has any
+`average()`/`stddev()` dependents** (the nested-aggregate pattern above), a bare `sum(...)`
+breaks their import with a cryptic `Formula addition failed... Search did not find '<name> ) ,
+{ } , query_filters ( ) + {' in your data or metadata` error — the import-time validator appears
+to text-scan the referenced formula for a visible aggregate-function token and reject it as a
+nested aggregate. Use `group_aggregate(sum(...), query_groups(), {})` instead (opaque to that
+scan, and still context-adaptive) — same correct value, no import error.
+
+### A third ratio-explosion shape, unsolved: mismatched dims between sibling INCLUDE-style LODs
+
+Two sibling LOD measures built as `query_groups() + {dimsA}` and `query_groups() + {dimsB}`
+where `dimsA != dimsB` (one includes an extra dimension the other doesn't) can explode when
+divided, even bare — a different shape from both fixes above. Tried `sum()`-wrapping the
+denominator, `group_aggregate(sum(...), query_groups(), {})`-wrapping it, and padding `dimsB` to
+match `dimsA` exactly; all three either didn't help or made the value worse. Don't assume this
+is the same bug as the two above — it needs its own investigation, not a repeat pattern-match.
 
 ### Common pattern: relative time via grand FIXED
 
@@ -721,6 +806,15 @@ a different calculation produced by the analytics engine, not `categorical-bin`)
 ThoughtSpot equivalent; omit + log. **Always classify by the calculation `class`, not the
 field's display name.**
 
+**A `categorical-bin` field can be dropped at *extraction*, before any of the above ever
+runs.** On the GE Aerospace C-FOQA migration, two fields depending on a manual-group calc
+never reached the classifier at all — `_extract_calculated_fields` found no `formula=`
+attribute to extract for that particular bin field and silently skipped it, so it never
+appeared in `skipped`/`filtered` output with a reason; it and its dependents just vanished.
+If a formula's dependency resolves to nothing in the parsed spec (not "untranslatable", not
+"filtered as a dependent" — genuinely absent), check whether the root is a `categorical-bin`
+the parser dropped before concluding it's a translation problem at all.
+
 ---
 
 ## Running / Cumulative Functions
@@ -831,6 +925,77 @@ function with `PARTITION BY` in the SQL string instead.
 
 **Extended windowed variants with no model-formula equivalent:**
 - `WINDOW_STDEV`, `WINDOW_PERCENTILE`, `WINDOW_COUNT`, `WINDOW_MEDIAN` — no windowed model-formula equivalent (table calculations, answer-level per EXC1). If the viz uses them as a plain aggregate over the whole partition (not a sliding window), use `stddev()`, `percentile(measure, p)`, `count()`, `median()` respectively. Otherwise realize answer-level or omit + log.
+
+### `WINDOW_AVG(m, FIRST(), FIRST()+N)` / `WINDOW_STDEV(...)` as a "reference period" baseline — reconstructible, don't omit-and-log by default
+
+A common Tableau pattern computes a reference-period average/std-dev band (e.g. "average of
+the first N date-bins of data ± 2 std dev") for a trend-chart overlay:
+`WINDOW_AVG(measure, FIRST(), FIRST()+N)`. This is **not** a sliding window (the `moving_*`
+family above) and **not** a whole-partition aggregate (`average()`/`stddev()` alone) — it's a
+bounded window anchored to the start of the data. Live-verified reconstructible, GE Aerospace
+C-FOQA migration:
+
+1. A grand-min helper for the period start: `group_aggregate ( min ( [binned_date] ) , {} , {} )`.
+2. The period end, N bins later — dispatch on whatever parameter drives the date grain (see
+   "DATETRUNC with a dynamic parameter" below for the same dispatch pattern): `add_months`/
+   `add_years` off the start helper (**`add_quarters` does not exist** — use
+   `add_months(d, n*3)`).
+3. The windowed aggregate itself, filtered to that range: `group_aggregate ( average (
+   [measure] ) , {} , query_filters () + { [binned_date] >= [formula_<start>] and
+   [binned_date] < [formula_<end>] } )`. `stddev()` the same way for the std-dev band, then
+   combine with ordinary arithmetic: `[formula_<avg>] + group_aggregate ( stddev ( [measure] ) ,
+   {} , {same filter} ) * 2`.
+4. A `group_aggregate` **can** reference a sibling `group_aggregate`-derived formula by id
+   inside its own filter clause (3rd arg), and ordinary arithmetic **can** combine a formula
+   reference with an inline `group_aggregate` call. **It cannot reference a
+   `group_aggregate`-valued formula — bare, or wrapped in a plain aggregate like
+   `sum()`/`max()` — as its own 1st argument.** That IS the nested-`group_aggregate`
+   restriction above, and it applies by reference just as much as by literal text —
+   decomposing into two formulas and referencing the inner one by id does **not** bypass it
+   when the reference sits in the 1st-argument position. ⚠️ **`VALIDATE_ONLY` import success
+   does not prove this is safe** — the restriction is enforced by the query planner at
+   execution time, not the import validator, so a formula built this way can import clean and
+   still fail the moment anything actually queries it (`"Nesting group-aggregate formulas is
+   not supported"` in the UI; `NESTED_GROUP_AGGREGATE_NOT_SUPPORTED` via
+   `ts agentql fetch-data`). **Confirm every new `group_aggregate` formula with a real query**
+   (`ts agentql fetch-data 'SELECT "<name>" AS v FROM "<model>"' -m <guid>`), not just
+   `VALIDATE_ONLY`, before treating it as done. Two fixes for the shapes that actually hit
+   this: a **grand-total wrapper** (`group_aggregate(ref, {}, query_filters())` over an
+   already-LOD value) — drop the outer `group_aggregate` entirely, a bare
+   `sum([formula_inner])` gives the same result; an **`EXCLUDE`-shaped wrapper**
+   (`group_aggregate(ref, query_groups() - {dims}, filters)`) — there's no bare-aggregate
+   escape hatch (relative dims need `group_aggregate` syntax), so inline the raw aggregate
+   directly instead of referencing the inner FIXED-LOD formula:
+   `group_aggregate(max([raw_col]), query_groups() - {dims}, query_filters())`, dropping the
+   inner FIXED's own grouping dims. This is a simplification (verified only that the result is
+   *constant across the excluded dimension's groups* — the defining behavioral test for
+   "exclude" — not that it numerically matches the true two-level computation); say so in the
+   migration report rather than presenting it as exact.
+
+**Two real blockers found doing this — check for both before concluding a measure can't be
+re-aggregated:**
+
+- **A branch with a bare (non-`group_aggregate`-wrapped) aggregate call cannot be
+  re-aggregated by an outer `average()`/`stddev()`**, even though it imports and computes
+  fine standalone. E.g. `if (sev='All') then unique count(x) else sum_if(cond, 1)` fails
+  `average([that formula])` outright with a misleading "not found" error — not because the
+  branches use different aggregate functions (tested and ruled out), but because neither
+  branch is wrapped in `group_aggregate`. Fix: wrap every branch in
+  `group_aggregate(agg(...), {}, {})` (empty dims/filters is fine — the wrapping is what
+  matters). No semantic change; every downstream average/ratio built on it starts working
+  immediately once fixed.
+- **Two sibling ratio formulas combined by arithmetic (`A - B`, e.g. a before/after
+  period-over-period comparison) must use the *same* aggregate-wrapper shape on their own
+  numerator.** `count(lod_measure) / other` minus a bare `lod_measure / other` fails even
+  though each side imports and computes correctly alone. Match the working sibling's exact
+  shape (don't drop a `count(...)`/`sum(...)` wrapper that looks redundant — Tableau's own
+  formula had it for a reason).
+
+**Diagnostic method:** isolate with `VALIDATE_ONLY`-import tests of the *exact* claim
+(`average([formula_X])` alone, unchanged) before and after each candidate fix, and diff the
+failing formula's shape against a working sibling's line by line — not just "both are
+if/else on a parameter." Don't accept the first plausible theory (mixed aggregate *function*
+type was the first guess here, and it was wrong).
 
 ---
 
@@ -1130,6 +1295,26 @@ model import. A missing formula produces a functional model with reduced coverag
 | `USERATTRIBUTE(attr)` | Embedded-RLS custom user attribute — no CLI translation yet. **Plausible native translation:** ABAC `ts_var(attr_var)` referencing an admin-created formula variable (same JWT user-attribute mechanism as `ISMEMBEROF`→`ts_groups`, reclassified 2026-06-28) — but `ts_var(...)` is only accepted in RLS RULES, not in Model/Answer formulas today, so no faithful in-formula translation exists. See BL-071. |
 | `USERATTRIBUTEINCLUDES(attr, val)` | Embedded-RLS multi-value attribute membership test — same disposition as `USERATTRIBUTE` above. See BL-071. |
 
+### Expression complexity ceiling — a real limit, not a missing function mapping
+
+A formula can be built entirely from translatable constructs (plain `if`/`else if`
+branches over physical columns, no unmapped function) and still be rejected outright by
+ThoughtSpot's formula parser with a cryptic tokenization error once it has enough
+branches. Live-verified on a GE Aerospace workbook: a 33-branch parameter-dispatch
+`CASE`/if-else chain (`Slicer` — lets the user pick which dimension a chart groups by)
+failed even after every column reference, `(copy)`-alias resolution, and casing issue in
+it was independently confirmed correct. This is a genuine branch-count/expression-size
+ceiling in the ThoughtSpot formula engine, not a translation gap.
+
+**How to tell the difference:** if a formula still fails after (a) every bracket
+reference resolves to a real column/formula, (b) every `(copy)` alias is resolved via
+`calc_map` rather than guessed, and (c) every branch returns a consistent type (see
+"ThoughtSpot Formula Syntax Rules" #8) — and the error is a generic/cryptic parse failure
+rather than naming a specific missing reference — stop retranslating the same formula and
+record it as a complexity-limit exclusion in `MIGRATION_LIMITATIONS.md`. There is no known
+exact branch-count threshold; treat any very-high-branch-count parameter dispatcher as a
+candidate for this failure mode before spending further time on it.
+
 **Formerly untranslatable, now mapped:**
 - `ISMEMBEROF("group")` → `( ts_groups = 'group' )` — multi-value list membership handled natively with `=` (reclassified 2026-06-28; CLI-translated v0.88.0, BL-071)
 - `USERNAME()` → `ts_username` / `ISUSERNAME(s)` → `( ts_username = s )` — direct system-variable reference + composite equality check (CLI-translated v0.88.0, BL-071). `FULLNAME()`/`ISFULLNAME(s)`/`USERDOMAIN()` remain untranslatable — see rows above
@@ -1264,6 +1449,24 @@ ThoughtSpot parameter references use bare `[Name]` syntax with no table qualifie
 - Strip wrapping double quotes from member values: `'"USD"'` → `USD`
 - Strip `#` delimiters from date defaults: `#2026-05-10#` → format as `MM/DD/YYYY`
 - `default_value` is always a string in ThoughtSpot TML regardless of `data_type`
+
+### Using a migrated parameter in a formula — `CHAR` needs an explicit cast or comparison
+
+Per the type-mapping table above, a Tableau `list`-type parameter migrates to ThoughtSpot
+`data_type: CHAR` — including when every value is a number string (`"0.05"`,
+`"999999999.0"`) or a `'true'`/`'false'` toggle. **`CHAR` is never implicitly numeric or
+boolean**, however the values look; a formula that treats the bare parameter reference as
+one fails with an error that reads like a missing reference, not a type error. Both were
+live-verified on a GE Aerospace fuel-migration workbook:
+
+| Formula shape | Fails with | Fix |
+|---|---|---|
+| `[Numeric-looking Param] <= [some column]` (or `>=`, `<`, `>`) | `Search did not find "<param name>" in your data or metadata` | Cast explicitly: `to_double ( [Param] ) <= [some column]` |
+| `if ( [Yes/No Param] ) then ... else ...` | `(If / else if) expects condition to be Boolean` | Compare explicitly: `if ( [Param] = 'true' ) then ... else ...` |
+
+Apply this whenever a translated formula references a parameter directly in a numeric
+comparison or as a bare boolean condition — don't conclude the formula is unfixable from
+either error message alone.
 
 ### SQL-lookup parameters (query at migration time)
 

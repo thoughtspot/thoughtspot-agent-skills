@@ -133,11 +133,16 @@ def _find_matching_brace(expr: str, open_pos: int) -> int:
     """Find the closing } that matches the { at open_pos, respecting nesting.
 
     Returns the index of the matching }, or -1 if unbalanced.
+
+    A {/} inside a [...] bracket is skipped -- a column/formula NAME can
+    itself contain a literal brace (e.g. "Flight Record {F} Tail, Date"),
+    which is not LOD-nesting syntax and must not affect the depth count.
     """
     depth = 1
     pos = open_pos + 1
     in_single = False
     in_double = False
+    in_bracket = 0
     while pos < len(expr):
         c = expr[pos]
         if c == "'" and not in_double:
@@ -145,7 +150,13 @@ def _find_matching_brace(expr: str, open_pos: int) -> int:
         elif c == '"' and not in_single:
             in_double = not in_double
         elif not in_single and not in_double:
-            if c == "{":
+            if c == "[":
+                in_bracket += 1
+            elif c == "]":
+                in_bracket = max(0, in_bracket - 1)
+            elif in_bracket > 0:
+                pass
+            elif c == "{":
                 depth += 1
             elif c == "}":
                 depth -= 1

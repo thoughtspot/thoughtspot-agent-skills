@@ -45,7 +45,11 @@ RATCHET: dict[str, tuple[int, str]] = {
     # ts tableau command module grew past 1000 lines with the multi-table
     # build-model fixes (v0.35-0.36). Split into per-flow submodules tracked
     # in BL-089 (M10); ratcheted until then. Lower this number as it shrinks.
-    "tools/ts-cli/ts_cli/commands/tableau.py": (1675, "BL-089"),
+    # +1 (2026-10-12, ts-cli v0.154.0): `_import_with_retry` now reads
+    # `ts tml import`'s stdout before checking its exit code (that command
+    # exits 1 on any per-item failure while still printing valid JSON) --
+    # one extra line for the try/except this fix needed.
+    "tools/ts-cli/ts_cli/commands/tableau.py": (1676, "BL-089"),
 }
 
 

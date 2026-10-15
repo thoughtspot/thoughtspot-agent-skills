@@ -99,33 +99,73 @@ def convert_lod(expr: str) -> str:
     result = expr
     safety = 0
     while safety < 50:
-        # Find the innermost { first (so nested LODs are resolved inside-out)
+        # Find the innermost { first (so nested LODs are resolved inside-out).
+        # Skip any {/} seen while inside a [...] bracket -- a column or
+        # formula NAME can itself contain a literal brace (e.g. a Tableau
+        # LOD-scope naming convention like "Flight Record {F} Tail, Date"),
+        # which is not LOD syntax at all. Without this, that inner {F} pair
+        # gets picked as `last_open`/its matching `}`, so `content` becomes
+        # the single character "F" instead of the real outer LOD body, which
+        # fails to parse and the whole conversion silently gives up, leaving
+        # the real {FIXED/INCLUDE/EXCLUDE ...} untranslated in the output
+        # (GE Aerospace C-FOQA finding: blocked "Flight record {F} Tail, Date
+        # {E} Severity, Event Type" and its dependents).
+        #
+        # A {...} pair found here can also be a dims-set literal (e.g.
+        # `{ [A] , [B] }`) that THIS function already emitted for an earlier,
+        # sibling LOD in the same expression (if/else-if branches each with
+        # their own {FIXED/INCLUDE/EXCLUDE...}). `_parse_lod_content` rejects
+        # it (no keyword, no top-level colon), but that only means "not an
+        # LOD" -- not "nothing further to convert". So on a parse failure we
+        # resume the scan right after this pair instead of aborting outright,
+        # otherwise a later sibling LOD (e.g. a "Level 1" branch) is left
+        # untranslated just because an earlier branch converted first (GE
+        # Aerospace C-FOQA finding: blocked "*GR: Event Count {I} Date, Event
+        # Type (severity dependent)").
+        search_from = 0
         last_open = -1
-        for i, c in enumerate(result):
-            if c == "{":
-                last_open = i
-            elif c == "}" and last_open >= 0:
+        close = -1
+        while True:
+            open_pos = -1
+            in_bracket = 0
+            i = search_from
+            while i < len(result):
+                c = result[i]
+                if c == "[":
+                    in_bracket += 1
+                elif c == "]":
+                    in_bracket = max(0, in_bracket - 1)
+                elif in_bracket > 0:
+                    pass
+                elif c == "{":
+                    open_pos = i
+                elif c == "}" and open_pos >= 0:
+                    break
+                i += 1
+            else:
+                open_pos = -1
+
+            if open_pos < 0:
+                last_open = -1
                 break
-        else:
-            if last_open < 0:
+
+            candidate_close = _find_matching_brace(result, open_pos)
+            if candidate_close < 0:
+                last_open = -1
                 break
-            close = _find_matching_brace(result, last_open)
-            if close < 0:
+
+            if _parse_lod_content(result[open_pos + 1:candidate_close]) is not None:
+                last_open, close = open_pos, candidate_close
                 break
+
+            search_from = candidate_close + 1
 
         if last_open < 0:
-            break
-
-        close = _find_matching_brace(result, last_open)
-        if close < 0:
             break
 
         safety += 1
         content = result[last_open + 1:close]
         parsed = _parse_lod_content(content)
-
-        if parsed is None:
-            break
 
         keyword, dims_raw, agg_expr = parsed
         replacement = _lod_to_group_aggregate(keyword, dims_raw, agg_expr)

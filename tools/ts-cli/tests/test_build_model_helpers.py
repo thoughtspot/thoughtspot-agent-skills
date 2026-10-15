@@ -350,6 +350,22 @@ def test_parse_import_error_truncates_detail_to_120():
     assert len(detail) == 120
 
 
+def test_parse_import_error_name_containing_a_comma():
+    """GE Aerospace C-FOQA finding: `[^,]+` stopped at the first comma
+    inside a formula name that itself contains one (a real Tableau LOD
+    calc name, "Flight record {F} Tail, Date {E} Severity, Event Type"),
+    so ", Error:" never matched right after the truncated name and the
+    whole regex failed -- the retry loop then treated a perfectly
+    identifiable, droppable formula error as a non-recoverable failure
+    and aborted the entire import batch."""
+    msg = ('Formula addition failed. Formula: Flight record {F} Tail, Date '
+           '{E} Severity, Event Type, Error: Search did not find "{ EXCLUDE"')
+    assert parse_import_error(msg) == (
+        "Flight record {F} Tail, Date {E} Severity, Event Type",
+        'Search did not find "{ EXCLUDE"',
+    )
+
+
 # --- remove_formula ---
 
 def test_remove_formula_drops_formula_and_its_columns():
