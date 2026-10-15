@@ -44,6 +44,22 @@ jobs:
         # PyPI/OSV advisory database. Fails on any known vulnerability.
         run: pip-audit
 
+      - name: Load private customer-name denylist (if configured)
+        # check_customer_references.py recognises links, not names. The opt-in name list
+        # lives in the CUSTOMER_DENYLIST repository secret, never in this public repo, and
+        # a hit prints only the entry number. GitHub withholds secrets from fork PRs, so on
+        # a fork the name check is skipped: BL-396 tracks closing that gap.
+        env:
+          CUSTOMER_DENYLIST: ${{ secrets.CUSTOMER_DENYLIST }}
+        run: |
+          if [ -n "$CUSTOMER_DENYLIST" ]; then
+            printf '%s\n' "$CUSTOMER_DENYLIST" > "$RUNNER_TEMP/customer-denylist.txt"
+            echo "TS_CUSTOMER_DENYLIST=$RUNNER_TEMP/customer-denylist.txt" >> "$GITHUB_ENV"
+            echo "Customer-name denylist loaded."
+          else
+            echo "::notice::No CUSTOMER_DENYLIST secret available (unset, or a fork PR): customer-name check skipped."
+          fi
+
       - name: Run validators (full-repo mode)
         run: |
           set -e

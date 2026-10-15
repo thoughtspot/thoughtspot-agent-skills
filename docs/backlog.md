@@ -14276,3 +14276,32 @@ September, while 26.9.0.cl PROD still emits `like_regex`.
    bump the currency anchor.
 
 **Target:** 2026-11-30, or the first PROD build after 26.9.0.cl, whichever comes first.
+
+## BL-396 — The customer-name check never runs on fork PRs `Tier 1`
+
+**Filed:** 2026-10-16. **Status:** Open. **Source:** PR #611. Like #553, it came from a fork
+and carried a customer's name, project names and schema into this public repo.
+
+**The facts.** CI now loads the private name list from the `CUSTOMER_DENYLIST` repository
+secret. GitHub withholds secrets from `pull_request` runs triggered from a fork, so the name
+check is skipped on exactly the PRs that most need it. External contributors and employees
+working from personal forks both arrive this way. A fork PR's `validate` run also waits for
+maintainer approval, and a conflicting PR may not run at all. So today the only defence on
+a fork is the maintainer reading the diff.
+
+**The work.** Add a separate `pull_request_target` workflow. It runs in the base repo's
+context, so it can read the secret, and it is safe only because it never executes PR code:
+- check out the **base** ref only;
+- fetch the PR head as data (`git fetch origin pull/N/head`);
+- run the base branch's `check_customer_references.py --range base..head`, with the list
+  written to `$RUNNER_TEMP`;
+- read-only `permissions`, no `actions/checkout` of the head ref, no `pip install` from
+  the PR.
+
+Output already redacts names to entry numbers. Optionally, also scan the PR title and body
+from the event payload.
+
+`pull_request_target` is a well-known foot-gun, so it needs an independent, refute-briefed
+security review before it merges.
+
+**Target:** 2026-11-15.

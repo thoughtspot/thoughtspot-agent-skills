@@ -144,6 +144,7 @@ its own, so the rule above still applies to everything it cannot see; the PR tem
 carries a checkbox for it. Maintainers can close part of that gap with an **opt-in
 private name list** kept outside the repo (`$TS_CUSTOMER_DENYLIST`, or
 `~/.config/thoughtspot-agent-skills/customer-denylist.txt`; one name per line). With no
-file it is skipped silently; a hit reports the entry number, never the name. The
-validator's docstring describes wiring it into CI from a repository secret. If something slips through, removing it from the tip is not
+file it is skipped silently; a hit reports the entry number, never the name. CI loads the
+same list from the `CUSTOMER_DENYLIST` repository secret. The exception is fork PRs, which
+GitHub never gives secrets to (BL-396). If something slips through, removing it from the tip is not
 enough to un-publish it — tell a maintainer, who decides whether history needs action.

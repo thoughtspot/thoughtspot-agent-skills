@@ -92,7 +92,8 @@ before the validators run, e.g.
     echo "TS_CUSTOMER_DENYLIST=$RUNNER_TEMP/denylist.txt" >> "$GITHUB_ENV"
 with `env: CUSTOMER_DENYLIST: ${{ secrets.CUSTOMER_DENYLIST }}`. Secrets are not exposed
 to workflows triggered from forks, so on a fork PR the name check is skipped.
-validate.yml deliberately does not reference the secret until one exists.
+validate.yml does exactly this from the `CUSTOMER_DENYLIST` secret, when the secret is set.
+BL-396 tracks the fork-PR gap.
 
 Why a separate validator rather than a rule in check_secrets.py: check_secrets looks for
 *credentials* and exempts lines by value-shape heuristics tuned for secrets. A tenant link
