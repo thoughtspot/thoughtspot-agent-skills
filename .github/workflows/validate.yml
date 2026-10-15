@@ -103,6 +103,7 @@ jobs:
           # in the sweep; running it here keeps it from silently rotting.
           python3 tools/validate/check_ossie_mapping_sync.py --root . --check || rc=1
           python3 tools/validate/generate_open_items_index.py --root . --check || rc=1
+          python3 tools/validate/generate_agentql_offline.py --root . --check || rc=1
           python3 tools/validate/check_mirror_sync.py || rc=1
           python3 tools/validate/generate_parity.py --check || rc=1
           # Internal-import + repo-hygiene gates (2026-07-29 audit findings 4.2/1.1/1.2).

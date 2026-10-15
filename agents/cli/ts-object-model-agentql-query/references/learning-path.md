@@ -49,6 +49,29 @@ a learner to expect a specific dated number. Totals over all time are stable.
 
 ---
 
+## Live or offline? — ask first
+
+Before the first lesson, ask the learner which mode to run in. Both teach the same material;
+they differ in whether anything runs on a cluster.
+
+| | **Live** (default) | **Offline** |
+|---|---|---|
+| What runs | Real `ts agentql generate-sql` / `fetch-data` on a cluster | Nothing — you read from the bundle |
+| Needs | A profile and the sample Model (or one the learner picks) | Only [`agentql-offline.md`](agentql-offline.md) |
+| Shows | Fresh generated SQL **and** live rows | The AgentQL, the captured SQL and the explanation; **result numbers are not live** |
+| Cost | Tool round-trips per lesson | **Far lower token spend; no cluster** |
+| Use it for | Demos, and checking current behaviour on this build | Reading and review, no cluster available, or keeping token spend down |
+
+**Running offline.** Work entirely from [`agentql-offline.md`](agentql-offline.md) — the
+generated single-document bundle of this whole reference library (every rule, pattern,
+limitation and lesson). Present each lesson in the same six-section block below, but **skip the
+`fetch-data` step**: fill sections 1–3 and 5 from the bundle, and in section 6 say the rows
+aren't live (offline). Say so once up front, so nobody mistakes a taught figure for a fresh
+one — and because the sample's rolling `date` makes dated totals move anyway. The learner can
+switch to live at any lesson.
+
+---
+
 ## How to run a lesson
 
 **Show the AgentQL. Don't ask the learner to write it.** The lesson's query is ready to

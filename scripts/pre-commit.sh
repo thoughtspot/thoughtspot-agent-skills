@@ -181,6 +181,10 @@ if echo "$STAGED" | grep -q 'open-items\.md'; then
   run_check "open items index"   "tools/validate/generate_open_items_index.py --root . --check"
 fi
 
+if echo "$STAGED" | grep -q 'ts-object-model-agentql-query/'; then
+  run_check "agentql offline bundle" "tools/validate/generate_agentql_offline.py --root . --check"
+fi
+
 # Cross-file consistency — runs when agents/, README.md, or SETUP.md are touched
 # Ensures README skills table, SETUP.md symlink/stage steps stay in sync with repo structure
 if echo "$STAGED" | grep -qE '(^agents/|README\.md|SETUP\.md)'; then

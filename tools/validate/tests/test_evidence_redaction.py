@@ -47,9 +47,17 @@ REDACTED_RUN_RECORDS = (
 )
 
 
+# Generated aggregate references are not evidence: they are rebuilt from their sources
+# (which ARE scanned where they are evidence), and they fold in SKILL.md changelog prose
+# whose neutral cluster names are legitimate there. Governed by the generator's own --check.
+GENERATED_EXCLUDED = ("agentql-offline.md",)
+
+
 def _evidence_files():
     for pattern in EVIDENCE_GLOBS:
-        yield from sorted(REPO.glob(pattern))
+        for p in sorted(REPO.glob(pattern)):
+            if p.name not in GENERATED_EXCLUDED:
+                yield p
 
 
 def test_evidence_files_use_redaction_markers_not_substitute_names():

@@ -80,6 +80,15 @@ will this touch?". Answer it, or just say **"run it"**. It runs `generate-sql` a
 purpose to show a rule. If you want practice, write your own version first and it will run
 that instead.
 
+**Live or offline.** At the start the agent asks which mode you want:
+- **Live** (default) — real `ts agentql` calls on a cluster: fresh SQL and rows. Needs a
+  profile and the sample Model. Best for a demo or to check current behaviour.
+- **Offline** — everything is read from **[references/agentql-offline.md](references/agentql-offline.md)**,
+  a single generated bundle of the whole reference library (every rule, pattern, limitation
+  and lesson, with the captured SQL). **No cluster, no live calls, far lower token spend.**
+  Result *numbers* aren't live, so offline teaches the SQL and the behaviour, not a fresh
+  figure. Best for reading and review, when there's no cluster, or to keep token spend down.
+
 | Module | What you learn | Questions |
 |---|---|---|
 | 0. Why AgentQL | ThoughtSpot compiles AgentQL to warehouse SQL and never runs it itself; the Model supplies joins, formulas and security | concept |
@@ -115,6 +124,7 @@ lists any lesson whose behaviour has changed.
 | [references/use-cases.md](references/use-cases.md) | When the user wants to *build on* this skill — tutorial, agent building-block, accuracy/regression/feature/limitation testing. |
 | [references/integration.md](references/integration.md) | When the user wants to call AgentQL directly from their own product/agent — auth options, the callosum endpoints, request bodies, the raw columnar response format and a parser. |
 | [references/open-items.md](references/open-items.md) | Verification status of the API behaviour this skill relies on. |
+| [references/agentql-offline.md](references/agentql-offline.md) | **The whole reference library as one offline document** — every file above, bundled. Read this (or hand it to an agent) to review everything in one place, or to run the skill/course **offline** with no live `ts agentql` calls and lower token spend. Generated from the sources by `tools/validate/generate_agentql_offline.py`; do not edit by hand. |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | If no ThoughtSpot profile is configured yet. |
 
 ---
@@ -326,6 +336,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.11.0 | 2026-10-16 | **Offline mode + a single-document bundle.** New generated reference [`agentql-offline.md`](references/agentql-offline.md) assembles the whole library (SKILL.md + every `references/*.md`) into one document — for reading/reviewing everything in one place, or handing to an agent as grounding. The course (and the normal flow) now offer **live vs offline**: offline works entirely from the bundle, with no live `ts agentql` calls and far lower token spend (result numbers aren't live). Built by `tools/validate/generate_agentql_offline.py` and gated against drift (`--check`) in pre-commit and CI. |
 | 2.10.0 | 2026-10-14 | **Learn AgentQL positioning + business-rules showcase.** Module 0 rewritten as the Token-Search-vs-AgentQL positioning (tokens validate, AgentQL expresses; the expressibility↔determinism trade-off; valid SQL ≠ correct business logic), with an optional **three-query taster** — a governed base, expressibility with governance still applied, and a hard limit — so the point lands without working through every module. New lesson **3.6** — *every product including those with no sales* (a `LEFT OUTER JOIN` tokens can't express) — dissects the generated SQL to show the business rules the Model applies for you: `join_progressive` table pruning, Model-supplied inner joins + keys, null-guarded aggregates, a case-insensitive filter, the row cap, and where RLS is injected. Live-verified on `(Sample) Retail - Apparel`; guarded by `l3_all_products_left_join`. Course now 37 questions. |
 | 2.9.0 | 2026-10-14 | **New reference: [`beyond-tokens.md`](references/beyond-tokens.md)** — four live-verified worked examples (26.9.0.cl) of questions that need AgentQL and ones it still can't answer: rank within a partition (window `RANK()` in a CTE, since `QUALIFY` is dropped), a preceding-7-days window (AgentQL frames count **rows**, not calendar days — no `RANGE … INTERVAL`), a cohort semi-join (`IN (SELECT …)` compiles then fails; CTE equi-join is the fix), and percentiles (`PERCENTILE_CONT` unsupported; `STDDEV` needs the CTE pattern, where **both** `STDDEV_POP` and `STDDEV_SAMP` work — not sample-only). Each rendered in the six-section block. Linked from the References table and as the course capstone. |
 | 2.8.2 | 2026-10-14 | **Consistent per-question output.** Every question — in the main run flow (Step 6) and in every course lesson — now reports in the same fixed six-section block, in the same order: **1. Question · 2. AgentQL Sent · 3. DB SQL Generated · 4. Error & Explanation (if any) · 5. Key Findings · 6. Results**. Section 4 is omitted when the query succeeds; depth still scales to the audience, but the order never changes. |

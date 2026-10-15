@@ -358,6 +358,13 @@ def check_skill_file(
 #   *backlog-archive*    — archived backlog content, not maintained
 DOCS_EXCLUDED_PREFIXES = ("docs/audit/", "docs/superpowers/")
 
+# Generated aggregate references — one self-contained bundle built from the other
+# references by a generator (generate_agentql_offline.py). Its internal cross-links are
+# depth-shifted copies of the sources' links (a SKILL.md `references/foo.md` link lands a
+# level off once its body sits inside references/), not navigable paths, so they are not
+# validated here. The generator's own --check guards the bundle against drift instead.
+GENERATED_REFERENCE_BASENAMES = ("agentql-offline.md",)
+
 
 def _is_excluded_doc(doc_file: Path, repo_root: Path) -> bool:
     rel = str(doc_file.relative_to(repo_root))
@@ -377,7 +384,10 @@ def main() -> int:
 
     repo_root = Path(args.root).resolve()
     skill_files = runtime_globs(repo_root, "*/SKILL.md")
-    reference_files = runtime_globs(repo_root, "*/references/*.md")
+    reference_files = [
+        p for p in runtime_globs(repo_root, "*/references/*.md")
+        if p.name not in GENERATED_REFERENCE_BASENAMES
+    ]
     doc_files = [
         p for p in repo_root.glob("docs/**/*.md")
         if not _is_excluded_doc(p, repo_root)
