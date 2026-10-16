@@ -1,20 +1,26 @@
 ---
 name: ts-dependency-cleanup
-description: Inspect and delete ThoughtSpot dependency graphs via the v1 /dependency API family — list dependents by type, list objects referencing a logical/physical column, table, relationship or pinboard, delete objects with their dependents, and purge. Authenticates with a v1 session-login cookie. Operations run in any order; purge requires a prior applied delete.
+description: Inspect and delete ThoughtSpot dependency graphs via the v1 /dependency API family — list dependents by type, list objects referencing a logical/physical column, table, relationship or pinboard, and cascade-delete objects with their dependents behind a mandatory preview, TML backup and typed confirmation. Authenticates with a v1 session-login cookie.
 ---
 
 # ThoughtSpot: Dependency Manager v2
 
-Run `/dependency` lookup operations against a ThoughtSpot instance: pick an operation
-from the menu, supply the GUIDs, read the result. Seven read-only lookups are specified
-(six work), plus a delete and a purge that are absent from the current build.
+Run `/dependency` operations against a ThoughtSpot instance: pick an operation from the
+menu, supply the GUIDs, read the result. Seven read-only lookups (six work) plus one
+**destructive** operation — a cascade delete (operation 8) — which **works and is
+irreversible on the server**. It runs only behind a preview, a TML backup and a typed
+`DELETE`.
 
-> **Live-verified against `https://172.32.51.133:8443` on 2026-09-01.** The v1
-> `/dependency/*` family is present on this build — the repo-wide "v1 is gone" concern
-> does not apply here. **Five of the nine specified operations work; four do not.**
-> This is build-specific: re-run the probe in
+> **Live-verified against `https://172.32.51.133:8443` (2026-09-01 to 2026-09-07).** The
+> v1 `/dependency/*` family is present on this build — the repo-wide "v1 is gone" concern
+> does not apply here. **Seven of the eight operations work, including the delete; only
+> operation 7 (pinboard) is broken.** This is build-specific: re-run the probe in
 > [references/open-items.md](references/open-items.md) before trusting it elsewhere.
 > The migration path to a `ts dependency` CLI group is open item #6.
+>
+> **Purge (`dependency/purge`) is deliberately not part of this release.** Its route is
+> live, but it takes no parameters and its scope — possibly every soft-deleted object on
+> the instance — is unverified (open item #8). It must not be called from this skill.
 
 ## Operation status on this build
 
@@ -27,12 +33,11 @@ from the menu, supply the GUIDs, read the result. Seven read-only lookups are sp
 | 5 | Referencing a physical column | `dependency/physicalcolumn` | **GET** | Works |
 | 6 | Referencing a physical table | `dependency/physicaltable` | **GET** | Works |
 | 7 | Referencing a pinboard | `dependency/pinboard` | GET | **BROKEN — 500 NPE** |
-| 8 | Delete with dependents | `dependency/delete-with-dependents` † | **POST** (form) | Works |
-| 9 | Purge | `dependency/purge` † | **POST** | Route live (`OPTIONS` 204); scope unverified |
+| 8 | Delete with dependents | `dependency/delete-with-dependents` † | **POST** (form) | Works — **destructive** |
 
-† **Operations 8 and 9 are on a different prefix**: `/callosum/v1/dependency/`, *not*
-`/callosum/v1/tspublic/v1/` where 1–7 live. Requesting them under the tspublic prefix
-returns 404 — which is why three earlier passes wrongly recorded them as absent.
+† **Operation 8 is on a different prefix**: `/callosum/v1/dependency/`, *not*
+`/callosum/v1/tspublic/v1/` where 1–7 live. Requesting it under the tspublic prefix
+returns 404 — which is why three earlier passes wrongly recorded it as absent.
 Operation 8 also requires **two parameters beyond `id`**: `type` and
 `operation_type=DELETE_OBJECT_CASCADE`.
 
@@ -49,6 +54,7 @@ into a single prompt to cut round-trips.
 | File | Purpose |
 |---|---|
 | [references/open-items.md](references/open-items.md) | Live probe results (2026-09-01), verified verbs and response shapes, and the remaining unknowns |
+| [../ts-dependency-manager/SKILL.md](../ts-dependency-manager/SKILL.md) Step 7 / Step 11 | The `ts dependency backup` / `ts dependency rollback` contract operation 8's backup reuses |
 
 ---
 
@@ -57,6 +63,8 @@ into a single prompt to cut round-trips.
 - A ThoughtSpot profile for the target cluster — run `/ts-profile-thoughtspot` if none exists
 - The profile's credential env var must be set in the calling shell
 - The user must have **MODIFY** or **FULL** access on any object touched by operation 8
+- The `ts` CLI (`pip install -e tools/ts-cli`) with the **same profile** — operation 8's
+  TML backup and rollback run through `ts dependency backup` / `ts dependency rollback`
 
 Credentials follow the repo-wide convention (`.claude/rules/security.md`): the profile
 in `~/.claude/thoughtspot-profiles.json` holds `base_url`, `username` and the **name** of
@@ -138,19 +146,17 @@ On invocation, display this before doing any work:
     6  Referencing a physical table        ID(s)
     7  Referencing a pinboard              ID(s)   [BROKEN on this build — 500]
 
-  Destructive — preview first, typed confirmation required:
+  Destructive — preview, TML backup and typed confirmation, always:
     8  Delete objects with their dependents   TYPE + ID(s)  [preview by default]
-    9  Purge deleted objects with dependents  — requires an applied 8 first
 
     Q  Quit
 ```
 
 Operations 1–6 may be run in any order, repeatedly, in one session, and all work.
-Operation 9 is the only sequenced one: it purges what operation 8 deleted, so it is
-refused until an operation 8 has run with `apply_changes=true` in this session.
 
 Operation 8 defaults to `apply_changes=false` — a preview that changes nothing. Applying
-it for real requires a typed `DELETE`.
+it for real requires a successful TML backup of everything in the preview **and** a
+typed `DELETE`.
 
 Operation 7 returns a server-side 500 on this build. The skill reports it; it must not
 substitute a different endpoint to work around it.
@@ -167,7 +173,7 @@ Do not show the menu until the user confirms.
 After Step 0, show the operation menu and read one selection:
 
 ```
-Which operation? Enter 1–9, or Q to quit:
+Which operation? Enter 1–8, or Q to quit:
 ```
 
 Save `{operation}` and go to the matching section. After any operation completes,
@@ -177,7 +183,7 @@ Save `{operation}` and go to the matching section. After any operation completes
 
 ## Shared — input handling
 
-Every operation takes `id`, and only operation 1 also takes `type`.
+Every operation takes `id`; operations 1 and 8 also take `type`.
 
 ### Output contract — always render results in the chat
 
@@ -263,9 +269,10 @@ Proceed? (Y / N):
 Reject and re-prompt if the list is empty, or if any entry is not a 36-character
 8-4-4-4-12 hex GUID. Do not silently drop a malformed entry — name it and ask again.
 
-### Collecting `type` (operation 1 only)
+### Collecting `type` (operation 1)
 
-`type` is **mandatory** for operation 1. Valid values, offered as a numbered pick:
+`type` is **mandatory** for operation 1. (Operation 8 takes a narrower set — see its
+parameter table.) Valid values, offered as a numbered pick:
 
 ```
   1  PHYSICAL_COLUMN
@@ -430,10 +437,87 @@ name and GUID, plus a per-type count and a total. `[]` means the object has no d
 and only it would be deleted. If the payload is unreadable, **stop** — do not proceed to 8b.
 
 Also save the `csv` field (a ready-made export of the impact set) outside the repo and
-print its path, since this skill keeps no backup of its own. The CSV supplements the
-chat table; it never replaces it.
+print its path. The CSV is a **record** of what is being removed, not a means of
+recovery — that is 8b's job. It supplements the chat table; it never replaces it.
 
-### 8b — Typed confirmation
+### 8b — TML backup (non-negotiable, always runs)
+
+**A successful TML export of everything the preview lists must exist before 8d runs.**
+The `/dependency` API has no undo, and #19 shows the cascade is wider than any lookup
+predicts, so this step is not optional and is not skipped for a "small" delete. Backup
+failure aborts operation 8 — never proceed with a partial backup.
+
+It reuses the sibling skill's codified backup rather than re-implementing it:
+`ts dependency backup` exports every object first and **writes nothing if any export
+fails**, then writes one file per object plus a `manifest.json` that
+`ts dependency rollback` reads.
+
+**1. Pick the backup location.** Ask:
+
+```
+Where should the TML backup be saved?
+
+  1  /tmp/   (default — ephemeral, cleared on reboot)
+  2  Custom path   (recommended — somewhere durable)
+
+Enter 1 or a path [default: 1]:
+```
+
+**2. Identify the source object** — the plan's `source` slot, which the backup always
+includes:
+
+| `type` | Source object | Why |
+|---|---|---|
+| `LOGICAL_COLUMN` | The **Table or Model that owns the column** | It is *modified*, not deleted — rolling it back in place restores the column |
+| `LOGICAL_TABLE` | The requested object itself | It is deleted; see the caveat below |
+
+The `/dependency` responses do not name a column's owning object. Ask the user for it
+(offer `ts metadata search --profile {name} --name "%keyword%"` to find it), export its
+TML once, and **confirm the column's name — `sourceColumnName` in the preview CSV —
+appears in it** before proceeding. A wrong source object means the column cannot be
+restored.
+
+**3. Map each preview dependent** to the backup's type vocabulary:
+
+| Preview `dependentType` (`dependentSubType`) | Backup `type` |
+|---|---|
+| `PINBOARD_ANSWER_BOOK` | `LIVEBOARD` |
+| `QUESTION_ANSWER_BOOK` | `ANSWER` |
+| `LOGICAL_TABLE` (`WORKSHEET`) | `MODEL` |
+| `LOGICAL_TABLE` (`SQL_VIEW` / `AGGR_WORKSHEET`) | `VIEW` |
+| `LOGICAL_TABLE` (`ONE_TO_ONE_LOGICAL`) | `TABLE` |
+
+An unrecognised type or subtype → **stop and show it to the user**. Do not guess; the
+type decides rollback order.
+
+**4. Run the backup** with every unique preview object as a `delete` entry:
+
+```bash
+echo '{
+  "operation": "REMOVE",
+  "source": {"guid": "<source-guid>", "type": "<TABLE|MODEL>", "name": "<source-name>"},
+  "delete": [ {"guid": "<full-guid>", "type": "ANSWER", "name": "<name>"}, ... ],
+  "out_dir": "<chosen-location>"
+}' | ts dependency backup --profile {name}
+```
+
+Non-zero exit → **stop**. Report the error verbatim; nothing has been deleted and no
+backup was written. On success, print the backup directory and check the manifest holds
+**1 + N** entries (source + every unique preview object). A count mismatch → stop.
+
+**Rollback** — if the delete must be undone, `ts dependency rollback --backup-dir
+<dir> --profile {name}`. Be plain with the user about what it cannot do:
+
+- Deleted objects are re-imported with **new GUIDs**. Anything that referenced an
+  original GUID — including objects outside the preview, or ones you cannot see
+  (cross-Org, RLS-restricted, Spotter feedback) — stays broken.
+- Sets / Cohorts / Alerts / Spotter feedback on deleted objects are not restored.
+- For a **`LOGICAL_TABLE`** delete, the requested object sits in the source slot, which
+  rollback updates *in place* at its original GUID. Whether that recreates a deleted
+  object is **not verified** (open item #20) — if it fails, re-import that file with
+  `ts tml import` as a new object.
+
+### 8c — Typed confirmation
 
 ```
 This will delete {N} objects, including {M} dependents you did not name:
@@ -444,9 +528,11 @@ This will delete {N} objects, including {M} dependents you did not name:
 Copy-ready GUIDs of everything above:
   {one full GUID per line, nothing else}
 
-There is no backup and no rollback in this skill — the deletion is not reversible here.
-The preview CSV has been saved to {path} as the only record of what is being removed.
-That path is session-scoped temp storage — copy it somewhere durable to keep it.
+The deletion is irreversible on the server. A TML backup of all {N} objects is at
+  {backup_dir}
+Rollback (`ts dependency rollback`) re-creates them with NEW GUIDs — references to the
+old GUIDs from anything outside this list will stay broken.
+The preview CSV is at {path} (session-scoped temp storage — copy it to keep it).
 
 Type DELETE to apply, or anything else to cancel:
 ```
@@ -457,7 +543,7 @@ Every GUID in this prompt is the **full 36 characters** (contract rule 5). This 
 last screen before an irreversible delete: a truncated id here means the user cannot
 look up what they are about to lose, and cannot record it afterwards.
 
-### 8c — Apply
+### 8d — Apply
 
 Re-run the identical call with `apply_changes=true`. Then:
 
@@ -472,12 +558,12 @@ Re-run the identical call with `apply_changes=true`. Then:
   dangerous outcome and must not pass silently
 - Save the applied `csv` alongside the table, print the path, and note it is
   session-scoped temp storage to copy elsewhere
-- Record the applied GUIDs in `{purged_pending}`; operation 9 reads it
+- Print the backup directory again, with the rollback command
 - Re-run the matching lookup (operations 1–6) per id and confirm it now returns empty,
   and spot-check individual objects via `metadata/details` (an absent `storables` array
   confirms deletion)
 
-### 8d — Business-rule refusals are normal, and are not your bug
+### 8e — Business-rule refusals are normal, and are not your bug
 
 The API enforces referential rules and returns `400 METADATA_ERROR` with the reason in
 `details`. **Verified example:**
@@ -499,53 +585,6 @@ Seen so far: `Deleting columns linked to filters is not allowed`.
 
 ---
 
-## Operation 9 — Purge deleted objects with dependents
-
-**Endpoint (verified 2026-09-03):** `POST {base_url}/callosum/v1/dependency/purge` —
-same `$D` prefix as operation 8. `OPTIONS` returns `204`, so the route is live. The
-specified input set is empty — no `id`.
-
-### 9a — Confirm the scope before ever calling it
-
-**The most dangerous call in this skill, and its scope is still unverified.** A bare
-`GET` on it returned `403` with `debug: ["Cannot Delete System Objects"]` — meaning the
-call reached deletion logic and was stopped by system-object protection, **not** by a
-missing parameter. That is evidence for the instance-wide reading:
-
-| Reading | Consequence |
-|---|---|
-| Instance-wide over everything soft-deleted | Purges objects this session never touched, including other users' deletions |
-| Scoped implicitly (session / recent deletes) | Behaves as expected |
-
-State this to the user and get explicit agreement before calling. Do not settle it by
-calling the endpoint to see what happens — that experiment *is* the destructive act.
-
-### 9b — Sequencing guard
-
-Purge finalises what operation 8 deleted, so check `{purged_pending}`:
-
-- **Empty** — refuse, and offer to run operation 8 first:
-
-  ```
-  Nothing to purge — no operation 8 has been applied in this session.
-  ```
-
-- **Populated** — list what is pending, then require the exact string `PURGE`.
-
-The guard is session-scoped: it cannot see a delete applied earlier or by another user,
-so a legitimate purge may be refused. Say so plainly and let the user decide — but
-**never fabricate a ledger entry** to get past it (open item #7).
-
-### 9c — Call
-
-```bash
-curl -sS -k -b "$JAR" -w '\n%{http_code}\n' -X POST "$D/purge"
-```
-
-Report the response verbatim, clear `{purged_pending}` on success, return to the menu.
-
----
-
 ## Error Handling
 
 | Symptom | Likely cause | Action |
@@ -558,7 +597,9 @@ Report the response verbatim, clear `{purged_pending}` on success, return to the
 | `400` with an id complaint | `id` not sent as a JSON array string | Confirm the array form `["guid"]`, including for a single GUID |
 | `405 Method Not Allowed` | Wrong verb | Operations 2–7 are GET; only operation 1 is POST. Check the status table — this is not an encoding problem |
 | `500` on `pinboard` | Server-side NPE in `referencingObjectsOfPinboards` | Known broken on this build (open item #11). Report and move on |
-| `404` on `delete-with-dependents` / `purge` | Wrong prefix | These two are on `/callosum/v1/dependency/`, not `/callosum/v1/tspublic/v1/`. Fix the prefix — do not conclude the endpoint is absent |
+| `404` on `delete-with-dependents` | Wrong prefix | It is on `/callosum/v1/dependency/`, not `/callosum/v1/tspublic/v1/`. Fix the prefix — do not conclude the endpoint is absent |
+| `ts dependency backup` non-zero exit | Export failed (permissions, token, invalid object) | Stop operation 8. Nothing was deleted or written. Report the error verbatim |
+| User asks to purge | Out of scope for this release | Refuse. `dependency/purge` takes no parameters and its scope is unverified (open item #8) — do not call it, not even to "check" |
 | `400 INVALID_METADATA_TYPE` | `type` missing | Send `type=LOGICAL_TABLE` or `LOGICAL_COLUMN` |
 | `400 INVALID_OPERATION_TYPE` | `operation_type` missing | Send `operation_type=DELETE_OBJECT_CASCADE` (that exact param name) |
 | `400 METADATA_ERROR` on delete | A business rule blocks it | Read `details` — it names the blocker (e.g. column linked to a filter). Report verbatim; do not retry or reshape |
@@ -578,8 +619,8 @@ Delete the cookie jar — it holds a live session:
 rm -f "$JAR"
 ```
 
-No backups and no cached state otherwise; the session ledger `{purged_pending}` is
-in-memory only and dies with the session.
+Leave the operation 8 backup directory in place — it is the user's only rollback path.
+Remind them where it is.
 
 ---
 
@@ -587,4 +628,4 @@ in-memory only and dies with the session.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.0.0 | 2026-09-08 | Initial release. Nine `/dependency` operations behind one menu, authenticated via v1 session login (`session/login` -> cookie jar), reading `base_url` / `username` / `password_env` from `~/.claude/thoughtspot-profiles.json`. **Ops 1-6** (`listdependents` POST + the five GET per-type lookups) and **op 8** (`delete-with-dependents`, cascade) are live-verified; **op 7** (`pinboard`) returns a server-side 500 NPE; **op 9** (`purge`) has a live route but unverified scope, gated behind an explicit agreement. Ops 8/9 sit on the `/callosum/v1/dependency/` prefix, not the `/callosum/v1/tspublic/v1/` prefix ops 1-7 use. Output contract requires full 36-character GUIDs and in-chat object tables -- a truncated GUID copies with its ellipsis, and a scratchpad CSV is not a delivery channel. Op 8's `apply_changes=false` preview is the authoritative blast radius: the ops 1-6 lookups under-report cascade scope (4 reported vs 12 deleted, live 2026-09-07 -- open item #19). |
+| 1.0.0 | 2026-09-08 | Initial release. Eight `/dependency` operations behind one menu, authenticated via v1 session login (`session/login` -> cookie jar), reading `base_url` / `username` / `password_env` from `~/.claude/thoughtspot-profiles.json`. **Ops 1-6** (`listdependents` POST + the five GET per-type lookups) and **op 8** (`delete-with-dependents`, cascade) are live-verified; **op 7** (`pinboard`) returns a server-side 500 NPE. Op 8 sits on the `/callosum/v1/dependency/` prefix, not the `/callosum/v1/tspublic/v1/` prefix ops 1-7 use, and runs only after a mandatory `apply_changes=false` preview, a non-negotiable `ts dependency backup` TML export of every previewed object (rollback via `ts dependency rollback`), and a typed `DELETE`. `dependency/purge` is deliberately excluded: no parameters, unverified scope (open item #8). Output contract requires full 36-character GUIDs and in-chat object tables -- a truncated GUID copies with its ellipsis, and a scratchpad CSV is not a delivery channel. Op 8's `apply_changes=false` preview is the authoritative blast radius: the ops 1-6 lookups under-report cascade scope (4 reported vs 12 deleted, live 2026-09-07 -- open item #19). |

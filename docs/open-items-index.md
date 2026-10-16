@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**232 total items** across 25 skills — **76 open**, 140 verified, 16 deferred
+**233 total items** across 25 skills — **76 open**, 139 verified, 18 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -16,7 +16,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
 | ts-audit | 15 | **5** | 10 | 0 |
 | ts-convert-from-qlik | 6 | **5** | 0 | 1 |
-| ts-dependency-cleanup | 19 | **5** | 14 | 0 |
+| ts-dependency-cleanup | 20 | **5** | 13 | 2 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
 | ts-convert-from-tableau | 17 | **3** | 12 | 2 |
@@ -77,10 +77,10 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-to-dbt | #2 | Legacy MetricFlow spec (semantic_models.yml) | OPEN |
 | ts-convert-to-dbt | #13 | Column Security Rules (CSR) not in Table TML | OPEN |
 | ts-dependency-cleanup | #6 | Migrate the calls into a `ts dependency` CLI group | OPEN |
-| ts-dependency-cleanup | #7 | The purge guard is session-scoped | OPEN |
-| ts-dependency-cleanup | #8 | Purge scope: evidence now points to instance-wide | OPEN |
+| ts-dependency-cleanup | #12 | CLOSED. The endpoints were never absent; the prefix was wrong. | OPEN |
 | ts-dependency-cleanup | #14 | Dependent data on this cluster is sparse | OPEN |
 | ts-dependency-cleanup | #16 | CLOSED. Encoding is form-encoded, and two parameters were undocumented. | OPEN |
+| ts-dependency-cleanup | #20 | Rollback of a `LOGICAL_TABLE` cascade | OPEN |
 | ts-dependency-manager | #11 | Reusable Set (cohort) delete command | OPEN |
 | ts-dependency-manager | #13 | Chart `client_state_v2` stale column references | OPEN |
 | ts-dependency-manager | #14 | Cohort `pass_thru_filter` lost on round-trip | OPEN |

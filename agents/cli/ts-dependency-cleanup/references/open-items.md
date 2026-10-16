@@ -6,7 +6,13 @@ which is blocked on the auth decision in #4.
 
 Per `.claude/rules/api-research.md`, each item should be checked against
 `mcp__SpotterCode__get-rest-api-reference` before live probing. The MCP was not
-authorized in the session that authored this skill, so no spec lookup was done.
+authorized in the session that authored this skill, so no spec lookup was done — and it
+was still unauthorized at the PR #505 review response (2026-10-16). #8 is the item that
+lookup would settle at zero risk; do it first.
+
+**This file is an append-only journal.** Several items were re-probed and their first
+entry is superseded; each superseded heading now says so and points forward. Read an
+item's **last** entry, not its first.
 
 ---
 
@@ -73,20 +79,32 @@ The sanctioned path (`.claude/rules/ts-cli.md`, "When a skill needs an API call 
 doesn't have yet"): verify via MCP → probe → add the command → replace the inline call.
 Blocked behind #1 — do not build CLI commands for endpoints that 404.
 
-## #7 — The purge guard is session-scoped — OPEN (design limit, not a bug)
+## #7 — The purge guard is session-scoped — DEFERRED with #8 (operation 9 cut from 1.0.0)
 
-Operation 9 refuses unless operation 8 applied a delete **in the same session**. It
-cannot see deletes applied earlier, by another user, or in another session, so it will
-refuse some legitimate purges. Options if that proves annoying: query for soft-deleted
-objects and gate on that instead, or drop the guard and rely on the typed `PURGE`
-confirmation alone. Do not "solve" it by letting the executor write the ledger by hand.
+*Historical.* The draft operation 9 refused unless operation 8 applied a delete **in the
+same session**, so it could not see deletes applied earlier, by another user, or in
+another session. Operation 9 was removed from 1.0.0 (PR #505 review), so this guard no
+longer exists.
 
-## #8 — Does `/dependency/purge` take an `id` body? — UNVERIFIED
+**Do not take the second remedy this entry used to list** — "drop the guard and rely on
+the typed `PURGE` confirmation alone". With an unparameterised call whose scope is
+unknown (#8), that strips the last friction from a possibly instance-wide purge. A purge
+re-introduction must be designed against #8's answer, not against this guard.
 
-The spec for this skill lists no inputs for operation 9, so SKILL.md sends no body and
-assumes purge is instance-wide over everything soft-deleted. If purge is actually
-scoped per-GUID, the current call is wrong in a dangerous direction — it would purge
-more than the user intended. **Verify this before anyone runs operation 9 for real.**
+## #8 — Purge scope — DEFERRED (BL-411); operation 9 cut from 1.0.0 — see the 2026-09-03 and 2026-10-16 entries below
+
+The spec for this skill lists no inputs for purge, so the draft sent no body. Three
+readings are consistent with every fact recorded here:
+
+| Reading | Consequence |
+|---|---|
+| Instance-wide over everything soft-deleted | Purges objects this skill never touched, including other users' pending deletions |
+| Scoped implicitly (session / recent deletes) | Behaves as the draft assumed |
+| Operates on an ordinary trash tier that operation 8 never populates | Useless for operation 8's objects **and** maximally destructive to third parties |
+
+The draft's "purge finalises what operation 8 deleted" was itself never verified. Resolve
+by spec lookup (`get-rest-api-reference`) — **never** by calling the endpoint. Tracked as
+BL-411; the skill refuses purge requests until it is answered.
 
 ## #9 — `listdependents` cannot reach pinboards — VERIFIED FROM SPEC (needs live confirm)
 
@@ -233,14 +251,16 @@ the handler itself is throwing. **No client-side fix.** Either a ThoughtSpot bug
 build or an undocumented required parameter. Worth a support ticket with the incident id
 (`94c3ec23-b140-45a0-ac2d-53e16d00d2aa`).
 
-## #12 — Operations 8 and 9 are absent on this build — VERIFIED 2026-09-01
+## #12 — SUPERSEDED (wrong prefix — see the CLOSED entry under "Ops 8 and 9 FOUND"). First pass: absent on this build
 
 404 on POST, GET and DELETE, and on every name variant tried:
 `delete-with-dependents`, `deletewithdependents`, `deletewithdependent`, `purge`,
 `purgedeleted`, `purge-deleted`, `deletedependents`.
 
-`purge` was probed with `OPTIONS` only — never invoked — because a parameterless purge
-could act instance-wide (see #8). It 404s on OPTIONS too.
+`purge` was probed with `OPTIONS` only on this pass, because a parameterless purge
+could act instance-wide (see #8). It 404s on OPTIONS too. **Correction (2026-10-16):** this
+"never invoked" held only for this pass — a later pass sent a bare `GET` that reached
+deletion logic. See #8's 2026-09-03 entry.
 
 Either these are newer than this build, or they live under a different route. Resolve
 via `get-rest-api-reference` when the SpotterCode MCP is authorized. **#8 (purge scope)
@@ -314,7 +334,7 @@ over. SKILL.md's bucket list and the multi-bucket note are corrected.
 users care about have richer dependency graphs. Prefer a user-supplied GUID over a
 scanned one when validating shape.
 
-## #16 — Ops 8/9 request encoding is inferred, not verified — OPEN
+## #16 — SUPERSEDED (see the CLOSED entry below). Ops 8/9 request encoding was inferred
 
 SKILL.md writes both as `POST` with `application/x-www-form-urlencoded`, matching
 operation 1 (the only other POST in the family). This is an **inference from a sibling
@@ -323,7 +343,7 @@ confirmed. On the first live call that returns `400`, retry as
 `Content-Type: application/json` with `{"id":["guid"],"apply_changes":false}` and record
 which the API accepts.
 
-## #12 — Ops 8/9 absent — RE-PROBED 2026-09-03, still absent
+## #12 — SUPERSEDED (see the CLOSED entry below). Re-probed 2026-09-03, still absent under the wrong prefix
 
 Second pass added the hypothesis that `delete-with-dependents` being **hyphenated**
 (unlike every working v1 endpoint here — `logicaltable`, `listdependents`) meant it was a
@@ -405,14 +425,15 @@ with `{"dependents":{"f4d845ef-...":[]}}` (full GUID not recorded at probe time)
 of the request shape. The blocker for `73dc7914` is a filter referencing it — plausibly
 on the liveboard `Test LB` (`51194061`), which operation 2 lists as one of its dependents.
 
-## #8 — Purge scope: evidence now points to instance-wide — 2026-09-03
+## #8 — Purge scope: evidence now points to instance-wide — 2026-09-03 (see also the 2026-10-16 entry)
 
 `OPTIONS /callosum/v1/dependency/purge` → `204` (route live). A bare `GET` → `403` with
 `debug: ["Cannot Delete System Objects"]`. That error comes from **deletion logic**, not
 from parameter validation — i.e. the call proceeded to act and was stopped only by
 system-object protection. Consistent with purge operating over everything soft-deleted
 rather than a session-scoped set. **Still not conclusive, and must not be resolved by
-calling it.** The mandatory scope gate in SKILL.md 9a stands.
+calling it.** (The draft's SKILL.md 9a scope gate was superseded by removing operation 9
+altogether — see the 2026-10-16 entry.)
 
 
 ---
@@ -454,3 +475,45 @@ count, or the report overstates the damage by 2.3x.
 **Open question — not yet probed.** Whether the `dependents` field nests the full closure
 for a *deeper* graph (column -> model -> liveboard -> ?) or flattens only two levels. All
 12 objects here were reachable within two hops, so this run does not settle it.
+
+---
+
+# PR #505 review response — 2026-10-16
+
+## #8 — Did the 2026-09-03 bare `GET` on purge delete anything? — CANNOT BE ESTABLISHED
+
+The 2026-09-03 entry records a bare `GET /callosum/v1/dependency/purge` returning `403
+["Cannot Delete System Objects"]` — an error from deletion logic, i.e. the call proceeded
+far enough to act. That was the experiment this file's own rule prohibits, and the
+earlier "never invoked" note was left uncorrected (now fixed in #12's first entry).
+
+**No inventory of soft-deleted objects was taken before or after that call**, so whether
+it purged anything before the 403 fired **cannot be established** from what was
+recorded. Stating that plainly rather than implying it was checked. If the cluster's
+audit log for 2026-09-03 is reachable, it is the only remaining way to find out.
+
+**Decision:** operation 9 is removed from 1.0.0. SKILL.md refuses purge requests and
+points here. Nothing user-facing changes — `README.md` and `CHANGELOG.md` already
+described the skill without purge. Re-introduction is BL-411 and needs (a) the spec
+lookup, (b) a scope answer, (c) a bounded call or per-GUID loop, and (d) a templated
+confirmation plus post-purge verification at least as strong as operation 8's.
+
+## #19 — test coverage — OPEN → covered by the smoke test's Step 4
+
+The smoke test's earlier claim to cover #19 was wrong: it compared the applied set with
+the preview, which is a different regression. Step 4 now asserts #19's actual property —
+every object the operation 2 lookup reports is contained in the operation 8 preview — and
+prints the lookup-vs-preview ratio, without deleting anything.
+
+## #20 — Rollback of a `LOGICAL_TABLE` cascade — OPEN
+
+Operation 8's backup reuses `ts dependency backup`, whose plan requires a `source`. For a
+`LOGICAL_COLUMN` delete the source is the owning Table/Model, which is modified rather
+than deleted, so `ts dependency rollback`'s in-place update is the right restore. For a
+`LOGICAL_TABLE` delete the requested object itself fills the source slot — and rollback
+updates source entries **in place at the original GUID**, which no longer exists.
+Whether that import recreates the object, fails, or creates it under a new GUID is not
+verified. SKILL.md 8b says so and gives the manual `ts tml import` fallback. Verify on
+a disposable table before relying on it; the clean fix is a `ts dependency backup` plan
+form with no `source` (or a `DELETE_SOURCE` intent).
+

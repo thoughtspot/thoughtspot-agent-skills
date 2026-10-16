@@ -18,27 +18,35 @@ raw calls the skill makes rather than a CLI.
       table is stale and should be updated (open item #11).
   4.  Op 8 preview                  — NON-destructive. `apply_changes=false`
       against --column-guid. Validates the 200 shape (`dependents` + `csv`) and
-      reports the cascade size. A `400 METADATA_ERROR` is recorded as a normal
-      business-rule refusal, not a test failure (open item #18).
+      reports the cascade size. Asserts open item #19's property: every object
+      the op-2 lookup reports must be in the preview (the preview is the
+      authoritative blast radius; the lookup under-reports). A `400
+      METADATA_ERROR` is recorded as a normal business-rule refusal, not a test
+      failure (open item #18).
   5.  Op 8 apply                    — DESTRUCTIVE and IRREVERSIBLE. Gated behind
-      --run-delete (default OFF). When skipped, nothing is deleted. When set,
-      it diffs the applied set against the Step 4 preview to catch the
-      under-reporting documented in open item #19.
+      --run-delete (default OFF), which must be run BY HAND:
+        * run_smoke_tests.py refuses to pass it, so it cannot fire from a gate;
+        * stdin must be a TTY and the operator must type DELETE, as the skill
+          requires;
+        * the preview cascade must be <= --max-cascade (default 3);
+        * the applied CSV is saved to a durable path, printed, and kept.
+      Then diffs applied vs preview (a preview-vs-apply regression — not #19,
+      which Step 4 covers).
   6.  Cleanup                       — deletes the cookie jar (a live credential).
 
-Operation 9 (purge) is deliberately NOT exercised: its scope is unverified and
-may be instance-wide over everything soft-deleted (open item #8). A smoke test
-must not be the thing that finds out.
+Purge is deliberately NOT exercised and is not part of the skill: its scope is
+unverified and may be instance-wide over everything soft-deleted (open item #8).
 
 Safety tiers: Steps 1-4 and 6 never modify data and always run. Step 5 is the
-only destructive leg and requires an explicit opt-in flag.
+only destructive leg.
 
 Usage:
     python tools/smoke-tests/smoke_ts_dependency_cleanup.py \
         --ts-profile dot133 \
         --column-guid <logical-column-guid> \
         [--pinboard-guid <guid>]     # optional: exercises the op-7 500 assertion
-        [--run-delete]               # DESTRUCTIVE opt-in, default OFF
+        [--run-delete]               # DESTRUCTIVE opt-in, default OFF, manual only
+        [--max-cascade N]            # refuse --run-delete above N objects (default 3)
 
 Credentials: the profile in ~/.claude/thoughtspot-profiles.json names an env var
 (`password_env`); the secret itself lives in the OS keychain and must already be
@@ -52,10 +60,14 @@ import os
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 PROFILES = Path.home() / ".claude" / "thoughtspot-profiles.json"
 GUID_LEN = 36
+DEFAULT_MAX_CASCADE = 3
+# Durable, outside the repo: the applied CSV is the record of an irreversible delete.
+RECORD_DIR = Path.home() / ".ts-dependency-cleanup" / "smoke-deletes"
 
 
 def _fail(msg: str) -> None:
@@ -94,8 +106,20 @@ def _curl(args: list[str], verify_ssl: bool) -> tuple[int, str]:
     return status, body
 
 
+def _ids(objs: list) -> set[str]:
+    return {o["id"] for o in objs if isinstance(o, dict) and o.get("id")}
+
+
+def _lookup_ids(parsed: dict, guid: str) -> set[str]:
+    """Flatten an op 1-6 response ({guid: {BUCKET: [header, ...]}}) to dependent ids."""
+    out: set[str] = set()
+    for bucket in (parsed.get(guid) or {}).values():
+        out |= _ids(bucket)
+    return out
+
+
 def run_smoke_test(profile_name: str, column_guid: str, pinboard_guid: str | None,
-                   run_delete: bool) -> None:
+                   run_delete: bool, max_cascade: int = DEFAULT_MAX_CASCADE) -> None:
     prof = _load_profile(profile_name)
     base = prof["base_url"].rstrip("/")
     verify = bool(prof.get("verify_ssl", True))
@@ -137,6 +161,7 @@ def run_smoke_test(profile_name: str, column_guid: str, pinboard_guid: str | Non
         print("\nStep 2  read-only lookups (ops 2-6)")
         id_arg = json.dumps([column_guid])
         shape_seen = False
+        lookup_ids: set[str] = set()
         for ep in ("logicalcolumn", "logicaltable", "logicalrelationship",
                    "physicalcolumn", "physicaltable"):
             status, body = _curl(["-b", str(jar), "-G", f"{v1}/dependency/{ep}",
@@ -149,6 +174,8 @@ def run_smoke_test(profile_name: str, column_guid: str, pinboard_guid: str | Non
                 _fail(f"{ep} returned unparseable JSON")
             if column_guid in parsed:
                 n = sum(len(v) for v in parsed[column_guid].values())
+                if ep == "logicalcolumn":
+                    lookup_ids = _lookup_ids(parsed, column_guid)
                 print(f"  PASS  {ep:22} 200, guid resolved, {n} dependent(s)")
                 shape_seen = True
             elif parsed == {}:
@@ -185,8 +212,15 @@ def run_smoke_test(profile_name: str, column_guid: str, pinboard_guid: str | Non
             if "dependents" not in parsed or "csv" not in parsed:
                 _fail("200 preview missing 'dependents' or 'csv' key")
             objs = parsed["dependents"].get(column_guid, [])
-            preview_ids = {o["id"] for o in objs}
+            preview_ids = _ids(objs)
             print(f"  PASS  200, cascade = {len(preview_ids)} object(s), csv present")
+            # Open item #19: the lookup under-reports, so the preview must CONTAIN it.
+            missing = lookup_ids - preview_ids
+            if missing:
+                _fail(f"preview omits {len(missing)} object(s) the op-2 lookup reports "
+                      f"(open item #19 inverted): {sorted(missing)}")
+            print(f"  PASS  #19 lookup {len(lookup_ids)} ⊆ preview {len(preview_ids)} "
+                  f"— the lookup is not a blast radius")
         elif status == 400 and "METADATA_ERROR" in body:
             detail = json.loads(body).get("details", "").replace("\n", " ")
             print(f"  PASS  400 business-rule refusal (normal — open item #18): {detail[:120]}")
@@ -198,22 +232,43 @@ def run_smoke_test(profile_name: str, column_guid: str, pinboard_guid: str | Non
 
         # --- Step 5: op 8 apply (DESTRUCTIVE, opt-in) ----------------------
         print("\nStep 5  op 8 apply (apply_changes=true) — DESTRUCTIVE")
+        if run_delete and len(preview_ids) > max_cascade:
+            print(f"  REFUSE  preview cascade is {len(preview_ids)} object(s), over "
+                  f"--max-cascade {max_cascade}; nothing was deleted")
+            run_delete = False
+        if run_delete and not sys.stdin.isatty():
+            print("  REFUSE  --run-delete needs an interactive terminal for the typed "
+                  "DELETE confirmation; nothing was deleted")
+            run_delete = False
+        if run_delete:
+            print(f"  About to IRREVERSIBLY delete {len(preview_ids)} object(s) plus "
+                  f"column {column_guid}:")
+            for g in sorted(preview_ids):
+                print(f"          {g}")
+            if input("  Type DELETE to apply, anything else to cancel: ") != "DELETE":
+                print("  CANCELLED  nothing was deleted")
+                run_delete = False
         if not run_delete:
-            print("  SKIP  --run-delete not set; nothing was deleted")
+            print("  SKIP  delete leg not run; nothing was deleted")
         else:
             apply_args = preview_args[:-1] + ["apply_changes=true"]
             status, body = _curl(apply_args, verify)
             if status != 200:
                 _fail(f"apply returned {status}: {body[:200]}")
-            objs = json.loads(body)["dependents"].get(column_guid, [])
-            applied_ids = {o["id"] for o in objs}
+            applied = json.loads(body)
+            RECORD_DIR.mkdir(parents=True, exist_ok=True)
+            record = RECORD_DIR / f"{datetime.now():%Y%m%d_%H%M%S}_{column_guid}.csv"
+            record.write_text(applied.get("csv", ""))
+            print(f"  RECORD  applied CSV kept at {record}")
+            objs = applied["dependents"].get(column_guid, [])
+            applied_ids = _ids(objs)
             print(f"  PASS  200, deleted {len(applied_ids)} object(s)")
             for o in sorted(objs, key=lambda x: (x.get("type", ""), x.get("name") or "")):
                 print(f"          {o.get('type'):22} {o.get('name')}  {o.get('id')}")
             extra = applied_ids - preview_ids
             if extra:
                 print(f"  WARN  {len(extra)} object(s) deleted that the preview did not "
-                      f"list — open item #19 regression:")
+                      f"list — preview-vs-apply regression:")
                 for g in sorted(extra):
                     print(f"          {g}")
             status, body = _curl(["-b", str(jar), "-G", f"{v1}/dependency/logicalcolumn",
@@ -242,11 +297,16 @@ def main() -> None:
                     help="a LOGICAL_COLUMN guid (36 chars)")
     ap.add_argument("--pinboard-guid", help="optional: exercises the op-7 500 assertion")
     ap.add_argument("--run-delete", action="store_true",
-                    help="DESTRUCTIVE: actually apply the cascade delete")
+                    help="DESTRUCTIVE: actually apply the cascade delete (manual runs "
+                         "only; needs a TTY and a typed DELETE)")
+    ap.add_argument("--max-cascade", type=int, default=DEFAULT_MAX_CASCADE,
+                    help=f"refuse --run-delete when the preview lists more than this "
+                         f"many objects (default {DEFAULT_MAX_CASCADE})")
     args = ap.parse_args()
     if len(args.column_guid) != GUID_LEN:
         _fail(f"--column-guid must be {GUID_LEN} chars, got {len(args.column_guid)}")
-    run_smoke_test(args.ts_profile, args.column_guid, args.pinboard_guid, args.run_delete)
+    run_smoke_test(args.ts_profile, args.column_guid, args.pinboard_guid, args.run_delete,
+                   args.max_cascade)
 
 
 if __name__ == "__main__":
