@@ -658,42 +658,54 @@ users running the *same* AgentQL get different rows, each correct for them. The 
 writes the filter and cannot remove it. Read [`architecture.md`](architecture.md) § "What the
 semantic layer guarantees".
 
-The sample Model has no RLS rule, so the two blocks below are **illustrative** (not live
-captures) — the shapes ThoughtSpot injects, and how they depend on **strict vs non-strict** RLS.
+The sample Model has no RLS rule, so the blocks below are **illustrative** (not live captures).
+Assume the rule is on the **fact** table. The clearest test is a **dimension-only** question —
+*"list all stores"* — because whether the fact is touched at all now depends on the RLS mode.
 
-**Strict RLS (recommended).** The rule is defined on **one** table — usually the **fact** — and
-ThoughtSpot **always includes the join to that table**, even when the question didn't otherwise
-need it. So the filter applies to *every* query. "Total sales" compiles to:
+**Strict RLS (recommended).** The rule is on one table (the fact), and ThoughtSpot **always
+forces the join to it in** — even for a question that only needs the stores dimension. So
+*"list all stores"* still joins the fact and applies the filter, and the AgentQL **cannot remove
+that join**:
 ```sql
-SELECT CASE WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES") ELSE 0 END "ca_1"
+SELECT "ta_2"."STORE" "ca_1"
 FROM "…"."FACT_SALES" "ta_1"
+  JOIN "…"."DIM_STORES" "ta_2" ON "ta_1"."STOREID" = "ta_2"."STOREID"
 WHERE ("ta_1"."_TENANT_ID" IN (2200539748))
+GROUP BY "ta_2"."STORE"
 LIMIT 100000
 ```
+The fact join is there **only** to carry the RLS filter — so every query is scoped, even one
+that never asked for a measure.
 
-**Non-strict RLS.** Only the tables actually in the search are included, so a rule on a table a
-given query doesn't touch **won't apply** — a leak. The safe shape is therefore RLS on **every**
-table, and the predicate appears on each one that's joined (the fact included):
+**Non-strict RLS.** Only the tables the question needs are included. *"List all stores"* touches
+just the stores table, so with the rule **only on the fact** there is no fact join and **no
+filter** — every tenant's stores come back. A leak:
+```sql
+SELECT "ta_1"."STORE" "ca_1"
+FROM "…"."DIM_STORES" "ta_1"
+GROUP BY "ta_1"."STORE"
+LIMIT 100000
+```
+The fix is RLS on **every** table. Then the predicate appears on each table a query does join
+(the fact included) — e.g. *"sales by store"*:
 ```sql
 … FROM "…"."FACT_SALES" "ta_1"
-  JOIN "…"."DIM_STORES"   "ta_2" ON "ta_1"."STOREID"   = "ta_2"."STOREID"
-  JOIN "…"."DIM_PRODUCTS" "ta_3" ON "ta_1"."PRODUCTID" = "ta_3"."PRODUCTID"
+  JOIN "…"."DIM_STORES" "ta_2" ON "ta_1"."STOREID" = "ta_2"."STOREID"
 WHERE (
   ("ta_1"."_TENANT_ID" IN (2200539748))
   AND ("ta_2"."_TENANT_ID" IN (2200539748))
-  AND ("ta_3"."_TENANT_ID" IN (2200539748))
 )
+GROUP BY "ta_2"."STORE"
 LIMIT 100000
 ```
 
-**Key Findings.** The `_TENANT_ID IN (…)` predicate is **injected by the RLS rule** into every
-query — the agent didn't write it and can't remove it; the tenant id comes from the querying
-user's context, so identical AgentQL returns correctly-scoped results per user. **Strict RLS**
-makes this deterministic by *forcing the secured table's join in*, so one rule on the fact covers
-everything; **non-strict** only filters tables a query happens to include, so you must secure
-**every** table. Either way security lives in the Model and is applied at compile time — the
-strongest argument for AgentQL over hand-written SQL. (Column-level security hides columns the
-same way.)
+**Key Findings.** The `_TENANT_ID IN (…)` predicate is **injected by the RLS rule** — the agent
+never wrote it and can't remove it; the tenant id comes from the user's context. The mode decides
+*reach*: **strict RLS forces the secured table's join into every query**, so one rule on the fact
+scopes even a dimension-only question deterministically; **non-strict** only filters tables a
+query already includes, so a rule on the fact alone leaks a stores-only query — secure **every**
+table. Either way security lives in the Model, applied at compile time — the strongest argument
+for AgentQL over hand-written SQL. (Column-level security hides columns the same way.)
 
 ### 3.6 Every product, including the ones with no sales — and the business rules in the SQL
 
