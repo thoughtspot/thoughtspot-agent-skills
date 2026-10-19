@@ -373,6 +373,7 @@ without re-deriving the query mechanics.
 | Version | Date | Summary |
 |---|---|---|
 | 2.17.0 | 2026-10-19 | **Join-type worked example in the course.** New illustrative lesson **2.9** (“The join type is the Model's, not yours”): the same *sales by product* AgentQL compiles to `JOIN` / `LEFT OUTER JOIN` / `RIGHT OUTER JOIN` / `FULL OUTER JOIN` depending purely on how the Model defines the fact↔dimension relationship — the agent never writes `JOIN`. Complements lesson 3.6 (AgentQL *overriding* an inner-join Model with a CTE outer join). Labelled illustrative (the sample Model is inner-only), kept out of the captured `lesson-sql.md`. |
+| 2.16.1 | 2026-10-20 | **Correct the custom-calendar lesson (4.6).** Live checks on the Model that carries the JulyOffset calendar show **AgentQL's relative-date UDFs use the standard (Gregorian) calendar** — `DIFF_YEAR`/`START_OF_CURRENT_YEAR`/`YEAR_NUMBER` all compile to `EXTRACT(YEAR …)` with a Jan-1 boundary, never `absolute_year_number`. The custom/fiscal calendar (the `absolute_year_number` + coarse-prune pattern) is honoured by **keyword Search / Spotter**, not AgentQL. Lesson 4.6 reframed to this Search-vs-AgentQL boundary with both real captures; Module 4 key-takeaway corrected (2.16.0 had wrongly claimed AgentQL resolves relative periods through the custom calendar). |
 | 2.16.0 | 2026-10-19 | **Custom-calendar worked example in the course.** New illustrative lesson **4.6** (“A custom calendar you never compute”) shows a *last-five-fiscal-years* question on a custom calendar (JulyOffset) compiling to **two** date filters: a **coarse** `TRANSACTIONDATE` bound that prunes partitions on the fact (a Model setting), and the **fine-grain** custom-calendar filter via `absolute_year_number` (the five completed prior years). Teaches that AgentQL never hand-codes fiscal math — the Model's calendar supplies the boundaries deterministically. Labelled illustrative (the sample Model is Gregorian), kept out of the captured `lesson-sql.md`. |
 | 2.15.0 | 2026-10-19 | **RLS worked example in the course.** Lesson 3.5 (“Security you never write”) now carries an **illustrative** RLS example — the `_TENANT_ID IN (…)` predicate ThoughtSpot injects — with both shapes and the **strict vs non-strict** distinction: strict RLS puts the rule on one table (the fact) and always forces that join in, so it filters every query; non-strict filters only the tables a query includes, so you place rules by what must be protected — the fact for sales-level data, and any dimension (e.g. store) whose membership must also be restricted. Clearly labelled illustrative (the sample Model has no RLS), kept out of the captured `lesson-sql.md`. First of the purpose-built governance examples. |
 | 2.14.0 | 2026-10-19 | **Learn AgentQL is now offline-only.** The course dropped the live/offline toggle: it runs entirely from captured examples ([`lesson-sql.md`](references/lesson-sql.md) + the bundled [`agentql-offline.md`](references/agentql-offline.md)) with no cluster, no profile and no per-lesson `ts agentql` calls — the sample Model can't demonstrate RLS, custom calendars or varied join types, so live added cost without showing the features that matter. Purpose-built example Models for those features are being added as captured offline examples. The skill's **live query flow is unchanged** (query any Model, pull rows, see the SQL); only the *course* is offline. |
@@ -1682,7 +1683,7 @@ table collects them in one place; the **determinism column is the throughline** 
 | **1 · The two APIs** | `generate-sql` compiles (nothing runs); `fetch-data` compiles then runs. Branch on `status`, not the exit code; AgentQL can only read. | `generate-sql` shows the exact warehouse SQL the engine emits — the same AgentQL always compiles to the same `executable_sql`, inspectable before a row is read. |
 | **2 · First queries** | Read the generated SQL: the joins — their *type* and keys — plus null-guards and the row cap are written for you from the Model (e.g. `sales → inner join → products`), not by your query. | The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run; the lenient parser never changes what's emitted. |
 | **3 · The semantic layer** | The Model supplies joins, formulas, security and safe division by default — and AgentQL can *override* the default join for greater expressibility: *all products, including those with no sales* becomes a CTE of all products `LEFT JOIN`ed to sales, instead of the Model's inner join. | Whether you take the Model's join or override it, the governed parts — keys, `AGG`/`SUM`, null-handling and RLS — are still injected deterministically by the engine. You change the join *shape*, never the governance. |
-| **4 · Dates and functions** | Date parts, relative periods and functions resolve through the Model's calendar — standard Gregorian, fiscal, or a custom 4-4-5 — so you never hand-code calendar math or use `CURRENT_DATE`. | AgentQL doesn't guess how a fiscal or 4-4-5 calendar works — the engine applies the Model's calendar definition deterministically, so "last period" always compiles to the same bounded SQL. |
+| **4 · Dates and functions** | Date parts and relative periods compile to warehouse SQL on the **standard** calendar; custom/fiscal calendars (e.g. 4-4-5) are honoured by Search/Spotter, not by AgentQL's relative-date UDFs. | The same AgentQL always compiles to the same bounded date SQL (live-verified `EXTRACT(YEAR …)`); a custom calendar changes the answer only via Search/Spotter. |
 | **5 · Advanced shapes** | CTEs, windows, top-N-per-group, period-over-period and set operations expand what you can express — within AgentQL's (narrower-than-SQL) envelope. | Even multi-stage shapes compile deterministically through the same governed engine; expressibility grows while compile-not-execute holds. |
 | **6 · Trust, but verify** | `SUCCESS` is not proof of the right answer: deterministic SQL can be deterministically *wrong* — a silently-dropped `QUALIFY`/`FILTER`, or the wrong grain. | The executed SQL is always governed and reproducible — but determinism guarantees *consistency*, not *correct intent*. The control queries verify the agent asked what you meant. |
 | **7 · Building on it** | Consume `fetch-data` in code, and test agents that write AgentQL — this course is itself a regression suite. | Because the same question compiles to the same SQL and rows, AgentQL output is testable: assert on generated SQL and results, and catch drift. |
@@ -2505,11 +2506,11 @@ even if it tried?
 
 ### Module 4 — Dates and functions (~30 min · 5 questions)
 
-**Key takeaway.** Date parts, relative periods and functions resolve through the Model's calendar — standard Gregorian, fiscal, or a custom 4-4-5 — so you never hand-code calendar math or use `CURRENT_DATE`.
+**Key takeaway.** Date parts and relative periods compile to warehouse SQL on the **standard** calendar — you never hand-code date math or use `CURRENT_DATE`. Custom/fiscal calendars (e.g. 4-4-5) are honoured by ThoughtSpot's **Search/Spotter** layer, not by AgentQL's relative-date UDFs.
 
-**How determinism holds.** AgentQL doesn't guess how a fiscal or 4-4-5 calendar works — the engine applies the Model's calendar definition deterministically, so "last period" always compiles to the same bounded SQL. (The sample Model is Gregorian; the fiscal/4-4-5 guarantee is the general one.)
+**How determinism holds.** The same AgentQL always compiles to the same bounded date SQL — live-verified `EXTRACT(YEAR …)` on the standard calendar. A custom calendar changes the answer only through Search/Spotter, so know which layer you're in.
 
-**Covers.** Date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets, and an illustrative custom-calendar example. (5 questions + 1 illustrative · ~30 min)
+**Covers.** Date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets, and the Search-vs-AgentQL custom-calendar boundary. (5 questions + 1 live-verified example · ~30 min)
 
 #### 4.1 Date parts with the extraction functions
 
@@ -2597,47 +2598,56 @@ CTE first (Module 5).
 
 **Guarded by:** `l4_case_buckets`.
 
-#### 4.6 A custom calendar you never compute (illustrative)
+#### 4.6 Custom calendars: Search vs AgentQL (live-verified)
 
-Not every business runs on the Gregorian year. A Model can carry a **custom calendar** — here
-**JulyOffset**, a fiscal calendar whose year starts in July — and relative-period questions then
-resolve through *it*, not the Gregorian year. The sample Model has no custom calendar, so this is
-**illustrative** (not a live capture).
+A Model can carry a **custom calendar** — e.g. **JulyOffset**, a fiscal calendar whose year starts
+in July. Ask for "the **last five complete years**" and the answer depends on **which layer** asks:
+ThoughtSpot's keyword **Search / Spotter** honours the custom calendar; **AgentQL's relative-date
+UDFs use the standard (Gregorian) calendar**. Both were verified live on the Model that carries
+JulyOffset.
 
-**Question.** Sales for the **last five fiscal years**, on the JulyOffset calendar.
-
-**AgentQL Sent** *(representative — the learner names the period; the Model's calendar supplies the
-boundaries):*
+**Via AgentQL** — a relative-year filter:
 ```sql
-SELECT SUM("t1"."sales") AS "Sales (last 5 fiscal years)"
-FROM "<a Model on the JulyOffset calendar>" AS "t1"
-WHERE <the last five completed fiscal years>
+SELECT SUM("t1"."Amount") AS "Amount (last 5 complete years)"
+FROM "<the Model>" AS "t1"
+WHERE DIFF_YEAR("t1"."Transactiondate", START_OF_CURRENT_YEAR()) BETWEEN -5 AND -1
+```
+compiles (live-captured) to **standard-calendar** SQL — note `EXTRACT(YEAR …)` and the Jan-1
+(`…, 1, 01`) boundary, and **no** custom calendar:
+```sql
+SELECT CASE WHEN sum("ta_1"."AMOUNT") IS NOT NULL THEN sum("ta_1"."AMOUNT") ELSE 0 END "ca_1"
+FROM "…"."FACTSALES" "ta_1"
+  JOIN "…"."DIMDATE" "ta_2" ON "ta_1"."TRANSACTIONDATE" = "ta_2"."TRANSACTIONDATE"
+WHERE (
+  (EXTRACT(YEAR FROM "ta_2"."TRANSACTIONDATE") - EXTRACT(YEAR FROM DATE_FROM_PARTS(EXTRACT(YEAR FROM CURRENT_DATE()), 1, 01))) >= -5
+  AND (EXTRACT(YEAR FROM "ta_2"."TRANSACTIONDATE") - EXTRACT(YEAR FROM DATE_FROM_PARTS(EXTRACT(YEAR FROM CURRENT_DATE()), 1, 01))) <= -1
+)
+LIMIT 100000
 ```
 
-**DB SQL Generated** *(illustrative).* ThoughtSpot compiles **two** date filters, each doing a
-different job:
+**Via keyword Search / Spotter** — with the JulyOffset calendar selected — the governed engine
+resolves the same "last five years" through the **custom calendar** instead. Its SQL carries two
+date filters (illustrative excerpt from such an answer):
 ```sql
--- 1. Coarse filter — partition pruning on the fact. A Model setting applies coarse date bounds
---    so the warehouse prunes partitions before the fine filter runs (a performance step):
+-- Coarse filter: partition pruning on each date-bearing table scanned (a Model setting)
 AND "ta_3"."TRANSACTIONDATE" >= DATE('2020-01-01', 'YYYY-MM-DD')
 AND "ta_2"."TRANSACTIONDATE" >= DATE('2020-01-01', 'YYYY-MM-DD')
 
--- 2. Fine-grain filter — the JulyOffset custom calendar, via its absolute_year_number
---    (ta_1 = the calendar, ta_4 = the current period): the five completed prior fiscal years.
+-- Fine-grain filter: the JulyOffset calendar, via absolute_year_number
+-- (ta_1 = calendar, ta_4 = current period): the five completed prior fiscal years
 AND ((
     "ta_1"."absolute_year_number" >= ("ta_4"."absolute_year_number" - 5)
     AND "ta_1"."absolute_year_number" <= ("ta_4"."absolute_year_number" - 1)
   ))
 ```
 
-**Key Findings.** AgentQL never computed a fiscal boundary. "Last five fiscal years" is resolved
-by the **custom calendar**: the engine joins the calendar table and compares its
-`absolute_year_number` against the current period's — deterministically, the same way every run.
-The two filters have distinct jobs: the **coarse** `TRANSACTIONDATE >= …` bounds are a *pruning*
-optimisation on the fact, while the **fine-grain** `absolute_year_number` window is the actual
-answer. Swap JulyOffset for a 4-4-5 or any fiscal calendar and the AgentQL is unchanged — only the
-Model's calendar definition differs. That is why "last period" means the right thing to everyone,
-with no hand-coded fiscal math.
+**Key Findings.** Both layers are deterministic — but they use **different calendars**. AgentQL's
+relative-date UDFs (`DIFF_YEAR`, `START_OF_CURRENT_YEAR`, `YEAR_NUMBER`, …) compile to the
+**standard Gregorian** calendar — live-verified on the very Model that defines JulyOffset. The
+**custom/fiscal calendar** (and the coarse-prune + fine-grain `absolute_year_number` pattern) is
+honoured by **keyword Search / Spotter**, where the calendar can be selected. So to get **fiscal**
+periods through AgentQL, filter on a fiscal-period **attribute the Model exposes** — don't expect
+the relative-date UDFs to switch calendars. Know which layer you are in.
 
 **Check yourself.** Write "sales in the last complete quarter" without `CURRENT_DATE`. Why
 does `DATE_TRUNC` compile but fail, and what do you use instead?
