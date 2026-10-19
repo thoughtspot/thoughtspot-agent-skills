@@ -104,6 +104,8 @@ jobs:
           python3 tools/validate/check_ossie_mapping_sync.py --root . --check || rc=1
           python3 tools/validate/generate_open_items_index.py --root . --check || rc=1
           python3 tools/validate/generate_agentql_offline.py --root . --check || rc=1
+          # AgentQL Quest must keep matching the captured lesson SQL it is built from.
+          python3 tools/agentql-quest/build.py --root . --check || rc=1
           python3 tools/validate/check_mirror_sync.py || rc=1
           python3 tools/validate/generate_parity.py --check || rc=1
           # Internal-import + repo-hygiene gates (2026-07-29 audit findings 4.2/1.1/1.2).
@@ -215,7 +217,7 @@ jobs:
         # an invocation with tools/ts-cli/tests.
         if: ${{ !cancelled() }}
         run: |
-          pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ -q
+          pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/agentql-quest/tests/ -q
           pytest agents/cli/ts-object-model-erd/tests/ -q
           pytest agents/databricks/tests/ -q
 
@@ -280,7 +282,7 @@ jobs:
       - name: Run unit + validator tests
         # Same three invocations as `suite` (see that job for why they're split).
         run: |
-          pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ -q
+          pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/agentql-quest/tests/ -q
           pytest agents/cli/ts-object-model-erd/tests/ -q
           pytest agents/databricks/tests/ -q
 

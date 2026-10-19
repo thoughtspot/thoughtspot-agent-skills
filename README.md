@@ -210,7 +210,8 @@ thoughtspot-agent-skills/
     ├── smoke-tests/ — End-to-end smoke tests requiring live credentials
     ├── ossie-roundtrip/ — Round-trips real Models through the Apache Ossie converter (lives upstream)
     ├── formula-fidelity/ — Checks translated formulas return the source's values (oracle vs ThoughtSpot, live)
-    └── agentql-retest/ — Re-probes every documented AgentQL limitation and reports the rows whose behaviour moved (live)
+    ├── agentql-retest/ — Re-probes every documented AgentQL limitation and reports the rows whose behaviour moved (live)
+    └── agentql-quest/  — AgentQL Quest, the Learn AgentQL course as a browser game, built from the captured lesson SQL and published to GitHub Pages
 ```
 
 ---

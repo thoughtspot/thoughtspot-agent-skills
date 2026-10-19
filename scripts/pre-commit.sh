@@ -185,6 +185,12 @@ if echo "$STAGED" | grep -q 'ts-object-model-agentql-query/'; then
   run_check "agentql offline bundle" "tools/validate/generate_agentql_offline.py --root . --check"
 fi
 
+# AgentQL Quest is built from lesson-sql.md; a recapture that moves the SQL must not
+# silently break the game's highlights.
+if echo "$STAGED" | grep -qE '^tools/agentql-quest/|ts-object-model-agentql-query/references/lesson-sql\.md$'; then
+  run_check "agentql quest"          "tools/agentql-quest/build.py --root . --check"
+fi
+
 # Cross-file consistency — runs when agents/, README.md, or SETUP.md are touched
 # Ensures README skills table, SETUP.md symlink/stage steps stay in sync with repo structure
 if echo "$STAGED" | grep -qE '(^agents/|README\.md|SETUP\.md)'; then
@@ -439,7 +445,7 @@ run_pytest() {
 }
 
 if echo "$STAGED" | grep -q '\.py$'; then
-  run_pytest "unit tests (ts-cli)"      tools/ts-cli/tests/ tools/validate/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/
+  run_pytest "unit tests (ts-cli)"      tools/ts-cli/tests/ tools/validate/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/agentql-quest/tests/
   run_pytest "unit tests (erd)"         agents/cli/ts-object-model-erd/tests/
   run_pytest "unit tests (databricks)"  agents/databricks/tests/
 fi

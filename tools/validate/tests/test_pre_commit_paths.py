@@ -36,7 +36,9 @@ def test_pre_commit_runs_from_a_path_with_a_space(tmp_path):
     root = tmp_path / "dir with space" / "repo"
     (root / "scripts").mkdir(parents=True)
     shutil.copy2(PRE_COMMIT, root / "scripts" / "pre-commit.sh")
-    validators = set(re.findall(r"tools/validate/[A-Za-z0-9_]+\.py", PRE_COMMIT.read_text()))
+    # Any tools/<dir>/<script>.py the hook names, not just tools/validate/: a check can live
+    # beside the tool it guards (tools/agentql-quest/build.py --check).
+    validators = set(re.findall(r"tools/[\w-]+/[A-Za-z0-9_]+\.py", PRE_COMMIT.read_text()))
     assert len(validators) > 20, "expected the real hook's validator list"
     for v in validators:
         f = root / v

@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AgentQL Quest</title>
+<meta name="description" content="A retro text adventure about how ThoughtSpot compiles AgentQL into deterministic, governed SQL.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one amber-phosphor monitor centred on a dark desk; every scene renders inside the glass. */
+:root {
+  --desk: #0b0805;
+  --glass: #150e06;
+  --phosphor: #ffb43a;
+  --dim: #a8722a;
+  --hot: #ffe6b0;
+  --blood: #ff6a45;
+  --rule: #4a3210;
+  --font-game: "VT323", "Courier New", ui-monospace, monospace;
+  --font-code: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: var(--desk);
+  color: var(--phosphor);
+  font-family: var(--font-game);
+  font-size: 22px;
+  line-height: 1.25;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: max(24px, env(safe-area-inset-top, 0px)) max(24px, env(safe-area-inset-bottom, 0px));
+}
+.monitor {
+  max-width: 860px;
+  margin: 0 auto;
+  border: 2px solid var(--rule);
+  border-radius: 18px;
+  background: var(--glass);
+  box-shadow: 0 0 0 6px #1d1409, 0 0 60px rgba(255,180,58,.08), inset 0 0 80px rgba(0,0,0,.7);
+  position: relative;
+  overflow: hidden;
+}
+.monitor::after {
+  content: "";
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgba(0,0,0,.22) 0 1px, transparent 1px 3px);
+}
+.screen {
+  padding: 22px 24px 28px;
+  display: grid;
+  gap: 14px;
+  text-shadow: 0 0 6px rgba(255,180,58,.45);
+  min-width: 0;
+}
+.status {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 18px;
+  border-bottom: 1px dashed var(--rule);
+  padding-bottom: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.status .lbl { color: var(--dim); letter-spacing: .06em; }
+.bar { color: var(--hot); letter-spacing: -1px; }
+.bar .gone { color: var(--rule); text-shadow: none; }
+h1, h2 { font-weight: 400; margin: 0; text-wrap: balance; }
+h2 { font-size: 30px; color: var(--hot); }
+p { margin: 0; max-width: 62ch; }
+.dim { color: var(--dim); }
+.hot { color: var(--hot); }
+.art {
+  margin: 0;
+  font-family: var(--font-game);
+  font-size: 20px;
+  line-height: 1.05;
+  white-space: pre;
+  overflow-x: auto;
+}
+.art.hot { color: var(--hot); }
+.scroll {
+  margin: 0;
+  font-family: var(--font-code);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  background: rgba(0,0,0,.35);
+  color: var(--dim);
+  text-shadow: none;
+}
+.scroll .ln { display: block; padding: 0 6px; margin: 0 -6px; }
+.scroll .on { background: var(--phosphor); color: var(--glass); font-weight: 600; }
+.scroll .agent { color: var(--phosphor); }
+.cap { font-size: 18px; color: var(--dim); }
+.legend { display: flex; flex-wrap: wrap; gap: 2px 16px; font-size: 18px; color: var(--dim); }
+.legend b { font-weight: 400; color: var(--hot); }
+.pane { display: grid; gap: 4px; min-width: 0; }
+.pane .lbl { font-size: 18px; color: var(--dim); letter-spacing: .06em; }
+.rule-card { border: 1px dashed var(--phosphor); padding: 10px 12px; display: grid; gap: 6px; }
+.feedback { border-left: 3px solid var(--hot); padding: 4px 0 4px 12px; display: grid; gap: 6px; }
+.feedback.miss { border-color: var(--blood); }
+.feedback .tag { color: var(--hot); letter-spacing: .08em; }
+.feedback.miss .tag { color: var(--blood); }
+.choices { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.choices button {
+  font: inherit;
+  color: var(--phosphor);
+  background: transparent;
+  border: 1px solid transparent;
+  text-align: left;
+  padding: 4px 8px;
+  width: 100%;
+  cursor: pointer;
+  text-shadow: inherit;
+}
+.choices button:hover, .choices button:focus-visible {
+  outline: none;
+  background: var(--phosphor);
+  color: var(--glass);
+  text-shadow: none;
+}
+.choices .key { color: var(--hot); }
+.choices button:hover .key, .choices button:focus-visible .key { color: var(--glass); }
+.cursor { display: inline-block; width: .6em; background: var(--phosphor); animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.foot { font-size: 16px; color: var(--dim); border-top: 1px dashed var(--rule); padding-top: 8px; }
+.foot a { color: var(--phosphor); }
+@media (max-width: 520px) {
+  body { font-size: 20px; padding-block: 12px; }
+  .screen { padding: 16px 14px 20px; }
+  .art { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+</style>
+</head>
+<body>
+<div class="monitor"><main class="screen" id="screen" aria-live="polite"></main></div>
+
+<!-- Written by build.py from encounters.yaml + the captured lesson SQL. Do not edit here. -->
+<script id="quest-data" type="application/json">__QUEST_DATA__</script>
+<script>
+const QUEST = JSON.parse(document.getElementById("quest-data").textContent);
+
+const ART = {
+  title: String.raw`
+     _                    _    ___  _
+    /_\  __ _ ___ _ _ | |_ / _ \| |
+   / _ \/ _' / -_) ' \|  _| (_) | |__
+  /_/ \_\__, \___|_||_|\__|\__\_\____|
+        |___/        Q  U  E  S  T
+`,
+  dragon: String.raw`
+                 /\    /\
+                /  \__/  \
+      ~~~~~~   (  O    O  )
+     ~~~~~~~~   \   /\   /____
+       ~~~~~~    \  \/  /     \_
+                  \____/ /\  /\ \
+                   //  \/  \/  \/
+`,
+  wizard: String.raw`
+        /\
+       /**\
+      /____\
+      (o  o)
+     /| ~~ |\     The Wizard
+      |____|      (the AI)
+      /_||_\
+`,
+  forge: String.raw`
+     ____________
+    |  [######]  |    The Forge
+    |__|######|__|    (ThoughtSpot)
+       |######|
+     ~~~~~~~~~~~~
+`,
+  crown: String.raw`
+      _/\_/\_/\_
+      \ o    o /
+       \______/
+       /|    |\
+`,
+  warrior: String.raw`
+      _/\_
+     (o  o)
+    /|####|\
+     |####|
+     /_||_\
+`,
+  grave: String.raw`
+       _____
+      /     \
+     | R.I.P |
+     |       |
+   __|_______|__
+`
+};
+
+const HEROES = [
+  { id: "queen", name: "The Queen", role: "Account rep: hold court and judge claims", path: "court" },
+  { id: "king", name: "The King", role: "Account rep: hold court and judge claims", path: "court" },
+  { id: "dwarf", name: "Dwarf Warrior", role: "Data engineer: dig into the generated SQL", path: "dwarf" },
+  { id: "elf", name: "Elf Warrior", role: "Analyst: what keywords can't reach", path: "elf" },
+  { id: "human", name: "Human Warrior", role: "SE: a mix of both, ready to demo", path: "human" }
+];
+
+const PLAYER_HP = 3;
+const LEGEND = `<div class="legend" aria-label="Who is who">
+  <span><b>Wizard</b> = the AI</span><span><b>Scroll</b> = the AgentQL it wrote</span>
+  <span><b>Forge</b> = ThoughtSpot + the Model</span><span><b>Dragon</b> = the SQL that runs</span></div>`;
+const RULE = `<div class="rule-card"><span class="hot">THE RULE OF THE FORGE</span>
+  <p>If it's in your scroll, you wrote it. If it isn't, ThoughtSpot added it from the Model. The AI never writes SQL.</p></div>`;
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const bar = (n, max, on, off) => `<span class="bar">${on.repeat(n)}<span class="gone">${off.repeat(max - n)}</span></span>`;
+const art = (k, cls = "") => `<pre class="art ${cls}" aria-hidden="true">${esc(ART[k])}</pre>`;
+const isOn = (hl, i) => hl === "all" || hl.includes(i);
+
+let state;
+let actions = [];
+const fresh = () => ({ screen: "title", hero: null, hp: PLAYER_HP, step: 0, enc: 0, flash: null });
+const hero = () => HEROES.find(h => h.id === state.hero) || {};
+const pathEncounters = () => (QUEST.paths[hero().path] || []).map(i => QUEST.encounters[i]);
+const encounter = () => pathEncounters()[state.enc];
+
+function best() { try { return JSON.parse(localStorage.getItem("aqq-best") || "{}"); } catch { return {}; } }
+function saveBest(key, hp) {
+  try { const b = best(); if (!(b[key] >= hp)) { b[key] = hp; localStorage.setItem("aqq-best", JSON.stringify(b)); } } catch {}
+}
+
+function choices(list) {
+  actions = list.map(c => c.go);
+  return `<ul class="choices">${list.map((c, i) =>
+    `<li><button type="button" id="choice-${i}" data-i="${i}"><span class="key">[${i + 1}]</span> ${esc(c.label)}</button></li>`
+  ).join("")}</ul>`;
+}
+
+function code(lines, hl, cls, label) {
+  return `<pre class="scroll" aria-label="${esc(label)}">${lines.map((l, i) =>
+    `<span class="ln ${cls}${isOn(hl, i) ? " on" : ""}">${esc(l)}</span>`).join("")}</pre>`;
+}
+
+function panes(e, p) {
+  return `<div class="pane"><span class="lbl">YOUR SCROLL: the AgentQL the AI wrote</span>${code(e.agentql, p.scrollHl, "agent", "Your AgentQL")}</div>
+    <div class="pane"><span class="lbl">THE DRAGON: SQL ThoughtSpot generated</span>${code(e.sql, p.sqlHl, "", "Generated warehouse SQL")}
+    <span class="cap">Captured from generate-sql on (Sample) Retail - Apparel, ${esc(QUEST.captured)}.</span></div>`;
+}
+
+const go = patch => () => { Object.assign(state, patch); render(); };
+
+const SCREENS = {
+  title() {
+    return `${art("title", "hot")}
+      <p>A text adventure about one idea: the AI understands your question, and ThoughtSpot turns it into the same governed SQL every time.</p>
+      <p class="dim">The SQL is fixed. So is the dragon. Learn its pattern.</p>
+      ${choices([{ label: "Begin", go: go({ screen: "choose" }) }])}
+      <p class="foot">Number keys or click to choose <span class="cursor">&nbsp;</span><br>
+        Part of the <a href="https://github.com/thoughtspot/thoughtspot-agent-skills/blob/main/agents/cli/ts-object-model-agentql-query/references/learning-path.md">Learn AgentQL course</a>.</p>`;
+  },
+  choose() {
+    const b = best();
+    return `<h2>Choose your hero</h2>
+      <p class="dim">The crown judges claims. Warriors fight dragons made of SQL.</p>
+      ${choices(HEROES.map(h => {
+        const open = h.path === "court" || (QUEST.paths[h.path] || []).length > 0;
+        return {
+          label: `${h.name}. ${h.role}${open ? "" : " (sealed)"}${b[h.path] ? `  best: ${b[h.path]}/${PLAYER_HP} ♥` : ""}`,
+          go: go({ screen: !open ? "locked" : h.path === "court" ? "court" : "intro", hero: h.id, hp: PLAYER_HP, step: 0, enc: 0, flash: null })
+        };
+      }))}`;
+  },
+  locked() {
+    return `${art("grave")}
+      <h2>The path of the ${esc(hero().name)} is sealed</h2>
+      <p>This quest is still being written. The Royal Court and the Dwarf's dragon are open.</p>
+      ${choices([{ label: "Back to the heroes", go: go({ screen: "choose" }) }])}`;
+  },
+  court() {
+    if (state.step >= QUEST.court.length) return SCREENS.courtEnd();
+    const p = QUEST.court[state.step];
+    const head = `<div class="status"><span class="lbl">${esc(hero().name.toUpperCase())}</span>
+      <span><span class="lbl">TRUST</span> ${bar(state.hp, PLAYER_HP, "♛", "♛")}</span>
+      <span><span class="lbl">PETITION</span> ${state.step + 1}/${QUEST.court.length}</span></div>`;
+    if (state.flash) {
+      const f = state.flash;
+      return `${head}${art("crown")}
+        <div class="feedback${f.ok ? "" : " miss"}"><span class="tag">${f.ok ? "WISELY JUDGED" : "THE COURT GASPS. -1 TRUST"}</span><p>${esc(p.why)}</p></div>
+        ${choices([{ label: state.hp === 0 ? "Face the consequences" : "Next petitioner", go: () => {
+          if (state.hp === 0) state.screen = "defeat"; else state.step++;
+          state.flash = null; render();
+        } }])}`;
+    }
+    const judge = verdict => () => {
+      const ok = verdict === p.truth;
+      if (!ok) state.hp--;
+      state.flash = { ok }; render();
+    };
+    return `${head}${art("crown")}
+      <p>A petitioner bows before the ${esc(hero().name.replace("The ", "").toLowerCase())}:</p>
+      <p class="hot">${esc(p.claim)}</p>
+      ${choices([{ label: "Heed them. It is true.", go: judge(true) }, { label: "Banish them. It is false.", go: judge(false) }])}`;
+  },
+  courtEnd() {
+    saveBest("court", state.hp);
+    return `${art("crown", "hot")}
+      <h2>Royal decree</h2>
+      <p>Court is adjourned with ${state.hp} of ${PLAYER_HP} trust intact. Let it be known across the realm:</p>
+      <p>1. ThoughtSpot never executes AgentQL. It compiles it into warehouse SQL.</p>
+      <p>2. Agents query the Model, not the tables, so the Model's joins, rules and security always apply.</p>
+      <p>3. That is what makes answers consistent: the same question gives the same SQL every time.</p>
+      <p class="dim">And one warning: consistent is not the same as correct. Check what was asked.</p>
+      ${choices([{ label: "Choose another hero", go: go({ screen: "choose" }) }, { label: "Hold court again", go: go({ screen: "court", hp: PLAYER_HP, step: 0, flash: null }) }])}`;
+  },
+  intro() {
+    const e = encounter();
+    return `${art("wizard")}
+      <p>A merchant brings a quest: <span class="hot">"${esc(e.quest)}"</span></p>
+      <p>The <span class="hot">Wizard</span> is the AI. His only job is to understand what the merchant meant and write it down. ${esc(e.whyAgentql)} In this game, his AgentQL is your <span class="hot">scroll</span>:</p>
+      ${code(e.agentql, [], "agent", "Your AgentQL")}
+      ${choices([{ label: "Carry the scroll to the Forge", go: go({ screen: "forge" }) }])}`;
+  },
+  forge() {
+    const e = encounter();
+    return `${art("forge")}
+      <p>The Forge is ThoughtSpot. It never runs the scroll. It compiles it against the Model's rules into warehouse SQL.</p>
+      <p>The fire roars, and from it rises a dragon made of SQL. Each scale is a line of that SQL. Say who put it there, and the scale breaks.</p>
+      ${LEGEND}
+      ${RULE}
+      <p class="dim">Dragon: ${e.points.length} scales. You: ${PLAYER_HP} hearts. A wrong guess costs a heart. Your scroll stays on screen for every round.</p>
+      ${choices([{ label: "Draw your weapon", go: go({ screen: "battle", step: 0, hp: PLAYER_HP, flash: null }) }])}`;
+  },
+  battle() {
+    const e = encounter();
+    const q = e.points[state.step];
+    const head = `<div class="status"><span><span class="lbl">${esc(hero().name.toUpperCase())}</span> ${bar(state.hp, PLAYER_HP, "♥", "♥")}</span>
+      <span><span class="lbl">DRAGON</span> ${bar(e.points.length - state.step, e.points.length, "█", "░")}</span></div>${LEGEND}`;
+    if (state.flash) {
+      const f = state.flash;
+      const last = state.step + 1 >= e.points.length;
+      return `${head}${panes(e, q)}
+        <div class="feedback${f.ok ? "" : " miss"}"><span class="tag">${f.ok ? "*CLANG* THE SCALE BREAKS" : "THE DRAGON BURNS YOU. -1 HEART"}</span><p>${esc(f.ok ? q.lesson : q.hint)}</p></div>
+        ${choices([{ label: f.ok ? (last ? "Watch the dragon fall" : "Next scale") : state.hp === 0 ? "Fall" : "Try again", go: () => {
+          if (state.hp === 0) state.screen = "defeat";
+          else if (f.ok) { state.step++; if (state.step >= e.points.length) state.screen = "victory"; }
+          state.flash = null; render();
+        } }])}`;
+    }
+    return `${head}${state.step === 0 ? art("dragon") : ""}${panes(e, q)}
+      <p>${esc(q.ask)}</p>
+      ${choices(q.options.map((o, i) => ({ label: o, go: () => {
+        const ok = i === q.correct;
+        if (!ok) state.hp--;
+        state.flash = { ok }; render();
+      } })))}`;
+  },
+  victory() {
+    const e = encounter();
+    const more = state.enc + 1 < pathEncounters().length;
+    if (!more) saveBest(hero().path, state.hp);
+    return `${art("warrior", "hot")}
+      <h2>The dragon falls</h2>
+      <p>You finish with ${state.hp} of ${PLAYER_HP} hearts. In its hoard: <span class="hot">${esc(e.loot)}</span></p>
+      <p>${esc(e.takeaway)}</p>
+      ${choices(more
+        ? [{ label: "Seek the next dragon", go: go({ screen: "intro", enc: state.enc + 1, step: 0, hp: PLAYER_HP, flash: null }) }]
+        : [{ label: "Choose another hero", go: go({ screen: "choose" }) }, { label: "Fight this dragon again", go: go({ screen: "forge" }) }])}`;
+  },
+  defeat() {
+    const court = hero().path === "court";
+    return `${art("grave")}
+      <h2>${court ? "The court loses faith" : "You have fallen"}</h2>
+      <p>${court ? "Too many false claims went unchallenged." : "The dragon's pattern never changes, because the Forge always compiles the same scroll into the same SQL."} Learn it and return.</p>
+      ${choices([{ label: "Try again", go: go(court ? { screen: "court", hp: PLAYER_HP, step: 0, flash: null } : { screen: "forge" }) }, { label: "Choose another hero", go: go({ screen: "choose" }) }])}`;
+  }
+};
+
+function render() {
+  const el = document.getElementById("screen");
+  el.innerHTML = SCREENS[state.screen]();
+  const first = el.querySelector(".choices button");
+  if (first && document.activeElement && document.activeElement !== document.body) first.focus({ preventScroll: true });
+}
+
+document.addEventListener("click", e => {
+  const b = e.target.closest(".choices button");
+  if (b) actions[+b.dataset.i]?.();
+});
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= actions.length) { e.preventDefault(); actions[n - 1](); }
+});
+
+state = fresh();
+render();
+</script>
+</body>
+</html>

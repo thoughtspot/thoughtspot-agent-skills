@@ -1,0 +1,214 @@
+# AgentQL Quest: what the game adds on top of the captured lesson SQL.
+#
+# The SQL is never written here. `build.py` reads the AgentQL and the generated warehouse SQL
+# for each `case` from agents/cli/ts-object-model-agentql-query/references/lesson-sql.md (the
+# committed capture of `tools/agentql-retest --suite lessons guards`). This file holds only
+# what the capture can't: which parts of the SQL to ask about, who put each one there, and the
+# words the player sees.
+#
+# The build fails (offline, no cluster) when:
+#   - a `case` is missing from the capture, or was not SUCCESS
+#   - `agentql` differs from the captured AgentQL by anything but layout
+#   - an `sql` or `scroll` match is a substring that hits no line
+# so a recapture that changes a lesson's SQL breaks the build instead of silently
+# highlighting nothing.
+
+# The three answers offered for every `who` point. `model` and `thoughtspot` answers both
+# map to the Forge option; the lesson text says which it was.
+who_options:
+  forge: "The Forge: ThoughtSpot added it"
+  agentql: "Your scroll: it's in the AgentQL"
+  ai: "The Wizard: the AI made it up"
+
+encounters:
+  - case: l3_all_products_left_join
+    paths: [dwarf]
+    quest: >-
+      Show me every product with its sales in the West region. Products never sold in the
+      West must still appear.
+    why_agentql: >-
+      Keyword search can't say "every product, sold or not", so he writes it as AgentQL.
+    agentql: |
+      WITH all_p AS (
+        SELECT "t1"."product" AS p
+        FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."product"
+      ), west AS (
+        SELECT "t2"."product" AS p, SUM("t2"."sales") AS s
+        FROM "(Sample) Retail - Apparel" AS "t2"
+        WHERE "t2"."region" = 'West' GROUP BY "t2"."product"
+      )
+      SELECT a.p AS product, COALESCE(west.s, 0) AS west_sales
+      FROM all_p a
+      LEFT OUTER JOIN west ON a.p = west.p
+    points:
+      - kind: who
+        answer: model
+        sql: ['"DIM_RETAPP_PRODUCTS" "ta_1"']
+        scroll: ['FROM "(Sample) Retail - Apparel" AS "t1"']
+        ask: >-
+          The "all products" part reads the products table DIM_RETAPP_PRODUCTS on its own,
+          with no join to sales. Your scroll only names the Model. Who put this table here?
+        hint: >-
+          Compare the highlighted line in your scroll. It names the Model, never a warehouse
+          table. The AI never writes SQL.
+        lesson: >-
+          The Model forged it. This is join-progressive pruning: a query that only lists
+          attributes needs no fact table, so you get the full product list, not just the
+          products that sold. That is what makes the outer join meaningful.
+
+      - kind: who
+        answer: model
+        sql:
+          - 'JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_2"'
+          - 'ON "ta_3"."PRODUCTID" = "ta_2"."PRODUCTID"'
+          - 'JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_STORES" "ta_4"'
+          - 'ON "ta_3"."STOREID" = "ta_4"."STOREID"'
+        scroll: ['FROM "(Sample) Retail - Apparel" AS "t2"']
+        ask: >-
+          Two inner joins, on PRODUCTID and STOREID. Your scroll reads from the Model and
+          mentions no keys. Who put these joins here?
+        hint: >-
+          Neither key appears in your scroll, and the AI never writes SQL. Who knows how the
+          tables relate?
+        lesson: >-
+          The Model supplied the relationships: the join type and the keys. Two people asking
+          this question get the same joins, every time.
+
+      - kind: who
+        answer: model
+        sql: ['WHEN sum("ta_3"."SALES") IS NOT NULL']
+        scroll: ['SUM("t2"."sales")']
+        ask: >-
+          The sum is wrapped in CASE WHEN ... IS NOT NULL ... ELSE 0. Your scroll's SUM has no
+          null check. Who added it?
+        hint: >-
+          Your scroll's only null handling is the COALESCE in its last SELECT. This guard sits
+          inside the West sales part.
+        lesson: >-
+          The Model decides null handling, and ThoughtSpot applies it to every aggregate. The
+          agent didn't write it and can't forget it.
+
+      - kind: who
+        answer: model
+        sql: ["WHERE LOWER(\"ta_4\".\"REGION\") = 'west'"]
+        scroll: ["WHERE \"t2\".\"region\" = 'West'"]
+        ask: >-
+          Your scroll says region = 'West'. The SQL says LOWER(REGION) = 'west'. Who changed
+          it?
+        hint: >-
+          Your scroll has 'West' with a capital W, and ThoughtSpot never runs the scroll as
+          written.
+        lesson: >-
+          A governed business rule. The Model defines this filter as case-insensitive, so
+          'West', 'west' and 'WEST' all compile to the same SQL.
+
+      - kind: who
+        answer: agentql
+        sql: ['LEFT OUTER JOIN "qt_1" "ta_6"', 'ON "ta_5"."ca_1" = "ta_6"."ca_2"']
+        scroll: ['LEFT OUTER JOIN west']
+        ask: >-
+          A LEFT OUTER JOIN keeps the products with no West sales, although the Model's own
+          join is INNER. Look at the highlighted line in your scroll. Who put it here?
+        hint: >-
+          Not every line comes from the Model. This one goes against the Model's default join,
+          and it is in your scroll.
+        lesson: >-
+          Your AgentQL. This is the expressibility AgentQL adds: keyword search can't say
+          "every member, matched or not". ThoughtSpot kept your join shape and still applied
+          the Model's keys and null guards inside it.
+
+      - kind: who
+        answer: thoughtspot
+        sql: ['LIMIT 100000']
+        scroll: []
+        ask: >-
+          LIMIT 100000 sits at the very bottom. Your scroll has no LIMIT anywhere. Who added
+          it?
+        hint: It isn't in your scroll, and the AI never writes SQL. That leaves one answer.
+        lesson: ThoughtSpot applies the row cap to every query. Nobody has to remember it.
+
+      - kind: choice
+        sql: ["WHERE LOWER(\"ta_4\".\"REGION\") = 'west'"]
+        scroll: ["WHERE \"t2\".\"region\" = 'West'"]
+        ask: >-
+          The dragon rears up. This sample Model has no row-level security (RLS), but if it
+          did, the user's RLS filter would sit in this WHERE clause. Could the Wizard (the AI)
+          write a scroll that leaves it out?
+        options:
+          - text: No. The Forge (ThoughtSpot) adds it while compiling
+            correct: true
+          - text: Yes, by leaving the filter out of the AgentQL
+          - text: Yes, by querying the warehouse tables directly
+        hint: >-
+          The AI never touches the warehouse. Everything it writes goes through ThoughtSpot
+          first.
+        lesson: >-
+          RLS is injected when ThoughtSpot compiles. The agent can't write it or remove it,
+          and AgentQL can't name warehouse tables, only the Model. This is the part that can't
+          be bypassed.
+
+      - kind: choice
+        sql: ['*']
+        scroll: ['*']
+        ask: >-
+          Final blow. The Wizard carries the exact same scroll to the Forge a second time.
+          What SQL comes out?
+        options:
+          - text: Exactly the same SQL, line for line
+            correct: true
+          - text: Slightly different SQL, because AI is involved
+          - text: It depends on the Wizard's mood
+        hint: Where does the AI sit, before ThoughtSpot compiles the scroll or inside it?
+        lesson: >-
+          Same scroll, same Model, same SQL. The AI's only job was understanding the quest.
+          Compilation is deterministic, which is why this dragon's pattern never changes and
+          why you could learn it. If the Wizard had worded the scroll differently, the SQL
+          could differ, so you check the AgentQL and trust the rest.
+
+    # Backed by the retest check `_all_products_outer_join` (tools/agentql-retest lessons.py)
+    # and the Results paragraph of lesson 3.6.
+    loot: >-
+      349 products, 4 of them with west_sales = 0. Classic t-shirt, Penguin t-shirt, Foothills
+      t-shirt and Organic cotton under tee sold elsewhere but never in the West. Without your
+      outer join they would have silently vanished.
+    takeaway: >-
+      The outer join was yours: the flexibility AgentQL adds. The table pruning, joins, null
+      guards, case-insensitive filter, row cap and RLS were the Model's guarantees. Check your
+      part. Trust the rest.
+
+# Court claims are not tied to one captured query. `backed_by` says where in the course each
+# answer is taught, so a reviewer can trace it.
+court:
+  - claim: '"Your Majesty, the AI writes SQL and runs it straight against our warehouse."'
+    truth: false
+    why: >-
+      False. The AI writes AgentQL, which states intent. ThoughtSpot never runs AgentQL. It
+      compiles it against the Model into warehouse SQL, and only that SQL runs.
+    backed_by: learning-path.md Module 0
+  - claim: '"If I ask the same question twice, I get the same SQL and the same answer."'
+    truth: true
+    why: >-
+      True. The same AgentQL always compiles to the same governed SQL. That is what makes
+      answers consistent and testable.
+    backed_by: learning-path.md Modules 1 and 7
+  - claim: >-
+      "With AgentQL, an agent can ask things keyword search cannot, like every product
+      including the ones that never sold."
+    truth: true
+    why: >-
+      True. AgentQL adds expressibility: outer joins, window functions, multi-step questions.
+      The Model's governance still applies to all of it.
+    backed_by: learning-path.md lesson 3.6
+  - claim: '"A clever agent could rewrite its query to slip past row-level security."'
+    truth: false
+    why: >-
+      False. RLS is injected when ThoughtSpot compiles the query. The agent can't write it or
+      remove it, and AgentQL can only see the Model, never the raw tables.
+    backed_by: learning-path.md lesson 3.5
+  - claim: '"If the query comes back SUCCESS, the answer must be what I meant."'
+    truth: false
+    why: >-
+      False. Determinism guarantees the SQL is governed and repeatable, not that the agent
+      understood the question. A misread question compiles, deterministically, to the wrong
+      answer. That is why people check what was asked.
+    backed_by: learning-path.md Module 6

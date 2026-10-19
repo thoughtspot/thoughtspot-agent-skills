@@ -1,0 +1,64 @@
+name: pages
+
+# Publishes AgentQL Quest (tools/agentql-quest), the browser game for the Learn AgentQL
+# course, to GitHub Pages. The page is rebuilt from encounters.yaml + the committed
+# lesson-sql.md capture, so a lesson recapture that lands on main updates the game too.
+#
+# Deliberately a separate workflow from validate.yml: it only runs after a merge, never on a
+# pull request, so it is not part of the required `validate` gate. Its build step runs the
+# same drift checks that `build.py --check` runs in validate.yml, so main cannot deploy a
+# game the PR gate would have rejected.
+#
+# Requires: repo Settings → Pages → Source = "GitHub Actions" (one-time, admin).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/agentql-quest/**"
+      - "agents/cli/ts-object-model-agentql-query/references/lesson-sql.md"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# Least privilege by default; only the deploy job is granted Pages + OIDC.
+permissions:
+  contents: read
+
+# One deployment at a time; never cancel one mid-flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Build the game
+        run: |
+          pip install pyyaml
+          python3 tools/agentql-quest/build.py --out _site/index.html
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
