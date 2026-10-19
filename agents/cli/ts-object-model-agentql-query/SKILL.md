@@ -69,25 +69,23 @@ can take it.
 You can also run `/ts-object-model-agentql-query teach me AgentQL`, or be specific: *"teach
 me AgentQL, just modules 1 and 2"*, *"start at module 5"*.
 
-**You need** a ThoughtSpot profile (set one up with `/ts-profile-thoughtspot`). There is no
-Model to prepare: the course runs on **`(Sample) Retail - Apparel`**, the sample Model
-every cluster ships with, and finds it by name.
+**You need nothing to set up.** The course runs **offline** — no profile, no cluster, no Model
+to prepare. Every lesson is presented from captured examples (the AgentQL and the exact SQL
+ThoughtSpot generated), taken from **`(Sample) Retail - Apparel`**, the sample Model every
+cluster ships with.
 
-**How a lesson runs.** The agent states a question and **shows you the AgentQL**, ready to
-run, so you never get stuck on syntax. It asks one quick prediction, such as "which tables
-will this touch?". Answer it, or just say **"run it"**. It runs `generate-sql` and
-`fetch-data` live, walks through the SQL ThoughtSpot generated, then breaks the query on
-purpose to show a rule. If you want practice, write your own version first and it will run
-that instead.
+**How a lesson runs.** The agent states a question and **shows you the AgentQL**, so you never
+get stuck on syntax, and asks one quick prediction, such as "which tables will this touch?".
+Then it reveals the **real captured warehouse SQL** ThoughtSpot generated, walks through it, and
+breaks the query on purpose to show a rule. Lessons come **one at a time** — it pauses for you
+before the next.
 
-**Live or offline.** At the start the agent asks which mode you want:
-- **Live** (default) — real `ts agentql` calls on a cluster: fresh SQL and rows. Needs a
-  profile and the sample Model. Best for a demo or to check current behaviour.
-- **Offline** — everything is read from **[references/agentql-offline.md](references/agentql-offline.md)**,
-  a single generated bundle of the whole reference library (every rule, pattern, limitation
-  and lesson, with the captured SQL). **No cluster, no live calls, far lower token spend.**
-  Result *numbers* aren't live, so offline teaches the SQL and the behaviour, not a fresh
-  figure. Best for reading and review, when there's no cluster, or to keep token spend down.
+**Offline by design.** The course makes **no live calls** — it reads from the captured examples
+in **[references/lesson-sql.md](references/lesson-sql.md)** (the real `executable_sql` per lesson)
+and the bundled **[references/agentql-offline.md](references/agentql-offline.md)**. No cluster, no
+profile, far lower token spend; result *numbers* are taught, not fresh. To get fresh numbers
+against your **own** data, use the skill's normal live query flow (above) — that is separate from
+the course.
 
 | Module | What you learn | Questions |
 |---|---|---|
@@ -119,7 +117,7 @@ lists any lesson whose behaviour has changed.
 | [references/patterns.md](references/patterns.md) | Complex shapes: last-N-periods, year-over-year, top-N / top-N-per-group, period-over-period, anomaly detection. |
 | [references/limitations.md](references/limitations.md) | **What AgentQL can't do** — hard-unsupported constructs, silent wrong-answer traps (e.g. `QUALIFY` and `FILTER (WHERE …)` are dropped), and what's been *fixed* on current builds. Read before telling a user something can't be done, and for the known-limitation-retest use case. |
 | [references/snowflake-sv-backing.md](references/snowflake-sv-backing.md) | **Snowflake Semantic View backing** (EXPERIMENTAL) — rules R1–R7 for SV-backed Models: the `100072` NULL-key bug, window-via-CTE, no `FROM`-subqueries, the measure-statistics trap, and Databricks MV comparison. Read when the Model's warehouse object is an SV. |
-| [references/learning-path.md](references/learning-path.md) | **The user wants to *learn* AgentQL** ("teach me AgentQL", "how does this work", "I need to demo it"). A guided, live course on `(Sample) Retail - Apparel`, the sample Model on every cluster: each lesson writes AgentQL, predicts the SQL, runs both APIs and breaks the query on purpose. Run it lesson by lesson instead of the normal flow. |
+| [references/learning-path.md](references/learning-path.md) | **The user wants to *learn* AgentQL** ("teach me AgentQL", "how does this work", "I need to demo it"). A guided, **offline** course on `(Sample) Retail - Apparel`, the sample Model on every cluster: each lesson shows the AgentQL, the real captured warehouse SQL, and breaks the query on purpose to teach a rule — one lesson at a time, no cluster needed. Run it lesson by lesson instead of the normal flow. |
 | [references/lesson-sql.md](references/lesson-sql.md) | **Captured warehouse SQL for every course lesson** (GENERATED). The real `executable_sql` each lesson compiles to, captured live; **offline mode shows it verbatim** in section 3 so no cluster is needed. Keyed by the lesson’s *Guarded by* id. Rebuild with `tools/agentql-retest/run.py … --out` then `tools/agentql-retest/build_lesson_sql.py`; do not edit by hand. |
 | [references/beyond-keywords.md](references/beyond-keywords.md) | **Worked examples of questions that need AgentQL — and ones it still can't answer.** Four live-verified cases (rank within a partition, a preceding-N-days window, a cohort semi-join, an unsupported percentile), each shown in the six-section output block. Read for "why not just use search?", for a demo, or before telling a user a question can or can't be done. |
 | [references/use-cases.md](references/use-cases.md) | When the user wants to *build on* this skill — tutorial, agent building-block, accuracy/regression/feature/limitation testing. |
@@ -337,6 +335,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.14.0 | 2026-10-19 | **Learn AgentQL is now offline-only.** The course dropped the live/offline toggle: it runs entirely from captured examples ([`lesson-sql.md`](references/lesson-sql.md) + the bundled [`agentql-offline.md`](references/agentql-offline.md)) with no cluster, no profile and no per-lesson `ts agentql` calls — the sample Model can't demonstrate RLS, custom calendars or varied join types, so live added cost without showing the features that matter. Purpose-built example Models for those features are being added as captured offline examples. The skill's **live query flow is unchanged** (query any Model, pull rows, see the SQL); only the *course* is offline. |
 | 2.13.0 | 2026-10-19 | **Course: one lesson at a time + captured SQL for offline.** The guided course now presents **a single lesson at a time** and waits for the learner before the next, instead of showing a whole module at once. New generated reference [`lesson-sql.md`](references/lesson-sql.md) stores the **real captured `executable_sql`** for every lesson (live on `(Sample) Retail - Apparel`), so **offline mode shows the exact warehouse SQL** in section 3 rather than reconstructing it; built by `tools/agentql-retest/build_lesson_sql.py` from a `--suite lessons guards` capture and bundled into `agentql-offline.md`. Lesson **1.3** (compiles-then-fails) switched from `BITAND` (which now compiles clean and executes on 26.9.0.cl) to the `IN (SELECT …)` semi-join, which still compiles then fails at fetch ([SCAL-326936](https://thoughtspot.atlassian.net/browse/SCAL-326936)); retest case updated. |
 | 2.12.1 | 2026-10-19 | **Pin the Module 0 concept explanation verbatim.** The conceptual text in Module 0 is now a **show-verbatim** block (a cleaner plain-language rewrite — two jobs of keywords, the expressibility↔determinism trade-off, valid SQL ≠ correct business logic, and the three ideas: ThoughtSpot never executes AgentQL / you query the Model not the tables / that is what makes answers consistent), so it reads identically every run instead of being paraphrased. New course-wide rule: concept prose and each lesson's written **Point out** / **Key Findings** are shown as-is; only the generated SQL and live result numbers vary. |
 | 2.12.0 | 2026-10-19 | **Consistent course messaging + determinism throughline.** The course now starts with a single **pinned opening message shown verbatim** (the determinism-forward definition + the live/offline choice), and every module opens with three pinned lines shown verbatim — **Key takeaway**, **How determinism holds**, **Covers** — so the messaging is identical on every run instead of improvised; a new **Key takeaways** table at the top of `learning-path.md` collects them for review, with *how deterministic SQL is maintained* as the throughline (Model-defined join types in Module 2; AgentQL overriding the default join for all-members expressibility in Module 3; Gregorian/fiscal/custom-4-4-5 calendars resolved deterministically in Module 4; determinism ≠ correct intent in Module 6). SKILL.md intro replaced the SpotQL-rename banner with a clean determinism-forward definition (the `spotql` API identifiers remain in the integration reference). |
