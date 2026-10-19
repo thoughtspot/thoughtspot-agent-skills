@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-20
+- fix: ts-object-model-agentql-query 2.17.1 — lesson 2.9 join types now live-verified with real captures (Sales→Product LEFT, Sales→Customer RIGHT, Sales→Date FULL OUTER; one query mixes LEFT+RIGHT), replacing the illustrative SQL
 - fix: ts-object-model-agentql-query 2.16.1 — lesson 4.6 now live-verified: AgentQL resolves relative periods through a Model's custom/fiscal calendar when the Model's date is configured with one (captured SQL joins the JulyOffset calendar table, window on absolute_year_number); with none configured the same AgentQL compiles to the standard Gregorian year. Replaces 2.16.0's illustrative example with the real capture; states the config dependency
 
 ## 2026-10-19

@@ -372,6 +372,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.17.1 | 2026-10-20 | **Join-type lesson (2.9) now live-verified.** Replaced the illustrative join-type SQL with real captures from a Model configured with three join types — Sales→Product `LEFT OUTER`, Sales→Customer `RIGHT OUTER`, Sales→Date `FULL OUTER` — showing the same grouped AgentQL compiling to each, and one query mixing LEFT+RIGHT across dimensions. The agent never writes `JOIN`; the generated SQL carries exactly the Model's configured type. |
 | 2.17.0 | 2026-10-19 | **Join-type worked example in the course.** New illustrative lesson **2.9** (“The join type is the Model's, not yours”): the same *sales by product* AgentQL compiles to `JOIN` / `LEFT OUTER JOIN` / `RIGHT OUTER JOIN` / `FULL OUTER JOIN` depending purely on how the Model defines the fact↔dimension relationship — the agent never writes `JOIN`. Complements lesson 3.6 (AgentQL *overriding* an inner-join Model with a CTE outer join). Labelled illustrative (the sample Model is inner-only), kept out of the captured `lesson-sql.md`. |
 | 2.16.1 | 2026-10-20 | **Custom-calendar lesson (4.6) now live-verified, and the dependency clarified.** AgentQL **does** resolve relative periods through a Model's custom/fiscal calendar **when the Model's date is configured with one** — live-captured on a Model with the JulyOffset calendar, the generated SQL joins the calendar table and computes the window on `absolute_year_number`. With **no** custom calendar configured the same AgentQL compiles to the standard Gregorian year (`EXTRACT(YEAR …)`), also verified. Replaces 2.16.0's illustrative example with the real capture and states the config dependency; Module 4 key-takeaway updated to match. |
 | 2.16.0 | 2026-10-19 | **Custom-calendar worked example in the course.** New illustrative lesson **4.6** (“A custom calendar you never compute”) shows a *last-five-fiscal-years* question on a custom calendar (JulyOffset) compiling to **two** date filters: a **coarse** `TRANSACTIONDATE` bound that prunes partitions on the fact (a Model setting), and the **fine-grain** custom-calendar filter via `absolute_year_number` (the five completed prior years). Teaches that AgentQL never hand-codes fiscal math — the Model's calendar supplies the boundaries deterministically. Labelled illustrative (the sample Model is Gregorian), kept out of the captured `lesson-sql.md`. |
@@ -1998,7 +1999,7 @@ customer asks whether an agent using AgentQL could drop a table: what do you sho
 
 **How determinism holds.** The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run; the lenient parser never changes what's emitted.
 
-**Covers.** Joins written for you, null handling, the row cap, inlined formulas, the lenient parser, the bare-measure trap, and how the Model's join *type* shapes the SQL. (8 questions + 1 illustrative · ~40 min)
+**Covers.** Joins written for you, null handling, the row cap, inlined formulas, the lenient parser, the bare-measure trap, and how the Model's join *type* shapes the SQL. (8 questions + 1 live-verified · ~40 min)
 
 #### 2.1 A total: null handling, the row cap, one table
 
@@ -2145,64 +2146,56 @@ and it fails silently.
 
 **Guarded by:** `l2_bare_measure_row_level`.
 
-#### 2.9 The join type is the Model's, not yours (illustrative)
+#### 2.9 The join type is the Model's, not yours (live-verified)
 
-Every join so far has been an **inner** join, because that is how the sample Model defines its
-fact↔dimension relationships. But the join **type** — inner, left, right, or full outer — is a
-Model property, and the generated SQL uses whatever the Model defines. You write the *same*
-AgentQL either way. The sample Model is inner-only, so the variants below are **illustrative**.
+The join **type** — inner, left, right, or full outer — is a property of the Model's
+fact↔dimension relationship, and the generated SQL uses whatever the Model defines. You write the
+*same* grouped AgentQL; only the join line changes. This Model is configured with **three
+different** join types, so one Model shows them all (live-captured):
 
-**Question.** Sales by product.
+| Relationship | Configured join |
+|---|---|
+| Sales → Product | `LEFT OUTER` — every sales row kept, even with a missing product |
+| Sales → Customer | `RIGHT OUTER` — every customer kept, even with no sales |
+| Sales → Date | `FULL OUTER` — both unmatched sides kept |
 
-**AgentQL Sent** — the same grouped query, whatever the Model's join type:
+**Amount by product** → `LEFT OUTER JOIN`:
 ```sql
-SELECT "t1"."product" AS p, SUM("t1"."sales") AS s FROM "<Model>" AS "t1" GROUP BY "t1"."product"
-```
-
-**DB SQL Generated.** Against the sample (inner) it compiles in full to:
-```sql
-SELECT "ta_2"."PRODUCTNAME" "ca_1",
-       CASE WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES") ELSE 0 END "ca_2"
-FROM "…"."FACT_SALES" "ta_1"
-  JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
-GROUP BY "ta_2"."PRODUCTNAME"
-LIMIT 100000
-```
-If the Model defined the fact↔products relationship with a different join type, **only the join
-line changes** — the `SELECT`, `GROUP BY`, null-guard and row cap are identical. The full
-statement with each type:
-```sql
--- LEFT OUTER (Model: "sales LEFT JOIN products") — every sales row kept, even if its product is missing
-SELECT "ta_2"."PRODUCTNAME" "ca_1",
-       CASE WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES") ELSE 0 END "ca_2"
-FROM "…"."FACT_SALES" "ta_1"
-  LEFT OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
-GROUP BY "ta_2"."PRODUCTNAME"
-LIMIT 100000
-
--- RIGHT OUTER (Model: "sales RIGHT JOIN products") — every product kept, even one with no sales
-SELECT "ta_2"."PRODUCTNAME" "ca_1",
-       CASE WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES") ELSE 0 END "ca_2"
-FROM "…"."FACT_SALES" "ta_1"
-  RIGHT OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
-GROUP BY "ta_2"."PRODUCTNAME"
-LIMIT 100000
-
--- FULL OUTER (Model: "sales FULL OUTER JOIN products") — both unmatched sides kept
-SELECT "ta_2"."PRODUCTNAME" "ca_1",
-       CASE WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES") ELSE 0 END "ca_2"
-FROM "…"."FACT_SALES" "ta_1"
-  FULL OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
-GROUP BY "ta_2"."PRODUCTNAME"
+SELECT "ta_1"."NAME" "ca_1",
+       CASE WHEN sum("ta_2"."AMOUNT") IS NOT NULL THEN sum("ta_2"."AMOUNT") ELSE 0 END "ca_2"
+FROM "…"."FACTSALES" "ta_2"
+  LEFT OUTER JOIN "…"."DIMPRODUCTS" "ta_1" ON "ta_2"."PRODUCTID" = "ta_1"."PRODUCTID"
+GROUP BY "ca_1"
 LIMIT 100000
 ```
 
-**Key Findings.** The join **type** is defined once — in the Model, on the fact↔dimension
-relationship. The agent never writes `JOIN`, and the generated SQL carries exactly the type the
-Model set. Change the Model from inner to right outer and "sales by product" starts including
-products that never sold, with **no change to the AgentQL**. (When the Model's join is inner but
-you need all members for *one* question, AgentQL can override it with a CTE outer join — that is
-lesson 3.6.) *(Illustrative — the sample Model is inner-only, so there is no retest case.)*
+**Amount by customer** → `RIGHT OUTER JOIN` (same shape, only the join line differs):
+```sql
+FROM "…"."FACTSALES" "ta_2"
+  RIGHT OUTER JOIN "…"."DIMCUSTOMER" "ta_1" ON "ta_2"."CUSTOMERID" = "ta_1"."CUSTOMERID"
+```
+
+**Amount by year** → `FULL OUTER JOIN` to the date dimension (and, because the date is on a custom
+calendar, the calendar table is joined too):
+```sql
+FROM "…"."FACTSALES" "ta_2"
+  FULL OUTER JOIN "…"."DIMDATE" "ta_3" ON "ta_2"."TRANSACTIONDATE" = "ta_3"."TRANSACTIONDATE"
+  JOIN "…"."julyoffset" "ta_1"           ON "ta_3"."TRANSACTIONDATE" = "ta_1"."date"
+```
+
+**One query can mix them** — amount by product *and* customer carries both the LEFT and the RIGHT:
+```sql
+FROM "…"."FACTSALES" "ta_3"
+  LEFT OUTER JOIN  "…"."DIMPRODUCTS" "ta_1" ON "ta_3"."PRODUCTID"  = "ta_1"."PRODUCTID"
+  RIGHT OUTER JOIN "…"."DIMCUSTOMER" "ta_2" ON "ta_3"."CUSTOMERID" = "ta_2"."CUSTOMERID"
+```
+
+**Key Findings.** The agent never wrote `JOIN` — each statement carries exactly the join **type the
+Model configured** for that relationship, and a single query **mixes types** across dimensions.
+Change the Model's Sales→Product join from left to inner and "amount by product" drops products
+with no sales, with **no change to the AgentQL**. (When the Model's join is inner but you need all
+members for *one* question, AgentQL can override it with a CTE outer join — lesson 3.6.)
+Live-verified on the "Semi-Additive" Model configured with the three join types above.
 
 **Check yourself.** Without running anything: which tables will a query for "quantity by
 state" touch? What does the query in 2.8 do, and how would you spot it from the result alone?
