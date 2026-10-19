@@ -88,6 +88,9 @@ learner needs no profile and no Model, and there is no per-lesson tool cost.
 - For a *break it* lesson, **section 4** shows the captured `status` and error.
 - **Section 6 (Results)** shows taught values, not live rows. Say so once up front, so nobody
   mistakes a taught figure for a fresh one (the sample's rolling `date` moves dated totals anyway).
+- A few lessons are **illustrative** (and labelled so): where the sample Model can't show a
+  feature — RLS, a custom calendar, non-default join types — the lesson carries its
+  representative SQL **inline**, clearly marked, instead of a live capture.
 
 The whole reference library is also bundled as one document,
 [`agentql-offline.md`](agentql-offline.md), for reading end to end. *(Want fresh numbers against
@@ -649,12 +652,48 @@ lesson's own runs are the check.
 
 ### 3.5 Security you never write
 
-No query here mentions security, and none needs to. If the Model has **row-level security**,
-the compiled SQL includes the user's filter automatically, so two users running the same
-AgentQL can get different rows, each correct for them. Column-level security hides columns
-the same way. Read [`architecture.md`](architecture.md) § "What the semantic layer
-guarantees". This is the strongest argument for AgentQL over raw SQL, and the sample Model
-has no RLS to demonstrate it.
+No query here mentions security, and none needs to. If the Model carries **row-level security
+(RLS)**, ThoughtSpot injects the user's filter into the compiled SQL automatically — so two
+users running the *same* AgentQL get different rows, each correct for them. The agent never
+writes the filter and cannot remove it. Read [`architecture.md`](architecture.md) § "What the
+semantic layer guarantees".
+
+The sample Model has no RLS rule, so the two blocks below are **illustrative** (not live
+captures) — the shapes ThoughtSpot injects, and how they depend on **strict vs non-strict** RLS.
+
+**Strict RLS (recommended).** The rule is defined on **one** table — usually the **fact** — and
+ThoughtSpot **always includes the join to that table**, even when the question didn't otherwise
+need it. So the filter applies to *every* query. "Total sales" compiles to:
+```sql
+SELECT CASE WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES") ELSE 0 END "ca_1"
+FROM "…"."FACT_SALES" "ta_1"
+WHERE ("ta_1"."_TENANT_ID" IN (2200539748))
+LIMIT 100000
+```
+
+**Non-strict RLS.** Only the tables actually in the search are included, so a rule on a table a
+given query doesn't touch **won't apply** — a leak. The safe shape is therefore RLS on **every**
+table, and the predicate appears on each one that's joined (the fact included):
+```sql
+… FROM "…"."FACT_SALES" "ta_1"
+  JOIN "…"."DIM_STORES"   "ta_2" ON "ta_1"."STOREID"   = "ta_2"."STOREID"
+  JOIN "…"."DIM_PRODUCTS" "ta_3" ON "ta_1"."PRODUCTID" = "ta_3"."PRODUCTID"
+WHERE (
+  ("ta_1"."_TENANT_ID" IN (2200539748))
+  AND ("ta_2"."_TENANT_ID" IN (2200539748))
+  AND ("ta_3"."_TENANT_ID" IN (2200539748))
+)
+LIMIT 100000
+```
+
+**Key Findings.** The `_TENANT_ID IN (…)` predicate is **injected by the RLS rule** into every
+query — the agent didn't write it and can't remove it; the tenant id comes from the querying
+user's context, so identical AgentQL returns correctly-scoped results per user. **Strict RLS**
+makes this deterministic by *forcing the secured table's join in*, so one rule on the fact covers
+everything; **non-strict** only filters tables a query happens to include, so you must secure
+**every** table. Either way security lives in the Model and is applied at compile time — the
+strongest argument for AgentQL over hand-written SQL. (Column-level security hides columns the
+same way.)
 
 ### 3.6 Every product, including the ones with no sales — and the business rules in the SQL
 
