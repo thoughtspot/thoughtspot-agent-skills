@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.tableau.literals import mask_for_fn_scan
+from ts_cli.tableau.parsing import _extract_function_args
+
 
 # ---------------------------------------------------------------------------
 # 15. Validation
@@ -141,27 +144,37 @@ def validate_output(expr: str) -> list[str]:
     for pattern, desc in _FORBIDDEN_PATTERNS:
         if pattern.search(expr):
             errors.append(f"Contains {desc}")
+    # The unmapped/table-calc/geo/analytics-extension/rank checks below scan
+    # for a bare function-call token (`NAME(`). A column, formula or parameter
+    # reference is always written `[...]`, and a field legitimately named e.g.
+    # "Airborne Duration Elapsed Difference (min)" contains the literal
+    # substring "Difference (" — matching the DIFFERENCE() spatial-function
+    # regex even though no function call is present. `mask_for_fn_scan` masks
+    # string/date literals (in case one holds an unmatched bracket character,
+    # e.g. `'['`) before masking `[...]` references, so neither can confuse
+    # the other and a real function call is never hidden inside either.
+    fn_scan_expr = mask_for_fn_scan(expr)
     for pattern, fn in _UNMAPPED_RE:
-        if pattern.search(expr):
+        if pattern.search(fn_scan_expr):
             errors.append(f"unmapped Tableau function: {fn}")
     for pattern, fn in _TABLE_CALC_RE:
-        if pattern.search(expr):
+        if pattern.search(fn_scan_expr):
             errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
-    window_fns = {m.group(1).upper() for m in _WINDOW_TABLECALC_RE.finditer(expr)}
+    window_fns = {m.group(1).upper() for m in _WINDOW_TABLECALC_RE.finditer(fn_scan_expr)}
     for fn in sorted(window_fns):
         errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
     # Analytics-extension families (MODEL_*/SCRIPT_*) — external R/Python, no
     # ThoughtSpot equivalent of any kind (finding 13.25).
-    for fn in sorted({m.group(1).upper() for m in _MODEL_EXT_RE.finditer(expr)}):
+    for fn in sorted({m.group(1).upper() for m in _MODEL_EXT_RE.finditer(fn_scan_expr)}):
         errors.append(
             f"Tableau analytics-extension function has no ThoughtSpot equivalent: {fn} "
             f"(external R/Python via an analytics extension)")
-    for fn in sorted({m.group(1).upper() for m in _RAWSQL_RE.finditer(expr)}):
+    for fn in sorted({m.group(1).upper() for m in _RAWSQL_RE.finditer(fn_scan_expr)}):
         errors.append(
             f"Tableau pass-through SQL has no ThoughtSpot equivalent: {fn} "
             f"(embeds raw warehouse SQL — not portable)")
     # A RANK_* member with no documented disposition (finding 13.26).
-    for fn in sorted({m.group(1).upper() for m in _RANK_UNKNOWN_RE.finditer(expr)}):
+    for fn in sorted({m.group(1).upper() for m in _RANK_UNKNOWN_RE.finditer(fn_scan_expr)}):
         errors.append(
             f"Tableau rank variant has no documented ThoughtSpot mapping: {fn} "
             f"(RANK/RANK_UNIQUE/RANK_DENSE/RANK_MODIFIED/RANK_PERCENTILE are mapped; "
@@ -270,14 +283,42 @@ def validate_pre_import(
         if "Custom SQL Query" in expr:
             warnings.append("Unresolved Custom SQL Query alias")
 
-        # Check for nested group_aggregate (ThoughtSpot limitation)
-        ga_positions = [m.start() for m in re.finditer(r'\bgroup_aggregate\s*\(', expr)]
-        if len(ga_positions) >= 2:
-            warnings.append(
-                "Nested group_aggregate — ThoughtSpot does not support "
-                "group_aggregate inside another group_aggregate. "
-                "Decompose into separate formulas."
+        # Check for a REAL nested group_aggregate (ThoughtSpot limitation):
+        # one call's own argument span contains another call's start position.
+        # Two or more group_aggregate(...) calls can legitimately coexist in
+        # one expression without nesting — siblings combined by plain
+        # arithmetic, e.g. a ratio of two independent FIXED LODs:
+        #   group_aggregate(sum([Profit]), {[Region]}, {})
+        #     / group_aggregate(sum([Sales]), {[Region]}, {})
+        # is two calls, zero nesting, and imports and queries fine. Counting
+        # occurrences alone (`>= 2`) flagged that case as an error.
+        ga_matches = list(re.finditer(r'\bgroup_aggregate\s*\(', expr))
+        if len(ga_matches) >= 2:
+            spans = []
+            for m in ga_matches:
+                open_paren_pos = m.end() - 1
+                extracted = _extract_function_args(expr, open_paren_pos)
+                end_pos = extracted[1] if extracted is not None else len(expr)
+                spans.append((m.start(), end_pos))
+            is_nested = any(
+                i != j and s2 < e1 and s1 < s2
+                for i, (s1, e1) in enumerate(spans)
+                for j, (s2, _e2) in enumerate(spans)
             )
+            if is_nested:
+                warnings.append(
+                    "Nested group_aggregate — ThoughtSpot does not support "
+                    "group_aggregate inside another group_aggregate's aggregate-"
+                    "expression (1st argument) position, whether written inline "
+                    "or as a reference to a group_aggregate-valued sibling "
+                    "formula. This is a query-planner restriction, not an import-"
+                    "time one — VALIDATE_ONLY success does not prove a formula "
+                    "built this way is safe; confirm with a live query. See "
+                    "tableau-formula-translation.md's \"Platform limitation: "
+                    "nested group_aggregate not supported\" for the fix, by "
+                    "outer-wrapper shape — there is no single universal "
+                    "decomposition that works for every shape."
+                )
 
         # Check for bare Tableau aggregate keywords
         if re.search(r"\bCOUNTD\b", expr):

@@ -89,3 +89,54 @@ class TestFunctionCensusCompleteness:
         """
         from ts_cli.tableau.functions import map_functions
         assert map_functions("ATAN2([y])") == "ATAN2([y])"
+
+
+class TestFunctionScanIgnoresFieldNamesAndLiterals:
+    """A column/formula/parameter name that happens to contain a word matching a
+    function-name regex (e.g. a column called "...Difference (min)") must not
+    be misread as a call to that function — same for a string literal holding
+    an unmatched bracket character."""
+
+    @staticmethod
+    def _errs(expr):
+        from ts_cli.tableau.validate import validate_output
+        return validate_output(expr)
+
+    def test_field_name_containing_a_spatial_function_word_is_not_flagged(self):
+        errs = self._errs("[Elapsed Difference (min)] + 1")
+        assert not any("DIFFERENCE" in e for e in errs), errs
+
+    def test_string_literal_with_unmatched_bracket_does_not_hide_a_real_call(self):
+        """The literal-before-ref masking order this depends on: `'['` must not be
+        misread as starting a real `[ref]` that swallows everything up to the
+        next real `]` (here, the one closing `[b]`)."""
+        from ts_cli.tableau.classify import _translatable_tier
+        expr = "IF [a] = '[' THEN RUNNING_SUM(SUM([b])) END"
+        assert _translatable_tier(expr) == "cumulative"
+
+
+class TestNestedGroupAggregateDetection:
+    """Flag only a REAL nesting (one call's 1st-argument span contains another
+    call's start) — two sibling group_aggregate(...) calls combined by plain
+    arithmetic (a ratio of two independent FIXED LODs, a common and working
+    pattern) must not be flagged."""
+
+    @staticmethod
+    def _warnings(expr):
+        from ts_cli.tableau.validate import validate_pre_import
+        result = validate_pre_import([{"name": "f", "expr": expr}])
+        return result[0]["warnings"] if result else []
+
+    def test_sibling_ratio_of_two_fixed_lods_is_not_flagged(self):
+        expr = (
+            "group_aggregate ( sum ( [Profit] ) , { [Region] } , { } ) / "
+            "group_aggregate ( sum ( [Sales] ) , { [Region] } , { } )"
+        )
+        assert not any("Nested group_aggregate" in w for w in self._warnings(expr))
+
+    def test_genuinely_nested_call_is_flagged(self):
+        expr = (
+            "group_aggregate ( sum ( group_aggregate ( max ( [X] ) , { [B] } , { } ) ) , "
+            "{ } , { } )"
+        )
+        assert any("Nested group_aggregate" in w for w in self._warnings(expr))

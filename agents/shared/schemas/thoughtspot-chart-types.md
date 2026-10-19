@@ -65,6 +65,48 @@ WATERFALL, WHISKER_SCATTER
 anchor column is geo-tagged in ThoughtSpot. `CANDLESTICK`/`WHISKER_SCATTER` import but only
 render meaningfully with OHLC / distribution-shaped inputs.
 
+**`GEO_BUBBLE` also requires an explicit `chart.axis_configs` block — unlike every other
+chart type in this table, a bare `chart_columns` list with no `axis_configs` is not
+sufficient and the tile renders empty with no error anywhere.** Live-verified on a Tableau
+migration: a `GEO_BUBBLE` tile with geo-tagged lat/long columns and a measure, but no
+`axis_configs`, imported clean and stayed blank; diffing against a confirmed-working
+`GEO_BUBBLE` tile on a different liveboard showed the only structural difference was this
+block:
+```yaml
+chart:
+  type: GEO_BUBBLE
+  chart_columns:
+  - column_id: "{Latitude column}"
+  - column_id: "{Longitude column}"
+  - column_id: "{Measure column}"
+  axis_configs:
+  - x:
+    - "{Latitude column}"
+    - "{Longitude column}"
+    y:
+    - "{Measure column}"
+```
+Adding it fixed the render. Treat `GEO_BUBBLE`'s full requirement as three things together,
+not any one in isolation: (1) the geo dimension(s) geo-tagged on the model
+(`properties.geo_config`), (2) a measure present in `chart_columns`, and (3) this explicit
+`axis_configs` block — each was independently verified necessary and none was sufficient
+alone.
+
+**The `TABLE` guidance above ("omit `chart`, set `display_mode: TABLE_MODE`") does not
+survive a reimport if the tile's existing chart type was a grouping type.** Live-verified:
+a tile whose `chart.type` was `ADVANCED_SCATTER` (with x/y/slice axis grouping) kept
+reverting to that exact same `ADVANCED_SCATTER` block on every reimport, even submitted
+with `chart` fully omitted each time. If a flat per-row list looks pivoted/grouped and this
+doesn't fix it, check first whether a column feeding the table is model-typed `MEASURE` —
+it auto-aggregates (per its `aggregation` property) when dropped bare into a table instead
+of showing the literal per-row value, which can look identical to a chart-type problem.
+Retype to `ATTRIBUTE` if every formula using that column already wraps it in an explicit
+aggregate function (so aggregation stays formula-specified, not column-type-driven). If a
+genuinely **pivoted/nested-row** table is wanted (a Tableau-style repeat-suppressed grouped
+row display), use `ADVANCED_PIVOT_TABLE` instead of fighting `TABLE_MODE` — it auto-resolves
+its row/column grouping from `chart_columns` + `search_query` (no `custom_chart_config`
+needed) and stuck cleanly on reimport in the same test.
+
 ## Muze charting library (`ADVANCED_*` types) — phase 1 GA
 
 ThoughtSpot has two charting libraries:

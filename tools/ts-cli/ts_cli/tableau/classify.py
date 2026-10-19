@@ -13,6 +13,7 @@ does with it.
 """
 from __future__ import annotations
 import re
+from ts_cli.tableau.literals import mask_for_fn_scan
 from ts_cli.tableau.sets import classify_sets
 from ts_cli.tableau_translate import translate_formulas
 
@@ -43,14 +44,23 @@ _PARAM_RE = re.compile(r"\[Parameters\]\.\[", re.I)
 def _translatable_tier(expr: str) -> str:
     if _LOD_RE.search(expr):
         return "lod"
-    if _RUNNING_RE.search(expr):
+    # Scan for a bare function-call token (`NAME(`) only in the parts of the
+    # expression that are neither a string/date literal nor a [ref] — a
+    # column, formula or parameter legitimately named e.g. "Airborne Duration
+    # Elapsed Difference (min)" contains the literal substring "Difference ("
+    # (matching a spatial-function regex in _untranslatable_tier below) even
+    # though no function call is present. `mask_for_fn_scan` masks literals
+    # before refs specifically so a literal holding an unmatched bracket
+    # character (e.g. `'['`) can't be misread as starting a real reference.
+    fn_scan_expr = mask_for_fn_scan(expr)
+    if _RUNNING_RE.search(fn_scan_expr):
         return "cumulative"
-    if _ROWOFFSET_RE.search(expr):
+    if _ROWOFFSET_RE.search(fn_scan_expr):
         # Only SIZE() reaches here translated — LOOKUP/INDEX/FIRST/LAST are
         # rejected by validate_output (see tableau/validate.py) and are
         # tiered "row_offset_ambiguous" via _untranslatable_tier below.
         return "row_offset_native"
-    if _RANK_RE.search(expr):
+    if _RANK_RE.search(fn_scan_expr):
         return "pass_through"
     if _PARAM_RE.search(expr):
         return "parameter_ref"
@@ -58,20 +68,21 @@ def _translatable_tier(expr: str) -> str:
 
 
 def _untranslatable_tier(expr: str, reason: str) -> str:
-    if _GEO_RE.search(expr):
+    fn_scan_expr = mask_for_fn_scan(expr)
+    if _GEO_RE.search(fn_scan_expr):
         return "geospatial"
     low = (reason or "").lower()
     if "circular" in low or "unresolvable" in low:
         return "circular"
     if "parameter" in low:
         return "parameter_query"
-    if _WINDOW_RE.search(expr):
+    if _WINDOW_RE.search(fn_scan_expr):
         # WINDOW_* needs a sort/partition attribute from worksheet addressing
         # this pipeline doesn't resolve (see validate.py's
         # _WINDOW_TABLECALC_RE) — distinct from row_offset_ambiguous since
         # it's a different Tableau function family (window, not row-offset).
         return "window_ambiguous"
-    if _ROWOFFSET_RE.search(expr):
+    if _ROWOFFSET_RE.search(fn_scan_expr):
         return "row_offset_ambiguous"
     return "untranslatable"
 

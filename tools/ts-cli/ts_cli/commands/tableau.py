@@ -503,6 +503,7 @@ def _import_with_retry(
         for c in ds.get("calculated_fields", [])
     }
     dropped_on_import: list[dict] = []
+    added_names = set(stats.get("added_names") or [])
     for _attempt in range(max_retries):
         import_tml = {k: v for k, v in merged.items() if not k.startswith("_")}
         tml_str = json.dumps(import_tml)
@@ -511,20 +512,26 @@ def _import_with_retry(
             input=json.dumps([tml_str]),
             capture_output=True, text=True,
         )
-        if import_proc.returncode != 0:
-            typer.echo(f"  Import failed: {import_proc.stderr[:200]}", err=True)
-            raise SystemExit(1)
-        import_result = json.loads(import_proc.stdout)
-        status = import_result[0]["response"]["status"]["status_code"]
+        # Exits 1 on any per-item failure even under ALL_OR_NONE, so read the JSON
+        # rather than gate on returncode; an unexpected shape is an ERROR, not a crash.
+        try:
+            import_result = json.loads(import_proc.stdout)
+            status = import_result[0]["response"]["status"]["status_code"]
+        except (json.JSONDecodeError, LookupError, TypeError, KeyError):
+            result["import_status"] = "ERROR"
+            result["import_error"] = f"Unparseable import response (exit {import_proc.returncode}): {import_proc.stdout[:200] or import_proc.stderr[:200]}"
+            typer.echo(f"  Import: {result['import_error']}", err=True)
+            break
         if status == "OK":
             result["import_status"] = status
-            result["updated_model_guid"] = (
-                extract_imported_guid(import_result) or existing_guid
-            )
+            result["updated_model_guid"] = extract_imported_guid(import_result) or existing_guid
             typer.echo(f"  Import: OK", err=True)
             break
         msg = import_result[0]["response"]["status"].get("error_message", "")
         parsed_err = parse_import_error(msg)
+        # Never drop a pre-existing formula (its dependent may be the real failure).
+        if parsed_err is not None and parsed_err[0] not in added_names:
+            parsed_err = None
         if parsed_err is None:
             result["import_status"] = status
             result["import_error"] = msg
@@ -536,6 +543,7 @@ def _import_with_retry(
         # references it — in THIS cycle — so a failed root (e.g. a date-window
         # formula) doesn't cost one import round-trip per downstream dependent.
         to_drop, reasons = _collect_cascade_victims(merged, bad_name, err_detail)
+        to_drop = [v for v in to_drop if v in added_names]  # same added-only rule
         for victim in to_drop:
             dropped_on_import.append({
                 "name": victim,
@@ -560,6 +568,8 @@ def _import_with_retry(
     if dropped_on_import:
         result["formulas_dropped_on_import"] = dropped_on_import
         result["formulas_added"] = stats["added"]
+    if result.get("import_status") != "OK":
+        raise SystemExit(1)
 
 
 def _merge_flow(

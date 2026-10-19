@@ -19,6 +19,7 @@ from ts_cli.tableau.parsing import _extract_function_args
 
 def convert_string_concat(
     expr: str, role: str = "dimension", registry: dict | None = None,
+    datatype: str | None = None,
 ) -> str:
     """Convert string + concatenation to concat().
 
@@ -35,6 +36,12 @@ def convert_string_concat(
     token, so "is this operand a string?" is decided by looking the
     placeholder up in `registry` rather than searching for a literal quote
     character.
+
+    `datatype` is the formula's own declared Tableau type (string/integer/
+    real/boolean/date/datetime), separate from `role` (dimension/measure is
+    about aggregation behavior, not type — a dimension can be a date or a
+    number used as a grouping key, not only a string). It gates which operand
+    shapes are eligible to join a `+` chain: see `_concat_operand_pattern`.
     """
     if role == "measure" and "to_string" not in expr.lower() and "str(" not in expr.lower():
         return expr
@@ -42,26 +49,35 @@ def convert_string_concat(
     if "+" not in expr:
         return expr
 
-    return _replace_string_plus_chains(expr, role, registry)
+    return _replace_string_plus_chains(expr, role, registry, datatype)
 
 
-_CONCAT_OPERAND = (
-    r"(?:"
-    r"\[[^\]]+\]"                   # [column ref]
-    r"|'[^']*'"                     # 'string literal'
-    r"|to_string\s*\([^)]*\)"       # to_string(...)
-    rf"|{PLACEHOLDER_RE}"           # masked string/date literal placeholder
-    r")"
-)
+def _concat_operand_pattern(datatype: str | None) -> str:
+    """Build the `+`-operand regex alternation.
 
-_CONCAT_PAIR = re.compile(
-    rf"({_CONCAT_OPERAND})\s*\+\s*({_CONCAT_OPERAND})",
-    re.IGNORECASE,
-)
+    The base set (`[ref]`, `'literal'`, `to_string(...)`, a masked literal
+    placeholder) is unconditional — these shapes are either unambiguously
+    string-typed already or a column reference `role == "dimension"` already
+    covers. Accepting ANY function call (e.g. `DATEDIFF(...)`, `YEAR(...)`)
+    is gated on `datatype == "string"`: without that gate, a `+` between two
+    non-string function calls in a dimension-role formula — ordinary numeric
+    arithmetic, e.g. `DATEDIFF('day', [Start], [End]) + [Offset Days]` — got
+    misread as string concatenation and wrapped in `concat()`, which rejects
+    non-text arguments and fails every such formula at import.
+    """
+    base = (
+        r"\[[^\]]+\]"                   # [column ref]
+        r"|'[^']*'"                     # 'string literal'
+        r"|to_string\s*\([^)]*\)"       # to_string(...)
+        rf"|{PLACEHOLDER_RE}"           # masked string/date literal placeholder
+    )
+    if datatype == "string":
+        base += r"|[A-Za-z_][A-Za-z_0-9]*\s*\((?:[^()]|\([^()]*\))*\)"  # any fn call, 1 level deep
+    return rf"(?:{base})"
 
 
 def _replace_string_plus_chains(
-    expr: str, role: str, registry: dict | None = None,
+    expr: str, role: str, registry: dict | None = None, datatype: str | None = None,
 ) -> str:
     """Replace ``a + 'x' + b`` chains with ``concat(a, 'x', b)`` at any depth.
 
@@ -70,10 +86,12 @@ def _replace_string_plus_chains(
     the full chain, and replaces with ``concat()``.  Merges adjacent results
     so ``concat(a, b) + c`` collapses to ``concat(a, b, c)``.
     """
+    operand = _concat_operand_pattern(datatype)
+    concat_pair = re.compile(rf"({operand})\s*\+\s*({operand})", re.IGNORECASE)
     result = expr
     safety = 0
     while safety < 50:
-        m = _CONCAT_PAIR.search(result)
+        m = concat_pair.search(result)
         if not m:
             break
         left, right = m.group(1).strip(), m.group(2).strip()
@@ -92,7 +110,7 @@ def _replace_string_plus_chains(
         # Extend chain rightward: keep matching + OPERAND after the pair
         chain = [left, right]
         end = m.end()
-        ext = re.compile(r"\s*\+\s*" + _CONCAT_OPERAND, re.IGNORECASE)
+        ext = re.compile(r"\s*\+\s*" + operand, re.IGNORECASE)
         while True:
             em = ext.match(result, end)
             if not em:

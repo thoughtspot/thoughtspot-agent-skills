@@ -89,7 +89,6 @@ def extract_parameters(root: ET.Element) -> list[dict]:
         ts_type = _tableau_type_to_ts_param(datatype)
         param: dict[str, Any] = {
             "name": name,
-            "default_value": alias or value or "",
             "data_type": ts_type,
         }
 
@@ -108,11 +107,35 @@ def extract_parameters(root: ET.Element) -> list[dict]:
                 param["data_type"] = "CHAR"
                 param["list_config"] = {"list_choice": choices}
 
+        if "list_config" in param:
+            # List-based (CHAR) parameter: `default_value` must match a
+            # choice's display_name, not its internal `value` — the
+            # column-level `alias` IS that display name for the parameter's
+            # current value, so it's the right source here. Example
+            # convention: a list parameter with choice value "1" / display
+            # name "Last Month" reports default_value "Last Month".
+            param["default_value"] = alias or value or ""
+        else:
+            # Free-form (no list_config) parameter: there's no display_name
+            # to match, so default_value must be the literal, parseable
+            # value — `alias` here is only a cosmetic Tableau-UI label for
+            # the current value, not the value itself. Preferring alias
+            # unconditionally broke a real-number parameter whose alias was
+            # a non-numeric label (e.g. value="0.0", alias="Unset") — a
+            # DOUBLE parameter got default_value: "Unset", and ThoughtSpot
+            # failed to parse it as a number, breaking the whole import.
+            param["default_value"] = value or alias or ""
+
         _range = col.find(".//range")
         if _range is not None:
+            # Keys per the model TML schema's own range_config documentation
+            # (range_min/range_max, not min/max) — a pre-existing mismatch
+            # that stayed unreachable until the INT64 fix below let integer
+            # range parameters actually reach import; it would have silently
+            # emitted a range_config ThoughtSpot's schema doesn't recognize.
             param["range_config"] = {
-                "min": _range.get("min", ""),
-                "max": _range.get("max", ""),
+                "range_min": _range.get("min", ""),
+                "range_max": _range.get("max", ""),
             }
 
         params.append(param)
@@ -132,10 +155,10 @@ def _normalize_date_params(params: list[dict]) -> list[dict]:
             p["default_value"] = _reformat_tableau_date(p["default_value"])
         rc = p.get("range_config")
         if rc:
-            if rc.get("min"):
-                rc["min"] = _reformat_tableau_date(rc["min"])
-            if rc.get("max"):
-                rc["max"] = _reformat_tableau_date(rc["max"])
+            if rc.get("range_min"):
+                rc["range_min"] = _reformat_tableau_date(rc["range_min"])
+            if rc.get("range_max"):
+                rc["range_max"] = _reformat_tableau_date(rc["range_max"])
         lc = p.get("list_config")
         if lc:
             for choice in lc.get("list_choice", []):
@@ -154,13 +177,18 @@ def _reformat_tableau_date(val: str) -> str:
 
 
 def _tableau_type_to_ts_param(datatype: str) -> str:
+    # ThoughtSpot's parameter data_type enum is CHAR/INT64/DOUBLE/BOOL/DATE
+    # only -- no "INT" and no "DATE_TIME". Both failed import ("Invalid
+    # parameter") on a build whose parameters had never hit a real import
+    # before (no test exercised this function against a live instance).
+    # datetime has no closer native parameter type than DATE.
     _map = {
         "string": "CHAR",
-        "integer": "INT",
+        "integer": "INT64",
         "real": "DOUBLE",
         "boolean": "BOOL",
         "date": "DATE",
-        "datetime": "DATE_TIME",
+        "datetime": "DATE",
     }
     return _map.get(datatype, "CHAR")
 

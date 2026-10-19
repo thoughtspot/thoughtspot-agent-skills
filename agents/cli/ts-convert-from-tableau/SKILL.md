@@ -1915,6 +1915,14 @@ From the export (and/or `ts metadata search --guid {model_guid}`) record:
 (In **scope 3 / Liveboards only**, the model already exists from Step 1.5a — this export is
 the single source of its obj_id, columns, formulas, and parameter UUIDs.)
 
+### 10-pre2. Optional: an MCP-based dashboard tool, if the session already has one
+
+Hand-authored TML (rest of Step 10) stays the default path. If a Liveboard-building MCP tool
+is already connected, offer it as an alternative — default to declining absent a preference,
+never if Spotter was declined at Step 5.5, never block waiting for one. See
+[`thoughtspot-liveboard-tml.md`](../../shared/schemas/thoughtspot-liveboard-tml.md) §"Building
+a Liveboard via an MCP-based dashboard tool" for gotchas.
+
 ### 10-charts. Choose the charting library (ask once)
 
 Before resolving chart types, ask the user which charting library to target — **default
@@ -2101,8 +2109,9 @@ everything loose:
 - Vizzes that share a **subject** (e.g. top-products + a geographic map) → e.g.
   "Product & Geographic Analysis".
 - Give each group a short `name` and a one-line `description`.
-A Tableau dashboard has no native sections, so this is an inference — keep it light
-(2–4 groups), and don't force a viz into a group it doesn't fit; ungrouped tiles are fine.
+A Tableau dashboard has no native sections, so this is an inference — keep it light (2–4
+groups) as a starting point, not a hard cap; a tab with many small tiles can reasonably need
+more. Don't force a viz into a group it doesn't fit; ungrouped tiles are fine.
 
 **Groups work with tabs — but the nesting is specific.** When using `layout.tabs[]`:
 1. Define `groups[]` at the liveboard level with `visualizations:` listing member viz IDs
@@ -2494,10 +2503,8 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.47.0 | 2026-10-19 | **Parser false positives, nested `group_aggregate`, LOD brace-scanning fixed (ts-cli v0.182.0).** Function-name scans mask literals/`[ref]`s first. Nested-`group_aggregate` detection checks span containment, not match-count. LOD scanning is a single-pass stack scanner skipping `[ref]` spans. `convert_string_concat` gated on `datatype == "string"`. Import-retry no longer fails open on a bad status/formula drop. Parameter types: `INT64`/`DATE`; `range_config` → `range_min`/`range_max`. Mapping-doc fixes + optional MCP liveboard step. Backlog BL-402/403/404 |
 | 1.46.0 | 2026-10-07 | Exact week forms (v0.174.0, BL-373/380) |
 | 1.45.0 | 2026-10-07 | Week notes (ts-cli v0.170.0, BL-334 item 2): advisory `review_notes` on week-dependent formulas; `review_required` for a known non-Monday week start and for `DATEDIFF('week')` → `diff_days / 7`; `ISOWEEK`/`ISOYEAR`/`ISOQUARTER`/`WEEK` skipped as unmapped |
-| 1.44.4 | 2026-10-07 | **Trigonometry is radians; quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-364, BL-365).** `SIN` … `ATAN` / `COT` no longer convert by `180 / π` (ThoughtSpot trig is radians, live — the old forms were wrong for every non-zero input); `PI()` is the warehouse's `PI()`; `DEGREES` / `RADIANS` are bracketed. A literal holding a quote is double-quoted (`'it''s'` read as two quotes), a backslash doubled, and every product under a division bracketed. `INT(x)` is now parenthesised: `INT([x]) * 2` multiplied only the negative branch (#579 review). Coverage-matrix rows 32, 33, 132, 133, 138, 139 |
-| 1.44.3 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
-| 1.44.2 | 2026-10-06 | **`DATEPART('weekday', d)` returns a number, not the day name (ts-cli v0.156.2, BL-334).** Now `( mod ( day_number_of_week ( d ) , 7 ) + 1 )` for a Sunday start. Week start: literal `start_of_week`, else the datasource's `<date-options start-of-week>`, else Sunday assumed and reported as a validation warning. `ISOWEEKDAY` / `'iso-weekday'` → `day_number_of_week` |
 
-**Older entries (v1.0.0–v1.44.1):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.44.4):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

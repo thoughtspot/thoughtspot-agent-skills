@@ -14476,3 +14476,83 @@ resubmission should start from current `main` and answer each item below.
    two-thirds unrelated backlog, session and validator changes.
 
 **Target:** on resubmission. Close as won't-do if nobody picks it up by 2027-03-31.
+## BL-402 — `ts tableau build-liveboard` should cross-check its output against the live Model
+
+**Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau liveboard-migration
+submission — the auto-builder emitted tiles referencing columns by a slightly different
+case/suffix than the live Model actually has (a bucket-wrapper formula, a trailing-space
+name), and formulas dropped during a later Model-enrichment pass left some tiles with no
+resolvable reference at all. The migration skill currently documents a manual
+correction pass (`references/step-10-liveboard-generation.md`) as the only fix — resolving
+case/suffix/bucket-wrapper drift and genuinely-dropped-vs-typo triage by hand, every time.
+
+**Why it matters.** A step that exists only in prose, run by an agent reading a skill file,
+is exactly the kind of mechanical transformation this repo's own angle-11 codification
+principle says should move into `ts-cli` once it's well-understood enough to automate (see
+`.claude/rules/repo-audit.md`, angle 11). It is also easy to skip or do inconsistently by
+hand, and the live Model is right there to check against — `build-liveboard` already has
+the connection and profile it needs.
+
+**Do.** Add a verification pass to `ts tableau build-liveboard`: after generating liveboard
+TML, export the live Model it targets and resolve every `answer_columns[]`/`chart_columns[]`
+entry against the Model's actual formula/column names. For each unresolved reference, try
+(in order) an exact case-insensitive match, a known suffix variant, then report the rest as
+genuinely unresolved (not silently drop them). Surface a summary (`resolved_case_fixes`,
+`resolved_suffix_fixes`, `unresolved`) in the command's result JSON, matching the shape
+`ts tableau verify` already uses for formula-level drop reporting.
+
+**Target:** 2026-12-31, or the next Tableau liveboard-migration engagement, whichever comes
+first.
+
+## BL-403 — Correct Step 7's "rerun when formulas are filtered" explanation
+
+**Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau submission.
+`references/step-7-review-templates.md` tells the reader that a non-zero
+`formulas_filtered` from `build-model --existing-guid` can be a same-batch ordering
+artifact — a formula depending on another formula added in the *same* batch, filtered
+because its dependency "wasn't live yet" — and that an identical retry often clears it once
+the dependency is live. That explanation is wrong: a same-batch `[Base]` dependency is
+rewritten to the resolved `[formula_Base]` reference and kept, not filtered, so retrying
+fixes nothing in that case. Left as-is, this sends the next reader down the wrong
+diagnostic path on a genuine `formulas_filtered` result.
+
+**Do.** Identify the actual mechanism `filter_unresolvable_formulas` uses that makes a
+second identical run sometimes clear previously-filtered formulas (if one still exists —
+confirm live, don't assume the prose was describing a real behavior that just had the wrong
+cause), and correct the step-7 reference accordingly. If no such mechanism survives
+scrutiny, remove the "retry once" advice entirely rather than leave a plausible-sounding but
+false explanation in place.
+
+**Target:** next Tableau skill touch that reaches Step 7, or 2026-12-31, whichever comes
+first.
+
+## BL-404 — Check whether `fix_double_aggregation` (formula_common.py) undoes a wrapper a different formula shape actually needs
+
+**Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau submission, flagging a
+tension between two findings from the same session:
+
+1. A Tableau-specific finding: when a formula references another `group_aggregate`-valued
+   formula and the combination hits ThoughtSpot's nested-`group_aggregate` restriction, one
+   fix shape is to wrap the reference in `group_aggregate(sum([formula_X]), query_groups(),
+   {})` rather than a bare `sum([formula_X])` — specifically because a bare `sum(...)`
+   around a reference to a formula with `average()`/`stddev()` dependents fails import with
+   a misleading `Formula addition failed... Search did not find` error, while the
+   `group_aggregate(...)`-wrapped form does not.
+2. The shared `fix_double_aggregation` (`tools/ts-cli/ts_cli/formula_common.py`, used by
+   every `ts-convert-from-*` converter, not just Tableau's) replaces `sum([formula_X])` with
+   bare `[formula_X]` whenever `X` is already aggregated — intended to avoid a genuine
+   double-aggregation, but applied as a blanket simplification regardless of what depends on
+   `X` downstream.
+
+If (1) is a real, general pattern (not Tableau-specific), (2) could be silently undoing the
+exact wrapper (1) says is required — reintroducing the same avg/stdev-dependent import
+failure for *any* converter's formula that happens to match this shape, not just Tableau's.
+
+**Do.** Confirm live, on a real cluster: does `fix_double_aggregation` ever fire on a
+formula `X` that itself has `average()`/`stddev()` dependents? If yes, does the simplified
+(bare-reference) output actually fail import the way a bare `sum(...)` wrap does in finding
+(1)? If the interaction is real, either make `fix_double_aggregation` skip simplifying when
+`X` has such a dependent, or confirm the two shapes are safe together and document why.
+
+**Target:** 2026-12-31, or the next converter work that touches `fix_double_aggregation` or
+the nested-`group_aggregate` reconstruction guidance, whichever comes first.

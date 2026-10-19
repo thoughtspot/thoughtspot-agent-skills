@@ -770,11 +770,11 @@ class TestNormalizeDateParams:
         from ts_cli.model_builder import _normalize_date_params
         params = [{
             "name": "DateRange", "data_type": "DATE", "default_value": "#2024-01-01#",
-            "range_config": {"min": "#2020-01-01#", "max": "#2026-12-31#"},
+            "range_config": {"range_min": "#2020-01-01#", "range_max": "#2026-12-31#"},
         }]
         result = _normalize_date_params(params)
-        assert result[0]["range_config"]["min"] == "01/01/2020"
-        assert result[0]["range_config"]["max"] == "12/31/2026"
+        assert result[0]["range_config"]["range_min"] == "01/01/2020"
+        assert result[0]["range_config"]["range_max"] == "12/31/2026"
 
     def test_list_config_dates_converted(self):
         from ts_cli.model_builder import _normalize_date_params

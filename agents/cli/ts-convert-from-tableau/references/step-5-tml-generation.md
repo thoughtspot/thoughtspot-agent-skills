@@ -545,6 +545,54 @@ Use `tableau-formula-translation.md`.
 - No `fqn` in `model_tables`
 - `obj_id` is optional on fresh import — omit it unless repointing an existing model
 
+### Hand-patching formulas directly via TML (bypassing `build-model`)
+
+When the CLI's own translator can't produce a formula (genuinely untranslatable per its own
+classifier, but reconstructible by hand — see `tableau-formula-translation.md`'s
+reconstruction techniques), it's sometimes faster to patch the exported model TML directly
+with `ts tml export` / `ts tml import` rather than extend the translator. Two things bite
+doing this:
+
+1. **A formula appended to `formulas[]` without a matching `columns[]` entry computes
+   correctly but is invisible to search/answers.** This repo's root `CLAUDE.md` already
+   states the rule ("every formula column needs a `columns[]` entry with `formula_id:`"),
+   but it's easy to violate when hand-splicing a formula in directly rather than going
+   through `build-model`'s own pipeline, which handles this automatically. Symptom is a
+   flat, confusing `"Column: <lowercased name> not found"` on import/search even though
+   `ts tml export` clearly shows the formula present — the lookup is for a *column*, not a
+   bare formula. After any manual `formulas[]` append, diff `{f['id'] for f in formulas}`
+   against `{c['formula_id'] for c in columns if c.get('formula_id')}` and backfill the
+   missing `columns[]` entries (same `column_type`/`aggregation` convention as an analogous
+   sibling formula).
+2. **Re-running `build-model --existing-guid` after a hand-fix can silently regress it — and
+   this applies to hand-patched `columns[]` properties, not just `formulas[]`.** For formulas:
+   its own translator may independently attempt one you already hand-fixed under a different
+   (possibly still-broken) translation, fail to import it, and the drop-on-failure logic
+   **removes the formula entirely** rather than leaving your working version alone — there is
+   no "already present, leave as-is" short-circuit for a name the translator also produces
+   output for. **For column properties**, same symptom via a different mechanism:
+   `build-model`'s column-cleanup pass regenerates each column's `properties` block from
+   scratch rather than merging into it, so a hand-added property with no CLI-side concept
+   (e.g. `geo_config` for a lat/long pair tagged for `GEO_BUBBLE` — see
+   `thoughtspot-chart-types.md`'s "imports structurally but renders empty" caveat) is
+   silently dropped on the next re-run even though nothing reported an error. **After any
+   `build-model` re-run following manual TML patches, re-export and diff against what you
+   expect** — both `formulas[]` *and* every hand-patched `columns[].properties` block — don't
+   assume a clean exit code means nothing was lost.
+
+### A casing mismatch between a TWB field caption and the live model's column name
+
+A column/formula reference resolved by exact name against the model's schema (not the
+query-time `=`/`!=` operators, which are case-insensitive — see
+`thoughtspot-formula-patterns.md`) produces the same *"Search did not find '<name>'"* error
+as a genuinely missing field when the casing doesn't match character-for-character. Synthetic
+example: a model column named `Preferred Weight Uom` referenced by a formula written against
+the TWB's own caption `Preferred Weight UOM` fails this way. Before concluding a referenced
+field doesn't exist or is untranslatable, diff the **exact casing** against the live model's
+column/formula list (`ts tml export … | grep -i` to find the candidate, then compare
+character-for-character) — a case-insensitive substring match in your own search can hide the
+real fix.
+
 ---
 
 ## Tableau Sets → ThoughtSpot column sets (Phase 2a/2b/2c)

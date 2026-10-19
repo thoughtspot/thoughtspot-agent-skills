@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.tableau.literals import _REF_RE
 from ts_cli.tableau.parsing import (
     _extract_function_args,
-    _find_matching_brace,
     _find_top_level_colon,
     _split_args,
 )
@@ -82,6 +82,57 @@ def _lod_to_group_aggregate(keyword: str, dims_raw: str, agg_expr: str) -> str:
     return f"group_aggregate ( {agg_expr} , {{}} , {{}} )"
 
 
+def _find_next_parseable_lod_pair(expr: str) -> tuple[int, int, tuple] | None:
+    """Find the innermost {...} pair whose content parses as real LOD syntax.
+
+    One left-to-right scan, stack-based: each `}` closes whatever `{` is
+    currently on top of the stack (standard bracket matching), which gives
+    the innermost pair first when LODs are genuinely nested, and simply the
+    next pair in sequence when they are not (sibling LODs, e.g. one per
+    if/else-if branch). If that pair's content does NOT parse as LOD syntax
+    — e.g. an earlier sibling's own conversion already emitted a
+    `{ [dims] }` set-literal, which becomes the next brace pair this scan
+    sees — the walk continues rather than stopping; because the stack still
+    holds any genuinely outer, still-unclosed `{` from before this one, a
+    real outer LOD the failed pair happened to sit inside is not lost either.
+
+    A `[` is never read as a brace-relevant character — a `[ref]` can contain
+    a literal, unescaped `[` (only a literal `]` needs Tableau's `]]` escape,
+    per `_REF_RE`), e.g. a field named "Ratio [x" is written `[Ratio [x]`.
+    Matching `_REF_RE` at each `[` and jumping straight to its end consumes
+    the whole ref atomically, so a bracket that's part of a name is never
+    confused for real `{}` nesting.
+
+    Returns (open_pos, close_pos, parsed), or None if nothing in the
+    expression parses as LOD content.
+    """
+    stack: list[int] = []
+    in_single = in_double = False
+    pos = 0
+    while pos < len(expr):
+        c = expr[pos]
+        if c == "'" and not in_double:
+            in_single = not in_single
+        elif c == '"' and not in_single:
+            in_double = not in_double
+        elif not in_single and not in_double:
+            if c == "[":
+                m = _REF_RE.match(expr, pos)
+                if m:
+                    pos = m.end()
+                    continue
+            elif c == "{":
+                stack.append(pos)
+            elif c == "}" and stack:
+                open_pos = stack.pop()
+                content = expr[open_pos + 1:pos]
+                parsed = _parse_lod_content(content)
+                if parsed is not None:
+                    return open_pos, pos, parsed
+        pos += 1
+    return None
+
+
 def convert_lod(expr: str) -> str:
     """Convert Tableau LOD expressions to ThoughtSpot group_aggregate().
 
@@ -99,37 +150,15 @@ def convert_lod(expr: str) -> str:
     result = expr
     safety = 0
     while safety < 50:
-        # Find the innermost { first (so nested LODs are resolved inside-out)
-        last_open = -1
-        for i, c in enumerate(result):
-            if c == "{":
-                last_open = i
-            elif c == "}" and last_open >= 0:
-                break
-        else:
-            if last_open < 0:
-                break
-            close = _find_matching_brace(result, last_open)
-            if close < 0:
-                break
-
-        if last_open < 0:
-            break
-
-        close = _find_matching_brace(result, last_open)
-        if close < 0:
+        found = _find_next_parseable_lod_pair(result)
+        if found is None:
             break
 
         safety += 1
-        content = result[last_open + 1:close]
-        parsed = _parse_lod_content(content)
-
-        if parsed is None:
-            break
-
+        open_pos, close_pos, parsed = found
         keyword, dims_raw, agg_expr = parsed
         replacement = _lod_to_group_aggregate(keyword, dims_raw, agg_expr)
-        result = result[:last_open] + replacement + result[close + 1:]
+        result = result[:open_pos] + replacement + result[close_pos + 1:]
 
     return result
 

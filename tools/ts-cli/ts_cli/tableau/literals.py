@@ -165,3 +165,23 @@ def mask_refs(expr: str) -> tuple[str, list[str]]:
 def unmask_refs(expr: str, refs: list[str]) -> str:
     """Restore the references ``mask_refs`` replaced."""
     return _REF_PLACEHOLDER_RE.sub(lambda m: refs[int(m.group(0)[2:-1])], expr)
+
+
+def mask_for_fn_scan(expr: str) -> str:
+    """Mask string/date literals, then ``[ref]``/``[parameter]`` references, so a
+    function-name regex (``\\bNAME\\s*\\(``) never matches inside either.
+
+    Order matters: ``mask_literals`` must run first. Its single regex already
+    distinguishes a ``'[' `` string literal from a real ``[ref]`` (the ``ref``
+    alternative is tried first per branch, same source `_LITERAL_RE` used
+    throughout this module), so a literal holding an unmatched bracket
+    character never confuses the ref-only pass that follows. Reversing the
+    order breaks on exactly that case: masking refs first leaves a literal
+    like ``'['`` with its bracket intact, and a *separate*, ref-only regex
+    (just ``\\[...\\]``, no quote-awareness) then reads from that stray ``[``
+    to the next real ``]`` as if it were one reference — silently deleting
+    whatever function call sat in between from the scan.
+    """
+    masked, _ = mask_literals(expr)
+    masked, _ = mask_refs(masked)
+    return masked

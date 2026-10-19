@@ -81,6 +81,18 @@ class TestFindMatchingBrace:
     def test_unbalanced_brace_returns_negative_one(self):
         assert _find_matching_brace("{abc", 0) == -1
 
+    def test_unescaped_bracket_inside_a_ref_name_does_not_miscount(self):
+        """A [ref] can hold a literal, unescaped `[` (only a literal `]` needs
+        Tableau's `]]` escape, per `_REF_RE`) — e.g. a field named "Ratio [x"
+        is written `[Ratio [x]`. A naive per-character bracket-depth counter
+        (treating every `[` as +1, every `]` as -1, with no awareness of the
+        single-`]`-closes-a-ref grammar) miscounts this and can leave the scan
+        still "inside a bracket" well past the ref's real end — skipping the
+        genuine `{...}` that follows instead of matching it."""
+        expr = "[Ratio [x] + {FIXED [B]: SUM([t])}"
+        open_pos = expr.index("{")
+        assert _find_matching_brace(expr, open_pos) == len(expr) - 1
+
 
 # ---------------------------------------------------------------------------
 # _find_top_level_colon

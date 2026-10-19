@@ -262,3 +262,26 @@ liveboard:
       height: 6
       width: 4
 ```
+
+## `build-liveboard` doesn't cross-check its output against the live Model (BL-402)
+
+`ts tableau build-liveboard` resolves `answer_columns[]`/`chart_columns[]` names from the
+TWB's own field captions, not from the live Model it targets — so case or whitespace drift
+between the two (a formula migrated as `sales channel` when the Model's own column is
+`Sales Channel`, or a formula name with a trailing space the TML round-trip doesn't
+preserve) can leave a tile referencing a name the Model doesn't actually have, and a formula
+dropped during a later Model-enrichment pass leaves a tile with no resolvable reference at
+all. Neither produces an import error — both silently render the tile broken.
+
+**Tracked as BL-402** (automating this into `build-liveboard` itself); until then, after
+generating the liveboard, export the live Model and diff every tile's referenced
+column/formula names against it by hand:
+1. Exact case-insensitive match — if the Model has `Sales Channel` and the tile references
+   `sales channel`, just correct the tile's casing.
+2. A known suffix/alias variant (a `(copy)`-style alias, a trailing-space formula name) —
+   resolve via the same `calc_map`/exact-name lookup used elsewhere in this skill, not by
+   guessing from string similarity.
+3. Anything left unresolved after (1) and (2) is genuinely missing — check whether the
+   underlying formula was dropped (classifier false-negative, a manual-group construct the
+   parser drops before translation ever sees it, etc.) before concluding the tile can't be
+   built.
