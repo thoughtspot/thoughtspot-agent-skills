@@ -815,7 +815,7 @@ even if it tried?
 
 **How determinism holds.** AgentQL doesn't guess how a fiscal or 4-4-5 calendar works — the engine applies the Model's calendar definition deterministically, so "last period" always compiles to the same bounded SQL. (The sample Model is Gregorian; the fiscal/4-4-5 guarantee is the general one.)
 
-**Covers.** Date parts, relative dates without `CURRENT_DATE`, date literals, string functions, and `CASE` buckets. (5 questions · ~30 min)
+**Covers.** Date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets, and an illustrative custom-calendar example. (5 questions + 1 illustrative · ~30 min)
 
 ### 4.1 Date parts with the extraction functions
 
@@ -902,6 +902,48 @@ grand total. This is bucketing per fact row. Bucketing *customers by their total
 CTE first (Module 5).
 
 **Guarded by:** `l4_case_buckets`.
+
+### 4.6 A custom calendar you never compute (illustrative)
+
+Not every business runs on the Gregorian year. A Model can carry a **custom calendar** — here
+**JulyOffset**, a fiscal calendar whose year starts in July — and relative-period questions then
+resolve through *it*, not the Gregorian year. The sample Model has no custom calendar, so this is
+**illustrative** (not a live capture).
+
+**Question.** Sales for the **last five fiscal years**, on the JulyOffset calendar.
+
+**AgentQL Sent** *(representative — the learner names the period; the Model's calendar supplies the
+boundaries):*
+```sql
+SELECT SUM("t1"."sales") AS "Sales (last 5 fiscal years)"
+FROM "<a Model on the JulyOffset calendar>" AS "t1"
+WHERE <the last five completed fiscal years>
+```
+
+**DB SQL Generated** *(illustrative).* ThoughtSpot compiles **two** date filters, each doing a
+different job:
+```sql
+-- 1. Coarse filter — partition pruning on the fact. A Model setting applies coarse date bounds
+--    so the warehouse prunes partitions before the fine filter runs (a performance step):
+AND "ta_3"."TRANSACTIONDATE" >= DATE('2020-01-01', 'YYYY-MM-DD')
+AND "ta_2"."TRANSACTIONDATE" >= DATE('2020-01-01', 'YYYY-MM-DD')
+
+-- 2. Fine-grain filter — the JulyOffset custom calendar, via its absolute_year_number
+--    (ta_1 = the calendar, ta_4 = the current period): the five completed prior fiscal years.
+AND ((
+    "ta_1"."absolute_year_number" >= ("ta_4"."absolute_year_number" - 5)
+    AND "ta_1"."absolute_year_number" <= ("ta_4"."absolute_year_number" - 1)
+  ))
+```
+
+**Key Findings.** AgentQL never computed a fiscal boundary. "Last five fiscal years" is resolved
+by the **custom calendar**: the engine joins the calendar table and compares its
+`absolute_year_number` against the current period's — deterministically, the same way every run.
+The two filters have distinct jobs: the **coarse** `TRANSACTIONDATE >= …` bounds are a *pruning*
+optimisation on the fact, while the **fine-grain** `absolute_year_number` window is the actual
+answer. Swap JulyOffset for a 4-4-5 or any fiscal calendar and the AgentQL is unchanged — only the
+Model's calendar definition differs. That is why "last period" means the right thing to everyone,
+with no hand-coded fiscal math.
 
 **Check yourself.** Write "sales in the last complete quarter" without `CURRENT_DATE`. Why
 does `DATE_TRUNC` compile but fail, and what do you use instead?

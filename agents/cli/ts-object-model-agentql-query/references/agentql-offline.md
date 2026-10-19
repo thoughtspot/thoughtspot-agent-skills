@@ -372,6 +372,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.16.0 | 2026-10-19 | **Custom-calendar worked example in the course.** New illustrative lesson **4.6** (“A custom calendar you never compute”) shows a *last-five-fiscal-years* question on a custom calendar (JulyOffset) compiling to **two** date filters: a **coarse** `TRANSACTIONDATE` bound that prunes partitions on the fact (a Model setting), and the **fine-grain** custom-calendar filter via `absolute_year_number` (the five completed prior years). Teaches that AgentQL never hand-codes fiscal math — the Model's calendar supplies the boundaries deterministically. Labelled illustrative (the sample Model is Gregorian), kept out of the captured `lesson-sql.md`. |
 | 2.15.0 | 2026-10-19 | **RLS worked example in the course.** Lesson 3.5 (“Security you never write”) now carries an **illustrative** RLS example — the `_TENANT_ID IN (…)` predicate ThoughtSpot injects — with both shapes and the **strict vs non-strict** distinction: strict RLS puts the rule on one table (the fact) and always forces that join in, so it filters every query; non-strict filters only the tables a query includes, so you place rules by what must be protected — the fact for sales-level data, and any dimension (e.g. store) whose membership must also be restricted. Clearly labelled illustrative (the sample Model has no RLS), kept out of the captured `lesson-sql.md`. First of the purpose-built governance examples. |
 | 2.14.0 | 2026-10-19 | **Learn AgentQL is now offline-only.** The course dropped the live/offline toggle: it runs entirely from captured examples ([`lesson-sql.md`](references/lesson-sql.md) + the bundled [`agentql-offline.md`](references/agentql-offline.md)) with no cluster, no profile and no per-lesson `ts agentql` calls — the sample Model can't demonstrate RLS, custom calendars or varied join types, so live added cost without showing the features that matter. Purpose-built example Models for those features are being added as captured offline examples. The skill's **live query flow is unchanged** (query any Model, pull rows, see the SQL); only the *course* is offline. |
 | 2.13.0 | 2026-10-19 | **Course: one lesson at a time + captured SQL for offline.** The guided course now presents **a single lesson at a time** and waits for the learner before the next, instead of showing a whole module at once. New generated reference [`lesson-sql.md`](references/lesson-sql.md) stores the **real captured `executable_sql`** for every lesson (live on `(Sample) Retail - Apparel`), so **offline mode shows the exact warehouse SQL** in section 3 rather than reconstructing it; built by `tools/agentql-retest/build_lesson_sql.py` from a `--suite lessons guards` capture and bundled into `agentql-offline.md`. Lesson **1.3** (compiles-then-fails) switched from `BITAND` (which now compiles clean and executes on 26.9.0.cl) to the `IN (SELECT …)` semi-join, which still compiles then fails at fetch ([SCAL-326936](https://thoughtspot.atlassian.net/browse/SCAL-326936)); retest case updated. |
@@ -2448,7 +2449,7 @@ even if it tried?
 
 **How determinism holds.** AgentQL doesn't guess how a fiscal or 4-4-5 calendar works — the engine applies the Model's calendar definition deterministically, so "last period" always compiles to the same bounded SQL. (The sample Model is Gregorian; the fiscal/4-4-5 guarantee is the general one.)
 
-**Covers.** Date parts, relative dates without `CURRENT_DATE`, date literals, string functions, and `CASE` buckets. (5 questions · ~30 min)
+**Covers.** Date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets, and an illustrative custom-calendar example. (5 questions + 1 illustrative · ~30 min)
 
 #### 4.1 Date parts with the extraction functions
 
@@ -2535,6 +2536,48 @@ grand total. This is bucketing per fact row. Bucketing *customers by their total
 CTE first (Module 5).
 
 **Guarded by:** `l4_case_buckets`.
+
+#### 4.6 A custom calendar you never compute (illustrative)
+
+Not every business runs on the Gregorian year. A Model can carry a **custom calendar** — here
+**JulyOffset**, a fiscal calendar whose year starts in July — and relative-period questions then
+resolve through *it*, not the Gregorian year. The sample Model has no custom calendar, so this is
+**illustrative** (not a live capture).
+
+**Question.** Sales for the **last five fiscal years**, on the JulyOffset calendar.
+
+**AgentQL Sent** *(representative — the learner names the period; the Model's calendar supplies the
+boundaries):*
+```sql
+SELECT SUM("t1"."sales") AS "Sales (last 5 fiscal years)"
+FROM "<a Model on the JulyOffset calendar>" AS "t1"
+WHERE <the last five completed fiscal years>
+```
+
+**DB SQL Generated** *(illustrative).* ThoughtSpot compiles **two** date filters, each doing a
+different job:
+```sql
+-- 1. Coarse filter — partition pruning on the fact. A Model setting applies coarse date bounds
+--    so the warehouse prunes partitions before the fine filter runs (a performance step):
+AND "ta_3"."TRANSACTIONDATE" >= DATE('2020-01-01', 'YYYY-MM-DD')
+AND "ta_2"."TRANSACTIONDATE" >= DATE('2020-01-01', 'YYYY-MM-DD')
+
+-- 2. Fine-grain filter — the JulyOffset custom calendar, via its absolute_year_number
+--    (ta_1 = the calendar, ta_4 = the current period): the five completed prior fiscal years.
+AND ((
+    "ta_1"."absolute_year_number" >= ("ta_4"."absolute_year_number" - 5)
+    AND "ta_1"."absolute_year_number" <= ("ta_4"."absolute_year_number" - 1)
+  ))
+```
+
+**Key Findings.** AgentQL never computed a fiscal boundary. "Last five fiscal years" is resolved
+by the **custom calendar**: the engine joins the calendar table and compares its
+`absolute_year_number` against the current period's — deterministically, the same way every run.
+The two filters have distinct jobs: the **coarse** `TRANSACTIONDATE >= …` bounds are a *pruning*
+optimisation on the fact, while the **fine-grain** `absolute_year_number` window is the actual
+answer. Swap JulyOffset for a 4-4-5 or any fiscal calendar and the AgentQL is unchanged — only the
+Model's calendar definition differs. That is why "last period" means the right thing to everyone,
+with no hand-coded fiscal math.
 
 **Check yourself.** Write "sales in the last complete quarter" without `CURRENT_DATE`. Why
 does `DATE_TRUNC` compile but fail, and what do you use instead?
