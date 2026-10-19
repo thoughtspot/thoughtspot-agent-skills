@@ -90,15 +90,14 @@ the course.
 | Module | What you learn | Questions |
 |---|---|---|
 | 0. Why AgentQL | ThoughtSpot compiles AgentQL to warehouse SQL and never runs it itself; the Model supplies joins, formulas and security | concept |
-| 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, reading result types, why it can only read (writes, DDL and injection are refused) | 5 |
-| 2. First queries | reading the SQL ThoughtSpot writes: joins written for you, null handling, the row cap, formulas inlined, the lenient parser, the bare-measure trap | 8 |
-| 3. The semantic layer | ratios and safe division, what `AVG` averages, which tables a query reads, formula measures (`AGG`, not `SUM`) on a Model you choose, security you never write, every member via an outer join and the business rules in the generated SQL | 6 |
-| 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets | 5 |
-| 5. Advanced shapes | CTEs, ranking and share of total, top N per group, year over year, set operations | 6 |
-| 6. Trust, but verify | queries that return `SUCCESS` with the wrong number, and the control queries that catch them | 4 |
-| 7. Building on it | consuming results in code, testing an agent that writes AgentQL | 3 |
+| 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, why it can only read (writes, DDL and injection are refused) | 4 |
+| 2. First queries | reading the SQL ThoughtSpot writes: joins/null-handling/row-cap written for you, a Model formula inlined, filters and counting, and how the Model's join type shapes the SQL | 4 |
+| 3. The semantic layer | ratios and safe division, formula measures (`AGG`, not `SUM`), security you never write, every member via an outer join and the business rules in the generated SQL | 4 |
+| 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, and a custom-calendar example | 3 |
+| 5. Advanced shapes | CTEs, window functions (rank and share of total), and `HAVING` plus the shapes that aren't allowed | 3 |
+| 6. Trust, but verify | the silent drops (`QUALIFY`, `FILTER`), loud failures and their workarounds, and the control queries that catch wrong numbers | 3 |
 
-37 questions in all; each module stands alone after Module 2. The course itself is
+21 questions in all; each module stands alone after Module 2. The course itself is
 [references/learning-path.md](references/learning-path.md).
 
 **Is the course still accurate on your cluster?** Every lesson claim is a retest case:
@@ -335,6 +334,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.18.0 | 2026-10-20 | **Leaner course: 39 → 21 lessons (~3–4 per module).** Trimmed Learn AgentQL to focus on *understanding* AgentQL and deterministic results rather than hand-writing it. Removed **Module 7** (Building on it) and the SQL-syntax-practice lessons (top-N, string functions, date literals, set-op mechanics, `AVG` grain, which-tables, lenient parser, bare-measure, two-dim joins, counting-as-its-own-lesson); kept the two-API basics, the determinism/governance showcases (RLS, custom calendar, join types), the key traps, and the whole *Trust, but verify* module. Lessons renumbered sequentially. The `agentql-retest` **lessons suite is unchanged** — the cut lessons' cases stay as behaviour-regression coverage. |
 | 2.17.1 | 2026-10-20 | **Join-type lesson (2.9) now live-verified.** Replaced the illustrative join-type SQL with real captures from a Model configured with three join types — Sales→Product `LEFT OUTER`, Sales→Customer `RIGHT OUTER`, Sales→Date `FULL OUTER` — showing the same grouped AgentQL compiling to each, and one query mixing LEFT+RIGHT across dimensions. The agent never writes `JOIN`; the generated SQL carries exactly the Model's configured type. |
 | 2.17.0 | 2026-10-19 | **Join-type worked example in the course.** New illustrative lesson **2.9** (“The join type is the Model's, not yours”): the same *sales by product* AgentQL compiles to `JOIN` / `LEFT OUTER JOIN` / `RIGHT OUTER JOIN` / `FULL OUTER JOIN` depending purely on how the Model defines the fact↔dimension relationship — the agent never writes `JOIN`. Complements lesson 3.6 (AgentQL *overriding* an inner-join Model with a CTE outer join). Labelled illustrative (the sample Model is inner-only), kept out of the captured `lesson-sql.md`. |
 | 2.16.1 | 2026-10-20 | **Custom-calendar lesson (4.6) now live-verified, and the dependency clarified.** AgentQL **does** resolve relative periods through a Model's custom/fiscal calendar **when the Model's date is configured with one** — live-captured on a Model with the JulyOffset calendar, the generated SQL joins the calendar table and computes the window on `absolute_year_number`. With **no** custom calendar configured the same AgentQL compiles to the standard Gregorian year (`EXTRACT(YEAR …)`), also verified. Replaces 2.16.0's illustrative example with the real capture and states the config dependency; Module 4 key-takeaway updated to match. |

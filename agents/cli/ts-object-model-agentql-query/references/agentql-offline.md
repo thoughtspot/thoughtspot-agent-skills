@@ -127,15 +127,14 @@ the course.
 | Module | What you learn | Questions |
 |---|---|---|
 | 0. Why AgentQL | ThoughtSpot compiles AgentQL to warehouse SQL and never runs it itself; the Model supplies joins, formulas and security | concept |
-| 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, reading result types, why it can only read (writes, DDL and injection are refused) | 5 |
-| 2. First queries | reading the SQL ThoughtSpot writes: joins written for you, null handling, the row cap, formulas inlined, the lenient parser, the bare-measure trap | 8 |
-| 3. The semantic layer | ratios and safe division, what `AVG` averages, which tables a query reads, formula measures (`AGG`, not `SUM`) on a Model you choose, security you never write, every member via an outer join and the business rules in the generated SQL | 6 |
-| 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets | 5 |
-| 5. Advanced shapes | CTEs, ranking and share of total, top N per group, year over year, set operations | 6 |
-| 6. Trust, but verify | queries that return `SUCCESS` with the wrong number, and the control queries that catch them | 4 |
-| 7. Building on it | consuming results in code, testing an agent that writes AgentQL | 3 |
+| 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, why it can only read (writes, DDL and injection are refused) | 4 |
+| 2. First queries | reading the SQL ThoughtSpot writes: joins/null-handling/row-cap written for you, a Model formula inlined, filters and counting, and how the Model's join type shapes the SQL | 4 |
+| 3. The semantic layer | ratios and safe division, formula measures (`AGG`, not `SUM`), security you never write, every member via an outer join and the business rules in the generated SQL | 4 |
+| 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, and a custom-calendar example | 3 |
+| 5. Advanced shapes | CTEs, window functions (rank and share of total), and `HAVING` plus the shapes that aren't allowed | 3 |
+| 6. Trust, but verify | the silent drops (`QUALIFY`, `FILTER`), loud failures and their workarounds, and the control queries that catch wrong numbers | 3 |
 
-37 questions in all; each module stands alone after Module 2. The course itself is
+21 questions in all; each module stands alone after Module 2. The course itself is
 [references/learning-path.md](references/learning-path.md).
 
 **Is the course still accurate on your cluster?** Every lesson claim is a retest case:
@@ -372,6 +371,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.18.0 | 2026-10-20 | **Leaner course: 39 → 21 lessons (~3–4 per module).** Trimmed Learn AgentQL to focus on *understanding* AgentQL and deterministic results rather than hand-writing it. Removed **Module 7** (Building on it) and the SQL-syntax-practice lessons (top-N, string functions, date literals, set-op mechanics, `AVG` grain, which-tables, lenient parser, bare-measure, two-dim joins, counting-as-its-own-lesson); kept the two-API basics, the determinism/governance showcases (RLS, custom calendar, join types), the key traps, and the whole *Trust, but verify* module. Lessons renumbered sequentially. The `agentql-retest` **lessons suite is unchanged** — the cut lessons' cases stay as behaviour-regression coverage. |
 | 2.17.1 | 2026-10-20 | **Join-type lesson (2.9) now live-verified.** Replaced the illustrative join-type SQL with real captures from a Model configured with three join types — Sales→Product `LEFT OUTER`, Sales→Customer `RIGHT OUTER`, Sales→Date `FULL OUTER` — showing the same grouped AgentQL compiling to each, and one query mixing LEFT+RIGHT across dimensions. The agent never writes `JOIN`; the generated SQL carries exactly the Model's configured type. |
 | 2.17.0 | 2026-10-19 | **Join-type worked example in the course.** New illustrative lesson **2.9** (“The join type is the Model's, not yours”): the same *sales by product* AgentQL compiles to `JOIN` / `LEFT OUTER JOIN` / `RIGHT OUTER JOIN` / `FULL OUTER JOIN` depending purely on how the Model defines the fact↔dimension relationship — the agent never writes `JOIN`. Complements lesson 3.6 (AgentQL *overriding* an inner-join Model with a CTE outer join). Labelled illustrative (the sample Model is inner-only), kept out of the captured `lesson-sql.md`. |
 | 2.16.1 | 2026-10-20 | **Custom-calendar lesson (4.6) now live-verified, and the dependency clarified.** AgentQL **does** resolve relative periods through a Model's custom/fiscal calendar **when the Model's date is configured with one** — live-captured on a Model with the JulyOffset calendar, the generated SQL joins the calendar table and computes the window on `absolute_year_number`. With **no** custom calendar configured the same AgentQL compiles to the standard Gregorian year (`EXTRACT(YEAR …)`), also verified. Replaces 2.16.0's illustrative example with the real capture and states the config dependency; Module 4 key-takeaway updated to match. |
@@ -1682,12 +1682,11 @@ table collects them in one place; the **determinism column is the throughline** 
 |---|---|---|
 | **0 · Why AgentQL** | AgentQL widens *what* can be asked; keywords keep a human able to *verify* it — more expressibility, same governance. | ThoughtSpot *compiles* AgentQL and never executes the AI's SQL, so a more expressive question never trades away a governed, reproducible answer. |
 | **1 · The two APIs** | `generate-sql` compiles (nothing runs); `fetch-data` compiles then runs. Branch on `status`, not the exit code; AgentQL can only read. | `generate-sql` shows the exact warehouse SQL the engine emits — the same AgentQL always compiles to the same `executable_sql`, inspectable before a row is read. |
-| **2 · First queries** | Read the generated SQL: the joins — their *type* and keys — plus null-guards and the row cap are written for you from the Model (e.g. `sales → inner join → products`), not by your query. | The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run; the lenient parser never changes what's emitted. |
+| **2 · First queries** | Read the generated SQL: the joins — their *type* and keys — plus null-guards and the row cap are written for you from the Model (e.g. `sales → inner join → products`), not by your query. | The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run. |
 | **3 · The semantic layer** | The Model supplies joins, formulas, security and safe division by default — and AgentQL can *override* the default join for greater expressibility: *all products, including those with no sales* becomes a CTE of all products `LEFT JOIN`ed to sales, instead of the Model's inner join. | Whether you take the Model's join or override it, the governed parts — keys, `AGG`/`SUM`, null-handling and RLS — are still injected deterministically by the engine. You change the join *shape*, never the governance. |
 | **4 · Dates and functions** | Date parts and relative periods resolve through the **Model's calendar** — standard Gregorian, or a custom/fiscal calendar (e.g. 4-4-5) when the Model is configured with one; you never hand-code date math. | AgentQL joins the Model's configured calendar and compiles "last period" to the same bounded SQL every run — live-verified standard `EXTRACT(YEAR …)`, and a JulyOffset join on `absolute_year_number`. |
 | **5 · Advanced shapes** | CTEs, windows, top-N-per-group, period-over-period and set operations expand what you can express — within AgentQL's (narrower-than-SQL) envelope. | Even multi-stage shapes compile deterministically through the same governed engine; expressibility grows while compile-not-execute holds. |
 | **6 · Trust, but verify** | `SUCCESS` is not proof of the right answer: deterministic SQL can be deterministically *wrong* — a silently-dropped `QUALIFY`/`FILTER`, or the wrong grain. | The executed SQL is always governed and reproducible — but determinism guarantees *consistency*, not *correct intent*. The control queries verify the agent asked what you meant. |
-| **7 · Building on it** | Consume `fetch-data` in code, and test agents that write AgentQL — this course is itself a regression suite. | Because the same question compiles to the same SQL and rows, AgentQL output is testable: assert on generated SQL and results, and catch drift. |
 
 ---
 
@@ -1864,7 +1863,7 @@ SELECT a.p, COALESCE(west.s, 0) FROM all_p a LEFT OUTER JOIN west ON a.p = west.
 *Every* product, including four never sold in the West (they come back `0`, not dropped) — an
 outer join keywords can't express. Show the generated SQL: the `LEFT OUTER JOIN` is the agent's
 contribution; the inner joins, keys, null-guards and (where present) RLS are the **Model's**,
-written for you. *(Full: lesson 3.6. Guarded by `l3_all_products_left_join`.)*
+written for you. *(Full: lesson 3.4. Guarded by `l3_all_products_left_join`.)*
 
 **3 — The honest limit.**
 ```sql
@@ -1883,13 +1882,13 @@ whether the answer is right — and which parts of the answer are governed regar
 
 ---
 
-### Module 1 — The two APIs (~20 min · 5 questions)
+### Module 1 — The two APIs (~20 min · 4 questions)
 
 **Key takeaway.** `generate-sql` compiles (nothing runs); `fetch-data` compiles then runs. Branch on `status`, not the exit code; AgentQL can only read.
 
 **How determinism holds.** `generate-sql` shows the exact warehouse SQL the engine emits — the same AgentQL always compiles to the same `executable_sql`, inspectable before a single row is read.
 
-**Covers.** The two calls, structured errors, a query that compiles but fails, result types, and read-only. (5 questions · ~20 min)
+**Covers.** The two calls, structured errors, a query that compiles but fails, and read-only. (4 questions · ~20 min)
 
 #### 1.1 Same query, both calls
 
@@ -1945,21 +1944,7 @@ rows. The fix is a CTE semi-join (see [`beyond-keywords.md`](beyond-keywords.md)
 
 **Guarded by:** `l1_compiles_then_fails`.
 
-#### 1.4 Reading `fetch-data`: types, and dates as numbers
-
-```sql
-SELECT "t1"."date" AS d, SUM("t1"."sales") AS s
-FROM "(Sample) Retail - Apparel" AS "t1"
-GROUP BY "t1"."date" ORDER BY "t1"."date" DESC LIMIT 1
-```
-
-**Point out.** The date comes back as an `INT64` number of seconds since 1970-01-01 UTC, not
-as a date string, so the caller has to convert it (see [`integration.md`](integration.md)).
-The latest date is today, because the formula rolls the data forward.
-
-**Guarded by:** `l1_dates_are_epoch_seconds`.
-
-#### 1.5 It can only read
+#### 1.4 It can only read
 
 The question every customer asks: *"could the AI change or delete my data?"* Show the answer.
 
@@ -1993,13 +1978,13 @@ customer asks whether an agent using AgentQL could drop a table: what do you sho
 
 ---
 
-### Module 2 — First queries: reading the SQL ThoughtSpot writes (~40 min · 8 questions)
+### Module 2 — First queries: reading the SQL ThoughtSpot writes (~35 min · 4 questions)
 
 **Key takeaway.** Read the generated SQL: the joins — their *type* and keys — plus null-guards and the row cap are written for you from the Model (e.g. `sales → inner join → products`), not by your query.
 
-**How determinism holds.** The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run; the lenient parser never changes what's emitted.
+**How determinism holds.** The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run.
 
-**Covers.** Joins written for you, null handling, the row cap, inlined formulas, the lenient parser, the bare-measure trap, and how the Model's join *type* shapes the SQL. (8 questions + 1 live-verified · ~40 min)
+**Covers.** A total (null handling, the row cap, one table), a Model formula inlined, filters and counting, and how the Model's join *type* shapes the SQL. (4 questions · ~35 min)
 
 #### 2.1 A total: null handling, the row cap, one table
 
@@ -2021,51 +2006,7 @@ FROM "(Sample) Retail - Apparel" AS "t1"
 
 **Guarded by:** `l2_total_touches_fact_only`.
 
-#### 2.2 Grouping by a dimension: the join is written for you
-
-```sql
-SELECT "t1"."region" AS r, SUM("t1"."sales") AS s
-FROM "(Sample) Retail - Apparel" AS "t1"
-GROUP BY "t1"."region"
-```
-
-**Point out.** A `JOIN` to `DIM_RETAPP_STORES` on `STOREID` appears, and only that one:
-`DIM_RETAPP_PRODUCTS` is not needed, so it is not joined. The learner never writes a join.
-The Model's join definitions do. The region totals add up to 2.1's total.
-
-**Guarded by:** `l2_group_by_joins_one_dim`.
-
-#### 2.3 Two dimensions, two joins
-
-**Question:** sales by item type and region.
-
-```sql
-SELECT "t1"."item type" AS it, "t1"."region" AS r, SUM("t1"."sales") AS s
-FROM "(Sample) Retail - Apparel" AS "t1"
-GROUP BY "t1"."item type", "t1"."region"
-```
-
-**Point out.** Both dimensions are now joined, from the fact table outward. That is the star
-schema the Model defines. Ask the learner to sketch it from the SQL alone.
-
-**Guarded by:** `l2_two_dims_two_joins`.
-
-#### 2.4 Top N: `ORDER BY` and `LIMIT`
-
-**Question:** the three best-selling item types.
-
-```sql
-SELECT "t1"."item type" AS it, SUM("t1"."sales") AS s
-FROM "(Sample) Retail - Apparel" AS "t1"
-GROUP BY "t1"."item type" ORDER BY s DESC LIMIT 3
-```
-
-**Point out.** `ORDER BY` can use the output alias. ThoughtSpot adds `NULLS LAST`, and the
-learner's `LIMIT 3` replaces the default cap.
-
-**Guarded by:** `l2_top_n`.
-
-#### 2.5 A Model formula compiles into the SQL
+#### 2.2 A Model formula compiles into the SQL
 
 ```sql
 SELECT YEAR("t1"."date") AS y, SUM("t1"."sales") AS s
@@ -2092,7 +2033,7 @@ to everyone.
 
 **Guarded by:** `l2_formula_compiles_inline`, `l2_current_date_rejected`.
 
-#### 2.6 Filters and counting
+#### 2.3 Filters and counting
 
 **Question:** sales in the West region.
 
@@ -2115,38 +2056,7 @@ SELECT COUNT(DISTINCT "t1"."store") AS n FROM "(Sample) Retail - Apparel" AS "t1
 
 **Guarded by:** `l2_filter_case_insensitive`, `l2_count_distinct`, `l2_count_star_rejected`.
 
-#### 2.7 The parser is lenient. Don't rely on it
-
-Two statements that look wrong and still work:
-
-```sql
-SELECT SUM("t1"."Sales") AS s FROM "(sample) retail - apparel" AS "t1"          -- wrong case
-SELECT "t1"."region" AS r, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"  -- no GROUP BY
-```
-
-**Point out.** Identifiers are matched case-insensitively, and a missing `GROUP BY` is
-filled in from the non-aggregated columns. Both give the correct answer. Write them properly
-anyway: copy the TML spelling, and always write the `GROUP BY`. A lenient parse is not a
-contract, and a reader (or another engine) should not have to guess.
-
-**Guarded by:** `l2_identifiers_case_insensitive`, `l2_implicit_group_by`.
-
-#### 2.8 A bare measure is not aggregated
-
-```sql
-SELECT "t1"."region" AS r, "t1"."sales" AS s FROM "(Sample) Retail - Apparel" AS "t1"
-```
-
-**Predict.** `sales` is defined in the Model as a SUM measure. Will this return five rows?
-
-**Point out.** No. It returns every sales row (up to the 100,000-row cap), each tagged with
-its region, and the SQL has no `sum(`. The Model's default aggregation applies in Search, not
-in AgentQL. **Aggregate raw measures yourself.** This is the most common beginner mistake,
-and it fails silently.
-
-**Guarded by:** `l2_bare_measure_row_level`.
-
-#### 2.9 The join type is the Model's, not yours (live-verified)
+#### 2.4 The join type is the Model's, not yours (live-verified)
 
 The join **type** — inner, left, right, or full outer — is a property of the Model's
 fact↔dimension relationship, and the generated SQL uses whatever the Model defines. You write the
@@ -2194,12 +2104,12 @@ FROM "…"."FACTSALES" "ta_3"
 Model configured** for that relationship, and a single query **mixes types** across dimensions.
 Change the Model's Sales→Product join from left to inner and "amount by product" drops products
 with no sales, with **no change to the AgentQL**. (When the Model's join is inner but you need all
-members for *one* question, AgentQL can override it with a CTE outer join — lesson 3.6.)
+members for *one* question, AgentQL can override it with a CTE outer join — lesson 3.4.)
 Live-verified on the "Semi-Additive" Model configured with the three join types above.
 
 **Check yourself.** Without running anything: which tables will a query for "quantity by
-state" touch? What does the query in 2.8 do, and how would you spot it from the result alone?
-Why does `CURRENT_DATE` fail when the Model's own formula uses it?
+state" touch? Why does `CURRENT_DATE` fail when the Model's own formula uses it? What join type
+would make "amount by product" keep products that never sold?
 
 **Try it on your Model.** Pick a Model the learner works with. Write one grouped query for it
 (you write it, or the learner does if they want to), then
@@ -2208,13 +2118,13 @@ before running `generate-sql`.
 
 ---
 
-### Module 3 — What the semantic layer does for you (~35 min · 6 questions)
+### Module 3 — What the semantic layer does for you (~30 min · 4 questions)
 
 **Key takeaway.** The Model supplies joins, formulas, security and safe division by default — and AgentQL can *override* the default join for greater expressibility: *all products, including those with no sales* becomes a CTE of all products `LEFT JOIN`ed to sales, instead of the Model's inner join.
 
 **How determinism holds.** Whether you take the Model's join or override it, the governed parts — keys, `AGG`/`SUM`, null-handling and RLS — are still injected deterministically by the engine. You change the join *shape*, never the governance.
 
-**Covers.** Ratios and safe division, what `AVG` averages, table pruning, `AGG` vs `SUM`, RLS, and every-member outer joins (3.6). (6 questions · ~35 min)
+**Covers.** Ratios and safe division, `AGG` vs `SUM`, RLS, and every-member outer joins (3.4). (4 questions · ~30 min)
 
 #### 3.1 A ratio of two measures, divided safely
 
@@ -2232,45 +2142,7 @@ computed from the group's totals, which is the correct average price.
 
 **Guarded by:** `l3_ratio_safe_division`.
 
-#### 3.2 `AVG` averages fact rows
-
-```sql
-SELECT "t1"."region" AS r, AVG("t1"."sales") AS a, SUM("t1"."sales") AS s, COUNT("t1"."sales") AS n
-FROM "(Sample) Retail - Apparel" AS "t1"
-GROUP BY "t1"."region"
-```
-
-**Predict.** Is `a` the average sale per *store* in the region, or per *row*?
-
-**Point out.** Per row: `a = s / n`, where `n` counts fact rows. "Average sales per store"
-needs a two-step query (5.1). This is the most common reason an `AVG` looks wrong.
-
-**Guarded by:** `l3_avg_is_row_level`.
-
-#### 3.3 Which tables a query reads
-
-```sql
-SELECT "t1"."item type" AS it FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."item type"
-SELECT "t1"."item type" AS it, "t1"."region" AS r FROM "(Sample) Retail - Apparel" AS "t1"
-GROUP BY "t1"."item type", "t1"."region"
-```
-
-**Predict.** Will either query touch the sales table?
-
-**Point out.**
-- **One dimension:** only `DIM_RETAPP_PRODUCTS` is read. The Model has `join_progressive`
-  on, so tables a query does not need are left out, as in 2.1.
-- **Two dimensions from different tables:** the SQL joins **through the fact table**,
-  because that is the only path between products and stores. So the result shows only the
-  combinations that have sales, not every possible pairing. Here all 75 exist. On sparser
-  data, a "list every product and region" query silently drops pairings with no sales.
-- On a Model **without** `join_progressive`, *every* query joins every table, even a
-  one-column dimension list, so results are filtered by the fact table. See
-  `limitations.md` ⚠️ "Any dimension-only query on a Model without `join_progressive`".
-
-**Guarded by:** `l3_dim_only_one_table`, `l3_two_dims_via_fact`.
-
-#### 3.4 Formula measures: `AGG`, not `SUM` (on a Model the learner chooses)
+#### 3.2 Formula measures: `AGG`, not `SUM` (on a Model the learner chooses)
 
 The sample Model's measures are all raw, so this lesson runs on **a Model the learner
 picks**: one they work with, on a cloud warehouse, that has formula measures. On the SE demo
@@ -2338,7 +2210,7 @@ fails on it. `classify-columns` reports these as `semiadditive_measure` with wra
 All but the last are limitations-suite cases on Dunder Mifflin. On another Model, the
 lesson's own runs are the check.
 
-#### 3.5 Security you never write
+#### 3.3 Security you never write
 
 No query here mentions security, and none needs to. If the Model carries **row-level security
 (RLS)**, ThoughtSpot injects the user's filter into the compiled SQL automatically — so two
@@ -2410,7 +2282,7 @@ store) whose membership must also be restricted. Either way security lives in th
 compile time — the strongest argument for AgentQL over hand-written SQL. (Column-level security
 hides columns the same way.)
 
-#### 3.6 Every product, including the ones with no sales — and the business rules in the SQL
+#### 3.4 Every product, including the ones with no sales — and the business rules in the SQL
 
 This is the module's showcase. It does two things at once: it shows a shape **keywords can't
 express** (every member, matched or not — an outer join), and it is the clearest look at
@@ -2497,13 +2369,13 @@ even if it tried?
 
 ---
 
-### Module 4 — Dates and functions (~30 min · 5 questions)
+### Module 4 — Dates and functions (~20 min · 3 questions)
 
 **Key takeaway.** Date parts and relative periods resolve through the **Model's calendar** — standard Gregorian, or a custom/fiscal calendar (e.g. 4-4-5) when the Model is configured with one — so you never hand-code date math or use `CURRENT_DATE`.
 
 **How determinism holds.** AgentQL doesn't guess the calendar — it joins the Model's configured calendar table and compiles "last period" to the same bounded SQL every run (live-verified: standard `EXTRACT(YEAR …)` with none configured, and a JulyOffset join on `absolute_year_number` when one is).
 
-**Covers.** Date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets, and a live-verified custom-calendar example. (5 questions + 1 live-verified example · ~30 min)
+**Covers.** Date parts, relative dates without `CURRENT_DATE`, and a live-verified custom-calendar example. (3 questions · ~20 min)
 
 #### 4.1 Date parts with the extraction functions
 
@@ -2543,55 +2415,7 @@ complete days before today, excluding today.
 
 **Guarded by:** `l4_this_year_relative`, `l4_last_30_days`.
 
-#### 4.3 A date literal in `WHERE`
-
-```sql
-SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
-WHERE "t1"."date" >= '<this year>-01-01'
-```
-
-**Point out.** A plain `'YYYY-MM-DD'` literal works in `WHERE`, and gives the same total as
-4.2's "this year". (Module 6 shows the same comparison going wrong inside `SUM(CASE …)`.)
-
-**Break it.** `DATE_TRUNC('month', "t1"."date")` compiles, then fails in the warehouse. Use
-`YEAR_NUMBER` / `MONTH_NUMBER` instead, as in 4.1.
-
-**Guarded by:** `l4_date_literal_filter`, `l4_date_trunc_fails`.
-
-#### 4.4 String functions
-
-```sql
-SELECT UPPER("t1"."region") AS u, LENGTH("t1"."region") AS l,
-       CONCAT("t1"."region", '-', "t1"."state") AS c, SUBSTR("t1"."state", 1, 3) AS sub
-FROM "(Sample) Retail - Apparel" AS "t1"
-GROUP BY UPPER("t1"."region"), LENGTH("t1"."region"), CONCAT("t1"."region", '-', "t1"."state"),
-         SUBSTR("t1"."state", 1, 3)
-```
-
-**Point out.** Familiar SQL string functions work. A computed column in `SELECT` must also
-be grouped: repeat the expression, as above, or name its output alias (`GROUP BY u`). A
-position (`GROUP BY 1`) is rejected. Regex functions do not work (`limitations.md`).
-
-**Guarded by:** `l4_string_functions`, `l4_group_by_alias`, `l4_group_by_ordinal_rejected`.
-
-#### 4.5 `CASE` to bucket values
-
-**Question:** count and total of sales rows, bucketed small / medium / large.
-
-```sql
-SELECT CASE WHEN "t1"."sales" >= 1000 THEN 'large' WHEN "t1"."sales" >= 100 THEN 'medium' ELSE 'small' END AS b,
-       COUNT("t1"."sales") AS n, SUM("t1"."sales") AS s
-FROM "(Sample) Retail - Apparel" AS "t1"
-GROUP BY CASE WHEN "t1"."sales" >= 1000 THEN 'large' WHEN "t1"."sales" >= 100 THEN 'medium' ELSE 'small' END
-```
-
-**Point out.** `CASE` works both in `SELECT` and in `GROUP BY`, and the buckets add up to the
-grand total. This is bucketing per fact row. Bucketing *customers by their total* needs a
-CTE first (Module 5).
-
-**Guarded by:** `l4_case_buckets`.
-
-#### 4.6 A custom calendar you never compute (live-verified)
+#### 4.3 A custom calendar you never compute (live-verified)
 
 Not every business runs on the Gregorian year. When a Model's date is configured with a **custom
 calendar** — here **JulyOffset**, a fiscal calendar whose year starts in July — AgentQL resolves
@@ -2638,13 +2462,13 @@ does `DATE_TRUNC` compile but fail, and what do you use instead?
 
 ---
 
-### Module 5 — Advanced shapes (~40 min · 6 questions)
+### Module 5 — Advanced shapes (~25 min · 3 questions)
 
 **Key takeaway.** CTEs, windows, top-N-per-group, period-over-period and set operations expand what you can express — within AgentQL's (narrower-than-SQL) envelope.
 
 **How determinism holds.** Even multi-stage shapes compile deterministically through the same governed engine; expressibility grows while compile-not-execute holds.
 
-**Covers.** CTEs, ranking and share of total, top N per group, period over period, and set operations. (6 questions · ~40 min)
+**Covers.** CTEs, window functions (rank and share of total), and `HAVING` plus the shapes that aren't allowed. (3 questions · ~25 min)
 
 #### 5.1 A CTE for two-step aggregation
 
@@ -2683,66 +2507,7 @@ with `NULLIF`.
 
 **Guarded by:** `l5_rank`, `l5_share_of_total`.
 
-#### 5.3 Top N per group
-
-**Question:** the two best-selling item types in each region.
-
-```sql
-WITH x AS (
-  SELECT "t1"."region" AS r, "t1"."item type" AS it, SUM("t1"."sales") AS s,
-         ROW_NUMBER() OVER (PARTITION BY "t1"."region" ORDER BY SUM("t1"."sales") DESC) AS rn
-  FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region", "t1"."item type")
-SELECT x.r, x.it, x.s FROM x WHERE x.rn <= 2
-```
-
-**Point out.** Number the rows in a CTE, then filter in the outer query. Do **not** reach for
-`QUALIFY`: it is accepted and silently ignored (6.1).
-
-**Guarded by:** `l5_top_n_per_group`.
-
-#### 5.4 Period over period and running totals
-
-```sql
-SELECT YEAR_NUMBER("t1"."date") AS y, SUM("t1"."sales") AS s,
-       LAG(SUM("t1"."sales")) OVER (ORDER BY YEAR_NUMBER("t1"."date")) AS prev
-FROM "(Sample) Retail - Apparel" AS "t1"
-GROUP BY YEAR_NUMBER("t1"."date")
-```
-
-Swap `LAG(…)` for `SUM(SUM("t1"."sales")) OVER (ORDER BY YEAR_NUMBER("t1"."date"))` to get a
-running total.
-
-**Point out.** `prev` is the previous year's total, and NULL for the first year. The running
-total for the latest year equals the grand total. The rows may not come back in year order:
-add an `ORDER BY` if order matters. More shapes (last N periods, year to date) are in
-[`patterns.md`](patterns.md).
-
-**Guarded by:** `l5_year_over_year`, `l5_running_total`.
-
-#### 5.5 Combining results: set operations and CTE joins
-
-```sql
-SELECT "t1"."region" AS r, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
-WHERE "t1"."region" = 'West' GROUP BY "t1"."region"
-UNION ALL
-SELECT "t1"."region" AS r, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
-WHERE "t1"."region" = 'East' GROUP BY "t1"."region"
-```
-
-**Question:** sales per store for each region, from two CTEs joined on region.
-
-```sql
-WITH a AS (SELECT "t1"."region" AS r, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region"),
-     b AS (SELECT "t1"."region" AS r, COUNT(DISTINCT "t1"."store") AS n FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region")
-SELECT a.r, a.s, b.n, a.s / b.n AS per_store FROM a JOIN b ON a.r = b.r
-```
-
-**Point out.** Both branches of a `UNION ALL` survive. Joining CTEs on an equality works. An
-inequality join, or joining a CTE to itself, does not (`limitations.md`).
-
-**Guarded by:** `l5_union_all`, `l5_join_ctes`.
-
-#### 5.6 `HAVING`, and the shapes that are not allowed
+#### 5.3 `HAVING`, and the shapes that are not allowed
 
 ```sql
 SELECT "t1"."store" AS store, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
@@ -2759,13 +2524,13 @@ a window, or two CTEs). Why does 5.3 use a CTE instead of `QUALIFY`?
 
 ---
 
-### Module 6 — Trust, but verify (~30 min · 4 questions)
+### Module 6 — Trust, but verify (~25 min · 3 questions)
 
 **Key takeaway.** `SUCCESS` is not proof of the right answer: deterministic SQL can be deterministically *wrong* — a silently-dropped `QUALIFY`/`FILTER`, or the wrong grain.
 
 **How determinism holds.** The executed SQL is always governed and reproducible — but determinism guarantees *consistency*, not *correct intent*. The control queries verify the agent asked what you meant.
 
-**Covers.** Queries that return `SUCCESS` with the wrong number, and the control queries that catch them. (4 questions · ~30 min)
+**Covers.** Silent drops (`QUALIFY`, `FILTER`), loud failures and their workarounds, and the control queries that catch wrong numbers. (3 questions · ~25 min)
 
 The hardest lesson in the course: **a `SUCCESS` with a plausible number can still be
 wrong.** Some constructs are accepted, then partly ignored.
@@ -2804,21 +2569,7 @@ West's share. A plausible-looking number is not a correct one.
 
 **Guarded by:** `l6_filter_dropped`.
 
-#### 6.3 Lenient rewrites you should not rely on
-
-```sql
-SELECT "t1"."store" AS store, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
-WHERE SUM("t1"."sales") > 40000000 GROUP BY "t1"."store"
-```
-
-**Point out.** This is invalid SQL, but it is quietly rewritten as `HAVING` and gives 5.6's
-answer. Together with 2.7 (identifier case, a missing `GROUP BY`), that makes three lenient
-parses. They help a beginner, and they are exactly why a successful query proves less than
-it seems.
-
-**Guarded by:** `l6_where_aggregate_is_having`.
-
-#### 6.4 Loud failures, and their workarounds
+#### 6.3 Loud failures, and their workarounds
 
 | Try | What happens | Instead |
 |---|---|---|
@@ -2844,88 +2595,19 @@ For any answer someone will act on:
 **Check yourself.** A colleague's AgentQL returns `SUCCESS` and a total that "looks about
 right". Name three checks you would run before putting it in front of a customer.
 
----
-
-### Module 7 — Building on it (~30 min · 3 questions)
-
-**Key takeaway.** Consume `fetch-data` in code, and test agents that write AgentQL — this course is itself a regression suite.
-
-**How determinism holds.** Because the same question compiles to the same SQL and rows, AgentQL output is testable: assert on generated SQL and results, and catch drift.
-
-**Covers.** Consuming results in code, testing an agent that writes AgentQL, and the course as a test suite. (3 questions · ~30 min)
-
-For developers and anyone wiring AgentQL into an agent or a test suite.
-
-#### 7.1 Consuming `fetch-data` in code
-
-`fetch-data` returns `columns[]` (index and type) and `rows[]` (one list per row, in
-`SELECT` order). Pair them by position, and convert `INT64` dates from epoch seconds:
-
-```python
-import datetime as dt, json, subprocess
-
-def agentql(sql, model, profile):
-    out = json.loads(subprocess.run(["ts", "agentql", "fetch-data", "--profile", profile, "-m", model, sql],
-                                    capture_output=True, text=True, check=True).stdout)
-    if out["status"] != "SUCCESS":
-        raise RuntimeError(f'{out["status"]}: {out["errors"]}')
-    return out["columns"], out["rows"]
-
-cols, rows = agentql('SELECT "t1"."region" AS r, "t1"."date" AS d, SUM("t1"."sales") AS s '
-                     'FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region", "t1"."date" '
-                     'ORDER BY "t1"."date" DESC LIMIT 5', model_guid, profile)
-for region, epoch, sales in rows:
-    print(region, dt.datetime.fromtimestamp(epoch, dt.timezone.utc).date(), sales)
-```
-
-**Point out.** Branch on `status`, never on the exit code (1.1). The response carries no
-column names, so keep your own `SELECT` order. Calling the REST endpoints directly from a
-product, with auth options and the raw response format, is covered in
-[`integration.md`](integration.md).
-
-**Guarded by:** `l7_columns_match_rows`.
-
-#### 7.2 Testing an agent that writes AgentQL
-
-The patterns are in [`use-cases.md`](use-cases.md):
-- **Accuracy benchmarking:** a set of questions, each with an answer you know is right (from
-  a control query, as in Module 6), run through the agent and compared.
-- **Regression testing:** the same set re-run after a ThoughtSpot upgrade.
-- **Known-limitation retesting:** queries that are expected to fail, re-run to find out when
-  they start working.
-
-#### 7.3 This course is a test suite too
-
-Every lesson above names the cases that check it. To see whether the course still matches
-the product on your cluster, run:
-
-```bash
-python3 tools/agentql-retest/run.py --profile {profile} --suite lessons
-```
-
-It finds the sample Model by name, runs every lesson claim, and lists only the ones whose
-behaviour has changed. Treat it as the worked example for 7.2: controls, value checks and
-statuses that are never trusted alone. See `tools/agentql-retest/README.md`.
-
-**Check yourself.** Design a five-question accuracy test for an agent on the sample Model.
-How will you know each expected answer is right?
-
----
-
 ### The modules
 
 | Module | In short | Questions |
 |---|---|---|
 | 0. Why AgentQL | ThoughtSpot compiles AgentQL to warehouse SQL and never runs it; the Model supplies the joins, formulas and security | concept |
-| 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, result types, why it can only read | 5 |
-| 2. First queries | reading the generated SQL: joins written for you, null handling, the row cap, inlined formulas, the lenient parser, the bare-measure trap | 8 |
-| 3. The semantic layer | ratios and safe division, what `AVG` averages, which tables a query reads, formula measures (`AGG` not `SUM`), security you never write, every member via an outer join and the business rules in the generated SQL | 6 |
-| 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, date literals, string functions, `CASE` buckets | 5 |
-| 5. Advanced shapes | CTEs, ranking and share of total, top N per group, period over period, set operations | 6 |
-| 6. Trust, but verify | queries that return `SUCCESS` with the wrong number, and the control queries that catch them | 4 |
-| 7. Building on it | consuming results in code, testing an agent that writes AgentQL | 3 |
+| 1. The two APIs | `generate-sql` vs `fetch-data`, structured errors, a query that compiles but fails, why it can only read | 4 |
+| 2. First queries | reading the generated SQL: joins/null-handling/row-cap written for you, a Model formula inlined, filters and counting, and how the Model's join type shapes the SQL | 4 |
+| 3. The semantic layer | ratios and safe division, formula measures (`AGG` not `SUM`), security you never write, every member via an outer join and the business rules in the generated SQL | 4 |
+| 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, and a custom-calendar example | 3 |
+| 5. Advanced shapes | CTEs, window functions (rank and share of total), and `HAVING` plus the shapes that aren't allowed | 3 |
+| 6. Trust, but verify | the silent drops (`QUALIFY`, `FILTER`), loud failures and their workarounds, and the control queries that catch wrong numbers | 3 |
 
-37 questions in all. Each module stands alone after Module 2, so a learner can stop and pick
+21 questions in all. Each module stands alone after Module 2, so a learner can stop and pick
 up later ("teach me AgentQL, start at module 5").
 
 ### After the course — where AgentQL earns its keep, and where it can't
