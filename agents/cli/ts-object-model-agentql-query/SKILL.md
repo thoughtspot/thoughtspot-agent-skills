@@ -5,11 +5,11 @@ description: Ask a question of a ThoughtSpot Model and get the answer as data �
 
 # ThoughtSpot: Query a Model with AgentQL
 
-> **AgentQL was previously called SpotQL.** The query language and the underlying API are
-> unchanged; only the name is new. The CLI command is now **`ts agentql`** (the old
-> `ts spotql` still works as a deprecated hidden alias). The server contract keeps the
-> `spotql` spelling — the callosum `/data/spotql/*` endpoints and the `spotql_query` request
-> field are stable identifiers, not the product name.
+> **AgentQL** is a SQL dialect an AI agent writes against a ThoughtSpot **Model**, not against
+> warehouse tables. ThoughtSpot never runs AgentQL itself — it **compiles it deterministically**
+> into warehouse SQL (Snowflake, Databricks, BigQuery, …), and the warehouse runs that SQL.
+> Because the Model supplies the joins, formulas, security and null-handling, the **same
+> question always compiles to the same governed SQL and returns the same answer**.
 
 Turn a question about a ThoughtSpot **Model** into an answer. You (the agent) write an
 AgentQL statement grounded in the rules in `references/`, then run it through two `ts`
@@ -336,6 +336,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.12.0 | 2026-10-19 | **Consistent course messaging + determinism throughline.** Every course module now opens with three pinned lines shown verbatim — **Key takeaway**, **How determinism holds**, **Covers** — so the messaging is identical on every run instead of improvised; a new **Key takeaways** table at the top of `learning-path.md` collects them for review, with *how deterministic SQL is maintained* as the throughline (Model-defined join types in Module 2; AgentQL overriding the default join for all-members expressibility in Module 3; Gregorian/fiscal/custom-4-4-5 calendars resolved deterministically in Module 4; determinism ≠ correct intent in Module 6). SKILL.md intro replaced the SpotQL-rename banner with a clean determinism-forward definition (the `spotql` API identifiers remain in the integration reference). |
 | 2.11.1 | 2026-10-19 | **Terminology: "Keyword Search" replaces "Token Search".** The positioning (Module 0, `architecture.md`, `beyond-keywords.md`) now calls ThoughtSpot's classic search experience **Keyword Search** and its query chips **keywords**, so the word *token* is reserved for AI token spend (and bearer-token auth) and no longer overloaded. Reference file `beyond-tokens.md` renamed to [`beyond-keywords.md`](references/beyond-keywords.md). No behaviour change; offline bundle regenerated. |
 | 2.11.0 | 2026-10-16 | **Offline mode + a single-document bundle.** New generated reference [`agentql-offline.md`](references/agentql-offline.md) assembles the whole library (SKILL.md + every `references/*.md`) into one document — for reading/reviewing everything in one place, or handing to an agent as grounding. The course (and the normal flow) now offer **live vs offline**: offline works entirely from the bundle, with no live `ts agentql` calls and far lower token spend (result numbers aren't live). Built by `tools/validate/generate_agentql_offline.py` and gated against drift (`--check`) in pre-commit and CI. |
 | 2.10.0 | 2026-10-14 | **Learn AgentQL positioning + business-rules showcase.** Module 0 rewritten as the Keyword-Search-vs-AgentQL positioning (keywords validate, AgentQL expresses; the expressibility↔determinism trade-off; valid SQL ≠ correct business logic), with an optional **three-query taster** — a governed base, expressibility with governance still applied, and a hard limit — so the point lands without working through every module. New lesson **3.6** — *every product including those with no sales* (a `LEFT OUTER JOIN` keywords can't express) — dissects the generated SQL to show the business rules the Model applies for you: `join_progressive` table pruning, Model-supplied inner joins + keys, null-guarded aggregates, a case-insensitive filter, the row cap, and where RLS is injected. Live-verified on `(Sample) Retail - Apparel`; guarded by `l3_all_products_left_join`. Course now 37 questions. |

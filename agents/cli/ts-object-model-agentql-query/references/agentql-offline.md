@@ -41,11 +41,11 @@ formula, offline mode teaches the SQL and the behaviour, not a fresh figure.
 
 ## ThoughtSpot: Query a Model with AgentQL
 
-> **AgentQL was previously called SpotQL.** The query language and the underlying API are
-> unchanged; only the name is new. The CLI command is now **`ts agentql`** (the old
-> `ts spotql` still works as a deprecated hidden alias). The server contract keeps the
-> `spotql` spelling — the callosum `/data/spotql/*` endpoints and the `spotql_query` request
-> field are stable identifiers, not the product name.
+> **AgentQL** is a SQL dialect an AI agent writes against a ThoughtSpot **Model**, not against
+> warehouse tables. ThoughtSpot never runs AgentQL itself — it **compiles it deterministically**
+> into warehouse SQL (Snowflake, Databricks, BigQuery, …), and the warehouse runs that SQL.
+> Because the Model supplies the joins, formulas, security and null-handling, the **same
+> question always compiles to the same governed SQL and returns the same answer**.
 
 Turn a question about a ThoughtSpot **Model** into an answer. You (the agent) write an
 AgentQL statement grounded in the rules in `references/`, then run it through two `ts`
@@ -372,6 +372,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.12.0 | 2026-10-19 | **Consistent course messaging + determinism throughline.** Every course module now opens with three pinned lines shown verbatim — **Key takeaway**, **How determinism holds**, **Covers** — so the messaging is identical on every run instead of improvised; a new **Key takeaways** table at the top of `learning-path.md` collects them for review, with *how deterministic SQL is maintained* as the throughline (Model-defined join types in Module 2; AgentQL overriding the default join for all-members expressibility in Module 3; Gregorian/fiscal/custom-4-4-5 calendars resolved deterministically in Module 4; determinism ≠ correct intent in Module 6). SKILL.md intro replaced the SpotQL-rename banner with a clean determinism-forward definition (the `spotql` API identifiers remain in the integration reference). |
 | 2.11.1 | 2026-10-19 | **Terminology: "Keyword Search" replaces "Token Search".** The positioning (Module 0, `architecture.md`, `beyond-keywords.md`) now calls ThoughtSpot's classic search experience **Keyword Search** and its query chips **keywords**, so the word *token* is reserved for AI token spend (and bearer-token auth) and no longer overloaded. Reference file `beyond-tokens.md` renamed to [`beyond-keywords.md`](references/beyond-keywords.md). No behaviour change; offline bundle regenerated. |
 | 2.11.0 | 2026-10-16 | **Offline mode + a single-document bundle.** New generated reference [`agentql-offline.md`](references/agentql-offline.md) assembles the whole library (SKILL.md + every `references/*.md`) into one document — for reading/reviewing everything in one place, or handing to an agent as grounding. The course (and the normal flow) now offer **live vs offline**: offline works entirely from the bundle, with no live `ts agentql` calls and far lower token spend (result numbers aren't live). Built by `tools/validate/generate_agentql_offline.py` and gated against drift (`--check`) in pre-commit and CI. |
 | 2.10.0 | 2026-10-14 | **Learn AgentQL positioning + business-rules showcase.** Module 0 rewritten as the Keyword-Search-vs-AgentQL positioning (keywords validate, AgentQL expresses; the expressibility↔determinism trade-off; valid SQL ≠ correct business logic), with an optional **three-query taster** — a governed base, expressibility with governance still applied, and a hard limit — so the point lands without working through every module. New lesson **3.6** — *every product including those with no sales* (a `LEFT OUTER JOIN` keywords can't express) — dissects the generated SQL to show the business rules the Model applies for you: `join_progressive` table pruning, Model-supplied inner joins + keys, null-guarded aggregates, a case-insensitive filter, the row cap, and where RLS is injected. Live-verified on `(Sample) Retail - Apparel`; guarded by `l3_all_products_left_join`. Course now 37 questions. |
@@ -1642,6 +1643,25 @@ behavioural claim is checked by a retest case, named on the lesson's **Guarded b
 
 ---
 
+### The key takeaways — review the whole messaging arc
+
+Every module opens with the same three pinned lines — **Key takeaway**, **How determinism
+holds** and **Covers** — shown *verbatim* so the messaging is identical on every run. This
+table collects them in one place; the **determinism column is the throughline** of the course.
+
+| Module | Key takeaway | How determinism holds |
+|---|---|---|
+| **0 · Why AgentQL** | AgentQL widens *what* can be asked; keywords keep a human able to *verify* it — more expressibility, same governance. | ThoughtSpot *compiles* AgentQL and never executes the AI's SQL, so a more expressive question never trades away a governed, reproducible answer. |
+| **1 · The two APIs** | `generate-sql` compiles (nothing runs); `fetch-data` compiles then runs. Branch on `status`, not the exit code; AgentQL can only read. | `generate-sql` shows the exact warehouse SQL the engine emits — the same AgentQL always compiles to the same `executable_sql`, inspectable before a row is read. |
+| **2 · First queries** | Read the generated SQL: the joins — their *type* and keys — plus null-guards and the row cap are written for you from the Model (e.g. `sales → inner join → products`), not by your query. | The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run; the lenient parser never changes what's emitted. |
+| **3 · The semantic layer** | The Model supplies joins, formulas, security and safe division by default — and AgentQL can *override* the default join for greater expressibility: *all products, including those with no sales* becomes a CTE of all products `LEFT JOIN`ed to sales, instead of the Model's inner join. | Whether you take the Model's join or override it, the governed parts — keys, `AGG`/`SUM`, null-handling and RLS — are still injected deterministically by the engine. You change the join *shape*, never the governance. |
+| **4 · Dates and functions** | Date parts, relative periods and functions resolve through the Model's calendar — standard Gregorian, fiscal, or a custom 4-4-5 — so you never hand-code calendar math or use `CURRENT_DATE`. | AgentQL doesn't guess how a fiscal or 4-4-5 calendar works — the engine applies the Model's calendar definition deterministically, so "last period" always compiles to the same bounded SQL. |
+| **5 · Advanced shapes** | CTEs, windows, top-N-per-group, period-over-period and set operations expand what you can express — within AgentQL's (narrower-than-SQL) envelope. | Even multi-stage shapes compile deterministically through the same governed engine; expressibility grows while compile-not-execute holds. |
+| **6 · Trust, but verify** | `SUCCESS` is not proof of the right answer: deterministic SQL can be deterministically *wrong* — a silently-dropped `QUALIFY`/`FILTER`, or the wrong grain. | The executed SQL is always governed and reproducible — but determinism guarantees *consistency*, not *correct intent*. The control queries verify the agent asked what you meant. |
+| **7 · Building on it** | Consume `fetch-data` in code, and test agents that write AgentQL — this course is itself a regression suite. | Because the same question compiles to the same SQL and rows, AgentQL output is testable: assert on generated SQL and results, and catch drift. |
+
+---
+
 ### The Model: `(Sample) Retail - Apparel`
 
 Every lesson runs on this Model because it **ships on every cluster**. It is a three-table
@@ -1744,9 +1764,21 @@ The product changes between releases. The **Guarded by** ids name the retest-sui
 check each lesson's claims (`tools/agentql-retest`, `--suite lessons`). A failing case means
 the lesson needs updating, not the learner.
 
+**Opening a module.** Start every module by showing its pinned **Key takeaway**, **How
+determinism holds** and **Covers** lines *exactly as written in the module header* — don't
+improvise the framing, so a learner sees the same messaging on every run (the
+[key-takeaways table](#the-key-takeaways--review-the-whole-messaging-arc) collects them all).
+Introduce the language only as **AgentQL** — never by its former name.
+
 ---
 
 ### Module 0 — Why AgentQL, and why keywords stay (concept, ~15 min)
+
+**Key takeaway.** AgentQL widens *what* can be asked; keywords keep a human able to *verify* it — more expressibility, same governance.
+
+**How determinism holds.** ThoughtSpot *compiles* AgentQL and never executes the AI's SQL, so a more expressive question never trades away a governed, reproducible answer.
+
+**Covers.** The positioning, the expressibility↔determinism trade-off, and a three-query taster. (concept · ~15 min)
 
 Read [`architecture.md`](architecture.md) § "The core principle" first. This module is the
 **positioning**: where AgentQL fits next to ThoughtSpot's Keyword Search, and why the course
@@ -1855,6 +1887,12 @@ whether the answer is right — and which parts of the answer are governed regar
 
 ### Module 1 — The two APIs (~20 min · 5 questions)
 
+**Key takeaway.** `generate-sql` compiles (nothing runs); `fetch-data` compiles then runs. Branch on `status`, not the exit code; AgentQL can only read.
+
+**How determinism holds.** `generate-sql` shows the exact warehouse SQL the engine emits — the same AgentQL always compiles to the same `executable_sql`, inspectable before a single row is read.
+
+**Covers.** The two calls, structured errors, a query that compiles but fails, result types, and read-only. (5 questions · ~20 min)
+
 #### 1.1 Same query, both calls
 
 **Question.** Total sales.
@@ -1953,6 +1991,12 @@ customer asks whether an agent using AgentQL could drop a table: what do you sho
 ---
 
 ### Module 2 — First queries: reading the SQL ThoughtSpot writes (~40 min · 8 questions)
+
+**Key takeaway.** Read the generated SQL: the joins — their *type* and keys — plus null-guards and the row cap are written for you from the Model (e.g. `sales → inner join → products`), not by your query.
+
+**How determinism holds.** The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run; the lenient parser never changes what's emitted.
+
+**Covers.** Joins written for you, null handling, the row cap, inlined formulas, the lenient parser, and the bare-measure trap. (8 questions · ~40 min)
 
 #### 2.1 A total: null handling, the row cap, one table
 
@@ -2111,6 +2155,12 @@ before running `generate-sql`.
 ---
 
 ### Module 3 — What the semantic layer does for you (~35 min · 6 questions)
+
+**Key takeaway.** The Model supplies joins, formulas, security and safe division by default — and AgentQL can *override* the default join for greater expressibility: *all products, including those with no sales* becomes a CTE of all products `LEFT JOIN`ed to sales, instead of the Model's inner join.
+
+**How determinism holds.** Whether you take the Model's join or override it, the governed parts — keys, `AGG`/`SUM`, null-handling and RLS — are still injected deterministically by the engine. You change the join *shape*, never the governance.
+
+**Covers.** Ratios and safe division, what `AVG` averages, table pruning, `AGG` vs `SUM`, RLS, and every-member outer joins (3.6). (6 questions · ~35 min)
 
 #### 3.1 A ratio of two measures, divided safely
 
@@ -2332,6 +2382,12 @@ even if it tried?
 
 ### Module 4 — Dates and functions (~30 min · 5 questions)
 
+**Key takeaway.** Date parts, relative periods and functions resolve through the Model's calendar — standard Gregorian, fiscal, or a custom 4-4-5 — so you never hand-code calendar math or use `CURRENT_DATE`.
+
+**How determinism holds.** AgentQL doesn't guess how a fiscal or 4-4-5 calendar works — the engine applies the Model's calendar definition deterministically, so "last period" always compiles to the same bounded SQL. (The sample Model is Gregorian; the fiscal/4-4-5 guarantee is the general one.)
+
+**Covers.** Date parts, relative dates without `CURRENT_DATE`, date literals, string functions, and `CASE` buckets. (5 questions · ~30 min)
+
 #### 4.1 Date parts with the extraction functions
 
 ```sql
@@ -2424,6 +2480,12 @@ does `DATE_TRUNC` compile but fail, and what do you use instead?
 ---
 
 ### Module 5 — Advanced shapes (~40 min · 6 questions)
+
+**Key takeaway.** CTEs, windows, top-N-per-group, period-over-period and set operations expand what you can express — within AgentQL's (narrower-than-SQL) envelope.
+
+**How determinism holds.** Even multi-stage shapes compile deterministically through the same governed engine; expressibility grows while compile-not-execute holds.
+
+**Covers.** CTEs, ranking and share of total, top N per group, period over period, and set operations. (6 questions · ~40 min)
 
 #### 5.1 A CTE for two-step aggregation
 
@@ -2540,6 +2602,12 @@ a window, or two CTEs). Why does 5.3 use a CTE instead of `QUALIFY`?
 
 ### Module 6 — Trust, but verify (~30 min · 4 questions)
 
+**Key takeaway.** `SUCCESS` is not proof of the right answer: deterministic SQL can be deterministically *wrong* — a silently-dropped `QUALIFY`/`FILTER`, or the wrong grain.
+
+**How determinism holds.** The executed SQL is always governed and reproducible — but determinism guarantees *consistency*, not *correct intent*. The control queries verify the agent asked what you meant.
+
+**Covers.** Queries that return `SUCCESS` with the wrong number, and the control queries that catch them. (4 questions · ~30 min)
+
 The hardest lesson in the course: **a `SUCCESS` with a plausible number can still be
 wrong.** Some constructs are accepted, then partly ignored.
 
@@ -2620,6 +2688,12 @@ right". Name three checks you would run before putting it in front of a customer
 ---
 
 ### Module 7 — Building on it (~30 min · 3 questions)
+
+**Key takeaway.** Consume `fetch-data` in code, and test agents that write AgentQL — this course is itself a regression suite.
+
+**How determinism holds.** Because the same question compiles to the same SQL and rows, AgentQL output is testable: assert on generated SQL and results, and catch drift.
+
+**Covers.** Consuming results in code, testing an agent that writes AgentQL, and the course as a test suite. (3 questions · ~30 min)
 
 For developers and anyone wiring AgentQL into an agent or a test suite.
 
