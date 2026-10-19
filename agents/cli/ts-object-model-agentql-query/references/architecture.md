@@ -90,8 +90,8 @@ intent is captured.
 ```mermaid
 flowchart LR
     Q[NL question] --> LLM
-    LLM -->|"primary: familiar default"| A[Search Tokens]
-    LLM -->|"fallback: tokens can't<br/>express — sub-queries, LoD"| B["Semantic SQL (AgentQL)"]
+    LLM -->|"primary: familiar default"| A[Keyword Search]
+    LLM -->|"fallback: keywords can't<br/>express — sub-queries, LoD"| B["Semantic SQL (AgentQL)"]
     A --> QS[QuerySpec]
     B --> QS
     QS --> QG["QueryGen — applies Model rules:<br/>RLS/CLS, joins, metrics,<br/>calendars, multi-fact"]
@@ -106,11 +106,11 @@ flowchart LR
 
 ```
                           ┌─────────────────────────────────────────┐
-  NL question ──► LLM ──►  │  Path A (primary): Search Tokens         │ ─┐
+  NL question ──► LLM ──►  │  Path A (primary): Keyword Search         │ ─┐
                           │     → familiar, default path              │  │
                           ├─────────────────────────────────────────┤  ├─► QuerySpec ─► QueryGen ─► deterministic
                           │  Path B (fallback): Semantic SQL (AgentQL) │  │   (Model rules)   warehouse SQL ─► execute
-                          │     → when tokens can't express the       │ ─┘
+                          │     → when keywords can't express the       │ ─┘
                           │       question (sub-queries, LoD, etc.)   │
                           └─────────────────────────────────────────┘
                                           │
@@ -120,24 +120,24 @@ flowchart LR
                             summary + optional generated-SQL view
                             → user can confirm / correct / challenge
 
-  The LLM output — tokens OR AgentQL — is INTENT. It is never executed directly.
+  The LLM output — keywords OR AgentQL — is INTENT. It is never executed directly.
   QueryGen produces and runs the SQL, with all Model rules (RLS/CLS, joins, metrics,
   calendars, multi-fact resolution) applied. Verifiability holds on both paths.
 ```
 
-**Why a hybrid, not AgentQL-only:** Token-based Answers and AgentQL **co-exist** — AgentQL is
-not a replacement. Token-based Answers stay the primary path: they are familiar and carry
+**Why a hybrid, not AgentQL-only:** Keyword-based Answers and AgentQL **co-exist** — AgentQL is
+not a replacement. Keyword-based Answers stay the primary path: they are familiar and carry
 the verification experience users already trust, letting a business user confirm or correct
 how Spotter interpreted their intent before acting. AgentQL is the **expressibility fallback**,
-taken when the token grammar can't express the question. It closes two gaps in the
-token-only approach:
+taken when the keyword grammar can't express the question. It closes two gaps in the
+keyword-only approach:
 
-- **Spotter training lag.** Tokenised answers require Spotter to be trained to emit
+- **Spotter training lag.** Keyword answers require Spotter to be trained to emit
   syntactically valid TML for each analytical feature; new Search Data capabilities (e.g.
   Sets, LoD formulas) lag behind in Spotter. AgentQL decouples *expressibility* from that
   training cycle — if Search Data can answer it, AgentQL can express it now.
 - **Analytical gaps.** Some questions Search Data can answer aren't reachable through the
-  token grammar but are straightforward to state in SQL.
+  keyword grammar but are straightforward to state in SQL.
 
 Crucially, the trust story is preserved either way: **at no stage is the LLM's SQL executed.**
 All answers run deterministic SQL generated on the semantic Model, so codified rules like RLS
@@ -149,15 +149,15 @@ are always applied and results are not hallucinations.
 
 Determinism (above) guarantees the *executed SQL* is governed and reproducible. It does **not**
 guarantee the user knows ThoughtSpot understood their *question* — and that interpretability is
-what has made ThoughtSpot uniquely trustworthy. With Token-based Answers, the search tokens
+what has made ThoughtSpot uniquely trustworthy. With Keyword-based Answers, the keywords
 themselves are the verification layer: a business user can read and correct them without knowing
 SQL. AgentQL raises the accuracy ceiling, but a more expressive query is harder to eyeball — and
 left unaddressed, an AgentQL answer risks becoming a "black box" indistinguishable from the opaque
 AI outputs competitors ship.
 
 The mitigation is a **verification layer unified across both transformers**, so users get one
-consistent standard of verifiability *regardless of whether an answer was produced by tokens or
-AgentQL*. The principle is co-existence **and parity** — verification is not a token-only feature
+consistent standard of verifiability *regardless of whether an answer was produced by keywords or
+AgentQL*. The principle is co-existence **and parity** — verification is not a keyword-only feature
 the AgentQL path quietly loses. It lets users **confirm, correct, or challenge** how the AI
 interpreted intent, surfaced at the altitude each persona needs:
 
@@ -185,7 +185,7 @@ Spotter can answer.
 
 | Value | Description |
 |---|---|
-| **Wider Spotter capability** | Answers a substantially wider range of complex analytical questions, closing the expressibility gap of the token-only path. |
+| **Wider Spotter capability** | Answers a substantially wider range of complex analytical questions, closing the expressibility gap of the keyword-only path. |
 | **Reduced training / maintenance** | Less burden constantly training Spotter to emit syntactically specific TML; the LLM focuses on generic, correct SQL. |
 | **No expressibility lag** | New Search Data features (e.g. Sets) become expressible immediately, decoupled from the Spotter-training cycle. |
 | **Better UX** | Faster, more intuitive access to complex insights without users needing to understand data-model nuances — driving adoption. |

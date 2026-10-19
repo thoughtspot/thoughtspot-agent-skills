@@ -118,48 +118,48 @@ the lesson needs updating, not the learner.
 
 ---
 
-## Module 0 — Why AgentQL, and why tokens stay (concept, ~15 min)
+## Module 0 — Why AgentQL, and why keywords stay (concept, ~15 min)
 
 Read [`architecture.md`](architecture.md) § "The core principle" first. This module is the
-**positioning**: where AgentQL fits next to ThoughtSpot's Token Search, and why the course
+**positioning**: where AgentQL fits next to ThoughtSpot's Keyword Search, and why the course
 spends as much time reading the *generated SQL* as writing AgentQL. No queries yet — these
 are the ideas every later module rests on.
 
 ### Two complementary ways to create a query
 
-> **One line to remember:** *AgentQL expands what AI can ask. Tokens let humans verify what
+> **One line to remember:** *AgentQL expands what AI can ask. Keywords let humans verify what
 > AI understood.*
 
 ThoughtSpot has **two** query-creation languages over the **same** governed semantic model,
 and both keep a human able to validate intent:
 
-| | **Token Search** (the foundation) | **AgentQL** (greater expressibility) |
+| | **Keyword Search** (the foundation) | **AgentQL** (greater expressibility) |
 |---|---|---|
-| Who writes the query | A person, in natural language → **tokens** | An **AI agent**, in AgentQL (Semantic SQL) |
+| Who writes the query | A person, in natural language → **keywords** | An **AI agent**, in AgentQL (Semantic SQL) |
 | What it can express | Filtering, pivoting, drill-down, calendars, governed metrics | All of that **plus** multi-stage analysis, complex expressions, CTEs, outer joins, and (where supported) cross-model queries |
-| How a human validates | Inspect the **tokens** — no SQL to read | **Still the tokens** — the agent's query is surfaced as tokens too, so a human confirms intent without reading SQL |
+| How a human validates | Inspect the **keywords** — no SQL to read | **Still the keywords** — the agent's query is surfaced as keywords too, so a human confirms intent without reading SQL |
 | Execution | Governed engine compiles to warehouse SQL | **Same** governed engine, same compile step |
 
-The headline: **Token Search is not replaced — its role evolves.** With tokens, the tokens do
+The headline: **Keyword Search is not replaced — its role evolves.** With keywords, the keywords do
 both jobs, creation *and* validation. With AgentQL, the agent takes over *creation* so it can
-ask more sophisticated questions, and tokens keep doing *validation*. That split — AI-authored
+ask more sophisticated questions, and keywords keep doing *validation*. That split — AI-authored
 query, human-validated intent — is what separates ThoughtSpot from tools that hand back raw
 AI-generated SQL or a prose explanation and ask you to trust it.
 
 ### The trade-off this course keeps returning to
 
 More expressibility means more decisions the agent can make — and some of those are
-**semantic**, not just syntactic. In Token Search the analyst predefined the joins in the
+**semantic**, not just syntactic. In Keyword Search the analyst predefined the joins in the
 Model. In AgentQL, especially **across models**, the agent may choose join keys, join types
 and grain. So:
 
-- **Token Search** → more *determinism* (relationships are predefined).
+- **Keyword Search** → more *determinism* (relationships are predefined).
 - **AgentQL** → more *flexibility*, with more *responsibility to validate* the agent's logic.
 
 **Valid SQL is not proof of correct business logic.** A query can compile, run, and return a
 confident wrong number because the agent joined at the wrong grain. The governed parts —
 RLS, the Model's own joins, formulas, calendars — the Model still guarantees. The agent-chosen
-parts are what a human (via tokens) must check. Three ideas follow from this, and the rest of
+parts are what a human (via keywords) must check. Three ideas follow from this, and the rest of
 the course is them in practice:
 
 1. **ThoughtSpot never executes AgentQL.** It is a **compile** step: AgentQL in, warehouse
@@ -177,8 +177,8 @@ the course is them in practice:
 ### One consistent experience
 
 Whichever language created the answer, the user gets the same ThoughtSpot experience:
-explore and visualise it, **verify it with tokens**, and pin it to Liveboards to share and
-monitor. AgentQL widens the question; the tokenised experience keeps a human informed and in
+explore and visualise it, **verify it with keywords**, and pin it to Liveboards to share and
+monitor. AgentQL widens the question; the keyword experience keeps a human informed and in
 control.
 
 ### See it in three queries (optional — run these now)
@@ -193,7 +193,7 @@ sample Model and guarded by a retest case.)
 SELECT SUM("t1"."sales") AS "Total Sales" FROM "(Sample) Retail - Apparel" AS "t1"
 ```
 You name the *business* column `sales`; the Model supplies the physical table and joins. A
-token search answers this too — it's the common, governed base both approaches stand on.
+keyword search answers this too — it's the common, governed base both approaches stand on.
 *(Full: Module 1–2. Guarded by `ctl_ap_total`.)*
 
 **2 — What AgentQL adds, and the business rules it inherits.**
@@ -204,7 +204,7 @@ WITH all_p AS (SELECT "t1"."product" AS p FROM "(Sample) Retail - Apparel" AS "t
 SELECT a.p, COALESCE(west.s, 0) FROM all_p a LEFT OUTER JOIN west ON a.p = west.p
 ```
 *Every* product, including four never sold in the West (they come back `0`, not dropped) — an
-outer join tokens can't express. Show the generated SQL: the `LEFT OUTER JOIN` is the agent's
+outer join keywords can't express. Show the generated SQL: the `LEFT OUTER JOIN` is the agent's
 contribution; the inner joins, keys, null-guards and (where present) RLS are the **Model's**,
 written for you. *(Full: lesson 3.6. Guarded by `l3_all_products_left_join`.)*
 
@@ -212,15 +212,15 @@ written for you. *(Full: lesson 3.6. Guarded by `l3_all_products_left_join`.)*
 ```sql
 SELECT PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY "t1"."sales") FROM "(Sample) Retail - Apparel" AS "t1"
 ```
-Rejected — `UNSUPPORTED_AGGREGATE`. AgentQL is far more expressive than tokens but **narrower
+Rejected — `UNSUPPORTED_AGGREGATE`. AgentQL is far more expressive than keywords but **narrower
 than raw warehouse SQL**: when a shape has no form, it refuses rather than guessing a wrong
-answer. *(Full: [`beyond-tokens.md`](beyond-tokens.md).)*
+answer. *(Full: [`beyond-keywords.md`](beyond-keywords.md).)*
 
 Together: a governed base (1), expressibility with the governance still applied (2), and a
 clear boundary (3) — the three claims of this module, in three queries.
 
 **Check yourself.** Who authors the query in each approach, and who validates it? Name one
-thing AgentQL can ask that tokens can't. Why does "the SQL compiled and ran" *not* settle
+thing AgentQL can ask that keywords can't. Why does "the SQL compiled and ran" *not* settle
 whether the answer is right — and which parts of the answer are governed regardless?
 
 ---
@@ -617,7 +617,7 @@ has no RLS to demonstrate it.
 
 ### 3.6 Every product, including the ones with no sales — and the business rules in the SQL
 
-This is the module's showcase. It does two things at once: it shows a shape **tokens can't
+This is the module's showcase. It does two things at once: it shows a shape **keywords can't
 express** (every member, matched or not — an outer join), and it is the clearest look at
 **how much business logic the Model writes into the SQL for you**. Lesson 3.3 ended on a
 warning — a query across two dimensions silently drops the combinations with no sales. Here is
@@ -1069,8 +1069,8 @@ up later ("teach me AgentQL, start at module 5").
 
 ## After the course — where AgentQL earns its keep, and where it can't
 
-[`beyond-tokens.md`](beyond-tokens.md) is the capstone: four live-verified worked examples of
-questions that **search tokens can't answer**, and ones where **even AgentQL hits a wall** —
+[`beyond-keywords.md`](beyond-keywords.md) is the capstone: four live-verified worked examples of
+questions that **keywords can't answer**, and ones where **even AgentQL hits a wall** —
 rank within a partition, a preceding-7-days window, a cohort semi-join, and an unsupported
 percentile. Each is written in the same six-section block the lessons use, so it reads like
 four more questions. Good material for a demo, and the honest answer to "why not just use

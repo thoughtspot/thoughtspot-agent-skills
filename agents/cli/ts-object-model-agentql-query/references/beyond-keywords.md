@@ -1,6 +1,6 @@
 # Questions that need AgentQL — and where it still can't go
 
-ThoughtSpot search tokens answer most questions. This file collects the ones they **can't**,
+ThoughtSpot keyword search answers most questions. This file collects the ones they **can't**,
 where writing AgentQL is the point — and, just as important, the ones where **even AgentQL
 hits a wall** and you need a rewrite or have to say no.
 
@@ -21,7 +21,7 @@ checks the failure modes.
 
 The ThoughtSpot `rank` formula ranks across the whole answer (or by `query_groups()`); it
 has no arbitrary `PARTITION BY`, so "the top product **within each region**" is not a single
-rank formula or token. AgentQL expresses it with a window `RANK()`.
+rank formula or keyword. AgentQL expresses it with a window `RANK()`.
 
 **1. Question.** For each region, which product has the highest total sales?
 
@@ -235,7 +235,7 @@ SELECT STDDEV_POP(s) OVER () AS pop, STDDEV_SAMP(s) OVER () AS samp FROM per LIM
 
 ## The pattern across all four
 
-| Question shape | Tokens / formula | AgentQL | Where it lands |
+| Question shape | Keywords / formula | AgentQL | Where it lands |
 |---|---|---|---|
 | Rank within a group | `rank` formula can't `PARTITION BY` | `RANK() OVER (PARTITION BY …)` in a CTE (not `QUALIFY`) | **AgentQL wins** |
 | Preceding N calendar days | `moving_sum` counts rows | `ROWS` frame counts rows; no calendar `RANGE` | **Hard — needs a dense date spine or external compute** |
@@ -243,6 +243,6 @@ SELECT STDDEV_POP(s) OVER () AS pop, STDDEV_SAMP(s) OVER () AS samp FROM per LIM
 | Percentile / scalar stddev | — | `MEDIAN` only; `STDDEV` via CTE (pop *and* sample); `PERCENTILE_CONT` unsupported | **Mixed — stddev via workaround, percentiles are a hard no** |
 
 The honest framing for a demo: AgentQL's window functions and CTEs take you well past what
-tokens can express, but the dialect is narrower than warehouse SQL. When a shape has no form
+keywords can express, but the dialect is narrower than warehouse SQL. When a shape has no form
 (a non-median percentile, a true calendar-range window), say so — don't ship a query that
 compiles into the wrong answer.

@@ -28,7 +28,7 @@ formula, offline mode teaches the SQL and the behaviour, not a fresh figure.
 - **references/limitations.md** — What AgentQL can't do, and the silent-wrong traps
 - **references/snowflake-sv-backing.md** — Rules for Snowflake Semantic View-backed Models
 - **references/learning-path.md** — The guided course (Modules 0–7)
-- **references/beyond-tokens.md** — Worked examples: where AgentQL earns its keep, and where it can't
+- **references/beyond-keywords.md** — Worked examples: where AgentQL earns its keep, and where it can't
 - **references/use-cases.md** — Building on the skill: tutorial, agent, test suites
 - **references/integration.md** — Calling AgentQL directly: auth, endpoints, response parsing
 - **references/open-items.md** — Verification status of the API behaviour this skill relies on
@@ -156,7 +156,7 @@ lists any lesson whose behaviour has changed.
 | [references/limitations.md](references/limitations.md) | **What AgentQL can't do** — hard-unsupported constructs, silent wrong-answer traps (e.g. `QUALIFY` and `FILTER (WHERE …)` are dropped), and what's been *fixed* on current builds. Read before telling a user something can't be done, and for the known-limitation-retest use case. |
 | [references/snowflake-sv-backing.md](references/snowflake-sv-backing.md) | **Snowflake Semantic View backing** (EXPERIMENTAL) — rules R1–R7 for SV-backed Models: the `100072` NULL-key bug, window-via-CTE, no `FROM`-subqueries, the measure-statistics trap, and Databricks MV comparison. Read when the Model's warehouse object is an SV. |
 | [references/learning-path.md](references/learning-path.md) | **The user wants to *learn* AgentQL** ("teach me AgentQL", "how does this work", "I need to demo it"). A guided, live course on `(Sample) Retail - Apparel`, the sample Model on every cluster: each lesson writes AgentQL, predicts the SQL, runs both APIs and breaks the query on purpose. Run it lesson by lesson instead of the normal flow. |
-| [references/beyond-tokens.md](references/beyond-tokens.md) | **Worked examples of questions that need AgentQL — and ones it still can't answer.** Four live-verified cases (rank within a partition, a preceding-N-days window, a cohort semi-join, an unsupported percentile), each shown in the six-section output block. Read for "why not just use search?", for a demo, or before telling a user a question can or can't be done. |
+| [references/beyond-keywords.md](references/beyond-keywords.md) | **Worked examples of questions that need AgentQL — and ones it still can't answer.** Four live-verified cases (rank within a partition, a preceding-N-days window, a cohort semi-join, an unsupported percentile), each shown in the six-section output block. Read for "why not just use search?", for a demo, or before telling a user a question can or can't be done. |
 | [references/use-cases.md](references/use-cases.md) | When the user wants to *build on* this skill — tutorial, agent building-block, accuracy/regression/feature/limitation testing. |
 | [references/integration.md](references/integration.md) | When the user wants to call AgentQL directly from their own product/agent — auth options, the callosum endpoints, request bodies, the raw columnar response format and a parser. |
 | [references/open-items.md](references/open-items.md) | Verification status of the API behaviour this skill relies on. |
@@ -372,9 +372,10 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.11.1 | 2026-10-19 | **Terminology: "Keyword Search" replaces "Token Search".** The positioning (Module 0, `architecture.md`, `beyond-keywords.md`) now calls ThoughtSpot's classic search experience **Keyword Search** and its query chips **keywords**, so the word *token* is reserved for AI token spend (and bearer-token auth) and no longer overloaded. Reference file `beyond-tokens.md` renamed to [`beyond-keywords.md`](references/beyond-keywords.md). No behaviour change; offline bundle regenerated. |
 | 2.11.0 | 2026-10-16 | **Offline mode + a single-document bundle.** New generated reference [`agentql-offline.md`](references/agentql-offline.md) assembles the whole library (SKILL.md + every `references/*.md`) into one document — for reading/reviewing everything in one place, or handing to an agent as grounding. The course (and the normal flow) now offer **live vs offline**: offline works entirely from the bundle, with no live `ts agentql` calls and far lower token spend (result numbers aren't live). Built by `tools/validate/generate_agentql_offline.py` and gated against drift (`--check`) in pre-commit and CI. |
-| 2.10.0 | 2026-10-14 | **Learn AgentQL positioning + business-rules showcase.** Module 0 rewritten as the Token-Search-vs-AgentQL positioning (tokens validate, AgentQL expresses; the expressibility↔determinism trade-off; valid SQL ≠ correct business logic), with an optional **three-query taster** — a governed base, expressibility with governance still applied, and a hard limit — so the point lands without working through every module. New lesson **3.6** — *every product including those with no sales* (a `LEFT OUTER JOIN` tokens can't express) — dissects the generated SQL to show the business rules the Model applies for you: `join_progressive` table pruning, Model-supplied inner joins + keys, null-guarded aggregates, a case-insensitive filter, the row cap, and where RLS is injected. Live-verified on `(Sample) Retail - Apparel`; guarded by `l3_all_products_left_join`. Course now 37 questions. |
-| 2.9.0 | 2026-10-14 | **New reference: [`beyond-tokens.md`](references/beyond-tokens.md)** — four live-verified worked examples (26.9.0.cl) of questions that need AgentQL and ones it still can't answer: rank within a partition (window `RANK()` in a CTE, since `QUALIFY` is dropped), a preceding-7-days window (AgentQL frames count **rows**, not calendar days — no `RANGE … INTERVAL`), a cohort semi-join (`IN (SELECT …)` compiles then fails; CTE equi-join is the fix), and percentiles (`PERCENTILE_CONT` unsupported; `STDDEV` needs the CTE pattern, where **both** `STDDEV_POP` and `STDDEV_SAMP` work — not sample-only). Each rendered in the six-section block. Linked from the References table and as the course capstone. |
+| 2.10.0 | 2026-10-14 | **Learn AgentQL positioning + business-rules showcase.** Module 0 rewritten as the Keyword-Search-vs-AgentQL positioning (keywords validate, AgentQL expresses; the expressibility↔determinism trade-off; valid SQL ≠ correct business logic), with an optional **three-query taster** — a governed base, expressibility with governance still applied, and a hard limit — so the point lands without working through every module. New lesson **3.6** — *every product including those with no sales* (a `LEFT OUTER JOIN` keywords can't express) — dissects the generated SQL to show the business rules the Model applies for you: `join_progressive` table pruning, Model-supplied inner joins + keys, null-guarded aggregates, a case-insensitive filter, the row cap, and where RLS is injected. Live-verified on `(Sample) Retail - Apparel`; guarded by `l3_all_products_left_join`. Course now 37 questions. |
+| 2.9.0 | 2026-10-14 | **New reference: [`beyond-keywords.md`](references/beyond-keywords.md)** — four live-verified worked examples (26.9.0.cl) of questions that need AgentQL and ones it still can't answer: rank within a partition (window `RANK()` in a CTE, since `QUALIFY` is dropped), a preceding-7-days window (AgentQL frames count **rows**, not calendar days — no `RANGE … INTERVAL`), a cohort semi-join (`IN (SELECT …)` compiles then fails; CTE equi-join is the fix), and percentiles (`PERCENTILE_CONT` unsupported; `STDDEV` needs the CTE pattern, where **both** `STDDEV_POP` and `STDDEV_SAMP` work — not sample-only). Each rendered in the six-section block. Linked from the References table and as the course capstone. |
 | 2.8.2 | 2026-10-14 | **Consistent per-question output.** Every question — in the main run flow (Step 6) and in every course lesson — now reports in the same fixed six-section block, in the same order: **1. Question · 2. AgentQL Sent · 3. DB SQL Generated · 4. Error & Explanation (if any) · 5. Key Findings · 6. Results**. Section 4 is omitted when the query succeeds; depth still scales to the audience, but the order never changes. |
 | 2.8.1 | 2026-10-14 | Learn AgentQL: dropped the audience **tracks** in favour of a plain module list — each module with a one-line summary and its **number of questions** (36 in all). Module headings now show the count. |
 | 2.8.0 | 2026-10-14 | **Read-only guards.** A new `guards` suite in `tools/agentql-retest` (26 cases + a positive control) covers statements AgentQL must always refuse: writes, DDL, admin (incl. `PUT`/`GET`/`UNDROP`/`EXECUTE IMMEDIATE`/`SHOW`), a second statement, and a physical table in `FROM`. It also checks that comments, `SELECT … INTO` and a `'; DROP` inside a literal compile to one regenerated `SELECT`. A guard that ever compiles to anything else is a new **BREACH** verdict (exit 3); guards never call `fetch-data`. The read-only check handles backslash and `$$` quoting. The suite's claim is scoped to *no writes or DDL*, not that a `SELECT` reads only the Model. New `limitations.md` § Read-only by design and Learn AgentQL lesson 1.5, "It can only read". |
@@ -395,7 +396,7 @@ without re-deriving the query mechanics.
 | 1.3.2 | 2026-07-10 | Live-verified on nebula-spotQL (Supplier Model): `LEFT`/`RIGHT`/`FULL OUTER JOIN` between CTEs compile verbatim and execute correctly; an attribute-only CTE compiles to a dimension-only scan (no fact join). Together these bypass a Model's inner join without changing it — new `patterns.md` § Dimension-anchored anti-join ("customers without sales"). Fix stale patterns.md set-op-in-CTE notes to match the 1.3.1 finding. |
 | 1.3.1 | 2026-07-08 | Fold in 2026-07 set-operator bug-hunt findings (live-verified on nebula-spotQL): correct CTE set-operation limitation — works when no branch contains an aggregate measure, only aggregated branches fail (engineering-confirmed); note `10000: Failed to transform QuerySpec: null` on outer re-aggregation (likely SCAL-318834); document aggregate-in-WHERE silently reparsed as HAVING; document set-op branch type mismatch compiling but failing at fetch-data. |
 | 1.3.0 | 2026-07-03 | Column classification now delegates to `ts spotql classify-columns` (BL-087); single canonical aggregate-function list. Prereq ts-cli v0.31.0. |
-| 1.2.0 | 2026-06-25 | Add `references/architecture.md` — the "why AgentQL" value proposition and architecture vs raw DB SQL (LLM SQL never executed; RLS/CLS, Model joins/filters, governed metrics/LOD/semi-additive, custom calendars, multi-fact chasm/fan-trap resolution; hybrid token/AgentQL NL flow with a unified verification layer across both transformers — co-existence + parity, not replacement). New capability bullet + References row linking it. |
+| 1.2.0 | 2026-06-25 | Add `references/architecture.md` — the "why AgentQL" value proposition and architecture vs raw DB SQL (LLM SQL never executed; RLS/CLS, Model joins/filters, governed metrics/LOD/semi-additive, custom calendars, multi-fact chasm/fan-trap resolution; hybrid keyword/AgentQL NL flow with a unified verification layer across both transformers — co-existence + parity, not replacement). New capability bullet + References row linking it. |
 | 1.1.1 | 2026-06-25 | Correct compilation attribution: ThoughtSpot (not the skill/agent) compiles AgentQL to warehouse SQL, deterministically; clarify in the intro and capability summary. |
 | 1.1.0 | 2026-06-25 | Add `references/integration.md` (raw AgentQL API for non-CLI consumers); Step 6 emits paste-ready request bodies; fix Step 2 TML parsing (`properties.column_type`, `formulas[]` via `formula_id`) with deterministic raw-vs-aggregate-formula classification; add capability summary; Step 1 accepts Model GUID/URL with search as fallback. |
 | 1.0.0 | 2026-06-25 | Initial release — query a Model with AgentQL via `ts spotql`; generate-sql + fetch-data + review. |
@@ -499,8 +500,8 @@ intent is captured.
 ```mermaid
 flowchart LR
     Q[NL question] --> LLM
-    LLM -->|"primary: familiar default"| A[Search Tokens]
-    LLM -->|"fallback: tokens can't<br/>express — sub-queries, LoD"| B["Semantic SQL (AgentQL)"]
+    LLM -->|"primary: familiar default"| A[Keyword Search]
+    LLM -->|"fallback: keywords can't<br/>express — sub-queries, LoD"| B["Semantic SQL (AgentQL)"]
     A --> QS[QuerySpec]
     B --> QS
     QS --> QG["QueryGen — applies Model rules:<br/>RLS/CLS, joins, metrics,<br/>calendars, multi-fact"]
@@ -515,11 +516,11 @@ flowchart LR
 
 ```
                           ┌─────────────────────────────────────────┐
-  NL question ──► LLM ──►  │  Path A (primary): Search Tokens         │ ─┐
+  NL question ──► LLM ──►  │  Path A (primary): Keyword Search         │ ─┐
                           │     → familiar, default path              │  │
                           ├─────────────────────────────────────────┤  ├─► QuerySpec ─► QueryGen ─► deterministic
                           │  Path B (fallback): Semantic SQL (AgentQL) │  │   (Model rules)   warehouse SQL ─► execute
-                          │     → when tokens can't express the       │ ─┘
+                          │     → when keywords can't express the       │ ─┘
                           │       question (sub-queries, LoD, etc.)   │
                           └─────────────────────────────────────────┘
                                           │
@@ -529,24 +530,24 @@ flowchart LR
                             summary + optional generated-SQL view
                             → user can confirm / correct / challenge
 
-  The LLM output — tokens OR AgentQL — is INTENT. It is never executed directly.
+  The LLM output — keywords OR AgentQL — is INTENT. It is never executed directly.
   QueryGen produces and runs the SQL, with all Model rules (RLS/CLS, joins, metrics,
   calendars, multi-fact resolution) applied. Verifiability holds on both paths.
 ```
 
-**Why a hybrid, not AgentQL-only:** Token-based Answers and AgentQL **co-exist** — AgentQL is
-not a replacement. Token-based Answers stay the primary path: they are familiar and carry
+**Why a hybrid, not AgentQL-only:** Keyword-based Answers and AgentQL **co-exist** — AgentQL is
+not a replacement. Keyword-based Answers stay the primary path: they are familiar and carry
 the verification experience users already trust, letting a business user confirm or correct
 how Spotter interpreted their intent before acting. AgentQL is the **expressibility fallback**,
-taken when the token grammar can't express the question. It closes two gaps in the
-token-only approach:
+taken when the keyword grammar can't express the question. It closes two gaps in the
+keyword-only approach:
 
-- **Spotter training lag.** Tokenised answers require Spotter to be trained to emit
+- **Spotter training lag.** Keyword answers require Spotter to be trained to emit
   syntactically valid TML for each analytical feature; new Search Data capabilities (e.g.
   Sets, LoD formulas) lag behind in Spotter. AgentQL decouples *expressibility* from that
   training cycle — if Search Data can answer it, AgentQL can express it now.
 - **Analytical gaps.** Some questions Search Data can answer aren't reachable through the
-  token grammar but are straightforward to state in SQL.
+  keyword grammar but are straightforward to state in SQL.
 
 Crucially, the trust story is preserved either way: **at no stage is the LLM's SQL executed.**
 All answers run deterministic SQL generated on the semantic Model, so codified rules like RLS
@@ -558,15 +559,15 @@ are always applied and results are not hallucinations.
 
 Determinism (above) guarantees the *executed SQL* is governed and reproducible. It does **not**
 guarantee the user knows ThoughtSpot understood their *question* — and that interpretability is
-what has made ThoughtSpot uniquely trustworthy. With Token-based Answers, the search tokens
+what has made ThoughtSpot uniquely trustworthy. With Keyword-based Answers, the keywords
 themselves are the verification layer: a business user can read and correct them without knowing
 SQL. AgentQL raises the accuracy ceiling, but a more expressive query is harder to eyeball — and
 left unaddressed, an AgentQL answer risks becoming a "black box" indistinguishable from the opaque
 AI outputs competitors ship.
 
 The mitigation is a **verification layer unified across both transformers**, so users get one
-consistent standard of verifiability *regardless of whether an answer was produced by tokens or
-AgentQL*. The principle is co-existence **and parity** — verification is not a token-only feature
+consistent standard of verifiability *regardless of whether an answer was produced by keywords or
+AgentQL*. The principle is co-existence **and parity** — verification is not a keyword-only feature
 the AgentQL path quietly loses. It lets users **confirm, correct, or challenge** how the AI
 interpreted intent, surfaced at the altitude each persona needs:
 
@@ -594,7 +595,7 @@ Spotter can answer.
 
 | Value | Description |
 |---|---|
-| **Wider Spotter capability** | Answers a substantially wider range of complex analytical questions, closing the expressibility gap of the token-only path. |
+| **Wider Spotter capability** | Answers a substantially wider range of complex analytical questions, closing the expressibility gap of the keyword-only path. |
 | **Reduced training / maintenance** | Less burden constantly training Spotter to emit syntactically specific TML; the LLM focuses on generic, correct SQL. |
 | **No expressibility lag** | New Search Data features (e.g. Sets) become expressible immediately, decoupled from the Spotter-training cycle. |
 | **Better UX** | Faster, more intuitive access to complex insights without users needing to understand data-model nuances — driving adoption. |
@@ -1745,48 +1746,48 @@ the lesson needs updating, not the learner.
 
 ---
 
-### Module 0 — Why AgentQL, and why tokens stay (concept, ~15 min)
+### Module 0 — Why AgentQL, and why keywords stay (concept, ~15 min)
 
 Read [`architecture.md`](architecture.md) § "The core principle" first. This module is the
-**positioning**: where AgentQL fits next to ThoughtSpot's Token Search, and why the course
+**positioning**: where AgentQL fits next to ThoughtSpot's Keyword Search, and why the course
 spends as much time reading the *generated SQL* as writing AgentQL. No queries yet — these
 are the ideas every later module rests on.
 
 #### Two complementary ways to create a query
 
-> **One line to remember:** *AgentQL expands what AI can ask. Tokens let humans verify what
+> **One line to remember:** *AgentQL expands what AI can ask. Keywords let humans verify what
 > AI understood.*
 
 ThoughtSpot has **two** query-creation languages over the **same** governed semantic model,
 and both keep a human able to validate intent:
 
-| | **Token Search** (the foundation) | **AgentQL** (greater expressibility) |
+| | **Keyword Search** (the foundation) | **AgentQL** (greater expressibility) |
 |---|---|---|
-| Who writes the query | A person, in natural language → **tokens** | An **AI agent**, in AgentQL (Semantic SQL) |
+| Who writes the query | A person, in natural language → **keywords** | An **AI agent**, in AgentQL (Semantic SQL) |
 | What it can express | Filtering, pivoting, drill-down, calendars, governed metrics | All of that **plus** multi-stage analysis, complex expressions, CTEs, outer joins, and (where supported) cross-model queries |
-| How a human validates | Inspect the **tokens** — no SQL to read | **Still the tokens** — the agent's query is surfaced as tokens too, so a human confirms intent without reading SQL |
+| How a human validates | Inspect the **keywords** — no SQL to read | **Still the keywords** — the agent's query is surfaced as keywords too, so a human confirms intent without reading SQL |
 | Execution | Governed engine compiles to warehouse SQL | **Same** governed engine, same compile step |
 
-The headline: **Token Search is not replaced — its role evolves.** With tokens, the tokens do
+The headline: **Keyword Search is not replaced — its role evolves.** With keywords, the keywords do
 both jobs, creation *and* validation. With AgentQL, the agent takes over *creation* so it can
-ask more sophisticated questions, and tokens keep doing *validation*. That split — AI-authored
+ask more sophisticated questions, and keywords keep doing *validation*. That split — AI-authored
 query, human-validated intent — is what separates ThoughtSpot from tools that hand back raw
 AI-generated SQL or a prose explanation and ask you to trust it.
 
 #### The trade-off this course keeps returning to
 
 More expressibility means more decisions the agent can make — and some of those are
-**semantic**, not just syntactic. In Token Search the analyst predefined the joins in the
+**semantic**, not just syntactic. In Keyword Search the analyst predefined the joins in the
 Model. In AgentQL, especially **across models**, the agent may choose join keys, join types
 and grain. So:
 
-- **Token Search** → more *determinism* (relationships are predefined).
+- **Keyword Search** → more *determinism* (relationships are predefined).
 - **AgentQL** → more *flexibility*, with more *responsibility to validate* the agent's logic.
 
 **Valid SQL is not proof of correct business logic.** A query can compile, run, and return a
 confident wrong number because the agent joined at the wrong grain. The governed parts —
 RLS, the Model's own joins, formulas, calendars — the Model still guarantees. The agent-chosen
-parts are what a human (via tokens) must check. Three ideas follow from this, and the rest of
+parts are what a human (via keywords) must check. Three ideas follow from this, and the rest of
 the course is them in practice:
 
 1. **ThoughtSpot never executes AgentQL.** It is a **compile** step: AgentQL in, warehouse
@@ -1804,8 +1805,8 @@ the course is them in practice:
 #### One consistent experience
 
 Whichever language created the answer, the user gets the same ThoughtSpot experience:
-explore and visualise it, **verify it with tokens**, and pin it to Liveboards to share and
-monitor. AgentQL widens the question; the tokenised experience keeps a human informed and in
+explore and visualise it, **verify it with keywords**, and pin it to Liveboards to share and
+monitor. AgentQL widens the question; the keyword experience keeps a human informed and in
 control.
 
 #### See it in three queries (optional — run these now)
@@ -1820,7 +1821,7 @@ sample Model and guarded by a retest case.)
 SELECT SUM("t1"."sales") AS "Total Sales" FROM "(Sample) Retail - Apparel" AS "t1"
 ```
 You name the *business* column `sales`; the Model supplies the physical table and joins. A
-token search answers this too — it's the common, governed base both approaches stand on.
+keyword search answers this too — it's the common, governed base both approaches stand on.
 *(Full: Module 1–2. Guarded by `ctl_ap_total`.)*
 
 **2 — What AgentQL adds, and the business rules it inherits.**
@@ -1831,7 +1832,7 @@ WITH all_p AS (SELECT "t1"."product" AS p FROM "(Sample) Retail - Apparel" AS "t
 SELECT a.p, COALESCE(west.s, 0) FROM all_p a LEFT OUTER JOIN west ON a.p = west.p
 ```
 *Every* product, including four never sold in the West (they come back `0`, not dropped) — an
-outer join tokens can't express. Show the generated SQL: the `LEFT OUTER JOIN` is the agent's
+outer join keywords can't express. Show the generated SQL: the `LEFT OUTER JOIN` is the agent's
 contribution; the inner joins, keys, null-guards and (where present) RLS are the **Model's**,
 written for you. *(Full: lesson 3.6. Guarded by `l3_all_products_left_join`.)*
 
@@ -1839,15 +1840,15 @@ written for you. *(Full: lesson 3.6. Guarded by `l3_all_products_left_join`.)*
 ```sql
 SELECT PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY "t1"."sales") FROM "(Sample) Retail - Apparel" AS "t1"
 ```
-Rejected — `UNSUPPORTED_AGGREGATE`. AgentQL is far more expressive than tokens but **narrower
+Rejected — `UNSUPPORTED_AGGREGATE`. AgentQL is far more expressive than keywords but **narrower
 than raw warehouse SQL**: when a shape has no form, it refuses rather than guessing a wrong
-answer. *(Full: [`beyond-tokens.md`](beyond-tokens.md).)*
+answer. *(Full: [`beyond-keywords.md`](beyond-keywords.md).)*
 
 Together: a governed base (1), expressibility with the governance still applied (2), and a
 clear boundary (3) — the three claims of this module, in three queries.
 
 **Check yourself.** Who authors the query in each approach, and who validates it? Name one
-thing AgentQL can ask that tokens can't. Why does "the SQL compiled and ran" *not* settle
+thing AgentQL can ask that keywords can't. Why does "the SQL compiled and ran" *not* settle
 whether the answer is right — and which parts of the answer are governed regardless?
 
 ---
@@ -2244,7 +2245,7 @@ has no RLS to demonstrate it.
 
 #### 3.6 Every product, including the ones with no sales — and the business rules in the SQL
 
-This is the module's showcase. It does two things at once: it shows a shape **tokens can't
+This is the module's showcase. It does two things at once: it shows a shape **keywords can't
 express** (every member, matched or not — an outer join), and it is the clearest look at
 **how much business logic the Model writes into the SQL for you**. Lesson 3.3 ended on a
 warning — a query across two dimensions silently drops the combinations with no sales. Here is
@@ -2696,8 +2697,8 @@ up later ("teach me AgentQL, start at module 5").
 
 ### After the course — where AgentQL earns its keep, and where it can't
 
-[`beyond-tokens.md`](beyond-tokens.md) is the capstone: four live-verified worked examples of
-questions that **search tokens can't answer**, and ones where **even AgentQL hits a wall** —
+[`beyond-keywords.md`](beyond-keywords.md) is the capstone: four live-verified worked examples of
+questions that **keywords can't answer**, and ones where **even AgentQL hits a wall** —
 rank within a partition, a preceding-7-days window, a cohort semi-join, and an unsupported
 percentile. Each is written in the same six-section block the lessons use, so it reads like
 four more questions. Good material for a demo, and the honest answer to "why not just use
@@ -2706,13 +2707,13 @@ search?".
 
 ---
 
-## Source: `references/beyond-tokens.md`
+## Source: `references/beyond-keywords.md`
 
 > Worked examples: where AgentQL earns its keep, and where it can't
 
 ## Questions that need AgentQL — and where it still can't go
 
-ThoughtSpot search tokens answer most questions. This file collects the ones they **can't**,
+ThoughtSpot keyword search answers most questions. This file collects the ones they **can't**,
 where writing AgentQL is the point — and, just as important, the ones where **even AgentQL
 hits a wall** and you need a rewrite or have to say no.
 
@@ -2733,7 +2734,7 @@ checks the failure modes.
 
 The ThoughtSpot `rank` formula ranks across the whole answer (or by `query_groups()`); it
 has no arbitrary `PARTITION BY`, so "the top product **within each region**" is not a single
-rank formula or token. AgentQL expresses it with a window `RANK()`.
+rank formula or keyword. AgentQL expresses it with a window `RANK()`.
 
 **1. Question.** For each region, which product has the highest total sales?
 
@@ -2947,7 +2948,7 @@ SELECT STDDEV_POP(s) OVER () AS pop, STDDEV_SAMP(s) OVER () AS samp FROM per LIM
 
 ### The pattern across all four
 
-| Question shape | Tokens / formula | AgentQL | Where it lands |
+| Question shape | Keywords / formula | AgentQL | Where it lands |
 |---|---|---|---|
 | Rank within a group | `rank` formula can't `PARTITION BY` | `RANK() OVER (PARTITION BY …)` in a CTE (not `QUALIFY`) | **AgentQL wins** |
 | Preceding N calendar days | `moving_sum` counts rows | `ROWS` frame counts rows; no calendar `RANGE` | **Hard — needs a dense date spine or external compute** |
@@ -2955,7 +2956,7 @@ SELECT STDDEV_POP(s) OVER () AS pop, STDDEV_SAMP(s) OVER () AS samp FROM per LIM
 | Percentile / scalar stddev | — | `MEDIAN` only; `STDDEV` via CTE (pop *and* sample); `PERCENTILE_CONT` unsupported | **Mixed — stddev via workaround, percentiles are a hard no** |
 
 The honest framing for a demo: AgentQL's window functions and CTEs take you well past what
-tokens can express, but the dialect is narrower than warehouse SQL. When a shape has no form
+keywords can express, but the dialect is narrower than warehouse SQL. When a shape has no form
 (a non-median percentile, a true calendar-range window), say so — don't ship a query that
 compiles into the wrong answer.
 
