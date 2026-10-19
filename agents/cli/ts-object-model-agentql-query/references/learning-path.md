@@ -523,19 +523,42 @@ AgentQL either way. The sample Model is inner-only, so the variants below are **
 SELECT "t1"."product" AS p, SUM("t1"."sales") AS s FROM "<Model>" AS "t1" GROUP BY "t1"."product"
 ```
 
-**DB SQL Generated** — only the join line changes, following the Model's relationship:
+**DB SQL Generated.** Against the sample (inner) it compiles in full to:
 ```sql
--- Inner (the sample's default): only products that have sales
-JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+SELECT "ta_2"."PRODUCTNAME" "ca_1",
+       CASE WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES") ELSE 0 END "ca_2"
+FROM "…"."FACT_SALES" "ta_1"
+  JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+GROUP BY "ta_2"."PRODUCTNAME"
+LIMIT 100000
+```
+If the Model defined the fact↔products relationship with a different join type, **only the join
+line changes** — the `SELECT`, `GROUP BY`, null-guard and row cap are identical. The full
+statement with each type:
+```sql
+-- LEFT OUTER (Model: "sales LEFT JOIN products") — every sales row kept, even if its product is missing
+SELECT "ta_2"."PRODUCTNAME" "ca_1",
+       CASE WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES") ELSE 0 END "ca_2"
+FROM "…"."FACT_SALES" "ta_1"
+  LEFT OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+GROUP BY "ta_2"."PRODUCTNAME"
+LIMIT 100000
 
--- Model defines "sales LEFT JOIN products": every sales row kept, even if its product is missing
-LEFT OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+-- RIGHT OUTER (Model: "sales RIGHT JOIN products") — every product kept, even one with no sales
+SELECT "ta_2"."PRODUCTNAME" "ca_1",
+       CASE WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES") ELSE 0 END "ca_2"
+FROM "…"."FACT_SALES" "ta_1"
+  RIGHT OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+GROUP BY "ta_2"."PRODUCTNAME"
+LIMIT 100000
 
--- Model defines "sales RIGHT JOIN products": every product kept, even one with no sales
-RIGHT OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
-
--- Model defines a FULL OUTER join: both unmatched sides kept
-FULL OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+-- FULL OUTER (Model: "sales FULL OUTER JOIN products") — both unmatched sides kept
+SELECT "ta_2"."PRODUCTNAME" "ca_1",
+       CASE WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES") ELSE 0 END "ca_2"
+FROM "…"."FACT_SALES" "ta_1"
+  FULL OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+GROUP BY "ta_2"."PRODUCTNAME"
+LIMIT 100000
 ```
 
 **Key Findings.** The join **type** is defined once — in the Model, on the fact↔dimension
