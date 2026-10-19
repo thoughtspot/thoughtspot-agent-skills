@@ -9,20 +9,22 @@ Joins two sources into one self-contained `index.html`:
   - `encounters.yaml` (next to this script): which parts of that SQL the game asks about,
     who put each one there, and the text the player reads.
 
-The data is written into the page rather than shipped beside it, so the file runs from
-GitHub Pages, any static host, or a double-click with no server.
+The data and the fonts are written into the page rather than shipped beside it, so the file
+makes no outside requests and runs from GitHub Pages, any static host, or a double-click.
 
     python3 tools/agentql-quest/build.py                   # write tools/agentql-quest/dist/index.html
     python3 tools/agentql-quest/build.py --out _site/index.html
-    python3 tools/agentql-quest/build.py --check           # validate only (pre-commit, CI)
+    python3 tools/agentql-quest/build.py --check           # validate only (tools/validate/check_agentql_quest.py)
 
 Fails when an encounter no longer matches the capture: a missing or rejected case, AgentQL
-that differs by more than layout, or a highlight that hits no line of the SQL. A recapture
-that changes a lesson therefore breaks the build instead of quietly highlighting nothing.
+that differs by more than layout, an `sql` line that is no longer in the SQL exactly, or an
+`sql_count` that no longer holds. A recapture that changes what a lesson teaches therefore
+breaks the build instead of quietly teaching something false.
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import pathlib
 import re
@@ -35,13 +37,23 @@ ROOT = HERE.parents[1]
 LESSON_SQL = ROOT / "agents/cli/ts-object-model-agentql-query/references/lesson-sql.md"
 ENCOUNTERS = HERE / "encounters.yaml"
 TEMPLATE = HERE / "game.html"
+FONT_DIR = HERE / "fonts"
 DEFAULT_OUT = HERE / "dist" / "index.html"
 PLACEHOLDER = "__QUEST_DATA__"
+FONT_PLACEHOLDER = "/*__FONT_FACES__*/"
+
+# (family, weight, file in fonts/) — Latin subsets from Fontsource 5.3.0, SIL OFL 1.1.
+FONTS = (
+    ("VT323", 400, "vt323-latin-400-normal.woff2"),
+    ("IBM Plex Mono", 400, "ibm-plex-mono-latin-400-normal.woff2"),
+    ("IBM Plex Mono", 600, "ibm-plex-mono-latin-600-normal.woff2"),
+)
 
 PATHS = ("dwarf", "elf", "human")
 WHO_ANSWERS = {"model": "forge", "thoughtspot": "forge", "agentql": "agentql"}
 WHO_ORDER = ("forge", "agentql", "ai")
 ALL = "*"
+_STRING = re.compile(r"('(?:[^']|'')*')")
 
 
 def parse_lesson_sql(text: str) -> tuple[str | None, dict[str, dict]]:
@@ -62,11 +74,24 @@ def parse_lesson_sql(text: str) -> tuple[str | None, dict[str, dict]]:
 
 
 def _norm(sql: str) -> str:
-    """Collapse whitespace and drop it around brackets and commas: only layout may differ."""
-    return re.sub(r"\s*([(),])\s*", r"\1", " ".join(sql.split()))
+    """Normalise layout only: line breaks and indentation may differ, nothing else.
+
+    Outside string literals, runs of whitespace collapse to one space, and whitespace is
+    dropped just inside brackets and before commas — the places a reader adds line breaks.
+    `(Sample) Retail` and `(Sample)Retail`, or `a, b` and `a,b`, stay different. String
+    literals are kept byte for byte.
+    """
+    parts = _STRING.split(sql)
+    for i in range(0, len(parts), 2):
+        s = re.sub(r"\s+", " ", parts[i])  # not " ".join(split()): that trims the edges next to a literal
+        s = re.sub(r"\(\s+", "(", s)
+        s = re.sub(r"\s+([),])", r"\1", s)
+        parts[i] = s
+    return "".join(parts).strip()
 
 
-def _highlight(matches: list[str], lines: list[str], where: str, errors: list[str]) -> list[int] | str:
+def _scroll_hl(matches: list[str], lines: list[str], where: str, errors: list[str]) -> list[int] | str:
+    """AgentQL highlights: substring match (the display copy is already pinned to the capture)."""
     if ALL in matches:
         return "all"
     hits: set[int] = set()
@@ -78,22 +103,45 @@ def _highlight(matches: list[str], lines: list[str], where: str, errors: list[st
     return sorted(hits)
 
 
+def _sql_hl(matches: list[str], lines: list[str], where: str, errors: list[str]) -> list[int] | str:
+    """SQL highlights: each match must equal a whole line (ignoring indentation), so a
+    recapture that edits that line — LIMIT 100000 → 1000000, JOIN → LEFT OUTER JOIN — fails."""
+    if ALL in matches:
+        return "all"
+    hits: set[int] = set()
+    for m in matches:
+        found = [i for i, line in enumerate(lines) if line.strip() == m.strip()]
+        if not found:
+            errors.append(f"{where}: no SQL line is exactly {m!r}")
+        hits.update(found)
+    return sorted(hits)
+
+
 def _point(p: dict, who: dict, sql: list[str], scroll: list[str], where: str, errors: list[str]) -> dict:
+    kind = p.get("kind")
     out = {
         "ask": p.get("ask", ""), "hint": p.get("hint", ""), "lesson": p.get("lesson", ""),
-        "sqlHl": _highlight(p.get("sql") or [], sql, f"{where} sql", errors),
-        "scrollHl": _highlight(p.get("scroll") or [], scroll, f"{where} scroll", errors),
+        "sqlHl": _sql_hl(p.get("sql") or [], sql, f"{where} sql", errors),
+        "scrollHl": _scroll_hl(p.get("scroll") or [], scroll, f"{where} scroll", errors),
     }
     for field in ("ask", "hint", "lesson"):
         if not out[field]:
             errors.append(f"{where}: missing {field}")
-    kind = p.get("kind")
+    # Facts about the whole statement that a single highlighted line can't pin down,
+    # e.g. the fact table appears once (pruning held) or only one join is outer.
+    whole = "\n".join(sql)
+    for needle, want in (p.get("sql_count") or {}).items():
+        got = whole.count(needle)
+        if got != want:
+            errors.append(f"{where}: expected {needle!r} {want} time(s) in the SQL, found {got}")
     if kind == "who":
+        if not p.get("sql"):
+            errors.append(f"{where}: a who point must highlight the SQL it asks about")
         target = WHO_ANSWERS.get(p.get("answer"))
         if target is None:
             errors.append(f"{where}: answer must be one of {sorted(WHO_ANSWERS)}, got {p.get('answer')!r}")
             target = "forge"
-        out["options"] = [who[k] for k in WHO_ORDER]
+        out["options"] = [who.get(k, "") for k in WHO_ORDER]
         out["correct"] = WHO_ORDER.index(target)
     elif kind == "choice":
         opts = p.get("options") or []
@@ -160,12 +208,38 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict]) -> tuple[
     return {"captured": date, "encounters": encounters, "paths": paths, "court": court}, errors
 
 
-def render(template: str, data: dict) -> str:
+def font_faces(font_dir: pathlib.Path = FONT_DIR) -> str:
+    """@font-face rules with each font inlined as a data: URI, so the page loads nothing."""
+    rules = []
+    for family, weight, name in FONTS:
+        b64 = base64.b64encode((font_dir / name).read_bytes()).decode("ascii")
+        rules.append(f'@font-face {{ font-family: "{family}"; font-style: normal; font-weight: {weight}; '
+                     f'font-display: swap; src: url(data:font/woff2;base64,{b64}) format("woff2"); }}')
+    return "\n".join(rules)
+
+
+def render(template: str, data: dict, fonts_css: str = "") -> str:
     if template.count(PLACEHOLDER) != 1:
         raise ValueError(f"game.html must contain {PLACEHOLDER} exactly once")
-    # Inside <script type="application/json">, "</" could close the tag; "<\/" is the same JSON.
-    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
-    return template.replace(PLACEHOLDER, payload)
+    if template.count(FONT_PLACEHOLDER) != 1:
+        raise ValueError(f"game.html must contain {FONT_PLACEHOLDER} exactly once")
+    # The JSON sits in a <script type="application/json">. Escaping every <, > and & keeps any
+    # string from closing the element or opening a "<!--<script" state in the HTML parser.
+    payload = (json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+               .replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e"))
+    return template.replace(PLACEHOLDER, payload).replace(FONT_PLACEHOLDER, fonts_css)
+
+
+def build(check: bool = False) -> tuple[str | None, dict, list[str]]:
+    """Validate, and unless `check`, render. Returns (html or None, data, errors)."""
+    date, cases = parse_lesson_sql(LESSON_SQL.read_text(encoding="utf-8"))
+    doc = yaml.safe_load(ENCOUNTERS.read_text(encoding="utf-8")) or {}
+    data, errors = compile_quest(doc, date, cases)
+    if errors:
+        return None, data, errors
+    fonts = font_faces()  # read even under --check, so a missing font file fails pre-commit too
+    html = None if check else render(TEMPLATE.read_text(encoding="utf-8"), data, fonts)
+    return html, data, errors
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -175,23 +249,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", help="accepted for parity with the other validators; paths resolve from this script")
     args = ap.parse_args(argv)
 
-    date, cases = parse_lesson_sql(LESSON_SQL.read_text(encoding="utf-8"))
-    doc = yaml.safe_load(ENCOUNTERS.read_text(encoding="utf-8")) or {}
-    data, errors = compile_quest(doc, date, cases)
+    html, data, errors = build(check=args.check)
     if errors:
         print("agentql-quest: encounters.yaml no longer matches lesson-sql.md:", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 1
-    html = render(TEMPLATE.read_text(encoding="utf-8"), data)
     n_points = sum(len(e["points"]) for e in data["encounters"])
+    summary = f"{len(data['encounters'])} encounters, {n_points} points, {len(data['court'])} court claims"
     if args.check:
-        print(f"agentql-quest: OK ({len(data['encounters'])} encounters, {n_points} points, {len(data['court'])} court claims)")
+        print(f"agentql-quest: OK ({summary})")
         return 0
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
-    print(f"agentql-quest: wrote {out} ({len(data['encounters'])} encounters, {n_points} points)")
+    print(f"agentql-quest: wrote {out} ({summary})")
     return 0
 
 

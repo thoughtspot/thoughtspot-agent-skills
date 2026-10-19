@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>AgentQL Quest</title>
 <meta name="description" content="A retro text adventure about how ThoughtSpot compiles AgentQL into deterministic, governed SQL.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&family=IBM+Plex+Mono:wght@400;600&display=swap">
 <style>
+/* Fonts are inlined by build.py (fonts/, SIL OFL 1.1), so the page makes no outside requests. */
+/*__FONT_FACES__*/
+
 /* Layout: one amber-phosphor monitor centred on a dark desk; every scene renders inside the glass. */
 :root {
   --desk: #0b0805;
@@ -94,7 +94,7 @@ p { margin: 0; max-width: 62ch; }
   text-shadow: none;
 }
 .scroll .ln { display: block; padding: 0 6px; margin: 0 -6px; }
-.scroll .on { background: var(--phosphor); color: var(--glass); font-weight: 600; }
+.scroll .ln.on { background: var(--phosphor); color: var(--glass); font-weight: 600; }
 .scroll .agent { color: var(--phosphor); }
 .cap { font-size: 18px; color: var(--dim); }
 .legend { display: flex; flex-wrap: wrap; gap: 2px 16px; font-size: 18px; color: var(--dim); }
@@ -214,7 +214,7 @@ const LEGEND = `<div class="legend" aria-label="Who is who">
   <span><b>Wizard</b> = the AI</span><span><b>Scroll</b> = the AgentQL it wrote</span>
   <span><b>Forge</b> = ThoughtSpot + the Model</span><span><b>Dragon</b> = the SQL that runs</span></div>`;
 const RULE = `<div class="rule-card"><span class="hot">THE RULE OF THE FORGE</span>
-  <p>If it's in your scroll, you wrote it. If it isn't, ThoughtSpot added it from the Model. The AI never writes SQL.</p></div>`;
+  <p>If it's in your scroll, the AI asked for it, even when ThoughtSpot rewrites it. If it isn't, ThoughtSpot added it from the Model. The AI never writes the SQL that runs.</p></div>`;
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const bar = (n, max, on, off) => `<span class="bar">${on.repeat(n)}<span class="gone">${off.repeat(max - n)}</span></span>`;
@@ -256,7 +256,7 @@ const go = patch => () => { Object.assign(state, patch); render(); };
 const SCREENS = {
   title() {
     return `${art("title", "hot")}
-      <p>A text adventure about one idea: the AI understands your question, and ThoughtSpot turns it into the same governed SQL every time.</p>
+      <p>A text adventure about one idea: the AI understands your question and writes it as AgentQL, and ThoughtSpot compiles that AgentQL into the same governed SQL every time.</p>
       <p class="dim">The SQL is fixed. So is the dragon. Learn its pattern.</p>
       ${choices([{ label: "Begin", go: go({ screen: "choose" }) }])}
       <p class="foot">Number keys or click to choose <span class="cursor">&nbsp;</span><br>
@@ -311,9 +311,9 @@ const SCREENS = {
       <h2>Royal decree</h2>
       <p>Court is adjourned with ${state.hp} of ${PLAYER_HP} trust intact. Let it be known across the realm:</p>
       <p>1. ThoughtSpot never executes AgentQL. It compiles it into warehouse SQL.</p>
-      <p>2. Agents query the Model, not the tables, so the Model's joins, rules and security always apply.</p>
-      <p>3. That is what makes answers consistent: the same question gives the same SQL every time.</p>
-      <p class="dim">And one warning: consistent is not the same as correct. Check what was asked.</p>
+      <p>2. Agents query the Model, not the tables, so the Model's rules and security always apply.</p>
+      <p>3. The same AgentQL always compiles to the same SQL. That is what makes answers consistent.</p>
+      <p class="dim">But the AI's step can vary, and consistent is not the same as correct. Check what was asked.</p>
       ${choices([{ label: "Choose another hero", go: go({ screen: "choose" }) }, { label: "Hold court again", go: go({ screen: "court", hp: PLAYER_HP, step: 0, flash: null }) }])}`;
   },
   intro() {
@@ -364,7 +364,8 @@ const SCREENS = {
     if (!more) saveBest(hero().path, state.hp);
     return `${art("warrior", "hot")}
       <h2>The dragon falls</h2>
-      <p>You finish with ${state.hp} of ${PLAYER_HP} hearts. In its hoard: <span class="hot">${esc(e.loot)}</span></p>
+      <p>You finish with ${state.hp} of ${PLAYER_HP} hearts.</p>
+      <p class="hot">${esc(e.loot)}</p>
       <p>${esc(e.takeaway)}</p>
       ${choices(more
         ? [{ label: "Seek the next dragon", go: go({ screen: "intro", enc: state.enc + 1, step: 0, hp: PLAYER_HP, flash: null }) }]
@@ -374,7 +375,7 @@ const SCREENS = {
     const court = hero().path === "court";
     return `${art("grave")}
       <h2>${court ? "The court loses faith" : "You have fallen"}</h2>
-      <p>${court ? "Too many false claims went unchallenged." : "The dragon's pattern never changes, because the Forge always compiles the same scroll into the same SQL."} Learn it and return.</p>
+      <p>${court ? "Too many claims were judged wrongly." : "The dragon's pattern never changes, because the Forge always compiles the same scroll into the same SQL."} Learn it and return.</p>
       ${choices([{ label: "Try again", go: go(court ? { screen: "court", hp: PLAYER_HP, step: 0, flash: null } : { screen: "forge" }) }, { label: "Choose another hero", go: go({ screen: "choose" }) }])}`;
   }
 };
@@ -382,8 +383,7 @@ const SCREENS = {
 function render() {
   const el = document.getElementById("screen");
   el.innerHTML = SCREENS[state.screen]();
-  const first = el.querySelector(".choices button");
-  if (first && document.activeElement && document.activeElement !== document.body) first.focus({ preventScroll: true });
+  el.querySelector(".choices button")?.focus({ preventScroll: true });
 }
 
 document.addEventListener("click", e => {

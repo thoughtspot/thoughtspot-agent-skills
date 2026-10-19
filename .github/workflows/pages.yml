@@ -4,10 +4,11 @@ name: pages
 # course, to GitHub Pages. The page is rebuilt from encounters.yaml + the committed
 # lesson-sql.md capture, so a lesson recapture that lands on main updates the game too.
 #
-# Deliberately a separate workflow from validate.yml: it only runs after a merge, never on a
-# pull request, so it is not part of the required `validate` gate. Its build step runs the
-# same drift checks that `build.py --check` runs in validate.yml, so main cannot deploy a
-# game the PR gate would have rejected.
+# Deliberately a separate workflow from validate.yml: it never runs on a pull request, so it
+# is not part of the required `validate` gate. It deploys only from main: a push to main, or
+# a manual run that the `if:` guards below refuse on any other branch, so an unreviewed
+# branch can never publish. The build step runs the same drift checks as
+# tools/validate/check_agentql_quest.py, so main cannot deploy a game the PR gate rejects.
 #
 # Requires: repo Settings → Pages → Source = "GitHub Actions" (one-time, admin).
 
@@ -31,6 +32,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,7 +45,7 @@ jobs:
 
       - name: Build the game
         run: |
-          pip install pyyaml
+          pip install pyyaml==6.0.3
           python3 tools/agentql-quest/build.py --out _site/index.html
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
@@ -52,6 +54,7 @@ jobs:
 
   deploy:
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write

@@ -188,7 +188,7 @@ fi
 # AgentQL Quest is built from lesson-sql.md; a recapture that moves the SQL must not
 # silently break the game's highlights.
 if echo "$STAGED" | grep -qE '^tools/agentql-quest/|ts-object-model-agentql-query/references/lesson-sql\.md$'; then
-  run_check "agentql quest"          "tools/agentql-quest/build.py --root . --check"
+  run_check "agentql quest"          "tools/validate/check_agentql_quest.py --root ."
 fi
 
 # Cross-file consistency — runs when agents/, README.md, or SETUP.md are touched

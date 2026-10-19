@@ -6,12 +6,17 @@
 # what the capture can't: which parts of the SQL to ask about, who put each one there, and the
 # words the player sees.
 #
+# Per point:
+#   sql:       whole SQL lines to highlight (indentation ignored). Each must still be in the
+#              capture exactly, so a recapture that edits the line fails the build.
+#   scroll:    substrings of the AgentQL lines to highlight. [] = nothing (itself a clue).
+#   sql_count: {text: n} facts about the whole statement that one line can't pin down.
+#   '*' in sql/scroll highlights everything.
+#
 # The build fails (offline, no cluster) when:
 #   - a `case` is missing from the capture, or was not SUCCESS
 #   - `agentql` differs from the captured AgentQL by anything but layout
-#   - an `sql` or `scroll` match is a substring that hits no line
-# so a recapture that changes a lesson's SQL breaks the build instead of silently
-# highlighting nothing.
+#   - an `sql` line, `scroll` substring or `sql_count` no longer holds
 
 # The three answers offered for every `who` point. `model` and `thoughtspot` answers both
 # map to the Forge option; the lesson text says which it was.
@@ -43,14 +48,15 @@ encounters:
     points:
       - kind: who
         answer: model
-        sql: ['"DIM_RETAPP_PRODUCTS" "ta_1"']
+        sql: ['FROM "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_1"']
+        sql_count: {'"FACT_RETAPP_SALES"': 1}   # pruning held: the fact table is read only once
         scroll: ['FROM "(Sample) Retail - Apparel" AS "t1"']
         ask: >-
           The "all products" part reads the products table DIM_RETAPP_PRODUCTS on its own,
           with no join to sales. Your scroll only names the Model. Who put this table here?
         hint: >-
           Compare the highlighted line in your scroll. It names the Model, never a warehouse
-          table. The AI never writes SQL.
+          table. The AI never writes the SQL that runs.
         lesson: >-
           The Model forged it. This is join-progressive pruning: a query that only lists
           attributes needs no fact table, so you get the full product list, not just the
@@ -68,15 +74,15 @@ encounters:
           Two inner joins, on PRODUCTID and STOREID. Your scroll reads from the Model and
           mentions no keys. Who put these joins here?
         hint: >-
-          Neither key appears in your scroll, and the AI never writes SQL. Who knows how the
-          tables relate?
+          Neither key appears in your scroll, and the AI never writes the SQL that runs. Who
+          knows how the tables relate?
         lesson: >-
           The Model supplied the relationships: the join type and the keys. Two people asking
           this question get the same joins, every time.
 
       - kind: who
-        answer: model
-        sql: ['WHEN sum("ta_3"."SALES") IS NOT NULL']
+        answer: thoughtspot
+        sql: ['WHEN sum("ta_3"."SALES") IS NOT NULL THEN sum("ta_3"."SALES")']
         scroll: ['SUM("t2"."sales")']
         ask: >-
           The sum is wrapped in CASE WHEN ... IS NOT NULL ... ELSE 0. Your scroll's SUM has no
@@ -85,11 +91,11 @@ encounters:
           Your scroll's only null handling is the COALESCE in its last SELECT. This guard sits
           inside the West sales part.
         lesson: >-
-          The Model decides null handling, and ThoughtSpot applies it to every aggregate. The
-          agent didn't write it and can't forget it.
+          ThoughtSpot wraps every SUM this way, so a sum over no rows gives 0 rather than
+          NULL. The agent didn't write it and can't forget it.
 
       - kind: who
-        answer: model
+        answer: thoughtspot
         sql: ["WHERE LOWER(\"ta_4\".\"REGION\") = 'west'"]
         scroll: ["WHERE \"t2\".\"region\" = 'West'"]
         ask: >-
@@ -99,12 +105,13 @@ encounters:
           Your scroll has 'West' with a capital W, and ThoughtSpot never runs the scroll as
           written.
         lesson: >-
-          A governed business rule. The Model defines this filter as case-insensitive, so
-          'West', 'west' and 'WEST' all compile to the same SQL.
+          ThoughtSpot compiles text comparisons to be case-insensitive, so 'West', 'west' and
+          'WEST' all give the same SQL.
 
       - kind: who
         answer: agentql
         sql: ['LEFT OUTER JOIN "qt_1" "ta_6"', 'ON "ta_5"."ca_1" = "ta_6"."ca_2"']
+        sql_count: {'LEFT OUTER JOIN': 1}       # only this join is outer; the Model's stay inner
         scroll: ['LEFT OUTER JOIN west']
         ask: >-
           A LEFT OUTER JOIN keeps the products with no West sales, although the Model's own
@@ -124,16 +131,19 @@ encounters:
         ask: >-
           LIMIT 100000 sits at the very bottom. Your scroll has no LIMIT anywhere. Who added
           it?
-        hint: It isn't in your scroll, and the AI never writes SQL. That leaves one answer.
+        hint: >-
+          It isn't in your scroll, and the AI never writes the SQL that runs. That leaves one
+          answer.
         lesson: ThoughtSpot applies the row cap to every query. Nobody has to remember it.
 
       - kind: choice
-        sql: ["WHERE LOWER(\"ta_4\".\"REGION\") = 'west'"]
-        scroll: ["WHERE \"t2\".\"region\" = 'West'"]
+        sql: []
+        scroll: []
         ask: >-
-          The dragon rears up. This sample Model has no row-level security (RLS), but if it
-          did, the user's RLS filter would sit in this WHERE clause. Could the Wizard (the AI)
-          write a scroll that leaves it out?
+          The dragon rears up. This sample Model has no row-level security (RLS). If it had,
+          ThoughtSpot would add each user's RLS filter while compiling, and with strict RLS it
+          would even force in the join that carries it. Could the Wizard (the AI) write a
+          scroll that leaves the filter out?
         options:
           - text: No. The Forge (ThoughtSpot) adds it while compiling
             correct: true
@@ -143,9 +153,9 @@ encounters:
           The AI never touches the warehouse. Everything it writes goes through ThoughtSpot
           first.
         lesson: >-
-          RLS is injected when ThoughtSpot compiles. The agent can't write it or remove it,
-          and AgentQL can't name warehouse tables, only the Model. This is the part that can't
-          be bypassed.
+          RLS lives in the Model and ThoughtSpot injects it at compile time. The agent can't
+          write it or remove it, and AgentQL can't name warehouse tables, only the Model.
+          Lesson 3.5 shows the injected filter.
 
       - kind: choice
         sql: ['*']
@@ -160,20 +170,21 @@ encounters:
           - text: It depends on the Wizard's mood
         hint: Where does the AI sit, before ThoughtSpot compiles the scroll or inside it?
         lesson: >-
-          Same scroll, same Model, same SQL. The AI's only job was understanding the quest.
-          Compilation is deterministic, which is why this dragon's pattern never changes and
-          why you could learn it. If the Wizard had worded the scroll differently, the SQL
-          could differ, so you check the AgentQL and trust the rest.
+          Same scroll, same Model, same SQL. Compilation is deterministic, which is why this
+          dragon's pattern never changes and why you could learn it. The AI's step is
+          different: asked again, the Wizard might word the scroll differently, and a
+          different scroll can compile to different SQL. So you check the AgentQL and trust
+          the rest.
 
-    # Backed by the retest check `_all_products_outer_join` (tools/agentql-retest lessons.py)
-    # and the Results paragraph of lesson 3.6.
+    # Not machine-checked: the capture holds SQL, not rows. These are the taught numbers from
+    # the Results paragraph of lesson 3.6 (learning-path.md), attributed as such on screen.
     loot: >-
-      349 products, 4 of them with west_sales = 0. Classic t-shirt, Penguin t-shirt, Foothills
-      t-shirt and Organic cotton under tee sold elsewhere but never in the West. Without your
-      outer join they would have silently vanished.
+      In lesson 3.6's live run, this query returned 349 products, 4 of them with no West
+      sales. Without your outer join those 4 would have silently vanished.
     takeaway: >-
-      The outer join was yours: the flexibility AgentQL adds. The table pruning, joins, null
-      guards, case-insensitive filter, row cap and RLS were the Model's guarantees. Check your
+      The outer join was yours: the flexibility AgentQL adds. Everything else came from
+      ThoughtSpot and the Model: the table pruning, the joins and keys, the null guard, the
+      case-insensitive filter and the row cap. RLS would be added the same way. Check your
       part. Trust the rest.
 
 # Court claims are not tied to one captured query. `backed_by` says where in the course each
@@ -185,15 +196,22 @@ court:
       False. The AI writes AgentQL, which states intent. ThoughtSpot never runs AgentQL. It
       compiles it against the Model into warehouse SQL, and only that SQL runs.
     backed_by: learning-path.md Module 0
-  - claim: '"If I ask the same question twice, I get the same SQL and the same answer."'
+  - claim: '"Run the same AgentQL twice and you get the same SQL both times."'
     truth: true
     why: >-
-      True. The same AgentQL always compiles to the same governed SQL. That is what makes
-      answers consistent and testable.
+      True. ThoughtSpot compiles the same AgentQL to the same governed SQL every time. That is
+      what makes answers consistent and testable.
     backed_by: learning-path.md Modules 1 and 7
+  - claim: '"Ask the AI the same question twice and it will always write the same AgentQL."'
+    truth: false
+    why: >-
+      False. The AI's step can vary: it may word the AgentQL differently, and different
+      AgentQL can give different SQL. What is fixed is the compile. That is why the AgentQL
+      is shown and checked, while the SQL it compiles to is repeatable.
+    backed_by: learning-path.md Modules 0 and 6
   - claim: >-
-      "With AgentQL, an agent can ask things keyword search cannot, like every product
-      including the ones that never sold."
+      "With AgentQL, an agent can ask things keyword search cannot, like every product with
+      its West sales, including products never sold in the West."
     truth: true
     why: >-
       True. AgentQL adds expressibility: outer joins, window functions, multi-step questions.

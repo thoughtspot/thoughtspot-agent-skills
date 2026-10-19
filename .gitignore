@@ -27,6 +27,7 @@ venv/
 *.egg-info/
 dist/
 build/
+_site/
 
 # macOS
 .DS_Store
