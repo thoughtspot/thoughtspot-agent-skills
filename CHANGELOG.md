@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-20
-- fix: ts-object-model-agentql-query 2.16.1 — correct lesson 4.6: live checks show AgentQL's relative-date UDFs use the standard Gregorian calendar (EXTRACT(YEAR …)), not the Model's custom/fiscal calendar; the absolute_year_number custom-calendar SQL comes from keyword Search/Spotter. 4.6 reframed to the Search-vs-AgentQL boundary with real captures; Module 4 key-takeaway corrected
+- fix: ts-object-model-agentql-query 2.16.1 — lesson 4.6 now live-verified: AgentQL resolves relative periods through a Model's custom/fiscal calendar when the Model's date is configured with one (captured SQL joins the JulyOffset calendar table, window on absolute_year_number); with none configured the same AgentQL compiles to the standard Gregorian year. Replaces 2.16.0's illustrative example with the real capture; states the config dependency
 
 ## 2026-10-19
 - feat: ts-object-model-agentql-query 2.17.0 — course lesson 2.9 adds an illustrative join-type example: the same AgentQL compiles to inner/left/right/full-outer joins depending on how the Model defines the fact↔dimension relationship; the agent never writes JOIN
