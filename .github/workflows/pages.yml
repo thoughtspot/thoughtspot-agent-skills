@@ -1,8 +1,11 @@
 name: pages
 
-# Publishes AgentQL Quest (tools/agentql-quest), the browser game for the Learn AgentQL
-# course, to GitHub Pages. The page is rebuilt from encounters.yaml + the committed
-# lesson-sql.md capture, so a lesson recapture that lands on main updates the game too.
+# Publishes the repo's GitHub Pages site:
+#   /                 .github/pages/  (the site's home page: what the site hosts, copied as-is)
+#   /agentql-quest/   AgentQL Quest, built by tools/agentql-quest/build.py from
+#                     encounters.yaml + the committed lesson-sql.md capture, so a lesson
+#                     recapture that lands on main updates the game too.
+# Each published page gets its own folder; list it on the home page.
 #
 # Deliberately a separate workflow from validate.yml: it never runs on a pull request, so it
 # is not part of the required `validate` gate. It deploys only from main: a push to main, or
@@ -17,6 +20,7 @@ on:
     branches: [main]
     paths:
       - "tools/agentql-quest/**"
+      - ".github/pages/**"
       - "agents/cli/ts-object-model-agentql-query/references/lesson-sql.md"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -43,10 +47,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build the game
+      - name: Build the site
         run: |
           pip install pyyaml==6.0.3
-          python3 tools/agentql-quest/build.py --out _site/index.html
+          mkdir -p _site
+          cp -R .github/pages/. _site/
+          python3 tools/agentql-quest/build.py --out _site/agentql-quest/index.html
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

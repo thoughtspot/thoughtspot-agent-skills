@@ -205,3 +205,38 @@ def test_every_path_plays_through_headlessly(doc, capture, tmp_path):
     page.write_text(_built_html(doc, capture), encoding="utf-8")
     r = subprocess.run(["node", str(HERE / "play_quest.js"), str(page)], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+# ---- the published site ----------------------------------------------------------------------
+
+def _site_build_script():
+    wf = yaml.safe_load((B.ROOT / ".github/workflows/pages.yml").read_text(encoding="utf-8"))
+    steps = wf["jobs"]["build"]["steps"]
+    return next(s["run"] for s in steps if s.get("name") == "Build the site")
+
+
+def test_pages_workflow_builds_home_page_and_game_in_its_folder(tmp_path):
+    # Run the workflow's own build commands (minus the pip install), writing into tmp_path.
+    script = "\n".join(line for line in _site_build_script().splitlines() if not line.strip().startswith("pip "))
+    site = tmp_path / "_site"
+    r = subprocess.run(["bash", "-euc", script.replace("_site", str(site))], cwd=B.ROOT,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    home, game = site / "index.html", site / "agentql-quest" / "index.html"
+    assert home.is_file() and game.is_file()
+    assert "<title>ThoughtSpot Agent Skills</title>" in home.read_text(encoding="utf-8")
+    assert "<title>AgentQL Quest</title>" in game.read_text(encoding="utf-8")
+
+
+def test_home_page_lists_the_game_and_loads_nothing_from_outside():
+    home = (B.ROOT / ".github/pages/index.html").read_text(encoding="utf-8")
+    assert 'href="agentql-quest/"' in home
+    assert not re.search(r'<(?:script|link|img|iframe)\b[^>]*\b(?:src|href)="https?://', home)
+
+
+def test_pages_workflow_deploys_only_from_main():
+    wf = yaml.safe_load((B.ROOT / ".github/workflows/pages.yml").read_text(encoding="utf-8"))
+    for job in ("build", "deploy"):
+        assert wf["jobs"][job].get("if") == "github.ref == 'refs/heads/main'", job
+    triggers = wf[True] if True in wf else wf["on"]  # PyYAML reads the bare key `on` as True
+    assert "pull_request" not in triggers and "pull_request_target" not in triggers

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ThoughtSpot Agent Skills</title>
+<meta name="description" content="AI agent skills for working with ThoughtSpot, and the pages published alongside them.">
+<!-- Home page of the GitHub Pages site for thoughtspot/thoughtspot-agent-skills.
+     Deployed as-is by .github/workflows/pages.yml. Each published page lives in its own
+     folder; add a row to the list below when you publish another one. -->
+<style>
+/* Layout: one plain, narrow column; a link list, not a landing page. No outside requests. */
+:root {
+  --bg: #fbfbf9;
+  --fg: #1d1f24;
+  --muted: #5d626c;
+  --rule: #dfe1e5;
+  --link: #1f5fbf;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #15171b; --fg: #e6e7ea; --muted: #9ba0aa; --rule: #2c3038; --link: #7eb0ff; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.6 var(--font);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 56px 48px;
+}
+main { max-width: 640px; margin: 0 auto; display: grid; gap: 28px; }
+h1 { margin: 0; font-size: 28px; line-height: 1.2; text-wrap: balance; }
+h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+p { margin: 0; }
+a { color: var(--link); }
+.lede { color: var(--muted); }
+ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+li { padding: 14px 0; border-bottom: 1px solid var(--rule); display: grid; gap: 2px; }
+li a { font-weight: 600; text-decoration: none; }
+li a:hover, li a:focus-visible { text-decoration: underline; }
+.path { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+footer { font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header style="display:grid;gap:10px">
+    <h1>ThoughtSpot Agent Skills</h1>
+    <p class="lede">AI agent skills for working with ThoughtSpot: platform conversion, semantic model authoring, multi-tenancy governance, and data querying. The skills live in the <a href="https://github.com/thoughtspot/thoughtspot-agent-skills">GitHub repository</a>. This site hosts pages built from them.</p>
+  </header>
+
+  <section style="display:grid;gap:12px" aria-labelledby="pages">
+    <h2 id="pages">Pages</h2>
+    <ul>
+      <li>
+        <a href="agentql-quest/">AgentQL Quest</a>
+        <span>The Learn AgentQL course as a retro text adventure: see which parts of the generated SQL ThoughtSpot adds from the Model, and which the AI asked for.</span>
+        <span class="path">/agentql-quest/</span>
+      </li>
+    </ul>
+  </section>
+
+  <footer>Source and installation instructions: <a href="https://github.com/thoughtspot/thoughtspot-agent-skills#readme">README</a>.</footer>
+</main>
+</body>
+</html>

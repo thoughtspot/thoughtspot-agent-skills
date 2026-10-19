@@ -6,8 +6,10 @@ played in the browser. It teaches one idea: the AI only understands the question
 as AgentQL, and ThoughtSpot compiles that AgentQL against the Model into the same governed
 warehouse SQL every time.
 
-Published to GitHub Pages by [`.github/workflows/pages.yml`](../../.github/workflows/pages.yml)
-on every merge to `main` that touches this directory or the lesson capture.
+Published to GitHub Pages at **`/agentql-quest/`** of the repo's site by
+[`.github/workflows/pages.yml`](../../.github/workflows/pages.yml) on every merge to `main` that
+touches this directory or the lesson capture. The site's home page, which lists it, is
+[`.github/pages/index.html`](../../.github/pages/index.html).
 
 ## Two paths
 
