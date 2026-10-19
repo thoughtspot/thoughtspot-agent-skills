@@ -677,17 +677,31 @@ LIMIT 100000
 The fact join is there **only** to carry the RLS filter — so every query is scoped, even one
 that never asked for a measure.
 
-**Non-strict RLS.** Only the tables the question needs are included. *"List all stores"* touches
-just the stores table, so with the rule **only on the fact** there is no fact join and **no
-filter** — every tenant's stores come back. A leak:
+**Non-strict RLS.** Only the tables the question needs are included, so RLS applies per table —
+which makes *which tables you secure* a deliberate design choice:
+
+- **Secure the fact only** — appropriate when only sales-level data is sensitive. Any query that
+  includes sales is filtered, but *"list all stores"* touches just the stores table, so it has no
+  fact join and returns **all** stores:
 ```sql
 SELECT "ta_1"."STORE" "ca_1"
 FROM "…"."DIM_STORES" "ta_1"
 GROUP BY "ta_1"."STORE"
 LIMIT 100000
 ```
-The fix is RLS on **every** table. Then the predicate appears on each table a query does join
-(the fact included) — e.g. *"sales by store"*:
+
+- **Secure the store table too** — when store membership itself must be restricted. The same
+  *"list all stores"* is then filtered on the store table directly:
+```sql
+SELECT "ta_1"."STORE" "ca_1"
+FROM "…"."DIM_STORES" "ta_1"
+WHERE ("ta_1"."_TENANT_ID" IN (2200539748))
+GROUP BY "ta_1"."STORE"
+LIMIT 100000
+```
+
+With rules on more than one table, a query that joins them carries the predicate on each — e.g.
+*"sales by store"* with rules on both fact and stores:
 ```sql
 … FROM "…"."FACT_SALES" "ta_1"
   JOIN "…"."DIM_STORES" "ta_2" ON "ta_1"."STOREID" = "ta_2"."STOREID"
@@ -702,10 +716,11 @@ LIMIT 100000
 **Key Findings.** The `_TENANT_ID IN (…)` predicate is **injected by the RLS rule** — the agent
 never wrote it and can't remove it; the tenant id comes from the user's context. The mode decides
 *reach*: **strict RLS forces the secured table's join into every query**, so one rule on the fact
-scopes even a dimension-only question deterministically; **non-strict** only filters tables a
-query already includes, so a rule on the fact alone leaks a stores-only query — secure **every**
-table. Either way security lives in the Model, applied at compile time — the strongest argument
-for AgentQL over hand-written SQL. (Column-level security hides columns the same way.)
+scopes even a dimension-only question; **non-strict** filters only the tables a query includes, so
+you place rules by what must be protected — the fact for sales-level data, and any dimension (like
+store) whose membership must also be restricted. Either way security lives in the Model, applied at
+compile time — the strongest argument for AgentQL over hand-written SQL. (Column-level security
+hides columns the same way.)
 
 ### 3.6 Every product, including the ones with no sales — and the business rules in the SQL
 
