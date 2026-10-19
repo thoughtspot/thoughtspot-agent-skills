@@ -45,6 +45,7 @@ SOURCES: list[tuple[str, str]] = [
     ("references/limitations.md", "What AgentQL can't do, and the silent-wrong traps"),
     ("references/snowflake-sv-backing.md", "Rules for Snowflake Semantic View-backed Models"),
     ("references/learning-path.md", "The guided course (Modules 0–7)"),
+    ("references/lesson-sql.md", "Captured warehouse SQL for every course lesson (offline section 3)"),
     ("references/beyond-keywords.md", "Worked examples: where AgentQL earns its keep, and where it can't"),
     ("references/use-cases.md", "Building on the skill: tutorial, agent, test suites"),
     ("references/integration.md", "Calling AgentQL directly: auth, endpoints, response parsing"),

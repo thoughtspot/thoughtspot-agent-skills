@@ -106,8 +106,12 @@ act on the answer.
 **Running offline.** Work entirely from [`agentql-offline.md`](agentql-offline.md) — the
 generated single-document bundle of this whole reference library (every rule, pattern,
 limitation and lesson). Present each lesson in the same six-section block below, but **skip the
-`fetch-data` step**: fill sections 1–3 and 5 from the bundle, and in section 6 say the rows
-aren't live (offline). Say so once up front, so nobody mistakes a taught figure for a fresh
+`fetch-data` step**. Fill section 2 (the AgentQL) and section 5 (Key Findings) from the lesson.
+For **section 3 (DB SQL Generated)**, show the **real captured warehouse SQL** for this lesson
+from [`lesson-sql.md`](lesson-sql.md), matched by the lesson's **Guarded by** id — it is the
+actual `executable_sql` from a live run, so offline shows exactly what live would; never
+reconstruct the SQL by hand. For a *break it* lesson, show its captured status/error in section
+4. In section 6 say the rows aren't live (offline). Say so once up front, so nobody mistakes a taught figure for a fresh
 one — and because the sample's rolling `date` makes dated totals move anyway. The learner can
 switch to live at any lesson.
 
@@ -131,6 +135,11 @@ Each lesson runs in two moves — a short pause to predict, then the result in a
    and present the result in the **same six sections, in the same order, every time** — the
    canonical structure from `SKILL.md` Step 6. Consistency across lessons is the point: a
    learner should see the same shape for question 1 and question 36.
+
+   **One lesson at a time.** Show a *single* lesson's six-section block, then **stop and wait**
+   for the learner to say *next* / *continue* before the following lesson. Never present a whole
+   module's questions in one message — it overwhelms. The module's pinned opener is shown once,
+   at the start of the module; the lessons then come one at a time.
 
 | Section | In a lesson |
 |---|---|
@@ -306,15 +315,20 @@ SELECT SUM("t1"."revenue") AS s FROM "(Sample) Retail - Apparel" AS "t1"
 ### 1.3 `generate-sql` SUCCESS is not proof the query runs
 
 ```sql
-SELECT BITAND("t1"."quantity purchased", 1) AS x FROM "(Sample) Retail - Apparel" AS "t1" LIMIT 3
+SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
+WHERE "t1"."product" IN (
+  SELECT "t2"."product" FROM "(Sample) Retail - Apparel" AS "t2" WHERE "t2"."item type" = 'Jackets')
 ```
 
 **Predict.** Will this compile? Will it run?
 
-**Point out.** It compiles (`SUCCESS`, emitting `&`), then `fetch-data` fails in the
-warehouse (`QUERY_EXECUTION_FAILED`, *Unknown function "&"*). Some constructs compile to SQL
-the warehouse rejects, so a query is not proven until `fetch-data` returns rows.
-`limitations.md` lists which ones.
+**Point out.** It compiles (`SUCCESS`) — `generate-sql` returns warehouse SQL — but `fetch-data`
+fails (`QUERY_EXECUTION_FAILED`, a SQL compilation error): the `IN (SELECT …)` subquery is
+passed through untranslated and the warehouse rejects it
+([SCAL-326936](https://thoughtspot.atlassian.net/browse/SCAL-326936)). A green `generate-sql`
+means *valid AgentQL*, not *runs successfully* — a query is not proven until `fetch-data` returns
+rows. The fix is a CTE semi-join (see [`beyond-keywords.md`](beyond-keywords.md) and
+`patterns.md`); `limitations.md` lists the compile-then-fail cases.
 
 **Guarded by:** `l1_compiles_then_fails`.
 
