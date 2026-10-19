@@ -372,6 +372,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.17.0 | 2026-10-19 | **Join-type worked example in the course.** New illustrative lesson **2.9** (“The join type is the Model's, not yours”): the same *sales by product* AgentQL compiles to `JOIN` / `LEFT OUTER JOIN` / `RIGHT OUTER JOIN` / `FULL OUTER JOIN` depending purely on how the Model defines the fact↔dimension relationship — the agent never writes `JOIN`. Complements lesson 3.6 (AgentQL *overriding* an inner-join Model with a CTE outer join). Labelled illustrative (the sample Model is inner-only), kept out of the captured `lesson-sql.md`. |
 | 2.16.0 | 2026-10-19 | **Custom-calendar worked example in the course.** New illustrative lesson **4.6** (“A custom calendar you never compute”) shows a *last-five-fiscal-years* question on a custom calendar (JulyOffset) compiling to **two** date filters: a **coarse** `TRANSACTIONDATE` bound that prunes partitions on the fact (a Model setting), and the **fine-grain** custom-calendar filter via `absolute_year_number` (the five completed prior years). Teaches that AgentQL never hand-codes fiscal math — the Model's calendar supplies the boundaries deterministically. Labelled illustrative (the sample Model is Gregorian), kept out of the captured `lesson-sql.md`. |
 | 2.15.0 | 2026-10-19 | **RLS worked example in the course.** Lesson 3.5 (“Security you never write”) now carries an **illustrative** RLS example — the `_TENANT_ID IN (…)` predicate ThoughtSpot injects — with both shapes and the **strict vs non-strict** distinction: strict RLS puts the rule on one table (the fact) and always forces that join in, so it filters every query; non-strict filters only the tables a query includes, so you place rules by what must be protected — the fact for sales-level data, and any dimension (e.g. store) whose membership must also be restricted. Clearly labelled illustrative (the sample Model has no RLS), kept out of the captured `lesson-sql.md`. First of the purpose-built governance examples. |
 | 2.14.0 | 2026-10-19 | **Learn AgentQL is now offline-only.** The course dropped the live/offline toggle: it runs entirely from captured examples ([`lesson-sql.md`](references/lesson-sql.md) + the bundled [`agentql-offline.md`](references/agentql-offline.md)) with no cluster, no profile and no per-lesson `ts agentql` calls — the sample Model can't demonstrate RLS, custom calendars or varied join types, so live added cost without showing the features that matter. Purpose-built example Models for those features are being added as captured offline examples. The skill's **live query flow is unchanged** (query any Model, pull rows, see the SQL); only the *course* is offline. |
@@ -1996,7 +1997,7 @@ customer asks whether an agent using AgentQL could drop a table: what do you sho
 
 **How determinism holds.** The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run; the lenient parser never changes what's emitted.
 
-**Covers.** Joins written for you, null handling, the row cap, inlined formulas, the lenient parser, and the bare-measure trap. (8 questions · ~40 min)
+**Covers.** Joins written for you, null handling, the row cap, inlined formulas, the lenient parser, the bare-measure trap, and how the Model's join *type* shapes the SQL. (8 questions + 1 illustrative · ~40 min)
 
 #### 2.1 A total: null handling, the row cap, one table
 
@@ -2142,6 +2143,42 @@ in AgentQL. **Aggregate raw measures yourself.** This is the most common beginne
 and it fails silently.
 
 **Guarded by:** `l2_bare_measure_row_level`.
+
+#### 2.9 The join type is the Model's, not yours (illustrative)
+
+Every join so far has been an **inner** join, because that is how the sample Model defines its
+fact↔dimension relationships. But the join **type** — inner, left, right, or full outer — is a
+Model property, and the generated SQL uses whatever the Model defines. You write the *same*
+AgentQL either way. The sample Model is inner-only, so the variants below are **illustrative**.
+
+**Question.** Sales by product.
+
+**AgentQL Sent** — the same grouped query, whatever the Model's join type:
+```sql
+SELECT "t1"."product" AS p, SUM("t1"."sales") AS s FROM "<Model>" AS "t1" GROUP BY "t1"."product"
+```
+
+**DB SQL Generated** — only the join line changes, following the Model's relationship:
+```sql
+-- Inner (the sample's default): only products that have sales
+JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+
+-- Model defines "sales LEFT JOIN products": every sales row kept, even if its product is missing
+LEFT OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+
+-- Model defines "sales RIGHT JOIN products": every product kept, even one with no sales
+RIGHT OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+
+-- Model defines a FULL OUTER join: both unmatched sides kept
+FULL OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+```
+
+**Key Findings.** The join **type** is defined once — in the Model, on the fact↔dimension
+relationship. The agent never writes `JOIN`, and the generated SQL carries exactly the type the
+Model set. Change the Model from inner to right outer and "sales by product" starts including
+products that never sold, with **no change to the AgentQL**. (When the Model's join is inner but
+you need all members for *one* question, AgentQL can override it with a CTE outer join — that is
+lesson 3.6.) *(Illustrative — the sample Model is inner-only, so there is no retest case.)*
 
 **Check yourself.** Without running anything: which tables will a query for "quantity by
 state" touch? What does the query in 2.8 do, and how would you spot it from the result alone?

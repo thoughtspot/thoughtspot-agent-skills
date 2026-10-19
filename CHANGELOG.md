@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-19
+- feat: ts-object-model-agentql-query 2.17.0 — course lesson 2.9 adds an illustrative join-type example: the same AgentQL compiles to inner/left/right/full-outer joins depending on how the Model defines the fact↔dimension relationship; the agent never writes JOIN
 - feat: ts-object-model-agentql-query 2.16.0 — course lesson 4.6 adds an illustrative custom-calendar example (JulyOffset): a last-5-fiscal-years question compiles to a coarse partition-pruning date filter on the fact plus the fine-grain custom-calendar filter via `absolute_year_number`; teaches that AgentQL never hand-codes fiscal math
 - feat: ts-object-model-agentql-query 2.15.0 — course lesson 3.5 gains an illustrative RLS worked example (the injected `_TENANT_ID IN (…)` predicate) teaching strict vs non-strict RLS (strict = one rule on the fact, join always forced in; non-strict = per-table, secure what must be protected (fact for sales; a dimension like store if its membership must be restricted)); labelled illustrative, kept out of captured lesson-sql.md
 - feat: ts-object-model-agentql-query 2.14.0 — Learn AgentQL is now offline-only (dropped the live/offline toggle): the course runs entirely from captured examples (`lesson-sql.md` + `agentql-offline.md`), no cluster or profile needed; the skill's live query flow is unchanged. Groundwork for purpose-built example Models (RLS, custom calendars, join types) captured as offline examples

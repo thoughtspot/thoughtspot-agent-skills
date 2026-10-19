@@ -362,7 +362,7 @@ customer asks whether an agent using AgentQL could drop a table: what do you sho
 
 **How determinism holds.** The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run; the lenient parser never changes what's emitted.
 
-**Covers.** Joins written for you, null handling, the row cap, inlined formulas, the lenient parser, and the bare-measure trap. (8 questions · ~40 min)
+**Covers.** Joins written for you, null handling, the row cap, inlined formulas, the lenient parser, the bare-measure trap, and how the Model's join *type* shapes the SQL. (8 questions + 1 illustrative · ~40 min)
 
 ### 2.1 A total: null handling, the row cap, one table
 
@@ -508,6 +508,42 @@ in AgentQL. **Aggregate raw measures yourself.** This is the most common beginne
 and it fails silently.
 
 **Guarded by:** `l2_bare_measure_row_level`.
+
+### 2.9 The join type is the Model's, not yours (illustrative)
+
+Every join so far has been an **inner** join, because that is how the sample Model defines its
+fact↔dimension relationships. But the join **type** — inner, left, right, or full outer — is a
+Model property, and the generated SQL uses whatever the Model defines. You write the *same*
+AgentQL either way. The sample Model is inner-only, so the variants below are **illustrative**.
+
+**Question.** Sales by product.
+
+**AgentQL Sent** — the same grouped query, whatever the Model's join type:
+```sql
+SELECT "t1"."product" AS p, SUM("t1"."sales") AS s FROM "<Model>" AS "t1" GROUP BY "t1"."product"
+```
+
+**DB SQL Generated** — only the join line changes, following the Model's relationship:
+```sql
+-- Inner (the sample's default): only products that have sales
+JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+
+-- Model defines "sales LEFT JOIN products": every sales row kept, even if its product is missing
+LEFT OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+
+-- Model defines "sales RIGHT JOIN products": every product kept, even one with no sales
+RIGHT OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+
+-- Model defines a FULL OUTER join: both unmatched sides kept
+FULL OUTER JOIN "…"."DIM_PRODUCTS" "ta_2" ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
+```
+
+**Key Findings.** The join **type** is defined once — in the Model, on the fact↔dimension
+relationship. The agent never writes `JOIN`, and the generated SQL carries exactly the type the
+Model set. Change the Model from inner to right outer and "sales by product" starts including
+products that never sold, with **no change to the AgentQL**. (When the Model's join is inner but
+you need all members for *one* question, AgentQL can override it with a CTE outer join — that is
+lesson 3.6.) *(Illustrative — the sample Model is inner-only, so there is no retest case.)*
 
 **Check yourself.** Without running anything: which tables will a query for "quantity by
 state" touch? What does the query in 2.8 do, and how would you spot it from the result alone?
