@@ -247,23 +247,9 @@ AP = {"ctl_ap_total": {"fetch": ok_fetch([[100.0]])},
 
 
 def test_lesson_checks_against_controls():
-    assert K.classify(by_id("l2_group_by_joins_one_dim"),
-                      dict(OK_GEN, executable_sql="… join dim_retapp_stores on storeid …"),
-                      ok_fetch([["West", 60.0], ["East", 40.0]]), AP)[0] == K.AS_DOCUMENTED
     assert K.classify(by_id("l2_filter_case_insensitive"),
                       dict(OK_GEN, executable_sql="… join … where lower(x) = 'west'"),
                       ok_fetch([[0.0]]), AP)[0] == K.CHANGED  # case-sensitive now: matched nothing
-    rows = [["West", 1.0]] * 3
-    assert K.classify(by_id("l2_bare_measure_row_level"), OK_GEN, ok_fetch(rows), AP)[0] == K.CHANGED
-
-
-def test_latest_date_check_wants_int_epoch_near_today():
-    import datetime as dt
-    today = int(dt.datetime.now(dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
-    c = by_id("l1_dates_are_epoch_seconds")
-    assert K.classify(c, OK_GEN, ok_fetch([[today, 1.0]]), {})[0] == K.AS_DOCUMENTED
-    assert K.classify(c, OK_GEN, ok_fetch([["2026-10-14", 1.0]]), {})[0] == K.CHANGED
-    assert K.classify(c, OK_GEN, ok_fetch([[today - 30 * 86400, 1.0]]), {})[0] == K.CHANGED
 
 
 # ---- the guards suite ----------------------------------------------------------------------

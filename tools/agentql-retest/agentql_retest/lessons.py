@@ -205,27 +205,9 @@ LESSON_CASES = [
          FETCH_ERROR,
          L + "1.3 generate-sql SUCCESS is not proof the query runs", model="apparel",
          code="QUERY_EXECUTION_FAILED"),
-    Case("l1_dates_are_epoch_seconds",
-         f'SELECT {DATE} AS d, SUM({SALES}) AS s {F} GROUP BY {DATE} ORDER BY {DATE} DESC LIMIT 1', OK,
-         L + "1.4 reading fetch-data: types, and dates as epoch seconds", model="apparel",
-         check=_latest_date_is_today),
-
-    # ---- module 2: first queries --------------------------------------------------------------
     Case("l2_total_touches_fact_only", f'SELECT SUM({SALES}) AS s, SUM({QTY}) AS q {F}', OK,
          L + "2.1 a total: null handling, the row cap, one table", model="apparel",
          sql_has=("is not null then sum(", "limit 100000", "fact_retapp_sales"), sql_lacks=("join",)),
-    Case("l2_group_by_joins_one_dim", f'SELECT {REGION} AS r, SUM({SALES}) AS s {F} GROUP BY {REGION}', OK,
-         L + "2.2 grouping by a dimension: the join is written for you", model="apparel",
-         sql_has=("join", "dim_retapp_stores", "storeid"), sql_lacks=("dim_retapp_products",),
-         check=_sums_to_total),
-    Case("l2_two_dims_two_joins",
-         f'SELECT {ITEM} AS it, {REGION} AS r, SUM({SALES}) AS s {F} GROUP BY {ITEM}, {REGION}', OK,
-         L + "2.3 two dimensions, two joins", model="apparel",
-         sql_has=("dim_retapp_stores", "dim_retapp_products"), check=_sums_to_total),
-    Case("l2_top_n",
-         f'SELECT {ITEM} AS it, SUM({SALES}) AS s {F} GROUP BY {ITEM} ORDER BY s DESC LIMIT 3', OK,
-         L + "2.4 top N: ORDER BY and LIMIT", model="apparel", sql_has=("nulls last", "limit 3"),
-         check=_top3_desc),
     Case("l2_formula_compiles_inline",
          f'SELECT YEAR({DATE}) AS y, SUM({SALES}) AS s {F} GROUP BY YEAR({DATE})', OK,
          L + "2.5 a Model formula compiles into the SQL", model="apparel",
@@ -235,15 +217,6 @@ LESSON_CASES = [
     Case("l2_filter_case_insensitive", f"SELECT SUM({SALES}) AS s {F} WHERE {REGION} = 'west'", OK,
          L + "2.6 filters: string equality is case-insensitive", model="apparel",
          sql_has=("lower(", "join"), check=_west_matches_control),
-    Case("l2_identifiers_case_insensitive",
-         f'SELECT SUM("t1"."Sales") AS s FROM "{SAMPLE_MODEL.lower()}" AS "t1"', OK,
-         L + "2.7 the parser is lenient: identifier case", model="apparel", same_as="ctl_ap_total"),
-    Case("l2_implicit_group_by", f'SELECT {REGION} AS r, SUM({SALES}) AS s {F}', OK,
-         L + "2.7 the parser is lenient: a missing GROUP BY", model="apparel",
-         sql_has=("group by",), same_as="ctl_ap_by_region"),
-    Case("l2_bare_measure_row_level", f'SELECT {REGION} AS r, {SALES} AS s {F}', OK,
-         L + "2.8 a bare measure is not aggregated", model="apparel", sql_lacks=("sum(",),
-         check=_not_aggregated),
     Case("l2_count_distinct", f'SELECT COUNT(DISTINCT {STORE}) AS n {F}', OK,
          L + "2.6 counting: COUNT(DISTINCT col), never COUNT(*)", model="apparel",
          sql_has=("count(distinct",)),
@@ -256,17 +229,8 @@ LESSON_CASES = [
     Case("l3_ratio_safe_division", f'SELECT {ITEM} AS it, SUM({SALES}) / SUM({QTY}) AS avg_price {F} GROUP BY {ITEM}',
          OK, L + "3.1 a ratio of two measures, divided safely", model="apparel", sql_has=("nullif(",),
          check=_ratio_matches_parts),
-    Case("l3_avg_is_row_level", f'SELECT {REGION} AS r, AVG({SALES}) AS a, SUM({SALES}) AS s, COUNT({SALES}) AS n '
-         f'{F} GROUP BY {REGION}', OK, L + "3.2 AVG averages fact rows, not anything larger", model="apparel",
-         check=_avg_is_sum_over_count),
     Case("l3_agg_on_raw_measure_rejected", f'SELECT {REGION} AS r, AGG({SALES}) AS s {F} GROUP BY {REGION}',
          GEN_ERROR, L + "3.4 formula measures: AGG, not SUM (break it)", model="apparel", code="QUERY_GEN_ERROR"),
-    Case("l3_dim_only_one_table", f'SELECT {ITEM} AS it {F} GROUP BY {ITEM}', OK,
-         L + "3.3 a dimension-only query reads only its own table", model="apparel",
-         sql_has=("dim_retapp_products",), sql_lacks=("join", "fact_retapp_sales")),
-    Case("l3_two_dims_via_fact", f'SELECT {ITEM} AS it, {REGION} AS r {F} GROUP BY {ITEM}, {REGION}', OK,
-         L + "3.3 two dimensions are joined through the fact table", model="apparel",
-         sql_has=("fact_retapp_sales", "dim_retapp_products", "dim_retapp_stores")),
     Case("l3_all_products_left_join",
          'WITH all_p AS (SELECT "t1"."product" AS p FROM "(Sample) Retail - Apparel" AS "t1" '
          'GROUP BY "t1"."product"), west AS (SELECT "t2"."product" AS p, SUM("t2"."sales") AS s '
@@ -294,25 +258,6 @@ LESSON_CASES = [
     Case("l4_last_30_days", f'SELECT SUM({SALES}) AS s {F} WHERE DIFF_DAY(START_OF_CURRENT_DAY(), {DATE}) '
          'BETWEEN 1 AND 30', OK, L + "4.2 relative dates: the period functions", model="apparel",
          sql_has=("current_date()", ">= 1", "<= 30")),
-    Case("l4_date_literal_filter", f"SELECT SUM({SALES}) AS s {F} WHERE {DATE} >= '{THIS_YEAR}-01-01'", OK,
-         L + "4.3 a date literal in WHERE", model="apparel", check=_equals_this_year),
-    Case("l4_date_trunc_fails", f"SELECT DATE_TRUNC('month', {DATE}) AS m, SUM({SALES}) AS s {F} "
-         f"GROUP BY DATE_TRUNC('month', {DATE})", FETCH_ERROR, L + "4.3 a date literal in WHERE (break it)",
-         model="apparel", code="QUERY_EXECUTION_FAILED"),
-    Case("l4_string_functions", f"SELECT UPPER({REGION}) AS u, LENGTH({REGION}) AS l, CONCAT({REGION}, '-', {STATE}) "
-         f"AS c, SUBSTR({STATE}, 1, 3) AS sub {F} GROUP BY UPPER({REGION}), LENGTH({REGION}), "
-         f"CONCAT({REGION}, '-', {STATE}), SUBSTR({STATE}, 1, 3)", OK, L + "4.4 string functions",
-         model="apparel", check=_strings_consistent),
-    Case("l4_group_by_alias", f'SELECT UPPER({REGION}) AS u, SUM({SALES}) AS s {F} GROUP BY u', OK,
-         L + "4.4 string functions", model="apparel", check=_sums_to_total_col(1)),
-    Case("l4_group_by_ordinal_rejected", f'SELECT UPPER({REGION}) AS u, SUM({SALES}) AS s {F} GROUP BY 1', GEN_ERROR,
-         L + "4.4 string functions", model="apparel", code="QUERY_GEN_ERROR"),
-    Case("l4_case_buckets", f"SELECT CASE WHEN {SALES} >= 1000 THEN 'large' WHEN {SALES} >= 100 THEN 'medium' "
-         f"ELSE 'small' END AS b, COUNT({SALES}) AS n, SUM({SALES}) AS s {F} GROUP BY CASE WHEN {SALES} >= 1000 "
-         f"THEN 'large' WHEN {SALES} >= 100 THEN 'medium' ELSE 'small' END", OK,
-         L + "4.5 CASE to bucket values", model="apparel", check=_sums_to_total_col(2)),
-
-    # ---- module 5: advanced shapes ---------------------------------------------------------------
     Case("ctl_ap_by_store", f'SELECT {STORE} AS st, SUM({SALES}) AS s {F} GROUP BY {STORE}', OK, "control",
          model="apparel", control=True),
     Case("l5_cte_two_step", f'WITH st AS (SELECT {STORE} AS store, SUM({SALES}) AS s {F} GROUP BY {STORE}) '
@@ -324,23 +269,6 @@ LESSON_CASES = [
     Case("l5_share_of_total", f'SELECT {REGION} AS r, SUM({SALES}) AS s, SUM({SALES}) / SUM(SUM({SALES})) OVER () '
          f'AS share {F} GROUP BY {REGION}', OK, L + "5.2 window functions: rank and share of total",
          model="apparel", sql_has=("over ()",), check=_shares_sum_to_one),
-    Case("l5_top_n_per_group", f'WITH x AS (SELECT {REGION} AS r, {ITEM} AS it, SUM({SALES}) AS s, ROW_NUMBER() OVER '
-         f'(PARTITION BY {REGION} ORDER BY SUM({SALES}) DESC) AS rn {F} GROUP BY {REGION}, {ITEM}) '
-         'SELECT x.r, x.it, x.s FROM x WHERE x.rn <= 2', OK, L + "5.3 top N per group", model="apparel",
-         check=_two_per_region),
-    Case("l5_year_over_year", f'SELECT YEAR_NUMBER({DATE}) AS y, SUM({SALES}) AS s, LAG(SUM({SALES})) OVER '
-         f'(ORDER BY YEAR_NUMBER({DATE})) AS prev {F} GROUP BY YEAR_NUMBER({DATE})', OK,
-         L + "5.4 period over period and running totals", model="apparel", check=_lag_is_previous_year),
-    Case("l5_running_total", f'SELECT YEAR_NUMBER({DATE}) AS y, SUM({SALES}) AS s, SUM(SUM({SALES})) OVER '
-         f'(ORDER BY YEAR_NUMBER({DATE})) AS running {F} GROUP BY YEAR_NUMBER({DATE})', OK,
-         L + "5.4 period over period and running totals", model="apparel", check=_running_ends_at_total),
-    Case("l5_union_all", f"SELECT {REGION} AS r, SUM({SALES}) AS s {F} WHERE {REGION} = 'West' GROUP BY {REGION} "
-         f"UNION ALL SELECT {REGION} AS r, SUM({SALES}) AS s {F} WHERE {REGION} = 'East' GROUP BY {REGION}", OK,
-         L + "5.5 combining results: set operations and CTE joins", model="apparel", check=_union_matches_regions),
-    Case("l5_join_ctes", f'WITH a AS (SELECT {REGION} AS r, SUM({SALES}) AS s {F} GROUP BY {REGION}), b AS (SELECT '
-         f'{REGION} AS r, COUNT(DISTINCT {STORE}) AS n {F} GROUP BY {REGION}) SELECT a.r, a.s, b.n, a.s / b.n AS '
-         'per_store FROM a JOIN b ON a.r = b.r', OK, L + "5.5 combining results: set operations and CTE joins",
-         model="apparel", check=_per_store),
     Case("l5_having", f'SELECT {STORE} AS store, SUM({SALES}) AS s {F} GROUP BY {STORE} HAVING SUM({SALES}) > 40000000',
          OK, L + "5.6 HAVING, and the shapes that are not allowed", model="apparel", sql_has=("having",),
          check=_all_over(40000000, 1)),
@@ -361,9 +289,6 @@ LESSON_CASES = [
     Case("l6_filter_dropped", f"SELECT SUM({SALES}) FILTER (WHERE {REGION} = 'West') AS s {F}", OK,
          L + "6.2 FILTER (WHERE …) is silently dropped", model="apparel", sql_lacks=("west",),
          differs_from="ctl_ap_west_case"),
-    Case("l6_where_aggregate_is_having", f'SELECT {STORE} AS store, SUM({SALES}) AS s {F} '
-         f'WHERE SUM({SALES}) > 40000000 GROUP BY {STORE}', OK, L + "6.3 lenient rewrites you should not rely on",
-         model="apparel", sql_has=("having",), same_as="l5_having"),
     Case("l6_stddev_rejected", f'SELECT STDDEV_SAMP({SALES}) AS sd {F}', GEN_ERROR,
          L + "6.4 loud failures, and their workarounds", model="apparel", code="UNSUPPORTED_AGGREGATE"),
     Case("l6_stddev_over_cte", f'WITH st AS (SELECT {STORE} AS store, SUM({SALES}) AS s {F} GROUP BY {STORE}) '
@@ -380,7 +305,4 @@ LESSON_CASES = [
          f"AS s {F}", OK, "control", model="apparel", control=True),
 
     # ---- module 7: building on it -------------------------------------------------------------------
-    Case("l7_columns_match_rows", f'SELECT {REGION} AS r, {DATE} AS d, SUM({SALES}) AS s {F} GROUP BY {REGION}, {DATE} '
-         f'ORDER BY {DATE} DESC LIMIT 5', OK, L + "7.1 consuming fetch-data in code", model="apparel",
-         check=_columns_match_rows),
 ]

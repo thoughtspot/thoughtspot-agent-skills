@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-20
-- feat: ts-object-model-agentql-query 2.18.0 — leaner Learn AgentQL course (39 → 21 lessons, ~3–4 per module): removed Module 7 and the SQL-syntax-practice lessons, kept the two-API basics, the determinism/governance showcases (RLS, custom calendar, join types), the key traps and the whole Trust-but-verify module; lessons renumbered; retest lessons suite unchanged (cut lessons' cases kept as behaviour coverage)
+- feat: ts-object-model-agentql-query 2.18.0 — leaner Learn AgentQL course (39 → 21 lessons, ~3–4 per module): removed Module 7 and the SQL-syntax-practice lessons, kept the two-API basics, the determinism/governance showcases (RLS, custom calendar, join types), the key traps and the whole Trust-but-verify module; lessons renumbered; cut lessons' cases also removed from the retest lessons suite (it backs the course 1:1)
 - fix: ts-object-model-agentql-query 2.17.1 — lesson 2.9 join types now live-verified with real captures (Sales→Product LEFT, Sales→Customer RIGHT, Sales→Date FULL OUTER; one query mixes LEFT+RIGHT), replacing the illustrative SQL
 - fix: ts-object-model-agentql-query 2.16.1 — lesson 4.6 now live-verified: AgentQL resolves relative periods through a Model's custom/fiscal calendar when the Model's date is configured with one (captured SQL joins the JulyOffset calendar table, window on absolute_year_number); with none configured the same AgentQL compiles to the standard Gregorian year. Replaces 2.16.0's illustrative example with the real capture; states the config dependency
 
