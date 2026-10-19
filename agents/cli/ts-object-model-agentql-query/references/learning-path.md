@@ -14,6 +14,27 @@ behavioural claim is checked by a retest case, named on the lesson's **Guarded b
 
 ---
 
+## Start here — the opening message (show verbatim)
+
+When the course starts, show the learner this message **exactly as written**, before anything
+else and before running any lesson. It is the one fixed opening, so every run begins the same
+way. Do not paraphrase it, and do not introduce the language by any former name.
+
+> **Learn AgentQL.** AgentQL is a SQL dialect an AI agent writes against a ThoughtSpot
+> **Model**, not against warehouse tables. ThoughtSpot never runs AgentQL itself — it
+> **compiles it deterministically** into warehouse SQL (Snowflake, Databricks, BigQuery, …),
+> and the warehouse runs that SQL. Because the Model supplies the joins, formulas, security
+> and null-handling, the **same question always compiles to the same governed SQL and returns
+> the same answer**. This course shows you that one question at a time — as much by reading the
+> *generated SQL* as by writing AgentQL.
+>
+> **Run it live or offline?** *Live* makes the real `ts agentql` calls on a cluster (fresh
+> generated SQL and live rows). *Offline* works entirely from the bundled reference — no
+> cluster, far lower token spend, with taught (not live) numbers. Both teach the same
+> material. Which would you like?
+
+---
+
 ## The key takeaways — review the whole messaging arc
 
 Every module opens with the same three pinned lines — **Key takeaway**, **How determinism
@@ -68,10 +89,11 @@ a learner to expect a specific dated number. Totals over all time are stable.
 
 ---
 
-## Live or offline? — ask first
+## Live or offline?
 
-Before the first lesson, ask the learner which mode to run in. Both teach the same material;
-they differ in whether anything runs on a cluster.
+The opening message above asks the learner which mode to run in. Both teach the same material;
+they differ in whether anything runs on a cluster. Use this table to explain the choice and to
+act on the answer.
 
 | | **Live** (default) | **Offline** |
 |---|---|---|
