@@ -372,6 +372,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.12.1 | 2026-10-19 | **Pin the Module 0 concept explanation verbatim.** The conceptual text in Module 0 is now a **show-verbatim** block (a cleaner plain-language rewrite — two jobs of keywords, the expressibility↔determinism trade-off, valid SQL ≠ correct business logic, and the three ideas: ThoughtSpot never executes AgentQL / you query the Model not the tables / that is what makes answers consistent), so it reads identically every run instead of being paraphrased. New course-wide rule: concept prose and each lesson's written **Point out** / **Key Findings** are shown as-is; only the generated SQL and live result numbers vary. |
 | 2.12.0 | 2026-10-19 | **Consistent course messaging + determinism throughline.** The course now starts with a single **pinned opening message shown verbatim** (the determinism-forward definition + the live/offline choice), and every module opens with three pinned lines shown verbatim — **Key takeaway**, **How determinism holds**, **Covers** — so the messaging is identical on every run instead of improvised; a new **Key takeaways** table at the top of `learning-path.md` collects them for review, with *how deterministic SQL is maintained* as the throughline (Model-defined join types in Module 2; AgentQL overriding the default join for all-members expressibility in Module 3; Gregorian/fiscal/custom-4-4-5 calendars resolved deterministically in Module 4; determinism ≠ correct intent in Module 6). SKILL.md intro replaced the SpotQL-rename banner with a clean determinism-forward definition (the `spotql` API identifiers remain in the integration reference). |
 | 2.11.1 | 2026-10-19 | **Terminology: "Keyword Search" replaces "Token Search".** The positioning (Module 0, `architecture.md`, `beyond-keywords.md`) now calls ThoughtSpot's classic search experience **Keyword Search** and its query chips **keywords**, so the word *token* is reserved for AI token spend (and bearer-token auth) and no longer overloaded. Reference file `beyond-tokens.md` renamed to [`beyond-keywords.md`](references/beyond-keywords.md). No behaviour change; offline bundle regenerated. |
 | 2.11.0 | 2026-10-16 | **Offline mode + a single-document bundle.** New generated reference [`agentql-offline.md`](references/agentql-offline.md) assembles the whole library (SKILL.md + every `references/*.md`) into one document — for reading/reviewing everything in one place, or handing to an agent as grounding. The course (and the normal flow) now offer **live vs offline**: offline works entirely from the bundle, with no live `ts agentql` calls and far lower token spend (result numbers aren't live). Built by `tools/validate/generate_agentql_offline.py` and gated against drift (`--check`) in pre-commit and CI. |
@@ -1792,6 +1793,11 @@ improvise the framing, so a learner sees the same messaging on every run (the
 [key-takeaways table](#the-key-takeaways--review-the-whole-messaging-arc) collects them all).
 Introduce the language only as **AgentQL** — never by its former name.
 
+**Showing the explanation.** Present concept-explaining text *as written*, never paraphrased:
+Module 0's **The concept (show verbatim)** section in full, and in every hands-on lesson the
+written **Point out** and **Key Findings** text. Only the generated SQL and (in live mode) the
+result numbers change between runs — the words a learner reads do not.
+
 ---
 
 ### Module 0 — Why AgentQL, and why keywords stay (concept, ~15 min)
@@ -1802,18 +1808,14 @@ Introduce the language only as **AgentQL** — never by its former name.
 
 **Covers.** The positioning, the expressibility↔determinism trade-off, and a three-query taster. (concept · ~15 min)
 
-Read [`architecture.md`](architecture.md) § "The core principle" first. This module is the
-**positioning**: where AgentQL fits next to ThoughtSpot's Keyword Search, and why the course
-spends as much time reading the *generated SQL* as writing AgentQL. No queries yet — these
-are the ideas every later module rests on.
+Read [`architecture.md`](architecture.md) § "The core principle" for the deeper version. The
+concept below is **pinned**: present it to the learner **exactly as written**, in full, before
+the taster — don't paraphrase or compress it. This is the one explanation every run shows.
 
-#### Two complementary ways to create a query
+#### The concept (show verbatim)
 
-> **One line to remember:** *AgentQL expands what AI can ask. Keywords let humans verify what
-> AI understood.*
-
-ThoughtSpot has **two** query-creation languages over the **same** governed semantic model,
-and both keep a human able to validate intent:
+ThoughtSpot has **two** ways to create a query over the **same** governed Model, and both keep a
+human able to validate intent:
 
 | | **Keyword Search** (the foundation) | **AgentQL** (greater expressibility) |
 |---|---|---|
@@ -1822,46 +1824,28 @@ and both keep a human able to validate intent:
 | How a human validates | Inspect the **keywords** — no SQL to read | **Still the keywords** — the agent's query is surfaced as keywords too, so a human confirms intent without reading SQL |
 | Execution | Governed engine compiles to warehouse SQL | **Same** governed engine, same compile step |
 
-The headline: **Keyword Search is not replaced — its role evolves.** With keywords, the keywords do
-both jobs, creation *and* validation. With AgentQL, the agent takes over *creation* so it can
-ask more sophisticated questions, and keywords keep doing *validation*. That split — AI-authored
-query, human-validated intent — is what separates ThoughtSpot from tools that hand back raw
-AI-generated SQL or a prose explanation and ask you to trust it.
+**Keyword Search isn't replaced.** Today keywords do two jobs: they create the query and they
+let a person check it. With AgentQL the agent takes over creating the query, and keywords keep
+the checking job.
 
-#### The trade-off this course keeps returning to
+**The trade-off.** The more an agent can express, the more decisions it makes, and some of those
+are about business meaning (which join, at what grain), not just syntax.
 
-More expressibility means more decisions the agent can make — and some of those are
-**semantic**, not just syntactic. In Keyword Search the analyst predefined the joins in the
-Model. In AgentQL, especially **across models**, the agent may choose join keys, join types
-and grain. So:
+- **Keyword Search** is more *deterministic*, because an analyst defined the relationships in the
+  Model in advance.
+- **AgentQL** is more *flexible*, so someone has to check the logic the agent chose.
 
-- **Keyword Search** → more *determinism* (relationships are predefined).
-- **AgentQL** → more *flexibility*, with more *responsibility to validate* the agent's logic.
+**Valid SQL is not proof of correct business logic.** A query can compile, run and return a
+confident wrong number. Three ideas run through the rest of the course:
 
-**Valid SQL is not proof of correct business logic.** A query can compile, run, and return a
-confident wrong number because the agent joined at the wrong grain. The governed parts —
-RLS, the Model's own joins, formulas, calendars — the Model still guarantees. The agent-chosen
-parts are what a human (via keywords) must check. Three ideas follow from this, and the rest of
-the course is them in practice:
-
-1. **ThoughtSpot never executes AgentQL.** It is a **compile** step: AgentQL in, warehouse
-   SQL out, and the warehouse runs the SQL. `generate-sql` stops after compiling;
-   `fetch-data` compiles, sends the SQL to the warehouse and returns the rows.
+1. **ThoughtSpot never executes AgentQL.** It compiles AgentQL into warehouse SQL, and the
+   warehouse runs that SQL.
 2. **You query the Model, not the tables.** `FROM` names one Model, and every column is a
-   business name (`"t1"."sales"`). The Model knows the physical tables, the joins, the
-   formulas and the security rules. AgentQL reaches the data only through it.
-3. **That is the point.** Joins, row-level security and formula logic come from the Model,
-   so two people asking the same question get the same answer. A hand-written SQL query
-   gives no such guarantee. See `architecture.md` § "What the semantic layer guarantees".
-   **This is why every lesson shows the generated SQL** — it is where you *see* which
-   decisions the Model made for you (governed) and which the agent made (to be validated).
-
-#### One consistent experience
-
-Whichever language created the answer, the user gets the same ThoughtSpot experience:
-explore and visualise it, **verify it with keywords**, and pin it to Liveboards to share and
-monitor. AgentQL widens the question; the keyword experience keeps a human informed and in
-control.
+   business name such as `"t1"."sales"`.
+3. **That's what makes answers consistent.** The joins, row-level security (RLS) and formulas
+   come from the Model, so two people asking the same question get the same answer. That is why
+   every lesson shows the generated SQL: it shows which parts the Model decided and which parts
+   the agent decided.
 
 #### See it in three queries (optional — run these now)
 

@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-19
+- docs: ts-object-model-agentql-query 2.12.1 — pin the Module 0 concept explanation as show-verbatim text (plain-language rewrite) so it reads identically every run; course-wide rule that concept prose and each lesson's Point out / Key Findings are shown as-is
 - docs: ts-object-model-agentql-query 2.12.0 — consistent Learn AgentQL course messaging: a pinned verbatim opening message (determinism-forward definition + live/offline choice) plus every module opening with three pinned lines (Key takeaway · How determinism holds · Covers) shown verbatim, plus a Key takeaways review table collecting them, with "how deterministic SQL is maintained" as the throughline (Model-defined joins, AgentQL overriding the default join, Gregorian/fiscal/custom-4-4-5 calendars, determinism ≠ correct intent); SKILL.md intro replaced the SpotQL-rename banner with a determinism-forward definition
 - docs: ts-object-model-agentql-query 2.11.1 — rename "Token Search" to "Keyword Search" across the positioning (reserving "token" for AI spend / bearer-token auth); `references/beyond-tokens.md` → `references/beyond-keywords.md`
 
