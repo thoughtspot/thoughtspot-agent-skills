@@ -106,6 +106,7 @@ p { margin: 0; max-width: 62ch; }
 .feedback.miss { border-color: var(--blood); }
 .feedback .tag { color: var(--hot); letter-spacing: .08em; }
 .feedback.miss .tag { color: var(--blood); }
+.feedback.magic { border-color: var(--dim); }
 .choices { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .choices button {
   font: inherit;
@@ -211,13 +212,6 @@ const ART = {
       |  ~~~  |
       |_______|
          | |
-`,
-  grave: String.raw`
-       _____
-      /     \
-     | R.I.P |
-     |       |
-   __|_______|__
 `
 };
 
@@ -274,9 +268,10 @@ const Sound = (() => {
   }
   const EFFECTS = {
     coin: t => { tone(hz(83), t, 0.07); tone(hz(88), t + 0.07, 0.25); },                 // gold
-    hurt: t => { tone(220, t, 0.28, "sawtooth", 0.5, master, 60); tone(98, t + 0.04, 0.3, "square", 0.3, master, 50); },
+    steal: t => { [88, 83, 79, 76].forEach((n, i) => tone(hz(n), t + i * 0.06, 0.07, "square", 0.3));  // coins tumbling away
+                  tone(130, t + 0.26, 0.3, "sawtooth", 0.35, master, 65); },
+    magic: t => [84, 88, 91, 96, 91, 96].forEach((n, i) => tone(hz(n), t + i * 0.05, 0.18, "triangle", 0.35)),
     fanfare: t => [72, 76, 79, 84].forEach((n, i) => tone(hz(n), t + i * 0.11, i === 3 ? 0.5 : 0.12)),
-    fall: t => [67, 63, 60, 55].forEach((n, i) => tone(hz(n), t + i * 0.2, 0.24, "triangle", 0.6)),
     blip: t => tone(hz(81), t, 0.045, "square", 0.2)
   };
   // Original loops, written for this game: [MIDI note or 0 for a rest, beats].
@@ -333,27 +328,49 @@ const Sound = (() => {
   };
 })();
 
-const PLAYER_HP = 3;
+// ---- Gold: right answers earn it, wrong ones let the dragon take some, magic is free. -----------
+const GOLD_WIN = 10, GOLD_LOSS = 5;
 const LEGEND = `<div class="legend" aria-label="Who is who">
   <span><b>Wizard</b> = the AI</span><span><b>Scroll</b> = the AgentQL it wrote</span>
   <span><b>Forge</b> = ThoughtSpot + the Model</span><span><b>Dragon</b> = the SQL that runs</span></div>`;
 const RULE = `<div class="rule-card"><span class="hot">THE RULE OF THE FORGE</span>
   <p>If it's in your scroll, the AI asked for it, even when ThoughtSpot rewrites it. If it isn't, ThoughtSpot added it from the Model. The AI never writes the SQL that runs.</p></div>`;
+const GOLD_RULES = `Each right answer earns ${GOLD_WIN} gold. A wrong one costs ${GOLD_LOSS}, but never more than you carry, and you answer again. Invoke magic to see the answer: no gold won or lost.`;
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const bar = (n, max, on, off) => `<span class="bar">${on.repeat(n)}<span class="gone">${off.repeat(max - n)}</span></span>`;
 const art = (k, cls = "") => `<pre class="art ${cls}" aria-hidden="true">${esc(ART[k])}</pre>`;
 const isOn = (hl, i) => hl === "all" || hl.includes(i);
 
-function loadProgress() { try { return JSON.parse(localStorage.getItem("aqq-progress") || "{}"); } catch { return {}; } }
-function markDone(id) { try { const p = loadProgress(); p[id] = true; localStorage.setItem("aqq-progress", JSON.stringify(p)); } catch {} }
+// Most gold a realm can give: every question answered right first time.
+const questionsIn = r => r.trials.length + r.encounters.reduce((n, e) => n + e.points.length, 0);
+const maxGold = r => questionsIn(r) * GOLD_WIN;
+const OPEN = REALMS.filter(r => !r.sealed);
+const COURSE_MAX = OPEN.reduce((n, r) => n + maxGold(r), 0);
+
+// Progress per realm: { done, best }. Older saves stored `true`; read those as done with 0 gold.
+function loadProgress() {
+  try {
+    const raw = JSON.parse(localStorage.getItem("aqq-progress") || "{}");
+    return Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, v === true ? { done: true, best: 0 } : v]));
+  } catch { return {}; }
+}
+function finishRealm(id, gold) {
+  const p = loadProgress(), prev = p[id] || { done: false, best: 0 };
+  const record = gold > prev.best;
+  p[id] = { done: true, best: Math.max(prev.best, gold) };
+  try { localStorage.setItem("aqq-progress", JSON.stringify(p)); } catch {}
+  return record;
+}
+const treasury = () => Object.values(loadProgress()).reduce((n, v) => n + (v.best || 0), 0);
+const courseDone = () => { const p = loadProgress(); return OPEN.every(r => p[r.id] && p[r.id].done); };
 
 let state;
 let actions = [];
-const fresh = () => ({ screen: "title", realm: 0, enc: 0, step: 0, hp: PLAYER_HP, flash: null });
+const fresh = () => ({ screen: "title", realm: 0, enc: 0, step: 0, gold: 0, flash: null });
 const realm = () => REALMS[state.realm];
 const encounter = () => realm().encounters[state.enc];
-const firstDone = () => !!loadProgress()[REALMS[0].id] || !!state.firstDone;
+const firstDone = () => !!(loadProgress()[REALMS[0].id] || {}).done || !!state.firstDone;
 
 function choices(list) {
   actions = list.map(c => c.go);
@@ -373,15 +390,39 @@ function panes(e, p) {
     <span class="cap">Captured from generate-sql on (Sample) Retail - Apparel, ${esc(QUEST.captured)}. Lesson ${esc(e.lesson)}.</span></div>`;
 }
 
+// One answer, for a trial or a dragon scale. Right: +gold and move on. Wrong: the dragon takes
+// gold (never below 0) and you try again. Magic: the answer is shown, no gold either way.
+function answer(ok) {
+  if (ok) { state.gold += GOLD_WIN; Sound.play("coin"); state.flash = { kind: "win", amount: GOLD_WIN }; }
+  else {
+    const taken = Math.min(GOLD_LOSS, state.gold);
+    state.gold -= taken; Sound.play("steal"); state.flash = { kind: "loss", amount: taken };
+  }
+  render();
+}
+function magic() { Sound.play("magic"); state.flash = { kind: "magic", amount: 0 }; render(); }
+const MAGIC_LABEL = "Invoke magic: show me the answer (no gold won or lost)";
+
+function feedback(f, why, hint, correctText, court = false) {
+  if (f.kind === "win") return `<div class="feedback"><span class="tag">+${f.amount} GOLD</span><p>${esc(why)}</p></div>`;
+  if (f.kind === "magic") return `<div class="feedback magic"><span class="tag">THE MAGIC REVEALS IT</span>
+    <p>The answer: <span class="hot">${esc(correctText)}</span></p><p>${esc(why)}</p></div>`;
+  const who = court ? "THE COURT" : "THE DRAGON";
+  const took = f.amount ? (court ? `THE COURT FINES YOU ${f.amount} GOLD` : `THE DRAGON TAKES ${f.amount} GOLD`)
+                        : `${who} FINDS YOUR PURSE EMPTY`;
+  return `<div class="feedback miss"><span class="tag">${took}</span><p>${esc(hint)}</p></div>`;
+}
+
 const meta = r => `Module ${r.module} · ${r.depth} · about ${r.minutes} min`;
 const go = patch => () => { Sound.play("blip"); Object.assign(state, patch); render(); };
 const toMap = go({ screen: "map", flash: null });
+const goldTag = () => `<span><span class="lbl">GOLD</span> <span class="hot">${state.gold}</span></span>`;
 
 const SCREENS = {
   title() {
     return `${art("title", "hot")}
       <p>A text adventure about one idea: the AI understands your question and writes it as AgentQL, and ThoughtSpot compiles that AgentQL into the same governed SQL every time. A person checks the intent with keywords.</p>
-      <p class="dim">Seven realms, one for each module of the course. Everyone starts in the Kingdom of Law.</p>
+      <p class="dim">Seven realms, one for each module of the course. Everyone starts in the Kingdom of Law. Earn gold with right answers, and see how much you carry home.</p>
       ${choices([{ label: "Open the map", go: toMap }])}
       <p class="foot">Number keys or click to choose. S and M switch sound effects and music. <span class="cursor">&nbsp;</span><br>
         Part of the <a href="https://github.com/thoughtspot/thoughtspot-agent-skills/blob/main/agents/cli/ts-object-model-agentql-query/references/learning-path.md">Learn AgentQL course</a>
@@ -391,11 +432,16 @@ const SCREENS = {
     const done = loadProgress();
     const names = Object.fromEntries(REALMS.map(r => [r.id, r.name.replace(/^The /, "")]));
     const routes = QUEST.routes.map(rt => `<span><b>${esc(rt.who)}:</b> ${rt.path.map(id => esc(names[id] || id)).join(" → ")}</span>`).join("");
+    const purse = courseDone()
+      ? `<p class="hot">Course complete. Your high score: ${treasury()} of ${COURSE_MAX} gold.</p>`
+      : `<p><span class="lbl">YOUR TREASURY</span> <span class="hot">${treasury()}</span> <span class="dim">of ${COURSE_MAX} gold across the open realms (your best in each).</span></p>`;
     return `<h2>The map</h2>
       <pre class="art" aria-hidden="true">${esc(MAP)}</pre>
+      ${purse}
       <div class="routes"><span>Suggested routes, if you'd like one:</span>${routes}</div>
       ${choices(REALMS.map((r, i) => {
-        const mark = done[r.id] ? "  ✓" : r.sealed ? "  (not yet open)" : i === 0 ? "  (start here)" : !firstDone() ? "  (after Law)" : "";
+        const d = done[r.id];
+        const mark = d && d.done ? `  ✓ best ${d.best}/${maxGold(r)} gold` : r.sealed ? "  (not yet open)" : i === 0 ? "  (start here)" : !firstDone() ? "  (after Law)" : "";
         return { label: `${r.name}. ${meta(r)}${mark}`, go: go({ screen: "realm", realm: i, flash: null }) };
       }))}`;
   },
@@ -406,8 +452,9 @@ const SCREENS = {
       ${choices([{ label: "Back to the map", go: toMap }])}`;
     if (state.realm !== 0 && !firstDone()) return `${head}<p class="dim">The roads open once you have studied in ${esc(REALMS[0].name)}, the foundation every other realm builds on.</p>
       ${choices([{ label: `Travel to ${REALMS[0].name}`, go: go({ screen: "realm", realm: 0 }) }, { label: "Back to the map", go: toMap }])}`;
-    const enter = r.trials.length ? go({ screen: "scroll" }) : go({ screen: "encIntro", enc: 0, step: 0, hp: PLAYER_HP, flash: null });
-    return `${head}${choices([{ label: "Enter the realm", go: enter }, { label: "Back to the map", go: toMap }])}`;
+    const enter = r.trials.length ? go({ screen: "scroll", gold: 0 }) : go({ screen: "encIntro", enc: 0, step: 0, gold: 0, flash: null });
+    return `${head}<p class="dim">Up to ${maxGold(r)} gold to win here.</p>
+      ${choices([{ label: "Enter the realm", go: enter }, { label: "Back to the map", go: toMap }])}`;
   },
   scroll() {
     const r = realm(), s = r.scroll;
@@ -415,47 +462,41 @@ const SCREENS = {
       <tbody>${s.rows.map(row => `<tr><td>${esc(row.label)}</td>${row.cells.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
       <ul class="notes">${(s.notes || []).map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : "";
     return `<h2>The Scroll of Law</h2>${table}
-      <p class="dim">Study it. The court will test you on it next: ${r.trials.length} petitions, ${PLAYER_HP} crowns of trust.</p>
-      ${choices([{ label: "Take your seat at court", go: go({ screen: "trials", step: 0, hp: PLAYER_HP, flash: null }) }, { label: "Back to the map", go: toMap }])}`;
+      <p class="dim">Study it. The court will test you on it next: ${r.trials.length} petitions. ${esc(GOLD_RULES)}</p>
+      ${choices([{ label: "Take your seat at court", go: go({ screen: "trials", step: 0, gold: 0, flash: null }) }, { label: "Back to the map", go: toMap }])}`;
   },
   trials() {
     const r = realm();
     if (state.step >= r.trials.length) return SCREENS.decree();
     const t = r.trials[state.step];
-    const head = `<div class="status"><span class="lbl">${esc(r.name.toUpperCase())}</span>
-      <span><span class="lbl">TRUST</span> ${bar(state.hp, PLAYER_HP, "♛", "♛")}</span>
+    const head = `<div class="status"><span class="lbl">${esc(r.name.toUpperCase())}</span>${goldTag()}
       <span><span class="lbl">PETITION</span> ${state.step + 1}/${r.trials.length}</span></div>`;
     const intro = t.kind === "route" ? "A merchant asks which engine should answer this question:" : "A petitioner makes a claim before the court:";
     if (state.flash) {
-      const f = state.flash;
+      const f = state.flash, settled = f.kind !== "loss";
       return `${head}${art("crown")}<p class="hot">${esc(t.text)}</p>
-        <div class="feedback${f.ok ? "" : " miss"}"><span class="tag">${f.ok ? "WISELY JUDGED" : "THE COURT GASPS. -1 TRUST"}</span><p>${esc(t.why)}</p></div>
-        ${choices([{ label: state.hp === 0 ? "Face the consequences" : "Next petitioner", go: () => {
-          if (state.hp === 0) state.screen = "defeat"; else state.step++;
+        ${feedback(f, t.why, "Not quite. Think again about what the Scroll of Law says.", t.options[t.correct], true)}
+        ${choices([{ label: settled ? "Next petitioner" : "Judge again", go: () => {
+          if (settled) state.step++;
           state.flash = null; render();
         } }])}`;
     }
     return `${head}${art("crown")}<p>${intro}</p><p class="hot">${esc(t.text)}</p>
-      ${choices(t.options.map((o, i) => ({ label: o, go: () => {
-        const ok = i === t.correct;
-        Sound.play(ok ? "coin" : "hurt");
-        if (!ok) state.hp--;
-        state.flash = { ok }; render();
-      } })))}`;
+      ${choices([...t.options.map((o, i) => ({ label: o, go: () => answer(i === t.correct) })), { label: MAGIC_LABEL, go: magic }])}`;
   },
   decree() {
     const r = realm();
-    markDone(r.id); state.firstDone = state.firstDone || state.realm === 0;
+    const record = finishRealm(r.id, state.gold); state.firstDone = state.firstDone || state.realm === 0;
     Sound.play("fanfare");
     return `${art("crown", "hot")}<h2>Royal decree</h2>
-      <p>Court is adjourned with ${state.hp} of ${PLAYER_HP} trust intact. Let it be known across the realms:</p>
+      <p>Court is adjourned. You carry <span class="hot">${state.gold} of ${maxGold(r)} gold</span> from ${esc(r.name)}${record ? ", your best here yet" : ""}. Let it be known across the realms:</p>
       ${r.decree.map((d, i) => `<p>${i + 1}. ${esc(d)}</p>`).join("")}
       <p class="dim">The roads to the other realms are open.</p>
       ${choices([{ label: "Back to the map", go: toMap }])}`;
   },
   encIntro() {
     const r = realm(), e = encounter();
-    return `<p class="realm-meta">${esc(r.name)} · dragon ${state.enc + 1} of ${r.encounters.length}</p>${art("wizard")}
+    return `<p class="realm-meta">${esc(r.name)} · dragon ${state.enc + 1} of ${r.encounters.length} · gold ${state.gold}</p>${art("wizard")}
       <p>A merchant brings a quest: <span class="hot">"${esc(e.quest)}"</span></p>
       <p>The <span class="hot">Wizard</span> is the AI. His only job is to understand what the merchant meant and write it down. ${esc(e.whyAgentql)} In this game, his AgentQL is your <span class="hot">scroll</span>:</p>
       ${code(e.agentql, [], "agent", "Your AgentQL")}
@@ -467,60 +508,46 @@ const SCREENS = {
       <p>The Forge is ThoughtSpot. It never runs the scroll. It compiles it against the Model's rules into warehouse SQL.</p>
       <p>The fire roars, and from it rises a dragon made of SQL. Each scale is a line of that SQL. Say who put it there, and the scale breaks.</p>
       ${LEGEND}${RULE}
-      <p class="dim">This dragon: ${e.points.length} scales. You: ${PLAYER_HP} hearts. A wrong guess costs a heart. Your scroll stays on screen for every round.</p>
-      ${choices([{ label: "Draw your weapon", go: go({ screen: "battle", step: 0, hp: PLAYER_HP, flash: null }) }])}`;
+      <p class="dim">This dragon: ${e.points.length} scales. ${esc(GOLD_RULES)} Your scroll stays on screen for every round.</p>
+      ${choices([{ label: "Draw your weapon", go: go({ screen: "battle", step: 0, flash: null }) }])}`;
   },
   battle() {
     const r = realm(), e = encounter(), q = e.points[state.step];
-    const head = `<div class="status"><span><span class="lbl">YOU</span> ${bar(state.hp, PLAYER_HP, "♥", "♥")}</span>
+    const head = `<div class="status">${goldTag()}
       <span><span class="lbl">DRAGON ${state.enc + 1}/${r.encounters.length}</span> ${bar(e.points.length - state.step, e.points.length, "█", "░")}</span></div>${LEGEND}`;
     if (state.flash) {
-      const f = state.flash;
+      const f = state.flash, settled = f.kind !== "loss";
       const last = state.step + 1 >= e.points.length;
       return `${head}${panes(e, q)}
-        <div class="feedback${f.ok ? "" : " miss"}"><span class="tag">${f.ok ? "*CLANG* THE SCALE BREAKS" : "THE DRAGON BURNS YOU. -1 HEART"}</span><p>${esc(f.ok ? q.lesson : q.hint)}</p></div>
-        ${choices([{ label: f.ok ? (last ? "Watch the dragon fall" : "Next scale") : state.hp === 0 ? "Fall" : "Try again", go: () => {
-          if (state.hp === 0) state.screen = "defeat";
-          else if (f.ok) { state.step++; if (state.step >= e.points.length) state.screen = "victory"; }
+        ${feedback(f, q.lesson, q.hint, q.options[q.correct])}
+        ${choices([{ label: !settled ? "Try again" : last ? "Watch the dragon fall" : "Next scale", go: () => {
+          if (settled) { state.step++; if (state.step >= e.points.length) state.screen = "victory"; }
           state.flash = null; render();
         } }])}`;
     }
     return `${head}${state.step === 0 ? art("dragon") : ""}${panes(e, q)}
       <p>${esc(q.ask)}</p>
-      ${choices(q.options.map((o, i) => ({ label: o, go: () => {
-        const ok = i === q.correct;
-        Sound.play(ok ? "coin" : "hurt");
-        if (!ok) state.hp--;
-        state.flash = { ok }; render();
-      } })))}`;
+      ${choices([...q.options.map((o, i) => ({ label: o, go: () => answer(i === q.correct) })), { label: MAGIC_LABEL, go: magic }])}`;
   },
   victory() {
     const r = realm(), e = encounter();
     const more = state.enc + 1 < r.encounters.length;
-    if (!more) markDone(r.id);
+    const record = more ? false : finishRealm(r.id, state.gold);
     Sound.play("fanfare");
     return `${art("banner", "hot")}<h2>The dragon falls</h2>
-      <p>You finish with ${state.hp} of ${PLAYER_HP} hearts.</p>
       <p class="hot">${esc(e.loot)}</p>
       <p>${esc(e.takeaway)}</p>
       ${more
-        ? `<p class="dim">Another dragon stirs deeper in ${esc(r.name)}.</p>` + choices([
-            { label: "Face the next dragon", go: go({ screen: "encIntro", enc: state.enc + 1, step: 0, hp: PLAYER_HP, flash: null }) },
+        ? `<p>You carry <span class="hot">${state.gold} gold</span> so far. Another dragon stirs deeper in ${esc(r.name)}.</p>` + choices([
+            { label: "Face the next dragon", go: go({ screen: "encIntro", enc: state.enc + 1, step: 0, flash: null }) },
             { label: "Back to the map", go: toMap }])
-        : `<p class="dim">${esc(r.name)} is cleared.</p>` + choices([{ label: "Back to the map", go: toMap }, { label: "Fight this dragon again", go: go({ screen: "forge" }) }])}`;
-  },
-  defeat() {
-    const court = realm().trials.length > 0;
-    Sound.play("fall");
-    return `${art("grave")}
-      <h2>${court ? "The court loses faith" : "You have fallen"}</h2>
-      <p>${court ? "Too many claims were judged wrongly." : "The dragon's pattern never changes, because the Forge always compiles the same scroll into the same SQL."} Learn it and return.</p>
-      ${choices([{ label: "Try again", go: go(court ? { screen: "scroll", hp: PLAYER_HP, step: 0, flash: null } : { screen: "forge" }) }, { label: "Back to the map", go: toMap }])}`;
+        : `<p>${esc(r.name)} is cleared. You carry home <span class="hot">${state.gold} of ${maxGold(r)} gold</span>${record ? ", your best here yet" : ""}.</p>` +
+          choices([{ label: "Back to the map", go: toMap }, { label: "Play this realm again", go: go({ screen: "encIntro", enc: 0, step: 0, gold: 0, flash: null }) }])}`;
   }
 };
 
 const MUSIC_FOR = { scroll: "court", trials: "court", decree: "court", encIntro: "battle", forge: "battle",
-                    battle: "battle", victory: "battle", defeat: "battle" };
+                    battle: "battle", victory: "battle" };
 
 function render() {
   const el = document.getElementById("screen");
