@@ -102,21 +102,33 @@ SELECT SUM("t1"."revenue") AS s FROM "(Sample) Retail - Apparel" AS "t1"
 **AgentQL**
 
 ```sql
-SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1" WHERE "t1"."product" IN (SELECT "t2"."product" FROM "(Sample) Retail - Apparel" AS "t2" WHERE "t2"."item type" = 'Jackets')
+SELECT "t1"."region" AS x FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region" UNION ALL SELECT SUM("t1"."sales") AS x FROM "(Sample) Retail - Apparel" AS "t1"
 ```
 
 **Generated SQL** (`status: SUCCESS`)
 
 ```sql
-SELECT CASE
-  WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES")
-  ELSE 0
-END "ca_1"
-FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_1"
-  JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_2"
-    ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
-WHERE "ta_2"."PRODUCTNAME" in (select "t2".product from (sample) retail - apparel "t2" where "t2".item type = 'Jackets')
-LIMIT 100000
+WITH 
+  "qt_0" AS (
+    SELECT "ta_1"."REGION" "ca_1"
+    FROM "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_STORES" "ta_1"
+    GROUP BY "ca_1"
+  ), 
+  "qt_1" AS (
+    SELECT CASE
+      WHEN sum("ta_2"."SALES") IS NOT NULL THEN sum("ta_2"."SALES")
+      ELSE 0
+    END "ca_2"
+    FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_2"
+  )
+(
+  SELECT *
+  FROM "qt_0"
+)
+UNION ALL (
+  SELECT *
+  FROM "qt_1"
+)
 ```
 
 ---

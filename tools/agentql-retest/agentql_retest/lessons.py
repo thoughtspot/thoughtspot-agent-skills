@@ -200,8 +200,7 @@ LESSON_CASES = [
     Case("l1_unknown_column", f'SELECT SUM("t1"."revenue") AS s {F}', GEN_ERROR,
          L + "1.2 a rejected query is a structured error", model="apparel", code="COLUMN_NOT_FOUND"),
     Case("l1_compiles_then_fails",
-         f'SELECT SUM({SALES}) AS s {F} WHERE "t1"."product" IN '
-         f'(SELECT "t2"."product" FROM "{SAMPLE_MODEL}" AS "t2" WHERE "t2"."item type" = \'Jackets\')',
+         f'SELECT {REGION} AS x {F} GROUP BY {REGION} UNION ALL SELECT SUM({SALES}) AS x {F}',
          FETCH_ERROR,
          L + "1.3 generate-sql SUCCESS is not proof the query runs", model="apparel",
          code="QUERY_EXECUTION_FAILED"),

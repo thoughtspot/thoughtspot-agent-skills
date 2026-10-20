@@ -289,21 +289,24 @@ SELECT SUM("t1"."revenue") AS s FROM "(Sample) Retail - Apparel" AS "t1"
 
 ### 1.3 `generate-sql` SUCCESS is not proof the query runs
 
+A `UNION ALL` that accidentally stacks a **text** column (region names) on a **number** (total sales):
+
 ```sql
-SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
-WHERE "t1"."product" IN (
-  SELECT "t2"."product" FROM "(Sample) Retail - Apparel" AS "t2" WHERE "t2"."item type" = 'Jackets')
+SELECT "t1"."region" AS x FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region"
+UNION ALL
+SELECT SUM("t1"."sales") AS x FROM "(Sample) Retail - Apparel" AS "t1"
 ```
 
 **Predict.** Will this compile? Will it run?
 
-**Point out.** It compiles (`SUCCESS`) — `generate-sql` returns warehouse SQL — but `fetch-data`
-fails (`QUERY_EXECUTION_FAILED`, a SQL compilation error): the `IN (SELECT …)` subquery is
-passed through untranslated and the warehouse rejects it
-([SCAL-326936](https://thoughtspot.atlassian.net/browse/SCAL-326936)). A green `generate-sql`
-means *valid AgentQL*, not *runs successfully* — a query is not proven until `fetch-data` returns
-rows. The fix is a CTE semi-join (see [`beyond-keywords.md`](beyond-keywords.md) and
-`patterns.md`); `limitations.md` lists the compile-then-fail cases.
+**Point out.** It compiles (`SUCCESS`) — `generate-sql` returns warehouse SQL (two CTEs unioned) —
+but `fetch-data` fails (`QUERY_EXECUTION_FAILED`): the two branches don't line up — one returns
+region names, the other a number — and the warehouse can't cast `'Midwest'` into the numeric union
+column (*"Numeric value 'Midwest' is not recognized"*). This is **not a ThoughtSpot bug that will be
+fixed** — the warehouse is correctly refusing a query whose own column types conflict, something
+neither AgentQL nor the compiler can catch because it surfaces only when the rows are read. A green
+`generate-sql` means *valid AgentQL*, not *runs successfully* — a query is not proven until
+`fetch-data` returns rows. `limitations.md` lists the compile-then-fail cases.
 
 **Guarded by:** `l1_compiles_then_fails`.
 

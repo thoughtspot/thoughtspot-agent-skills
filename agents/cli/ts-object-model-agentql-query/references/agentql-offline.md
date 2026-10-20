@@ -371,6 +371,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.18.2 | 2026-10-20 | **Lesson 1.3 now uses a durable failure, not a bug.** Replaced the "compiles, then fails" example (an `IN (SELECT …)` subquery, tracked as bug SCAL-326936 and likely to be fixed) with a `UNION ALL` whose branches have mismatched column types (text region names stacked on a numeric total) — it compiles but the warehouse correctly rejects it at `fetch-data` (*"Numeric value 'Midwest' is not recognized"*). That failure is not a ThoughtSpot bug and will never be "resolved", so the lesson's point — a green `generate-sql` is not proof the query runs — stays valid. Live-verified; captured SQL regenerated. |
 | 2.18.1 | 2026-10-20 | **Two cut-lesson behaviours kept under live test.** Moved the `GROUP BY <ordinal>` rejection and the "dates return as epoch seconds" result-format assertion out of the trimmed course and into the `agentql-retest` **limitations** suite (live-verified on the Dunder Mifflin demo Model). Documented the epoch-seconds return format in `limitations.md` (*Not bugs*). The other two trim-removed behaviours (`DATE_TRUNC` rejection, aggregate-in-`WHERE`→`HAVING`) were already covered by that suite. |
 | 2.18.0 | 2026-10-20 | **Leaner course: 39 → 21 lessons (~3–4 per module).** Trimmed Learn AgentQL to focus on *understanding* AgentQL and deterministic results rather than hand-writing it. Removed **Module 7** (Building on it) and the SQL-syntax-practice lessons (top-N, string functions, date literals, set-op mechanics, `AVG` grain, which-tables, lenient parser, bare-measure, two-dim joins, counting-as-its-own-lesson); kept the two-API basics, the determinism/governance showcases (RLS, custom calendar, join types), the key traps, and the whole *Trust, but verify* module. Lessons renumbered sequentially, and the cut lessons' cases are removed from the `agentql-retest` lessons suite too (that suite backs the course 1:1). |
 | 2.17.1 | 2026-10-20 | **Join-type lesson (2.9) now live-verified.** Replaced the illustrative join-type SQL with real captures from a Model configured with three join types — Sales→Product `LEFT OUTER`, Sales→Customer `RIGHT OUTER`, Sales→Date `FULL OUTER` — showing the same grouped AgentQL compiling to each, and one query mixing LEFT+RIGHT across dimensions. The agent never writes `JOIN`; the generated SQL carries exactly the Model's configured type. |
@@ -1931,21 +1932,24 @@ SELECT SUM("t1"."revenue") AS s FROM "(Sample) Retail - Apparel" AS "t1"
 
 #### 1.3 `generate-sql` SUCCESS is not proof the query runs
 
+A `UNION ALL` that accidentally stacks a **text** column (region names) on a **number** (total sales):
+
 ```sql
-SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1"
-WHERE "t1"."product" IN (
-  SELECT "t2"."product" FROM "(Sample) Retail - Apparel" AS "t2" WHERE "t2"."item type" = 'Jackets')
+SELECT "t1"."region" AS x FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region"
+UNION ALL
+SELECT SUM("t1"."sales") AS x FROM "(Sample) Retail - Apparel" AS "t1"
 ```
 
 **Predict.** Will this compile? Will it run?
 
-**Point out.** It compiles (`SUCCESS`) — `generate-sql` returns warehouse SQL — but `fetch-data`
-fails (`QUERY_EXECUTION_FAILED`, a SQL compilation error): the `IN (SELECT …)` subquery is
-passed through untranslated and the warehouse rejects it
-([SCAL-326936](https://thoughtspot.atlassian.net/browse/SCAL-326936)). A green `generate-sql`
-means *valid AgentQL*, not *runs successfully* — a query is not proven until `fetch-data` returns
-rows. The fix is a CTE semi-join (see [`beyond-keywords.md`](beyond-keywords.md) and
-`patterns.md`); `limitations.md` lists the compile-then-fail cases.
+**Point out.** It compiles (`SUCCESS`) — `generate-sql` returns warehouse SQL (two CTEs unioned) —
+but `fetch-data` fails (`QUERY_EXECUTION_FAILED`): the two branches don't line up — one returns
+region names, the other a number — and the warehouse can't cast `'Midwest'` into the numeric union
+column (*"Numeric value 'Midwest' is not recognized"*). This is **not a ThoughtSpot bug that will be
+fixed** — the warehouse is correctly refusing a query whose own column types conflict, something
+neither AgentQL nor the compiler can catch because it surfaces only when the rows are read. A green
+`generate-sql` means *valid AgentQL*, not *runs successfully* — a query is not proven until
+`fetch-data` returns rows. `limitations.md` lists the compile-then-fail cases.
 
 **Guarded by:** `l1_compiles_then_fails`.
 
@@ -2735,21 +2739,33 @@ SELECT SUM("t1"."revenue") AS s FROM "(Sample) Retail - Apparel" AS "t1"
 **AgentQL**
 
 ```sql
-SELECT SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1" WHERE "t1"."product" IN (SELECT "t2"."product" FROM "(Sample) Retail - Apparel" AS "t2" WHERE "t2"."item type" = 'Jackets')
+SELECT "t1"."region" AS x FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region" UNION ALL SELECT SUM("t1"."sales") AS x FROM "(Sample) Retail - Apparel" AS "t1"
 ```
 
 **Generated SQL** (`status: SUCCESS`)
 
 ```sql
-SELECT CASE
-  WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES")
-  ELSE 0
-END "ca_1"
-FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_1"
-  JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_2"
-    ON "ta_1"."PRODUCTID" = "ta_2"."PRODUCTID"
-WHERE "ta_2"."PRODUCTNAME" in (select "t2".product from (sample) retail - apparel "t2" where "t2".item type = 'Jackets')
-LIMIT 100000
+WITH 
+  "qt_0" AS (
+    SELECT "ta_1"."REGION" "ca_1"
+    FROM "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_STORES" "ta_1"
+    GROUP BY "ca_1"
+  ), 
+  "qt_1" AS (
+    SELECT CASE
+      WHEN sum("ta_2"."SALES") IS NOT NULL THEN sum("ta_2"."SALES")
+      ELSE 0
+    END "ca_2"
+    FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_2"
+  )
+(
+  SELECT *
+  FROM "qt_0"
+)
+UNION ALL (
+  SELECT *
+  FROM "qt_1"
+)
 ```
 
 ---
