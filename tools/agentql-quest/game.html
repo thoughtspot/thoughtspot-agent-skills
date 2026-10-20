@@ -74,7 +74,8 @@ p { margin: 0; max-width: 62ch; }
 .art {
   margin: 0;
   font-family: var(--font-game);
-  font-size: 20px;
+  /* Shrinks to fit narrow screens: a VT323 cell is about half its height wide. */
+  font-size: min(20px, calc((100vw - 76px) / (var(--cols, 40) * 0.5)));
   line-height: 1.05;
   white-space: pre;
   overflow-x: auto;
@@ -142,6 +143,8 @@ p { margin: 0; max-width: 62ch; }
 .routes { display: grid; gap: 2px; font-size: 18px; color: var(--dim); }
 .routes b { font-weight: 400; color: var(--hot); }
 .notes { display: grid; gap: 8px; margin: 0; padding-left: 1.2em; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.soon { color: var(--hot); letter-spacing: .04em; }
 .sound { display: flex; flex-wrap: wrap; gap: 4px 16px; justify-content: flex-end; padding: 0 24px 14px; position: relative; z-index: 1; }
 .sound button { font: inherit; font-size: 17px; color: var(--dim); background: transparent; border: 1px solid var(--rule); padding: 2px 10px; cursor: pointer; }
 .sound button[aria-pressed="true"] { color: var(--phosphor); border-color: var(--dim); }
@@ -149,7 +152,12 @@ p { margin: 0; max-width: 62ch; }
 @media (max-width: 520px) {
   body { font-size: 20px; padding-block: 12px; }
   .screen { padding: 16px 14px 20px; }
-  .art { font-size: 16px; }
+  .law thead { display: none; }
+  .law, .law tbody, .law tr, .law td { display: block; width: 100%; }
+  .law tr { padding: 8px 0; border-bottom: 1px dashed var(--rule); }
+  .law td { border: 0; padding: 2px 0; }
+  .law td:first-child { color: var(--hot); min-width: 0; }
+  .law td[data-col]::before { content: attr(data-col) ": "; color: var(--dim); }
 }
 .flame { color: var(--hot); animation: flicker 1.3s steps(2) infinite; }
 .flame.b { animation-delay: .45s; }
@@ -167,7 +175,8 @@ p { margin: 0; max-width: 62ch; }
 </style>
 </head>
 <body>
-<div class="monitor"><main class="screen" id="screen" aria-live="polite"></main>
+<p class="sr-only" id="live" aria-live="polite"></p>
+<div class="monitor"><main class="screen" id="screen"></main>
   <div class="sound" role="group" aria-label="Sound">
     <button type="button" id="sound-sfx" aria-pressed="true"></button>
     <button type="button" id="sound-music" aria-pressed="false"></button>
@@ -265,7 +274,7 @@ function hallScene(title, petitioning) {
     "_|#|_" + "_".repeat(W - 10) + "_|#|_",
     ...crowd.map(pad)
   ];
-  return `<pre class="art scene" aria-hidden="true">${lines.map(l => esc(l)
+  return `<pre class="art scene" style="--cols:${W}" aria-hidden="true">${lines.map(l => esc(l)
     // Private-use markers, so no letter in a hall's name can turn into a torch or a crown.
     .replace("\uE000", '<span class="flame">*</span>').replace("\uE001", '<span class="flame b">*</span>')
     .replace("\uE002", '<span class="hot crown">W</span>')).join("\n")}</pre>`;  // one cell wide, unlike ♛
@@ -330,7 +339,7 @@ function realmScene(r) {
   const out = lines.flatMap(l => l === "@BANNER" ? banner.map(b => esc(b))
     : [l.startsWith("!") ? `<span class="shimmer">${esc(l.slice(1))}</span>`
        : esc(l).replace(/\$/g, '<span class="flame">*</span>').replace(/%/g, '<span class="flame b">*</span>')]);
-  return `<pre class="art scene" aria-hidden="true">${out.join("\n")}</pre>`;
+  return `<pre class="art scene" style="--cols:${W}" aria-hidden="true">${out.join("\n")}</pre>`;
 }
 
 const MAP = (() => {
@@ -352,15 +361,18 @@ const Sound = (() => {
   let track = null, want = null, timer = null, lead = { i: 0, t: 0 }, bass = { i: 0, t: 0 };
   const hz = n => 440 * Math.pow(2, (n - 69) / 12);          // MIDI note number to frequency
 
+  let broken = false;                                        // audio failed once: stay silent
   function ensure() {
-    if (!AC || !unlocked) return false;
-    if (!ctx) {
-      ctx = new AC();
-      master = ctx.createGain(); master.gain.value = 0.16; master.connect(ctx.destination);
-      musicBus = ctx.createGain(); musicBus.gain.value = 0.45; musicBus.connect(master);
-    }
-    if (ctx.state === "suspended") ctx.resume();
-    return true;
+    if (!AC || !unlocked || broken) return false;
+    try {
+      if (!ctx) {
+        ctx = new AC();
+        master = ctx.createGain(); master.gain.value = 0.16; master.connect(ctx.destination);
+        musicBus = ctx.createGain(); musicBus.gain.value = 0.45; musicBus.connect(master);
+      }
+      if (ctx.state === "suspended") ctx.resume();
+      return true;
+    } catch { broken = true; return false; }
   }
   function tone(freq, at, dur, type = "square", vol = 0.5, dest = master, slideTo = 0) {
     const o = ctx.createOscillator(), g = ctx.createGain();
@@ -420,9 +432,9 @@ const Sound = (() => {
   }
   return {
     prefs,
-    unlock() { unlocked = true; startMusic(want); },
-    play(name) { if (prefs.sfx && ensure()) EFFECTS[name](ctx.currentTime + 0.01); },
-    music(name) { want = name; startMusic(name); },
+    unlock() { unlocked = true; try { startMusic(want); } catch { broken = true; } },
+    play(name) { try { if (prefs.sfx && ensure()) EFFECTS[name](ctx.currentTime + 0.01); } catch { broken = true; } },
+    music(name) { want = name; try { startMusic(name); } catch { broken = true; } },
     toggle(which) {
       prefs[which] = !prefs[which]; save(); label();
       if (which === "music") startMusic(want);
@@ -436,17 +448,18 @@ const Sound = (() => {
 
 // ---- Gold: right answers earn it, wrong ones cost some, magic is free. -------------------------
 const GOLD_WIN = 10, GOLD_LOSS = 5;
-const DETERMINISM = "So the same AgentQL always compiles to the same SQL.";
+const DETERMINISM = "So the same AgentQL, on the same Model, for the same user, always compiles to the same SQL.";
 const LEGEND = `<div class="legend" aria-label="Who is who">
   <span><b>Wizard</b> = the AI</span><span><b>Scroll</b> = the AgentQL it wrote</span>
   <span><b>Forge</b> = ThoughtSpot + the Model</span><span><b>Dragon</b> = the SQL that runs</span></div>`;
 const RULE = `<div class="rule-card"><span class="hot">THE RULE OF THE FORGE</span>
-  <p>If it's in your scroll, the AI asked for it, even when ThoughtSpot rewrites it. If it isn't, ThoughtSpot added it from the Model. The AI never writes the SQL that runs.</p></div>`;
+  <p>Whatever the Forge adds or changes is the Forge's: tables, joins and keys, column names, null guards, LOWER(), the row cap. A shape your scroll asked for, and the SQL keeps, is yours: an outer join, two steps, a ranking. The Wizard only writes the scroll. ThoughtSpot compiles the SQL that runs.</p></div>`;
 const GOLD_RULES = `Each right answer earns ${GOLD_WIN} gold. A wrong one costs ${GOLD_LOSS}, but never more than you carry, and you answer again. Invoke magic to see the answer: no gold won or lost.`;
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const bar = (n, max, on, off) => `<span class="bar">${on.repeat(n)}<span class="gone">${off.repeat(max - n)}</span></span>`;
-const art = (k, cls = "") => `<pre class="art ${cls}" aria-hidden="true">${esc(ART[k])}</pre>`;
+const cols = t => Math.max(...String(t).split("\n").map(l => l.length));
+const art = (k, cls = "") => `<pre class="art ${cls}" style="--cols:${cols(ART[k])}" aria-hidden="true">${esc(ART[k])}</pre>`;
 const isOn = (hl, i) => hl === "all" || hl.includes(i);
 
 // Most gold a realm can give: every question answered right first time.
@@ -456,11 +469,21 @@ const OPEN = REALMS.filter(r => !r.sealed);
 const COURSE_MAX = OPEN.reduce((n, r) => n + maxGold(r), 0);
 
 // Progress per realm: { done, best }. Older saves stored `true`; read those as done with 0 gold.
+// Saves come from the player's browser, so treat them as untrusted: only known realms, `best` as a
+// whole number between 0 and the realm's maximum. Older saves stored `true`: done with 0 gold.
 function loadProgress() {
-  try {
-    const raw = JSON.parse(localStorage.getItem("aqq-progress") || "{}");
-    return Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, v === true ? { done: true, best: 0 } : v]));
-  } catch { return {}; }
+  let raw = {};
+  try { raw = JSON.parse(localStorage.getItem("aqq-progress") || "{}") || {}; } catch { return {}; }
+  const out = {};
+  for (const r of REALMS) {
+    const v = raw[r.id];
+    if (v === true) out[r.id] = { done: true, best: 0 };
+    else if (v && typeof v === "object") {
+      const b = Math.floor(Number(v.best));
+      out[r.id] = { done: !!v.done, best: Number.isFinite(b) ? Math.max(0, Math.min(b, maxGold(r))) : 0 };
+    }
+  }
+  return out;
 }
 function finishRealm(id, gold) {
   const p = loadProgress(), prev = p[id] || { done: false, best: 0 };
@@ -469,7 +492,7 @@ function finishRealm(id, gold) {
   try { localStorage.setItem("aqq-progress", JSON.stringify(p)); } catch {}
   return record;
 }
-const treasury = () => Object.entries(loadProgress()).reduce((n, [id, v]) => n + (OPEN.some(r => r.id === id) ? v.best || 0 : 0), 0);
+const treasury = () => Object.entries(loadProgress()).reduce((n, [id, v]) => n + (OPEN.some(r => r.id === id) ? v.best : 0), 0);
 const courseDone = () => { const p = loadProgress(); return OPEN.every(r => p[r.id] && p[r.id].done); };
 
 let state;
@@ -488,13 +511,18 @@ function choices(list) {
 }
 
 function code(lines, hl, cls, label) {
-  return `<pre class="scroll" aria-label="${esc(label)}">${lines.map((l, i) =>
-    `<span class="ln ${cls}${isOn(hl, i) ? " on" : ""}">${esc(l)}</span>`).join("")}</pre>`;
+  return `<div class="sr-only">${esc(label)}:</div><pre class="scroll">${lines.map((l, i) =>
+    `<span class="ln ${cls}${isOn(hl, i) ? " on" : ""}">${isOn(hl, i) ? '<span class="sr-only">Highlighted: </span>' : ""}${esc(l)}</span>`).join("")}</pre>`;
 }
 
+function cell(c) {
+  const m = /^(.*?)(Coming soon:)(.*)$/.exec(c);
+  return m ? `${esc(m[1])}<span class="soon">${esc(m[2])}</span>${esc(m[3])}` : esc(c);
+}
 function table(columns, rows) {
   return `<div class="law-wrap"><table class="law"><thead><tr><th></th>${columns.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>
-    <tbody>${rows.map(row => `<tr><td>${esc(row.label)}</td>${row.cells.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    <tbody>${rows.map(row => `<tr><td>${esc(row.label)}</td>${row.cells.map((c, i) =>
+      `<td data-col="${esc(columns[i] || "")}">${cell(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 
 function panes(e, p) {
@@ -517,7 +545,11 @@ function magic() { Sound.play("magic"); state.flash = { kind: "magic", amount: 0
 const MAGIC_LABEL = "Invoke magic: show me the answer (no gold won or lost)";
 const settled = f => f.kind === "win" || f.kind === "magic";
 
+function announce(t) { const el = document.getElementById("live"); if (el) el.textContent = t; }
+
 function feedback(f, why, hint, correctText, court = false) {
+  announce(f.kind === "win" ? `Right. Plus ${f.amount} gold. ${why}` : f.kind === "magic" ? `The answer: ${correctText}. ${why}`
+           : f.kind === "blocked" ? `This path is closed here. ${hint}` : `Not quite. ${hint}`);
   if (f.kind === "win") return `<div class="feedback"><span class="tag">+${f.amount} GOLD</span><p>${esc(why)}</p></div>`;
   if (f.kind === "magic") return `<div class="feedback magic"><span class="tag">THE MAGIC REVEALS IT</span>
     <p>The answer: <span class="hot">${esc(correctText)}</span></p><p>${esc(why)}</p></div>`;
@@ -535,8 +567,8 @@ const goldTag = () => `<span><span class="lbl">GOLD</span> <span class="hot">${s
 
 const SCREENS = {
   title() {
-    return `${art("title", "hot")}
-      <p>A text adventure about one idea: the AI understands your question and writes it as AgentQL, and ThoughtSpot compiles that AgentQL into the same governed SQL every time. A person checks the intent with keywords.</p>
+    return `<h1 class="sr-only">AgentQL Quest</h1>${art("title", "hot")}
+      <p>A text adventure about one idea: the AI understands your question and writes it as AgentQL, and ThoughtSpot compiles that AgentQL into governed SQL, the same way every time.</p>
       <p class="dim">Start in the Kingdom of Law, then take a quest in any realm. Each takes a few minutes. Earn gold with right answers.</p>
       ${choices([{ label: "Open the map", go: toMap }])}
       <p class="foot">Number keys or click to choose. S and M switch sound effects and music. <span class="cursor">&nbsp;</span><br>
@@ -551,7 +583,7 @@ const SCREENS = {
       ? `<p class="hot">Course complete. Your high score: ${treasury()} of ${COURSE_MAX} gold.</p>`
       : `<p><span class="lbl">YOUR TREASURY</span> <span class="hot">${treasury()}</span> <span class="dim">of ${COURSE_MAX} gold (your best in each realm).</span></p>`;
     return `<h2>The map</h2>
-      <pre class="art" aria-hidden="true">${esc(MAP)}</pre>
+      <pre class="art" style="--cols:${cols(MAP)}" aria-hidden="true">${esc(MAP)}</pre>
       ${purse}
       <div class="routes"><span>Suggested routes, if you'd like one:</span>${routes}</div>
       ${choices(REALMS.map((r, i) => {
@@ -612,7 +644,7 @@ const SCREENS = {
     return `${art("crown", "hot")}<h2>Royal decree</h2>
       <p>You carry <span class="hot">${state.gold} of ${maxGold(r)} gold</span> from ${esc(r.name)}${record ? ", your best here yet" : ""}. Let it be known across the realms:</p>
       ${r.decree.map((d, i) => `<p>${i + 1}. ${esc(d)}</p>`).join("")}
-      <p class="dim">The Scroll of Law, everything from the four halls in one place:</p>
+      <p class="dim">The Scroll of Law: the whole comparison in one place.</p>
       ${r.scroll ? table(r.scroll.columns, r.scroll.rows) : ""}
       <p class="dim">The roads to the other realms are open.</p>
       ${choices([{ label: "Back to the map", go: toMap }])}`;
@@ -679,7 +711,7 @@ const SCREENS = {
     return `${realmScene(r)}<h2>The dragon falls</h2>
       <p>You carry home <span class="hot">${state.gold} of ${maxGold(r)} gold</span>${record ? ", your best here yet" : ""}.</p>
       <p class="lbl">DETERMINISTIC RULES UNCOVERED</p>
-      <p class="dim">Added by the Model and ThoughtSpot, not by the AI. The same rules, applied the same way, to every query.</p>
+      <p class="dim">Added by the Model and ThoughtSpot, not by the AI, and applied the same way every time this AgentQL compiles.</p>
       <ul class="rules">${rules.map(item).join("")}</ul>
       ${yours.length ? `<p class="lbl">YOUR PART, IN THE AGENTQL</p><ul class="rules">${yours.map(item).join("")}</ul>` : ""}
       <p class="verdict">${esc(DETERMINISM)}</p>
@@ -706,7 +738,7 @@ document.addEventListener("click", e => {
   if (b) actions[+b.dataset.i]?.();
 });
 document.addEventListener("keydown", e => {
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;   // holding a key must not skip explanations
   Sound.unlock();
   const k = (e.key || "").toLowerCase();
   if (k === "s") { e.preventDefault(); return Sound.toggle("sfx"); }

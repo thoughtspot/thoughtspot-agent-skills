@@ -337,7 +337,7 @@ def test_course_refs_in_the_committed_encounters_are_current(doc, course):
 
 
 def test_each_encounter_names_the_lesson_that_guards_its_case(doc, course):
-    _, lessons = course
+    _, lessons, _ = course
     for e in doc["encounters"]:
         assert e["case"] in lessons[str(e["lesson"])]
 
@@ -354,7 +354,7 @@ def test_a_renumbered_course_fails_the_build(doc, course, text, needle):
 
 
 def test_an_encounter_pointing_at_the_wrong_lesson_fails(doc, course):
-    _, lessons = course
+    _, lessons, _ = course
     wrong = next(n for n, ids in lessons.items() if CASE not in ids)
     _encounter(doc)["lesson"] = wrong
     errors = B.check_course_refs("", doc, *course)
@@ -431,3 +431,58 @@ def test_the_hoard_separates_rules_from_the_players_part(doc, capture):
     by = {p["rule"]: p["ruleBy"] for p in lake["points"] if p["rule"]}
     assert by["Every product kept, sold in the West or not"] == "agentql"
     assert {"model", "agentql"} <= set(by.values())
+
+
+
+# ---- second review: the course's own numbering, statement shape, quoted names --------------------
+
+def test_a_renumbered_or_retitled_lesson_fails(doc, course):
+    modules, lessons, titles = course
+    # Swap what 3.3 and 3.4 are about: the numbers still exist, but "Lesson 3.3 shows the injected
+    # filter" would now name the outer-join lesson.
+    swapped = dict(titles, **{"3.3": titles["3.4"], "3.4": titles["3.3"]})
+    errors = B.check_course_refs(B.ENCOUNTERS.read_text(encoding="utf-8"), doc, modules, lessons, swapped)
+    assert any("lesson 3.3 is now" in e for e in errors) and any("lesson 3.4 is now" in e for e in errors)
+
+
+def test_every_named_lesson_declares_its_title(doc, course):
+    del doc["lesson_titles"]["5.2"]
+    errors = B.check_course_refs(B.ENCOUNTERS.read_text(encoding="utf-8"), doc, *course)
+    assert any("lesson 5.2 is named but has no entry in lesson_titles" in e for e in errors)
+
+
+@pytest.mark.parametrize("case,old,new,needle", [
+    ("l2_filter_case_insensitive", "  ELSE 0\n", "  ELSE NULL\n", "no SQL line is exactly 'ELSE 0'"),
+    ("l5_rank", "ELSE 0", "ELSE NULL", "expected 'ELSE 0' 2 time(s)"),
+    ("l5_cte_two_step", '  GROUP BY "ca_1"\n)', '  GROUP BY "ca_1"\nLIMIT 100000\n)', "expected 'LIMIT' 1 time(s)"),
+    (CASE, '    ON "ta_5"."ca_1" = "ta_6"."ca_2"\nLIMIT 100000',
+     '    ON "ta_5"."ca_1" = "ta_6"."ca_2"\nWHERE "ta_6"."ca_3" IS NOT NULL\nLIMIT 100000', "expected 'WHERE' 1 time(s)"),
+    (CASE, '    WHERE LOWER("ta_4"."REGION") = \'west\'', '      JOIN "RETAILAPPAREL"."PUBLIC"."DIM_X" "ta_9" ON 1 = 1\n'
+     '    WHERE LOWER("ta_4"."REGION") = \'west\'', "expected 'JOIN \"RETAILAPPAREL\"' 2 time(s)"),
+])
+def test_second_review_falsifications_fail(doc, capture, case, old, new, needle):
+    errors = _errors(doc, _recaptured(capture, old, new, case))
+    assert any(needle in e for e in errors), errors
+
+
+def test_statement_order_checks(doc, capture):
+    # The row cap must close the statement, and the West filter must come before the outer join.
+    cap = _recaptured(capture, "LIMIT 100000", "LIMIT 100000\nORDER BY 1", "l5_cte_two_step")
+    assert any("expected the statement to end with 'LIMIT 100000'" in e for e in _errors(doc, cap))
+
+
+def test_norm_keeps_quoted_names_exact():
+    assert B._norm('"(Sample)  Retail  -  Apparel"') != B._norm('"(Sample) Retail - Apparel"')
+
+
+def test_planned_capabilities_are_labelled_coming_soon(doc):
+    # AgentQL keyword review and pinning are planned, near term: the game must not teach them as
+    # shipped, and the comparison must say "Coming soon" where it describes them for AgentQL.
+    scroll = _law(doc)["scroll"]
+    agentql = scroll["columns"].index("AgentQL")
+    rows = {r["label"]: r["cells"][agentql] for r in scroll["rows"]}
+    assert rows["How a person checks it"].startswith("Coming soon")
+    assert "Coming soon: pin it" in rows["Where the answer lives"]
+    raw = B.ENCOUNTERS.read_text(encoding="utf-8")
+    for shipped_claim in ("Still the keywords", "shown as keywords too", "Keyword Search and AgentQL produce ThoughtSpot Answers you can pin"):
+        assert shipped_claim not in raw

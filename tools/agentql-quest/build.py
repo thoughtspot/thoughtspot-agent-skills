@@ -55,7 +55,7 @@ WHO_ANSWERS = {"model": "forge", "thoughtspot": "forge", "agentql": "agentql"}
 WHO_ORDER = ("forge", "agentql", "ai")
 RULE_BY = ("model", "thoughtspot", "agentql", "determinism")
 ALL = "*"
-_STRING = re.compile(r"('(?:[^']|'')*')")
+_STRING = re.compile(r"""('(?:[^']|'')*'|"(?:[^"]|"")*")""")    # string literals and quoted names
 
 
 def parse_lesson_sql(text: str) -> tuple[str | None, dict[str, dict]]:
@@ -81,7 +81,7 @@ def _norm(sql: str) -> str:
     Outside string literals, runs of whitespace collapse to one space, and whitespace is
     dropped just inside brackets and before commas — the places a reader adds line breaks.
     `(Sample) Retail` and `(Sample)Retail`, or `a, b` and `a,b`, stay different. String
-    literals are kept byte for byte.
+    literals and double-quoted names are kept byte for byte.
     """
     parts = _STRING.split(sql)
     for i in range(0, len(parts), 2):
@@ -137,6 +137,15 @@ def _point(p: dict, who: dict, sql: list[str], scroll: list[str], cases: dict[st
         got = whole.count(needle)
         if got != want:
             errors.append(f"{where}: expected {needle!r} {want} time(s) in the SQL, found {got}")
+    stripped = [line.strip() for line in sql if line.strip()]
+    last = p.get("sql_last_line")
+    if last and (not stripped or stripped[-1] != last.strip()):
+        errors.append(f"{where}: expected the statement to end with {last!r}, it ends with {stripped[-1] if stripped else None!r}")
+    for before, after in p.get("sql_before") or []:
+        ia = next((i for i, l in enumerate(stripped) if l == before.strip()), None)
+        ib = next((i for i, l in enumerate(stripped) if l == after.strip()), None)
+        if ia is None or ib is None or ia >= ib:
+            errors.append(f"{where}: expected {before!r} before {after!r} in the SQL")
     # "Could the AI write X?" — only true while the capture still shows X being rejected.
     rejected = p.get("rejected_case")
     if rejected:
@@ -350,17 +359,21 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict]) -> tuple[
     return {"captured": date, "realms": realms, "routes": routes}, errors
 
 
-def parse_learning_path(text: str) -> tuple[set[str], dict[str, set[str]]]:
-    """Module numbers, and per lesson number ("3.4") the case ids its **Guarded by** line names."""
+def parse_learning_path(text: str) -> tuple[set[str], dict[str, set[str]], dict[str, str]]:
+    """Module numbers; per lesson number ("3.4") the case ids its **Guarded by** line names; and
+    per lesson number its heading title."""
     modules = set(re.findall(r"^## Module (\d+)\b", text, re.M))
     lessons: dict[str, set[str]] = {}
-    for m in re.finditer(r"^### (\d+\.\d+)\b(.*?)(?=^##)", text + "\n##", re.S | re.M):
-        guarded = re.findall(r"\*\*Guarded by:?\*\*:?([^\n]*)", m.group(2))
+    titles: dict[str, str] = {}
+    for m in re.finditer(r"^### (\d+\.\d+)\b([^\n]*)(.*?)(?=^##)", text + "\n##", re.S | re.M):
+        guarded = re.findall(r"\*\*Guarded by:?\*\*:?([^\n]*)", m.group(3))
         lessons[m.group(1)] = {cid for line in guarded for cid in re.findall(r"`([^`]+)`", line)}
-    return modules, lessons
+        titles[m.group(1)] = m.group(2).strip()
+    return modules, lessons, titles
 
 
-def check_course_refs(encounters_text: str, doc: dict, modules: set[str], lessons: dict[str, set[str]]) -> list[str]:
+def check_course_refs(encounters_text: str, doc: dict, modules: set[str], lessons: dict[str, set[str]],
+                      titles: dict[str, str] | None = None) -> list[str]:
     """The game's text names lessons and modules by number; the course renumbers them.
 
     Every "lesson X.Y" / "Module N" (or "Modules N and M") in encounters.yaml must still exist,
@@ -368,9 +381,19 @@ def check_course_refs(encounters_text: str, doc: dict, modules: set[str], lesson
     so "In lesson 3.4's live run" points at the lesson that actually teaches this SQL.
     """
     errors = []
-    for ref in sorted(set(re.findall(r"\blessons? (\d+\.\d+)\b", encounters_text, re.I))):
+    expect = doc.get("lesson_titles") or {}
+    named = set(re.findall(r"\blessons? (\d+\.\d+)\b", encounters_text, re.I))
+    named |= {str(e.get("lesson")) for e in doc.get("encounters") or [] if e.get("lesson")}
+    for ref in sorted(named):
         if ref not in lessons:
             errors.append(f"encounters.yaml names lesson {ref}, which learning-path.md no longer has")
+        elif titles is not None:
+            # A renumbered or retitled course can leave a number pointing at a different lesson.
+            want = expect.get(ref)
+            if not want:
+                errors.append(f"lesson {ref} is named but has no entry in lesson_titles")
+            elif want.lower() not in titles.get(ref, "").lower():
+                errors.append(f"lesson {ref} is now {titles.get(ref)!r}, not the lesson about {want!r}")
     for a, b in re.findall(r"\bModules? (\d+)(?: and (\d+))?\b", encounters_text):
         for ref in filter(None, (a, b)):
             if ref not in modules:
@@ -421,7 +444,7 @@ def build(check: bool = False) -> tuple[str | None, dict, list[str]]:
     raw = ENCOUNTERS.read_text(encoding="utf-8")
     doc = yaml.safe_load(raw) or {}
     data, errors = compile_quest(doc, date, cases)
-    errors += check_course_refs(raw, doc, *parse_learning_path(LEARNING_PATH.read_text(encoding="utf-8")))
+    errors += check_course_refs(raw, doc, *parse_learning_path(LEARNING_PATH.read_text(encoding="utf-8")))  # modules, lessons, titles
     if errors:
         return None, data, errors
     fonts = font_faces()  # read even under --check, so a missing font file fails pre-commit too

@@ -403,8 +403,8 @@ def frames():
         ctext(img, "AGENTQL", 14, "A", 4, shadow="R")
         ctext(img, "QUEST", 48, "H", 4, shadow="R")
         ctext(img, "5 REALMS. ABOUT 15 MINUTES.", 92, "H", 1, shadow="K")
-        ctext(img, "SEE HOW EVERY AGENTQL QUESTION BECOMES", 106, "A", 1, shadow="K")
-        ctext(img, "GOVERNED, REPEATABLE SQL.", 116, "A", 1, shadow="K")
+        ctext(img, "SEE HOW THOUGHTSPOT TURNS AGENTQL", 106, "A", 1, shadow="K")
+        ctext(img, "INTO GOVERNED, REPEATABLE SQL.", 116, "A", 1, shadow="K")
         ctext(img, "FREE IN YOUR BROWSER. NO LOGIN.", 132, "M", 1, shadow="K")
         if f % 6 < 4:
             ctext(img, "PRESS START", 150, "H", 2, shadow="R")
@@ -425,7 +425,7 @@ def poster():
     ctext(img, "QUEST", 40, "H", 4, shadow="R", x=12)
     text(img, "WHO WROTE EACH LINE", 14, 76, "H")
     text(img, "OF THE SQL?", 14, 86, "H")
-    text(img, "5 REALMS. 15 MINUTES.", 14, 104, "M")
+    text(img, "5 REALMS. ABOUT 15 MINUTES.", 14, 104, "M")
     text(img, "FREE IN YOUR BROWSER.", 14, 114, "M")
     return img
 

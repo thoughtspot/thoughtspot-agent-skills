@@ -185,9 +185,9 @@ if echo "$STAGED" | grep -q 'ts-object-model-agentql-query/'; then
   run_check "agentql offline bundle" "tools/validate/generate_agentql_offline.py --root . --check"
 fi
 
-# AgentQL Quest is built from lesson-sql.md; a recapture that moves the SQL must not
-# silently break the game's highlights.
-if echo "$STAGED" | grep -qE '^tools/agentql-quest/|ts-object-model-agentql-query/references/lesson-sql\.md$'; then
+# AgentQL Quest is built from lesson-sql.md and names lessons in learning-path.md; a recapture
+# that moves the SQL, or a course renumbering, must not silently break the game.
+if echo "$STAGED" | grep -qE '^tools/agentql-quest/|ts-object-model-agentql-query/references/(lesson-sql|learning-path)\.md$'; then
   run_check "agentql quest"          "tools/validate/check_agentql_quest.py --root ."
 fi
 

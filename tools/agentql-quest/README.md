@@ -41,8 +41,10 @@ SQL that runs). Names are generic fantasy on purpose: no names, terms or quotati
 published fantasy work.
 
 The Kingdom of Law also covers **Code Complete**, the third engine Spotter can use (analysis
-beyond SQL, on the returned results). Anything ThoughtSpot's product summary marks as
-*planned*, such as cross-model joins, is deliberately left out until it ships.
+beyond SQL, on the returned results). Unreleased capabilities are left out, except two the
+product team has confirmed for the near term: **keyword review of AgentQL answers** and
+**pinning AgentQL answers to a Liveboard**. The game teaches both as *coming soon*, never as
+shipped, and a test fails if that wording slips. Update `encounters.yaml` when they ship.
 
 **Gold, not hit points.** A right answer earns 10 gold. A wrong one costs 5 (the dragon takes it,
 or the court fines you), never more than you carry in that realm, and you answer again, so a
