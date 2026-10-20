@@ -100,6 +100,11 @@ law.halls.forEach((h, hi) => {
   expect("hall", `hall ${hi + 1}`);
   if (!has(h.title) || !h.teach.every(t => has(t))) fail(`hall ${hi + 1} must show its title and what it teaches`);
   h.rows.forEach(row => { if (!has(row.label)) fail(`hall ${hi + 1} is missing its "${row.label}" row`); });
+  // The throne room: two torches, one crown, and the hall's own name on the banner (letters in a
+  // name must never turn into torches or crowns).
+  const flames = (screen.innerHTML.match(/class="flame/g) || []).length, crowns = (screen.innerHTML.match(/class="hot crown"/g) || []).length;
+  if (flames !== 2 || crowns !== 1) fail(`hall ${hi + 1}: expected 2 torches and 1 crown, found ${flames} and ${crowns}`);
+  if (!screen.innerHTML.includes(h.title.toUpperCase())) fail(`hall ${hi + 1}: the banner should carry "${h.title.toUpperCase()}"`);
   press(0); expect("trials", `hall ${hi + 1}'s petitions`);
   h.trials.forEach((t, ti) => {
     if (!has(t.text)) fail("petition not shown");

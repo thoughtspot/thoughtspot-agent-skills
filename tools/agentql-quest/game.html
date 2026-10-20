@@ -151,7 +151,12 @@ p { margin: 0; max-width: 62ch; }
   .screen { padding: 16px 14px 20px; }
   .art { font-size: 16px; }
 }
-@media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+.flame { color: var(--hot); animation: flicker 1.3s steps(2) infinite; }
+.flame.b { animation-delay: .45s; }
+@keyframes flicker { 50% { color: var(--blood); opacity: .7; } }
+.scene { color: var(--dim); }
+.scene .hot { color: var(--hot); }
+@media (prefers-reduced-motion: reduce) { .cursor, .flame { animation: none; } }
 </style>
 </head>
 <body>
@@ -227,6 +232,38 @@ const MAP_ROWS = [
   String.raw`                     _|^|^|_        ,,,,,,,,,`,
   String.raw`                    |_|_|_|_|`
 ];
+// The throne room for a Kingdom of Law hall: pillars with torches, the hall's banner, the
+// throne, and petitioners. During petitions one petitioner stands before the throne.
+function hallScene(title, petitioning) {
+  const W = 50, pad = s => s.padEnd(W);
+  const banner = title.toUpperCase();
+  const inner = 33, lp = Math.max(0, Math.floor((inner - banner.length) / 2));
+  const row = (left, mid, right) => left + mid.padEnd(W - left.length - right.length) + right;
+  const crowd = petitioning
+    ? ["      o   o                o       o   o",
+       "     /|\\ /|\\     o        /|\\     /|\\ /|\\",
+       "     / \\ / \\    /|\\       / \\     / \\ / \\",
+       "                / \\  steps forward"]
+    : ["      o   o    o      o      o    o   o",
+       "     /|\\ /|\\  /|\\    /|\\    /|\\  /|\\ /|\\",
+       "     / \\ / \\  / \\    / \\    / \\  / \\ / \\"];
+  const lines = [
+    row(" )\uE000(", "   .---------------------------------.", " )\uE001( "),
+    row(" |#|", "   |" + (" ".repeat(lp) + banner).padEnd(inner) + "|", " |#| "),
+    row(" |#|", "   '---------------------------------'", " |#| "),
+    row(" |#|", "        ||        _/^\\_        ||", " |#| "),
+    row(" |#|", "        ||       |  \uE002  |       ||", " |#| "),
+    row(" |#|", "        ||      _|_____|_      ||", " |#| "),
+    row(" |#|", "        ||     |_________|     ||", " |#| "),
+    "_|#|_" + "_".repeat(W - 10) + "_|#|_",
+    ...crowd.map(pad)
+  ];
+  return `<pre class="art scene" aria-hidden="true">${lines.map(l => esc(l)
+    // Private-use markers, so no letter in a hall's name can turn into a torch or a crown.
+    .replace("\uE000", '<span class="flame">*</span>').replace("\uE001", '<span class="flame b">*</span>')
+    .replace("\uE002", '<span class="hot crown">W</span>')).join("\n")}</pre>`;  // one cell wide, unlike ♛
+}
+
 const MAP = (() => {
   const w = Math.max(...MAP_ROWS.map(r => r.length));
   const edge = "+" + "-".repeat(w + 2) + "+";
@@ -470,6 +507,7 @@ const SCREENS = {
   hall() {
     const r = realm(), h = hall();
     return `<div class="status"><span class="lbl">HALL ${state.hall + 1} OF ${r.halls.length}</span>${goldTag()}</div>
+      ${hallScene(h.title, false)}
       <h2>${esc(h.title)}</h2>
       ${h.teach.map(t => `<p>${esc(t)}</p>`).join("")}
       ${h.rows.length ? table(h.columns, h.rows) : ""}
@@ -483,7 +521,7 @@ const SCREENS = {
     if (state.flash) {
       const f = state.flash, lastInHall = state.step + 1 >= h.trials.length, lastHall = state.hall + 1 >= r.halls.length;
       const next = !settled(f) ? "Judge again" : !lastInHall ? "Next petitioner" : lastHall ? "Hear the royal decree" : `On to hall ${state.hall + 2}`;
-      return `${head}${art("crown")}<p class="hot">${esc(t.text)}</p>
+      return `${head}${hallScene(h.title, true)}<p class="hot">${esc(t.text)}</p>
         ${feedback(f, t.why, "Not quite. Think again about what this hall just taught.", t.options[t.correct], true)}
         ${choices([{ label: next, go: () => {
           if (settled(f)) {
@@ -494,7 +532,7 @@ const SCREENS = {
           state.flash = null; render();
         } }])}`;
     }
-    return `${head}${art("crown")}<p>${intro}</p><p class="hot">${esc(t.text)}</p>
+    return `${head}${hallScene(h.title, true)}<p>${intro}</p><p class="hot">${esc(t.text)}</p>
       ${choices([...t.options.map((o, i) => ({ label: o, go: () => answer(i === t.correct ? "win" : "loss") })), { label: MAGIC_LABEL, go: magic }])}`;
   },
   decree() {

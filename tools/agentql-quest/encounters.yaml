@@ -111,7 +111,7 @@ realms:
       - title: The Hall of Checking
         teach:
           - Whoever writes the query, a person checks it the same way, by reading the keywords. No SQL to read.
-          - The more an agent can express, the more it decides, including business choices like which join. That is why someone checks what it chose.
+          - The more an agent can express, the more it has to get right. That is why someone always checks that it understood the question.
         columns: [Keyword Search, AgentQL]
         rows: [How a person checks it, What it can express]
         trials:
