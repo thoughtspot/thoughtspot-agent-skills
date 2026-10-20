@@ -306,6 +306,9 @@ def test_pages_workflow_builds_home_page_and_game_in_its_folder(tmp_path):
     assert home.is_file() and game.is_file()
     assert "<title>ThoughtSpot Agent Skills</title>" in home.read_text(encoding="utf-8")
     assert "<title>AgentQL Quest</title>" in game.read_text(encoding="utf-8")
+    # Every local image the home page shows must be in the site, or it renders as a broken image.
+    for src in re.findall(r'<img[^>]+src="([^":]+)"', home.read_text(encoding="utf-8")):
+        assert (site / src).is_file(), f"home page shows {src}, which the build did not copy"
 
 
 def test_home_page_lists_the_game_and_loads_nothing_from_outside():

@@ -44,6 +44,7 @@ li a { font-weight: 600; text-decoration: none; }
 li a:hover, li a:focus-visible { text-decoration: underline; }
 .path { font-family: var(--mono); font-size: 13px; color: var(--muted); }
 footer { font-size: 14px; color: var(--muted); }
+.poster img { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 1px solid var(--rule); margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -57,8 +58,10 @@ footer { font-size: 14px; color: var(--muted); }
     <h2 id="pages">Pages</h2>
     <ul>
       <li>
+        <a href="agentql-quest/" class="poster"><img src="agentql-quest-poster.png" width="960" height="600"
+          alt="AgentQL Quest: a dragon made of SQL rises from the Forge's fire beside a dwarf at his anvil. Who wrote each line of the SQL?"></a>
         <a href="agentql-quest/">AgentQL Quest</a>
-        <span>The Learn AgentQL course as a retro text adventure: a realm for each module, starting with how AgentQL sits with Keyword Search, then dragons made of the SQL ThoughtSpot generates.</span>
+        <span>The Learn AgentQL course as a retro text adventure: start with how AgentQL sits with Keyword Search, then take short quests where every dragon is made of the SQL ThoughtSpot generates.</span>
         <span class="path">/agentql-quest/</span>
       </li>
     </ul>

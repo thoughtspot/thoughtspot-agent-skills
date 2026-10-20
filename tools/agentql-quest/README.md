@@ -1,5 +1,9 @@
 # agentql-quest
 
+[![AgentQL Quest: the Wizard writes the scroll, the Forge compiles it, and a dragon of SQL rises from the fire](promo/agentql-quest.gif)](https://thoughtspot.github.io/thoughtspot-agent-skills/agentql-quest/)
+
+**[Play it in your browser](https://thoughtspot.github.io/thoughtspot-agent-skills/agentql-quest/)** · [promo assets](promo/)
+
 **AgentQL Quest** is a retro text-adventure version of the
 [Learn AgentQL course](../../agents/cli/ts-object-model-agentql-query/references/learning-path.md),
 played in the browser. It teaches one idea: the AI only understands the question and writes it

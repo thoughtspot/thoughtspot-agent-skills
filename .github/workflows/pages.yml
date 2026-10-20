@@ -52,6 +52,7 @@ jobs:
           pip install pyyaml==6.0.3
           mkdir -p _site
           cp -R .github/pages/. _site/
+          cp tools/agentql-quest/promo/agentql-quest-poster.png _site/
           python3 tools/agentql-quest/build.py --out _site/agentql-quest/index.html
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
