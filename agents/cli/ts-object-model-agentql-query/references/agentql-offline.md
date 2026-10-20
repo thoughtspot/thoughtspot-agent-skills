@@ -99,6 +99,13 @@ It shows how to write AgentQL, what the two APIs do, and the exact SQL ThoughtSp
 the warehouse. Built first for SEs and other technical field staff. Anyone who reads SQL
 can take it.
 
+**Prefer to play?** **[AgentQL Quest](https://thoughtspot.github.io/thoughtspot-agent-skills/agentql-quest/)** is the course as a retro browser game, about
+15 minutes, nothing to install. Start in the Kingdom of Law (how AgentQL sits with Keyword
+Search), then take short quests where every dragon is made of the SQL ThoughtSpot generates and
+you name who wrote each line: ThoughtSpot and the Model, or your AgentQL.
+
+[![AgentQL Quest: a dragon made of SQL rises from the Forge. Who wrote each line of the SQL?](https://thoughtspot.github.io/thoughtspot-agent-skills/agentql-quest-poster.png)](https://thoughtspot.github.io/thoughtspot-agent-skills/agentql-quest/)
+
 **Start it** by asking, in Claude Code or Cortex Code:
 
 > teach me AgentQL
@@ -370,6 +377,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.19.1 | 2026-10-20 | Link **AgentQL Quest**, the course as a browser game on the repo's GitHub Pages site, from the Learn AgentQL section, with its poster as the link. |
 | 2.19.0 | 2026-10-20 | **Removed Module 6 (*Trust, but verify*): 21 → 18 lessons, Modules 0–5.** Its lessons centred on **silent-drop bugs** — `QUALIFY` and `FILTER (WHERE …)` accepted then ignored, and a `SUM(CASE … date-literal …)` returning an `UNKNOWN`-typed empty — which are defects that will be fixed, so a course resting on them rots (same reasoning as lesson 1.3). The loud-failure cases (`STDDEV`, `IN (SELECT …)`) stay documented in `limitations.md`, and all six behaviours remain under live test in the `agentql-retest` **limitations** suite (`qualify`, `filter_where`, `sum_case_date_literal`, `stddev_*`, `in_subquery`). Removed the six `l6_*` lessons-suite cases and their three controls; regenerated `lesson-sql.md` and the offline bundle. |
 | 2.18.3 | 2026-10-20 | **Lesson 3.2 (formula measures: `AGG`, not `SUM`) is now concrete and live-captured.** Replaced the "pick your own Model" template (placeholder `<attribute>`/`<formula measure>` query) with a real example on the same Semi-Additive Model as lesson 2.4: `AGG("Spot Balance")` by country, with the actual generated SQL — one `AGG` compiles to a six-CTE query carrying the Model's `group_max` + `sum_if` balance logic, a vivid "read the SQL to see how much the formula does". Break-it variants (`SUM` of a formula → `NESTED_AGGREGATE_NOT_SUPPORTED`; `AGG` of a raw measure → `QUERY_GEN_ERROR`; bare formula ≡ `AGG`) now show real captured errors. Behaviour guards unchanged (still live-tested on the portable Dunder Mifflin / sample Models). |
 | 2.18.2 | 2026-10-20 | **Lesson 1.3 now uses a durable failure, not a bug.** Replaced the "compiles, then fails" example (an `IN (SELECT …)` subquery, tracked as bug SCAL-326936 and likely to be fixed) with a `UNION ALL` whose branches have mismatched column types (text region names stacked on a numeric total) — it compiles but the warehouse correctly rejects it at `fetch-data` (*"Numeric value 'Midwest' is not recognized"*). That failure is not a ThoughtSpot bug and will never be "resolved", so the lesson's point — a green `generate-sql` is not proof the query runs — stays valid. Live-verified; captured SQL regenerated. |
