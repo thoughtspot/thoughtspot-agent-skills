@@ -30,6 +30,7 @@ CTE_SP = f'WITH a AS (SELECT {SP} AS sp, SUM({Q}) AS q {F} GROUP BY {SP})'
 NO = "❌ "
 SILENT = "⚠️ "
 FIXED = "✅ "
+INFO = "ℹ️ "  # correct, must-know result-format behaviour (not a bug, not a trap)
 
 
 def _totals(results) -> dict:
@@ -97,6 +98,18 @@ def _check_day_of_year(rows, _results):
     return f"DAY_IN_YEAR_NUMBER / DAY_NUMBER wrong for {bad}" if bad else None
 
 
+def _check_epoch_date(rows, _results):
+    """fetch-data returns date columns as epoch SECONDS (an integer), not an ISO string."""
+    v = rows[0][0]
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return f"date came back as {type(v).__name__} {v!r}, expected epoch seconds (a number)"
+    try:
+        year = dt.datetime.fromtimestamp(v, dt.timezone.utc).year
+    except (OverflowError, OSError, ValueError):
+        return f"value {v!r} does not decode as epoch seconds"
+    return None if 2000 <= year <= 2100 else f"epoch {v} decodes to year {year}, outside 2000–2100"
+
+
 CASES = [
     # ---- controls -------------------------------------------------------------------------
     Case("ctl_totals_by_sp", f'SELECT {SP} AS sp, SUM({Q}) AS q {F} GROUP BY {SP}', OK,
@@ -118,6 +131,9 @@ CASES = [
     # ---- ❌ rejected at generate-sql ----------------------------------------------------------
     Case("self_join_cte", f'{CTE_SP} SELECT x.sp, y.q FROM a x JOIN a y ON x.sp = y.sp', GEN_ERROR,
          NO + "Self-join of a CTE", code="SELF_JOIN"),
+    Case("group_by_ordinal", f'SELECT UPPER({SP}) AS u, SUM({Q}) AS q {F} GROUP BY 1', GEN_ERROR,
+         NO + "GROUP BY <ordinal> (positional) — rejected; diagnostic misnames it (Missing formula alias)",
+         code="QUERY_GEN_ERROR"),
     Case("non_equi_model_cte",
          f'{CTE_SP} SELECT {SP} AS sp, SUM({Q}) AS q {F} JOIN a ON {SP} = a.sp AND a.q > 1500 GROUP BY {SP}',
          GEN_ERROR, NO + "Non-equi JOIN (Model ⋈ CTE)", code="NON_EQUI_JOIN"),
@@ -330,6 +346,12 @@ CASES = [
          FIXED + "String = / IN are case-insensitive", sql_has=("lower(",), same_as="ctl_filter_eq"),
     Case("filter_in_upper", f"SELECT SUM({Q}) AS q {F} WHERE {SP} IN ('JIM HALPERT')", OK,
          FIXED + "String = / IN are case-insensitive", same_as="ctl_filter_eq"),
+
+    # ---- result-format behaviour (reading fetch-data) ---------------------------------------------
+    Case("dates_are_epoch_seconds",
+         f'SELECT {D} AS d, SUM({Q}) AS q {F} GROUP BY {D} ORDER BY {D} DESC LIMIT 1', OK,
+         INFO + "Date columns come back as epoch seconds (integer), not an ISO string",
+         check=_check_epoch_date),
 ]
 
 CASES += LESSON_CASES

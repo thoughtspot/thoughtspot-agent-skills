@@ -371,6 +371,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.18.1 | 2026-10-20 | **Two cut-lesson behaviours kept under live test.** Moved the `GROUP BY <ordinal>` rejection and the "dates return as epoch seconds" result-format assertion out of the trimmed course and into the `agentql-retest` **limitations** suite (live-verified on the Dunder Mifflin demo Model). Documented the epoch-seconds return format in `limitations.md` (*Not bugs*). The other two trim-removed behaviours (`DATE_TRUNC` rejection, aggregate-in-`WHERE`→`HAVING`) were already covered by that suite. |
 | 2.18.0 | 2026-10-20 | **Leaner course: 39 → 21 lessons (~3–4 per module).** Trimmed Learn AgentQL to focus on *understanding* AgentQL and deterministic results rather than hand-writing it. Removed **Module 7** (Building on it) and the SQL-syntax-practice lessons (top-N, string functions, date literals, set-op mechanics, `AVG` grain, which-tables, lenient parser, bare-measure, two-dim joins, counting-as-its-own-lesson); kept the two-API basics, the determinism/governance showcases (RLS, custom calendar, join types), the key traps, and the whole *Trust, but verify* module. Lessons renumbered sequentially, and the cut lessons' cases are removed from the `agentql-retest` lessons suite too (that suite backs the course 1:1). |
 | 2.17.1 | 2026-10-20 | **Join-type lesson (2.9) now live-verified.** Replaced the illustrative join-type SQL with real captures from a Model configured with three join types — Sales→Product `LEFT OUTER`, Sales→Customer `RIGHT OUTER`, Sales→Date `FULL OUTER` — showing the same grouped AgentQL compiling to each, and one query mixing LEFT+RIGHT across dimensions. The agent never writes `JOIN`; the generated SQL carries exactly the Model's configured type. |
 | 2.17.0 | 2026-10-19 | **Join-type worked example in the course.** New illustrative lesson **2.9** (“The join type is the Model's, not yours”): the same *sales by product* AgentQL compiles to `JOIN` / `LEFT OUTER JOIN` / `RIGHT OUTER JOIN` / `FULL OUTER JOIN` depending purely on how the Model defines the fact↔dimension relationship — the agent never writes `JOIN`. Complements lesson 3.6 (AgentQL *overriding* an inner-join Model with a CTE outer join). Labelled illustrative (the sample Model is inner-only), kept out of the captured `lesson-sql.md`. |
@@ -1492,6 +1493,10 @@ control, and they still matter.
 
 ### Not bugs — feature requests and security behaviour
 
+- **Date columns return as epoch seconds**, not ISO strings: `fetch-data` emits a date as an
+  integer (seconds since the Unix epoch, UTC). A consumer must decode it
+  (`datetime.fromtimestamp(v, tz=utc)`) — expecting `"2026-01-31"` and getting `1769817600`
+  is a format contract, not a bug (✓ live 2026-10-14).
 - Run AgentQL directly on **tables** (not just Models) — [SCAL-319871](https://thoughtspot.atlassian.net/browse/SCAL-319871) (Open)
 - Custom-calendar switching in AgentQL — [SCAL-318205](https://thoughtspot.atlassian.net/browse/SCAL-318205) (Open)
 - **Security (ticket, not probed):** data returned through AgentQL now honours Column

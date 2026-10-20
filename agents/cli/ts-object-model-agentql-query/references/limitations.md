@@ -175,6 +175,10 @@ control, and they still matter.
 
 ## Not bugs — feature requests and security behaviour
 
+- **Date columns return as epoch seconds**, not ISO strings: `fetch-data` emits a date as an
+  integer (seconds since the Unix epoch, UTC). A consumer must decode it
+  (`datetime.fromtimestamp(v, tz=utc)`) — expecting `"2026-01-31"` and getting `1769817600`
+  is a format contract, not a bug (✓ live 2026-10-14).
 - Run AgentQL directly on **tables** (not just Models) — [SCAL-319871](https://thoughtspot.atlassian.net/browse/SCAL-319871) (Open)
 - Custom-calendar switching in AgentQL — [SCAL-318205](https://thoughtspot.atlassian.net/browse/SCAL-318205) (Open)
 - **Security (ticket, not probed):** data returned through AgentQL now honours Column
