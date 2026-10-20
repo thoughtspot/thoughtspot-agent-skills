@@ -371,6 +371,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.18.3 | 2026-10-20 | **Lesson 3.2 (formula measures: `AGG`, not `SUM`) is now concrete and live-captured.** Replaced the "pick your own Model" template (placeholder `<attribute>`/`<formula measure>` query) with a real example on the same Semi-Additive Model as lesson 2.4: `AGG("Spot Balance")` by country, with the actual generated SQL — one `AGG` compiles to a six-CTE query carrying the Model's `group_max` + `sum_if` balance logic, a vivid "read the SQL to see how much the formula does". Break-it variants (`SUM` of a formula → `NESTED_AGGREGATE_NOT_SUPPORTED`; `AGG` of a raw measure → `QUERY_GEN_ERROR`; bare formula ≡ `AGG`) now show real captured errors. Behaviour guards unchanged (still live-tested on the portable Dunder Mifflin / sample Models). |
 | 2.18.2 | 2026-10-20 | **Lesson 1.3 now uses a durable failure, not a bug.** Replaced the "compiles, then fails" example (an `IN (SELECT …)` subquery, tracked as bug SCAL-326936 and likely to be fixed) with a `UNION ALL` whose branches have mismatched column types (text region names stacked on a numeric total) — it compiles but the warehouse correctly rejects it at `fetch-data` (*"Numeric value 'Midwest' is not recognized"*). That failure is not a ThoughtSpot bug and will never be "resolved", so the lesson's point — a green `generate-sql` is not proof the query runs — stays valid. Live-verified; captured SQL regenerated. |
 | 2.18.1 | 2026-10-20 | **Two cut-lesson behaviours kept under live test.** Moved the `GROUP BY <ordinal>` rejection and the "dates return as epoch seconds" result-format assertion out of the trimmed course and into the `agentql-retest` **limitations** suite (live-verified on the Dunder Mifflin demo Model). Documented the epoch-seconds return format in `limitations.md` (*Not bugs*). The other two trim-removed behaviours (`DATE_TRUNC` rejection, aggregate-in-`WHERE`→`HAVING`) were already covered by that suite. |
 | 2.18.0 | 2026-10-20 | **Leaner course: 39 → 21 lessons (~3–4 per module).** Trimmed Learn AgentQL to focus on *understanding* AgentQL and deterministic results rather than hand-writing it. Removed **Module 7** (Building on it) and the SQL-syntax-practice lessons (top-N, string functions, date literals, set-op mechanics, `AVG` grain, which-tables, lenient parser, bare-measure, two-dim joins, counting-as-its-own-lesson); kept the two-API basics, the determinism/governance showcases (RLS, custom calendar, join types), the key traps, and the whole *Trust, but verify* module. Lessons renumbered sequentially, and the cut lessons' cases are removed from the `agentql-retest` lessons suite too (that suite backs the course 1:1). |
@@ -2151,73 +2152,101 @@ computed from the group's totals, which is the correct average price.
 
 **Guarded by:** `l3_ratio_safe_division`.
 
-#### 3.2 Formula measures: `AGG`, not `SUM` (on a Model the learner chooses)
+#### 3.2 Formula measures: `AGG`, not `SUM` (live-verified)
 
-The sample Model's measures are all raw, so this lesson runs on **a Model the learner
-picks**: one they work with, on a cloud warehouse, that has formula measures. On the SE demo
-cluster, `Dunder Mifflin` works. Everyone else names their own.
+A **formula measure** already contains its own aggregation, so you wrap it in `AGG(...)` —
+never `SUM(...)`. The sample Model's measures are all raw, so this lesson runs on the same
+**Semi-Additive** Model as lesson 2.4, which has a real formula measure, `Spot Balance`,
+defined in the Model as
 
-**Set it up.** Do this yourself, in front of the learner. The classification is itself part
-of the lesson.
-
-1. **Classify the Model's columns:**
-
-   ```bash
-   ts agentql classify-columns --model {guid} --profile {profile}
-   ```
-
-   Each column comes back with a `kind` and a `wrapper`. Show the learner the measures:
-   `raw_measure` (wrapper `SUM`, or the aggregation it names), `aggregate_measure`
-   (wrapper **`AGG`**), and `semiadditive_measure` (wrapper `SUM`, the exception below).
-   This is how you tell, for any Model, which wrapper a measure takes.
-2. **No `aggregate_measure`?** Say so: this Model has no formula measures. Offer another
-   Model, or skip the lesson. Do not invent one.
-3. **Pick the pieces:**
-   - **one `aggregate_measure`.** Prefer a simple one; read its formula with
-     `ts tml export {guid} --profile {profile} --parse` (`model.formulas[].expr`).
-   - **one `attribute` with a handful of values** (a country, region, category or type).
-     Check with `COUNT(DISTINCT …)` if unsure, and keep it to about 20 or fewer.
-   - **a control, if there is one.** When the formula is a plain sum of one column that the
-     Model also exposes as a `raw_measure`, that raw measure is the control.
-4. **Write the question from those names.** For example: *"What is `Sales - Actual (fx)` by
-   `Ship Country`?"*
-
-**Show the query**, filled in with the picked names. **Predict:** `SUM` or `AGG`, and what
-will the SQL contain?
-
-```sql
-SELECT "t1"."<attribute>" AS a, AGG("t1"."<formula measure>") AS m
-FROM "<Model>" AS "t1"
-GROUP BY "t1"."<attribute>"
+```
+sum_if( [Balance Date] = group_max([Balance Date], [Transaction Date]), [Balance] )
 ```
 
-**Point out.**
-- **`AGG()` means "use the Model's formula as defined."** The formula already aggregates,
-  so the compiled SQL carries the formula's own aggregation once, not one you add on top.
-- **Read the SQL to see how much the formula does.** A formula built on `group_aggregate`
-  (the Dunder Mifflin sales measures are) compiles to a CTE at the formula's own level of
-  detail, joined back to the query with a `LEFT OUTER JOIN`. That logic is defined once in
-  the Model, and nobody has to write it again in a query.
-- **If there is a control,** run `SUM` of the raw column beside it: the two agree.
+— the balance as at its latest date. How do you know its wrapper is `AGG`? Classify the
+columns — this is how you tell, for *any* Model:
 
-**Break it.** Three variants, run one at a time:
+```bash
+ts agentql classify-columns --model {guid} --profile {profile}
+```
+
+`Spot Balance` comes back as `aggregate_measure` → wrapper **`AGG`**; raw columns like
+`Amount` come back as `raw_measure` → wrapper `SUM`.
+
+**Spot balance by country** — the agent writes only `AGG`; the Model supplies everything else:
+
+```sql
+SELECT "t1"."Country" AS a, AGG("t1"."Spot Balance") AS m
+FROM "Semi-Additive (Last Value Validation)" AS "t1"
+GROUP BY "t1"."Country"
+```
+
+**Predict.** `SUM` or `AGG`? And how much SQL will that one `AGG("Spot Balance")` generate?
+
+**DB SQL Generated** (`generate-sql` → `SUCCESS`, live-captured). One `AGG` compiles to a
+**six-CTE** query. The two CTEs that *are* the formula:
+
+```sql
+-- the group_max: the latest balance date per transaction date
+"qt_0" AS (
+  SELECT max("ta_1"."BALANCEDATE") "ca_1", "ta_2"."TRANSACTIONDATE" "ca_2"
+  FROM "…"."FACTBALANCES" "ta_1"
+    FULL OUTER JOIN "…"."DIMDATE" "ta_2" ON "ta_1"."BALANCEDATE" = "ta_2"."TRANSACTIONDATE"
+  GROUP BY "ca_2"
+),
+-- the sum_if: sum the balance only where its date IS that latest date
+"qt_5" AS (
+  SELECT CASE WHEN sum(CASE WHEN "ta_10"."ca_13" = "ta_11"."ca_1" THEN "ta_10"."ca_14" ELSE NULL END) IS NOT NULL
+              THEN sum(CASE WHEN "ta_10"."ca_13" = "ta_11"."ca_1" THEN "ta_10"."ca_14" ELSE NULL END)
+              ELSE 0 END "ca_15",
+         "ta_10"."ca_12" "ca_16"
+  FROM "qt_4" "ta_10"
+    LEFT OUTER JOIN "qt_0" "ta_11" ON (EQUAL_NULL("ta_10"."ca_11","ta_11"."ca_2"))
+  GROUP BY "ca_16"
+)
+```
+
+(The compiler also built `qt_1`–`qt_4` to assemble the inputs across the fact and dimension
+tables — the joins you saw in lesson 2.4.)
+
+**Point out.**
+- **`AGG()` means "use the Model's formula as defined."** You wrote one function; the Model
+  turned it into the `group_max` + conditional `sum` above — its own aggregation, applied once,
+  never one you add on top. That logic lives in the Model, not the query, so the same question
+  compiles to the same SQL every run.
+- **Read the SQL to see how much the formula does.** One short `AGG(...)` became six CTEs of
+  balance logic. Nobody re-derives it per query — it is defined once and governed centrally.
+- **A bare formula measure behaves like `AGG`.** `"t1"."Spot Balance"` with no wrapper compiles
+  to the *same* SQL and rows as `AGG(...)` — the aggregation is in the formula. (Contrast a bare
+  *raw* measure, which returns every row.) Write `AGG()` anyway, so the reader can see it.
+
+**Break it.** Each on the same Model, one at a time:
 
 | Variant | Result | Why |
 |---|---|---|
-| `SUM("t1"."<formula measure>")` | rejected: `NESTED_AGGREGATE_NOT_SUPPORTED` | the formula already aggregates, so `SUM` would aggregate it twice |
-| `AGG("t1"."<raw measure>")` | rejected: `QUERY_GEN_ERROR`, *"All non-constant columns should be grouped by or aggregated"* | a raw column has no aggregation for `AGG` to use. Try it on the sample Model: `AGG("t1"."sales")` |
-| `"t1"."<formula measure>"`, bare | **same SQL and rows as `AGG()`** | the aggregation lives in the formula. Contrast 2.8, where a bare *raw* measure returned every row. Write `AGG()` anyway, so the reader can see it |
+| `SUM("t1"."Spot Balance")` | rejected: `NESTED_AGGREGATE_NOT_SUPPORTED` — *"expression with nested aggregation"* | the formula already aggregates, so `SUM` would aggregate it twice |
+| `AGG("t1"."Amount")` (a raw measure) | rejected: `QUERY_GEN_ERROR` — *"All non-constant columns should be grouped by or aggregated"* | a raw column has no built-in aggregation for `AGG` to use; give it `SUM` |
+| `"t1"."Spot Balance"`, bare | **same SQL and rows as `AGG()`** | the aggregation lives in the formula |
 
-**The exception: semi-additive measures.** A formula whose outermost call is
+**The exception: semi-additive measures.** A formula whose *outermost* call is
 `last_value` / `first_value` (a balance or snapshot measure) takes **`SUM`**, and `AGG`
-fails on it. `classify-columns` reports these as `semiadditive_measure` with wrapper
-`SUM`. Mention it, and follow `wrapper` rather than memorising the rule. Details are in
-[`agentql-rules.md`](agentql-rules.md) § Aggregation.
+fails on it. `classify-columns` reports these as `semiadditive_measure` with wrapper `SUM`;
+follow `wrapper` rather than memorising the rule. (`Spot Balance` above is built from
+`sum_if`/`group_max`, so its outermost call aggregates and it is an ordinary
+`aggregate_measure` → `AGG`.) Details are in [`agentql-rules.md`](agentql-rules.md) § Aggregation.
+
+**Key Findings.** One `AGG("Spot Balance")` expanded to six CTEs of balance logic the agent
+never wrote — defined once in the Model, compiled deterministically, identical every run. `SUM`
+of a formula and `AGG` of a raw column are both rejected at `generate-sql`, so the mistake
+surfaces before any data is read.
+
+Live-verified on the "Semi-Additive" Model (`Spot Balance`).
 
 **Guarded by:** `sum_on_agg_formula`, `agg_on_agg_formula`, `agg_formula_equals_raw_sum`, `agg_formula_bare_like_agg`, `l3_agg_on_raw_measure_rejected`.
 
-All but the last are limitations-suite cases on Dunder Mifflin. On another Model, the
-lesson's own runs are the check.
+The displayed SQL above is captured from the Semi-Additive Model; the same behaviours
+(nested-aggregate rejection, bare ≡ `AGG`, `AGG`-on-raw rejection) are kept under live test on
+the cluster-portable Dunder Mifflin and sample Models by the cases named above.
 
 #### 3.3 Security you never write
 
