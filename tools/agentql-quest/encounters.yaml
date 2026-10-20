@@ -374,7 +374,7 @@ encounters:
           and it is in your scroll.
         lesson: >-
           Your AgentQL. This is the expressibility AgentQL adds. ThoughtSpot kept your join
-          shape and still applied the Model's keys and null guards inside it.
+          shape and still applied the Model's keys, and its own null guards, inside it.
       - kind: choice
         rule: Row-level security rules come from the Model and are added when ThoughtSpot compiles
         rule_by: model
