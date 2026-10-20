@@ -39,12 +39,12 @@ def _encounter(doc):
     return next(e for e in doc["encounters"] if e["case"] == CASE)
 
 
-def _recaptured(capture, old, new):
-    """The real capture with one edit to lesson 3.4's generated SQL, as a recapture might make."""
+def _recaptured(capture, old, new, case=CASE, count=-1):
+    """The real capture with one edit to a lesson's generated SQL, as a recapture might make."""
     date, cases = capture
     cases = copy.deepcopy(cases)
-    assert old in cases[CASE]["sql"], old
-    cases[CASE]["sql"] = cases[CASE]["sql"].replace(old, new)
+    assert old in cases[case]["sql"], old
+    cases[case]["sql"] = cases[case]["sql"].replace(old, new, count)
     return date, cases
 
 
@@ -65,7 +65,7 @@ def test_committed_encounters_build_clean(doc, capture):
     assert errors == []
     assert data["captured"] and re.fullmatch(r"\d{4}-\d{2}-\d{2}", data["captured"])
     first = data["realms"][0]
-    assert first["id"] == "law" and first["module"] == 0 and first["trials"], "everyone starts in Law (Module 0)"
+    assert first["id"] == "law" and first["module"] == 0 and first["halls"], "everyone starts in Law (Module 0)"
     assert any(r["encounters"] for r in data["realms"]), "at least one realm should have a dragon"
 
 
@@ -93,24 +93,24 @@ def test_who_answers_map_to_the_right_option(doc, capture):
 
 # ---- drift: recaptures that would make a lesson false must fail ----------------------------
 
-@pytest.mark.parametrize("old,new,why", [
-    ("LIMIT 100000", "LIMIT 1000000", "row cap changed"),
-    ('      JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_2"',
-     '      LEFT OUTER JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_2"', "Model join became outer"),
-    ('    FROM "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_1"\n',
-     '    FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_9"\n'
-     '      JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_1" ON "ta_9"."PRODUCTID" = "ta_1"."PRODUCTID"\n',
-     "pruning turned off"),
-    ("WHERE LOWER(\"ta_4\".\"REGION\") = 'west'", "WHERE \"ta_4\".\"REGION\" = 'West'", "filter no longer case-insensitive"),
+@pytest.mark.parametrize("case,old,new,why", [
+    ("l5_cte_two_step", "LIMIT 100000", "LIMIT 1000000", "row cap changed (the Forests teach it)"),
+    (CASE, '      JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_2"',
+     '      LEFT OUTER JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_2"', "the Model's join turned outer (the Lake)"),
+    ("l2_filter_case_insensitive", "WHERE LOWER(\"ta_2\".\"REGION\") = 'west'", "WHERE \"ta_2\".\"REGION\" = 'West'",
+     "filter no longer case-insensitive (the Mines)"),
+    ("l5_cte_two_step", '"ta_1"."STORENAME" "ca_1",', '"ta_1"."STORE_NAME" "ca_1",', "physical column renamed (the Forests)"),
 ])
-def test_a_recapture_that_falsifies_a_lesson_fails(doc, capture, old, new, why):
-    assert _errors(doc, _recaptured(capture, old, new)), f"{why}: the build should have failed"
+def test_a_recapture_that_falsifies_a_lesson_fails(doc, capture, case, old, new, why):
+    assert _errors(doc, _recaptured(capture, old, new, case)), f"{why}: the build should have failed"
 
 
-def test_pruning_held_count_is_what_catches_an_extra_fact_join(doc, capture):
-    # The FROM line survives in this variant, so only sql_count can see the extra fact read.
-    cap = _recaptured(capture, '  "qt_1" AS (', '  "qt_x" AS (SELECT 1 FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES"),\n  "qt_1" AS (')
-    assert any("expected '\"FACT_RETAPP_SALES\"' 1 time(s)" in e for e in _errors(doc, cap))
+def test_a_ranking_that_loses_its_null_guard_fails(doc, capture):
+    # The Isles teach that the rank orders by the null-safe sum; the line still exists once, so
+    # only sql_count notices the guard inside the ranking has gone.
+    cap = _recaptured(capture, '    WHEN sum("ta_2"."SALES") IS NOT NULL THEN sum("ta_2"."SALES")\n    ELSE 0\n  END desc)',
+                      '    sum("ta_2"."SALES") desc)', "l5_rank")
+    assert any("found 1" in e for e in _errors(doc, cap))
 
 
 def test_changed_agentql_fails_the_build(doc, capture):
@@ -171,20 +171,24 @@ def _law(doc):
     return next(r for r in doc["realms"] if r["id"] == "law")
 
 
+def _law_trials(doc):
+    return [t for h in _law(doc)["halls"] for t in h["trials"]]
+
+
 def test_trial_claims_need_a_boolean_truth(doc, capture):
-    next(t for t in _law(doc)["trials"] if t["kind"] == "claim")["truth"] = "false"
-    assert any("realm law trial" in e and "true/false truth" in e for e in _errors(doc, capture))
+    next(t for t in _law_trials(doc) if t["kind"] == "claim")["truth"] = "false"
+    assert any("realm law hall" in e and "true/false truth" in e for e in _errors(doc, capture))
 
 
 def test_a_petition_must_go_to_a_known_engine(doc, capture):
-    next(t for t in _law(doc)["trials"] if t["kind"] == "route")["answer"] = "spellbook"
+    next(t for t in _law_trials(doc) if t["kind"] == "route")["answer"] = "spellbook"
     assert any("answer must be one of ['keyword', 'agentql', 'code_complete']" in e for e in _errors(doc, capture))
 
 
 def test_trial_answers_compile_to_the_right_option(doc, capture):
     data, _ = B.compile_quest(doc, *capture)
-    law = data["realms"][0]
-    for raw, t in zip(_law(doc)["trials"], law["trials"]):
+    law = [t for h in data["realms"][0]["halls"] for t in h["trials"]]
+    for raw, t in zip(_law_trials(doc), law):
         if raw["kind"] == "claim":
             assert t["correct"] == (0 if raw["truth"] else 1)
         else:
@@ -198,7 +202,7 @@ def _realm(doc, rid):
 
 
 def test_a_sealed_realm_cannot_hold_content(doc, capture):
-    _realm(doc, "forests")["encounters"] = ["l2_total_touches_fact_only"]
+    _realm(doc, "isles")["sealed"] = True
     assert any("a sealed realm has no trials or encounters" in e for e in _errors(doc, capture))
 
 
@@ -232,6 +236,10 @@ def test_a_realm_module_must_exist_in_the_course(doc, course):
 
 
 def test_could_the_ai_write_it_needs_the_rejection_to_hold(doc, capture):
+    _encounter(doc)["points"].append({"kind": "choice", "sql": [], "scroll": [], "rejected_case": "l2_current_date_rejected",
+                                      "ask": "a", "hint": "h", "lesson": "l",
+                                      "options": [{"text": "no", "correct": True}, {"text": "yes"}]})
+    assert _errors(doc, capture) == []
     date, cases = copy.deepcopy(capture)
     cases["l2_current_date_rejected"]["sql"] = "SELECT CURRENT_DATE"   # as if it now compiled
     errors = B.compile_quest(doc, date, cases)[1]
@@ -242,11 +250,11 @@ def test_could_the_ai_write_it_needs_the_rejection_to_hold(doc, capture):
 
 def test_inlined_data_has_no_raw_markup_and_round_trips(doc, capture):
     data, _ = B.compile_quest(doc, *capture)
-    data["realms"][0]["trials"][0]["why"] = "<!--<script></script>-->&amp;"
+    data["realms"][0]["halls"][0]["trials"][0]["why"] = "<!--<script></script>-->&amp;"
     html = B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "")
     body = html.split('<script id="quest-data" type="application/json">', 1)[1].split("</script>", 1)[0]
     assert not set(body) & set("<>&"), "the data block must contain no raw <, > or &"
-    assert json.loads(body)["realms"][0]["trials"][0]["why"] == "<!--<script></script>-->&amp;"
+    assert json.loads(body)["realms"][0]["halls"][0]["trials"][0]["why"] == "<!--<script></script>-->&amp;"
 
 
 def test_page_makes_no_outside_requests(doc, capture):
@@ -356,3 +364,53 @@ def test_scroll_rows_have_one_cell_per_column(doc, capture):
     cols = len(scroll["columns"])
     scroll["rows"][0]["cells"] = ["A person", "in natural language"] + ["x"] * (cols - 1)
     assert any(f"has {cols + 1} cells for {cols} columns" in e for e in _errors(doc, capture))
+
+
+
+# ---- halls and the quest path ----------------------------------------------------------------
+
+def _mines(doc):
+    return next(e for e in doc["encounters"] if e["case"] == "l2_filter_case_insensitive")
+
+
+def test_the_dragon_path_must_be_agentql(doc, capture):
+    _encounter(doc)["path"]["answer"] = "keyword"
+    assert any("path.answer must be 'agentql'" in e for e in _errors(doc, capture))
+
+
+def test_the_right_path_cannot_be_blocked(doc, capture):
+    _mines(doc)["path"]["blocked"]["agentql"] = "closed"
+    assert any("the right path can't be blocked" in e for e in _errors(doc, capture))
+
+
+def test_every_path_explains_itself(doc, capture):
+    del _encounter(doc)["path"]["why"]["code_complete"]
+    assert any("path needs a why (or blocked) text for code_complete" in e for e in _errors(doc, capture))
+
+
+def test_the_mines_block_the_keyword_path(doc, capture):
+    data, _ = B.compile_quest(doc, *capture)
+    mines = next(r for r in data["realms"] if r["id"] == "mines")["encounters"][0]["path"]
+    kinds = {o: x["kind"] for o, x in zip(mines["options"], mines["outcomes"])}
+    assert kinds == {"Send it to Keyword Search": "blocked", "Send it to AgentQL": "win", "Send it to Code Complete": "loss"}
+
+
+def test_a_hall_needs_questions(doc, capture):
+    _law(doc)["halls"][0]["trials"] = []
+    assert any("realm law hall 1: needs at least one question" in e for e in _errors(doc, capture))
+
+
+def test_every_recap_row_is_taught_in_a_hall(doc, capture):
+    for h in _law(doc)["halls"]:
+        h["rows"] = [x for x in h["rows"] if x != "Where the answer lives"]
+    assert any("'Where the answer lives' is in the recap but no hall teaches it" in e for e in _errors(doc, capture))
+
+
+def test_a_hall_teaches_only_scroll_columns_and_rows(doc, capture):
+    _law(doc)["halls"][0]["columns"] = ["Keyword Search", "Telepathy"]
+    assert any("unknown scroll columns ['Telepathy']" in e for e in _errors(doc, capture))
+
+
+def test_who_points_name_their_rule(doc, capture):
+    del _mines(doc)["points"][0]["rule"]
+    assert any("a who point needs a rule" in e for e in _errors(doc, capture))

@@ -13,19 +13,23 @@ touches this directory or the lesson capture. The site's home page, which lists 
 
 ## The realm map
 
-Every player starts in the **Kingdom of Law**, the foundation, then travels to any open realm.
-Each realm is one module of the course. The map suggests a route per audience (account rep:
-Law only; data engineer: Law, Mines, Lake, Forests; SE: everything), but does not enforce one.
+Every player starts in the **Kingdom of Law**, the foundation, then takes a quest in any realm.
+Each quest is a couple of minutes. The map suggests a route per audience (account rep: Law
+only; data engineer: Law, Mines, Lake, Forests; SE: everything) but does not enforce one.
 
-| Realm | Module | Played as | Status |
-|---|---|---|---|
-| The Elven Kingdom of Law | 0 · Why AgentQL, and why keywords stay | The Scroll of Law, then claims and petitions (send each question to Keyword Search or AgentQL) | open |
-| The Riders of the Grasslands | 1 · The two APIs | | sealed |
-| The Dwarven Mines of Silver Ore | 2 · Reading the SQL | SQL dragons from lessons 2.1, 2.2, 2.3 | open |
-| The Craftsmen of the Lake | 3 · The semantic layer | SQL dragon from lesson 3.4 | open |
-| The Golden Forests | 4 · Dates and calendars | | sealed |
-| The Shifting Isles | 5 · Advanced shapes | | sealed |
-| The Warriors of the White Peaks | 6 · Trust, but verify | | sealed |
+| Realm | Lesson | Played as |
+|---|---|---|
+| The Elven Kingdom of Law | Module 0 | Four halls, each teaching one idea with its slice of the comparison table, then two questions on it. The full table is the recap on the decree |
+| The Dwarven Mines of Silver Ore | 2.3 | The gentle start: a simple question with the **keyword path blocked**, so even it is written in AgentQL. 4 scales |
+| The Craftsmen of the Lake | 3.4 | A question keywords can't ask: every product, sold or not. 3 scales |
+| The Golden Forests | 5.1 | A question in two steps (a CTE). 4 scales |
+| The Shifting Isles | 5.2 | A rank within each region (a window function). 4 scales |
+
+Every quest runs the same way: the merchant's **business question**; **read the intent** (send it
+to Keyword Search, AgentQL or Code Complete, and a wrong path says why it doesn't fit); the
+Wizard writes the **AgentQL**; the **dragon** is the SQL ThoughtSpot compiled; and the **hoard**
+lists the deterministic rules uncovered. Each quest's question genuinely needs AgentQL, except the
+Mines, where the keyword path is closed on purpose.
 
 In a dragon fight, each scale is a line of the generated SQL, broken by saying who put it there:
 ThoughtSpot (from the Model or its own rules), the AgentQL, or the AI (which never writes the

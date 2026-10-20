@@ -165,7 +165,33 @@ def _point(p: dict, who: dict, sql: list[str], scroll: list[str], cases: dict[st
     return out
 
 
-def _encounter(e: dict, n: int, who: dict, cases: dict[str, dict], errors: list[str]) -> dict | None:
+def _path(path: dict, engines: dict, where: str, errors: list[str]) -> dict:
+    """The quest's first question: which engine fits the merchant's intent?
+
+    The dragon is the AgentQL path, so AgentQL must be the answer. Every other engine either
+    explains why it doesn't fit (`why`) or is closed in this realm (`blocked`), which costs no
+    gold: the player simply chooses again.
+    """
+    order = list(engines)
+    answer, blocked, why = path.get("answer"), path.get("blocked") or {}, path.get("why") or {}
+    if answer != "agentql":
+        errors.append(f"{where}: the dragon is the AgentQL path, so path.answer must be 'agentql', got {answer!r}")
+    if answer in blocked:
+        errors.append(f"{where}: the right path can't be blocked")
+    outcomes = []
+    for k in order:
+        text = blocked.get(k) if k in blocked else why.get(k)
+        if not text:
+            errors.append(f"{where}: path needs a why (or blocked) text for {k}")
+        outcomes.append({"kind": "blocked" if k in blocked else "win" if k == answer else "loss", "why": text or ""})
+    for k in list(blocked) + list(why):
+        if k not in engines:
+            errors.append(f"{where}: unknown engine {k!r} in path")
+    return {"options": [f"Send it to {engines[k]}" for k in order], "outcomes": outcomes,
+            "correct": order.index(answer) if answer in order else 0}
+
+
+def _encounter(e: dict, n: int, who: dict, engines: dict, cases: dict[str, dict], errors: list[str]) -> dict | None:
     cid = e.get("case", f"#{n}")
     cap = cases.get(cid)
     if cap is None:
@@ -182,12 +208,16 @@ def _encounter(e: dict, n: int, who: dict, cases: dict[str, dict], errors: list[
               for i, p in enumerate(e.get("points") or [], 1)]
     if not points:
         errors.append(f"{cid}: no points")
-    for field in ("quest", "why_agentql", "loot", "takeaway"):
+    for field in ("quest", "path", "takeaway"):
         if not e.get(field):
             errors.append(f"{cid}: missing {field}")
+    for i, (raw, pt) in enumerate(zip(e.get("points") or [], points), 1):
+        if raw.get("kind") == "who" and not raw.get("rule"):
+            errors.append(f"{cid} point {i}: a who point needs a rule (the hoard lists it)")
+        pt["rule"] = raw.get("rule", "")
     return {"case": cid, "lesson": str(e.get("lesson") or ""), "quest": e.get("quest", ""),
-            "whyAgentql": e.get("why_agentql", ""), "agentql": scroll_lines, "sql": sql_lines,
-            "points": points, "loot": e.get("loot", ""), "takeaway": e.get("takeaway", "")}
+            "path": _path(e.get("path") or {}, engines, f"{cid} path", errors),
+            "agentql": scroll_lines, "sql": sql_lines, "points": points, "takeaway": e.get("takeaway", "")}
 
 
 def _trial(t: dict, engines: dict, where: str, errors: list[str]) -> dict:
@@ -211,6 +241,40 @@ def _trial(t: dict, engines: dict, where: str, errors: list[str]) -> dict:
     return {"kind": kind, "text": "", "why": "", "options": [], "correct": 0}
 
 
+def _halls(r: dict, engines: dict, rid: str, errors: list[str]) -> list[dict]:
+    """Law teaches one idea per hall, with just the slice of the comparison table it needs,
+    then tests it straight away. The full table (`scroll`) is the recap at the end."""
+    scroll = r.get("scroll") or {}
+    columns = scroll.get("columns") or []
+    rows = {row.get("label"): row.get("cells") or [] for row in scroll.get("rows") or []}
+    for label, cells in rows.items():
+        if len(cells) != len(columns):
+            errors.append(f"realm {rid}: scroll row {label!r} has {len(cells)} cells for {len(columns)} "
+                          f"columns (an unquoted comma in YAML splits a cell)")
+    halls, taught = [], set()
+    for n, h in enumerate(r.get("halls") or [], 1):
+        where = f"realm {rid} hall {n}"
+        cols = h.get("columns") or []
+        bad_cols = [c for c in cols if c not in columns]
+        bad_rows = [x for x in h.get("rows") or [] if x not in rows]
+        if bad_cols or bad_rows:
+            errors.append(f"{where}: unknown scroll columns {bad_cols} or rows {bad_rows}")
+        if not h.get("title") or not h.get("teach"):
+            errors.append(f"{where}: needs a title and something to teach")
+        trials = [_trial(t, engines, f"{where} trial {i}", errors) for i, t in enumerate(h.get("trials") or [], 1)]
+        if not trials:
+            errors.append(f"{where}: needs at least one question")
+        idx = [columns.index(c) for c in cols if c in columns]
+        table = [{"label": x, "cells": [rows[x][i] for i in idx if i < len(rows[x])]} for x in h.get("rows") or [] if x in rows]
+        taught.update(x for x in h.get("rows") or [])
+        halls.append({"title": h.get("title", ""), "teach": h.get("teach") or [], "columns": cols,
+                      "rows": table, "trials": trials})
+    for label in rows:
+        if halls and label not in taught:
+            errors.append(f"realm {rid}: scroll row {label!r} is in the recap but no hall teaches it")
+    return halls
+
+
 def compile_quest(doc: dict, date: str | None, cases: dict[str, dict]) -> tuple[dict, list[str]]:
     """Turn encounters.yaml plus the capture into the game's data. Returns (data, errors)."""
     errors: list[str] = []
@@ -226,7 +290,7 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict]) -> tuple[
 
     by_case: dict[str, dict] = {}
     for n, e in enumerate(doc.get("encounters") or [], 1):
-        built = _encounter(e, n, who, cases, errors)
+        built = _encounter(e, n, who, engines, cases, errors)
         if built:
             by_case[built["case"]] = built
 
@@ -241,8 +305,8 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict]) -> tuple[
                 errors.append(f"realm {rid}: missing {field}")
         if not isinstance(r.get("module"), int):
             errors.append(f"realm {rid}: module must be a number")
-        trials = [_trial(t, engines, f"realm {rid} trial {i}", errors)
-                  for i, t in enumerate(r.get("trials") or [], 1)]
+        halls = _halls(r, engines, rid, errors)
+        trials = [t for h in halls for t in h["trials"]]
         enc_ids = list(r.get("encounters") or [])
         for cid in enc_ids:
             if cid not in by_case and not any(e.get("case") == cid for e in doc.get("encounters") or []):
@@ -255,25 +319,18 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict]) -> tuple[
             errors.append(f"realm {rid}: a sealed realm has no trials or encounters")
         if not sealed and not (trials or enc_ids):
             errors.append(f"realm {rid}: an open realm needs trials or encounters (or sealed: true)")
-        scroll = r.get("scroll")
-        if scroll:
-            cols = len(scroll.get("columns") or [])
-            for row in scroll.get("rows") or []:
-                if len(row.get("cells") or []) != cols:
-                    errors.append(f"realm {rid}: scroll row {row.get('label')!r} has {len(row.get('cells') or [])} "
-                                  f"cells for {cols} columns (an unquoted comma in YAML splits a cell)")
-        if trials and not r.get("decree"):
-            errors.append(f"realm {rid}: a trials realm needs a decree")
+        if halls and not r.get("decree"):
+            errors.append(f"realm {rid}: a realm of halls needs a decree")
         realms.append({
             "id": rid, "name": r.get("name", ""), "module": r.get("module"), "depth": r.get("depth", ""),
             "minutes": r.get("minutes", 0), "covers": r.get("covers", ""), "sealed": sealed,
-            "scroll": r.get("scroll"), "trials": trials, "decree": r.get("decree") or [],
+            "scroll": r.get("scroll"), "halls": halls, "decree": r.get("decree") or [],
             "encounters": [by_case[c] for c in enc_ids if c in by_case],
         })
     if not realms:
         errors.append("realms: none defined")
-    elif realms[0]["sealed"] or not realms[0]["trials"]:
-        errors.append("realms: the first realm is where every player starts; it must be open with trials")
+    elif realms[0]["sealed"] or not realms[0]["halls"]:
+        errors.append("realms: the first realm is where every player starts; it must be open with halls")
     for cid in by_case:
         if cid not in used:
             errors.append(f"{cid}: defined under encounters but in no realm")
@@ -383,7 +440,8 @@ def main(argv: list[str] | None = None) -> int:
     open_realms = [r for r in data["realms"] if not r["sealed"]]
     encs = [e for r in data["realms"] for e in r["encounters"]]
     summary = (f"{len(open_realms)}/{len(data['realms'])} realms open, {len(encs)} dragons, "
-               f"{sum(len(e['points']) for e in encs)} scales, {sum(len(r['trials']) for r in data['realms'])} trials")
+               f"{sum(len(e['points']) for e in encs)} scales, "
+               f"{sum(len(h['trials']) for r in data['realms'] for h in r['halls'])} hall questions")
     if args.check:
         print(f"agentql-quest: OK ({summary})")
         return 0

@@ -46,28 +46,29 @@ const expect = (screenName, why) => { if (S().screen !== screenName) fail(`expec
 const magicButton = () => ctx.__actions().length - 1;          // magic is always the last choice
 const log = [];
 
-// One question, answered the given way. "right" | "wrong-then-right" | "magic".
-function answerQuestion(q, how, explain) {
+// One question, answered the given way: "right" | "wrong-then-right" | "magic".
+// `wrongIndex` picks the wrong option (default: the one after the right answer).
+function answerQuestion(correct, nOptions, how, explain, revealText, wrongIndex) {
   const before = S().gold;
   if (how === "magic") {
     const heard = notes;
     press(magicButton());
     if (S().flash.kind !== "magic" || S().gold !== before) fail("magic must win and lose no gold");
     if (notes === heard) fail("magic should make its sound");
-    if (!has(q.options[q.correct]) || !has(explain)) fail("magic must show the answer and its explanation");
+    if (!has(revealText) || !has(explain)) fail("magic must show the answer and its explanation");
     press(0);
     return;
   }
   if (how === "wrong-then-right") {
     const heard = notes;
-    press((q.correct + 1) % q.options.length);
+    press(wrongIndex ?? (correct + 1) % nOptions);
     const taken = Math.min(LOSS, before);
     if (S().flash.kind !== "loss" || S().gold !== before - taken) fail(`a miss with ${before} gold should take ${taken}`);
-    if (notes === heard) fail("a miss should make the dragon's sound");
-    press(0);                                                   // try again, same question
+    if (notes === heard) fail("a miss should make its sound");
+    press(0);                                                   // answer again, same question
   }
   const mid = S().gold, heard = notes;
-  press(q.correct);
+  press(correct);
   if (S().flash.kind !== "win" || S().gold !== mid + WIN) fail(`a right answer should add ${WIN} gold`);
   if (notes === heard) fail("a right answer should sound the coin");
   if (!has(explain)) fail("the explanation must follow a right answer");
@@ -84,27 +85,36 @@ expect("map", "the title opens the map");
 if (intervals.size !== 0) fail("music must stay off until the player turns it on");
 Q.realms.forEach(r => { if (!has(r.name)) fail(`map does not list ${r.name}`); });
 
-// A road other than Law is closed until Law is done; sealed realms stay sealed.
-press(Q.realms.findIndex((r, i) => i > 0 && !r.sealed));
+// Other roads wait for Law.
+press(1);
 if (!text().includes("The roads open once")) fail("a realm other than Law should wait for Law");
 press(1);
-Q.realms.forEach((r, i) => { if (r.sealed) { press(i); if (!text().includes("not yet open")) fail(`${r.name} should be sealed`); press(0); } });
 
 const expected = {};
 
-// Law: the scroll, then every trial. A miss on an empty purse costs nothing; magic on the second.
+// ---- Law: each hall teaches, then asks. Empty-purse miss is free; magic is free. --------------
 const law = Q.realms[0];
-press(0); expect("realm", "Law opens"); press(0); expect("scroll", "the Scroll of Law comes first");
-law.scroll.rows.forEach(row => { if (!has(row.label)) fail(`scroll is missing "${row.label}"`); });
-press(0); expect("trials", "the court follows the scroll");
-law.trials.forEach((t, n) => {
-  if (!has(t.text)) fail("petition not shown");
-  answerQuestion(t, n === 0 ? "wrong-then-right" : n === 1 ? "magic" : n === 2 ? "wrong-then-right" : "right", t.why);
+press(0); expect("realm", "Law opens"); press(0);
+let missed = false;
+law.halls.forEach((h, hi) => {
+  expect("hall", `hall ${hi + 1}`);
+  if (!has(h.title) || !h.teach.every(t => has(t))) fail(`hall ${hi + 1} must show its title and what it teaches`);
+  h.rows.forEach(row => { if (!has(row.label)) fail(`hall ${hi + 1} is missing its "${row.label}" row`); });
+  press(0); expect("trials", `hall ${hi + 1}'s petitions`);
+  h.trials.forEach((t, ti) => {
+    if (!has(t.text)) fail("petition not shown");
+    const how = hi === 0 && ti === 0 ? "wrong-then-right" : hi === 0 && ti === 1 ? "magic" : hi === 1 && ti === 0 ? "wrong-then-right" : "right";
+    if (how === "wrong-then-right" && hi === 1) missed = true;
+    answerQuestion(t.correct, t.options.length, how, t.why, t.options[t.correct]);
+  });
 });
-expected.law = WIN * (law.trials.length - 1) - LOSS;           // trial 1 missed at 0 gold (free); trial 2 magic; trial 3 missed
+const lawQs = law.halls.reduce((n, h) => n + h.trials.length, 0);
+expected.law = WIN * (lawQs - 1) - LOSS;                       // one magic (no gold); one paid miss
 if (S().gold !== expected.law) fail(`Law should end with ${expected.law} gold, has ${S().gold}`);
-if (!text().includes("Royal decree") || !text().includes(`${expected.law} of`)) fail("the decree should show the gold won");
-log.push(`law: scroll + ${law.trials.length} trials, ${expected.law} gold (empty-purse miss free, magic free, one miss -${LOSS})`);
+expect("decree", "the last hall ends in the decree");
+if (!text().includes(`${expected.law} of`)) fail("the decree should show the gold won");
+law.scroll.rows.forEach(row => { if (!has(row.label)) fail(`the recap is missing "${row.label}"`); });
+log.push(`law: ${law.halls.length} halls, ${lawQs} questions, ${expected.law} gold; recap table shown`);
 
 // Effects off: silent. Music on: a loop plays notes, and the setting is remembered.
 snd.toggle("sfx"); let before = notes; snd.play("coin");
@@ -118,43 +128,54 @@ snd.toggle("music");
 if (intervals.size !== 0) fail("turning music off should stop the loop");
 press(0); expect("map", "the decree returns to the map");
 
-// Every dragon realm: scale 2 of the first dragon is missed once, everything else right first time.
-Q.realms.forEach((r, i) => {
+// ---- Every quest: read the intent, then the AgentQL path and its dragon. ----------------------
+Q.realms.forEach((r, ri) => {
   if (r.sealed || !r.encounters.length) return;
-  press(i); expect("realm", r.name); press(0);
-  r.encounters.forEach((e, n) => {
-    expect("encIntro", `dragon ${n + 1} of ${r.name}`);
-    if (!has(e.quest)) fail("quest not shown");
-    press(0); expect("forge", "the scroll goes to the Forge"); press(0); expect("battle", "the fight starts");
-    e.points.forEach((p, k) => {
-      if (!has(p.ask)) fail("question not shown");
-      const lit = (screen.innerHTML.match(/class="ln[^"]*\bon\b/g) || []).length;
-      const want = (p.sqlHl === "all" ? e.sql.length : p.sqlHl.length) +
-                   (p.scrollHl === "all" ? e.agentql.length : p.scrollHl.length);
-      if (lit !== want) fail(`expected ${want} highlighted lines, found ${lit}`);
-      answerQuestion(p, n === 0 && k === 1 ? "wrong-then-right" : "right", p.lesson);
-    });
-    expect("victory", "the dragon falls");
-    if (!has(e.loot)) fail("loot not shown");
-    press(0);                                                   // next dragon, or back to the map
+  const e = r.encounters[0], p = e.path;
+  press(ri); expect("realm", r.name); press(0); expect("quest", `${r.name} opens on the question`);
+  if (!has(e.quest)) fail("the business question is not shown");
+  // Blocked paths cost nothing; then one paid wrong path; then the right one.
+  p.outcomes.forEach((o, i) => {
+    if (o.kind !== "blocked") return;
+    const g = S().gold;
+    press(i);
+    if (S().flash.kind !== "blocked" || S().gold !== g || !has(o.why)) fail("a blocked path must explain itself and cost nothing");
+    press(0);
   });
-  expect("map", `${r.name} returns to the map when cleared`);
-  const scales = r.encounters.reduce((a, e) => a + e.points.length, 0);
-  expected[r.id] = WIN * scales - LOSS;
-  log.push(`${r.id}: ${r.encounters.length} dragon(s), ${scales} scales, ${expected[r.id]} gold`);
+  const wrong = p.outcomes.findIndex(o => o.kind === "loss");
+  if (wrong < 0) fail("every quest should have at least one wrong path");
+  answerQuestion(p.correct, p.options.length, "right", p.outcomes[p.correct].why, p.options[p.correct]);
+  expect("wizard", "the Wizard writes the AgentQL after the right path");
+  if (!has(e.agentql[0])) fail("the scroll is not shown");
+  press(0); expect("forge", "the scroll goes to the Forge"); press(0); expect("battle", "the fight starts");
+  e.points.forEach((pt, k) => {
+    if (!has(pt.ask)) fail("question not shown");
+    const lit = (screen.innerHTML.match(/class="ln[^"]*\bon\b/g) || []).length;
+    const want = (pt.sqlHl === "all" ? e.sql.length : pt.sqlHl.length) + (pt.scrollHl === "all" ? e.agentql.length : pt.scrollHl.length);
+    if (lit !== want) fail(`expected ${want} highlighted lines, found ${lit}`);
+    answerQuestion(pt.correct, pt.options.length, k === 1 ? "wrong-then-right" : "right", pt.lesson, pt.options[pt.correct]);
+  });
+  expect("victory", "the dragon falls");
+  e.points.filter(pt => pt.rule).forEach(pt => { if (!has(pt.rule)) fail(`the hoard should list the rule "${pt.rule}"`); });
+  expected[r.id] = WIN * (1 + e.points.length) - LOSS;
+  if (S().gold !== expected[r.id]) fail(`${r.id} should end with ${expected[r.id]} gold, has ${S().gold}`);
+  press(0); expect("map", "the hoard returns to the map");
+  log.push(`${r.id}: path (${p.outcomes.filter(o => o.kind === "blocked").length} blocked) + ${e.points.length} scales, ${expected[r.id]} gold`);
 });
 
-// Saved bests and the treasury; replaying a realm worse never lowers the best.
+// Saved bests, the course high score, and a worse replay that can't lower a best.
 const saved = JSON.parse(store["aqq-progress"]);
 Object.entries(expected).forEach(([id, g]) => { if (!saved[id] || !saved[id].done || saved[id].best !== g) fail(`${id} should save best ${g}`); });
 const total = Object.values(expected).reduce((a, b) => a + b, 0);
-if (!text().includes(`${total} of`)) fail(`the map should show the high score ${total}`);
-if (!text().includes("Course complete")) fail("with every open realm cleared, the map should say the course is complete");
-const lake = Q.realms.findIndex(r => r.id === "lake");
-press(lake); press(0); press(0); press(0);                      // realm -> intro -> forge -> battle
-Q.realms[lake].encounters[0].points.forEach(p => answerQuestion(p, "magic", p.lesson));
-expect("victory", "an all-magic run still finishes the dragon");
-if (JSON.parse(store["aqq-progress"]).lake.best !== expected.lake) fail("a 0-gold replay must not lower the best");
-log.push(`high score ${total}, kept after a 0-gold replay`);
+if (!text().includes("Course complete") || !text().includes(`${total} of`)) fail(`the map should show the course high score ${total}`);
+const ri = Q.realms.findIndex(r => r.encounters.length);
+press(ri); press(0);
+const e0 = Q.realms[ri].encounters[0];
+answerQuestion(e0.path.correct, e0.path.options.length, "magic", e0.path.outcomes[e0.path.correct].why, e0.path.options[e0.path.correct]);
+press(0); press(0);
+e0.points.forEach(pt => answerQuestion(pt.correct, pt.options.length, "magic", pt.lesson, pt.options[pt.correct]));
+expect("victory", "an all-magic run still finishes the quest");
+if (JSON.parse(store["aqq-progress"])[Q.realms[ri].id].best !== expected[Q.realms[ri].id]) fail("a 0-gold replay must not lower the best");
+log.push(`course high score ${total}, kept after a 0-gold replay`);
 log.push(`sound: silent before input; coin, theft, magic and fanfare heard; toggles and music work (${notes} notes)`);
 console.log(log.join("\n"));
