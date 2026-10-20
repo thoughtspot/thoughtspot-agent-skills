@@ -163,8 +163,9 @@ expression.
   A date literal in a filter is fine (`d >= '2025-01-01'`, or `TO_DATE('2025-01-01')`).
 - **No regex** — `REGEXP_LIKE`, `~`, `REGEXP_SUBSTR`, `REGEXP_REPLACE` all fail (some only
   at `fetch-data`). Use `LIKE` / `ILIKE`.
-- **Never rely on more than 100,000 rows.** Every statement is capped: `LIMIT 100000` is
-  appended, and a larger explicit `LIMIT` is silently rewritten down to 100,000. For a bulk
+- **Never rely on more than 100,000 rows.** Ordinary single-SELECT statements are capped:
+  `LIMIT 100000` is appended, and a larger explicit `LIMIT` is silently rewritten down to
+  100,000 (a set-operation query can compile without it — see `limitations.md`). For a bulk
   extract, page with `ORDER BY … LIMIT n OFFSET m` (works on 26.9.0.cl) or filter into
   slices.
 - **Every CTE must reference a real column** — a CTE selecting only literals errors with

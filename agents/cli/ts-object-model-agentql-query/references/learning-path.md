@@ -45,7 +45,7 @@ table collects them in one place; the **determinism column is the throughline** 
 |---|---|---|
 | **0 · Why AgentQL** | AgentQL widens *what* can be asked; keywords keep a human able to *verify* it — more expressibility, same governance. | ThoughtSpot *compiles* AgentQL and never executes the AI's SQL, so a more expressive question never trades away a governed, reproducible answer. |
 | **1 · The two APIs** | `generate-sql` compiles (nothing runs); `fetch-data` compiles then runs. Branch on `status`, not the exit code; AgentQL can only read. | `generate-sql` shows the exact warehouse SQL the engine emits — the same AgentQL always compiles to the same `executable_sql`, inspectable before a row is read. |
-| **2 · First queries** | Read the generated SQL: the joins — their *type* and keys — plus null-guards and the row cap are written for you from the Model (e.g. `sales → inner join → products`), not by your query. | The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run. |
+| **2 · First queries** | Read the generated SQL: the joins — their *type* and keys — are written for you from the Model (e.g. `sales → inner join → products`), and ThoughtSpot adds the null-guards and the row cap — none of it from your query. | The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run. |
 | **3 · The semantic layer** | The Model supplies joins, formulas, security and safe division by default — and AgentQL can *override* the default join for greater expressibility: *all products, including those with no sales* becomes a CTE of all products `LEFT JOIN`ed to sales, instead of the Model's inner join. | Whether you take the Model's join or override it, the governed parts — keys, `AGG`/`SUM`, null-handling and RLS — are still injected deterministically by the engine. You change the join *shape*, never the governance. |
 | **4 · Dates and functions** | Date parts and relative periods resolve through the **Model's calendar** — standard Gregorian, or a custom/fiscal calendar (e.g. 4-4-5) when the Model is configured with one; you never hand-code date math. | AgentQL joins the Model's configured calendar and compiles "last period" to the same bounded SQL every run — live-verified standard `EXTRACT(YEAR …)`, and a JulyOffset join on `absolute_year_number`. |
 | **5 · Advanced shapes** | CTEs, windows, top-N-per-group, period-over-period and set operations expand what you can express — within AgentQL's (narrower-than-SQL) envelope. | Even multi-stage shapes compile deterministically through the same governed engine; expressibility grows while compile-not-execute holds. |
@@ -174,12 +174,13 @@ human able to validate intent:
 |---|---|---|
 | Who writes the query | A person, in natural language → **keywords** | An **AI agent**, in AgentQL (Semantic SQL) |
 | What it can express | Filtering, pivoting, drill-down, calendars, governed metrics | All of that **plus** multi-stage analysis, complex expressions, CTEs, outer joins, and (where supported) cross-model queries |
-| How a human validates | Inspect the **keywords** — no SQL to read | **Still the keywords** — the agent's query is surfaced as keywords too, so a human confirms intent without reading SQL |
+| How a human validates | Inspect the **keywords** — no SQL to read | **Read the generated SQL** that `generate-sql` returns — and *coming soon*, the agent's query surfaced back as **keywords**, so a human confirms intent without reading SQL |
 | Execution | Governed engine compiles to warehouse SQL | **Same** governed engine, same compile step |
 
 **Keyword Search isn't replaced.** Today keywords do two jobs: they create the query and they
-let a person check it. With AgentQL the agent takes over creating the query, and keywords keep
-the checking job.
+let a person check it. With AgentQL the agent takes over creating the query; today you confirm
+its intent by reading the generated SQL (what `generate-sql` returns), and surfacing that query
+back as keywords — so you can check it without reading SQL — is coming soon.
 
 **The trade-off.** The more an agent can express, the more decisions it makes, and some of those
 are about business meaning (which join, at what grain), not just syntax.
@@ -345,7 +346,7 @@ customer asks whether an agent using AgentQL could drop a table: what do you sho
 
 ## Module 2 — First queries: reading the SQL ThoughtSpot writes (~35 min · 4 questions)
 
-**Key takeaway.** Read the generated SQL: the joins — their *type* and keys — plus null-guards and the row cap are written for you from the Model (e.g. `sales → inner join → products`), not by your query.
+**Key takeaway.** Read the generated SQL: the joins — their *type* and keys — are written for you from the Model (e.g. `sales → inner join → products`), and ThoughtSpot adds the null-guards and the row cap — none of it from your query.
 
 **How determinism holds.** The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run.
 
@@ -365,7 +366,9 @@ FROM "(Sample) Retail - Apparel" AS "t1"
   out (the Model has `join_progressive` on).
 - `CASE WHEN sum(x) IS NOT NULL THEN sum(x) ELSE 0 END`: an empty total comes back as 0,
   not NULL.
-- `LIMIT 100000` is added to every statement. That is the row cap (see `limitations.md`).
+- `LIMIT 100000` is appended — the row cap ThoughtSpot adds to ordinary single-SELECT
+  statements (see `limitations.md`; a set-operation query like lesson 1.3's `UNION ALL`
+  compiles without it).
 - Physical names (`"RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES"."SALES"`) replace the
   business names.
 
@@ -733,10 +736,10 @@ LIMIT 100000                                        -- ⑥ the row cap
   list, not just products that sold. This is what makes the outer join meaningful (3.3).
 - **② Join type and keys.** You never wrote `PRODUCTID` or `STOREID`, or that these are inner
   joins. The **Model** supplied the relationships; two people asking this get the same joins.
-- **③ Null handling.** Every aggregate is wrapped `CASE WHEN … IS NOT NULL … ELSE 0`. The
-  Model decides how NULLs behave — you didn't.
+- **③ Null handling.** The `sum` is wrapped `CASE WHEN … IS NOT NULL … ELSE 0`, so an empty
+  group returns 0, not NULL. ThoughtSpot's compiler adds this null-handling — you didn't.
 - **④ A governed business rule.** The region filter compiled to `LOWER(REGION) = 'west'` —
-  case-insensitive by the Model's definition, not your literal.
+  string `=` is case-insensitive because ThoughtSpot's compiler lowercases both sides, not your literal.
 - **⑤ Your contribution.** The `LEFT OUTER JOIN` and `COALESCE` are the *agent's* logic — the
   expressibility AgentQL adds. The Model couldn't express "all members" through its inner
   join; you did, with a CTE.

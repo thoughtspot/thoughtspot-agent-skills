@@ -86,11 +86,13 @@ works directly. Membership filters (`IN (SELECT …)`) → CTE + equi-join (`pat
 | `LIMIT n` with **n > 100,000** | silently rewritten to `LIMIT 100000` — see the note below | ✓ live 2026-10-14 |
 | `LOG(x)` (one-argument) | the **natural** log — compiles to `ln(x)` (`LOG(100)` = 4.605…). PostgreSQL's one-argument `LOG` is base 10, so SQL written for Postgres returns a different number with no error. Write `LN(x)` for the natural log; base 10 has no working form, because the two-argument `LOG(10, x)` is rejected (❌ above) — divide by `LN(10)` | ✓ live 2026-10-14 |
 
-> **Every generated statement is capped at 100,000 rows.** `LIMIT 100000` is appended to
-> statements that carry no `LIMIT` of their own, and an explicit larger `LIMIT` (e.g.
-> `LIMIT 200000`) is **rewritten down** to 100,000 (✓ live 2026-10-14). On a large Model a
-> bulk extract is silently truncated with nothing in the response to say so. Whether it is
-> configurable is unconfirmed. Smaller explicit limits are honoured as written.
+> **Ordinary single-SELECT statements are capped at 100,000 rows.** `LIMIT 100000` is
+> appended to a single-SELECT statement that carries no `LIMIT` of its own, and an explicit
+> larger `LIMIT` (e.g. `LIMIT 200000`) is **rewritten down** to 100,000 (✓ live 2026-10-14).
+> **Not universal:** a set-operation query compiles without the cap — the `UNION ALL` in the
+> course's lesson 1.3 is captured compiling to `SUCCESS` with no `LIMIT` at all. On a large
+> Model a bulk extract is silently truncated with nothing in the response to say so. Whether
+> the cap is configurable is unconfirmed. Smaller explicit limits are honoured as written.
 
 > **Diagnostics that name the wrong thing** ([SCAL-326945](https://thoughtspot.atlassian.net/browse/SCAL-326945)):
 > a derived table in a `JOIN` reports `Table 't' not found`, where `'t'` is a hardcoded

@@ -377,6 +377,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.19.2 | 2026-10-21 | **Five factual corrections to the course, checked against the committed SQL capture.** (1) Module 0 — surfacing an agent's AgentQL back as reviewable **keywords** is *coming soon*, not shipped; today you validate by reading the generated SQL. (2) Module 2 takeaway — **null-guards and the row cap are ThoughtSpot's**, not the Model's (joins, keys, formulas and RLS are the Model's); the course had contradicted `limitations.md`/`agentql-rules.md`. (3) Lesson 3.4 ③ — "the `sum` is wrapped" (not "every aggregate"; the capture has an un-guarded outer `sum` in share-of-total), and credit ThoughtSpot's compiler. (4) Lesson 3.4 ④ — case-insensitive `=` comes from ThoughtSpot's compiler (`LOWER` both sides), not the Model. (5) The 100,000-row cap is **not universal** — the lesson 1.3 `UNION ALL` is captured compiling to `SUCCESS` with no `LIMIT`; qualified the claim in `learning-path.md`, `limitations.md` and `agentql-rules.md`. No lesson numbers or titles changed. |
 | 2.19.1 | 2026-10-20 | Link **AgentQL Quest**, the course as a browser game on the repo's GitHub Pages site, from the Learn AgentQL section, with its poster as the link. |
 | 2.19.0 | 2026-10-20 | **Removed Module 6 (*Trust, but verify*): 21 → 18 lessons, Modules 0–5.** Its lessons centred on **silent-drop bugs** — `QUALIFY` and `FILTER (WHERE …)` accepted then ignored, and a `SUM(CASE … date-literal …)` returning an `UNKNOWN`-typed empty — which are defects that will be fixed, so a course resting on them rots (same reasoning as lesson 1.3). The loud-failure cases (`STDDEV`, `IN (SELECT …)`) stay documented in `limitations.md`, and all six behaviours remain under live test in the `agentql-retest` **limitations** suite (`qualify`, `filter_where`, `sum_case_date_literal`, `stddev_*`, `in_subquery`). Removed the six `l6_*` lessons-suite cases and their three controls; regenerated `lesson-sql.md` and the offline bundle. |
 | 2.18.3 | 2026-10-20 | **Lesson 3.2 (formula measures: `AGG`, not `SUM`) is now concrete and live-captured.** Replaced the "pick your own Model" template (placeholder `<attribute>`/`<formula measure>` query) with a real example on the same Semi-Additive Model as lesson 2.4: `AGG("Spot Balance")` by country, with the actual generated SQL — one `AGG` compiles to a six-CTE query carrying the Model's `group_max` + `sum_if` balance logic, a vivid "read the SQL to see how much the formula does". Break-it variants (`SUM` of a formula → `NESTED_AGGREGATE_NOT_SUPPORTED`; `AGG` of a raw measure → `QUERY_GEN_ERROR`; bare formula ≡ `AGG`) now show real captured errors. Behaviour guards unchanged (still live-tested on the portable Dunder Mifflin / sample Models). |
@@ -800,8 +801,9 @@ expression.
   A date literal in a filter is fine (`d >= '2025-01-01'`, or `TO_DATE('2025-01-01')`).
 - **No regex** — `REGEXP_LIKE`, `~`, `REGEXP_SUBSTR`, `REGEXP_REPLACE` all fail (some only
   at `fetch-data`). Use `LIKE` / `ILIKE`.
-- **Never rely on more than 100,000 rows.** Every statement is capped: `LIMIT 100000` is
-  appended, and a larger explicit `LIMIT` is silently rewritten down to 100,000. For a bulk
+- **Never rely on more than 100,000 rows.** Ordinary single-SELECT statements are capped:
+  `LIMIT 100000` is appended, and a larger explicit `LIMIT` is silently rewritten down to
+  100,000 (a set-operation query can compile without it — see `limitations.md`). For a bulk
   extract, page with `ORDER BY … LIMIT n OFFSET m` (works on 26.9.0.cl) or filter into
   slices.
 - **Every CTE must reference a real column** — a CTE selecting only literals errors with
@@ -1414,11 +1416,13 @@ works directly. Membership filters (`IN (SELECT …)`) → CTE + equi-join (`pat
 | `LIMIT n` with **n > 100,000** | silently rewritten to `LIMIT 100000` — see the note below | ✓ live 2026-10-14 |
 | `LOG(x)` (one-argument) | the **natural** log — compiles to `ln(x)` (`LOG(100)` = 4.605…). PostgreSQL's one-argument `LOG` is base 10, so SQL written for Postgres returns a different number with no error. Write `LN(x)` for the natural log; base 10 has no working form, because the two-argument `LOG(10, x)` is rejected (❌ above) — divide by `LN(10)` | ✓ live 2026-10-14 |
 
-> **Every generated statement is capped at 100,000 rows.** `LIMIT 100000` is appended to
-> statements that carry no `LIMIT` of their own, and an explicit larger `LIMIT` (e.g.
-> `LIMIT 200000`) is **rewritten down** to 100,000 (✓ live 2026-10-14). On a large Model a
-> bulk extract is silently truncated with nothing in the response to say so. Whether it is
-> configurable is unconfirmed. Smaller explicit limits are honoured as written.
+> **Ordinary single-SELECT statements are capped at 100,000 rows.** `LIMIT 100000` is
+> appended to a single-SELECT statement that carries no `LIMIT` of its own, and an explicit
+> larger `LIMIT` (e.g. `LIMIT 200000`) is **rewritten down** to 100,000 (✓ live 2026-10-14).
+> **Not universal:** a set-operation query compiles without the cap — the `UNION ALL` in the
+> course's lesson 1.3 is captured compiling to `SUCCESS` with no `LIMIT` at all. On a large
+> Model a bulk extract is silently truncated with nothing in the response to say so. Whether
+> the cap is configurable is unconfirmed. Smaller explicit limits are honoured as written.
 
 > **Diagnostics that name the wrong thing** ([SCAL-326945](https://thoughtspot.atlassian.net/browse/SCAL-326945)):
 > a derived table in a `JOIN` reports `Table 't' not found`, where `'t'` is a hardcoded
@@ -1697,7 +1701,7 @@ table collects them in one place; the **determinism column is the throughline** 
 |---|---|---|
 | **0 · Why AgentQL** | AgentQL widens *what* can be asked; keywords keep a human able to *verify* it — more expressibility, same governance. | ThoughtSpot *compiles* AgentQL and never executes the AI's SQL, so a more expressive question never trades away a governed, reproducible answer. |
 | **1 · The two APIs** | `generate-sql` compiles (nothing runs); `fetch-data` compiles then runs. Branch on `status`, not the exit code; AgentQL can only read. | `generate-sql` shows the exact warehouse SQL the engine emits — the same AgentQL always compiles to the same `executable_sql`, inspectable before a row is read. |
-| **2 · First queries** | Read the generated SQL: the joins — their *type* and keys — plus null-guards and the row cap are written for you from the Model (e.g. `sales → inner join → products`), not by your query. | The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run. |
+| **2 · First queries** | Read the generated SQL: the joins — their *type* and keys — are written for you from the Model (e.g. `sales → inner join → products`), and ThoughtSpot adds the null-guards and the row cap — none of it from your query. | The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run. |
 | **3 · The semantic layer** | The Model supplies joins, formulas, security and safe division by default — and AgentQL can *override* the default join for greater expressibility: *all products, including those with no sales* becomes a CTE of all products `LEFT JOIN`ed to sales, instead of the Model's inner join. | Whether you take the Model's join or override it, the governed parts — keys, `AGG`/`SUM`, null-handling and RLS — are still injected deterministically by the engine. You change the join *shape*, never the governance. |
 | **4 · Dates and functions** | Date parts and relative periods resolve through the **Model's calendar** — standard Gregorian, or a custom/fiscal calendar (e.g. 4-4-5) when the Model is configured with one; you never hand-code date math. | AgentQL joins the Model's configured calendar and compiles "last period" to the same bounded SQL every run — live-verified standard `EXTRACT(YEAR …)`, and a JulyOffset join on `absolute_year_number`. |
 | **5 · Advanced shapes** | CTEs, windows, top-N-per-group, period-over-period and set operations expand what you can express — within AgentQL's (narrower-than-SQL) envelope. | Even multi-stage shapes compile deterministically through the same governed engine; expressibility grows while compile-not-execute holds. |
@@ -1826,12 +1830,13 @@ human able to validate intent:
 |---|---|---|
 | Who writes the query | A person, in natural language → **keywords** | An **AI agent**, in AgentQL (Semantic SQL) |
 | What it can express | Filtering, pivoting, drill-down, calendars, governed metrics | All of that **plus** multi-stage analysis, complex expressions, CTEs, outer joins, and (where supported) cross-model queries |
-| How a human validates | Inspect the **keywords** — no SQL to read | **Still the keywords** — the agent's query is surfaced as keywords too, so a human confirms intent without reading SQL |
+| How a human validates | Inspect the **keywords** — no SQL to read | **Read the generated SQL** that `generate-sql` returns — and *coming soon*, the agent's query surfaced back as **keywords**, so a human confirms intent without reading SQL |
 | Execution | Governed engine compiles to warehouse SQL | **Same** governed engine, same compile step |
 
 **Keyword Search isn't replaced.** Today keywords do two jobs: they create the query and they
-let a person check it. With AgentQL the agent takes over creating the query, and keywords keep
-the checking job.
+let a person check it. With AgentQL the agent takes over creating the query; today you confirm
+its intent by reading the generated SQL (what `generate-sql` returns), and surfacing that query
+back as keywords — so you can check it without reading SQL — is coming soon.
 
 **The trade-off.** The more an agent can express, the more decisions it makes, and some of those
 are about business meaning (which join, at what grain), not just syntax.
@@ -1997,7 +2002,7 @@ customer asks whether an agent using AgentQL could drop a table: what do you sho
 
 ### Module 2 — First queries: reading the SQL ThoughtSpot writes (~35 min · 4 questions)
 
-**Key takeaway.** Read the generated SQL: the joins — their *type* and keys — plus null-guards and the row cap are written for you from the Model (e.g. `sales → inner join → products`), not by your query.
+**Key takeaway.** Read the generated SQL: the joins — their *type* and keys — are written for you from the Model (e.g. `sales → inner join → products`), and ThoughtSpot adds the null-guards and the row cap — none of it from your query.
 
 **How determinism holds.** The join type and keys come from the Model definition every time, so the same question emits identical governed SQL run-to-run.
 
@@ -2017,7 +2022,9 @@ FROM "(Sample) Retail - Apparel" AS "t1"
   out (the Model has `join_progressive` on).
 - `CASE WHEN sum(x) IS NOT NULL THEN sum(x) ELSE 0 END`: an empty total comes back as 0,
   not NULL.
-- `LIMIT 100000` is added to every statement. That is the row cap (see `limitations.md`).
+- `LIMIT 100000` is appended — the row cap ThoughtSpot adds to ordinary single-SELECT
+  statements (see `limitations.md`; a set-operation query like lesson 1.3's `UNION ALL`
+  compiles without it).
 - Physical names (`"RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES"."SALES"`) replace the
   business names.
 
@@ -2385,10 +2392,10 @@ LIMIT 100000                                        -- ⑥ the row cap
   list, not just products that sold. This is what makes the outer join meaningful (3.3).
 - **② Join type and keys.** You never wrote `PRODUCTID` or `STOREID`, or that these are inner
   joins. The **Model** supplied the relationships; two people asking this get the same joins.
-- **③ Null handling.** Every aggregate is wrapped `CASE WHEN … IS NOT NULL … ELSE 0`. The
-  Model decides how NULLs behave — you didn't.
+- **③ Null handling.** The `sum` is wrapped `CASE WHEN … IS NOT NULL … ELSE 0`, so an empty
+  group returns 0, not NULL. ThoughtSpot's compiler adds this null-handling — you didn't.
 - **④ A governed business rule.** The region filter compiled to `LOWER(REGION) = 'west'` —
-  case-insensitive by the Model's definition, not your literal.
+  string `=` is case-insensitive because ThoughtSpot's compiler lowercases both sides, not your literal.
 - **⑤ Your contribution.** The `LEFT OUTER JOIN` and `COALESCE` are the *agent's* logic — the
   expressibility AgentQL adds. The Model couldn't express "all members" through its inner
   join; you did, with a CTE.
