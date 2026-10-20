@@ -14,6 +14,8 @@
 #   '*' in sql/scroll highlights everything.
 #
 # The build fails (offline, no cluster) when:
+#   - an encounter's `lesson` is not a lesson in learning-path.md whose Guarded by lists its case,
+#     or any text names a lesson ("lesson 3.4") or Module that learning-path.md no longer has
 #   - a `case` is missing from the capture, or was not SUCCESS
 #   - `agentql` differs from the captured AgentQL by anything but layout
 #   - an `sql` line, `scroll` substring or `sql_count` no longer holds
@@ -27,6 +29,7 @@ who_options:
 
 encounters:
   - case: l3_all_products_left_join
+    lesson: "3.4"                         # its Guarded by line must list `case`
     paths: [dwarf]
     quest: >-
       Show me every product with its sales in the West region. Products never sold in the
@@ -155,7 +158,7 @@ encounters:
         lesson: >-
           RLS lives in the Model and ThoughtSpot injects it at compile time. The agent can't
           write it or remove it, and AgentQL can't name warehouse tables, only the Model.
-          Lesson 3.5 shows the injected filter.
+          Lesson 3.3 shows the injected filter.
 
       - kind: choice
         sql: ['*']
@@ -177,9 +180,9 @@ encounters:
           the rest.
 
     # Not machine-checked: the capture holds SQL, not rows. These are the taught numbers from
-    # the Results paragraph of lesson 3.6 (learning-path.md), attributed as such on screen.
+    # the Results paragraph of lesson 3.4 (learning-path.md), attributed as such on screen.
     loot: >-
-      In lesson 3.6's live run, this query returned 349 products, 4 of them with no West
+      In lesson 3.4's live run, this query returned 349 products, 4 of them with no West
       sales. Without your outer join those 4 would have silently vanished.
     takeaway: >-
       The outer join was yours: the flexibility AgentQL adds. Everything else came from
@@ -201,7 +204,7 @@ court:
     why: >-
       True. ThoughtSpot compiles the same AgentQL to the same governed SQL every time. That is
       what makes answers consistent and testable.
-    backed_by: learning-path.md Modules 1 and 7
+    backed_by: learning-path.md Module 1
   - claim: '"Ask the AI the same question twice and it will always write the same AgentQL."'
     truth: false
     why: >-
@@ -216,13 +219,13 @@ court:
     why: >-
       True. AgentQL adds expressibility: outer joins, window functions, multi-step questions.
       The Model's governance still applies to all of it.
-    backed_by: learning-path.md lesson 3.6
+    backed_by: learning-path.md lesson 3.4
   - claim: '"A clever agent could rewrite its query to slip past row-level security."'
     truth: false
     why: >-
       False. RLS is injected when ThoughtSpot compiles the query. The agent can't write it or
       remove it, and AgentQL can only see the Model, never the raw tables.
-    backed_by: learning-path.md lesson 3.5
+    backed_by: learning-path.md lesson 3.3
   - claim: '"If the query comes back SUCCESS, the answer must be what I meant."'
     truth: false
     why: >-

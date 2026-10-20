@@ -40,7 +40,7 @@ def _encounter(doc):
 
 
 def _recaptured(capture, old, new):
-    """The real capture with one edit to lesson 3.6's generated SQL, as a recapture might make."""
+    """The real capture with one edit to lesson 3.4's generated SQL, as a recapture might make."""
     date, cases = capture
     cases = copy.deepcopy(cases)
     assert old in cases[CASE]["sql"], old
@@ -240,3 +240,39 @@ def test_pages_workflow_deploys_only_from_main():
         assert wf["jobs"][job].get("if") == "github.ref == 'refs/heads/main'", job
     triggers = wf[True] if True in wf else wf["on"]  # PyYAML reads the bare key `on` as True
     assert "pull_request" not in triggers and "pull_request_target" not in triggers
+
+
+# ---- lesson and module numbers the text names ------------------------------------------------
+
+@pytest.fixture(scope="module")
+def course():
+    return B.parse_learning_path(B.LEARNING_PATH.read_text(encoding="utf-8"))
+
+
+def test_course_refs_in_the_committed_encounters_are_current(doc, course):
+    assert B.check_course_refs(B.ENCOUNTERS.read_text(encoding="utf-8"), doc, *course) == []
+
+
+def test_each_encounter_names_the_lesson_that_guards_its_case(doc, course):
+    _, lessons = course
+    for e in doc["encounters"]:
+        assert e["case"] in lessons[str(e["lesson"])]
+
+
+@pytest.mark.parametrize("text,needle", [
+    ("Lesson 9.9 shows it.", "lesson 9.9"),
+    ("backed_by: learning-path.md lesson 9.9", "lesson 9.9"),
+    ("backed_by: learning-path.md Modules 1 and 9", "Module 9"),
+    ("backed_by: learning-path.md Module 9", "Module 9"),
+])
+def test_a_renumbered_course_fails_the_build(doc, course, text, needle):
+    errors = B.check_course_refs(text, {"encounters": []}, *course)
+    assert any(needle in e for e in errors), errors
+
+
+def test_an_encounter_pointing_at_the_wrong_lesson_fails(doc, course):
+    _, lessons = course
+    wrong = next(n for n, ids in lessons.items() if CASE not in ids)
+    _encounter(doc)["lesson"] = wrong
+    errors = B.check_course_refs("", doc, *course)
+    assert any(f"lesson {wrong}'s Guarded by line does not list {CASE}" in e for e in errors)

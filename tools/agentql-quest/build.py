@@ -16,7 +16,8 @@ makes no outside requests and runs from GitHub Pages, any static host, or a doub
     python3 tools/agentql-quest/build.py --out _site/index.html
     python3 tools/agentql-quest/build.py --check           # validate only (tools/validate/check_agentql_quest.py)
 
-Fails when an encounter no longer matches the capture: a missing or rejected case, AgentQL
+Fails when an encounter no longer matches the capture or the course: a lesson or Module the
+text names that the course no longer has, a missing or rejected case, AgentQL
 that differs by more than layout, an `sql` line that is no longer in the SQL exactly, or an
 `sql_count` that no longer holds. A recapture that changes what a lesson teaches therefore
 breaks the build instead of quietly teaching something false.
@@ -35,6 +36,7 @@ import yaml
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 LESSON_SQL = ROOT / "agents/cli/ts-object-model-agentql-query/references/lesson-sql.md"
+LEARNING_PATH = ROOT / "agents/cli/ts-object-model-agentql-query/references/learning-path.md"
 ENCOUNTERS = HERE / "encounters.yaml"
 TEMPLATE = HERE / "game.html"
 FONT_DIR = HERE / "fonts"
@@ -208,6 +210,42 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict]) -> tuple[
     return {"captured": date, "encounters": encounters, "paths": paths, "court": court}, errors
 
 
+def parse_learning_path(text: str) -> tuple[set[str], dict[str, set[str]]]:
+    """Module numbers, and per lesson number ("3.4") the case ids its **Guarded by** line names."""
+    modules = set(re.findall(r"^## Module (\d+)\b", text, re.M))
+    lessons: dict[str, set[str]] = {}
+    for m in re.finditer(r"^### (\d+\.\d+)\b(.*?)(?=^##)", text + "\n##", re.S | re.M):
+        guarded = re.findall(r"\*\*Guarded by:?\*\*:?([^\n]*)", m.group(2))
+        lessons[m.group(1)] = {cid for line in guarded for cid in re.findall(r"`([^`]+)`", line)}
+    return modules, lessons
+
+
+def check_course_refs(encounters_text: str, doc: dict, modules: set[str], lessons: dict[str, set[str]]) -> list[str]:
+    """The game's text names lessons and modules by number; the course renumbers them.
+
+    Every "lesson X.Y" / "Module N" (or "Modules N and M") in encounters.yaml must still exist,
+    and each encounter's `lesson` must be one whose Guarded by line lists the encounter's case,
+    so "In lesson 3.4's live run" points at the lesson that actually teaches this SQL.
+    """
+    errors = []
+    for ref in sorted(set(re.findall(r"\blessons? (\d+\.\d+)\b", encounters_text, re.I))):
+        if ref not in lessons:
+            errors.append(f"encounters.yaml names lesson {ref}, which learning-path.md no longer has")
+    for a, b in re.findall(r"\bModules? (\d+)(?: and (\d+))?\b", encounters_text):
+        for ref in filter(None, (a, b)):
+            if ref not in modules:
+                errors.append(f"encounters.yaml names Module {ref}, which learning-path.md no longer has")
+    for e in doc.get("encounters") or []:
+        cid, lesson = e.get("case"), str(e.get("lesson") or "")
+        if not lesson:
+            errors.append(f"{cid}: missing lesson (the learning-path.md lesson it comes from)")
+        elif lesson not in lessons:
+            errors.append(f"{cid}: lesson {lesson} is not in learning-path.md")
+        elif cid not in lessons[lesson]:
+            errors.append(f"{cid}: lesson {lesson}'s Guarded by line does not list {cid}")
+    return errors
+
+
 def font_faces(font_dir: pathlib.Path = FONT_DIR) -> str:
     """@font-face rules with each font inlined as a data: URI, so the page loads nothing."""
     rules = []
@@ -233,8 +271,10 @@ def render(template: str, data: dict, fonts_css: str = "") -> str:
 def build(check: bool = False) -> tuple[str | None, dict, list[str]]:
     """Validate, and unless `check`, render. Returns (html or None, data, errors)."""
     date, cases = parse_lesson_sql(LESSON_SQL.read_text(encoding="utf-8"))
-    doc = yaml.safe_load(ENCOUNTERS.read_text(encoding="utf-8")) or {}
+    raw = ENCOUNTERS.read_text(encoding="utf-8")
+    doc = yaml.safe_load(raw) or {}
     data, errors = compile_quest(doc, date, cases)
+    errors += check_course_refs(raw, doc, *parse_learning_path(LEARNING_PATH.read_text(encoding="utf-8")))
     if errors:
         return None, data, errors
     fonts = font_faces()  # read even under --check, so a missing font file fails pre-commit too
