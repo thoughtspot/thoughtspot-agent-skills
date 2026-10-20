@@ -20,6 +20,8 @@
 #   scroll:    substrings of the AgentQL lines to highlight. [] = nothing (itself a clue).
 #   sql_count: {text: n} facts about the whole statement that one line can't pin down.
 #   rule:      the deterministic rule this scale shows, listed in the hoard when it breaks.
+#   rule_by:   who adds that rule (model | thoughtspot), or agentql for the player's own part,
+#              or determinism for the conclusion. A who point takes it from its answer.
 #   '*' in sql/scroll highlights everything.
 #
 # The build fails (offline, no cluster) when:
@@ -274,6 +276,7 @@ encounters:
           ThoughtSpot wraps every SUM this way, so an empty total comes back as 0, not NULL.
       - kind: choice
         rule: The same AgentQL always compiles to the same SQL
+        rule_by: determinism
         sql: ['*']
         scroll: ['*']
         ask: >-
@@ -290,8 +293,8 @@ encounters:
           different: asked again, the Wizard might word the scroll differently, which is why a
           person checks the intent with keywords.
     takeaway: >-
-      You asked one simple question. ThoughtSpot and the Model added the join, the
-      case-insensitive filter and the null-safe sum, the same way every time.
+      One simple question. Every rule above came from the Model and ThoughtSpot, not from the
+      AI, so this AgentQL compiles to exactly this SQL, every time.
 
   # ---- Craftsmen of the Lake: a question keywords can't ask -------------------------------------
   - case: l3_all_products_left_join
@@ -344,7 +347,7 @@ encounters:
           this question get the same joins, every time.
       - kind: who
         answer: agentql
-        rule: "Yours: every product kept, matched or not"
+        rule: Every product kept, sold in the West or not
         sql: ['LEFT OUTER JOIN "qt_1" "ta_6"', 'ON "ta_5"."ca_1" = "ta_6"."ca_2"']
         sql_count: {'LEFT OUTER JOIN': 1}       # only this join is outer; the Model's stay inner
         scroll: ['LEFT OUTER JOIN west']
@@ -358,7 +361,8 @@ encounters:
           Your AgentQL. This is the expressibility AgentQL adds. ThoughtSpot kept your join
           shape and still applied the Model's keys and null guards inside it.
       - kind: choice
-        rule: Row-level security is added at compile time and can't be removed
+        rule: Row-level security comes from the Model and is added at compile time; no query can remove it
+        rule_by: model
         sql: []
         scroll: []
         ask: >-
@@ -378,8 +382,8 @@ encounters:
           write it or remove it, and AgentQL can't name warehouse tables, only the Model.
           Lesson 3.3 shows the injected filter.
     takeaway: >-
-      The outer join was yours: the flexibility AgentQL adds. The joins, keys and security
-      came from the Model. Check your part. Trust the rest.
+      The outer join was yours: the flexibility AgentQL adds. Everything else was a rule from
+      the Model and ThoughtSpot, applied exactly as it is to every other query.
 
   # ---- Golden Forests: a question in two steps --------------------------------------------------
   - case: l5_cte_two_step
@@ -404,7 +408,7 @@ encounters:
     points:
       - kind: who
         answer: agentql
-        rule: "Yours: the question built in two steps"
+        rule: The question built in two steps
         sql: ['WITH "qt_0" AS (', 'FROM "qt_0" "ta_3"']
         scroll: ['WITH st AS (', 'FROM st']
         ask: >-
@@ -447,8 +451,8 @@ encounters:
         hint: It isn't in your scroll, and the AI never writes the SQL that runs.
         lesson: ThoughtSpot adds the row cap to every statement, however many steps it has.
     takeaway: >-
-      You chose the two steps. The Model and ThoughtSpot supplied the names, the joins and the
-      row cap inside each of them.
+      The two steps were yours. Inside each step, the Model and ThoughtSpot applied the same
+      rules they apply everywhere, so the result is just as repeatable.
 
   # ---- Shifting Isles: ranking within each region ------------------------------------------------
   - case: l5_rank
@@ -472,7 +476,7 @@ encounters:
     points:
       - kind: who
         answer: agentql
-        rule: "Yours: a rank within each region"
+        rule: A rank that restarts in every region
         sql: ['rank() over (partition by "ta_1"."REGION" order by CASE']
         scroll: ['RANK() OVER (PARTITION BY "t1"."region"']
         ask: >-
@@ -509,6 +513,7 @@ encounters:
           the same as for a simple total.
       - kind: choice
         rule: The same AgentQL always compiles to the same SQL
+        rule_by: determinism
         sql: ['*']
         scroll: ['*']
         ask: >-
@@ -524,5 +529,5 @@ encounters:
           Same scroll, same Model, same SQL, however advanced the shape. That is what makes the
           answer repeatable, and testable.
     takeaway: >-
-      The window function was yours. The joins and the null-safe sums came from the Model and
-      ThoughtSpot, exactly as they did for the simplest question in the mines.
+      The ranking was yours. The rules inside it were the same ones that governed the simplest
+      question in the mines: however advanced the shape, the governed parts never change.

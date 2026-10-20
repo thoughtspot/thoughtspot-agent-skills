@@ -139,6 +139,8 @@ Q.realms.forEach((r, ri) => {
   const e = r.encounters[0], p = e.path;
   press(ri); expect("realm", r.name); press(0); expect("quest", `${r.name} opens on the question`);
   if (!has(e.quest)) fail("the business question is not shown");
+  if (!screen.innerHTML.includes('class="art scene"') || !screen.innerHTML.includes(r.name.toUpperCase()))
+    fail(`${r.name}'s question should show its own scene, with its name on the banner`);
   // Blocked paths cost nothing; then one paid wrong path; then the right one.
   p.outcomes.forEach((o, i) => {
     if (o.kind !== "blocked") return;
@@ -161,7 +163,16 @@ Q.realms.forEach((r, ri) => {
     answerQuestion(pt.correct, pt.options.length, k === 1 ? "wrong-then-right" : "right", pt.lesson, pt.options[pt.correct]);
   });
   expect("victory", "the dragon falls");
-  e.points.filter(pt => pt.rule).forEach(pt => { if (!has(pt.rule)) fail(`the hoard should list the rule "${pt.rule}"`); });
+  // The hoard: rules tagged by who adds them, the player's part apart, determinism as the conclusion.
+  if (!text().includes("DETERMINISTIC RULES UNCOVERED")) fail("the hoard should be headed as deterministic rules");
+  if (!text().includes("So the same AgentQL always compiles to the same SQL.")) fail("every hoard ends on determinism");
+  const hoard = text(), yoursAt = hoard.indexOf("YOUR PART");
+  e.points.filter(pt => pt.rule && pt.ruleBy !== "determinism").forEach(pt => {
+    if (!has(pt.rule)) fail(`the hoard should list "${pt.rule}"`);
+    const at = hoard.indexOf(pt.rule.slice(0, 30));
+    const inYours = yoursAt >= 0 && at > yoursAt;
+    if ((pt.ruleBy === "agentql") !== inYours) fail(`"${pt.rule}" is in the wrong part of the hoard`);
+  });
   expected[r.id] = WIN * (1 + e.points.length) - LOSS;
   if (S().gold !== expected[r.id]) fail(`${r.id} should end with ${expected[r.id]} gold, has ${S().gold}`);
   press(0); expect("map", "the hoard returns to the map");

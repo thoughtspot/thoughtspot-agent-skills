@@ -156,7 +156,14 @@ p { margin: 0; max-width: 62ch; }
 @keyframes flicker { 50% { color: var(--blood); opacity: .7; } }
 .scene { color: var(--dim); }
 .scene .hot { color: var(--hot); }
-@media (prefers-reduced-motion: reduce) { .cursor, .flame { animation: none; } }
+.shimmer { color: var(--phosphor); animation: shimmer 2.4s ease-in-out infinite; }
+@keyframes shimmer { 50% { color: var(--dim); } }
+.rules { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.rules li { display: grid; grid-template-columns: 6.5em 1fr; gap: 12px; }
+.verdict { font-size: 27px; color: var(--hot); border-top: 1px dashed var(--dim); border-bottom: 1px dashed var(--dim); padding: 8px 0; }
+.rules .who { color: var(--hot); letter-spacing: .06em; }
+@media (max-width: 520px) { .rules li { grid-template-columns: 1fr; gap: 0; } }
+@media (prefers-reduced-motion: reduce) { .cursor, .flame, .shimmer { animation: none; } }
 </style>
 </head>
 <body>
@@ -222,9 +229,9 @@ const ART = {
 
 // The map is drawn row by row and framed in code, so the border always lines up.
 const MAP_ROWS = [
-  String.raw`[3] CRAFTSMEN       ~~~~~~~~~~~~        [5] THE SHIFTING`,
-  String.raw`    OF THE LAKE    ~~~  LAKE  ~~~       ~~~ ISLES ~~~`,
-  String.raw`                    ~~~~~~~~~~~~      ~~~~~~~~~~~~~`,
+  String.raw`[3] CRAFTSMEN       =-=-=-=-=-=-        [5] THE SHIFTING`,
+  String.raw`    OF THE LAKE    =-=  LAKE  =-=       =-= ISLES =-=`,
+  String.raw`                    =-=-=-=-=-=-      =-=-=-=-=-=-=`,
   String.raw`[2] DWARVEN MINES`,
   String.raw`  /\/\/\/\                        ,,,,,,,,,,,,,`,
   String.raw`   ##   ##        [1] KINGDOM     ,,[4] GOLDEN,,,`,
@@ -262,6 +269,68 @@ function hallScene(title, petitioning) {
     // Private-use markers, so no letter in a hall's name can turn into a torch or a crown.
     .replace("\uE000", '<span class="flame">*</span>').replace("\uE001", '<span class="flame b">*</span>')
     .replace("\uE002", '<span class="hot crown">W</span>')).join("\n")}</pre>`;  // one cell wide, unlike ♛
+}
+
+const SCENES = {
+ "mines": [
+  "@BANNER",
+  "       /\\           /\\/\\          /\\ ",
+  "      /  \\    /\\   /    \\   /\\   /  \\ ",
+  "     /    \\__/  \\_/      \\_/  \\_/    \\ ",
+  "        ||   $    __________    %   ||",
+  "        ||       /          \\       ||",
+  "        ||      |  .  ..  .  |      ||",
+  "   _____||______|____________|______||_____",
+  "         o        ______         o",
+  "        /|\\=    [_o____o_]     =/|\\ ",
+  "        / \\                     / \\ "
+ ],
+ "lake": [
+  "@BANNER",
+  "          _/\\_           _/\\_          _/\\_",
+  "         |    |  ___    |    |  ___   |    |",
+  "         |_[]_| |   |   |_[]_| |   |  |_[]_|",
+  "          |  |  |___|    |  |  |___|   |  |",
+  "!   =-=   |  |  =-=   =- |  | =-=   =- |  |  =-=",
+  "! =-   =- |  | =-   =-=  |  |  =-   =-=|  | =-",
+  "!   =-=      =-=   \\____o____/   =-=       =-=",
+  "! =-   =-=   =-   =-   =-=   =-   =-   =-=   =-"
+ ],
+ "forests": [
+  "@BANNER",
+  "     $     ,@@@@@,        %      ,@@@@@,     $",
+  "         ,@@@@@@@@@,          ,@@@@@@@@@,",
+  "        @@@@@@@@@@@@@   %    @@@@@@@@@@@@@",
+  "     %   '@@@@@@@@@'    ,@@,  '@@@@@@@@@'   %",
+  "            |   |      @@@@@@     |   |",
+  "     $      |   |       '||'      |   |     $",
+  "  __________|___|________||_______|___|__________"
+ ],
+ "isles": [
+  "@BANNER",
+  "            _/\\_                    ,/\\,",
+  "          _/    \\_       $        _/    \\_",
+  "!  =-=   /  ,  ,  \\   =-=   =-=  /   ||   \\   =-=",
+  "! =-=-= (__________) =-=-= =-=-=(____||____) =-=-=",
+  "!   =-=-=    =-=-=    =-=-=    =-=-=    =-=-=   =-",
+  "!  =-=-   =-=-   \\_o_/   =-=-   =-=-   =-=-   =-="
+ ]
+};
+
+// A realm's scene: its art with the realm's name on a banner. Markers apply to the art only,
+// never to the banner, so no letter in a name can become a lantern.
+function realmScene(r) {
+  const lines = SCENES[r.id];
+  if (!lines) return art("banner", "hot");
+  const art_ = lines.filter(l => l !== "@BANNER").map(l => l.replace(/^!/, ""));
+  const name = r.name.toUpperCase(), inner = name.length + 6;
+  const W = Math.max(inner + 2, ...art_.map(l => l.length));
+  const off = " ".repeat(Math.floor((W - inner - 2) / 2));
+  const banner = [off + "." + "-".repeat(inner) + ".", off + "|   " + name + "   |", off + "'" + "-".repeat(inner) + "'"];
+  const out = lines.flatMap(l => l === "@BANNER" ? banner.map(b => esc(b))
+    : [l.startsWith("!") ? `<span class="shimmer">${esc(l.slice(1))}</span>`
+       : esc(l).replace(/\$/g, '<span class="flame">*</span>').replace(/%/g, '<span class="flame b">*</span>')]);
+  return `<pre class="art scene" aria-hidden="true">${out.join("\n")}</pre>`;
 }
 
 const MAP = (() => {
@@ -367,6 +436,7 @@ const Sound = (() => {
 
 // ---- Gold: right answers earn it, wrong ones cost some, magic is free. -------------------------
 const GOLD_WIN = 10, GOLD_LOSS = 5;
+const DETERMINISM = "So the same AgentQL always compiles to the same SQL.";
 const LEGEND = `<div class="legend" aria-label="Who is who">
   <span><b>Wizard</b> = the AI</span><span><b>Scroll</b> = the AgentQL it wrote</span>
   <span><b>Forge</b> = ThoughtSpot + the Model</span><span><b>Dragon</b> = the SQL that runs</span></div>`;
@@ -492,7 +562,7 @@ const SCREENS = {
   },
   realm() {
     const r = realm();
-    const head = `${art(r.halls.length ? "crown" : "banner")}<h2>${esc(r.name)}</h2><p class="realm-meta">${esc(meta(r))}</p><p>${esc(r.covers)}</p>`;
+    const head = `${r.halls.length ? art("crown") : realmScene(r)}<h2>${esc(r.name)}</h2><p class="realm-meta">${esc(meta(r))}</p><p>${esc(r.covers)}</p>`;
     if (r.sealed) return `${head}<p class="dim">The road here is not yet open. This realm is still being written.</p>
       ${choices([{ label: "Back to the map", go: toMap }])}`;
     if (state.realm !== 0 && !firstDone()) return `${head}<p class="dim">The roads open once you have studied in ${esc(REALMS[0].name)}, the foundation every other realm builds on.</p>
@@ -552,7 +622,7 @@ const SCREENS = {
   quest() {
     const r = realm(), e = encounter(), p = e.path;
     const head = `<div class="status"><span class="lbl">${esc(r.name.toUpperCase())}</span>${goldTag()}</div>`;
-    const body = `${art("wizard")}<p>A merchant brings a question:</p><p class="hot">"${esc(e.quest)}"</p>
+    const body = `${realmScene(r)}<p>A merchant brings a question:</p><p class="hot">"${esc(e.quest)}"</p>
       <p>First, read the intent. Which path should Spotter take?</p>`;
     if (state.flash) {
       const f = state.flash, chosen = state.choice ?? p.correct;
@@ -602,11 +672,17 @@ const SCREENS = {
     const r = realm(), e = encounter();
     const record = finishRealm(r.id, state.gold);
     Sound.play("fanfare");
-    const rules = e.points.map(p => p.rule).filter(Boolean);
-    return `${art("banner", "hot")}<h2>The dragon falls</h2>
+    const TAG = { model: "MODEL", thoughtspot: "THOUGHTSPOT", agentql: "AGENTQL" };
+    const item = p => `<li><span class="who">${TAG[p.ruleBy]}</span><span>${esc(p.rule)}</span></li>`;
+    const rules = e.points.filter(p => p.rule && (p.ruleBy === "model" || p.ruleBy === "thoughtspot"));
+    const yours = e.points.filter(p => p.rule && p.ruleBy === "agentql");
+    return `${realmScene(r)}<h2>The dragon falls</h2>
       <p>You carry home <span class="hot">${state.gold} of ${maxGold(r)} gold</span>${record ? ", your best here yet" : ""}.</p>
-      <p class="lbl">RULES UNCOVERED</p>
-      <ul class="notes">${rules.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+      <p class="lbl">DETERMINISTIC RULES UNCOVERED</p>
+      <p class="dim">Added by the Model and ThoughtSpot, not by the AI. The same rules, applied the same way, to every query.</p>
+      <ul class="rules">${rules.map(item).join("")}</ul>
+      ${yours.length ? `<p class="lbl">YOUR PART, IN THE AGENTQL</p><ul class="rules">${yours.map(item).join("")}</ul>` : ""}
+      <p class="verdict">${esc(DETERMINISM)}</p>
       <p>${esc(e.takeaway)}</p>
       ${choices([{ label: "Back to the map", go: toMap }, { label: "Take this quest again", go: go({ screen: "quest", enc: 0, step: 0, gold: 0, flash: null }) }])}`;
   }

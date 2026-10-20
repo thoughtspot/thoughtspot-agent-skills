@@ -414,3 +414,17 @@ def test_a_hall_teaches_only_scroll_columns_and_rows(doc, capture):
 def test_who_points_name_their_rule(doc, capture):
     del _mines(doc)["points"][0]["rule"]
     assert any("a who point needs a rule" in e for e in _errors(doc, capture))
+
+
+def test_every_rule_says_who_adds_it(doc, capture):
+    rls = next(p for p in _encounter(doc)["points"] if p["kind"] == "choice" and p.get("rule_by") == "model")
+    del rls["rule_by"]
+    assert any("rule_by must be one of" in e for e in _errors(doc, capture))
+
+
+def test_the_hoard_separates_rules_from_the_players_part(doc, capture):
+    data, _ = B.compile_quest(doc, *capture)
+    lake = next(r for r in data["realms"] if r["id"] == "lake")["encounters"][0]
+    by = {p["rule"]: p["ruleBy"] for p in lake["points"] if p["rule"]}
+    assert by["Every product kept, sold in the West or not"] == "agentql"
+    assert {"model", "agentql"} <= set(by.values())

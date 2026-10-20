@@ -53,6 +53,7 @@ FONTS = (
 
 WHO_ANSWERS = {"model": "forge", "thoughtspot": "forge", "agentql": "agentql"}
 WHO_ORDER = ("forge", "agentql", "ai")
+RULE_BY = ("model", "thoughtspot", "agentql", "determinism")
 ALL = "*"
 _STRING = re.compile(r"('(?:[^']|'')*')")
 
@@ -214,7 +215,11 @@ def _encounter(e: dict, n: int, who: dict, engines: dict, cases: dict[str, dict]
     for i, (raw, pt) in enumerate(zip(e.get("points") or [], points), 1):
         if raw.get("kind") == "who" and not raw.get("rule"):
             errors.append(f"{cid} point {i}: a who point needs a rule (the hoard lists it)")
-        pt["rule"] = raw.get("rule", "")
+        # The hoard tags each rule with who adds it; a who point's answer already says so.
+        by = raw.get("rule_by") or (raw.get("answer") if raw.get("kind") == "who" else None)
+        if raw.get("rule") and by not in RULE_BY:
+            errors.append(f"{cid} point {i}: rule_by must be one of {list(RULE_BY)}, got {by!r}")
+        pt["rule"], pt["ruleBy"] = raw.get("rule", ""), by or ""
     return {"case": cid, "lesson": str(e.get("lesson") or ""), "quest": e.get("quest", ""),
             "path": _path(e.get("path") or {}, engines, f"{cid} path", errors),
             "agentql": scroll_lines, "sql": sql_lines, "points": points, "takeaway": e.get("takeaway", "")}
