@@ -132,9 +132,8 @@ the course.
 | 3. The semantic layer | ratios and safe division, formula measures (`AGG`, not `SUM`), security you never write, every member via an outer join and the business rules in the generated SQL | 4 |
 | 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, and a custom-calendar example | 3 |
 | 5. Advanced shapes | CTEs, window functions (rank and share of total), and `HAVING` plus the shapes that aren't allowed | 3 |
-| 6. Trust, but verify | the silent drops (`QUALIFY`, `FILTER`), loud failures and their workarounds, and the control queries that catch wrong numbers | 3 |
 
-21 questions in all; each module stands alone after Module 2. The course itself is
+18 questions in all; each module stands alone after Module 2. The course itself is
 [references/learning-path.md](references/learning-path.md).
 
 **Is the course still accurate on your cluster?** Every lesson claim is a retest case:
@@ -371,6 +370,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.19.0 | 2026-10-20 | **Removed Module 6 (*Trust, but verify*): 21 → 18 lessons, Modules 0–5.** Its lessons centred on **silent-drop bugs** — `QUALIFY` and `FILTER (WHERE …)` accepted then ignored, and a `SUM(CASE … date-literal …)` returning an `UNKNOWN`-typed empty — which are defects that will be fixed, so a course resting on them rots (same reasoning as lesson 1.3). The loud-failure cases (`STDDEV`, `IN (SELECT …)`) stay documented in `limitations.md`, and all six behaviours remain under live test in the `agentql-retest` **limitations** suite (`qualify`, `filter_where`, `sum_case_date_literal`, `stddev_*`, `in_subquery`). Removed the six `l6_*` lessons-suite cases and their three controls; regenerated `lesson-sql.md` and the offline bundle. |
 | 2.18.3 | 2026-10-20 | **Lesson 3.2 (formula measures: `AGG`, not `SUM`) is now concrete and live-captured.** Replaced the "pick your own Model" template (placeholder `<attribute>`/`<formula measure>` query) with a real example on the same Semi-Additive Model as lesson 2.4: `AGG("Spot Balance")` by country, with the actual generated SQL — one `AGG` compiles to a six-CTE query carrying the Model's `group_max` + `sum_if` balance logic, a vivid "read the SQL to see how much the formula does". Break-it variants (`SUM` of a formula → `NESTED_AGGREGATE_NOT_SUPPORTED`; `AGG` of a raw measure → `QUERY_GEN_ERROR`; bare formula ≡ `AGG`) now show real captured errors. Behaviour guards unchanged (still live-tested on the portable Dunder Mifflin / sample Models). |
 | 2.18.2 | 2026-10-20 | **Lesson 1.3 now uses a durable failure, not a bug.** Replaced the "compiles, then fails" example (an `IN (SELECT …)` subquery, tracked as bug SCAL-326936 and likely to be fixed) with a `UNION ALL` whose branches have mismatched column types (text region names stacked on a numeric total) — it compiles but the warehouse correctly rejects it at `fetch-data` (*"Numeric value 'Midwest' is not recognized"*). That failure is not a ThoughtSpot bug and will never be "resolved", so the lesson's point — a green `generate-sql` is not proof the query runs — stays valid. Live-verified; captured SQL regenerated. |
 | 2.18.1 | 2026-10-20 | **Two cut-lesson behaviours kept under live test.** Moved the `GROUP BY <ordinal>` rejection and the "dates return as epoch seconds" result-format assertion out of the trimmed course and into the `agentql-retest` **limitations** suite (live-verified on the Dunder Mifflin demo Model). Documented the epoch-seconds return format in `limitations.md` (*Not bugs*). The other two trim-removed behaviours (`DATE_TRUNC` rejection, aggregate-in-`WHERE`→`HAVING`) were already covered by that suite. |
@@ -1654,7 +1654,7 @@ answering a business question; that is the normal flow in `SKILL.md`.
 **Audience.** Built first for **SEs and other technical field staff** who need to explain and
 demo the capability. It works for anyone comfortable reading SQL.
 
-**Status.** All eight modules (0–7) are written and live-verified on 26.9.0.cl PROD. Every
+**Status.** All modules (0–5) are written and live-verified on 26.9.0.cl PROD. Every
 behavioural claim is checked by a retest case, named on the lesson's **Guarded by** line.
 
 ---
@@ -1693,7 +1693,6 @@ table collects them in one place; the **determinism column is the throughline** 
 | **3 · The semantic layer** | The Model supplies joins, formulas, security and safe division by default — and AgentQL can *override* the default join for greater expressibility: *all products, including those with no sales* becomes a CTE of all products `LEFT JOIN`ed to sales, instead of the Model's inner join. | Whether you take the Model's join or override it, the governed parts — keys, `AGG`/`SUM`, null-handling and RLS — are still injected deterministically by the engine. You change the join *shape*, never the governance. |
 | **4 · Dates and functions** | Date parts and relative periods resolve through the **Model's calendar** — standard Gregorian, or a custom/fiscal calendar (e.g. 4-4-5) when the Model is configured with one; you never hand-code date math. | AgentQL joins the Model's configured calendar and compiles "last period" to the same bounded SQL every run — live-verified standard `EXTRACT(YEAR …)`, and a JulyOffset join on `absolute_year_number`. |
 | **5 · Advanced shapes** | CTEs, windows, top-N-per-group, period-over-period and set operations expand what you can express — within AgentQL's (narrower-than-SQL) envelope. | Even multi-stage shapes compile deterministically through the same governed engine; expressibility grows while compile-not-execute holds. |
-| **6 · Trust, but verify** | `SUCCESS` is not proof of the right answer: deterministic SQL can be deterministically *wrong* — a silently-dropped `QUALIFY`/`FILTER`, or the wrong grain. | The executed SQL is always governed and reproducible — but determinism guarantees *consistency*, not *correct intent*. The control queries verify the agent asked what you meant. |
 
 ---
 
@@ -2558,80 +2557,9 @@ GROUP BY "t1"."store" HAVING SUM("t1"."sales") > 40000000
 **Guarded by:** `l5_having`, `l5_from_subquery_rejected`.
 
 **Check yourself.** Write "stores whose sales are above their region's average" (a CTE plus
-a window, or two CTEs). Why does 5.3 use a CTE instead of `QUALIFY`?
+a window, or two CTEs).
 
 ---
-
-### Module 6 — Trust, but verify (~25 min · 3 questions)
-
-**Key takeaway.** `SUCCESS` is not proof of the right answer: deterministic SQL can be deterministically *wrong* — a silently-dropped `QUALIFY`/`FILTER`, or the wrong grain.
-
-**How determinism holds.** The executed SQL is always governed and reproducible — but determinism guarantees *consistency*, not *correct intent*. The control queries verify the agent asked what you meant.
-
-**Covers.** Silent drops (`QUALIFY`, `FILTER`), loud failures and their workarounds, and the control queries that catch wrong numbers. (3 questions · ~25 min)
-
-The hardest lesson in the course: **a `SUCCESS` with a plausible number can still be
-wrong.** Some constructs are accepted, then partly ignored.
-
-#### 6.1 `QUALIFY` is silently dropped (and one more silent case)
-
-```sql
-SELECT "t1"."region" AS r, "t1"."item type" AS it, SUM("t1"."sales") AS s
-FROM "(Sample) Retail - Apparel" AS "t1"
-GROUP BY "t1"."region", "t1"."item type"
-QUALIFY ROW_NUMBER() OVER (PARTITION BY "t1"."region" ORDER BY SUM("t1"."sales") DESC) = 1
-```
-
-**Predict.** How many rows: one per region (5)?
-
-**Point out.** 75 rows, every region and item type pairing. The generated SQL has no
-`ROW_NUMBER` at all: the clause was dropped without an error. The **control** is 5.3's CTE
-form with `rn = 1`, which returns 5 rows. Comparing the two is how you catch this.
-
-**One more:** `SUM(CASE WHEN "t1"."date" >= '<this year>-01-01' THEN "t1"."sales" ELSE 0 END)`
-generates **correct** SQL, but the result comes back typed `UNKNOWN` with an empty value. 4.3
-showed the same comparison working in `WHERE`. The control is `YEAR_NUMBER(date) >= <this
-year>` inside the `CASE`, which returns the number.
-
-**Guarded by:** `l6_qualify_dropped`, `l6_sum_case_date_literal`.
-
-#### 6.2 `FILTER (WHERE …)` is silently dropped
-
-```sql
-SELECT SUM("t1"."sales") FILTER (WHERE "t1"."region" = 'West') AS s FROM "(Sample) Retail - Apparel" AS "t1"
-```
-
-**Point out.** It returns the **grand total**, because the filter is not in the SQL. The
-control, `SUM(CASE WHEN "t1"."region" = 'West' THEN "t1"."sales" ELSE 0 END)`, returns
-West's share. A plausible-looking number is not a correct one.
-
-**Guarded by:** `l6_filter_dropped`.
-
-#### 6.3 Loud failures, and their workarounds
-
-| Try | What happens | Instead |
-|---|---|---|
-| `STDDEV_SAMP("t1"."sales")` | rejected, `UNSUPPORTED_AGGREGATE` | apply it to a CTE column, e.g. the per-store totals from 5.1 |
-| `WHERE region IN (SELECT …)` | compiles, then fails in the warehouse | join a CTE, or filter on the values directly |
-
-Loud failures are the easy kind: the error tells you. The full list, with dates and
-tickets, is [`limitations.md`](limitations.md).
-
-**Guarded by:** `l6_stddev_rejected`, `l6_stddev_over_cte`, `l6_in_subquery_fails`.
-
-#### The verification habit
-
-For any answer someone will act on:
-1. **Read the generated SQL** and check that every clause you wrote is in it. A dropped
-   `QUALIFY` or `FILTER` is visible there.
-2. **For a number that matters, run a control:** the same question in a second form (a
-   `CASE` instead of `FILTER`, a CTE instead of `QUALIFY`, the parts of a ratio). If the
-   two agree, trust it.
-3. **Check the result's types.** An `UNKNOWN` column, or an empty value where you expected a
-   number, is a defect, not a zero.
-
-**Check yourself.** A colleague's AgentQL returns `SUCCESS` and a total that "looks about
-right". Name three checks you would run before putting it in front of a customer.
 
 ### The modules
 
@@ -2643,9 +2571,8 @@ right". Name three checks you would run before putting it in front of a customer
 | 3. The semantic layer | ratios and safe division, formula measures (`AGG` not `SUM`), security you never write, every member via an outer join and the business rules in the generated SQL | 4 |
 | 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, and a custom-calendar example | 3 |
 | 5. Advanced shapes | CTEs, window functions (rank and share of total), and `HAVING` plus the shapes that aren't allowed | 3 |
-| 6. Trust, but verify | the silent drops (`QUALIFY`, `FILTER`), loud failures and their workarounds, and the control queries that catch wrong numbers | 3 |
 
-21 questions in all. Each module stands alone after Module 2, so a learner can stop and pick
+18 questions in all. Each module stands alone after Module 2, so a learner can stop and pick
 up later ("teach me AgentQL, start at module 5").
 
 ### After the course — where AgentQL earns its keep, and where it can't
@@ -3395,272 +3322,6 @@ SELECT x.r FROM (SELECT "t1"."region" AS r, SUM("t1"."sales") AS s FROM "(Sample
 ```
 
 **Rejected — `status: TABLE_NOT_FOUND`** — Error Code: QUERY_GEN_ERROR Error Message: SQL validation failed with 2 error(s) Validation Errors: 1. [TABLE_NOT_FOUND] Table 't' not found. in FROM clause 2. [TABLE_NOT_FOUND] Table 'x' not found. in SELECT clause, column 1
-
----
-
-### ctl_ap_top1_per_region
-
-*control*
-
-**AgentQL**
-
-```sql
-WITH x AS (SELECT "t1"."region" AS r, "t1"."item type" AS it, SUM("t1"."sales") AS s, ROW_NUMBER() OVER (PARTITION BY "t1"."region" ORDER BY SUM("t1"."sales") DESC) AS rn FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region", "t1"."item type") SELECT x.r, x.it, x.s FROM x WHERE x.rn = 1
-```
-
-**Generated SQL** (`status: SUCCESS`)
-
-```sql
-WITH "qt_0" AS (
-  SELECT 
-    "ta_1"."REGION" "ca_1", 
-    "ta_2"."PRODUCTTYPE" "ca_2", 
-    CASE
-      WHEN sum("ta_3"."SALES") IS NOT NULL THEN sum("ta_3"."SALES")
-      ELSE 0
-    END "ca_3", 
-    row_number() over (partition by "ta_1"."REGION" order by CASE
-      WHEN sum("ta_3"."SALES") IS NOT NULL THEN sum("ta_3"."SALES")
-      ELSE 0
-    END desc) "ca_4"
-  FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_3"
-    JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_STORES" "ta_1"
-      ON "ta_3"."STOREID" = "ta_1"."STOREID"
-    JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_2"
-      ON "ta_3"."PRODUCTID" = "ta_2"."PRODUCTID"
-  GROUP BY 
-    "ca_1", 
-    "ca_2"
-  
-)
-SELECT 
-  "ta_4"."ca_1" "ca_5", 
-  "ta_4"."ca_2" "ca_6", 
-  "ta_4"."ca_3" "ca_7"
-FROM "qt_0" "ta_4"
-WHERE "ta_4"."ca_4" = 1
-LIMIT 100000
-```
-
----
-
-### ctl_ap_west_case
-
-*control*
-
-**AgentQL**
-
-```sql
-SELECT SUM(CASE WHEN "t1"."region" = 'West' THEN "t1"."sales" ELSE 0 END) AS s FROM "(Sample) Retail - Apparel" AS "t1"
-```
-
-**Generated SQL** (`status: SUCCESS`)
-
-```sql
-SELECT CASE
-  WHEN sum(CASE
-    WHEN LOWER("ta_2"."REGION") = 'west' THEN "ta_1"."SALES"
-    ELSE 0
-  END) IS NOT NULL THEN sum(CASE
-    WHEN LOWER("ta_2"."REGION") = 'west' THEN "ta_1"."SALES"
-    ELSE 0
-  END)
-  ELSE 0
-END "ca_1"
-FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_1"
-  JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_STORES" "ta_2"
-    ON "ta_1"."STOREID" = "ta_2"."STOREID"
-LIMIT 100000
-```
-
----
-
-### l6_qualify_dropped
-
-*📘 6.1 QUALIFY is silently dropped*
-
-**AgentQL**
-
-```sql
-SELECT "t1"."region" AS r, "t1"."item type" AS it, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."region", "t1"."item type" QUALIFY ROW_NUMBER() OVER (PARTITION BY "t1"."region" ORDER BY SUM("t1"."sales") DESC) = 1
-```
-
-**Generated SQL** (`status: SUCCESS`)
-
-```sql
-SELECT 
-  "ta_1"."REGION" "ca_1", 
-  "ta_2"."PRODUCTTYPE" "ca_2", 
-  CASE
-    WHEN sum("ta_3"."SALES") IS NOT NULL THEN sum("ta_3"."SALES")
-    ELSE 0
-  END "ca_3"
-FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_3"
-  JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_STORES" "ta_1"
-    ON "ta_3"."STOREID" = "ta_1"."STOREID"
-  JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_PRODUCTS" "ta_2"
-    ON "ta_3"."PRODUCTID" = "ta_2"."PRODUCTID"
-GROUP BY 
-  "ca_1", 
-  "ca_2"
-LIMIT 100000
-```
-
----
-
-### l6_filter_dropped
-
-*📘 6.2 FILTER (WHERE …) is silently dropped*
-
-**AgentQL**
-
-```sql
-SELECT SUM("t1"."sales") FILTER (WHERE "t1"."region" = 'West') AS s FROM "(Sample) Retail - Apparel" AS "t1"
-```
-
-**Generated SQL** (`status: SUCCESS`)
-
-```sql
-SELECT CASE
-  WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES")
-  ELSE 0
-END "ca_1"
-FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_1"
-LIMIT 100000
-```
-
----
-
-### l6_stddev_rejected
-
-*📘 6.4 loud failures, and their workarounds*
-
-**AgentQL**
-
-```sql
-SELECT STDDEV_SAMP("t1"."sales") AS sd FROM "(Sample) Retail - Apparel" AS "t1"
-```
-
-**Rejected — `status: UNSUPPORTED_AGGREGATE`** — Error Code: QUERY_GEN_ERROR Error Message: SQL validation failed with 1 error(s) Validation Errors: 1. [UNSUPPORTED_AGGREGATE] Aggregate/window function 'stddev_samp' is not supported directly on a model. Select the arguments as output columns in a CTE and apply this function over those output columns. in SELECT clause, column 1 (near 'stddev_samp("t1".sales)')
-
----
-
-### l6_stddev_over_cte
-
-*📘 6.4 loud failures, and their workarounds*
-
-**AgentQL**
-
-```sql
-WITH st AS (SELECT "t1"."store" AS store, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."store") SELECT STDDEV_SAMP(st.s) AS sd FROM st
-```
-
-**Generated SQL** (`status: SUCCESS`)
-
-```sql
-WITH "qt_0" AS (
-  SELECT 
-    "ta_1"."STORENAME" "ca_1", 
-    CASE
-      WHEN sum("ta_2"."SALES") IS NOT NULL THEN sum("ta_2"."SALES")
-      ELSE 0
-    END "ca_2"
-  FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_2"
-    JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_STORES" "ta_1"
-      ON "ta_2"."STOREID" = "ta_1"."STOREID"
-  GROUP BY "ca_1"
-)
-SELECT stddev_samp("ta_3"."ca_2") "ca_3"
-FROM "qt_0" "ta_3"
-LIMIT 100000
-```
-
----
-
-### l6_in_subquery_fails
-
-*📘 6.4 loud failures, and their workarounds*
-
-**AgentQL**
-
-```sql
-SELECT "t1"."region" AS r, SUM("t1"."sales") AS s FROM "(Sample) Retail - Apparel" AS "t1" WHERE "t1"."region" IN (SELECT "t2"."region" FROM "(Sample) Retail - Apparel" AS "t2" WHERE "t2"."state" = 'california') GROUP BY "t1"."region"
-```
-
-**Generated SQL** (`status: SUCCESS`)
-
-```sql
-SELECT 
-  "ta_1"."REGION" "ca_1", 
-  CASE
-    WHEN sum("ta_2"."SALES") IS NOT NULL THEN sum("ta_2"."SALES")
-    ELSE 0
-  END "ca_2"
-FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_2"
-  JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_STORES" "ta_1"
-    ON "ta_2"."STOREID" = "ta_1"."STOREID"
-WHERE "ta_1"."REGION" in (select "t2".region from (sample) retail - apparel "t2" where "t2".state = 'california')
-GROUP BY "ca_1"
-LIMIT 100000
-```
-
----
-
-### l6_sum_case_date_literal
-
-*📘 6.1 QUALIFY is silently dropped (and one more silent case)*
-
-**AgentQL**
-
-```sql
-SELECT SUM(CASE WHEN "t1"."date" >= '2026-01-01' THEN "t1"."sales" ELSE 0 END) AS s FROM "(Sample) Retail - Apparel" AS "t1"
-```
-
-**Generated SQL** (`status: SUCCESS`)
-
-```sql
-SELECT CASE
-  WHEN sum(CASE
-    WHEN DATEADD(day, DATEDIFF(day, DATE('2020-04-30', 'YYYY-MM-DD'), CURRENT_DATE()), "ta_1"."RECORDDATE") >= '2026-01-01' THEN "ta_1"."SALES"
-    ELSE 0
-  END) IS NOT NULL THEN sum(CASE
-    WHEN DATEADD(day, DATEDIFF(day, DATE('2020-04-30', 'YYYY-MM-DD'), CURRENT_DATE()), "ta_1"."RECORDDATE") >= '2026-01-01' THEN "ta_1"."SALES"
-    ELSE 0
-  END)
-  ELSE 0
-END "ca_1"
-FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_1"
-LIMIT 100000
-```
-
----
-
-### ctl_ap_this_year_case
-
-*control*
-
-**AgentQL**
-
-```sql
-SELECT SUM(CASE WHEN YEAR_NUMBER("t1"."date") >= 2026 THEN "t1"."sales" ELSE 0 END) AS s FROM "(Sample) Retail - Apparel" AS "t1"
-```
-
-**Generated SQL** (`status: SUCCESS`)
-
-```sql
-SELECT CASE
-  WHEN sum(CASE
-    WHEN EXTRACT(YEAR FROM DATEADD(day, DATEDIFF(day, DATE('2020-04-30', 'YYYY-MM-DD'), CURRENT_DATE()), "ta_1"."RECORDDATE")) >= 2026 THEN "ta_1"."SALES"
-    ELSE 0
-  END) IS NOT NULL THEN sum(CASE
-    WHEN EXTRACT(YEAR FROM DATEADD(day, DATEDIFF(day, DATE('2020-04-30', 'YYYY-MM-DD'), CURRENT_DATE()), "ta_1"."RECORDDATE")) >= 2026 THEN "ta_1"."SALES"
-    ELSE 0
-  END)
-  ELSE 0
-END "ca_1"
-FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_1"
-LIMIT 100000
-```
 
 ---
 

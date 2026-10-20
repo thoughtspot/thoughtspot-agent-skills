@@ -95,9 +95,8 @@ the course.
 | 3. The semantic layer | ratios and safe division, formula measures (`AGG`, not `SUM`), security you never write, every member via an outer join and the business rules in the generated SQL | 4 |
 | 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, and a custom-calendar example | 3 |
 | 5. Advanced shapes | CTEs, window functions (rank and share of total), and `HAVING` plus the shapes that aren't allowed | 3 |
-| 6. Trust, but verify | the silent drops (`QUALIFY`, `FILTER`), loud failures and their workarounds, and the control queries that catch wrong numbers | 3 |
 
-21 questions in all; each module stands alone after Module 2. The course itself is
+18 questions in all; each module stands alone after Module 2. The course itself is
 [references/learning-path.md](references/learning-path.md).
 
 **Is the course still accurate on your cluster?** Every lesson claim is a retest case:
@@ -334,6 +333,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.19.0 | 2026-10-20 | **Removed Module 6 (*Trust, but verify*): 21 → 18 lessons, Modules 0–5.** Its lessons centred on **silent-drop bugs** — `QUALIFY` and `FILTER (WHERE …)` accepted then ignored, and a `SUM(CASE … date-literal …)` returning an `UNKNOWN`-typed empty — which are defects that will be fixed, so a course resting on them rots (same reasoning as lesson 1.3). The loud-failure cases (`STDDEV`, `IN (SELECT …)`) stay documented in `limitations.md`, and all six behaviours remain under live test in the `agentql-retest` **limitations** suite (`qualify`, `filter_where`, `sum_case_date_literal`, `stddev_*`, `in_subquery`). Removed the six `l6_*` lessons-suite cases and their three controls; regenerated `lesson-sql.md` and the offline bundle. |
 | 2.18.3 | 2026-10-20 | **Lesson 3.2 (formula measures: `AGG`, not `SUM`) is now concrete and live-captured.** Replaced the "pick your own Model" template (placeholder `<attribute>`/`<formula measure>` query) with a real example on the same Semi-Additive Model as lesson 2.4: `AGG("Spot Balance")` by country, with the actual generated SQL — one `AGG` compiles to a six-CTE query carrying the Model's `group_max` + `sum_if` balance logic, a vivid "read the SQL to see how much the formula does". Break-it variants (`SUM` of a formula → `NESTED_AGGREGATE_NOT_SUPPORTED`; `AGG` of a raw measure → `QUERY_GEN_ERROR`; bare formula ≡ `AGG`) now show real captured errors. Behaviour guards unchanged (still live-tested on the portable Dunder Mifflin / sample Models). |
 | 2.18.2 | 2026-10-20 | **Lesson 1.3 now uses a durable failure, not a bug.** Replaced the "compiles, then fails" example (an `IN (SELECT …)` subquery, tracked as bug SCAL-326936 and likely to be fixed) with a `UNION ALL` whose branches have mismatched column types (text region names stacked on a numeric total) — it compiles but the warehouse correctly rejects it at `fetch-data` (*"Numeric value 'Midwest' is not recognized"*). That failure is not a ThoughtSpot bug and will never be "resolved", so the lesson's point — a green `generate-sql` is not proof the query runs — stays valid. Live-verified; captured SQL regenerated. |
 | 2.18.1 | 2026-10-20 | **Two cut-lesson behaviours kept under live test.** Moved the `GROUP BY <ordinal>` rejection and the "dates return as epoch seconds" result-format assertion out of the trimmed course and into the `agentql-retest` **limitations** suite (live-verified on the Dunder Mifflin demo Model). Documented the epoch-seconds return format in `limitations.md` (*Not bugs*). The other two trim-removed behaviours (`DATE_TRUNC` rejection, aggregate-in-`WHERE`→`HAVING`) were already covered by that suite. |

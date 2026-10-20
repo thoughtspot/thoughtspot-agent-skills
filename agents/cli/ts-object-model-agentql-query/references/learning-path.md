@@ -10,7 +10,7 @@ answering a business question; that is the normal flow in `SKILL.md`.
 **Audience.** Built first for **SEs and other technical field staff** who need to explain and
 demo the capability. It works for anyone comfortable reading SQL.
 
-**Status.** All eight modules (0–7) are written and live-verified on 26.9.0.cl PROD. Every
+**Status.** All modules (0–5) are written and live-verified on 26.9.0.cl PROD. Every
 behavioural claim is checked by a retest case, named on the lesson's **Guarded by** line.
 
 ---
@@ -49,7 +49,6 @@ table collects them in one place; the **determinism column is the throughline** 
 | **3 · The semantic layer** | The Model supplies joins, formulas, security and safe division by default — and AgentQL can *override* the default join for greater expressibility: *all products, including those with no sales* becomes a CTE of all products `LEFT JOIN`ed to sales, instead of the Model's inner join. | Whether you take the Model's join or override it, the governed parts — keys, `AGG`/`SUM`, null-handling and RLS — are still injected deterministically by the engine. You change the join *shape*, never the governance. |
 | **4 · Dates and functions** | Date parts and relative periods resolve through the **Model's calendar** — standard Gregorian, or a custom/fiscal calendar (e.g. 4-4-5) when the Model is configured with one; you never hand-code date math. | AgentQL joins the Model's configured calendar and compiles "last period" to the same bounded SQL every run — live-verified standard `EXTRACT(YEAR …)`, and a JulyOffset join on `absolute_year_number`. |
 | **5 · Advanced shapes** | CTEs, windows, top-N-per-group, period-over-period and set operations expand what you can express — within AgentQL's (narrower-than-SQL) envelope. | Even multi-stage shapes compile deterministically through the same governed engine; expressibility grows while compile-not-execute holds. |
-| **6 · Trust, but verify** | `SUCCESS` is not proof of the right answer: deterministic SQL can be deterministically *wrong* — a silently-dropped `QUALIFY`/`FILTER`, or the wrong grain. | The executed SQL is always governed and reproducible — but determinism guarantees *consistency*, not *correct intent*. The control queries verify the agent asked what you meant. |
 
 ---
 
@@ -914,80 +913,9 @@ GROUP BY "t1"."store" HAVING SUM("t1"."sales") > 40000000
 **Guarded by:** `l5_having`, `l5_from_subquery_rejected`.
 
 **Check yourself.** Write "stores whose sales are above their region's average" (a CTE plus
-a window, or two CTEs). Why does 5.3 use a CTE instead of `QUALIFY`?
+a window, or two CTEs).
 
 ---
-
-## Module 6 — Trust, but verify (~25 min · 3 questions)
-
-**Key takeaway.** `SUCCESS` is not proof of the right answer: deterministic SQL can be deterministically *wrong* — a silently-dropped `QUALIFY`/`FILTER`, or the wrong grain.
-
-**How determinism holds.** The executed SQL is always governed and reproducible — but determinism guarantees *consistency*, not *correct intent*. The control queries verify the agent asked what you meant.
-
-**Covers.** Silent drops (`QUALIFY`, `FILTER`), loud failures and their workarounds, and the control queries that catch wrong numbers. (3 questions · ~25 min)
-
-The hardest lesson in the course: **a `SUCCESS` with a plausible number can still be
-wrong.** Some constructs are accepted, then partly ignored.
-
-### 6.1 `QUALIFY` is silently dropped (and one more silent case)
-
-```sql
-SELECT "t1"."region" AS r, "t1"."item type" AS it, SUM("t1"."sales") AS s
-FROM "(Sample) Retail - Apparel" AS "t1"
-GROUP BY "t1"."region", "t1"."item type"
-QUALIFY ROW_NUMBER() OVER (PARTITION BY "t1"."region" ORDER BY SUM("t1"."sales") DESC) = 1
-```
-
-**Predict.** How many rows: one per region (5)?
-
-**Point out.** 75 rows, every region and item type pairing. The generated SQL has no
-`ROW_NUMBER` at all: the clause was dropped without an error. The **control** is 5.3's CTE
-form with `rn = 1`, which returns 5 rows. Comparing the two is how you catch this.
-
-**One more:** `SUM(CASE WHEN "t1"."date" >= '<this year>-01-01' THEN "t1"."sales" ELSE 0 END)`
-generates **correct** SQL, but the result comes back typed `UNKNOWN` with an empty value. 4.3
-showed the same comparison working in `WHERE`. The control is `YEAR_NUMBER(date) >= <this
-year>` inside the `CASE`, which returns the number.
-
-**Guarded by:** `l6_qualify_dropped`, `l6_sum_case_date_literal`.
-
-### 6.2 `FILTER (WHERE …)` is silently dropped
-
-```sql
-SELECT SUM("t1"."sales") FILTER (WHERE "t1"."region" = 'West') AS s FROM "(Sample) Retail - Apparel" AS "t1"
-```
-
-**Point out.** It returns the **grand total**, because the filter is not in the SQL. The
-control, `SUM(CASE WHEN "t1"."region" = 'West' THEN "t1"."sales" ELSE 0 END)`, returns
-West's share. A plausible-looking number is not a correct one.
-
-**Guarded by:** `l6_filter_dropped`.
-
-### 6.3 Loud failures, and their workarounds
-
-| Try | What happens | Instead |
-|---|---|---|
-| `STDDEV_SAMP("t1"."sales")` | rejected, `UNSUPPORTED_AGGREGATE` | apply it to a CTE column, e.g. the per-store totals from 5.1 |
-| `WHERE region IN (SELECT …)` | compiles, then fails in the warehouse | join a CTE, or filter on the values directly |
-
-Loud failures are the easy kind: the error tells you. The full list, with dates and
-tickets, is [`limitations.md`](limitations.md).
-
-**Guarded by:** `l6_stddev_rejected`, `l6_stddev_over_cte`, `l6_in_subquery_fails`.
-
-### The verification habit
-
-For any answer someone will act on:
-1. **Read the generated SQL** and check that every clause you wrote is in it. A dropped
-   `QUALIFY` or `FILTER` is visible there.
-2. **For a number that matters, run a control:** the same question in a second form (a
-   `CASE` instead of `FILTER`, a CTE instead of `QUALIFY`, the parts of a ratio). If the
-   two agree, trust it.
-3. **Check the result's types.** An `UNKNOWN` column, or an empty value where you expected a
-   number, is a defect, not a zero.
-
-**Check yourself.** A colleague's AgentQL returns `SUCCESS` and a total that "looks about
-right". Name three checks you would run before putting it in front of a customer.
 
 ## The modules
 
@@ -999,9 +927,8 @@ right". Name three checks you would run before putting it in front of a customer
 | 3. The semantic layer | ratios and safe division, formula measures (`AGG` not `SUM`), security you never write, every member via an outer join and the business rules in the generated SQL | 4 |
 | 4. Dates and functions | date parts, relative dates without `CURRENT_DATE`, and a custom-calendar example | 3 |
 | 5. Advanced shapes | CTEs, window functions (rank and share of total), and `HAVING` plus the shapes that aren't allowed | 3 |
-| 6. Trust, but verify | the silent drops (`QUALIFY`, `FILTER`), loud failures and their workarounds, and the control queries that catch wrong numbers | 3 |
 
-21 questions in all. Each module stands alone after Module 2, so a learner can stop and pick
+18 questions in all. Each module stands alone after Module 2, so a learner can stop and pick
 up later ("teach me AgentQL, start at module 5").
 
 ## After the course — where AgentQL earns its keep, and where it can't

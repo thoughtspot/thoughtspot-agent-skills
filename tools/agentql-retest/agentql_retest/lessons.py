@@ -126,11 +126,6 @@ def _store_mean(rows, results):
         f"CTE gave avg {avg} over {n} stores; control has {len(stores)} stores, mean {statistics.mean(stores)}"
 
 
-def _store_stdev(rows, results):
-    want = statistics.stdev(r[1] for r in _ctl(results, "ctl_ap_by_store"))
-    return None if _close(rows[0][0], want, 1e-6) else f"STDDEV over the CTE gave {rows[0][0]}, hand-computed {want}"
-
-
 def _rank_one_is_max(rows, _results):
     best = {}
     for r, _store, s, rk in rows:
@@ -274,34 +269,4 @@ LESSON_CASES = [
     Case("l5_from_subquery_rejected", f'SELECT x.r FROM (SELECT {REGION} AS r, SUM({SALES}) AS s {F} '
          f'GROUP BY {REGION}) AS x', GEN_ERROR, L + "5.6 HAVING, and the shapes that are not allowed",
          model="apparel", code="TABLE_NOT_FOUND"),
-
-    # ---- module 6: trust, but verify ---------------------------------------------------------------
-    Case("ctl_ap_top1_per_region", f'WITH x AS (SELECT {REGION} AS r, {ITEM} AS it, SUM({SALES}) AS s, ROW_NUMBER() '
-         f'OVER (PARTITION BY {REGION} ORDER BY SUM({SALES}) DESC) AS rn {F} GROUP BY {REGION}, {ITEM}) '
-         'SELECT x.r, x.it, x.s FROM x WHERE x.rn = 1', OK, "control", model="apparel", control=True),
-    Case("ctl_ap_west_case", f"SELECT SUM(CASE WHEN {REGION} = 'West' THEN {SALES} ELSE 0 END) AS s {F}", OK,
-         "control", model="apparel", control=True),
-    Case("l6_qualify_dropped", f'SELECT {REGION} AS r, {ITEM} AS it, SUM({SALES}) AS s {F} GROUP BY {REGION}, {ITEM} '
-         f'QUALIFY ROW_NUMBER() OVER (PARTITION BY {REGION} ORDER BY SUM({SALES}) DESC) = 1', OK,
-         L + "6.1 QUALIFY is silently dropped", model="apparel", sql_lacks=("row_number",),
-         differs_from="ctl_ap_top1_per_region"),
-    Case("l6_filter_dropped", f"SELECT SUM({SALES}) FILTER (WHERE {REGION} = 'West') AS s {F}", OK,
-         L + "6.2 FILTER (WHERE …) is silently dropped", model="apparel", sql_lacks=("west",),
-         differs_from="ctl_ap_west_case"),
-    Case("l6_stddev_rejected", f'SELECT STDDEV_SAMP({SALES}) AS sd {F}', GEN_ERROR,
-         L + "6.4 loud failures, and their workarounds", model="apparel", code="UNSUPPORTED_AGGREGATE"),
-    Case("l6_stddev_over_cte", f'WITH st AS (SELECT {STORE} AS store, SUM({SALES}) AS s {F} GROUP BY {STORE}) '
-         'SELECT STDDEV_SAMP(st.s) AS sd FROM st', OK, L + "6.4 loud failures, and their workarounds",
-         model="apparel", check=_store_stdev),
-    Case("l6_in_subquery_fails", f'SELECT {REGION} AS r, SUM({SALES}) AS s {F} WHERE {REGION} IN (SELECT '
-         f'"t2"."region" FROM "{SAMPLE_MODEL}" AS "t2" WHERE "t2"."state" = \'california\') GROUP BY {REGION}',
-         FETCH_ERROR, L + "6.4 loud failures, and their workarounds", model="apparel",
-         code="QUERY_EXECUTION_FAILED"),
-    Case("l6_sum_case_date_literal", f"SELECT SUM(CASE WHEN {DATE} >= '{THIS_YEAR}-01-01' THEN {SALES} ELSE 0 END) "
-         f"AS s {F}", OK, L + "6.1 QUALIFY is silently dropped (and one more silent case)", model="apparel",
-         differs_from="ctl_ap_this_year_case"),
-    Case("ctl_ap_this_year_case", f"SELECT SUM(CASE WHEN YEAR_NUMBER({DATE}) >= {THIS_YEAR} THEN {SALES} ELSE 0 END) "
-         f"AS s {F}", OK, "control", model="apparel", control=True),
-
-    # ---- module 7: building on it -------------------------------------------------------------------
 ]
