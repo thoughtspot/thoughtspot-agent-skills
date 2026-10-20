@@ -51,7 +51,6 @@ FONTS = (
     ("IBM Plex Mono", 600, "ibm-plex-mono-latin-600-normal.woff2"),
 )
 
-PATHS = ("dwarf", "elf", "human")
 WHO_ANSWERS = {"model": "forge", "thoughtspot": "forge", "agentql": "agentql"}
 WHO_ORDER = ("forge", "agentql", "ai")
 ALL = "*"
@@ -119,7 +118,8 @@ def _sql_hl(matches: list[str], lines: list[str], where: str, errors: list[str])
     return sorted(hits)
 
 
-def _point(p: dict, who: dict, sql: list[str], scroll: list[str], where: str, errors: list[str]) -> dict:
+def _point(p: dict, who: dict, sql: list[str], scroll: list[str], cases: dict[str, dict],
+           where: str, errors: list[str]) -> dict:
     kind = p.get("kind")
     out = {
         "ask": p.get("ask", ""), "hint": p.get("hint", ""), "lesson": p.get("lesson", ""),
@@ -136,6 +136,14 @@ def _point(p: dict, who: dict, sql: list[str], scroll: list[str], where: str, er
         got = whole.count(needle)
         if got != want:
             errors.append(f"{where}: expected {needle!r} {want} time(s) in the SQL, found {got}")
+    # "Could the AI write X?" — only true while the capture still shows X being rejected.
+    rejected = p.get("rejected_case")
+    if rejected:
+        cap = cases.get(rejected)
+        if cap is None:
+            errors.append(f"{where}: rejected_case {rejected!r} is not in lesson-sql.md")
+        elif cap["sql"] is not None:
+            errors.append(f"{where}: rejected_case {rejected!r} now compiles (SUCCESS), so the answer is wrong")
     if kind == "who":
         if not p.get("sql"):
             errors.append(f"{where}: a who point must highlight the SQL it asks about")
@@ -157,6 +165,52 @@ def _point(p: dict, who: dict, sql: list[str], scroll: list[str], where: str, er
     return out
 
 
+def _encounter(e: dict, n: int, who: dict, cases: dict[str, dict], errors: list[str]) -> dict | None:
+    cid = e.get("case", f"#{n}")
+    cap = cases.get(cid)
+    if cap is None:
+        errors.append(f"{cid}: not in lesson-sql.md")
+        return None
+    if cap["sql"] is None:
+        errors.append(f"{cid}: captured status was not SUCCESS, so there is no SQL to fight")
+        return None
+    agentql = (e.get("agentql") or "").rstrip("\n")
+    if _norm(agentql) != _norm(cap["agentql"]):
+        errors.append(f"{cid}: agentql differs from the captured AgentQL (only layout may differ)")
+    sql_lines, scroll_lines = cap["sql"].splitlines(), agentql.splitlines()
+    points = [_point(p, who, sql_lines, scroll_lines, cases, f"{cid} point {i}", errors)
+              for i, p in enumerate(e.get("points") or [], 1)]
+    if not points:
+        errors.append(f"{cid}: no points")
+    for field in ("quest", "why_agentql", "loot", "takeaway"):
+        if not e.get(field):
+            errors.append(f"{cid}: missing {field}")
+    return {"case": cid, "lesson": str(e.get("lesson") or ""), "quest": e.get("quest", ""),
+            "whyAgentql": e.get("why_agentql", ""), "agentql": scroll_lines, "sql": sql_lines,
+            "points": points, "loot": e.get("loot", ""), "takeaway": e.get("takeaway", "")}
+
+
+def _trial(t: dict, engines: dict, where: str, errors: list[str]) -> dict:
+    kind = t.get("kind")
+    if kind == "claim":
+        if not t.get("claim") or not t.get("why") or not isinstance(t.get("truth"), bool):
+            errors.append(f"{where}: a claim needs claim, why and a true/false truth")
+        return {"kind": "claim", "text": t.get("claim", ""), "why": t.get("why", ""),
+                "options": ["Heed them. It is true.", "Banish them. It is false."],
+                "correct": 0 if t.get("truth") is True else 1}
+    if kind == "route":
+        order = list(engines)
+        if t.get("answer") not in engines:
+            errors.append(f"{where}: answer must be one of {order}, got {t.get('answer')!r}")
+        if not t.get("petition") or not t.get("why"):
+            errors.append(f"{where}: a route needs petition and why")
+        return {"kind": "route", "text": t.get("petition", ""), "why": t.get("why", ""),
+                "options": [f"Send it to {engines[k]}" for k in order],
+                "correct": order.index(t["answer"]) if t.get("answer") in engines else 0}
+    errors.append(f"{where}: kind must be 'claim' or 'route', got {kind!r}")
+    return {"kind": kind, "text": "", "why": "", "options": [], "correct": 0}
+
+
 def compile_quest(doc: dict, date: str | None, cases: dict[str, dict]) -> tuple[dict, list[str]]:
     """Turn encounters.yaml plus the capture into the game's data. Returns (data, errors)."""
     errors: list[str] = []
@@ -164,50 +218,74 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict]) -> tuple[
     missing = [k for k in WHO_ORDER if not who.get(k)]
     if missing:
         errors.append(f"who_options: missing {missing}")
+    engines = doc.get("engines") or {}
+    if len(engines) < 2:
+        errors.append("engines: need at least two engines for petitions")
     if not date:
         errors.append("lesson-sql.md: no capture date found in its header")
 
-    encounters, paths = [], {p: [] for p in PATHS}
+    by_case: dict[str, dict] = {}
     for n, e in enumerate(doc.get("encounters") or [], 1):
-        cid = e.get("case", f"#{n}")
-        cap = cases.get(cid)
-        if cap is None:
-            errors.append(f"{cid}: not in lesson-sql.md")
-            continue
-        if cap["sql"] is None:
-            errors.append(f"{cid}: captured status was not SUCCESS, so there is no SQL to fight")
-            continue
-        agentql = (e.get("agentql") or "").rstrip("\n")
-        if _norm(agentql) != _norm(cap["agentql"]):
-            errors.append(f"{cid}: agentql differs from the captured AgentQL (only layout may differ)")
-        sql_lines, scroll_lines = cap["sql"].splitlines(), agentql.splitlines()
-        points = [_point(p, who, sql_lines, scroll_lines, f"{cid} point {i}", errors)
-                  for i, p in enumerate(e.get("points") or [], 1)]
-        if not points:
-            errors.append(f"{cid}: no points")
-        for field in ("quest", "why_agentql", "loot", "takeaway"):
-            if not e.get(field):
-                errors.append(f"{cid}: missing {field}")
-        for path in e.get("paths") or []:
-            if path not in paths:
-                errors.append(f"{cid}: unknown path {path!r} (known: {list(PATHS)})")
-            else:
-                paths[path].append(len(encounters))
-        encounters.append({
-            "case": cid, "quest": e.get("quest", ""), "whyAgentql": e.get("why_agentql", ""),
-            "agentql": scroll_lines, "sql": sql_lines, "points": points,
-            "loot": e.get("loot", ""), "takeaway": e.get("takeaway", ""),
+        built = _encounter(e, n, who, cases, errors)
+        if built:
+            by_case[built["case"]] = built
+
+    realms, used, ids = [], set(), set()
+    for r in doc.get("realms") or []:
+        rid = r.get("id") or "?"
+        if rid in ids:
+            errors.append(f"realm {rid}: duplicate id")
+        ids.add(rid)
+        for field in ("name", "covers", "depth", "minutes"):
+            if not r.get(field):
+                errors.append(f"realm {rid}: missing {field}")
+        if not isinstance(r.get("module"), int):
+            errors.append(f"realm {rid}: module must be a number")
+        trials = [_trial(t, engines, f"realm {rid} trial {i}", errors)
+                  for i, t in enumerate(r.get("trials") or [], 1)]
+        enc_ids = list(r.get("encounters") or [])
+        for cid in enc_ids:
+            if cid not in by_case and not any(e.get("case") == cid for e in doc.get("encounters") or []):
+                errors.append(f"realm {rid}: encounter {cid!r} is not defined under encounters")
+            elif cid in used:
+                errors.append(f"realm {rid}: encounter {cid!r} is already in another realm")
+            used.add(cid)
+        sealed = bool(r.get("sealed"))
+        if sealed and (trials or enc_ids):
+            errors.append(f"realm {rid}: a sealed realm has no trials or encounters")
+        if not sealed and not (trials or enc_ids):
+            errors.append(f"realm {rid}: an open realm needs trials or encounters (or sealed: true)")
+        scroll = r.get("scroll")
+        if scroll:
+            cols = len(scroll.get("columns") or [])
+            for row in scroll.get("rows") or []:
+                if len(row.get("cells") or []) != cols:
+                    errors.append(f"realm {rid}: scroll row {row.get('label')!r} has {len(row.get('cells') or [])} "
+                                  f"cells for {cols} columns (an unquoted comma in YAML splits a cell)")
+        if trials and not r.get("decree"):
+            errors.append(f"realm {rid}: a trials realm needs a decree")
+        realms.append({
+            "id": rid, "name": r.get("name", ""), "module": r.get("module"), "depth": r.get("depth", ""),
+            "minutes": r.get("minutes", 0), "covers": r.get("covers", ""), "sealed": sealed,
+            "scroll": r.get("scroll"), "trials": trials, "decree": r.get("decree") or [],
+            "encounters": [by_case[c] for c in enc_ids if c in by_case],
         })
+    if not realms:
+        errors.append("realms: none defined")
+    elif realms[0]["sealed"] or not realms[0]["trials"]:
+        errors.append("realms: the first realm is where every player starts; it must be open with trials")
+    for cid in by_case:
+        if cid not in used:
+            errors.append(f"{cid}: defined under encounters but in no realm")
 
-    court = []
-    for i, c in enumerate(doc.get("court") or [], 1):
-        if not c.get("claim") or not c.get("why") or not isinstance(c.get("truth"), bool):
-            errors.append(f"court claim {i}: needs claim, why and a true/false truth")
-        court.append({"claim": c.get("claim", ""), "truth": bool(c.get("truth")), "why": c.get("why", "")})
-    if not court:
-        errors.append("court: no claims")
+    routes = []
+    for rt in doc.get("routes") or []:
+        bad = [x for x in rt.get("path") or [] if x not in ids]
+        if bad or not rt.get("who") or not rt.get("path"):
+            errors.append(f"route {rt.get('who')!r}: needs who and a path of realm ids (unknown: {bad})")
+        routes.append({"who": rt.get("who", ""), "path": rt.get("path") or []})
 
-    return {"captured": date, "encounters": encounters, "paths": paths, "court": court}, errors
+    return {"captured": date, "realms": realms, "routes": routes}, errors
 
 
 def parse_learning_path(text: str) -> tuple[set[str], dict[str, set[str]]]:
@@ -235,8 +313,15 @@ def check_course_refs(encounters_text: str, doc: dict, modules: set[str], lesson
         for ref in filter(None, (a, b)):
             if ref not in modules:
                 errors.append(f"encounters.yaml names Module {ref}, which learning-path.md no longer has")
+    realm_of = {cid: r for r in doc.get("realms") or [] for cid in r.get("encounters") or []}
+    for r in doc.get("realms") or []:
+        if str(r.get("module")) not in modules:
+            errors.append(f"realm {r.get('id')}: Module {r.get('module')} is not in learning-path.md")
     for e in doc.get("encounters") or []:
         cid, lesson = e.get("case"), str(e.get("lesson") or "")
+        realm = realm_of.get(cid)
+        if realm and lesson and lesson.split(".")[0] != str(realm.get("module")):
+            errors.append(f"{cid}: lesson {lesson} is not in Module {realm.get('module')}, its realm's module")
         if not lesson:
             errors.append(f"{cid}: missing lesson (the learning-path.md lesson it comes from)")
         elif lesson not in lessons:
@@ -295,8 +380,10 @@ def main(argv: list[str] | None = None) -> int:
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 1
-    n_points = sum(len(e["points"]) for e in data["encounters"])
-    summary = f"{len(data['encounters'])} encounters, {n_points} points, {len(data['court'])} court claims"
+    open_realms = [r for r in data["realms"] if not r["sealed"]]
+    encs = [e for r in data["realms"] for e in r["encounters"]]
+    summary = (f"{len(open_realms)}/{len(data['realms'])} realms open, {len(encs)} dragons, "
+               f"{sum(len(e['points']) for e in encs)} scales, {sum(len(r['trials']) for r in data['realms'])} trials")
     if args.check:
         print(f"agentql-quest: OK ({summary})")
         return 0

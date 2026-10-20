@@ -16,9 +16,9 @@ const ctx = vm.createContext({
     addEventListener() {}, activeElement: null, body: {}
   },
   localStorage: { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = v; } },
-  JSON, String, parseInt, Object, Array
+  JSON, String, parseInt, Object, Array, Math
 });
-vm.runInContext(js + "\n;globalThis.__state = () => state; globalThis.__actions = () => actions; globalThis.__render = render;", ctx);
+vm.runInContext(js + "\n;globalThis.__state = () => state; globalThis.__actions = () => actions;", ctx);
 
 const Q = JSON.parse(data);
 const S = () => ctx.__state();
@@ -27,68 +27,87 @@ const press = i => { const a = ctx.__actions(); if (!a[i]) fail(`no button ${i +
 const decode = s => s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 const text = () => decode(screen.innerHTML.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ");
 const has = s => text().includes(s.trim().split(/\s+/).join(" ").slice(0, 40));
-const toChoose = () => { S().screen = "choose"; ctx.__render(); };
+const expect = (screenName, why) => { if (S().screen !== screenName) fail(`expected "${screenName}": ${why}`); };
 const log = [];
 
-// Royal Court as the Queen: judge every claim correctly.
-press(0); press(0);
-for (const c of Q.court) {
-  if (!has(c.claim)) fail("claim not shown");
-  press(c.truth ? 0 : 1);
-  if (!S().flash.ok) fail("a correct verdict was marked wrong");
-  if (!has(c.why)) fail("verdict explanation not shown");
+press(0);                                                   // title -> map
+expect("map", "the title opens the map");
+Q.realms.forEach(r => { if (!has(r.name)) fail(`map does not list ${r.name}`); });
+
+// A road other than Law is closed until Law is done.
+const firstOpenOther = Q.realms.findIndex((r, i) => i > 0 && !r.sealed);
+press(firstOpenOther);
+if (!text().includes("The roads open once")) fail("a realm other than Law should wait for Law");
+press(1);                                                   // back to the map
+
+// Sealed realms stay sealed.
+Q.realms.forEach((r, i) => {
+  if (!r.sealed) return;
+  press(i);
+  if (!text().includes("not yet open")) fail(`${r.name} should be sealed`);
   press(0);
-}
-if (!text().includes("Royal decree")) fail("court did not end in the decree");
-log.push(`court: ${Q.court.length} claims judged, decree shown`);
-press(0);
+});
 
-// Every path with no encounters is sealed; every path with encounters opens.
-const heroes = { dwarf: 2, elf: 3, human: 4 };
-for (const [path, idx] of Object.entries(heroes)) {
-  press(idx);
-  const open = (Q.paths[path] || []).length > 0;
-  if (open !== (S().screen === "intro")) fail(`${path} should be ${open ? "open" : "sealed"}`);
-  toChoose();
-}
+// Law: the scroll, then every trial; one deliberate miss first.
+const law = Q.realms[0];
+press(0); expect("realm", "Law opens"); press(0); expect("scroll", "Law shows the Scroll of Law first");
+law.scroll.rows.forEach(row => { if (!has(row.label)) fail(`scroll is missing "${row.label}"`); });
+press(0); expect("trials", "the court follows the scroll");
+law.trials.forEach((t, n) => {
+  if (!has(t.text)) fail("petition not shown");
+  if (n === 0) {
+    press((t.correct + 1) % t.options.length);
+    if (S().flash.ok || S().hp !== 2 || !has(t.why)) fail("a wrong verdict must cost trust and explain");
+    press(0);                                               // next petitioner
+    return;
+  }
+  press(t.correct);
+  if (!S().flash.ok || !has(t.why)) fail("a correct verdict was marked wrong or unexplained");
+  press(0);
+});
+if (!text().includes("Royal decree")) fail("Law should end in the decree");
+log.push(`law: scroll + ${law.trials.length} trials, decree shown`);
+press(0); expect("map", "the decree returns to the map");
 
-// Each open path: one miss (costs a heart, shows the hint), then every point answered right.
-for (const [path, idx] of Object.entries(heroes)) {
-  const encs = (Q.paths[path] || []).map(i => Q.encounters[i]);
-  if (!encs.length) continue;
-  toChoose(); press(idx);
-  encs.forEach((e, n) => {
-    if (S().screen !== "intro") fail(`expected the intro of dragon ${n + 1}`);
-    press(0); press(0);                                  // intro -> forge -> battle
-    if (n === 0) {
-      press((e.points[0].correct + 1) % e.points[0].options.length);
-      if (S().hp !== 2 || !has(e.points[0].hint)) fail("a miss must cost a heart and show the hint");
-      press(0);
-    }
-    for (const p of e.points) {
+// Every open dragon realm, every dragon, every scale; a miss on the first scale of each realm.
+Q.realms.forEach((r, i) => {
+  if (r.sealed || !r.encounters.length) return;
+  press(i); expect("realm", r.name); press(0);
+  r.encounters.forEach((e, n) => {
+    expect("encIntro", `dragon ${n + 1} of ${r.name}`);
+    if (!has(e.quest)) fail("quest not shown");
+    press(0); expect("forge", "the scroll goes to the Forge"); press(0); expect("battle", "the fight starts");
+    e.points.forEach((p, k) => {
       if (!has(p.ask)) fail("question not shown");
       const lit = (screen.innerHTML.match(/class="ln[^"]*\bon\b/g) || []).length;
       const want = (p.sqlHl === "all" ? e.sql.length : p.sqlHl.length) +
                    (p.scrollHl === "all" ? e.agentql.length : p.scrollHl.length);
       if (lit !== want) fail(`expected ${want} highlighted lines, found ${lit}`);
+      if (n === 0 && k === 0) {
+        press((p.correct + 1) % p.options.length);
+        if (S().hp !== 2 || !has(p.hint)) fail("a miss must cost a heart and show the hint");
+        press(0);                                           // try again
+      }
       press(p.correct);
-      if (!S().flash.ok) fail("the correct answer was marked wrong");
-      if (!has(p.lesson)) fail("lesson not shown after a hit");
+      if (!S().flash.ok || !has(p.lesson)) fail("the right answer was marked wrong or the lesson is missing");
       press(0);
-    }
-    if (S().screen !== "victory" || !has(e.loot)) fail("no victory screen with the loot");
-    if (n + 1 < encs.length) press(0);
+    });
+    expect("victory", "the dragon falls");
+    if (!has(e.loot)) fail("loot not shown");
+    press(0);                                               // next dragon, or back to the map
   });
-  log.push(`${path}: ${encs.length} dragon(s), ${encs.reduce((a, e) => a + e.points.length, 0)} scales broken`);
+  expect("map", `${r.name} returns to the map when cleared`);
+  log.push(`${r.id}: ${r.encounters.length} dragon(s), ${r.encounters.reduce((a, e) => a + e.points.length, 0)} scales`);
+});
 
-  // Defeat: three misses on a fresh fight.
-  press(1); press(0);
-  const p0 = encs[encs.length - 1].points[0];
-  for (let i = 0; i < 3; i++) { press((p0.correct + 1) % p0.options.length); press(0); }
-  if (S().screen !== "defeat") fail("three misses should end in defeat");
-  log.push(`${path}: three misses ends in defeat`);
-  toChoose();
-}
+// Defeat: three misses on a fresh fight.
+const ri = Q.realms.findIndex(r => r.encounters.length);
+press(ri); press(0); press(0); press(0);                    // realm -> intro -> forge -> battle
+const p0 = Q.realms[ri].encounters[0].points[0];
+for (let k = 0; k < 3; k++) { press((p0.correct + 1) % p0.options.length); press(0); }
+expect("defeat", "three misses should end in defeat");
+log.push("three misses ends in defeat");
 
-if (!store["aqq-best"]) fail("best scores were not saved");
+const done = JSON.parse(store["aqq-progress"] || "{}");
+Q.realms.forEach(r => { if (!r.sealed && !done[r.id]) fail(`${r.id} was cleared but not saved`); });
 console.log(log.join("\n"));

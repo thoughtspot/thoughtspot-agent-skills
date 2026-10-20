@@ -1,24 +1,30 @@
-# AgentQL Quest: what the game adds on top of the captured lesson SQL.
+# AgentQL Quest: the realm map, and what the game adds on top of the course.
+#
+# Each realm is one module of the Learn AgentQL course (learning-path.md). Every player starts
+# in the Kingdom of Law (Module 0, the foundation), then travels to any open realm. Realms are
+# played two ways:
+#   - trials:     true/false claims, and petitions sent to the right engine (concept realms)
+#   - encounters: SQL dragons, one per captured lesson (realms that read the SQL)
 #
 # The SQL is never written here. `build.py` reads the AgentQL and the generated warehouse SQL
-# for each `case` from agents/cli/ts-object-model-agentql-query/references/lesson-sql.md (the
-# committed capture of `tools/agentql-retest --suite lessons guards`). This file holds only
-# what the capture can't: which parts of the SQL to ask about, who put each one there, and the
-# words the player sees.
+# for each encounter's `case` from references/lesson-sql.md (the committed capture of
+# `tools/agentql-retest --suite lessons guards`). This file holds only what the capture can't.
 #
-# Per point:
+# Per dragon point:
 #   sql:       whole SQL lines to highlight (indentation ignored). Each must still be in the
 #              capture exactly, so a recapture that edits the line fails the build.
 #   scroll:    substrings of the AgentQL lines to highlight. [] = nothing (itself a clue).
 #   sql_count: {text: n} facts about the whole statement that one line can't pin down.
+#   rejected_case: a captured case that must still be rejected (for "could the AI write…?").
 #   '*' in sql/scroll highlights everything.
 #
 # The build fails (offline, no cluster) when:
-#   - an encounter's `lesson` is not a lesson in learning-path.md whose Guarded by lists its case,
-#     or any text names a lesson ("lesson 3.4") or Module that learning-path.md no longer has
+#   - a realm's module, or any lesson ("lesson 3.4") or Module the text names, is no longer
+#     in learning-path.md; or an encounter's `lesson` doesn't list its case under Guarded by,
+#     or belongs to a different module than its realm
 #   - a `case` is missing from the capture, or was not SUCCESS
 #   - `agentql` differs from the captured AgentQL by anything but layout
-#   - an `sql` line, `scroll` substring or `sql_count` no longer holds
+#   - an `sql` line, `scroll` substring, `sql_count` or `rejected_case` no longer holds
 
 # The three answers offered for every `who` point. `model` and `thoughtspot` answers both
 # map to the Forge option; the lesson text says which it was.
@@ -27,15 +33,335 @@ who_options:
   agentql: "Your scroll: it's in the AgentQL"
   ai: "The Wizard: the AI made it up"
 
+# The two engines a petition can be sent to in the Kingdom of Law.
+engines:
+  keyword: Keyword Search
+  agentql: AgentQL
+
+# Suggested routes, shown on the map. Advice, not gates.
+routes:
+  - who: Account rep
+    path: [law]
+  - who: Data engineer
+    path: [law, mines, lake, forests]
+  - who: SE
+    path: [law, riders, mines, lake, forests, isles, peaks]
+
+realms:
+  - id: law
+    name: The Elven Kingdom of Law
+    module: 0
+    depth: Overview
+    minutes: 10
+    covers: >-
+      The foundation. How AgentQL sits with Keyword Search: who writes the query, how a
+      person checks it, and why the answer stays governed either way.
+    scroll:
+      columns: [Keyword Search, AgentQL]
+      rows:
+        - label: Who writes the query
+          cells: ["A person, in natural language turned into keywords", "An AI agent, in AgentQL"]
+        - label: What it can express
+          cells: ["Filtering, pivoting, drill-down, calendars, governed metrics",
+                  "All of that, plus multi-stage analysis, complex expressions and outer joins"]
+        - label: How a person checks it
+          cells: [Read the keywords. No SQL to read., "Still the keywords. The agent's query is shown as keywords too."]
+        - label: How it runs
+          cells: [The governed engine compiles it into warehouse SQL, The same engine and the same compile step]
+      notes:
+        - Keyword Search isn't replaced. Keywords used to do two jobs, creating the query and letting a person check it. With AgentQL the agent creates the query, and keywords keep the checking job.
+        - The more an agent can express, the more decisions it makes, including business ones like which join and at what grain. That is why a person checks what it chose.
+        - ThoughtSpot never executes AgentQL. It compiles it into warehouse SQL against the Model, so the joins, security and formulas always come from the Model.
+    source: learning-path.md Module 0
+    trials:
+      - kind: claim
+        claim: '"Now that an AI agent can write the query, we no longer need keyword search."'
+        truth: false
+        why: >-
+          False. Keywords used to create the query and let a person check it. With AgentQL the
+          agent creates the query, and keywords keep the checking job.
+      - kind: route
+        petition: '"Show me total sales by region for last quarter."'
+        answer: keyword
+        why: >-
+          Keyword Search. Filtering, governed metrics and calendars are what keywords do well,
+          with the most predictable answer.
+      - kind: claim
+        claim: '"To trust an answer the agent produced, someone has to read its SQL."'
+        truth: false
+        why: >-
+          False. The agent's query is shown as keywords too, so a person confirms the intent
+          without reading any SQL.
+      - kind: route
+        petition: '"Show me every product with its West sales, including products never sold in the West."'
+        answer: agentql
+        why: >-
+          AgentQL. Keeping every product, matched or not, takes an outer join, which keywords
+          can't express. It is the showcase of lesson 3.4.
+      - kind: claim
+        claim: '"Keyword Search and AgentQL each run on their own engine, with their own rules."'
+        truth: false
+        why: >-
+          False. Both go through the same governed engine and the same compile step, against
+          the same Model.
+      - kind: claim
+        claim: '"The more an agent can express, the more decisions it makes, including business ones like which join to use."'
+        truth: true
+        why: >-
+          True. That is the trade-off. Keyword Search is more deterministic, because an analyst
+          defined the relationships in the Model in advance. AgentQL is more flexible, so a
+          person checks the logic the agent chose.
+      - kind: route
+        petition: '"Show me sales by month, and let me drill down into each store."'
+        answer: keyword
+        why: >-
+          Keyword Search. Drill-down and calendar periods over governed metrics are the
+          foundation keywords are built for.
+      - kind: claim
+        claim: '"The AI writes SQL and runs it straight against our warehouse."'
+        truth: false
+        why: >-
+          False. ThoughtSpot never executes AgentQL. It compiles the AgentQL into warehouse SQL
+          against the Model, and only that SQL runs.
+      - kind: claim
+        claim: '"If the query compiles and runs, the number must be right."'
+        truth: false
+        why: >-
+          False. Valid SQL is not proof of correct business logic. A query can compile, run and
+          return a confident wrong number, which is why a person checks the intent.
+      - kind: claim
+        claim: '"Joins, row-level security and formulas come from the Model, so they are the same for everyone who asks."'
+        truth: true
+        why: >-
+          True. You query the Model, not the tables, so the governed parts of every answer are
+          decided by the Model, not by whoever, or whatever, wrote the query.
+    decree:
+      - ThoughtSpot never executes AgentQL. It compiles it into warehouse SQL.
+      - You query the Model, not the tables, so the Model's joins, security and formulas always apply.
+      - Keywords keep the checking job, for keyword search and AgentQL alike. Valid SQL is not proof of the right answer.
+
+  - id: riders
+    name: The Riders of the Grasslands
+    module: 1
+    depth: Technical
+    minutes: 15
+    covers: >-
+      The two messengers: one only carries the question to the Forge and back (generate-sql),
+      the other also returns with the rows (fetch-data). And why the Forge only ever reads.
+    sealed: true
+
+  - id: mines
+    name: The Dwarven Mines of Silver Ore
+    module: 2
+    depth: Reads SQL
+    minutes: 15
+    covers: >-
+      Dig into the SQL ThoughtSpot writes: null-safe totals, the row cap, business names
+      turned into physical columns, Model formulas compiled in, and filters that bring in
+      their joins.
+    encounters: [l2_total_touches_fact_only, l2_formula_compiles_inline, l2_filter_case_insensitive]
+
+  - id: lake
+    name: The Craftsmen of the Lake
+    module: 3
+    depth: Reads SQL
+    minutes: 15
+    covers: >-
+      The semantic layer at work: the Model forges the joins, keys, null handling and security,
+      and AgentQL can still override a join when a question needs every member.
+    encounters: [l3_all_products_left_join]
+
+  - id: forests
+    name: The Golden Forests
+    module: 4
+    depth: Reads SQL
+    minutes: 15
+    covers: >-
+      Seasons and calendars: date parts, relative periods, and fiscal or 4-4-5 calendars the
+      Model computes so the query never has to.
+    sealed: true
+
+  - id: isles
+    name: The Shifting Isles
+    module: 5
+    depth: Reads SQL
+    minutes: 15
+    covers: >-
+      The shapes only AgentQL can make: CTEs, window functions and HAVING, and the shapes
+      that are not allowed.
+    sealed: true
+
+  - id: peaks
+    name: The Warriors of the White Peaks
+    module: 6
+    depth: Technical
+    minutes: 15
+    covers: >-
+      Trust, but verify: SUCCESS is not proof of the right answer. Find the cursed scrolls,
+      queries that compile and run but silently answer a different question.
+    sealed: true
+
 encounters:
+  # ---- Dwarven Mines (Module 2) ---------------------------------------------------------------
+  - case: l2_total_touches_fact_only
+    lesson: "2.1"
+    quest: What are our total sales, and the total quantity purchased?
+    why_agentql: >-
+      A keyword search answers this too. It is the governed base both share, so let's see what
+      ThoughtSpot writes for it.
+    agentql: |
+      SELECT SUM("t1"."sales") AS s,
+             SUM("t1"."quantity purchased") AS q
+      FROM "(Sample) Retail - Apparel" AS "t1"
+    points:
+      - kind: who
+        answer: model
+        sql: ['FROM "RETAILAPPAREL"."PUBLIC"."FACT_RETAPP_SALES" "ta_1"']
+        sql_count: {'JOIN': 0}                 # one table: no dimension was joined in
+        scroll: ['FROM "(Sample) Retail - Apparel" AS "t1"']
+        ask: >-
+          The SQL reads one table, FACT_RETAPP_SALES, and joins nothing else. Your scroll only
+          names the Model. Who decided that one table was enough?
+        hint: >-
+          Your scroll never names a table. The AI never writes the SQL that runs. Who knows
+          which tables hold sales?
+        lesson: >-
+          The Model. It knows both measures live in the sales table and, with join-progressive
+          pruning on, leaves out every dimension the question doesn't need.
+      - kind: who
+        answer: model
+        sql: ['WHEN sum("ta_1"."QUANTITYPURCHASED") IS NOT NULL THEN sum("ta_1"."QUANTITYPURCHASED")']
+        scroll: ['"t1"."quantity purchased"']
+        ask: >-
+          Your scroll asked for "quantity purchased". The SQL sums QUANTITYPURCHASED. Who
+          translated the business name into the physical column?
+        hint: Your scroll uses business names only. Something maps them to the warehouse.
+        lesson: >-
+          The Model. You query business names like "quantity purchased", and the Model maps each
+          one to its physical column. Rename the column in the warehouse and only the Model changes.
+      - kind: who
+        answer: thoughtspot
+        sql: ['WHEN sum("ta_1"."SALES") IS NOT NULL THEN sum("ta_1"."SALES")']
+        scroll: ['SUM("t1"."sales")']
+        ask: >-
+          Each sum is wrapped in CASE WHEN ... IS NOT NULL ... ELSE 0. Your scroll has no null
+          check. Who added it?
+        hint: Look for a null check in your scroll. There isn't one.
+        lesson: >-
+          ThoughtSpot wraps every SUM this way, so an empty total comes back as 0, not NULL.
+      - kind: who
+        answer: thoughtspot
+        sql: ['LIMIT 100000']
+        scroll: []
+        ask: LIMIT 100000 closes the statement. Your scroll has no LIMIT. Who added it?
+        hint: It isn't in your scroll, and the AI never writes the SQL that runs.
+        lesson: ThoughtSpot adds the row cap to every statement.
+    loot: >-
+      Two totals, each 0 rather than NULL if there were no rows, read from one table with no
+      joins at all.
+    takeaway: >-
+      You named two business measures. ThoughtSpot and the Model chose the table, the physical
+      columns, the null handling and the row cap.
+
+  - case: l2_formula_compiles_inline
+    lesson: "2.2"
+    quest: Show me sales by year.
+    why_agentql: >-
+      "date" is a formula column in the Model, so this shows what the warehouse really sees.
+    agentql: |
+      SELECT YEAR("t1"."date") AS y, SUM("t1"."sales") AS s
+      FROM "(Sample) Retail - Apparel" AS "t1"
+      GROUP BY YEAR("t1"."date")
+    points:
+      - kind: who
+        answer: model
+        sql: ["extract(year from DATEADD(day, DATEDIFF(day, DATE('2020-04-30', 'YYYY-MM-DD'), CURRENT_DATE()), \"ta_1\".\"RECORDDATE\")) \"ca_1\","]
+        scroll: ['YEAR("t1"."date") AS y']
+        ask: >-
+          Your scroll asked for the YEAR of "date". The SQL holds a whole date formula, with
+          DATEADD, DATEDIFF and CURRENT_DATE. Who wrote that formula?
+        hint: Your scroll only says "date". Where is "date" defined?
+        lesson: >-
+          The Model. "date" is a formula column, and ThoughtSpot compiles the Model's formula
+          straight into the SQL. You wrote "date"; the Model supplied the logic.
+      - kind: choice
+        sql: ["extract(year from DATEADD(day, DATEDIFF(day, DATE('2020-04-30', 'YYYY-MM-DD'), CURRENT_DATE()), \"ta_1\".\"RECORDDATE\")) \"ca_1\","]
+        scroll: []
+        rejected_case: l2_current_date_rejected
+        ask: >-
+          The Model's formula uses CURRENT_DATE. Could the Wizard put CURRENT_DATE in a scroll
+          of his own?
+        options:
+          - text: No. AgentQL rejects it, because "today" logic lives in the Model
+            correct: true
+          - text: Yes. AgentQL accepts any SQL function
+          - text: Yes, but only inside a CTE
+        hint: >-
+          If every query could define "today" its own way, would two people get the same
+          answer?
+        lesson: >-
+          AgentQL rejects it (SQL_DATE_FUNCTION). A relative date defined once in the Model
+          means the same thing to everyone, so the query may not redefine it.
+      - kind: who
+        answer: agentql
+        sql: ['GROUP BY "ca_1"']
+        scroll: ['GROUP BY YEAR("t1"."date")']
+        ask: GROUP BY the year. Who asked for that grouping?
+        hint: Look at the last line of your scroll.
+        lesson: >-
+          Your AgentQL. The grouping is the question you asked. ThoughtSpot kept it, and
+          grouped by the compiled year formula.
+    loot: Sales by year, with "year" worked out by the Model's own date formula.
+    takeaway: >-
+      You asked for the year. The Model owns what "date" means, including "today", and
+      ThoughtSpot compiled it in for you.
+
+  - case: l2_filter_case_insensitive
+    lesson: "2.3"
+    quest: What were sales in the West region?
+    why_agentql: The Wizard writes "west" in lower case, the way people often type it.
+    agentql: |
+      SELECT SUM("t1"."sales") AS s
+      FROM "(Sample) Retail - Apparel" AS "t1"
+      WHERE "t1"."region" = 'west'
+    points:
+      - kind: who
+        answer: thoughtspot
+        sql: ["WHERE LOWER(\"ta_2\".\"REGION\") = 'west'"]
+        scroll: ["WHERE \"t1\".\"region\" = 'west'"]
+        ask: >-
+          Your scroll wrote 'west' in lower case, but the data says 'West'. The query still
+          finds the West's sales. Who made them match?
+        hint: Compare your WHERE with the SQL's WHERE. Something was wrapped around REGION.
+        lesson: >-
+          ThoughtSpot. Text = and IN always compile case-insensitively, with LOWER(), and there
+          is no case-sensitive form.
+      - kind: who
+        answer: model
+        sql:
+          - 'JOIN "RETAILAPPAREL"."PUBLIC"."DIM_RETAPP_STORES" "ta_2"'
+          - 'ON "ta_1"."STOREID" = "ta_2"."STOREID"'
+        scroll: ['FROM "(Sample) Retail - Apparel" AS "t1"']
+        ask: >-
+          Filtering on region brought in a join to the stores table, on STOREID. Your scroll
+          never mentioned stores or keys. Who added the join?
+        hint: Region lives in a different table from sales. Who knows how they connect?
+        lesson: >-
+          The Model. Region lives in the stores table, so filtering on it brings in that join,
+          with the type and keys the Model defines.
+    loot: The West's total sales, found even though the scroll typed 'west' in lower case.
+    takeaway: >-
+      You asked for a filter. ThoughtSpot made it case-insensitive, and the Model brought in
+      the join that the filter needed.
+
+  # ---- Craftsmen of the Lake (Module 3) -------------------------------------------------------
   - case: l3_all_products_left_join
     lesson: "3.4"                         # its Guarded by line must list `case`
-    paths: [dwarf]
     quest: >-
       Show me every product with its sales in the West region. Products never sold in the
       West must still appear.
     why_agentql: >-
-      Keyword search can't say "every product, sold or not", so he writes it as AgentQL.
+      Keyword Search can't say "every product, sold or not", so he writes it as AgentQL.
     agentql: |
       WITH all_p AS (
         SELECT "t1"."product" AS p
@@ -175,9 +501,8 @@ encounters:
         lesson: >-
           Same scroll, same Model, same SQL. Compilation is deterministic, which is why this
           dragon's pattern never changes and why you could learn it. The AI's step is
-          different: asked again, the Wizard might word the scroll differently, and a
-          different scroll can compile to different SQL. So you check the AgentQL and trust
-          the rest.
+          different: asked again, the Wizard might word the scroll differently. That is why a
+          person checks the intent, shown as keywords, and trusts the rest.
 
     # Not machine-checked: the capture holds SQL, not rows. These are the taught numbers from
     # the Results paragraph of lesson 3.4 (learning-path.md), attributed as such on screen.
@@ -189,47 +514,3 @@ encounters:
       ThoughtSpot and the Model: the table pruning, the joins and keys, the null guard, the
       case-insensitive filter and the row cap. RLS would be added the same way. Check your
       part. Trust the rest.
-
-# Court claims are not tied to one captured query. `backed_by` says where in the course each
-# answer is taught, so a reviewer can trace it.
-court:
-  - claim: '"Your Majesty, the AI writes SQL and runs it straight against our warehouse."'
-    truth: false
-    why: >-
-      False. The AI writes AgentQL, which states intent. ThoughtSpot never runs AgentQL. It
-      compiles it against the Model into warehouse SQL, and only that SQL runs.
-    backed_by: learning-path.md Module 0
-  - claim: '"Run the same AgentQL twice and you get the same SQL both times."'
-    truth: true
-    why: >-
-      True. ThoughtSpot compiles the same AgentQL to the same governed SQL every time. That is
-      what makes answers consistent and testable.
-    backed_by: learning-path.md Module 1
-  - claim: '"Ask the AI the same question twice and it will always write the same AgentQL."'
-    truth: false
-    why: >-
-      False. The AI's step can vary: it may word the AgentQL differently, and different
-      AgentQL can give different SQL. What is fixed is the compile. That is why the AgentQL
-      is shown and checked, while the SQL it compiles to is repeatable.
-    backed_by: learning-path.md Modules 0 and 6
-  - claim: >-
-      "With AgentQL, an agent can ask things keyword search cannot, like every product with
-      its West sales, including products never sold in the West."
-    truth: true
-    why: >-
-      True. AgentQL adds expressibility: outer joins, window functions, multi-step questions.
-      The Model's governance still applies to all of it.
-    backed_by: learning-path.md lesson 3.4
-  - claim: '"A clever agent could rewrite its query to slip past row-level security."'
-    truth: false
-    why: >-
-      False. RLS is injected when ThoughtSpot compiles the query. The agent can't write it or
-      remove it, and AgentQL can only see the Model, never the raw tables.
-    backed_by: learning-path.md lesson 3.3
-  - claim: '"If the query comes back SUCCESS, the answer must be what I meant."'
-    truth: false
-    why: >-
-      False. Determinism guarantees the SQL is governed and repeatable, not that the agent
-      understood the question. A misread question compiles, deterministically, to the wrong
-      answer. That is why people check what was asked.
-    backed_by: learning-path.md Module 6

@@ -48,6 +48,10 @@ def _recaptured(capture, old, new):
     return date, cases
 
 
+def _built_encounters(data):
+    return [e for r in data["realms"] for e in r["encounters"]]
+
+
 def _built_html(doc, capture):
     data, errors = B.compile_quest(doc, *capture)
     assert errors == []
@@ -60,7 +64,9 @@ def test_committed_encounters_build_clean(doc, capture):
     data, errors = B.compile_quest(doc, *capture)
     assert errors == []
     assert data["captured"] and re.fullmatch(r"\d{4}-\d{2}-\d{2}", data["captured"])
-    assert data["paths"]["dwarf"], "the dwarf path should have at least one dragon"
+    first = data["realms"][0]
+    assert first["id"] == "law" and first["module"] == 0 and first["trials"], "everyone starts in Law (Module 0)"
+    assert any(r["encounters"] for r in data["realms"]), "at least one realm should have a dragon"
 
 
 def test_main_check_passes_on_the_repo():
@@ -70,7 +76,7 @@ def test_main_check_passes_on_the_repo():
 def test_every_who_point_highlights_the_sql_it_asks_about(doc, capture):
     data, _ = B.compile_quest(doc, *capture)
     src = {e["case"]: e for e in doc["encounters"]}
-    for e in data["encounters"]:
+    for e in _built_encounters(data):
         for p, raw in zip(e["points"], src[e["case"]]["points"]):
             if raw["kind"] == "who":
                 assert p["sqlHl"] == "all" or p["sqlHl"], f"{e['case']}: a who point lights up no SQL"
@@ -78,7 +84,7 @@ def test_every_who_point_highlights_the_sql_it_asks_about(doc, capture):
 
 def test_who_answers_map_to_the_right_option(doc, capture):
     data, _ = B.compile_quest(doc, *capture)
-    e = next(x for x in data["encounters"] if x["case"] == CASE)
+    e = next(x for x in _built_encounters(data) if x["case"] == CASE)
     expected = {"model": 0, "thoughtspot": 0, "agentql": 1}  # option 2, the AI, is never right
     for p, raw in zip(e["points"], _encounter(doc)["points"]):
         if raw.get("answer"):
@@ -150,31 +156,97 @@ def test_choice_needs_exactly_one_correct(doc, capture):
     assert any("exactly one correct" in e for e in _errors(doc, capture))
 
 
-def test_unknown_answer_path_and_kind_fail(doc, capture):
+def test_unknown_answer_kind_and_route_fail(doc, capture):
     e = _encounter(doc)
     e["points"][0]["answer"] = "ai"
     e["points"][1]["kind"] = "riddle"
-    e["paths"] = ["dwarf", "orc"]
+    doc["routes"][0]["path"].append("mordor")
     errors = _errors(doc, capture)
     assert any("answer must be one of" in x for x in errors)
     assert any("kind must be 'who' or 'choice'" in x for x in errors)
-    assert any("unknown path 'orc'" in x for x in errors)
+    assert any("unknown: ['mordor']" in x for x in errors)
 
 
-def test_court_claims_need_a_boolean_truth(doc, capture):
-    doc["court"][0]["truth"] = "false"
-    assert any("court claim 1" in e for e in _errors(doc, capture))
+def _law(doc):
+    return next(r for r in doc["realms"] if r["id"] == "law")
+
+
+def test_trial_claims_need_a_boolean_truth(doc, capture):
+    next(t for t in _law(doc)["trials"] if t["kind"] == "claim")["truth"] = "false"
+    assert any("realm law trial" in e and "true/false truth" in e for e in _errors(doc, capture))
+
+
+def test_a_petition_must_go_to_a_known_engine(doc, capture):
+    next(t for t in _law(doc)["trials"] if t["kind"] == "route")["answer"] = "code_complete"
+    assert any("answer must be one of ['keyword', 'agentql']" in e for e in _errors(doc, capture))
+
+
+def test_trial_answers_compile_to_the_right_option(doc, capture):
+    data, _ = B.compile_quest(doc, *capture)
+    law = data["realms"][0]
+    for raw, t in zip(_law(doc)["trials"], law["trials"]):
+        if raw["kind"] == "claim":
+            assert t["correct"] == (0 if raw["truth"] else 1)
+        else:
+            assert t["options"][t["correct"]].endswith(doc["engines"][raw["answer"]])
+
+
+# ---- realm rules -----------------------------------------------------------------------------
+
+def _realm(doc, rid):
+    return next(r for r in doc["realms"] if r["id"] == rid)
+
+
+def test_a_sealed_realm_cannot_hold_content(doc, capture):
+    _realm(doc, "forests")["encounters"] = ["l2_total_touches_fact_only"]
+    assert any("a sealed realm has no trials or encounters" in e for e in _errors(doc, capture))
+
+
+def test_an_open_realm_needs_content(doc, capture):
+    _realm(doc, "lake")["encounters"] = []
+    errors = _errors(doc, capture)
+    assert any("realm lake: an open realm needs" in e for e in errors)
+    assert any(f"{CASE}: defined under encounters but in no realm" in e for e in errors)
+
+
+def test_an_encounter_belongs_to_one_realm(doc, capture):
+    _realm(doc, "mines")["encounters"].append(CASE)
+    assert any(f"encounter {CASE!r} is already in another realm" in e for e in _errors(doc, capture))
+
+
+def test_everyone_starts_in_an_open_trials_realm(doc, capture):
+    doc["realms"].insert(0, doc["realms"].pop(doc["realms"].index(_realm(doc, "mines"))))
+    assert any("the first realm is where every player starts" in e for e in _errors(doc, capture))
+
+
+def test_an_encounter_must_sit_in_its_realms_module(doc, course):
+    _realm(doc, "mines")["encounters"].append(CASE)        # a Module 3 lesson in a Module 2 realm
+    _realm(doc, "lake")["encounters"].remove(CASE)
+    errors = B.check_course_refs("", doc, *course)
+    assert any(f"{CASE}: lesson 3.4 is not in Module 2" in e for e in errors)
+
+
+def test_a_realm_module_must_exist_in_the_course(doc, course):
+    _realm(doc, "isles")["module"] = 9
+    assert any("realm isles: Module 9 is not in learning-path.md" in e for e in B.check_course_refs("", doc, *course))
+
+
+def test_could_the_ai_write_it_needs_the_rejection_to_hold(doc, capture):
+    date, cases = copy.deepcopy(capture)
+    cases["l2_current_date_rejected"]["sql"] = "SELECT CURRENT_DATE"   # as if it now compiled
+    errors = B.compile_quest(doc, date, cases)[1]
+    assert any("rejected_case 'l2_current_date_rejected' now compiles" in e for e in errors)
 
 
 # ---- the rendered page -----------------------------------------------------------------------
 
 def test_inlined_data_has_no_raw_markup_and_round_trips(doc, capture):
     data, _ = B.compile_quest(doc, *capture)
-    data["court"][0]["why"] = "<!--<script></script>-->&amp;"
+    data["realms"][0]["trials"][0]["why"] = "<!--<script></script>-->&amp;"
     html = B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "")
     body = html.split('<script id="quest-data" type="application/json">', 1)[1].split("</script>", 1)[0]
     assert not set(body) & set("<>&"), "the data block must contain no raw <, > or &"
-    assert json.loads(body)["court"][0]["why"] == "<!--<script></script>-->&amp;"
+    assert json.loads(body)["realms"][0]["trials"][0]["why"] == "<!--<script></script>-->&amp;"
 
 
 def test_page_makes_no_outside_requests(doc, capture):
@@ -276,3 +348,9 @@ def test_an_encounter_pointing_at_the_wrong_lesson_fails(doc, course):
     _encounter(doc)["lesson"] = wrong
     errors = B.check_course_refs("", doc, *course)
     assert any(f"lesson {wrong}'s Guarded by line does not list {CASE}" in e for e in errors)
+
+
+def test_scroll_rows_have_one_cell_per_column(doc, capture):
+    # An unquoted comma in a YAML flow list splits one cell into two; it rendered as a 4-cell row.
+    _law(doc)["scroll"]["rows"][0]["cells"] = ["A person", "in natural language", "An AI agent", "in AgentQL"]
+    assert any("has 4 cells for 2 columns" in e for e in _errors(doc, capture))

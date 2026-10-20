@@ -11,13 +11,26 @@ Published to GitHub Pages at **`/agentql-quest/`** of the repo's site by
 touches this directory or the lesson capture. The site's home page, which lists it, is
 [`.github/pages/index.html`](../../.github/pages/index.html).
 
-## Two paths
+## The realm map
 
-| Hero | For | What they do |
-|---|---|---|
-| The Queen / The King | Account reps and anyone who needs the summary | Judge claims brought to court ("the AI runs SQL against our warehouse") as true or false |
-| Dwarf Warrior | Data engineers and anyone who reads SQL | Fight a dragon made of the generated SQL. Each scale is a line of it; break it by saying who put it there: ThoughtSpot (from the Model or its own rules), the AgentQL, or the AI (which never writes the SQL that runs) |
-| Elf / Human Warrior | Analysts / SEs | Sealed until an encounter lists them in `paths` |
+Every player starts in the **Kingdom of Law**, the foundation, then travels to any open realm.
+Each realm is one module of the course. The map suggests a route per audience (account rep:
+Law only; data engineer: Law, Mines, Lake, Forests; SE: everything), but does not enforce one.
+
+| Realm | Module | Played as | Status |
+|---|---|---|---|
+| The Elven Kingdom of Law | 0 · Why AgentQL, and why keywords stay | The Scroll of Law, then claims and petitions (send each question to Keyword Search or AgentQL) | open |
+| The Riders of the Grasslands | 1 · The two APIs | | sealed |
+| The Dwarven Mines of Silver Ore | 2 · Reading the SQL | SQL dragons from lessons 2.1, 2.2, 2.3 | open |
+| The Craftsmen of the Lake | 3 · The semantic layer | SQL dragon from lesson 3.4 | open |
+| The Golden Forests | 4 · Dates and calendars | | sealed |
+| The Shifting Isles | 5 · Advanced shapes | | sealed |
+| The Warriors of the White Peaks | 6 · Trust, but verify | | sealed |
+
+In a dragon fight, each scale is a line of the generated SQL, broken by saying who put it there:
+ThoughtSpot (from the Model or its own rules), the AgentQL, or the AI (which never writes the
+SQL that runs). Names are generic fantasy on purpose: no names, terms or quotations from any
+published fantasy work.
 
 ## How it is built
 
@@ -60,10 +73,12 @@ pytest tools/agentql-quest/tests -q                       # includes a headless 
 | `expected '…' N time(s) in the SQL` | a whole-statement fact moved, e.g. the fact table is read twice (pruning off) | same: check whether the lesson still holds |
 | `match '…' hits no line` | a `scroll` substring no longer appears in the AgentQL | update `scroll` |
 
-## Adding an encounter
+## Adding an encounter or opening a realm
 
-Add an entry under `encounters:` keyed by a lesson's **Guarded by** case id, with the `paths`
-it appears on, a `quest`, the AgentQL laid out for reading, and its `points`. A `who` point
+Add an entry under `encounters:` keyed by a lesson's **Guarded by** case id, with its `lesson`
+number, and list the case under its realm's `encounters` (the lesson must be in that realm's
+module). To open a sealed realm, drop `sealed: true` and give it encounters or `trials`. Each
+encounter needs a `quest`, the AgentQL laid out for reading, and its `points`. A `who` point
 names its `answer` (`model`, `thoughtspot` or `agentql`) and must highlight `sql`; a `choice`
 point lists its own `options` with exactly one `correct: true`. `scroll: []` highlights nothing
 in the AgentQL, which is itself the clue that ThoughtSpot added the line.

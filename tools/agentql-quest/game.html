@@ -130,6 +130,17 @@ p { margin: 0; max-width: 62ch; }
 @keyframes blink { 50% { opacity: 0; } }
 .foot { font-size: 16px; color: var(--dim); border-top: 1px dashed var(--rule); padding-top: 8px; }
 .foot a { color: var(--phosphor); }
+.map-list { display: grid; gap: 4px; }
+.realm-meta { font-size: 18px; color: var(--dim); }
+.tag { color: var(--hot); }
+.law { width: 100%; border-collapse: collapse; font-size: 19px; }
+.law-wrap { overflow-x: auto; }
+.law th, .law td { text-align: left; vertical-align: top; padding: 6px 10px 6px 0; border-bottom: 1px dashed var(--rule); }
+.law th { color: var(--hot); font-weight: 400; }
+.law td:first-child { color: var(--dim); min-width: 9em; }
+.routes { display: grid; gap: 2px; font-size: 18px; color: var(--dim); }
+.routes b { font-weight: 400; color: var(--hot); }
+.notes { display: grid; gap: 8px; margin: 0; padding-left: 1.2em; }
 @media (max-width: 520px) {
   body { font-size: 20px; padding-block: 12px; }
   .screen { padding: 16px 14px 20px; }
@@ -145,6 +156,7 @@ p { margin: 0; max-width: 62ch; }
 <script id="quest-data" type="application/json">__QUEST_DATA__</script>
 <script>
 const QUEST = JSON.parse(document.getElementById("quest-data").textContent);
+const REALMS = QUEST.realms;
 
 const ART = {
   title: String.raw`
@@ -185,12 +197,12 @@ const ART = {
        \______/
        /|    |\
 `,
-  warrior: String.raw`
-      _/\_
-     (o  o)
-    /|####|\
-     |####|
-     /_||_\
+  banner: String.raw`
+       _______
+      | ~~~~~ |
+      |  ~~~  |
+      |_______|
+         | |
 `,
   grave: String.raw`
        _____
@@ -201,13 +213,23 @@ const ART = {
 `
 };
 
-const HEROES = [
-  { id: "queen", name: "The Queen", role: "Account rep: hold court and judge claims", path: "court" },
-  { id: "king", name: "The King", role: "Account rep: hold court and judge claims", path: "court" },
-  { id: "dwarf", name: "Dwarf Warrior", role: "Data engineer: dig into the generated SQL", path: "dwarf" },
-  { id: "elf", name: "Elf Warrior", role: "Analyst: what keywords can't reach", path: "elf" },
-  { id: "human", name: "Human Warrior", role: "SE: a mix of both, ready to demo", path: "human" }
+// The map is drawn row by row and framed in code, so the border always lines up.
+const MAP_ROWS = [
+  String.raw`[7] WHITE PEAKS    /\    /\/\ `,  // trailing space: a final \ would escape the backtick
+  String.raw`  /\/\/\/\        /  \  /    \     [2] RIDERS OF`,
+  String.raw`[3] DWARVEN MINES /    \/      \   THE GRASSLANDS`,
+  String.raw`   ##   ##                         ,,,,,,,,,,,,`,
+  String.raw`               ~~~~~~~~~~~~`,
+  String.raw`[1] KINGDOM    ~~ [4] LAKE ~~    ^^^ [5] GOLDEN`,
+  String.raw`    OF LAW      ~~~~~~~~~~~~    ^^^^^  FORESTS`,
+  String.raw`   _|^|^|_`,
+  String.raw`  |_|_|_|_|     ~~~ [6] THE SHIFTING ISLES ~~~`
 ];
+const MAP = (() => {
+  const w = Math.max(...MAP_ROWS.map(r => r.length));
+  const edge = "+" + "-".repeat(w + 2) + "+";
+  return [edge, ...MAP_ROWS.map(r => "| " + r.padEnd(w) + " |"), edge].join("\n");
+})();
 
 const PLAYER_HP = 3;
 const LEGEND = `<div class="legend" aria-label="Who is who">
@@ -221,17 +243,15 @@ const bar = (n, max, on, off) => `<span class="bar">${on.repeat(n)}<span class="
 const art = (k, cls = "") => `<pre class="art ${cls}" aria-hidden="true">${esc(ART[k])}</pre>`;
 const isOn = (hl, i) => hl === "all" || hl.includes(i);
 
+function loadProgress() { try { return JSON.parse(localStorage.getItem("aqq-progress") || "{}"); } catch { return {}; } }
+function markDone(id) { try { const p = loadProgress(); p[id] = true; localStorage.setItem("aqq-progress", JSON.stringify(p)); } catch {} }
+
 let state;
 let actions = [];
-const fresh = () => ({ screen: "title", hero: null, hp: PLAYER_HP, step: 0, enc: 0, flash: null });
-const hero = () => HEROES.find(h => h.id === state.hero) || {};
-const pathEncounters = () => (QUEST.paths[hero().path] || []).map(i => QUEST.encounters[i]);
-const encounter = () => pathEncounters()[state.enc];
-
-function best() { try { return JSON.parse(localStorage.getItem("aqq-best") || "{}"); } catch { return {}; } }
-function saveBest(key, hp) {
-  try { const b = best(); if (!(b[key] >= hp)) { b[key] = hp; localStorage.setItem("aqq-best", JSON.stringify(b)); } } catch {}
-}
+const fresh = () => ({ screen: "title", realm: 0, enc: 0, step: 0, hp: PLAYER_HP, flash: null });
+const realm = () => REALMS[state.realm];
+const encounter = () => realm().encounters[state.enc];
+const firstDone = () => !!loadProgress()[REALMS[0].id] || !!state.firstDone;
 
 function choices(list) {
   actions = list.map(c => c.go);
@@ -248,98 +268,108 @@ function code(lines, hl, cls, label) {
 function panes(e, p) {
   return `<div class="pane"><span class="lbl">YOUR SCROLL: the AgentQL the AI wrote</span>${code(e.agentql, p.scrollHl, "agent", "Your AgentQL")}</div>
     <div class="pane"><span class="lbl">THE DRAGON: SQL ThoughtSpot generated</span>${code(e.sql, p.sqlHl, "", "Generated warehouse SQL")}
-    <span class="cap">Captured from generate-sql on (Sample) Retail - Apparel, ${esc(QUEST.captured)}.</span></div>`;
+    <span class="cap">Captured from generate-sql on (Sample) Retail - Apparel, ${esc(QUEST.captured)}. Lesson ${esc(e.lesson)}.</span></div>`;
 }
 
+const meta = r => `Module ${r.module} · ${r.depth} · about ${r.minutes} min`;
 const go = patch => () => { Object.assign(state, patch); render(); };
+const toMap = go({ screen: "map", flash: null });
 
 const SCREENS = {
   title() {
     return `${art("title", "hot")}
-      <p>A text adventure about one idea: the AI understands your question and writes it as AgentQL, and ThoughtSpot compiles that AgentQL into the same governed SQL every time.</p>
-      <p class="dim">The SQL is fixed. So is the dragon. Learn its pattern.</p>
-      ${choices([{ label: "Begin", go: go({ screen: "choose" }) }])}
+      <p>A text adventure about one idea: the AI understands your question and writes it as AgentQL, and ThoughtSpot compiles that AgentQL into the same governed SQL every time. A person checks the intent with keywords.</p>
+      <p class="dim">Seven realms, one for each module of the course. Everyone starts in the Kingdom of Law.</p>
+      ${choices([{ label: "Open the map", go: toMap }])}
       <p class="foot">Number keys or click to choose <span class="cursor">&nbsp;</span><br>
         Part of the <a href="https://github.com/thoughtspot/thoughtspot-agent-skills/blob/main/agents/cli/ts-object-model-agentql-query/references/learning-path.md">Learn AgentQL course</a>
         from <a href="https://github.com/thoughtspot/thoughtspot-agent-skills">ThoughtSpot Agent Skills</a>.</p>`;
   },
-  choose() {
-    const b = best();
-    return `<h2>Choose your hero</h2>
-      <p class="dim">The crown judges claims. Warriors fight dragons made of SQL.</p>
-      ${choices(HEROES.map(h => {
-        const open = h.path === "court" || (QUEST.paths[h.path] || []).length > 0;
-        return {
-          label: `${h.name}. ${h.role}${open ? "" : " (sealed)"}${b[h.path] ? `  best: ${b[h.path]}/${PLAYER_HP} ♥` : ""}`,
-          go: go({ screen: !open ? "locked" : h.path === "court" ? "court" : "intro", hero: h.id, hp: PLAYER_HP, step: 0, enc: 0, flash: null })
-        };
+  map() {
+    const done = loadProgress();
+    const names = Object.fromEntries(REALMS.map(r => [r.id, r.name.replace(/^The /, "")]));
+    const routes = QUEST.routes.map(rt => `<span><b>${esc(rt.who)}:</b> ${rt.path.map(id => esc(names[id] || id)).join(" → ")}</span>`).join("");
+    return `<h2>The map</h2>
+      <pre class="art" aria-hidden="true">${esc(MAP)}</pre>
+      <div class="routes"><span>Suggested routes, if you'd like one:</span>${routes}</div>
+      ${choices(REALMS.map((r, i) => {
+        const mark = done[r.id] ? "  ✓" : r.sealed ? "  (not yet open)" : i === 0 ? "  (start here)" : !firstDone() ? "  (after Law)" : "";
+        return { label: `${r.name}. ${meta(r)}${mark}`, go: go({ screen: "realm", realm: i, flash: null }) };
       }))}`;
   },
-  locked() {
-    return `${art("grave")}
-      <h2>The path of the ${esc(hero().name)} is sealed</h2>
-      <p>This quest is still being written. The Royal Court and the Dwarf's dragon are open.</p>
-      ${choices([{ label: "Back to the heroes", go: go({ screen: "choose" }) }])}`;
+  realm() {
+    const r = realm();
+    const head = `${art(r.trials.length ? "crown" : "banner")}<h2>${esc(r.name)}</h2><p class="realm-meta">${esc(meta(r))}</p><p>${esc(r.covers)}</p>`;
+    if (r.sealed) return `${head}<p class="dim">The road here is not yet open. This realm is still being written.</p>
+      ${choices([{ label: "Back to the map", go: toMap }])}`;
+    if (state.realm !== 0 && !firstDone()) return `${head}<p class="dim">The roads open once you have studied in ${esc(REALMS[0].name)}, the foundation every other realm builds on.</p>
+      ${choices([{ label: `Travel to ${REALMS[0].name}`, go: go({ screen: "realm", realm: 0 }) }, { label: "Back to the map", go: toMap }])}`;
+    const enter = r.trials.length ? go({ screen: "scroll" }) : go({ screen: "encIntro", enc: 0, step: 0, hp: PLAYER_HP, flash: null });
+    return `${head}${choices([{ label: "Enter the realm", go: enter }, { label: "Back to the map", go: toMap }])}`;
   },
-  court() {
-    if (state.step >= QUEST.court.length) return SCREENS.courtEnd();
-    const p = QUEST.court[state.step];
-    const head = `<div class="status"><span class="lbl">${esc(hero().name.toUpperCase())}</span>
+  scroll() {
+    const r = realm(), s = r.scroll;
+    const table = s ? `<div class="law-wrap"><table class="law"><thead><tr><th></th>${s.columns.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+      <tbody>${s.rows.map(row => `<tr><td>${esc(row.label)}</td>${row.cells.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      <ul class="notes">${(s.notes || []).map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : "";
+    return `<h2>The Scroll of Law</h2>${table}
+      <p class="dim">Study it. The court will test you on it next: ${r.trials.length} petitions, ${PLAYER_HP} crowns of trust.</p>
+      ${choices([{ label: "Take your seat at court", go: go({ screen: "trials", step: 0, hp: PLAYER_HP, flash: null }) }, { label: "Back to the map", go: toMap }])}`;
+  },
+  trials() {
+    const r = realm();
+    if (state.step >= r.trials.length) return SCREENS.decree();
+    const t = r.trials[state.step];
+    const head = `<div class="status"><span class="lbl">${esc(r.name.toUpperCase())}</span>
       <span><span class="lbl">TRUST</span> ${bar(state.hp, PLAYER_HP, "♛", "♛")}</span>
-      <span><span class="lbl">PETITION</span> ${state.step + 1}/${QUEST.court.length}</span></div>`;
+      <span><span class="lbl">PETITION</span> ${state.step + 1}/${r.trials.length}</span></div>`;
+    const intro = t.kind === "route" ? "A merchant asks which engine should answer this question:" : "A petitioner makes a claim before the court:";
     if (state.flash) {
       const f = state.flash;
-      return `${head}${art("crown")}
-        <div class="feedback${f.ok ? "" : " miss"}"><span class="tag">${f.ok ? "WISELY JUDGED" : "THE COURT GASPS. -1 TRUST"}</span><p>${esc(p.why)}</p></div>
+      return `${head}${art("crown")}<p class="hot">${esc(t.text)}</p>
+        <div class="feedback${f.ok ? "" : " miss"}"><span class="tag">${f.ok ? "WISELY JUDGED" : "THE COURT GASPS. -1 TRUST"}</span><p>${esc(t.why)}</p></div>
         ${choices([{ label: state.hp === 0 ? "Face the consequences" : "Next petitioner", go: () => {
           if (state.hp === 0) state.screen = "defeat"; else state.step++;
           state.flash = null; render();
         } }])}`;
     }
-    const judge = verdict => () => {
-      const ok = verdict === p.truth;
-      if (!ok) state.hp--;
-      state.flash = { ok }; render();
-    };
-    return `${head}${art("crown")}
-      <p>A petitioner bows before the ${esc(hero().name.replace("The ", "").toLowerCase())}:</p>
-      <p class="hot">${esc(p.claim)}</p>
-      ${choices([{ label: "Heed them. It is true.", go: judge(true) }, { label: "Banish them. It is false.", go: judge(false) }])}`;
+    return `${head}${art("crown")}<p>${intro}</p><p class="hot">${esc(t.text)}</p>
+      ${choices(t.options.map((o, i) => ({ label: o, go: () => {
+        const ok = i === t.correct;
+        if (!ok) state.hp--;
+        state.flash = { ok }; render();
+      } })))}`;
   },
-  courtEnd() {
-    saveBest("court", state.hp);
-    return `${art("crown", "hot")}
-      <h2>Royal decree</h2>
-      <p>Court is adjourned with ${state.hp} of ${PLAYER_HP} trust intact. Let it be known across the realm:</p>
-      <p>1. ThoughtSpot never executes AgentQL. It compiles it into warehouse SQL.</p>
-      <p>2. Agents query the Model, not the tables, so the Model's rules and security always apply.</p>
-      <p>3. The same AgentQL always compiles to the same SQL. That is what makes answers consistent.</p>
-      <p class="dim">But the AI's step can vary, and consistent is not the same as correct. Check what was asked.</p>
-      ${choices([{ label: "Choose another hero", go: go({ screen: "choose" }) }, { label: "Hold court again", go: go({ screen: "court", hp: PLAYER_HP, step: 0, flash: null }) }])}`;
+  decree() {
+    const r = realm();
+    markDone(r.id); state.firstDone = state.firstDone || state.realm === 0;
+    return `${art("crown", "hot")}<h2>Royal decree</h2>
+      <p>Court is adjourned with ${state.hp} of ${PLAYER_HP} trust intact. Let it be known across the realms:</p>
+      ${r.decree.map((d, i) => `<p>${i + 1}. ${esc(d)}</p>`).join("")}
+      <p class="dim">The roads to the other realms are open.</p>
+      ${choices([{ label: "Back to the map", go: toMap }])}`;
   },
-  intro() {
-    const e = encounter();
-    return `${art("wizard")}
+  encIntro() {
+    const r = realm(), e = encounter();
+    return `<p class="realm-meta">${esc(r.name)} · dragon ${state.enc + 1} of ${r.encounters.length}</p>${art("wizard")}
       <p>A merchant brings a quest: <span class="hot">"${esc(e.quest)}"</span></p>
       <p>The <span class="hot">Wizard</span> is the AI. His only job is to understand what the merchant meant and write it down. ${esc(e.whyAgentql)} In this game, his AgentQL is your <span class="hot">scroll</span>:</p>
       ${code(e.agentql, [], "agent", "Your AgentQL")}
-      ${choices([{ label: "Carry the scroll to the Forge", go: go({ screen: "forge" }) }])}`;
+      ${choices([{ label: "Carry the scroll to the Forge", go: go({ screen: "forge" }) }, { label: "Back to the map", go: toMap }])}`;
   },
   forge() {
     const e = encounter();
     return `${art("forge")}
       <p>The Forge is ThoughtSpot. It never runs the scroll. It compiles it against the Model's rules into warehouse SQL.</p>
       <p>The fire roars, and from it rises a dragon made of SQL. Each scale is a line of that SQL. Say who put it there, and the scale breaks.</p>
-      ${LEGEND}
-      ${RULE}
-      <p class="dim">Dragon: ${e.points.length} scales. You: ${PLAYER_HP} hearts. A wrong guess costs a heart. Your scroll stays on screen for every round.</p>
+      ${LEGEND}${RULE}
+      <p class="dim">This dragon: ${e.points.length} scales. You: ${PLAYER_HP} hearts. A wrong guess costs a heart. Your scroll stays on screen for every round.</p>
       ${choices([{ label: "Draw your weapon", go: go({ screen: "battle", step: 0, hp: PLAYER_HP, flash: null }) }])}`;
   },
   battle() {
-    const e = encounter();
-    const q = e.points[state.step];
-    const head = `<div class="status"><span><span class="lbl">${esc(hero().name.toUpperCase())}</span> ${bar(state.hp, PLAYER_HP, "♥", "♥")}</span>
-      <span><span class="lbl">DRAGON</span> ${bar(e.points.length - state.step, e.points.length, "█", "░")}</span></div>${LEGEND}`;
+    const r = realm(), e = encounter(), q = e.points[state.step];
+    const head = `<div class="status"><span><span class="lbl">YOU</span> ${bar(state.hp, PLAYER_HP, "♥", "♥")}</span>
+      <span><span class="lbl">DRAGON ${state.enc + 1}/${r.encounters.length}</span> ${bar(e.points.length - state.step, e.points.length, "█", "░")}</span></div>${LEGEND}`;
     if (state.flash) {
       const f = state.flash;
       const last = state.step + 1 >= e.points.length;
@@ -360,24 +390,25 @@ const SCREENS = {
       } })))}`;
   },
   victory() {
-    const e = encounter();
-    const more = state.enc + 1 < pathEncounters().length;
-    if (!more) saveBest(hero().path, state.hp);
-    return `${art("warrior", "hot")}
-      <h2>The dragon falls</h2>
+    const r = realm(), e = encounter();
+    const more = state.enc + 1 < r.encounters.length;
+    if (!more) markDone(r.id);
+    return `${art("banner", "hot")}<h2>The dragon falls</h2>
       <p>You finish with ${state.hp} of ${PLAYER_HP} hearts.</p>
       <p class="hot">${esc(e.loot)}</p>
       <p>${esc(e.takeaway)}</p>
-      ${choices(more
-        ? [{ label: "Seek the next dragon", go: go({ screen: "intro", enc: state.enc + 1, step: 0, hp: PLAYER_HP, flash: null }) }]
-        : [{ label: "Choose another hero", go: go({ screen: "choose" }) }, { label: "Fight this dragon again", go: go({ screen: "forge" }) }])}`;
+      ${more
+        ? `<p class="dim">Another dragon stirs deeper in ${esc(r.name)}.</p>` + choices([
+            { label: "Face the next dragon", go: go({ screen: "encIntro", enc: state.enc + 1, step: 0, hp: PLAYER_HP, flash: null }) },
+            { label: "Back to the map", go: toMap }])
+        : `<p class="dim">${esc(r.name)} is cleared.</p>` + choices([{ label: "Back to the map", go: toMap }, { label: "Fight this dragon again", go: go({ screen: "forge" }) }])}`;
   },
   defeat() {
-    const court = hero().path === "court";
+    const court = realm().trials.length > 0;
     return `${art("grave")}
       <h2>${court ? "The court loses faith" : "You have fallen"}</h2>
       <p>${court ? "Too many claims were judged wrongly." : "The dragon's pattern never changes, because the Forge always compiles the same scroll into the same SQL."} Learn it and return.</p>
-      ${choices([{ label: "Try again", go: go(court ? { screen: "court", hp: PLAYER_HP, step: 0, flash: null } : { screen: "forge" }) }, { label: "Choose another hero", go: go({ screen: "choose" }) }])}`;
+      ${choices([{ label: "Try again", go: go(court ? { screen: "scroll", hp: PLAYER_HP, step: 0, flash: null } : { screen: "forge" }) }, { label: "Back to the map", go: toMap }])}`;
   }
 };
 
