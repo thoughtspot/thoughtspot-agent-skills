@@ -141,6 +141,10 @@ p { margin: 0; max-width: 62ch; }
 .routes { display: grid; gap: 2px; font-size: 18px; color: var(--dim); }
 .routes b { font-weight: 400; color: var(--hot); }
 .notes { display: grid; gap: 8px; margin: 0; padding-left: 1.2em; }
+.sound { display: flex; flex-wrap: wrap; gap: 4px 16px; justify-content: flex-end; padding: 0 24px 14px; position: relative; z-index: 1; }
+.sound button { font: inherit; font-size: 17px; color: var(--dim); background: transparent; border: 1px solid var(--rule); padding: 2px 10px; cursor: pointer; }
+.sound button[aria-pressed="true"] { color: var(--phosphor); border-color: var(--dim); }
+.sound button:hover, .sound button:focus-visible { outline: none; color: var(--glass); background: var(--phosphor); }
 @media (max-width: 520px) {
   body { font-size: 20px; padding-block: 12px; }
   .screen { padding: 16px 14px 20px; }
@@ -150,7 +154,11 @@ p { margin: 0; max-width: 62ch; }
 </style>
 </head>
 <body>
-<div class="monitor"><main class="screen" id="screen" aria-live="polite"></main></div>
+<div class="monitor"><main class="screen" id="screen" aria-live="polite"></main>
+  <div class="sound" role="group" aria-label="Sound">
+    <button type="button" id="sound-sfx" aria-pressed="true"></button>
+    <button type="button" id="sound-music" aria-pressed="false"></button>
+  </div></div>
 
 <!-- Written by build.py from encounters.yaml + the captured lesson SQL. Do not edit here. -->
 <script id="quest-data" type="application/json">__QUEST_DATA__</script>
@@ -231,6 +239,100 @@ const MAP = (() => {
   return [edge, ...MAP_ROWS.map(r => "| " + r.padEnd(w) + " |"), edge].join("\n");
 })();
 
+// ---- Sound: generated with the Web Audio API, so there are no audio files and no requests. ----
+// Effects are on by default, music is off; both toggles are remembered. Browsers only allow
+// audio after the player clicks or presses a key, so nothing plays before that.
+const Sound = (() => {
+  const AC = typeof AudioContext !== "undefined" ? AudioContext
+    : typeof webkitAudioContext !== "undefined" ? webkitAudioContext : null;
+  const prefs = { sfx: true, music: false };
+  try { Object.assign(prefs, JSON.parse(localStorage.getItem("aqq-sound") || "{}")); } catch {}
+  const save = () => { try { localStorage.setItem("aqq-sound", JSON.stringify(prefs)); } catch {} };
+  let ctx = null, master = null, musicBus = null, unlocked = false;
+  let track = null, want = null, timer = null, lead = { i: 0, t: 0 }, bass = { i: 0, t: 0 };
+  const hz = n => 440 * Math.pow(2, (n - 69) / 12);          // MIDI note number to frequency
+
+  function ensure() {
+    if (!AC || !unlocked) return false;
+    if (!ctx) {
+      ctx = new AC();
+      master = ctx.createGain(); master.gain.value = 0.16; master.connect(ctx.destination);
+      musicBus = ctx.createGain(); musicBus.gain.value = 0.45; musicBus.connect(master);
+    }
+    if (ctx.state === "suspended") ctx.resume();
+    return true;
+  }
+  function tone(freq, at, dur, type = "square", vol = 0.5, dest = master, slideTo = 0) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, at);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, at + dur);
+    g.gain.setValueAtTime(vol, at);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g); g.connect(dest);
+    o.start(at); o.stop(at + dur + 0.02);
+  }
+  const EFFECTS = {
+    coin: t => { tone(hz(83), t, 0.07); tone(hz(88), t + 0.07, 0.25); },                 // gold
+    hurt: t => { tone(220, t, 0.28, "sawtooth", 0.5, master, 60); tone(98, t + 0.04, 0.3, "square", 0.3, master, 50); },
+    fanfare: t => [72, 76, 79, 84].forEach((n, i) => tone(hz(n), t + i * 0.11, i === 3 ? 0.5 : 0.12)),
+    fall: t => [67, 63, 60, 55].forEach((n, i) => tone(hz(n), t + i * 0.2, 0.24, "triangle", 0.6)),
+    blip: t => tone(hz(81), t, 0.045, "square", 0.2)
+  };
+  // Original loops, written for this game: [MIDI note or 0 for a rest, beats].
+  const TRACKS = {
+    map: { bpm: 96,
+      lead: [[72,1],[76,1],[79,1],[76,1],[77,1],[74,1],[71,2],[72,1],[74,1],[76,1],[79,1],[77,2],[74,2]],
+      bass: [[48,2],[55,2],[53,2],[55,2],[48,2],[52,2],[53,2],[55,2]] },
+    court: { bpm: 80,
+      lead: [[74,2],[77,1],[76,1],[74,2],[69,2],[70,2],[72,1],[70,1],[69,4]],
+      bass: [[50,4],[46,4],[43,4],[45,4]] },
+    battle: { bpm: 132,
+      lead: [[69,.5],[72,.5],[76,.5],[72,.5],[69,.5],[72,.5],[77,.5],[72,.5],[67,.5],[71,.5],[74,.5],[71,.5],[68,.5],[71,.5],[76,1]],
+      bass: [[45,1],[45,1],[41,1],[41,1],[43,1],[43,1],[40,1],[40,1]] }
+  };
+  function voice(part, notes, spb, type, vol) {
+    while (part.t < ctx.currentTime + 0.25) {
+      const [n, beats] = notes[part.i % notes.length];
+      if (n) tone(hz(n), part.t, beats * spb * 0.85, type, vol, musicBus);
+      part.t += beats * spb; part.i++;
+    }
+  }
+  function stopMusic() { clearInterval(timer); timer = null; track = null; }
+  function startMusic(name) {
+    if (!prefs.music || !name || !ensure() || document.hidden) return stopMusic();
+    if (track === name && timer) return;
+    stopMusic();
+    track = name;
+    const tr = TRACKS[name], spb = 60 / tr.bpm, t0 = ctx.currentTime + 0.05;
+    lead = { i: 0, t: t0 }; bass = { i: 0, t: t0 };
+    const tick = () => { voice(lead, tr.lead, spb, "square", 0.22); voice(bass, tr.bass, spb, "triangle", 0.5); };
+    tick(); timer = setInterval(tick, 100);
+  }
+  function label() {
+    const fx = document.getElementById("sound-sfx"), mu = document.getElementById("sound-music");
+    if (!fx || !mu || !fx.setAttribute) return;
+    fx.textContent = `[S] Sound effects: ${prefs.sfx ? "on" : "off"}`;
+    mu.textContent = `[M] Music: ${prefs.music ? "on" : "off"}`;
+    fx.setAttribute("aria-pressed", String(prefs.sfx));
+    mu.setAttribute("aria-pressed", String(prefs.music));
+  }
+  return {
+    prefs,
+    unlock() { unlocked = true; startMusic(want); },
+    play(name) { if (prefs.sfx && ensure()) EFFECTS[name](ctx.currentTime + 0.01); },
+    music(name) { want = name; startMusic(name); },
+    toggle(which) {
+      prefs[which] = !prefs[which]; save(); label();
+      if (which === "music") startMusic(want);
+      else if (prefs.sfx) this.play("blip");
+    },
+    pause() { stopMusic(); },
+    resume() { startMusic(want); },
+    label
+  };
+})();
+
 const PLAYER_HP = 3;
 const LEGEND = `<div class="legend" aria-label="Who is who">
   <span><b>Wizard</b> = the AI</span><span><b>Scroll</b> = the AgentQL it wrote</span>
@@ -272,7 +374,7 @@ function panes(e, p) {
 }
 
 const meta = r => `Module ${r.module} · ${r.depth} · about ${r.minutes} min`;
-const go = patch => () => { Object.assign(state, patch); render(); };
+const go = patch => () => { Sound.play("blip"); Object.assign(state, patch); render(); };
 const toMap = go({ screen: "map", flash: null });
 
 const SCREENS = {
@@ -281,7 +383,7 @@ const SCREENS = {
       <p>A text adventure about one idea: the AI understands your question and writes it as AgentQL, and ThoughtSpot compiles that AgentQL into the same governed SQL every time. A person checks the intent with keywords.</p>
       <p class="dim">Seven realms, one for each module of the course. Everyone starts in the Kingdom of Law.</p>
       ${choices([{ label: "Open the map", go: toMap }])}
-      <p class="foot">Number keys or click to choose <span class="cursor">&nbsp;</span><br>
+      <p class="foot">Number keys or click to choose. S and M switch sound effects and music. <span class="cursor">&nbsp;</span><br>
         Part of the <a href="https://github.com/thoughtspot/thoughtspot-agent-skills/blob/main/agents/cli/ts-object-model-agentql-query/references/learning-path.md">Learn AgentQL course</a>
         from <a href="https://github.com/thoughtspot/thoughtspot-agent-skills">ThoughtSpot Agent Skills</a>.</p>`;
   },
@@ -336,6 +438,7 @@ const SCREENS = {
     return `${head}${art("crown")}<p>${intro}</p><p class="hot">${esc(t.text)}</p>
       ${choices(t.options.map((o, i) => ({ label: o, go: () => {
         const ok = i === t.correct;
+        Sound.play(ok ? "coin" : "hurt");
         if (!ok) state.hp--;
         state.flash = { ok }; render();
       } })))}`;
@@ -343,6 +446,7 @@ const SCREENS = {
   decree() {
     const r = realm();
     markDone(r.id); state.firstDone = state.firstDone || state.realm === 0;
+    Sound.play("fanfare");
     return `${art("crown", "hot")}<h2>Royal decree</h2>
       <p>Court is adjourned with ${state.hp} of ${PLAYER_HP} trust intact. Let it be known across the realms:</p>
       ${r.decree.map((d, i) => `<p>${i + 1}. ${esc(d)}</p>`).join("")}
@@ -385,6 +489,7 @@ const SCREENS = {
       <p>${esc(q.ask)}</p>
       ${choices(q.options.map((o, i) => ({ label: o, go: () => {
         const ok = i === q.correct;
+        Sound.play(ok ? "coin" : "hurt");
         if (!ok) state.hp--;
         state.flash = { ok }; render();
       } })))}`;
@@ -393,6 +498,7 @@ const SCREENS = {
     const r = realm(), e = encounter();
     const more = state.enc + 1 < r.encounters.length;
     if (!more) markDone(r.id);
+    Sound.play("fanfare");
     return `${art("banner", "hot")}<h2>The dragon falls</h2>
       <p>You finish with ${state.hp} of ${PLAYER_HP} hearts.</p>
       <p class="hot">${esc(e.loot)}</p>
@@ -405,6 +511,7 @@ const SCREENS = {
   },
   defeat() {
     const court = realm().trials.length > 0;
+    Sound.play("fall");
     return `${art("grave")}
       <h2>${court ? "The court loses faith" : "You have fallen"}</h2>
       <p>${court ? "Too many claims were judged wrongly." : "The dragon's pattern never changes, because the Forge always compiles the same scroll into the same SQL."} Learn it and return.</p>
@@ -412,23 +519,37 @@ const SCREENS = {
   }
 };
 
+const MUSIC_FOR = { scroll: "court", trials: "court", decree: "court", encIntro: "battle", forge: "battle",
+                    battle: "battle", victory: "battle", defeat: "battle" };
+
 function render() {
   const el = document.getElementById("screen");
   el.innerHTML = SCREENS[state.screen]();
+  Sound.music(MUSIC_FOR[state.screen] || "map");
   el.querySelector(".choices button")?.focus({ preventScroll: true });
 }
 
 document.addEventListener("click", e => {
+  Sound.unlock();
+  if (e.target.closest("#sound-sfx")) return Sound.toggle("sfx");
+  if (e.target.closest("#sound-music")) return Sound.toggle("music");
   const b = e.target.closest(".choices button");
   if (b) actions[+b.dataset.i]?.();
 });
 document.addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  Sound.unlock();
+  const k = (e.key || "").toLowerCase();
+  if (k === "s") { e.preventDefault(); return Sound.toggle("sfx"); }
+  if (k === "m") { e.preventDefault(); return Sound.toggle("music"); }
   const n = parseInt(e.key, 10);
   if (n >= 1 && n <= actions.length) { e.preventDefault(); actions[n - 1](); }
 });
 
+document.addEventListener("visibilitychange", () => (document.hidden ? Sound.pause() : Sound.resume()));
+
 state = fresh();
+Sound.label();
 render();
 </script>
 </body>

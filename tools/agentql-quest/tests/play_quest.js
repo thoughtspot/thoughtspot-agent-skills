@@ -10,15 +10,28 @@ const data = html.split('<script id="quest-data" type="application/json">')[1].s
 const js = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
 const screen = { innerHTML: "", querySelector: () => null };
 const store = {};
+// A fake AudioContext that counts the notes the page starts, and timers we tick by hand.
+let notes = 0;
+const param = { value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} };
+class FakeAudioContext {
+  constructor() { this.currentTime = 0; this.state = "running"; this.destination = {}; FakeAudioContext.last = this; }
+  createGain() { return { gain: { ...param }, connect() {} }; }
+  createOscillator() { return { type: "", frequency: { ...param }, connect() {}, start() { notes++; }, stop() {} }; }
+  resume() {}
+}
+const intervals = new Map(); let nextId = 1;
 const ctx = vm.createContext({
   document: {
     getElementById: id => (id === "quest-data" ? { textContent: data } : screen),
-    addEventListener() {}, activeElement: null, body: {}
+    addEventListener() {}, activeElement: null, body: {}, hidden: false
   },
   localStorage: { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = v; } },
+  AudioContext: FakeAudioContext,
+  setInterval: fn => { const id = nextId++; intervals.set(id, fn); return id; },
+  clearInterval: id => intervals.delete(id),
   JSON, String, parseInt, Object, Array, Math
 });
-vm.runInContext(js + "\n;globalThis.__state = () => state; globalThis.__actions = () => actions;", ctx);
+vm.runInContext(js + "\n;globalThis.__state = () => state; globalThis.__actions = () => actions; globalThis.__sound = Sound;", ctx);
 
 const Q = JSON.parse(data);
 const S = () => ctx.__state();
@@ -30,8 +43,15 @@ const has = s => text().includes(s.trim().split(/\s+/).join(" ").slice(0, 40));
 const expect = (screenName, why) => { if (S().screen !== screenName) fail(`expected "${screenName}": ${why}`); };
 const log = [];
 
+// Sound: silent until the player's first input, effects on and music off by default.
+if (notes !== 0) fail("no sound may play before the player clicks or presses a key");
+const snd = ctx.__sound;
+if (!snd.prefs.sfx || snd.prefs.music) fail("defaults should be effects on, music off");
+snd.unlock();                                               // what the first click or key press does
 press(0);                                                   // title -> map
 expect("map", "the title opens the map");
+if (notes === 0) fail("moving to the map should blip once audio is unlocked");
+if (intervals.size !== 0) fail("music must stay off until the player turns it on");
 Q.realms.forEach(r => { if (!has(r.name)) fail(`map does not list ${r.name}`); });
 
 // A road other than Law is closed until Law is done.
@@ -61,11 +81,27 @@ law.trials.forEach((t, n) => {
     press(0);                                               // next petitioner
     return;
   }
+  const heard = notes;
   press(t.correct);
+  if (notes === heard) fail("a correct verdict should sound the coin");
   if (!S().flash.ok || !has(t.why)) fail("a correct verdict was marked wrong or unexplained");
   press(0);
 });
 if (!text().includes("Royal decree")) fail("Law should end in the decree");
+// Effects off: an answer makes no sound. Music on: a loop starts and plays notes.
+let before = notes;
+snd.toggle("sfx"); before = notes;
+snd.play("coin");
+if (notes !== before) fail("with effects off, the coin sound must not play");
+snd.toggle("sfx");
+snd.toggle("music");
+if (intervals.size !== 1) fail("turning music on should start one loop");
+FakeAudioContext.last.currentTime += 2;                     // let two seconds of music pass
+before = notes; [...intervals.values()][0]();
+if (notes === before) fail("the music loop should schedule notes");
+if (!JSON.parse(store["aqq-sound"]).music) fail("the music setting should be remembered");
+snd.toggle("music");
+if (intervals.size !== 0) fail("turning music off should stop the loop");
 log.push(`law: scroll + ${law.trials.length} trials, decree shown`);
 press(0); expect("map", "the decree returns to the map");
 
@@ -84,7 +120,9 @@ Q.realms.forEach((r, i) => {
                    (p.scrollHl === "all" ? e.agentql.length : p.scrollHl.length);
       if (lit !== want) fail(`expected ${want} highlighted lines, found ${lit}`);
       if (n === 0 && k === 0) {
+        const heard = notes;
         press((p.correct + 1) % p.options.length);
+        if (notes === heard) fail("a miss should sound the damage");
         if (S().hp !== 2 || !has(p.hint)) fail("a miss must cost a heart and show the hint");
         press(0);                                           // try again
       }
@@ -110,4 +148,5 @@ log.push("three misses ends in defeat");
 
 const done = JSON.parse(store["aqq-progress"] || "{}");
 Q.realms.forEach(r => { if (!r.sealed && !done[r.id]) fail(`${r.id} was cleared but not saved`); });
+log.push(`sound: silent before input, coin/damage/fanfare heard, toggles and music loop work (${notes} notes)`);
 console.log(log.join("\n"));

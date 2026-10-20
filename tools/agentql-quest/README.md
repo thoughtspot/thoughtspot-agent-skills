@@ -32,6 +32,16 @@ ThoughtSpot (from the Model or its own rules), the AgentQL, or the AI (which nev
 SQL that runs). Names are generic fantasy on purpose: no names, terms or quotations from any
 published fantasy work.
 
+The Kingdom of Law also covers **Code Complete**, the third engine Spotter can use (analysis
+beyond SQL, on the returned results). Anything ThoughtSpot's product summary marks as
+*planned*, such as cross-model joins, is deliberately left out until it ships.
+
+**Sound** is generated in the page with the Web Audio API: no audio files, no requests. Sound
+effects (gold for a right answer, damage for a wrong one, a fanfare, a fall) are on by default;
+the original 8-bit music loops are off by default. Both are toggled with the buttons under the
+screen or the S and M keys, remembered in the player's browser, and nothing plays until the
+player's first click or key press.
+
 ## How it is built
 
 ```

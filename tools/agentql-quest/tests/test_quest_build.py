@@ -177,8 +177,8 @@ def test_trial_claims_need_a_boolean_truth(doc, capture):
 
 
 def test_a_petition_must_go_to_a_known_engine(doc, capture):
-    next(t for t in _law(doc)["trials"] if t["kind"] == "route")["answer"] = "code_complete"
-    assert any("answer must be one of ['keyword', 'agentql']" in e for e in _errors(doc, capture))
+    next(t for t in _law(doc)["trials"] if t["kind"] == "route")["answer"] = "spellbook"
+    assert any("answer must be one of ['keyword', 'agentql', 'code_complete']" in e for e in _errors(doc, capture))
 
 
 def test_trial_answers_compile_to_the_right_option(doc, capture):
@@ -352,5 +352,7 @@ def test_an_encounter_pointing_at_the_wrong_lesson_fails(doc, course):
 
 def test_scroll_rows_have_one_cell_per_column(doc, capture):
     # An unquoted comma in a YAML flow list splits one cell into two; it rendered as a 4-cell row.
-    _law(doc)["scroll"]["rows"][0]["cells"] = ["A person", "in natural language", "An AI agent", "in AgentQL"]
-    assert any("has 4 cells for 2 columns" in e for e in _errors(doc, capture))
+    scroll = _law(doc)["scroll"]
+    cols = len(scroll["columns"])
+    scroll["rows"][0]["cells"] = ["A person", "in natural language"] + ["x"] * (cols - 1)
+    assert any(f"has {cols + 1} cells for {cols} columns" in e for e in _errors(doc, capture))

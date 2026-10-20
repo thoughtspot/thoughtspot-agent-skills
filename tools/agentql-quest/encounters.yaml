@@ -33,10 +33,13 @@ who_options:
   agentql: "Your scroll: it's in the AgentQL"
   ai: "The Wizard: the AI made it up"
 
-# The two engines a petition can be sent to in the Kingdom of Law.
+# The engines a petition can be sent to in the Kingdom of Law. Spotter picks one per question;
+# the player learns which fits what. (Code Complete is public; items the product summary marks
+# "planned", such as cross-model joins, are deliberately left out until they ship.)
 engines:
   keyword: Keyword Search
   agentql: AgentQL
+  code_complete: Code Complete
 
 # Suggested routes, shown on the map. Advice, not gates.
 routes:
@@ -52,27 +55,40 @@ realms:
     name: The Elven Kingdom of Law
     module: 0
     depth: Overview
-    minutes: 10
+    minutes: 12
     covers: >-
-      The foundation. How AgentQL sits with Keyword Search: who writes the query, how a
-      person checks it, and why the answer stays governed either way.
+      The foundation. How AgentQL sits with Keyword Search, and where Code Complete takes
+      over: who writes the query, how a person checks it, and why the answer stays governed.
     scroll:
-      columns: [Keyword Search, AgentQL]
+      columns: [Keyword Search, AgentQL, Code Complete]
       rows:
+        - label: Best for
+          cells: ["Straightforward questions, with fast and predictable answers",
+                  "More complex questions that need greater expressibility",
+                  "Analysis beyond SQL, after the database query has run"]
         - label: Who writes the query
-          cells: ["A person, in natural language turned into keywords", "An AI agent, in AgentQL"]
+          cells: ["A person, in natural language turned into keywords", "An AI agent, in AgentQL",
+                  "Spotter adds code that works on the results of a Keyword Search or AgentQL query"]
         - label: What it can express
           cells: ["Filtering, pivoting, drill-down, calendars, governed metrics",
-                  "All of that, plus multi-stage analysis, complex expressions and outer joins"]
+                  "All of that, plus multi-stage analysis, complex expressions and outer joins",
+                  "Forecasting, statistical analysis, custom calculations, and tools such as Slack or Google Sheets"]
         - label: How a person checks it
-          cells: [Read the keywords. No SQL to read., "Still the keywords. The agent's query is shown as keywords too."]
+          cells: ["Read the keywords. No SQL to read.", "Still the keywords. The agent's query is shown as keywords too.",
+                  "It starts from a Keyword Search or AgentQL result"]
         - label: How it runs
-          cells: [The governed engine compiles it into warehouse SQL, The same engine and the same compile step]
+          cells: ["The governed engine compiles it into warehouse SQL", "The same engine and the same compile step",
+                  "Its code runs on the returned data. Every database query stays governed and secure."]
+        - label: Where the answer lives
+          cells: ["A ThoughtSpot Answer: explore it, verify it with keywords, pin it to a Liveboard",
+                  "The same: explore, verify with keywords, pin to a Liveboard",
+                  "Spotter Canvas only. It can't be pinned to a Liveboard."]
       notes:
+        - Spotter picks the right engine for each question. Knowing which fits what helps you explain the answer you get.
         - Keyword Search isn't replaced. Keywords used to do two jobs, creating the query and letting a person check it. With AgentQL the agent creates the query, and keywords keep the checking job.
         - The more an agent can express, the more decisions it makes, including business ones like which join and at what grain. That is why a person checks what it chose.
         - ThoughtSpot never executes AgentQL. It compiles it into warehouse SQL against the Model, so the joins, security and formulas always come from the Model.
-    source: learning-path.md Module 0
+    source: learning-path.md Module 0; Code Complete from ThoughtSpot's public Spotter summary
     trials:
       - kind: claim
         claim: '"Now that an AI agent can write the query, we no longer need keyword search."'
@@ -112,11 +128,35 @@ realms:
           defined the relationships in the Model in advance. AgentQL is more flexible, so a
           person checks the logic the agent chose.
       - kind: route
+        petition: '"Forecast next quarter''s sales from the last two years."'
+        answer: code_complete
+        why: >-
+          Code Complete. Forecasting needs code libraries that run after the database query.
+          The sales history itself still comes from a governed Keyword Search or AgentQL query.
+      - kind: route
         petition: '"Show me sales by month, and let me drill down into each store."'
         answer: keyword
         why: >-
           Keyword Search. Drill-down and calendar periods over governed metrics are the
           foundation keywords are built for.
+      - kind: claim
+        claim: '"A Code Complete answer can be pinned to a Liveboard, like any other answer."'
+        truth: false
+        why: >-
+          False. Keyword Search and AgentQL produce ThoughtSpot Answers you can pin. Code
+          Complete answers live in Spotter Canvas only and can't be pinned to a Liveboard.
+      - kind: route
+        petition: '"Is the West''s average order really different from the East''s, statistically?"'
+        answer: code_complete
+        why: >-
+          Code Complete. A statistical test is analysis beyond SQL, run by code on the data
+          a governed query returned.
+      - kind: claim
+        claim: '"Because Code Complete runs code, it can reach the database without the Model''s rules."'
+        truth: false
+        why: >-
+          False. Code Complete works on the results that came back. Every database query stays
+          governed and secure.
       - kind: claim
         claim: '"The AI writes SQL and runs it straight against our warehouse."'
         truth: false
@@ -139,6 +179,7 @@ realms:
       - ThoughtSpot never executes AgentQL. It compiles it into warehouse SQL.
       - You query the Model, not the tables, so the Model's joins, security and formulas always apply.
       - Keywords keep the checking job, for keyword search and AgentQL alike. Valid SQL is not proof of the right answer.
+      - Code Complete goes beyond SQL on the results that come back, and every database query stays governed.
 
   - id: riders
     name: The Riders of the Grasslands
