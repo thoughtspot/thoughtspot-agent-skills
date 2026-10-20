@@ -5,15 +5,15 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**213 total items** across 24 skills — **71 open**, 126 verified, 16 deferred
+**213 total items** across 24 skills — **72 open**, 125 verified, 16 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
 | ts-convert-to-databricks-mv | 9 | **8** | 1 | 0 |
 | ts-object-model-aggregates | 20 | **8** | 11 | 1 |
+| ts-convert-from-looker | 13 | **7** | 6 | 0 |
 | ts-dependency-manager | 16 | **7** | 8 | 1 |
 | ts-object-model-coach | 7 | **7** | 0 | 0 |
-| ts-convert-from-looker | 13 | **6** | 7 | 0 |
 | ts-audit | 15 | **5** | 10 | 0 |
 | ts-convert-from-qlik | 6 | **5** | 0 | 1 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
@@ -33,7 +33,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-formula-translate | 5 | **0** | 5 | 0 |
 | ts-object-model-agentql-query | 9 | **0** | 9 | 0 |
 | ts-object-set-manager | 8 | **0** | 8 | 0 |
-### Untagged (71 items)
+### Untagged (72 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -47,6 +47,7 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-from-looker | #1 | `type: number` cross-measure SQL inlining edge cases | OPEN |
 | ts-convert-from-looker | #3 | Multiple explores that share views: one model or separate models | OPEN |
 | ts-convert-from-looker | #4 | `sql_always_where:` → ThoughtSpot RLS | OPEN |
+| ts-convert-from-looker | #5 | Liveboard layout grid coordinates | OPEN |
 | ts-convert-from-looker | #7 | `extends:` circular extension detection | OPEN |
 | ts-convert-from-looker | #8 | `explore: name { from: other_view }` aliasing | OPEN |
 | ts-convert-from-looker | #10 | `type: list` workaround via SQL | OPEN |
@@ -63,8 +64,8 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-from-snowflake-sv | #4 | Private facts and metrics (`ACCESS_MODIFIER: PRIVATE`) | NOT IMPLEMENTED |
 | ts-convert-from-snowflake-sv | #5 | `unique_keys` declarations | NOT IMPLEMENTED |
 | ts-convert-from-tableau | #3 | COLLECTION datasources | OPEN |
-| ts-convert-from-tableau | #18 | CURRENCY / NUMBER answer_columns format sub-config | TO VERIFY |
-| ts-convert-from-tableau | #19 | `sorted by … descending/ascending` search token | TO VERIFY |
+| ts-convert-from-tableau | #18 | CURRENCY / NUMBER answer_columns format sub-config | OPEN |
+| ts-convert-from-tableau | #19 | `sorted by … descending/ascending` search token | OPEN |
 | ts-convert-to-databricks-mv | #1 | Worksheet input is not supported | OPEN |
 | ts-convert-to-databricks-mv | #2 | `sql_view`-backed tables have no `build-mv` path | OPEN |
 | ts-convert-to-databricks-mv | #3 | Period-offset `sum_if(diff_months(...) = N, [m])` mapping is a lossy approximation | OPEN |

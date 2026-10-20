@@ -247,6 +247,19 @@ fix `chart_columns`/`axis_configs`/`table_columns` — those must already use th
 names or the chart fails. The reliable workflow: import once, export, copy the resolved
 names into `chart_columns`/`axis_configs`, re-import.
 
+**`axis_configs[]` keys depend on chart type — don't default to KPI's `y`-only shape for
+everything.** `KPI` is the only type with no category to plot, so it correctly uses `y`
+only. Every other type — **including `PIE`** — needs **both** `x` (the category/slice
+column) and `y` (the measure). A pie chart looks like "just one measure" the way a KPI is,
+so it's tempting to give it a `y`-only `axis_configs`, but that's a different, harder-to-spot
+failure than the "renders broken" case above: it imports with **no error** and the tile is
+not visibly broken — it just hangs/loads indefinitely while structurally similar tiles with
+a complete `x`+`y` load normally. **Verified 2026-07-02:** a PIE tile built with
+`axis_configs: [{y: [Measure]}]` (no `x`) hung indefinitely; adding `x: [Category]` fixed it
+immediately. If a specific tile is unusually slow while others in the same liveboard are
+fast, diff its `axis_configs` against a working tile of a similar chart type before assuming
+a data-volume problem.
+
 ---
 
 ## Note tiles (text tiles)

@@ -1,6 +1,6 @@
 ---
 name: ts-convert-from-tableau
-description: Convert or import a Tableau workbook (.twb or .twbx) into ThoughtSpot — parses TWB XML, generates table + model TMLs, validates and imports. Optionally migrates dashboards to liveboards with layout approximation. Direction is always Tableau → ThoughtSpot. Not for ThoughtSpot → Tableau or standalone TML exports.
+description: Convert or import a Tableau workbook (.twb or .twbx) into ThoughtSpot — parses TWB XML, generates table + model TMLs, validates and imports. Optionally migrates dashboards to liveboards via SpotterViz. Direction is always Tableau → ThoughtSpot. Not for ThoughtSpot → Tableau or standalone TML exports.
 ---
 
 # Tableau Workbook → ThoughtSpot
@@ -8,13 +8,13 @@ description: Convert or import a Tableau workbook (.twb or .twbx) into ThoughtSp
 Converts a Tableau workbook into ThoughtSpot objects. Parses the TWB XML to extract
 tables, columns, joins, and calculated fields, then generates Table TMLs and a Model
 TML per datasource. Optionally converts Tableau dashboards into ThoughtSpot Liveboards
-with approximate layout mapping.
+via **SpotterViz** (ThoughtSpot's own MCP server for building dashboards from
+natural-language instructions) — there is no hand-authored-TML liveboard path.
 
 Ask one question at a time for **dependent** decisions (where the next question depends on
 the answer), waiting for each. But **batch independent questions into a single
 multi-question prompt** to cut round-trips and keep the migration fast — e.g. mode + scope,
-the count-column + bin-style + cohort-handling decisions, or theme + parameter-chips. See
-**Efficiency** in Step 0.
+or the count-column + bin-style + cohort-handling decisions. See **Efficiency** in Step 0.
 
 ---
 
@@ -29,19 +29,18 @@ the count-column + bin-style + cohort-handling decisions, or theme + parameter-c
 | [../../shared/schemas/thoughtspot-sql-view-tml.md](../../shared/schemas/thoughtspot-sql-view-tml.md) | SQL View TML structure — for custom SQL datasources |
 | [../../shared/schemas/thoughtspot-liveboard-tml.md](../../shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure reference |
 | [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer/visualization TML structure |
-| [../../shared/schemas/thoughtspot-chart-types.md](../../shared/schemas/thoughtspot-chart-types.md) | Verified `answer.chart.type` enum (44 values) + analytical-intent → chart-type mapping |
-| [../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md](../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md) | Step 10a — durable dual-axis combo (line+column) via `custom_chart_config` |
+| [../../shared/schemas/thoughtspot-chart-types.md](../../shared/schemas/thoughtspot-chart-types.md) | Verified `answer.chart.type` enum (44 values) + analytical-intent → chart-type mapping (used for Step 11.5 coverage tiles, and for intent wording in Step 10's SpotterViz instructions) |
+| [../../shared/schemas/spotterviz-liveboard-build.md](../../shared/schemas/spotterviz-liveboard-build.md) | Step 1.6/Step 10 — SpotterViz connectivity setup, the `is_spotter_enabled` gate, build-instruction composition, known gotchas |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth setup |
 | [../../../tools/ts-cli/README.md](../../../tools/ts-cli/README.md) | `ts spotter answer` — the Spotter last-mile command (Step 12.6) |
 | [references/open-items.md](references/open-items.md) | Known validation quirks and workarounds |
 | [references/coverage-matrix.md](references/coverage-matrix.md) | Canonical mapped/unmapped construct matrix — cite in Audit mode (A4) and the migration report (Step 12) |
-| [references/liveboard-style-themes.md](references/liveboard-style-themes.md) | Step 10.5 curated themes — brand tokens + per-chart `viz_style` color palettes |
 | [references/step-3-parse-fields.md](references/step-3-parse-fields.md) | Step 3 TWB field-by-field extraction detail (relation wrapper handling, per-element field mapping, SQL dialect notes, blend date-grain resolution) |
 | [references/step-5-tml-generation.md](references/step-5-tml-generation.md) | Step 5 TML generation detail — hard rules, hand-assembly templates, parameter type mapping, formula edge cases, Tableau Sets → column/query sets |
 | [references/step-7-review-templates.md](references/step-7-review-templates.md) | Step 7 review-checkpoint and import display templates |
-| [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md) | Step 10 liveboard generation detail — KPI template, per-encoding search-query rules, liveboard TML template |
+| [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md) | Zone extraction field reference + container-tree grid mapping algorithm (Step 9) — groundwork for composing Step 10's SpotterViz build instructions |
 | [references/audit-mode-report.md](references/audit-mode-report.md) | Step A4 audit-mode coverage report templates |
-| [references/migration-report-format.md](references/migration-report-format.md) | Step 12 migration report format + Step 10g Migration Summary / Step 12.6 coverage-tile detail |
+| [references/migration-report-format.md](references/migration-report-format.md) | Step 12 migration report format + Step 10 Migration Summary / Step 12.6 coverage-tile detail |
 | [references/changelog-archive.md](references/changelog-archive.md) | Full changelog history below the versions kept inline |
 
 ---
@@ -57,8 +56,7 @@ these `--out`/`--output` files:**
 - `classification.json` / `{workbook_name}_classification.json` / `classification_tiers.json` (`ts tableau classify-formulas`, Steps A3/A4/6/7)
 - `formulas_translated.json` (`ts tableau translate-formulas`, Step 5b)
 - `table_columns.json`, `parameters.json`, `calc_id_map.json`, `param_name_map.json`, `column_name_map.json`, `table_name_map.json` (intermediate mapping files, Steps 3/5b)
-- The generated `*.table.tml` / `*.model.tml` (incl. `*.phase0.model.tml`) / `*.sql_view.tml` / `*.cohort.tml` / `*.liveboard.tml` files under `/tmp/ts_tableau_mig/output/{workbook_name}/`
-- `dashboard_spec.json` (input to `ts tableau build-liveboard`, Step 10c)
+- The generated `*.table.tml` / `*.model.tml` (incl. `*.phase0.model.tml`) / `*.sql_view.tml` / `*.cohort.tml` files under `/tmp/ts_tableau_mig/output/{workbook_name}/`
 
 Instead: consume the command's **stdout compact summary** (the counts, `stats`,
 `tier_counts` each command already prints); or `json.load()` the file from disk inside a
@@ -156,6 +154,7 @@ When the user picks **M**, immediately ask **what to migrate** — this decides 
 
   1.  Authenticate to ThoughtSpot .......................... auto
   1.5 Choose migration scope (1–5) and pace (F/C) ...... you choose
+  1.6 Confirm SpotterViz MCP connectivity .................. auto/you choose [scope 1,3]
   2.  Locate and extract the TWB file ...................... you provide path
   3.  Parse TWB XML — extract tables, columns, joins,
       calculated fields, blend relationships,
@@ -176,18 +175,14 @@ When the user picks **M**, immediately ask **what to migrate** — this decides 
   8.  Migrate dashboards? + separate vs single-tabbed (2+) . you choose (skip → Step 12) [scope 1,3]
   9.  Parse dashboard layout and map to grid ............... auto         [scope 1,3]
   9d. Orphan worksheets (not on a dashboard) — add as tiles? you choose   [scope 1,3]
- 10c. Choose charting library (Legacy default / Muze) ........ you choose  [scope 1,3]
- 10.  Generate liveboard TML (export model for params first) auto         [scope 1,3]
- 10f. Add referenced parameters to the header? (default Y) . you choose   [scope 1,3]
- 10g. Add a "Migration Summary" tab (migrated/decisions/omitted) auto     [scope 1,3]
- 10.5 Pick a liveboard style (curated theme; default) ..... you choose    [scope 1,3]
- 11.  Import liveboard ..................................... you confirm   [scope 1,3]
+ 10.  Build liveboard via SpotterViz (is_spotter_enabled gate,
+      build instructions, poll to completion) ............ you confirm   [scope 1,3]
  11.5 Formula coverage answers (every formula testable) ... auto         [scope 1,2,4]
  12.  Migration report (outcomes + links + formula map) ... auto         [scope 1,2,3,4,5]
  12.5 Resume prompt — fix parked formulas? .............. you choose    [scope 1,2,4; if parked]
 
-Confirmation required: Steps 1.5, 3.6, 4.5, 5.5, 7, 7.5, 8, 9d, 11, 12.5
-Auto-executed: Steps 1, 3, 5, 6, 9, 10, 11.5, 12
+Confirmation required: Steps 1.5, 1.6 (only if not connected), 3.6, 4.5, 5.5, 7, 7.5, 8, 9d, 10, 12.5
+Auto-executed: Steps 1, 3, 5, 6, 9, 11.5, 12
 (Per-scope runs/skips: see the table in Step 1.5.)
 
 ### Efficiency — keep the migration fast
@@ -195,13 +190,13 @@ Auto-executed: Steps 1, 3, 5, 6, 9, 10, 11.5, 12
 The flow is interactive, but most of the wall-clock cost is avoidable. Apply these:
 
 - **Batch independent prompts** — single multi-question prompt for decisions that don't
-  depend on each other (*mode + scope*; *count-column + bin-style + cohort-handling*;
-  *theme + parameter-chips*); serialize only genuinely dependent questions.
+  depend on each other (*mode + scope*; *count-column + bin-style + cohort-handling*);
+  serialize only genuinely dependent questions.
 - **Parse the TWB in one pass** — datasources, columns, calc fields, parameters, dashboards,
   zones, table-calc addressing in a *single* script, not one Bash call per element.
-- **Read the model's real `obj_id` once, up front** (Step 10-pre) — one export yields
-  `obj_id` + `parameters[].id` + resolved column names, preventing the slow
-  build→import→fail→delete→re-import liveboard cycle (the obj_id rule, Step 7/10-pre).
+- **Read the model's real `obj_id` once, right after import** (Step 7) — SpotterViz's
+  `data_source_id` (Step 10) and the Step 11.5 coverage answers both need it; capturing it
+  once avoids re-deriving it later.
 - **Don't fetch what you don't need** — skip `ts connections list`/`get` when the user names
   the connection or tables are reused (Steps 4/4.5); skip the model/table layer in scope 3.
 - **One `build-model` call per workbook, not per datasource** (Step 5a/5b) — plus one `ts
@@ -430,9 +425,10 @@ ts metadata search --subtype WORKSHEET --name "%{partial}%" --profile {profile_n
 
 From the chosen model capture and save: `{model_guid}` (`metadata_id`), **`{model_obj_id}`**
 (`metadata_obj_id` — the **real** obj_id; see the obj_id rule in Step 7), and `{model_name}`
-(`metadata_name`). Then **export it once** (Step 10-pre) to read its columns, formulas, and
-`parameters[].id` for building liveboard tiles. Confirm the picked model with the user before
-proceeding:
+(`metadata_name`). Then **export it once** to read its columns and formulas — this is what
+Step 10's SpotterViz build instructions describe tiles against — and confirm its
+`properties.spotter_config.is_spotter_enabled` (Step 10's gate) while you're there. Confirm
+the picked model with the user before proceeding:
 
 ```
 Using existing model: {model_name}
@@ -440,6 +436,42 @@ Using existing model: {model_name}
   Columns: {n}   Formulas: {f}   Parameters: {names}
 Build liveboards on this model? (yes / pick another)
 ```
+
+---
+
+## Step 1.6 — Confirm SpotterViz Connectivity
+
+> **Scope gate:** runs for scopes **1** and **3** (the only scopes that build liveboards).
+> **Skip for scope 2, 4, 5.**
+
+This skill builds liveboards exclusively via **SpotterViz**, ThoughtSpot's own MCP server
+for building Liveboards from natural-language instructions — there is no hand-authored-TML
+fallback. Check now, before doing any parsing work, so a missing connection surfaces early
+rather than after the model is already built.
+
+Check whether the SpotterViz MCP tools are loaded this session (tool names under
+`mcp__claude_ai_ThoughtSpot_Spotter__*` — try `check_connectivity`). If connected, confirm
+and continue to Step 2.
+
+**If not connected**, walk the user through setup — see
+[`../../shared/schemas/spotterviz-liveboard-build.md`](../../shared/schemas/spotterviz-liveboard-build.md)
+for the exact MCP config, the restart requirement, and the interactive OAuth login (none of
+which can be completed in a non-interactive session). Then ask:
+
+```
+SpotterViz isn't connected yet — liveboard generation (Step 10) needs it, with no
+hand-authored-TML fallback in this skill.
+
+  Y  I've set it up — recheck connectivity
+  N  Proceed without it — I understand liveboards can't be built this session
+
+Enter Y / N:
+```
+
+**On N:** proceed with the migration normally through Step 7.5/11.5/12 (Model/Table work is
+unaffected), but when Step 8 is reached, tell the user again that dashboards can't be
+migrated to liveboards this session and skip straight to Step 11.5/12 — don't silently drop
+the dashboards without saying so a second time, in case the user forgot.
 
 ---
 
@@ -1232,8 +1264,7 @@ log the omission with the original SQL query for manual recreation.
 
 See [references/step-5-tml-generation.md](references/step-5-tml-generation.md) "Parameter
 migration — type mapping and invariants" for the critical parameter invariants (string-typed
-`range_config` values, inlining a formula referenced inside `sum()`, and reading back the
-assigned parameter UUID for Step 10f).
+`range_config` values, inlining a formula referenced inside `sum()`).
 
 ### Formula reference translation
 
@@ -1316,7 +1347,7 @@ formula-less phase-0 base).
 > not found for referencedObjectId , fqn , and name <Model>"` (error 14500) — confirms the
 > 1.5.3/1.13.0 obj_id-required finding still holds. **Fix:** import the model first, read
 > back its real `obj_id` (import response `objId` / `metadata search --guid` / export —
-> same lookup Step 10-pre already does for liveboard `tables[].obj_id`), rewrite the
+> see the obj_id rule in Step 7), rewrite the
 > cohort file's `worksheet.obj_id` to that value, then import the cohort(s). `ts tml lint`
 > does not catch this (it's a live-import-only failure, not a structural TML defect —
 > lint stays clean either way); only a real/`VALIDATE_ONLY` import surfaces it.
@@ -1325,7 +1356,7 @@ formula-less phase-0 base).
 > *semantic reinterpretations*, not literal 1:1 translations, even when the CLI performs
 > them automatically. For **each** entry in `cohorts_emitted`/`cohorts_deferred`, surface its
 > outcome and ask the user to confirm it matches intent, in **both** the Step 7 review
-> checkpoint and the Migration Summary (Step 10g) / Step 12 report — see the reference above
+> checkpoint and the Migration Summary (Step 10) / Step 12 report — see the reference above
 > for the per-set review-line format and which reinterpretations especially need a human eye.
 
 ### 5c. SQL View TML — one per custom SQL relation
@@ -1706,16 +1737,17 @@ and `{parameter_map}` from the TWB parse.
 > `P1UKBankCustomers-bankdemo1` became `P1-UK-Bank-Customers-49347340`). **Never reuse the
 > obj_id you wrote into the TML for downstream references** — capture the model's *actual*
 > `obj_id` after import and use only that for:
-> - every liveboard viz `answer.tables[].obj_id` (Step 10c) — a wrong obj_id makes **every
+> - SpotterViz's `data_source_id` (Step 10) — the guid is enough, but the obj_id is the
+>   same cheap capture and the Step 11.5 coverage answers need it too;
+> - every Step 11.5 coverage-answer `answer.tables[].obj_id` — a wrong obj_id makes **every
 >   tile fail to bind** (`"No table with object_id … found"`), forcing a delete + re-import;
 > - the cohort `worksheet.obj_id` (Step 5b) — cohort binding is more lenient (it may resolve
 >   by name and still import), but use the real obj_id anyway for correctness.
 >
 > Capture it from any of these (cheapest first): the **import response header** `objId`;
-> `ts metadata search --guid {model_guid}` → `metadata_obj_id`; or the model export
-> (Step 10-pre). Save it as `{model_obj_id}`. Doing this **once, up front** (Step 10-pre,
-> alongside the parameter UUIDs) is the single biggest speed win — it removes the
-> build→fail→delete→re-import liveboard cycle entirely.
+> `ts metadata search --guid {model_guid}` → `metadata_obj_id`; or a model export. Save it as
+> `{model_obj_id}`. Doing this **once, up front** is the single biggest speed win — it
+> removes the build→fail→delete→re-import cycle entirely for every downstream reference.
 
 Save the model's real `{model_obj_id}` now (read it from the import response `objId`).
 
@@ -1766,15 +1798,19 @@ user confirms the model.
 ## Step 8 — Migrate Dashboards?
 
 **Scope gate:** if the user chose **scope 2 (Tables + Models only)**, **scope 4 (Models
-only)**, or **scope 5 (Tables only)** in Step 1.5, skip this entire step and Steps 9–11 —
+only)**, or **scope 5 (Tables only)** in Step 1.5, skip this entire step and Steps 9–10 —
 go straight to **Step 11.5** (coverage, scopes 2/4) then **Step 12**. In **scope 3
 (Liveboards only)** this step is the entry point (the model came from Step 1.5a); the
-liveboard tiles reference that model's columns (Step 10-pre export).
+SpotterViz build (Step 10) describes tiles against that model's columns.
+
+**If Step 1.6 ended with the user declining SpotterViz setup**, skip this step (and 9, 10)
+the same way — tell the user again that dashboards can't be migrated to liveboards this
+session, then go straight to Step 11.5/12.
 
 If Step 3d found zero `<dashboard>` elements, skip to **Step 11.5** (a model-only workbook
 still benefits from coverage answers), then Step 12.
 
-Otherwise (scope 1 or 3 with dashboards), present the decision:
+Otherwise (scope 1 or 3 with dashboards, and SpotterViz connected), present the decision:
 
 ```
 The workbook contains {N} dashboard(s):
@@ -1803,8 +1839,8 @@ This workbook has {N} dashboards. Create:
 Enter S / T:
 ```
 
-**T** puts each dashboard on its own tab in one liveboard (`layout.tabs[]`); **S** keeps them
-independent. Either way, add the Step 10g Migration Summary as a final tab.
+**T** describes each dashboard as its own tab in one SpotterViz build; **S** builds them as
+independent liveboards. Either way, Step 10 asks SpotterViz to add a Migration Summary tab.
 
 ---
 
@@ -1823,7 +1859,8 @@ is the layout's real structure (9c).
 Classify each zone:
 - **Chart zones**: a worksheet viz — a leaf zone carrying a `name` (worksheet name) and no
   more specific sub-type. These become visualization tiles.
-- **Text/title zones**: `type="text"` or `type="title"` → becomes a note tile (Step 10c).
+- **Text/title zones**: `type="text"` or `type="title"` → becomes a note/annotation in the
+  Step 10 SpotterViz build instructions.
 - **Skip**: `type="bitmap"` (images), `type="web"`, `type="extension"`, `type="metric"`,
   `type="filter"` (quick filters — handled via liveboard `filters[]`, not as tiles),
   `type="paramctrl"` (parameter controls — the migrated model `parameters[]` cover these),
@@ -1863,8 +1900,11 @@ height, the y-band fallback, and floating-zone handling). **Invariant: column sp
 row must sum to exactly 12**, with a minimum `col_span` of 2 per tile.
 
 Save the grid layout as a list of tiles with `zone_id`, `zone_type`, `worksheet_name`,
-`col` (x), `col_span` (width), `row_span` (height), `y` — ready for Step 10c. Column spans in
-each row must sum to 12; keep a stable left-to-right order matching the source.
+`col` (x), `col_span` (width), `row_span` (height), `y`. Step 10's SpotterViz build
+instructions don't need literal pixel/grid coordinates, but this relative layout — which
+zones share a row, which are grouped, left-to-right order — is exactly what turns "here are
+six tiles" into a clear description of the source dashboard's actual structure. Column spans
+in each row must sum to 12; keep a stable left-to-right order matching the source.
 
 ### 9d. Orphan worksheets — surface and prompt to include
 
@@ -1882,10 +1922,9 @@ recommend → resolve).
 3. **Recommend.** Say whether each looks worth adding (a meaningful, distinct view) or is
    likely a draft/superseded by a tile already on the dashboard.
 4. **Prompt** (per the references — ask, don't assume). Offer: add **all**, add a **subset**
-   (name which), or **none**. For any the user picks, build them as additional tiles in Step 10
-   (same chart-type resolution, theming, and grid placement as dashboarded vizzes) and append
-   them after the dashboard's own tiles.
-5. **Record the outcome** in the Migration Summary (Step 10g): which orphans existed, which
+   (name which), or **none**. For any the user picks, describe them as additional tiles in
+   Step 10's SpotterViz build instructions, appended after the dashboard's own tiles.
+5. **Record the outcome** in the Migration Summary (Step 10): which orphans existed, which
    were added, which were left off (and that the model still supports them via Spotter).
 
 **MUST-ASK — never skip the prompt or decide on the user's behalf**, even when the dashboard
@@ -1895,424 +1934,45 @@ representing a distinct, useful view — the user can always decline.
 
 ---
 
-## Step 10 — Generate Liveboard TML
-
-### 10-pre. Export model — capture obj_id, parameters, and resolved column names (BEFORE generating TML)
-
-**Do this first, before writing any liveboard YAML.** One export of each model referenced by
-the liveboard gives you everything the tiles need — do it once and reuse:
-
-```bash
-ts tml export {model_guid} --profile {profile_name}
-```
-
-From the export (and/or `ts metadata search --guid {model_guid}`) record:
-- **`obj_id`** — the model's **real** `obj_id` (the export root / `metadata_obj_id`). Save as
-  `{model_obj_id}` and use it for **every** liveboard viz `answer.tables[].obj_id`. **Do NOT
-  use the obj_id you wrote into the model TML** — a fresh model's requested obj_id is
-  reassigned by ThoughtSpot, and a stale ref makes every tile fail to bind (see the obj_id
-  rule in Step 7). This is the fix for the build→fail→delete→re-import cycle.
-- `parameters[]` — for each, `name` (display name) and `id` (the UUID ThoughtSpot assigned,
-  needed for `parameter_overrides[].key` in Step 10f). **If you skip this, Step 10f cannot be
-  completed** — the UUIDs aren't in the TWB or the import response.
-- column + formula **display names** — the exact names tiles must reference (and, in scope 3,
-  the only columns available; map TWB shelf fields to these and surface any with no match).
-
-(In **scope 3 / Liveboards only**, the model already exists from Step 1.5a — this export is
-the single source of its obj_id, columns, formulas, and parameter UUIDs.)
-
-### 10-charts. Choose the charting library (ask once)
-
-Before resolving chart types, ask the user which charting library to target — **default
-Legacy**:
-
-```
-Which charting library should the liveboard use?
-  L  Legacy charts — portable, work on every cluster                           (default)
-  M  Muze charts (new charting library) — early access; the target cluster
-     must have it enabled (e.g. SE). Closer to Tableau's shelves (Color →
-     slice-with-color, small multiples → trellis-by) for a more faithful migration.
-
-Enter L / M:
-```
-
-- **L (Legacy, default):** emit the legacy chart types with `chart.axis_configs`
-  (the rest of Step 10 as written).
-- **M (Muze):** for **cartesian/pivot** intents (bar, column, line, area, their stacked
-  forms, line+column combos, pivot) emit the `ADVANCED_*` type with `chart.custom_chart_config`
-  (shelf model: `x-axis` / `y-axis` / `slice-with-color` / `trellis-by`); **fall back to the
-  Legacy type** for every other intent (pie, scatter/bubble, heatmap, treemap, sankey,
-  funnel, waterfall, pareto, spider, geo, KPI). Map a Tableau **Color** encoding →
-  `slice-with-color` and **small multiples** → `trellis-by`. Never put `custom_chart_config`
-  on a Legacy type (import fails). See
-  [`../../shared/schemas/thoughtspot-chart-types.md`](../../shared/schemas/thoughtspot-chart-types.md)
-  "New charting library" for the verified shelf spec and rules.
-
-### 10a. Resolve chart types
-
-**Default to CHART_MODE with the closest chart type — TABLE_MODE is a last resort.**
-Only use `TABLE_MODE` for explicit crosstabs (Tableau `text` mark class) or when there
-is genuinely no chart type that can render the data. For untranslatable visualizations
-(k-means cluster, forecast), build a **CHART_MODE placeholder** with the most representative
-type (SCATTER for cluster inputs, LINE for forecast historical trend) and flag for review
-in the description — never fall back to TABLE_MODE as a lazy alternative.
-
-See [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
-"Mark class → chart type (Step 10a)" for the full Tableau mark-class → `chart.type` mapping
-table (bar/line/circle/square/pie/area/text/map/KPI-block/dual-axis combo).
-
-**Combo / dual-axis rule (Muze path only).** A Tableau **dual-axis** worksheet (two `<pane>`
-marks with different mark classes, typically `Bar` + `Line`, on a secondary/synchronized
-axis) is a combo chart. On **Muze** (Step 10-charts = M) emit `ADVANCED_LINE_COLUMN` with
-both measures on `axis_configs.y` and let ThoughtSpot auto-resolve line vs column. **Do NOT
-hand-author `chart.custom_chart_config`** — its column refs are GUIDs assigned only after an
-answer exists, so a fresh import with display names fails with `Invalid GUID string`
-(live-verified; only a real/`VALIDATE_ONLY` import catches it, not `ts tml lint`). To
-durably pin the split, use capture-and-replay: import the auto-resolved combo, set it in the
-UI, export (now has real GUIDs), replay on re-import. On **Legacy** (or pre-Muze clusters),
-split into separate COLUMN + LINE tiles and flag the merged axis as a gap. Full detail:
-[`../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md`](../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md).
-
-For the **authoritative `answer.chart.type` enum (44 valid values)**, per-type shelf shapes,
-the geo/candlestick caveats, and a full **analytical-intent → chart-type** mapping (for
-choosing a better chart than the source used), see
-[`../../shared/schemas/thoughtspot-chart-types.md`](../../shared/schemas/thoughtspot-chart-types.md).
-`GAUGE` is **not** a valid type, and one invalid enum value fails the whole import — validate
-the type before importing.
-
-**KPI rule.** A Tableau scorecard/KPI worksheet (Measure Names + Measure Values, no
-dimension) maps poorly to a single tile. Emit **one KPI viz per measure** — that's the
-idiomatic ThoughtSpot KPI (headline + sparkline + period-over-period). **ALWAYS include a date
-when the model has one** — this applies to *every* KPI tile (not just measure blocks), and is
-easy to forget. Date selection: **0 date fields → static KPI (measure only); exactly 1 →
-include it automatically; 2+ → ask the user which.** Use the data's grain (`[Date].yearly`
-for annual data, `[Date].monthly` otherwise) — the default is monthly, so set `.yearly`
-explicitly for annual sources. So a "count of sectors" KPI in a workbook with a `Fiscal Year`
-column is `[Total Sectors] [Fiscal Year].yearly`, **not** a bare `[Total Sectors]`.
-
-For the trend/sparkline to actually render, three things are required:
-
-1. The date must be in **both** `chart_columns` and on axis **`x`**, with the measure on `y`
-2. A `table:` block with `table_columns` and `ordered_column_ids`
-3. **`client_state_v2` on the `chart:` block** with `showSparkline: true` in the
-   `kpiColumnProperties` — without this, the KPI renders as a plain number with no trend line
-
-See `thoughtspot-liveboard-tml.md` "KPI sparkline `client_state_v2`" and
-[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
-"KPI viz template (Step 10a)" for the full KPI viz YAML (`kpiDisplayProperties`, per-column
-`kpiColumnProperties`, fresh `axisProperties` UUIDs, optional `seriesColors`) — substitute
-column names, UUIDs, and colors.
-
-### 10b. Build search queries
-
-`search_query` is a ThoughtSpot search string of **bracketed column display names**, not
-a "sum sales" phrase. Build it from the worksheet shelves:
-
-See [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
-"Build search queries — per-encoding rule set (Step 10b)" for the full rule set: measure/
-dimension/date-bucket references, Top-N + sort fidelity, currency/number/percent column
-`format`, Color-shelf/small-multiples fidelity (Muze `slice-with-color`/`trellis-by` vs
-Legacy), cumulative/moving measures, the two growth/decline forms (`growth of` keyword vs an
-answer-level period-comparison formula with a worked example), and answer-level vs model
-formula placement.
-
-### 10c. Build liveboard TML
-
-**Emit the base Answer + Liveboard TML deterministically — don't hand-write it.** Assemble a
-dashboard spec from Steps 9/9b/9c and run:
-
-```bash
-ts tableau build-liveboard --input dashboard_spec.json --output-dir ./out
-```
-
-Optional flags `--model-name`/`--model-fqn`/`--report-name` are only needed for a bare
-`ts tableau parse` input (not this case — the spec below already carries `model_name`).
-
-The spec is one object per dashboard → visuals → fields, each field tagged with its Tableau
-`shelf` (`columns`/`rows`/`color`) or an explicit `role`, plus `measure: true/false`; carry
-the Step 9c grid placement as each visual's `tile`. The command does role-aware axis layout
-(Columns→x, Color→series/color, Rows→pivot rows, measures→y), applies the chart-type
-requirement floor (flags a chart short of the measures it needs — never silently
-downgrades), and assembles one tabbed liveboard. Full spec shape: `tools/ts-cli/README.md`
-(`ts tableau build-liveboard`) / `ts_cli/tableau/liveboard.py`.
-
-**Presentation polish rides in the spec, not a second hand-edit pass.** Anything the
-auto-builder can't express (hand-tuned combo/dual-axis, KPI sparkline, per-column `format`,
-theme `viz_style`) goes on that visual's `override`/`formats`/`client_state_v2`/
-`custom_chart_config`/`viz_style` keys, which the command replays into the emitted TML. Add
-tiles with no Tableau source visual via `extra_visuals[]`.
-
-> The command consumes a spec you assemble from the Step 9 parse; fully **extracting** the
-> per-visual shelves/roles inside `ts tableau parse` (so the spec is produced end-to-end with
-> no hand-assembly) is a tracked follow-on — see open item #20.
-
-See [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
-"Liveboard TML template (Step 10c)" for the full YAML — the reference for what the command
-emits, and the shape to match when hand-tuning an `override`. Follow
-`../../shared/schemas/thoughtspot-liveboard-tml.md` exactly.
-
-**Critical naming rule (this is what breaks vizzes).** `chart_columns`, `axis_configs`,
-and `table.table_columns` must reference the **resolved** answer-column names, not raw
-model names:
-- aggregated measure → `Total {Measure}` (`SUM([Total Revenue])` → `Total Total Revenue`)
-- **model formula with embedded aggregation** (e.g. `sum([A] * [B])`) → resolves to the
-  **formula name as-is**, no "Total" prefix. Example: formula "Commission Earned" with
-  `sum(...)` expression → `Commission Earned`, NOT `Total Commission Earned`.
-- bucketed date → `{Bucket}(col)` (`[Ship Date].yearly` → `Year(Ship Date)`)
-- **KPI date auto-bucketing:** a bare date in a KPI `search_query` (e.g. `[Date]`) is
-  auto-bucketed to **monthly** — resolved name becomes `Month(Date)` and the search_query
-  gains `.monthly`. Specify `[Date].daily` explicitly if you want `Day(Date)` instead.
-- attribute → unchanged
-
-ThoughtSpot re-resolves `answer_columns` from `search_query` on import but does **not** fix
-`chart_columns`/`axis_configs`. Reliable loop: build with your best-guess resolved names,
-import, **export the liveboard**, copy the exact resolved names back into
-`chart_columns`/`axis_configs`, and re-import. Use `obj_id` (never bare `fqn`) for the
-table ref, and don't hand-author `client_state_v2` — leave styling to defaults.
-
-Note tiles use `note_tile.html_parsed_string` (HTML) and have **no `answer`** — not the
-old `viz_type: NOTE_TILE`/`content` form.
-
-**Do NOT create a note tile just for the dashboard title.** ThoughtSpot liveboards have
-native `name` and `description` fields — use them instead. Set `liveboard.name` to the
-dashboard title and `liveboard.description` to any subtitle or context text. Only create
-a note tile for a Tableau text zone that carries **content beyond the title** — instructions,
-annotations, embedded links, or multi-paragraph context that belongs inside the board.
-
-### 10d. Beautify layout
-
-Apply layout optimization to each liveboard TML:
-
-1. **Sort tiles** by y, then x.
-2. **Pack rows from y=0** — reset y values so tiles start at 0 with no gaps.
-3. **Fill 12 columns per row** — if a row's tiles don't span all 12 columns, expand
-   the rightmost tile's width to fill.
-4. **Minimum tile height** — enforce minimum height of 4 units.
-5. **Remove empty rows** — if a row has no tiles, remove it.
-
-Rewrite the `layout.tiles` section with corrected coordinates.
-
-### 10e. Group related tiles into sections, and label everything clearly
-
-A flat grid of tiles reads as a dump; a grouped, well-labelled liveboard reads as a
-designed product. Two cheap, high-value steps:
-
-**Group related vizzes into sections** (`groups[]` + `group_layouts[]` — see
-`../../shared/schemas/thoughtspot-liveboard-tml.md` "Sections (groups)" and "Tabbed +
-Groups"). Infer groupings from what the vizzes have in common rather than leaving
-everything loose:
-- All the per-measure **KPI tiles** → one "Key Metrics" section.
-- Vizzes that share a **breakdown dimension** (e.g. two charts both by *Sales Channel*) →
-  a section named for that dimension ("Channel Performance").
-- Vizzes that share a **subject** (e.g. top-products + a geographic map) → e.g.
-  "Product & Geographic Analysis".
-- Give each group a short `name` and a one-line `description`.
-A Tableau dashboard has no native sections, so this is an inference — keep it light (2–4
-groups) as a starting point, not a hard cap; a tab with many small tiles can reasonably need
-more. Don't force a viz into a group it doesn't fit; ungrouped tiles are fine.
-
-**Groups work with tabs — but the nesting is specific.** When using `layout.tabs[]`:
-1. Define `groups[]` at the liveboard level with `visualizations:` listing member viz IDs
-2. In each tab's `tiles[]`, place **group IDs** as tiles (`visualization_id: Group_1`) —
-   NOT individual viz IDs
-3. Nest `group_layouts[]` **inside each tab** (not at the top-level `layout`)
-4. Individual vizzes only appear inside `group_layouts[].tiles[]`
-5. Ungrouped vizzes (e.g. note tiles) go directly in `tabs[].tiles[]`
-
-**Common mistake:** putting individual viz IDs in `tabs[].tiles[]` alongside groups, or
-putting `group_layouts` at the layout root instead of inside each tab — both cause
-"Group was dropped because it has no valid visualizations" on import.
-
-**Write meaningful names and descriptions on every viz — no exceptions, including fully
-translated charts, not just placeholders.** Don't ship raw worksheet names like `Sheet 1`.
-Set `answer.name` to a clear title (prefer the Tableau worksheet caption when descriptive;
-otherwise synthesize from the shelves — `{measure} by {dimension}`, `Monthly {measure}
-Trend`, `Top {N} {dimension} by {measure}`) and a one-line `answer.description` stating
-what the chart shows and naming the Tableau source worksheet (these surface as the tile
-title and its info tooltip):
-
-```yaml
-answer:
-  name: "Top 5 Item Types by Revenue"
-  description: "Horizontal bar of top 5 item types ranked by total revenue. Source: Tableau worksheet 'Top 5 Item Type Revenue wise'."
-```
-
-Keep descriptions to one factual sentence. For placeholder/partial vizzes, also note what's
-missing and that it needs review.
-
-### 10f. Surface referenced parameters in the liveboard header
-
-> **A parameter chip is only valuable when a formula that CONSUMES the parameter is on the
-> board (live-verified 2026-07-05).** ThoughtSpot **drops any unreferenced parameter** on
-> import ("Dropping unreferenced parameters … ordered chips … will be dropped") — so adding a
-> chip for a param no tile uses is not just pointless, it fails. Map Tableau parameters by how
-> they're used:
-> - **A model formula consumes the param as a value** (a bin size, a threshold, a dynamic
->   selector a tile displays) → add the chip (below). The chip will stick because the tile
->   references it.
-> - **Filter-type param** (e.g. `Category Tier`, `Engagement Type` — used only inside an
->   `if [Param]=… then …` filter/category formula) → the idiomatic ThoughtSpot form is a
->   **liveboard filter** on the underlying column (`filters[]` in
->   `thoughtspot-liveboard-tml.md`), *not* a parameter chip.
-> - **Display-toggle param** (e.g. `Metric`, `Top 10` that drove Tableau **sheet-swapping** —
->   show the Sales sheet vs the Units sheet) → **no ThoughtSpot equivalent.** Build explicit
->   per-metric tiles, or omit. Do **not** try to force a chip with a raw `[Param]`-selector
->   tile — such a tile isn't a valid query and gets dropped.
-
-If parameter creation failed in Step 5b, fix the parameter first (check `range_config` string
-values, cross-formula inlining) before proceeding.
-
-If any viz on the liveboard **references a model parameter** (directly, or via a formula/bin
-it uses — e.g. an `Age (bin)` driven by an `Age Groups` parameter), the parameter can be
-shown as a **header chip** so users can change it live. For each referenced parameter,
-**ask the user — default yes:**
-
-```
-Add parameter "{name}" to the liveboard header so users can adjust it? [Y/n]  (default Y)
-```
-
-On **yes**, add it to the liveboard header via `ordered_chips[]` and `parameter_overrides[]`
-(see `../../shared/schemas/thoughtspot-liveboard-tml.md`):
-
-```yaml
-liveboard:
-  parameter_overrides:
-  - key: "{parameter_uuid}"
-    value:
-      name: "{Model Name}::{Parameter Name}"
-      id: "{parameter_uuid}"
-      # override_value: "..."   # only to change the default
-  ordered_chips:
-  - name: "{Model Name}::{Parameter Name}"
-    type: PARAMETER
-```
-
-The `{parameter_uuid}` is assigned when the model imports — resolve it by exporting the
-model (`ts tml export {model_guid} --parse`) and reading its `parameters[].id`. Chip names
-are scope-qualified: `Model Name::Parameter Name`.
-
-### 10g. Add a "Migration Summary" tab
-
-Add a final **"Migration Summary"** tab to each liveboard — a single note tile that records
-what the migration did, reviewable **in-product** (editable/deletable by the user). Use the
-**tabs** layout (`layout.tabs[]`): migrated content first, summary last. The note tile's
-`html_parsed_string` has four sections (items migrated; decisions made; partial/placeholder
-— per the placeholder principle, forecast/cluster vizzes are placeholders showing the
-reproducible part, not omissions; items NOT migrated — reserved for things with genuinely
-nothing to render) — see
-[references/migration-report-format.md](references/migration-report-format.md) "Migration
-Summary tab content (Step 10g)" for the exact section template. This is the same content as
-`MIGRATION_LIMITATIONS.md` (Step 12) plus the positive items — keep consistent. Multiple
-liveboards → one summary each, model-level decisions on the first. **Record the Step 9d
-orphan-worksheet outcome here** (which were added/left off, and that any calc fields/cohorts
-they introduced remain usable via Spotter/search even if unreferenced by a tile).
-
-Write each liveboard to
-`/tmp/ts_tableau_mig/output/{workbook_name}/{dashboard_name}.liveboard.tml`.
-
----
-
-## Step 10.5 — Liveboard Style
-
-A migrated liveboard looks intentional when it carries a coherent style rather than the
-bare default. Offer the user a **curated theme** (one pick), then write it into the
-liveboard. A complete theme is **three layers** — board/group/tile brand tokens
-(`style.style_properties`), per-object assignments (`style.overrides[]`), **and** a matching
-per-chart color palette (`chart.viz_style`). The full token reference is in
-`../../shared/schemas/thoughtspot-liveboard-tml.md` ("Liveboard styling"); the
-ready-to-apply per-theme recipes (tokens + `viz_style` palettes) are in
-[references/liveboard-style-themes.md](references/liveboard-style-themes.md) — read it and
-apply the chosen theme's three layers verbatim.
-
-**MUST present ALL 6 themes plus option 0 — do not truncate the list.** Presenting a
-subset removes the user's choice. Use the exact prompt below:
-
-```
-Pick a style for the liveboard(s):
-  1  Clean & Minimal     — light gray, sharp borders (data-first, default)
-  2  Cool Professional   — blue, corporate/executive
-  3  Fresh & Modern      — mint/teal, contemporary
-  4  Soft Lavender       — purple, elegant/calm
-  5  Warm Tones          — peach/orange, friendly/customer-facing
-  6  High Contrast KPIs  — dark KPI tiles for maximum headline impact
-  0  None                — leave ThoughtSpot defaults
-
-Enter 1–6 or 0:
-```
-
-**Apply the theme to EVERY chart tile — don't skip any.** When a theme defines a chart
-palette (`viz_style`), set it on *all* chart vizzes uniformly, including formula-/growth-based
-tiles and ones added late. A common miss is theming the straightforward bars/pies but leaving
-a growth or computed tile on the default color — verify every chart tile got both its
-`tile_brand_color` override **and** its `viz_style`.
-
-**Confirm the theme on every workbook — never apply it silently.** In a multi-workbook run,
-remember the previous pick and offer it as the **default** ("Style for this liveboard?
-[default: High Contrast KPIs]") — always surface the choice, don't assume it carries over.
-Apply by writing `style.style_properties` and, where the theme colors groups/tiles,
-per-object `style.overrides[]` (YAML shape: see
-[references/liveboard-style-themes.md](references/liveboard-style-themes.md)).
-
-**Theme → token map:** the per-theme `lb_brand_color`/`group_brand_color`/`tile_brand_color`
-tokens, border type, and KPI-tile treatment are in
-[references/liveboard-style-themes.md](references/liveboard-style-themes.md) — that file is
-authoritative; don't assume values. `TBC_I`–`TBC_P` are valid **only on KPI tiles** — never
-apply a dark tile color to a chart/table tile.
-
-**Post-apply verification.** After importing a themed liveboard, export it and verify:
-1. Every chart viz has a `chart.viz_style` entry with the theme's color palette
-2. Every viz has a `style.overrides[]` entry with the correct `tile_brand_color`
-3. KPI tiles have `tile_kpi_color` and `is_highlighted` if the theme specifies them
-4. No viz is missing from the overrides list (common miss: late-added or computed tiles)
-If any are missing, add them and re-import.
-
----
-
-## Step 11 — Import Liveboard
-
-Display a summary:
-```
-Ready to import {N} liveboard(s) to {base_url}:
-  - {dashboard_name_1}
-  - {dashboard_name_2}
-  ...
-```
-
-Ask: "Import now? (yes/no)"
-
-On confirmation, import every liveboard TML in the output directory. Use `--pattern
-'*.liveboard.tml'` to select only liveboard files, `--policy PARTIAL` so successfully
-imported liveboards are kept even if some fail, and `--create-new` since these are new
-objects:
-
-```bash
-ts tml import --dir /tmp/ts_tableau_mig/output/{workbook_name} \
-  --pattern '*.liveboard.tml' --policy PARTIAL --create-new --profile {profile_name}
-```
-
-Parse the response for import errors. Show any failures with detail.
-
-**Re-importing a liveboard in place** (a styling/param-chip/coverage pass after the first
-import): set `guid` **and** `obj_id` to the existing object's values and import with
-`--no-create-new`. **The single thing that matters: `guid`/`obj_id` must be TOP-LEVEL keys of
-the TML document — siblings of `liveboard:`, NOT nested inside it.**
-
-```json
-{ "guid": "<existing>", "obj_id": "<existing>", "liveboard": { "name": ..., "visualizations": ... } }
-```
-
-Nesting them as `liveboard.guid` (easy to do when building `{"liveboard": {...}}` and
-setting `d["liveboard"]["guid"]`) means the import never matches and **forks a duplicate
-with a new guid — every time, regardless of `--policy`** (same top-level placement rule
-tables/models already follow). Read the existing `obj_id` from the search result
-(`metadata_obj_id`) or a prior export, and **verify the returned `id_guid` is unchanged**
-afterward; if it changed, the guid was mis-placed — fix it and delete the stale duplicate.
-
-For each successfully imported liveboard, display the URL:
-
-```
-{base_url}/#/pinboard/{liveboard_guid}
-```
+## Step 10 — Build Liveboard via SpotterViz
+
+> **Scope gate:** runs for scopes **1, 3**, and only when Step 1.6 confirmed SpotterViz
+> connectivity. If the user declined setup at Step 1.6, this step does not run — Step 8
+> already told the user why and routed to Step 11.5/12 instead.
+
+This skill builds every liveboard through **SpotterViz** — there is no hand-authored-TML
+path. See
+[`../../shared/schemas/spotterviz-liveboard-build.md`](../../shared/schemas/spotterviz-liveboard-build.md)
+for the full procedure (connectivity, the `is_spotter_enabled` gate, build-instruction
+composition, polling, and known gotchas). The condensed steps:
+
+1. **Re-confirm `is_spotter_enabled` on the target model.** Export it
+   (`ts tml export {model_guid} --profile {profile_name} --parse`) and check
+   `properties.spotter_config.is_spotter_enabled`. If `false` or absent, ask the user to
+   enable it (even if Step 5.5 declined AI search generally — SpotterViz depends on this
+   specific property regardless), set it `true`, and re-import in place (existing
+   `guid`/`obj_id` at the document root, `--no-create-new`) before proceeding. If they
+   decline, liveboard generation cannot proceed for that model.
+2. **Compose build instructions**, one per dashboard (or one per tab, if Step 8 chose
+   **T**). Use Step 9's zone classification, worksheet shelves, and relative layout to
+   describe — in plain language — what each tile should show and how tiles group together;
+   use `thoughtspot-chart-types.md`'s analytical-intent vocabulary for chart-intent wording.
+   Append any Step 9d orphan worksheets the user chose to add. Ask for a final **Migration
+   Summary** tab in the same instructions, covering: items migrated (and how), decisions
+   made, partial/placeholder items (what's missing, why), and items not migrated (and why)
+   — see [references/migration-report-format.md](references/migration-report-format.md)
+   "Migration Summary content" for the exact four-section shape; keep it consistent with
+   the Step 12 report.
+3. **Call `create_dashboard`** (new liveboard) or `modify_dashboard` (iterating on one
+   already built this session) with a `title`, the composed `instructions`, and
+   `data_source_id` set to the model's `{model_obj_id}` (captured in Step 7).
+4. **Poll `get_dashboard_status`** until `completed` (capture the returned Liveboard
+   guid/URL), `needs_input` (relay the question to the user verbatim, get an answer,
+   resubmit), or `failed` (report plainly — never treat as success).
+5. **Display the result:**
+   ```
+   {base_url}/#/pinboard/{liveboard_guid}
+   ```
 
 ---
 
@@ -2326,20 +1986,28 @@ model-only workbook (no dashboards) visualizes none. Those formulas are valid on
 have no quick way to be *seen and tested*. So make every formula reachable:
 
 1. **Find uncovered formulas.** From the model's formula columns (plus any answer-level formulas
-   built in Step 10), subtract those already referenced by a liveboard tile. The remainder are
-   uncovered. (For a model-only workbook, **all** formulas are uncovered.)
-2. **Build one simple answer per uncovered formula** — a minimal, testable viz:
+   SpotterViz built in Step 10), subtract those already referenced by a liveboard tile. The
+   remainder are uncovered. (For a model-only workbook, **all** formulas are uncovered.)
+2. **Build one simple answer per uncovered formula** — a minimal, testable viz, hand-authored
+   as Answer TML (see `../../shared/schemas/thoughtspot-answer-tml.md`) — this is the one place
+   in this skill that still hand-authors TML, since it's a single-tile test fixture, not a
+   dashboard:
    - A measure → a KPI (`[Formula]`) or a small BAR by a natural dimension (`[Region] [Formula]`).
    - A string/label formula → a `TABLE_MODE` tile (`[Region] [Formula]`).
-   - Apply the same conventions as Step 10b (resolved names, `%` format for ratios, sort attrs
-     for cumulative/moving).
+   - Reference columns by their **resolved display name**, and use the model's real `obj_id`
+     (see the obj_id rule in Step 7) for `answer.tables[].obj_id` — a wrong obj_id makes the
+     tile fail to bind.
    - **Put the original Tableau formula in the answer's `description`** (e.g.
      `description: "Coverage tile for Rank of profit  ·  Tableau: RANK_UNIQUE(SUM([Profit]),'desc')"`)
      so a reviewer can compare the source expression to the migrated one without leaving the tile.
 3. **Where they live:**
-   - **Liveboard exists** → add a **"Formula coverage"** tab to it (one tile per uncovered
-     formula). Keeps everything testable in one place. Re-import in place (see the
-     `ALL_OR_NONE` rule above).
+   - **Liveboard exists** (built via SpotterViz, Step 10) → add a **"Formula coverage"** tab to
+     it (one tile per uncovered formula). Export the liveboard, append the tab, and re-import in
+     place: set `guid` **and** `obj_id` to the existing object's values, import with
+     `--no-create-new`, and keep both **top-level keys of the TML document — siblings of
+     `liveboard:`, not nested inside it** (nesting them as `liveboard.guid` means the import
+     never matches and forks a duplicate with a new guid, every time, regardless of `--policy`).
+     Verify the returned `id_guid` is unchanged afterward.
    - **No liveboard** (model-only) → create **standalone saved answers** (one per formula) bound
      to the model, so each is independently openable.
 4. **Note it** in the Step 12 report (a formula's coverage tile/answer counts as ✅ reachable).
@@ -2351,7 +2019,7 @@ For table-mode coverage tiles, **omit the `chart` block** and set `display_mode:
 > **Spotter-seeded coverage tiles.** Step 12.6 can build coverage tiles here too — seeding
 > `search_query` from Spotter's returned `tokens` and the chart type from its
 > `visualization_type` — for measures Spotter expressed and you verified. Same tile shape and
-> `ALL_OR_NONE` re-import rules; the only difference is where the search came from.
+> re-import rules as above; the only difference is where the search came from.
 
 ---
 
@@ -2388,7 +2056,8 @@ Formula mapping table; ground each excluded-formula root cause in
 
 A console one-liner (`Tables: N · Models: N · Liveboards: N`) is fine as a closing line, but
 the markdown report above is the deliverable. Keep it consistent with each liveboard's
-in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.md`.
+in-product **Migration Summary** tab (requested in Step 10's SpotterViz build instructions)
+and any `MIGRATION_LIMITATIONS.md`.
 
 ---
 
@@ -2501,6 +2170,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.47.0 | 2026-10-19 | **Parser false positives, nested `group_aggregate`, LOD brace-scanning fixed (ts-cli v0.182.0).** Function-name scans mask literals/`[ref]`s first. Nested-`group_aggregate` checks span containment, not match-count. LOD scanning is a single-pass stack scanner skipping `[ref]` spans. `convert_string_concat` gated on `datatype == "string"`. Import-retry no longer fails open or reports success on an unattributable failure. Parameter types `INT64`/`DATE`; `range_config` → `range_min`/`range_max`. Mapping-doc fixes (nested-`group_aggregate` workaround, ratio-explosion, `WINDOW_AVG`/`STDEV` reconstruction, CHAR-parameter casts, dynamic-grain `DATETRUNC`). Backlog BL-403/404 |
+| 2.0.0 | 2026-10-22 | **BREAKING — liveboard generation moves to SpotterViz, dropping the hand-authored-TML path entirely; plus Model/formula-engine fixes (ts-cli v0.182.0).** Parser false positives (function-name scans now mask literals/`[ref]`s first), nested-`group_aggregate` detection (checks span containment, not match-count), LOD brace-scanning (single-pass stack scanner skipping `[ref]` spans), `convert_string_concat` gated on `datatype == "string"`, import-retry no longer fails open or reports success on an unattributable failure, parameter types `INT64`/`DATE`, `range_config` → `range_min`/`range_max`, and mapping-doc fixes (nested-`group_aggregate` workaround, ratio-explosion, `WINDOW_AVG`/`STDEV` reconstruction, CHAR-parameter casts, dynamic-grain `DATETRUNC`) — backlog BL-403/404. **Liveboard generation:** new Step 1.6 confirms SpotterViz MCP connectivity before any parsing work (scope 1/3), with setup instructions if it's missing and a clear "liveboards can't be built this session, Model/Table work is unaffected" message if the user proceeds without it. Step 10 checks which Tableau fields actually survived model-build before describing any tile, re-confirms `is_spotter_enabled`, composes natural-language build instructions from Step 9's zone/shelf/layout extraction, calls `create_dashboard`/`modify_dashboard`, polls to completion, **then verifies every tile actually runs and returns data** — retry once, and record any still-failing tile in the Migration Summary and Step 12 report. Removed: the charting-library choice (Legacy/Muze), hand-authored chart-type/search-query/layout-beautify/grouping rules, parameter header chips, and the 6-theme styling pass — none apply to a SpotterViz-built liveboard. See `../../shared/schemas/spotterviz-liveboard-build.md` for the full procedure and known gotchas. Step 11 (hand-authored TML import) removed; Step 11.5's coverage answers still hand-author a single-tile Answer TML (unaffected) and absorbed the top-level `guid`/`obj_id` re-import rule Step 11 used to carry. |
 
 **Older entries (v1.0.0–v1.46.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

@@ -353,9 +353,6 @@ express the step). Plain ranges (no `granularity`) keep `range_config`.
   `sum ( if ( [x] = 'Yes' ) then 1 else 0 )` directly, not `sum ( [Attrition Count] )`.
   Apply this when any MEASURE formula references another formula column inside an
   aggregation function.
-- After importing a model with parameters, **export the model** and read the
-  `parameters[].id` field — ThoughtSpot assigns the UUID on import. You need this UUID
-  for Step 10f (liveboard parameter chips).
 
 ---
 

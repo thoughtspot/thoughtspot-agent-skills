@@ -216,29 +216,29 @@ Spotter-enabled instance before relying on Step 12.6 output)
 
 ---
 
-## #18 — CURRENCY / NUMBER answer_columns format sub-config — TO VERIFY
+## #18 — CURRENCY / NUMBER answer_columns format sub-config — WONT-FIX (superseded)
 
-Step 10b now carries Tableau currency/number/decimal formats to `answer_columns[].format`.
-Only `category: PERCENTAGE` (`percentageFormatConfig.decimals`) is live-verified in
-`thoughtspot-answer-tml.md`. The CURRENCY (`currencyFormatConfig`) and NUMBER
-(`numberFormatConfig`) shapes are documented by parallel structure but **not** verified —
-confirm the exact field names against a live Answer export (edit a currency + a
-thousands-separated number column in the UI, export the answer TML, read the `format` block)
-before relying on them. Until verified, the skill's guidance is to ship the numeric measure
-unformatted rather than emit a `format` block that could fail import.
+Previously: a hand-authored `search_query`/`answer_columns[]` tile carried Tableau
+currency/number/decimal formats to `answer_columns[].format`, with the CURRENCY/NUMBER shapes
+unverified against a live Answer export. Moot — Step 10 no longer hand-authors answer
+TML for migrated dashboard tiles; liveboards build via SpotterViz (see
+`../../../shared/schemas/spotterviz-liveboard-build.md`). The `answer_columns[].format`
+capability itself remains documented in `thoughtspot-answer-tml.md` for other converters that
+still hand-author TML; only this skill's use of it is gone.
 
-Status: TO VERIFY — capture a live Answer export with currency + number formats
+Status: WONT-FIX — hand-authored answer_columns formatting no longer exists in this skill
 
 ---
 
-## #19 — `sorted by … descending/ascending` search token — TO VERIFY
+## #19 — `sorted by … descending/ascending` search token — WONT-FIX (superseded)
 
-Step 10b carries a plain measure sort as `sorted by [Measure] descending`/`ascending` in the
-`search_query`. `top N` / `bottom N` are verified (open items in the Top-N set work); the bare
-`sorted by … descending` token has not been round-tripped here. Confirm it parses and renders
-on the target build; if the exact keyword differs, correct Step 10b.
+Previously: a hand-authored `search_query` carried a plain measure sort as `sorted by
+[Measure] descending`/`ascending`, unverified against a live build. Moot — Step 10 no longer
+hand-authors `search_query`; liveboards build via SpotterViz from natural-language
+instructions (see `../../../shared/schemas/spotterviz-liveboard-build.md`), which resolves
+sort/chart-type/shelf assignment itself.
 
-Status: TO VERIFY — round-trip a sorted (non-Top-N) viz on a live instance
+Status: WONT-FIX — hand-authored search_query construction no longer exists in this skill
 
 ---
 
@@ -279,8 +279,15 @@ when binding to a pre-existing model whose formula names differ from the workboo
 (b) KPI-on-attribute-grade handling (a PASS/FAIL grade KPI is flagged NEEDS REVIEW since a KPI
 wants a measure); (c) container-tree tile layout (currently coord-proportional).
 
-Status: RESOLVED (parser extraction + end-to-end parse→build-liveboard) 2026-07-16; fidelity
-follow-ons tracked above.
+**Superseded 2026-10-20:** Step 10 no longer builds liveboards via `ts tableau
+build-liveboard`/hand-authored TML — it builds exclusively through SpotterViz (see
+`../../../shared/schemas/spotterviz-liveboard-build.md`). The parser extraction this item
+tracked (`dashboards` key, per-visual shelf/role tagging) is still used to compose
+SpotterViz's build instructions, but the three fidelity follow-ons above were specific to the
+removed `build-liveboard` emission path and no longer apply.
+
+Status: WONT-FIX (fidelity follow-ons) — superseded by the SpotterViz build path; parser
+extraction itself remains RESOLVED (2026-07-16) and in use.
 
 ---
 

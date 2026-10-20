@@ -232,7 +232,7 @@ Example: a Tableau bar of customers by Region, colored by Gender → one
 - So: **Legacy type → `axis_configs`; Muze type → `custom_chart_config`** (or omit both for a
   trivial x/y Muze chart). Never mix a Legacy type with `custom_chart_config`.
 
-### Guidance for generators (Tableau skill, liveboard-builder)
+### Guidance for generators (liveboard-builder, and any hand-authored-TML converter)
 
 - **Default to Legacy charts, but PROMPT the user to choose** Legacy vs Muze before generating
   chart TML. Legacy is the portable default (works on every cluster); Muze is phase 1 GA
@@ -250,7 +250,9 @@ Example: a Tableau bar of customers by Region, colored by Gender → one
 
 ## Analytical intent → chart type (recommendation mapping)
 
-Used by the liveboard-builder recommendation engine and the Tableau skill's Step 10a.
+Used by the liveboard-builder recommendation engine, any hand-authored-TML converter's
+chart-type-resolution step, and for intent wording when composing SpotterViz build
+instructions (`ts-convert-from-tableau`/`ts-convert-from-looker` Step 10).
 
 | Analytical intent | First choice | Alternatives |
 |---|---|---|

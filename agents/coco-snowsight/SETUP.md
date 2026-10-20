@@ -63,6 +63,7 @@ snow stage copy agents/shared/schemas/ts-tml-import-gate.md @SKILLS.PUBLIC.SHARE
 snow stage copy agents/shared/schemas/thoughtspot-answer-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/schemas/thoughtspot-chart-types.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/schemas/thoughtspot-liveboard-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/schemas/spotterviz-liveboard-build.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/schemas/thoughtspot-sets-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/schemas/thoughtspot-view-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/schemas/thoughtspot-alert-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
