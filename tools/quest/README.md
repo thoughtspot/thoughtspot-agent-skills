@@ -1,4 +1,4 @@
-# agentql-quest
+# quest
 
 [![AgentQL Quest: the Wizard writes the scroll, the Forge compiles it, and a dragon of SQL rises from the fire](promo/agentql-quest.gif)](https://thoughtspot.github.io/thoughtspot-agent-skills/agentql-quest/)
 
@@ -85,10 +85,10 @@ quest.schema.json ──┘                └─► index.html         (one sel
   their SIL Open Font License files.
 
 ```bash
-python3 tools/agentql-quest/build.py                      # → tools/agentql-quest/dist/{index.html,quest.json,quest.schema.json}
-python3 tools/agentql-quest/build.py --check              # validate only
+python3 tools/quest/build.py                      # → tools/quest/dist/{index.html,quest.json,quest.schema.json}
+python3 tools/quest/build.py --check              # validate only
 python3 tools/validate/check_agentql_quest.py --root .    # the same, as pre-commit and CI run it
-pytest tools/agentql-quest/tests -q                       # includes a headless play-through (needs node)
+pytest tools/quest/tests -q                       # includes a headless play-through (needs node)
 ```
 
 ## The data contract

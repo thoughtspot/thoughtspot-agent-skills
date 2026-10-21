@@ -187,7 +187,7 @@ fi
 
 # AgentQL Quest is built from lesson-sql.md and names lessons in learning-path.md; a recapture
 # that moves the SQL, or a course renumbering, must not silently break the game.
-if echo "$STAGED" | grep -qE '^tools/agentql-quest/|ts-object-model-agentql-query/references/(lesson-sql|learning-path)\.md$'; then
+if echo "$STAGED" | grep -qE '^tools/quest/|ts-object-model-agentql-query/references/(lesson-sql|learning-path)\.md$'; then
   run_check "agentql quest"          "tools/validate/check_agentql_quest.py --root ."
 fi
 
@@ -445,7 +445,7 @@ run_pytest() {
 }
 
 if echo "$STAGED" | grep -q '\.py$'; then
-  run_pytest "unit tests (ts-cli)"      tools/ts-cli/tests/ tools/validate/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/agentql-quest/tests/
+  run_pytest "unit tests (ts-cli)"      tools/ts-cli/tests/ tools/validate/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/quest/tests/
   run_pytest "unit tests (erd)"         agents/cli/ts-object-model-erd/tests/
   run_pytest "unit tests (databricks)"  agents/databricks/tests/
 fi

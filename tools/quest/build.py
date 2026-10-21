@@ -14,9 +14,9 @@ makes no outside requests and runs from GitHub Pages, any static host, or a doub
 data is also written beside the page as `quest.json`, the contract `quest.schema.json` describes,
 so another front end can play the same checked content without parsing the YAML or the capture.
 
-    python3 tools/agentql-quest/build.py                   # write tools/agentql-quest/dist/
-    python3 tools/agentql-quest/build.py --out _site/index.html   # quest.json and its schema land beside it
-    python3 tools/agentql-quest/build.py --check           # validate only (tools/validate/check_agentql_quest.py)
+    python3 tools/quest/build.py                   # write tools/quest/dist/
+    python3 tools/quest/build.py --out _site/index.html   # quest.json and its schema land beside it
+    python3 tools/quest/build.py --check           # validate only (tools/validate/check_agentql_quest.py)
 
 Fails when an encounter no longer matches the capture or the course: a lesson or Module the
 text names that the course no longer has, a missing or rejected case, AgentQL that differs by
@@ -643,7 +643,7 @@ def build(check: bool = False) -> tuple[str | None, dict, list[str]]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=str(DEFAULT_OUT),
-                    help="output HTML (default: tools/agentql-quest/dist/index.html); "
+                    help="output HTML (default: tools/quest/dist/index.html); "
                          "quest.json and quest.schema.json are written beside it")
     ap.add_argument("--check", action="store_true", help="validate only; write nothing")
     ap.add_argument("--root", help="accepted for parity with the other validators; paths resolve from this script")

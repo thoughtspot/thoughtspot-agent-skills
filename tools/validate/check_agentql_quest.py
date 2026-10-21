@@ -2,14 +2,14 @@
 """
 check_agentql_quest.py — AgentQL Quest still matches the captured lesson SQL it is built from.
 
-The game in tools/agentql-quest/ is built from encounters.yaml plus the committed
+The game in tools/quest/ is built from encounters.yaml plus the committed
 agents/cli/ts-object-model-agentql-query/references/lesson-sql.md. A recapture can move
 the generated SQL out from under an encounter, so that a "who put this line here?" question
 points at a line that changed or no longer exists — the game would then teach something the
 SQL no longer shows. This runs the build's own validation (`build.py --check`) and fails on
 any drift: a missing or rejected case, AgentQL changed beyond layout, an `sql` line no longer
 present exactly, an `sql_count` that no longer holds, a capture header naming a Model the
-AgentQL doesn't query, or built data that no longer fits tools/agentql-quest/quest.schema.json
+AgentQL doesn't query, or built data that no longer fits tools/quest/quest.schema.json
 (the contract quest.json is published with).
 
 Lives here, as a thin wrapper, so the gate is catalogued with the other validators in
@@ -31,7 +31,7 @@ def main() -> int:
     ap.add_argument("--root", default=".", help="repo root")
     args = ap.parse_args()
 
-    build_py = Path(args.root).resolve() / "tools" / "agentql-quest" / "build.py"
+    build_py = Path(args.root).resolve() / "tools" / "quest" / "build.py"
     spec = importlib.util.spec_from_file_location("agentql_quest_build", build_py)
     if spec is None or spec.loader is None:
         print(f"FAIL  cannot load {build_py}")

@@ -5,7 +5,7 @@ explorable map, where you walk a realm and its characters ask the questions, and
 on another topic can reuse the engine by adding a content folder._
 
 Status: **accepted** (decisions in §8 made 2026-10-21) · Builds on: AgentQL Quest
-([`tools/agentql-quest/`](../../../tools/agentql-quest/), #622) and its data contract
+([`tools/quest/`](../../../tools/quest/) (renamed from `tools/agentql-quest/`), #622) and its data contract
 `quest.json` / `quest.schema.json` (#632)
 
 ---

@@ -162,11 +162,11 @@ def test_unknown_answer_kind_and_route_fail(doc, capture):
     e = _encounter(doc)
     e["points"][0]["answer"] = "ai"
     e["points"][1]["kind"] = "riddle"
-    doc["routes"][0]["path"].append("mordor")
+    doc["routes"][0]["path"].append("the_far_marsh")
     errors = _errors(doc, capture)
     assert any("answer must be one of" in x for x in errors)
     assert any("kind must be 'who' or 'choice'" in x for x in errors)
-    assert any("unknown: ['mordor']" in x for x in errors)
+    assert any("unknown: ['the_far_marsh']" in x for x in errors)
 
 
 def _law(doc):
@@ -673,6 +673,52 @@ def test_pages_workflow_deploys_only_from_main():
         assert wf["jobs"][job].get("if") == "github.ref == 'refs/heads/main'", job
     triggers = wf[True] if True in wf else wf["on"]  # PyYAML reads the bare key `on` as True
     assert "pull_request" not in triggers and "pull_request_target" not in triggers
+
+
+# ---- paths that would go stale silently if the folder moved ------------------------------------
+
+def _rel(path: pathlib.Path) -> str:
+    return path.relative_to(B.ROOT).as_posix()
+
+
+def test_pages_path_filters_cover_the_game_and_its_sources():
+    # A stale filter never fails: pushes to main just stop redeploying the game.
+    wf = yaml.safe_load((B.ROOT / ".github/workflows/pages.yml").read_text(encoding="utf-8"))
+    triggers = wf[True] if True in wf else wf["on"]
+    filters = [_github_glob(f) for f in triggers["push"]["paths"]]
+    files = [_rel(f) for f in B.ROOT.rglob("*") if f.is_file() and ".git" not in f.parts]
+    for f, rx in zip(triggers["push"]["paths"], filters):
+        assert any(rx.fullmatch(x) for x in files), f"pages.yml path filter {f!r} matches nothing in the repo"
+    for needed in (B.HERE / "build.py", B.ENCOUNTERS, B.TEMPLATE, B.LESSON_SQL):
+        assert any(rx.fullmatch(_rel(needed)) for rx in filters), f"pages.yml would not redeploy for {_rel(needed)}"
+
+
+def _github_glob(pattern: str) -> re.Pattern:
+    """A workflow path filter as a regex: ** crosses folders, * stays within one."""
+    out = re.escape(pattern).replace(r"\*\*", "\0").replace(r"\*", "[^/]*").replace("\0", ".*")
+    return re.compile(out)
+
+
+def test_pre_commit_runs_the_quest_gate_for_the_game_and_the_course():
+    # A stale trigger never fails either: the gate just stops running locally.
+    text = (B.ROOT / "scripts/pre-commit.sh").read_text(encoding="utf-8")
+    m = re.search(r"grep -qE '([^']+)'; then\n\s*run_check \"agentql quest\"", text)
+    assert m, "the agentql quest trigger in pre-commit.sh has moved; update this test"
+    trigger = re.compile(m.group(1))
+    for path in (B.HERE / "build.py", B.ENCOUNTERS, B.TEMPLATE, B.LESSON_SQL, B.LEARNING_PATH):
+        assert trigger.search(_rel(path)), f"pre-commit would not run the quest gate for {_rel(path)}"
+
+
+def test_every_tools_path_named_in_the_quest_docs_exists():
+    # Commands and docstrings that name a tools/ path (README, build.py, promo, the validator,
+    # the workflows' comments) must keep pointing at real files after a move.
+    sources = [B.HERE / "README.md", B.HERE / "build.py", B.HERE / "promo/README.md",
+               B.HERE / "promo/make_ad.py", B.ROOT / "tools/validate/check_agentql_quest.py",
+               B.ROOT / ".github/workflows/pages.yml", B.ROOT / "README.md"]
+    named = {m for f in sources for m in re.findall(r"\btools/[\w./-]*\w", f.read_text(encoding="utf-8"))}
+    assert any(n.startswith("tools/quest/") for n in named)
+    missing = sorted(n for n in named if not (B.ROOT / n).exists() and not any(part in n for part in ("/dist", "*")))
+    assert missing == [], missing
 
 
 # ---- lesson and module numbers the text names ------------------------------------------------

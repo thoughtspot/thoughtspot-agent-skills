@@ -6,9 +6,9 @@ it; a dragon made of SQL rises from the fire; the player names who wrote each li
 Drawn at 320x200 in the game's own amber palette, scaled 3x with hard pixels and CRT scanlines.
 All art and the 5x7 font are original.
 
-    python3 tools/agentql-quest/promo/make_ad.py <out_dir>                 # GIF + poster
-    python3 tools/agentql-quest/promo/make_ad.py <out_dir> --video-frames  # also 1920x1200 frames
-    swift tools/agentql-quest/promo/encode_mp4.swift <out_dir>/video-frames/manifest.txt <out.mp4> 30
+    python3 tools/quest/promo/make_ad.py <out_dir>                 # GIF + poster
+    python3 tools/quest/promo/make_ad.py <out_dir> --video-frames  # also 1920x1200 frames
+    swift tools/quest/promo/encode_mp4.swift <out_dir>/video-frames/manifest.txt <out.mp4> 30
 """
 import math
 import random
