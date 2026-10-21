@@ -39,6 +39,7 @@ CHECK_META: dict[str, dict[str, str]] = {
     "A3": {"desc": "No AI instructions configured", "thresholds": "HIGH if absent"},
     "A4": {"desc": "Missing Spotter config", "thresholds": "HIGH (Spotter) / MEDIUM (General)"},
     "A5": {"desc": "Spotter readiness composite score", "thresholds": "Weighted score -> severity"},
+    "A6": {"desc": "Measure AI context coverage below threshold", "thresholds": "GREEN >= 80%, YELLOW >= 50% of visible measures"},
     "D1": {"desc": "Model complexity exceeds threshold", "thresholds": "Tables >15 RED, Columns >75 RED"},
     "D2": {"desc": "VARCHAR join keys detected", "thresholds": "HIGH per occurrence"},
     "D3": {"desc": "Join type analysis (FULL OUTER, LEFT/RIGHT)", "thresholds": "HIGH for FULL OUTER, INFO for others"},

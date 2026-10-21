@@ -337,7 +337,7 @@ Check definitions, thresholds, and severity logic are implemented in:
 
 | Module | Angle | Checks |
 |---|---|---|
-| `checks_ai.py` | AI Readiness | A1–A5 |
+| `checks_ai.py` | AI Readiness | A1–A6 |
 | `checks_data.py` | Data Modeling | D1–D12 |
 | `checks_human.py` | Human Readiness | H1–H5, H7–H10 |
 | `checks_perf.py` | Performance | P1–P9, P11, P13–P18 |
@@ -424,6 +424,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.5.0 | 2026-10-21 | **A6 — measure AI context coverage**: the share of visible measures carrying `properties.ai_context`, which the Spotter-ready profile has promised ("AI context required") with no check behind it; the finding names the uncovered measures. **A2 fix:** synonyms are read from `properties.synonyms`, where Model TML keeps them. A2 read the column root, so it reported 0% synonym coverage for every Model and A5's readiness score always lost its synonym weight — on 599 Models from the SE demo cluster, A2 flagged all 599 before the fix and 278 after. |
 | 2.4.3 | 2026-10-02 | H5 orphan-Set check now fires: Sets discovered directly rather than from Model dependents (BL-302, BL-324). A Set whose consumer lookup fails, hides dependents, or is consumed only by another Set stays unreported with a warning. H4 ignores Set rows, so a Model with only Sets is still an orphan. |
 | 2.4.2 | 2026-08-26 | Record why Step 3-4 connection scoping does **not** use `ts metadata search --connection`: the flag keeps only rows with a matching `dataSourceName`, which worksheets/models/answers do not carry, so it would enumerate zero of them — and it takes a single connection where Step 2c offers several. Keep the hand filter, but compare case-insensitively (finding 11.1). |
 | 2.4.1 | 2026-07-03 | Fix stale Phase 2 cross-reference — "OI-6 through OI-9" corrected to "#9 through #12", matching the actual numbering in `references/open-items.md` (audit finding 5.4). |

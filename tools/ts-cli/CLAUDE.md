@@ -170,7 +170,7 @@ ts_cli/
     __init__.py       — run_audit() entry point, angle module registry
     context.py        — AuditContext dataclass + build_context()
     findings.py       — Finding dataclass + build_summary()
-    checks_ai.py      — AI readiness checks (A1-A5)
+    checks_ai.py      — AI readiness checks (A1-A6)
     checks_data.py    — Data modeling checks (D1-D12)
     checks_human.py   — Human readiness checks (H1-H10)
     checks_perf.py    — Performance checks (P1-P18)
