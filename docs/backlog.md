@@ -258,6 +258,7 @@ are roughly ordered by value÷effort.
 | ~~BL-397~~ | ~~Two join shapes import rejects that `ts tml lint` does not check: `MANY_TO_MANY` (14528, and the Power BI converter emits it) and a referencing join under its destination (14504)~~ | DONE (2026-10-22 — ts-cli v0.180.0) |
 | ~~BL-398~~ | ~~Sisense picks each join's direction by a tie-broken sort over a `set`: the emitted join graph varies by hash seed, so I17 passes or fails between runs~~ | DONE (2026-10-21 — ts-cli v0.179.0) |
 | ~~BL-399~~ | ~~ts-audit's assessment profile (Spotter-ready / General) is asked for, stored and never used: every check runs fixed thresholds~~ | DONE (2026-10-22 — ts-cli v0.181.0, ts-audit 2.6.0) |
+| BL-401 | `ts-dependency-cleanup` (closed PR #505): what a resubmission must fix before a cascade-delete skill can merge | On resubmission |
 
 ### Tier 3 — Opportunistic
 
@@ -14392,3 +14393,46 @@ the check catalog rows from the table.
 **Target:** 2026-11-30.
 
 **Resolved 2026-10-22:** wired, not removed. `ts audit run --assessment spotter|general` (default general) carries the choice on `AuditContext`; A1, A2, A3, A4 and A6 read their bar from one table in `ts_cli/audit/assessment.py` — the skill's promised pass marks, HIGH below half the mark (the one rule added; user-approved), A6 graded for Spotter-ready and LOW for General. Both SKILL run commands pass it and the report header shows it. Tests per profile per check at the boundaries.
+
+## BL-401 — `ts-dependency-cleanup` resubmission requirements (closed PR #505) `Tier 2`
+
+**Filed:** 2026-10-22. **Source:** the 2026-09-14 review of PR #505, closed unmerged on
+2026-10-22 for inactivity. Recorded here so the findings outlive the closed PR. A
+resubmission should start from current `main` and answer each item below.
+
+**Blocking:**
+1. **Backup before the cascade delete (op 8).** The skill deletes with no backup and no
+   rollback, although `ts-dependency-manager` treats a pre-delete TML export as
+   non-negotiable for the same operation class (its Step 7, rollback at Step 11). Its own
+   open item #19 found the lookups reported 4 dependents where the cascade removed 12, so
+   the radius is not predictable. Take a TML export first, or state in SKILL.md why this
+   path is exempt.
+2. **The smoke test can cascade-delete from a pre-push gate.** `--run-delete` is passed
+   through verbatim by `run_smoke_tests.py`, and can sit in the gitignored
+   `smoke-config.local.json`. The runner should refuse destructive flags, or cap the
+   cascade the test may apply.
+3. **Cut op 9 (purge) from the first release.** The call is unparameterised (`POST
+   …/purge`, no body), so the confirmation shows a bounded list and authorises a possibly
+   unbounded action; there is no post-purge verification; and it clears the pending
+   ledger on success as if exactly those objects went. The open items also contradict
+   each other on whether purge was ever invoked (an early "never invoked" against a later
+   `GET` returning `Cannot Delete System Objects` from deletion logic). Its scope (#8) is
+   answerable from the REST spec via the SpotterCode MCP, per `api-research.md`, with no
+   live call. If purge returns later, it needs that answer first, plus a templated
+   confirmation screen and verification.
+4. **The SKILL.md header describes a read-only skill** ("seven read-only lookups… a
+   delete and a purge that are absent"), contradicting its own operations table (op 8
+   works) and open item #12's closure.
+
+**Should fix:**
+5. The smoke test claims to cover #19 (lookup vs apply under-reporting) but compares
+   preview against apply; #19 has no test.
+6. Open items #8 and #12 lead with superseded first headings and no forward pointer;
+   `check_open_items.py` reads only the first.
+7. Register the skill in `REQUIRED_EXTRA_ARGS` (`--column-guid`), regenerate
+   `docs/open-items-index.md`, add the `agents/PARITY.md` row. Without the first, the
+   runner silently SKIPs the smoke test of a destructive skill.
+8. Submit the skill on its own. The original diff was roughly one-third skill and
+   two-thirds unrelated backlog, session and validator changes.
+
+**Target:** on resubmission. Close as won't-do if nobody picks it up by 2027-03-31.
