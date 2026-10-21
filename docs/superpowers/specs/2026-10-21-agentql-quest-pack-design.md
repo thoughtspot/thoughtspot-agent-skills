@@ -112,7 +112,6 @@ tools/quest/
   classic/                     the text-adventure page (today's game.html, on core/)
   explore/                     the map front end (new)
   fonts/                       VT323 and IBM Plex Mono, with their OFL licences
-  vendor/                      Phaser, pinned and verified (§9)
   tests/                       all engine and pack tests (one pytest root, as today)
   packs/
     agentql/                   AgentQL Quest's pack
@@ -288,30 +287,21 @@ route realm) is replaced with a made-up name in PR 1.
 
 | Need | Choice | Why |
 |---|---|---|
-| Engine | **Phaser 4.2.1** (MIT), the arcade-physics build (1,266,396 bytes minified) | The current stable major: 4.0 shipped April 2026, and 4.2.1 is npm `latest`. It includes walking, collision, cameras, input and Tiled map loading. It has the largest body of examples overall, though Phaser 4-specific ones still lag Phaser 3's. Vendored and pinned (§9). |
-| Maps | **Tiled 1.10 or later**, saved as `.tmj` JSON with tilesets embedded (no external `.tsx`/`.tsj`) | Realms are drawn visually, and Phaser's Tiled loader reads the file directly. Tiled 1.9 wrote an object's `type` as `class`, which Phaser doesn't read; 1.10 went back to `type`. |
+| Engine | **`engine.js`, our own** (about 250 lines; decision 5) | It does only what the page needs: draws Tiled tile layers and one-tile sprites from one atlas on a 2D canvas, moves a 12x12 body against solid tiles and sprites, reads the arrow keys, follows the player and runs timers, tweens and a fade. No third-party code, so no licences to carry, and its geometry is tested in node. Phaser 4.2.1 was the first choice; it bundles GPL-3.0 code. |
+| Maps | **Tiled 1.10 or later**, saved as `.tmj` JSON with tilesets embedded (no external `.tsx`/`.tsj`) | Realms are drawn visually, and the page reads the file directly. Tiled 1.9 wrote an object's `type` as `class`; 1.10 went back to `type`. |
 | Art | **Kenney Tiny Dungeon** (CC0, 16×16), in the amber monitor (decision 2, revised 2026-10-22; first Kenney 1-Bit tinted amber) | Shaded, outlined sprites at the mid-to-late-80s standard, with a fitting tile for every role. CC0 means no attribution or licence risk in a public repo. |
 | Dialogue | Not needed: questions come from `quest.json` | Ink or similar only if characters later need branching conversation. |
 
 Rejected: KAPLAY (thinner for a game with several maps), RPG JS (smaller community), Godot (tens
 of MB on the web, harder in CI), RPG Maker (commercial licence).
 
-**Phaser settings this design relies on:**
-- **Renderer (revised in PR 6): `Phaser.AUTO`, WebGL where there is one, else a 2D canvas,** and
-  draw maps with `TilemapLayer`. Originally forced WebGL for the amber tint, which PR 6 removed.
-  `TilemapLayer.setTint` works only under WebGL; the default `AUTO` mode can fall back to Canvas,
-  which ignores tile tint. `TilemapGPULayer` has no tint API at all. If WebGL isn't available, the
-  page offers classic mode.
-- **Audio: boot with `audio: { noAudio: true }`.** Phaser otherwise creates its own
-  AudioContext, and `core/`'s Web Audio module stays the only sound.
-- **Keyboard: limit Phaser's input to the canvas** with `input.keyboard.target` set to the
-  focusable canvas element.
-  - Phaser's keyboard manager calls `preventDefault` on captured keys. Scoped to the canvas, it
-    can't swallow Enter or Space on the dialog, the title links, the pause menu or the sound
-    buttons.
-  - When a dialog opens, the game also turns the manager off (`game.input.keyboard.enabled =
-    false`). When the dialog closes, it turns it back on. Pausing the scene already clears held keys;
-    `scene.input.keyboard.resetKeys()` on resume is a backup, so an arrow key never stays stuck.
+**What the page relies on from its engine:**
+- **A 2D canvas,** 320x128 (the maps' height), scaled up with crisp pixels. No WebGL is needed;
+  without a canvas the page offers classic mode.
+- **No audio of its own:** `core/`'s Web Audio module stays the only sound.
+- **Keys only on the map:** the engine listens for the arrows on the focusable map element, so it
+  can't swallow Enter or Space on the dialog, the links or the sound buttons. When a dialog opens
+  the page turns its keys off and clears held ones, so an arrow never stays stuck.
 
 ### 4.2 Binding maps to content
 
@@ -339,7 +329,7 @@ comma-separated: Tiled's list properties need 1.12, and ids can't contain commas
 They come from the content ids, and `hall` is reserved as an id, so the two forms can't collide.
 
 **Collision, for both the game and the checks:**
-- **One source:** a tile layer named `walls`, where any non-empty tile blocks. Phaser sets
+- **One source:** a tile layer named `walls`, where any non-empty tile blocks. The engine sets
   collision from that layer, and the build reads the same layer.
 - **Objects:** each sits on the tile containing its centre (Tiled anchors tile objects at the
   bottom-left, so the build converts). Characters, chests and portals are solid.
@@ -365,7 +355,7 @@ They come from the content ids, and `hall` is reserved as an id, so the two form
 - **Every map:**
   - tilesets embedded, never external `.tsx`/`.tsj`;
   - each tileset's image exists in the pack and ships in the explore build;
-  - no Tiled object templates (`template`), which Phaser doesn't resolve.
+  - no Tiled object templates (`template`), which the page doesn't resolve.
 
 Positions are otherwise free, so a map can be redrawn without touching content.
 
@@ -402,7 +392,7 @@ Dwarven Mines, about 2–3 minutes:
 
 ### 4.4 Questions as HTML over the game
 
-When you interact, the scene pauses, Phaser's keyboard is turned off, and a modal `<dialog>`
+When you interact, the world freezes, the engine's keys are turned off, and a modal `<dialog>`
 opens over the canvas. It uses the same question rendering from `core/` as classic mode: panes
 with highlights, options, **Invoke magic**, feedback and gold. This:
 - keeps questions accessible: real buttons, focus management, a live region for results,
@@ -430,17 +420,17 @@ kept, and the character can be asked again.
 
 - **Side by side (decision 1):** classic stays the default at `/agentql-quest/`, one
   self-contained file that still runs from a double-click. Explore is published at
-  `/agentql-quest/explore/` as several files (page, scripts, Phaser, maps, tiles) and fetches
+  `/agentql-quest/explore/` as several files (page, scripts, engine, maps, tiles) and fetches
   `../quest.json`. Explore becomes the default only when all five realms are explorable, with
   classic linked.
-- **Explore needs HTTP.** Browsers block `fetch` and XHR from `file://`, and Phaser's loader uses
-  XHR, so explore doesn't run from a double-click. To work locally, build into a folder and serve
+- **Explore needs HTTP.** Browsers block `fetch` and XHR from `file://`, and the page uses
+  `fetch`, so explore doesn't run from a double-click. To work locally, build into a folder and serve
   it with `python3 -m http.server`. To test on a phone, use the same server, reached by the
   computer's LAN address. Pages deploys only from `main` and there are no preview deploys, so this
   local loop is how the manual checklist (§6) is done.
 - **No outside requests.**
-- **Budget:** 3 MB for the explore folder. Phaser is about 1.27 MB, the fonts are 48 KB, and maps
-  and tiles are small.
+- **Budget:** 3 MB for the explore folder. The engine is about 10 KB, the fonts are 48 KB, and maps
+  and tiles are small (about 216 KB in all).
 
 ## 5. Testing
 
@@ -461,7 +451,7 @@ kept, and the character can be asked again.
   Playwright smoke test that uses the Chrome already on GitHub's Ubuntu runner
   (`channel: 'chrome'`), so no browser download. Runners have no GPU, and Chrome is removing its
   automatic software-WebGL fallback, so the test launches with `--enable-unsafe-swiftshader` and
-  asserts that the Phaser canvas booted (not the classic-mode fallback).
+  asserts that the canvas booted (not the classic-mode fallback).
 
 ## 6. Delivery
 
@@ -495,7 +485,7 @@ kept, and the character can be asked again.
 4. **Map binding:** the §4.2 object types, step ids and checks (the flood-fill included), and the
    node map play-through, on a tiny test map.
 5. **Explore prototype:**
-   - Phaser vendored with its §9 checks;
+   - the page on its own small engine (decision 5);
    - the Mines map and tiles, plus the overworld;
    - classic's `#realm=` deep link and return link;
    - the dialog, controls and the Pages build step;
@@ -541,31 +531,26 @@ site's home page.
 2. **The art is Kenney 1-Bit, tinted amber,** for the prototype. Revisit only if it feels generic.
    *Revised 2026-10-22:* the maintainer judged it too early-80s and picked **Kenney Tiny Dungeon**
    (CC0, mid-to-late-80s top-down) from a style board of four directions, inside the amber
-   monitor frame. With no tint, WebGL is no longer required (`Phaser.AUTO`; see §4.1).
+   monitor frame. With no tint, WebGL is no longer required (and after decision 5, a 2D canvas is all the page uses).
 3. **Testing uses a manual checklist** until explore becomes the default. Then a Playwright smoke
    test on the runner's own Chrome.
 4. **The engine is renamed** `tools/quest/` now, as PR 1, while only one pack depends on it. The
    public URL doesn't change.
+5. **No game library** (2026-10-22). A review found that Phaser 4.2.1's build bundles a GPL-3.0
+   video polyfill (`rvfc-polyfill`), plus about a dozen other works whose notices we'd have to
+   carry, on a public, Pages-deployed repo. The maintainer chose an in-house engine (`engine.js`)
+   over a custom Phaser build or a legal ruling. Phaser never reaches `main`: the explore pull
+   requests merge together.
 
 ## 9. Risks
 
 | Risk | Mitigation |
 |---|---|
 | Walking adds time: the course is "about 15 minutes" | Small maps (one screen or two), every question within 2–3 minutes per realm |
-| Phaser 4 is new (April 2026) | Use only basic features (tilemaps, arcade movement, cameras, input); pin one version |
-| **Vendored Phaser gets no security alerts today.** Snyk Code skips files over 1 MB and minified files, pip-audit is Python only, and Dependabot watches only Actions and `tools/ts-cli` | See **Vendored Phaser checks** below |
+| Our own engine has bugs a library wouldn't | It does very little; node tests on its geometry, and the headless Chrome play-through on every map, in CI |
 | A canvas game is harder to make accessible | All questions are HTML dialogs; classic mode is always one link away |
 | Map edits silently break the course | The §4.2 checks (links, coverage, reachability) and the node map play-through, in the PR gate |
 | Two front ends drift apart | One `core/` for state, scoring, saves, sound and the question panel; both front ends' tests run on it |
 | Two packs overwrite each other's saves | A `storage_key` per pack; the build refuses duplicates |
 
-**Vendored Phaser checks** (all added in PR 5):
-- `vendor/package.json` and `package-lock.json` pin `phaser@4.2.1`. The lock records the npm
-  tarball's integrity.
-- An npm entry in `.github/dependabot.yml` for `vendor/`.
-- A test checks the vendored file's own SHA-256 against the value recorded beside it, which
-  matches jsDelivr's published per-file hash.
-- Another test checks that the version in `package.json` equals the version Phaser's file declares
-  (matched with `\bVERSION:"…"`, because the file also contains `LOG_VERSION`). So a Dependabot bump
-  fails until the vendored file is replaced. Phaser's only dependency, `eventemitter3`, is already
-  bundled, so `dependabot.yml` ignores it.
+(The vendored-Phaser checks planned here went with Phaser: decision 5.)

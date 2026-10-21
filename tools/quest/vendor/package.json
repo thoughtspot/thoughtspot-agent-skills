@@ -1,8 +1,0 @@
-{
-  "name": "quest-vendor",
-  "private": true,
-  "description": "Pins the Phaser build vendored beside this file (phaser-arcade-physics.min.js), so Dependabot can raise its security updates. Nothing is installed from here: the build ships the vendored file, which tests/test_quest_build.py checks against phaser.sha256 and this version.",
-  "dependencies": {
-    "phaser": "4.2.1"
-  }
-}

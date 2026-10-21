@@ -185,7 +185,7 @@ end (for example an explorable map) plays the same content by loading `quest.jso
 
 A pack whose `explore.realms` lists realms has a Tiled map for each, plus an overworld:
 `maps/overworld.tmj` and `maps/<realm id>.tmj`, saved by Tiled 1.10 or later as JSON (CSV tile
-data). `maps.py` checks them in the build (design §4.2), and refuses anything Phaser 4 or the
+data). `maps.py` checks them in the build (design §4.2), and refuses anything a tile engine or the
 explore page would read differently from the check:
 
 - **Shape:** orthogonal and finite; layers at the top level, unoffset: tile layers `floor`,
@@ -221,7 +221,7 @@ explore page would read differently from the check:
   object; the exit must be reachable from the start. A gate that only opens after a step behind it,
   or a first step behind a gate, fails. Objects are solid; reaching one means standing on a
   walkable tile next to it.
-- **No Tiled templates,** which Phaser doesn't resolve.
+- **No Tiled templates,** which the explore page doesn't resolve.
 
 `Quest.machine` accepts `interact {step}` only for the step the current screen waits on
 (`expected(state)`), and changes nothing on it, so walking to the foe first does nothing.
@@ -239,29 +239,26 @@ map opens that realm in the classic page (`../#realm=<id>&from=explore`, which s
 and shows a link back to the map).
 
 ```
-explore/index.html, explore/explore.js ─┐
-core/*.js, core/quest.css, fonts/       ─┤                 ┌─► explore/index.html, explore.js, core.js, quest.css, fonts.css
-vendor/ (Phaser and its notices)        ─┼─► build.py ─────┼─► explore/phaser.min.js, phaser.LICENSE.md, phaser.THIRD-PARTY.md
-packs/agentql/tiles/, maps/*.tmj        ─┘                 └─► explore/art.json, tiles.json, tiles/, maps/
+explore/index.html, explore.js, engine.js ─┐                 ┌─► explore/index.html, explore.js, engine.js
+core/*.js, core/quest.css, fonts/          ─┼─► build.py ─────┼─► explore/core.js, quest.css, fonts.css
+packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► explore/art.json, tiles.json, tiles/, maps/
 ```
 
 - **The build owns `explore/`:** it marks the folder it writes and replaces only a marked one. It
-  refuses to overwrite an `explore/` it didn't write, and to build inside `tools/quest/`.
-- **Everything is local** and the folder must stay under 3 MB (about 1.4 MB today). No outside
-  requests: the fonts, Phaser and the art are all copied in.
-- **Phaser** 4.2.1 (MIT) is vendored in `vendor/`: `package.json` pins the release (Dependabot
-  watches it), `phaser.sha256` records the file's hash, and the build refuses a file that fails
-  either check. Its MIT notice ships beside it (`explore/phaser.LICENSE.md`), and so do the notices
-  of what its build bundles (`explore/phaser.THIRD-PARTY.md`: eventemitter3, rbush, Simplify.js,
-  Earcut, psrdnoise). To update: `npm pack phaser@<version>`, copy
-  `dist/phaser-arcade-physics.min.js`, update the hash, `package.json` and `package-lock.json`
-  together, and recheck the bundled works in its `src/`.
+  refuses, before writing anything, an `explore/` it didn't write (or a link), and any output in
+  `tools/quest/` other than `dist/`.
+- **Everything is ours and local:** no third-party code, no outside requests, and under 3 MB
+  (about 216 KB today). The page runs on `engine.js` (`Quest.engine`), a small tile engine: it
+  draws the map's tile layers and one-tile sprites from the atlas on a 2D canvas, moves the
+  player's 12x12 body against solid tiles and solid sprites (one axis at a time, so it slides along
+  walls), reads the arrow keys on the map, follows the player with the camera, and runs timers,
+  tweens and a fade. Its geometry has no DOM, so node tests drive it. (Phaser was used until it
+  turned out to bundle GPL-3.0 code; design decision 5.)
 - **Tiles** are Kenney's Tiny Dungeon (CC0, `tiles/LICENSE-kenney.txt`): `tiles/tiles.png` is its
   `tilemap_packed.png` (12x11 frames of 16px) with one row added, of which frame 132, the top of a
   wall, is ours. `tiles/tiles.json` names the frame for everything the page draws (the wall and its
   top, the player, the five roles, the open chest, exit, gate, portal); the build checks it. A
-  realm's look is its map's own floor and decoration. WebGL is used where the browser has it,
-  else a 2D canvas.
+  realm's look is its map's own floor and decoration.
 - **Fun:** talk to a chest to open it (its loot is yours, or a mimic snaps at you), to a barrel to
   roll it aside, and to the troll's hoard it uncovers to claim it. You start with the weapon
   `tiles.json` names; others come as loot, and X (or the pad's Weapon) switches the one in your
@@ -279,12 +276,13 @@ packs/agentql/tiles/, maps/*.tmj        ─┘                 └─► explore
   map has focus, so links and buttons keep Enter and Space; number keys pick in a dialog; Esc
   closes it ("not now"; the step waits). Standing by a portal names its realm and how you did
   there. S and M switch sound.
-- **Checks:** the build checks the maps (above) and the vendored Phaser; `tests/play_map.js` walks
+- **Checks:** the build checks the maps (above) and the tile index; `tests/play_map.js` walks
   each map through the machine with no canvas. In a real browser,
   `python3 tools/quest/tests/smoke_explore.py` builds the site, serves it, and plays each
   explorable realm in headless Chrome (`explore/#smoke=<realm>`): locked for a fresh player, the
   map loads, every step talked to in order, the gate shut exactly until its steps are done, the
-  realm saved, Enter on a link left alone, no request outside the site. pytest runs it wherever
+  realm saved, Enter on a link left alone, no request outside the site, and the fun and the people
+  (all with page-script events, not the browser's own input). pytest runs it wherever
   Chrome is installed, CI included. The scripted play writes saves, so it runs only on a local
   server (`127.0.0.1` or `localhost`). Touch, screen reader and cross-browser checks are a manual
   list in the PR.
@@ -309,7 +307,6 @@ sources:
 | `art/classic/….txt: not used` | an art file the page never reads, or a scene for a realm that doesn't exist or has halls (a realm of halls shows its crown) | remove it, or fix its name |
 | `strings.yaml: '…' is not used by the page, the engine or a plugin` | a string nothing reads (often a typo, or one a plugin reads without listing it in `STRINGS`) | remove it, or list it in the plugin's `STRINGS` |
 | `maps/….tmj: …` (for example `can't be reached when the game waits on …`, `must be exactly one tile on the grid`, `the map's edge must all be wall`, `step … needs exactly one object`, `is external; embed it`) | a map doesn't bind to the content, or something on it can't be reached | fix the map in Tiled; the message names the object |
-| `vendor/phaser-arcade-physics.min.js: its SHA-256 doesn't match phaser.sha256` or `package.json pins phaser …, the vendored file is …` | the vendored Phaser was changed or updated only in part | update the file, its hash and `package.json` together (see the explore front end) |
 | `explore/: … bytes is over the 3,000,000-byte budget` | the explore folder grew too big (usually art or maps) | shrink the tiles or maps |
 | `tiles/tiles.json: an explorable pack names its tile frames here` | a pack lists `explore.realms` but has no tile index | add `tiles/tiles.json` |
 | `realm …: the classic page plays either halls or one encounter per realm` | a realm with halls and an encounter, or two encounters | split it into realms |

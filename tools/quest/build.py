@@ -829,26 +829,8 @@ _ART_CALL = re.compile(r'\bart\("([a-z0-9_]+)"')
 
 
 EXPLORE_DIR = HERE / "explore"   # the explore front end: page template and its script
-VENDOR = HERE / "vendor"         # Phaser, pinned (vendor/package.json) and checked (vendor/phaser.sha256)
 EXPLORE_BUDGET = 3_000_000       # bytes for the whole explore folder (design §4.6)
 EXPLORE_MARK = ".written-by-build"   # in every explore/ the build writes, so a rebuild only ever replaces its own
-
-
-def check_vendor() -> list[str]:
-    """The vendored Phaser is the file its recorded hash names, at the version package.json pins."""
-    import hashlib
-    path, record = VENDOR / "phaser-arcade-physics.min.js", VENDOR / "phaser.sha256"
-    if not path.is_file() or not record.is_file():
-        return ["vendor/: phaser-arcade-physics.min.js and phaser.sha256 are needed for the explore page"]
-    errors = []
-    want = record.read_text(encoding="utf-8").split()[0]
-    if hashlib.sha256(path.read_bytes()).hexdigest() != want:
-        errors.append("vendor/phaser-arcade-physics.min.js: its SHA-256 doesn't match phaser.sha256")
-    pinned = json.loads((VENDOR / "package.json").read_text(encoding="utf-8"))["dependencies"]["phaser"]
-    found = re.search(r'\bVERSION:"([0-9.]+)"', path.read_text(encoding="utf-8", errors="ignore"))
-    if not found or found.group(1) != pinned:
-        errors.append(f"vendor/: package.json pins phaser {pinned}, the vendored file is {found.group(1) if found else '?'}")
-    return errors
 
 
 TILE_NAMES = {"wall", "wall_top", "player", *maps.ROLES, "reward_open", "exit", "gate", "portal", "throne",   # what explore.js draws
@@ -903,17 +885,26 @@ def explore_items(pack: "Pack") -> set[str]:
     return set(items) if isinstance(items, dict) else set()
 
 
+def out_problems(out: pathlib.Path, explorable: bool) -> list[str]:
+    """Before anything is written: the page's folder isn't one of the engine's own (tools/quest/
+    except its dist/), and an explore/ already there is one this build wrote, not a link."""
+    folder = out.parent.resolve()
+    here = HERE.resolve()
+    if folder.is_relative_to(here) and not folder.is_relative_to(here / "dist"):
+        return [f"--out: {out.parent} is inside tools/quest/; build into tools/quest/dist/ or somewhere outside"]
+    ex = out.parent / "explore"
+    if explorable and (ex.is_symlink() or (ex.exists() and not (ex / EXPLORE_MARK).is_file())):
+        return [f"explore/: {ex} is already there and isn't a folder this build wrote; move it, or build somewhere else"]
+    return []
+
+
 def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fonts_css: str, core: str) -> list[str]:
     """The explore front end, in <page folder>/explore/: its page, script, the shared core and look,
-    the fonts, Phaser, the art, and the pack's tiles and maps. Everything is local."""
+    the fonts, the engine, the art, and the pack's tiles and maps. Everything is local.
+    out_problems() has already said it may."""
     ex = out_dir / "explore"
-    if ex.resolve().is_relative_to(HERE.resolve()):
-        return [f"--out: {out_dir} is inside tools/quest/; build somewhere else (its explore/ would replace the sources)"]
     if ex.exists():
-        # A folder this build wrote before carries the mark; anything else there is someone's, left alone.
-        if not (ex / EXPLORE_MARK).is_file():
-            return [f"explore/: {ex} exists and wasn't written by build.py; move it, or build somewhere else"]
-        shutil.rmtree(ex)    # no files left over from an older build
+        shutil.rmtree(ex)    # a folder this build wrote (it carries the mark): no files left over
     (ex / "maps").mkdir(parents=True, exist_ok=True)
     (ex / EXPLORE_MARK).write_text("Written by tools/quest/build.py, which replaces this folder on every build.\n",
                                    encoding="utf-8")
@@ -927,9 +918,7 @@ def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fo
     (ex / "core.js").write_text(core, encoding="utf-8")
     (ex / "quest.css").write_text(CORE_CSS.read_text(encoding="utf-8"), encoding="utf-8")
     (ex / "fonts.css").write_text(fonts_css, encoding="utf-8")
-    (ex / "phaser.min.js").write_bytes((VENDOR / "phaser-arcade-physics.min.js").read_bytes())
-    (ex / "phaser.LICENSE.md").write_bytes((VENDOR / "LICENSE-phaser.md").read_bytes())   # MIT: the notice ships with it
-    (ex / "phaser.THIRD-PARTY.md").write_bytes((VENDOR / "THIRD-PARTY-phaser.md").read_bytes())   # what Phaser bundles
+    (ex / "engine.js").write_text((EXPLORE_DIR / "engine.js").read_text(encoding="utf-8"), encoding="utf-8")
     (ex / "art.json").write_text(json.dumps(art, ensure_ascii=False), encoding="utf-8")
     (ex / "tiles.json").write_text((pack.dir / "tiles" / "tiles.json").read_text(encoding="utf-8"), encoding="utf-8")
     for f in (pack.dir / "tiles").iterdir():
@@ -1016,7 +1005,6 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
     if data:
         errors += maps.check_maps(pack.dir, data)   # the explore front end's maps (design §4.2)
         if data["pack"]["explore_realms"]:
-            errors += check_vendor()
             errors += check_tiles(pack, data)
     try:
         errors += (denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent) + denylist.scan(CORE_DIR)
@@ -1087,6 +1075,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{name}: OK ({summary})")
         return 0
     out = pathlib.Path(args.out)
+    problems = out_problems(out, bool(data["pack"]["explore_realms"]))
+    if problems:
+        for e in problems:
+            print(f"{name}: {e}", file=sys.stderr)
+        return 1
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
     out.with_name("quest.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -2944,7 +2944,7 @@ def _with_objects(m, extra):
     (lambda m: m.pop("orientation"), "orientation must be orthogonal"),
     (lambda m: m.update(infinite=[]), "is infinite"),
     (lambda m: _layer(m, "tilelayer")["data"].__setitem__(0, 2 ** 53 + 1), "must be 12x6 tile numbers"),
-    (lambda m: m["tilesets"][0].update(tiles=[{"id": 0, "properties": {"a": 1}}]), "per-tile data Phaser can't read"),
+    (lambda m: m["tilesets"][0].update(tiles=[{"id": 0, "properties": {"a": 1}}]), "per-tile data that isn't a list of properties"),
     (lambda m: _obj(m, "foe").pop("x"), "must be numbers"),
     (lambda m: _obj(m, "foe").update(x=10 ** 400), "must be numbers"),
     (lambda m: m["tilesets"][0].update(image="x" * 300 + ".png"), "is not in the pack"),
@@ -3028,38 +3028,9 @@ def test_a_spawn_on_the_edge_leaves_it_open(tmp_path):
 
 # ---- PR 5: the explore front end (design §4) ------------------------------------------------------
 
-EXPLORE_FILES = ["index.html", "explore.js", "core.js", "quest.css", "fonts.css", "phaser.min.js", "art.json",
+EXPLORE_FILES = ["index.html", "explore.js", "engine.js", "core.js", "quest.css", "fonts.css", "art.json",
                  "tiles.json", "tiles/tiles.png", "tiles/LICENSE-kenney.txt", "maps/overworld.tmj", "maps/mines.tmj",
-                 "phaser.LICENSE.md", "phaser.THIRD-PARTY.md", B.EXPLORE_MARK]
-
-
-def test_the_vendored_phaser_is_the_pinned_release():
-    assert B.check_vendor() == []
-    pinned = json.loads((B.VENDOR / "package.json").read_text(encoding="utf-8"))["dependencies"]["phaser"]
-    lock = json.loads((B.VENDOR / "package-lock.json").read_text(encoding="utf-8"))
-    assert lock["packages"]["node_modules/phaser"]["version"] == pinned
-
-
-@pytest.mark.parametrize("edit,rehash,needle", [
-    (lambda js: js + b"\n", False, "SHA-256 doesn't match"),
-    # another release, its hash recorded: the package.json pin still catches it
-    (lambda js: js.replace(b'VERSION:"', b'VERSION:"9', 1), True, "the vendored file is 9"),
-])
-def test_a_changed_phaser_fails_the_build(tmp_path, monkeypatch, edit, rehash, needle):
-    vendor = tmp_path / "vendor"
-    shutil.copytree(B.VENDOR, vendor)
-    js = vendor / "phaser-arcade-physics.min.js"
-    js.write_bytes(edit(js.read_bytes()))
-    if rehash:
-        import hashlib
-        (vendor / "phaser.sha256").write_text(hashlib.sha256(js.read_bytes()).hexdigest() + "  phaser-arcade-physics.min.js\n")
-    monkeypatch.setattr(B, "VENDOR", vendor)
-    assert any(needle in e for e in B.build(check=True)[3])
-
-
-def test_dependabot_watches_the_vendored_phaser():
-    cfg = yaml.safe_load((B.ROOT / ".github/dependabot.yml").read_text(encoding="utf-8"))
-    assert any(u["package-ecosystem"] == "npm" and u["directory"] == "/tools/quest/vendor" for u in cfg["updates"])
+                 B.EXPLORE_MARK]
 
 
 def test_the_explore_folder_is_built_local_and_in_budget(tmp_path):
@@ -3198,7 +3169,7 @@ def test_a_rebuild_leaves_no_old_explore_files(tmp_path):
     (tmp_path / "explore/maps/old.tmj").write_text("{}", encoding="utf-8")
     assert B.main(["--out", str(page)]) == 0
     assert not (tmp_path / "explore/maps/old.tmj").exists()
-    assert (tmp_path / "explore/phaser.LICENSE.md").read_bytes() == (B.VENDOR / "LICENSE-phaser.md").read_bytes()
+    assert (tmp_path / "explore/engine.js").read_bytes() == (B.EXPLORE_DIR / "engine.js").read_bytes()
 
 
 
@@ -3211,15 +3182,32 @@ def test_a_rebuild_never_deletes_a_folder_it_did_not_write(tmp_path):
     assert (tmp_path / "explore/notes.txt").read_text(encoding="utf-8") == "mine"
 
 
-def test_the_build_refuses_to_write_into_its_own_sources(tmp_path):
-    before = (B.EXPLORE_DIR / "explore.js").read_bytes()
-    out = B.HERE / "index.html"
-    try:
-        assert B.main(["--out", str(out)]) == 1
-    finally:
-        for name in ("index.html", "quest.json", "quest.schema.json"):
-            (B.HERE / name).unlink(missing_ok=True)
-    assert (B.EXPLORE_DIR / "explore.js").read_bytes() == before
+@pytest.mark.parametrize("where", ["index.html", "explore/index.html", "core/index.html", "packs/agentql/index.html"])
+def test_the_build_refuses_to_write_into_its_own_sources(monkeypatch, tmp_path, where):
+    # In a copy of tools/quest, so a failure can't touch the real sources.
+    copy = tmp_path / "quest"
+    shutil.copytree(B.HERE, copy, ignore=shutil.ignore_patterns("dist", "__pycache__", "tests"))
+    monkeypatch.setattr(B, "HERE", copy)
+    before = {p: p.read_bytes() for p in copy.rglob("*") if p.is_file()}
+    assert B.main(["--out", str(copy / where)]) == 1
+    after = {p: p.read_bytes() for p in copy.rglob("*") if p.is_file()}
+    assert after == before          # refused before anything was written
+
+
+def test_the_default_build_into_dist_works(monkeypatch, tmp_path):
+    copy = tmp_path / "quest"
+    shutil.copytree(B.HERE, copy, ignore=shutil.ignore_patterns("dist", "__pycache__", "tests"))
+    monkeypatch.setattr(B, "HERE", copy)
+    assert B.main(["--out", str(copy / "dist/index.html")]) == 0
+    assert (copy / "dist/explore/engine.js").is_file()
+    assert B.main(["--out", str(copy / "dist/index.html")]) == 0      # and again, over its own folder
+
+
+def test_an_explore_link_is_refused(tmp_path):
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "explore").symlink_to(tmp_path / "elsewhere")
+    assert B.main(["--out", str(tmp_path / "index.html")]) == 1
+    assert not (tmp_path / "index.html").exists()
 
 
 def test_a_published_name_in_the_explore_page_fails_the_build(tmp_path, monkeypatch):
@@ -3483,3 +3471,55 @@ def test_a_hoard_is_the_one_thing_that_shares_a_tile(tmp_path):
     errors = MAPS.check_maps(pack.dir, data)
     shared = [e for e in errors if "shares its tile" in e]
     assert len(shared) == 1 and "(chest)" in shared[0], errors
+
+
+
+# ---- the engine (engine.js): no third-party code ----------------------------------------------------
+
+def test_the_explore_page_ships_only_our_own_code():
+    assert not (B.HERE / "vendor").exists()
+    cfg = yaml.safe_load((B.ROOT / ".github/dependabot.yml").read_text(encoding="utf-8"))
+    assert not any("tools/quest" in u.get("directory", "") for u in cfg["updates"])
+    page = (B.EXPLORE_DIR / "index.html").read_text(encoding="utf-8")
+    assert re.findall(r'<script src="([^"]+)"', page) == ["engine.js", "core.js", "explore.js"]
+    assert "Phaser" not in (B.EXPLORE_DIR / "explore.js").read_text(encoding="utf-8")
+
+
+ENGINE = r"""
+const fs = require("fs"); globalThis.Quest = {};
+eval(fs.readFileSync(process.argv[1], "utf8"));
+const E = Quest.engine, T = 16;
+// A 6x4 room: walls round the edge, one pillar at (3,1).
+const rows = ["######", "#..#.#", "#....#", "######"];
+const walls = new E.Layer({ name: "walls", width: 6, height: 4, data: rows.join("").split("").map(c => c === "#" ? 1 : 0) });
+walls.setCollisionByExclusion();
+const crate = new E.Sprite(4 * T + 8, 2 * T + 8, 0, true);
+const block = E.blocker(walls, () => [crate].filter(s => s.body.enable));
+const box = (x, y) => ({ x, y, w: 12, h: 12 });
+const out = {};
+out.right = E.move(box(1 * T + 8, 2 * T + 8), 200, 0, block);                // stops at the crate
+crate.body.enable = false;
+out.rightNoCrate = E.move(box(1 * T + 8, 2 * T + 8), 200, 0, block);         // stops at the wall
+out.up = E.move(box(1 * T + 8, 2 * T + 8), 0, -200, block);                  // stops under the top wall
+out.slide = E.move(box(1 * T + 8, 2 * T + 8), 8, -40, block);                // slides along the top while pushing up
+out.pillar = E.move(box(2 * T + 8, 1 * T + 8), 40, 0, block);               // the pillar at (3,1)
+out.fast = E.move(box(1 * T + 8, 2 * T + 8), 5000, 0, block);               // no tunnelling at any speed
+out.touching = block(4 * T, 1 * T, 4 * T + 12, 1 * T + 12) === null;        // edges touching the pillar don't count
+out.tile = [walls.getTileAt(0, 0) && walls.getTileAt(0, 0).index, walls.getTileAt(1, 1), walls.getTileAtWorldXY(3 * T + 1, T + 1).x];
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_engine_stops_the_player_at_walls_and_solids():
+    r = subprocess.run(["node", "-e", ENGINE, str(B.EXPLORE_DIR / "engine.js")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    assert got["right"]["x"] == 4 * 16 - 6                 # flush with the crate's left edge
+    assert got["rightNoCrate"]["x"] == 5 * 16 - 6          # flush with the right wall
+    assert got["up"]["y"] == 1 * 16 + 6                     # flush under the top wall
+    assert got["slide"]["y"] == 1 * 16 + 6 and got["slide"]["x"] == pytest.approx(1 * 16 + 16)   # pushed up, still slid right
+    assert got["pillar"]["x"] == 3 * 16 - 6
+    assert got["fast"]["x"] == 4 * 16 - 6 or got["fast"]["x"] == 5 * 16 - 6
+    assert got["touching"] is True
+    assert got["tile"] == [1, None, 3]

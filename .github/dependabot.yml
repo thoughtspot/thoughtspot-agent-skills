@@ -29,15 +29,3 @@ updates:
           - "*"
     commit-message:
       prefix: "chore"
-
-  # Phaser, vendored for the quest's explore front end (tools/quest/vendor/). Nothing installs
-  # from here; a bump PR fails tools/quest's tests until the vendored file and phaser.sha256 are
-  # replaced with the new version's (design §9). Phaser's own dependency is bundled in its build.
-  - package-ecosystem: "npm"
-    directory: "/tools/quest/vendor"
-    schedule:
-      interval: "weekly"
-    ignore:
-      - dependency-name: "eventemitter3"
-    commit-message:
-      prefix: "chore"

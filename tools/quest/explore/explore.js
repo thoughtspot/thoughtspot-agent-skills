@@ -1,4 +1,4 @@
-// The explore front end: walk a pack's Tiled maps (Phaser), and answer each step in a dialog drawn
+// The explore front end: walk a pack's Tiled maps (Quest.engine, engine.js), and answer each step in a dialog drawn
 // by Quest.screens, the same screens as the classic page. The rules of play are Quest.machine's:
 // talking to someone sends `interact {step}`, which it refuses unless that step is next.
 // Design: docs/superpowers/specs/2026-10-21-agentql-quest-pack-design.md (§4).
@@ -177,10 +177,11 @@
     const onMap = e.target === $("world") || e.target === document.body || !!(e.target.closest && e.target.closest("#world"));
     if ((k === "enter" || k === " ") && !e.repeat && world && onMap) { e.preventDefault(); talk(world.nearby()); }
   });
-  // Clicking the map, or anywhere that isn't a control, gives the map the keys again (Phaser keeps
-  // the map's own clicks, and Phaser listens for arrows only on the map).
-  document.addEventListener("pointerdown", e => {
-    if (dialog.open || (e.target.closest && e.target.closest("a, button, input, select, textarea, dialog"))) return;
+  // Clicking the map, or anywhere that isn't a control, gives the map the keys again (the engine
+  // listens for arrows only on the map). On click, after the browser has put focus where it puts it.
+  document.addEventListener("click", e => {
+    if (dialog.open || (e.target.closest && e.target.closest("a, button, input, select, textarea, dialog, label"))) return;
+    if (window.getSelection && String(window.getSelection())) return;      // selecting text: leave focus be
     $("world").focus({ preventScroll: true });
   });
   document.addEventListener("click", e => {
@@ -200,11 +201,11 @@
   // from the back/forward cache) is judged again next time, so close it.
   window.addEventListener("pageshow", () => {
     if (dialogStep === "portal") { closeDialog(); state = machine.act(state, { type: "map" }, progress.load()).state; }
-    if (world) world.refresh();
+    if (world) { world.refresh(); world.near = undefined; }   // and say again what is close, from the new save
     hud();                                  // gold won in the classic page shows at once
   });
 
-  // ---- the world: one Phaser scene per map ---------------------------------------------------
+  // ---- the world: one scene per map (engine.js) -----------------------------------------------
   const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   // The steps a gate waits on are done once the game has moved past them.
   const done = step => {
@@ -215,31 +216,25 @@
     return (progress.load()[r.id] || {}).done || (now !== null && order.indexOf(now) > order.indexOf(step));
   };
 
-  class World extends Phaser.Scene {
-    constructor() { super("world"); }
-    init(data) { this.mapId = data.map; }
-    preload() {
-      this.load.spritesheet("tiles", "tiles/tiles.png", { frameWidth: TILE, frameHeight: TILE });
-      for (const id of ["overworld", ...explorable]) this.load.tilemapTiledJSON(id, `maps/${id}.tmj`);
-    }
+  class World {
+    constructor(api, mapId, doc) { Object.assign(this, api); this.mapId = mapId; this.doc = doc; }
     create() {
-      const map = this.make.tilemap({ key: this.mapId });
-      const tiles = map.addTilesetImage("tiles", "tiles");
-      map.createLayer("floor", tiles);
-      const walls = map.createLayer("walls", tiles);
+      const doc = this.doc, map = { height: doc.height };
+      const layer = name => doc.layers.find(l => l.type === "tilelayer" && l.name === name);
+      this.addLayer(layer("floor"));
+      const walls = this.addLayer(layer("walls"));
       this.walls = walls;
-      walls.setCollisionByExclusion([-1]);
+      walls.setCollisionByExclusion();
       // A wall painted with the wall tile shows its brick face where floor is below it, and its dark
       // top elsewhere; any other tile on the walls layer (a crate, a barrel) is drawn as it is.
       const plain = t => !!t && (t.index - 1 === FRAMES.wall || t.index - 1 === FRAMES.wall_top);
       walls.forEachTile(t => {
         if (plain(t)) t.index = 1 + (t.y + 1 < map.height && !plain(walls.getTileAt(t.x, t.y + 1)) ? FRAMES.wall : FRAMES.wall_top);
       });
-      this.decor = map.getLayer("decor") ? map.createLayer("decor", tiles) : null;   // torches, rails, rubble: drawn, never blocking
+      this.decor = layer("decor") ? this.addLayer(layer("decor")) : null;   // torches, rails, rubble: drawn, never blocking
       this.objects = [];
-      this.solid = this.physics.add.staticGroup();
       this.gates = [];
-      for (const o of map.getObjectLayer("objects").objects) {
+      for (const o of doc.layers.find(l => l.type === "objectgroup" && l.name === "objects").objects) {
         const prop = n => ((o.properties || []).find(p => p.name === n) || {}).value;
         const x = o.x + o.width / 2, y = o.y + o.height / 2;
         const obj = { type: o.type, x, y, to: prop("to"), key: `${this.mapId}:${o.id}`, loot: prop("loot"), roll: prop("roll"),
@@ -247,7 +242,7 @@
                       step: ROLES.includes(o.type) ? `${prop("encounter")}:${o.type}` : o.type === "throne" ? `hall:${prop("hall")}` : null };
         if (o.type === "spawn") { this.spawn = { x, y }; continue; }
         if (o.type === "gate") {
-          const g = this.solid.create(x, y, "tiles", FRAMES.gate);
+          const g = this.addSprite(x, y, FRAMES.gate, true);
           g.requires = String(prop("requires") || "").split(",").map(s => s.trim()).filter(Boolean);
           this.gates.push(g); continue;
         }
@@ -256,7 +251,7 @@
           : o.type === "chest" && opened ? (obj.loot === MIMIC ? FRAMES.mimic : FRAMES.chest_open)
           : o.type === "hoard" && opened ? FRAMES.hoard_empty
           : o.type === "npc" ? FRAMES.npcs[obj.look] : FRAMES[o.type] ?? FRAMES.portal;
-        obj.sprite = this.solid.create(x, y, "tiles", frame);
+        obj.sprite = this.addSprite(x, y, frame, true);
         if (o.type === "barrel" && opened) this.place(obj, ...this.rolledTo(obj));
         if (o.type === "barrel") obj.sprite.setDepth(2);
         // The living breathe: a pixel up and down, out of step with each other.
@@ -271,19 +266,15 @@
         this.hide(h, !!b && !fun.done[b.key]);
       }
       // The player's body moves; what you see follows it, facing the way it walks, with a step bob.
-      this.player = this.physics.add.sprite(this.spawn.x, this.spawn.y, "tiles", FRAMES.player).setVisible(false);
-      this.player.body.setSize(12, 12);
-      this.look = this.add.image(this.spawn.x, this.spawn.y, "tiles", FRAMES.player).setDepth(10);
-      this.events.on("postupdate", () => this.follow());
+      this.player = this.addPlayer(this.spawn.x, this.spawn.y);          // a 12x12 body
+      this.look = this.addSprite(this.spawn.x, this.spawn.y, FRAMES.player, false).setDepth(10);
       this.facing = [0, 1];
-      this.held = this.add.image(this.spawn.x, this.spawn.y, "tiles", ITEMS[fun.weapon].frame).setDepth(11).setScale(0.75);
-      this.physics.add.collider(this.player, walls);
-      this.physics.add.collider(this.player, this.solid);
-      this.cursors = this.input.keyboard.createCursorKeys();
-      this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
-      this.cameras.main.startFollow(this.player, true, reduced ? 1 : 0.2, reduced ? 1 : 0.2);
-      this.cameras.main.setZoom(Math.max(1, Math.floor(this.scale.height / map.heightInPixels)));
-      if (!reduced) this.cameras.main.fadeIn(220, 0, 0, 0);
+      this.held = this.addSprite(this.spawn.x, this.spawn.y, ITEMS[fun.weapon].frame, false).setDepth(11).setScale(0.75);
+      this.collide(walls);                                                // walls, and every enabled solid sprite
+      this.cursors = this.input.keyboard.cursors;
+      this.cameras.main.setBounds(0, 0, doc.width * TILE, doc.height * TILE);
+      this.cameras.main.startFollow(this.player, true, reduced ? 1 : 0.2);
+      if (!reduced) this.cameras.main.fadeIn(220);
       this.refresh();
       world = this;
       hud();
@@ -301,7 +292,6 @@
     }
     freeze(on) {
       this.input.keyboard.enabled = !on;
-      this.game.input.keyboard.enabled = !on;
       if (!on) this.input.keyboard.resetKeys();
       this.player.setVelocity(0, 0);
       this.look.setPosition(Math.round(this.player.x), Math.round(this.player.y));
@@ -419,7 +409,11 @@
   }
   function goTo(mapId) {
     world = null;
-    game.scene.start("world", { map: mapId });
+    game.start(api => {
+      const w = new World(api, mapId, MAPS[mapId]);
+      w.create();
+      return { update: () => w.update(), postupdate: () => w.follow() };
+    });
     Sound.music(mapId === "overworld" ? "map" : "battle");
   }
 
@@ -429,14 +423,16 @@
   // #look=<map>, locally: open that map straight away, for screenshots (tests/shoot_maps.py).
   const LOOK = LOCAL && /^#look=([a-z0-9_]+)$/.exec(location.hash);
   // WebGL where the browser has it, else a 2D canvas; if neither starts, offer the classic version.
-  let game;
+  let game, MAPS;
   try {
-    game = new Phaser.Game({
-      type: Phaser.AUTO, parent: "world", width: 320, height: 128, pixelArt: true, backgroundColor: "#16131f",
-      audio: { noAudio: true }, physics: { default: "arcade" }, scale: { mode: Phaser.Scale.FIT },
-      input: { keyboard: { target: $("world") } }, banner: false,
-      // A headless smoke run uses virtual time, which never fires animation frames.
-      fps: { forceSetTimeOut: SMOKE || !!LOOK }
+    const image = src => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error(`couldn't load ${src}`)); i.src = src; });
+    const ids = ["overworld", ...explorable];
+    const [atlas, ...docs] = await Promise.all([image("tiles/tiles.png"), ...ids.map(id => fetch(`maps/${id}.tmj`).then(r => r.json()))]);
+    MAPS = Object.fromEntries(ids.map((id, i) => [id, docs[i]]));
+    game = Quest.engine.create({
+      parent: $("world"), width: 320, height: 128, background: "#16131f", atlas, columns: MAPS.overworld.tilesets[0].columns,
+      keyTarget: $("world"),
+      timeouts: SMOKE || !!LOOK        // a headless run uses virtual time, which never fires animation frames
     });
   } catch (e) {
     $("nogl").textContent = S("explore_no_canvas");
@@ -446,14 +442,13 @@
     log(`NOGL ${e.message}`);
     return;
   }
-  game.scene.add("world", World);
   const looking = LOOK && (LOOK[1] === "overworld" || explorable.has(LOOK[1])) ? LOOK[1] : null;   // a map that exists
   if (looking && looking !== "overworld") state = Object.assign(state, { realm: realms.findIndex(r => r.id === looking) });
   goTo(looking || "overworld");
   $("world").focus({ preventScroll: true });
 
   // For tests: the state, the world, and a scripted play of one realm (see tests/smoke_explore.py).
-  window.Quest.explore = {
+  if (LOCAL) window.Quest.explore = {
     state: () => state, world: () => world, talk, dispatch, actions: () => actions, dialogOpen: () => dialog.open,
     async smoke(realmId) {
       // Stand on a floor tile next to something (the walk itself is maps.py's check and play_map.js's).
@@ -474,7 +469,8 @@
       $("classic").dispatchEvent(enter);
       if (enter.defaultPrevented) throw new Error("Enter on the classic link was taken by the map");
       // Clicking something that isn't a control gives the map the keys; the arrows then walk.
-      $("help").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      $("world").blur();
+      $("help").dispatchEvent(new MouseEvent("click", { bubbles: true }));
       if (document.activeElement !== $("world")) throw new Error("a click off the controls left the map without focus");
       const key = (type, k, code, more = {}) => {
         const ev = new KeyboardEvent(type, Object.assign({ key: k, code: k, bubbles: true, cancelable: true }, more));

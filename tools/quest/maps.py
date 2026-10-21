@@ -14,10 +14,10 @@ such realm, saved by Tiled 1.10 or later as JSON with tilesets embedded. On a ma
         gate     requires=<step id>,<step id>,...   blocks its tiles until those steps are DONE
   - a step id is "<encounter id>:<merchant|guide|compiler|foe|reward>" or "hall:<hall id>".
 
-Only what Phaser 4 and the explore page read the same way: an orthogonal, finite map; layers at
+Only what a tile engine and the explore page read the same way: an orthogonal, finite map; layers at
 the top level (no groups) with no offsets: tile layers `floor` and `walls` and, if it likes, `decor`
 (drawn, never blocking), the map's size, and one object layer `objects`; one embedded tileset named
-`tiles`; unrotated rectangle objects (not tile objects, which Tiled and Phaser anchor differently),
+`tiles`; unrotated rectangle objects (not tile objects, which Tiled anchors differently),
 each exactly one tile on the grid (the explore page gives each a 16px body at its centre); tiles of
 16px; a wall all round the edge (the page doesn't stop the player at the map's edge).
 
@@ -127,7 +127,7 @@ class Map:
             elif layer.get("type") == "tilelayer" and ("compression" in layer or layer.get("encoding", "csv") != "csv"):
                 errors.append(f"{self.name}: tile layer {layer.get('name')!r} must be CSV, with no encoding or compression set")
             elif layer.get("type") == "tilelayer" and (layer.get("x"), layer.get("y")) != (0, 0):
-                errors.append(f"{self.name}: tile layer {layer.get('name')!r} needs x 0 and y 0 (Phaser places it there)")
+                errors.append(f"{self.name}: tile layer {layer.get('name')!r} needs x 0 and y 0 (the explore page draws it there)")
         layers = [l for l in layers if isinstance(l, dict)]
         walls = [l for l in layers if l.get("type") == "tilelayer" and l.get("name") == "walls"]
         if d and len(walls) != 1:
@@ -163,7 +163,7 @@ class Map:
                     errors.append(f"{where}: type must be text")
                     continue
                 if "template" in o:
-                    errors.append(f"{where}: uses a Tiled template, which Phaser doesn't resolve; detach it")
+                    errors.append(f"{where}: uses a Tiled template, which the explore page doesn't resolve; detach it")
                 if "class" in o and "type" not in o:
                     errors.append(f"{where}: has a class but no type (saved by Tiled 1.9); save with Tiled 1.10 or later")
                 if not all(k in o and _num(o[k]) and abs(o[k]) < 1e9 for k in ("x", "y", "width", "height")):
@@ -205,9 +205,12 @@ class Map:
             elif any(isinstance(g, int) and (g & GID) > ts["tilecount"] for l in tiles for g in (l.get("data") or [])
                      if isinstance(l.get("data"), list)):
                 errors.append(f"{self.name}: a tile layer uses a tile past the tileset's {ts['tilecount']}")
+
+
+                errors.append(f"{self.name}: tileset {ts.get('source')!r} is external; embed it (the explore page reads embedded tilesets only)")
             elif "tiles" in ts and not (isinstance(ts["tiles"], list) and all(
                     isinstance(t, dict) and isinstance(t.get("properties", []), list) for t in ts["tiles"])):
-                errors.append(f"{self.name}: tileset {ts.get('name')!r} has per-tile data Phaser can't read")
+                errors.append(f"{self.name}: tileset {ts.get('name')!r} has per-tile data that isn't a list of properties")
             else:
                 image = ts.get("image")
                 try:
