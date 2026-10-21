@@ -255,7 +255,7 @@ are roughly ordered by value÷effort.
 | ~~BL-382~~ | ~~The Snowflake from-direction translator (`sv_sql`) does not strip SQL comments: `/* x */` and `-- y` became `/ * [T::X] * /` and `- - [T::Y]`~~ | DONE (2026-10-07 — ts-cli v0.173.0) |
 | BL-395 | Re-run the AgentQL retest suite on 26.9.0.sw and reconcile `limitations.md` (3 tickets fixed only in that release, the regex row) | 2026-11-30 |
 | ~~BL-396~~ | ~~ERD `order-fulfilment` example fails I18/I19: an alias self-join and alias names in 19 `on:` clauses — lint-clean when written, rejected by import~~ | DONE (2026-10-21 — ts-object-model-erd 1.9.3) |
-| BL-397 | Two join shapes import rejects that `ts tml lint` does not check: `MANY_TO_MANY` (14528, and the Power BI converter emits it) and a referencing join under its destination (14504) | 2026-11-30 |
+| ~~BL-397~~ | ~~Two join shapes import rejects that `ts tml lint` does not check: `MANY_TO_MANY` (14528, and the Power BI converter emits it) and a referencing join under its destination (14504)~~ | DONE (2026-10-22 — ts-cli v0.180.0) |
 | ~~BL-398~~ | ~~Sisense picks each join's direction by a tie-broken sort over a `set`: the emitted join graph varies by hash seed, so I17 passes or fails between runs~~ | DONE (2026-10-21 — ts-cli v0.179.0) |
 | BL-399 | ts-audit's assessment profile (Spotter-ready / General) is asked for, stored and never used: every check runs fixed thresholds | 2026-11-30 |
 
@@ -14333,6 +14333,8 @@ for a many-to-many relationship (a bridge table, or a NEEDS REVIEW flag) in the 
 the new rule will start failing its output.
 
 **Target:** 2026-11-30.
+
+**Resolved 2026-10-22:** ts-cli v0.180.0. `ts tml lint` I20 (MANY_TO_MANY Model join) and I21 (`referencing_join` its own Table TML does not declare — cross-file, checked when the Tables are in the batch), from the review probes R13/R14. Power BI and Sisense now leave a many-to-many relationship out and flag it NEEDS REVIEW, pointing at a warehouse bridge table (the user's choice over emitting MANY_TO_ONE, which fans out silently).
 
 ## BL-398 — Sisense join direction depends on set iteration order `Tier 2`
 

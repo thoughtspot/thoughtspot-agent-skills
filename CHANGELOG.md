@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-10-22
+- feat: `ts tml lint` I20 (a `MANY_TO_MANY` Model join, rejected with 14528) and I21 (a `referencing_join` under an entry whose own Table TML does not declare it, rejected with 14504; checked when the Table TMLs are linted alongside). Power BI (ts-convert-from-powerbi 1.1.8) and Sisense (ts-convert-from-sisense 1.0.5) now leave a many-to-many relationship out and flag it NEEDS REVIEW instead of emitting a join that fails import. Filed BL-399: ts-audit's assessment profile is never used.
+- chore: bump ts-cli to v0.180.0
+
 ## 2026-10-21
 - fix: `ts sisense build-model` orients every join from the fact (MANY) side to the dimension (ONE) side by one deterministic ranking of the tables — distinct join keys, then shared keys, measures, connection count and name. The source side used to come from a sort over a set, so on tied connection counts the join graph changed with Python's hash seed: two facts sharing a Product and a Calendar dimension gave 6 different join sets over 12 seeds, 5 of them failing `ts tml lint` I17. Now one join set on every seed, none failing I17 (BL-398).
 - chore: bump ts-cli to v0.179.0

@@ -161,6 +161,13 @@ def _build_one_join(rel: dict, rank: dict, table_ids: set, join_type: str,
     if err:
         return {"name": nm, "status": "NEEDS REVIEW", "note": err}
     card, defaulted = _cardinality(rel)
+    if card == "MANY_TO_MANY":
+        # A Model join cannot be MANY_TO_MANY (error 14528, lint I20); as MANY_TO_ONE it
+        # would fan out silently. Leave it out and say why (BL-397).
+        return {"name": nm, "status": "NEEDS REVIEW",
+                "note": "many-to-many relation has no Model join (ThoughtSpot rejects "
+                        "MANY_TO_MANY); join skipped — model a bridge table in the warehouse "
+                        "and join it MANY_TO_ONE from each side"}
     joins_by_src.setdefault(src_table, []).append({
         "with": _clean(dst_table), "on": on, "type": join_type, "cardinality": card})
     if defaulted:

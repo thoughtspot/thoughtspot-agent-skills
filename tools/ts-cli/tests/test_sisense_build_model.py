@@ -417,3 +417,18 @@ def test_snowflaked_dimension_still_joins_fact_to_dimension():
         ("Returns", "Calendar", "MANY_TO_ONE"), ("Returns", "Product", "MANY_TO_ONE"),
         ("Sales", "Calendar", "MANY_TO_ONE"), ("Sales", "Product", "MANY_TO_ONE")]
     assert _i17(model) == []
+
+
+def test_many_to_many_relation_is_skipped_and_flagged():
+    """A Model join cannot be MANY_TO_MANY (error 14528, lint I20); as MANY_TO_ONE it would
+    fan out silently, so the relation is left out and flagged NEEDS REVIEW (BL-397)."""
+    from ts_cli.tml_lint import lint_tml
+    inv = _inv()
+    inv["relations"][0]["cardinality"] = "many_to_many"
+    files, mapping = assemble(inv, {}, "MyConn", "db1", "sch1", "LEFT_OUTER", False)
+    model_doc = next(tml for fn, tml in files if fn.endswith(".model.tml"))
+    joins = [j for t in model_doc["model"]["model_tables"] for j in t.get("joins", [])]
+    assert len(joins) == 1 and all(j["cardinality"] != "MANY_TO_MANY" for j in joins)
+    flagged = [r for r in mapping["relationships"] if "bridge table" in r.get("note", "")]
+    assert len(flagged) == 1 and flagged[0]["status"] == "NEEDS REVIEW"
+    assert not [f for f in lint_tml(model_doc) if f.startswith("I20")]

@@ -42,7 +42,7 @@ truth for the formula rows is `tools/ts-cli/ts_cli/sisense/functions.py`
 | Sisense column type codes → data types | Mapped | int/bool/string/datetime/double/date/… (`_SISENSE_TYPE_CODES`) |
 | `relations[]` → joins | Mapped | oid-resolved endpoints; each join runs fact (MANY) → dimension (ONE), the fact being the table with more distinct join keys (then fewer shared keys, more measures, more relations, name) — deterministic, so two facts sharing dimensions never trips I17 (BL-398); ON clause references columns by display **name** (matches the model `column_id`) |
 | Composite-key relations (multi-column) | Mapped | ALL column pairs conjoined in the ON clause (`[F::a]=[D::a] AND [F::b]=[D::b]`) — no dropped pair / fan-out |
-| Join cardinality | Approximated | Sisense v2 exports none → defaults `MANY_TO_ONE` and **flags the join NEEDS REVIEW** (a many-to-many bridge would fan out) |
+| Join cardinality | Approximated | Sisense v2 exports none → defaults `MANY_TO_ONE` and **flags the join NEEDS REVIEW** (a many-to-many bridge would fan out). An explicit `many_to_many` is **left out** and flagged NEEDS REVIEW: a Model join cannot be `MANY_TO_MANY` (14528, lint I20) |
 | Custom-SQL table (`type: custom`) | Mapped | `sql_expression` carried onto the table |
 | Duplicate column names | Mapped | deduped to the fact table |
 | Calc column colliding with a physical column name | Mapped | formula renamed `<name> (Calc)` so the base column + its reference survive; flagged |
