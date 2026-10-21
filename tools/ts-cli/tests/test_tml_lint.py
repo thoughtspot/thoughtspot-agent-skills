@@ -266,9 +266,14 @@ class TestI14DuplicateJoinPairs:
                           "columns": [], "formulas": []}}
 
     @staticmethod
-    def _join(name, with_, on="[A::X] = [B::Y]"):
-        return {"name": name, "with": with_, "on": on,
-                "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"}
+    def _join(name, with_, on=None):
+        # No `on:` by default: these tests are about the pair, and a placeholder
+        # `[A::X] = [B::Y]` names tables outside the join, which I19 rejects.
+        j = {"name": name, "with": with_,
+             "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"}
+        if on:
+            j["on"] = on
+        return j
 
     def test_duplicate_pair_is_flagged(self):
         f = lint_tml(self._model([

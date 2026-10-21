@@ -19,6 +19,7 @@ import sys
 # Dependency order matters only for module-level statements; all cross-module
 # calls resolve at call time in the shared namespace.
 CLOSURE = [
+    "ts_cli/tml_join_graph.py",  # tml_lint's join-graph rules (I17-I19) call into it
     "ts_cli/tml_lint.py",
     "ts_cli/tml_common.py",
     "ts_cli/formula_common.py",
