@@ -193,21 +193,33 @@ class Map:
                     there = target is not None and target.is_file()
                 except OSError:     # a name too long for the file system, say
                     there = False
+
+
+                atlas = (pack_dir / "tiles" / "tiles.png").resolve()
                 if (target is None or not target.is_relative_to(pack_dir) or target.suffix.lower() not in IMAGES
                         or not there):
                     errors.append(f"{self.name}: tileset {ts.get('name')!r} image {image!r} is not in the pack "
                                   f"(a {'/'.join(IMAGES)} file under the pack's folder)")
+                elif target != atlas:   # the page draws tiles/tiles.png whatever the map says
+                    errors.append(f"{self.name}: tileset {ts.get('name')!r} image {image!r} must be ../tiles/tiles.png, "
+                                  "the atlas the explore page draws")
                 elif _png_size(target) is None:
                     errors.append(f"{self.name}: tileset {ts.get('name')!r} image {image!r} is not a readable PNG")
                 elif _png_size(target) != (ts.get("imagewidth"), ts.get("imageheight")):
                     errors.append(f"{self.name}: tileset {ts.get('name')!r} says its image is "
                                   f"{ts.get('imagewidth')}x{ts.get('imageheight')}, but {image} is "
                                   "{}x{}; reload the image in Tiled".format(*_png_size(target)))
-                count = ts.get("tilecount") if isinstance(ts.get("tilecount"), int) else 0
+                size = _png_size(atlas) if atlas.is_file() else None
+                count = (size[0] // TILE) * (size[1] // TILE) if size else 0
+                if ts.get("tilecount") != count or ts.get("columns") != (size[0] // TILE if size else None):
+                    errors.append(f"{self.name}: tileset {ts.get('name')!r} must have tilecount {count} and "
+                                  f"columns {size[0] // TILE if size else '?'}, as tiles/tiles.png does; reload it in Tiled")
+                if ts.get("firstgid") != 1:
+                    errors.append(f"{self.name}: tileset {ts.get('name')!r} needs firstgid 1")
                 for l in tiles:
                     data = l.get("data") if isinstance(l.get("data"), list) else []
                     if any(isinstance(g, int) and (g & GID) > count for g in data):
-                        errors.append(f"{self.name}: layer {l.get('name')!r} uses a tile past the tileset's {count}")
+                        errors.append(f"{self.name}: layer {l.get('name')!r} uses a tile past tiles/tiles.png's {count}")
 
     def _box(self, o: dict) -> tuple[float, float, float, float]:
         x, y, w, h = (float(o.get(k, 0) or 0) for k in ("x", "y", "width", "height"))

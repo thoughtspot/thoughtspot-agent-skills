@@ -54,6 +54,7 @@
   }
   function openDialog(step) {
     dialogStep = step;
+    if (world && /:reward$/.test(step)) world.openChest(step);    // the hoard's chest opens as you claim it
     if (world) world.freeze(true);
     if (!dialog.open) dialog.showModal();
     show();
@@ -162,6 +163,7 @@
   window.addEventListener("pageshow", () => {
     if (dialogStep === "portal") { closeDialog(); state = machine.act(state, { type: "map" }, progress.load()).state; }
     if (world) world.refresh();
+    hud();                                  // gold won in the classic page shows at once
   });
 
   // ---- the world: one Phaser scene per map ---------------------------------------------------
@@ -195,7 +197,7 @@
       walls.forEachTile(t => {
         if (plain(t)) t.index = 1 + (t.y + 1 < map.height && !plain(walls.getTileAt(t.x, t.y + 1)) ? FRAMES.wall : FRAMES.wall_top);
       });
-      if (map.getLayer("decor")) map.createLayer("decor", tiles);   // torches, rails, rubble: drawn, never blocking
+      this.decor = map.getLayer("decor") ? map.createLayer("decor", tiles) : null;   // torches, rails, rubble: drawn, never blocking
       this.objects = [];
       this.solid = this.physics.add.staticGroup();
       this.gates = [];
@@ -213,13 +215,15 @@
         obj.sprite = this.solid.create(x, y, "tiles", FRAMES[o.type] ?? FRAMES.portal);
         // The living breathe: a pixel up and down, out of step with each other.
         if (!reduced && ["merchant", "guide", "foe"].includes(o.type))
-          this.tweens.add({ targets: obj.sprite, y: y - 1, duration: 700 + 90 * this.objects.length, yoyo: true, repeat: -1, ease: "Stepped" });
+          this.time.addEvent({ delay: 650 + 90 * this.objects.length, loop: true,       // a pixel up, a pixel down
+                               callback: () => obj.sprite.setY(obj.sprite.y === y ? y - 1 : y) });
         this.objects.push(obj);
       }
       // The player's body moves; what you see follows it, facing the way it walks, with a step bob.
       this.player = this.physics.add.sprite(this.spawn.x, this.spawn.y, "tiles", FRAMES.player).setVisible(false);
       this.player.body.setSize(12, 12);
       this.look = this.add.image(this.spawn.x, this.spawn.y, "tiles", FRAMES.player).setDepth(10);
+      this.events.on("postupdate", () => this.follow());
       this.physics.add.collider(this.player, walls);
       this.physics.add.collider(this.player, this.solid);
       this.cursors = this.input.keyboard.createCursorKeys();
@@ -237,8 +241,10 @@
         const open = g.requires.every(done);
         g.setVisible(!open); g.body.enable = !open;
       }
-      for (const o of this.objects)       // the hoard's chest stands open once its step is done
-        if (o.type === "reward") o.sprite.setFrame(done(o.step) ? FRAMES.reward_open : FRAMES.reward);
+    }
+    openChest(step) {
+      const o = this.objects.find(x => x.type === "reward" && x.step === step);
+      if (o) o.sprite.setFrame(FRAMES.reward_open);
     }
     freeze(on) {
       this.input.keyboard.enabled = !on;
@@ -269,7 +275,12 @@
       const dy = (c.up.isDown || pad.up ? -1 : 0) + (c.down.isDown || pad.down ? 1 : 0);
       this.player.setVelocity(dx * v, dy * v);
       if (dx) this.look.setFlipX(dx < 0);
-      const step = !reduced && (dx || dy) && Math.floor(this.time.now / 140) % 2;
+    }
+    // After the physics step, so what you see is where the body is; bob only when it really moved.
+    follow() {
+      if (!this.player) return;
+      const b = this.player.body, moving = !this.frozen && (Math.abs(b.deltaX()) > 0.01 || Math.abs(b.deltaY()) > 0.01);
+      const step = !reduced && moving && Math.floor(this.time.now / 140) % 2;
       this.look.setPosition(Math.round(this.player.x), Math.round(this.player.y) - (step ? 1 : 0));
     }
   }
@@ -319,8 +330,9 @@
     return;
   }
   game.scene.add("world", World);
-  if (LOOK && LOOK[1] !== "overworld") state = Object.assign(state, { realm: realms.findIndex(r => r.id === LOOK[1]) });
-  goTo(LOOK ? LOOK[1] : "overworld");
+  const looking = LOOK && (LOOK[1] === "overworld" || explorable.has(LOOK[1])) ? LOOK[1] : null;   // a map that exists
+  if (looking && looking !== "overworld") state = Object.assign(state, { realm: realms.findIndex(r => r.id === looking) });
+  goTo(looking || "overworld");
   $("world").focus({ preventScroll: true });
 
   // For tests: the state, the world, and a scripted play of one realm (see tests/smoke_explore.py).
@@ -355,6 +367,29 @@
       const locked0 = machine.locked(Object.assign({}, state, { realm: ri, gate: null }), progress.load());
       if (locked0 && !$("toast").textContent.includes(S("mark_after_first").trim())) throw new Error("the portal doesn't say it is locked");
       log(`NEAR ${$("toast").textContent}`);
+      // The art: a wall over floor shows its face, a wall over wall its top; decoration is drawn and
+      // never blocks; walls stop a real walk; what you see is where the body is.
+      {
+        const W = world.walls, at = (x, y) => W.getTileAt(x, y);
+        let faces = 0, tops = 0;
+        W.forEachTile(t => {
+          if (t.index - 1 === FRAMES.wall) { faces++; if (at(t.x, t.y + 1) && at(t.x, t.y + 1).index - 1 === FRAMES.wall) throw new Error(`a brick face at (${t.x}, ${t.y}) has wall below`); }
+          if (t.index - 1 === FRAMES.wall_top) { tops++; const b = at(t.x, t.y + 1); if (t.y + 1 < W.layer.height && !(b && (b.index - 1 === FRAMES.wall || b.index - 1 === FRAMES.wall_top))) throw new Error(`a wall top at (${t.x}, ${t.y}) has floor below`); }
+        });
+        if (!faces || !tops) throw new Error(`walls drew ${faces} faces and ${tops} tops`);
+        if (world.decor && (!world.decor.layer.data.flat().some(t => t.index > 0) || world.decor.layer.data.flat().some(t => t.collides)))
+          throw new Error("decoration isn't drawn, or blocks");
+        world.player.setPosition(world.spawn.x, world.spawn.y);
+        key("keydown", "ArrowUp", 38); await wait(900); key("keyup", "ArrowUp", 38); await wait(80);
+        if (world.player.y < TILE + 6 - 0.5) throw new Error(`walked into the top wall (y ${world.player.y})`);
+        if (Math.abs(world.look.x - Math.round(world.player.x)) > 1 || Math.abs(world.look.y - Math.round(world.player.y)) > 1)
+          throw new Error("the player you see isn't where its body is");
+        // Back from the classic page with gold won there: the bar shows it at once.
+        const before = $("hud-gold").textContent;
+        progress.finish(realms[realms.length - 1].id, 10);
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+        if ($("hud-gold").textContent === before) throw new Error("the gold bar didn't catch up after Back");
+      }
       // Back from the classic page with a gate left open: the page closes it and returns to the map.
       talk(portal);
       window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
@@ -387,11 +422,19 @@
         dialog.close(); await wait(50);
         if (dialog.open || world.frozen || document.activeElement !== $("world")) throw new Error("closing the dialog didn't hand back the map");
       }
+      if (!reduced) {                        // the living breathe
+        const someone = world.objects.find(o => ["merchant", "guide", "foe"].includes(o.type));
+        const ys = new Set();
+        for (let i = 0; i < 30; i++) { ys.add(someone.sprite.y); await wait(100); }
+        if (ys.size < 2) throw new Error("nobody breathes");
+      }
+      const chest = world.objects.find(o => o.type === "reward");
       const steps = [];
       for (let n = 0; n < 50; n++) {
         const want = machine.expected(state);
         if (want === null) break;
         const obj = world.objects.find(o => o.step === want);
+        if (want.endsWith(":reward") && chest.sprite.frame.name !== FRAMES.reward) throw new Error("the chest opened before you claimed it");
         // Stand on a floor tile next to it (the walk itself is maps.py's check and play_map.js's).
         const spot = [[0, TILE], [0, -TILE], [-TILE, 0], [TILE, 0]].map(([dx, dy]) => ({ x: obj.x + dx, y: obj.y + dy }))
           .find(s => { const t = world.walls.getTileAtWorldXY(s.x, s.y); return !(t && t.index > 0)
@@ -401,6 +444,7 @@
         await wait(80);
         talk(world.nearby());
         if (!dialog.open) throw new Error(`talking at ${want} opened no dialog`);
+        if (want.endsWith(":reward") && chest.sprite.frame.name !== FRAMES.reward_open) throw new Error("the chest didn't open as you claimed it");
         steps.push(want + (world.gates.some(g => g.body.enable) ? "[gate-shut]" : ""));
         for (let d = 0; d < 60 && dialog.open; d++) {
           const last = actions[actions.length - 1];
