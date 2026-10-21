@@ -1484,7 +1484,7 @@ def test_apostrophes_do_not_split_a_name(text, hit):
 
 def test_the_denylist_skips_binaries_and_caches(tmp_path):
     import denylist as D
-    for rel in ("art.png", "ART.PNG", "__pycache__/x.pyc", "notes.txt"):
+    for rel in ("art.png", "poster.PNG", "__pycache__/x.pyc", "notes.txt"):  # distinct names: macOS ignores case
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("zqxvorn", encoding="utf-8")
     assert D.scan(tmp_path, {D.digest("zqxvorn")}) == [
