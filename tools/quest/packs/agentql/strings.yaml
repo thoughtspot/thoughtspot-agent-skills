@@ -131,3 +131,4 @@ explore_not_yet: Not yet. Someone else has something for you first.
 explore_no_webgl: This map needs WebGL, which this browser couldn't start. The classic version plays the same quests.
 explore_back: Back to the explore map
 explore_near_portal: "{name}{mark}. Press Enter or Space to go in."
+explore_near_sealed: "{name}{mark}."

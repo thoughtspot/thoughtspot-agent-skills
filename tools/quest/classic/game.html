@@ -83,8 +83,8 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = (e.key || "").toLowerCase();
-  if (e.repeat) {   // holding a key must not skip explanations, nor Enter or Space "click" the focused button
-    if (k === "enter" || k === " ") e.preventDefault();
+  if (e.repeat) {   // holding a key must not skip explanations, nor held Enter keep "clicking" the focused button
+    if (k === "enter") e.preventDefault();
     return;
   }
   Sound.unlock();

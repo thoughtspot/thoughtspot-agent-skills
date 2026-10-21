@@ -831,6 +831,7 @@ _ART_CALL = re.compile(r'\bart\("([a-z0-9_]+)"')
 EXPLORE_DIR = HERE / "explore"   # the explore front end: page template and its script
 VENDOR = HERE / "vendor"         # Phaser, pinned (vendor/package.json) and checked (vendor/phaser.sha256)
 EXPLORE_BUDGET = 3_000_000       # bytes for the whole explore folder (design §4.6)
+EXPLORE_MARK = ".written-by-build"   # in every explore/ the build writes, so a rebuild only ever replaces its own
 
 
 def check_vendor() -> list[str]:
@@ -854,9 +855,16 @@ def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fo
     """The explore front end, in <page folder>/explore/: its page, script, the shared core and look,
     the fonts, Phaser, the art, and the pack's tiles and maps. Everything is local."""
     ex = out_dir / "explore"
-    if ex.is_dir():
-        shutil.rmtree(ex)    # only what this build writes: no files left over from an older one
+    if ex.resolve().is_relative_to(HERE.resolve()):
+        return [f"--out: {out_dir} is inside tools/quest/; build somewhere else (its explore/ would replace the sources)"]
+    if ex.exists():
+        # A folder this build wrote before carries the mark; anything else there is someone's, left alone.
+        if not (ex / EXPLORE_MARK).is_file():
+            return [f"explore/: {ex} exists and wasn't written by build.py; move it, or build somewhere else"]
+        shutil.rmtree(ex)    # no files left over from an older build
     (ex / "maps").mkdir(parents=True, exist_ok=True)
+    (ex / EXPLORE_MARK).write_text("Written by tools/quest/build.py, which replaces this folder on every build.\n",
+                                   encoding="utf-8")
     (ex / "tiles").mkdir(parents=True, exist_ok=True)
     page = (EXPLORE_DIR / "index.html").read_text(encoding="utf-8")
     values = {TITLE_PLACEHOLDER: _html_text(pack.title),
@@ -869,6 +877,7 @@ def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fo
     (ex / "fonts.css").write_text(fonts_css, encoding="utf-8")
     (ex / "phaser.min.js").write_bytes((VENDOR / "phaser-arcade-physics.min.js").read_bytes())
     (ex / "phaser.LICENSE.md").write_bytes((VENDOR / "LICENSE-phaser.md").read_bytes())   # MIT: the notice ships with it
+    (ex / "phaser.THIRD-PARTY.md").write_bytes((VENDOR / "THIRD-PARTY-phaser.md").read_bytes())   # what Phaser bundles
     (ex / "art.json").write_text(json.dumps(art, ensure_ascii=False), encoding="utf-8")
     (ex / "tiles.json").write_text((pack.dir / "tiles" / "tiles.json").read_text(encoding="utf-8"), encoding="utf-8")
     for f in (pack.dir / "tiles").iterdir():

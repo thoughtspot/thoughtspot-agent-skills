@@ -53,7 +53,7 @@
   function closeDialog() {
     dialogStep = null;
     if (dialog.open) dialog.close();
-    if (world) world.freeze(false);
+    if (world) { world.freeze(false); world.near = undefined; }   // say again what is close, once back
     $("world").focus({ preventScroll: true });
   }
   // Esc: not now. The close event comes a task later, so one from a dialog already reopened is stale.
@@ -130,7 +130,12 @@
     const onMap = e.target === $("world") || e.target === document.body || !!(e.target.closest && e.target.closest("#world"));
     if ((k === "enter" || k === " ") && !e.repeat && world && onMap) { e.preventDefault(); talk(world.nearby()); }
   });
-  $("world").addEventListener("pointerdown", () => $("world").focus({ preventScroll: true }));   // Phaser keeps the click
+  // Clicking the map, or anywhere that isn't a control, gives the map the keys again (Phaser keeps
+  // the map's own clicks, and Phaser listens for arrows only on the map).
+  document.addEventListener("pointerdown", e => {
+    if (dialog.open || (e.target.closest && e.target.closest("a, button, input, select, textarea, dialog"))) return;
+    $("world").focus({ preventScroll: true });
+  });
   document.addEventListener("click", e => {
     Sound.unlock();
     if (e.target.closest("#sound-sfx")) Sound.toggle("sfx");
@@ -223,7 +228,9 @@
       const p = this.player, want = machine.expected(state);
       const close = this.objects.filter(o => {
         const dx = Math.abs(o.x - p.x), dy = Math.abs(o.y - p.y);
-        return (dx <= TILE * 1.25 && dy <= TILE * 0.6) || (dy <= TILE * 1.25 && dx <= TILE * 0.6);
+        // Beside it: within reach on one axis, overlapping it on the other (half the 12px body
+        // plus half the 16px tile, so a player pressed against it anywhere along its side counts).
+        return (dx <= TILE * 1.25 && dy < 14) || (dy <= TILE * 1.25 && dx < 14);
       }).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y));
       return close.find(o => o.step && o.step === want) || close[0] || null;
     }
@@ -239,13 +246,19 @@
   }
   // Standing by a portal says where it goes, as the classic map's entry does (best gold, sealed,
   // locked until the first realm); the live region reads it too.
+  let portalText = "";
   function describe(obj) {
-    if (!obj || obj.type !== "portal") return;
+    if (!obj || obj.type !== "portal") {            // walked away: the portal's words go with it
+      if (portalText && $("toast").textContent === portalText) toast("");
+      portalText = "";
+      return;
+    }
     const i = realms.findIndex(r => r.id === obj.to), r = realms[i], d = progress.load()[r.id];
     const mark = d && d.done ? S("mark_best", { best: d.best, max: Quest.rules.maxGold(r) }) : r.sealed ? S("mark_sealed")
       : i === 0 ? S("mark_start") : !machine.firstDone(state, progress.load()) ? S("mark_after_first") : "";
-    const t = S("explore_near_portal", { name: r.name, mark: mark.trim() ? ` ${mark.trim()}` : "" });
-    toast(t); announce(t);
+    const t = S(r.sealed ? "explore_near_sealed" : "explore_near_portal", { name: r.name, mark: mark.trim() ? ` ${mark.trim()}` : "" });
+    toast(t);                    // #toast is a status region: read once, not twice
+    portalText = t;
   }
   function goTo(mapId) {
     world = null;
@@ -254,12 +267,13 @@
   }
 
   // The scripted play (tests/smoke_explore.py) writes saves, so it runs only on a local server.
-  const SMOKE = location.hash.startsWith("#smoke=") && ["127.0.0.1", "localhost"].includes(location.hostname);
+  const LOCAL = ["127.0.0.1", "localhost"].includes(location.hostname);
+  const SMOKE = location.hash.startsWith("#smoke=") && LOCAL;
   // WebGL is required: tinting the tiles amber needs it. Without it, offer the classic version.
   let game;
   try {
     game = new Phaser.Game({
-      type: Phaser.WEBGL, parent: "world", width: 320, height: 144, pixelArt: true, backgroundColor: "#150e06",
+      type: Phaser.WEBGL, parent: "world", width: 320, height: 128, pixelArt: true, backgroundColor: "#150e06",
       audio: { noAudio: true }, physics: { default: "arcade" }, scale: { mode: Phaser.Scale.FIT },
       input: { keyboard: { target: $("world") } }, banner: false,
       // A headless smoke run uses virtual time, which never fires animation frames.
@@ -269,6 +283,7 @@
     $("nogl").textContent = S("explore_no_webgl");
     $("nogl").style.display = "block";
     for (const id of ["help", "world", "pad"]) $(id).hidden = true;
+    document.querySelector(".sound").hidden = true;
     log(`NOGL ${e.message}`);
     return;
   }
@@ -288,13 +303,30 @@
       const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
       $("classic").dispatchEvent(enter);
       if (enter.defaultPrevented) throw new Error("Enter on the classic link was taken by the map");
-      $("world").focus();
+      // Clicking something that isn't a control gives the map the keys; the arrows then walk.
+      $("help").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      if (document.activeElement !== $("world")) throw new Error("a click off the controls left the map without focus");
+      const key = (type, k, code, more = {}) => {
+        const ev = new KeyboardEvent(type, Object.assign({ key: k, code: k, bubbles: true, cancelable: true }, more));
+        Object.defineProperty(ev, "keyCode", { get: () => code }); Object.defineProperty(ev, "which", { get: () => code });
+        (document.activeElement || document.body).dispatchEvent(ev);
+        return ev;
+      };
+      const x0 = world.player.x;
+      key("keydown", "ArrowRight", 39); await wait(400); key("keyup", "ArrowRight", 39); await wait(50);
+      if (!(world.player.x > x0 + 8)) throw new Error(`the right arrow didn't walk (x ${x0} -> ${world.player.x})`);
       const portal = world.objects.find(o => o.type === "portal" && o.to === realmId);
       const ri = realms.findIndex(r => r.id === realmId);
-      // Standing by the portal names its realm.
+      // Standing by the portal names its realm, with the classic map's mark.
       world.player.setPosition(portal.x, portal.y + TILE);
       await until(() => $("toast").textContent.includes(realms[ri].name));
+      const locked0 = machine.locked(Object.assign({}, state, { realm: ri, gate: null }), progress.load());
+      if (locked0 && !$("toast").textContent.includes(S("mark_after_first").trim())) throw new Error("the portal doesn't say it is locked");
       log(`NEAR ${$("toast").textContent}`);
+      // Back from the classic page with a gate left open: the page closes it and returns to the map.
+      talk(portal);
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      if (dialog.open || state.screen !== "map") throw new Error("pageshow left a portal dialog open");
       if (machine.locked(Object.assign({}, state, { realm: ri, gate: null }), progress.load())) {   // a fresh player plays the first realm first
         talk(portal); dispatch({ type: "enter" });
         if (world.mapId !== "overworld" || !dialog.open) throw new Error(`${realmId} let a fresh player in`);
@@ -306,6 +338,23 @@
       if (state.screen !== "realm") throw new Error(`the portal did not open ${realmId}`);
       dispatch({ type: "enter" });
       await until(() => world && world.mapId === realmId);
+      {
+        // Beside someone along a whole side counts; across a corner doesn't.
+        const first = world.objects.find(o => o.step === machine.expected(state));
+        world.player.setPosition(first.x - 14, first.y + 11);
+        if (world.nearby() !== first) throw new Error("pressed against the side of someone, nearby() found nobody");
+        world.player.setPosition(first.x - 14, first.y + 15);
+        if (world.nearby() === first) throw new Error("across a corner counted as next to someone");
+        // A dialog freezes the world; held Enter doesn't click through it; Esc lets go and gives the map the keys.
+        world.player.setPosition(first.x - 14, first.y);
+        talk(world.nearby());
+        if (!dialog.open || !world.frozen) throw new Error("talking didn't open a dialog over a frozen world");
+        const before = JSON.stringify(state);
+        if (!key("keydown", "Enter", 13, { repeat: true }).defaultPrevented) throw new Error("held Enter reached the dialog's button");
+        if (JSON.stringify(state) !== before) throw new Error("held Enter changed the game");
+        dialog.close(); await wait(50);
+        if (dialog.open || world.frozen || document.activeElement !== $("world")) throw new Error("closing the dialog didn't hand back the map");
+      }
       const steps = [];
       for (let n = 0; n < 50; n++) {
         const want = machine.expected(state);
