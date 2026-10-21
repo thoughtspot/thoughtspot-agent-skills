@@ -286,7 +286,7 @@ def test_page_makes_no_outside_requests(doc, capture):
 def test_highlight_rule_outranks_the_agentql_text_colour():
     # B1 from review: `.scroll .on` lost to `.scroll .agent` (same specificity, declared later),
     # painting highlighted AgentQL amber on amber. The highlight needs the extra class.
-    css = B.TEMPLATE.read_text(encoding="utf-8")
+    css = B.CORE_CSS.read_text(encoding="utf-8")   # the shared look, inlined into the classic page
     assert re.search(r"\.scroll \.ln\.on \{[^}]*color:", css)
     assert not re.search(r"\.scroll \.on \{", css)
 
@@ -1303,7 +1303,7 @@ def test_routes_name_only_realms(doc, capture):
     ("publish_path: agentql-quest", "publish_path: Agentql Quest", "publish_path must be a folder name"),
     ("  lesson_sql: agents/cli/ts-object-model-agentql-query/references/lesson-sql.md",
      "  lesson_sql: no/such/file.md", "source 'lesson_sql' is not a file in the repo"),
-    ("explore:\n  realms: []", "explore:\n  realms: mines", "explore.realms must be a list"),
+    ("explore:\n  realms: [mines]", "explore:\n  realms: mines", "explore.realms must be a list"),
     ("checks: [agentql_capture, course_refs, agentql_rules]", "checks: [agentql_capture, course_refs, agentql_rules, ../build]",
      "no plugin checks/../build.py"),
     ("unlock: first_realm_first", "unlock: none", "unlock must be one of"),
@@ -1873,7 +1873,7 @@ def test_the_build_keeps_arts_trailing_spaces():
 
 
 @pytest.mark.parametrize("mark", [B.PLACEHOLDER, B.FONT_PLACEHOLDER, B.ART_PLACEHOLDER, B.TITLE_PLACEHOLDER,
-                                  B.DESCRIPTION_PLACEHOLDER, B.CORE_PLACEHOLDER])
+                                  B.DESCRIPTION_PLACEHOLDER, B.CORE_PLACEHOLDER, B.CSS_PLACEHOLDER])
 def test_render_needs_every_placeholder_exactly_once(mark):
     template = B.TEMPLATE.read_text(encoding="utf-8")
     for broken in (template.replace(mark, ""), template.replace(mark, mark + mark)):
@@ -2982,3 +2982,151 @@ def test_expected_is_null_for_a_realm_that_does_not_exist():
                                   m.act(Object.assign(m.fresh(), { screen: "quest", realm: 99 }), { type: "interact", step: "x:merchant" }, {}).refused ? "refused" : "taken"]));
     """)
     assert got == [None, "refused"]
+
+
+# ---- PR 5: the explore front end (design §4) ------------------------------------------------------
+
+EXPLORE_FILES = ["index.html", "explore.js", "core.js", "quest.css", "fonts.css", "phaser.min.js", "art.json",
+                 "tiles.json", "tiles/tiles.png", "tiles/LICENSE-kenney.txt", "maps/overworld.tmj", "maps/mines.tmj"]
+
+
+def test_the_vendored_phaser_is_the_pinned_release():
+    assert B.check_vendor() == []
+    pinned = json.loads((B.VENDOR / "package.json").read_text(encoding="utf-8"))["dependencies"]["phaser"]
+    lock = json.loads((B.VENDOR / "package-lock.json").read_text(encoding="utf-8"))
+    assert lock["packages"]["node_modules/phaser"]["version"] == pinned
+
+
+@pytest.mark.parametrize("edit,rehash,needle", [
+    (lambda js: js + b"\n", False, "SHA-256 doesn't match"),
+    # another release, its hash recorded: the package.json pin still catches it
+    (lambda js: js.replace(b'VERSION:"', b'VERSION:"9', 1), True, "the vendored file is 9"),
+])
+def test_a_changed_phaser_fails_the_build(tmp_path, monkeypatch, edit, rehash, needle):
+    vendor = tmp_path / "vendor"
+    shutil.copytree(B.VENDOR, vendor)
+    js = vendor / "phaser-arcade-physics.min.js"
+    js.write_bytes(edit(js.read_bytes()))
+    if rehash:
+        import hashlib
+        (vendor / "phaser.sha256").write_text(hashlib.sha256(js.read_bytes()).hexdigest() + "  phaser-arcade-physics.min.js\n")
+    monkeypatch.setattr(B, "VENDOR", vendor)
+    assert any(needle in e for e in B.build(check=True)[3])
+
+
+def test_dependabot_watches_the_vendored_phaser():
+    cfg = yaml.safe_load((B.ROOT / ".github/dependabot.yml").read_text(encoding="utf-8"))
+    assert any(u["package-ecosystem"] == "npm" and u["directory"] == "/tools/quest/vendor" for u in cfg["updates"])
+
+
+def test_the_explore_folder_is_built_local_and_in_budget(tmp_path):
+    page = tmp_path / "index.html"
+    assert B.main(["--out", str(page)]) == 0
+    ex = tmp_path / "explore"
+    for f in EXPLORE_FILES:
+        assert (ex / f).is_file(), f
+    assert sum(f.stat().st_size for f in ex.rglob("*") if f.is_file()) <= B.EXPLORE_BUDGET
+    html = (ex / "index.html").read_text(encoding="utf-8")
+    assert "<title>AgentQL Quest</title>" in html and "__PAGE_" not in html
+    assert (ex / "core.js").read_text(encoding="utf-8") == B.core_script()
+    # Nothing is fetched from outside: no remote src/href/url() in our files, and every local
+    # fetch in explore.js names a file the build wrote.
+    for f in ("index.html", "explore.js", "quest.css", "fonts.css", "core.js"):
+        text = (ex / f).read_text(encoding="utf-8")
+        assert not re.search(r'(?:src|href)\s*=\s*["\']?(?:https?:)?//|url\(\s*["\']?(?:https?:)?//|fetch\(\s*["`\']https?:', text), f
+    js = (ex / "explore.js").read_text(encoding="utf-8")
+    fetched = re.findall(r'fetch\("([^"]+)"\)', js)
+    assert fetched
+    for local in fetched:
+        assert (ex / local).resolve().is_file(), local
+    assert json.loads((ex / "art.json").read_text(encoding="utf-8")) == ART
+
+
+def test_an_explore_folder_over_budget_fails_the_build(tmp_path, monkeypatch):
+    monkeypatch.setattr(B, "EXPLORE_BUDGET", 1000)
+    assert B.main(["--out", str(tmp_path / "index.html")]) == 1
+
+
+def test_the_packs_own_maps_pass_the_checks():
+    data, errors = B.compile_pack(B.Pack("agentql"))
+    assert errors == [] and data["pack"]["explore_realms"] == ["mines"]
+    assert MAPS.check_maps(PACK_DIR, data) == []
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_mines_map_plays_through_the_machine(tmp_path):
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    quest = tmp_path / "quest.json"
+    quest.write_text(json.dumps(data), encoding="utf-8")
+    r = subprocess.run(["node", str(HERE / "play_map.js"), str(quest), str(PACK_DIR / "maps/mines.tmj"), "mines"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = json.loads(r.stdout)
+    assert out["interactions"] == [f"west_sales:{x}" for x in MAPS.ROLES] and out["saves"] == ["mines"]
+
+
+DEEP_LINK = r"""
+const fs = require("fs"), vm = require("vm");
+const html = fs.readFileSync(process.argv[1], "utf8");
+const block = id => html.split(`<script id="${id}" type="application/json">`)[1].split("</script>")[0];
+const js = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
+const el = () => ({ textContent: "", setAttribute() {} });
+const link = { textContent: "" }, back = { hidden: true, querySelector: () => link };
+const screen = { innerHTML: "", querySelector: () => null };
+const els = { "quest-data": { textContent: block("quest-data") }, "classic-art": { textContent: block("classic-art") },
+              live: el(), "sound-sfx": el(), "sound-music": el(), "back-explore": back };
+const store = {};
+const ctx = vm.createContext({
+  document: { getElementById: id => els[id] || screen, addEventListener() {}, hidden: false },
+  localStorage: { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = v; } },
+  setInterval: () => 0, clearInterval: () => {}, JSON, String, Number, parseInt, Object, Array, Math,
+  ...(process.argv[2] === "none" ? {} : { location: { hash: process.argv[2] } })
+});
+vm.runInContext(js, ctx);
+const st = vm.runInContext("Quest.classic.state()", ctx);
+console.log(JSON.stringify({ screen: st.screen, realm: st.realm, back: !back.hidden, label: link.textContent }));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+@pytest.mark.parametrize("hash,want", [
+    ("#realm=mines&from=explore", {"screen": "realm", "realm": 1, "back": True}),
+    ("#realm=mines", {"screen": "realm", "realm": 1, "back": False}),
+    ("#realm=nowhere&from=explore", {"screen": "title", "back": False}),
+    ("#realm=mines&from=explore&x=1", {"screen": "title", "back": False}),
+    ("", {"screen": "title", "back": False}),
+    ("none", {"screen": "title", "back": False}),         # no location at all (as in node)
+])
+def test_the_classic_page_opens_at_a_realm_from_the_explore_map(tmp_path, hash, want):
+    page = tmp_path / "index.html"
+    assert B.main(["--out", str(page)]) == 0
+    r = subprocess.run(["node", "-e", DEEP_LINK, str(page), hash], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    assert {k: got[k] for k in want} == want
+    data = json.loads((tmp_path / "quest.json").read_text(encoding="utf-8"))
+    assert got["label"] == (data["pack"]["strings"]["explore_back"] if want["back"] else "")
+
+
+GOOD_SMOKE = ["MAP overworld", "LOCKED mines", "MAP mines", "MAP overworld",
+              "SMOKE mines west_sales:merchant[gate-shut] west_sales:guide[gate-shut] west_sales:compiler[gate-shut] "
+              "west_sales:foe west_sales:reward | {\"done\":true,\"best\":0}"]
+
+
+@pytest.mark.parametrize("edit,needle", [
+    (None, None),
+    (lambda log: [x for x in log if not x.startswith("LOCKED")], "was not locked for a fresh player"),
+    (lambda log: [x for x in log if x != "MAP mines"], "map never loaded"),
+    (lambda log: log + ["ERROR smoke: timed out"], "ERROR smoke"),
+    (lambda log: log[:-1], "no SMOKE line"),
+    (lambda log: log[:-1] + [log[-1].replace("west_sales:foe ", "")], "steps"),
+    (lambda log: log[:-1] + [log[-1].replace("west_sales:foe", "west_sales:foe[gate-shut]")], "at west_sales:foe the gate is shut"),
+    (lambda log: log[:-1] + [log[-1].replace("compiler[gate-shut]", "compiler")], "at west_sales:compiler the gate is open"),
+    (lambda log: log[:-1] + [log[-1].replace('{"done":true,"best":0}', "null")], "was not saved as finished"),
+])
+def test_the_explore_smoke_reads_the_page_log(edit, needle):
+    sys.path.insert(0, str(HERE))
+    import smoke_explore as SX
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    problems = SX.check("mines", edit(list(GOOD_SMOKE)) if edit else list(GOOD_SMOKE), data)
+    assert (problems == []) if needle is None else any(needle in p for p in problems), problems

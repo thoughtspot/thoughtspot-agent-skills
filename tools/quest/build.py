@@ -87,6 +87,8 @@ PLACEHOLDER = "__QUEST_DATA__"
 FONT_PLACEHOLDER = "/*__FONT_FACES__*/"
 ART_PLACEHOLDER = "__CLASSIC_ART__"
 CORE_PLACEHOLDER = "/*__QUEST_CORE__*/"
+CSS_PLACEHOLDER = "/*__QUEST_CSS__*/"
+CORE_CSS = HERE / "core" / "quest.css"   # the look, shared by the classic and explore pages
 CORE_DIR = HERE / "core"   # shared front-end code: plain scripts, inlined into the classic page in name order
 TITLE_PLACEHOLDER, DESCRIPTION_PLACEHOLDER = "__PAGE_TITLE__", "__PAGE_DESCRIPTION__"
 PAGES = "https://thoughtspot.github.io/thoughtspot-agent-skills"
@@ -801,17 +803,20 @@ def core_script(core_dir: pathlib.Path | None = None) -> str:
     return "\n".join(parts)
 
 
-def render(template: str, data: dict, fonts_css: str = "", art: dict | None = None, core: str | None = None) -> str:
+def render(template: str, data: dict, fonts_css: str = "", art: dict | None = None, core: str | None = None,
+           css: str | None = None) -> str:
     """The classic page: the shared core (core/*.js), the data, the pack's art (art/classic/), its
     title and description and the fonts written into classic/game.html."""
-    for mark in (PLACEHOLDER, FONT_PLACEHOLDER, ART_PLACEHOLDER, TITLE_PLACEHOLDER, DESCRIPTION_PLACEHOLDER, CORE_PLACEHOLDER):
+    for mark in (PLACEHOLDER, FONT_PLACEHOLDER, ART_PLACEHOLDER, TITLE_PLACEHOLDER, DESCRIPTION_PLACEHOLDER, CORE_PLACEHOLDER,
+                 CSS_PLACEHOLDER):
         if template.count(mark) != 1:
             raise ValueError(f"game.html must contain {mark} exactly once")
     pack = data.get("pack") or {}
     values = {PLACEHOLDER: _script_json(data), ART_PLACEHOLDER: _script_json(art or {}),
               TITLE_PLACEHOLDER: _html_text(pack.get("title", "")),
               DESCRIPTION_PLACEHOLDER: _html_text((pack.get("strings") or {}).get("page_description", "")),
-              FONT_PLACEHOLDER: fonts_css, CORE_PLACEHOLDER: core_script() if core is None else core}
+              FONT_PLACEHOLDER: fonts_css, CORE_PLACEHOLDER: core_script() if core is None else core,
+              CSS_PLACEHOLDER: CORE_CSS.read_text(encoding="utf-8") if css is None else css}
     # One pass over the template, so a placeholder's name inside the pack's own text is never filled.
     return re.sub("|".join(re.escape(m) for m in values), lambda m: values[m.group(0)], template)
 
@@ -822,9 +827,60 @@ _STRING_CALL = re.compile(r"\b[SH]\(((?:[^()]|\([^()]*\))*?)[,)]")
 _ART_CALL = re.compile(r'\bart\("([a-z0-9_]+)"')
 
 
+EXPLORE_DIR = HERE / "explore"   # the explore front end: page template and its script
+VENDOR = HERE / "vendor"         # Phaser, pinned (vendor/package.json) and checked (vendor/phaser.sha256)
+EXPLORE_BUDGET = 3_000_000       # bytes for the whole explore folder (design §4.6)
+
+
+def check_vendor() -> list[str]:
+    """The vendored Phaser is the file its recorded hash names, at the version package.json pins."""
+    import hashlib
+    path, record = VENDOR / "phaser-arcade-physics.min.js", VENDOR / "phaser.sha256"
+    if not path.is_file() or not record.is_file():
+        return ["vendor/: phaser-arcade-physics.min.js and phaser.sha256 are needed for the explore page"]
+    errors = []
+    want = record.read_text(encoding="utf-8").split()[0]
+    if hashlib.sha256(path.read_bytes()).hexdigest() != want:
+        errors.append("vendor/phaser-arcade-physics.min.js: its SHA-256 doesn't match phaser.sha256")
+    pinned = json.loads((VENDOR / "package.json").read_text(encoding="utf-8"))["dependencies"]["phaser"]
+    found = re.search(r'\bVERSION:"([0-9.]+)"', path.read_text(encoding="utf-8", errors="ignore"))
+    if not found or found.group(1) != pinned:
+        errors.append(f"vendor/: package.json pins phaser {pinned}, the vendored file is {found.group(1) if found else '?'}")
+    return errors
+
+
+def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fonts_css: str, core: str) -> list[str]:
+    """The explore front end, in <page folder>/explore/: its page, script, the shared core and look,
+    the fonts, Phaser, the art, and the pack's tiles and maps. Everything is local."""
+    ex = out_dir / "explore"
+    (ex / "maps").mkdir(parents=True, exist_ok=True)
+    (ex / "tiles").mkdir(parents=True, exist_ok=True)
+    page = (EXPLORE_DIR / "index.html").read_text(encoding="utf-8")
+    values = {TITLE_PLACEHOLDER: _html_text(pack.title),
+              DESCRIPTION_PLACEHOLDER: _html_text(pack.strings.get("page_description", ""))}
+    (ex / "index.html").write_text(re.sub("|".join(re.escape(m) for m in values), lambda m: values[m.group(0)], page),
+                                   encoding="utf-8")
+    (ex / "explore.js").write_text((EXPLORE_DIR / "explore.js").read_text(encoding="utf-8"), encoding="utf-8")
+    (ex / "core.js").write_text(core, encoding="utf-8")
+    (ex / "quest.css").write_text(CORE_CSS.read_text(encoding="utf-8"), encoding="utf-8")
+    (ex / "fonts.css").write_text(fonts_css, encoding="utf-8")
+    (ex / "phaser.min.js").write_bytes((VENDOR / "phaser-arcade-physics.min.js").read_bytes())
+    (ex / "art.json").write_text(json.dumps(art, ensure_ascii=False), encoding="utf-8")
+    (ex / "tiles.json").write_text((pack.dir / "tiles" / "tiles.json").read_text(encoding="utf-8"), encoding="utf-8")
+    for f in (pack.dir / "tiles").iterdir():
+        if f.is_file() and f.suffix.lower() in (".png", ".txt"):
+            (ex / "tiles" / f.name).write_bytes(f.read_bytes())
+    for f in (pack.dir / "maps").glob("*.tmj"):
+        (ex / "maps" / f.name).write_bytes(f.read_bytes())
+    size = sum(f.stat().st_size for f in ex.rglob("*") if f.is_file())
+    return [f"explore/: {size:,} bytes is over the {EXPLORE_BUDGET:,}-byte budget"] if size > EXPLORE_BUDGET else []
+
+
 def classic_needs(template: str, core: str | None = None) -> tuple[set[str], set[str]]:
-    """What the page and the core it inlines read from a pack."""
-    script = template.split("<script>", 1)[-1] + "\n" + (core_script() if core is None else core)
+    """What the front ends read from a pack: the classic page, the core it inlines, and the explore
+    page's script (its strings, for a pack with explorable realms)."""
+    explore = (EXPLORE_DIR / "explore.js").read_text(encoding="utf-8") if (EXPLORE_DIR / "explore.js").is_file() else ""
+    script = template.split("<script>", 1)[-1] + "\n" + (core_script() if core is None else core) + "\n" + explore
     strings = {k for arg in _STRING_CALL.findall(script) for k in re.findall(r'"([a-z0-9_]+)"', arg)}
     return strings | {"page_description"}, set(_ART_CALL.findall(script)) | {"map"}  # the head's description
 
@@ -879,6 +935,9 @@ def _not_json(name: str):
     raise ValueError(f"quest.schema.json: {name} is not JSON (JSON.parse and strict parsers reject it)")
 
 
+BUILT: dict = {}
+
+
 def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None, dict, dict, list[str]]:
     """Validate, and unless `check`, render. Returns (html or None, data, schema, errors)."""
     pack = Pack(pack_id)
@@ -886,6 +945,10 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
     errors += check_packs_unique()
     if data:
         errors += maps.check_maps(pack.dir, data)   # the explore front end's maps (design §4.2)
+        if data["pack"]["explore_realms"]:
+            errors += check_vendor()
+            if not (pack.dir / "tiles" / "tiles.json").is_file():
+                errors.append("tiles/tiles.json: an explorable pack names its tile frames here")
     try:
         errors += denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent) + denylist.scan(CORE_DIR)
     except (OSError, ValueError) as e:  # fails closed: no list, or a list that isn't hashes
@@ -918,6 +981,7 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
     except (OSError, ValueError) as e:
         errors.append(f"denylist: {e}")
     html = None if check else render(TEMPLATE.read_text(encoding="utf-8"), data, fonts, art, core)
+    BUILT.update(pack=pack, art=art, fonts=fonts, core=core)   # for main() to write the explore folder
     return html, data, schema, errors
 
 
@@ -957,6 +1021,12 @@ def main(argv: list[str] | None = None) -> int:
     out.write_text(html, encoding="utf-8")
     out.with_name("quest.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     out.with_name("quest.schema.json").write_text(json.dumps(schema, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if data["pack"]["explore_realms"]:
+        problems = write_explore(out.parent, BUILT["pack"], data, BUILT["art"], BUILT["fonts"], BUILT["core"])
+        if problems:
+            for e in problems:
+                print(f"  - {e}", file=sys.stderr)
+            return 1
     print(f"{name}: wrote {out}, quest.json and quest.schema.json ({summary})")
     return 0
 

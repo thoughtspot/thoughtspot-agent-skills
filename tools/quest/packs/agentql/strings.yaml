@@ -115,3 +115,18 @@ fine_court: THE COURT FINES YOU {amount} GOLD
 fine_foe: THE DRAGON TAKES {amount} GOLD
 empty_court: THE COURT FINDS YOUR PURSE EMPTY
 empty_foe: THE DRAGON FINDS YOUR PURSE EMPTY
+
+# ---- The explore page (explore/), and classic mode's way back to it. ----
+explore_help: Arrow keys walk. Enter or Space talks to whoever you stand next to. S and M switch sound effects and music.
+explore_classic: Play the classic version
+explore_world: The map. Walk with the arrow keys; talk with Enter or Space.
+explore_close: Close (Esc)
+explore_pad_left: ←
+explore_pad_up: ↑
+explore_pad_down: ↓
+explore_pad_right: →
+explore_pad_talk: Talk
+explore_nobody: There is nobody close enough to talk to.
+explore_not_yet: Not yet. Someone else has something for you first.
+explore_no_webgl: This map needs WebGL, which this browser couldn't start. The classic version plays the same quests.
+explore_back: Back to the explore map

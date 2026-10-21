@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>__PAGE_TITLE__</title>
+<meta name="description" content="__PAGE_DESCRIPTION__">
+<!-- Written by build.py into <page folder>/explore/. Everything is local: no outside requests. -->
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="quest.css">
+<style>
+/* The explore page: the map on the monitor, a dialog over it for every question. */
+.monitor { max-width: 1000px; }
+#world { position: relative; width: 100%; aspect-ratio: 20 / 9; background: var(--glass); }
+#world canvas { width: 100% !important; height: 100% !important; image-rendering: pixelated; display: block; }
+#world:focus-within { outline: 1px dashed var(--dim); }
+.bar-top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 0 0 8px; }
+.bar-top a { color: var(--hot); }
+#toast { min-height: 1.4em; margin: 8px 0 0; color: var(--hot); }
+#pad { display: none; gap: 8px; justify-content: center; margin-top: 10px; }
+#pad button { font: inherit; font-size: 22px; min-width: 56px; min-height: 48px; background: var(--glass);
+              color: var(--phosphor); border: 1px solid var(--dim); border-radius: 4px; touch-action: none; }
+@media (pointer: coarse) { #pad { display: flex; } }
+dialog { max-width: min(900px, 94vw); width: 100%; max-height: 90vh; overflow: auto; background: var(--glass);
+         color: var(--phosphor); border: 1px solid var(--dim); padding: 16px 20px; }
+dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
+#close { float: right; font: inherit; background: none; color: var(--dim); border: 1px solid var(--rule); cursor: pointer; }
+#nogl { display: none; }
+@media (prefers-reduced-motion: reduce) { #world canvas { transition: none; } }
+</style>
+</head>
+<body>
+<p class="sr-only" id="live" aria-live="polite"></p>
+<div class="monitor"><div class="screen">
+  <div class="bar-top"><span id="help"></span><a id="classic" href="../"></a></div>
+  <div id="world" tabindex="0" aria-label=""></div>
+  <p id="toast" role="status"></p>
+  <p id="nogl"></p>
+  <div id="pad" role="group">
+    <button type="button" data-key="left"></button><button type="button" data-key="up"></button>
+    <button type="button" data-key="down"></button><button type="button" data-key="right"></button>
+    <button type="button" data-key="talk"></button>
+  </div>
+  <div class="sound" role="group" aria-label="Sound">
+    <button type="button" id="sound-sfx" aria-pressed="true"></button>
+    <button type="button" id="sound-music" aria-pressed="false"></button>
+  </div>
+</div></div>
+<dialog id="dialog" aria-labelledby="dialog-title">
+  <button type="button" id="close"></button>
+  <h2 class="sr-only" id="dialog-title"></h2>
+  <div class="screen" id="screen"></div>
+</dialog>
+<pre class="sr-only" id="log"></pre>
+<script src="phaser.min.js"></script>
+<script src="core.js"></script>
+<script src="explore.js"></script>
+</body>
+</html>

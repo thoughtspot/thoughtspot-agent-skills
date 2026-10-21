@@ -218,6 +218,41 @@ explore page would read differently from the check:
 finished, every out-of-order interaction is refused, and a test pins that the machine asks for the
 steps in exactly the order `maps.py` walks.
 
+## The explore front end (prototype)
+
+When a pack lists `explore.realms`, the build also writes `<page folder>/explore/`: a page where
+you walk the overworld and a realm's map and talk to whoever you stand next to. Every question
+opens in a dialog drawn by the same `core/60-screens.js` as the classic page, and the same
+`Quest.machine` decides what happens, so the two pages keep one save. A portal to a realm without a
+map opens that realm in the classic page (`../#realm=<id>&from=explore`, which starts at its gate
+and shows a link back to the map).
+
+```
+explore/index.html, explore/explore.js ─┐
+core/*.js, core/quest.css, fonts/       ─┤                 ┌─► explore/index.html, explore.js, core.js, quest.css, fonts.css
+vendor/phaser-arcade-physics.min.js     ─┼─► build.py ─────┼─► explore/phaser.min.js
+packs/agentql/tiles/, maps/*.tmj        ─┘                 └─► explore/art.json, tiles.json, tiles/, maps/
+```
+
+- **Everything is local** and the folder must stay under 3 MB (about 1.4 MB today). No outside
+  requests: the fonts, Phaser and the art are all copied in.
+- **Phaser** 4.2.1 (MIT) is vendored in `vendor/`: `package.json` pins the release (Dependabot
+  watches it), `phaser.sha256` records the file's hash, and the build refuses a file that matches
+  neither. To update: `npm pack phaser@<version>`, copy `dist/phaser-arcade-physics.min.js`, and
+  update the hash, `package.json` and `package-lock.json` together.
+- **Tiles** are from Kenney's 1-Bit Pack (CC0, `tiles/LICENSE-kenney.txt`), tinted amber at run
+  time, which needs WebGL; without it the page offers the classic version. `tiles/tiles.json` names
+  each frame (floor, wall, player, the five roles, exit, gate, portal).
+- **Play:** arrow keys or the touch pad walk; Enter, Space or the pad's talk button talks; number
+  keys pick in a dialog; Esc closes it ("not now"; the step waits). S and M switch sound.
+- **Checks:** the build checks the maps (above) and the vendored Phaser; `tests/play_map.js` walks
+  each map through the machine with no canvas. In a real browser,
+  `python3 tools/quest/tests/smoke_explore.py` builds the site, serves it, and plays each
+  explorable realm in headless Chrome (`explore/#smoke=<realm>`): locked for a fresh player, the
+  map loads, every step talked to in order, the gate shut exactly until its steps are done, the
+  realm saved. CI has no browser yet, so this is run by hand; keyboard, touch, screen reader and
+  cross-browser checks are a manual list in the PR.
+
 ## When the build fails
 
 `build.py` refuses to build when the pack no longer holds together, or no longer matches its
@@ -238,6 +273,9 @@ sources:
 | `art/classic/….txt: not used` | an art file the page never reads, or a scene for a realm that doesn't exist or has halls (a realm of halls shows its crown) | remove it, or fix its name |
 | `strings.yaml: '…' is not used by the page, the engine or a plugin` | a string nothing reads (often a typo, or one a plugin reads without listing it in `STRINGS`) | remove it, or list it in the plugin's `STRINGS` |
 | `maps/….tmj: …` (for example `can't be reached when the game waits on …`, `must be exactly one tile on the grid`, `the map's edge must all be wall`, `step … needs exactly one object`, `is external; embed it`) | a map doesn't bind to the content, or something on it can't be reached | fix the map in Tiled; the message names the object |
+| `vendor/phaser-arcade-physics.min.js: its SHA-256 doesn't match phaser.sha256` or `package.json pins phaser …, the vendored file is …` | the vendored Phaser was changed or updated only in part | update the file, its hash and `package.json` together (see the explore front end) |
+| `explore/: … bytes is over the 3,000,000-byte budget` | the explore folder grew too big (usually art or maps) | shrink the tiles or maps |
+| `tiles/tiles.json: an explorable pack names its tile frames here` | a pack lists `explore.realms` but has no tile index | add `tiles/tiles.json` |
 | `realm …: the classic page plays either halls or one encounter per realm` | a realm with halls and an encounter, or two encounters | split it into realms |
 | `pack.yaml: …` (for example `unknown key`, `unlock must be one of`, `pane …: label '…' is not in strings.yaml`, `pane id '…' is also a content key`) | the manifest is malformed | fix `pack.yaml`; the message names the rule |
 | `packs … and … share storage_key '…'` (or `id`, `publish_path`) | two games would overwrite each other's saves or Pages folder | give each pack its own |
