@@ -3348,6 +3348,7 @@ def test_a_map_draws_with_the_atlas_the_page_draws(tmp_path, monkeypatch):
 # ---- PR 7: chests, barrels, hoards, weapons, a door per realm -------------------------------------
 
 FUN_ITEMS = {"sword": {"frame": 1, "kind": "weapon"}, "gem": {"frame": 2, "kind": "treasure"}}
+FUN_NPCS = {"elder": 3}
 
 
 def _fun_cave(tmp_path, extra, rows=CAVE_ROWS, walls=None):
@@ -3355,7 +3356,7 @@ def _fun_cave(tmp_path, extra, rows=CAVE_ROWS, walls=None):
     cave = _tmj(rows, objects, CAVE_GATE)
     pack, data = _explorable(tmp_path, cave=cave)
     (pack.dir / "tiles").mkdir(exist_ok=True)
-    (pack.dir / "tiles/tiles.json").write_text(json.dumps({"items": FUN_ITEMS}), encoding="utf-8")
+    (pack.dir / "tiles/tiles.json").write_text(json.dumps({"items": FUN_ITEMS, "npcs": FUN_NPCS}), encoding="utf-8")
     return MAPS.check_maps(pack.dir, data)
 
 
@@ -3436,3 +3437,37 @@ def test_the_packs_maps_have_fun_in_them():
     frames = json.loads((PACK_DIR / "tiles/tiles.json").read_text(encoding="utf-8"))
     data, _ = B.compile_pack(B.Pack("agentql"))
     assert set(frames["portals"]) == {r["id"] for r in data["realms"]} and len(set(frames["portals"].values())) == len(data["realms"])
+
+
+
+@pytest.mark.parametrize("props,needle", [
+    ({"look": "elder", "says": "claim_true"}, None),                     # a line the pack has
+    ({"look": "elder", "about": "shore"}, None),                         # a realm, told from its content
+    ({"look": "elder", "says": "no_such_line"}, "must name lines in strings.yaml"),
+    ({"look": "elder", "about": "moon"}, "about='moon' is not a realm"),
+    ({"look": "goblin", "says": "claim_true"}, "is not one of tiles/tiles.json's npcs"),
+    ({"look": "elder"}, "needs look, and either says or about"),
+    ({"look": "elder", "says": "claim_true", "about": "shore"}, "needs look, and either says or about"),
+])
+def test_an_npc_says_lines_the_pack_has(tmp_path, props, needle):
+    errors = _fun_cave(tmp_path, {"n": ("npc", props)}, _rows((3, 4, "n")))
+    assert (errors == []) if needle is None else any(needle in e for e in errors), errors
+
+
+def test_an_npc_never_blocks_the_quest_and_can_be_reached(tmp_path):
+    # parked in the one way to the gate: the quest can't be finished
+    errors = _fun_cave(tmp_path, {"n": ("npc", {"look": "elder", "says": "claim_true"})}, _rows((7, 3, "n"), (7, 2, "#"), (7, 4, "#")))
+    assert any("can't be reached when the game waits on the_rune:foe" in e for e in errors), errors
+    # walled in where nobody can talk to it
+    errors = _fun_cave(tmp_path / "b", {"n": ("npc", {"look": "elder", "says": "claim_true"})}, _rows((10, 1, "n"), (9, 1, "#"), (10, 2, "#")))
+    assert any("can't be reached, even once the quest is done" in e for e in errors), errors
+
+
+def test_the_lines_npcs_say_count_as_used_and_needed(tmp_path, monkeypatch):
+    assert {"npc_elder_walk", "npc_miner_barrel"} <= MAPS.npc_lines(PACK_DIR)
+    packs = _copy_packs(tmp_path)
+    f = packs / "agentql/strings.yaml"
+    f.write_text(f.read_text(encoding="utf-8").replace("npc_miner_barrel:", "npc_miner_barrels:"), encoding="utf-8")
+    monkeypatch.setattr(B, "PACKS", packs)
+    errors = B.build(check=True)[3]
+    assert any("the classic page needs 'npc_miner_barrel'" in e for e in errors), errors

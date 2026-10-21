@@ -209,7 +209,10 @@ explore page would read differently from the check:
     `barrel roll=left|right|up|down`, and `hoard loot=<item>,…` on the same tile as a barrel,
     hidden until it rolls. Items are `tiles.json`'s `items`; a barrel rolls one tile, onto open
     floor. The walk treats a barrel as solid where it stands and where it rolls to, so the quest
-    never depends on it, and every chest, barrel and hoard must be reachable once the quest is done.
+    never depends on it, and every chest, barrel and hoard must be reachable once the quest is done;
+  - someone to talk to, also never a step: `npc look=<who>` (`tiles.json`'s `npcs`) with either
+    `says=<line>,…` (keys in `strings.yaml`) or `about=<realm id>` (the realm told from its own
+    name and `covers`, so it stays true as the content changes).
 - **Steps:** a step id is `<encounter id>:<merchant|guide|compiler|foe|reward>` or
   `hall:<hall id>`. Every step of a realm has exactly one object on its map.
 - **Reachability, in the game's order:** the game plays a realm's steps in one order (halls, then
@@ -264,7 +267,9 @@ packs/agentql/tiles/, maps/*.tmj        ─┘                 └─► explore
   `tiles.json` names; others come as loot, and X (or the pad's Weapon) switches the one in your
   hand, which the foe's first question mentions. Loot never touches gold or the quest: it is saved
   apart, under `<storage key>-explore`. Each realm's portal is its own door (`tiles.json`'s
-  `portals`), and every item's name is `item_<id>` in `strings.yaml`.
+  `portals`), and every item's name is `item_<id>` in `strings.yaml`. Talk to an npc to hear its
+  next line (in the toast, which screen readers read); a tie between two things beside you goes to
+  the one you face.
 - **Motion:** the player faces the way it walks and bobs a pixel each step; the merchant, guide
   and foe breathe; maps fade in. With reduced motion on, none of it.
 - **Screenshots:** `python3 tools/quest/tests/shoot_maps.py <folder>` saves every map as a player

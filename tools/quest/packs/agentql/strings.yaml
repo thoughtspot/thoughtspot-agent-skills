@@ -144,6 +144,12 @@ explore_hoard_empty: The troll's hoard is empty now.
 explore_weapon: "You ready the {weapon}."
 explore_face_foe: "You face it with your {weapon}."
 explore_hud_kit: "{weapon} · LOOT {n}"
+explore_npc_about: "A traveller: Through that door lies {realm}. {covers}"
+npc_elder_walk: "Elder Wren: The arrow keys walk you about, and Enter or Space talks to whoever is beside you."
+npc_elder_order: "Elder Wren: Each door leads to a realm. Start with the Kingdom of Law; the others open once you have studied there."
+npc_elder_fun: "Elder Wren: X changes your weapon. Chests and barrels hide things, and none of it costs you any gold."
+npc_miner_gate: "Old miner: The gate to the east stays shut until the Forge has done its work."
+npc_miner_barrel: "Old miner: That barrel in the far corner never sat right. Give it a shove."
 item_sword: sword
 item_dagger: dagger
 item_axe: axe
