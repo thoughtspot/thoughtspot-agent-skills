@@ -64,6 +64,7 @@ import importlib.util
 import json
 import pathlib
 import re
+import shutil
 import sys
 
 import yaml
@@ -853,6 +854,8 @@ def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fo
     """The explore front end, in <page folder>/explore/: its page, script, the shared core and look,
     the fonts, Phaser, the art, and the pack's tiles and maps. Everything is local."""
     ex = out_dir / "explore"
+    if ex.is_dir():
+        shutil.rmtree(ex)    # only what this build writes: no files left over from an older one
     (ex / "maps").mkdir(parents=True, exist_ok=True)
     (ex / "tiles").mkdir(parents=True, exist_ok=True)
     page = (EXPLORE_DIR / "index.html").read_text(encoding="utf-8")
@@ -865,6 +868,7 @@ def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fo
     (ex / "quest.css").write_text(CORE_CSS.read_text(encoding="utf-8"), encoding="utf-8")
     (ex / "fonts.css").write_text(fonts_css, encoding="utf-8")
     (ex / "phaser.min.js").write_bytes((VENDOR / "phaser-arcade-physics.min.js").read_bytes())
+    (ex / "phaser.LICENSE.md").write_bytes((VENDOR / "LICENSE-phaser.md").read_bytes())   # MIT: the notice ships with it
     (ex / "art.json").write_text(json.dumps(art, ensure_ascii=False), encoding="utf-8")
     (ex / "tiles.json").write_text((pack.dir / "tiles" / "tiles.json").read_text(encoding="utf-8"), encoding="utf-8")
     for f in (pack.dir / "tiles").iterdir():
@@ -876,10 +880,11 @@ def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fo
     return [f"explore/: {size:,} bytes is over the {EXPLORE_BUDGET:,}-byte budget"] if size > EXPLORE_BUDGET else []
 
 
-def classic_needs(template: str, core: str | None = None) -> tuple[set[str], set[str]]:
-    """What the front ends read from a pack: the classic page, the core it inlines, and the explore
-    page's script (its strings, for a pack with explorable realms)."""
-    explore = (EXPLORE_DIR / "explore.js").read_text(encoding="utf-8") if (EXPLORE_DIR / "explore.js").is_file() else ""
+def classic_needs(template: str, core: str | None = None, explore_page: bool = False) -> tuple[set[str], set[str]]:
+    """What the front ends read from a pack: the classic page, the core it inlines, and, for a pack
+    with explorable realms (`explore_page`), the explore page's script."""
+    js = EXPLORE_DIR / "explore.js"
+    explore = js.read_text(encoding="utf-8") if explore_page and js.is_file() else ""
     script = template.split("<script>", 1)[-1] + "\n" + (core_script() if core is None else core) + "\n" + explore
     strings = {k for arg in _STRING_CALL.findall(script) for k in re.findall(r'"([a-z0-9_]+)"', arg)}
     return strings | {"page_description"}, set(_ART_CALL.findall(script)) | {"map"}  # the head's description
@@ -915,7 +920,7 @@ def check_classic(pack: Pack, data: dict, art: dict, template: str, unused: bool
     """Everything the classic page reads must be in the pack, and the pack's art must all be used.
     `unused`: also refuse strings nothing reads (skipped when the compile already failed, since a
     broken trial can make a used string look unused)."""
-    strings, pieces = classic_needs(template, core)
+    strings, pieces = classic_needs(template, core, bool((data.get("pack") or {}).get("explore_realms")))
     scenes = {f"scene_{r['id']}" for r in data.get("realms") or [] if not r["halls"]}  # a realm of halls shows its crown
     errors = [f"strings.yaml: the classic page needs {k!r}" for k in sorted(strings - set(pack.strings))]
     used = strings | engine_strings(pack, load_plugins(pack.manifest.get("checks") or []), data)
@@ -950,7 +955,8 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
             if not (pack.dir / "tiles" / "tiles.json").is_file():
                 errors.append("tiles/tiles.json: an explorable pack names its tile frames here")
     try:
-        errors += denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent) + denylist.scan(CORE_DIR)
+        errors += (denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent) + denylist.scan(CORE_DIR)
+                   + denylist.scan(EXPLORE_DIR))
     except (OSError, ValueError) as e:  # fails closed: no list, or a list that isn't hashes
         errors.append(f"denylist: {e}")
     schema: dict = {}

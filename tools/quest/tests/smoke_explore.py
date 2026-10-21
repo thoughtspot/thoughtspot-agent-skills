@@ -3,7 +3,8 @@ serve it, open explore/#smoke=<realm> and read the page's log. The run must show
 for a fresh player (when the pack's unlock rule asks it), load its map, talk to every step's object
 in order with the gate shut until its steps are done, and save the realm as finished.
 
-Manual for now (design §4.6): CI has no browser. Playwright takes this over later.
+pytest runs it wherever Chrome is installed (GitHub's ubuntu-latest has it; CI fails without it).
+Playwright may take it over later (design §5).
     python3 tools/quest/tests/smoke_explore.py [realm id ...]   (default: every explorable realm)
 Chrome is found at $QUEST_CHROME, or the usual install paths. Exits non-zero on any failure."""
 from __future__ import annotations
@@ -26,12 +27,18 @@ sys.path.insert(0, str(HERE.parent))
 import build as B  # noqa: E402
 
 CHROMES = [os.environ.get("QUEST_CHROME", ""), "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-           shutil.which("google-chrome") or "", shutil.which("chromium") or ""]
+           shutil.which("google-chrome") or "", shutil.which("google-chrome-stable") or "", shutil.which("chromium") or ""]
+
+
+def find_chrome() -> str | None:
+    return next((c for c in CHROMES if c and pathlib.Path(c).exists()), None)
 
 
 def run(realm: str, site: pathlib.Path, port: int, chrome: str, profile: pathlib.Path) -> list[str]:
     url = f"http://127.0.0.1:{port}/{B.Pack(B.DEFAULT_PACK).publish_path}/explore/#smoke={realm}"
-    out = subprocess.run([chrome, "--headless=new", "--enable-unsafe-swiftshader", f"--user-data-dir={profile}",
+    # CI's Ubuntu runners don't allow Chrome's sandbox (user namespaces); the page is our own local build.
+    ci = ["--no-sandbox"] if os.environ.get("GITHUB_ACTIONS") == "true" else []
+    out = subprocess.run([chrome, "--headless=new", "--enable-unsafe-swiftshader", *ci, f"--user-data-dir={profile}",
                           "--virtual-time-budget=60000", "--dump-dom", url], capture_output=True, text=True, timeout=180)
     m = re.search(r'<pre[^>]*id="log"[^>]*>(.*?)</pre>', out.stdout, re.S)
     return html.unescape(m.group(1)).splitlines() if m else [f"ERROR no log in the page ({out.stderr[-300:]!r})"]
@@ -67,7 +74,7 @@ def check(realm: str, log: list[str], data: dict) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    chrome = next((c for c in CHROMES if c and pathlib.Path(c).exists()), None)
+    chrome = find_chrome()
     if not chrome:
         print("no Chrome found; set QUEST_CHROME", file=sys.stderr)
         return 2

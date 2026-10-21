@@ -237,21 +237,26 @@ packs/agentql/tiles/, maps/*.tmj        ─┘                 └─► explore
 - **Everything is local** and the folder must stay under 3 MB (about 1.4 MB today). No outside
   requests: the fonts, Phaser and the art are all copied in.
 - **Phaser** 4.2.1 (MIT) is vendored in `vendor/`: `package.json` pins the release (Dependabot
-  watches it), `phaser.sha256` records the file's hash, and the build refuses a file that matches
-  neither. To update: `npm pack phaser@<version>`, copy `dist/phaser-arcade-physics.min.js`, and
+  watches it), `phaser.sha256` records the file's hash, and the build refuses a file that fails
+  either check. Its MIT notice ships beside it (`explore/phaser.LICENSE.md`). To update: `npm pack phaser@<version>`, copy `dist/phaser-arcade-physics.min.js`, and
   update the hash, `package.json` and `package-lock.json` together.
 - **Tiles** are from Kenney's 1-Bit Pack (CC0, `tiles/LICENSE-kenney.txt`), tinted amber at run
   time, which needs WebGL; without it the page offers the classic version. `tiles/tiles.json` names
   each frame (floor, wall, player, the five roles, exit, gate, portal).
-- **Play:** arrow keys or the touch pad walk; Enter, Space or the pad's talk button talks; number
-  keys pick in a dialog; Esc closes it ("not now"; the step waits). S and M switch sound.
+- **Play:** arrow keys or the touch pad walk; Enter, Space or the pad's talk button talks to whoever
+  is next to you (up, down, left or right; the one the game waits on first), but only while the
+  map has focus, so links and buttons keep Enter and Space; number keys pick in a dialog; Esc
+  closes it ("not now"; the step waits). Standing by a portal names its realm and how you did
+  there. S and M switch sound.
 - **Checks:** the build checks the maps (above) and the vendored Phaser; `tests/play_map.js` walks
   each map through the machine with no canvas. In a real browser,
   `python3 tools/quest/tests/smoke_explore.py` builds the site, serves it, and plays each
   explorable realm in headless Chrome (`explore/#smoke=<realm>`): locked for a fresh player, the
   map loads, every step talked to in order, the gate shut exactly until its steps are done, the
-  realm saved. CI has no browser yet, so this is run by hand; keyboard, touch, screen reader and
-  cross-browser checks are a manual list in the PR.
+  realm saved, Enter on a link left alone, no request outside the site. pytest runs it wherever
+  Chrome is installed, CI included. The scripted play writes saves, so it runs only on a local
+  server (`127.0.0.1` or `localhost`). Touch, screen reader and cross-browser checks are a manual
+  list in the PR.
 
 ## When the build fails
 
