@@ -110,6 +110,7 @@ schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► ind
   itself, for any game: the hall's throne room (`hallScene`); the frames around the map and around a
   realm's name in its scene; the quote marks around a quest's question; the routes' `:` and ` → `;
   the `[n]` key hints, the `n/m` petition counter and the decree's numbering; the foe's `█░` bar;
+  the colon after each pane's screen-reader name; upper-casing realm and hall names in banners;
   its English `lang` and the sound group's label; and trimming a leading "The " from realm names in
   the routes. It makes **no outside
   requests** and runs from Pages, any static host, or a double-click.

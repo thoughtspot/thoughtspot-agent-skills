@@ -1882,6 +1882,15 @@ def test_wording_in_attributes_is_escaped():
     # the last realm's map entry opens the first realm instead
     (lambda h: h.replace('go: go({ screen: "realm", realm: i, flash: null })', 'go: go({ screen: "realm", realm: i === REALMS.length - 1 ? 0 : i, flash: null })'),
      'did not open from the map'),
+    # a realm that returns to the map without finishing (the round-2 hole)
+    (lambda h: h.replace('if (state.step >= e.points.length) state.screen = "victory"; }',
+                         'if (state.step >= e.points.length) state.screen = state.realm === REALMS.length - 1 ? "map" : "victory"; }'),
+     'left realm "isles" without reaching victory'),
+    (lambda h: h.replace('else if (lastHall) state.screen = "decree";', 'else if (lastHall) state.screen = "map";'),
+     'left realm "law" without reaching decree'),
+    (lambda h: h.replace(': go({ screen: "quest", enc: 0, step: 0, gold: 0, flash: null });',
+                         ': go({ screen: "quest", realm: 1, enc: 0, step: 0, gold: 0, flash: null });'),
+     'left realm "lake" without reaching victory'),
 ])
 def test_the_smoke_play_fails_a_realm_it_cannot_finish(tmp_path, break_it, needle):
     template = B.TEMPLATE.read_text(encoding="utf-8")
@@ -1960,3 +1969,56 @@ def test_the_soon_marker_comes_from_the_pack():
                          capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout) == ['Pin it. <span class="soon">Soon:</span> tomorrow', "Coming soon: x"]
+
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+@pytest.mark.parametrize("where", ["pane", "takeaway", "covers"])
+def test_content_using_a_placeholders_name_is_shown_as_written(tmp_path, where):
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    text = "group_aggregate(sum(sales), {state}, {}) and {amount} for {name}"
+    encounter = data["realms"][1]["encounters"][0]
+    if where == "pane":
+        encounter["panes"][0]["lines"].append(text)
+    elif where == "takeaway":
+        encounter["takeaway"] += " " + text
+    else:
+        data["realms"][1]["covers"] += " " + text
+    page = tmp_path / "index.html"
+    page.write_text(B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "", ART), encoding="utf-8")
+    r = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_a_games_own_undefined_does_not_hide_a_broken_screen(tmp_path):
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    data["realms"][1]["encounters"][0]["takeaway"] += " Dividing by zero is undefined."
+    page = tmp_path / "index.html"
+    page.write_text(B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "", ART), encoding="utf-8")
+    ok = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    broken = B.TEMPLATE.read_text(encoding="utf-8").replace('art("foe")', "ART.nothing")
+    page.write_text(B.render(broken, data, "", ART), encoding="utf-8")
+    r = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
+    assert r.returncode != 0 and '"undefined"' in r.stderr, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("value", ["None", "{1}", '"send_to"'])
+def test_a_plugins_strings_must_be_a_set_of_names(tmp_path, monkeypatch, value):
+    (tmp_path / "odd.py").write_text(f'NAME = "odd"\nSTRINGS = {value}\n', encoding="utf-8")
+    monkeypatch.setattr(B, "CHECKS", tmp_path)
+    with pytest.raises(ValueError, match="STRINGS must be a set"):
+        B.load_plugins(["odd"])
+
+
+def test_a_broken_trial_does_not_also_report_its_strings_unused(tmp_path, monkeypatch):
+    packs = _copy_packs(tmp_path)
+    content = packs / "agentql/content.yaml"
+    text = content.read_text(encoding="utf-8")
+    assert text.count("          - kind: claim") > 1
+    content.write_text(text.replace("          - kind: claim", "          - kind: clam"), encoding="utf-8")   # every claim broken
+    monkeypatch.setattr(B, "PACKS", packs)
+    errors = B.build(check=True)[3]
+    assert any("kind must be one of" in e for e in errors)
+    assert not any("is not used by the page" in e for e in errors), errors

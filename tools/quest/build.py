@@ -250,7 +250,7 @@ def load_plugins(names: list[str]) -> list:
         if getattr(mod, "NAME", None) != name:
             raise ValueError(f"checks/{name}.py must set NAME = {name!r}")
         strings = getattr(mod, "STRINGS", set())
-        if isinstance(strings, str) or not all(isinstance(k, str) for k in strings):
+        if not isinstance(strings, (set, frozenset, list, tuple)) or not all(isinstance(k, str) for k in strings):
             raise ValueError(f"checks/{name}.py: STRINGS must be a set of strings.yaml keys")
         if getattr(mod, "META", None) and not hasattr(mod, "meta"):
             raise ValueError(f"checks/{name}.py declares META but has no meta hook")
@@ -812,7 +812,8 @@ def classic_needs(template: str) -> tuple[set[str], set[str]]:
 def engine_strings(pack: Pack, plugins: list, data: dict) -> set[str]:
     """The strings the engine and plugins read: the claim buttons (when a hall asks a claim), pane
     labels and captions, and each plugin's STRINGS."""
-    claims = any(t["kind"] == "claim" for r in data.get("realms") or [] for h in r["halls"] for t in h["trials"])
+    claims = any(t.get("kind") == "claim" for r in data.get("realms") or [] for h in r.get("halls") or []
+                 for t in h.get("trials") or [])
     keys = {"claim_true", "claim_false"} if claims else set()
     for spec in pack.panes:
         if isinstance(spec, dict):
@@ -833,13 +834,16 @@ def classic_art(pack: Pack) -> tuple[dict, list[str]]:
     return art, errors
 
 
-def check_classic(pack: Pack, data: dict, art: dict, template: str) -> list[str]:
-    """Everything the classic page reads must be in the pack, and the pack's art must all be used."""
+def check_classic(pack: Pack, data: dict, art: dict, template: str, unused: bool = True) -> list[str]:
+    """Everything the classic page reads must be in the pack, and the pack's art must all be used.
+    `unused`: also refuse strings nothing reads (skipped when the compile already failed, since a
+    broken trial can make a used string look unused)."""
     strings, pieces = classic_needs(template)
     scenes = {f"scene_{r['id']}" for r in data.get("realms") or [] if not r["halls"]}  # a realm of halls shows its crown
     errors = [f"strings.yaml: the classic page needs {k!r}" for k in sorted(strings - set(pack.strings))]
     used = strings | engine_strings(pack, load_plugins(pack.manifest.get("checks") or []), data)
-    errors += [f"strings.yaml: {k!r} is not used by the page, the engine or a plugin" for k in sorted(set(pack.strings) - used)]
+    if unused:
+        errors += [f"strings.yaml: {k!r} is not used by the page, the engine or a plugin" for k in sorted(set(pack.strings) - used)]
     errors += [f"art/classic/{k}.txt: the classic page needs it" for k in sorted(pieces - set(art))]
     for r in data.get("realms") or []:  # the page plays a realm's halls, or its one encounter
         if r["halls"] and r["encounters"] or len(r["encounters"]) > 1:
@@ -874,7 +878,7 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
     art, art_errors = classic_art(pack)
     errors += art_errors
     if data:
-        errors += check_classic(pack, data, art, TEMPLATE.read_text(encoding="utf-8"))
+        errors += check_classic(pack, data, art, TEMPLATE.read_text(encoding="utf-8"), unused=not errors)
     if errors:
         return None, data, schema, errors
     fonts = font_faces()  # read even under --check, so a missing font file fails pre-commit too

@@ -3,8 +3,10 @@
 // shows the answer), every other screen moved on with its first button. A realm counts as played
 // only when it opens from the map, reaches its decree (if it has halls) or victory (if it has an
 // encounter), and returns to the map. Every screen visited, the last included, must render
-// something, with no "undefined" (unless the game's own data says it) and no unfilled {name} the
-// pack's strings use as a placeholder. Prints the screens visited and exits non-zero on any failure.
+// something, with no "undefined" (apart from where the game's own data or art says it), and no
+// string may be shown with a {name} the page didn't fill (recorded inside the page's fill(), so
+// content that contains braces is never mistaken for one). Prints the screens visited and exits
+// non-zero on any failure.
 //   node smoke_page.js <built index.html>
 "use strict";
 const fs = require("fs");
@@ -25,19 +27,27 @@ const ctx = vm.createContext({
   localStorage: { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = v; } },
   setInterval: () => 0, clearInterval: () => {}, JSON, String, Number, parseInt, Object, Array, Math
 });
-vm.runInContext(js + "\n;globalThis.__state = () => state; globalThis.__actions = () => actions;", ctx);
+// Record every {name} the page's fill() leaves unfilled, where it happens.
+const FILL = "(m, k) => (Object.prototype.hasOwnProperty.call(v, k) ? String(v[k]) : m)";
+if (!js.includes(FILL)) { console.error("FAIL: the page's fill() has changed; update smoke_page.js"); process.exit(1); }
+vm.runInContext("globalThis.__misses = [];\n" + js.replace(FILL, "(m, k) => (Object.prototype.hasOwnProperty.call(v, k) ? String(v[k]) : (__misses.push(m), m))")
+                + "\n;globalThis.__state = () => state; globalThis.__actions = () => actions;", ctx);
 const fail = msg => { console.error(`FAIL: ${msg}`); process.exit(1); };
 const key = k => (listeners.keydown || []).forEach(fn => fn({ key: k, metaKey: false, ctrlKey: false, altKey: false,
                                                                 repeat: false, preventDefault() {} }));
-// Only names the strings use as placeholders can be left unfilled: content such as a formula's
-// {date} is shown as written.
-const placeholders = new Set(Object.values(quest.pack.strings).flatMap(t => t.match(/\{\w+\}/g) || []));
-const dataSaysUndefined = /\bundefined\b/.test(block("quest-data"));
+// "undefined" is a bug unless the game's own text says it: those texts (escaped as the page shows
+// them) are removed from the screen before looking.
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const texts = [];
+const walk = x => (typeof x === "string" ? texts.push(x) : x && typeof x === "object" && Object.values(x).forEach(walk));
+walk(quest); walk(JSON.parse(block("classic-art")));
+const saysUndefined = texts.filter(t => /\bundefined\b/.test(t)).flatMap(t => [esc(t), ...esc(t).split("\n")])
+  .sort((a, b) => b.length - a.length);
 const check = s => {
   if (!screen.innerHTML.trim()) fail(`screen "${s}" rendered nothing`);
-  if (!dataSaysUndefined && /\bundefined\b/.test(screen.innerHTML)) fail(`screen "${s}" shows "undefined"`);
-  const unfilled = (screen.innerHTML.match(/\{\w+\}/g) || []).find(m => placeholders.has(m));
-  if (unfilled) fail(`screen "${s}" shows an unfilled ${unfilled}`);
+  const shown = saysUndefined.reduce((h, t) => h.split(t).join(""), screen.innerHTML);
+  if (/\bundefined\b/.test(shown)) fail(`screen "${s}" shows "undefined"`);
+  if (ctx.__misses.length) fail(`screen "${s}" shows an unfilled ${ctx.__misses[0]}`);
 };
 const QUESTIONS = new Set(["trials", "quest", "battle"]);
 const open = quest.realms.map((r, i) => (r.sealed ? -1 : i)).filter(i => i >= 0);
