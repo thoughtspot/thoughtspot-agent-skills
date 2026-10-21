@@ -2067,13 +2067,16 @@ def test_the_machine_refuses_what_a_screen_does_not_offer():
         [at("title"), null],
         [at("title"), { type: "teleport" }],
         [at("nowhere"), { type: "map" }],                                   // a screen the machine doesn't know
+        [at("realm", { realm: 1 }), { type: "interact", step: QUEST.realms[1].encounters[0].id + ":merchant" }],   // not yet entered
+        [at("map"), { type: "interact", step: QUEST.realms[1].encounters[0].id + ":merchant" }],
+        [at("quest", { realm: 1 }), { type: "interact", step: QUEST.realms[1].encounters[0].id + ":guide" }],      // out of order
         [at("battle", { realm: 1 }), { type: "answer", option: QUEST.realms[1].encounters[0].points[0].options.length }],
         [at("trials", { realm: 0 }), { type: "answer", option: QUEST.realms[0].halls[0].trials[0].options.length }],
         [at("quest", { realm: 1 }), { type: "answer", option: QUEST.realms[1].encounters[0].path.options.length }],
       ];
       console.log(JSON.stringify(tries.map(([s, a]) => { const o = m.act(s, a, {}); return [!!o.refused, o.state === s, o.effects.length]; })));
     """)
-    assert got == [[True, True, 0]] * 16
+    assert got == [[True, True, 0]] * 19
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
@@ -2120,6 +2123,8 @@ def test_the_core_carries_no_agentql_wording():
     core = B.core_script()
     for word in ("AgentQL", "ThoughtSpot", "Wizard", "Forge", "Dragon", "dragon", "Kingdom of Law", "Spotter"):
         assert word not in core, word
+    # ...and "merchant" (pack wording) only as that object type, quoted.
+    assert re.sub(r'"merchant"|:merchant`', "", core).count("merchant") == 0
 
 
 @pytest.mark.parametrize("bad", ["x = '</script>';", "// <!-- a comment", "x = '</SCRIPT >';"])
@@ -2388,6 +2393,7 @@ def _tmj(rows: list[str], objects: dict[str, tuple[str, dict]], gates: list[tupl
         n += 1
     return {"type": "map", "width": w, "height": h, "tilewidth": TILE, "tileheight": TILE, "orientation": "orthogonal",
             "layers": [{"type": "tilelayer", "name": "walls", "width": w, "height": h, "data": data},
+                       {"type": "tilelayer", "name": "floor", "width": w, "height": h, "data": [0] * (w * h)},
                        {"type": "objectgroup", "name": "objects", "objects": objs}],
             "tilesets": [{"firstgid": 1, "name": "tiles", "image": image, "tilewidth": TILE, "tileheight": TILE,
                           "imagewidth": TILE, "imageheight": TILE, "tilecount": 1, "columns": 1}]}
@@ -2436,15 +2442,46 @@ def _spawn_in_wall():
 
 @pytest.mark.parametrize("make,needle", [
     # walls off the compiler, so its gate never opens either
-    (lambda: _tmj(["############", "#S.M.G..#..#", "###.....#F.#", "#.C#.......#", "###..X..#R.#", "############"],
-                  CAVE_OBJECTS, CAVE_GATE), "(compiler): can't be reached from the spawn"),
+    (lambda: _tmj(["############", "#S.M.G..#..#", "#.......#F.#", "##........##", "#C#..X..#R.#", "############"],
+                  CAVE_OBJECTS, CAVE_GATE), "(compiler): can't be reached when the game waits on the_rune:compiler"),
     # the spawn in a wall
     (_spawn_in_wall, "the spawn is outside the map, in a wall, or on a solid object"),
     # a solid character parked in the one-tile way into the foe's room
     (lambda: _tmj(["############", "#S.M....#..#", "#.......#F.#", "#.C.....G..#", "#X......#R.#", "############"],
-                  CAVE_OBJECTS, []), "(foe): can't be reached from the spawn"),
+                  CAVE_OBJECTS, []), "(foe): can't be reached when the game waits on the_rune:foe"),
     # a gate that needs a step that is only behind it
-    (lambda: _tmj(CAVE_ROWS, CAVE_OBJECTS, [("the_rune:foe", [(8, 3)])]), "never opens (it needs the_rune:foe"),
+    (lambda: _tmj(CAVE_ROWS, CAVE_OBJECTS, [("the_rune:foe", [(8, 3)])]),
+     "(foe): can't be reached when the game waits on the_rune:foe (still shut"),
+    # the compiler behind a gate that needs the foe, which the game asks for only after the compiler:
+    # every step is REACHABLE once the gate opens, but no player can ever open it (review of PR 4, B1)
+    (lambda: _tmj(["############", "#S.M.G..#C.#", "#.......#..#", "#.F.......##", "#X......#R.#", "############"],
+                  CAVE_OBJECTS, [("the_rune:foe", [(8, 3)])]),
+     "(compiler): can't be reached when the game waits on the_rune:compiler"),
+    # the merchant, the first step, behind a gate that needs the compiler
+    (lambda: _tmj(["############", "#S.G.C..#M.#", "#.......#..#", "#.F.......##", "#X......#R.#", "############"],
+                  CAVE_OBJECTS, [("the_rune:compiler", [(8, 3)])]),
+     "(merchant): can't be reached when the game waits on the_rune:merchant"),
+    # a gate needs two steps: one done is not enough (all, not any)
+    (lambda: _tmj(["############", "#S.M.G..#F.#", "#.......#..#", "#.C.......##", "#X......#R.#", "############"],
+                  CAVE_OBJECTS, [("the_rune:compiler,the_rune:reward", [(8, 3)])]),
+     "(foe): can't be reached when the game waits on the_rune:foe"),
+    # two one-tile gates: the second still blocks the way round
+    (lambda: _tmj(["############", "#S.M.G..#F.#", "#.......#..#", "#.C........#", "#X......#R.#", "############"],
+                  CAVE_OBJECTS, [("the_rune:reward", [(8, 3)]), ("the_rune:reward", [(9, 3)])]),
+     "(foe): can't be reached when the game waits on the_rune:foe"),
+    # the only way to the foe is round the outside of the map
+    (lambda: _tmj(["S.M.G.#F", "C.....#.", "X.....#R", "......#."], CAVE_OBJECTS, []),
+     "(foe): can't be reached when the game waits on the_rune:foe"),
+    # the merchant or the exit, solid, parked in the one doorway
+    (lambda: _tmj(["############", "#S...G..#..#", "#.......#F.#", "#.C.....M..#", "#X......#R.#", "############"],
+                  CAVE_OBJECTS, []), "(foe): can't be reached when the game waits on the_rune:foe"),
+    (lambda: _tmj(["############", "#S.M.G..#..#", "#.......#F.#", "#.C.....X..#", "#.......#R.#", "############"],
+                  CAVE_OBJECTS, []), "(foe): can't be reached when the game waits on the_rune:foe"),
+    # the exit walled off: a player must always be able to leave
+    (lambda: _tmj(["############", "#S.M.G..#F.#", "#.......#..#", "##C.......##", "X#......#R.#", "############"],
+                  CAVE_OBJECTS, []), "(exit): can't be reached from the spawn"),
+    # a gate over the spawn
+    (lambda: _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE + [("the_rune:reward", [(1, 1)])]), "covers the spawn"),
 ])
 def test_an_unreachable_map_fails(tmp_path, make, needle):
     pack, data = _explorable(tmp_path, cave=make())
@@ -2482,11 +2519,11 @@ def test_the_overworld_needs_one_portal_per_realm(tmp_path, objects, needle):
 
 @pytest.mark.parametrize("edit,needle", [
     (lambda m: m["tilesets"][0].update(source="tiles.tsx"), "is external; embed it"),
-    (lambda m: m["layers"][1]["objects"][0].update(template="spawn.tx"), "uses a Tiled template"),
+    (lambda m: m["layers"][2]["objects"][0].update(template="spawn.tx"), "uses a Tiled template"),
     (lambda m: m["layers"][0].update(name="floor"), "exactly one tile layer named walls"),
     (lambda m: m["layers"][0].update(data="eJxjYGBgAAAABQAB"), "CSV, not base64"),
-    (lambda m: m["layers"][1]["objects"][1]["properties"][0].update(type="int", value=5), "must be a string"),
-    (lambda m: [o.update({"class": o.pop("type")}) for o in m["layers"][1]["objects"][:1]], "saved by Tiled 1.9"),
+    (lambda m: m["layers"][2]["objects"][1]["properties"][0].update(type="int", value=5), "must be a string"),
+    (lambda m: [o.update({"class": o.pop("type")}) for o in m["layers"][2]["objects"][:1]], "saved by Tiled 1.9"),
 ])
 def test_every_map_is_one_phaser_can_load(tmp_path, edit, needle):
     cave = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
@@ -2561,7 +2598,206 @@ def test_the_map_play_through_catches_a_broken_machine(tmp_path, edit, needle):
 def test_the_map_play_through_needs_every_step_on_the_map(tmp_path):
     pack, data = _explorable(tmp_path)
     cave = json.loads((pack.dir / "maps/cave.tmj").read_text(encoding="utf-8"))
-    cave["layers"][1]["objects"] = [o for o in cave["layers"][1]["objects"] if o["type"] != "compiler"]
+    cave["layers"][2]["objects"] = [o for o in cave["layers"][2]["objects"] if o["type"] != "compiler"]
     (pack.dir / "maps/cave.tmj").write_text(json.dumps(cave), encoding="utf-8")
     r = _play_map(tmp_path, pack, data)
     assert r.returncode != 0 and "the map has no object for step the_rune:compiler" in r.stderr
+
+
+
+# ---- review of PR 4: maps Phaser reads differently, and the rules each with a test that breaks it --
+
+def _layer(m, kind):
+    return next(l for l in m["layers"] if l["type"] == kind)
+
+
+def _obj(m, kind):
+    return next(o for o in _layer(m, "objectgroup")["objects"] if o["type"] == kind)
+
+
+@pytest.mark.parametrize("edit,needle", [
+    (lambda m: m.update(layers=[{"type": "group", "name": "g", "layers": m["layers"]}]), "is a group"),
+    (lambda m: _layer(m, "objectgroup").update(offsetx=80), "is offset"),
+    (lambda m: _layer(m, "tilelayer").update(offsety=16), "is offset"),
+    (lambda m: _layer(m, "tilelayer").update(width=6, height=12), "the walls layer must be 12x6"),
+    (lambda m: m.update(orientation="isometric"), "orientation must be orthogonal"),
+    (lambda m: m.update(infinite=True), "is infinite"),
+    (lambda m: _obj(m, "merchant").update(rotation=90), "must be an unrotated rectangle"),
+    (lambda m: _obj(m, "gate").update(polygon=[{"x": 0, "y": 0}, {"x": 16, "y": 0}, {"x": 0, "y": 16}]),
+     "must be an unrotated rectangle"),
+    (lambda m: _obj(m, "foe").update(gid=1), "insert tile objects as rectangles"),
+    (lambda m: _obj(m, "gate").update(width=TILE * 2), "must fill exactly one tile (the explore page blocks one"),
+    (lambda m: _layer(m, "objectgroup").update(name="Object Layer 1"), "one object layer, named objects"),
+    (lambda m: m["layers"].append({"type": "objectgroup", "name": "objects", "objects": []}), "one object layer, named objects"),
+    (lambda m: m["layers"].pop(1), "exactly the tile layers floor and walls"),
+    (lambda m: m["layers"][1].update(width=3), "tile layer 'floor' must be the map's size"),
+    (lambda m: m["tilesets"][0].update(name="kenney"), "one tileset, named tiles"),
+    (lambda m: m["tilesets"].append(dict(m["tilesets"][0], firstgid=2)), "one tileset, named tiles"),
+    (lambda m: _obj(m, "guide").update(properties=[]), "needs exactly the properties ['encounter']"),
+    (lambda m: _obj(m, "guide")["properties"][0].update(type="int"), "must be a string"),
+    (lambda m: _obj(m, "guide")["properties"][0].update(value=5), "must be a string"),
+    (lambda m: _obj(m, "gate")["properties"][0].update(value="nope:foe"), "requires nope:foe, which is not a step"),
+    (lambda m: _obj(m, "spawn").update(x=-TILE), "the spawn is outside the map"),
+    (lambda m: _obj(m, "spawn").update(x=_obj(m, "merchant")["x"], y=_obj(m, "merchant")["y"]), "on a solid object"),
+    (lambda m: m["layers"].insert(0, {"type": "imagelayer", "name": "sky"}), None),
+    (lambda m: _obj(m, "merchant").update(x="16px"), "must be numbers"),
+    (lambda m: _obj(m, "guide").update(width=TILE * 3), "must fill exactly one tile"),
+    (lambda m: _obj(m, "gate")["properties"][0].update(value=" , "), "requires names no step"),
+    (lambda m: _obj(m, "gate").update(x=TILE * 40), "is not wholly on the map"),
+    (lambda m: _obj(m, "foe").update(x=TILE * 40), "is outside the map"),
+    (lambda m: m["layers"].append(copy.deepcopy(_layer(m, "tilelayer"))), "exactly one tile layer named walls"),
+    (lambda m: _layer(m, "tilelayer")["data"].pop(), "the walls layer must be 12x6"),
+    (lambda m: _layer(m, "objectgroup")["objects"].append(dict(_obj(m, "spawn"), id=99, x=TILE * 2)), "needs exactly one spawn"),
+    (lambda m: _layer(m, "objectgroup")["objects"].remove(_obj(m, "spawn")), "needs exactly one spawn"),
+    (lambda m: _layer(m, "objectgroup")["objects"].append(dict(_obj(m, "exit"), id=98, x=TILE * 2)), "needs exactly one exit"),
+    (lambda m: m["layers"].append("walls"), "a layer is not a JSON object"),
+    (lambda m: m["tilesets"][0].update(image=5), "image 5 is not in the pack"),
+    (lambda m: m["tilesets"][0].update(image="/etc/hosts"), "is not in the pack"),
+    (lambda m: m["tilesets"][0].update(image="../pack.yaml"), "is not in the pack"),
+    (lambda m: m["tilesets"][0].update(image="../../../outside.png"), "is not in the pack"),
+])
+def test_a_map_phaser_would_read_differently_fails(tmp_path, edit, needle):
+    cave = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
+    edit(cave)
+    pack, data = _explorable(tmp_path, cave=cave)
+    (tmp_path / "outside.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    errors = MAPS.check_maps(pack.dir, data)
+    assert (errors == []) if needle is None else any(needle in e for e in errors), errors
+
+
+@pytest.mark.parametrize("doc", ["[]", "null", '"x"', "5"])
+def test_a_map_that_is_not_a_json_object_is_an_error_not_a_crash(tmp_path, doc):
+    pack, data = _explorable(tmp_path)
+    (pack.dir / "maps/cave.tmj").write_text(doc, encoding="utf-8")
+    assert any("not a Tiled map" in e for e in MAPS.check_maps(pack.dir, data))
+
+
+def test_flipped_tiles_are_walls_and_flags_alone_are_not(tmp_path):
+    cave = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
+    walls = _layer(cave, "tilelayer")["data"]
+    walls[0] = 1 | 0x80000000                       # a flipped wall tile is still a wall
+    walls[2 * 12 + 4] = 0x80000000                  # flags with no tile are empty floor
+    pack, data = _explorable(tmp_path, cave=cave)
+    m = MAPS.Map(pack.dir / "maps/cave.tmj", [])
+    assert (0, 0) in m.wall and (4, 2) not in m.wall
+
+
+@pytest.mark.parametrize("make,needle", [
+    (lambda: _tmj(["#######", "#S..#.#", "##A#B##"], OVER_OBJECTS), "(portal): can't be reached from the spawn"),
+    (lambda: _tmj(["#######", "#S..A.#", "##A#B##"], OVER_OBJECTS), "realm shore needs exactly one portal, has 2"),
+    (lambda: _tmj(OVER_ROWS, OVER_OBJECTS, [("the_rune:foe", [(3, 1)])]), "the overworld has no steps to open a gate"),
+])
+def test_the_overworld_rules_each_fail(tmp_path, make, needle):
+    pack, data = _explorable(tmp_path, over=make())
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any(needle in e for e in errors), errors
+
+
+@pytest.mark.parametrize("gone,needle", [("overworld", "maps/overworld.tmj: missing"), ("cave", "maps/cave.tmj: missing")])
+def test_a_missing_map_fails(tmp_path, gone, needle):
+    pack, data = _explorable(tmp_path)
+    (pack.dir / f"maps/{gone}.tmj").unlink()
+    assert any(needle in e for e in MAPS.check_maps(pack.dir, data))
+
+
+def test_other_files_in_maps_are_reported(tmp_path):
+    pack, data = _explorable(tmp_path)
+    for name in ("cave.tmx", "tiles.tsx", "notes.json"):
+        (pack.dir / "maps" / name).write_text("x", encoding="utf-8")
+    errors = MAPS.check_maps(pack.dir, data)
+    for name in ("cave.tmx", "tiles.tsx", "notes.json"):
+        assert any(f"maps/{name}: not used" in e for e in errors), (name, errors)
+    assert not any("tiles.png" in e for e in errors)
+
+
+def test_a_sealed_or_reserved_realm_cannot_be_explored(tmp_path):
+    pack, data = _explorable(tmp_path)
+    cave = next(r for r in data["realms"] if r["id"] == "cave")
+    cave["sealed"] = True
+    assert any("realm cave is sealed" in e for e in MAPS.check_maps(pack.dir, data))
+    cave["sealed"], cave["id"] = False, "overworld"
+    assert any("'overworld' is reserved" in e for e in MAPS.check_maps(pack.dir, data))
+
+
+SHORE_ROWS = ["##########",
+              "#S..1.#..#",
+              "#.....#2.#",
+              "#X........",
+              "##########"]
+SHORE_OBJECTS = {"S": ("spawn", {}), "X": ("exit", {}), "1": ("throne", {"hall": "first"}), "2": ("throne", {"hall": "second"})}
+SHORE_GATE = [("hall:first", [(6, 3)])]
+
+
+def _explorable_shore(tmp_path, shore=None):
+    """The second pack with the shore explorable too: two halls, and a two-point battle in the cave."""
+    pack, _ = _explorable(tmp_path)
+    content = (pack.dir / "content.yaml").read_text(encoding="utf-8")
+    hall = content[content.index("      - id: first"):content.index("    decree:")]
+    content = content.replace("    decree:", hall.replace("id: first", "id: second").replace("The First Hall", "The Second Hall") + "    decree:")
+    point = content[content.index("      - kind: choice\n        rune: [leaf]"):content.index("    takeaway:")]
+    content = content.replace("    takeaway:", point.replace("What is the second part?", "And the first?") + "    takeaway:")
+    (pack.dir / "content.yaml").write_text(content, encoding="utf-8")
+    manifest = pack.dir / "pack.yaml"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace("explore: {realms: [cave]}", "explore: {realms: [shore, cave]}"),
+                        encoding="utf-8")
+    (pack.dir / "maps/shore.tmj").write_text(json.dumps(shore or _tmj(SHORE_ROWS, SHORE_OBJECTS, SHORE_GATE)), encoding="utf-8")
+    pack = B.Pack("second", pack.dir.parent)
+    data, errors = B.compile_pack(pack)
+    assert errors == [], errors
+    assert [len(h["trials"]) for h in data["realms"][0]["halls"]] == [2, 2] and len(data["realms"][1]["encounters"][0]["points"]) == 2
+    return pack, data
+
+
+def test_a_realm_of_halls_maps_its_thrones(tmp_path):
+    pack, data = _explorable_shore(tmp_path)
+    assert MAPS.check_maps(pack.dir, data) == []
+    # the second throne behind a gate that needs itself
+    pack, data = _explorable_shore(tmp_path / "b", _tmj(SHORE_ROWS, SHORE_OBJECTS, [("hall:second", [(6, 3)])]))
+    assert any("(throne): can't be reached when the game waits on hall:second" in e for e in MAPS.check_maps(pack.dir, data))
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+@pytest.mark.parametrize("realm", ["shore", "cave"])
+def test_the_machine_plays_a_maps_steps_in_the_order_the_check_walks(tmp_path, realm):
+    # maps.py walks realm_steps; the machine must ask for exactly that order, halls included.
+    pack, data = _explorable_shore(tmp_path)
+    quest = tmp_path / "quest.json"
+    quest.write_text(json.dumps(data), encoding="utf-8")
+    r = subprocess.run(["node", str(HERE / "play_map.js"), str(quest), str(pack.dir / f"maps/{realm}.tmj"), realm],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = json.loads(r.stdout)
+    assert out["interactions"] == MAPS.realm_steps(next(x for x in data["realms"] if x["id"] == realm))
+    assert out["saves"] == [realm]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+@pytest.mark.parametrize("edit,needle", [
+    # the halls branch of expected()
+    (('case "hall": case "trials": return r.halls[s.hall] ? `hall:${r.halls[s.hall].id}` : null;',
+      'case "hall": case "trials": return r.halls[0] ? `hall:${r.halls[0].id}` : null;'), "never reached hall:second"),
+    (('case "hall": case "trials": return r.halls[s.hall] ? `hall:${r.halls[s.hall].id}` : null;',
+      'case "hall": return r.halls[s.hall] ? `hall:${r.halls[s.hall].id}` : null;'), "never reached"),
+    # interact must change nothing
+    (('case "interact": break;', 'case "interact": s.gold += 1; break;'), "changed the state or had effects"),
+    (('case "interact": break;', 'case "interact": sound("blip"); break;'), "changed the state or had effects"),
+    (('case "interact": break;', 'case "interact": s.flash = null; s.step = 0; break;'), "changed the state or had effects"),
+])
+def test_the_map_play_through_catches_the_machine_on_halls_and_interact(tmp_path, edit, needle):
+    pack, data = _explorable_shore(tmp_path)
+    quest = tmp_path / "quest.json"
+    quest.write_text(json.dumps(data), encoding="utf-8")
+    copy_dir = tmp_path / "quest_copy"
+    shutil.copytree(B.HERE / "core", copy_dir / "core")
+    (copy_dir / "tests").mkdir()
+    shutil.copy(HERE / "play_map.js", copy_dir / "tests/play_map.js")
+    f = copy_dir / "core/40-machine.js"
+    old, new = edit
+    assert f.read_text(encoding="utf-8").count(old) == 1, f"the machine changed; update this test's line: {old}"
+    f.write_text(f.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+    fails = []
+    for realm in ("shore", "cave"):
+        r = subprocess.run(["node", str(copy_dir / "tests/play_map.js"), str(quest), str(pack.dir / f"maps/{realm}.tmj"), realm],
+                           capture_output=True, text=True)
+        fails.append(r.returncode != 0 and needle in r.stderr)
+    assert any(fails), needle
