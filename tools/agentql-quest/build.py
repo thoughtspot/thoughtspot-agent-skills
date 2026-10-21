@@ -14,15 +14,16 @@ makes no outside requests and runs from GitHub Pages, any static host, or a doub
 data is also written beside the page as `quest.json`, the contract `quest.schema.json` describes,
 so another front end can play the same checked content without parsing the YAML or the capture.
 
-    python3 tools/agentql-quest/build.py                   # write tools/agentql-quest/dist/{index.html,quest.json}
-    python3 tools/agentql-quest/build.py --out _site/index.html   # quest.json lands beside it
+    python3 tools/agentql-quest/build.py                   # write tools/agentql-quest/dist/
+    python3 tools/agentql-quest/build.py --out _site/index.html   # quest.json and its schema land beside it
     python3 tools/agentql-quest/build.py --check           # validate only (tools/validate/check_agentql_quest.py)
 
 Fails when an encounter no longer matches the capture or the course: a lesson or Module the
-text names that the course no longer has, a missing or rejected case, AgentQL
-that differs by more than layout, an `sql` line that is no longer in the SQL exactly, or an
-`sql_count` that no longer holds; or data that no longer fits `quest.schema.json`. A recapture that changes what a lesson teaches therefore
-breaks the build instead of quietly teaching something false.
+text names that the course no longer has, a missing or rejected case, AgentQL that differs by
+more than layout, an `sql` line that is no longer in the SQL exactly, an `sql_count` that no
+longer holds, or a capture header that names a different Model from the one the AgentQL queries;
+or when the data no longer fits `quest.schema.json`. A recapture that changes what a lesson
+teaches therefore breaks the build instead of quietly teaching something false.
 """
 from __future__ import annotations
 
@@ -43,6 +44,7 @@ ENCOUNTERS = HERE / "encounters.yaml"
 TEMPLATE = HERE / "game.html"
 SCHEMA = HERE / "quest.schema.json"
 SCHEMA_VERSION = 1
+BESIDE = ("quest.json", "quest.schema.json")  # written next to the page, so --out may not name them
 FONT_DIR = HERE / "fonts"
 DEFAULT_OUT = HERE / "dist" / "index.html"
 PLACEHOLDER = "__QUEST_DATA__"
@@ -80,9 +82,9 @@ def parse_lesson_sql(text: str) -> tuple[str | None, dict[str, dict]]:
 
 
 def parse_capture_model(text: str) -> str | None:
-    """The Model the capture was taken on, from the header's "on the sample Model **`…`**"."""
-    m = re.search(r"Model \*\*`([^`]+)`\*\*", text)
-    return m.group(1) if m else None
+    """The Model the capture was taken on, from the header's "captured live on the sample Model **`…`**"."""
+    m = re.search(r"captured\s+live\s+on\s+the\s+sample\s+Model\s+\*\*`([^`]+)`\*\*", text)
+    return m.group(1).strip() if m else None
 
 
 def _norm(sql: str) -> str:
@@ -300,9 +302,14 @@ def _halls(r: dict, engines: dict, rid: str, errors: list[str]) -> list[dict]:
 
 
 def compile_quest(doc: dict, date: str | None, cases: dict[str, dict],
-                  model: str = "") -> tuple[dict, list[str]]:
-    """Turn encounters.yaml plus the capture into the game's data. Returns (data, errors)."""
+                  model: str | None) -> tuple[dict, list[str]]:
+    """Turn encounters.yaml plus the capture into the game's data. Returns (data, errors).
+
+    `model` is the Model the capture's header names (see parse_capture_model)."""
     errors: list[str] = []
+    model = (model or "").strip()
+    if not model:
+        errors.append("lesson-sql.md: no Model named in its header")
     who = doc.get("who_options") or {}
     missing = [k for k in WHO_ORDER if not who.get(k)]
     if missing:
@@ -318,6 +325,10 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict],
         built = _encounter(e, n, who, engines, cases, errors)
         if built:
             by_case[built["case"]] = built
+            # The dragon's caption names the header's Model: it must be the one this AgentQL queries.
+            if model and f'FROM "{model}"' not in cases[built["case"]]["agentql"]:
+                errors.append(f"{built['case']}: the capture header names Model {model!r}, "
+                              f"but this AgentQL does not query FROM \"{model}\"")
 
     realms, used, ids = [], set(), set()
     for r in doc.get("realms") or []:
@@ -371,8 +382,10 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict],
             "realms": realms, "routes": routes}, errors
 
 
-# The JSON Schema keywords quest.schema.json may use. Anything else fails, so the schema can
-# never lean on a rule this checker would silently skip (the repo has no jsonschema dependency).
+# The JSON Schema keywords quest.schema.json may use. The schema is checked first, whole, so it
+# can never lean on a rule this checker would silently skip (the repo has no jsonschema
+# dependency): an unknown keyword, an object that allows unlisted or optional fields, or an
+# unresolved $ref fails before any data is looked at.
 _SCHEMA_NOTES = {"$schema", "$id", "title", "description", "$defs"}
 _SCHEMA_RULES = {"type", "enum", "required", "properties", "additionalProperties", "items",
                  "minItems", "anyOf", "$ref"}
@@ -380,42 +393,97 @@ _JSON_TYPES = {"object": dict, "array": list, "string": str, "integer": int, "bo
                "null": type(None)}
 
 
-def check_schema(value, schema: dict, root: dict | None = None, where: str = "quest") -> list[str]:
-    """Check `value` against the subset of JSON Schema that quest.schema.json uses."""
-    root = root or schema
-    unknown = set(schema) - _SCHEMA_NOTES - _SCHEMA_RULES
+def lint_schema(node, root: dict, where: str = "#") -> list[str]:
+    """Problems with the schema itself: anything check_schema could not enforce exactly."""
+    def bad(msg: str) -> list[str]:
+        return [f"quest.schema.json {where}: {msg}"]
+    if not isinstance(node, dict):
+        return bad("every schema must be an object (boolean schemas are not supported)")
+    unknown = set(node) - _SCHEMA_NOTES - _SCHEMA_RULES
     if unknown:
-        return [f"quest.schema.json uses {sorted(unknown)}, which check_schema does not support"]
-    if "$ref" in schema:
-        ref = schema["$ref"]
-        if not ref.startswith("#/$defs/") or ref[8:] not in root.get("$defs", {}):
-            return [f"quest.schema.json: unknown $ref {ref!r}"]
-        return check_schema(value, root["$defs"][ref[8:]], root, where)
-    if "anyOf" in schema:
-        if not any(not check_schema(value, s, root, where) for s in schema["anyOf"]):
-            return [f"{where}: matches none of its allowed shapes"]
+        return bad(f"uses {sorted(unknown)}, which check_schema does not support")
     errors: list[str] = []
-    if "type" in schema:
-        t = _JSON_TYPES[schema["type"]]
-        # bool is an int in Python; JSON keeps them apart.
-        if not isinstance(value, t) or (t is int and isinstance(value, bool)):
-            return [f"{where}: expected {schema['type']}, got {type(value).__name__}"]
-    if "enum" in schema and value not in schema["enum"]:
+    t = node.get("type")
+    if "type" in node and (not isinstance(t, str) or t not in _JSON_TYPES):
+        errors += bad(f"type {t!r} is not supported (one of {sorted(_JSON_TYPES)})")
+    if "additionalProperties" in node and node["additionalProperties"] is not False:
+        errors += bad("only additionalProperties: false is supported")
+    if t == "object" or "properties" in node:
+        # A front end relies on the shape: every field present, nothing unlisted.
+        if t != "object" or "properties" not in node or node.get("additionalProperties") is not False:
+            errors += bad("an object needs type: object, properties and additionalProperties: false")
+        if set(node.get("required", [])) != set(node.get("properties", {})):
+            errors += bad("every property must be required")
+    if "enum" in node and not isinstance(node["enum"], list):
+        errors += bad("enum must be a list")
+    if "minItems" in node and (not isinstance(node["minItems"], int) or isinstance(node["minItems"], bool)):
+        errors += bad("minItems must be an integer")
+    if "$ref" in node:
+        ref = node["$ref"]
+        if not isinstance(ref, str) or not ref.startswith("#/$defs/") or ref[8:] not in root.get("$defs", {}):
+            errors += bad(f"unknown $ref {ref!r}")
+    for k, sub in (node.get("properties") or {}).items():
+        errors += lint_schema(sub, root, f"{where}/properties/{k}")
+    if "items" in node:
+        errors += lint_schema(node["items"], root, f"{where}/items")
+    for i, sub in enumerate(node.get("anyOf") or []):
+        errors += lint_schema(sub, root, f"{where}/anyOf/{i}")
+    if node is root:
+        for k, sub in (node.get("$defs") or {}).items():
+            errors += lint_schema(sub, root, f"#/$defs/{k}")
+    return errors
+
+
+def _same(a, b) -> bool:
+    """JSON equality: true and false are not 1 and 0, as they are to Python's ==."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    return a == b
+
+
+def _is_type(value, name: str) -> bool:
+    if isinstance(value, bool):
+        return name == "boolean"
+    if name == "integer":  # 2020-12: 1.0 is an integer
+        return isinstance(value, int) or (isinstance(value, float) and value.is_integer())
+    return isinstance(value, _JSON_TYPES[name])
+
+
+def check_schema(value, schema: dict) -> list[str]:
+    """Check `value` against quest.schema.json's subset of JSON Schema 2020-12."""
+    problems = lint_schema(schema, schema)
+    return problems or _check(value, schema, schema, "quest")
+
+
+def _check(value, schema: dict, root: dict, where: str) -> list[str]:
+    errors: list[str] = []
+    if "$ref" in schema:  # 2020-12: $ref applies alongside its siblings, it doesn't replace them
+        errors += _check(value, root["$defs"][schema["$ref"][8:]], root, where)
+    if "anyOf" in schema:
+        branches = [_check(value, s, root, where) for s in schema["anyOf"]]
+        if all(branches):
+            errors.append(f"{where}: matches none of its allowed shapes ({'; or '.join(b[0] for b in branches)})")
+    if "type" in schema and not _is_type(value, schema["type"]):
+        return errors + [f"{where}: expected {schema['type']}, got {type(value).__name__}"]
+    if "enum" in schema and not any(_same(value, e) for e in schema["enum"]):
         errors.append(f"{where}: {value!r} is not one of {schema['enum']}")
-    if isinstance(value, dict):
-        props = schema.get("properties", {})
+    if isinstance(value, dict) and "properties" in schema:
+        props = schema["properties"]
         errors += [f"{where}: missing {k!r}" for k in schema.get("required", []) if k not in value]
-        if schema.get("additionalProperties") is False:
-            errors += [f"{where}: {k!r} is not in quest.schema.json" for k in value if k not in props]
+        errors += [f"{where}: {k!r} is not in quest.schema.json" for k in value if k not in props]
         for k, v in value.items():
             if k in props:
-                errors += check_schema(v, props[k], root, f"{where}.{k}")
+                errors += _check(v, props[k], root, f"{where}.{k}")
     if isinstance(value, list):
         if len(value) < schema.get("minItems", 0):
             errors.append(f"{where}: needs at least {schema['minItems']} item(s)")
         if "items" in schema:
             for i, v in enumerate(value):
-                errors += check_schema(v, schema["items"], root, f"{where}[{i}]")
+                errors += _check(v, schema["items"], root, f"{where}[{i}]")
     return errors
 
 
@@ -505,9 +573,7 @@ def build(check: bool = False) -> tuple[str | None, dict, list[str]]:
     model = parse_capture_model(capture)
     raw = ENCOUNTERS.read_text(encoding="utf-8")
     doc = yaml.safe_load(raw) or {}
-    data, errors = compile_quest(doc, date, cases, model or "")
-    if not model:
-        errors.append("lesson-sql.md: no Model named in its header")
+    data, errors = compile_quest(doc, date, cases, model)
     errors += check_course_refs(raw, doc, *parse_learning_path(LEARNING_PATH.read_text(encoding="utf-8")))  # modules, lessons, titles
     errors += check_schema(data, json.loads(SCHEMA.read_text(encoding="utf-8")))
     if errors:
@@ -520,11 +586,15 @@ def build(check: bool = False) -> tuple[str | None, dict, list[str]]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=str(DEFAULT_OUT),
-                    help="output HTML (default: tools/agentql-quest/dist/index.html); quest.json is written beside it")
+                    help="output HTML (default: tools/agentql-quest/dist/index.html); "
+                         "quest.json and quest.schema.json are written beside it")
     ap.add_argument("--check", action="store_true", help="validate only; write nothing")
     ap.add_argument("--root", help="accepted for parity with the other validators; paths resolve from this script")
     args = ap.parse_args(argv)
 
+    if pathlib.Path(args.out).name in BESIDE:
+        print(f"agentql-quest: --out names the page; {pathlib.Path(args.out).name} is written beside it", file=sys.stderr)
+        return 2
     html, data, errors = build(check=args.check)
     if errors:
         print("agentql-quest: encounters.yaml no longer matches lesson-sql.md, the course or quest.schema.json:",
@@ -543,9 +613,9 @@ def main(argv: list[str] | None = None) -> int:
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
-    quest_json = out.with_name("quest.json")
-    quest_json.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"agentql-quest: wrote {out} and {quest_json.name} ({summary})")
+    out.with_name("quest.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    out.with_name("quest.schema.json").write_text(SCHEMA.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"agentql-quest: wrote {out}, quest.json and quest.schema.json ({summary})")
     return 0
 
 

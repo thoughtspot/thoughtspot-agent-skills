@@ -18,6 +18,7 @@ sys.path.insert(0, str(HERE.parent))
 import build as B  # noqa: E402
 
 CASE = "l3_all_products_left_join"
+MODEL = "(Sample) Retail - Apparel"  # the Model lesson-sql.md's header names
 
 
 @pytest.fixture(scope="module")
@@ -32,7 +33,7 @@ def doc():
 
 def _errors(doc, capture):
     date, cases = capture
-    return B.compile_quest(doc, date, cases)[1]
+    return B.compile_quest(doc, date, cases, MODEL)[1]
 
 
 def _encounter(doc):
@@ -52,9 +53,6 @@ def _built_encounters(data):
     return [e for r in data["realms"] for e in r["encounters"]]
 
 
-MODEL = "(Sample) Retail - Apparel"
-
-
 def _built_html(doc, capture):
     data, errors = B.compile_quest(doc, *capture, MODEL)
     assert errors == []
@@ -64,7 +62,7 @@ def _built_html(doc, capture):
 # ---- the committed content -------------------------------------------------------------------
 
 def test_committed_encounters_build_clean(doc, capture):
-    data, errors = B.compile_quest(doc, *capture)
+    data, errors = B.compile_quest(doc, *capture, MODEL)
     assert errors == []
     assert data["captured"] and re.fullmatch(r"\d{4}-\d{2}-\d{2}", data["captured"])
     first = data["realms"][0]
@@ -77,7 +75,7 @@ def test_main_check_passes_on_the_repo():
 
 
 def test_every_who_point_highlights_the_sql_it_asks_about(doc, capture):
-    data, _ = B.compile_quest(doc, *capture)
+    data, _ = B.compile_quest(doc, *capture, MODEL)
     src = {e["case"]: e for e in doc["encounters"]}
     for e in _built_encounters(data):
         for p, raw in zip(e["points"], src[e["case"]]["points"]):
@@ -86,7 +84,7 @@ def test_every_who_point_highlights_the_sql_it_asks_about(doc, capture):
 
 
 def test_who_answers_map_to_the_right_option(doc, capture):
-    data, _ = B.compile_quest(doc, *capture)
+    data, _ = B.compile_quest(doc, *capture, MODEL)
     e = next(x for x in _built_encounters(data) if x["case"] == CASE)
     expected = {"model": 0, "thoughtspot": 0, "agentql": 1}  # option 2, the AI, is never right
     for p, raw in zip(e["points"], _encounter(doc)["points"]):
@@ -147,7 +145,7 @@ def test_missing_and_rejected_cases_fail(doc, capture):
     rejected = next(cid for cid, c in cases.items() if c["sql"] is None)
     first = _encounter(doc)
     doc["encounters"] = [dict(copy.deepcopy(first), case="no_such_case"), dict(copy.deepcopy(first), case=rejected)]
-    errors = B.compile_quest(doc, date, cases)[1]
+    errors = B.compile_quest(doc, date, cases, MODEL)[1]
     assert any("no_such_case: not in lesson-sql.md" in e for e in errors)
     assert any(f"{rejected}: captured status was not SUCCESS" in e for e in errors)
 
@@ -189,7 +187,7 @@ def test_a_petition_must_go_to_a_known_engine(doc, capture):
 
 
 def test_trial_answers_compile_to_the_right_option(doc, capture):
-    data, _ = B.compile_quest(doc, *capture)
+    data, _ = B.compile_quest(doc, *capture, MODEL)
     law = [t for h in data["realms"][0]["halls"] for t in h["trials"]]
     for raw, t in zip(_law_trials(doc), law):
         if raw["kind"] == "claim":
@@ -245,14 +243,14 @@ def test_could_the_ai_write_it_needs_the_rejection_to_hold(doc, capture):
     assert _errors(doc, capture) == []
     date, cases = copy.deepcopy(capture)
     cases["l2_current_date_rejected"]["sql"] = "SELECT CURRENT_DATE"   # as if it now compiled
-    errors = B.compile_quest(doc, date, cases)[1]
+    errors = B.compile_quest(doc, date, cases, MODEL)[1]
     assert any("rejected_case 'l2_current_date_rejected' now compiles" in e for e in errors)
 
 
 # ---- the rendered page -----------------------------------------------------------------------
 
 def test_inlined_data_has_no_raw_markup_and_round_trips(doc, capture):
-    data, _ = B.compile_quest(doc, *capture)
+    data, _ = B.compile_quest(doc, *capture, MODEL)
     data["realms"][0]["halls"][0]["trials"][0]["why"] = "<!--<script></script>-->&amp;"
     html = B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "")
     body = html.split('<script id="quest-data" type="application/json">', 1)[1].split("</script>", 1)[0]
@@ -341,6 +339,114 @@ def test_the_schema_checker_refuses_keywords_it_cannot_enforce():
     assert "unknown $ref" in B.check_schema("x", {"$ref": "#/$defs/nope"})[0]
 
 
+def _one_field(field: dict, defs: dict | None = None) -> dict:
+    """A schema for {"a": ...} whose one field is `field`."""
+    return {"type": "object", "properties": {"a": field}, "required": ["a"], "additionalProperties": False,
+            "$defs": defs or {}}
+
+
+@pytest.mark.parametrize("field,defs,value,needle", [
+    # 2020-12 applies $ref AND its siblings: a rule beside $ref must not be skipped.
+    ({"$ref": "#/$defs/t", "minItems": 2}, {"t": {"type": "array"}}, [1], "needs at least 2 item(s)"),
+    ({"$ref": "#/$defs/t", "type": "string"}, {"t": {"enum": [1, "x"]}}, 1, "expected string, got int"),
+    ({"$ref": "#/$defs/t", "enum": ["x"]}, {"t": {"type": "string"}}, "y", "'y' is not one of ['x']"),
+    ({"description": "lines", "$ref": "#/$defs/t", "minItems": 1}, {"t": {"type": "array"}}, [], "needs at least 1"),
+    # JSON keeps true/false apart from 1/0; Python's == does not.
+    ({"enum": [1]}, {}, True, "True is not one of [1]"),
+    ({"enum": [0]}, {}, False, "False is not one of [0]"),
+    ({"type": "integer"}, {}, True, "expected integer, got bool"),
+    # A failed anyOf says why each shape failed.
+    ({"anyOf": [{"enum": ["all"]}, {"type": "array"}]}, {}, "some", "'some' is not one of ['all']; or "),
+])
+def test_the_schema_checker_applies_every_rule(field, defs, value, needle):
+    errors = B.check_schema({"a": value}, _one_field(field, defs))
+    assert any(needle in e for e in errors), errors
+
+
+def test_the_schema_checker_follows_2020_12_integers():
+    assert B.check_schema({"a": 1.0}, _one_field({"type": "integer"})) == []
+    assert B.check_schema({"a": 1.5}, _one_field({"type": "integer"})) != []
+
+
+@pytest.mark.parametrize("field,needle", [
+    ({"type": "object", "properties": {"b": {"type": "string"}}, "required": ["b"],
+      "additionalProperties": {"type": "string"}}, "only additionalProperties: false is supported"),
+    ({"type": "object"}, "an object needs type: object, properties and additionalProperties: false"),
+    ({"type": "object", "properties": {"b": {"type": "string"}}, "required": [], "additionalProperties": False},
+     "every property must be required"),
+    ({"type": "number"}, "type 'number' is not supported"),
+    ({"type": ["string", "null"]}, "is not supported"),
+    (True, "boolean schemas are not supported"),
+    ({"anyOf": [{"type": "array", "items": {"type": "integer", "minimum": 0}}]}, "uses ['minimum']"),
+    ({"$ref": "#/$defs/nope"}, "unknown $ref"),
+])
+def test_the_schema_checker_refuses_what_it_cannot_enforce(field, needle):
+    # Refused as a schema problem before any data is checked, never a silent pass or a traceback.
+    errors = B.check_schema({"a": "x"}, _one_field(field))
+    assert errors and all(e.startswith("quest.schema.json") for e in errors), errors
+    assert any(needle in e for e in errors), errors
+
+
+def test_unused_schema_definitions_are_checked_too():
+    # A definition no data reaches yet still can't hide an unenforceable rule.
+    schema = _one_field({"type": "string"}, {"later": {"type": "string", "pattern": "^x"}})
+    assert any("#/$defs/later" in e and "pattern" in e for e in B.check_schema({"a": "x"}, schema))
+
+
+# The gate itself (build() / main --check), not just check_schema, must fail on drift.
+
+def _gate_with(monkeypatch, tmp_path, *, schema=None, capture=None):
+    if schema is not None:
+        monkeypatch.setattr(B, "SCHEMA", tmp_path / "quest.schema.json")
+        B.SCHEMA.write_text(json.dumps(schema), encoding="utf-8")
+    if capture is not None:
+        monkeypatch.setattr(B, "LESSON_SQL", tmp_path / "lesson-sql.md")
+        B.LESSON_SQL.write_text(capture, encoding="utf-8")
+    return B.build(check=True)[2]
+
+
+def test_the_gate_fails_when_the_schema_changes_and_the_build_does_not(monkeypatch, tmp_path, schema, capsys):
+    drifted = copy.deepcopy(schema)
+    drifted["properties"]["title"] = {"type": "string"}
+    drifted["required"].append("title")
+    assert any("missing 'title'" in e for e in _gate_with(monkeypatch, tmp_path, schema=drifted))
+    assert B.main(["--check"]) == 1
+    assert "missing 'title'" in capsys.readouterr().err
+
+
+def test_the_gate_fails_when_the_header_names_no_model(monkeypatch, tmp_path):
+    real = B.LESSON_SQL.read_text(encoding="utf-8")
+    for header in ("the sample Model", "the sample Model ** **"):
+        text = real.replace("the sample Model **`(Sample) Retail - Apparel`**", header)
+        assert text != real
+        errors = _gate_with(monkeypatch, tmp_path, capture=text)
+        assert "lesson-sql.md: no Model named in its header" in errors, header
+
+
+def test_the_gate_fails_when_the_header_names_another_model(monkeypatch, tmp_path):
+    # The caption names the header's Model, so it must be the one the AgentQL queries.
+    real = B.LESSON_SQL.read_text(encoding="utf-8")
+    text = real.replace("**`(Sample) Retail - Apparel`**", "**`Acme Sales`**")
+    errors = _gate_with(monkeypatch, tmp_path, capture=text)
+    assert any(f"names Model 'Acme Sales', but this AgentQL does not query" in e for e in errors), errors
+
+
+def test_the_page_fails_its_play_through_without_a_model(doc, capture, tmp_path):
+    data, errors = B.compile_quest(doc, *capture, MODEL)
+    assert errors == []
+    data["model"] = ""
+    page = tmp_path / "index.html"
+    page.write_text(B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, B.font_faces()), encoding="utf-8")
+    r = subprocess.run(["node", str(HERE / "play_quest.js"), str(page)], capture_output=True, text=True)
+    assert r.returncode != 0 and "should name the Model" in r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("name", B.BESIDE)
+def test_out_may_not_name_a_file_written_beside_the_page(tmp_path, name):
+    assert B.main(["--out", str(tmp_path / name)]) == 2
+    assert not (tmp_path / name).exists()
+
+
 def test_every_schema_field_is_required(schema):
     # A front end may rely on every field being present; an optional one would need a default.
     def walk(node, where):
@@ -361,6 +467,7 @@ def test_main_writes_quest_json_beside_the_page(tmp_path):
     assert B.main(["--out", str(page)]) == 0
     data = json.loads((tmp_path / "quest.json").read_text(encoding="utf-8"))
     assert data == _embedded(page)
+    assert (tmp_path / "quest.schema.json").read_text(encoding="utf-8") == B.SCHEMA.read_text(encoding="utf-8")
     assert data["model"] == MODEL
 
 
@@ -391,6 +498,10 @@ def test_pages_workflow_builds_home_page_and_game_in_its_folder(tmp_path):
     assert "<title>AgentQL Quest</title>" in game.read_text(encoding="utf-8")
     # The data contract is published beside the game, identical to what the page embeds.
     assert json.loads((game.parent / "quest.json").read_text(encoding="utf-8")) == _embedded(game)
+    # ...with the schema its $id names, at that same path.
+    schema_url = json.loads(B.SCHEMA.read_text(encoding="utf-8"))["$id"]
+    assert schema_url.endswith("/agentql-quest/quest.schema.json")
+    assert (game.parent / "quest.schema.json").read_text(encoding="utf-8") == B.SCHEMA.read_text(encoding="utf-8")
     # Every local image the home page shows must be in the site, or it renders as a broken image.
     for src in re.findall(r'<img[^>]+src="([^":]+)"', home.read_text(encoding="utf-8")):
         assert (site / src).is_file(), f"home page shows {src}, which the build did not copy"
@@ -477,7 +588,7 @@ def test_every_path_explains_itself(doc, capture):
 
 
 def test_the_mines_block_the_keyword_path(doc, capture):
-    data, _ = B.compile_quest(doc, *capture)
+    data, _ = B.compile_quest(doc, *capture, MODEL)
     mines = next(r for r in data["realms"] if r["id"] == "mines")["encounters"][0]["path"]
     kinds = {o: x["kind"] for o, x in zip(mines["options"], mines["outcomes"])}
     assert kinds == {"Send it to Keyword Search": "blocked", "Send it to AgentQL": "win", "Send it to Code Complete": "loss"}
@@ -511,7 +622,7 @@ def test_every_rule_says_who_adds_it(doc, capture):
 
 
 def test_the_hoard_separates_rules_from_the_players_part(doc, capture):
-    data, _ = B.compile_quest(doc, *capture)
+    data, _ = B.compile_quest(doc, *capture, MODEL)
     lake = next(r for r in data["realms"] if r["id"] == "lake")["encounters"][0]
     by = {p["rule"]: p["ruleBy"] for p in lake["points"] if p["rule"]}
     assert by["Every product kept, sold in the West or not"] == "agentql"

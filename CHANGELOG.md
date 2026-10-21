@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-21
-- feat: AgentQL Quest publishes its checked data as `quest.json` beside the game, described by a new `quest.schema.json` that `build.py --check` (the PR gate) enforces, so another front end can play the same content without parsing the YAML or the capture. The page now reads the capture's Model name from that data instead of hard-coding it.
+- feat: AgentQL Quest publishes its checked data as `quest.json` beside the game, described by a new `quest.schema.json` that `build.py --check` (the PR gate) enforces, so another front end can play the same content without parsing the YAML or the capture. The schema is published beside it. The dragon's caption now names the Model from `lesson-sql.md`'s header (checked against the Model the captured AgentQL queries) instead of hard-coding it.
 
 ## 2026-10-20
 - feat: ts-object-model-agentql-query 2.19.0 — removed course Module 6 (Trust, but verify): 21 → 18 lessons, Modules 0–5. Its lessons centred on silent-drop bugs (QUALIFY / FILTER accepted then ignored, SUM(CASE date-literal) returning UNKNOWN) that will be fixed, so the course no longer rests on them (same reasoning as lesson 1.3); all six behaviours stay under live test in the agentql-retest limitations suite and documented in limitations.md. Removed the six l6_* lessons cases and their controls; regenerated lesson-sql.md and the offline bundle

@@ -8,8 +8,9 @@ the generated SQL out from under an encounter, so that a "who put this line here
 points at a line that changed or no longer exists — the game would then teach something the
 SQL no longer shows. This runs the build's own validation (`build.py --check`) and fails on
 any drift: a missing or rejected case, AgentQL changed beyond layout, an `sql` line no longer
-present exactly, an `sql_count` that no longer holds, or built data that no longer fits
-tools/agentql-quest/quest.schema.json (the contract quest.json is published under).
+present exactly, an `sql_count` that no longer holds, a capture header naming a Model the
+AgentQL doesn't query, or built data that no longer fits tools/agentql-quest/quest.schema.json
+(the contract quest.json is published with).
 
 Lives here, as a thin wrapper, so the gate is catalogued with the other validators in
 docs/quality-gates.md; the logic stays beside the tool it guards.
