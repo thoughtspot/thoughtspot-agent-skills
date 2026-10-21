@@ -10,7 +10,7 @@
  "tileheight": 16,
  "infinite": false,
  "nextlayerid": 5,
- "nextobjectid": 9,
+ "nextobjectid": 13,
  "layers": [
   {
    "id": 1,
@@ -313,7 +313,7 @@
     0,
     0,
     0,
-    83,
+    0,
     0,
     41,
     41,
@@ -669,6 +669,78 @@
        "name": "requires",
        "type": "string",
        "value": "west_sales:compiler"
+      }
+     ]
+    },
+    {
+     "id": 9,
+     "name": "",
+     "type": "chest",
+     "x": 32,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "loot",
+       "type": "string",
+       "value": "axe"
+      }
+     ]
+    },
+    {
+     "id": 10,
+     "name": "",
+     "type": "chest",
+     "x": 288,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "loot",
+       "type": "string",
+       "value": "mimic"
+      }
+     ]
+    },
+    {
+     "id": 11,
+     "name": "",
+     "type": "barrel",
+     "x": 272,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "roll",
+       "type": "string",
+       "value": "left"
+      }
+     ]
+    },
+    {
+     "id": 12,
+     "name": "",
+     "type": "hoard",
+     "x": 272,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "loot",
+       "type": "string",
+       "value": "red_potion,shield,staff"
       }
      ]
     }

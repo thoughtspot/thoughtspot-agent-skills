@@ -36,9 +36,14 @@ import re
 
 ROLES = ("merchant", "guide", "compiler", "foe", "reward")
 PROPS = {"spawn": set(), "exit": set(), "portal": {"to"}, "throne": {"hall"}, "gate": {"requires"},
+         # for fun, never a step: a chest of loot (or a mimic), a barrel that rolls one tile off a hoard
+         "chest": {"loot"}, "barrel": {"roll"}, "hoard": {"loot"},
          **{role: {"encounter"} for role in ROLES}}
 REALM_TYPES = set(PROPS) - {"portal"}
-OVERWORLD_TYPES = {"spawn", "portal", "gate"}
+OVERWORLD_TYPES = {"spawn", "portal", "gate", "chest", "barrel", "hoard"}
+EXTRAS = ("chest", "barrel", "hoard")
+ROLLS = {"left": (-1, 0), "right": (1, 0), "up": (0, -1), "down": (0, 1)}
+MIMIC = "mimic"
 OVERWORLD = "overworld"
 IMAGES = (".png",)
 GID = 0x1FFFFFFF   # a tile number without Tiled's flip and rotation flags
@@ -80,6 +85,7 @@ class Map:
 
     def __init__(self, path: pathlib.Path, errors: list[str]):
         self.path, self.name, self.errors = path, f"maps/{path.name}", errors
+        self.items: set[str] = set()     # the pack's loot (tiles/tiles.json), for chests and hoards
         try:
             self.doc = json.loads(path.read_text(encoding="utf-8"), parse_constant=_not_json)
         except (OSError, ValueError) as e:
@@ -171,6 +177,10 @@ class Map:
                 self.objects.append({"type": o.get("type"), "props": _props(o, where, errors), "where": where,
                                      "tile": tile, "rect": self._rect(o)})
         pack_dir = path.parent.parent.resolve()
+        try:
+            self.items = set((json.loads((pack_dir / "tiles" / "tiles.json").read_text(encoding="utf-8")).get("items") or {}))
+        except (OSError, ValueError, AttributeError):
+            self.items = set()
         sets = d.get("tilesets") if isinstance(d.get("tilesets"), list) else []
         if d and [t.get("name") if isinstance(t, dict) else None for t in sets] != ["tiles"]:
             errors.append(f"{self.name}: needs exactly one tileset, named tiles (the explore page draws with that one)")
@@ -274,7 +284,8 @@ def reachability(m: Map, steps: list[str] | None = None) -> list[str]:
     if len(spawns) != 1:
         return []   # reported by the shape checks
     gates = [(g, requires(g)) for g in m.of("gate")]
-    solid = {o["tile"] for o in m.objects if o["type"] not in ("spawn", "gate")}
+    # A barrel blocks where it stands and where it rolls to: the quest must not care which.
+    solid = {o["tile"] for o in m.objects if o["type"] not in ("spawn", "gate")} | {rolled(b) for b in m.of("barrel")}
     start = spawns[0]["tile"]
     if not m.inside(start) or start in m.wall or start in solid:
         return [f"{spawns[0]['where']}: the spawn is outside the map, in a wall, or on a solid object"]
@@ -309,7 +320,21 @@ def reachability(m: Map, steps: list[str] | None = None) -> list[str]:
                           + (f" (still shut: {'; '.join(shut)})" if shut else ""))
             break       # every later step waits on this one
         done.add(s)
+    # Every bit of fun can be found by the end: chests and barrels where they stand, a hoard once its
+    # barrel has rolled off it (with every gate open).
+    every = {x for g, needs in gates for x in needs}
+    if not errors:
+        late = walk(every)
+        for o in m.of("chest") + m.of("barrel") + m.of("hoard"):
+            if not reach(o, late):
+                errors.append(f"{o['where']}: can't be reached, even once the quest is done")
     return errors
+
+
+def rolled(barrel: dict) -> tuple[int, int]:
+    """The tile a barrel rolls to."""
+    dx, dy = ROLLS.get(barrel["props"].get("roll"), (0, 0))
+    return barrel["tile"][0] + dx, barrel["tile"][1] + dy
 
 
 def _shape(m: Map, allowed: set[str], errors: list[str]) -> None:
@@ -331,12 +356,38 @@ def _shape(m: Map, allowed: set[str], errors: list[str]) -> None:
             errors.append(f"{o['where']}: is outside the map")
     if len(m.of("spawn")) != 1:
         errors.append(f"{m.name}: needs exactly one spawn")
+    _extras(m, errors)
     edge = {(x, y) for x in range(m.w) for y in (0, m.h - 1)} | {(x, y) for y in range(m.h) for x in (0, m.w - 1)}
     shut = m.wall | {o["tile"] for o in m.objects if o["type"] not in ("spawn", "gate")}   # walls, or someone solid
     if m.doc and not edge <= shut:
         x, y = min(edge - shut, key=lambda t: (t[1], t[0]))
         errors.append(f"{m.name}: the map's edge must all be wall or someone solid (the explore page doesn't stop the player there); "
                       f"({x}, {y}) isn't")
+
+
+def _extras(m: Map, errors: list[str]) -> None:
+    """Chests, barrels and hoards: loot the pack names, barrels that roll onto open floor, a hoard
+    under each barrel that hides one."""
+    items = m.items
+    taken = {o["tile"] for o in m.objects if o["type"] not in ("barrel", "hoard")}
+    for o in m.of("chest"):
+        loot = o["props"].get("loot", "")
+        if loot != MIMIC and loot not in items:
+            errors.append(f"{o['where']}: loot={loot!r} is not an item in tiles/tiles.json (or {MIMIC!r})")
+    for o in m.of("hoard"):
+        loot = [x.strip() for x in o["props"].get("loot", "").split(",") if x.strip()]
+        if not loot or any(x not in items for x in loot):
+            errors.append(f"{o['where']}: loot={o['props'].get('loot')!r} must name items in tiles/tiles.json")
+        if sum(b["tile"] == o["tile"] for b in m.of("barrel")) != 1:
+            errors.append(f"{o['where']}: a hoard lies under exactly one barrel, on its tile")
+    gate_tiles = {t for g in m.of("gate") for t in g["rect"]}
+    for b in m.of("barrel"):
+        if b["props"].get("roll") not in ROLLS:
+            errors.append(f"{b['where']}: roll must be one of {sorted(ROLLS)}")
+            continue
+        to = rolled(b)
+        if not m.inside(to) or to in m.wall or to in taken or to in gate_tiles or any(rolled(x) == to for x in m.of("barrel") if x is not b):
+            errors.append(f"{b['where']}: rolls {b['props']['roll']} onto {to}, which isn't open floor")
 
 
 def check_realm_map(m: Map, realm: dict) -> list[str]:

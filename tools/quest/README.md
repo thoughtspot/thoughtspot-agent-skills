@@ -204,7 +204,12 @@ explore page would read differently from the check:
   - `exit`, realm maps only, one per map;
   - `merchant`, `guide`, `compiler`, `foe`, `reward` with `encounter=<encounter id>`;
   - `throne hall=<hall id>`;
-  - `gate requires=<step id>,…`.
+  - `gate requires=<step id>,…`;
+  - for fun, never a step (realm maps and the overworld): `chest loot=<item>` (or `loot=mimic`),
+    `barrel roll=left|right|up|down`, and `hoard loot=<item>,…` on the same tile as a barrel,
+    hidden until it rolls. Items are `tiles.json`'s `items`; a barrel rolls one tile, onto open
+    floor. The walk treats a barrel as solid where it stands and where it rolls to, so the quest
+    never depends on it, and every chest, barrel and hoard must be reachable once the quest is done.
 - **Steps:** a step id is `<encounter id>:<merchant|guide|compiler|foe|reward>` or
   `hall:<hall id>`. Every step of a realm has exactly one object on its map.
 - **Reachability, in the game's order:** the game plays a realm's steps in one order (halls, then
@@ -254,6 +259,12 @@ packs/agentql/tiles/, maps/*.tmj        ─┘                 └─► explore
   top, the player, the five roles, the open chest, exit, gate, portal); the build checks it. A
   realm's look is its map's own floor and decoration. WebGL is used where the browser has it,
   else a 2D canvas.
+- **Fun:** talk to a chest to open it (its loot is yours, or a mimic snaps at you), to a barrel to
+  roll it aside, and to the troll's hoard it uncovers to claim it. You start with the weapon
+  `tiles.json` names; others come as loot, and X (or the pad's Weapon) switches the one in your
+  hand, which the foe's first question mentions. Loot never touches gold or the quest: it is saved
+  apart, under `<storage key>-explore`. Each realm's portal is its own door (`tiles.json`'s
+  `portals`), and every item's name is `item_<id>` in `strings.yaml`.
 - **Motion:** the player faces the way it walks and bobs a pixel each step; the merchant, guide
   and foe breathe; maps fade in. With reduced motion on, none of it.
 - **Screenshots:** `python3 tools/quest/tests/shoot_maps.py <folder>` saves every map as a player

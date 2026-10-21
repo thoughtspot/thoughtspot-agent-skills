@@ -6,10 +6,58 @@
   "guide": 84,
   "compiler": 74,
   "foe": 110,
-  "reward": 89,
+  "reward": 90,
   "reward_open": 91,
   "exit": 46,
   "gate": 28,
   "portal": 45,
-  "throne": 7
+  "throne": 7,
+  "chest": 89,
+  "chest_open": 91,
+  "mimic": 92,
+  "barrel": 82,
+  "hoard": 66,
+  "hoard_empty": 66,
+  "portals": {
+    "law": 45,
+    "mines": 9,
+    "lake": 32,
+    "forests": 46,
+    "isles": 11
+  },
+  "weapon": "sword",
+  "items": {
+    "sword": {
+      "frame": 104,
+      "kind": "weapon"
+    },
+    "dagger": {
+      "frame": 103,
+      "kind": "weapon"
+    },
+    "axe": {
+      "frame": 118,
+      "kind": "weapon"
+    },
+    "staff": {
+      "frame": 129,
+      "kind": "weapon"
+    },
+    "red_potion": {
+      "frame": 115,
+      "kind": "treasure"
+    },
+    "blue_potion": {
+      "frame": 116,
+      "kind": "treasure"
+    },
+    "green_potion": {
+      "frame": 114,
+      "kind": "treasure"
+    },
+    "shield": {
+      "frame": 102,
+      "kind": "treasure"
+    }
+  }
 }

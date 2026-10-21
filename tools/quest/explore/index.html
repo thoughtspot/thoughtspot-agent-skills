@@ -19,6 +19,7 @@
 .hud { display: flex; justify-content: space-between; gap: 12px; color: var(--phosphor); margin: 0 0 6px; flex-wrap: wrap; }
 .hud span { white-space: nowrap; }
 .hud #hud-gold { color: var(--hot); }
+.hud #hud-kit { color: var(--dim); }
 #toast { min-height: 1.4em; margin: 8px 0 0; color: var(--hot); }
 #pad { display: none; gap: 8px; justify-content: center; margin-top: 10px; }
 #pad button { font: inherit; font-size: 22px; min-width: 56px; min-height: 48px; background: var(--glass);
@@ -36,14 +37,14 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
 <p class="sr-only" id="live" aria-live="polite"></p>
 <main class="monitor"><div class="screen">
   <div class="bar-top"><span id="help"></span><a id="classic" href="../"></a></div>
-  <div class="hud" aria-hidden="true"><span id="hud-place"></span><span id="hud-gold"></span></div>
+  <div class="hud" aria-hidden="true"><span id="hud-place"></span><span id="hud-kit"></span><span id="hud-gold"></span></div>
   <div id="world" tabindex="0" aria-label=""></div>
   <p id="toast" role="status"></p>
   <p id="nogl"></p>
   <div id="pad" role="group">
     <button type="button" data-key="left"></button><button type="button" data-key="up"></button>
     <button type="button" data-key="down"></button><button type="button" data-key="right"></button>
-    <button type="button" data-key="talk"></button>
+    <button type="button" data-key="talk"></button><button type="button" data-key="weapon"></button>
   </div>
   <div class="sound" role="group" aria-label="Sound">
     <button type="button" id="sound-sfx" aria-pressed="true"></button>
