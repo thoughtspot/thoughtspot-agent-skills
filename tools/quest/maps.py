@@ -179,7 +179,10 @@ class Map:
                                   f"{self.tw}; snap to grid in Tiled); the explore page gives it a body that size at its centre")
                     continue
                 tile = self._tile(o)
-                if any(x["tile"] == tile for x in self.objects):   # the page could only ever talk to one of them
+                # The page could only ever talk to one of two objects on a tile; a hoard under its
+                # barrel is the one pair that shares (it shows once the barrel has rolled off it).
+                pair = lambda a, b: {a, b} == {"hoard", "barrel"}
+                if any(x["tile"] == tile and not pair(x["type"], o.get("type")) for x in self.objects):
                     errors.append(f"{where}: shares its tile {tile} with another object; give each its own")
                 self.objects.append({"type": o.get("type"), "props": _props(o, where, errors), "where": where,
                                      "tile": tile, "rect": self._rect(o)})
