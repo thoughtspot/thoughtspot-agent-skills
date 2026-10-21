@@ -111,7 +111,7 @@ tools/quest/
   core/                        shared front-end code, plain scripts (§3.6)
   classic/                     the text-adventure page (today's game.html, on core/)
   explore/                     the map front end (new)
-  fonts/                       VT323 and IBM Plex Mono, with their OFL licences (moved)
+  fonts/                       VT323 and IBM Plex Mono, with their OFL licences
   vendor/                      Phaser, pinned and verified (§9)
   tests/                       all engine and pack tests (one pytest root, as today)
   packs/
@@ -141,7 +141,7 @@ sources:                               # read-only inputs the plugins check agai
 rule_tags:                             # the reward screen's tags: label and where each is shown
   model:       {label: MODEL,       group: rules}
   thoughtspot: {label: THOUGHTSPOT, group: rules}
-  agentql:     {label: YOUR PART,   group: yours}
+  agentql:     {label: AGENTQL,     group: yours}   # the "YOUR PART, IN THE AGENTQL" heading is a string
   determinism: {label: "",          group: verdict}   # hidden; the verdict string stands in for them
 lexicon:                               # the roles the engine knows, named the pack's way
   guide: The Wizard                    # writes the scroll (the AI)
@@ -183,10 +183,11 @@ A plugin may:
 |---|---|
 | case ids, capture equality, SQL line highlights, `sql_count` / `sql_before` / `sql_last_line` / `rejected_case`, the Model header and `FROM` check | `agentql_capture` |
 | lesson numbers and titles, Modules, realm `module` | `course_refs` |
-| the dragon's path is `agentql`; the three engines (`choice` trials with engine options); the who-put-it-there options and their mapping; the first realm is open and has halls; the crediting rule (§3.5) | `agentql_rules` |
+| the dragon's path is `agentql`; the three engines (`choice` trials with engine options); the who-put-it-there options and their mapping; the first realm has halls; the crediting rule (§3.5) | `agentql_rules` |
 
-The core's `unlock: first_realm_first` only locks the other realms until the first is done. That
-the first realm has *halls* is AgentQL's rule, so it lives in `agentql_rules`.
+Under `unlock: first_realm_first` the core requires the first realm to be open (otherwise every
+other realm stays locked forever). That the first realm has *halls* is AgentQL's rule, so it lives
+in `agentql_rules`.
 
 ### 3.4 `quest.json` version 2
 
@@ -212,14 +213,16 @@ the first realm has *halls* is AgentQL's rule, so it lives in `agentql_rules`.
 - **Classic art** is inlined into the classic page from `art/classic/`. It's not in `quest.json`.
 
 **One schema per pack, generated:**
-- `build.py` assembles each pack's schema from `schema/core.json` plus what its plugins declare.
+- `build.py` assembles each pack's schema from `schema/core.json`, what its plugins declare, the
+  manifest's `rule_tags` and the pack's pane ids (so `highlights` is closed too: every point names
+  every pane, `[]` when none).
   The result is closed: every field is listed and required, with no open maps or
   `patternProperties`. So it passes the existing `lint_schema` unchanged, and CI's real validator
   checks it as today.
 - It's published beside that pack's `quest.json`, so AgentQL's stays at
   `/agentql-quest/quest.schema.json`, with title "AgentQL Quest data" and the same `$id`.
-- A second game gets its own schema, with only the core and its own plugins' fields. Nothing in
-  it is AgentQL's.
+- A second game gets its own schema, from the core, its own plugins, its tags and its panes.
+  Nothing in it is AgentQL's.
 
 **The switch from v1:**
 - The only consumers of `quest.json` are our own front ends, so PR 2 switches it to
@@ -239,13 +242,12 @@ the first realm has *halls* is AgentQL's rule, so it lives in `agentql_rules`.
 | Generic fantasy names only | **nothing**: a realm renamed after a published work's place passes | the core denylist (see below) |
 
 **The crediting check** (`agentql_rules`) applies to a `who` point with explicit highlights,
-where every highlighted SQL line is part of either:
+where every highlighted SQL line lies wholly within either:
 - a `LIMIT <n>` line; or
 - the full null-guard shape `CASE WHEN <aggregate> IS NOT NULL THEN <aggregate> ELSE 0 END`.
 
-Such a point must answer `thoughtspot`. Points that highlight everything (`*`), such as the
-determinism points in the Mines and the Isles, are out of scope. A `CASE` the AgentQL itself
-wrote doesn't match the full shape.
+Such a point must answer `thoughtspot`. Every other point is out of scope. In today's capture, no `CASE` that the AgentQL itself wrote
+matches the full shape. The Lake's `COALESCE` compiles to a `CASE` with no aggregate.
 
 **The denylist:**
 - **Storage:** hashed and normalised (lowercased, accents stripped) single words and two-word
@@ -262,7 +264,7 @@ route realm) is replaced with a made-up name in PR 1.
 - **`core/` is plain scripts, not ES modules.** Each one adds to one `Quest` global.
   - Classic mode: `build.py` concatenates them, in a fixed order, into the single inline script.
     So classic stays one self-contained file that runs from a double-click. The build refuses
-    any core file containing `</script` or `<!--`, in any case.
+    any inlined core or `art/classic/` file containing `</script` or `<!--`, in any case.
   - Explore: loads the same files with `<script src>`.
 - **The state machine moves out of rendering.** `Quest.act(state, action)` returns the new state
   plus effects (play a sound, save progress), and `render()` only draws.
@@ -305,8 +307,8 @@ of MB on the web, harder in CI), RPG Maker (commercial licence).
     can't swallow Enter or Space on the dialog, the title links, the pause menu or the sound
     buttons.
   - When a dialog opens, the game also turns the manager off (`game.input.keyboard.enabled =
-    false`). When the dialog closes, it turns it back on and calls `resetKeys()`, so a held arrow
-    key doesn't stay stuck.
+    false`). When the dialog closes, it turns it back on. Pausing the scene already clears held keys;
+    `scene.input.keyboard.resetKeys()` on resume is a backup, so an arrow key never stays stuck.
 
 ### 4.2 Binding maps to content
 
@@ -389,7 +391,7 @@ Dwarven Mines, about 2–3 minutes:
 - **The same rule in both front ends.** The shared `unlock` rule applies to both, so a new player
   must finish Law first.
 - **Law opens in classic mode.** Law has no map yet, so its portal opens
-  `/agentql-quest/#realm=law`. Classic gains that deep link in PR 4 (today it always starts at
+  `/agentql-quest/#realm=law`. Classic gains that deep link in PR 5 (today it always starts at
   the title), plus a "back to the map" link when it was opened from explore.
 - **Saves are shared.** Classic (`/agentql-quest/`) and explore (`/agentql-quest/explore/`) share
   an origin and the `aqq` saves. Explore re-reads them on `pageshow` and before every portal
@@ -454,14 +456,16 @@ kept, and the character can be asked again.
   `tests/packs/agentql/`), one pytest root, so `validate.yml` and pre-commit name one path.
 - **Rendering (decision 3):** a manual checklist (§6) until explore becomes the default. Then a
   Playwright smoke test that uses the Chrome already on GitHub's Ubuntu runner
-  (`channel: 'chrome'`), so no browser download.
+  (`channel: 'chrome'`), so no browser download. Runners have no GPU, and Chrome is removing its
+  automatic software-WebGL fallback, so the test launches with `--enable-unsafe-swiftshader` and
+  asserts that the Phaser canvas booted (not the classic-mode fallback).
 
 ## 6. Delivery
 
 **PRs in order,** each gated and reviewed:
 
 1. **Rename only** (decision 4): `tools/agentql-quest/` → `tools/quest/`, with no other change
-   except the fixture fix in §3.5, so git keeps the history. Every reference to the folder
+   except the fixture fix in §3.5 and the path tests below, so git keeps the history. Every reference to the folder
    changes with it:
    - **Silent if missed, so each gets a test:**
      - `pages.yml`'s `on.push.paths` (a test reads it);
@@ -469,7 +473,9 @@ kept, and the character can be asked again.
      - the root README's tree (`check_consistency` only does a substring match, and "quest"
        already appears in the URL);
      - the folder's own docs: its README commands, `build.py`'s docstring and `--help`, and
-       `promo/README.md` and `make_ad.py`.
+       `promo/README.md` and `make_ad.py`;
+     - comments: the header of `pages.yml` and the docstring of `check_agentql_quest.py`;
+     - this design doc's own link to the folder (`check_references` skips `docs/superpowers/`).
    - **Loud if missed:**
      - the pytest paths in `validate.yml` (both jobs) and `pre-commit.sh`;
      - `pages.yml`'s build command and poster copy;
@@ -477,7 +483,7 @@ kept, and the character can be asked again.
    - **Also:** it edits `pre-commit.sh`, `validate.yml` and a validator, so
      `docs/quality-gates.md` is regenerated after committing, and the code owners review it.
 2. **Data v2 and plugins:**
-   - the pack layout (fonts and promo moved), the manifest, and the three plugins;
+   - the pack layout (promo moved into the pack), the manifest, and the three plugins;
    - the generated per-pack schema, `quest.json` v2, and the two content-rule checks;
    - classic adapted to read v2.
    Nothing changes for players.
@@ -546,5 +552,7 @@ site's home page.
 - An npm entry in `.github/dependabot.yml` for `vendor/`.
 - A test checks the vendored file's own SHA-256 against the value recorded beside it, which
   matches jsDelivr's published per-file hash.
-- Another test checks that the version in `package.json` equals the version Phaser's file
-  declares. So a Dependabot bump fails until the vendored file is replaced.
+- Another test checks that the version in `package.json` equals the version Phaser's file declares
+  (matched with `\bVERSION:"…"`, because the file also contains `LOG_VERSION`). So a Dependabot bump
+  fails until the vendored file is replaced. Phaser's only dependency, `eventemitter3`, is already
+  bundled, so `dependabot.yml` ignores it.
