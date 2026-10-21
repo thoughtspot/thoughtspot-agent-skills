@@ -3471,3 +3471,15 @@ def test_the_lines_npcs_say_count_as_used_and_needed(tmp_path, monkeypatch):
     monkeypatch.setattr(B, "PACKS", packs)
     errors = B.build(check=True)[3]
     assert any("the classic page needs 'npc_miner_barrel'" in e for e in errors), errors
+
+
+
+def test_a_hoard_is_the_one_thing_that_shares_a_tile(tmp_path):
+    cave = _with_objects(_tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE),
+                         [("barrel", 6, 4, {"roll": "right"}), ("hoard", 6, 4, {"loot": "gem"}), ("chest", 6, 4, {"loot": "gem"})])
+    pack, data = _explorable(tmp_path, cave=cave)
+    (pack.dir / "tiles").mkdir(exist_ok=True)
+    (pack.dir / "tiles/tiles.json").write_text(json.dumps({"items": FUN_ITEMS, "npcs": FUN_NPCS}), encoding="utf-8")
+    errors = MAPS.check_maps(pack.dir, data)
+    shared = [e for e in errors if "shares its tile" in e]
+    assert len(shared) == 1 and "(chest)" in shared[0], errors
