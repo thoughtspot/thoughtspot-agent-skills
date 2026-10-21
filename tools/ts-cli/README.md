@@ -634,7 +634,8 @@ whose columns carry no explicit index type; the object has landed (live-verified
 
 Lint TML **locally** for the model invariants that ThoughtSpot's `VALIDATE_ONLY`
 import policy does **not** catch — the ones it accepts silently and then mis-behaves on
-(drops a formula, flips a measure to an attribute, breaks a join at query time). No
+(drops a formula, flips a measure to an attribute, breaks a join at query time) — plus a
+few the server does reject but explains badly, so lint names the offending joins. No
 ThoughtSpot connection needed; pure structural check. Run it before `ts tml import` to
 fail loud.
 
@@ -653,6 +654,10 @@ Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
 | I14 | an ordered table pair joined more than once — the join path is ambiguous and the Model will not load; a role-played dimension needs its own aliased `model_tables` entry |
 | I15 | a column-root key (`description`, `name`, `column_id`, `formula_id`, `data_panel_column_groups`) inside a `columns[]` entry's `properties:` — a Model import SILENTLY ignores unknown keys there, so the TML imports with status OK and the value is lost (BL-232). Contrast `synonyms`, which must stay under `properties:` |
 | I16 | *(only when the Table TMLs are linted in the same batch)* a Model column `MEASURE`/`AGGREGATE` over a Table column that is not `AGGREGATE` — UI search works but AgentQL/SpotQL reads the Table's aggregation, so every aggregate query on a Metric View / Semantic View measure fails |
+| I17 | a cycle that follows the join arrows (A → B → A; server error 13123), or two arrow-following routes from one table to another (a diamond; 13124). The server rejects both but its message ("Schema validation failed") names no join — lint names the cycle or both routes. Two facts sharing a dimension loop only if direction is ignored, and are **not** flagged |
+| I18 | a self-join — a table joined to itself, directly or through aliases (13125 / 14565). Unsupported in Models; flatten the hierarchy in the warehouse |
+| I19 | a join `on:` naming a table that is neither of the join's two tables, or an alias name instead of the physical one — "Invalid srcTable or destTable in join expression" |
+| JOIN-KEY | *(opt-in, `--require-join-key`)* a join that does not equate the given column on both tables — e.g. a tenant key in a shared-schema warehouse, where a join without it can match rows across tenants. Not an invariant: ThoughtSpot imports such a Model |
 | XREF | a model `model_tables`/`column_id`/join reference to a table or column that no batch TML generates — surfaces only when a table/sql_view TML is linted **alongside** the model (e.g. `--dir`); a lone model file skips it (no ground truth for what tables exist) |
 
 ```bash
@@ -682,8 +687,16 @@ ts tml lint --file model.tml && ts tml import --file model.tml --policy ALL_OR_N
 | `--order` | `name` | Same as `ts tml import --order`: `name` (default) or `tableau` (table → sql_view → model → cohort → liveboard) |
 | `--model-phase` | `all` | Same as `ts tml import --model-phase`: `all` (default) or `base` (drop `*.phaseN.model.tml` for N ≥ 1) |
 | `--pattern` | none | Same as `ts tml import --pattern`: glob(s) to filter `--dir` matches (repeatable) |
+| `--require-join-key` | none | Opt-in JOIN-KEY rule: every Model join must carry `[A::KEY] = [B::KEY]` for this column (repeatable). A join that only references a Table TML join is checked against that Table TML when it is in the batch |
+| `--exempt` | none | With `--require-join-key`: skip joins touching this table, by physical or alias name (repeatable) — shared reference tables that carry no tenant key. Alone it is a usage error (exit 2) |
 
 `--order`/`--model-phase`/`--pattern` apply only to the `--file`/`--dir` input mode, matching `ts tml import`.
+
+```bash
+# Every join in a multi-tenant Model must also match on customer_id,
+# except joins to the shared calendar and country tables
+ts tml lint --dir ./tml --require-join-key customer_id --exempt CALENDAR --exempt COUNTRY
+```
 
 **Input:** the SAME input as `ts tml import` — either `--file`/`--dir` (raw TML text per file) or, when neither is given, stdin as a JSON string or array of TML strings.
 

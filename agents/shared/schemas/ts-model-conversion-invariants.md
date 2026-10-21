@@ -1,11 +1,11 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found; I13 added and live-verified 2026-07-30 on se-thoughtspot — error_code 14516 on a dangling [formula_*] reference, BL-178/BL-183) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found; I13 added and live-verified 2026-07-30 on se-thoughtspot — error_code 14516 on a dangling [formula_*] reference, BL-178/BL-183; I17-I19 added and live-verified 2026-10-21 on se-thoughtspot — join-graph error codes 13123/13124/13125/14565) -->
 
 # ThoughtSpot Model Conversion Invariants
 
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I15, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I19, N1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
 > Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7),
@@ -662,6 +662,69 @@ for hand-built and hand-edited Models.
 
 **Applies to:** every Model over a semantic-layer object (`ts-link-semantic-layer`, and any
 hand-built equivalent).
+
+---
+
+### I17 — One join route between any two tables: no cycles, no second paths
+
+**Rule:** read the Model's joins as a **directed** graph (an arrow from each `model_tables[]`
+entry to its `joins[].with`, each alias its own node). It must contain no cycle that follows
+the arrows, and no two different arrow-following routes from one table to another.
+
+**Failure mode:** the import is rejected, and the message names nothing:
+
+| Shape | Server response |
+|---|---|
+| A → B and B → A, or A → B → C → A | error **13123**, "Schema validation failed" |
+| A → B → D and A → C → D (two routes to D) | error **13124**, "Schema validation failed" |
+
+**Direction is what matters.** Two fact tables sharing dimensions —
+`ORDERS → DATE`, `INVENTORY → DATE`, `ORDER_LINES → PRODUCT`, `INVENTORY → PRODUCT` — form a
+loop only when the arrows are ignored. That is the ordinary multi-fact shape and imports
+fine, so I17 never flags it. A check that ignores direction flags every multi-fact Model.
+
+**Fix:** alias the table the second route reaches, once per role (the I14 pattern):
+`ORDERS → SHIPPER` (an alias of `SUPPLIER`) beside `PRODUCT → SUPPLIER` imports clean. I14 is
+the degenerate case of this rule — two joins between one pair — and keeps its own id.
+
+**Evidence:** live probe on se-thoughtspot 2026-10-21 — throwaway Models over existing tables,
+`--policy VALIDATE_ONLY` and `ALL_OR_NONE` giving identical results; nothing persisted.
+
+**Enforced by:** `ts tml lint` — it names the cycle, or both routes from their lowest shared
+starting table, which the server's response never does.
+
+---
+
+### I18 — No self-joins
+
+**Rule:** no join may connect a physical table to itself, whether directly (`EMPLOYEE →
+EMPLOYEE`), to an alias of itself (`EMPLOYEE → MANAGER`), or between two aliases of it
+(`SALES_REP → REP_MANAGER`, both `DM_EMPLOYEE`).
+
+**Failure mode:** rejected in every form probed (2026-10-21): direct gives error 14565
+"INTERNAL ERROR"; through aliases gives 13125 "Schema validation failed" with physical names
+in `on:`, and "Invalid srcTable or destTable in join expression" with alias names.
+
+**Fix:** a parent-child hierarchy (employee → manager) is flattened in the warehouse — a view
+carrying the parent's columns — and that view joined as an ordinary dimension.
+
+**Enforced by:** `ts tml lint`.
+
+---
+
+### I19 — A join's `on:` names only its two tables, by physical name
+
+**Rule:** every `[TABLE::COL]` in a join's `on:` must name the physical table (`name:`) of the
+join's source entry or of its `with:` target. Never a third table, and never an alias — an
+alias is selected by `with:`, and `on:` always uses the physical name (as in I14's example).
+The two sides may appear in either order.
+
+**Failure mode:** "Invalid srcTable or destTable in join expression" at import, for a third
+table and for an alias name alike — including an ordinary, non-self join to an alias
+(live-probed 2026-10-21).
+
+**Enforced by:** `ts tml lint`. Joins carrying no inline `on:` (a `referencing_join` to a
+Table TML join) are not checked by this rule.
 
 ---
 

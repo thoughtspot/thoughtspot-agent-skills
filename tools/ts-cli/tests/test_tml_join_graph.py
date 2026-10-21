@@ -169,6 +169,17 @@ class TestEdgeCases:
         assert sorted(_ids(f)) == ["I17", "I17"]
         assert any("cycle" in x for x in f) and any("reach 'S'" in x for x in f)
 
+    def test_route_between_two_cycles_still_counts(self):
+        """Edges INSIDE a cycle are set aside for path counting; an edge from one
+        cycle to another is an ordinary route. Two such routes into S are a diamond
+        even though both start in cycles."""
+        f = lint_tml(_model(
+            _t("A", _j("A", "B"), _j("A", "S")), _t("B", _j("B", "A"), _j("B", "C")),
+            _t("C", _j("C", "D"), _j("C", "S")), _t("D", _j("D", "C")),
+            _t("S")))
+        assert sorted(_ids(f)) == ["I17", "I17", "I17"]
+        assert any("reach 'S' from 'A/B'" in x and "A/B -> C/D -> S" in x for x in f)
+
     def test_on_table_names_are_case_insensitive(self):
         assert lint_tml(_model(
             _t("Orders", {"name": "j", "with": "Customer",
@@ -256,6 +267,15 @@ class TestRequiredJoinKey:
              "on": "[ORDERS::INC] = [INCIDENT::ID]"}]}})
         f = lint_required_join_key(m, self.KEY, table_joins=idx)
         assert len(f) == 1 and "does not equate 'customer_id'" in f[0]
+
+    def test_referencing_join_declared_on_the_target_table(self):
+        m = self._m(_t("LINES", {"with": "ORDERS", "referencing_join": "O_TO_L"}),
+                    _t("ORDERS"))
+        idx = table_join_index({"ORDERS": {"joins_with": [
+            {"name": "O_TO_L", "destination": {"name": "LINES"},
+             "on": "[ORDERS::ID] = [LINES::ORDER_ID] AND "
+                   "[ORDERS::customer_id] = [LINES::customer_id]"}]}})
+        assert lint_required_join_key(m, self.KEY, table_joins=idx) == []
 
     def test_referencing_join_without_its_table_tml_says_so(self):
         m = self._m(_t("ORDERS", {"with": "INCIDENT", "referencing_join": "O_TO_I"}),

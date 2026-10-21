@@ -192,56 +192,75 @@ def ambiguous_paths(graph: JoinGraph) -> list[tuple[str, str, list[str], list[st
     the LOWEST shared ancestor, so a diamond deep in a chain is reported once at its
     split point rather than again for every table above it.
 
-    Edges inside a directed cycle are ignored here: the cycle is reported on its own,
-    and path counting through a loop is meaningless.
+    A directed cycle is collapsed to one node first, named by its members joined with
+    `/`: the cycle is reported on its own, path counting through a loop is meaningless,
+    and a second route that merely passes through a cycle is still a second route.
     """
-    adj = graph.adjacency()
-    in_cycle: set = set()
-    for comp in strongly_connected(adj):
-        if len(comp) > 1:
-            in_cycle.update(comp)
-    dag = {v: [w for w in ws if not (v in in_cycle and w in in_cycle)]
-           for v, ws in adj.items()}
-    preds: dict[str, list[str]] = {v: [] for v in dag}
-    for v, ws in dag.items():
-        for w in ws:
-            preds[w].append(v)
-
-    anc_cache: dict[str, set] = {}
-
-    def ancestors(v: str) -> set:
-        if v not in anc_cache:
-            seen, todo = {v}, [v]
-            while todo:
-                for p in preds[todo.pop()]:
-                    if p not in seen:
-                        seen.add(p)
-                        todo.append(p)
-            anc_cache[v] = seen
-        return anc_cache[v]
-
+    dag = _condense(graph.adjacency())
+    anc = _Ancestors(dag)
     found = []
     for v in sorted(dag):
-        ps = sorted(set(preds[v]))
-        hit = None
-        for i, p1 in enumerate(ps):
-            for p2 in ps[i + 1:]:
-                shared = ancestors(p1) & ancestors(p2)
-                if shared:
-                    hit = (p1, p2, shared)
-                    break
-            if hit:
-                break
+        hit = _first_converging_pair(sorted(set(anc.preds[v])), anc)
         if not hit:
             continue
         p1, p2, shared = hit
-        lowest = sorted(u for u in shared
-                        if not any(u in ancestors(c) for c in shared if c != u))
-        src = lowest[0] if lowest else sorted(shared)[0]
-        a = _shortest_path(dag, src, p1) + [v]
-        b = _shortest_path(dag, src, p2) + [v]
-        found.append((src, v, a, b))
+        src = _lowest(shared, anc)
+        found.append((src, v, _shortest_path(dag, src, p1) + [v],
+                      _shortest_path(dag, src, p2) + [v]))
     return found
+
+
+def _condense(adj: dict[str, list[str]]) -> dict[str, list[str]]:
+    """The condensation DAG: each strongly connected component becomes one node, named
+    by its sorted members joined with `/` (a single table keeps its own name)."""
+    label: dict[str, str] = {}
+    for comp in strongly_connected(adj):
+        for n in comp:
+            label[n] = "/".join(comp)
+    out: dict[str, set] = {lbl: set() for lbl in label.values()}
+    for v, ws in adj.items():
+        for w in ws:
+            if label[v] != label[w]:
+                out[label[v]].add(label[w])
+    return {v: sorted(ws) for v, ws in out.items()}
+
+
+class _Ancestors:
+    """Predecessors of a DAG and memoised ancestor sets (each node its own ancestor)."""
+
+    def __init__(self, dag: dict[str, list[str]]):
+        self.preds: dict[str, list[str]] = {v: [] for v in dag}
+        for v, ws in dag.items():
+            for w in ws:
+                self.preds[w].append(v)
+        self._cache: dict[str, set] = {}
+
+    def of(self, v: str) -> set:
+        if v not in self._cache:
+            seen, todo = {v}, [v]
+            while todo:
+                for p in self.preds[todo.pop()]:
+                    if p not in seen:
+                        seen.add(p)
+                        todo.append(p)
+            self._cache[v] = seen
+        return self._cache[v]
+
+
+def _first_converging_pair(preds: list[str], anc: _Ancestors):
+    """The first two predecessors with a common ancestor, and that shared set."""
+    for i, p1 in enumerate(preds):
+        for p2 in preds[i + 1:]:
+            shared = anc.of(p1) & anc.of(p2)
+            if shared:
+                return p1, p2, shared
+    return None
+
+
+def _lowest(shared: set, anc: _Ancestors) -> str:
+    """The shared ancestor nearest the merge point: one that is no other's ancestor."""
+    lowest = sorted(u for u in shared if not any(u in anc.of(c) for c in shared if c != u))
+    return lowest[0] if lowest else sorted(shared)[0]
 
 
 def on_clause_tables(on: str) -> list[str]:
@@ -306,26 +325,37 @@ def lint_required_join_key(model_tml: dict, keys: list, exempt: list = (),
                 graph.physical[e.frm].lower(), graph.physical[e.to].lower()}
         if ends & skip:
             continue
-        on = e.join.get("on")
-        if not on and e.join.get("referencing_join"):
-            on = (table_joins or {}).get(
-                (graph.physical[e.frm].lower(), e.join["referencing_join"]))
-        label = f"join '{e.name}' ({e.frm} -> {e.to})"
-        if not on:
-            findings.append(
-                f"JOIN-KEY: {label} has no on: clause in the Model and its Table TML is "
-                f"not in this batch, so the join key cannot be checked. Lint the Table "
-                f"TML alongside the Model, or --exempt one of its tables."
-            )
-            continue
-        phys = {graph.physical[e.frm].lower(), graph.physical[e.to].lower()}
-        for key in keys:
-            if not _equates_key(on, key, phys):
-                findings.append(
-                    f"JOIN-KEY: {label} does not equate '{key}' on both tables "
-                    f"(on: {on}) — rows from different tenants can match. Add "
-                    f"`AND [{graph.physical[e.frm]}::{key}] = "
-                    f"[{graph.physical[e.to]}::{key}]`, or --exempt the table if it "
-                    f"is shared reference data with no '{key}'."
-                )
+        findings.extend(_join_key_findings(graph, e, keys, table_joins or {}))
     return findings
+
+
+def _join_on(graph: JoinGraph, e: Edge, table_joins: dict):
+    """The join's `on:` — inline, else the referenced Table TML join. A referenced join
+    can be declared on either table's TML, so both are looked up."""
+    on = e.join.get("on")
+    ref = e.join.get("referencing_join")
+    if on or not ref:
+        return on
+    for table in (graph.physical[e.frm], graph.physical[e.to]):
+        on = table_joins.get((table.lower(), ref))
+        if on:
+            return on
+    return None
+
+
+def _join_key_findings(graph: JoinGraph, e: Edge, keys: list, table_joins: dict) -> list[str]:
+    label = f"join '{e.name}' ({e.frm} -> {e.to})"
+    on = _join_on(graph, e, table_joins)
+    if not on:
+        return [
+            f"JOIN-KEY: {label} has no on: clause in the Model and its Table TML is "
+            f"not in this batch, so the join key cannot be checked. Lint the Table "
+            f"TML alongside the Model, or --exempt one of its tables."
+        ]
+    pf, pt = graph.physical[e.frm], graph.physical[e.to]
+    return [
+        f"JOIN-KEY: {label} does not equate '{key}' on both tables (on: {on}) — rows "
+        f"from different tenants can match. Add `AND [{pf}::{key}] = [{pt}::{key}]`, "
+        f"or --exempt the table if it is shared reference data with no '{key}'."
+        for key in keys if not _equates_key(on, key, {pf.lower(), pt.lower()})
+    ]

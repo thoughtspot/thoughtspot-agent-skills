@@ -254,6 +254,7 @@ are roughly ordered by value÷effort.
 | ~~BL-381~~ | ~~`check_skill_versions` accepts a changelog whose top row is lower than the row below it (a version going backwards after an accept-both merge)~~ | DONE (2026-10-07) |
 | ~~BL-382~~ | ~~The Snowflake from-direction translator (`sv_sql`) does not strip SQL comments: `/* x */` and `-- y` became `/ * [T::X] * /` and `- - [T::Y]`~~ | DONE (2026-10-07 — ts-cli v0.173.0) |
 | BL-395 | Re-run the AgentQL retest suite on 26.9.0.sw and reconcile `limitations.md` (3 tickets fixed only in that release, the regex row) | 2026-11-30 |
+| BL-396 | ERD `order-fulfilment` example fails I18/I19: an alias self-join and alias names in 19 `on:` clauses — lint-clean when written, rejected by import | 2026-11-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -14276,3 +14277,29 @@ September, while 26.9.0.cl PROD still emits `like_regex`.
    bump the currency anchor.
 
 **Target:** 2026-11-30, or the first PROD build after 26.9.0.cl, whichever comes first.
+
+## BL-396 — ERD `order-fulfilment` example fails I18/I19 `Tier 2`
+
+**Filed:** 2026-10-21. **Source:** the join-graph lint rules I17-I19 (ts-cli 0.176.0),
+live-probed on se-thoughtspot the same day.
+
+**What.** `agents/cli/ts-object-model-erd/examples/order-fulfilment/tml/dunder_mifflin_order_fulfilment.model.tml`
+was synthetic, lint-clean TML when it shipped (1.8.1), but two of its showcased shapes are
+rejected by a real import:
+
+1. **I18** — `SALES_REP → SALES_REP_MANAGER` is a self-join between two aliases of
+   `DM_EMPLOYEE`. Self-joins are unsupported in Models in every form probed (13125).
+2. **I19** — 19 joins to aliases write the ALIAS name in `on:`
+   (`[DM_ORDER::SALES_REP_ID] = [SALES_REP::EMPLOYEE_ID]`). `on:` takes the physical name
+   (`[DM_EMPLOYEE::EMPLOYEE_ID]`); an alias there is "Invalid srcTable or destTable".
+
+The README advertises "A self-join through an alias" as a feature of the example, so a
+reader copying it learns a pattern that cannot import.
+
+**Do.** Rewrite the 19 `on:` clauses to physical names; drop the manager self-join (or
+replace it with a flattened manager column on a view, the I18 fix); remove the README
+bullet; re-render `model_erd.html` (its viewer is baked, and `tests/test_examples.py`
+fails on drift); PATCH-bump `ts-object-model-erd`. Then `ts tml lint --dir` on the
+example's `tml/` must be clean.
+
+**Target:** 2026-11-15.
