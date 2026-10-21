@@ -188,13 +188,16 @@ A pack whose `explore.realms` lists realms has a Tiled map for each, plus an ove
 data). `maps.py` checks them in the build (design §4.2), and refuses anything Phaser 4 or the
 explore page would read differently from the check:
 
-- **Shape:** orthogonal and finite; layers at the top level, unoffset: tile layers `floor` and
-  `walls` (the map's size) and one object layer `objects`; one embedded tileset named `tiles`
-  whose `.png` is in the pack; 16px tiles; objects are unrotated rectangles (not tile objects or
-  points), each exactly one tile on the grid (snap to grid in Tiled), because the explore page
-  gives each a 16px body at its centre; a wall, or someone solid, all round the edge, because the
-  page doesn't stop the player at the map's edge.
-- **Collision** is the `walls` layer: any non-empty tile blocks.
+- **Shape:** orthogonal and finite; layers at the top level, unoffset: tile layers `floor`,
+  `walls` and, if you like, `decor` (each the map's size) and one object layer `objects`; one
+  embedded tileset named `tiles` whose `.png` is in the pack, at the size the map says; 16px tiles;
+  objects are unrotated rectangles (not tile objects or points), each exactly one tile on the grid
+  (snap to grid in Tiled), because the explore page gives each a 16px body at its centre; a wall,
+  or someone solid, all round the edge, because the page doesn't stop the player at the map's edge.
+- **Collision** is the `walls` layer: any non-empty tile blocks. Paint walls with the wall tile
+  (`tiles.json`'s `wall`): the page shows its brick face where floor is below and its dark top
+  elsewhere. Any other tile on `walls` (a crate, a barrel) is drawn as it is, and blocks.
+- **Decoration** that you can walk past (torches on a wall face, rails, rubble) goes on `decor`.
 - **Objects** have a `type` and string properties only:
   - `spawn`, where the player appears (one per map);
   - `portal to=<realm id>`, overworld only, one per realm;
@@ -245,9 +248,16 @@ packs/agentql/tiles/, maps/*.tmj        ─┘                 └─► explore
   Earcut, psrdnoise). To update: `npm pack phaser@<version>`, copy
   `dist/phaser-arcade-physics.min.js`, update the hash, `package.json` and `package-lock.json`
   together, and recheck the bundled works in its `src/`.
-- **Tiles** are from Kenney's 1-Bit Pack (CC0, `tiles/LICENSE-kenney.txt`), tinted amber at run
-  time, which needs WebGL; without it the page offers the classic version. `tiles/tiles.json` names
-  each frame (floor, wall, player, the five roles, exit, gate, portal).
+- **Tiles** are Kenney's Tiny Dungeon (CC0, `tiles/LICENSE-kenney.txt`): `tiles/tiles.png` is its
+  `tilemap_packed.png` (12x11 frames of 16px) with one row added, of which frame 132, the top of a
+  wall, is ours. `tiles/tiles.json` names the frame for everything the page draws (the wall and its
+  top, the player, the five roles, the open chest, exit, gate, portal); the build checks it. A
+  realm's look is its map's own floor and decoration. WebGL is used where the browser has it,
+  else a 2D canvas.
+- **Motion:** the player faces the way it walks and bobs a pixel each step; the merchant, guide
+  and foe breathe; maps fade in. With reduced motion on, none of it.
+- **Screenshots:** `python3 tools/quest/tests/shoot_maps.py <folder>` saves every map as a player
+  first sees it (`explore/#look=<map>`, local only), for reviewing art and map changes.
 - **Play:** arrow keys or the touch pad walk; Enter, Space or the pad's talk button talks to whoever
   is next to you (up, down, left or right; the one the game waits on first), but only while the
   map has focus, so links and buttons keep Enter and Space; number keys pick in a dialog; Esc

@@ -15,7 +15,7 @@
   const progress = Quest.progress(realms, pack.storage_key), machine = Quest.machine(quest);
   const Sound = Quest.sound(pack.storage_key, S);
   const explorable = new Set(pack.explore_realms);
-  const TILE = 16, AMBER = 0xffb43a, DIM = 0xa8722a;
+  const TILE = 16;
   const ROLES = ["merchant", "guide", "compiler", "foe", "reward"];
   const FRAMES = await fetch("tiles.json").then(r => r.json());
 
@@ -30,6 +30,14 @@
   for (const b of document.querySelectorAll("#pad button")) { b.textContent = PAD[b.dataset.key]; b.setAttribute("aria-label", PAD[b.dataset.key]); }
   Sound.label();
   const toast = t => { $("toast").textContent = t; };
+  // The gold bar: where you are, and your gold (this quest's, in a realm; every realm's, on the map).
+  const open = realms.filter(r => !r.sealed), maxGold = Quest.rules.maxGold;
+  function hud() {
+    const inRealm = world && world.mapId !== "overworld", r = inRealm ? realms[state.realm] : null;
+    $("hud-place").textContent = r ? r.name : S("explore_hud_map");
+    $("hud-gold").textContent = r ? S("explore_hud_gold", { gold: state.gold, max: maxGold(r) })
+                                  : S("explore_hud_gold", { gold: progress.treasury(), max: open.reduce((n, x) => n + maxGold(x), 0) });
+  }
   const announce = t => { $("live").textContent = t; };
 
   // ---- the machine, and the dialog that draws its screens ------------------------------------
@@ -76,6 +84,7 @@
       if (state.screen === "realm") return show();                  // still at the gate: locked or sealed
       closeDialog(); return goTo(realms[state.realm].id);
     }
+    hud();
     if (machine.expected(state) !== dialogStep) { closeDialog(); if (world) world.refresh(); return; }
     show();
   }
@@ -176,10 +185,17 @@
     create() {
       const map = this.make.tilemap({ key: this.mapId });
       const tiles = map.addTilesetImage("tiles", "tiles");
-      const floor = map.createLayer("floor", tiles), walls = map.createLayer("walls", tiles);
+      map.createLayer("floor", tiles);
+      const walls = map.createLayer("walls", tiles);
       this.walls = walls;
-      floor.setTint(DIM); walls.setTint(AMBER);
       walls.setCollisionByExclusion([-1]);
+      // A wall painted with the wall tile shows its brick face where floor is below it, and its dark
+      // top elsewhere; any other tile on the walls layer (a crate, a barrel) is drawn as it is.
+      const plain = t => !!t && (t.index - 1 === FRAMES.wall || t.index - 1 === FRAMES.wall_top);
+      walls.forEachTile(t => {
+        if (plain(t)) t.index = 1 + (t.y + 1 < map.height && !plain(walls.getTileAt(t.x, t.y + 1)) ? FRAMES.wall : FRAMES.wall_top);
+      });
+      if (map.getLayer("decor")) map.createLayer("decor", tiles);   // torches, rails, rubble: drawn, never blocking
       this.objects = [];
       this.solid = this.physics.add.staticGroup();
       this.gates = [];
@@ -190,23 +206,30 @@
                       step: ROLES.includes(o.type) ? `${prop("encounter")}:${o.type}` : o.type === "throne" ? `hall:${prop("hall")}` : null };
         if (o.type === "spawn") { this.spawn = { x, y }; continue; }
         if (o.type === "gate") {
-          const g = this.solid.create(x, y, "tiles", FRAMES.gate).setTint(AMBER);
+          const g = this.solid.create(x, y, "tiles", FRAMES.gate);
           g.requires = String(prop("requires") || "").split(",").map(s => s.trim()).filter(Boolean);
           this.gates.push(g); continue;
         }
-        obj.sprite = this.solid.create(x, y, "tiles", FRAMES[o.type] ?? FRAMES.portal).setTint(AMBER);
+        obj.sprite = this.solid.create(x, y, "tiles", FRAMES[o.type] ?? FRAMES.portal);
+        // The living breathe: a pixel up and down, out of step with each other.
+        if (!reduced && ["merchant", "guide", "foe"].includes(o.type))
+          this.tweens.add({ targets: obj.sprite, y: y - 1, duration: 700 + 90 * this.objects.length, yoyo: true, repeat: -1, ease: "Stepped" });
         this.objects.push(obj);
       }
-      this.player = this.physics.add.sprite(this.spawn.x, this.spawn.y, "tiles", FRAMES.player).setTint(0xffe6b0);
+      // The player's body moves; what you see follows it, facing the way it walks, with a step bob.
+      this.player = this.physics.add.sprite(this.spawn.x, this.spawn.y, "tiles", FRAMES.player).setVisible(false);
       this.player.body.setSize(12, 12);
+      this.look = this.add.image(this.spawn.x, this.spawn.y, "tiles", FRAMES.player).setDepth(10);
       this.physics.add.collider(this.player, walls);
       this.physics.add.collider(this.player, this.solid);
       this.cursors = this.input.keyboard.createCursorKeys();
       this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
       this.cameras.main.startFollow(this.player, true, reduced ? 1 : 0.2, reduced ? 1 : 0.2);
       this.cameras.main.setZoom(Math.max(1, Math.floor(this.scale.height / map.heightInPixels)));
+      if (!reduced) this.cameras.main.fadeIn(220, 0, 0, 0);
       this.refresh();
       world = this;
+      hud();
       log(`MAP ${this.mapId}`);
     }
     refresh() {
@@ -214,12 +237,15 @@
         const open = g.requires.every(done);
         g.setVisible(!open); g.body.enable = !open;
       }
+      for (const o of this.objects)       // the hoard's chest stands open once its step is done
+        if (o.type === "reward") o.sprite.setFrame(done(o.step) ? FRAMES.reward_open : FRAMES.reward);
     }
     freeze(on) {
       this.input.keyboard.enabled = !on;
       this.game.input.keyboard.enabled = !on;
       if (!on) this.input.keyboard.resetKeys();
       this.player.setVelocity(0, 0);
+      this.look.setPosition(Math.round(this.player.x), Math.round(this.player.y));
       this.frozen = on;
     }
     // Whoever the player stands next to, up, down, left or right (not across a corner); the one the
@@ -242,6 +268,9 @@
       const dx = (c.left.isDown || pad.left ? -1 : 0) + (c.right.isDown || pad.right ? 1 : 0);
       const dy = (c.up.isDown || pad.up ? -1 : 0) + (c.down.isDown || pad.down ? 1 : 0);
       this.player.setVelocity(dx * v, dy * v);
+      if (dx) this.look.setFlipX(dx < 0);
+      const step = !reduced && (dx || dy) && Math.floor(this.time.now / 140) % 2;
+      this.look.setPosition(Math.round(this.player.x), Math.round(this.player.y) - (step ? 1 : 0));
     }
   }
   // Standing by a portal says where it goes, as the classic map's entry does (best gold, sealed,
@@ -269,18 +298,20 @@
   // The scripted play (tests/smoke_explore.py) writes saves, so it runs only on a local server.
   const LOCAL = ["127.0.0.1", "localhost"].includes(location.hostname);
   const SMOKE = location.hash.startsWith("#smoke=") && LOCAL;
-  // WebGL is required: tinting the tiles amber needs it. Without it, offer the classic version.
+  // #look=<map>, locally: open that map straight away, for screenshots (tests/shoot_maps.py).
+  const LOOK = LOCAL && /^#look=([a-z0-9_]+)$/.exec(location.hash);
+  // WebGL where the browser has it, else a 2D canvas; if neither starts, offer the classic version.
   let game;
   try {
     game = new Phaser.Game({
-      type: Phaser.WEBGL, parent: "world", width: 320, height: 128, pixelArt: true, backgroundColor: "#150e06",
+      type: Phaser.AUTO, parent: "world", width: 320, height: 128, pixelArt: true, backgroundColor: "#16131f",
       audio: { noAudio: true }, physics: { default: "arcade" }, scale: { mode: Phaser.Scale.FIT },
       input: { keyboard: { target: $("world") } }, banner: false,
       // A headless smoke run uses virtual time, which never fires animation frames.
-      fps: { forceSetTimeOut: SMOKE }
+      fps: { forceSetTimeOut: SMOKE || !!LOOK }
     });
   } catch (e) {
-    $("nogl").textContent = S("explore_no_webgl");
+    $("nogl").textContent = S("explore_no_canvas");
     $("nogl").style.display = "block";
     for (const id of ["help", "world", "pad"]) $(id).hidden = true;
     document.querySelector(".sound").hidden = true;
@@ -288,7 +319,8 @@
     return;
   }
   game.scene.add("world", World);
-  goTo("overworld");
+  if (LOOK && LOOK[1] !== "overworld") state = Object.assign(state, { realm: realms.findIndex(r => r.id === LOOK[1]) });
+  goTo(LOOK ? LOOK[1] : "overworld");
   $("world").focus({ preventScroll: true });
 
   // For tests: the state, the world, and a scripted play of one realm (see tests/smoke_explore.py).
