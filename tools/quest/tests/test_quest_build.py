@@ -681,22 +681,47 @@ def _rel(path: pathlib.Path) -> str:
     return path.relative_to(B.ROOT).as_posix()
 
 
+def _tracked() -> list[str]:
+    """Committed files only: a clone keeps ignored leftovers (dist/, __pycache__/) of a moved folder."""
+    out = subprocess.run(["git", "ls-files"], cwd=B.ROOT, capture_output=True, text=True, check=True).stdout
+    return out.splitlines()
+
+
+def _tracked_path_exists(rel: str, tracked: list[str]) -> bool:
+    return rel in tracked or any(t.startswith(rel.rstrip("/") + "/") for t in tracked)
+
+
 def test_pages_path_filters_cover_the_game_and_its_sources():
     # A stale filter never fails: pushes to main just stop redeploying the game.
     wf = yaml.safe_load((B.ROOT / ".github/workflows/pages.yml").read_text(encoding="utf-8"))
     triggers = wf[True] if True in wf else wf["on"]
     filters = [_github_glob(f) for f in triggers["push"]["paths"]]
-    files = [_rel(f) for f in B.ROOT.rglob("*") if f.is_file() and ".git" not in f.parts]
+    files = _tracked()
     for f, rx in zip(triggers["push"]["paths"], filters):
         assert any(rx.fullmatch(x) for x in files), f"pages.yml path filter {f!r} matches nothing in the repo"
-    for needed in (B.HERE / "build.py", B.ENCOUNTERS, B.TEMPLATE, B.LESSON_SQL):
+    # Everything the site is built from: the game, its data, schema, fonts, poster and capture.
+    poster = B.HERE / "promo/agentql-quest-poster.png"
+    for needed in (B.HERE / "build.py", B.ENCOUNTERS, B.TEMPLATE, B.SCHEMA, poster, B.LESSON_SQL,
+                   *sorted(B.FONT_DIR.glob("*.woff2"))):
         assert any(rx.fullmatch(_rel(needed)) for rx in filters), f"pages.yml would not redeploy for {_rel(needed)}"
 
 
 def _github_glob(pattern: str) -> re.Pattern:
-    """A workflow path filter as a regex: ** crosses folders, * stays within one."""
-    out = re.escape(pattern).replace(r"\*\*", "\0").replace(r"\*", "[^/]*").replace("\0", ".*")
+    """A workflow path filter as a regex, for the subset pages.yml uses: `**/` is zero or more
+    folders, `**` anything, `*` anything within one folder. Other syntax (`?`, `[...]`, `!`) isn't
+    modelled; it would fail this test loudly, never let a stale filter pass."""
+    out = (re.escape(pattern).replace(r"\*\*/", "\1").replace(r"\*\*", "\0")
+           .replace(r"\*", "[^/]*").replace("\1", "(?:.*/)?").replace("\0", ".*"))
     return re.compile(out)
+
+
+def test_github_glob_follows_the_documented_forms_it_models():
+    assert _github_glob("docs/**/*.md").fullmatch("docs/README.md")
+    assert _github_glob("docs/**/*.md").fullmatch("docs/a/b/c.md")
+    assert _github_glob("**/README.md").fullmatch("README.md")
+    assert not _github_glob("docs/*").fullmatch("docs/a/b.md")
+    assert not _github_glob("tools/quest/**").fullmatch("tools/questx/a.py")
+    assert not _github_glob("a.md").fullmatch("aXmd")
 
 
 def test_pre_commit_runs_the_quest_gate_for_the_game_and_the_course():
@@ -710,15 +735,27 @@ def test_pre_commit_runs_the_quest_gate_for_the_game_and_the_course():
 
 
 def test_every_tools_path_named_in_the_quest_docs_exists():
-    # Commands and docstrings that name a tools/ path (README, build.py, promo, the validator,
-    # the workflows' comments) must keep pointing at real files after a move.
+    # Commands and docstrings that name a tools/ path (the quest's README, build.py and promo, the
+    # validator, pages.yml and the root README) must keep pointing at committed files after a move.
     sources = [B.HERE / "README.md", B.HERE / "build.py", B.HERE / "promo/README.md",
                B.HERE / "promo/make_ad.py", B.ROOT / "tools/validate/check_agentql_quest.py",
                B.ROOT / ".github/workflows/pages.yml", B.ROOT / "README.md"]
     named = {m for f in sources for m in re.findall(r"\btools/[\w./-]*\w", f.read_text(encoding="utf-8"))}
     assert any(n.startswith("tools/quest/") for n in named)
-    missing = sorted(n for n in named if not (B.ROOT / n).exists() and not any(part in n for part in ("/dist", "*")))
+    # dist/ is build output and isn't committed, so check the folder it is written into.
+    tracked = _tracked()
+    missing = sorted(n for n in named if not _tracked_path_exists(n.partition("/dist")[0], tracked))
     assert missing == [], missing
+
+
+def test_the_root_readme_tree_and_the_design_doc_name_the_folder():
+    # check_consistency only looks for the name as a substring, and "quest" is in the URL.
+    readme = (B.ROOT / "README.md").read_text(encoding="utf-8")
+    assert re.search(rf"[\u251c\u2514]\u2500\u2500 {re.escape(B.HERE.name)}/ ", readme), "README tree"
+    # check_references skips docs/superpowers/.
+    spec = B.ROOT / "docs/superpowers/specs/2026-10-21-agentql-quest-pack-design.md"
+    links = re.findall(r"\]\((\.\./[^)\s#]+)\)", spec.read_text(encoding="utf-8"))
+    assert links and all((spec.parent / link).resolve().exists() for link in links), links
 
 
 # ---- lesson and module numbers the text names ------------------------------------------------
