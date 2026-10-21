@@ -409,6 +409,39 @@ Exits non-zero if any GUID could not be deleted, unless the only failures are
 
 ---
 
+### `ts model dictionary`
+
+A data dictionary for one or more Models: one row per column, with its role,
+aggregation, data type, source table and column, formula, description, synonyms, AI
+context, and whether it is indexed or hidden. The data type and warehouse column come
+from the Table TMLs, because a Model column has no data type of its own: `--model`
+exports the Tables with the Model, and with `--file`/`--dir` you include the Table
+TMLs alongside it (a Model read alone gives every row with the type left blank).
+A column on a SQL View is sourced from its `sql_output_column`, and its data type is
+blank: SQL View TML carries none.
+
+```bash
+# Live: export the Model and its Tables, print JSON rows
+ts model dictionary --model <model-guid> --profile myprofile
+
+# Offline, from TML kept in git: one CSV for every Model in the directory
+ts model dictionary --dir ./tml --format csv --out dictionary.csv
+
+# One worksheet per Model (needs: pip install 'thoughtspot-cli[xlsx]')
+ts model dictionary --model <g1> --model <g2> --format xlsx --out dictionary.xlsx
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--model`, `-m` | none | Model GUID to export live with its Tables (repeatable). Needs a profile |
+| `--file` / `--dir` | none | Model and Table TML files, offline. Not combined with `--model` |
+| `--format`, `-f` | `json` | `json` (to stdout), `csv` (stdout or `--out`; a `Model` column lets several Models share one file), `xlsx` (needs `--out`) |
+| `--out`, `-o` | none | Output file. Required for `xlsx` |
+
+XLSX sheet titles are made valid and unique: Excel refuses a title longer than 31
+characters or containing `[]:*?/\`, so `Sales: EU/UK` becomes `Sales_ EU_UK`, and a
+repeated name gets ` (2)`.
+
 ### `ts model promote-formula`
 
 Promote formulas from an Answer into a Model. Exports both TMLs, detects
@@ -2702,6 +2735,7 @@ JSON-RPC over websocket) require the optional extra:
 
 ```bash
 pip install 'thoughtspot-cli[qlik]'    # adds websocket-client
+pip install 'thoughtspot-cli[xlsx]'    # adds openpyxl, for `ts model dictionary --format xlsx`
 ```
 
 Invoking a live mode without it fails with that exact remediation message. The

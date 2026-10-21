@@ -73,10 +73,11 @@ check ID appearing in reports).
 | ID | What it detects | Severity logic |
 |---|---|---|
 | A1 | Description coverage below threshold | GREEN/YELLOW/RED by profile |
-| A2 | Synonym coverage below threshold | GREEN/YELLOW/RED by profile |
+| A2 | Synonym coverage below threshold — read from `properties.synonyms`, where Model TML keeps them (before ts-cli 0.177.0 it read the column root and scored every Model 0%) | GREEN/YELLOW/RED by profile |
 | A3 | No AI instructions configured | HIGH (Spotter) / MEDIUM (General) |
 | A4 | Missing Spotter config | HIGH (Spotter) / MEDIUM (General) |
 | A5 | Spotter readiness composite score | Weighted score → severity |
+| A6 | Measure AI context coverage — share of visible `MEASURE` columns with a non-empty `properties.ai_context`. Attributes are not counted: the coach's ai_context schema requires it on every measure (`additivity`, `time_basis`, `grain_keys`) and leaves it empty, correctly, on most attributes such as surrogate keys | ≥ 80% clean; < 50% HIGH; otherwise MEDIUM. The finding lists the uncovered measures |
 
 ---
 

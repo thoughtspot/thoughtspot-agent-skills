@@ -36,8 +36,8 @@ jobs:
 
       - name: Install optional extras for audit coverage
         # Core deps are installed above; extras pull in snowflake-connector-python,
-        # websocket-client, cryptography, etc. that also need CVE coverage.
-        run: pip install -e "tools/ts-cli[snowflake,qlik]"
+        # websocket-client, openpyxl, cryptography, etc. that also need CVE coverage.
+        run: pip install -e "tools/ts-cli[snowflake,qlik,xlsx]"
 
       - name: Dependency vulnerability scan (pip-audit)
         # Audits the full environment (core + optional extras) against the
@@ -338,7 +338,7 @@ jobs:
       - name: Install runtime deps + pip-audit
         run: |
           pip install pip-audit
-          pip install -e "tools/ts-cli[snowflake,qlik]"
+          pip install -e "tools/ts-cli[snowflake,qlik,xlsx]"
 
       - name: Dependency vulnerability scan (pip-audit)
         run: pip-audit
