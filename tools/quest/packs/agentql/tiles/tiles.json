@@ -1,0 +1,13 @@
+{
+  "floor": 0,
+  "wall": 1,
+  "player": 2,
+  "merchant": 3,
+  "guide": 4,
+  "compiler": 5,
+  "foe": 6,
+  "reward": 7,
+  "exit": 8,
+  "gate": 9,
+  "portal": 10
+}

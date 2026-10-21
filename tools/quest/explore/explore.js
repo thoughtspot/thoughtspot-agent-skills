@@ -1,0 +1,285 @@
+// The explore front end: walk a pack's Tiled maps (Phaser), and answer each step in a dialog drawn
+// by Quest.screens, the same screens as the classic page. The rules of play are Quest.machine's:
+// talking to someone sends `interact {step}`, which it refuses unless that step is next.
+// Design: docs/superpowers/specs/2026-10-21-agentql-quest-pack-design.md (§4).
+"use strict";
+(async function () {
+  const $ = id => document.getElementById(id);
+  const log = t => { $("log").textContent += t + "\n"; };
+  window.addEventListener("error", e => log(`ERROR ${e.message}`));
+  window.addEventListener("unhandledrejection", e => log(`ERROR ${e.reason}`));
+
+  const [quest, art] = await Promise.all([fetch("../quest.json").then(r => r.json()), fetch("art.json").then(r => r.json())]);
+  const pack = quest.pack, realms = quest.realms;
+  const { S } = Quest.wording(pack.strings);
+  const progress = Quest.progress(realms, pack.storage_key), machine = Quest.machine(quest);
+  const Sound = Quest.sound(pack.storage_key, S);
+  const explorable = new Set(pack.explore_realms);
+  const TILE = 16, AMBER = 0xffb43a, DIM = 0xa8722a;
+  const ROLES = ["merchant", "guide", "compiler", "foe", "reward"];
+  const FRAMES = await fetch("tiles.json").then(r => r.json());
+
+  // ---- the page's words ----------------------------------------------------------------------
+  $("help").textContent = S("explore_help");
+  $("classic").textContent = S("explore_classic");
+  $("world").setAttribute("aria-label", S("explore_world"));
+  $("close").textContent = S("explore_close");
+  $("dialog-title").textContent = pack.title;
+  const PAD = { left: S("explore_pad_left"), up: S("explore_pad_up"), down: S("explore_pad_down"),
+                right: S("explore_pad_right"), talk: S("explore_pad_talk") };
+  for (const b of document.querySelectorAll("#pad button")) { b.textContent = PAD[b.dataset.key]; b.setAttribute("aria-label", PAD[b.dataset.key]); }
+  Sound.label();
+  const toast = t => { $("toast").textContent = t; };
+  const announce = t => { $("live").textContent = t; };
+
+  // ---- the machine, and the dialog that draws its screens ------------------------------------
+  let state = machine.fresh(), actions = [], dialogStep = null, world = null;
+  state = machine.act(state, { type: "map" }, progress.load()).state;            // the overworld is the map
+  const screens = Quest.screens({ quest, art, progress, machine, state: () => state, announce,
+                                  choose: list => { actions = list.map(c => c.action); } });
+  const dialog = $("dialog");
+  function show() {
+    $("screen").innerHTML = screens.draw(state.screen);
+    Sound.music(screens.MUSIC_FOR[state.screen] || "map");
+    $("screen").querySelector(".choices button")?.focus({ preventScroll: true });
+  }
+  function openDialog(step) {
+    dialogStep = step;
+    if (world) world.freeze(true);
+    if (!dialog.open) dialog.showModal();
+    show();
+  }
+  function closeDialog() {
+    dialogStep = null;
+    if (dialog.open) dialog.close();
+    if (world) world.freeze(false);
+    $("world").focus({ preventScroll: true });
+  }
+  // Esc: not now. The close event comes a task later, so one from a dialog already reopened is stale.
+  dialog.addEventListener("close", () => { if (!dialog.open && dialogStep !== null) closeDialog(); });
+  $("close").addEventListener("click", closeDialog);
+
+  // Do an action from a dialog button: the machine decides; then close the dialog once the game
+  // waits on another step, and follow it to another map when it leaves this one.
+  function dispatch(action) {
+    if (action.type === "realm" && !explorable.has(realms[action.realm].id)) return toClassic(realms[action.realm].id);
+    const out = machine.act(state, action, progress.load());
+    if (out.refused) return;
+    state = out.state;
+    for (const fx of out.effects) {
+      if (fx.type === "sound") Sound.play(fx.name);
+      else if (fx.type === "save") progress.finish(fx.realm, fx.gold);
+    }
+    if (state.screen === "map") { closeDialog(); return goTo("overworld"); }
+    if (dialogStep === "portal") {
+      if (state.screen === "realm") return show();                  // still at the gate: locked or sealed
+      closeDialog(); return goTo(realms[state.realm].id);
+    }
+    if (machine.expected(state) !== dialogStep) { closeDialog(); if (world) world.refresh(); return; }
+    show();
+  }
+  $("screen").addEventListener("click", e => {
+    const b = e.target.closest(".choices button");
+    if (b && actions[+b.dataset.i]) dispatch(actions[+b.dataset.i]);
+  });
+  const toClassic = id => { location.href = `../#realm=${encodeURIComponent(id)}&from=explore`; };
+
+  // Talk to an object the player stands next to.
+  function talk(obj) {
+    if (!obj) return toast(S("explore_nobody"));
+    toast("");
+    if (obj.type === "portal") {
+      const i = realms.findIndex(r => r.id === obj.to);
+      if (!explorable.has(obj.to)) return toClassic(obj.to);
+      state = machine.act(state, { type: "realm", realm: i }, progress.load()).state;
+      Sound.play("blip");
+      return openDialog("portal");
+    }
+    if (obj.type === "exit") {               // leave the realm; a quest left unfinished is not saved
+      state = Object.assign(machine.fresh(), { screen: "map", firstDone: state.firstDone });
+      Sound.play("blip");
+      return goTo("overworld");
+    }
+    const out = machine.act(state, { type: "interact", step: obj.step }, progress.load());
+    if (out.refused) return toast(S("explore_not_yet"));
+    openDialog(obj.step);
+  }
+
+  // ---- input: keys and the touch pad ---------------------------------------------------------
+  const pad = { up: false, down: false, left: false, right: false };
+  document.addEventListener("keydown", e => {
+    Sound.unlock();
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = (e.key || "").toLowerCase();
+    if (k === "s" && !e.repeat) { e.preventDefault(); return Sound.toggle("sfx"); }
+    if (k === "m" && !e.repeat) { e.preventDefault(); return Sound.toggle("music"); }
+    if (dialog.open) {
+      const n = parseInt(e.key, 10);
+      if (!e.repeat && n >= 1 && n <= actions.length) { e.preventDefault(); dispatch(actions[n - 1]); }
+      return;
+    }
+    if ((k === "enter" || k === " ") && !e.repeat && world) { e.preventDefault(); talk(world.nearby()); }
+  });
+  document.addEventListener("click", e => {
+    Sound.unlock();
+    if (e.target.closest("#sound-sfx")) Sound.toggle("sfx");
+    else if (e.target.closest("#sound-music")) Sound.toggle("music");
+  });
+  for (const b of document.querySelectorAll("#pad button")) {
+    const k = b.dataset.key;
+    if (k === "talk") { b.addEventListener("click", () => { Sound.unlock(); if (world && !dialog.open) talk(world.nearby()); }); continue; }
+    b.addEventListener("pointerdown", e => { e.preventDefault(); Sound.unlock(); pad[k] = true; });
+    for (const ev of ["pointerup", "pointerleave", "pointercancel"]) b.addEventListener(ev, () => { pad[k] = false; });
+  }
+  document.addEventListener("visibilitychange", () => (document.hidden ? Sound.pause() : Sound.resume()));
+  // Back from classic mode: saves may have changed there.
+  window.addEventListener("pageshow", () => { if (world) world.refresh(); });
+
+  // ---- the world: one Phaser scene per map ---------------------------------------------------
+  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // The steps a gate waits on are done once the game has moved past them.
+  const done = step => {
+    const r = realms.find(x => x.encounters.some(e => step.startsWith(e.id + ":")) || x.halls.some(h => step === `hall:${h.id}`));
+    if (!r) return false;
+    const order = r.halls.map(h => `hall:${h.id}`).concat(r.encounters.flatMap(e => ROLES.map(x => `${e.id}:${x}`)));
+    const now = machine.expected(state);
+    return (progress.load()[r.id] || {}).done || (now !== null && order.indexOf(now) > order.indexOf(step));
+  };
+
+  class World extends Phaser.Scene {
+    constructor() { super("world"); }
+    init(data) { this.mapId = data.map; }
+    preload() {
+      this.load.spritesheet("tiles", "tiles/tiles.png", { frameWidth: TILE, frameHeight: TILE });
+      for (const id of ["overworld", ...explorable]) this.load.tilemapTiledJSON(id, `maps/${id}.tmj`);
+    }
+    create() {
+      const map = this.make.tilemap({ key: this.mapId });
+      const tiles = map.addTilesetImage("tiles", "tiles");
+      const floor = map.createLayer("floor", tiles), walls = map.createLayer("walls", tiles);
+      floor.setTint(DIM); walls.setTint(AMBER);
+      walls.setCollisionByExclusion([-1]);
+      this.objects = [];
+      this.solid = this.physics.add.staticGroup();
+      this.gates = [];
+      for (const o of map.getObjectLayer("objects").objects) {
+        const prop = n => ((o.properties || []).find(p => p.name === n) || {}).value;
+        const x = o.x + o.width / 2, y = o.y + o.height / 2;
+        const obj = { type: o.type, x, y, to: prop("to"),
+                      step: ROLES.includes(o.type) ? `${prop("encounter")}:${o.type}` : o.type === "throne" ? `hall:${prop("hall")}` : null };
+        if (o.type === "spawn") { this.spawn = { x, y }; continue; }
+        if (o.type === "gate") {
+          const g = this.solid.create(x, y, "tiles", FRAMES.gate).setTint(AMBER);
+          g.requires = String(prop("requires") || "").split(",").map(s => s.trim()).filter(Boolean);
+          this.gates.push(g); continue;
+        }
+        obj.sprite = this.solid.create(x, y, "tiles", FRAMES[o.type] ?? FRAMES.portal).setTint(AMBER);
+        this.objects.push(obj);
+      }
+      this.player = this.physics.add.sprite(this.spawn.x, this.spawn.y, "tiles", FRAMES.player).setTint(0xffe6b0);
+      this.player.body.setSize(12, 12);
+      this.physics.add.collider(this.player, walls);
+      this.physics.add.collider(this.player, this.solid);
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
+      this.cameras.main.startFollow(this.player, true, reduced ? 1 : 0.2, reduced ? 1 : 0.2);
+      this.cameras.main.setZoom(Math.max(1, Math.floor(this.scale.height / map.heightInPixels)));
+      this.refresh();
+      world = this;
+      log(`MAP ${this.mapId}`);
+    }
+    refresh() {
+      for (const g of this.gates) {
+        const open = g.requires.every(done);
+        g.setVisible(!open); g.body.enable = !open;
+      }
+    }
+    freeze(on) {
+      this.input.keyboard.enabled = !on;
+      this.game.input.keyboard.enabled = !on;
+      if (!on) this.input.keyboard.resetKeys();
+      this.player.setVelocity(0, 0);
+      this.frozen = on;
+    }
+    nearby() {
+      const p = this.player;
+      return this.objects.filter(o => Math.abs(o.x - p.x) <= TILE * 1.25 && Math.abs(o.y - p.y) <= TILE * 1.25)
+        .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0] || null;
+    }
+    update() {
+      if (this.frozen) return;
+      const c = this.cursors, v = 90;
+      const dx = (c.left.isDown || pad.left ? -1 : 0) + (c.right.isDown || pad.right ? 1 : 0);
+      const dy = (c.up.isDown || pad.up ? -1 : 0) + (c.down.isDown || pad.down ? 1 : 0);
+      this.player.setVelocity(dx * v, dy * v);
+    }
+  }
+  function goTo(mapId) {
+    world = null;
+    game.scene.start("world", { map: mapId });
+    Sound.music(mapId === "overworld" ? "map" : "battle");
+  }
+
+  // WebGL is required: tinting the tiles amber needs it. Without it, offer the classic version.
+  let game;
+  try {
+    game = new Phaser.Game({
+      type: Phaser.WEBGL, parent: "world", width: 320, height: 144, pixelArt: true, backgroundColor: "#150e06",
+      audio: { noAudio: true }, physics: { default: "arcade" }, scale: { mode: Phaser.Scale.FIT },
+      input: { keyboard: { target: $("world") } }, banner: false,
+      // A headless smoke run (#smoke=) uses virtual time, which never fires animation frames.
+      fps: { forceSetTimeOut: location.hash.startsWith("#smoke=") }
+    });
+  } catch (e) {
+    $("nogl").textContent = S("explore_no_webgl");
+    $("nogl").style.display = "block";
+    log(`NOGL ${e.message}`);
+    return;
+  }
+  game.scene.add("world", World);
+  goTo("overworld");
+  $("world").focus({ preventScroll: true });
+
+  // For tests: the state, the world, and a scripted play of one realm (see tests/smoke_explore.py).
+  window.Quest.explore = {
+    state: () => state, world: () => world, talk, dispatch, actions: () => actions, dialogOpen: () => dialog.open,
+    async smoke(realmId) {
+      const wait = (ms = 50) => new Promise(r => setTimeout(r, ms));
+      const until = async test => { for (let i = 0; i < 200 && !test(); i++) await wait(); if (!test()) throw new Error(`timed out on map ${world ? world.mapId : "(none)"} at frame ${game.loop.frame}`); };
+      await until(() => world && world.mapId === "overworld");
+      const portal = world.objects.find(o => o.type === "portal" && o.to === realmId);
+      const ri = realms.findIndex(r => r.id === realmId);
+      if (machine.locked(Object.assign({}, state, { realm: ri, locked: undefined }), progress.load())) {   // a fresh player plays the first realm first
+        talk(portal); dispatch({ type: "enter" });
+        if (world.mapId !== "overworld" || !dialog.open) throw new Error(`${realmId} let a fresh player in`);
+        log(`LOCKED ${realmId}`);
+        closeDialog();
+        progress.finish(realms[0].id, 0);
+      }
+      talk(portal);
+      if (state.screen !== "realm") throw new Error(`the portal did not open ${realmId}`);
+      dispatch({ type: "enter" });
+      await until(() => world && world.mapId === realmId);
+      const steps = [];
+      for (let n = 0; n < 50; n++) {
+        const want = machine.expected(state);
+        if (want === null) break;
+        const obj = world.objects.find(o => o.step === want);
+        world.player.setPosition(obj.x, obj.y + TILE);           // stand next to it, as a player would walk
+        await wait(80);
+        talk(world.nearby());
+        if (!dialog.open) throw new Error(`talking at ${want} opened no dialog`);
+        steps.push(want + (world.gates.some(g => g.body.enable) ? "[gate-shut]" : ""));
+        for (let d = 0; d < 60 && dialog.open; d++) {
+          const last = actions[actions.length - 1];
+          dispatch(state.flash ? actions[0] : (last && last.type === "magic" ? last : actions[0]));
+          await wait(20);
+        }
+        if (state.screen === "map" || world.mapId === "overworld") break;
+      }
+      log(`SMOKE ${realmId} ${steps.join(" ")} | ${JSON.stringify(progress.load()[realmId] || null)}`);
+      return steps;
+    }
+  };
+  if (location.hash.startsWith("#smoke=")) Quest.explore.smoke(location.hash.slice(7)).catch(e => log(`ERROR smoke: ${e.message}`));
+})();
