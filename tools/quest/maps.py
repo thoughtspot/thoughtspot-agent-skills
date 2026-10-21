@@ -193,8 +193,6 @@ class Map:
                     there = target is not None and target.is_file()
                 except OSError:     # a name too long for the file system, say
                     there = False
-
-
                 atlas = (pack_dir / "tiles" / "tiles.png").resolve()
                 if (target is None or not target.is_relative_to(pack_dir) or target.suffix.lower() not in IMAGES
                         or not there):
