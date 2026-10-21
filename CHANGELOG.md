@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-21
+- fix: ts-object-model-erd 1.9.3 — the Order Fulfilment example Model now passes `ts tml lint`: alias joins name physical tables in `on:` (I19, 19 joins) and the unsupported `SALES_REP → SALES_REP_MANAGER` self-join is removed (I18) (BL-396)
 - feat: the quest engine's shared front-end core, PR 3 of the quest-pack design. The classic page's logic moves into `tools/quest/core/*.js` (wording, gold, saves, sound, and a state machine), plain scripts on one `Quest` global that the page inlines and the coming explore front end can load. `Quest.machine(...).act(state, action, progress)` returns the next state and its effects (sounds, saves) and refuses any action the current screen doesn't offer; the page only draws and dispatches. Players see no change: 997 played screens and 48,440 injected-state screens are identical to the live page.
 - feat: `ts model dictionary` — a data dictionary for one or more Models, one row per column (role, aggregation, data type and source column from the Table TMLs, formula, description, synonyms, AI context, indexed, hidden). Live (`--model`) or offline from TML files; JSON, CSV, or XLSX with one sheet per Model via the new optional `[xlsx]` extra (openpyxl), now also covered by CI's pip-audit.
 - chore: bump ts-cli to v0.178.0

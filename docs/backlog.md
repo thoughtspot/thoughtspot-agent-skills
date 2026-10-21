@@ -254,7 +254,7 @@ are roughly ordered by value÷effort.
 | ~~BL-381~~ | ~~`check_skill_versions` accepts a changelog whose top row is lower than the row below it (a version going backwards after an accept-both merge)~~ | DONE (2026-10-07) |
 | ~~BL-382~~ | ~~The Snowflake from-direction translator (`sv_sql`) does not strip SQL comments: `/* x */` and `-- y` became `/ * [T::X] * /` and `- - [T::Y]`~~ | DONE (2026-10-07 — ts-cli v0.173.0) |
 | BL-395 | Re-run the AgentQL retest suite on 26.9.0.sw and reconcile `limitations.md` (3 tickets fixed only in that release, the regex row) | 2026-11-30 |
-| BL-396 | ERD `order-fulfilment` example fails I18/I19: an alias self-join and alias names in 19 `on:` clauses — lint-clean when written, rejected by import | 2026-11-15 |
+| ~~BL-396~~ | ~~ERD `order-fulfilment` example fails I18/I19: an alias self-join and alias names in 19 `on:` clauses — lint-clean when written, rejected by import~~ | DONE (2026-10-21 — ts-object-model-erd 1.9.3) |
 | BL-397 | Two join shapes import rejects that `ts tml lint` does not check: `MANY_TO_MANY` (14528, and the Power BI converter emits it) and a referencing join under its destination (14504) | 2026-11-30 |
 | BL-398 | Sisense picks each join's direction by a tie-broken sort over a `set`: the emitted join graph varies by hash seed, so I17 passes or fails between runs | 2026-11-15 |
 
@@ -14305,6 +14305,12 @@ fails on drift); PATCH-bump `ts-object-model-erd`. Then `ts tml lint --dir` on t
 example's `tml/` must be clean.
 
 **Target:** 2026-11-15.
+
+**Resolved 2026-10-21:** ts-object-model-erd 1.9.3. The 19 `on:` clauses name physical tables;
+the manager alias, its self-join, formula and column are removed rather than replaced by a
+flattened view (the example has no warehouse to hold one), and the README now says self-joins are
+not supported. Both examples lint clean; `model_erd.html` re-rendered. The screenshots still show
+the removed table.
 
 ## BL-397 — Join shapes import rejects that `ts tml lint` does not check `Tier 2`
 
