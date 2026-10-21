@@ -257,7 +257,7 @@ are roughly ordered by value÷effort.
 | ~~BL-396~~ | ~~ERD `order-fulfilment` example fails I18/I19: an alias self-join and alias names in 19 `on:` clauses — lint-clean when written, rejected by import~~ | DONE (2026-10-21 — ts-object-model-erd 1.9.3) |
 | ~~BL-397~~ | ~~Two join shapes import rejects that `ts tml lint` does not check: `MANY_TO_MANY` (14528, and the Power BI converter emits it) and a referencing join under its destination (14504)~~ | DONE (2026-10-22 — ts-cli v0.180.0) |
 | ~~BL-398~~ | ~~Sisense picks each join's direction by a tie-broken sort over a `set`: the emitted join graph varies by hash seed, so I17 passes or fails between runs~~ | DONE (2026-10-21 — ts-cli v0.179.0) |
-| BL-399 | ts-audit's assessment profile (Spotter-ready / General) is asked for, stored and never used: every check runs fixed thresholds | 2026-11-30 |
+| ~~BL-399~~ | ~~ts-audit's assessment profile (Spotter-ready / General) is asked for, stored and never used: every check runs fixed thresholds~~ | DONE (2026-10-22 — ts-cli v0.181.0, ts-audit 2.6.0) |
 
 ### Tier 3 — Opportunistic
 
@@ -14387,3 +14387,5 @@ the skill's own framing of who the audit is for. Tests per profile per check; re
 the check catalog rows from the table.
 
 **Target:** 2026-11-30.
+
+**Resolved 2026-10-22:** wired, not removed. `ts audit run --assessment spotter|general` (default general) carries the choice on `AuditContext`; A1, A2, A3, A4 and A6 read their bar from one table in `ts_cli/audit/assessment.py` — the skill's promised pass marks, HIGH below half the mark (the one rule added; user-approved), A6 graded for Spotter-ready and LOW for General. Both SKILL run commands pass it and the report header shows it. Tests per profile per check at the boundaries.

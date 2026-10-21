@@ -4640,6 +4640,24 @@ are queried as `LOGICAL_COLUMN`; the default `LOGICAL_TABLE` returns nothing for
 
 ---
 
+## `ts audit` — environment health audit
+
+`ts audit run` runs the deterministic checks behind the `ts-audit` skill against one or more
+Models and prints a JSON report; `ts audit report` renders that JSON as a self-contained
+HTML page. The check catalog is `agents/cli/ts-audit/references/check-catalog.md`.
+
+```bash
+ts audit run --models <guid> --angles A,D --assessment spotter --profile myprofile -o audit.json
+ts audit report audit.json -o report.html
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--models`, `-m` | required | Model GUID to audit (repeatable) |
+| `--angles`, `-a` | all | Comma-separated subset of `A,D,H,P,S` |
+| `--assessment` | `general` | The bar the AI-readiness checks (A1–A4, A6) measure against. `spotter` (Spotter-ready): descriptions ≥ 95%, synonyms ≥ 80%, measure AI context required, missing AI instructions or Model description HIGH. `general`: ≥ 50%, ≥ 25%, AI context recommended (a gap is LOW), missing instructions or description MEDIUM. Coverage checks are HIGH below half their pass mark. The table lives in `ts_cli/audit/assessment.py`; the report header names the assessment used |
+| `--output`, `-o` | stdout | Write the JSON report to a file |
+
 ## `ts sets` — reusable Set inventory and report (read-only)
 
 Used by the `ts-object-set-manager` skill. Reports every **reusable Set** (cohort) on the

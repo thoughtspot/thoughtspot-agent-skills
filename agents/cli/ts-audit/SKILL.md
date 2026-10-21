@@ -165,8 +165,13 @@ Assessment profile — sets pass/fail thresholds:
 Enter 1 or 2:
 ```
 
-Store the profile. Thresholds are defined in each check function
-(see [references/check-catalog.md](references/check-catalog.md)).
+Store the choice and pass it to `ts audit run` as `--assessment spotter` (1) or
+`--assessment general` (2) in Step 5. It sets the AI-readiness checks' bar — A1, A2 and
+A6 pass marks (coverage HIGH below half the mark), and whether a missing AI instruction
+set or Model description (A3, A4) is HIGH or MEDIUM. The table is
+`tools/ts-cli/ts_cli/audit/assessment.py`; the catalog rows are in
+[references/check-catalog.md](references/check-catalog.md). Omitted, it defaults to
+`general`, and the report header names the assessment used.
 
 ### 2c. Connection scope
 
@@ -328,6 +333,7 @@ Run the audit via the `ts` CLI:
 ts audit run \
   --models "{guid1}" --models "{guid2}" \
   --angles "{A,D,H,P,S}" \
+  --assessment "{spotter|general}" \
   --profile "{profile_name}" \
   --output ~/Dev/audit-runs/{profile_name}-{date}/audit.json
 ```
@@ -370,6 +376,7 @@ Or piped directly from Step 5:
 ts audit run \
   --models "{guid1}" --models "{guid2}" \
   --angles "{A,D,H,P,S}" \
+  --assessment "{spotter|general}" \
   --profile "{profile_name}" \
   | ts audit report -o ~/Dev/audit-runs/{profile_name}-{date}/report.html
 ```
@@ -424,6 +431,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.6.0 | 2026-10-22 | **The assessment profile now does something (BL-399).** Step 2b has always asked for Spotter-ready or General and promised different thresholds, but nothing passed the choice on: every check ran one fixed bar, so a Spotter-ready audit passed descriptions at 80% against a promised 95%. `ts audit run --assessment spotter|general` now carries it: A1 95% / 50%, A2 80% / 25%, A6 required (graded) / recommended (LOW), A3-A4 HIGH / MEDIUM; coverage is HIGH below half the pass mark. Both run commands pass it, and the report header shows it. Default `general`. |
 | 2.5.0 | 2026-10-21 | **A6 — measure AI context coverage**: the share of visible measures carrying `properties.ai_context`, which the Spotter-ready profile has promised ("AI context required") with no check behind it; the finding names the uncovered measures. **A2 fix:** synonyms are read from `properties.synonyms`, where Model TML keeps them. A2 read the column root, so it reported 0% synonym coverage for every Model and A5's readiness score always lost its synonym weight — on 599 Models from the SE demo cluster, A2 flagged all 599 before the fix and 278 after. |
 | 2.4.3 | 2026-10-02 | H5 orphan-Set check now fires: Sets discovered directly rather than from Model dependents (BL-302, BL-324). A Set whose consumer lookup fails, hides dependents, or is consumed only by another Set stays unreported with a warning. H4 ignores Set rows, so a Model with only Sets is still an orphan. |
 | 2.4.2 | 2026-08-26 | Record why Step 3-4 connection scoping does **not** use `ts metadata search --connection`: the flag keeps only rows with a matching `dataSourceName`, which worksheets/models/answers do not carry, so it would enumerate zero of them — and it takes a single connection where Step 2c offers several. Keep the hand filter, but compare case-insensitively (finding 11.1). |

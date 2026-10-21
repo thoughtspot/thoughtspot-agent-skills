@@ -22,15 +22,25 @@ def run(
     profile: Optional[str] = _profile_option,
     angles: Optional[str] = typer.Option(None, "--angles", "-a",
                                           help="Comma-separated angle filter: A,D,H,P,S (default: all)"),
+    assessment_name: str = typer.Option(
+        "general", "--assessment",
+        help="Bar the AI-readiness checks measure against: spotter (descriptions >= 95%, "
+             "synonyms >= 80%, AI context required) or general (>= 50%, >= 25%, "
+             "AI context recommended). Default: general"),
     output: Optional[Path] = typer.Option(None, "--output", "-o",
                                            help="Write JSON report to file instead of stdout"),
 ) -> None:
     """Run audit checks against one or more ThoughtSpot models."""
-    from ts_cli.audit import run_audit
+    from ts_cli.audit import assessment, run_audit
+
+    try:
+        assessment.normalise(assessment_name)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
     angle_list = [a.strip().upper() for a in angles.split(",")] if angles else None
     client = ThoughtSpotClient(resolve_profile(profile))
-    result = run_audit(client, models, angle_list)
+    result = run_audit(client, models, angle_list, assessment_name)
     json_str = json.dumps(result, indent=2)
 
     if output:

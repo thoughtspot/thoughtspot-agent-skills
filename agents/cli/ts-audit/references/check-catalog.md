@@ -70,14 +70,18 @@ check ID appearing in reports).
 
 ## AI Readiness — `checks_ai.py`
 
+A1-A4 and A6 are measured against the assessment profile (`ts audit run --assessment
+spotter|general`, default `general`). The thresholds are one table in
+`tools/ts-cli/ts_cli/audit/assessment.py`; the rows below describe it.
+
 | ID | What it detects | Severity logic |
 |---|---|---|
-| A1 | Description coverage below threshold | GREEN/YELLOW/RED by profile |
-| A2 | Synonym coverage below threshold — read from `properties.synonyms`, where Model TML keeps them (before ts-cli 0.177.0 it read the column root and scored every Model 0%) | GREEN/YELLOW/RED by profile |
-| A3 | No AI instructions configured | HIGH (Spotter) / MEDIUM (General) |
-| A4 | Missing Spotter config | HIGH (Spotter) / MEDIUM (General) |
+| A1 | Description coverage below threshold | Spotter-ready: pass ≥ 95%, HIGH < 47.5%. General: pass ≥ 50%, HIGH < 25%. MEDIUM between |
+| A2 | Synonym coverage below threshold — read from `properties.synonyms`, where Model TML keeps them (before ts-cli 0.177.0 it read the column root and scored every Model 0%) | Spotter-ready: pass ≥ 80%, HIGH < 40%. General: pass ≥ 25%, HIGH < 12.5%. MEDIUM between |
+| A3 | No AI instructions configured | HIGH (Spotter-ready) / MEDIUM (General) |
+| A4 | Missing Spotter config (no Model description) | HIGH (Spotter-ready) / MEDIUM (General) |
 | A5 | Spotter readiness composite score | Weighted score → severity |
-| A6 | Measure AI context coverage — share of visible `MEASURE` columns with a non-empty `properties.ai_context`. Attributes are not counted: the coach's ai_context schema requires it on every measure (`additivity`, `time_basis`, `grain_keys`) and leaves it empty, correctly, on most attributes such as surrogate keys | ≥ 80% clean; < 50% HIGH; otherwise MEDIUM. The finding lists the uncovered measures |
+| A6 | Measure AI context coverage — share of visible `MEASURE` columns with a non-empty `properties.ai_context`. Attributes are not counted: the coach's ai_context schema requires it on every measure (`additivity`, `time_basis`, `grain_keys`) and leaves it empty, correctly, on most attributes such as surrogate keys | ≥ 80% clean under both profiles. Spotter-ready (AI context required): HIGH < 40%, otherwise MEDIUM. General (recommended): LOW at any depth. The finding lists the uncovered measures |
 
 ---
 

@@ -2673,6 +2673,7 @@ function buildDashboard(){
       html += '<a class="cluster-url" href="'+D.C.u+'" target="_blank" rel="noopener">'+esc(D.C.u)+' <span class="ext">↗</span></a>';
     }
     if(D.C.p) html += '<span class="meta-item">Profile: <strong>'+esc(D.C.p)+'</strong></span>';
+    if(D.C.as) html += '<span class="meta-item">Assessment: <strong>'+esc(D.C.as)+'</strong></span>';
     if(D.C.dt) html += '<span class="meta-item">Date: <strong>'+esc(D.C.dt)+'</strong></span>';
     if(D.C.ar && D.C.ar.length > 0){
       html += '<div class="angles">';

@@ -20,6 +20,8 @@ class AuditContext:
     answers: list = field(default_factory=list)
     model_guids: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
+    # Which bar the AI-readiness checks measure against (audit/assessment.py, BL-399).
+    assessment: str = "general"
 
     def guid_for(self, tml: dict) -> str:
         return tml.get("guid", "")
@@ -106,6 +108,7 @@ def make_context(
     answers=None,
     model_guids=None,
     warnings=None,
+    assessment="general",
 ) -> AuditContext:
     return AuditContext(
         models=models or [],
@@ -116,6 +119,7 @@ def make_context(
         answers=answers or [],
         model_guids=model_guids or [],
         warnings=warnings or [],
+        assessment=assessment,
     )
 
 

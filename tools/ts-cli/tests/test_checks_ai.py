@@ -22,7 +22,7 @@ def _col(name="Amount", description="", synonyms=None):
 
 def test_a1_flags_low_coverage():
     cols = [_col("A"), _col("B"), _col("C", description="has desc")]
-    ctx = make_context(models=[_model(columns=cols)])
+    ctx = make_context(models=[_model(columns=cols)], assessment="spotter")
     findings = check_a1(ctx)
     assert len(findings) == 1
     assert findings[0].severity == "HIGH"
@@ -42,7 +42,7 @@ def test_a1_empty_columns():
 
 def test_a2_flags_low_coverage():
     cols = [_col("A"), _col("B"), _col("C", synonyms=["revenue"])]
-    ctx = make_context(models=[_model(columns=cols)])
+    ctx = make_context(models=[_model(columns=cols)], assessment="spotter")
     findings = check_a2(ctx)
     assert len(findings) == 1
     assert findings[0].check_id == "A2"
@@ -55,7 +55,8 @@ def test_a2_passes_high_coverage():
 
 
 def test_a3_flags_missing_instructions():
-    ctx = make_context(models=[_model(guid="m-1")], ai_instructions={"m-1": {}})
+    ctx = make_context(models=[_model(guid="m-1")], ai_instructions={"m-1": {}},
+                       assessment="spotter")
     findings = check_a3(ctx)
     assert len(findings) == 1
     assert findings[0].severity == "HIGH"
@@ -134,8 +135,9 @@ def _tml_col(name, ctype="ATTRIBUTE", ai_context=None, synonyms=None, hidden=Fal
     return c
 
 
-def _tml_ctx(*cols, name="M"):
-    return AuditContext(models=[{"guid": "g-1", "model": {"name": name, "columns": list(cols)}}])
+def _tml_ctx(*cols, name="M", assessment="spotter"):
+    return AuditContext(models=[{"guid": "g-1", "model": {"name": name, "columns": list(cols)}}],
+                        assessment=assessment)
 
 
 AC = "additivity: additive\ntime_basis: DM_DATE.Date\ngrain_keys: [T.ID]"
@@ -196,3 +198,98 @@ class TestSynonymsUnderProperties:
         without = check_a5(_tml_ctx(_tml_col("C", desc="d")))
         assert with_syn and without
         assert round(with_syn[0].metric - without[0].metric) == 15
+
+
+# --- Assessment profiles (BL-399) ---------------------------------------------------
+# One row per (check, profile): the pass mark, and HIGH below half of it. The table lives
+# in ts_cli/audit/assessment.py; these pin each profile's promise from SKILL Step 2b.
+import pytest  # noqa: E402
+
+from ts_cli.audit import assessment  # noqa: E402
+
+
+def _desc_cols(n_described, n):
+    return [_col(f"C{i}", description="d" if i < n_described else "") for i in range(n)]
+
+
+def _syn_cols(n_syn, n):
+    return [_col(f"C{i}", synonyms=["s"] if i < n_syn else []) for i in range(n)]
+
+
+@pytest.mark.parametrize("profile,n_described,expected", [
+    ("spotter", 95, None), ("spotter", 94, "MEDIUM"), ("spotter", 48, "MEDIUM"),
+    ("spotter", 47, "HIGH"),
+    ("general", 50, None), ("general", 49, "MEDIUM"), ("general", 25, "MEDIUM"),
+    ("general", 24, "HIGH"),
+])
+def test_a1_by_profile(profile, n_described, expected):
+    f = check_a1(make_context(models=[_model(columns=_desc_cols(n_described, 100))],
+                              assessment=profile))
+    assert (f[0].severity if f else None) == expected
+
+
+@pytest.mark.parametrize("profile,n_syn,expected", [
+    ("spotter", 80, None), ("spotter", 79, "MEDIUM"), ("spotter", 39, "HIGH"),
+    ("general", 25, None), ("general", 24, "MEDIUM"), ("general", 12, "HIGH"),
+])
+def test_a2_by_profile(profile, n_syn, expected):
+    f = check_a2(make_context(models=[_model(columns=_syn_cols(n_syn, 100))],
+                              assessment=profile))
+    assert (f[0].severity if f else None) == expected
+
+
+@pytest.mark.parametrize("profile,expected", [("spotter", "HIGH"), ("general", "MEDIUM")])
+def test_a3_a4_presence_by_profile(profile, expected):
+    ctx = make_context(models=[_model(guid="m-1")], ai_instructions={"m-1": {}},
+                       assessment=profile)
+    assert [f.severity for f in check_a3(ctx)] == [expected]
+    assert [f.severity for f in check_a4(ctx)] == [expected]
+
+
+@pytest.mark.parametrize("profile,covered,expected", [
+    ("spotter", 8, None), ("spotter", 7, "MEDIUM"), ("spotter", 3, "HIGH"),
+    ("general", 8, None), ("general", 7, "LOW"), ("general", 0, "LOW"),
+])
+def test_a6_by_profile(profile, covered, expected):
+    """AI context is required for Spotter-ready (graded) and recommended for General
+    (a gap is LOW, however deep)."""
+    cols = [_tml_col(f"M{i}", "MEASURE", AC if i < covered else None) for i in range(10)]
+    f = check_a6(_tml_ctx(*cols, assessment=profile))
+    assert (f[0].severity if f else None) == expected
+
+
+def test_default_profile_is_general():
+    assert make_context().assessment == "general" == assessment.DEFAULT
+
+
+def test_threshold_payload_carries_the_profile_pass_mark():
+    f = check_a1(make_context(models=[_model(columns=_desc_cols(10, 100))],
+                              assessment="spotter"))
+    assert f[0].threshold == {"green": 95, "yellow": 47.5, "assessment": "Spotter-ready"}
+    f = check_a6(_tml_ctx(_tml_col("M", "MEASURE"), assessment="general"))
+    assert f[0].threshold == {"green": 80, "assessment": "General"}
+
+
+@pytest.mark.parametrize("name,key", [("spotter", "spotter"), ("Spotter-ready", "spotter"),
+                                      ("GENERAL", "general"), (None, "general")])
+def test_normalise_accepts_the_skill_labels(name, key):
+    assert assessment.normalise(name) == key
+
+
+def test_unknown_profile_is_refused():
+    with pytest.raises(ValueError):
+        assessment.normalise("strict")
+
+
+def test_cli_refuses_an_unknown_assessment():
+    from typer.testing import CliRunner
+    from ts_cli.cli import app
+    res = CliRunner().invoke(app, ["audit", "run", "--models", "g", "--assessment", "strict"])
+    assert res.exit_code != 0 and "unknown assessment" in (res.output + str(res.exception))
+
+
+def test_report_shows_the_assessment():
+    from ts_cli.audit.report import compact_payload
+    data = {"findings": [], "summary": {}, "check_meta": {},
+            "corpus": {"assessment": "Spotter-ready", "models": []}}
+    assert compact_payload(data)["C"]["as"] == "Spotter-ready"

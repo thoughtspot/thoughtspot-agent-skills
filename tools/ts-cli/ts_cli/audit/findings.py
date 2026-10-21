@@ -34,12 +34,12 @@ _SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 _ANGLES = ["ai", "data_modeling", "human", "performance", "security"]
 
 CHECK_META: dict[str, dict[str, str]] = {
-    "A1": {"desc": "Description coverage below threshold", "thresholds": "GREEN >= 80%, YELLOW >= 50%"},
-    "A2": {"desc": "Synonym coverage below threshold", "thresholds": "GREEN >= 50%, YELLOW >= 25%"},
-    "A3": {"desc": "No AI instructions configured", "thresholds": "HIGH if absent"},
+    "A1": {"desc": "Description coverage below threshold", "thresholds": "Spotter-ready >= 95% / General >= 50%; HIGH below half"},
+    "A2": {"desc": "Synonym coverage below threshold", "thresholds": "Spotter-ready >= 80% / General >= 25%; HIGH below half"},
+    "A3": {"desc": "No AI instructions configured", "thresholds": "HIGH (Spotter-ready) / MEDIUM (General)"},
     "A4": {"desc": "Missing Spotter config", "thresholds": "HIGH (Spotter) / MEDIUM (General)"},
     "A5": {"desc": "Spotter readiness composite score", "thresholds": "Weighted score -> severity"},
-    "A6": {"desc": "Measure AI context coverage below threshold", "thresholds": "GREEN >= 80%, YELLOW >= 50% of visible measures"},
+    "A6": {"desc": "Measure AI context coverage below threshold", "thresholds": ">= 80% of visible measures; Spotter-ready HIGH below 40%, General LOW"},
     "D1": {"desc": "Model complexity exceeds threshold", "thresholds": "Tables >15 RED, Columns >75 RED"},
     "D2": {"desc": "VARCHAR join keys detected", "thresholds": "HIGH per occurrence"},
     "D3": {"desc": "Join type analysis (FULL OUTER, LEFT/RIGHT)", "thresholds": "HIGH for FULL OUTER, INFO for others"},

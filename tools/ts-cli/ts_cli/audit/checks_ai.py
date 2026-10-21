@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.audit import assessment
 from ts_cli.audit.context import AuditContext, nl_instructions
 from ts_cli.audit.findings import Finding
 
@@ -33,16 +34,16 @@ def check_a1(ctx: AuditContext) -> list:
             continue
         described = sum(1 for c in cols if (c.get("description") or "").strip())
         pct = (described / len(cols)) * 100
-        if pct >= 80:
+        severity = assessment.coverage_severity(ctx.assessment, "A1", pct)
+        if severity is None:
             continue
-        severity = "HIGH" if pct < 50 else "MEDIUM"
         findings.append(Finding(
             check_id="A1", angle=_ANGLE, severity=severity,
             object_type="model", object_name=m.get("name", ""),
             object_guid=ctx.guid_for(model),
             detail=f"{described}/{len(cols)} columns have descriptions ({pct:.0f}%)",
             metric=round(pct, 1),
-            threshold={"green": 80, "yellow": 50},
+            threshold=assessment.threshold(ctx.assessment, "A1"),
         ))
     return findings
 
@@ -56,16 +57,16 @@ def check_a2(ctx: AuditContext) -> list:
             continue
         with_syn = sum(1 for c in cols if _has_synonyms(c))
         pct = (with_syn / len(cols)) * 100
-        if pct >= 50:
+        severity = assessment.coverage_severity(ctx.assessment, "A2", pct)
+        if severity is None:
             continue
-        severity = "HIGH" if pct < 25 else "MEDIUM"
         findings.append(Finding(
             check_id="A2", angle=_ANGLE, severity=severity,
             object_type="model", object_name=m.get("name", ""),
             object_guid=ctx.guid_for(model),
             detail=f"{with_syn}/{len(cols)} columns have synonyms ({pct:.0f}%)",
             metric=round(pct, 1),
-            threshold={"green": 50, "yellow": 25},
+            threshold=assessment.threshold(ctx.assessment, "A2"),
         ))
     return findings
 
@@ -84,7 +85,8 @@ def check_a3(ctx: AuditContext) -> list:
         )
         if not has_instructions:
             findings.append(Finding(
-                check_id="A3", angle=_ANGLE, severity="HIGH",
+                check_id="A3", angle=_ANGLE,
+                severity=assessment.presence_severity(ctx.assessment, "A3"),
                 object_type="model", object_name=m.get("name", ""),
                 object_guid=guid,
                 detail="No AI/Spotter coaching instructions configured",
@@ -99,7 +101,8 @@ def check_a4(ctx: AuditContext) -> list:
         desc = (m.get("description") or "").strip()
         if not desc:
             findings.append(Finding(
-                check_id="A4", angle=_ANGLE, severity="MEDIUM",
+                check_id="A4", angle=_ANGLE,
+                severity=assessment.presence_severity(ctx.assessment, "A4"),
                 object_type="model", object_name=m.get("name", ""),
                 object_guid=ctx.guid_for(model),
                 detail="Model has no description",
@@ -176,9 +179,9 @@ def check_a6(ctx: AuditContext) -> list:
                    if not str((c.get("properties") or {}).get("ai_context") or "").strip()]
         covered = len(measures) - len(missing)
         pct = (covered / len(measures)) * 100
-        if pct >= 80:
+        severity = assessment.coverage_severity(ctx.assessment, "A6", pct)
+        if severity is None:
             continue
-        severity = "HIGH" if pct < 50 else "MEDIUM"
         shown = ", ".join(missing[:5]) + (f" (+{len(missing) - 5} more)" if len(missing) > 5 else "")
         findings.append(Finding(
             check_id="A6", angle=_ANGLE, severity=severity,
@@ -187,7 +190,7 @@ def check_a6(ctx: AuditContext) -> list:
             detail=(f"{covered}/{len(measures)} measures have AI context ({pct:.0f}%) — "
                     f"missing: {shown}"),
             metric=round(pct, 1),
-            threshold={"green": 80, "yellow": 50},
+            threshold=assessment.threshold(ctx.assessment, "A6"),
         ))
     return findings
 

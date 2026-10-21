@@ -157,6 +157,7 @@ def compact_payload(data: dict) -> dict:
             "p": corpus.get("profile_name", ""),
             "dt": corpus.get("audit_date", ""),
             "ar": corpus.get("angles_run", []),
+            "as": corpus.get("assessment", ""),
             "m": compact_models,
             "tr": compact_reuse,
             "mo": compact_overlaps,

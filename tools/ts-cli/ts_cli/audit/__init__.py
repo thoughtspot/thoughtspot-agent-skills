@@ -309,9 +309,12 @@ def run_audit(
     client,
     model_guids: list,
     angles: Optional[list] = None,
+    assessment_name: Optional[str] = None,
 ) -> dict:
+    from ts_cli.audit import assessment
     angles = angles or list(ANGLE_MODULES.keys())
     ctx = build_context(client, model_guids, angles)
+    ctx.assessment = assessment.normalise(assessment_name)
     findings: list[Finding] = []
     checks_run = 0
     all_check_ids: list[str] = []
@@ -333,6 +336,7 @@ def run_audit(
         profile_name=client._profile_name,
         angles=angles,
     )
+    corpus["assessment"] = assessment.label(ctx.assessment)
 
     _inject_findings_into_erd(corpus, findings)
 

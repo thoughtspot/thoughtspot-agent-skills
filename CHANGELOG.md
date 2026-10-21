@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-22
+- feat: ts-audit 2.6.0 — the assessment profile is honoured: `ts audit run --assessment spotter|general` (default general) sets the AI-readiness checks' bar (A1 95%/50%, A2 80%/25%, A6 required/recommended, A3-A4 HIGH/MEDIUM), from one table in `ts_cli/audit/assessment.py`. The skill always asked for the profile and never passed it on (BL-399).
+- chore: bump ts-cli to v0.181.0
 - feat: `ts tml lint` I20 (a `MANY_TO_MANY` Model join, rejected with 14528) and I21 (a `referencing_join` under an entry whose own Table TML does not declare it, rejected with 14504; checked when the Table TMLs are linted alongside). Power BI (ts-convert-from-powerbi 1.1.8) and Sisense (ts-convert-from-sisense 1.0.5) now leave a many-to-many relationship out and flag it NEEDS REVIEW instead of emitting a join that fails import. Filed BL-399: ts-audit's assessment profile is never used.
 - chore: bump ts-cli to v0.180.0
 
