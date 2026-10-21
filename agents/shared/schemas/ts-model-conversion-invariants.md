@@ -1,11 +1,11 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found; I13 added and live-verified 2026-07-30 on se-thoughtspot — error_code 14516 on a dangling [formula_*] reference, BL-178/BL-183; I17-I19 added and live-verified 2026-10-21 on se-thoughtspot — join-graph error codes 13123/13124/13125/14565) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found; I13 added and live-verified 2026-07-30 on se-thoughtspot — error_code 14516 on a dangling [formula_*] reference, BL-178/BL-183; I17-I19 added and live-verified 2026-10-21 on se-thoughtspot — join-graph error codes 13123/13124/13125/14565; I20-I21 2026-10-21 — 14528/14504) -->
 
 # ThoughtSpot Model Conversion Invariants
 
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I19, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I21, N1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
 > Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7),
@@ -739,6 +739,43 @@ Table TML join) are not checked by this rule.
 
 ---
 
+
+### I20 — No `MANY_TO_MANY` Model join
+
+**Rule:** a Model join's `cardinality` is `MANY_TO_ONE`, `ONE_TO_MANY` or `ONE_TO_ONE` —
+never `MANY_TO_MANY`.
+
+**Failure mode:** rejected at import, error **14528**: "Invalid value MANY_TO_MANY of field
+…joins…cardinality. Allowed values are MANY_TO_ONE, ONE_TO_MANY, ONE_TO_ONE" (live-probed
+2026-10-21). Emitting it as `MANY_TO_ONE` instead is worse: a many-to-many key fans out and
+totals inflate with no error.
+
+**Fix:** model the relationship through a bridge table in the warehouse, joined
+`MANY_TO_ONE` from each side. A converter that meets a many-to-many source relationship
+leaves the join out and flags it NEEDS REVIEW (Power BI and Sisense do). A Table TML's
+`joins_with` lists `MANY_TO_MANY` in its own vocabulary; that was not probed, so only Model
+joins are checked.
+
+**Enforced by:** `ts tml lint`.
+
+---
+
+### I21 — A `referencing_join` lives under the entry whose Table TML declares it
+
+**Rule:** a Model join written as `referencing_join: <name>` sits under the
+`model_tables[]` entry whose **own** Table TML has a `joins_with[]` entry of that name.
+
+**Failure mode:** placed under the other table — or naming a join that table does not
+have — it is rejected at import, error **14504** "Relationships do not exist", naming the
+`<table>::<join>` it looked for (live-probed 2026-10-21: the same join imports under its
+declaring table and fails under its destination).
+
+**Enforced by:** `ts tml lint`, cross-file like I16 — only when the entry's Table TML is
+linted in the same batch (`--dir`, or `--file table.tml --file model.tml`). A Model linted
+alone has no ground truth for what its Tables declare. The CoCo pre-import checklist's
+`referencing_join` row checks the name; this adds which table must own it.
+
+---
 
 ## Naming
 

@@ -26,6 +26,8 @@ rules it does catch but reports only as a bare error code:
 - **I17** — one join route between any two tables. Read each join as an arrow from its MANY side to its ONE side (a `ONE_TO_MANY` join points from `with:` back to the declaring entry): no cycle along the arrows, no two routes to one table. *(Rejected with "Schema validation failed", error 13123 / 13124, naming no join. Two facts sharing a dimension are fine.)*
 - **I18** — no self-join, aliased or not. *(Rejected, 13125 / 14565.)*
 - **I19** — a join's `on:` names only its two tables, by physical name — never a third table or an alias. *("Invalid srcTable or destTable in join expression".)*
+- **I20** — no `MANY_TO_MANY` Model join. *(Rejected, 14528; model a bridge table instead.)*
+- **I21** — a `referencing_join` sits under the entry whose own Table TML declares it. *(Rejected, 14504 "Relationships do not exist"; checked when the Table TMLs are linted alongside.)*
 
 `ts tml lint` reads raw TML file paths via `--file`/`--dir` (the same input `ts tml
 import` takes) and exits non-zero on any finding, so it gates the import (replace
