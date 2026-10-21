@@ -5,14 +5,14 @@
       "objectives": [
         "Measure delivery performance (ship-to-delivery days) by carrier, branch and driver",
         "Track receivables: outstanding balances and late payment by bill-to customer",
-        "Attribute revenue to sales reps and their managers",
+        "Attribute revenue to sales reps and selling branches",
         "Review returns by reason and by who processed them"
       ],
       "personas": ["Warehouse and logistics leads", "Accounts receivable", "Regional sales management", "Operations audit"],
       "questions": [
         "Average days to deliver by carrier for orders shipped from Scranton last month",
         "Which bill-to customers have an outstanding balance more than 30 days past due?",
-        "Revenue by sales rep manager this year",
+        "Revenue by sales rep this year",
         "Who updated the most cancelled orders in the audit trail?"
       ]
     },

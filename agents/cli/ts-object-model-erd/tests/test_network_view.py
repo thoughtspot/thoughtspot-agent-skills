@@ -38,7 +38,7 @@ def test_cards_render_by_default(FULFIL, tmp_path):
       return {nodes: document.querySelectorAll('#nodes .node').length,
               titles: document.querySelectorAll('#nodes .nh, #nodes .node-block-title').length,
               dots: document.querySelectorAll('#nodes circle.dot').length};""", tmp_path)
-    assert r == {"nodes": 29, "titles": 29, "dots": 0}
+    assert r == {"nodes": 28, "titles": 28, "dots": 0}
 
 
 def test_probe_reports_js_errors(SALES, tmp_path):
@@ -55,8 +55,8 @@ def test_network_view_draws_one_dot_per_table(FULFIL, tmp_path):
               aliasFill: document.querySelector('#nodes .node circle.dot[data-kind="alias"]').getAttribute('fill')};""",
         tmp_path, hash=NET)
     assert r["view"] == "network"
-    assert r["dots"] == 29 and r["cards"] == 0
-    assert "SALES_REP" in r["labels"] and len(r["labels"]) == 29
+    assert r["dots"] == 28 and r["cards"] == 0
+    assert "SALES_REP" in r["labels"] and len(r["labels"]) == 28
     assert r["aliasFill"].upper() == "#7C3AED"
 
 
@@ -293,7 +293,7 @@ def test_minimap_draws_dots_in_network_view(FULFIL, tmp_path):
       return {n:c.length, rects:document.querySelectorAll('#minimap-nodes rect').length,
               fills:[...new Set(c.map(e=>e.getAttribute('fill').toUpperCase()))].sort(),
               minR:Math.min(...c.map(e=>+e.getAttribute('r')))};""", tmp_path, hash=NET)
-    assert r["n"] == 29 and r["rects"] == 0
+    assert r["n"] == 28 and r["rects"] == 0
     assert "#7C3AED" in r["fills"] and "#1E6FA8" in r["fills"]
     assert r["minR"] >= 2
 

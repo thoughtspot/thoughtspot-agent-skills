@@ -9,45 +9,36 @@ model:
     joins:
     - name: DM_ORDER_to_SALES_REP
       with: SALES_REP
-      'on': '[DM_ORDER::SALES_REP_ID] = [SALES_REP::EMPLOYEE_ID]'
+      'on': '[DM_ORDER::SALES_REP_ID] = [DM_EMPLOYEE::EMPLOYEE_ID]'
       type: INNER
       cardinality: MANY_TO_ONE
     - name: DM_ORDER_to_ORDER_APPROVER
       with: ORDER_APPROVER
-      'on': '[DM_ORDER::APPROVER_ID] = [ORDER_APPROVER::EMPLOYEE_ID]'
+      'on': '[DM_ORDER::APPROVER_ID] = [DM_EMPLOYEE::EMPLOYEE_ID]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
     - name: DM_ORDER_to_BILL_TO_CUSTOMER
       with: BILL_TO_CUSTOMER
-      'on': '[DM_ORDER::BILL_TO_CUSTOMER_ID] = [BILL_TO_CUSTOMER::CUSTOMER_ID]'
+      'on': '[DM_ORDER::BILL_TO_CUSTOMER_ID] = [DM_CUSTOMER::CUSTOMER_ID]'
       type: INNER
       cardinality: MANY_TO_ONE
     - name: DM_ORDER_to_SHIP_TO_CUSTOMER
       with: SHIP_TO_CUSTOMER
-      'on': '[DM_ORDER::SHIP_TO_CUSTOMER_ID] = [SHIP_TO_CUSTOMER::CUSTOMER_ID]'
+      'on': '[DM_ORDER::SHIP_TO_CUSTOMER_ID] = [DM_CUSTOMER::CUSTOMER_ID]'
       type: INNER
       cardinality: MANY_TO_ONE
     - name: DM_ORDER_to_ORDER_BRANCH
       with: ORDER_BRANCH
-      'on': '[DM_ORDER::BRANCH_ID] = [ORDER_BRANCH::BRANCH_ID]'
+      'on': '[DM_ORDER::BRANCH_ID] = [DM_BRANCH::BRANCH_ID]'
       type: INNER
       cardinality: MANY_TO_ONE
     - name: DM_ORDER_to_ORDER_DATE
       with: ORDER_DATE
-      'on': '[DM_ORDER::ORDER_DATE] = [ORDER_DATE::DATE]'
+      'on': '[DM_ORDER::ORDER_DATE] = [DM_DATE_DIM::DATE]'
       type: INNER
       cardinality: MANY_TO_ONE
   - name: DM_EMPLOYEE
     alias: SALES_REP
-    fqn: 40c0b5fb-6d7a-5932-abe8-7cd643fcd849
-    joins:
-    - name: SALES_REP_to_SALES_REP_MANAGER
-      with: SALES_REP_MANAGER
-      'on': '[SALES_REP::MANAGER_ID] = [SALES_REP_MANAGER::EMPLOYEE_ID]'
-      type: LEFT_OUTER
-      cardinality: MANY_TO_ONE
-  - name: DM_EMPLOYEE
-    alias: SALES_REP_MANAGER
     fqn: 40c0b5fb-6d7a-5932-abe8-7cd643fcd849
   - name: DM_EMPLOYEE
     alias: ORDER_APPROVER
@@ -87,27 +78,27 @@ model:
       referencing_join: DM_SHIPMENT_to_DM_CARRIER
     - name: DM_SHIPMENT_to_WAREHOUSE_PICKER
       with: WAREHOUSE_PICKER
-      'on': '[DM_SHIPMENT::PICKER_ID] = [WAREHOUSE_PICKER::EMPLOYEE_ID]'
+      'on': '[DM_SHIPMENT::PICKER_ID] = [DM_EMPLOYEE::EMPLOYEE_ID]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
     - name: DM_SHIPMENT_to_DELIVERY_DRIVER
       with: DELIVERY_DRIVER
-      'on': '[DM_SHIPMENT::DRIVER_ID] = [DELIVERY_DRIVER::EMPLOYEE_ID]'
+      'on': '[DM_SHIPMENT::DRIVER_ID] = [DM_EMPLOYEE::EMPLOYEE_ID]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
     - name: DM_SHIPMENT_to_ORIGIN_BRANCH
       with: ORIGIN_BRANCH
-      'on': '[DM_SHIPMENT::ORIGIN_BRANCH_ID] = [ORIGIN_BRANCH::BRANCH_ID]'
+      'on': '[DM_SHIPMENT::ORIGIN_BRANCH_ID] = [DM_BRANCH::BRANCH_ID]'
       type: INNER
       cardinality: MANY_TO_ONE
     - name: DM_SHIPMENT_to_SHIP_DATE
       with: SHIP_DATE
-      'on': '[DM_SHIPMENT::SHIP_DATE] = [SHIP_DATE::DATE]'
+      'on': '[DM_SHIPMENT::SHIP_DATE] = [DM_DATE_DIM::DATE]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
     - name: DM_SHIPMENT_to_DELIVERY_DATE
       with: DELIVERY_DATE
-      'on': '[DM_SHIPMENT::DELIVERY_DATE] = [DELIVERY_DATE::DATE]'
+      'on': '[DM_SHIPMENT::DELIVERY_DATE] = [DM_DATE_DIM::DATE]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
   - name: DM_CARRIER
@@ -134,17 +125,17 @@ model:
       referencing_join: DM_INVOICE_to_DM_ORDER
     - name: DM_INVOICE_to_INVOICE_DATE
       with: INVOICE_DATE
-      'on': '[DM_INVOICE::INVOICE_DATE] = [INVOICE_DATE::DATE]'
+      'on': '[DM_INVOICE::INVOICE_DATE] = [DM_DATE_DIM::DATE]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
     - name: DM_INVOICE_to_DUE_DATE
       with: DUE_DATE
-      'on': '[DM_INVOICE::DUE_DATE] = [DUE_DATE::DATE]'
+      'on': '[DM_INVOICE::DUE_DATE] = [DM_DATE_DIM::DATE]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
     - name: DM_INVOICE_to_PAID_DATE
       with: PAID_DATE
-      'on': '[DM_INVOICE::PAID_DATE] = [PAID_DATE::DATE]'
+      'on': '[DM_INVOICE::PAID_DATE] = [DM_DATE_DIM::DATE]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
   - name: DM_DATE_DIM
@@ -163,12 +154,12 @@ model:
       referencing_join: DM_RETURN_to_DM_ORDER_DETAIL
     - name: DM_RETURN_to_RETURN_HANDLER
       with: RETURN_HANDLER
-      'on': '[DM_RETURN::HANDLED_BY_ID] = [RETURN_HANDLER::EMPLOYEE_ID]'
+      'on': '[DM_RETURN::HANDLED_BY_ID] = [DM_EMPLOYEE::EMPLOYEE_ID]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
     - name: DM_RETURN_to_RETURN_DATE
       with: RETURN_DATE
-      'on': '[DM_RETURN::RETURN_DATE] = [RETURN_DATE::DATE]'
+      'on': '[DM_RETURN::RETURN_DATE] = [DM_DATE_DIM::DATE]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
   - name: DM_EMPLOYEE
@@ -184,17 +175,17 @@ model:
       referencing_join: DM_AUDIT_EVENT_to_DM_ORDER
     - name: DM_AUDIT_EVENT_to_AUDIT_CREATED_BY
       with: AUDIT_CREATED_BY
-      'on': '[DM_AUDIT_EVENT::CREATED_BY_ID] = [AUDIT_CREATED_BY::EMPLOYEE_ID]'
+      'on': '[DM_AUDIT_EVENT::CREATED_BY_ID] = [DM_EMPLOYEE::EMPLOYEE_ID]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
     - name: DM_AUDIT_EVENT_to_AUDIT_UPDATED_BY
       with: AUDIT_UPDATED_BY
-      'on': '[DM_AUDIT_EVENT::UPDATED_BY_ID] = [AUDIT_UPDATED_BY::EMPLOYEE_ID]'
+      'on': '[DM_AUDIT_EVENT::UPDATED_BY_ID] = [DM_EMPLOYEE::EMPLOYEE_ID]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
     - name: DM_AUDIT_EVENT_to_AUDIT_EVENT_DATE
       with: AUDIT_EVENT_DATE
-      'on': '[DM_AUDIT_EVENT::EVENT_DATE] = [AUDIT_EVENT_DATE::DATE]'
+      'on': '[DM_AUDIT_EVENT::EVENT_DATE] = [DM_DATE_DIM::DATE]'
       type: LEFT_OUTER
       cardinality: MANY_TO_ONE
   - name: DM_EMPLOYEE
@@ -210,9 +201,6 @@ model:
   - id: formula_Sales Rep
     name: Sales Rep
     expr: concat ( [SALES_REP::LAST_NAME] , ', ' , [SALES_REP::FIRST_NAME] )
-  - id: formula_Sales Rep Manager
-    name: Sales Rep Manager
-    expr: concat ( [SALES_REP_MANAGER::LAST_NAME] , ', ' , [SALES_REP_MANAGER::FIRST_NAME] )
   - id: formula_Order Approver
     name: Order Approver
     expr: concat ( [ORDER_APPROVER::LAST_NAME] , ', ' , [ORDER_APPROVER::FIRST_NAME] )
@@ -257,14 +245,6 @@ model:
       column_type: ATTRIBUTE
       synonyms:
       - Salesperson
-      synonym_type: USER_DEFINED
-  - name: Sales Rep Manager
-    formula_id: formula_Sales Rep Manager
-    description: Sales Rep Manager (DM_EMPLOYEE in the SALES_REP_MANAGER role), Last, First
-    properties:
-      column_type: ATTRIBUTE
-      synonyms:
-      - Regional Manager
       synonym_type: USER_DEFINED
   - name: Order Approver
     formula_id: formula_Order Approver

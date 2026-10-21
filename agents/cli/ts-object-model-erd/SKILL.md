@@ -23,7 +23,7 @@ Render a Model into a single self-contained HTML ERD. Read-only — never modifi
 | Remove or repoint dependencies | `/ts-dependency-manager` |
 
 **Examples:** [examples/](examples/README.md) has two rendered ERDs with the TML they
-were built from: a clean 8-table star schema, and a 29-table order-to-cash Model where
+were built from: a clean 8-table star schema, and a 28-table order-to-cash Model where
 `DM_EMPLOYEE`, `DM_DATE_DIM`, `DM_CUSTOMER` and `DM_BRANCH` are each aliased into
 several roles. Open one to see what this skill produces before running it.
 

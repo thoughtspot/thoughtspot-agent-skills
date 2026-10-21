@@ -11,7 +11,7 @@ network calls and no ThoughtSpot login.
 | Example | Tables | What it shows |
 |---|---|---|
 | [Sales & Inventory](#sales--inventory) | 8 | A clean star schema: two facts sharing one product and one date dimension |
-| [Order Fulfilment](#order-fulfilment) | 29 (20 of them aliases) | Role-playing dimensions: the same physical table joined many times under different aliases |
+| [Order Fulfilment](#order-fulfilment) | 28 (19 of them aliases) | Role-playing dimensions: the same physical table joined many times under different aliases |
 
 ---
 
@@ -55,28 +55,30 @@ separate `model_tables` entry with its own `alias`:
 
 | Physical table | Aliases (roles) |
 |---|---|
-| `DM_EMPLOYEE` | `SALES_REP`, `SALES_REP_MANAGER`, `ORDER_APPROVER`, `WAREHOUSE_PICKER`, `DELIVERY_DRIVER`, `RETURN_HANDLER`, `AUDIT_CREATED_BY`, `AUDIT_UPDATED_BY` |
+| `DM_EMPLOYEE` | `SALES_REP`, `ORDER_APPROVER`, `WAREHOUSE_PICKER`, `DELIVERY_DRIVER`, `RETURN_HANDLER`, `AUDIT_CREATED_BY`, `AUDIT_UPDATED_BY` |
 | `DM_DATE_DIM` | `ORDER_DATE`, `SHIP_DATE`, `DELIVERY_DATE`, `INVOICE_DATE`, `DUE_DATE`, `PAID_DATE`, `RETURN_DATE`, `AUDIT_EVENT_DATE` |
 | `DM_CUSTOMER` | `BILL_TO_CUSTOMER`, `SHIP_TO_CUSTOMER` |
 | `DM_BRANCH` | `ORDER_BRANCH`, `ORIGIN_BRANCH` |
 
 Things to try in the viewer:
 
-- **Filter → Alias** highlights all 20 alias nodes. Click one and its inspector names
+- **Filter → Alias** highlights all 19 alias nodes. Click one and its inspector names
   the physical table behind it.
 - **Why aliases instead of one shared `DM_EMPLOYEE`?** With a single employee node,
   "orders by sales rep" and "shipments by driver" would join through the same rows,
   and you could not ask for a sales rep and a driver in the same search. Each alias is
   an independent join path. The display names (`Sales Rep`, `Delivery Driver`, …) keep
   the roles distinct in search.
-- **A self-join through an alias:** `SALES_REP → SALES_REP_MANAGER` joins
-  `DM_EMPLOYEE` to itself on `MANAGER_ID`.
+- **No self-joins.** A Model cannot join a table to itself, even through two aliases,
+  so there is no sales-rep-to-manager join here. A hierarchy like that is flattened in
+  the warehouse first.
 - **RLS follows the physical table.** The rule lives on `DM_BRANCH`'s Table TML, so
   *both* `ORDER_BRANCH` and `ORIGIN_BRANCH` show as secured. Turn on **Filter → RLS**
   to see it.
 - **Two join origins.** Joins between un-aliased tables reference Table TML joins.
   Every join to an alias is defined inline in the Model, because a Table TML join
-  targets a physical table, not an alias.
+  targets a physical table, not an alias. In those inline joins, `with:` names the
+  alias and `on:` names the physical table on each side.
 - **Group by → Fact neighbourhood** splits the diagram into the order, shipment,
   invoice, return and audit areas.
 
