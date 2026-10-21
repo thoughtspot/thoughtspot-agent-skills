@@ -64,10 +64,11 @@ player's first click or key press.
 ## How it is built
 
 ```
-encounters.yaml ─┐                ┌─► quest.json  (the checked data, see "The data contract")
-lesson-sql.md ───┼─► build.py ────┤
-game.html ───────┤                └─► index.html  (one self-contained file, quest.json inside)
-fonts/ ──────────┘
+encounters.yaml ────┐                ┌─► quest.json         (the checked data, see "The data contract")
+lesson-sql.md ──────┤                │
+game.html ──────────┼─► build.py ────┼─► quest.schema.json  (a copy of the schema, where its $id points)
+fonts/ ─────────────┤                │
+quest.schema.json ──┘                └─► index.html         (one self-contained file, quest.json inside)
 ```
 
 - **`lesson-sql.md`** (in the skill's `references/`) is the only source of SQL: the AgentQL and
@@ -84,7 +85,7 @@ fonts/ ──────────┘
   their SIL Open Font License files.
 
 ```bash
-python3 tools/agentql-quest/build.py                      # → tools/agentql-quest/dist/{index.html,quest.json}
+python3 tools/agentql-quest/build.py                      # → tools/agentql-quest/dist/{index.html,quest.json,quest.schema.json}
 python3 tools/agentql-quest/build.py --check              # validate only
 python3 tools/validate/check_agentql_quest.py --root .    # the same, as pre-commit and CI run it
 pytest tools/agentql-quest/tests -q                       # includes a headless play-through (needs node)
@@ -104,9 +105,15 @@ apart. Every field is required and nothing else is allowed, so a front end can r
 shape. A new field goes into `build.py` and the schema in the same change (either alone fails
 the gate); bump `schema_version` for any change a front end would notice. The check is a small
 built-in one, because the repo has no `jsonschema` dependency. It checks the schema itself first,
-whole, and refuses anything it couldn't enforce exactly: a keyword it doesn't know, an object
-that allows unlisted or optional fields, or a broken `$ref`. A rule therefore can't look
-enforced and not be.
+whole, and accepts only a small, strict form of JSON Schema it can enforce exactly. It refuses:
+- a keyword it doesn't know;
+- an object rule (`required`, `additionalProperties`) away from that object's `properties`;
+- an object that allows unlisted or optional fields;
+- `$id` or `$defs` below the root;
+- a broken or looping `$ref`.
+Reviews compared it with a real 2020-12 validator, through thousands of random schema and data
+edits, and found no difference on what it accepts. If you need a form it refuses, extend the
+checker and its tests first.
 
 So a question is edited in `encounters.yaml`, never in a front end, and a second front end
 (for example an explorable map) plays the same content by loading `quest.json`.
@@ -125,7 +132,7 @@ So a question is edited in `encounters.yaml`, never in a front end, and a second
 | `match '…' hits no line` | a `scroll` substring no longer appears in the AgentQL | update `scroll` |
 | `lesson-sql.md: no Model named in its header` | the capture's header lost the "captured live on the sample Model" line | regenerate `lesson-sql.md` with `tools/agentql-retest/build_lesson_sql.py` |
 | `the capture header names Model '…', but this AgentQL does not query FROM "…"` | the header and the captured AgentQL disagree about the Model, so the caption would name the wrong one | recapture, or fix the generator's header |
-| `quest.…: missing '…'`, `'…' is not in quest.schema.json`, `expected …, got …`, `… is not one of …`, `needs at least … item(s)`, `matches none of its allowed shapes (…)` | the built data no longer fits the contract (the path says where) | change `build.py` and the schema together |
+| `quest: …` or `quest.…: …`, for example `missing '…'`, `'…' is not in quest.schema.json`, `expected …, got …`, `… is not one of …`, `needs at least … item(s)`, `matches none of its allowed shapes (…)` | the built data no longer fits the contract (the path says where) | change `build.py` and the schema together |
 | `quest.schema.json #/…: …` | the schema uses something the built-in check can't enforce | use only the supported forms the message names |
 
 ## Adding an encounter or opening a realm

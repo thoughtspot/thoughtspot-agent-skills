@@ -326,7 +326,7 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict],
         if built:
             by_case[built["case"]] = built
             # The dragon's caption names the header's Model: it must be the one this AgentQL queries.
-            if model and f'FROM "{model}"' not in cases[built["case"]]["agentql"]:
+            if model and not re.search(rf'\bFROM\s+"{re.escape(model)}"', cases[built["case"]]["agentql"], re.I):
                 errors.append(f"{built['case']}: the capture header names Model {model!r}, "
                               f"but this AgentQL does not query FROM \"{model}\"")
 
@@ -382,10 +382,11 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict],
             "realms": realms, "routes": routes}, errors
 
 
-# The JSON Schema keywords quest.schema.json may use. The schema is checked first, whole, so it
-# can never lean on a rule this checker would silently skip (the repo has no jsonschema
-# dependency): an unknown keyword, an object that allows unlisted or optional fields, or an
-# unresolved $ref fails before any data is looked at.
+# The JSON Schema keywords quest.schema.json may use (the repo has no jsonschema dependency).
+# lint_schema checks the schema first, whole, and accepts only a strict form _check enforces
+# exactly: an unknown keyword, an object rule away from its properties, an object that allows
+# unlisted or optional fields, $id or $defs below the root, or a broken or looping $ref fails
+# before any data is looked at.
 _SCHEMA_NOTES = {"$schema", "$id", "title", "description", "$defs"}
 _SCHEMA_RULES = {"type", "enum", "required", "properties", "additionalProperties", "items",
                  "minItems", "anyOf", "$ref"}
@@ -403,15 +404,22 @@ def lint_schema(node, root: dict, where: str = "#") -> list[str]:
     if unknown:
         return bad(f"uses {sorted(unknown)}, which check_schema does not support")
     errors: list[str] = []
+    if node is not root and {"$id", "$schema", "$defs"} & node.keys():
+        # $ref always resolves against the root's $defs, so nothing below may start a new scope.
+        errors += bad("$id, $schema and $defs are supported only at the root")
     t = node.get("type")
     if "type" in node and (not isinstance(t, str) or t not in _JSON_TYPES):
         errors += bad(f"type {t!r} is not supported (one of {sorted(_JSON_TYPES)})")
     if "additionalProperties" in node and node["additionalProperties"] is not False:
         errors += bad("only additionalProperties: false is supported")
-    if t == "object" or "properties" in node:
-        # A front end relies on the shape: every field present, nothing unlisted.
+    if t == "object" or {"properties", "required", "additionalProperties"} & node.keys():
+        # A front end relies on the shape: every field present, nothing unlisted. _check applies
+        # required and additionalProperties only beside properties, so none may appear alone.
         if t != "object" or "properties" not in node or node.get("additionalProperties") is not False:
             errors += bad("an object needs type: object, properties and additionalProperties: false")
+        if not isinstance(node.get("properties", {}), dict) or not isinstance(node.get("required", []), list) \
+                or not all(isinstance(k, str) for k in node.get("required", [])):
+            return errors + bad("properties must be an object and required a list of names")
         if set(node.get("required", [])) != set(node.get("properties", {})):
             errors += bad("every property must be required")
     if "enum" in node and not isinstance(node["enum"], list):
@@ -419,16 +427,28 @@ def lint_schema(node, root: dict, where: str = "#") -> list[str]:
     if "minItems" in node and (not isinstance(node["minItems"], int) or isinstance(node["minItems"], bool)):
         errors += bad("minItems must be an integer")
     if "$ref" in node:
-        ref = node["$ref"]
-        if not isinstance(ref, str) or not ref.startswith("#/$defs/") or ref[8:] not in root.get("$defs", {}):
+        ref, seen = node["$ref"], set()
+        defs = root.get("$defs") if isinstance(root.get("$defs"), dict) else {}
+        if not isinstance(ref, str) or not ref.startswith("#/$defs/") or ref[8:] not in defs:
             errors += bad(f"unknown $ref {ref!r}")
+        else:
+            # A chain of $refs that comes back to itself never reaches a rule (and never ends).
+            while isinstance(ref, str) and ref.startswith("#/$defs/") and ref[8:] in defs and ref not in seen:
+                seen.add(ref)
+                ref = defs[ref[8:]].get("$ref") if isinstance(defs[ref[8:]], dict) else None
+            if ref in seen:
+                errors += bad(f"$ref {node['$ref']!r} refers back to itself")
     for k, sub in (node.get("properties") or {}).items():
         errors += lint_schema(sub, root, f"{where}/properties/{k}")
     if "items" in node:
         errors += lint_schema(node["items"], root, f"{where}/items")
+    if "anyOf" in node and not (isinstance(node["anyOf"], list) and node["anyOf"]):
+        return errors + bad("anyOf must be a non-empty list")
     for i, sub in enumerate(node.get("anyOf") or []):
         errors += lint_schema(sub, root, f"{where}/anyOf/{i}")
     if node is root:
+        if not isinstance(node.get("$defs", {}), dict):
+            return errors + bad("$defs must be an object")
         for k, sub in (node.get("$defs") or {}).items():
             errors += lint_schema(sub, root, f"#/$defs/{k}")
     return errors
@@ -592,7 +612,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", help="accepted for parity with the other validators; paths resolve from this script")
     args = ap.parse_args(argv)
 
-    if pathlib.Path(args.out).name in BESIDE:
+    if pathlib.Path(args.out).name.casefold() in BESIDE:  # case-insensitive filesystems
         print(f"agentql-quest: --out names the page; {pathlib.Path(args.out).name} is written beside it", file=sys.stderr)
         return 2
     html, data, errors = build(check=args.check)

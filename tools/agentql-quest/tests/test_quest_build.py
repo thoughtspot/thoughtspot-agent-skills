@@ -379,12 +379,48 @@ def test_the_schema_checker_follows_2020_12_integers():
     (True, "boolean schemas are not supported"),
     ({"anyOf": [{"type": "array", "items": {"type": "integer", "minimum": 0}}]}, "uses ['minimum']"),
     ({"$ref": "#/$defs/nope"}, "unknown $ref"),
+    # Object rules that _check only applies beside properties must not appear without them.
+    ({"required": ["k"]}, "an object needs type: object"),
+    ({"additionalProperties": False}, "an object needs type: object"),
+    ({"anyOf": [{"required": ["a"]}, {"required": ["b"]}]}, "an object needs type: object"),
+    # $ref resolves against the root only, so nothing below may open a new scope.
+    ({"$id": "realm.schema.json", "type": "string"}, "supported only at the root"),
+    ({"$defs": {"x": {"type": "string"}}, "type": "string"}, "supported only at the root"),
+    # Malformed forms are refused, not a traceback.
+    ({"type": "object", "properties": {"b": {"type": "string"}}, "required": 5, "additionalProperties": False},
+     "required a list of names"),
+    ({"type": "object", "properties": [], "required": [], "additionalProperties": False}, "properties must be an object"),
+    ({"type": "array", "minItems": "1"}, "minItems must be an integer"),
+    ({"enum": "x"}, "enum must be a list"),
+    ({"anyOf": []}, "anyOf must be a non-empty list"),
 ])
 def test_the_schema_checker_refuses_what_it_cannot_enforce(field, needle):
     # Refused as a schema problem before any data is checked, never a silent pass or a traceback.
     errors = B.check_schema({"a": "x"}, _one_field(field))
     assert errors and all(e.startswith("quest.schema.json") for e in errors), errors
     assert any(needle in e for e in errors), errors
+
+
+@pytest.mark.parametrize("field,defs", [
+    # beside a $ref, these would apply in 2020-12 but not in _check
+    ({"$ref": "#/$defs/t", "required": ["k"]}, {"t": {"type": "string"}}),
+    ({"$ref": "#/$defs/t", "additionalProperties": False}, {"t": {"type": "string"}}),
+])
+def test_object_rules_beside_a_ref_are_refused(field, defs):
+    errors = B.check_schema({"a": "x"}, _one_field(field, defs))
+    assert errors and all(e.startswith("quest.schema.json") for e in errors), errors
+
+
+@pytest.mark.parametrize("defs", [{"loop": {"$ref": "#/$defs/loop"}},
+                                  {"a": {"$ref": "#/$defs/b"}, "b": {"$ref": "#/$defs/a"}}])
+def test_a_ref_that_loops_is_refused_not_a_recursion_error(defs):
+    errors = B.check_schema({"a": "x"}, _one_field({"$ref": f"#/$defs/{next(iter(defs))}"}, defs))
+    assert any("refers back to itself" in e for e in errors), errors
+
+
+def test_defs_must_be_an_object():
+    schema = dict(_one_field({"type": "string"}), **{"$defs": []})
+    assert any("$defs must be an object" in e for e in B.check_schema({"a": "x"}, schema))
 
 
 def test_unused_schema_definitions_are_checked_too():
@@ -416,21 +452,41 @@ def test_the_gate_fails_when_the_schema_changes_and_the_build_does_not(monkeypat
 
 def test_the_gate_fails_when_the_header_names_no_model(monkeypatch, tmp_path):
     real = B.LESSON_SQL.read_text(encoding="utf-8")
-    for header in ("the sample Model", "the sample Model ** **"):
+    for header in ("the sample Model", "the sample Model ** **", "the sample Model **` `**"):
         text = real.replace("the sample Model **`(Sample) Retail - Apparel`**", header)
         assert text != real
         errors = _gate_with(monkeypatch, tmp_path, capture=text)
         assert "lesson-sql.md: no Model named in its header" in errors, header
 
 
-def test_the_gate_fails_when_the_header_names_another_model(monkeypatch, tmp_path):
+@pytest.mark.parametrize("name", ["Acme Sales", "(Sample) Retail"])  # another Model, or a prefix of the real one
+def test_the_gate_fails_when_the_header_names_another_model(monkeypatch, tmp_path, name):
     # The caption names the header's Model, so it must be the one the AgentQL queries.
     real = B.LESSON_SQL.read_text(encoding="utf-8")
-    text = real.replace("**`(Sample) Retail - Apparel`**", "**`Acme Sales`**")
+    text = real.replace("**`(Sample) Retail - Apparel`**", f"**`{name}`**")
     errors = _gate_with(monkeypatch, tmp_path, capture=text)
-    assert any(f"names Model 'Acme Sales', but this AgentQL does not query" in e for e in errors), errors
+    assert any(f"names Model {name!r}, but this AgentQL does not query" in e for e in errors), errors
 
 
+@pytest.mark.parametrize("model", [None, "", "   "])
+def test_compile_quest_refuses_a_blank_model(doc, capture, model):
+    assert "lesson-sql.md: no Model named in its header" in B.compile_quest(doc, *capture, model)[1]
+
+
+def test_the_header_model_is_read_from_the_capture_line_only():
+    text = "A note on Model **`Decoy`**.\n\ncaptured live on the sample Model **` Real `** (a cluster)"
+    assert B.parse_capture_model(text) == "Real"
+
+
+def test_the_gate_reads_the_committed_header(monkeypatch, tmp_path):
+    # A decoy before the capture line must not change the Model the caption names.
+    real = B.LESSON_SQL.read_text(encoding="utf-8")
+    text = real.replace("# Captured warehouse SQL", "Model **`Decoy`**\n\n# Captured warehouse SQL", 1)
+    assert text != real
+    assert _gate_with(monkeypatch, tmp_path, capture=text) == []
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_the_page_fails_its_play_through_without_a_model(doc, capture, tmp_path):
     data, errors = B.compile_quest(doc, *capture, MODEL)
     assert errors == []
@@ -441,7 +497,7 @@ def test_the_page_fails_its_play_through_without_a_model(doc, capture, tmp_path)
     assert r.returncode != 0 and "should name the Model" in r.stdout + r.stderr
 
 
-@pytest.mark.parametrize("name", B.BESIDE)
+@pytest.mark.parametrize("name", ["quest.json", "quest.schema.json", "Quest.json", "QUEST.SCHEMA.JSON"])
 def test_out_may_not_name_a_file_written_beside_the_page(tmp_path, name):
     assert B.main(["--out", str(tmp_path / name)]) == 2
     assert not (tmp_path / name).exists()
