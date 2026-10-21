@@ -4,6 +4,8 @@ promote-formula: codify the mechanical formula-promotion merge from
 ts-object-answer-promote Steps 8-10 (BL-066). Exports answer + model TML,
 detects duplicates, maps column references, infers column_type, and emits
 the merged Model TML as JSON to stdout.
+
+dictionary: a data dictionary, one row per column (logic in ts_cli/model_dictionary.py).
 """
 from __future__ import annotations
 
@@ -288,3 +290,113 @@ def _select_formulas(
     if not include_auto:
         return [f for f in all_formulas if not f.get("was_auto_generated")]
     return list(all_formulas)
+
+
+def _dictionary_docs(models: List[str], files: List[str], directory: Optional[str],
+                     profile: Optional[str]) -> list:
+    """Parsed TML docs for `dictionary`: exported live (Models with their Tables) when
+    --model is given, else read from --file/--dir. An export item that fails on its own
+    (FORBIDDEN inside an HTTP 200) is reported on stderr and left out, never read as an
+    empty Model."""
+    from ts_cli.commands.tml import load_input_tmls
+    from ts_cli.tml_common import export_item_doc
+
+    if models:
+        client = ThoughtSpotClient(resolve_profile(profile))
+        resp = client.post("/api/rest/2.0/metadata/tml/export", json={
+            "metadata": [{"identifier": g} for g in models],
+            "export_associated": True, "formattype": "YAML"})
+        docs = []
+        for item in resp.json():
+            doc, reason = export_item_doc(item)
+            if reason:
+                typer.echo(f"Warning: skipped — {reason}", err=True)
+            elif doc:
+                docs.append(doc)
+        return docs
+    return [parse_edoc(t) for t in load_input_tmls(files, directory)]
+
+
+@app.command("dictionary")
+def dictionary(
+    models: List[str] = typer.Option(
+        [], "--model", "-m", help="Model GUID to export live, with its Tables (repeatable)"),
+    file: List[str] = typer.Option(
+        [], "--file", help="Model / Table TML file (repeatable) — offline, no profile needed"),
+    directory: Optional[str] = typer.Option(
+        None, "--dir", help="Directory of Model / Table TML files — offline"),
+    profile: Optional[str] = _profile_option,
+    format: str = typer.Option("json", "--format", "-f", help="json (default), csv or xlsx"),
+    out: Optional[str] = typer.Option(
+        None, "--out", "-o", help="Write to this file (required for xlsx)"),
+) -> None:
+    """A data dictionary for one or more Models: one row per column.
+
+    Each row carries the column's name, role, aggregation, data type and source
+    table/column, its formula, description, synonyms, AI context, and whether it is
+    indexed or hidden. The data type and warehouse column come from the Table TMLs:
+    a Model column has no data type of its own, so a Model read without its Tables
+    leaves that field blank. --model exports the Tables with it; with --file/--dir,
+    include the Table TMLs alongside the Model.
+
+    Output: JSON rows to stdout by default. `--format csv` writes CSV (to stdout, or
+    --out), with a Model column so several Models fit one file. `--format xlsx` writes
+    one worksheet per Model to --out and needs the optional extra:
+    pip install 'thoughtspot-cli[xlsx]'.
+
+    \b
+      ts model dictionary --model <guid> --profile myprofile
+      ts model dictionary --dir ./tml --format csv --out dictionary.csv
+      ts model dictionary --model <g1> --model <g2> --format xlsx --out dictionary.xlsx
+    """
+    from ts_cli.model_dictionary import build_rows
+
+    fmt = format.lower()
+    _check_dictionary_args(fmt, out, models, file, directory)
+    tables, model_docs = _split_docs(_dictionary_docs(models, file, directory, profile))
+    per_model = [(d["model"].get("name", ""), build_rows(d, tables)) for d in model_docs]
+    rows = [r for _, rs in per_model for r in rs]
+    typer.echo(f"{len(model_docs)} Model(s), {len(rows)} column(s), "
+               f"{len(tables)} Table/SQL View TML(s) for sources and types", err=True)
+    _emit_dictionary(fmt, per_model, rows, out)
+
+
+def _check_dictionary_args(fmt: str, out, models, file, directory) -> None:
+    if fmt not in ("json", "csv", "xlsx"):
+        raise SystemExit("--format must be json, csv or xlsx")
+    if fmt == "xlsx" and not out:
+        raise SystemExit("--format xlsx needs --out <file.xlsx>")
+    if models and (file or directory):
+        raise SystemExit("Use --model, or --file/--dir — not both")
+    if not models and not file and not directory:
+        raise SystemExit("Give --model <guid>, or --file/--dir with exported TML")
+
+
+def _split_docs(docs: list) -> tuple:
+    """(Table and SQL View bodies by name, Model docs). A Model column can sit on either."""
+    tables = {body["name"]: body for d in docs if isinstance(d, dict)
+              for body in (d.get("table"), d.get("sql_view"))
+              if isinstance(body, dict) and body.get("name")}
+    model_docs = [d for d in docs if isinstance(d, dict) and isinstance(d.get("model"), dict)]
+    if not model_docs:
+        raise SystemExit("No Model TML found in the input")
+    return tables, model_docs
+
+
+def _emit_dictionary(fmt: str, per_model: list, rows: list, out) -> None:
+    from ts_cli.model_dictionary import to_csv, write_xlsx
+
+    if fmt == "xlsx":
+        try:
+            write_xlsx(per_model, out)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from exc
+        typer.echo(f"Written to {out}", err=True)
+        return
+    text = to_csv(rows) if fmt == "csv" else json.dumps(rows, indent=2) + "\n"
+    if not out:
+        sys.stdout.write(text)
+        return
+    with open(out, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+    typer.echo(f"Written to {out}", err=True)
