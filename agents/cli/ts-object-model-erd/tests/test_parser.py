@@ -299,3 +299,30 @@ def test_alias_detected():
     }
     m = parser.parse_model(model_tml, {"MY_ALIAS": table_tml})
     assert m["tables"][0]["alias_of"] == "PHYSICAL_TABLE"
+
+
+def _keys(model, node):
+    t = next(t for t in model["tables"] if t["id"] == node)
+    return {c["name"] for c in t["cols"] if c.get("key")}
+
+
+def test_join_keys_reach_alias_nodes():
+    """`on:` names PHYSICAL tables (an alias there is rejected at import, I19), but
+    nodes are keyed by alias. A role-played dimension's keys must land on the alias
+    node the join points at, not vanish because no node is called by the physical
+    name."""
+    tml = {"model": {"name": "M", "model_tables": [
+        {"name": "ORDERS", "joins": [
+            {"name": "o_order_date", "with": "ORDER_DATE",
+             "on": "[ORDERS::ORDER_DATE_ID] = [DIM_DATE::DATE_ID]",
+             "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"},
+            {"name": "o_ship_date", "with": "SHIP_DATE",
+             "on": "[ORDERS::SHIP_DATE_ID] = [DIM_DATE::DATE_ID]",
+             "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"}]},
+        {"name": "DIM_DATE", "alias": "ORDER_DATE"},
+        {"name": "DIM_DATE", "alias": "SHIP_DATE"}],
+        "columns": []}}
+    m = parser.parse_model(tml, {})
+    assert _keys(m, "ORDERS") == {"ORDER_DATE_ID", "SHIP_DATE_ID"}
+    assert _keys(m, "ORDER_DATE") == {"DATE_ID"}
+    assert _keys(m, "SHIP_DATE") == {"DATE_ID"}

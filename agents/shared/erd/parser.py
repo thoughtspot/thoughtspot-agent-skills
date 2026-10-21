@@ -226,19 +226,42 @@ def _enrich_from_table_tmls(tables_by_id, phys_by_id, table_tmls):
             t["alias_of"] = phys_name
 
 
-def _apply_join_keys(tables_by_id, on_exprs):
-    """Flag (or synthesize) the columns that participate in join ON clauses."""
-    for on_expr in on_exprs:
+def _on_nodes(tbl, endpoints, tables_by_id, phys_by_id):
+    """The node(s) a table named in an `on:` clause refers to.
+
+    `on:` names PHYSICAL tables (an alias there is rejected at import — invariant
+    I19), while nodes are keyed by alias. So for a join, the name is matched to
+    whichever of its two endpoints is that table, alias or not; looking it up as a
+    node id alone dropped every alias's join keys from the diagram. With no endpoints
+    (a Table TML `joins_with` on), every node of that physical table matches."""
+    if endpoints:
+        hits = [n for n in endpoints if n == tbl]
+        hits = hits or [n for n in endpoints
+                        if str(phys_by_id.get(n) or n).lower() == str(tbl).lower()]
+        return list(dict.fromkeys(hits))
+    if tbl in tables_by_id:
+        return [tbl]
+    return [n for n in tables_by_id if str(phys_by_id.get(n) or "").lower() == str(tbl).lower()]
+
+
+def _apply_join_keys(tables_by_id, on_exprs, phys_by_id=None):
+    """Flag (or synthesize) the columns that participate in join ON clauses.
+
+    `on_exprs` items are an `on:` string, or `(on, from_node, to_node)` for a join
+    whose endpoints are known."""
+    for item in on_exprs:
+        on_expr, endpoints = (item[0], item[1:]) if isinstance(item, tuple) else (item, ())
         for tbl, col in _keys_from_on(on_expr):
-            t = tables_by_id.get(tbl)
-            if not t:
-                continue
-            existing = next((c for c in t["cols"] if c["name"] == col), None)
-            if existing:
-                existing["key"] = True
-            else:
-                t["cols"].append({"name": col, "src": col, "role": "ATTR",
-                                  "agg": None, "key": True, "hidden": True, "flag": None})
+            for node in _on_nodes(tbl, endpoints, tables_by_id, phys_by_id or {}):
+                t = tables_by_id.get(node)
+                if not t:
+                    continue
+                existing = next((c for c in t["cols"] if c["name"] == col), None)
+                if existing:
+                    existing["key"] = True
+                else:
+                    t["cols"].append({"name": col, "src": col, "role": "ATTR",
+                                      "agg": None, "key": True, "hidden": True, "flag": None})
 
 
 def _mark_rls_path(tables, table_tmls):
@@ -324,8 +347,8 @@ def parse_model(model_tml, table_tmls, log=None):
     _enrich_from_table_tmls(tables_by_id, phys_by_id, table_tmls)
 
     on_exprs = [meta["on"] for meta in table_joins.values()]
-    on_exprs.extend(j["on"] for j in joins if j.get("on"))
-    _apply_join_keys(tables_by_id, on_exprs)
+    on_exprs.extend((j["on"], j["from"], j["to"]) for j in joins if j.get("on"))
+    _apply_join_keys(tables_by_id, on_exprs, phys_by_id)
 
     _mark_rls_path(tables, table_tmls)
     _log_degraded_fidelity(joins, table_joins, log)
