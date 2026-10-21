@@ -185,10 +185,13 @@ end (for example an explorable map) plays the same content by loading `quest.jso
 
 A pack whose `explore.realms` lists realms has a Tiled map for each, plus an overworld:
 `maps/overworld.tmj` and `maps/<realm id>.tmj`, saved by Tiled 1.10 or later as JSON (CSV tile
-data) with tilesets embedded and their images in the pack. `maps.py` checks them in the build
-(design §4.2):
+data). `maps.py` checks them in the build (design §4.2), and refuses anything Phaser 4 or the
+explore page would read differently from the check:
 
-- **Collision** is one tile layer named `walls`: any non-empty tile blocks.
+- **Shape:** orthogonal and finite; layers at the top level, unoffset: tile layers `floor` and
+  `walls` (the map's size) and one object layer `objects`; one embedded tileset named `tiles`
+  whose `.png` is in the pack; objects are unrotated rectangles (not tile objects), one tile each.
+- **Collision** is the `walls` layer: any non-empty tile blocks.
 - **Objects** have a `type` and string properties only:
   - `spawn`, where the player appears (one per map);
   - `portal to=<realm id>`, overworld only, one per realm;
@@ -198,15 +201,19 @@ data) with tilesets embedded and their images in the pack. `maps.py` checks them
   - `gate requires=<step id>,…`.
 - **Steps:** a step id is `<encounter id>:<merchant|guide|compiler|foe|reward>` or
   `hall:<hall id>`. Every step of a realm has exactly one object on its map.
-- **Reachability:** a flood-fill from the spawn, with every gate closed until the steps it requires
-  are reachable, must reach every object. Objects are solid; reaching one means standing on a
+- **Reachability, in the game's order:** the game plays a realm's steps in one order (halls, then
+  each encounter's merchant, guide, compiler, foe, reward). Before each step, a flood-fill from the
+  spawn, with only the gates whose required steps are all **done** open, must reach that step's
+  object; the exit must be reachable from the start. A gate that only opens after a step behind it,
+  or a first step behind a gate, fails. Objects are solid; reaching one means standing on a
   walkable tile next to it.
 - **No Tiled templates,** which Phaser doesn't resolve.
 
-Order isn't the map's job: `Quest.machine` accepts `interact {step}` only for the step the current
-screen waits on (`expected(state)`), so walking to the foe first does nothing.
-`tests/play_map.js` walks a realm's map through the machine with no canvas, and checks every step
-can be reached and finished and every out-of-order interaction is refused.
+`Quest.machine` accepts `interact {step}` only for the step the current screen waits on
+(`expected(state)`), and changes nothing on it, so walking to the foe first does nothing.
+`tests/play_map.js` plays a realm's steps through the machine with no canvas: every step is
+finished, every out-of-order interaction is refused, and a test pins that the machine asks for the
+steps in exactly the order `maps.py` walks.
 
 ## When the build fails
 

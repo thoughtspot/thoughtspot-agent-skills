@@ -1,7 +1,8 @@
 // The buttons a built classic page draws must be exactly the actions Quest.machine accepts, on every
 // state the page can show: each screen x realm x hall x step x flash, under several saves, and for
 // a realm's gate also when the save changes between drawing and pressing (another tab finishing or
-// clearing a realm). Candidate actions include malformed ones. Exits non-zero on any mismatch.
+// clearing a realm). Candidate actions include malformed ones. `interact` is left out: it is the
+// explore page's action (tests/play_map.js), which the classic page never draws. Exits non-zero on any mismatch.
 //   node drawn_vs_accepted.js <built index.html> [plain|sealed|sealed_first|onehall]
 "use strict";
 const fs = require("fs"), vm = require("vm");

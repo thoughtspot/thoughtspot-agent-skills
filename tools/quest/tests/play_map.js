@@ -61,7 +61,10 @@ for (let guard = 0; guard < 500; guard++) {
     if (other !== want && act({ type: "interact", step: other }, false)) fail(`${other} was accepted while the game waits on ${want}`);
     if (other !== want) log.refused++;
   }
-  act({ type: "interact", step: want });
+  // The right step is accepted and changes nothing: its dialog does the rest.
+  const before = JSON.stringify(state), out = machine.act(state, { type: "interact", step: want }, progress.load());
+  if (out.refused) fail(`${out.refused} (interact ${want})`);
+  if (JSON.stringify(out.state) !== before || out.effects.length) fail(`interact ${want} changed the state or had effects`);
   log.interactions.push(want);
   // The step's dialog, until the machine waits on something else.
   for (let d = 0; d < 100 && machine.expected(state) === want; d++) {
