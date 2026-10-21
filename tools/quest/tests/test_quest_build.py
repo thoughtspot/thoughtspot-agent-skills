@@ -2827,7 +2827,7 @@ def test_the_map_play_through_catches_the_machine_on_halls_and_interact(tmp_path
      "property 'encounter' is given twice"),
     (lambda m: _obj(m, "foe").update(properties={"encounter": "the_rune"}), "properties must be a list"),
     (lambda m: _obj(m, "foe").update(type=["foe"]), "type must be text"),
-    (lambda m: _obj(m, "foe").update(x=float("nan")), "must be numbers"),
+    (lambda m: _obj(m, "foe").update(x=float("nan")), "is not JSON"),
     (lambda m: m["tilesets"][0].update(image="tiles\x00.png"), "is not in the pack"),
 ])
 def test_a_map_the_explore_pages_physics_reads_differently_fails(tmp_path, edit, needle):
@@ -2843,7 +2843,7 @@ def test_a_map_the_explore_pages_physics_reads_differently_fails(tmp_path, edit,
     (lambda: _tmj(["############", "#S.M.G..#F..", "#.......#...", "#.C.......##", "#X......#R.#", "############"],
                   CAVE_OBJECTS, CAVE_GATE), "the map's edge must all be wall or someone solid"),
     # the exit behind a gate: a player must be able to leave from the start
-    (lambda: _tmj(["############", "#S.M.G..#..#", "#.......#F.#", "#.C.......##", "#.......#RX#", "############"],
+    (lambda: _tmj(["############", "#S.M.G..#F.#", "#.......#..#", "#.C.......X#", "#.......#R.#", "############"],
                   CAVE_OBJECTS, CAVE_GATE), "(exit): can't be reached from the spawn"),
     # two rooms that touch only at a wall corner: the player can't squeeze across it
     (lambda: _tmj(["############", "#S.M.G.#####", "#.......#F.#", "#.C....#..##", "#X.....##R.#", "############"],
@@ -2876,3 +2876,109 @@ def test_a_map_plays_one_realm_shape(tmp_path):
     cave = next(r for r in data["realms"] if r["id"] == "cave")
     cave["halls"] = copy.deepcopy(data["realms"][0]["halls"])
     assert any("has halls and an encounter" in e for e in MAPS.check_maps(pack.dir, data))
+
+
+
+# ---- third review of PR 4 -----------------------------------------------------------------------
+
+def test_the_exit_behind_a_gate_map_is_fine_without_the_gate(tmp_path):
+    # So the exit-behind-a-gate test fails for the gate, not for the walls.
+    rows = ["############", "#S.M.G..#F.#", "#.......#..#", "#.C.......X#", "#.......#R.#", "############"]
+    pack, data = _explorable(tmp_path, cave=_tmj(rows, CAVE_OBJECTS, []))
+    assert MAPS.check_maps(pack.dir, data) == []
+
+
+@pytest.mark.parametrize("make,needle", [
+    # two objects on one tile: the page could only ever talk to the first
+    (lambda: _with_objects(_tmj(OVER_ROWS, OVER_OBJECTS), [("portal", 2, 2, {"to": "cave"})]), "shares its tile (2, 2) with another object"),
+    (lambda: _with_objects(_tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE), [("exit", 2, 3, {})]), "shares its tile (2, 3) with another object"),
+])
+def test_one_object_per_tile(tmp_path, make, needle):
+    m = make()
+    if any(o["type"] == "portal" for o in _layer(m, "objectgroup")["objects"]):
+        pack, data = _explorable(tmp_path, over=m)
+    else:
+        pack, data = _explorable(tmp_path, cave=m)
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any(needle in e for e in errors), errors
+
+
+def _with_objects(m, extra):
+    objs = _layer(m, "objectgroup")["objects"]
+    for i, (kind, x, y, props) in enumerate(extra):
+        objs.append({"id": 900 + i, "type": kind, "x": x * TILE, "y": y * TILE, "width": TILE, "height": TILE,
+                     "properties": [{"name": k, "type": "string", "value": v} for k, v in props.items()]})
+    return m
+
+
+@pytest.mark.parametrize("edit,needle", [
+    # each rule on its other axis
+    (lambda m: _obj(m, "foe").update(y=_obj(m, "foe")["y"] + 4), "must be exactly one tile on the grid"),
+    (lambda m: _obj(m, "foe").update(height=TILE * 2), "must be exactly one tile on the grid"),
+    (lambda m: m.update(tileheight=8), "tiles must be 16x16"),
+    (lambda m: _layer(m, "tilelayer").update(starty=16), "is offset"),
+    (lambda m: _layer(m, "objectgroup").update(offsetx=""), "is offset"),
+    # the top and the bottom edge, and things that don't close an edge
+    (lambda m: _layer(m, "tilelayer")["data"].__setitem__(4, 0), "the map's edge must all be wall"),
+    (lambda m: _layer(m, "tilelayer")["data"].__setitem__(5 * 12 + 4, 0), "the map's edge must all be wall"),
+    # what Phaser reads differently or can't read
+    (lambda m: _layer(m, "tilelayer").update(compression="zlib"), "must be CSV, with no encoding or compression"),
+    (lambda m: _layer(m, "tilelayer").update(encoding="base64"), "must be CSV, with no encoding or compression"),
+    (lambda m: _layer(m, "tilelayer").update(opacity=float("nan")), "is not JSON"),
+    (lambda m: m.pop("orientation"), "orientation must be orthogonal"),
+    (lambda m: m.update(infinite=[]), "is infinite"),
+    (lambda m: _layer(m, "tilelayer")["data"].__setitem__(0, 2 ** 53 + 1), "must be 12x6 tile numbers"),
+    (lambda m: m["tilesets"][0].update(tiles=[{"id": 0, "properties": {"a": 1}}]), "per-tile data Phaser can't read"),
+    (lambda m: _obj(m, "foe").pop("x"), "must be numbers"),
+    (lambda m: _obj(m, "foe").update(x=10 ** 400), "must be numbers"),
+    (lambda m: m["tilesets"][0].update(image="x" * 300 + ".png"), "is not in the pack"),
+    (lambda m: _obj(m, "gate")["properties"][0].update(value="\x1cthe_rune:compiler"), "requires must be step ids"),
+])
+def test_more_maps_the_page_reads_differently_fail(tmp_path, edit, needle):
+    cave = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
+    edit(cave)
+    pack, data = _explorable(tmp_path, cave=cave)
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any(needle in e for e in errors), errors
+
+
+@pytest.mark.parametrize("make,needle", [
+    # an edge closed only by a gate (which opens) or the spawn (where you stand) isn't closed
+    (lambda: _tmj(["#####G######", "#S.M.G..#F.#", "#.......#..#", "#.C........#", "#X......#R.#", "############"],
+                  dict(CAVE_OBJECTS, G=("gate", {"requires": "the_rune:compiler"})), CAVE_GATE), "the map's edge must all be wall"),
+    # a portal is solid: one parked in the only way to another blocks it
+    (lambda: _tmj(["#######", "#S.A.B#", "#######"], OVER_OBJECTS), "(portal): can't be reached from the spawn"),
+])
+def test_edges_and_portals_hold_as_the_page_does(tmp_path, make, needle):
+    m = make()
+    if any(o["type"] == "portal" for o in _layer(m, "objectgroup")["objects"]):
+        pack, data = _explorable(tmp_path, over=m)
+    else:
+        pack, data = _explorable(tmp_path, cave=m)
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any(needle in e for e in errors), errors
+
+
+def test_every_explorable_realms_map_is_checked(tmp_path):
+    pack, data = _explorable(tmp_path)
+    shore = _tmj(["######", "#S.1X#", "######"], {"S": ("spawn", {}), "X": ("exit", {}), "1": ("throne", {"hall": "nope"})})
+    (pack.dir / "maps/shore.tmj").write_text(json.dumps(shore), encoding="utf-8")
+    data["pack"]["explore_realms"] = ["cave", "shore"]
+    assert any("maps/shore.tmj" in e and "hall:nope is not a step" in e for e in MAPS.check_maps(pack.dir, data))
+
+
+def test_folders_in_maps_are_reported_even_with_no_explorable_realm(tmp_path):
+    pack, data = _explorable(tmp_path)
+    (pack.dir / "maps/old").mkdir()
+    data["pack"]["explore_realms"] = []
+    assert any("maps/old/: maps/ holds no folders" in e for e in MAPS.check_maps(pack.dir, data))
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_expected_is_null_for_a_realm_that_does_not_exist():
+    got = _node_core("""
+      const m = Quest.machine(QUEST);
+      console.log(JSON.stringify([m.expected(Object.assign(m.fresh(), { screen: "quest", realm: 99 })),
+                                  m.act(Object.assign(m.fresh(), { screen: "quest", realm: 99 }), { type: "interact", step: "x:merchant" }, {}).refused ? "refused" : "taken"]));
+    """)
+    assert got == [None, "refused"]
