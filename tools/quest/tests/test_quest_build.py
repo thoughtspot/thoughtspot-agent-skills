@@ -1756,7 +1756,7 @@ def test_the_page_title_and_description_are_escaped(doc, capture):
     html = B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "", ART)
     assert "<title>Quest &lt;b&gt;&quot;&amp;</title>" in html
     assert '<meta name="description" content="Say &quot;&lt;hi&gt;&quot; &amp; go">' in html
-    assert '<h1 class="sr-only">${esc(QUEST.pack.title)}</h1>' in B.TEMPLATE.read_text(encoding="utf-8")
+    assert '<h1 class="sr-only">${esc(QUEST.pack.title)}</h1>' in (B.CORE_DIR / "60-screens.js").read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
@@ -1807,12 +1807,12 @@ def test_the_agentql_page_smoke_plays_every_realm(tmp_path):
     (lambda h: h.replace('H("realm_max", { max: maxGold(r) })', 'H("realm_max")'), "unfilled {max}"),
 ])
 def test_the_smoke_play_catches_a_broken_screen(tmp_path, break_it, needle):
-    template = B.TEMPLATE.read_text(encoding="utf-8")
-    broken = break_it(template)
-    assert broken != template or needle is None
+    core = B.core_script()          # the screens are drawn by core/60-screens.js
+    broken = break_it(core)
+    assert broken != core or needle is None
     data, _ = B.compile_pack(B.Pack("agentql"))
     page = tmp_path / "index.html"
-    page.write_text(B.render(broken, data, "", ART), encoding="utf-8")
+    page.write_text(B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "", ART, broken), encoding="utf-8")
     r = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
     if needle is None:
         assert r.returncode == 0, r.stderr
@@ -1883,16 +1883,16 @@ def test_render_needs_every_placeholder_exactly_once(mark):
 
 def test_wording_in_attributes_is_escaped():
     # H() output is for element text; an attribute takes the plain string, escaped.
-    assert 'aria-label="${esc(S("legend_label"))}"' in B.TEMPLATE.read_text(encoding="utf-8")
+    assert 'aria-label="${esc(S("legend_label"))}"' in (B.CORE_DIR / "60-screens.js").read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 @pytest.mark.parametrize("where,old,new,needle", [
     # victory's "Back to the map" leads nowhere: the old smoke play looped and passed
-    ("page", '{ label: S("back_to_map"), action: MAP_ACTION }, { label: S("quest_again")',
+    ("core", '{ label: S("back_to_map"), action: MAP_ACTION }, { label: S("quest_again")',
      '{ label: S("back_to_map"), action: { type: "again" } }, { label: S("quest_again")', "ran out of steps"),
     # the last realm's map entry opens the first realm instead
-    ("page", 'action: { type: "realm", realm: i } };', 'action: { type: "realm", realm: i === REALMS.length - 1 ? 0 : i } };',
+    ("core", 'action: { type: "realm", realm: i } };', 'action: { type: "realm", realm: i === REALMS.length - 1 ? 0 : i } };',
      "did not open from the map"),
     # a realm that returns to the map without finishing (the round-2 hole), now in the machine
     ("core", 'if (s.step >= r.encounters[s.enc].points.length) finish("victory");',
@@ -1973,7 +1973,7 @@ def test_placeholder_names_anywhere_in_the_pack_are_never_filled(doc, capture):
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_the_soon_marker_comes_from_the_pack():
-    lines = B.TEMPLATE.read_text(encoding="utf-8").split("<script>", 1)[1].splitlines()
+    lines = (B.CORE_DIR / "60-screens.js").read_text(encoding="utf-8").splitlines()
     start = lines.index(next(x for x in lines if x.startswith("function cell(c)")))
     js = (CORE_TEXT.read_text(encoding="utf-8") + '\nconst esc = Quest.esc, { S } = Quest.wording({"soon_marker": "Soon:"});\n'
           + "\n".join(lines[start:start + 5])
@@ -2010,8 +2010,8 @@ def test_a_games_own_undefined_does_not_hide_a_broken_screen(tmp_path):
     page.write_text(B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "", ART), encoding="utf-8")
     ok = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
     assert ok.returncode == 0, ok.stdout + ok.stderr
-    broken = B.TEMPLATE.read_text(encoding="utf-8").replace('art("foe")', "ART.nothing")
-    page.write_text(B.render(broken, data, "", ART), encoding="utf-8")
+    broken = B.core_script().replace('art("foe")', "ART.nothing")
+    page.write_text(B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "", ART, broken), encoding="utf-8")
     r = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
     assert r.returncode != 0 and '"undefined"' in r.stderr, r.stdout + r.stderr
 
@@ -2112,7 +2112,7 @@ def test_the_machine_plays_the_whole_game_without_a_page():
 
 
 def test_the_machine_rules_and_text_never_touch_the_page_or_storage():
-    for name in ("10-text.js", "20-rules.js", "40-machine.js"):
+    for name in ("10-text.js", "20-rules.js", "40-machine.js", "60-screens.js"):
         text = (B.CORE_DIR / name).read_text(encoding="utf-8")
         for word in ("document", "localStorage", "window", "innerHTML", "AudioContext"):
             assert word not in text, (name, word)
